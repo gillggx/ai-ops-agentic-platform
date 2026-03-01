@@ -1,0 +1,44 @@
+name: Deploy to AWS EC2
+
+# 觸發條件：只要有新的程式碼合併(push)到 main 分支，就啟動這個流程
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 執行遠端 SSH 部署指令
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            echo "連線成功！開始執行 V11 自動部署..."
+            
+            # 1. 進入專案目錄並拉取最新程式碼
+            cd ~/ai-ops-agentic-platform
+            git pull origin main
+            
+            # 2. 前端：安裝套件與打包編譯
+            echo "打包前端 React 畫面..."
+            cd frontend
+            npm install
+            npm run build
+            
+            # 3. 後端：重啟 FastAPI 大腦
+            echo "重啟後端 AI 大腦..."
+            cd ../fastapi_backend_service
+            
+            # 強制終止舊的背景程式 (加上 || true 避免找不到行程時報錯中斷)
+            pkill -f uvicorn || true
+            
+            # 啟動虛擬環境並將新版大腦掛載到背景
+            source ../venv/bin/activate
+            nohup uvicorn main:app --host 0.0.0.0 --port 8000 > backend.log 2>&1 &
+            
+            echo "部署完美結束！戰情室已更新！"
