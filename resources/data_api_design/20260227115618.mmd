@@ -1,0 +1,257 @@
+
+classDiagram
+    class Config {
+        +APP_NAME: str
+        +APP_VERSION: str
+        +DEBUG: bool
+        +DATABASE_URL: str
+        +SECRET_KEY: str
+        +ALGORITHM: str
+        +ACCESS_TOKEN_EXPIRE_MINUTES: int
+        +LOG_LEVEL: str
+        +API_V1_PREFIX: str
+        +get_settings() Config
+    }
+
+    class Database {
+        -engine: AsyncEngine
+        -AsyncSessionLocal: async_sessionmaker
+        +Base: DeclarativeBase
+        +get_db() AsyncGenerator
+        +init_db() None
+    }
+
+    class UserModel {
+        +id: int
+        +username: str
+        +email: str
+        +hashed_password: str
+        +is_active: bool
+        +is_superuser: bool
+        +created_at: datetime
+        +updated_at: datetime
+        +items: List[ItemModel]
+    }
+
+    class ItemModel {
+        +id: int
+        +title: str
+        +description: str
+        +is_active: bool
+        +owner_id: int
+        +created_at: datetime
+        +updated_at: datetime
+        +owner: UserModel
+    }
+
+    class StandardResponse {
+        +status: str
+        +message: str
+        +data: Optional[Any]
+        +error_code: Optional[str]
+        +success(data: Any, message: str) StandardResponse
+        +error(message: str, error_code: str) StandardResponse
+    }
+
+    class HealthResponse {
+        +status: str
+        +version: str
+        +database: str
+        +timestamp: datetime
+    }
+
+    class UserCreate {
+        +username: str
+        +email: EmailStr
+        +password: str
+    }
+
+    class UserUpdate {
+        +username: Optional[str]
+        +email: Optional[EmailStr]
+        +password: Optional[str]
+        +is_active: Optional[bool]
+    }
+
+    class UserResponse {
+        +id: int
+        +username: str
+        +email: str
+        +is_active: bool
+        +is_superuser: bool
+        +created_at: datetime
+    }
+
+    class ItemCreate {
+        +title: str
+        +description: Optional[str]
+    }
+
+    class ItemUpdate {
+        +title: Optional[str]
+        +description: Optional[str]
+        +is_active: Optional[bool]
+    }
+
+    class ItemResponse {
+        +id: int
+        +title: str
+        +description: Optional[str]
+        +is_active: bool
+        +owner_id: int
+        +created_at: datetime
+    }
+
+    class TokenSchema {
+        +access_token: str
+        +token_type: str
+    }
+
+    class LoginRequest {
+        +username: str
+        +password: str
+    }
+
+    class Security {
+        +pwd_context: CryptContext
+        +oauth2_scheme: OAuth2PasswordBearer
+        +verify_password(plain_password: str, hashed_password: str) bool
+        +get_password_hash(password: str) str
+        +create_access_token(data: dict, expires_delta: Optional[timedelta]) str
+        +decode_access_token(token: str) dict
+    }
+
+    class AppException {
+        +status_code: int
+        +error_code: str
+        +detail: str
+        +__init__(status_code: int, error_code: str, detail: str)
+    }
+
+    class AppLogger {
+        -logger: logging.Logger
+        +__init__(name: str)
+        +get_logger() logging.Logger
+        +log_request(method: str, path: str, status_code: int, duration: float) None
+        +log_error(error: Exception, context: dict) None
+    }
+
+    class RequestLoggingMiddleware {
+        -app: FastAPI
+        -logger: AppLogger
+        +__init__(app: FastAPI)
+        +dispatch(request: Request, call_next: Callable) Response
+    }
+
+    class UserRepository {
+        -db: AsyncSession
+        +__init__(db: AsyncSession)
+        +get_by_id(user_id: int) Optional[UserModel]
+        +get_by_username(username: str) Optional[UserModel]
+        +get_by_email(email: str) Optional[UserModel]
+        +get_all(skip: int, limit: int) List[UserModel]
+        +create(user_data: dict) UserModel
+        +update(user_id: int, user_data: dict) Optional[UserModel]
+        +delete(user_id: int) bool
+        +count() int
+    }
+
+    class ItemRepository {
+        -db: AsyncSession
+        +__init__(db: AsyncSession)
+        +get_by_id(item_id: int) Optional[ItemModel]
+        +get_all(skip: int, limit: int) List[ItemModel]
+        +get_by_owner(owner_id: int, skip: int, limit: int) List[ItemModel]
+        +create(item_data: dict) ItemModel
+        +update(item_id: int, item_data: dict) Optional[ItemModel]
+        +delete(item_id: int) bool
+        +count_by_owner(owner_id: int) int
+    }
+
+    class AuthService {
+        -user_repo: UserRepository
+        +__init__(user_repo: UserRepository)
+        +authenticate_user(username: str, password: str) Optional[UserModel]
+        +login(login_data: LoginRequest) TokenSchema
+        +get_current_user(token: str, db: AsyncSession) UserModel
+    }
+
+    class UserService {
+        -user_repo: UserRepository
+        +__init__(user_repo: UserRepository)
+        +get_user(user_id: int) UserResponse
+        +get_users(skip: int, limit: int) List[UserResponse]
+        +create_user(user_data: UserCreate) UserResponse
+        +update_user(user_id: int, user_data: UserUpdate, current_user: UserModel) UserResponse
+        +delete_user(user_id: int, current_user: UserModel) bool
+    }
+
+    class ItemService {
+        -item_repo: ItemRepository
+        +__init__(item_repo: ItemRepository)
+        +get_item(item_id: int) ItemResponse
+        +get_items(skip: int, limit: int) List[ItemResponse]
+        +get_my_items(owner_id: int, skip: int, limit: int) List[ItemResponse]
+        +create_item(item_data: ItemCreate, owner_id: int) ItemResponse
+        +update_item(item_id: int, item_data: ItemUpdate, current_user: UserModel) ItemResponse
+        +delete_item(item_id: int, current_user: UserModel) bool
+    }
+
+    class AuthRouter {
+        +router: APIRouter
+        +prefix: str
+        +tags: List[str]
+        +login(login_data: LoginRequest, auth_service: AuthService) StandardResponse
+        +get_me(current_user: UserModel) StandardResponse
+    }
+
+    class UsersRouter {
+        +router: APIRouter
+        +prefix: str
+        +tags: List[str]
+        +get_users(skip: int, limit: int, user_service: UserService) StandardResponse
+        +get_user(user_id: int, user_service: UserService) StandardResponse
+        +create_user(user_data: UserCreate, user_service: UserService) StandardResponse
+        +update_user(user_id: int, user_data: UserUpdate, user_service: UserService, current_user: UserModel) StandardResponse
+        +delete_user(user_id: int, user_service: UserService, current_user: UserModel) StandardResponse
+    }
+
+    class ItemsRouter {
+        +router: APIRouter
+        +prefix: str
+        +tags: List[str]
+        +get_items(skip: int, limit: int, item_service: ItemService) StandardResponse
+        +get_item(item_id: int, item_service: ItemService) StandardResponse
+        +get_my_items(skip: int, limit: int, item_service: ItemService, current_user: UserModel) StandardResponse
+        +create_item(item_data: ItemCreate, item_service: ItemService, current_user: UserModel) StandardResponse
+        +update_item(item_id: int, item_data: ItemUpdate, item_service: ItemService, current_user: UserModel) StandardResponse
+        +delete_item(item_id: int, item_service: ItemService, current_user: UserModel) StandardResponse
+    }
+
+    class TestConftest {
+        +async_client: AsyncClient
+        +test_db: AsyncSession
+        +test_user: UserModel
+        +test_item: ItemModel
+        +auth_headers: dict
+        +override_get_db() AsyncGenerator
+    }
+
+    UserModel --> ItemModel : one-to-many
+    UserRepository --> UserModel : manages
+    ItemRepository --> ItemModel : manages
+    AuthService --> UserRepository : uses
+    AuthService --> Security : uses
+    UserService --> UserRepository : uses
+    UserService --> Security : uses
+    ItemService --> ItemRepository : uses
+    AuthRouter --> AuthService : uses
+    UsersRouter --> UserService : uses
+    ItemsRouter --> ItemService : uses
+    AuthRouter --> StandardResponse : returns
+    UsersRouter --> StandardResponse : returns
+    ItemsRouter --> StandardResponse : returns
+    RequestLoggingMiddleware --> AppLogger : uses
+    TestConftest --> Database : uses
+    TestConftest --> UserModel : creates
+    TestConftest --> ItemModel : creates

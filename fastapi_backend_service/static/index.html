@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Ops</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="bg-slate-50 text-slate-900 h-screen flex flex-col overflow-hidden">
+
+  <!-- ══════════════════════════════════════════════════════════
+       LOGIN SCREEN
+  ═══════════════════════════════════════════════════════════ -->
+  <div id="login-screen" class="flex items-center justify-center h-full">
+    <div class="login-card">
+      <div class="text-center mb-6">
+        <!-- AI Ops Icon -->
+        <div class="flex justify-center mb-3">
+          <div class="w-14 h-14 rounded-2xl bg-blue-500/20 border border-blue-500/30
+                      flex items-center justify-center">
+            <svg class="w-8 h-8 text-blue-400" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+              <path d="M5.636 5.636l2.122 2.121M16.243 16.243l2.121 2.122
+                       M5.636 18.364l2.122-2.122M16.243 7.757l2.121-2.121"/>
+            </svg>
+          </div>
+        </div>
+        <h1 class="text-2xl font-bold tracking-tight text-slate-900" data-i18n="brand">AI Ops</h1>
+        <p class="text-slate-500 text-sm mt-1" data-i18n="brand-sub">AI 診斷智能體 · AIOps</p>
+      </div>
+
+      <div class="space-y-3">
+        <div>
+          <label class="text-xs text-slate-500 font-medium uppercase tracking-wider">Username</label>
+          <input id="login-username" type="text" value="admin"
+            class="input-field mt-1"
+            onkeydown="if(event.key==='Enter')document.getElementById('login-password').focus()" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-500 font-medium uppercase tracking-wider">Password</label>
+          <input id="login-password" type="password" value="admin"
+            class="input-field mt-1"
+            onkeydown="if(event.key==='Enter')loginWithCredentials()" />
+        </div>
+
+        <div id="login-error"
+             class="hidden text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        </div>
+
+        <button id="login-btn" onclick="loginWithCredentials()"
+          class="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-700
+                 rounded-xl py-2.5 font-semibold text-sm transition-colors"
+          data-i18n="login-btn">
+          登入
+        </button>
+      </div>
+
+      <div class="mt-5 border-t border-slate-200 pt-5">
+        <p class="text-xs text-slate-500 text-center mb-2" data-i18n="paste-token">
+          或直接貼上 JWT Token
+        </p>
+        <div class="flex gap-2">
+          <input id="token-input" type="text" placeholder="eyJhbGc..."
+            class="input-field flex-1 font-mono text-xs" />
+          <button onclick="loginWithToken()"
+            class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs transition-colors border border-slate-200"
+            data-i18n="use-token">
+            使用
+          </button>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 text-center mt-4">
+        <span data-i18n="no-account">未有帳號？請先透過</span>
+        <a href="/docs" target="_blank" class="text-indigo-600 hover:underline">/docs</a>
+        <span data-i18n="create-user">建立使用者。</span>
+      </p>
+    </div>
+  </div>
+
+
+  <!-- ══════════════════════════════════════════════════════════
+       MAIN APP
+  ═══════════════════════════════════════════════════════════ -->
+  <div id="main-app" class="hidden flex flex-col h-full overflow-hidden">
+
+    <!-- Header -->
+    <header class="flex-shrink-0 flex items-center justify-between px-5 py-3
+                   bg-white border-b border-slate-200 shadow-sm">
+      <div class="flex items-center gap-3">
+        <!-- AI Ops Brand -->
+        <div class="flex items-center gap-2">
+          <svg class="w-5 h-5 text-blue-400" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+            <path d="M5.636 5.636l2.122 2.121M16.243 16.243l2.121 2.122
+                     M5.636 18.364l2.122-2.122M16.243 7.757l2.121-2.121"/>
+          </svg>
+          <span class="text-base font-bold" data-i18n="brand">AI Ops</span>
+        </div>
+        <span class="text-xs px-2 py-0.5 rounded-full
+                     bg-indigo-100 text-indigo-600 border border-indigo-200">
+          v8 · RBAC
+        </span>
+        <div id="status-indicator" class="flex items-center gap-1.5 text-xs text-slate-500">
+          <span class="w-1.5 h-1.5 rounded-full bg-green-400 inline-block"></span>
+          Ready
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <!-- Language Switcher -->
+        <button id="lang-btn" onclick="_toggleLang()"
+          class="text-xs text-slate-600 hover:text-slate-900 border border-slate-300
+                 hover:border-slate-400 hover:bg-slate-50 rounded-lg px-3 py-1.5 transition-colors font-medium">
+          EN
+        </button>
+        <span id="user-badge" class="text-xs text-slate-600 hidden"></span>
+        <button onclick="logout()"
+          class="text-xs text-slate-600 hover:text-slate-900 border border-slate-300
+                 hover:border-slate-400 hover:bg-slate-50 rounded-lg px-3 py-1.5 transition-colors"
+          data-i18n="logout">
+          登出
+        </button>
+      </div>
+    </header>
+
+    <!-- Body: Sidebar + Views -->
+    <div class="flex flex-1 overflow-hidden">
+
+      <!-- ── LEFT SIDEBAR ── -->
+      <nav id="sidebar"
+        class="flex-shrink-0 flex flex-col items-center gap-1 py-3 px-2
+               bg-blue-900 border-r border-blue-800 w-[56px]">
+
+        <!-- Diagnose -->
+        <button class="nav-btn active-nav" id="nav-diagnose" title="診斷站"
+          onclick="switchView('diagnose')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a7 7 0 1 1 0 14A7 7 0 0 1 12 2z"/>
+            <path d="M12 6v3l2 2"/>
+            <path d="M12 19v3M8.5 20.5l1-1.5M15.5 20.5l-1-1.5"/>
+          </svg>
+        </button>
+
+        <div class="w-6 border-t border-blue-800 my-1"></div>
+
+        <!-- Data Subjects -->
+        <button class="nav-btn" id="nav-data-subjects" title="Data Subject 管理"
+          onclick="switchView('data-subjects')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <ellipse cx="12" cy="5" rx="9" ry="3"/>
+            <path d="M21 12c0 1.657-4.03 3-9 3S3 13.657 3 12"/>
+            <path d="M3 5v14c0 1.657 4.03 3 9 3s9-1.343 9-3V5"/>
+          </svg>
+        </button>
+
+        <!-- Event Types -->
+        <button class="nav-btn" id="nav-event-types" title="Event Builder"
+          onclick="switchView('event-types')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+            <rect x="9" y="3" width="6" height="4" rx="1"/>
+            <path d="M9 12h6M9 16h4"/>
+          </svg>
+        </button>
+
+        <!-- MCP Builder -->
+        <button class="nav-btn" id="nav-mcp-builder" title="MCP Builder"
+          onclick="switchView('mcp-builder')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06
+                     a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09
+                     A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83
+                     l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09
+                     A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83
+                     l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09
+                     a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83
+                     l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09
+                     a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+
+        <!-- Skill Builder -->
+        <button class="nav-btn" id="nav-skill-builder" title="Skill Builder"
+          onclick="switchView('skill-builder')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <circle cx="12" cy="12" r="6"/>
+            <circle cx="12" cy="12" r="2"/>
+          </svg>
+        </button>
+
+        <div class="flex-1"></div>
+        <div class="w-6 border-t border-blue-800 my-1"></div>
+
+        <!-- Settings -->
+        <button class="nav-btn" id="nav-settings" title="系統大腦調校 (IT Admin)"
+          onclick="switchView('settings')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77
+                     a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91
+                     a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+          </svg>
+        </button>
+      </nav>
+
+      <!-- ── VIEW CONTAINER ── -->
+      <div class="flex-1 overflow-hidden flex flex-col">
+
+        <!-- ══ DIAGNOSE VIEW ══ -->
+        <div id="view-diagnose" class="view-panel flex flex-1 overflow-hidden">
+
+          <!-- Chat Panel (LEFT, 30%) — Event-Driven layout -->
+          <div class="flex flex-col min-w-0" style="width:30%;flex-shrink:0;">
+            <div id="chat-history" class="flex-1 overflow-y-auto p-4 space-y-3">
+              <div class="text-center py-8">
+                <p class="text-xs text-slate-400 bg-white border border-slate-200 inline-block px-3 py-1 rounded-full"
+                   data-i18n="chat-assistant">
+                  對話助手
+                </p>
+              </div>
+            </div>
+
+            <!-- Input Area -->
+            <div class="flex-shrink-0 border-t border-slate-200 p-4 bg-white">
+              <!-- ⚡ Quick Trigger Button (CRUCIAL) -->
+              <button onclick="_simulateTrigger('⚡ 模擬觸發：TETCH01 PM2 發生 SPC OOC')"
+                class="w-full mb-2 text-left text-xs px-3 py-2 rounded-lg
+                       bg-amber-50 border border-amber-200 text-amber-700
+                       hover:bg-amber-100 hover:border-amber-300
+                       transition-colors flex items-center gap-2">
+                <svg class="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                </svg>
+                <span data-i18n="sim-trigger">⚡ 模擬觸發：TETCH01 PM2 發生 SPC OOC</span>
+              </button>
+
+              <div class="flex gap-2 items-end">
+                <textarea id="issue-input"
+                  placeholder="描述症狀，例如：系統 CPU 突然飆升..."
+                  class="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2.5
+                         text-sm text-slate-900 resize-none focus:outline-none focus:border-indigo-400
+                         placeholder-slate-400 leading-relaxed"
+                  rows="3"
+                  onkeydown="handleInputKey(event)"></textarea>
+                <button id="send-btn" onclick="sendDiagnosis()"
+                  class="flex-shrink-0 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-200
+                         disabled:text-slate-400 rounded-xl p-3 transition-colors self-end">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+                  </svg>
+                </button>
+              </div>
+              <p class="text-xs text-slate-400 mt-2" data-i18n="send-hint">Ctrl + Enter 送出</p>
+            </div>
+          </div>
+
+          <!-- Report Panel (RIGHT, 70% — always visible, event-driven layout) -->
+          <div id="report-panel"
+               class="flex flex-col border-l border-slate-200 overflow-hidden bg-white"
+               style="flex:1;min-width:0;">
+            <div id="tab-bar"
+              class="flex-shrink-0 flex items-center gap-1 px-4 py-2
+                     bg-white border-b border-slate-200 overflow-x-auto">
+              <button id="tab-btn-summary" onclick="switchTab('summary')"
+                class="tab-btn active-tab whitespace-nowrap">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round"
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586
+                       a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+                <span data-i18n="summary-tab">總結報告</span>
+              </button>
+            </div>
+            <div id="tab-content" class="flex-1 flex flex-col min-h-0">
+              <div id="panel-summary" class="tab-panel flex flex-col flex-1 min-h-0">
+                <div id="summary-placeholder"
+                  class="flex flex-col items-center justify-center flex-1 text-slate-400">
+                  <svg class="w-14 h-14 mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586
+                         a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                  </svg>
+                  <p class="text-sm" data-i18n="report-placeholder">診斷完成後，AI 報告將呈現在此</p>
+                </div>
+                <div id="summary-content" class="hidden"></div>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /view-diagnose -->
+
+
+        <!-- ══ DATA SUBJECTS VIEW ══ -->
+        <div id="view-data-subjects" class="view-panel hidden flex-1 flex flex-col overflow-hidden">
+          <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
+                      border-b border-slate-200 bg-white">
+            <div>
+              <h2 class="font-semibold text-base flex items-center gap-2">
+                <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <ellipse cx="12" cy="5" rx="9" ry="3"/>
+                  <path d="M21 12c0 1.657-4.03 3-9 3S3 13.657 3 12"/>
+                  <path d="M3 5v14c0 1.657 4.03 3 9 3s9-1.343 9-3V5"/>
+                </svg>
+                <span data-i18n="ds-title">Data Subject 管理</span>
+              </h2>
+              <p class="text-xs text-slate-500 mt-0.5" data-i18n="ds-sub">定義資料源與 API 連線設定 (IT Admin)</p>
+            </div>
+            <button onclick="openDrawer('ds-create')"
+              class="builder-btn-primary text-sm px-4 py-2" data-i18n="ds-add">
+              + 新增 Data Subject
+            </button>
+          </div>
+          <div id="ds-list" class="flex-1 overflow-y-auto p-6">
+            <div class="text-center text-slate-600 py-12">載入中...</div>
+          </div>
+        </div>
+
+
+        <!-- ══ EVENT TYPES VIEW ══ -->
+        <div id="view-event-types" class="view-panel hidden flex-1 flex flex-col overflow-hidden">
+          <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
+                      border-b border-slate-200 bg-white">
+            <div>
+              <h2 class="font-semibold text-base flex items-center gap-2">
+                <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+                  <rect x="9" y="3" width="6" height="4" rx="1"/>
+                  <path d="M9 12h6M9 16h4"/>
+                </svg>
+                <span data-i18n="et-title">Event Type Builder</span>
+              </h2>
+              <p class="text-xs text-slate-500 mt-0.5" data-i18n="et-sub">定義異常事件與屬性 (Expert/PE)</p>
+            </div>
+            <button onclick="openDrawer('et-create')"
+              class="builder-btn-primary text-sm px-4 py-2" data-i18n="et-add">
+              + 新增 Event Type
+            </button>
+          </div>
+          <div id="et-list" class="flex-1 overflow-y-auto p-6">
+            <div class="text-center text-slate-600 py-12">載入中...</div>
+          </div>
+        </div>
+
+
+        <!-- ══ MCP BUILDER VIEW ══ -->
+        <div id="view-mcp-builder" class="view-panel hidden flex-1 flex flex-col overflow-hidden">
+          <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
+                      border-b border-slate-200 bg-white">
+            <div>
+              <h2 class="font-semibold text-base flex items-center gap-2">
+                <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06
+                           a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09
+                           A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83
+                           l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09
+                           A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83
+                           l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09
+                           a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83
+                           l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09
+                           a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+                <span data-i18n="mcp-title">MCP Builder</span>
+              </h2>
+              <p class="text-xs text-slate-500 mt-0.5" data-i18n="mcp-sub">資料加工與視覺化建構器 (Expert/PE)</p>
+            </div>
+            <button onclick="openDrawer('mcp-create')"
+              class="builder-btn-primary text-sm px-4 py-2" data-i18n="mcp-add">
+              + 新增 MCP
+            </button>
+          </div>
+          <div id="mcp-list" class="flex-1 overflow-y-auto p-6">
+            <div class="text-center text-slate-600 py-12">載入中...</div>
+          </div>
+        </div>
+
+
+        <!-- ══ SKILL BUILDER VIEW ══ -->
+        <div id="view-skill-builder" class="view-panel hidden flex-1 flex flex-col overflow-hidden">
+          <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
+                      border-b border-slate-200 bg-white">
+            <div>
+              <h2 class="font-semibold text-base flex items-center gap-2">
+                <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"/>
+                  <circle cx="12" cy="12" r="6"/>
+                  <circle cx="12" cy="12" r="2"/>
+                </svg>
+                <span data-i18n="skill-title">Skill Builder</span>
+              </h2>
+              <p class="text-xs text-slate-500 mt-0.5" data-i18n="skill-sub">決策大腦：Event → MCP → 診斷邏輯 (Expert/PE)</p>
+            </div>
+            <button onclick="openDrawer('skill-create')"
+              class="builder-btn-primary text-sm px-4 py-2" data-i18n="skill-add">
+              + 新增 Skill
+            </button>
+          </div>
+          <div id="skill-list" class="flex-1 overflow-y-auto p-6">
+            <div class="text-center text-slate-600 py-12">載入中...</div>
+          </div>
+        </div>
+
+        <!-- ══ SETTINGS VIEW ══ -->
+        <div id="view-settings" class="view-panel hidden flex-1 flex flex-col overflow-hidden">
+          <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
+                      border-b border-slate-200 bg-white">
+            <div>
+              <h2 class="font-semibold text-base flex items-center gap-2">
+                <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77
+                           a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91
+                           a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+                </svg>
+                <span data-i18n="settings-title">系統大腦調校 (Prompt Settings)</span>
+              </h2>
+              <p class="text-xs text-slate-500 mt-0.5" data-i18n="settings-sub">IT Admin 維護 LLM Prompt 設定</p>
+            </div>
+            <button onclick="_loadSettings()"
+              class="text-xs text-slate-500 hover:text-slate-900 border border-slate-300
+                     hover:border-slate-400 hover:bg-slate-50 rounded-lg px-3 py-1.5 transition-colors"
+              data-i18n="settings-reload">
+              ↺ 重新載入
+            </button>
+          </div>
+          <div id="settings-body" class="flex-1 overflow-y-auto p-6 space-y-8">
+            <div class="text-center text-slate-600 py-12">載入中...</div>
+          </div>
+        </div>
+
+      </div><!-- /view-container -->
+    </div><!-- /body -->
+
+  </div><!-- /main-app -->
+
+
+  <!-- ══════════════════════════════════════════════════════════
+       60VW RIGHT DRAWER (shared)
+  ═══════════════════════════════════════════════════════════ -->
+  <div id="drawer-overlay"
+    class="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 hidden"
+    onclick="closeDrawer()"></div>
+
+  <div id="drawer"
+    class="fixed top-0 right-0 h-full z-50 bg-white border-l border-slate-200
+           flex flex-col shadow-2xl transform translate-x-full transition-transform duration-300"
+    style="width: 60vw;">
+
+    <!-- Drawer Header -->
+    <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
+                border-b border-slate-200 bg-white">
+      <h3 id="drawer-title" class="font-semibold text-base text-slate-900"></h3>
+      <button onclick="closeDrawer()"
+        class="text-slate-400 hover:text-slate-900 rounded-lg p-1.5 hover:bg-slate-100 transition-colors">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Drawer Body -->
+    <div id="drawer-body" class="flex-1 overflow-y-auto p-6 bg-slate-50"></div>
+
+    <!-- Drawer Footer -->
+    <div id="drawer-footer"
+      class="flex-shrink-0 flex items-center justify-end gap-3 px-6 py-4
+             border-t border-slate-200 bg-white"></div>
+  </div>
+
+
+  <script src="/app.js"></script>
+  <script src="/builder.js"></script>
+</body>
+</html>

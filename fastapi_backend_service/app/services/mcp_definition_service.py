@@ -1,0 +1,367 @@
+"""Service layer for MCPDefinition CRUD + LLM generation."""
+
+import json
+import logging
+from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
+
+from app.core.exceptions import AppException
+from app.models.mcp_definition import MCPDefinitionModel
+from app.repositories.data_subject_repository import DataSubjectRepository
+from app.repositories.mcp_definition_repository import MCPDefinitionRepository
+from app.repositories.system_parameter_repository import SystemParameterRepository
+from app.schemas.mcp_definition import (
+    MCPCheckIntentResponse,
+    MCPDefinitionCreate,
+    MCPDefinitionResponse,
+    MCPDefinitionUpdate,
+    MCPGenerateResponse,
+    MCPRunWithDataRequest,  # noqa: F401 — imported for re-use in router
+    MCPTryRunResponse,
+)
+from app.services.mcp_builder_service import MCPBuilderService
+from app.services.sandbox_service import execute_script
+
+_JSON_OPT = ("output_schema", "ui_render_config", "input_definition")
+
+
+def _normalize_output(output_data: Any, llm_output_schema: Any) -> Dict[str, Any]:
+    """Ensure output_data conforms to Standard Payload format.
+
+    Standard Payload = {output_schema, dataset, ui_render: {type, chart_data}}.
+    If the sandbox script returned old-format data (no 'ui_render' key), wrap it.
+    """
+    # Already Standard Payload — trust it
+    if isinstance(output_data, dict) and "ui_render" in output_data:
+        # Ensure output_schema is present (may be missing in early LLM versions)
+        if "output_schema" not in output_data:
+            output_data = dict(output_data)
+            output_data["output_schema"] = llm_output_schema
+        return output_data
+
+    # Script returned a bare list
+    if isinstance(output_data, list):
+        dataset = output_data
+    elif isinstance(output_data, dict):
+        # Try to find the first list-of-dicts value as the dataset
+        dataset = None
+        # Check if 'dataset' key already exists (partial Standard Payload)
+        if "dataset" in output_data and isinstance(output_data["dataset"], list):
+            dataset = output_data["dataset"]
+        else:
+            for v in output_data.values():
+                if isinstance(v, list) and v and isinstance(v[0], dict):
+                    dataset = v
+                    break
+        if dataset is None:
+            # Wrap the whole dict as a single-row dataset
+            dataset = [output_data]
+    else:
+        dataset = [{"value": str(output_data)}]
+
+    return {
+        "output_schema": llm_output_schema or {},
+        "dataset": dataset,
+        "ui_render": {"type": "table", "chart_data": None},
+    }
+
+
+def _j(s: Optional[str]) -> Any:
+    if not s:
+        return None
+    try:
+        return json.loads(s)
+    except Exception:
+        return None
+
+
+def _to_response(obj: MCPDefinitionModel) -> MCPDefinitionResponse:
+    return MCPDefinitionResponse(
+        id=obj.id,
+        name=obj.name,
+        description=obj.description,
+        data_subject_id=obj.data_subject_id,
+        processing_intent=obj.processing_intent,
+        processing_script=obj.processing_script,
+        output_schema=_j(obj.output_schema),
+        ui_render_config=_j(obj.ui_render_config),
+        input_definition=_j(obj.input_definition),
+        sample_output=_j(obj.sample_output),
+        created_at=obj.created_at,
+        updated_at=obj.updated_at,
+    )
+
+
+class MCPDefinitionService:
+    def __init__(
+        self,
+        repo: MCPDefinitionRepository,
+        ds_repo: DataSubjectRepository,
+        llm: MCPBuilderService,
+        sp_repo: Optional[SystemParameterRepository] = None,
+    ) -> None:
+        self._repo = repo
+        self._ds_repo = ds_repo
+        self._llm = llm
+        self._sp_repo = sp_repo
+
+    async def list_all(self) -> List[MCPDefinitionResponse]:
+        return [_to_response(o) for o in await self._repo.get_all()]
+
+    async def get(self, mcp_id: int) -> MCPDefinitionResponse:
+        obj = await self._repo.get_by_id(mcp_id)
+        if not obj:
+            raise AppException(status_code=404, error_code="NOT_FOUND", detail="MCP 不存在")
+        return _to_response(obj)
+
+    async def create(self, data: MCPDefinitionCreate) -> MCPDefinitionResponse:
+        ds = await self._ds_repo.get_by_id(data.data_subject_id)
+        if not ds:
+            raise AppException(status_code=404, error_code="NOT_FOUND", detail="DataSubject 不存在")
+        obj = await self._repo.create(
+            name=data.name,
+            description=data.description,
+            data_subject_id=data.data_subject_id,
+            processing_intent=data.processing_intent,
+        )
+        return _to_response(obj)
+
+    async def update(self, mcp_id: int, data: MCPDefinitionUpdate) -> MCPDefinitionResponse:
+        obj = await self._repo.get_by_id(mcp_id)
+        if not obj:
+            raise AppException(status_code=404, error_code="NOT_FOUND", detail="MCP 不存在")
+        updates: Dict[str, Any] = {}
+        for field in ("name", "description", "processing_intent", "processing_script", "diagnostic_prompt"):
+            val = getattr(data, field, None)
+            if val is not None:
+                updates[field] = val
+        for field in ("output_schema", "ui_render_config", "input_definition", "sample_output"):
+            val = getattr(data, field, None)
+            if val is not None:
+                updates[field] = val
+        obj = await self._repo.update(obj, **updates)
+        return _to_response(obj)
+
+    async def delete(self, mcp_id: int) -> None:
+        obj = await self._repo.get_by_id(mcp_id)
+        if not obj:
+            raise AppException(status_code=404, error_code="NOT_FOUND", detail="MCP 不存在")
+        await self._repo.delete(obj)
+
+    async def check_intent(
+        self,
+        processing_intent: str,
+        data_subject_id: int,
+    ) -> MCPCheckIntentResponse:
+        """Ask LLM to verify the processing intent is clear before generation."""
+        ds = await self._ds_repo.get_by_id(data_subject_id)
+        if not ds:
+            # DS not found — don't block, let try-run fail with proper 404
+            return MCPCheckIntentResponse(is_clear=True, questions=[])
+
+        output_schema_raw = _j(ds.output_schema) or {}
+        try:
+            result = await self._llm.check_intent(
+                processing_intent=processing_intent,
+                data_subject_name=ds.name,
+                data_subject_output_schema=output_schema_raw,
+            )
+        except Exception as exc:
+            logger.warning("check_intent LLM call failed: %s", exc)
+            return MCPCheckIntentResponse(is_clear=True, questions=[])
+
+        return MCPCheckIntentResponse(
+            is_clear=result.get("is_clear", True),
+            questions=result.get("questions", []),
+            suggested_prompt=result.get("suggested_prompt", ""),
+        )
+
+    async def generate(self, mcp_id: int) -> MCPGenerateResponse:
+        """Invoke LLM to generate script, output schema, UI config, and input definition."""
+        obj = await self._repo.get_by_id(mcp_id)
+        if not obj:
+            raise AppException(status_code=404, error_code="NOT_FOUND", detail="MCP 不存在")
+        ds = await self._ds_repo.get_by_id(obj.data_subject_id)
+        if not ds:
+            raise AppException(status_code=404, error_code="NOT_FOUND", detail="DataSubject 不存在")
+
+        # Load prompt template from DB if available
+        prompt_template = None
+        if self._sp_repo:
+            prompt_template = await self._sp_repo.get_value("PROMPT_MCP_GENERATE")
+
+        output_schema_raw = _j(ds.output_schema) or {}
+        result = await self._llm.generate_all(
+            processing_intent=obj.processing_intent,
+            data_subject_name=ds.name,
+            data_subject_output_schema=output_schema_raw,
+            prompt_template=prompt_template,
+        )
+
+        # Persist LLM results
+        await self._repo.update(
+            obj,
+            processing_script=result.get("processing_script", ""),
+            output_schema=result.get("output_schema", {}),
+            ui_render_config=result.get("ui_render_config", {}),
+            input_definition=result.get("input_definition", {}),
+        )
+
+        return MCPGenerateResponse(
+            mcp_id=mcp_id,
+            processing_script=result.get("processing_script", ""),
+            output_schema=result.get("output_schema", {}),
+            ui_render_config=result.get("ui_render_config", {}),
+            input_definition=result.get("input_definition", {}),
+            summary=result.get("summary", ""),
+        )
+
+    async def _analyze_sandbox_error(
+        self,
+        script: str,
+        error_message: str,
+        processing_intent: str,
+        data_subject_name: str,
+    ) -> Dict[str, Any]:
+        """Best-effort: ask LLM to triage the sandbox error. Never raises."""
+        try:
+            return await self._llm.triage_error(
+                script=script,
+                error_message=error_message,
+                processing_intent=processing_intent,
+                data_subject_name=data_subject_name,
+            )
+        except Exception as exc:
+            logger.warning("triage_error failed: %s", exc)
+            return {
+                "error_type": "System_Issue",
+                "error_reason": "",
+                "script_issue": "",
+                "suggested_prompt": "",
+                "fix_suggestion": "",
+            }
+
+    async def try_run(
+        self,
+        processing_intent: str,
+        data_subject_id: int,
+        sample_data: Any,
+    ) -> MCPTryRunResponse:
+        """LLM generate script (with guardrails) → sandbox execute → return result."""
+        ds = await self._ds_repo.get_by_id(data_subject_id)
+        if not ds:
+            raise AppException(status_code=404, error_code="NOT_FOUND", detail="DataSubject 不存在")
+
+        # Load system prompt from DB if available
+        system_prompt = None
+        if self._sp_repo:
+            system_prompt = await self._sp_repo.get_value("PROMPT_MCP_TRY_RUN")
+
+        output_schema_raw = _j(ds.output_schema) or {}
+        try:
+            result = await self._llm.generate_for_try_run(
+                processing_intent=processing_intent,
+                data_subject_name=ds.name,
+                data_subject_output_schema=output_schema_raw,
+                system_prompt=system_prompt,
+            )
+        except Exception as exc:
+            return MCPTryRunResponse(success=False, error=f"LLM 生成失敗：{exc}")
+
+        script = result.get("processing_script", "")
+        try:
+            output_data = await execute_script(script, sample_data)
+        except (ValueError, TimeoutError) as exc:
+            error_msg = f"沙盒執行失敗：{exc}"
+            triage = await self._analyze_sandbox_error(
+                script, error_msg, processing_intent, ds.name
+            )
+            parts = []
+            if triage.get("error_reason"):  parts.append(f"錯誤原因：{triage['error_reason']}")
+            if triage.get("script_issue"):  parts.append(f"腳本問題：{triage['script_issue']}")
+            if triage.get("fix_suggestion"): parts.append(f"修改建議：{triage['fix_suggestion']}")
+            return MCPTryRunResponse(
+                success=False,
+                script=script,
+                error=error_msg,
+                error_analysis="\n".join(parts) if parts else None,
+                error_type=triage.get("error_type"),
+                suggested_prompt=triage.get("suggested_prompt") or None,
+            )
+        except Exception as exc:
+            error_msg = f"未預期的執行錯誤：{exc}"
+            triage = await self._analyze_sandbox_error(
+                script, error_msg, processing_intent, ds.name
+            )
+            parts = []
+            if triage.get("error_reason"):  parts.append(f"錯誤原因：{triage['error_reason']}")
+            if triage.get("script_issue"):  parts.append(f"腳本問題：{triage['script_issue']}")
+            if triage.get("fix_suggestion"): parts.append(f"修改建議：{triage['fix_suggestion']}")
+            return MCPTryRunResponse(
+                success=False,
+                script=script,
+                error=error_msg,
+                error_analysis="\n".join(parts) if parts else None,
+                error_type=triage.get("error_type"),
+                suggested_prompt=triage.get("suggested_prompt") or None,
+            )
+
+        # ── Normalize output_data into Standard Payload format.
+        # LLM scripts from before Phase 8.5 (or non-compliant ones) may return raw data
+        # without the required {output_schema, dataset, ui_render} keys.
+        output_data = _normalize_output(output_data, result.get("output_schema", {}))
+
+        return MCPTryRunResponse(
+            success=True,
+            script=script,
+            output_data=output_data,
+            ui_render_config=result.get("ui_render_config", {}),
+            output_schema=result.get("output_schema", {}),
+            input_definition=result.get("input_definition", {}),
+            summary=result.get("summary", ""),
+        )
+
+    async def run_with_data(self, mcp_id: int, raw_data: Any) -> MCPTryRunResponse:
+        """Execute stored processing_script with raw_data (no LLM). Used by Skill Builder.
+
+        This runs the MCP's already-generated Python script against freshly fetched data
+        from the DataSubject API, so the expert can see real output before writing the
+        Skill diagnostic prompt.
+        """
+        obj = await self._repo.get_by_id(mcp_id)
+        if not obj:
+            raise AppException(status_code=404, error_code="NOT_FOUND", detail="MCP 不存在")
+        if not obj.processing_script:
+            raise AppException(
+                status_code=400,
+                error_code="INVALID_STATE",
+                detail="此 MCP 尚未生成 Python 腳本，請先在 MCP Builder 完成試跑",
+            )
+
+        try:
+            output_data = await execute_script(obj.processing_script, raw_data)
+        except (ValueError, TimeoutError) as exc:
+            return MCPTryRunResponse(
+                success=False,
+                script=obj.processing_script,
+                error=str(exc),
+            )
+        except Exception as exc:
+            return MCPTryRunResponse(
+                success=False,
+                script=obj.processing_script,
+                error=f"未預期的執行錯誤：{exc}",
+            )
+
+        llm_output_schema = _j(obj.output_schema) or {}
+        output_data = _normalize_output(output_data, llm_output_schema)
+
+        return MCPTryRunResponse(
+            success=True,
+            script=obj.processing_script,
+            output_data=output_data,
+            output_schema=llm_output_schema,
+            ui_render_config=_j(obj.ui_render_config) or {},
+            input_definition=_j(obj.input_definition) or {},
+        )
