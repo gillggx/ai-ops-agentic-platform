@@ -432,12 +432,16 @@ body {
 }
 .skill-tab-btn:hover { color: #1e3a8a; }
 .skill-tab-btn.active { border-bottom-color: #1e3a8a; color: #1e3a8a; font-weight: 600; }
+/* Summary tab — slightly bolder to stand out */
+.summary-tab-btn { font-weight: 500; }
+.summary-tab-btn.active { border-bottom-color: #1d4ed8; color: #1d4ed8; }
 
-/* Diagnosis summary bar */
+/* Diagnosis summary bar — now lives inside a p-4 tab panel (card style) */
 .diagnosis-summary-bar {
   background: #f0f7ff;
-  border-bottom: 1px solid #bfdbfe;
-  padding: 12px 20px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 10px 14px;
 }
 .diagnosis-summary-bar .summary-row {
   display: grid;
@@ -1172,4 +1176,199 @@ body {
 .ws-close-btn:hover {
   color: #ef4444;
   background-color: #fee2e2;
+}
+
+/* ── Phase 10: Mobile-First Responsive Layout ─────────────────── */
+
+/* Desktop defaults ─────────── */
+
+/* Chat panel: 30% left column */
+.chat-panel-col {
+  width: 30%;
+  flex-shrink: 0;
+}
+
+/* Workspace panel: remaining 70% */
+.workspace-panel-col {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Mobile view toggle: hidden on desktop */
+#mobile-view-toggle { display: none; }
+
+/* Mobile toggle button base styles */
+.mobile-toggle-btn {
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #64748b;
+  transition: background-color 0.15s, color 0.15s;
+  cursor: pointer;
+  user-select: none;
+}
+.mobile-toggle-btn:active { background-color: #e2e8f0; }
+.mobile-toggle-active {
+  background-color: #eff6ff;
+  color: #1d4ed8;
+}
+
+/* ── Data Tables: horizontal scroll on all screen sizes ──────── */
+.mcp-table-wrap, .skill-evidence-table {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.mcp-table-wrap table, .skill-evidence-table table {
+  min-width: 480px;
+}
+
+/* Ensure Plotly charts are always responsive */
+.plotly-graph-div, .js-plotly-plot {
+  max-width: 100% !important;
+}
+
+/* ── Mobile breakpoint (≤ 768px) ──────────────────────────────── */
+@media (max-width: 768px) {
+
+  /* Show mobile toggle bar */
+  #mobile-view-toggle { display: flex; }
+
+  /* Diagnose view becomes a column: toggle-bar on top, panels below */
+  #view-diagnose { flex-direction: column; }
+
+  /* Panels container: relative+overflow for sliding panels */
+  #diagnose-panels {
+    position: relative;
+    overflow: hidden;
+    flex: 1;
+  }
+
+  /* Both panels: absolute, full size, slide via transform */
+  .chat-panel-col {
+    position: absolute;
+    inset: 0;
+    width: 100% !important;
+    z-index: 1;
+    background: #fff;
+    transform: translateX(0);
+    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    flex-shrink: 0 !important;
+  }
+
+  .workspace-panel-col {
+    position: absolute;
+    inset: 0;
+    width: 100% !important;
+    flex: none !important;
+    z-index: 1;
+    background: #fff;
+    border-left: none !important;
+    transform: translateX(100%);
+    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* Chat active: chat shows (left), workspace hides (right) */
+  #diagnose-panels.mobile-chat .chat-panel-col    { transform: translateX(0); }
+  #diagnose-panels.mobile-chat .workspace-panel-col { transform: translateX(100%); }
+
+  /* Workspace active: workspace shows (center), chat hides (left) */
+  #diagnose-panels.mobile-workspace .chat-panel-col    { transform: translateX(-100%); }
+  #diagnose-panels.mobile-workspace .workspace-panel-col { transform: translateX(0); }
+
+  /* Drawer: full-width on mobile */
+  #drawer { width: 100vw !important; }
+
+  /* Header: compact spacing */
+  header { padding: 8px 12px !important; }
+
+  /* Prevent iOS auto-zoom on input focus (font-size ≥ 16px) */
+  #issue-input, .input-field { font-size: 16px; }
+
+  /* Slash menu anchor: slightly narrower so it doesn't clip */
+  #slash-menu-anchor { right: 56px; }
+
+  /* Workspace tab label: allow more space on mobile */
+  .ws-tab-label { max-width: 180px; }
+
+  /* Report cards: ensure text doesn't overflow */
+  .pipeline-block-header, .pipeline-recommendation {
+    word-break: break-word;
+  }
+
+  /* Chat bubbles: slightly smaller on mobile */
+  .chat-user, .chat-agent, .chat-tool, .chat-error {
+    max-width: 95%;
+  }
+}
+
+/* ── Chart Fullscreen Modal ──────────────────────────────────── */
+#chart-fullscreen-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9990;
+  background: rgba(0, 0, 0, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#chart-fullscreen-modal.hidden { display: none; }
+
+#chart-fullscreen-inner {
+  width: 94vw;
+  height: 82vh;
+  background: #0f172a;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+#chart-fullscreen-close {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 9991;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 38px;
+  height: 38px;
+  font-size: 17px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+#chart-fullscreen-close:hover { background: rgba(255, 255, 255, 0.32); }
+
+/* Expand button below each chart */
+.chart-expand-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 3px 10px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.chart-expand-btn:hover { background: #dbeafe; }
+
+/* Mobile portrait: rotate fullscreen chart 90° → simulates landscape */
+@media (max-width: 768px) and (orientation: portrait) {
+  #chart-fullscreen-inner {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    /* swap width/height: screen-height becomes chart-width, screen-width becomes chart-height */
+    width: 100vh;
+    height: 100vw;
+    border-radius: 0;
+    transform: translate(-50%, -50%) rotate(90deg);
+  }
 }

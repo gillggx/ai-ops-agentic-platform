@@ -125,11 +125,14 @@ async def get_ec(
 @router.get("/spc", summary="SPC Chart Mock Data")
 async def get_spc(
     chart_name: Optional[str] = Query(default=None, description="Filter by chart name (optional, e.g. CD)"),
+    lot_id: Optional[str] = Query(default=None, description="Filter by lot ID (optional). Falls back to all records if not found."),
+    tool_id: Optional[str] = Query(default=None, description="Filter by tool ID (optional, e.g. TETCH01)"),
 ):
     """Return SPC chart data for Etch CD measurement.
 
     100 records total — 10 tools (TETCH01-10) × 10 lots each.
     TETCH01 lots 1-4 are intentionally OOC (above UCL 46.5) to simulate SPC_OOC_Etch_CD events.
+    lot_id / tool_id filters: if provided but no match found, returns all records (mock fallback).
     """
     base_time = datetime(2026, 3, 1, 0, 0, 0, tzinfo=timezone.utc)
     UCL = 46.5
@@ -159,7 +162,7 @@ async def get_spc(
         values = _tetch01_values if t_idx == 0 else _normal_values[t_idx - 1]
         for j in range(10):
             lot_num = t_idx * 10 + j + 1
-            lot_id = f"L2603{lot_num:03d}"
+            record_lot_id = f"L2603{lot_num:03d}"  # use a different name to avoid shadowing the query param
             dt = (base_time - timedelta(minutes=idx * 5)).isoformat()
             records.append(
                 {
@@ -168,7 +171,7 @@ async def get_spc(
                     "UCL": UCL,
                     "LCL": LCL,
                     "tool": tool,
-                    "lotID": lot_id,
+                    "lotID": record_lot_id,
                     "recipe": recipe,
                     "DCItem": "CD",
                     "ChartName": "CD",
@@ -178,6 +181,46 @@ async def get_spc(
 
     if chart_name:
         records = [r for r in records if r["ChartName"] == chart_name]
+
+    if tool_id:
+        filtered = [r for r in records if r["tool"].lower() == tool_id.lower()]
+        if filtered:
+            records = filtered
+
+    if lot_id:
+        filtered = [r for r in records if r["lotID"].lower() == lot_id.lower()]
+        if filtered:
+            records = filtered
+        else:
+            # lot_id not in fixed mock data (e.g. user typed "AAAAA").
+            # Generate 10 deterministic SPC records WITH that exact lotID so the
+            # processing script's lotID filter always finds data — same hash-seed
+            # pattern as /mock/apc.
+            import random
+            rng = random.Random(abs(hash(lot_id)) % (2 ** 32))
+            gen = []
+            for i in range(10):
+                tool_num = (i % 10) + 1
+                tool     = f"TETCH{tool_num:02d}"
+                recipe   = f"ETH_RCP_{tool_num:02d}"
+                # 20 % chance OOC (> UCL 46.5), otherwise in-control
+                if rng.random() < 0.2:
+                    value = round(rng.uniform(46.6, 47.5), 1)
+                else:
+                    value = round(rng.uniform(44.2, 46.4), 1)
+                dt = (base_time - timedelta(minutes=i * 15)).isoformat()
+                gen.append({
+                    "datetime": dt,
+                    "value":    value,
+                    "UCL":      UCL,
+                    "LCL":      LCL,
+                    "tool":     tool,
+                    "lotID":    lot_id,   # ← exact queried lot_id
+                    "recipe":   recipe,
+                    "DCItem":   "CD",
+                    "ChartName": "CD",
+                })
+            records = gen
 
     return records
 

@@ -330,11 +330,19 @@ class CopilotService:
             yield {"type": "error", "message": f"資料查詢失敗：{exc}"}
             return
 
+        raw_count = len(raw_data) if isinstance(raw_data, list) else f"non-list({type(raw_data).__name__})"
+        print(f"[MCP DEBUG] {mcp.name}  raw_data rows={raw_count}  params={params}  url={endpoint_url}", flush=True)
+
         try:
             output_data = await execute_script(mcp.processing_script, raw_data)
         except Exception as exc:
             yield {"type": "error", "message": f"腳本執行失敗：{exc}"}
             return
+
+        ds_count = len(output_data.get("dataset", [])) if isinstance(output_data, dict) else "?"
+        has_chart = bool(isinstance(output_data, dict) and
+                         output_data.get("ui_render", {}).get("chart_data"))
+        print(f"[MCP DEBUG] {mcp.name}  script→ dataset_rows={ds_count}  has_chart={has_chart}", flush=True)
 
         llm_schema = _j(mcp.output_schema) if hasattr(mcp, "output_schema") else None
         output_data = _normalize_output(output_data, llm_schema)

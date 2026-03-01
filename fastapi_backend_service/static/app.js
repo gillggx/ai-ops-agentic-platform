@@ -26,6 +26,9 @@ let _toolTabs    = {};  // key: toolName → { tabEl, panelEl } (legacy non-stre
 let _workspaceTabs = {};   // { tabId: {btn, panel} }
 let _activeTabId   = null;
 
+// Phase 10 — Mobile responsive state
+let _mobileView = 'chat';  // 'chat' | 'workspace'
+
 // Phase 9 — Copilot state
 let _slotContext     = {};     // accumulated params for current slot-filling session
 let _slotToolId      = null;   // tool_id being filled
@@ -69,6 +72,8 @@ const _i18nData = {
     'settings-title':    '系統大腦調校 (Prompt Settings)',
     'settings-sub':      'IT Admin 維護 LLM Prompt 設定',
     'settings-reload':   '↺ 重新載入',
+    'mobile-chat':       '對話',
+    'mobile-workspace':  '報告',
   },
   en: {
     'brand':             'AI Ops',
@@ -99,6 +104,8 @@ const _i18nData = {
     'settings-title':    'Brain Tuning (Prompt Settings)',
     'settings-sub':      'IT Admin maintains LLM prompt settings',
     'settings-reload':   '↺ Reload',
+    'mobile-chat':       'Chat',
+    'mobile-workspace':  'Report',
   },
 };
 
@@ -337,7 +344,6 @@ function _initReportPanel(payload) {
         </div>
         <div class="flex gap-2 flex-wrap">${paramsChips}</div>
       </div>
-      <div id="diagnosis-summary" class="hidden diagnosis-summary-bar flex-shrink-0"></div>
       <div id="skill-tab-bar"
            class="flex flex-shrink-0 border-b border-slate-200 bg-white overflow-x-auto px-2 pt-1 min-h-[42px]"></div>
       <div id="skill-tab-panels" class="flex-1 overflow-y-auto"></div>
@@ -399,12 +405,25 @@ function _switchSkillTab(idx) {
 }
 
 /**
- * Render diagnosis summary bar above skill tabs (called after all skills complete).
+ * Render diagnosis summary as a tab (called after all skills complete).
+ * Creates a "📊 總覽" tab at the end of the skill tab bar and switches to it.
  */
 function _renderDiagnosisSummary(skills) {
-  const el = document.getElementById('diagnosis-summary');
-  if (!el || skills.length === 0) return;
+  const tabBar = document.getElementById('skill-tab-bar');
+  const panels = document.getElementById('skill-tab-panels');
+  if (!tabBar || !panels || skills.length === 0) return;
 
+  const summaryIdx = tabBar.querySelectorAll('.skill-tab-btn').length;
+
+  // ── Tab button ──────────────────────────────────────────────
+  const btn = document.createElement('button');
+  btn.className = 'skill-tab-btn summary-tab-btn';
+  btn.title     = '診斷總覽';
+  btn.innerHTML = '📊 總覽';
+  btn.onclick   = () => _switchSkillTab(summaryIdx);
+  tabBar.appendChild(btn);
+
+  // ── Panel content ────────────────────────────────────────────
   const headerCols = `
     <div class="summary-row" style="font-weight:600;color:#1e3a8a;font-size:11px;text-transform:uppercase;letter-spacing:.05em;padding-bottom:4px;border-bottom:1px solid #bfdbfe;">
       <span>Skill</span><span>診斷結論</span><span>建議動作</span>
@@ -427,11 +446,16 @@ function _renderDiagnosisSummary(skills) {
       </div>`;
   }).join('');
 
-  el.innerHTML = `
-    <div class="text-xs font-bold text-blue-900 uppercase tracking-wider mb-2">📊 診斷總覽</div>
-    ${headerCols}
-    ${rows}`;
-  el.classList.remove('hidden');
+  // ── Panel element ────────────────────────────────────────────
+  const panel = document.createElement('div');
+  panel.className = 'skill-tab-panel p-4 hidden';
+  panel.innerHTML = `
+    <div class="text-xs font-bold text-blue-900 uppercase tracking-wider mb-3">📊 診斷總覽</div>
+    <div class="diagnosis-summary-bar">${headerCols}${rows}</div>`;
+  panels.appendChild(panel);
+
+  // Switch to summary tab
+  _switchSkillTab(summaryIdx);
 }
 
 /**
@@ -467,6 +491,60 @@ function _initChartsInCard(cardEl) {
       div.style.display = 'none';  // hide on error; table fallback remains visible
     }
   });
+}
+
+/**
+ * Open a chart in a fullscreen overlay.
+ * On mobile portrait the inner container is CSS-rotated 90° to fill the
+ * landscape dimensions — no native screen-lock API required.
+ */
+function _openChartFullscreen(chartData) {
+  const modal  = document.getElementById('chart-fullscreen-modal');
+  const target = document.getElementById('chart-fullscreen-target');
+  if (!modal || !target || !chartData) return;
+
+  target.innerHTML = '';
+  modal.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+
+  if (chartData.startsWith('{')) {
+    // Plotly JSON spec — re-render at full size
+    requestAnimationFrame(() => {
+      try {
+        const spec   = JSON.parse(chartData);
+        const traces = spec.data || spec.traces || [];
+        const layout = Object.assign({
+          margin:          { t: 44, b: 52, l: 58, r: 26 },
+          paper_bgcolor:   'rgba(0,0,0,0)',
+          plot_bgcolor:    '#1e293b',
+          font:            { color: '#e2e8f0', size: 13 },
+          autosize:        true,
+        }, spec.layout || {});
+        if (window.Plotly) {
+          Plotly.newPlot(target, traces, layout, { responsive: true, displayModeBar: true });
+        }
+      } catch (_) {
+        target.innerHTML = '<p style="color:#e2e8f0;padding:24px">圖表載入失敗</p>';
+      }
+    });
+  } else if (chartData.startsWith('data:image/')) {
+    // Base64 PNG
+    target.innerHTML = `<img src="${chartData}"
+      style="max-width:100%;max-height:100%;object-fit:contain;display:block;margin:auto">`;
+  }
+}
+
+/** Close chart fullscreen overlay and purge Plotly instance. */
+function closeChartFullscreen() {
+  const modal  = document.getElementById('chart-fullscreen-modal');
+  const target = document.getElementById('chart-fullscreen-target');
+  if (!modal) return;
+  modal.classList.add('hidden');
+  document.body.style.overflow = '';
+  if (target) {
+    if (window.Plotly) { try { Plotly.purge(target); } catch (_) {} }
+    target.innerHTML = '';
+  }
 }
 
 /** Legacy: kept so old non-streaming code paths don't break */
@@ -537,7 +615,14 @@ function _renderMcpEvidence(mcpOutput) {
       ? uiRender.chart_data
       : JSON.stringify(uiRender.chart_data);
     const escaped = chartData.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
-    chartHtml = `<div class="evidence-chart" data-chart="${escaped}"></div>`;
+    chartHtml = `
+      <div class="evidence-chart-wrapper">
+        <div class="evidence-chart" data-chart="${escaped}"></div>
+        <button class="chart-expand-btn"
+                onclick="_openChartFullscreen(this.previousElementSibling.dataset.chart)">
+          ⛶ 全螢幕查看
+        </button>
+      </div>`;
   }
 
   // ── Dataset table (always shown if rows exist) ─────────────
@@ -644,6 +729,13 @@ function _showMainApp(username) {
     badge.classList.remove('hidden');
   }
   _applyI18n();
+
+  // Phase 10: init mobile layout + swipe after DOM is visible
+  _initMobileLayout();
+  _initSwipeGesture();
+
+  // Keep layout correct when user rotates device or resizes window
+  window.addEventListener('resize', _initMobileLayout, { passive: true });
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1040,6 +1132,10 @@ function _createWorkspaceTab(tabId, title, contentHtml) {
 
   _workspaceTabs[tabId] = { btn, panel };
   _activateWorkspaceTab(tabId);
+
+  // Phase 10: auto-switch to workspace on mobile when a new tab appears
+  if (_isMobile()) _switchMobileView('workspace');
+
   return { btn, panel };
 }
 
@@ -1103,11 +1199,91 @@ function _resetSession() {
   _slotToolType = null;
   _clearSlashTool();
 
+  // Phase 10: reset mobile view to chat panel for new diagnosis
+  if (_isMobile()) _switchMobileView('chat');
+
   // Hide report panel for new diagnosis
   _hideReportPanel();
 
   // Add visual separator in chat
   _addChatDivider('── 新診斷開始 ──');
+}
+
+// ══════════════════════════════════════════════════════════════
+// Phase 10 — Mobile Responsive Helpers
+// ══════════════════════════════════════════════════════════════
+
+function _isMobile() {
+  return window.innerWidth <= 768;
+}
+
+/**
+ * Switch mobile view between 'chat' and 'workspace'.
+ * On desktop this is a no-op (panels are always both visible).
+ */
+function _switchMobileView(view) {
+  _mobileView = view;
+  const panels = document.getElementById('diagnose-panels');
+  const chatBtn = document.getElementById('mobile-chat-btn');
+  const wsBtn   = document.getElementById('mobile-ws-btn');
+  if (!panels) return;
+
+  panels.classList.toggle('mobile-chat',      view === 'chat');
+  panels.classList.toggle('mobile-workspace', view === 'workspace');
+
+  if (chatBtn) {
+    chatBtn.classList.toggle('mobile-toggle-active', view === 'chat');
+    chatBtn.classList.remove(view === 'chat' ? 'text-slate-600' : 'text-indigo-700');
+  }
+  if (wsBtn) {
+    wsBtn.classList.toggle('mobile-toggle-active', view === 'workspace');
+    wsBtn.classList.remove(view === 'workspace' ? 'text-slate-600' : 'text-indigo-700');
+  }
+}
+
+/**
+ * Initialise mobile layout on app boot and on window resize.
+ * Sets the initial CSS state so panels are correctly positioned.
+ */
+function _initMobileLayout() {
+  const panels = document.getElementById('diagnose-panels');
+  if (!panels) return;
+  if (_isMobile()) {
+    // Default: show chat panel
+    panels.classList.add('mobile-chat');
+    panels.classList.remove('mobile-workspace');
+  } else {
+    // Desktop: remove mobile state classes entirely
+    panels.classList.remove('mobile-chat', 'mobile-workspace');
+  }
+}
+
+/**
+ * Attach swipe gesture listeners to #diagnose-panels.
+ * Swipe left  → switch to workspace
+ * Swipe right → switch to chat
+ */
+function _initSwipeGesture() {
+  const el = document.getElementById('diagnose-panels');
+  if (!el) return;
+
+  let startX = 0;
+  let startY = 0;
+
+  el.addEventListener('touchstart', (e) => {
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+  }, { passive: true });
+
+  el.addEventListener('touchend', (e) => {
+    if (!_isMobile()) return;
+    const dx = e.changedTouches[0].clientX - startX;
+    const dy = e.changedTouches[0].clientY - startY;
+    // Only count horizontal swipes (dx must be dominant + min 50px)
+    if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    if (dx < 0 && _mobileView === 'chat')      _switchMobileView('workspace'); // left
+    if (dx > 0 && _mobileView === 'workspace') _switchMobileView('chat');      // right
+  }, { passive: true });
 }
 
 // ══════════════════════════════════════════════════════════════

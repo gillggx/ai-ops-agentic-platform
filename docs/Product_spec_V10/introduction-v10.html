@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>GlassBox AIoPs — 產品介紹 v10</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: "Helvetica Neue", Arial, "PingFang TC", "Microsoft JhengHei", sans-serif;
+  font-size: 15px; line-height: 1.7; color: #1e293b; background: #f8fafc;
+}
+
+/* ── Cover ─────────────────────────── */
+.cover {
+  background: linear-gradient(150deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+  color: white; padding: 80px 60px; min-height: 480px;
+  display: flex; flex-direction: column; justify-content: center;
+  position: relative; overflow: hidden;
+}
+.cover::before {
+  content: ''; position: absolute; top: -80px; right: -80px;
+  width: 400px; height: 400px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(99,102,241,.3) 0%, transparent 70%);
+}
+.cover-content { position: relative; z-index: 1; }
+.cover-eyebrow { font-size: 11px; letter-spacing: 4px; text-transform: uppercase; color: #818cf8; margin-bottom: 20px; font-weight: 700; }
+.cover h1 { font-size: 54px; font-weight: 900; line-height: 1.1; margin-bottom: 14px; }
+.cover h1 em { font-style: normal; color: #a5b4fc; }
+.cover .tagline { font-size: 17px; color: #94a3b8; margin-bottom: 40px; max-width: 560px; line-height: 1.5; }
+.feature-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 40px; }
+.feature-item { display: flex; align-items: center; gap: 12px; font-size: 14px; color: #c7d2fe; }
+.feature-icon { width: 32px; height: 32px; background: rgba(99,102,241,.3); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+.cover-meta { display: flex; gap: 40px; border-top: 1px solid rgba(255,255,255,.1); padding-top: 20px; }
+.cover-meta dt { font-size: 11px; color: #64748b; }
+.cover-meta dd { font-size: 14px; color: #e2e8f0; font-weight: 600; }
+
+/* ── Version badges on cover ─────── */
+.version-history { display: flex; gap: 10px; margin-bottom: 28px; flex-wrap: wrap; }
+.ver-badge { padding: 3px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; border: 1px solid; }
+.ver-old  { border-color: rgba(148,163,184,.3); color: #64748b; }
+.ver-new  { border-color: #818cf8; color: #a5b4fc; background: rgba(99,102,241,.15); }
+
+/* ── Chapter ───────────────────────── */
+.chapter { background: white; max-width: 1000px; margin: 40px auto; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.07); }
+.chapter-header { padding: 32px 40px 20px; border-bottom: 2px solid #f1f5f9; }
+.chapter-num { font-size: 11px; font-weight: 700; color: #6366f1; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 6px; }
+.chapter-header h2 { font-size: 28px; font-weight: 800; color: #0f172a; }
+.chapter-header .lead { font-size: 14px; color: #64748b; margin-top: 8px; border-left: 3px solid #6366f1; padding-left: 12px; }
+.chapter-body { padding: 32px 40px; }
+
+/* New chapter badge */
+.chapter-header .new-badge { display: inline-block; background: #dcfce7; color: #15803d; font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 10px; margin-left: 12px; vertical-align: middle; }
+.chapter-header .v9-badge  { background: #dbeafe; color: #1d4ed8; }
+.chapter-header .v10-badge { background: #fdf4ff; color: #7c3aed; }
+
+/* ── Sections ──────────────────────── */
+.section { margin-bottom: 48px; }
+.section:last-child { margin-bottom: 0; }
+.section h3 { font-size: 19px; font-weight: 700; color: #1e293b; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 2px solid #f1f5f9; }
+.section h4 { font-size: 14px; font-weight: 700; color: #334155; margin: 14px 0 8px; }
+.section p { margin: 8px 0 12px; font-size: 14px; }
+.section ul, .section ol { padding-left: 22px; margin: 8px 0 12px; }
+.section li { margin: 5px 0; font-size: 14px; }
+
+/* ── Screenshots ───────────────────── */
+.shot { margin: 20px 0; border-radius: 10px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 4px 16px rgba(0,0,0,.1); }
+.shot img { width: 100%; display: block; }
+.shot figcaption { background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 8px 16px; font-size: 12px; color: #64748b; text-align: center; }
+
+/* ── LLM Application Cards ──────────── */
+.llm-card { border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; margin: 16px 0; }
+.llm-card-header { display: flex; align-items: center; gap: 12px; padding: 14px 18px; background: linear-gradient(135deg, #fdf4ff, #ede9fe); border-bottom: 1px solid #e2e8f0; }
+.llm-num { background: #6d28d9; color: white; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800; flex-shrink: 0; }
+.llm-card-header h4 { margin: 0; font-size: 15px; font-weight: 700; color: #3b0764; }
+.llm-badge { background: linear-gradient(135deg, #7c3aed, #6366f1); color: white; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 10px; margin-left: auto; white-space: nowrap; }
+.llm-card-body { padding: 14px 18px; font-size: 13px; color: #475569; }
+.llm-card-body code { font-family: monospace; font-size: 11px; background: #ede9fe; color: #5b21b6; padding: 1px 5px; border-radius: 3px; }
+
+/* ── Layer pyramid ─────────────────── */
+.layer-pyramid { border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; margin: 16px 0; }
+.layer-row { display: flex; border-bottom: 1px solid #e2e8f0; }
+.layer-row:last-child { border-bottom: none; }
+.layer-label { width: 130px; flex-shrink: 0; padding: 14px 16px; font-size: 13px; font-weight: 700; display: flex; flex-direction: column; justify-content: center; }
+.layer-body { flex: 1; padding: 14px 16px; font-size: 13px; color: #334155; border-left: 1px solid #e2e8f0; }
+.layer-body ul { margin: 4px 0; padding-left: 18px; }
+.layer-body li { font-size: 12px; margin: 3px 0; }
+.l-event { background: #ede9fe; color: #5b21b6; }
+.l-skill { background: #dbeafe; color: #1e40af; }
+.l-mcp   { background: #dcfce7; color: #14532d; }
+.l-ds    { background: #fef9c3; color: #713f12; }
+
+/* ── Flow steps ─────────────────────── */
+.flow { border-left: 3px solid #6366f1; padding-left: 20px; margin: 16px 0; }
+.flow-item { margin: 14px 0; position: relative; }
+.flow-item::before { content: ''; position: absolute; left: -27px; top: 5px; width: 12px; height: 12px; border-radius: 50%; background: #6366f1; border: 2px solid white; box-shadow: 0 0 0 2px #6366f1; }
+.flow-item.llm-step::before { background: #7c3aed; box-shadow: 0 0 0 2px #7c3aed; }
+.flow-title { font-size: 14px; font-weight: 700; color: #1e293b; margin-bottom: 3px; }
+.flow-desc { font-size: 13px; color: #64748b; }
+.flow-payload { font-family: monospace; font-size: 11px; background: #0f172a; color: #a5f3fc; padding: 6px 10px; border-radius: 6px; margin-top: 6px; }
+
+/* ── Comparison grid ────────────────── */
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; margin: 16px 0; }
+.compare-col { padding: 18px; }
+.compare-col:first-child { background: #fff1f2; border-right: 1px solid #e2e8f0; }
+.compare-col:last-child { background: #f0fdf4; }
+.compare-title { font-weight: 700; font-size: 14px; margin-bottom: 10px; }
+.compare-col:first-child .compare-title { color: #be123c; }
+.compare-col:last-child .compare-title { color: #15803d; }
+.compare-item { font-size: 13px; color: #475569; padding: 4px 0 4px 18px; position: relative; }
+.compare-item::before { position: absolute; left: 2px; }
+.compare-col:first-child .compare-item::before { content: "✗"; color: #be123c; }
+.compare-col:last-child .compare-item::before { content: "✓"; color: #15803d; }
+
+/* ── Tables ─────────────────────────── */
+table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+th { background: #1e293b; color: #f1f5f9; padding: 9px 12px; text-align: left; font-weight: 600; font-size: 12px; }
+td { padding: 8px 12px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+tr:nth-child(even) td { background: #f8fafc; }
+
+/* ── Callouts ───────────────────────── */
+.callout { border-radius: 8px; padding: 14px 16px; margin: 14px 0; font-size: 13px; }
+.callout-title { font-weight: 700; margin-bottom: 5px; font-size: 14px; }
+.tip    { background: #f0fdf4; border-left: 4px solid #22c55e; }
+.tip .callout-title { color: #15803d; }
+.info   { background: #eff6ff; border-left: 4px solid #3b82f6; }
+.info .callout-title { color: #1d4ed8; }
+.purple { background: #fdf4ff; border-left: 4px solid #a855f7; }
+.purple .callout-title { color: #7c3aed; }
+.mobile-callout { background: linear-gradient(135deg, #fdf4ff, #eff6ff); border-left: 4px solid #8b5cf6; }
+.mobile-callout .callout-title { color: #6d28d9; }
+
+/* ── Code ───────────────────────────── */
+code { font-family: monospace; font-size: 12px; background: #f1f5f9; color: #6366f1; padding: 2px 6px; border-radius: 3px; border: 1px solid #e2e8f0; }
+pre { background: #0f172a; color: #e2e8f0; padding: 16px 18px; border-radius: 8px; font-family: monospace; font-size: 12px; margin: 12px 0; line-height: 1.6; overflow-x: auto; }
+pre .c { color: #64748b; }
+pre .k { color: #a5b4fc; }
+pre .s { color: #86efac; }
+pre .n { color: #fbbf24; }
+
+/* ── Two col ────────────────────────── */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 14px 0; }
+.col-box { border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; background: #f8fafc; }
+
+/* ── Mobile Layout Diagram ───────────── */
+.layout-demo { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 16px 0; }
+.layout-box { border: 2px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
+.layout-box-title { background: #1e293b; color: white; padding: 8px 14px; font-size: 12px; font-weight: 700; text-align: center; }
+.layout-frame { background: #f8fafc; padding: 12px; font-family: monospace; font-size: 11px; color: #334155; line-height: 1.8; }
+.layout-frame .lf-sidebar { background: #1e293b; color: #94a3b8; padding: 2px 6px; border-radius: 3px; }
+.layout-frame .lf-chat { background: #eff6ff; color: #1d4ed8; padding: 2px 6px; border-radius: 3px; }
+.layout-frame .lf-ws { background: #fdf4ff; color: #7c3aed; padding: 2px 6px; border-radius: 3px; }
+.layout-frame .lf-toggle { background: #e0e7ff; color: #4338ca; padding: 2px 6px; border-radius: 3px; }
+
+/* ── Slash command demo ─────────────── */
+.slash-demo { border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; margin: 16px 0; }
+.slash-demo-input { background: #f8fafc; padding: 10px 14px; border-bottom: 1px solid #e2e8f0; font-family: monospace; font-size: 13px; color: #334155; }
+.slash-demo-menu { background: white; }
+.slash-item { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+.slash-item:last-child { border-bottom: none; }
+.slash-item.active { background: #eff6ff; }
+.slash-key { font-family: monospace; font-weight: 700; color: #6366f1; min-width: 120px; }
+.slash-desc { color: #64748b; }
+
+/* ── Tab bar demo ───────────────────── */
+.tab-bar-demo { border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; margin: 16px 0; }
+.tab-bar { display: flex; background: #f8fafc; border-bottom: 1px solid #e2e8f0; padding: 0 8px; gap: 2px; align-items: center; }
+.tab-item { display: flex; align-items: center; gap: 6px; padding: 8px 12px; font-size: 12px; font-weight: 600; color: #64748b; border-bottom: 2px solid transparent; cursor: pointer; }
+.tab-item.active { color: #6366f1; border-bottom-color: #6366f1; background: white; }
+.tab-close { width: 14px; height: 14px; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; color: #94a3b8; }
+.tab-content-demo { padding: 16px; background: white; font-size: 13px; color: #475569; }
+</style>
+</head>
+<body>
+
+<!-- ══════════════════
+     COVER
+══════════════════ -->
+<div class="cover">
+  <div class="cover-content">
+    <div class="cover-eyebrow">Product Introduction · v10</div>
+    <h1>GlassBox<br><em>AIoPs</em></h1>
+    <p class="tagline">以 AI 驅動的製程異常診斷平台<br>Copilot 對話助手 × 多 Tab 工作區 × 行動裝置全支援<br>以 SPC OOC 蝕刻製程異常為範例說明</p>
+    <div class="version-history">
+      <span class="ver-badge ver-old">v8 · 四層架構 + SSE</span>
+      <span class="ver-badge ver-old">v9 · Copilot Slash Command</span>
+      <span class="ver-badge ver-old">v9.1 · Multi-Tab Workspace</span>
+      <span class="ver-badge ver-new">v10 · Mobile-First 響應式</span>
+    </div>
+    <div class="feature-list">
+      <div class="feature-item"><div class="feature-icon">🔌</div><strong>四層彈性架構</strong> — Event / Skill / MCP / DataSubject，無需改程式即可擴充新診斷場景</div>
+      <div class="feature-item"><div class="feature-icon">🤖</div><strong>Copilot 對話助手</strong> — Slash Command 快捷操作 + LLM Slot-Filling 自然語言觸發診斷</div>
+      <div class="feature-item"><div class="feature-icon">📑</div><strong>Multi-Tab 工作區</strong> — 右側面板支援多 Tab 顯示診斷報告，結果不再被覆蓋</div>
+      <div class="feature-item"><div class="feature-icon">📱</div><strong>Mobile-First 響應式</strong> — 手機全螢幕單視圖 + 手勢滑動切換，隨時隨地掌握製程狀態</div>
+    </div>
+    <dl class="cover-meta">
+      <div><dt>版本</dt><dd>v10</dd></div>
+      <div><dt>AI 引擎</dt><dd>Claude Opus 4.6</dd></div>
+      <div><dt>日期</dt><dd>2026-03-01</dd></div>
+    </dl>
+  </div>
+</div>
+
+<!-- ══════════════════
+     CH1: POSITIONING
+══════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 1</div>
+    <h2>系統定位與核心價值</h2>
+    <p class="lead">GlassBox AIoPs 將資深 PE 工程師的診斷知識固化為可配置的「診斷技能（Skill）」，由 AI 在製程異常發生時自動執行，大幅縮短根因分析時間。</p>
+  </div>
+  <div class="chapter-body">
+    <div class="section">
+      <h3>傳統流程 vs. GlassBox AIoPs</h3>
+      <div class="compare">
+        <div class="compare-col">
+          <div class="compare-title">❌ 傳統手動流程</div>
+          <div class="compare-item">接到警報後人工判斷要查哪些系統</div>
+          <div class="compare-item">登入 MES、LIMS、SPC 系統逐一查詢</div>
+          <div class="compare-item">依靠個人經驗比對資料判斷根因</div>
+          <div class="compare-item">手動撰寫診斷報告（格式不一）</div>
+          <div class="compare-item">資深 PE 知識無法系統化傳承</div>
+          <div class="compare-item">需在電腦前才能查看診斷結果</div>
+        </div>
+        <div class="compare-col">
+          <div class="compare-title">✓ GlassBox AIoPs v10</div>
+          <div class="compare-item">事件觸發後自動匹配診斷技能（Skill）</div>
+          <div class="compare-item">MCP 自動呼叫各資料來源 API</div>
+          <div class="compare-item">Claude LLM 依診斷邏輯分析並得出結論</div>
+          <div class="compare-item">結構化報告含 Evidence + 建議行動</div>
+          <div class="compare-item">Copilot 對話助手 + Slash Command 快捷觸發</div>
+          <div class="compare-item">Mobile-First：手機手勢滑動即可查看診斷</div>
+        </div>
+      </div>
+
+      <h3 style="margin-top:32px;">v10 版本亮點：三大新功能</h3>
+      <table>
+        <thead><tr><th>版本</th><th>新功能</th><th>核心價值</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>v9</strong></td>
+            <td>Copilot 對話助手 + Slash Command</td>
+            <td>以自然語言輸入或 <code>/</code> 快捷鍵觸發診斷，LLM 自動提取事件參數（Slot-Filling）</td>
+          </tr>
+          <tr>
+            <td><strong>v9.1</strong></td>
+            <td>Multi-Tab Workspace</td>
+            <td>右側報告面板改為多 Tab，可同時保留多份診斷報告，切換對比不同結果</td>
+          </tr>
+          <tr>
+            <td><strong>v10</strong></td>
+            <td>Mobile-First 響應式佈局</td>
+            <td>手機全螢幕模式 + 手勢左右滑動切換，AI 結果自動跳轉報告面板</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════
+     CH2: FOUR LAYERS
+══════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 2</div>
+    <h2>彈性四層組件架構</h2>
+    <p class="lead">系統最核心的設計是四層組件金字塔。每一層都可獨立配置，PE 工程師無需修改程式碼，透過 Builder Copilot 的 UI 即可擴充新的診斷場景。</p>
+  </div>
+  <div class="chapter-body">
+
+    <div class="section">
+      <h3>四層架構定義</h3>
+      <div class="layer-pyramid">
+        <div class="layer-row">
+          <div class="layer-label l-event">⚡<br>Event Type</div>
+          <div class="layer-body">
+            <strong>定義「什麼事件觸發診斷」</strong>，包含事件名稱與屬性 Schema。事件發生時攜帶具體的 params 值。
+            <ul>
+              <li>一個 Event Type 可綁定多個 Skill（平行執行）</li>
+              <li>範例：<code>SPC_OOC_Etch_CD</code>（蝕刻 CD SPC 超出管制界限）</li>
+            </ul>
+          </div>
+        </div>
+        <div class="layer-row">
+          <div class="layer-label l-skill">🤖<br>Skill</div>
+          <div class="layer-body">
+            <strong>定義「如何診斷」</strong>，綁定一個 MCP + param_mappings + diagnostic_prompt（診斷邏輯）。
+            <ul>
+              <li>param_mappings 支援 AI Auto-Map 自動生成</li>
+              <li>範例：<code>檢查SPC 是否連續異常</code></li>
+            </ul>
+          </div>
+        </div>
+        <div class="layer-row">
+          <div class="layer-label l-mcp">🔧<br>MCP</div>
+          <div class="layer-body">
+            <strong>定義「如何取資料並前處理」</strong>，包含 input_params、output_schema，以及 AI 生成的 Python processing_script。
+            <ul>
+              <li>腳本在 RestrictedPython 沙箱中安全執行</li>
+              <li>範例：<code>Query SPC data</code></li>
+            </ul>
+          </div>
+        </div>
+        <div class="layer-row">
+          <div class="layer-label l-ds">🗄️<br>DataSubject</div>
+          <div class="layer-body">
+            <strong>定義「資料在哪裡」</strong>，提供 API Endpoint URL、HTTP Method 及 Response Schema。
+            <ul>
+              <li>可指向任意 REST API（工廠 MES、LIMS、SPC 系統）</li>
+              <li>範例：<code>SPC_Chart_Data</code>（<code>/api/v1/mock/spc-chart</code>）</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════
+     CH3: SPC EXAMPLE
+══════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 3</div>
+    <h2>SPC OOC 診斷完整示範</h2>
+    <p class="lead">從事件觸發到診斷完成，以 SPC OOC 蝕刻異常為例，示範系統的完整執行流程與 SSE 漸進式串流機制。</p>
+  </div>
+  <div class="chapter-body">
+
+    <div class="section">
+      <h3>觸發 → SSE 串流 → 多 Tab 結果</h3>
+      <div class="flow">
+        <div class="flow-item">
+          <div class="flow-title">事件觸發：點擊「⚡ 模擬觸發」或 Copilot 自然語言輸入</div>
+          <div class="flow-desc">左側聊天區顯示紅色事件警告卡片，包含 <code>equipment_id</code>、<code>measurement_value</code>、<code>spc_chart_id</code> 等完整屬性</div>
+        </div>
+        <div class="flow-item">
+          <div class="flow-title">點擊「🔍 啟動診斷分析」</div>
+          <div class="flow-desc">系統呼叫 <code>POST /api/v1/diagnose/event-driven-stream</code>，開始 SSE 串流</div>
+        </div>
+        <div class="flow-item">
+          <div class="flow-title"><code>start</code> 事件：右側 Multi-Tab 工作區初始化</div>
+          <div class="flow-desc">自動建立「診斷報告」Tab，顯示事件 Header</div>
+          <div class="flow-payload">{"type":"start","skill_count":3,"event_type":"SPC_OOC_Etch_CD"}</div>
+        </div>
+        <div class="flow-item llm-step">
+          <div class="flow-title">🤖 <code>skill_done</code> × 3：每 Skill 完成立即更新 Tab</div>
+          <div class="flow-desc">卡片包含 AI 診斷結論、Plotly Trend Chart、資料表格、建議行動，不等待其他 Skill</div>
+        </div>
+        <div class="flow-item">
+          <div class="flow-title"><code>done</code>：全部完成，顯示診斷摘要</div>
+          <div class="flow-desc">底部顯示各狀態計數（正常/異常/錯誤）</div>
+        </div>
+      </div>
+
+      <div class="callout info">
+        <div class="callout-title">ℹ️ v9.1 新功能：Tab 式結果管理</div>
+        v9.1 起右側報告面板改為 <strong>Multi-Tab 工作區</strong>。每次觸發診斷會建立新 Tab，可保留多份不同批次的診斷結果並行切換對比，不再被覆蓋覆寫。
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>SPC OOC 診斷鏈路（三個 Skill 平行執行）</h3>
+      <table>
+        <thead><tr><th>Skill</th><th>MCP</th><th>DataSubject</th><th>診斷目的</th></tr></thead>
+        <tbody>
+          <tr><td>APC 異常偵測</td><td>apc parameter check</td><td>APC_Data</td><td>APC 參數是否飽和或異常</td></tr>
+          <tr><td>配方異動檢查</td><td>Check recipe data</td><td>Recipe_Data</td><td>MES/RMS 最近是否有配方修改</td></tr>
+          <tr><td>SPC 連續異常分析</td><td>Query SPC data</td><td>SPC_Chart_Data</td><td>SPC 管制圖連續超限情況 + Trend Chart</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════
+     CH4: LLM APPLICATIONS
+══════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 4</div>
+    <h2>六大 LLM 應用場景</h2>
+    <p class="lead">系統在六個關鍵節點應用 <strong>Claude Opus 4.6</strong>，涵蓋從系統建置（Builder Copilot）到運行時診斷分析的完整生命週期。</p>
+  </div>
+  <div class="chapter-body">
+
+    <div class="section">
+      <h3>LLM 應用一覽表</h3>
+      <table>
+        <thead><tr><th>#</th><th>場景</th><th>觸發時機</th><th>API 端點</th></tr></thead>
+        <tbody>
+          <tr><td>①</td><td>MCP 腳本生成</td><td>Builder：加工意圖 + 試跑</td><td><code>/mcp-definitions/{id}/try-run</code></td></tr>
+          <tr><td>②</td><td>MCP 試執行驗證</td><td>Builder：驗證腳本結果</td><td><code>/mcp-definitions/{id}/try-run</code></td></tr>
+          <tr><td>③</td><td>Auto-Map 參數對應</td><td>Skill Builder：點擊 AI Auto-Map</td><td><code>/builder/auto-map</code></td></tr>
+          <tr><td>④</td><td>建議診斷邏輯</td><td>Skill Builder：點擊 AI 建議邏輯</td><td><code>/builder/suggest-logic</code></td></tr>
+          <tr><td>⑤</td><td>驗證診斷邏輯</td><td>Skill Builder：點擊 Validate Logic</td><td><code>/builder/validate-logic</code></td></tr>
+          <tr><td>⑥</td><td>診斷報告生成</td><td>診斷執行（每個 Skill）</td><td><code>/diagnose/event-driven-stream</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h3>⑥ 診斷報告生成 — Skill 執行時序</h3>
+      <div class="flow">
+        <div class="flow-item">
+          <div class="flow-title">解析 param_mappings，呼叫 DataSubject API</div>
+          <div class="flow-desc">從事件 params 提取 MCP 輸入，呼叫對應的資料來源 API</div>
+        </div>
+        <div class="flow-item">
+          <div class="flow-title">RestrictedPython 沙箱執行 MCP 腳本</div>
+          <div class="flow-desc">輸出 Standard Payload：<code>{dataset, ui_render: {type, chart_data}}</code></div>
+        </div>
+        <div class="flow-item llm-step">
+          <div class="flow-title">🤖 Claude LLM 診斷分析</div>
+          <div class="flow-desc">diagnostic_prompt + MCP 輸出資料 → 結構化報告（status / conclusion / evidence / recommendation）</div>
+        </div>
+        <div class="flow-item">
+          <div class="flow-title">SSE skill_done 推播，前端多 Tab 即時渲染</div>
+          <div class="flow-desc">v9.1：結果追加到現有診斷 Tab；v10 Mobile：自動跳轉至報告面板</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════
+     CH5: BUILDER COPILOT
+══════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 5</div>
+    <h2>Builder Copilot — AI 輔助知識建構</h2>
+    <p class="lead">Builder Copilot 是 GlassBox 的核心創新：讓 PE 工程師通過 UI 配置（而非撰寫程式）建構新的診斷場景，AI 負責腳本生成和知識推理。</p>
+  </div>
+  <div class="chapter-body">
+
+    <div class="section">
+      <h3>MCP 建構四步驟</h3>
+      <table>
+        <thead><tr><th>步驟</th><th>操作</th><th>AI 介入</th><th>結果</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Step 1</strong></td><td>選定 DataSubject，撈取樣本資料</td><td>—</td><td>確認資料可用，取得 Output Schema</td></tr>
+          <tr><td><strong>Step 2</strong></td><td>填入自然語言加工意圖</td><td>—</td><td>意圖記錄，供 LLM 參考</td></tr>
+          <tr><td><strong>Step 3</strong></td><td>點擊「⚡ 執行試跑」</td><td>Claude 生成腳本 + 沙箱執行驗證 🤖①②</td><td>腳本生成 + 試跑通過</td></tr>
+          <tr><td><strong>Step 4</strong></td><td>確認結果，點擊「更新/建立」</td><td>—</td><td>MCP 定義完成</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h3>Skill 建構五步驟</h3>
+      <table>
+        <thead><tr><th>步驟</th><th>操作</th><th>AI 介入</th></tr></thead>
+        <tbody>
+          <tr><td>A. 基本設定</td><td>填入名稱、選擇 MCP 和 Event Type</td><td>—</td></tr>
+          <tr><td>B. Auto-Map</td><td>點擊「🤖 AI Auto-Map」</td><td>Claude 語意分析映射關係 🤖③</td></tr>
+          <tr><td>C. 確認映射</td><td>審查 LOW 信心度項目</td><td>—</td></tr>
+          <tr><td>D. 診斷邏輯</td><td>點擊「💡 AI 建議邏輯」或手動撰寫</td><td>Claude 生成 PE 等級邏輯 🤖④</td></tr>
+          <tr><td>E. 驗證邏輯</td><td>點擊「✅ Validate Logic」</td><td>Claude 確認欄位引用正確 🤖⑤</td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout purple">
+        <div class="callout-title">🔮 Builder Copilot 的設計哲學</div>
+        PE 工程師定義「查什麼資料、用什麼邏輯診斷」，Claude 負責「如何取資料、如何寫腳本、如何推理」，達到知識的<strong>可配置、可復用、可迭代</strong>。
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════
+     CH6: SKILL DEEP DIVE
+══════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 6</div>
+    <h2>Skill — 連結事件、資料與 AI 診斷的核心組件</h2>
+    <p class="lead">Skill 將事件觸發時機、資料取得方式（MCP）、LLM 診斷邏輯和後續行動定義整合為一個可配置的診斷單元。</p>
+  </div>
+  <div class="chapter-body">
+    <div class="section">
+      <h3>SPC OOC 案例：三個 Skill 的設定摘要</h3>
+      <table>
+        <thead>
+          <tr><th>Skill</th><th>綁定 Event</th><th>MCP 輸出</th><th>診斷邏輯摘要</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>APC 異常偵測</strong></td>
+            <td><code>SPC_OOC_Etch_CD</code></td>
+            <td>最近 24h APC 補償參數表格</td>
+            <td>APC 補償值趨近上/下限（飽和）→ ABNORMAL</td>
+          </tr>
+          <tr>
+            <td><strong>配方異動檢查</strong></td>
+            <td><code>SPC_OOC_Etch_CD</code></td>
+            <td>最近 12h Recipe 修改紀錄</td>
+            <td>OOC 前 12h 內有關鍵參數異動 → ABNORMAL</td>
+          </tr>
+          <tr>
+            <td><strong>SPC 連續異常分析</strong></td>
+            <td><code>SPC_OOC_Etch_CD</code></td>
+            <td>📊 Trend Chart + 100 筆量測表格</td>
+            <td>連續 ≥ 4 點超過 UCL/LCL → ABNORMAL</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════
+     CH7: COPILOT (V9 NEW)
+══════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 7</div>
+    <h2>Copilot 對話助手 <span class="new-badge v9-badge">v9 新功能</span></h2>
+    <p class="lead">v9 大幅升級對話助手，導入 <strong>Slash Command（斜槓指令）</strong> 與 <strong>LLM Slot-Filling</strong>，讓工程師以自然語言或快捷指令觸發診斷，無需點擊多個按鈕。</p>
+  </div>
+  <div class="chapter-body">
+
+    <div class="section">
+      <h3>Slash Command（斜槓指令）</h3>
+      <p>在對話輸入框輸入 <code>/</code>，系統自動彈出快捷指令選單，點擊即可觸發對應操作：</p>
+
+      <div class="slash-demo">
+        <div class="slash-demo-input">/ — 顯示可用指令</div>
+        <div class="slash-demo-menu">
+          <div class="slash-item active">
+            <span class="slash-key">/simulate</span>
+            <span class="slash-desc">模擬觸發 SPC OOC 事件，自動帶入預設參數</span>
+          </div>
+          <div class="slash-item">
+            <span class="slash-key">/diagnose</span>
+            <span class="slash-desc">對當前事件立即啟動 AI 診斷分析（SSE 串流）</span>
+          </div>
+          <div class="slash-item">
+            <span class="slash-key">/clear</span>
+            <span class="slash-desc">清除聊天紀錄，重設對話狀態</span>
+          </div>
+          <div class="slash-item">
+            <span class="slash-key">/help</span>
+            <span class="slash-desc">顯示所有可用指令說明</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout tip">
+        <div class="callout-title">✅ Mobile 使用技巧</div>
+        在手機上，鍵盤彈起時斜槓選單自動調整位置，不會被鍵盤遮蓋。在 <code>Chat</code> 視圖輸入 <code>/</code> 後，用手指輕觸指令即可執行。
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>LLM Slot-Filling — 自然語言觸發診斷</h3>
+      <p>除了 Slash Command，工程師可直接用自然語言輸入需求，Copilot 的 LLM 引擎自動解析意圖（Slot-Filling）並填入所需的事件參數：</p>
+
+      <div class="llm-card">
+        <div class="llm-card-header">
+          <div class="llm-num">🤖</div>
+          <h4>Slot-Filling 工作原理</h4>
+          <span class="llm-badge">Claude Opus 4.6</span>
+        </div>
+        <div class="llm-card-body">
+          <p><strong>使用者輸入：</strong></p>
+          <p><em>「我想查 TETCH01 PM2 腔體最近的 SPC 異常」</em></p>
+          <p style="margin-top:10px;"><strong>Claude 解析後的 JSON（內部結構）：</strong></p>
+          <pre><span class="c">// Copilot LLM 回傳的 Slot-Filling JSON</span>
+{
+  <span class="s">"intent"</span>: <span class="s">"diagnose"</span>,
+  <span class="s">"is_ready"</span>: <span class="k">true</span>,
+  <span class="s">"reply_message"</span>: <span class="s">"已識別設備 TETCH01 PM2，準備啟動 SPC OOC 診斷..."</span>,
+  <span class="s">"tab_title"</span>: <span class="s">"TETCH01 PM2 SPC OOC"</span>,
+  <span class="s">"event_type_name"</span>: <span class="s">"SPC_OOC_Etch_CD"</span>,
+  <span class="s">"event_params"</span>: {
+    <span class="s">"equipment_id"</span>: <span class="s">"TETCH01"</span>,
+    <span class="s">"chamber_id"</span>: <span class="s">"PM2"</span>
+  }
+}</pre>
+          <p>當 <code>is_ready: true</code> 時，系統自動在 Multi-Tab 工作區建立新 Tab 並啟動診斷；<br>
+          當 <code>is_ready: false</code> 時，Copilot 回覆 <code>reply_message</code> 向使用者確認缺少的參數（如：「請問是哪條 SPC 管制圖？」）。</p>
+        </div>
+      </div>
+
+      <div class="callout purple">
+        <div class="callout-title">🔮 Copilot 的設計哲學</div>
+        傳統診斷需要按下「模擬觸發」→「啟動診斷」兩個按鈕，且必須知道事件屬性的精確格式。Copilot 讓工程師以<strong>對話方式下達指令</strong>，LLM 負責理解意圖、提取參數、確認是否足夠，再自動執行。即使不熟悉系統操作，也能快速觸發診斷。
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Copilot 狀態流程</h3>
+      <div class="flow">
+        <div class="flow-item">
+          <div class="flow-title">使用者輸入自然語言或 Slash Command</div>
+          <div class="flow-desc">Copilot 將輸入送至 Claude API 進行意圖分析</div>
+        </div>
+        <div class="flow-item llm-step">
+          <div class="flow-title">🤖 Claude 解析意圖 + Slot-Filling</div>
+          <div class="flow-desc">回傳 JSON 結構：intent / is_ready / reply_message / event_params</div>
+        </div>
+        <div class="flow-item">
+          <div class="flow-title">is_ready = false：詢問缺少的參數</div>
+          <div class="flow-desc">在聊天區顯示 reply_message，引導使用者補充資訊</div>
+        </div>
+        <div class="flow-item">
+          <div class="flow-title">is_ready = true：自動建立 Tab + 啟動診斷</div>
+          <div class="flow-desc">Multi-Tab 工作區新增「{tab_title}」Tab，立即呼叫 SSE 診斷 API；Mobile 自動跳轉至報告面板</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════
+     CH8: MULTI-TAB WORKSPACE (V9.1 NEW)
+══════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 8</div>
+    <h2>Multi-Tab 工作區 <span class="new-badge v9-badge">v9.1 新功能</span></h2>
+    <p class="lead">v9.1 將右側報告面板升級為 <strong>Multi-Tab 工作區（Workspace）</strong>，讓多份診斷報告可同時存在，工程師在不同批次之間切換對比更方便。</p>
+  </div>
+  <div class="chapter-body">
+
+    <div class="section">
+      <h3>Tab 工作區示意</h3>
+      <div class="tab-bar-demo">
+        <div class="tab-bar">
+          <div class="tab-item active">
+            <span>📊 TETCH01 PM2</span>
+            <span class="tab-close">×</span>
+          </div>
+          <div class="tab-item">
+            <span>📊 TETCH02 PM3</span>
+            <span class="tab-close">×</span>
+          </div>
+          <div class="tab-item">
+            <span>📊 SPC OOC #3</span>
+            <span class="tab-close">×</span>
+          </div>
+        </div>
+        <div class="tab-content-demo">
+          <strong>TETCH01 PM2 — SPC OOC 診斷報告</strong><br>
+          APC 異常偵測：<span style="color:#dc2626;font-weight:700;">ABNORMAL</span> — APC 補償值已達飽和上限 &nbsp;|&nbsp;
+          配方異動：<span style="color:#16a34a;font-weight:700;">NORMAL</span> — 無近期配方修改 &nbsp;|&nbsp;
+          SPC 趨勢：<span style="color:#dc2626;font-weight:700;">ABNORMAL</span> — 連續 5 點超過 UCL
+        </div>
+      </div>
+
+      <p>每個 Tab 代表一個完整的診斷工作，包含：</p>
+      <table>
+        <thead><tr><th>Tab 區塊</th><th>內容</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Tab 標題</strong></td><td>由 Copilot 的 <code>tab_title</code> 或預設名稱生成（如「SPC OOC #1」）</td></tr>
+          <tr><td><strong>Skill 卡片</strong></td><td>各 Skill 的診斷結果（狀態、AI 結論、Evidence、建議行動）</td></tr>
+          <tr><td><strong>Plotly 圖表</strong></td><td>SPC Trend Chart、APC 參數趨勢等視覺化佐證（互動式，可 hover 看數值）</td></tr>
+          <tr><td><strong>資料表格</strong></td><td>MCP 查詢結果的原始資料（支援橫向捲動），最多顯示 15 筆</td></tr>
+          <tr><td><strong>摘要列</strong></td><td>所有 Skill 完成後，顯示整體診斷結果統計（正常 N / 異常 N / 錯誤 N）</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h3>Tab 管理機制</h3>
+      <div class="two-col">
+        <div class="col-box">
+          <h4>🆕 建立新 Tab</h4>
+          <ul style="font-size:13px; margin-top:8px;">
+            <li>點擊「🔍 啟動診斷分析」按鈕</li>
+            <li>Copilot <code>is_ready=true</code> 後自動建立</li>
+            <li>Slash Command <code>/diagnose</code> 執行時</li>
+          </ul>
+        </div>
+        <div class="col-box">
+          <h4>❌ 關閉 Tab</h4>
+          <ul style="font-size:13px; margin-top:8px;">
+            <li>點擊 Tab 右側的 <strong>×</strong> 關閉按鈕</li>
+            <li>最後一個 Tab 關閉後顯示空白歡迎畫面</li>
+            <li>切換 Tab 不影響其他 Tab 的診斷資料</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout info">
+        <div class="callout-title">ℹ️ v10 Mobile 整合</div>
+        當 Tab 在 Mobile 裝置上建立時（Copilot 回傳 <code>is_ready=true</code>），系統自動將視圖切換至 <strong>報告面板（Workspace）</strong>，讓使用者即時看到新建立的診斷結果，無需手動切換。
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════
+     CH9: MOBILE-FIRST (V10 NEW)
+══════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 9</div>
+    <h2>Mobile-First 響應式佈局 <span class="new-badge v10-badge">v10 新功能</span></h2>
+    <p class="lead">v10 完整支援行動裝置，在 768px 以下螢幕自動切換為全螢幕單視圖，搭配手勢滑動操作，讓工程師隨時隨地掌握製程狀態。</p>
+  </div>
+  <div class="chapter-body">
+
+    <div class="section">
+      <h3>響應式佈局策略</h3>
+      <div class="layout-demo">
+        <div class="layout-box">
+          <div class="layout-box-title">🖥️ Desktop（寬度 &gt; 768px）</div>
+          <div class="layout-frame">
+┌──────────────────────────────────┐
+│ <span class="lf-sidebar">側欄</span> │ <span class="lf-chat">Chat 對話（30%）</span> │ <span class="lf-ws">Workspace（70%）</span> │
+│      │                  │                │
+│  🔬  │  💬 聊天訊息...  │  📑 Tab 1      │
+│  🔧  │  🎯 事件卡片     │  ├ Skill 1...  │
+│  🤖  │  ⏳ 診斷中...    │  ├ 📊 圖表     │
+│      │                  │  └ 📋 摘要     │
+└──────────────────────────────────┘</div>
+        </div>
+        <div class="layout-box">
+          <div class="layout-box-title">📱 Mobile（寬度 ≤ 768px）</div>
+          <div class="layout-frame">
+┌──────────────────┐
+│ <span class="lf-toggle">💬 對話 │ 📊 報告</span>     │
+├──────────────────┤
+│                  │
+│ [當前視圖]       │
+│ Chat 或 Workspace│
+│ 全螢幕顯示       │
+│                  │
+│ ← 滑動切換 →    │
+└──────────────────┘</div>
+        </div>
+      </div>
+
+      <table>
+        <thead><tr><th>斷點</th><th>佈局</th><th>導覽方式</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>Desktop</strong><br>&gt; 768px</td>
+            <td>左側欄（深藍）+ 30% Chat + 70% Workspace 三欄並排</td>
+            <td>滑鼠點擊、頂部 Tab Bar</td>
+          </tr>
+          <tr>
+            <td><strong>Mobile</strong><br>≤ 768px</td>
+            <td>頂部切換列 + 全螢幕單視圖（Chat 或 Workspace 擇一）</td>
+            <td>頂部 Toggle 按鈕、手勢左右滑動</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h3>Mobile 頂部切換列（Toggle Bar）</h3>
+      <p>Mobile 模式下，頂部顯示兩個切換按鈕，替代桌面版的並排佈局：</p>
+
+      <div class="tab-bar-demo">
+        <div class="tab-bar" style="background: white; border-bottom: 1px solid #e2e8f0;">
+          <div style="flex:1; text-align:center; padding: 10px; background: #eff6ff; border-radius: 8px; margin: 4px; font-size: 13px; font-weight: 700; color: #1d4ed8;">
+            💬 對話
+          </div>
+          <div style="width: 1px; background: #e2e8f0; margin: 8px 4px;"></div>
+          <div style="flex:1; text-align:center; padding: 10px; border-radius: 8px; margin: 4px; font-size: 13px; font-weight: 500; color: #64748b;">
+            📊 報告
+          </div>
+        </div>
+        <div class="tab-content-demo">
+          點擊「💬 對話」切換至聊天視圖（Copilot / 事件觸發）<br>
+          點擊「📊 報告」切換至工作區視圖（Multi-Tab 診斷報告）
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>手勢滑動（Swipe Gestures）</h3>
+      <table>
+        <thead><tr><th>手勢</th><th>當前視圖</th><th>切換結果</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>向左滑動</strong> ←</td>
+            <td>Chat 對話</td>
+            <td>切換至 Workspace 報告</td>
+          </tr>
+          <tr>
+            <td><strong>向右滑動</strong> →</td>
+            <td>Workspace 報告</td>
+            <td>切換回 Chat 對話</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout mobile-callout">
+        <div class="callout-title">📱 手勢辨識技術細節</div>
+        滑動辨識使用原生 Touch Events（非第三方套件）：<br>
+        ① 最小滑動距離 &gt; 50px（避免誤觸）<br>
+        ② 橫向偏移量 / 縱向偏移量 ≥ 1.5（區分滑動 vs. 頁面捲動）<br>
+        ③ CSS transform + transition 280ms 動畫，流暢無跳閃
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>AI 結果自動跳轉（Auto-Switch）</h3>
+      <p>Mobile 模式下，當 AI 完成診斷並建立新的 Workspace Tab 時，系統<strong>自動將視圖切換至「📊 報告」</strong>，讓工程師立刻看到剛產生的圖表，無需手動切換：</p>
+
+      <div class="flow">
+        <div class="flow-item">
+          <div class="flow-title">工程師在 Chat 視圖輸入指令或點擊「啟動診斷」</div>
+          <div class="flow-desc">系統開始 SSE 串流，Chat 視圖顯示進度訊息（⏳ 正在執行...）</div>
+        </div>
+        <div class="flow-item llm-step">
+          <div class="flow-title">🤖 AI 完成首個 Skill，建立 Workspace Tab</div>
+          <div class="flow-desc">系統自動呼叫 <code>_switchMobileView('workspace')</code></div>
+        </div>
+        <div class="flow-item">
+          <div class="flow-title">畫面自動滑動至「📊 報告」視圖</div>
+          <div class="flow-desc">工程師看到即時渲染的診斷卡片 + Plotly 圖表，無需手動操作</div>
+        </div>
+        <div class="flow-item">
+          <div class="flow-title">右滑可返回 Chat 繼續輸入下一個查詢</div>
+          <div class="flow-desc">對話歷史完整保留，可繼續發送新指令</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Mobile 元件優化細項</h3>
+      <table>
+        <thead><tr><th>元件</th><th>優化內容</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>資料表格</strong></td>
+            <td>超出螢幕寬度自動水平捲動（<code>overflow-x: auto</code>），不破版</td>
+          </tr>
+          <tr>
+            <td><strong>Plotly 圖表</strong></td>
+            <td>寬度 100% 自適應，支援觸控縮放與 hover tooltip（長按顯示數值）</td>
+          </tr>
+          <tr>
+            <td><strong>輸入框</strong></td>
+            <td><code>font-size: 16px</code> 防止 iOS Safari 自動縮放畫面</td>
+          </tr>
+          <tr>
+            <td><strong>Slash 選單</strong></td>
+            <td>鍵盤彈出時自動調整位置，確保不被遮擋</td>
+          </tr>
+          <tr>
+            <td><strong>側欄（Sidebar）</strong></td>
+            <td>Mobile 下自動隱藏（<code>display: none</code>），使用頂部 Toggle 替代</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════
+     VERSION HISTORY
+══════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Appendix</div>
+    <h2>版本歷史</h2>
+    <p class="lead">GlassBox AIoPs 各版本演進記錄。</p>
+  </div>
+  <div class="chapter-body">
+    <div class="section">
+      <table>
+        <thead><tr><th>版本</th><th>日期</th><th>主要功能</th></tr></thead>
+        <tbody>
+          <tr><td><strong>v1–v3</strong></td><td>Phase 1–3</td><td>FastAPI 基礎服務、JWT Auth、AI Agent Loop、MCP Event Triage、SSE 串流</td></tr>
+          <tr><td><strong>v4–v5</strong></td><td>Phase 4–5</td><td>Glass Box SPA 前端、Vite + React + Tailwind 重建</td></tr>
+          <tr><td><strong>v6</strong></td><td>Phase 6</td><td>半導體蝕刻製程 Domain（SPC_OOC_Etch_CD）、Builder API（Auto-Map、Validate Logic）</td></tr>
+          <tr><td><strong>v8</strong></td><td>Phase 8</td><td>Light Theme 重設、SSE 漸進式串流診斷、30/70 分割佈局</td></tr>
+          <tr><td><strong>v8.11</strong></td><td>Phase 8.11</td><td>六大 LLM 應用整合、MCP 腳本生成 + 驗證完整流程、光主題全覆蓋</td></tr>
+          <tr><td><strong>v9</strong></td><td>Phase 9</td><td>Copilot 對話助手升級：Slash Command（/simulate, /diagnose）+ LLM Slot-Filling</td></tr>
+          <tr><td><strong>v9.1</strong></td><td>Phase 9.1</td><td>Multi-Tab Workspace：右側報告面板多 Tab 化，可同時保留多份診斷結果</td></tr>
+          <tr><td><strong>v10</strong></td><td>Phase 10</td><td>Mobile-First 響應式：768px 斷點、全螢幕單視圖、手勢滑動、AI 自動跳轉</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
