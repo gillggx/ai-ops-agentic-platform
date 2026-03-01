@@ -249,15 +249,23 @@
                 <span data-i18n="sim-trigger">⚡ 模擬觸發：TETCH01 PM2 發生 SPC OOC</span>
               </button>
 
-              <div class="flex gap-2 items-end">
+              <!-- Copilot tool tag (shown when a tool is pre-selected via slash menu) -->
+              <div id="copilot-tool-tag-wrap" class="hidden"></div>
+
+              <!-- Input row — wrapper has position:relative so slash menu can pop above -->
+              <div class="flex gap-2 items-end" style="position:relative;">
+                <!-- Slash command popup — rendered by JS into #slash-menu-anchor -->
+                <div id="slash-menu-anchor" style="position:absolute;bottom:100%;left:0;right:48px;"></div>
+
                 <textarea id="issue-input"
-                  placeholder="描述症狀，例如：系統 CPU 突然飆升..."
+                  placeholder="描述症狀，或輸入 '/' 呼叫工具... 例如：我想查 N97A45.00 在 3200 站點的 APC 資料"
                   class="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2.5
                          text-sm text-slate-900 resize-none focus:outline-none focus:border-indigo-400
                          placeholder-slate-400 leading-relaxed"
                   rows="3"
+                  oninput="handleInputChange(event)"
                   onkeydown="handleInputKey(event)"></textarea>
-                <button id="send-btn" onclick="sendDiagnosis()"
+                <button id="send-btn" onclick="_sendCopilotMessage()"
                   class="flex-shrink-0 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-200
                          disabled:text-slate-400 rounded-xl p-3 transition-colors self-end">
                   <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -270,35 +278,29 @@
             </div>
           </div>
 
-          <!-- Report Panel (RIGHT, 70% — always visible, event-driven layout) -->
+          <!-- Report Panel (RIGHT, 70% — Multi-Tab Workspace) -->
           <div id="report-panel"
                class="flex flex-col border-l border-slate-200 overflow-hidden bg-white"
                style="flex:1;min-width:0;">
+            <!-- Tab bar: dynamic workspace tabs injected here by JS -->
             <div id="tab-bar"
               class="flex-shrink-0 flex items-center gap-1 px-4 py-2
                      bg-white border-b border-slate-200 overflow-x-auto">
-              <button id="tab-btn-summary" onclick="switchTab('summary')"
-                class="tab-btn active-tab whitespace-nowrap">
-                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round"
+              <span id="ws-empty-hint"
+                class="text-xs text-slate-400 italic px-1 py-1 select-none pointer-events-none whitespace-nowrap">
+                觸發事件或呼叫工具後，分析頁籤將自動在此開啟
+              </span>
+            </div>
+            <!-- Tab content: dynamic panels + permanent placeholder -->
+            <div id="tab-content" class="flex-1 flex flex-col min-h-0 relative">
+              <div id="workspace-placeholder"
+                class="flex flex-col items-center justify-center flex-1 text-slate-400">
+                <svg class="w-14 h-14 mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
                     d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586
                        a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                 </svg>
-                <span data-i18n="summary-tab">總結報告</span>
-              </button>
-            </div>
-            <div id="tab-content" class="flex-1 flex flex-col min-h-0">
-              <div id="panel-summary" class="tab-panel flex flex-col flex-1 min-h-0">
-                <div id="summary-placeholder"
-                  class="flex flex-col items-center justify-center flex-1 text-slate-400">
-                  <svg class="w-14 h-14 mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
-                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586
-                         a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                  </svg>
-                  <p class="text-sm" data-i18n="report-placeholder">診斷完成後，AI 報告將呈現在此</p>
-                </div>
-                <div id="summary-content" class="hidden"></div>
+                <p class="text-sm" data-i18n="report-placeholder">診斷完成後，AI 報告將呈現在此</p>
               </div>
             </div>
           </div>

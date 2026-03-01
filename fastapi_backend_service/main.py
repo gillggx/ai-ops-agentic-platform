@@ -184,6 +184,7 @@ _SEED_EVENT_TYPES = [
             {"name": "ooc_parameter",         "type": "string",  "required": True,  "description": "超出管制界限的量測參數名稱 (e.g., CD_Mean)"},
             {"name": "rule_violated",         "type": "string",  "required": True,  "description": "違反的 SPC 管制規則 (e.g., Western Electric Rule 1)"},
             {"name": "consecutive_ooc_count", "type": "number",  "required": True,  "description": "連續超出管制的點位次數"},
+            {"name": "SPC_CHART",             "type": "string",  "required": True,  "description": "SPC 圖表名稱，對應 DataSubject 查詢參數 chart_name (e.g., CD)"},
         ],
     },
 ]

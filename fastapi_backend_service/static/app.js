@@ -20,7 +20,19 @@
 // ══════════════════════════════════════════════════════════════
 let _token       = localStorage.getItem('glassbox_token');
 let _isStreaming = false;
-let _toolTabs    = {};  // key: toolName → { tabEl, panelEl }
+let _toolTabs    = {};  // key: toolName → { tabEl, panelEl } (legacy non-streaming flow)
+
+// Phase 9.1 — Multi-Tab Workspace state
+let _workspaceTabs = {};   // { tabId: {btn, panel} }
+let _activeTabId   = null;
+
+// Phase 9 — Copilot state
+let _slotContext     = {};     // accumulated params for current slot-filling session
+let _slotToolId      = null;   // tool_id being filled
+let _slotToolType    = null;   // 'mcp' | 'skill'
+let _copilotHistory  = [];     // [{role, content}] conversation history
+let _slashMenuVisible = false;
+let _slashMenuItems  = null;   // cached {mcps, skills} for slash menu
 
 // ══════════════════════════════════════════════════════════════
 // i18n
@@ -138,6 +150,7 @@ const _SPC_OOC_EVENT = {
     chamber_id:       'CH1',
     operation_number: '3200',
     ooc_parameter:    'CD_Mean',
+    SPC_CHART:        'CD',
   },
 };
 
@@ -299,49 +312,48 @@ async function _launchEventDiagnosis() {
  * Clears previous skill cards; returns the cards container element.
  */
 function _initReportPanel(payload) {
-  document.getElementById('summary-placeholder').classList.add('hidden');
-  const sc = document.getElementById('summary-content');
-  sc.classList.remove('hidden');
+  const tabId  = 'evt-current';
+  const evtId  = payload.event_id || 'Event';
+
+  // Replace any existing event tab (re-trigger resets the tab)
+  if (_workspaceTabs[tabId]) {
+    _workspaceTabs[tabId].btn.remove();
+    _workspaceTabs[tabId].panel.remove();
+    delete _workspaceTabs[tabId];
+  }
 
   const paramsChips = Object.entries(payload.params || {}).map(([k, v]) =>
     `<span class="inline-flex items-center gap-1 bg-red-50 border border-red-200
                   rounded px-2 py-0.5 font-mono text-xs text-red-800">
-      <span class="text-red-500">${_escapeHtml(k)}:</span>${_escapeHtml(v)}
+      <span class="text-red-500">${_escapeHtml(k)}:</span>${_escapeHtml(String(v))}
     </span>`).join('');
 
-  sc.innerHTML = `
-    <div class="px-6 pt-5 pb-3 border-b border-slate-200 flex-shrink-0">
-      <div class="flex items-center gap-3 mb-2">
-        <span class="text-base font-bold text-red-700">🚨 ${_escapeHtml(payload.event_type || '')}</span>
-        <span class="text-xs font-mono text-slate-400">${_escapeHtml(payload.event_id || '')}</span>
+  const contentHtml = `
+    <div class="flex flex-col h-full overflow-hidden">
+      <div class="px-6 pt-5 pb-3 border-b border-slate-200 flex-shrink-0 bg-slate-50">
+        <div class="flex items-center gap-3 mb-2">
+          <span class="text-base font-bold text-red-700">🚨 ${_escapeHtml(payload.event_type || '')}</span>
+          <span class="text-xs font-mono text-slate-400">${_escapeHtml(evtId)}</span>
+        </div>
+        <div class="flex gap-2 flex-wrap">${paramsChips}</div>
       </div>
-      <div class="flex gap-2 flex-wrap">${paramsChips}</div>
-    </div>
-    <div id="diagnosis-summary" class="hidden diagnosis-summary-bar flex-shrink-0"></div>
-    <div id="skill-tab-bar"
-         class="flex flex-shrink-0 border-b border-slate-200 bg-white overflow-x-auto px-2 pt-1 min-h-[42px]"></div>
-    <div id="skill-tab-panels" class="flex-1 overflow-y-auto"></div>`;
+      <div id="diagnosis-summary" class="hidden diagnosis-summary-bar flex-shrink-0"></div>
+      <div id="skill-tab-bar"
+           class="flex flex-shrink-0 border-b border-slate-200 bg-white overflow-x-auto px-2 pt-1 min-h-[42px]"></div>
+      <div id="skill-tab-panels" class="flex-1 overflow-y-auto"></div>
+    </div>`;
 
-  // Override summary-content padding (set via innerHTML, not class)
-  sc.className = 'flex flex-col h-full overflow-hidden';
-
-  switchTab('summary');
+  _createWorkspaceTab(tabId, `🚨 ${evtId}`, contentHtml);
+  _showReportPanel();
 }
 
 function _renderPipelineError(msg) {
-  const sc = document.getElementById('summary-content');
-  if (!sc.classList.contains('hidden')) {
-    // Append error below existing cards if any
-    const container = sc.querySelector('#skill-cards-container');
-    if (container) {
-      container.insertAdjacentHTML('beforeend',
-        `<div class="p-4 text-red-600 bg-red-50 border border-red-200 rounded-lg text-sm">❌ 管線執行失敗：${_escapeHtml(msg)}</div>`);
-      return;
-    }
+  // Append error into the active event workspace tab
+  const panels = document.getElementById('skill-tab-panels');
+  if (panels) {
+    panels.insertAdjacentHTML('beforeend',
+      `<div class="m-4 p-4 text-red-600 bg-red-50 border border-red-200 rounded-lg text-sm">❌ 管線執行失敗：${_escapeHtml(msg)}</div>`);
   }
-  sc.classList.remove('hidden');
-  sc.innerHTML = `<div class="p-6 text-red-600">❌ 管線執行失敗：${_escapeHtml(msg)}</div>`;
-  document.getElementById('summary-placeholder').classList.add('hidden');
 }
 
 /**
@@ -411,7 +423,7 @@ function _renderDiagnosisSummary(skills) {
           <span class="text-slate-700 text-xs leading-snug">${_escapeHtml(s.skill_name)}</span>
         </div>
         <span class="text-slate-600 text-xs leading-relaxed">${_escapeHtml(s.conclusion || s.error || '')}</span>
-        <span class="text-blue-800 text-xs leading-relaxed italic">${_escapeHtml(s.human_recommendation || '—')}</span>
+        <span class="text-blue-800 text-xs leading-relaxed italic">${s.status !== 'NORMAL' ? _escapeHtml(s.human_recommendation || '—') : '—'}</span>
       </div>`;
   }).join('');
 
@@ -483,7 +495,7 @@ function _renderSkillBlock(s) {
     ? `<ul class="pipeline-evidence-list">${(s.evidence || []).map(e => `<li>${_escapeHtml(e)}</li>`).join('')}</ul>`
     : '';
 
-  const recommendHtml = s.human_recommendation
+  const recommendHtml = s.human_recommendation && s.status !== 'NORMAL'
     ? `<div class="pipeline-recommendation">💡 <strong>建議動作：</strong>${_escapeHtml(s.human_recommendation)}</div>`
     : '';
 
@@ -639,10 +651,12 @@ function _showMainApp(username) {
 // ══════════════════════════════════════════════════════════════
 
 function switchTab(name) {
-  // Deactivate all tabs and panels
+  // Try workspace tab first (Phase 9.1)
+  if (_workspaceTabs[name]) { _activateWorkspaceTab(name); return; }
+
+  // Fallback: legacy element-based switching (for _createToolTab / old SSE flow)
   document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active-tab'));
   document.querySelectorAll('.tab-panel').forEach(el => el.classList.add('hidden'));
-
   const tabEl   = document.getElementById(`tab-btn-${name}`);
   const panelEl = document.getElementById(`panel-${name}`);
   if (tabEl)   tabEl.classList.add('active-tab');
@@ -991,22 +1005,103 @@ async function sendDiagnosis() {
 }
 
 // ══════════════════════════════════════════════════════════════
+// Multi-Tab Workspace management (right 70% panel)
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * Create a new workspace tab + panel and auto-activate it.
+ * tabId     : unique string key (e.g. 'evt-current', 'mcp-1715000000')
+ * title     : HTML-safe display string for the tab label
+ * contentHtml : inner HTML for the panel (already escaped where needed)
+ * Returns { btn, panel }.
+ */
+function _createWorkspaceTab(tabId, title, contentHtml) {
+  // Hide placeholder / empty hint
+  document.getElementById('workspace-placeholder')?.classList.add('hidden');
+  document.getElementById('ws-empty-hint')?.classList.add('hidden');
+
+  // ── Tab button ──────────────────────────────────────────────
+  const btn = document.createElement('button');
+  btn.id        = `ws-tab-btn-${tabId}`;
+  btn.className = 'tab-btn ws-tab whitespace-nowrap';
+  btn.innerHTML =
+    `<span class="ws-tab-label">${title}</span>` +
+    `<span class="ws-close-btn" title="關閉"` +
+    ` onclick="_closeWorkspaceTab('${tabId.replace(/'/g, "\\'")}');event.stopPropagation()">×</span>`;
+  btn.onclick = () => _activateWorkspaceTab(tabId);
+  document.getElementById('tab-bar').appendChild(btn);
+
+  // ── Panel ────────────────────────────────────────────────────
+  const panel = document.createElement('div');
+  panel.id        = `ws-panel-${tabId}`;
+  panel.className = 'tab-panel hidden flex flex-col flex-1 min-h-0';
+  panel.innerHTML = contentHtml;
+  document.getElementById('tab-content').appendChild(panel);
+
+  _workspaceTabs[tabId] = { btn, panel };
+  _activateWorkspaceTab(tabId);
+  return { btn, panel };
+}
+
+/** Activate a workspace tab (deactivates all others). */
+function _activateWorkspaceTab(tabId) {
+  Object.values(_workspaceTabs).forEach(({ btn, panel }) => {
+    btn.classList.remove('active-tab');
+    panel.classList.add('hidden');
+  });
+  const entry = _workspaceTabs[tabId];
+  if (!entry) return;
+  entry.btn.classList.add('active-tab');
+  entry.panel.classList.remove('hidden');
+  _activeTabId = tabId;
+}
+
+/**
+ * Close a workspace tab. If it was the active tab, focus the most recent
+ * remaining tab; if none remain, show the workspace placeholder again.
+ * Exposed globally so the inline onclick handler can call it.
+ */
+function _closeWorkspaceTab(tabId) {
+  const entry = _workspaceTabs[tabId];
+  if (!entry) return;
+  const wasActive = _activeTabId === tabId;
+  entry.btn.remove();
+  entry.panel.remove();
+  delete _workspaceTabs[tabId];
+
+  const remaining = Object.keys(_workspaceTabs);
+  if (remaining.length > 0) {
+    if (wasActive) _activateWorkspaceTab(remaining[remaining.length - 1]);
+  } else {
+    _activeTabId = null;
+    document.getElementById('workspace-placeholder')?.classList.remove('hidden');
+    document.getElementById('ws-empty-hint')?.classList.remove('hidden');
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
 // Session reset (before each new diagnosis)
 // ══════════════════════════════════════════════════════════════
 
 function _resetSession() {
-  // Remove dynamic tool tabs and panels
-  document.querySelectorAll('.tab-btn:not(#tab-btn-summary)').forEach(el => el.remove());
-  document.querySelectorAll('.tab-panel:not(#panel-summary)').forEach(el => el.remove());
-  _toolTabs = {};
+  // Clear all workspace tabs
+  Object.keys(_workspaceTabs).forEach(id => {
+    _workspaceTabs[id].btn.remove();
+    _workspaceTabs[id].panel.remove();
+  });
+  _workspaceTabs = {};
+  _activeTabId   = null;
+  _toolTabs      = {};
 
-  // Reset summary panel
-  document.getElementById('summary-placeholder').classList.remove('hidden');
-  const sc = document.getElementById('summary-content');
-  sc.innerHTML = '';
-  sc.classList.add('hidden');
+  // Show workspace placeholder + empty hint
+  document.getElementById('workspace-placeholder')?.classList.remove('hidden');
+  document.getElementById('ws-empty-hint')?.classList.remove('hidden');
 
-  switchTab('summary');
+  // Reset copilot slot state (keep history for context continuity)
+  _slotContext  = {};
+  _slotToolId   = null;
+  _slotToolType = null;
+  _clearSlashTool();
 
   // Hide report panel for new diagnosis
   _hideReportPanel();
@@ -1039,7 +1134,11 @@ function _setStatus(state) {
 function handleInputKey(event) {
   if (event.ctrlKey && event.key === 'Enter') {
     event.preventDefault();
-    sendDiagnosis();
+    _sendCopilotMessage();
+  }
+  // Close slash menu on Escape
+  if (event.key === 'Escape') {
+    _hideSlashMenu();
   }
 }
 
@@ -1049,6 +1148,331 @@ function _escapeHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+// ══════════════════════════════════════════════════════════════
+// Phase 9 — Copilot: Slash Menu, Slot Filling, Direct Invocation
+// ══════════════════════════════════════════════════════════════
+
+/** Called on every keystroke in the chat textarea. */
+function handleInputChange(event) {
+  const val = event.target.value;
+  if (val === '/') {
+    _showSlashMenu();
+  } else if (!val.startsWith('/')) {
+    _hideSlashMenu();
+  }
+}
+
+/** Fetch tools from API and render slash popup above the textarea. */
+async function _showSlashMenu() {
+  _hideSlashMenu();
+  _slashMenuVisible = true;
+
+  const anchor = document.getElementById('slash-menu-anchor');
+  if (!anchor) return;
+
+  anchor.innerHTML = '<div class="slash-menu"><div class="p-3 text-xs text-slate-400">載入工具清單...</div></div>';
+
+  if (!_slashMenuItems) {
+    try {
+      const [mcpRes, skillRes] = await Promise.all([
+        fetch('/api/v1/mcp-definitions',   { headers: { Authorization: `Bearer ${_token}` } }),
+        fetch('/api/v1/skill-definitions', { headers: { Authorization: `Bearer ${_token}` } }),
+      ]);
+      const mcpJson   = await mcpRes.json();
+      const skillJson = await skillRes.json();
+      _slashMenuItems = {
+        mcps:   mcpJson.data   || [],
+        skills: skillJson.data || [],
+      };
+    } catch {
+      if (anchor) anchor.innerHTML = '<div class="slash-menu"><div class="p-3 text-xs text-red-400">工具清單載入失敗</div></div>';
+      return;
+    }
+  }
+
+  if (!_slashMenuVisible) return;  // user navigated away while loading
+
+  const { mcps, skills } = _slashMenuItems;
+  let html = '<div class="slash-menu">';
+
+  if (mcps.length) {
+    html += '<div class="slash-menu-section">🔍 MCP 資料查詢工具</div>';
+    for (const m of mcps) {
+      const desc = (m.processing_intent || m.name || '').slice(0, 60);
+      html += `<div class="slash-menu-item" onclick="_selectSlashTool(${m.id},'mcp',${JSON.stringify(m.name)},${JSON.stringify(desc)})">
+        <span class="slash-menu-badge slash-mcp-badge">MCP</span>
+        <div class="slash-menu-item-content">
+          <div class="slash-menu-item-name">${_escapeHtml(m.name)}</div>
+          <div class="slash-menu-item-desc">${_escapeHtml(desc)}</div>
+        </div>
+      </div>`;
+    }
+  }
+
+  if (skills.length) {
+    html += '<div class="slash-menu-section">🧠 Skill 智能診斷技能</div>';
+    for (const s of skills) {
+      const desc = (s.description || s.name || '').slice(0, 60);
+      html += `<div class="slash-menu-item" onclick="_selectSlashTool(${s.id},'skill',${JSON.stringify(s.name)},${JSON.stringify(desc)})">
+        <span class="slash-menu-badge slash-skill-badge">Skill</span>
+        <div class="slash-menu-item-content">
+          <div class="slash-menu-item-name">${_escapeHtml(s.name)}</div>
+          <div class="slash-menu-item-desc">${_escapeHtml(desc)}</div>
+        </div>
+      </div>`;
+    }
+  }
+
+  html += '</div>';
+  if (anchor) anchor.innerHTML = html;
+}
+
+function _hideSlashMenu() {
+  _slashMenuVisible = false;
+  const anchor = document.getElementById('slash-menu-anchor');
+  if (anchor) anchor.innerHTML = '';
+}
+
+/** Called when user clicks a tool in the slash menu. */
+function _selectSlashTool(toolId, toolType, toolName, desc) {
+  _hideSlashMenu();
+  _slotToolId   = toolId;
+  _slotToolType = toolType;
+  _slotContext  = {};  // reset params for new tool
+
+  // Show "tool selected" tag above the input
+  const wrap = document.getElementById('copilot-tool-tag-wrap');
+  if (wrap) {
+    const badgeCls = toolType === 'mcp' ? 'slash-mcp-badge' : 'slash-skill-badge';
+    const label    = toolType === 'mcp' ? '🔍 MCP' : '🧠 Skill';
+    wrap.innerHTML = `<div class="copilot-tool-tag">
+      <span class="slash-menu-badge ${badgeCls}">${label}</span>
+      <span>${_escapeHtml(toolName)}</span>
+      <span class="remove-tag" onclick="_clearSlashTool()" title="取消選擇">×</span>
+    </div>`;
+    wrap.classList.remove('hidden');
+  }
+
+  const input = document.getElementById('issue-input');
+  if (input) { input.value = ''; input.focus(); }
+}
+
+function _clearSlashTool() {
+  _slotToolId   = null;
+  _slotToolType = null;
+  _slotContext  = {};
+  const wrap = document.getElementById('copilot-tool-tag-wrap');
+  if (wrap) { wrap.innerHTML = ''; wrap.classList.add('hidden'); }
+}
+
+/** Primary send handler — replaces raw sendDiagnosis() for normal chat. */
+async function _sendCopilotMessage() {
+  if (_isStreaming) return;
+
+  const input   = document.getElementById('issue-input');
+  const message = input.value.trim();
+  if (!message) return;
+
+  input.value  = '';
+  _isStreaming = true;
+  _setInputLocked(true);
+  _setStatus('streaming');
+  _hideSlashMenu();
+
+  _addChatBubble('user', _escapeHtml(message));
+  _copilotHistory.push({ role: 'user', content: message });
+
+  // Build slot context: include pre-selected tool hint
+  const slotCtx = { ..._slotContext };
+  if (_slotToolId) {
+    slotCtx._selected_tool_id   = _slotToolId;
+    slotCtx._selected_tool_type = _slotToolType;
+  }
+
+  const body = {
+    message,
+    slot_context: slotCtx,
+    history: _copilotHistory.slice(-12),
+  };
+
+  try {
+    const response = await fetch('/api/v1/diagnose/copilot-chat', {
+      method:  'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${_token}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (response.status === 401) { logout(); return; }
+    if (!response.ok) {
+      let msg = `HTTP ${response.status}`;
+      try { const err = await response.json(); msg = err.message || msg; } catch { /* */ }
+      _addChatBubble('error', `❌ 請求失敗：${msg}`);
+      return;
+    }
+
+    const reader  = response.body.getReader();
+    const decoder = new TextDecoder();
+    let   buf     = '';
+    let   lastMsg = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+
+      for (const part of parts) {
+        const trimmed = part.trim();
+        if (!trimmed) continue;
+        const ev = _parseCopilotChunk(trimmed);
+        if (ev) { const m = _handleCopilotEvent(ev); if (m) lastMsg = m; }
+      }
+    }
+    if (buf.trim()) {
+      const ev = _parseCopilotChunk(buf.trim());
+      if (ev) _handleCopilotEvent(ev);
+    }
+
+    if (lastMsg) _copilotHistory.push({ role: 'assistant', content: lastMsg });
+
+  } catch (err) {
+    _addChatBubble('error', `❌ 連線錯誤：${err.message}`);
+    _setStatus('ready');
+  } finally {
+    _isStreaming = false;
+    _setInputLocked(false);
+  }
+}
+
+/** Parse a raw SSE chunk into a JSON object (type is embedded in the JSON). */
+function _parseCopilotChunk(text) {
+  let dataStr = null;
+  for (const line of text.split('\n')) {
+    if (line.startsWith('data: ')) dataStr = line.slice(6).trim();
+  }
+  if (!dataStr) return null;
+  try { return JSON.parse(dataStr); } catch { return null; }
+}
+
+/** Dispatch copilot SSE event. Returns the agent's text message (for history). */
+function _handleCopilotEvent(ev) {
+  if (!ev || !ev.type) return null;
+
+  switch (ev.type) {
+
+    case 'thinking': {
+      // Show subtle status bubble — replace previous thinking bubble
+      const prev = document.getElementById('copilot-thinking-bubble');
+      if (prev) prev.closest('.flex')?.remove();
+      _addChatBubble(
+        'tool',
+        `<span style="color:#94a3b8;font-size:12px;">${_escapeHtml(ev.message || '')}</span>`,
+        'copilot-thinking-bubble',
+      );
+      return null;
+    }
+
+    case 'chat': {
+      document.getElementById('copilot-thinking-bubble')?.closest('.flex')?.remove();
+      _addChatBubble('agent', _escapeHtml(ev.message || ''));
+      return ev.message;
+    }
+
+    case 'question': {
+      // Slot filling — persist slot state for the next user turn
+      document.getElementById('copilot-thinking-bubble')?.closest('.flex')?.remove();
+      _slotContext  = ev.slot_context || {};
+      _slotToolId   = ev.tool_id   != null ? ev.tool_id   : _slotToolId;
+      _slotToolType = ev.tool_type || _slotToolType;
+
+      const qWrap = document.createElement('div');
+      qWrap.className = 'flex justify-start';
+      const qBubble = document.createElement('div');
+      qBubble.className = 'chat-copilot-question';
+      qBubble.innerHTML = `<span style="font-size:11px;opacity:0.6;display:block;margin-bottom:3px;">💬 Copilot</span>${_escapeHtml(ev.question || '')}`;
+      qWrap.appendChild(qBubble);
+      document.getElementById('chat-history').appendChild(qWrap);
+      document.getElementById('chat-history').scrollTop = 99999;
+      return ev.question;
+    }
+
+    case 'mcp_result': {
+      document.getElementById('copilot-thinking-bubble')?.closest('.flex')?.remove();
+      _clearSlashTool();
+      _slotContext = {};
+      _renderCopilotMcpPanel(ev);
+      _addChatBubble('agent', `✅ <strong>${_escapeHtml(ev.mcp_name || '')}</strong> 查詢完成，結果已呈現於右側報告區。`);
+      return `${ev.mcp_name} 查詢完成`;
+    }
+
+    case 'skill_result': {
+      document.getElementById('copilot-thinking-bubble')?.closest('.flex')?.remove();
+      _clearSlashTool();
+      _slotContext = {};
+      _renderCopilotSkillPanel(ev);
+      const icon = ev.status === 'NORMAL' ? '✅' : '⚠️';
+      _addChatBubble('agent', `${icon} <strong>${_escapeHtml(ev.skill_name || '')}</strong> 診斷完成，結果已呈現於右側報告區。`);
+      return `${ev.skill_name} 診斷完成`;
+    }
+
+    case 'error': {
+      document.getElementById('copilot-thinking-bubble')?.closest('.flex')?.remove();
+      _addChatBubble('error', `❌ ${_escapeHtml(ev.message || '未知錯誤')}`);
+      return null;
+    }
+
+    case 'done': {
+      _setStatus('ready');
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Render a direct MCP query result into the right report panel
+ * as a dedicated "Copilot 查詢" tab with Universal Data Viewer.
+ */
+function _renderCopilotMcpPanel(ev) {
+  _showReportPanel();
+  const tabId    = `mcp-${Date.now()}`;
+  const tabTitle = ev.tab_title || `🔍 ${ev.mcp_name || 'MCP 查詢'}`;
+  const evidenceHtml = _renderMcpEvidence(ev.mcp_output);
+
+  const contentHtml = `
+    <div class="p-4 overflow-y-auto flex-1">
+      <div class="flex items-center gap-2 mb-3">
+        <span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-700">MCP 查詢</span>
+        <span class="text-sm font-semibold text-slate-800">${_escapeHtml(ev.mcp_name || '')}</span>
+      </div>
+      ${evidenceHtml || '<p class="text-slate-400 text-sm p-4">無資料回傳</p>'}
+    </div>`;
+
+  const { panel } = _createWorkspaceTab(tabId, tabTitle, contentHtml);
+  _initChartsInCard(panel);
+}
+
+/**
+ * Render a direct Skill diagnosis result into the right report panel,
+ * reusing _renderSkillBlock for consistent card styling.
+ */
+function _renderCopilotSkillPanel(ev) {
+  _showReportPanel();
+  const icon     = ev.status === 'NORMAL' ? '✅' : '⚠️';
+  const tabId    = `skill-${Date.now()}`;
+  const tabTitle = ev.tab_title || `${icon} ${ev.skill_name || 'Skill 診斷'}`;
+
+  const contentHtml = `<div class="p-4 overflow-y-auto flex-1">${_renderSkillBlock(ev)}</div>`;
+
+  const { panel } = _createWorkspaceTab(tabId, tabTitle, contentHtml);
+  _initChartsInCard(panel);
 }
 
 // ══════════════════════════════════════════════════════════════

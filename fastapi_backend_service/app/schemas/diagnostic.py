@@ -5,7 +5,7 @@
 ``DiagnoseResponse`` — the final structured response returned to the caller.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from pydantic import BaseModel, Field
 
@@ -27,6 +27,20 @@ class DiagnoseRequest(BaseModel):
         max_length=2000,
         description="使用者對問題的自然語言描述，例如「系統變好慢」。",
         examples=["系統變好慢，CPU 使用率好像很高"],
+    )
+
+
+class CopilotChatRequest(BaseModel):
+    """Request body for POST /api/v1/diagnose/copilot-chat."""
+
+    message: str = Field(..., min_length=1, max_length=2000, description="使用者輸入的訊息")
+    slot_context: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="已收集的參數（Slot Filling 狀態）",
+    )
+    history: List[Dict[str, str]] = Field(
+        default_factory=list,
+        description="對話歷史，每筆含 role 與 content",
     )
 
 

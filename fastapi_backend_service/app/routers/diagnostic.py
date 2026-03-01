@@ -38,7 +38,8 @@ from app.repositories.event_type_repository import EventTypeRepository
 from app.repositories.mcp_definition_repository import MCPDefinitionRepository
 from app.repositories.skill_definition_repository import SkillDefinitionRepository
 from app.repositories.system_parameter_repository import SystemParameterRepository
-from app.schemas.diagnostic import DiagnoseRequest, EventDrivenDiagnoseRequest
+from app.schemas.diagnostic import CopilotChatRequest, DiagnoseRequest, EventDrivenDiagnoseRequest
+from app.services.copilot_service import CopilotService
 from app.services.diagnostic_service import DiagnosticService
 from app.services.event_pipeline_service import EventPipelineService
 from app.services.mcp_builder_service import MCPBuilderService
@@ -173,6 +174,62 @@ async def diagnose_event_driven_stream(
             event_params=body.params,
             base_url=base_url,
         ):
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+def _get_copilot_service(db: AsyncSession = Depends(get_db)) -> CopilotService:
+    return CopilotService(
+        mcp_repo=MCPDefinitionRepository(db),
+        skill_repo=SkillDefinitionRepository(db),
+        ds_repo=DataSubjectRepository(db),
+    )
+
+
+@router.post(
+    "/copilot-chat",
+    summary="Copilot 對話 (SSE 串流)",
+    description=(
+        "接收使用者訊息（自然語言或 Slash Command 選擇的工具），透過 LLM 解析意圖，"
+        "互動式收集缺少的參數（Slot Filling），再直接呼叫 MCP 查詢資料或 Skill 執行診斷，"
+        "以 Server-Sent Events 串流即時推播結果。"
+    ),
+    responses={
+        200: {"description": "SSE 串流（text/event-stream）"},
+        401: {"description": "未提供或無效的 JWT Token"},
+    },
+)
+async def copilot_chat(
+    body: CopilotChatRequest,
+    http_request: Request,
+    svc: CopilotService = Depends(_get_copilot_service),
+    current_user: UserModel = Depends(get_current_user),
+) -> StreamingResponse:
+    """Stream copilot intent-parsing and tool execution results."""
+    logger.info(
+        "Copilot chat from user=%s: %s",
+        current_user.username,
+        body.message[:80],
+    )
+    base_url = str(http_request.base_url).rstrip("/")
+
+    async def generate():
+        gen = await svc.stream_chat(
+            message=body.message,
+            slot_context=body.slot_context,
+            history=body.history,
+            base_url=base_url,
+        )
+        async for event in gen:
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(

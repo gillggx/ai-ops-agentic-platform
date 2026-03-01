@@ -1041,3 +1041,135 @@ body {
   text-overflow: ellipsis;
 }
 .evidence-table tr:nth-child(even) td { background: #f8fafc; }
+
+/* ══════════════════════════════════════════════════════════════
+   Phase 9 — Copilot Slash Command Menu
+══════════════════════════════════════════════════════════════ */
+
+/* Container — pops up above the textarea */
+.slash-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  box-shadow: 0 8px 32px -4px rgba(0,0,0,0.14), 0 2px 8px -2px rgba(0,0,0,0.08);
+  z-index: 100;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.slash-menu-section {
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.slash-menu-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.slash-menu-item:hover,
+.slash-menu-item.slash-active {
+  background: #f1f5f9;
+}
+
+.slash-menu-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 6px;
+  margin-top: 1px;
+}
+.slash-mcp-badge  { background: #eff6ff; color: #3b82f6; border: 1px solid #bfdbfe; }
+.slash-skill-badge { background: #f5f3ff; color: #7c3aed; border: 1px solid #ddd6fe; }
+
+.slash-menu-item-content { flex: 1; min-width: 0; }
+.slash-menu-item-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1e293b;
+  margin-bottom: 1px;
+}
+.slash-menu-item-desc {
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Copilot question bubble — slot filling prompt from AI */
+.chat-copilot-question {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-left: 3px solid #38bdf8;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #0c4a6e;
+  max-width: 85%;
+}
+
+/* Tool selected indicator above input */
+.copilot-tool-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: #1d4ed8;
+  margin-bottom: 6px;
+}
+.copilot-tool-tag .remove-tag {
+  cursor: pointer;
+  color: #93c5fd;
+  font-size: 14px;
+  line-height: 1;
+}
+.copilot-tool-tag .remove-tag:hover { color: #3b82f6; }
+
+/* ── Multi-Tab Workspace (Phase 9.1) ──────────────────────────── */
+
+/* Tab label: truncate long LLM-generated titles */
+.ws-tab-label {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Close button on each workspace tab */
+.ws-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  font-size: 14px;
+  line-height: 1;
+  color: #94a3b8;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.15s, background-color 0.15s;
+}
+.ws-close-btn:hover {
+  color: #ef4444;
+  background-color: #fee2e2;
+}

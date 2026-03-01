@@ -983,7 +983,11 @@ function _renderStandardPayload(result) {
 
   if (uiRender) {
     const type      = uiRender.type || 'table';
-    const chartData = uiRender.chart_data;
+    // Normalize: backend may return chart_data as an already-parsed object
+    const rawChartData = uiRender.chart_data;
+    const chartData = (rawChartData && typeof rawChartData === 'object')
+      ? JSON.stringify(rawChartData)
+      : rawChartData;
 
     if (type === 'table' || !chartData) {
       // No chart — just show the data table
