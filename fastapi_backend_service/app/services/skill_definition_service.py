@@ -11,9 +11,11 @@ from app.repositories.mcp_definition_repository import MCPDefinitionRepository
 from app.repositories.skill_definition_repository import SkillDefinitionRepository
 from app.repositories.system_parameter_repository import SystemParameterRepository
 from app.schemas.skill_definition import (
+    SkillCheckCodeDiagnosisIntentResponse,
     SkillDefinitionCreate,
     SkillDefinitionResponse,
     SkillDefinitionUpdate,
+    SkillGenerateCodeDiagnosisResponse,
     SkillTryDiagnosisResponse,
 )
 from app.services.mcp_builder_service import MCPBuilderService
@@ -34,11 +36,13 @@ def _to_response(obj: SkillDefinitionModel) -> SkillDefinitionResponse:
         id=obj.id,
         name=obj.name,
         description=obj.description,
+        problem_subject=obj.problem_subject,
         event_type_id=obj.event_type_id,
         mcp_id=mcp_ids_list[0] if mcp_ids_list else None,
         param_mappings=_j(obj.param_mappings),
         diagnostic_prompt=obj.diagnostic_prompt,
         human_recommendation=obj.human_recommendation,
+        last_diagnosis_result=_j(obj.last_diagnosis_result),
         created_at=obj.created_at,
         updated_at=obj.updated_at,
     )
@@ -81,6 +85,8 @@ class SkillDefinitionService:
         }
         if data.param_mappings is not None:
             kwargs["param_mappings"] = [m.model_dump() for m in data.param_mappings]
+        if data.problem_subject is not None:
+            kwargs["problem_subject"] = data.problem_subject
         if data.diagnostic_prompt is not None:
             kwargs["diagnostic_prompt"] = data.diagnostic_prompt
         if data.human_recommendation is not None:
@@ -97,6 +103,8 @@ class SkillDefinitionService:
             updates["name"] = data.name
         if data.description is not None:
             updates["description"] = data.description
+        if data.problem_subject is not None:
+            updates["problem_subject"] = data.problem_subject
         if "mcp_id" in data.model_fields_set:
             updates["mcp_ids"] = [data.mcp_id] if data.mcp_id else []
         if data.param_mappings is not None:
@@ -105,6 +113,11 @@ class SkillDefinitionService:
             updates["diagnostic_prompt"] = data.diagnostic_prompt
         if data.human_recommendation is not None:
             updates["human_recommendation"] = data.human_recommendation
+        if "last_diagnosis_result" in data.model_fields_set:
+            updates["last_diagnosis_result"] = (
+                json.dumps(data.last_diagnosis_result, ensure_ascii=False)
+                if data.last_diagnosis_result is not None else None
+            )
         obj = await self._repo.update(obj, **updates)
         return _to_response(obj)
 
@@ -185,6 +198,51 @@ class SkillDefinitionService:
             diagnostic_prompt=diagnostic_prompt,
             mcp_output_sample=mcp_output_sample,
         )
+
+    async def check_code_diagnosis_intent(
+        self,
+        diagnostic_prompt: str,
+        problem_subject: Optional[str],
+        mcp_output_sample: Dict[str, Any],
+        event_attributes: List[Dict[str, Any]],
+    ) -> SkillCheckCodeDiagnosisIntentResponse:
+        """Check clarity of diagnostic_prompt + problem_subject for code generation."""
+        if not self._llm:
+            return SkillCheckCodeDiagnosisIntentResponse(
+                is_clear=True,
+                suggested_prompt=diagnostic_prompt,
+                suggested_problem_subject=problem_subject or "",
+            )
+        data = await self._llm.check_code_diagnosis_intent(
+            diagnostic_prompt=diagnostic_prompt,
+            problem_subject=problem_subject,
+            mcp_output_sample=mcp_output_sample,
+            event_attributes=event_attributes,
+        )
+        return SkillCheckCodeDiagnosisIntentResponse(**data)
+
+    async def generate_code_diagnosis(
+        self,
+        diagnostic_prompt: str,
+        problem_subject: Optional[str],
+        mcp_sample_outputs: Dict[str, Any],
+        event_attributes: Optional[List[Dict[str, Any]]] = None,
+    ) -> SkillGenerateCodeDiagnosisResponse:
+        """Generate Python diagnostic code that returns diagnosis_message + problem_object."""
+        if not self._llm:
+            return SkillGenerateCodeDiagnosisResponse(
+                success=False, error="LLM service not configured"
+            )
+        try:
+            result = await self._llm.generate_code_diagnosis(
+                diagnostic_prompt=diagnostic_prompt,
+                problem_subject=problem_subject,
+                mcp_sample_outputs=mcp_sample_outputs,
+                event_attributes=event_attributes or [],
+            )
+        except Exception as exc:
+            return SkillGenerateCodeDiagnosisResponse(success=False, error=str(exc))
+        return SkillGenerateCodeDiagnosisResponse(**result)
 
     async def auto_map(self, mcp_id: int, event_type_id: int) -> Dict[str, Any]:
         """LLM semantic mapping: match DataSubject input fields → Event attributes.

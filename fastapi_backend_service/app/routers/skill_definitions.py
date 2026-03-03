@@ -14,9 +14,11 @@ from app.repositories.skill_definition_repository import SkillDefinitionReposito
 from app.repositories.system_parameter_repository import SystemParameterRepository
 from app.schemas.skill_definition import (
     SkillAutoMapRequest,
+    SkillCheckCodeDiagnosisIntentRequest,
     SkillCheckDiagnosisIntentRequest,
     SkillDefinitionCreate,
     SkillDefinitionUpdate,
+    SkillGenerateCodeDiagnosisRequest,
     SkillTryDiagnosisRequest,
 )
 from app.services.mcp_builder_service import MCPBuilderService
@@ -132,5 +134,37 @@ async def try_diagnosis_skill(
     result = await svc.try_diagnosis(
         diagnostic_prompt=body.diagnostic_prompt,
         mcp_sample_outputs=body.mcp_sample_outputs,
+    )
+    return StandardResponse.success(data=result.model_dump())
+
+
+@router.post("/check-code-diagnosis-intent", response_model=StandardResponse)
+async def check_code_diagnosis_intent(
+    body: SkillCheckCodeDiagnosisIntentRequest,
+    svc: SkillDefinitionService = Depends(_get_service),
+    _: UserModel = Depends(get_current_user),
+):
+    """Check if diagnostic_prompt + problem_subject are ready for code generation."""
+    result = await svc.check_code_diagnosis_intent(
+        diagnostic_prompt=body.diagnostic_prompt,
+        problem_subject=body.problem_subject,
+        mcp_output_sample=body.mcp_output_sample,
+        event_attributes=body.event_attributes,
+    )
+    return StandardResponse.success(data=result.model_dump())
+
+
+@router.post("/generate-code-diagnosis", response_model=StandardResponse)
+async def generate_code_diagnosis(
+    body: SkillGenerateCodeDiagnosisRequest,
+    svc: SkillDefinitionService = Depends(_get_service),
+    _: UserModel = Depends(get_current_user),
+):
+    """Generate Python diagnostic code that returns diagnosis_message + problem_object."""
+    result = await svc.generate_code_diagnosis(
+        diagnostic_prompt=body.diagnostic_prompt,
+        problem_subject=body.problem_subject,
+        mcp_sample_outputs=body.mcp_sample_outputs,
+        event_attributes=body.event_attributes,
     )
     return StandardResponse.success(data=result.model_dump())

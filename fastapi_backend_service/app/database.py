@@ -94,6 +94,20 @@ def _get_session_factory() -> async_sessionmaker[AsyncSession]:
 # ---------------------------------------------------------------------------
 
 
+def AsyncSessionLocal() -> AsyncSession:
+    """Return a new async session (context manager style, for use outside requests).
+
+    Intended for background tasks (e.g. APScheduler jobs) that cannot use FastAPI's
+    ``Depends(get_db)`` mechanism.
+
+    Usage::
+
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(...)
+    """
+    return _get_session_factory()()
+
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Async generator that yields a database session for use in FastAPI dependencies.
 
@@ -167,6 +181,9 @@ async def _safe_add_columns(conn) -> None:
     migrations = [
         ("skill_definitions", "human_recommendation", "TEXT"),
         ("event_types", "spc_chart", "VARCHAR(100)"),
+        # Phase 11 (v2) — decouple Skill from trigger; RoutineCheck is the bridge
+        ("event_types", "diagnosis_skill_ids", "TEXT DEFAULT '[]'"),
+        ("routine_checks", "trigger_event_id", "INTEGER"),
     ]
     for table, column, col_type in migrations:
         try:

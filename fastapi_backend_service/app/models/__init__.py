@@ -7,6 +7,8 @@ from app.models.event_type import EventTypeModel
 from app.models.mcp_definition import MCPDefinitionModel
 from app.models.skill_definition import SkillDefinitionModel
 from app.models.system_parameter import SystemParameterModel
+from app.models.routine_check import RoutineCheckModel
+from app.models.generated_event import GeneratedEventModel
 
 __all__ = [
     "UserModel",
@@ -16,4 +18,6 @@ __all__ = [
     "MCPDefinitionModel",
     "SkillDefinitionModel",
     "SystemParameterModel",
+    "RoutineCheckModel",
+    "GeneratedEventModel",
 ]

@@ -32,6 +32,30 @@ def _j(s: Optional[str]) -> Any:
         return None
 
 
+def _parse_et_diagnosis_skills(raw: Optional[str]):
+    """Parse ET's diagnosis_skill_ids column into (skill_id_list, {skill_id: param_mappings}).
+
+    Handles both old format [int, ...] and new format [{skill_id, param_mappings}, ...].
+    Returns (ordered_ids, mapping_dict).
+    """
+    try:
+        data = json.loads(raw) if raw else []
+    except Exception:
+        data = []
+
+    skill_ids: List[int] = []
+    skill_param_map: Dict[int, List] = {}
+    for entry in data:
+        if isinstance(entry, int):
+            skill_ids.append(entry)
+            skill_param_map[entry] = []
+        elif isinstance(entry, dict) and "skill_id" in entry:
+            sid = int(entry["skill_id"])
+            skill_ids.append(sid)
+            skill_param_map[sid] = entry.get("param_mappings", [])
+    return skill_ids, skill_param_map
+
+
 class SkillPipelineResult:
     """Result of running the full pipeline for one Skill."""
 
@@ -111,24 +135,28 @@ class EventPipelineService:
                 "error": f"找不到 Event Type: {event_type_name}",
             }
 
-        # 2. Find all Skills bound to this event type
-        skills = await self._skill_repo.get_by_event_type(et.id)
-        if not skills:
+        # 2. Find bound skills from ET's diagnosis_skills list
+        skill_ids, skill_param_map = _parse_et_diagnosis_skills(
+            getattr(et, "diagnosis_skill_ids", None)
+        )
+        if not skill_ids:
             return {
                 "event": {"event_type": event_type_name, "event_id": event_id},
                 "skills": [],
-                "error": f"尚無 Skill 綁定至 {event_type_name}，請先在 Skill Builder 建立對應的 Skill。",
+                "error": f"尚無 Skill 綁定至 {event_type_name}，請先在 EventType 設定診斷 Skills。",
             }
+        skills = await self._skill_repo.get_by_ids(skill_ids)
 
         # 3. Load system prompt (optional)
         system_prompt = None
         if self._sp_repo:
             system_prompt = await self._sp_repo.get_value("PROMPT_SKILL_DIAGNOSIS")
 
-        # 4. Process each skill
+        # 4. Process each skill using ET-specific param mappings
         results: List[Dict[str, Any]] = []
         for skill in skills:
-            result = await self._run_skill(skill, event_params, system_prompt, base_url)
+            et_pm = skill_param_map.get(skill.id, [])
+            result = await self._run_skill(skill, event_params, system_prompt, base_url, et_param_mappings=et_pm)
             results.append(result.to_dict())
 
         return {
@@ -164,14 +192,17 @@ class EventPipelineService:
             }
             return
 
-        # 2. Find bound skills
-        skills = await self._skill_repo.get_by_event_type(et.id)
-        if not skills:
+        # 2. Find bound skills from ET's diagnosis_skills list
+        skill_ids, skill_param_map = _parse_et_diagnosis_skills(
+            getattr(et, "diagnosis_skill_ids", None)
+        )
+        if not skill_ids:
             yield {
                 "type": "error",
-                "message": f"尚無 Skill 綁定至 {event_type_name}，請先在 Skill Builder 建立對應的 Skill。",
+                "message": f"尚無 Skill 綁定至 {event_type_name}，請先在 EventType 設定診斷 Skills。",
             }
             return
+        skills = await self._skill_repo.get_by_ids(skill_ids)
 
         # 3. Load system prompt
         system_prompt = None
@@ -198,13 +229,14 @@ class EventPipelineService:
                 "mcp_name": "",  # filled in after MCP load
             }
 
-            result = await self._run_skill(skill, event_params, system_prompt, base_url)
+            et_pm = skill_param_map.get(skill.id, [])
+            result = await self._run_skill(skill, event_params, system_prompt, base_url, et_param_mappings=et_pm)
 
             yield {"type": "skill_done", "index": i, **result.to_dict()}
 
         yield {"type": "done"}
 
-    async def _run_skill(self, skill, event_params: Dict[str, str], system_prompt, base_url: str = "") -> SkillPipelineResult:
+    async def _run_skill(self, skill, event_params: Dict[str, str], system_prompt, base_url: str = "", et_param_mappings: Optional[List[Dict]] = None) -> SkillPipelineResult:
         """Execute the full pipeline for a single Skill."""
         skill_name = skill.name
         mcp_id_list = _j(skill.mcp_ids) or []
@@ -248,8 +280,11 @@ class EventPipelineService:
                 error="DataSubject 缺少 endpoint_url 設定",
             )
 
-        # Resolve param mappings: event_field → mcp_param, then event_params[event_field]
-        param_mappings = _j(skill.param_mappings) or []
+        # Resolve param mappings: prefer ET-level mappings, fall back to skill's own
+        if et_param_mappings is not None:
+            param_mappings = et_param_mappings
+        else:
+            param_mappings = _j(skill.param_mappings) or []
         resolved: Dict[str, str] = {}
         for mapping in param_mappings:
             event_field = mapping.get("event_field", "")

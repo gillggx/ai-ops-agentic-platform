@@ -10,7 +10,7 @@ Four LLM background tasks:
 import json
 import logging
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import anthropic
 
@@ -570,6 +570,236 @@ DataSubject 名稱：{data_subject_name}
             logger.warning("try_diagnosis JSON parse failed; raw=%s", text[:200])
             # Fallback: treat whole text as summary, flag as ambiguous warning
             return {"status": "ABNORMAL", "conclusion": "LLM 回應解析失敗", "evidence": [], "summary": text}
+
+    async def check_code_diagnosis_intent(
+        self,
+        diagnostic_prompt: str,
+        problem_subject: Optional[str],
+        mcp_output_sample: Dict[str, Any],
+        event_attributes: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Check clarity of diagnostic_prompt + problem_subject for code generation.
+
+        Returns dict with: is_clear, questions, suggested_prompt,
+                           suggested_problem_subject, changes
+        """
+        prompt = f"""你是半導體製程智能診斷系統設計師。
+請評估以下診斷配置是否適合生成 Python 診斷函式，並提供改善建議。
+
+【觸發此 Skill 的事件屬性（Skill 輸入參數與意義）】
+{json.dumps(event_attributes, ensure_ascii=False, indent=2)}
+
+【MCP 輸出資料樣本（診斷函式的輸入格式）】
+{json.dumps(mcp_output_sample, ensure_ascii=False, indent=2)}
+
+【使用者的異常判斷條件（Diagnostic Prompt）】
+「{diagnostic_prompt}」
+
+【使用者指定的有問題物件（Problem Subject）】
+「{problem_subject or "未指定"}」
+
+請完成以下評估並提供改善建議：
+
+1. 異常判斷條件是否清晰（可直接轉換為 Python 邏輯）：
+   - 是否明確對應到 MCP 輸出的具體欄位名稱？
+   - 是否有可量化的判斷條件（數值門檻、計數、時間條件等）？
+   - 是否清楚說明何時算正常、何時算異常？
+
+2. 有問題的物件是否具體可識別：
+   - 應為可從 MCP 輸出或事件屬性中找到的具體物件（如 Tool ID、Lot ID、製程參數名稱等）
+
+改寫原則：
+- 明確引用 MCP 輸出中的具體欄位名稱
+- 加入具體的數值門檻或計數條件
+- ⚠️ 不要在改寫版本中加入輸出格式指令（系統輸出格式固定為 diagnosis_message + problem_object）
+
+只回傳 JSON（不要有其他文字）：
+{{
+  "is_clear": true 或 false,
+  "questions": ["若不清晰才填，最多3個問題；若已清晰則為空陣列"],
+  "suggested_prompt": "改寫後的完整診斷條件（即使原本清晰也提供更精確的版本）",
+  "suggested_problem_subject": "改善後的有問題物件說明（若已合理可小幅調整或保持相同）",
+  "changes": "一句話說明改寫了什麼"
+}}"""
+
+        try:
+            response = await self._client.messages.create(
+                model=_MODEL,
+                max_tokens=700,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            data = _extract_json(_get_text(response.content))
+            data.setdefault("is_clear", True)
+            data.setdefault("questions", [])
+            data.setdefault("suggested_prompt", diagnostic_prompt)
+            data.setdefault("suggested_problem_subject", problem_subject or "")
+            data.setdefault("changes", "")
+            return data
+        except Exception:
+            return {
+                "is_clear": True, "questions": [],
+                "suggested_prompt": diagnostic_prompt,
+                "suggested_problem_subject": problem_subject or "",
+                "changes": "",
+            }
+
+    async def generate_code_diagnosis(
+        self,
+        diagnostic_prompt: str,
+        problem_subject: Optional[str],
+        mcp_sample_outputs: Dict[str, Any],
+        event_attributes: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """Generate Python diagnostic code and execute it.
+
+        The generated diagnose() function returns diagnosis_message + problem_object directly.
+        Returns dict with keys: success, generated_code, diagnosis_message, problem_object, error
+        """
+        import math
+        import datetime as _dt
+
+        event_attributes = event_attributes or []
+
+        # ── Step 1: LLM generates diagnostic Python code ─────────────────────
+        code_prompt = f"""你是半導體製程智能診斷工程師。請根據以下信息，撰寫一個 Python 診斷函式。
+
+【觸發此 Skill 的事件屬性（診斷背景參考）】
+{json.dumps(event_attributes, ensure_ascii=False, indent=2)}
+
+【有問題的項目或物件】
+{problem_subject or "未指定"}
+
+【異常判斷條件（Diagnostic Prompt）】
+{diagnostic_prompt}
+
+【MCP 輸出資料樣本（函式輸入格式，僅供參考欄位結構）】
+{json.dumps(mcp_sample_outputs, ensure_ascii=False, indent=2)}
+
+請撰寫一個 Python 函式 `diagnose(mcp_outputs: dict) -> dict`：
+- mcp_outputs 的結構與上方 MCP 輸出資料樣本完全相同（診斷函式只做邏輯判斷，不用重新處理 MCP 原始資料）
+- 根據「異常判斷條件」對 mcp_outputs 進行邏輯判斷
+- 函式必須回傳 dict，包含三個 key（這是 Skill 的標準輸出格式）：
+  - "status": str — 必須是 "NORMAL" 或 "ABNORMAL"
+    * ABNORMAL：資料「符合」使用者描述的異常條件 → 異常條件被觸發了
+    * NORMAL  ：資料「不符合」使用者描述的異常條件 → 一切正常
+  - "diagnosis_message": str — 繁體中文診斷訊息（2-3 句話，說明診斷結果與原因，並具體列出異常數量）
+  - "problem_object": 【重要】必須是 dict，key 為物件類型名稱（英文），value 為從資料中找到的實際識別碼。
+    格式規則（三種之一，視情況選擇）：
+    ① 單一物件：{{"tool": "TECH01"}}  → 對應 schema: tool: string
+    ② 多個同類物件：{{"tool": ["TECH01","TECH03","TECH05"]}}  → 對應 schema: tool: array
+    ③ 多維度識別：{{"tool": "TECH01", "recipe": "RCP-001"}}  → 對應 schema: tool: string, recipe: string
+    規則：
+    * key 使用資料欄位語意（如 tool_id→tool, lot_id→lot, recipe_name→recipe）
+    * value 只能是 string（單一）或 list of string（多個）—— 不能是數字或巢狀物件
+    * 若無任何異常（status=NORMAL）→ 回傳 {{}}（空 dict）
+    * ❌ 禁止回傳泛稱字串（如 "此批次", "有問題的物件"）—— 必須是資料中的實際 ID 值
+- 只使用 Python 標準語法；可用 json, math, datetime, collections 等標準函式庫
+- 不要使用 eval(), exec(), os, sys 等危險操作
+
+只回傳 JSON（不要有其他文字）：
+{{
+  "code": "def diagnose(mcp_outputs: dict) -> dict:\\n    ..."
+}}"""
+
+        try:
+            resp1 = await self._client.messages.create(
+                model=_MODEL,
+                max_tokens=2048,
+                messages=[{"role": "user", "content": code_prompt}],
+            )
+            raw_code_data = _extract_json(_get_text(resp1.content))
+            generated_code = raw_code_data.get("code", "")
+        except Exception as exc:
+            return {
+                "success": False, "generated_code": "", "code_result": None,
+                "response_message": "", "error": f"Code generation failed: {exc}",
+            }
+
+        if not generated_code:
+            return {
+                "success": False, "generated_code": "", "code_result": None,
+                "response_message": "", "error": "LLM did not return any code",
+            }
+
+        # ── Step 2: Execute the code safely ──────────────────────────────────
+        _ALLOWED_IMPORTS = frozenset({
+            "json", "math", "datetime", "collections", "itertools",
+            "functools", "statistics", "re", "operator",
+        })
+
+        def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name.split(".")[0] not in _ALLOWED_IMPORTS:
+                raise ImportError(f"Import of '{name}' is not allowed in diagnostic sandbox")
+            return __import__(name, globals, locals, fromlist, level)
+
+        _SAFE_BUILTINS = {
+            "abs": abs, "all": all, "any": any, "bool": bool, "dict": dict,
+            "enumerate": enumerate, "filter": filter, "float": float, "format": format,
+            "frozenset": frozenset, "int": int, "isinstance": isinstance, "issubclass": issubclass,
+            "len": len, "list": list, "map": map, "max": max, "min": min, "next": next,
+            "print": print, "range": range, "repr": repr, "reversed": reversed,
+            "round": round, "set": set, "sorted": sorted, "str": str, "sum": sum,
+            "tuple": tuple, "type": type, "zip": zip,
+            "True": True, "False": False, "None": None,
+            "Exception": Exception, "ValueError": ValueError, "TypeError": TypeError,
+            "KeyError": KeyError, "IndexError": IndexError, "AttributeError": AttributeError,
+            "__import__": _safe_import,
+        }
+        sandbox = {
+            "__builtins__": _SAFE_BUILTINS,
+            "json": __import__("json"),
+            "math": math,
+            "datetime": _dt,
+        }
+
+        try:
+            exec(generated_code, sandbox)  # noqa: S102
+            diagnose_fn = sandbox.get("diagnose")
+            if not callable(diagnose_fn):
+                return {
+                    "success": False, "generated_code": generated_code, "code_result": None,
+                    "response_message": "", "error": "Generated code does not define a callable 'diagnose' function",
+                }
+            raw_result = diagnose_fn(mcp_sample_outputs)
+            if not isinstance(raw_result, dict):
+                return {
+                    "success": False, "generated_code": generated_code,
+                    "diagnosis_message": "", "problem_object": "",
+                    "error": f"diagnose() must return a dict, got {type(raw_result).__name__}",
+                }
+            raw_status        = str(raw_result.get("status", "")).upper()
+            status            = "NORMAL" if raw_status == "NORMAL" else "ABNORMAL"
+            diagnosis_message = str(raw_result.get("diagnosis_message", "診斷完成。"))
+            problem_object    = raw_result.get("problem_object", {})
+        except Exception as exc:
+            return {
+                "success": False, "generated_code": generated_code,
+                "status": "ABNORMAL", "diagnosis_message": "", "problem_object": {},
+                "error": f"Code execution error: {exc}",
+            }
+
+        # Build check_output_schema — status is always the first field
+        # problem_object is expected to be a dict: {key: str | list[str]}
+        schema_fields = [
+            {"name": "status", "type": "string", "description": "NORMAL 或 ABNORMAL"},
+            {"name": "diagnosis_message", "type": "string", "description": "診斷說明"},
+        ]
+        if isinstance(problem_object, dict) and problem_object:
+            for k, v in problem_object.items():
+                field_type = "array" if isinstance(v, list) else "string"
+                schema_fields.append({"name": k, "type": field_type, "description": f"有問題的 {k}"})
+
+        check_output_schema = {"fields": schema_fields}
+
+        return {
+            "success": True,
+            "generated_code": generated_code,
+            "status": status,
+            "diagnosis_message": diagnosis_message,
+            "problem_object": problem_object,
+            "check_output_schema": check_output_schema,
+            "error": None,
+        }
 
     async def auto_map(
         self,

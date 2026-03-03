@@ -25,9 +25,12 @@ from app.routers import (
     data_subjects_router,
     diagnostic_router,
     event_types_router,
+    generated_events_router,
+    help_router,
     items_router,
     mcp_definitions_router,
     mock_data_router,
+    routine_check_router,
     skill_definitions_router,
     system_parameters_router,
     users_router,
@@ -422,7 +425,12 @@ async def lifespan(app: FastAPI):
     logger.info("Database initialised")
     await _seed_data()
     logger.info("Startup seeding complete")
+    # Phase 11: start the proactive inspection scheduler
+    from app.scheduler import start_scheduler, stop_scheduler
+    await start_scheduler(base_url=f"http://127.0.0.1:{settings.PORT if hasattr(settings, 'PORT') else 8000}")
+    logger.info("APScheduler started")
     yield
+    stop_scheduler()
     logger.info("Application shutting down")
 
 
@@ -472,6 +480,11 @@ app.include_router(event_types_router, prefix=_PREFIX)
 app.include_router(mcp_definitions_router, prefix=_PREFIX)
 app.include_router(skill_definitions_router, prefix=_PREFIX)
 app.include_router(system_parameters_router, prefix=_PREFIX)
+# Phase 11 routers
+app.include_router(routine_check_router, prefix=_PREFIX)
+app.include_router(generated_events_router, prefix=_PREFIX)
+# Help Chat
+app.include_router(help_router, prefix=_PREFIX)
 
 # ---------------------------------------------------------------------------
 # Global Exception Handlers

@@ -53,8 +53,8 @@ class Config(BaseSettings):
         description="JWT signing algorithm",
     )
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
-        default=30,
-        description="Access token expiration time in minutes",
+        default=720,
+        description="Access token expiration time in minutes (default: 720 = 12 hours)",
         ge=1,
     )
     ALLOWED_ORIGINS: str = Field(

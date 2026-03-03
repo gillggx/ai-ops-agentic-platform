@@ -3,7 +3,7 @@
 import json
 from typing import List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.skill_definition import SkillDefinitionModel
@@ -30,6 +30,16 @@ class SkillDefinitionRepository:
             select(SkillDefinitionModel).where(SkillDefinitionModel.event_type_id == et_id)
         )
         return list(result.scalars().all())
+
+    async def get_by_ids(self, ids: List[int]) -> List[SkillDefinitionModel]:
+        if not ids:
+            return []
+        result = await self._db.execute(
+            select(SkillDefinitionModel).where(SkillDefinitionModel.id.in_(ids))
+        )
+        # Preserve caller-specified order
+        rows = {r.id: r for r in result.scalars().all()}
+        return [rows[i] for i in ids if i in rows]
 
     async def create(self, **kwargs) -> SkillDefinitionModel:
         for field in _JSON_FIELDS:

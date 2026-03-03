@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class EventAttribute(BaseModel):
@@ -13,18 +13,39 @@ class EventAttribute(BaseModel):
     required: bool = Field(default=True)
 
 
+class ParamMapping(BaseModel):
+    """Mapping from an EventType attribute → one MCP input parameter."""
+    event_field: str
+    mcp_id: int
+    mcp_param: str
+    confidence: str = Field(default="HIGH")
+    reasoning: str = Field(default="")
+
+
+class DiagnosisSkillBinding(BaseModel):
+    """Associates a Skill with this EventType, storing the parameter mapping."""
+    skill_id: int
+    param_mappings: List[ParamMapping] = Field(default_factory=list)
+
+
 class EventTypeCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200, description="e.g. SPC_OOC_Etch")
     description: str = Field(..., min_length=1, description="What this event represents")
     attributes: List[EventAttribute] = Field(default_factory=list)
-    spc_chart: Optional[str] = Field(default=None, max_length=100, description="SPC chart ID, e.g. 'CD'")
+    diagnosis_skills: List[DiagnosisSkillBinding] = Field(
+        default_factory=list,
+        description="Skills bound to this EventType with per-skill parameter mappings",
+    )
 
 
 class EventTypeUpdate(BaseModel):
     name: Optional[str] = Field(default=None, max_length=200)
     description: Optional[str] = None
     attributes: Optional[List[EventAttribute]] = None
-    spc_chart: Optional[str] = Field(default=None, max_length=100)
+    diagnosis_skills: Optional[List[DiagnosisSkillBinding]] = Field(
+        default=None,
+        description="Skills bound to this EventType with per-skill parameter mappings",
+    )
 
 
 class EventTypeResponse(BaseModel):
@@ -32,8 +53,14 @@ class EventTypeResponse(BaseModel):
     name: str
     description: str
     attributes: List[Dict[str, Any]]
-    spc_chart: Optional[str] = None
+    diagnosis_skills: List[DiagnosisSkillBinding] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @computed_field
+    @property
+    def diagnosis_skill_ids(self) -> List[int]:
+        """Backward-compat: plain list of skill IDs derived from diagnosis_skills."""
+        return [s.skill_id for s in self.diagnosis_skills]

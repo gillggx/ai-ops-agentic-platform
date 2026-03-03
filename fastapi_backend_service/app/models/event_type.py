@@ -3,7 +3,6 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, Integer, String, Text, func
-from typing import Optional
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -20,8 +19,8 @@ class EventTypeModel(Base):
     # JSON: [{"name": str, "type": "string|number|boolean", "description": str, "required": bool}]
     # NOTE: description on each attribute is MANDATORY (LLM mapping relies on it)
     attributes: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    # SPC chart identifier (e.g. "CD" for Critical Dimension). Optional, for SPC-type events.
-    spc_chart: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, default=None)
+    # JSON list of Skill IDs to run when this event type is diagnosed: [1, 2, 3]
+    diagnosis_skill_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False,
         default=lambda: datetime.now(tz=timezone.utc), server_default=func.now(),

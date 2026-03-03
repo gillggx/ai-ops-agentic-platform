@@ -25,6 +25,9 @@ pandas>=2.2.0
 plotly>=5.22.0
 matplotlib>=3.9.0
 
+# Scheduler
+apscheduler>=3.10.0
+
 # Utilities
 python-dotenv>=1.0.0
 python-multipart>=0.0.9

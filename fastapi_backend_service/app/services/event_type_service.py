@@ -6,7 +6,31 @@ from typing import Any, Dict, List
 from app.core.exceptions import AppException
 from app.models.event_type import EventTypeModel
 from app.repositories.event_type_repository import EventTypeRepository
-from app.schemas.event_type import EventTypeCreate, EventTypeResponse, EventTypeUpdate
+from app.schemas.event_type import (
+    DiagnosisSkillBinding,
+    EventTypeCreate,
+    EventTypeResponse,
+    EventTypeUpdate,
+)
+
+
+def _parse_diagnosis_skills(raw: str) -> List[DiagnosisSkillBinding]:
+    """Parse the diagnosis_skill_ids column (may be old int-list or new binding-list)."""
+    try:
+        data = json.loads(raw) if raw else []
+    except Exception:
+        return []
+
+    result = []
+    for entry in data:
+        if isinstance(entry, int):
+            result.append(DiagnosisSkillBinding(skill_id=entry, param_mappings=[]))
+        elif isinstance(entry, dict) and "skill_id" in entry:
+            try:
+                result.append(DiagnosisSkillBinding(**entry))
+            except Exception:
+                result.append(DiagnosisSkillBinding(skill_id=entry["skill_id"], param_mappings=[]))
+    return result
 
 
 def _to_response(obj: EventTypeModel) -> EventTypeResponse:
@@ -16,11 +40,16 @@ def _to_response(obj: EventTypeModel) -> EventTypeResponse:
         except Exception:
             return []
 
+    diagnosis_skills = _parse_diagnosis_skills(
+        getattr(obj, "diagnosis_skill_ids", None) or "[]"
+    )
+
     return EventTypeResponse(
         id=obj.id,
         name=obj.name,
         description=obj.description,
         attributes=_j(obj.attributes),
+        diagnosis_skills=diagnosis_skills,
         created_at=obj.created_at,
         updated_at=obj.updated_at,
     )
@@ -47,6 +76,7 @@ class EventTypeService:
             name=data.name,
             description=data.description,
             attributes=attrs,
+            diagnosis_skills=data.diagnosis_skills,
         )
         return _to_response(obj)
 
@@ -61,6 +91,8 @@ class EventTypeService:
             updates["description"] = data.description
         if data.attributes is not None:
             updates["attributes"] = [a.model_dump() for a in data.attributes]
+        if data.diagnosis_skills is not None:
+            updates["diagnosis_skills"] = data.diagnosis_skills
         obj = await self._repo.update(obj, **updates)
         return _to_response(obj)
 

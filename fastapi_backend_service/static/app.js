@@ -37,6 +37,12 @@ let _copilotHistory  = [];     // [{role, content}] conversation history
 let _slashMenuVisible = false;
 let _slashMenuItems  = null;   // cached {mcps, skills} for slash menu
 
+// ── Help Chat global state ──────────────────────────────────────
+let _helpPanelOpen     = false;
+let _helpWelcomeShown  = false;   // guard: show welcome bubble only once per session
+let _helpHistory       = [];      // [{role, content}] — preserved across open/close
+let _helpStreaming      = false;
+
 // ══════════════════════════════════════════════════════════════
 // i18n
 // ══════════════════════════════════════════════════════════════
@@ -1376,8 +1382,11 @@ async function _showSlashMenu() {
   if (mcps.length) {
     html += '<div class="slash-menu-section">🔍 MCP 資料查詢工具</div>';
     for (const m of mcps) {
-      const desc = (m.processing_intent || m.name || '').slice(0, 60);
-      html += `<div class="slash-menu-item" onclick="_selectSlashTool(${m.id},'mcp',${JSON.stringify(m.name)},${JSON.stringify(desc)})">
+      const desc = (m.processing_intent || m.name || '').slice(0, 80);
+      // Use data-* attributes to avoid double-quote conflicts in onclick=""
+      html += `<div class="slash-menu-item"
+        data-tool-id="${m.id}" data-tool-type="mcp" data-tool-name="${_escapeHtml(m.name)}"
+        onclick="_selectSlashTool(parseInt(this.dataset.toolId),this.dataset.toolType,this.dataset.toolName)">
         <span class="slash-menu-badge slash-mcp-badge">MCP</span>
         <div class="slash-menu-item-content">
           <div class="slash-menu-item-name">${_escapeHtml(m.name)}</div>
@@ -1390,8 +1399,10 @@ async function _showSlashMenu() {
   if (skills.length) {
     html += '<div class="slash-menu-section">🧠 Skill 智能診斷技能</div>';
     for (const s of skills) {
-      const desc = (s.description || s.name || '').slice(0, 60);
-      html += `<div class="slash-menu-item" onclick="_selectSlashTool(${s.id},'skill',${JSON.stringify(s.name)},${JSON.stringify(desc)})">
+      const desc = (s.description || s.name || '').slice(0, 80);
+      html += `<div class="slash-menu-item"
+        data-tool-id="${s.id}" data-tool-type="skill" data-tool-name="${_escapeHtml(s.name)}"
+        onclick="_selectSlashTool(parseInt(this.dataset.toolId),this.dataset.toolType,this.dataset.toolName)">
         <span class="slash-menu-badge slash-skill-badge">Skill</span>
         <div class="slash-menu-item-content">
           <div class="slash-menu-item-name">${_escapeHtml(s.name)}</div>
@@ -1412,7 +1423,7 @@ function _hideSlashMenu() {
 }
 
 /** Called when user clicks a tool in the slash menu. */
-function _selectSlashTool(toolId, toolType, toolName, desc) {
+function _selectSlashTool(toolId, toolType, toolName) {
   _hideSlashMenu();
   _slotToolId   = toolId;
   _slotToolType = toolType;
@@ -1431,8 +1442,22 @@ function _selectSlashTool(toolId, toolType, toolName, desc) {
     wrap.classList.remove('hidden');
   }
 
+  // Pre-fill textarea with the tool's full intent/description as a ready-to-send prompt
   const input = document.getElementById('issue-input');
-  if (input) { input.value = ''; input.focus(); }
+  if (input) {
+    let prompt = '';
+    if (toolType === 'mcp') {
+      const m = (_slashMenuItems?.mcps || []).find(x => x.id === toolId);
+      prompt = m?.processing_intent || m?.description || toolName;
+    } else {
+      const s = (_slashMenuItems?.skills || []).find(x => x.id === toolId);
+      prompt = s?.description || toolName;
+    }
+    input.value = prompt || '';
+    input.focus();
+    // Place cursor at end so user can append to the prompt
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
 }
 
 function _clearSlashTool() {
@@ -1668,3 +1693,121 @@ function _renderCopilotSkillPanel(ev) {
     marked.setOptions({ breaks: true, gfm: true });
   }
 })();
+
+
+// ══════════════════════════════════════════════════════════════
+// Help Chat — Usage Assistant
+// ══════════════════════════════════════════════════════════════
+
+/** Toggle the help chat panel open/closed (non-floating right panel). */
+function toggleHelpPanel() {
+  _helpPanelOpen = !_helpPanelOpen;
+  const panel = document.getElementById('help-panel');
+  if (!panel) return;
+
+  if (_helpPanelOpen) {
+    panel.style.display = 'flex';
+    panel.style.flexDirection = 'column';
+    // Show welcome bubble only once per session
+    if (!_helpWelcomeShown) {
+      _helpWelcomeShown = true;
+      _addHelpBubble('agent',
+        '👋 您好！我是 Glass Box 使用說明 AI 助理，可以回答您關於系統操作的問題。<br>請問有什麼需要幫助的嗎？');
+    }
+    setTimeout(() => document.getElementById('help-input')?.focus(), 150);
+  } else {
+    panel.style.display = 'none';
+  }
+}
+
+/** Append a chat bubble to the help panel. */
+function _addHelpBubble(type, html) {
+  const container = document.getElementById('help-chat-history');
+  if (!container) return null;
+  const wrapper = document.createElement('div');
+  wrapper.className = type === 'user' ? 'flex justify-end' : 'flex justify-start';
+  const bubble = document.createElement('div');
+  bubble.className = type === 'user' ? 'chat-bubble chat-user' : 'chat-bubble chat-agent';
+  bubble.innerHTML = html;
+  wrapper.appendChild(bubble);
+  container.appendChild(wrapper);
+  container.scrollTop = container.scrollHeight;
+  return bubble;
+}
+
+/** Send a message to the help chat backend. */
+async function _sendHelpMessage() {
+  if (_helpStreaming) return;
+  const input = document.getElementById('help-input');
+  const message = input?.value.trim();
+  if (!message) return;
+
+  input.value = '';
+  _addHelpBubble('user', _escapeHtml ? _escapeHtml(message) : message);
+  _helpHistory.push({ role: 'user', content: message });
+
+  _helpStreaming = true;
+  const sendBtn = document.getElementById('help-send-btn');
+  if (sendBtn) sendBtn.disabled = true;
+
+  // Create streaming agent bubble
+  const container = document.getElementById('help-chat-history');
+  const wrapper   = document.createElement('div');
+  wrapper.className = 'flex justify-start';
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-bubble chat-agent';
+  bubble.innerHTML = '<span class="text-slate-400 text-xs animate-pulse">思考中...</span>';
+  wrapper.appendChild(bubble);
+  container?.appendChild(wrapper);
+  if (container) container.scrollTop = container.scrollHeight;
+
+  let fullText = '';
+  try {
+    const response = await fetch('/api/v1/help/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${_token}`,
+      },
+      body: JSON.stringify({ message, history: _helpHistory.slice(0, -1) }),
+    });
+
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    const reader  = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    bubble.innerHTML = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+      for (const part of parts) {
+        const ev = _parseCopilotChunk(part.trim());  // reuse existing SSE parser
+        if (!ev) continue;
+        if (ev.type === 'chat') {
+          fullText += ev.message || '';
+          // Render with line breaks
+          bubble.innerHTML = (typeof marked !== 'undefined')
+            ? marked.parse(fullText)
+            : fullText.replace(/\n/g, '<br>');
+          if (container) container.scrollTop = container.scrollHeight;
+        } else if (ev.type === 'error') {
+          bubble.innerHTML = `<span class="text-red-500">❌ ${ev.message}</span>`;
+        }
+      }
+    }
+
+    if (fullText) _helpHistory.push({ role: 'assistant', content: fullText });
+
+  } catch (e) {
+    bubble.innerHTML = `<span class="text-red-500">❌ 請求失敗：${e.message}</span>`;
+  } finally {
+    _helpStreaming = false;
+    if (sendBtn) sendBtn.disabled = false;
+    setTimeout(() => document.getElementById('help-input')?.focus(), 50);
+  }
+}
