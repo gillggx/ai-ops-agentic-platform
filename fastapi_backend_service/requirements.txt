@@ -20,12 +20,17 @@ bcrypt==3.2.2  # passlib 1.7.4 is incompatible with bcrypt >= 4.0.0
 # AI / LLM
 anthropic>=0.40.0
 
+# Scheduling (Phase 11 — RoutineCheck proactive engine)
+apscheduler==3.10.4
+
+# HTTP client (event_pipeline_service — DataSubject API calls + async testing)
+httpx==0.26.0
+
 # Utilities
 python-dotenv==1.0.0
 python-multipart==0.0.7
 
 # Testing
-httpx==0.26.0
 pytest==7.4.4
 pytest-asyncio==0.23.3
 pytest-cov==4.1.0
