@@ -38,7 +38,18 @@ if config.config_file_name is not None:
 # Alembic can detect all table definitions for autogenerate support.
 from app.config import get_settings  # noqa: E402
 from app.database import Base  # noqa: E402
-from app.models import UserModel, ItemModel  # noqa: E402, F401
+# Import ALL models so Base.metadata is fully populated for autogenerate
+from app.models import (  # noqa: E402, F401
+    UserModel,
+    ItemModel,
+    DataSubjectModel,
+    EventTypeModel,
+    MCPDefinitionModel,
+    SkillDefinitionModel,
+    SystemParameterModel,
+    RoutineCheckModel,
+    GeneratedEventModel,
+)
 
 # Inject the database URL from application settings into the Alembic config.
 settings = get_settings()
