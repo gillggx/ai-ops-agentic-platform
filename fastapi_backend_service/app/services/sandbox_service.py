@@ -58,6 +58,7 @@ _ALLOWED_BASE_MODULES = frozenset({
     "itertools", "functools", "operator", "re", "string", "decimal",
     "io", "base64", "copy", "abc", "numbers", "types", "enum",
     "typing", "warnings", "heapq", "bisect", "struct", "csv",
+    "time", "calendar",      # pandas internal deps (pd.to_datetime / date math)
     # ── Approved data / viz libraries ────────────────────────────
     "pandas", "plotly", "matplotlib",
     # ── CPython C-extension internals auto-imported by the above ──
