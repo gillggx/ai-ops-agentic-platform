@@ -1,0 +1,123 @@
+-- dev.db.example — Schema reference for Glass Box AI Backend (Phase 14)
+--
+-- This file documents the SQLite schema used in local development.
+-- The actual dev.db is excluded from version control (.gitignore: *.db).
+--
+-- To initialise a fresh dev database, run:
+--   cd fastapi_backend_service
+--   python -c "import asyncio; from app.database import init_db; asyncio.run(init_db())"
+-- Then apply any additional manual columns (legacy ALTER TABLE migrations):
+--   sqlite3 dev.db "ALTER TABLE skill_definitions ADD COLUMN last_diagnosis_result TEXT;"
+--   sqlite3 dev.db "ALTER TABLE routine_checks ADD COLUMN skill_input TEXT;"
+--
+-- For production (PostgreSQL), run: alembic upgrade head
+
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username VARCHAR(150) UNIQUE NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    hashed_password VARCHAR(255) NOT NULL,
+    is_active BOOLEAN DEFAULT 1 NOT NULL,
+    is_superuser BOOLEAN DEFAULT 0 NOT NULL,
+    roles TEXT DEFAULT '[]' NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE TABLE data_subjects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name VARCHAR(200) UNIQUE NOT NULL,
+    description TEXT NOT NULL,
+    api_config TEXT NOT NULL,       -- JSON
+    input_schema TEXT NOT NULL,     -- JSON
+    output_schema TEXT NOT NULL,    -- JSON
+    is_builtin BOOLEAN DEFAULT 0 NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE TABLE event_types (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name VARCHAR(200) UNIQUE NOT NULL,
+    description TEXT NOT NULL,
+    attributes TEXT NOT NULL,               -- JSON list of {name, type, description, required}
+    spc_chart VARCHAR(100),
+    diagnosis_skill_ids TEXT DEFAULT '[]',  -- JSON list of {skill_id, param_mappings}
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE TABLE mcp_definitions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name VARCHAR(200) UNIQUE NOT NULL,
+    description TEXT NOT NULL,
+    data_subject_id INTEGER NOT NULL REFERENCES data_subjects(id) ON DELETE RESTRICT,
+    processing_intent TEXT NOT NULL,
+    processing_script TEXT,
+    output_schema TEXT,                 -- JSON
+    ui_render_config TEXT,              -- JSON
+    input_definition TEXT,              -- JSON list of {name, type, description, required}
+    sample_output TEXT,                 -- JSON
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE TABLE skill_definitions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name VARCHAR(200) UNIQUE NOT NULL,
+    description TEXT NOT NULL,
+    event_type_id INTEGER REFERENCES event_types(id) ON DELETE SET NULL,
+    mcp_ids TEXT NOT NULL DEFAULT '[]',         -- JSON list of MCP IDs
+    param_mappings TEXT,                         -- JSON [{event_field, mcp_id, mcp_param, confidence}]
+    problem_subject VARCHAR(300),                -- e.g. "TETCH01 蝕刻機台"
+    diagnostic_prompt TEXT,
+    human_recommendation TEXT,
+    last_diagnosis_result TEXT,                  -- JSON {status, diagnosis_message, problem_object, generated_code, check_output_schema, timestamp}
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE TABLE routine_checks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name VARCHAR(200) NOT NULL,
+    skill_id INTEGER NOT NULL REFERENCES skill_definitions(id) ON DELETE CASCADE,
+    skill_input TEXT NOT NULL DEFAULT '{}',     -- JSON: mandatory Skill execution parameters
+    trigger_event_id INTEGER REFERENCES event_types(id) ON DELETE SET NULL,
+    event_param_mappings TEXT,                  -- JSON [{event_field, mcp_field}]
+    schedule_interval VARCHAR(20) NOT NULL,     -- "30m"|"1h"|"4h"|"8h"|"12h"|"daily"
+    is_active BOOLEAN NOT NULL DEFAULT 1,
+    last_run_at TEXT,
+    last_run_status VARCHAR(20),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE TABLE generated_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type_id INTEGER NOT NULL REFERENCES event_types(id) ON DELETE RESTRICT,
+    source_skill_id INTEGER NOT NULL REFERENCES skill_definitions(id) ON DELETE RESTRICT,
+    source_routine_check_id INTEGER REFERENCES routine_checks(id) ON DELETE SET NULL,
+    mapped_parameters TEXT NOT NULL,    -- JSON
+    skill_conclusion TEXT,
+    status VARCHAR(20) NOT NULL,        -- "pending"|"diagnosed"|"closed"
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE TABLE system_parameters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key VARCHAR(100) UNIQUE NOT NULL,
+    value TEXT,
+    description VARCHAR(500),
+    updated_at DATETIME NOT NULL
+);
+
+CREATE TABLE items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    is_active BOOLEAN DEFAULT 1 NOT NULL,
+    owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+);

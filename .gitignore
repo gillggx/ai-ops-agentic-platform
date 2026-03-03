@@ -1,2 +1,6 @@
 __pycache__
 *.pyc
+
+# SQLite / database files — never commit local DBs
+*.db
+*.sqlite3
