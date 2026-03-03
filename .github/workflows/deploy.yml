@@ -22,6 +22,8 @@ jobs:
             
             # 1. 進入專案目錄並拉取最新程式碼
             cd ~/ai-ops-agentic-platform
+            # 移除可能殘留在 git index 的 dev.db，避免 pull 衝突
+            git rm --cached fastapi_backend_service/dev.db 2>/dev/null || true
             git pull origin main
             
             # 2. 前端：安裝套件與打包編譯
@@ -33,12 +35,24 @@ jobs:
             # 3. 後端：重啟 FastAPI 大腦
             echo "重啟後端 AI 大腦..."
             cd ../fastapi_backend_service
-            
+
             # 強制終止舊的背景程式 (加上 || true 避免找不到行程時報錯中斷)
             pkill -f uvicorn || true
-            
-            # 啟動虛擬環境並將新版大腦掛載到背景
+
+            # 啟動虛擬環境
             source ../venv/bin/activate
+
+            # 安裝/更新 Python 依賴套件
+            echo "安裝 Python 依賴套件..."
+            pip install -r requirements.txt
+
+            # 執行資料庫 Schema 自動升級 (Alembic)
+            echo "執行資料庫 Schema 升級..."
+            cd fastapi_backend_service
+            alembic upgrade head
+            cd ..
+
+            # 將新版大腦掛載到背景
             nohup uvicorn main:app --host 0.0.0.0 --port 8000 > backend.log 2>&1 &
             
             echo "部署完美結束！戰情室已更新！"
