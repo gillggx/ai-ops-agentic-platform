@@ -22,9 +22,12 @@ jobs:
             
             # 1. 進入專案目錄並拉取最新程式碼
             cd ~/ai-ops-agentic-platform
-            # 移除可能殘留在 git index 的 dev.db，避免 pull 衝突
+            # 備份 dev.db，還原 git 追蹤狀態後再 pull，最後還原資料
+            cp fastapi_backend_service/dev.db /tmp/devdb_bak.db 2>/dev/null || true
+            git checkout -- fastapi_backend_service/dev.db 2>/dev/null || true
             git rm --cached fastapi_backend_service/dev.db 2>/dev/null || true
             git pull origin main
+            cp /tmp/devdb_bak.db fastapi_backend_service/dev.db 2>/dev/null || true
             
             # 2. 前端：安裝套件與打包編譯
             echo "打包前端 React 畫面..."
