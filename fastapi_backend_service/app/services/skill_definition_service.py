@@ -75,14 +75,15 @@ class SkillDefinitionService:
         return _to_response(obj)
 
     async def create(self, data: SkillDefinitionCreate) -> SkillDefinitionResponse:
-        if not await self._et_repo.get_by_id(data.event_type_id):
+        if data.event_type_id is not None and not await self._et_repo.get_by_id(data.event_type_id):
             raise AppException(status_code=404, error_code="NOT_FOUND", detail="EventType 不存在")
         kwargs: Dict[str, Any] = {
             "name": data.name,
             "description": data.description,
-            "event_type_id": data.event_type_id,
             "mcp_ids": [data.mcp_id] if data.mcp_id else [],
         }
+        if data.event_type_id is not None:
+            kwargs["event_type_id"] = data.event_type_id
         if data.param_mappings is not None:
             kwargs["param_mappings"] = [m.model_dump() for m in data.param_mappings]
         if data.problem_subject is not None:
