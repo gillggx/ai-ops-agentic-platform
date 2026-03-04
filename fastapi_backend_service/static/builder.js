@@ -48,7 +48,7 @@ const _suggestedIntents = {};
 // API helpers
 // ══════════════════════════════════════════════════════════════
 
-async function _api(method, path, body) {
+async function _api(method, path, body, signal) {
   const opts = {
     method,
     headers: {
@@ -57,6 +57,7 @@ async function _api(method, path, body) {
     },
   };
   if (body !== undefined) opts.body = JSON.stringify(body);
+  if (signal) opts.signal = signal;
   const res = await fetch(`/api/v1${path}`, opts);
   const json = await res.json();
   if (!res.ok) throw new Error(json.message || `HTTP ${res.status}`);
@@ -1193,16 +1194,24 @@ async function _doTryRun(n) {
   if (tabObj) { tabObj.status = 'running'; _renderTryTabBar(); }
 
   btn.disabled = true;
-  btn.textContent = '⏳ 試跑中（LLM 生成 + 沙盒執行）...';
-  statusEl.innerHTML = '<div class="llm-loading"><div class="llm-spinner"></div><span>LLM 正在依據真實樣本生成腳本並執行，約 20~40 秒…</span></div>';
+  btn.textContent = '⏳ AI 深度編譯中...';
+  statusEl.innerHTML = `
+    <div class="llm-loading">
+      <div class="llm-spinner"></div>
+      <span>🧠 AI 正在深度編譯與驗證腳本，此過程約需 30–60 秒，請耐心等候...</span>
+    </div>`;
   if (resultEl) resultEl.innerHTML = '';
+
+  const _tryRunAbort = new AbortController();
+  const _tryRunTimer = setTimeout(() => _tryRunAbort.abort(), 120000); // 120 s
 
   try {
     const result = await _api('POST', '/mcp-definitions/try-run', {
       processing_intent: intent,
       data_subject_id: dsId,
       sample_data: _sampleData,
-    });
+    }, _tryRunAbort.signal);
+    clearTimeout(_tryRunTimer);
 
     if (!result.success) {
       const analysis = result.error_analysis
@@ -1264,7 +1273,12 @@ async function _doTryRun(n) {
       resultEl.innerHTML = _buildResultHtml(result, `(Tab ${tabN})`);
     }
   } catch (e) {
-    statusEl.innerHTML = `<p class="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">✗ 請求失敗：${_esc(e.message)}</p>`;
+    clearTimeout(_tryRunTimer);
+    const isTimeout = e.name === 'AbortError';
+    const msg = isTimeout
+      ? '⏱ 請求超時（已等待 120 秒）。LLM 可能負載過高，請稍後再試。'
+      : `✗ 請求失敗：${_esc(e.message)}`;
+    statusEl.innerHTML = `<p class="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">${msg}</p>`;
     if (tabObj) { tabObj.status = 'error'; _renderTryTabBar(); }
   } finally {
     btn.disabled = false;
