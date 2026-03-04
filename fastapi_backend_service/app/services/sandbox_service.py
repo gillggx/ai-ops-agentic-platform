@@ -134,6 +134,52 @@ def _safe_import(name: str, *args: Any, **kwargs: Any) -> Any:
     return importlib.import_module(name)
 
 
+def _make_json_serializable(obj: Any) -> Any:
+    """Recursively convert non-JSON-serializable objects to their JSON-safe equivalents.
+
+    Handles the most common types produced by pandas/numpy inside sandbox scripts:
+    - pd.Timestamp / datetime.datetime / datetime.date → ISO 8601 string
+    - pd.NaT / pd.NA / float nan → None
+    - numpy integer/floating scalars → int / float
+    - numpy ndarray / pandas Series → list
+    - pandas DataFrame → list of row dicts
+    """
+    # pandas Timestamp / NaT
+    if _pd is not None:
+        if isinstance(obj, _pd.Timestamp):
+            return obj.isoformat() if not _pd.isnull(obj) else None
+        if obj is _pd.NaT:
+            return None
+        try:
+            if _pd.isna(obj) and not isinstance(obj, (list, dict)):
+                return None
+        except (TypeError, ValueError):
+            pass
+        if isinstance(obj, _pd.DataFrame):
+            return [_make_json_serializable(r) for r in obj.to_dict(orient="records")]
+        if isinstance(obj, _pd.Series):
+            return [_make_json_serializable(v) for v in obj.tolist()]
+
+    # stdlib datetime
+    if isinstance(obj, (datetime.datetime, datetime.date)):
+        return obj.isoformat()
+
+    # numpy scalars / arrays (duck-typed to avoid hard numpy dependency)
+    t = type(obj)
+    tmod = getattr(t, "__module__", "")
+    if tmod and tmod.startswith("numpy"):
+        if hasattr(obj, "tolist"):
+            return obj.tolist()
+
+    # containers — recurse
+    if isinstance(obj, dict):
+        return {k: _make_json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_make_json_serializable(v) for v in obj]
+
+    return obj
+
+
 def _run_sync(script: str, raw_data: Any) -> Dict[str, Any]:
     """Execute the script synchronously in a restricted namespace."""
     safe_builtins: Dict[str, Any] = {
@@ -218,7 +264,8 @@ def _run_sync(script: str, raw_data: Any) -> Dict[str, Any]:
         raise ValueError(
             f"process() must return a dict, got {type(result).__name__}."
         )
-    return result
+    # Sanitize: convert pandas Timestamps, numpy types, etc. to JSON-safe equivalents
+    return _make_json_serializable(result)
 
 
 def _run_diagnose_sync(code: str, mcp_outputs: Dict[str, Any]) -> Dict[str, Any]:
