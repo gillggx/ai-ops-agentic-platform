@@ -565,7 +565,6 @@ DataSubject 名稱：{data_subject_name}
             model=_MODEL,
             max_tokens=4096,
             system=sys_prompt,
-            thinking={"type": "adaptive"},
             messages=[{"role": "user", "content": prompt}],
         )
 
