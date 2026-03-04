@@ -741,6 +741,8 @@ DataSubject 名稱：{data_subject_name}
         _ALLOWED_IMPORTS = frozenset({
             "json", "math", "datetime", "collections", "itertools",
             "functools", "statistics", "re", "operator",
+            "_strptime",    # implicit import triggered by datetime.strptime() on first call
+            "_datetime",    # C extension backing the datetime module
         })
 
         def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):
