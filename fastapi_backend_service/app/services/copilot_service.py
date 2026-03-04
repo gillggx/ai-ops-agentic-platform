@@ -81,6 +81,9 @@ class CopilotService:
         mcps = await self._mcp_repo.get_all()
         skills = await self._skill_repo.get_all()
 
+        # Build an MCP lookup dict for fallback param resolution
+        mcp_lookup: Dict[int, Any] = {m.id: m for m in mcps}
+
         # Build required-param map per MCP (derived from skill param_mappings)
         mcp_params_map: Dict[int, List[str]] = {}
         for skill in skills:
@@ -100,6 +103,19 @@ class CopilotService:
                 pname = mapping.get("mcp_param")
                 if pname and pname not in params:
                     params.append(pname)
+
+            # Fallback: if no param_mappings, derive required params from the
+            # bound MCP's input_definition so slot filling still triggers.
+            if not params:
+                mcp_id_list = _j(skill.mcp_ids) or []
+                if mcp_id_list:
+                    bound_mcp = mcp_lookup.get(mcp_id_list[0])
+                    if bound_mcp:
+                        input_def = _j(bound_mcp.input_definition) if hasattr(bound_mcp, "input_definition") else None
+                        for p in (input_def or {}).get("params", []):
+                            if p.get("required") and p.get("name") and p["name"] not in params:
+                                params.append(p["name"])
+
             skill_params_map[skill.id] = params
 
         mcp_catalog = self._build_mcp_catalog(mcps, mcp_params_map)
