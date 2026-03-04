@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -353,19 +354,34 @@ class MCPDefinitionService:
             system_prompt = await self._sp_repo.get_value("PROMPT_MCP_TRY_RUN")
 
         output_schema_raw = _j(ds.output_schema) or {}
+        _record_count = len(sample_data) if isinstance(sample_data, list) else 1
         try:
+            _t0_llm = time.time()
             result = await self._llm.generate_for_try_run(
                 processing_intent=processing_intent,
                 data_subject_name=ds.name,
                 data_subject_output_schema=output_schema_raw,
                 system_prompt=system_prompt,
             )
+            _t1_llm = time.time()
+            logger.warning(
+                "try_run perf | stage=LLM_codegen elapsed=%.2fs raw_data_records=%d",
+                _t1_llm - _t0_llm,
+                _record_count,
+            )
         except Exception as exc:
             return MCPTryRunResponse(success=False, error=f"LLM 生成失敗：{exc}")
 
         script = result.get("processing_script", "")
         try:
+            _t0_sb = time.time()
             output_data = await execute_script(script, sample_data)
+            _t1_sb = time.time()
+            logger.warning(
+                "try_run perf | stage=sandbox_exec elapsed=%.2fs raw_data_records=%d",
+                _t1_sb - _t0_sb,
+                _record_count,
+            )
         except (ValueError, TimeoutError) as exc:
             error_msg = f"沙盒執行失敗：{exc}"
             triage = await self._analyze_sandbox_error(

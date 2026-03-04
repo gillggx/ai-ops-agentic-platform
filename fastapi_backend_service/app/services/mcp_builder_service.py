@@ -42,6 +42,7 @@ DataSubject 名稱：{data_subject_name}
    - ui_render 格式：{"type": "trend_chart|bar_chart|table", "charts": [json.dumps(fig.to_dict()), ...], "chart_data": charts[0] 或 null}
    - 若有圖表需求，charts 陣列至少包含一個 json.dumps(fig.to_dict()) 字串；無圖表則 charts=[], chart_data=null
    - ⚠️⚠️ 絕對禁止使用 fig.to_html()、fig.write_html()、fig.to_json()；必須用 json.dumps(fig.to_dict()) ⚠️⚠️
+   - 🔴 CRITICAL RULE (English): You MUST serialize charts using: import json; charts.append(json.dumps(fig.to_dict())). ANY use of fig.to_html() or fig.to_json() will cause the system to CRASH immediately. No exceptions.
 
 2. **output_schema**（object）：
    - 定義 process() 函式回傳值的 Schema
