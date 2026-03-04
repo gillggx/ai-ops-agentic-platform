@@ -18,42 +18,64 @@ jobs:
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            echo "連線成功！開始執行 V11 自動部署..."
-            
-            # 1. 進入專案目錄並拉取最新程式碼
-            cd ~/ai-ops-agentic-platform
-            # 搬走 dev.db 讓 git pull 不衝突，pull 後再還原
-            mv fastapi_backend_service/dev.db /tmp/devdb_bak.db 2>/dev/null || true
+            set -e
+            echo "=== 連線成功！開始部署 ==="
+
+            # ── 變數 ────────────────────────────────────────────────────
+            REPO_ROOT="$HOME/ai-ops-agentic-platform"
+            OUTER_BE="$REPO_ROOT/fastapi_backend_service"          # 有 requirements.txt
+            INNER_BE="$OUTER_BE/fastapi_backend_service"           # 有 main.py
+            VENV="$REPO_ROOT/venv/bin/activate"
+
+            # ── 1. Git pull ──────────────────────────────────────────────
+            echo "--- [1/4] 拉取最新程式碼 ---"
+            cd "$REPO_ROOT"
+            mv "$OUTER_BE/dev.db" /tmp/devdb_bak.db 2>/dev/null || true
             git pull origin main
-            cp /tmp/devdb_bak.db fastapi_backend_service/dev.db 2>/dev/null || true
-            
-            # 2. 前端：安裝套件與打包編譯
-            echo "打包前端 React 畫面..."
-            cd frontend
+            cp /tmp/devdb_bak.db "$OUTER_BE/dev.db" 2>/dev/null || true
+
+            # ── 2. 前端打包 ──────────────────────────────────────────────
+            echo "--- [2/4] 打包前端 ---"
+            cd "$REPO_ROOT/frontend"
             npm install
             npm run build
-            
-            # 3. 後端：重啟 FastAPI 大腦
-            echo "重啟後端 AI 大腦..."
-            cd ../fastapi_backend_service
 
-            # 強制終止舊的背景程式 (加上 || true 避免找不到行程時報錯中斷)
-            pkill -f uvicorn || true
-
-            # 啟動虛擬環境
-            source ../venv/bin/activate
-
-            # 安裝/更新 Python 依賴套件
-            echo "安裝 Python 依賴套件..."
-            pip install -r requirements.txt
-
-            # 執行資料庫 Schema 自動升級 (Alembic)
-            echo "執行資料庫 Schema 升級..."
-            cd fastapi_backend_service
+            # ── 3. Python 依賴 + DB migration ───────────────────────────
+            echo "--- [3/4] 安裝依賴 & DB migration ---"
+            source "$VENV"
+            pip install -r "$OUTER_BE/requirements.txt"
+            cd "$INNER_BE"
             alembic upgrade head
-            cd ..
 
-            # 將新版大腦掛載到背景
-            nohup uvicorn main:app --host 0.0.0.0 --port 8000 > backend.log 2>&1 &
-            
-            echo "部署完美結束！戰情室已更新！"
+            # ── 4. 重啟後端 (systemd) ────────────────────────────────────
+            echo "--- [4/4] 重啟後端服務 ---"
+
+            # 首次部署：若 service 不存在，先建立
+            if ! systemctl is-enabled aiops.service &>/dev/null; then
+              echo "首次設定 systemd service..."
+              sudo tee /etc/systemd/system/aiops.service > /dev/null << EOF
+            [Unit]
+            Description=AIOps FastAPI Backend
+            After=network.target
+
+            [Service]
+            User=$USER
+            WorkingDirectory=$INNER_BE
+            ExecStart=$REPO_ROOT/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+            Restart=always
+            RestartSec=5
+            StandardOutput=journal
+            StandardError=journal
+
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+              sudo systemctl daemon-reload
+              sudo systemctl enable aiops.service
+            fi
+
+            sudo systemctl restart aiops.service
+            sleep 2
+            sudo systemctl status aiops.service --no-pager
+
+            echo "=== 部署完成！==="
