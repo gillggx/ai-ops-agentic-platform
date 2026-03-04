@@ -43,7 +43,7 @@ jobs:
             source "$VENV"
             pip install -r "$BE_DIR/requirements.txt"
             cd "$BE_DIR"
-            alembic upgrade head
+            PYTHONPATH="$BE_DIR" alembic upgrade head
 
             # ── 4. 重啟後端 (systemd) ──────────────────────────────────────
             echo "--- [4/4] 重啟後端服務 ---"
