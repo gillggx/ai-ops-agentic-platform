@@ -43,7 +43,12 @@ jobs:
             source "$VENV"
             pip install -r "$BE_DIR/requirements.txt"
             cd "$BE_DIR"
-            PYTHONPATH="$BE_DIR" alembic upgrade head
+            # 若 DB 由 init_db() 建立（無 alembic 版本紀錄），先 stamp 再 upgrade
+            PYTHONPATH="$BE_DIR" alembic upgrade head || {
+              echo "upgrade failed (tables pre-exist); stamping DB to head..."
+              PYTHONPATH="$BE_DIR" alembic stamp head
+              PYTHONPATH="$BE_DIR" alembic upgrade head
+            }
 
             # ── 4. 重啟後端 (systemd) ──────────────────────────────────────
             echo "--- [4/4] 重啟後端服務 ---"
