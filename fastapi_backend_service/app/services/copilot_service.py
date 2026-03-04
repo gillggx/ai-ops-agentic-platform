@@ -470,6 +470,7 @@ class CopilotService:
             "conclusion": llm_result.get("conclusion", ""),
             "evidence": llm_result.get("evidence", []),
             "summary": llm_result.get("summary", ""),
+            "problem_object": llm_result.get("problem_object") or {},
             "human_recommendation": skill.human_recommendation or "",
             "mcp_output": output_data,
             "tab_title": tab_title or f"{icon} {skill.name}",
