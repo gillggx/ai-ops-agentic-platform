@@ -220,7 +220,6 @@ class MCPBuilderService:
                 response = await self._client.messages.create(
                     model=_MODEL,
                     max_tokens=4096,
-                    thinking={"type": "adaptive"},
                     messages=[{"role": "user", "content": prompt}],
                 )
                 return _extract_json(_get_text(response.content))
@@ -294,7 +293,6 @@ DataSubject 名稱：{data_subject_name}
                     model=_MODEL,
                     max_tokens=4096,
                     system=sys_prompt,
-                    thinking={"type": "adaptive"},
                     messages=[{"role": "user", "content": prompt}],
                 )
                 return _extract_json(_get_text(response.content))
