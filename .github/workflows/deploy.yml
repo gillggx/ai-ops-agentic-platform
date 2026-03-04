@@ -21,59 +21,57 @@ jobs:
             set -e
             echo "=== 連線成功！開始部署 ==="
 
-            # ── 變數 ────────────────────────────────────────────────────
+            # ── 變數 ──────────────────────────────────────────────────────
             REPO_ROOT="$HOME/ai-ops-agentic-platform"
-            OUTER_BE="$REPO_ROOT/fastapi_backend_service"          # 有 requirements.txt
-            INNER_BE="$OUTER_BE/fastapi_backend_service"           # 有 main.py
+            OUTER_BE="$REPO_ROOT/fastapi_backend_service"
+            INNER_BE="$OUTER_BE/fastapi_backend_service"
             VENV="$REPO_ROOT/venv/bin/activate"
+            SERVICE_FILE="/etc/systemd/system/aiops.service"
 
-            # ── 1. Git pull ──────────────────────────────────────────────
+            # ── 1. Git pull ────────────────────────────────────────────────
             echo "--- [1/4] 拉取最新程式碼 ---"
             cd "$REPO_ROOT"
             mv "$OUTER_BE/dev.db" /tmp/devdb_bak.db 2>/dev/null || true
             git pull origin main
             cp /tmp/devdb_bak.db "$OUTER_BE/dev.db" 2>/dev/null || true
 
-            # ── 2. 前端打包 ──────────────────────────────────────────────
+            # ── 2. 前端打包 ────────────────────────────────────────────────
             echo "--- [2/4] 打包前端 ---"
             cd "$REPO_ROOT/frontend"
             npm install
             npm run build
 
-            # ── 3. Python 依賴 + DB migration ───────────────────────────
+            # ── 3. Python 依賴 + DB migration ─────────────────────────────
             echo "--- [3/4] 安裝依賴 & DB migration ---"
             source "$VENV"
             pip install -r "$OUTER_BE/requirements.txt"
             cd "$INNER_BE"
             alembic upgrade head
 
-            # ── 4. 重啟後端 (systemd) ────────────────────────────────────
+            # ── 4. 重啟後端 (systemd) ──────────────────────────────────────
             echo "--- [4/4] 重啟後端服務 ---"
 
-            # 首次部署：若 service 不存在，先建立
-            if ! systemctl is-enabled aiops.service &>/dev/null; then
-              echo "首次設定 systemd service..."
-              sudo tee /etc/systemd/system/aiops.service > /dev/null << EOF
-            [Unit]
-            Description=AIOps FastAPI Backend
-            After=network.target
+            # 建立或更新 systemd service（用 printf 避免 YAML heredoc 解析問題）
+            printf '%s\n' \
+              '[Unit]' \
+              'Description=AIOps FastAPI Backend' \
+              'After=network.target' \
+              '' \
+              '[Service]' \
+              "User=$USER" \
+              "WorkingDirectory=$INNER_BE" \
+              "ExecStart=$REPO_ROOT/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000" \
+              'Restart=always' \
+              'RestartSec=5' \
+              'StandardOutput=journal' \
+              'StandardError=journal' \
+              '' \
+              '[Install]' \
+              'WantedBy=multi-user.target' \
+              | sudo tee "$SERVICE_FILE" > /dev/null
 
-            [Service]
-            User=$USER
-            WorkingDirectory=$INNER_BE
-            ExecStart=$REPO_ROOT/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
-            Restart=always
-            RestartSec=5
-            StandardOutput=journal
-            StandardError=journal
-
-            [Install]
-            WantedBy=multi-user.target
-            EOF
-              sudo systemctl daemon-reload
-              sudo systemctl enable aiops.service
-            fi
-
+            sudo systemctl daemon-reload
+            sudo systemctl enable aiops.service
             sudo systemctl restart aiops.service
             sleep 2
             sudo systemctl status aiops.service --no-pager
