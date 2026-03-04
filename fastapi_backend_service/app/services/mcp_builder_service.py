@@ -123,14 +123,34 @@ _DEFAULT_TRY_RUN_SYSTEM_PROMPT = """\
 必須使用 json.dumps(fig.to_dict()) — 禁止用 fig.to_json()（可能產生二進位輸出）
 
 【繪圖規範 — 需要圖表時（trend_chart / bar_chart / scatter_chart）必須有至少一張】
-- Plotly（優先，支援多圖）：
+⚠️ 關鍵規則：每一條要顯示的資料線都必須獨立加入 go.Figure()。以 SPC Trend Chart 為例，
+你必須分別呼叫 fig.add_trace() 四次：(1) 主值折線、(2) UCL 水平線、(3) LCL 水平線、(4) OOC 散點標記。
+千萬不能漏掉任何一條 trace。
+
+- Plotly 多-trace 骨架（SPC Trend Chart 範例，其他圖表類比此結構）：
   charts = []
-  fig = go.Figure(...)
-  fig.update_layout(margin=dict(l=40, r=20, t=30, b=40), height=260)
-  charts.append(json.dumps(fig.to_dict()))   # ← 必須用 json.dumps(fig.to_dict())
-  # 若有第二張圖（例如：趨勢圖 + 分佈圖）：
-  # fig2 = go.Figure(...); charts.append(json.dumps(fig2.to_dict()))
+  fig = go.Figure()
+  # ① 主值折線（最重要，絕對不可省略）
+  fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='lines+markers',
+      name='Value', line=dict(color='green'), marker=dict(color='green')))
+  # ② UCL 水平線
+  fig.add_trace(go.Scatter(x=x_vals, y=[ucl]*len(x_vals), mode='lines',
+      name='UCL', line=dict(color='orange', dash='dash')))
+  # ③ LCL 水平線
+  fig.add_trace(go.Scatter(x=x_vals, y=[lcl]*len(x_vals), mode='lines',
+      name='LCL', line=dict(color='orange', dash='dash')))
+  # ④ OOC 異常點（若有）
+  ooc_mask = [(v > ucl or v < lcl) for v in y_vals]
+  ooc_x = [x for x, m in zip(x_vals, ooc_mask) if m]
+  ooc_y = [y for y, m in zip(y_vals, ooc_mask) if m]
+  if ooc_x:
+      fig.add_trace(go.Scatter(x=ooc_x, y=ooc_y, mode='markers',
+          name='OOC', marker=dict(color='red', size=10)))
+  fig.update_layout(title='Chart Title', xaxis_title='X', yaxis_title='Y',
+      margin=dict(l=40, r=20, t=40, b=40), height=320)
+  charts.append(json.dumps(fig.to_dict()))
   ui_render = {"type": "trend_chart", "charts": charts, "chart_data": charts[0]}
+
 - Matplotlib（備選，僅需單張時）：
   buf = io.BytesIO(); plt.savefig(buf, format='png'); buf.seek(0)
   chart_data = 'data:image/png;base64,' + base64.b64encode(buf.read()).decode()
