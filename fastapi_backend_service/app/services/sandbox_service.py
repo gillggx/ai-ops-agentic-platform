@@ -96,30 +96,28 @@ def _strip_preinjected_imports(script: str) -> str:
     return _PREINJECTED_IMPORT_RE.sub("# [auto-removed: pre-injected]", script)
 
 
-# Regex to intercept fig.to_html(...) / fig.to_json() — LLMs frequently ignore prompt
-# instructions and call these even when told not to. We rewrite them at the source so
-# the sandbox always produces JSON-serialisable chart output regardless.
+# Regex to intercept fig.to_html(...) — LLMs frequently call this despite prompt rules.
+# Rewrite to fig.to_json() which uses Plotly's own encoder and handles pandas Timestamps,
+# numpy types, and other non-serialisable objects natively.
+# NOTE: we do NOT rewrite fig.to_json() — it is already the correct format.
 _TO_HTML_RE = re.compile(
     r"\b([a-zA-Z_]\w*)\.to_html\s*\([^)]*\)"
-)
-_TO_JSON_RE = re.compile(
-    r"\b([a-zA-Z_]\w*)\.to_json\s*\(\s*\)"
 )
 
 
 def _rewrite_plotly_output(script: str) -> str:
-    """Rewrite fig.to_html(...) → json.dumps(fig.to_dict()) and
-    fig.to_json() → json.dumps(fig.to_dict()) so LLM-generated scripts
-    always produce JSON chart data even when they ignore system prompt rules."""
+    """Rewrite fig.to_html(...) → fig.to_json() so LLM-generated scripts
+    always produce Plotly JSON chart data even when they call to_html().
+
+    Uses fig.to_json() (not json.dumps(fig.to_dict())) because Plotly's own
+    JSON encoder correctly handles pandas Timestamps and numpy types that
+    Python's standard json.dumps would reject with TypeError."""
     rewritten = _TO_HTML_RE.sub(
-        lambda m: f"json.dumps({m.group(1)}.to_dict())", script
-    )
-    rewritten = _TO_JSON_RE.sub(
-        lambda m: f"json.dumps({m.group(1)}.to_dict())", rewritten
+        lambda m: f"{m.group(1)}.to_json()", script
     )
     if rewritten != script:
         logger.warning(
-            "sandbox: rewrote fig.to_html()/to_json() → json.dumps(fig.to_dict())"
+            "sandbox: rewrote fig.to_html() → fig.to_json()"
         )
     return rewritten
 
