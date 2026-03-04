@@ -343,6 +343,9 @@ class EventPipelineService:
                         "ui_render": {**(output_data.get("ui_render") or {}), "chart_data": chart, "type": "chart"},
                     }
 
+        # Attach call params so the frontend can display which parameters were used
+        output_data = {**output_data, "_call_params": resolved}
+
         # Run LLM diagnosis
         diagnostic_prompt = skill.diagnostic_prompt or ""
         if not diagnostic_prompt:

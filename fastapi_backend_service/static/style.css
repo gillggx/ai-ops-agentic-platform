@@ -1071,6 +1071,37 @@ body {
 }
 .evidence-table tr:nth-child(even) td { background: #f8fafc; }
 
+/* MCP call parameters header */
+.mcp-call-params {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+.mcp-param-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+.mcp-param-key {
+  color: #64748b;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+.mcp-param-sep { color: #94a3b8; margin: 0 1px; }
+.mcp-param-val { color: #1e293b; font-family: monospace; font-weight: 500; }
+
 /* Evidence chart/data tab bar */
 .evidence-tab-bar {
   display: flex;

@@ -363,6 +363,9 @@ class CopilotService:
                     }
                     print(f"[MCP DEBUG] {mcp.name}  auto_chart generated from dataset", flush=True)
 
+        # Attach call params so the frontend can display which parameters were used
+        output_data = {**output_data, "_call_params": params}
+
         yield {
             "type": "mcp_result",
             "mcp_id": tool_id,

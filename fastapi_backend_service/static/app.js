@@ -691,22 +691,37 @@ function _renderSkillBlock(s) {
 }
 
 /**
- * Render MCP output evidence as a tabbed section (📊 趨勢圖 | 📋 數據).
- * When a chart is available both tabs are shown; otherwise falls back to table-only.
- * Chart (Plotly/PNG) is activated via _initChartsInCard() after DOM insert.
- * @param {Object} mcpOutput  - Standard Payload {ui_render, dataset}
- * @param {string} [suffix]   - Unique suffix for tab element IDs (generated if omitted)
+ * Render MCP output evidence: call params header + tabbed Charting / Summary Data / Raw Data.
+ *
+ * Tab logic (per spec):
+ *   - "📊 Charting"      → shown when chart_data is present
+ *   - "📋 Summary Data"  → dataset exists AND script returned Standard Payload (_is_processed=true)
+ *   - "📄 Raw Data"      → dataset exists AND script output was wrapped by normalize (_is_processed=false)
+ *   Single-content → titled section without tabs.
+ *
+ * @param {Object} mcpOutput  - Standard Payload {ui_render, dataset, _call_params, _is_processed}
+ * @param {string} [suffix]   - Unique suffix for tab IDs (auto-generated if omitted)
  */
 function _renderMcpEvidence(mcpOutput, suffix) {
   if (!mcpOutput) return '';
 
-  const uid      = suffix || Math.random().toString(36).slice(2, 7);
-  const uiRender = mcpOutput.ui_render;
-  const rows     = Array.isArray(mcpOutput.dataset) ? mcpOutput.dataset.slice(0, 15) : [];
-  let chartHtml  = '';
-  let tableHtml  = '';
+  const uid         = suffix || Math.random().toString(36).slice(2, 7);
+  const uiRender    = mcpOutput.ui_render;
+  const rows        = Array.isArray(mcpOutput.dataset) ? mcpOutput.dataset.slice(0, 15) : [];
+  const callParams  = mcpOutput._call_params || {};
+  const isProcessed = mcpOutput._is_processed !== false; // default true when absent
+
+  // ── Call parameters header ─────────────────────────────────
+  const paramEntries = Object.entries(callParams).filter(([, v]) => v != null && v !== '');
+  const paramsHtml = paramEntries.length > 0 ? `
+    <div class="mcp-call-params">
+      ${paramEntries.map(([k, v]) =>
+        `<span class="mcp-param-chip"><span class="mcp-param-key">${_escapeHtml(k)}</span><span class="mcp-param-sep">:</span><span class="mcp-param-val">${_escapeHtml(String(v))}</span></span>`
+      ).join('')}
+    </div>` : '';
 
   // ── Chart ──────────────────────────────────────────────────
+  let chartHtml = '';
   if (uiRender && uiRender.chart_data) {
     const chartData = typeof uiRender.chart_data === 'string'
       ? uiRender.chart_data
@@ -723,6 +738,7 @@ function _renderMcpEvidence(mcpOutput, suffix) {
   }
 
   // ── Dataset table ──────────────────────────────────────────
+  let tableHtml = '';
   if (rows.length > 0) {
     const cols      = Object.keys(rows[0]);
     const headerRow = cols.map(c => `<th>${_escapeHtml(String(c))}</th>`).join('');
@@ -738,25 +754,36 @@ function _renderMcpEvidence(mcpOutput, suffix) {
       </div>`;
   }
 
-  if (!chartHtml && !tableHtml) return '';
+  if (!chartHtml && !tableHtml) return paramsHtml;
 
-  // No chart — table only, no tabs needed
-  if (!chartHtml) {
-    return `
+  const dataTabLabel = isProcessed ? '📋 Summary Data' : '📄 Raw Data';
+
+  // Chart only
+  if (!tableHtml) {
+    return `${paramsHtml}
       <div class="evidence-chart-section">
-        <div class="evidence-chart-title">📋 數據表格佐證</div>
+        <div class="evidence-chart-title">📊 Charting</div>
+        ${chartHtml}
+      </div>`;
+  }
+
+  // Dataset only — single section, no tabs
+  if (!chartHtml) {
+    return `${paramsHtml}
+      <div class="evidence-chart-section">
+        <div class="evidence-chart-title">${dataTabLabel}</div>
         ${tableHtml}
       </div>`;
   }
 
-  // Chart + Data tabs
-  return `
+  // Both chart + dataset → Charting tab | Summary Data / Raw Data tab
+  return `${paramsHtml}
     <div class="evidence-chart-section">
       <div class="evidence-tab-bar">
         <button id="ev-btn-chart-${uid}" class="evidence-tab-btn active"
-                onclick="_switchEvidenceTab('${uid}', 'chart')">📊 趨勢圖</button>
+                onclick="_switchEvidenceTab('${uid}', 'chart')">📊 Charting</button>
         <button id="ev-btn-data-${uid}" class="evidence-tab-btn"
-                onclick="_switchEvidenceTab('${uid}', 'data')">📋 數據</button>
+                onclick="_switchEvidenceTab('${uid}', 'data')">${dataTabLabel}</button>
       </div>
       <div id="ev-chart-${uid}" class="evidence-tab-panel">
         ${chartHtml}

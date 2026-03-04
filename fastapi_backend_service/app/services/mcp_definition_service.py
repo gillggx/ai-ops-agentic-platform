@@ -38,6 +38,8 @@ def _normalize_output(output_data: Any, llm_output_schema: Any) -> Dict[str, Any
         if "output_schema" not in output_data:
             output_data = dict(output_data)
             output_data["output_schema"] = llm_output_schema
+        # Mark as intentionally processed by the script (not wrapped by normalize)
+        output_data.setdefault("_is_processed", True)
         return output_data
 
     # Script returned a bare list
@@ -64,6 +66,7 @@ def _normalize_output(output_data: Any, llm_output_schema: Any) -> Dict[str, Any
         "output_schema": llm_output_schema or {},
         "dataset": dataset,
         "ui_render": {"type": "table", "chart_data": None},
+        "_is_processed": False,  # wrapped by normalize — treat as raw data
     }
 
 
