@@ -350,6 +350,19 @@ class CopilotService:
         llm_schema = _j(mcp.output_schema) if hasattr(mcp, "output_schema") else None
         output_data = _normalize_output(output_data, llm_schema)
 
+        # Auto-generate chart when script produced no chart_data but dataset is available
+        if not output_data.get("ui_render", {}).get("chart_data") and output_data.get("dataset"):
+            ui_cfg = _j(mcp.ui_render_config) if isinstance(mcp.ui_render_config, str) else (mcp.ui_render_config or {})
+            if ui_cfg.get("chart_type", "table") not in ("table", "", None):
+                from app.services.mcp_definition_service import _auto_chart  # noqa: PLC0415
+                chart = _auto_chart(output_data["dataset"], ui_cfg)
+                if chart:
+                    output_data = {
+                        **output_data,
+                        "ui_render": {**(output_data.get("ui_render") or {}), "chart_data": chart, "type": "chart"},
+                    }
+                    print(f"[MCP DEBUG] {mcp.name}  auto_chart generated from dataset", flush=True)
+
         yield {
             "type": "mcp_result",
             "mcp_id": tool_id,

@@ -67,6 +67,60 @@ def _normalize_output(output_data: Any, llm_output_schema: Any) -> Dict[str, Any
     }
 
 
+def _auto_chart(dataset: list, ui_render_config: Optional[dict]) -> Optional[str]:
+    """Generate a Plotly JSON string from dataset + ui_render_config.
+
+    Used as a fallback when the processing script produces no chart_data.
+    Returns a Plotly JSON string (fig.to_json()) or None on failure.
+    """
+    if not dataset or not isinstance(dataset, list):
+        return None
+    try:
+        import plotly.graph_objects as go  # noqa: PLC0415
+
+        cfg = ui_render_config or {}
+        x_key = cfg.get("x_axis", "")
+        y_key = cfg.get("y_axis", "")
+        series_keys = cfg.get("series") or []
+
+        first = dataset[0] if dataset else {}
+
+        x_vals = (
+            [row.get(x_key) for row in dataset]
+            if x_key and x_key in first
+            else list(range(len(dataset)))
+        )
+
+        keys_to_plot: list = []
+        if series_keys:
+            keys_to_plot = [k for k in series_keys if k in first]
+        elif y_key and y_key in first:
+            keys_to_plot = [y_key]
+        else:
+            keys_to_plot = [
+                k for k in first
+                if isinstance(first.get(k), (int, float)) and k != x_key
+            ][:4]
+
+        if not keys_to_plot:
+            return None
+
+        fig = go.Figure()
+        for key in keys_to_plot:
+            fig.add_trace(go.Scatter(
+                x=x_vals,
+                y=[row.get(key) for row in dataset],
+                mode="lines+markers",
+                name=key,
+            ))
+
+        fig.update_layout(margin=dict(l=40, r=20, t=30, b=40), height=260)
+        return fig.to_json()
+    except Exception:
+        logger.debug("_auto_chart failed", exc_info=True)
+        return None
+
+
 def _j(s: Optional[str]) -> Any:
     if not s:
         return None

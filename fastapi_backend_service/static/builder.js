@@ -1428,21 +1428,76 @@ function _buildResultHtml(result, label) {
 }
 
 /**
+ * Build a Plotly spec from a dataset array + ui_render_config.
+ * Returns {data, layout} suitable for Plotly.newPlot(), or null if not possible.
+ */
+function _buildChartFromDataset(dataset, cfg) {
+  if (!dataset || !dataset.length) return null;
+  const first = dataset[0];
+  const xKey = (cfg && cfg.x_axis) || '';
+  const yKey = (cfg && cfg.y_axis) || '';
+  const seriesKeys = (cfg && cfg.series) || [];
+
+  const xVals = (xKey && first.hasOwnProperty(xKey))
+    ? dataset.map(r => r[xKey])
+    : dataset.map((_, i) => i);
+
+  let keysToPlot = [];
+  if (seriesKeys.length > 0) {
+    keysToPlot = seriesKeys.filter(k => first.hasOwnProperty(k));
+  } else if (yKey && first.hasOwnProperty(yKey)) {
+    keysToPlot = [yKey];
+  } else {
+    keysToPlot = Object.keys(first)
+      .filter(k => typeof first[k] === 'number' && k !== xKey)
+      .slice(0, 4);
+  }
+  if (!keysToPlot.length) return null;
+
+  const traces = keysToPlot.map(key => ({
+    x: xVals,
+    y: dataset.map(r => r[key]),
+    type: 'scatter',
+    mode: 'lines+markers',
+    name: key,
+  }));
+  return { data: traces, layout: { margin: { l: 40, r: 20, t: 30, b: 40 }, height: 260 } };
+}
+
+/**
  * Restore the Step 4 result area from a saved MCP's sample_output (no re-run needed).
  * Called after _initTryTabs() when editing an existing MCP.
+ * Always rebuilds chart from dataset + ui_render_config to avoid stale chart_data in DB.
  */
 function _renderSavedTryRunResult(mcp) {
   const resultEl = document.getElementById('mcp-tryrun-result-1');
   const statusEl = document.getElementById('mcp-tryrun-status-1');
   if (!resultEl || !mcp.sample_output) return;
 
+  // Deep-copy the sample_output so we don't mutate the MCP object
+  const outputData = JSON.parse(JSON.stringify(mcp.sample_output));
+
+  // Always regenerate chart from dataset + ui_render_config to avoid stale chart_data
+  const cfg = mcp.ui_render_config || {};
+  const chartType = cfg.chart_type || 'table';
+  const dataset = outputData.dataset;
+  if (dataset && Array.isArray(dataset) && dataset.length > 0 && chartType !== 'table') {
+    const freshSpec = _buildChartFromDataset(dataset, cfg);
+    if (freshSpec) {
+      outputData.ui_render = Object.assign({}, outputData.ui_render || {}, {
+        chart_data: JSON.stringify(freshSpec),
+        type: 'chart',
+      });
+    }
+  }
+
   // Reconstruct a result-like object so _buildResultHtml can consume it
   const savedResult = {
     success:          true,
     script:           mcp.processing_script || '',
-    output_data:      mcp.sample_output,
+    output_data:      outputData,
     output_schema:    mcp.output_schema    || {},
-    ui_render_config: mcp.ui_render_config || {},
+    ui_render_config: cfg,
     input_definition: mcp.input_definition || {},
   };
 
