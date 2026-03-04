@@ -96,6 +96,34 @@ def _strip_preinjected_imports(script: str) -> str:
     return _PREINJECTED_IMPORT_RE.sub("# [auto-removed: pre-injected]", script)
 
 
+# Regex to intercept fig.to_html(...) / fig.to_json() — LLMs frequently ignore prompt
+# instructions and call these even when told not to. We rewrite them at the source so
+# the sandbox always produces JSON-serialisable chart output regardless.
+_TO_HTML_RE = re.compile(
+    r"\b([a-zA-Z_]\w*)\.to_html\s*\([^)]*\)"
+)
+_TO_JSON_RE = re.compile(
+    r"\b([a-zA-Z_]\w*)\.to_json\s*\(\s*\)"
+)
+
+
+def _rewrite_plotly_output(script: str) -> str:
+    """Rewrite fig.to_html(...) → json.dumps(fig.to_dict()) and
+    fig.to_json() → json.dumps(fig.to_dict()) so LLM-generated scripts
+    always produce JSON chart data even when they ignore system prompt rules."""
+    rewritten = _TO_HTML_RE.sub(
+        lambda m: f"json.dumps({m.group(1)}.to_dict())", script
+    )
+    rewritten = _TO_JSON_RE.sub(
+        lambda m: f"json.dumps({m.group(1)}.to_dict())", rewritten
+    )
+    if rewritten != script:
+        logger.warning(
+            "sandbox: rewrote fig.to_html()/to_json() → json.dumps(fig.to_dict())"
+        )
+    return rewritten
+
+
 # Regex patterns that must not appear in a submitted script
 _FORBIDDEN_PATTERNS = [
     r"\bimport\s+(requests?|http|urllib|socket|subprocess|os|sys|pathlib|shutil|glob|pickle)\b",
@@ -250,7 +278,7 @@ def _run_sync(script: str, raw_data: Any) -> Dict[str, Any]:
 
     local_ns: Dict[str, Any] = {}
 
-    clean_script = _strip_preinjected_imports(script)
+    clean_script = _rewrite_plotly_output(_strip_preinjected_imports(script))
     exec(compile(clean_script, "<mcp_script>", "exec"), global_ns, local_ns)  # noqa: S102
 
     process_fn = local_ns.get("process")
@@ -336,7 +364,7 @@ def _run_diagnose_sync(code: str, mcp_outputs: Dict[str, Any]) -> Dict[str, Any]
 
     local_ns: Dict[str, Any] = {}
 
-    clean_code = _strip_preinjected_imports(code)
+    clean_code = _rewrite_plotly_output(_strip_preinjected_imports(code))
     exec(compile(clean_code, "<diagnose_script>", "exec"), global_ns, local_ns)  # noqa: S102
 
     diagnose_fn = local_ns.get("diagnose")
