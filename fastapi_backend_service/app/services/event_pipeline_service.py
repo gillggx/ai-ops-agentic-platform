@@ -241,6 +241,16 @@ class EventPipelineService:
             et_pm = skill_param_map.get(skill.id, [])
             result = await self._run_skill(skill, event_params, system_prompt, base_url, et_param_mappings=et_pm)
 
+            mcp_out = result.mcp_output or {}
+            ui = mcp_out.get("ui_render") or {}
+            logger.warning(
+                "【後端準備發送的圖表 Payload】skill=%s  charts=%s  chart_data_len=%s  dataset_rows=%s  raw_dataset_rows=%s",
+                result.skill_name,
+                ui.get("charts"),
+                len(ui.get("chart_data") or ""),
+                len(mcp_out.get("dataset") or []),
+                len(mcp_out.get("_raw_dataset") or []),
+            )
             yield {"type": "skill_done", "index": i, **result.to_dict()}
 
         yield {"type": "done"}

@@ -369,6 +369,15 @@ class CopilotService:
         )
         output_data = {**output_data, "_raw_dataset": raw_list, "_call_params": params}
 
+        ui = output_data.get("ui_render") or {}
+        logger.warning(
+            "【後端準備發送的圖表 Payload】mcp=%s  charts=%s  chart_data_len=%s  dataset_rows=%s  raw_dataset_rows=%s",
+            mcp.name,
+            ui.get("charts"),
+            len(ui.get("chart_data") or ""),
+            len(output_data.get("dataset") or []),
+            len(output_data.get("_raw_dataset") or []),
+        )
         yield {
             "type": "mcp_result",
             "mcp_id": tool_id,

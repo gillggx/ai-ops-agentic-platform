@@ -284,6 +284,7 @@ async function _launchEventDiagnosis() {
           skillBubbles[evt.index] = document.getElementById(bubbleId);
 
         } else if (evt.type === 'skill_done') {
+          console.log('【1. SSE 收到原始 Payload】skill_done', JSON.parse(JSON.stringify(evt)));
           doneCount++;
           collectedSkills.push(evt);
           // Update chat bubble
@@ -701,6 +702,7 @@ function _renderSkillBlock(s) {
  */
 function _renderMcpEvidence(mcpOutput, suffix) {
   if (!mcpOutput) return '';
+  console.log('【2. 準備渲染圖表，檢查紙箱】 charts:', (mcpOutput.ui_render || {}).charts, 'chart_data:', (mcpOutput.ui_render || {}).chart_data, '_is_processed:', mcpOutput._is_processed, '_raw_dataset rows:', Array.isArray(mcpOutput._raw_dataset) ? mcpOutput._raw_dataset.length : mcpOutput._raw_dataset);
 
   const uid        = suffix || Math.random().toString(36).slice(2, 7);
   const uiRender   = mcpOutput.ui_render || {};
@@ -1746,6 +1748,7 @@ function _handleCopilotEvent(ev) {
     }
 
     case 'mcp_result': {
+      console.log('【1. SSE 收到原始 Payload】mcp_result', JSON.parse(JSON.stringify(ev)));
       document.getElementById('copilot-thinking-bubble')?.closest('.flex')?.remove();
       _clearSlashTool();
       _slotContext = {};
