@@ -76,7 +76,7 @@ class Config(BaseSettings):
 
     # ── LLM Settings ─────────────────────────────────────────────────────────
     LLM_MODEL: str = Field(
-        default="claude-3-5-sonnet-20241022",
+        default="claude-sonnet-4-6",
         description="Anthropic model ID used by all services (diagnostic, builder, copilot, etc.)",
     )
     LLM_MAX_TOKENS_DIAGNOSTIC: int = Field(
