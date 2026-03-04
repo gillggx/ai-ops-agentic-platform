@@ -439,7 +439,81 @@ Key attributes: `lot_id`, `tool_id`, `chamber_id`, `recipe_id`, `operation_numbe
 
 ## 7. Skills & Tools
 
-All skills inherit from `BaseMCPSkill` (`app/skills/base.py`) and are registered in `SKILL_REGISTRY` (dict keyed by tool name).
+> **Two kinds of "Skills" exist in this system. Section 7.0 describes DB-driven Skills (the primary workflow). Sections 7.1–7.5 describe the legacy hard-coded agent skills.**
+
+### 7.0 DB-Driven Skill Execution Flow
+
+A **Skill** is a DB record (`skill_definitions` table) created via the Skill Builder UI. When it is triggered, the following pipeline runs:
+
+```
+POST /api/v1/diagnose/event-driven-stream
+  { event_type_id, parameters }
+        │
+        ▼
+EventPipelineService.stream()
+  1. Look up all Skills registered for this EventType
+  2. For each Skill (in order):
+        │
+        ▼
+  _run_skill(skill, params, base_url)
+        │
+        ├─ A. Resolve MCP
+        │      skill.mcp_id → SkillDefinition → MCPDefinition
+        │
+        ├─ B. Fetch DataSubject data
+        │      mcp.data_subject_id → DataSubject.api_config.endpoint_url
+        │      GET {endpoint_url}?{param_mappings resolved from event params}
+        │      Returns raw JSON (list of records)
+        │
+        ├─ C. Run MCP processing script (Sandbox)
+        │      execute_script(mcp.processing_script, raw_data)
+        │      Returns Standard Payload or raw data
+        │
+        ├─ D. Normalize output → Standard Payload
+        │      _normalize_output(output_data, mcp.output_schema)
+        │      → {output_schema, dataset, ui_render: {type, chart_data}}
+        │
+        ├─ E. Auto-generate chart (if chart_data=null)
+        │      _auto_chart(dataset, mcp.ui_render_config)
+        │      Uses Plotly go.Scatter with x_axis/y_axis/series from ui_render_config
+        │
+        ├─ F. LLM Diagnosis
+        │      try_diagnosis(skill.diagnostic_prompt, mcp_output=output_data)
+        │      Returns: {status, conclusion, evidence, summary, problem_object}
+        │
+        └─ G. Return SkillPipelineResult
+               {status, conclusion, evidence, summary,
+                problem_object, human_recommendation, mcp_output}
+        │
+        ▼
+  yield SSE event: skill_done (all fields above)
+        │
+        ▼
+Frontend _appendSkillCard(evt)
+  Renders 5-section Skill Result Card (see §13)
+```
+
+#### Key Data Flows
+
+| Step | Input | Output |
+|------|-------|--------|
+| B: DS fetch | `endpoint_url + params` | Raw JSON list |
+| C: Sandbox | Python script + raw data | Arbitrary output (Standard Payload or raw) |
+| D: Normalize | Sandbox output | Standard Payload `{dataset, ui_render, output_schema}` |
+| E: Auto-chart | `dataset + ui_render_config` | Plotly JSON string (if `chart_data` was null) |
+| F: LLM | `diagnostic_prompt + MCP output` | `{status, conclusion, evidence, summary, problem_object}` |
+
+#### Parameter Mapping
+
+Event parameters → MCP input parameters via `skill.param_mappings`:
+```json
+{"mcp_field": "event_param_key"}
+```
+e.g. `{"chart_name": "chart_name"}` maps the event's `chart_name` attribute to the MCP script's expected input.
+
+---
+
+All legacy agent skills inherit from `BaseMCPSkill` (`app/skills/base.py`) and are registered in `SKILL_REGISTRY` (dict keyed by tool name).
 
 ### 7.1 `mcp_event_triage` — EventTriageSkill
 

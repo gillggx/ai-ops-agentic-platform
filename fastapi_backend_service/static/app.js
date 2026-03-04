@@ -396,8 +396,8 @@ function _appendSkillCard(s) {
   panel.innerHTML = _renderSkillBlock(s);
   panels.appendChild(panel);
 
-  // Init charts in the new panel
-  _initChartsInCard(panel);
+  // Defer Plotly init one frame so the browser completes layout before measuring container
+  requestAnimationFrame(() => _initChartsInCard(panel));
 }
 
 /** Switch active skill tab. */
@@ -616,6 +616,8 @@ function _switchEvidenceTab(suffix, tab) {
     dataTab  && dataTab.classList.add('hidden');
     chartBtn && chartBtn.classList.add('active');
     dataBtn  && dataBtn.classList.remove('active');
+    // Re-trigger Plotly render in case chart was first rendered while hidden
+    if (chartTab) requestAnimationFrame(() => _initChartsInCard(chartTab));
   } else {
     chartTab && chartTab.classList.add('hidden');
     dataTab  && dataTab.classList.remove('hidden');
@@ -1764,7 +1766,7 @@ function _renderCopilotMcpPanel(ev) {
     </div>`;
 
   const { panel } = _createWorkspaceTab(tabId, tabTitle, contentHtml);
-  _initChartsInCard(panel);
+  requestAnimationFrame(() => _initChartsInCard(panel));
 }
 
 /**
@@ -1780,7 +1782,7 @@ function _renderCopilotSkillPanel(ev) {
   const contentHtml = `<div class="p-4 overflow-y-auto flex-1">${_renderSkillBlock(ev)}</div>`;
 
   const { panel } = _createWorkspaceTab(tabId, tabTitle, contentHtml);
-  _initChartsInCard(panel);
+  requestAnimationFrame(() => _initChartsInCard(panel));
 }
 
 // ══════════════════════════════════════════════════════════════
