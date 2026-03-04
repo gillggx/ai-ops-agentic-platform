@@ -39,8 +39,9 @@ DataSubject 名稱：{data_subject_name}
    - raw_data 的結構符合上面的輸出 Schema
    - 根據加工意圖進行計算（例如：計算移動平均、標示 OOC、排序等）
    - 回傳 dict 必須符合標準輸出規範：{output_schema, dataset（統計摘要，不含原始 raw_data）, ui_render}
-   - ui_render 格式：{"type": "trend_chart|bar_chart|table", "charts": [fig.to_json(), ...], "chart_data": charts[0] 或 null}
-   - 若有圖表需求，charts 陣列至少包含一個 Plotly fig.to_json() 字串；無圖表則 charts=[], chart_data=null
+   - ui_render 格式：{"type": "trend_chart|bar_chart|table", "charts": [json.dumps(fig.to_dict()), ...], "chart_data": charts[0] 或 null}
+   - 若有圖表需求，charts 陣列至少包含一個 json.dumps(fig.to_dict()) 字串；無圖表則 charts=[], chart_data=null
+   - ⚠️⚠️ 絕對禁止使用 fig.to_html()、fig.write_html()、fig.to_json()；必須用 json.dumps(fig.to_dict()) ⚠️⚠️
 
 2. **output_schema**（object）：
    - 定義 process() 函式回傳值的 Schema
@@ -117,16 +118,18 @@ _DEFAULT_TRY_RUN_SYSTEM_PROMPT = """\
     "chart_data": "Plotly JSON 字串 1"  # 與 charts[0] 相同（向下相容用）；若無圖表則為 null
   }
 
+⚠️⚠️ 絕對禁止使用 fig.to_html()、fig.write_html()、fig.show()、任何 HTML 輸出方式 ⚠️⚠️
+必須使用 json.dumps(fig.to_dict()) — 禁止用 fig.to_json()（可能產生二進位輸出）
+
 【繪圖規範 — 需要圖表時（trend_chart / bar_chart / scatter_chart）必須有至少一張】
 - Plotly（優先，支援多圖）：
   charts = []
   fig = go.Figure(...)
   fig.update_layout(margin=dict(l=40, r=20, t=30, b=40), height=260)
-  charts.append(fig.to_json())
+  charts.append(json.dumps(fig.to_dict()))   # ← 必須用 json.dumps(fig.to_dict())
   # 若有第二張圖（例如：趨勢圖 + 分佈圖）：
-  # fig2 = go.Figure(...); charts.append(fig2.to_json())
+  # fig2 = go.Figure(...); charts.append(json.dumps(fig2.to_dict()))
   ui_render = {"type": "trend_chart", "charts": charts, "chart_data": charts[0]}
-  ⚠️ 必須用 fig.to_json()，禁止用 fig.to_html()、fig.write_html() 等 HTML 輸出方式
 - Matplotlib（備選，僅需單張時）：
   buf = io.BytesIO(); plt.savefig(buf, format='png'); buf.seek(0)
   chart_data = 'data:image/png;base64,' + base64.b64encode(buf.read()).decode()

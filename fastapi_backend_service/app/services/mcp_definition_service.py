@@ -26,6 +26,11 @@ from app.services.sandbox_service import execute_script
 _JSON_OPT = ("output_schema", "ui_render_config", "input_definition")
 
 
+def _is_html_chart(s: Any) -> bool:
+    """Return True if value looks like an HTML string (fig.to_html() output) rather than Plotly JSON."""
+    return isinstance(s, str) and s.strip().startswith("<")
+
+
 def _normalize_output(output_data: Any, llm_output_schema: Any) -> Dict[str, Any]:
     """Ensure output_data conforms to Standard Payload format.
 
@@ -34,6 +39,9 @@ def _normalize_output(output_data: Any, llm_output_schema: Any) -> Dict[str, Any
 
     Multi-chart support: ui_render.charts is a list of Plotly JSON strings.
     chart_data is kept as charts[0] for backward compat.
+
+    HTML sanitisation: if chart_data / charts[] contain HTML (fig.to_html() output),
+    they are discarded so the auto-chart fallback can regenerate proper JSON charts.
     """
     # Already Standard Payload — trust it
     if isinstance(output_data, dict) and "ui_render" in output_data:
@@ -43,15 +51,28 @@ def _normalize_output(output_data: Any, llm_output_schema: Any) -> Dict[str, Any
             output_data["output_schema"] = llm_output_schema
         # Normalise ui_render.charts: build charts list if missing, backfill chart_data
         ui = dict(output_data.get("ui_render") or {})
+
+        # ── Sanitise: strip any HTML chart_data (scripts won't execute in dynamic DOM) ──
+        cd = ui.get("chart_data")
+        if _is_html_chart(cd):
+            logger.warning("_normalize_output: chart_data is HTML (fig.to_html()), discarding — use json.dumps(fig.to_dict())")
+            ui["chart_data"] = None
+            cd = None
+
         charts = ui.get("charts")
         if not isinstance(charts, list):
-            # Old-format script: only chart_data present — wrap it
-            cd = ui.get("chart_data")
             ui["charts"] = [cd] if cd else []
         else:
-            # New-format: ensure chart_data mirrors charts[0]
-            if ui["charts"] and not ui.get("chart_data"):
-                ui["chart_data"] = ui["charts"][0]
+            # Strip any HTML entries from charts[]
+            clean = [c for c in charts if c and not _is_html_chart(c)]
+            if len(clean) < len(charts):
+                logger.warning("_normalize_output: %d HTML chart(s) stripped from charts[]", len(charts) - len(clean))
+            ui["charts"] = clean
+            if clean and not ui.get("chart_data"):
+                ui["chart_data"] = clean[0]
+            elif not clean:
+                ui["chart_data"] = None
+
         output_data["ui_render"] = ui
         # Mark as intentionally processed by the script (not wrapped by normalize)
         output_data.setdefault("_is_processed", True)
@@ -133,7 +154,8 @@ def _auto_chart(dataset: list, ui_render_config: Optional[dict]) -> Optional[str
             ))
 
         fig.update_layout(margin=dict(l=40, r=20, t=30, b=40), height=260)
-        return fig.to_json()
+        # Use json.dumps(fig.to_dict()) — avoids binary-encoded output from new Plotly versions
+        return json.dumps(fig.to_dict())
     except Exception:
         logger.debug("_auto_chart failed", exc_info=True)
         return None
