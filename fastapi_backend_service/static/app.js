@@ -605,25 +605,28 @@ function _renderProblemObjectInline(obj) {
   return `<span class="text-xs font-semibold bg-yellow-100 text-yellow-800 border border-yellow-300 rounded px-2 py-0.5">${_escapeHtml(String(obj))}</span>`;
 }
 
-/** Switch between chart / data tabs in an evidence section. */
-function _switchEvidenceTab(suffix, tab) {
-  const chartTab = document.getElementById(`ev-chart-${suffix}`);
-  const dataTab  = document.getElementById(`ev-data-${suffix}`);
-  const chartBtn = document.getElementById(`ev-btn-chart-${suffix}`);
-  const dataBtn  = document.getElementById(`ev-btn-data-${suffix}`);
-  if (tab === 'chart') {
-    chartTab && chartTab.classList.remove('hidden');
-    dataTab  && dataTab.classList.add('hidden');
-    chartBtn && chartBtn.classList.add('active');
-    dataBtn  && dataBtn.classList.remove('active');
-    // Re-trigger Plotly render in case chart was first rendered while hidden
-    if (chartTab) requestAnimationFrame(() => _initChartsInCard(chartTab));
-  } else {
-    chartTab && chartTab.classList.add('hidden');
-    dataTab  && dataTab.classList.remove('hidden');
-    chartBtn && chartBtn.classList.remove('active');
-    dataBtn  && dataBtn.classList.add('active');
+/**
+ * Switch the active tab in an evidence section.
+ * @param {string} uid   - Unique suffix for this evidence block
+ * @param {string} tabId - ID of the tab to activate (e.g. 'chart-0', 'summary', 'raw')
+ */
+function _switchEvidenceTab(uid, tabId) {
+  const section = document.getElementById(`ev-section-${uid}`);
+  if (!section) return;
+
+  // Hide all panels, deactivate all buttons
+  section.querySelectorAll('.evidence-tab-panel').forEach(p => p.classList.add('hidden'));
+  section.querySelectorAll('.evidence-tab-btn').forEach(b => b.classList.remove('active'));
+
+  // Show requested panel + activate its button
+  const panel = document.getElementById(`ev-panel-${tabId}-${uid}`);
+  const btn   = document.getElementById(`ev-btn-${tabId}-${uid}`);
+  if (panel) {
+    panel.classList.remove('hidden');
+    // Re-trigger Plotly render for chart tabs that were hidden during initial render
+    if (tabId.startsWith('chart')) requestAnimationFrame(() => _initChartsInCard(panel));
   }
+  if (btn) btn.classList.add('active');
 }
 
 function _renderSkillBlock(s) {
@@ -642,10 +645,12 @@ function _renderSkillBlock(s) {
   const statusClass = s.status === 'NORMAL' ? 'normal' : 'abnormal';
   const statusLabel = s.status === 'NORMAL' ? '✓ NORMAL' : '⚠ ABNORMAL';
 
-  // 1. Diagnosis message
-  const diagMsg = s.conclusion || '';
+  // 1. LLM-generated summary (primary narrative)
+  const summaryHtml = s.summary
+    ? `<p class="text-sm text-slate-800 mb-2">${_escapeHtml(s.summary)}</p>`
+    : (s.conclusion ? `<p class="text-sm text-slate-800 mb-2">${_escapeHtml(s.conclusion)}</p>` : '');
 
-  // 2. Identified abnormal object
+  // 2. Identified abnormal object (from Python result)
   const probObj = s.problem_object;
   const hasProbObj = probObj && (
     (typeof probObj === 'string' && probObj !== '') ||
@@ -658,19 +663,14 @@ function _renderSkillBlock(s) {
       ${_renderProblemObjectInline(probObj)}
     </div>` : '';
 
-  // 3. Evidence bullets
-  const evidenceHtml = (s.evidence || []).length > 0
-    ? `<ul class="pipeline-evidence-list">${(s.evidence || []).map(e => `<li>${_escapeHtml(e)}</li>`).join('')}</ul>`
-    : '';
-
-  // 4. Chart tab + Data tab
-  const tabSuffix = Math.random().toString(36).slice(2, 7);
-  const evidenceTabsHtml = _renderMcpEvidence(s.mcp_output, tabSuffix);
-
-  // 5. Suggestion action
+  // 3. Expert recommendation (only shown when ABNORMAL)
   const recommendHtml = s.human_recommendation && s.status !== 'NORMAL'
     ? `<div class="pipeline-recommendation">💡 <strong>建議動作：</strong>${_escapeHtml(s.human_recommendation)}</div>`
     : '';
+
+  // 4. MCP evidence tabs (Charting + Summary Data)
+  const tabSuffix = Math.random().toString(36).slice(2, 7);
+  const evidenceTabsHtml = _renderMcpEvidence(s.mcp_output, tabSuffix);
 
   return `
     <div class="pipeline-report-block">
@@ -680,12 +680,10 @@ function _renderSkillBlock(s) {
         <span class="pipeline-block-status ${statusClass}">${statusLabel}</span>
       </div>
       <div class="pipeline-block-body">
-        <p class="text-sm text-slate-800 font-medium mb-1">${_escapeHtml(diagMsg)}</p>
+        ${summaryHtml}
         ${problemHtml}
-        ${evidenceHtml}
-        ${s.summary ? `<p class="text-xs text-slate-500 mt-2 italic">${_escapeHtml(s.summary)}</p>` : ''}
-        ${evidenceTabsHtml}
         ${recommendHtml}
+        ${evidenceTabsHtml}
       </div>
     </div>`;
 }
@@ -693,23 +691,20 @@ function _renderSkillBlock(s) {
 /**
  * Render MCP output evidence: call params header + tabbed Charting / Summary Data / Raw Data.
  *
- * Tab logic (per spec):
- *   - "📊 Charting"      → shown when chart_data is present
- *   - "📋 Summary Data"  → dataset exists AND script returned Standard Payload (_is_processed=true)
- *   - "📄 Raw Data"      → dataset exists AND script output was wrapped by normalize (_is_processed=false)
- *   Single-content → titled section without tabs.
+ * Tab logic:
+ *   - "📊 Charting" (or "📊 Chart N" for multiples) → one tab per chart in ui_render.charts[]
+ *   - "📋 Summary Data" → dataset exists AND _is_processed=true
+ *   - "📄 Raw Data"     → _raw_dataset exists (original DS API response)
  *
- * @param {Object} mcpOutput  - Standard Payload {ui_render, dataset, _call_params, _is_processed}
+ * @param {Object} mcpOutput  - Standard Payload {ui_render, dataset, _call_params, _raw_dataset}
  * @param {string} [suffix]   - Unique suffix for tab IDs (auto-generated if omitted)
  */
 function _renderMcpEvidence(mcpOutput, suffix) {
   if (!mcpOutput) return '';
 
-  const uid         = suffix || Math.random().toString(36).slice(2, 7);
-  const uiRender    = mcpOutput.ui_render;
-  const rows        = Array.isArray(mcpOutput.dataset) ? mcpOutput.dataset.slice(0, 15) : [];
-  const callParams  = mcpOutput._call_params || {};
-  const isProcessed = mcpOutput._is_processed !== false; // default true when absent
+  const uid        = suffix || Math.random().toString(36).slice(2, 7);
+  const uiRender   = mcpOutput.ui_render || {};
+  const callParams = mcpOutput._call_params || {};
 
   // ── Call parameters header ─────────────────────────────────
   const paramEntries = Object.entries(callParams).filter(([, v]) => v != null && v !== '');
@@ -720,77 +715,87 @@ function _renderMcpEvidence(mcpOutput, suffix) {
       ).join('')}
     </div>` : '';
 
-  // ── Chart ──────────────────────────────────────────────────
-  let chartHtml = '';
-  if (uiRender && uiRender.chart_data) {
-    const chartData = typeof uiRender.chart_data === 'string'
-      ? uiRender.chart_data
-      : JSON.stringify(uiRender.chart_data);
-    const escaped = chartData.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
-    chartHtml = `
-      <div class="evidence-chart-wrapper">
-        <div class="evidence-chart" data-chart="${escaped}"></div>
-        <button class="chart-expand-btn"
-                onclick="_openChartFullscreen(this.previousElementSibling.dataset.chart)">
-          ⛶ 全螢幕查看
-        </button>
-      </div>`;
+  // ── Build tabs array: [{id, label, html}] ─────────────────
+  const tabs = [];
+
+  // Chart tabs — prefer charts[] array; fall back to chart_data for old/auto-chart payloads
+  const chartsArr = Array.isArray(uiRender.charts) ? uiRender.charts.filter(Boolean) : [];
+  const charts = chartsArr.length > 0 ? chartsArr
+    : (uiRender.chart_data ? [uiRender.chart_data] : []);
+
+  charts.forEach((chartData, i) => {
+    const tabId = `chart-${i}`;
+    const label = charts.length === 1 ? '📊 Charting' : `📊 Chart ${i + 1}`;
+    const cd = typeof chartData === 'string' ? chartData : JSON.stringify(chartData);
+    const escaped = cd.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    tabs.push({
+      id: tabId,
+      label,
+      html: `
+        <div class="evidence-chart-wrapper">
+          <div class="evidence-chart" data-chart="${escaped}"></div>
+          <button class="chart-expand-btn"
+                  onclick="_openChartFullscreen(this.previousElementSibling.dataset.chart)">
+            ⛶ 全螢幕查看
+          </button>
+        </div>`,
+    });
+  });
+
+  // Summary Data tab — processed dataset
+  const summaryRows = Array.isArray(mcpOutput.dataset) ? mcpOutput.dataset.slice(0, 20) : [];
+  if (summaryRows.length > 0 && mcpOutput._is_processed !== false) {
+    tabs.push({ id: 'summary', label: '📋 Summary Data', html: _buildTableHtml(summaryRows) });
   }
 
-  // ── Dataset table ──────────────────────────────────────────
-  let tableHtml = '';
-  if (rows.length > 0) {
-    const cols      = Object.keys(rows[0]);
-    const headerRow = cols.map(c => `<th>${_escapeHtml(String(c))}</th>`).join('');
-    const bodyRows  = rows.map(r =>
-      `<tr>${cols.map(c => `<td>${_escapeHtml(String(r[c] ?? ''))}</td>`).join('')}</tr>`
-    ).join('');
-    tableHtml = `
-      <div style="overflow-x:auto">
-        <table class="evidence-table">
-          <thead><tr>${headerRow}</tr></thead>
-          <tbody>${bodyRows}</tbody>
-        </table>
-      </div>`;
+  // Raw Data tab — original DS API response
+  const rawRows = Array.isArray(mcpOutput._raw_dataset) ? mcpOutput._raw_dataset.slice(0, 20) : [];
+  if (rawRows.length > 0) {
+    tabs.push({ id: 'raw', label: '📄 Raw Data', html: _buildTableHtml(rawRows) });
   }
 
-  if (!chartHtml && !tableHtml) return paramsHtml;
+  if (tabs.length === 0) return paramsHtml;
 
-  const dataTabLabel = isProcessed ? '📋 Summary Data' : '📄 Raw Data';
-
-  // Chart only
-  if (!tableHtml) {
+  // Single tab — show as titled section without tab bar
+  if (tabs.length === 1) {
     return `${paramsHtml}
       <div class="evidence-chart-section">
-        <div class="evidence-chart-title">📊 Charting</div>
-        ${chartHtml}
+        <div class="evidence-chart-title">${tabs[0].label}</div>
+        ${tabs[0].html}
       </div>`;
   }
 
-  // Dataset only — single section, no tabs
-  if (!chartHtml) {
-    return `${paramsHtml}
-      <div class="evidence-chart-section">
-        <div class="evidence-chart-title">${dataTabLabel}</div>
-        ${tableHtml}
-      </div>`;
-  }
+  // Multiple tabs — render tab bar
+  const firstTab = tabs[0].id;
+  const tabBtns  = tabs.map((t, i) => `
+    <button id="ev-btn-${t.id}-${uid}" class="evidence-tab-btn${i === 0 ? ' active' : ''}"
+            onclick="_switchEvidenceTab('${uid}', '${t.id}')">${t.label}</button>`).join('');
+  const tabPanels = tabs.map((t, i) => `
+    <div id="ev-panel-${t.id}-${uid}" class="evidence-tab-panel${i !== 0 ? ' hidden' : ''}">
+      ${t.html}
+    </div>`).join('');
 
-  // Both chart + dataset → Charting tab | Summary Data / Raw Data tab
   return `${paramsHtml}
-    <div class="evidence-chart-section">
-      <div class="evidence-tab-bar">
-        <button id="ev-btn-chart-${uid}" class="evidence-tab-btn active"
-                onclick="_switchEvidenceTab('${uid}', 'chart')">📊 Charting</button>
-        <button id="ev-btn-data-${uid}" class="evidence-tab-btn"
-                onclick="_switchEvidenceTab('${uid}', 'data')">${dataTabLabel}</button>
-      </div>
-      <div id="ev-chart-${uid}" class="evidence-tab-panel">
-        ${chartHtml}
-      </div>
-      <div id="ev-data-${uid}" class="evidence-tab-panel hidden">
-        ${tableHtml}
-      </div>
+    <div id="ev-section-${uid}" class="evidence-chart-section">
+      <div class="evidence-tab-bar">${tabBtns}</div>
+      ${tabPanels}
+    </div>`;
+}
+
+/** Build an HTML table from an array of row objects. */
+function _buildTableHtml(rows) {
+  if (!rows || !rows.length) return '';
+  const cols      = Object.keys(rows[0]);
+  const headerRow = cols.map(c => `<th>${_escapeHtml(String(c))}</th>`).join('');
+  const bodyRows  = rows.map(r =>
+    `<tr>${cols.map(c => `<td>${_escapeHtml(String(r[c] ?? ''))}</td>`).join('')}</tr>`
+  ).join('');
+  return `
+    <div style="overflow-x:auto">
+      <table class="evidence-table">
+        <thead><tr>${headerRow}</tr></thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
     </div>`;
 }
 

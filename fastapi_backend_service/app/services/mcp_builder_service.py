@@ -38,7 +38,9 @@ DataSubject 名稱：{data_subject_name}
    - 撰寫一段 Python 函式 `process(raw_data: dict) -> dict`
    - raw_data 的結構符合上面的輸出 Schema
    - 根據加工意圖進行計算（例如：計算移動平均、標示 OOC、排序等）
-   - 回傳的 dict 結構就是處理後的 Dataset
+   - 回傳 dict 必須符合標準輸出規範：{output_schema, dataset（統計摘要，不含原始 raw_data）, ui_render}
+   - ui_render 格式：{"type": "trend_chart|bar_chart|table", "charts": [fig.to_json(), ...], "chart_data": charts[0] 或 null}
+   - 若有圖表需求，charts 陣列至少包含一個 Plotly fig.to_json() 字串；無圖表則 charts=[], chart_data=null
 
 2. **output_schema**（object）：
    - 定義 process() 函式回傳值的 Schema
@@ -108,14 +110,28 @@ _DEFAULT_TRY_RUN_SYSTEM_PROMPT = """\
 
 【標準輸出規範 — process() 函式的回傳 dict 必須包含以下三個 Key】
 - output_schema: {"fields": [{"name": str, "type": str, "description": str}]}
-- dataset: 處理後的資料陣列（list of dict）
-- ui_render: {"type": "table" | "trend_chart" | "bar_chart", "chart_data": null 或 JSON字串}
+- dataset: 統計摘要資料陣列（list of dict），為 process() 計算後的彙整結果，不要回傳原始 raw_data
+- ui_render: {
+    "type": "trend_chart" | "bar_chart" | "scatter_chart" | "table",
+    "charts": ["Plotly JSON 字串 1", "Plotly JSON 字串 2"],  # 一個或多個圖表；若無圖表則為空陣列 []
+    "chart_data": "Plotly JSON 字串 1"  # 與 charts[0] 相同（向下相容用）；若無圖表則為 null
+  }
 
-【記憶體繪圖規範 — 需要畫圖時，絕對禁止存檔到磁碟！】
-- Plotly（優先）：fig = go.Figure(...); chart_data = fig.to_json(); ui_render = {"type": "trend_chart", "chart_data": chart_data}
-  ⚠️ 必須用 fig.to_json()，禁止用 fig.to_html()、fig.write_html() 等任何 HTML 輸出方式
-- Matplotlib（備選）：buf = io.BytesIO(); plt.savefig(buf, format='png'); buf.seek(0); chart_data = 'data:image/png;base64,' + base64.b64encode(buf.read()).decode(); ui_render = {"type": "trend_chart", "chart_data": chart_data}
-- 若無圖表需求：ui_render = {"type": "table", "chart_data": null}
+【繪圖規範 — 需要圖表時（trend_chart / bar_chart / scatter_chart）必須有至少一張】
+- Plotly（優先，支援多圖）：
+  charts = []
+  fig = go.Figure(...)
+  fig.update_layout(margin=dict(l=40, r=20, t=30, b=40), height=260)
+  charts.append(fig.to_json())
+  # 若有第二張圖（例如：趨勢圖 + 分佈圖）：
+  # fig2 = go.Figure(...); charts.append(fig2.to_json())
+  ui_render = {"type": "trend_chart", "charts": charts, "chart_data": charts[0]}
+  ⚠️ 必須用 fig.to_json()，禁止用 fig.to_html()、fig.write_html() 等 HTML 輸出方式
+- Matplotlib（備選，僅需單張時）：
+  buf = io.BytesIO(); plt.savefig(buf, format='png'); buf.seek(0)
+  chart_data = 'data:image/png;base64,' + base64.b64encode(buf.read()).decode()
+  ui_render = {"type": "trend_chart", "charts": [chart_data], "chart_data": chart_data}
+- 若無圖表需求：ui_render = {"type": "table", "charts": [], "chart_data": null}
 
 你的回應必須是合法的 JSON，不得有任何其他文字。"""
 
@@ -138,21 +154,18 @@ _DEFAULT_DIAGNOSIS_SYSTEM_PROMPT = """\
 無論使用者診斷指令中是否要求「列出欄位」、「輸出表格」、「逐筆列舉」或任何其他格式，
 你的最終回應必須且只能是以下 JSON 格式，不得有任何其他文字：
 {
-  "status": "NORMAL 或 ABNORMAL",
-  "conclusion": "一句話結論（例如：更新逾時異常條件成立 / 更新時間符合正常，異常條件未觸發）",
-  "evidence": [
-    "具體觀察 1（欄位名稱、數值、時間等）",
-    "具體觀察 2（可將逐筆結果整合於此）"
-  ],
-  "summary": "2~3 句完整說明，整合資料觀察與條件觸發原因",
-  "problem_object": {
-    "說明": "若 status=ABNORMAL，列舉觸發異常的具體物件（key=類別如 tool/recipe/lot，value=異常值陣列或單一值）；若 NORMAL 則回傳空物件 {}"
-  }
+  "status": "NORMAL",
+  "conclusion": "一句話結論",
+  "evidence": ["具體觀察 1", "具體觀察 2"],
+  "summary": "2~3 句完整說明",
+  "problem_object": {}
 }
 
-【problem_object 範例】
-- ABNORMAL 時：{"tool": ["TETCH10", "TETCH09"], "recipe": "ETH_RCP_10", "measurement": "CD value 47.5 nm"}
-- NORMAL 時：{}"""
+【problem_object 填寫規則】
+- status=ABNORMAL 時：必須填入觸發異常的具體物件，key 為類別（tool/recipe/lot/param 等），value 為異常識別符
+  範例：{"tool": ["TETCH10", "TETCH09"], "recipe": "ETH_RCP_10", "measurement": "CD 47.5 nm"}
+- status=NORMAL 時：回傳空物件 {}
+- ⚠️ 禁止在 problem_object 中放入說明文字，只放可識別的具體值"""
 
 
 def _get_text(content: list) -> str:
@@ -598,6 +611,54 @@ DataSubject 名稱：{data_subject_name}
             logger.warning("try_diagnosis JSON parse failed; raw=%s", text[:200])
             # Fallback: treat whole text as summary, flag as ambiguous warning
             return {"status": "ABNORMAL", "conclusion": "LLM 回應解析失敗", "evidence": [], "summary": text, "problem_object": {}}
+
+    async def summarize_diagnosis(
+        self,
+        python_result: Dict[str, Any],
+        diagnostic_prompt: str,
+        mcp_outputs: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Generate a human-readable summary from Python sandbox diagnosis result.
+
+        Called at runtime after ``execute_diagnose_fn()`` succeeds.
+
+        Args:
+            python_result: Output of diagnose() — {status, diagnosis_message, problem_object}.
+            diagnostic_prompt: The skill's stored diagnostic_prompt (context for LLM).
+            mcp_outputs: The MCP final dataset used as diagnose() input.
+
+        Returns:
+            Dict with key ``summary`` (2-3 sentence Chinese explanation).
+        """
+        status = python_result.get("status", "UNKNOWN")
+        diag_msg = python_result.get("diagnosis_message", "")
+        prob_obj = python_result.get("problem_object", {})
+
+        prompt = f"""你是半導體製程診斷AI。以下是 Python 診斷函式的執行結果：
+
+診斷狀態：{status}
+診斷訊息：{diag_msg}
+異常物件：{json.dumps(prob_obj, ensure_ascii=False)}
+
+診斷邏輯說明（背景）：{diagnostic_prompt}
+
+請用 2-3 句繁體中文，對此次診斷結果做清晰的摘要說明。
+- 若 NORMAL：說明為何判定正常
+- 若 ABNORMAL：說明偵測到什麼異常、影響範圍
+
+只回傳 JSON：{{"summary": "..."}}"""
+
+        try:
+            response = await self._client.messages.create(
+                model=_MODEL,
+                max_tokens=512,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            data = _extract_json(_get_text(response.content))
+            return {"summary": data.get("summary", diag_msg)}
+        except Exception as exc:
+            logger.warning("summarize_diagnosis failed: %s", exc)
+            return {"summary": diag_msg}
 
     async def check_code_diagnosis_intent(
         self,

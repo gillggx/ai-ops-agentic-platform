@@ -29,15 +29,30 @@ _JSON_OPT = ("output_schema", "ui_render_config", "input_definition")
 def _normalize_output(output_data: Any, llm_output_schema: Any) -> Dict[str, Any]:
     """Ensure output_data conforms to Standard Payload format.
 
-    Standard Payload = {output_schema, dataset, ui_render: {type, chart_data}}.
+    Standard Payload = {output_schema, dataset, ui_render: {type, charts, chart_data}}.
     If the sandbox script returned old-format data (no 'ui_render' key), wrap it.
+
+    Multi-chart support: ui_render.charts is a list of Plotly JSON strings.
+    chart_data is kept as charts[0] for backward compat.
     """
     # Already Standard Payload — trust it
     if isinstance(output_data, dict) and "ui_render" in output_data:
+        output_data = dict(output_data)
         # Ensure output_schema is present (may be missing in early LLM versions)
         if "output_schema" not in output_data:
-            output_data = dict(output_data)
             output_data["output_schema"] = llm_output_schema
+        # Normalise ui_render.charts: build charts list if missing, backfill chart_data
+        ui = dict(output_data.get("ui_render") or {})
+        charts = ui.get("charts")
+        if not isinstance(charts, list):
+            # Old-format script: only chart_data present — wrap it
+            cd = ui.get("chart_data")
+            ui["charts"] = [cd] if cd else []
+        else:
+            # New-format: ensure chart_data mirrors charts[0]
+            if ui["charts"] and not ui.get("chart_data"):
+                ui["chart_data"] = ui["charts"][0]
+        output_data["ui_render"] = ui
         # Mark as intentionally processed by the script (not wrapped by normalize)
         output_data.setdefault("_is_processed", True)
         return output_data
@@ -65,7 +80,7 @@ def _normalize_output(output_data: Any, llm_output_schema: Any) -> Dict[str, Any
     return {
         "output_schema": llm_output_schema or {},
         "dataset": dataset,
-        "ui_render": {"type": "table", "chart_data": None},
+        "ui_render": {"type": "table", "charts": [], "chart_data": None},
         "_is_processed": False,  # wrapped by normalize — treat as raw data
     }
 
@@ -369,6 +384,12 @@ class MCPDefinitionService:
         # without the required {output_schema, dataset, ui_render} keys.
         output_data = _normalize_output(output_data, result.get("output_schema", {}))
 
+        # Attach raw DS data so frontend can show "Raw Data" tab
+        raw_list = sample_data if isinstance(sample_data, list) else (
+            list(sample_data.values())[0] if isinstance(sample_data, dict) and sample_data else [sample_data]
+        )
+        output_data = {**output_data, "_raw_dataset": raw_list}
+
         return MCPTryRunResponse(
             success=True,
             script=script,
@@ -413,6 +434,12 @@ class MCPDefinitionService:
 
         llm_output_schema = _j(obj.output_schema) or {}
         output_data = _normalize_output(output_data, llm_output_schema)
+
+        # Attach raw DS data so frontend can show "Raw Data" tab
+        raw_list = raw_data if isinstance(raw_data, list) else (
+            list(raw_data.values())[0] if isinstance(raw_data, dict) and raw_data else [raw_data]
+        )
+        output_data = {**output_data, "_raw_dataset": raw_list}
 
         return MCPTryRunResponse(
             success=True,

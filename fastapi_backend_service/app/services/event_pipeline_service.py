@@ -19,7 +19,7 @@ from app.repositories.skill_definition_repository import SkillDefinitionReposito
 from app.repositories.system_parameter_repository import SystemParameterRepository
 from app.services.mcp_builder_service import MCPBuilderService
 from app.services.mcp_definition_service import _normalize_output
-from app.services.sandbox_service import execute_script
+from app.services.sandbox_service import execute_diagnose_fn, execute_script
 
 logger = logging.getLogger(__name__)
 
@@ -340,18 +340,66 @@ class EventPipelineService:
                 if chart:
                     output_data = {
                         **output_data,
-                        "ui_render": {**(output_data.get("ui_render") or {}), "chart_data": chart, "type": "chart"},
+                        "ui_render": {**(output_data.get("ui_render") or {}), "chart_data": chart, "charts": [chart], "type": "chart"},
                     }
 
-        # Attach call params so the frontend can display which parameters were used
-        output_data = {**output_data, "_call_params": resolved}
+        # Attach raw DS data (before MCP script processing) + call params
+        raw_list = raw_data if isinstance(raw_data, list) else (
+            list(raw_data.values())[0] if isinstance(raw_data, dict) and raw_data else [raw_data]
+        )
+        output_data = {**output_data, "_raw_dataset": raw_list, "_call_params": resolved}
 
-        # Run LLM diagnosis
+        # ── Diagnosis: Python code (preferred) → LLM summary; fallback to pure LLM ──
         diagnostic_prompt = skill.diagnostic_prompt or ""
+
+        # Attempt Python-code-based diagnosis if generated_code exists in last_diagnosis_result
+        last_dr = _j(skill.last_diagnosis_result) if hasattr(skill, "last_diagnosis_result") else None
+        generated_code = (last_dr or {}).get("generated_code", "")
+
+        if generated_code:
+            # Path A: run sandbox diagnose() → Python gives status + problem_object
+            mcp_outputs_for_diag = {mcp_name: output_data}
+            try:
+                py_result = await execute_diagnose_fn(generated_code, mcp_outputs_for_diag)
+            except Exception as exc:
+                logger.warning("execute_diagnose_fn failed for skill %s: %s", skill.id, exc)
+                py_result = None
+
+            if py_result is not None:
+                raw_status = py_result.get("status", "ABNORMAL")
+                status = "NORMAL" if raw_status.upper() == "NORMAL" else "ABNORMAL"
+                problem_object = py_result.get("problem_object") or {}
+
+                # LLM generates a concise summary from the Python result
+                try:
+                    summary_result = await self._llm.summarize_diagnosis(
+                        python_result=py_result,
+                        diagnostic_prompt=diagnostic_prompt,
+                        mcp_outputs=mcp_outputs_for_diag,
+                    )
+                    summary = summary_result.get("summary", py_result.get("diagnosis_message", ""))
+                except Exception as exc:
+                    logger.warning("summarize_diagnosis failed for skill %s: %s", skill.id, exc)
+                    summary = py_result.get("diagnosis_message", "")
+
+                return SkillPipelineResult(
+                    skill_id=skill.id,
+                    skill_name=skill_name,
+                    mcp_name=mcp_name,
+                    status=status,
+                    conclusion=py_result.get("diagnosis_message", ""),
+                    evidence=[],
+                    summary=summary,
+                    human_recommendation=skill.human_recommendation or "",
+                    problem_object=problem_object,
+                    mcp_output=output_data,
+                )
+
+        # Path B (fallback): pure LLM diagnosis
         if not diagnostic_prompt:
             return SkillPipelineResult(
                 skill_id=skill.id, skill_name=skill_name, mcp_name=mcp_name,
-                error="此 Skill 尚未設定 Diagnostic Prompt",
+                error="此 Skill 尚未設定 Diagnostic Prompt 且無生成診斷程式碼",
             )
 
         try:

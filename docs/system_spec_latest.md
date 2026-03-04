@@ -477,20 +477,29 @@ EventPipelineService.stream()
         │      _auto_chart(dataset, mcp.ui_render_config)
         │      Uses Plotly go.Scatter with x_axis/y_axis/series from ui_render_config
         │
-        ├─ F. LLM Diagnosis
+        ├─ F. Diagnosis (Python-code path, preferred)
+        │      If skill.last_diagnosis_result.generated_code exists:
+        │        execute_diagnose_fn(generated_code, {mcp_name: output_data})
+        │        → Python sandbox returns: {status, diagnosis_message, problem_object}
+        │        Then: summarize_diagnosis(python_result, diagnostic_prompt, mcp_outputs)
+        │        → LLM returns: {summary}
+        │
+        ├─ F'. Diagnosis fallback (pure LLM, when no generated_code)
         │      try_diagnosis(skill.diagnostic_prompt, mcp_output=output_data)
         │      Returns: {status, conclusion, evidence, summary, problem_object}
         │
         └─ G. Return SkillPipelineResult
                {status, conclusion, evidence, summary,
                 problem_object, human_recommendation, mcp_output}
+               ▸ Python path:  status/problem_object from Python; summary from LLM
+               ▸ Fallback path: all fields from LLM
         │
         ▼
   yield SSE event: skill_done (all fields above)
         │
         ▼
 Frontend _appendSkillCard(evt)
-  Renders 5-section Skill Result Card (see §13)
+  Renders 4-section Skill Result Card (see §13)
 ```
 
 #### Key Data Flows
@@ -501,7 +510,9 @@ Frontend _appendSkillCard(evt)
 | C: Sandbox | Python script + raw data | Arbitrary output (Standard Payload or raw) |
 | D: Normalize | Sandbox output | Standard Payload `{dataset, ui_render, output_schema}` |
 | E: Auto-chart | `dataset + ui_render_config` | Plotly JSON string (if `chart_data` was null) |
-| F: LLM | `diagnostic_prompt + MCP output` | `{status, conclusion, evidence, summary, problem_object}` |
+| F: Python sandbox | `generated_code + mcp_outputs` | `{status, diagnosis_message, problem_object}` |
+| F summarize | Python result + diagnostic_prompt | `{summary}` (LLM-generated narrative) |
+| F' LLM fallback | `diagnostic_prompt + MCP output` | `{status, conclusion, evidence, summary, problem_object}` |
 
 #### Parameter Mapping
 
@@ -746,7 +757,7 @@ Push to `main` branch → `.github/workflows/deploy.yml` SSH-deploys to EC2:
 
 ---
 
-## 13. Skill Result Card UI (v12.0)
+## 13. Skill Result Card UI (v13.0)
 
 When a Skill executes, the right-side report panel renders a per-skill tab card. Each card has the following layout:
 
@@ -754,63 +765,48 @@ When a Skill executes, the right-side report panel renders a per-skill tab card.
 ┌─────────────────────────────────────────────────────────────────┐
 │ ⚙️ [Skill Name]     [MCP Name]              ⚠ ABNORMAL / ✓ NORMAL │
 ├─────────────────────────────────────────────────────────────────┤
-│ [Diagnosis Message]                                              │
-│   e.g. "3-sigma 最差機台與配方異常條件成立，TETCH10 搭配                │
-│         ETH_RCP_10 之 CD 值 47.5 nm 為所有資料點中偏離管制最嚴重者"   │
+│ [LLM Summary]                                                    │
+│   e.g. "偵測到 TETCH10 搭配 ETH_RCP_10 之 CD 值 47.5 nm 超出     │
+│         3-sigma 管制上限，為所有資料點中偏離最嚴重者。"              │
 │                                                                  │
 │ 🎯 異常物件                                                        │
 │   tool: TETCH10, TETCH09                                        │
 │   recipe: ETH_RCP_10                                            │
 │   measurement: CD value 47.5 nm                                 │
 │                                                                  │
-│ • UCL=46.5 nm, LCL=43.5 nm, 管制中心值 45.0 nm                   │  ← evidence bullets
-│ • 各資料點偏離中心值之 sigma 倍數：TETCH10 (+5.0σ), ...           │
-│ • OOC 記錄共 4 筆：TETCH10, TETCH09, TETCH03, TETCH01            │
+│ 💡 建議動作：聯繫製程工程師排查 TETCH10 是否有硬體異常            │  ← suggestion action
 │                                                                  │
 │ ┌──────────────┬──────────────┐                                  │
-│ │ 📊 趨勢圖 ▐  │  📋 數據     │  ← evidence tabs (chart | data)  │
+│ │ 📊 趨勢圖 ▐  │  📋 數據     │  ← MCP evidence tabs             │
 │ ├──────────────┴──────────────┤                                  │
 │ │  [Plotly trend chart]        │  ← tab 1 active by default      │
 │ └─────────────────────────────┘                                  │
-│                                                                  │
-│ 💡 建議動作：聯繫製程工程師排查 TETCH10 是否有硬體異常            │  ← suggestion action
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 5 Display Sections
+### 4 Display Sections
 
 | # | Section | Field Source | Always Shown? |
 |---|---------|--------------|---------------|
-| 1 | **Diagnosis message** | `conclusion` (LLM) | Yes |
-| 2 | **Identified abnormal objects** | `problem_object` (LLM) | Only when non-empty |
-| 3 | **Evidence bullets** | `evidence[]` (LLM) | Only when non-empty |
-| 4 | **Chart tab / Data tab** | `mcp_output` | Only when `mcp_output` has data |
-| 5 | **Suggestion action** | `human_recommendation` (expert DB field) | Only when ABNORMAL + field is set |
+| 1 | **LLM Summary** | `summary` (LLM-generated from Python result) | Yes (falls back to `conclusion` if empty) |
+| 2 | **Identified abnormal objects** | `problem_object` (Python sandbox result) | Only when non-empty |
+| 3 | **Suggestion action** | `human_recommendation` (expert DB field) | Only when ABNORMAL + field is set |
+| 4 | **MCP evidence tabs** | `mcp_output` (Charting + Summary Data) | Only when `mcp_output` has data |
+
+### Diagnosis Source Priority
+
+| Path | Trigger | Status/problem_object Source | Summary Source |
+|------|---------|------------------------------|----------------|
+| **Python code** (preferred) | `skill.last_diagnosis_result.generated_code` exists | Python `diagnose(mcp_outputs)` sandbox | LLM `summarize_diagnosis()` |
+| **LLM fallback** | No `generated_code` stored | LLM `try_diagnosis()` | LLM `try_diagnosis()` |
 
 ### Evidence Tabs (section 4)
 
-- **📊 趨勢圖 tab** (default active): Renders a Plotly interactive chart from `mcp_output.ui_render.chart_data`.
-  If the processing script returned `chart_data=null`, the backend `_auto_chart()` function auto-generates a chart from `mcp_output.dataset` + MCP's `ui_render_config`.
-- **📋 數據 tab**: Shows the raw dataset table (up to 15 rows).
-- If no chart_data exists after auto-generation, only the 📋 Data table is shown without tabs.
-
-### LLM Diagnosis Output Format
-
-`try_diagnosis()` in `mcp_builder_service.py` prompts the LLM to return:
-```json
-{
-  "status": "NORMAL|ABNORMAL",
-  "conclusion": "一句話結論",
-  "evidence": ["具體觀察 1", "具體觀察 2"],
-  "summary": "2–3 句完整說明",
-  "problem_object": {
-    "tool": ["TETCH10", "TETCH09"],
-    "recipe": "ETH_RCP_10"
-  }
-}
-```
-`problem_object` contains identified abnormal entities keyed by category (tool, recipe, lot, measurement, etc.).
-`human_recommendation` is **not** LLM-generated — it is written by the domain expert in the Skill definition and stored in the `skill_definitions.human_recommendation` column.
+Same as MCP result evidence tabs (§12 MCP Result Display):
+- **📊 Charting tab** (shown when `chart_data` is present after auto-generation)
+- **📋 Summary Data tab** (shown when `dataset` exists and `_is_processed=true`)
+- **📄 Raw Data tab** (when `_is_processed=false`)
+- Call params chip bar at top (from `_call_params` dict)
 
 ### Auto-Chart Fallback (`_auto_chart`)
 

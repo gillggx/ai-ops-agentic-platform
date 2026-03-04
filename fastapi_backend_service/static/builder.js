@@ -1477,18 +1477,26 @@ function _renderSavedTryRunResult(mcp) {
   // Deep-copy the sample_output so we don't mutate the MCP object
   const outputData = JSON.parse(JSON.stringify(mcp.sample_output));
 
-  // Always regenerate chart from dataset + ui_render_config to avoid stale chart_data
+  // Always regenerate chart(s) from dataset + ui_render_config to avoid stale chart_data
   const cfg = mcp.ui_render_config || {};
   const chartType = cfg.chart_type || 'table';
   const dataset = outputData.dataset;
   if (dataset && Array.isArray(dataset) && dataset.length > 0 && chartType !== 'table') {
     const freshSpec = _buildChartFromDataset(dataset, cfg);
     if (freshSpec) {
+      const freshJson = JSON.stringify(freshSpec);
       outputData.ui_render = Object.assign({}, outputData.ui_render || {}, {
-        chart_data: JSON.stringify(freshSpec),
+        chart_data: freshJson,
+        charts: [freshJson],
         type: 'chart',
       });
     }
+  } else if (!outputData.ui_render) {
+    outputData.ui_render = { type: 'table', charts: [], chart_data: null };
+  } else if (!Array.isArray((outputData.ui_render || {}).charts)) {
+    // Backfill charts[] for older saved sample_output that only has chart_data
+    const cd = (outputData.ui_render || {}).chart_data;
+    outputData.ui_render = Object.assign({}, outputData.ui_render, { charts: cd ? [cd] : [] });
   }
 
   // Reconstruct a result-like object so _buildResultHtml can consume it

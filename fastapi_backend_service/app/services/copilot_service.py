@@ -359,12 +359,15 @@ class CopilotService:
                 if chart:
                     output_data = {
                         **output_data,
-                        "ui_render": {**(output_data.get("ui_render") or {}), "chart_data": chart, "type": "chart"},
+                        "ui_render": {**(output_data.get("ui_render") or {}), "chart_data": chart, "charts": [chart], "type": "chart"},
                     }
                     print(f"[MCP DEBUG] {mcp.name}  auto_chart generated from dataset", flush=True)
 
-        # Attach call params so the frontend can display which parameters were used
-        output_data = {**output_data, "_call_params": params}
+        # Attach raw DS data (before MCP script processing) + call params
+        raw_list = raw_data if isinstance(raw_data, list) else (
+            list(raw_data.values())[0] if isinstance(raw_data, dict) and raw_data else [raw_data]
+        )
+        output_data = {**output_data, "_raw_dataset": raw_list, "_call_params": params}
 
         yield {
             "type": "mcp_result",

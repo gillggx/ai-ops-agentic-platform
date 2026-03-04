@@ -221,6 +221,133 @@ def _run_sync(script: str, raw_data: Any) -> Dict[str, Any]:
     return result
 
 
+def _run_diagnose_sync(code: str, mcp_outputs: Dict[str, Any]) -> Dict[str, Any]:
+    """Execute diagnose(mcp_outputs) in a restricted sandbox namespace."""
+    safe_builtins: Dict[str, Any] = {
+        # ── Core functions ────────────────────────────────────────
+        "abs": abs, "all": all, "any": any, "bool": bool,
+        "dict": dict, "enumerate": enumerate, "filter": filter,
+        "float": float, "int": int, "isinstance": isinstance,
+        "issubclass": issubclass, "iter": iter, "len": len,
+        "list": list, "map": map, "max": max, "min": min,
+        "next": next, "range": range, "repr": repr, "reversed": reversed,
+        "round": round, "set": set, "slice": slice, "sorted": sorted,
+        "str": str, "sum": sum, "tuple": tuple, "type": type, "zip": zip,
+        "print": print, "hash": hash, "id": id,
+        "getattr": getattr, "hasattr": hasattr, "setattr": setattr,
+        "format": format, "vars": vars, "dir": dir,
+        "chr": chr, "ord": ord, "hex": hex, "oct": oct, "bin": bin,
+        "bytes": bytes, "bytearray": bytearray, "memoryview": memoryview,
+        "frozenset": frozenset, "complex": complex,
+        "divmod": divmod, "pow": pow,
+        "object": object, "property": property,
+        "staticmethod": staticmethod, "classmethod": classmethod,
+        "super": super,
+        "__import__": _safe_import,
+        "None": None, "True": True, "False": False,
+        # ── Exception classes ──────────────────────────────────────
+        "Exception": Exception, "BaseException": BaseException,
+        "ValueError": ValueError, "TypeError": TypeError,
+        "KeyError": KeyError, "IndexError": IndexError,
+        "AttributeError": AttributeError, "RuntimeError": RuntimeError,
+        "StopIteration": StopIteration, "NameError": NameError,
+        "NotImplementedError": NotImplementedError,
+        "ZeroDivisionError": ZeroDivisionError,
+        "OverflowError": OverflowError, "ArithmeticError": ArithmeticError,
+        "ImportError": ImportError, "ModuleNotFoundError": ModuleNotFoundError,
+        "LookupError": LookupError, "AssertionError": AssertionError,
+        "GeneratorExit": GeneratorExit,
+    }
+
+    global_ns: Dict[str, Any] = {
+        "__builtins__": safe_builtins,
+        "json": json,
+        "math": math,
+        "statistics": statistics,
+        "datetime": datetime,
+        "collections": collections,
+        "OrderedDict": collections.OrderedDict,
+        "defaultdict": collections.defaultdict,
+        "Counter": collections.Counter,
+        "namedtuple": collections.namedtuple,
+        "itertools": itertools,
+        "functools": functools,
+        "io": io,
+        "base64": base64,
+    }
+
+    if _pd is not None:
+        global_ns["pandas"] = _pd
+        global_ns["pd"] = _pd
+    if _go is not None:
+        global_ns["go"] = _go
+        global_ns["plotly"] = plotly
+        global_ns["px"] = _px
+    if _plt is not None:
+        global_ns["plt"] = _plt
+        global_ns["matplotlib"] = matplotlib
+
+    local_ns: Dict[str, Any] = {}
+
+    clean_code = _strip_preinjected_imports(code)
+    exec(compile(clean_code, "<diagnose_script>", "exec"), global_ns, local_ns)  # noqa: S102
+
+    diagnose_fn = local_ns.get("diagnose")
+    if not callable(diagnose_fn):
+        raise ValueError(
+            "Diagnostic script must define a callable `diagnose(mcp_outputs: dict) -> dict` function."
+        )
+
+    result = diagnose_fn(mcp_outputs)
+    if not isinstance(result, dict):
+        raise ValueError(
+            f"diagnose() must return a dict, got {type(result).__name__}."
+        )
+    # Validate required keys
+    for key in ("status", "diagnosis_message", "problem_object"):
+        if key not in result:
+            raise ValueError(f"diagnose() result is missing required key '{key}'.")
+    return result
+
+
+async def execute_diagnose_fn(
+    code: str,
+    mcp_outputs: Dict[str, Any],
+    timeout: float = 10.0,
+) -> Dict[str, Any]:
+    """Execute *code* with *mcp_outputs* in a sandboxed thread, with *timeout* seconds.
+
+    Args:
+        code: Python source that defines ``diagnose(mcp_outputs: dict) -> dict``.
+        mcp_outputs: The MCP final dataset to pass into ``diagnose()``.
+        timeout: Maximum wall-clock seconds before raising ``TimeoutError``.
+
+    Returns:
+        The dict returned by ``diagnose(mcp_outputs)`` with keys:
+        ``{status, diagnosis_message, problem_object}``.
+
+    Raises:
+        ValueError: Forbidden pattern, no ``diagnose`` function, wrong return type,
+                    or missing required keys.
+        TimeoutError: Execution exceeded *timeout* seconds.
+    """
+    _static_check(code)
+
+    loop = asyncio.get_event_loop()
+    try:
+        result = await asyncio.wait_for(
+            loop.run_in_executor(None, _run_diagnose_sync, code, mcp_outputs),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError:
+        raise TimeoutError(
+            f"Diagnose script execution timed out after {timeout:.0f}s. "
+            "Please simplify the diagnostic logic."
+        )
+    logger.debug("diagnose sandbox succeeded, status=%s", result.get("status"))
+    return result
+
+
 async def execute_script(
     script: str,
     raw_data: Any,
