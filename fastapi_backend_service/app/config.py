@@ -74,6 +74,36 @@ class Config(BaseSettings):
         description="Anthropic API key for Claude LLM calls",
     )
 
+    # ── LLM Settings ─────────────────────────────────────────────────────────
+    LLM_MODEL: str = Field(
+        default="claude-opus-4-6",
+        description="Anthropic model ID used by all services (diagnostic, builder, copilot, etc.)",
+    )
+    LLM_MAX_TOKENS_DIAGNOSTIC: int = Field(
+        default=4096,
+        description="Max output tokens for the diagnostic agent loop",
+    )
+    LLM_MAX_TOKENS_GENERATE: int = Field(
+        default=4096,
+        description="Max output tokens for MCP/Skill generation prompts",
+    )
+    LLM_MAX_TOKENS_CHAT: int = Field(
+        default=2048,
+        description="Max output tokens for help-chat and copilot intent parsing",
+    )
+
+    # ── HTTP Client ────────────────────────────────────────────────────────────
+    HTTPX_TIMEOUT_SECONDS: float = Field(
+        default=15.0,
+        description="Timeout in seconds for outbound HTTP calls to DataSubject APIs",
+    )
+
+    # ── Scheduler ─────────────────────────────────────────────────────────────
+    SCHEDULER_MISFIRE_GRACE_TIME_SECONDS: int = Field(
+        default=300,
+        description="Grace period (seconds) before a delayed APScheduler job is skipped",
+    )
+
     @property
     def allowed_origins_list(self) -> list[str]:
         """Parse ALLOWED_ORIGINS string into a list of origin strings.

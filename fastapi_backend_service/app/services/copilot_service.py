@@ -21,7 +21,7 @@ from app.services.sandbox_service import execute_script
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "claude-opus-4-6"
+_MODEL = get_settings().LLM_MODEL
 
 
 def _j(s: Optional[str]) -> Any:
@@ -76,7 +76,7 @@ class CopilotService:
         slot_context: Dict[str, Any],
         history: List[Dict[str, str]],
         base_url: str,
-    ):
+    ) -> AsyncIterator[Dict[str, Any]]:
         # 1. Load tool catalog
         mcps = await self._mcp_repo.get_all()
         skills = await self._skill_repo.get_all()
@@ -269,7 +269,8 @@ class CopilotService:
 
     # ── Catalog Builders ─────────────────────────────────────────
 
-    def _build_mcp_catalog(self, mcps, mcp_params_map: Dict[int, List[str]]) -> str:
+    def _build_mcp_catalog(self, mcps: List[Any], mcp_params_map: Dict[int, List[str]]) -> str:
+        """Build a text catalog of available MCPs for the LLM intent prompt."""
         lines = []
         for mcp in mcps:
             params = mcp_params_map.get(mcp.id, [])
@@ -278,7 +279,8 @@ class CopilotService:
             lines.append(f"- [ID:{mcp.id}] {mcp.name}: {intent} | 需要參數: {params_str}")
         return "\n".join(lines) if lines else "（無可用 MCP）"
 
-    def _build_skill_catalog(self, skills, skill_params_map: Dict[int, List[str]]) -> str:
+    def _build_skill_catalog(self, skills: List[Any], skill_params_map: Dict[int, List[str]]) -> str:
+        """Build a text catalog of available Skills for the LLM intent prompt."""
         lines = []
         for skill in skills:
             desc = skill.description or skill.name
@@ -295,7 +297,8 @@ class CopilotService:
         params: Dict[str, Any],
         base_url: str,
         tab_title: str = "",
-    ):
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """Fetch DataSubject data, run MCP script, and yield mcp_result SSE events."""
         mcp = await self._mcp_repo.get_by_id(tool_id)
         if not mcp:
             yield {"type": "error", "message": f"找不到 MCP id={tool_id}"}
@@ -363,7 +366,8 @@ class CopilotService:
         params: Dict[str, Any],
         base_url: str,
         tab_title: str = "",
-    ):
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """Fetch DataSubject data, run MCP script, run LLM diagnosis, and yield skill_result SSE events."""
         skill = await self._skill_repo.get_by_id(tool_id)
         if not skill:
             yield {"type": "error", "message": f"找不到 Skill id={tool_id}"}

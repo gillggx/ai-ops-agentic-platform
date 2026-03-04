@@ -17,7 +17,7 @@ import anthropic
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
-_MODEL = "claude-opus-4-6"
+_MODEL = get_settings().LLM_MODEL
 
 # ── Fallback prompts (used when DB has no entry yet) ─────────────────────────
 
@@ -157,18 +157,25 @@ def _get_text(content: list) -> str:
 
 
 def _extract_json(raw: str) -> Dict[str, Any]:
-    """Strip markdown fences and parse JSON. Tries multiple strategies."""
+    """Strip markdown fences and parse the first valid JSON object found.
+
+    Uses json.JSONDecoder.raw_decode() so trailing text / multiple objects
+    after the first closing brace never cause 'Extra data' errors.
+    """
     text = raw.strip()
     # Strategy 1: explicit ``` fences (with or without 'json' tag)
     m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
     if m:
         text = m.group(1).strip()
-    # Strategy 2: if still no leading {, find the first JSON object in the text
+    # Strategy 2: skip leading non-JSON text to find the first '{'
     if not text.startswith("{"):
-        m = re.search(r"\{[\s\S]*\}", text)
-        if m:
-            text = m.group(0)
-    return json.loads(text)
+        idx = text.find("{")
+        if idx != -1:
+            text = text[idx:]
+    # Strategy 3: raw_decode — parses only the first valid JSON object,
+    # ignoring any trailing text or extra JSON objects.
+    obj, _ = json.JSONDecoder().raw_decode(text)
+    return obj
 
 
 class MCPBuilderService:
@@ -207,14 +214,20 @@ class MCPBuilderService:
             processing_intent=processing_intent,
         )
 
-        response = await self._client.messages.create(
-            model=_MODEL,
-            max_tokens=4096,
-            thinking={"type": "adaptive"},
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        return _extract_json(_get_text(response.content))
+        last_err: Exception = RuntimeError("generate_all: no attempts made")
+        for attempt in range(2):
+            try:
+                response = await self._client.messages.create(
+                    model=_MODEL,
+                    max_tokens=4096,
+                    thinking={"type": "adaptive"},
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                return _extract_json(_get_text(response.content))
+            except (json.JSONDecodeError, ValueError) as exc:
+                last_err = exc
+                logger.warning("generate_all JSON parse failed (attempt %d): %s", attempt + 1, exc)
+        raise ValueError(f"LLM 生成失敗：{last_err}")
 
     async def generate_for_try_run(
         self,
@@ -274,15 +287,21 @@ DataSubject 名稱：{data_subject_name}
   "summary": "..."
 }}"""
 
-        response = await self._client.messages.create(
-            model=_MODEL,
-            max_tokens=4096,
-            system=sys_prompt,
-            thinking={"type": "adaptive"},
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        return _extract_json(_get_text(response.content))
+        last_err: Exception = RuntimeError("generate_for_try_run: no attempts made")
+        for attempt in range(2):
+            try:
+                response = await self._client.messages.create(
+                    model=_MODEL,
+                    max_tokens=4096,
+                    system=sys_prompt,
+                    thinking={"type": "adaptive"},
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                return _extract_json(_get_text(response.content))
+            except (json.JSONDecodeError, ValueError) as exc:
+                last_err = exc
+                logger.warning("generate_for_try_run JSON parse failed (attempt %d): %s", attempt + 1, exc)
+        raise ValueError(f"LLM 生成失敗：{last_err}")
 
     async def analyze_error(
         self,

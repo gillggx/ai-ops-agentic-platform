@@ -487,14 +487,18 @@ function _initChartsInCard(cardEl) {
           }, spec.layout || {});
           Plotly.newPlot(div, traces, layout, { responsive: true, displayModeBar: false });
         } else {
-          // Plotly not loaded — hide the empty chart div (table fallback still shows)
-          div.style.display = 'none';
+          // Plotly not loaded — hide wrapper so no blank space remains
+          (div.closest('.evidence-chart-wrapper') || div).style.display = 'none';
         }
       } else if (raw.startsWith('data:image/')) {
         div.innerHTML = `<img src="${raw}" style="max-width:100%;border-radius:6px">`;
+      } else {
+        // Unknown format — hide wrapper
+        (div.closest('.evidence-chart-wrapper') || div).style.display = 'none';
       }
     } catch (e) {
-      div.style.display = 'none';  // hide on error; table fallback remains visible
+      // Hide entire wrapper on error so no blank space remains
+      (div.closest('.evidence-chart-wrapper') || div).style.display = 'none';
     }
   });
 }

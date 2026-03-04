@@ -19,7 +19,7 @@ router = APIRouter(prefix="/mock", tags=["mock-data"])
 @router.get("/apc", summary="APC Mock Data")
 async def get_apc(
     lot_id: str = Query(..., description="Lot ID"),
-    operation_number: str = Query(..., description="Operation number"),
+    operation_number: str = Query("3200", description="Operation number (default: 3200)"),
 ):
     """Return mock APC control data for a given lot and operation."""
     seed = hash(lot_id + operation_number) % 1000

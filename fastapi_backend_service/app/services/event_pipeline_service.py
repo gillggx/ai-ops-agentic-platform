@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from app.config import get_settings
 from app.repositories.data_subject_repository import DataSubjectRepository
 from app.repositories.event_type_repository import EventTypeRepository
 from app.repositories.mcp_definition_repository import MCPDefinitionRepository
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 def _j(s: Optional[str]) -> Any:
+    """Parse a JSON string, returning None on failure or empty input."""
     if not s:
         return None
     try:
@@ -32,7 +34,7 @@ def _j(s: Optional[str]) -> Any:
         return None
 
 
-def _parse_et_diagnosis_skills(raw: Optional[str]):
+def _parse_et_diagnosis_skills(raw: Optional[str]) -> tuple[List[int], Dict[int, List]]:
     """Parse ET's diagnosis_skill_ids column into (skill_id_list, {skill_id: param_mappings}).
 
     Handles both old format [int, ...] and new format [{skill_id, param_mappings}, ...].
@@ -71,7 +73,8 @@ class SkillPipelineResult:
         human_recommendation: str = "",
         error: Optional[str] = None,
         mcp_output: Optional[Dict[str, Any]] = None,
-    ):
+    ) -> None:
+        """Initialise a SkillPipelineResult with all pipeline output fields."""
         self.skill_id = skill_id
         self.skill_name = skill_name
         self.mcp_name = mcp_name
@@ -84,6 +87,7 @@ class SkillPipelineResult:
         self.mcp_output = mcp_output
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialise the result to a plain dict for SSE / API responses."""
         return {
             "skill_id": self.skill_id,
             "skill_name": self.skill_name,
@@ -99,6 +103,8 @@ class SkillPipelineResult:
 
 
 class EventPipelineService:
+    """Orchestrates the full event-driven diagnosis pipeline: skill lookup → DS fetch → MCP script → LLM diagnosis."""
+
     def __init__(
         self,
         skill_repo: SkillDefinitionRepository,
@@ -362,7 +368,7 @@ class EventPipelineService:
         """Fetch raw data from DataSubject endpoint using httpx (no auth needed for /mock/*)."""
         if endpoint_url.startswith("/") and base_url:
             endpoint_url = base_url + endpoint_url
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=get_settings().HTTPX_TIMEOUT_SECONDS) as client:
             response = await client.get(endpoint_url, params=params)
             response.raise_for_status()
             payload = response.json()

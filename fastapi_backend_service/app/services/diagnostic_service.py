@@ -61,6 +61,7 @@ from app.schemas.diagnostic import DiagnoseResponse, ToolCallRecord
 from app.skills import SKILL_REGISTRY
 
 logger = logging.getLogger(__name__)
+_MODEL = get_settings().LLM_MODEL
 
 # ---------------------------------------------------------------------------
 # System Prompt — triage-first constraint is explicit and non-negotiable
@@ -205,8 +206,8 @@ class DiagnosticService:
         for _ in range(self._max_turns):
             turns += 1
             response = await self._client.messages.create(
-                model="claude-opus-4-6",
-                max_tokens=4096,
+                model=_MODEL,
+                max_tokens=get_settings().LLM_MAX_TOKENS_DIAGNOSTIC,
                 system=_SYSTEM_PROMPT,
                 tools=self._tools,
                 messages=messages,
@@ -262,8 +263,8 @@ class DiagnosticService:
                 ),
             })
             final_resp = await self._client.messages.create(
-                model="claude-opus-4-6",
-                max_tokens=4096,
+                model=_MODEL,
+                max_tokens=get_settings().LLM_MAX_TOKENS_DIAGNOSTIC,
                 system=_SYSTEM_PROMPT,
                 messages=messages,
             )
@@ -306,8 +307,8 @@ class DiagnosticService:
             for _ in range(self._max_turns):
                 turns += 1
                 response = await self._client.messages.create(
-                    model="claude-opus-4-6",
-                    max_tokens=4096,
+                    model=_MODEL,
+                    max_tokens=get_settings().LLM_MAX_TOKENS_DIAGNOSTIC,
                     system=_SYSTEM_PROMPT,
                     tools=self._tools,
                     messages=messages,
@@ -385,8 +386,8 @@ class DiagnosticService:
                     ),
                 })
                 final_resp = await self._client.messages.create(
-                    model="claude-opus-4-6",
-                    max_tokens=4096,
+                    model=_MODEL,
+                    max_tokens=get_settings().LLM_MAX_TOKENS_DIAGNOSTIC,
                     system=_SYSTEM_PROMPT,
                     messages=messages,
                 )

@@ -13,7 +13,7 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "claude-opus-4-6"
+_MODEL = get_settings().LLM_MODEL
 
 # Module-level cache so docs are read once per process
 _SYSTEM_PROMPT: Optional[str] = None
@@ -53,6 +53,7 @@ def _build_system_prompt() -> str:
 
 
 def _get_system_prompt() -> str:
+    """Return the cached system prompt, building it on first call."""
     global _SYSTEM_PROMPT
     if _SYSTEM_PROMPT is None:
         _SYSTEM_PROMPT = _build_system_prompt()
@@ -93,7 +94,7 @@ class HelpChatService:
         try:
             async with self._client.messages.stream(
                 model=_MODEL,
-                max_tokens=2048,
+                max_tokens=get_settings().LLM_MAX_TOKENS_CHAT,
                 system=[
                     {
                         "type": "text",

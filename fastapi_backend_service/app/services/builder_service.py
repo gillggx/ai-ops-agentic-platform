@@ -30,7 +30,7 @@ from app.schemas.builder import (
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "claude-opus-4-6"
+_MODEL = get_settings().LLM_MODEL
 
 
 class BuilderService:

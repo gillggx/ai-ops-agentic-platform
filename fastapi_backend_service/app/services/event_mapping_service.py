@@ -22,7 +22,7 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "claude-opus-4-6"
+_MODEL = get_settings().LLM_MODEL
 
 _MAPPING_SYSTEM_PROMPT = """\
 你是一位半導體製程資料映射專家。你的唯一任務是從「Skill 診斷結果數據」中，\

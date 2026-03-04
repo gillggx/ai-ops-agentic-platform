@@ -23,6 +23,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import select
 
+from app.config import get_settings
 from app.database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
@@ -234,7 +235,7 @@ def schedule_check(check_id: int, interval: str, base_url: str = "") -> None:
         id=job_id,
         kwargs={"check_id": check_id, "base_url": base_url},
         replace_existing=True,
-        misfire_grace_time=300,  # 5-minute grace window
+        misfire_grace_time=get_settings().SCHEDULER_MISFIRE_GRACE_TIME_SECONDS,
     )
     logger.info("Scheduled RoutineCheck[%d] every %s (job_id=%s)", check_id, interval, job_id)
 
