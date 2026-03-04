@@ -176,28 +176,43 @@ function _simulateTrigger(/* text — kept for signature compat */) {
   window._pendingEventPayload = { ..._SPC_OOC_EVENT };
 
   const paramsHtml = Object.entries(_SPC_OOC_EVENT.params)
-    .map(([k, v]) => `<div class="flex justify-between text-xs py-0.5">
-        <span class="text-red-700 font-mono">${_escapeHtml(k)}</span>
-        <span class="text-red-900 font-mono font-medium">${_escapeHtml(v)}</span>
+    .map(([k, v]) => `
+      <div class="flex justify-between text-sm">
+        <span class="text-slate-500">${_escapeHtml(k)}</span>
+        <span class="text-slate-800 font-medium font-mono">${_escapeHtml(v)}</span>
       </div>`)
     .join('');
 
   const cardHtml = `
-    <div class="event-alert-card">
-      <div class="event-alert-header">
-        <span class="text-red-600 font-bold">⚡ 事件通知</span>
-        <span class="text-xs text-red-500 ml-auto">${_escapeHtml(_SPC_OOC_EVENT.timestamp)}</span>
+    <div class="bg-white border border-slate-200 rounded-lg shadow-sm w-full max-w-sm font-sans overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
+        <div class="flex items-center space-x-2">
+          <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          <span class="text-slate-700 font-semibold text-sm">系統通知</span>
+        </div>
+        <span class="text-slate-400 text-xs">${_escapeHtml(_SPC_OOC_EVENT.timestamp)}</span>
       </div>
-      <div class="event-alert-type">${_escapeHtml(_SPC_OOC_EVENT.event_type)}</div>
-      <div class="event-alert-id text-xs text-red-600 mb-2"># ${_escapeHtml(_SPC_OOC_EVENT.event_id)}</div>
-      <div class="event-alert-params border border-red-200 rounded-lg p-2 bg-red-50 mb-3">${paramsHtml}</div>
-      <button onclick="_launchEventDiagnosis()"
-        class="w-full flex items-center justify-center gap-2
-               bg-red-300 hover:bg-red-400 border border-red-400
-               text-red-900 text-sm font-semibold
-               rounded-xl px-4 py-2.5 transition-colors">
-        🔍 啟動診斷分析
-      </button>
+      <div class="p-4">
+        <div class="mb-4">
+          <h3 class="text-lg font-bold text-slate-800">${_escapeHtml(_SPC_OOC_EVENT.event_type)}</h3>
+          <p class="text-xs text-slate-400 font-mono mt-1"># ${_escapeHtml(_SPC_OOC_EVENT.event_id)}</p>
+        </div>
+        <div class="space-y-2 mb-5 bg-slate-50 p-3 rounded-md border border-slate-100">
+          ${paramsHtml}
+        </div>
+        <button onclick="_launchEventDiagnosis()"
+          class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-4 rounded-md
+                 transition-colors flex items-center justify-center space-x-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+          </svg>
+          <span>啟動診斷分析</span>
+        </button>
+      </div>
     </div>`;
 
   _addChatBubble('event-alert', cardHtml);

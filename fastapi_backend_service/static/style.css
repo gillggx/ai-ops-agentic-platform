@@ -930,37 +930,11 @@ body {
   font-size: 11px;
 }
 
-/* ── Phase 8.10: Event Alert Card ───────────────────────────── */
+/* ── Event Alert Card — pure Tailwind, no custom CSS needed ─── */
 .chat-event-alert {
   width: 100%;
   max-width: 100%;
   margin: 4px 0;
-}
-.event-alert-card {
-  background: #fee2e2;
-  border: 1px solid #fecaca;
-  border-left: 4px solid #ef4444;
-  border-radius: 12px;
-  padding: 14px 16px;
-}
-.event-alert-header {
-  display: flex;
-  align-items: center;
-  margin-bottom: 6px;
-  gap: 8px;
-}
-.event-alert-type {
-  font-size: 15px;
-  font-weight: 700;
-  color: #991b1b;
-  font-family: monospace;
-  margin-bottom: 2px;
-}
-.event-alert-id {
-  font-family: monospace;
-}
-.event-alert-params {
-  font-family: monospace;
 }
 
 /* ── Phase 8.10: Pipeline Report Blocks ─────────────────────── */
