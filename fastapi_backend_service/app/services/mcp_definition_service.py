@@ -425,9 +425,20 @@ class MCPDefinitionService:
         # ── Auto-chart fallback: if the script returned HTML (which was stripped by
         # _normalize_output) or omitted charts entirely, regenerate from dataset.
         ui_render = output_data.get("ui_render", {})
+        ui_cfg = result.get("ui_render_config", {})
+        chart_type = ui_cfg.get("chart_type") or ""
+        logger.warning(
+            "try_run chart_state | ui_render.charts=%r chart_type=%r dataset_len=%d",
+            bool(ui_render.get("charts")),
+            chart_type,
+            len(output_data.get("dataset") or []),
+        )
         if not ui_render.get("charts") and not ui_render.get("chart_data"):
-            ui_cfg = result.get("ui_render_config", {})
-            if (ui_cfg.get("chart_type") or "table") != "table":
+            # Fix: treat missing/empty chart_type as non-table (attempt auto-chart).
+            # Previously `(chart_type or "table") != "table"` wrongly skipped auto-chart
+            # when chart_type was None or "".
+            if chart_type != "table":
+                logger.warning("try_run | triggering _auto_chart fallback (chart_type=%r)", chart_type)
                 chart = _auto_chart(output_data.get("dataset", []), ui_cfg)
                 if chart:
                     output_data["ui_render"] = {
@@ -435,6 +446,7 @@ class MCPDefinitionService:
                         "charts": [chart],
                         "chart_data": chart,
                     }
+                    logger.warning("try_run | _auto_chart succeeded, chart injected")
 
         # Attach raw DS data so frontend can show "Raw Data" tab
         raw_list = sample_data if isinstance(sample_data, list) else (
