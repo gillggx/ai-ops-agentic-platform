@@ -406,6 +406,20 @@ class MCPDefinitionService:
         # without the required {output_schema, dataset, ui_render} keys.
         output_data = _normalize_output(output_data, result.get("output_schema", {}))
 
+        # ── Auto-chart fallback: if the script returned HTML (which was stripped by
+        # _normalize_output) or omitted charts entirely, regenerate from dataset.
+        ui_render = output_data.get("ui_render", {})
+        if not ui_render.get("charts") and not ui_render.get("chart_data"):
+            ui_cfg = result.get("ui_render_config", {})
+            if (ui_cfg.get("chart_type") or "table") != "table":
+                chart = _auto_chart(output_data.get("dataset", []), ui_cfg)
+                if chart:
+                    output_data["ui_render"] = {
+                        **ui_render,
+                        "charts": [chart],
+                        "chart_data": chart,
+                    }
+
         # Attach raw DS data so frontend can show "Raw Data" tab
         raw_list = sample_data if isinstance(sample_data, list) else (
             list(sample_data.values())[0] if isinstance(sample_data, dict) and sample_data else [sample_data]
