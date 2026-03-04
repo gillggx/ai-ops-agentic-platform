@@ -563,6 +563,67 @@ function _renderPipelineResults(result) {
   (result.skills || []).forEach(s => _appendSkillCard(s));
 }
 
+/**
+ * Render a problem_object value as inline badges / key-value rows.
+ * Handles scalar, array, and object shapes.
+ */
+function _renderProblemObjectInline(obj) {
+  if (obj === null || obj === undefined) return '';
+  if (typeof obj === 'string' || typeof obj === 'number' || typeof obj === 'boolean') {
+    return `<span class="inline-block text-xs font-semibold bg-yellow-100 text-yellow-800 border border-yellow-300 rounded px-2 py-0.5">${_escapeHtml(String(obj))}</span>`;
+  }
+  if (Array.isArray(obj)) {
+    if (!obj.length) return '';
+    if (obj.every(v => typeof v !== 'object' || v === null)) {
+      return `<div class="flex flex-wrap gap-1">${obj.map(v =>
+        `<span class="text-xs font-semibold bg-yellow-100 text-yellow-800 border border-yellow-300 rounded px-2 py-0.5">${_escapeHtml(String(v))}</span>`
+      ).join('')}</div>`;
+    }
+    return `<pre class="bg-amber-50 border border-amber-200 text-amber-900 text-xs rounded px-2 py-2 overflow-x-auto max-h-24">${_escapeHtml(JSON.stringify(obj, null, 2))}</pre>`;
+  }
+  if (typeof obj === 'object') {
+    const entries = Object.entries(obj);
+    if (!entries.length) return '';
+    const rows = entries.map(([k, v]) => {
+      let cell;
+      if (v === null || v === undefined) {
+        cell = '<span class="text-slate-400">—</span>';
+      } else if (Array.isArray(v) && v.every(x => typeof x !== 'object' || x === null)) {
+        cell = `<div class="flex flex-wrap gap-0.5">${v.map(x =>
+          `<span class="inline-block bg-yellow-100 text-yellow-800 border border-yellow-300 rounded px-1.5 text-xs">${_escapeHtml(String(x))}</span>`
+        ).join('')}</div>`;
+      } else {
+        cell = `<span class="text-amber-800 font-semibold text-xs">${_escapeHtml(typeof v === 'object' ? JSON.stringify(v) : String(v))}</span>`;
+      }
+      return `<tr>
+        <td class="py-0.5 pr-3 text-slate-500 font-medium text-xs whitespace-nowrap align-top">${_escapeHtml(k)}</td>
+        <td class="py-0.5 align-top">${cell}</td>
+      </tr>`;
+    }).join('');
+    return `<table class="text-xs border-collapse w-full">${rows}</table>`;
+  }
+  return `<span class="text-xs font-semibold bg-yellow-100 text-yellow-800 border border-yellow-300 rounded px-2 py-0.5">${_escapeHtml(String(obj))}</span>`;
+}
+
+/** Switch between chart / data tabs in an evidence section. */
+function _switchEvidenceTab(suffix, tab) {
+  const chartTab = document.getElementById(`ev-chart-${suffix}`);
+  const dataTab  = document.getElementById(`ev-data-${suffix}`);
+  const chartBtn = document.getElementById(`ev-btn-chart-${suffix}`);
+  const dataBtn  = document.getElementById(`ev-btn-data-${suffix}`);
+  if (tab === 'chart') {
+    chartTab && chartTab.classList.remove('hidden');
+    dataTab  && dataTab.classList.add('hidden');
+    chartBtn && chartBtn.classList.add('active');
+    dataBtn  && dataBtn.classList.remove('active');
+  } else {
+    chartTab && chartTab.classList.add('hidden');
+    dataTab  && dataTab.classList.remove('hidden');
+    chartBtn && chartBtn.classList.remove('active');
+    dataBtn  && dataBtn.classList.add('active');
+  }
+}
+
 function _renderSkillBlock(s) {
   if (s.error) {
     return `
@@ -579,15 +640,35 @@ function _renderSkillBlock(s) {
   const statusClass = s.status === 'NORMAL' ? 'normal' : 'abnormal';
   const statusLabel = s.status === 'NORMAL' ? '✓ NORMAL' : '⚠ ABNORMAL';
 
+  // 1. Diagnosis message
+  const diagMsg = s.conclusion || '';
+
+  // 2. Identified abnormal object
+  const probObj = s.problem_object;
+  const hasProbObj = probObj && (
+    (typeof probObj === 'string' && probObj !== '') ||
+    (Array.isArray(probObj) && probObj.length > 0) ||
+    (typeof probObj === 'object' && !Array.isArray(probObj) && Object.keys(probObj).length > 0)
+  );
+  const problemHtml = hasProbObj ? `
+    <div class="skill-problem-object mt-2 mb-1">
+      <div class="text-xs text-slate-500 uppercase tracking-wider mb-1">🎯 異常物件</div>
+      ${_renderProblemObjectInline(probObj)}
+    </div>` : '';
+
+  // 3. Evidence bullets
   const evidenceHtml = (s.evidence || []).length > 0
     ? `<ul class="pipeline-evidence-list">${(s.evidence || []).map(e => `<li>${_escapeHtml(e)}</li>`).join('')}</ul>`
     : '';
 
+  // 4. Chart tab + Data tab
+  const tabSuffix = Math.random().toString(36).slice(2, 7);
+  const evidenceTabsHtml = _renderMcpEvidence(s.mcp_output, tabSuffix);
+
+  // 5. Suggestion action
   const recommendHtml = s.human_recommendation && s.status !== 'NORMAL'
     ? `<div class="pipeline-recommendation">💡 <strong>建議動作：</strong>${_escapeHtml(s.human_recommendation)}</div>`
     : '';
-
-  const chartHtml = _renderMcpEvidence(s.mcp_output);
 
   return `
     <div class="pipeline-report-block">
@@ -597,29 +678,33 @@ function _renderSkillBlock(s) {
         <span class="pipeline-block-status ${statusClass}">${statusLabel}</span>
       </div>
       <div class="pipeline-block-body">
-        <p class="text-sm text-slate-800 font-medium mb-1">${_escapeHtml(s.conclusion)}</p>
+        <p class="text-sm text-slate-800 font-medium mb-1">${_escapeHtml(diagMsg)}</p>
+        ${problemHtml}
         ${evidenceHtml}
         ${s.summary ? `<p class="text-xs text-slate-500 mt-2 italic">${_escapeHtml(s.summary)}</p>` : ''}
-        ${chartHtml}
+        ${evidenceTabsHtml}
         ${recommendHtml}
       </div>
     </div>`;
 }
 
 /**
- * Render MCP output evidence as a chart + dataset table.
- * Chart (Plotly/PNG) renders via _initChartsInCard() after DOM insert.
- * Dataset table is ALWAYS shown when rows are available (fallback for chart failures).
+ * Render MCP output evidence as a tabbed section (📊 趨勢圖 | 📋 數據).
+ * When a chart is available both tabs are shown; otherwise falls back to table-only.
+ * Chart (Plotly/PNG) is activated via _initChartsInCard() after DOM insert.
+ * @param {Object} mcpOutput  - Standard Payload {ui_render, dataset}
+ * @param {string} [suffix]   - Unique suffix for tab element IDs (generated if omitted)
  */
-function _renderMcpEvidence(mcpOutput) {
+function _renderMcpEvidence(mcpOutput, suffix) {
   if (!mcpOutput) return '';
 
+  const uid      = suffix || Math.random().toString(36).slice(2, 7);
   const uiRender = mcpOutput.ui_render;
-  const rows = Array.isArray(mcpOutput.dataset) ? mcpOutput.dataset.slice(0, 15) : [];
-  let chartHtml = '';
-  let tableHtml = '';
+  const rows     = Array.isArray(mcpOutput.dataset) ? mcpOutput.dataset.slice(0, 15) : [];
+  let chartHtml  = '';
+  let tableHtml  = '';
 
-  // ── Chart section ──────────────────────────────────────────
+  // ── Chart ──────────────────────────────────────────────────
   if (uiRender && uiRender.chart_data) {
     const chartData = typeof uiRender.chart_data === 'string'
       ? uiRender.chart_data
@@ -635,15 +720,15 @@ function _renderMcpEvidence(mcpOutput) {
       </div>`;
   }
 
-  // ── Dataset table (always shown if rows exist) ─────────────
+  // ── Dataset table ──────────────────────────────────────────
   if (rows.length > 0) {
-    const cols       = Object.keys(rows[0]);
-    const headerRow  = cols.map(c => `<th>${_escapeHtml(String(c))}</th>`).join('');
-    const bodyRows   = rows.map(r =>
+    const cols      = Object.keys(rows[0]);
+    const headerRow = cols.map(c => `<th>${_escapeHtml(String(c))}</th>`).join('');
+    const bodyRows  = rows.map(r =>
       `<tr>${cols.map(c => `<td>${_escapeHtml(String(r[c] ?? ''))}</td>`).join('')}</tr>`
     ).join('');
     tableHtml = `
-      <div style="overflow-x:auto;margin-top:${chartHtml ? '10px' : '0'}">
+      <div style="overflow-x:auto">
         <table class="evidence-table">
           <thead><tr>${headerRow}</tr></thead>
           <tbody>${bodyRows}</tbody>
@@ -653,12 +738,30 @@ function _renderMcpEvidence(mcpOutput) {
 
   if (!chartHtml && !tableHtml) return '';
 
-  const sectionTitle = chartHtml ? '📊 數據圖表佐證' : '📋 數據表格佐證';
+  // No chart — table only, no tabs needed
+  if (!chartHtml) {
+    return `
+      <div class="evidence-chart-section">
+        <div class="evidence-chart-title">📋 數據表格佐證</div>
+        ${tableHtml}
+      </div>`;
+  }
+
+  // Chart + Data tabs
   return `
     <div class="evidence-chart-section">
-      <div class="evidence-chart-title">${sectionTitle}</div>
-      ${chartHtml}
-      ${tableHtml}
+      <div class="evidence-tab-bar">
+        <button id="ev-btn-chart-${uid}" class="evidence-tab-btn active"
+                onclick="_switchEvidenceTab('${uid}', 'chart')">📊 趨勢圖</button>
+        <button id="ev-btn-data-${uid}" class="evidence-tab-btn"
+                onclick="_switchEvidenceTab('${uid}', 'data')">📋 數據</button>
+      </div>
+      <div id="ev-chart-${uid}" class="evidence-tab-panel">
+        ${chartHtml}
+      </div>
+      <div id="ev-data-${uid}" class="evidence-tab-panel hidden">
+        ${tableHtml}
+      </div>
     </div>`;
 }
 

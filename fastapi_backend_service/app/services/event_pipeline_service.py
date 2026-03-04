@@ -71,6 +71,7 @@ class SkillPipelineResult:
         evidence: Optional[List[str]] = None,
         summary: str = "",
         human_recommendation: str = "",
+        problem_object: Optional[Dict[str, Any]] = None,
         error: Optional[str] = None,
         mcp_output: Optional[Dict[str, Any]] = None,
     ) -> None:
@@ -83,6 +84,7 @@ class SkillPipelineResult:
         self.evidence = evidence or []
         self.summary = summary
         self.human_recommendation = human_recommendation
+        self.problem_object = problem_object or {}
         self.error = error
         self.mcp_output = mcp_output
 
@@ -97,6 +99,7 @@ class SkillPipelineResult:
             "evidence": self.evidence,
             "summary": self.summary,
             "human_recommendation": self.human_recommendation,
+            "problem_object": self.problem_object,
             "error": self.error,
             "mcp_output": self.mcp_output,
         }
@@ -372,6 +375,7 @@ class EventPipelineService:
             evidence=llm_result.get("evidence", []),
             summary=llm_result.get("summary", ""),
             human_recommendation=skill.human_recommendation or "",
+            problem_object=llm_result.get("problem_object") or {},
             mcp_output=output_data,
         )
 

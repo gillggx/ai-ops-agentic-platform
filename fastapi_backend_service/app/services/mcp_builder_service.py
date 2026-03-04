@@ -144,8 +144,15 @@ _DEFAULT_DIAGNOSIS_SYSTEM_PROMPT = """\
     "具體觀察 1（欄位名稱、數值、時間等）",
     "具體觀察 2（可將逐筆結果整合於此）"
   ],
-  "summary": "2~3 句完整說明，整合資料觀察與條件觸發原因"
-}"""
+  "summary": "2~3 句完整說明，整合資料觀察與條件觸發原因",
+  "problem_object": {
+    "說明": "若 status=ABNORMAL，列舉觸發異常的具體物件（key=類別如 tool/recipe/lot，value=異常值陣列或單一值）；若 NORMAL 則回傳空物件 {}"
+  }
+}
+
+【problem_object 範例】
+- ABNORMAL 時：{"tool": ["TETCH10", "TETCH09"], "recipe": "ETH_RCP_10", "measurement": "CD value 47.5 nm"}
+- NORMAL 時：{}"""
 
 
 def _get_text(content: list) -> str:
@@ -576,16 +583,21 @@ DataSubject 名稱：{data_subject_name}
                 raw_status = "NORMAL" if sev == "LOW" else "ABNORMAL"
             # Normalize to binary NORMAL / ABNORMAL
             status = "NORMAL" if raw_status.upper() == "NORMAL" else "ABNORMAL"
+            prob_obj = data.get("problem_object", {})
+            # Discard the instructional placeholder if LLM echoed it back verbatim
+            if isinstance(prob_obj, dict) and "說明" in prob_obj and len(prob_obj) == 1:
+                prob_obj = {}
             return {
                 "status": status,
                 "conclusion": data.get("conclusion", ""),
                 "evidence": data.get("evidence", []),
                 "summary": data.get("summary", ""),
+                "problem_object": prob_obj,
             }
         except Exception:
             logger.warning("try_diagnosis JSON parse failed; raw=%s", text[:200])
             # Fallback: treat whole text as summary, flag as ambiguous warning
-            return {"status": "ABNORMAL", "conclusion": "LLM 回應解析失敗", "evidence": [], "summary": text}
+            return {"status": "ABNORMAL", "conclusion": "LLM 回應解析失敗", "evidence": [], "summary": text, "problem_object": {}}
 
     async def check_code_diagnosis_intent(
         self,

@@ -1,13 +1,14 @@
 # Glass Box AI Diagnostic Platform — System Specification (Latest)
 
-**Version**: v11.0
+**Version**: v12.0
 **Last Updated**: 2026-03-04
-**Status**: Active Development — Phases 1–9 + Phase 11 Complete
+**Status**: Active Development — Phases 1–14 Complete
 
 ## Changelog
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v12.0 | 2026-03-04 | Skill card redesign: chart/data tabs, problem_object, suggestion action. `_auto_chart` fallback. Diagnosis prompt returns `problem_object`. |
 | v11.0 | 2026-03-04 | Initial living spec created; covers all phases 1–11. Hard-coded config extracted to `config.py`. Code style refactored (type hints + docstrings). |
 
 ---
@@ -589,11 +590,39 @@ event: skill_start
 data: {"skill_id": 1, "skill_name": "...", "mcp_name": "..."}
 
 event: skill_done
-data: {"skill_id": 1, "status": "NORMAL|ABNORMAL", "conclusion": "...", ...}
+data: {
+  "skill_id": 1,
+  "skill_name": "檢查SPC 是否連續異常",
+  "mcp_name": "SPC CD Chart Query",
+  "status": "NORMAL|ABNORMAL",
+  "conclusion": "一句話結論",
+  "evidence": ["具體觀察 1", "具體觀察 2"],
+  "summary": "2–3 句完整說明",
+  "problem_object": {"tool": ["TETCH10"], "recipe": "ETH_RCP_10"},
+  "human_recommendation": "聯繫製程工程師排查 TETCH10",
+  "mcp_output": {
+    "output_schema": {...},
+    "dataset": [...],
+    "ui_render": {"type": "chart", "chart_data": "<Plotly JSON>"}
+  },
+  "error": null
+}
 
 event: done
 data: {}
 ```
+
+#### `skill_done` Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `status` | `NORMAL\|ABNORMAL` | Binary diagnostic result |
+| `conclusion` | string | One-sentence result (LLM-generated) |
+| `evidence` | string[] | Bullet-point observations supporting conclusion |
+| `summary` | string | 2–3 sentence integrated explanation |
+| `problem_object` | object | Identified abnormal entities (tool, recipe, lot, etc.); `{}` when NORMAL |
+| `human_recommendation` | string | Suggested action written by domain expert (from Skill DB field); empty when none configured |
+| `mcp_output` | Standard Payload | Raw MCP execution result (`dataset` + `ui_render` with chart_data) |
 
 ### SSE — Copilot Chat
 
@@ -640,3 +669,78 @@ Push to `main` branch → `.github/workflows/deploy.yml` SSH-deploys to EC2:
 3. `pip install -r requirements.txt`
 4. `alembic upgrade head`
 5. `nohup uvicorn main:app --host 0.0.0.0 --port 8000`
+
+---
+
+## 13. Skill Result Card UI (v12.0)
+
+When a Skill executes, the right-side report panel renders a per-skill tab card. Each card has the following layout:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ ⚙️ [Skill Name]     [MCP Name]              ⚠ ABNORMAL / ✓ NORMAL │
+├─────────────────────────────────────────────────────────────────┤
+│ [Diagnosis Message]                                              │
+│   e.g. "3-sigma 最差機台與配方異常條件成立，TETCH10 搭配                │
+│         ETH_RCP_10 之 CD 值 47.5 nm 為所有資料點中偏離管制最嚴重者"   │
+│                                                                  │
+│ 🎯 異常物件                                                        │
+│   tool: TETCH10, TETCH09                                        │
+│   recipe: ETH_RCP_10                                            │
+│   measurement: CD value 47.5 nm                                 │
+│                                                                  │
+│ • UCL=46.5 nm, LCL=43.5 nm, 管制中心值 45.0 nm                   │  ← evidence bullets
+│ • 各資料點偏離中心值之 sigma 倍數：TETCH10 (+5.0σ), ...           │
+│ • OOC 記錄共 4 筆：TETCH10, TETCH09, TETCH03, TETCH01            │
+│                                                                  │
+│ ┌──────────────┬──────────────┐                                  │
+│ │ 📊 趨勢圖 ▐  │  📋 數據     │  ← evidence tabs (chart | data)  │
+│ ├──────────────┴──────────────┤                                  │
+│ │  [Plotly trend chart]        │  ← tab 1 active by default      │
+│ └─────────────────────────────┘                                  │
+│                                                                  │
+│ 💡 建議動作：聯繫製程工程師排查 TETCH10 是否有硬體異常            │  ← suggestion action
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 5 Display Sections
+
+| # | Section | Field Source | Always Shown? |
+|---|---------|--------------|---------------|
+| 1 | **Diagnosis message** | `conclusion` (LLM) | Yes |
+| 2 | **Identified abnormal objects** | `problem_object` (LLM) | Only when non-empty |
+| 3 | **Evidence bullets** | `evidence[]` (LLM) | Only when non-empty |
+| 4 | **Chart tab / Data tab** | `mcp_output` | Only when `mcp_output` has data |
+| 5 | **Suggestion action** | `human_recommendation` (expert DB field) | Only when ABNORMAL + field is set |
+
+### Evidence Tabs (section 4)
+
+- **📊 趨勢圖 tab** (default active): Renders a Plotly interactive chart from `mcp_output.ui_render.chart_data`.
+  If the processing script returned `chart_data=null`, the backend `_auto_chart()` function auto-generates a chart from `mcp_output.dataset` + MCP's `ui_render_config`.
+- **📋 數據 tab**: Shows the raw dataset table (up to 15 rows).
+- If no chart_data exists after auto-generation, only the 📋 Data table is shown without tabs.
+
+### LLM Diagnosis Output Format
+
+`try_diagnosis()` in `mcp_builder_service.py` prompts the LLM to return:
+```json
+{
+  "status": "NORMAL|ABNORMAL",
+  "conclusion": "一句話結論",
+  "evidence": ["具體觀察 1", "具體觀察 2"],
+  "summary": "2–3 句完整說明",
+  "problem_object": {
+    "tool": ["TETCH10", "TETCH09"],
+    "recipe": "ETH_RCP_10"
+  }
+}
+```
+`problem_object` contains identified abnormal entities keyed by category (tool, recipe, lot, measurement, etc.).
+`human_recommendation` is **not** LLM-generated — it is written by the domain expert in the Skill definition and stored in the `skill_definitions.human_recommendation` column.
+
+### Auto-Chart Fallback (`_auto_chart`)
+
+When `mcp_output.ui_render.chart_data` is null after script execution, `_auto_chart(dataset, ui_render_config)` generates a Plotly `Scatter` chart from the dataset using the MCP's `ui_render_config` (x_axis, y_axis, series keys). This applies in:
+- Event-driven diagnosis pipeline (`event_pipeline_service._run_skill`)
+- Copilot direct MCP execution (`copilot_service._execute_mcp`)
+- MCP Builder re-open: `_buildChartFromDataset()` in `builder.js` regenerates chart client-side from stored dataset + `ui_render_config`, bypassing any stale `chart_data` stored in `sample_output`.
