@@ -18,8 +18,8 @@ router = APIRouter(prefix="/mock", tags=["mock-data"])
 
 @router.get("/apc", summary="APC Mock Data")
 async def get_apc(
-    lot_id: str = Query(..., description="Lot ID"),
-    operation_number: str = Query("3200", description="Operation number (default: 3200)"),
+    lot_id: str = Query(default="L001", description="Lot ID"),
+    operation_number: str = Query(default="3200", description="Operation number"),
 ):
     """Return mock APC control data for a given lot and operation."""
     seed = hash(lot_id + operation_number) % 1000
@@ -66,9 +66,9 @@ async def get_apc(
 
 @router.get("/recipe", summary="Recipe Mock Data")
 async def get_recipe(
-    lot_id: str = Query(..., description="Lot ID"),
-    tool_id: str = Query(..., description="Tool ID"),
-    operation_number: str = Query(..., description="Operation number"),
+    lot_id: str = Query(default="L001", description="Lot ID"),
+    tool_id: str = Query(default="TETCH01", description="Tool ID"),
+    operation_number: str = Query(default="3200", description="Operation number"),
 ):
     """Return recipe parameters with dynamic 12-hour-ago last-modified time."""
     # Dynamic: 12 hours ago from NOW (as spec requires)
@@ -99,7 +99,7 @@ async def get_recipe(
 
 @router.get("/ec", summary="Equipment Constants Mock Data")
 async def get_ec(
-    tool_id: str = Query(..., description="Tool ID"),
+    tool_id: str = Query(default="TETCH01", description="Tool ID"),
 ):
     """Return equipment hardware parameter baselines."""
     seed = hash(tool_id) % 1000
