@@ -1332,68 +1332,62 @@ function _renderStandardPayload(result) {
   let dataHtml = '';
 
   if (uiRender) {
-    const type      = uiRender.type || 'table';
-    // Normalize: backend may return chart_data as an already-parsed object
-    const rawChartData = uiRender.chart_data;
-    const chartData = (rawChartData && typeof rawChartData === 'object')
-      ? JSON.stringify(rawChartData)
-      : rawChartData;
+    const type = uiRender.type || 'table';
+    // Build charts array: prefer charts[] (multi-chart support), fall back to chart_data
+    const _normChart = c => (c && typeof c === 'object') ? JSON.stringify(c) : c;
+    const rawCharts  = Array.isArray(uiRender.charts) ? uiRender.charts : [];
+    const chartsArr  = rawCharts.length > 0
+      ? rawCharts.map(_normChart).filter(Boolean)
+      : (uiRender.chart_data ? [_normChart(uiRender.chart_data)] : []);
 
-    if (type === 'table' || !chartData) {
+    if (type === 'table' || chartsArr.length === 0) {
       // No chart — just show the data table
       dataHtml = _renderDatasetTable(dataset || outputData);
     } else {
-      // Has chart — show Chart tab + Data tab
+      // Has chart(s) — show Chart tab + Data tab
       const tabId     = 'rtab-' + Math.random().toString(36).slice(2, 8);
       const tableHtml = _renderDatasetTable(dataset || outputData);
 
-      let chartPaneHtml;
-      if (typeof chartData === 'string' && chartData.startsWith('data:image')) {
-        // Matplotlib base64 PNG — inject directly
-        chartPaneHtml = `<img src="${chartData}" style="max-width:100%;border-radius:8px;border:1px solid #334155;" alt="chart" />`;
-      } else if (typeof chartData === 'string' && chartData.trim().startsWith('{')) {
-        // Plotly JSON spec — render via Plotly.newPlot() (avoids innerHTML script-blocking)
-        const plotId = tabId + '-plot';
-        chartPaneHtml = `<div id="${plotId}" style="width:100%;min-height:420px;"></div>`;
-        // Defer until after the HTML string is inserted into the DOM
-        setTimeout(() => {
-          const el = document.getElementById(plotId);
-          if (!el || !window.Plotly) return;
-          try {
-            const spec = JSON.parse(chartData);
-            const layout = Object.assign({
-              paper_bgcolor: '#ffffff',
-              plot_bgcolor:  '#f8fafc',
-              font: { color: '#1e293b', size: 11 },
-              margin: { t: 40, r: 20, b: 60, l: 60 },
-            }, spec.layout || {});
-            Plotly.newPlot(el, spec.data || [], layout, { responsive: true, displayModeBar: false });
-          } catch(e) { el.innerHTML = `<p class="text-xs text-red-400 p-4">圖表渲染失敗：${e.message}</p>`; }
-        }, 80);
-      } else {
-        // Legacy HTML string — re-execute scripts manually
-        const legacyId = tabId + '-legacy';
-        chartPaneHtml = `<div id="${legacyId}" style="width:100%;min-height:420px;"></div>`;
-        setTimeout(() => {
-          const el = document.getElementById(legacyId);
-          if (!el) return;
-          el.innerHTML = chartData;
-          el.querySelectorAll('script').forEach(old => {
-            const s = document.createElement('script');
-            if (old.src) s.src = old.src; else s.text = old.textContent;
-            old.replaceWith(s);
-          });
-        }, 80);
-      }
+      // Render each chart — all stacked inside a single "Chart" tab pane
+      const chartsPanesHtml = chartsArr.map((chartData, idx) => {
+        if (typeof chartData === 'string' && chartData.startsWith('data:image')) {
+          // Matplotlib base64 PNG
+          return `<div class="mb-3"><img src="${chartData}" style="max-width:100%;border-radius:8px;border:1px solid #334155;" alt="chart" /></div>`;
+        } else if (typeof chartData === 'string' && chartData.trim().startsWith('{')) {
+          // Plotly JSON — render via Plotly.newPlot() (the only supported JSON path)
+          const plotId = `${tabId}-plot-${idx}`;
+          setTimeout(() => {
+            const el = document.getElementById(plotId);
+            if (!el || !window.Plotly) return;
+            try {
+              const spec = JSON.parse(chartData);
+              const layout = Object.assign({
+                paper_bgcolor: '#ffffff',
+                plot_bgcolor:  '#f8fafc',
+                font: { color: '#1e293b', size: 11 },
+                margin: { t: 40, r: 20, b: 60, l: 60 },
+              }, spec.layout || {});
+              Plotly.newPlot(el, spec.data || [], layout, { responsive: true, displayModeBar: false });
+            } catch(e) { el.innerHTML = `<p class="text-xs text-red-400 p-4">圖表渲染失敗：${e.message}</p>`; }
+          }, 80);
+          return `<div class="mb-3"><div id="${plotId}" style="width:100%;min-height:280px;"></div></div>`;
+        } else {
+          // Unsupported format — HTML output (fig.to_html) is blocked
+          return `<div class="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
+            ⚠️ 圖表格式不支援。請確認腳本使用 <code>json.dumps(fig.to_dict())</code> 產生圖表，不可使用 fig.to_html()。
+          </div>`;
+        }
+      }).join('');
 
+      const chartLabel = chartsArr.length > 1 ? `📊 圖表 (${chartsArr.length})` : '📊 圖表';
       dataHtml = `
         <div class="result-tab-bar flex gap-1 mb-2">
           <button class="result-tab-btn text-xs px-3 py-1 rounded-md bg-indigo-600 text-white font-medium transition-colors"
-                  onclick="_switchResultTab('${tabId}','chart',this)">📊 圖表</button>
+                  onclick="_switchResultTab('${tabId}','chart',this)">${chartLabel}</button>
           <button class="result-tab-btn text-xs px-3 py-1 rounded-md text-slate-500 font-medium transition-colors hover:text-slate-800"
                   onclick="_switchResultTab('${tabId}','data',this)">📋 資料</button>
         </div>
-        <div id="${tabId}-chart">${chartPaneHtml}</div>
+        <div id="${tabId}-chart">${chartsPanesHtml}</div>
         <div id="${tabId}-data"  class="hidden">${tableHtml}</div>
       `;
     }
