@@ -80,11 +80,22 @@ class CopilotService:
         # 1. Load tool catalog
         mcps = await self._mcp_repo.get_all()
         skills = await self._skill_repo.get_all()
+        all_ds = await self._ds_repo.get_all()
 
-        # Build an MCP lookup dict for fallback param resolution
+        # Build lookup dicts
         mcp_lookup: Dict[int, Any] = {m.id: m for m in mcps}
+        ds_lookup: Dict[int, Any] = {d.id: d for d in all_ds}
 
-        # Build required-param map per MCP (derived from skill param_mappings)
+        def _required_from_ds(ds) -> List[str]:
+            """Extract required field names from a DataSubject's input_schema."""
+            schema = _j(ds.input_schema) if isinstance(ds.input_schema, str) else (ds.input_schema or {})
+            return [
+                f["name"] for f in (schema or {}).get("fields", [])
+                if f.get("required") and f.get("name")
+            ]
+
+        # Build required-param map per MCP
+        # Priority: explicit skill param_mappings → DataSubject input_schema (ground truth)
         mcp_params_map: Dict[int, List[str]] = {}
         for skill in skills:
             for mapping in (_j(skill.param_mappings) or []):
@@ -94,6 +105,14 @@ class CopilotService:
                     mcp_params_map.setdefault(mid, [])
                     if pname not in mcp_params_map[mid]:
                         mcp_params_map[mid].append(pname)
+        # For MCPs with no param mappings, fall back to their DataSubject's input_schema
+        for mcp in mcps:
+            if mcp.id not in mcp_params_map:
+                ds = ds_lookup.get(mcp.data_subject_id)
+                if ds:
+                    required = _required_from_ds(ds)
+                    if required:
+                        mcp_params_map[mcp.id] = required
 
         # Also build required params for skills directly
         skill_params_map: Dict[int, List[str]] = {}
@@ -104,19 +123,28 @@ class CopilotService:
                 if pname and pname not in params:
                     params.append(pname)
 
-            # Fallback: if no param_mappings, derive required params from the
-            # bound MCP's input_definition so slot filling still triggers.
+            # Fallback chain (when param_mappings is empty):
+            # 1. MCP input_definition.params (required=true)
+            # 2. DataSubject input_schema.fields (required=true)  ← ground truth
             if not params:
                 mcp_id_list = _j(skill.mcp_ids) or []
                 if mcp_id_list:
                     bound_mcp = mcp_lookup.get(mcp_id_list[0])
                     if bound_mcp:
+                        # Try MCP input_definition first
                         input_def = _j(bound_mcp.input_definition) if hasattr(bound_mcp, "input_definition") else None
                         for p in (input_def or {}).get("params", []):
                             if p.get("required") and p.get("name") and p["name"] not in params:
                                 params.append(p["name"])
+                        # If still empty, fall back to DataSubject input_schema (most authoritative)
+                        if not params:
+                            ds = ds_lookup.get(bound_mcp.data_subject_id)
+                            if ds:
+                                params = _required_from_ds(ds)
 
             skill_params_map[skill.id] = params
+            if params:
+                logger.debug("skill_params_map[%s]=%s", skill.id, params)
 
         mcp_catalog = self._build_mcp_catalog(mcps, mcp_params_map)
         skill_catalog = self._build_skill_catalog(skills, skill_params_map)
