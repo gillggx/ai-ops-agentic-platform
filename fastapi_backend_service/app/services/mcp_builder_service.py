@@ -127,28 +127,39 @@ _DEFAULT_TRY_RUN_SYSTEM_PROMPT = """\
 你必須分別呼叫 fig.add_trace() 四次：(1) 主值折線、(2) UCL 水平線、(3) LCL 水平線、(4) OOC 散點標記。
 千萬不能漏掉任何一條 trace。
 
-- Plotly 多-trace 骨架（SPC Trend Chart 範例，其他圖表類比此結構）：
+⚠️ 若使用者要求 N 張圖，charts 陣列必須包含 N 個 json.dumps(fig.to_dict()) 字串，每張圖建立一個獨立的 go.Figure()。
+
+- Plotly 單圖骨架（SPC Trend Chart，4 traces 標準格式）：
   charts = []
   fig = go.Figure()
-  # ① 主值折線（最重要，絕對不可省略）
+  # ① 主值折線（最重要，絕對不可省略，顏色用 green）
   fig.add_trace(go.Scatter(x=x_vals, y=y_vals, mode='lines+markers',
       name='Value', line=dict(color='green'), marker=dict(color='green')))
-  # ② UCL 水平線
+  # ② UCL 水平線（顏色 orange, dash）
   fig.add_trace(go.Scatter(x=x_vals, y=[ucl]*len(x_vals), mode='lines',
       name='UCL', line=dict(color='orange', dash='dash')))
-  # ③ LCL 水平線
+  # ③ LCL 水平線（顏色 orange, dash）
   fig.add_trace(go.Scatter(x=x_vals, y=[lcl]*len(x_vals), mode='lines',
       name='LCL', line=dict(color='orange', dash='dash')))
-  # ④ OOC 異常點（若有）
+  # ④ OOC 異常點（顏色 red，超出 UCL 或低於 LCL 的點）
   ooc_mask = [(v > ucl or v < lcl) for v in y_vals]
   ooc_x = [x for x, m in zip(x_vals, ooc_mask) if m]
   ooc_y = [y for y, m in zip(y_vals, ooc_mask) if m]
   if ooc_x:
       fig.add_trace(go.Scatter(x=ooc_x, y=ooc_y, mode='markers',
           name='OOC', marker=dict(color='red', size=10)))
-  fig.update_layout(title='Chart Title', xaxis_title='X', yaxis_title='Y',
+  fig.update_layout(title='Chart 1 Title', xaxis_title='X', yaxis_title='Y',
       margin=dict(l=40, r=20, t=40, b=40), height=320)
-  charts.append(json.dumps(fig.to_dict()))
+  charts.append(json.dumps(fig.to_dict()))   # ← append 後再建第 2 張
+
+- Plotly 多圖骨架（若使用者要求 2 張圖，照此模式建立第 2 個 fig）：
+  # ── 第 2 張圖 ──────────────────────────────────────────────────
+  fig2 = go.Figure()
+  # 按需加入 traces（參考上方骨架）
+  fig2.add_trace(go.Scatter(...))
+  fig2.update_layout(title='Chart 2 Title', ...)
+  charts.append(json.dumps(fig2.to_dict()))  # ← 同樣 append 進 charts
+  # 最終 ui_render 含所有圖表
   ui_render = {"type": "trend_chart", "charts": charts, "chart_data": charts[0]}
 
 - Matplotlib（備選，僅需單張時）：

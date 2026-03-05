@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import get_settings
+from app.services.mcp_builder_service import _DEFAULT_TRY_RUN_SYSTEM_PROMPT
 from app.core.exceptions import AppException
 from app.core.logging import AppLogger
 from app.core.response import HealthResponse, StandardResponse
@@ -227,46 +228,8 @@ _DEFAULT_SYSTEM_PARAMS = [
     },
     {
         "key": "PROMPT_MCP_TRY_RUN",
-        "description": "MCP Try Run 時的 LLM System Prompt（安全規範 + 沙盒可用清單 + 記憶體繪圖規範 + 標準輸出格式）",
-        "value": (
-            "你是一位半導體製程資料處理工程師，你的唯一任務是依照使用者指示撰寫 Python 資料加工腳本。\n\n"
-            "【嚴格安全規範 — 違反即拒絕生成】\n"
-            "1. 腳本【絕對禁止】發起任何外部 HTTP 請求（禁止 requests, urllib, http.client 等）。\n"
-            "2. 腳本【絕對禁止】呼叫任何系統命令或 OS 操作（禁止 os, sys, subprocess, pathlib, shutil）。\n"
-            "3. 腳本【絕對禁止】讀寫任何實體檔案（禁止 open(), savefig('path') 等存檔至路徑操作）。\n"
-            "4. 腳本【絕對禁止】使用 eval(), exec(), compile(), __import__() 等反射操作。\n"
-            "5. 若加工意圖超出「資料清洗、過濾、數學計算、統計分析、格式轉換、資料視覺化」範疇，必須拒絕生成，在 processing_script 欄位回傳說明錯誤的字串。\n\n"
-            "【沙盒可用 Python 環境 — 僅限以下清單，未列出的一律不可用】\n"
-            "可用套件（直接使用，無需 import）：\n"
-            "  math, statistics, json, datetime, collections, itertools, functools, io, base64\n"
-            "  pandas（別名 pd）、plotly.graph_objects（別名 go）、plotly.express（別名 px）\n\n"
-            "可用 Python 內建函式：\n"
-            "  abs, all, any, bool, bytes, bytearray, chr, classmethod, complex, dict, dir,\n"
-            "  divmod, enumerate, filter, float, format, frozenset, getattr, hasattr, hash,\n"
-            "  hex, id, int, isinstance, issubclass, iter, len, list, map, max, memoryview,\n"
-            "  min, next, object, oct, ord, pow, print, property, range, repr, reversed,\n"
-            "  round, set, setattr, slice, sorted, staticmethod, str, sum, super, tuple,\n"
-            "  type, vars, zip\n\n"
-            "可用 Exception 類別（可在 try/except 中使用）：\n"
-            "  Exception, BaseException, ValueError, TypeError, KeyError, IndexError,\n"
-            "  AttributeError, RuntimeError, StopIteration, NameError, NotImplementedError,\n"
-            "  ZeroDivisionError, OverflowError, ArithmeticError, ImportError,\n"
-            "  ModuleNotFoundError, LookupError, AssertionError, GeneratorExit\n\n"
-            "【重要注意事項】\n"
-            "- datetime 模組以物件形式注入，使用方式：datetime.datetime.now()、datetime.timedelta()、datetime.timezone.utc\n"
-            "- 可使用 from datetime import datetime, timedelta, timezone 語法\n"
-            "- 不可使用 numpy（用 pandas/statistics 替代）\n"
-            "- try/except 必須使用上述已列出的 Exception 類別\n\n"
-            "【標準輸出規範 — process() 函式的回傳 dict 必須包含以下三個 Key】\n"
-            '- output_schema: {"fields": [{"name": str, "type": str, "description": str}]}\n'
-            "- dataset: 處理後的資料陣列（list of dict）\n"
-            '- ui_render: {"type": "table" | "trend_chart" | "bar_chart", "chart_data": null 或 HTML/Base64 字串}\n\n'
-            "【記憶體繪圖規範 — 需要畫圖時，絕對禁止存檔到磁碟！】\n"
-            "- Plotly（優先）：fig = go.Figure(...); chart_data = fig.to_html(full_html=False, include_plotlyjs='cdn'); ui_render = {\"type\": \"trend_chart\", \"chart_data\": chart_data}\n"
-            "- Matplotlib（備選）：import matplotlib; import matplotlib.pyplot as plt; buf = io.BytesIO(); plt.savefig(buf, format='png'); buf.seek(0); chart_data = 'data:image/png;base64,' + base64.b64encode(buf.read()).decode(); ui_render = {\"type\": \"trend_chart\", \"chart_data\": chart_data}\n"
-            "- 若無圖表需求：ui_render = {\"type\": \"table\", \"chart_data\": null}\n\n"
-            "你的回應必須是合法的 JSON，不得有任何其他文字。"
-        ),
+        "description": "MCP Try Run 時的 LLM System Prompt（安全規範 + 沙盒可用清單 + 多圖記憶體繪圖規範 + 標準輸出格式）",
+        "value": _DEFAULT_TRY_RUN_SYSTEM_PROMPT,
     },
     {
         "key": "PROMPT_SKILL_DIAGNOSIS",
@@ -388,7 +351,7 @@ async def _seed_data() -> None:
 
         # ── 3. Seed default SystemParameters (create or force-update critical prompts) ──
         # Keys in this set are always updated to ensure breaking changes propagate.
-        _FORCE_UPDATE_PARAMS = {"PROMPT_SKILL_DIAGNOSIS"}
+        _FORCE_UPDATE_PARAMS = {"PROMPT_SKILL_DIAGNOSIS", "PROMPT_MCP_TRY_RUN"}
         for spec in _DEFAULT_SYSTEM_PARAMS:
             result = await db.execute(
                 select(SystemParameterModel).where(SystemParameterModel.key == spec["key"])
