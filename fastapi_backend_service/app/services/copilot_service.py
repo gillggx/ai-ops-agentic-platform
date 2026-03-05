@@ -233,6 +233,14 @@ class CopilotService:
 
         system_prompt = f"""你是一個半導體工廠的 AI Copilot 助手，負責解析使用者意圖、識別工具並提取查詢參數。
 {forced_hint}
+
+## ⚠️ CRITICAL RULE — 必須嚴格遵守，違反即為系統性錯誤
+If the user's prompt does NOT explicitly contain values for ALL required parameters of the selected tool,
+you MUST NOT set is_ready=true. You MUST set is_ready=false and ask the user to provide the missing values.
+Never assume, fabricate, or substitute default values for required parameters (such as lot_id, tool_id,
+operation_number). The user must explicitly supply them. Executing a tool without confirmed parameter
+values is strictly forbidden.
+
 ## 可用工具
 
 ### 🔍 MCP 資料查詢工具
@@ -263,7 +271,7 @@ class CopilotService:
 3. 從使用者訊息中提取參數放入 extracted_params（如 lot_id, tool_id, operation_number, chart_name 等）
 4. 已在 Slot Context 中的參數不算 missing_params
 5. missing_params 只列必填且尚未收集的參數名稱（字串陣列）
-6. 若所有必填參數齊全（含 Slot Context 中已有的）→ is_ready = true，同時生成 tab_title
+6. 若所有必填參數齊全（含 Slot Context 中已有的，且來自使用者明確提供）→ is_ready = true，同時生成 tab_title
 7. 若有 missing_params → is_ready = false，在 reply_message 中用繁體中文友善地追問（一次最多問 2 個）
 8. 若是一般問候或聊天 → intent = "general_chat"，在 reply_message 回覆
 9. lot ID 常見格式如 L12345 或 N97A45.00，operation number 是製程站點編號如 3200 或 24981
@@ -290,9 +298,12 @@ class CopilotService:
         lines = []
         for mcp in mcps:
             params = mcp_params_map.get(mcp.id, [])
-            params_str = ", ".join(params) if params else "（無需額外參數）"
+            if params:
+                params_str = ", ".join(f"{p} [REQUIRED]" for p in params)
+            else:
+                params_str = "（無需額外參數）"
             intent = mcp.processing_intent or mcp.name
-            lines.append(f"- [ID:{mcp.id}] {mcp.name}: {intent} | 需要參數: {params_str}")
+            lines.append(f"- [ID:{mcp.id}] {mcp.name}: {intent} | 必填參數: {params_str}")
         return "\n".join(lines) if lines else "（無可用 MCP）"
 
     def _build_skill_catalog(self, skills: List[Any], skill_params_map: Dict[int, List[str]]) -> str:
@@ -301,8 +312,11 @@ class CopilotService:
         for skill in skills:
             desc = skill.description or skill.name
             params = skill_params_map.get(skill.id, [])
-            params_str = ", ".join(params) if params else "（無需額外參數）"
-            lines.append(f"- [ID:{skill.id}] {skill.name}: {desc} | 需要參數: {params_str}")
+            if params:
+                params_str = ", ".join(f"{p} [REQUIRED]" for p in params)
+            else:
+                params_str = "（無需額外參數）"
+            lines.append(f"- [ID:{skill.id}] {skill.name}: {desc} | 必填參數: {params_str}")
         return "\n".join(lines) if lines else "（無可用 Skill）"
 
     # ── MCP Direct Execution ─────────────────────────────────────
