@@ -4010,7 +4010,15 @@ function _nbOnSkillSelect() {
   const skill = skillId ? _skillDefs.find(s => s.id === skillId) : null;
   const checkEl = document.getElementById('nb-skill-system-check');
   if (!checkEl) return;
-  if (!skill) { checkEl.innerHTML = '<p class="text-slate-400 italic">選擇 Skill 後顯示設定摘要</p>'; return; }
+  if (!skill) {
+    checkEl.innerHTML = '<p class="text-slate-400 italic">選擇 Skill 後顯示設定摘要</p>';
+    // Reset MCP lock when skill is cleared
+    const mcpSel = document.getElementById('nb-mcp-select');
+    const hint   = document.getElementById('nb-mcp-params-hint');
+    if (mcpSel) { mcpSel.disabled = false; mcpSel.value = ''; }
+    if (hint)   hint.innerHTML = '';
+    return;
+  }
 
   const mcpIds = (() => { try { return JSON.parse(skill.mcp_ids || '[]'); } catch(_) { return []; } })();
   const mcpNames = mcpIds.map(id => {
@@ -4030,14 +4038,41 @@ function _nbOnSkillSelect() {
       </span>
     </div>`;
 
-  // Auto-select the bound MCP in L3
-  if (mcpIds.length && _nbMcpMode === 'select') {
-    const mcpSel = document.getElementById('nb-mcp-select');
-    if (mcpSel) {
-      mcpSel.value = mcpIds[0];
-      _nbOnMcpSelect();
+  // Auto-lock the bound MCP in L3 when skill has bindings
+  const mcpSel  = document.getElementById('nb-mcp-select');
+  const hint    = document.getElementById('nb-mcp-params-hint');
+  if (mcpIds.length && mcpSel) {
+    // Fix: option values are strings, mcpIds are numbers
+    mcpSel.value = String(mcpIds[0]);
+    mcpSel.disabled = true;  // lock — driven by Skill binding
+    _nbOnMcpSelect();        // trigger params hint
+
+    // Replace hint with "auto-loaded" badge
+    if (hint) {
+      hint.innerHTML = `
+        <div class="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50
+                    border border-emerald-200 rounded-lg px-3 py-1.5 mt-1">
+          <svg class="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
+          <span>已由 Skill 自動帶入：<strong>${_esc(mcpNames[0] || 'MCP #' + mcpIds[0])}</strong></span>
+          <button onclick="_nbUnlockMcp()" class="ml-auto text-emerald-500 hover:text-emerald-700
+                                                   underline text-[10px]">手動更換</button>
+        </div>`;
     }
+  } else if (mcpSel) {
+    // No binding — unlock dropdown so user can freely select
+    mcpSel.disabled = false;
+    if (hint) hint.innerHTML = '';
   }
+}
+
+function _nbUnlockMcp() {
+  const mcpSel = document.getElementById('nb-mcp-select');
+  const hint   = document.getElementById('nb-mcp-params-hint');
+  if (mcpSel) { mcpSel.disabled = false; mcpSel.value = ''; }
+  if (hint)   hint.innerHTML = '';
 }
 
 function _nbOnMcpSelect() {

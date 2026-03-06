@@ -1502,6 +1502,15 @@ body {
   75%, 100% { transform: scale(2); opacity: 0; }
 }
 
+/* ── v12 Nested Builder: locked MCP select (auto-bound from Skill) ── */
+#nb-mcp-select:disabled {
+  background-color: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #15803d;
+  opacity: 1;
+  cursor: default;
+}
+
 /* ── v12 Nested Builder: line-clamp utilities ─────────────── */
 .line-clamp-1 { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
 .line-clamp-2 { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
