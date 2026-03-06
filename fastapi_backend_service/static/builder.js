@@ -4075,6 +4075,47 @@ function _nbUnlockMcp() {
   if (hint)   hint.innerHTML = '';
 }
 
+// Dynamic param form when DS is selected in "建立全新" MCP mode
+function _nbOnDsChange() {
+  const sel    = document.getElementById('nb-mcp-ds');
+  const formEl = document.getElementById('nb-mcp-sample-form');
+  if (!sel || !formEl) return;
+
+  const dsId = parseInt(sel.value);
+  if (!dsId) { formEl.innerHTML = ''; return; }
+  const ds = _dataSubjects.find(d => d.id === dsId);
+  if (!ds) { formEl.innerHTML = ''; return; }
+
+  const inFields = (ds.input_schema?.fields) || [];
+  if (inFields.length === 0) { formEl.innerHTML = ''; return; }
+
+  const inputs = inFields.map(f => `
+    <div class="flex items-center gap-2 mb-1.5">
+      <label class="text-xs text-slate-500 w-32 shrink-0">${_esc(f.name)}${f.required ? ' <span class="text-red-400">*</span>' : ''}</label>
+      <input id="nb-mcp-param-${_esc(f.name)}"
+             class="input-field flex-1 text-xs py-1"
+             placeholder="${_esc(f.description || f.name)}"
+             value="${_esc(_defaultSampleValue(f.name))}" />
+    </div>`).join('');
+
+  formEl.innerHTML = `
+    <label class="text-xs text-slate-500 font-medium">測試參數</label>
+    <div class="mt-1 bg-slate-50 border border-slate-200 rounded-lg p-3">${inputs}</div>`;
+}
+
+// Collect params from the dynamic form fields into a plain object
+function _nbCollectFormParams() {
+  const sel = document.getElementById('nb-mcp-ds');
+  const dsId = sel ? parseInt(sel.value) : null;
+  const ds = dsId ? _dataSubjects.find(d => d.id === dsId) : null;
+  const params = {};
+  for (const f of (ds?.input_schema?.fields || [])) {
+    const el = document.getElementById(`nb-mcp-param-${f.name}`);
+    if (el && el.value.trim()) params[f.name] = el.value.trim();
+  }
+  return params;
+}
+
 function _nbOnMcpSelect() {
   const sel = document.getElementById('nb-mcp-select');
   const mcpId = sel ? parseInt(sel.value) : null;
@@ -4119,45 +4160,84 @@ async function _tryRunNestedBuilder() {
     if (_nbSkillMode === 'select') {
       const sel = document.getElementById('nb-skill-select');
       skillObj = sel && sel.value ? _skillDefs.find(s => s.id === parseInt(sel.value)) : null;
-      if (!skillObj) throw new Error('請先選擇一個 Skill');
-      const mcpIds = (() => { try { return JSON.parse(skillObj.mcp_ids || '[]'); } catch(_) { return []; } })();
-      mcpId = mcpIds[0] || null;
+      if (skillObj) {
+        // Skill selected — derive MCP from its bindings
+        const mcpIds = (() => { try { return JSON.parse(skillObj.mcp_ids || '[]'); } catch(_) { return []; } })();
+        mcpId = mcpIds[0] || null;
+      }
     }
 
+    // MCP select panel can override/set mcpId
     if (_nbMcpMode === 'select') {
       const sel = document.getElementById('nb-mcp-select');
       if (sel && sel.value) mcpId = parseInt(sel.value);
     }
 
-    // ── Step 2: Run MCP Try-Run (if MCP selected) ───────────
+    // ── Step 2: Run MCP Try-Run ───────────────────────────────
     let mcpTryResult = null;
-    if (mcpId) {
-      const mcp = _mcpDefs.find(m => m.id === mcpId);
-      if (!mcp) throw new Error(`找不到 MCP #${mcpId}`);
 
-      // Get sample data first
+    if (_nbMcpMode === 'new') {
+      // "建立全新" mode — fetch real sample data then run try-run
+      const dsId   = parseInt(document.getElementById('nb-mcp-ds')?.value || '0');
+      const intent = document.getElementById('nb-mcp-intent')?.value?.trim() || '';
+      if (!dsId)   throw new Error('請選擇 Data Subject');
+      if (!intent) throw new Error('請填寫加工意圖 (Processing Intent)');
+
+      const ds = _dataSubjects.find(d => d.id === dsId);
+      if (!ds) throw new Error('找不到所選的 Data Subject');
+
+      // Fetch raw data from DS endpoint using form params (same as _fetchSample())
       let sampleData = null;
-      if (mcp.data_subject_id) {
+      const rawUrl = ds.api_config?.endpoint_url || '';
+      if (rawUrl) {
+        const formParams = _nbCollectFormParams();
+        const method = (ds.api_config?.method || 'GET').toUpperCase();
+        const path = rawUrl.replace(/^\/api\/v1/, '');
+        const qp = new URLSearchParams(formParams);
+        const fullPath = method === 'GET' && qp.toString() ? `${path}?${qp}` : path;
+        const body = method !== 'GET' ? formParams : undefined;
         try {
-          const dsResult = await _api('GET', `/data-subjects/${mcp.data_subject_id}/sample`);
-          sampleData = dsResult;
-        } catch(_) { /* no sample data, try-run will use mock */ }
+          sampleData = await _api(method, fullPath, body);
+        } catch(fetchErr) {
+          throw new Error(`撈取樣本資料失敗：${fetchErr.message}`);
+        }
       }
-
-      const intent = document.getElementById('nb-mcp-intent')?.value?.trim()
-        || mcp.processing_intent || '分析資料並呈現圖表';
 
       mcpTryResult = await _api('POST', '/mcp-definitions/try-run', {
         processing_intent: intent,
-        data_subject_id: mcp.data_subject_id,
-        sample_data: sampleData,
+        data_subject_id:   dsId,
+        sample_data:       sampleData,
       });
-
       _nbTryRunResult = mcpTryResult;
 
-      // Update collapsibles with data
+    } else if (mcpId) {
+      // "選擇現有" mode — run try-run from saved MCP definition
+      const mcp = _mcpDefs.find(m => m.id === mcpId);
+      if (!mcp) throw new Error(`找不到 MCP #${mcpId}`);
+
+      let sampleData = null;
+      if (mcp.data_subject_id) {
+        try {
+          sampleData = await _api('GET', `/data-subjects/${mcp.data_subject_id}/sample`);
+        } catch(_) {}
+      }
+
+      const intent = mcp.processing_intent || '分析資料並呈現圖表';
+      mcpTryResult = await _api('POST', '/mcp-definitions/try-run', {
+        processing_intent: intent,
+        data_subject_id:   mcp.data_subject_id,
+        sample_data:       sampleData,
+      });
+      _nbTryRunResult = mcpTryResult;
+
+    } else if (!skillObj) {
+      throw new Error('請選擇 Skill 或設定 MCP 後再執行');
+    }
+
+    // Update collapsible previews
+    if (mcpTryResult) {
       const rawEl = document.getElementById('nb-data-review');
-      if (rawEl && sampleData) rawEl.textContent = JSON.stringify(sampleData, null, 2);
+      if (rawEl) rawEl.textContent = JSON.stringify(mcpTryResult.dataset || mcpTryResult, null, 2);
       const schemaEl = document.getElementById('nb-format-review');
       if (schemaEl && mcpTryResult?.output_schema) {
         schemaEl.textContent = JSON.stringify(mcpTryResult.output_schema, null, 2);
