@@ -402,8 +402,8 @@
           <!-- Body: split top (builder) / bottom (console) -->
           <div class="flex-1 flex flex-col min-h-0 overflow-hidden">
 
-            <!-- TOP 60%: Nested Builder Form -->
-            <div class="overflow-y-auto p-5 bg-slate-100 border-b border-slate-300" style="height:60%">
+            <!-- TOP: Nested Builder Form (flex-1 when console collapsed, shrinks when expanded) -->
+            <div id="nb-builder-top" class="flex-1 overflow-y-auto p-5 bg-slate-100 border-b border-slate-300">
 
               <!-- L1: Task (outermost — dark border) -->
               <div class="bg-white rounded-xl border border-slate-200 shadow-sm
@@ -603,25 +603,33 @@
               </div><!-- /L1 Task -->
             </div><!-- /builder top -->
 
-            <!-- BOTTOM 40%: Try Run Console (dark panel) -->
-            <div class="flex flex-col bg-slate-900 text-white overflow-hidden" style="height:40%">
-              <!-- Console header bar -->
+            <!-- BOTTOM: Try Run Console (collapsed by default, expands on Run) -->
+            <div id="nb-console-panel"
+                 class="flex-shrink-0 flex flex-col bg-slate-900 text-white overflow-hidden">
+              <!-- Console header bar (always visible) -->
               <div class="flex-shrink-0 flex items-center justify-between px-4 py-2
-                          bg-slate-950 border-b border-slate-700">
+                          bg-slate-950 border-t border-slate-700">
                 <div class="flex items-center gap-2">
                   <span class="text-xs font-mono text-emerald-400 font-semibold">Try Run Console</span>
                   <span id="nb-console-status-dot" class="hidden w-2 h-2 rounded-full bg-emerald-400"
                         style="animation: ping 1.2s cubic-bezier(0,0,0.2,1) infinite;"></span>
                 </div>
-                <button onclick="_tryRunNestedBuilder()" id="nb-console-run-btn"
-                        class="text-xs px-3 py-1 bg-emerald-700 hover:bg-emerald-600
-                               text-white rounded-lg transition-colors font-medium">
-                  ▶ Run
-                </button>
+                <div class="flex items-center gap-2">
+                  <button id="nb-console-collapse-btn" onclick="_nbCollapseConsole()"
+                          class="hidden text-xs px-2 py-1 text-slate-400 hover:text-white
+                                 rounded transition-colors">
+                    ↓ 收起
+                  </button>
+                  <button onclick="_tryRunNestedBuilder()" id="nb-console-run-btn"
+                          class="text-xs px-3 py-1 bg-emerald-700 hover:bg-emerald-600
+                                 text-white rounded-lg transition-colors font-medium">
+                    ▶ Run
+                  </button>
+                </div>
               </div>
 
-              <!-- Console scrollable body -->
-              <div id="nb-console-body" class="flex-1 overflow-y-auto p-4">
+              <!-- Console scrollable body (hidden until first run) -->
+              <div id="nb-console-body" class="hidden flex-1 overflow-y-auto p-4">
 
                 <!-- Placeholder -->
                 <div id="nb-console-placeholder"

@@ -3913,11 +3913,40 @@ function _renderDashboardExecLog(events) {
 // v12 — Nested Builder (Task > Skill > MCP)
 // ══════════════════════════════════════════════════════════════
 
-let _nbSkillMode    = 'select';  // 'select' | 'new'
-let _nbMcpMode      = 'select';  // 'select' | 'new'
-let _nbTryRunResult = null;      // last MCP try-run result for the console
+let _nbSkillMode       = 'select';  // 'select' | 'new'
+let _nbMcpMode         = 'select';  // 'select' | 'new'
+let _nbTryRunResult    = null;      // last MCP try-run result for the console
+let _nbConsoleExpanded = false;
+
+function _nbExpandConsole() {
+  if (_nbConsoleExpanded) return;
+  _nbConsoleExpanded = true;
+  const builder = document.getElementById('nb-builder-top');
+  const panel   = document.getElementById('nb-console-panel');
+  const body    = document.getElementById('nb-console-body');
+  const colBtn  = document.getElementById('nb-console-collapse-btn');
+  if (builder) { builder.style.flex = 'none'; builder.style.height = '60%'; }
+  if (panel)   panel.style.height = '40%';
+  if (body)    body.classList.remove('hidden');
+  if (colBtn)  colBtn.classList.remove('hidden');
+}
+
+function _nbCollapseConsole() {
+  _nbConsoleExpanded = false;
+  const builder = document.getElementById('nb-builder-top');
+  const panel   = document.getElementById('nb-console-panel');
+  const body    = document.getElementById('nb-console-body');
+  const colBtn  = document.getElementById('nb-console-collapse-btn');
+  if (builder) { builder.style.flex = '1'; builder.style.height = ''; }
+  if (panel)   panel.style.height = '';
+  if (body)    body.classList.add('hidden');
+  if (colBtn)  colBtn.classList.add('hidden');
+}
 
 async function _nbInitView() {
+  // Ensure console starts collapsed when entering the view
+  _nbCollapseConsole();
+
   // Populate skill and MCP dropdowns
   if (!_skillDefs.length) {
     try { _skillDefs = await _api('GET', '/skill-definitions'); } catch(_) {}
@@ -4030,6 +4059,9 @@ function _nbOnMcpSelect() {
 }
 
 async function _tryRunNestedBuilder() {
+  // Expand console first (slides up)
+  _nbExpandConsole();
+
   const runBtn    = document.getElementById('nb-console-run-btn');
   const headerBtn = document.getElementById('nb-header-run-btn');
   const placeholder = document.getElementById('nb-console-placeholder');
