@@ -4123,14 +4123,41 @@ function _nbOnMcpSelect() {
   const hint = document.getElementById('nb-mcp-params-hint');
   if (!hint) return;
   if (!mcp) { hint.innerHTML = ''; return; }
-  const inputDef = (() => { try { return JSON.parse(mcp.input_definition || '{}'); } catch(_) { return {}; } })();
-  const params = (inputDef.params || []).filter(p => p.required);
-  if (!params.length) { hint.innerHTML = ''; return; }
+
+  // Render DS input form from the MCP's bound DataSubject
+  const ds = mcp.data_subject_id ? _dataSubjects.find(d => d.id === mcp.data_subject_id) : null;
+  const fields = ds?.input_schema?.fields || [];
+
+  if (!fields.length) {
+    hint.innerHTML = `
+      <div class="mt-2 text-xs text-slate-400 italic">此 MCP 無需額外查詢參數</div>`;
+    return;
+  }
+
   hint.innerHTML = `
-    <div class="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 mt-1">
-      <span class="font-medium text-slate-700">必填參數：</span>
-      ${params.map(p => `<span class="inline-block bg-amber-100 text-amber-700 border border-amber-200
-                                     rounded px-1.5 py-0.5 mr-1 font-mono">${_esc(p.name)}</span>`).join('')}
+    <div class="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
+      <p class="text-[11px] font-bold text-blue-700 uppercase tracking-widest mb-2.5 flex items-center gap-1.5">
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+        </svg>
+        DS 查詢參數 — ${_esc(ds.name)}
+      </p>
+      <div class="space-y-2.5">
+        ${fields.map(f => `
+          <div>
+            <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
+              ${_esc(f.label || f.name)}${f.required ? ' <span class="text-red-500">*</span>' : ''}
+            </label>
+            <input id="nb-mcp-select-param-${_esc(f.name)}"
+                   type="${f.type === 'number' ? 'number' : 'text'}"
+                   placeholder="${_esc(f.description || f.name)}"
+                   value="${f.default_value !== undefined && f.default_value !== null ? _esc(String(f.default_value)) : ''}"
+                   class="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-sm
+                          font-medium text-slate-800 shadow-sm focus:outline-none
+                          focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow">
+          </div>`).join('')}
+      </div>
     </div>`;
 }
 
@@ -4223,27 +4250,53 @@ async function _tryRunNestedBuilder() {
       _nbLogLine('✓', 'MCP Try Run 完成', 'text-emerald-600');
 
     } else if (mcpId) {
-      // "選擇現有" mode — run try-run from saved MCP definition
+      // "選擇現有" mode — run stored processing_script directly (NO LLM)
       const mcp = _mcpDefs.find(m => m.id === mcpId);
       if (!mcp) throw new Error(`找不到 MCP #${mcpId}`);
 
-      let sampleData = null;
-      if (mcp.data_subject_id) {
-        _nbLogLine('📡', `正在撈取 Data Subject 樣本資料…`);
-        try {
-          sampleData = await _api('GET', `/data-subjects/${mcp.data_subject_id}/sample`);
-          _nbLogLine('✓', '樣本資料撈取成功', 'text-emerald-600');
-        } catch(_) {
-          _nbLogLine('⚠', '無法撈取樣本資料，以空資料繼續', 'text-amber-600');
-        }
+      const ds = mcp.data_subject_id ? _dataSubjects.find(d => d.id === mcp.data_subject_id) : null;
+      const dsFields = ds?.input_schema?.fields || [];
+
+      // Validate all required DS input fields are filled
+      const missingRequired = dsFields.filter(f => {
+        if (!f.required) return false;
+        const el = document.getElementById(`nb-mcp-select-param-${f.name}`);
+        return !el || !el.value.trim();
+      });
+      if (missingRequired.length) {
+        throw new Error(`請先填寫 DS 查詢參數：${missingRequired.map(f => f.label || f.name).join('、')}`);
       }
 
-      _nbLogLine('⚙', `執行 MCP：${mcp.name}…`);
-      const intent = mcp.processing_intent || '分析資料並呈現圖表';
-      mcpTryResult = await _api('POST', '/mcp-definitions/try-run', {
-        processing_intent: intent,
-        data_subject_id:   mcp.data_subject_id,
-        sample_data:       sampleData,
+      // Collect form params and fetch real DS data
+      let rawData = null;
+      const rawUrl = ds?.api_config?.endpoint_url || '';
+      if (ds && rawUrl) {
+        _nbLogLine('📡', `正在撈取 DS 資料：${ds.name}…`);
+        const formParams = {};
+        for (const f of dsFields) {
+          const el = document.getElementById(`nb-mcp-select-param-${f.name}`);
+          if (el && el.value.trim()) formParams[f.name] = el.value.trim();
+        }
+        const method = (ds.api_config?.method || 'GET').toUpperCase();
+        const path = rawUrl.replace(/^\/api\/v1/, '');
+        const qp = new URLSearchParams(formParams);
+        const fullPath = method === 'GET' && qp.toString() ? `${path}?${qp}` : path;
+        const body = method !== 'GET' ? formParams : undefined;
+        try {
+          rawData = await _api(method, fullPath, body);
+          _nbLogLine('✓', 'DS 資料撈取成功', 'text-emerald-600');
+        } catch(fetchErr) {
+          throw new Error(`撈取 DS 資料失敗：${fetchErr.message}`);
+        }
+      } else if (!ds) {
+        throw new Error('此 MCP 未綁定 Data Subject，無法取得資料');
+      }
+
+      if (!rawData) throw new Error('DS 回傳空資料，請確認查詢參數是否正確');
+
+      _nbLogLine('⚙', `執行 MCP：${mcp.name}（直接執行已存 Python）…`);
+      mcpTryResult = await _api('POST', `/mcp-definitions/${mcpId}/run-with-data`, {
+        raw_data: rawData,
       });
       _nbTryRunResult = mcpTryResult;
       _nbLogLine('✓', 'MCP 執行完成', 'text-emerald-600');
