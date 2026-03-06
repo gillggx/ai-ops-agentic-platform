@@ -4151,6 +4151,8 @@ async function _tryRunNestedBuilder() {
   if (placeholder) placeholder.classList.add('hidden');
   if (skillResult) skillResult.classList.add('hidden');
   if (mcpResult) mcpResult.classList.add('hidden');
+  _nbLogClear();
+  _nbLogLine('▶', '開始執行 Try Run');
 
   try {
     // ── Step 1: Resolve Skill + MCP ──────────────────────────
@@ -4161,6 +4163,7 @@ async function _tryRunNestedBuilder() {
       const sel = document.getElementById('nb-skill-select');
       skillObj = sel && sel.value ? _skillDefs.find(s => s.id === parseInt(sel.value)) : null;
       if (skillObj) {
+        _nbLogLine('📋', `已選 Skill：${skillObj.name}`);
         // Skill selected — derive MCP from its bindings
         const mcpIds = (() => { try { return JSON.parse(skillObj.mcp_ids || '[]'); } catch(_) { return []; } })();
         mcpId = mcpIds[0] || null;
@@ -4171,6 +4174,11 @@ async function _tryRunNestedBuilder() {
     if (_nbMcpMode === 'select') {
       const sel = document.getElementById('nb-mcp-select');
       if (sel && sel.value) mcpId = parseInt(sel.value);
+    }
+
+    if (mcpId) {
+      const mcp = _mcpDefs.find(m => m.id === mcpId);
+      if (mcp) _nbLogLine('🔧', `已選 MCP：${mcp.name}`);
     }
 
     // ── Step 2: Run MCP Try-Run ───────────────────────────────
@@ -4190,6 +4198,7 @@ async function _tryRunNestedBuilder() {
       let sampleData = null;
       const rawUrl = ds.api_config?.endpoint_url || '';
       if (rawUrl) {
+        _nbLogLine('📡', `正在撈取 Data Subject 樣本資料：${ds.name}…`);
         const formParams = _nbCollectFormParams();
         const method = (ds.api_config?.method || 'GET').toUpperCase();
         const path = rawUrl.replace(/^\/api\/v1/, '');
@@ -4198,17 +4207,20 @@ async function _tryRunNestedBuilder() {
         const body = method !== 'GET' ? formParams : undefined;
         try {
           sampleData = await _api(method, fullPath, body);
+          _nbLogLine('✓', '樣本資料撈取成功', 'text-emerald-600');
         } catch(fetchErr) {
           throw new Error(`撈取樣本資料失敗：${fetchErr.message}`);
         }
       }
 
+      _nbLogLine('⚙', 'LLM 生成 MCP 處理腳本並沙箱執行中…');
       mcpTryResult = await _api('POST', '/mcp-definitions/try-run', {
         processing_intent: intent,
         data_subject_id:   dsId,
         sample_data:       sampleData,
       });
       _nbTryRunResult = mcpTryResult;
+      _nbLogLine('✓', 'MCP Try Run 完成', 'text-emerald-600');
 
     } else if (mcpId) {
       // "選擇現有" mode — run try-run from saved MCP definition
@@ -4217,11 +4229,16 @@ async function _tryRunNestedBuilder() {
 
       let sampleData = null;
       if (mcp.data_subject_id) {
+        _nbLogLine('📡', `正在撈取 Data Subject 樣本資料…`);
         try {
           sampleData = await _api('GET', `/data-subjects/${mcp.data_subject_id}/sample`);
-        } catch(_) {}
+          _nbLogLine('✓', '樣本資料撈取成功', 'text-emerald-600');
+        } catch(_) {
+          _nbLogLine('⚠', '無法撈取樣本資料，以空資料繼續', 'text-amber-600');
+        }
       }
 
+      _nbLogLine('⚙', `執行 MCP：${mcp.name}…`);
       const intent = mcp.processing_intent || '分析資料並呈現圖表';
       mcpTryResult = await _api('POST', '/mcp-definitions/try-run', {
         processing_intent: intent,
@@ -4229,6 +4246,7 @@ async function _tryRunNestedBuilder() {
         sample_data:       sampleData,
       });
       _nbTryRunResult = mcpTryResult;
+      _nbLogLine('✓', 'MCP 執行完成', 'text-emerald-600');
 
     } else if (!skillObj) {
       throw new Error('請選擇 Skill 或設定 MCP 後再執行');
@@ -4261,6 +4279,7 @@ async function _tryRunNestedBuilder() {
         mcpNameForKey = document.getElementById('nb-mcp-name')?.value?.trim() || 'mcp';
       }
 
+      _nbLogLine('🧠', 'LLM 生成 Skill 診斷 Python 程式碼…');
       const skillCodeResult = await _api('POST', '/skill-definitions/generate-code-diagnosis', {
         diagnostic_prompt:  diagPrompt,
         problem_subject:    probSubject || null,
@@ -4272,6 +4291,11 @@ async function _tryRunNestedBuilder() {
         throw new Error(skillCodeResult.error || 'Skill 診斷碼生成失敗');
       }
 
+      const resultStatus = skillCodeResult.status || 'UNKNOWN';
+      const statusIcon = resultStatus === 'ABNORMAL' ? '⚠' : resultStatus === 'NORMAL' ? '✓' : '—';
+      const statusColor = resultStatus === 'ABNORMAL' ? 'text-red-600' : resultStatus === 'NORMAL' ? 'text-emerald-600' : 'text-slate-500';
+      _nbLogLine(statusIcon, `Skill 診斷完成 → ${resultStatus}`, statusColor);
+
       // Attach display helpers for _nbRenderSkillDiagnosis
       skillLiveResult = {
         ...skillCodeResult,
@@ -4281,18 +4305,21 @@ async function _tryRunNestedBuilder() {
     }
 
     // ── Step 4: Show Skill Diagnosis Layer ──────────────────
+    _nbLogLine('📊', '渲染診斷結果…');
     _nbRenderSkillDiagnosis(skillObj, skillLiveResult);
 
     // ── Step 5: Show MCP Evidence Layer ──────────────────────
     if (mcpTryResult) _nbRenderMcpEvidence(mcpTryResult);
+    _nbLogLine('✓', 'Try Run 完成', 'text-emerald-600');
 
   } catch(e) {
+    _nbLogLine('✗', `執行失敗：${e.message}`, 'text-red-600');
     if (placeholder) {
       placeholder.classList.remove('hidden');
       placeholder.innerHTML = `
         <div class="text-center">
-          <p class="text-red-400 font-semibold text-sm mb-1">✗ 執行失敗</p>
-          <p class="text-red-300 text-xs">${_esc(e.message)}</p>
+          <p class="text-red-600 font-semibold text-sm mb-1">✗ 執行失敗</p>
+          <p class="text-red-500 text-xs">${_esc(e.message)}</p>
         </div>`;
     }
   } finally {
@@ -4324,37 +4351,43 @@ function _nbRenderSkillDiagnosis(skillObj, liveResult = null) {
 
   const statusBadge = isAbn
     ? `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full
-                    bg-red-500/20 border border-red-500/40 text-red-300 font-bold text-xs">⚠ ABNORMAL</span>`
+                    bg-red-100 border border-red-300 text-red-700 font-bold text-xs">⚠ ABNORMAL</span>`
     : status === 'NORMAL'
     ? `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full
-                    bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-bold text-xs">✓ NORMAL</span>`
+                    bg-emerald-100 border border-emerald-300 text-emerald-700 font-bold text-xs">✓ NORMAL</span>`
     : `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full
-                    bg-slate-700 border border-slate-600 text-slate-400 font-bold text-xs">— ${_esc(status)}</span>`;
+                    bg-slate-100 border border-slate-300 text-slate-500 font-bold text-xs">— ${_esc(status)}</span>`;
 
   const probHtml = probObj && typeof probObj === 'object' && Object.keys(probObj).length
-    ? `<div class="mt-2 space-y-1">` +
+    ? `<div class="mt-1 space-y-1">` +
         Object.entries(probObj).map(([k, v]) =>
           `<div class="flex gap-2 text-xs">
-             <span class="text-slate-500 min-w-24">${_esc(k)}：</span>
-             <span class="text-slate-200">${_esc(String(v))}</span>
+             <span class="text-slate-500 min-w-24 font-medium">${_esc(k)}：</span>
+             <span class="text-slate-700 font-semibold">${_esc(String(v))}</span>
            </div>`).join('') +
         `</div>`
-    : `<p class="text-xs text-slate-500 italic mt-2">無異常物件</p>`;
+    : `<p class="text-xs text-slate-400 italic mt-1">無異常物件</p>`;
+
+  // Light report card style: ABNORMAL = red-tinted, NORMAL = green-tinted, UNKNOWN = neutral
+  const cardBg     = isAbn ? 'bg-red-50 border border-red-200 border-l-4 border-l-red-500'
+                   : status === 'NORMAL' ? 'bg-emerald-50 border border-emerald-200 border-l-4 border-l-emerald-500'
+                   : 'bg-slate-50 border border-slate-200 border-l-4 border-l-slate-400';
+  const msgColor   = isAbn ? 'text-red-900' : status === 'NORMAL' ? 'text-emerald-900' : 'text-slate-700';
+  const labelColor = isAbn ? 'text-red-500'  : status === 'NORMAL' ? 'text-emerald-600' : 'text-slate-500';
 
   cardEl.innerHTML = `
-    <div class="bg-slate-800 border ${isAbn ? 'border-red-500/30' : 'border-slate-700'}
-                rounded-xl p-4 border-t-4 ${isAbn ? 'border-t-red-500' : 'border-t-emerald-500'}">
+    <div class="${cardBg} rounded-xl p-4">
       <div class="flex items-center gap-2 mb-3">
         ${statusBadge}
-        <span class="text-xs text-slate-400">${liveResult?.skillName || (skillObj ? _esc(skillObj.name) : '未選擇')}</span>
+        <span class="text-xs text-slate-500 font-medium">${liveResult?.skillName || (skillObj ? _esc(skillObj.name) : '未選擇')}</span>
       </div>
-      <p class="text-sm text-slate-200 leading-relaxed mb-2">${_esc(diagMsg)}</p>
-      <div class="text-xs text-slate-500 uppercase tracking-wider mb-1">異常物件</div>
+      <p class="text-sm ${msgColor} leading-relaxed mb-3 font-medium">${_esc(diagMsg)}</p>
+      <div class="text-[11px] font-bold ${labelColor} uppercase tracking-widest mb-1.5">異常物件</div>
       ${probHtml}
       ${isAbn && (liveResult?.expertAction || skillObj?.human_recommendation) ? `
-        <div class="mt-3 bg-amber-900/30 border border-amber-700/30 rounded-lg px-3 py-2">
-          <p class="text-xs text-amber-400 font-semibold mb-0.5">↳ 專家建議處置</p>
-          <p class="text-xs text-amber-200">${_esc(liveResult?.expertAction || skillObj?.human_recommendation)}</p>
+        <div class="mt-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+          <p class="text-[11px] font-bold text-amber-700 uppercase tracking-widest mb-1">↳ 專家建議處置</p>
+          <p class="text-sm text-amber-800">${_esc(liveResult?.expertAction || skillObj?.human_recommendation)}</p>
         </div>` : ''}
     </div>`;
 
@@ -4375,22 +4408,24 @@ function _nbRenderMcpEvidence(result) {
       chartEl.innerHTML = '';
       charts.forEach((chartJson, i) => {
         const wrapper = document.createElement('div');
-        wrapper.style.cssText = 'height:240px;background:#1e293b;border-radius:8px;overflow:hidden;margin-bottom:8px;';
+        wrapper.style.cssText = 'height:260px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;overflow:hidden;margin-bottom:8px;';
         chartEl.appendChild(wrapper);
         try {
           const figData = typeof chartJson === 'string' ? JSON.parse(chartJson) : chartJson;
           const layoutOverride = {
-            paper_bgcolor: '#1e293b', plot_bgcolor: '#1e293b',
-            font: { color: '#94a3b8', size: 11 },
+            paper_bgcolor: '#f8fafc', plot_bgcolor: '#ffffff',
+            font: { color: '#334155', size: 11 },
             margin: { l: 50, r: 20, t: 30, b: 40 },
+            xaxis: { gridcolor: '#e2e8f0', linecolor: '#cbd5e1' },
+            yaxis: { gridcolor: '#e2e8f0', linecolor: '#cbd5e1' },
           };
           Plotly.newPlot(wrapper, figData.data || [], { ...figData.layout, ...layoutOverride }, { responsive: true });
         } catch(e) {
-          wrapper.innerHTML = `<p class="text-xs text-red-400 p-3">圖表渲染失敗：${_esc(e.message)}</p>`;
+          wrapper.innerHTML = `<p class="text-xs text-red-500 p-3">圖表渲染失敗：${_esc(e.message)}</p>`;
         }
       });
     } else {
-      chartEl.innerHTML = `<div class="flex items-center justify-center h-24 text-slate-600 text-sm">無圖表資料</div>`;
+      chartEl.innerHTML = `<div class="flex items-center justify-center h-24 text-slate-400 text-sm">無圖表資料</div>`;
     }
   }
 
@@ -4403,19 +4438,19 @@ function _nbRenderMcpEvidence(result) {
     } else {
       const keys = Object.keys(dataset[0] || {});
       sumEl.innerHTML = `
-        <div class="overflow-x-auto">
+        <div class="overflow-x-auto rounded-lg border border-slate-200">
           <table class="text-xs w-full border-collapse">
-            <thead>
-              <tr>${keys.map(k => `<th class="text-left text-slate-500 border-b border-slate-700 px-2 py-1">${_esc(k)}</th>`).join('')}</tr>
+            <thead class="bg-slate-100">
+              <tr>${keys.map(k => `<th class="text-left text-slate-600 font-bold border-b border-slate-200 px-3 py-2 uppercase tracking-wide">${_esc(k)}</th>`).join('')}</tr>
             </thead>
-            <tbody>
-              ${dataset.slice(0, 20).map(row =>
-                `<tr class="hover:bg-slate-800 transition-colors">
-                   ${keys.map(k => `<td class="text-slate-300 border-b border-slate-800 px-2 py-1">${_esc(String(row[k] ?? ''))}</td>`).join('')}
+            <tbody class="bg-white">
+              ${dataset.slice(0, 20).map((row, ri) =>
+                `<tr class="${ri % 2 === 1 ? 'bg-slate-50' : 'bg-white'} hover:bg-blue-50 transition-colors">
+                   ${keys.map(k => `<td class="text-slate-700 border-b border-slate-100 px-3 py-1.5">${_esc(String(row[k] ?? ''))}</td>`).join('')}
                  </tr>`).join('')}
             </tbody>
           </table>
-          ${dataset.length > 20 ? `<p class="text-slate-600 italic mt-1">⋯ 僅顯示前 20 筆（共 ${dataset.length} 筆）</p>` : ''}
+          ${dataset.length > 20 ? `<p class="text-slate-400 italic mt-2 px-3 pb-2 text-[11px]">⋯ 僅顯示前 20 筆（共 ${dataset.length} 筆）</p>` : ''}
         </div>`;
     }
   }
@@ -4431,11 +4466,31 @@ function _nbSwitchMcpTab(tab) {
     const content = document.getElementById(`nb-mcp-tab-${t}`);
     const isActive = t === tab;
     if (btn) {
-      btn.className = `text-xs px-3 py-2 border-b-2 transition-colors font-${isActive ? 'semibold' : 'normal'} ` +
-        (isActive ? 'text-blue-400 border-blue-400' : 'text-slate-500 border-transparent hover:text-slate-300');
+      btn.className = `text-xs px-4 py-2 border-b-2 transition-colors ` +
+        (isActive ? 'text-blue-600 border-blue-600 font-bold' : 'text-slate-500 border-transparent hover:text-slate-700 font-medium');
     }
     if (content) content.classList.toggle('hidden', !isActive);
   });
+}
+
+// ── Execution log helpers ─────────────────────────────────────
+function _nbLogClear() {
+  const el = document.getElementById('nb-exec-log');
+  const lines = document.getElementById('nb-exec-log-lines');
+  if (el) el.classList.remove('hidden');
+  if (lines) lines.innerHTML = '';
+}
+
+function _nbLogLine(icon, text, color = 'text-slate-600') {
+  const lines = document.getElementById('nb-exec-log-lines');
+  if (!lines) return;
+  const ts = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+  const row = document.createElement('div');
+  row.className = `flex items-start gap-2 py-0.5`;
+  row.innerHTML = `<span class="text-slate-400 shrink-0 select-none">${ts}</span>
+                   <span class="${color}">${icon} ${_esc(text)}</span>`;
+  lines.appendChild(row);
+  lines.scrollTop = lines.scrollHeight;
 }
 
 async function _nbSaveRoutineCheck() {

@@ -621,82 +621,102 @@
               </div><!-- /max-w-5xl -->
             </div><!-- /builder top -->
 
-            <!-- BOTTOM: Try Run Console (collapsed by default, expands on Run) -->
+            <!-- BOTTOM: Try Run Report (collapsed by default, expands on Run) -->
             <div id="nb-console-panel"
-                 class="flex-shrink-0 flex flex-col bg-slate-900 text-white overflow-hidden">
-              <!-- Console header bar (always visible) -->
-              <div class="flex-shrink-0 flex items-center justify-between px-4 py-2
-                          bg-slate-950 border-t border-slate-700">
+                 class="flex-shrink-0 flex flex-col bg-white overflow-hidden border-t border-slate-200 shadow-xl">
+              <!-- Report header bar (always visible) -->
+              <div class="flex-shrink-0 flex items-center justify-between px-4 py-2.5
+                          bg-slate-50 border-b border-slate-200">
                 <div class="flex items-center gap-2">
-                  <span class="text-xs font-mono text-emerald-400 font-semibold">Try Run Console</span>
-                  <span id="nb-console-status-dot" class="hidden w-2 h-2 rounded-full bg-emerald-400"
+                  <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                  </svg>
+                  <span class="text-xs font-bold text-slate-600 uppercase tracking-widest">Try Run Report</span>
+                  <span id="nb-console-status-dot" class="hidden w-2 h-2 rounded-full bg-blue-500"
                         style="animation: ping 1.2s cubic-bezier(0,0,0.2,1) infinite;"></span>
                 </div>
                 <div class="flex items-center gap-2">
                   <button id="nb-console-collapse-btn" onclick="_nbCollapseConsole()"
-                          class="hidden text-xs px-2 py-1 text-slate-400 hover:text-white
-                                 rounded transition-colors">
+                          class="hidden text-xs px-2 py-1 text-slate-500 hover:text-slate-800
+                                 border border-slate-200 hover:border-slate-300 rounded transition-colors">
                     ↓ 收起
                   </button>
                   <button onclick="_tryRunNestedBuilder()" id="nb-console-run-btn"
-                          class="text-xs px-3 py-1 bg-emerald-700 hover:bg-emerald-600
-                                 text-white rounded-lg transition-colors font-medium">
+                          class="text-xs px-4 py-1.5 bg-blue-600 hover:bg-blue-700
+                                 text-white rounded-md transition-colors font-bold shadow-sm">
                     ▶ Run
                   </button>
                 </div>
               </div>
 
-              <!-- Console scrollable body (hidden until first run) -->
-              <div id="nb-console-body" class="hidden flex-1 overflow-y-auto p-4">
+              <!-- Report scrollable body (hidden until first run) -->
+              <div id="nb-console-body" class="hidden flex-1 overflow-y-auto bg-white">
 
                 <!-- Placeholder -->
                 <div id="nb-console-placeholder"
-                     class="flex flex-col items-center justify-center h-full text-slate-600">
-                  <svg class="w-10 h-10 mb-3 opacity-40" fill="none" stroke="currentColor"
-                       viewBox="0 0 24 24">
+                     class="flex flex-col items-center justify-center h-full text-slate-400 py-10">
+                  <svg class="w-10 h-10 mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                          d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                          d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                   </svg>
-                  <p class="text-sm">點擊 ▶ Run 執行巡檢模擬</p>
-                  <p class="text-xs mt-1">先設定上方 Skill 與 MCP 後再執行</p>
+                  <p class="text-sm text-slate-500">點擊 ▶ Run 執行巡檢模擬</p>
+                  <p class="text-xs mt-1 text-slate-400">先設定上方 Skill 與 MCP 後再執行</p>
+                </div>
+
+                <!-- Execution Log (GitHub Actions light style) -->
+                <div id="nb-exec-log" class="hidden mx-4 mt-4 mb-3 bg-slate-50 border border-slate-200
+                                              rounded-lg overflow-hidden font-mono text-xs text-slate-600">
+                  <div class="bg-slate-100 border-b border-slate-200 px-3 py-1.5 text-[11px]
+                               font-bold text-slate-500 uppercase tracking-widest">執行記錄</div>
+                  <div id="nb-exec-log-lines" class="p-3 space-y-0.5 max-h-36 overflow-y-auto"></div>
                 </div>
 
                 <!-- Skill Diagnosis Layer -->
-                <div id="nb-skill-result" class="hidden space-y-3">
-                  <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold
-                              border-b border-slate-700 pb-1 mb-2">
-                    📊 Skill 診斷層
+                <div id="nb-skill-result" class="hidden mx-4 mt-2 mb-3">
+                  <div class="text-[11px] font-bold text-slate-500 uppercase tracking-widest
+                              border-b border-slate-200 pb-2 mb-3 flex items-center gap-1.5">
+                    <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                    </svg>
+                    Skill 診斷報告
                   </div>
                   <div id="nb-skill-diagnosis-card"></div>
                 </div>
 
                 <!-- MCP Evidence Layer -->
-                <div id="nb-mcp-result" class="hidden mt-4 space-y-2">
-                  <div class="text-xs text-slate-500 uppercase tracking-wider font-semibold
-                              border-b border-slate-700 pb-1 mb-2">
-                    🔬 MCP 佐證層
+                <div id="nb-mcp-result" class="hidden mx-4 mb-4">
+                  <div class="text-[11px] font-bold text-slate-500 uppercase tracking-widest
+                              border-b border-slate-200 pb-2 mb-3 flex items-center gap-1.5">
+                    <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"/>
+                    </svg>
+                    MCP 佐證資料
                   </div>
                   <!-- Tab bar -->
-                  <div class="flex gap-0 mb-3 border-b border-slate-700">
+                  <div class="flex gap-0 mb-0 border-b border-slate-200">
                     <button id="nb-tab-charting" onclick="_nbSwitchMcpTab('charting')"
-                            class="text-xs px-3 py-2 text-blue-400 border-b-2 border-blue-400
-                                   font-semibold transition-colors">📊 Charting</button>
+                            class="text-xs px-4 py-2 text-blue-600 border-b-2 border-blue-600
+                                   font-bold transition-colors">📊 Charting</button>
                     <button id="nb-tab-summary" onclick="_nbSwitchMcpTab('summary')"
-                            class="text-xs px-3 py-2 text-slate-500 border-b-2 border-transparent
-                                   hover:text-slate-300 transition-colors">📑 Summary Data</button>
+                            class="text-xs px-4 py-2 text-slate-500 border-b-2 border-transparent
+                                   hover:text-slate-700 font-medium transition-colors">📑 Summary Data</button>
                     <button id="nb-tab-raw" onclick="_nbSwitchMcpTab('raw')"
-                            class="text-xs px-3 py-2 text-slate-500 border-b-2 border-transparent
-                                   hover:text-slate-300 transition-colors">💾 Raw Data</button>
+                            class="text-xs px-4 py-2 text-slate-500 border-b-2 border-transparent
+                                   hover:text-slate-700 font-medium transition-colors">💾 Raw Data</button>
                   </div>
                   <!-- Tab content -->
-                  <div id="nb-mcp-tab-charting" class="min-h-24"></div>
-                  <div id="nb-mcp-tab-summary" class="hidden text-xs text-slate-300 space-y-1"></div>
-                  <div id="nb-mcp-tab-raw" class="hidden text-xs font-mono text-slate-400
-                                                    whitespace-pre-wrap max-h-48 overflow-y-auto"></div>
+                  <div id="nb-mcp-tab-charting" class="pt-3 min-h-24"></div>
+                  <div id="nb-mcp-tab-summary" class="hidden pt-3 text-xs text-slate-700 space-y-1"></div>
+                  <div id="nb-mcp-tab-raw" class="hidden pt-3 text-xs font-mono text-slate-600
+                                                    whitespace-pre-wrap max-h-64 overflow-y-auto
+                                                    bg-slate-50 border border-slate-200 rounded-lg p-3"></div>
                 </div>
 
               </div><!-- /console-body -->
-            </div><!-- /console -->
+            </div><!-- /report panel -->
 
           </div><!-- /body split -->
         </div><!-- /view-nested-builder -->
