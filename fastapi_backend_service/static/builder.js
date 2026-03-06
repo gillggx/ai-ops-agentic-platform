@@ -3988,20 +3988,20 @@ function _nbSetSkillMode(mode) {
   _nbSkillMode = mode;
   document.getElementById('nb-skill-select-panel').classList.toggle('hidden', mode !== 'select');
   document.getElementById('nb-skill-new-panel').classList.toggle('hidden', mode !== 'new');
-  document.getElementById('nb-skill-mode-select').className =
-    `px-3 py-1.5 transition-colors ${mode === 'select' ? 'bg-purple-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`;
-  document.getElementById('nb-skill-mode-new').className =
-    `px-3 py-1.5 transition-colors ${mode === 'new' ? 'bg-purple-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`;
+  const _ACTIVE_S   = 'px-4 py-1.5 text-xs font-bold transition-colors bg-purple-600 text-white';
+  const _INACTIVE_S = 'px-4 py-1.5 text-xs font-medium transition-colors bg-white text-slate-600 hover:bg-slate-50';
+  document.getElementById('nb-skill-mode-select').className = mode === 'select' ? _ACTIVE_S : _INACTIVE_S;
+  document.getElementById('nb-skill-mode-new').className    = mode === 'new'    ? _ACTIVE_S : _INACTIVE_S;
 }
 
 function _nbSetMcpMode(mode) {
   _nbMcpMode = mode;
   document.getElementById('nb-mcp-select-panel').classList.toggle('hidden', mode !== 'select');
   document.getElementById('nb-mcp-new-panel').classList.toggle('hidden', mode !== 'new');
-  document.getElementById('nb-mcp-mode-select').className =
-    `px-3 py-1.5 transition-colors ${mode === 'select' ? 'bg-emerald-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`;
-  document.getElementById('nb-mcp-mode-new').className =
-    `px-3 py-1.5 transition-colors ${mode === 'new' ? 'bg-emerald-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`;
+  const _ACTIVE_M   = 'px-4 py-1.5 text-xs font-bold transition-colors bg-emerald-600 text-white';
+  const _INACTIVE_M = 'px-4 py-1.5 text-xs font-medium transition-colors bg-white text-slate-600 hover:bg-slate-50';
+  document.getElementById('nb-mcp-mode-select').className = mode === 'select' ? _ACTIVE_M : _INACTIVE_M;
+  document.getElementById('nb-mcp-mode-new').className    = mode === 'new'    ? _ACTIVE_M : _INACTIVE_M;
 }
 
 function _nbOnSkillSelect() {

@@ -403,27 +403,33 @@
           <div class="flex-1 flex flex-col min-h-0 overflow-hidden">
 
             <!-- TOP: Nested Builder Form (flex-1 when console collapsed, shrinks when expanded) -->
-            <div id="nb-builder-top" class="flex-1 overflow-y-auto p-5 bg-slate-100 border-b border-slate-300">
+            <div id="nb-builder-top" class="flex-1 overflow-y-auto p-6 bg-slate-100 border-b border-slate-200">
+              <!-- max-w-5xl container prevents fields from stretching across full screen -->
+              <div class="max-w-5xl mx-auto">
 
-              <!-- L1: Task (outermost — dark border) -->
-              <div class="bg-white rounded-xl border border-slate-200 shadow-sm
-                          border-l-8 border-l-slate-800 p-5">
+              <!-- L1: Task card -->
+              <div class="bg-white rounded-xl shadow-md border border-slate-200 border-l-[8px] border-l-slate-800 p-6">
 
-                <div class="flex items-center gap-2 mb-4">
-                  <span class="text-xs font-bold text-slate-500 uppercase tracking-wider
+                <div class="flex items-center gap-2 mb-5">
+                  <span class="text-[10px] font-bold text-slate-500 uppercase tracking-widest
                                bg-slate-100 px-2 py-0.5 rounded-full border border-slate-300">L1</span>
                   <h2 class="font-bold text-sm text-slate-900">巡檢任務 (Task)</h2>
                 </div>
 
-                <div class="grid grid-cols-2 gap-3 mb-5">
+                <div class="grid grid-cols-2 gap-4 mb-2">
                   <div>
-                    <label class="text-xs text-slate-500 font-medium">任務名稱 *</label>
+                    <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">任務名稱 *</label>
                     <input id="nb-task-name" type="text" placeholder="例：SPC 異常巡檢 - TETCH01"
-                           class="input-field mt-1 text-sm w-full">
+                           class="w-full bg-white border border-slate-300 rounded-md p-3 text-sm font-medium
+                                  text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500
+                                  focus:border-blue-500 transition-shadow">
                   </div>
                   <div>
-                    <label class="text-xs text-slate-500 font-medium">執行頻率</label>
-                    <select id="nb-task-interval" class="input-field mt-1 text-sm w-full">
+                    <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">執行頻率</label>
+                    <select id="nb-task-interval"
+                            class="w-full bg-white border border-slate-300 rounded-md px-3 py-2.5 text-sm font-medium
+                                   text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500
+                                   focus:border-blue-500 transition-shadow">
                       <option value="30m">每 30 分鐘</option>
                       <option value="1h" selected>每 1 小時</option>
                       <option value="4h">每 4 小時</option>
@@ -434,101 +440,113 @@
                   </div>
                 </div>
 
-                <!-- L2: Skill (purple border) -->
-                <div class="bg-slate-50 border border-slate-200 border-l-4 border-l-purple-500 rounded-lg p-4">
+                <!-- L2: Skill card -->
+                <div class="bg-slate-50 rounded-lg shadow-inner border border-slate-200 border-l-[6px] border-l-purple-500 p-5 mt-4">
 
-                  <div class="flex items-center justify-between mb-3">
+                  <div class="flex items-center justify-between mb-4">
                     <div class="flex items-center gap-2">
-                      <span class="text-xs font-bold text-purple-700 uppercase tracking-wider
+                      <span class="text-[10px] font-bold text-purple-700 uppercase tracking-widest
                                    bg-purple-100 px-2 py-0.5 rounded-full border border-purple-200">L2</span>
                       <h3 class="font-bold text-sm text-purple-900">診斷技能 (Skill)</h3>
                     </div>
                     <!-- Skill mode toggle -->
-                    <div class="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+                    <div class="flex rounded-md border border-slate-200 overflow-hidden shadow-sm">
                       <button id="nb-skill-mode-select" onclick="_nbSetSkillMode('select')"
-                              class="px-3 py-1.5 bg-purple-600 text-white transition-colors">選擇現有</button>
+                              class="px-4 py-1.5 bg-purple-600 text-white text-xs font-bold transition-colors">選擇現有</button>
                       <button id="nb-skill-mode-new" onclick="_nbSetSkillMode('new')"
-                              class="px-3 py-1.5 bg-white text-slate-600 hover:bg-slate-50 transition-colors">建立全新</button>
+                              class="px-4 py-1.5 bg-white text-slate-600 hover:bg-slate-50 text-xs font-medium transition-colors">建立全新</button>
                     </div>
                   </div>
 
                   <!-- Skill: select existing -->
                   <div id="nb-skill-select-panel">
-                    <label class="text-xs text-slate-500 font-medium">選擇已有 Skill</label>
-                    <select id="nb-skill-select" class="input-field mt-1 text-sm w-full"
+                    <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">選擇已有 Skill</label>
+                    <select id="nb-skill-select"
+                            class="w-full bg-white border border-slate-300 rounded-md px-3 py-2.5 text-sm font-medium
+                                   text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500
+                                   focus:border-blue-500 transition-shadow"
                             onchange="_nbOnSkillSelect()">
                       <option value="">— 請選擇 —</option>
                     </select>
                   </div>
 
                   <!-- Skill: build new -->
-                  <div id="nb-skill-new-panel" class="hidden space-y-3">
+                  <div id="nb-skill-new-panel" class="hidden space-y-4">
                     <div>
-                      <label class="text-xs text-slate-500 font-medium">Skill 名稱 *</label>
+                      <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">Skill 名稱 *</label>
                       <input id="nb-skill-name" type="text" placeholder="例：連續異常檢查"
-                             class="input-field mt-1 text-sm w-full">
+                             class="w-full bg-white border border-slate-300 rounded-md p-3 text-sm font-medium
+                                    text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500
+                                    focus:border-blue-500 transition-shadow">
                     </div>
                     <div>
-                      <label class="text-xs text-slate-500 font-medium">異常判斷條件 (Diagnostic Prompt)</label>
+                      <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">異常判斷條件 (Diagnostic Prompt)</label>
                       <textarea id="nb-skill-prompt" rows="3"
                                 placeholder="例：若 3 個連續數值超過 UCL 或低於 LCL，判定為 ABNORMAL"
-                                class="input-field mt-1 text-sm w-full resize-none"></textarea>
+                                class="w-full bg-white border border-slate-300 rounded-md p-3 text-sm font-medium
+                                       text-slate-800 shadow-sm resize-none focus:outline-none focus:ring-2
+                                       focus:ring-blue-500 focus:border-blue-500 transition-shadow"></textarea>
                     </div>
-                    <div class="grid grid-cols-2 gap-3">
+                    <div class="grid grid-cols-2 gap-4">
                       <div>
-                        <label class="text-xs text-slate-500 font-medium">有問題的物件 (Target Object)</label>
+                        <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">有問題的物件 (Target Object)</label>
                         <textarea id="nb-skill-target" rows="2"
                                   placeholder="例：lot_id, tool_id, datetime"
-                                  class="input-field mt-1 text-sm w-full resize-none"></textarea>
+                                  class="w-full bg-white border border-slate-300 rounded-md p-3 text-sm font-medium
+                                         text-slate-800 shadow-sm resize-none focus:outline-none focus:ring-2
+                                         focus:ring-blue-500 focus:border-blue-500 transition-shadow"></textarea>
                       </div>
                       <div>
-                        <label class="text-xs text-slate-500 font-medium">專家建議處置</label>
+                        <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">專家建議處置</label>
                         <textarea id="nb-skill-action" rows="2"
                                   placeholder="例：通知 PE 複查，同時暫停相關機台進料"
-                                  class="input-field mt-1 text-sm w-full resize-none"></textarea>
+                                  class="w-full bg-white border border-slate-300 rounded-md p-3 text-sm font-medium
+                                         text-slate-800 shadow-sm resize-none focus:outline-none focus:ring-2
+                                         focus:ring-blue-500 focus:border-blue-500 transition-shadow"></textarea>
                       </div>
                     </div>
                   </div>
 
                   <!-- Skill system check (collapsible) -->
-                  <details class="mt-3">
-                    <summary class="text-xs text-slate-500 cursor-pointer hover:text-purple-600
-                                    select-none font-medium list-none flex items-center gap-1">
+                  <details class="mt-4">
+                    <summary class="text-[11px] font-bold text-slate-400 uppercase tracking-widest cursor-pointer
+                                    hover:text-purple-600 select-none list-none flex items-center gap-1.5 transition-colors">
                       <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                              d="M19 9l-7 7-7-7"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
                       </svg>
                       ⚙️ Skill 底層設定檢查（展開）
                     </summary>
-                    <div class="mt-2 p-3 bg-white border border-purple-100 rounded-lg
-                                text-xs space-y-1" id="nb-skill-system-check">
+                    <div class="mt-2 p-3 bg-white border border-purple-100 rounded-lg text-xs space-y-1"
+                         id="nb-skill-system-check">
                       <p class="text-slate-400 italic">選擇 Skill 後顯示設定摘要</p>
                     </div>
                   </details>
 
-                  <!-- L3: MCP (emerald border) -->
-                  <div class="bg-white border border-slate-200 border-l-4 border-l-emerald-500
-                              rounded-lg p-4 mt-4 shadow-sm">
+                  <!-- L3: MCP card -->
+                  <div class="bg-white rounded-md shadow-sm border border-slate-200 border-l-[4px] border-l-emerald-500 p-4 mt-4">
 
-                    <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center justify-between mb-4">
                       <div class="flex items-center gap-2">
-                        <span class="text-xs font-bold text-emerald-700 uppercase tracking-wider
+                        <span class="text-[10px] font-bold text-emerald-700 uppercase tracking-widest
                                      bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-200">L3</span>
                         <h4 class="font-bold text-xs text-emerald-900">資料節點 (MCP)</h4>
                       </div>
                       <!-- MCP mode toggle -->
-                      <div class="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-medium">
+                      <div class="flex rounded-md border border-slate-200 overflow-hidden shadow-sm">
                         <button id="nb-mcp-mode-select" onclick="_nbSetMcpMode('select')"
-                                class="px-3 py-1.5 bg-emerald-600 text-white transition-colors">選擇現有</button>
+                                class="px-4 py-1.5 bg-emerald-600 text-white text-xs font-bold transition-colors">選擇現有</button>
                         <button id="nb-mcp-mode-new" onclick="_nbSetMcpMode('new')"
-                                class="px-3 py-1.5 bg-white text-slate-600 hover:bg-slate-50 transition-colors">建立全新</button>
+                                class="px-4 py-1.5 bg-white text-slate-600 hover:bg-slate-50 text-xs font-medium transition-colors">建立全新</button>
                       </div>
                     </div>
 
                     <!-- MCP: select existing -->
                     <div id="nb-mcp-select-panel">
-                      <label class="text-xs text-slate-500 font-medium">選擇已有 MCP</label>
-                      <select id="nb-mcp-select" class="input-field mt-1 text-sm w-full"
+                      <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">選擇已有 MCP</label>
+                      <select id="nb-mcp-select"
+                              class="w-full bg-white border border-slate-300 rounded-md px-3 py-2.5 text-sm font-medium
+                                     text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500
+                                     focus:border-blue-500 transition-shadow"
                               onchange="_nbOnMcpSelect()">
                         <option value="">— 請選擇 —</option>
                       </select>
@@ -536,68 +554,71 @@
                     </div>
 
                     <!-- MCP: build new -->
-                    <div id="nb-mcp-new-panel" class="hidden space-y-3">
-                      <div class="grid grid-cols-2 gap-3">
+                    <div id="nb-mcp-new-panel" class="hidden space-y-4">
+                      <div class="grid grid-cols-2 gap-4">
                         <div>
-                          <label class="text-xs text-slate-500 font-medium">MCP 名稱 *</label>
+                          <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">MCP 名稱 *</label>
                           <input id="nb-mcp-name" type="text" placeholder="例：Query SPC Data"
-                                 class="input-field mt-1 text-sm w-full">
+                                 class="w-full bg-white border border-slate-300 rounded-md p-3 text-sm font-medium
+                                        text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500
+                                        focus:border-blue-500 transition-shadow">
                         </div>
                         <div>
-                          <label class="text-xs text-slate-500 font-medium">Data Subject</label>
-                          <select id="nb-mcp-ds" class="input-field mt-1 text-sm w-full"
+                          <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">Data Subject</label>
+                          <select id="nb-mcp-ds"
+                                  class="w-full bg-white border border-slate-300 rounded-md px-3 py-2.5 text-sm font-medium
+                                         text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500
+                                         focus:border-blue-500 transition-shadow"
                                   onchange="_nbOnDsChange()">
                             <option value="">— 請選擇 —</option>
                           </select>
                         </div>
                       </div>
                       <!-- Dynamic param form generated by _nbOnDsChange() -->
-                      <div id="nb-mcp-sample-form" class="mt-1"></div>
+                      <div id="nb-mcp-sample-form"></div>
                       <div>
-                        <label class="text-xs text-slate-500 font-medium">加工意圖 (Processing Intent)</label>
+                        <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">加工意圖 (Processing Intent)</label>
                         <textarea id="nb-mcp-intent" rows="3"
                                   placeholder="例：計算 SPC 數據的均值、UCL、LCL，繪製 2 張 trend chart（不同顏色區分正常/超限）"
-                                  class="input-field mt-1 text-sm w-full resize-none"></textarea>
+                                  class="w-full bg-white border border-slate-300 rounded-md p-3 text-sm font-medium
+                                         text-slate-800 shadow-sm resize-none focus:outline-none focus:ring-2
+                                         focus:ring-blue-500 focus:border-blue-500 transition-shadow"></textarea>
                       </div>
                     </div>
 
                     <!-- Data Review (collapsible) -->
-                    <details class="mt-3">
-                      <summary class="text-[11px] text-slate-500 cursor-pointer hover:text-emerald-600
-                                      select-none font-medium list-none flex items-center gap-1">
+                    <details class="mt-4">
+                      <summary class="text-[11px] font-bold text-slate-400 uppercase tracking-widest cursor-pointer
+                                      hover:text-emerald-600 select-none list-none flex items-center gap-1.5 transition-colors">
                         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M19 9l-7 7-7-7"/>
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
                         </svg>
                         👁️ Data Review — Raw Data（展開）
                       </summary>
-                      <div class="mt-2 bg-slate-50 border border-slate-200 rounded-lg p-2
-                                  max-h-48 overflow-y-auto">
-                        <pre id="nb-data-review"
-                             class="text-[10px] text-slate-600 whitespace-pre-wrap">點擊 Try Run 後，原始資料將呈現在此</pre>
+                      <div class="mt-2 bg-slate-50 border border-slate-200 rounded-lg p-3 max-h-48 overflow-y-auto">
+                        <pre id="nb-data-review" class="text-[10px] text-slate-600 whitespace-pre-wrap">點擊 Try Run 後，原始資料將呈現在此</pre>
                       </div>
                     </details>
 
                     <!-- Format Review (collapsible) -->
                     <details class="mt-2">
-                      <summary class="text-[11px] text-emerald-700 cursor-pointer hover:text-emerald-800
-                                      select-none font-medium list-none flex items-center gap-1">
+                      <summary class="text-[11px] font-bold text-emerald-600 uppercase tracking-widest cursor-pointer
+                                      hover:text-emerald-800 select-none list-none flex items-center gap-1.5 transition-colors">
                         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M19 9l-7 7-7-7"/>
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
                         </svg>
                         📐 Format Review — Output Schema（展開）
                       </summary>
-                      <div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-lg p-2
-                                  max-h-48 overflow-y-auto">
-                        <pre id="nb-format-review"
-                             class="text-[10px] text-slate-700 whitespace-pre-wrap">點擊 Try Run 後，輸出結構將呈現在此</pre>
+                      <div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-lg p-3 max-h-48 overflow-y-auto">
+                        <pre id="nb-format-review" class="text-[10px] text-slate-700 whitespace-pre-wrap">點擊 Try Run 後，輸出結構將呈現在此</pre>
                       </div>
                     </details>
 
                   </div><!-- /L3 MCP -->
                 </div><!-- /L2 Skill -->
               </div><!-- /L1 Task -->
+
+              </div><!-- /max-w-5xl -->
             </div><!-- /builder top -->
 
             <!-- BOTTOM: Try Run Console (collapsed by default, expands on Run) -->
