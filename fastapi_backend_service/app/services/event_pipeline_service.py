@@ -318,26 +318,35 @@ class EventPipelineService:
                 if val is not None:
                     resolved[mcp_param] = val
 
-        # Fetch raw data from DataSubject API
+        # ── Step 1: Fetch raw data from DataSubject API ──────────────────────────
         try:
             raw_data = await self._fetch_ds_data(endpoint_url, resolved, base_url)
         except Exception as exc:
+            failure_msg = await self._llm.explain_failure(
+                stage="DS 資料撈取",
+                error=str(exc),
+                context={"mcp": mcp_name, "ds": ds.name, "params": resolved},
+            )
             return SkillPipelineResult(
                 skill_id=skill.id, skill_name=skill_name, mcp_name=mcp_name,
-                error=f"DataSubject API 呼叫失敗：{exc}",
+                error=failure_msg,
             )
 
-        # Run MCP processing script
+        # ── Step 2: Execute MCP processing script (run stored Python, no LLM) ──
         try:
             output_data = await execute_script(mcp.processing_script, raw_data)
         except Exception as exc:
+            failure_msg = await self._llm.explain_failure(
+                stage="MCP 腳本執行",
+                error=str(exc),
+                context={"mcp": mcp_name, "script_head": mcp.processing_script[:200] if mcp.processing_script else ""},
+            )
             return SkillPipelineResult(
                 skill_id=skill.id, skill_name=skill_name, mcp_name=mcp_name,
-                error=f"MCP 腳本執行失敗：{exc}",
+                error=failure_msg,
             )
 
-        # Normalise output into Standard Payload {dataset, ui_render, output_schema}
-        # so the frontend evidence section always has a consistent structure.
+        # Normalise into Standard Payload {dataset, ui_render, output_schema}
         llm_schema = _j(mcp.output_schema) if hasattr(mcp, "output_schema") else None
         output_data = _normalize_output(output_data, llm_schema)
 
@@ -353,90 +362,85 @@ class EventPipelineService:
                         "ui_render": {**(output_data.get("ui_render") or {}), "chart_data": chart, "charts": [chart], "type": "chart"},
                     }
 
-        # Attach raw DS data (before MCP script processing) + call params
+        # Attach raw DS data + call params for frontend evidence tab
         raw_list = raw_data if isinstance(raw_data, list) else (
             list(raw_data.values())[0] if isinstance(raw_data, dict) and raw_data else [raw_data]
         )
         output_data = {**output_data, "_raw_dataset": raw_list, "_call_params": resolved}
 
-        # ── Diagnosis: Python code (preferred) → LLM summary; fallback to pure LLM ──
-        diagnostic_prompt = skill.diagnostic_prompt or ""
+        # ── Step 3: Validate MCP output has data ─────────────────────────────────
+        if not output_data.get("dataset"):
+            failure_msg = await self._llm.explain_failure(
+                stage="MCP 資料驗證",
+                error="MCP 回傳空資料集，無法進行診斷",
+                context={"mcp": mcp_name, "ds": ds.name, "params": resolved},
+            )
+            return SkillPipelineResult(
+                skill_id=skill.id, skill_name=skill_name, mcp_name=mcp_name,
+                error=failure_msg,
+                mcp_output=output_data,
+            )
 
-        # Attempt Python-code-based diagnosis if generated_code exists in last_diagnosis_result
+        # ── Step 4: Execute Skill Python diagnostic code (mandatory, no LLM fallback) ──
         last_dr = _j(skill.last_diagnosis_result) if hasattr(skill, "last_diagnosis_result") else None
         generated_code = (last_dr or {}).get("generated_code", "")
 
-        if generated_code:
-            # Path A: run sandbox diagnose() → Python gives status + problem_object
-            mcp_outputs_for_diag = {mcp_name: output_data}
-            try:
-                py_result = await execute_diagnose_fn(generated_code, mcp_outputs_for_diag)
-            except Exception as exc:
-                logger.warning("execute_diagnose_fn failed for skill %s: %s", skill.id, exc)
-                py_result = None
-
-            if py_result is not None:
-                raw_status = py_result.get("status", "ABNORMAL")
-                status = "NORMAL" if raw_status.upper() == "NORMAL" else "ABNORMAL"
-                problem_object = py_result.get("problem_object") or {}
-
-                # LLM generates a concise summary from the Python result
-                try:
-                    summary_result = await self._llm.summarize_diagnosis(
-                        python_result=py_result,
-                        diagnostic_prompt=diagnostic_prompt,
-                        mcp_outputs=mcp_outputs_for_diag,
-                    )
-                    summary = summary_result.get("summary", py_result.get("diagnosis_message", ""))
-                except Exception as exc:
-                    logger.warning("summarize_diagnosis failed for skill %s: %s", skill.id, exc)
-                    summary = py_result.get("diagnosis_message", "")
-
-                return SkillPipelineResult(
-                    skill_id=skill.id,
-                    skill_name=skill_name,
-                    mcp_name=mcp_name,
-                    status=status,
-                    conclusion=py_result.get("diagnosis_message", ""),
-                    evidence=[],
-                    summary=summary,
-                    human_recommendation=skill.human_recommendation or "",
-                    problem_object=problem_object,
-                    mcp_output=output_data,
-                )
-
-        # Path B (fallback): pure LLM diagnosis
-        if not diagnostic_prompt:
+        if not generated_code:
+            failure_msg = await self._llm.explain_failure(
+                stage="Skill 診斷碼缺失",
+                error="此 Skill 尚未生成 Python 診斷碼",
+                context={"skill": skill_name, "hint": "請在 Nested Builder 完成 Try Run 以生成診斷碼"},
+            )
             return SkillPipelineResult(
                 skill_id=skill.id, skill_name=skill_name, mcp_name=mcp_name,
-                error="此 Skill 尚未設定 Diagnostic Prompt 且無生成診斷程式碼",
+                error=failure_msg,
+                mcp_output=output_data,
             )
+
+        mcp_outputs_for_diag = {mcp_name: output_data}
+        try:
+            py_result = await execute_diagnose_fn(generated_code, mcp_outputs_for_diag)
+        except Exception as exc:
+            failure_msg = await self._llm.explain_failure(
+                stage="Skill Python 執行",
+                error=str(exc),
+                context={
+                    "skill": skill_name,
+                    "dataset_sample": str(output_data.get("dataset", [])[:2]),
+                },
+            )
+            return SkillPipelineResult(
+                skill_id=skill.id, skill_name=skill_name, mcp_name=mcp_name,
+                error=failure_msg,
+                mcp_output=output_data,
+            )
+
+        # ── Step 5: LLM polishes Python result into human-readable diagnostic message ──
+        raw_status = py_result.get("status", "ABNORMAL")
+        status = "NORMAL" if raw_status.upper() == "NORMAL" else "ABNORMAL"
+        problem_object = py_result.get("problem_object") or {}
 
         try:
-            llm_result = await self._llm.try_diagnosis(
-                diagnostic_prompt=diagnostic_prompt,
-                mcp_outputs={mcp_name: output_data},
-                system_prompt=system_prompt,
+            summary_result = await self._llm.summarize_diagnosis(
+                python_result=py_result,
+                diagnostic_prompt=skill.diagnostic_prompt or "",
+                mcp_outputs=mcp_outputs_for_diag,
             )
+            summary = summary_result.get("summary", py_result.get("diagnosis_message", ""))
         except Exception as exc:
-            return SkillPipelineResult(
-                skill_id=skill.id, skill_name=skill_name, mcp_name=mcp_name,
-                error=f"LLM 診斷失敗：{exc}",
-            )
-
-        raw_status = llm_result.get("status") or llm_result.get("severity") or ""
-        status = "NORMAL" if raw_status.upper() == "NORMAL" else "ABNORMAL"
+            logger.warning("summarize_diagnosis failed for skill %s: %s", skill.id, exc)
+            summary = py_result.get("diagnosis_message", "")
 
         return SkillPipelineResult(
             skill_id=skill.id,
             skill_name=skill_name,
             mcp_name=mcp_name,
             status=status,
-            conclusion=llm_result.get("conclusion", ""),
-            evidence=llm_result.get("evidence", []),
-            summary=llm_result.get("summary", ""),
+            conclusion=py_result.get("diagnosis_message", ""),
+            evidence=[],
+            summary=summary,
             human_recommendation=skill.human_recommendation or "",
-            problem_object=llm_result.get("problem_object") or {},
+            problem_object=problem_object,
             mcp_output=output_data,
         )
 

@@ -695,6 +695,46 @@ DataSubject 名稱：{data_subject_name}
             logger.warning("summarize_diagnosis failed: %s", exc)
             return {"summary": diag_msg}
 
+    async def explain_failure(
+        self,
+        stage: str,
+        error: str,
+        context: Dict[str, Any],
+    ) -> str:
+        """Generate a concise human-readable failure explanation using LLM.
+
+        Called when any stage of the Skill pipeline fails (DS fetch, MCP script,
+        empty dataset, or Skill Python exception).  Always returns a string —
+        falls back to ``"{stage} 失敗：{error}"`` if the LLM call itself fails.
+
+        Args:
+            stage: Display name of the failed stage (e.g. "MCP 腳本執行").
+            error: Raw exception message or error description.
+            context: Additional key/value context (MCP name, params used, etc.).
+        """
+        prompt = f"""你是半導體製程智能診斷系統。
+以下是診斷流程在「{stage}」階段發生的失敗：
+
+錯誤訊息：{error}
+相關上下文：{json.dumps(context, ensure_ascii=False)}
+
+請用 1-2 句繁體中文清楚說明：
+1. 哪個步驟失敗了
+2. 可能的原因或建議處置方式
+
+只回傳 JSON：{{"explanation": "..."}}"""
+        try:
+            response = await self._client.messages.create(
+                model=_MODEL,
+                max_tokens=256,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            data = _extract_json(_get_text(response.content))
+            return data.get("explanation", error)
+        except Exception as exc:
+            logger.warning("explain_failure LLM call failed: %s", exc)
+            return f"{stage} 失敗：{error}"
+
     async def check_code_diagnosis_intent(
         self,
         diagnostic_prompt: str,
