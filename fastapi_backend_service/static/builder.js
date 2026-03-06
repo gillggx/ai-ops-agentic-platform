@@ -4244,10 +4244,46 @@ async function _tryRunNestedBuilder() {
       }
     }
 
-    // ── Step 3: Show Skill Diagnosis Layer ──────────────────
-    _nbRenderSkillDiagnosis(skillObj);
+    // ── Step 3: If new Skill mode + MCP output → generate Skill code & run diagnosis ──
+    let skillLiveResult = null;
+    if (_nbSkillMode === 'new' && mcpTryResult) {
+      const diagPrompt   = document.getElementById('nb-skill-prompt')?.value?.trim() || '';
+      const probSubject  = document.getElementById('nb-skill-target')?.value?.trim() || '';
+      const expertAction = document.getElementById('nb-skill-action')?.value?.trim() || '';
+      if (!diagPrompt) throw new Error('請填寫異常判斷條件 (Diagnostic Prompt)');
 
-    // ── Step 4: Show MCP Evidence Layer ──────────────────────
+      // Identify the MCP name to use as key in mcp_sample_outputs
+      let mcpNameForKey = 'mcp';
+      if (_nbMcpMode === 'select' && mcpId) {
+        const mcp = _mcpDefs.find(m => m.id === mcpId);
+        if (mcp) mcpNameForKey = mcp.name;
+      } else if (_nbMcpMode === 'new') {
+        mcpNameForKey = document.getElementById('nb-mcp-name')?.value?.trim() || 'mcp';
+      }
+
+      const skillCodeResult = await _api('POST', '/skill-definitions/generate-code-diagnosis', {
+        diagnostic_prompt:  diagPrompt,
+        problem_subject:    probSubject || null,
+        mcp_sample_outputs: { [mcpNameForKey]: mcpTryResult.output_data || mcpTryResult },
+        event_attributes:   [],
+      });
+
+      if (!skillCodeResult.success) {
+        throw new Error(skillCodeResult.error || 'Skill 診斷碼生成失敗');
+      }
+
+      // Attach display helpers for _nbRenderSkillDiagnosis
+      skillLiveResult = {
+        ...skillCodeResult,
+        skillName:   document.getElementById('nb-skill-name')?.value?.trim() || '新建 Skill',
+        expertAction,
+      };
+    }
+
+    // ── Step 4: Show Skill Diagnosis Layer ──────────────────
+    _nbRenderSkillDiagnosis(skillObj, skillLiveResult);
+
+    // ── Step 5: Show MCP Evidence Layer ──────────────────────
     if (mcpTryResult) _nbRenderMcpEvidence(mcpTryResult);
 
   } catch(e) {
@@ -4267,19 +4303,22 @@ async function _tryRunNestedBuilder() {
   }
 }
 
-function _nbRenderSkillDiagnosis(skillObj) {
+// liveResult: result from generate-code-diagnosis (takes priority over skillObj.last_diagnosis_result)
+function _nbRenderSkillDiagnosis(skillObj, liveResult = null) {
   const resultEl = document.getElementById('nb-skill-result');
   const cardEl   = document.getElementById('nb-skill-diagnosis-card');
   if (!resultEl || !cardEl) return;
 
-  // Try to load last_diagnosis_result from the selected skill
-  let savedResult = null;
-  if (skillObj?.last_diagnosis_result) {
-    try { savedResult = JSON.parse(skillObj.last_diagnosis_result); } catch(_) {}
+  // Priority: liveResult (from fresh LLM run) > skillObj.last_diagnosis_result > empty state
+  let savedResult = liveResult || null;
+  if (!savedResult && skillObj?.last_diagnosis_result) {
+    const raw = skillObj.last_diagnosis_result;
+    try { savedResult = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch(_) {}
   }
 
   const status  = savedResult?.status || (skillObj ? 'UNKNOWN' : 'UNKNOWN');
-  const diagMsg = savedResult?.diagnosis_message || (skillObj ? '已載入 Skill 設定，診斷數據需實際執行後產生' : '請選擇一個 Skill');
+  const diagMsg = savedResult?.diagnosis_message
+    || (skillObj ? '已載入 Skill 設定，診斷數據需實際執行後產生' : '請選擇一個 Skill');
   const probObj = savedResult?.problem_object;
   const isAbn   = status === 'ABNORMAL';
 
@@ -4307,15 +4346,15 @@ function _nbRenderSkillDiagnosis(skillObj) {
                 rounded-xl p-4 border-t-4 ${isAbn ? 'border-t-red-500' : 'border-t-emerald-500'}">
       <div class="flex items-center gap-2 mb-3">
         ${statusBadge}
-        <span class="text-xs text-slate-400">${skillObj ? _esc(skillObj.name) : '未選擇'}</span>
+        <span class="text-xs text-slate-400">${liveResult?.skillName || (skillObj ? _esc(skillObj.name) : '未選擇')}</span>
       </div>
       <p class="text-sm text-slate-200 leading-relaxed mb-2">${_esc(diagMsg)}</p>
       <div class="text-xs text-slate-500 uppercase tracking-wider mb-1">異常物件</div>
       ${probHtml}
-      ${isAbn && skillObj?.expert_action ? `
+      ${isAbn && (liveResult?.expertAction || skillObj?.human_recommendation) ? `
         <div class="mt-3 bg-amber-900/30 border border-amber-700/30 rounded-lg px-3 py-2">
           <p class="text-xs text-amber-400 font-semibold mb-0.5">↳ 專家建議處置</p>
-          <p class="text-xs text-amber-200">${_esc(skillObj.expert_action)}</p>
+          <p class="text-xs text-amber-200">${_esc(liveResult?.expertAction || skillObj?.human_recommendation)}</p>
         </div>` : ''}
     </div>`;
 
