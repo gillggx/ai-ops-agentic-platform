@@ -686,19 +686,19 @@
                 </div>
 
                 <!-- MCP Evidence Layer -->
-                <div id="nb-mcp-result" class="hidden mx-4 mb-4">
-                  <div class="text-[11px] font-bold text-slate-500 uppercase tracking-widest
-                              border-b border-slate-200 pb-2 mb-3 flex items-center gap-1.5">
-                    <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div id="nb-mcp-result" class="hidden mx-4 mb-4 bg-emerald-50/30 border border-slate-200 border-l-4 border-l-emerald-500 rounded-xl p-4">
+                  <div class="text-[11px] font-bold text-emerald-700 uppercase tracking-widest
+                              border-b border-emerald-100 pb-2 mb-3 flex items-center gap-1.5">
+                    <svg class="w-3 h-3 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                             d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"/>
                     </svg>
                     MCP 佐證資料
                   </div>
                   <!-- Tab bar -->
-                  <div class="flex gap-0 mb-0 border-b border-slate-200">
+                  <div class="flex gap-0 mb-0 border-b border-emerald-100">
                     <button id="nb-tab-charting" onclick="_nbSwitchMcpTab('charting')"
-                            class="text-xs px-4 py-2 text-blue-600 border-b-2 border-blue-600
+                            class="text-xs px-4 py-2 text-emerald-700 border-b-2 border-emerald-600
                                    font-bold transition-colors">📊 Charting</button>
                     <button id="nb-tab-summary" onclick="_nbSwitchMcpTab('summary')"
                             class="text-xs px-4 py-2 text-slate-500 border-b-2 border-transparent
@@ -709,10 +709,8 @@
                   </div>
                   <!-- Tab content -->
                   <div id="nb-mcp-tab-charting" class="pt-3 min-h-24"></div>
-                  <div id="nb-mcp-tab-summary" class="hidden pt-3 text-xs text-slate-700 space-y-1"></div>
-                  <div id="nb-mcp-tab-raw" class="hidden pt-3 text-xs font-mono text-slate-600
-                                                    whitespace-pre-wrap max-h-64 overflow-y-auto
-                                                    bg-slate-50 border border-slate-200 rounded-lg p-3"></div>
+                  <div id="nb-mcp-tab-summary" class="hidden pt-3"></div>
+                  <div id="nb-mcp-tab-raw" class="hidden pt-3"></div>
                 </div>
 
               </div><!-- /console-body -->

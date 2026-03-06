@@ -4453,15 +4453,21 @@ function _nbRenderMcpEvidence(result) {
   resultEl.classList.remove('hidden');
   _nbSwitchMcpTab('charting');
 
-  // Charting tab
+  // Data lives inside output_data (MCPTryRunResponse envelope)
+  const outputData = result.output_data || result;
+  const uiRender   = outputData.ui_render || outputData.ui_render_config || {};
+  const charts     = uiRender.charts || (uiRender.chart_data ? [uiRender.chart_data] : []);
+  const dataset    = outputData.dataset || [];
+  const rawDataset = outputData._raw_dataset || [];
+
+  // ── Charting tab ────────────────────────────────────────────
   const chartEl = document.getElementById('nb-mcp-tab-charting');
   if (chartEl) {
-    const charts = result.charts || (result.chart_data ? [result.chart_data] : []);
     if (charts.length) {
       chartEl.innerHTML = '';
-      charts.forEach((chartJson, i) => {
+      charts.forEach((chartJson) => {
         const wrapper = document.createElement('div');
-        wrapper.style.cssText = 'height:260px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;overflow:hidden;margin-bottom:8px;';
+        wrapper.style.cssText = 'height:280px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;overflow:hidden;margin-bottom:8px;';
         chartEl.appendChild(wrapper);
         try {
           const figData = typeof chartJson === 'string' ? JSON.parse(chartJson) : chartJson;
@@ -4482,35 +4488,46 @@ function _nbRenderMcpEvidence(result) {
     }
   }
 
-  // Summary tab
+  // ── Summary tab (processed dataset as grid) ─────────────────
   const sumEl = document.getElementById('nb-mcp-tab-summary');
-  if (sumEl) {
-    const dataset = result.dataset || [];
-    if (!dataset.length) {
-      sumEl.innerHTML = `<p class="text-slate-500 italic">無摘要資料</p>`;
-    } else {
-      const keys = Object.keys(dataset[0] || {});
-      sumEl.innerHTML = `
-        <div class="overflow-x-auto rounded-lg border border-slate-200">
-          <table class="text-xs w-full border-collapse">
-            <thead class="bg-slate-100">
-              <tr>${keys.map(k => `<th class="text-left text-slate-600 font-bold border-b border-slate-200 px-3 py-2 uppercase tracking-wide">${_esc(k)}</th>`).join('')}</tr>
-            </thead>
-            <tbody class="bg-white">
-              ${dataset.slice(0, 20).map((row, ri) =>
-                `<tr class="${ri % 2 === 1 ? 'bg-slate-50' : 'bg-white'} hover:bg-blue-50 transition-colors">
-                   ${keys.map(k => `<td class="text-slate-700 border-b border-slate-100 px-3 py-1.5">${_esc(String(row[k] ?? ''))}</td>`).join('')}
-                 </tr>`).join('')}
-            </tbody>
-          </table>
-          ${dataset.length > 20 ? `<p class="text-slate-400 italic mt-2 px-3 pb-2 text-[11px]">⋯ 僅顯示前 20 筆（共 ${dataset.length} 筆）</p>` : ''}
-        </div>`;
-    }
-  }
+  if (sumEl) _nbRenderDataGrid(sumEl, dataset, '無摘要資料');
 
-  // Raw tab
+  // ── Raw Data tab (original DS data as grid) ──────────────────
   const rawEl = document.getElementById('nb-mcp-tab-raw');
-  if (rawEl) rawEl.textContent = JSON.stringify(result, null, 2);
+  if (rawEl) {
+    const rawRows = Array.isArray(rawDataset) ? rawDataset
+      : (rawDataset && typeof rawDataset === 'object' ? [rawDataset] : []);
+    _nbRenderDataGrid(rawEl, rawRows, '無原始資料');
+  }
+}
+
+// Shared grid renderer for Summary and Raw Data tabs
+function _nbRenderDataGrid(el, rows, emptyMsg) {
+  if (!rows.length) {
+    el.innerHTML = `<p class="text-slate-400 italic text-sm py-4">${emptyMsg}</p>`;
+    return;
+  }
+  // Filter out internal _prefixed keys from display
+  const keys = Object.keys(rows[0] || {}).filter(k => !k.startsWith('_'));
+  if (!keys.length) {
+    el.innerHTML = `<p class="text-slate-400 italic text-sm py-4">${emptyMsg}</p>`;
+    return;
+  }
+  el.innerHTML = `
+    <div class="overflow-x-auto rounded-lg border border-slate-200">
+      <table class="text-xs w-full border-collapse">
+        <thead class="bg-slate-100 sticky top-0">
+          <tr>${keys.map(k => `<th class="text-left text-slate-600 font-bold border-b border-slate-200 px-3 py-2 uppercase tracking-wide whitespace-nowrap">${_esc(k)}</th>`).join('')}</tr>
+        </thead>
+        <tbody class="bg-white">
+          ${rows.slice(0, 50).map((row, ri) =>
+            `<tr class="${ri % 2 === 1 ? 'bg-slate-50' : 'bg-white'} hover:bg-blue-50 transition-colors">
+               ${keys.map(k => `<td class="text-slate-700 border-b border-slate-100 px-3 py-1.5 whitespace-nowrap">${_esc(String(row[k] ?? ''))}</td>`).join('')}
+             </tr>`).join('')}
+        </tbody>
+      </table>
+      ${rows.length > 50 ? `<p class="text-slate-400 italic px-3 py-2 text-[11px]">⋯ 僅顯示前 50 筆（共 ${rows.length} 筆）</p>` : ''}
+    </div>`;
 }
 
 function _nbSwitchMcpTab(tab) {
@@ -4520,7 +4537,7 @@ function _nbSwitchMcpTab(tab) {
     const isActive = t === tab;
     if (btn) {
       btn.className = `text-xs px-4 py-2 border-b-2 transition-colors ` +
-        (isActive ? 'text-blue-600 border-blue-600 font-bold' : 'text-slate-500 border-transparent hover:text-slate-700 font-medium');
+        (isActive ? 'text-emerald-700 border-emerald-600 font-bold' : 'text-slate-500 border-transparent hover:text-slate-700 font-medium');
     }
     if (content) content.classList.toggle('hidden', !isActive);
   });
