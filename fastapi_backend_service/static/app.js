@@ -894,6 +894,9 @@ function _showMainApp(username) {
   }
   _applyI18n();
 
+  // v12: default to Mission Control Dashboard
+  switchView('dashboard');
+
   // Phase 10: init mobile layout + swipe after DOM is visible
   _initMobileLayout();
   _initSwipeGesture();

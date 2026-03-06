@@ -1496,3 +1496,12 @@ body {
 
 /* ── Schema field accent ─────────────────────────────────── */
 .schema-field-name { color: #0A6EF0; }
+
+/* ── v12 Dashboard: ping animation for anomaly KPI dot ────── */
+@keyframes ping {
+  75%, 100% { transform: scale(2); opacity: 0; }
+}
+
+/* ── v12 Nested Builder: line-clamp utilities ─────────────── */
+.line-clamp-1 { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
+.line-clamp-2 { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }

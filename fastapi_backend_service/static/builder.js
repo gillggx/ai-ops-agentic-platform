@@ -96,12 +96,14 @@ function switchView(name) {
   _currentView = name;
 
   // Refresh data when switching to builder views
-  if (name === 'data-subjects')   _loadDataSubjects();
-  if (name === 'event-types')     _loadEventTypes();
-  if (name === 'mcp-builder')     _loadMcpDefs();
-  if (name === 'skill-builder')   _loadSkillDefs();
-  if (name === 'settings')        _loadSettings();
-  if (name === 'routine-checks')  _loadRoutineChecks();
+  if (name === 'dashboard')        _loadDashboard();
+  if (name === 'nested-builder')   _nbInitView();
+  if (name === 'data-subjects')    _loadDataSubjects();
+  if (name === 'event-types')      _loadEventTypes();
+  if (name === 'mcp-builder')      _loadMcpDefs();
+  if (name === 'skill-builder')    _loadSkillDefs();
+  if (name === 'settings')         _loadSettings();
+  if (name === 'routine-checks')   _loadRoutineChecks();
   if (name === 'generated-events') _loadGeneratedEvents();
 
   // Phase 8.6: send AI welcome message once when entering diagnose view
@@ -3734,4 +3736,545 @@ async function _updateAlarmStatus(id, newStatus) {
     await _api('PATCH', `/generated-events/${id}/status`, { status: newStatus });
     await _loadGeneratedEvents();
   } catch(e) { alert(`更新失敗：${e.message}`); }
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// v12 — Mission Control Dashboard
+// ══════════════════════════════════════════════════════════════
+
+async function _loadDashboard() {
+  const content = document.getElementById('dashboard-content');
+  if (!content) return;
+  try {
+    // Parallel fetch: routine checks + generated events + skill/mcp defs for tag resolution
+    const [rcs, events] = await Promise.all([
+      _api('GET', '/routine-checks'),
+      _api('GET', '/generated-events').catch(() => []),
+    ]);
+    // Ensure local caches are populated for tag resolution
+    if (!_skillDefs.length) {
+      try { _skillDefs = await _api('GET', '/skill-definitions'); } catch(_) {}
+    }
+    if (!_mcpDefs.length) {
+      try { _mcpDefs = await _api('GET', '/mcp-definitions'); } catch(_) {}
+    }
+
+    // Derive 24H subset
+    const now = Date.now();
+    const events24h = events.filter(e => {
+      if (!e.created_at) return false;
+      return (now - new Date(e.created_at).getTime()) < 86400000;
+    });
+    const abnormals = events24h.filter(e => e.status === 'pending');
+
+    // KPIs
+    const activeRcs = rcs.filter(r => r.is_active);
+    _setKpi('kpi-active-tasks', activeRcs.length);
+    _setKpi('kpi-exec-count', events24h.length);
+    _setKpi('kpi-abnormals', abnormals.length);
+
+    // Resource share rate: unique MCPs referenced by >1 routine check / total MCPs
+    const mcpRefs = rcs.flatMap(rc => {
+      const skill = _skillDefs.find(s => s.id === rc.skill_id);
+      if (!skill) return [];
+      try { return JSON.parse(skill.mcp_ids || '[]'); } catch(_) { return []; }
+    });
+    const totalMcps = _mcpDefs.length;
+    const uniqueRef = new Set(mcpRefs).size;
+    const reuseRate = totalMcps > 0 ? Math.round((uniqueRef / totalMcps) * 100) : 0;
+    _setKpi('kpi-reuse-rate', reuseRate + '%');
+
+    // Render panels
+    _renderDashboardActiveTasks(rcs);
+    _renderDashboardExecLog(events24h);
+  } catch(e) {
+    const el = document.getElementById('dashboard-active-tasks');
+    if (el) el.innerHTML = `<div class="text-red-500 text-sm py-4">載入失敗：${_esc(e.message)}</div>`;
+  }
+}
+
+function _setKpi(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+
+function _renderDashboardActiveTasks(rcs) {
+  const el = document.getElementById('dashboard-active-tasks');
+  if (!el) return;
+  if (!rcs.length) {
+    el.innerHTML = `
+      <div class="flex flex-col items-center justify-center py-10 text-slate-400 text-center">
+        <p class="text-sm font-medium">尚無排程巡檢</p>
+        <p class="text-xs mt-1">點擊右上角「+ 新增排程」開始設定</p>
+      </div>`;
+    return;
+  }
+  const intervalLabel = { '30m':'每30分', '1h':'每1h', '4h':'每4h',
+                           '8h':'每8h', '12h':'每12h', 'daily':'每天' };
+  el.innerHTML = rcs.map(rc => {
+    const skill = _skillDefs.find(s => s.id === rc.skill_id);
+    const skillName = skill ? skill.name : `Skill #${rc.skill_id}`;
+    const mcpIds = skill ? (JSON.parse(skill.mcp_ids || '[]').catch ? [] : (() => { try { return JSON.parse(skill.mcp_ids || '[]'); } catch(_) { return []; } })()) : [];
+    const mcpNames = mcpIds.map(mid => {
+      const m = _mcpDefs.find(m => m.id === mid);
+      return m ? m.name : `MCP #${mid}`;
+    });
+    const isAbn = rc.last_run_status === 'ABNORMAL';
+    const borderCls = isAbn ? 'border-l-red-500' : rc.is_active ? 'border-l-blue-400' : 'border-l-slate-300';
+    const statusDot = rc.is_active
+      ? '<span class="w-1.5 h-1.5 rounded-full bg-blue-400 inline-block"></span>'
+      : '<span class="w-1.5 h-1.5 rounded-full bg-slate-300 inline-block"></span>';
+    return `
+    <div class="bg-white border border-slate-200 border-l-4 ${borderCls} rounded-xl p-4 shadow-sm
+                hover:shadow-md transition-shadow cursor-pointer"
+         onclick="switchView('routine-checks')">
+      <div class="flex items-start justify-between gap-2 mb-2">
+        <div class="flex items-center gap-1.5 min-w-0">
+          ${statusDot}
+          <span class="font-semibold text-sm text-slate-900 truncate">${_esc(rc.name)}</span>
+        </div>
+        <span class="text-xs text-slate-400 flex-shrink-0">${intervalLabel[rc.check_interval] || rc.check_interval}</span>
+      </div>
+      <div class="flex flex-wrap gap-1.5 mt-1">
+        <span class="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700
+                     border border-purple-200 font-medium">
+          🧠 ${_esc(skillName)}
+        </span>
+        ${mcpNames.map(n => `
+          <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700
+                       border border-emerald-200 font-medium">
+            ⚙ ${_esc(n)}
+          </span>`).join('')}
+      </div>
+      ${isAbn ? `
+        <div class="mt-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1">
+          ⚠ 上次執行：ABNORMAL
+        </div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function _renderDashboardExecLog(events) {
+  const el = document.getElementById('dashboard-exec-log');
+  if (!el) return;
+  if (!events.length) {
+    el.innerHTML = `
+      <div class="flex flex-col items-center justify-center py-10 text-slate-400 text-center">
+        <p class="text-sm font-medium">24H 內尚無執行記錄</p>
+      </div>`;
+    return;
+  }
+  // Sort newest first
+  const sorted = [...events].sort((a, b) =>
+    new Date(b.created_at || 0) - new Date(a.created_at || 0));
+  el.innerHTML = sorted.map(ev => {
+    const isAbn = ev.status === 'pending';
+    const skill = _skillDefs.find(s => s.id === ev.source_skill_id);
+    const skillName = skill ? skill.name : `Skill #${ev.source_skill_id}`;
+    const ts = ev.created_at ? ev.created_at.replace('T',' ').substring(11,16) : '';
+    const diagMsg = (() => {
+      try {
+        const d = JSON.parse(ev.diagnosis_result || '{}');
+        return d.diagnosis_message || '';
+      } catch(_) { return ''; }
+    })();
+    const actionMsg = (() => {
+      try {
+        const d = JSON.parse(ev.diagnosis_result || '{}');
+        return d.recommended_action || '';
+      } catch(_) { return ''; }
+    })();
+    return `
+    <div class="bg-white border ${isAbn ? 'border-red-200 bg-red-50/20' : 'border-slate-200'}
+                rounded-xl p-3 flex gap-3 items-start shadow-sm">
+      <div class="text-xs text-slate-400 pt-0.5 flex-shrink-0 w-10 text-right">${ts}</div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 mb-0.5 flex-wrap">
+          <span class="font-semibold text-sm text-slate-900">${_esc(skillName)}</span>
+          ${isAbn
+            ? `<span class="text-xs font-bold text-red-600 bg-red-100 border border-red-200
+                           px-2 py-0.5 rounded-full">⚠ ABNORMAL</span>`
+            : `<span class="text-xs font-medium text-green-700 bg-green-100 border border-green-200
+                           px-2 py-0.5 rounded-full">✓ NORMAL</span>`}
+        </div>
+        ${diagMsg ? `<p class="text-xs text-slate-600 mt-0.5 line-clamp-2">${_esc(diagMsg)}</p>` : ''}
+        ${isAbn && actionMsg ? `
+          <p class="text-xs text-red-600 mt-1 font-medium flex items-start gap-1">
+            <span>↳ 處置：</span><span class="line-clamp-1">${_esc(actionMsg)}</span>
+          </p>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// v12 — Nested Builder (Task > Skill > MCP)
+// ══════════════════════════════════════════════════════════════
+
+let _nbSkillMode    = 'select';  // 'select' | 'new'
+let _nbMcpMode      = 'select';  // 'select' | 'new'
+let _nbTryRunResult = null;      // last MCP try-run result for the console
+
+async function _nbInitView() {
+  // Populate skill and MCP dropdowns
+  if (!_skillDefs.length) {
+    try { _skillDefs = await _api('GET', '/skill-definitions'); } catch(_) {}
+  }
+  if (!_mcpDefs.length) {
+    try { _mcpDefs = await _api('GET', '/mcp-definitions'); } catch(_) {}
+  }
+  if (!_dataSubjects.length) {
+    try { _dataSubjects = await _api('GET', '/data-subjects'); } catch(_) {}
+  }
+
+  // Populate Skill select
+  const skillSel = document.getElementById('nb-skill-select');
+  if (skillSel) {
+    skillSel.innerHTML = '<option value="">— 請選擇 —</option>' +
+      _skillDefs.map(s => `<option value="${s.id}">${_esc(s.name)}</option>`).join('');
+  }
+
+  // Populate MCP select
+  const mcpSel = document.getElementById('nb-mcp-select');
+  if (mcpSel) {
+    mcpSel.innerHTML = '<option value="">— 請選擇 —</option>' +
+      _mcpDefs.map(m => `<option value="${m.id}">${_esc(m.name)}</option>`).join('');
+  }
+
+  // Populate DS select in "build new" panel
+  const dsSel = document.getElementById('nb-mcp-ds');
+  if (dsSel) {
+    dsSel.innerHTML = '<option value="">— 請選擇 —</option>' +
+      _dataSubjects.map(d => `<option value="${d.id}">${_esc(d.name)}</option>`).join('');
+  }
+
+  // Apply initial mode states
+  _nbSetSkillMode(_nbSkillMode);
+  _nbSetMcpMode(_nbMcpMode);
+}
+
+function _nbSetSkillMode(mode) {
+  _nbSkillMode = mode;
+  document.getElementById('nb-skill-select-panel').classList.toggle('hidden', mode !== 'select');
+  document.getElementById('nb-skill-new-panel').classList.toggle('hidden', mode !== 'new');
+  document.getElementById('nb-skill-mode-select').className =
+    `px-3 py-1.5 transition-colors ${mode === 'select' ? 'bg-purple-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`;
+  document.getElementById('nb-skill-mode-new').className =
+    `px-3 py-1.5 transition-colors ${mode === 'new' ? 'bg-purple-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`;
+}
+
+function _nbSetMcpMode(mode) {
+  _nbMcpMode = mode;
+  document.getElementById('nb-mcp-select-panel').classList.toggle('hidden', mode !== 'select');
+  document.getElementById('nb-mcp-new-panel').classList.toggle('hidden', mode !== 'new');
+  document.getElementById('nb-mcp-mode-select').className =
+    `px-3 py-1.5 transition-colors ${mode === 'select' ? 'bg-emerald-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`;
+  document.getElementById('nb-mcp-mode-new').className =
+    `px-3 py-1.5 transition-colors ${mode === 'new' ? 'bg-emerald-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50'}`;
+}
+
+function _nbOnSkillSelect() {
+  const sel = document.getElementById('nb-skill-select');
+  const skillId = sel ? parseInt(sel.value) : null;
+  const skill = skillId ? _skillDefs.find(s => s.id === skillId) : null;
+  const checkEl = document.getElementById('nb-skill-system-check');
+  if (!checkEl) return;
+  if (!skill) { checkEl.innerHTML = '<p class="text-slate-400 italic">選擇 Skill 後顯示設定摘要</p>'; return; }
+
+  const mcpIds = (() => { try { return JSON.parse(skill.mcp_ids || '[]'); } catch(_) { return []; } })();
+  const mcpNames = mcpIds.map(id => {
+    const m = _mcpDefs.find(m => m.id === id);
+    return m ? m.name : `MCP #${id}`;
+  });
+
+  checkEl.innerHTML = `
+    <div class="grid grid-cols-2 gap-1">
+      <span class="text-slate-500">診斷提示詞：</span>
+      <span class="text-slate-700 truncate">${skill.diagnostic_prompt ? '✓ 已設定' : '⚠ 未設定'}</span>
+      <span class="text-slate-500">綁定 MCP：</span>
+      <span class="text-emerald-700">${mcpNames.length ? mcpNames.join(', ') : '— 未綁定'}</span>
+      <span class="text-slate-500">上次診斷：</span>
+      <span class="${skill.last_diagnosis_result ? 'text-blue-700' : 'text-slate-400'}">
+        ${skill.last_diagnosis_result ? '✓ 有記錄' : '— 未執行'}
+      </span>
+    </div>`;
+
+  // Auto-select the bound MCP in L3
+  if (mcpIds.length && _nbMcpMode === 'select') {
+    const mcpSel = document.getElementById('nb-mcp-select');
+    if (mcpSel) {
+      mcpSel.value = mcpIds[0];
+      _nbOnMcpSelect();
+    }
+  }
+}
+
+function _nbOnMcpSelect() {
+  const sel = document.getElementById('nb-mcp-select');
+  const mcpId = sel ? parseInt(sel.value) : null;
+  const mcp = mcpId ? _mcpDefs.find(m => m.id === mcpId) : null;
+  const hint = document.getElementById('nb-mcp-params-hint');
+  if (!hint) return;
+  if (!mcp) { hint.innerHTML = ''; return; }
+  const inputDef = (() => { try { return JSON.parse(mcp.input_definition || '{}'); } catch(_) { return {}; } })();
+  const params = (inputDef.params || []).filter(p => p.required);
+  if (!params.length) { hint.innerHTML = ''; return; }
+  hint.innerHTML = `
+    <div class="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 mt-1">
+      <span class="font-medium text-slate-700">必填參數：</span>
+      ${params.map(p => `<span class="inline-block bg-amber-100 text-amber-700 border border-amber-200
+                                     rounded px-1.5 py-0.5 mr-1 font-mono">${_esc(p.name)}</span>`).join('')}
+    </div>`;
+}
+
+async function _tryRunNestedBuilder() {
+  const runBtn    = document.getElementById('nb-console-run-btn');
+  const headerBtn = document.getElementById('nb-header-run-btn');
+  const placeholder = document.getElementById('nb-console-placeholder');
+  const skillResult = document.getElementById('nb-skill-result');
+  const mcpResult   = document.getElementById('nb-mcp-result');
+  const dot = document.getElementById('nb-console-status-dot');
+
+  // Show running state
+  [runBtn, headerBtn].forEach(b => { if (b) { b.disabled = true; b.textContent = '⏳ 執行中...'; } });
+  if (dot) dot.classList.remove('hidden');
+  if (placeholder) placeholder.classList.add('hidden');
+  if (skillResult) skillResult.classList.add('hidden');
+  if (mcpResult) mcpResult.classList.add('hidden');
+
+  try {
+    // ── Step 1: Resolve Skill + MCP ──────────────────────────
+    let skillObj = null;
+    let mcpId    = null;
+
+    if (_nbSkillMode === 'select') {
+      const sel = document.getElementById('nb-skill-select');
+      skillObj = sel && sel.value ? _skillDefs.find(s => s.id === parseInt(sel.value)) : null;
+      if (!skillObj) throw new Error('請先選擇一個 Skill');
+      const mcpIds = (() => { try { return JSON.parse(skillObj.mcp_ids || '[]'); } catch(_) { return []; } })();
+      mcpId = mcpIds[0] || null;
+    }
+
+    if (_nbMcpMode === 'select') {
+      const sel = document.getElementById('nb-mcp-select');
+      if (sel && sel.value) mcpId = parseInt(sel.value);
+    }
+
+    // ── Step 2: Run MCP Try-Run (if MCP selected) ───────────
+    let mcpTryResult = null;
+    if (mcpId) {
+      const mcp = _mcpDefs.find(m => m.id === mcpId);
+      if (!mcp) throw new Error(`找不到 MCP #${mcpId}`);
+
+      // Get sample data first
+      let sampleData = null;
+      if (mcp.data_subject_id) {
+        try {
+          const dsResult = await _api('GET', `/data-subjects/${mcp.data_subject_id}/sample`);
+          sampleData = dsResult;
+        } catch(_) { /* no sample data, try-run will use mock */ }
+      }
+
+      const intent = document.getElementById('nb-mcp-intent')?.value?.trim()
+        || mcp.processing_intent || '分析資料並呈現圖表';
+
+      mcpTryResult = await _api('POST', '/mcp-definitions/try-run', {
+        processing_intent: intent,
+        data_subject_id: mcp.data_subject_id,
+        sample_data: sampleData,
+      });
+
+      _nbTryRunResult = mcpTryResult;
+
+      // Update collapsibles with data
+      const rawEl = document.getElementById('nb-data-review');
+      if (rawEl && sampleData) rawEl.textContent = JSON.stringify(sampleData, null, 2);
+      const schemaEl = document.getElementById('nb-format-review');
+      if (schemaEl && mcpTryResult?.output_schema) {
+        schemaEl.textContent = JSON.stringify(mcpTryResult.output_schema, null, 2);
+      }
+    }
+
+    // ── Step 3: Show Skill Diagnosis Layer ──────────────────
+    _nbRenderSkillDiagnosis(skillObj);
+
+    // ── Step 4: Show MCP Evidence Layer ──────────────────────
+    if (mcpTryResult) _nbRenderMcpEvidence(mcpTryResult);
+
+  } catch(e) {
+    if (placeholder) {
+      placeholder.classList.remove('hidden');
+      placeholder.innerHTML = `
+        <div class="text-center">
+          <p class="text-red-400 font-semibold text-sm mb-1">✗ 執行失敗</p>
+          <p class="text-red-300 text-xs">${_esc(e.message)}</p>
+        </div>`;
+    }
+  } finally {
+    [runBtn, headerBtn].forEach(b => {
+      if (b) { b.disabled = false; b.textContent = b.id === 'nb-header-run-btn' ? '▶ Try Run' : '▶ Run'; }
+    });
+    if (dot) dot.classList.add('hidden');
+  }
+}
+
+function _nbRenderSkillDiagnosis(skillObj) {
+  const resultEl = document.getElementById('nb-skill-result');
+  const cardEl   = document.getElementById('nb-skill-diagnosis-card');
+  if (!resultEl || !cardEl) return;
+
+  // Try to load last_diagnosis_result from the selected skill
+  let savedResult = null;
+  if (skillObj?.last_diagnosis_result) {
+    try { savedResult = JSON.parse(skillObj.last_diagnosis_result); } catch(_) {}
+  }
+
+  const status  = savedResult?.status || (skillObj ? 'UNKNOWN' : 'UNKNOWN');
+  const diagMsg = savedResult?.diagnosis_message || (skillObj ? '已載入 Skill 設定，診斷數據需實際執行後產生' : '請選擇一個 Skill');
+  const probObj = savedResult?.problem_object;
+  const isAbn   = status === 'ABNORMAL';
+
+  const statusBadge = isAbn
+    ? `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full
+                    bg-red-500/20 border border-red-500/40 text-red-300 font-bold text-xs">⚠ ABNORMAL</span>`
+    : status === 'NORMAL'
+    ? `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full
+                    bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-bold text-xs">✓ NORMAL</span>`
+    : `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full
+                    bg-slate-700 border border-slate-600 text-slate-400 font-bold text-xs">— ${_esc(status)}</span>`;
+
+  const probHtml = probObj && typeof probObj === 'object' && Object.keys(probObj).length
+    ? `<div class="mt-2 space-y-1">` +
+        Object.entries(probObj).map(([k, v]) =>
+          `<div class="flex gap-2 text-xs">
+             <span class="text-slate-500 min-w-24">${_esc(k)}：</span>
+             <span class="text-slate-200">${_esc(String(v))}</span>
+           </div>`).join('') +
+        `</div>`
+    : `<p class="text-xs text-slate-500 italic mt-2">無異常物件</p>`;
+
+  cardEl.innerHTML = `
+    <div class="bg-slate-800 border ${isAbn ? 'border-red-500/30' : 'border-slate-700'}
+                rounded-xl p-4 border-t-4 ${isAbn ? 'border-t-red-500' : 'border-t-emerald-500'}">
+      <div class="flex items-center gap-2 mb-3">
+        ${statusBadge}
+        <span class="text-xs text-slate-400">${skillObj ? _esc(skillObj.name) : '未選擇'}</span>
+      </div>
+      <p class="text-sm text-slate-200 leading-relaxed mb-2">${_esc(diagMsg)}</p>
+      <div class="text-xs text-slate-500 uppercase tracking-wider mb-1">異常物件</div>
+      ${probHtml}
+      ${isAbn && skillObj?.expert_action ? `
+        <div class="mt-3 bg-amber-900/30 border border-amber-700/30 rounded-lg px-3 py-2">
+          <p class="text-xs text-amber-400 font-semibold mb-0.5">↳ 專家建議處置</p>
+          <p class="text-xs text-amber-200">${_esc(skillObj.expert_action)}</p>
+        </div>` : ''}
+    </div>`;
+
+  resultEl.classList.remove('hidden');
+}
+
+function _nbRenderMcpEvidence(result) {
+  const resultEl = document.getElementById('nb-mcp-result');
+  if (!resultEl) return;
+  resultEl.classList.remove('hidden');
+  _nbSwitchMcpTab('charting');
+
+  // Charting tab
+  const chartEl = document.getElementById('nb-mcp-tab-charting');
+  if (chartEl) {
+    const charts = result.charts || (result.chart_data ? [result.chart_data] : []);
+    if (charts.length) {
+      chartEl.innerHTML = '';
+      charts.forEach((chartJson, i) => {
+        const wrapper = document.createElement('div');
+        wrapper.style.cssText = 'height:240px;background:#1e293b;border-radius:8px;overflow:hidden;margin-bottom:8px;';
+        chartEl.appendChild(wrapper);
+        try {
+          const figData = typeof chartJson === 'string' ? JSON.parse(chartJson) : chartJson;
+          const layoutOverride = {
+            paper_bgcolor: '#1e293b', plot_bgcolor: '#1e293b',
+            font: { color: '#94a3b8', size: 11 },
+            margin: { l: 50, r: 20, t: 30, b: 40 },
+          };
+          Plotly.newPlot(wrapper, figData.data || [], { ...figData.layout, ...layoutOverride }, { responsive: true });
+        } catch(e) {
+          wrapper.innerHTML = `<p class="text-xs text-red-400 p-3">圖表渲染失敗：${_esc(e.message)}</p>`;
+        }
+      });
+    } else {
+      chartEl.innerHTML = `<div class="flex items-center justify-center h-24 text-slate-600 text-sm">無圖表資料</div>`;
+    }
+  }
+
+  // Summary tab
+  const sumEl = document.getElementById('nb-mcp-tab-summary');
+  if (sumEl) {
+    const dataset = result.dataset || [];
+    if (!dataset.length) {
+      sumEl.innerHTML = `<p class="text-slate-500 italic">無摘要資料</p>`;
+    } else {
+      const keys = Object.keys(dataset[0] || {});
+      sumEl.innerHTML = `
+        <div class="overflow-x-auto">
+          <table class="text-xs w-full border-collapse">
+            <thead>
+              <tr>${keys.map(k => `<th class="text-left text-slate-500 border-b border-slate-700 px-2 py-1">${_esc(k)}</th>`).join('')}</tr>
+            </thead>
+            <tbody>
+              ${dataset.slice(0, 20).map(row =>
+                `<tr class="hover:bg-slate-800 transition-colors">
+                   ${keys.map(k => `<td class="text-slate-300 border-b border-slate-800 px-2 py-1">${_esc(String(row[k] ?? ''))}</td>`).join('')}
+                 </tr>`).join('')}
+            </tbody>
+          </table>
+          ${dataset.length > 20 ? `<p class="text-slate-600 italic mt-1">⋯ 僅顯示前 20 筆（共 ${dataset.length} 筆）</p>` : ''}
+        </div>`;
+    }
+  }
+
+  // Raw tab
+  const rawEl = document.getElementById('nb-mcp-tab-raw');
+  if (rawEl) rawEl.textContent = JSON.stringify(result, null, 2);
+}
+
+function _nbSwitchMcpTab(tab) {
+  ['charting', 'summary', 'raw'].forEach(t => {
+    const btn     = document.getElementById(`nb-tab-${t}`);
+    const content = document.getElementById(`nb-mcp-tab-${t}`);
+    const isActive = t === tab;
+    if (btn) {
+      btn.className = `text-xs px-3 py-2 border-b-2 transition-colors font-${isActive ? 'semibold' : 'normal'} ` +
+        (isActive ? 'text-blue-400 border-blue-400' : 'text-slate-500 border-transparent hover:text-slate-300');
+    }
+    if (content) content.classList.toggle('hidden', !isActive);
+  });
+}
+
+async function _nbSaveRoutineCheck() {
+  const name     = document.getElementById('nb-task-name')?.value?.trim();
+  const interval = document.getElementById('nb-task-interval')?.value;
+  if (!name) { alert('請填寫任務名稱'); return; }
+
+  let skillId = null;
+  if (_nbSkillMode === 'select') {
+    const sel = document.getElementById('nb-skill-select');
+    skillId = sel && sel.value ? parseInt(sel.value) : null;
+  }
+  if (!skillId) { alert('請先選擇或建立 Skill'); return; }
+
+  try {
+    await _api('POST', '/routine-checks', {
+      name,
+      skill_id: skillId,
+      check_interval: interval,
+      is_active: true,
+      generated_event_name: `${name} 自動警報`,
+    });
+    alert('排程已儲存！');
+    switchView('dashboard');
+  } catch(e) {
+    alert(`儲存失敗：${e.message}`);
+  }
 }
