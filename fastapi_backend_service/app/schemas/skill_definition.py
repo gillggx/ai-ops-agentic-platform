@@ -43,10 +43,11 @@ class SkillDefinitionResponse(BaseModel):
     description: str
     problem_subject: Optional[str] = None
     event_type_id: Optional[int] = None
-    mcp_id: Optional[int]
-    param_mappings: Optional[List[Dict[str, Any]]]
-    diagnostic_prompt: Optional[str]
-    human_recommendation: Optional[str]
+    mcp_id: Optional[int] = None
+    mcp_ids: str = "[]"          # JSON text: "[1, 2, 3]"
+    param_mappings: Optional[List[Dict[str, Any]]] = None
+    diagnostic_prompt: Optional[str] = None
+    human_recommendation: Optional[str] = None
     last_diagnosis_result: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime

@@ -39,6 +39,7 @@ def _to_response(obj: SkillDefinitionModel) -> SkillDefinitionResponse:
         problem_subject=obj.problem_subject,
         event_type_id=obj.event_type_id,
         mcp_id=mcp_ids_list[0] if mcp_ids_list else None,
+        mcp_ids=obj.mcp_ids or "[]",
         param_mappings=_j(obj.param_mappings),
         diagnostic_prompt=obj.diagnostic_prompt,
         human_recommendation=obj.human_recommendation,
