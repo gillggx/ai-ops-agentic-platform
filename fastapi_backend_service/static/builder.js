@@ -3916,6 +3916,7 @@ function _renderDashboardExecLog(events) {
 let _nbSkillMode       = 'select';  // 'select' | 'new'
 let _nbMcpMode         = 'select';  // 'select' | 'new'
 let _nbTryRunResult    = null;      // last MCP try-run result for the console
+let _nbSkillLiveResult = null;      // last Skill live-diagnosis result (from generate-code-diagnosis)
 let _nbConsoleExpanded = false;
 
 function _nbExpandConsole() {
@@ -4180,6 +4181,8 @@ async function _tryRunNestedBuilder() {
   if (mcpResult) mcpResult.classList.add('hidden');
   _nbLogClear();
   _nbLogLine('▶', '開始執行 Try Run');
+  // Reset saved results from previous try-run
+  _nbSkillLiveResult = null;
 
   try {
     // ── Step 1: Resolve Skill + MCP ──────────────────────────
@@ -4355,6 +4358,7 @@ async function _tryRunNestedBuilder() {
         skillName:   document.getElementById('nb-skill-name')?.value?.trim() || '新建 Skill',
         expertAction,
       };
+      _nbSkillLiveResult = skillLiveResult;  // persist for save step
     }
 
     // ── Step 4: Show Skill Diagnosis Layer ──────────────────
@@ -4568,24 +4572,113 @@ async function _nbSaveRoutineCheck() {
   const interval = document.getElementById('nb-task-interval')?.value;
   if (!name) { alert('請填寫任務名稱'); return; }
 
-  let skillId = null;
-  if (_nbSkillMode === 'select') {
-    const sel = document.getElementById('nb-skill-select');
-    skillId = sel && sel.value ? parseInt(sel.value) : null;
-  }
-  if (!skillId) { alert('請先選擇或建立 Skill'); return; }
+  const saveBtn = document.getElementById('nb-save-btn');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '儲存中…'; }
+  _nbExpandConsole();
 
   try {
+    // ── Step 1: Save MCP (if building new) ───────────────────────
+    let mcpId = null;
+    if (_nbMcpMode === 'new') {
+      if (!_nbTryRunResult) {
+        alert('請先執行 Try Run 以產生 MCP 腳本');
+        return;
+      }
+      _nbLogLine('💾', '儲存 MCP 定義…');
+      const mcpName = document.getElementById('nb-mcp-name')?.value?.trim() || `${name} MCP`;
+      const dsId    = parseInt(document.getElementById('nb-mcp-ds')?.value || '0');
+      const intent  = document.getElementById('nb-mcp-intent')?.value?.trim() || '';
+
+      const mcpCreateRes = await _api('POST', '/mcp-definitions', {
+        name: mcpName,
+        description: '',
+        data_subject_id: dsId,
+        processing_intent: intent,
+      });
+      mcpId = mcpCreateRes.id;
+
+      // Patch in the generated script + schemas from the try-run result
+      await _api('PATCH', `/mcp-definitions/${mcpId}`, {
+        processing_script: _nbTryRunResult.script || '',
+        output_schema:     _nbTryRunResult.output_schema || {},
+        ui_render_config:  _nbTryRunResult.ui_render_config || {},
+        input_definition:  _nbTryRunResult.input_definition || {},
+        sample_output:     _nbTryRunResult.output_data || {},
+      });
+      _nbLogLine('✓', `MCP「${mcpName}」已儲存（id=${mcpId}）`, 'text-emerald-600');
+
+    } else {
+      const sel = document.getElementById('nb-mcp-select');
+      mcpId = sel && sel.value ? parseInt(sel.value) : null;
+    }
+
+    // ── Step 2: Save Skill (if building new) ─────────────────────
+    let skillId = null;
+    if (_nbSkillMode === 'new') {
+      if (!_nbSkillLiveResult) {
+        alert('請先執行 Try Run 以產生 Skill 診斷碼');
+        return;
+      }
+      _nbLogLine('💾', '儲存 Skill 定義…');
+      const skillName   = document.getElementById('nb-skill-name')?.value?.trim() || `${name} Skill`;
+      const diagPrompt  = document.getElementById('nb-skill-prompt')?.value?.trim() || '';
+      const probSubject = document.getElementById('nb-skill-target')?.value?.trim() || '';
+      const expertAct   = document.getElementById('nb-skill-action')?.value?.trim() || '';
+
+      const skillCreateRes = await _api('POST', '/skill-definitions', {
+        name:                 skillName,
+        description:          '',
+        diagnostic_prompt:    diagPrompt,
+        problem_subject:      probSubject || null,
+        mcp_id:               mcpId,
+        human_recommendation: expertAct || null,
+      });
+      skillId = skillCreateRes.id;
+
+      // Patch in generated code + last_diagnosis_result
+      const lastDiag = {
+        status:              _nbSkillLiveResult.status || 'UNKNOWN',
+        diagnosis_message:   _nbSkillLiveResult.diagnosis_message || '',
+        problem_object:      _nbSkillLiveResult.problem_object || {},
+        generated_code:      _nbSkillLiveResult.generated_code || '',
+        check_output_schema: _nbSkillLiveResult.check_output_schema || {},
+        timestamp:           new Date().toISOString(),
+      };
+      await _api('PATCH', `/skill-definitions/${skillId}`, {
+        last_diagnosis_result: lastDiag,
+      });
+      _nbLogLine('✓', `Skill「${skillName}」已儲存（id=${skillId}）`, 'text-emerald-600');
+
+    } else {
+      const sel = document.getElementById('nb-skill-select');
+      skillId = sel && sel.value ? parseInt(sel.value) : null;
+    }
+
+    if (!skillId) {
+      alert('無法取得 Skill ID，請重新選擇或建立 Skill');
+      return;
+    }
+
+    // ── Step 3: Create RoutineCheck ───────────────────────────────
+    _nbLogLine('💾', '建立巡檢排程…');
     await _api('POST', '/routine-checks', {
       name,
-      skill_id: skillId,
-      check_interval: interval,
-      is_active: true,
+      skill_id:             skillId,
+      check_interval:       interval,
+      is_active:            true,
       generated_event_name: `${name} 自動警報`,
     });
-    alert('排程已儲存！');
-    switchView('dashboard');
+    _nbLogLine('✓', `排程「${name}」已建立！`, 'text-emerald-600');
+
+    setTimeout(() => {
+      alert(`任務「${name}」已成功建立！`);
+      switchView('dashboard');
+    }, 400);
+
   } catch(e) {
+    _nbLogLine('✗', `儲存失敗：${e.message}`, 'text-red-500');
     alert(`儲存失敗：${e.message}`);
+  } finally {
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '儲存排程'; }
   }
 }
