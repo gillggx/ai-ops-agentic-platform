@@ -4117,6 +4117,25 @@ function _nbCollectFormParams() {
   return params;
 }
 
+// Collect skill_input for RoutineCheck: reads from whichever param form is active
+function _nbCollectSkillInput() {
+  if (_nbMcpMode === 'new') {
+    // New MCP mode: read from the dynamic sample form (nb-mcp-param-{name})
+    return _nbCollectFormParams();
+  }
+  // Select mode: read from the nb-mcp-select-param-{name} inputs
+  const sel = document.getElementById('nb-mcp-select');
+  const mcpId = sel ? parseInt(sel.value) : null;
+  const mcp = mcpId ? _mcpDefs.find(m => m.id === mcpId) : null;
+  const ds = mcp?.data_subject_id ? _dataSubjects.find(d => d.id === mcp.data_subject_id) : null;
+  const params = {};
+  for (const f of (ds?.input_schema?.fields || [])) {
+    const el = document.getElementById(`nb-mcp-select-param-${f.name}`);
+    if (el && el.value.trim()) params[f.name] = el.value.trim();
+  }
+  return params;
+}
+
 function _nbOnMcpSelect() {
   const sel = document.getElementById('nb-mcp-select');
   const mcpId = sel ? parseInt(sel.value) : null;
@@ -4586,12 +4605,13 @@ async function _nbSaveRoutineCheck() {
       }
       _nbLogLine('💾', '儲存 MCP 定義…');
       const mcpName = document.getElementById('nb-mcp-name')?.value?.trim() || `${name} MCP`;
+      const mcpDesc = document.getElementById('nb-mcp-desc')?.value?.trim() || '';
       const dsId    = parseInt(document.getElementById('nb-mcp-ds')?.value || '0');
       const intent  = document.getElementById('nb-mcp-intent')?.value?.trim() || '';
 
       const mcpCreateRes = await _api('POST', '/mcp-definitions', {
         name: mcpName,
-        description: '',
+        description: mcpDesc,
         data_subject_id: dsId,
         processing_intent: intent,
       });
@@ -4664,7 +4684,8 @@ async function _nbSaveRoutineCheck() {
     await _api('POST', '/routine-checks', {
       name,
       skill_id:             skillId,
-      check_interval:       interval,
+      skill_input:          _nbCollectSkillInput(),
+      schedule_interval:    interval,
       is_active:            true,
       generated_event_name: `${name} 自動警報`,
     });
