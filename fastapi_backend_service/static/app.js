@@ -820,6 +820,28 @@ function _buildTableHtml(rows) {
 // Auth helpers
 // ══════════════════════════════════════════════════════════════
 
+/** Returns true if JWT token is missing, malformed, or past its exp claim. */
+function _isTokenExpired(token) {
+  if (!token) return true;
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return !payload.exp || payload.exp < Math.floor(Date.now() / 1000);
+  } catch(_) {
+    return true; // malformed token → treat as expired
+  }
+}
+
+/** Clear all in-memory conversation histories and DOM chat containers on login. */
+function _clearConversationHistory() {
+  _copilotHistory = [];
+  _helpHistory    = [];
+  _helpWelcomeShown = false;
+  const chatEl = document.getElementById('chat-history');
+  if (chatEl) chatEl.innerHTML = '';
+  const helpEl = document.getElementById('help-chat-history');
+  if (helpEl) helpEl.innerHTML = '';
+}
+
 async function loginWithCredentials() {
   const username = document.getElementById('login-username').value.trim();
   const password = document.getElementById('login-password').value;
@@ -851,6 +873,7 @@ async function loginWithCredentials() {
     if (!_token) throw new Error('回應中未包含 access_token');
 
     localStorage.setItem('glassbox_token', _token);
+    _clearConversationHistory();
     _showMainApp(username);
 
   } catch (err) {
@@ -866,6 +889,7 @@ function loginWithToken() {
   if (!t) { _showLoginError('請輸入 Token'); return; }
   _token = t;
   localStorage.setItem('glassbox_token', _token);
+  _clearConversationHistory();
   _showMainApp('Token User');
 }
 
@@ -1844,7 +1868,12 @@ function _renderCopilotSkillPanel(ev) {
 
 (function init() {
   if (_token) {
-    _showMainApp('');
+    if (_isTokenExpired(_token)) {
+      // Token has expired — clear it and show login screen
+      logout();
+    } else {
+      _showMainApp('');
+    }
   }
 
   // Apply i18n on load
