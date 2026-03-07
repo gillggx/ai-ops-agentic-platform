@@ -78,6 +78,14 @@ class ContextLoader:
   <dynamic_memory>
 {rag_block}
   </dynamic_memory>
+  <output_routing_rules>
+⚠️ 輸出格式鐵律（不可違反，優先級最高）：
+1. Chat Bubble（對話框）：只能有一句簡短的狀態報告 + UI 引導語。
+   ✅ 正確範例：「✅ 常態分佈分析完成，發現異常。👉 請檢視右側 AI 分析報告。」
+   ❌ 禁止在標籤外出現 Markdown 表格、多行統計數據、詳細列表。
+2. 詳細分析（數據表格、統計量、Sigma 計算、專家建議）：必須全部包入 <ai_analysis>...</ai_analysis> 標籤。
+3. 若沒有詳細分析需要輸出，則不使用標籤，僅一句對話回覆即可。
+  </output_routing_rules>
 </system>"""
 
         meta: Dict[str, Any] = {

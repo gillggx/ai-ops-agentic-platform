@@ -46,16 +46,41 @@ _SESSION_TTL_HOURS = 24
 _SESSION_MAX_MESSAGES = 20  # keep last 20 messages (~10 turns) to limit tokens
 
 
-def _trim_for_llm(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
-    """Strip large rendering payloads from tool results before sending to LLM.
+def _dataset_summary(dataset: List[Any]) -> Dict[str, Any]:
+    """Build a compact summary for large datasets (spec 1.1)."""
+    n = len(dataset)
+    sample = dataset[:5]
+    stats_parts: List[str] = [f"總共 {n} 筆資料"]
+    if n > 0 and isinstance(dataset[0], dict):
+        for key, val in dataset[0].items():
+            if isinstance(val, (int, float)):
+                vals = [r.get(key) for r in dataset if isinstance(r.get(key), (int, float))]
+                if vals:
+                    avg = sum(vals) / len(vals)
+                    stats_parts.append(f"{key} 平均值 {avg:.3f}")
+                    break  # one stat is enough for context
+    return {
+        "dataset_summary": "。".join(stats_parts) + f"。已截斷，僅顯示前 {len(sample)} 筆供結構參考。",
+        "sample_data": sample,
+    }
 
-    Only llm_readable_data + essential metadata are kept. This prevents large
-    datasets (execute_mcp) and chart JSON (execute_skill) from bloating context.
+
+def _trim_for_llm(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    """Strip large rendering payloads from tool results before sending to LLM (v13.3 §1.1).
+
+    execute_skill → only llm_readable_data (structured status/targets)
+    execute_mcp   → llm_readable_data + dataset_summary (count + avg) + 5 sample rows
+    list_*        → keep first 8 items, add _truncated flag
+    others        → passthrough
     """
     if tool_name == "execute_skill":
         return {k: result[k] for k in ("skill_name", "llm_readable_data", "status") if k in result}
     if tool_name == "execute_mcp":
-        return {k: result[k] for k in ("status", "mcp_id", "llm_readable_data") if k in result}
+        od = result.get("output_data") or {}
+        dataset = od.get("dataset") or []
+        trimmed: Dict[str, Any] = {k: result[k] for k in ("status", "mcp_id", "llm_readable_data") if k in result}
+        trimmed.update(_dataset_summary(dataset) if dataset else {"dataset_summary": "(無資料)", "sample_data": []})
+        return trimmed
     if "data" in result and isinstance(result.get("data"), list) and len(result["data"]) > 8:
         return {**result, "data": result["data"][:8], "_truncated": True}
     return result

@@ -2007,6 +2007,35 @@ function _renderCopilotSkillPanel(ev) {
 }
 
 /**
+ * v13.3: Render <ai_analysis> content into the right workspace panel.
+ * Creates a dedicated "✨ Analysis from AI" tab with markdown-rendered content.
+ */
+function _renderAiAnalysisPanel(markdownContent) {
+  _showReportPanel();
+  const tabId    = `ai-analysis-${Date.now()}`;
+  const tabTitle = '✨ Analysis from AI';
+  const rendered = (typeof marked !== 'undefined')
+    ? marked.parse(markdownContent)
+    : markdownContent.replace(/\n/g, '<br>');
+  const contentHtml = `
+    <div class="p-5 overflow-y-auto flex-1">
+      <div class="flex items-center gap-2 mb-4">
+        <span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-700">AI 深度分析</span>
+      </div>
+      <div class="prose prose-sm max-w-none text-slate-800
+                  [&_table]:w-full [&_table]:border-collapse [&_table]:text-xs
+                  [&_th]:bg-slate-100 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_th]:border [&_th]:border-slate-200
+                  [&_td]:px-3 [&_td]:py-1.5 [&_td]:border [&_td]:border-slate-200
+                  [&_h3]:text-sm [&_h3]:font-bold [&_h3]:text-slate-700 [&_h3]:mt-4 [&_h3]:mb-2
+                  [&_strong]:text-slate-900">
+        ${rendered}
+      </div>
+    </div>`;
+  const { panel } = _createWorkspaceTab(tabId, tabTitle, contentHtml);
+  void panel; // no charts to init
+}
+
+/**
  * Render an Agent draft action card in the workspace panel.
  * Shows a preview of the draft payload and an "Open Editor" button.
  */
@@ -2399,8 +2428,18 @@ function _handleV13Event(ev) {
 
     case 'synthesis': {
       document.getElementById('v13-thinking-bubble')?.closest('.flex')?.remove();
-      _streamSynthesisBubble(ev.text || '(無回答)');
-      _diagLogLine('💬', `SYNTHESIS 完成 (${(ev.text || '').length} chars)`, '#a78bfa');
+      const fullText = ev.text || '(無回答)';
+      // v13.3 Output Routing: split <ai_analysis> from chat text
+      const analysisMatch = fullText.match(/<ai_analysis>([\s\S]*?)<\/ai_analysis>/);
+      if (analysisMatch) {
+        const chatText = fullText.replace(/<ai_analysis>[\s\S]*?<\/ai_analysis>/g, '').trim()
+                         || '👉 請檢視右側 AI 分析報告。';
+        _streamSynthesisBubble(chatText);
+        _renderAiAnalysisPanel(analysisMatch[1].trim());
+      } else {
+        _streamSynthesisBubble(fullText);
+      }
+      _diagLogLine('💬', `SYNTHESIS 完成 (${fullText.length} chars${analysisMatch ? ', 含 AI 分析' : ''})`, '#a78bfa');
       break;
     }
 
