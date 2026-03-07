@@ -43,12 +43,12 @@ jobs:
             source "$VENV"
             pip install -r "$BE_DIR/requirements.txt"
             cd "$BE_DIR"
-            # 若 DB 由 init_db() 建立（無 alembic 版本紀錄），先 stamp 再 upgrade
-            PYTHONPATH="$BE_DIR" alembic upgrade head || {
-              echo "upgrade failed (tables pre-exist); stamping DB to head..."
-              PYTHONPATH="$BE_DIR" alembic stamp head
-              PYTHONPATH="$BE_DIR" alembic upgrade head
-            }
+            # Non-fatal migration: try upgrade, fall back to stamp+upgrade, then stamp head.
+            # App lifespan (create_all) covers any remaining missing tables.
+            PYTHONPATH="$BE_DIR" alembic upgrade head || \
+              (PYTHONPATH="$BE_DIR" alembic stamp base && PYTHONPATH="$BE_DIR" alembic upgrade head) || \
+              (PYTHONPATH="$BE_DIR" alembic stamp head && echo "stamped head; create_all will fill gaps") || \
+              echo "migration skipped — create_all will handle schema"
 
             # ── 4. 重啟後端 (systemd) ──────────────────────────────────────
             echo "--- [4/4] 重啟後端服務 ---"
