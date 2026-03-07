@@ -4698,6 +4698,7 @@ function _nbRenderMcpEvidence(result) {
 
 // Shared grid renderer for Summary and Raw Data tabs
 function _nbRenderDataGrid(el, rows, emptyMsg) {
+  if (!Array.isArray(rows)) rows = [];   // guard: string / object / null-ish → empty
   if (!rows.length) {
     el.innerHTML = `<p class="text-slate-400 italic text-sm py-4">${emptyMsg}</p>`;
     return;
@@ -5520,7 +5521,8 @@ async function _mcpTryRun() {
     const rawEl = document.getElementById('mce-data-review');
     const schemaEl = document.getElementById('mce-format-review');
     if (rawEl) {
-      const rows = outputData._raw_dataset || (Array.isArray(outputData.dataset) ? outputData.dataset : []);
+      const rows = Array.isArray(outputData._raw_dataset) ? outputData._raw_dataset
+                 : Array.isArray(outputData.dataset) ? outputData.dataset : [];
       _nbRenderDataGrid(rawEl, rows, '無原始資料');
       document.getElementById('mce-data-review-details')?.setAttribute('open', '');
     }
@@ -5536,7 +5538,7 @@ async function _mcpTryRun() {
       _mceSwitchMcpTab('charting');
       const uiRender = outputData.ui_render || outputData.ui_render_config || {};
       const charts   = uiRender.charts || (uiRender.chart_data ? [uiRender.chart_data] : []);
-      const dataset  = outputData.dataset || [];
+      const dataset  = Array.isArray(outputData.dataset) ? outputData.dataset : [];
 
       const chartEl = document.getElementById('mce-mcp-tab-charting');
       if (chartEl) {
