@@ -142,6 +142,7 @@ async def get_soul(
     db: AsyncSession = Depends(get_db),
     current_user: UserModel = Depends(get_current_user),
 ) -> Dict[str, Any]:
+    from app.services.context_loader import _DEFAULT_SOUL
     result = await db.execute(
         select(SystemParameterModel).where(SystemParameterModel.key == _SOUL_PARAM_KEY)
     )
@@ -149,7 +150,7 @@ async def get_soul(
     return {
         "status": "success",
         "key": _SOUL_PARAM_KEY,
-        "soul_prompt": sp.value if sp else None,
+        "soul_prompt": sp.value if sp else _DEFAULT_SOUL,
         "is_default": sp is None,
     }
 

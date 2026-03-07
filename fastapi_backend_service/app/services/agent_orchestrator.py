@@ -43,6 +43,22 @@ logger = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 5
 _SESSION_TTL_HOURS = 24
+_SESSION_MAX_MESSAGES = 20  # keep last 20 messages (~10 turns) to limit tokens
+
+
+def _trim_for_llm(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    """Strip large rendering payloads from tool results before sending to LLM.
+
+    Only llm_readable_data + essential metadata are kept. This prevents large
+    datasets (execute_mcp) and chart JSON (execute_skill) from bloating context.
+    """
+    if tool_name == "execute_skill":
+        return {k: result[k] for k in ("skill_name", "llm_readable_data", "status") if k in result}
+    if tool_name == "execute_mcp":
+        return {k: result[k] for k in ("status", "mcp_id", "llm_readable_data") if k in result}
+    if "data" in result and isinstance(result.get("data"), list) and len(result["data"]) > 8:
+        return {**result, "data": result["data"][:8], "_truncated": True}
+    return result
 
 
 def _extract_text(content: List[Any]) -> str:
@@ -252,6 +268,15 @@ class AgentOrchestrator:
                 yield {"type": "done"}
                 return
 
+            # Emit token usage
+            if hasattr(response, "usage") and response.usage:
+                yield {
+                    "type": "llm_usage",
+                    "input_tokens": response.usage.input_tokens,
+                    "output_tokens": response.usage.output_tokens,
+                    "iteration": iteration,
+                }
+
             # Stream thinking blocks (if present)
             for thinking_text in _extract_thinking(response.content):
                 yield {"type": "thinking", "text": thinking_text}
@@ -308,7 +333,7 @@ class AgentOrchestrator:
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": tool_id,
-                        "content": json.dumps(result, ensure_ascii=False),
+                        "content": json.dumps(_trim_for_llm(tool_name, result), ensure_ascii=False),
                     })
 
                 messages.append({"role": "user", "content": tool_results})
@@ -346,8 +371,8 @@ class AgentOrchestrator:
             except Exception as exc:
                 logger.warning("Memory auto-write failed: %s", exc)
 
-        # Save session
-        await self._save_session(session_id, messages)
+        # Save session (trim to last _SESSION_MAX_MESSAGES to bound token growth)
+        await self._save_session(session_id, messages[-_SESSION_MAX_MESSAGES:])
         yield {"type": "done", "session_id": session_id}
 
     # ── Session Helpers ───────────────────────────────────────────────────────

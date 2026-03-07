@@ -2233,6 +2233,15 @@ async function _sendAgentV13Message() {
 
   _addChatBubble('user', _escapeHtml(message));
 
+  // Thinking placeholder
+  _addChatBubble('agent',
+    '<span id="v13-thinking-bubble" class="inline-flex items-center gap-1.5 text-slate-400 text-xs">' +
+    '<span class="animate-spin text-base">⏳</span> 思考中…</span>');
+
+  // Reset token badge for new message
+  const _badge = document.getElementById('v13-token-badge');
+  if (_badge) { _badge.textContent = ''; _badge.classList.add('hidden'); delete _badge._totalIn; delete _badge._totalOut; }
+
   // Expand Agent Console and mark new session
   _diagConsoleClear();
   _diagConsoleExpand();
@@ -2355,6 +2364,18 @@ function _handleV13Event(ev) {
       break;
     }
 
+    case 'llm_usage': {
+      const badge = document.getElementById('v13-token-badge');
+      if (badge) {
+        badge._totalIn  = (badge._totalIn  || 0) + (ev.input_tokens  || 0);
+        badge._totalOut = (badge._totalOut || 0) + (ev.output_tokens || 0);
+        badge.textContent = `in ${badge._totalIn.toLocaleString()} / out ${badge._totalOut.toLocaleString()} tok`;
+        badge.classList.remove('hidden');
+      }
+      _diagLogLine('🔢', `LLM #${ev.iteration} tokens | in=${ev.input_tokens} out=${ev.output_tokens}`, '#64748b');
+      break;
+    }
+
     case 'tool_start': {
       const inputStr = JSON.stringify(ev.input || {});
       _diagLogLine('🔧', `TOOL #${ev.iteration || '?'} → ${ev.tool || ''}(${inputStr.slice(0, 80)}${inputStr.length > 80 ? '…' : ''})`, '#fbbf24');
@@ -2377,6 +2398,7 @@ function _handleV13Event(ev) {
     }
 
     case 'synthesis': {
+      document.getElementById('v13-thinking-bubble')?.closest('.flex')?.remove();
       _streamSynthesisBubble(ev.text || '(無回答)');
       _diagLogLine('💬', `SYNTHESIS 完成 (${(ev.text || '').length} chars)`, '#a78bfa');
       break;
@@ -2388,6 +2410,7 @@ function _handleV13Event(ev) {
     }
 
     case 'error': {
+      document.getElementById('v13-thinking-bubble')?.closest('.flex')?.remove();
       _diagLogLine('❌', `ERROR | ${ev.message || '未知錯誤'}${ev.iteration ? ` (iter ${ev.iteration})` : ''}`, '#f87171');
       _addChatBubble('error', `⚠️ Agent 錯誤：${_escapeHtml(ev.message || '未知錯誤')}`);
       break;
