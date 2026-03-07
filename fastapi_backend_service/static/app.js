@@ -286,20 +286,26 @@ async function _launchEventDiagnosis() {
         try { evt = JSON.parse(dataLine.slice(5).trim()); } catch { continue; }
 
         if (evt.type === 'error') {
+          _diagLogLine('✗', evt.message, '#f87171');
           _addChatBubble('error', `⚠️ ${_escapeHtml(evt.message)}`);
           _renderPipelineError(evt.message);
 
         } else if (evt.type === 'start') {
           totalSkills = evt.skill_count || 0;
+          _diagLogLine('▶', `診斷管線啟動 — ${totalSkills} 個 Skill`);
           _addChatBubble('agent', `📋 共找到 <strong>${totalSkills}</strong> 個 Skill，逐一執行中...`);
 
         } else if (evt.type === 'skill_start') {
           const bubbleId = `skill-bubble-${evt.index}`;
+          _diagLogLine('⏳', `執行 Skill：${evt.skill_name}`);
           _addChatBubble('agent', `⏳ 正在執行 <strong>${_escapeHtml(evt.skill_name)}</strong>...`, bubbleId);
           skillBubbles[evt.index] = document.getElementById(bubbleId);
 
         } else if (evt.type === 'skill_done') {
           console.log('【1. SSE 收到原始 Payload】skill_done', JSON.parse(JSON.stringify(evt)));
+          const doneIcon = evt.error ? '✗' : (evt.status === 'NORMAL' ? '✓' : '⚠');
+          const doneColor = evt.error ? '#f87171' : (evt.status === 'NORMAL' ? '#34d399' : '#fbbf24');
+          _diagLogLine(doneIcon, `${evt.skill_name} → ${evt.error ? '錯誤' : (evt.status || '完成')}${evt.error ? '：' + evt.error : ''}`, doneColor);
           doneCount++;
           collectedSkills.push(evt);
           // Update chat bubble
@@ -316,10 +322,13 @@ async function _launchEventDiagnosis() {
           _renderDiagnosisSummary(collectedSkills);
           const abnormal = collectedSkills.filter(s => !s.error && s.status !== 'NORMAL').length;
           if (totalSkills === 0) {
+            _diagLogLine('⚠', '未找到綁定此 Event 的 Skill', '#fbbf24');
             _addChatBubble('agent', '⚠️ 未找到綁定此 Event 的 Skill，請先在 Skill Builder 建立。');
           } else if (abnormal > 0) {
+            _diagLogLine('✓', `診斷完成 — ${abnormal}/${totalSkills} 異常`, '#fbbf24');
             _addChatBubble('agent', `🚨 診斷完成：${totalSkills} 個 Skill 中有 <strong>${abnormal}</strong> 個檢測到異常，請查看右側報告。`);
           } else {
+            _diagLogLine('✓', `診斷完成 — 全部 ${totalSkills} 個正常`, '#34d399');
             _addChatBubble('agent', `✅ 診斷完成：全部 ${totalSkills} 個 Skill 正常。`);
           }
           _setStatus('ready');
@@ -494,13 +503,19 @@ function _initChartsInCard(cardEl) {
         const spec    = JSON.parse(raw);
         const traces  = spec.data || spec.traces || [];
         if (window.Plotly) {
+          const specLayout = spec.layout || {};
+          // Deep-merge margin so spec can adjust individual sides without clobbering defaults
+          const mergedMargin = Object.assign({ t: 40, b: 40, l: 50, r: 20 }, specLayout.margin || {});
+          if (specLayout.title && mergedMargin.t < 55) mergedMargin.t = 55;
+          const hasHorizLegend = specLayout.legend?.orientation === 'h';
+          if (hasHorizLegend && mergedMargin.b < 100) mergedMargin.b = 100;
+          const legendOverride = hasHorizLegend ? { legend: { ...specLayout.legend, y: -0.28, x: 0, xanchor: 'left' } } : {};
           const layout = Object.assign({
-            margin: { t: 30, b: 40, l: 50, r: 20 },
-            height: 260,
+            height: 360,
             paper_bgcolor: 'rgba(0,0,0,0)',
             plot_bgcolor:  '#f8fafc',
             font: { color: '#374151', size: 11 },
-          }, spec.layout || {});
+          }, specLayout, { margin: mergedMargin }, legendOverride);
           Plotly.newPlot(div, traces, layout, { responsive: true, displayModeBar: false });
         } else {
           // Plotly not loaded — hide wrapper so no blank space remains
@@ -918,8 +933,8 @@ function _showMainApp(username) {
   }
   _applyI18n();
 
-  // v12: default to Mission Control Dashboard
-  switchView('dashboard');
+  // default to Diagnose (診斷站)
+  switchView('diagnose');
 
   // Phase 10: init mobile layout + swipe after DOM is visible
   _initMobileLayout();
@@ -1509,6 +1524,58 @@ function handleInputKey(event) {
   }
 }
 
+// ── Agent Console (bottom-right of Diagnose page) ────────────────────────────
+let _diagConsoleOpen      = false;
+let _diagConsoleDotTimer  = null;
+
+function _diagConsoleExpand() {
+  const el = document.getElementById('diag-console');
+  if (!el) return;
+  el.style.height = '218px';   // header(34) + lines(184)
+  _diagConsoleOpen = true;
+  const ch = document.getElementById('diag-console-chevron');
+  if (ch) ch.style.transform = 'rotate(180deg)';
+}
+
+function _diagConsoleCollapse() {
+  const el = document.getElementById('diag-console');
+  if (!el) return;
+  el.style.height = '34px';    // just the header visible
+  _diagConsoleOpen = false;
+  const ch = document.getElementById('diag-console-chevron');
+  if (ch) ch.style.transform = '';
+}
+
+function _diagConsoleToggle() {
+  if (_diagConsoleOpen) _diagConsoleCollapse();
+  else _diagConsoleExpand();
+}
+
+function _diagConsoleClear() {
+  const lines = document.getElementById('diag-console-lines');
+  if (lines) lines.innerHTML = '';
+}
+
+function _diagLogLine(icon, text, color = '#94a3b8') {
+  const lines = document.getElementById('diag-console-lines');
+  if (!lines) return;
+  if (!_diagConsoleOpen) _diagConsoleExpand();
+  const ts = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+  const row = document.createElement('div');
+  row.className = 'flex items-start gap-2 py-0.5';
+  row.innerHTML = `<span style="color:#475569;flex-shrink:0;">${ts}</span>`
+                + `<span style="color:${color};">${icon} ${_escapeHtml(String(text))}</span>`;
+  lines.appendChild(row);
+  lines.scrollTop = lines.scrollHeight;
+  // Pulse dot
+  const dot = document.getElementById('diag-console-dot');
+  if (dot) {
+    dot.classList.remove('hidden');
+    clearTimeout(_diagConsoleDotTimer);
+    _diagConsoleDotTimer = setTimeout(() => dot.classList.add('hidden'), 2000);
+  }
+}
+
 function _escapeHtml(str) {
   return String(str)
     .replace(/&/g, '&amp;')
@@ -1669,6 +1736,7 @@ async function _sendCopilotMessage() {
 
   _addChatBubble('user', _escapeHtml(message));
   _copilotHistory.push({ role: 'user', content: message });
+  _diagLogLine('→', message.length > 60 ? message.slice(0, 60) + '…' : message, '#cbd5e1');
 
   // Build slot context: include pre-selected tool hint
   const slotCtx = { ..._slotContext };
@@ -1762,6 +1830,7 @@ function _handleCopilotEvent(ev) {
         `<span style="color:#94a3b8;font-size:12px;">${_escapeHtml(ev.message || '')}</span>`,
         'copilot-thinking-bubble',
       );
+      _diagLogLine('🤔', ev.message || 'Agent 思考中…', '#64748b');
       return null;
     }
 
@@ -1795,6 +1864,7 @@ function _handleCopilotEvent(ev) {
       _clearSlashTool();
       _slotContext = {};
       _renderCopilotMcpPanel(ev);
+      _diagLogLine('🔧', `MCP「${ev.mcp_name || ''}」查詢完成`, '#34d399');
       _addChatBubble('agent', `✅ <strong>${_escapeHtml(ev.mcp_name || '')}</strong> 查詢完成，結果已呈現於右側報告區。`);
       return `${ev.mcp_name} 查詢完成`;
     }
@@ -1805,17 +1875,21 @@ function _handleCopilotEvent(ev) {
       _slotContext = {};
       _renderCopilotSkillPanel(ev);
       const icon = ev.status === 'NORMAL' ? '✅' : '⚠️';
+      const statusColor = ev.status === 'NORMAL' ? '#34d399' : '#fbbf24';
+      _diagLogLine(icon, `Skill「${ev.skill_name || ''}」→ ${ev.status || '完成'}`, statusColor);
       _addChatBubble('agent', `${icon} <strong>${_escapeHtml(ev.skill_name || '')}</strong> 診斷完成，結果已呈現於右側報告區。`);
       return `${ev.skill_name} 診斷完成`;
     }
 
     case 'error': {
       document.getElementById('copilot-thinking-bubble')?.closest('.flex')?.remove();
+      _diagLogLine('✗', ev.message || '未知錯誤', '#f87171');
       _addChatBubble('error', `❌ ${_escapeHtml(ev.message || '未知錯誤')}`);
       return null;
     }
 
     case 'done': {
+      _diagLogLine('✓', 'Agent 完成', '#34d399');
       _setStatus('ready');
       return null;
     }

@@ -148,8 +148,13 @@ _DEFAULT_TRY_RUN_SYSTEM_PROMPT = """\
   if ooc_x:
       fig.add_trace(go.Scatter(x=ooc_x, y=ooc_y, mode='markers',
           name='OOC', marker=dict(color='red', size=10)))
-  fig.update_layout(title='Chart 1 Title', xaxis_title='X', yaxis_title='Y',
-      margin=dict(l=40, r=20, t=40, b=40), height=320)
+  fig.update_layout(
+      title=dict(text='Chart 1 Title', y=0.97, x=0, xanchor='left'),
+      xaxis_title='X', yaxis_title='Y',
+      height=360,
+      margin=dict(l=50, r=20, t=55, b=100),
+      legend=dict(orientation='h', y=-0.28, x=0, xanchor='left')
+  )
   charts.append(json.dumps(fig.to_dict()))   # ← append 後再建第 2 張
 
 - Plotly 多圖骨架（若使用者要求 2 張圖，照此模式建立第 2 個 fig）：
@@ -870,7 +875,7 @@ def diagnose(mcp_outputs: dict) -> dict:
         try:
             resp1 = await self._client.messages.create(
                 model=_MODEL,
-                max_tokens=2048,
+                max_tokens=4096,
                 messages=[{"role": "user", "content": code_prompt}],
             )
             raw_text = _get_text(resp1.content)
@@ -926,6 +931,15 @@ def diagnose(mcp_outputs: dict) -> dict:
             "math": math,
             "datetime": _dt,
         }
+
+        try:
+            compile(generated_code, "<diagnose>", "exec")
+        except SyntaxError as exc:
+            return {
+                "success": False, "generated_code": generated_code,
+                "status": "ABNORMAL", "diagnosis_message": "", "problem_object": {},
+                "error": f"Code syntax error: {exc}",
+            }
 
         try:
             exec(generated_code, sandbox)  # noqa: S102

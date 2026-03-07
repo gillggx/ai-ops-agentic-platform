@@ -1,13 +1,14 @@
 # Glass Box AI Diagnostic Platform — System Specification (Latest)
 
-**Version**: v12.0
-**Last Updated**: 2026-03-04
-**Status**: Active Development — Phases 1–14 Complete
+**Version**: v13.0
+**Last Updated**: 2026-03-07
+**Status**: Active Development — Phases 1–15 Complete
 
 ## Changelog
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v13.0 | 2026-03-07 | UI Phase 15: 診斷站 as default landing page; Skill Builder & MCP Builder full-page L/R editors (two-state list+editor); 排程巡檢管理 removed from sidebar; Agent Console in diagnose page; Plotly chart horizontal legend forced below plot. Code gen `max_tokens` 2048→4096 + `compile()` pre-check in `mcp_builder_service.py`. |
 | v12.0 | 2026-03-04 | Skill card redesign: chart/data tabs, problem_object, suggestion action. `_auto_chart` fallback. Diagnosis prompt returns `problem_object`. |
 | v11.0 | 2026-03-04 | Initial living spec created; covers all phases 1–11. Hard-coded config extracted to `config.py`. Code style refactored (type hints + docstrings). |
 
@@ -34,7 +35,7 @@
 
 **Project Root**: `fastapi_backend_service/`
 **Application Name**: Glass Box AI Diagnostic Platform
-**Version**: 1.0.0 (app), v11.0 (spec)
+**Version**: 1.0.0 (app), v13.0 (spec)
 
 ### Purpose
 
@@ -586,10 +587,70 @@ Passive skill — generates structured questions for the human operator (no API 
 
 | File | Description |
 |------|-------------|
-| `index.html` | Main SPA entry point. Sidebar nav, slash command menu (`/`), copilot chat panel, help chat panel. |
+| `index.html` | Main SPA entry point. Sidebar nav (9 items; 診斷站 is default), slash command menu (`/`), copilot chat panel, help chat panel (`?`), Agent Console. |
 | `style.css` | Light theme: white/slate-50 content cards, dark sidebar (`bg-slate-800`). `.slash-menu`, `.copilot-tool-tag`, SSE card styles. |
-| `app.js` | Copilot intent parsing, SSE streaming (Fetch + ReadableStream), event diagnosis tabs, slot filling state, `_parseCopilotChunk()`, `_parseSSEChunk()`. |
-| `builder.js` | MCP Builder UI (script generation, try-run, output preview) and Skill Builder UI (param mapping, diagnostic prompt editor). |
+| `app.js` | Copilot intent parsing, SSE streaming (Fetch + ReadableStream), event diagnosis tabs, slot filling state, `_parseCopilotChunk()`, `_parseSSEChunk()`. Agent Console: `_diagLogLine()`, `_diagConsoleExpand/Collapse/Toggle/Clear()`. |
+| `builder.js` | Nested Builder, MCP Builder (two-state list+editor, `_mcpOpenEditor/BackToList/TryRun/Save`), Skill Builder (two-state list+editor, `_skOpenEditor/BackToList/TryRun/Save`). |
+
+### 8.1 Nav Sidebar Order (v13)
+
+| # | ID | 頁面 | 預設 |
+|---|----|------|------|
+| 1 | `nav-diagnose` | 診斷站 (Copilot + Event) | ✅ active |
+| 2 | `nav-dashboard` | 戰情指揮中心 | |
+| 3 | `nav-nested-builder` | 巢狀建構器 | |
+| 4 | `nav-data-subjects` | Data Subjects | |
+| 5 | `nav-mcp-builder` | MCP Builder | |
+| 6 | `nav-skill-builder` | Skill Builder | |
+| 7 | `nav-event-types` | Event Types | |
+| 8 | `nav-generated-events` | 自動生成警報 | |
+| 9 | `nav-system-params` | 系統參數 | |
+
+> 排程巡檢管理 (`nav-routine-checks`) 已從 sidebar 移除（頁面 HTML 保留，可直接呼叫 `switchView('routine-checks')`）。
+
+### 8.2 Skill Builder & MCP Builder Page States (v13)
+
+兩個 Builder 頁面均採**兩段式**設計：
+
+**List State** (預設): 卡片列表 + 右上角「新增」按鈕。
+- Skill: `#sk-list-state` — 點擊卡片或「新增」→ `_skOpenEditor(id|null)`
+- MCP: `#mce-list-state` — 點擊卡片或「新增」→ `_mcpOpenEditor(id|null)`
+
+**Editor State**: 全頁 L/R 分割（`xl:flex-row`），無 drawer。
+- 左側：設定卡片（Skill: L2 purple + L3 emerald；MCP: L3 emerald）
+- 右側：Terminal Logs + Execution Report 雙頁籤
+- 標題列：`← 返回列表 | 名稱 | 💾 儲存 | ▶ Try Run`
+- IDs: `#sk-editor` / `#mcp-editor`
+
+### 8.3 Agent Console (v13)
+
+位於診斷站 `#report-panel` 底部，ID `#diag-console`。
+
+| 狀態 | 高度 | 觸發 |
+|------|------|------|
+| 隱藏 | `0px` | 初始 |
+| 展開 | `218px` | 第一條 log 自動展開 |
+| 收縮 | `34px`（僅 header） | 點擊 `▲` toggle |
+
+**Log 函數**: `_diagLogLine(icon, text, color)` — 帶時間戳、自動 scroll。
+**鉤入點**:
+- `_sendCopilotMessage` — 使用者送出訊息（灰色）
+- `_handleCopilotEvent` — `thinking`、`mcp_result`（綠）、`skill_result`（綠/黃）、`error`（紅）、`done`
+- `_launchEventDiagnosis` — SSE `start`、`skill_start`、`skill_done`（含 error）、`done`
+
+### 8.4 Plotly Chart Rendering Rules (v13)
+
+所有 `Plotly.newPlot` 呼叫使用以下 margin/legend 規則（共 4 處）：
+
+```javascript
+const mergedMargin = Object.assign({ t: 40, b: 40, l: 50, r: 20 }, specLayout.margin || {});
+if (specLayout.title && mergedMargin.t < 55) mergedMargin.t = 55;
+const hasHorizLegend = specLayout.legend?.orientation === 'h';
+if (hasHorizLegend && mergedMargin.b < 100) mergedMargin.b = 100;
+const legendOverride = hasHorizLegend ? { legend: { ...specLayout.legend, y: -0.28, x: 0, xanchor: 'left' } } : {};
+```
+
+LLM prompt 亦規定 `fig.update_layout` 預設使用 `height=360, margin.t=55, margin.b=100, legend(orientation='h', y=-0.28)`。
 
 **Key frontend patterns**:
 - SSE via `fetch()` + `ReadableStream` (not `EventSource` — lacks `Authorization` header support)

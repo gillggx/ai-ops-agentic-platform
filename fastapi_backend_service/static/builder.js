@@ -831,7 +831,7 @@ async function _loadMcpDefs() {
       const ds = _dataSubjects.find(d => d.id === mcp.data_subject_id);
       const hasGenerated = !!(mcp.processing_script);
       return `
-        <div class="builder-card" onclick="openDrawer('mcp-edit', ${mcp.id})">
+        <div class="builder-card" onclick="_mcpOpenEditor(${mcp.id})">
           <div class="flex-1">
             <div class="builder-card-name">${_esc(mcp.name)}</div>
             <div class="builder-card-desc">${_esc(mcp.description || '（無說明）')}</div>
@@ -1377,12 +1377,17 @@ function _renderStandardPayload(result) {
             if (!el || !window.Plotly) return;
             try {
               const spec = JSON.parse(chartData);
+              const specLayout = spec.layout || {};
+              const mergedMargin = Object.assign({ t: 40, r: 20, b: 60, l: 60 }, specLayout.margin || {});
+              if (specLayout.title && mergedMargin.t < 55) mergedMargin.t = 55;
+              const hasHorizLegend = specLayout.legend?.orientation === 'h';
+              if (hasHorizLegend && mergedMargin.b < 100) mergedMargin.b = 100;
+              const legendOverride = hasHorizLegend ? { legend: { ...specLayout.legend, y: -0.28, x: 0, xanchor: 'left' } } : {};
               const layout = Object.assign({
                 paper_bgcolor: '#ffffff',
                 plot_bgcolor:  '#f8fafc',
                 font: { color: '#1e293b', size: 11 },
-                margin: { t: 40, r: 20, b: 60, l: 60 },
-              }, spec.layout || {});
+              }, specLayout, { margin: mergedMargin }, legendOverride);
               Plotly.newPlot(el, spec.data || [], layout, { responsive: true, displayModeBar: false });
             } catch(e) { el.innerHTML = `<p class="text-xs text-red-400 p-4">圖表渲染失敗：${e.message}</p>`; }
           }, 80);
@@ -1759,7 +1764,7 @@ async function _loadSkillDefs() {
         ? `<span class="builder-tag builder-tag-purple" title="${_esc(boundMcp.name)}">${_esc(boundMcp.name)}</span>`
         : `<span class="builder-tag text-slate-500">未綁定 MCP</span>`;
       return `
-        <div class="builder-card" onclick="openDrawer('skill-edit', ${sk.id})">
+        <div class="builder-card" onclick="_skOpenEditor(${sk.id})">
           <div class="flex-1">
             <div class="builder-card-name">${_esc(sk.name)}</div>
             <div class="builder-card-desc">${_esc(sk.description || '（無說明）')}</div>
@@ -3116,6 +3121,7 @@ function _renderRoutineChecks() {
       ${_routineChecks.map(rc => {
         const skill = (_skillDefs||[]).find(s => s.id === rc.skill_id);
         const skillName = skill ? skill.name : `Skill #${rc.skill_id}`;
+        const skillDesc = skill?.description ? `<span class="text-slate-400 ml-1">·</span> <span class="text-slate-500">${_esc(skill.description)}</span>` : '';
         const lastRun = rc.last_run_at ? rc.last_run_at.replace('T',' ').substring(0,16) : '未執行';
         return `
         <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow transition-shadow">
@@ -3128,7 +3134,7 @@ function _renderRoutineChecks() {
                 </span>
                 <span class="text-xs text-slate-500">${intervalLabel[rc.schedule_interval] || rc.schedule_interval}</span>
               </div>
-              <p class="text-xs text-slate-500 mt-1">Skill: <span class="font-medium text-slate-700">${_esc(skillName)}</span></p>
+              <p class="text-xs text-slate-500 mt-1">Skill: <span class="font-medium text-slate-700">${_esc(skillName)}</span>${skillDesc}</p>
               <div class="flex items-center gap-3 mt-1">
                 <span class="text-xs text-slate-400">上次執行：${lastRun}</span>
                 ${statusBadge(rc.last_run_status)}
@@ -4655,14 +4661,19 @@ function _nbRenderMcpEvidence(result) {
         chartEl.appendChild(wrapper);
         try {
           const figData = typeof chartJson === 'string' ? JSON.parse(chartJson) : chartJson;
+          const figLayout = figData.layout || {};
+          const mergedMargin = Object.assign({ l: 50, r: 20, t: 40, b: 40 }, figLayout.margin || {});
+          if (figLayout.title && mergedMargin.t < 55) mergedMargin.t = 55;
+          const hasHorizLegend = figLayout.legend?.orientation === 'h';
+          if (hasHorizLegend && mergedMargin.b < 100) mergedMargin.b = 100;
+          const legendOverride = hasHorizLegend ? { legend: { ...figLayout.legend, y: -0.28, x: 0, xanchor: 'left' } } : {};
           const layoutOverride = {
             paper_bgcolor: '#f8fafc', plot_bgcolor: '#ffffff',
             font: { color: '#334155', size: 11 },
-            margin: { l: 50, r: 20, t: 30, b: 40 },
             xaxis: { gridcolor: '#e2e8f0', linecolor: '#cbd5e1' },
             yaxis: { gridcolor: '#e2e8f0', linecolor: '#cbd5e1' },
           };
-          Plotly.newPlot(wrapper, figData.data || [], { ...figData.layout, ...layoutOverride }, { responsive: true });
+          Plotly.newPlot(wrapper, figData.data || [], { ...figLayout, ...layoutOverride, margin: mergedMargin, ...legendOverride }, { responsive: true });
         } catch(e) {
           wrapper.innerHTML = `<p class="text-xs text-red-500 p-3">圖表渲染失敗：${_esc(e.message)}</p>`;
         }
@@ -4862,5 +4873,757 @@ async function _nbSaveRoutineCheck() {
     alert(`儲存失敗：${e.message}`);
   } finally {
     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '儲存排程'; }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SKILL BUILDER — Full-page L/R Editor (Change B)
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _skRightTab = 'logs';
+let _skTryRunMcpResult = null;
+let _skMcpSampleParams = null;  // DS query params collected for the selected MCP
+
+// ── Tab switching ─────────────────────────────────────────────
+function _skSwitchRightTab(tab) {
+  _skRightTab = tab;
+  ['logs', 'report'].forEach(t => {
+    document.getElementById(`sk-rtab-${t}`)?.classList.toggle('hidden', t !== tab);
+    const btn = document.getElementById(`sk-rtab-btn-${t}`);
+    if (btn) btn.className = t === tab
+      ? 'px-5 py-3 text-xs font-bold text-blue-700 border-b-2 border-blue-600 transition-colors'
+      : 'px-5 py-3 text-xs font-medium text-slate-500 border-b-2 border-transparent hover:text-slate-700 transition-colors';
+  });
+}
+
+function _skSwitchMcpTab(tab) {
+  ['charting', 'summary', 'raw'].forEach(t => {
+    const btn = document.getElementById(`sk-tab-${t}`);
+    const content = document.getElementById(`sk-mcp-tab-${t}`);
+    if (btn) btn.className = `text-xs px-4 py-2 border-b-2 transition-colors ` +
+      (t === tab ? 'text-emerald-700 border-emerald-600 font-bold' : 'text-slate-500 border-transparent hover:text-slate-700 font-medium');
+    content?.classList.toggle('hidden', t !== tab);
+  });
+}
+
+function _skLogLine(icon, text, color = 'text-slate-600') {
+  const lines = document.getElementById('sk-exec-log-lines');
+  if (!lines) return;
+  const ts = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+  const row = document.createElement('div');
+  row.className = 'flex items-start gap-2 py-0.5';
+  row.innerHTML = `<span class="text-slate-400 shrink-0 select-none">${ts}</span>
+                   <span class="${color}">${icon} ${_esc(text)}</span>`;
+  lines.appendChild(row);
+}
+
+// ── Open / close editor ───────────────────────────────────────
+async function _skOpenEditor(id) {
+  if (_mcpDefs.length === 0)    _mcpDefs    = await _api('GET', '/mcp-definitions') || [];
+  if (_dataSubjects.length === 0) _dataSubjects = await _api('GET', '/data-subjects') || [];
+
+  // Switch to editor state
+  document.getElementById('sk-list-state')?.classList.add('hidden');
+  const editor = document.getElementById('sk-editor');
+  if (editor) { editor.classList.remove('hidden'); editor.classList.add('flex'); }
+
+  // Reset right panel
+  _skSwitchRightTab('logs');
+  document.getElementById('sk-exec-log')?.classList.add('hidden');
+  document.getElementById('sk-exec-log-lines').innerHTML = '';
+  const ph = document.getElementById('sk-console-placeholder');
+  if (ph) {
+    ph.classList.remove('hidden');
+    ph.innerHTML = `
+      <svg class="w-10 h-10 mb-3 opacity-25" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+              d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+      </svg>
+      <p class="text-sm font-medium text-slate-500">點擊 ▶ Try Run 執行診斷模擬</p>
+      <p class="text-xs mt-1 text-slate-400">先設定左側 Skill 與 MCP 後再執行</p>`;
+  }
+  document.getElementById('sk-skill-result')?.classList.add('hidden');
+  document.getElementById('sk-mcp-result')?.classList.add('hidden');
+  _skTryRunMcpResult = null;
+  _skMcpSampleParams = null;
+
+  // Populate MCP dropdown
+  const mcpSel = document.getElementById('sk-edit-mcp-select');
+  if (mcpSel) {
+    mcpSel.innerHTML = '<option value="">— 請選擇 MCP —</option>' +
+      _mcpDefs.map(m => {
+        const ds = _dataSubjects.find(d => d.id === m.data_subject_id);
+        return `<option value="${m.id}">${_esc(m.name)}${ds ? ' (' + _esc(ds.name) + ')' : ''}</option>`;
+      }).join('');
+  }
+
+  if (!id) {
+    // New Skill
+    document.getElementById('sk-editor-title').textContent = '新增 Skill';
+    document.getElementById('sk-edit-id').value = '';
+    document.getElementById('sk-edit-name').value = '';
+    document.getElementById('sk-edit-desc').value = '';
+    document.getElementById('sk-edit-prompt').value = '';
+    document.getElementById('sk-edit-subject').value = '';
+    document.getElementById('sk-edit-action').value = '';
+    if (mcpSel) mcpSel.value = '';
+    document.getElementById('sk-edit-mcp-hint').innerHTML = '';
+    return;
+  }
+
+  // Load existing Skill
+  let sk = _skillDefs.find(s => s.id === id) || await _api('GET', `/skill-definitions/${id}`);
+  document.getElementById('sk-editor-title').textContent = sk?.name || `Skill #${id}`;
+  document.getElementById('sk-edit-id').value = id;
+  document.getElementById('sk-edit-name').value = sk?.name || '';
+  document.getElementById('sk-edit-desc').value = sk?.description || '';
+  document.getElementById('sk-edit-prompt').value = sk?.diagnostic_prompt || '';
+  document.getElementById('sk-edit-subject').value = sk?.problem_subject || '';
+  document.getElementById('sk-edit-action').value = sk?.human_recommendation || '';
+  if (mcpSel && sk?.mcp_id) {
+    mcpSel.value = sk.mcp_id;
+    _skOnMcpChange();
+  }
+}
+
+function _skBackToList() {
+  document.getElementById('sk-editor')?.classList.add('hidden');
+  document.getElementById('sk-editor')?.classList.remove('flex');
+  document.getElementById('sk-list-state')?.classList.remove('hidden');
+  _loadSkillDefs();
+}
+
+// ── MCP selection change ───────────────────────────────────────
+function _skOnMcpChange() {
+  const mcpId = parseInt(document.getElementById('sk-edit-mcp-select')?.value) || null;
+  const mcp = mcpId ? _mcpDefs.find(m => m.id === mcpId) : null;
+  const hint = document.getElementById('sk-edit-mcp-hint');
+  _skMcpSampleParams = null;
+  if (!hint) return;
+  if (!mcp) { hint.innerHTML = ''; return; }
+
+  const ds = mcp.data_subject_id ? _dataSubjects.find(d => d.id === mcp.data_subject_id) : null;
+  const fields = ds?.input_schema?.fields || [];
+  if (!fields.length) {
+    hint.innerHTML = '<div class="mt-2 text-xs text-slate-400 italic">此 MCP 無需額外查詢參數</div>';
+    return;
+  }
+  hint.innerHTML = `
+    <div class="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
+      <p class="text-[11px] font-bold text-blue-700 uppercase tracking-widest mb-2.5">
+        DS 查詢參數 — ${_esc(ds.name)}
+      </p>
+      <div class="space-y-2.5">
+        ${fields.map(f => `
+          <div>
+            <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
+              ${_esc(f.label || f.name)}${f.required ? ' <span class="text-red-500">*</span>' : ''}
+            </label>
+            <input id="sk-mcp-param-${_esc(f.name)}"
+                   type="${f.type === 'number' ? 'number' : 'text'}"
+                   placeholder="${_esc(f.description || f.name)}"
+                   value="${f.default_value !== undefined && f.default_value !== null ? _esc(String(f.default_value)) : ''}"
+                   class="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-sm
+                          font-medium text-slate-800 shadow-sm focus:outline-none
+                          focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow">
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
+// ── Fetch & Preview for the Skill editor's L3 MCP card ────────
+async function _skFetchPreview() {
+  const mcpId = parseInt(document.getElementById('sk-edit-mcp-select')?.value) || null;
+  const mcp = mcpId ? _mcpDefs.find(m => m.id === mcpId) : null;
+  if (!mcp) { alert('請先選擇 MCP'); return; }
+
+  const ds = mcp.data_subject_id ? _dataSubjects.find(d => d.id === mcp.data_subject_id) : null;
+  if (!ds) { alert('此 MCP 未綁定 Data Subject'); return; }
+
+  const fields = ds?.input_schema?.fields || [];
+  const formParams = {};
+  for (const f of fields) {
+    const el = document.getElementById(`sk-mcp-param-${f.name}`);
+    if (el && el.value.trim()) formParams[f.name] = el.value.trim();
+  }
+  _skMcpSampleParams = formParams;
+
+  const drEl  = document.getElementById('sk-data-review');
+  const frEl  = document.getElementById('sk-format-review');
+  if (drEl) drEl.innerHTML = '<p class="text-xs text-slate-400 italic p-3 animate-pulse">撈取中…</p>';
+  document.getElementById('sk-data-review-details')?.setAttribute('open', '');
+  document.getElementById('sk-format-review-details')?.setAttribute('open', '');
+
+  try {
+    const rawUrl = ds.api_config?.endpoint_url || '';
+    if (!rawUrl) throw new Error('DataSubject 沒有設定 API endpoint');
+    const path = rawUrl.replace(/^\/api\/v1/, '');
+    const method = (ds.api_config?.method || 'GET').toUpperCase();
+    const qp = new URLSearchParams(formParams);
+    const fullPath = method === 'GET' ? `${path}?${qp}` : path;
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    const resp = await fetch(`/api/v1${fullPath}`, {
+      method,
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: method !== 'GET' ? JSON.stringify(formParams) : undefined,
+    });
+    const json = await resp.json();
+    const rows = Array.isArray(json) ? json
+      : (json.data ? (Array.isArray(json.data) ? json.data : [json.data]) : [json]);
+    if (drEl) _nbRenderDataGrid(drEl, rows, '無資料回傳');
+    if (frEl) {
+      const schema = mcp.output_schema || ds.output_schema || _nbInferSchemaFromRows(rows);
+      _nbRenderSchemaGrid(frEl, schema);
+    }
+  } catch(e) {
+    if (drEl) drEl.innerHTML = `<p class="text-xs text-red-500 p-3">撈取失敗：${_esc(e.message)}</p>`;
+  }
+}
+
+// ── Render Skill diagnosis in right panel ────────────────────
+function _skRenderDiagnosis(liveResult) {
+  const resultEl = document.getElementById('sk-skill-result');
+  const cardEl   = document.getElementById('sk-skill-diagnosis-card');
+  if (!resultEl || !cardEl) return;
+  const status  = liveResult?.status || 'UNKNOWN';
+  const diagMsg = liveResult?.diagnosis_message || '診斷完成。';
+  const probObj = liveResult?.problem_object;
+  const isAbn   = status === 'ABNORMAL';
+  const statusBadge = isAbn
+    ? `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-100 border border-red-300 text-red-700 font-bold text-xs">⚠ ABNORMAL</span>`
+    : status === 'NORMAL'
+    ? `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-700 font-bold text-xs">✓ NORMAL</span>`
+    : `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-100 border border-slate-300 text-slate-500 font-bold text-xs">— ${_esc(status)}</span>`;
+  const probHtml = probObj && typeof probObj === 'object' && Object.keys(probObj).length
+    ? `<div class="mt-1 space-y-1">` + Object.entries(probObj).map(([k, v]) =>
+        `<div class="flex gap-2 text-xs"><span class="text-slate-500 min-w-24 font-medium">${_esc(k)}：</span><span class="text-slate-700 font-semibold">${_esc(String(v))}</span></div>`
+      ).join('') + `</div>`
+    : `<p class="text-xs text-slate-400 italic mt-1">無異常物件</p>`;
+  const cardBg = isAbn ? 'bg-red-50 border border-red-200 border-l-4 border-l-red-500'
+               : status === 'NORMAL' ? 'bg-emerald-50 border border-emerald-200 border-l-4 border-l-emerald-500'
+               : 'bg-slate-50 border border-slate-200 border-l-4 border-l-slate-400';
+  const msgColor = isAbn ? 'text-red-900' : status === 'NORMAL' ? 'text-emerald-900' : 'text-slate-700';
+  cardEl.innerHTML = `
+    <div class="${cardBg} rounded-xl p-4">
+      <div class="flex items-center gap-2 mb-3">${statusBadge}<span class="text-xs text-slate-500 font-medium">${_esc(liveResult?.skillName || 'Skill')}</span></div>
+      <p class="text-sm ${msgColor} leading-relaxed mb-3 font-medium">${_esc(diagMsg)}</p>
+      <div class="text-[11px] font-bold uppercase tracking-widest mb-1.5 ${isAbn ? 'text-red-500' : 'text-emerald-600'}">異常物件</div>
+      ${probHtml}
+      ${isAbn && liveResult?.expertAction ? `<div class="mt-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5"><p class="text-[11px] font-bold text-amber-700 uppercase tracking-widest mb-1">↳ 專家建議處置</p><p class="text-sm text-amber-800">${_esc(liveResult.expertAction)}</p></div>` : ''}
+    </div>`;
+  resultEl.classList.remove('hidden');
+}
+
+// ── Render MCP evidence in right panel ────────────────────────
+function _skRenderMcpEvidence(result) {
+  const resultEl = document.getElementById('sk-mcp-result');
+  if (!resultEl) return;
+  resultEl.classList.remove('hidden');
+  _skSwitchMcpTab('charting');
+  const outputData = result.output_data || result;
+  const uiRender   = outputData.ui_render || outputData.ui_render_config || {};
+  const charts     = uiRender.charts || (uiRender.chart_data ? [uiRender.chart_data] : []);
+  const dataset    = outputData.dataset || [];
+  const rawDataset = outputData._raw_dataset || [];
+
+  const chartEl = document.getElementById('sk-mcp-tab-charting');
+  if (chartEl) {
+    if (charts.length) {
+      chartEl.innerHTML = '';
+      charts.forEach(chartJson => {
+        const wrapper = document.createElement('div');
+        wrapper.style.cssText = 'height:280px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;overflow:hidden;margin-bottom:8px;';
+        chartEl.appendChild(wrapper);
+        try {
+          const figData = typeof chartJson === 'string' ? JSON.parse(chartJson) : chartJson;
+          const figLayout = figData.layout || {};
+          const mergedMargin = Object.assign({ l: 50, r: 20, t: 40, b: 40 }, figLayout.margin || {});
+          if (figLayout.title && mergedMargin.t < 55) mergedMargin.t = 55;
+          const hasHorizLegend = figLayout.legend?.orientation === 'h';
+          if (hasHorizLegend && mergedMargin.b < 100) mergedMargin.b = 100;
+          const legendOverride = hasHorizLegend ? { legend: { ...figLayout.legend, y: -0.28, x: 0, xanchor: 'left' } } : {};
+          Plotly.newPlot(wrapper, figData.data || [], { ...figLayout,
+            paper_bgcolor: '#f8fafc', plot_bgcolor: '#ffffff',
+            font: { color: '#334155', size: 11 }, margin: mergedMargin, ...legendOverride }, { responsive: true });
+        } catch(e) { wrapper.innerHTML = `<p class="text-xs text-red-500 p-3">圖表渲染失敗：${_esc(e.message)}</p>`; }
+      });
+    } else {
+      chartEl.innerHTML = `<div class="flex items-center justify-center h-24 text-slate-400 text-sm">無圖表資料</div>`;
+    }
+  }
+  const sumEl = document.getElementById('sk-mcp-tab-summary');
+  if (sumEl) _nbRenderDataGrid(sumEl, dataset, '無摘要資料');
+  const rawEl = document.getElementById('sk-mcp-tab-raw');
+  if (rawEl) _nbRenderDataGrid(rawEl, Array.isArray(rawDataset) ? rawDataset : (rawDataset ? [rawDataset] : []), '無原始資料');
+}
+
+// ── Try Run ───────────────────────────────────────────────────
+async function _skTryRun() {
+  const diagPrompt = document.getElementById('sk-edit-prompt')?.value?.trim();
+  const mcpId = parseInt(document.getElementById('sk-edit-mcp-select')?.value) || null;
+  if (!diagPrompt) { alert('請先填寫「異常判斷條件 (Diagnostic Prompt)」'); return; }
+  if (!mcpId)      { alert('請先選擇 MCP'); return; }
+
+  _skSwitchRightTab('logs');
+  const runBtn = document.getElementById('sk-run-btn');
+  const ph     = document.getElementById('sk-console-placeholder');
+  const dot    = document.getElementById('sk-console-status-dot');
+  if (runBtn) { runBtn.disabled = true; runBtn.textContent = '⏳ 執行中...'; }
+  if (dot) dot.classList.remove('hidden');
+  if (ph) ph.classList.add('hidden');
+  document.getElementById('sk-exec-log')?.classList.remove('hidden');
+  document.getElementById('sk-exec-log-lines').innerHTML = '';
+  document.getElementById('sk-skill-result')?.classList.add('hidden');
+  document.getElementById('sk-mcp-result')?.classList.add('hidden');
+
+  try {
+    const mcp = _mcpDefs.find(m => m.id === mcpId);
+    if (!mcp) throw new Error(`找不到 MCP #${mcpId}`);
+    _skLogLine('▶', '開始執行 Skill Try Run');
+    _skLogLine('🔧', `使用 MCP：${mcp.name}`);
+
+    // Step 1: run MCP to get fresh output
+    let mcpTryResult = null;
+    const ds = mcp.data_subject_id ? _dataSubjects.find(d => d.id === mcp.data_subject_id) : null;
+    const rawUrl = ds?.api_config?.endpoint_url || '';
+    if (ds && rawUrl) {
+      _skLogLine('📡', `正在撈取 DS 資料：${ds.name}…`);
+      const formParams = _skMcpSampleParams || {};
+      const method = (ds.api_config?.method || 'GET').toUpperCase();
+      const path = rawUrl.replace(/^\/api\/v1/, '');
+      const qp = new URLSearchParams(formParams);
+      const fullPath = method === 'GET' && qp.toString() ? `${path}?${qp}` : path;
+      try {
+        const rawData = await _api(method, fullPath, method !== 'GET' ? formParams : undefined);
+        _skLogLine('✓', 'DS 資料撈取成功', 'text-emerald-600');
+        _skLogLine('⚙', `執行 MCP 處理…`);
+        mcpTryResult = await _api('POST', `/mcp-definitions/${mcpId}/run-with-data`, { raw_data: rawData });
+        _skTryRunMcpResult = mcpTryResult;
+        _skLogLine('✓', 'MCP 執行完成', 'text-emerald-600');
+      } catch(fetchErr) {
+        _skLogLine('⚠', `DS 撈取失敗，改用已存樣本資料：${fetchErr.message}`, 'text-amber-600');
+      }
+    }
+
+    // Fallback to stored sample_output
+    const mcpOutput = (mcpTryResult?.output_data) || mcp.sample_output || {};
+    if (!mcpTryResult && Object.keys(mcpOutput).length === 0)
+      throw new Error('MCP 無可用輸出資料，請先執行 MCP 的撈取與預覽');
+
+    if (mcpTryResult) _skRenderMcpEvidence(mcpTryResult);
+
+    // Step 2: generate Skill code diagnosis
+    const probSubject = document.getElementById('sk-edit-subject')?.value?.trim() || null;
+    _skLogLine('🧠', 'LLM 生成 Skill 診斷 Python 程式碼…');
+    const result = await _api('POST', '/skill-definitions/generate-code-diagnosis', {
+      diagnostic_prompt:  diagPrompt,
+      problem_subject:    probSubject,
+      mcp_sample_outputs: { [mcp.name]: mcpOutput },
+      event_attributes:   [],
+    });
+    if (!result.success) throw new Error(result.error || 'Skill 診斷碼生成失敗');
+
+    const status = result.status || 'UNKNOWN';
+    _skLogLine(status === 'ABNORMAL' ? '⚠' : '✓', `Skill 診斷完成 → ${status}`,
+               status === 'ABNORMAL' ? 'text-red-600' : 'text-emerald-600');
+    _skRenderDiagnosis({
+      ...result,
+      skillName:   document.getElementById('sk-edit-name')?.value?.trim() || 'Skill',
+      expertAction: document.getElementById('sk-edit-action')?.value?.trim() || '',
+    });
+    _skLogLine('✓', 'Try Run 完成 — 切換至報告…', 'text-emerald-600');
+    setTimeout(() => _skSwitchRightTab('report'), 700);
+
+  } catch(e) {
+    _skLogLine('✗', `執行失敗：${e.message}`, 'text-red-600');
+    if (ph) {
+      ph.classList.remove('hidden');
+      ph.innerHTML = `<div class="text-center"><p class="text-red-600 font-semibold text-sm mb-1">✗ 執行失敗</p><p class="text-red-500 text-xs">${_esc(e.message)}</p></div>`;
+    }
+  } finally {
+    if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Try Run'; }
+    if (dot) dot.classList.add('hidden');
+  }
+}
+
+// ── Save Skill ───────────────────────────────────────────────
+async function _skSave() {
+  const id   = parseInt(document.getElementById('sk-edit-id')?.value) || null;
+  const name = document.getElementById('sk-edit-name')?.value?.trim();
+  if (!name) { alert('請填寫 Skill 名稱'); return; }
+
+  const mcpId = parseInt(document.getElementById('sk-edit-mcp-select')?.value) || null;
+  const payload = {
+    name,
+    description:       document.getElementById('sk-edit-desc')?.value?.trim() || '',
+    diagnostic_prompt: document.getElementById('sk-edit-prompt')?.value?.trim() || null,
+    problem_subject:   document.getElementById('sk-edit-subject')?.value?.trim() || null,
+    human_recommendation: document.getElementById('sk-edit-action')?.value?.trim() || null,
+  };
+  if (mcpId) {
+    // Merge into mcp_ids (single MCP)
+    payload.mcp_id = mcpId;
+  }
+
+  try {
+    if (id) {
+      await _api('PATCH', `/skill-definitions/${id}`, payload);
+    } else {
+      await _api('POST', '/skill-definitions', payload);
+    }
+    alert(`Skill「${name}」已儲存`);
+    _skBackToList();
+  } catch(e) {
+    alert(`儲存失敗：${e.message}`);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MCP BUILDER — Full-page L/R Editor (Change C)
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _mceRightTab = 'logs';
+
+// ── Tab switching ─────────────────────────────────────────────
+function _mceSwitchRightTab(tab) {
+  _mceRightTab = tab;
+  ['logs', 'report'].forEach(t => {
+    document.getElementById(`mce-rtab-${t}`)?.classList.toggle('hidden', t !== tab);
+    const btn = document.getElementById(`mce-rtab-btn-${t}`);
+    if (btn) btn.className = t === tab
+      ? 'px-5 py-3 text-xs font-bold text-blue-700 border-b-2 border-blue-600 transition-colors'
+      : 'px-5 py-3 text-xs font-medium text-slate-500 border-b-2 border-transparent hover:text-slate-700 transition-colors';
+  });
+}
+
+function _mceSwitchMcpTab(tab) {
+  ['charting', 'summary', 'raw'].forEach(t => {
+    const btn = document.getElementById(`mce-tab-${t}`);
+    const content = document.getElementById(`mce-mcp-tab-${t}`);
+    if (btn) btn.className = `text-xs px-4 py-2 border-b-2 transition-colors ` +
+      (t === tab ? 'text-emerald-700 border-emerald-600 font-bold' : 'text-slate-500 border-transparent hover:text-slate-700 font-medium');
+    content?.classList.toggle('hidden', t !== tab);
+  });
+}
+
+function _mceLogLine(icon, text, color = 'text-slate-600') {
+  const lines = document.getElementById('mce-exec-log-lines');
+  if (!lines) return;
+  const ts = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+  const row = document.createElement('div');
+  row.className = 'flex items-start gap-2 py-0.5';
+  row.innerHTML = `<span class="text-slate-400 shrink-0 select-none">${ts}</span>
+                   <span class="${color}">${icon} ${_esc(text)}</span>`;
+  lines.appendChild(row);
+}
+
+// ── Open / close editor ───────────────────────────────────────
+async function _mcpOpenEditor(id) {
+  if (_dataSubjects.length === 0) _dataSubjects = await _api('GET', '/data-subjects') || [];
+
+  // Switch to editor state
+  document.getElementById('mce-list-state')?.classList.add('hidden');
+  const editor = document.getElementById('mcp-editor');
+  if (editor) { editor.classList.remove('hidden'); editor.classList.add('flex'); }
+
+  // Reset right panel
+  _mceSwitchRightTab('logs');
+  document.getElementById('mce-exec-log')?.classList.add('hidden');
+  document.getElementById('mce-exec-log-lines').innerHTML = '';
+  const ph = document.getElementById('mce-console-placeholder');
+  if (ph) {
+    ph.classList.remove('hidden');
+    ph.innerHTML = `
+      <svg class="w-10 h-10 mb-3 opacity-25" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+              d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+      </svg>
+      <p class="text-sm font-medium text-slate-500">點擊 ▶ Try Run 執行 MCP 加工</p>
+      <p class="text-xs mt-1 text-slate-400">先填寫左側 MCP 設定後再執行</p>`;
+  }
+  document.getElementById('mce-mcp-result')?.classList.add('hidden');
+
+  // Populate DS dropdown
+  const dsSel = document.getElementById('mce-edit-ds');
+  if (dsSel) {
+    dsSel.innerHTML = '<option value="">— 請選擇 —</option>' +
+      _dataSubjects.map(d => `<option value="${d.id}">${_esc(d.name)}</option>`).join('');
+  }
+
+  if (!id) {
+    document.getElementById('mcp-editor-title').textContent = '新增 MCP';
+    document.getElementById('mce-edit-id').value = '';
+    document.getElementById('mce-edit-name').value = '';
+    if (dsSel) dsSel.value = '';
+    document.getElementById('mce-edit-desc').value = '';
+    document.getElementById('mce-edit-intent').value = '';
+    document.getElementById('mce-edit-sample-form').innerHTML = '';
+    return;
+  }
+
+  // Load existing MCP
+  let mcp = _mcpDefs.find(m => m.id === id) || await _api('GET', `/mcp-definitions/${id}`);
+  document.getElementById('mcp-editor-title').textContent = mcp?.name || `MCP #${id}`;
+  document.getElementById('mce-edit-id').value = id;
+  document.getElementById('mce-edit-name').value = mcp?.name || '';
+  document.getElementById('mce-edit-desc').value = mcp?.description || '';
+  document.getElementById('mce-edit-intent').value = mcp?.processing_intent || '';
+  if (dsSel && mcp?.data_subject_id) {
+    dsSel.value = mcp.data_subject_id;
+    _mceOnDsChange();
+  }
+}
+
+function _mcpBackToList() {
+  document.getElementById('mcp-editor')?.classList.add('hidden');
+  document.getElementById('mcp-editor')?.classList.remove('flex');
+  document.getElementById('mce-list-state')?.classList.remove('hidden');
+  _loadMcpDefs();
+}
+
+// ── DS change → render sample form ───────────────────────────
+function _mceOnDsChange() {
+  const dsId = parseInt(document.getElementById('mce-edit-ds')?.value) || null;
+  const ds = dsId ? _dataSubjects.find(d => d.id === dsId) : null;
+  const formEl = document.getElementById('mce-edit-sample-form');
+  if (!formEl) return;
+  if (!ds) { formEl.innerHTML = ''; return; }
+  const fields = ds.input_schema?.fields || [];
+  if (!fields.length) { formEl.innerHTML = ''; return; }
+  formEl.innerHTML = `
+    <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
+      <p class="text-[11px] font-bold text-blue-700 uppercase tracking-widest mb-2.5">DS 查詢參數</p>
+      <div class="space-y-2.5">
+        ${fields.map(f => `
+          <div>
+            <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
+              ${_esc(f.label || f.name)}${f.required ? ' <span class="text-red-500">*</span>' : ''}
+            </label>
+            <input id="mce-ds-param-${_esc(f.name)}"
+                   type="${f.type === 'number' ? 'number' : 'text'}"
+                   placeholder="${_esc(f.description || f.name)}"
+                   value="${f.default_value !== undefined && f.default_value !== null ? _esc(String(f.default_value)) : ''}"
+                   class="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-sm
+                          font-medium text-slate-800 shadow-sm focus:outline-none
+                          focus:ring-2 focus:ring-blue-500 transition-shadow">
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
+// ── Fetch & Preview for MCP editor ───────────────────────────
+async function _mceFetchPreview() {
+  const dsId = parseInt(document.getElementById('mce-edit-ds')?.value) || null;
+  const ds = dsId ? _dataSubjects.find(d => d.id === dsId) : null;
+  if (!ds) { alert('請先選擇 Data Subject'); return; }
+
+  const fields = ds.input_schema?.fields || [];
+  const formParams = {};
+  for (const f of fields) {
+    const el = document.getElementById(`mce-ds-param-${f.name}`);
+    if (el && el.value.trim()) formParams[f.name] = el.value.trim();
+  }
+
+  const drEl  = document.getElementById('mce-data-review');
+  const frEl  = document.getElementById('mce-format-review');
+  if (drEl) drEl.innerHTML = '<p class="text-xs text-slate-400 italic p-3 animate-pulse">撈取中…</p>';
+  document.getElementById('mce-data-review-details')?.setAttribute('open', '');
+  document.getElementById('mce-format-review-details')?.setAttribute('open', '');
+
+  try {
+    const rawUrl = ds.api_config?.endpoint_url || '';
+    if (!rawUrl) throw new Error('DataSubject 沒有設定 API endpoint');
+    const path = rawUrl.replace(/^\/api\/v1/, '');
+    const method = (ds.api_config?.method || 'GET').toUpperCase();
+    const qp = new URLSearchParams(formParams);
+    const fullPath = method === 'GET' ? `${path}?${qp}` : path;
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    const resp = await fetch(`/api/v1${fullPath}`, {
+      method,
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: method !== 'GET' ? JSON.stringify(formParams) : undefined,
+    });
+    const json = await resp.json();
+    const rows = Array.isArray(json) ? json
+      : (json.data ? (Array.isArray(json.data) ? json.data : [json.data]) : [json]);
+    if (drEl) _nbRenderDataGrid(drEl, rows, '無資料回傳');
+    if (frEl) _nbRenderSchemaGrid(frEl, ds.output_schema || _nbInferSchemaFromRows(rows));
+  } catch(e) {
+    if (drEl) drEl.innerHTML = `<p class="text-xs text-red-500 p-3">撈取失敗：${_esc(e.message)}</p>`;
+  }
+}
+
+// ── Try Run (generate script + execute) ───────────────────────
+async function _mcpTryRun() {
+  const dsId   = parseInt(document.getElementById('mce-edit-ds')?.value) || null;
+  const intent = document.getElementById('mce-edit-intent')?.value?.trim();
+  if (!dsId)   { alert('請先選擇 Data Subject'); return; }
+  if (!intent) { alert('請先填寫加工意圖 (Processing Intent)'); return; }
+
+  _mceSwitchRightTab('logs');
+  const runBtn = document.getElementById('mce-run-btn');
+  const ph     = document.getElementById('mce-console-placeholder');
+  const dot    = document.getElementById('mce-console-status-dot');
+  if (runBtn) { runBtn.disabled = true; runBtn.textContent = '⏳ 執行中...'; }
+  if (dot) dot.classList.remove('hidden');
+  if (ph) ph.classList.add('hidden');
+  document.getElementById('mce-exec-log')?.classList.remove('hidden');
+  document.getElementById('mce-exec-log-lines').innerHTML = '';
+  document.getElementById('mce-mcp-result')?.classList.add('hidden');
+
+  try {
+    const ds = _dataSubjects.find(d => d.id === dsId);
+    if (!ds) throw new Error('找不到所選 Data Subject');
+
+    _mceLogLine('▶', '開始執行 MCP Try Run');
+
+    // Fetch sample data
+    let sampleData = null;
+    const rawUrl = ds.api_config?.endpoint_url || '';
+    if (rawUrl) {
+      _mceLogLine('📡', `正在撈取 DS 資料：${ds.name}…`);
+      const fields = ds.input_schema?.fields || [];
+      const formParams = {};
+      for (const f of fields) {
+        const el = document.getElementById(`mce-ds-param-${f.name}`);
+        if (el && el.value.trim()) formParams[f.name] = el.value.trim();
+      }
+      const method = (ds.api_config?.method || 'GET').toUpperCase();
+      const path = rawUrl.replace(/^\/api\/v1/, '');
+      const qp = new URLSearchParams(formParams);
+      const fullPath = method === 'GET' && qp.toString() ? `${path}?${qp}` : path;
+      sampleData = await _api(method, fullPath, method !== 'GET' ? formParams : undefined);
+      _mceLogLine('✓', '樣本資料撈取成功', 'text-emerald-600');
+    }
+
+    // Generate script via try-run
+    _mceLogLine('⚙', 'LLM 生成 MCP 處理腳本並沙箱執行中…');
+    const result = await _api('POST', '/mcp-definitions/try-run', {
+      processing_intent: intent,
+      data_subject_id:   dsId,
+      sample_data:       sampleData,
+    });
+
+    if (!result.success) {
+      _mceLogLine('✗', `執行失敗：${result.error || '未知錯誤'}`, 'text-red-600');
+      if (ph) {
+        ph.classList.remove('hidden');
+        ph.innerHTML = `<div class="text-center"><p class="text-red-600 font-semibold text-sm mb-1">✗ 執行失敗</p><p class="text-red-500 text-xs">${_esc(result.error_analysis || result.error || '')}</p></div>`;
+      }
+      return;
+    }
+
+    _mceLogLine('✓', 'MCP 執行完成', 'text-emerald-600');
+
+    // Update Data / Format Review
+    const outputData = result.output_data || {};
+    const rawEl = document.getElementById('mce-data-review');
+    const schemaEl = document.getElementById('mce-format-review');
+    if (rawEl) {
+      const rows = outputData._raw_dataset || (Array.isArray(outputData.dataset) ? outputData.dataset : []);
+      _nbRenderDataGrid(rawEl, rows, '無原始資料');
+      document.getElementById('mce-data-review-details')?.setAttribute('open', '');
+    }
+    if (schemaEl && result.output_schema) {
+      _nbRenderSchemaGrid(schemaEl, result.output_schema);
+      document.getElementById('mce-format-review-details')?.setAttribute('open', '');
+    }
+
+    // Render MCP evidence in right panel
+    const resultEl = document.getElementById('mce-mcp-result');
+    if (resultEl) {
+      resultEl.classList.remove('hidden');
+      _mceSwitchMcpTab('charting');
+      const uiRender = outputData.ui_render || outputData.ui_render_config || {};
+      const charts   = uiRender.charts || (uiRender.chart_data ? [uiRender.chart_data] : []);
+      const dataset  = outputData.dataset || [];
+
+      const chartEl = document.getElementById('mce-mcp-tab-charting');
+      if (chartEl) {
+        if (charts.length) {
+          chartEl.innerHTML = '';
+          charts.forEach(chartJson => {
+            const wrapper = document.createElement('div');
+            wrapper.style.cssText = 'height:280px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;overflow:hidden;margin-bottom:8px;';
+            chartEl.appendChild(wrapper);
+            try {
+              const figData = typeof chartJson === 'string' ? JSON.parse(chartJson) : chartJson;
+              const figLayout = figData.layout || {};
+              const mergedMargin = Object.assign({ l: 50, r: 20, t: 40, b: 40 }, figLayout.margin || {});
+              if (figLayout.title && mergedMargin.t < 55) mergedMargin.t = 55;
+              const hasHorizLegend = figLayout.legend?.orientation === 'h';
+              if (hasHorizLegend && mergedMargin.b < 100) mergedMargin.b = 100;
+              const legendOverride = hasHorizLegend ? { legend: { ...figLayout.legend, y: -0.28, x: 0, xanchor: 'left' } } : {};
+              Plotly.newPlot(wrapper, figData.data || [], { ...figLayout,
+                paper_bgcolor: '#f8fafc', plot_bgcolor: '#ffffff',
+                font: { color: '#334155', size: 11 }, margin: mergedMargin, ...legendOverride }, { responsive: true });
+            } catch(e) { wrapper.innerHTML = `<p class="text-xs text-red-500 p-3">圖表渲染失敗：${_esc(e.message)}</p>`; }
+          });
+        } else {
+          chartEl.innerHTML = `<div class="flex items-center justify-center h-24 text-slate-400 text-sm">無圖表資料</div>`;
+        }
+      }
+      const sumEl = document.getElementById('mce-mcp-tab-summary');
+      if (sumEl) _nbRenderDataGrid(sumEl, dataset, '無摘要資料');
+      const rawTabEl = document.getElementById('mce-mcp-tab-raw');
+      const rawRows = outputData._raw_dataset || [];
+      if (rawTabEl) _nbRenderDataGrid(rawTabEl, Array.isArray(rawRows) ? rawRows : [], '無原始資料');
+    }
+
+    _mceLogLine('✓', 'Try Run 完成 — 切換至報告…', 'text-emerald-600');
+
+    // Auto-save script to MCP if editing existing
+    const mcpId = parseInt(document.getElementById('mce-edit-id')?.value) || null;
+    if (mcpId && result.script) {
+      try {
+        await _api('PATCH', `/mcp-definitions/${mcpId}`, {
+          processing_script: result.script,
+          output_schema:     result.output_schema || null,
+          ui_render_config:  result.ui_render_config || null,
+          input_definition:  result.input_definition || null,
+          sample_output:     outputData,
+        });
+        _mceLogLine('💾', 'MCP 腳本已自動儲存', 'text-emerald-600');
+      } catch(_) {}
+    }
+
+    setTimeout(() => _mceSwitchRightTab('report'), 700);
+
+  } catch(e) {
+    _mceLogLine('✗', `執行失敗：${e.message}`, 'text-red-600');
+    if (ph) {
+      ph.classList.remove('hidden');
+      ph.innerHTML = `<div class="text-center"><p class="text-red-600 font-semibold text-sm mb-1">✗ 執行失敗</p><p class="text-red-500 text-xs">${_esc(e.message)}</p></div>`;
+    }
+  } finally {
+    if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Try Run'; }
+    if (dot) dot.classList.add('hidden');
+  }
+}
+
+// ── Save MCP ─────────────────────────────────────────────────
+async function _mcpSave() {
+  const id   = parseInt(document.getElementById('mce-edit-id')?.value) || null;
+  const name = document.getElementById('mce-edit-name')?.value?.trim();
+  const dsId = parseInt(document.getElementById('mce-edit-ds')?.value) || null;
+  if (!name) { alert('請填寫 MCP 名稱'); return; }
+  if (!dsId) { alert('請選擇 Data Subject'); return; }
+
+  const payload = {
+    name,
+    description:       document.getElementById('mce-edit-desc')?.value?.trim() || '',
+    processing_intent: document.getElementById('mce-edit-intent')?.value?.trim() || '',
+  };
+
+  try {
+    if (id) {
+      await _api('PATCH', `/mcp-definitions/${id}`, payload);
+    } else {
+      await _api('POST', '/mcp-definitions', { ...payload, data_subject_id: dsId });
+    }
+    alert(`MCP「${name}」已儲存`);
+    _mcpBackToList();
+  } catch(e) {
+    alert(`儲存失敗：${e.message}`);
   }
 }
