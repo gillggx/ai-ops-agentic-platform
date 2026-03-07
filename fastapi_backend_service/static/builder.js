@@ -3917,31 +3917,151 @@ let _nbSkillMode       = 'select';  // 'select' | 'new'
 let _nbMcpMode         = 'select';  // 'select' | 'new'
 let _nbTryRunResult    = null;      // last MCP try-run result for the console
 let _nbSkillLiveResult = null;      // last Skill live-diagnosis result (from generate-code-diagnosis)
-let _nbConsoleExpanded = false;
+let _nbRightTab        = 'logs';    // 'logs' | 'report'
 
+// ── Right panel tab switching ─────────────────────────────────
+function _nbSwitchRightTab(tab) {
+  _nbRightTab = tab;
+  ['logs', 'report'].forEach(t => {
+    const content = document.getElementById(`nb-rtab-${t}`);
+    const btn     = document.getElementById(`nb-rtab-btn-${t}`);
+    if (content) content.classList.toggle('hidden', t !== tab);
+    if (btn) {
+      btn.className = t === tab
+        ? 'px-5 py-3 text-xs font-bold text-blue-700 border-b-2 border-blue-600 transition-colors'
+        : 'px-5 py-3 text-xs font-medium text-slate-500 border-b-2 border-transparent hover:text-slate-700 transition-colors';
+    }
+  });
+}
+
+// Legacy expand/collapse — now just switches to logs tab and shows the log block
 function _nbExpandConsole() {
-  if (_nbConsoleExpanded) return;
-  _nbConsoleExpanded = true;
-  const builder = document.getElementById('nb-builder-top');
-  const panel   = document.getElementById('nb-console-panel');
-  const body    = document.getElementById('nb-console-body');
-  const colBtn  = document.getElementById('nb-console-collapse-btn');
-  if (builder) { builder.style.flex = 'none'; builder.style.height = '60%'; }
-  if (panel)   panel.style.height = '40%';
-  if (body)    body.classList.remove('hidden');
-  if (colBtn)  colBtn.classList.remove('hidden');
+  _nbSwitchRightTab('logs');
+  document.getElementById('nb-console-placeholder')?.classList.add('hidden');
+  document.getElementById('nb-exec-log')?.classList.remove('hidden');
 }
 
 function _nbCollapseConsole() {
-  _nbConsoleExpanded = false;
-  const builder = document.getElementById('nb-builder-top');
-  const panel   = document.getElementById('nb-console-panel');
-  const body    = document.getElementById('nb-console-body');
-  const colBtn  = document.getElementById('nb-console-collapse-btn');
-  if (builder) { builder.style.flex = '1'; builder.style.height = ''; }
-  if (panel)   panel.style.height = '';
-  if (body)    body.classList.add('hidden');
-  if (colBtn)  colBtn.classList.add('hidden');
+  document.getElementById('nb-console-placeholder')?.classList.remove('hidden');
+  document.getElementById('nb-exec-log')?.classList.add('hidden');
+  document.getElementById('nb-skill-result')?.classList.add('hidden');
+  document.getElementById('nb-mcp-result')?.classList.add('hidden');
+}
+
+// ── Fetch & Preview: pull DS sample data and render Data/Format Review grids ──
+async function _nbFetchPreview() {
+  let ds = null;
+  let formParams = {};
+  let mcpOutputSchema = null;
+
+  if (_nbMcpMode === 'new') {
+    const dsId = parseInt(document.getElementById('nb-mcp-ds')?.value || '0');
+    ds = dsId ? _dataSubjects.find(d => d.id === dsId) : null;
+    formParams = _nbCollectFormParams();
+  } else {
+    const sel = document.getElementById('nb-mcp-select');
+    const mcpId = sel ? parseInt(sel.value) : null;
+    const mcp = mcpId ? _mcpDefs.find(m => m.id === mcpId) : null;
+    ds = mcp?.data_subject_id ? _dataSubjects.find(d => d.id === mcp.data_subject_id) : null;
+    mcpOutputSchema = mcp?.output_schema || null;
+    for (const f of (ds?.input_schema?.fields || [])) {
+      const el = document.getElementById(`nb-mcp-select-param-${f.name}`);
+      if (el && el.value.trim()) formParams[f.name] = el.value.trim();
+    }
+  }
+
+  if (!ds) { alert('請先選擇 Data Subject'); return; }
+
+  const drEl  = document.getElementById('nb-data-review');
+  const frEl  = document.getElementById('nb-format-review');
+  const drDet = document.getElementById('nb-data-review-details');
+  const frDet = document.getElementById('nb-format-review-details');
+  if (drEl) drEl.innerHTML = '<p class="text-xs text-slate-400 italic p-3 animate-pulse">撈取中…</p>';
+  if (drDet) drDet.open = true;
+  if (frDet) frDet.open = true;
+
+  try {
+    const rawUrl = ds.api_config?.endpoint_url || '';
+    if (!rawUrl) throw new Error('DataSubject 沒有設定 API endpoint');
+    const path = rawUrl.replace(/^\/api\/v1/, '');
+    const method = (ds.api_config?.method || 'GET').toUpperCase();
+    const qp = new URLSearchParams(formParams);
+    const fullPath = method === 'GET' ? `${path}?${qp}` : path;
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    const resp = await fetch(`/api/v1${fullPath}`, {
+      method,
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: method !== 'GET' ? JSON.stringify(formParams) : undefined,
+    });
+    const json = await resp.json();
+    const rows = Array.isArray(json) ? json
+      : (json.data ? (Array.isArray(json.data) ? json.data : [json.data]) : [json]);
+
+    // Render Data Review as grid table
+    if (drEl) _nbRenderDataGrid(drEl, rows, '無資料回傳');
+
+    // Render Format Review: prefer MCP output_schema, fallback to inferred schema
+    if (frEl) {
+      const schema = mcpOutputSchema || ds.output_schema || _nbInferSchemaFromRows(rows);
+      _nbRenderSchemaGrid(frEl, schema);
+    }
+  } catch(e) {
+    if (drEl) drEl.innerHTML = `<p class="text-xs text-red-500 p-3">撈取失敗：${_esc(e.message)}</p>`;
+  }
+}
+
+// Render a schema object as a professional grid table (field | type | description)
+function _nbRenderSchemaGrid(el, schema) {
+  if (!schema) {
+    el.innerHTML = '<p class="text-xs text-slate-400 italic p-3">無 Schema 資訊</p>';
+    return;
+  }
+  let fields = [];
+  if (Array.isArray(schema)) {
+    fields = schema.map(f => typeof f === 'object'
+      ? { name: f.name || f.key || '?', type: f.type || 'any', desc: f.description || f.desc || '' }
+      : { name: String(f), type: 'any', desc: '' });
+  } else if (schema.fields && Array.isArray(schema.fields)) {
+    fields = schema.fields.map(f => ({ name: f.name || f.key || '?', type: f.type || 'any', desc: f.description || '' }));
+  } else {
+    fields = Object.entries(schema).map(([k, v]) => ({
+      name: k,
+      type: typeof v === 'object' ? (v.type || 'object') : String(v),
+      desc: typeof v === 'object' ? (v.description || '') : '',
+    }));
+  }
+  if (!fields.length) {
+    el.innerHTML = '<p class="text-xs text-slate-400 italic p-3">Schema 為空</p>';
+    return;
+  }
+  el.innerHTML = `
+    <table class="text-xs w-full border-collapse">
+      <thead class="bg-emerald-50 sticky top-0">
+        <tr>
+          <th class="text-left text-emerald-700 font-bold border-b border-emerald-200 px-3 py-2 uppercase tracking-wide whitespace-nowrap">欄位</th>
+          <th class="text-left text-emerald-700 font-bold border-b border-emerald-200 px-3 py-2 uppercase tracking-wide whitespace-nowrap">型態</th>
+          <th class="text-left text-emerald-700 font-bold border-b border-emerald-200 px-3 py-2 uppercase tracking-wide">說明</th>
+        </tr>
+      </thead>
+      <tbody class="bg-white">
+        ${fields.map((f, i) => `
+          <tr class="${i % 2 ? 'bg-slate-50/70' : ''} hover:bg-emerald-50/40 transition-colors">
+            <td class="font-mono font-semibold text-slate-800 border-b border-slate-100 px-3 py-1.5 whitespace-nowrap">${_esc(f.name)}</td>
+            <td class="border-b border-slate-100 px-3 py-1.5 whitespace-nowrap">
+              <span class="bg-blue-50 text-blue-700 border border-blue-100 px-1.5 py-0.5 rounded text-[10px] font-semibold">${_esc(f.type)}</span>
+            </td>
+            <td class="text-slate-500 border-b border-slate-100 px-3 py-1.5">${_esc(f.desc)}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+// Infer lightweight schema from the first data row
+function _nbInferSchemaFromRows(rows) {
+  if (!rows.length) return null;
+  return Object.entries(rows[0]).filter(([k]) => !k.startsWith('_')).map(([k, v]) => ({
+    name: k, type: v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v, desc: '',
+  }));
 }
 
 async function _nbInitView() {
@@ -3980,9 +4100,10 @@ async function _nbInitView() {
       _dataSubjects.map(d => `<option value="${d.id}">${_esc(d.name)}</option>`).join('');
   }
 
-  // Apply initial mode states
+  // Apply initial mode states and reset right panel to Logs tab
   _nbSetSkillMode(_nbSkillMode);
   _nbSetMcpMode(_nbMcpMode);
+  _nbSwitchRightTab('logs');
 }
 
 function _nbSetSkillMode(mode) {
@@ -4182,8 +4303,8 @@ function _nbOnMcpSelect() {
 }
 
 async function _tryRunNestedBuilder() {
-  // Expand console first (slides up)
-  _nbExpandConsole();
+  // Switch to Logs tab and prepare state
+  _nbSwitchRightTab('logs');
 
   const runBtn    = document.getElementById('nb-console-run-btn');
   const headerBtn = document.getElementById('nb-header-run-btn');
@@ -4199,6 +4320,7 @@ async function _tryRunNestedBuilder() {
   if (skillResult) skillResult.classList.add('hidden');
   if (mcpResult) mcpResult.classList.add('hidden');
   _nbLogClear();
+  document.getElementById('nb-exec-log')?.classList.remove('hidden');
   _nbLogLine('▶', '開始執行 Try Run');
   // Reset saved results from previous try-run
   _nbSkillLiveResult = null;
@@ -4327,13 +4449,20 @@ async function _tryRunNestedBuilder() {
       throw new Error('請選擇 Skill 或設定 MCP 後再執行');
     }
 
-    // Update collapsible previews
+    // Update Data Review and Format Review with grid tables
     if (mcpTryResult) {
+      const outputData = mcpTryResult.output_data || mcpTryResult;
       const rawEl = document.getElementById('nb-data-review');
-      if (rawEl) rawEl.textContent = JSON.stringify(mcpTryResult.dataset || mcpTryResult, null, 2);
+      if (rawEl) {
+        const rows = outputData._raw_dataset
+          || (Array.isArray(outputData.dataset) ? outputData.dataset : []);
+        _nbRenderDataGrid(rawEl, rows, '無原始資料');
+        document.getElementById('nb-data-review-details')?.setAttribute('open', '');
+      }
       const schemaEl = document.getElementById('nb-format-review');
-      if (schemaEl && mcpTryResult?.output_schema) {
-        schemaEl.textContent = JSON.stringify(mcpTryResult.output_schema, null, 2);
+      if (schemaEl && mcpTryResult.output_schema) {
+        _nbRenderSchemaGrid(schemaEl, mcpTryResult.output_schema);
+        document.getElementById('nb-format-review-details')?.setAttribute('open', '');
       }
     }
 
@@ -4386,7 +4515,10 @@ async function _tryRunNestedBuilder() {
 
     // ── Step 5: Show MCP Evidence Layer ──────────────────────
     if (mcpTryResult) _nbRenderMcpEvidence(mcpTryResult);
-    _nbLogLine('✓', 'Try Run 完成', 'text-emerald-600');
+    _nbLogLine('✓', 'Try Run 完成 — 正在切換至報告…', 'text-emerald-600');
+
+    // Auto-switch to Report tab after a brief pause so user sees the final log line
+    setTimeout(() => _nbSwitchRightTab('report'), 700);
 
   } catch(e) {
     _nbLogLine('✗', `執行失敗：${e.message}`, 'text-red-600');
