@@ -1316,14 +1316,19 @@
                   </div>
                   <div class="space-y-3">
                     <div>
-                      <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">選擇 MCP</label>
+                      <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">選擇已有 MCP</label>
                       <select id="sk-edit-mcp-select"
                               class="w-full bg-white border border-slate-300 rounded-md px-3 py-2.5 text-sm font-medium
                                      text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-400
                                      transition-shadow"
                               onchange="_skOnMcpChange()">
-                        <option value="">— 請選擇 MCP —</option>
+                        <option value="">— 請選擇已有的 MCP —</option>
                       </select>
+                      <p class="mt-1.5 text-[11px] text-slate-400">
+                        沒有合適的 MCP？
+                        <a href="#" onclick="switchView('mcp-builder');return false;"
+                           class="text-emerald-600 font-semibold hover:underline">→ 先到 MCP Builder 建立一個</a>
+                      </p>
                     </div>
                     <div id="sk-edit-mcp-hint"></div>
                     <button onclick="_skFetchPreview()"

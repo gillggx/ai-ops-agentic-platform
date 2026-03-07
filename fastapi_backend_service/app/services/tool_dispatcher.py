@@ -62,7 +62,18 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     },
     {
         "name": "list_mcps",
-        "description": "列出所有 System MCP (資料來源) 及其 input_schema。用於了解有哪些原始資料可查詢。",
+        "description": (
+            "列出所有 Custom MCP（已建立的資料處理管線，含 processing_script）。"
+            "draft_skill 的 mcp_ids 必須從此清單中選取 Custom MCP ID。"
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "list_system_mcps",
+        "description": (
+            "列出所有 System MCP（底層資料來源）及其 input_schema。"
+            "建立新 Custom MCP 時，先用此工具找到對應的 system_mcp_id，再呼叫 draft_mcp。"
+        ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
@@ -193,6 +204,8 @@ class ToolDispatcher:
                 case "list_skills":
                     return await self._call_api("GET", "/api/v1/skill-definitions")
                 case "list_mcps":
+                    return await self._call_api("GET", "/api/v1/mcp-definitions?type=custom")
+                case "list_system_mcps":
                     return await self._call_api("GET", "/api/v1/mcp-definitions?type=system")
                 case "draft_skill":
                     return await self._call_api("POST", "/api/v1/agent/draft/skill", body=tool_input)

@@ -5244,19 +5244,14 @@ async function _skOpenEditor(id, draftData) {
   _skTryRunMcpResult = null;
   _skMcpSampleParams = null;
 
-  // Populate MCP dropdown — custom MCPs + system MCPs (both usable)
+  // Populate MCP dropdown — custom MCPs only (these have processing_script)
   const mcpSel = document.getElementById('sk-edit-mcp-select');
   if (mcpSel) {
-    const customOpts = _mcpDefs.map(m => {
+    const opts = _mcpDefs.map(m => {
       const ds = _dataSubjects.find(d => d.id === (m.system_mcp_id || m.data_subject_id));
       return `<option value="${m.id}">${_esc(m.name)}${ds ? ' (' + _esc(ds.name) + ')' : ''}</option>`;
     }).join('');
-    const sysOpts = _dataSubjects.map(m =>
-      `<option value="${m.id}">[系統] ${_esc(m.name)}</option>`
-    ).join('');
-    mcpSel.innerHTML = '<option value="">— 請選擇 MCP —</option>' +
-      (customOpts ? `<optgroup label="Custom MCP">${customOpts}</optgroup>` : '') +
-      (sysOpts ? `<optgroup label="System MCP">${sysOpts}</optgroup>` : '');
+    mcpSel.innerHTML = '<option value="">— 請選擇已有的 MCP —</option>' + opts;
   }
 
   if (!id) {
