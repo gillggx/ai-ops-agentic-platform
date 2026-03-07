@@ -106,7 +106,7 @@ function switchView(name) {
   if (name === 'settings')         _loadSettings();
   if (name === 'routine-checks')   _loadRoutineChecks();
   if (name === 'generated-events') _loadGeneratedEvents();
-  if (name === 'agent-brain')      { _brainLoadSoul(); _brainLoadMemories(); }
+  if (name === 'agent-brain')      { _brainLoadSoul(); _brainLoadPref(); _brainLoadMemories(); }
 
   // Phase 8.6: send AI welcome message once when entering diagnose view
   if (name === 'diagnose' && !_diagnoseWelcomeSent) {

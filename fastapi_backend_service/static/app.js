@@ -2439,6 +2439,20 @@ async function _brainSaveSoul() {
   }
 }
 
+async function _brainLoadPref() {
+  const textarea = document.getElementById('brain-pref-textarea');
+  if (!textarea) return;
+  try {
+    const r = await fetch('/api/v1/agent/preference', {
+      headers: { 'Authorization': `Bearer ${_token}` }
+    });
+    const d = await r.json();
+    textarea.value = d.preferences || '';
+  } catch(e) {
+    textarea.value = `載入失敗: ${e.message}`;
+  }
+}
+
 async function _brainSavePref() {
   const textarea = document.getElementById('brain-pref-textarea');
   const status   = document.getElementById('brain-pref-status');

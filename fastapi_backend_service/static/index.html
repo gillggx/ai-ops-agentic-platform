@@ -1600,10 +1600,16 @@
                   <h3 class="font-semibold text-sm text-slate-900">個人偏好設定</h3>
                   <p class="text-xs text-slate-500">Agent 的回答風格與格式偏好 — 送出前 AI 安全審查</p>
                 </div>
-                <button onclick="_brainSavePref()"
-                  class="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-semibold">
-                  儲存偏好
-                </button>
+                <div class="flex gap-2">
+                  <button onclick="_brainLoadPref()"
+                    class="text-xs px-3 py-1.5 border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-600">
+                    ↺ 載入
+                  </button>
+                  <button onclick="_brainSavePref()"
+                    class="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-semibold">
+                    儲存偏好
+                  </button>
+                </div>
               </div>
               <textarea id="brain-pref-textarea" rows="4" spellcheck="false"
                 class="w-full bg-slate-50 border border-slate-200 rounded-lg p-3
