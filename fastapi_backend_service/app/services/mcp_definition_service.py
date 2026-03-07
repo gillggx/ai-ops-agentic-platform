@@ -643,8 +643,37 @@ class MCPDefinitionService:
                 detail="此 MCP 尚未生成 Python 腳本，請先在 MCP Builder 完成試跑",
             )
 
+        # Step 1: Fetch raw data from bound System MCP (raw_data = agent params, not dataset)
+        sys_mcp_id = getattr(obj, 'system_mcp_id', None)
+        api_raw_data: Any = raw_data  # fallback: use params as-is
+        if sys_mcp_id:
+            sys_mcp = await self._repo.get_by_id(sys_mcp_id)
+            if sys_mcp and getattr(sys_mcp, 'mcp_type', 'system') == 'system':
+                api_cfg = _j(sys_mcp.api_config) if isinstance(sys_mcp.api_config, str) else (sys_mcp.api_config or {})
+                endpoint_url = api_cfg.get("endpoint_url", "")
+                method = api_cfg.get("method", "GET").upper()
+                headers = api_cfg.get("headers", {})
+                if endpoint_url:
+                    if endpoint_url.startswith("/") and base_url:
+                        url = base_url.rstrip("/") + endpoint_url
+                    else:
+                        url = endpoint_url
+                    params_dict: Dict[str, Any] = raw_data if isinstance(raw_data, dict) else {}
+                    try:
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            if method == "GET":
+                                resp = await client.get(url, params=params_dict, headers=headers)
+                            else:
+                                resp = await client.post(url, json=params_dict, headers=headers)
+                            resp.raise_for_status()
+                            response_json = resp.json()
+                            api_raw_data = response_json if isinstance(response_json, list) else [response_json]
+                    except Exception as exc:
+                        return MCPTryRunResponse(success=False, error=f"System MCP 資料撈取失敗：{exc}")
+
+        # Step 2: Run processing script on fetched data
         try:
-            output_data = await execute_script(obj.processing_script, raw_data)
+            output_data = await execute_script(obj.processing_script, api_raw_data)
         except (ValueError, TimeoutError) as exc:
             return MCPTryRunResponse(
                 success=False,
@@ -662,8 +691,8 @@ class MCPDefinitionService:
         output_data = _normalize_output(output_data, llm_output_schema)
 
         # Attach raw DS data so frontend can show "Raw Data" tab
-        raw_list = raw_data if isinstance(raw_data, list) else (
-            list(raw_data.values())[0] if isinstance(raw_data, dict) and raw_data else [raw_data]
+        raw_list = api_raw_data if isinstance(api_raw_data, list) else (
+            list(api_raw_data.values())[0] if isinstance(api_raw_data, dict) and api_raw_data else [api_raw_data]
         )
         output_data = {**output_data, "_raw_dataset": raw_list}
 

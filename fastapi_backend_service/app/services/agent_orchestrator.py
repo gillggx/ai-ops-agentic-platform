@@ -101,9 +101,15 @@ def _result_summary(result: Dict[str, Any]) -> str:
         return f"ERROR: {result['error']}"
     if "llm_readable_data" in result:
         lrd = result["llm_readable_data"]
-        status = lrd.get("status", "?")
-        msg = lrd.get("diagnosis_message", "")[:80]
-        return f"status={status} | {msg}"
+        if isinstance(lrd, dict):
+            status = lrd.get("status", "?")
+            msg = lrd.get("diagnosis_message", "")[:80]
+            return f"status={status} | {msg}"
+        # execute_mcp: llm_readable_data is a JSON string of dataset preview
+        if "output_data" in result and isinstance(result.get("output_data"), dict):
+            ds = result["output_data"].get("dataset")
+            count = len(ds) if isinstance(ds, list) else "?"
+            return f"MCP #{result.get('mcp_id', '?')} 回傳 {count} 筆資料"
     if "memories" in result:
         return f"{result['count']} 條記憶"
     if "draft_id" in result:
@@ -144,15 +150,17 @@ def _build_render_card(
     if tool_name == "execute_mcp" and isinstance(result, dict) and result.get("status") == "success":
         od = result.get("output_data") or {}
         mcp_id = tool_input.get("mcp_id")
+        dataset = od.get("dataset")
+        raw_dataset = od.get("_raw_dataset") or dataset
         return {
             "type": "mcp",
             "mcp_name": f"MCP #{mcp_id}",
             "mcp_output": {
                 "ui_render": od.get("ui_render") or {},
-                "dataset": od.get("dataset"),
-                "_raw_dataset": od.get("dataset"),
+                "dataset": dataset,
+                "_raw_dataset": raw_dataset,
                 "_call_params": tool_input.get("params", {}),
-                "_is_processed": True,
+                "_is_processed": od.get("_is_processed", True),
             },
         }
 

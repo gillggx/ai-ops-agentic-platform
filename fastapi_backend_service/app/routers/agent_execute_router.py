@@ -5,6 +5,7 @@ Implements the PRD v12 Section 3.1 execution contract with strict view separatio
   - ui_render_payload → for frontend UI rendering (agent must NOT parse this)
 """
 
+import json
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, Request
@@ -86,8 +87,12 @@ async def execute_mcp(
     )
 
     result = await svc.run_with_data(mcp_id=mcp_id, raw_data=body, base_url=base_url)
+    od = result.output_data if hasattr(result, "output_data") else {}
+    dataset = od.get("dataset") or [] if isinstance(od, dict) else []
+    preview = dataset[:10] if isinstance(dataset, list) else []
     return {
         "status": "success",
         "mcp_id": mcp_id,
-        "output_data": result.output_data if hasattr(result, "output_data") else result,
+        "output_data": od,
+        "llm_readable_data": json.dumps(preview, ensure_ascii=False)[:3000],
     }
