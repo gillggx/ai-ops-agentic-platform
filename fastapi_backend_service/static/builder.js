@@ -4303,18 +4303,49 @@ function _nbOnMcpSelect() {
 }
 
 async function _tryRunNestedBuilder() {
+  // ── Pre-run validation ────────────────────────────────────
+  const errors = [];
+  if (!document.getElementById('nb-task-name')?.value?.trim())
+    errors.push('請填寫「任務名稱」');
+
+  if (_nbSkillMode === 'new') {
+    if (!document.getElementById('nb-skill-name')?.value?.trim())
+      errors.push('請填寫「Skill 名稱」');
+    if (!document.getElementById('nb-skill-prompt')?.value?.trim())
+      errors.push('請填寫「異常判斷條件 (Diagnostic Prompt)」');
+  } else {
+    if (!document.getElementById('nb-skill-select')?.value)
+      errors.push('請選擇現有 Skill');
+  }
+
+  if (_nbMcpMode === 'new') {
+    if (!document.getElementById('nb-mcp-name')?.value?.trim())
+      errors.push('請填寫「MCP 名稱」');
+    if (!document.getElementById('nb-mcp-ds')?.value)
+      errors.push('請選擇 Data Subject');
+    if (!document.getElementById('nb-mcp-intent')?.value?.trim())
+      errors.push('請填寫「加工意圖 (Processing Intent)」');
+  } else {
+    if (!document.getElementById('nb-mcp-select')?.value)
+      errors.push('請選擇現有 MCP');
+  }
+
+  if (errors.length) {
+    alert('請先完成以下設定：\n\n' + errors.map(e => '• ' + e).join('\n'));
+    return;
+  }
+
   // Switch to Logs tab and prepare state
   _nbSwitchRightTab('logs');
 
-  const runBtn    = document.getElementById('nb-console-run-btn');
   const headerBtn = document.getElementById('nb-header-run-btn');
   const placeholder = document.getElementById('nb-console-placeholder');
   const skillResult = document.getElementById('nb-skill-result');
   const mcpResult   = document.getElementById('nb-mcp-result');
   const dot = document.getElementById('nb-console-status-dot');
 
-  // Show running state
-  [runBtn, headerBtn].forEach(b => { if (b) { b.disabled = true; b.textContent = '⏳ 執行中...'; } });
+  // Show running state (header button only)
+  if (headerBtn) { headerBtn.disabled = true; headerBtn.textContent = '⏳ 執行中...'; }
   if (dot) dot.classList.remove('hidden');
   if (placeholder) placeholder.classList.add('hidden');
   if (skillResult) skillResult.classList.add('hidden');
@@ -4531,9 +4562,7 @@ async function _tryRunNestedBuilder() {
         </div>`;
     }
   } finally {
-    [runBtn, headerBtn].forEach(b => {
-      if (b) { b.disabled = false; b.textContent = b.id === 'nb-header-run-btn' ? '▶ Try Run' : '▶ Run'; }
-    });
+    if (headerBtn) { headerBtn.disabled = false; headerBtn.textContent = '▶ Try Run'; }
     if (dot) dot.classList.add('hidden');
   }
 }
