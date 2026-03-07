@@ -339,25 +339,32 @@ async def _seed_data() -> None:
 
         # ── 1b. Seed system MCPs (mirrors of DataSubjects, mcp_type='system') ──
         from app.models.mcp_definition import MCPDefinitionModel as _MCPModel
-        for spec in _MOCK_DATA_SUBJECTS:
-            result = await db.execute(
-                select(_MCPModel).where(
-                    _MCPModel.name == spec["name"],
-                    _MCPModel.mcp_type == "system",
+        try:
+            for spec in _MOCK_DATA_SUBJECTS:
+                result = await db.execute(
+                    select(_MCPModel).where(
+                        _MCPModel.name == spec["name"],
+                        _MCPModel.mcp_type == "system",
+                    )
                 )
+                if result.scalar_one_or_none() is None:
+                    sys_obj = _MCPModel(
+                        name=spec["name"],
+                        description=spec["description"],
+                        mcp_type="system",
+                        api_config=_json.dumps(spec["api_config"], ensure_ascii=False),
+                        input_schema=_json.dumps(spec["input_schema"], ensure_ascii=False),
+                        processing_intent="",
+                        visibility="public",
+                    )
+                    db.add(sys_obj)
+                    logger.info("Seeded system MCP: %s", spec["name"])
+        except Exception as _seed_err:
+            logger.warning(
+                "System MCP seeding skipped (schema not ready — run migration 0005): %s",
+                _seed_err,
             )
-            if result.scalar_one_or_none() is None:
-                sys_obj = _MCPModel(
-                    name=spec["name"],
-                    description=spec["description"],
-                    mcp_type="system",
-                    api_config=_json.dumps(spec["api_config"], ensure_ascii=False),
-                    input_schema=_json.dumps(spec["input_schema"], ensure_ascii=False),
-                    processing_intent="",
-                    visibility="public",
-                )
-                db.add(sys_obj)
-                logger.info("Seeded system MCP: %s", spec["name"])
+            await db.rollback()
 
         # ── 2. Seed built-in EventTypes (create or update attributes) ─────
         for spec in _SEED_EVENT_TYPES:
