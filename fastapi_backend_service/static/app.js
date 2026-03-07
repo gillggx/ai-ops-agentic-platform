@@ -37,6 +37,10 @@ let _copilotHistory  = [];     // [{role, content}] conversation history
 let _slashMenuVisible = false;
 let _slashMenuItems  = null;   // cached {mcps, skills} for slash menu
 
+// ── v13 Agent state ─────────────────────────────────────────────
+let _v13Mode      = true;    // default to v13 Agent (real agentic loop)
+let _v13SessionId = null;    // persist session_id across turns
+
 // ── Help Chat global state ──────────────────────────────────────
 let _helpPanelOpen     = false;
 let _helpWelcomeShown  = false;   // guard: show welcome bubble only once per session
@@ -933,8 +937,11 @@ function _showMainApp(username) {
   }
   _applyI18n();
 
-  // default to Diagnose (診斷站)
-  switchView('diagnose');
+  // default to Diagnose (診斷站) — guard for script load order
+  if (typeof switchView === 'function') switchView('diagnose');
+
+  // Default to v13 Agent mode — set button highlight
+  _setChatMode('v13');
 
   // Phase 10: init mobile layout + swipe after DOM is visible
   _initMobileLayout();
@@ -1585,6 +1592,44 @@ function _escapeHtml(str) {
 }
 
 // ══════════════════════════════════════════════════════════════
+// v12 — Agent Draft: open editor with pre-filled draft data
+
+async function _openDraftEditor(draftId, draftType) {
+  if (!draftId) return;
+  try {
+    const resp = await fetch(`/api/v1/agent/draft/${draftId}`, {
+      headers: { 'Authorization': `Bearer ${_token}` }
+    });
+    if (!resp.ok) { alert('無法取得草稿資料'); return; }
+    const json = await resp.json();
+    const payload = Object.assign({}, json.data?.payload || json.payload || {});
+    payload._draft_id = draftId;
+
+    // Remember current view so "← 返回" can go back to chat
+    window._draftReturnView = 'diagnose';
+
+    if (draftType === 'skill') {
+      if (typeof switchView === 'function') switchView('skill-builder');
+      setTimeout(() => {
+        if (typeof _skOpenEditor === 'function') _skOpenEditor(null, payload);
+        document.getElementById('sk-back-btn') && (document.getElementById('sk-back-btn').textContent = '← 返回對話');
+      }, 200);
+    } else if (draftType === 'mcp') {
+      if (typeof switchView === 'function') switchView('mcp-builder');
+      setTimeout(() => {
+        if (typeof _mcpOpenEditor === 'function') _mcpOpenEditor(null, payload);
+        document.getElementById('mcp-back-btn') && (document.getElementById('mcp-back-btn').textContent = '← 返回對話');
+      }, 200);
+    } else {
+      if (typeof switchView === 'function') switchView('nested-builder');
+    }
+  } catch (e) {
+    console.error('_openDraftEditor error:', e);
+    alert('開啟草稿失敗：' + e.message);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
 // Phase 9 — Copilot: Slash Menu, Slot Filling, Direct Invocation
 // ══════════════════════════════════════════════════════════════
 
@@ -1720,8 +1765,9 @@ function _clearSlashTool() {
   if (wrap) { wrap.innerHTML = ''; wrap.classList.add('hidden'); }
 }
 
-/** Primary send handler — replaces raw sendDiagnosis() for normal chat. */
+/** Primary send handler — v12 Copilot or v13 Agent depending on _v13Mode. */
 async function _sendCopilotMessage() {
+  if (_v13Mode) { await _sendAgentV13Message(); return; }
   if (_isStreaming) return;
 
   const input   = document.getElementById('issue-input');
@@ -1881,6 +1927,30 @@ function _handleCopilotEvent(ev) {
       return `${ev.skill_name} 診斷完成`;
     }
 
+    case 'draft_ready': {
+      document.getElementById('copilot-thinking-bubble')?.closest('.flex')?.remove();
+      const draftType = ev.draft_type || 'skill';
+      const draftId   = ev.draft_id || '';
+      const draftMsg  = ev.message || '草稿已準備完畢！';
+      _diagLogLine('📝', `草稿已建立 (${draftType}): ${draftId.slice(0,8)}…`, '#a78bfa');
+
+      // Render clickable bubble with "開啟建構器" button
+      const bubbleDiv = document.createElement('div');
+      bubbleDiv.className = 'flex justify-start';
+      bubbleDiv.innerHTML = `
+        <div class="chat-copilot-question" style="max-width:90%;">
+          <span style="font-size:11px;opacity:0.6;display:block;margin-bottom:4px;">📝 Agent 草稿</span>
+          <p style="margin:0 0 8px;">${_escapeHtml(draftMsg)}</p>
+          <button onclick="_openDraftEditor('${_escapeHtml(draftId)}','${_escapeHtml(draftType)}')"
+            style="background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer;font-size:12px;">
+            👉 點擊開啟建構器
+          </button>
+        </div>`;
+      document.getElementById('chat-history').appendChild(bubbleDiv);
+      document.getElementById('chat-history').scrollTop = 99999;
+      return draftMsg;
+    }
+
     case 'error': {
       document.getElementById('copilot-thinking-bubble')?.closest('.flex')?.remove();
       _diagLogLine('✗', ev.message || '未知錯誤', '#f87171');
@@ -1934,6 +2004,54 @@ function _renderCopilotSkillPanel(ev) {
 
   const { panel } = _createWorkspaceTab(tabId, tabTitle, contentHtml);
   requestAnimationFrame(() => _initChartsInCard(panel));
+}
+
+/**
+ * Render an Agent draft action card in the workspace panel.
+ * Shows a preview of the draft payload and an "Open Editor" button.
+ */
+function _renderDraftActionCard(card) {
+  _showReportPanel();
+  const tabId     = `draft-${Date.now()}`;
+  const icon      = card.draft_type === 'skill' ? '⚙️' : '🔗';
+  const typeLabel = card.draft_type === 'skill' ? 'Skill 草稿' : 'MCP 草稿';
+
+  const fillRows = Object.entries(card.auto_fill || {})
+    .filter(([, v]) => v !== null && v !== undefined && v !== '')
+    .map(([k, v]) => `
+      <div class="flex gap-2 text-xs py-1 border-b border-slate-100 last:border-0">
+        <span class="font-mono text-purple-600 w-36 shrink-0">${_escapeHtml(k)}</span>
+        <span class="text-slate-700 truncate">${_escapeHtml(String(v).slice(0, 120))}</span>
+      </div>`).join('');
+
+  const contentHtml = `
+    <div class="p-5 flex flex-col gap-4 h-full overflow-y-auto">
+      <div class="flex items-start gap-3">
+        <span class="text-3xl leading-none">${icon}</span>
+        <div class="flex-1 min-w-0">
+          <div class="font-bold text-slate-800 text-base">${typeLabel} — 待人工審核</div>
+          <div class="text-[11px] text-slate-400 font-mono mt-0.5 truncate">${_escapeHtml(card.draft_id)}</div>
+        </div>
+        <span class="shrink-0 inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700">待發佈</span>
+      </div>
+
+      <div class="bg-slate-50 rounded-lg border border-slate-200 px-3 py-2">
+        <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">草稿預覽</div>
+        ${fillRows || '<span class="text-slate-400 text-xs">（無預覽資料）</span>'}
+      </div>
+
+      <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700">
+        ℹ️ Agent 草稿不會直接修改正式資料。點擊下方按鈕開啟編輯器，確認內容後再正式發佈。
+      </div>
+
+      <button onclick="_openDraftEditor('${_escapeHtml(card.draft_id)}', '${_escapeHtml(card.draft_type)}')"
+              class="w-full py-3 rounded-lg bg-purple-600 hover:bg-purple-500 active:bg-purple-700
+                     text-white text-sm font-semibold transition-colors shadow-sm">
+        ✏️ 開啟編輯器 — 審核並發佈
+      </button>
+    </div>`;
+
+  _createWorkspaceTab(tabId, `${icon} ${typeLabel}`, contentHtml);
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -2074,5 +2192,375 @@ async function _sendHelpMessage() {
     _helpStreaming = false;
     if (sendBtn) sendBtn.disabled = false;
     setTimeout(() => document.getElementById('help-input')?.focus(), 50);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// v13 Real Agentic Loop — Glass-box Console + Context Control
+// ══════════════════════════════════════════════════════════════
+
+function _setChatMode(mode) {
+  _v13Mode = mode === 'v13';
+  const v12Btn = document.getElementById('chat-mode-v12');
+  const v13Btn = document.getElementById('chat-mode-v13');
+  if (!v12Btn || !v13Btn) return;
+  if (_v13Mode) {
+    v12Btn.className = 'px-2.5 py-1 rounded-l-md text-slate-500 hover:text-slate-700 transition-all';
+    v13Btn.className = 'px-2.5 py-1 rounded-r-md bg-purple-600 text-white transition-all';
+    _addChatBubble('agent',
+      '<span style="color:#7c3aed;font-size:11px;">⚡ <strong>v13 Agentic Mode</strong> — Agent 具備 Tool Use + RAG 長期記憶</span>');
+  } else {
+    v12Btn.className = 'px-2.5 py-1 rounded-l-md bg-blue-600 text-white transition-all';
+    v13Btn.className = 'px-2.5 py-1 rounded-r-md text-slate-500 hover:text-slate-700 transition-all';
+    _addChatBubble('agent',
+      '<span style="color:#2563eb;font-size:11px;">💬 已切換至 Copilot 模式</span>');
+  }
+}
+
+/** v13 Agent — calls POST /agent/chat/stream and renders Glass-box Console events */
+async function _sendAgentV13Message() {
+  if (_isStreaming) return;
+
+  const input   = document.getElementById('issue-input');
+  const message = input.value.trim();
+  if (!message) return;
+
+  input.value  = '';
+  _isStreaming = true;
+  _setInputLocked(true);
+  _setStatus('streaming');
+  _hideSlashMenu();
+
+  _addChatBubble('user', _escapeHtml(message));
+
+  // Expand Agent Console and mark new session
+  _diagConsoleClear();
+  _diagConsoleExpand();
+  _diagLogLine('🚀', `新對話開始 | "${message.slice(0, 60)}${message.length > 60 ? '…' : ''}"`, '#38bdf8');
+
+  const body = {
+    message,
+    session_id: _v13SessionId || null,
+  };
+
+  try {
+    const response = await fetch('/api/v1/agent/chat/stream', {
+      method:  'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${_token}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (response.status === 401) { logout(); return; }
+    if (!response.ok) {
+      let msg = `HTTP ${response.status}`;
+      try { const err = await response.json(); msg = err.message || msg; } catch { /* */ }
+      _addChatBubble('error', `❌ 請求失敗：${msg}`);
+      return;
+    }
+
+    const reader  = response.body.getReader();
+    const decoder = new TextDecoder();
+    let   buf     = '';
+
+    // Remove any stale thinking placeholder
+    document.getElementById('v13-thinking-bubble')?.closest('.flex')?.remove();
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+
+      for (const part of parts) {
+        const trimmed = part.trim();
+        if (!trimmed) continue;
+        const ev = _parseCopilotChunk(trimmed);  // reuse SSE parser
+        if (ev) _handleV13Event(ev);
+      }
+    }
+    if (buf.trim()) {
+      const ev = _parseCopilotChunk(buf.trim());
+      if (ev) _handleV13Event(ev);
+    }
+
+  } catch (err) {
+    _addChatBubble('error', `❌ 連線錯誤：${err.message}`);
+  } finally {
+    _isStreaming = false;
+    _setInputLocked(false);
+    _setStatus('ready');
+  }
+}
+
+/**
+ * Render Agent synthesis text as a chat bubble with line-by-line reveal.
+ * Uses marked.parse() for markdown (tables, bold, etc.).
+ * Lines are revealed one every 40ms so long responses feel progressive.
+ */
+function _streamSynthesisBubble(text) {
+  const container = document.getElementById('chat-history');
+  if (!container) return;
+
+  // Build the bubble shell immediately (empty)
+  const wrapper = document.createElement('div');
+  wrapper.className = 'flex justify-start';
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-bubble chat-agent';
+  wrapper.appendChild(bubble);
+  container.appendChild(wrapper);
+  container.scrollTop = container.scrollHeight;
+
+  // Split into logical lines (preserve blank lines for paragraph spacing)
+  const lines = text.split('\n');
+  let accumulated = '';
+  let idx = 0;
+
+  function revealNext() {
+    if (idx >= lines.length) return;
+    accumulated += (idx > 0 ? '\n' : '') + lines[idx];
+    idx++;
+    // Render accumulated markdown
+    bubble.innerHTML = (typeof marked !== 'undefined')
+      ? marked.parse(accumulated)
+      : accumulated.replace(/\n/g, '<br>');
+    container.scrollTop = container.scrollHeight;
+    // Reveal next line after short delay; blank lines are faster
+    const delay = lines[idx - 1].trim() === '' ? 8 : 40;
+    setTimeout(revealNext, delay);
+  }
+
+  revealNext();
+}
+
+/** Render a v13 SSE event as a Glass-box Console line */
+function _handleV13Event(ev) {
+  if (!ev || !ev.type) return;
+
+  switch (ev.type) {
+
+    case 'context_load': {
+      const ragCount = ev.rag_count || 0;
+      const pref = ev.pref_summary && ev.pref_summary !== '(無)' ? ev.pref_summary : '未設定';
+      _diagLogLine('📦', `CONTEXT | Soul 載入 | 偏好: ${pref} | RAG: ${ragCount} 條`, '#60a5fa');
+      break;
+    }
+
+    case 'thinking': {
+      _diagLogLine('💭', `THINKING | ${(ev.text || '').slice(0, 160)}${(ev.text||'').length > 160 ? '…' : ''}`, '#94a3b8');
+      break;
+    }
+
+    case 'tool_start': {
+      const inputStr = JSON.stringify(ev.input || {});
+      _diagLogLine('🔧', `TOOL #${ev.iteration || '?'} → ${ev.tool || ''}(${inputStr.slice(0, 80)}${inputStr.length > 80 ? '…' : ''})`, '#fbbf24');
+      break;
+    }
+
+    case 'tool_done': {
+      _diagLogLine('✅', `DONE  → ${ev.tool || ''} | ${ev.result_summary || ''}`, '#4ade80');
+      // Render result in right workspace panel
+      if (ev.render_card) {
+        if (ev.render_card.type === 'skill') {
+          _renderCopilotSkillPanel(ev.render_card);
+        } else if (ev.render_card.type === 'mcp') {
+          _renderCopilotMcpPanel(ev.render_card);
+        } else if (ev.render_card.type === 'draft') {
+          _renderDraftActionCard(ev.render_card);
+        }
+      }
+      break;
+    }
+
+    case 'synthesis': {
+      _streamSynthesisBubble(ev.text || '(無回答)');
+      _diagLogLine('💬', `SYNTHESIS 完成 (${(ev.text || '').length} chars)`, '#a78bfa');
+      break;
+    }
+
+    case 'memory_write': {
+      _diagLogLine('🧠', `MEMORY | 已記住: ${(ev.content || '').slice(0, 80)} (source: ${ev.source || '?'})`, '#c084fc');
+      break;
+    }
+
+    case 'error': {
+      _diagLogLine('❌', `ERROR | ${ev.message || '未知錯誤'}${ev.iteration ? ` (iter ${ev.iteration})` : ''}`, '#f87171');
+      _addChatBubble('error', `⚠️ Agent 錯誤：${_escapeHtml(ev.message || '未知錯誤')}`);
+      break;
+    }
+
+    case 'done': {
+      if (ev.session_id) _v13SessionId = ev.session_id;
+      _diagLogLine('🏁', `DONE | session=${ev.session_id || '?'}`, '#475569');
+      break;
+    }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// Agent Brain — Context Control Center functions
+// ══════════════════════════════════════════════════════════════
+
+async function _brainLoadSoul() {
+  const textarea = document.getElementById('brain-soul-textarea');
+  if (!textarea) return;
+  try {
+    const r = await fetch('/api/v1/agent/soul', {
+      headers: { 'Authorization': `Bearer ${_token}` }
+    });
+    const d = await r.json();
+    textarea.value = d.soul_prompt || d.data?.soul_prompt || '(尚未設定)';
+  } catch(e) {
+    textarea.value = `載入失敗: ${e.message}`;
+  }
+}
+
+async function _brainSaveSoul() {
+  const textarea = document.getElementById('brain-soul-textarea');
+  if (!textarea) return;
+  try {
+    const r = await fetch('/api/v1/agent/soul', {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ soul_prompt: textarea.value }),
+    });
+    const d = await r.json();
+    if (d.status === 'success') {
+      alert('Soul Prompt 已儲存');
+    } else {
+      alert(`儲存失敗: ${JSON.stringify(d)}`);
+    }
+  } catch(e) {
+    alert(`儲存失敗: ${e.message}`);
+  }
+}
+
+async function _brainSavePref() {
+  const textarea = document.getElementById('brain-pref-textarea');
+  const status   = document.getElementById('brain-pref-status');
+  if (!textarea || !status) return;
+
+  status.textContent = '⏳ AI 安全審查中...';
+  status.style.color = '#64748b';
+
+  try {
+    const r = await fetch('/api/v1/agent/preference', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: textarea.value }),
+    });
+    const d = await r.json();
+    if (d.blocked) {
+      status.textContent = `⛔ 被阻擋：${d.reason}`;
+      status.style.color = '#dc2626';
+    } else if (d.status === 'success') {
+      status.textContent = '✓ 偏好已儲存';
+      status.style.color = '#16a34a';
+    } else {
+      status.textContent = `⚠️ ${d.message || JSON.stringify(d)}`;
+      status.style.color = '#d97706';
+    }
+  } catch(e) {
+    status.textContent = `失敗: ${e.message}`;
+    status.style.color = '#dc2626';
+  }
+}
+
+async function _brainLoadMemories() {
+  const list = document.getElementById('brain-memory-list');
+  if (!list) return;
+  list.innerHTML = '<p class="text-xs text-slate-400 text-center py-2">載入中...</p>';
+  try {
+    const r = await fetch('/api/v1/agent/memory?limit=100', {
+      headers: { 'Authorization': `Bearer ${_token}` }
+    });
+    const d = await r.json();
+    const memories = d.memories || d.data?.memories || [];
+    _renderMemoryList(memories);
+  } catch(e) {
+    list.innerHTML = `<p class="text-xs text-red-500">載入失敗: ${e.message}</p>`;
+  }
+}
+
+async function _brainSearchMemories() {
+  const q = document.getElementById('brain-memory-search')?.value?.trim();
+  if (!q) { _brainLoadMemories(); return; }
+  const list = document.getElementById('brain-memory-list');
+  list.innerHTML = '<p class="text-xs text-slate-400 text-center py-2">搜尋中...</p>';
+  try {
+    const r = await fetch(`/api/v1/agent/memory/search?q=${encodeURIComponent(q)}`, {
+      headers: { 'Authorization': `Bearer ${_token}` }
+    });
+    const d = await r.json();
+    const memories = d.memories || [];
+    if (!memories.length) {
+      list.innerHTML = `<p class="text-xs text-slate-400 text-center py-2">未找到「${_escapeHtml(q)}」相關記憶</p>`;
+      return;
+    }
+    _renderMemoryList(memories);
+  } catch(e) {
+    list.innerHTML = `<p class="text-xs text-red-500">搜尋失敗: ${e.message}</p>`;
+  }
+}
+
+function _renderMemoryList(memories) {
+  const list = document.getElementById('brain-memory-list');
+  if (!list) return;
+  if (!memories.length) {
+    list.innerHTML = '<p class="text-xs text-slate-400 text-center py-4">目前沒有長期記憶</p>';
+    return;
+  }
+  list.innerHTML = memories.map(m => `
+    <div class="flex items-start gap-2 p-2 bg-slate-50 border border-slate-100 rounded-lg">
+      <div class="flex-1 min-w-0">
+        <p class="text-xs text-slate-800 leading-relaxed">${_escapeHtml(m.content)}</p>
+        <p class="text-[10px] text-slate-400 mt-0.5">
+          <span class="inline-block bg-purple-100 text-purple-600 px-1.5 rounded">${m.source || 'manual'}</span>
+          ${m.created_at ? m.created_at.slice(0, 16).replace('T', ' ') : ''}
+          ${m.ref_id ? `· ref: ${_escapeHtml(m.ref_id)}` : ''}
+        </p>
+      </div>
+      <button onclick="_brainDeleteMemory(${m.id})"
+        class="flex-shrink-0 text-[10px] text-red-400 hover:text-red-600 hover:bg-red-50
+               border border-red-200 rounded px-2 py-0.5 transition-colors">
+        🗑️
+      </button>
+    </div>
+  `).join('');
+}
+
+async function _brainDeleteMemory(id) {
+  if (!confirm(`確定刪除記憶 #${id}？`)) return;
+  try {
+    const r = await fetch(`/api/v1/agent/memory/${id}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${_token}` }
+    });
+    const d = await r.json();
+    if (d.status === 'success') _brainLoadMemories();
+    else alert(`刪除失敗: ${JSON.stringify(d)}`);
+  } catch(e) {
+    alert(`刪除失敗: ${e.message}`);
+  }
+}
+
+async function _brainDeleteAllMemories() {
+  if (!confirm('確定清除所有長期記憶？此操作無法復原。')) return;
+  try {
+    const r = await fetch('/api/v1/agent/memory', {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${_token}` }
+    });
+    const d = await r.json();
+    if (d.status === 'success') {
+      alert(`已清除 ${d.deleted_count} 條記憶`);
+      _brainLoadMemories();
+    }
+  } catch(e) {
+    alert(`清除失敗: ${e.message}`);
   }
 }

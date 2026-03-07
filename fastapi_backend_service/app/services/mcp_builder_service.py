@@ -75,7 +75,8 @@ _DEFAULT_TRY_RUN_SYSTEM_PROMPT = """\
 2. 腳本【絕對禁止】呼叫任何系統命令或 OS 操作（禁止 os, sys, subprocess, pathlib, shutil）。
 3. 腳本【絕對禁止】讀寫任何實體檔案（禁止 open(), savefig('path') 等存檔至路徑操作）。
 4. 腳本【絕對禁止】使用 eval(), exec(), compile(), __import__() 等反射操作。
-5. 若加工意圖超出「資料清洗、過濾、數學計算、統計分析、格式轉換、資料視覺化」範疇，必須拒絕生成，在 processing_script 欄位回傳說明錯誤的字串。
+5. 若加工意圖超出「資料清洗、過濾、數學計算、統計分析、統計門檻判斷、異常標記、格式轉換、資料視覺化」範疇，必須拒絕生成，在 processing_script 欄位回傳說明錯誤的字串。
+   注意：「判斷某值是否超過門檻」「計算後標記正常/異常」「輸出 status 欄位」均屬合法的統計計算範疇，不得拒絕。
 
 【沙盒可用 Python 環境 — 僅限以下清單，未列出的一律不可用】
 ⚠️【絕對禁止在腳本中 import pandas / import plotly / import matplotlib】
@@ -234,8 +235,12 @@ def _extract_json(raw: str) -> Dict[str, Any]:
             text = text[idx:]
     # Strategy 3: raw_decode — parses only the first valid JSON object,
     # ignoring any trailing text or extra JSON objects.
-    obj, _ = json.JSONDecoder().raw_decode(text)
-    return obj
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(text)
+        return obj
+    except json.JSONDecodeError:
+        # LLM returned plain text instead of JSON — treat as general_chat reply
+        return {"intent": "general_chat", "reply_message": raw.strip(), "is_ready": False}
 
 
 class MCPBuilderService:

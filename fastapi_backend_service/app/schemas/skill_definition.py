@@ -35,6 +35,7 @@ class SkillDefinitionUpdate(BaseModel):
     diagnostic_prompt: Optional[str] = None
     human_recommendation: Optional[str] = None
     last_diagnosis_result: Optional[Dict[str, Any]] = None
+    visibility: Optional[str] = Field(default=None, pattern="^(private|public)$")
 
 
 class SkillDefinitionResponse(BaseModel):
@@ -49,6 +50,7 @@ class SkillDefinitionResponse(BaseModel):
     diagnostic_prompt: Optional[str] = None
     human_recommendation: Optional[str] = None
     last_diagnosis_result: Optional[Dict[str, Any]] = None
+    visibility: str = "private"
     created_at: datetime
     updated_at: datetime
 

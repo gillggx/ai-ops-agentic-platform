@@ -16,6 +16,12 @@ from app.routers.routine_check_router import router as routine_check_router
 from app.routers.generated_events_router import router as generated_events_router
 # Help Chat
 from app.routers.help_router import router as help_router
+# v12 Agent routers
+from app.routers.agent_router import router as agent_router
+from app.routers.agent_execute_router import router as agent_execute_router
+from app.routers.agent_draft_router import router as agent_draft_router
+# v12.5 Expert Mode
+from app.routers.agentic_skill_router import router as agentic_skill_router
 
 __all__ = [
     "auth_router",
@@ -32,4 +38,8 @@ __all__ = [
     "routine_check_router",
     "generated_events_router",
     "help_router",
+    "agent_router",
+    "agent_execute_router",
+    "agent_draft_router",
+    "agentic_skill_router",
 ]

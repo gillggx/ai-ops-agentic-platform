@@ -35,7 +35,16 @@ from app.routers import (
     skill_definitions_router,
     system_parameters_router,
     users_router,
+    # v12 Agent
+    agent_router,
+    agent_execute_router,
+    agent_draft_router,
+    # v12.5 Expert Mode
+    agentic_skill_router,
 )
+from app.routers.agent_chat_router import router as agent_chat_router
+from app.routers.agent_memory_router import router as agent_memory_router
+from app.routers.agent_preference_router import router as agent_preference_router
 
 settings = get_settings()
 logger = AppLogger("main").get_logger()
@@ -297,7 +306,7 @@ async def _seed_data() -> None:
                     existing.roles = desired
                     logger.info("Updated roles for user: %s", u["username"])
 
-        # ── 1. Seed built-in DataSubjects (create or update output_schema) ──
+        # ── 1. Seed built-in DataSubjects (legacy; keep for backward compat) ──
         for spec in _MOCK_DATA_SUBJECTS:
             result = await db.execute(
                 select(DataSubjectModel).where(DataSubjectModel.name == spec["name"])
@@ -327,6 +336,28 @@ async def _seed_data() -> None:
                     changed = True
                 if changed:
                     logger.info("Updated schemas for DataSubject: %s", spec["name"])
+
+        # ── 1b. Seed system MCPs (mirrors of DataSubjects, mcp_type='system') ──
+        from app.models.mcp_definition import MCPDefinitionModel as _MCPModel
+        for spec in _MOCK_DATA_SUBJECTS:
+            result = await db.execute(
+                select(_MCPModel).where(
+                    _MCPModel.name == spec["name"],
+                    _MCPModel.mcp_type == "system",
+                )
+            )
+            if result.scalar_one_or_none() is None:
+                sys_obj = _MCPModel(
+                    name=spec["name"],
+                    description=spec["description"],
+                    mcp_type="system",
+                    api_config=_json.dumps(spec["api_config"], ensure_ascii=False),
+                    input_schema=_json.dumps(spec["input_schema"], ensure_ascii=False),
+                    processing_intent="",
+                    visibility="public",
+                )
+                db.add(sys_obj)
+                logger.info("Seeded system MCP: %s", spec["name"])
 
         # ── 2. Seed built-in EventTypes (create or update attributes) ─────
         for spec in _SEED_EVENT_TYPES:
@@ -448,6 +479,16 @@ app.include_router(routine_check_router, prefix=_PREFIX)
 app.include_router(generated_events_router, prefix=_PREFIX)
 # Help Chat
 app.include_router(help_router, prefix=_PREFIX)
+# v12 Agent routers
+app.include_router(agent_router, prefix=_PREFIX)
+app.include_router(agent_execute_router, prefix=_PREFIX)
+app.include_router(agent_draft_router, prefix=_PREFIX)
+# v12.5 Expert Mode — bi-directional Markdown parser
+app.include_router(agentic_skill_router, prefix=_PREFIX)
+# v13 Real Agentic Platform
+app.include_router(agent_chat_router, prefix=_PREFIX)
+app.include_router(agent_memory_router, prefix=_PREFIX)
+app.include_router(agent_preference_router, prefix=_PREFIX)
 
 # ---------------------------------------------------------------------------
 # Global Exception Handlers

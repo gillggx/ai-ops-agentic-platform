@@ -188,14 +188,15 @@
 
         <div class="w-6 border-t border-slate-200 my-1"></div>
 
-        <!-- Data Subjects -->
-        <button class="nav-btn" id="nav-data-subjects" title="Data Subject 管理"
-          onclick="switchView('data-subjects')">
+        <!-- System MCPs (IT Sponsor) -->
+        <button class="nav-btn" id="nav-system-mcps" title="System MCP 管理 (IT Sponsor)"
+          onclick="switchView('system-mcps')">
           <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <ellipse cx="12" cy="5" rx="9" ry="3"/>
             <path d="M21 12c0 1.657-4.03 3-9 3S3 13.657 3 12"/>
             <path d="M3 5v14c0 1.657 4.03 3 9 3s9-1.343 9-3V5"/>
+            <path d="M9 12l2 2 4-4" stroke-width="1.8"/>
           </svg>
         </button>
 
@@ -247,6 +248,16 @@
                stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
             <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+          </svg>
+        </button>
+
+        <!-- Agent Brain -->
+        <button class="nav-btn" id="nav-agent-brain" title="Agent 大腦設定 (Context Control Center)"
+          onclick="switchView('agent-brain')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.46 2.5 2.5 0 0 1-1.8-3 2.5 2.5 0 0 1-1.8-3A2.5 2.5 0 0 1 2 11a2.5 2.5 0 0 1 1.44-2.25A2.5 2.5 0 0 1 6 6.5V5A2.5 2.5 0 0 1 9.5 2Z"/>
+            <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.46 2.5 2.5 0 0 0 1.8-3 2.5 2.5 0 0 0 1.8-3A2.5 2.5 0 0 0 22 11a2.5 2.5 0 0 0-1.44-2.25A2.5 2.5 0 0 0 18 6.5V5A2.5 2.5 0 0 0 14.5 2Z"/>
           </svg>
         </button>
 
@@ -778,6 +789,23 @@
 
           <!-- Chat Panel (LEFT, 30%) — Event-Driven layout -->
           <div id="chat-panel" class="chat-panel-col flex flex-col min-w-0">
+
+            <!-- v13 Agent Mode Toggle -->
+            <div class="flex-shrink-0 flex items-center justify-between px-3 py-1.5
+                        border-b border-slate-100 bg-slate-50">
+              <span class="text-[10px] text-slate-400 font-medium">對話模式</span>
+              <div class="flex bg-white rounded-md border border-slate-200 text-[10px] font-semibold">
+                <button id="chat-mode-v12" onclick="_setChatMode('v12')"
+                  class="px-2.5 py-1 rounded-l-md bg-blue-600 text-white transition-all">
+                  Copilot
+                </button>
+                <button id="chat-mode-v13" onclick="_setChatMode('v13')"
+                  class="px-2.5 py-1 rounded-r-md text-slate-500 hover:text-slate-700 transition-all">
+                  Agent v13
+                </button>
+              </div>
+            </div>
+
             <div id="chat-history" class="flex-1 overflow-y-auto p-4 space-y-3">
               <div class="text-center py-8">
                 <p class="text-xs text-slate-400 bg-white border border-slate-200 inline-block px-3 py-1 rounded-full"
@@ -888,8 +916,8 @@
         </div><!-- /view-diagnose -->
 
 
-        <!-- ══ DATA SUBJECTS VIEW ══ -->
-        <div id="view-data-subjects" class="view-panel hidden flex-1 flex flex-col overflow-hidden">
+        <!-- ══ SYSTEM MCPs VIEW ══ -->
+        <div id="view-system-mcps" class="view-panel hidden flex-1 flex flex-col overflow-hidden">
           <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
                       border-b border-slate-200 bg-white">
             <div>
@@ -899,17 +927,18 @@
                   <ellipse cx="12" cy="5" rx="9" ry="3"/>
                   <path d="M21 12c0 1.657-4.03 3-9 3S3 13.657 3 12"/>
                   <path d="M3 5v14c0 1.657 4.03 3 9 3s9-1.343 9-3V5"/>
+                  <path d="M9 12l2 2 4-4" stroke-width="1.8"/>
                 </svg>
-                <span data-i18n="ds-title">Data Subject 管理</span>
+                System MCP 管理
               </h2>
-              <p class="text-xs text-slate-500 mt-0.5" data-i18n="ds-sub">定義資料源與 API 連線設定 (IT Admin)</p>
+              <p class="text-xs text-slate-500 mt-0.5">定義資料源連線設定，供 Custom MCP 呼叫 (IT Sponsor)</p>
             </div>
-            <button onclick="openDrawer('ds-create')"
-              class="builder-btn-primary text-sm px-4 py-2" data-i18n="ds-add">
-              + 新增 Data Subject
+            <button onclick="openDrawer('smc-create')"
+              class="builder-btn-primary text-sm px-4 py-2">
+              + 新增 System MCP
             </button>
           </div>
-          <div id="ds-list" class="flex-1 overflow-y-auto p-6">
+          <div id="smc-list" class="flex-1 overflow-y-auto p-6">
             <div class="text-center text-slate-600 py-12">載入中...</div>
           </div>
         </div>
@@ -983,7 +1012,7 @@
             <!-- Editor header -->
             <div class="flex-shrink-0 flex items-center justify-between px-6 py-3 border-b border-slate-200 bg-white">
               <div class="flex items-center gap-3">
-                <button onclick="_mcpBackToList()"
+                <button id="mcp-back-btn" onclick="_mcpBackToList()"
                         class="text-slate-400 hover:text-slate-700 text-sm flex items-center gap-1 transition-colors">
                   ← MCP 列表
                 </button>
@@ -1204,6 +1233,17 @@
                 <span id="sk-editor-title" class="font-semibold text-sm text-slate-700">新增 Skill</span>
               </div>
               <div class="flex items-center gap-2">
+                <!-- 視覺/代碼模式切換 (PRD v12.5 §4.5.1) -->
+                <div class="flex bg-slate-100 rounded-lg p-0.5 border border-slate-200 text-xs font-semibold mr-1">
+                  <button id="sk-mode-visual" onclick="_skSetMode('visual')"
+                          class="px-3 py-1.5 rounded-md bg-white text-purple-700 shadow-sm transition-all">
+                    👁️ Visual
+                  </button>
+                  <button id="sk-mode-raw" onclick="_skSetMode('raw')"
+                          class="px-3 py-1.5 rounded-md text-slate-500 hover:text-slate-700 transition-all">
+                    ⌨️ Raw
+                  </button>
+                </div>
                 <button onclick="_skSave()" class="builder-btn-secondary text-sm px-4 py-2">💾 儲存</button>
                 <button id="sk-run-btn" onclick="_skTryRun()" class="builder-btn-primary text-sm px-4 py-2">▶ Try Run</button>
               </div>
@@ -1326,6 +1366,32 @@
                 </div>
               </div>
 
+              <!-- RAW EDITOR PANEL (PRD v12.5 §4.5.1 — hidden by default) -->
+              <div id="sk-raw-panel"
+                   class="hidden w-full xl:w-1/2 overflow-y-auto p-4 bg-slate-900
+                          border-b xl:border-r border-slate-700 flex-col gap-3">
+                <div class="flex items-center justify-between flex-shrink-0">
+                  <span class="text-[10px] font-bold text-purple-300 uppercase tracking-widest">
+                    ⌨️ OpenClaw Raw Markdown — 雙向綁定
+                  </span>
+                  <button onclick="_skApplyRaw()"
+                          class="text-xs px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded-md font-semibold transition-colors">
+                    ✓ 套用至表單
+                  </button>
+                </div>
+                <textarea id="sk-raw-textarea" spellcheck="false"
+                          class="flex-1 min-h-96 w-full bg-slate-800 text-green-300 font-mono text-xs
+                                 border border-slate-600 rounded-lg p-4 resize-none outline-none
+                                 focus:border-purple-500 focus:ring-1 focus:ring-purple-500 leading-relaxed"
+                          oninput="_skRawDebounce()"
+                          placeholder="切換至 Raw 模式後，Skill 的 OpenClaw Markdown 將顯示於此..."></textarea>
+                <p class="text-[10px] text-slate-400 flex-shrink-0">
+                  💡 修改 <code class="text-yellow-300">&lt;condition&gt;</code> 後 600ms 自動同步至 diagnostic_prompt；
+                  修改 YAML <code class="text-yellow-300">description:</code> 同步至說明欄位。
+                  點擊「✓ 套用至表單」或切換回 Visual 模式確認變更。
+                </p>
+              </div>
+
               <!-- RIGHT: Run results -->
               <div id="sk-panel-right" class="w-full xl:w-1/2 flex flex-col bg-white min-h-72 xl:min-h-0">
                 <!-- Tab bar -->
@@ -1436,6 +1502,107 @@
           </div>
           <div id="settings-body" class="flex-1 overflow-y-auto p-6 space-y-8">
             <div class="text-center text-slate-600 py-12">載入中...</div>
+          </div>
+        </div>
+
+        <!-- ══ AGENT BRAIN VIEW (v13 Context Control Center) ══ -->
+        <div id="view-agent-brain" class="view-panel hidden flex-1 flex flex-col overflow-hidden">
+          <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
+                      border-b border-slate-200 bg-white">
+            <div>
+              <h2 class="font-semibold text-base flex items-center gap-2">
+                <svg class="w-4 h-4 text-purple-500" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.46 2.5 2.5 0 0 1-1.8-3 2.5 2.5 0 0 1-1.8-3A2.5 2.5 0 0 1 2 11a2.5 2.5 0 0 1 1.44-2.25A2.5 2.5 0 0 1 6 6.5V5A2.5 2.5 0 0 1 9.5 2Z"/>
+                  <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.46 2.5 2.5 0 0 0 1.8-3 2.5 2.5 0 0 0 1.8-3A2.5 2.5 0 0 0 22 11a2.5 2.5 0 0 0-1.44-2.25A2.5 2.5 0 0 0 18 6.5V5A2.5 2.5 0 0 0 14.5 2Z"/>
+                </svg>
+                Agent 大腦設定 — Context Control Center
+              </h2>
+              <p class="text-xs text-slate-500 mt-0.5">管理 Soul 鐵律、個人偏好、長期記憶</p>
+            </div>
+          </div>
+
+          <!-- Three-panel layout -->
+          <div class="flex-1 overflow-y-auto p-6 space-y-8">
+
+            <!-- Panel 1: Soul Admin Editor -->
+            <div class="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="font-semibold text-sm text-slate-900">Soul 鐵律編輯器</h3>
+                  <p class="text-xs text-slate-500">全域不可違反規則 — 影響所有使用者的 Agent 行為</p>
+                </div>
+                <div class="flex gap-2">
+                  <button onclick="_brainLoadSoul()"
+                    class="text-xs px-3 py-1.5 border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-600">
+                    ↺ 載入
+                  </button>
+                  <button onclick="_brainSaveSoul()"
+                    class="text-xs px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-semibold">
+                    儲存 Soul
+                  </button>
+                </div>
+              </div>
+              <textarea id="brain-soul-textarea" rows="8" spellcheck="false"
+                class="w-full bg-slate-50 border border-slate-200 rounded-lg p-3
+                       text-xs font-mono text-slate-800 resize-none focus:outline-none focus:border-purple-400"
+                placeholder="載入中..."></textarea>
+            </div>
+
+            <!-- Panel 2: User Preference -->
+            <div class="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="font-semibold text-sm text-slate-900">個人偏好設定</h3>
+                  <p class="text-xs text-slate-500">Agent 的回答風格與格式偏好 — 送出前 AI 安全審查</p>
+                </div>
+                <button onclick="_brainSavePref()"
+                  class="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-semibold">
+                  儲存偏好
+                </button>
+              </div>
+              <textarea id="brain-pref-textarea" rows="4" spellcheck="false"
+                class="w-full bg-slate-50 border border-slate-200 rounded-lg p-3
+                       text-xs text-slate-800 resize-none focus:outline-none focus:border-blue-400"
+                placeholder="例如：回答請使用繁體中文，報告結尾附上資料表格..."></textarea>
+              <div id="brain-pref-status" class="text-xs text-slate-400"></div>
+            </div>
+
+            <!-- Panel 3: RAG Memory Manager -->
+            <div class="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="font-semibold text-sm text-slate-900">長期記憶管理</h3>
+                  <p class="text-xs text-slate-500">Agent 的 RAG 記憶庫 — 可搜尋或手動刪除幻覺記憶</p>
+                </div>
+                <div class="flex gap-2">
+                  <button onclick="_brainLoadMemories()"
+                    class="text-xs px-3 py-1.5 border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-600">
+                    ↺ 重新整理
+                  </button>
+                  <button onclick="_brainDeleteAllMemories()"
+                    class="text-xs px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg">
+                    全部清除
+                  </button>
+                </div>
+              </div>
+              <!-- Search bar -->
+              <div class="flex gap-2">
+                <input id="brain-memory-search" type="text" placeholder="搜尋記憶關鍵字..."
+                  class="flex-1 text-xs px-3 py-2 border border-slate-200 rounded-lg
+                         focus:outline-none focus:border-blue-400 bg-slate-50"
+                  onkeydown="if(event.key==='Enter') _brainSearchMemories()">
+                <button onclick="_brainSearchMemories()"
+                  class="text-xs px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg">
+                  搜尋
+                </button>
+              </div>
+              <!-- Memory list -->
+              <div id="brain-memory-list" class="space-y-2 max-h-96 overflow-y-auto">
+                <p class="text-xs text-slate-400 text-center py-4">點擊「重新整理」載入記憶</p>
+              </div>
+            </div>
+
           </div>
         </div>
 

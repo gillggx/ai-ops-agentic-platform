@@ -228,6 +228,7 @@ async def copilot_chat(
             slot_context=body.slot_context,
             history=body.history,
             base_url=base_url,
+            user_id=current_user.id,
         )
         async for event in gen:
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"

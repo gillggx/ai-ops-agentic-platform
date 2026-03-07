@@ -1,6 +1,8 @@
 """MCP Definition CRUD + LLM generation router."""
 
-from fastapi import APIRouter, Depends
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.response import StandardResponse
@@ -35,10 +37,11 @@ def _get_service(db: AsyncSession = Depends(get_db)) -> MCPDefinitionService:
 
 @router.get("", response_model=StandardResponse)
 async def list_mcp_definitions(
+    type: Optional[str] = Query(default=None, description="Filter by mcp_type: 'system' or 'custom'"),
     svc: MCPDefinitionService = Depends(_get_service),
     _: UserModel = Depends(get_current_user),
 ):
-    items = await svc.list_all()
+    items = await svc.list_all(mcp_type=type)
     return StandardResponse.success(data=[i.model_dump() for i in items])
 
 
@@ -103,6 +106,7 @@ async def check_intent_clarity(
     """Ask LLM to verify the processing intent is clear and unambiguous before generation."""
     result = await svc.check_intent(
         processing_intent=body.processing_intent,
+        system_mcp_id=body.system_mcp_id,
         data_subject_id=body.data_subject_id,
     )
     return StandardResponse.success(data=result.model_dump())
@@ -117,6 +121,7 @@ async def try_run_mcp(
     """Generate a script from intent (with safety guardrails) and execute it in sandbox."""
     result = await svc.try_run(
         processing_intent=body.processing_intent,
+        system_mcp_id=body.system_mcp_id,
         data_subject_id=body.data_subject_id,
         sample_data=body.sample_data,
     )

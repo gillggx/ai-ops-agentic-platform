@@ -276,6 +276,34 @@ body {
   border-bottom-left-radius: 4px;
 }
 
+/* Markdown content inside agent bubbles */
+.chat-agent table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12px;
+}
+.chat-agent table th,
+.chat-agent table td {
+  border: 1px solid #cbd5e1;
+  padding: 5px 10px;
+  text-align: left;
+}
+.chat-agent table th {
+  background: #e2e8f0;
+  font-weight: 600;
+  color: #1e3a8a;
+}
+.chat-agent table tr:nth-child(even) td {
+  background: #f1f5f9;
+}
+.chat-agent p { margin: 4px 0; }
+.chat-agent ul, .chat-agent ol { margin: 4px 0; padding-left: 18px; }
+.chat-agent li { margin: 2px 0; }
+.chat-agent strong { color: #1e293b; }
+.chat-agent h3 { font-size: 13px; font-weight: 700; margin: 8px 0 4px; color: #1e3a8a; }
+.chat-agent code { background: #e2e8f0; border-radius: 3px; padding: 1px 4px; font-size: 11px; }
+
 /* Tool call notification (smaller, subtle) */
 .chat-tool {
   background: rgba(99, 102, 241, 0.06);

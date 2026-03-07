@@ -44,6 +44,7 @@ def _to_response(obj: SkillDefinitionModel) -> SkillDefinitionResponse:
         diagnostic_prompt=obj.diagnostic_prompt,
         human_recommendation=obj.human_recommendation,
         last_diagnosis_result=_j(obj.last_diagnosis_result),
+        visibility=obj.visibility if hasattr(obj, 'visibility') and obj.visibility else "private",
         created_at=obj.created_at,
         updated_at=obj.updated_at,
     )
@@ -120,6 +121,8 @@ class SkillDefinitionService:
                 json.dumps(data.last_diagnosis_result, ensure_ascii=False)
                 if data.last_diagnosis_result is not None else None
             )
+        if data.visibility is not None:
+            updates["visibility"] = data.visibility
         obj = await self._repo.update(obj, **updates)
         return _to_response(obj)
 

@@ -33,6 +33,8 @@ class SkillDefinitionModel(Base):
     human_recommendation: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # JSON — last recorded Code Diagnosis result: {diagnosis_message, problem_object, check_output_schema, generated_code, timestamp}
     last_diagnosis_result: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
+    # Visibility: 'private' (owner only) | 'public' (all users + agent tools_manifest)
+    visibility: Mapped[str] = mapped_column(String(10), nullable=False, default="private", server_default="private")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False,
         default=lambda: datetime.now(tz=timezone.utc), server_default=func.now(),

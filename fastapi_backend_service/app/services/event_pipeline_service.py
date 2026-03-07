@@ -283,20 +283,32 @@ class EventPipelineService:
                 error="此 MCP 尚未生成 Python 腳本，請先在 MCP Builder 完成試跑並儲存。",
             )
 
-        # Load DataSubject
-        ds = await self._ds_repo.get_by_id(mcp.data_subject_id)
-        if not ds:
-            return SkillPipelineResult(
-                skill_id=skill.id, skill_name=skill_name, mcp_name=mcp_name,
-                error="找不到對應的 DataSubject",
-            )
+        # Resolve data source: prefer system_mcp_id, fall back to data_subject_id
+        system_mcp_id = getattr(mcp, 'system_mcp_id', None)
+        if system_mcp_id:
+            sys_mcp = await self._mcp_repo.get_by_id(system_mcp_id)
+            if not sys_mcp:
+                return SkillPipelineResult(
+                    skill_id=skill.id, skill_name=skill_name, mcp_name=mcp_name,
+                    error=f"System MCP id={system_mcp_id} 不存在",
+                )
+            ds_api_config = _j(sys_mcp.api_config) if isinstance(sys_mcp.api_config, str) else (sys_mcp.api_config or {})
+            ds_name = sys_mcp.name
+        else:
+            ds = await self._ds_repo.get_by_id(mcp.data_subject_id)
+            if not ds:
+                return SkillPipelineResult(
+                    skill_id=skill.id, skill_name=skill_name, mcp_name=mcp_name,
+                    error="找不到對應的 System MCP / DataSubject",
+                )
+            ds_api_config = _j(ds.api_config) if isinstance(ds.api_config, str) else (ds.api_config or {})
+            ds_name = ds.name
 
-        ds_api_config = _j(ds.api_config) if isinstance(ds.api_config, str) else (ds.api_config or {})
         endpoint_url = ds_api_config.get("endpoint_url", "")
         if not endpoint_url:
             return SkillPipelineResult(
                 skill_id=skill.id, skill_name=skill_name, mcp_name=mcp_name,
-                error="DataSubject 缺少 endpoint_url 設定",
+                error="System MCP / DataSubject 缺少 endpoint_url 設定",
             )
 
         # Resolve param mappings: prefer ET-level mappings, fall back to skill's own
@@ -318,14 +330,14 @@ class EventPipelineService:
                 if val is not None:
                     resolved[mcp_param] = val
 
-        # ── Step 1: Fetch raw data from DataSubject API ──────────────────────────
+        # ── Step 1: Fetch raw data from System MCP / DataSubject API ──────────────
         try:
             raw_data = await self._fetch_ds_data(endpoint_url, resolved, base_url)
         except Exception as exc:
             failure_msg = await self._llm.explain_failure(
                 stage="DS 資料撈取",
                 error=str(exc),
-                context={"mcp": mcp_name, "ds": ds.name, "params": resolved},
+                context={"mcp": mcp_name, "ds": ds_name, "params": resolved},
             )
             return SkillPipelineResult(
                 skill_id=skill.id, skill_name=skill_name, mcp_name=mcp_name,
@@ -373,7 +385,7 @@ class EventPipelineService:
             failure_msg = await self._llm.explain_failure(
                 stage="MCP 資料驗證",
                 error="MCP 回傳空資料集，無法進行診斷",
-                context={"mcp": mcp_name, "ds": ds.name, "params": resolved},
+                context={"mcp": mcp_name, "ds": ds_name, "params": resolved},
             )
             return SkillPipelineResult(
                 skill_id=skill.id, skill_name=skill_name, mcp_name=mcp_name,

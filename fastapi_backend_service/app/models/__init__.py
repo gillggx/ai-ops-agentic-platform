@@ -9,6 +9,10 @@ from app.models.skill_definition import SkillDefinitionModel
 from app.models.system_parameter import SystemParameterModel
 from app.models.routine_check import RoutineCheckModel
 from app.models.generated_event import GeneratedEventModel
+from app.models.agent_draft import AgentDraftModel
+from app.models.agent_memory import AgentMemoryModel
+from app.models.user_preference import UserPreferenceModel
+from app.models.agent_session import AgentSessionModel
 
 __all__ = [
     "UserModel",
@@ -20,4 +24,8 @@ __all__ = [
     "SystemParameterModel",
     "RoutineCheckModel",
     "GeneratedEventModel",
+    "AgentDraftModel",
+    "AgentMemoryModel",
+    "UserPreferenceModel",
+    "AgentSessionModel",
 ]

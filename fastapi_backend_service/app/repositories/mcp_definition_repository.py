@@ -25,6 +25,20 @@ class MCPDefinitionRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_by_name(self, name: str) -> Optional[MCPDefinitionModel]:
+        result = await self._db.execute(
+            select(MCPDefinitionModel).where(MCPDefinitionModel.name == name)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_all_by_type(self, mcp_type: str) -> List[MCPDefinitionModel]:
+        result = await self._db.execute(
+            select(MCPDefinitionModel)
+            .where(MCPDefinitionModel.mcp_type == mcp_type)
+            .order_by(MCPDefinitionModel.id)
+        )
+        return list(result.scalars().all())
+
     async def get_by_data_subject(self, ds_id: int) -> List[MCPDefinitionModel]:
         result = await self._db.execute(
             select(MCPDefinitionModel).where(MCPDefinitionModel.data_subject_id == ds_id)

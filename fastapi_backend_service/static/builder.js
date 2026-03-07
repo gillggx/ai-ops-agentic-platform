@@ -99,12 +99,14 @@ function switchView(name) {
   if (name === 'dashboard')        _loadDashboard();
   if (name === 'nested-builder')   _nbInitView();
   if (name === 'data-subjects')    _loadDataSubjects();
+  if (name === 'system-mcps')     _loadSystemMcps();
   if (name === 'event-types')      _loadEventTypes();
   if (name === 'mcp-builder')      _loadMcpDefs();
   if (name === 'skill-builder')    _loadSkillDefs();
   if (name === 'settings')         _loadSettings();
   if (name === 'routine-checks')   _loadRoutineChecks();
   if (name === 'generated-events') _loadGeneratedEvents();
+  if (name === 'agent-brain')      { _brainLoadSoul(); _brainLoadMemories(); }
 
   // Phase 8.6: send AI welcome message once when entering diagnose view
   if (name === 'diagnose' && !_diagnoseWelcomeSent) {
@@ -170,6 +172,10 @@ function _setDrawerContent(title, body, footer) {
 
 async function _renderDrawerContent(type, id) {
   switch (type) {
+    case 'smc-create':
+    case 'smc-edit':
+      await _renderSystemMcpDrawer(id);
+      break;
     case 'ds-create':
     case 'ds-edit':
       await _renderDSDrawer(id);
@@ -327,6 +333,292 @@ async function _deleteDS(id) {
     closeDrawer(true);
     _loadDataSubjects();
   } catch (e) { alert(`刪除失敗：${e.message}`); }
+}
+
+// ══════════════════════════════════════════════════════════════
+// SYSTEM MCPs  (IT Sponsor — Phase 2)
+// ══════════════════════════════════════════════════════════════
+
+async function _loadSystemMcps() {
+  const container = document.getElementById('smc-list');
+  if (!container) return;
+  try {
+    const items = await _api('GET', '/mcp-definitions?type=system') || [];
+    if (items.length === 0) {
+      container.innerHTML = '<p class="text-center text-slate-600 py-12">尚無 System MCP，點擊右上角新增</p>';
+      return;
+    }
+    container.innerHTML = items.map(smc => {
+      const cfg = smc.api_config || {};
+      const inSchema = smc.input_schema || {};
+      const fieldCount = (inSchema.fields || []).length;
+      return `
+      <div class="builder-card" onclick="openDrawer('smc-edit', ${smc.id})">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="builder-card-name">${_esc(smc.name)}</span>
+            <span class="builder-tag bg-blue-100 text-blue-700 border-blue-200">system</span>
+            <span class="builder-tag">${_esc(cfg.method || 'GET')}</span>
+          </div>
+          <div class="builder-card-desc">${_esc(smc.description || '（無說明）')}</div>
+          <div class="builder-card-meta flex gap-2 flex-wrap">
+            <span class="builder-tag truncate max-w-xs">${_esc(cfg.endpoint_url || '未設定 endpoint')}</span>
+            ${fieldCount ? `<span class="builder-tag">${fieldCount} 個查詢欄位</span>` : ''}
+          </div>
+        </div>
+        <div class="text-slate-600 text-sm">›</div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    container.innerHTML = `<p class="text-center text-red-400 py-12">載入失敗：${_esc(e.message)}</p>`;
+  }
+}
+
+/** Render the System MCP drawer — used for both create and edit. */
+async function _renderSystemMcpDrawer(id) {
+  let smc = null;
+  if (id) {
+    smc = await _api('GET', `/mcp-definitions/${id}`);
+  }
+  const title = id ? `編輯 System MCP — ${_esc(smc?.name || '')}` : '新增 System MCP';
+  const cfg       = smc?.api_config  || { endpoint_url: '', method: 'GET', headers: {} };
+  const inSchema  = smc?.input_schema || { fields: [] };
+  const inFields  = inSchema.fields || [];
+
+  // Render dynamic input field rows
+  const fieldsHtml = inFields.map((f, i) => _smcFieldRow(i, f)).join('');
+
+  const body = `
+    <div class="builder-field">
+      <label class="builder-label required">名稱</label>
+      <input id="smc-name" class="builder-input" value="${_esc(smc?.name || '')}"
+             placeholder="e.g. APC_Data" />
+    </div>
+    <div class="builder-field">
+      <label class="builder-label">說明</label>
+      <textarea id="smc-desc" class="builder-textarea" rows="2"
+                placeholder="此 System MCP 提供的資料說明">${_esc(smc?.description || '')}</textarea>
+    </div>
+
+    <div class="text-xs font-bold text-slate-500 uppercase tracking-widest mt-4 mb-2">API 連線設定</div>
+
+    <div class="builder-field">
+      <label class="builder-label required">Endpoint URL</label>
+      <input id="smc-url" class="builder-input font-mono text-sm"
+             value="${_esc(cfg.endpoint_url || '')}"
+             placeholder="/api/v1/mock-data/apc" />
+    </div>
+    <div class="builder-field">
+      <label class="builder-label">HTTP Method</label>
+      <select id="smc-method" class="builder-select">
+        <option value="GET"  ${cfg.method !== 'POST' ? 'selected' : ''}>GET</option>
+        <option value="POST" ${cfg.method === 'POST' ? 'selected' : ''}>POST</option>
+      </select>
+    </div>
+    <div class="builder-field">
+      <label class="builder-label">Headers (JSON，選填)</label>
+      <textarea id="smc-headers" class="builder-textarea font-mono text-xs" rows="2"
+                placeholder='{"Authorization": "Bearer token"}'>${_esc(_prettyJson(cfg.headers || {}))}</textarea>
+    </div>
+
+    <div class="text-xs font-bold text-slate-500 uppercase tracking-widest mt-4 mb-2 flex items-center justify-between">
+      <span>查詢參數 (Input Schema)</span>
+      <button type="button" onclick="_smcAddField()"
+              class="text-xs px-2 py-0.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 rounded-md font-semibold">
+        + 新增欄位
+      </button>
+    </div>
+    <div id="smc-fields-container" class="space-y-2 mb-3">
+      ${fieldsHtml || '<p id="smc-no-fields" class="text-xs text-slate-400 italic">目前無查詢參數，此 MCP 不需要輸入值即可呼叫</p>'}
+    </div>
+
+    <!-- Test connection panel -->
+    <div class="mt-4 border border-slate-200 rounded-lg overflow-hidden">
+      <div class="flex items-center justify-between bg-slate-50 px-3 py-2 border-b border-slate-200">
+        <span class="text-xs font-semibold text-slate-600">🔌 測試連線</span>
+        <button type="button" onclick="_smcTestConnection()"
+                class="text-xs px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md font-semibold">
+          ▶ 測試
+        </button>
+      </div>
+      <div id="smc-test-result" class="p-3 text-xs text-slate-400 italic min-h-[48px]">
+        儲存後填入查詢參數並點擊「測試」，確認 API 連線正常。
+      </div>
+    </div>
+  `;
+
+  const footer = `
+    <button class="builder-btn-secondary" onclick="closeDrawer()">取消</button>
+    ${id ? `<button class="builder-btn-danger mr-auto" onclick="_deleteSystemMcp(${id})">刪除</button>` : ''}
+    <button class="builder-btn-primary" onclick="_saveSystemMcp(${id || 'null'})">
+      ${id ? '更新' : '建立'}
+    </button>
+  `;
+
+  _setDrawerContent(title, body, footer);
+  _smcFieldIndex = inFields.length;
+}
+
+/** Counter for dynamic field rows */
+let _smcFieldIndex = 0;
+
+/** Render one input-schema field row */
+function _smcFieldRow(i, f = {}) {
+  return `
+    <div id="smc-field-${i}" class="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5">
+      <input class="builder-input text-xs flex-1 min-w-0" placeholder="欄位名稱 (e.g. lot_id)"
+             id="smc-fname-${i}" value="${_esc(f.name || '')}">
+      <select class="builder-select text-xs w-24 shrink-0" id="smc-ftype-${i}">
+        <option value="string"  ${(f.type||'string') === 'string'  ? 'selected' : ''}>string</option>
+        <option value="number"  ${f.type === 'number'  ? 'selected' : ''}>number</option>
+        <option value="boolean" ${f.type === 'boolean' ? 'selected' : ''}>boolean</option>
+      </select>
+      <input class="builder-input text-xs flex-1 min-w-0" placeholder="說明"
+             id="smc-fdesc-${i}" value="${_esc(f.description || '')}">
+      <label class="flex items-center gap-1 text-xs text-slate-500 shrink-0 cursor-pointer">
+        <input type="checkbox" id="smc-freq-${i}" ${f.required ? 'checked' : ''} class="accent-indigo-600"> 必填
+      </label>
+      <button type="button" onclick="_smcRemoveField(${i})"
+              class="text-slate-400 hover:text-red-500 text-sm font-bold shrink-0 px-1">✕</button>
+    </div>`;
+}
+
+function _smcAddField() {
+  const container = document.getElementById('smc-fields-container');
+  if (!container) return;
+  const noFields = document.getElementById('smc-no-fields');
+  if (noFields) noFields.remove();
+  const div = document.createElement('div');
+  div.innerHTML = _smcFieldRow(_smcFieldIndex);
+  container.appendChild(div.firstElementChild);
+  _smcFieldIndex++;
+}
+
+function _smcRemoveField(i) {
+  document.getElementById(`smc-field-${i}`)?.remove();
+  if (!document.getElementById('smc-fields-container')?.children.length) {
+    document.getElementById('smc-fields-container').innerHTML =
+      '<p id="smc-no-fields" class="text-xs text-slate-400 italic">目前無查詢參數</p>';
+  }
+}
+
+/** Collect all input-schema field rows from the drawer */
+function _smcCollectFields() {
+  const fields = [];
+  const container = document.getElementById('smc-fields-container');
+  if (!container) return fields;
+  for (let i = 0; i < _smcFieldIndex; i++) {
+    const nameEl = document.getElementById(`smc-fname-${i}`);
+    if (!nameEl || !document.getElementById(`smc-field-${i}`)) continue; // removed
+    const name = nameEl.value.trim();
+    if (!name) continue;
+    fields.push({
+      name,
+      type: document.getElementById(`smc-ftype-${i}`)?.value || 'string',
+      description: document.getElementById(`smc-fdesc-${i}`)?.value.trim() || '',
+      required: document.getElementById(`smc-freq-${i}`)?.checked || false,
+    });
+  }
+  return fields;
+}
+
+async function _saveSystemMcp(id) {
+  const name = document.getElementById('smc-name')?.value.trim();
+  if (!name) { alert('請填寫名稱'); return; }
+  const url = document.getElementById('smc-url')?.value.trim();
+  if (!url) { alert('請填寫 Endpoint URL'); return; }
+
+  let headers = {};
+  try { headers = JSON.parse(document.getElementById('smc-headers')?.value || '{}'); } catch {}
+
+  const payload = {
+    name,
+    description: document.getElementById('smc-desc')?.value.trim() || '',
+    mcp_type: 'system',
+    api_config: {
+      endpoint_url: url,
+      method: document.getElementById('smc-method')?.value || 'GET',
+      headers,
+    },
+    input_schema: { fields: _smcCollectFields() },
+  };
+
+  try {
+    if (id) {
+      await _api('PATCH', `/mcp-definitions/${id}`, payload);
+    } else {
+      await _api('POST', '/mcp-definitions', payload);
+    }
+    // Invalidate system MCP cache so dropdowns refresh
+    _dataSubjects = [];
+    closeDrawer(true);
+    _loadSystemMcps();
+  } catch (e) {
+    alert(`儲存失敗：${e.message}`);
+  }
+}
+
+async function _deleteSystemMcp(id) {
+  if (!confirm('確定要刪除此 System MCP？相依的 Custom MCP 將失去資料來源。')) return;
+  try {
+    await _api('DELETE', `/mcp-definitions/${id}`);
+    _dataSubjects = [];
+    closeDrawer(true);
+    _loadSystemMcps();
+  } catch (e) { alert(`刪除失敗：${e.message}`); }
+}
+
+async function _smcTestConnection() {
+  const url    = document.getElementById('smc-url')?.value.trim();
+  const method = document.getElementById('smc-method')?.value || 'GET';
+  const resultEl = document.getElementById('smc-test-result');
+  if (!url) { if (resultEl) resultEl.innerHTML = '<span class="text-amber-500">請先填寫 Endpoint URL</span>'; return; }
+  if (resultEl) resultEl.innerHTML = '<span class="animate-pulse text-slate-400">連線測試中…</span>';
+
+  // Collect any filled-in param values from the field rows
+  const params = {};
+  for (let i = 0; i < _smcFieldIndex; i++) {
+    if (!document.getElementById(`smc-field-${i}`)) continue;
+    const nameEl = document.getElementById(`smc-fname-${i}`);
+    const valEl  = document.getElementById(`smc-test-param-${i}`);
+    if (nameEl?.value.trim() && valEl?.value.trim()) {
+      params[nameEl.value.trim()] = valEl.value.trim();
+    }
+  }
+
+  // Build test param inputs if they don't exist yet
+  const container = document.getElementById('smc-fields-container');
+  let hasTestInputs = !!document.getElementById('smc-test-param-0');
+  if (!hasTestInputs && container) {
+    // Inject small "test value" inputs next to each field row
+    for (let i = 0; i < _smcFieldIndex; i++) {
+      const row = document.getElementById(`smc-field-${i}`);
+      if (!row) continue;
+      if (!document.getElementById(`smc-test-param-${i}`)) {
+        const inp = document.createElement('input');
+        inp.id = `smc-test-param-${i}`;
+        inp.className = 'builder-input text-xs w-24 shrink-0 border-dashed';
+        inp.placeholder = '測試值';
+        row.insertBefore(inp, row.querySelector('button'));
+      }
+    }
+    if (resultEl) resultEl.innerHTML = '<span class="text-slate-400">請在各欄位旁填入測試值，再點擊測試。</span>';
+    return;
+  }
+
+  try {
+    const path = url.replace(/^\/api\/v1/, '');
+    const qp = new URLSearchParams(params);
+    const fullPath = method === 'GET' && qp.toString() ? `${path}?${qp}` : path;
+    const body = method !== 'GET' ? params : undefined;
+    const data = await _api(method, fullPath, body);
+    const preview = JSON.stringify(data, null, 2).slice(0, 800);
+    if (resultEl) resultEl.innerHTML = `
+      <div class="text-emerald-600 font-semibold mb-1">✓ 連線成功</div>
+      <pre class="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">${_esc(preview)}${preview.length >= 800 ? '\n…（截斷）' : ''}</pre>`;
+  } catch (e) {
+    if (resultEl) resultEl.innerHTML = `<span class="text-red-500">✗ 連線失敗：${_esc(e.message)}</span>`;
+  }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -638,12 +930,13 @@ async function _renderEtMappingRows(skillId, existingMappings) {
       try { _mcpDefs = await _api('GET', '/mcp-definitions') || []; } catch {}
     }
     const mcp = _mcpDefs.find(m => m.id === mcpId);
-    if (mcp?.data_subject_id) {
-      // Lazy-load DataSubjects if needed
+    const dataSourceId = mcp?.system_mcp_id || mcp?.data_subject_id;
+    if (dataSourceId) {
+      // Lazy-load system MCPs if needed
       if (_dataSubjects.length === 0) {
-        try { _dataSubjects = await _api('GET', '/data-subjects') || []; } catch {}
+        try { _dataSubjects = await _api('GET', '/mcp-definitions?type=system') || []; } catch {}
       }
-      const ds = _dataSubjects.find(d => d.id === mcp.data_subject_id);
+      const ds = _dataSubjects.find(d => d.id === dataSourceId);
       if (ds?.input_schema) {
         try {
           const schema = typeof ds.input_schema === 'string'
@@ -662,7 +955,7 @@ async function _renderEtMappingRows(skillId, existingMappings) {
 
   const attrs = _getEtCurrentAttrs();
   if (mcpParams.length === 0) {
-    container.innerHTML = '<p class="text-xs text-slate-500 text-center py-2">找不到此 Skill MCP 對應的 DataSubject 查詢參數</p>';
+    container.innerHTML = '<p class="text-xs text-slate-500 text-center py-2">找不到此 Skill MCP 對應的 System MCP 查詢參數</p>';
     return;
   }
 
@@ -718,13 +1011,14 @@ async function _autoMapEtSkill() {
   const mcp = _mcpDefs.find(m => m.id === mcpId);
   if (!mcp) { _autoMapEtSkillByName(); return; }
 
-  // Build tool_input_schema from DataSubject.input_schema (not mcp.input_definition)
+  // Build tool_input_schema from System MCP input_schema (not mcp.input_definition)
   let tool_input_schema = {};
-  if (mcp.data_subject_id) {
+  const _dsId = mcp.system_mcp_id || mcp.data_subject_id;
+  if (_dsId) {
     if (_dataSubjects.length === 0) {
-      try { _dataSubjects = await _api('GET', '/data-subjects') || []; } catch {}
+      try { _dataSubjects = await _api('GET', '/mcp-definitions?type=system') || []; } catch {}
     }
-    const ds = _dataSubjects.find(d => d.id === mcp.data_subject_id);
+    const ds = _dataSubjects.find(d => d.id === _dsId);
     if (ds?.input_schema) {
       try {
         const schema = typeof ds.input_schema === 'string'
@@ -821,14 +1115,14 @@ function _removeEtSkill(skillId) {
 async function _loadMcpDefs() {
   const container = document.getElementById('mcp-list');
   try {
-    _mcpDefs = await _api('GET', '/mcp-definitions') || [];
-    if (_dataSubjects.length === 0) _dataSubjects = await _api('GET', '/data-subjects') || [];
+    _mcpDefs = await _api('GET', '/mcp-definitions?type=custom') || [];
+    if (_dataSubjects.length === 0) _dataSubjects = await _api('GET', '/mcp-definitions?type=system') || [];
     if (_mcpDefs.length === 0) {
       container.innerHTML = '<p class="text-center text-slate-600 py-12">尚無 MCP，點擊右上角新增</p>';
       return;
     }
     container.innerHTML = _mcpDefs.map(mcp => {
-      const ds = _dataSubjects.find(d => d.id === mcp.data_subject_id);
+      const ds = _dataSubjects.find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id));
       const hasGenerated = !!(mcp.processing_script);
       return `
         <div class="builder-card" onclick="_mcpOpenEditor(${mcp.id})">
@@ -836,7 +1130,7 @@ async function _loadMcpDefs() {
             <div class="builder-card-name">${_esc(mcp.name)}</div>
             <div class="builder-card-desc">${_esc(mcp.description || '（無說明）')}</div>
             <div class="builder-card-meta">
-              <span class="builder-tag">${_esc(ds?.name || `DS #${mcp.data_subject_id}`)}</span>
+              <span class="builder-tag">${_esc(ds?.name || `DS #${mcp.system_mcp_id || mcp.data_subject_id}`)}</span>
               ${hasGenerated ? '<span class="builder-tag builder-tag-green">✓ LLM 已生成</span>' : '<span class="builder-tag builder-tag-amber">待 LLM 生成</span>'}
             </div>
           </div>
@@ -853,13 +1147,14 @@ async function _renderMCPDrawer(id) {
   // Reset try-run state for new MCPs
   if (!id) { _sampleData = null; _tryRunPassed = false; _tryRunResult = null; }
 
-  if (_dataSubjects.length === 0) _dataSubjects = await _api('GET', '/data-subjects') || [];
+  if (_dataSubjects.length === 0) _dataSubjects = await _api('GET', '/mcp-definitions?type=system') || [];
   let mcp = null;
   if (id) mcp = _mcpDefs.find(m => m.id === id) || await _api('GET', `/mcp-definitions/${id}`);
   const title = id ? `編輯 MCP — ${_esc(mcp?.name || '')}` : '新增 MCP';
 
+  const selectedSysMcpId = mcp?.system_mcp_id || mcp?.data_subject_id;
   const dsOptions = _dataSubjects.map(ds =>
-    `<option value="${ds.id}" ${mcp?.data_subject_id === ds.id ? 'selected' : ''}>${_esc(ds.name)}</option>`
+    `<option value="${ds.id}" ${selectedSysMcpId === ds.id ? 'selected' : ''}>${_esc(ds.name)}</option>`
   ).join('');
 
   // Save button: disabled for new MCP until try-run passes; always enabled when editing
@@ -881,7 +1176,7 @@ async function _renderMCPDrawer(id) {
       Step 1 · 選定資料源 &amp; 撈取樣本
     </div>
     <div class="builder-field">
-      <label class="builder-label required">選定 DataSubject</label>
+      <label class="builder-label required">選定 System MCP (資料源)</label>
       <select id="mcp-ds" class="builder-select" onchange="_onDsChange()">
         <option value="">— 請選擇 —</option>
         ${dsOptions}
@@ -1086,7 +1381,7 @@ async function _tryRunMCP(n) {
   const btn      = document.getElementById(`mcp-tryrun-btn-${tabN}`);
 
   if (!intent)      { alert('請先填寫加工意圖'); return; }
-  if (!dsId)        { alert('請先選定 DataSubject'); return; }
+  if (!dsId)        { alert('請先選定 System MCP (資料源)'); return; }
   if (!_sampleData) { alert('請先點擊「撈取樣本資料」取得真實資料'); return; }
 
   btn.disabled = true;
@@ -1098,7 +1393,7 @@ async function _tryRunMCP(n) {
   try {
     const check = await _api('POST', '/mcp-definitions/check-intent', {
       processing_intent: intent,
-      data_subject_id: dsId,
+      system_mcp_id: dsId,
     });
 
     const improvedIntent = check.improved_intent || check.suggested_prompt || '';
@@ -1210,7 +1505,7 @@ async function _doTryRun(n) {
   try {
     const result = await _api('POST', '/mcp-definitions/try-run', {
       processing_intent: intent,
-      data_subject_id: dsId,
+      system_mcp_id: dsId,
       sample_data: _sampleData,
     }, _tryRunAbort.signal);
     clearTimeout(_tryRunTimer);
@@ -1384,14 +1679,15 @@ function _renderStandardPayload(result) {
               if (hasHorizLegend && mergedMargin.b < 100) mergedMargin.b = 100;
               const legendOverride = hasHorizLegend ? { legend: { ...specLayout.legend, y: -0.28, x: 0, xanchor: 'left' } } : {};
               const layout = Object.assign({
+                height: 360,
                 paper_bgcolor: '#ffffff',
                 plot_bgcolor:  '#f8fafc',
                 font: { color: '#1e293b', size: 11 },
-              }, specLayout, { margin: mergedMargin }, legendOverride);
+              }, specLayout, { height: specLayout.height || 360, margin: mergedMargin }, legendOverride);
               Plotly.newPlot(el, spec.data || [], layout, { responsive: true, displayModeBar: false });
             } catch(e) { el.innerHTML = `<p class="text-xs text-red-400 p-4">圖表渲染失敗：${e.message}</p>`; }
           }, 80);
-          return `<div class="mb-3"><div id="${plotId}" style="width:100%;min-height:280px;"></div></div>`;
+          return `<div class="mb-3"><div id="${plotId}" style="width:100%;height:360px;"></div></div>`;
         } else {
           // Unsupported format — HTML output (fig.to_html) is blocked
           return `<div class="mb-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
@@ -1689,12 +1985,12 @@ async function _triggerMcpGenerate(id) {
 async function _saveMCP(id) {
   const name = document.getElementById('mcp-name').value.trim();
   const dsId = parseInt(document.getElementById('mcp-ds').value);
-  if (!name || !dsId) { alert('請填寫名稱並選擇 DataSubject'); return; }
+  if (!name || !dsId) { alert('請填寫名稱並選擇 System MCP (資料源)'); return; }
 
   const body = {
     name,
     description: document.getElementById('mcp-desc').value.trim(),
-    data_subject_id: dsId,
+    system_mcp_id: dsId,
     processing_intent: document.getElementById(`mcp-intent-${_activeTryTabN}`)?.value?.trim() || '',
   };
   // Always merge try-run artifacts when available (applies to both create and update)
@@ -1715,7 +2011,7 @@ async function _saveMCP(id) {
       const created = await _api('POST', '/mcp-definitions', {
         name: body.name,
         description: body.description,
-        data_subject_id: body.data_subject_id,
+        system_mcp_id: body.system_mcp_id,
         processing_intent: body.processing_intent,
       });
       if (_tryRunResult && _tryRunResult.success) {
@@ -1801,7 +2097,7 @@ function _renderSkillMcpCard() {
   }
   const mcp = _mcpDefs.find(m => m.id === _selectedSkillMcp);
   if (!mcp) return;
-  const ds = _dataSubjects.find(d => d.id === mcp.data_subject_id);
+  const ds = _dataSubjects.find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id));
   const inputFields = ds?.input_schema?.fields || [];
 
   const noScriptWarning = mcp.processing_script ? '' :
@@ -1828,7 +2124,7 @@ function _renderSkillMcpCard() {
     }).join('');
     paramRows = headerRow + rows;
   } else {
-    paramRows = '<p class="text-xs text-slate-500 italic">此 DataSubject 不需要輸入參數</p>';
+    paramRows = '<p class="text-xs text-slate-500 italic">此 System MCP 不需要輸入參數</p>';
   }
 
   container.innerHTML = `
@@ -1904,9 +2200,9 @@ async function _executeSkillMcp() {
     return;
   }
 
-  const ds = _dataSubjects.find(d => d.id === mcp.data_subject_id);
+  const ds = _dataSubjects.find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id));
   if (!ds) {
-    statusEl.innerHTML = '<p class="text-xs text-red-400">找不到對應的 DataSubject</p>';
+    statusEl.innerHTML = '<p class="text-xs text-red-400">找不到對應的 System MCP / DataSubject</p>';
     return;
   }
 
@@ -1920,20 +2216,20 @@ async function _executeSkillMcp() {
 
   const endpointUrl = ds.api_config?.endpoint_url;
   if (!endpointUrl) {
-    statusEl.innerHTML = '<p class="text-xs text-red-400">DataSubject 缺少 endpoint_url 設定</p>';
+    statusEl.innerHTML = '<p class="text-xs text-red-400">System MCP 缺少 endpoint_url 設定</p>';
     return;
   }
 
   if (btn) { btn.disabled = true; btn.textContent = '⏳ 載入中...'; }
-  statusEl.innerHTML = '<div class="llm-loading"><div class="llm-spinner"></div><span>正在從 DataSubject 取得資料並執行腳本…</span></div>';
+  statusEl.innerHTML = '<div class="llm-loading"><div class="llm-spinner"></div><span>正在從 System MCP 取得資料並執行腳本…</span></div>';
   resultEl.innerHTML = '';
 
   try {
-    // Step 1: Fetch raw data from DataSubject API with test values
+    // Step 1: Fetch raw data from System MCP API with test values
     const params = new URLSearchParams(testValues);
     const rawUrl = endpointUrl + (Object.keys(testValues).length > 0 ? '?' + params.toString() : '');
     const rawRes = await fetch(rawUrl, { headers: { 'Authorization': `Bearer ${_token}` } });
-    if (!rawRes.ok) throw new Error(`DataSubject API 返回 HTTP ${rawRes.status}`);
+    if (!rawRes.ok) throw new Error(`System MCP API 返回 HTTP ${rawRes.status}`);
     const rawJson = await rawRes.json();
     const rawData = rawJson.data !== undefined ? rawJson.data : rawJson;
 
@@ -1965,8 +2261,8 @@ async function _executeSkillMcp() {
 
 async function _renderSkillDrawer(id) {
   if (_eventTypes.length === 0)   _eventTypes   = await _api('GET', '/event-types') || [];
-  if (_mcpDefs.length === 0)      _mcpDefs      = await _api('GET', '/mcp-definitions') || [];
-  if (_dataSubjects.length === 0) _dataSubjects = await _api('GET', '/data-subjects') || [];
+  if (_mcpDefs.length === 0)      _mcpDefs      = await _api('GET', '/mcp-definitions?type=custom') || [];
+  if (_dataSubjects.length === 0) _dataSubjects = await _api('GET', '/mcp-definitions?type=system') || [];
   let sk = null;
   if (id) sk = _skillDefs.find(s => s.id === id) || await _api('GET', `/skill-definitions/${id}`);
   const title = id ? `編輯 Skill — ${_esc(sk?.name || '')}` : '新增 Skill';
@@ -1980,7 +2276,7 @@ async function _renderSkillDrawer(id) {
   _skillMcpExecResult = null;
 
   const mcpOptions = _mcpDefs.map(m => {
-    const ds = _dataSubjects.find(d => d.id === m.data_subject_id);
+    const ds = _dataSubjects.find(d => d.id === (m.system_mcp_id || m.data_subject_id));
     return `<option value="${m.id}"${_selectedSkillMcp === m.id ? ' selected' : ''}>${_esc(m.name)}${ds ? ' (' + _esc(ds.name) + ')' : ''}</option>`;
   }).join('');
 
@@ -3338,10 +3634,10 @@ function _buildSkillInputFields(skillId, currentValues) {
     return `<div class="text-xs text-slate-400 py-2">找不到此 Skill 的 MCP 定義</div>`;
   }
 
-  // Get DataSubject input_schema fields (the real named query params)
-  const ds = (_dataSubjects||[]).find(d => d.id === mcp.data_subject_id);
+  // Get System MCP input_schema fields (the real named query params)
+  const ds = (_dataSubjects||[]).find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id));
   if (!ds?.input_schema) {
-    return `<div class="text-xs text-slate-400 py-2">找不到此 MCP 對應的 DataSubject 查詢參數定義</div>`;
+    return `<div class="text-xs text-slate-400 py-2">找不到此 MCP 對應的 System MCP 查詢參數定義</div>`;
   }
 
   let fields = [];
@@ -3352,13 +3648,13 @@ function _buildSkillInputFields(skillId, currentValues) {
   } catch {}
 
   if (!fields.length) {
-    return `<div class="text-xs text-slate-400 py-2">此 DataSubject 無需輸入參數</div>`;
+    return `<div class="text-xs text-slate-400 py-2">此 System MCP 無需輸入參數</div>`;
   }
 
   return `
     <div class="border border-indigo-200 rounded-lg p-3 bg-indigo-50/50">
       <div class="text-xs font-semibold text-indigo-700 mb-2">
-        📋 Skill 執行參數（DataSubject: ${_esc(ds.name || '')}）
+        📋 Skill 執行參數（System MCP: ${_esc(ds.name || '')}）
       </div>
       <div class="space-y-2">
         ${fields.map(f => `
@@ -3436,9 +3732,9 @@ async function _renderRcEventMappingRows(etId, skillId, existingMappings) {
   // Get MCP output fields: skill → MCP → DataSubject.output_schema.fields
   let outputFields = [];
   if (skillId) {
-    // Ensure data-subjects are loaded
+    // Ensure system MCPs are loaded
     if (!_dataSubjects || _dataSubjects.length === 0) {
-      try { _dataSubjects = await _api('GET', '/data-subjects') || []; } catch {}
+      try { _dataSubjects = await _api('GET', '/mcp-definitions?type=system') || []; } catch {}
     }
     const skill = (_skillDefs||[]).find(s => s.id === skillId);
     if (skill) {
@@ -3448,7 +3744,7 @@ async function _renderRcEventMappingRows(etId, skillId, existingMappings) {
       if (mcpIdList.length === 0 && skill.mcp_id) mcpIdList = [skill.mcp_id];
       const mcpId = mcpIdList[0] || null;
       const mcp = mcpId ? (_mcpDefs||[]).find(m => m.id === mcpId) : null;
-      const ds = mcp ? (_dataSubjects||[]).find(d => d.id === mcp.data_subject_id) : null;
+      const ds = mcp ? (_dataSubjects||[]).find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id)) : null;
       if (ds?.output_schema) {
         try {
           const schema = typeof ds.output_schema === 'string' ? JSON.parse(ds.output_schema) : ds.output_schema;
@@ -3533,7 +3829,7 @@ async function _autoMapRcEventParams() {
     if (mcpIdList.length === 0 && skill.mcp_id) mcpIdList = [skill.mcp_id];
     const mcpId = mcpIdList[0] || null;
     const mcp = mcpId ? (_mcpDefs||[]).find(m => m.id === mcpId) : null;
-    const ds = mcp ? (_dataSubjects||[]).find(d => d.id === mcp.data_subject_id) : null;
+    const ds = mcp ? (_dataSubjects||[]).find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id)) : null;
     if (ds?.output_schema) {
       try {
         const schema = typeof ds.output_schema === 'string' ? JSON.parse(ds.output_schema) : ds.output_schema;
@@ -3543,7 +3839,7 @@ async function _autoMapRcEventParams() {
   }
 
   if (!Object.keys(event_schema).length || !outputFields.length) {
-    if (statusEl) statusEl.innerHTML = '<p class="text-xs text-slate-400">無足夠資訊進行自動映射（請確認已選擇 Skill 並設定 DataSubject output schema）</p>';
+    if (statusEl) statusEl.innerHTML = '<p class="text-xs text-slate-400">無足夠資訊進行自動映射（請確認已選擇 Skill 並設定 System MCP output schema）</p>';
     return;
   }
 
@@ -3588,7 +3884,7 @@ async function _openRoutineCheckDrawer(id) {
     try { _mcpDefs = await _api('GET', '/mcp-definitions'); } catch {}
   }
   if (!_dataSubjects || _dataSubjects.length === 0) {
-    try { _dataSubjects = await _api('GET', '/data-subjects'); } catch {}
+    try { _dataSubjects = await _api('GET', '/mcp-definitions?type=system'); } catch {}
   }
   // Load EventTypes for displaying existing ET name in edit mode
   if (!_eventTypes || _eventTypes.length === 0) {
@@ -3968,7 +4264,7 @@ async function _nbFetchPreview() {
     const sel = document.getElementById('nb-mcp-select');
     const mcpId = sel ? parseInt(sel.value) : null;
     const mcp = mcpId ? _mcpDefs.find(m => m.id === mcpId) : null;
-    ds = mcp?.data_subject_id ? _dataSubjects.find(d => d.id === mcp.data_subject_id) : null;
+    ds = (mcp?.system_mcp_id || mcp?.data_subject_id) ? _dataSubjects.find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id)) : null;
     mcpOutputSchema = mcp?.output_schema || null;
     for (const f of (ds?.input_schema?.fields || [])) {
       const el = document.getElementById(`nb-mcp-select-param-${f.name}`);
@@ -3976,7 +4272,7 @@ async function _nbFetchPreview() {
     }
   }
 
-  if (!ds) { alert('請先選擇 Data Subject'); return; }
+  if (!ds) { alert('請先選擇 System MCP'); return; }
 
   const drEl  = document.getElementById('nb-data-review');
   const frEl  = document.getElementById('nb-format-review');
@@ -3988,7 +4284,7 @@ async function _nbFetchPreview() {
 
   try {
     const rawUrl = ds.api_config?.endpoint_url || '';
-    if (!rawUrl) throw new Error('DataSubject 沒有設定 API endpoint');
+    if (!rawUrl) throw new Error('System MCP 沒有設定 API endpoint');
     const path = rawUrl.replace(/^\/api\/v1/, '');
     const method = (ds.api_config?.method || 'GET').toUpperCase();
     const qp = new URLSearchParams(formParams);
@@ -4082,7 +4378,7 @@ async function _nbInitView() {
     try { _mcpDefs = await _api('GET', '/mcp-definitions'); } catch(_) {}
   }
   if (!_dataSubjects.length) {
-    try { _dataSubjects = await _api('GET', '/data-subjects'); } catch(_) {}
+    try { _dataSubjects = await _api('GET', '/mcp-definitions?type=system'); } catch(_) {}
   }
 
   // Populate Skill select
@@ -4099,7 +4395,7 @@ async function _nbInitView() {
       _mcpDefs.map(m => `<option value="${m.id}">${_esc(m.name)}</option>`).join('');
   }
 
-  // Populate DS select in "build new" panel
+  // Populate System MCP select in "build new" panel
   const dsSel = document.getElementById('nb-mcp-ds');
   if (dsSel) {
     dsSel.innerHTML = '<option value="">— 請選擇 —</option>' +
@@ -4254,7 +4550,7 @@ function _nbCollectSkillInput() {
   const sel = document.getElementById('nb-mcp-select');
   const mcpId = sel ? parseInt(sel.value) : null;
   const mcp = mcpId ? _mcpDefs.find(m => m.id === mcpId) : null;
-  const ds = mcp?.data_subject_id ? _dataSubjects.find(d => d.id === mcp.data_subject_id) : null;
+  const ds = (mcp?.system_mcp_id || mcp?.data_subject_id) ? _dataSubjects.find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id)) : null;
   const params = {};
   for (const f of (ds?.input_schema?.fields || [])) {
     const el = document.getElementById(`nb-mcp-select-param-${f.name}`);
@@ -4271,8 +4567,8 @@ function _nbOnMcpSelect() {
   if (!hint) return;
   if (!mcp) { hint.innerHTML = ''; return; }
 
-  // Render DS input form from the MCP's bound DataSubject
-  const ds = mcp.data_subject_id ? _dataSubjects.find(d => d.id === mcp.data_subject_id) : null;
+  // Render System MCP input form from the MCP's bound System MCP
+  const ds = (mcp.system_mcp_id || mcp.data_subject_id) ? _dataSubjects.find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id)) : null;
   const fields = ds?.input_schema?.fields || [];
 
   if (!fields.length) {
@@ -4288,7 +4584,7 @@ function _nbOnMcpSelect() {
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                 d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
         </svg>
-        DS 查詢參數 — ${_esc(ds.name)}
+        System MCP 查詢參數 — ${_esc(ds.name)}
       </p>
       <div class="space-y-2.5">
         ${fields.map(f => `
@@ -4396,17 +4692,17 @@ async function _tryRunNestedBuilder() {
       // "建立全新" mode — fetch real sample data then run try-run
       const dsId   = parseInt(document.getElementById('nb-mcp-ds')?.value || '0');
       const intent = document.getElementById('nb-mcp-intent')?.value?.trim() || '';
-      if (!dsId)   throw new Error('請選擇 Data Subject');
+      if (!dsId)   throw new Error('請選擇 System MCP');
       if (!intent) throw new Error('請填寫加工意圖 (Processing Intent)');
 
       const ds = _dataSubjects.find(d => d.id === dsId);
-      if (!ds) throw new Error('找不到所選的 Data Subject');
+      if (!ds) throw new Error('找不到所選的 System MCP');
 
       // Fetch raw data from DS endpoint using form params (same as _fetchSample())
       let sampleData = null;
       const rawUrl = ds.api_config?.endpoint_url || '';
       if (rawUrl) {
-        _nbLogLine('📡', `正在撈取 Data Subject 樣本資料：${ds.name}…`);
+        _nbLogLine('📡', `正在撈取 System MCP 樣本資料：${ds.name}…`);
         const formParams = _nbCollectFormParams();
         const method = (ds.api_config?.method || 'GET').toUpperCase();
         const path = rawUrl.replace(/^\/api\/v1/, '');
@@ -4424,7 +4720,7 @@ async function _tryRunNestedBuilder() {
       _nbLogLine('⚙', 'LLM 生成 MCP 處理腳本並沙箱執行中…');
       mcpTryResult = await _api('POST', '/mcp-definitions/try-run', {
         processing_intent: intent,
-        data_subject_id:   dsId,
+        system_mcp_id:     dsId,
         sample_data:       sampleData,
       });
       _nbTryRunResult = mcpTryResult;
@@ -4435,24 +4731,24 @@ async function _tryRunNestedBuilder() {
       const mcp = _mcpDefs.find(m => m.id === mcpId);
       if (!mcp) throw new Error(`找不到 MCP #${mcpId}`);
 
-      const ds = mcp.data_subject_id ? _dataSubjects.find(d => d.id === mcp.data_subject_id) : null;
+      const ds = (mcp.system_mcp_id || mcp.data_subject_id) ? _dataSubjects.find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id)) : null;
       const dsFields = ds?.input_schema?.fields || [];
 
-      // Validate all required DS input fields are filled
+      // Validate all required System MCP input fields are filled
       const missingRequired = dsFields.filter(f => {
         if (!f.required) return false;
         const el = document.getElementById(`nb-mcp-select-param-${f.name}`);
         return !el || !el.value.trim();
       });
       if (missingRequired.length) {
-        throw new Error(`請先填寫 DS 查詢參數：${missingRequired.map(f => f.label || f.name).join('、')}`);
+        throw new Error(`請先填寫 System MCP 查詢參數：${missingRequired.map(f => f.label || f.name).join('、')}`);
       }
 
-      // Collect form params and fetch real DS data
+      // Collect form params and fetch real System MCP data
       let rawData = null;
       const rawUrl = ds?.api_config?.endpoint_url || '';
       if (ds && rawUrl) {
-        _nbLogLine('📡', `正在撈取 DS 資料：${ds.name}…`);
+        _nbLogLine('📡', `正在撈取 System MCP 資料：${ds.name}…`);
         const formParams = {};
         for (const f of dsFields) {
           const el = document.getElementById(`nb-mcp-select-param-${f.name}`);
@@ -4465,12 +4761,12 @@ async function _tryRunNestedBuilder() {
         const body = method !== 'GET' ? formParams : undefined;
         try {
           rawData = await _api(method, fullPath, body);
-          _nbLogLine('✓', 'DS 資料撈取成功', 'text-emerald-600');
+          _nbLogLine('✓', 'System MCP 資料撈取成功', 'text-emerald-600');
         } catch(fetchErr) {
-          throw new Error(`撈取 DS 資料失敗：${fetchErr.message}`);
+          throw new Error(`撈取 System MCP 資料失敗：${fetchErr.message}`);
         }
       } else if (!ds) {
-        throw new Error('此 MCP 未綁定 Data Subject，無法取得資料');
+        throw new Error('此 MCP 未綁定 System MCP，無法取得資料');
       }
 
       if (!rawData) throw new Error('DS 回傳空資料，請確認查詢參數是否正確');
@@ -4785,7 +5081,7 @@ async function _nbSaveRoutineCheck() {
       const mcpCreateRes = await _api('POST', '/mcp-definitions', {
         name: mcpName,
         description: mcpDesc,
-        data_subject_id: dsId,
+        system_mcp_id: dsId,
         processing_intent: intent,
       });
       mcpId = mcpCreateRes.id;
@@ -4919,9 +5215,9 @@ function _skLogLine(icon, text, color = 'text-slate-600') {
 }
 
 // ── Open / close editor ───────────────────────────────────────
-async function _skOpenEditor(id) {
-  if (_mcpDefs.length === 0)    _mcpDefs    = await _api('GET', '/mcp-definitions') || [];
-  if (_dataSubjects.length === 0) _dataSubjects = await _api('GET', '/data-subjects') || [];
+async function _skOpenEditor(id, draftData) {
+  if (_mcpDefs.length === 0)    _mcpDefs    = await _api('GET', '/mcp-definitions?type=custom') || [];
+  if (_dataSubjects.length === 0) _dataSubjects = await _api('GET', '/mcp-definitions?type=system') || [];
 
   // Switch to editor state
   document.getElementById('sk-list-state')?.classList.add('hidden');
@@ -4948,27 +5244,42 @@ async function _skOpenEditor(id) {
   _skTryRunMcpResult = null;
   _skMcpSampleParams = null;
 
-  // Populate MCP dropdown
+  // Populate MCP dropdown — custom MCPs + system MCPs (both usable)
   const mcpSel = document.getElementById('sk-edit-mcp-select');
   if (mcpSel) {
+    const customOpts = _mcpDefs.map(m => {
+      const ds = _dataSubjects.find(d => d.id === (m.system_mcp_id || m.data_subject_id));
+      return `<option value="${m.id}">${_esc(m.name)}${ds ? ' (' + _esc(ds.name) + ')' : ''}</option>`;
+    }).join('');
+    const sysOpts = _dataSubjects.map(m =>
+      `<option value="${m.id}">[系統] ${_esc(m.name)}</option>`
+    ).join('');
     mcpSel.innerHTML = '<option value="">— 請選擇 MCP —</option>' +
-      _mcpDefs.map(m => {
-        const ds = _dataSubjects.find(d => d.id === m.data_subject_id);
-        return `<option value="${m.id}">${_esc(m.name)}${ds ? ' (' + _esc(ds.name) + ')' : ''}</option>`;
-      }).join('');
+      (customOpts ? `<optgroup label="Custom MCP">${customOpts}</optgroup>` : '') +
+      (sysOpts ? `<optgroup label="System MCP">${sysOpts}</optgroup>` : '');
   }
 
   if (!id) {
-    // New Skill
-    document.getElementById('sk-editor-title').textContent = '新增 Skill';
+    // New Skill (possibly pre-filled from agent draft)
+    const isDraft = !!draftData;
+    document.getElementById('sk-editor-title').textContent = isDraft ? '草稿審核 — 新增 Skill' : '新增 Skill';
     document.getElementById('sk-edit-id').value = '';
-    document.getElementById('sk-edit-name').value = '';
-    document.getElementById('sk-edit-desc').value = '';
-    document.getElementById('sk-edit-prompt').value = '';
-    document.getElementById('sk-edit-subject').value = '';
-    document.getElementById('sk-edit-action').value = '';
-    if (mcpSel) mcpSel.value = '';
+    document.getElementById('sk-edit-name').value        = draftData?.name || '';
+    document.getElementById('sk-edit-desc').value        = draftData?.description || '';
+    document.getElementById('sk-edit-prompt').value      = draftData?.diagnostic_prompt || '';
+    document.getElementById('sk-edit-subject').value     = draftData?.problematic_target || '';
+    document.getElementById('sk-edit-action').value      = draftData?.expert_action || '';
+    if (mcpSel) {
+      const mcpRef = draftData?.mcp_id || (draftData?.mcp_ids?.[0]);
+      mcpSel.value = mcpRef != null ? String(mcpRef) : '';
+      if (mcpRef) _skOnMcpChange();
+    }
     document.getElementById('sk-edit-mcp-hint').innerHTML = '';
+    // If from draft, store draft_id for publish button
+    if (isDraft && draftData._draft_id) {
+      document.getElementById('sk-editor').dataset.draftId = draftData._draft_id;
+    }
+    _skSetMode('visual'); // always reset to Visual mode on open
     return;
   }
 
@@ -4985,11 +5296,19 @@ async function _skOpenEditor(id) {
     mcpSel.value = sk.mcp_id;
     _skOnMcpChange();
   }
+  _skSetMode('visual'); // always reset to Visual mode on open
 }
 
 function _skBackToList() {
   document.getElementById('sk-editor')?.classList.add('hidden');
   document.getElementById('sk-editor')?.classList.remove('flex');
+  // If opened from Agent draft, return to chat instead of Skill list
+  if (window._draftReturnView) {
+    const target = window._draftReturnView;
+    window._draftReturnView = null;
+    switchView(target);
+    return;
+  }
   document.getElementById('sk-list-state')?.classList.remove('hidden');
   _loadSkillDefs();
 }
@@ -4997,14 +5316,18 @@ function _skBackToList() {
 // ── MCP selection change ───────────────────────────────────────
 function _skOnMcpChange() {
   const mcpId = parseInt(document.getElementById('sk-edit-mcp-select')?.value) || null;
-  const mcp = mcpId ? _mcpDefs.find(m => m.id === mcpId) : null;
+  // Look in both custom and system lists
+  const mcp = mcpId ? (_mcpDefs.find(m => m.id === mcpId) || _dataSubjects.find(m => m.id === mcpId)) : null;
   const hint = document.getElementById('sk-edit-mcp-hint');
   _skMcpSampleParams = null;
   if (!hint) return;
   if (!mcp) { hint.innerHTML = ''; return; }
 
-  const ds = mcp.data_subject_id ? _dataSubjects.find(d => d.id === mcp.data_subject_id) : null;
-  const fields = ds?.input_schema?.fields || [];
+  // Resolve the data source: if this IS a system MCP, use it directly; otherwise look up parent
+  const isSysMcp = mcp.mcp_type === 'system';
+  const ds = isSysMcp ? mcp : (_dataSubjects.find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id)) || null);
+  const inputSchema = isSysMcp ? (mcp.input_schema || null) : (ds?.input_schema || null);
+  const fields = (typeof inputSchema === 'string' ? JSON.parse(inputSchema || '{}') : (inputSchema || {}))?.fields || [];
   if (!fields.length) {
     hint.innerHTML = '<div class="mt-2 text-xs text-slate-400 italic">此 MCP 無需額外查詢參數</div>';
     return;
@@ -5012,7 +5335,7 @@ function _skOnMcpChange() {
   hint.innerHTML = `
     <div class="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
       <p class="text-[11px] font-bold text-blue-700 uppercase tracking-widest mb-2.5">
-        DS 查詢參數 — ${_esc(ds.name)}
+        查詢參數 — ${_esc(ds?.name || mcp.name)}
       </p>
       <div class="space-y-2.5">
         ${fields.map(f => `
@@ -5035,13 +5358,17 @@ function _skOnMcpChange() {
 // ── Fetch & Preview for the Skill editor's L3 MCP card ────────
 async function _skFetchPreview() {
   const mcpId = parseInt(document.getElementById('sk-edit-mcp-select')?.value) || null;
-  const mcp = mcpId ? _mcpDefs.find(m => m.id === mcpId) : null;
+  // Look in both custom and system lists
+  const mcp = mcpId ? (_mcpDefs.find(m => m.id === mcpId) || _dataSubjects.find(m => m.id === mcpId)) : null;
   if (!mcp) { alert('請先選擇 MCP'); return; }
 
-  const ds = mcp.data_subject_id ? _dataSubjects.find(d => d.id === mcp.data_subject_id) : null;
-  if (!ds) { alert('此 MCP 未綁定 Data Subject'); return; }
+  // Resolve data source: system MCP = itself; custom MCP = look up parent system MCP
+  const isSysMcp = mcp.mcp_type === 'system';
+  const ds = isSysMcp ? mcp : (_dataSubjects.find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id)) || null);
+  if (!ds) { alert('此 Custom MCP 未綁定 System MCP，請先在 MCP Builder 設定資料來源'); return; }
 
-  const fields = ds?.input_schema?.fields || [];
+  const rawInputSchema = typeof ds.input_schema === 'string' ? JSON.parse(ds.input_schema || '{}') : (ds.input_schema || {});
+  const fields = rawInputSchema?.fields || [];
   const formParams = {};
   for (const f of fields) {
     const el = document.getElementById(`sk-mcp-param-${f.name}`);
@@ -5056,10 +5383,11 @@ async function _skFetchPreview() {
   document.getElementById('sk-format-review-details')?.setAttribute('open', '');
 
   try {
-    const rawUrl = ds.api_config?.endpoint_url || '';
-    if (!rawUrl) throw new Error('DataSubject 沒有設定 API endpoint');
+    const rawApiConfig = typeof ds.api_config === 'string' ? JSON.parse(ds.api_config || '{}') : (ds.api_config || {});
+    const rawUrl = rawApiConfig?.endpoint_url || '';
+    if (!rawUrl) throw new Error('System MCP 沒有設定 API endpoint');
     const path = rawUrl.replace(/^\/api\/v1/, '');
-    const method = (ds.api_config?.method || 'GET').toUpperCase();
+    const method = (rawApiConfig?.method || 'GET').toUpperCase();
     const qp = new URLSearchParams(formParams);
     const fullPath = method === 'GET' ? `${path}?${qp}` : path;
     const token = localStorage.getItem('token') || sessionStorage.getItem('token');
@@ -5185,10 +5513,10 @@ async function _skTryRun() {
 
     // Step 1: run MCP to get fresh output
     let mcpTryResult = null;
-    const ds = mcp.data_subject_id ? _dataSubjects.find(d => d.id === mcp.data_subject_id) : null;
+    const ds = (mcp.system_mcp_id || mcp.data_subject_id) ? _dataSubjects.find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id)) : null;
     const rawUrl = ds?.api_config?.endpoint_url || '';
     if (ds && rawUrl) {
-      _skLogLine('📡', `正在撈取 DS 資料：${ds.name}…`);
+      _skLogLine('📡', `正在撈取 System MCP 資料：${ds.name}…`);
       const formParams = _skMcpSampleParams || {};
       const method = (ds.api_config?.method || 'GET').toUpperCase();
       const path = rawUrl.replace(/^\/api\/v1/, '');
@@ -5196,7 +5524,7 @@ async function _skTryRun() {
       const fullPath = method === 'GET' && qp.toString() ? `${path}?${qp}` : path;
       try {
         const rawData = await _api(method, fullPath, method !== 'GET' ? formParams : undefined);
-        _skLogLine('✓', 'DS 資料撈取成功', 'text-emerald-600');
+        _skLogLine('✓', 'System MCP 資料撈取成功', 'text-emerald-600');
         _skLogLine('⚙', `執行 MCP 處理…`);
         mcpTryResult = await _api('POST', `/mcp-definitions/${mcpId}/run-with-data`, { raw_data: rawData });
         _skTryRunMcpResult = mcpTryResult;
@@ -5245,6 +5573,125 @@ async function _skTryRun() {
     if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ Try Run'; }
     if (dot) dot.classList.add('hidden');
   }
+}
+
+// ── AgenticRawEditor (PRD v12.5 §4.5.1) ─────────────────────────────────
+
+let _skRawTimer = null;
+
+/**
+ * Toggle between Visual form mode and ⌨️ Raw Markdown editor mode.
+ * @param {'visual'|'raw'} mode
+ */
+function _skSetMode(mode) {
+  const isRaw = mode === 'raw';
+  const leftPanel = document.getElementById('sk-builder-left');
+  const rawPanel  = document.getElementById('sk-raw-panel');
+  if (!leftPanel || !rawPanel) return;
+
+  leftPanel.classList.toggle('hidden', isRaw);
+  rawPanel.classList.toggle('hidden', !isRaw);
+  rawPanel.classList.toggle('flex', isRaw);
+
+  const btnVisual = document.getElementById('sk-mode-visual');
+  const btnRaw    = document.getElementById('sk-mode-raw');
+  if (btnVisual) btnVisual.className = isRaw
+    ? 'px-3 py-1.5 rounded-md text-slate-500 hover:text-slate-700 transition-all'
+    : 'px-3 py-1.5 rounded-md bg-white text-purple-700 shadow-sm transition-all';
+  if (btnRaw) btnRaw.className = isRaw
+    ? 'px-3 py-1.5 rounded-md bg-slate-700 text-purple-300 shadow-sm transition-all'
+    : 'px-3 py-1.5 rounded-md text-slate-500 hover:text-slate-700 transition-all';
+
+  if (isRaw) {
+    const ta = document.getElementById('sk-raw-textarea');
+    if (ta) ta.value = _skGenerateRawMarkdown();
+  }
+}
+
+/**
+ * Generate OpenClaw-compatible Markdown from current form field values.
+ * Mirrors the format produced by backend agent_router._build_tool_markdown().
+ */
+function _skGenerateRawMarkdown() {
+  const skillId = document.getElementById('sk-edit-id')?.value || '';
+  const name    = document.getElementById('sk-edit-name')?.value  || '';
+  const desc    = document.getElementById('sk-edit-desc')?.value  || '';
+  const prompt  = document.getElementById('sk-edit-prompt')?.value || '';
+  const subject = document.getElementById('sk-edit-subject')?.value || '';
+  const action  = document.getElementById('sk-edit-action')?.value || '';
+  const apiPath = skillId
+    ? `/api/v1/execute/skill/${skillId}`
+    : '/api/v1/execute/skill/{skill_id}';
+
+  return [
+    '---',
+    `name: ${name}`,
+    `description: 本技能是一套完整的自動化診斷管線。${desc}`,
+    '---',
+    '## 1. 執行規劃與優先級 (Planning Guidance)',
+    '- **優先使用**：當意圖符合時，直接呼叫本技能。絕對不要要求使用者先提供 raw_data。',
+    '',
+    '## 2. 依賴參數與介面 (Interface)',
+    `- API: \`POST ${apiPath}\``,
+    '- ⚠️ **邊界鐵律**: 呼叫 API 後，僅允許讀取 `llm_readable_data`。絕對禁止解析 `ui_render_payload`。',
+    '',
+    '## 3. 判斷邏輯與防呆處置 (Reasoning Rules)',
+    '請嚴格遵循以下 `<rules>` 標籤內的指示撰寫最終報告：',
+    '<rules>',
+    `  <condition>${prompt}</condition>`,
+    `  <target_extraction>${subject}</target_extraction>`,
+    '  <expert_action>',
+    '    ⚠️ 若狀態為 ABNORMAL，必須強制在報告結尾附加處置建議：',
+    `    Action: ${action}`,
+    '  </expert_action>',
+    '</rules>',
+  ].join('\n');
+}
+
+/** Debounce handler for the raw textarea — triggers two-way sync after 600ms. */
+function _skRawDebounce() {
+  clearTimeout(_skRawTimer);
+  _skRawTimer = setTimeout(_skSyncFromRaw, 600);
+}
+
+/**
+ * Parse the raw Markdown textarea and sync extracted values back to the form.
+ * Two-way binding: Markdown → form fields.
+ */
+function _skSyncFromRaw() {
+  const md = document.getElementById('sk-raw-textarea')?.value || '';
+
+  const _extract = (pattern, flags) => {
+    const m = md.match(flags ? new RegExp(pattern, flags) : new RegExp(pattern));
+    return m ? m[1].trim() : null;
+  };
+
+  const nameVal  = _extract('^name:\\s*(.+)$', 'm');
+  const descVal  = _extract('^description:\\s*本技能是一套完整的自動化診斷管線。(.*)$', 'm')
+                || _extract('^description:\\s*(.+)$', 'm');
+  const condVal  = _extract('<condition>([\\s\\S]*?)<\\/condition>');
+  const subjVal  = _extract('<target_extraction>([\\s\\S]*?)<\\/target_extraction>');
+
+  // expert_action: find "Action: ..." inside the block
+  const actBlockM = md.match(/<expert_action>([\s\S]*?)<\/expert_action>/);
+  let actionVal = null;
+  if (actBlockM) {
+    const actLineM = actBlockM[1].match(/Action:\s*([\s\S]*?)$/m);
+    actionVal = actLineM ? actLineM[1].trim() : actBlockM[1].trim();
+  }
+
+  const set = (id, val) => { if (val !== null) { const el = document.getElementById(id); if (el) el.value = val; } };
+  set('sk-edit-name',    nameVal);
+  set('sk-edit-desc',    descVal);
+  set('sk-edit-prompt',  condVal);
+  set('sk-edit-subject', subjVal);
+  set('sk-edit-action',  actionVal);
+}
+
+/** Apply raw Markdown changes to form and switch back to Visual mode. */
+function _skApplyRaw() {
+  _skSyncFromRaw();
+  _skSetMode('visual');
 }
 
 // ── Save Skill ───────────────────────────────────────────────
@@ -5319,8 +5766,8 @@ function _mceLogLine(icon, text, color = 'text-slate-600') {
 }
 
 // ── Open / close editor ───────────────────────────────────────
-async function _mcpOpenEditor(id) {
-  if (_dataSubjects.length === 0) _dataSubjects = await _api('GET', '/data-subjects') || [];
+async function _mcpOpenEditor(id, draftData) {
+  if (_dataSubjects.length === 0) _dataSubjects = await _api('GET', '/mcp-definitions?type=system') || [];
 
   // Switch to editor state
   document.getElementById('mce-list-state')?.classList.add('hidden');
@@ -5344,7 +5791,7 @@ async function _mcpOpenEditor(id) {
   }
   document.getElementById('mce-mcp-result')?.classList.add('hidden');
 
-  // Populate DS dropdown
+  // Populate System MCP dropdown
   const dsSel = document.getElementById('mce-edit-ds');
   if (dsSel) {
     dsSel.innerHTML = '<option value="">— 請選擇 —</option>' +
@@ -5352,13 +5799,31 @@ async function _mcpOpenEditor(id) {
   }
 
   if (!id) {
-    document.getElementById('mcp-editor-title').textContent = '新增 MCP';
+    // New MCP (possibly pre-filled from agent draft)
+    const isDraft = !!draftData;
+    document.getElementById('mcp-editor-title').textContent = isDraft ? '草稿審核 — 新增 MCP' : '新增 MCP';
     document.getElementById('mce-edit-id').value = '';
-    document.getElementById('mce-edit-name').value = '';
-    if (dsSel) dsSel.value = '';
-    document.getElementById('mce-edit-desc').value = '';
-    document.getElementById('mce-edit-intent').value = '';
+    document.getElementById('mce-edit-name').value    = draftData?.name || '';
+    document.getElementById('mce-edit-desc').value    = draftData?.description || '';
+    document.getElementById('mce-edit-intent').value  = draftData?.processing_intent || '';
     document.getElementById('mce-edit-sample-form').innerHTML = '';
+    if (dsSel) {
+      // Try system_mcp_id first (numeric ID), then data_subject (name or id)
+      const systemMcpId = draftData?.system_mcp_id;
+      const dsRef = systemMcpId || draftData?.data_subject;
+      if (dsRef) {
+        const ds = typeof dsRef === 'number'
+          ? _dataSubjects.find(d => d.id === dsRef)
+          : _dataSubjects.find(d => d.name === dsRef || String(d.id) === String(dsRef));
+        if (ds) { dsSel.value = ds.id; _mceOnDsChange(); }
+        else dsSel.value = '';
+      } else {
+        dsSel.value = '';
+      }
+    }
+    if (isDraft && draftData._draft_id) {
+      document.getElementById('mcp-editor').dataset.draftId = draftData._draft_id;
+    }
     return;
   }
 
@@ -5369,8 +5834,8 @@ async function _mcpOpenEditor(id) {
   document.getElementById('mce-edit-name').value = mcp?.name || '';
   document.getElementById('mce-edit-desc').value = mcp?.description || '';
   document.getElementById('mce-edit-intent').value = mcp?.processing_intent || '';
-  if (dsSel && mcp?.data_subject_id) {
-    dsSel.value = mcp.data_subject_id;
+  if (dsSel && (mcp?.system_mcp_id || mcp?.data_subject_id)) {
+    dsSel.value = mcp.system_mcp_id || mcp.data_subject_id;
     _mceOnDsChange();
   }
 }
@@ -5378,6 +5843,15 @@ async function _mcpOpenEditor(id) {
 function _mcpBackToList() {
   document.getElementById('mcp-editor')?.classList.add('hidden');
   document.getElementById('mcp-editor')?.classList.remove('flex');
+  const backBtn = document.getElementById('mcp-back-btn');
+  if (backBtn) backBtn.textContent = '← MCP 列表';
+  // If opened from Agent draft, return to chat instead of MCP list
+  if (window._draftReturnView) {
+    const target = window._draftReturnView;
+    window._draftReturnView = null;
+    switchView(target);
+    return;
+  }
   document.getElementById('mce-list-state')?.classList.remove('hidden');
   _loadMcpDefs();
 }
@@ -5393,7 +5867,7 @@ function _mceOnDsChange() {
   if (!fields.length) { formEl.innerHTML = ''; return; }
   formEl.innerHTML = `
     <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
-      <p class="text-[11px] font-bold text-blue-700 uppercase tracking-widest mb-2.5">DS 查詢參數</p>
+      <p class="text-[11px] font-bold text-blue-700 uppercase tracking-widest mb-2.5">System MCP 查詢參數</p>
       <div class="space-y-2.5">
         ${fields.map(f => `
           <div>
@@ -5433,7 +5907,7 @@ async function _mceFetchPreview() {
 
   try {
     const rawUrl = ds.api_config?.endpoint_url || '';
-    if (!rawUrl) throw new Error('DataSubject 沒有設定 API endpoint');
+    if (!rawUrl) throw new Error('System MCP 沒有設定 API endpoint');
     const path = rawUrl.replace(/^\/api\/v1/, '');
     const method = (ds.api_config?.method || 'GET').toUpperCase();
     const qp = new URLSearchParams(formParams);
@@ -5458,7 +5932,7 @@ async function _mceFetchPreview() {
 async function _mcpTryRun() {
   const dsId   = parseInt(document.getElementById('mce-edit-ds')?.value) || null;
   const intent = document.getElementById('mce-edit-intent')?.value?.trim();
-  if (!dsId)   { alert('請先選擇 Data Subject'); return; }
+  if (!dsId)   { alert('請先選擇 System MCP'); return; }
   if (!intent) { alert('請先填寫加工意圖 (Processing Intent)'); return; }
 
   _mceSwitchRightTab('logs');
@@ -5474,7 +5948,7 @@ async function _mcpTryRun() {
 
   try {
     const ds = _dataSubjects.find(d => d.id === dsId);
-    if (!ds) throw new Error('找不到所選 Data Subject');
+    if (!ds) throw new Error('找不到所選 System MCP');
 
     _mceLogLine('▶', '開始執行 MCP Try Run');
 
@@ -5482,7 +5956,7 @@ async function _mcpTryRun() {
     let sampleData = null;
     const rawUrl = ds.api_config?.endpoint_url || '';
     if (rawUrl) {
-      _mceLogLine('📡', `正在撈取 DS 資料：${ds.name}…`);
+      _mceLogLine('📡', `正在撈取 System MCP 資料：${ds.name}…`);
       const fields = ds.input_schema?.fields || [];
       const formParams = {};
       for (const f of fields) {
@@ -5501,7 +5975,7 @@ async function _mcpTryRun() {
     _mceLogLine('⚙', 'LLM 生成 MCP 處理腳本並沙箱執行中…');
     const result = await _api('POST', '/mcp-definitions/try-run', {
       processing_intent: intent,
-      data_subject_id:   dsId,
+      system_mcp_id:     dsId,
       sample_data:       sampleData,
     });
 
@@ -5609,7 +6083,7 @@ async function _mcpSave() {
   const name = document.getElementById('mce-edit-name')?.value?.trim();
   const dsId = parseInt(document.getElementById('mce-edit-ds')?.value) || null;
   if (!name) { alert('請填寫 MCP 名稱'); return; }
-  if (!dsId) { alert('請選擇 Data Subject'); return; }
+  if (!dsId) { alert('請選擇 System MCP'); return; }
 
   const payload = {
     name,
@@ -5621,7 +6095,7 @@ async function _mcpSave() {
     if (id) {
       await _api('PATCH', `/mcp-definitions/${id}`, payload);
     } else {
-      await _api('POST', '/mcp-definitions', { ...payload, data_subject_id: dsId });
+      await _api('POST', '/mcp-definitions', { ...payload, system_mcp_id: dsId });
     }
     alert(`MCP「${name}」已儲存`);
     _mcpBackToList();

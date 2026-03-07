@@ -9,8 +9,15 @@ from pydantic import BaseModel, Field
 class MCPDefinitionCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     description: str = Field(default="")
-    data_subject_id: int = Field(..., description="ID of the DataSubject to process")
-    processing_intent: str = Field(..., min_length=1, description="Natural language processing goal")
+    mcp_type: str = Field(default="custom", pattern="^(system|custom)$")
+    # For custom MCPs: ID of the system MCP this wraps
+    system_mcp_id: Optional[int] = Field(default=None, description="System MCP id (for custom MCPs)")
+    # Legacy: kept for backward compat with existing API clients
+    data_subject_id: Optional[int] = Field(default=None, description="Deprecated: use system_mcp_id")
+    processing_intent: str = Field(default="", description="Natural language processing goal")
+    # For system MCPs: API connection config
+    api_config: Optional[Dict[str, Any]] = None
+    input_schema: Optional[Dict[str, Any]] = None
 
 
 class MCPDefinitionUpdate(BaseModel):
@@ -22,19 +29,29 @@ class MCPDefinitionUpdate(BaseModel):
     ui_render_config: Optional[Dict[str, Any]] = None
     input_definition: Optional[Dict[str, Any]] = None
     sample_output: Optional[Dict[str, Any]] = None
+    visibility: Optional[str] = Field(default=None, pattern="^(private|public)$")
+    api_config: Optional[Dict[str, Any]] = None
+    input_schema: Optional[Dict[str, Any]] = None
+    system_mcp_id: Optional[int] = None
 
 
 class MCPDefinitionResponse(BaseModel):
     id: int
     name: str
     description: str
-    data_subject_id: int
+    mcp_type: str = "custom"
+    data_subject_id: Optional[int] = None
+    system_mcp_id: Optional[int] = None
+    # Parsed dicts for system MCPs (mirrors DataSubjectResponse format)
+    api_config: Optional[Dict[str, Any]] = None
+    input_schema: Optional[Dict[str, Any]] = None
     processing_intent: str
     processing_script: Optional[str]
     output_schema: Optional[Dict[str, Any]]
     ui_render_config: Optional[Dict[str, Any]]
     input_definition: Optional[Dict[str, Any]]
     sample_output: Optional[Dict[str, Any]]
+    visibility: str = "private"
     created_at: datetime
     updated_at: datetime
 
@@ -60,7 +77,8 @@ class MCPGenerateResponse(BaseModel):
 class MCPTryRunRequest(BaseModel):
     """Try-run: LLM generates script from intent, executes it in sandbox with sample_data."""
     processing_intent: str = Field(..., min_length=1)
-    data_subject_id: int
+    system_mcp_id: Optional[int] = Field(default=None, description="System MCP id (preferred)")
+    data_subject_id: Optional[int] = Field(default=None, description="Deprecated: use system_mcp_id")
     sample_data: Any = Field(..., description="Real data from the DataSubject API (dict or list)")
 
 
@@ -82,7 +100,8 @@ class MCPTryRunResponse(BaseModel):
 class MCPCheckIntentRequest(BaseModel):
     """Ask LLM to check if processing intent is clear before generation."""
     processing_intent: str = Field(..., min_length=1)
-    data_subject_id: int
+    system_mcp_id: Optional[int] = Field(default=None, description="System MCP id (preferred)")
+    data_subject_id: Optional[int] = Field(default=None, description="Deprecated: use system_mcp_id")
 
 
 class MCPCheckIntentResponse(BaseModel):
