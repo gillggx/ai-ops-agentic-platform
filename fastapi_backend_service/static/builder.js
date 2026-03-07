@@ -5274,7 +5274,7 @@ async function _skOpenEditor(id, draftData) {
     if (isDraft && draftData._draft_id) {
       document.getElementById('sk-editor').dataset.draftId = draftData._draft_id;
     }
-    _skSetMode('visual'); // always reset to Visual mode on open
+    _skSetMode('visual'); _skSetMcpMode('existing'); // always reset to Visual mode on open
     return;
   }
 
@@ -5306,6 +5306,75 @@ function _skBackToList() {
   }
   document.getElementById('sk-list-state')?.classList.remove('hidden');
   _loadSkillDefs();
+}
+
+// ── MCP mode toggle (select existing vs create new) ───────────
+function _skSetMcpMode(mode) {
+  const isNew = mode === 'new';
+  document.getElementById('sk-mcp-panel-existing').classList.toggle('hidden', isNew);
+  document.getElementById('sk-mcp-panel-new').classList.toggle('hidden', !isNew);
+  const btnExisting = document.getElementById('sk-mcp-mode-existing');
+  const btnNew = document.getElementById('sk-mcp-mode-new');
+  if (btnExisting) btnExisting.className = isNew
+    ? 'flex-1 px-3 py-1.5 rounded-md text-slate-500 hover:text-slate-700 transition-all'
+    : 'flex-1 px-3 py-1.5 rounded-md bg-white text-emerald-700 shadow-sm transition-all';
+  if (btnNew) btnNew.className = isNew
+    ? 'flex-1 px-3 py-1.5 rounded-md bg-white text-emerald-700 shadow-sm transition-all'
+    : 'flex-1 px-3 py-1.5 rounded-md text-slate-500 hover:text-slate-700 transition-all';
+
+  if (isNew) {
+    // Populate the system MCP dropdown
+    const sel = document.getElementById('sk-new-mcp-sys-select');
+    if (sel && _dataSubjects.length) {
+      sel.innerHTML = '<option value="">— 選擇資料來源 —</option>' +
+        _dataSubjects.map(m => `<option value="${m.id}">${_esc(m.name)}</option>`).join('');
+    }
+  }
+}
+
+async function _skCreateInlineMcp() {
+  const name    = document.getElementById('sk-new-mcp-name')?.value.trim();
+  const sysId   = parseInt(document.getElementById('sk-new-mcp-sys-select')?.value) || null;
+  const intent  = document.getElementById('sk-new-mcp-intent')?.value.trim() || '';
+  const statusEl = document.getElementById('sk-new-mcp-status');
+
+  if (!name) { alert('請輸入 MCP 名稱'); return; }
+  if (!sysId) { alert('請選擇資料來源 (System MCP)'); return; }
+
+  if (statusEl) { statusEl.textContent = '建立中…'; statusEl.classList.remove('hidden', 'text-red-500'); statusEl.classList.add('text-slate-500'); }
+
+  try {
+    const result = await _api('POST', '/mcp-definitions', {
+      name,
+      description: intent,
+      mcp_type: 'custom',
+      system_mcp_id: sysId,
+      processing_intent: intent,
+      visibility: 'private',
+    });
+    const newId = result?.data?.id || result?.id;
+    if (!newId) throw new Error(result?.message || '建立失敗');
+
+    // Add to _mcpDefs and refresh dropdown
+    const newMcp = result?.data || result;
+    if (!_mcpDefs.find(m => m.id === newId)) _mcpDefs.push(newMcp);
+    const sel = document.getElementById('sk-edit-mcp-select');
+    if (sel) {
+      const opt = document.createElement('option');
+      opt.value = newId;
+      opt.textContent = name;
+      sel.appendChild(opt);
+      sel.value = newId;
+    }
+
+    // Switch back to "existing" mode (the new MCP is now selected)
+    _skSetMcpMode('existing');
+    _skOnMcpChange();
+
+    if (statusEl) { statusEl.textContent = `✓ MCP「${name}」已建立並綁定。如需生成腳本請到 MCP Builder 執行 Try Run。`; statusEl.classList.remove('hidden', 'text-slate-500'); statusEl.classList.add('text-emerald-600'); }
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = `建立失敗：${e.message}`; statusEl.classList.remove('hidden', 'text-slate-500'); statusEl.classList.add('text-red-500'); }
+  }
 }
 
 // ── MCP selection change ───────────────────────────────────────

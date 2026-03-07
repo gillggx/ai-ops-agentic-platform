@@ -1315,8 +1315,20 @@
                     <h4 class="font-bold text-xs text-emerald-900">資料節點 (MCP)</h4>
                   </div>
                   <div class="space-y-3">
-                    <div>
-                      <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">選擇已有 MCP</label>
+                    <!-- MCP mode toggle -->
+                    <div class="flex bg-slate-100 rounded-lg p-0.5 border border-slate-200 text-xs font-semibold">
+                      <button id="sk-mcp-mode-existing" onclick="_skSetMcpMode('existing')"
+                              class="flex-1 px-3 py-1.5 rounded-md bg-white text-emerald-700 shadow-sm transition-all">
+                        選擇已有 MCP
+                      </button>
+                      <button id="sk-mcp-mode-new" onclick="_skSetMcpMode('new')"
+                              class="flex-1 px-3 py-1.5 rounded-md text-slate-500 hover:text-slate-700 transition-all">
+                        ＋ 建立新 MCP
+                      </button>
+                    </div>
+
+                    <!-- Existing MCP panel -->
+                    <div id="sk-mcp-panel-existing">
                       <select id="sk-edit-mcp-select"
                               class="w-full bg-white border border-slate-300 rounded-md px-3 py-2.5 text-sm font-medium
                                      text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-400
@@ -1324,12 +1336,39 @@
                               onchange="_skOnMcpChange()">
                         <option value="">— 請選擇已有的 MCP —</option>
                       </select>
-                      <p class="mt-1.5 text-[11px] text-slate-400">
-                        沒有合適的 MCP？
-                        <a href="#" onclick="switchView('mcp-builder');return false;"
-                           class="text-emerald-600 font-semibold hover:underline">→ 先到 MCP Builder 建立一個</a>
-                      </p>
                     </div>
+
+                    <!-- New MCP inline form -->
+                    <div id="sk-mcp-panel-new" class="hidden space-y-2.5 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                      <p class="text-[10px] font-bold text-emerald-700 uppercase tracking-widest">新 MCP 設定</p>
+                      <div>
+                        <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">MCP 名稱 <span class="text-red-500">*</span></label>
+                        <input id="sk-new-mcp-name" type="text" placeholder="例：CD SPC 統計分析"
+                               class="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-800
+                                      shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                      </div>
+                      <div>
+                        <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">資料來源 (System MCP) <span class="text-red-500">*</span></label>
+                        <select id="sk-new-mcp-sys-select"
+                                class="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-800
+                                       shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                          <option value="">— 選擇資料來源 —</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">加工意圖</label>
+                        <textarea id="sk-new-mcp-intent" rows="3" placeholder="描述要對資料做什麼計算或轉換…"
+                                  class="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-800
+                                         shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 resize-none"></textarea>
+                      </div>
+                      <button onclick="_skCreateInlineMcp()"
+                              class="w-full text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white
+                                     rounded-md px-3 py-2 transition-colors">
+                        建立 MCP 並綁定
+                      </button>
+                      <p id="sk-new-mcp-status" class="text-[11px] text-slate-500 hidden"></p>
+                    </div>
+
                     <div id="sk-edit-mcp-hint"></div>
                     <button onclick="_skFetchPreview()"
                             class="flex items-center gap-1.5 text-xs text-emerald-700 font-semibold
