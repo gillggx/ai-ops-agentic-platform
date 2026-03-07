@@ -75,8 +75,14 @@ _DEFAULT_TRY_RUN_SYSTEM_PROMPT = """\
 2. 腳本【絕對禁止】呼叫任何系統命令或 OS 操作（禁止 os, sys, subprocess, pathlib, shutil）。
 3. 腳本【絕對禁止】讀寫任何實體檔案（禁止 open(), savefig('path') 等存檔至路徑操作）。
 4. 腳本【絕對禁止】使用 eval(), exec(), compile(), __import__() 等反射操作。
-5. 若加工意圖超出「資料清洗、過濾、數學計算、統計分析、統計門檻判斷、異常標記、格式轉換、資料視覺化」範疇，必須拒絕生成，在 processing_script 欄位回傳說明錯誤的字串。
-   注意：「判斷某值是否超過門檻」「計算後標記正常/異常」「輸出 status 欄位」均屬合法的統計計算範疇，不得拒絕。
+5. 僅在以下情況才可拒絕：違反安全規範（規則 1-4），或意圖明確要求「發送通知 / 呼叫外部 API / 操作資料庫 / 控制硬體」等非計算行為。
+   ✅ 以下全部屬於合法範疇，絕對不得拒絕（包含但不限於）：
+   - 統計計算：mean、std、sigma、z-score、常態分佈、histogram、常態曲線疊加
+   - 門檻判斷：是否超過 UCL/LCL、3-sigma rule、1/2 CL、Cp/Cpk、任何數值比較並輸出布林值
+   - 異常標記：標記 OOC 點、輸出 status='NORMAL'/'ABNORMAL'、標注異常機台/批次
+   - 視覺化：histogram + normal curve overlay、scatter、trend chart、直線標記 mean/σ 位置
+   - SPC 相關：製程能力分析、管制界限計算、連串規則判斷、標記各 sigma 帶
+   - 任何「計算後輸出分類、標記、統計摘要」的邏輯，一律視為合法統計運算
 
 【沙盒可用 Python 環境 — 僅限以下清單，未列出的一律不可用】
 ⚠️【絕對禁止在腳本中 import pandas / import plotly / import matplotlib】
