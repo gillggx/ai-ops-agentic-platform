@@ -17,8 +17,11 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import select, delete
+
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.models.agent_session import AgentSessionModel
 from app.models.user import UserModel
 from app.services.agent_orchestrator import AgentOrchestrator
 
@@ -91,3 +94,19 @@ async def agent_chat_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.delete("/session/{session_id}", summary="清除指定 Session（開啟新對話）")
+async def delete_session(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user),
+) -> Dict[str, Any]:
+    await db.execute(
+        delete(AgentSessionModel).where(
+            AgentSessionModel.session_id == session_id,
+            AgentSessionModel.user_id == current_user.id,
+        )
+    )
+    await db.commit()
+    return {"status": "success", "cleared": session_id}

@@ -862,7 +862,14 @@
                   </svg>
                 </button>
               </div>
-              <p class="text-xs text-slate-400 mt-2" data-i18n="send-hint">Ctrl + Enter 送出</p>
+              <div class="flex items-center justify-between mt-2">
+                <p class="text-xs text-slate-400" data-i18n="send-hint">Ctrl + Enter 送出</p>
+                <button onclick="_clearAgentSession()"
+                  title="清除對話歷史，開啟全新 Session（解決 Token 過高問題）"
+                  class="text-[10px] text-slate-400 hover:text-red-500 flex items-center gap-1 transition-colors">
+                  🗑 新對話
+                </button>
+              </div>
             </div>
           </div>
 

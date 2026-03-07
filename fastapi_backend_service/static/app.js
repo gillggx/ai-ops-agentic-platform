@@ -2247,6 +2247,27 @@ function _setChatMode(mode) {
 }
 
 /** v13 Agent — calls POST /agent/chat/stream and renders Glass-box Console events */
+async function _clearAgentSession() {
+  if (_isStreaming) return;
+  if (_v13SessionId) {
+    try {
+      await fetch(`/api/v1/agent/session/${_v13SessionId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${_token}` },
+      });
+    } catch { /* ignore */ }
+  }
+  _v13SessionId = null;
+  // Clear chat history UI
+  const hist = document.getElementById('chat-history');
+  if (hist) hist.innerHTML = '<div class="text-center py-8"><p class="text-xs text-slate-400 bg-white border border-slate-200 inline-block px-3 py-1 rounded-full">新對話已開始</p></div>';
+  // Reset token badge
+  const badge = document.getElementById('v13-token-badge');
+  if (badge) { badge.textContent = ''; badge.classList.add('hidden'); }
+  _diagConsoleClear();
+  _diagLogLine('🗑', '對話歷史已清除，下次傳訊將使用全新 Session', '#f87171');
+}
+
 async function _sendAgentV13Message() {
   if (_isStreaming) return;
 
@@ -2384,7 +2405,8 @@ function _handleV13Event(ev) {
     case 'context_load': {
       const ragCount = ev.rag_count || 0;
       const pref = ev.pref_summary && ev.pref_summary !== '(無)' ? ev.pref_summary : '未設定';
-      _diagLogLine('📦', `CONTEXT | Soul 載入 | 偏好: ${pref} | RAG: ${ragCount} 條`, '#60a5fa');
+      const turns = ev.history_turns || 0;
+      _diagLogLine('📦', `CONTEXT | Soul 載入 | 偏好: ${pref} | RAG: ${ragCount} 條 | 歷史: ${turns} 輪`, '#60a5fa');
       break;
     }
 

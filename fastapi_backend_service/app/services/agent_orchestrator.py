@@ -46,6 +46,41 @@ _SESSION_TTL_HOURS = 24
 _SESSION_MAX_MESSAGES = 20  # keep last 20 messages (~10 turns) to limit tokens
 
 
+_TOOL_RESULT_MAX_CHARS = 2000  # hard cap per tool_result when stored/loaded
+
+
+def _sanitize_history(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Retroactively trim oversized tool_result content in loaded session history.
+
+    Old sessions (pre-v13.3) may have full datasets stored. Cap any single
+    tool_result content to _TOOL_RESULT_MAX_CHARS to prevent 400k token floods.
+    """
+    cleaned = []
+    for msg in messages:
+        if msg.get("role") == "user" and isinstance(msg.get("content"), list):
+            new_content = []
+            for item in msg["content"]:
+                if isinstance(item, dict) and item.get("type") == "tool_result":
+                    raw = item.get("content", "")
+                    if isinstance(raw, str) and len(raw) > _TOOL_RESULT_MAX_CHARS:
+                        try:
+                            parsed = json.loads(raw)
+                            # Strip heavy fields
+                            for key in ("output_data", "ui_render_payload", "_raw_dataset"):
+                                parsed.pop(key, None)
+                            if "llm_readable_data" not in parsed:
+                                parsed["_truncated"] = f"[已截斷，原始 {len(raw)} 字元]"
+                            raw = json.dumps(parsed, ensure_ascii=False)[:_TOOL_RESULT_MAX_CHARS]
+                        except Exception:
+                            raw = raw[:_TOOL_RESULT_MAX_CHARS] + "…[截斷]"
+                        item = {**item, "content": raw}
+                new_content.append(item)
+            cleaned.append({**msg, "content": new_content})
+        else:
+            cleaned.append(msg)
+    return cleaned
+
+
 def _dataset_summary(dataset: List[Any]) -> Dict[str, Any]:
     """Build a compact summary for large datasets (spec 1.1)."""
     n = len(dataset)
@@ -257,10 +292,11 @@ class AgentOrchestrator:
             query=message,
             top_k_memories=5,
         )
+        # Load session history before emitting context_load so we can report turn count
+        session_id, history = await self._load_session(session_id)
+        context_meta["history_turns"] = len(history) // 2  # user+assistant pairs
         yield {"type": "context_load", **context_meta}
 
-        # Load session history
-        session_id, history = await self._load_session(session_id)
         messages: List[Dict[str, Any]] = history + [{"role": "user", "content": message}]
 
         dispatcher = ToolDispatcher(
@@ -423,7 +459,8 @@ class AgentOrchestrator:
                         await self._db.commit()
                     else:
                         try:
-                            return session_id, json.loads(row.messages)
+                            raw_history = json.loads(row.messages)
+                            return session_id, _sanitize_history(raw_history)
                         except Exception:
                             pass
 
