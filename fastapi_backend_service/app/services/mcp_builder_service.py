@@ -860,10 +860,12 @@ DataSubject 名稱：{data_subject_name}
 - 只使用 Python 標準語法；可用 json, math, datetime, collections 等標準函式庫
 - 不要使用 eval(), exec(), os, sys 等危險操作
 
-只回傳 JSON（不要有其他文字）：
-{{
-  "code": "def diagnose(mcp_outputs: dict) -> dict:\\n    ..."
-}}"""
+只回傳 Python 程式碼區塊（不要有其他文字，不要包在 JSON 裡）：
+
+```python
+def diagnose(mcp_outputs: dict) -> dict:
+    ...
+```"""
 
         try:
             resp1 = await self._client.messages.create(
@@ -871,8 +873,15 @@ DataSubject 名稱：{data_subject_name}
                 max_tokens=2048,
                 messages=[{"role": "user", "content": code_prompt}],
             )
-            raw_code_data = _extract_json(_get_text(resp1.content))
-            generated_code = raw_code_data.get("code", "")
+            raw_text = _get_text(resp1.content)
+            # Extract code from ```python ... ``` block; fallback to bare def
+            m = re.search(r"```(?:python)?\s*([\s\S]+?)\s*```", raw_text)
+            if m:
+                generated_code = m.group(1).strip()
+            else:
+                # Fallback: everything from 'def diagnose' onwards
+                idx = raw_text.find("def diagnose")
+                generated_code = raw_text[idx:].strip() if idx != -1 else raw_text.strip()
         except Exception as exc:
             return {
                 "success": False, "generated_code": "", "code_result": None,
