@@ -4,3 +4,8 @@ __pycache__
 # SQLite / database files — never commit local DBs
 *.db
 *.sqlite3
+
+# Environment files — each environment keeps its own .env
+.env
+.env.local
+.env.*.local
