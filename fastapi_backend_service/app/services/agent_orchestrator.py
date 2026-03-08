@@ -73,19 +73,17 @@ async def _preflight_validate(
                 "status": "error", "code": "MCP_NOT_FOUND",
                 "message": f"⚠️ MCP #{mcp_id} 不存在。請呼叫 list_mcps 取得有效的 MCP 列表後重試。",
             }
-        # Resolve input_schema: system MCP uses its own schema; custom MCP uses parent system MCP's
+        # Resolve input_schema:
+        # - System MCP: use its own schema
+        # - Custom MCP with own input_schema defined: validate against that
+        # - Custom MCP without own input_schema: skip validation entirely
+        #   (the processing_script may hard-code parent params internally)
         mcp_type = getattr(mcp, "mcp_type", "custom") or "custom"
         if mcp_type == "system":
             schema_src = mcp  # the called MCP IS the system MCP
         else:
-            sys_id = getattr(mcp, "system_mcp_id", None) or getattr(mcp, "data_subject_id", None)
-            if sys_id:
-                sys_result = await db.execute(
-                    select(MCPDefinitionModel).where(MCPDefinitionModel.id == sys_id)
-                )
-                schema_src = sys_result.scalar_one_or_none()
-            else:
-                schema_src = None
+            # Custom MCP: only use its own input_schema, never inherit from parent system MCP
+            schema_src = mcp if getattr(mcp, "input_schema", None) else None
 
         if schema_src and schema_src.input_schema:
             try:
