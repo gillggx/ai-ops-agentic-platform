@@ -631,8 +631,8 @@ DataSubject 名稱：{data_subject_name}
 請根據上述資料與診斷邏輯，輸出結構化診斷報告："""
 
         response = await self._client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=800,
+            model=_MODEL,
+            max_tokens=4096,
             system=sys_prompt,
             messages=[{"role": "user", "content": prompt}],
         )

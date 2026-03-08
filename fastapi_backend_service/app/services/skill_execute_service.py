@@ -14,9 +14,8 @@ from app.repositories.data_subject_repository import DataSubjectRepository
 from app.repositories.mcp_definition_repository import MCPDefinitionRepository
 from app.repositories.skill_definition_repository import SkillDefinitionRepository
 from app.services.event_pipeline_service import EventPipelineService
-from app.services.mcp_builder_service import MCPBuilderService
 from app.services.mcp_definition_service import _normalize_output
-from app.services.sandbox_service import execute_script
+from app.services.sandbox_service import execute_diagnose_fn, execute_script
 
 logger = logging.getLogger(__name__)
 
@@ -145,25 +144,37 @@ class SkillExecuteService:
                         "ui_render": {**(output_data.get("ui_render") or {}), "chart_data": chart, "charts": [chart], "type": "chart"},
                     }
 
-        # ── 3. LLM diagnosis ──
+        # ── 3. Python diagnose() execution (no LLM) ──
+        # Load generated_code saved from Skill Builder simulation
+        last_result = _j(skill.last_diagnosis_result) or {}
+        diagnose_code = last_result.get("generated_code") or ""
+        if not diagnose_code:
+            return {
+                "status": "error",
+                "llm_readable_data": {
+                    "status": "ERROR",
+                    "error": "此 Skill 尚未在 Skill Builder 完成模擬，缺少診斷腳本。請先在 Skill Builder 執行「試跑」以生成診斷邏輯。",
+                },
+                "ui_render_payload": {"has_chart": False},
+            }
+
         try:
-            llm_svc = MCPBuilderService()
-            llm_result = await llm_svc.try_diagnosis(
-                diagnostic_prompt=skill.diagnostic_prompt,
+            diag_result = await execute_diagnose_fn(
+                code=diagnose_code,
                 mcp_outputs={mcp.name: output_data},
             )
         except Exception as exc:
             return {
                 "status": "error",
-                "llm_readable_data": {"status": "ERROR", "error": f"LLM 診斷失敗：{exc}"},
+                "llm_readable_data": {"status": "ERROR", "error": f"診斷腳本執行失敗：{exc}"},
                 "ui_render_payload": {"has_chart": False},
             }
 
-        raw_status = llm_result.get("status") or llm_result.get("severity") or ""
-        diag_status = "NORMAL" if raw_status.upper() == "NORMAL" else "ABNORMAL"
+        raw_status = str(diag_result.get("status", "")).upper()
+        diag_status = "NORMAL" if raw_status == "NORMAL" else "ABNORMAL"
 
-        # Extract problematic targets from problem_object or evidence
-        problem_obj = llm_result.get("problem_object") or {}
+        # Extract problematic targets from problem_object
+        problem_obj = diag_result.get("problem_object") or {}
         problematic_targets: List[str] = []
         if isinstance(problem_obj, dict):
             for v in problem_obj.values():
@@ -171,20 +182,16 @@ class SkillExecuteService:
                     problematic_targets.extend([str(x) for x in v])
                 elif v:
                     problematic_targets.append(str(v))
-        if not problematic_targets and diag_status == "ABNORMAL":
-            # Fall back to skill's problem_subject
-            if skill.problem_subject:
-                problematic_targets = [skill.problem_subject]
+        if not problematic_targets and diag_status == "ABNORMAL" and skill.problem_subject:
+            problematic_targets = [skill.problem_subject]
 
         # ── 4. Build strict view-separated response ──
 
         # llm_readable_data: minimal, anti-hallucination data for the AI agent
         llm_readable_data: Dict[str, Any] = {
             "status": diag_status,
-            "diagnosis_message": llm_result.get("conclusion", ""),
+            "diagnosis_message": diag_result.get("diagnosis_message", ""),
             "problematic_targets": problematic_targets,
-            "evidence": llm_result.get("evidence", []),
-            "summary": llm_result.get("summary", ""),
         }
         if diag_status == "ABNORMAL" and skill.human_recommendation:
             llm_readable_data["expert_action"] = skill.human_recommendation

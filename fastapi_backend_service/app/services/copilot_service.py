@@ -17,7 +17,7 @@ from app.repositories.skill_definition_repository import SkillDefinitionReposito
 from app.services.event_pipeline_service import EventPipelineService
 from app.services.mcp_builder_service import MCPBuilderService, _extract_json, _get_text
 from app.services.mcp_definition_service import _normalize_output
-from app.services.sandbox_service import execute_script
+from app.services.sandbox_service import execute_diagnose_fn, execute_script
 
 logger = logging.getLogger(__name__)
 
@@ -540,18 +540,23 @@ values is strictly forbidden.
         llm_schema = _j(mcp.output_schema) if hasattr(mcp, "output_schema") else None
         output_data = _normalize_output(output_data, llm_schema)
 
+        last_result = _j(skill.last_diagnosis_result) if hasattr(skill, "last_diagnosis_result") else None
+        diagnose_code = (last_result or {}).get("generated_code") or ""
+        if not diagnose_code:
+            yield {"type": "error", "message": "此 Skill 尚未在 Skill Builder 完成模擬，缺少診斷腳本。請先在 Skill Builder 執行「試跑」。"}
+            return
+
         try:
-            llm_svc = MCPBuilderService()
-            llm_result = await llm_svc.try_diagnosis(
-                diagnostic_prompt=skill.diagnostic_prompt,
+            diag_result = await execute_diagnose_fn(
+                code=diagnose_code,
                 mcp_outputs={mcp.name: output_data},
             )
         except Exception as exc:
-            yield {"type": "error", "message": f"LLM 診斷失敗：{exc}"}
+            yield {"type": "error", "message": f"診斷腳本執行失敗：{exc}"}
             return
 
-        raw_status = llm_result.get("status") or llm_result.get("severity") or ""
-        status = "NORMAL" if raw_status.upper() == "NORMAL" else "ABNORMAL"
+        raw_status = str(diag_result.get("status", "")).upper()
+        status = "NORMAL" if raw_status == "NORMAL" else "ABNORMAL"
 
         icon = "✅" if status == "NORMAL" else "⚠️"
         yield {
@@ -560,10 +565,10 @@ values is strictly forbidden.
             "skill_name": skill.name,
             "mcp_name": mcp.name,
             "status": status,
-            "conclusion": llm_result.get("conclusion", ""),
-            "evidence": llm_result.get("evidence", []),
-            "summary": llm_result.get("summary", ""),
-            "problem_object": llm_result.get("problem_object") or {},
+            "conclusion": diag_result.get("diagnosis_message", ""),
+            "evidence": [],
+            "summary": diag_result.get("diagnosis_message", ""),
+            "problem_object": diag_result.get("problem_object") or {},
             "human_recommendation": skill.human_recommendation or "",
             "mcp_output": output_data,
             "tab_title": tab_title or f"{icon} {skill.name}",
