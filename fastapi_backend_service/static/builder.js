@@ -6730,6 +6730,35 @@ let _mdsList = [];
 let _mdsEditingId = null;
 let _mdsGenerating = false;
 let _mdsRunning = false;
+let _mdsFormCache = {}; // { [id|'new']: unsaved form values }
+
+function _mdsCaptureFormState() {
+  const key = _mdsEditingId != null ? _mdsEditingId : 'new';
+  _mdsFormCache[key] = {
+    name:    document.getElementById('mds-name')?.value ?? null,
+    desc:    document.getElementById('mds-desc')?.value ?? null,
+    genDesc: document.getElementById('mds-gen-desc')?.value ?? null,
+    params:  document.getElementById('mds-gen-params')?.value ?? null,
+    code:    document.getElementById('mds-python-code')?.value ?? null,
+    schema:  document.getElementById('mds-input-schema')?.value ?? null,
+    active:  document.getElementById('mds-active')?.checked ?? null,
+  };
+}
+
+function _mdsRestoreFormState() {
+  const key = _mdsEditingId != null ? _mdsEditingId : 'new';
+  const s = _mdsFormCache[key];
+  if (!s) return;
+  const setVal = (id, val) => { if (val !== null && val !== undefined) { const el = document.getElementById(id); if (el) el.value = val; } };
+  const setBool = (id, val) => { if (val !== null && val !== undefined) { const el = document.getElementById(id); if (el) el.checked = val; } };
+  setVal('mds-name', s.name);
+  setVal('mds-desc', s.desc);
+  setVal('mds-gen-desc', s.genDesc);
+  setVal('mds-gen-params', s.params);
+  setVal('mds-python-code', s.code);
+  setVal('mds-input-schema', s.schema);
+  setBool('mds-active', s.active);
+}
 
 function _mdsToast(msg, type = 'success') {
   const colors = { success: 'bg-emerald-600', error: 'bg-red-600', info: 'bg-blue-600' };
@@ -6901,6 +6930,8 @@ function _mdsRenderDrawer() {
   `;
 
   _setDrawerContent(title, body, footer);
+  // Restore any unsaved form values the user had typed before navigating away
+  requestAnimationFrame(_mdsRestoreFormState);
 }
 
 function _mdsFormatJson(s) {
@@ -6917,6 +6948,7 @@ function _mdsFormatJsonPreview(s, maxRows = 3) {
 
 // Quick Sample: ask LLM to generate sample rows directly as JSON (no Python code needed)
 async function _mdsQuickSample() {
+  _mdsCaptureFormState();
   const desc = document.getElementById('mds-gen-desc')?.value?.trim();
   if (!desc) { _mdsToast('請先填寫描述', 'error'); return; }
   if (!_mdsEditingId) {
@@ -7000,20 +7032,43 @@ async function _mdsGenerateCodeFromPreview(desc) {
 
 // Playground: show raw data + MCP-style design interface
 async function _mdsShowPlayground(id) {
+  _mdsCaptureFormState();
   const item = _mdsList.find(m => m.id === id) || { id, name: '', description: '' };
   let rows = [];
+  let dataSource = '';
 
-  // Use cached sample_output if available
-  if (item.sample_output) {
-    try { rows = JSON.parse(item.sample_output); } catch {}
+  // Prefer Python generate() over LLM quick-sample
+  if (item.python_code) {
+    _mdsToast('⏳ 執行 Python generate()...', 'info');
+    try {
+      // Use params from the gen-params field if still available in cache
+      const cachedParams = _mdsFormCache[id]?.params;
+      let params = {};
+      if (cachedParams) { try { params = JSON.parse(cachedParams); } catch {} }
+      const r = await _api('POST', `/mock-data/${id}/run`, { params });
+      const dataset = r?.dataset || r?.data?.dataset;
+      rows = Array.isArray(dataset) ? dataset : (dataset ? [dataset] : []);
+      dataSource = '🐍 Python generate()';
+      const idx = _mdsList.findIndex(m => m.id === id);
+      if (idx >= 0) _mdsList[idx].sample_output = JSON.stringify(rows.slice(0, 50));
+    } catch (e) {
+      _mdsToast(`Python 執行失敗: ${e.message}，改用快速預覽`, 'error');
+    }
   }
 
+  // Fallback: sample_output cache
+  if (!rows.length && item.sample_output) {
+    try { rows = JSON.parse(item.sample_output); dataSource = '📋 快取資料'; } catch {}
+  }
+
+  // Last resort: quick-sample
   if (!rows.length) {
-    _mdsToast('⏳ 取得假資料中...', 'info');
+    _mdsToast('⏳ AI 生成假資料中...', 'info');
     try {
       const desc = item.description || '';
       const r = await _api('POST', `/mock-data/${id}/quick-sample`, { description: desc, count: 20 });
       rows = r?.rows || r?.data?.rows || [];
+      dataSource = '🤖 AI 快速預覽';
       const idx = _mdsList.findIndex(m => m.id === id);
       if (idx >= 0) _mdsList[idx].sample_output = JSON.stringify(rows);
     } catch (e) {
@@ -7029,7 +7084,10 @@ async function _mdsShowPlayground(id) {
     `🔬 MCP 模擬沙盒 — ${item.name || 'Mock Data'}`,
     `<div class="space-y-4">
       <div class="p-3 bg-slate-800 rounded-xl">
-        <p class="text-[10px] font-bold text-slate-300 uppercase tracking-widest mb-2">Raw Data (前 5 筆)</p>
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-[10px] font-bold text-slate-300 uppercase tracking-widest">Raw Data (前 5 筆)</p>
+          <span class="text-[10px] text-slate-400">${dataSource} · ${rows.length} 筆</span>
+        </div>
         <pre class="text-green-300 font-mono text-[10px] overflow-auto max-h-40">${rawJson}</pre>
       </div>
 
@@ -7139,6 +7197,7 @@ async function _mdsSaveAsCustomMcp(mockId) {
 
 async function _mdsGenerateCode() {
   if (_mdsGenerating) return;
+  _mdsCaptureFormState();
   const descEl = document.getElementById('mds-gen-desc');
   const paramsEl = document.getElementById('mds-gen-params');
   const btn = document.getElementById('mds-gen-btn');
@@ -7200,6 +7259,8 @@ async function _mdsSaveAndGetId() {
   try {
     const r = await _api('POST', '/mock-data', { name, description: desc, is_active: true });
     const item = r?.id ? r : r?.data;
+    // Transfer any 'new' cache to the real id
+    if (_mdsFormCache['new']) { _mdsFormCache[item.id] = _mdsFormCache['new']; delete _mdsFormCache['new']; }
     _mdsEditingId = item.id;
     _mdsList.unshift(item);
     return item;
@@ -7233,6 +7294,8 @@ async function _mdsSave() {
       _mdsList.unshift(item);
     }
     _mdsToast('✅ 儲存成功', 'success');
+    // Clear form cache on successful save
+    delete _mdsFormCache[_mdsEditingId != null ? _mdsEditingId : 'new'];
     closeDrawer();
     _mdsRenderList();
   } catch (e) {
