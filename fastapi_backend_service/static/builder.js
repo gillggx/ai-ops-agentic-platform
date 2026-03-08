@@ -4483,28 +4483,56 @@ async function _nbPreFillFromDraft(payload) {
     if (expEl) expEl.value = payload.expire_at.substring(0, 10);
   }
 
-  // Skill select — use 'select' mode and pick skill
-  _nbSetSkillMode('select');
+  // Skill: existing skill_id vs new skill_draft
   if (payload.skill_id) {
+    _nbSetSkillMode('select');
     const skillSel = document.getElementById('nb-skill-select');
     if (skillSel) {
       skillSel.value = String(payload.skill_id);
-      _nbOnSkillSelect();  // triggers skill summary + event preview
+      _nbOnSkillSelect();  // triggers skill summary + MCP auto-lock + event preview
     }
-  }
-
-  // Pre-fill skill_input into dynamic nb-mcp-select-param-{name} fields (rendered by _nbOnSkillSelect)
-  if (payload.skill_input) {
-    const skillInput = typeof payload.skill_input === 'string'
-      ? (() => { try { return JSON.parse(payload.skill_input); } catch { return {}; } })()
-      : payload.skill_input;
-    // Give the MCP param form time to render before populating
-    setTimeout(() => {
-      Object.entries(skillInput).forEach(([k, v]) => {
-        const el = document.getElementById(`nb-mcp-select-param-${k}`);
-        if (el) el.value = v;
-      });
-    }, 500);
+    // Pre-fill skill_input into dynamic nb-mcp-select-param-{name} fields
+    if (payload.skill_input) {
+      const skillInput = typeof payload.skill_input === 'string'
+        ? (() => { try { return JSON.parse(payload.skill_input); } catch { return {}; } })()
+        : payload.skill_input;
+      setTimeout(() => {
+        Object.entries(skillInput).forEach(([k, v]) => {
+          const el = document.getElementById(`nb-mcp-select-param-${k}`);
+          if (el) el.value = v;
+        });
+      }, 500);
+    }
+  } else if (payload.skill_draft) {
+    const sd = payload.skill_draft;
+    _nbSetSkillMode('new');
+    const setV = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = val; };
+    setV('nb-skill-name',   sd.name || '');
+    setV('nb-skill-prompt', sd.diagnostic_prompt || '');
+    setV('nb-skill-target', sd.problem_subject || '');
+    setV('nb-skill-action', sd.human_recommendation || '');
+    // Pre-select MCP if mcp_ids provided
+    const mcp_ids = sd.mcp_ids || (sd.mcp_id ? [sd.mcp_id] : []);
+    if (mcp_ids.length) {
+      _nbSetMcpMode('select');
+      const mcpSel = document.getElementById('nb-mcp-select');
+      if (mcpSel) {
+        mcpSel.value = String(mcp_ids[0]);
+        _nbOnMcpSelect();
+        // Pre-fill skill_input into nb-mcp-select-param-{name} fields
+        if (payload.skill_input) {
+          const skillInput = typeof payload.skill_input === 'string'
+            ? (() => { try { return JSON.parse(payload.skill_input); } catch { return {}; } })()
+            : payload.skill_input;
+          setTimeout(() => {
+            Object.entries(skillInput).forEach(([k, v]) => {
+              const el = document.getElementById(`nb-mcp-select-param-${k}`);
+              if (el) el.value = v;
+            });
+          }, 500);
+        }
+      }
+    }
   }
 
   _nbUpdateEventPreview();

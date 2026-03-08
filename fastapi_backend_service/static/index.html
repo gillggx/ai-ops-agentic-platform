@@ -452,20 +452,22 @@
                     </select>
                   </div>
                 </div>
-                <!-- Daily time + expire_at row -->
-                <div id="nb-task-daily-row" class="hidden mt-3">
-                  <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">每日執行時間</label>
-                  <input id="nb-task-schedule-time" type="time" value="08:00"
-                         class="bg-white border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-800
-                                shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
-                  <p class="text-xs text-slate-400 mt-0.5">格式 HH:MM，伺服器依此時間觸發 (UTC+8)</p>
-                </div>
-                <div class="mt-3">
-                  <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">效期（到期後自動停用）</label>
-                  <input id="nb-task-expire-at" type="date"
-                         class="bg-white border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-800
-                                shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
-                  <p class="text-xs text-slate-400 mt-0.5">留空代表永久有效</p>
+                <!-- Daily time + expire_at row (inline) -->
+                <div class="mt-3 grid grid-cols-2 gap-4">
+                  <div id="nb-task-daily-row" class="hidden">
+                    <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">每日執行時間</label>
+                    <input id="nb-task-schedule-time" type="time" value="08:00"
+                           class="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-800
+                                  shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                    <p class="text-xs text-slate-400 mt-0.5">格式 HH:MM，UTC+8</p>
+                  </div>
+                  <div>
+                    <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">效期（到期後自動停用）</label>
+                    <input id="nb-task-expire-at" type="date"
+                           class="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-800
+                                  shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                    <p class="text-xs text-slate-400 mt-0.5">留空代表永久有效</p>
+                  </div>
                 </div>
 
                 <!-- L2: Skill card -->

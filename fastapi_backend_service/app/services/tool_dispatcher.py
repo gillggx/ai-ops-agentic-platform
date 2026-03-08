@@ -139,9 +139,11 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     {
         "name": "draft_routine_check",
         "description": (
-            "以草稿模式建立排程巡檢。Agent 提案後需人工在 Event Link Builder 確認後發佈。\n"
+            "以草稿模式建立排程巡檢。Agent 提案後需人工在 巢狀建構器 (Nested Builder) 確認後發佈。\n"
             "⚠️ 提供 skill_id（現有 Skill）或 skill_draft（建立新 Skill，先用 list_skills 確認無重複）。\n"
-            "schedule_interval 可選: '30m' | '1h' | '4h' | '8h' | '12h' | 'daily'。"
+            "⚠️ skill_draft 需包含：name, description, mcp_ids（用 list_mcps 取得正確 custom MCP ID）, diagnostic_prompt, problem_subject, human_recommendation。\n"
+            "schedule_interval 可選: '30m' | '1h' | '4h' | '8h' | '12h' | 'daily'。\n"
+            "daily 模式須填 schedule_time (HH:MM)。若用戶說「最近N天」請計算 expire_at (YYYY-MM-DD)。"
         ),
         "input_schema": {
             "type": "object",

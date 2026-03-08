@@ -41,7 +41,7 @@ def _j(s: Any) -> Any:
 _VIEW_MAP = {
     "mcp": "mcp-builder",
     "skill": "skill-builder",
-    "routine_check": "event-link-builder",
+    "routine_check": "nested-builder",
     "event_skill_link": "event-link-builder",
 }
 
@@ -402,6 +402,9 @@ async def create_routine_check_draft(
         "skill_draft": body.get("skill_draft"),
         "schedule_interval": body.get("schedule_interval", "1h"),
         "skill_input": body.get("skill_input") or {},
+        "schedule_time": body.get("schedule_time"),
+        "expire_at": body.get("expire_at"),
+        "generated_event_name": body.get("generated_event_name"),
     }
     draft = await _create_draft(db, "routine_check", payload, current_user.id)
     return _draft_response(draft, payload)
