@@ -127,6 +127,67 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "list_routine_checks",
+        "description": "列出所有排程巡檢 (RoutineCheck)，含 id、名稱、綁定 Skill、執行間隔、啟用狀態。用於了解目前有哪些主動巡檢任務。",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "list_event_types",
+        "description": "列出所有 EventType（異常事件類型），含 id、名稱、屬性欄位、已連結的 diagnosis_skill_ids。用於了解有哪些事件可以觸發 Skill 診斷。",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "draft_routine_check",
+        "description": (
+            "以草稿模式建立排程巡檢。Agent 提案後需人工在 Event Link Builder 確認後發佈。\n"
+            "⚠️ 提供 skill_id（現有 Skill）或 skill_draft（建立新 Skill，先用 list_skills 確認無重複）。\n"
+            "schedule_interval 可選: '30m' | '1h' | '4h' | '8h' | '12h' | 'daily'。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "排程名稱"},
+                "skill_id": {"type": "integer", "description": "綁定現有 Skill 的 ID（與 skill_draft 二擇一）"},
+                "skill_draft": {
+                    "type": "object",
+                    "description": "若需建立新 Skill：{name, description, mcp_ids, diagnostic_prompt, problem_subject, human_recommendation}",
+                },
+                "schedule_interval": {
+                    "type": "string",
+                    "enum": ["30m", "1h", "4h", "8h", "12h", "daily"],
+                    "description": "執行間隔（預設 1h）",
+                },
+                "skill_input": {
+                    "type": "object",
+                    "description": "固定傳給 Skill 的執行參數，例如 {lot_id, tool_id}",
+                },
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "draft_event_skill_link",
+        "description": (
+            "以草稿模式將 Skill 連結至 EventType 的診斷鏈。Agent 提案後需人工確認後發佈。\n"
+            "⚠️ 提供 event_type_id（現有）或 event_type_name（新建 EventType）。\n"
+            "⚠️ 提供 skill_id（現有）或 skill_draft（新建 Skill）。\n"
+            "先用 list_event_types 與 list_skills 確認現有清單再決定是否新建。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "event_type_id": {"type": "integer", "description": "現有 EventType 的 ID（與 event_type_name 二擇一）"},
+                "event_type_name": {"type": "string", "description": "新建 EventType 的名稱"},
+                "skill_id": {"type": "integer", "description": "現有 Skill 的 ID（與 skill_draft 二擇一）"},
+                "skill_draft": {
+                    "type": "object",
+                    "description": "若需建立新 Skill：{name, description, mcp_ids, diagnostic_prompt, problem_subject, human_recommendation}",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "search_memory",
         "description": "搜尋 Agent 的長期記憶。用於查詢歷史診斷結果或使用者曾說的話。",
         "input_schema": {
@@ -211,6 +272,14 @@ class ToolDispatcher:
                     return await self._call_api("POST", "/api/v1/agent/draft/skill", body=tool_input)
                 case "draft_mcp":
                     return await self._call_api("POST", "/api/v1/agent/draft/mcp", body=tool_input)
+                case "list_routine_checks":
+                    return await self._call_api("GET", "/api/v1/routine-checks")
+                case "list_event_types":
+                    return await self._call_api("GET", "/api/v1/event-types")
+                case "draft_routine_check":
+                    return await self._call_api("POST", "/api/v1/agent/draft/routine_check", body=tool_input)
+                case "draft_event_skill_link":
+                    return await self._call_api("POST", "/api/v1/agent/draft/event_skill_link", body=tool_input)
                 case "patch_skill_raw":
                     return await self._call_api(
                         "PUT",

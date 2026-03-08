@@ -38,13 +38,22 @@ def _j(s: Any) -> Any:
         return None
 
 
+_VIEW_MAP = {
+    "mcp": "mcp-builder",
+    "skill": "skill-builder",
+    "routine_check": "event-link-builder",
+    "event_skill_link": "event-link-builder",
+}
+
+
 def _draft_response(draft: AgentDraftModel, auto_fill: Dict) -> Dict[str, Any]:
+    view = _VIEW_MAP.get(draft.draft_type, "nested-builder")
     return {
         "draft_id": draft.id,
         "draft_type": draft.draft_type,
         "status": draft.status,
         "deep_link_data": {
-            "view": f"{draft.draft_type}-builder" if draft.draft_type in ("mcp", "skill") else "nested-builder",
+            "view": view,
             "draft_id": draft.id,
             "auto_fill": auto_fill,
         },
@@ -227,6 +236,10 @@ async def publish_draft(
         published_id = await _publish_schedule(db, payload)
     elif draft.draft_type == "event":
         published_id = await _publish_event(db, payload)
+    elif draft.draft_type == "routine_check":
+        published_id = await _publish_routine_check(db, payload)
+    elif draft.draft_type == "event_skill_link":
+        published_id = await _publish_event_skill_link(db, payload)
     else:
         raise AppException(status_code=422, error_code="UNKNOWN_DRAFT_TYPE", detail=f"未知的草稿類型: {draft.draft_type}")
 
@@ -364,6 +377,148 @@ async def _publish_event(db: AsyncSession, payload: Dict) -> int:
     await db.commit()
     await db.refresh(obj)
     return obj.id
+
+
+# ── Create Routine Check Draft ───────────────────────────────────────────────
+
+@router.post("/routine_check", summary="建立排程巡檢草稿 (Agent 呼叫)", response_model=Dict[str, Any])
+async def create_routine_check_draft(
+    body: Dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Agent proposes a RoutineCheck (scheduled skill run).
+
+    Body fields:
+      name              — check name
+      skill_id          — existing Skill ID (provide this OR skill_draft)
+      skill_draft       — {name, description, mcp_ids, diagnostic_prompt, ...} if creating new Skill
+      schedule_interval — "30m" | "1h" | "4h" | "8h" | "12h" | "daily"
+      skill_input       — JSON dict of fixed params (lot_id, tool_id, etc.)
+    """
+    payload = {
+        "name": body.get("name", ""),
+        "skill_id": body.get("skill_id"),
+        "skill_draft": body.get("skill_draft"),
+        "schedule_interval": body.get("schedule_interval", "1h"),
+        "skill_input": body.get("skill_input") or {},
+    }
+    draft = await _create_draft(db, "routine_check", payload, current_user.id)
+    return _draft_response(draft, payload)
+
+
+# ── Create Event → Skill Link Draft ─────────────────────────────────────────
+
+@router.post("/event_skill_link", summary="建立 Event→Skill 連結草稿 (Agent 呼叫)", response_model=Dict[str, Any])
+async def create_event_skill_link_draft(
+    body: Dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Agent proposes linking a Skill to an EventType's diagnosis chain.
+
+    Body fields:
+      event_type_id   — existing EventType ID (provide this OR event_type_name)
+      event_type_name — new EventType name (if creating a new one)
+      skill_id        — existing Skill ID (provide this OR skill_draft)
+      skill_draft     — {name, description, mcp_ids, diagnostic_prompt, ...} if creating new Skill
+    """
+    payload = {
+        "event_type_id": body.get("event_type_id"),
+        "event_type_name": body.get("event_type_name", ""),
+        "skill_id": body.get("skill_id"),
+        "skill_draft": body.get("skill_draft"),
+    }
+    draft = await _create_draft(db, "event_skill_link", payload, current_user.id)
+    return _draft_response(draft, payload)
+
+
+async def _publish_routine_check(db: AsyncSession, payload: Dict) -> int:
+    """Create a RoutineCheck from draft payload.
+
+    If payload contains skill_draft (no skill_id), first publish the Skill,
+    then create the RoutineCheck referencing the new Skill's id.
+    """
+    from app.models.routine_check import RoutineCheckModel
+    import json as _json
+
+    skill_id = payload.get("skill_id")
+    if not skill_id and payload.get("skill_draft"):
+        skill_id = await _publish_skill(db, payload["skill_draft"])
+
+    if not skill_id:
+        raise AppException(status_code=422, error_code="MISSING_SKILL",
+                           detail="routine_check 草稿缺少 skill_id 或 skill_draft")
+
+    interval = payload.get("schedule_interval") or "1h"
+    skill_input_raw = payload.get("skill_input") or {}
+    if isinstance(skill_input_raw, dict):
+        skill_input = _json.dumps(skill_input_raw, ensure_ascii=False)
+    else:
+        skill_input = str(skill_input_raw)
+
+    obj = RoutineCheckModel(
+        name=payload.get("name") or f"排程巡檢 {uuid.uuid4().hex[:6]}",
+        skill_id=skill_id,
+        skill_input=skill_input,
+        schedule_interval=interval,
+        is_active=False,
+    )
+    db.add(obj)
+    await db.commit()
+    await db.refresh(obj)
+    return obj.id
+
+
+async def _publish_event_skill_link(db: AsyncSession, payload: Dict) -> int:
+    """Link a Skill to an EventType's diagnosis_skill_ids.
+
+    Creates Skill first if skill_draft is provided.
+    Creates EventType first if only event_type_name is provided.
+    Returns the EventType id.
+    """
+    from app.models.event_type import EventTypeModel
+    from sqlalchemy import select
+    import json as _json
+
+    # Resolve or create Skill
+    skill_id = payload.get("skill_id")
+    if not skill_id and payload.get("skill_draft"):
+        skill_id = await _publish_skill(db, payload["skill_draft"])
+    if not skill_id:
+        raise AppException(status_code=422, error_code="MISSING_SKILL",
+                           detail="event_skill_link 草稿缺少 skill_id 或 skill_draft")
+
+    # Resolve or create EventType
+    et_id = payload.get("event_type_id")
+    if et_id:
+        result = await db.execute(select(EventTypeModel).where(EventTypeModel.id == et_id))
+        et = result.scalar_one_or_none()
+        if not et:
+            raise AppException(status_code=404, error_code="ET_NOT_FOUND",
+                               detail=f"EventType #{et_id} 不存在")
+    else:
+        et_name = payload.get("event_type_name") or f"Draft Event {uuid.uuid4().hex[:6]}"
+        result = await db.execute(select(EventTypeModel).where(EventTypeModel.name == et_name))
+        et = result.scalar_one_or_none()
+        if not et:
+            et = EventTypeModel(
+                name=et_name,
+                description="Agent 建立的事件類型",
+                attributes=_json.dumps([]),
+                diagnosis_skill_ids=_json.dumps([]),
+            )
+            db.add(et)
+            await db.flush()
+
+    # Append skill_id to diagnosis_skill_ids (deduplicate)
+    existing_ids = _j(et.diagnosis_skill_ids) or []
+    if skill_id not in existing_ids:
+        existing_ids.append(skill_id)
+    et.diagnosis_skill_ids = _json.dumps(existing_ids, ensure_ascii=False)
+    await db.commit()
+    await db.refresh(et)
+    return et.id
 
 
 def _cron_to_minutes(cron: str) -> int:

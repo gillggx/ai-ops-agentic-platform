@@ -104,8 +104,9 @@ function switchView(name) {
   if (name === 'mcp-builder')      _loadMcpDefs();
   if (name === 'skill-builder')    _loadSkillDefs();
   if (name === 'settings')         _loadSettings();
-  if (name === 'routine-checks')   _loadRoutineChecks();
-  if (name === 'generated-events') _loadGeneratedEvents();
+  if (name === 'routine-checks')       _loadRoutineChecks();
+  if (name === 'generated-events')     _loadGeneratedEvents();
+  if (name === 'event-link-builder')   _elInitView();
   if (name === 'agent-brain')      { _brainLoadSoul(); _brainLoadPref(); _brainLoadMemories(); }
 
   // Phase 8.6: send AI welcome message once when entering diagnose view
@@ -6196,4 +6197,272 @@ async function _mcpSave() {
   } catch(e) {
     alert(`儲存失敗：${e.message}`);
   }
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// EVENT → SKILL LINK BUILDER  (V13 Final Feature)
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _elMode        = 'event_skill_link';  // 'event_skill_link' | 'routine_check'
+let _elEtMode      = 'existing';          // 'existing' | 'new'
+let _elSkillMode   = 'existing';          // 'existing' | 'new'
+let _elRcSkillMode = 'existing';          // 'existing' | 'new'
+let _elDraftId     = null;               // set when opened from a draft
+
+/** Called by switchView('event-link-builder') */
+async function _elInitView() {
+  _elMode        = 'event_skill_link';
+  _elEtMode      = 'existing';
+  _elSkillMode   = 'existing';
+  _elRcSkillMode = 'existing';
+
+  _elApplyModeUI();
+
+  // Populate dropdowns in parallel
+  try {
+    const [ets, skills, mcps] = await Promise.all([
+      _api('GET', '/event-types'),
+      _api('GET', '/skill-definitions'),
+      _api('GET', '/mcp-definitions?type=custom'),
+    ]);
+    _elPopulateEtSelect(ets || []);
+    _elPopulateSkillSelects(skills || []);
+    _elPopulateMcpSelects(mcps || []);
+  } catch(e) {
+    console.error('_elInitView error:', e);
+  }
+}
+
+function _elSetMode(mode) {
+  _elMode = mode;
+  _elApplyModeUI();
+}
+
+function _elApplyModeUI() {
+  const isLink = _elMode === 'event_skill_link';
+  document.getElementById('el-form-event-skill')?.classList.toggle('hidden', !isLink);
+  document.getElementById('el-form-routine')?.classList.toggle('hidden', isLink);
+
+  const btnLink    = document.getElementById('el-mode-event-skill');
+  const btnRoutine = document.getElementById('el-mode-routine');
+  if (btnLink) btnLink.className = `w-full text-left px-3 py-3 rounded-lg border text-xs font-semibold transition-colors ${isLink ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`;
+  if (btnRoutine) btnRoutine.className = `w-full text-left px-3 py-3 rounded-lg border text-xs font-semibold transition-colors ${!isLink ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`;
+}
+
+function _elSetEtMode(mode) {
+  _elEtMode = mode;
+  const ex = document.getElementById('el-et-existing-row');
+  const nw = document.getElementById('el-et-new-row');
+  ex?.classList.toggle('hidden', mode === 'new');
+  nw?.classList.toggle('hidden', mode === 'existing');
+  document.getElementById('el-et-mode-existing').className = `text-xs px-3 py-1.5 rounded-lg font-semibold transition-colors ${mode === 'existing' ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-300 text-slate-600 hover:bg-slate-50'}`;
+  document.getElementById('el-et-mode-new').className = `text-xs px-3 py-1.5 rounded-lg font-semibold transition-colors ${mode === 'new' ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-300 text-slate-600 hover:bg-slate-50'}`;
+}
+
+function _elSetSkillMode(mode) {
+  _elSkillMode = mode;
+  document.getElementById('el-skill-existing-row')?.classList.toggle('hidden', mode === 'new');
+  document.getElementById('el-skill-new-row')?.classList.toggle('hidden', mode === 'existing');
+  document.getElementById('el-skill-mode-existing').className = `text-xs px-3 py-1.5 rounded-lg font-semibold transition-colors ${mode === 'existing' ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-300 text-slate-600 hover:bg-slate-50'}`;
+  document.getElementById('el-skill-mode-new').className = `text-xs px-3 py-1.5 rounded-lg font-semibold transition-colors ${mode === 'new' ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-300 text-slate-600 hover:bg-slate-50'}`;
+}
+
+function _elSetRcSkillMode(mode) {
+  _elRcSkillMode = mode;
+  document.getElementById('el-rc-skill-existing-row')?.classList.toggle('hidden', mode === 'new');
+  document.getElementById('el-rc-skill-new-row')?.classList.toggle('hidden', mode === 'existing');
+  document.getElementById('el-rc-skill-mode-existing').className = `text-xs px-3 py-1.5 rounded-lg font-semibold transition-colors ${mode === 'existing' ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-300 text-slate-600 hover:bg-slate-50'}`;
+  document.getElementById('el-rc-skill-mode-new').className = `text-xs px-3 py-1.5 rounded-lg font-semibold transition-colors ${mode === 'new' ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-300 text-slate-600 hover:bg-slate-50'}`;
+}
+
+function _elPopulateEtSelect(ets) {
+  const sel = document.getElementById('el-et-select');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">-- 選擇 EventType --</option>' +
+    ets.map(e => `<option value="${e.id}">${_escapeHtml(e.name)}</option>`).join('');
+}
+
+function _elPopulateSkillSelects(skills) {
+  const opts = '<option value="">-- 選擇 Skill --</option>' +
+    skills.map(s => `<option value="${s.id}">${_escapeHtml(s.name)}</option>`).join('');
+  const s1 = document.getElementById('el-skill-select');
+  const s2 = document.getElementById('el-rc-skill-select');
+  if (s1) s1.innerHTML = opts;
+  if (s2) s2.innerHTML = opts;
+}
+
+function _elPopulateMcpSelects(mcps) {
+  const opts = '<option value="">-- 選擇 MCP --</option>' +
+    mcps.map(m => `<option value="${m.id}">${_escapeHtml(m.name)}</option>`).join('');
+  ['el-skill-new-mcp', 'el-rc-skill-new-mcp'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = opts;
+  });
+}
+
+/** Build payload for event_skill_link mode */
+function _elBuildEventSkillPayload() {
+  const etId   = _elEtMode === 'existing' ? parseInt(document.getElementById('el-et-select')?.value || '0') : null;
+  const etName = _elEtMode === 'new'      ? (document.getElementById('el-et-new-name')?.value || '').trim() : null;
+  let skillId   = null;
+  let skillDraft = null;
+  if (_elSkillMode === 'existing') {
+    skillId = parseInt(document.getElementById('el-skill-select')?.value || '0') || null;
+  } else {
+    const mcpId = parseInt(document.getElementById('el-skill-new-mcp')?.value || '0') || null;
+    skillDraft = {
+      name: (document.getElementById('el-skill-new-name')?.value || '').trim(),
+      description: (document.getElementById('el-skill-new-desc')?.value || '').trim(),
+      mcp_ids: mcpId ? [mcpId] : [],
+      diagnostic_prompt: (document.getElementById('el-skill-new-prompt')?.value || '').trim(),
+    };
+  }
+  return { event_type_id: etId || null, event_type_name: etName || '', skill_id: skillId, skill_draft: skillDraft };
+}
+
+/** Build payload for routine_check mode */
+function _elBuildRoutinePayload() {
+  const name     = (document.getElementById('el-rc-name')?.value || '').trim();
+  const interval = document.getElementById('el-rc-interval')?.value || '1h';
+  let skillId    = null;
+  let skillDraft = null;
+  if (_elRcSkillMode === 'existing') {
+    skillId = parseInt(document.getElementById('el-rc-skill-select')?.value || '0') || null;
+  } else {
+    const mcpId = parseInt(document.getElementById('el-rc-skill-new-mcp')?.value || '0') || null;
+    skillDraft = {
+      name: (document.getElementById('el-rc-skill-new-name')?.value || '').trim(),
+      mcp_ids: mcpId ? [mcpId] : [],
+      diagnostic_prompt: (document.getElementById('el-rc-skill-new-prompt')?.value || '').trim(),
+    };
+  }
+  let skillInput = {};
+  try { skillInput = JSON.parse(document.getElementById('el-rc-skill-input')?.value || '{}'); } catch {}
+  return { name, skill_id: skillId, skill_draft: skillDraft, schedule_interval: interval, skill_input: skillInput };
+}
+
+function _elShowResult(msg, isError = false) {
+  const el = document.getElementById('el-result-banner');
+  if (!el) return;
+  el.className = `mt-2 p-3 rounded-lg text-xs ${isError ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-green-50 border border-green-200 text-green-700'}`;
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+/** Directly publish to registry */
+async function _elSave() {
+  try {
+    if (_elMode === 'event_skill_link') {
+      const p = _elBuildEventSkillPayload();
+      if (!p.event_type_id && !p.event_type_name) { alert('請選擇或輸入 EventType'); return; }
+      if (!p.skill_id && !p.skill_draft?.name)     { alert('請選擇或填寫 Skill'); return; }
+      // Create draft then immediately publish
+      const draft = await _api('POST', '/agent/draft/event_skill_link', p);
+      const draftId = draft.draft_id || draft.data?.draft_id;
+      if (!draftId) throw new Error('無法取得草稿 ID');
+      await _api('POST', `/agent/draft/${draftId}/publish`);
+      _elShowResult('✅ Event→Skill 連結已發佈！');
+    } else {
+      const p = _elBuildRoutinePayload();
+      if (!p.name) { alert('請填寫排程名稱'); return; }
+      if (!p.skill_id && !p.skill_draft?.name) { alert('請選擇或填寫 Skill'); return; }
+      const draft = await _api('POST', '/agent/draft/routine_check', p);
+      const draftId = draft.draft_id || draft.data?.draft_id;
+      if (!draftId) throw new Error('無法取得草稿 ID');
+      await _api('POST', `/agent/draft/${draftId}/publish`);
+      _elShowResult('✅ 排程巡檢已發佈！');
+    }
+  } catch(e) {
+    _elShowResult('❌ 發佈失敗：' + e.message, true);
+  }
+}
+
+/** Save as agent draft (for review) */
+async function _elSaveDraft() {
+  try {
+    let draft;
+    if (_elMode === 'event_skill_link') {
+      const p = _elBuildEventSkillPayload();
+      draft = await _api('POST', '/agent/draft/event_skill_link', p);
+    } else {
+      const p = _elBuildRoutinePayload();
+      draft = await _api('POST', '/agent/draft/routine_check', p);
+    }
+    const draftId = draft.draft_id || draft.data?.draft_id;
+    _elShowResult(`📋 草稿已建立 (${draftId?.slice(0, 8) || '?'}…)，可在 Agent 對話中審核發佈。`);
+  } catch(e) {
+    _elShowResult('❌ 草稿儲存失敗：' + e.message, true);
+  }
+}
+
+/** Pre-fill form from agent draft payload (called by _openDraftEditor) */
+async function _elPreFillFromDraft(payload, draftId) {
+  _elDraftId = draftId;
+
+  // Show draft banner
+  const banner = document.getElementById('el-draft-banner');
+  const draftDisplay = document.getElementById('el-draft-id-display');
+  if (banner) banner.classList.remove('hidden');
+  if (draftDisplay) draftDisplay.textContent = draftId || '';
+
+  // Wait for dropdowns to be populated
+  if (_elMode === 'event_skill_link' || payload.event_type_id || payload.event_type_name) {
+    _elSetMode('event_skill_link');
+
+    if (payload.event_type_id) {
+      _elSetEtMode('existing');
+      const sel = document.getElementById('el-et-select');
+      if (sel) sel.value = String(payload.event_type_id);
+    } else if (payload.event_type_name) {
+      _elSetEtMode('new');
+      const inp = document.getElementById('el-et-new-name');
+      if (inp) inp.value = payload.event_type_name;
+    }
+
+    if (payload.skill_id) {
+      _elSetSkillMode('existing');
+      const sel = document.getElementById('el-skill-select');
+      if (sel) sel.value = String(payload.skill_id);
+    } else if (payload.skill_draft) {
+      _elSetSkillMode('new');
+      const sd = payload.skill_draft;
+      _setVal('el-skill-new-name', sd.name || '');
+      _setVal('el-skill-new-desc', sd.description || '');
+      _setVal('el-skill-new-prompt', sd.diagnostic_prompt || '');
+      if (sd.mcp_ids?.[0]) {
+        const sel = document.getElementById('el-skill-new-mcp');
+        if (sel) sel.value = String(sd.mcp_ids[0]);
+      }
+    }
+  } else {
+    _elSetMode('routine_check');
+
+    _setVal('el-rc-name', payload.name || '');
+    const ivSel = document.getElementById('el-rc-interval');
+    if (ivSel && payload.schedule_interval) ivSel.value = payload.schedule_interval;
+    if (payload.skill_input) {
+      _setVal('el-rc-skill-input', JSON.stringify(payload.skill_input, null, 2));
+    }
+
+    if (payload.skill_id) {
+      _elSetRcSkillMode('existing');
+      const sel = document.getElementById('el-rc-skill-select');
+      if (sel) sel.value = String(payload.skill_id);
+    } else if (payload.skill_draft) {
+      _elSetRcSkillMode('new');
+      const sd = payload.skill_draft;
+      _setVal('el-rc-skill-new-name', sd.name || '');
+      _setVal('el-rc-skill-new-prompt', sd.diagnostic_prompt || '');
+      if (sd.mcp_ids?.[0]) {
+        const sel = document.getElementById('el-rc-skill-new-mcp');
+        if (sel) sel.value = String(sd.mcp_ids[0]);
+      }
+    }
+  }
+}
+
+function _setVal(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.value = val;
 }

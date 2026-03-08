@@ -200,6 +200,16 @@
           </svg>
         </button>
 
+        <!-- Event → Skill Link Builder -->
+        <button class="nav-btn" id="nav-event-link-builder" title="Event → Skill 連結建構器"
+          onclick="switchView('event-link-builder')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+          </svg>
+        </button>
+
         <!-- Event Types -->
         <button class="nav-btn" id="nav-event-types" title="Event Builder"
           onclick="switchView('event-types')">
@@ -1736,6 +1746,174 @@
             <div class="text-center text-slate-500 py-12 text-sm">載入中...</div>
           </div>
         </div>
+
+        <!-- ══ EVENT → SKILL LINK BUILDER VIEW ══ -->
+        <div id="view-event-link-builder" class="view-panel hidden flex-1 flex flex-col overflow-hidden">
+          <!-- Header -->
+          <div class="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white">
+            <div>
+              <h2 class="font-semibold text-base flex items-center gap-2">
+                <svg class="w-4 h-4 text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                </svg>
+                Event → Skill 連結建構器
+              </h2>
+              <p class="text-xs text-slate-500 mt-0.5">將 Skill 加入 EventType 診斷鏈，或建立排程巡檢</p>
+            </div>
+          </div>
+
+          <!-- Body: 3-column layout -->
+          <div class="flex flex-1 overflow-hidden divide-x divide-slate-200">
+
+            <!-- ── Column 1: Mode Selector ── -->
+            <div class="w-56 flex-shrink-0 flex flex-col bg-slate-50 p-4 gap-3 overflow-y-auto">
+              <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">建構模式</p>
+              <button onclick="_elSetMode('event_skill_link')" id="el-mode-event-skill"
+                class="w-full text-left px-3 py-3 rounded-lg border border-indigo-300 bg-indigo-50 text-indigo-700
+                       text-xs font-semibold hover:bg-indigo-100 transition-colors">
+                🔗 Event → Skill 連結<br>
+                <span class="font-normal text-indigo-500">將 Skill 加入事件診斷鏈</span>
+              </button>
+              <button onclick="_elSetMode('routine_check')" id="el-mode-routine"
+                class="w-full text-left px-3 py-3 rounded-lg border border-slate-200 bg-white text-slate-600
+                       text-xs font-semibold hover:bg-slate-50 transition-colors">
+                🕒 排程巡檢<br>
+                <span class="font-normal text-slate-400">定時執行 Skill 主動巡檢</span>
+              </button>
+
+              <!-- Draft info (populated by _openDraftEditor) -->
+              <div id="el-draft-banner" class="hidden mt-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200">
+                <p class="text-[10px] font-bold text-amber-700">Agent 草稿待審核</p>
+                <p id="el-draft-id-display" class="text-[10px] text-amber-500 font-mono truncate mt-0.5"></p>
+              </div>
+            </div>
+
+            <!-- ── Column 2: Form ── -->
+            <div class="flex-1 flex flex-col overflow-y-auto p-5 gap-5 bg-white">
+
+              <!-- Event Skill Link form -->
+              <div id="el-form-event-skill" class="">
+                <p class="text-xs font-bold text-slate-700 mb-3">① 選擇 EventType</p>
+                <div class="flex gap-2 mb-3">
+                  <button onclick="_elSetEtMode('existing')" id="el-et-mode-existing"
+                    class="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-semibold">現有 EventType</button>
+                  <button onclick="_elSetEtMode('new')" id="el-et-mode-new"
+                    class="text-xs px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-600 font-semibold hover:bg-slate-50">建立新 EventType</button>
+                </div>
+                <div id="el-et-existing-row">
+                  <select id="el-et-select" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:border-indigo-400 outline-none">
+                    <option value="">-- 載入中... --</option>
+                  </select>
+                </div>
+                <div id="el-et-new-row" class="hidden">
+                  <input id="el-et-new-name" type="text" placeholder="新 EventType 名稱（英文，e.g. SPC_OOC_APC）"
+                    class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:border-indigo-400 outline-none"/>
+                </div>
+
+                <div class="mt-5">
+                  <p class="text-xs font-bold text-slate-700 mb-3">② 選擇 Skill</p>
+                  <div class="flex gap-2 mb-3">
+                    <button onclick="_elSetSkillMode('existing')" id="el-skill-mode-existing"
+                      class="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-semibold">現有 Skill</button>
+                    <button onclick="_elSetSkillMode('new')" id="el-skill-mode-new"
+                      class="text-xs px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-600 font-semibold hover:bg-slate-50">建立新 Skill</button>
+                  </div>
+                  <div id="el-skill-existing-row">
+                    <select id="el-skill-select" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:border-indigo-400 outline-none">
+                      <option value="">-- 載入中... --</option>
+                    </select>
+                  </div>
+                  <div id="el-skill-new-row" class="hidden flex flex-col gap-2">
+                    <input id="el-skill-new-name" type="text" placeholder="Skill 名稱"
+                      class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:border-indigo-400 outline-none"/>
+                    <input id="el-skill-new-desc" type="text" placeholder="Skill 說明"
+                      class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:border-indigo-400 outline-none"/>
+                    <select id="el-skill-new-mcp" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:border-indigo-400 outline-none">
+                      <option value="">-- 選擇 MCP --</option>
+                    </select>
+                    <textarea id="el-skill-new-prompt" rows="3" placeholder="診斷條件 (diagnostic_prompt)"
+                      class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono focus:border-indigo-400 outline-none resize-none"></textarea>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Routine Check form -->
+              <div id="el-form-routine" class="hidden flex flex-col gap-4">
+                <div>
+                  <label class="text-xs font-bold text-slate-700 block mb-1.5">排程名稱</label>
+                  <input id="el-rc-name" type="text" placeholder="例：每小時 SPC 巡檢"
+                    class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:border-indigo-400 outline-none"/>
+                </div>
+                <div>
+                  <p class="text-xs font-bold text-slate-700 mb-2">綁定 Skill</p>
+                  <div class="flex gap-2 mb-2">
+                    <button onclick="_elSetRcSkillMode('existing')" id="el-rc-skill-mode-existing"
+                      class="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-semibold">現有 Skill</button>
+                    <button onclick="_elSetRcSkillMode('new')" id="el-rc-skill-mode-new"
+                      class="text-xs px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-600 font-semibold hover:bg-slate-50">建立新 Skill</button>
+                  </div>
+                  <div id="el-rc-skill-existing-row">
+                    <select id="el-rc-skill-select" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:border-indigo-400 outline-none">
+                      <option value="">-- 載入中... --</option>
+                    </select>
+                  </div>
+                  <div id="el-rc-skill-new-row" class="hidden flex flex-col gap-2">
+                    <input id="el-rc-skill-new-name" type="text" placeholder="Skill 名稱"
+                      class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:border-indigo-400 outline-none"/>
+                    <select id="el-rc-skill-new-mcp" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:border-indigo-400 outline-none">
+                      <option value="">-- 選擇 MCP --</option>
+                    </select>
+                    <textarea id="el-rc-skill-new-prompt" rows="2" placeholder="診斷條件"
+                      class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono focus:border-indigo-400 outline-none resize-none"></textarea>
+                  </div>
+                </div>
+                <div>
+                  <label class="text-xs font-bold text-slate-700 block mb-1.5">執行間隔</label>
+                  <select id="el-rc-interval" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:border-indigo-400 outline-none">
+                    <option value="30m">每 30 分鐘</option>
+                    <option value="1h" selected>每 1 小時</option>
+                    <option value="4h">每 4 小時</option>
+                    <option value="8h">每 8 小時</option>
+                    <option value="12h">每 12 小時</option>
+                    <option value="daily">每天</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="text-xs font-bold text-slate-700 block mb-1.5">固定執行參數 (JSON)</label>
+                  <textarea id="el-rc-skill-input" rows="3" placeholder='{"lot_id": "L2603001", "tool_id": "TETCH01"}'
+                    class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono focus:border-indigo-400 outline-none resize-none"></textarea>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- ── Column 3: Actions ── -->
+            <div class="w-64 flex-shrink-0 flex flex-col bg-slate-50 p-4 gap-3 overflow-y-auto">
+              <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">操作</p>
+              <button onclick="_elSave()"
+                class="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700
+                       text-white text-sm font-semibold transition-colors shadow-sm">
+                ✓ 直接發佈至 Registry
+              </button>
+              <button onclick="_elSaveDraft()"
+                class="w-full py-2.5 rounded-lg bg-white border border-indigo-300 hover:bg-indigo-50
+                       text-indigo-700 text-sm font-semibold transition-colors">
+                📋 存為 Agent 草稿
+              </button>
+
+              <div class="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700">
+                <p class="font-semibold mb-1">ℹ️ 說明</p>
+                <p><strong>Event→Skill 連結</strong>：將 Skill 加入 EventType 的 diagnosis_skill_ids，事件觸發時自動執行。</p>
+                <p class="mt-1"><strong>排程巡檢</strong>：定時執行 Skill，結果 ABNORMAL 時自動生成警報事件。</p>
+              </div>
+
+              <div id="el-result-banner" class="hidden mt-2 p-3 rounded-lg text-xs"></div>
+            </div>
+
+          </div>
+        </div><!-- /view-event-link-builder -->
 
       </div><!-- /view-container -->
 

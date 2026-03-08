@@ -1658,6 +1658,11 @@ async function _openDraftEditor(draftId, draftType) {
         if (typeof _mcpOpenEditor === 'function') _mcpOpenEditor(null, payload);
         document.getElementById('mcp-back-btn') && (document.getElementById('mcp-back-btn').textContent = '← 返回對話');
       }, 200);
+    } else if (draftType === 'routine_check' || draftType === 'event_skill_link') {
+      if (typeof switchView === 'function') switchView('event-link-builder');
+      setTimeout(async () => {
+        if (typeof _elPreFillFromDraft === 'function') await _elPreFillFromDraft(payload, draftId);
+      }, 400);
     } else {
       if (typeof switchView === 'function') switchView('nested-builder');
     }
@@ -2069,9 +2074,18 @@ function _renderAiAnalysisPanel(markdownContent) {
  */
 function _renderDraftActionCard(card) {
   _showReportPanel();
-  const tabId     = `draft-${Date.now()}`;
-  const icon      = card.draft_type === 'skill' ? '⚙️' : '🔗';
-  const typeLabel = card.draft_type === 'skill' ? 'Skill 草稿' : 'MCP 草稿';
+  const tabId = `draft-${Date.now()}`;
+  const TYPE_META = {
+    skill:            { icon: '⚙️', label: 'Skill 草稿' },
+    mcp:              { icon: '🔗', label: 'MCP 草稿' },
+    routine_check:    { icon: '🕒', label: '排程巡檢草稿' },
+    event_skill_link: { icon: '🔗', label: 'Event→Skill 連結草稿' },
+    schedule:         { icon: '🕒', label: '排程草稿' },
+    event:            { icon: '⚡', label: '事件草稿' },
+  };
+  const meta      = TYPE_META[card.draft_type] || { icon: '📋', label: '草稿' };
+  const icon      = meta.icon;
+  const typeLabel = meta.label;
 
   const fillRows = Object.entries(card.auto_fill || {})
     .filter(([, v]) => v !== null && v !== undefined && v !== '')
