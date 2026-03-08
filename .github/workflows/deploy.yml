@@ -29,6 +29,8 @@ jobs:
             echo "--- [1/4] 拉取最新程式碼 ---"
             cd "$REPO_ROOT"
             mv "$BE_DIR/dev.db" /tmp/devdb_bak.db 2>/dev/null || true
+            # Untrack .env if git still tracks it (one-time migration after removing from repo)
+            git rm --cached "$BE_DIR/.env" 2>/dev/null || true
             git pull origin main
             cp /tmp/devdb_bak.db "$BE_DIR/dev.db" 2>/dev/null || true
 
