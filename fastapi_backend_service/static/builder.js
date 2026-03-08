@@ -3974,7 +3974,7 @@ async function _openRoutineCheckDrawer(id) {
   }
 
   _editingRoutineCheck = id || null;
-  const rc = id ? _routineChecks.find(r => r.id === id) : null;
+  const rc = id ? (_routineChecks.find(r => r.id === id) || await _api('GET', `/routine-checks/${id}`)) : null;
   const title = rc ? '編輯排程巡檢' : '新增排程巡檢';
   const body = _buildRoutineCheckForm(rc);
   const footer = `
@@ -3985,6 +3985,9 @@ async function _openRoutineCheckDrawer(id) {
         ${id ? '更新' : '建立排程'}
       </button>
     </div>`;
+  // Show the drawer panel
+  document.getElementById('drawer-overlay')?.classList.remove('hidden');
+  document.getElementById('drawer')?.classList.add('drawer-open');
   _setDrawerContent(title, body, footer);
 }
 
@@ -4226,7 +4229,7 @@ function _renderDashboardActiveTasks(rcs) {
           ${statusDot}
           <span class="font-semibold text-sm text-slate-900 truncate">${_esc(rc.name)}</span>
         </div>
-        <span class="text-xs text-slate-400 flex-shrink-0">${intervalLabel[rc.check_interval] || rc.check_interval}</span>
+        <span class="text-xs text-slate-400 flex-shrink-0">${intervalLabel[rc.schedule_interval || rc.check_interval] || rc.schedule_interval || rc.check_interval}</span>
       </div>
       <div class="flex flex-wrap gap-1.5 mt-1">
         <span class="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700
@@ -5364,8 +5367,20 @@ async function _nbSaveRoutineCheck() {
     _nbLogLine('✓', `排程「${name}」已建立！`, 'text-emerald-600');
 
     setTimeout(() => {
-      alert(`任務「${name}」已成功建立！`);
+      // Close any open draft workspace tabs (routine_check type)
+      if (typeof _closeWorkspaceTab === 'function' && typeof _workspaceTabs !== 'undefined') {
+        Object.keys(_workspaceTabs).forEach(tabId => {
+          if (tabId.startsWith('draft-')) _closeWorkspaceTab(tabId);
+        });
+      }
       switchView('dashboard');
+      // Non-blocking success toast
+      const toast = document.createElement('div');
+      toast.className = 'fixed bottom-6 right-6 bg-emerald-600 text-white text-sm font-medium px-5 py-3 rounded-xl shadow-lg z-50';
+      toast.style.transition = 'opacity 0.4s';
+      toast.textContent = `✓ 任務「${name}」已成功建立`;
+      document.body.appendChild(toast);
+      setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 400); }, 2500);
     }, 400);
 
   } catch(e) {
