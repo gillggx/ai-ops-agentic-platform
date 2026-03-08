@@ -6397,7 +6397,7 @@ async function _elSaveDraft() {
 }
 
 /** Pre-fill form from agent draft payload (called by _openDraftEditor) */
-async function _elPreFillFromDraft(payload, draftId) {
+async function _elPreFillFromDraft(payload, draftId, draftType) {
   _elDraftId = draftId;
 
   // Show draft banner
@@ -6406,8 +6406,11 @@ async function _elPreFillFromDraft(payload, draftId) {
   if (banner) banner.classList.remove('hidden');
   if (draftDisplay) draftDisplay.textContent = draftId || '';
 
-  // Wait for dropdowns to be populated
-  if (_elMode === 'event_skill_link' || payload.event_type_id || payload.event_type_name) {
+  // Determine mode from explicit draftType, then fall back to payload fields
+  const isEventSkillLink = draftType === 'event_skill_link'
+    || (!draftType && (payload.event_type_id || payload.event_type_name));
+
+  if (isEventSkillLink) {
     _elSetMode('event_skill_link');
 
     if (payload.event_type_id) {

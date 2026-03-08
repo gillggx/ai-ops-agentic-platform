@@ -364,8 +364,14 @@ def _build_render_card(
             },
         }
 
-    if tool_name in ("draft_skill", "draft_mcp") and isinstance(result, dict) and "draft_id" in result:
-        draft_type = "skill" if tool_name == "draft_skill" else "mcp"
+    _DRAFT_TOOL_TYPE_MAP = {
+        "draft_skill": "skill",
+        "draft_mcp": "mcp",
+        "draft_routine_check": "routine_check",
+        "draft_event_skill_link": "event_skill_link",
+    }
+    if tool_name in _DRAFT_TOOL_TYPE_MAP and isinstance(result, dict) and "draft_id" in result:
+        draft_type = _DRAFT_TOOL_TYPE_MAP[tool_name]
         deep_link = result.get("deep_link_data") or {}
         return {
             "type": "draft",

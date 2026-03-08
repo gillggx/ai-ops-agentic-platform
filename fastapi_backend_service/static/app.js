@@ -1661,7 +1661,7 @@ async function _openDraftEditor(draftId, draftType) {
     } else if (draftType === 'routine_check' || draftType === 'event_skill_link') {
       if (typeof switchView === 'function') switchView('event-link-builder');
       setTimeout(async () => {
-        if (typeof _elPreFillFromDraft === 'function') await _elPreFillFromDraft(payload, draftId);
+        if (typeof _elPreFillFromDraft === 'function') await _elPreFillFromDraft(payload, draftId, draftType);
       }, 400);
     } else {
       if (typeof switchView === 'function') switchView('nested-builder');
