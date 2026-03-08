@@ -429,19 +429,36 @@ async def promote_to_system_mcp(
 
 # ── Public run (no auth — for System MCP api_config) ─────────────────────────
 
+class _FlexBody(BaseModel):
+    """Accepts either {"params": {...}} (standard) or flat dict (sent by System MCP executor)."""
+    params: Optional[dict] = None
+    model_config = {"extra": "allow"}
+
+
 @router.post("/{mock_id}/public-run")
 async def public_run_mock_data_source(
     mock_id: int,
-    body: MockDataRunRequest,
+    body: _FlexBody,
     db: AsyncSession = Depends(get_db),
 ):
-    """No-auth endpoint for System MCP api_config to call."""
+    """No-auth endpoint for System MCP api_config to call.
+
+    Accepts two body formats:
+    - Standard: {"params": {"operationNumber": "9800", ...}}
+    - Flat (sent by generic System MCP executor): {"operationNumber": "9800", ...}
+    """
     m = await db.get(MockDataSourceModel, mock_id)
     if not m or not m.python_code or not m.is_active:
         raise _app_err(400, "Mock source not ready", "NOT_READY")
 
+    # If body has explicit `params` key, use it; otherwise treat entire body as params
+    if body.params is not None:
+        params = body.params
+    else:
+        params = {k: v for k, v in body.model_dump().items() if k != "params" and v is not None}
+
     try:
-        dataset = await execute_generate_fn(m.python_code, body.params)
+        dataset = await execute_generate_fn(m.python_code, params)
     except (ValueError, TimeoutError) as e:
         raise _app_err(422, str(e), "SANDBOX_ERROR")
 
