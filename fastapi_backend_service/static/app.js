@@ -2056,7 +2056,7 @@ function _renderAiAnalysisPanel(markdownContent) {
     : markdownContent.replace(/\n/g, '<br>');
   document.getElementById('ws-analysis-placeholder')?.remove();
   content.innerHTML = `
-    <div class="p-4 text-sm text-slate-700 leading-relaxed ai-analysis-body">
+    <div class="p-3 ai-analysis-body">
       ${rendered}
     </div>`;
 }

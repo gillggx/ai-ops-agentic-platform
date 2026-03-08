@@ -5438,7 +5438,15 @@ async function _skFetchPreview() {
 
   // Resolve data source: system MCP = itself; custom MCP = look up parent system MCP
   const isSysMcp = mcp.mcp_type === 'system';
-  const ds = isSysMcp ? mcp : (_dataSubjects.find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id)) || null);
+  let ds = isSysMcp ? mcp : (_dataSubjects.find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id)) || null);
+  // Fallback: old custom MCPs have data_subject_id (IDs 1-5) pointing to old data_subjects table.
+  // _dataSubjects now holds system MCPs (IDs 6+). Resolve by name via legacy API.
+  if (!ds && !isSysMcp && mcp.data_subject_id) {
+    try {
+      const oldDs = await _api('GET', `/data-subjects/${mcp.data_subject_id}`);
+      if (oldDs?.name) ds = _dataSubjects.find(d => d.name === oldDs.name) || null;
+    } catch {}
+  }
   if (!ds) { alert('此 Custom MCP 未綁定 System MCP，請先在 MCP Builder 設定資料來源'); return; }
 
   const rawInputSchema = typeof ds.input_schema === 'string' ? JSON.parse(ds.input_schema || '{}') : (ds.input_schema || {});

@@ -1329,33 +1329,33 @@ body {
   box-shadow: 0 1px 3px rgba(0,0,0,0.06);
 }
 
-/* ── AI Analysis Panel — match left panel typography ─────────── */
-.ai-analysis-body { font-size: 13px; color: #334155; line-height: 1.6; }
+/* ── AI Analysis Panel — match draft-preview compact typography ── */
+.ai-analysis-body { font-size: 12px; color: #334155; line-height: 1.55; }
 .ai-analysis-body h1,
 .ai-analysis-body h2,
 .ai-analysis-body h3,
 .ai-analysis-body h4 {
-  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
   letter-spacing: 0.06em; color: #64748b;
-  margin: 14px 0 6px; padding-bottom: 4px;
+  margin: 12px 0 5px; padding-bottom: 3px;
   border-bottom: 1px solid #e2e8f0;
 }
-.ai-analysis-body p { margin: 4px 0 8px; }
+.ai-analysis-body p { margin: 3px 0 6px; }
 .ai-analysis-body strong { font-weight: 600; color: #1e293b; }
-.ai-analysis-body ul, .ai-analysis-body ol { padding-left: 16px; margin: 4px 0 8px; }
-.ai-analysis-body li { margin: 2px 0; }
+.ai-analysis-body ul, .ai-analysis-body ol { padding-left: 14px; margin: 3px 0 6px; }
+.ai-analysis-body li { margin: 1px 0; }
 .ai-analysis-body table {
   width: 100%; border-collapse: collapse;
-  font-size: 12px; margin: 8px 0;
+  font-size: 11px; margin: 6px 0;
   overflow-x: auto; display: block;
 }
 .ai-analysis-body thead th {
   background: #f1f5f9; color: #374151;
-  font-weight: 600; font-size: 11px; text-transform: uppercase;
-  padding: 5px 10px; border: 1px solid #e2e8f0; text-align: left;
+  font-weight: 600; font-size: 10px; text-transform: uppercase;
+  padding: 4px 8px; border: 1px solid #e2e8f0; text-align: left;
 }
 .ai-analysis-body tbody td {
-  padding: 4px 10px; border: 1px solid #e2e8f0; color: #334155;
+  padding: 3px 8px; border: 1px solid #e2e8f0; color: #334155;
 }
 .ai-analysis-body tbody tr:nth-child(even) td { background: #f8fafc; }
 
