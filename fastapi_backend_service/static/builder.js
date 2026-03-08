@@ -5613,7 +5613,7 @@ async function _skCreateInlineMcp() {
 }
 
 // ── MCP selection change ───────────────────────────────────────
-function _skOnMcpChange() {
+async function _skOnMcpChange() {
   const mcpId = parseInt(document.getElementById('sk-edit-mcp-select')?.value) || null;
   // Look in both custom and system lists
   const mcp = mcpId ? (_mcpDefs.find(m => m.id === mcpId) || _dataSubjects.find(m => m.id === mcpId)) : null;
@@ -5622,37 +5622,72 @@ function _skOnMcpChange() {
   if (!hint) return;
   if (!mcp) { hint.innerHTML = ''; return; }
 
-  // Resolve the data source: if this IS a system MCP, use it directly; otherwise look up parent
+  // Resolve the data source: system MCP = itself; custom MCP = look up parent
   const isSysMcp = mcp.mcp_type === 'system';
-  const ds = isSysMcp ? mcp : (_dataSubjects.find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id)) || null);
+  let ds = isSysMcp ? mcp : (_dataSubjects.find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id)) || null);
+  // Fallback: old custom MCPs have legacy data_subject_id — resolve by name
+  if (!ds && !isSysMcp && mcp.data_subject_id) {
+    try {
+      const oldDs = await _api('GET', `/data-subjects/${mcp.data_subject_id}`);
+      if (oldDs?.name) ds = _dataSubjects.find(d => d.name === oldDs.name) || null;
+    } catch {}
+  }
+
+  // Show "no processing script" banner if MCP has never been through Try Run
+  const hasScript = !!(mcp.processing_script && mcp.processing_script.trim());
+  const noScriptBanner = (!isSysMcp && !hasScript)
+    ? `<div class="mt-2 mb-1 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2 flex items-start gap-2">
+        <span class="text-amber-500 text-base leading-none mt-0.5">⚠</span>
+        <div class="flex-1">
+          <p class="text-[11px] font-bold text-amber-700">此 MCP 尚未完成 Try Run</p>
+          <p class="text-[11px] text-amber-600 mt-0.5">請先在 MCP Builder 完成試跑，否則 Skill Try Run 將無法執行。</p>
+          <button onclick="window._openMcpBuilderForId(${mcp.id})"
+                  class="mt-1.5 text-[11px] font-semibold text-white bg-amber-500 hover:bg-amber-400
+                         rounded px-2.5 py-1 transition-colors">
+            → 前往 MCP Builder 完成試跑
+          </button>
+        </div>
+      </div>`
+    : '';
+
   const inputSchema = isSysMcp ? (mcp.input_schema || null) : (ds?.input_schema || null);
   const fields = (typeof inputSchema === 'string' ? JSON.parse(inputSchema || '{}') : (inputSchema || {}))?.fields || [];
   if (!fields.length) {
-    hint.innerHTML = '<div class="mt-2 text-xs text-slate-400 italic">此 MCP 無需額外查詢參數</div>';
+    hint.innerHTML = noScriptBanner + '<div class="mt-2 text-xs text-slate-400 italic">此 MCP 無需額外查詢參數</div>';
     return;
   }
-  hint.innerHTML = `
+  hint.innerHTML = noScriptBanner + `
     <div class="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
       <p class="text-[11px] font-bold text-blue-700 uppercase tracking-widest mb-2.5">
-        查詢參數 — ${_esc(ds?.name || mcp.name)}
+        🔑 系統 MCP 查詢參數 — ${_esc(ds?.name || mcp.name)}
       </p>
+      <p class="text-[10px] text-blue-500 mb-2">請填入查詢條件後點擊「撈取與預覽樣本」</p>
       <div class="space-y-2.5">
         ${fields.map(f => `
           <div>
-            <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
-              ${_esc(f.label || f.name)}${f.required ? ' <span class="text-red-500">*</span>' : ''}
+            <label class="text-[11px] font-bold text-slate-600 uppercase tracking-widest mb-1 block">
+              ${_esc(f.label || f.name)}${f.required ? ' <span class="text-red-500">*</span>' : ' <span class="text-slate-400">(選填)</span>'}
             </label>
             <input id="sk-mcp-param-${_esc(f.name)}"
                    type="${f.type === 'number' ? 'number' : 'text'}"
                    placeholder="${_esc(f.description || f.name)}"
                    value="${f.default_value !== undefined && f.default_value !== null ? _esc(String(f.default_value)) : ''}"
-                   class="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-sm
+                   class="w-full bg-white border border-blue-300 rounded-md px-3 py-2 text-sm
                           font-medium text-slate-800 shadow-sm focus:outline-none
                           focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow">
           </div>`).join('')}
       </div>
     </div>`;
 }
+
+// Open the MCP Builder and load the specified MCP for editing
+window._openMcpBuilderForId = async function(mcpId) {
+  // Switch to MCP Builder view
+  switchView('mcp');
+  await new Promise(r => setTimeout(r, 300));
+  const mcp = _mcpDefs.find(m => m.id === mcpId);
+  if (mcp) _nbOpenEditor(mcpId);
+};
 
 // ── Fetch & Preview for the Skill editor's L3 MCP card ────────
 async function _skFetchPreview() {
@@ -5820,8 +5855,15 @@ async function _skTryRun() {
 
     // Step 1: run MCP to get fresh output
     let mcpTryResult = null;
-    const ds = (mcp.system_mcp_id || mcp.data_subject_id) ? _dataSubjects.find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id)) : null;
-    const rawUrl = ds?.api_config?.endpoint_url || '';
+    let ds = (mcp.system_mcp_id || mcp.data_subject_id) ? _dataSubjects.find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id)) : null;
+    // Fallback: legacy MCPs use old data_subject_id — resolve by name
+    if (!ds && mcp.data_subject_id) {
+      try {
+        const oldDs = await _api('GET', `/data-subjects/${mcp.data_subject_id}`);
+        if (oldDs?.name) ds = _dataSubjects.find(d => d.name === oldDs.name) || null;
+      } catch {}
+    }
+    const rawUrl = ds?.api_config?.endpoint_url || (typeof ds?.api_config === 'string' ? JSON.parse(ds.api_config||'{}').endpoint_url : '');
     if (ds && rawUrl) {
       _skLogLine('📡', `正在撈取 System MCP 資料：${ds.name}…`);
       const formParams = _skMcpSampleParams || {};
@@ -5837,14 +5879,23 @@ async function _skTryRun() {
         _skTryRunMcpResult = mcpTryResult;
         _skLogLine('✓', 'MCP 執行完成', 'text-emerald-600');
       } catch(fetchErr) {
-        _skLogLine('⚠', `DS 撈取失敗，改用已存樣本資料：${fetchErr.message}`, 'text-amber-600');
+        const msg = fetchErr.message || '';
+        if (msg.includes('尚未生成 Python 腳本') || msg.includes('processing_script')) {
+          // MCP was never through Try Run in MCP Builder — surface actionable error
+          throw new Error(`此 MCP「${mcp.name}」尚未完成 Try Run，無法執行。請先前往 MCP Builder 對該 MCP 執行試跑後再回此處。`);
+        }
+        _skLogLine('⚠', `MCP 執行失敗，改用已存樣本資料：${msg}`, 'text-amber-600');
       }
     }
 
     // Fallback to stored sample_output
     const mcpOutput = (mcpTryResult?.output_data) || mcp.sample_output || {};
-    if (!mcpTryResult && Object.keys(mcpOutput).length === 0)
-      throw new Error('MCP 無可用輸出資料，請先執行 MCP 的撈取與預覽');
+    if (!mcpTryResult && Object.keys(mcpOutput).length === 0) {
+      const hasScript = !!(mcp.processing_script && mcp.processing_script.trim());
+      if (!hasScript)
+        throw new Error(`此 MCP「${mcp.name}」尚未在 MCP Builder 完成 Try Run（無 Python 腳本）。\n請先前往 MCP Builder → 選擇此 MCP → 點擊 Try Run 完成試跑。`);
+      throw new Error('MCP 無可用輸出資料，請先填入查詢參數並執行上方「撈取與預覽樣本」');
+    }
 
     if (mcpTryResult) _skRenderMcpEvidence(mcpTryResult);
 
