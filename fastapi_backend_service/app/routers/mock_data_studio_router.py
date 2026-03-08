@@ -13,6 +13,7 @@ from app.core.response import StandardResponse
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.mock_data_source import MockDataSourceModel
+from app.models.mcp_definition import MCPDefinitionModel
 from app.models.user import UserModel
 from app.schemas.mock_data_source import (
     MockDataGenerateRequest,
@@ -355,6 +356,74 @@ async def playground_run(
             "output_data": output_data,
             "row_count": len(rows),
         },
+    )
+
+
+# ── Promote to System MCP ────────────────────────────────────────────────────
+
+@router.post("/{mock_id}/promote-to-system-mcp", response_model=StandardResponse)
+async def promote_to_system_mcp(
+    mock_id: int,
+    db: AsyncSession = Depends(get_db),
+    _user: UserModel = Depends(get_current_user),
+):
+    """Create (or update) a System MCP entry that wraps this mock data source.
+
+    The System MCP api_config points to POST /api/v1/mock-data/{id}/public-run
+    so any Custom MCP or Skill can consume it like a real production data source.
+    """
+    m = await db.get(MockDataSourceModel, mock_id)
+    if not m:
+        raise _app_err(404, "Not found", "NOT_FOUND")
+    if not m.python_code:
+        raise _app_err(400, "請先生成程式碼才能升級為 System MCP", "NO_CODE")
+
+    api_config = json.dumps({
+        "endpoint_url": f"/api/v1/mock-data/{mock_id}/public-run",
+        "method": "POST",
+        "headers": {},
+    }, ensure_ascii=False)
+
+    # Check if a System MCP with this name already exists
+    existing = await db.execute(
+        select(MCPDefinitionModel).where(
+            MCPDefinitionModel.name == m.name,
+            MCPDefinitionModel.mcp_type == "system",
+        )
+    )
+    sys_mcp = existing.scalar_one_or_none()
+
+    if sys_mcp:
+        # Update api_config + input_schema to reflect latest mock source state
+        sys_mcp.api_config = api_config
+        if m.input_schema:
+            sys_mcp.input_schema = m.input_schema
+        sys_mcp.description = m.description or sys_mcp.description
+        await db.commit()
+        await db.refresh(sys_mcp)
+        return StandardResponse(
+            status="success",
+            message=f"System MCP「{sys_mcp.name}」已更新 (id={sys_mcp.id})",
+            data={"system_mcp_id": sys_mcp.id, "name": sys_mcp.name, "updated": True},
+        )
+
+    # Create new System MCP
+    sys_mcp = MCPDefinitionModel(
+        name=m.name,
+        description=m.description or "",
+        mcp_type="system",
+        api_config=api_config,
+        input_schema=m.input_schema,
+        processing_intent="",
+        visibility="public",
+    )
+    db.add(sys_mcp)
+    await db.commit()
+    await db.refresh(sys_mcp)
+    return StandardResponse(
+        status="success",
+        message=f"System MCP「{sys_mcp.name}」建立成功 (id={sys_mcp.id})",
+        data={"system_mcp_id": sys_mcp.id, "name": sys_mcp.name, "updated": False},
     )
 
 

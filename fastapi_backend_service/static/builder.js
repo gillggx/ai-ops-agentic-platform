@@ -6927,6 +6927,7 @@ function _mdsRenderDrawer() {
       ${item ? '💾 儲存' : '✓ 建立'}
     </button>
     ${item && hasCode ? `<button onclick="closeDrawer();setTimeout(()=>_mdsTestRun(${item.id}),100)" class="text-sm px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-semibold">▶ 試執行</button>` : ''}
+    ${item && hasCode ? `<button onclick="_mdsPromoteToSystemMcp(${item.id})" class="text-sm px-3 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-xl font-semibold">⬆ 升級為 System MCP</button>` : ''}
   `;
 
   _setDrawerContent(title, body, footer);
@@ -7105,6 +7106,7 @@ async function _mdsShowPlayground(id) {
       <div id="mds-playground-result" class="hidden"></div>
     </div>`,
     `<button onclick="_mdsOpenEdit(${id})" class="builder-btn-secondary text-sm px-4 py-2">← 回到編輯</button>
+     <button onclick="_mdsPromoteToSystemMcp(${id})" class="text-sm px-3 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-xl font-semibold">⬆ 升級為 System MCP</button>
      <button onclick="_mdsSaveAsCustomMcp(${id})" class="builder-btn-primary text-sm px-4 py-2">💾 儲存為 Custom MCP</button>`
   );
 
@@ -7179,6 +7181,28 @@ async function _mdsRunPlayground(id) {
     _mdsToast(`設計失敗: ${e.message}`, 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '🤖 AI 設計 MCP 處理邏輯 + 預覽圖表'; }
+  }
+}
+
+async function _mdsPromoteToSystemMcp(mockId) {
+  _mdsToast('⬆ 升級為 System MCP 中...', 'info');
+  try {
+    const r = await _api('POST', `/mock-data/${mockId}/promote-to-system-mcp`, {});
+    const d = r?.data || r;
+    const updated = d?.updated;
+    const name = d?.name || '';
+    const sysId = d?.system_mcp_id;
+    _mdsToast(
+      updated
+        ? `✅ System MCP「${name}」已更新 (id=${sysId})`
+        : `✅ System MCP「${name}」建立成功 (id=${sysId})！可在 MCP Builder 中選用`,
+      'success'
+    );
+    // Update list cache
+    const idx = _mdsList.findIndex(m => m.id === mockId);
+    if (idx >= 0) _mdsList[idx]._systemMcpId = sysId;
+  } catch (e) {
+    _mdsToast(`升級失敗: ${e.message}`, 'error');
   }
 }
 
