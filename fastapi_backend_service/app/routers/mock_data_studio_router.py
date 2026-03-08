@@ -148,8 +148,8 @@ async def run_mock_data_source(
 
     try:
         dataset = await execute_generate_fn(m.python_code, body.params)
-    except (ValueError, TimeoutError) as e:
-        raise _app_err(422, str(e), "SANDBOX_ERROR")
+    except Exception as e:
+        raise _app_err(422, f"generate() 執行失敗：{e}", "SANDBOX_ERROR")
 
     rows = dataset if isinstance(dataset, list) else [dataset]
     llm_readable = json.dumps(dataset, ensure_ascii=False)[:2000]
@@ -459,7 +459,7 @@ async def public_run_mock_data_source(
 
     try:
         dataset = await execute_generate_fn(m.python_code, params)
-    except (ValueError, TimeoutError) as e:
-        raise _app_err(422, str(e), "SANDBOX_ERROR")
+    except Exception as e:
+        raise _app_err(422, f"generate() 執行失敗：{e}", "SANDBOX_ERROR")
 
     return dataset if isinstance(dataset, list) else [dataset]

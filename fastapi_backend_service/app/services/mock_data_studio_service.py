@@ -261,38 +261,63 @@ class MockDataStudioService:
         system = _QUICK_SAMPLE_SYSTEM_PROMPT.replace("{count}", str(count))
         user_msg = f"描述：{description}\n\n請生成 {count} 筆資料。"
 
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: self._client.messages.create(
-                model=_MODEL,
-                max_tokens=4096,
-                system=system,
-                messages=[{"role": "user", "content": user_msg}],
-            ),
-        )
+        # For complex descriptions (many fields), cap at 5 rows to avoid token overflow
+        effective_count = count
+        complexity_hints = ["30個", "30+", "超過", "parameters", "30 個", "多個欄位", "many"]
+        if any(h in description for h in complexity_hints) and count > 5:
+            effective_count = 5
+            logger.info("quick_sample: complex description detected, capping count %d→5", count)
 
-        text = response.content[0].text.strip()
+        system_with_count = _QUICK_SAMPLE_SYSTEM_PROMPT.replace("{count}", str(effective_count))
+        user_msg_final = f"描述：{description}\n\n請生成 {effective_count} 筆資料。"
 
-        # Strip markdown fences
-        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE)
-        text = re.sub(r"\s*```\s*$", "", text, flags=re.MULTILINE)
-        text = text.strip()
+        async def _call_llm(n: int) -> str:
+            prompt = _QUICK_SAMPLE_SYSTEM_PROMPT.replace("{count}", str(n))
+            msg = f"描述：{description}\n\n請生成 {n} 筆資料。"
+            loop = asyncio.get_event_loop()
+            resp = await loop.run_in_executor(
+                None,
+                lambda: self._client.messages.create(
+                    model=_MODEL,
+                    max_tokens=8192,
+                    system=prompt,
+                    messages=[{"role": "user", "content": msg}],
+                ),
+            )
+            raw = resp.content[0].text.strip()
+            logger.info("quick_sample LLM stop_reason=%s len=%d count=%d", resp.stop_reason, len(raw), n)
+            return raw
 
-        try:
-            data = json.loads(text)
-            if isinstance(data, list):
-                return data
-            if isinstance(data, dict):
-                return [data]
-        except json.JSONDecodeError:
-            # Try to find JSON array in response
-            m = re.search(r"\[[\s\S]+\]", text)
-            if m:
-                try:
-                    return json.loads(m.group(0))
-                except json.JSONDecodeError:
-                    pass
+        def _parse(text: str) -> List[Dict[str, Any]]:
+            t = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE)
+            t = re.sub(r"\s*```\s*$", "", t, flags=re.MULTILINE).strip()
+            try:
+                data = json.loads(t)
+                if isinstance(data, list):
+                    return data
+                if isinstance(data, dict):
+                    return [data]
+            except json.JSONDecodeError:
+                m = re.search(r"\[[\s\S]+\]", t)
+                if m:
+                    try:
+                        return json.loads(m.group(0))
+                    except json.JSONDecodeError:
+                        pass
+            return []
 
-        logger.error("quick_sample: could not parse LLM response as JSON, raw=%s", text[:300])
-        raise ValueError("LLM 未回傳有效 JSON 陣列，請重試")
+        # First attempt
+        text = await _call_llm(effective_count)
+        rows = _parse(text)
+
+        # Retry with 3 rows if first attempt produced no valid JSON
+        if not rows and effective_count > 3:
+            logger.warning("quick_sample: first attempt failed, retrying with 3 rows")
+            text = await _call_llm(3)
+            rows = _parse(text)
+
+        if not rows:
+            logger.error("quick_sample: could not parse LLM response as JSON, raw=%s", text[:300])
+            raise ValueError("LLM 未回傳有效 JSON 陣列，請重試")
+
+        return rows
