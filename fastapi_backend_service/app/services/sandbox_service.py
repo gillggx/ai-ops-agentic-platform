@@ -60,7 +60,7 @@ _ALLOWED_BASE_MODULES = frozenset({
     "typing", "warnings", "heapq", "bisect", "struct", "csv",
     "time", "calendar",      # pandas internal deps (pd.to_datetime / date math)
     # ── Approved data / viz libraries ────────────────────────────
-    "pandas", "plotly", "matplotlib",
+    "numpy", "pandas", "plotly", "matplotlib",
     # ── CPython C-extension internals auto-imported by the above ──
     # These are private helper modules (_xyz) that CPython imports
     # transparently when you call a stdlib function for the first time.

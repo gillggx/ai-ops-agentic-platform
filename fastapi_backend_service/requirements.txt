@@ -26,6 +26,9 @@ apscheduler==3.10.4
 # HTTP client (event_pipeline_service — DataSubject API calls + async testing)
 httpx==0.26.0
 
+# Data science (used by MCP sandbox scripts)
+numpy>=1.26.0
+
 # Utilities
 python-dotenv==1.0.0
 python-multipart==0.0.7

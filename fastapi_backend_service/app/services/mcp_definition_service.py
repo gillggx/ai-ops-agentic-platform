@@ -478,9 +478,9 @@ class MCPDefinitionService:
                 success=False,
                 error=(
                     f"LLM 拒絕生成腳本：{refusal[:300]}\n\n"
-                    "建議：加工意圖請聚焦於「資料計算、統計分析、異常標記」，"
-                    "例如「計算 mean/std，標記超出 3σ 的點並輸出 status 欄位」。"
-                    "「診斷」邏輯應放在 Skill 層而非 MCP 層。"
+                    "建議：加工意圖請聚焦於「資料計算、統計分析、異常標記、效能排行」，"
+                    "例如「計算 mean/std/skewness/kurtosis，標記超出 3σ 的點並輸出 status 欄位」。"
+                    "可使用 pandas、numpy 進行統計計算。"
                 ),
             )
         try:

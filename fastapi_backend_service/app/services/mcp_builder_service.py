@@ -113,8 +113,9 @@ _DEFAULT_TRY_RUN_SYSTEM_PROMPT = """\
 【重要注意事項】
 - datetime 模組以物件形式注入，使用方式：datetime.datetime.now()、datetime.timedelta()、datetime.timezone.utc
 - 可使用 from datetime import datetime, timedelta, timezone 語法
-- 不可使用 numpy（用 pandas/statistics 替代）
-- 不可使用 scipy、sklearn 等未列出的套件
+- ✅ 可使用 numpy（import numpy as np）— 適合計算 skewness、kurtosis、histogram 等進階統計
+  範例：np.mean(values)、float(scipy 替代：np.std(values))、自訂 skewness：float(((vals - np.mean(vals))**3).mean() / np.std(vals)**3)
+- 不可使用 scipy、sklearn 等未列出的套件（numpy 已足夠做統計分析）
 - try/except 必須使用上述已列出的 Exception 類別，例如 except Exception: 或 except ValueError:
 
 【標準輸出規範 — process() 函式的回傳 dict 必須包含以下三個 Key】
