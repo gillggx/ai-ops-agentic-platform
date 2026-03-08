@@ -280,8 +280,18 @@ def _derive_schema(rows: List[Any]) -> dict:
     first = rows[0] if isinstance(rows[0], dict) else {}
     fields = []
     for k, v in first.items():
-        t = "number" if isinstance(v, (int, float)) else "boolean" if isinstance(v, bool) else "string"
-        fields.append({"name": k, "type": t, "description": ""})
+        if isinstance(v, bool):
+            t = "boolean"
+        elif isinstance(v, (int, float)):
+            t = "number"
+        elif isinstance(v, dict):
+            t = "object"
+        elif isinstance(v, list):
+            t = "array"
+        else:
+            t = "string"
+        desc = f"nested object with keys: {list(v.keys())[:5]}" if isinstance(v, dict) else ""
+        fields.append({"name": k, "type": t, "description": desc})
     return {"fields": fields}
 
 
@@ -301,22 +311,23 @@ async def playground_run(
     if not m:
         raise _app_err(404, "Not found", "NOT_FOUND")
 
-    # Step 1: Get raw rows
+    # Step 1: Get raw rows — prefer sample_output (already fetched data) for playground;
+    # only run python_code if sample_output is absent and params are provided.
     rows: List[Any] = []
-    if m.python_code:
+    if m.sample_output:
+        try:
+            rows = json.loads(m.sample_output)
+        except json.JSONDecodeError:
+            pass
+    if not rows and m.python_code and body.params:
         try:
             dataset = await execute_generate_fn(m.python_code, body.params)
             rows = dataset if isinstance(dataset, list) else [dataset]
         except Exception as e:
             raise _app_err(422, f"generate() 執行失敗: {e}", "SANDBOX_ERROR")
-    elif m.sample_output:
-        try:
-            rows = json.loads(m.sample_output)
-        except json.JSONDecodeError:
-            pass
 
     if not rows:
-        raise _app_err(400, "尚無資料可處理，請先生成程式碼或執行試跑", "NO_DATA")
+        raise _app_err(400, "尚無資料可處理，請先點擊「📊 預覽假資料」產生樣本資料", "NO_DATA")
 
     # Step 2: Derive schema from actual row structure
     output_schema = _derive_schema(rows)
