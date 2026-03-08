@@ -25,6 +25,10 @@ class RoutineCheckCreate(BaseModel):
     )
     schedule_interval: ScheduleInterval = Field(default="1h")
     is_active: bool = Field(default=True)
+    # Optional: YYYY-MM-DD date after which the check auto-deactivates
+    expire_at: Optional[str] = Field(default=None, description="效期 (YYYY-MM-DD)，到期後自動停用")
+    # Optional: HH:MM — only relevant when schedule_interval == "daily"
+    schedule_time: Optional[str] = Field(default=None, description="每日執行時間 HH:MM，僅 daily 模式使用")
 
 
 class RoutineCheckUpdate(BaseModel):
@@ -34,6 +38,8 @@ class RoutineCheckUpdate(BaseModel):
     event_param_mappings: Optional[List[Dict[str, Any]]] = Field(default=None)
     schedule_interval: Optional[ScheduleInterval] = None
     is_active: Optional[bool] = None
+    expire_at: Optional[str] = None
+    schedule_time: Optional[str] = None
 
 
 class RoutineCheckResponse(BaseModel):
@@ -47,6 +53,8 @@ class RoutineCheckResponse(BaseModel):
     is_active: bool
     last_run_at: Optional[str]
     last_run_status: Optional[str]
+    expire_at: Optional[str] = None
+    schedule_time: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

@@ -41,6 +41,10 @@ class RoutineCheckModel(Base):
     last_run_at: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
     # "NORMAL" | "ABNORMAL" | "ERROR" | None (never ran)
     last_run_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, default=None)
+    # ISO date string (YYYY-MM-DD) after which this check is automatically deactivated
+    expire_at: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
+    # "HH:MM" — only used when schedule_interval == "daily" to specify execution time
+    schedule_time: Mapped[Optional[str]] = mapped_column(String(5), nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False,
         default=lambda: datetime.now(tz=timezone.utc), server_default=func.now(),

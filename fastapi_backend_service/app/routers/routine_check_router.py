@@ -47,6 +47,8 @@ def _to_response(obj) -> RoutineCheckResponse:
         is_active=obj.is_active,
         last_run_at=obj.last_run_at,
         last_run_status=obj.last_run_status,
+        expire_at=getattr(obj, 'expire_at', None),
+        schedule_time=getattr(obj, 'schedule_time', None),
         created_at=obj.created_at,
         updated_at=obj.updated_at,
     )
@@ -118,6 +120,8 @@ async def create_routine_check(
         event_param_mappings=event_param_mappings,
         schedule_interval=body.schedule_interval,
         is_active=body.is_active,
+        expire_at=body.expire_at,
+        schedule_time=body.schedule_time,
     )
 
     if body.is_active:

@@ -3563,30 +3563,38 @@ function _buildRcEventPreview(skill, scheduleName, existingEtId) {
     </div>`;
 }
 
-function _buildRoutineCheckForm(rc) {
+function _buildRoutineCheckForm(rc, prefill) {
+  // prefill overrides rc for agent-draft pre-population
+  const d = { ...(rc || {}), ...(prefill || {}) };
   const intervalLabel = { '30m': '每30分鐘', '1h': '每1小時', '4h': '每4小時',
-                           '8h': '每8小時', '12h': '每12小時', 'daily': '每天' };
+                           '8h': '每8小時', '12h': '每12小時', 'daily': '每天 (指定時間)' };
 
-  const selectedSkillId = rc?.skill_id || null;
+  const selectedSkillId = d.skill_id || null;
   const skill = selectedSkillId ? (_skillDefs||[]).find(s => s.id === selectedSkillId) : null;
-  const skillInputFields = _buildSkillInputFields(selectedSkillId, rc?.skill_input || {});
+  const skillInput = d.skill_input || {};
+  // skill_input may come as JSON string from draft payload
+  const skillInputObj = typeof skillInput === 'string' ? (()=>{ try{return JSON.parse(skillInput);}catch{return{};} })() : skillInput;
+  const skillInputFields = _buildSkillInputFields(selectedSkillId, skillInputObj);
   const eventPreview = skill
-    ? _buildRcEventPreview(skill, rc?.name || '', rc?.trigger_event_id || null)
+    ? _buildRcEventPreview(skill, d.name || '', d.trigger_event_id || null)
     : `<div class="text-xs text-slate-400 py-2 pl-1">← 請先選擇 Skill，系統將自動預覽 Event 格式</div>`;
+
+  const curInterval = d.schedule_interval || '1h';
+  const isDailySelected = curInterval === 'daily';
 
   return `
     <div class="space-y-4">
       <div class="builder-field">
         <label class="builder-label required">排程名稱</label>
         <input id="rc-name" type="text" class="builder-input" placeholder="例如：TETCH01 每小時 APC 巡檢"
-          value="${_esc(rc?.name || '')}">
+          value="${_esc(d.name || '')}">
       </div>
 
       <div class="builder-field">
         <label class="builder-label required">選擇 Skill</label>
         <select id="rc-skill-id" class="builder-select w-full" onchange="_onRcSkillChange(this.value)">
           <option value="">— 請選擇 Skill —</option>
-          ${(_skillDefs||[]).map(s => `<option value="${s.id}" ${rc?.skill_id==s.id?'selected':''}>${_esc(s.name)}</option>`).join('')}
+          ${(_skillDefs||[]).map(s => `<option value="${s.id}" ${d.skill_id==s.id?'selected':''}>${_esc(s.name)}</option>`).join('')}
         </select>
       </div>
 
@@ -3603,16 +3611,30 @@ function _buildRoutineCheckForm(rc) {
 
       <div class="builder-field">
         <label class="builder-label">巡檢頻率</label>
-        <select id="rc-interval" class="builder-select w-full">
+        <select id="rc-interval" class="builder-select w-full" onchange="_onRcIntervalChange(this.value)">
           ${Object.entries(intervalLabel).map(([v,l]) =>
-            `<option value="${v}" ${(rc?.schedule_interval||'1h')==v?'selected':''}>${l}</option>`
+            `<option value="${v}" ${curInterval==v?'selected':''}>${l}</option>`
           ).join('')}
         </select>
       </div>
 
+      <div id="rc-daily-time-row" class="builder-field ${isDailySelected ? '' : 'hidden'}">
+        <label class="builder-label">每日執行時間</label>
+        <input id="rc-schedule-time" type="time" class="builder-input w-32"
+          value="${_esc(d.schedule_time || '08:00')}">
+        <p class="text-[10px] text-slate-400 mt-1">格式 HH:MM，伺服器依此時間觸發 (UTC+8)</p>
+      </div>
+
+      <div class="builder-field">
+        <label class="builder-label">效期（到期後自動停用）</label>
+        <input id="rc-expire-at" type="date" class="builder-input w-44"
+          value="${_esc(d.expire_at || '')}">
+        <p class="text-[10px] text-slate-400 mt-1">留空代表永久有效</p>
+      </div>
+
       <div class="builder-field">
         <label class="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" id="rc-active" class="w-4 h-4 rounded" ${!rc || rc.is_active ? 'checked' : ''}>
+          <input type="checkbox" id="rc-active" class="w-4 h-4 rounded" ${d.is_active !== false ? 'checked' : ''}>
           <span class="builder-label mb-0">啟用排程</span>
         </label>
       </div>
@@ -3686,10 +3708,10 @@ function _buildSkillInputFields(skillId, currentValues) {
 }
 
 /** Called when user changes the Skill dropdown — re-render skill_input + event preview. */
-async function _onRcSkillChange(skillId) {
+async function _onRcSkillChange(skillId, prefillValues) {
   const section = document.getElementById('rc-skill-input-section');
   if (section) {
-    section.innerHTML = _buildSkillInputFields(skillId ? parseInt(skillId) : null, {});
+    section.innerHTML = _buildSkillInputFields(skillId ? parseInt(skillId) : null, prefillValues || {});
   }
   // Refresh event format preview
   const previewSection = document.getElementById('rc-event-preview-section');
@@ -3886,6 +3908,55 @@ async function _autoMapRcEventParams() {
 }
 
 // Called by drawer 'routine-check-create' / 'routine-check-edit'
+function _onRcIntervalChange(val) {
+  const row = document.getElementById('rc-daily-time-row');
+  if (row) row.classList.toggle('hidden', val !== 'daily');
+}
+
+/** Pre-fill and open the RoutineCheck drawer from an agent draft payload. */
+async function _openRoutineCheckDrawerFromDraft(payload) {
+  // Ensure data is loaded
+  if (!_skillDefs || _skillDefs.length === 0) {
+    try { _skillDefs = await _api('GET', '/skill-definitions') || []; } catch {}
+  }
+  if (!_mcpDefs || _mcpDefs.length === 0) {
+    try { _mcpDefs = await _api('GET', '/mcp-definitions'); } catch {}
+  }
+  if (!_dataSubjects || _dataSubjects.length === 0) {
+    try { _dataSubjects = await _api('GET', '/mcp-definitions?type=system'); } catch {}
+  }
+  // skill_input may be object from draft
+  const skillInputObj = payload.skill_input || {};
+  const prefill = {
+    name: payload.name || '',
+    skill_id: payload.skill_id || null,
+    skill_input: skillInputObj,
+    schedule_interval: payload.schedule_interval || '1h',
+    schedule_time: payload.schedule_time || '',
+    expire_at: payload.expire_at || '',
+    is_active: false,
+  };
+  _editingRoutineCheck = null;
+  const title = '新增排程巡檢（草稿預填）';
+  const body = _buildRoutineCheckForm(null, prefill);
+  const footer = `
+    <div class="flex gap-2 justify-end w-full">
+      <button class="builder-btn-secondary" onclick="closeDrawer()">取消</button>
+      <button class="builder-btn-primary" onclick="_saveRoutineCheck(null)">建立排程</button>
+    </div>`;
+  // Open drawer directly (bypasses _renderDrawerContent which would overwrite content)
+  _currentDrawer = 'routine-check-create';
+  _editingId = null;
+  _drawerDirty = false;
+  document.getElementById('drawer-overlay')?.classList.remove('hidden');
+  document.getElementById('drawer')?.classList.add('drawer-open');
+  _setDrawerContent(title, body, footer);
+  // After DOM settles, trigger skill change to populate input fields with pre-fill values
+  if (prefill.skill_id) {
+    setTimeout(() => _onRcSkillChange(String(prefill.skill_id), skillInputObj), 300);
+  }
+}
+
 async function _openRoutineCheckDrawer(id) {
   // Lazy-load dependencies
   if (!_skillDefs || _skillDefs.length === 0) {
@@ -3937,10 +4008,18 @@ async function _saveRoutineCheck(id) {
   // Collect event name for auto-creating EventType (create mode only)
   const generated_event_name = document.getElementById('rc-event-name')?.value?.trim() || null;
 
+  // Collect expire_at + schedule_time
+  const expireAt = document.getElementById('rc-expire-at')?.value?.trim() || null;
+  const scheduleTime = interval === 'daily'
+    ? (document.getElementById('rc-schedule-time')?.value?.trim() || null)
+    : null;
+
   const payload = {
     name, skill_id: skillId, skill_input,
     generated_event_name,
     schedule_interval: interval, is_active: isActive,
+    expire_at: expireAt || undefined,
+    schedule_time: scheduleTime || undefined,
   };
 
   try {

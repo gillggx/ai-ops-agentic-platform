@@ -1658,7 +1658,13 @@ async function _openDraftEditor(draftId, draftType) {
         if (typeof _mcpOpenEditor === 'function') _mcpOpenEditor(null, payload);
         document.getElementById('mcp-back-btn') && (document.getElementById('mcp-back-btn').textContent = '← 返回對話');
       }, 200);
-    } else if (draftType === 'routine_check' || draftType === 'event_skill_link') {
+    } else if (draftType === 'routine_check') {
+      // Reuse existing RoutineCheck drawer, pre-fill from draft
+      if (typeof switchView === 'function') switchView('routine-checks');
+      setTimeout(() => {
+        if (typeof _openRoutineCheckDrawerFromDraft === 'function') _openRoutineCheckDrawerFromDraft(payload);
+      }, 300);
+    } else if (draftType === 'event_skill_link') {
       if (typeof switchView === 'function') switchView('event-link-builder');
       setTimeout(async () => {
         if (typeof _elPreFillFromDraft === 'function') await _elPreFillFromDraft(payload, draftId, draftType);
@@ -2087,12 +2093,17 @@ function _renderDraftActionCard(card) {
   const icon      = meta.icon;
   const typeLabel = meta.label;
 
+  const _fmtVal = v => {
+    if (v === null || v === undefined) return '';
+    if (typeof v === 'object') return JSON.stringify(v).slice(0, 120);
+    return String(v).slice(0, 120);
+  };
   const fillRows = Object.entries(card.auto_fill || {})
-    .filter(([, v]) => v !== null && v !== undefined && v !== '')
+    .filter(([, v]) => v !== null && v !== undefined && v !== '' && !(Array.isArray(v) && !v.length))
     .map(([k, v]) => `
       <div class="flex gap-2 text-xs py-1 border-b border-slate-100 last:border-0">
         <span class="font-mono text-purple-600 w-36 shrink-0">${_escapeHtml(k)}</span>
-        <span class="text-slate-700 truncate">${_escapeHtml(String(v).slice(0, 120))}</span>
+        <span class="text-slate-700 truncate">${_escapeHtml(_fmtVal(v))}</span>
       </div>`).join('');
 
   const contentHtml = `
