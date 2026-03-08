@@ -172,6 +172,37 @@ def _sanitize_history(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return cleaned
 
 
+def _clean_history_boundary(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Remove orphaned tool_result messages from the front of a trimmed history slice.
+
+    When history is trimmed to the last N messages, the slice may start with a
+    user(tool_result) message whose corresponding assistant(tool_use) was cut off.
+    Anthropic API rejects such requests with 400 invalid_request_error.
+
+    Strategy: skip any leading user(tool_result) + the following assistant response
+    until we reach a clean user(text) turn.
+    """
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+        if msg.get("role") == "user":
+            content = msg.get("content", "")
+            is_tool_result = isinstance(content, list) and any(
+                isinstance(b, dict) and b.get("type") == "tool_result"
+                for b in content
+            )
+            if not is_tool_result:
+                break  # found a clean user text turn
+            # Orphaned tool_result — skip it and the assistant turn that follows
+            i += 1
+            if i < len(messages) and messages[i].get("role") == "assistant":
+                i += 1
+        else:
+            # History starts with assistant — invalid pair, skip
+            i += 1
+    return messages[i:]
+
+
 def _dataset_summary(dataset: List[Any]) -> Dict[str, Any]:
     """Build a compact summary for large datasets (spec 1.1)."""
     n = len(dataset)
@@ -276,7 +307,8 @@ def _result_summary(result: Dict[str, Any]) -> str:
         if "output_data" in result and isinstance(result.get("output_data"), dict):
             ds = result["output_data"].get("dataset")
             count = len(ds) if isinstance(ds, list) else result.get("row_count", 0)
-            return f"MCP #{result.get('mcp_id', '?')} 回傳 {count} 筆資料"
+            name = result.get("mcp_name") or f"MCP #{result.get('mcp_id', '?')}"
+            return f"{name} 回傳 {count} 筆資料"
     if "memories" in result:
         return f"{result['count']} 條記憶"
     if "draft_id" in result:
@@ -317,11 +349,12 @@ def _build_render_card(
     if tool_name == "execute_mcp" and isinstance(result, dict) and result.get("status") == "success":
         od = result.get("output_data") or {}
         mcp_id = tool_input.get("mcp_id")
+        mcp_name = result.get("mcp_name") or f"MCP #{mcp_id}"
         dataset = od.get("dataset")
         raw_dataset = od.get("_raw_dataset") or dataset
         return {
             "type": "mcp",
-            "mcp_name": f"MCP #{mcp_id}",
+            "mcp_name": mcp_name,
             "mcp_output": {
                 "ui_render": od.get("ui_render") or {},
                 "dataset": dataset,
@@ -529,7 +562,9 @@ class AgentOrchestrator:
                 logger.warning("Memory auto-write failed: %s", exc)
 
         # Save session (trim to last _SESSION_MAX_MESSAGES to bound token growth)
-        await self._save_session(session_id, messages[-_SESSION_MAX_MESSAGES:])
+        # Then clean the boundary to prevent orphaned tool_result blocks (→ 400 error)
+        trimmed = _clean_history_boundary(messages[-_SESSION_MAX_MESSAGES:])
+        await self._save_session(session_id, trimmed)
         yield {"type": "done", "session_id": session_id}
 
     # ── Session Helpers ───────────────────────────────────────────────────────

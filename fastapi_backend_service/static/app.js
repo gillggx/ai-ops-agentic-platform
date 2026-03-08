@@ -2012,7 +2012,9 @@ function _handleCopilotEvent(ev) {
 function _renderCopilotMcpPanel(ev) {
   _showReportPanel();
   const tabId    = `mcp-${Date.now()}`;
-  const tabTitle = ev.tab_title || `🔍 ${ev.mcp_name || 'MCP 查詢'}`;
+  const rawName = ev.mcp_name || 'MCP 查詢';
+  const shortName = rawName.length > 18 ? rawName.slice(0, 17) + '…' : rawName;
+  const tabTitle = ev.tab_title || `🔍 ${shortName}`;
   const evidenceHtml = _renderMcpEvidence(ev.mcp_output);
 
   const contentHtml = `

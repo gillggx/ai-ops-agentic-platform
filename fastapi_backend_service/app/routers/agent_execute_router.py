@@ -80,11 +80,16 @@ async def execute_mcp(
     """
     base_url = f"{request.url.scheme}://{request.url.netloc}"
 
+    mcp_repo = MCPDefinitionRepository(db)
     svc = MCPDefinitionService(
-        repo=MCPDefinitionRepository(db),
+        repo=mcp_repo,
         ds_repo=DataSubjectRepository(db),
         llm=MCPBuilderService(),
     )
+
+    # Fetch MCP name for display (best-effort)
+    mcp_obj = await mcp_repo.get_by_id(mcp_id)
+    mcp_name = mcp_obj.name if mcp_obj else f"MCP #{mcp_id}"
 
     result = await svc.run_with_data(mcp_id=mcp_id, raw_data=body, base_url=base_url)
     # Surface failures explicitly so LLM sees an error instead of empty data
@@ -92,6 +97,7 @@ async def execute_mcp(
         return {
             "status": "error",
             "mcp_id": mcp_id,
+            "mcp_name": mcp_name,
             "error": result.error or "MCP 執行失敗（未知錯誤）",
             "llm_readable_data": {},
         }
@@ -101,6 +107,7 @@ async def execute_mcp(
     return {
         "status": "success",
         "mcp_id": mcp_id,
+        "mcp_name": mcp_name,
         "row_count": len(dataset) if isinstance(dataset, list) else 0,
         "output_data": od,
         "llm_readable_data": json.dumps(preview, ensure_ascii=False)[:3000],
