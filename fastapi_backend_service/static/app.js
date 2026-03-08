@@ -893,6 +893,9 @@ async function loginWithCredentials() {
 
     localStorage.setItem('glassbox_token', _token);
     _clearConversationHistory();
+    // Reset token counter on every fresh login
+    const _lb = document.getElementById('v13-token-badge');
+    if (_lb) { _lb.textContent = ''; _lb.classList.add('hidden'); delete _lb._totalIn; delete _lb._totalOut; }
     _showMainApp(username);
 
   } catch (err) {
@@ -909,6 +912,8 @@ function loginWithToken() {
   _token = t;
   localStorage.setItem('glassbox_token', _token);
   _clearConversationHistory();
+  const _lb2 = document.getElementById('v13-token-badge');
+  if (_lb2) { _lb2.textContent = ''; _lb2.classList.add('hidden'); delete _lb2._totalIn; delete _lb2._totalOut; }
   _showMainApp('Token User');
 }
 
@@ -2496,12 +2501,27 @@ function _handleV13Event(ev) {
         } else if (ev.render_card.type === 'draft') {
           _renderDraftActionCard(ev.render_card);
         }
+      } else {
+        // No render_card — show pending synthesis indicator in console and right panel
+        _diagLogLine('🤔', 'AI 正在整合分析結果…', '#a78bfa');
+        _showReportPanel();
+        const _wsContent = document.getElementById('ws-analysis-content');
+        if (_wsContent && !_wsContent.querySelector('#ws-synthesis-pending')) {
+          const _existing = _wsContent.querySelector('.ai-analysis-body');
+          if (!_existing) {
+            _wsContent.innerHTML = `<div id="ws-synthesis-pending" class="flex flex-col items-center justify-center h-40 gap-3 text-slate-400">
+              <span class="animate-spin text-3xl">⏳</span>
+              <span class="text-sm font-medium">AI 正在整合分析結果…</span>
+            </div>`;
+          }
+        }
       }
       break;
     }
 
     case 'synthesis': {
       document.getElementById('v13-thinking-bubble')?.closest('.flex')?.remove();
+      document.getElementById('ws-synthesis-pending')?.remove();
       const fullText = ev.text || '(無回答)';
       // v13.3 Output Routing: split <ai_analysis> from chat text
       const analysisMatch = fullText.match(/<ai_analysis>([\s\S]*?)<\/ai_analysis>/);
