@@ -1152,7 +1152,17 @@ async function _renderMCPDrawer(id) {
   if (id) mcp = _mcpDefs.find(m => m.id === id) || await _api('GET', `/mcp-definitions/${id}`);
   const title = id ? `編輯 MCP — ${_esc(mcp?.name || '')}` : '新增 MCP';
 
-  const selectedSysMcpId = mcp?.system_mcp_id || mcp?.data_subject_id;
+  // Resolve system_mcp_id — prefer the direct FK; fall back to name-matching via old data_subject
+  let selectedSysMcpId = mcp?.system_mcp_id || null;
+  if (!selectedSysMcpId && mcp?.data_subject_id) {
+    try {
+      const oldDs = await _api('GET', `/data-subjects/${mcp.data_subject_id}`);
+      if (oldDs?.name) {
+        const matched = _dataSubjects.find(d => d.name === oldDs.name);
+        if (matched) selectedSysMcpId = matched.id;
+      }
+    } catch {}
+  }
   const dsOptions = _dataSubjects.map(ds =>
     `<option value="${ds.id}" ${selectedSysMcpId === ds.id ? 'selected' : ''}>${_esc(ds.name)}</option>`
   ).join('');
@@ -4953,7 +4963,7 @@ function _nbRenderMcpEvidence(result) {
       chartEl.innerHTML = '';
       charts.forEach((chartJson) => {
         const wrapper = document.createElement('div');
-        wrapper.style.cssText = 'height:280px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;overflow:hidden;margin-bottom:8px;';
+        wrapper.style.cssText = 'height:380px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;margin-bottom:8px;';
         chartEl.appendChild(wrapper);
         try {
           const figData = typeof chartJson === 'string' ? JSON.parse(chartJson) : chartJson;
@@ -5525,7 +5535,7 @@ function _skRenderMcpEvidence(result) {
       chartEl.innerHTML = '';
       charts.forEach(chartJson => {
         const wrapper = document.createElement('div');
-        wrapper.style.cssText = 'height:280px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;overflow:hidden;margin-bottom:8px;';
+        wrapper.style.cssText = 'height:380px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;margin-bottom:8px;';
         chartEl.appendChild(wrapper);
         try {
           const figData = typeof chartJson === 'string' ? JSON.parse(chartJson) : chartJson;
@@ -5898,8 +5908,20 @@ async function _mcpOpenEditor(id, draftData) {
   document.getElementById('mce-edit-name').value = mcp?.name || '';
   document.getElementById('mce-edit-desc').value = mcp?.description || '';
   document.getElementById('mce-edit-intent').value = mcp?.processing_intent || '';
-  if (dsSel && (mcp?.system_mcp_id || mcp?.data_subject_id)) {
-    dsSel.value = mcp.system_mcp_id || mcp.data_subject_id;
+
+  // Resolve system_mcp_id — prefer the direct FK; fall back to name-matching via old data_subject
+  let resolvedDsId = mcp?.system_mcp_id || null;
+  if (!resolvedDsId && mcp?.data_subject_id) {
+    try {
+      const oldDs = await _api('GET', `/data-subjects/${mcp.data_subject_id}`);
+      if (oldDs?.name) {
+        const matched = _dataSubjects.find(d => d.name === oldDs.name);
+        if (matched) resolvedDsId = matched.id;
+      }
+    } catch {}
+  }
+  if (dsSel && resolvedDsId) {
+    dsSel.value = resolvedDsId;
     _mceOnDsChange();
   }
 }
@@ -6084,7 +6106,7 @@ async function _mcpTryRun() {
           chartEl.innerHTML = '';
           charts.forEach(chartJson => {
             const wrapper = document.createElement('div');
-            wrapper.style.cssText = 'height:280px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;overflow:hidden;margin-bottom:8px;';
+            wrapper.style.cssText = 'height:380px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;margin-bottom:8px;';
             chartEl.appendChild(wrapper);
             try {
               const figData = typeof chartJson === 'string' ? JSON.parse(chartJson) : chartJson;

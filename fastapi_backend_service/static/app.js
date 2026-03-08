@@ -1320,71 +1320,47 @@ async function sendDiagnosis() {
  * contentHtml : inner HTML for the panel (already escaped where needed)
  * Returns { btn, panel }.
  */
+/**
+ * Split-screen: inject content into the left Data & Chart pane.
+ * Replaces the previous tab-based system — each new result replaces the pane content.
+ * Returns { btn: null, panel } for backward compat with callers that destructure the result.
+ */
 function _createWorkspaceTab(tabId, title, contentHtml) {
-  // Hide placeholder / empty hint
+  const pane = document.getElementById('ws-data-content');
+  if (!pane) return { btn: null, panel: null };
+
   document.getElementById('workspace-placeholder')?.classList.add('hidden');
-  document.getElementById('ws-empty-hint')?.classList.add('hidden');
 
-  // ── Tab button ──────────────────────────────────────────────
-  const btn = document.createElement('button');
-  btn.id        = `ws-tab-btn-${tabId}`;
-  btn.className = 'tab-btn ws-tab whitespace-nowrap';
-  btn.innerHTML =
-    `<span class="ws-tab-label">${title}</span>` +
-    `<span class="ws-close-btn" title="關閉"` +
-    ` onclick="_closeWorkspaceTab('${tabId.replace(/'/g, "\\'")}');event.stopPropagation()">×</span>`;
-  btn.onclick = () => _activateWorkspaceTab(tabId);
-  document.getElementById('tab-bar').appendChild(btn);
+  // Replace pane content with a titled card
+  pane.innerHTML = `
+    <div id="ws-panel-${tabId}" class="flex flex-col h-full">
+      <div class="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-slate-100 bg-white">
+        <span class="text-xs font-semibold text-slate-700 truncate">${title}</span>
+      </div>
+      <div class="flex-1 overflow-y-auto min-h-0">
+        ${contentHtml}
+      </div>
+    </div>`;
 
-  // ── Panel ────────────────────────────────────────────────────
-  const panel = document.createElement('div');
-  panel.id        = `ws-panel-${tabId}`;
-  panel.className = 'tab-panel hidden flex flex-col flex-1 min-h-0';
-  panel.innerHTML = contentHtml;
-  document.getElementById('tab-content').appendChild(panel);
+  const panel = pane.querySelector(`#ws-panel-${tabId}`);
+  _workspaceTabs[tabId] = { btn: null, panel };
+  _activeTabId = tabId;
 
-  _workspaceTabs[tabId] = { btn, panel };
-  _activateWorkspaceTab(tabId);
-
-  // Phase 10: auto-switch to workspace on mobile when a new tab appears
   if (_isMobile()) _switchMobileView('workspace');
 
-  return { btn, panel };
+  return { btn: null, panel };
 }
 
-/** Activate a workspace tab (deactivates all others). */
+/** No-op stubs kept for backward compat. */
 function _activateWorkspaceTab(tabId) {
-  Object.values(_workspaceTabs).forEach(({ btn, panel }) => {
-    btn.classList.remove('active-tab');
-    panel.classList.add('hidden');
-  });
-  const entry = _workspaceTabs[tabId];
-  if (!entry) return;
-  entry.btn.classList.add('active-tab');
-  entry.panel.classList.remove('hidden');
   _activeTabId = tabId;
 }
 
-/**
- * Close a workspace tab. If it was the active tab, focus the most recent
- * remaining tab; if none remain, show the workspace placeholder again.
- * Exposed globally so the inline onclick handler can call it.
- */
 function _closeWorkspaceTab(tabId) {
-  const entry = _workspaceTabs[tabId];
-  if (!entry) return;
-  const wasActive = _activeTabId === tabId;
-  entry.btn.remove();
-  entry.panel.remove();
   delete _workspaceTabs[tabId];
-
-  const remaining = Object.keys(_workspaceTabs);
-  if (remaining.length > 0) {
-    if (wasActive) _activateWorkspaceTab(remaining[remaining.length - 1]);
-  } else {
+  if (Object.keys(_workspaceTabs).length === 0) {
     _activeTabId = null;
     document.getElementById('workspace-placeholder')?.classList.remove('hidden');
-    document.getElementById('ws-empty-hint')?.classList.remove('hidden');
   }
 }
 
@@ -1402,9 +1378,36 @@ function _resetSession() {
   _activeTabId   = null;
   _toolTabs      = {};
 
-  // Show workspace placeholder + empty hint
-  document.getElementById('workspace-placeholder')?.classList.remove('hidden');
-  document.getElementById('ws-empty-hint')?.classList.remove('hidden');
+  // Reset data pane to placeholder
+  const dataPaneContent = document.getElementById('ws-data-content');
+  if (dataPaneContent) {
+    dataPaneContent.innerHTML = `
+      <div id="workspace-placeholder"
+        class="flex flex-col items-center justify-center h-full text-slate-400 py-16">
+        <svg class="w-14 h-14 mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
+            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586
+               a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+        <p class="text-sm">診斷完成後，AI 報告將呈現在此</p>
+      </div>`;
+  }
+  // Reset analysis pane to placeholder
+  const analysisPaneContent = document.getElementById('ws-analysis-content');
+  if (analysisPaneContent) {
+    analysisPaneContent.innerHTML = `
+      <div id="ws-analysis-placeholder"
+        class="flex flex-col items-center justify-center h-full text-slate-400 py-16 px-4 text-center">
+        <svg class="w-10 h-10 mb-3 opacity-25" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
+            d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3
+               m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547
+               A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531
+               c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+        </svg>
+        <p class="text-xs text-slate-400">AI 深度分析將顯示於此</p>
+      </div>`;
+  }
 
   // Reset copilot slot state (keep history for context continuity)
   _slotContext  = {};
@@ -2007,21 +2010,18 @@ function _renderCopilotSkillPanel(ev) {
 }
 
 /**
- * v13.3: Render <ai_analysis> content into the right workspace panel.
- * Creates a dedicated "✨ Analysis from AI" tab with markdown-rendered content.
+ * v13.3 + split-screen: Render <ai_analysis> content into the right analysis pane.
  */
 function _renderAiAnalysisPanel(markdownContent) {
   _showReportPanel();
-  const tabId    = `ai-analysis-${Date.now()}`;
-  const tabTitle = '✨ Analysis from AI';
+  const content = document.getElementById('ws-analysis-content');
+  if (!content) return;
   const rendered = (typeof marked !== 'undefined')
     ? marked.parse(markdownContent)
     : markdownContent.replace(/\n/g, '<br>');
-  const contentHtml = `
-    <div class="p-5 overflow-y-auto flex-1">
-      <div class="flex items-center gap-2 mb-4">
-        <span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-700">AI 深度分析</span>
-      </div>
+  document.getElementById('ws-analysis-placeholder')?.remove();
+  content.innerHTML = `
+    <div class="p-4">
       <div class="prose prose-sm max-w-none text-slate-800
                   [&_table]:w-full [&_table]:border-collapse [&_table]:text-xs
                   [&_th]:bg-slate-100 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_th]:border [&_th]:border-slate-200
@@ -2031,8 +2031,6 @@ function _renderAiAnalysisPanel(markdownContent) {
         ${rendered}
       </div>
     </div>`;
-  const { panel } = _createWorkspaceTab(tabId, tabTitle, contentHtml);
-  void panel; // no charts to init
 }
 
 /**
