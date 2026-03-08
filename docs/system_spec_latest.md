@@ -1,13 +1,14 @@
 # Glass Box AI Diagnostic Platform — System Specification (Latest)
 
-**Version**: v13.0
-**Last Updated**: 2026-03-07
+**Version**: v13.5
+**Last Updated**: 2026-03-08
 **Status**: Active Development — Phases 1–15 Complete
 
 ## Changelog
 
 | Version | Date | Changes |
 |---------|------|---------|
+| v13.5 | 2026-03-08 | Split-screen Dashboard; Agent pre-flight validation; production httpx loopback fix; session history boundary sanitization; MCP real-name in tabs; System MCP execution fixes |
 | v13.0 | 2026-03-07 | UI Phase 15: 診斷站 as default landing page; Skill Builder & MCP Builder full-page L/R editors (two-state list+editor); 排程巡檢管理 removed from sidebar; Agent Console in diagnose page; Plotly chart horizontal legend forced below plot. Code gen `max_tokens` 2048→4096 + `compile()` pre-check in `mcp_builder_service.py`. |
 | v12.0 | 2026-03-04 | Skill card redesign: chart/data tabs, problem_object, suggestion action. `_auto_chart` fallback. Diagnosis prompt returns `problem_object`. |
 | v11.0 | 2026-03-04 | Initial living spec created; covers all phases 1–11. Hard-coded config extracted to `config.py`. Code style refactored (type hints + docstrings). |
@@ -28,6 +29,7 @@
 10. [Database Migrations](#10-database-migrations)
 11. [Response Formats](#11-response-formats)
 12. [Running the Service](#12-running-the-service)
+14. [Agent v13 架構](#14-agent-v13-架構)
 
 ---
 
@@ -35,7 +37,7 @@
 
 **Project Root**: `fastapi_backend_service/`
 **Application Name**: Glass Box AI Diagnostic Platform
-**Version**: 1.0.0 (app), v13.0 (spec)
+**Version**: 1.0.0 (app), v13.5 (spec)
 
 ### Purpose
 
@@ -205,6 +207,10 @@ All routes use prefix `/api/v1` (configurable via `API_V1_PREFIX`).
 | POST | `/mcp-definitions/try-run` | Bearer JWT | Generate + sandbox execute |
 | POST | `/mcp-definitions/{mcp_id}/run-with-data` | Bearer JWT | Execute stored script with raw_data |
 
+**Query Param**: `POST /mcp-definitions/?type=system|custom` — 列表過濾支援
+- `GET /mcp-definitions/?type=system` — 回傳 System MCP 列表
+- `GET /mcp-definitions/?type=custom` — 回傳 Custom MCP 列表
+
 ### 4.9 Skill Definitions (`/skill-definitions`)
 
 | Method | Path | Auth | Description |
@@ -254,7 +260,21 @@ All routes use prefix `/api/v1` (configurable via `API_V1_PREFIX`).
 |--------|------|------|-------------|
 | POST | `/help/chat` | Bearer JWT | SSE usage Q&A (product spec + user manual context) |
 
-### 4.14 Mock Data (`/mock`)
+### 4.14 Agent (`/agent`, `/execute`)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/agent/chat/stream` | Bearer JWT | Agentic loop SSE stream |
+| GET | `/agent/tools_manifest` | Bearer JWT | Tool schemas + meta_tools |
+| GET | `/agent/brain` | Bearer JWT | User soul + preferences |
+| PATCH | `/agent/brain` | Bearer JWT | Update soul/preferences |
+| POST | `/agent/draft/skill` | Bearer JWT | Create skill draft (agent-only) |
+| POST | `/agent/draft/mcp` | Bearer JWT | Create MCP draft (agent-only) |
+| GET | `/agent/drafts` | Bearer JWT | List pending drafts |
+| POST | `/execute/mcp/{mcp_id}` | Bearer JWT | Execute MCP (system+custom); returns mcp_name, row_count, output_data, llm_readable_data |
+| POST | `/execute/skill/{skill_id}` | Bearer JWT | Execute Skill; returns llm_readable_data, ui_render_payload |
+
+### 4.15 Mock Data (`/mock`)
 
 No authentication required.
 
@@ -350,6 +370,11 @@ Key attributes: `lot_id`, `tool_id`, `chamber_id`, `recipe_id`, `operation_numbe
 | `input_definition` | Text | Nullable — input params spec |
 | `sample_output` | Text | Nullable — actual Try Run output |
 | `created_at` / `updated_at` | DateTime(tz) | Standard |
+| `mcp_type`     | String(10) | Default 'custom'; 'system' = IT-managed data source |
+| `api_config`   | Text | System MCP only — JSON: {endpoint_url, method, headers} |
+| `input_schema` | Text | System MCP only — JSON: {fields: [{name, type, description, required}]} |
+| `system_mcp_id`| Integer | FK→mcp_definitions.id; custom MCP's parent system MCP |
+| `visibility`   | String(20) | 'public' \| 'private' (default 'private') |
 
 ### 5.6 `skill_definitions`
 
@@ -407,6 +432,51 @@ Key attributes: `lot_id`, `tool_id`, `chamber_id`, `recipe_id`, `operation_numbe
 | `last_run_at` | Text | Nullable — ISO timestamp |
 | `last_run_status` | String(20) | Nullable — NORMAL/ABNORMAL/ERROR |
 | `created_at` / `updated_at` | DateTime(tz) | Standard |
+
+### 5.11 `agent_sessions`
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer | PK |
+| session_id | String | UNIQUE |
+| user_id | Integer | FK→users.id |
+| messages | Text | JSON: conversation history (last 20 messages) |
+| expires_at | DateTime | 24h TTL |
+| created_at | DateTime | Standard |
+
+### 5.12 `agent_memories`
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer | PK |
+| user_id | Integer | FK→users.id |
+| content | Text | 純文字記憶 |
+| embedding | BLOB | JSON array (SQLite) / pgvector (prod) |
+| source | String(50) | 'diagnosis' \| 'user_preference' \| 'manual' |
+| ref_id | String(100) | Nullable — related skill_id or mcp_id |
+| created_at / updated_at | DateTime | Standard |
+
+### 5.13 `agent_drafts`
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer | PK |
+| draft_id | String | UNIQUE (UUID) |
+| user_id | Integer | FK→users.id |
+| draft_type | String(20) | 'skill' \| 'mcp' |
+| payload | Text | JSON: proposed record content |
+| status | String(20) | 'pending' \| 'published' \| 'rejected' |
+| created_at / updated_at | DateTime | Standard |
+
+### 5.14 `user_preferences`
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer | PK |
+| user_id | Integer | UNIQUE FK→users.id |
+| preferences | Text | Free-form text |
+| soul_override | Text | Admin override for soul prompt |
+| created_at / updated_at | DateTime | Standard |
 
 ---
 
@@ -591,6 +661,18 @@ Passive skill — generates structured questions for the human operator (no API 
 | `style.css` | Light theme: white/slate-50 content cards, dark sidebar (`bg-slate-800`). `.slash-menu`, `.copilot-tool-tag`, SSE card styles. |
 | `app.js` | Copilot intent parsing, SSE streaming (Fetch + ReadableStream), event diagnosis tabs, slot filling state, `_parseCopilotChunk()`, `_parseSSEChunk()`. Agent Console: `_diagLogLine()`, `_diagConsoleExpand/Collapse/Toggle/Clear()`. |
 | `builder.js` | Nested Builder, MCP Builder (two-state list+editor, `_mcpOpenEditor/BackToList/TryRun/Save`), Skill Builder (two-state list+editor, `_skOpenEditor/BackToList/TryRun/Save`). |
+
+#### 主要 JS 模組結構（v13.5）
+
+| 函式 / 模組 | 位置 | 職責 |
+|------------|------|------|
+| `_createWorkspaceTab` | app.js | 在 #ws-data-tab-bar 新增 tab；面板 append 至 #ws-data-content |
+| `_activateWorkspaceTab` / `_closeWorkspaceTab` | app.js | Tab 切換 / 關閉 |
+| `_renderAiAnalysisPanel` | app.js | 將 AI 分析 Markdown 渲染至右側 #ws-analysis-content |
+| `_renderCopilotMcpPanel` | app.js | MCP 查詢結果 → workspace tab |
+| `_renderCopilotSkillPanel` | app.js | Skill 診斷結果 → workspace tab |
+| `_skFetchPreview` | builder.js | Skill Builder 撈取預覽；含 data_subject 名稱回退 |
+| `_mcpOpenEditor` | builder.js | MCP 編輯器開啟；含 system_mcp_id 名稱回退 |
 
 ### 8.1 Nav Sidebar Order (v13)
 
@@ -875,3 +957,68 @@ When `mcp_output.ui_render.chart_data` is null after script execution, `_auto_ch
 - Event-driven diagnosis pipeline (`event_pipeline_service._run_skill`)
 - Copilot direct MCP execution (`copilot_service._execute_mcp`)
 - MCP Builder re-open: `_buildChartFromDataset()` in `builder.js` regenerates chart client-side from stored dataset + `ui_render_config`, bypassing any stale `chart_data` stored in `sample_output`.
+
+---
+
+## 14. Agent v13 架構
+
+### 13.1 AgentOrchestrator
+
+檔案：`app/services/agent_orchestrator.py`
+
+5-Stage 迴圈：
+1. **Context Load** — Soul + UserPref + RAG 組裝 system prompt
+2. **LLM Call** — `anthropic.messages.create(tools=TOOL_SCHEMAS, ...)`
+3. **Tool Execute** — Pre-flight validate → ToolDispatcher.execute()
+4. **Synthesis** — `stop_reason=end_turn` → emit synthesis event
+5. **Memory Write** — ABNORMAL 診斷自動存入 agent_memories
+
+### 13.2 Pre-flight Validation
+
+函式：`_preflight_validate(db, tool_name, tool_input)`
+
+攔截規則：
+- `execute_mcp`: mcp_id 不存在 → 錯誤；system MCP 直接呼叫時檢查自身 input_schema；custom MCP 檢查 parent system MCP input_schema；params={} 但有 input fields → 要求確認
+- `execute_skill`: skill_id 不存在 → 錯誤
+
+### 13.3 Session History Management
+
+- 每次對話結束後 `messages[-20:]` 截斷
+- `_clean_history_boundary()` 掃描截斷後的開頭，移除孤立的 `user(tool_result)` + 對應 `assistant` message，防止 Anthropic API 400 invalid_request_error
+- `_sanitize_history()` 截斷舊 session 中超大的 tool_result content（>2000 chars）
+
+### 13.4 Internal URL Rule
+
+所有 service 層的內部 httpx 呼叫（system MCP endpoint fetch）必須使用：
+```python
+if endpoint_url.startswith("/"):
+    url = "http://127.0.0.1:8000" + endpoint_url  # 不走 nginx
+```
+
+### 13.5 Split-Screen Dashboard Layout
+
+```
+#view-diagnose (flex row)
+├── #diag-console (left: chat + agent console)
+└── #ws-split-container (right: flex row, flex-1)
+    ├── #ws-data-pane (flex:7)
+    │   ├── #ws-data-tab-bar (hidden when ≤1 tab)
+    │   └── #ws-data-content (overflow-y-auto)
+    └── #ws-analysis-pane (flex:3)
+        └── #ws-analysis-content (.ai-analysis-body, 12px)
+```
+
+### 13.6 Tool Schemas
+
+| Tool | 用途 |
+|------|------|
+| `execute_skill` | 執行 Skill；回傳 llm_readable_data (status/diagnosis_message/problematic_targets) |
+| `execute_mcp` | 執行 MCP (system + custom)；回傳 dataset preview + mcp_name |
+| `list_skills` | 列出所有 public Skill |
+| `list_mcps` | 列出 custom MCP |
+| `list_system_mcps` | 列出 system MCP |
+| `draft_skill` | 建立 Skill 草稿 (待人工審核) |
+| `draft_mcp` | 建立 MCP 草稿 |
+| `patch_skill_raw` | 以 OpenClaw Markdown 直接修改 Skill |
+| `search_memory` | 搜尋 RAG 長期記憶 |
+| `update_user_pref` | 更新用戶偏好 |
