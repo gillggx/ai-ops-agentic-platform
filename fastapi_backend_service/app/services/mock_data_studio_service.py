@@ -184,7 +184,8 @@ class MockDataStudioService:
     """LLM-powered code generator and sample data generator for Mock Data Studio."""
 
     def __init__(self) -> None:
-        self._client = anthropic.Anthropic(api_key=get_settings().ANTHROPIC_API_KEY)
+        # Use async client so LLM calls don't block the event loop
+        self._client = anthropic.AsyncAnthropic(api_key=get_settings().ANTHROPIC_API_KEY)
 
     async def generate_code(
         self,
@@ -203,15 +204,14 @@ class MockDataStudioService:
         if sample_params:
             user_msg += f"\n\n範例呼叫參數：{json.dumps(sample_params, ensure_ascii=False)}"
 
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: self._client.messages.create(
+        response = await asyncio.wait_for(
+            self._client.messages.create(
                 model=_MODEL,
-                max_tokens=3000,
+                max_tokens=4096,
                 system=_GENERATE_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": user_msg}],
             ),
+            timeout=55.0,
         )
 
         text = response.content[0].text.strip()
@@ -274,15 +274,14 @@ class MockDataStudioService:
         async def _call_llm(n: int) -> str:
             prompt = _QUICK_SAMPLE_SYSTEM_PROMPT.replace("{count}", str(n))
             msg = f"描述：{description}\n\n請生成 {n} 筆資料。"
-            loop = asyncio.get_event_loop()
-            resp = await loop.run_in_executor(
-                None,
-                lambda: self._client.messages.create(
+            resp = await asyncio.wait_for(
+                self._client.messages.create(
                     model=_MODEL,
                     max_tokens=8192,
                     system=prompt,
                     messages=[{"role": "user", "content": msg}],
                 ),
+                timeout=50.0,  # fail before nginx 60s gateway timeout
             )
             raw = resp.content[0].text.strip()
             logger.info("quick_sample LLM stop_reason=%s len=%d count=%d", resp.stop_reason, len(raw), n)

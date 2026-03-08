@@ -1,5 +1,6 @@
 """Mock Data Studio Router — CRUD + run + generate-code + quick-sample."""
 
+import asyncio
 import json
 from typing import Any, List, Optional
 
@@ -197,6 +198,8 @@ async def quick_sample(
             description=body.description or m.description,
             count=body.count,
         )
+    except asyncio.TimeoutError:
+        raise _app_err(408, "LLM 回應超時（描述太複雜），請精簡描述後重試", "LLM_TIMEOUT")
     except Exception as e:
         raise _app_err(500, f"LLM 生成失敗: {e}", "LLM_ERROR")
 
