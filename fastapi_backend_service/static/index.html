@@ -431,6 +431,7 @@
                   <div>
                     <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">任務名稱 *</label>
                     <input id="nb-task-name" type="text" placeholder="例：SPC 異常巡檢 - TETCH01"
+                           oninput="_nbUpdateEventPreview()"
                            class="w-full bg-white border border-slate-300 rounded-md p-3 text-sm font-medium
                                   text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500
                                   focus:border-blue-500 transition-shadow">
@@ -438,6 +439,7 @@
                   <div>
                     <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">執行頻率</label>
                     <select id="nb-task-interval"
+                            onchange="_nbOnTaskIntervalChange(this.value)"
                             class="w-full bg-white border border-slate-300 rounded-md px-3 py-2.5 text-sm font-medium
                                    text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500
                                    focus:border-blue-500 transition-shadow">
@@ -446,9 +448,24 @@
                       <option value="4h">每 4 小時</option>
                       <option value="8h">每 8 小時</option>
                       <option value="12h">每 12 小時</option>
-                      <option value="daily">每天</option>
+                      <option value="daily">每天 (指定時間)</option>
                     </select>
                   </div>
+                </div>
+                <!-- Daily time + expire_at row -->
+                <div id="nb-task-daily-row" class="hidden mt-3">
+                  <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">每日執行時間</label>
+                  <input id="nb-task-schedule-time" type="time" value="08:00"
+                         class="bg-white border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-800
+                                shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                  <p class="text-xs text-slate-400 mt-0.5">格式 HH:MM，伺服器依此時間觸發 (UTC+8)</p>
+                </div>
+                <div class="mt-3">
+                  <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">效期（到期後自動停用）</label>
+                  <input id="nb-task-expire-at" type="date"
+                         class="bg-white border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-800
+                                shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                  <p class="text-xs text-slate-400 mt-0.5">留空代表永久有效</p>
                 </div>
 
                 <!-- L2: Skill card -->
@@ -663,6 +680,13 @@
                   </div><!-- /L3 MCP -->
                 </div><!-- /L2 Skill -->
               </div><!-- /L1 Task -->
+
+              <!-- Event Preview (auto-updates when Skill is selected) -->
+              <div id="nb-event-preview-section" class="mt-4">
+                <div class="border border-slate-200 rounded-lg p-3 bg-slate-50/40 text-xs text-slate-400 italic">
+                  ← 請先選擇 Skill，系統將自動預覽異常時觸發的 Event 格式
+                </div>
+              </div>
 
             </div><!-- /LEFT builder -->
 
@@ -1711,7 +1735,7 @@
               </h2>
               <p class="text-xs text-slate-500 mt-0.5">設定主動巡檢排程，定時執行 Skill 並自動生成警報</p>
             </div>
-            <button onclick="openDrawer('routine-check-create')"
+            <button onclick="switchView('nested-builder')"
               class="builder-btn-primary text-sm px-4 py-2">
               + 新增排程
             </button>
@@ -1776,12 +1800,7 @@
                 🔗 Event → Skill 連結<br>
                 <span class="font-normal text-indigo-500">將 Skill 加入事件診斷鏈</span>
               </button>
-              <button onclick="_elSetMode('routine_check')" id="el-mode-routine"
-                class="w-full text-left px-3 py-3 rounded-lg border border-slate-200 bg-white text-slate-600
-                       text-xs font-semibold hover:bg-slate-50 transition-colors">
-                🕒 排程巡檢<br>
-                <span class="font-normal text-slate-400">定時執行 Skill 主動巡檢</span>
-              </button>
+              <!-- 排程巡檢已移至 巢狀建構器 (Nested Builder) -->
 
               <!-- Draft info (populated by _openDraftEditor) -->
               <div id="el-draft-banner" class="hidden mt-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200">

@@ -4220,7 +4220,7 @@ function _renderDashboardActiveTasks(rcs) {
     return `
     <div class="bg-white border border-slate-200 border-l-4 ${borderCls} rounded-xl p-4 shadow-sm
                 hover:shadow-md transition-shadow cursor-pointer"
-         onclick="switchView('routine-checks')">
+         onclick="_openRoutineCheckDrawer(${rc.id})">
       <div class="flex items-start justify-between gap-2 mb-2">
         <div class="flex items-center gap-1.5 min-w-0">
           ${statusDot}
@@ -4580,6 +4580,8 @@ function _nbOnSkillSelect() {
     mcpSel.disabled = false;
     if (hint) hint.innerHTML = '';
   }
+
+  _nbUpdateEventPreview();
 }
 
 function _nbUnlockMcp() {
@@ -4587,6 +4589,23 @@ function _nbUnlockMcp() {
   const hint   = document.getElementById('nb-mcp-params-hint');
   if (mcpSel) { mcpSel.disabled = false; mcpSel.value = ''; }
   if (hint)   hint.innerHTML = '';
+}
+
+function _nbOnTaskIntervalChange(val) {
+  document.getElementById('nb-task-daily-row')?.classList.toggle('hidden', val !== 'daily');
+}
+
+function _nbUpdateEventPreview() {
+  const el = document.getElementById('nb-event-preview-section');
+  if (!el) return;
+  const skillId = parseInt(document.getElementById('nb-skill-select')?.value || '0') || null;
+  const name = document.getElementById('nb-task-name')?.value?.trim() || '';
+  const skill = skillId ? (_skillDefs || []).find(s => s.id === skillId) : null;
+  if (!skill) {
+    el.innerHTML = `<div class="text-xs text-slate-400 italic px-1">← 請先選擇 Skill，以預覽 ABNORMAL 時建立的 Event 格式</div>`;
+    return;
+  }
+  el.innerHTML = _buildRcEventPreview(skill, name, null);
 }
 
 // Dynamic param form when DS is selected in "建立全新" MCP mode
@@ -5240,14 +5259,21 @@ async function _nbSaveRoutineCheck() {
 
     // ── Step 3: Create RoutineCheck ───────────────────────────────
     _nbLogLine('💾', '建立巡檢排程…');
-    await _api('POST', '/routine-checks', {
+    const scheduleTime   = document.getElementById('nb-task-schedule-time')?.value?.trim() || null;
+    const expireAt       = document.getElementById('nb-task-expire-at')?.value?.trim() || null;
+    const eventNameInput = document.getElementById('rc-event-name')?.value?.trim();
+    const generatedEventName = eventNameInput || `${name} 自動警報`;
+    const rcPayload = {
       name,
       skill_id:             skillId,
       skill_input:          _nbCollectSkillInput(),
       schedule_interval:    interval,
       is_active:            true,
-      generated_event_name: `${name} 自動警報`,
-    });
+      generated_event_name: generatedEventName,
+    };
+    if (interval === 'daily' && scheduleTime) rcPayload.schedule_time = scheduleTime;
+    if (expireAt) rcPayload.expire_at = expireAt;
+    await _api('POST', '/routine-checks', rcPayload);
     _nbLogLine('✓', `排程「${name}」已建立！`, 'text-emerald-600');
 
     setTimeout(() => {
