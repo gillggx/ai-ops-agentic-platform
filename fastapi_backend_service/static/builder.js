@@ -6418,7 +6418,19 @@ function _elBuildRoutinePayload() {
   }
   let skillInput = {};
   try { skillInput = JSON.parse(document.getElementById('el-rc-skill-input')?.value || '{}'); } catch {}
-  return { name, skill_id: skillId, skill_draft: skillDraft, schedule_interval: interval, skill_input: skillInput };
+  const scheduleTime = document.getElementById('el-rc-schedule-time')?.value || '';
+  const expireAt = document.getElementById('el-rc-expire-at')?.value || '';
+  const genEventName = document.getElementById('el-rc-generated-event-name')?.value?.trim() || '';
+  return {
+    name,
+    skill_id: skillId,
+    skill_draft: skillDraft,
+    schedule_interval: interval,
+    skill_input: skillInput,
+    ...(scheduleTime && interval === 'daily' ? { schedule_time: scheduleTime } : {}),
+    ...(expireAt ? { expire_at: expireAt } : {}),
+    ...(genEventName ? { generated_event_name: genEventName } : {}),
+  };
 }
 
 function _elShowResult(msg, isError = false) {
@@ -6541,10 +6553,38 @@ async function _elPreFillFromDraft(payload, draftId, draftType) {
         if (sel) sel.value = String(sd.mcp_ids[0]);
       }
     }
+    // Pre-fill new fields
+    if (payload.schedule_time) {
+      _setVal('el-rc-schedule-time', payload.schedule_time);
+      _elOnRcIntervalChange(document.getElementById('el-rc-interval')?.value || '');
+    }
+    if (payload.expire_at) _setVal('el-rc-expire-at', payload.expire_at);
+    if (payload.generated_event_name) _setVal('el-rc-generated-event-name', payload.generated_event_name);
+    // Trigger event preview update
+    setTimeout(_elUpdateRcEventPreview, 100);
   }
 }
 
 function _setVal(id, val) {
   const el = document.getElementById(id);
   if (el) el.value = val;
+}
+
+function _elOnRcIntervalChange(val) {
+  const row = document.getElementById('el-rc-schedule-time-row');
+  if (row) row.classList.toggle('hidden', val !== 'daily');
+}
+
+function _elUpdateRcEventPreview() {
+  const previewEl = document.getElementById('el-rc-event-preview');
+  if (!previewEl) return;
+  const skillId = parseInt(document.getElementById('el-rc-skill-select')?.value || '0') || null;
+  const scheduleName = document.getElementById('el-rc-name')?.value?.trim() || '';
+  const skill = skillId ? (_skillDefs || []).find(s => s.id === skillId) : null;
+  if (!skill) {
+    previewEl.innerHTML = '<div class="border border-slate-200 rounded-lg p-3 bg-slate-50/40 text-xs text-slate-400">← 請先選擇 Skill，系統將自動預覽異常時觸發的 Event 格式</div>';
+    return;
+  }
+  previewEl.innerHTML = _buildRcEventPreview(skill, scheduleName, null)
+    .replace('id="rc-event-name"', 'id="el-rc-generated-event-name"');
 }

@@ -1855,7 +1855,7 @@
                       class="text-xs px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-600 font-semibold hover:bg-slate-50">建立新 Skill</button>
                   </div>
                   <div id="el-rc-skill-existing-row">
-                    <select id="el-rc-skill-select" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:border-indigo-400 outline-none">
+                    <select id="el-rc-skill-select" onchange="_elUpdateRcEventPreview()" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:border-indigo-400 outline-none">
                       <option value="">-- 載入中... --</option>
                     </select>
                   </div>
@@ -1871,19 +1871,39 @@
                 </div>
                 <div>
                   <label class="text-xs font-bold text-slate-700 block mb-1.5">執行間隔</label>
-                  <select id="el-rc-interval" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:border-indigo-400 outline-none">
+                  <select id="el-rc-interval" onchange="_elOnRcIntervalChange(this.value)" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:border-indigo-400 outline-none">
                     <option value="30m">每 30 分鐘</option>
                     <option value="1h" selected>每 1 小時</option>
                     <option value="4h">每 4 小時</option>
                     <option value="8h">每 8 小時</option>
                     <option value="12h">每 12 小時</option>
-                    <option value="daily">每天</option>
+                    <option value="daily">每天 (指定時間)</option>
                   </select>
                 </div>
                 <div>
                   <label class="text-xs font-bold text-slate-700 block mb-1.5">固定執行參數 (JSON)</label>
                   <textarea id="el-rc-skill-input" rows="3" placeholder='{"lot_id": "L2603001", "tool_id": "TETCH01"}'
                     class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono focus:border-indigo-400 outline-none resize-none"></textarea>
+                </div>
+                <div id="el-rc-schedule-time-row" class="hidden">
+                  <label class="text-xs font-bold text-slate-700 block mb-1.5">每日執行時間</label>
+                  <input id="el-rc-schedule-time" type="time" value="08:00"
+                    class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:border-indigo-400 outline-none"/>
+                  <p class="text-xs text-slate-400 mt-0.5">格式 HH:MM，伺服器依此時間觸發 (UTC+8)</p>
+                </div>
+                <div>
+                  <label class="text-xs font-bold text-slate-700 block mb-1.5">效期（到期後自動停用）</label>
+                  <input id="el-rc-expire-at" type="date"
+                    class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:border-indigo-400 outline-none"/>
+                  <p class="text-xs text-slate-400 mt-0.5">留空代表永久有效</p>
+                </div>
+                <!-- Event Preview Section -->
+                <div>
+                  <div id="el-rc-event-preview">
+                    <div class="border border-slate-200 rounded-lg p-3 bg-slate-50/40 text-xs text-slate-400">
+                      ← 請先選擇 Skill，系統將自動預覽異常時觸發的 Event 格式
+                    </div>
+                  </div>
                 </div>
               </div>
 

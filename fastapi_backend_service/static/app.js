@@ -1659,11 +1659,10 @@ async function _openDraftEditor(draftId, draftType) {
         document.getElementById('mcp-back-btn') && (document.getElementById('mcp-back-btn').textContent = '← 返回對話');
       }, 200);
     } else if (draftType === 'routine_check') {
-      // Reuse existing RoutineCheck drawer, pre-fill from draft
-      if (typeof switchView === 'function') switchView('routine-checks');
-      setTimeout(() => {
-        if (typeof _openRoutineCheckDrawerFromDraft === 'function') _openRoutineCheckDrawerFromDraft(payload);
-      }, 300);
+      if (typeof switchView === 'function') switchView('event-link-builder');
+      setTimeout(async () => {
+        if (typeof _elPreFillFromDraft === 'function') await _elPreFillFromDraft(payload, draftId, draftType);
+      }, 400);
     } else if (draftType === 'event_skill_link') {
       if (typeof switchView === 'function') switchView('event-link-builder');
       setTimeout(async () => {
