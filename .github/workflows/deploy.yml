@@ -51,12 +51,17 @@ jobs:
               cp "$DB_BAK" "$BE_DIR/dev.db" || { echo "ERROR: DB restore failed"; exit 1; }
               echo "DB restored OK"
             fi
-            # Restore .env then patch SERVER_BASE_URL to correct internal port
+            # Restore .env then ensure SERVER_BASE_URL is correct
             if [ -f "$ENV_BAK" ]; then
               cp "$ENV_BAK" "$BE_DIR/.env"
-              sed -i 's|SERVER_BASE_URL=.*|SERVER_BASE_URL="http://127.0.0.1:8000"|' "$BE_DIR/.env"
-              echo "SERVER_BASE_URL patched to http://127.0.0.1:8000"
             fi
+            # Upsert SERVER_BASE_URL (replace if exists, append if missing)
+            if grep -q "SERVER_BASE_URL" "$BE_DIR/.env" 2>/dev/null; then
+              sed -i 's|SERVER_BASE_URL=.*|SERVER_BASE_URL="http://127.0.0.1:8000"|' "$BE_DIR/.env"
+            else
+              echo 'SERVER_BASE_URL="http://127.0.0.1:8000"' >> "$BE_DIR/.env"
+            fi
+            echo "SERVER_BASE_URL set to http://127.0.0.1:8000"
 
             # ── 2. 前端打包 ────────────────────────────────────────────────
             echo "--- [2/4] 打包前端 ---"
