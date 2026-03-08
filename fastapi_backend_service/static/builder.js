@@ -1131,7 +1131,7 @@ async function _loadMcpDefs() {
       const ds = _dataSubjects.find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id));
       const hasGenerated = !!(mcp.processing_script);
       return `
-        <div class="builder-card" onclick="_mcpOpenEditor(${mcp.id})">
+        <div class="builder-card group" onclick="_mcpOpenEditor(${mcp.id})">
           <div class="flex-1">
             <div class="builder-card-name">${_esc(mcp.name)}</div>
             <div class="builder-card-desc">${_esc(mcp.description || '（無說明）')}</div>
@@ -1140,6 +1140,10 @@ async function _loadMcpDefs() {
               ${hasGenerated ? '<span class="builder-tag builder-tag-green">✓ LLM 已生成</span>' : '<span class="builder-tag builder-tag-amber">待 LLM 生成</span>'}
             </div>
           </div>
+          <button onclick="event.stopPropagation();_deleteMCP(${mcp.id})"
+            class="opacity-0 group-hover:opacity-100 transition-opacity ml-2 px-2 py-1 text-xs text-red-500 hover:bg-red-50 rounded-lg">
+            🗑
+          </button>
           <div class="text-slate-600 text-sm">›</div>
         </div>
       `;
