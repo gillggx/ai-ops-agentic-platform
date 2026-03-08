@@ -1321,6 +1321,14 @@ body {
   max-width: 100% !important;
 }
 
+/* ── Workspace inner tab bar ─────────────────────────────────── */
+.ws-inner-tab { display: inline-flex; align-items: center; }
+.ws-inner-tab.active-ws-tab {
+  background: #fff; border-color: #e2e8f0;
+  color: #4f46e5; font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+
 /* ── AI Analysis Panel — match left panel typography ─────────── */
 .ai-analysis-body { font-size: 13px; color: #334155; line-height: 1.6; }
 .ai-analysis-body h1,

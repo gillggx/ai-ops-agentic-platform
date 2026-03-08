@@ -1321,46 +1321,77 @@ async function sendDiagnosis() {
  * Returns { btn, panel }.
  */
 /**
- * Split-screen: inject content into the left Data & Chart pane.
- * Replaces the previous tab-based system — each new result replaces the pane content.
- * Returns { btn: null, panel } for backward compat with callers that destructure the result.
+ * Split-screen workspace tab manager.
+ * Tabs live inside #ws-data-pane (left 70%).  Each result gets a slim tab button in
+ * #ws-data-tab-bar and a panel stored in _workspaceTabs.  Only one panel is shown at
+ * a time inside #ws-data-content.  The tab bar is hidden when there is ≤1 result.
  */
 function _createWorkspaceTab(tabId, title, contentHtml) {
-  const pane = document.getElementById('ws-data-content');
-  if (!pane) return { btn: null, panel: null };
-
   document.getElementById('workspace-placeholder')?.classList.add('hidden');
 
-  // Replace pane content with a titled card
-  pane.innerHTML = `
-    <div id="ws-panel-${tabId}" class="flex flex-col h-full">
-      <div class="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-slate-100 bg-white">
-        <span class="text-xs font-semibold text-slate-700 truncate">${title}</span>
-      </div>
-      <div class="flex-1 overflow-y-auto min-h-0">
-        ${contentHtml}
-      </div>
-    </div>`;
+  const tabBar = document.getElementById('ws-data-tab-bar');
+  const content = document.getElementById('ws-data-content');
+  if (!content) return { btn: null, panel: null };
 
-  const panel = pane.querySelector(`#ws-panel-${tabId}`);
-  _workspaceTabs[tabId] = { btn: null, panel };
-  _activeTabId = tabId;
+  // ── Tab button ────────────────────────────────────────────────
+  const btn = document.createElement('button');
+  btn.id        = `ws-tab-btn-${tabId}`;
+  btn.className = 'ws-inner-tab whitespace-nowrap text-xs px-3 py-1 rounded-md border border-transparent text-slate-500 hover:text-slate-700 transition-colors';
+  btn.innerHTML =
+    `<span>${title}</span>` +
+    `<span class="ml-1.5 text-slate-400 hover:text-red-400 cursor-pointer"
+          onclick="_closeWorkspaceTab('${tabId.replace(/'/g,"\\'")}');event.stopPropagation()">×</span>`;
+  btn.onclick = () => _activateWorkspaceTab(tabId);
+  tabBar?.appendChild(btn);
 
+  // ── Panel (hidden by default, appended to content area) ───────
+  const panel = document.createElement('div');
+  panel.id        = `ws-panel-${tabId}`;
+  panel.className = 'hidden h-full';
+  panel.innerHTML = contentHtml;
+  content.appendChild(panel);
+
+  _workspaceTabs[tabId] = { btn, panel };
+  _activateWorkspaceTab(tabId);
+
+  // Show tab bar only when there are multiple results
+  if (tabBar) tabBar.classList.toggle('hidden', Object.keys(_workspaceTabs).length < 2);
   if (_isMobile()) _switchMobileView('workspace');
 
-  return { btn: null, panel };
+  return { btn, panel };
 }
 
-/** No-op stubs kept for backward compat. */
+/** Activate a workspace tab. */
 function _activateWorkspaceTab(tabId) {
+  Object.values(_workspaceTabs).forEach(({ btn, panel }) => {
+    btn?.classList.remove('active-ws-tab');
+    panel?.classList.add('hidden');
+  });
+  const entry = _workspaceTabs[tabId];
+  if (!entry) return;
+  entry.btn?.classList.add('active-ws-tab');
+  entry.panel?.classList.remove('hidden');
   _activeTabId = tabId;
 }
 
+/** Close a workspace tab. */
 function _closeWorkspaceTab(tabId) {
+  const entry = _workspaceTabs[tabId];
+  if (!entry) return;
+  const wasActive = _activeTabId === tabId;
+  entry.btn?.remove();
+  entry.panel?.remove();
   delete _workspaceTabs[tabId];
-  if (Object.keys(_workspaceTabs).length === 0) {
+
+  const remaining = Object.keys(_workspaceTabs);
+  const tabBar = document.getElementById('ws-data-tab-bar');
+  if (remaining.length === 0) {
     _activeTabId = null;
     document.getElementById('workspace-placeholder')?.classList.remove('hidden');
+    tabBar?.classList.add('hidden');
+  } else {
+    if (tabBar) tabBar.classList.toggle('hidden', remaining.length < 2);
+    if (wasActive) _activateWorkspaceTab(remaining[remaining.length - 1]);
   }
 }
 
@@ -1377,6 +1408,10 @@ function _resetSession() {
   _workspaceTabs = {};
   _activeTabId   = null;
   _toolTabs      = {};
+
+  // Clear tab bar
+  const tabBar = document.getElementById('ws-data-tab-bar');
+  if (tabBar) { tabBar.innerHTML = ''; tabBar.classList.add('hidden'); }
 
   // Reset data pane to placeholder
   const dataPaneContent = document.getElementById('ws-data-content');

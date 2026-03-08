@@ -595,9 +595,11 @@ class MCPDefinitionService:
             if not endpoint_url:
                 raise AppException(status_code=422, error_code="DS_NO_ENDPOINT", detail="System MCP 缺少 endpoint_url")
 
-            # Build absolute URL
-            if endpoint_url.startswith("/") and base_url:
-                url = base_url.rstrip("/") + endpoint_url
+            # Build absolute URL.
+            # For relative paths, always use 127.0.0.1 to avoid routing through
+            # nginx in production (external base_url may have SSL/proxy issues).
+            if endpoint_url.startswith("/"):
+                url = "http://127.0.0.1:8000" + endpoint_url
             else:
                 url = endpoint_url
 
@@ -654,8 +656,8 @@ class MCPDefinitionService:
                 method = api_cfg.get("method", "GET").upper()
                 headers = api_cfg.get("headers", {})
                 if endpoint_url:
-                    if endpoint_url.startswith("/") and base_url:
-                        url = base_url.rstrip("/") + endpoint_url
+                    if endpoint_url.startswith("/"):
+                        url = "http://127.0.0.1:8000" + endpoint_url
                     else:
                         url = endpoint_url
                     params_dict: Dict[str, Any] = raw_data if isinstance(raw_data, dict) else {}

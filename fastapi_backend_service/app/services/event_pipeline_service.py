@@ -459,8 +459,8 @@ class EventPipelineService:
     @staticmethod
     async def _fetch_ds_data(endpoint_url: str, params: Dict[str, str], base_url: str = "") -> Any:
         """Fetch raw data from DataSubject endpoint using httpx (no auth needed for /mock/*)."""
-        if endpoint_url.startswith("/") and base_url:
-            endpoint_url = base_url + endpoint_url
+        if endpoint_url.startswith("/"):
+            endpoint_url = "http://127.0.0.1:8000" + endpoint_url
         async with httpx.AsyncClient(timeout=get_settings().HTTPX_TIMEOUT_SECONDS) as client:
             response = await client.get(endpoint_url, params=params)
             response.raise_for_status()
