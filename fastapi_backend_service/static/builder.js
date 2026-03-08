@@ -1121,7 +1121,8 @@ async function _loadMcpDefs() {
   const container = document.getElementById('mcp-list');
   try {
     _mcpDefs = await _api('GET', '/mcp-definitions?type=custom') || [];
-    if (_dataSubjects.length === 0) _dataSubjects = await _api('GET', '/mcp-definitions?type=system') || [];
+    // Always reload system MCPs so newly promoted mock sources appear in the dropdown
+    _dataSubjects = await _api('GET', '/mcp-definitions?type=system') || [];
     if (_mcpDefs.length === 0) {
       container.innerHTML = '<p class="text-center text-slate-600 py-12">尚無 MCP，點擊右上角新增</p>';
       return;

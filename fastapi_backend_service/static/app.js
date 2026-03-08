@@ -1637,7 +1637,7 @@ function _escapeHtml(str) {
 // ══════════════════════════════════════════════════════════════
 // v12 — Agent Draft: open editor with pre-filled draft data
 
-async function _openDraftEditor(draftId, draftType) {
+async function _openDraftEditor(draftId, draftType, tabId) {
   if (!draftId) return;
   try {
     const resp = await fetch(`/api/v1/agent/draft/${draftId}`, {
@@ -1647,6 +1647,9 @@ async function _openDraftEditor(draftId, draftType) {
     const json = await resp.json();
     const payload = Object.assign({}, json.data?.payload || json.payload || {});
     payload._draft_id = draftId;
+
+    // Close the draft workspace tab now that we're opening the editor
+    if (tabId && typeof _closeWorkspaceTab === 'function') _closeWorkspaceTab(tabId);
 
     // Remember current view so "← 返回" can go back to chat
     window._draftReturnView = 'diagnose';
@@ -1659,10 +1662,20 @@ async function _openDraftEditor(draftId, draftType) {
       }, 200);
     } else if (draftType === 'mcp') {
       if (typeof switchView === 'function') switchView('mcp-builder');
-      setTimeout(() => {
-        if (typeof _mcpOpenEditor === 'function') _mcpOpenEditor(null, payload);
-        document.getElementById('mcp-back-btn') && (document.getElementById('mcp-back-btn').textContent = '← 返回對話');
-      }, 200);
+      // Wait for _loadMcpDefs() to complete (it loads _dataSubjects needed for dropdown)
+      // Poll until _dataSubjects is populated or timeout after 3s
+      const waitForDs = () => new Promise(resolve => {
+        let attempts = 0;
+        const check = () => {
+          if ((typeof _dataSubjects !== 'undefined' && _dataSubjects.length > 0) || attempts >= 15) { resolve(); return; }
+          attempts++;
+          setTimeout(check, 200);
+        };
+        check();
+      });
+      await waitForDs();
+      if (typeof _mcpOpenEditor === 'function') _mcpOpenEditor(null, payload);
+      document.getElementById('mcp-back-btn') && (document.getElementById('mcp-back-btn').textContent = '← 返回對話');
     } else if (draftType === 'routine_check') {
       if (typeof switchView === 'function') switchView('nested-builder');
       setTimeout(async () => {
@@ -2130,7 +2143,7 @@ function _renderDraftActionCard(card) {
         ℹ️ Agent 草稿不會直接修改正式資料。點擊下方按鈕開啟編輯器，確認內容後再正式發佈。
       </div>
 
-      <button onclick="_openDraftEditor('${_escapeHtml(card.draft_id)}', '${_escapeHtml(card.draft_type)}')"
+      <button onclick="_openDraftEditor('${_escapeHtml(card.draft_id)}', '${_escapeHtml(card.draft_type)}', '${tabId}')"
               class="w-full py-3 rounded-lg bg-purple-600 hover:bg-purple-500 active:bg-purple-700
                      text-white text-sm font-semibold transition-colors shadow-sm">
         ✏️ 開啟編輯器 — 審核並發佈
