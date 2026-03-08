@@ -97,6 +97,10 @@ class Config(BaseSettings):
         default=15.0,
         description="Timeout in seconds for outbound HTTP calls to DataSubject APIs",
     )
+    SERVER_BASE_URL: str = Field(
+        default="http://127.0.0.1:8765",
+        description="Base URL of this server for self-referential System MCP calls (e.g. mock data sources). Set to match the actual uvicorn port.",
+    )
 
     # ── Scheduler ─────────────────────────────────────────────────────────────
     SCHEDULER_MISFIRE_GRACE_TIME_SECONDS: int = Field(
