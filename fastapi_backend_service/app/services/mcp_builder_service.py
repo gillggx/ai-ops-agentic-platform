@@ -245,8 +245,12 @@ def _extract_json(raw: str) -> Dict[str, Any]:
     try:
         obj, _ = json.JSONDecoder().raw_decode(text)
         return obj
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
         # LLM returned plain text instead of JSON — treat as general_chat reply
+        logger.error(
+            "_extract_json FAILED: %s | first_300_chars=%r | last_300_chars=%r",
+            exc, raw[:300], raw[-300:]
+        )
         return {"intent": "general_chat", "reply_message": raw.strip(), "is_ready": False}
 
 
@@ -363,11 +367,22 @@ DataSubject 名稱：{data_subject_name}
             try:
                 response = await self._client.messages.create(
                     model=_MODEL,
-                    max_tokens=4096,
+                    max_tokens=8192,
                     system=sys_prompt,
                     messages=[{"role": "user", "content": prompt}],
                 )
-                return _extract_json(_get_text(response.content))
+                raw_text = _get_text(response.content)
+                logger.info(
+                    "generate_for_try_run raw LLM response (attempt %d): stop_reason=%s len=%d first_200=%r",
+                    attempt + 1, response.stop_reason, len(raw_text), raw_text[:200],
+                )
+                result = _extract_json(raw_text)
+                if "processing_script" not in result:
+                    logger.warning(
+                        "generate_for_try_run: processing_script missing from parsed JSON keys=%s",
+                        list(result.keys()),
+                    )
+                return result
             except (json.JSONDecodeError, ValueError) as exc:
                 last_err = exc
                 logger.warning("generate_for_try_run JSON parse failed (attempt %d): %s", attempt + 1, exc)
