@@ -85,13 +85,14 @@ _DEFAULT_TRY_RUN_SYSTEM_PROMPT = """\
    - 任何「計算後輸出分類、標記、統計摘要」的邏輯，一律視為合法統計運算
 
 【沙盒可用 Python 環境 — 僅限以下清單，未列出的一律不可用】
-⚠️【絕對禁止在腳本中 import pandas / import plotly / import matplotlib】
+⚠️【絕對禁止在腳本中 import pandas / import plotly / import matplotlib / import numpy】
 以下變數已預先注入全域命名空間，直接呼叫即可，禁止重複 import：
   pd       → pandas（DataFrame 操作，直接用 pd.DataFrame(...)）
   go       → plotly.graph_objects（用 go.Figure(...)、go.Scatter(...) 等）
   px       → plotly.express（用 px.line(...)、px.bar(...) 等）
   plt      → matplotlib.pyplot（備用，直接用 plt.figure()、plt.plot() 等）
   matplotlib → matplotlib 模組
+  np       → numpy（直接用 np.mean(...)、np.std(...)、np.array(...)、np.percentile(...) 等）
 
 可 import 的標準函式庫（唯獨以下這些，其餘禁止）：
   math, statistics, json, datetime, collections, itertools, functools, io, base64
@@ -113,9 +114,9 @@ _DEFAULT_TRY_RUN_SYSTEM_PROMPT = """\
 【重要注意事項】
 - datetime 模組以物件形式注入，使用方式：datetime.datetime.now()、datetime.timedelta()、datetime.timezone.utc
 - 可使用 from datetime import datetime, timedelta, timezone 語法
-- ✅ 可使用 numpy（import numpy as np）— 適合計算 skewness、kurtosis、histogram 等進階統計
-  範例：np.mean(values)、float(scipy 替代：np.std(values))、自訂 skewness：float(((vals - np.mean(vals))**3).mean() / np.std(vals)**3)
-- 不可使用 scipy、sklearn 等未列出的套件（numpy 已足夠做統計分析）
+- ✅ np（numpy）已預注入，直接使用即可：np.mean(vals)、np.std(vals)、np.percentile(vals, 75)
+  進階統計範例：skewness = float(((a - a.mean())**3).mean() / a.std()**3)，其中 a = np.array(vals)
+- 不可使用 scipy、sklearn 等未列出的套件（np 已足夠做統計分析）
 - try/except 必須使用上述已列出的 Exception 類別，例如 except Exception: 或 except ValueError:
 
 【標準輸出規範 — process() 函式的回傳 dict 必須包含以下三個 Key】

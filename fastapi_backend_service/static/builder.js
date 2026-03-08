@@ -59,7 +59,13 @@ async function _api(method, path, body, signal) {
   if (body !== undefined) opts.body = JSON.stringify(body);
   if (signal) opts.signal = signal;
   const res = await fetch(`/api/v1${path}`, opts);
-  const json = await res.json();
+  let json;
+  try {
+    json = await res.json();
+  } catch (e) {
+    // Server returned non-JSON (e.g. HTML error page from nginx/proxy)
+    throw new Error(`伺服器回傳非 JSON 回應 (HTTP ${res.status})，後端服務可能重啟中，請稍後再試。`);
+  }
   if (!res.ok) throw new Error(json.message || `HTTP ${res.status}`);
   // StandardResponse wraps payload in .data; some legacy endpoints return directly
   return json.data !== undefined ? json.data : json;

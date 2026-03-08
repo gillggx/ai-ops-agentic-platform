@@ -48,6 +48,11 @@ try:
 except ImportError:
     _plt = None
 
+try:
+    import numpy as _np
+except ImportError:
+    _np = None
+
 # Modules the generated script is allowed to import (base module names).
 # Includes CPython internal C-extension modules (_strptime, _decimal, …) that
 # are lazily auto-imported the first time a stdlib function is called — e.g.
@@ -85,8 +90,8 @@ _ALLOWED_BASE_MODULES = frozenset({
 # These are already in global_ns — re-importing them can cause conflicts on some
 # Python versions (especially Python 3.14 + plotly's lazy-loading __init__).
 _PREINJECTED_IMPORT_RE = re.compile(
-    r"^[ \t]*(import\s+(plotly|pandas|matplotlib)\b[^\n]*"
-    r"|from\s+(plotly|pandas|matplotlib)\b[^\n]*)[ \t]*$",
+    r"^[ \t]*(import\s+(plotly|pandas|matplotlib|numpy)\b[^\n]*"
+    r"|from\s+(plotly|pandas|matplotlib|numpy)\b[^\n]*)[ \t]*$",
     re.MULTILINE,
 )
 
@@ -273,6 +278,9 @@ def _run_sync(script: str, raw_data: Any) -> Dict[str, Any]:
     if _plt is not None:
         global_ns["plt"] = _plt
         global_ns["matplotlib"] = matplotlib
+    if _np is not None:
+        global_ns["np"] = _np
+        global_ns["numpy"] = _np
 
     local_ns: Dict[str, Any] = {}
 
