@@ -647,6 +647,27 @@ class MCPDefinitionService:
 
         # Step 1: Fetch raw data from bound System MCP (raw_data = agent params, not dataset)
         sys_mcp_id = getattr(obj, 'system_mcp_id', None)
+        # Fallback: legacy custom MCPs have data_subject_id but system_mcp_id=null.
+        # Resolve by fetching the old DataSubject, then name-matching to a system MCP.
+        if not sys_mcp_id:
+            ds_id = getattr(obj, 'data_subject_id', None)
+            if ds_id:
+                try:
+                    old_ds = await self._ds_repo.get_by_id(ds_id)
+                    if old_ds and old_ds.name:
+                        from sqlalchemy import select as _select
+                        from app.models.mcp_definition import MCPDefinitionModel as _MCPModel
+                        _r = await self._repo._db.execute(
+                            _select(_MCPModel).where(
+                                _MCPModel.mcp_type == 'system',
+                                _MCPModel.name == old_ds.name,
+                            )
+                        )
+                        _matched = _r.scalar_one_or_none()
+                        if _matched:
+                            sys_mcp_id = _matched.id
+                except Exception:
+                    pass
         api_raw_data: Any = raw_data  # fallback: use params as-is
         if sys_mcp_id:
             sys_mcp = await self._repo.get_by_id(sys_mcp_id)
