@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import anthropic
 
@@ -28,29 +28,53 @@ def _generate_safe_import(name: str, *args: Any, **kwargs: Any) -> Any:
     import importlib
     return importlib.import_module(name)
 
+
 logger = logging.getLogger(__name__)
 _MODEL = get_settings().LLM_MODEL
 
+# ── Prompts ───────────────────────────────────────────────────────────────────
+
+# Uses section markers so Python code is NEVER embedded inside JSON strings.
 _GENERATE_SYSTEM_PROMPT = """\
 你是一個 Mock Data Studio 專家，專門為半導體製程 Demo 環境撰寫 Python 模擬資料產生器。
 
-你的任務：根據使用者描述，撰寫一個 Python 函式 `generate(params: dict) -> list`，
-該函式接收查詢參數，回傳符合真實製程格式的模擬 list of dicts（類似 REST API 的 JSON 陣列回應）。
+你的任務：根據使用者描述，撰寫一個 Python 函式 `generate(params: dict) -> list`。
 
 規則：
 1. 函式名稱固定為 `generate`，參數為 `params: dict`，回傳 `list`（不可回傳 dict）
 2. 使用 hash-seed 技術讓相同 params 每次回傳相同資料（確定性模擬）
-3. 資料要有半導體工廠的真實感：lot_id 格式 L26xxxxx、tool_id 格式 TECHxx、時間用 ISO 8601
-4. 禁止 import requests, urllib, socket, subprocess, os, sys；只能用 math, json, datetime, random, collections
-5. 包含 3~5 個異常資料點（模擬真實工廠偶發異常）
-6. 回傳純 JSON 格式（不要 markdown fence），結構：
-{
-  "input_schema": {"fields": [{"name": str, "type": str, "description": str, "required": bool}]},
-  "python_code": "def generate(params: dict) -> list:\\n    ...",
-  "sample_params": {"key": "value", ...}
-}
+3. 資料要有半導體工廠真實感：lot_id 格式 L26xxxxx、tool 格式 TETCH01、時間 ISO 8601
+4. 禁止 import requests, urllib, socket, subprocess, os, sys
+5. 允許的 import：math, json, datetime, random, collections, statistics, re
+6. 包含 3~5 個異常資料點（超出 UCL/LCL 或其他異常標記）
+7. 資料量需符合描述（若描述說 1000 筆，生成 1000 筆）
+
+回應格式（嚴格按此結構，使用 section marker 分隔各部分）：
+
+===INPUT_SCHEMA===
+{"fields": [{"name": "...", "type": "string|number|boolean", "description": "...", "required": true}]}
+===PYTHON_CODE===
+def generate(params: dict) -> list:
+    # your implementation
+    ...
+===SAMPLE_PARAMS===
+{"param_name": "example_value"}
+===END===
 """
 
+_QUICK_SAMPLE_SYSTEM_PROMPT = """\
+你是半導體製程資料模擬專家。根據使用者的描述，直接生成符合格式的 JSON 假資料。
+
+規則：
+1. 直接回傳 JSON 陣列（list of dicts），不需要程式碼
+2. 生成 {count} 筆資料
+3. 資料要有半導體工廠真實感：lot_id 格式 L26xxxxx、tool TETCH01、時間 ISO 8601
+4. 若描述中有 UCL/LCL，讓 3~5 筆超出管制界限
+5. 只回傳 JSON array，不要 markdown fence，不要說明文字
+"""
+
+
+# ── Sandbox ───────────────────────────────────────────────────────────────────
 
 def _run_generate_sync(code: str, params: Dict[str, Any]) -> Any:
     """Execute the generate(params) function in sandbox and return its result."""
@@ -123,10 +147,7 @@ async def execute_generate_fn(
     params: Dict[str, Any],
     timeout: float = 10.0,
 ) -> Any:
-    """Execute mock data source generate(params) in sandbox.
-
-    Returns: list or dict — the raw response from the generate() function.
-    """
+    """Execute mock data source generate(params) in sandbox."""
     _static_check(code)
     loop = asyncio.get_event_loop()
     try:
@@ -139,8 +160,28 @@ async def execute_generate_fn(
     return result
 
 
+# ── Section parser ────────────────────────────────────────────────────────────
+
+def _parse_sections(text: str) -> Dict[str, str]:
+    """Parse LLM response with ===SECTION=== markers.
+
+    Returns dict with keys: INPUT_SCHEMA, PYTHON_CODE, SAMPLE_PARAMS.
+    Falls back gracefully if sections are missing.
+    """
+    sections: Dict[str, str] = {}
+    pattern = re.compile(r"===([A-Z_]+)===\s*([\s\S]*?)(?====|$)")
+    for m in pattern.finditer(text):
+        key = m.group(1).strip()
+        val = m.group(2).strip()
+        if key != "END":
+            sections[key] = val
+    return sections
+
+
+# ── Service ───────────────────────────────────────────────────────────────────
+
 class MockDataStudioService:
-    """LLM-powered code generator for Mock Data Studio."""
+    """LLM-powered code generator and sample data generator for Mock Data Studio."""
 
     def __init__(self) -> None:
         self._client = anthropic.Anthropic(api_key=get_settings().ANTHROPIC_API_KEY)
@@ -153,7 +194,8 @@ class MockDataStudioService:
     ) -> Dict[str, Any]:
         """Ask Claude to generate a mock data source Python function.
 
-        Returns dict with keys: input_schema, python_code, sample_params.
+        Uses section markers to avoid JSON-escaping issues with Python code.
+        Returns dict: {input_schema, python_code, sample_params}.
         """
         user_msg = f"請為以下描述建立 Mock Data Source：\n\n{description}"
         if input_schema:
@@ -166,30 +208,91 @@ class MockDataStudioService:
             None,
             lambda: self._client.messages.create(
                 model=_MODEL,
-                max_tokens=2048,
+                max_tokens=3000,
                 system=_GENERATE_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": user_msg}],
             ),
         )
 
         text = response.content[0].text.strip()
+        logger.debug("generate_code LLM raw response length=%d", len(text))
 
-        # Strip markdown fences if present
-        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE)
-        text = re.sub(r"\s*```$", "", text, flags=re.MULTILINE)
+        sections = _parse_sections(text)
 
-        try:
-            result = json.loads(text)
-        except json.JSONDecodeError:
-            # Try to extract JSON object
-            m = re.search(r"\{[\s\S]+\}", text)
+        # Parse input_schema JSON safely
+        schema_val: Optional[Dict[str, Any]] = None
+        if "INPUT_SCHEMA" in sections:
+            try:
+                schema_val = json.loads(sections["INPUT_SCHEMA"])
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse INPUT_SCHEMA JSON, keeping raw string")
+
+        # Parse sample_params JSON safely
+        sp_val: Dict[str, Any] = {}
+        if "SAMPLE_PARAMS" in sections:
+            try:
+                sp_val = json.loads(sections["SAMPLE_PARAMS"])
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse SAMPLE_PARAMS JSON")
+
+        python_code = sections.get("PYTHON_CODE", "")
+
+        # Fallback: try to extract python code from ```python block
+        if not python_code:
+            m = re.search(r"```python\s*([\s\S]+?)```", text)
             if m:
-                result = json.loads(m.group(0))
-            else:
-                raise ValueError(f"LLM returned non-JSON response: {text[:200]}")
+                python_code = m.group(1).strip()
 
         return {
-            "input_schema": result.get("input_schema"),
-            "python_code": result.get("python_code", ""),
-            "sample_params": result.get("sample_params", {}),
+            "input_schema": schema_val,
+            "python_code": python_code,
+            "sample_params": sp_val,
         }
+
+    async def quick_sample(
+        self,
+        description: str,
+        count: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Ask Claude to generate N sample data rows directly as JSON (no Python code).
+
+        Returns a list of dicts ready for display.
+        """
+        system = _QUICK_SAMPLE_SYSTEM_PROMPT.replace("{count}", str(count))
+        user_msg = f"描述：{description}\n\n請生成 {count} 筆資料。"
+
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self._client.messages.create(
+                model=_MODEL,
+                max_tokens=4096,
+                system=system,
+                messages=[{"role": "user", "content": user_msg}],
+            ),
+        )
+
+        text = response.content[0].text.strip()
+
+        # Strip markdown fences
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE)
+        text = re.sub(r"\s*```\s*$", "", text, flags=re.MULTILINE)
+        text = text.strip()
+
+        try:
+            data = json.loads(text)
+            if isinstance(data, list):
+                return data
+            if isinstance(data, dict):
+                return [data]
+        except json.JSONDecodeError:
+            # Try to find JSON array in response
+            m = re.search(r"\[[\s\S]+\]", text)
+            if m:
+                try:
+                    return json.loads(m.group(0))
+                except json.JSONDecodeError:
+                    pass
+
+        logger.error("quick_sample: could not parse LLM response as JSON, raw=%s", text[:300])
+        raise ValueError("LLM 未回傳有效 JSON 陣列，請重試")

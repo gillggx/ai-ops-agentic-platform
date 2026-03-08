@@ -6813,6 +6813,8 @@ function _mdsRenderDrawer() {
     catch { inputSchemaVal = item.input_schema; }
   }
 
+  const hasCode = !!(item?.python_code);
+
   const body = `
     <div class="space-y-4">
       <div class="grid grid-cols-2 gap-4">
@@ -6832,56 +6834,70 @@ function _mdsRenderDrawer() {
         </div>
       </div>
 
-      <div class="border border-emerald-200 rounded-xl p-4 bg-emerald-50/30">
-        <div class="flex items-center gap-2 mb-2">
-          <span class="text-xs font-bold text-emerald-700 uppercase tracking-widest">✨ AI 代碼生成</span>
+      <!-- AI 生成區塊 -->
+      <div class="border border-emerald-200 rounded-xl p-4 bg-emerald-50/30 space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-emerald-700 uppercase tracking-widest">✨ Step 1 — AI 代碼生成</span>
+          ${hasCode ? '<span class="text-[10px] text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full">✓ 已有程式碼</span>' : '<span class="text-[10px] text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">⚠ 尚無程式碼，請先生成</span>'}
         </div>
         <label class="label-sm">描述這個 Mock 資料要模擬什麼 *</label>
-        <textarea id="mds-gen-desc" rows="2" class="input-field font-normal text-sm resize-none"
-          placeholder="e.g. 模擬一個半導體 Etch 製程的 SPC 管制圖資料，包含 lot_id, tool_id, cd_value, UCL, LCL 欄位，TETCH01 前 3 批要 OOC"
+        <textarea id="mds-gen-desc" rows="3" class="input-field font-normal text-sm resize-none"
+          placeholder="e.g. 模擬 SPC 管制圖資料，8個機台 × 10個 recipe，1000 個 wafer，UCL=80、LCL=60，2台機台有趨勢異常"
           >${item?.description || ''}</textarea>
-        <div class="flex gap-2 mt-2">
+        <div class="flex gap-2">
           <input id="mds-gen-params" type="text" class="input-field flex-1 text-xs"
-            placeholder='範例參數 JSON，e.g. {"lot_id": "L001", "tool_id": "TETCH01"}'/>
+            placeholder='範例參數（可選）：{"operation_number": "9800", "DCName": "Depth"}'/>
+          <button id="mds-quick-btn" onclick="_mdsQuickSample()"
+            class="text-xs px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-semibold transition-colors whitespace-nowrap">
+            📊 預覽假資料
+          </button>
           <button id="mds-gen-btn" onclick="_mdsGenerateCode()"
-            class="text-xs px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold transition-colors whitespace-nowrap">
-            🤖 AI 生成
+            class="text-xs px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold transition-colors whitespace-nowrap">
+            🤖 生成程式碼
           </button>
         </div>
+        <p class="text-[10px] text-slate-500">💡 先「📊 預覽假資料」看效果 → 滿意後「🤖 生成程式碼」→ 存檔 → 試執行</p>
       </div>
 
+      <!-- Input Schema -->
       <div>
         <label class="label-sm">Input Schema (JSON)</label>
-        <textarea id="mds-input-schema" rows="4" class="input-field font-mono text-xs resize-none"
+        <textarea id="mds-input-schema" rows="3" class="input-field font-mono text-xs resize-none"
           placeholder='{"fields": [{"name": "lot_id", "type": "string", "required": true}]}'
           >${inputSchemaVal}</textarea>
       </div>
 
+      <!-- Python Code -->
       <div>
         <label class="label-sm flex items-center justify-between">
-          <span>Python 程式碼</span>
-          <span class="text-[10px] text-slate-400 font-normal">定義 generate(params: dict) -> list</span>
+          <span>Python 程式碼 — Step 2</span>
+          <span class="text-[10px] text-slate-400 font-normal">generate(params: dict) -> list</span>
         </label>
         <textarea id="mds-python-code" rows="14" class="input-field font-mono text-xs resize-none"
-          placeholder="def generate(params: dict) -> list:&#10;    # your mock data logic here&#10;    ..."
+          placeholder="def generate(params: dict) -> list:&#10;    # AI 生成後會填入此處&#10;    ..."
           style="background:#0f172a;color:#86efac;border-color:#334155"
           >${item?.python_code || ''}</textarea>
       </div>
 
+      <!-- Sample Output -->
       ${item?.sample_output ? `
       <div>
-        <label class="label-sm">上次執行結果（預覽）</label>
-        <pre class="bg-slate-900 text-green-300 rounded-lg p-3 text-[10px] font-mono overflow-auto max-h-40 border border-slate-700">${_mdsFormatJson(item.sample_output)}</pre>
+        <div class="flex items-center justify-between mb-1">
+          <label class="label-sm">上次執行結果（前 3 筆）</label>
+          ${item.id ? `<button onclick="_mdsShowPlayground(${item.id})" class="text-[10px] px-2 py-1 bg-purple-600 text-white rounded-md hover:bg-purple-500">🔬 模擬 MCP 處理</button>` : ''}
+        </div>
+        <pre class="bg-slate-900 text-green-300 rounded-lg p-3 text-[10px] font-mono overflow-auto max-h-32 border border-slate-700">${_mdsFormatJsonPreview(item.sample_output, 3)}</pre>
       </div>` : ''}
     </div>
   `;
 
   const footer = `
     <button onclick="closeDrawer()" class="builder-btn-secondary text-sm px-4 py-2">取消</button>
+    ${item ? `<button onclick="_mdsShowPlayground(${item.id})" class="text-sm px-3 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-semibold">🔬 模擬 MCP 處理</button>` : ''}
     <button onclick="_mdsSave()" class="builder-btn-primary text-sm px-4 py-2">
       ${item ? '💾 儲存' : '✓ 建立'}
     </button>
-    ${item ? `<button onclick="closeDrawer();setTimeout(()=>_mdsTestRun(${item.id}),100)" class="text-sm px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-semibold">▶ 試執行</button>` : ''}
+    ${item && hasCode ? `<button onclick="closeDrawer();setTimeout(()=>_mdsTestRun(${item.id}),100)" class="text-sm px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-semibold">▶ 試執行</button>` : ''}
   `;
 
   _setDrawerContent(title, body, footer);
@@ -6889,6 +6905,236 @@ function _mdsRenderDrawer() {
 
 function _mdsFormatJson(s) {
   try { return JSON.stringify(JSON.parse(s), null, 2); } catch { return s; }
+}
+
+function _mdsFormatJsonPreview(s, maxRows = 3) {
+  try {
+    const arr = JSON.parse(s);
+    const preview = Array.isArray(arr) ? arr.slice(0, maxRows) : arr;
+    return JSON.stringify(preview, null, 2);
+  } catch { return s; }
+}
+
+// Quick Sample: ask LLM to generate sample rows directly as JSON (no Python code needed)
+async function _mdsQuickSample() {
+  const desc = document.getElementById('mds-gen-desc')?.value?.trim();
+  if (!desc) { _mdsToast('請先填寫描述', 'error'); return; }
+  if (!_mdsEditingId) {
+    const name = document.getElementById('mds-name')?.value?.trim();
+    if (!name) { _mdsToast('請先填寫名稱', 'error'); return; }
+    const created = await _mdsSaveAndGetId();
+    if (!created) return;
+  }
+
+  const btn = document.getElementById('mds-quick-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 生成中...'; }
+  _mdsToast('📊 AI 正在生成假資料...', 'info');
+
+  try {
+    const r = await _api('POST', `/mock-data/${_mdsEditingId}/quick-sample`, { description: desc, count: 20 });
+    const rows = r?.rows || r?.data?.rows || [];
+    const cols = r?.columns || r?.data?.columns || (rows[0] ? Object.keys(rows[0]) : []);
+
+    // Update list cache sample_output
+    const idx = _mdsList.findIndex(m => m.id === _mdsEditingId);
+    if (idx >= 0) _mdsList[idx].sample_output = JSON.stringify(rows.slice(0, 50));
+
+    _mdsShowQuickSampleResult(rows, cols, desc);
+  } catch (e) {
+    _mdsToast(`預覽失敗: ${e.message}`, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📊 預覽假資料'; }
+  }
+}
+
+function _mdsShowQuickSampleResult(rows, cols, description) {
+  if (!rows.length) { _mdsToast('LLM 未回傳資料', 'error'); return; }
+
+  // Build table HTML (first 10 rows)
+  const preview = rows.slice(0, 10);
+  const thead = `<tr>${cols.map(c => `<th class="px-2 py-1 text-left text-[10px] font-semibold text-slate-500 border-b border-slate-200">${c}</th>`).join('')}</tr>`;
+  const tbody = preview.map(row =>
+    `<tr class="hover:bg-slate-50">${cols.map(c => {
+      const v = row[c];
+      const isNum = typeof v === 'number';
+      const isOoc = isNum && (row.UCL !== undefined && v > row.UCL) || (row.LCL !== undefined && v < row.LCL);
+      return `<td class="px-2 py-1 text-[10px] ${isOoc ? 'text-red-600 font-semibold' : 'text-slate-700'} border-b border-slate-100">${v ?? ''}</td>`;
+    }).join('')}</tr>`
+  ).join('');
+
+  const tableHtml = `
+    <div class="overflow-auto max-h-64 rounded-lg border border-slate-200">
+      <table class="w-full text-xs">
+        <thead class="bg-slate-50 sticky top-0">${thead}</thead>
+        <tbody>${tbody}</tbody>
+      </table>
+    </div>
+    <p class="text-[10px] text-slate-400 mt-1">顯示前 ${preview.length} 筆（共 ${rows.length} 筆） · 紅色 = OOC</p>
+  `;
+
+  _setDrawerContent(
+    `📊 假資料預覽 — ${rows.length} 筆 (${cols.length} 欄)`,
+    `<div class="space-y-4">
+      <div class="p-3 bg-blue-50 border border-blue-200 rounded-xl">
+        <p class="text-xs text-blue-700 font-medium">✅ AI 成功生成 ${rows.length} 筆假資料！</p>
+        <p class="text-[10px] text-blue-500 mt-0.5">欄位：${cols.join(' · ')}</p>
+      </div>
+      ${tableHtml}
+      <div class="p-3 bg-purple-50 border border-purple-200 rounded-xl">
+        <p class="text-xs text-purple-700 font-semibold">🔬 下一步：模擬 MCP 處理</p>
+        <p class="text-[10px] text-purple-500 mt-0.5">基於這份假資料，讓 AI 幫你設計計算邏輯與視覺化（等同 MCP Builder 的 try-run）</p>
+      </div>
+    </div>`,
+    `<button onclick="_mdsOpenEdit(${_mdsEditingId})" class="builder-btn-secondary text-sm px-4 py-2">← 回到編輯</button>
+     <button onclick="_mdsShowPlayground(${_mdsEditingId})" class="text-sm px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-semibold">🔬 模擬 MCP 處理</button>
+     <button onclick="_mdsGenerateCodeFromPreview('${(description || '').replace(/'/g, "\\'")}'); _mdsOpenEdit(${_mdsEditingId})" class="builder-btn-primary text-sm px-4 py-2">🤖 生成 Python 程式碼</button>`
+  );
+}
+
+async function _mdsGenerateCodeFromPreview(desc) {
+  // Trigger generate-code using the cached description
+  const descEl = document.getElementById('mds-gen-desc');
+  if (descEl && desc) descEl.value = desc;
+  await _mdsGenerateCode();
+}
+
+// Playground: show raw data + MCP-style design interface
+async function _mdsShowPlayground(id) {
+  const item = _mdsList.find(m => m.id === id) || { id, name: '', description: '' };
+  let rows = [];
+
+  // Use cached sample_output if available
+  if (item.sample_output) {
+    try { rows = JSON.parse(item.sample_output); } catch {}
+  }
+
+  if (!rows.length) {
+    _mdsToast('⏳ 取得假資料中...', 'info');
+    try {
+      const desc = item.description || '';
+      const r = await _api('POST', `/mock-data/${id}/quick-sample`, { description: desc, count: 20 });
+      rows = r?.rows || r?.data?.rows || [];
+      const idx = _mdsList.findIndex(m => m.id === id);
+      if (idx >= 0) _mdsList[idx].sample_output = JSON.stringify(rows);
+    } catch (e) {
+      _mdsToast(`無法取得資料: ${e.message}`, 'error');
+      return;
+    }
+  }
+
+  const cols = rows.length > 0 ? Object.keys(rows[0]) : [];
+  const rawJson = JSON.stringify(rows.slice(0, 5), null, 2);
+
+  _setDrawerContent(
+    `🔬 MCP 模擬沙盒 — ${item.name || 'Mock Data'}`,
+    `<div class="space-y-4">
+      <div class="p-3 bg-slate-800 rounded-xl">
+        <p class="text-[10px] font-bold text-slate-300 uppercase tracking-widest mb-2">Raw Data (前 5 筆)</p>
+        <pre class="text-green-300 font-mono text-[10px] overflow-auto max-h-40">${rawJson}</pre>
+      </div>
+
+      <div class="p-3 bg-amber-50 border border-amber-200 rounded-xl">
+        <p class="text-xs font-semibold text-amber-800 mb-1">💬 告訴 AI 你想怎麼處理這份資料</p>
+        <p class="text-[10px] text-amber-600 mb-2">例如：「計算每台機台的平均值，標示 OOC 點，畫出趨勢圖」</p>
+        <textarea id="mds-playground-intent" rows="3" class="input-field text-sm resize-none"
+          placeholder="計算統計摘要（mean, std, OOC count），並畫出 SPC 趨勢圖..."></textarea>
+        <button id="mds-playground-btn" onclick="_mdsRunPlayground(${id})"
+          class="mt-2 w-full text-sm py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-semibold transition-colors">
+          🤖 AI 設計 MCP 處理邏輯 + 預覽圖表
+        </button>
+      </div>
+
+      <div id="mds-playground-result" class="hidden"></div>
+    </div>`,
+    `<button onclick="_mdsOpenEdit(${id})" class="builder-btn-secondary text-sm px-4 py-2">← 回到編輯</button>
+     <button onclick="_mdsSaveAsCustomMcp(${id})" class="builder-btn-primary text-sm px-4 py-2">💾 儲存為 Custom MCP</button>`
+  );
+
+  // Make drawer visible if not already
+  document.getElementById('drawer-overlay')?.classList.remove('hidden');
+  document.getElementById('drawer')?.classList.add('drawer-open');
+}
+
+async function _mdsRunPlayground(id) {
+  const intent = document.getElementById('mds-playground-intent')?.value?.trim();
+  if (!intent) { _mdsToast('請填寫處理意圖', 'error'); return; }
+  const item = _mdsList.find(m => m.id === id);
+  const btn = document.getElementById('mds-playground-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ AI 設計中...'; }
+
+  let rows = [];
+  if (item?.sample_output) {
+    try { rows = JSON.parse(item.sample_output); } catch {}
+  }
+
+  try {
+    // Use MCP try-run endpoint with the raw data and processing intent
+    // We send the raw rows as sample_data (same as MCP Builder try-run)
+    const r = await _api('POST', '/mcp-definitions/try-run', {
+      processing_intent: intent,
+      sample_data: rows,
+      data_subject_name: item?.name || 'Mock Data',
+      data_subject_output_schema: JSON.stringify({ fields: Object.keys(rows[0] || {}).map(k => ({ name: k, type: typeof rows[0][k] })) }),
+    });
+
+    const resultEl = document.getElementById('mds-playground-result');
+    if (!resultEl) return;
+    resultEl.classList.remove('hidden');
+
+    // Show generated code + result
+    const code = r?.processing_script || r?.data?.processing_script || '';
+    const outputDataset = r?.output_data || r?.data?.output_data || r?.data || {};
+    const chartData = outputDataset?.ui_render?.chart_data || null;
+
+    resultEl.innerHTML = `
+      <div class="space-y-3">
+        <div class="p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+          <p class="text-xs font-semibold text-emerald-700">✅ AI 設計完成！</p>
+        </div>
+        ${chartData ? `<div id="mds-pg-chart" class="bg-white border border-slate-200 rounded-xl p-2" style="height:300px"></div>` : ''}
+        ${code ? `
+        <details>
+          <summary class="text-xs text-slate-500 cursor-pointer hover:text-slate-700">查看生成的 Processing Script</summary>
+          <pre class="mt-2 bg-slate-900 text-green-300 rounded-lg p-3 text-[10px] font-mono overflow-auto max-h-48">${code}</pre>
+        </details>` : ''}
+        <div id="mds-save-mcp-payload" class="hidden"
+          data-intent="${(intent||'').replace(/"/g,'&quot;')}"
+          data-code="${(code||'').replace(/"/g,'&quot;')}"
+          data-mock-id="${id}"></div>
+      </div>
+    `;
+
+    // Render chart if available
+    if (chartData && window.Plotly) {
+      try {
+        const fig = typeof chartData === 'string' ? JSON.parse(chartData) : chartData;
+        Plotly.react('mds-pg-chart', fig.data || [], fig.layout || {}, { responsive: true, displayModeBar: false });
+      } catch {}
+    }
+
+    _mdsToast('✅ MCP 設計完成！', 'success');
+  } catch (e) {
+    _mdsToast(`設計失敗: ${e.message}`, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🤖 AI 設計 MCP 處理邏輯 + 預覽圖表'; }
+  }
+}
+
+async function _mdsSaveAsCustomMcp(mockId) {
+  const payloadEl = document.getElementById('mds-save-mcp-payload');
+  if (!payloadEl) { _mdsToast('請先執行 AI 設計', 'error'); return; }
+  const intent = payloadEl.dataset.intent;
+  const code = payloadEl.dataset.code;
+  const item = _mdsList.find(m => m.id === mockId);
+  if (!intent || !code) { _mdsToast('請先執行 AI 設計', 'error'); return; }
+
+  _mdsToast('💾 儲存 Custom MCP 中...', 'info');
+
+  // This requires a System MCP to exist for this mock source
+  // For now, navigate to MCP Builder with pre-filled data
+  closeDrawer();
+  switchView('mcp-builder');
+  _mdsToast('✅ 請在 MCP Builder 中貼上意圖以完成設計', 'success');
 }
 
 async function _mdsGenerateCode() {
