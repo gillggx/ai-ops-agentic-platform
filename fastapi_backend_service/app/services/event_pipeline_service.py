@@ -5,6 +5,7 @@ Executes the full end-to-end chain for a triggered event:
   → MCP script execution → LLM diagnosis → structured report per Skill.
 """
 
+import datetime
 import json
 import logging
 from typing import Any, Dict, List, Optional
@@ -397,11 +398,35 @@ class EventPipelineService:
         last_dr = _j(skill.last_diagnosis_result) if hasattr(skill, "last_diagnosis_result") else None
         generated_code = (last_dr or {}).get("generated_code", "")
 
+        if not generated_code and skill.diagnostic_prompt:
+            # Auto-regenerate code from diagnostic_prompt + current MCP data
+            logger.info("Skill %s missing generated_code; auto-regenerating from diagnostic_prompt", skill_name)
+            try:
+                regen = await self._llm.generate_code_diagnosis(
+                    diagnostic_prompt=skill.diagnostic_prompt,
+                    problem_subject=skill.problem_subject or "",
+                    mcp_sample_outputs={mcp_name: output_data},
+                    event_attributes=[],
+                )
+                generated_code = regen.get("generated_code", "")
+                if generated_code:
+                    new_dr = {
+                        **(last_dr or {}),
+                        "generated_code": generated_code,
+                        "timestamp": datetime.datetime.utcnow().isoformat(),
+                    }
+                    await self._skill_repo.update(
+                        skill, last_diagnosis_result=new_dr
+                    )
+                    logger.info("Auto-saved regenerated code for Skill %s", skill_name)
+            except Exception as regen_exc:
+                logger.warning("Auto-regen failed for Skill %s: %s", skill_name, regen_exc)
+
         if not generated_code:
             failure_msg = await self._llm.explain_failure(
                 stage="Skill 診斷碼缺失",
                 error="此 Skill 尚未生成 Python 診斷碼",
-                context={"skill": skill_name, "hint": "請在 Nested Builder 完成 Try Run 以生成診斷碼"},
+                context={"skill": skill_name, "hint": "請在 Skill Builder 開啟 Skill，點擊「🐍 生成 Code 診斷」按鈕，儲存後再試"},
             )
             return SkillPipelineResult(
                 skill_id=skill.id, skill_name=skill_name, mcp_name=mcp_name,

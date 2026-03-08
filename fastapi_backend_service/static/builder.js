@@ -2082,11 +2082,17 @@ async function _loadSkillDefs() {
     }
     container.innerHTML = _skillDefs.map(sk => {
       const et = _eventTypes.find(e => e.id === sk.event_type_id);
+      const hasCode = !!(sk.last_diagnosis_result?.generated_code);
       const hasDiag = !!(sk.diagnostic_prompt);
       const boundMcp = sk.mcp_id ? _mcpDefs.find(m => m.id === sk.mcp_id) : null;
       const mcpTag = boundMcp
         ? `<span class="builder-tag builder-tag-purple" title="${_esc(boundMcp.name)}">${_esc(boundMcp.name)}</span>`
         : `<span class="builder-tag text-slate-500">未綁定 MCP</span>`;
+      const diagTag = hasCode
+        ? '<span class="builder-tag builder-tag-green">🐍 Code 診斷</span>'
+        : hasDiag
+          ? '<span class="builder-tag" style="background:#fef3c7;color:#92400e;" title="有診斷邏輯但缺少 Python 碼，需重新生成">⚠ 需重生成</span>'
+          : '';
       return `
         <div class="builder-card" onclick="_skOpenEditor(${sk.id})">
           <div class="flex-1">
@@ -2095,7 +2101,7 @@ async function _loadSkillDefs() {
             <div class="builder-card-meta">
               <span class="builder-tag">${_esc(et?.name || `Event #${sk.event_type_id}`)}</span>
               ${mcpTag}
-              ${hasDiag ? '<span class="builder-tag builder-tag-green">✓ 診斷邏輯</span>' : ''}
+              ${diagTag}
             </div>
           </div>
           <div class="text-slate-600 text-sm">›</div>
@@ -3053,6 +3059,9 @@ async function _saveSkill(id) {
     diagnostic_prompt: diagPromptEl ? diagPromptEl.value.trim() : '',
     human_recommendation: humanRecEl ? humanRecEl.value.trim() : '',
   };
+
+  // Include last_diagnosis_result (generated_code) so Agent can execute this Skill
+  if (_diagnosisRunResult) payload.last_diagnosis_result = _diagnosisRunResult;
 
   try {
     if (id) await _api('PATCH', `/skill-definitions/${id}`, payload);

@@ -94,6 +94,8 @@ class SkillDefinitionService:
             kwargs["diagnostic_prompt"] = data.diagnostic_prompt
         if data.human_recommendation is not None:
             kwargs["human_recommendation"] = data.human_recommendation
+        if data.last_diagnosis_result is not None:
+            kwargs["last_diagnosis_result"] = data.last_diagnosis_result
         obj = await self._repo.create(**kwargs)
         return _to_response(obj)
 

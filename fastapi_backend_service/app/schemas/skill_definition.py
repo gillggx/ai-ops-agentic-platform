@@ -24,6 +24,7 @@ class SkillDefinitionCreate(BaseModel):
     param_mappings: Optional[List[ParamMapping]] = None
     diagnostic_prompt: Optional[str] = None
     human_recommendation: Optional[str] = None
+    last_diagnosis_result: Optional[Dict[str, Any]] = None
 
 
 class SkillDefinitionUpdate(BaseModel):

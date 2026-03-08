@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.skill_definition import SkillDefinitionModel
 
-_JSON_FIELDS = ("mcp_ids", "param_mappings")
+_JSON_FIELDS = ("mcp_ids", "param_mappings", "last_diagnosis_result")
 
 
 class SkillDefinitionRepository:

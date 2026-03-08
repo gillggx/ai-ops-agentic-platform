@@ -153,7 +153,7 @@ class SkillExecuteService:
                 "status": "error",
                 "llm_readable_data": {
                     "status": "ERROR",
-                    "error": "此 Skill 尚未在 Skill Builder 完成模擬，缺少診斷腳本。請先在 Skill Builder 執行「試跑」以生成診斷邏輯。",
+                    "error": "此 Skill 缺少 Python 診斷碼。請在 Skill Builder 開啟此 Skill，點擊「🐍 生成 Code 診斷」按鈕執行一次，儲存後再試。",
                 },
                 "ui_render_payload": {"has_chart": False},
             }
