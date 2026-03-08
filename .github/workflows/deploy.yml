@@ -28,11 +28,15 @@ jobs:
             # ── 1. Git pull ────────────────────────────────────────────────
             echo "--- [1/4] 拉取最新程式碼 ---"
             cd "$REPO_ROOT"
-            mv "$BE_DIR/dev.db" /tmp/devdb_bak.db 2>/dev/null || true
-            # Untrack .env if git still tracks it (one-time migration after removing from repo)
-            git rm --cached "$BE_DIR/.env" 2>/dev/null || true
+            # Back up files that must survive the pull
+            mv "$BE_DIR/dev.db"  /tmp/devdb_bak.db  2>/dev/null || true
+            cp "$BE_DIR/.env"    /tmp/env_bak        2>/dev/null || true
+            # Remove untracked .env so git pull (which deletes it from repo) won't abort
+            rm -f "$BE_DIR/.env"
             git pull origin main
+            # Restore preserved files
             cp /tmp/devdb_bak.db "$BE_DIR/dev.db" 2>/dev/null || true
+            cp /tmp/env_bak      "$BE_DIR/.env"   2>/dev/null || true
 
             # ── 2. 前端打包 ────────────────────────────────────────────────
             echo "--- [2/4] 打包前端 ---"
