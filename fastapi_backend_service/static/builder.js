@@ -7212,7 +7212,38 @@ async function _mdsRunPlayground(id) {
     // Show generated code + result
     const code = r?.script || r?.data?.script || '';
     const outputData = r?.output_data || r?.data?.output_data || {};
-    const chartData = outputData?.ui_render?.chart_data || null;
+    const chartData = outputData?.ui_render?.chart_data
+      || (outputData?.ui_render?.charts?.[0]) || null;
+    const dataset = outputData?.dataset || [];
+
+    // Build dataset table HTML
+    let tableHtml = '';
+    if (dataset.length > 0) {
+      const cols = Object.keys(dataset[0]);
+      tableHtml = `
+        <div class="mt-2">
+          <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">
+            輸出資料 (${dataset.length} 筆)
+          </p>
+          <div class="overflow-auto max-h-64 border border-slate-200 rounded-lg">
+            <table class="text-[10px] w-full border-collapse">
+              <thead class="bg-slate-100 sticky top-0">
+                <tr>${cols.map(c => `<th class="px-2 py-1.5 text-left font-bold text-slate-600 border-b border-slate-200 whitespace-nowrap">${_esc(c)}</th>`).join('')}</tr>
+              </thead>
+              <tbody>
+                ${dataset.map((row, i) => `
+                  <tr class="${i % 2 === 0 ? 'bg-white' : 'bg-slate-50'}">
+                    ${cols.map(c => {
+                      const v = row[c];
+                      const display = v === null || v === undefined ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+                      return `<td class="px-2 py-1 border-b border-slate-100 text-slate-700 whitespace-nowrap max-w-[200px] truncate" title="${_esc(display)}">${_esc(display)}</td>`;
+                    }).join('')}
+                  </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>`;
+    }
 
     resultEl.innerHTML = `
       <div class="space-y-3">
@@ -7220,10 +7251,11 @@ async function _mdsRunPlayground(id) {
           <p class="text-xs font-semibold text-emerald-700">✅ AI 設計完成！</p>
         </div>
         ${chartData ? `<div id="mds-pg-chart" class="bg-white border border-slate-200 rounded-xl p-2" style="height:300px"></div>` : ''}
+        ${tableHtml}
         ${code ? `
         <details>
           <summary class="text-xs text-slate-500 cursor-pointer hover:text-slate-700">查看生成的 Processing Script</summary>
-          <pre class="mt-2 bg-slate-900 text-green-300 rounded-lg p-3 text-[10px] font-mono overflow-auto max-h-48">${code}</pre>
+          <pre class="mt-2 bg-slate-900 text-green-300 rounded-lg p-3 text-[10px] font-mono overflow-auto max-h-48">${_esc(code)}</pre>
         </details>` : ''}
         <div id="mds-save-mcp-payload" class="hidden"
           data-intent="${(intent||'').replace(/"/g,'&quot;')}"
