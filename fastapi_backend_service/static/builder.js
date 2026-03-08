@@ -4456,6 +4456,60 @@ function _nbInferSchemaFromRows(rows) {
   }));
 }
 
+async function _nbPreFillFromDraft(payload) {
+  // Switch to nested-builder and pre-fill form fields from agent draft payload
+  await _nbInitView();
+
+  // Task name
+  const nameEl = document.getElementById('nb-task-name');
+  if (nameEl && payload.name) { nameEl.value = payload.name; }
+
+  // Schedule interval
+  const intervalEl = document.getElementById('nb-task-interval');
+  if (intervalEl && payload.schedule_interval) {
+    intervalEl.value = payload.schedule_interval;
+    _nbOnTaskIntervalChange(payload.schedule_interval);
+  }
+
+  // Daily time
+  if (payload.schedule_time) {
+    const timeEl = document.getElementById('nb-task-schedule-time');
+    if (timeEl) timeEl.value = payload.schedule_time;
+  }
+
+  // Expire at
+  if (payload.expire_at) {
+    const expEl = document.getElementById('nb-task-expire-at');
+    if (expEl) expEl.value = payload.expire_at.substring(0, 10);
+  }
+
+  // Skill select — use 'select' mode and pick skill
+  _nbSetSkillMode('select');
+  if (payload.skill_id) {
+    const skillSel = document.getElementById('nb-skill-select');
+    if (skillSel) {
+      skillSel.value = String(payload.skill_id);
+      _nbOnSkillSelect();  // triggers skill summary + event preview
+    }
+  }
+
+  // Pre-fill skill_input into dynamic nb-mcp-select-param-{name} fields (rendered by _nbOnSkillSelect)
+  if (payload.skill_input) {
+    const skillInput = typeof payload.skill_input === 'string'
+      ? (() => { try { return JSON.parse(payload.skill_input); } catch { return {}; } })()
+      : payload.skill_input;
+    // Give the MCP param form time to render before populating
+    setTimeout(() => {
+      Object.entries(skillInput).forEach(([k, v]) => {
+        const el = document.getElementById(`nb-mcp-select-param-${k}`);
+        if (el) el.value = v;
+      });
+    }, 500);
+  }
+
+  _nbUpdateEventPreview();
+}
+
 async function _nbInitView() {
   // Ensure console starts collapsed when entering the view
   _nbCollapseConsole();
