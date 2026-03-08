@@ -87,12 +87,21 @@ async def execute_mcp(
     )
 
     result = await svc.run_with_data(mcp_id=mcp_id, raw_data=body, base_url=base_url)
+    # Surface failures explicitly so LLM sees an error instead of empty data
+    if not result.success or result.error:
+        return {
+            "status": "error",
+            "mcp_id": mcp_id,
+            "error": result.error or "MCP 執行失敗（未知錯誤）",
+            "llm_readable_data": {},
+        }
     od = result.output_data if hasattr(result, "output_data") else {}
     dataset = od.get("dataset") or [] if isinstance(od, dict) else []
     preview = dataset[:10] if isinstance(dataset, list) else []
     return {
         "status": "success",
         "mcp_id": mcp_id,
+        "row_count": len(dataset) if isinstance(dataset, list) else 0,
         "output_data": od,
         "llm_readable_data": json.dumps(preview, ensure_ascii=False)[:3000],
     }

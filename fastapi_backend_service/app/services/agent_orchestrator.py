@@ -73,31 +73,51 @@ async def _preflight_validate(
                 "status": "error", "code": "MCP_NOT_FOUND",
                 "message": f"⚠️ MCP #{mcp_id} 不存在。請呼叫 list_mcps 取得有效的 MCP 列表後重試。",
             }
-        # Resolve system MCP to get required input_schema
-        sys_id = getattr(mcp, "system_mcp_id", None) or getattr(mcp, "data_subject_id", None)
-        if sys_id:
-            sys_result = await db.execute(
-                select(MCPDefinitionModel).where(MCPDefinitionModel.id == sys_id)
-            )
-            sys_mcp = sys_result.scalar_one_or_none()
-            if sys_mcp and sys_mcp.input_schema:
-                try:
-                    schema = json.loads(sys_mcp.input_schema) if isinstance(sys_mcp.input_schema, str) else sys_mcp.input_schema
-                    required = [f["name"] for f in schema.get("fields", []) if f.get("required")]
-                    provided = tool_input.get("params") or {}
-                    missing = [k for k in required if k not in provided or not provided[k]]
-                    if missing:
-                        return {
-                            "status": "error", "code": "MISSING_PARAMS",
-                            "message": (
-                                f"⚠️ MCP「{mcp.name}」缺少必填查詢參數：{missing}。"
-                                f"請向用戶確認這些參數的值後再重試。"
-                            ),
-                            "missing_params": missing,
-                            "required_params": required,
-                        }
-                except Exception:
-                    pass
+        # Resolve input_schema: system MCP uses its own schema; custom MCP uses parent system MCP's
+        mcp_type = getattr(mcp, "mcp_type", "custom") or "custom"
+        if mcp_type == "system":
+            schema_src = mcp  # the called MCP IS the system MCP
+        else:
+            sys_id = getattr(mcp, "system_mcp_id", None) or getattr(mcp, "data_subject_id", None)
+            if sys_id:
+                sys_result = await db.execute(
+                    select(MCPDefinitionModel).where(MCPDefinitionModel.id == sys_id)
+                )
+                schema_src = sys_result.scalar_one_or_none()
+            else:
+                schema_src = None
+
+        if schema_src and schema_src.input_schema:
+            try:
+                schema = json.loads(schema_src.input_schema) if isinstance(schema_src.input_schema, str) else schema_src.input_schema
+                fields = schema.get("fields", [])
+                required = [f["name"] for f in fields if f.get("required")]
+                all_field_names = [f["name"] for f in fields]
+                provided = tool_input.get("params") or {}
+                missing = [k for k in required if k not in provided or not provided[k]]
+                # Also block calls with completely empty params when there ARE input fields defined
+                if not provided and all_field_names and not required:
+                    # optional-only fields: still ask user rather than silently returning full dataset
+                    return {
+                        "status": "error", "code": "MISSING_PARAMS",
+                        "message": (
+                            f"⚠️ MCP「{mcp.name}」有以下可用查詢參數：{all_field_names}。"
+                            f"請向用戶確認要查詢的值後再重試（不帶參數會回傳全部資料，可能不是用戶想要的）。"
+                        ),
+                        "available_params": all_field_names,
+                    }
+                if missing:
+                    return {
+                        "status": "error", "code": "MISSING_PARAMS",
+                        "message": (
+                            f"⚠️ MCP「{mcp.name}」缺少必填查詢參數：{missing}。"
+                            f"請向用戶確認這些參數的值後再重試。"
+                        ),
+                        "missing_params": missing,
+                        "required_params": required,
+                    }
+            except Exception:
+                pass
 
     elif tool_name == "execute_skill":
         skill_id = tool_input.get("skill_id")
@@ -255,7 +275,7 @@ def _result_summary(result: Dict[str, Any]) -> str:
         # execute_mcp: llm_readable_data is a JSON string of dataset preview
         if "output_data" in result and isinstance(result.get("output_data"), dict):
             ds = result["output_data"].get("dataset")
-            count = len(ds) if isinstance(ds, list) else "?"
+            count = len(ds) if isinstance(ds, list) else result.get("row_count", 0)
             return f"MCP #{result.get('mcp_id', '?')} 回傳 {count} 筆資料"
     if "memories" in result:
         return f"{result['count']} 條記憶"
