@@ -28,15 +28,35 @@ jobs:
             # ── 1. Git pull ────────────────────────────────────────────────
             echo "--- [1/4] 拉取最新程式碼 ---"
             cd "$REPO_ROOT"
-            # Back up files that must survive the pull
-            mv "$BE_DIR/dev.db"  /tmp/devdb_bak.db  2>/dev/null || true
-            cp "$BE_DIR/.env"    /tmp/env_bak        2>/dev/null || true
-            # Remove untracked .env so git pull (which deletes it from repo) won't abort
+
+            # Use $HOME for backups — /tmp can be wiped between deploys
+            DB_BAK="$HOME/deploy_bak/dev.db"
+            ENV_BAK="$HOME/deploy_bak/.env"
+            mkdir -p "$HOME/deploy_bak"
+
+            # Back up DB (fail hard if DB exists but backup fails)
+            if [ -f "$BE_DIR/dev.db" ]; then
+              cp "$BE_DIR/dev.db" "$DB_BAK" || { echo "ERROR: DB backup failed, aborting deploy to protect data"; exit 1; }
+              echo "DB backed up: $(du -sh "$DB_BAK" | cut -f1)"
+            fi
+            # Back up .env
+            cp "$BE_DIR/.env" "$ENV_BAK" 2>/dev/null || true
+
+            # Remove untracked .env so git pull won't abort
             rm -f "$BE_DIR/.env"
             git pull origin main
-            # Restore preserved files
-            cp /tmp/devdb_bak.db "$BE_DIR/dev.db" 2>/dev/null || true
-            cp /tmp/env_bak      "$BE_DIR/.env"   2>/dev/null || true
+
+            # Restore DB (fail hard if backup exists but restore fails)
+            if [ -f "$DB_BAK" ]; then
+              cp "$DB_BAK" "$BE_DIR/dev.db" || { echo "ERROR: DB restore failed"; exit 1; }
+              echo "DB restored OK"
+            fi
+            # Restore .env then patch SERVER_BASE_URL to correct internal port
+            if [ -f "$ENV_BAK" ]; then
+              cp "$ENV_BAK" "$BE_DIR/.env"
+              sed -i 's|SERVER_BASE_URL=.*|SERVER_BASE_URL="http://127.0.0.1:8000"|' "$BE_DIR/.env"
+              echo "SERVER_BASE_URL patched to http://127.0.0.1:8000"
+            fi
 
             # ── 2. 前端打包 ────────────────────────────────────────────────
             echo "--- [2/4] 打包前端 ---"
@@ -49,10 +69,10 @@ jobs:
             source "$VENV"
             pip install -r "$BE_DIR/requirements.txt"
             cd "$BE_DIR"
-            # Non-fatal migration: try upgrade, fall back to stamp+upgrade, then stamp head.
-            # App lifespan (create_all) covers any remaining missing tables.
+            # Safe migration: upgrade head only. If already up to date, that's fine.
+            # NEVER stamp base (would re-run data migrations and risk data corruption).
+            # If upgrade fails, stamp head and let create_all fill gaps.
             PYTHONPATH="$BE_DIR" alembic upgrade head || \
-              (PYTHONPATH="$BE_DIR" alembic stamp base && PYTHONPATH="$BE_DIR" alembic upgrade head) || \
               (PYTHONPATH="$BE_DIR" alembic stamp head && echo "stamped head; create_all will fill gaps") || \
               echo "migration skipped — create_all will handle schema"
 
