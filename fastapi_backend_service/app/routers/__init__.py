@@ -8,6 +8,7 @@ from app.routers.event_types import router as event_types_router
 from app.routers.items import router as items_router
 from app.routers.mcp_definitions import router as mcp_definitions_router
 from app.routers.mock_data_router import router as mock_data_router
+from app.routers.mock_data_studio_router import router as mock_data_studio_router
 from app.routers.skill_definitions import router as skill_definitions_router
 from app.routers.system_parameters import router as system_parameters_router
 from app.routers.users import router as users_router
@@ -30,6 +31,7 @@ __all__ = [
     "diagnostic_router",
     "builder_router",
     "mock_data_router",
+    "mock_data_studio_router",
     "data_subjects_router",
     "event_types_router",
     "mcp_definitions_router",

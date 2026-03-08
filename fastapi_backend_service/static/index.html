@@ -200,6 +200,18 @@
           </svg>
         </button>
 
+        <!-- Mock Data Studio -->
+        <button class="nav-btn" id="nav-mock-data-studio" title="Mock Data Studio (模擬資料工廠)"
+          onclick="switchView('mock-data-studio')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="7" rx="1"/>
+            <rect x="14" y="3" width="7" height="7" rx="1"/>
+            <path d="M3 14h7v7H3z" rx="1"/>
+            <path d="M14 14l3.5 3.5M21 14l-3.5 3.5M17.5 17.5V21M17.5 17.5V14"/>
+          </svg>
+        </button>
+
         <!-- Event → Skill Link Builder -->
         <button class="nav-btn" id="nav-event-link-builder" title="Event → Skill 連結建構器"
           onclick="switchView('event-link-builder')">
@@ -1011,6 +1023,35 @@
           </div>
         </div>
 
+
+        <!-- ══ MOCK DATA STUDIO VIEW ══ -->
+        <div id="view-mock-data-studio" class="view-panel hidden flex-1 flex flex-col overflow-hidden">
+          <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
+                      border-b border-slate-200 bg-white">
+            <div>
+              <h2 class="font-semibold text-base flex items-center gap-2">
+                <svg class="w-4 h-4 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="3" width="7" height="7" rx="1"/>
+                  <rect x="14" y="3" width="7" height="7" rx="1"/>
+                  <path d="M3 14h7v7H3z"/>
+                  <circle cx="17.5" cy="17.5" r="3.5"/>
+                  <path d="M17.5 16v1.5l1 1"/>
+                </svg>
+                Mock Data Studio
+              </h2>
+              <p class="text-xs text-slate-500 mt-0.5">用 Python 建立模擬資料 API，供 System MCP 使用</p>
+            </div>
+            <button onclick="_mdsOpenCreate()"
+              class="builder-btn-primary text-sm px-4 py-2">
+              + 新增 Mock 資料源
+            </button>
+          </div>
+          <!-- List -->
+          <div id="mds-list" class="flex-1 overflow-y-auto p-6 space-y-3">
+            <div class="text-center text-slate-400 py-12 text-sm">載入中...</div>
+          </div>
+        </div>
 
         <!-- ══ EVENT TYPES VIEW ══ -->
         <div id="view-event-types" class="view-panel hidden flex-1 flex flex-col overflow-hidden">

@@ -31,6 +31,7 @@ from app.routers import (
     items_router,
     mcp_definitions_router,
     mock_data_router,
+    mock_data_studio_router,
     routine_check_router,
     skill_definitions_router,
     system_parameters_router,
@@ -476,6 +477,7 @@ app.include_router(diagnostic_router, prefix=_PREFIX)
 app.include_router(builder_router, prefix=_PREFIX)
 # Phase 8 routers
 app.include_router(mock_data_router, prefix=_PREFIX)
+app.include_router(mock_data_studio_router, prefix=_PREFIX)
 app.include_router(data_subjects_router, prefix=_PREFIX)
 app.include_router(event_types_router, prefix=_PREFIX)
 app.include_router(mcp_definitions_router, prefix=_PREFIX)

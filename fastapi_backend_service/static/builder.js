@@ -107,6 +107,7 @@ function switchView(name) {
   if (name === 'routine-checks')       _loadRoutineChecks();
   if (name === 'generated-events')     _loadGeneratedEvents();
   if (name === 'event-link-builder')   _elInitView();
+  if (name === 'mock-data-studio')     _mdsLoadList();
   if (name === 'agent-brain')      { _brainLoadSoul(); _brainLoadPref(); _brainLoadMemories(); }
 
   // Phase 8.6: send AI welcome message once when entering diagnose view
@@ -196,6 +197,9 @@ async function _renderDrawerContent(type, id) {
     case 'routine-check-create':
     case 'routine-check-edit':
       _openRoutineCheckDrawer(id);
+      break;
+    case 'mds-edit':
+      _mdsRenderDrawer();
       break;
   }
 }
@@ -6716,3 +6720,344 @@ function _elUpdateRcEventPreview() {
   previewEl.innerHTML = _buildRcEventPreview(skill, scheduleName, null)
     .replace('id="rc-event-name"', 'id="el-rc-generated-event-name"');
 }
+
+
+// ══════════════════════════════════════════════════════════════
+// MOCK DATA STUDIO
+// ══════════════════════════════════════════════════════════════
+
+let _mdsList = [];
+let _mdsEditingId = null;
+let _mdsGenerating = false;
+let _mdsRunning = false;
+
+function _mdsToast(msg, type = 'success') {
+  const colors = { success: 'bg-emerald-600', error: 'bg-red-600', info: 'bg-blue-600' };
+  const t = document.createElement('div');
+  t.className = `fixed bottom-6 right-6 ${colors[type] || 'bg-slate-700'} text-white text-sm font-medium px-5 py-3 rounded-xl shadow-lg z-[200]`;
+  t.style.transition = 'opacity 0.4s';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 400); }, 2800);
+}
+
+async function _mdsLoadList() {
+  const listEl = document.getElementById('mds-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<div class="text-center text-slate-400 py-12 text-sm">載入中...</div>';
+  try {
+    const r = await _api('GET', '/mock-data');
+    _mdsList = Array.isArray(r) ? r : (r.data || r || []);
+    _mdsRenderList();
+  } catch (e) {
+    listEl.innerHTML = `<div class="text-center text-red-500 py-12 text-sm">載入失敗: ${e.message}</div>`;
+  }
+}
+
+function _mdsRenderList() {
+  const listEl = document.getElementById('mds-list');
+  if (!listEl) return;
+  if (!_mdsList.length) {
+    listEl.innerHTML = `
+      <div class="text-center py-20">
+        <div class="text-4xl mb-3">🧪</div>
+        <p class="text-slate-500 text-sm">尚無 Mock 資料源</p>
+        <p class="text-slate-400 text-xs mt-1">點擊「+ 新增 Mock 資料源」，用自然語言描述需求，AI 自動生成 Python 模擬邏輯</p>
+      </div>`;
+    return;
+  }
+  listEl.innerHTML = _mdsList.map(m => `
+    <div class="bg-white border border-slate-200 rounded-xl p-4 flex items-start gap-4 hover:border-emerald-300 transition-colors">
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2">
+          <span class="font-semibold text-sm text-slate-800">${m.name}</span>
+          <span class="px-1.5 py-0.5 rounded text-[10px] font-medium ${m.is_active ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-500 border border-slate-200'}">
+            ${m.is_active ? '● 啟用' : '○ 停用'}
+          </span>
+          ${m.python_code ? '<span class="px-1.5 py-0.5 rounded text-[10px] bg-blue-50 text-blue-600 border border-blue-200">有程式碼</span>' : '<span class="px-1.5 py-0.5 rounded text-[10px] bg-yellow-50 text-yellow-600 border border-yellow-200">⚠ 無程式碼</span>'}
+        </div>
+        <p class="text-xs text-slate-500 mt-1 line-clamp-1">${m.description || '(無說明)'}</p>
+        <p class="text-[10px] text-slate-400 mt-1 font-mono">POST /api/v1/mock-data/${m.id}/run</p>
+      </div>
+      <div class="flex gap-2 flex-shrink-0">
+        <button onclick="_mdsOpenEdit(${m.id})"
+          class="text-xs px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg transition-colors">
+          編輯
+        </button>
+        <button onclick="_mdsTestRun(${m.id})"
+          class="text-xs px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors">
+          ▶ 試執行
+        </button>
+      </div>
+    </div>`).join('');
+}
+
+function _mdsOpenCreate() {
+  _mdsEditingId = null;
+  openDrawer('mds-edit');
+}
+
+function _mdsOpenEdit(id) {
+  _mdsEditingId = id;
+  openDrawer('mds-edit');
+}
+
+// Called by renderDrawerContent dispatcher
+function _mdsRenderDrawer() {
+  const item = _mdsEditingId ? _mdsList.find(m => m.id === _mdsEditingId) : null;
+  const title = item ? `編輯 Mock 資料源：${item.name}` : '新增 Mock 資料源';
+
+  let inputSchemaVal = '';
+  if (item?.input_schema) {
+    try { inputSchemaVal = JSON.stringify(JSON.parse(item.input_schema), null, 2); }
+    catch { inputSchemaVal = item.input_schema; }
+  }
+
+  const body = `
+    <div class="space-y-4">
+      <div class="grid grid-cols-2 gap-4">
+        <div class="col-span-2">
+          <label class="label-sm">名稱 *</label>
+          <input id="mds-name" type="text" class="input-field" value="${item?.name || ''}" placeholder="e.g. Fake_SPC_Data"/>
+        </div>
+        <div class="col-span-2">
+          <label class="label-sm">說明</label>
+          <input id="mds-desc" type="text" class="input-field" value="${item?.description || ''}" placeholder="這個模擬資料源用於..."/>
+        </div>
+        <div>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input id="mds-active" type="checkbox" class="w-4 h-4 rounded" ${item?.is_active !== false ? 'checked' : ''}/>
+            <span class="text-xs font-medium text-slate-700">啟用 (Active)</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="border border-emerald-200 rounded-xl p-4 bg-emerald-50/30">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-xs font-bold text-emerald-700 uppercase tracking-widest">✨ AI 代碼生成</span>
+        </div>
+        <label class="label-sm">描述這個 Mock 資料要模擬什麼 *</label>
+        <textarea id="mds-gen-desc" rows="2" class="input-field font-normal text-sm resize-none"
+          placeholder="e.g. 模擬一個半導體 Etch 製程的 SPC 管制圖資料，包含 lot_id, tool_id, cd_value, UCL, LCL 欄位，TETCH01 前 3 批要 OOC"
+          >${item?.description || ''}</textarea>
+        <div class="flex gap-2 mt-2">
+          <input id="mds-gen-params" type="text" class="input-field flex-1 text-xs"
+            placeholder='範例參數 JSON，e.g. {"lot_id": "L001", "tool_id": "TETCH01"}'/>
+          <button id="mds-gen-btn" onclick="_mdsGenerateCode()"
+            class="text-xs px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold transition-colors whitespace-nowrap">
+            🤖 AI 生成
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <label class="label-sm">Input Schema (JSON)</label>
+        <textarea id="mds-input-schema" rows="4" class="input-field font-mono text-xs resize-none"
+          placeholder='{"fields": [{"name": "lot_id", "type": "string", "required": true}]}'
+          >${inputSchemaVal}</textarea>
+      </div>
+
+      <div>
+        <label class="label-sm flex items-center justify-between">
+          <span>Python 程式碼</span>
+          <span class="text-[10px] text-slate-400 font-normal">定義 generate(params: dict) -> list</span>
+        </label>
+        <textarea id="mds-python-code" rows="14" class="input-field font-mono text-xs resize-none"
+          placeholder="def generate(params: dict) -> list:&#10;    # your mock data logic here&#10;    ..."
+          style="background:#0f172a;color:#86efac;border-color:#334155"
+          >${item?.python_code || ''}</textarea>
+      </div>
+
+      ${item?.sample_output ? `
+      <div>
+        <label class="label-sm">上次執行結果（預覽）</label>
+        <pre class="bg-slate-900 text-green-300 rounded-lg p-3 text-[10px] font-mono overflow-auto max-h-40 border border-slate-700">${_mdsFormatJson(item.sample_output)}</pre>
+      </div>` : ''}
+    </div>
+  `;
+
+  const footer = `
+    <button onclick="closeDrawer()" class="builder-btn-secondary text-sm px-4 py-2">取消</button>
+    <button onclick="_mdsSave()" class="builder-btn-primary text-sm px-4 py-2">
+      ${item ? '💾 儲存' : '✓ 建立'}
+    </button>
+    ${item ? `<button onclick="closeDrawer();setTimeout(()=>_mdsTestRun(${item.id}),100)" class="text-sm px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-semibold">▶ 試執行</button>` : ''}
+  `;
+
+  _setDrawerContent(title, body, footer);
+}
+
+function _mdsFormatJson(s) {
+  try { return JSON.stringify(JSON.parse(s), null, 2); } catch { return s; }
+}
+
+async function _mdsGenerateCode() {
+  if (_mdsGenerating) return;
+  const descEl = document.getElementById('mds-gen-desc');
+  const paramsEl = document.getElementById('mds-gen-params');
+  const btn = document.getElementById('mds-gen-btn');
+  const desc = descEl?.value?.trim();
+  if (!desc) { _mdsToast('請先填寫描述', 'error'); return; }
+
+  // If no id yet, we need to create first or generate on a temp basis
+  if (!_mdsEditingId) {
+    const name = document.getElementById('mds-name')?.value?.trim();
+    if (!name) { _mdsToast('請先填寫名稱', 'error'); return; }
+    // Auto-save to get an id
+    const created = await _mdsSaveAndGetId();
+    if (!created) return;
+  }
+
+  _mdsGenerating = true;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 生成中...'; }
+
+  let sampleParams = null;
+  try { sampleParams = JSON.parse(paramsEl?.value || 'null'); } catch {}
+
+  try {
+    const r = await _api('POST', `/mock-data/${_mdsEditingId}/generate-code`, { description: desc, sample_params: sampleParams });
+    const item = r?.mock_data_source || r?.data?.mock_data_source;
+    if (item?.python_code) {
+      const codeEl = document.getElementById('mds-python-code');
+      if (codeEl) codeEl.value = item.python_code;
+    }
+    if (item?.input_schema) {
+      const schemaEl = document.getElementById('mds-input-schema');
+      if (schemaEl) {
+        try { schemaEl.value = JSON.stringify(JSON.parse(item.input_schema), null, 2); }
+        catch { schemaEl.value = item.input_schema; }
+      }
+    }
+    // Update list cache
+    const idx = _mdsList.findIndex(m => m.id === _mdsEditingId);
+    if (idx >= 0) _mdsList[idx] = item;
+    else _mdsList.unshift(item);
+
+    _mdsToast('✨ AI 程式碼生成完成！請檢視後儲存', 'success');
+    const sampleParamsResult = r?.sample_params || r?.data?.sample_params;
+    if (sampleParamsResult) {
+      const sp = JSON.stringify(sampleParamsResult);
+      if (paramsEl) paramsEl.value = sp;
+    }
+  } catch (e) {
+    _mdsToast(`生成失敗: ${e.message}`, 'error');
+  } finally {
+    _mdsGenerating = false;
+    if (btn) { btn.disabled = false; btn.textContent = '🤖 AI 生成'; }
+  }
+}
+
+async function _mdsSaveAndGetId() {
+  const name = document.getElementById('mds-name')?.value?.trim();
+  const desc = document.getElementById('mds-desc')?.value?.trim() || '';
+  if (!name) { _mdsToast('請填寫名稱', 'error'); return null; }
+  try {
+    const r = await _api('POST', '/mock-data', { name, description: desc, is_active: true });
+    const item = r?.id ? r : r?.data;
+    _mdsEditingId = item.id;
+    _mdsList.unshift(item);
+    return item;
+  } catch (e) {
+    _mdsToast(`建立失敗: ${e.message}`, 'error');
+    return null;
+  }
+}
+
+async function _mdsSave() {
+  const name = document.getElementById('mds-name')?.value?.trim();
+  const desc = document.getElementById('mds-desc')?.value?.trim() || '';
+  const isActive = document.getElementById('mds-active')?.checked ?? true;
+  const inputSchema = document.getElementById('mds-input-schema')?.value?.trim() || null;
+  const pythonCode = document.getElementById('mds-python-code')?.value?.trim() || null;
+
+  if (!name) { _mdsToast('請填寫名稱', 'error'); return; }
+
+  const payload = { name, description: desc, is_active: isActive, input_schema: inputSchema, python_code: pythonCode };
+
+  try {
+    let r;
+    if (_mdsEditingId) {
+      r = await _api('PATCH', `/mock-data/${_mdsEditingId}`, payload);
+      const item = r?.id ? r : r?.data;
+      const idx = _mdsList.findIndex(m => m.id === _mdsEditingId);
+      if (idx >= 0) _mdsList[idx] = item;
+    } else {
+      r = await _api('POST', '/mock-data', payload);
+      const item = r?.id ? r : r?.data;
+      _mdsList.unshift(item);
+    }
+    _mdsToast('✅ 儲存成功', 'success');
+    closeDrawer();
+    _mdsRenderList();
+  } catch (e) {
+    _mdsToast(`儲存失敗: ${e.message}`, 'error');
+  }
+}
+
+async function _mdsTestRun(id) {
+  if (_mdsRunning) return;
+  const item = _mdsList.find(m => m.id === id);
+  if (!item) return;
+
+  // Build params from input_schema
+  let params = {};
+  if (item.input_schema) {
+    try {
+      const schema = JSON.parse(item.input_schema);
+      // Prompt user for required params if any
+      const required = (schema.fields || []).filter(f => f.required);
+      if (required.length > 0) {
+        const paramsStr = prompt(
+          `請輸入測試參數 JSON:\n必填欄位: ${required.map(f => f.name).join(', ')}\n\n範例: ${JSON.stringify(Object.fromEntries(required.map(f => [f.name, 'test_value'])))}`,
+          JSON.stringify(Object.fromEntries(required.map(f => [f.name, ''])))
+        );
+        if (paramsStr === null) return;
+        try { params = JSON.parse(paramsStr); } catch { _mdsToast('JSON 格式錯誤', 'error'); return; }
+      }
+    } catch {}
+  }
+
+  _mdsRunning = true;
+  _mdsToast('▶ 執行中...', 'info');
+
+  try {
+    const r = await _api('POST', `/mock-data/${id}/run`, { params });
+    const dataset = r?.dataset || r?.data?.dataset;
+    const rows = Array.isArray(dataset) ? dataset : [dataset];
+
+    // Update sample_output in list cache
+    const idx = _mdsList.findIndex(m => m.id === id);
+    if (idx >= 0) _mdsList[idx].sample_output = JSON.stringify(rows.slice(0, 20));
+
+    // Show result in a new drawer
+    _mdsEditingId = id;
+    _setDrawerContent(
+      `▶ 試執行結果：${item.name}`,
+      `<div class="space-y-4">
+        <div class="flex items-center gap-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+          <span class="text-emerald-700 text-sm font-semibold">✅ 執行成功 — ${rows.length} 筆資料</span>
+        </div>
+        <div>
+          <label class="label-sm">Endpoint URL</label>
+          <code class="block text-xs bg-slate-900 text-green-300 rounded-lg px-3 py-2 font-mono"
+            >POST /api/v1/mock-data/${id}/run</code>
+        </div>
+        <div>
+          <label class="label-sm">輸出資料（前 10 筆）</label>
+          <pre class="bg-slate-900 text-green-300 rounded-lg p-3 text-[10px] font-mono overflow-auto max-h-96 border border-slate-700">${JSON.stringify(rows.slice(0, 10), null, 2)}</pre>
+        </div>
+      </div>`,
+      `<button onclick="closeDrawer()" class="builder-btn-secondary text-sm px-4 py-2">關閉</button>
+       <button onclick="_mdsOpenEdit(${id})" class="builder-btn-primary text-sm px-4 py-2">編輯程式碼</button>`
+    );
+    if (!document.getElementById('drawer').classList.contains('drawer-open')) {
+      document.getElementById('drawer-overlay')?.classList.remove('hidden');
+      document.getElementById('drawer')?.classList.add('drawer-open');
+    }
+  } catch (e) {
+    _mdsToast(`執行失敗: ${e.message}`, 'error');
+  } finally {
+    _mdsRunning = false;
+  }
+}
+
