@@ -35,6 +35,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.models.agent_session import AgentSessionModel
+from app.models.mcp_definition import MCPDefinitionModel
+from app.models.skill_definition import SkillDefinitionModel
 from app.services.agent_memory_service import AgentMemoryService
 from app.services.context_loader import ContextLoader
 from app.services.tool_dispatcher import TOOL_SCHEMAS, ToolDispatcher
@@ -44,6 +46,75 @@ logger = logging.getLogger(__name__)
 MAX_ITERATIONS = 5
 _SESSION_TTL_HOURS = 24
 _SESSION_MAX_MESSAGES = 20  # keep last 20 messages (~10 turns) to limit tokens
+
+
+async def _preflight_validate(
+    db: AsyncSession,
+    tool_name: str,
+    tool_input: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Pre-flight validation (spec §3-A) — intercept ambiguous/missing params before execution.
+
+    Returns an error dict (injected as tool_result) when validation fails so the LLM
+    is forced to ask the user for clarification instead of proceeding blindly.
+    Returns None when the call is safe to execute.
+    """
+    if tool_name == "execute_mcp":
+        mcp_id = tool_input.get("mcp_id")
+        if not mcp_id:
+            return {
+                "status": "error", "code": "MISSING_MCP_ID",
+                "message": "⚠️ execute_mcp 缺少 mcp_id。請先呼叫 list_mcps 確認正確的 MCP ID 後再重試。",
+            }
+        result = await db.execute(select(MCPDefinitionModel).where(MCPDefinitionModel.id == mcp_id))
+        mcp = result.scalar_one_or_none()
+        if not mcp:
+            return {
+                "status": "error", "code": "MCP_NOT_FOUND",
+                "message": f"⚠️ MCP #{mcp_id} 不存在。請呼叫 list_mcps 取得有效的 MCP 列表後重試。",
+            }
+        # Resolve system MCP to get required input_schema
+        sys_id = getattr(mcp, "system_mcp_id", None) or getattr(mcp, "data_subject_id", None)
+        if sys_id:
+            sys_result = await db.execute(
+                select(MCPDefinitionModel).where(MCPDefinitionModel.id == sys_id)
+            )
+            sys_mcp = sys_result.scalar_one_or_none()
+            if sys_mcp and sys_mcp.input_schema:
+                try:
+                    schema = json.loads(sys_mcp.input_schema) if isinstance(sys_mcp.input_schema, str) else sys_mcp.input_schema
+                    required = [f["name"] for f in schema.get("fields", []) if f.get("required")]
+                    provided = tool_input.get("params") or {}
+                    missing = [k for k in required if k not in provided or not provided[k]]
+                    if missing:
+                        return {
+                            "status": "error", "code": "MISSING_PARAMS",
+                            "message": (
+                                f"⚠️ MCP「{mcp.name}」缺少必填查詢參數：{missing}。"
+                                f"請向用戶確認這些參數的值後再重試。"
+                            ),
+                            "missing_params": missing,
+                            "required_params": required,
+                        }
+                except Exception:
+                    pass
+
+    elif tool_name == "execute_skill":
+        skill_id = tool_input.get("skill_id")
+        if not skill_id:
+            return {
+                "status": "error", "code": "MISSING_SKILL_ID",
+                "message": "⚠️ execute_skill 缺少 skill_id。請先呼叫 list_skills 確認正確的 Skill ID 後再重試。",
+            }
+        result = await db.execute(select(SkillDefinitionModel).where(SkillDefinitionModel.id == skill_id))
+        skill = result.scalar_one_or_none()
+        if not skill:
+            return {
+                "status": "error", "code": "SKILL_NOT_FOUND",
+                "message": f"⚠️ Skill #{skill_id} 不存在。請呼叫 list_skills 取得有效的 Skill 列表後重試。",
+            }
+
+    return None  # validation passed
 
 
 _TOOL_RESULT_MAX_CHARS = 2000  # hard cap per tool_result when stored/loaded
@@ -367,7 +438,12 @@ class AgentOrchestrator:
                         "iteration": iteration,
                     }
 
-                    result = await dispatcher.execute(tool_name, tool_input)
+                    # ── Pre-flight validation (spec §3-A) ─────────────────
+                    preflight_err = await _preflight_validate(self._db, tool_name, tool_input)
+                    if preflight_err:
+                        result = preflight_err
+                    else:
+                        result = await dispatcher.execute(tool_name, tool_input)
 
                     # Capture ABNORMAL diagnosis for memory auto-write
                     if tool_name == "execute_skill" and isinstance(result, dict):

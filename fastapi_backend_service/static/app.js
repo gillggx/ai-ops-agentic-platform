@@ -1981,7 +1981,7 @@ function _renderCopilotMcpPanel(ev) {
   const evidenceHtml = _renderMcpEvidence(ev.mcp_output);
 
   const contentHtml = `
-    <div class="p-4 overflow-y-auto flex-1">
+    <div class="p-4">
       <div class="flex items-center gap-2 mb-3">
         <span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-700">MCP 查詢</span>
         <span class="text-sm font-semibold text-slate-800">${_escapeHtml(ev.mcp_name || '')}</span>
@@ -2003,7 +2003,7 @@ function _renderCopilotSkillPanel(ev) {
   const tabId    = `skill-${Date.now()}`;
   const tabTitle = ev.tab_title || `${icon} ${ev.skill_name || 'Skill 診斷'}`;
 
-  const contentHtml = `<div class="p-4 overflow-y-auto flex-1">${_renderSkillBlock(ev)}</div>`;
+  const contentHtml = `<div class="p-4">${_renderSkillBlock(ev)}</div>`;
 
   const { panel } = _createWorkspaceTab(tabId, tabTitle, contentHtml);
   requestAnimationFrame(() => _initChartsInCard(panel));
@@ -2021,15 +2021,8 @@ function _renderAiAnalysisPanel(markdownContent) {
     : markdownContent.replace(/\n/g, '<br>');
   document.getElementById('ws-analysis-placeholder')?.remove();
   content.innerHTML = `
-    <div class="p-4">
-      <div class="prose prose-sm max-w-none text-slate-800
-                  [&_table]:w-full [&_table]:border-collapse [&_table]:text-xs
-                  [&_th]:bg-slate-100 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_th]:border [&_th]:border-slate-200
-                  [&_td]:px-3 [&_td]:py-1.5 [&_td]:border [&_td]:border-slate-200
-                  [&_h3]:text-sm [&_h3]:font-bold [&_h3]:text-slate-700 [&_h3]:mt-4 [&_h3]:mb-2
-                  [&_strong]:text-slate-900">
-        ${rendered}
-      </div>
+    <div class="p-4 text-sm text-slate-700 leading-relaxed ai-analysis-body">
+      ${rendered}
     </div>`;
 }
 
