@@ -7282,7 +7282,8 @@ async function _mdsGenerateCode() {
 
 async function _mdsSaveAndGetId() {
   const name = document.getElementById('mds-name')?.value?.trim();
-  const desc = document.getElementById('mds-desc')?.value?.trim() || '';
+  const genDesc = document.getElementById('mds-gen-desc')?.value?.trim();
+  const desc = genDesc || document.getElementById('mds-desc')?.value?.trim() || '';
   if (!name) { _mdsToast('請填寫名稱', 'error'); return null; }
   try {
     const r = await _api('POST', '/mock-data', { name, description: desc, is_active: true });
@@ -7300,7 +7301,10 @@ async function _mdsSaveAndGetId() {
 
 async function _mdsSave() {
   const name = document.getElementById('mds-name')?.value?.trim();
-  const desc = document.getElementById('mds-desc')?.value?.trim() || '';
+  // Prefer Step 1 AI-description textarea; fall back to the brief 說明 field
+  const genDesc = document.getElementById('mds-gen-desc')?.value?.trim();
+  const shortDesc = document.getElementById('mds-desc')?.value?.trim();
+  const desc = genDesc || shortDesc || '';
   const isActive = document.getElementById('mds-active')?.checked ?? true;
   const inputSchema = document.getElementById('mds-input-schema')?.value?.trim() || null;
   const pythonCode = document.getElementById('mds-python-code')?.value?.trim() || null;
