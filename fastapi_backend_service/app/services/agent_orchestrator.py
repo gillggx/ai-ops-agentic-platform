@@ -238,6 +238,26 @@ def _trim_for_llm(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
         trimmed: Dict[str, Any] = {k: result[k] for k in ("status", "mcp_id", "llm_readable_data") if k in result}
         trimmed.update(_dataset_summary(dataset) if dataset else {"dataset_summary": "(無資料)", "sample_data": []})
         return trimmed
+    if tool_name in ("list_skills", "list_mcps", "list_system_mcps"):
+        _HEAVY_FIELDS = ("last_diagnosis_result", "diagnostic_prompt", "param_mappings",
+                         "processing_script", "api_config", "generated_code", "check_output_schema")
+        items = result.get("data") or result.get("items") or []
+        if not isinstance(items, list):
+            return result
+        trimmed_items = []
+        for item in items[:12]:
+            if isinstance(item, dict):
+                trimmed_items.append({k: v for k, v in item.items() if k not in _HEAVY_FIELDS})
+            else:
+                trimmed_items.append(item)
+        base = {k: v for k, v in result.items() if k not in ("data", "items")}
+        if "data" in result:
+            base["data"] = trimmed_items
+        else:
+            base["items"] = trimmed_items
+        if len(items) > 12:
+            base["_truncated"] = True
+        return base
     if "data" in result and isinstance(result.get("data"), list) and len(result["data"]) > 8:
         return {**result, "data": result["data"][:8], "_truncated": True}
     return result
