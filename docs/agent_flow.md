@@ -47,7 +47,9 @@ User Message
 |----|------|------|
 | **Soul（鐵律）** | `SystemParameter.AGENT_SOUL_PROMPT` → 使用者覆寫 → 程式預設 | 不可違反的行為規則：診斷優先序（先 Skill→再 MCP→才草稿）、禁止猜測參數、禁止解析 `ui_render_payload`、記憶引用需標注等 |
 | **UserPref（個人偏好）** | `user_preferences` 資料表 | 使用者偏好語言、報告格式等（透過 `update_user_preference` 工具更新） |
-| **Dynamic Memory（RAG）** | `agent_memory` 向量資料表，以使用者訊息做 keyword 搜尋，取 top-5 相關記憶 | 歷史診斷結果、使用者曾說的事情，例如「[記憶] TETCH01 於 2026-03-01 出現 APC 飽和異常」 |
+| **Dynamic Memory（RAG）** | `agent_memory` 資料表，以使用者訊息做 **keyword 搜尋**，取 top-5 相關記憶 | 歷史診斷結果、使用者曾說的事情，例如「[記憶] TETCH01 於 2026-03-01 出現 APC 飽和異常」 |
+
+> **⚠️ 實作備註 — RAG 搜尋方式**：目前（SQLite dev 環境）使用 **keyword-based** 搜尋（`LIKE` 查詢）。程式碼已預留 prod 路徑（PostgreSQL + pgvector 餘弦相似度），升級時僅需替換 `AgentMemoryService.search()` 實作，上層邏輯不變。
 
 **SPC 場景**：「幫我做 SPC 的檢查」這句話會觸發對 `agent_memory` 的搜尋，若過去有執行過 SPC 相關診斷，該結果會被注入到 `<dynamic_memory>`，讓 LLM 知道上次的情況。
 
@@ -55,6 +57,8 @@ User Message
 
 - **Session History**：從 `AgentSessionModel` 載入同一 `session_id` 的前 N 輪對話記錄（最多保留 20 則，`_SESSION_MAX_MESSAGES = 20`），確保多輪對話的連貫性。
 - **Tool Schemas**：`TOOL_SCHEMAS`（來自 `tool_dispatcher.py`）同步提供給 LLM，讓它知道有哪些工具可以呼叫。
+
+> **⚠️ 實作備註 — Extended Thinking**：`_extract_thinking()` 函式已實作（解析 `<thinking>` blocks），但 `messages.create()` 中尚未傳入 `betas=["thinking"]` 參數，目前 LLM **不會**產生 thinking block。此為未來啟用 Extended Thinking 的預留接口，啟用時無需改動其他邏輯。
 
 **SSE 事件**：`{ type: "context_load", rag_count: 2, soul_preview: "...", history_turns: 3 }`
 
@@ -202,6 +206,16 @@ mem = await self._memory_svc.write_diagnosis(
 
 下次相同用戶問起 TETCH01 相關問題，這條記憶會被 RAG 撈出注入 `<dynamic_memory>`。
 
+> **⚠️ 實作備註 — 自動記憶寫入的觸發機制**：
+> 此觸發邏輯寫在 `AgentOrchestrator._run_impl()` 的 **Python 程式碼**中（Stage 3 擷取，Stage 5 寫入），**不受 Soul（鐵律）控制**。
+> Soul 是 LLM 的 System Prompt，只能影響 LLM 的行為（例如指示 LLM 何時主動呼叫 `save_memory` 工具）；但 ABNORMAL 自動寫入是 Python 層的 hardcode 邏輯，LLM 看不到、也無法阻止它。
+>
+> **若想讓此行為可設定**，需在程式碼中加入開關，例如：
+> - `SystemParameter` 中新增 `AUTO_MEMORY_WRITE = true/false`
+> - 或在 `UserPreferenceModel` 加一個 `auto_memory` 欄位
+>
+> 目前**所有 ABNORMAL 診斷都會自動記錄**，無法透過 Soul 修改此行為。
+
 **SSE 事件**：`{ type: "memory_write", content: "TETCH01 SPC 異常...", memory_id: 42 }`
 
 ### 前端輸出
@@ -265,3 +279,49 @@ AgentOrchestrator.run()          # 總控，SSE 串流
                   ABNORMAL 結果自動寫入長期記憶
                   Session 寫回 AgentSessionModel
 ```
+
+---
+
+## Q&A — 常見問題
+
+### Q1：這些功能都是已完成實作的嗎？
+
+> **提問**：這些都是我們目前已經完成的嗎？
+
+**A：是的，全部皆已實作並運作中。** 以下兩個細節需補充說明：
+
+| 項目 | 狀態 |
+|------|------|
+| RAG 記憶搜尋 | ✅ 實作，**目前為 keyword-based**（SQLite `LIKE`）。文件正確反映此現況。Prod 升級至 pgvector 時只需替換 `AgentMemoryService.search()` |
+| Extended Thinking | ✅ `_extract_thinking()` 程式碼存在，但 `messages.create()` **未傳入** `betas=["thinking"]`，LLM 目前不產生 thinking block。為未來預留的接口 |
+| 其餘所有功能 | ✅ 完整實作且確認運作 |
+
+---
+
+### Q2：「只要偵測到異常就自動記錄」可以用鐵律（Soul）控制嗎？
+
+> **提問**：目前是只要偵測異常就會記錄，這個是用鐵律可以改變的嗎？
+
+**A：不行，鐵律（Soul）無法改變此行為。**
+
+原因：ABNORMAL 自動寫入記憶的邏輯寫在 `AgentOrchestrator._run_impl()` 的 **Python 程式碼**中，是平台層的 hardcode 行為：
+
+```python
+# agent_orchestrator.py Stage 3 — 擷取 ABNORMAL 結果
+if tool_name == "execute_skill" and lrd.get("status") == "ABNORMAL":
+    _new_diagnosis = { ... }  # 標記待寫入
+
+# Stage 5 — 無條件寫入，LLM 看不到這段
+if _new_diagnosis:
+    await self._memory_svc.write_diagnosis(...)
+```
+
+**Soul（鐵律）是 LLM 的 System Prompt**，只能影響 LLM 的決策行為（例如：什麼時候主動呼叫 `save_memory` 工具、記憶引用要加 `[記憶]` 前綴等）。Python 層的自動寫入在 LLM 呼叫之外執行，LLM 對它毫無感知。
+
+**若需要讓此行為可設定，方法如下：**
+
+1. **全域開關**：在 `SystemParameter` 新增 `AUTO_MEMORY_ON_ABNORMAL = true/false`，Stage 5 讀取後決定是否執行
+2. **個人設定**：在 `UserPreferenceModel` 加 `auto_memory_enabled: bool` 欄位，讓每個用戶自己決定
+3. **條件過濾**：只記錄特定 Skill 或特定 problem_subject 的 ABNORMAL（例如只記錄設備相關異常）
+
+目前**沒有開關**，所有 ABNORMAL 診斷都會被自動記錄。
