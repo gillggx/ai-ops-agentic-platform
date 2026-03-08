@@ -7126,23 +7126,27 @@ async function _mdsRunPlayground(id) {
   }
 
   try {
-    // Use MCP try-run endpoint with the raw data and processing intent
-    // We send the raw rows as sample_data (same as MCP Builder try-run)
-    const r = await _api('POST', '/mcp-definitions/try-run', {
+    // Use dedicated playground endpoint — no DataSubject DB lookup required
+    const r = await _api('POST', `/mock-data/${id}/playground`, {
       processing_intent: intent,
-      sample_data: rows,
-      data_subject_name: item?.name || 'Mock Data',
-      data_subject_output_schema: JSON.stringify({ fields: Object.keys(rows[0] || {}).map(k => ({ name: k, type: typeof rows[0][k] })) }),
+      params: {},
     });
 
     const resultEl = document.getElementById('mds-playground-result');
     if (!resultEl) return;
     resultEl.classList.remove('hidden');
 
+    // Check for failure
+    if (r?.success === false || r?.data?.success === false) {
+      const errMsg = r?.data?.error || r?.message || '未知錯誤';
+      resultEl.innerHTML = `<div class="p-3 bg-red-50 border border-red-200 rounded-xl"><p class="text-xs font-semibold text-red-700">❌ 執行失敗</p><p class="text-[10px] text-red-500 mt-1 font-mono">${errMsg}</p></div>`;
+      return;
+    }
+
     // Show generated code + result
-    const code = r?.processing_script || r?.data?.processing_script || '';
-    const outputDataset = r?.output_data || r?.data?.output_data || r?.data || {};
-    const chartData = outputDataset?.ui_render?.chart_data || null;
+    const code = r?.script || r?.data?.script || '';
+    const outputData = r?.output_data || r?.data?.output_data || {};
+    const chartData = outputData?.ui_render?.chart_data || null;
 
     resultEl.innerHTML = `
       <div class="space-y-3">

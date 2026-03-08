@@ -23,6 +23,8 @@ from app.schemas.mock_data_source import (
     MockDataSourceUpdate,
 )
 from app.services.mock_data_studio_service import MockDataStudioService, execute_generate_fn
+from app.services.mcp_builder_service import MCPBuilderService
+from app.services.sandbox_service import execute_script
 
 router = APIRouter(prefix="/mock-data", tags=["mock-data-studio"])
 
@@ -256,6 +258,102 @@ async def generate_code_for_mock(
         data={
             "mock_data_source": _to_response(m).model_dump(),
             "sample_params": result.get("sample_params", {}),
+        },
+    )
+
+
+# ── Playground: LLM design processing logic on mock data ─────────────────────
+
+class PlaygroundRequest(BaseModel):
+    processing_intent: str
+    params: dict = {}
+
+
+def _derive_schema(rows: List[Any]) -> dict:
+    """Derive a simple output_schema dict from the first row of data."""
+    if not rows:
+        return {"fields": []}
+    first = rows[0] if isinstance(rows[0], dict) else {}
+    fields = []
+    for k, v in first.items():
+        t = "number" if isinstance(v, (int, float)) else "boolean" if isinstance(v, bool) else "string"
+        fields.append({"name": k, "type": t, "description": ""})
+    return {"fields": fields}
+
+
+@router.post("/{mock_id}/playground", response_model=StandardResponse)
+async def playground_run(
+    mock_id: int,
+    body: PlaygroundRequest,
+    db: AsyncSession = Depends(get_db),
+    _user: UserModel = Depends(get_current_user),
+):
+    """Run LLM-designed processing logic on mock data rows.
+
+    Does NOT require a DataSubject — derives schema directly from mock data rows.
+    Flow: generate(params) → derive schema → LLM script → sandbox execute → return.
+    """
+    m = await db.get(MockDataSourceModel, mock_id)
+    if not m:
+        raise _app_err(404, "Not found", "NOT_FOUND")
+
+    # Step 1: Get raw rows
+    rows: List[Any] = []
+    if m.python_code:
+        try:
+            dataset = await execute_generate_fn(m.python_code, body.params)
+            rows = dataset if isinstance(dataset, list) else [dataset]
+        except Exception as e:
+            raise _app_err(422, f"generate() 執行失敗: {e}", "SANDBOX_ERROR")
+    elif m.sample_output:
+        try:
+            rows = json.loads(m.sample_output)
+        except json.JSONDecodeError:
+            pass
+
+    if not rows:
+        raise _app_err(400, "尚無資料可處理，請先生成程式碼或執行試跑", "NO_DATA")
+
+    # Step 2: Derive schema from actual row structure
+    output_schema = _derive_schema(rows)
+
+    # Step 3: Ask LLM to generate processing script
+    builder = MCPBuilderService()
+    try:
+        result = await builder.generate_for_try_run(
+            processing_intent=body.processing_intent,
+            data_subject_name=m.name,
+            data_subject_output_schema=output_schema,
+        )
+    except Exception as e:
+        raise _app_err(500, f"LLM 生成失敗: {e}", "LLM_ERROR")
+
+    script = result.get("processing_script", "")
+    if not script or "def process" not in script:
+        return StandardResponse(
+            status="error",
+            message=result.get("processing_script", "LLM 未生成可用腳本"),
+            data={"success": False, "error": result.get("processing_script", "")},
+        )
+
+    # Step 4: Execute script in sandbox
+    try:
+        output_data = await execute_script(script, rows)
+    except (ValueError, TimeoutError) as e:
+        return StandardResponse(
+            status="success",
+            message="沙盒執行失敗",
+            data={"success": False, "script": script, "error": str(e)},
+        )
+
+    return StandardResponse(
+        status="success",
+        message="Playground 執行完成",
+        data={
+            "success": True,
+            "script": script,
+            "output_data": output_data,
+            "row_count": len(rows),
         },
     )
 
