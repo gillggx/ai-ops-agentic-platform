@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 5
 _SESSION_TTL_HOURS = 24
-_SESSION_MAX_MESSAGES = 20  # keep last 20 messages (~10 turns) to limit tokens
+_SESSION_MAX_MESSAGES = 12  # keep last 12 messages (~6 turns) to limit tokens
 
 
 async def _preflight_validate(
@@ -101,8 +101,8 @@ async def _preflight_validate(
                     return {
                         "status": "error", "code": "MISSING_PARAMS",
                         "message": (
-                            f"⚠️ MCP「{mcp.name}」有以下可用查詢參數：{all_field_names}。"
-                            f"請向用戶確認要查詢的值後再重試（不帶參數會回傳全部資料，可能不是用戶想要的）。"
+                            f"⛔ [STOP — 禁止再次呼叫 execute_mcp] MCP「{mcp.name}」有以下可用查詢參數：{all_field_names}。"
+                            f"你必須立即停止工具呼叫，直接以文字訊息向用戶詢問他想查詢的值，等待用戶回答後才能繼續。"
                         ),
                         "available_params": all_field_names,
                     }
@@ -110,8 +110,8 @@ async def _preflight_validate(
                     return {
                         "status": "error", "code": "MISSING_PARAMS",
                         "message": (
-                            f"⚠️ MCP「{mcp.name}」缺少必填查詢參數：{missing}。"
-                            f"請向用戶確認這些參數的值後再重試。"
+                            f"⛔ [STOP — 禁止再次呼叫 execute_mcp] MCP「{mcp.name}」缺少必填查詢參數：{missing}。"
+                            f"你必須立即停止工具呼叫，直接以文字訊息向用戶詢問這些參數的值，等待用戶回答後才能繼續。"
                         ),
                         "missing_params": missing,
                         "required_params": required,
@@ -137,7 +137,7 @@ async def _preflight_validate(
     return None  # validation passed
 
 
-_TOOL_RESULT_MAX_CHARS = 2000  # hard cap per tool_result when stored/loaded
+_TOOL_RESULT_MAX_CHARS = 1500  # hard cap per tool_result when stored/loaded
 
 
 def _sanitize_history(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -204,30 +204,28 @@ def _clean_history_boundary(messages: List[Dict[str, Any]]) -> List[Dict[str, An
 
 
 def _dataset_summary(dataset: List[Any]) -> Dict[str, Any]:
-    """Build a compact summary for large datasets (spec 1.1)."""
+    """Build a compact summary for large datasets — no raw rows sent to LLM."""
     n = len(dataset)
-    sample = dataset[:5]
     stats_parts: List[str] = [f"總共 {n} 筆資料"]
     if n > 0 and isinstance(dataset[0], dict):
+        columns = list(dataset[0].keys())
+        stats_parts.append(f"欄位: {', '.join(columns[:10])}")
         for key, val in dataset[0].items():
             if isinstance(val, (int, float)):
                 vals = [r.get(key) for r in dataset if isinstance(r.get(key), (int, float))]
                 if vals:
                     avg = sum(vals) / len(vals)
                     stats_parts.append(f"{key} 平均值 {avg:.3f}")
-                    break  # one stat is enough for context
-    return {
-        "dataset_summary": "。".join(stats_parts) + f"。已截斷，僅顯示前 {len(sample)} 筆供結構參考。",
-        "sample_data": sample,
-    }
+                    break
+    return {"dataset_summary": "。".join(stats_parts) + "。"}
 
 
 def _trim_for_llm(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
     """Strip large rendering payloads from tool results before sending to LLM (v13.3 §1.1).
 
     execute_skill → only llm_readable_data (structured status/targets)
-    execute_mcp   → llm_readable_data + dataset_summary (count + avg) + 5 sample rows
-    list_*        → keep first 8 items, add _truncated flag
+    execute_mcp   → llm_readable_data + dataset_summary (count + columns + avg)
+    list_*        → keep first 12 items, strip heavy fields
     others        → passthrough
     """
     if tool_name == "execute_skill":
@@ -236,18 +234,24 @@ def _trim_for_llm(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
         od = result.get("output_data") or {}
         dataset = od.get("dataset") or []
         trimmed: Dict[str, Any] = {k: result[k] for k in ("status", "mcp_id", "llm_readable_data") if k in result}
-        trimmed.update(_dataset_summary(dataset) if dataset else {"dataset_summary": "(無資料)", "sample_data": []})
+        trimmed.update(_dataset_summary(dataset) if dataset else {"dataset_summary": "(無資料)"})
         return trimmed
     if tool_name in ("list_skills", "list_mcps", "list_system_mcps"):
         _HEAVY_FIELDS = ("last_diagnosis_result", "diagnostic_prompt", "param_mappings",
-                         "processing_script", "api_config", "generated_code", "check_output_schema")
+                         "processing_script", "api_config", "generated_code", "check_output_schema",
+                         "sample_output", "ui_render_config", "input_definition")
         items = result.get("data") or result.get("items") or []
         if not isinstance(items, list):
             return result
         trimmed_items = []
         for item in items[:12]:
             if isinstance(item, dict):
-                trimmed_items.append({k: v for k, v in item.items() if k not in _HEAVY_FIELDS})
+                clean = {k: v for k, v in item.items() if k not in _HEAVY_FIELDS}
+                # Truncate long text fields to keep catalog compact
+                for field in ("processing_intent", "description"):
+                    if isinstance(clean.get(field), str) and len(clean[field]) > 300:
+                        clean[field] = clean[field][:300] + "…"
+                trimmed_items.append(clean)
             else:
                 trimmed_items.append(item)
         base = {k: v for k, v in result.items() if k not in ("data", "items")}
@@ -505,6 +509,7 @@ class AgentOrchestrator:
                 messages.append({"role": "assistant", "content": _content_to_list(response.content)})
 
                 tool_results = []
+                _force_synthesis = False  # set when an error requires user action
                 for tc in tool_calls:
                     tool_id = tc.id if hasattr(tc, "id") else tc.get("id", "")
                     tool_name = tc.name if hasattr(tc, "name") else tc.get("name", "")
@@ -523,6 +528,16 @@ class AgentOrchestrator:
                         result = preflight_err
                     else:
                         result = await dispatcher.execute(tool_name, tool_input)
+
+                    # ── Detect unrecoverable errors → force synthesis ──────
+                    # Any execute_mcp/execute_skill error cannot be resolved by
+                    # the agent alone — it must ask the user or report the failure.
+                    if isinstance(result, dict) and result.get("status") == "error":
+                        if tool_name in ("execute_mcp", "execute_skill"):
+                            _force_synthesis = True
+                    # MISSING_PARAMS from preflight also requires force synthesis
+                    if isinstance(result, dict) and result.get("code") == "MISSING_PARAMS":
+                        _force_synthesis = True
 
                     # Capture ABNORMAL diagnosis for memory auto-write
                     if tool_name == "execute_skill" and isinstance(result, dict):
@@ -553,6 +568,25 @@ class AgentOrchestrator:
                     })
 
                 messages.append({"role": "user", "content": tool_results})
+
+                # ── Force synthesis: unrecoverable error → ask user, stop retrying ──
+                if _force_synthesis:
+                    try:
+                        synth_resp = await self._client.messages.create(
+                            model=self._model,
+                            max_tokens=512,
+                            system=system_prompt,
+                            tool_choice={"type": "none"},
+                            tools=TOOL_SCHEMAS,
+                            messages=messages,
+                        )
+                        final_text = _extract_text(synth_resp.content)
+                        yield {"type": "synthesis", "text": final_text}
+                        messages.append({"role": "assistant", "content": _content_to_list(synth_resp.content)})
+                    except Exception as exc:
+                        yield {"type": "synthesis", "text": f"執行失敗，請確認參數後再試一次。（{exc}）"}
+                    break
+
                 continue
 
             # Unexpected stop reason

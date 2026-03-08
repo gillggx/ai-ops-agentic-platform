@@ -2019,7 +2019,9 @@ async function _saveMCP(id) {
     body.output_schema     = _tryRunResult.output_schema;
     body.ui_render_config  = _tryRunResult.ui_render_config;
     body.input_definition  = _tryRunResult.input_definition;
-    body.sample_output     = _tryRunResult.output_data;
+    // Cap sample_output to 20 rows to prevent DB/LLM token bloat
+    const _od = _tryRunResult.output_data || {};
+    body.sample_output = { ..._od, dataset: (_od.dataset || []).slice(0, 20), _raw_dataset: undefined };
   }
 
   try {

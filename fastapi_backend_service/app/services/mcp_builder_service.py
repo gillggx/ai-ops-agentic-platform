@@ -841,6 +841,24 @@ DataSubject 名稱：{data_subject_name}
         event_attributes = event_attributes or []
 
         # ── Step 1: LLM generates diagnostic Python code ─────────────────────
+        # Build a compact schema preview that mirrors the REAL runtime structure.
+        # The generated diagnose() will be executed against mcp_sample_outputs which has
+        # {"mcp_name": {"dataset": [...full rows...], ...}}.
+        # Show only 3 sample rows under the same "dataset" key so the LLM writes correct accessors.
+        def _schema_preview(outputs: Dict[str, Any]) -> Dict[str, Any]:
+            preview = {}
+            for mcp_name, mcp_data in outputs.items():
+                if not isinstance(mcp_data, dict):
+                    preview[mcp_name] = mcp_data
+                    continue
+                dataset = mcp_data.get("dataset") or []
+                preview[mcp_name] = {
+                    "dataset": dataset[:3],           # same key as runtime; 3 rows for schema ref
+                    "_total_rows": len(dataset),      # hint: full dataset available at runtime
+                }
+            return preview
+
+        mcp_schema = _schema_preview(mcp_sample_outputs)
         code_prompt = f"""你是半導體製程智能診斷工程師。請根據以下信息，撰寫一個 Python 診斷函式。
 
 【觸發此 Skill 的事件屬性（診斷背景參考）】
@@ -852,36 +870,36 @@ DataSubject 名稱：{data_subject_name}
 【異常判斷條件（Diagnostic Prompt）】
 {diagnostic_prompt}
 
-【MCP 輸出資料樣本（函式輸入格式，僅供參考欄位結構）】
-{json.dumps(mcp_sample_outputs, ensure_ascii=False, indent=2)}
+【MCP 輸出資料結構（僅顯示前 3 筆供欄位參考；執行時 dataset 包含完整資料，通過 mcp_outputs[mcp_name]["dataset"] 存取）】
+{json.dumps(mcp_schema, ensure_ascii=False, indent=2)}
 
-請撰寫一個 Python 函式 `diagnose(mcp_outputs: dict) -> dict`：
-- mcp_outputs 的結構與上方 MCP 輸出資料樣本完全相同（診斷函式只做邏輯判斷，不用重新處理 MCP 原始資料）
-- 根據「異常判斷條件」對 mcp_outputs 進行邏輯判斷
-- 函式必須回傳 dict，包含三個 key（這是 Skill 的標準輸出格式）：
-  - "status": str — 必須是 "NORMAL" 或 "ABNORMAL"
-    * ABNORMAL：資料「符合」使用者描述的異常條件 → 異常條件被觸發了
-    * NORMAL  ：資料「不符合」使用者描述的異常條件 → 一切正常
-  - "diagnosis_message": str — 繁體中文診斷訊息（2-3 句話，說明診斷結果與原因，並具體列出異常數量）
-  - "problem_object": 【重要】必須是 dict，key 為物件類型名稱（英文），value 為從資料中找到的實際識別碼。
-    格式規則（三種之一，視情況選擇）：
-    ① 單一物件：{{"tool": "TECH01"}}  → 對應 schema: tool: string
-    ② 多個同類物件：{{"tool": ["TECH01","TECH03","TECH05"]}}  → 對應 schema: tool: array
-    ③ 多維度識別：{{"tool": "TECH01", "recipe": "RCP-001"}}  → 對應 schema: tool: string, recipe: string
-    規則：
-    * key 使用資料欄位語意（如 tool_id→tool, lot_id→lot, recipe_name→recipe）
-    * value 只能是 string（單一）或 list of string（多個）—— 不能是數字或巢狀物件
-    * 若無任何異常（status=NORMAL）→ 回傳 {{}}（空 dict）
-    * ❌ 禁止回傳泛稱字串（如 "此批次", "有問題的物件"）—— 必須是資料中的實際 ID 值
-- 只使用 Python 標準語法；可用 json, math, datetime, collections 等標準函式庫
-- 不要使用 eval(), exec(), os, sys 等危險操作
+只回傳 Python 程式碼區塊（不要有其他文字，不要包在 JSON 裡）。
 
-只回傳 Python 程式碼區塊（不要有其他文字，不要包在 JSON 裡）：
-
+⚠️ **必須**以下列樣板開頭（前兩行不可更改，這是取資料的唯一正確方式）：
 ```python
 def diagnose(mcp_outputs: dict) -> dict:
+    rows = list(mcp_outputs.values())[0].get("dataset", [])
+    if not rows:
+        return {{"status": "NORMAL", "diagnosis_message": "無資料", "problem_object": {{}}}}
+    # 在此撰寫你的診斷邏輯
     ...
-```"""
+```
+
+函式規範：
+- 根據「異常判斷條件」對 rows 進行邏輯判斷（rows 是完整資料列的 list）
+- 禁止使用 `mcp_name`、`mcp_outputs.keys()` 等未先定義的變數存取 key
+- 函式必須回傳 dict，包含三個 key：
+  - "status": "NORMAL" 或 "ABNORMAL"
+    * ABNORMAL：資料符合異常條件
+    * NORMAL  ：一切正常
+  - "diagnosis_message": str — 繁體中文診斷訊息（2-3 句話，具體說明結果與原因）
+  - "problem_object": dict — key 為物件類型（英文），value 為實際 ID 值
+    ① 單一：{{"tool": "TETCH01"}}
+    ② 多個：{{"tool": ["TETCH01","TETCH03"]}}
+    ③ 正常時：{{}}（空 dict）
+    ❌ 禁止回傳泛稱字串（必須是資料中的實際 ID 值）
+- 只使用 Python 標準語法；可用 json, math, datetime, collections
+- 不要使用 eval(), exec(), os, sys"""
 
         try:
             resp1 = await self._client.messages.create(
