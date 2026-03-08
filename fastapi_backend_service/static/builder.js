@@ -4608,18 +4608,19 @@ function _nbOnSkillSelect() {
 
   // Auto-lock the bound MCP in L3 when skill has bindings
   const mcpSel  = document.getElementById('nb-mcp-select');
-  const hint    = document.getElementById('nb-mcp-params-hint');
+  const badge   = document.getElementById('nb-mcp-lock-badge');
   if (mcpIds.length && mcpSel) {
     // Fix: option values are strings, mcpIds are numbers
     mcpSel.value = String(mcpIds[0]);
     mcpSel.disabled = true;  // lock — driven by Skill binding
-    _nbOnMcpSelect();        // trigger params hint
+    _nbOnMcpSelect();        // renders query params into nb-mcp-params-hint
 
-    // Replace hint with "auto-loaded" badge
-    if (hint) {
-      hint.innerHTML = `
+    // Show "auto-loaded" badge in separate element (does NOT overwrite params)
+    if (badge) {
+      badge.classList.remove('hidden');
+      badge.innerHTML = `
         <div class="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50
-                    border border-emerald-200 rounded-lg px-3 py-1.5 mt-1">
+                    border border-emerald-200 rounded-lg px-3 py-1.5">
           <svg class="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                   d="M13 10V3L4 14h7v7l9-11h-7z"/>
@@ -4632,6 +4633,8 @@ function _nbOnSkillSelect() {
   } else if (mcpSel) {
     // No binding — unlock dropdown so user can freely select
     mcpSel.disabled = false;
+    if (badge) { badge.classList.add('hidden'); badge.innerHTML = ''; }
+    const hint = document.getElementById('nb-mcp-params-hint');
     if (hint) hint.innerHTML = '';
   }
 
@@ -4641,8 +4644,10 @@ function _nbOnSkillSelect() {
 function _nbUnlockMcp() {
   const mcpSel = document.getElementById('nb-mcp-select');
   const hint   = document.getElementById('nb-mcp-params-hint');
+  const badge  = document.getElementById('nb-mcp-lock-badge');
   if (mcpSel) { mcpSel.disabled = false; mcpSel.value = ''; }
   if (hint)   hint.innerHTML = '';
+  if (badge)  { badge.classList.add('hidden'); badge.innerHTML = ''; }
 }
 
 function _nbOnTaskIntervalChange(val) {
