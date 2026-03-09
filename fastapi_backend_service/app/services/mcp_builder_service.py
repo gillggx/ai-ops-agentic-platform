@@ -97,6 +97,9 @@ _DEFAULT_TRY_RUN_SYSTEM_PROMPT = """\
 可 import 的標準函式庫（唯獨以下這些，其餘禁止）：
   math, statistics, json, datetime, collections, itertools, functools, io, base64
 
+直接可用（已注入全域，無需 import）：
+  deque（from collections）、OrderedDict、defaultdict、Counter、namedtuple
+
 可用 Python 內建函式：
   abs, all, any, bool, bytes, bytearray, chr, classmethod, complex, dict, dir,
   divmod, enumerate, filter, float, format, frozenset, getattr, hasattr, hash,
@@ -130,6 +133,11 @@ _DEFAULT_TRY_RUN_SYSTEM_PROMPT = """\
 
 ⚠️⚠️ 絕對禁止使用 fig.to_html()、fig.write_html()、fig.show()、任何 HTML 輸出方式 ⚠️⚠️
 必須使用 json.dumps(fig.to_dict()) — 禁止用 fig.to_json()（可能產生二進位輸出）
+
+⚠️ Plotly Layout 現代 API（v4+）— 禁止使用已棄用屬性：
+- ❌ 禁止：yaxis=dict(titlefont=dict(...))  → ✅ 改用：yaxis=dict(title=dict(text="...", font=dict(...)))
+- ❌ 禁止：layout.titlefont  → ✅ 改用：layout.title.font
+- ❌ 禁止：xaxis/yaxis 的 titlefont 屬性 → ✅ 改用 title=dict(font=dict(size=12, color="black"))
 
 【繪圖規範 — 需要圖表時（trend_chart / bar_chart / scatter_chart）必須有至少一張】
 ⚠️ 關鍵規則：每一條要顯示的資料線都必須獨立加入 go.Figure()。以 SPC Trend Chart 為例，
