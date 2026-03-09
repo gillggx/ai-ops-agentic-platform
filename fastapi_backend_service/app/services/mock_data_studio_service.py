@@ -14,10 +14,10 @@ from app.services.sandbox_service import _static_check, _make_json_serializable
 _GENERATE_ALLOWED_MODULES = frozenset({
     "json", "math", "statistics", "datetime", "collections",
     "itertools", "functools", "operator", "re", "string", "decimal",
-    "io", "base64", "copy", "random", "time", "calendar",
+    "io", "base64", "copy", "random", "time", "calendar", "hashlib",
     "_strptime", "_decimal", "_json", "_datetime", "_collections_abc",
     "_functools", "_operator", "_io", "_statistics", "_heapq", "_bisect",
-    "_struct", "_csv", "_abc",
+    "_struct", "_csv", "_abc", "_hashlib",
 })
 
 
@@ -82,6 +82,7 @@ def _run_generate_sync(code: str, params: Dict[str, Any]) -> Any:
     import collections
     import datetime
     import functools
+    import hashlib
     import io
     import itertools
     import math
@@ -123,9 +124,13 @@ def _run_generate_sync(code: str, params: Dict[str, Any]) -> Any:
         "itertools": itertools,
         "functools": functools,
         "random": random,
+        "hashlib": hashlib,
         "re": re_mod,
         "io": io,
         "base64": base64,
+        "deque": collections.deque,
+        "Counter": collections.Counter,
+        "defaultdict": collections.defaultdict,
     }
 
     local_ns: Dict[str, Any] = {}

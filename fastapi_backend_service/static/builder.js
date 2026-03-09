@@ -6953,6 +6953,7 @@ function _mdsOpenEdit(id) {
 function _mdsRenderDrawer() {
   const item = _mdsEditingId ? _mdsList.find(m => m.id === _mdsEditingId) : null;
   const title = item ? `編輯 Mock 資料源：${item.name}` : '新增 Mock 資料源';
+  const hasCode = !!(item?.python_code);
 
   let inputSchemaVal = '';
   if (item?.input_schema) {
@@ -6960,97 +6961,205 @@ function _mdsRenderDrawer() {
     catch { inputSchemaVal = item.input_schema; }
   }
 
-  const hasCode = !!(item?.python_code);
+  // Inline preview (shown after generation or if sample_output exists)
+  const previewHtml = item?.sample_output ? _mdsBuildInlinePreview(item.sample_output, item.id) : '';
 
   const body = `
     <div class="space-y-4">
-      <div class="grid grid-cols-2 gap-4">
-        <div class="col-span-2">
+
+      <!-- 名稱 + 啟用 -->
+      <div class="flex gap-3 items-end">
+        <div class="flex-1">
           <label class="label-sm">名稱 *</label>
-          <input id="mds-name" type="text" class="input-field" value="${item?.name || ''}" placeholder="e.g. Fake_SPC_Data"/>
+          <input id="mds-name" type="text" class="input-field" value="${_esc(item?.name || '')}" placeholder="e.g. SPC_Mock_Data"/>
         </div>
-        <div class="col-span-2">
-          <label class="label-sm">說明</label>
-          <input id="mds-desc" type="text" class="input-field" value="${item?.description || ''}" placeholder="這個模擬資料源用於..."/>
-        </div>
-        <div>
-          <label class="flex items-center gap-2 cursor-pointer">
-            <input id="mds-active" type="checkbox" class="w-4 h-4 rounded" ${item?.is_active !== false ? 'checked' : ''}/>
-            <span class="text-xs font-medium text-slate-700">啟用 (Active)</span>
-          </label>
-        </div>
-      </div>
-
-      <!-- AI 生成區塊 -->
-      <div class="border border-emerald-200 rounded-xl p-4 bg-emerald-50/30 space-y-2">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-bold text-emerald-700 uppercase tracking-widest">✨ Step 1 — AI 代碼生成</span>
-          ${hasCode ? '<span class="text-[10px] text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full">✓ 已有程式碼</span>' : '<span class="text-[10px] text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">⚠ 尚無程式碼，請先生成</span>'}
-        </div>
-        <label class="label-sm">描述這個 Mock 資料要模擬什麼 *</label>
-        <textarea id="mds-gen-desc" rows="3" class="input-field font-normal text-sm resize-none"
-          placeholder="e.g. 模擬 SPC 管制圖資料，8個機台 × 10個 recipe，1000 個 wafer，UCL=80、LCL=60，2台機台有趨勢異常"
-          >${item?.description || ''}</textarea>
-        <div class="flex gap-2">
-          <input id="mds-gen-params" type="text" class="input-field flex-1 text-xs"
-            placeholder='範例參數（可選）：{"operation_number": "9800", "DCName": "Depth"}'/>
-          <button id="mds-quick-btn" onclick="_mdsQuickSample()"
-            class="text-xs px-3 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-semibold transition-colors whitespace-nowrap">
-            📊 預覽假資料
-          </button>
-          <button id="mds-gen-btn" onclick="_mdsGenerateCode()"
-            class="text-xs px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold transition-colors whitespace-nowrap">
-            🤖 生成程式碼
-          </button>
-        </div>
-        <p class="text-[10px] text-slate-500">💡 先「📊 預覽假資料」看效果 → 滿意後「🤖 生成程式碼」→ 存檔 → 試執行</p>
-      </div>
-
-      <!-- Input Schema -->
-      <div>
-        <label class="label-sm">Input Schema (JSON)</label>
-        <textarea id="mds-input-schema" rows="3" class="input-field font-mono text-xs resize-none"
-          placeholder='{"fields": [{"name": "lot_id", "type": "string", "required": true}]}'
-          >${inputSchemaVal}</textarea>
-      </div>
-
-      <!-- Python Code -->
-      <div>
-        <label class="label-sm flex items-center justify-between">
-          <span>Python 程式碼 — Step 2</span>
-          <span class="text-[10px] text-slate-400 font-normal">generate(params: dict) -> list</span>
+        <label class="flex items-center gap-2 cursor-pointer mb-2">
+          <input id="mds-active" type="checkbox" class="w-4 h-4 rounded" ${item?.is_active !== false ? 'checked' : ''}/>
+          <span class="text-xs font-medium text-slate-600">啟用</span>
         </label>
-        <textarea id="mds-python-code" rows="14" class="input-field font-mono text-xs resize-none"
-          placeholder="def generate(params: dict) -> list:&#10;    # AI 生成後會填入此處&#10;    ..."
-          style="background:#0f172a;color:#86efac;border-color:#334155"
-          >${item?.python_code || ''}</textarea>
       </div>
 
-      <!-- Sample Output -->
-      ${item?.sample_output ? `
+      <!-- 描述 + 生成按鈕 -->
       <div>
-        <div class="flex items-center justify-between mb-1">
-          <label class="label-sm">上次執行結果（前 3 筆）</label>
-          ${item.id ? `<button onclick="_mdsShowPlayground(${item.id})" class="text-[10px] px-2 py-1 bg-purple-600 text-white rounded-md hover:bg-purple-500">🔬 模擬 MCP 處理</button>` : ''}
+        <label class="label-sm">描述這份 Mock 資料 *
+          <span class="font-normal text-slate-400 ml-1">— AI 依此生成 Python 腳本</span>
+        </label>
+        <textarea id="mds-gen-desc" rows="3" class="input-field font-normal text-sm resize-none"
+          placeholder="e.g. Recipe offset 資料，包含 recipe_header 摘要列和 recipe_param 明細列，每個 recipe 約 25 個參數，其中 4 個異常"
+          >${_esc(item?.description || '')}</textarea>
+        <div class="flex gap-2 mt-2">
+          <input id="mds-gen-params" type="text" class="input-field flex-1 text-xs"
+            placeholder='測試參數（可選）：{"recipe_name": "rcp01"}'/>
+          <button id="mds-gen-btn" onclick="_mdsGenAndPreview()"
+            class="text-sm px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold transition-colors whitespace-nowrap">
+            ${hasCode ? '🔄 重新生成' : '🤖 AI 生成 + 預覽'}
+          </button>
         </div>
-        <pre class="bg-slate-900 text-green-300 rounded-lg p-3 text-[10px] font-mono overflow-auto max-h-32 border border-slate-700">${_mdsFormatJsonPreview(item.sample_output, 3)}</pre>
-      </div>` : ''}
+      </div>
+
+      <!-- 預覽結果（生成後顯示） -->
+      <div id="mds-inline-result" class="${previewHtml ? '' : 'hidden'}">
+        ${previewHtml}
+      </div>
+
+      <!-- 進階設定（折疊） -->
+      <details class="border border-slate-200 rounded-lg overflow-hidden">
+        <summary class="px-3 py-2 text-xs font-semibold text-slate-500 cursor-pointer hover:bg-slate-50 select-none">
+          ⚙️ 進階設定${hasCode ? ' · <span class="text-emerald-600">✓ 已有程式碼</span>' : ''}
+        </summary>
+        <div class="p-3 space-y-3 border-t border-slate-200">
+          <div>
+            <label class="label-sm">Input Schema (JSON)</label>
+            <textarea id="mds-input-schema" rows="3" class="input-field font-mono text-xs resize-none"
+              placeholder='{"fields": [{"name": "lot_id", "type": "string", "required": true}]}'
+              >${_esc(inputSchemaVal)}</textarea>
+          </div>
+          <div>
+            <label class="label-sm flex justify-between">
+              <span>Python 程式碼</span>
+              <span class="font-normal text-slate-400">generate(params: dict) -> list</span>
+            </label>
+            <textarea id="mds-python-code" rows="12" class="input-field font-mono text-xs resize-none"
+              style="background:#0f172a;color:#86efac;border-color:#334155"
+              placeholder="def generate(params: dict) -> list:&#10;    ..."
+              >${_esc(item?.python_code || '')}</textarea>
+          </div>
+        </div>
+      </details>
+
     </div>
   `;
 
   const footer = `
     <button onclick="closeDrawer()" class="builder-btn-secondary text-sm px-4 py-2">取消</button>
-    ${item ? `<button onclick="_mdsShowPlayground(${item.id})" class="text-sm px-3 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-semibold">🔬 模擬 MCP 處理</button>` : ''}
-    <button onclick="_mdsSave()" class="builder-btn-primary text-sm px-4 py-2">
-      ${item ? '💾 儲存' : '✓ 建立'}
-    </button>
-    ${item && hasCode ? `<button onclick="closeDrawer();setTimeout(()=>_mdsTestRun(${item.id}),100)" class="text-sm px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-semibold">▶ 試執行</button>` : ''}
-    ${item && hasCode ? `<button onclick="_mdsPromoteToSystemMcp(${item.id})" class="text-sm px-3 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-xl font-semibold">⬆ 升級為 System MCP</button>` : ''}
+    <button onclick="_mdsSave()" class="builder-btn-primary text-sm px-4 py-2">💾 儲存</button>
+    ${hasCode ? `<button onclick="_mdsSaveAndTestRun()" class="text-sm px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-semibold">▶ 儲存並試執行</button>` : ''}
   `;
 
   _setDrawerContent(title, body, footer);
-  // Restore any unsaved form values the user had typed before navigating away
   requestAnimationFrame(_mdsRestoreFormState);
+}
+
+function _mdsBuildInlinePreview(sampleOutputJson, mockId) {
+  let rows = [];
+  try { rows = JSON.parse(sampleOutputJson); } catch { return ''; }
+  if (!Array.isArray(rows) || !rows.length) return '';
+  const preview = rows.slice(0, 5);
+  const cols = Object.keys(preview[0]);
+  const thead = `<tr>${cols.map(c => `<th class="px-2 py-1 text-left text-[10px] font-semibold text-slate-500 border-b border-slate-200 whitespace-nowrap">${_esc(c)}</th>`).join('')}</tr>`;
+  const tbody = preview.map(row =>
+    `<tr class="hover:bg-slate-50">${cols.map(c => {
+      const v = row[c];
+      const isAnomaly = row.anomaly_flag === true || row.out_of_spec === true ||
+        (typeof v === 'number' && row.UCL !== undefined && (v > row.UCL || v < row.LCL));
+      return `<td class="px-2 py-1 text-[10px] ${isAnomaly ? 'text-red-600 font-semibold' : 'text-slate-700'} border-b border-slate-100 whitespace-nowrap">${v ?? ''}</td>`;
+    }).join('')}</tr>`
+  ).join('');
+  return `
+    <div class="rounded-lg border border-emerald-200 bg-emerald-50/30 overflow-hidden">
+      <div class="flex items-center justify-between px-3 py-2 bg-emerald-50 border-b border-emerald-200">
+        <span class="text-xs font-semibold text-emerald-700">✅ 資料預覽（前 ${preview.length} 筆，共 ${rows.length} 筆）</span>
+        ${mockId ? `<button onclick="_mdsShowPlayground(${mockId})" class="text-[10px] px-2 py-1 bg-purple-600 text-white rounded hover:bg-purple-500">🔬 設計 MCP 處理邏輯</button>` : ''}
+      </div>
+      <div class="overflow-auto max-h-48">
+        <table class="w-full text-xs">
+          <thead class="bg-slate-50 sticky top-0">${thead}</thead>
+          <tbody>${tbody}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+// Combined: auto-save → generate code → run → show inline preview
+async function _mdsGenAndPreview() {
+  if (_mdsGenerating) return;
+  _mdsCaptureFormState();
+  const desc = document.getElementById('mds-gen-desc')?.value?.trim();
+  const name = document.getElementById('mds-name')?.value?.trim();
+  if (!desc) { _mdsToast('請先填寫描述', 'error'); return; }
+  if (!name) { _mdsToast('請先填寫名稱', 'error'); return; }
+
+  const btn = document.getElementById('mds-gen-btn');
+  const resultDiv = document.getElementById('mds-inline-result');
+  _mdsGenerating = true;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ AI 生成中...'; }
+  if (resultDiv) { resultDiv.className = ''; resultDiv.innerHTML = '<div class="text-xs text-slate-400 animate-pulse py-2">⏳ AI 正在生成 Python 腳本...</div>'; }
+
+  // Step 1: ensure record exists
+  if (!_mdsEditingId) {
+    const created = await _mdsSaveAndGetId();
+    if (!created) { _mdsGenerating = false; if (btn) { btn.disabled = false; btn.textContent = '🤖 AI 生成 + 預覽'; } return; }
+  }
+
+  let sampleParams = null;
+  try { sampleParams = JSON.parse(document.getElementById('mds-gen-params')?.value || 'null'); } catch {}
+
+  try {
+    // Step 2: generate code
+    if (resultDiv) resultDiv.innerHTML = '<div class="text-xs text-slate-400 animate-pulse py-2">⏳ AI 生成程式碼中（約 15-30 秒）...</div>';
+    const gr = await _api('POST', `/mock-data/${_mdsEditingId}/generate-code`, { description: desc, sample_params: sampleParams });
+    const genItem = gr?.mock_data_source || gr?.data?.mock_data_source;
+    if (genItem) {
+      const idx = _mdsList.findIndex(m => m.id === _mdsEditingId);
+      if (idx >= 0) _mdsList[idx] = genItem; else _mdsList.unshift(genItem);
+      // Sync code/schema to advanced textareas if open
+      const codeEl = document.getElementById('mds-python-code');
+      if (codeEl && genItem.python_code) codeEl.value = genItem.python_code;
+      const schemaEl = document.getElementById('mds-input-schema');
+      if (schemaEl && genItem.input_schema) {
+        try { schemaEl.value = JSON.stringify(JSON.parse(genItem.input_schema), null, 2); } catch { schemaEl.value = genItem.input_schema; }
+      }
+    }
+
+    // Step 3: run to get real data
+    if (resultDiv) resultDiv.innerHTML = '<div class="text-xs text-slate-400 animate-pulse py-2">▶ 執行 generate() 取得資料...</div>';
+    const params = sampleParams || {};
+    const rr = await _api('POST', `/mock-data/${_mdsEditingId}/run`, { params });
+    const dataset = rr?.dataset || rr?.data?.dataset;
+    const rows = Array.isArray(dataset) ? dataset : (dataset ? [dataset] : []);
+
+    // Update cache + show preview
+    const idx = _mdsList.findIndex(m => m.id === _mdsEditingId);
+    if (idx >= 0) _mdsList[idx].sample_output = JSON.stringify(rows.slice(0, 20));
+    if (resultDiv) {
+      resultDiv.className = '';
+      resultDiv.innerHTML = _mdsBuildInlinePreview(JSON.stringify(rows), _mdsEditingId);
+    }
+    // Refresh footer to show ▶ 儲存並試執行 button
+    _mdsRenderDrawer();
+    _mdsToast('✅ 生成完成！', 'success');
+  } catch (e) {
+    _mdsToast(`生成失敗: ${e.message}`, 'error');
+    if (resultDiv) { resultDiv.className = ''; resultDiv.innerHTML = `<div class="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">❌ ${_esc(e.message)}</div>`; }
+  } finally {
+    _mdsGenerating = false;
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 重新生成'; }
+  }
+}
+
+// Save then test run, show result inline
+async function _mdsSaveAndTestRun() {
+  await _mdsSave();
+  if (!_mdsEditingId) return;
+  const item = _mdsList.find(m => m.id === _mdsEditingId);
+  if (!item) return;
+  let params = {};
+  try {
+    const p = document.getElementById('mds-gen-params')?.value;
+    if (p) params = JSON.parse(p);
+  } catch {}
+  _mdsToast('▶ 執行中...', 'info');
+  try {
+    const r = await _api('POST', `/mock-data/${_mdsEditingId}/run`, { params });
+    const dataset = r?.dataset || r?.data?.dataset;
+    const rows = Array.isArray(dataset) ? dataset : (dataset ? [dataset] : []);
+    const idx = _mdsList.findIndex(m => m.id === _mdsEditingId);
+    if (idx >= 0) _mdsList[idx].sample_output = JSON.stringify(rows.slice(0, 20));
+    _mdsToast(`✅ 執行成功 — ${rows.length} 筆資料`, 'success');
+    _mdsRenderDrawer();
+  } catch (e) {
+    _mdsToast(`執行失敗: ${e.message}`, 'error');
+  }
 }
 
 function _mdsFormatJson(s) {
