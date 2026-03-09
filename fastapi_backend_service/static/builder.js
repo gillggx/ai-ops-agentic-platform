@@ -6401,6 +6401,19 @@ async function _mcpTryRun() {
 
     _mceLogLine('✓', 'MCP 執行完成', 'text-emerald-600');
 
+    // Show generated Python script in terminal
+    if (result.script) {
+      const lines = document.getElementById('mce-exec-log-lines');
+      if (lines) {
+        const scriptBlock = document.createElement('div');
+        scriptBlock.className = 'mt-3';
+        scriptBlock.innerHTML = `
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">🐍 生成的 Python 腳本</div>
+          <pre class="bg-slate-50 border border-slate-200 rounded p-3 text-[11px] text-slate-700 overflow-x-auto whitespace-pre-wrap leading-relaxed">${_esc(result.script)}</pre>`;
+        lines.appendChild(scriptBlock);
+      }
+    }
+
     // Update Data / Format Review
     const outputData = result.output_data || {};
     const rawEl = document.getElementById('mce-data-review');
