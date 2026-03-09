@@ -5974,12 +5974,15 @@ async function _skTryRun() {
         timestamp:           new Date().toISOString(),
       };
       if (skId) {
-        _api('PATCH', `/skill-definitions/${skId}`, { last_diagnosis_result: _skLastDiagnosisResult })
-          .then(() => _skLogLine('💾', '診斷碼已自動儲存', 'text-slate-400'))
-          .catch(e => _skLogLine('⚠', `自動儲存失敗：${e.message}`, 'text-amber-600'));
-        // Also update local cache so list refreshes correctly without re-fetch
-        const localSk = _skillDefs.find(s => s.id === skId);
-        if (localSk) localSk.last_diagnosis_result = JSON.stringify(_skLastDiagnosisResult);
+        try {
+          await _api('PATCH', `/skill-definitions/${skId}`, { last_diagnosis_result: _skLastDiagnosisResult });
+          _skLogLine('💾', '診斷碼已自動儲存 ✓', 'text-emerald-600');
+          // Update local cache so list badge refreshes without re-fetch
+          const localSk = _skillDefs.find(s => s.id === skId);
+          if (localSk) localSk.last_diagnosis_result = JSON.stringify(_skLastDiagnosisResult);
+        } catch(saveErr) {
+          _skLogLine('⚠', `自動儲存失敗：${saveErr.message}`, 'text-amber-600');
+        }
       }
     }
 
