@@ -926,7 +926,9 @@ def diagnose(mcp_outputs: dict) -> dict:
     ③ 正常時：{{}}（空 dict）
     ❌ 禁止回傳泛稱字串（必須是資料中的實際 ID 值）
 - 只使用 Python 標準語法；可用 json, math, datetime, collections
-- 不要使用 eval(), exec(), os, sys"""
+- 不要使用 eval(), exec(), os, sys
+- ⚠️ **Python 語法鐵律**：if/else/for/while 區塊內必須有至少一條語句，禁止空區塊。若無實際邏輯，用 `pass` 填充。
+- ⚠️ **禁止在 if 條件後面直接 return 而不縮排**：if 的 body 必須縮排 4 格。"""
 
         try:
             resp1 = await self._client.messages.create(
