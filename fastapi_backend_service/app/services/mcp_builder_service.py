@@ -43,6 +43,8 @@ DataSubject 名稱：{data_subject_name}
    - 若有圖表需求，charts 陣列至少包含一個 json.dumps(fig.to_dict()) 字串；無圖表則 charts=[], chart_data=null
    - ⚠️⚠️ 絕對禁止使用 fig.to_html()、fig.write_html()、fig.to_json()；必須用 json.dumps(fig.to_dict()) ⚠️⚠️
    - 🔴 CRITICAL RULE (English): You MUST serialize charts using: import json; charts.append(json.dumps(fig.to_dict())). ANY use of fig.to_html() or fig.to_json() will cause the system to CRASH immediately. No exceptions.
+   - ⚠️ Plotly v4+ API：禁止使用已棄用的 titlefont 屬性，改用 yaxis=dict(title=dict(text="...", font=dict(...)))
+   - 沙盒可直接使用：pd、go、px、plt、np、json、math、deque、Counter、defaultdict（無需 import）
 
 2. **output_schema**（object）：
    - 定義 process() 函式回傳值的 Schema
@@ -979,11 +981,17 @@ def diagnose(mcp_outputs: dict) -> dict:
             "KeyError": KeyError, "IndexError": IndexError, "AttributeError": AttributeError,
             "__import__": _safe_import,
         }
+        import collections as _collections
         sandbox = {
             "__builtins__": _SAFE_BUILTINS,
             "json": __import__("json"),
             "math": math,
             "datetime": _dt,
+            "collections": _collections,
+            "deque": _collections.deque,
+            "Counter": _collections.Counter,
+            "defaultdict": _collections.defaultdict,
+            "OrderedDict": _collections.OrderedDict,
         }
 
         try:
