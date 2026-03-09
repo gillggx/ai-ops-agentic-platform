@@ -4,7 +4,7 @@ import asyncio
 import json
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -449,31 +449,43 @@ class _FlexBody(BaseModel):
     model_config = {"extra": "allow"}
 
 
+async def _run_mock_source(mock_id: int, params: dict, db: AsyncSession):
+    """Shared logic for GET and POST public-run."""
+    m = await db.get(MockDataSourceModel, mock_id)
+    if not m or not m.python_code or not m.is_active:
+        raise _app_err(400, "Mock source not ready", "NOT_READY")
+    try:
+        dataset = await execute_generate_fn(m.python_code, params)
+    except Exception as e:
+        raise _app_err(422, f"generate() 執行失敗：{e}", "SANDBOX_ERROR")
+    return dataset if isinstance(dataset, list) else [dataset]
+
+
+@router.get("/{mock_id}/public-run")
+async def public_run_mock_data_source_get(
+    mock_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """GET variant — query string params forwarded as generate() params."""
+    params = dict(request.query_params)
+    return await _run_mock_source(mock_id, params, db)
+
+
 @router.post("/{mock_id}/public-run")
 async def public_run_mock_data_source(
     mock_id: int,
     body: _FlexBody,
     db: AsyncSession = Depends(get_db),
 ):
-    """No-auth endpoint for System MCP api_config to call.
+    """POST variant — body params forwarded as generate() params.
 
     Accepts two body formats:
     - Standard: {"params": {"operationNumber": "9800", ...}}
     - Flat (sent by generic System MCP executor): {"operationNumber": "9800", ...}
     """
-    m = await db.get(MockDataSourceModel, mock_id)
-    if not m or not m.python_code or not m.is_active:
-        raise _app_err(400, "Mock source not ready", "NOT_READY")
-
-    # If body has explicit `params` key, use it; otherwise treat entire body as params
     if body.params is not None:
         params = body.params
     else:
         params = {k: v for k, v in body.model_dump().items() if k != "params" and v is not None}
-
-    try:
-        dataset = await execute_generate_fn(m.python_code, params)
-    except Exception as e:
-        raise _app_err(422, f"generate() 執行失敗：{e}", "SANDBOX_ERROR")
-
-    return dataset if isinstance(dataset, list) else [dataset]
+    return await _run_mock_source(mock_id, params, db)

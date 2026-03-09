@@ -129,6 +129,10 @@ async def create_skill_draft(
         "problematic_target": body.get("problematic_target", body.get("problem_subject", "")),
         "expert_action": body.get("expert_action", body.get("human_recommendation", "")),
     }
+    # Capture MCP input params used by the agent so the draft card can display them
+    mcp_input_params = body.get("mcp_input_params") or body.get("input_params")
+    if mcp_input_params:
+        payload["mcp_input_params"] = mcp_input_params
     draft = await _create_draft(db, "skill", payload, current_user.id)
     return _draft_response(draft, payload)
 

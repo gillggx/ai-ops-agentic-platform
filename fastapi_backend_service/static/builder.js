@@ -107,8 +107,19 @@ function switchView(name) {
   if (name === 'data-subjects')    _loadDataSubjects();
   if (name === 'system-mcps')     _loadSystemMcps();
   if (name === 'event-types')      _loadEventTypes();
-  if (name === 'mcp-builder')      _loadMcpDefs();
-  if (name === 'skill-builder')    _loadSkillDefs();
+  if (name === 'mcp-builder') {
+    // Ensure MCE overlay is closed and list is visible
+    document.getElementById('mcp-editor')?.classList.add('hidden');
+    document.getElementById('mcp-editor')?.classList.remove('flex');
+    _loadMcpDefs();
+  }
+  if (name === 'skill-builder') {
+    // Ensure SK editor is closed and list is visible
+    document.getElementById('sk-editor')?.classList.add('hidden');
+    document.getElementById('sk-editor')?.classList.remove('flex');
+    document.getElementById('sk-list-state')?.classList.remove('hidden');
+    _loadSkillDefs();
+  }
   if (name === 'settings')         _loadSettings();
   if (name === 'routine-checks')       _loadRoutineChecks();
   if (name === 'generated-events')     _loadGeneratedEvents();
@@ -2074,15 +2085,18 @@ async function _loadSkillDefs() {
   const container = document.getElementById('skill-list');
   try {
     _skillDefs = await _api('GET', '/skill-definitions') || [];
-    if (_eventTypes.length === 0) _eventTypes = await _api('GET', '/event-types') || [];
-    if (_mcpDefs.length === 0)    _mcpDefs    = await _api('GET', '/mcp-definitions') || [];
+    if (_eventTypes.length === 0)    _eventTypes    = await _api('GET', '/event-types') || [];
+    if (_mcpDefs.length === 0)       _mcpDefs       = await _api('GET', '/mcp-definitions') || [];
+    if (_dataSubjects.length === 0)  _dataSubjects  = await _api('GET', '/mcp-definitions?type=system') || [];
     if (_skillDefs.length === 0) {
       container.innerHTML = '<p class="text-center text-slate-600 py-12">尚無 Skill，點擊右上角新增</p>';
       return;
     }
     container.innerHTML = _skillDefs.map(sk => {
       const et = _eventTypes.find(e => e.id === sk.event_type_id);
-      const hasCode = !!(sk.last_diagnosis_result?.generated_code);
+      let ldr = null;
+      try { ldr = sk.last_diagnosis_result ? JSON.parse(sk.last_diagnosis_result) : null; } catch {}
+      const hasCode = !!(ldr?.generated_code || sk.generated_code);
       const hasDiag = !!(sk.diagnostic_prompt);
       const boundMcp = sk.mcp_id ? _mcpDefs.find(m => m.id === sk.mcp_id) : null;
       const mcpTag = boundMcp
@@ -2099,7 +2113,7 @@ async function _loadSkillDefs() {
             <div class="builder-card-name">${_esc(sk.name)}</div>
             <div class="builder-card-desc">${_esc(sk.description || '（無說明）')}</div>
             <div class="builder-card-meta">
-              <span class="builder-tag">${_esc(et?.name || `Event #${sk.event_type_id}`)}</span>
+              <span class="builder-tag">${sk.event_type_id ? _esc(et?.name || `Event #${sk.event_type_id}`) : '<span style="color:#94a3b8">未設定 Event</span>'}</span>
               ${mcpTag}
               ${diagTag}
             </div>
@@ -5661,32 +5675,50 @@ async function _skOnMcpChange() {
 
   const inputSchema = isSysMcp ? (mcp.input_schema || null) : (ds?.input_schema || null);
   const fields = (typeof inputSchema === 'string' ? JSON.parse(inputSchema || '{}') : (inputSchema || {}))?.fields || [];
-  if (!fields.length) {
-    hint.innerHTML = noScriptBanner + '<div class="mt-2 text-xs text-slate-400 italic">此 MCP 無需額外查詢參數</div>';
-    return;
-  }
-  hint.innerHTML = noScriptBanner + `
-    <div class="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
-      <p class="text-[11px] font-bold text-blue-700 uppercase tracking-widest mb-2.5">
-        🔑 系統 MCP 查詢參數 — ${_esc(ds?.name || mcp.name)}
-      </p>
-      <p class="text-[10px] text-blue-500 mb-2">請填入查詢條件後點擊「撈取與預覽樣本」</p>
+
+  // Custom MCP's own manual params (source='manual'|'event', not 'data_subject')
+  const inputDef = !isSysMcp ? (typeof mcp.input_definition === 'string'
+    ? JSON.parse(mcp.input_definition || '{}') : (mcp.input_definition || {})) : {};
+  const manualParams = (inputDef?.params || []).filter(p => p.source !== 'data_subject' && p.name !== 'raw_data');
+
+  const _renderFields = (flds, idPrefix, sectionTitle, sectionColor) => {
+    if (!flds.length) return '';
+    const borderColor = sectionColor === 'green' ? 'border-green-200' : 'border-blue-200';
+    const bgColor     = sectionColor === 'green' ? 'bg-green-50' : 'bg-blue-50';
+    const titleColor  = sectionColor === 'green' ? 'text-green-700' : 'text-blue-700';
+    const inputBorder = sectionColor === 'green' ? 'border-green-300 focus:ring-green-500 focus:border-green-500' : 'border-blue-300 focus:ring-blue-500 focus:border-blue-500';
+    const subtitleColor = sectionColor === 'green' ? 'text-green-500' : 'text-blue-500';
+    return `
+    <div class="mt-3 ${bgColor} ${borderColor} border rounded-lg p-3">
+      <p class="text-[11px] font-bold ${titleColor} uppercase tracking-widest mb-2.5">${sectionTitle}</p>
+      <p class="text-[10px] ${subtitleColor} mb-2">請填入查詢條件後點擊「撈取與預覽樣本」</p>
       <div class="space-y-2.5">
-        ${fields.map(f => `
+        ${flds.map(f => `
           <div>
             <label class="text-[11px] font-bold text-slate-600 uppercase tracking-widest mb-1 block">
               ${_esc(f.label || f.name)}${f.required ? ' <span class="text-red-500">*</span>' : ' <span class="text-slate-400">(選填)</span>'}
             </label>
-            <input id="sk-mcp-param-${_esc(f.name)}"
+            <input id="${idPrefix}${_esc(f.name)}"
                    type="${f.type === 'number' ? 'number' : 'text'}"
                    placeholder="${_esc(f.description || f.name)}"
                    value="${f.default_value !== undefined && f.default_value !== null ? _esc(String(f.default_value)) : ''}"
-                   class="w-full bg-white border border-blue-300 rounded-md px-3 py-2 text-sm
+                   class="w-full bg-white border ${inputBorder} rounded-md px-3 py-2 text-sm
                           font-medium text-slate-800 shadow-sm focus:outline-none
-                          focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow">
+                          focus:ring-2 transition-shadow">
           </div>`).join('')}
       </div>
     </div>`;
+  };
+
+  const dsName = ds?.name || mcp.name;
+  const fetchSection  = _renderFields(fields, 'sk-mcp-param-', `🔑 系統 MCP 查詢參數 — ${_esc(dsName)}`, 'blue');
+  const manualSection = _renderFields(manualParams, 'sk-mcp-manual-', `⚙️ MCP 運算參數 — ${_esc(mcp.name)}`, 'green');
+
+  if (!fetchSection && !manualSection) {
+    hint.innerHTML = noScriptBanner + '<div class="mt-2 text-xs text-slate-400 italic">此 MCP 無需額外查詢參數</div>';
+    return;
+  }
+  hint.innerHTML = noScriptBanner + fetchSection + manualSection;
 }
 
 // Open the MCP Builder and load the specified MCP for editing

@@ -1,16 +1,26 @@
-"""Agent Router — tools manifest and execution endpoints for AI agents."""
+"""Agent Router — tools manifest and execution endpoints for AI agents.
+
+v14 additions:
+  POST /agent/approve/{token}          — HITL approval gate
+  GET  /agent/sessions/{sid}/workspace — read canvas workspace state
+  POST /agent/sessions/{sid}/workspace — write canvas overrides
+"""
 
 import json
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user
+from app.models.agent_session import AgentSessionModel
 from app.models.user import UserModel
 from app.repositories.mcp_definition_repository import MCPDefinitionRepository
 from app.repositories.skill_definition_repository import SkillDefinitionRepository
+from app.services.agent_orchestrator import set_approval
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -157,3 +167,99 @@ async def get_tools_manifest(
     ]
 
     return {"tools": tools, "total": len(tools), "meta_tools": meta_tools}
+
+
+# ── v14: HITL Approval Endpoint ───────────────────────────────────────────────
+
+class ApprovalRequest(BaseModel):
+    approved: bool
+
+
+@router.post(
+    "/approve/{token}",
+    summary="v14 HITL — 批准或拒絕高風險工具操作",
+    response_model=Dict[str, Any],
+)
+async def approve_tool(
+    token: str,
+    body: ApprovalRequest,
+    current_user: UserModel = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Signal approval or rejection for a pending destructive tool call.
+
+    The agent SSE stream emits 'approval_required' with an approval_token.
+    The frontend calls this endpoint to unblock the suspended agent.
+    """
+    ok = set_approval(token, body.approved)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Approval token '{token}' not found or already resolved.")
+    return {
+        "token": token,
+        "approved": body.approved,
+        "message": "批准成功，Agent 將繼續執行。" if body.approved else "已拒絕，Agent 將取消操作。",
+    }
+
+
+# ── v14: Workspace State Endpoints ────────────────────────────────────────────
+
+class WorkspaceUpdateRequest(BaseModel):
+    canvas_overrides: Dict[str, Any]
+
+
+@router.get(
+    "/sessions/{session_id}/workspace",
+    summary="v14 取得工作區狀態 (canvas overrides)",
+    response_model=Dict[str, Any],
+)
+async def get_workspace(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user),
+) -> Dict[str, Any]:
+    result = await db.execute(
+        select(AgentSessionModel).where(
+            AgentSessionModel.session_id == session_id,
+            AgentSessionModel.user_id == current_user.id,
+        )
+    )
+    row = result.scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Session 不存在")
+    workspace = {}
+    if row.workspace_state:
+        try:
+            workspace = json.loads(row.workspace_state)
+        except Exception:
+            pass
+    return {"session_id": session_id, "canvas_overrides": workspace}
+
+
+@router.post(
+    "/sessions/{session_id}/workspace",
+    summary="v14 更新工作區 Canvas Overrides",
+    response_model=Dict[str, Any],
+)
+async def update_workspace(
+    session_id: str,
+    body: WorkspaceUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Update canvas overrides for a session. These will be injected as
+    highest-priority context in the next agent call for this session."""
+    result = await db.execute(
+        select(AgentSessionModel).where(
+            AgentSessionModel.session_id == session_id,
+            AgentSessionModel.user_id == current_user.id,
+        )
+    )
+    row = result.scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Session 不存在")
+    row.workspace_state = json.dumps(body.canvas_overrides, ensure_ascii=False)
+    await db.commit()
+    return {
+        "session_id": session_id,
+        "canvas_overrides": body.canvas_overrides,
+        "message": "Canvas overrides 已更新，下次 Agent 呼叫時生效。",
+    }
