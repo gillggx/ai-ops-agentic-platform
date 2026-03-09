@@ -93,6 +93,7 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
                 "problem_subject": {"type": "string", "description": "問題目標欄位名稱"},
                 "human_recommendation": {"type": "string", "description": "專家處置建議（使用者未提供時留空）"},
                 "mcp_ids": {"type": "array", "items": {"type": "integer"}, "description": "綁定的 MCP ID 清單（必填，先用 list_mcps 取得正確 ID）"},
+                "mcp_input_params": {"type": "object", "description": "本次分析時傳入 MCP 的實際輸入參數（key-value），供草稿卡顯示供人工確認"},
             },
             "required": ["name", "diagnostic_prompt", "mcp_ids"],
         },
@@ -109,6 +110,26 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
                 "processing_intent": {"type": "string", "description": "處理意圖描述"},
             },
             "required": ["name", "system_mcp_id", "processing_intent"],
+        },
+    },
+    {
+        "name": "patch_mcp",
+        "description": (
+            "修改現有 Custom MCP 的欄位。可更新 name、description、processing_intent、diagnostic_prompt。"
+            "⚠️ 只能修改 Custom MCP（mcp_type=custom），不可修改 System MCP。"
+            "修改後用戶會在 MCP Builder 看到更新後的設定。"
+            "如果需要重新生成 processing_script，修改 processing_intent 後提示用戶到 MCP Builder 點擊 Try Run。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "mcp_id": {"type": "integer", "description": "Custom MCP ID（先用 list_mcps 取得）"},
+                "name": {"type": "string", "description": "新的 MCP 名稱（選填）"},
+                "description": {"type": "string", "description": "新的說明（選填）"},
+                "processing_intent": {"type": "string", "description": "新的加工意圖（選填，修改後需重新 Try Run 才能更新 processing_script）"},
+                "diagnostic_prompt": {"type": "string", "description": "新的診斷條件（選填）"},
+            },
+            "required": ["mcp_id"],
         },
     },
     {
@@ -285,6 +306,11 @@ class ToolDispatcher:
                     return await self._call_api("POST", "/api/v1/agent/draft/routine_check", body=tool_input)
                 case "draft_event_skill_link":
                     return await self._call_api("POST", "/api/v1/agent/draft/event_skill_link", body=tool_input)
+                case "patch_mcp":
+                    mcp_id = tool_input.pop("mcp_id")
+                    if not tool_input:
+                        return {"error": "至少需提供一個要修改的欄位"}
+                    return await self._call_api("PATCH", f"/api/v1/mcp-definitions/{mcp_id}", body=tool_input)
                 case "patch_skill_raw":
                     return await self._call_api(
                         "PUT",

@@ -1,32 +1,47 @@
-"""Agent Orchestrator — the v13 Real Agentic Loop.
+"""Agent Orchestrator — Agentic OS v14.0
 
-Implements a 5-stage stateful while loop using Anthropic tool_use:
+Five-stage transparent loop with Anthropic tool_use:
 
-  Stage 1: Context Load  — assemble Soul + UserPref + RAG
-  Stage 2: LLM Call      — send messages + tools to Anthropic
-  Stage 3: Tool Execute  — intercept tool_use blocks, dispatch, append results
-  Stage 4: Synthesis     — LLM produces final end_turn text
-  Stage 5: Memory Write  — auto-persist ABNORMAL diagnoses to RAG
+  Stage 1: Context Load      — Soul + UserPref + RAG + Prompt Caching
+  Stage 2: Intent & Planning — LLM outputs <plan> tag before any tools
+  Stage 3: Tool Execution    — Sandbox distillation + HITL safety gate
+  Stage 4: Reasoning         — LLM synthesises from distilled data
+  Stage 5: Memory Write      — Conflict-aware RAG persistence
 
-MAX_ITERATIONS = 5 (hard guardrail, configurable via SystemParameter)
+v14 New Features:
+  - stage_update SSE (1-5) for full transparency
+  - Sequential Planning: LLM must output <plan> before tool calls
+  - Programmatic Distillation: Pandas stats summary via DataDistillationService
+  - HITL: is_destructive tools pause and emit approval_required SSE
+  - Token Compaction: compact history when cumulative tokens > 60k
+  - Prompt Caching: stable blocks (Soul) get cache_control: ephemeral
+  - Memory Conflict Resolution: UPDATE instead of ADD on contradicting entries
+  - Workspace Sync: canvas_overrides injected as highest-priority context
 
 SSE events emitted:
-  context_load   — Stage 1 complete
-  thinking       — LLM <thinking> blocks (if extended thinking enabled)
-  tool_start     — before each tool execution
-  tool_done      — after each tool execution
-  synthesis      — final answer text
-  memory_write   — after auto-persistence
-  error          — any error or MAX_ITERATIONS hit
-  done           — stream end
+  stage_update     — Stage 1-5 transitions (status: running|complete)
+  context_load     — Stage 1 metadata (soul, rag, cache stats)
+  thinking         — LLM <thinking> blocks
+  llm_usage        — Per-iteration token usage (includes cache_read_tokens)
+  token_usage      — Cumulative session tokens (triggers compaction notice)
+  tool_start       — Before each tool execution
+  tool_done        — After each tool execution (+ render_card)
+  approval_required — HITL: destructive tool awaiting user approval
+  synthesis        — Final answer text
+  memory_write     — After conflict-aware memory persistence
+  error            — Any error or MAX_ITERATIONS hit
+  done             — Stream end
 """
 
 from __future__ import annotations
 
+import asyncio
+import datetime
 import json
 import logging
+import re
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 import anthropic
@@ -39,26 +54,47 @@ from app.models.mcp_definition import MCPDefinitionModel
 from app.models.skill_definition import SkillDefinitionModel
 from app.services.agent_memory_service import AgentMemoryService
 from app.services.context_loader import ContextLoader
+from app.services.data_distillation_service import DataDistillationService
 from app.services.tool_dispatcher import TOOL_SCHEMAS, ToolDispatcher
 
 logger = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 5
 _SESSION_TTL_HOURS = 24
-_SESSION_MAX_MESSAGES = 12  # keep last 12 messages (~6 turns) to limit tokens
+_SESSION_MAX_MESSAGES = 12
+_TOOL_RESULT_MAX_CHARS = 1500
+_COMPACTION_TOKEN_THRESHOLD = 60_000  # v14: compact history when exceeded
 
+# v14: Tools that require human approval before execution
+_DESTRUCTIVE_TOOLS = frozenset({
+    "patch_skill_raw",   # modifies skill code directly
+    "draft_routine_check",  # creates scheduled automation
+    "draft_event_skill_link",  # links skill to event type (side-effects)
+})
+
+# v14: HITL approval registry — maps approval_token → asyncio.Event
+# Single-process (uvicorn) safe. For multi-process, use Redis.
+_pending_approvals: Dict[str, Optional[bool]] = {}  # token → True/False/None(pending)
+_approval_events: Dict[str, asyncio.Event] = {}
+
+
+def set_approval(token: str, approved: bool) -> bool:
+    """Called by the /agent/approve/{token} endpoint. Returns False if token unknown."""
+    if token not in _approval_events:
+        return False
+    _pending_approvals[token] = approved
+    _approval_events[token].set()
+    return True
+
+
+# ── Pre-flight Validation ──────────────────────────────────────────────────────
 
 async def _preflight_validate(
     db: AsyncSession,
     tool_name: str,
     tool_input: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
-    """Pre-flight validation (spec §3-A) — intercept ambiguous/missing params before execution.
-
-    Returns an error dict (injected as tool_result) when validation fails so the LLM
-    is forced to ask the user for clarification instead of proceeding blindly.
-    Returns None when the call is safe to execute.
-    """
+    """Pre-flight validation — intercept ambiguous/missing params before execution."""
     if tool_name == "execute_mcp":
         mcp_id = tool_input.get("mcp_id")
         if not mcp_id:
@@ -73,16 +109,11 @@ async def _preflight_validate(
                 "status": "error", "code": "MCP_NOT_FOUND",
                 "message": f"⚠️ MCP #{mcp_id} 不存在。請呼叫 list_mcps 取得有效的 MCP 列表後重試。",
             }
-        # Resolve input_schema:
-        # - System MCP: use its own schema
-        # - Custom MCP with own input_schema defined: validate against that
-        # - Custom MCP without own input_schema: skip validation entirely
-        #   (the processing_script may hard-code parent params internally)
+        # Custom MCP: only validate against its own input_schema (never inherit parent's)
         mcp_type = getattr(mcp, "mcp_type", "custom") or "custom"
         if mcp_type == "system":
-            schema_src = mcp  # the called MCP IS the system MCP
+            schema_src = mcp
         else:
-            # Custom MCP: only use its own input_schema, never inherit from parent system MCP
             schema_src = mcp if getattr(mcp, "input_schema", None) else None
 
         if schema_src and schema_src.input_schema:
@@ -93,9 +124,7 @@ async def _preflight_validate(
                 all_field_names = [f["name"] for f in fields]
                 provided = tool_input.get("params") or {}
                 missing = [k for k in required if k not in provided or not provided[k]]
-                # Also block calls with completely empty params when there ARE input fields defined
                 if not provided and all_field_names and not required:
-                    # optional-only fields: still ask user rather than silently returning full dataset
                     return {
                         "status": "error", "code": "MISSING_PARAMS",
                         "message": (
@@ -132,18 +161,13 @@ async def _preflight_validate(
                 "message": f"⚠️ Skill #{skill_id} 不存在。請呼叫 list_skills 取得有效的 Skill 列表後重試。",
             }
 
-    return None  # validation passed
+    return None
 
 
-_TOOL_RESULT_MAX_CHARS = 1500  # hard cap per tool_result when stored/loaded
-
+# ── History Utilities ──────────────────────────────────────────────────────────
 
 def _sanitize_history(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Retroactively trim oversized tool_result content in loaded session history.
-
-    Old sessions (pre-v13.3) may have full datasets stored. Cap any single
-    tool_result content to _TOOL_RESULT_MAX_CHARS to prevent 400k token floods.
-    """
+    """Cap oversized tool_result content in loaded history."""
     cleaned = []
     for msg in messages:
         if msg.get("role") == "user" and isinstance(msg.get("content"), list):
@@ -154,7 +178,6 @@ def _sanitize_history(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                     if isinstance(raw, str) and len(raw) > _TOOL_RESULT_MAX_CHARS:
                         try:
                             parsed = json.loads(raw)
-                            # Strip heavy fields
                             for key in ("output_data", "ui_render_payload", "_raw_dataset"):
                                 parsed.pop(key, None)
                             if "llm_readable_data" not in parsed:
@@ -171,15 +194,7 @@ def _sanitize_history(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _clean_history_boundary(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Remove orphaned tool_result messages from the front of a trimmed history slice.
-
-    When history is trimmed to the last N messages, the slice may start with a
-    user(tool_result) message whose corresponding assistant(tool_use) was cut off.
-    Anthropic API rejects such requests with 400 invalid_request_error.
-
-    Strategy: skip any leading user(tool_result) + the following assistant response
-    until we reach a clean user(text) turn.
-    """
+    """Remove orphaned tool_result messages from trimmed history front."""
     i = 0
     while i < len(messages):
         msg = messages[i]
@@ -190,19 +205,56 @@ def _clean_history_boundary(messages: List[Dict[str, Any]]) -> List[Dict[str, An
                 for b in content
             )
             if not is_tool_result:
-                break  # found a clean user text turn
-            # Orphaned tool_result — skip it and the assistant turn that follows
+                break
             i += 1
             if i < len(messages) and messages[i].get("role") == "assistant":
                 i += 1
         else:
-            # History starts with assistant — invalid pair, skip
             i += 1
     return messages[i:]
 
 
+def _compact_history(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """v14: Replace old messages with an <archive_summary> when token budget exceeded.
+
+    Keeps the last 4 messages (2 turns) intact; summarises the rest into a
+    single user message. No LLM call — fast keyword extraction for dev.
+    """
+    if len(messages) <= 4:
+        return messages
+
+    old_messages = messages[:-4]
+    recent_messages = messages[-4:]
+
+    # Build a plain-text archive from old messages
+    archive_lines: List[str] = []
+    for msg in old_messages:
+        role = msg.get("role", "?")
+        content = msg.get("content", "")
+        if isinstance(content, str) and content.strip():
+            archive_lines.append(f"[{role}] {content[:200]}")
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict):
+                    if block.get("type") == "text":
+                        archive_lines.append(f"[{role}] {block.get('text', '')[:200]}")
+                    elif block.get("type") == "tool_result":
+                        archive_lines.append(f"[tool_result] {str(block.get('content', ''))[:150]}")
+
+    archive_text = (
+        "<archive_summary>\n"
+        "以下為本 Session 早期對話摘要（已自動壓縮以節省 Token）：\n"
+        + "\n".join(archive_lines[:20])
+        + "\n</archive_summary>"
+    )
+
+    compacted = [{"role": "user", "content": archive_text}] + recent_messages
+    return _clean_history_boundary(compacted)
+
+
+# ── Data Helpers ───────────────────────────────────────────────────────────────
+
 def _dataset_summary(dataset: List[Any]) -> Dict[str, Any]:
-    """Build a compact summary for large datasets — no raw rows sent to LLM."""
     n = len(dataset)
     stats_parts: List[str] = [f"總共 {n} 筆資料"]
     if n > 0 and isinstance(dataset[0], dict):
@@ -219,13 +271,7 @@ def _dataset_summary(dataset: List[Any]) -> Dict[str, Any]:
 
 
 def _trim_for_llm(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
-    """Strip large rendering payloads from tool results before sending to LLM (v13.3 §1.1).
-
-    execute_skill → only llm_readable_data (structured status/targets)
-    execute_mcp   → llm_readable_data + dataset_summary (count + columns + avg)
-    list_*        → keep first 12 items, strip heavy fields
-    others        → passthrough
-    """
+    """Strip large rendering payloads before sending to LLM."""
     if tool_name == "execute_skill":
         return {k: result[k] for k in ("skill_name", "llm_readable_data", "status") if k in result}
     if tool_name == "execute_mcp":
@@ -245,7 +291,6 @@ def _trim_for_llm(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
         for item in items[:12]:
             if isinstance(item, dict):
                 clean = {k: v for k, v in item.items() if k not in _HEAVY_FIELDS}
-                # Truncate long text fields to keep catalog compact
                 for field in ("processing_intent", "description"):
                     if isinstance(clean.get(field), str) and len(clean[field]) > 300:
                         clean[field] = clean[field][:300] + "…"
@@ -264,6 +309,8 @@ def _trim_for_llm(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
         return {**result, "data": result["data"][:8], "_truncated": True}
     return result
 
+
+# ── Content Block Helpers ──────────────────────────────────────────────────────
 
 def _extract_text(content: List[Any]) -> str:
     parts = []
@@ -294,7 +341,6 @@ def _extract_tool_calls(content: List[Any]) -> List[Any]:
 
 
 def _content_to_list(content: List[Any]) -> List[Dict]:
-    """Convert Anthropic content blocks to serializable list."""
     result = []
     for block in content:
         if hasattr(block, "type"):
@@ -309,14 +355,12 @@ def _content_to_list(content: List[Any]) -> List[Dict]:
                 })
             elif block.type == "thinking":
                 result.append({"type": "thinking", "thinking": block.thinking})
-            # skip other types (redacted_thinking, etc.)
         elif isinstance(block, dict):
             result.append(block)
     return result
 
 
 def _result_summary(result: Dict[str, Any]) -> str:
-    """Build a short human-readable summary of a tool result for the SSE event."""
     if "error" in result:
         return f"ERROR: {result['error']}"
     if "llm_readable_data" in result:
@@ -325,7 +369,6 @@ def _result_summary(result: Dict[str, Any]) -> str:
             status = lrd.get("status", "?")
             msg = lrd.get("diagnosis_message", "")[:80]
             return f"status={status} | {msg}"
-        # execute_mcp: llm_readable_data is a JSON string of dataset preview
         if "output_data" in result and isinstance(result.get("output_data"), dict):
             ds = result["output_data"].get("dataset")
             count = len(ds) if isinstance(ds, list) else result.get("row_count", 0)
@@ -345,7 +388,6 @@ def _build_render_card(
     tool_input: Dict[str, Any],
     result: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
-    """Build a frontend render_card for execute_skill / execute_mcp tool results."""
     if tool_name == "execute_skill" and isinstance(result, dict) and "ui_render_payload" in result:
         lrd = result.get("llm_readable_data") or {}
         urp = result.get("ui_render_payload") or {}
@@ -405,8 +447,31 @@ def _build_render_card(
     return None
 
 
+# ── Stage Labels ───────────────────────────────────────────────────────────────
+
+_STAGE_LABELS = {
+    1: "情境感知 (Context Load)",
+    2: "意圖解析與規劃 (Planning)",
+    3: "工具調用與安全審查 (Tool Execution)",
+    4: "邏輯推理與彙整 (Reasoning)",
+    5: "回覆與記憶寫入 (Memory Write)",
+}
+
+
+def _stage_event(stage: int, status: str = "running", **extra: Any) -> Dict[str, Any]:
+    return {
+        "type": "stage_update",
+        "stage": stage,
+        "label": _STAGE_LABELS.get(stage, f"Stage {stage}"),
+        "status": status,
+        **extra,
+    }
+
+
+# ── Main Orchestrator ──────────────────────────────────────────────────────────
+
 class AgentOrchestrator:
-    """Five-stage agentic loop with SSE streaming."""
+    """v14 Five-stage agentic loop with full observability and safety features."""
 
     def __init__(
         self,
@@ -414,16 +479,19 @@ class AgentOrchestrator:
         base_url: str,
         auth_token: str,
         user_id: int,
+        canvas_overrides: Optional[Dict[str, Any]] = None,
     ) -> None:
         self._db = db
         self._base_url = base_url
         self._auth_token = auth_token
         self._user_id = user_id
+        self._canvas_overrides = canvas_overrides
         settings = get_settings()
         self._client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
         self._model = settings.LLM_MODEL
         self._memory_svc = AgentMemoryService(db)
         self._context_loader = ContextLoader(db)
+        self._distill_svc = DataDistillationService()
 
     async def run(
         self,
@@ -438,16 +506,27 @@ class AgentOrchestrator:
         session_id: Optional[str],
     ) -> AsyncIterator[Dict[str, Any]]:
 
-        # ── Stage 1: Context Load ──────────────────────────────────────────
-        system_prompt, context_meta = await self._context_loader.build(
+        # ══════════════════════════════════════════════════════════════
+        # Stage 1: Context Load
+        # ══════════════════════════════════════════════════════════════
+        yield _stage_event(1, "running")
+
+        system_blocks, context_meta = await self._context_loader.build(
             user_id=self._user_id,
             query=message,
             top_k_memories=5,
+            canvas_overrides=self._canvas_overrides,
         )
-        # Load session history before emitting context_load so we can report turn count
-        session_id, history = await self._load_session(session_id)
-        context_meta["history_turns"] = len(history) // 2  # user+assistant pairs
+        session_id, history, cumulative_tokens = await self._load_session(session_id)
+        context_meta["history_turns"] = len(history) // 2
+        context_meta["cumulative_tokens"] = cumulative_tokens
+
+        yield _stage_event(1, "complete")
         yield {"type": "context_load", **context_meta}
+
+        # v14: Emit workspace_update if canvas_overrides are active
+        if self._canvas_overrides:
+            yield {"type": "workspace_update", "canvas_overrides": self._canvas_overrides}
 
         messages: List[Dict[str, Any]] = history + [{"role": "user", "content": message}]
 
@@ -460,18 +539,37 @@ class AgentOrchestrator:
 
         final_text = ""
         iteration = 0
-        _new_diagnosis: Optional[Dict] = None  # for Stage 5 memory write
+        _new_diagnosis: Optional[Dict] = None
+        _plan_extracted = False
+        _session_input_tokens = cumulative_tokens
 
-        # ── Stage 2–4: Tool Use Loop ────────────────────────────────────────
+        # ══════════════════════════════════════════════════════════════
+        # v14: Token Compaction — compact before we start if already over threshold
+        # ══════════════════════════════════════════════════════════════
+        if _session_input_tokens > _COMPACTION_TOKEN_THRESHOLD and len(messages) > 5:
+            logger.info("Token compaction triggered: %d tokens", _session_input_tokens)
+            messages = _compact_history(messages)
+            yield {
+                "type": "token_usage",
+                "cumulative_tokens": _session_input_tokens,
+                "compaction": True,
+                "message": f"Session 已累積 {_session_input_tokens:,} tokens，已壓縮歷史對話。",
+            }
+
+        # ══════════════════════════════════════════════════════════════
+        # Stage 2-4: Tool Use Loop
+        # ══════════════════════════════════════════════════════════════
+        yield _stage_event(2, "running")
+
         while iteration < MAX_ITERATIONS:
             iteration += 1
-            logger.info("AgentOrchestrator: iteration=%d user=%d", iteration, self._user_id)
+            logger.info("AgentOrchestrator v14: iteration=%d user=%d", iteration, self._user_id)
 
             try:
                 response = await self._client.messages.create(
                     model=self._model,
                     max_tokens=4096,
-                    system=system_prompt,
+                    system=system_blocks,   # v14: List[Dict] with cache_control
                     tools=TOOL_SCHEMAS,
                     messages=messages,
                 )
@@ -481,33 +579,67 @@ class AgentOrchestrator:
                 yield {"type": "done"}
                 return
 
-            # Emit token usage
+            # Emit token usage (v14: includes cache stats)
             if hasattr(response, "usage") and response.usage:
+                usage = response.usage
+                iter_input = getattr(usage, "input_tokens", 0)
+                iter_output = getattr(usage, "output_tokens", 0)
+                cache_read = getattr(usage, "cache_read_input_tokens", 0)
+                cache_create = getattr(usage, "cache_creation_input_tokens", 0)
+                _session_input_tokens += iter_input
                 yield {
                     "type": "llm_usage",
-                    "input_tokens": response.usage.input_tokens,
-                    "output_tokens": response.usage.output_tokens,
+                    "input_tokens": iter_input,
+                    "output_tokens": iter_output,
+                    "cache_read_tokens": cache_read,
+                    "cache_creation_tokens": cache_create,
+                    "cumulative_tokens": _session_input_tokens,
                     "iteration": iteration,
                 }
 
-            # Stream thinking blocks (if present)
+            # Stream thinking blocks
             for thinking_text in _extract_thinking(response.content):
                 yield {"type": "thinking", "text": thinking_text}
 
-            # ── end_turn: Synthesis ────────────────────────────────────────
+            # ── end_turn: extract plan then synthesize ─────────────────
             if response.stop_reason == "end_turn":
                 final_text = _extract_text(response.content)
+
+                # v14: Extract <plan> from first assistant response
+                if not _plan_extracted:
+                    plan_match = re.search(r"<plan>([\s\S]*?)</plan>", final_text)
+                    if plan_match:
+                        _plan_extracted = True
+                        yield _stage_event(2, "complete", plan=plan_match.group(1).strip())
+                    else:
+                        yield _stage_event(2, "complete")
+
+                yield _stage_event(4, "running")
                 yield {"type": "synthesis", "text": final_text}
+                yield _stage_event(4, "complete")
                 messages.append({"role": "assistant", "content": _content_to_list(response.content)})
                 break
 
-            # ── tool_use: Execute tools ────────────────────────────────────
+            # ── tool_use: Execute tools ────────────────────────────────
             if response.stop_reason == "tool_use":
                 tool_calls = _extract_tool_calls(response.content)
                 messages.append({"role": "assistant", "content": _content_to_list(response.content)})
 
+                # v14: Extract <plan> from tool_use response text
+                if not _plan_extracted:
+                    resp_text = _extract_text(response.content)
+                    plan_match = re.search(r"<plan>([\s\S]*?)</plan>", resp_text)
+                    if plan_match:
+                        _plan_extracted = True
+                        yield _stage_event(2, "complete", plan=plan_match.group(1).strip())
+                    else:
+                        yield _stage_event(2, "complete")
+
+                yield _stage_event(3, "running")
+
                 tool_results = []
-                _force_synthesis = False  # set when an error requires user action
+                _force_synthesis = False
+
                 for tc in tool_calls:
                     tool_id = tc.id if hasattr(tc, "id") else tc.get("id", "")
                     tool_name = tc.name if hasattr(tc, "name") else tc.get("name", "")
@@ -520,24 +652,65 @@ class AgentOrchestrator:
                         "iteration": iteration,
                     }
 
-                    # ── Pre-flight validation (spec §3-A) ─────────────────
-                    preflight_err = await _preflight_validate(self._db, tool_name, tool_input)
-                    if preflight_err:
-                        result = preflight_err
-                    else:
-                        result = await dispatcher.execute(tool_name, tool_input)
+                    # ── v14: HITL — destructive tool gate ─────────────────
+                    if tool_name in _DESTRUCTIVE_TOOLS:
+                        approval_token = str(uuid.uuid4())[:8]
+                        _approval_events[approval_token] = asyncio.Event()
+                        _pending_approvals[approval_token] = None
 
-                    # ── Detect unrecoverable errors → force synthesis ──────
-                    # Any execute_mcp/execute_skill error cannot be resolved by
-                    # the agent alone — it must ask the user or report the failure.
+                        yield {
+                            "type": "approval_required",
+                            "approval_token": approval_token,
+                            "tool": tool_name,
+                            "input": tool_input,
+                            "message": f"⚠️ 工具「{tool_name}」會修改系統設定，需要您的批准。請點擊「批准」或「拒絕」。",
+                            "timeout_seconds": 60,
+                        }
+
+                        # Wait for approval (60s timeout)
+                        try:
+                            await asyncio.wait_for(
+                                _approval_events[approval_token].wait(),
+                                timeout=60.0,
+                            )
+                            approved = _pending_approvals.get(approval_token, False)
+                        except asyncio.TimeoutError:
+                            approved = False
+                        finally:
+                            _approval_events.pop(approval_token, None)
+                            _pending_approvals.pop(approval_token, None)
+
+                        if not approved:
+                            result = {
+                                "status": "error",
+                                "code": "APPROVAL_REJECTED",
+                                "message": f"用戶拒絕或超時未批准「{tool_name}」操作，已取消執行。",
+                            }
+                            _force_synthesis = True
+                        else:
+                            # Proceed with execution
+                            preflight_err = await _preflight_validate(self._db, tool_name, tool_input)
+                            result = preflight_err if preflight_err else await dispatcher.execute(tool_name, tool_input)
+                    else:
+                        # ── Pre-flight validation ──────────────────────────
+                        preflight_err = await _preflight_validate(self._db, tool_name, tool_input)
+                        if preflight_err:
+                            result = preflight_err
+                        else:
+                            result = await dispatcher.execute(tool_name, tool_input)
+
+                    # ── v14: Programmatic Distillation for data tools ──────
+                    if tool_name == "execute_mcp" and isinstance(result, dict) and result.get("status") == "success":
+                        result = await self._distill_svc.distill_mcp_result(result)
+
+                    # ── Force synthesis on unrecoverable errors ────────────
                     if isinstance(result, dict) and result.get("status") == "error":
                         if tool_name in ("execute_mcp", "execute_skill"):
                             _force_synthesis = True
-                    # MISSING_PARAMS from preflight also requires force synthesis
                     if isinstance(result, dict) and result.get("code") == "MISSING_PARAMS":
                         _force_synthesis = True
 
-                    # Capture ABNORMAL diagnosis for memory auto-write
+                    # Capture ABNORMAL diagnosis for memory
                     if tool_name == "execute_skill" and isinstance(result, dict):
                         lrd = result.get("llm_readable_data", {})
                         if isinstance(lrd, dict) and lrd.get("status") == "ABNORMAL":
@@ -565,15 +738,17 @@ class AgentOrchestrator:
                         "content": json.dumps(_trim_for_llm(tool_name, result), ensure_ascii=False),
                     })
 
+                yield _stage_event(3, "complete")
                 messages.append({"role": "user", "content": tool_results})
 
-                # ── Force synthesis: unrecoverable error → ask user, stop retrying ──
+                # ── Force synthesis ────────────────────────────────────────
                 if _force_synthesis:
+                    yield _stage_event(4, "running")
                     try:
                         synth_resp = await self._client.messages.create(
                             model=self._model,
                             max_tokens=512,
-                            system=system_prompt,
+                            system=system_blocks,
                             tool_choice={"type": "none"},
                             tools=TOOL_SCHEMAS,
                             messages=messages,
@@ -583,6 +758,7 @@ class AgentOrchestrator:
                         messages.append({"role": "assistant", "content": _content_to_list(synth_resp.content)})
                     except Exception as exc:
                         yield {"type": "synthesis", "text": f"執行失敗，請確認參數後再試一次。（{exc}）"}
+                    yield _stage_event(4, "complete")
                     break
 
                 continue
@@ -592,17 +768,20 @@ class AgentOrchestrator:
             break
 
         else:
-            # MAX_ITERATIONS exceeded
             yield {
                 "type": "error",
                 "message": f"Agent 已達最大迭代上限 ({MAX_ITERATIONS})，強制中斷。請人工協助或簡化請求。",
                 "iteration": iteration,
             }
 
-        # ── Stage 5: Memory Write ───────────────────────────────────────────
+        # ══════════════════════════════════════════════════════════════
+        # Stage 5: Memory Write (conflict-aware)
+        # ══════════════════════════════════════════════════════════════
+        yield _stage_event(5, "running")
+
         if _new_diagnosis:
             try:
-                mem = await self._memory_svc.write_diagnosis(
+                mem = await self._memory_svc.write_diagnosis_with_conflict_check(
                     user_id=self._user_id,
                     skill_name=_new_diagnosis["skill_name"],
                     targets=_new_diagnosis["targets"],
@@ -615,20 +794,24 @@ class AgentOrchestrator:
                         "content": mem.content[:100],
                         "source": mem.source,
                         "memory_id": mem.id,
+                        "conflict_resolved": getattr(mem, "_conflict_resolved", False),
                     }
             except Exception as exc:
                 logger.warning("Memory auto-write failed: %s", exc)
 
-        # Save session (trim to last _SESSION_MAX_MESSAGES to bound token growth)
-        # Then clean the boundary to prevent orphaned tool_result blocks (→ 400 error)
+        yield _stage_event(5, "complete")
+
+        # Save session with cumulative token count
         trimmed = _clean_history_boundary(messages[-_SESSION_MAX_MESSAGES:])
-        await self._save_session(session_id, trimmed)
+        await self._save_session(session_id, trimmed, _session_input_tokens)
         yield {"type": "done", "session_id": session_id}
 
     # ── Session Helpers ───────────────────────────────────────────────────────
 
-    async def _load_session(self, session_id: Optional[str]) -> tuple[str, List[Dict]]:
-        """Load or create a session. Returns (session_id, messages_list)."""
+    async def _load_session(
+        self, session_id: Optional[str]
+    ) -> tuple[str, List[Dict], int]:
+        """Load or create a session. Returns (session_id, messages, cumulative_tokens)."""
         if session_id:
             result = await self._db.execute(
                 select(AgentSessionModel).where(
@@ -638,46 +821,55 @@ class AgentOrchestrator:
             )
             row = result.scalar_one_or_none()
             if row:
-                # Check TTL (normalise naive datetimes from SQLite to UTC-aware)
                 expires = row.expires_at
                 if expires:
                     if expires.tzinfo is None:
                         expires = expires.replace(tzinfo=timezone.utc)
-                    if expires < datetime.now(tz=timezone.utc):
+                    if expires < datetime.datetime.now(tz=timezone.utc):
                         await self._db.delete(row)
                         await self._db.commit()
                     else:
                         try:
                             raw_history = json.loads(row.messages)
-                            return session_id, _sanitize_history(raw_history)
+                            cumulative = getattr(row, "cumulative_tokens", None) or 0
+                            return session_id, _sanitize_history(raw_history), cumulative
                         except Exception:
                             pass
 
-        # New session
         new_id = str(uuid.uuid4())
-        return new_id, []
+        return new_id, [], 0
 
-    async def _save_session(self, session_id: str, messages: List[Dict]) -> None:
-        """Upsert session with 24h TTL."""
+    async def _save_session(
+        self,
+        session_id: str,
+        messages: List[Dict],
+        cumulative_tokens: int = 0,
+    ) -> None:
+        """Upsert session with 24h TTL and cumulative token count."""
         try:
             result = await self._db.execute(
                 select(AgentSessionModel).where(AgentSessionModel.session_id == session_id)
             )
             row = result.scalar_one_or_none()
-            expires = datetime.now(tz=timezone.utc) + timedelta(hours=_SESSION_TTL_HOURS)
+            expires = datetime.datetime.now(tz=timezone.utc) + timedelta(hours=_SESSION_TTL_HOURS)
             serialized = json.dumps(messages, ensure_ascii=False)
 
             if row:
                 row.messages = serialized
                 row.expires_at = expires
+                if hasattr(row, "cumulative_tokens"):
+                    row.cumulative_tokens = cumulative_tokens
             else:
-                row = AgentSessionModel(
-                    session_id=session_id,
-                    user_id=self._user_id,
-                    messages=serialized,
-                    created_at=datetime.now(tz=timezone.utc),
-                    expires_at=expires,
-                )
+                kwargs: Dict[str, Any] = {
+                    "session_id": session_id,
+                    "user_id": self._user_id,
+                    "messages": serialized,
+                    "created_at": datetime.datetime.now(tz=timezone.utc),
+                    "expires_at": expires,
+                }
+                if hasattr(AgentSessionModel, "cumulative_tokens"):
+                    kwargs["cumulative_tokens"] = cumulative_tokens
+                row = AgentSessionModel(**kwargs)
                 self._db.add(row)
             await self._db.commit()
         except Exception as exc:

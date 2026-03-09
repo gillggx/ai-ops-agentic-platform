@@ -108,7 +108,7 @@ class AgentMemoryService:
         diagnosis_message: str,
         skill_id: Optional[int] = None,
     ) -> Optional[AgentMemoryModel]:
-        """Auto-write triggered after an ABNORMAL skill diagnosis."""
+        """Auto-write triggered after an ABNORMAL skill diagnosis (no conflict check)."""
         if not targets and not diagnosis_message:
             return None
         target_str = "、".join(targets) if targets else "未知目標"
@@ -123,6 +123,61 @@ class AgentMemoryService:
             source="diagnosis",
             ref_id=f"skill:{skill_id}" if skill_id else None,
         )
+
+    async def write_diagnosis_with_conflict_check(
+        self,
+        user_id: int,
+        skill_name: str,
+        targets: List[str],
+        diagnosis_message: str,
+        skill_id: Optional[int] = None,
+    ) -> Optional[AgentMemoryModel]:
+        """v14: Conflict-aware diagnosis memory write.
+
+        Before writing, searches existing memories for the same Skill + target
+        combination. If a contradicting memory is found (same target, different
+        NORMAL/ABNORMAL conclusion), performs UPDATE instead of ADD to maintain
+        consistency (Conflict Resolution).
+        """
+        if not targets and not diagnosis_message:
+            return None
+
+        target_str = "、".join(targets) if targets else "未知目標"
+        ts = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+        new_content = (
+            f"[診斷記錄] {ts} | Skill「{skill_name}」判定 ABNORMAL | "
+            f"問題目標: {target_str} | 訊息: {diagnosis_message}"
+        )
+
+        # Search for conflicting memories about the same skill + target
+        query = f"{skill_name} {target_str}"
+        similar = await self.search(user_id, query, top_k=5)
+
+        for mem in similar:
+            if not _is_same_skill_target(mem.content, skill_name, targets):
+                continue
+            if _is_contradictory(mem.content, new_content):
+                # UPDATE: replace old contradicting memory
+                logger.info(
+                    "Memory conflict detected for Skill '%s' target '%s' — updating mem.id=%d",
+                    skill_name, target_str, mem.id,
+                )
+                mem.content = new_content
+                mem.updated_at = datetime.now(tz=timezone.utc)
+                mem._conflict_resolved = True  # flag for SSE event
+                await self._db.commit()
+                await self._db.refresh(mem)
+                return mem
+
+        # No conflict — ADD new memory
+        result = await self.write(
+            user_id=user_id,
+            content=new_content,
+            source="diagnosis",
+            ref_id=f"skill:{skill_id}" if skill_id else None,
+        )
+        result._conflict_resolved = False
+        return result
 
     # ── Delete ────────────────────────────────────────────────────────────────
 
@@ -165,3 +220,48 @@ class AgentMemoryService:
             "ref_id": m.ref_id,
             "created_at": m.created_at.isoformat() if m.created_at else None,
         }
+
+
+# ── Conflict Detection Helpers (module-level) ─────────────────────────────────
+
+def _is_same_skill_target(
+    memory_content: str,
+    skill_name: str,
+    targets: List[str],
+) -> bool:
+    """Check if a memory entry is about the same Skill + at least one target."""
+    content_lower = memory_content.lower()
+    if skill_name.lower() not in content_lower:
+        return False
+    return any(t.lower() in content_lower for t in targets if t)
+
+
+def _is_contradictory(old_content: str, new_content: str) -> bool:
+    """Detect logical contradiction between two diagnosis memory entries.
+
+    v14 heuristic (SQLite-compatible, no embeddings):
+    - Both must be [診斷記錄] entries
+    - Old says NORMAL, new says ABNORMAL (or vice-versa) for the same object
+    - OR old says ABNORMAL and new says NORMAL
+
+    Semantic similarity > 0.9 threshold is approximated by shared token overlap.
+    """
+    if "[診斷記錄]" not in old_content or "[診斷記錄]" not in new_content:
+        return False
+
+    old_lower = old_content.lower()
+    new_lower = new_content.lower()
+
+    # Token overlap (similarity proxy)
+    old_tokens = set(old_lower.split())
+    new_tokens = set(new_lower.split())
+    if not old_tokens or not new_tokens:
+        return False
+    overlap = len(old_tokens & new_tokens) / min(len(old_tokens), len(new_tokens))
+    if overlap < 0.4:
+        return False  # Too different — not about the same thing
+
+    # Contradiction: one says NORMAL, other says ABNORMAL
+    old_is_abnormal = "abnormal" in old_lower
+    new_is_abnormal = "abnormal" in new_lower
+    return old_is_abnormal != new_is_abnormal

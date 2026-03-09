@@ -1377,6 +1377,12 @@ function _activateWorkspaceTab(tabId) {
   entry.btn?.classList.add('active-ws-tab');
   entry.panel?.classList.remove('hidden');
   _activeTabId = tabId;
+  // Resize Plotly charts that became visible (Plotly doesn't auto-resize on un-hide)
+  requestAnimationFrame(() => {
+    entry.panel?.querySelectorAll('.evidence-chart[data-chart]').forEach(div => {
+      if (window.Plotly && div._fullLayout) Plotly.Plots.resize(div);
+    });
+  });
 }
 
 /** Close a workspace tab. */
@@ -2115,13 +2121,22 @@ function _renderDraftActionCard(card) {
     if (typeof v === 'object') return JSON.stringify(v).slice(0, 120);
     return String(v).slice(0, 120);
   };
-  const fillRows = Object.entries(card.auto_fill || {})
-    .filter(([, v]) => v !== null && v !== undefined && v !== '' && !(Array.isArray(v) && !v.length))
+  const autoFill = card.auto_fill || {};
+  const mcpParams = autoFill.mcp_input_params || null;
+  const fillRows = Object.entries(autoFill)
+    .filter(([k, v]) => k !== 'mcp_input_params' && v !== null && v !== undefined && v !== '' && !(Array.isArray(v) && !v.length))
     .map(([k, v]) => `
       <div class="flex gap-2 text-xs py-1 border-b border-slate-100 last:border-0">
         <span class="font-mono text-purple-600 w-36 shrink-0">${_escapeHtml(k)}</span>
         <span class="text-slate-700 truncate">${_escapeHtml(_fmtVal(v))}</span>
       </div>`).join('');
+  const paramRows = mcpParams
+    ? Object.entries(mcpParams).map(([k, v]) => `
+        <div class="flex gap-2 text-xs py-1 border-b border-slate-100 last:border-0">
+          <span class="font-mono text-blue-600 w-36 shrink-0">${_escapeHtml(k)}</span>
+          <span class="text-slate-700 truncate">${_escapeHtml(_fmtVal(v))}</span>
+        </div>`).join('')
+    : '';
 
   const contentHtml = `
     <div class="p-5 flex flex-col gap-4 h-full overflow-y-auto">
@@ -2138,6 +2153,11 @@ function _renderDraftActionCard(card) {
         <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">草稿預覽</div>
         ${fillRows || '<span class="text-slate-400 text-xs">（無預覽資料）</span>'}
       </div>
+      ${paramRows ? `
+      <div class="bg-blue-50 rounded-lg border border-blue-200 px-3 py-2">
+        <div class="text-[10px] font-bold text-blue-500 uppercase tracking-wider mb-2">🔢 MCP 輸入參數（Agent 帶入）</div>
+        ${paramRows}
+      </div>` : ''}
 
       <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700">
         ℹ️ Agent 草稿不會直接修改正式資料。點擊下方按鈕開啟編輯器，確認內容後再正式發佈。
@@ -2362,6 +2382,9 @@ async function _sendAgentV13Message() {
   const _badge = document.getElementById('v13-token-badge');
   if (_badge) { _badge.textContent = ''; _badge.classList.add('hidden'); delete _badge._totalIn; delete _badge._totalOut; }
 
+  // Reset trace card for new message
+  _v14ResetTrace();
+
   // Expand Agent Console and mark new session
   _diagConsoleClear();
   _diagConsoleExpand();
@@ -2500,11 +2523,13 @@ function _handleV13Event(ev) {
     case 'tool_start': {
       const inputStr = JSON.stringify(ev.input || {});
       _diagLogLine('🔧', `TOOL #${ev.iteration || '?'} → ${ev.tool || ''}(${inputStr.slice(0, 80)}${inputStr.length > 80 ? '…' : ''})`, '#fbbf24');
+      _v14TraceAddTool(ev.tool || '', ev.input || {}, ev.iteration || 0);
       break;
     }
 
     case 'tool_done': {
       _diagLogLine('✅', `DONE  → ${ev.tool || ''} | ${ev.result_summary || ''}`, '#4ade80');
+      _v14TraceUpdateTool(ev.tool || '', ev.result_summary || '', ev.iteration || 0);
       // Render result in right workspace panel
       if (ev.render_card) {
         if (ev.render_card.type === 'skill') {
@@ -2551,7 +2576,9 @@ function _handleV13Event(ev) {
     }
 
     case 'memory_write': {
-      _diagLogLine('🧠', `MEMORY | 已記住: ${(ev.content || '').slice(0, 80)} (source: ${ev.source || '?'})`, '#c084fc');
+      const conflict = ev.conflict_resolved ? ' [衝突已解決→UPDATE]' : '';
+      _diagLogLine('🧠', `MEMORY | 已記住: ${(ev.content || '').slice(0, 80)} (source: ${ev.source || '?'})${conflict}`, '#c084fc');
+      _v14TraceAddMemory(ev.content, ev.source);
       break;
     }
 
@@ -2559,14 +2586,253 @@ function _handleV13Event(ev) {
       document.getElementById('v13-thinking-bubble')?.closest('.flex')?.remove();
       _diagLogLine('❌', `ERROR | ${ev.message || '未知錯誤'}${ev.iteration ? ` (iter ${ev.iteration})` : ''}`, '#f87171');
       _addChatBubble('error', `⚠️ Agent 錯誤：${_escapeHtml(ev.message || '未知錯誤')}`);
+      _v14TraceFinalize(Object.keys(_v14TraceToolRows).length);
+      _v14ResetTrace();
       break;
     }
 
     case 'done': {
       if (ev.session_id) _v13SessionId = ev.session_id;
       _diagLogLine('🏁', `DONE | session=${ev.session_id || '?'}`, '#475569');
+      _v14UpdateStageBar(null); // reset bar
+      _v14TraceFinalize(Object.keys(_v14TraceToolRows).length);
+      _v14ResetTrace();
       break;
     }
+
+    // ── v14 New Events ──────────────────────────────────────────
+
+    case 'stage_update': {
+      const stageNum = ev.stage || 0;
+      const stageLabel = ev.label || `Stage ${stageNum}`;
+      const status = ev.status || 'running';
+      const icon = status === 'complete' ? '✅' : '⏳';
+      _diagLogLine(icon, `Stage ${stageNum} ${status === 'complete' ? '完成' : '執行中'}: ${stageLabel}`, status === 'complete' ? '#4ade80' : '#fbbf24');
+      _v14UpdateStageBar(stageNum, status);
+      if (ev.plan) {
+        _diagLogLine('📋', `PLAN | ${ev.plan.slice(0, 200)}`, '#93c5fd');
+        _v14TraceAddPlan(ev.plan);
+      }
+      break;
+    }
+
+    case 'token_usage': {
+      const total = (ev.cumulative_tokens || 0).toLocaleString();
+      const compaction = ev.compaction ? ' 🗜️ 已壓縮' : '';
+      _diagLogLine('📊', `TOKEN BUDGET | 累計: ${total} tokens${compaction}`, '#64748b');
+      break;
+    }
+
+    case 'approval_required': {
+      _diagLogLine('⚠️', `HITL | 等待批准: ${ev.tool || ''}（token: ${ev.approval_token}）`, '#f97316');
+      _v14ShowApprovalModal(ev);
+      break;
+    }
+
+    case 'workspace_update': {
+      const keys = Object.keys(ev.canvas_overrides || {}).join(', ');
+      _diagLogLine('🖼️', `WORKSPACE | Canvas overrides 已注入: ${keys}`, '#818cf8');
+      break;
+    }
+  }
+}
+
+// ── v14: Inline Agent Action Trace Card ──────────────────────────────────────────
+// Shows plan / tool calls / memory writes directly in the chat stream
+
+let _v14TraceCard = null;       // current trace card DOM element (entries container)
+let _v14TraceToolRows = {};     // key: "toolName:iteration" → <div> element
+
+function _v14ResetTrace() {
+  _v14TraceCard = null;
+  _v14TraceToolRows = {};
+}
+
+/** Lazy-create the trace card in chat. Returns the entries <div>. */
+function _v14GetOrCreateTrace() {
+  if (_v14TraceCard) return _v14TraceCard;
+
+  const container = document.getElementById('chat-history');
+  if (!container) return null;
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'flex justify-start';
+  wrapper.id = 'v14-trace-wrapper';
+
+  wrapper.innerHTML = `
+    <div class="v14-trace-shell max-w-[90%] bg-slate-900/80 border border-slate-700 rounded-xl p-3 my-1 text-[11px] font-mono">
+      <div class="flex items-center gap-2 cursor-pointer select-none"
+           onclick="this.nextElementSibling.classList.toggle('hidden'); this.querySelector('.ti')?.classList.toggle('rotate-180')">
+        <span class="text-yellow-400 text-sm animate-pulse" id="v14-trace-spinner">⚡</span>
+        <span class="text-slate-300 font-semibold tracking-wide">Agent 執行軌跡</span>
+        <span class="ti text-slate-500 ml-auto transition-transform duration-200">▲</span>
+      </div>
+      <div class="v14-trace-entries mt-2 space-y-1.5 border-t border-slate-700 pt-2"></div>
+    </div>`;
+
+  container.appendChild(wrapper);
+  container.scrollTop = container.scrollHeight;
+
+  _v14TraceCard = wrapper.querySelector('.v14-trace-entries');
+  return _v14TraceCard;
+}
+
+function _v14TraceAddPlan(planText) {
+  const entries = _v14GetOrCreateTrace();
+  if (!entries) return;
+  const row = document.createElement('div');
+  row.className = 'flex items-start gap-1.5 text-slate-400';
+  row.innerHTML = `<span class="shrink-0 text-blue-400">📋</span>
+    <span class="text-blue-200 leading-snug">${_escapeHtml(planText.slice(0, 300))}</span>`;
+  entries.appendChild(row);
+  entries.closest('.v14-trace-shell')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function _v14TraceAddTool(toolName, toolInput, iteration) {
+  const entries = _v14GetOrCreateTrace();
+  if (!entries) return;
+
+  const key = `${toolName}:${iteration}`;
+  // Compact param display: just the key params
+  const paramStr = Object.entries(toolInput || {}).slice(0, 3)
+    .map(([k, v]) => `${k}=${JSON.stringify(v).slice(0, 30)}`).join(', ');
+
+  const row = document.createElement('div');
+  row.className = 'flex items-start gap-1.5 text-slate-400';
+  row.innerHTML = `<span class="shrink-0 animate-spin text-yellow-400">⏳</span>
+    <span>
+      <span class="text-yellow-200 font-semibold">${_escapeHtml(toolName)}</span>
+      <span class="text-slate-500">(${_escapeHtml(paramStr)})</span>
+    </span>`;
+
+  entries.appendChild(row);
+  _v14TraceToolRows[key] = row;
+  entries.closest('.v14-trace-shell')?.closest('.flex')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function _v14TraceUpdateTool(toolName, resultSummary, iteration) {
+  const key = `${toolName}:${iteration}`;
+  const row = _v14TraceToolRows[key];
+  if (!row) return;
+  row.innerHTML = `<span class="shrink-0 text-green-400">✅</span>
+    <span>
+      <span class="text-green-300 font-semibold">${_escapeHtml(toolName)}</span>
+      <span class="text-slate-400"> → ${_escapeHtml((resultSummary || '').slice(0, 120))}</span>
+    </span>`;
+}
+
+function _v14TraceAddMemory(content, source) {
+  const entries = _v14TraceCard;
+  if (!entries) return;
+  const row = document.createElement('div');
+  row.className = 'flex items-start gap-1.5 text-slate-400';
+  row.innerHTML = `<span class="shrink-0 text-purple-400">🧠</span>
+    <span class="text-purple-200">記憶已更新：${_escapeHtml((content || '').slice(0, 100))}</span>`;
+  entries.appendChild(row);
+}
+
+function _v14TraceFinalize(toolCount) {
+  // Stop spinner, show summary count
+  const spinner = document.getElementById('v14-trace-spinner');
+  if (spinner) { spinner.textContent = '✦'; spinner.classList.remove('animate-pulse'); }
+  if (!_v14TraceCard) return;
+  const shell = _v14TraceCard.closest('.v14-trace-shell');
+  if (!shell) return;
+  // Add summary line
+  const summary = document.createElement('div');
+  summary.className = 'mt-2 pt-1.5 border-t border-slate-700/50 text-slate-500 text-[10px]';
+  summary.textContent = `共執行 ${toolCount} 個工具`;
+  _v14TraceCard.appendChild(summary);
+}
+
+// ── v14: Stage Progress Bar ────────────────────────────────────────────────────
+
+const _V14_STAGE_LABELS = ['', '情境感知', '意圖規劃', '工具執行', '邏輯推理', '記憶寫入'];
+
+function _v14UpdateStageBar(activeStage, status) {
+  const bar = document.getElementById('v14-stage-bar');
+  if (!bar) return;
+  if (activeStage === null) {
+    // Reset
+    bar.querySelectorAll('.v14-stage-dot').forEach(d => {
+      d.className = 'v14-stage-dot w-5 h-5 rounded-full bg-slate-600 text-[9px] flex items-center justify-center font-bold text-slate-400';
+    });
+    return;
+  }
+  for (let i = 1; i <= 5; i++) {
+    const dot = bar.querySelector(`[data-stage="${i}"]`);
+    if (!dot) continue;
+    if (i < activeStage) {
+      dot.className = 'v14-stage-dot w-5 h-5 rounded-full bg-green-500 text-[9px] flex items-center justify-center font-bold text-white';
+    } else if (i === activeStage) {
+      const cls = status === 'complete'
+        ? 'v14-stage-dot w-5 h-5 rounded-full bg-green-500 text-[9px] flex items-center justify-center font-bold text-white'
+        : 'v14-stage-dot w-5 h-5 rounded-full bg-yellow-400 text-[9px] flex items-center justify-center font-bold text-slate-900 animate-pulse';
+      dot.className = cls;
+    } else {
+      dot.className = 'v14-stage-dot w-5 h-5 rounded-full bg-slate-600 text-[9px] flex items-center justify-center font-bold text-slate-400';
+    }
+  }
+}
+
+// ── v14: HITL Approval Modal ──────────────────────────────────────────────────
+
+function _v14ShowApprovalModal(ev) {
+  const existing = document.getElementById('v14-approval-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'v14-approval-modal';
+  modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm';
+  modal.innerHTML = `
+    <div class="bg-slate-800 border border-orange-500 rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl">
+      <div class="flex items-center gap-3 mb-4">
+        <span class="text-2xl">⚠️</span>
+        <div>
+          <div class="text-white font-bold text-base">高風險操作審核</div>
+          <div class="text-orange-300 text-xs mt-0.5">Human-in-the-loop (HITL) v14</div>
+        </div>
+      </div>
+      <div class="bg-slate-900 rounded-lg p-3 mb-4 text-sm">
+        <div class="text-slate-400 text-xs mb-1">工具</div>
+        <div class="text-yellow-300 font-mono">${_escapeHtml(ev.tool || '')}</div>
+        <div class="text-slate-400 text-xs mt-2 mb-1">參數</div>
+        <div class="text-slate-300 font-mono text-xs break-all">${_escapeHtml(JSON.stringify(ev.input || {}, null, 2).slice(0, 200))}</div>
+      </div>
+      <p class="text-slate-300 text-sm mb-5">${_escapeHtml(ev.message || '')}</p>
+      <div class="flex gap-3">
+        <button onclick="_v14ResolveApproval('${ev.approval_token}', true)"
+          class="flex-1 bg-green-600 hover:bg-green-500 text-white font-bold py-2.5 rounded-xl text-sm transition-colors">
+          ✅ 批准執行
+        </button>
+        <button onclick="_v14ResolveApproval('${ev.approval_token}', false)"
+          class="flex-1 bg-red-700 hover:bg-red-600 text-white font-bold py-2.5 rounded-xl text-sm transition-colors">
+          ❌ 拒絕
+        </button>
+      </div>
+      <div class="text-center text-slate-500 text-xs mt-3">
+        ⏱️ 60 秒內未操作將自動拒絕
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  // Auto-close after 62s (agent will have timed out)
+  setTimeout(() => modal.remove(), 62000);
+}
+
+async function _v14ResolveApproval(token, approved) {
+  document.getElementById('v14-approval-modal')?.remove();
+  const action = approved ? '批准' : '拒絕';
+  _diagLogLine(approved ? '✅' : '❌', `HITL | 用戶${action}: token=${token}`, approved ? '#4ade80' : '#f87171');
+  try {
+    const authHeader = _getAuthHeader ? _getAuthHeader() : {};
+    await fetch(`/api/v1/agent/approve/${token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeader },
+      body: JSON.stringify({ approved }),
+    });
+  } catch (e) {
+    _diagLogLine('⚠️', `HITL 回報失敗: ${e.message}`, '#f97316');
   }
 }
 

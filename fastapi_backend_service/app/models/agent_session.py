@@ -1,6 +1,12 @@
-"""AgentSession ORM model — short-term conversation cache (24h TTL)."""
+"""AgentSession ORM model — short-term conversation cache (24h TTL).
+
+v14 additions:
+  - cumulative_tokens: tracks total input tokens consumed this session
+  - workspace_state: JSON blob for Canvas workspace overrides
+"""
 
 from datetime import datetime, timezone
+from typing import Optional
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
@@ -28,6 +34,14 @@ class AgentSessionModel(Base):
         default=lambda: datetime.now(tz=timezone.utc), server_default=func.now(),
     )
     # 24h TTL — service layer checks this and auto-clears
-    expires_at: Mapped[datetime | None] = mapped_column(
+    expires_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    # v14: cumulative input tokens for compaction threshold tracking
+    cumulative_tokens: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, default=0
+    )
+    # v14: workspace state — canvas overrides JSON ({"tool_id": "TETCH01", ...})
+    workspace_state: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
     )
