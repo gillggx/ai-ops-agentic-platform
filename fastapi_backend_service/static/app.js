@@ -2382,9 +2382,6 @@ async function _sendAgentV13Message() {
   const _badge = document.getElementById('v13-token-badge');
   if (_badge) { _badge.textContent = ''; _badge.classList.add('hidden'); delete _badge._totalIn; delete _badge._totalOut; }
 
-  // Reset trace card for new message
-  _v14ResetTrace();
-
   // Expand Agent Console and mark new session
   _diagConsoleClear();
   _diagConsoleExpand();
@@ -2523,13 +2520,11 @@ function _handleV13Event(ev) {
     case 'tool_start': {
       const inputStr = JSON.stringify(ev.input || {});
       _diagLogLine('🔧', `TOOL #${ev.iteration || '?'} → ${ev.tool || ''}(${inputStr.slice(0, 80)}${inputStr.length > 80 ? '…' : ''})`, '#fbbf24');
-      _v14TraceAddTool(ev.tool || '', ev.input || {}, ev.iteration || 0);
       break;
     }
 
     case 'tool_done': {
       _diagLogLine('✅', `DONE  → ${ev.tool || ''} | ${ev.result_summary || ''}`, '#4ade80');
-      _v14TraceUpdateTool(ev.tool || '', ev.result_summary || '', ev.iteration || 0);
       // Render result in right workspace panel
       if (ev.render_card) {
         if (ev.render_card.type === 'skill') {
@@ -2578,7 +2573,6 @@ function _handleV13Event(ev) {
     case 'memory_write': {
       const conflict = ev.conflict_resolved ? ' [衝突已解決→UPDATE]' : '';
       _diagLogLine('🧠', `MEMORY | 已記住: ${(ev.content || '').slice(0, 80)} (source: ${ev.source || '?'})${conflict}`, '#c084fc');
-      _v14TraceAddMemory(ev.content, ev.source);
       break;
     }
 
@@ -2586,8 +2580,6 @@ function _handleV13Event(ev) {
       document.getElementById('v13-thinking-bubble')?.closest('.flex')?.remove();
       _diagLogLine('❌', `ERROR | ${ev.message || '未知錯誤'}${ev.iteration ? ` (iter ${ev.iteration})` : ''}`, '#f87171');
       _addChatBubble('error', `⚠️ Agent 錯誤：${_escapeHtml(ev.message || '未知錯誤')}`);
-      _v14TraceFinalize(Object.keys(_v14TraceToolRows).length);
-      _v14ResetTrace();
       break;
     }
 
@@ -2595,8 +2587,6 @@ function _handleV13Event(ev) {
       if (ev.session_id) _v13SessionId = ev.session_id;
       _diagLogLine('🏁', `DONE | session=${ev.session_id || '?'}`, '#475569');
       _v14UpdateStageBar(null); // reset bar
-      _v14TraceFinalize(Object.keys(_v14TraceToolRows).length);
-      _v14ResetTrace();
       break;
     }
 
@@ -2611,7 +2601,6 @@ function _handleV13Event(ev) {
       _v14UpdateStageBar(stageNum, status);
       if (ev.plan) {
         _diagLogLine('📋', `PLAN | ${ev.plan.slice(0, 200)}`, '#93c5fd');
-        _v14TraceAddPlan(ev.plan);
       }
       break;
     }
@@ -2635,114 +2624,6 @@ function _handleV13Event(ev) {
       break;
     }
   }
-}
-
-// ── v14: Inline Agent Action Trace Card ──────────────────────────────────────────
-// Shows plan / tool calls / memory writes directly in the chat stream
-
-let _v14TraceCard = null;       // current trace card DOM element (entries container)
-let _v14TraceToolRows = {};     // key: "toolName:iteration" → <div> element
-
-function _v14ResetTrace() {
-  _v14TraceCard = null;
-  _v14TraceToolRows = {};
-}
-
-/** Lazy-create the trace card in chat. Returns the entries <div>. */
-function _v14GetOrCreateTrace() {
-  if (_v14TraceCard) return _v14TraceCard;
-
-  const container = document.getElementById('chat-history');
-  if (!container) return null;
-
-  const wrapper = document.createElement('div');
-  wrapper.className = 'flex justify-start';
-  wrapper.id = 'v14-trace-wrapper';
-
-  wrapper.innerHTML = `
-    <div class="v14-trace-shell max-w-[90%] bg-slate-900/80 border border-slate-700 rounded-xl p-3 my-1 text-[11px] font-mono">
-      <div class="flex items-center gap-2 cursor-pointer select-none"
-           onclick="this.nextElementSibling.classList.toggle('hidden'); this.querySelector('.ti')?.classList.toggle('rotate-180')">
-        <span class="text-yellow-400 text-sm animate-pulse" id="v14-trace-spinner">⚡</span>
-        <span class="text-slate-300 font-semibold tracking-wide">Agent 執行軌跡</span>
-        <span class="ti text-slate-500 ml-auto transition-transform duration-200">▲</span>
-      </div>
-      <div class="v14-trace-entries mt-2 space-y-1.5 border-t border-slate-700 pt-2"></div>
-    </div>`;
-
-  container.appendChild(wrapper);
-  container.scrollTop = container.scrollHeight;
-
-  _v14TraceCard = wrapper.querySelector('.v14-trace-entries');
-  return _v14TraceCard;
-}
-
-function _v14TraceAddPlan(planText) {
-  const entries = _v14GetOrCreateTrace();
-  if (!entries) return;
-  const row = document.createElement('div');
-  row.className = 'flex items-start gap-1.5 text-slate-400';
-  row.innerHTML = `<span class="shrink-0 text-blue-400">📋</span>
-    <span class="text-blue-200 leading-snug">${_escapeHtml(planText.slice(0, 300))}</span>`;
-  entries.appendChild(row);
-  entries.closest('.v14-trace-shell')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-}
-
-function _v14TraceAddTool(toolName, toolInput, iteration) {
-  const entries = _v14GetOrCreateTrace();
-  if (!entries) return;
-
-  const key = `${toolName}:${iteration}`;
-  // Compact param display: just the key params
-  const paramStr = Object.entries(toolInput || {}).slice(0, 3)
-    .map(([k, v]) => `${k}=${JSON.stringify(v).slice(0, 30)}`).join(', ');
-
-  const row = document.createElement('div');
-  row.className = 'flex items-start gap-1.5 text-slate-400';
-  row.innerHTML = `<span class="shrink-0 animate-spin text-yellow-400">⏳</span>
-    <span>
-      <span class="text-yellow-200 font-semibold">${_escapeHtml(toolName)}</span>
-      <span class="text-slate-500">(${_escapeHtml(paramStr)})</span>
-    </span>`;
-
-  entries.appendChild(row);
-  _v14TraceToolRows[key] = row;
-  entries.closest('.v14-trace-shell')?.closest('.flex')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-}
-
-function _v14TraceUpdateTool(toolName, resultSummary, iteration) {
-  const key = `${toolName}:${iteration}`;
-  const row = _v14TraceToolRows[key];
-  if (!row) return;
-  row.innerHTML = `<span class="shrink-0 text-green-400">✅</span>
-    <span>
-      <span class="text-green-300 font-semibold">${_escapeHtml(toolName)}</span>
-      <span class="text-slate-400"> → ${_escapeHtml((resultSummary || '').slice(0, 120))}</span>
-    </span>`;
-}
-
-function _v14TraceAddMemory(content, source) {
-  const entries = _v14TraceCard;
-  if (!entries) return;
-  const row = document.createElement('div');
-  row.className = 'flex items-start gap-1.5 text-slate-400';
-  row.innerHTML = `<span class="shrink-0 text-purple-400">🧠</span>
-    <span class="text-purple-200">記憶已更新：${_escapeHtml((content || '').slice(0, 100))}</span>`;
-  entries.appendChild(row);
-}
-
-function _v14TraceFinalize(toolCount) {
-  // Stop spinner, show summary count
-  const spinner = document.getElementById('v14-trace-spinner');
-  if (spinner) { spinner.textContent = '✦'; spinner.classList.remove('animate-pulse'); }
-  if (!_v14TraceCard) return;
-  const shell = _v14TraceCard.closest('.v14-trace-shell');
-  if (!shell) return;
-  // Add summary line
-  const summary = document.createElement('div');
-  summary.className = 'mt-2 pt-1.5 border-t border-slate-700/50 text-slate-500 text-[10px]';
-  summary.textContent = `共執行 ${toolCount} 個工具`;
-  _v14TraceCard.appendChild(summary);
 }
 
 // ── v14: Stage Progress Bar ────────────────────────────────────────────────────
