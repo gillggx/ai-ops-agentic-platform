@@ -444,6 +444,15 @@ def _build_render_card(
             "auto_fill": deep_link.get("auto_fill") or {},
         }
 
+    # navigate tool → emit navigation action to frontend
+    if tool_name == "navigate" and isinstance(result, dict) and result.get("action") == "navigate":
+        return {
+            "type": "navigate",
+            "target": result.get("target"),
+            "id": result.get("id"),
+            "message": result.get("message", ""),
+        }
+
     return None
 
 

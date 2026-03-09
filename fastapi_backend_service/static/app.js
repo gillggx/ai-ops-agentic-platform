@@ -2623,6 +2623,34 @@ function _handleV13Event(ev) {
       _diagLogLine('🖼️', `WORKSPACE | Canvas overrides 已注入: ${keys}`, '#818cf8');
       break;
     }
+
+    case 'navigate': {
+      const { target, id, message } = ev;
+      _diagLogLine('🔗', `NAVIGATE | ${target}${id ? ':' + id : ''} — ${message || ''}`, '#34d399');
+      _v14HandleNavigate(target, id, message);
+      break;
+    }
+  }
+}
+
+function _v14HandleNavigate(target, id, message) {
+  // Switch view and open the appropriate editor
+  const viewMap = {
+    'mcp-edit':      () => { switchView('mcp-builder');   if (id) setTimeout(() => _mcpOpenEdit && _mcpOpenEdit(id), 300); },
+    'skill-edit':    () => { switchView('skill-builder');  if (id) setTimeout(() => _skOpenEditor && _skOpenEditor(id), 300); },
+    'mcp-builder':   () => { switchView('mcp-builder'); },
+    'skill-builder': () => { switchView('skill-builder'); },
+  };
+  const nav = viewMap[target];
+  if (nav) nav();
+
+  // Show a toast notification with the Agent's message
+  if (message) {
+    const toast = document.createElement('div');
+    toast.className = 'fixed bottom-24 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-3 bg-indigo-600 text-white text-sm rounded-xl shadow-xl max-w-sm text-center';
+    toast.innerHTML = `<span>🔗</span><span>${message}</span>`;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 5000);
   }
 }
 

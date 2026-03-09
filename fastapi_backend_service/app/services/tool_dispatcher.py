@@ -158,6 +158,34 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
+        "name": "navigate",
+        "description": (
+            "在 UI 中導航至指定頁面或開啟特定資源的編輯器。"
+            "適用場景：patch_mcp 修改後引導用戶到 MCP Builder 點 Try Run；"
+            "或需要用戶手動審查/確認某個 MCP/Skill 設定時。"
+            "呼叫此工具後 UI 會自動切換到對應視圖並開啟編輯器，不需要用戶手動操作。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "enum": ["mcp-edit", "skill-edit", "mcp-builder", "skill-builder"],
+                    "description": "導航目標：mcp-edit=開啟指定 MCP 編輯器，skill-edit=開啟指定 Skill 編輯器，mcp-builder=切換到 MCP Builder 清單，skill-builder=切換到 Skill Builder 清單",
+                },
+                "id": {
+                    "type": "integer",
+                    "description": "目標資源 ID（mcp-edit/skill-edit 時必填）",
+                },
+                "message": {
+                    "type": "string",
+                    "description": "顯示給用戶的引導訊息，例如「請在 MCP Builder 中點擊 Try Run 重新生成腳本」",
+                },
+            },
+            "required": ["target"],
+        },
+    },
+    {
         "name": "draft_routine_check",
         "description": (
             "以草稿模式建立排程巡檢。Agent 提案後需人工在 巢狀建構器 (Nested Builder) 確認後發佈。\n"
@@ -317,6 +345,14 @@ class ToolDispatcher:
                         f"/api/v1/agentic/skills/{tool_input['skill_id']}/raw",
                         body={"raw_markdown": tool_input["raw_markdown"]},
                     )
+                case "navigate":
+                    return {
+                        "action": "navigate",
+                        "target": tool_input.get("target"),
+                        "id": tool_input.get("id"),
+                        "message": tool_input.get("message", ""),
+                        "deep_link": f"{tool_input.get('target')}:{tool_input.get('id', '')}",
+                    }
                 case "search_memory":
                     top_k = tool_input.get("top_k", 5)
                     memories = await self._memory_svc.search(
@@ -356,6 +392,8 @@ class ToolDispatcher:
                 resp = await client.post(url, headers=self._headers, json=body or {})
             elif method == "PUT":
                 resp = await client.put(url, headers=self._headers, json=body or {})
+            elif method == "PATCH":
+                resp = await client.patch(url, headers=self._headers, json=body or {})
             elif method == "DELETE":
                 resp = await client.delete(url, headers=self._headers)
             else:
