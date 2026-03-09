@@ -2706,10 +2706,9 @@ async function _v14ResolveApproval(token, approved) {
   const action = approved ? '批准' : '拒絕';
   _diagLogLine(approved ? '✅' : '❌', `HITL | 用戶${action}: token=${token}`, approved ? '#4ade80' : '#f87171');
   try {
-    const authHeader = _getAuthHeader ? _getAuthHeader() : {};
     await fetch(`/api/v1/agent/approve/${token}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeader },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_token}` },
       body: JSON.stringify({ approved }),
     });
   } catch (e) {
