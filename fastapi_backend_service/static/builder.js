@@ -2095,7 +2095,7 @@ async function _loadSkillDefs() {
     container.innerHTML = _skillDefs.map(sk => {
       const et = _eventTypes.find(e => e.id === sk.event_type_id);
       let ldr = null;
-      try { ldr = sk.last_diagnosis_result ? JSON.parse(sk.last_diagnosis_result) : null; } catch {}
+      try { const r = sk.last_diagnosis_result; ldr = r ? (typeof r === 'string' ? JSON.parse(r) : r) : null; } catch {}
       const hasCode = !!(ldr?.generated_code || sk.generated_code);
       const hasDiag = !!(sk.diagnostic_prompt);
       const boundMcp = sk.mcp_id ? _mcpDefs.find(m => m.id === sk.mcp_id) : null;
