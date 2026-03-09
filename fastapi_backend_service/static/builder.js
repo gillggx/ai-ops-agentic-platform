@@ -5959,6 +5959,24 @@ async function _skTryRun() {
       skillName:   document.getElementById('sk-edit-name')?.value?.trim() || 'Skill',
       expertAction: document.getElementById('sk-edit-action')?.value?.trim() || '',
     });
+
+    // Auto-save last_diagnosis_result so list badge shows "🐍 Code 診斷"
+    const skId = parseInt(document.getElementById('sk-edit-id')?.value) || null;
+    if (skId && result.generated_code) {
+      const ldr = {
+        status:              result.status              || 'ABNORMAL',
+        diagnosis_message:   result.diagnosis_message   || '',
+        problem_object:      result.problem_object       || {},
+        generated_code:      result.generated_code,
+        check_output_schema: result.check_output_schema  || null,
+        timestamp:           new Date().toISOString(),
+      };
+      _api('PATCH', `/skill-definitions/${skId}`, { last_diagnosis_result: ldr }).catch(() => {});
+      // Also update local cache so list refreshes correctly
+      const localSk = _skillDefs.find(s => s.id === skId);
+      if (localSk) localSk.last_diagnosis_result = JSON.stringify(ldr);
+    }
+
     _skLogLine('✓', 'Try Run 完成 — 切換至報告…', 'text-emerald-600');
     setTimeout(() => _skSwitchRightTab('report'), 700);
 
