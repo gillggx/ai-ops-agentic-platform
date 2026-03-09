@@ -5438,6 +5438,7 @@ async function _nbSaveRoutineCheck() {
 let _skRightTab = 'logs';
 let _skTryRunMcpResult = null;
 let _skMcpSampleParams = null;  // DS query params collected for the selected MCP
+let _skLastDiagnosisResult = null;  // Saved after successful _skTryRun
 
 // ── Tab switching ─────────────────────────────────────────────
 function _skSwitchRightTab(tab) {
@@ -5501,6 +5502,7 @@ async function _skOpenEditor(id, draftData) {
   document.getElementById('sk-mcp-result')?.classList.add('hidden');
   _skTryRunMcpResult = null;
   _skMcpSampleParams = null;
+  _skLastDiagnosisResult = null;
 
   // Populate MCP dropdown — custom MCPs only (these have processing_script)
   const mcpSel = document.getElementById('sk-edit-mcp-select');
@@ -5962,8 +5964,8 @@ async function _skTryRun() {
 
     // Auto-save last_diagnosis_result so list badge shows "🐍 Code 診斷"
     const skId = parseInt(document.getElementById('sk-edit-id')?.value) || null;
-    if (skId && result.generated_code) {
-      const ldr = {
+    if (result.generated_code) {
+      _skLastDiagnosisResult = {
         status:              result.status              || 'ABNORMAL',
         diagnosis_message:   result.diagnosis_message   || '',
         problem_object:      result.problem_object       || {},
@@ -5971,10 +5973,14 @@ async function _skTryRun() {
         check_output_schema: result.check_output_schema  || null,
         timestamp:           new Date().toISOString(),
       };
-      _api('PATCH', `/skill-definitions/${skId}`, { last_diagnosis_result: ldr }).catch(() => {});
-      // Also update local cache so list refreshes correctly
-      const localSk = _skillDefs.find(s => s.id === skId);
-      if (localSk) localSk.last_diagnosis_result = JSON.stringify(ldr);
+      if (skId) {
+        _api('PATCH', `/skill-definitions/${skId}`, { last_diagnosis_result: _skLastDiagnosisResult })
+          .then(() => _skLogLine('💾', '診斷碼已自動儲存', 'text-slate-400'))
+          .catch(e => _skLogLine('⚠', `自動儲存失敗：${e.message}`, 'text-amber-600'));
+        // Also update local cache so list refreshes correctly without re-fetch
+        const localSk = _skillDefs.find(s => s.id === skId);
+        if (localSk) localSk.last_diagnosis_result = JSON.stringify(_skLastDiagnosisResult);
+      }
     }
 
     _skLogLine('✓', 'Try Run 完成 — 切換至報告…', 'text-emerald-600');
@@ -6128,6 +6134,10 @@ async function _skSave() {
   if (mcpId) {
     // Merge into mcp_ids (single MCP)
     payload.mcp_id = mcpId;
+  }
+  // Include last_diagnosis_result from current session Try Run
+  if (_skLastDiagnosisResult) {
+    payload.last_diagnosis_result = _skLastDiagnosisResult;
   }
 
   try {
