@@ -2068,6 +2068,12 @@ function _renderCopilotMcpPanel(ev) {
 
   const { panel } = _createWorkspaceTab(tabId, tabTitle, contentHtml);
   requestAnimationFrame(() => _initChartsInCard(panel));
+
+  // [v15.2] Fire shadow analysis if dataset + data_profile are available
+  const rawData = ev.mcp_output?._raw_dataset || ev.mcp_output?.dataset;
+  if (ev.data_profile && Array.isArray(rawData) && rawData.length > 5) {
+    _startShadowAnalysis(rawData, ev.data_profile, ev.mcp_name || 'MCP 查詢');
+  }
 }
 
 /**
@@ -2084,23 +2090,35 @@ function _renderCopilotSkillPanel(ev) {
 
   const { panel } = _createWorkspaceTab(tabId, tabTitle, contentHtml);
   requestAnimationFrame(() => _initChartsInCard(panel));
+
+  // [v15.2] Mirror skill result to shadow panel skill section
+  _renderSkillInShadowPanel(ev);
 }
 
 /**
- * v13.3 + split-screen: Render <ai_analysis> content into the right analysis pane.
+ * v13.3 + split-screen → v15.2: Render <ai_analysis> content.
+ * If shadow panel already has stat cards, skip (shadow is preferred).
+ * Otherwise show as text fallback in shadow results area.
  */
 function _renderAiAnalysisPanel(markdownContent) {
+  // Skip if shadow already has data results
+  const shadowResults = document.getElementById('shadow-results');
+  if (shadowResults && !shadowResults.classList.contains('hidden')) return;
+
+  // Fallback: render AI text analysis as a wide card in shadow panel
   _showReportPanel();
-  const content = document.getElementById('ws-analysis-content');
-  if (!content) return;
+  const grid = document.getElementById('shadow-cards-grid');
+  if (!grid) return;
   const rendered = (typeof marked !== 'undefined')
     ? marked.parse(markdownContent)
     : markdownContent.replace(/\n/g, '<br>');
-  document.getElementById('ws-analysis-placeholder')?.remove();
-  content.innerHTML = `
-    <div class="p-3 ai-analysis-body">
-      ${rendered}
-    </div>`;
+  const div = document.createElement('div');
+  div.className = 'col-span-2 text-xs text-slate-600 leading-relaxed prose prose-sm max-w-none';
+  div.innerHTML = rendered;
+  grid.appendChild(div);
+  const intro = document.getElementById('shadow-intro');
+  if (intro && !intro.textContent) intro.textContent = 'AI 文字分析：';
+  _shadowSetState('done');
 }
 
 /**
@@ -2531,7 +2549,7 @@ function _handleV13Event(ev) {
 
     case 'tool_done': {
       _diagLogLine('✅', `DONE  → ${ev.tool || ''} | ${ev.result_summary || ''}`, '#4ade80');
-      // Render result in right workspace panel
+      // Render result in workspace (left) + shadow panel (right) as appropriate
       if (ev.render_card) {
         if (ev.render_card.type === 'skill') {
           _renderCopilotSkillPanel(ev.render_card);
@@ -2541,28 +2559,16 @@ function _handleV13Event(ev) {
           _renderDraftActionCard(ev.render_card);
         }
       } else {
-        // No render_card — show pending synthesis indicator in console and right panel
         _diagLogLine('🤔', 'AI 正在整合分析結果…', '#a78bfa');
-        _showReportPanel();
-        const _wsContent = document.getElementById('ws-analysis-content');
-        if (_wsContent && !_wsContent.querySelector('#ws-synthesis-pending')) {
-          const _existing = _wsContent.querySelector('.ai-analysis-body');
-          if (!_existing) {
-            _wsContent.innerHTML = `<div id="ws-synthesis-pending" class="flex flex-col items-center justify-center h-40 gap-3 text-slate-400">
-              <span class="animate-spin text-3xl">⏳</span>
-              <span class="text-sm font-medium">AI 正在整合分析結果…</span>
-            </div>`;
-          }
-        }
       }
       break;
     }
 
     case 'synthesis': {
       document.getElementById('v13-thinking-bubble')?.closest('.flex')?.remove();
-      document.getElementById('ws-synthesis-pending')?.remove();
       const fullText = ev.text || '(無回答)';
       // v13.3 Output Routing: split <ai_analysis> from chat text
+      // v15.2: <ai_analysis> goes to shadow panel as fallback (shadow stats take priority)
       const analysisMatch = fullText.match(/<ai_analysis>([\s\S]*?)<\/ai_analysis>/);
       if (analysisMatch) {
         const chatText = fullText.replace(/<ai_analysis>[\s\S]*?<\/ai_analysis>/g, '').trim()
@@ -2963,4 +2969,190 @@ async function _brainDeleteAllMemories() {
   } catch(e) {
     alert(`清除失敗: ${e.message}`);
   }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v15.2 Shadow Analyst — Async right-panel statistical analysis
+// ═══════════════════════════════════════════════════════════════════════════
+
+let _shadowJitCode   = null;
+let _shadowMcpName   = '';
+let _shadowAbortCtrl = null;
+
+/** Switch shadow panel between idle / running / done states. */
+function _shadowSetState(state) {
+  document.getElementById('shadow-idle')?.classList.toggle('hidden', state !== 'idle');
+  document.getElementById('shadow-running')?.classList.toggle('hidden', state !== 'running');
+  document.getElementById('shadow-results')?.classList.toggle('hidden', state !== 'done');
+}
+
+/**
+ * Fire shadow analysis after an MCP returns data.
+ * @param {Array}  rawData     - list-of-dicts dataset
+ * @param {Object} dataProfile - DataProfile from Smart Sampling
+ * @param {string} mcpName     - display name for context label
+ */
+function _startShadowAnalysis(rawData, dataProfile, mcpName) {
+  if (!rawData || !dataProfile) return;
+
+  const rowCount = dataProfile.row_count || (Array.isArray(rawData) ? rawData.length : 0);
+  const label = document.getElementById('shadow-context-label');
+  if (label) label.textContent = `${mcpName} · ${rowCount} 筆`;
+  _shadowMcpName = mcpName;
+  _shadowJitCode = null;
+
+  // Reset results area
+  const grid = document.getElementById('shadow-cards-grid');
+  if (grid) grid.innerHTML = '';
+  const intro = document.getElementById('shadow-intro');
+  if (intro) intro.textContent = '';
+  document.getElementById('shadow-feedback')?.classList.add('hidden');
+  const saveBtn = document.getElementById('shadow-save-btn');
+  if (saveBtn) { saveBtn.classList.add('hidden'); saveBtn.disabled = false; saveBtn.textContent = '💾 儲存'; }
+
+  _shadowSetState('running');
+  const dt = document.getElementById('shadow-decision-text');
+  if (dt) dt.textContent = '';
+
+  // Abort any in-flight shadow request
+  if (_shadowAbortCtrl) _shadowAbortCtrl.abort();
+  _shadowAbortCtrl = new AbortController();
+
+  // Cap payload to 500 rows to avoid oversized requests
+  const payload = Array.isArray(rawData) ? rawData.slice(0, 500) : rawData;
+
+  fetch('/api/v1/agent/shadow-analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_token}` },
+    body: JSON.stringify({ raw_data: payload, data_profile: dataProfile, mcp_name: mcpName }),
+    signal: _shadowAbortCtrl.signal,
+  }).then(async resp => {
+    if (!resp.ok) { _shadowSetState('idle'); return; }
+    const reader  = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith('data:')) continue;
+        try { _handleShadowEvent(JSON.parse(line.slice(5).trim())); } catch {}
+      }
+    }
+  }).catch(err => {
+    if (err.name !== 'AbortError') _shadowSetState('idle');
+  });
+}
+
+/** Handle a single shadow SSE event dict. */
+function _handleShadowEvent(ev) {
+  switch (ev.type) {
+    case 'decision': {
+      const dt = document.getElementById('shadow-decision-text');
+      if (dt && ev.message) dt.textContent = ev.message;
+      break;
+    }
+    case 'stat_card':
+      _appendShadowCard(ev);
+      // Reveal results area as cards arrive (don't wait for done)
+      document.getElementById('shadow-results')?.classList.remove('hidden');
+      document.getElementById('shadow-running')?.classList.add('hidden');
+      break;
+    case 'done': {
+      _shadowJitCode = ev.jit_code || null;
+      const intro = document.getElementById('shadow-intro');
+      if (intro && ev.intro) intro.textContent = ev.intro;
+      _shadowSetState('done');
+      document.getElementById('shadow-feedback')?.classList.remove('hidden');
+      if (_shadowJitCode) document.getElementById('shadow-save-btn')?.classList.remove('hidden');
+      break;
+    }
+    case 'error':
+      _shadowSetState('idle');
+      break;
+  }
+}
+
+/** Append a stat card to the shadow cards grid. */
+function _appendShadowCard(card) {
+  const grid = document.getElementById('shadow-cards-grid');
+  if (!grid) return;
+  const sigClass = {
+    critical: 'bg-red-50 border-red-200 text-red-800',
+    warning:  'bg-amber-50 border-amber-200 text-amber-800',
+    normal:   'bg-emerald-50 border-emerald-200 text-emerald-800',
+  }[card.significance] || 'bg-slate-50 border-slate-200 text-slate-700';
+  const div = document.createElement('div');
+  div.className = `border rounded-lg p-2.5 ${sigClass}`;
+  div.innerHTML = `
+    <div class="text-[10px] font-semibold uppercase tracking-wide opacity-60">${_escapeHtml(String(card.label || ''))}</div>
+    <div class="text-base font-bold mt-0.5 leading-tight">
+      ${_escapeHtml(String(card.value ?? ''))}
+      <span class="text-[10px] font-normal ml-0.5 opacity-60">${_escapeHtml(String(card.unit || ''))}</span>
+    </div>
+    ${card.note ? `<div class="text-[10px] mt-1 opacity-60 leading-snug">${_escapeHtml(card.note)}</div>` : ''}
+  `;
+  grid.appendChild(div);
+}
+
+/**
+ * Mirror a Skill execution result into the shadow panel skill section (right panel header).
+ * @param {Object} ev - render_card of type 'skill'
+ */
+function _renderSkillInShadowPanel(ev) {
+  const section = document.getElementById('shadow-skill-section');
+  if (!section) return;
+  const icon    = ev.status === 'NORMAL' ? '✅' : '⚠️';
+  const bgClass = ev.status === 'NORMAL' ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200';
+  const txClass = ev.status === 'NORMAL' ? 'text-emerald-700' : 'text-amber-700';
+  section.innerHTML = `
+    <div class="rounded-lg border ${bgClass} p-2">
+      <div class="flex items-center gap-1.5 mb-0.5">
+        <span>${icon}</span>
+        <span class="text-[11px] font-bold ${txClass} flex-1 truncate">${_escapeHtml(ev.skill_name || 'Skill 診斷')}</span>
+        <span class="text-[10px] font-bold ${txClass}">${ev.status || ''}</span>
+      </div>
+      <p class="text-[10px] text-slate-600 leading-snug">${_escapeHtml(ev.conclusion || ev.summary || '')}</p>
+    </div>`;
+  section.classList.remove('hidden');
+  const label = document.getElementById('shadow-context-label');
+  if (label) label.textContent = ev.skill_name || 'Skill 診斷';
+}
+
+/** 👍/👎 visual feedback (local only). */
+function _shadowFeedback(type) {
+  const sel = type === 'like'
+    ? '[onclick="_shadowFeedback(\'like\')"]'
+    : '[onclick="_shadowFeedback(\'dislike\')"]';
+  const btn = document.querySelector(sel);
+  if (btn) btn.style.filter = 'drop-shadow(0 0 4px gold)';
+}
+
+/** 💾 Save current JIT code as a private Agent Tool. */
+function _shadowSaveTool() {
+  if (!_shadowJitCode) return;
+  const btn = document.getElementById('shadow-save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳...'; }
+  fetch('/api/v1/agent-tools', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_token}` },
+    body: JSON.stringify({
+      name: `Shadow: ${_shadowMcpName}`,
+      code: _shadowJitCode,
+      description: `影子分析自動生成：針對「${_shadowMcpName}」資料的統計分析腳本`,
+    }),
+  }).then(r => r.json()).then(r => {
+    if (r.status === 'success') {
+      if (btn) { btn.textContent = '✅ 已儲存'; }
+    } else {
+      if (btn) { btn.disabled = false; btn.textContent = '💾 儲存'; }
+    }
+  }).catch(() => {
+    if (btn) { btn.disabled = false; btn.textContent = '💾 儲存'; }
+  });
 }

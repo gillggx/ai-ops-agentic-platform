@@ -841,6 +841,12 @@ class AgentOrchestrator:
                         "iteration": iteration,
                     }
                     if render_card:
+                        # [v15.2] Attach data_profile to MCP render_card → frontend fires shadow analysis
+                        if render_card.get("type") == "mcp" and isinstance(result, dict):
+                            _pre_profile = result.get("_data_profile")
+                            if _pre_profile:
+                                render_card["data_profile"] = _pre_profile
+                                render_card["row_count"] = _pre_profile.get("row_count", 0)
                         done_event["render_card"] = render_card
                     yield done_event
 

@@ -25,6 +25,8 @@ from app.routers.agent_draft_router import router as agent_draft_router
 from app.routers.agentic_skill_router import router as agentic_skill_router
 # v15.0 Agent Tool Chest
 from app.routers.agent_tool_router import router as agent_tool_router
+# v15.2 Shadow Analyst
+from app.routers.shadow_analyst_router import router as shadow_analyst_router
 
 __all__ = [
     "auth_router",
@@ -47,4 +49,5 @@ __all__ = [
     "agent_draft_router",
     "agentic_skill_router",
     "agent_tool_router",
+    "shadow_analyst_router",
 ]

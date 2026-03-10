@@ -942,25 +942,54 @@
                 </div>
               </div>
 
-              <!-- Right pane: Analysis from AI (30%) -->
+              <!-- Right pane: Shadow Analysis Panel (30%) — v15.2 -->
               <div id="ws-analysis-pane" class="flex flex-col min-h-0 overflow-hidden bg-slate-50 border-l border-slate-200" style="flex:3">
-                <div class="flex-shrink-0 flex items-center px-4 py-2 bg-white border-b border-slate-100">
-                  <span class="text-xs font-bold text-purple-600 uppercase tracking-widest">&#10024; Analysis from AI</span>
+
+                <!-- ── Fixed header ── -->
+                <div class="flex-shrink-0 flex items-center justify-between px-3 py-2 bg-white border-b border-slate-100">
+                  <span class="text-[11px] font-bold text-purple-600 uppercase tracking-widest">🔬 AI 分析面板</span>
+                  <span id="shadow-context-label" class="text-[10px] text-slate-400 truncate ml-2 max-w-[160px]">等待資料中...</span>
                 </div>
-                <div id="ws-analysis-content" class="flex-1 overflow-y-auto min-h-0">
-                  <div id="ws-analysis-placeholder"
-                    class="flex flex-col items-center justify-center h-full text-slate-400 py-16 px-4 text-center">
-                    <svg class="w-10 h-10 mb-3 opacity-25" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
-                        d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3
-                           m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547
-                           A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531
-                           c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
-                    </svg>
-                    <p class="text-xs text-slate-400">AI 深度分析將顯示於此</p>
+
+                <!-- ── Skill result section (hidden until skill executes) ── -->
+                <div id="shadow-skill-section" class="hidden flex-shrink-0 border-b border-slate-200 bg-white px-3 py-2"></div>
+
+                <!-- ── Shadow analysis body ── -->
+                <div id="shadow-analysis-content" class="flex-1 overflow-y-auto min-h-0">
+
+                  <!-- idle -->
+                  <div id="shadow-idle" class="flex flex-col items-center justify-center h-full text-slate-400 py-16 px-4 text-center">
+                    <span class="text-3xl mb-3 opacity-40">🔬</span>
+                    <p class="text-xs font-medium">執行 MCP 或 Skill 後</p>
+                    <p class="text-[11px] mt-1 opacity-70">AI 將自動分析資料集</p>
                   </div>
-                </div>
-              </div>
+
+                  <!-- running (hidden) -->
+                  <div id="shadow-running" class="hidden flex flex-col items-center justify-center h-40 gap-2 text-slate-400 py-8">
+                    <span class="text-2xl" style="animation:pulse 1.5s ease-in-out infinite">⚡</span>
+                    <p class="text-xs font-medium text-purple-600">影子工程師計算中...</p>
+                    <p id="shadow-decision-text" class="text-[10px] text-slate-400 text-center px-4 leading-relaxed"></p>
+                  </div>
+
+                  <!-- results (hidden) -->
+                  <div id="shadow-results" class="hidden p-3 space-y-2">
+                    <!-- AI intro sentence -->
+                    <p id="shadow-intro" class="text-[11px] text-slate-500 italic leading-relaxed"></p>
+                    <!-- Stat cards grid -->
+                    <div id="shadow-cards-grid" class="grid grid-cols-2 gap-2"></div>
+                    <!-- Feedback bar -->
+                    <div id="shadow-feedback" class="hidden flex items-center gap-2 pt-2 border-t border-slate-200 mt-1">
+                      <span class="text-[10px] text-slate-400 flex-1">此分析有幫助嗎？</span>
+                      <button onclick="_shadowFeedback('like')" class="text-base hover:scale-125 transition-transform" title="有幫助">👍</button>
+                      <button onclick="_shadowFeedback('dislike')" class="text-base hover:scale-125 transition-transform" title="沒幫助">👎</button>
+                      <button onclick="_shadowSaveTool()" id="shadow-save-btn"
+                        class="hidden text-[10px] px-2 py-0.5 bg-purple-600 hover:bg-purple-500 text-white rounded font-semibold"
+                        title="儲存為私有工具">💾 儲存</button>
+                    </div>
+                  </div>
+
+                </div><!-- /shadow-analysis-content -->
+              </div><!-- /ws-analysis-pane -->
 
             </div><!-- /ws-split-container -->
             <!-- Agent Console — collapsible terminal at bottom of right panel -->

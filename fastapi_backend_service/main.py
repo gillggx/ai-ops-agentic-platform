@@ -44,6 +44,8 @@ from app.routers import (
     agentic_skill_router,
     # v15.0 Agent Tool Chest
     agent_tool_router,
+    # v15.2 Shadow Analyst
+    shadow_analyst_router,
 )
 from app.routers.agent_chat_router import router as agent_chat_router
 from app.routers.agent_memory_router import router as agent_memory_router
@@ -497,6 +499,7 @@ app.include_router(agent_draft_router, prefix=_PREFIX)
 # v12.5 Expert Mode — bi-directional Markdown parser
 app.include_router(agentic_skill_router, prefix=_PREFIX)
 app.include_router(agent_tool_router, prefix=_PREFIX)
+app.include_router(shadow_analyst_router, prefix=_PREFIX)  # v15.2 Shadow Analyst
 # v13 Real Agentic Platform
 app.include_router(agent_chat_router, prefix=_PREFIX)
 app.include_router(agent_memory_router, prefix=_PREFIX)
