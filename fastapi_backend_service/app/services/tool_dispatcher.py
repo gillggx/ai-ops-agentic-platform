@@ -283,6 +283,50 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
             "required": ["text"],
         },
     },
+    # ── [v15.1] Agent Tool Chest ───────────────────────────────────────────
+    {
+        "name": "execute_agent_tool",
+        "description": (
+            "【第二優先級】執行你自己先前累積的 Agent Tool（私有工具）。"
+            "適用條件：現有 Skill 不符合，但你的工具庫中有描述相符、曾成功執行過的腳本。"
+            "傳入 tool_id（從 tools_manifest.agent_tools 取得）和 raw_data（已撈取的 df 資料）。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tool_id": {"type": "integer", "description": "Agent Tool ID（從 tools_manifest.agent_tools 取得）"},
+                "raw_data": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "要分析的資料集（list-of-dicts，即 df 來源）",
+                },
+            },
+            "required": ["tool_id", "raw_data"],
+        },
+    },
+    {
+        "name": "search_catalog",
+        "description": (
+            "搜尋 Skill / Custom MCP / System MCP / Agent Tool 目錄。"
+            "用於發現可用工具或確認某類分析需求是否已有現成解決方案。"
+            "catalog 可選：skills | mcps | system_mcps | agent_tools"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "catalog": {
+                    "type": "string",
+                    "enum": ["skills", "mcps", "system_mcps", "agent_tools"],
+                    "description": "要搜尋的目錄類型",
+                },
+                "query": {
+                    "type": "string",
+                    "description": "關鍵字（用於名稱/描述過濾，留空回傳全部）",
+                },
+            },
+            "required": ["catalog"],
+        },
+    },
 ]
 
 
@@ -311,7 +355,16 @@ class ToolDispatcher:
         "list_routine_checks", "list_event_types",
         "draft_skill", "draft_mcp", "draft_routine_check", "draft_event_skill_link",
         "patch_mcp", "patch_skill_raw",
+        "search_catalog",  # returns catalog items, not raw datasets
     })
+
+    # Catalog type → API endpoint mapping
+    _CATALOG_ENDPOINTS: Dict[str, str] = {
+        "skills":       "/api/v1/skill-definitions",
+        "mcps":         "/api/v1/mcp-definitions?type=custom",
+        "system_mcps":  "/api/v1/mcp-definitions?type=system",
+        "agent_tools":  "/api/v1/agent-tools",
+    }
 
     async def _execute_inner(self, tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a tool and return its result as a dict (inner, no profiling)."""
@@ -397,6 +450,19 @@ class ToolDispatcher:
                         "/api/v1/agent/preference",
                         body={"user_id": self._user_id, "text": tool_input["text"]},
                     )
+                # ── [v15.1] Agent Tool Chest execution ────────────────────
+                case "execute_agent_tool":
+                    return await self._call_api(
+                        "POST",
+                        f"/api/v1/agent-tools/{tool_input['tool_id']}/execute",
+                        body={"raw_data": tool_input.get("raw_data", [])},
+                    )
+                # ── [v15.1] Catalog search across skills / mcps / system_mcps / agent_tools
+                case "search_catalog":
+                    return await self._search_catalog(
+                        catalog=tool_input.get("catalog", "skills"),
+                        query=tool_input.get("query", ""),
+                    )
                 case _:
                     return {"error": f"Unknown tool: {tool_name}"}
         except Exception as exc:
@@ -443,3 +509,33 @@ class ToolDispatcher:
                 return resp.json()
             except Exception:
                 return {"error": f"Non-JSON response ({resp.status_code})", "body": resp.text[:500]}
+
+    async def _search_catalog(self, catalog: str, query: str = "") -> Dict[str, Any]:
+        """Fetch a catalog list and optionally filter by query string (name/description)."""
+        endpoint = self._CATALOG_ENDPOINTS.get(catalog)
+        if not endpoint:
+            return {"error": f"Unknown catalog: {catalog}. Valid: {list(self._CATALOG_ENDPOINTS)}"}
+
+        raw = await self._call_api("GET", endpoint)
+
+        # Unwrap StandardResponse envelope → list of items
+        items: List[Dict[str, Any]] = []
+        if isinstance(raw, dict):
+            data = raw.get("data", raw)
+            if isinstance(data, dict):
+                items = data.get("items", data.get("skills", data.get("mcps", [])))
+            elif isinstance(data, list):
+                items = data
+        elif isinstance(raw, list):
+            items = raw
+
+        # Filter by query (name or description, case-insensitive)
+        if query:
+            q = query.lower()
+            items = [
+                it for it in items
+                if q in str(it.get("name", "")).lower()
+                or q in str(it.get("description", "")).lower()
+            ]
+
+        return {"catalog": catalog, "query": query, "total": len(items), "items": items}
