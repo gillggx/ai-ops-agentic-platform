@@ -83,6 +83,7 @@ class ContextLoader:
         query: str = "",
         top_k_memories: int = 5,
         canvas_overrides: Optional[Dict[str, Any]] = None,
+        task_context: Optional[Dict[str, Optional[str]]] = None,  # v14.1: metadata pre-filter
     ) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """Build system prompt blocks and return (content_blocks, context_meta).
 
@@ -94,7 +95,20 @@ class ContextLoader:
         """
         soul = await self._load_soul(user_id)
         pref = await self._load_preference(user_id)
-        memories = await self._memory_svc.search(user_id, query or "", top_k=top_k_memories) if query else []
+
+        # v14.1: Pre-filtered memory retrieval using task_context metadata
+        _tc = task_context or {}
+        if query or _tc.get("task_type"):
+            memories, filter_meta = await self._memory_svc.search_with_metadata(
+                user_id=user_id,
+                query=query or "",
+                top_k=top_k_memories,
+                task_type=_tc.get("task_type"),
+                data_subject=_tc.get("data_subject"),
+                tool_name=_tc.get("tool_name"),
+            )
+        else:
+            memories, filter_meta = [], {"strategy": "skipped"}
 
         rag_lines = [f"- {m.content}" for m in memories]
         rag_block = "\n".join(rag_lines) if rag_lines else "(無相關歷史記憶)"
@@ -143,6 +157,8 @@ class ContextLoader:
             "rag_count": len(memories),
             "cache_blocks": 1,  # number of cached blocks
             "has_canvas_overrides": bool(canvas_overrides),
+            "memory_filter": filter_meta,          # v14.1: pre-filter details for context_load SSE
+            "task_context": _tc,                   # v14.1: extracted task context
         }
 
         return system_blocks, meta
