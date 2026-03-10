@@ -95,6 +95,11 @@ class MCPTryRunResponse(BaseModel):
     error_analysis: Optional[str] = None   # LLM explanation when success=False
     error_type: Optional[str] = None        # "User_Prompt_Issue" | "System_Issue"
     suggested_prompt: Optional[str] = None  # LLM-suggested improved prompt
+    # Performance metrics
+    llm_elapsed_s: float = 0.0
+    sandbox_elapsed_s: float = 0.0
+    input_records: int = 0
+    output_records: int = 0
 
 
 class MCPCheckIntentRequest(BaseModel):

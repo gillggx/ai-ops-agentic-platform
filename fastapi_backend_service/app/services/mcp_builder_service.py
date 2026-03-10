@@ -10,6 +10,7 @@ Four LLM background tasks:
 import json
 import logging
 import re
+import time
 from typing import Any, Dict, List, Optional
 
 import anthropic
@@ -928,8 +929,17 @@ def diagnose(mcp_outputs: dict) -> dict:
 - 只使用 Python 標準語法；可用 json, math, datetime, collections
 - 不要使用 eval(), exec(), os, sys
 - ⚠️ **Python 語法鐵律**：if/else/for/while 區塊內必須有至少一條語句，禁止空區塊。若無實際邏輯，用 `pass` 填充。
-- ⚠️ **禁止在 if 條件後面直接 return 而不縮排**：if 的 body 必須縮排 4 格。"""
+- ⚠️ **禁止在 if 條件後面直接 return 而不縮排**：if 的 body 必須縮排 4 格。
+- ⚠️ **Exception Handling 鐵律**：主診斷邏輯必須包在 try/except 中，格式如下：
+  ```python
+  try:
+      # 診斷邏輯
+  except Exception as e:
+      return {{"status": "ABNORMAL", "diagnosis_message": f"診斷執行異常：{{e}}", "problem_object": {{}}}}
+  ```
+  exception message 必須使用 `f"診斷執行異常：{{e}}"` 格式，不可自訂其他格式。"""
 
+        _t0_llm = time.time()
         try:
             resp1 = await self._client.messages.create(
                 model=_MODEL,
@@ -949,7 +959,9 @@ def diagnose(mcp_outputs: dict) -> dict:
             return {
                 "success": False, "generated_code": "", "code_result": None,
                 "response_message": "", "error": f"Code generation failed: {exc}",
+                "llm_elapsed_s": 0.0, "exec_elapsed_s": 0.0, "input_records": 0,
             }
+        _t1_llm = time.time()
 
         if not generated_code:
             return {
@@ -1003,8 +1015,10 @@ def diagnose(mcp_outputs: dict) -> dict:
                 "success": False, "generated_code": generated_code,
                 "status": "ABNORMAL", "diagnosis_message": "", "problem_object": {},
                 "error": f"Code syntax error: {exc}",
+                "llm_elapsed_s": round(_t1_llm - _t0_llm, 2), "exec_elapsed_s": 0.0, "input_records": 0,
             }
 
+        _t0_exec = time.time()
         try:
             exec(generated_code, sandbox)  # noqa: S102
             diagnose_fn = sandbox.get("diagnose")
@@ -1012,13 +1026,21 @@ def diagnose(mcp_outputs: dict) -> dict:
                 return {
                     "success": False, "generated_code": generated_code, "code_result": None,
                     "response_message": "", "error": "Generated code does not define a callable 'diagnose' function",
+                    "llm_elapsed_s": round(_t1_llm - _t0_llm, 2), "exec_elapsed_s": 0.0, "input_records": 0,
                 }
+            # Count input records for metrics
+            _input_rec = 0
+            for _v in mcp_sample_outputs.values():
+                if isinstance(_v, dict):
+                    _input_rec = len(_v.get("dataset") or [])
+                    break
             raw_result = diagnose_fn(mcp_sample_outputs)
             if not isinstance(raw_result, dict):
                 return {
                     "success": False, "generated_code": generated_code,
                     "diagnosis_message": "", "problem_object": "",
                     "error": f"diagnose() must return a dict, got {type(raw_result).__name__}",
+                    "llm_elapsed_s": round(_t1_llm - _t0_llm, 2), "exec_elapsed_s": 0.0, "input_records": _input_rec,
                 }
             raw_status        = str(raw_result.get("status", "")).upper()
             status            = "NORMAL" if raw_status == "NORMAL" else "ABNORMAL"
@@ -1029,7 +1051,9 @@ def diagnose(mcp_outputs: dict) -> dict:
                 "success": False, "generated_code": generated_code,
                 "status": "ABNORMAL", "diagnosis_message": "", "problem_object": {},
                 "error": f"Code execution error: {exc}",
+                "llm_elapsed_s": round(_t1_llm - _t0_llm, 2), "exec_elapsed_s": 0.0, "input_records": 0,
             }
+        _t1_exec = time.time()
 
         # Build check_output_schema — status is always the first field
         # problem_object is expected to be a dict: {key: str | list[str]}
@@ -1052,6 +1076,9 @@ def diagnose(mcp_outputs: dict) -> dict:
             "problem_object": problem_object,
             "check_output_schema": check_output_schema,
             "error": None,
+            "llm_elapsed_s": round(_t1_llm - _t0_llm, 2),
+            "exec_elapsed_s": round(_t1_exec - _t0_exec, 2),
+            "input_records": _input_rec,
         }
 
     async def auto_map(

@@ -149,3 +149,7 @@ class SkillGenerateCodeDiagnosisResponse(BaseModel):
     problem_object: Any = None
     check_output_schema: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    # Performance metrics
+    llm_elapsed_s: float = 0.0
+    exec_elapsed_s: float = 0.0
+    input_records: int = 0

@@ -1539,6 +1539,11 @@ async function _doTryRun(n) {
   const _tryRunAbort = new AbortController();
   const _tryRunTimer = setTimeout(() => _tryRunAbort.abort(), 120000); // 120 s
 
+  // Log input size before calling LLM
+  const _inputRows = Array.isArray(_sampleData) ? _sampleData.length
+    : (typeof _sampleData === 'object' && _sampleData ? Object.values(_sampleData).reduce((s,v) => s + (Array.isArray(v) ? v.length : 1), 0) : 0);
+  statusEl.insertAdjacentHTML?.('beforeend', '');  // noop placeholder
+
   try {
     const result = await _api('POST', '/mcp-definitions/try-run', {
       processing_intent: intent,
@@ -1601,7 +1606,18 @@ async function _doTryRun(n) {
     const saveBtn = document.getElementById('mcp-save-btn');
     if (saveBtn) { saveBtn.disabled = false; saveBtn.removeAttribute('style'); }
 
-    statusEl.innerHTML = '<p class="text-xs text-green-400 bg-green-400/10 border border-green-400/20 rounded-lg px-3 py-2 mb-2">✓ 試跑成功！請檢視下方結果，確認後即可儲存。</p>';
+    // Performance summary line
+    const _outRows = result.output_records ?? (result.output_data?.dataset?.length ?? 0);
+    const _perfLine = [
+      `📊 Input: ${result.input_records ?? _inputRows} rows`,
+      result.llm_elapsed_s ? `🧠 LLM: ${result.llm_elapsed_s}s` : null,
+      result.sandbox_elapsed_s ? `⚙ Exec: ${result.sandbox_elapsed_s}s` : null,
+      `📤 Output: ${_outRows} rows`,
+    ].filter(Boolean).join(' | ');
+
+    statusEl.innerHTML = `
+      <p class="text-xs text-green-400 bg-green-400/10 border border-green-400/20 rounded-lg px-3 py-2 mb-1">✓ 試跑成功！請檢視下方結果，確認後即可儲存。</p>
+      <p class="text-xs text-slate-500 font-mono px-1">${_perfLine}</p>`;
 
     if (resultEl) {
       resultEl.innerHTML = _buildResultHtml(result, `(Tab ${tabN})`);
@@ -5824,7 +5840,15 @@ function _skRenderDiagnosis(liveResult) {
       <div class="text-[11px] font-bold uppercase tracking-widest mb-1.5 ${isAbn ? 'text-red-500' : 'text-emerald-600'}">異常物件</div>
       ${probHtml}
       ${isAbn && liveResult?.expertAction ? `<div class="mt-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5"><p class="text-[11px] font-bold text-amber-700 uppercase tracking-widest mb-1">↳ 專家建議處置</p><p class="text-sm text-amber-800">${_esc(liveResult.expertAction)}</p></div>` : ''}
-    </div>`;
+    </div>
+    ${liveResult?.generated_code ? `
+    <div class="mt-3">
+      <p class="text-[11px] font-bold text-slate-500 uppercase tracking-widest cursor-pointer hover:text-purple-600 select-none flex items-center gap-1"
+         onclick="this.nextElementSibling.classList.toggle('hidden')">
+        🐍 生成的 Python 診斷函式 <span class="text-slate-400 normal-case font-normal">(點擊展開 / 收起)</span>
+      </p>
+      <pre class="hidden mt-1 bg-slate-900 text-green-300 text-xs rounded-lg px-3 py-3 overflow-x-auto whitespace-pre-wrap max-h-72 overflow-y-auto leading-relaxed">${_esc(liveResult.generated_code)}</pre>
+    </div>` : ''}`;
   resultEl.classList.remove('hidden');
 }
 
@@ -5944,7 +5968,10 @@ async function _skTryRun() {
 
     // Step 2: generate Skill code diagnosis
     const probSubject = document.getElementById('sk-edit-subject')?.value?.trim() || null;
+    const _mcpOutRows = (mcpOutput?.dataset || []).length || (Array.isArray(mcpOutput) ? mcpOutput.length : 0);
+    _skLogLine('📊', `MCP 輸出：${_mcpOutRows} rows`);
     _skLogLine('🧠', 'LLM 生成 Skill 診斷 Python 程式碼…');
+    const _t0Llm = Date.now();
     const result = await _api('POST', '/skill-definitions/generate-code-diagnosis', {
       diagnostic_prompt:  diagPrompt,
       problem_subject:    probSubject,
@@ -5952,6 +5979,13 @@ async function _skTryRun() {
       event_attributes:   [],
     });
     if (!result.success) throw new Error(result.error || 'Skill 診斷碼生成失敗');
+
+    const _perfParts = [
+      result.llm_elapsed_s  ? `🧠 LLM: ${result.llm_elapsed_s}s`  : `🧠 LLM: ${((Date.now()-_t0Llm)/1000).toFixed(1)}s`,
+      result.exec_elapsed_s ? `⚙ Exec: ${result.exec_elapsed_s}s` : null,
+      result.input_records  ? `📊 Input: ${result.input_records} rows` : null,
+    ].filter(Boolean);
+    _skLogLine('⏱', _perfParts.join(' | '), 'text-slate-500');
 
     const status = result.status || 'UNKNOWN';
     _skLogLine(status === 'ABNORMAL' ? '⚠' : '✓', `Skill 診斷完成 → ${status}`,

@@ -564,6 +564,7 @@ class MCPDefinitionService:
         )
         output_data = {**output_data, "_raw_dataset": raw_list}
 
+        out_records = len(output_data.get("dataset") or [])
         return MCPTryRunResponse(
             success=True,
             script=script,
@@ -572,6 +573,10 @@ class MCPDefinitionService:
             output_schema=result.get("output_schema", {}),
             input_definition=result.get("input_definition", {}),
             summary=result.get("summary", ""),
+            llm_elapsed_s=round(_t1_llm - _t0_llm, 2),
+            sandbox_elapsed_s=round(_t1_sb - _t0_sb, 2),
+            input_records=_record_count,
+            output_records=out_records,
         )
 
     async def run_with_data(self, mcp_id: int, raw_data: Any, base_url: str = "") -> MCPTryRunResponse:
