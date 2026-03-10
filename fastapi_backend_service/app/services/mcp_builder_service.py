@@ -872,7 +872,7 @@ DataSubject 名稱：{data_subject_name}
         # Build a compact schema preview that mirrors the REAL runtime structure.
         # The generated diagnose() will be executed against mcp_sample_outputs which has
         # {"mcp_name": {"dataset": [...full rows...], ...}}.
-        # Show only 3 sample rows under the same "dataset" key so the LLM writes correct accessors.
+        # Only send column schema + 1 example row — LLM needs field names/types only, not raw data.
         def _schema_preview(outputs: Dict[str, Any]) -> Dict[str, Any]:
             preview = {}
             for mcp_name, mcp_data in outputs.items():
@@ -880,10 +880,17 @@ DataSubject 名稱：{data_subject_name}
                     preview[mcp_name] = mcp_data
                     continue
                 dataset = mcp_data.get("dataset") or []
-                preview[mcp_name] = {
-                    "dataset": dataset[:3],           # same key as runtime; 3 rows for schema ref
-                    "_total_rows": len(dataset),      # hint: full dataset available at runtime
-                }
+                total = len(dataset)
+                if dataset:
+                    example = dataset[0]
+                    columns = {k: type(v).__name__ for k, v in example.items()} if isinstance(example, dict) else {}
+                    preview[mcp_name] = {
+                        "columns": columns,      # {field: type} — schema reference
+                        "example_row": example,  # 1 row for field name/value context
+                        "_total_rows": total,    # full dataset at runtime: mcp_outputs[name]["dataset"]
+                    }
+                else:
+                    preview[mcp_name] = {"columns": {}, "example_row": {}, "_total_rows": 0}
             return preview
 
         mcp_schema = _schema_preview(mcp_sample_outputs)
@@ -898,7 +905,7 @@ DataSubject 名稱：{data_subject_name}
 【異常判斷條件（Diagnostic Prompt）】
 {diagnostic_prompt}
 
-【MCP 輸出資料結構（僅顯示前 3 筆供欄位參考；執行時 dataset 包含完整資料，通過 mcp_outputs[mcp_name]["dataset"] 存取）】
+【MCP 輸出欄位結構（columns=欄位類型, example_row=1筆範例；執行時完整資料通過 mcp_outputs[mcp_name]["dataset"] 存取）】
 {json.dumps(mcp_schema, ensure_ascii=False, indent=2)}
 
 只回傳 Python 程式碼區塊（不要有其他文字，不要包在 JSON 裡）。
