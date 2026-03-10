@@ -690,6 +690,7 @@ class AgentOrchestrator:
 
                 tool_results = []
                 _force_synthesis = False
+                _profiles_this_round: list = []  # [P0 v15] DataProfiles collected this iteration
 
                 for tc in tool_calls:
                     tool_id = tc.id if hasattr(tc, "id") else tc.get("id", "")
@@ -753,6 +754,30 @@ class AgentOrchestrator:
                     # ── v14: Programmatic Distillation for data tools ──────
                     if tool_name == "execute_mcp" and isinstance(result, dict) and result.get("status") == "success":
                         result = await self._distill_svc.distill_mcp_result(result)
+
+                        # [P1 v15] Auto-persistence: fire-and-forget reusability evaluation
+                        _jit_script = (
+                            result.get("output_data", {}).get("_script") or
+                            result.get("_script") or ""
+                        )
+                        if not _jit_script:
+                            # Fallback: fetch processing_script from MCP record
+                            _mcp_id = tool_input.get("mcp_id")
+                            if _mcp_id:
+                                try:
+                                    from app.repositories.mcp_definition_repository import MCPDefinitionRepository
+                                    _mcp_repo = MCPDefinitionRepository(self._db)
+                                    _mcp_obj = await _mcp_repo.get_by_id(_mcp_id)
+                                    _jit_script = getattr(_mcp_obj, "processing_script", "") or ""
+                                except Exception:
+                                    pass
+                        if _jit_script:
+                            asyncio.create_task(
+                                self._maybe_persist_tool(
+                                    code=_jit_script,
+                                    context=f"execute_mcp id={tool_input.get('mcp_id')} params={json.dumps(tool_input.get('params', {}), ensure_ascii=False)[:200]}",
+                                )
+                            )
 
                     # ── Force synthesis on unrecoverable errors ────────────
                     if isinstance(result, dict) and result.get("status") == "error":
@@ -819,6 +844,11 @@ class AgentOrchestrator:
                         done_event["render_card"] = render_card
                     yield done_event
 
+                    # [P0 v15] Extract DataProfile before trimming (trim drops _data_profile key)
+                    _profile = result.pop("_data_profile", None) if isinstance(result, dict) else None
+                    if _profile:
+                        _profiles_this_round.append(_profile)
+
                     _tr_content = json.dumps(_trim_for_llm(tool_name, result), ensure_ascii=False)
                     if len(_tr_content) > _LLM_RESULT_MAX_CHARS:
                         try:
@@ -836,6 +866,24 @@ class AgentOrchestrator:
 
                 yield _stage_event(3, "complete")
                 messages.append({"role": "user", "content": tool_results})
+
+                # [P0 v15] Inject DataProfiles as hidden context for next LLM call
+                if _profiles_this_round:
+                    try:
+                        from app.services.data_profile_service import build_profile_injection_text
+                        _profile_text = build_profile_injection_text(_profiles_this_round)
+                        messages.append({
+                            "role": "user",
+                            "content": f"<hidden_data_profile>\n{_profile_text}\n</hidden_data_profile>",
+                        })
+                        yield {
+                            "type": "context_load",
+                            "source": "data_profile",
+                            "profiles": len(_profiles_this_round),
+                            "columns": [list(p.get("meta", {}).keys()) for p in _profiles_this_round],
+                        }
+                    except Exception as _dp_exc:
+                        logger.warning("DataProfile injection failed (non-blocking): %s", _dp_exc)
 
                 # ── Force synthesis ────────────────────────────────────────
                 if _force_synthesis:
@@ -994,3 +1042,23 @@ class AgentOrchestrator:
             await self._db.commit()
         except Exception as exc:
             logger.warning("Session save failed: %s", exc)
+
+    async def _maybe_persist_tool(self, code: str, context: str = "") -> None:
+        """[P1 v15] Fire-and-forget: evaluate JIT script and optionally save to Agent Tool Chest."""
+        try:
+            from app.services.agent_tool_service import AgentToolService
+            svc = AgentToolService(self._db)
+            eval_result = await svc.evaluate_reusability(code, context)
+            if eval_result.get("reusable"):
+                await svc.create(
+                    user_id=self._user_id,
+                    name=eval_result.get("name", "Unnamed Tool"),
+                    code=code,
+                    description=eval_result.get("description", ""),
+                )
+                logger.info(
+                    "AgentTool auto-saved: name=%s user_id=%s",
+                    eval_result.get("name"), self._user_id,
+                )
+        except Exception as exc:
+            logger.warning("_maybe_persist_tool failed (non-blocking): %s", exc)

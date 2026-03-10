@@ -23,6 +23,8 @@ from app.routers.agent_execute_router import router as agent_execute_router
 from app.routers.agent_draft_router import router as agent_draft_router
 # v12.5 Expert Mode
 from app.routers.agentic_skill_router import router as agentic_skill_router
+# v15.0 Agent Tool Chest
+from app.routers.agent_tool_router import router as agent_tool_router
 
 __all__ = [
     "auth_router",
@@ -44,4 +46,5 @@ __all__ = [
     "agent_execute_router",
     "agent_draft_router",
     "agentic_skill_router",
+    "agent_tool_router",
 ]

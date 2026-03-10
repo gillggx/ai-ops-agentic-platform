@@ -283,6 +283,20 @@ def _run_sync(script: str, raw_data: Any) -> Dict[str, Any]:
         global_ns["np"] = _np
         global_ns["numpy"] = _np
 
+    # [P2 v15] Pre-inject raw_data as `df` so LLM scripts can operate on df directly
+    # (no pd.read_csv() file I/O needed)
+    if _pd is not None:
+        try:
+            if isinstance(raw_data, list) and raw_data and isinstance(raw_data[0], dict):
+                global_ns["df"] = _pd.DataFrame(raw_data)
+            elif isinstance(raw_data, dict):
+                for _v in raw_data.values():
+                    if isinstance(_v, list) and _v and isinstance(_v[0], dict):
+                        global_ns["df"] = _pd.DataFrame(_v)
+                        break
+        except Exception:
+            pass  # non-blocking: df injection is best-effort
+
     local_ns: Dict[str, Any] = {}
 
     clean_script = _rewrite_plotly_output(_strip_preinjected_imports(script))

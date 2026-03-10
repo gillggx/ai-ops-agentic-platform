@@ -304,8 +304,17 @@ class ToolDispatcher:
         self._user_id = user_id
         self._memory_svc = AgentMemoryService(db)
 
-    async def execute(self, tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a tool and return its result as a dict."""
+    # Tools that return conversational/structural data — skip DataProfile for these
+    _NON_DATA_TOOLS = frozenset({
+        "navigate", "save_memory", "search_memory", "update_user_preference",
+        "list_skills", "list_mcps", "list_system_mcps",
+        "list_routine_checks", "list_event_types",
+        "draft_skill", "draft_mcp", "draft_routine_check", "draft_event_skill_link",
+        "patch_mcp", "patch_skill_raw",
+    })
+
+    async def _execute_inner(self, tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a tool and return its result as a dict (inner, no profiling)."""
         logger.info("ToolDispatcher.execute: tool=%s input=%s", tool_name, json.dumps(tool_input, ensure_ascii=False)[:200])
         try:
             match tool_name:
@@ -393,6 +402,24 @@ class ToolDispatcher:
         except Exception as exc:
             logger.exception("ToolDispatcher error: tool=%s", tool_name)
             return {"error": str(exc), "tool": tool_name}
+
+    async def execute(self, tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a tool, then attach DataProfile if result contains a dataset."""
+        result = await self._execute_inner(tool_name, tool_input)
+
+        # [P0 v15] Smart Sampling Interceptor — skip non-data tools for efficiency
+        if tool_name not in self._NON_DATA_TOOLS:
+            try:
+                from app.services.data_profile_service import DataProfileService, is_data_source
+                if is_data_source(result):
+                    profile = DataProfileService.build_profile(result)
+                    if profile:
+                        result["_data_profile"] = profile
+                        logger.debug("DataProfile attached: tool=%s cols=%s", tool_name, list(profile.get("meta", {}).keys()))
+            except Exception as exc:
+                logger.warning("Smart Sampling interceptor failed (non-blocking): %s", exc)
+
+        return result
 
     async def _call_api(
         self, method: str, path: str, body: Optional[Dict] = None

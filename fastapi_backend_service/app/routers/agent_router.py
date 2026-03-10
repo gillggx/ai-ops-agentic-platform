@@ -166,7 +166,31 @@ async def get_tools_manifest(
         }
     ]
 
-    return {"tools": tools, "total": len(tools), "meta_tools": meta_tools}
+    # ── [P1 v15] Section 3: Agent Tools (per-user JIT tool chest) ─────────
+    agent_tools_manifest = []
+    try:
+        from app.services.agent_tool_service import AgentToolService
+        at_svc = AgentToolService(db)
+        agent_tools_list = await at_svc.get_all(user_id=current_user.id)
+        agent_tools_manifest = [
+            {
+                "tool_id": t.id,
+                "name": t.name,
+                "description": t.description,
+                "usage_count": t.usage_count,
+            }
+            for t in agent_tools_list
+        ]
+    except Exception:
+        pass  # agent_tools table may not exist yet (migration pending)
+
+    return {
+        "tools": tools,
+        "total": len(tools),
+        "meta_tools": meta_tools,
+        "agent_tools": agent_tools_manifest,
+        "agent_tools_total": len(agent_tools_manifest),
+    }
 
 
 # ── v14: HITL Approval Endpoint ───────────────────────────────────────────────
