@@ -59,6 +59,12 @@ class AgentMemoryService:
             for row in rows.mappings():
                 m = AgentMemoryModel()
                 for k, v in row.items():
+                    # SQLite returns datetime columns as strings — parse them back
+                    if k in ("created_at", "updated_at") and isinstance(v, str):
+                        try:
+                            v = datetime.fromisoformat(v)
+                        except (ValueError, TypeError):
+                            pass
                     setattr(m, k, v)
                 objs.append(m)
             return objs
