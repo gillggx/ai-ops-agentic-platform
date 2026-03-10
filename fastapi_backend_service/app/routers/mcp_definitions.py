@@ -1,8 +1,12 @@
 """MCP Definition CRUD + LLM generation router."""
 
+import asyncio
+import json
+import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.response import StandardResponse
@@ -126,6 +130,59 @@ async def try_run_mcp(
         sample_data=body.sample_data,
     )
     return StandardResponse.success(data=result.model_dump())
+
+
+@router.post("/try-run-stream")
+async def try_run_mcp_stream(
+    body: MCPTryRunRequest,
+    svc: MCPDefinitionService = Depends(_get_service),
+    _: UserModel = Depends(get_current_user),
+) -> StreamingResponse:
+    """SSE variant of try-run: streams progress pings to prevent proxy 504 timeout.
+
+    Events:
+      data: {"type": "progress", "step": "codegen|sandbox|retry", "message": "...", "elapsed_s": N}
+      data: {"type": "done",     "result": {...}}
+      data: {"type": "error",    "message": "..."}
+    """
+    # Step messages keyed by minimum elapsed seconds (heuristic)
+    _STEPS = [
+        (0,  "codegen", "🧠 LLM 生成腳本中"),
+        (50, "sandbox", "⚙ 沙盒執行中"),
+        (90, "retry",   "🔄 AI 自癒：偵測錯誤，重新生成腳本"),
+    ]
+
+    async def _stream():
+        t0 = time.time()
+        task = asyncio.create_task(svc.try_run(
+            processing_intent=body.processing_intent,
+            system_mcp_id=body.system_mcp_id,
+            data_subject_id=body.data_subject_id,
+            sample_data=body.sample_data,
+        ))
+
+        # Send keep-alive progress pings every 2 s until task completes
+        while not task.done():
+            elapsed = int(time.time() - t0)
+            step, msg = "codegen", "🧠 LLM 生成腳本中"
+            for threshold, s, m in sorted(_STEPS, reverse=True):
+                if elapsed >= threshold:
+                    step, msg = s, m
+                    break
+            yield f"data: {json.dumps({'type': 'progress', 'step': step, 'message': f'{msg}...', 'elapsed_s': elapsed}, ensure_ascii=False)}\n\n"
+            await asyncio.sleep(2)
+
+        try:
+            result = task.result()
+            yield f"data: {json.dumps({'type': 'done', 'result': result.model_dump()}, ensure_ascii=False)}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/{mcp_id}/run-with-data", response_model=StandardResponse)

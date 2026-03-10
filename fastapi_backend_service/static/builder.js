@@ -1529,29 +1529,93 @@ async function _doTryRun(n) {
 
   btn.disabled = true;
   btn.textContent = '⏳ AI 深度編譯中...';
-  statusEl.innerHTML = `
-    <div class="llm-loading">
-      <div class="llm-spinner"></div>
-      <span>🧠 AI 正在深度編譯與驗證腳本，此過程約需 30–60 秒，請耐心等候...</span>
-    </div>`;
   if (resultEl) resultEl.innerHTML = '';
 
-  const _tryRunAbort = new AbortController();
-  const _tryRunTimer = setTimeout(() => _tryRunAbort.abort(), 120000); // 120 s
-
-  // Log input size before calling LLM
   const _inputRows = Array.isArray(_sampleData) ? _sampleData.length
     : (typeof _sampleData === 'object' && _sampleData ? Object.values(_sampleData).reduce((s,v) => s + (Array.isArray(v) ? v.length : 1), 0) : 0);
-  statusEl.insertAdjacentHTML?.('beforeend', '');  // noop placeholder
+
+  // ── SSE streaming try-run (防止 proxy 504 timeout) ─────────────────────────
+  let _sseAbort = new AbortController();
+  let _tickInterval = null;
+
+  function _updateProgress(msg, elapsed) {
+    statusEl.innerHTML = `
+      <div class="llm-loading">
+        <div class="llm-spinner"></div>
+        <span>${msg} <span class="text-slate-400 font-mono">(已等待 ${elapsed}s)</span></span>
+      </div>`;
+  }
+
+  _updateProgress('🧠 LLM 生成腳本中', 0);
+  let _elapsedDisplay = 0;
+  let _currentMsg = '🧠 LLM 生成腳本中';
+  _tickInterval = setInterval(() => {
+    _elapsedDisplay++;
+    _updateProgress(_currentMsg, _elapsedDisplay);
+  }, 1000);
+
+  let result = null;
+  let sseError = null;
 
   try {
-    const result = await _api('POST', '/mcp-definitions/try-run', {
-      processing_intent: intent,
-      system_mcp_id: dsId,
-      sample_data: _sampleData,
-    }, _tryRunAbort.signal);
-    clearTimeout(_tryRunTimer);
+    const resp = await fetch('/api/v1/mcp-definitions/try-run-stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${_token}` },
+      body: JSON.stringify({ processing_intent: intent, system_mcp_id: dsId, sample_data: _sampleData }),
+      signal: _sseAbort.signal,
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith('data:')) continue;
+        try {
+          const ev = JSON.parse(line.slice(5).trim());
+          if (ev.type === 'progress') {
+            _currentMsg = ev.message || _currentMsg;
+            _elapsedDisplay = ev.elapsed_s ?? _elapsedDisplay;
+            _updateProgress(_currentMsg, _elapsedDisplay);
+          } else if (ev.type === 'done') {
+            result = ev.result;
+          } else if (ev.type === 'error') {
+            sseError = ev.message;
+          }
+        } catch {}
+      }
+    }
+  } catch (fetchErr) {
+    clearInterval(_tickInterval);
+    const msg = fetchErr.name === 'AbortError'
+      ? '⏱ 請求已中止。'
+      : `✗ 請求失敗：${_esc(fetchErr.message)}`;
+    statusEl.innerHTML = `<p class="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">${msg}</p>`;
+    if (tabObj) { tabObj.status = 'error'; _renderTryTabBar(); }
+    btn.disabled = false;
+    btn.innerHTML = '<span>▶</span> 執行試跑 (Try Run)';
+    return;
+  }
+
+  clearInterval(_tickInterval);
+
+  if (sseError || !result) {
+    statusEl.innerHTML = `<p class="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">✗ ${_esc(sseError || '未收到結果')}</p>`;
+    if (tabObj) { tabObj.status = 'error'; _renderTryTabBar(); }
+    btn.disabled = false;
+    btn.innerHTML = '<span>▶</span> 執行試跑 (Try Run)';
+    return;
+  }
+
+  // ── from here, `result` is the MCPTryRunResponse ─────────────────────────
+  try {
     if (!result.success) {
       const analysis = result.error_analysis
         ? `<div class="mt-3 bg-amber-500/10 border border-amber-500/20 rounded-xl p-4">
@@ -1623,12 +1687,8 @@ async function _doTryRun(n) {
       resultEl.innerHTML = _buildResultHtml(result, `(Tab ${tabN})`);
     }
   } catch (e) {
-    clearTimeout(_tryRunTimer);
-    const isTimeout = e.name === 'AbortError';
-    const msg = isTimeout
-      ? '⏱ 請求超時（已等待 120 秒）。LLM 可能負載過高，請稍後再試。'
-      : `✗ 請求失敗：${_esc(e.message)}`;
-    statusEl.innerHTML = `<p class="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">${msg}</p>`;
+    clearInterval(_tickInterval);
+    statusEl.innerHTML = `<p class="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-lg px-3 py-2">✗ 請求失敗：${_esc(e.message)}</p>`;
     if (tabObj) { tabObj.status = 'error'; _renderTryTabBar(); }
   } finally {
     btn.disabled = false;
