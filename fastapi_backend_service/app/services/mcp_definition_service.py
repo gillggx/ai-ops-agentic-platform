@@ -26,6 +26,7 @@ from app.schemas.mcp_definition import (
 )
 from app.services.mcp_builder_service import MCPBuilderService
 from app.services.sandbox_service import execute_script
+from app.utils.llm_utils import classify_error
 
 _JSON_OPT = ("output_schema", "ui_render_config", "input_definition")
 
@@ -71,11 +72,27 @@ def _normalize_output(output_data: Any, llm_output_schema: Any) -> Dict[str, Any
             clean = [c for c in charts if c and not _is_html_chart(c)]
             if len(clean) < len(charts):
                 logger.warning("_normalize_output: %d HTML chart(s) stripped from charts[]", len(charts) - len(clean))
-            ui["charts"] = clean
-            if clean and not ui.get("chart_data"):
-                ui["chart_data"] = clean[0]
-            elif not clean:
+            # P2 fix: validate remaining entries are parseable Plotly JSON
+            valid: list = []
+            for c in clean:
+                try:
+                    json.loads(c)
+                    valid.append(c)
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    logger.warning("_normalize_output: chart entry is not valid JSON, discarding")
+            if len(valid) < len(clean):
+                logger.warning("_normalize_output: %d invalid JSON chart(s) discarded", len(clean) - len(valid))
+            ui["charts"] = valid
+            if valid and not ui.get("chart_data"):
+                ui["chart_data"] = valid[0]
+            elif not valid:
                 ui["chart_data"] = None
+
+        # P3 fix: dataset must be a list of dicts — reset if malformed
+        dataset = output_data.get("dataset")
+        if not isinstance(dataset, list):
+            logger.warning("_normalize_output: dataset is %s (not list), resetting to []", type(dataset).__name__)
+            output_data["dataset"] = []
 
         output_data["ui_render"] = ui
         # Mark as intentionally processed by the script (not wrapped by normalize)
@@ -484,6 +501,9 @@ class MCPDefinitionService:
         except Exception as exc:
             return MCPTryRunResponse(success=False, error=f"LLM 生成失敗：{exc}")
 
+        # Collect self-learning events from LLM generation (Schema Guard results)
+        _self_learning: list = list(result.get("_learning_events", []))
+
         script = result.get("processing_script", "")
         if not script or not script.strip() or "def process" not in script:
             # LLM refused or produced unusable output — surface a helpful error
@@ -497,49 +517,78 @@ class MCPDefinitionService:
                     "可使用 pandas、numpy 進行統計計算。"
                 ),
             )
-        try:
-            _t0_sb = time.time()
-            output_data = await execute_script(script, sample_data)
-            _t1_sb = time.time()
-            logger.warning(
-                "try_run perf | stage=sandbox_exec elapsed=%.2fs raw_data_records=%d",
-                _t1_sb - _t0_sb,
-                _record_count,
-            )
-        except (ValueError, TimeoutError) as exc:
-            error_msg = f"沙盒執行失敗：{exc}"
-            triage = await self._analyze_sandbox_error(
-                script, error_msg, processing_intent, ds_name
-            )
-            parts = []
-            if triage.get("error_reason"):  parts.append(f"錯誤原因：{triage['error_reason']}")
-            if triage.get("script_issue"):  parts.append(f"腳本問題：{triage['script_issue']}")
-            if triage.get("fix_suggestion"): parts.append(f"修改建議：{triage['fix_suggestion']}")
-            return MCPTryRunResponse(
-                success=False,
-                script=script,
-                error=error_msg,
-                error_analysis="\n".join(parts) if parts else None,
-                error_type=triage.get("error_type"),
-                suggested_prompt=triage.get("suggested_prompt") or None,
-            )
-        except Exception as exc:
-            error_msg = f"未預期的執行錯誤：{exc}"
-            triage = await self._analyze_sandbox_error(
-                script, error_msg, processing_intent, ds_name
-            )
-            parts = []
-            if triage.get("error_reason"):  parts.append(f"錯誤原因：{triage['error_reason']}")
-            if triage.get("script_issue"):  parts.append(f"腳本問題：{triage['script_issue']}")
-            if triage.get("fix_suggestion"): parts.append(f"修改建議：{triage['fix_suggestion']}")
-            return MCPTryRunResponse(
-                success=False,
-                script=script,
-                error=error_msg,
-                error_analysis="\n".join(parts) if parts else None,
-                error_type=triage.get("error_type"),
-                suggested_prompt=triage.get("suggested_prompt") or None,
-            )
+        # v14.2: sandbox execution with one auto-retry on failure.
+        # On first failure: classify error → re-ask LLM to fix the script → retry sandbox.
+        _t0_sb = _t1_sb = time.time()
+        output_data = None
+        final_error: Optional[MCPTryRunResponse] = None
+
+        for _sandbox_attempt in range(2):  # attempt 0 = first run; attempt 1 = auto-retry
+            try:
+                _t0_sb = time.time()
+                output_data = await execute_script(script, sample_data)
+                _t1_sb = time.time()
+                logger.warning(
+                    "try_run perf | stage=sandbox_exec attempt=%d elapsed=%.2fs raw_data_records=%d",
+                    _sandbox_attempt + 1, _t1_sb - _t0_sb, _record_count,
+                )
+                if _sandbox_attempt > 0:
+                    _self_learning.append("[Self-Healing ✓] 第 2 次沙盒執行成功（修正版腳本通過）")
+                final_error = None
+                break  # success — exit retry loop
+            except (ValueError, TimeoutError, Exception) as exc:
+                error_msg = f"沙盒執行失敗：{exc}"
+                error_label = classify_error(str(exc))
+                _self_learning.append(f"[Self-Healing] 第 {_sandbox_attempt + 1} 次沙盒失敗 — 錯誤分類：{error_label}")
+                logger.warning(
+                    "try_run sandbox error (attempt %d) type=%s: %s",
+                    _sandbox_attempt + 1, error_label, exc,
+                )
+
+                if _sandbox_attempt == 0:
+                    # First failure → ask LLM to fix the script with error context
+                    logger.warning("try_run | triggering sandbox auto-retry via LLM fix (error_type=%s)", error_label)
+                    _self_learning.append(f"[Self-Healing] LLM 注入錯誤上下文（{error_label}），重新生成腳本…")
+                    error_context = (
+                        f"[{error_label}] 上次生成的腳本在沙盒執行時失敗：\n{error_msg}\n"
+                        f"請修正 process() 函式並確保欄位名稱與 Schema 一致。"
+                    )
+                    try:
+                        fixed_result = await self._llm.generate_for_try_run(
+                            processing_intent=processing_intent + f"\n\n⚠️ 前次腳本錯誤（{error_label}）：{error_msg[:300]}",
+                            data_subject_name=ds_name,
+                            data_subject_output_schema=output_schema_raw,
+                            system_prompt=system_prompt,
+                            sample_row=_sample_row,
+                        )
+                        fixed_script = fixed_result.get("processing_script", "")
+                        if fixed_script and "def process" in fixed_script:
+                            script = fixed_script
+                            logger.warning("try_run | LLM fix succeeded, retrying sandbox")
+                            continue  # retry sandbox with fixed script
+                    except Exception as fix_exc:
+                        logger.warning("try_run | LLM fix attempt failed: %s", fix_exc)
+
+                # Second failure or LLM fix failed → return error with triage
+                triage = await self._analyze_sandbox_error(
+                    script, error_msg, processing_intent, ds_name
+                )
+                parts = []
+                if triage.get("error_reason"):   parts.append(f"錯誤原因：{triage['error_reason']}")
+                if triage.get("script_issue"):   parts.append(f"腳本問題：{triage['script_issue']}")
+                if triage.get("fix_suggestion"): parts.append(f"修改建議：{triage['fix_suggestion']}")
+                final_error = MCPTryRunResponse(
+                    success=False,
+                    script=script,
+                    error=error_msg,
+                    error_analysis="\n".join(parts) if parts else None,
+                    error_type=f"[{error_label}] {triage.get('error_type', '')}".strip(" []") or error_label,
+                    suggested_prompt=triage.get("suggested_prompt") or None,
+                )
+                break
+
+        if final_error is not None:
+            return final_error
 
         # ── Normalize output_data into Standard Payload format.
         # LLM scripts from before Phase 8.5 (or non-compliant ones) may return raw data
@@ -579,6 +628,9 @@ class MCPDefinitionService:
         output_data = {**output_data, "_raw_dataset": raw_list}
 
         out_records = len(output_data.get("dataset") or [])
+        _self_learning.append(
+            f"[Output ✓] 輸出正規化完成 — dataset={out_records} rows · charts={len((output_data.get('ui_render') or {}).get('charts') or [])}"
+        )
         return MCPTryRunResponse(
             success=True,
             script=script,
@@ -591,6 +643,7 @@ class MCPDefinitionService:
             sandbox_elapsed_s=round(_t1_sb - _t0_sb, 2),
             input_records=_record_count,
             output_records=out_records,
+            learning_events=_self_learning,
         )
 
     async def run_with_data(self, mcp_id: int, raw_data: Any, base_url: str = "") -> MCPTryRunResponse:

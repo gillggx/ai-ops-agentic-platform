@@ -304,6 +304,41 @@ class AgentMemoryService:
             tool_name=tool_name_failed,
         )
 
+    async def write_ds_schema_lesson(
+        self,
+        user_id: int,
+        ds_name: str,
+        correct_fields: List[str],
+        wrong_guess: Optional[str] = None,
+    ) -> AgentMemoryModel:
+        """v14.2 Lesson Learnt — DS Naming Convention.
+
+        Called after a successful MCP Try-Run to persist the correct field
+        names for a DataSubject.  On the next Try-Run for the same DS,
+        Stage 1 pre-filter (data_subject=ds_name, task_type=mcp_draft)
+        retrieves this lesson so the LLM uses correct column names on the
+        first attempt — skipping the retry entirely.
+
+        Args:
+            ds_name: Name of the DataSubject / System MCP.
+            correct_fields: List of verified column names from actual sample data.
+            wrong_guess: Optional — what LLM guessed before (for richer lesson text).
+        """
+        ts = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+        fields_str = ", ".join(correct_fields) if correct_fields else "（未知）"
+        wrong_str = f" | LLM 錯誤猜測: {wrong_guess}" if wrong_guess else ""
+        content = (
+            f"[DS_Schema] {ts} | DS={ds_name} | "
+            f"正確欄位: {fields_str}{wrong_str}"
+        )
+        return await self.write(
+            user_id=user_id,
+            content=content,
+            source="ds_schema_lesson",
+            task_type="mcp_draft",
+            data_subject=ds_name,
+        )
+
     async def write_preference(
         self,
         user_id: int,

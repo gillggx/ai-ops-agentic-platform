@@ -1,0 +1,81 @@
+📑 Agentic OS v14.3 開發規格書：導引式自癒控制台
+1. 版本願景 (Vision)
+從「被動對話」轉化為「主動導引」。透過 Scenario Pilot (情境導航員) 解決使用者不知從何下手的痛點，並利用 View State Machine (視圖狀態機) 確保主導航、執行 Console 與 MCP/Skill 結果能在同一個舞台空間內優雅地流轉。
+
+2. 新增組件：主畫面導航員 (Scenario Pilot)
+在 DATA & CHART 區域建立一個初始視圖 (HomeView)。
+
+2.1 情境卡片設計
+
+卡片 A：品質診斷 (SPC OOC)
+
+指令觸發：Analyze recent 24h SPC OOC and root causes.
+
+卡片 B：效能巡檢 (Cp/Cpk)
+
+指令觸發：Check fleet health and process capability (Cp/Cpk).
+
+卡片 C：記憶查詢 (Lesson Learnt)
+
+指令觸發：Query recent auto-corrections and learned patterns.
+
+3. 核心機制：視圖狀態機 (View State Machine)
+為了保留 MCP 報告空間並兼顧導航，實作三階段視圖切換。
+
+3.1 狀態定義
+
+狀態	顯示內容	Console 狀態	Rollback 機制
+HOME	3 張情境導航卡片	縮合 (40px)	N/A
+RUNNING	載入動畫 (Skeleton)	自動彈起 (180px)	可點擊「取消任務」回 HOME
+RESULT	MCP 圖表 / Skill 報告	維持展開或手動縮合	右上角顯示「🏠 返回首頁」
+3.2 空間切換動畫 (CSS/JS)
+
+進入任務：卡片向上 FadeOut + Scale(0.95)，報告容器 FadeIn。
+
+Console 連動：當狀態轉為 RUNNING 時，強制觸發 Console.expand()。
+
+4. 執行與驗證補丁 (v14.1 整合)
+在 RUNNING 狀態下，Console 必須即時顯示以下自癒日誌：
+
+Stage 3 (Validation)：若 McpTryRunOutputGuard 偵測到錯誤，Console 需顯示 [Self-Healing] 偵測到參數錯誤，正在修正重試...。
+
+Stage 5 (Evolution)：任務成功後，若有修正經驗，需顯示 [Memory] 已記錄 DS 欄位慣例至 Lesson Learnt。
+
+5. UI/UX 佈局規範 (依據 image_5de07c & 5dd7e2)
+5.1 中央舞台 (Center Stage)
+
+疊加層 (Stacking)：HomeView 與 ReportView 採用絕對定位疊加。
+
+透明度切換：使用 opacity 與 z-index 進行無縫切換，確保使用者感覺不到頁面跳轉。
+
+5.2 抽屜式 Console (The Drawer)
+
+位置：固定在 DATA & CHART 區域的最下方。
+
+互動：點擊 Header 可手動開關；AI 開始執行時必須強行彈起（Glass Box 理念）。
+
+6. 開發任務清單 (Task Checklist for 小柯)
+/task 實作 v14.3 導航與視圖切換系統：
+
+實作 HomeView 組件：包含 3 個 Scenario Cards。
+
+實作 ViewStateContext：管理 HOME | RUNNING | RESULT 狀態。
+
+實作 Rollback 按鈕：在 ReportView 渲染時，右上角必須提供返回 HOME 的入口。
+
+整合 Console 自動彈起邏輯：連動 useAgentLoop hook，當進入 Stage 2 時自動展開 Console。
+
+視覺美化：參考上傳的 HTML 原型，確保卡片有 Hover 動畫，且切換時不閃爍。
+
+7. 驗證情境 (Rollback 測試)
+進入首頁：確認看到 3 張卡片，Console 是收起來的。
+
+啟動任務：點擊「品質診斷」，確認卡片消失，Console 彈起並開始跑 Log。
+
+檢視結果：等待 5 秒，確認中間出現了 SPC 圖表。
+
+執行 Rollback：點擊「🏠 返回首頁」，確認畫面回到 3 張卡片，且 Console 歸位。
+
+💡 PM 的最後叮嚀
+
+小柯，這份 spec 的重點在於 「空間的靈活運用」。不要把首頁做成一個死頁面，它應該是數據報告的「前導層」。當使用者想看數據時，首頁要優雅地讓位；當使用者迷惘時，首頁要隨時能 Rollback 回來。

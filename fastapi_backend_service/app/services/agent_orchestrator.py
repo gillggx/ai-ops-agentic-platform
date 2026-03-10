@@ -784,6 +784,16 @@ class AgentOrchestrator:
                                 logger.info(
                                     "Trap memory written: tool=%s code=%s", tool_name, _err_code
                                 )
+                                yield {
+                                    "type": "memory_write",
+                                    "source": "trap",
+                                    "memory_type": "trap",
+                                    "tool_name": tool_name,
+                                    "error_code": _err_code or "UNKNOWN",
+                                    "content": _err_msg[:80],
+                                    "fix_rule": _fix_rule[:120],
+                                    "conflict_resolved": False,
+                                }
                             except Exception as _trap_exc:
                                 logger.warning("Trap write failed: %s", _trap_exc)
 
@@ -877,10 +887,13 @@ class AgentOrchestrator:
                 if mem:
                     yield {
                         "type": "memory_write",
-                        "content": mem.content[:100],
                         "source": mem.source,
+                        "memory_type": "diagnosis",
+                        "content": mem.content[:100],
                         "memory_id": mem.id,
                         "conflict_resolved": getattr(mem, "_conflict_resolved", False),
+                        "skill_name": _new_diagnosis.get("skill_name", ""),
+                        "targets": _new_diagnosis.get("targets", []),
                     }
             except Exception as exc:
                 logger.warning("Memory auto-write failed: %s", exc)
@@ -896,9 +909,11 @@ class AgentOrchestrator:
                 )
                 yield {
                     "type": "memory_write",
-                    "content": pref_mem.content[:100],
                     "source": "hitl_preference",
+                    "memory_type": "preference",
+                    "content": pref_mem.content[:100],
                     "memory_id": pref_mem.id,
+                    "overrides": list(self._canvas_overrides.keys()),
                     "conflict_resolved": False,
                 }
             except Exception as exc:
