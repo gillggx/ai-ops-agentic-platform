@@ -15,7 +15,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_memory import AgentMemoryModel
@@ -34,13 +35,33 @@ class AgentMemoryService:
     # ── Read ──────────────────────────────────────────────────────────────────
 
     async def list(self, user_id: int, limit: int = 50) -> List[AgentMemoryModel]:
-        result = await self._db.execute(
-            select(AgentMemoryModel)
-            .where(AgentMemoryModel.user_id == user_id)
-            .order_by(AgentMemoryModel.created_at.desc())
-            .limit(limit)
-        )
-        return list(result.scalars().all())
+        try:
+            result = await self._db.execute(
+                select(AgentMemoryModel)
+                .where(AgentMemoryModel.user_id == user_id)
+                .order_by(AgentMemoryModel.created_at.desc())
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+        except OperationalError:
+            # Metadata columns not yet migrated — query only stable columns
+            await self._db.rollback()
+            rows = await self._db.execute(
+                text(
+                    "SELECT id, user_id, content, embedding, source, ref_id, "
+                    "created_at, updated_at "
+                    "FROM agent_memories WHERE user_id = :uid "
+                    "ORDER BY created_at DESC LIMIT :lim"
+                ),
+                {"uid": user_id, "lim": limit},
+            )
+            objs: List[AgentMemoryModel] = []
+            for row in rows.mappings():
+                m = AgentMemoryModel()
+                for k, v in row.items():
+                    setattr(m, k, v)
+                objs.append(m)
+            return objs
 
     async def get(self, memory_id: int) -> Optional[AgentMemoryModel]:
         result = await self._db.execute(
@@ -105,41 +126,52 @@ class AgentMemoryService:
         has_filters = bool(task_type or data_subject or tool_name)
 
         if has_filters:
-            filter_meta["strategy"] = "metadata_prefilter"
-            meta_conditions = [AgentMemoryModel.user_id == user_id]
-            if task_type:
-                meta_conditions.append(AgentMemoryModel.task_type == task_type)
-            if data_subject:
-                meta_conditions.append(AgentMemoryModel.data_subject == data_subject)
-            if tool_name:
-                meta_conditions.append(AgentMemoryModel.tool_name == tool_name)
+            try:
+                filter_meta["strategy"] = "metadata_prefilter"
+                meta_conditions = [AgentMemoryModel.user_id == user_id]
+                if task_type:
+                    meta_conditions.append(AgentMemoryModel.task_type == task_type)
+                if data_subject:
+                    meta_conditions.append(AgentMemoryModel.data_subject == data_subject)
+                if tool_name:
+                    meta_conditions.append(AgentMemoryModel.tool_name == tool_name)
 
-            result = await self._db.execute(
-                select(AgentMemoryModel)
-                .where(*meta_conditions)
-                .order_by(AgentMemoryModel.created_at.desc())
-                .limit(_MAX_MEMORIES_PER_USER)
-            )
-            primary_pool = list(result.scalars().all())
-            filter_meta["primary_pool_size"] = len(primary_pool)
-
-            # Backward-compat: supplement with legacy (no metadata) if needed
-            if len(primary_pool) < top_k:
-                result2 = await self._db.execute(
+                result = await self._db.execute(
                     select(AgentMemoryModel)
-                    .where(
-                        AgentMemoryModel.user_id == user_id,
-                        AgentMemoryModel.task_type.is_(None),
-                        AgentMemoryModel.data_subject.is_(None),
-                    )
+                    .where(*meta_conditions)
                     .order_by(AgentMemoryModel.created_at.desc())
                     .limit(_MAX_MEMORIES_PER_USER)
                 )
-                legacy_pool = list(result2.scalars().all())
-                filter_meta["legacy_supplement"] = len(legacy_pool)
-                candidate_pool = primary_pool + legacy_pool
-            else:
-                candidate_pool = primary_pool
+                primary_pool = list(result.scalars().all())
+                filter_meta["primary_pool_size"] = len(primary_pool)
+
+                # Backward-compat: supplement with legacy (no metadata) if needed
+                if len(primary_pool) < top_k:
+                    result2 = await self._db.execute(
+                        select(AgentMemoryModel)
+                        .where(
+                            AgentMemoryModel.user_id == user_id,
+                            AgentMemoryModel.task_type.is_(None),
+                            AgentMemoryModel.data_subject.is_(None),
+                        )
+                        .order_by(AgentMemoryModel.created_at.desc())
+                        .limit(_MAX_MEMORIES_PER_USER)
+                    )
+                    legacy_pool = list(result2.scalars().all())
+                    filter_meta["legacy_supplement"] = len(legacy_pool)
+                    candidate_pool = primary_pool + legacy_pool
+                else:
+                    candidate_pool = primary_pool
+            except OperationalError as exc:
+                # Migration not yet applied on this DB — fall back gracefully
+                logger.warning(
+                    "agent_memory metadata columns missing (migration pending): %s — "
+                    "falling back to unfiltered search", exc
+                )
+                filter_meta["strategy"] = "no_filter_fallback"
+                filter_meta["fallback_reason"] = "migration_pending"
+                await self._db.rollback()
+                candidate_pool = await self.list(user_id, limit=_MAX_MEMORIES_PER_USER)
         else:
             filter_meta["strategy"] = "no_filter_fallback"
             candidate_pool = await self.list(user_id, limit=_MAX_MEMORIES_PER_USER)
