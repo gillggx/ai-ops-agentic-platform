@@ -2101,9 +2101,9 @@ function _renderCopilotSkillPanel(ev) {
  * Otherwise show as text fallback in shadow results area.
  */
 function _renderAiAnalysisPanel(markdownContent) {
-  // Skip if shadow already has data results
-  const shadowResults = document.getElementById('shadow-results');
-  if (shadowResults && !shadowResults.classList.contains('hidden')) return;
+  // Skip if shadow is active (running or done) — shadow stat cards take priority
+  const shadowIdle = document.getElementById('shadow-idle');
+  if (!shadowIdle || shadowIdle.classList.contains('hidden')) return;
 
   // Fallback: render AI text analysis as a wide card in shadow panel
   _showReportPanel();
