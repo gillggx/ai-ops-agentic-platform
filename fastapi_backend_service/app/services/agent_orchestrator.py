@@ -62,7 +62,8 @@ logger = logging.getLogger(__name__)
 MAX_ITERATIONS = 5
 _SESSION_TTL_HOURS = 24
 _SESSION_MAX_MESSAGES = 12
-_TOOL_RESULT_MAX_CHARS = 1500
+_TOOL_RESULT_MAX_CHARS = 6000   # cap for history; live results use _LLM_RESULT_MAX_CHARS
+_LLM_RESULT_MAX_CHARS  = 8000   # cap applied to every tool_result before adding to messages
 _COMPACTION_TOKEN_THRESHOLD = 60_000  # v14: compact history when exceeded
 
 # v14: Tools that require human approval before execution
@@ -741,10 +742,19 @@ class AgentOrchestrator:
                         done_event["render_card"] = render_card
                     yield done_event
 
+                    _tr_content = json.dumps(_trim_for_llm(tool_name, result), ensure_ascii=False)
+                    if len(_tr_content) > _LLM_RESULT_MAX_CHARS:
+                        try:
+                            _tr_parsed = json.loads(_tr_content)
+                            for _drop in ("output_data", "ui_render_payload", "_raw_dataset", "dataset"):
+                                _tr_parsed.pop(_drop, None)
+                            _tr_content = json.dumps(_tr_parsed, ensure_ascii=False)[:_LLM_RESULT_MAX_CHARS]
+                        except Exception:
+                            _tr_content = _tr_content[:_LLM_RESULT_MAX_CHARS] + "…[截斷]"
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": tool_id,
-                        "content": json.dumps(_trim_for_llm(tool_name, result), ensure_ascii=False),
+                        "content": _tr_content,
                     })
 
                 yield _stage_event(3, "complete")
