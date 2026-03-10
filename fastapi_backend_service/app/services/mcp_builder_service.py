@@ -124,6 +124,14 @@ _DEFAULT_TRY_RUN_SYSTEM_PROMPT = """\
   進階統計範例：skewness = float(((a - a.mean())**3).mean() / a.std()**3)，其中 a = np.array(vals)
 - 不可使用 scipy、sklearn 等未列出的套件（np 已足夠做統計分析）
 - try/except 必須使用上述已列出的 Exception 類別，例如 except Exception: 或 except ValueError:
+- ⚠️ Exception Handling 鐵律：主診斷邏輯必須包在 try/except Exception as e 中：
+  try:
+      # 主要計算邏輯
+  except Exception as e:
+      return {"output_schema": {"fields": []}, "dataset": [], "ui_render": {"type": "table", "charts": [], "chart_data": None},
+              "_error": f"執行異常：{e}"}
+- ⚠️ 禁止使用 raise RuntimeError / raise ValueError 等主動拋出例外（改為回傳 _error 欄位）
+- ⚠️ 禁止空 if 區塊（if condition: 後面必須有實際程式碼，不得僅有 pass 或空行）
 
 【標準輸出規範 — process() 函式的回傳 dict 必須包含以下三個 Key】
 - output_schema: {"fields": [{"name": str, "type": str, "description": str}]}
@@ -322,6 +330,7 @@ class MCPBuilderService:
         data_subject_name: str,
         data_subject_output_schema: Dict[str, Any],
         system_prompt: Optional[str] = None,
+        sample_row: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """Same as generate_all() but with strict guardrails in the system prompt.
 
@@ -330,14 +339,21 @@ class MCPBuilderService:
 
         Args:
             system_prompt: Optional override from DB (SystemParameter PROMPT_MCP_TRY_RUN).
+            sample_row: One row of real data so LLM can see exact column names/format.
         """
         sys_prompt = system_prompt or _DEFAULT_TRY_RUN_SYSTEM_PROMPT
+
+        sample_section = ""
+        if sample_row is not None:
+            sample_section = f"""\n真實資料範例（1 筆）：
+{json.dumps(sample_row, ensure_ascii=False, indent=2)}
+⚠️ 欄位名稱必須完全按照範例，不可自行猜測或修改。
+"""
 
         prompt = f"""以下是一個 DataSubject（資料源）的名稱與輸出格式：
 DataSubject 名稱：{data_subject_name}
 輸出 Schema（Raw Format）：
-{json.dumps(data_subject_output_schema, ensure_ascii=False, indent=2)}
-
+{json.dumps(data_subject_output_schema, ensure_ascii=False, indent=2)}{sample_section}
 使用者希望對此資料執行以下加工意圖：
 「{processing_intent}」
 

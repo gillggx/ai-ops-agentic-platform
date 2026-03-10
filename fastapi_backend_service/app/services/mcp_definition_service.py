@@ -453,6 +453,19 @@ class MCPDefinitionService:
             system_prompt = await self._sp_repo.get_value("PROMPT_MCP_TRY_RUN")
 
         _record_count = len(sample_data) if isinstance(sample_data, list) else 1
+        # Extract 1 sample row so LLM can see exact column names/format
+        if isinstance(sample_data, list) and sample_data:
+            _sample_row = sample_data[0]
+        elif isinstance(sample_data, dict):
+            # If it's a dict with a list value, peek inside
+            for _v in sample_data.values():
+                if isinstance(_v, list) and _v:
+                    _sample_row = _v[0]
+                    break
+            else:
+                _sample_row = sample_data
+        else:
+            _sample_row = None
         try:
             _t0_llm = time.time()
             result = await self._llm.generate_for_try_run(
@@ -460,6 +473,7 @@ class MCPDefinitionService:
                 data_subject_name=ds_name,
                 data_subject_output_schema=output_schema_raw,
                 system_prompt=system_prompt,
+                sample_row=_sample_row,
             )
             _t1_llm = time.time()
             logger.warning(
