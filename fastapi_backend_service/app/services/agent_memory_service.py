@@ -76,6 +76,95 @@ class AgentMemoryService:
         scored.sort(key=lambda x: x[0], reverse=True)
         return [m for _, m in scored[:top_k]]
 
+    async def search_with_metadata(
+        self,
+        user_id: int,
+        query: str,
+        top_k: int = 5,
+        task_type: Optional[str] = None,
+        data_subject: Optional[str] = None,
+        tool_name: Optional[str] = None,
+    ) -> tuple[List[AgentMemoryModel], Dict[str, Any]]:
+        """v14.1: Pre-filtered keyword search — Metadata Indexing.
+
+        Stage 1 filter strategy:
+        1. If metadata filters provided → fetch matching memories (primary pool)
+           + supplement with legacy memories (no metadata) if pool too small
+        2. Score candidates with keyword tokens, return top_k
+
+        Returns (memories, filter_meta) where filter_meta documents applied filters
+        for the context_load SSE event.
+        """
+        filter_meta: Dict[str, Any] = {
+            "task_type": task_type,
+            "data_subject": data_subject,
+            "tool_name": tool_name,
+            "strategy": "none",
+        }
+
+        has_filters = bool(task_type or data_subject or tool_name)
+
+        if has_filters:
+            filter_meta["strategy"] = "metadata_prefilter"
+            meta_conditions = [AgentMemoryModel.user_id == user_id]
+            if task_type:
+                meta_conditions.append(AgentMemoryModel.task_type == task_type)
+            if data_subject:
+                meta_conditions.append(AgentMemoryModel.data_subject == data_subject)
+            if tool_name:
+                meta_conditions.append(AgentMemoryModel.tool_name == tool_name)
+
+            result = await self._db.execute(
+                select(AgentMemoryModel)
+                .where(*meta_conditions)
+                .order_by(AgentMemoryModel.created_at.desc())
+                .limit(_MAX_MEMORIES_PER_USER)
+            )
+            primary_pool = list(result.scalars().all())
+            filter_meta["primary_pool_size"] = len(primary_pool)
+
+            # Backward-compat: supplement with legacy (no metadata) if needed
+            if len(primary_pool) < top_k:
+                result2 = await self._db.execute(
+                    select(AgentMemoryModel)
+                    .where(
+                        AgentMemoryModel.user_id == user_id,
+                        AgentMemoryModel.task_type.is_(None),
+                        AgentMemoryModel.data_subject.is_(None),
+                    )
+                    .order_by(AgentMemoryModel.created_at.desc())
+                    .limit(_MAX_MEMORIES_PER_USER)
+                )
+                legacy_pool = list(result2.scalars().all())
+                filter_meta["legacy_supplement"] = len(legacy_pool)
+                candidate_pool = primary_pool + legacy_pool
+            else:
+                candidate_pool = primary_pool
+        else:
+            filter_meta["strategy"] = "no_filter_fallback"
+            candidate_pool = await self.list(user_id, limit=_MAX_MEMORIES_PER_USER)
+
+        if not candidate_pool:
+            return [], filter_meta
+
+        tokens = [t.lower() for t in query.split() if len(t) > 1]
+        if not tokens:
+            return candidate_pool[:top_k], filter_meta
+
+        scored: List[tuple[int, AgentMemoryModel]] = []
+        seen_ids: set = set()
+        for m in candidate_pool:
+            if m.id in seen_ids:
+                continue
+            seen_ids.add(m.id)
+            text = m.content.lower()
+            score = sum(1 for t in tokens if t in text)
+            if score > 0:
+                scored.append((score, m))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [m for _, m in scored[:top_k]], filter_meta
+
     # ── Write ─────────────────────────────────────────────────────────────────
 
     async def write(
@@ -84,6 +173,9 @@ class AgentMemoryService:
         content: str,
         source: str = "manual",
         ref_id: Optional[str] = None,
+        task_type: Optional[str] = None,       # v14.1: Metadata Indexing
+        data_subject: Optional[str] = None,    # v14.1
+        tool_name: Optional[str] = None,       # v14.1
     ) -> AgentMemoryModel:
         """Persist a new memory entry."""
         memory = AgentMemoryModel(
@@ -91,6 +183,9 @@ class AgentMemoryService:
             content=content,
             source=source,
             ref_id=ref_id,
+            task_type=task_type,
+            data_subject=data_subject,
+            tool_name=tool_name,
             created_at=datetime.now(tz=timezone.utc),
             updated_at=datetime.now(tz=timezone.utc),
         )
@@ -179,6 +274,95 @@ class AgentMemoryService:
         result._conflict_resolved = False
         return result
 
+    async def write_trap(
+        self,
+        user_id: int,
+        tool_name_failed: str,
+        error_message: str,
+        fix_applied: str,
+        task_type: Optional[str] = None,
+        data_subject: Optional[str] = None,
+    ) -> AgentMemoryModel:
+        """v14.1: Negative Index / Trap — auto-write when tool returns error.
+
+        Format: [Trap] tool=X | Error: ... | Rule: 下次遇到此情況應 ...
+        Bound to tool_name metadata for precise pre-filtering.
+        """
+        ts = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+        content = (
+            f"[Trap] {ts} | 工具「{tool_name_failed}」發生錯誤 | "
+            f"錯誤訊息: {error_message[:200]} | "
+            f"修正規則: {fix_applied}"
+        )
+        return await self.write(
+            user_id=user_id,
+            content=content,
+            source="trap",
+            ref_id=None,
+            task_type=task_type,
+            data_subject=data_subject,
+            tool_name=tool_name_failed,
+        )
+
+    async def write_ds_schema_lesson(
+        self,
+        user_id: int,
+        ds_name: str,
+        correct_fields: List[str],
+        wrong_guess: Optional[str] = None,
+    ) -> AgentMemoryModel:
+        """v14.2 Lesson Learnt — DS Naming Convention.
+
+        Called after a successful MCP Try-Run to persist the correct field
+        names for a DataSubject.  On the next Try-Run for the same DS,
+        Stage 1 pre-filter (data_subject=ds_name, task_type=mcp_draft)
+        retrieves this lesson so the LLM uses correct column names on the
+        first attempt — skipping the retry entirely.
+
+        Args:
+            ds_name: Name of the DataSubject / System MCP.
+            correct_fields: List of verified column names from actual sample data.
+            wrong_guess: Optional — what LLM guessed before (for richer lesson text).
+        """
+        ts = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+        fields_str = ", ".join(correct_fields) if correct_fields else "（未知）"
+        wrong_str = f" | LLM 錯誤猜測: {wrong_guess}" if wrong_guess else ""
+        content = (
+            f"[DS_Schema] {ts} | DS={ds_name} | "
+            f"正確欄位: {fields_str}{wrong_str}"
+        )
+        return await self.write(
+            user_id=user_id,
+            content=content,
+            source="ds_schema_lesson",
+            task_type="mcp_draft",
+            data_subject=ds_name,
+        )
+
+    async def write_preference(
+        self,
+        user_id: int,
+        canvas_overrides: Dict[str, Any],
+        task_type: Optional[str] = None,
+        data_subject: Optional[str] = None,
+    ) -> AgentMemoryModel:
+        """v14.1: HITL Preference Write — persist canvas_overrides as user preference memory."""
+        ts = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+        overrides_text = "; ".join(f"{k}={v}" for k, v in canvas_overrides.items())
+        content = (
+            f"[使用者偏好] {ts} | "
+            f"任務類型: {task_type or '未知'} | "
+            f"資料對象: {data_subject or '未知'} | "
+            f"調整: {overrides_text}"
+        )
+        return await self.write(
+            user_id=user_id,
+            content=content,
+            source="hitl_preference",
+            task_type=task_type,
+            data_subject=data_subject,
+        )
+
     # ── Delete ────────────────────────────────────────────────────────────────
 
     async def delete(self, memory_id: int, user_id: int) -> bool:
@@ -218,6 +402,9 @@ class AgentMemoryService:
             "content": m.content,
             "source": m.source,
             "ref_id": m.ref_id,
+            "task_type": getattr(m, "task_type", None),
+            "data_subject": getattr(m, "data_subject", None),
+            "tool_name": getattr(m, "tool_name", None),
             "created_at": m.created_at.isoformat() if m.created_at else None,
         }
 

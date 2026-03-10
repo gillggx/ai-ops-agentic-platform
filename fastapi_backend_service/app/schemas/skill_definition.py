@@ -153,3 +153,5 @@ class SkillGenerateCodeDiagnosisResponse(BaseModel):
     llm_elapsed_s: float = 0.0
     exec_elapsed_s: float = 0.0
     input_records: int = 0
+    # Self-learning events (v14.2): schema guard retries, error labels
+    learning_events: List[str] = []

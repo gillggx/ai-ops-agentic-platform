@@ -18,7 +18,7 @@
 // ══════════════════════════════════════════════════════════════
 // State
 // ══════════════════════════════════════════════════════════════
-let _token       = localStorage.getItem('glassbox_token');
+let _token       = null;  // memory-only: cleared on refresh (by design)
 let _isStreaming = false;
 let _toolTabs    = {};  // key: toolName → { tabEl, panelEl } (legacy non-streaming flow)
 
@@ -891,7 +891,6 @@ async function loginWithCredentials() {
     _token = json.data?.access_token;
     if (!_token) throw new Error('回應中未包含 access_token');
 
-    localStorage.setItem('glassbox_token', _token);
     _clearConversationHistory();
     // Reset token counter on every fresh login
     const _lb = document.getElementById('v13-token-badge');
@@ -910,7 +909,6 @@ function loginWithToken() {
   const t = document.getElementById('token-input').value.trim();
   if (!t) { _showLoginError('請輸入 Token'); return; }
   _token = t;
-  localStorage.setItem('glassbox_token', _token);
   _clearConversationHistory();
   const _lb2 = document.getElementById('v13-token-badge');
   if (_lb2) { _lb2.textContent = ''; _lb2.classList.add('hidden'); delete _lb2._totalIn; delete _lb2._totalOut; }
@@ -918,7 +916,6 @@ function loginWithToken() {
 }
 
 function logout() {
-  localStorage.removeItem('glassbox_token');
   _token = null;
   document.getElementById('main-app').classList.add('hidden');
   document.getElementById('login-screen').classList.remove('hidden');
@@ -1612,15 +1609,24 @@ function _diagConsoleClear() {
   if (lines) lines.innerHTML = '';
 }
 
-function _diagLogLine(icon, text, color = '#94a3b8') {
+// type: 'default' (hex color string) | 'learn' (self-learning highlight)
+function _diagLogLine(icon, text, colorOrType = '#94a3b8') {
   const lines = document.getElementById('diag-console-lines');
   if (!lines) return;
   if (!_diagConsoleOpen) _diagConsoleExpand();
   const ts = new Date().toLocaleTimeString('zh-TW', { hour12: false });
   const row = document.createElement('div');
-  row.className = 'flex items-start gap-2 py-0.5';
-  row.innerHTML = `<span style="color:#475569;flex-shrink:0;">${ts}</span>`
-                + `<span style="color:${color};">${icon} ${_escapeHtml(String(text))}</span>`;
+
+  if (colorOrType === 'learn') {
+    row.style.cssText = 'display:flex;align-items:flex-start;gap:8px;padding:3px 12px 3px 10px;' +
+      'margin:0 -12px;background:rgba(139,92,246,0.12);border-left:2px solid #7c3aed;';
+    row.innerHTML = `<span style="color:#475569;flex-shrink:0;font-family:monospace;">${ts}</span>`
+                  + `<span style="color:#c4b5fd;font-weight:600;">${icon} ${_escapeHtml(String(text))}</span>`;
+  } else {
+    row.className = 'flex items-start gap-2 py-0.5';
+    row.innerHTML = `<span style="color:#475569;flex-shrink:0;">${ts}</span>`
+                  + `<span style="color:${colorOrType};">${icon} ${_escapeHtml(String(text))}</span>`;
+  }
   lines.appendChild(row);
   lines.scrollTop = lines.scrollHeight;
   // Pulse dot
@@ -2571,8 +2577,45 @@ function _handleV13Event(ev) {
     }
 
     case 'memory_write': {
-      const conflict = ev.conflict_resolved ? ' [衝突已解決→UPDATE]' : '';
-      _diagLogLine('🧠', `MEMORY | 已記住: ${(ev.content || '').slice(0, 80)} (source: ${ev.source || '?'})${conflict}`, '#c084fc');
+      const conflict = ev.conflict_resolved ? '（衝突→UPDATE）' : '';
+      const mtype = ev.memory_type || ev.source || 'memory';
+
+      // Separator line before learn events
+      const lines = document.getElementById('diag-console-lines');
+      if (lines) {
+        const sep = document.createElement('div');
+        sep.style.cssText = 'border-top:1px solid rgba(139,92,246,0.2);margin:2px -12px;';
+        lines.appendChild(sep);
+      }
+
+      if (mtype === 'trap') {
+        _diagLogLine('💡',
+          `[Trap 記憶] 工具：${ev.tool_name || '?'} | 錯誤碼：${ev.error_code || '?'} | ` +
+          `學到：${(ev.fix_rule || ev.content || '').slice(0, 100)}${conflict}`,
+          'learn');
+      } else if (mtype === 'diagnosis') {
+        const targets = Array.isArray(ev.targets) && ev.targets.length
+          ? `→ 異常對象：${ev.targets.slice(0, 3).join(', ')}`
+          : '';
+        _diagLogLine('💡',
+          `[診斷記憶] Skill：${ev.skill_name || '?'} ABNORMAL ${targets}${conflict}`,
+          'learn');
+      } else if (mtype === 'preference') {
+        const keys = Array.isArray(ev.overrides) && ev.overrides.length
+          ? ev.overrides.join(', ')
+          : (ev.content || '').slice(0, 80);
+        _diagLogLine('💡',
+          `[使用者偏好] 記住參數覆寫：${keys}${conflict}`,
+          'learn');
+      } else if (mtype === 'ds_schema_lesson') {
+        _diagLogLine('💡',
+          `[DS Schema 教訓] ${(ev.content || '').slice(0, 100)}${conflict}`,
+          'learn');
+      } else {
+        _diagLogLine('💡',
+          `[記憶寫入] ${(ev.content || '').slice(0, 100)} (${ev.source || '?'})${conflict}`,
+          'learn');
+      }
       break;
     }
 

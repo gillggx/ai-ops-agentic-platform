@@ -14,8 +14,10 @@ import time
 from typing import Any, Dict, List, Optional
 
 import anthropic
+from pydantic import BaseModel, ValidationError, field_validator
 
 from app.config import get_settings
+from app.utils.llm_utils import llm_retry
 
 logger = logging.getLogger(__name__)
 _MODEL = get_settings().LLM_MODEL
@@ -201,6 +203,12 @@ _DEFAULT_TRY_RUN_SYSTEM_PROMPT = """\
   ui_render = {"type": "trend_chart", "charts": [chart_data], "chart_data": chart_data}
 - 若無圖表需求：ui_render = {"type": "table", "charts": [], "chart_data": null}
 
+⚠️ 圖表生成鐵律（最高優先級）：
+1. 只生成加工意圖中明確要求的圖表，禁止自行添加任何額外圖表
+2. 若加工意圖包含「輸出為列表」「flat list」「可直接渲染」「資料格式」「扁平化」→ 直接設 ui_render.type="table", charts=[], chart_data=null，不需生成任何圖表
+3. 預設最多生成 1 張主圖；只有當意圖中明確出現「多張圖」「N 張圖」才允許多張
+4. 禁止自行添加衍生統計圖（例如：count by X、summary bar、distribution chart 等），除非使用者明確要求
+
 你的回應必須是合法的 JSON，不得有任何其他文字。"""
 
 _DEFAULT_DIAGNOSIS_SYSTEM_PROMPT = """\
@@ -234,6 +242,72 @@ _DEFAULT_DIAGNOSIS_SYSTEM_PROMPT = """\
   範例：{"tool": ["TETCH10", "TETCH09"], "recipe": "ETH_RCP_10", "measurement": "CD 47.5 nm"}
 - status=NORMAL 時：回傳空物件 {}
 - ⚠️ 禁止在 problem_object 中放入說明文字，只放可識別的具體值"""
+
+
+# ── v14.2 Schema Guards ───────────────────────────────────────────────────────
+
+class McpTryRunOutputGuard(BaseModel):
+    """Pydantic validation for generate_for_try_run() LLM output.
+
+    Ensures the JSON the LLM returns actually contains a runnable process()
+    function and a properly-shaped output_schema before we execute the sandbox.
+    If validation fails, the error detail is fed back to the LLM for retry.
+    """
+    processing_script: str
+    output_schema: Dict[str, Any]
+    ui_render_config: Dict[str, Any] = {}
+    input_definition: Dict[str, Any] = {}
+    summary: str = ""
+
+    @field_validator("processing_script")
+    @classmethod
+    def must_have_process_fn(cls, v: str) -> str:
+        if "def process" not in v:
+            raise ValueError(
+                "processing_script 缺少 'def process' 函式定義。"
+                "請確保回傳的 JSON 中 processing_script 欄位包含完整的 Python 函式。"
+            )
+        return v
+
+    @field_validator("output_schema")
+    @classmethod
+    def must_have_fields(cls, v: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(v.get("fields"), list):
+            raise ValueError(
+                "output_schema 必須包含 'fields' 陣列，格式：{\"fields\": [{\"name\": ..., \"type\": ..., \"description\": ...}]}"
+            )
+        return v
+
+
+class SkillCodeOutputGuard:
+    """Validator for generate_code_diagnosis() Python code output.
+
+    Not a Pydantic model because the output is raw Python, not JSON.
+    Validates structural requirements and returns the error string for LLM retry.
+    """
+
+    @staticmethod
+    def validate(code: str) -> str:
+        """Raise ValueError with detail if code is invalid, else return code."""
+        errors = []
+        if "def diagnose" not in code:
+            errors.append("缺少 'def diagnose' 函式定義（必須以 def diagnose(mcp_outputs: dict) -> dict: 開頭）")
+        if '"status"' not in code and "'status'" not in code:
+            errors.append("回傳 dict 缺少 'status' 鍵（必須回傳 NORMAL 或 ABNORMAL）")
+        if '"diagnosis_message"' not in code and "'diagnosis_message'" not in code:
+            errors.append("回傳 dict 缺少 'diagnosis_message' 鍵")
+        if '"problem_object"' not in code and "'problem_object'" not in code:
+            errors.append("回傳 dict 缺少 'problem_object' 鍵")
+        if errors:
+            raise ValueError(
+                "生成的 diagnose() 函式結構不完整：\n"
+                + "\n".join(f"  - {e}" for e in errors)
+                + "\n\n請修正並確保所有 3 個必要 key 都存在於回傳的 dict 中。"
+            )
+        return code
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _get_text(content: list) -> str:
@@ -390,31 +464,54 @@ DataSubject 名稱：{data_subject_name}
   "summary": "..."
 }}"""
 
-        last_err: Exception = RuntimeError("generate_for_try_run: no attempts made")
-        for attempt in range(2):
+        # v14.2: use llm_retry so that McpTryRunOutputGuard validation errors
+        # are fed back to the LLM as error_context on the next attempt.
+        _attempt_count = [0]
+        _events: List[str] = []
+        _guard_failures = [0]
+
+        async def _call(error_context: Optional[str]) -> Dict[str, Any]:
+            retry_suffix = ""
+            if error_context:
+                retry_suffix = (
+                    f"\n\n⚠️ 上一次生成的輸出驗證失敗，請修正以下問題後重新生成：\n{error_context}"
+                )
+                _events.append(f"[Schema Guard] 注入驗證錯誤，發起第 {_attempt_count[0] + 1} 次重試…")
+            full_prompt = prompt + retry_suffix
+            _attempt_count[0] += 1
+            response = await self._client.messages.create(
+                model=_MODEL,
+                max_tokens=8192,
+                system=sys_prompt,
+                messages=[{"role": "user", "content": full_prompt}],
+            )
+            raw_text = _get_text(response.content)
+            logger.info(
+                "generate_for_try_run raw LLM response (attempt %d): stop_reason=%s len=%d first_200=%r",
+                _attempt_count[0], response.stop_reason, len(raw_text), raw_text[:200],
+            )
+            return _extract_json(raw_text)
+
+        def _validate(result: Dict[str, Any]) -> Dict[str, Any]:
             try:
-                response = await self._client.messages.create(
-                    model=_MODEL,
-                    max_tokens=8192,
-                    system=sys_prompt,
-                    messages=[{"role": "user", "content": prompt}],
-                )
-                raw_text = _get_text(response.content)
-                logger.info(
-                    "generate_for_try_run raw LLM response (attempt %d): stop_reason=%s len=%d first_200=%r",
-                    attempt + 1, response.stop_reason, len(raw_text), raw_text[:200],
-                )
-                result = _extract_json(raw_text)
-                if "processing_script" not in result:
-                    logger.warning(
-                        "generate_for_try_run: processing_script missing from parsed JSON keys=%s",
-                        list(result.keys()),
-                    )
-                return result
-            except (json.JSONDecodeError, ValueError) as exc:
-                last_err = exc
-                logger.warning("generate_for_try_run JSON parse failed (attempt %d): %s", attempt + 1, exc)
-        raise ValueError(f"LLM 生成失敗：{last_err}")
+                McpTryRunOutputGuard.model_validate(result)
+            except ValidationError as exc:
+                _guard_failures[0] += 1
+                err_short = str(exc).splitlines()[0][:80]
+                _events.append(f"[Schema Guard ✗] 第 {_attempt_count[0]} 次驗證失敗：{err_short}")
+                # Convert Pydantic error to a plain string the LLM can read
+                raise ValueError(str(exc)) from exc
+            return result
+
+        result = await llm_retry(_call, _validate, max_retries=2)
+        if _guard_failures[0] == 0:
+            _events.append("[Schema Guard ✓] MCP 結構驗證通過（def process ✓ · output_schema.fields ✓）")
+        else:
+            _events.append(
+                f"[Schema Guard ✓] 結構驗證通過（共嘗試 {_attempt_count[0]} 次，修正 {_guard_failures[0]} 次失敗）"
+            )
+        result["_learning_events"] = _events
+        return result
 
     async def analyze_error(
         self,
@@ -962,28 +1059,69 @@ def diagnose(mcp_outputs: dict) -> dict:
   ```
   exception message 必須使用 `f"診斷執行異常：{{e}}"` 格式，不可自訂其他格式。"""
 
+        # v14.2: use llm_retry + SkillCodeOutputGuard so structural errors
+        # in the generated diagnose() function are caught and fed back to LLM.
         _t0_llm = time.time()
-        try:
-            resp1 = await self._client.messages.create(
-                model=_MODEL,
-                max_tokens=4096,
-                messages=[{"role": "user", "content": code_prompt}],
-            )
-            raw_text = _get_text(resp1.content)
-            # Extract code from ```python ... ``` block; fallback to bare def
+        _skill_attempt_count = [0]
+        _skill_events: List[str] = []
+        _skill_guard_failures = [0]
+
+        def _extract_code(raw_text: str) -> str:
             m = re.search(r"```(?:python)?\s*([\s\S]+?)\s*```", raw_text)
             if m:
-                generated_code = m.group(1).strip()
-            else:
-                # Fallback: everything from 'def diagnose' onwards
-                idx = raw_text.find("def diagnose")
-                generated_code = raw_text[idx:].strip() if idx != -1 else raw_text.strip()
+                return m.group(1).strip()
+            idx = raw_text.find("def diagnose")
+            return raw_text[idx:].strip() if idx != -1 else raw_text.strip()
+
+        async def _call_skill(error_context: Optional[str]) -> str:
+            retry_suffix = ""
+            if error_context:
+                retry_suffix = (
+                    f"\n\n⚠️ 上一次生成的 diagnose() 函式有以下問題，請修正：\n{error_context}"
+                )
+                _skill_events.append(
+                    f"[Schema Guard] 注入驗證錯誤，發起第 {_skill_attempt_count[0] + 1} 次重試…"
+                )
+            _skill_attempt_count[0] += 1
+            resp = await self._client.messages.create(
+                model=_MODEL,
+                max_tokens=4096,
+                messages=[{"role": "user", "content": code_prompt + retry_suffix}],
+            )
+            return _extract_code(_get_text(resp.content))
+
+        def _validate_skill(code: str) -> str:
+            try:
+                return SkillCodeOutputGuard.validate(code)
+            except ValueError as exc:
+                _skill_guard_failures[0] += 1
+                err_short = str(exc)[:80]
+                _skill_events.append(
+                    f"[Schema Guard ✗] 第 {_skill_attempt_count[0]} 次驗證失敗：{err_short}"
+                )
+                raise
+
+        try:
+            generated_code = await llm_retry(
+                _call_skill,
+                _validate_skill,
+                max_retries=2,
+            )
         except Exception as exc:
             return {
                 "success": False, "generated_code": "", "code_result": None,
                 "response_message": "", "error": f"Code generation failed: {exc}",
                 "llm_elapsed_s": 0.0, "exec_elapsed_s": 0.0, "input_records": 0,
+                "learning_events": _skill_events,
             }
+        if _skill_guard_failures[0] == 0:
+            _skill_events.append(
+                "[Schema Guard ✓] 診斷碼結構驗證通過（def diagnose ✓ · status/diagnosis_message/problem_object ✓）"
+            )
+        else:
+            _skill_events.append(
+                f"[Schema Guard ✓] 診斷碼驗證通過（共嘗試 {_skill_attempt_count[0]} 次，修正 {_skill_guard_failures[0]} 次失敗）"
+            )
         _t1_llm = time.time()
 
         if not generated_code:
@@ -1068,7 +1206,14 @@ def diagnose(mcp_outputs: dict) -> dict:
             raw_status        = str(raw_result.get("status", "")).upper()
             status            = "NORMAL" if raw_status == "NORMAL" else "ABNORMAL"
             diagnosis_message = str(raw_result.get("diagnosis_message", "診斷完成。"))
-            problem_object    = raw_result.get("problem_object", {})
+            # P1 fix: problem_object must be a dict — LLM sometimes returns a string or list
+            problem_object = raw_result.get("problem_object", {})
+            if not isinstance(problem_object, dict):
+                logger.warning(
+                    "generate_code_diagnosis: problem_object is %s (not dict), normalizing to {}",
+                    type(problem_object).__name__,
+                )
+                problem_object = {}
         except Exception as exc:
             return {
                 "success": False, "generated_code": generated_code,
@@ -1091,6 +1236,10 @@ def diagnose(mcp_outputs: dict) -> dict:
 
         check_output_schema = {"fields": schema_fields}
 
+        _skill_events.append(
+            f"[Sandbox ✓] diagnose() 執行完成 → status={status}"
+            + (f"（problem_object 已正規化為 {{}}）" if not isinstance(raw_result.get("problem_object"), dict) else "")
+        )
         return {
             "success": True,
             "generated_code": generated_code,
@@ -1102,6 +1251,7 @@ def diagnose(mcp_outputs: dict) -> dict:
             "llm_elapsed_s": round(_t1_llm - _t0_llm, 2),
             "exec_elapsed_s": round(_t1_exec - _t0_exec, 2),
             "input_records": _input_rec,
+            "learning_events": _skill_events,
         }
 
     async def auto_map(

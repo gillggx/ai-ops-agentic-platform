@@ -100,6 +100,8 @@ class MCPTryRunResponse(BaseModel):
     sandbox_elapsed_s: float = 0.0
     input_records: int = 0
     output_records: int = 0
+    # Self-learning events (v14.2): schema guard retries, sandbox retries, error labels
+    learning_events: List[str] = []
 
 
 class MCPCheckIntentRequest(BaseModel):

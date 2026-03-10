@@ -1785,7 +1785,7 @@ function _buildResultHtml(result, label) {
       ${schemaHtml}
       <details class="mt-3">
         <summary class="text-xs text-slate-500 cursor-pointer hover:text-slate-700">🔍 查看生成的 Python 腳本</summary>
-        <pre class="bg-slate-50 border border-slate-200 rounded-md p-3 text-xs text-slate-700 mt-2 overflow-auto max-h-48">${_esc(result.script || '')}</pre>
+        <pre class="bg-slate-50 border border-slate-200 rounded-md p-3 text-xs text-slate-700 mt-2 overflow-x-auto overflow-y-scroll max-h-[480px] whitespace-pre-wrap leading-relaxed">${_esc(result.script || '')}</pre>
       </details>
     </div>
   `;
@@ -4980,6 +4980,7 @@ async function _tryRunNestedBuilder() {
       });
       _nbTryRunResult = mcpTryResult;
       _nbLogLine('✓', 'MCP Try Run 完成', 'text-emerald-600');
+      _renderLearningEvents('nb-exec-log-lines', mcpTryResult.learning_events);
 
     } else if (mcpId) {
       // "選擇現有" mode — run stored processing_script directly (NO LLM)
@@ -5083,6 +5084,7 @@ async function _tryRunNestedBuilder() {
         throw new Error(skillCodeResult.error || 'Skill 診斷碼生成失敗');
       }
 
+      _renderLearningEvents('nb-exec-log-lines', skillCodeResult.learning_events);
       const resultStatus = skillCodeResult.status || 'UNKNOWN';
       const statusIcon = resultStatus === 'ABNORMAL' ? '⚠' : resultStatus === 'NORMAL' ? '✓' : '—';
       const statusColor = resultStatus === 'ABNORMAL' ? 'text-red-600' : resultStatus === 'NORMAL' ? 'text-emerald-600' : 'text-slate-500';
@@ -5290,7 +5292,36 @@ function _nbSwitchMcpTab(tab) {
   });
 }
 
-// ── Execution log helpers ─────────────────────────────────────
+// ── Unified Execution Console Helpers (v14.2) ─────────────────
+// type: 'default' | 'success' | 'error' | 'warning' | 'muted' | 'learn'
+function _consoleLog(linesId, icon, text, type = 'default') {
+  const lines = document.getElementById(linesId);
+  if (!lines) return;
+  const ts = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+  const row = document.createElement('div');
+
+  if (type === 'learn') {
+    row.className = 'flex items-start gap-2 py-1 -mx-4 px-4 bg-violet-50 border-l-2 border-violet-400';
+    row.innerHTML = `<span class="text-slate-400 shrink-0 select-none font-mono">${ts}</span>
+                     <span class="text-violet-700 font-semibold flex-1">${icon} ${_esc(text)}</span>`;
+  } else {
+    const colorMap = {
+      default: 'text-slate-600',
+      success: 'text-emerald-600',
+      error:   'text-red-600',
+      warning: 'text-amber-600',
+      muted:   'text-slate-400',
+    };
+    const cls = colorMap[type] || 'text-slate-600';
+    row.className = 'flex items-start gap-2 py-0.5';
+    row.innerHTML = `<span class="text-slate-400 shrink-0 select-none font-mono">${ts}</span>
+                     <span class="${cls}">${icon} ${_esc(text)}</span>`;
+  }
+  lines.appendChild(row);
+  lines.scrollTop = lines.scrollHeight;
+}
+
+// ── Per-console shims (keep old call sites unchanged) ──────────
 function _nbLogClear() {
   const el = document.getElementById('nb-exec-log');
   const lines = document.getElementById('nb-exec-log-lines');
@@ -5298,16 +5329,34 @@ function _nbLogClear() {
   if (lines) lines.innerHTML = '';
 }
 
-function _nbLogLine(icon, text, color = 'text-slate-600') {
-  const lines = document.getElementById('nb-exec-log-lines');
-  if (!lines) return;
-  const ts = new Date().toLocaleTimeString('zh-TW', { hour12: false });
-  const row = document.createElement('div');
-  row.className = `flex items-start gap-2 py-0.5`;
-  row.innerHTML = `<span class="text-slate-400 shrink-0 select-none">${ts}</span>
-                   <span class="${color}">${icon} ${_esc(text)}</span>`;
-  lines.appendChild(row);
-  lines.scrollTop = lines.scrollHeight;
+function _nbLogLine(icon, text, colorOrType = 'text-slate-600') {
+  // Translate legacy Tailwind color class → type token
+  const type = _colorToType(colorOrType);
+  _consoleLog('nb-exec-log-lines', icon, text, type);
+}
+
+// ── Render a batch of self-learning events from API response ───
+function _renderLearningEvents(linesId, events) {
+  if (!Array.isArray(events) || events.length === 0) return;
+  // Separator line
+  const lines = document.getElementById(linesId);
+  if (lines) {
+    const sep = document.createElement('div');
+    sep.className = 'border-t border-violet-200 my-1 -mx-4';
+    lines.appendChild(sep);
+  }
+  for (const ev of events) {
+    _consoleLog(linesId, '💡', ev, 'learn');
+  }
+}
+
+function _colorToType(c) {
+  if (!c || c === 'text-slate-600' || c === 'text-slate-700') return 'default';
+  if (c === 'text-emerald-600') return 'success';
+  if (c === 'text-red-600' || c === 'text-red-500') return 'error';
+  if (c === 'text-amber-600' || c === 'text-amber-500') return 'warning';
+  if (c === 'text-slate-400' || c === 'text-slate-500') return 'muted';
+  return 'default';
 }
 
 async function _nbSaveRoutineCheck() {
@@ -5478,15 +5527,8 @@ function _skSwitchMcpTab(tab) {
   });
 }
 
-function _skLogLine(icon, text, color = 'text-slate-600') {
-  const lines = document.getElementById('sk-exec-log-lines');
-  if (!lines) return;
-  const ts = new Date().toLocaleTimeString('zh-TW', { hour12: false });
-  const row = document.createElement('div');
-  row.className = 'flex items-start gap-2 py-0.5';
-  row.innerHTML = `<span class="text-slate-400 shrink-0 select-none">${ts}</span>
-                   <span class="${color}">${icon} ${_esc(text)}</span>`;
-  lines.appendChild(row);
+function _skLogLine(icon, text, colorOrType = 'text-slate-600') {
+  _consoleLog('sk-exec-log-lines', icon, text, _colorToType(colorOrType));
 }
 
 // ── Open / close editor ───────────────────────────────────────
@@ -5847,7 +5889,7 @@ function _skRenderDiagnosis(liveResult) {
          onclick="this.nextElementSibling.classList.toggle('hidden')">
         🐍 生成的 Python 診斷函式 <span class="text-slate-400 normal-case font-normal">(點擊展開 / 收起)</span>
       </p>
-      <pre class="hidden mt-1 bg-slate-900 text-green-300 text-xs rounded-lg px-3 py-3 overflow-x-auto whitespace-pre-wrap max-h-72 overflow-y-auto leading-relaxed">${_esc(liveResult.generated_code)}</pre>
+      <pre class="hidden mt-1 bg-slate-900 text-green-300 text-xs rounded-lg px-3 py-3 overflow-x-auto overflow-y-scroll whitespace-pre-wrap max-h-[480px] leading-relaxed">${_esc(liveResult.generated_code)}</pre>
     </div>` : ''}`;
   resultEl.classList.remove('hidden');
 }
@@ -5986,6 +6028,7 @@ async function _skTryRun() {
       result.input_records  ? `📊 Input: ${result.input_records} rows` : null,
     ].filter(Boolean);
     _skLogLine('⏱', _perfParts.join(' | '), 'text-slate-500');
+    _renderLearningEvents('sk-exec-log-lines', result.learning_events);
 
     const status = result.status || 'UNKNOWN';
     _skLogLine(status === 'ABNORMAL' ? '⚠' : '✓', `Skill 診斷完成 → ${status}`,
@@ -6218,15 +6261,8 @@ function _mceSwitchMcpTab(tab) {
   });
 }
 
-function _mceLogLine(icon, text, color = 'text-slate-600') {
-  const lines = document.getElementById('mce-exec-log-lines');
-  if (!lines) return;
-  const ts = new Date().toLocaleTimeString('zh-TW', { hour12: false });
-  const row = document.createElement('div');
-  row.className = 'flex items-start gap-2 py-0.5';
-  row.innerHTML = `<span class="text-slate-400 shrink-0 select-none">${ts}</span>
-                   <span class="${color}">${icon} ${_esc(text)}</span>`;
-  lines.appendChild(row);
+function _mceLogLine(icon, text, colorOrType = 'text-slate-600') {
+  _consoleLog('mce-exec-log-lines', icon, text, _colorToType(colorOrType));
 }
 
 // ── Open / close editor ───────────────────────────────────────
@@ -6465,6 +6501,7 @@ async function _mcpTryRun() {
     }
 
     _mceLogLine('✓', 'MCP 執行完成', 'text-emerald-600');
+    _renderLearningEvents('mce-exec-log-lines', result.learning_events);
 
     // Show generated Python script in terminal
     if (result.script) {
@@ -6474,7 +6511,7 @@ async function _mcpTryRun() {
         scriptBlock.className = 'mt-3';
         scriptBlock.innerHTML = `
           <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">🐍 生成的 Python 腳本</div>
-          <pre class="bg-slate-50 border border-slate-200 rounded p-3 text-[11px] text-slate-700 overflow-x-auto whitespace-pre-wrap leading-relaxed">${_esc(result.script)}</pre>`;
+          <pre class="bg-slate-50 border border-slate-200 rounded p-3 text-[11px] text-slate-700 overflow-x-auto overflow-y-scroll whitespace-pre-wrap leading-relaxed max-h-[500px]">${_esc(result.script)}</pre>`;
         lines.appendChild(scriptBlock);
       }
     }

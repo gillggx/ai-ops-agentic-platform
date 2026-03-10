@@ -55,6 +55,7 @@ from app.models.skill_definition import SkillDefinitionModel
 from app.services.agent_memory_service import AgentMemoryService
 from app.services.context_loader import ContextLoader
 from app.services.data_distillation_service import DataDistillationService
+from app.services.task_context_extractor import extract as extract_task_context
 from app.services.tool_dispatcher import TOOL_SCHEMAS, ToolDispatcher
 
 logger = logging.getLogger(__name__)
@@ -457,6 +458,37 @@ def _build_render_card(
     return None
 
 
+# ── v14.1: Trap Rule Derivation ────────────────────────────────────────────────
+
+def _derive_fix_rule(
+    tool_name: str,
+    error_code: str,
+    tool_input: Dict[str, Any],
+    error_msg: str,
+) -> Optional[str]:
+    """Derive a human-readable fix rule from a tool error for Trap memory.
+
+    Returns None if the error should not be persisted (transient / user-rejected).
+    """
+    if error_code == "MISSING_MCP_ID":
+        return "呼叫 execute_mcp 前必須先呼叫 list_mcps 取得有效 mcp_id"
+    if error_code == "MCP_NOT_FOUND":
+        mcp_id = tool_input.get("mcp_id")
+        return f"MCP #{mcp_id} 不存在，呼叫 execute_mcp 前必須先用 list_mcps 確認 ID"
+    if error_code == "MISSING_PARAMS":
+        missing = tool_input.get("missing_params") or []
+        return f"呼叫 {tool_name} 缺少必填參數 {missing}，需先向用戶詢問後才能繼續"
+    if error_code == "SKILL_NOT_FOUND":
+        skill_id = tool_input.get("skill_id")
+        return f"Skill #{skill_id} 不存在，呼叫 execute_skill 前必須先用 list_skills 確認 ID"
+    if error_code == "APPROVAL_REJECTED":
+        return None  # User rejection — not a bug, no Trap needed
+    # Generic: persist if substantive and not transient
+    if len(error_msg) > 20 and "timeout" not in error_msg.lower():
+        return f"工具 {tool_name} 回傳錯誤，下次注意：{error_msg[:150]}"
+    return None
+
+
 # ── Stage Labels ───────────────────────────────────────────────────────────────
 
 _STAGE_LABELS = {
@@ -517,15 +549,24 @@ class AgentOrchestrator:
     ) -> AsyncIterator[Dict[str, Any]]:
 
         # ══════════════════════════════════════════════════════════════
-        # Stage 1: Context Load
+        # Stage 1: Context Load & Hybrid Retrieval
         # ══════════════════════════════════════════════════════════════
         yield _stage_event(1, "running")
+
+        # v14.1: Extract task context for metadata pre-filtering (no LLM call)
+        _tc_type, _tc_subject, _tc_tool = extract_task_context(message, self._canvas_overrides)
+        _task_context: Dict[str, Optional[str]] = {
+            "task_type": _tc_type,
+            "data_subject": _tc_subject,
+            "tool_name": _tc_tool,
+        }
 
         system_blocks, context_meta = await self._context_loader.build(
             user_id=self._user_id,
             query=message,
             top_k_memories=5,
             canvas_overrides=self._canvas_overrides,
+            task_context=_task_context,   # v14.1: pre-filtered memory retrieval
         )
         session_id, history, cumulative_tokens = await self._load_session(session_id)
         context_meta["history_turns"] = len(history) // 2
@@ -720,6 +761,42 @@ class AgentOrchestrator:
                     if isinstance(result, dict) and result.get("code") == "MISSING_PARAMS":
                         _force_synthesis = True
 
+                    # v14.1: Negative Index / Trap — auto-write on tool error
+                    _is_tool_error = (
+                        isinstance(result, dict)
+                        and result.get("status") == "error"
+                        and tool_name in ("execute_mcp", "execute_skill")
+                    )
+                    if _is_tool_error:
+                        _err_msg = result.get("message") or result.get("error") or "未知錯誤"
+                        _err_code = result.get("code", "")
+                        _fix_rule = _derive_fix_rule(tool_name, _err_code, tool_input, _err_msg)
+                        if _fix_rule:
+                            try:
+                                await self._memory_svc.write_trap(
+                                    user_id=self._user_id,
+                                    tool_name_failed=tool_name,
+                                    error_message=_err_msg,
+                                    fix_applied=_fix_rule,
+                                    task_type=_task_context.get("task_type"),
+                                    data_subject=_task_context.get("data_subject"),
+                                )
+                                logger.info(
+                                    "Trap memory written: tool=%s code=%s", tool_name, _err_code
+                                )
+                                yield {
+                                    "type": "memory_write",
+                                    "source": "trap",
+                                    "memory_type": "trap",
+                                    "tool_name": tool_name,
+                                    "error_code": _err_code or "UNKNOWN",
+                                    "content": _err_msg[:80],
+                                    "fix_rule": _fix_rule[:120],
+                                    "conflict_resolved": False,
+                                }
+                            except Exception as _trap_exc:
+                                logger.warning("Trap write failed: %s", _trap_exc)
+
                     # Capture ABNORMAL diagnosis for memory
                     if tool_name == "execute_skill" and isinstance(result, dict):
                         lrd = result.get("llm_readable_data", {})
@@ -810,13 +887,37 @@ class AgentOrchestrator:
                 if mem:
                     yield {
                         "type": "memory_write",
-                        "content": mem.content[:100],
                         "source": mem.source,
+                        "memory_type": "diagnosis",
+                        "content": mem.content[:100],
                         "memory_id": mem.id,
                         "conflict_resolved": getattr(mem, "_conflict_resolved", False),
+                        "skill_name": _new_diagnosis.get("skill_name", ""),
+                        "targets": _new_diagnosis.get("targets", []),
                     }
             except Exception as exc:
                 logger.warning("Memory auto-write failed: %s", exc)
+
+        # v14.1: HITL Preference Write — persist canvas_overrides as user preference
+        if self._canvas_overrides:
+            try:
+                pref_mem = await self._memory_svc.write_preference(
+                    user_id=self._user_id,
+                    canvas_overrides=self._canvas_overrides,
+                    task_type=_task_context.get("task_type"),
+                    data_subject=_task_context.get("data_subject"),
+                )
+                yield {
+                    "type": "memory_write",
+                    "source": "hitl_preference",
+                    "memory_type": "preference",
+                    "content": pref_mem.content[:100],
+                    "memory_id": pref_mem.id,
+                    "overrides": list(self._canvas_overrides.keys()),
+                    "conflict_resolved": False,
+                }
+            except Exception as exc:
+                logger.warning("Preference memory write failed: %s", exc)
 
         yield _stage_event(5, "complete")
 

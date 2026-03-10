@@ -243,23 +243,28 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     },
     {
         "name": "search_memory",
-        "description": "搜尋 Agent 的長期記憶。用於查詢歷史診斷結果或使用者曾說的話。",
+        "description": "搜尋 Agent 的長期記憶。用於查詢歷史診斷結果或使用者曾說的話。支援 Metadata 過濾以精準提取同類型經驗。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "搜尋關鍵字"},
                 "top_k": {"type": "integer", "description": "回傳筆數 (預設 5)", "default": 5},
+                "task_type": {"type": "string", "description": "限定記憶類型 (可選)，例如 draw_chart / troubleshooting"},
+                "data_subject": {"type": "string", "description": "限定資料對象/機台 (可選)，例如 TETCH01"},
             },
             "required": ["query"],
         },
     },
     {
         "name": "save_memory",
-        "description": "明確儲存一條長期記憶，例如「使用者確認 TETCH01 已維修完畢」。",
+        "description": "明確儲存一條長期記憶，例如「使用者確認 TETCH01 已維修完畢」。支援 Metadata 標籤以利日後精準提取。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "content": {"type": "string", "description": "記憶內容 (純文字)"},
+                "task_type": {"type": "string", "description": "任務類型標籤 (可選)，例如 draw_chart / troubleshooting"},
+                "data_subject": {"type": "string", "description": "資料對象/機台標籤 (可選)，例如 TETCH01"},
+                "tool_name": {"type": "string", "description": "關聯工具名稱標籤 (可選)，例如 execute_mcp"},
             },
             "required": ["content"],
         },
@@ -355,18 +360,26 @@ class ToolDispatcher:
                     }
                 case "search_memory":
                     top_k = tool_input.get("top_k", 5)
-                    memories = await self._memory_svc.search(
-                        self._user_id, tool_input["query"], top_k=top_k
+                    memories, filter_applied = await self._memory_svc.search_with_metadata(
+                        user_id=self._user_id,
+                        query=tool_input["query"],
+                        top_k=top_k,
+                        task_type=tool_input.get("task_type"),
+                        data_subject=tool_input.get("data_subject"),
                     )
                     return {
                         "memories": [AgentMemoryService.to_dict(m) for m in memories],
                         "count": len(memories),
+                        "filter_applied": filter_applied,
                     }
                 case "save_memory":
                     m = await self._memory_svc.write(
                         user_id=self._user_id,
                         content=tool_input["content"],
                         source="agent_request",
+                        task_type=tool_input.get("task_type"),
+                        data_subject=tool_input.get("data_subject"),
+                        tool_name=tool_input.get("tool_name"),
                     )
                     return {"saved": True, "memory_id": m.id, "content": m.content}
                 case "update_user_preference":
