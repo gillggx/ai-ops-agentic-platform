@@ -1,12 +1,14 @@
-"""Shadow Analyst Service — v15.2 Async Shadow Analysis.
+"""Shadow Analyst Service — v15.3 Async Shadow Analysis.
 
 Triggered after an MCP execution returns dataset (is_data_source: true).
-Runs a focused statistical analysis (CV / Pearson / outliers / distribution)
-using the v15.1 decision tree:
-  P2: match user's agent_tools by keyword similarity
-  P3: JIT — LLM generates compact Python → sandbox executes
+Decision tree:
+  P2:   Match user's agent_tools by keyword similarity
+  P2.5: Reuse-First — call generic tools directly (no LLM needed)
+        calc_statistics / find_outliers / correlation_analysis / distribution_test
+  P3:   JIT — LLM generates compact Python → sandbox executes
+        (only reached for non-numeric / edge-case datasets)
 
-Streams SSE events: decision | stat_card | done | error
+Streams SSE events: decision | stat_card | chart_card | done | error
 """
 from __future__ import annotations
 
@@ -30,17 +32,35 @@ _ANALYSIS_SYSTEM = """\
 你是一位精確的統計分析工程師。
 你的任務：給定數據 Profile，生成一段緊湊的 Python 分析腳本（不超過 60 行）。
 
+可用環境（嚴格限制）：
+- 變數 `df`（pandas DataFrame）已預注入，直接使用，無需 import pandas
+- 可用模組：pd（pandas）、np（numpy）、math、statistics — 均已在全域，無需 import
+- ⛔ 嚴禁 import scipy / requests / os / sys 等任何其他模組
+
+計算範例（只用 pandas/numpy）：
+- CV：df['col'].std() / df['col'].mean() * 100
+- Pearson R：df[['col1','col2']].corr().iloc[0,1]
+- 偏態：df['col'].skew()
+- 峰度：df['col'].kurt()
+- 異常率：((df['col'] > df['col'].mean()+3*df['col'].std()) | (df['col'] < df['col'].mean()-3*df['col'].std())).mean()*100
+
+資料型態判斷（重要）：
+- 若 row_count == 1（單筆參數快照，如 APC）：改為逐欄分析，將每個數值欄位與其目標值/上下限比較，
+  計算偏差率 (deviation%)，不做 CV/相關性（樣本不足）
+- 若 row_count >= 2：可做 CV、偏態、Pearson R 等時序統計
+- 使用 df.select_dtypes(include='number') 篩選數值欄位，避免 string/datetime 欄位報錯
+
 規則：
-1. 變數 `df`（pandas DataFrame）已預注入，直接使用
-2. 只做唯讀操作（嚴禁 write / delete / to_csv / to_sql）
-3. 必須計算至少 2 個統計指標（CV / Pearson R / P-value / 峰度 / 偏態 / 異常率）
+1. 只做唯讀操作（嚴禁 write / delete / to_csv / to_sql）
+2. 必須輸出至少 2 張 stat_card
+3. 任何計算前先用 .dropna() 去除 NaN，避免 std/mean 回傳 NaN
 4. 最後一行必須是：result = {"stat_cards": [...], "intro": "..."}
 
-stat_card 格式（每張卡）：
-{"label": "CV (pressure)", "value": 12.3, "unit": "%", "significance": "normal|warning|critical", "note": "可選說明"}
+stat_card 格式：
+{"label": "CV (value)", "value": 12.3, "unit": "%", "significance": "normal|warning|critical"}
 
 significance 規則：
-- CV > 30% 或 |Pearson R| > 0.7（強相關）→ "critical"
+- CV > 30% 或 |Pearson R| > 0.7 → "critical"
 - CV 10-30% 或 |Pearson R| 0.4-0.7 → "warning"
 - 其他 → "normal"
 
@@ -141,14 +161,137 @@ class ShadowAnalystService:
                 yield ev
             return
 
-        # ── P3: JIT ────────────────────────────────────────────────────────────
+        # ── P2.5: Reuse-First — generic tools (no LLM needed) ─────────────────
+        yield {
+            "type": "decision",
+            "method": "generic_tools",
+            "message": "[Decision] 呼叫通用工具庫直接分析（Reuse-First）...",
+        }
+        cards_p25: List[Dict[str, Any]] = []
+        chart_cards_p25: List[Dict[str, Any]] = []
+        async for ev in self._run_generic_tools(raw_data, data_profile, mcp_name, row_count):
+            if ev["type"] == "stat_card":
+                cards_p25.append({k: v for k, v in ev.items() if k != "type"})
+                yield ev
+            elif ev["type"] == "chart_card":
+                chart_cards_p25.append({k: v for k, v in ev.items() if k != "type"})
+                yield ev
+            else:
+                yield ev
+
+        if len(cards_p25) >= 2:
+            # P2.5 produced enough cards — done
+            return
+
+        # ── P3: JIT fallback (only for non-numeric / exotic data) ─────────────
         yield {
             "type": "decision",
             "method": "jit",
-            "message": "[Decision] 精準匹配失敗，轉由自律工程師開發專屬腳本...",
+            "message": "[Decision] 通用工具庫覆蓋不足，轉由自律工程師開發補充腳本...",
         }
         async for ev in self._run_jit(raw_data, data_profile, mcp_name, row_count):
             yield ev
+
+    # ── P2.5 helper — generic tools direct call (no LLM) ──────────────────────
+
+    async def _run_generic_tools(
+        self,
+        raw_data: List[Dict[str, Any]],
+        data_profile: Dict[str, Any],
+        mcp_name: str,
+        row_count: int,
+    ):
+        """Call generic tools directly based on data profile. Yields stat_card / chart_card events."""
+        from app.generic_tools.processing.statistical import (
+            calc_statistics, find_outliers, distribution_test,
+        )
+        from app.generic_tools.processing.correlation import correlation_analysis
+        from app.generic_tools.visualization.distribution import plot_box
+
+        stats_meta = data_profile.get("stats", {})
+        numeric_cols = list(stats_meta.keys())
+        # primary column = first numeric column (prefer 'value')
+        primary_col = next(
+            (c for c in numeric_cols if c.lower() in ("value", "val", "measurement", "result")),
+            numeric_cols[0] if numeric_cols else None,
+        )
+
+        if not primary_col:
+            return  # no numeric data — fall through to P3
+
+        # ── 1. calc_statistics ────────────────────────────────────────────────
+        stats_result = calc_statistics(raw_data, column=primary_col)
+        if stats_result["status"] == "success":
+            p = stats_result["payload"]
+            mean_val = p.get("mean", 0)
+            std_val  = p.get("std", 0)
+            cv_pct   = round(abs(std_val / mean_val) * 100, 2) if mean_val else 0.0
+            skew     = p.get("skewness", 0)
+            kurt     = p.get("kurtosis", 0)
+
+            yield {"type": "stat_card", "label": f"CV ({primary_col})",
+                   "value": cv_pct, "unit": "%",
+                   "significance": "critical" if cv_pct > 30 else "warning" if cv_pct > 10 else "normal"}
+            yield {"type": "stat_card", "label": "Skewness",
+                   "value": round(skew, 3), "unit": "",
+                   "significance": "warning" if abs(skew) > 1.0 else "normal"}
+            yield {"type": "stat_card", "label": "Kurtosis",
+                   "value": round(kurt, 3), "unit": "",
+                   "significance": "warning" if abs(kurt) > 3.0 else "normal"}
+            if row_count > 1:
+                yield {"type": "stat_card", "label": f"Mean ({primary_col})",
+                       "value": round(mean_val, 4), "unit": "",
+                       "significance": "normal"}
+
+        # ── 2. find_outliers ──────────────────────────────────────────────────
+        if row_count >= 4:
+            out_result = find_outliers(raw_data, column=primary_col, method="sigma")
+            if out_result["status"] == "success":
+                p = out_result["payload"]
+                rate = p.get("outlier_rate_pct", 0)
+                yield {"type": "stat_card", "label": "3σ Anomaly Rate",
+                       "value": rate, "unit": "%",
+                       "significance": "critical" if rate > 5 else "warning" if rate > 0 else "normal"}
+
+        # ── 3. correlation_analysis (if 2+ numeric cols) ──────────────────────
+        if len(numeric_cols) >= 2 and row_count >= 3:
+            col_a, col_b = numeric_cols[0], numeric_cols[1]
+            corr_result = correlation_analysis(raw_data, col_a=col_a, col_b=col_b)
+            if corr_result["status"] == "success":
+                p = corr_result["payload"]
+                pearson = p.get("pearson_r", 0)
+                yield {"type": "stat_card", "label": f"Pearson r ({col_a}↔{col_b})",
+                       "value": round(pearson, 4), "unit": "",
+                       "significance": "critical" if abs(pearson) > 0.7 else "warning" if abs(pearson) > 0.4 else "normal"}
+
+        # ── 4. distribution_test (normality) ─────────────────────────────────
+        if row_count >= 8:
+            dist_result = distribution_test(raw_data, column=primary_col)
+            if dist_result["status"] == "success":
+                p = dist_result["payload"]
+                is_normal = p.get("is_normal", True)
+                jb = p.get("jb_statistic", 0)
+                yield {"type": "stat_card", "label": "Distribution",
+                       "value": "Normal" if is_normal else "Non-Normal",
+                       "unit": f"JB={jb:.2f}", "significance": "normal" if is_normal else "warning"}
+
+        # ── 5. Box plot via plot_box ──────────────────────────────────────────
+        if row_count >= 4:
+            # plot_box uses "columns" (plural) parameter, not "column"
+            box_result = plot_box(raw_data, columns=[primary_col],
+                                  title=f"{mcp_name} — {primary_col} Distribution")
+            if box_result["status"] == "success" and box_result["payload"].get("plotly"):
+                yield {"type": "chart_card",
+                       "tool_name": "plot_box",
+                       "summary": box_result["summary"],
+                       "payload": box_result["payload"]}
+
+        yield {
+            "type": "done",
+            "jit_code": None,
+            "tool_used": "generic_tools",
+            "intro": f"已使用通用工具庫分析「{mcp_name}」的 {primary_col} 欄位（{row_count} 筆）。",
+        }
 
     # ── P2 helper ─────────────────────────────────────────────────────────────
 
@@ -194,7 +337,7 @@ class ShadowAnalystService:
         try:
             resp = await self._client.messages.create(
                 model=_MODEL,
-                max_tokens=800,
+                max_tokens=1500,
                 system=_ANALYSIS_SYSTEM,
                 messages=[{"role": "user", "content": user_msg}],
             )
@@ -211,9 +354,15 @@ class ShadowAnalystService:
             yield {"type": "error", "message": f"Code generation failed: {exc}"}
             return
 
+        # Wrap flat analysis code in process() — sandbox requires process(raw_data)->dict.
+        # The sandbox pre-injects `df` in global_ns so the inner code can still use `df`.
+        sandbox_code = "def process(raw_data):\n"
+        sandbox_code += "\n".join("    " + ln if ln.strip() else "" for ln in code.splitlines())
+        sandbox_code += "\n    return result\n"
+
         # Execute in sandbox
         try:
-            result = await sandbox_service.execute_script(script=code, raw_data=raw_data)
+            result = await sandbox_service.execute_script(script=sandbox_code, raw_data=raw_data)
         except Exception as exc:
             logger.warning("Shadow JIT sandbox failed: %s", exc)
             yield {"type": "error", "message": f"Sandbox execution failed: {exc}"}
@@ -233,7 +382,7 @@ class ShadowAnalystService:
 
         yield {
             "type": "done",
-            "jit_code": code,
+            "jit_code": code,  # expose original unwrapped code to user
             "tool_used": "jit",
             "intro": intro,
         }

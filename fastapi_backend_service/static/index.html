@@ -283,6 +283,22 @@
           </svg>
         </button>
 
+        <!-- Arsenal 武器庫 -->
+        <button class="nav-btn" id="nav-arsenal" title="私有武器庫 (Agent Tools)"
+          onclick="switchView('arsenal')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14.5 10c-.83 0-1.5-.67-1.5-1.5v-5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5z"/>
+            <path d="M20.5 10H19V8.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
+            <path d="M9.5 14c.83 0 1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5S8 21.33 8 20.5v-5c0-.83.67-1.5 1.5-1.5z"/>
+            <path d="M3.5 14H5v1.5c0 .83-.67 1.5-1.5 1.5S2 16.33 2 15.5 2.67 14 3.5 14z"/>
+            <path d="M14 14.5c0-.83.67-1.5 1.5-1.5h5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-5c-.83 0-1.5-.67-1.5-1.5z"/>
+            <path d="M15.5 19H14v1.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5z"/>
+            <path d="M10 9.5C10 8.67 9.33 8 8.5 8h-5C2.67 8 2 8.67 2 9.5S2.67 11 3.5 11h5c.83 0 1.5-.67 1.5-1.5z"/>
+            <path d="M8.5 5H10V3.5C10 2.67 9.33 2 8.5 2S7 2.67 7 3.5 7.67 5 8.5 5z"/>
+          </svg>
+        </button>
+
         <div class="flex-1"></div>
         <div class="w-6 border-t border-slate-200 my-1"></div>
 
@@ -977,15 +993,7 @@
                     <p id="shadow-intro" class="text-[11px] text-slate-500 italic leading-relaxed"></p>
                     <!-- Stat cards grid -->
                     <div id="shadow-cards-grid" class="grid grid-cols-2 gap-2"></div>
-                    <!-- Feedback bar -->
-                    <div id="shadow-feedback" class="hidden flex items-center gap-2 pt-2 border-t border-slate-200 mt-1">
-                      <span class="text-[10px] text-slate-400 flex-1">此分析有幫助嗎？</span>
-                      <button onclick="_shadowFeedback('like')" class="text-base hover:scale-125 transition-transform" title="有幫助">👍</button>
-                      <button onclick="_shadowFeedback('dislike')" class="text-base hover:scale-125 transition-transform" title="沒幫助">👎</button>
-                      <button onclick="_shadowSaveTool()" id="shadow-save-btn"
-                        class="hidden text-[10px] px-2 py-0.5 bg-purple-600 hover:bg-purple-500 text-white rounded font-semibold"
-                        title="儲存為私有工具">💾 儲存</button>
-                    </div>
+                    <!-- Feedback bar removed — agent auto-manages tool saving -->
                   </div>
 
                 </div><!-- /shadow-analysis-content -->
@@ -994,7 +1002,7 @@
             </div><!-- /ws-split-container -->
             <!-- Agent Console — collapsible terminal at bottom of right panel -->
             <div id="diag-console" class="flex-shrink-0 bg-slate-900 overflow-hidden"
-                 style="height:0;transition:height 0.2s ease;">
+                 style="height:34px;transition:height 0.2s ease;">
               <div class="flex items-center justify-between px-3 py-1.5 bg-slate-800 border-b border-slate-700">
                 <div class="flex items-center gap-2">
                   <span id="diag-console-dot" class="hidden w-2 h-2 rounded-full bg-blue-400"
@@ -1038,7 +1046,7 @@
 
 
         <!-- ══ SYSTEM MCPs VIEW ══ -->
-        <div id="view-system-mcps" class="view-panel hidden flex-1 flex flex-col overflow-hidden">
+        <div id="view-system-mcps" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
           <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
                       border-b border-slate-200 bg-white">
             <div>
@@ -1066,7 +1074,7 @@
 
 
         <!-- ══ MOCK DATA STUDIO VIEW ══ -->
-        <div id="view-mock-data-studio" class="view-panel hidden flex-1 flex flex-col overflow-hidden">
+        <div id="view-mock-data-studio" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
           <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
                       border-b border-slate-200 bg-white">
             <div>
@@ -1095,7 +1103,7 @@
         </div>
 
         <!-- ══ EVENT TYPES VIEW ══ -->
-        <div id="view-event-types" class="view-panel hidden flex-1 flex flex-col overflow-hidden">
+        <div id="view-event-types" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
           <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
                       border-b border-slate-200 bg-white">
             <div>
@@ -1122,7 +1130,7 @@
 
 
         <!-- ══ MCP BUILDER VIEW ══ -->
-        <div id="view-mcp-builder" class="view-panel hidden flex-1 flex flex-col overflow-hidden">
+        <div id="view-mcp-builder" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
 
           <!-- LIST STATE -->
           <div id="mce-list-state" class="flex flex-col flex-1 overflow-hidden">
@@ -1342,7 +1350,7 @@
 
 
         <!-- ══ SKILL BUILDER VIEW ══ -->
-        <div id="view-skill-builder" class="view-panel hidden flex-1 flex flex-col overflow-hidden">
+        <div id="view-skill-builder" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
 
           <!-- LIST STATE -->
           <div id="sk-list-state" class="flex flex-col flex-1 overflow-hidden">
@@ -1672,7 +1680,7 @@
         </div><!-- /view-skill-builder -->
 
         <!-- ══ SETTINGS VIEW ══ -->
-        <div id="view-settings" class="view-panel hidden flex-1 flex flex-col overflow-hidden">
+        <div id="view-settings" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
           <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
                       border-b border-slate-200 bg-white">
             <div>
@@ -1700,7 +1708,7 @@
         </div>
 
         <!-- ══ AGENT BRAIN VIEW (v13 Context Control Center) ══ -->
-        <div id="view-agent-brain" class="view-panel hidden flex-1 flex flex-col overflow-hidden">
+        <div id="view-agent-brain" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
           <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
                       border-b border-slate-200 bg-white">
             <div>
@@ -1807,7 +1815,7 @@
         </div>
 
         <!-- ══ ROUTINE CHECKS VIEW ══ -->
-        <div id="view-routine-checks" class="view-panel hidden flex-1 flex flex-col overflow-hidden">
+        <div id="view-routine-checks" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
           <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
                       border-b border-slate-200 bg-white">
             <div>
@@ -1830,8 +1838,85 @@
           </div>
         </div>
 
+        <!-- ══ ARSENAL VIEW ══ -->
+        <div id="view-arsenal" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
+
+          <!-- Header -->
+          <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
+                      border-b border-slate-200 bg-white">
+            <div>
+              <h2 class="font-semibold text-base flex items-center gap-2">
+                <svg class="w-4 h-4 text-violet-500" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14.5 10c-.83 0-1.5-.67-1.5-1.5v-5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5z"/>
+                  <path d="M20.5 10H19V8.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
+                  <path d="M9.5 14c.83 0 1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5S8 21.33 8 20.5v-5c0-.83.67-1.5 1.5-1.5z"/>
+                  <path d="M3.5 14H5v1.5c0 .83-.67 1.5-1.5 1.5S2 16.33 2 15.5 2.67 14 3.5 14z"/>
+                  <path d="M14 14.5c0-.83.67-1.5 1.5-1.5h5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-5c-.83 0-1.5-.67-1.5-1.5z"/>
+                  <path d="M15.5 19H14v1.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5z"/>
+                  <path d="M10 9.5C10 8.67 9.33 8 8.5 8h-5C2.67 8 2 8.67 2 9.5S2.67 11 3.5 11h5c.83 0 1.5-.67 1.5-1.5z"/>
+                  <path d="M8.5 5H10V3.5C10 2.67 9.33 2 8.5 2S7 2.67 7 3.5 7.67 5 8.5 5z"/>
+                </svg>
+                私有武器庫 — Agent Tool Chest
+              </h2>
+              <p class="text-xs text-slate-500 mt-0.5">影子分析自動生成、由你親手儲存的專屬分析腳本</p>
+            </div>
+            <div class="flex items-center gap-3">
+              <span id="arsenal-count-badge"
+                    class="hidden text-xs font-bold px-2.5 py-1 rounded-full bg-violet-100 text-violet-700"></span>
+              <button onclick="_arsenalLoad()"
+                      class="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-800
+                             border border-slate-200 rounded-lg px-3 py-1.5 hover:border-slate-300 transition-colors">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+                  <path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+                  <path d="M8 16H3v5"/>
+                </svg>
+                重新整理
+              </button>
+            </div>
+          </div>
+
+          <!-- Grid -->
+          <div class="flex-1 overflow-y-auto p-6">
+            <!-- Loading state -->
+            <div id="arsenal-loading" class="hidden flex items-center justify-center py-20">
+              <div class="flex flex-col items-center gap-3 text-slate-400">
+                <svg class="w-8 h-8 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                <span class="text-sm">載入武器庫中...</span>
+              </div>
+            </div>
+
+            <!-- Empty state -->
+            <div id="arsenal-empty" class="hidden flex flex-col items-center justify-center py-24 text-center">
+              <div class="w-20 h-20 rounded-2xl bg-violet-50 flex items-center justify-center mb-5">
+                <svg class="w-10 h-10 text-violet-300" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14.5 10c-.83 0-1.5-.67-1.5-1.5v-5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5z"/>
+                  <path d="M20.5 10H19V8.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
+                  <path d="M9.5 14c.83 0 1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5S8 21.33 8 20.5v-5c0-.83.67-1.5 1.5-1.5z"/>
+                  <path d="M3.5 14H5v1.5c0 .83-.67 1.5-1.5 1.5S2 16.33 2 15.5 2.67 14 3.5 14z"/>
+                  <path d="M14 14.5c0-.83.67-1.5 1.5-1.5h5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-5c-.83 0-1.5-.67-1.5-1.5z"/>
+                </svg>
+              </div>
+              <p class="text-slate-600 font-semibold text-sm">武器庫空空如也</p>
+              <p class="text-slate-400 text-xs mt-1.5 max-w-xs">
+                在診斷站執行 MCP 查詢後，右側分析面板會出現 <strong class="text-violet-500">💾 儲存</strong> 按鈕，
+                將影子分析腳本鑄入武器庫。
+              </p>
+            </div>
+
+            <!-- Tool cards grid -->
+            <div id="arsenal-grid"
+                 class="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-4"></div>
+          </div>
+
+        </div><!-- /view-arsenal -->
+
         <!-- ══ GENERATED EVENTS VIEW ══ -->
-        <div id="view-generated-events" class="view-panel hidden flex-1 flex flex-col overflow-hidden">
+        <div id="view-generated-events" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
           <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
                       border-b border-slate-200 bg-white">
             <div>
@@ -1857,7 +1942,7 @@
         </div>
 
         <!-- ══ EVENT → SKILL LINK BUILDER VIEW ══ -->
-        <div id="view-event-link-builder" class="view-panel hidden flex-1 flex flex-col overflow-hidden">
+        <div id="view-event-link-builder" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
           <!-- Header -->
           <div class="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white">
             <div>

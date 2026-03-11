@@ -278,9 +278,17 @@ def _trim_for_llm(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
         return {k: result[k] for k in ("skill_name", "llm_readable_data", "status") if k in result}
     if tool_name == "execute_mcp":
         od = result.get("output_data") or {}
-        dataset = od.get("dataset") or []
-        trimmed: Dict[str, Any] = {k: result[k] for k in ("status", "mcp_id", "llm_readable_data") if k in result}
+        dataset = od.get("dataset") or od.get("_raw_dataset") or []
+        trimmed: Dict[str, Any] = {k: result[k] for k in ("status", "mcp_id", "mcp_name", "llm_readable_data") if k in result}
         trimmed.update(_dataset_summary(dataset) if dataset else {"dataset_summary": "(無資料)"})
+        # Provide schema_sample (5 rows) so Agent can understand columns for writing execute_jit code
+        if isinstance(dataset, list) and dataset:
+            trimmed["schema_sample"] = dataset[:5]
+            trimmed["schema_note"] = (
+                f"共 {len(dataset)} 筆資料，schema_sample 為前 5 筆。"
+                "如需統計/視覺化/回歸分析，優先呼叫 analyze_data(mcp_id=..., template='linear_regression'|'spc_chart'|'boxplot'|'stats_summary'|'correlation', params={value_col:...}) "
+                "（模板已處理 datetime 回歸與 Y 軸）；複雜自定義邏輯才改用 execute_jit。"
+            )
         return trimmed
     if tool_name in ("list_skills", "list_mcps", "list_system_mcps"):
         _HEAVY_FIELDS = ("last_diagnosis_result", "diagnostic_prompt", "param_mappings",
@@ -455,6 +463,87 @@ def _build_render_card(
             "message": result.get("message", ""),
         }
 
+    # [v15.3] execute_utility → chart or stats panel
+    if tool_name == "execute_utility" and isinstance(result, dict):
+        # Unwrap StandardResponse envelope if present
+        tool_result = result.get("data") if "data" in result else result
+        if isinstance(tool_result, dict) and tool_result.get("status") == "success":
+            payload = tool_result.get("payload") or {}
+            return {
+                "type": "utility",
+                "tool_name": tool_input.get("tool_name", "utility"),
+                "summary": tool_result.get("summary", ""),
+                "payload": payload,
+            }
+
+    # [v15.6] analyze_data → chart + result table (pre-built template, MCP-standard output)
+    if tool_name == "analyze_data" and isinstance(result, dict):
+        if result.get("status") == "success":
+            ad_data = result.get("data") or {}
+            chart_json = ad_data.get("chart_json")
+            payload: Dict[str, Any] = {}
+            if chart_json:
+                try:
+                    payload["plotly"] = json.loads(chart_json) if isinstance(chart_json, str) else chart_json
+                except Exception:
+                    payload["chart_json"] = chart_json
+            # Always attach result_table as rows (the per-point data table output)
+            result_table = ad_data.get("result_table")
+            if result_table and isinstance(result_table, list) and result_table:
+                payload["rows"] = result_table
+                payload["columns"] = list(result_table[0].keys())
+            # If no chart (stats_summary), use stats as key-value fallback
+            if not chart_json:
+                stats = ad_data.get("stats") or {}
+                if isinstance(stats, dict):
+                    payload.update(stats)
+            title = ad_data.get("title") or f"{ad_data.get('template', 'analyze_data')} 分析"
+            return {
+                "type": "utility",
+                "tool_name": title,
+                "summary": title,
+                "payload": payload,
+                "row_count": ad_data.get("row_count", 0),
+                "jit_mcp_id": tool_input.get("mcp_id"),
+                "jit_run_params": tool_input.get("run_params", {}),
+                "jit_python_code": "",  # template-based; promote via promote-analysis
+                "jit_title": title,
+                # [v15.6] Template context for promote-analysis endpoint
+                "analyze_template": tool_input.get("template"),
+                "analyze_params": tool_input.get("params", {}),
+                "analyze_stats": ad_data.get("stats") or {},
+            }
+
+    # [v15.4] execute_jit → chart or stats panel (server-side sandbox result)
+    # result is the raw StandardResponse: {"status": "success", "data": {...}}
+    if tool_name == "execute_jit" and isinstance(result, dict):
+        if result.get("status") == "success":
+            jit_data = result.get("data") or {}
+            chart_json = jit_data.get("chart_json")
+            jit_result = jit_data.get("jit_result") or {}
+            payload: Dict[str, Any] = {}
+            if chart_json:
+                try:
+                    payload["plotly"] = json.loads(chart_json) if isinstance(chart_json, str) else chart_json
+                except Exception:
+                    payload["chart_json"] = chart_json
+            else:
+                # Stats-only: render as key-value pairs (exclude large values)
+                payload = {k: v for k, v in jit_result.items()
+                           if not isinstance(v, (list, dict)) or k == "summary"}
+            return {
+                "type": "utility",
+                "tool_name": jit_data.get("title", "JIT 分析"),
+                "summary": jit_data.get("title", "JIT 分析"),
+                "payload": payload,
+                "row_count": jit_data.get("row_count", 0),
+                # [v15.5] Promote-to-MCP/Skill context — passed back to frontend for "固化 ↗" button
+                "jit_mcp_id": tool_input.get("mcp_id"),
+                "jit_run_params": tool_input.get("run_params", {}),
+                "jit_python_code": tool_input.get("python_code", ""),
+                "jit_title": tool_input.get("title", "JIT 分析"),
+            }
+
     return None
 
 
@@ -619,7 +708,7 @@ class AgentOrchestrator:
             try:
                 response = await self._client.messages.create(
                     model=self._model,
-                    max_tokens=4096,
+                    max_tokens=8192,
                     system=system_blocks,   # v14: List[Dict] with cache_control
                     tools=TOOL_SCHEMAS,
                     messages=messages,
@@ -779,6 +868,21 @@ class AgentOrchestrator:
                                 )
                             )
 
+                    # [v15.4] Auto-persist execute_jit code → Agent Tool Chest
+                    if tool_name == "execute_jit" and isinstance(result, dict) and result.get("status") == "success":
+                        _jit_code = tool_input.get("python_code", "")
+                        if _jit_code:
+                            asyncio.create_task(
+                                self._maybe_persist_tool(
+                                    code=_jit_code,
+                                    context=(
+                                        f"execute_jit title={tool_input.get('title', '')} "
+                                        f"mcp_id={tool_input.get('mcp_id')} "
+                                        f"row_count={result.get('data', {}).get('row_count', '?')}"
+                                    ),
+                                )
+                            )
+
                     # ── Force synthesis on unrecoverable errors ────────────
                     if isinstance(result, dict) and result.get("status") == "error":
                         if tool_name in ("execute_mcp", "execute_skill"):
@@ -856,14 +960,19 @@ class AgentOrchestrator:
                         _profiles_this_round.append(_profile)
 
                     _tr_content = json.dumps(_trim_for_llm(tool_name, result), ensure_ascii=False)
-                    if len(_tr_content) > _LLM_RESULT_MAX_CHARS:
+                    _cap = _LLM_RESULT_MAX_CHARS
+                    if len(_tr_content) > _cap:
                         try:
                             _tr_parsed = json.loads(_tr_content)
                             for _drop in ("output_data", "ui_render_payload", "_raw_dataset", "dataset"):
                                 _tr_parsed.pop(_drop, None)
-                            _tr_content = json.dumps(_tr_parsed, ensure_ascii=False)[:_LLM_RESULT_MAX_CHARS]
+                            # Trim schema_sample to fewer rows if still over limit
+                            if tool_name == "execute_mcp" and "schema_sample" in _tr_parsed:
+                                while len(json.dumps(_tr_parsed, ensure_ascii=False)) > _cap and _tr_parsed["schema_sample"]:
+                                    _tr_parsed["schema_sample"] = _tr_parsed["schema_sample"][:-1]
+                            _tr_content = json.dumps(_tr_parsed, ensure_ascii=False)[:_cap]
                         except Exception:
-                            _tr_content = _tr_content[:_LLM_RESULT_MAX_CHARS] + "…[截斷]"
+                            _tr_content = _tr_content[:_cap] + "…[截斷]"
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": tool_id,

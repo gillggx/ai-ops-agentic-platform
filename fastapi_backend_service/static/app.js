@@ -1613,7 +1613,7 @@ function _diagConsoleClear() {
 function _diagLogLine(icon, text, colorOrType = '#94a3b8') {
   const lines = document.getElementById('diag-console-lines');
   if (!lines) return;
-  if (!_diagConsoleOpen) _diagConsoleExpand();
+  // Auto-expand removed — user opens console manually via chevron button
   const ts = new Date().toLocaleTimeString('zh-TW', { hour12: false });
   const row = document.createElement('div');
 
@@ -2071,7 +2071,7 @@ function _renderCopilotMcpPanel(ev) {
 
   // [v15.2] Fire shadow analysis if dataset + data_profile are available
   const rawData = ev.mcp_output?._raw_dataset || ev.mcp_output?.dataset;
-  if (ev.data_profile && Array.isArray(rawData) && rawData.length > 5) {
+  if (ev.data_profile && Array.isArray(rawData) && rawData.length >= 1) {
     _startShadowAnalysis(rawData, ev.data_profile, ev.mcp_name || 'MCP 查詢');
   }
 }
@@ -2093,6 +2093,126 @@ function _renderCopilotSkillPanel(ev) {
 
   // [v15.2] Mirror skill result to shadow panel skill section
   _renderSkillInShadowPanel(ev);
+}
+
+/**
+ * v15.3 — Render a generic tool (execute_utility) result into the workspace.
+ * If payload.plotly exists → render Plotly chart.
+ * Otherwise → render a key/value stats summary card.
+ */
+function _renderUtilityPanel(card) {
+  _showReportPanel();
+  const toolName = card.tool_name || 'utility';
+  const summary  = card.summary  || '';
+  const payload  = card.payload  || {};
+  const tabId    = `util-${Date.now()}`;
+  const isViz    = !!payload.plotly;
+
+  // Build body HTML
+  let bodyHtml = '';
+
+  // Shared data-table renderer (used by both viz and non-viz paths)
+  const _renderDataTable = (rows) => {
+    if (!Array.isArray(rows) || !rows.length) return '';
+    const cols = Object.keys(rows[0] || {}).slice(0, 12);
+    const thead = cols.map(c => `<th class="px-2 py-1 text-left text-[10px] font-semibold text-slate-500 uppercase whitespace-nowrap">${_escapeHtml(c)}</th>`).join('');
+    const tbody = rows.map(r =>
+      `<tr class="border-t border-slate-100 hover:bg-slate-50">${cols.map(c => {
+        const v = r[c];
+        const cls = v === 'OOC 🔴' ? 'text-red-600 font-semibold' : 'text-slate-700';
+        return `<td class="px-2 py-1 text-xs ${cls} max-w-[140px] truncate">${_escapeHtml(String(v ?? ''))}</td>`;
+      }).join('')}</tr>`
+    ).join('');
+    const footer = rows.length > 100 ? `<p class="text-[10px] text-slate-400 px-2 py-1">（顯示 ${rows.length} 筆）</p>` : '';
+    return `
+      <div class="mt-3 overflow-auto rounded border border-slate-200 max-h-64">
+        <table class="w-full text-xs">
+          <thead class="bg-slate-50 sticky top-0">${'<tr>' + thead + '</tr>'}</thead>
+          <tbody>${tbody}</tbody>
+        </table>
+        ${footer}
+      </div>`;
+  };
+
+  if (isViz) {
+    // Plotly chart + optional result table below
+    const chartJson = JSON.stringify(payload.plotly);
+    const tableHtml = _renderDataTable(payload.rows);
+    bodyHtml = `
+      <div class="evidence-chart-wrapper rounded-lg overflow-hidden border border-slate-200 bg-white">
+        <div class="evidence-chart" data-chart='${chartJson.replace(/'/g, "&#39;")}'
+             style="min-height:360px;"></div>
+      </div>
+      ${tableHtml ? `<div class="mt-1"><p class="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">📋 資料表</p>${tableHtml}</div>` : ''}`;
+  } else {
+    // Stats / table result — render key-value grid + data table
+    const rows = payload.rows;
+    const meta = Object.entries(payload)
+      .filter(([k]) => k !== 'rows' && k !== 'columns' && k !== 'condition' && typeof payload[k] !== 'object')
+      .map(([k, v]) => {
+        const display = String(v ?? '');
+        return `
+          <div class="flex gap-2 text-xs py-1 border-b border-slate-100 last:border-0">
+            <span class="font-mono text-purple-600 w-44 shrink-0">${_escapeHtml(k)}</span>
+            <span class="text-slate-700 break-all">${_escapeHtml(display)}</span>
+          </div>`;
+      }).join('');
+    bodyHtml = `<div class="divide-y divide-slate-100">${meta}</div>${_renderDataTable(rows)}`;
+  }
+
+  // [v15.6] Promote-to-MCP/Skill — supports both execute_jit (python_code) and analyze_data (template)
+  const jitMcpId       = card.jit_mcp_id;
+  const jitCode        = card.jit_python_code || '';
+  const analyzeTemplate = card.analyze_template || '';
+  if (!window._jitStore) window._jitStore = {};
+  let promoteBtn = '';
+  if (jitMcpId && (jitCode || analyzeTemplate)) {
+    const r2 = (card.analyze_stats || {}).r_squared;
+    const r2Label = (typeof r2 === 'number') ? ` R²=${r2.toFixed(4)}` : '';
+    const skillLabel = analyzeTemplate
+      ? (typeof r2 === 'number' && r2 > 0.7
+          ? `🧠 升級為 Skill（R²=${r2.toFixed(4)} ✅ 趨勢顯著）`
+          : `🧠 固化為 Skill${r2Label}`)
+      : '🧠 固化為 Skill（含判斷邏輯）';
+    window._jitStore[tabId] = {
+      mcp_id:           jitMcpId,
+      run_params:       card.jit_run_params || {},
+      python_code:      jitCode,
+      title:            card.jit_title || toolName,
+      output_keys:      Object.keys(card.payload || {}).filter(k => k !== 'plotly' && k !== 'rows' && k !== 'columns'),
+      analyze_template: analyzeTemplate,
+      analyze_params:   card.analyze_params || {},
+      analyze_stats:    card.analyze_stats  || {},
+    };
+    promoteBtn = `
+      <div class="flex gap-2 mt-1 flex-wrap">
+        <button data-jit-key="${tabId}" data-jit-target="mcp"
+                onclick="_promoteJitFromStore(this)"
+                class="text-xs px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-sm">
+          📦 固化為 MCP
+        </button>
+        <button data-jit-key="${tabId}" data-jit-target="skill"
+                onclick="_promoteJitFromStore(this)"
+                class="text-xs px-3 py-1.5 rounded-lg ${typeof r2 === 'number' && r2 > 0.7 ? 'bg-green-600 hover:bg-green-500' : 'bg-purple-600 hover:bg-purple-500'} text-white font-semibold shadow-sm">
+          ${_escapeHtml(skillLabel)}
+        </button>
+      </div>`;
+  }
+
+  const contentHtml = `
+    <div class="p-4 flex flex-col gap-3 h-full overflow-y-auto">
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-violet-100 text-violet-700">⚡ 通用工具</span>
+        <span class="text-sm font-semibold text-slate-800">${_escapeHtml(toolName)}</span>
+      </div>
+      ${summary ? `<p class="text-xs text-slate-500 leading-relaxed">${_escapeHtml(summary)}</p>` : ''}
+      ${promoteBtn}
+      ${bodyHtml}
+    </div>`;
+
+  const tabIcon = isViz ? '📊' : '📐';
+  const { panel } = _createWorkspaceTab(tabId, `${tabIcon} ${toolName}`, contentHtml);
+  if (isViz) requestAnimationFrame(() => _initChartsInCard(panel));
 }
 
 /**
@@ -2406,9 +2526,9 @@ async function _sendAgentV13Message() {
   const _badge = document.getElementById('v13-token-badge');
   if (_badge) { _badge.textContent = ''; _badge.classList.add('hidden'); delete _badge._totalIn; delete _badge._totalOut; }
 
-  // Expand Agent Console and mark new session
+  // Collapse and clear console for new session
+  _diagConsoleCollapse();
   _diagConsoleClear();
-  _diagConsoleExpand();
   _diagLogLine('🚀', `新對話開始 | "${message.slice(0, 60)}${message.length > 60 ? '…' : ''}"`, '#38bdf8');
 
   const body = {
@@ -2557,6 +2677,8 @@ function _handleV13Event(ev) {
           _renderCopilotMcpPanel(ev.render_card);
         } else if (ev.render_card.type === 'draft') {
           _renderDraftActionCard(ev.render_card);
+        } else if (ev.render_card.type === 'utility') {
+          _renderUtilityPanel(ev.render_card);
         }
       } else {
         _diagLogLine('🤔', 'AI 正在整合分析結果…', '#a78bfa');
@@ -3007,9 +3129,7 @@ function _startShadowAnalysis(rawData, dataProfile, mcpName) {
   if (grid) grid.innerHTML = '';
   const intro = document.getElementById('shadow-intro');
   if (intro) intro.textContent = '';
-  document.getElementById('shadow-feedback')?.classList.add('hidden');
-  const saveBtn = document.getElementById('shadow-save-btn');
-  if (saveBtn) { saveBtn.classList.add('hidden'); saveBtn.disabled = false; saveBtn.textContent = '💾 儲存'; }
+  // (feedback bar removed)
 
   _shadowSetState('running');
   const dt = document.getElementById('shadow-decision-text');
@@ -3063,13 +3183,17 @@ function _handleShadowEvent(ev) {
       document.getElementById('shadow-results')?.classList.remove('hidden');
       document.getElementById('shadow-running')?.classList.add('hidden');
       break;
+    case 'chart_card':
+      _appendShadowChart(ev);
+      document.getElementById('shadow-results')?.classList.remove('hidden');
+      document.getElementById('shadow-running')?.classList.add('hidden');
+      break;
     case 'done': {
       _shadowJitCode = ev.jit_code || null;
       const intro = document.getElementById('shadow-intro');
       if (intro && ev.intro) intro.textContent = ev.intro;
       _shadowSetState('done');
-      document.getElementById('shadow-feedback')?.classList.remove('hidden');
-      if (_shadowJitCode) document.getElementById('shadow-save-btn')?.classList.remove('hidden');
+      // (feedback bar removed)
       break;
     }
     case 'error':
@@ -3098,6 +3222,24 @@ function _appendShadowCard(card) {
     ${card.note ? `<div class="text-[10px] mt-1 opacity-60 leading-snug">${_escapeHtml(card.note)}</div>` : ''}
   `;
   grid.appendChild(div);
+}
+
+/** Append a Plotly chart from generic tools into the shadow cards grid (full-width). */
+function _appendShadowChart(ev) {
+  const grid = document.getElementById('shadow-cards-grid');
+  if (!grid || !ev.payload?.plotly) return;
+
+  const chartJson = JSON.stringify(ev.payload.plotly);
+  const wrapper = document.createElement('div');
+  wrapper.className = 'col-span-2 rounded-lg border border-slate-200 bg-white overflow-hidden mt-1';
+  wrapper.innerHTML = `
+    <div class="text-[10px] font-semibold uppercase tracking-wide text-slate-500 px-3 pt-2 pb-0">
+      📊 ${_escapeHtml(ev.tool_name || 'Chart')}
+      <span class="font-normal normal-case text-slate-400 ml-1">${_escapeHtml(ev.summary || '')}</span>
+    </div>
+    <div class="evidence-chart" data-chart='${chartJson.replace(/'/g, "&#39;")}' style="min-height:240px;"></div>`;
+  grid.appendChild(wrapper);
+  requestAnimationFrame(() => _initChartsInCard(wrapper));
 }
 
 /**
@@ -3155,4 +3297,151 @@ function _shadowSaveTool() {
   }).catch(() => {
     if (btn) { btn.disabled = false; btn.textContent = '💾 儲存'; }
   });
+}
+
+// ── v15.5: Promote JIT → MCP / Skill ─────────────────────────────────────────
+
+/** Bridge: route to _promoteAnalysis (template) or _promoteJit (raw Python). */
+function _promoteJitFromStore(btn) {
+  const key    = btn.dataset.jitKey;
+  const target = btn.dataset.jitTarget;
+  const ctx    = (window._jitStore || {})[key];
+  if (!ctx) { alert('找不到分析資料，請重新執行'); return; }
+  if (ctx.analyze_template) {
+    _promoteAnalysis(ctx.mcp_id, ctx.run_params, ctx.analyze_template, ctx.analyze_params, ctx.analyze_stats, ctx.title, target, btn);
+  } else {
+    _promoteJit(ctx.mcp_id, ctx.run_params, ctx.python_code, ctx.title, target, ctx.output_keys, btn);
+  }
+}
+
+/**
+ * v15.6 — Promote analyze_data template result → MCP + optional Skill.
+ * Calls POST /agent/promote-analysis (no LLM for MCP; R²>0.7 auto-fills Skill).
+ */
+async function _promoteAnalysis(mcpId, runParams, template, params, stats, title, target, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 固化中…'; }
+  let result;
+  try {
+    result = await _api('POST', '/agent/promote-analysis', {
+      mcp_id:     mcpId,
+      run_params: runParams || {},
+      template:   template,
+      params:     params   || {},
+      stats:      stats    || {},
+      title:      title,
+      target:     target,
+    });
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = target === 'skill' ? '🧠 固化為 Skill' : '📦 固化為 MCP'; }
+    alert('固化失敗：' + e); return;
+  }
+  if (!result?.new_mcp_id) {
+    if (btn) { btn.disabled = false; btn.textContent = '❌ 固化失敗'; }
+    return;
+  }
+  if (btn) { btn.textContent = '✅ 固化成功！'; }
+  const newMcpId = result.new_mcp_id;
+  if (target === 'mcp') {
+    _openBuilderWithPrefill('mcp', { _existing_mcp_id: newMcpId });
+  } else {
+    const meta  = result.skill_meta || {};
+    const r2    = stats?.r_squared || 0;
+    const skillDraft = {
+      name:              `${title} 診斷`,
+      description:       `R²=${r2.toFixed ? r2.toFixed(4) : r2}${r2 > 0.7 ? ' — 趨勢顯著，自動監控' : ' — 監控用'}`,
+      diagnostic_prompt: meta.diagnostic_prompt || '',
+      problematic_target: meta.problem_subject  || '',
+      expert_action:      meta.human_recommendation || '',
+      mcp_id:             newMcpId,
+    };
+    _openBuilderWithPrefill('skill', skillDraft);
+  }
+}
+
+/**
+ * Calls POST /api/v1/agent/promote-jit, then navigates to the appropriate builder.
+ */
+async function _promoteJit(mcpId, runParams, pythonCode, title, target, outputKeys, btn) {
+  btn = btn || event?.target;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 固化中…'; }
+
+  outputKeys = Array.isArray(outputKeys) ? outputKeys : [];
+  let result;
+  try {
+    result = await _api('POST', '/agent/promote-jit', {
+      mcp_id: mcpId,
+      run_params: runParams || {},
+      python_code: pythonCode,
+      title: title,
+      target: target,
+      output_keys: outputKeys,
+    });
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = target === 'skill' ? '🧠 固化為 Skill' : '📦 固化為 MCP'; }
+    alert('固化失敗：' + e);
+    return;
+  }
+
+  if (!result || !result.new_mcp_id) {
+    if (btn) { btn.disabled = false; btn.textContent = target === 'skill' ? '🧠 固化為 Skill' : '📦 固化為 MCP'; }
+    alert('固化失敗，請檢查 console');
+    return;
+  }
+
+  if (btn) { btn.textContent = '✅ 固化成功！'; }
+
+  const newMcpId = result.new_mcp_id;
+
+  if (target === 'mcp') {
+    // MCP already created in DB — open MCP editor to review
+    _openBuilderWithPrefill('mcp', { _existing_mcp_id: newMcpId });
+  } else {
+    // Skill — MCP already created, open Skill Builder with skill_meta pre-filled
+    const meta = result.skill_meta || {};
+    const skillDraft = {
+      name: `${title} 診斷`,
+      description: `基於 ${title} MCP 的自動診斷技能`,
+      diagnostic_prompt:    meta.diagnostic_prompt    || `執行 ${title} MCP，依輸出值判斷 NORMAL/ABNORMAL`,
+      problematic_target:   meta.problem_subject       || '',
+      expert_action:        meta.human_recommendation  || '',
+      mcp_id:               newMcpId,
+    };
+    _openBuilderWithPrefill('skill', skillDraft);
+    // Also notify user in chat
+    setTimeout(() => {
+      if (typeof _addChatBubble === 'function') {
+        _addChatBubble('assistant',
+          `✅ **MCP #${newMcpId}「${result.mcp_name}」已建立**\n\n` +
+          `Skill Builder 已預填診斷邏輯，請確認後儲存：\n\n` +
+          `> **判斷條件**：${meta.diagnostic_prompt || '（請填寫）'}\n` +
+          `> **處置建議**：${meta.human_recommendation || '（請填寫）'}`
+        );
+      }
+    }, 600);
+  }
+}
+
+/**
+ * Navigate to the correct builder view and open editor with pre-filled data.
+ * @param {'mcp'|'skill'} target
+ * @param {object} draftData  - prefill fields matching _mcpOpenEditor / _skOpenEditor draftData
+ */
+function _openBuilderWithPrefill(target, draftData) {
+  if (target === 'mcp') {
+    if (typeof switchView === 'function') switchView('mcp-builder');
+    setTimeout(() => {
+      if (!draftData) return;
+      if (draftData._existing_mcp_id) {
+        // Open existing MCP by id (already created in DB by promote-jit)
+        if (typeof _mcpOpenEditor === 'function') _mcpOpenEditor(draftData._existing_mcp_id);
+      } else {
+        if (typeof _mcpOpenEditor === 'function') _mcpOpenEditor(null, draftData);
+      }
+    }, 200);
+  } else {
+    if (typeof switchView === 'function') switchView('skill-builder');
+    setTimeout(() => {
+      if (typeof _skOpenEditor === 'function') _skOpenEditor(null, draftData);
+    }, 200);
+  }
 }

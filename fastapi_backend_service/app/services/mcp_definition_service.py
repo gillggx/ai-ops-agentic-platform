@@ -48,6 +48,12 @@ def _normalize_output(output_data: Any, llm_output_schema: Any) -> Dict[str, Any
     HTML sanitisation: if chart_data / charts[] contain HTML (fig.to_html() output),
     they are discarded so the auto-chart fallback can regenerate proper JSON charts.
     """
+    # Normalise legacy ui_render_payload key → ui_render (old template scripts used wrong key)
+    if isinstance(output_data, dict) and "ui_render_payload" in output_data and "ui_render" not in output_data:
+        p = output_data.pop("ui_render_payload")
+        chart = p.get("chart_data") if isinstance(p, dict) else None
+        output_data["ui_render"] = {"type": "plotly", "chart_data": chart, "charts": [chart] if chart else []}
+
     # Already Standard Payload — trust it
     if isinstance(output_data, dict) and "ui_render" in output_data:
         output_data = dict(output_data)

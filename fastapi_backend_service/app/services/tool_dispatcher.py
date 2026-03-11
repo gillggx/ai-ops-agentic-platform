@@ -304,6 +304,116 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
             "required": ["tool_id", "raw_data"],
         },
     },
+    # ── [v15.6] Structured Analysis Templates — zero-code chart/stats ─────
+    {
+        "name": "analyze_data",
+        "description": (
+            "【第二點五優先級 v15.6】使用預建分析模板對 MCP 全量資料進行分析。\n"
+            "★ 標準圖表分析必須優先使用此工具（不要寫 Python）：\n"
+            "   linear_regression / spc_chart / boxplot / stats_summary / correlation\n"
+            "優點：模板已內建正確的 datetime 回歸（index-based）、Y 軸範圍設定、UCL/LCL/OOC 標注。\n"
+            "Agent 只需映射欄位名稱（value_col / time_col 等），零程式碼，零錯誤。\n"
+            "流程：\n"
+            "  1. execute_mcp 取 schema_sample（5筆）→ 確認欄位名稱\n"
+            "  2. analyze_data(mcp_id=..., template='linear_regression', params={value_col: '...', time_col: '...'})\n"
+            "  Server 端自動：抓全量資料 → 執行模板 → 回傳 chart_json + stats + llm_readable_data\n"
+            "⚠️ 若分析需求超出 5 個模板範圍（例如多步驟自定義邏輯），才退而使用 execute_jit。\n"
+            "不確定模板參數時：先呼叫 GET /api/v1/agent/analyze-data/templates 查看說明。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "mcp_id": {"type": "integer", "description": "要分析的 MCP ID"},
+                "run_params": {"type": "object", "description": "MCP 執行參數，例如 {CHART_NAME: 'CD', lot_id: 'L2603001'}"},
+                "template": {
+                    "type": "string",
+                    "enum": ["linear_regression", "spc_chart", "boxplot", "stats_summary", "correlation"],
+                    "description": "分析模板名稱",
+                },
+                "params": {
+                    "type": "object",
+                    "description": (
+                        "模板欄位映射（對應 DataFrame 的欄位名稱）：\n"
+                        "  linear_regression: {value_col(必), time_col?, group_col?, ucl?, lcl?, cl?, title?}\n"
+                        "  spc_chart:         {value_col(必), ucl(必), lcl(必), time_col?, group_col?, cl?, title?}\n"
+                        "  boxplot:           {value_col(必), group_col(必), title?}\n"
+                        "  stats_summary:     {value_col(必), group_col?, title?}\n"
+                        "  correlation:       {col_x(必), col_y(必), group_col?, title?}"
+                    ),
+                },
+                "title": {"type": "string", "description": "分析標題（可選）"},
+            },
+            "required": ["mcp_id", "template", "params"],
+        },
+    },
+    # ── [v15.4] JIT Analyze — server-side sandbox with full MCP dataset ──
+    {
+        "name": "execute_jit",
+        "description": (
+            "【第二點五優先級 v15.4】以自訂 Python 對 MCP 全量資料進行沙盒分析，資料完全在 Server 端處理。\n"
+            "★ 任何統計分析、視覺化、回歸、時序、分群等需求，優先使用此工具（不需把資料傳給 LLM）。\n"
+            "流程：Agent 看 schema (5筆) → 寫 python_code → execute_jit(mcp_id, run_params, python_code)\n"
+            "  Server 端自動：抓取 MCP 全量資料 → 沙盒執行 python_code（df 已預注入）→ 回傳結果\n"
+            "沙盒已預裝：df (pandas DataFrame, 全量), np, pd, math, statistics, go (plotly), px\n"
+            "python_code 必須定義 process(raw_data: list) -> dict，可透過 df 操作全量資料\n"
+            "常用模式：\n"
+            "  線性回歸   → coeffs = np.polyfit(range(len(df)), df['value'], 1)\n"
+            "  統計量     → df['value'].describe().to_dict()\n"
+            "  Plotly 圖  → fig = go.Figure(...); return {'chart_data': fig.to_json()}\n"
+            "⚠️ 禁止在 python_code 裡 import requests/os/sys/subprocess"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "mcp_id": {
+                    "type": "integer",
+                    "description": "要分析的 MCP ID（Custom MCP）",
+                },
+                "run_params": {
+                    "type": "object",
+                    "description": "MCP 執行參數，例如 {CHART_NAME: 'CD', lot_id: 'L2603001'}",
+                },
+                "python_code": {
+                    "type": "string",
+                    "description": "Python 程式碼，必須定義 process(raw_data: list) -> dict 函式",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "分析標題，顯示於工作區面板",
+                },
+            },
+            "required": ["mcp_id", "python_code"],
+        },
+    },
+    # ── [v15.3] Generic Tools (inline / small dataset only) ───────────────
+    {
+        "name": "execute_utility",
+        "description": (
+            "呼叫通用工具庫中的 50 個分析/可視化函式（僅適合 inline 小型資料，< 20 筆）。\n"
+            "⚠️ 大型 MCP 資料請改用 execute_jit（不需傳遞資料列）。\n"
+            "常用：calc_statistics / find_outliers / correlation_analysis / linear_regression /\n"
+            "      plot_line / plot_bar / plot_scatter / plot_histogram / plot_box / plot_heatmap"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tool_name": {
+                    "type": "string",
+                    "description": "通用工具名稱，例如 'calc_statistics' / 'plot_line'",
+                },
+                "data": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "小型資料集（list-of-dicts，< 20 筆）",
+                },
+                "params": {
+                    "type": "object",
+                    "description": "工具專屬參數",
+                },
+            },
+            "required": ["tool_name", "data"],
+        },
+    },
     {
         "name": "search_catalog",
         "description": (
@@ -355,7 +465,10 @@ class ToolDispatcher:
         "list_routine_checks", "list_event_types",
         "draft_skill", "draft_mcp", "draft_routine_check", "draft_event_skill_link",
         "patch_mcp", "patch_skill_raw",
-        "search_catalog",  # returns catalog items, not raw datasets
+        "search_catalog",   # returns catalog items, not raw datasets
+        "execute_jit",      # already analyzed — no need for DataProfile
+        "execute_utility",  # result is already processed by generic tool
+        "analyze_data",     # pre-built template result already processed
     })
 
     # Catalog type → API endpoint mapping
@@ -449,6 +562,41 @@ class ToolDispatcher:
                         "POST",
                         "/api/v1/agent/preference",
                         body={"user_id": self._user_id, "text": tool_input["text"]},
+                    )
+                # ── [v15.6] Structured Analysis Templates ─────────────────
+                case "analyze_data":
+                    return await self._call_api(
+                        "POST",
+                        "/api/v1/agent/analyze-data",
+                        body={
+                            "mcp_id": tool_input["mcp_id"],
+                            "run_params": tool_input.get("run_params", {}),
+                            "template": tool_input["template"],
+                            "params": tool_input.get("params", {}),
+                            "title": tool_input.get("title", ""),
+                        },
+                    )
+                # ── [v15.4] JIT Analyze — server-side sandbox ─────────────
+                case "execute_jit":
+                    return await self._call_api(
+                        "POST",
+                        "/api/v1/agent/jit-analyze",
+                        body={
+                            "mcp_id": tool_input["mcp_id"],
+                            "run_params": tool_input.get("run_params", {}),
+                            "python_code": tool_input["python_code"],
+                            "title": tool_input.get("title", "JIT 分析"),
+                        },
+                    )
+                # ── [v15.3] Generic Tools (inline / small dataset) ────────
+                case "execute_utility":
+                    return await self._call_api(
+                        "POST",
+                        f"/api/v1/generic-tools/{tool_input['tool_name']}",
+                        body={
+                            "data": tool_input.get("data", []),
+                            "params": tool_input.get("params", {}),
+                        },
                     )
                 # ── [v15.1] Agent Tool Chest execution ────────────────────
                 case "execute_agent_tool":

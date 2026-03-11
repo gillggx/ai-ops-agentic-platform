@@ -283,6 +283,19 @@ def _run_sync(script: str, raw_data: Any) -> Dict[str, Any]:
         global_ns["np"] = _np
         global_ns["numpy"] = _np
 
+    # [v15.6] Inject analysis_library.run_analysis so template-based processing_scripts
+    # can call run_analysis(template, df, params) without any sys/os imports
+    try:
+        from app.services.analysis_library import run_analysis as _run_analysis
+        global_ns["run_analysis"] = _run_analysis
+    except Exception:
+        pass
+
+    # JSON-compat aliases: scripts generated via json.dumps may contain null/true/false
+    global_ns["null"]  = None
+    global_ns["true"]  = True
+    global_ns["false"] = False
+
     # [P2 v15] Pre-inject raw_data as `df` so LLM scripts can operate on df directly
     # (no pd.read_csv() file I/O needed)
     if _pd is not None:

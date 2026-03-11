@@ -31,11 +31,11 @@ class AgentToolCreate(BaseModel):
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
-@router.get("", response_model=Dict[str, Any])
+@router.get("", response_model=StandardResponse)
 async def list_agent_tools(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
-) -> Dict[str, Any]:
+) -> StandardResponse:
     svc = AgentToolService(db)
     tools = await svc.get_all(user_id=current_user.id)
     return StandardResponse.success(
@@ -44,12 +44,12 @@ async def list_agent_tools(
     )
 
 
-@router.post("", response_model=Dict[str, Any], status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=StandardResponse, status_code=status.HTTP_201_CREATED)
 async def create_agent_tool(
     body: AgentToolCreate,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
-) -> Dict[str, Any]:
+) -> StandardResponse:
     svc = AgentToolService(db)
     tool = await svc.create(
         user_id=current_user.id,
@@ -63,12 +63,12 @@ async def create_agent_tool(
     )
 
 
-@router.get("/{tool_id}", response_model=Dict[str, Any])
+@router.get("/{tool_id}", response_model=StandardResponse)
 async def get_agent_tool(
     tool_id: int,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
-) -> Dict[str, Any]:
+) -> StandardResponse:
     svc = AgentToolService(db)
     tool = await svc.get_by_id(tool_id)
     if not tool or tool.user_id != current_user.id:
@@ -78,12 +78,12 @@ async def get_agent_tool(
     return StandardResponse.success(data=data)
 
 
-@router.delete("/{tool_id}", response_model=Dict[str, Any])
+@router.delete("/{tool_id}", response_model=StandardResponse)
 async def delete_agent_tool(
     tool_id: int,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
-) -> Dict[str, Any]:
+) -> StandardResponse:
     svc = AgentToolService(db)
     tool = await svc.get_by_id(tool_id)
     if not tool or tool.user_id != current_user.id:
@@ -97,13 +97,13 @@ class AgentToolExecuteRequest(BaseModel):
     raw_data: Any = Field(..., description="Dataset to operate on (list-of-dicts or dict)")
 
 
-@router.post("/{tool_id}/execute", response_model=Dict[str, Any])
+@router.post("/{tool_id}/execute", response_model=StandardResponse)
 async def execute_agent_tool(
     tool_id: int,
     body: AgentToolExecuteRequest,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
-) -> Dict[str, Any]:
+) -> StandardResponse:
     """Execute an Agent Tool's code in sandbox with the provided raw_data (df injected)."""
     svc = AgentToolService(db)
     tool = await svc.get_by_id(tool_id)

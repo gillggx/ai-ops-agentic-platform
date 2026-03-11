@@ -126,6 +126,7 @@ function switchView(name) {
   if (name === 'event-link-builder')   _elInitView();
   if (name === 'mock-data-studio')     _mdsLoadList();
   if (name === 'agent-brain')      { _brainLoadSoul(); _brainLoadPref(); _brainLoadMemories(); }
+  if (name === 'arsenal')          _arsenalLoad();
 
   // Phase 8.6: send AI welcome message once when entering diagnose view
   if (name === 'diagnose' && !_diagnoseWelcomeSent) {
@@ -6298,6 +6299,7 @@ async function _skSave() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 let _mceRightTab = 'logs';
+let _mceCurrentMcp = null;  // full MCP object loaded in editor (null = new MCP)
 
 // ── Tab switching ─────────────────────────────────────────────
 function _mceSwitchRightTab(tab) {
@@ -6360,6 +6362,7 @@ async function _mcpOpenEditor(id, draftData) {
 
   if (!id) {
     // New MCP (possibly pre-filled from agent draft)
+    _mceCurrentMcp = null;
     const isDraft = !!draftData;
     document.getElementById('mcp-editor-title').textContent = isDraft ? '草稿審核 — 新增 MCP' : '新增 MCP';
     document.getElementById('mce-edit-id').value = '';
@@ -6389,6 +6392,7 @@ async function _mcpOpenEditor(id, draftData) {
 
   // Load existing MCP
   let mcp = _mcpDefs.find(m => m.id === id) || await _api('GET', `/mcp-definitions/${id}`);
+  _mceCurrentMcp = mcp;
   document.getElementById('mcp-editor-title').textContent = mcp?.name || `MCP #${id}`;
   document.getElementById('mce-edit-id').value = id;
   document.getElementById('mce-edit-name').value = mcp?.name || '';
@@ -6524,13 +6528,13 @@ async function _mcpTryRun() {
 
     _mceLogLine('▶', '開始執行 MCP Try Run');
 
-    // Fetch sample data
+    // Collect form params and fetch sample data
     let sampleData = null;
+    let formParams = {};
     const rawUrl = ds.api_config?.endpoint_url || '';
     if (rawUrl) {
       _mceLogLine('📡', `正在撈取 System MCP 資料：${ds.name}…`);
       const fields = ds.input_schema?.fields || [];
-      const formParams = {};
       for (const f of fields) {
         const el = document.getElementById(`mce-ds-param-${f.name}`);
         if (el && el.value.trim()) formParams[f.name] = el.value.trim();
@@ -6543,13 +6547,27 @@ async function _mcpTryRun() {
       _mceLogLine('✓', '樣本資料撈取成功', 'text-emerald-600');
     }
 
-    // Generate script via try-run
-    _mceLogLine('⚙', 'LLM 生成 MCP 處理腳本並沙箱執行中…');
-    const result = await _api('POST', '/mcp-definitions/try-run', {
-      processing_intent: intent,
-      system_mcp_id:     dsId,
-      sample_data:       sampleData,
-    });
+    // If MCP already has a processing_script (e.g., promoted from analyze_data),
+    // execute it directly via run-with-data — skip LLM generation entirely.
+    const mcpId = parseInt(document.getElementById('mce-edit-id')?.value) || null;
+    const hasScript = !!(mcpId && _mceCurrentMcp?.processing_script);
+    let result;
+    if (hasScript) {
+      _mceLogLine('⚡', '已有 processing_script — 直接執行（跳過 LLM）', 'text-blue-500');
+      // Pass form params as raw_data — backend re-fetches dataset and runs existing script
+      result = await _api('POST', `/mcp-definitions/${mcpId}/run-with-data`, {
+        raw_data: formParams,
+      });
+      // Backend returns script=obj.processing_script; guard just in case
+      if (result && !result.script) result = { ...result, script: _mceCurrentMcp.processing_script };
+    } else {
+      _mceLogLine('⚙', 'LLM 生成 MCP 處理腳本並沙箱執行中…');
+      result = await _api('POST', '/mcp-definitions/try-run', {
+        processing_intent: intent,
+        system_mcp_id:     dsId,
+        sample_data:       sampleData,
+      });
+    }
 
     if (!result.success) {
       _mceLogLine('✗', `執行失敗：${result.error || '未知錯誤'}`, 'text-red-600');
@@ -6563,14 +6581,15 @@ async function _mcpTryRun() {
     _mceLogLine('✓', 'MCP 執行完成', 'text-emerald-600');
     _renderLearningEvents('mce-exec-log-lines', result.learning_events);
 
-    // Show generated Python script in terminal
+    // Show Python script in terminal (stored script for run-with-data; LLM-generated for try-run)
     if (result.script) {
       const lines = document.getElementById('mce-exec-log-lines');
       if (lines) {
         const scriptBlock = document.createElement('div');
         scriptBlock.className = 'mt-3';
+        const scriptLabel = hasScript ? '📦 已儲存的 Python 腳本（直接執行）' : '🐍 生成的 Python 腳本';
         scriptBlock.innerHTML = `
-          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">🐍 生成的 Python 腳本</div>
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">${scriptLabel}</div>
           <pre class="bg-slate-50 border border-slate-200 rounded p-3 text-[11px] text-slate-700 overflow-x-auto overflow-y-scroll whitespace-pre-wrap leading-relaxed max-h-[500px]">${_esc(result.script)}</pre>`;
         lines.appendChild(scriptBlock);
       }
@@ -6634,9 +6653,8 @@ async function _mcpTryRun() {
 
     _mceLogLine('✓', 'Try Run 完成 — 切換至報告…', 'text-emerald-600');
 
-    // Auto-save script to MCP if editing existing
-    const mcpId = parseInt(document.getElementById('mce-edit-id')?.value) || null;
-    if (mcpId && result.script) {
+    // Auto-save script to MCP if editing existing (skip if run-with-data — script already in DB)
+    if (mcpId && result.script && !hasScript) {
       try {
         await _api('PATCH', `/mcp-definitions/${mcpId}`, {
           processing_script: result.script,
@@ -7823,3 +7841,187 @@ async function _mdsTestRun(id) {
   }
 }
 
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 🗡️  Arsenal — 私有武器庫 (Agent Tool Chest)
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function _arsenalLoad() {
+  const grid    = document.getElementById('arsenal-grid');
+  const empty   = document.getElementById('arsenal-empty');
+  const loading = document.getElementById('arsenal-loading');
+  const badge   = document.getElementById('arsenal-count-badge');
+  if (!grid) return;
+
+  grid.innerHTML = '';
+  empty?.classList.add('hidden');
+  loading?.classList.remove('hidden');
+
+  try {
+    const r = await _api('GET', '/agent-tools');
+    const items = r?.items || r?.data?.items || [];
+    loading?.classList.add('hidden');
+
+    if (badge) {
+      badge.textContent = `${items.length} 件武器`;
+      badge.classList.toggle('hidden', items.length === 0);
+    }
+
+    if (items.length === 0) {
+      empty?.classList.remove('hidden');
+      return;
+    }
+
+    items.forEach(tool => grid.appendChild(_arsenalBuildCard(tool)));
+  } catch (e) {
+    loading?.classList.add('hidden');
+    empty?.classList.remove('hidden');
+  }
+}
+
+function _arsenalBuildCard(tool) {
+  const usageColor = tool.usage_count > 0
+    ? 'bg-violet-100 text-violet-700'
+    : 'bg-slate-100 text-slate-500';
+  const usageLabel = tool.usage_count > 0
+    ? `⚔️ 已出戰 ${tool.usage_count} 次`
+    : '⚔️ 尚未出戰';
+  const date = tool.created_at
+    ? new Date(tool.created_at).toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' })
+    : '';
+  const cardId = `arsenal-card-${tool.id}`;
+  const codeId = `arsenal-code-${tool.id}`;
+
+  const card = document.createElement('div');
+  card.id = cardId;
+  card.className = [
+    'group relative bg-white rounded-2xl border border-slate-200',
+    'shadow-sm hover:shadow-md hover:border-violet-300',
+    'transition-all duration-200 overflow-hidden flex flex-col',
+  ].join(' ');
+
+  card.innerHTML = `
+    <!-- Accent bar -->
+    <div class="h-1 w-full bg-gradient-to-r from-violet-500 via-purple-400 to-fuchsia-400"></div>
+
+    <div class="p-5 flex flex-col gap-3 flex-1">
+      <!-- Title row -->
+      <div class="flex items-start justify-between gap-2">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <div class="w-9 h-9 rounded-xl bg-violet-50 flex items-center justify-center flex-shrink-0">
+            <svg class="w-4.5 h-4.5 text-violet-500" style="width:18px;height:18px"
+                 viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="16 18 22 12 16 6"/>
+              <polyline points="8 6 2 12 8 18"/>
+            </svg>
+          </div>
+          <div class="min-w-0">
+            <p class="text-sm font-semibold text-slate-800 truncate" title="${_escHtml(tool.name)}">${_escHtml(tool.name)}</p>
+            <p class="text-[11px] text-slate-400 mt-0.5">${date}</p>
+          </div>
+        </div>
+        <!-- Usage badge -->
+        <span class="flex-shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full ${usageColor} whitespace-nowrap">
+          ${usageLabel}
+        </span>
+      </div>
+
+      <!-- Description -->
+      ${tool.description ? `
+      <p class="text-xs text-slate-500 leading-relaxed line-clamp-2">${_escHtml(tool.description)}</p>
+      ` : ''}
+
+      <!-- Code toggle -->
+      <button onclick="_arsenalToggleCode(${tool.id})"
+              class="flex items-center gap-1.5 text-[11px] text-violet-600 hover:text-violet-800
+                     font-medium transition-colors self-start">
+        <svg id="arsenal-chevron-${tool.id}" class="w-3.5 h-3.5 transition-transform" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+        查看程式碼
+      </button>
+
+      <!-- Code block (hidden by default) -->
+      <div id="${codeId}" class="hidden">
+        <pre class="mt-1 bg-slate-900 text-green-300 text-[10px] font-mono rounded-xl p-4
+                    overflow-x-auto leading-relaxed max-h-56 overflow-y-auto whitespace-pre-wrap
+                    break-words">${_escHtml(tool.code || '（程式碼需重新載入）')}</pre>
+      </div>
+    </div>
+
+    <!-- Footer actions -->
+    <div class="px-5 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+      <span class="text-[10px] text-slate-400">ID #${tool.id}</span>
+      <button onclick="_arsenalDelete(${tool.id}, '${_escHtml(tool.name).replace(/'/g, "\\'")}')"
+              class="flex items-center gap-1 text-[11px] text-red-400 hover:text-red-600
+                     hover:bg-red-50 px-2 py-1 rounded-lg transition-colors font-medium">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6"/>
+          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+          <path d="M10 11v6"/><path d="M14 11v6"/>
+          <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+        </svg>
+        解除武裝
+      </button>
+    </div>
+  `;
+
+  // Fetch full code (list endpoint trims it; get single item for full code)
+  if (!tool.code) {
+    _api('GET', `/agent-tools/${tool.id}`).then(r => {
+      const pre = card.querySelector(`#${codeId} pre`);
+      if (pre && r?.data?.code) pre.textContent = r.data.code;
+    }).catch(() => {});
+  }
+
+  return card;
+}
+
+function _arsenalToggleCode(id) {
+  const block   = document.getElementById(`arsenal-code-${id}`);
+  const chevron = document.getElementById(`arsenal-chevron-${id}`);
+  if (!block) return;
+  const open = block.classList.toggle('hidden');
+  // open=true means now hidden (just toggled to hidden), open=false means now visible
+  if (chevron) chevron.style.transform = block.classList.contains('hidden') ? '' : 'rotate(180deg)';
+
+  // Lazy-load full code on first expand
+  if (!block.classList.contains('hidden')) {
+    const pre = block.querySelector('pre');
+    if (pre && pre.textContent.includes('（程式碼需重新載入）')) {
+      _api('GET', `/agent-tools/${id}`).then(r => {
+        if (r?.data?.code) pre.textContent = r.data.code;
+      }).catch(() => {});
+    }
+  }
+}
+
+async function _arsenalDelete(id, name) {
+  if (!confirm(`確定要從武器庫移除「${name}」嗎？此動作無法復原。`)) return;
+  try {
+    await _api('DELETE', `/agent-tools/${id}`);
+    document.getElementById(`arsenal-card-${id}`)?.remove();
+    // Recount
+    const remaining = document.querySelectorAll('[id^="arsenal-card-"]').length;
+    const badge = document.getElementById('arsenal-count-badge');
+    if (badge) badge.textContent = `${remaining} 件武器`;
+    if (remaining === 0) {
+      badge?.classList.add('hidden');
+      document.getElementById('arsenal-empty')?.classList.remove('hidden');
+    }
+  } catch (e) {
+    alert('刪除失敗，請稍後再試。');
+  }
+}
+
+function _escHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
