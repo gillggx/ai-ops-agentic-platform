@@ -614,18 +614,27 @@ async def promote_analysis(
 
     mcp_name = f"{body.title}（模板固化）" if body.title else f"{body.template} 分析 MCP"
     try:
-        new_mcp = await mcp_repo.create(
-            name=mcp_name,
-            description=f"由 analyze_data/{body.template} 模板自動固化。{body.title}",
-            processing_intent=body.title or body.template,
-            processing_script=processing_script,
-            mcp_type="custom",
-            system_mcp_id=system_mcp_id,
-            data_subject_id=system_mcp_id,
-            visibility="private",
-        )
-        await db.commit()
-        await db.refresh(new_mcp)
+        # Upsert: if same-named MCP already exists (e.g. user clicked MCP then Skill),
+        # reuse it and update the script rather than failing on unique constraint.
+        existing = await mcp_repo.get_by_name(mcp_name)
+        if existing:
+            await mcp_repo.update(existing, processing_script=processing_script)
+            await db.commit()
+            await db.refresh(existing)
+            new_mcp = existing
+        else:
+            new_mcp = await mcp_repo.create(
+                name=mcp_name,
+                description=f"由 analyze_data/{body.template} 模板自動固化。{body.title}",
+                processing_intent=body.title or body.template,
+                processing_script=processing_script,
+                mcp_type="custom",
+                system_mcp_id=system_mcp_id,
+                data_subject_id=system_mcp_id,
+                visibility="private",
+            )
+            await db.commit()
+            await db.refresh(new_mcp)
         new_mcp_id: int = new_mcp.id
     except Exception as exc:
         await db.rollback()
