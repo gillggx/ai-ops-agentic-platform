@@ -674,6 +674,23 @@ async def promote_analysis(
     except Exception:
         pass  # sample_output is best-effort; MCP is already created
 
+    # Auto-register the processing_script as an Agent Tool in the user's arsenal
+    try:
+        from app.services.agent_tool_service import AgentToolService
+        tool_svc = AgentToolService(db)
+        tool_name = f"⚡ {mcp_name}"
+        all_tools = await tool_svc.get_all(user_id=current_user.id)
+        if not any(t.name == tool_name for t in all_tools):
+            await tool_svc.create(
+                user_id=current_user.id,
+                name=tool_name,
+                code=processing_script,
+                description=f"由 analyze_data/{body.template} 模板固化。來源 MCP #{new_mcp_id}。",
+            )
+            await db.commit()
+    except Exception:
+        pass  # arsenal registration is best-effort
+
     # Skill target: generate diagnostic_prompt from stats (no LLM needed)
     if body.target == "skill":
         r2 = float(body.stats.get("r_squared", 0))
