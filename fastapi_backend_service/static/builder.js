@@ -2195,12 +2195,38 @@ async function _loadSkillDefs() {
               ${diagTag}
             </div>
           </div>
-          <div class="text-slate-600 text-sm">›</div>
+          <div class="flex items-center gap-2">
+            <div class="text-slate-600 text-sm">›</div>
+            <button onclick="event.stopPropagation(); _skDelete(${sk.id}, '${_esc(sk.name).replace(/'/g, "\\'")}')"
+                    title="刪除 Skill"
+                    class="w-7 h-7 flex items-center justify-center rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+              </svg>
+            </button>
+          </div>
         </div>
       `;
     }).join('');
   } catch (e) {
     container.innerHTML = `<p class="text-center text-red-400 py-12">載入失敗：${_esc(e.message)}</p>`;
+  }
+}
+
+async function _skDelete(id, name) {
+  if (!confirm(`確定要刪除 Skill「${name}」嗎？此動作無法復原。`)) return;
+  try {
+    await _api('DELETE', `/skill-definitions/${id}`);
+    // Remove card from DOM instantly
+    const cards = document.getElementById('sk-list-cards');
+    if (cards) {
+      const all = cards.querySelectorAll('.builder-card');
+      all.forEach(el => { if (el.innerHTML.includes(`_skOpenEditor(${id})`)) el.remove(); });
+    }
+    // Reload list to keep counts/state consistent
+    _renderSkillList();
+  } catch (e) {
+    alert('刪除失敗：' + e.message);
   }
 }
 
