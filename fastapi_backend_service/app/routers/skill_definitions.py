@@ -18,6 +18,7 @@ from app.schemas.skill_definition import (
     SkillCheckDiagnosisIntentRequest,
     SkillDefinitionCreate,
     SkillDefinitionUpdate,
+    SkillDiagnoseWithFeedbackRequest,
     SkillGenerateCodeDiagnosisRequest,
     SkillTryDiagnosisRequest,
 )
@@ -166,5 +167,26 @@ async def generate_code_diagnosis(
         problem_subject=body.problem_subject,
         mcp_sample_outputs=body.mcp_sample_outputs,
         event_attributes=body.event_attributes,
+    )
+    return StandardResponse.success(data=result.model_dump())
+
+
+
+@router.post("/{skill_id}/diagnose-with-feedback", response_model=StandardResponse)
+async def diagnose_skill_with_feedback(
+    skill_id: int,
+    body: SkillDiagnoseWithFeedbackRequest,
+    svc: SkillDefinitionService = Depends(_get_service),
+    _: UserModel = Depends(get_current_user),
+):
+    """User feedback → LLM reflects on diagnostic_prompt → revised prompt → re-run diagnosis.
+
+    If re-run succeeds, the revised diagnostic_prompt is persisted to the Skill.
+    """
+    result = await svc.diagnose_with_feedback(
+        skill_id=skill_id,
+        mcp_sample_outputs=body.mcp_sample_outputs,
+        user_feedback=body.user_feedback,
+        previous_result_summary=body.previous_result_summary,
     )
     return StandardResponse.success(data=result.model_dump())

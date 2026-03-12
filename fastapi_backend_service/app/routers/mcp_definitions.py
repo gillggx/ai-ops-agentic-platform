@@ -22,6 +22,7 @@ from app.schemas.mcp_definition import (
     MCPDefinitionUpdate,
     MCPGenerateRequest,
     MCPRunWithDataRequest,
+    MCPRunWithFeedbackRequest,
     MCPTryRunRequest,
 )
 from app.services.mcp_builder_service import MCPBuilderService
@@ -199,4 +200,26 @@ async def run_mcp_with_data(
     the diagnostic prompt.
     """
     result = await svc.run_with_data(mcp_id, body.raw_data)
+    return StandardResponse.success(data=result.model_dump())
+
+
+@router.post("/{mcp_id}/run-with-feedback", response_model=StandardResponse)
+async def run_mcp_with_feedback(
+    mcp_id: int,
+    body: MCPRunWithFeedbackRequest,
+    svc: MCPDefinitionService = Depends(_get_service),
+    _: UserModel = Depends(get_current_user),
+):
+    """User feedback → LLM reflection → revised script → sandbox re-run.
+
+    Returns reflection text, revised_script, and re-run output_data.
+    If re-run succeeds, the revised script is persisted to the MCP.
+    """
+    result = await svc.run_with_feedback(
+        mcp_id=mcp_id,
+        input_params=body.input_params,
+        user_feedback=body.user_feedback,
+        previous_result_summary=body.previous_result_summary,
+        force_regen=body.force_regen,
+    )
     return StandardResponse.success(data=result.model_dump())

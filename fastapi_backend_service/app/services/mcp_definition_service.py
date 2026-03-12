@@ -22,6 +22,7 @@ from app.schemas.mcp_definition import (
     MCPDefinitionUpdate,
     MCPGenerateResponse,
     MCPRunWithDataRequest,  # noqa: F401 — imported for re-use in router
+    MCPRunWithFeedbackResponse,
     MCPTryRunResponse,
 )
 from app.services.mcp_builder_service import MCPBuilderService
@@ -806,3 +807,186 @@ class MCPDefinitionService:
             ui_render_config=_j(obj.ui_render_config) or {},
             input_definition=_j(obj.input_definition) or {},
         )
+
+    async def run_with_feedback(
+        self,
+        mcp_id: int,
+        input_params: Any,
+        user_feedback: str,
+        previous_result_summary: Optional[str] = None,
+        force_regen: bool = False,
+    ) -> MCPRunWithFeedbackResponse:
+        """User feedback → LLM reflection → revised script → fetch real data → sandbox re-run → persist log.
+
+        input_params: the FORM PARAMS (e.g. {lot_id, tool_id}), NOT the raw dataset.
+                      This method re-fetches the actual dataset from the system MCP API
+                      before running the revised script, exactly like run_with_data().
+        force_regen:  If True, skip script revision via reflection and instead call
+                      try_run() with user_feedback appended to the intent (full LLM regen).
+        """
+        from app.models.feedback_log import FeedbackLogModel
+
+        obj = await self._repo.get_by_id(mcp_id)
+        if not obj:
+            raise AppException(status_code=404, error_code="NOT_FOUND", detail="MCP 不存在")
+
+        original_script = obj.processing_script or ""
+        ds_name, _ = await self._get_ds_info(obj)
+
+        # ── Step 0: Re-fetch actual API data (same logic as run_with_data) ───────
+        api_raw_data: Any = input_params
+        sys_mcp_id = getattr(obj, 'system_mcp_id', None)
+        if not sys_mcp_id:
+            ds_id = getattr(obj, 'data_subject_id', None)
+            if ds_id:
+                try:
+                    old_ds = await self._ds_repo.get_by_id(ds_id)
+                    if old_ds and old_ds.name:
+                        from sqlalchemy import select as _select
+                        from app.models.mcp_definition import MCPDefinitionModel as _MCPModel
+                        _r = await self._repo._db.execute(
+                            _select(_MCPModel).where(
+                                _MCPModel.mcp_type == 'system',
+                                _MCPModel.name == old_ds.name,
+                            )
+                        )
+                        _matched = _r.scalar_one_or_none()
+                        if _matched:
+                            sys_mcp_id = _matched.id
+                except Exception:
+                    pass
+        if sys_mcp_id:
+            sys_mcp = await self._repo.get_by_id(sys_mcp_id)
+            if sys_mcp and getattr(sys_mcp, 'mcp_type', 'system') == 'system':
+                api_cfg = _j(sys_mcp.api_config) if isinstance(sys_mcp.api_config, str) else (sys_mcp.api_config or {})
+                endpoint_url = api_cfg.get("endpoint_url", "")
+                method = api_cfg.get("method", "GET").upper()
+                headers = api_cfg.get("headers", {})
+                if endpoint_url:
+                    if endpoint_url.startswith("/"):
+                        url = get_settings().SERVER_BASE_URL + endpoint_url
+                    else:
+                        url = endpoint_url
+                    params_dict: Dict[str, Any] = input_params if isinstance(input_params, dict) else {}
+                    try:
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            if method == "GET":
+                                resp = await client.get(url, params=params_dict, headers=headers)
+                            else:
+                                resp = await client.post(url, json=params_dict, headers=headers)
+                            resp.raise_for_status()
+                            response_json = resp.json()
+                            api_raw_data = response_json if isinstance(response_json, list) else [response_json]
+                    except Exception as exc:
+                        return MCPRunWithFeedbackResponse(
+                            reflection="", revised_script=original_script,
+                            error=f"System MCP 資料重新撈取失敗：{exc}"
+                        )
+
+        # ── Step 1a: Force re-generation via try_run (if force_regen=True) ───────
+        if force_regen:
+            enriched_intent = (obj.processing_intent or "") + f"\n\n[用戶回饋 — 請根據此改善腳本]\n{user_feedback}"
+            try:
+                try_result = await self.try_run(
+                    processing_intent=enriched_intent,
+                    sample_data=api_raw_data,
+                    system_mcp_id=sys_mcp_id,
+                )
+                if try_result.success:
+                    output_data = _normalize_output(try_result.output_data, _j(obj.output_schema) or {})
+                    output_data = {**output_data, "_raw_dataset": api_raw_data if isinstance(api_raw_data, list) else []}
+                    # Persist new script
+                    new_script = try_result.script or original_script
+                    await self._repo.update(obj, processing_script=new_script)
+                    self._save_feedback_log_sync(
+                        mcp_id, user_feedback, previous_result_summary or "",
+                        "[Force Regen] 已請 LLM 重新生成腳本", new_script, True
+                    )
+                    return MCPRunWithFeedbackResponse(
+                        reflection=f"[重新生成腳本] {try_result.summary or '新腳本已生成'}",
+                        revised_script=new_script,
+                        rerun_success=True,
+                        output_data=output_data,
+                    )
+                else:
+                    return MCPRunWithFeedbackResponse(
+                        reflection="LLM 重新生成腳本失敗",
+                        revised_script=original_script,
+                        error=try_result.error or "未知錯誤",
+                    )
+            except Exception as exc:
+                return MCPRunWithFeedbackResponse(
+                    reflection="Force regen 失敗", revised_script=original_script, error=str(exc)
+                )
+
+        # ── Step 1b: LLM reflection + revised script (normal path) ───────────────
+        reflect_result = await self._llm.reflect_and_fix(
+            original_script=original_script,
+            processing_intent=obj.processing_intent or "",
+            data_subject_name=ds_name or obj.name,
+            user_feedback=user_feedback,
+            previous_result_summary=previous_result_summary or "",
+        )
+        reflection = reflect_result.get("reflection", "")
+        revised_script = reflect_result.get("revised_script", "") or original_script
+
+        # ── Step 2: sandbox re-run with revised script on REAL fetched data ───────
+        rerun_success = False
+        output_data: Dict[str, Any] = {}
+        error: Optional[str] = None
+        try:
+            raw_output = await execute_script(revised_script, api_raw_data)
+            output_data = _normalize_output(raw_output, _j(obj.output_schema) or {})
+            raw_list = api_raw_data if isinstance(api_raw_data, list) else []
+            output_data = {**output_data, "_raw_dataset": raw_list}
+            rerun_success = True
+        except Exception as exc:
+            error = f"修正腳本執行失敗：{exc}"
+
+        # ── Step 3: if re-run succeeded, persist the revised script to the MCP ───
+        if rerun_success and revised_script != original_script:
+            await self._repo.update(obj, processing_script=revised_script)
+
+        # ── Step 4: save feedback log ─────────────────────────────────────────────
+        log_id: Optional[int] = None
+        try:
+            log = FeedbackLogModel(
+                target_type="mcp",
+                target_id=mcp_id,
+                user_feedback=user_feedback,
+                previous_result_summary=previous_result_summary or "",
+                llm_reflection=reflection,
+                revised_script=revised_script,
+                rerun_success=rerun_success,
+            )
+            self._repo._db.add(log)
+            await self._repo._db.flush()
+            log_id = log.id
+        except Exception as exc:
+            logger.warning("run_with_feedback: failed to save feedback log: %s", exc)
+
+        return MCPRunWithFeedbackResponse(
+            reflection=reflection,
+            revised_script=revised_script,
+            rerun_success=rerun_success,
+            output_data=output_data,
+            error=error,
+            feedback_log_id=log_id,
+        )
+
+    def _save_feedback_log_sync(
+        self, target_id: int, user_feedback: str, prev_summary: str,
+        reflection: str, revised_script: str, success: bool
+    ) -> None:
+        """Fire-and-forget feedback log (no await needed for force_regen path)."""
+        from app.models.feedback_log import FeedbackLogModel
+        try:
+            log = FeedbackLogModel(
+                target_type="mcp", target_id=target_id,
+                user_feedback=user_feedback, previous_result_summary=prev_summary,
+                llm_reflection=reflection, revised_script=revised_script,
+                rerun_success=success,
+            )
+            self._repo._db.add(log)
+        except Exception as exc:
+            logger.warning("_save_feedback_log_sync: %s", exc)

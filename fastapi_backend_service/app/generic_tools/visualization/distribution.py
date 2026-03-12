@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List
 
-from app.generic_tools._base import ToolResult, _plotly_to_payload, _safe_float
+from app.generic_tools._base import ToolResult, _plotly_to_payload, _safe_float, _apply_tight_range
 
 EDA_COLORS = ["#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B3", "#937860", "#DA8BC3", "#8C8C8C"]
 
@@ -191,6 +191,7 @@ def plot_error_bar(data: List[Dict[str, Any]], **params) -> Dict[str, Any]:
                              error_y=error_y, name=y_col)],
             layout=go.Layout(title=title),
         )
+        _apply_tight_range(fig, x_vals=x_vals, y_vals_list=[y_vals])
         return ToolResult.ok(f"Error bar: '{y_col}', {len(data)} points", _plotly_to_payload(fig))
     except Exception as exc:
         return ToolResult.err(f"plot_error_bar failed: {exc}")
@@ -648,6 +649,7 @@ def plot_bland_altman(data: List[Dict[str, Any]], **params) -> Dict[str, Any]:
                            annotation_text=label)
         _eda_layout(fig, title, n)
         fig.update_layout(xaxis_title="Mean of methods", yaxis_title="Difference (M1-M2)")
+        _apply_tight_range(fig, x_vals=list(means), y_vals_list=[list(diffs)])
         return ToolResult.ok(
             f"Bland-Altman '{method1_col}' vs '{method2_col}' (n={n}): bias={bias:.4f}",
             _plotly_to_payload(fig))

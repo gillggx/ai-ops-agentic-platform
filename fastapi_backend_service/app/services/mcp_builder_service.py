@@ -1300,3 +1300,69 @@ def diagnose(mcp_outputs: dict) -> dict:
         except Exception:
             logger.warning("auto_map JSON parse failed, raw: %s", _get_text(response.content)[:200])
             return {"mapping": []}
+
+    async def reflect_and_fix(
+        self,
+        original_script: str,
+        processing_intent: str,
+        data_subject_name: str,
+        user_feedback: str,
+        previous_result_summary: str,
+    ) -> Dict[str, Any]:
+        """Ask LLM to reflect on why the previous script failed and generate a revised one.
+
+        Returns dict with keys: reflection (str), revised_script (str).
+        """
+        prompt = f"""\
+你是一位半導體製程資料處理工程師。使用者對你之前生成的 MCP 腳本提出了問題，請你反思、學習，並修正腳本。
+
+【原始加工意圖】
+{processing_intent}
+
+【資料源（DataSubject）名稱】
+{data_subject_name}
+
+【上次執行結果摘要】
+{previous_result_summary or "(未提供)"}
+
+【使用者回饋（問題描述）】
+{user_feedback}
+
+【原始腳本】
+```python
+{original_script}
+```
+
+請完成以下兩項任務，以 JSON 格式回傳：
+
+1. **reflection**（str）：
+   - 分析上次結果為何不符合預期（根據使用者回饋推斷）
+   - 說明你將如何修正（2~4 句）
+
+2. **revised_script**（str）：
+   - 修正後的完整 Python 函式 `process(raw_data: dict) -> dict`
+   - 必須保留標準輸出格式（output_schema, dataset, ui_render）
+   - 針對使用者回饋的問題點做出明確改善
+   - ⚠️ 禁止使用 fig.to_html()，必須用 json.dumps(fig.to_dict())
+   - 沙盒可用：pd, go, px, plt, np, json, math（無需 import）
+
+只回傳 JSON，不要有其他文字：
+{{
+  "reflection": "...",
+  "revised_script": "..."
+}}"""
+
+        response = await self._client.messages.create(
+            model=_MODEL,
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        try:
+            result = _extract_json(_get_text(response.content))
+            return {
+                "reflection": result.get("reflection", ""),
+                "revised_script": result.get("revised_script", ""),
+            }
+        except Exception:
+            logger.warning("reflect_and_fix JSON parse failed")
+            return {"reflection": "LLM 反思失敗，請重試", "revised_script": original_script}

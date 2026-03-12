@@ -5592,6 +5592,7 @@ let _skRightTab = 'logs';
 let _skTryRunMcpResult = null;
 let _skMcpSampleParams = null;  // DS query params collected for the selected MCP
 let _skLastDiagnosisResult = null;  // Saved after successful _skTryRun
+let _skLastMcpSampleOutputs = null;  // keyed by mcp.name, for feedback re-run
 
 // ── Tab switching ─────────────────────────────────────────────
 function _skSwitchRightTab(tab) {
@@ -5603,6 +5604,11 @@ function _skSwitchRightTab(tab) {
       ? 'px-5 py-3 text-xs font-bold text-blue-700 border-b-2 border-blue-600 transition-colors'
       : 'px-5 py-3 text-xs font-medium text-slate-500 border-b-2 border-transparent hover:text-slate-700 transition-colors';
   });
+  // Feedback bar only shows on Report tab when result exists
+  const fb = document.getElementById('sk-feedback-section');
+  if (fb && _skLastDiagnosisResult) {
+    fb.classList.toggle('hidden', tab !== 'report');
+  }
 }
 
 function _skSwitchMcpTab(tab) {
@@ -6129,6 +6135,9 @@ async function _skTryRun() {
 
     // Auto-save last_diagnosis_result so list badge shows "🐍 Code 診斷"
     const skId = parseInt(document.getElementById('sk-edit-id')?.value) || null;
+    // Capture mcp_sample_outputs for feedback re-run (set here so mcp is in scope)
+    _skLastMcpSampleOutputs = { [mcp.name]: mcpOutput };
+
     if (result.generated_code) {
       _skLastDiagnosisResult = {
         status:              result.status              || 'ABNORMAL',
@@ -6150,6 +6159,13 @@ async function _skTryRun() {
         }
       }
     }
+
+    // Save state for Detail Inspector + Feedback
+    _skLastMcpSampleOutputs = { [mcp.name]: mcpOutput };
+    const skFeedbackSection = document.getElementById('sk-feedback-section');
+    if (skFeedbackSection) skFeedbackSection.classList.remove('hidden');
+    const skDetailBtn = document.getElementById('sk-detail-btn');
+    if (skDetailBtn) skDetailBtn.classList.remove('hidden');
 
     _skLogLine('✓', 'Try Run 完成 — 切換至報告…', 'text-emerald-600');
     setTimeout(() => _skSwitchRightTab('report'), 700);
@@ -6327,6 +6343,8 @@ async function _skSave() {
 
 let _mceRightTab = 'logs';
 let _mceCurrentMcp = null;  // full MCP object loaded in editor (null = new MCP)
+let _mceLastTryRunResult = null;  // MCPTryRunResponse from latest try-run (for Detail Inspector + Feedback)
+let _mceLastRawData = null;       // raw_data used in latest run (for feedback re-run)
 
 // ── Tab switching ─────────────────────────────────────────────
 function _mceSwitchRightTab(tab) {
@@ -6338,6 +6356,13 @@ function _mceSwitchRightTab(tab) {
       ? 'px-5 py-3 text-xs font-bold text-blue-700 border-b-2 border-blue-600 transition-colors'
       : 'px-5 py-3 text-xs font-medium text-slate-500 border-b-2 border-transparent hover:text-slate-700 transition-colors';
   });
+  // Feedback bar only shows when on Report tab AND a result exists
+  const fb = document.getElementById('mce-feedback-section');
+  if (fb && !fb.classList.contains('hidden') === false) {
+    // if already hidden (no result yet), keep hidden regardless of tab
+  } else if (fb && _mceLastTryRunResult) {
+    fb.classList.toggle('hidden', tab !== 'report');
+  }
 }
 
 function _mceSwitchMcpTab(tab) {
@@ -6596,6 +6621,9 @@ async function _mcpTryRun() {
       });
     }
 
+    // Capture raw data for feedback re-run
+    _mceLastRawData = formParams;
+
     if (!result.success) {
       _mceLogLine('✗', `執行失敗：${result.error || '未知錯誤'}`, 'text-red-600');
       if (ph) {
@@ -6679,6 +6707,13 @@ async function _mcpTryRun() {
     }
 
     _mceLogLine('✓', 'Try Run 完成 — 切換至報告…', 'text-emerald-600');
+
+    // Save result state for Detail Inspector + Feedback
+    _mceLastTryRunResult = result;
+    const feedbackSection = document.getElementById('mce-feedback-section');
+    if (feedbackSection) feedbackSection.classList.remove('hidden');
+    const detailBtn = document.getElementById('mce-detail-btn');
+    if (detailBtn) detailBtn.classList.remove('hidden');
 
     // Auto-save script to MCP if editing existing (skip if run-with-data — script already in DB)
     if (mcpId && result.script && !hasScript) {
@@ -8259,4 +8294,285 @@ function _escHtml(str) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+
+// ══════════════════════════════════════════════════════════════════
+// Builder Detail Inspector
+// ══════════════════════════════════════════════════════════════════
+
+let _bdiMode = 'mcp';   // 'mcp' | 'skill'
+let _bdiActiveTab = 'meta';
+
+function _openBuilderDetail(mode) {
+  _bdiMode = mode;
+  const panel = document.getElementById('builder-detail-inspector');
+  if (!panel) return;
+  panel.classList.remove('hidden');
+  const title = document.getElementById('bdi-title');
+  if (title) title.textContent = mode === 'skill'
+    ? '🔍 Skill Builder Detail Inspector'
+    : '🔍 MCP Builder Detail Inspector';
+  _bdiShowTab('meta');
+}
+
+function _closeBuilderDetail() {
+  document.getElementById('builder-detail-inspector')?.classList.add('hidden');
+}
+
+function _bdiShowTab(tab) {
+  _bdiActiveTab = tab;
+  ['meta', 'json', 'script', 'diag'].forEach(t => {
+    const btn = document.getElementById(`bdi-tab-btn-${t}`);
+    if (btn) btn.className = t === tab
+      ? 'flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 border-emerald-500 text-emerald-300 transition-colors'
+      : 'flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-colors';
+  });
+  _renderBdiContent(tab);
+}
+
+function _renderBdiContent(tab) {
+  const content = document.getElementById('bdi-content');
+  if (!content) return;
+
+  const result = _bdiMode === 'skill' ? _skLastDiagnosisResult : _mceLastTryRunResult;
+
+  if (tab === 'meta') {
+    if (!result) { content.innerHTML = '<p class="text-slate-500 text-xs">尚無執行結果</p>'; return; }
+    const rows = _bdiMode === 'mcp' ? [
+      ['✅ 成功', result.success ? 'Yes' : 'No'],
+      ['🧠 LLM 耗時', result.llm_elapsed_s ? `${result.llm_elapsed_s}s` : '—'],
+      ['⚙ 沙盒耗時', result.sandbox_elapsed_s ? `${result.sandbox_elapsed_s}s` : '—'],
+      ['📥 輸入筆數', result.input_records || '—'],
+      ['📤 輸出筆數', result.output_records || '—'],
+      ['📊 Charts', (result.output_data?.ui_render?.charts || []).length],
+    ] : [
+      ['📋 Status', result.status || '—'],
+      ['🔬 Diagnosis', result.diagnosis_message || '—'],
+      ['⏱ LLM 耗時', result.llm_elapsed_s ? `${result.llm_elapsed_s}s` : '—'],
+      ['🔴 Problem Object', JSON.stringify(result.problem_object || {})],
+      ['⏰ Timestamp', result.timestamp || '—'],
+    ];
+    content.innerHTML = `<table class="w-full text-[11px]">
+      ${rows.map(([k,v]) => `<tr class="border-b border-slate-800"><td class="py-2 pr-4 text-slate-400 font-semibold whitespace-nowrap">${_esc(k)}</td><td class="py-2 text-slate-200">${_esc(String(v))}</td></tr>`).join('')}
+    </table>`;
+  } else if (tab === 'json') {
+    const obj = _bdiMode === 'mcp' ? (_mceLastTryRunResult?.output_data || null) : _skLastDiagnosisResult;
+    content.innerHTML = obj
+      ? `<pre class="text-[11px] text-green-300 whitespace-pre-wrap leading-relaxed">${_esc(JSON.stringify(obj, null, 2))}</pre>`
+      : '<p class="text-slate-500 text-xs">尚無 JSON 資料</p>';
+  } else if (tab === 'script') {
+    const script = _bdiMode === 'mcp'
+      ? (_mceLastTryRunResult?.script || _mceCurrentMcp?.processing_script || null)
+      : (_skLastDiagnosisResult?.generated_code || null);
+    content.innerHTML = script
+      ? `<pre class="text-[11px] text-blue-200 whitespace-pre-wrap leading-relaxed">${_esc(script)}</pre>`
+      : '<p class="text-slate-500 text-xs">尚無腳本</p>';
+  } else if (tab === 'diag') {
+    if (_bdiMode === 'skill') {
+      const d = _skLastDiagnosisResult;
+      if (!d) { content.innerHTML = '<p class="text-slate-500 text-xs">尚無診斷結果</p>'; return; }
+      const color = d.status === 'ABNORMAL' ? 'text-red-400' : 'text-emerald-400';
+      content.innerHTML = `<div class="space-y-3">
+        <div class="text-base font-bold ${color}">${_esc(d.status || '—')}</div>
+        <div class="text-slate-300 text-xs">${_esc(d.diagnosis_message || '—')}</div>
+        <div class="text-[10px] text-slate-500 font-semibold uppercase">Problem Object</div>
+        <pre class="text-[11px] text-amber-300 whitespace-pre-wrap">${_esc(JSON.stringify(d.problem_object || {}, null, 2))}</pre>
+      </div>`;
+    } else {
+      const schema = _mceLastTryRunResult?.output_schema;
+      if (!schema) { content.innerHTML = '<p class="text-slate-500 text-xs">尚無輸出 Schema</p>'; return; }
+      const fields = schema.fields || [];
+      content.innerHTML = `<table class="w-full text-[11px]">
+        <tr class="text-slate-400 border-b border-slate-700"><th class="text-left py-1 pr-3">欄位</th><th class="text-left py-1 pr-3">型別</th><th class="text-left py-1">說明</th></tr>
+        ${fields.map(f => `<tr class="border-b border-slate-800"><td class="py-1.5 pr-3 text-emerald-300">${_esc(f.name||'')}</td><td class="py-1.5 pr-3 text-blue-300">${_esc(f.type||'')}</td><td class="py-1.5 text-slate-300">${_esc(f.description||'')}</td></tr>`).join('')}
+      </table>`;
+    }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// MCP Feedback Submit
+// ══════════════════════════════════════════════════════════════════
+
+async function _mceSubmitFeedback(forceRegen = false) {
+  const feedback = document.getElementById('mce-feedback-text')?.value?.trim();
+  if (!feedback) { alert('請填寫回饋說明'); return; }
+  const mcpId = parseInt(document.getElementById('mce-edit-id')?.value) || null;
+  if (!mcpId) { alert('請先儲存 MCP 再提交回饋'); return; }
+  if (!_mceLastRawData) { alert('請先執行 Try Run 取得資料'); return; }
+
+  // Disable both buttons
+  const btnReflect = document.getElementById('mce-feedback-btn-reflect');
+  const btnRegen   = document.getElementById('mce-feedback-btn-regen');
+  const label = forceRegen ? '⏳ LLM 重新生成腳本...' : '⏳ AI 反思修正中...';
+  if (btnReflect) { btnReflect.disabled = true; }
+  if (btnRegen)   { btnRegen.disabled = true; btnRegen.textContent = label; }
+  if (!forceRegen && btnReflect) btnReflect.textContent = label;
+
+  // Switch to Logs tab and clear old logs before writing fresh ones
+  _mceSwitchRightTab('logs');
+  document.getElementById('mce-exec-log-lines').innerHTML = '';
+  document.getElementById('mce-exec-log')?.classList.remove('hidden');
+  document.getElementById('mce-console-placeholder')?.classList.add('hidden');
+  const dot = document.getElementById('mce-console-status-dot');
+  if (dot) dot.classList.remove('hidden');
+  _mceLogLine('💬', `用戶回饋：${feedback}`, 'text-amber-600');
+  _mceLogLine(forceRegen ? '✨' : '🔄', forceRegen ? 'LLM 重新生成腳本（Force Regen）…' : 'AI 反思修正腳本…');
+
+  // Build previous_result_summary
+  const prev = _mceLastTryRunResult;
+  const prevCharts = prev?.output_data?.ui_render?.charts || [];
+  const prevRows = prev?.output_data?.dataset?.length || 0;
+  const prevSummary = prev
+    ? `charts=${prevCharts.length}, dataset_rows=${prevRows}, success=${prev.success}`
+    : '';
+
+  try {
+    const result = await _api('POST', `/mcp-definitions/${mcpId}/run-with-feedback`, {
+      input_params: _mceLastRawData,
+      user_feedback: feedback,
+      previous_result_summary: prevSummary,
+      force_regen: forceRegen,
+    });
+
+    // Show reflection in logs
+    if (result.reflection) {
+      _mceLogLine('💡', `AI 反思：${result.reflection}`, 'text-amber-600');
+    }
+
+    // Show reflection banner in report
+    const banner = document.getElementById('mce-reflection-banner');
+    const reflText = document.getElementById('mce-reflection-text');
+    if (banner && reflText) {
+      reflText.textContent = result.reflection || '(無反思內容)';
+      banner.classList.remove('hidden');
+    }
+
+    if (result.rerun_success && result.output_data) {
+      _mceLogLine('✓', `重跑成功 — charts=${(result.output_data?.ui_render?.charts||[]).length}, rows=${(result.output_data?.dataset||[]).length}`, 'text-emerald-600');
+      _mceLastTryRunResult = { ...prev, output_data: result.output_data, script: result.revised_script || prev?.script };
+
+      // Re-render charts
+      const uiRender = result.output_data.ui_render || {};
+      const newCharts = uiRender.charts || [];
+      const dataset   = Array.isArray(result.output_data.dataset) ? result.output_data.dataset : [];
+      const chartEl   = document.getElementById('mce-mcp-tab-charting');
+      const sumEl     = document.getElementById('mce-mcp-tab-summary');
+      const rawTabEl  = document.getElementById('mce-mcp-tab-raw');
+      if (chartEl) {
+        if (newCharts.length) {
+          chartEl.innerHTML = '';
+          newCharts.forEach(chartJson => {
+            const wrapper = document.createElement('div');
+            wrapper.style.cssText = 'height:380px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;margin-bottom:8px;';
+            chartEl.appendChild(wrapper);
+            try {
+              const figData = typeof chartJson === 'string' ? JSON.parse(chartJson) : chartJson;
+              const fl = figData.layout || {};
+              const m = Object.assign({l:50,r:20,t:40,b:40}, fl.margin||{});
+              if (fl.title && m.t < 55) m.t = 55;
+              Plotly.newPlot(wrapper, figData.data||[], {...fl, paper_bgcolor:'#f8fafc', plot_bgcolor:'#ffffff', font:{color:'#334155',size:11}, margin:m}, {responsive:true});
+            } catch(e) { wrapper.innerHTML = `<p class="text-xs text-red-500 p-3">渲染失敗：${_esc(e.message)}</p>`; }
+          });
+        } else {
+          chartEl.innerHTML = `<div class="flex items-center justify-center h-24 text-slate-400 text-sm">無圖表資料</div>`;
+        }
+      }
+      if (sumEl) _nbRenderDataGrid(sumEl, dataset, '無摘要資料');
+      if (rawTabEl) _nbRenderDataGrid(rawTabEl, result.output_data._raw_dataset || [], '無原始資料');
+
+      // Update data/format review on left panel
+      const rawEl = document.getElementById('mce-data-review');
+      if (rawEl) _nbRenderDataGrid(rawEl, result.output_data._raw_dataset || dataset, '無原始資料');
+
+      // Switch to report after a moment
+      setTimeout(() => _mceSwitchRightTab('report'), 500);
+      setTimeout(() => _mceSwitchMcpTab('charting'), 550);
+
+    } else {
+      const errMsg = result.error || '未知錯誤';
+      _mceLogLine('✗', `重跑失敗：${errMsg}`, 'text-red-600');
+      if (reflText) reflText.textContent += `\n\n⚠️ 重跑失敗：${errMsg}`;
+    }
+
+    // Clear textarea
+    const textEl = document.getElementById('mce-feedback-text');
+    if (textEl) textEl.value = '';
+
+  } catch(e) {
+    _mceLogLine('✗', `回饋提交失敗：${e.message}`, 'text-red-600');
+  } finally {
+    if (dot) dot.classList.add('hidden');
+    if (btnReflect) { btnReflect.disabled = false; btnReflect.textContent = '🔄 修正腳本 + 反思'; }
+    if (btnRegen)   { btnRegen.disabled = false;   btnRegen.textContent = '✨ 重新生成腳本'; }
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// Skill Feedback Submit
+// ══════════════════════════════════════════════════════════════════
+
+async function _skSubmitFeedback() {
+  const feedback = document.getElementById('sk-feedback-text')?.value?.trim();
+  if (!feedback) { alert('請填寫回饋說明'); return; }
+  const skillId = parseInt(document.getElementById('sk-edit-id')?.value) || null;
+  if (!skillId) { alert('請先儲存 Skill 再提交回饋'); return; }
+  if (!_skLastMcpSampleOutputs) { alert('請先執行 Try Run 取得資料'); return; }
+
+  const btn = document.querySelector('#sk-feedback-section button');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ AI 反思中...'; }
+
+  const prev = _skLastDiagnosisResult;
+  const prevSummary = prev
+    ? `status=${prev.status}, diagnosis_message="${(prev.diagnosis_message||'').slice(0,80)}"`
+    : '';
+
+  try {
+    const result = await _api('POST', `/skill-definitions/${skillId}/diagnose-with-feedback`, {
+      mcp_sample_outputs:       _skLastMcpSampleOutputs,
+      user_feedback:            feedback,
+      previous_result_summary:  prevSummary,
+    });
+
+    // Show reflection banner
+    const banner = document.getElementById('sk-reflection-banner');
+    const reflText = document.getElementById('sk-reflection-text');
+    if (banner && reflText) {
+      reflText.textContent = result.reflection || '(無反思內容)';
+      banner.classList.remove('hidden');
+    }
+
+    // If re-run succeeded, update diagnosis card
+    if (result.rerun_success) {
+      _skLastDiagnosisResult = {
+        status:            result.status || '',
+        diagnosis_message: result.diagnosis_message || '',
+        problem_object:    result.problem_object || {},
+        timestamp:         new Date().toISOString(),
+      };
+      _skRenderDiagnosis({
+        ...result,
+        skillName:    document.getElementById('sk-edit-name')?.value?.trim() || 'Skill',
+        expertAction: document.getElementById('sk-edit-action')?.value?.trim() || '',
+      });
+
+      // Update diagnostic_prompt textarea if revised
+      if (result.revised_prompt) {
+        const promptEl = document.getElementById('sk-edit-prompt');
+        if (promptEl) promptEl.value = result.revised_prompt;
+      }
+    } else if (!result.rerun_success && result.error) {
+      if (banner) document.getElementById('sk-reflection-text').textContent +=
+        `\n\n⚠️ 重跑失敗：${result.error}`;
+    }
+
+    const textEl = document.getElementById('sk-feedback-text');
+    if (textEl) textEl.value = '';
+
+  } catch(e) {
+    alert(`回饋提交失敗：${e.message}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 重跑診斷 + AI 反思'; }
+  }
 }

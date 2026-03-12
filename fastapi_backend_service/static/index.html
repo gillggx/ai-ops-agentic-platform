@@ -910,6 +910,25 @@
               <!-- Copilot tool tag (shown when a tool is pre-selected via slash menu) -->
               <div id="copilot-tool-tag-wrap" class="hidden"></div>
 
+              <!-- v15.4 Tool Palette — quick tool discovery above input -->
+              <div class="relative mb-1.5" id="tool-palette-wrap">
+                <button onclick="_toolPaletteToggle()"
+                        class="flex items-center gap-1.5 text-xs text-purple-600 hover:text-purple-700 font-semibold transition-colors group">
+                  <svg class="w-3.5 h-3.5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                  </svg>
+                  <span>我的工具庫</span>
+                  <span id="tool-palette-count"
+                        class="hidden bg-purple-100 text-purple-700 text-[10px] rounded-full px-1.5 font-bold leading-5"></span>
+                </button>
+                <!-- Dropdown panel — floats above input row -->
+                <div id="tool-palette-panel"
+                     class="hidden absolute bottom-full left-0 mb-2 bg-white border border-slate-200 rounded-xl shadow-2xl z-50"
+                     style="width:min(420px,90vw);max-height:440px;overflow-y:auto;">
+                  <div id="tool-palette-content" class="p-3"></div>
+                </div>
+              </div>
+
               <!-- Input row — wrapper has position:relative so slash menu can pop above -->
               <div class="flex gap-2 items-end" style="position:relative;">
                 <!-- Slash command popup — rendered by JS into #slash-menu-anchor -->
@@ -1038,6 +1057,10 @@
                     <div class="w-3 h-px bg-slate-600"></div>
                     <div class="v14-stage-dot w-5 h-5 rounded-full bg-slate-600 text-[9px] flex items-center justify-center font-bold text-slate-400" data-stage="5" title="記憶寫入">5</div>
                   </div>
+                  <button onclick="_openTraceInspector()"
+                          class="text-[10px] font-mono text-purple-400 hover:text-purple-200 border border-purple-700/50 hover:border-purple-400/60 rounded px-1.5 py-0.5 transition-colors">
+                    Detail 🔍
+                  </button>
                   <button onclick="_diagConsoleClear()"
                           class="text-[10px] font-mono text-slate-500 hover:text-slate-300 transition-colors">clear</button>
                   <button onclick="_diagConsoleToggle()" class="text-slate-500 hover:text-slate-300 transition-colors">
@@ -1190,6 +1213,9 @@
                 <span id="mcp-editor-title" class="font-semibold text-sm text-slate-700">新增 MCP</span>
               </div>
               <div class="flex items-center gap-2">
+                <button id="mce-detail-btn" onclick="_openBuilderDetail('mcp')"
+                        class="hidden builder-btn-secondary text-sm px-3 py-2 gap-1 items-center"
+                        title="Detail Inspector">🔍 Details</button>
                 <button onclick="_mcpSave()" class="builder-btn-secondary text-sm px-4 py-2">💾 儲存</button>
                 <button id="mce-run-btn" onclick="_mcpTryRun()" class="builder-btn-primary text-sm px-4 py-2">▶ Try Run</button>
               </div>
@@ -1353,6 +1379,29 @@
                     <div id="mce-mcp-tab-raw" class="hidden pt-3"></div>
                   </div>
                 </div>
+                <!-- Feedback section — sticky bottom bar, outside scroll area -->
+                <div id="mce-feedback-section"
+                     class="hidden flex-shrink-0 border-t border-slate-200 bg-white px-4 py-3 flex flex-col gap-2">
+                  <div id="mce-reflection-banner" class="hidden bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    <div class="text-[10px] font-bold text-amber-700 uppercase tracking-widest mb-0.5">💡 AI 反思</div>
+                    <div id="mce-reflection-text" class="text-xs text-amber-800 leading-relaxed"></div>
+                  </div>
+                  <div class="flex items-end gap-2">
+                    <textarea id="mce-feedback-text" rows="2"
+                      placeholder="對結果不滿意？告訴 AI 哪裡不對：例：圖表是空的；應該顯示 OOC 點但沒有..."
+                      class="flex-1 text-xs border border-slate-300 rounded-lg px-3 py-2 resize-none focus:outline-none focus:border-emerald-500"></textarea>
+                    <div class="flex flex-col gap-1.5 flex-shrink-0">
+                      <button onclick="_mceSubmitFeedback(false)" id="mce-feedback-btn-reflect"
+                              class="text-xs px-3 py-1.5 bg-slate-600 hover:bg-slate-500 text-white rounded-lg font-semibold transition-colors whitespace-nowrap">
+                        🔄 修正腳本
+                      </button>
+                      <button onclick="_mceSubmitFeedback(true)" id="mce-feedback-btn-regen"
+                              class="text-xs px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold transition-colors whitespace-nowrap">
+                        ✨ 重新生成
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div><!-- /RIGHT panel -->
 
             </div><!-- /L/R split -->
@@ -1414,6 +1463,9 @@
                     ⌨️ Raw
                   </button>
                 </div>
+                <button id="sk-detail-btn" onclick="_openBuilderDetail('skill')"
+                        class="hidden builder-btn-secondary text-sm px-3 py-2"
+                        title="Detail Inspector">🔍 Details</button>
                 <button onclick="_skSave()" class="builder-btn-secondary text-sm px-4 py-2">💾 儲存</button>
                 <button id="sk-run-btn" onclick="_skTryRun()" class="builder-btn-primary text-sm px-4 py-2">▶ Try Run</button>
               </div>
@@ -1682,6 +1734,23 @@
                     <div id="sk-mcp-tab-charting" class="pt-3 min-h-24"></div>
                     <div id="sk-mcp-tab-summary" class="hidden pt-3"></div>
                     <div id="sk-mcp-tab-raw" class="hidden pt-3"></div>
+                  </div>
+                </div>
+                <!-- Skill Feedback section — sticky bottom bar -->
+                <div id="sk-feedback-section"
+                     class="hidden flex-shrink-0 border-t border-slate-200 bg-white px-4 py-3 flex flex-col gap-2">
+                  <div id="sk-reflection-banner" class="hidden bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    <div class="text-[10px] font-bold text-amber-700 uppercase tracking-widest mb-0.5">💡 AI 反思</div>
+                    <div id="sk-reflection-text" class="text-xs text-amber-800 leading-relaxed"></div>
+                  </div>
+                  <div class="flex items-end gap-2">
+                    <textarea id="sk-feedback-text" rows="2"
+                      placeholder="對診斷不滿意？說明哪裡判斷錯了：例：資料有異常但結果是 NORMAL..."
+                      class="flex-1 text-xs border border-slate-300 rounded-lg px-3 py-2 resize-none focus:outline-none focus:border-purple-500"></textarea>
+                    <button onclick="_skSubmitFeedback()" id="sk-feedback-btn"
+                            class="flex-shrink-0 text-xs px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-semibold transition-colors whitespace-nowrap">
+                      🔄 重跑診斷
+                    </button>
                   </div>
                 </div>
               </div><!-- /RIGHT panel -->
@@ -2235,6 +2304,87 @@
             title="關閉">✕</button>
     <div id="chart-fullscreen-inner" onclick="event.stopPropagation()">
       <div id="chart-fullscreen-target" style="width:100%;height:100%"></div>
+    </div>
+  </div>
+
+  <!-- ═══ v15.4 Agentic Trace Inspector Overlay ═══ -->
+  <div id="trace-inspector" class="hidden fixed inset-0 z-[200] bg-black/70 backdrop-blur-sm flex items-end"
+       onclick="if(event.target===this)_closeTraceInspector()">
+    <div class="w-full bg-slate-900 border-t border-purple-500/50 rounded-t-2xl shadow-2xl flex flex-col"
+         style="max-height:80vh;">
+      <!-- Header -->
+      <div class="flex items-center justify-between px-4 py-3 border-b border-slate-700 flex-shrink-0">
+        <div class="flex items-center gap-3">
+          <span class="text-purple-300 font-bold text-sm">🔍 Agentic Trace Inspector</span>
+          <span class="text-[10px] text-slate-500 font-mono bg-slate-800 px-2 py-0.5 rounded">v15.4 XAI</span>
+        </div>
+        <button onclick="_closeTraceInspector()"
+                class="text-slate-400 hover:text-white text-xl leading-none w-7 h-7 flex items-center justify-center rounded-md hover:bg-slate-700 transition-colors">✕</button>
+      </div>
+      <!-- Tabs -->
+      <div class="flex border-b border-slate-700 flex-shrink-0 overflow-x-auto">
+        <button id="trace-tab-btn-reasoning" onclick="_traceShowTab('reasoning')"
+                class="flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 border-purple-500 text-purple-300 transition-colors">
+          💭 A. 推理鏈
+        </button>
+        <button id="trace-tab-btn-plan" onclick="_traceShowTab('plan')"
+                class="flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-colors">
+          📋 B. 計畫圖紙
+        </button>
+        <button id="trace-tab-btn-sandbox" onclick="_traceShowTab('sandbox')"
+                class="flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-colors">
+          🔬 C. 沙盒足跡
+        </button>
+        <button id="trace-tab-btn-memory" onclick="_traceShowTab('memory')"
+                class="flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-colors">
+          🧠 D. 記憶溯源
+        </button>
+      </div>
+      <!-- Content -->
+      <div id="trace-content"
+           class="overflow-y-auto flex-1 p-4 space-y-3 font-mono text-xs text-slate-300"
+           style="min-height:220px;"></div>
+    </div>
+  </div>
+
+  <!-- ══ BUILDER DETAIL INSPECTOR ══ -->
+  <div id="builder-detail-inspector"
+       class="hidden fixed inset-0 z-[200] bg-black/70 backdrop-blur-sm flex items-end"
+       onclick="if(event.target===this)_closeBuilderDetail()">
+    <div class="w-full bg-slate-900 border-t border-emerald-500/50 rounded-t-2xl shadow-2xl flex flex-col"
+         style="max-height:80vh;">
+      <!-- Header -->
+      <div class="flex items-center justify-between px-4 py-3 border-b border-slate-700 flex-shrink-0">
+        <div class="flex items-center gap-3">
+          <span id="bdi-title" class="text-emerald-300 font-bold text-sm">🔍 Builder Detail Inspector</span>
+          <span class="text-[10px] text-slate-500 font-mono bg-slate-800 px-2 py-0.5 rounded">XAI</span>
+        </div>
+        <button onclick="_closeBuilderDetail()"
+                class="text-slate-400 hover:text-white text-xl leading-none w-7 h-7 flex items-center justify-center rounded-md hover:bg-slate-700 transition-colors">✕</button>
+      </div>
+      <!-- Tabs -->
+      <div class="flex border-b border-slate-700 flex-shrink-0 overflow-x-auto">
+        <button id="bdi-tab-btn-meta" onclick="_bdiShowTab('meta')"
+                class="flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 border-emerald-500 text-emerald-300 transition-colors">
+          📋 執行元資料
+        </button>
+        <button id="bdi-tab-btn-json" onclick="_bdiShowTab('json')"
+                class="flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-colors">
+          {} Raw JSON
+        </button>
+        <button id="bdi-tab-btn-script" onclick="_bdiShowTab('script')"
+                class="flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-colors">
+          🐍 Processing Script
+        </button>
+        <button id="bdi-tab-btn-diag" onclick="_bdiShowTab('diag')"
+                class="flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-colors">
+          🧪 診斷結果
+        </button>
+      </div>
+      <!-- Content -->
+      <div id="bdi-content"
+           class="overflow-y-auto flex-1 p-4 font-mono text-xs text-slate-300"
+           style="min-height:220px;"></div>
     </div>
   </div>
 

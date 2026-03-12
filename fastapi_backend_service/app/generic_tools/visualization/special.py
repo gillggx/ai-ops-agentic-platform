@@ -14,7 +14,7 @@ import math
 import random
 from typing import Any, Dict, List
 
-from app.generic_tools._base import ToolResult, _plotly_to_payload, _safe_float
+from app.generic_tools._base import ToolResult, _plotly_to_payload, _safe_float, _apply_tight_range
 
 EDA_COLORS = ["#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B3", "#937860", "#DA8BC3", "#8C8C8C"]
 
@@ -58,6 +58,7 @@ def plot_candlestick(data: List[Dict[str, Any]], **params) -> Dict[str, Any]:
             low=[_safe_float(r.get(low_col)) for r in data],
             close=[_safe_float(r.get(close_col)) for r in data],
         )], layout=go.Layout(title=title))
+        _apply_tight_range(fig, x_vals=x_vals)
         return ToolResult.ok(f"Candlestick: {len(data)} candles", _plotly_to_payload(fig))
     except Exception as exc:
         return ToolResult.err(f"plot_candlestick failed: {exc}")

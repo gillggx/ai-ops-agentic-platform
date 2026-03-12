@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from app.generic_tools._base import ToolResult, _plotly_to_payload, _safe_float
+from app.generic_tools._base import ToolResult, _plotly_to_payload, _safe_float, _apply_tight_range
 
 
 def _extract_col(data: List[Dict], col: str) -> List:
@@ -32,6 +32,7 @@ def plot_line(data: List[Dict[str, Any]], **params) -> Dict[str, Any]:
         traces = [go.Scatter(x=x_vals, y=_extract_col(data, y), mode="lines+markers",
                              name=y) for y in y_cols]
         fig = go.Figure(data=traces, layout=go.Layout(title=title))
+        _apply_tight_range(fig, x_vals=x_vals, y_vals_list=[_extract_col(data, y) for y in y_cols])
         return ToolResult.ok(f"Line chart: {len(y_cols)} series, {len(data)} points",
                              _plotly_to_payload(fig))
     except Exception as exc:
@@ -56,6 +57,7 @@ def plot_bar(data: List[Dict[str, Any]], **params) -> Dict[str, Any]:
         x_vals = _extract_col(data, x_col) if x_col else list(range(len(data)))
         traces = [go.Bar(x=x_vals, y=_extract_col(data, y), name=y) for y in y_cols]
         fig = go.Figure(data=traces, layout=go.Layout(title=title, barmode=barmode))
+        _apply_tight_range(fig, x_vals=x_vals, y_vals_list=[_extract_col(data, y) for y in y_cols])
         return ToolResult.ok(f"Bar chart: {len(y_cols)} series, {len(data)} bars",
                              _plotly_to_payload(fig))
     except Exception as exc:
@@ -102,6 +104,7 @@ def plot_scatter(data: List[Dict[str, Any]], **params) -> Dict[str, Any]:
         fig = go.Figure(data=traces,
                         layout=go.Layout(title=title,
                                          xaxis_title=x_col, yaxis_title=y_col))
+        _apply_tight_range(fig, x_vals=x_vals, y_vals_list=[y_vals])
         return ToolResult.ok(f"Scatter: '{x_col}' vs '{y_col}', {len(data)} points",
                              _plotly_to_payload(fig))
     except Exception as exc:
@@ -176,6 +179,7 @@ def plot_area(data: List[Dict[str, Any]], **params) -> Dict[str, Any]:
         fig = go.Figure(data=[go.Scatter(x=x_vals, y=y_vals, fill="tozeroy",
                                          mode="lines", name=y_col)],
                         layout=go.Layout(title=title))
+        _apply_tight_range(fig, x_vals=x_vals, y_vals_list=[y_vals])
         return ToolResult.ok(f"Area chart: '{y_col}', {len(data)} points", _plotly_to_payload(fig))
     except Exception as exc:
         return ToolResult.err(f"plot_area failed: {exc}")
@@ -202,6 +206,7 @@ def plot_step_line(data: List[Dict[str, Any]], **params) -> Dict[str, Any]:
                              name=y_col)],
             layout=go.Layout(title=title),
         )
+        _apply_tight_range(fig, x_vals=x_vals, y_vals_list=[y_vals])
         return ToolResult.ok(f"Step line: '{y_col}', {len(data)} steps", _plotly_to_payload(fig))
     except Exception as exc:
         return ToolResult.err(f"plot_step_line failed: {exc}")

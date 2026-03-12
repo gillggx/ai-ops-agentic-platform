@@ -360,6 +360,15 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
             "  線性回歸   → coeffs = np.polyfit(range(len(df)), df['value'], 1)\n"
             "  統計量     → df['value'].describe().to_dict()\n"
             "  Plotly 圖  → fig = go.Figure(...); return {'chart_data': fig.to_json()}\n"
+            "【視覺化鐵律 — 必須遵守，否則圖表無法正確呈現 100+ 點】\n"
+            "  1. 散點圖/時序圖 X 軸：永遠用 df.index 或 range(len(df))，禁止用 datetime 欄位作 X 軸。\n"
+            "     原因：datetime 欄位值相近時點位會在視覺上重疊，100 點看起來只有 5 點。\n"
+            "     例外：只有在用戶明確要求「時間軸」時才用 datetime，且必須加 xaxis_rangebreaks。\n"
+            "  2. 若資料有 datetime 欄位且用戶想看時間，改用 hovertext 顯示時間（不當 X 軸）。\n"
+            "  3. 多點重疊時必須加 opacity=0.6, marker_size=5（禁止用預設 marker_size=10）。\n"
+            "  4. Z-Score / 異常偵測圖標準寫法：\n"
+            "     x=list(range(len(df)))  # 用 index 確保所有點可見\n"
+            "     hover_text=[str(t) for t in df['datetime_col']]  # 時間放 hover\n"
             "⚠️ 禁止在 python_code 裡 import requests/os/sys/subprocess"
         ),
         "input_schema": {
@@ -389,10 +398,27 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     {
         "name": "execute_utility",
         "description": (
-            "呼叫通用工具庫中的 50 個分析/可視化函式（僅適合 inline 小型資料，< 20 筆）。\n"
+            "呼叫兵工廠 150 個原子通用工具（75 分析 + 75 視覺化），僅適合 inline 小型資料（< 20 筆）。\n"
             "⚠️ 大型 MCP 資料請改用 execute_jit（不需傳遞資料列）。\n"
-            "常用：calc_statistics / find_outliers / correlation_analysis / linear_regression /\n"
-            "      plot_line / plot_bar / plot_scatter / plot_histogram / plot_box / plot_heatmap"
+            "【分析工具（75）】統計: calc_statistics, find_outliers, correlation_analysis, linear_regression, "
+            "chi_square_test, t_test, anova_test, pca_analysis, kmeans_cluster, dbscan_cluster, "
+            "isolation_forest, z_score_normalize, min_max_scale, robust_scale, winsorize, "
+            "binning_equal_width, binning_quantile, target_encode, label_encode, "
+            "moving_average, exponential_smoothing, seasonal_decompose, acf_pacf, "
+            "change_point_detect, trend_test, granger_causality, cross_correlation, "
+            "time_weighted_average, resample_time_series, interpolate_missing, "
+            "frequency_analysis, top_n_values, value_counts_stats, cross_reference, "
+            "logic_evaluator, spc_control_limits, cpk_ppk, gage_r_r, "
+            "survival_analysis, forecast_ets, forecast_arima, forecast_prophet "
+            "及更多...\n"
+            "【視覺化工具（75）】plot_line, plot_bar, plot_scatter, plot_histogram, plot_box, "
+            "plot_heatmap, plot_pie, plot_area, plot_bubble, plot_violin, "
+            "plot_spc_chart, plot_pareto, plot_waterfall, plot_gantt, "
+            "plot_correlation_matrix, plot_acf_pacf, plot_3d_scatter, plot_3d_surface, "
+            "plot_radar, plot_sankey, plot_treemap, plot_sunburst, "
+            "plot_candlestick, plot_bullet_chart, plot_gauge, plot_event_markers "
+            "及更多...\n"
+            "如用戶問「你有什麼分析工具」，請直接列舉以上類別。"
         ),
         "input_schema": {
             "type": "object",

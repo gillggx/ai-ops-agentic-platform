@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List
 
-from app.generic_tools._base import ToolResult, _plotly_to_payload, _safe_float
+from app.generic_tools._base import ToolResult, _plotly_to_payload, _safe_float, _apply_tight_range
 
 EDA_COLORS = ["#4C72B0", "#DD8452", "#55A868", "#C44E52", "#8172B3", "#937860", "#DA8BC3", "#8C8C8C"]
 
@@ -263,6 +263,7 @@ def plot_bubble(data: List[Dict[str, Any]], **params) -> Dict[str, Any]:
                              marker=marker, name=title)],
             layout=go.Layout(title=title, xaxis_title=x_col, yaxis_title=y_col),
         )
+        _apply_tight_range(fig, x_vals=x_vals, y_vals_list=[y_vals])
         return ToolResult.ok(f"Bubble: '{x_col}' vs '{y_col}', {len(data)} bubbles",
                              _plotly_to_payload(fig))
     except Exception as exc:
@@ -298,6 +299,7 @@ def plot_dual_axis(data: List[Dict[str, Any]], **params) -> Dict[str, Any]:
             yaxis={"title": y1_col},
             yaxis2={"title": y2_col, "overlaying": "y", "side": "right"},
         )
+        _apply_tight_range(fig, x_vals=x_vals)
         return ToolResult.ok(f"Dual axis: '{y1_col}' (bar) + '{y2_col}' (line)",
                              _plotly_to_payload(fig))
     except Exception as exc:
@@ -800,6 +802,7 @@ def plot_event_markers(data: List[Dict[str, Any]], **params) -> Dict[str, Any]:
                 fig.add_vline(x=idx, line_color="#CC0000", line_dash="dot",
                                annotation_text=str(evt), annotation_font_size=9)
         _eda_layout(fig, title, n)
+        _apply_tight_range(fig, x_vals=x_vals)
         return ToolResult.ok(f"Event markers '{value_col}' (n={n})", _plotly_to_payload(fig))
     except Exception as exc:
         return ToolResult.err(f"plot_event_markers failed: {exc}")
@@ -1117,6 +1120,7 @@ def plot_outlier_flags(data: List[Dict[str, Any]], **params) -> Dict[str, Any]:
                             text=f"threshold={threshold}σ  outliers={len(out_x)}/{n}  mean={mean:.3f}",
                             showarrow=False, font=dict(size=9, color="#666"),
                             align="left", bgcolor="rgba(255,255,255,0.8)")
+        _apply_tight_range(fig, x_vals=x_vals)
         return ToolResult.ok(f"Outlier flags '{value_col}' (n={n}, {len(out_x)} outliers)",
                              _plotly_to_payload(fig))
     except Exception as exc:

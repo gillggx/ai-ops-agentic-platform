@@ -125,3 +125,27 @@ class MCPRunWithDataRequest(BaseModel):
     against test data fetched from the DataSubject API.
     """
     raw_data: Any = Field(..., description="Raw data from DataSubject API (dict or list)")
+
+
+class MCPRunWithFeedbackRequest(BaseModel):
+    """Re-run MCP with user feedback → triggers LLM reflection + revised script + sandbox re-exec."""
+    input_params: Any = Field(..., description="Form params used in the previous run (e.g. {lot_id, tool_id})")
+    user_feedback: str = Field(..., min_length=1, description="User's description of what went wrong")
+    previous_result_summary: Optional[str] = Field(
+        default=None,
+        description="Brief description of previous result (e.g. 'chart was empty, only 3 rows in dataset')"
+    )
+    force_regen: bool = Field(
+        default=False,
+        description="If True, discard current script and call full LLM re-generation (try_run) with feedback as extra context"
+    )
+
+
+class MCPRunWithFeedbackResponse(BaseModel):
+    """Result of feedback-triggered re-run."""
+    reflection: str = ""          # LLM's analysis of what went wrong
+    revised_script: str = ""      # LLM's revised processing_script
+    rerun_success: bool = False
+    output_data: Dict[str, Any] = {}
+    error: Optional[str] = None
+    feedback_log_id: Optional[int] = None

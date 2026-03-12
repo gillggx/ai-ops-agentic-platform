@@ -41,6 +41,16 @@ let _slashMenuItems  = null;   // cached {mcps, skills} for slash menu
 let _v13Mode      = true;    // default to v13 Agent (real agentic loop)
 let _v13SessionId = null;    // persist session_id across turns
 
+// ── v15.4 Trace Inspector state ───────────────────────────────────
+let _traceReasoning  = [];   // [{iteration, text}]
+let _tracePlan       = '';   // Stage 2 blueprint (<plan> tag)
+let _tracePlanDiff   = '';   // Stage 4 revised plan
+let _traceStages     = [];   // [{stage, label, status, ts}] — always populated
+let _traceSandbox    = [];   // [{tool, iteration, input, code, summary}] — all tools
+let _traceMemory     = [];   // memory_write events
+let _traceSynthesis  = '';   // final synthesis text
+let _traceActiveTab  = 'reasoning';
+
 // ── Help Chat global state ──────────────────────────────────────
 let _helpPanelOpen     = false;
 let _helpWelcomeShown  = false;   // guard: show welcome bubble only once per session
@@ -1733,15 +1743,18 @@ async function _showSlashMenu() {
 
   if (!_slashMenuItems) {
     try {
-      const [mcpRes, skillRes] = await Promise.all([
+      const [mcpRes, skillRes, agentToolRes] = await Promise.all([
         fetch('/api/v1/mcp-definitions',   { headers: { Authorization: `Bearer ${_token}` } }),
         fetch('/api/v1/skill-definitions', { headers: { Authorization: `Bearer ${_token}` } }),
+        fetch('/api/v1/agent-tools',       { headers: { Authorization: `Bearer ${_token}` } }),
       ]);
-      const mcpJson   = await mcpRes.json();
-      const skillJson = await skillRes.json();
+      const mcpJson       = await mcpRes.json();
+      const skillJson     = await skillRes.json();
+      const agentToolJson = await agentToolRes.json();
       _slashMenuItems = {
-        mcps:   mcpJson.data   || [],
-        skills: skillJson.data || [],
+        mcps:        mcpJson.data        || [],
+        skills:      skillJson.data      || [],
+        agentTools:  agentToolJson.data?.items || [],
       };
     } catch {
       if (anchor) anchor.innerHTML = '<div class="slash-menu"><div class="p-3 text-xs text-red-400">工具清單載入失敗</div></div>';
@@ -1751,14 +1764,46 @@ async function _showSlashMenu() {
 
   if (!_slashMenuVisible) return;  // user navigated away while loading
 
-  const { mcps, skills } = _slashMenuItems;
+  const { mcps, skills, agentTools } = _slashMenuItems;
   let html = '<div class="slash-menu">';
 
+  // ── Section: Private Agent Tools (固化 JIT) ──────────────────
+  if (agentTools.length) {
+    html += '<div class="slash-menu-section">⚡ 私有分析工具（固化）</div>';
+    for (const t of agentTools) {
+      const name = _escapeHtml(t.title || t.name || 'Tool');
+      const desc = _escapeHtml((t.description || t.context || '').slice(0, 70));
+      html += `<div class="slash-menu-item"
+        data-tool-name="${name}" data-tool-type="agent_tool"
+        onclick="_selectSlashAnalysisTool(this.dataset.toolName, 'agent_tool')">
+        <span class="slash-menu-badge" style="background:#7c3aed;color:#fff">JIT</span>
+        <div class="slash-menu-item-content">
+          <div class="slash-menu-item-name">${name}</div>
+          ${desc ? `<div class="slash-menu-item-desc">${desc}</div>` : ''}
+        </div>
+      </div>`;
+    }
+  }
+
+  // ── Section: analyze_data templates ──────────────────────────
+  html += '<div class="slash-menu-section">📊 伺服器端分析模板</div>';
+  for (const t of _ANALYZE_TEMPLATES) {
+    html += `<div class="slash-menu-item"
+      data-tool-name="${t.id}" data-tool-type="analyze_template"
+      onclick="_selectSlashAnalysisTool(this.dataset.toolName, 'analyze_template')">
+      <span class="slash-menu-badge" style="background:#1d4ed8;color:#fff">分析</span>
+      <div class="slash-menu-item-content">
+        <div class="slash-menu-item-name">${t.label}</div>
+        <div class="slash-menu-item-desc">${t.desc}</div>
+      </div>
+    </div>`;
+  }
+
+  // ── Section: MCP data tools ───────────────────────────────────
   if (mcps.length) {
     html += '<div class="slash-menu-section">🔍 MCP 資料查詢工具</div>';
     for (const m of mcps) {
       const desc = (m.processing_intent || m.name || '').slice(0, 80);
-      // Use data-* attributes to avoid double-quote conflicts in onclick=""
       html += `<div class="slash-menu-item"
         data-tool-id="${m.id}" data-tool-type="mcp" data-tool-name="${_escapeHtml(m.name)}"
         onclick="_selectSlashTool(parseInt(this.dataset.toolId),this.dataset.toolType,this.dataset.toolName)">
@@ -1771,6 +1816,7 @@ async function _showSlashMenu() {
     }
   }
 
+  // ── Section: Skills ───────────────────────────────────────────
   if (skills.length) {
     html += '<div class="slash-menu-section">🧠 Skill 智能診斷技能</div>';
     for (const s of skills) {
@@ -1789,6 +1835,12 @@ async function _showSlashMenu() {
 
   html += '</div>';
   if (anchor) anchor.innerHTML = html;
+}
+
+/** Handle click on Agent Tool or analyze_template in slash menu — prefills textarea. */
+function _selectSlashAnalysisTool(name, type) {
+  _hideSlashMenu();
+  _toolPaletteUse(name, type);
 }
 
 function _hideSlashMenu() {
@@ -2529,6 +2581,11 @@ async function _sendAgentV13Message() {
   // Collapse and clear console for new session
   _diagConsoleCollapse();
   _diagConsoleClear();
+  _traceClear();
+  _toolPaletteReady = false;   // refresh tool list on next open
+  _tpJitCache       = null;    // reset JIT cache so new tools show up
+  _tpMcpSkillCache  = null;
+  _slashMenuItems   = null;    // refresh slash menu (new agent tools may have been saved)
   _diagLogLine('🚀', `新對話開始 | "${message.slice(0, 60)}${message.length > 60 ? '…' : ''}"`, '#38bdf8');
 
   const body = {
@@ -2645,7 +2702,10 @@ function _handleV13Event(ev) {
     }
 
     case 'thinking': {
-      _diagLogLine('💭', `THINKING | ${(ev.text || '').slice(0, 160)}${(ev.text||'').length > 160 ? '…' : ''}`, '#94a3b8');
+      const _thinkText = ev.text || '';
+      _traceReasoning.push({ iteration: ev.iteration || _traceReasoning.length + 1, text: _thinkText });
+      _diagLogLine('💭', `THINKING | ${_thinkText.slice(0, 160)}${_thinkText.length > 160 ? '…' : ''}`, '#94a3b8');
+      _traceLiveUpdate('reasoning');
       break;
     }
 
@@ -2664,11 +2724,27 @@ function _handleV13Event(ev) {
     case 'tool_start': {
       const inputStr = JSON.stringify(ev.input || {});
       _diagLogLine('🔧', `TOOL #${ev.iteration || '?'} → ${ev.tool || ''}(${inputStr.slice(0, 80)}${inputStr.length > 80 ? '…' : ''})`, '#fbbf24');
+      // [v15.4] Record every tool call for Sandbox Trace
+      _traceSandbox.push({
+        tool: ev.tool || '',
+        iteration: ev.iteration || 0,
+        input: ev.input || {},
+        code: '',        // filled in on tool_done if execute_jit
+        summary: '',     // filled in on tool_done
+        ts: new Date().toLocaleTimeString('zh-TW', { hour12: false }),
+      });
       break;
     }
 
     case 'tool_done': {
       _diagLogLine('✅', `DONE  → ${ev.tool || ''} | ${ev.result_summary || ''}`, '#4ade80');
+      // [v15.4] Fill summary + code into the matching sandbox entry
+      const _sbEntry = _traceSandbox.findLast?.(s => s.tool === ev.tool && s.iteration === (ev.iteration || 0))
+                    || _traceSandbox.filter(s => s.tool === ev.tool).at?.(-1);
+      if (_sbEntry) {
+        _sbEntry.summary = ev.result_summary || '';
+        if (ev.render_card?.jit_python_code) _sbEntry.code = ev.render_card.jit_python_code;
+      }
       // Render result in workspace (left) + shadow panel (right) as appropriate
       if (ev.render_card) {
         if (ev.render_card.type === 'skill') {
@@ -2688,6 +2764,7 @@ function _handleV13Event(ev) {
 
     case 'synthesis': {
       document.getElementById('v13-thinking-bubble')?.closest('.flex')?.remove();
+      _traceSynthesis = ev.text || '';   // [v15.4] capture for Reasoning tab
       const fullText = ev.text || '(無回答)';
       // v13.3 Output Routing: split <ai_analysis> from chat text
       // v15.2: <ai_analysis> goes to shadow panel as fallback (shadow stats take priority)
@@ -2705,6 +2782,7 @@ function _handleV13Event(ev) {
     }
 
     case 'memory_write': {
+      _traceMemory.push({ ...ev });
       const conflict = ev.conflict_resolved ? '（衝突→UPDATE）' : '';
       const mtype = ev.memory_type || ev.source || 'memory';
 
@@ -2770,9 +2848,17 @@ function _handleV13Event(ev) {
       const icon = status === 'complete' ? '✅' : '⏳';
       _diagLogLine(icon, `Stage ${stageNum} ${status === 'complete' ? '完成' : '執行中'}: ${stageLabel}`, status === 'complete' ? '#4ade80' : '#fbbf24');
       _v14UpdateStageBar(stageNum, status);
+      // [v15.4] Always record stage for Plan tab timeline
+      const _existing = _traceStages.find(s => s.stage === stageNum);
+      const _stageRec = { stage: stageNum, label: stageLabel, status, ts: new Date().toLocaleTimeString('zh-TW', { hour12: false }) };
+      if (_existing) Object.assign(_existing, _stageRec);
+      else _traceStages.push(_stageRec);
       if (ev.plan) {
+        if (stageNum === 2) _tracePlan = ev.plan;
+        else if (stageNum === 4) _tracePlanDiff = ev.plan;
         _diagLogLine('📋', `PLAN | ${ev.plan.slice(0, 200)}`, '#93c5fd');
       }
+      _traceLiveUpdate('plan');
       break;
     }
 
@@ -3445,3 +3531,481 @@ function _openBuilderWithPrefill(target, draftData) {
     }, 200);
   }
 }
+
+// ══════════════════════════════════════════════════════════════════
+// v15.4 Agentic Trace Inspector
+// ══════════════════════════════════════════════════════════════════
+
+function _traceClear() {
+  _traceReasoning = [];
+  _tracePlan      = '';
+  _tracePlanDiff  = '';
+  _traceStages    = [];
+  _traceSandbox   = [];
+  _traceMemory    = [];
+  _traceSynthesis = '';
+  _traceActiveTab = 'reasoning';
+}
+
+function _openTraceInspector() {
+  const panel = document.getElementById('trace-inspector');
+  if (!panel) return;
+  panel.classList.remove('hidden');
+  _traceShowTab(_traceActiveTab);
+}
+
+function _closeTraceInspector() {
+  document.getElementById('trace-inspector')?.classList.add('hidden');
+}
+
+function _traceLiveUpdate(tab) {
+  const panel = document.getElementById('trace-inspector');
+  if (!panel || panel.classList.contains('hidden')) return;
+  if (_traceActiveTab === tab) _renderTraceContent(tab);
+}
+
+function _traceShowTab(tab) {
+  _traceActiveTab = tab;
+  ['reasoning', 'plan', 'sandbox', 'memory'].forEach(t => {
+    const btn = document.getElementById(`trace-tab-btn-${t}`);
+    if (!btn) return;
+    if (t === tab) {
+      btn.className = 'flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 border-purple-500 text-purple-300 transition-colors';
+    } else {
+      btn.className = 'flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-colors';
+    }
+  });
+  _renderTraceContent(tab);
+}
+
+function _renderTraceContent(tab) {
+  const content = document.getElementById('trace-content');
+  if (!content) return;
+
+  if (tab === 'reasoning') {
+    let html = '';
+    // Extended thinking blocks
+    if (_traceReasoning.length) {
+      html += _traceReasoning.map(r => `
+        <div class="border border-purple-700/40 rounded-lg p-3 bg-purple-950/20">
+          <div class="text-purple-400 text-[10px] font-bold uppercase tracking-widest mb-2">
+            💭 Iteration ${r.iteration} — &lt;thinking&gt;
+          </div>
+          <pre class="whitespace-pre-wrap text-slate-300 text-[11px] leading-relaxed overflow-x-auto">${_escapeHtml(r.text)}</pre>
+        </div>`).join('');
+    } else {
+      html += `<div class="text-amber-400/70 text-[10px] italic px-1 py-1">
+        ℹ️ 本次未啟用 Extended Thinking（Claude 未輸出 &lt;thinking&gt; 標籤）
+      </div>`;
+    }
+    // Final synthesis answer
+    if (_traceSynthesis) {
+      html += `
+        <div class="border border-slate-600 rounded-lg p-3 bg-slate-800/50 mt-2">
+          <div class="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2">
+            💬 Stage 5 — Final Synthesis Output
+          </div>
+          <pre class="whitespace-pre-wrap text-slate-200 text-[11px] leading-relaxed overflow-x-auto">${_escapeHtml(_traceSynthesis)}</pre>
+        </div>`;
+    }
+    if (!html.trim()) html = '<p class="text-slate-500 italic text-center py-8">對話尚未開始</p>';
+    content.innerHTML = html;
+    content.scrollTop = content.scrollHeight;
+
+  } else if (tab === 'plan') {
+    let html = '';
+    // Stage timeline — always available
+    if (_traceStages.length) {
+      const stageNames = ['', '情境感知', '意圖規劃', '工具執行', '邏輯推理', '記憶寫入'];
+      const stageColors = ['', '#60a5fa', '#a78bfa', '#fbbf24', '#34d399', '#f472b6'];
+      html += `<div class="border border-slate-700 rounded-lg p-3 bg-slate-800/40 mb-3">
+        <div class="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2">⏱ Stage 執行時序</div>
+        <div class="space-y-1">
+          ${_traceStages.map(s => {
+            const dot = s.status === 'complete' ? '✅' : '⏳';
+            const col = stageColors[s.stage] || '#94a3b8';
+            return `<div class="flex items-center gap-2 text-[11px]">
+              <span class="text-slate-500 font-mono">${s.ts}</span>
+              <span>${dot}</span>
+              <span style="color:${col}">Stage ${s.stage} ${s.status === 'complete' ? '完成' : '執行中'}</span>
+              <span class="text-slate-400">— ${_escapeHtml(s.label)}</span>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    }
+    // Blueprint from <plan> tag
+    if (_tracePlan) {
+      html += `<div class="border border-blue-700/40 rounded-lg p-3 bg-blue-950/20">
+        <div class="text-blue-400 text-[10px] font-bold uppercase tracking-widest mb-2">📋 Stage 2 Blueprint（&lt;plan&gt; 標籤）</div>
+        <pre class="whitespace-pre-wrap text-slate-300 text-[11px] leading-relaxed overflow-x-auto">${_escapeHtml(_tracePlan)}</pre>
+      </div>`;
+    } else if (_traceStages.length) {
+      html += `<div class="text-amber-400/70 text-[10px] italic px-1">
+        ℹ️ LLM 本次未輸出 &lt;plan&gt; 標籤（代表直接回答，未進行多步規劃）
+      </div>`;
+    }
+    // Plan diff from Stage 4
+    if (_tracePlanDiff) {
+      html += `<div class="border border-amber-700/40 rounded-lg p-3 bg-amber-950/20 mt-2">
+        <div class="text-amber-400 text-[10px] font-bold uppercase tracking-widest mb-2">🔄 Stage 4 Plan Diff（反思修正）</div>
+        <pre class="whitespace-pre-wrap text-slate-300 text-[11px] leading-relaxed overflow-x-auto">${_escapeHtml(_tracePlanDiff)}</pre>
+      </div>`;
+    }
+    if (!html.trim()) html = '<p class="text-slate-500 italic text-center py-8">對話尚未開始</p>';
+    content.innerHTML = html;
+
+  } else if (tab === 'sandbox') {
+    if (!_traceSandbox.length) {
+      content.innerHTML = `<div class="text-center py-6">
+        <div class="text-slate-400 text-sm mb-1">本次未呼叫任何工具</div>
+        <div class="text-slate-600 text-[11px]">Agent 直接回答，無工具執行足跡</div>
+      </div>`;
+      return;
+    }
+    content.innerHTML = _traceSandbox.map(s => {
+      const inputStr = JSON.stringify(s.input || {}, null, 2);
+      return `<div class="border border-green-700/30 rounded-lg p-3 bg-slate-800/50">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-green-400 text-[10px] font-bold uppercase tracking-widest">🔧 ${_escapeHtml(s.tool)}</span>
+          <span class="text-slate-500 text-[10px] font-mono">iter ${s.iteration}</span>
+          ${s.ts ? `<span class="text-slate-600 text-[10px]">${s.ts}</span>` : ''}
+        </div>
+        <div class="mb-2">
+          <div class="text-[10px] text-slate-500 mb-1">Input：</div>
+          <pre class="bg-slate-900 rounded p-2 text-amber-200 text-[10px] overflow-x-auto border border-slate-700">${_escapeHtml(inputStr.slice(0, 500))}${inputStr.length > 500 ? '\n…[截斷]' : ''}</pre>
+        </div>
+        ${s.code ? `
+        <div class="mb-2">
+          <div class="text-[10px] text-slate-500 mb-1">Python Code：</div>
+          <pre class="bg-slate-900 rounded p-2 text-green-300 text-[11px] overflow-x-auto border border-slate-700">${_escapeHtml(s.code)}</pre>
+        </div>` : ''}
+        ${s.summary ? `<div class="text-[10px] text-slate-400">結果：${_escapeHtml(s.summary)}</div>` : ''}
+      </div>`;
+    }).join('');
+
+  } else if (tab === 'memory') {
+    if (!_traceMemory.length) {
+      content.innerHTML = `<div class="text-center py-6">
+        <div class="text-slate-400 text-sm mb-1">本次未寫入記憶</div>
+        <div class="text-slate-600 text-[11px]">無 ABNORMAL 診斷、工具錯誤、或偏好覆寫</div>
+      </div>`;
+      return;
+    }
+    content.innerHTML = _traceMemory.map(m => `
+      <div class="border border-purple-700/30 rounded-lg p-3 bg-purple-950/10">
+        <div class="flex items-center gap-2 mb-1.5 flex-wrap">
+          <span class="text-purple-300 text-[10px] font-bold">${_memTypeLabel(m)}</span>
+          ${m.memory_id ? `<span class="text-slate-500 text-[10px] font-mono">ID: ${m.memory_id}</span>` : ''}
+          ${m.conflict_resolved ? '<span class="text-amber-400 text-[10px]">⚡ 衝突→UPDATE</span>' : ''}
+        </div>
+        <div class="text-slate-300 text-[11px] leading-relaxed">${_escapeHtml(m.content || '')}</div>
+        ${m.fix_rule ? `<div class="text-yellow-300 text-[10px] mt-1.5">修復規則：${_escapeHtml(m.fix_rule)}</div>` : ''}
+        ${m.tool_name ? `<div class="text-slate-400 text-[10px] mt-0.5">工具：${m.tool_name}</div>` : ''}
+        ${m.skill_name ? `<div class="text-slate-400 text-[10px] mt-0.5">Skill：${m.skill_name}</div>` : ''}
+        ${Array.isArray(m.targets) && m.targets.length ? `<div class="text-red-400 text-[10px] mt-0.5">異常對象：${m.targets.join(', ')}</div>` : ''}
+      </div>`).join('');
+  }
+}
+
+function _memTypeLabel(m) {
+  const map = {
+    trap: '⚡ Trap 記憶',
+    diagnosis: '🩺 診斷記憶',
+    preference: '👤 使用者偏好',
+    ds_schema_lesson: '📊 DS Schema 教訓',
+  };
+  return map[m.memory_type] || map[m.source] || '💡 記憶寫入';
+}
+
+// ══════════════════════════════════════════════════════════════════
+// v15.4 Tool Palette — 4-tab tool browser with keyword search
+// ══════════════════════════════════════════════════════════════════
+
+const _ANALYZE_TEMPLATES = [
+  { id: 'spc_chart',         label: '📈 SPC 管制圖',      desc: '繪製 UCL/LCL 管制圖，自動標示 OOC 點' },
+  { id: 'linear_regression', label: '📉 線性回歸趨勢',    desc: '對時序數據進行線性趨勢回歸分析' },
+  { id: 'boxplot',           label: '📦 分組 Box Plot',   desc: '依類別欄位分組繪製箱型圖' },
+  { id: 'stats_summary',     label: '📊 統計摘要',         desc: '計算平均、標準差、Min/Max、偏度、峰度' },
+  { id: 'correlation',       label: '🔗 相關係數矩陣',    desc: '計算數值欄位間的 Pearson 相關係數熱圖' },
+];
+
+// Tool palette state
+let _toolPaletteReady   = false;
+let _tpCurrentTab       = 'jit';
+let _tpGenericCache     = null;   // [{name, category, description, params}]
+let _tpJitCache         = null;
+let _tpMcpSkillCache    = null;   // {mcps, skills}
+let _tpGenericFilter    = '';
+
+function _toolPaletteToggle() {
+  const panel = document.getElementById('tool-palette-panel');
+  if (!panel) return;
+  if (panel.classList.contains('hidden')) {
+    _toolPaletteOpen();
+  } else {
+    panel.classList.add('hidden');
+  }
+}
+
+async function _toolPaletteOpen() {
+  const panel   = document.getElementById('tool-palette-panel');
+  const content = document.getElementById('tool-palette-content');
+  if (!panel || !content) return;
+  panel.classList.remove('hidden');
+
+  // Render tab shell + switch to current tab
+  content.innerHTML = `
+    <div class="flex border-b border-slate-200 -mx-3 px-0 mb-0 overflow-x-auto" style="margin-top:-4px">
+      <button id="tp-tab-jit"      onclick="_tpSwitchTab('jit')"
+              class="flex-shrink-0 px-3 py-2 text-[11px] font-semibold border-b-2 transition-colors border-purple-500 text-purple-700">
+        ⚡ 私有工具
+      </button>
+      <button id="tp-tab-generic"  onclick="_tpSwitchTab('generic')"
+              class="flex-shrink-0 px-3 py-2 text-[11px] font-semibold border-b-2 transition-colors border-transparent text-slate-500 hover:text-slate-700">
+        🔬 通用工具庫
+      </button>
+      <button id="tp-tab-template" onclick="_tpSwitchTab('template')"
+              class="flex-shrink-0 px-3 py-2 text-[11px] font-semibold border-b-2 transition-colors border-transparent text-slate-500 hover:text-slate-700">
+        📊 分析模板
+      </button>
+      <button id="tp-tab-mcp"      onclick="_tpSwitchTab('mcp')"
+              class="flex-shrink-0 px-3 py-2 text-[11px] font-semibold border-b-2 transition-colors border-transparent text-slate-500 hover:text-slate-700">
+        🔍 MCP / Skill
+      </button>
+    </div>
+    <div id="tp-body" class="pt-2 space-y-1.5"></div>`;
+
+  await _tpSwitchTab(_tpCurrentTab);
+}
+
+async function _tpSwitchTab(tab) {
+  _tpCurrentTab = tab;
+  // Update tab button styles
+  ['jit', 'generic', 'template', 'mcp'].forEach(t => {
+    const btn = document.getElementById(`tp-tab-${t}`);
+    if (!btn) return;
+    if (t === tab) {
+      btn.className = 'flex-shrink-0 px-3 py-2 text-[11px] font-semibold border-b-2 transition-colors border-purple-500 text-purple-700';
+    } else {
+      btn.className = 'flex-shrink-0 px-3 py-2 text-[11px] font-semibold border-b-2 transition-colors border-transparent text-slate-500 hover:text-slate-700';
+    }
+  });
+  const body = document.getElementById('tp-body');
+  if (!body) return;
+  body.innerHTML = '<p class="text-xs text-slate-400 text-center py-3">載入中…</p>';
+
+  if (tab === 'jit') {
+    if (!_tpJitCache) {
+      try { const r = await _api('GET', '/agent-tools'); _tpJitCache = r?.items || []; }
+      catch (_) { _tpJitCache = []; }
+    }
+    _tpRenderJit(body, _tpJitCache);
+
+  } else if (tab === 'generic') {
+    if (!_tpGenericCache) {
+      try {
+        const res = await fetch('/api/v1/generic-tools/catalog', { headers: { Authorization: `Bearer ${_token}` } });
+        const j = await res.json();
+        _tpGenericCache = j.data?.tools || [];
+      } catch (_) { _tpGenericCache = []; }
+    }
+    _tpRenderGeneric(body, _tpGenericFilter);
+
+  } else if (tab === 'template') {
+    _tpRenderTemplate(body);
+
+  } else if (tab === 'mcp') {
+    if (!_tpMcpSkillCache) {
+      try {
+        const [mr, sr] = await Promise.all([
+          fetch('/api/v1/mcp-definitions',   { headers: { Authorization: `Bearer ${_token}` } }),
+          fetch('/api/v1/skill-definitions', { headers: { Authorization: `Bearer ${_token}` } }),
+        ]);
+        const mj = await mr.json(); const sj = await sr.json();
+        _tpMcpSkillCache = { mcps: mj.data || [], skills: sj.data || [] };
+      } catch (_) { _tpMcpSkillCache = { mcps: [], skills: [] }; }
+    }
+    _tpRenderMcpSkill(body, _tpMcpSkillCache);
+  }
+
+  // Update badge
+  const jitCount = (_tpJitCache || []).length;
+  const genCount = (_tpGenericCache || []).length;
+  const badge = document.getElementById('tool-palette-count');
+  if (badge && (jitCount + genCount) > 0) {
+    badge.textContent = jitCount + genCount + _ANALYZE_TEMPLATES.length;
+    badge.classList.remove('hidden');
+  }
+}
+
+function _tpRenderJit(body, tools) {
+  if (!tools.length) {
+    body.innerHTML = `<p class="text-[11px] text-slate-400 italic py-2 px-1">
+      尚無固化工具。對 Agent 說「幫我分析…」後，成功分析會自動固化為私有工具。
+    </p>`;
+    return;
+  }
+  body.innerHTML = tools.map(t => {
+    const name = _escapeHtml(t.title || t.name || 'Tool');
+    const desc = _escapeHtml((t.description || t.context || '').slice(0, 80));
+    return `<div class="flex items-start gap-2 p-2 rounded-lg border border-purple-100 bg-purple-50/40 hover:bg-purple-50 transition-colors">
+      <div class="flex-1 min-w-0">
+        <div class="text-xs font-semibold text-slate-800 truncate">⚡ ${name}</div>
+        ${desc ? `<div class="text-[10px] text-slate-500 mt-0.5">${desc}</div>` : ''}
+      </div>
+      <button data-name="${name}" data-type="agent_tool"
+              onclick="_toolPaletteUse(this.dataset.name,this.dataset.type)"
+              class="flex-shrink-0 text-[10px] bg-purple-600 hover:bg-purple-500 text-white rounded-md px-2 py-1 font-semibold transition-colors">
+        ▶ 使用
+      </button>
+    </div>`;
+  }).join('');
+}
+
+function _tpRenderGeneric(body, filter) {
+  _tpGenericFilter = filter || '';
+  const q = _tpGenericFilter.toLowerCase().trim();
+  const tools = (_tpGenericCache || []).filter(t =>
+    !q || t.name.toLowerCase().includes(q) || (t.description || '').toLowerCase().includes(q) || (t.category || '').toLowerCase().includes(q)
+  );
+
+  const catEmoji = { processing: '⚙️', visualization: '📊' };
+  // Group by category
+  const groups = {};
+  for (const t of tools) {
+    const cat = t.category || 'other';
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push(t);
+  }
+
+  let html = `<div class="mb-2">
+    <input id="tp-generic-search" type="text" value="${_escapeHtml(_tpGenericFilter)}"
+           placeholder="搜尋工具名稱或功能… (${_tpGenericCache?.length || 0} 個)"
+           oninput="_tpGenericSearch(this.value)"
+           class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-purple-400 bg-white"/>
+  </div>`;
+
+  if (!tools.length) {
+    html += `<p class="text-xs text-slate-400 text-center py-3">找不到符合的工具</p>`;
+  } else {
+    for (const [cat, items] of Object.entries(groups)) {
+      html += `<div class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-2 mb-1">
+        ${catEmoji[cat] || '🔧'} ${cat} (${items.length})
+      </div>`;
+      html += items.map(t => {
+        const name = _escapeHtml(t.name);
+        const desc = _escapeHtml((t.description || '').slice(0, 70));
+        return `<div class="flex items-start gap-2 p-1.5 rounded-lg hover:bg-slate-50 transition-colors">
+          <div class="flex-1 min-w-0">
+            <div class="text-xs font-mono text-slate-800">${name}</div>
+            ${desc ? `<div class="text-[10px] text-slate-400 mt-0.5 leading-tight">${desc}</div>` : ''}
+          </div>
+          <button data-name="${name}" data-type="generic"
+                  onclick="_toolPaletteUse(this.dataset.name,this.dataset.type)"
+                  class="flex-shrink-0 text-[10px] bg-slate-700 hover:bg-slate-600 text-white rounded-md px-2 py-0.5 font-semibold transition-colors whitespace-nowrap">
+            ▶ 使用
+          </button>
+        </div>`;
+      }).join('');
+    }
+  }
+  body.innerHTML = html;
+  // Keep focus on search
+  if (q) document.getElementById('tp-generic-search')?.focus();
+}
+
+function _tpGenericSearch(val) {
+  _tpGenericFilter = val;
+  const body = document.getElementById('tp-body');
+  if (body) _tpRenderGeneric(body, val);
+}
+
+function _tpRenderTemplate(body) {
+  body.innerHTML = _ANALYZE_TEMPLATES.map(t => `
+    <div class="flex items-start gap-2 p-2 rounded-lg border border-blue-100 bg-blue-50/40 hover:bg-blue-50 transition-colors">
+      <div class="flex-1 min-w-0">
+        <div class="text-xs font-semibold text-slate-800">${t.label}</div>
+        <div class="text-[10px] text-slate-500 mt-0.5">${t.desc}</div>
+      </div>
+      <button data-name="${t.id}" data-type="analyze_template"
+              onclick="_toolPaletteUse(this.dataset.name,this.dataset.type)"
+              class="flex-shrink-0 text-[10px] bg-blue-600 hover:bg-blue-500 text-white rounded-md px-2 py-1 font-semibold transition-colors">
+        ▶ 使用
+      </button>
+    </div>`).join('');
+}
+
+function _tpRenderMcpSkill(body, { mcps, skills }) {
+  let html = '';
+  if (mcps.length) {
+    html += '<div class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1 mb-1">🔍 MCP 資料工具</div>';
+    html += mcps.map(m => {
+      const name = _escapeHtml(m.name);
+      const desc = _escapeHtml((m.processing_intent || '').slice(0, 60));
+      return `<div class="flex items-center gap-2 p-1.5 rounded-lg hover:bg-slate-50">
+        <div class="flex-1 min-w-0">
+          <div class="text-xs font-semibold text-slate-800 truncate">${name}</div>
+          ${desc ? `<div class="text-[10px] text-slate-400">${desc}</div>` : ''}
+        </div>
+        <button data-id="${m.id}" data-type="mcp" data-name="${name}"
+                onclick="_selectSlashTool(parseInt(this.dataset.id),this.dataset.type,this.dataset.name);document.getElementById('tool-palette-panel')?.classList.add('hidden')"
+                class="flex-shrink-0 text-[10px] bg-teal-600 hover:bg-teal-500 text-white rounded-md px-2 py-0.5 font-semibold transition-colors">
+          ▶ 選用
+        </button>
+      </div>`;
+    }).join('');
+  }
+  if (skills.length) {
+    html += '<div class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-2 mb-1">🧠 Skill 診斷技能</div>';
+    html += skills.map(s => {
+      const name = _escapeHtml(s.name);
+      const desc = _escapeHtml((s.description || '').slice(0, 60));
+      return `<div class="flex items-center gap-2 p-1.5 rounded-lg hover:bg-slate-50">
+        <div class="flex-1 min-w-0">
+          <div class="text-xs font-semibold text-slate-800 truncate">${name}</div>
+          ${desc ? `<div class="text-[10px] text-slate-400">${desc}</div>` : ''}
+        </div>
+        <button data-id="${s.id}" data-type="skill" data-name="${name}"
+                onclick="_selectSlashTool(parseInt(this.dataset.id),this.dataset.type,this.dataset.name);document.getElementById('tool-palette-panel')?.classList.add('hidden')"
+                class="flex-shrink-0 text-[10px] bg-indigo-600 hover:bg-indigo-500 text-white rounded-md px-2 py-0.5 font-semibold transition-colors">
+          ▶ 選用
+        </button>
+      </div>`;
+    }).join('');
+  }
+  if (!html) html = '<p class="text-xs text-slate-400 text-center py-3">尚無 MCP 或 Skill</p>';
+  body.innerHTML = html;
+}
+
+function _toolPaletteUse(name, type) {
+  const input = document.getElementById('issue-input');
+  if (!input) return;
+  const templateLabels = {
+    spc_chart:         'SPC 管制圖',
+    linear_regression: '線性回歸趨勢',
+    boxplot:           '分組 Box Plot',
+    stats_summary:     '統計摘要',
+    correlation:       '相關係數矩陣',
+  };
+  let msg = '';
+  if (type === 'agent_tool') {
+    msg = `幫我用「${name}」分析，資料來源：`;
+  } else if (type === 'generic') {
+    msg = `幫我用通用工具「${name}」分析，資料：`;
+  } else {
+    msg = `幫我對 [請填MCP名稱] 做「${templateLabels[name] || name}」分析，主要數值欄位：`;
+  }
+  input.value = msg;
+  input.focus();
+  input.setSelectionRange(msg.length, msg.length);
+  document.getElementById('tool-palette-panel')?.classList.add('hidden');
+}
+
+// Close tool palette when clicking outside
+document.addEventListener('click', e => {
+  const wrap = document.getElementById('tool-palette-wrap');
+  if (wrap && !wrap.contains(e.target)) {
+    document.getElementById('tool-palette-panel')?.classList.add('hidden');
+  }
+});

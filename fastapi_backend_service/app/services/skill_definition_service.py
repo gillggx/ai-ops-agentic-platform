@@ -15,6 +15,7 @@ from app.schemas.skill_definition import (
     SkillDefinitionCreate,
     SkillDefinitionResponse,
     SkillDefinitionUpdate,
+    SkillDiagnoseWithFeedbackResponse,
     SkillGenerateCodeDiagnosisResponse,
     SkillTryDiagnosisResponse,
 )
@@ -278,4 +279,120 @@ class SkillDefinitionService:
         return await self._llm.auto_map(
             data_subject_inputs=ds_inputs,
             event_attributes=event_attrs,
+        )
+
+    async def diagnose_with_feedback(
+        self,
+        skill_id: int,
+        mcp_sample_outputs: Dict[str, Any],
+        user_feedback: str,
+        previous_result_summary: Optional[str] = None,
+    ) -> SkillDiagnoseWithFeedbackResponse:
+        """User feedback → LLM reflects on diagnostic_prompt → revised prompt → re-run diagnosis → persist log."""
+        import logging
+        from app.models.feedback_log import FeedbackLogModel
+        from app.services.sandbox_service import execute_script
+
+        logger = logging.getLogger(__name__)
+
+        skill = await self._repo.get_by_id(skill_id)
+        if not skill:
+            raise AppException(status_code=404, error_code="NOT_FOUND", detail="Skill 不存在")
+
+        original_prompt = skill.diagnostic_prompt or ""
+
+        # Step 1: LLM reflection on diagnostic prompt
+        if not self._llm:
+            return SkillDiagnoseWithFeedbackResponse(
+                reflection="LLM service not configured",
+                error="LLM service not configured",
+            )
+
+        reflect_prompt = f"""\
+你是一位半導體製程智能診斷 AI。使用者對你之前的診斷結果提出了問題，請你反思並改善診斷提示詞。
+
+【原始診斷提示詞（diagnostic_prompt）】
+{original_prompt}
+
+【上次診斷結果摘要】
+{previous_result_summary or "(未提供)"}
+
+【使用者回饋】
+{user_feedback}
+
+【MCP 輸出資料樣本】
+{json.dumps(mcp_sample_outputs, ensure_ascii=False)[:2000]}
+
+請完成以下兩項任務，以 JSON 格式回傳：
+
+1. **reflection**（str）：分析上次診斷為何不準確（2~4 句）
+2. **revised_prompt**（str）：修正後的診斷提示詞，使判斷更精確
+
+只回傳 JSON：
+{{"reflection": "...", "revised_prompt": "..."}}"""
+
+        try:
+            response = await self._llm._client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=2048,
+                messages=[{"role": "user", "content": reflect_prompt}],
+            )
+            from app.services.mcp_builder_service import _extract_json, _get_text
+            result = _extract_json(_get_text(response.content))
+            reflection = result.get("reflection", "")
+            revised_prompt = result.get("revised_prompt", "") or original_prompt
+        except Exception as exc:
+            reflection = f"LLM 反思失敗：{exc}"
+            revised_prompt = original_prompt
+
+        # Step 2: re-run diagnosis with revised prompt
+        rerun_success = False
+        status = ""
+        diagnosis_message = ""
+        problem_object = None
+        error: Optional[str] = None
+
+        try:
+            diag_result = await self._llm.try_diagnosis(
+                diagnostic_prompt=revised_prompt,
+                mcp_sample_outputs=mcp_sample_outputs,
+            )
+            status = diag_result.get("status", "")
+            diagnosis_message = diag_result.get("summary", "") or diag_result.get("conclusion", "")
+            problem_object = diag_result.get("problem_object")
+            rerun_success = True
+        except Exception as exc:
+            error = f"重跑診斷失敗：{exc}"
+
+        # Step 3: if revised prompt differs, persist it
+        if revised_prompt != original_prompt and rerun_success:
+            await self._repo.update(skill, diagnostic_prompt=revised_prompt)
+
+        # Step 4: save feedback log
+        log_id: Optional[int] = None
+        try:
+            log = FeedbackLogModel(
+                target_type="skill",
+                target_id=skill_id,
+                user_feedback=user_feedback,
+                previous_result_summary=previous_result_summary or "",
+                llm_reflection=reflection,
+                revised_script=revised_prompt,
+                rerun_success=rerun_success,
+            )
+            self._repo._db.add(log)
+            await self._repo._db.flush()
+            log_id = log.id
+        except Exception as exc:
+            logger.warning("diagnose_with_feedback: failed to save log: %s", exc)
+
+        return SkillDiagnoseWithFeedbackResponse(
+            reflection=reflection,
+            revised_prompt=revised_prompt,
+            rerun_success=rerun_success,
+            status=status,
+            diagnosis_message=diagnosis_message,
+            problem_object=problem_object,
+            error=error,
+            feedback_log_id=log_id,
         )

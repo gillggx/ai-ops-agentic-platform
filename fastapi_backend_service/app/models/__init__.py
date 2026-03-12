@@ -15,6 +15,7 @@ from app.models.user_preference import UserPreferenceModel
 from app.models.agent_session import AgentSessionModel
 from app.models.mock_data_source import MockDataSourceModel
 from app.models.agent_tool import AgentToolModel
+from app.models.feedback_log import FeedbackLogModel
 
 __all__ = [
     "UserModel",
@@ -32,4 +33,5 @@ __all__ = [
     "AgentSessionModel",
     "MockDataSourceModel",
     "AgentToolModel",
+    "FeedbackLogModel",
 ]

@@ -155,3 +155,29 @@ class SkillGenerateCodeDiagnosisResponse(BaseModel):
     input_records: int = 0
     # Self-learning events (v14.2): schema guard retries, error labels
     learning_events: List[str] = []
+
+
+# ── Skill Feedback request/response ───────────────────────────────────────────
+
+class SkillDiagnoseWithFeedbackRequest(BaseModel):
+    """Re-run Skill diagnosis with user feedback → LLM reflection + revised prompt."""
+    mcp_sample_outputs: Dict[str, Any] = Field(
+        ..., description="Same MCP sample outputs used in previous diagnosis"
+    )
+    user_feedback: str = Field(..., min_length=1, description="User's description of what went wrong")
+    previous_result_summary: Optional[str] = Field(
+        default=None,
+        description="Brief description of previous result (e.g. 'status was NORMAL but should be ABNORMAL')"
+    )
+
+
+class SkillDiagnoseWithFeedbackResponse(BaseModel):
+    """Result of feedback-triggered Skill re-diagnosis."""
+    reflection: str = ""
+    revised_prompt: str = ""
+    rerun_success: bool = False
+    status: str = ""
+    diagnosis_message: str = ""
+    problem_object: Any = None
+    error: Optional[str] = None
+    feedback_log_id: Optional[int] = None

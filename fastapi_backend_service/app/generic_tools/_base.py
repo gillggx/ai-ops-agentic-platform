@@ -86,3 +86,67 @@ def _plotly_to_payload(fig) -> Dict[str, Any]:
     """Convert a Plotly Figure to a JSON-safe payload dict (bdata-free)."""
     raw = json.loads(fig.to_json())
     return {"plotly": _strip_bdata(raw)}
+
+
+def _tight_xrange(x_vals, pad_pct: float = 0.05):
+    """Compute [lo, hi] X-axis range with padding. Handles datetime strings and numeric values."""
+    valid = [v for v in (x_vals or []) if v is not None]
+    if not valid:
+        return None
+    try:
+        import pandas as pd
+        ts = pd.to_datetime(valid, errors="coerce")
+        good = ts.dropna()
+        if len(good) >= max(1, len(valid) * 0.5):
+            t_min, t_max = good.min(), good.max()
+            span_s = max((t_max - t_min).total_seconds(), 60)
+            pad = pd.Timedelta(seconds=span_s * pad_pct)
+            return [(t_min - pad).isoformat(), (t_max + pad).isoformat()]
+    except Exception:
+        pass
+    try:
+        nums = [float(v) for v in valid if v is not None]
+        nums = [n for n in nums if not math.isnan(n)]
+        if not nums:
+            return None
+        lo, hi = min(nums), max(nums)
+        span = (hi - lo) if hi != lo else (abs(hi) * 0.1 or 1.0)
+        pad = span * pad_pct
+        return [lo - pad, hi + pad]
+    except Exception:
+        return None
+
+
+def _tight_yrange(y_vals_list, pad_pct: float = 0.10):
+    """Compute [lo, hi] Y-axis range from multiple lists of Y values."""
+    all_y = []
+    for ys in (y_vals_list or []):
+        for v in (ys or []):
+            try:
+                f = float(v)
+                if not math.isnan(f):
+                    all_y.append(f)
+            except (TypeError, ValueError):
+                pass
+    if not all_y:
+        return None
+    lo, hi = min(all_y), max(all_y)
+    span = (hi - lo) if hi != lo else (abs(hi) * 0.1 or 1.0)
+    pad = span * pad_pct
+    return [lo - pad, hi + pad]
+
+
+def _apply_tight_range(fig, x_vals=None, y_vals_list=None, pad_x: float = 0.05, pad_y: float = 0.10):
+    """Apply tight axis ranges to a Plotly Figure to prevent data clustering."""
+    updates: Dict[str, Any] = {}
+    if x_vals:
+        xr = _tight_xrange(x_vals, pad_pct=pad_x)
+        if xr:
+            updates["xaxis"] = {"range": xr}
+    if y_vals_list:
+        yr = _tight_yrange(y_vals_list, pad_pct=pad_y)
+        if yr:
+            updates["yaxis"] = {"range": yr}
+    if updates:
+        fig.update_layout(**updates)
+    return fig
