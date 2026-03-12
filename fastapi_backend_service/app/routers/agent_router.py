@@ -467,22 +467,18 @@ async def promote_jit(
     Creates the MCP in DB directly (bypassing try-run). Returns new_mcp_id.
     For 'skill' target: also generates Skill diagnostic metadata for pre-fill.
     """
-    import anthropic as _anthropic
-
-    from app.config import get_settings
-
-    settings = get_settings()
-    client = _anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    from app.utils.llm_client import get_llm_client
 
     # 1. Wrap python_code → MCP processing_script
     wrap_prompt = _WRAP_SCRIPT_PROMPT.format(python_code=body.python_code)
     try:
-        wrap_resp = await client.messages.create(
-            model=_PROMOTE_MODEL,
-            max_tokens=4096,
+        llm = get_llm_client()
+        wrap_resp = await llm.create(
+            system="你是一位 Python 專家。請嚴格遵守指示，只回傳 Python 程式碼，不要任何 markdown fence 或說明文字。",
             messages=[{"role": "user", "content": wrap_prompt}],
+            max_tokens=4096,
         )
-        processing_script: str = wrap_resp.content[0].text.strip()
+        processing_script: str = wrap_resp.text.strip()
         # Strip accidental markdown fences
         if processing_script.startswith("```"):
             lines = processing_script.splitlines()
@@ -533,12 +529,12 @@ async def promote_jit(
             output_keys=output_keys_str,
         )
         try:
-            skill_resp = await client.messages.create(
-                model=_PROMOTE_MODEL,
-                max_tokens=1024,
+            skill_resp = await get_llm_client().create(
+                system="你是一位半導體製程診斷工程師。請嚴格按照要求的 JSON 格式回答，不要其他文字。",
                 messages=[{"role": "user", "content": skill_prompt}],
+                max_tokens=1024,
             )
-            raw_json = skill_resp.content[0].text.strip()
+            raw_json = skill_resp.text.strip()
             skill_meta = json.loads(raw_json)
         except Exception:
             skill_meta = {
@@ -647,9 +643,14 @@ async def promote_analysis(
     try:
         import pandas as _pd
         from app.services.analysis_library import run_analysis as _run_analysis
+        from app.services.mcp_builder_service import MCPBuilderService
         from app.services.mcp_definition_service import MCPDefinitionService
 
-        _svc = MCPDefinitionService(db)
+        _svc = MCPDefinitionService(
+            repo=MCPDefinitionRepository(db),
+            ds_repo=DataSubjectRepository(db),
+            llm=MCPBuilderService(),
+        )
         _run_result = await _svc.run_with_data(body.mcp_id, body.run_params)
         _od = (_run_result.output_data or {}) if _run_result.success else {}
         _raw = _od.get("_raw_dataset") or _od.get("dataset") or []

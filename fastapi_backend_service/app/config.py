@@ -75,9 +75,26 @@ class Config(BaseSettings):
     )
 
     # ── LLM Settings ─────────────────────────────────────────────────────────
+    LLM_PROVIDER: str = Field(
+        default="anthropic",
+        description="LLM backend: 'anthropic' (Claude) or 'ollama' (OpenAI-compatible local model)",
+    )
     LLM_MODEL: str = Field(
         default="claude-opus-4-6",
-        description="Anthropic model ID used by all services (diagnostic, builder, copilot, etc.)",
+        description="Anthropic model ID used when LLM_PROVIDER=anthropic",
+    )
+    # ── Ollama / OpenAI-compatible settings (used when LLM_PROVIDER=ollama) ──
+    OLLAMA_BASE_URL: str = Field(
+        default="http://localhost:11434/v1",
+        description="Base URL for Ollama / OpenAI-compatible API endpoint",
+    )
+    OLLAMA_MODEL: str = Field(
+        default="qwen2.5:32b",
+        description="Model name to use when LLM_PROVIDER=ollama",
+    )
+    OLLAMA_API_KEY: str = Field(
+        default="ollama",
+        description="API key for Ollama (any non-empty string works; set to real key for vLLM/remote)",
     )
     LLM_MAX_TOKENS_DIAGNOSTIC: int = Field(
         default=4096,

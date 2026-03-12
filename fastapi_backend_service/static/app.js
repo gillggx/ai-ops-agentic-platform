@@ -530,6 +530,11 @@ function _initChartsInCard(cardEl) {
             plot_bgcolor:  '#f8fafc',
             font: { color: '#374151', size: 11 },
           }, specLayout, { margin: mergedMargin }, legendOverride);
+          // Set explicit container height so Plotly doesn't clip tall multi-subplot charts
+          if (layout.height && layout.height > 360) {
+            div.style.height = layout.height + 'px';
+            div.style.minHeight = layout.height + 'px';
+          }
           Plotly.newPlot(div, traces, layout, { responsive: true, displayModeBar: false });
         } else {
           // Plotly not loaded — hide wrapper so no blank space remains
@@ -2057,6 +2062,16 @@ function _handleCopilotEvent(ev) {
       return `${ev.skill_name} 診斷完成`;
     }
 
+    case 'analysis_result': {
+      document.getElementById('copilot-thinking-bubble')?.closest('.flex')?.remove();
+      _clearSlashTool();
+      _slotContext = {};
+      _renderCopilotAnalysisPanel(ev);
+      _diagLogLine('📊', `分析「${ev.mcp_name || ''}」完成（${ev.row_count || '?'} 筆原始資料）`, '#818cf8');
+      _addChatBubble('agent', `📊 <strong>${_escapeHtml(ev.mcp_name || '')}</strong> 分析完成，結果已呈現於右側報告區。`);
+      return `${ev.mcp_name} 分析完成`;
+    }
+
     case 'draft_ready': {
       document.getElementById('copilot-thinking-bubble')?.closest('.flex')?.remove();
       const draftType = ev.draft_type || 'skill';
@@ -2145,6 +2160,64 @@ function _renderCopilotSkillPanel(ev) {
 
   // [v15.2] Mirror skill result to shadow panel skill section
   _renderSkillInShadowPanel(ev);
+}
+
+/**
+ * Render a Copilot analysis_result (raw data analysis via code-gen + sandbox)
+ * into the right report panel as a dedicated tab.
+ */
+function _renderCopilotAnalysisPanel(ev) {
+  _showReportPanel();
+  const tabId    = `analysis-${Date.now()}`;
+  const tabTitle = ev.tab_title || `📊 ${ev.mcp_name || '分析'}`;
+
+  // Build dataset table if present
+  let tableHtml = '';
+  const rows = Array.isArray(ev.dataset) ? ev.dataset : [];
+  if (rows.length > 0) {
+    const cols = Object.keys(rows[0] || {}).slice(0, 12);
+    const thead = cols.map(c =>
+      `<th class="px-2 py-1 text-left text-[10px] font-semibold text-slate-500 uppercase whitespace-nowrap">${_escapeHtml(c)}</th>`
+    ).join('');
+    const tbody = rows.slice(0, 50).map(r =>
+      `<tr class="border-t border-slate-100 hover:bg-slate-50">${cols.map(c =>
+        `<td class="px-2 py-1 text-xs text-slate-700 max-w-[140px] truncate">${_escapeHtml(String(r[c] ?? ''))}</td>`
+      ).join('')}</tr>`
+    ).join('');
+    tableHtml = `
+      <div class="overflow-x-auto rounded border border-slate-200 mt-3">
+        <table class="min-w-full text-xs">
+          <thead class="bg-slate-50"><tr>${thead}</tr></thead>
+          <tbody>${tbody}</tbody>
+        </table>
+      </div>`;
+  }
+
+  // Chart placeholder — will be rendered by _initChartsInCard
+  const chartHtml = ev.has_chart && ev.chart_json
+    ? `<div class="mt-4"><div class="plotly-chart-container" data-chart-json="${_escapeHtml(ev.chart_json)}"></div></div>`
+    : '';
+
+  // Format text_result (newlines → <br>)
+  const textHtml = ev.text_result
+    ? `<div class="mt-3 p-3 bg-indigo-50 rounded-lg border border-indigo-100 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">${_escapeHtml(ev.text_result)}</div>`
+    : '';
+
+  const contentHtml = `
+    <div class="p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700">AI 分析</span>
+        <span class="text-sm font-semibold text-slate-800">${_escapeHtml(ev.mcp_name || '')}</span>
+        <span class="text-xs text-slate-400 ml-auto">${ev.row_count ?? '?'} 筆原始資料</span>
+      </div>
+      ${ev.analysis_request ? `<p class="text-xs text-slate-500 mb-2 italic">${_escapeHtml(ev.analysis_request)}</p>` : ''}
+      ${textHtml}
+      ${chartHtml}
+      ${tableHtml}
+    </div>`;
+
+  const { panel } = _createWorkspaceTab(tabId, tabTitle, contentHtml);
+  requestAnimationFrame(() => _initChartsInCard(panel));
 }
 
 /**

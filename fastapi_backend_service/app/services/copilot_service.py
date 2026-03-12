@@ -8,20 +8,51 @@ import json
 import logging
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-import anthropic
-
 from app.config import get_settings
 from app.repositories.data_subject_repository import DataSubjectRepository
 from app.repositories.mcp_definition_repository import MCPDefinitionRepository
 from app.repositories.skill_definition_repository import SkillDefinitionRepository
 from app.services.event_pipeline_service import EventPipelineService
-from app.services.mcp_builder_service import MCPBuilderService, _extract_json, _get_text
+from app.services.mcp_builder_service import MCPBuilderService, _extract_json
 from app.services.mcp_definition_service import _normalize_output
 from app.services.sandbox_service import execute_diagnose_fn, execute_script
+from app.utils.llm_client import get_llm_client
 
 logger = logging.getLogger(__name__)
 
-_MODEL = get_settings().LLM_MODEL
+# System prompt for analysis code generation (Qwen-compatible: rules first, positive framing)
+_ANALYSIS_CODE_GEN_SYSTEM = """\
+你是一位資料分析工程師。根據使用者的分析需求和資料欄位，撰寫一個 Python 分析函式 process(raw_data)。
+
+【第一規則：try/except 必須包住主體，不得省略】
+def process(raw_data: list) -> dict:
+    if not raw_data:
+        return {"text_result": "無資料", "dataset": [], "ui_render": {}}
+    try:
+        # 分析邏輯寫在這裡
+        ...
+        return {"text_result": "...", "dataset": rows, "ui_render": {...}}
+    except Exception as e:
+        return {"text_result": f"分析失敗：{e}", "dataset": [], "ui_render": {}}
+
+【第二規則：預注入變數（直接使用，一律不需要 import）】
+  df → pandas DataFrame（全量原始資料已預注入）
+  pd → pandas  np → numpy
+  go → plotly.graph_objects  px → plotly.express
+
+✅ 正確寫法：df['col'].mean()  /  np.std(df['val'])
+❌ 錯誤寫法：import pandas  /  import numpy
+
+【第三規則：輸出格式】
+回傳 dict 必須包含：
+  text_result: str → 分析摘要（繁體中文，條列重點，100-300字）
+  dataset: list[dict] → 結果資料列（無資料用 []）
+  ui_render: dict → 有圖表時用 {"type": "plotly", "chart_data": fig.to_json(), "charts": [fig.to_json()]}
+                    純文字時用 {"type": "table"} 或 {}
+
+【第四規則：只回傳 Python 程式碼】
+不要任何 markdown fence (```) 或說明文字。只有純 Python。
+"""
 
 
 def _j(s: Optional[str]) -> Any:
@@ -45,8 +76,7 @@ class CopilotService:
         self._mcp_repo = mcp_repo
         self._skill_repo = skill_repo
         self._ds_repo = ds_repo
-        settings = get_settings()
-        self._client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+        self._llm = get_llm_client()
 
     async def stream_chat(
         self,
@@ -188,6 +218,7 @@ class CopilotService:
         is_ready = intent_result.get("is_ready", False)
         reply_message = intent_result.get("reply_message", "")
         tab_title = intent_result.get("tab_title", "")
+        analysis_request = intent_result.get("analysis_request", "")
 
         # 3. Merge slot_context with newly extracted params
         # Strip internal _selected_tool_* keys before using as API params
@@ -209,7 +240,9 @@ class CopilotService:
             yield {"type": "done"}
             return
 
-        if intent == "general_chat" or intent not in ("execute_mcp", "execute_skill", "mcp_call", "skill_call"):
+        if intent == "general_chat" or intent not in (
+            "execute_mcp", "execute_skill", "analyze_mcp", "mcp_call", "skill_call"
+        ):
             yield {
                 "type": "chat",
                 "message": reply_message
@@ -234,6 +267,29 @@ class CopilotService:
                 return
 
             async for event in self._execute_mcp(tool_id, merged_params, base_url, tab_title):
+                yield event
+            yield {"type": "done"}
+            return
+
+        if intent == "analyze_mcp":
+            required = mcp_params_map.get(tool_id, []) if tool_id else []
+            still_missing = [p for p in required if p not in merged_params]
+            if not is_ready or still_missing:
+                yield {
+                    "type": "question",
+                    "question": reply_message or f"請提供以下必填參數：{', '.join(still_missing or missing_params)}",
+                    "slot_context": merged_params,
+                    "tool_id": tool_id,
+                    "tool_type": "mcp",
+                }
+                yield {"type": "done"}
+                return
+
+            async for event in self._analyze_mcp_with_code(
+                tool_id, merged_params, base_url,
+                analysis_request=analysis_request or message,
+                tab_title=tab_title,
+            ):
                 yield event
             yield {"type": "done"}
             return
@@ -305,33 +361,35 @@ values is strictly forbidden.
 ## 回傳格式
 請嚴格回傳以下 JSON（不加任何前後文字、不加 markdown）：
 {{
-  "intent": "execute_mcp | execute_skill | build_mcp | build_skill | build_schedule | build_event | general_chat",
+  "intent": "execute_mcp | execute_skill | analyze_mcp | build_mcp | build_skill | build_schedule | build_event | general_chat",
   "tool_id": <整數 ID 或 null>,
   "tool_type": "mcp | skill | null",
   "extracted_params": {{}},
   "missing_params": [],
   "is_ready": false,
   "reply_message": "給使用者看的話（追問缺少的參數、播報執行進度、或一般回覆）",
-  "tab_title": "若 is_ready=true，生成一個簡短頁籤標題（如 '🔍 APC: L12345' 或 '🧠 CD 異常診斷'）"
+  "tab_title": "若 is_ready=true，生成一個簡短頁籤標題（如 '🔍 APC: L12345' 或 '🧠 CD 異常診斷'）",
+  "analysis_request": "（僅 analyze_mcp 時填寫）使用者要做的具體分析內容，例如：計算各參數平均值並找出最異常的參數"
 }}
 
 ## 規則
-1. 若使用者描述需要查詢資料 → intent = "execute_mcp"，選擇最匹配的 MCP
-2. 若使用者描述需要進行異常診斷 → intent = "execute_skill"，選擇最匹配的 Skill
-3. 若使用者說「建立 MCP / 資料節點 / 資料處理」等建構意圖 → intent = "build_mcp"
-4. 若使用者說「建立 Skill / 診斷技能 / 診斷管線」等建構意圖 → intent = "build_skill"
-5. 若使用者說「定時 / 排程 / 每天 / 每小時執行」等排程意圖 → intent = "build_schedule"
-6. 若使用者說「當異常發生時觸發 / 事件觸發」等事件意圖 → intent = "build_event"
-7. 從使用者訊息中提取相關參數放入 extracted_params（名稱、MCP ID、診斷條件、cron 表達式等）
-8. 已在 Slot Context 中的參數不算 missing_params
-9. missing_params 只列必填且尚未收集的參數名稱（字串陣列）
-10. 若所有必填參數齊全（含 Slot Context 中已有的，且來自使用者明確提供）→ is_ready = true，同時生成 tab_title
-11. 若有 missing_params → is_ready = false，在 reply_message 中用繁體中文友善地追問（一次最多問 2 個）
-12. 若是一般問候或聊天 → intent = "general_chat"，在 reply_message 回覆
-13. lot ID 常見格式如 L12345 或 N97A45.00，operation number 是製程站點編號如 3200 或 24981
-14. tab_title 要簡短（15 字以內），包含工具名稱與關鍵參數，例如 '🔍 APC: L12345@3200'
-15. 若使用者詢問系統架構相關問題（如「有幾個 MCP？」「什麼是 Data Subject？」「你有哪些工具？」）→ intent = "general_chat"，在 reply_message 中用繁體中文友善回答。Data Subject 是底層資料連線抽象層（Agent 透過 MCP 間接存取，使用者無需直接操作）。
-16. 任何情況下都必須回傳合法 JSON，不得輸出純文字或解釋性文字。"""
+1. 若使用者描述需要查詢資料（只看/顯示資料）→ intent = "execute_mcp"，選擇最匹配的 MCP
+2. 若使用者描述需要對資料進行計算、分析、找趨勢、統計、找異常值、比較、排行等 → intent = "analyze_mcp"，選擇最匹配的 MCP，並在 analysis_request 說明具體分析需求
+3. 若使用者描述需要進行完整異常診斷（NORMAL/ABNORMAL 判定）→ intent = "execute_skill"，選擇最匹配的 Skill
+4. 若使用者說「建立 MCP / 資料節點 / 資料處理」等建構意圖 → intent = "build_mcp"
+5. 若使用者說「建立 Skill / 診斷技能 / 診斷管線」等建構意圖 → intent = "build_skill"
+6. 若使用者說「定時 / 排程 / 每天 / 每小時執行」等排程意圖 → intent = "build_schedule"
+7. 若使用者說「當異常發生時觸發 / 事件觸發」等事件意圖 → intent = "build_event"
+8. 從使用者訊息中提取相關參數放入 extracted_params（名稱、MCP ID、診斷條件、cron 表達式等）
+9. 已在 Slot Context 中的參數不算 missing_params
+10. missing_params 只列必填且尚未收集的參數名稱（字串陣列）
+11. 若所有必填參數齊全（含 Slot Context 中已有的，且來自使用者明確提供）→ is_ready = true，同時生成 tab_title
+12. 若有 missing_params → is_ready = false，在 reply_message 中用繁體中文友善地追問（一次最多問 2 個）
+13. 若是一般問候或聊天 → intent = "general_chat"，在 reply_message 回覆
+14. lot ID 常見格式如 L12345 或 N97A45.00，operation number 是製程站點編號如 3200 或 24981
+15. tab_title 要簡短（15 字以內），包含工具名稱與關鍵參數，例如 '🔍 APC: L12345@3200'
+16. 若使用者詢問系統架構相關問題（如「有幾個 MCP？」「什麼是 Data Subject？」「你有哪些工具？」）→ intent = "general_chat"，在 reply_message 中用繁體中文友善回答。Data Subject 是底層資料連線抽象層（Agent 透過 MCP 間接存取，使用者無需直接操作）。
+17. 任何情況下都必須回傳合法 JSON，不得輸出純文字或解釋性文字。"""
 
         messages: List[Dict[str, str]] = []
         for h in history[-6:]:
@@ -339,13 +397,12 @@ values is strictly forbidden.
                 messages.append({"role": h["role"], "content": h["content"]})
         messages.append({"role": "user", "content": message})
 
-        response = await self._client.messages.create(
-            model=_MODEL,
-            max_tokens=1024,
+        response = await self._llm.create(
             system=system_prompt,
             messages=messages,
+            max_tokens=1024,
         )
-        return _extract_json(_get_text(response.content))
+        return _extract_json(response.text)
 
     # ── Catalog Builders ─────────────────────────────────────────
 
@@ -572,6 +629,138 @@ values is strictly forbidden.
             "human_recommendation": skill.human_recommendation or "",
             "mcp_output": output_data,
             "tab_title": tab_title or f"{icon} {skill.name}",
+        }
+
+    # ── Raw Data Analysis (code-gen + sandbox) ────────────────────
+
+    async def _analyze_mcp_with_code(
+        self,
+        tool_id: int,
+        params: Dict[str, Any],
+        base_url: str,
+        analysis_request: str = "",
+        tab_title: str = "",
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """Fetch raw MCP data, generate Python analysis code via LLM, execute in sandbox.
+
+        Yields analysis_result SSE events with text_result + optional chart.
+        Uses _raw_dataset (before MCP processing_script transforms) for deeper analysis.
+        """
+        mcp = await self._mcp_repo.get_by_id(tool_id)
+        if not mcp:
+            yield {"type": "error", "message": f"找不到 MCP id={tool_id}"}
+            return
+
+        # Resolve data source
+        system_mcp_id = getattr(mcp, 'system_mcp_id', None)
+        if system_mcp_id:
+            sys_mcp = await self._mcp_repo.get_by_id(system_mcp_id)
+            if not sys_mcp:
+                yield {"type": "error", "message": f"找不到 System MCP id={system_mcp_id}"}
+                return
+            ds_api_config = _j(sys_mcp.api_config) if isinstance(sys_mcp.api_config, str) else (sys_mcp.api_config or {})
+        else:
+            ds = await self._ds_repo.get_by_id(mcp.data_subject_id)
+            if not ds:
+                yield {"type": "error", "message": "找不到對應的 System MCP / DataSubject"}
+                return
+            ds_api_config = _j(ds.api_config) if isinstance(ds.api_config, str) else (ds.api_config or {})
+
+        endpoint_url = ds_api_config.get("endpoint_url", "")
+        if not endpoint_url:
+            yield {"type": "error", "message": "System MCP / DataSubject 缺少 endpoint_url"}
+            return
+
+        yield {"type": "thinking", "message": f"📊 正在取得 {mcp.name} 原始資料..."}
+
+        try:
+            raw_data = await EventPipelineService._fetch_ds_data(endpoint_url, params, base_url)
+        except Exception as exc:
+            yield {"type": "error", "message": f"資料查詢失敗：{exc}"}
+            return
+
+        if not raw_data or (isinstance(raw_data, list) and len(raw_data) == 0):
+            yield {"type": "error", "message": "資料查詢結果為空，無法進行分析"}
+            return
+
+        # Build schema sample (5 rows) for code generation — do NOT pass full dataset to LLM
+        sample_rows = raw_data[:5] if isinstance(raw_data, list) else []
+        if not sample_rows and isinstance(raw_data, dict):
+            for v in raw_data.values():
+                if isinstance(v, list):
+                    sample_rows = v[:5]
+                    break
+
+        columns = list(sample_rows[0].keys()) if sample_rows else []
+        row_count = len(raw_data) if isinstance(raw_data, list) else "unknown"
+
+        yield {"type": "thinking", "message": f"🧠 正在生成分析程式碼（{row_count} 筆資料，{len(columns)} 個欄位）..."}
+
+        # Generate analysis code
+        schema_desc = json.dumps(sample_rows, ensure_ascii=False, indent=2)
+        code_gen_prompt = f"""資料來源：{mcp.name}
+資料欄位：{columns}
+資料筆數：{row_count}
+前 5 筆範例資料：
+{schema_desc}
+
+使用者的分析需求：{analysis_request}
+
+請撰寫 process(raw_data) 函式，針對上述需求進行分析，並在 text_result 中用繁體中文條列說明分析結果。"""
+
+        try:
+            code_resp = await self._llm.create(
+                system=_ANALYSIS_CODE_GEN_SYSTEM,
+                messages=[{"role": "user", "content": code_gen_prompt}],
+                max_tokens=2048,
+            )
+            python_code = code_resp.text.strip()
+            # Strip accidental markdown fences
+            if python_code.startswith("```"):
+                lines = python_code.splitlines()
+                python_code = "\n".join(
+                    ln for ln in lines if not ln.strip().startswith("```")
+                ).strip()
+        except Exception as exc:
+            yield {"type": "error", "message": f"分析程式碼生成失敗：{exc}"}
+            return
+
+        yield {"type": "thinking", "message": "⚙️ 正在沙盒執行分析..."}
+
+        # Execute in sandbox with FULL raw data
+        analysis_input = raw_data if isinstance(raw_data, list) else list(raw_data.values())[0] if isinstance(raw_data, dict) else []
+        try:
+            sandbox_result = await execute_script(python_code, analysis_input)
+        except (ValueError, TimeoutError) as exc:
+            yield {"type": "error", "message": f"分析沙盒執行失敗：{exc}"}
+            return
+        except Exception as exc:
+            yield {"type": "error", "message": f"分析執行未預期錯誤：{exc}"}
+            return
+
+        # Extract chart if present
+        chart_json: Optional[str] = None
+        ui_render = sandbox_result.get("ui_render") or {}
+        charts = ui_render.get("charts") or []
+        if charts and charts[0]:
+            chart_json = charts[0]
+        elif ui_render.get("chart_data"):
+            chart_json = ui_render["chart_data"]
+
+        text_result = sandbox_result.get("text_result", "分析完成，請查看下方結果。")
+        dataset = sandbox_result.get("dataset") or []
+
+        yield {
+            "type": "analysis_result",
+            "mcp_id": tool_id,
+            "mcp_name": mcp.name,
+            "analysis_request": analysis_request,
+            "text_result": text_result,
+            "dataset": dataset,
+            "chart_json": chart_json,
+            "has_chart": bool(chart_json),
+            "row_count": row_count,
+            "tab_title": tab_title or f"📊 {mcp.name} 分析",
         }
 
     # ── Build Intent Handling ─────────────────────────────────────

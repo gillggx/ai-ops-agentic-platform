@@ -34,6 +34,17 @@ TEMPLATES: Dict[str, Dict[str, Any]] = {
             "title":       "圖表標題",
         },
     },
+    "per_group_regression": {
+        "description": "各分組獨立線性回歸 — 每個分組（機台/lot）各自一個子圖，並排顯示 slope/R²，適合比較不同機台趨勢差異",
+        "required_params": ["value_col", "group_col"],
+        "optional_params": {
+            "time_col":  "datetime 欄位（可選，預設用 row index）",
+            "ucl":       "上控制線（可選）",
+            "lcl":       "下控制線（可選）",
+            "title":     "圖表標題",
+            "cols":      "每行子圖數（可選，預設 4）",
+        },
+    },
     "spc_chart": {
         "description": "SPC 管制圖 — 繪製量測值走勢、UCL/LCL/CL，標注 OOC 點",
         "required_params": ["value_col", "ucl", "lcl"],
@@ -515,14 +526,182 @@ def run_correlation(
     }
 
 
+def run_per_group_regression(
+    df: pd.DataFrame,
+    value_col: str,
+    group_col: str,
+    time_col: Optional[str] = None,
+    ucl: Optional[float] = None,
+    lcl: Optional[float] = None,
+    title: str = "各分組線性回歸",
+    cols: int = 4,
+) -> Dict[str, Any]:
+    """Per-group linear regression with a clean subplot grid.
+
+    Each group (machine/tool/lot) gets its own subplot with scatter + regression line.
+    Subplot titles show group name + slope + R² and are positioned above the chart area.
+    """
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    for c in (value_col, group_col):
+        if c not in df.columns:
+            raise ValueError(f"欄位 '{c}' 不存在，可用欄位：{list(df.columns)}")
+
+    groups = sorted(df[group_col].dropna().unique())
+    n = len(groups)
+    cols = max(1, min(int(cols), n))
+    rows = (n + cols - 1) // cols
+
+    # Build subplot titles (group name only; slope/R² added via annotations after fitting)
+    subplot_titles = [str(g) for g in groups] + [""] * (rows * cols - n)
+
+    fig = make_subplots(
+        rows=rows,
+        cols=cols,
+        subplot_titles=subplot_titles,
+        vertical_spacing=max(0.08, 0.4 / rows),
+        horizontal_spacing=0.06,
+    )
+
+    result_rows: List[Dict[str, Any]] = []
+    stats_by_group: Dict[str, Any] = {}
+    llm_parts: List[str] = []
+
+    for idx, grp in enumerate(groups):
+        row_i = idx // cols + 1
+        col_i = idx % cols + 1
+        gdf = df[df[group_col] == grp].copy()
+
+        if time_col and time_col in gdf.columns:
+            try:
+                gdf[time_col] = pd.to_datetime(gdf[time_col])
+                gdf = gdf.sort_values(time_col).reset_index(drop=True)
+            except Exception:
+                pass
+
+        vals = pd.to_numeric(gdf[value_col], errors="coerce")
+        x_num = np.arange(len(gdf))
+
+        if time_col and time_col in gdf.columns:
+            try:
+                t_s = pd.to_datetime(gdf[time_col])
+                t0 = t_s.iloc[0]
+                x_disp = [(t_s.iloc[i] - t0).total_seconds() / 60.0 for i in range(len(gdf))]
+            except Exception:
+                x_disp = list(x_num)
+        else:
+            x_disp = list(x_num)
+
+        mask = ~np.isnan(vals.values)
+        if mask.sum() < 2:
+            continue
+
+        coeffs = np.polyfit(x_num[mask], vals.values[mask], 1)
+        slope, intercept = float(coeffs[0]), float(coeffs[1])
+        trend_y = intercept + slope * x_num
+        y_mean = float(vals[mask].mean())
+        ss_tot = float(np.sum((vals.values[mask] - y_mean) ** 2))
+        ss_res = float(np.sum((vals.values[mask] - trend_y[mask]) ** 2))
+        r_squared = float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0
+
+        x_list = [float(v) for v in x_disp]
+        y_list = [float(v) if not np.isnan(v) else None for v in vals]
+        trend_list = [float(v) for v in trend_y]
+
+        fig.add_trace(go.Scatter(
+            x=x_list, y=y_list,
+            mode="markers", showlegend=False,
+            marker=dict(color="#6366f1", size=4, opacity=0.6),
+            name=str(grp),
+        ), row=row_i, col=col_i)
+
+        fig.add_trace(go.Scatter(
+            x=x_list, y=trend_list,
+            mode="lines", showlegend=False,
+            line=dict(color="#ef4444", width=2, dash="dash"),
+            name=f"{grp} trend",
+        ), row=row_i, col=col_i)
+
+        if ucl is not None:
+            fig.add_trace(go.Scatter(
+                x=[x_list[0], x_list[-1]], y=[ucl, ucl],
+                mode="lines", showlegend=False,
+                line=dict(color="#f97316", width=1, dash="dot"),
+            ), row=row_i, col=col_i)
+        if lcl is not None:
+            fig.add_trace(go.Scatter(
+                x=[x_list[0], x_list[-1]], y=[lcl, lcl],
+                mode="lines", showlegend=False,
+                line=dict(color="#3b82f6", width=1, dash="dot"),
+            ), row=row_i, col=col_i)
+
+        stats_by_group[str(grp)] = {
+            "slope": round(slope, 6),
+            "r_squared": round(r_squared, 4),
+            "n": int(mask.sum()),
+            "mean": round(y_mean, 4),
+        }
+        llm_parts.append(f"{grp}: slope={slope:.4f}, R²={r_squared:.4f}")
+
+        # Add slope/R² as an inside-subplot annotation (top-left corner, data coordinates)
+        y_top = float(vals[mask].max())
+        if ucl is not None:
+            y_top = max(y_top, ucl)
+        fig.add_annotation(
+            row=row_i, col=col_i,
+            x=x_list[0],
+            y=y_top,
+            text=f"s={slope:.4f}  R²={r_squared:.3f}",
+            xanchor="left",
+            yanchor="top",
+            showarrow=False,
+            font=dict(size=8, color="#6366f1"),
+            bgcolor="rgba(248,250,252,0.85)",
+            borderpad=2,
+        )
+
+        for i, row_d in enumerate(gdf.itertuples()):
+            result_rows.append({
+                group_col: str(grp),
+                "序號": i + 1,
+                value_col: round(y_list[i], 4) if y_list[i] is not None else None,
+                "趨勢線": round(trend_list[i], 4),
+                "slope": round(slope, 6),
+                "r_squared": round(r_squared, 4),
+            })
+
+    chart_height = max(280, rows * 220 + 60)
+    fig.update_layout(
+        title=dict(text=title, font=dict(size=14)),
+        height=chart_height,
+        template="plotly_white",
+        margin=dict(l=40, r=20, t=60, b=40),
+    )
+
+    llm_readable = (
+        f"{group_col} 各分組線性回歸（共 {n} 組）：\n" + "\n".join(llm_parts[:10])
+    )
+    if n > 10:
+        llm_readable += f"\n…共 {n} 組"
+
+    return {
+        "stats": stats_by_group,
+        "chart_data": fig.to_json(),
+        "llm_readable_data": llm_readable,
+        "result_table": result_rows[:500],
+    }
+
+
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 
 _RUNNERS = {
-    "linear_regression": run_linear_regression,
-    "spc_chart":         run_spc_chart,
-    "boxplot":           run_boxplot,
-    "stats_summary":     run_stats_summary,
-    "correlation":       run_correlation,
+    "linear_regression":    run_linear_regression,
+    "per_group_regression": run_per_group_regression,
+    "spc_chart":            run_spc_chart,
+    "boxplot":              run_boxplot,
+    "stats_summary":        run_stats_summary,
+    "correlation":          run_correlation,
 }
 
 

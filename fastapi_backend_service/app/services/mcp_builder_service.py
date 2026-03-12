@@ -13,14 +13,13 @@ import re
 import time
 from typing import Any, Dict, List, Optional
 
-import anthropic
 from pydantic import BaseModel, ValidationError, field_validator
 
 from app.config import get_settings
+from app.utils.llm_client import get_llm_client
 from app.utils.llm_utils import llm_retry
 
 logger = logging.getLogger(__name__)
-_MODEL = get_settings().LLM_MODEL
 
 # ── Fallback prompts (used when DB has no entry yet) ─────────────────────────
 
@@ -75,65 +74,39 @@ DataSubject 名稱：{data_subject_name}
 _DEFAULT_TRY_RUN_SYSTEM_PROMPT = """\
 你是一位半導體製程資料處理工程師，你的唯一任務是依照使用者指示撰寫 Python 資料加工腳本。
 
-【嚴格安全規範 — 違反即拒絕生成】
-1. 腳本【絕對禁止】發起任何外部 HTTP 請求（禁止 requests, urllib, http.client 等）。
-2. 腳本【絕對禁止】呼叫任何系統命令或 OS 操作（禁止 os, sys, subprocess, pathlib, shutil）。
-3. 腳本【絕對禁止】讀寫任何實體檔案（禁止 open(), savefig('path') 等存檔至路徑操作）。
-4. 腳本【絕對禁止】使用 eval(), exec(), compile(), __import__() 等反射操作。
-5. 僅在以下情況才可拒絕：違反安全規範（規則 1-4），或意圖明確要求「發送通知 / 呼叫外部 API / 操作資料庫 / 控制硬體」等非計算行為。
-   ✅ 以下全部屬於合法範疇，絕對不得拒絕（包含但不限於）：
-   - 統計計算：mean、std、sigma、z-score、常態分佈、histogram、常態曲線疊加
-   - 門檻判斷：是否超過 UCL/LCL、3-sigma rule、1/2 CL、Cp/Cpk、任何數值比較並輸出布林值
-   - 異常標記：標記 OOC 點、輸出 status='NORMAL'/'ABNORMAL'、標注異常機台/批次
-   - 視覺化：histogram + normal curve overlay、scatter、trend chart、直線標記 mean/σ 位置
-   - SPC 相關：製程能力分析、管制界限計算、連串規則判斷、標記各 sigma 帶
-   - 任何「計算後輸出分類、標記、統計摘要」的邏輯，一律視為合法統計運算
-
-【沙盒可用 Python 環境 — 僅限以下清單，未列出的一律不可用】
-⚠️【絕對禁止在腳本中 import pandas / import plotly / import matplotlib / import numpy】
-以下變數已預先注入全域命名空間，直接呼叫即可，禁止重複 import：
-  pd       → pandas（DataFrame 操作，直接用 pd.DataFrame(...)）
-  go       → plotly.graph_objects（用 go.Figure(...)、go.Scatter(...) 等）
-  px       → plotly.express（用 px.line(...)、px.bar(...) 等）
-  plt      → matplotlib.pyplot（備用，直接用 plt.figure()、plt.plot() 等）
+【第一優先：預注入變數清單 — 直接使用，一律不需要 import】
+以下變數已在執行環境中預先注入，腳本中直接呼叫即可：
+  pd         → pandas        直接用 pd.DataFrame(...), pd.Series(...)
+  go         → plotly.graph_objects  直接用 go.Figure(...), go.Scatter(...)
+  px         → plotly.express       直接用 px.line(...), px.bar(...)
+  plt        → matplotlib.pyplot    直接用 plt.figure(), plt.plot()
   matplotlib → matplotlib 模組
-  np       → numpy（直接用 np.mean(...)、np.std(...)、np.array(...)、np.percentile(...) 等）
+  np         → numpy         直接用 np.mean(...), np.std(...), np.array(...)
+  deque, Counter, defaultdict, OrderedDict — 直接用，無需 import
 
-可 import 的標準函式庫（唯獨以下這些，其餘禁止）：
+✅ 正確寫法：vals = [row["measured_value"] for row in raw_data]; mean = np.mean(vals)
+❌ 錯誤寫法：import pandas as pd  /  import numpy as np  /  import plotly.graph_objects as go
+（腳本中出現任何 import pandas / import numpy / import plotly / import matplotlib 即為錯誤）
+
+可 import 的標準函式庫（唯獨以下這些）：
   math, statistics, json, datetime, collections, itertools, functools, io, base64
 
-直接可用（已注入全域，無需 import）：
-  deque（from collections）、OrderedDict、defaultdict、Counter、namedtuple
+【安全規範 — 腳本中不得出現以下操作】
+1. 外部 HTTP 請求：requests, urllib, http.client
+2. 系統命令：os, sys, subprocess, pathlib, shutil
+3. 檔案讀寫：open(), savefig('path')
+4. 反射操作：eval(), exec(), compile(), __import__()
 
-可用 Python 內建函式：
-  abs, all, any, bool, bytes, bytearray, chr, classmethod, complex, dict, dir,
-  divmod, enumerate, filter, float, format, frozenset, getattr, hasattr, hash,
-  hex, id, int, isinstance, issubclass, iter, len, list, map, max, memoryview,
-  min, next, object, oct, ord, pow, print, property, range, repr, reversed,
-  round, set, setattr, slice, sorted, staticmethod, str, sum, super, tuple,
-  type, vars, zip
-
-可用 Exception 類別（可在 try/except 中使用）：
-  Exception, BaseException, ValueError, TypeError, KeyError, IndexError,
-  AttributeError, RuntimeError, StopIteration, NameError, NotImplementedError,
-  ZeroDivisionError, OverflowError, ArithmeticError, ImportError,
-  ModuleNotFoundError, LookupError, AssertionError, GeneratorExit
-
-【重要注意事項】
-- datetime 模組以物件形式注入，使用方式：datetime.datetime.now()、datetime.timedelta()、datetime.timezone.utc
-- 可使用 from datetime import datetime, timedelta, timezone 語法
-- ✅ np（numpy）已預注入，直接使用即可：np.mean(vals)、np.std(vals)、np.percentile(vals, 75)
-  進階統計範例：skewness = float(((a - a.mean())**3).mean() / a.std()**3)，其中 a = np.array(vals)
-- 不可使用 scipy、sklearn 等未列出的套件（np 已足夠做統計分析）
-- try/except 必須使用上述已列出的 Exception 類別，例如 except Exception: 或 except ValueError:
-- ⚠️ Exception Handling 鐵律：主診斷邏輯必須包在 try/except Exception as e 中：
+【Exception Handling 鐵律 — 必須遵守】
+process() 函式的主要邏輯必須包在 try/except 中：
   try:
       # 主要計算邏輯
   except Exception as e:
       return {"output_schema": {"fields": []}, "dataset": [], "ui_render": {"type": "table", "charts": [], "chart_data": None},
               "_error": f"執行異常：{e}"}
-- ⚠️ 禁止使用 raise RuntimeError / raise ValueError 等主動拋出例外（改為回傳 _error 欄位）
-- ⚠️ 禁止空 if 區塊（if condition: 後面必須有實際程式碼，不得僅有 pass 或空行）
+不得使用 raise，遇到錯誤一律回傳 _error 欄位。
+不得有空 if 區塊（if: 後面必須有程式碼）。
+datetime 可直接 from datetime import datetime, timedelta, timezone 使用。
 
 【標準輸出規範 — process() 函式的回傳 dict 必須包含以下三個 Key】
 - output_schema: {"fields": [{"name": str, "type": str, "description": str}]}
@@ -244,6 +217,35 @@ _DEFAULT_DIAGNOSIS_SYSTEM_PROMPT = """\
 - ⚠️ 禁止在 problem_object 中放入說明文字，只放可識別的具體值"""
 
 
+_DEFAULT_SKILL_DIAG_SYSTEM_PROMPT = """\
+你是一位半導體製程智能診斷工程師。你的任務是撰寫一個 Python 診斷函式 diagnose()。
+
+【第一規則：try/except 是必須的，不得省略】
+函式主體必須包在 try/except 中，格式固定如下：
+def diagnose(mcp_outputs: dict) -> dict:
+    rows = list(mcp_outputs.values())[0].get("dataset", [])
+    if not rows:
+        return {"status": "NORMAL", "diagnosis_message": "無資料", "problem_object": {}}
+    try:
+        # 診斷邏輯寫在這裡
+        ...
+        return {"status": "NORMAL", "diagnosis_message": "...", "problem_object": {}}
+    except Exception as e:
+        return {"status": "ABNORMAL", "diagnosis_message": f"診斷執行異常：{e}", "problem_object": {}}
+
+【第二規則：回傳 dict 必須包含以下三個 key，缺一不可】
+1. "status"            → 字串，只能是 "NORMAL" 或 "ABNORMAL"
+2. "diagnosis_message" → 繁體中文診斷說明（2-3 句）
+3. "problem_object"    → dict，異常時填入具體物件（如 {"tool": "TETCH01"}），正常時填 {}
+
+【第三規則：只回傳 Python 程式碼，不要任何說明文字】
+回應格式：
+```python
+def diagnose(mcp_outputs: dict) -> dict:
+    ...
+```"""
+
+
 # ── v14.2 Schema Guards ───────────────────────────────────────────────────────
 
 class McpTryRunOutputGuard(BaseModel):
@@ -352,8 +354,7 @@ class MCPBuilderService:
     """LLM-powered design-time helper for the MCP Builder."""
 
     def __init__(self) -> None:
-        settings = get_settings()
-        self._client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+        self._llm = get_llm_client()
 
     async def generate_all(
         self,
@@ -387,12 +388,12 @@ class MCPBuilderService:
         last_err: Exception = RuntimeError("generate_all: no attempts made")
         for attempt in range(2):
             try:
-                response = await self._client.messages.create(
-                    model=_MODEL,
-                    max_tokens=4096,
+                response = await self._llm.create(
+                    system="",
                     messages=[{"role": "user", "content": prompt}],
-                )
-                return _extract_json(_get_text(response.content))
+                    max_tokens=4096,
+                    )
+                return _extract_json(response.text)
             except (json.JSONDecodeError, ValueError) as exc:
                 last_err = exc
                 logger.warning("generate_all JSON parse failed (attempt %d): %s", attempt + 1, exc)
@@ -479,13 +480,12 @@ DataSubject 名稱：{data_subject_name}
                 _events.append(f"[Schema Guard] 注入驗證錯誤，發起第 {_attempt_count[0] + 1} 次重試…")
             full_prompt = prompt + retry_suffix
             _attempt_count[0] += 1
-            response = await self._client.messages.create(
-                model=_MODEL,
-                max_tokens=8192,
+            response = await self._llm.create(
                 system=sys_prompt,
                 messages=[{"role": "user", "content": full_prompt}],
-            )
-            raw_text = _get_text(response.content)
+                max_tokens=8192,
+                )
+            raw_text = response.text
             logger.info(
                 "generate_for_try_run raw LLM response (attempt %d): stop_reason=%s len=%d first_200=%r",
                 _attempt_count[0], response.stop_reason, len(raw_text), raw_text[:200],
@@ -550,12 +550,12 @@ DataSubject 名稱：{data_subject_name}
 2. **腳本問題**：腳本哪裡寫錯了（具體行數或邏輯）？
 3. **修改建議**：使用者應如何調整加工意圖或腳本邏輯來修正？"""
 
-        response = await self._client.messages.create(
-            model=_MODEL,
-            max_tokens=1024,
+        response = await self._llm.create(
+            system="",
             messages=[{"role": "user", "content": prompt}],
-        )
-        return _get_text(response.content)
+            max_tokens=1024,
+            )
+        return response.text
 
     async def check_intent(
         self,
@@ -598,13 +598,13 @@ DataSubject 名稱：{data_subject_name}
   "changes": "一句話說明改寫了什麼（例如：補充窗口大小7筆與±3σ控制限）"
 }}"""
 
-        response = await self._client.messages.create(
-            model=_MODEL,
-            max_tokens=700,
+        response = await self._llm.create(
+            system="",
             messages=[{"role": "user", "content": prompt}],
-        )
+            max_tokens=700,
+            )
         try:
-            data = _extract_json(_get_text(response.content))
+            data = _extract_json(response.text)
             # Backward-compat: keep suggested_prompt alias
             data.setdefault("improved_intent", data.get("suggested_prompt", ""))
             data.setdefault("suggested_prompt", data.get("improved_intent", ""))
@@ -662,13 +662,13 @@ DataSubject 名稱：{data_subject_name}
   "changes": "一句話說明改寫了什麼（例如：補充具體欄位名稱與3天時間門檻）"
 }}"""
 
-        response = await self._client.messages.create(
-            model=_MODEL,
-            max_tokens=700,
+        response = await self._llm.create(
+            system="",
             messages=[{"role": "user", "content": prompt}],
-        )
+            max_tokens=700,
+            )
         try:
-            data = _extract_json(_get_text(response.content))
+            data = _extract_json(response.text)
             # Normalise: keep backward-compat `suggested_prompt` alias
             data.setdefault("improved_prompt", data.get("suggested_prompt", ""))
             data.setdefault("suggested_prompt", data.get("improved_prompt", ""))
@@ -730,13 +730,13 @@ DataSubject 名稱：{data_subject_name}
   "fix_suggestion": "建議使用者採取的行動（1-2句）"
 }}"""
 
-        response = await self._client.messages.create(
-            model=_MODEL,
-            max_tokens=1024,
+        response = await self._llm.create(
+            system="",
             messages=[{"role": "user", "content": prompt}],
-        )
+            max_tokens=1024,
+            )
         try:
-            return _extract_json(_get_text(response.content))
+            return _extract_json(response.text)
         except Exception as exc:
             logger.warning("triage_error JSON parse failed: %s", exc)
             return {
@@ -771,14 +771,13 @@ DataSubject 名稱：{data_subject_name}
 
 請根據上述資料與診斷邏輯，輸出結構化診斷報告："""
 
-        response = await self._client.messages.create(
-            model=_MODEL,
-            max_tokens=4096,
+        response = await self._llm.create(
             system=sys_prompt,
             messages=[{"role": "user", "content": prompt}],
-        )
+            max_tokens=4096,
+            )
 
-        text = _get_text(response.content).strip()
+        text = response.text.strip()
         try:
             data = _extract_json(text)
             # Accept both 'status' (NORMAL/ABNORMAL) and legacy 'severity' (LOW/MEDIUM/HIGH/CRITICAL)
@@ -841,12 +840,12 @@ DataSubject 名稱：{data_subject_name}
 只回傳 JSON：{{"summary": "..."}}"""
 
         try:
-            response = await self._client.messages.create(
-                model=_MODEL,
-                max_tokens=512,
+            response = await self._llm.create(
+                system="",
                 messages=[{"role": "user", "content": prompt}],
-            )
-            data = _extract_json(_get_text(response.content))
+                max_tokens=512,
+                )
+            data = _extract_json(response.text)
             return {"summary": data.get("summary", diag_msg)}
         except Exception as exc:
             logger.warning("summarize_diagnosis failed: %s", exc)
@@ -881,12 +880,12 @@ DataSubject 名稱：{data_subject_name}
 
 只回傳 JSON：{{"explanation": "..."}}"""
         try:
-            response = await self._client.messages.create(
-                model=_MODEL,
-                max_tokens=256,
+            response = await self._llm.create(
+                system="",
                 messages=[{"role": "user", "content": prompt}],
-            )
-            data = _extract_json(_get_text(response.content))
+                max_tokens=256,
+                )
+            data = _extract_json(response.text)
             return data.get("explanation", error)
         except Exception as exc:
             logger.warning("explain_failure LLM call failed: %s", exc)
@@ -944,12 +943,12 @@ DataSubject 名稱：{data_subject_name}
 }}"""
 
         try:
-            response = await self._client.messages.create(
-                model=_MODEL,
-                max_tokens=700,
+            response = await self._llm.create(
+                system="",
                 messages=[{"role": "user", "content": prompt}],
-            )
-            data = _extract_json(_get_text(response.content))
+                max_tokens=700,
+                )
+            data = _extract_json(response.text)
             data.setdefault("is_clear", True)
             data.setdefault("questions", [])
             data.setdefault("suggested_prompt", diagnostic_prompt)
@@ -1083,12 +1082,12 @@ def diagnose(mcp_outputs: dict) -> dict:
                     f"[Schema Guard] 注入驗證錯誤，發起第 {_skill_attempt_count[0] + 1} 次重試…"
                 )
             _skill_attempt_count[0] += 1
-            resp = await self._client.messages.create(
-                model=_MODEL,
-                max_tokens=4096,
+            resp = await self._llm.create(
+                system=_DEFAULT_SKILL_DIAG_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": code_prompt + retry_suffix}],
-            )
-            return _extract_code(_get_text(resp.content))
+                max_tokens=4096,
+                )
+            return _extract_code(resp.text)
 
         def _validate_skill(code: str) -> str:
             try:
@@ -1290,15 +1289,15 @@ def diagnose(mcp_outputs: dict) -> dict:
   ]
 }}"""
 
-        response = await self._client.messages.create(
-            model=_MODEL,
-            max_tokens=1024,
+        response = await self._llm.create(
+            system="",
             messages=[{"role": "user", "content": prompt}],
-        )
+            max_tokens=1024,
+            )
         try:
-            return _extract_json(_get_text(response.content))
+            return _extract_json(response.text)
         except Exception:
-            logger.warning("auto_map JSON parse failed, raw: %s", _get_text(response.content)[:200])
+            logger.warning("auto_map JSON parse failed, raw: %s", response.text[:200])
             return {"mapping": []}
 
     async def reflect_and_fix(
@@ -1352,13 +1351,13 @@ def diagnose(mcp_outputs: dict) -> dict:
   "revised_script": "..."
 }}"""
 
-        response = await self._client.messages.create(
-            model=_MODEL,
-            max_tokens=4096,
+        response = await self._llm.create(
+            system="",
             messages=[{"role": "user", "content": prompt}],
-        )
+            max_tokens=4096,
+            )
         try:
-            result = _extract_json(_get_text(response.content))
+            result = _extract_json(response.text)
             return {
                 "reflection": result.get("reflection", ""),
                 "revised_script": result.get("revised_script", ""),
