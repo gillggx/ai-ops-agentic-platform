@@ -79,17 +79,27 @@ def plot_scatter(data: List[Dict[str, Any]], **params) -> Dict[str, Any]:
                 return ToolResult.err("Need 2 numeric columns for scatter plot.")
             x_col, y_col = num_cols[0], num_cols[1]
 
-        kwargs = dict(
-            x=_extract_col(data, x_col), y=_extract_col(data, y_col),
-            mode="markers", name=f"{x_col} vs {y_col}",
-        )
-        if size_col:
-            kwargs["marker"] = {"size": [max(4, _safe_float(v) or 4)
-                                         for v in _extract_col(data, size_col)]}
-        if color_col:
-            kwargs.setdefault("marker", {})["color"] = _extract_col(data, color_col)
+        x_vals = _extract_col(data, x_col)
+        y_vals = _extract_col(data, y_col)
 
-        fig = go.Figure(data=[go.Scatter(**kwargs)],
+        if color_col:
+            # Group by color column to create separate traces (handles categorical)
+            groups: dict = {}
+            for row, xv, yv in zip(data, x_vals, y_vals):
+                key = str(row.get(color_col, ""))
+                groups.setdefault(key, ([], []))[0].append(xv)
+                groups[key][1].append(yv)
+            traces = [go.Scatter(x=gx, y=gy, mode="markers", name=k)
+                      for k, (gx, gy) in groups.items()]
+        else:
+            marker = {}
+            if size_col:
+                marker["size"] = [max(4, _safe_float(v) or 4)
+                                  for v in _extract_col(data, size_col)]
+            traces = [go.Scatter(x=x_vals, y=y_vals, mode="markers",
+                                 name=f"{x_col} vs {y_col}", marker=marker)]
+
+        fig = go.Figure(data=traces,
                         layout=go.Layout(title=title,
                                          xaxis_title=x_col, yaxis_title=y_col))
         return ToolResult.ok(f"Scatter: '{x_col}' vs '{y_col}', {len(data)} points",

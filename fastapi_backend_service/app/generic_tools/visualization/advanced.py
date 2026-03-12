@@ -793,10 +793,11 @@ def plot_event_markers(data: List[Dict[str, Any]], **params) -> Dict[str, Any]:
                                   marker=dict(color=EDA_COLORS[0], size=4),
                                   line=dict(color=EDA_COLORS[0], width=1.5), name=value_col))
         if event_col:
-            event_rows = [(x, row.get(event_col)) for x, row in zip(x_vals, data)
+            event_rows = [(i, x, row.get(event_col)) for i, (x, row) in enumerate(zip(x_vals, data))
                           if row.get(event_col)]
-            for x, evt in event_rows[:20]:
-                fig.add_vline(x=x, line_color="#CC0000", line_dash="dot",
+            for idx, x, evt in event_rows[:20]:
+                # Use integer index as x position to avoid type mismatch with string dates
+                fig.add_vline(x=idx, line_color="#CC0000", line_dash="dot",
                                annotation_text=str(evt), annotation_font_size=9)
         _eda_layout(fig, title, n)
         return ToolResult.ok(f"Event markers '{value_col}' (n={n})", _plotly_to_payload(fig))

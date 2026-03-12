@@ -8,7 +8,7 @@ import math
 import random
 from typing import Any, Dict, List
 
-from app.generic_tools._base import ToolResult, _safe_float
+from app.generic_tools._base import ToolResult, _jsonify, _safe_float
 
 
 def cluster_data(data: List[Dict[str, Any]], **params) -> Dict[str, Any]:

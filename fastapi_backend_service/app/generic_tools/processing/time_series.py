@@ -159,7 +159,9 @@ def resample_time_series(data: List[Dict[str, Any]], **params) -> Dict[str, Any]
             return ToolResult.err("No numeric columns to resample.")
 
         resampled = df[cols].resample(interval).agg(agg_func).dropna()
-        rows = resampled.reset_index().to_dict(orient="records")
+        rows_df = resampled.reset_index()
+        rows_df[time_col] = rows_df[time_col].dt.strftime("%Y-%m-%dT%H:%M:%S")
+        rows = rows_df.to_dict(orient="records")
 
         return ToolResult.ok(
             f"Resampled {len(data)} rows → {len(rows)} rows at interval='{interval}' using {agg_func}",
@@ -778,7 +780,8 @@ def time_weighted_average(data: List[Dict[str, Any]], **params) -> Dict[str, Any
         if len(v) < 2:
             return ToolResult.err("Need at least 2 valid data points.")
         # Trapezoidal integration
-        twa = float(np.trapz(v, t)) / (float(t[-1]) - float(t[0])) if t[-1] != t[0] else float(v[0])
+        trapz_fn = getattr(np, "trapezoid", None) or getattr(np, "trapz", None)
+        twa = float(trapz_fn(v, t)) / (float(t[-1]) - float(t[0])) if t[-1] != t[0] else float(v[0])
         simple_mean = float(np.mean(v))
         return ToolResult.ok(
             f"Time-weighted average '{value_col}': TWA={twa:.4f}, simple mean={simple_mean:.4f}",
