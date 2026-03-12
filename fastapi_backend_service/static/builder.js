@@ -7889,16 +7889,18 @@ async function _toolCatalogLoad() {
   body.innerHTML = '<div class="flex items-center justify-center py-20 text-slate-400 text-sm">載入中…</div>';
 
   try {
-    const [manifestR, templatesR, arsenalR] = await Promise.all([
+    const [manifestR, templatesR, arsenalR, allSkillsR] = await Promise.all([
       _api('GET', '/agent/tools_manifest'),
       _api('GET', '/agent/analyze-data/templates'),
       _api('GET', '/agent-tools'),
+      _api('GET', '/skill-definitions'),   // all skills including private
     ]);
 
-    const skills     = manifestR?.tools        || [];
-    const metaTools  = manifestR?.meta_tools   || [];
-    const privateTools = arsenalR?.items       || [];
-    const templates  = templatesR?.templates   || {};
+    // Full list from /skill-definitions; fall back to manifest if needed
+    const allSkills    = Array.isArray(allSkillsR) ? allSkillsR : (allSkillsR?.items || manifestR?.tools || []);
+    const metaTools    = manifestR?.meta_tools   || [];
+    const privateTools = arsenalR?.items         || [];
+    const templates    = templatesR?.templates   || {};
 
     body.innerHTML = '';
 
@@ -7955,18 +7957,20 @@ async function _toolCatalogLoad() {
     );
     _section('📊', '分析模板 (analyze_data)', 'bg-violet-100 text-violet-700', tmplCards);
 
-    // 3. 診斷技能 (Skills)
-    const skillCards = skills.map(s =>
-      _card({
+    // 3. 診斷技能 (Skills) — all skills including private
+    const skillCards = allSkills.map(s => {
+      const isPublic = s.visibility === 'public';
+      return _card({
         icon: '🎯',
         name: s.name,
         description: s.description || '',
-        endpoint: `POST /api/v1/execute/skill/${s.skill_id}`,
-        badge: 'Skill',
-        badgeClass: 'bg-emerald-100 text-emerald-600',
-      })
-    );
-    _section('🎯', '診斷技能 (Skills)', 'bg-emerald-100 text-emerald-700', skillCards.length ? skillCards : [_card({ icon: '💤', name: '尚無公開 Skill', description: '請在 Skill Builder 建立並設定可見度為 public。' })]);
+        endpoint: `POST /api/v1/execute/skill/${s.id || s.skill_id}`,
+        badge: isPublic ? '🌐 public' : '🔒 private',
+        badgeClass: isPublic ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-500',
+      });
+    });
+    _section('🎯', `診斷技能 (Skills)`, 'bg-emerald-100 text-emerald-700',
+      skillCards.length ? skillCards : [_card({ icon: '💤', name: '尚無 Skill', description: '請在 Skill Builder 建立診斷技能。' })]);
 
     // 4. Meta Tools
     if (metaTools.length) {
