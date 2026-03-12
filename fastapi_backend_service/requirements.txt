@@ -27,8 +27,16 @@ apscheduler==3.10.4
 # HTTP client (event_pipeline_service — DataSubject API calls + async testing)
 httpx==0.26.0
 
-# Data science (used by MCP sandbox scripts)
+# Data science (used by MCP sandbox scripts, analysis_library, generic_tools)
 numpy>=1.26.0
+pandas>=2.0.0
+plotly>=5.20.0
+scipy>=1.12.0
+scikit-learn>=1.4.0
+
+# MongoDB (OntologySimulator integration)
+motor>=3.7.0
+pymongo>=4.16.0
 
 # Utilities
 python-dotenv==1.0.0
