@@ -127,6 +127,7 @@ function switchView(name) {
   if (name === 'mock-data-studio')     _mdsLoadList();
   if (name === 'agent-brain')      { _brainLoadSoul(); _brainLoadPref(); _brainLoadMemories(); }
   if (name === 'arsenal')          _arsenalLoad();
+  if (name === 'tool-catalog')     _toolCatalogLoad();
 
   // Phase 8.6: send AI welcome message once when entering diagnose view
   if (name === 'diagnose' && !_diagnoseWelcomeSent) {
@@ -7871,6 +7872,137 @@ async function _mdsTestRun(id) {
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 🗡️  Arsenal — 私有武器庫 (Agent Tool Chest)
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Tool Catalog (工具目錄) ─────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+const _BUILTIN_TOOLS = [
+  { name: 'analyze_data', icon: '📊', description: '結構化分析模板引擎 — 呼叫預建模板（linear_regression / spc_chart / boxplot / stats_summary / correlation）對 MCP 資料進行統計分析與視覺化，輸出圖表 + 結果表格，可直接固化為 MCP。', params: 'template, mcp_id, params{}' },
+  { name: 'execute_jit',  icon: '🐍', description: '即時 Python 沙盒 — Agent 自行撰寫 Python 程式碼，在安全的受限環境中對資料執行一次性計算，適合 analyze_data 模板無法覆蓋的客製化分析。', params: 'python_code, mcp_id, run_params{}' },
+  { name: 'search_catalog', icon: '🔍', description: '工具目錄搜尋 — 以語義關鍵字搜尋可用 Skills 或 MCPs，返回最相關的候選清單，Agent 決策時優先呼叫。', params: 'query, type(skill|mcp)' },
+  { name: 'execute_agent_tool', icon: '⚡', description: '私有武器庫執行 — 從用戶私有武器庫中選取已儲存的 Python 工具腳本並在沙盒中執行，適合重複使用的自訂分析邏輯。', params: 'tool_id, data[]' },
+];
+
+async function _toolCatalogLoad() {
+  const body = document.getElementById('tool-catalog-body');
+  if (!body) return;
+  body.innerHTML = '<div class="flex items-center justify-center py-20 text-slate-400 text-sm">載入中…</div>';
+
+  try {
+    const [manifestR, templatesR, arsenalR] = await Promise.all([
+      _api('GET', '/agent/tools_manifest'),
+      _api('GET', '/agent/analyze-data/templates'),
+      _api('GET', '/agent-tools'),
+    ]);
+
+    const skills     = manifestR?.tools        || [];
+    const metaTools  = manifestR?.meta_tools   || [];
+    const privateTools = arsenalR?.items       || [];
+    const templates  = templatesR?.templates   || {};
+
+    body.innerHTML = '';
+
+    // ── Section helper ─────────────────────────────────────────────────────
+    function _section(icon, title, color, cards) {
+      const sec = document.createElement('div');
+      sec.innerHTML = `
+        <div class="flex items-center gap-2 mb-3">
+          <span class="text-lg">${icon}</span>
+          <h2 class="text-sm font-bold text-slate-700">${title}</h2>
+          <span class="text-xs px-2 py-0.5 rounded-full font-semibold ${color}">${cards.length}</span>
+        </div>
+        <div class="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-3" id="tc-section-${title.replace(/\s/g,'')}"></div>
+      `;
+      body.appendChild(sec);
+      const grid = sec.querySelector('[id^="tc-section-"]');
+      cards.forEach(c => grid.appendChild(c));
+    }
+
+    // ── Card builder ───────────────────────────────────────────────────────
+    function _card(opts) {
+      const el = document.createElement('div');
+      el.className = 'bg-white rounded-xl border border-slate-200 p-4 flex flex-col gap-2 shadow-sm hover:shadow-md transition-shadow';
+      el.innerHTML = `
+        <div class="flex items-start justify-between gap-2">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="text-base flex-shrink-0">${opts.icon || '🔧'}</span>
+            <span class="font-semibold text-slate-800 text-sm truncate">${_esc(opts.name)}</span>
+          </div>
+          ${opts.badge ? `<span class="flex-shrink-0 text-[10px] px-2 py-0.5 rounded-full font-semibold ${opts.badgeClass || 'bg-slate-100 text-slate-500'}">${opts.badge}</span>` : ''}
+        </div>
+        <p class="text-xs text-slate-500 leading-relaxed">${_esc(opts.description || '（無說明）')}</p>
+        ${opts.params ? `<div class="text-[10px] font-mono bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 text-slate-500">${_esc(opts.params)}</div>` : ''}
+        ${opts.endpoint ? `<div class="text-[10px] font-mono bg-slate-900 text-green-300 rounded-lg px-3 py-1.5">${_esc(opts.endpoint)}</div>` : ''}
+      `;
+      return el;
+    }
+
+    // 1. 系統內建工具
+    _section('🤖', '系統內建工具', 'bg-blue-100 text-blue-700',
+      _BUILTIN_TOOLS.map(t => _card({ icon: t.icon, name: t.name, description: t.description, params: `params: ${t.params}`, badge: 'Built-in', badgeClass: 'bg-blue-100 text-blue-600' }))
+    );
+
+    // 2. 分析模板 (analyze_data sub-tools)
+    const tmplCards = Object.entries(templates).map(([key, meta]) =>
+      _card({
+        icon: '📈',
+        name: key,
+        description: meta.description || '',
+        params: `必填: ${(meta.required_params||[]).join(', ') || '—'}　選填: ${Object.keys(meta.optional_params||{}).join(', ') || '—'}`,
+        badge: 'Template',
+        badgeClass: 'bg-violet-100 text-violet-600',
+      })
+    );
+    _section('📊', '分析模板 (analyze_data)', 'bg-violet-100 text-violet-700', tmplCards);
+
+    // 3. 診斷技能 (Skills)
+    const skillCards = skills.map(s =>
+      _card({
+        icon: '🎯',
+        name: s.name,
+        description: s.description || '',
+        endpoint: `POST /api/v1/execute/skill/${s.skill_id}`,
+        badge: 'Skill',
+        badgeClass: 'bg-emerald-100 text-emerald-600',
+      })
+    );
+    _section('🎯', '診斷技能 (Skills)', 'bg-emerald-100 text-emerald-700', skillCards.length ? skillCards : [_card({ icon: '💤', name: '尚無公開 Skill', description: '請在 Skill Builder 建立並設定可見度為 public。' })]);
+
+    // 4. Meta Tools
+    if (metaTools.length) {
+      const metaCards = metaTools.map(m =>
+        _card({
+          icon: '🔧',
+          name: m.tool_name,
+          description: m.description || '',
+          params: `workflow: ${(m.workflow||'').slice(0, 80)}…`,
+          badge: 'Meta',
+          badgeClass: 'bg-amber-100 text-amber-600',
+        })
+      );
+      _section('🔧', 'Meta Tools', 'bg-amber-100 text-amber-700', metaCards);
+    }
+
+    // 5. 私有工具 (Arsenal)
+    const privateCards = privateTools.map(t =>
+      _card({
+        icon: '⚡',
+        name: t.name,
+        description: t.description || '',
+        params: `usage: ${t.usage_count || 0} 次`,
+        badge: 'Private',
+        badgeClass: 'bg-slate-100 text-slate-500',
+      })
+    );
+    _section('💾', '私有武器庫 (Arsenal)', 'bg-slate-100 text-slate-600',
+      privateCards.length ? privateCards : [_card({ icon: '💤', name: '武器庫目前為空', description: '從 Shadow Analyst 儲存分析腳本，或固化分析模板，工具會自動出現在這裡。' })]
+    );
+
+  } catch (e) {
+    body.innerHTML = `<div class="text-center py-20 text-red-400 text-sm">載入失敗：${_esc(e.message)}</div>`;
+  }
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function _arsenalLoad() {

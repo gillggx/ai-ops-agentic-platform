@@ -299,6 +299,18 @@
           </svg>
         </button>
 
+        <!-- Tool Catalog 工具目錄 -->
+        <button class="nav-btn" id="nav-tool-catalog" title="工具目錄 (Agent Tool Catalog)"
+          onclick="switchView('tool-catalog')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="7" rx="1"/>
+            <rect x="14" y="3" width="7" height="7" rx="1"/>
+            <rect x="3" y="14" width="7" height="7" rx="1"/>
+            <rect x="14" y="14" width="7" height="7" rx="1"/>
+          </svg>
+        </button>
+
         <div class="flex-1"></div>
         <div class="w-6 border-t border-slate-200 my-1"></div>
 
@@ -1914,6 +1926,27 @@
           </div>
 
         </div><!-- /view-arsenal -->
+
+        <!-- ══ TOOL CATALOG VIEW ══ -->
+        <div id="view-tool-catalog" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
+          <!-- Header -->
+          <div class="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white">
+            <div>
+              <h1 class="text-lg font-bold text-slate-800">🗂️ Agent 工具目錄</h1>
+              <p class="text-xs text-slate-500 mt-0.5">目前 Agent 可使用的所有工具清單與說明</p>
+            </div>
+            <button onclick="_toolCatalogLoad()"
+                    class="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-800
+                           border border-slate-200 rounded-lg px-3 py-1.5 hover:border-slate-300 transition-colors">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              重新整理
+            </button>
+          </div>
+          <!-- Content -->
+          <div class="flex-1 overflow-y-auto p-6 space-y-8" id="tool-catalog-body">
+            <div class="flex items-center justify-center py-20 text-slate-400 text-sm">載入中…</div>
+          </div>
+        </div><!-- /view-tool-catalog -->
 
         <!-- ══ GENERATED EVENTS VIEW ══ -->
         <div id="view-generated-events" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
