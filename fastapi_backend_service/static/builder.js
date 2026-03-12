@@ -7889,18 +7889,19 @@ async function _toolCatalogLoad() {
   body.innerHTML = '<div class="flex items-center justify-center py-20 text-slate-400 text-sm">載入中…</div>';
 
   try {
-    const [manifestR, templatesR, arsenalR, allSkillsR] = await Promise.all([
+    const [manifestR, templatesR, arsenalR, allSkillsR, mcpDefsR] = await Promise.all([
       _api('GET', '/agent/tools_manifest'),
       _api('GET', '/agent/analyze-data/templates'),
       _api('GET', '/agent-tools'),
-      _api('GET', '/skill-definitions'),   // all skills including private
+      _api('GET', '/skill-definitions'),
+      _api('GET', '/mcp-definitions?type=custom'),  // custom MCPs with processing_script
     ]);
 
-    // Full list from /skill-definitions; fall back to manifest if needed
     const allSkills    = Array.isArray(allSkillsR) ? allSkillsR : (allSkillsR?.items || manifestR?.tools || []);
     const metaTools    = manifestR?.meta_tools   || [];
     const privateTools = arsenalR?.items         || [];
     const templates    = templatesR?.templates   || {};
+    const customMcps   = Array.isArray(mcpDefsR) ? mcpDefsR : (mcpDefsR?.items || []);
 
     body.innerHTML = '';
 
@@ -7972,6 +7973,53 @@ async function _toolCatalogLoad() {
     _section('🎯', `診斷技能 (Skills)`, 'bg-emerald-100 text-emerald-700',
       skillCards.length ? skillCards : [_card({ icon: '💤', name: '尚無 Skill', description: '請在 Skill Builder 建立診斷技能。' })]);
 
+    // ── Code card with collapsible Python block ──────────────────────────────
+    let _codeCardIdx = 0;
+    function _codeCard(opts) {
+      const idx = _codeCardIdx++;
+      const el = document.createElement('div');
+      el.className = 'bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow overflow-hidden';
+      el.innerHTML = `
+        <div class="p-4 flex flex-col gap-2">
+          <div class="flex items-start justify-between gap-2">
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="text-base flex-shrink-0">${opts.icon || '🐍'}</span>
+              <span class="font-semibold text-slate-800 text-sm truncate">${_esc(opts.name)}</span>
+            </div>
+            <span class="flex-shrink-0 text-[10px] px-2 py-0.5 rounded-full font-semibold ${opts.badgeClass || 'bg-slate-100 text-slate-500'}">${opts.badge || ''}</span>
+          </div>
+          ${opts.description ? `<p class="text-xs text-slate-500 leading-relaxed">${_esc(opts.description)}</p>` : ''}
+          <button onclick="
+            var b=document.getElementById('tc-code-${idx}');
+            var a=document.getElementById('tc-arrow-${idx}');
+            b.classList.toggle('hidden');
+            a.textContent=b.classList.contains('hidden')?'▶ 展開腳本':'▼ 收合腳本';
+          " class="self-start text-[10px] font-semibold text-indigo-500 hover:text-indigo-700 transition-colors">
+            <span id="tc-arrow-${idx}">▶ 展開腳本</span>
+          </button>
+        </div>
+        <div id="tc-code-${idx}" class="hidden border-t border-slate-100">
+          <pre class="bg-slate-900 text-green-300 text-[10px] font-mono p-4 overflow-x-auto overflow-y-auto max-h-72 leading-relaxed whitespace-pre">${_esc(opts.code || '（無腳本）')}</pre>
+        </div>
+      `;
+      return el;
+    }
+
+    // 3.5 MCP Python 腳本庫
+    const mcpScriptCards = customMcps
+      .filter(m => m.processing_script)
+      .map(m => _codeCard({
+        icon: '📦',
+        name: m.name,
+        description: m.description || m.processing_intent || '',
+        code: m.processing_script,
+        badge: 'MCP Script',
+        badgeClass: 'bg-indigo-100 text-indigo-600',
+      }));
+    if (mcpScriptCards.length) {
+      _section('🐍', 'MCP Python 腳本庫（我們幫 Agent 準備的）', 'bg-indigo-100 text-indigo-700', mcpScriptCards);
+    }
+
     // 4. Meta Tools
     if (metaTools.length) {
       const metaCards = metaTools.map(m =>
@@ -7987,18 +8035,18 @@ async function _toolCatalogLoad() {
       _section('🔧', 'Meta Tools', 'bg-amber-100 text-amber-700', metaCards);
     }
 
-    // 5. 私有工具 (Arsenal)
+    // 5. 私有武器庫 (Agent 自己寫的 / 固化的)
     const privateCards = privateTools.map(t =>
-      _card({
+      _codeCard({
         icon: '⚡',
-        name: t.name,
+        name: `${t.name}  （使用 ${t.usage_count || 0} 次）`,
         description: t.description || '',
-        params: `usage: ${t.usage_count || 0} 次`,
-        badge: 'Private',
-        badgeClass: 'bg-slate-100 text-slate-500',
+        code: t.code || '（無腳本）',
+        badge: 'Agent 寫的',
+        badgeClass: 'bg-orange-100 text-orange-600',
       })
     );
-    _section('💾', '私有武器庫 (Arsenal)', 'bg-slate-100 text-slate-600',
+    _section('💾', '私有武器庫（Agent 自己寫的）', 'bg-orange-100 text-orange-700',
       privateCards.length ? privateCards : [_card({ icon: '💤', name: '武器庫目前為空', description: '從 Shadow Analyst 儲存分析腳本，或固化分析模板，工具會自動出現在這裡。' })]
     );
 
