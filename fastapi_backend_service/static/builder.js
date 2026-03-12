@@ -7889,12 +7889,13 @@ async function _toolCatalogLoad() {
   body.innerHTML = '<div class="flex items-center justify-center py-20 text-slate-400 text-sm">載入中…</div>';
 
   try {
-    const [manifestR, templatesR, arsenalR, allSkillsR, mcpDefsR] = await Promise.all([
+    const [manifestR, templatesR, arsenalR, allSkillsR, mcpDefsR, genericR] = await Promise.all([
       _api('GET', '/agent/tools_manifest'),
       _api('GET', '/agent/analyze-data/templates'),
       _api('GET', '/agent-tools'),
       _api('GET', '/skill-definitions'),
-      _api('GET', '/mcp-definitions?type=custom'),  // custom MCPs with processing_script
+      _api('GET', '/mcp-definitions?type=custom'),
+      _api('GET', '/generic-tools/catalog'),        // 25 processing + 25 visualization
     ]);
 
     const allSkills    = Array.isArray(allSkillsR) ? allSkillsR : (allSkillsR?.items || manifestR?.tools || []);
@@ -7902,6 +7903,7 @@ async function _toolCatalogLoad() {
     const privateTools = arsenalR?.items         || [];
     const templates    = templatesR?.templates   || {};
     const customMcps   = Array.isArray(mcpDefsR) ? mcpDefsR : (mcpDefsR?.items || []);
+    const genericTools = genericR?.tools         || [];
 
     body.innerHTML = '';
 
@@ -7972,6 +7974,29 @@ async function _toolCatalogLoad() {
     });
     _section('🎯', `診斷技能 (Skills)`, 'bg-emerald-100 text-emerald-700',
       skillCards.length ? skillCards : [_card({ icon: '💤', name: '尚無 Skill', description: '請在 Skill Builder 建立診斷技能。' })]);
+
+    // 3.7 Generic Tools (25 processing + 25 visualization)
+    const processingTools = genericTools.filter(t => t.category === 'processing');
+    const vizTools        = genericTools.filter(t => t.category === 'visualization');
+
+    function _genericCard(t) {
+      const paramsStr = Object.entries(t.params || {}).map(([k,v]) => `${k}: ${v}`).join('  |  ');
+      return _card({
+        icon: t.category === 'processing' ? '⚙️' : '📉',
+        name: t.name,
+        description: t.description || '',
+        params: paramsStr || null,
+        badge: t.category === 'processing' ? 'Processing' : 'Visualization',
+        badgeClass: t.category === 'processing' ? 'bg-cyan-100 text-cyan-700' : 'bg-pink-100 text-pink-700',
+      });
+    }
+
+    if (processingTools.length)
+      _section('⚙️', `資料處理工具 (Generic Processing × ${processingTools.length})`, 'bg-cyan-100 text-cyan-700',
+        processingTools.map(_genericCard));
+    if (vizTools.length)
+      _section('📉', `視覺化工具 (Generic Visualization × ${vizTools.length})`, 'bg-pink-100 text-pink-700',
+        vizTools.map(_genericCard));
 
     // ── Code card with collapsible Python block ──────────────────────────────
     let _codeCardIdx = 0;
