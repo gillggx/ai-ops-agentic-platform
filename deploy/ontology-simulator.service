@@ -1,0 +1,25 @@
+[Unit]
+Description=OntologySimulator MES Backend (port 8001)
+After=network.target mongod.service
+Wants=mongod.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/aiops/ontology_simulator
+EnvironmentFile=/opt/aiops/ontology_simulator/.env
+ExecStart=/opt/aiops/venv_ontology/bin/python main.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ontology-simulator
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/aiops/ontology_simulator /tmp
+
+[Install]
+WantedBy=multi-user.target
