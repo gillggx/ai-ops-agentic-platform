@@ -322,6 +322,23 @@ export default function Dashboard() {
           EXPLORER
         </button>
 
+        {/* Audit Tracker link */}
+        <button
+          onClick={() => router.push("/audit")}
+          className={[
+            "flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded border transition-colors",
+            isTrace
+              ? "bg-indigo-800 border-indigo-600 text-indigo-200 hover:bg-indigo-700"
+              : "bg-white border-slate-300 text-slate-500 hover:bg-slate-50",
+          ].join(" ")}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24"
+               fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+          </svg>
+          AUDIT
+        </button>
+
         {/* Clock */}
         <div className={[
           "font-mono text-[12px] px-3 py-1.5 rounded-md border shadow-inner min-w-[100px] text-center transition-colors duration-300",

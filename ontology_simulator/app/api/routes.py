@@ -213,3 +213,72 @@ async def acknowledge_tool_hold(tool_id: str):
     Called by the frontend when the engineer clicks ACKNOWLEDGE."""
     released = acknowledge_hold(tool_id)
     return {"tool_id": tool_id, "released": released}
+
+
+# ── Audit: Index Count vs Actual Data Objects ──────────────────
+
+@router.get("/audit")
+async def get_audit():
+    """
+    Module 3 – Object & Index Tracker (Spec §4 last paragraph).
+
+    For each subsystem (APC / DC / SPC / RECIPE), returns:
+      - index_entries  : total snapshot rows (= how many times the sub-system was called)
+      - distinct_objects: number of unique data objects actually stored
+      - compression_ratio: index_entries / distinct_objects
+
+    Example: RECIPE might have 8,000 index entries but only 20 distinct recipe versions.
+    """
+    db = get_db()
+
+    subsystems = ["APC", "DC", "SPC", "RECIPE"]
+    result = {}
+
+    for obj in subsystems:
+        # Total index entries
+        index_entries = await db.object_snapshots.count_documents({"objectName": obj})
+
+        # Distinct object IDs (unique data objects stored)
+        pipeline = [
+            {"$match":  {"objectName": obj}},
+            {"$group":  {"_id": "$objectID"}},
+            {"$count":  "n"},
+        ]
+        distinct_res    = await db.object_snapshots.aggregate(pipeline).to_list(length=1)
+        distinct_objects = distinct_res[0]["n"] if distinct_res else 0
+
+        # Newest & oldest snapshot timestamp
+        newest_doc = await db.object_snapshots.find_one(
+            {"objectName": obj}, sort=[("eventTime", -1)]
+        )
+        oldest_doc = await db.object_snapshots.find_one(
+            {"objectName": obj}, sort=[("eventTime", 1)]
+        )
+
+        compression = round(index_entries / distinct_objects, 1) if distinct_objects else None
+
+        result[obj] = {
+            "index_entries":     index_entries,
+            "distinct_objects":  distinct_objects,
+            "compression_ratio": compression,
+            "newest_event_time": newest_doc["eventTime"].isoformat() + "Z" if newest_doc else None,
+            "oldest_event_time": oldest_doc["eventTime"].isoformat() + "Z" if oldest_doc else None,
+        }
+
+    # Events fan-out summary
+    tool_events = await db.events.count_documents({"eventType": "TOOL_EVENT"})
+    lot_events  = await db.events.count_documents({"eventType": "LOT_EVENT"})
+
+    # Master data counts (actual stored versions, not snapshots)
+    master = {
+        "recipe_versions": await db.recipe_data.count_documents({}),
+        "apc_models":      await db.apc_state.count_documents({}),
+        "lots":            await db.lots.count_documents({}),
+        "tools":           await db.tools.count_documents({}),
+    }
+
+    return {
+        "subsystems":    result,
+        "event_fanout":  {"TOOL_EVENT": tool_events, "LOT_EVENT": lot_events},
+        "master_data":   master,
+    }

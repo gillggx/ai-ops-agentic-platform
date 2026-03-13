@@ -61,6 +61,69 @@ function extractPayload(doc: SnapshotDoc, objectName: ObjectType): unknown {
   return (raw as unknown) ?? {};
 }
 
+// ── Time-Machine drill-down result panel ──────────────────────
+function DrilldownPanel({
+  result,
+  loading,
+  error,
+  query,
+}: {
+  result: SnapshotDoc | null;
+  loading: boolean;
+  error: string | null;
+  query: { targetID: string; step: string; eventTime: string; objectName: string } | null;
+}) {
+  if (!query) return null;
+
+  return (
+    <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50 overflow-hidden">
+      {/* Query label */}
+      <div className="px-3 py-2 border-b border-violet-200 bg-violet-100 flex items-center gap-2">
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+             className="text-violet-600 shrink-0">
+          <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+        </svg>
+        <span className="text-[10px] font-bold text-violet-700 uppercase tracking-wider">
+          Time-Machine Query
+        </span>
+        <span className="font-mono text-[10px] text-violet-500 ml-1">
+          /context/query?targetID={query.targetID}&amp;objectName={query.objectName}&amp;step={query.step}&amp;eventTime={new Date(query.eventTime).toISOString()}
+        </span>
+      </div>
+
+      {loading && (
+        <div className="px-4 py-3 text-[12px] text-violet-500 font-mono animate-pulse">
+          Querying subsystem…
+        </div>
+      )}
+      {error && (
+        <div className="px-4 py-3 text-[12px] text-red-600 font-mono">⚠ {error}</div>
+      )}
+      {result && !loading && (
+        <div className="bg-[#1e1b4b] overflow-x-auto p-4">
+          <div className="text-[9px] font-bold text-violet-400 uppercase tracking-widest mb-2">
+            Exact point-in-time snapshot retrieved via 4-key index
+          </div>
+          <pre
+            className="text-[12px] font-mono leading-relaxed text-slate-300 m-0 whitespace-pre"
+            dangerouslySetInnerHTML={{
+              __html: (() => {
+                const raw = JSON.stringify(result, null, 2)
+                  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                return raw
+                  .replace(/"([^"]+)":/g, '<span class="json-key">"$1"</span>:')
+                  .replace(/: "([^"]*)"/g, ': <span class="json-str">"$1"</span>')
+                  .replace(/: (-?[0-9]+\.?[0-9]*)/g, ': <span class="json-num">$1</span>');
+              })(),
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Timeline card ─────────────────────────────────────────────
 function TimelineCard({
   doc,
@@ -85,6 +148,54 @@ function TimelineCard({
   const payload  = extractPayload(doc, objectName);
   const timeStr  = eventTime ? fmtTime(eventTime) : "—";
   const isoStr   = eventTime ? fmtISO(eventTime) : "—";
+
+  // ── Drill-down state ────────────────────────────────────────
+  type DrillQuery = { targetID: string; step: string; eventTime: string; objectName: string };
+  const [drillQuery,   setDrillQuery]   = useState<DrillQuery | null>(null);
+  const [drillResult,  setDrillResult]  = useState<SnapshotDoc | null>(null);
+  const [drillLoading, setDrillLoading] = useState(false);
+  const [drillError,   setDrillError]   = useState<string | null>(null);
+
+  const handleDrilldown = useCallback(async () => {
+    // Prefer lotID as targetID; fall back to toolID
+    const targetID = lotID !== "—" ? lotID : toolID;
+    if (!eventTime || step === "—" || targetID === "—") return;
+
+    const q: DrillQuery = { targetID, step, eventTime, objectName };
+
+    // If same query already shown, toggle off
+    if (drillQuery && drillQuery.targetID === targetID && drillQuery.step === step) {
+      setDrillQuery(null);
+      setDrillResult(null);
+      setDrillError(null);
+      return;
+    }
+
+    setDrillQuery(q);
+    setDrillResult(null);
+    setDrillError(null);
+    setDrillLoading(true);
+
+    try {
+      const params = new URLSearchParams({
+        eventTime:  new Date(eventTime).toISOString(),
+        step,
+        targetID,
+        objectName,
+      });
+      const res = await fetch(`${getApiUrl()}/context/query?${params}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as Record<string, unknown>;
+        throw new Error((body?.detail as string) ?? `HTTP ${res.status}`);
+      }
+      const data = await res.json() as SnapshotDoc;
+      setDrillResult(data);
+    } catch (e) {
+      setDrillError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDrillLoading(false);
+    }
+  }, [lotID, toolID, eventTime, step, objectName, drillQuery]);
 
   return (
     <div className="relative pl-12 pb-8">
@@ -114,10 +225,29 @@ function TimelineCard({
               {objectID.length > 28 ? objectID.slice(0, 26) + "…" : objectID}
             </span>
           </div>
-          <div className="flex items-center gap-3 text-[10px] text-slate-500 font-mono bg-white px-2 py-1 rounded border border-slate-200 shadow-sm shrink-0">
-            <span title="Tool ID">⚙️ {toolID}</span>
-            <span title="Lot ID">📦 {lotID}</span>
-            <span title="Step">🏷️ {step}</span>
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-3 text-[10px] text-slate-500 font-mono bg-white px-2 py-1 rounded border border-slate-200 shadow-sm">
+              <span title="Tool ID">⚙️ {toolID}</span>
+              <span title="Lot ID">📦 {lotID}</span>
+              <span title="Step">🏷️ {step}</span>
+            </div>
+            {/* Time-Machine drill-down button */}
+            <button
+              onClick={handleDrilldown}
+              title="Time-Machine Query: retrieve exact point-in-time snapshot via 4-key index"
+              className={[
+                "flex items-center gap-1 px-2 py-1 rounded border text-[10px] font-bold transition-colors",
+                drillQuery
+                  ? "bg-violet-600 border-violet-700 text-white"
+                  : "bg-white border-violet-300 text-violet-600 hover:bg-violet-50",
+              ].join(" ")}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24"
+                   fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+              </svg>
+              {drillQuery ? "CLOSE" : "TIME-MACHINE"}
+            </button>
           </div>
         </div>
 
@@ -154,12 +284,24 @@ function TimelineCard({
         </div>
 
         {/* 3. Payload block */}
-        <div className="bg-[#1e293b] rounded-b-xl overflow-x-auto p-4 border-t border-slate-800">
+        <div className="bg-[#1e293b] overflow-x-auto p-4 border-t border-slate-800">
           <pre
             className="text-[12px] font-mono leading-relaxed text-slate-300 m-0 whitespace-pre"
             dangerouslySetInnerHTML={{ __html: syntaxHighlight(payload) }}
           />
         </div>
+
+        {/* 4. Time-Machine drill-down result */}
+        {drillQuery && (
+          <div className="px-4 pb-4 bg-[#1e293b]">
+            <DrilldownPanel
+              result={drillResult}
+              loading={drillLoading}
+              error={drillError}
+              query={drillQuery}
+            />
+          </div>
+        )}
       </div>
     </div>
   );
