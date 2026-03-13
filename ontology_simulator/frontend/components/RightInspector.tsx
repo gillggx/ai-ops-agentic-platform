@@ -4,7 +4,11 @@ import { MachineState } from "@/lib/types";
 import { TopoNode } from "@/components/TopologyView";
 import { LogType } from "@/hooks/useConsole";
 
-function getApiUrl() { return `http://${typeof window !== "undefined" ? window.location.hostname : "localhost"}:8001/api/v1`; }
+function getApiUrl() {
+  if (typeof window === "undefined") return "http://localhost:8001/api/v1";
+  const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+  return isLocal ? `http://${window.location.hostname}:8001/api/v1` : `${window.location.origin}/simulator-api/api/v1`;
+}
 
 // ── URL builder ──────────────────────────────────────────────
 function buildUrl(node: TopoNode, machine: MachineState, eventTime: string | null): string | null {

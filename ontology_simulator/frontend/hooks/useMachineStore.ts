@@ -7,10 +7,13 @@ import { LogType } from "@/hooks/useConsole";
 // The OntologySimulator backend always runs on port 8001.
 // Evaluated lazily at call-time to avoid SSG/hydration mismatch.
 function getUrls() {
-  const host = typeof window !== "undefined" ? window.location.hostname : "localhost";
+  if (typeof window === "undefined") return { ws: "ws://localhost:8001/ws", api: "http://localhost:8001/api/v1" };
+  const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+  if (isLocal) return { ws: `ws://${window.location.hostname}:8001/ws`, api: `http://${window.location.hostname}:8001/api/v1` };
+  const wsp = window.location.protocol === "https:" ? "wss" : "ws";
   return {
-    ws:  `ws://${host}:8001/ws`,
-    api: `http://${host}:8001/api/v1`,
+    ws:  `${wsp}://${window.location.host}/simulator/ws`,
+    api: `${window.location.origin}/simulator-api/api/v1`,
   };
 }
 const MACHINE_IDS = Array.from({ length: 10 }, (_, i) => `EQP-${String(i + 1).padStart(2, "0")}`);
