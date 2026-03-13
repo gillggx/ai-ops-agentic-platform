@@ -28,10 +28,10 @@ if $REBUILD; then
 fi
 
 echo "🔁  重啟服務..."
-systemctl restart fastapi-backend ontology-simulator
+sudo systemctl restart fastapi-backend ontology-simulator
 
 sleep 2
-systemctl is-active --quiet fastapi-backend && echo "  ✅  fastapi-backend  RUNNING" || echo "  ❌  fastapi-backend  FAILED"
-systemctl is-active --quiet ontology-simulator && echo "  ✅  ontology-simulator  RUNNING" || echo "  ❌  ontology-simulator  FAILED"
+sudo systemctl is-active --quiet fastapi-backend && echo "  ✅  fastapi-backend  RUNNING" || echo "  ❌  fastapi-backend  FAILED"
+sudo systemctl is-active --quiet ontology-simulator && echo "  ✅  ontology-simulator  RUNNING" || echo "  ❌  ontology-simulator  FAILED"
 echo ""
 echo "✅  更新完成"
