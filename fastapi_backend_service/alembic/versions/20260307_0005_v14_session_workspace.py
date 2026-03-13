@@ -8,7 +8,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "20260307_0005"
-down_revision = None  # set to previous revision id if chaining
+down_revision = "fix_ds_nullable_005"
 branch_labels = None
 depends_on = None
 

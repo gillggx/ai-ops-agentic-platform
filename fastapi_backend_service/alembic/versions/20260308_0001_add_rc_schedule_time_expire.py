@@ -9,7 +9,7 @@ from typing import Union
 from alembic import op
 
 revision: str = 'rc_schedule_time_006'
-down_revision: Union[str, None] = 'fix_ds_nullable_005'
+down_revision: Union[str, None] = '20260307_0005'
 branch_labels = None
 depends_on = None
 
