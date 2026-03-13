@@ -15,16 +15,6 @@ jobs:
         with:
           fetch-depth: 2   # need previous commit to diff
 
-      - name: Detect frontend changes
-        id: frontend
-        run: |
-          # If any file under ontology_simulator/frontend/ changed → rebuild
-          if git diff --name-only HEAD~1 HEAD | grep -q "^ontology_simulator/frontend/"; then
-            echo "changed=true" >> $GITHUB_OUTPUT
-          else
-            echo "changed=false" >> $GITHUB_OUTPUT
-          fi
-
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -41,9 +31,6 @@ jobs:
             # Ensure remote uses SSH (not HTTPS) so git pull works without credentials
             git remote set-url origin git@github.com:gillggx/ai-ops-agentic-platform.git
 
-            # Pass --rebuild-frontend only when Next.js source changed
-            REBUILD_FLAG="${{ steps.frontend.outputs.changed == 'true' && '--rebuild-frontend' || '' }}"
-
-            bash deploy/update.sh $REBUILD_FLAG
+            bash deploy/update.sh --rebuild-frontend
 
             echo "=== Deploy complete ==="
