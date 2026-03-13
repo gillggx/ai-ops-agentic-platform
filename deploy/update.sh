@@ -18,7 +18,7 @@ echo "🐍  更新 pip 依賴..."
 
 echo "🗃️   執行 Alembic migrations..."
 cd "$APP_DIR/fastapi_backend_service"
-/opt/aiops/venv_backend/bin/alembic upgrade head
+PYTHONPATH="$APP_DIR/fastapi_backend_service" /opt/aiops/venv_backend/bin/alembic upgrade head
 
 if $REBUILD; then
   echo "🔨  重新建置 Next.js..."
