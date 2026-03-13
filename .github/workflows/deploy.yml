@@ -37,6 +37,9 @@ jobs:
 
             cd /opt/aiops
 
+            # Ensure remote uses SSH (not HTTPS) so git pull works without credentials
+            git remote set-url origin git@github.com:gillggx/ai-ops-agentic-platform.git
+
             # Pass --rebuild-frontend only when Next.js source changed
             REBUILD_FLAG="${{ steps.frontend.outputs.changed == 'true' && '--rebuild-frontend' || '' }}"
 
