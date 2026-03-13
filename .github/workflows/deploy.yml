@@ -1,4 +1,4 @@
-name: Deploy to AWS EC2
+name: Deploy to Production (AWS EC2)
 
 on:
   push:
@@ -10,102 +10,36 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 執行遠端 SSH 部署指令
+      - name: Checkout (for changed-files detection)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2   # need previous commit to diff
+
+      - name: Detect frontend changes
+        id: frontend
+        run: |
+          # If any file under ontology_simulator/frontend/ changed → rebuild
+          if git diff --name-only HEAD~1 HEAD | grep -q "^ontology_simulator/frontend/"; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.EC2_HOST }}
+          host:     ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USERNAME }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          key:      ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -e
-            echo "=== 開始部署 ==="
+            echo "=== [1/1] Running update.sh on /opt/aiops ==="
 
-            REPO_ROOT="$HOME/ai-ops-agentic-platform"
-            BE_DIR="$REPO_ROOT/fastapi_backend_service"
-            VENV="$REPO_ROOT/venv/bin/activate"
-            SERVICE_FILE="/etc/systemd/system/aiops.service"
+            cd /opt/aiops
 
-            # ── 1. Git pull ────────────────────────────────────────────────
-            echo "--- [1/4] 拉取最新程式碼 ---"
-            cd "$REPO_ROOT"
+            # Pass --rebuild-frontend only when Next.js source changed
+            REBUILD_FLAG="${{ steps.frontend.outputs.changed == 'true' && '--rebuild-frontend' || '' }}"
 
-            # Use $HOME for backups — /tmp can be wiped between deploys
-            DB_BAK="$HOME/deploy_bak/dev.db"
-            ENV_BAK="$HOME/deploy_bak/.env"
-            mkdir -p "$HOME/deploy_bak"
+            bash deploy/update.sh $REBUILD_FLAG
 
-            # Back up DB (fail hard if DB exists but backup fails)
-            if [ -f "$BE_DIR/dev.db" ]; then
-              cp "$BE_DIR/dev.db" "$DB_BAK" || { echo "ERROR: DB backup failed, aborting deploy to protect data"; exit 1; }
-              echo "DB backed up: $(du -sh "$DB_BAK" | cut -f1)"
-            fi
-            # Back up .env
-            cp "$BE_DIR/.env" "$ENV_BAK" 2>/dev/null || true
-
-            # Remove untracked .env so git pull won't abort
-            rm -f "$BE_DIR/.env"
-            git pull origin main
-
-            # Restore DB (fail hard if backup exists but restore fails)
-            if [ -f "$DB_BAK" ]; then
-              cp "$DB_BAK" "$BE_DIR/dev.db" || { echo "ERROR: DB restore failed"; exit 1; }
-              echo "DB restored OK"
-            fi
-            # Restore .env then ensure SERVER_BASE_URL is correct
-            if [ -f "$ENV_BAK" ]; then
-              cp "$ENV_BAK" "$BE_DIR/.env"
-            fi
-            # Upsert SERVER_BASE_URL (replace if exists, append if missing)
-            if grep -q "SERVER_BASE_URL" "$BE_DIR/.env" 2>/dev/null; then
-              sed -i 's|SERVER_BASE_URL=.*|SERVER_BASE_URL="http://127.0.0.1:8000"|' "$BE_DIR/.env"
-            else
-              echo 'SERVER_BASE_URL="http://127.0.0.1:8000"' >> "$BE_DIR/.env"
-            fi
-            echo "SERVER_BASE_URL set to http://127.0.0.1:8000"
-
-            # ── 2. 前端打包 ────────────────────────────────────────────────
-            echo "--- [2/4] 打包前端 ---"
-            cd "$REPO_ROOT/frontend"
-            npm install
-            npm run build
-
-            # ── 3. Python 依賴 + DB migration ─────────────────────────────
-            echo "--- [3/4] 安裝依賴 & DB migration ---"
-            source "$VENV"
-            pip install -r "$BE_DIR/requirements.txt"
-            cd "$BE_DIR"
-            # Safe migration: upgrade head only. If already up to date, that's fine.
-            # NEVER stamp base (would re-run data migrations and risk data corruption).
-            # If upgrade fails, stamp head and let create_all fill gaps.
-            PYTHONPATH="$BE_DIR" alembic upgrade head || \
-              (PYTHONPATH="$BE_DIR" alembic stamp head && echo "stamped head; create_all will fill gaps") || \
-              echo "migration skipped — create_all will handle schema"
-
-            # ── 4. 重啟後端 (systemd) ──────────────────────────────────────
-            echo "--- [4/4] 重啟後端服務 ---"
-
-            printf '%s\n' \
-              '[Unit]' \
-              'Description=AIOps FastAPI Backend' \
-              'After=network.target' \
-              '' \
-              '[Service]' \
-              "User=$USER" \
-              "WorkingDirectory=$BE_DIR" \
-              "ExecStart=$REPO_ROOT/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000" \
-              'Restart=always' \
-              'RestartSec=5' \
-              'StandardOutput=journal' \
-              'StandardError=journal' \
-              '' \
-              '[Install]' \
-              'WantedBy=multi-user.target' \
-              | sudo tee "$SERVICE_FILE" > /dev/null
-
-            sudo systemctl daemon-reload
-            sudo systemctl enable aiops.service
-            sudo systemctl restart aiops.service
-            sleep 2
-            sudo systemctl status aiops.service --no-pager
-
-            echo "=== 部署完成！==="
+            echo "=== Deploy complete ==="
