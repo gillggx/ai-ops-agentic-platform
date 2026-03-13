@@ -20,7 +20,7 @@ SyslogIdentifier=fastapi-backend
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/opt/aiops/fastapi_backend_service /tmp
+ReadWritePaths=/opt/aiops /tmp
 
 [Install]
 WantedBy=multi-user.target
