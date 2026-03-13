@@ -121,6 +121,14 @@ function switchView(name) {
     _loadSkillDefs();
   }
   if (name === 'settings')         _loadSettings();
+  if (name === 'simulator') {
+    // Lazy-load the iframe: set src only on first visit to avoid pre-loading
+    const iframe = document.getElementById('simulator-iframe');
+    if (iframe && !iframe.dataset.loaded) {
+      iframe.src = '/simulator/';
+      iframe.dataset.loaded = '1';
+    }
+  }
   if (name === 'routine-checks')       _loadRoutineChecks();
   if (name === 'generated-events')     _loadGeneratedEvents();
   if (name === 'event-link-builder')   _elInitView();

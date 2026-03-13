@@ -189,6 +189,83 @@ _MOCK_DATA_SUBJECTS = [
 ]
 
 
+_ONTOLOGY_SYSTEM_MCPS = [
+    {
+        "name": "OntologySim — 批次清單",
+        "description": "OntologySimulator MES：查詢所有批次狀態（Waiting / Processing / Finished）",
+        "api_config": {
+            "endpoint_url": "http://localhost:8001/api/v1/lots",
+            "method": "GET",
+            "headers": {},
+        },
+        "input_schema": {
+            "fields": [
+                {"name": "status", "type": "string", "description": "篩選批次狀態（可選：Waiting / Processing / Finished）", "required": False},
+            ]
+        },
+    },
+    {
+        "name": "OntologySim — 機台狀態",
+        "description": "OntologySimulator MES：查詢全部 10 台機台的即時狀態（Idle / Busy / Hold）",
+        "api_config": {
+            "endpoint_url": "http://localhost:8001/api/v1/tools",
+            "method": "GET",
+            "headers": {},
+        },
+        "input_schema": {"fields": []},
+    },
+    {
+        "name": "OntologySim — 事件時間線",
+        "description": "OntologySimulator MES：查詢製程事件時間線（TOOL_EVENT / LOT_EVENT）",
+        "api_config": {
+            "endpoint_url": "http://localhost:8001/api/v1/events",
+            "method": "GET",
+            "headers": {},
+        },
+        "input_schema": {
+            "fields": [
+                {"name": "toolID", "type": "string", "description": "機台 ID（可選，e.g. EQP-01）", "required": False},
+                {"name": "lotID",  "type": "string", "description": "批次 ID（可選，e.g. LOT-0001）", "required": False},
+                {"name": "limit",  "type": "integer","description": "回傳筆數上限（預設 50）", "required": False},
+            ]
+        },
+    },
+    {
+        "name": "OntologySim — 物件歷史",
+        "description": "OntologySimulator 時間機器：查詢 APC/DC/SPC/Recipe 物件的歷史快照序列",
+        "api_config": {
+            "endpoint_url": "http://localhost:8001/api/v1/analytics/history",
+            "method": "GET",
+            "headers": {},
+        },
+        "input_schema": {
+            "fields": [
+                {"name": "targetID",    "type": "string", "description": "批次或機台 ID（e.g. LOT-0001 / EQP-01）", "required": True},
+                {"name": "objectName",  "type": "string", "description": "物件類型：DC / APC / SPC / RECIPE", "required": True},
+                {"name": "limit",       "type": "integer","description": "回傳快照筆數（預設 20）", "required": False},
+            ]
+        },
+    },
+    {
+        "name": "OntologySim — 時間機器查詢",
+        "description": "OntologySimulator 時間機器：給定時間戳記、步驟、物件，回傳當下的完整快照狀態",
+        "api_config": {
+            "endpoint_url": "http://localhost:8001/api/v1/context/query",
+            "method": "GET",
+            "headers": {},
+        },
+        "input_schema": {
+            "fields": [
+                {"name": "eventTime",   "type": "string", "description": "查詢時間點 (ISO 8601，e.g. 2025-01-04T16:21:00)", "required": True},
+                {"name": "targetID",    "type": "string", "description": "批次或機台 ID", "required": True},
+                {"name": "objectName",  "type": "string", "description": "物件類型：DC / APC / SPC / RECIPE", "required": True},
+                {"name": "step",        "type": "string", "description": "步驟代碼（e.g. STEP_042）", "required": False},
+            ]
+        },
+    },
+]
+
+
 _SEED_EVENT_TYPES = [
     {
         "name": "SPC_OOC_Etch_CD",
@@ -371,6 +448,31 @@ async def _seed_data() -> None:
                 "System MCP seeding skipped (schema not ready — run migration 0005): %s",
                 _seed_err,
             )
+            await db.rollback()
+
+        # ── 1c. Seed OntologySimulator system MCPs ────────────────────────────
+        try:
+            for spec in _ONTOLOGY_SYSTEM_MCPS:
+                result = await db.execute(
+                    select(_MCPModel).where(
+                        _MCPModel.name == spec["name"],
+                        _MCPModel.mcp_type == "system",
+                    )
+                )
+                if result.scalar_one_or_none() is None:
+                    sys_obj = _MCPModel(
+                        name=spec["name"],
+                        description=spec["description"],
+                        mcp_type="system",
+                        api_config=_json.dumps(spec["api_config"], ensure_ascii=False),
+                        input_schema=_json.dumps(spec["input_schema"], ensure_ascii=False),
+                        processing_intent="",
+                        visibility="public",
+                    )
+                    db.add(sys_obj)
+                    logger.info("Seeded OntologySim system MCP: %s", spec["name"])
+        except Exception as _seed_err2:
+            logger.warning("OntologySim MCP seeding skipped: %s", _seed_err2)
             await db.rollback()
 
         # ── 2. Seed built-in EventTypes (create or update attributes) ─────
@@ -603,6 +705,11 @@ async def health_check() -> HealthResponse:
 # ---------------------------------------------------------------------------
 # Static Frontend  (mounted LAST so API routes take priority)
 # ---------------------------------------------------------------------------
+
+# OntologySimulator Next.js static export (must be mounted before "/" catch-all)
+_SIMULATOR_DIR = Path(__file__).parent.parent / "ontology_simulator" / "frontend" / "out"
+if _SIMULATOR_DIR.exists():
+    app.mount("/simulator", StaticFiles(directory=_SIMULATOR_DIR, html=True), name="simulator")
 
 _STATIC_DIR = Path(__file__).parent / "static"
 if _STATIC_DIR.exists():

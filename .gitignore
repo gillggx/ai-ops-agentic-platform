@@ -9,3 +9,12 @@ __pycache__
 .env
 .env.local
 .env.*.local
+
+# OntologySimulator frontend build artifacts
+ontology_simulator/frontend/node_modules/
+ontology_simulator/frontend/.next/
+ontology_simulator/frontend/tsconfig.tsbuildinfo
+
+# Backup files
+*_backup*
+*.local_backup
