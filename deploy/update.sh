@@ -28,10 +28,17 @@ if $REBUILD; then
 fi
 
 echo "🔁  重啟服務..."
-sudo systemctl restart fastapi-backend ontology-simulator
+# Try systemctl first; fall back to pkill so systemd Restart=on-failure kicks in
+if sudo -n systemctl restart fastapi-backend ontology-simulator 2>/dev/null; then
+  echo "  systemctl restart OK"
+else
+  echo "  ⚠️  sudo systemctl failed — using pkill fallback (systemd will auto-restart)"
+  pkill -TERM -f "venv_backend/bin/uvicorn"   2>/dev/null || true
+  pkill -TERM -f "venv_ontology/bin/python"   2>/dev/null || true
+fi
 
-sleep 2
-sudo systemctl is-active --quiet fastapi-backend && echo "  ✅  fastapi-backend  RUNNING" || echo "  ❌  fastapi-backend  FAILED"
-sudo systemctl is-active --quiet ontology-simulator && echo "  ✅  ontology-simulator  RUNNING" || echo "  ❌  ontology-simulator  FAILED"
+sleep 5
+sudo -n systemctl is-active --quiet fastapi-backend   2>/dev/null && echo "  ✅  fastapi-backend  RUNNING" || echo "  ❌  fastapi-backend  FAILED (check: journalctl -u fastapi-backend -n 20)"
+sudo -n systemctl is-active --quiet ontology-simulator 2>/dev/null && echo "  ✅  ontology-simulator  RUNNING" || echo "  ❌  ontology-simulator  FAILED (check: journalctl -u ontology-simulator -n 20)"
 echo ""
 echo "✅  更新完成"

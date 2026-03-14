@@ -7,6 +7,15 @@ set -e
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# ── Python interpreters (use repo venvs if present) ──────────────────────────
+BACKEND_PYTHON="$REPO_ROOT/.venv/bin/python"
+BACKEND_UVICORN="$REPO_ROOT/.venv/bin/uvicorn"
+ONTOLOGY_PYTHON="$REPO_ROOT/ontology_simulator/.venv/bin/python"
+# Fall back to system python if venvs don't exist
+[ -f "$BACKEND_PYTHON"  ] || BACKEND_PYTHON="python3"
+[ -f "$BACKEND_UVICORN" ] || BACKEND_UVICORN="uvicorn"
+[ -f "$ONTOLOGY_PYTHON" ] || ONTOLOGY_PYTHON="python3"
+
 # ── 1. 終止佔用 port 8000 / 8001 的程序 ─────────────────────────────────────
 echo "🛑  正在終止 port 8000 / 8001 上的程序..."
 for PORT in 8000 8001; do
@@ -41,7 +50,7 @@ echo "🚀  啟動 OntologySimulator (port 8001)..."
 LOG_ONTO="$REPO_ROOT/logs/ontology_simulator.log"
 mkdir -p "$REPO_ROOT/logs"
 cd "$REPO_ROOT/ontology_simulator"
-nohup python main.py > "$LOG_ONTO" 2>&1 &
+nohup "$ONTOLOGY_PYTHON" main.py > "$LOG_ONTO" 2>&1 &
 ONTO_PID=$!
 echo "    PID=$ONTO_PID  log=$LOG_ONTO"
 
@@ -50,7 +59,7 @@ echo ""
 echo "🚀  啟動 FastAPI Backend Service (port 8000)..."
 LOG_FAST="$REPO_ROOT/logs/fastapi_backend.log"
 cd "$REPO_ROOT/fastapi_backend_service"
-nohup uvicorn main:app --host 0.0.0.0 --port 8000 --reload > "$LOG_FAST" 2>&1 &
+nohup "$BACKEND_UVICORN" main:app --host 0.0.0.0 --port 8000 --reload > "$LOG_FAST" 2>&1 &
 FAST_PID=$!
 echo "    PID=$FAST_PID  log=$LOG_FAST"
 
