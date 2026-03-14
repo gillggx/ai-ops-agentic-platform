@@ -7,9 +7,9 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REBUILD=false
 [[ "${1:-}" == "--rebuild-frontend" ]] && REBUILD=true
 
-# ── Helper: wait until an HTTP endpoint returns 2xx (timeout 30s) ─────────
+# ── Helper: wait until an HTTP endpoint returns 2xx (timeout 60s) ─────────
 wait_for_http() {
-  local url="$1" label="$2" deadline=$(( $(date +%s) + 30 ))
+  local url="$1" label="$2" deadline=$(( $(date +%s) + 60 ))
   echo -n "    ⏳  Waiting for $label ..."
   while true; do
     if curl -sf --max-time 3 "$url" -o /dev/null 2>/dev/null; then
@@ -17,7 +17,7 @@ wait_for_http() {
       return 0
     fi
     if (( $(date +%s) >= deadline )); then
-      echo " ❌  TIMEOUT (30s)"
+      echo " ❌  TIMEOUT (60s)"
       return 1
     fi
     sleep 2
@@ -53,8 +53,11 @@ if sudo -n systemctl restart fastapi-backend ontology-simulator 2>/dev/null; the
   echo "    systemctl restart OK"
 else
   echo "    ⚠️  sudo systemctl unavailable — pkill fallback (systemd will auto-restart)"
-  pkill -TERM -f "venv_backend/bin/uvicorn"  2>/dev/null || true
-  pkill -TERM -f "venv_ontology/bin/python"  2>/dev/null || true
+  # Use SIGKILL so exit code is non-zero, ensuring Restart=on-failure triggers
+  pkill -9 -f "venv_backend/bin/uvicorn"  2>/dev/null || true
+  pkill -9 -f "venv_ontology/bin/python"  2>/dev/null || true
+  echo "    Waiting 20s for systemd to respawn services..."
+  sleep 20
 fi
 
 echo ""
