@@ -148,11 +148,12 @@ export default function Dashboard() {
   const [traceEventTime,  setTraceEventTime]   = useState<string | null>(null);
   const [traceSnapshot,   setTraceSnapshot]    = useState<MachineState | null>(null);
   const [hideIdle,        setHideIdle]         = useState(false);
-  const [clock,           setClock]            = useState(() => new Date().toTimeString().split(" ")[0]);
+  const [clock,           setClock]            = useState("");
 
-  // Live clock tick
+  // Live clock tick (empty initial value avoids SSR hydration mismatch)
   useEffect(() => {
     if (mode === "TRACE") return;
+    setClock(new Date().toTimeString().split(" ")[0]);
     const t = setInterval(() => setClock(new Date().toTimeString().split(" ")[0]), 1000);
     return () => clearInterval(t);
   }, [mode]);
