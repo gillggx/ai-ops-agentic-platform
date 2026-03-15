@@ -166,17 +166,22 @@ export default function TopologyView({
   const lotId = machine?.lotId ?? null;
   const step  = machine?.step  ?? null;
 
-  // Fetch context graph whenever lot+step changes
+  // Fetch context graph whenever lot+step+lastEvent changes.
+  // Pass event_time so the API anchors to this specific process run,
+  // not a previous cycle's ProcessEnd for the same lot+step.
+  const anchor = machine?.lastEvent ?? null;
   useEffect(() => {
     if (!lotId || !step) { setCtx(null); return; }
-    const url = `${getApiBase()}/api/v2/ontology/context?lot_id=${encodeURIComponent(lotId)}&step=${encodeURIComponent(step)}`;
+    const params = new URLSearchParams({ lot_id: lotId, step });
+    if (anchor) params.set("event_time", anchor);
+    const url = `${getApiBase()}/api/v2/ontology/context?${params}`;
     setLoading(true);
     fetch(url)
       .then(r => r.ok ? r.json() : null)
       .then(d => setCtx(d ?? null))
       .catch(() => setCtx(null))
       .finally(() => setLoading(false));
-  }, [lotId, step]);
+  }, [lotId, step, anchor]);
 
   const graph = useMemo(() => ctx ? buildGraph(ctx, machine?.id ?? undefined) : null, [ctx, machine?.id]);
 

@@ -20,6 +20,7 @@ GET /api/v2/ontology/history/{object_type}/{object_id}
 GET /api/v2/ontology/indices/{object_type}
 GET /api/v2/ontology/enumerate
 """
+from datetime import datetime, timezone, timedelta
 from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import APIRouter, HTTPException, Query
@@ -206,44 +207,40 @@ async def get_orphans(limit: int = Query(50, ge=1, le=500)):
 
 @router.get("/context")
 async def get_graph_context(
-    lot_id:         str  = Query(..., description="Lot ID, e.g. LOT-0001"),
-    step:           str  = Query(..., description="Step ID, e.g. STEP_005"),
-    process_status: str  = Query(
-        "ProcessEnd",
-        description="ProcessStart → show Recipe+APC only; ProcessEnd → show all 4 objects",
-    ),
-    ooc_only: bool = Query(False, description="If true, only return OOC events"),
+    lot_id:     str           = Query(..., description="Lot ID, e.g. LOT-0001"),
+    step:       str           = Query(..., description="Step ID, e.g. STEP_005"),
+    event_time: datetime|None = Query(None,  description="ISO8601 anchor time — locks context to the specific run that started at/near this time"),
+    ooc_only:   bool          = Query(False, description="If true, only return OOC events"),
 ):
     """
-    Graph Context Service (Option B topology model).
+    Graph Context Service.
 
-    Given (lot_id, step, process_status), returns a nested JSON with all related
-    entities. Two phases are supported:
+    Anchors to the process run whose ProcessStart is at/before event_time.
+    Only returns DC+SPC if the ProcessEnd for THAT run has been written.
+    This prevents showing stale DC/SPC from a previous cycle when a lot is
+    currently in-progress on the same step.
 
-      process_status=ProcessStart (t0):
-        root.event_time = start_time
-        recipe + apc populated; dc + spc = null (not yet measured)
-
-      process_status=ProcessEnd (t1, default):
-        root.event_time = end_time
-        All 4 objects populated. root.start_time shows when processing began.
-
-    This enables topology to accurately reflect what information was available
-    at each phase of the process lifecycle.
+      in_progress=False: full context (Recipe+APC+DC+SPC)
+      in_progress=True : partial context (Recipe+APC only; DC+SPC=null)
     """
     db = get_db()
 
-    req_status = process_status if process_status in ("ProcessStart", "ProcessEnd") else "ProcessEnd"
-
-    filt: dict = {"lotID": lot_id, "step": step, "status": req_status, "eventType": "LOT_EVENT"}
-    if ooc_only and req_status == "ProcessEnd":
-        filt["spc_status"] = "OOC"
-
-    end_event   = await db.events.find_one(filt, sort=[("eventTime", -1)])
-
-    # ── Locate ProcessStart event (always try, regardless of requested phase) ──
+    # ── 1. Find the anchored ProcessStart ─────────────────────────────────────
     start_filt: dict = {"lotID": lot_id, "step": step, "status": "ProcessStart", "eventType": "LOT_EVENT"}
+    if event_time:
+        # Normalise to naive UTC for MongoDB comparison
+        et = event_time.astimezone(timezone.utc).replace(tzinfo=None) if event_time.tzinfo else event_time
+        # ProcessStart at or before the anchor (within 5s tolerance for clock skew)
+        start_filt["eventTime"] = {"$lte": et + timedelta(seconds=5)}
     start_event = await db.events.find_one(start_filt, sort=[("eventTime", -1)])
+
+    # ── 2. Find the paired ProcessEnd (must come AFTER this ProcessStart) ──────
+    end_filt: dict = {"lotID": lot_id, "step": step, "status": "ProcessEnd", "eventType": "LOT_EVENT"}
+    if start_event:
+        end_filt["eventTime"] = {"$gt": start_event["eventTime"]}
+    if ooc_only:
+        end_filt["spc_status"] = "OOC"
+    end_event = await db.events.find_one(end_filt, sort=[("eventTime", 1)])  # earliest end after start
 
     # ── Determine authoritative event & phase ─────────────────────────────────
     # Priority: ProcessEnd (complete) > ProcessStart (in-progress) > 404
