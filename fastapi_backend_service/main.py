@@ -216,7 +216,7 @@ _ONTOLOGY_SYSTEM_MCPS = [
     },
     {
         "name": "OntologySim — 事件時間線",
-        "description": "OntologySimulator MES：查詢製程事件時間線（TOOL_EVENT / LOT_EVENT）",
+        "description": "OntologySimulator MES：查詢製程事件時間線。dedup=true（預設）每步驟只回傳一筆 ProcessEnd，limit 即為唯一步驟數。",
         "api_config": {
             "endpoint_url": "http://localhost:8001/api/v1/events",
             "method": "GET",
@@ -224,9 +224,10 @@ _ONTOLOGY_SYSTEM_MCPS = [
         },
         "input_schema": {
             "fields": [
-                {"name": "toolID", "type": "string", "description": "機台 ID（可選，e.g. EQP-01）", "required": False},
-                {"name": "lotID",  "type": "string", "description": "批次 ID（可選，e.g. LOT-0001）", "required": False},
-                {"name": "limit",  "type": "integer","description": "回傳筆數上限（預設 50）", "required": False},
+                {"name": "toolID", "type": "string",  "description": "機台 ID（可選，e.g. EQP-01）", "required": False},
+                {"name": "lotID",  "type": "string",  "description": "批次 ID（可選，e.g. LOT-0001）", "required": False},
+                {"name": "limit",  "type": "integer", "description": "回傳唯一步驟數上限（預設 50，dedup=true 時每步驟 1 筆）", "required": False},
+                {"name": "dedup",  "type": "boolean", "description": "去重複：true（預設）= 每 (lot, step) 只回一筆 ProcessEnd；false = 返回全部原始事件", "required": False},
             ]
         },
     },

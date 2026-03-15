@@ -197,20 +197,47 @@ async def list_tools():
 
 @router.get("/events")
 async def list_events(
-    toolID: str = Query(None, description="Filter by tool ID"),
-    lotID:  str = Query(None, description="Filter by lot ID"),
-    limit:  int = Query(50, ge=1, le=500),
+    toolID: str  = Query(None, description="Filter by tool ID"),
+    lotID:  str  = Query(None, description="Filter by lot ID"),
+    limit:  int  = Query(50, ge=1, le=500),
+    dedup:  bool = Query(False, description="If true, deduplicate: return one ProcessEnd TOOL_EVENT per (lot, step). limit then means number of unique steps."),
 ):
     """Return the most recent `limit` events, newest-first.
-    Used by the TRACE mode timeline panel."""
+    Used by the TRACE mode timeline panel.
+
+    dedup=true: returns one entry per (lot, step) — ProcessEnd wins, LOT_EVENT filtered out.
+    With dedup=true, limit=50 means 50 unique process steps (not 50 raw documents).
+    """
     filt: dict = {}
     if toolID:
         filt["toolID"] = toolID
     if lotID:
         filt["lotID"] = lotID
-    cursor = get_db().events.find(filt, {"_id": 0}).sort("eventTime", -1).limit(limit)
-    docs   = await cursor.to_list(length=limit)
-    return docs
+
+    if not dedup:
+        cursor = get_db().events.find(filt, {"_id": 0}).sort("eventTime", -1).limit(limit)
+        docs   = await cursor.to_list(length=limit)
+        return docs
+
+    # dedup=true: fetch TOOL_EVENT + ProcessEnd only, one entry per (lot, step)
+    filt["eventType"] = "TOOL_EVENT"
+    # Fetch more than needed to absorb ProcessStart events before dedup
+    raw_limit = limit * 4
+    cursor = get_db().events.find(filt, {"_id": 0}).sort("eventTime", -1).limit(raw_limit)
+    docs   = await cursor.to_list(length=raw_limit)
+
+    # Merge: ProcessEnd wins; if only ProcessStart exists (in-progress), keep it
+    seen: dict = {}
+    for d in docs:  # already newest-first
+        key = (d.get("lotID"), d.get("step"))
+        if key not in seen:
+            seen[key] = d
+        elif d.get("status") == "ProcessEnd" and seen[key].get("status") == "ProcessStart":
+            seen[key] = d  # ProcessEnd always supersedes ProcessStart
+
+    # Sort deduplicated results newest-first, return at most `limit` steps
+    deduped = sorted(seen.values(), key=lambda x: x.get("eventTime", ""), reverse=True)[:limit]
+    return deduped
 
 
 # ── Equipment HOLD Acknowledge ─────────────────────────────────
