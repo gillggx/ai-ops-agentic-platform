@@ -10,12 +10,28 @@ function getApiUrl() {
   return isLocal ? `http://${window.location.hostname}:8001/api/v1` : `${window.location.origin}/simulator-api/api/v1`;
 }
 
+function getApiV2Url() {
+  if (typeof window === "undefined") return "http://localhost:8001/api/v2/ontology";
+  const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+  return isLocal ? `http://${window.location.hostname}:8001/api/v2/ontology` : `${window.location.origin}/simulator-api/api/v2/ontology`;
+}
+
 // ── URL builder ──────────────────────────────────────────────
 function buildUrl(node: TopoNode, machine: MachineState, eventTime: string | null): string | null {
-  const step = machine.step;
-  const et   = eventTime ?? machine.lastEvent;
+  const step   = machine.step;
+  const et     = eventTime ?? machine.lastEvent;
+  const toolId = machine.id;
+  const lotId  = machine.lotId ?? machine.id;
+  const v2     = getApiV2Url();
+
+  // v2 endpoints for new ontology objects
+  if (node === "EC")   return step ? `${v2}/equipment/${toolId}/constants` : null;
+  if (node === "FDC")  return step ? `${v2}/fdc/${toolId}/uchart?step=${step}` : null;
+  if (node === "OCAP") return step ? `${v2}/ocap/${lotId}/${step}` : null;
+
+  // legacy v1 for existing objects
   if (!step || !et) return null;
-  const targetID = node === "LOT" ? (machine.lotId ?? machine.id) : machine.id;
+  const targetID = node === "LOT" ? lotId : toolId;
   return `${getApiUrl()}/context/query?${new URLSearchParams({ targetID, step, objectName: node, eventTime: et })}`;
 }
 
@@ -571,6 +587,116 @@ function GenericBody({ data }: { data: Record<string, unknown> }) {
   );
 }
 
+// EC renderer
+function ECBody({ data }: { data: Record<string, unknown> }) {
+  const constants = data.constants as Record<string, { value: number; setpoint: number; unit: string; deviation_pct: number; status: string }> | undefined;
+  if (!constants) return <GenericBody data={data} />;
+  const driftCount = Object.values(constants).filter(c => c.status !== "NORMAL").length;
+  return (
+    <>
+      <div className={`flex items-center justify-between rounded-lg px-3 py-2 mb-4 border ${
+        driftCount > 0 ? "bg-amber-50 border-amber-300 text-amber-700" : "bg-emerald-50 border-emerald-300 text-emerald-700"
+      }`}>
+        <span className="text-[11px] font-semibold tracking-wide">{driftCount > 0 ? `⚠ ${driftCount} DRIFT` : "✓ ALL OK"}</span>
+        <span className="text-[11px] font-mono font-bold">{data.tool_id as string}</span>
+      </div>
+      <div className="divide-y divide-slate-100">
+        {Object.entries(constants).map(([key, c]) => (
+          <div key={key} className="py-1.5">
+            <div className="flex items-center justify-between mb-0.5">
+              <span className="text-[11px] font-semibold text-slate-700">{key}</span>
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                c.status === "NORMAL" ? "bg-emerald-50 text-emerald-600 border-emerald-200" : "bg-amber-50 text-amber-600 border-amber-200"
+              }`}>{c.status}</span>
+            </div>
+            <div className="flex justify-between text-[10px] text-slate-400 font-mono">
+              <span>value: <b className="text-slate-700">{c.value?.toFixed(4)}</b> {c.unit}</span>
+              <span>setpt: <b className="text-slate-700">{c.setpoint?.toFixed(4)}</b></span>
+              <span>dev: <b className={c.deviation_pct > 2 ? "text-amber-600" : "text-slate-700"}>{c.deviation_pct?.toFixed(2)}%</b></span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+// FDC renderer
+function FDCBody({ data }: { data: Record<string, unknown> }) {
+  const uchart = data.uchart as Array<{ lot_id: string; u_value: number; ucl: number; lcl: number; status: string }> | undefined;
+  const oocCount = data.ooc_count as number ?? 0;
+  if (!uchart) return <GenericBody data={data} />;
+  return (
+    <>
+      <div className={`flex items-center justify-between rounded-lg px-3 py-2 mb-4 border ${
+        oocCount > 0 ? "bg-amber-50 border-amber-300 text-amber-700" : "bg-emerald-50 border-emerald-300 text-emerald-700"
+      }`}>
+        <span className="text-[11px] font-semibold">OOC {oocCount}/{uchart.length}</span>
+        <span className="text-[11px] font-mono font-bold">{data.tool_id as string} · {data.step as string}</span>
+      </div>
+      <div className="flex text-[10px] text-slate-400 font-semibold mb-1 px-0.5">
+        <span className="flex-1">LOT</span>
+        <span className="w-16 text-right">U-VALUE</span>
+        <span className="w-14 text-right">UCL</span>
+        <span className="w-8 text-right">OK</span>
+      </div>
+      <div className="divide-y divide-slate-100">
+        {uchart.slice(0, 15).map((r, i) => (
+          <div key={i} className="flex items-center py-1 text-[11px]">
+            <span className="flex-1 font-mono text-slate-500 truncate">{r.lot_id}</span>
+            <span className="w-16 text-right font-mono font-bold text-slate-800 tabular-nums">{r.u_value?.toFixed(4)}</span>
+            <span className="w-14 text-right font-mono text-slate-400 tabular-nums">{r.ucl?.toFixed(3)}</span>
+            <span className={`w-8 text-right font-semibold ${r.status === "OOC" ? "text-amber-600" : "text-emerald-500"}`}>
+              {r.status === "OOC" ? "✗" : "✓"}
+            </span>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+// OCAP renderer
+function OCAPBody({ data }: { data: Record<string, unknown> }) {
+  const actions = data.actions as Array<{ step: number; action: string; owner: string; deadline_hrs: number }> | undefined;
+  const severity = data.severity as string | undefined;
+  const sevColor = severity === "HIGH" ? "bg-red-50 border-red-300 text-red-700"
+                 : severity === "MEDIUM" ? "bg-amber-50 border-amber-300 text-amber-700"
+                 : "bg-sky-50 border-sky-300 text-sky-700";
+  return (
+    <>
+      <div className={`flex items-center justify-between rounded-lg px-3 py-2 mb-4 border ${sevColor}`}>
+        <span className="text-[11px] font-semibold">{severity ?? "OCAP"}</span>
+        <span className="text-[11px] font-mono font-bold">{data.trigger_spc_status as string}</span>
+      </div>
+      {data.root_cause_hypothesis && (
+        <div className="mb-3 bg-slate-50 rounded border border-slate-200 px-3 py-2 text-[11px] text-slate-700">
+          <span className="text-[10px] font-bold text-slate-400 block mb-1">ROOT CAUSE</span>
+          {data.root_cause_hypothesis as string}
+        </div>
+      )}
+      {actions && (
+        <div>
+          <div className="inline-flex items-center text-[10px] font-semibold tracking-widest px-1.5 py-0.5 rounded border mb-2 bg-violet-50 text-violet-600 border-violet-200">
+            ACTION PLAN
+          </div>
+          <div className="space-y-2">
+            {actions.map((a, i) => (
+              <div key={i} className="bg-white border border-slate-100 rounded p-2">
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-[10px] font-bold text-slate-500">Step {a.step} · {a.owner}</span>
+                  <span className="text-[10px] font-mono text-slate-400">{a.deadline_hrs}h</span>
+                </div>
+                <p className="text-[11px] text-slate-700">{a.action}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────
 
 interface Props {
@@ -722,6 +848,9 @@ export default function RightInspector({ machine, activeNode, traceEventTime, ad
                 {node === "APC"    && <APCBody    data={result} />}
                 {node === "RECIPE" && <RecipeBody data={result} />}
                 {node === "SPC"    && <SPCBody    data={result} />}
+                {node === "EC"     && <ECBody     data={result} />}
+                {node === "FDC"    && <FDCBody    data={result} />}
+                {node === "OCAP"   && <OCAPBody   data={result} />}
                 {(node === "LOT" || node === "TOOL") && <GenericBody data={result} />}
               </>
             );

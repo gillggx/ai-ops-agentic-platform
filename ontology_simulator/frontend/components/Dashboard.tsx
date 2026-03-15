@@ -403,7 +403,7 @@ export default function Dashboard() {
       {/* ── Body ─────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden flex flex-col">
 
-        <div className="flex-1 overflow-hidden grid grid-cols-[320px_1fr_360px]">
+        <div className="flex-1 overflow-hidden grid grid-cols-[240px_1fr_360px]">
 
           {/* ── LEFT panel ─────────────────────────────────────────── */}
           <aside className="border-r border-slate-200 bg-slate-50 overflow-hidden flex flex-col shadow-[4px_0_15px_rgba(0,0,0,0.03)] z-10">

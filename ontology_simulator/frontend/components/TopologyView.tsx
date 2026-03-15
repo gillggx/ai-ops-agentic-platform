@@ -16,6 +16,9 @@ export const OBJECT_API_REGISTRY: Record<string, {
   APC:    { label: "APC",    queryEndpoint: _id => `/api/v2/ontology/indices/APC` },
   DC:     { label: "DC",     queryEndpoint: _id => `/api/v2/ontology/indices/DC` },
   SPC:    { label: "SPC",    queryEndpoint: _id => `/api/v2/ontology/indices/SPC` },
+  EC:     { label: "EC",     queryEndpoint: id => `/api/v2/ontology/equipment/${id}/constants` },
+  FDC:    { label: "FDC" },
+  OCAP:   { label: "OCAP" },
 };
 
 // ── 100-Color Ordered Palette (golden-angle HSL) ──────────────────────────────
@@ -59,6 +62,9 @@ interface CtxResponse {
   apc:    Record<string, unknown> | null;
   dc:     Record<string, unknown> | null;
   spc:    Record<string, unknown> | null;
+  ec:     Record<string, unknown> | null;
+  fdc:    Record<string, unknown> | null;
+  ocap:   Record<string, unknown> | null;
 }
 
 // ── Graph types ───────────────────────────────────────────────────────────────
@@ -102,20 +108,54 @@ function buildGraph(ctx: CtxResponse, machineId?: string): { nodes: GraphNode[];
     value: lotId, isCircle: true, pos: LOT_POS, paletteIdx: pi++ });
   edges.push({ from: toolId, to: lotId });
 
-  // Layer 3+: subsystem objects discovered from the event
-  // edgeFrom: RECIPE → TOOL (recipe is a tool configuration); APC/DC/SPC → LOT (lot-tracking)
-  const discovered: Array<{ type: string; data: Record<string, unknown> | null; defaultId: string; edgeFrom: string }> = [
+  // ── Machine-side objects (EC, FDC): anchor below TOOL on the LEFT ───────────
+  // EC above TOOL, FDC below TOOL — fixed positions, no zigzag
+  const MACHINE_LAYOUT: Record<string, { x: number; y: number }> = {
+    EC:  { x: TOOL_POS.x, y: TOOL_POS.y - 80 },
+    FDC: { x: TOOL_POS.x, y: TOOL_POS.y + 80 },
+  };
+
+  const machineSide: Array<{ type: string; data: Record<string, unknown> | null; defaultId: string }> = [
+    { type: "EC",  data: ctx.ec,  defaultId: `EC-${toolId}` },
+    { type: "FDC", data: ctx.fdc, defaultId: `FDC-${toolId}` },
+  ].filter(d => d.data !== null);
+
+  machineSide.forEach(({ type, data, defaultId }) => {
+    const reg = OBJECT_API_REGISTRY[type];
+    const rawId = (data?.objectID as string) ?? defaultId;
+    const value = rawId.length > 14 ? rawId.slice(0, 13) + "…" : rawId;
+    let subtext: string | undefined;
+    if (type === "EC") {
+      const driftCount = data?.drift_count as number | undefined;
+      subtext = driftCount !== undefined ? (driftCount > 0 ? `${driftCount} DRIFT` : "ALL OK") : undefined;
+    } else if (type === "FDC") {
+      const oocCount = data?.ooc_count as number | undefined;
+      const total = (data?.uchart as unknown[])?.length;
+      if (oocCount !== undefined && total !== undefined) subtext = `OOC ${oocCount}/${total}`;
+    }
+    const pos = MACHINE_LAYOUT[type] ?? { x: TOOL_POS.x, y: TOOL_POS.y + 80 };
+    nodes.push({
+      id: rawId, type, label: reg?.label ?? type, value,
+      subtext, isOOC: false, isCircle: reg?.isCircle,
+      pos, paletteIdx: pi++,
+    });
+    edges.push({ from: toolId, to: rawId });
+  });
+
+  // ── Lot-side objects: RECIPE → TOOL, others → LOT, laid out on RIGHT ─────────
+  const lotSide: Array<{ type: string; data: Record<string, unknown> | null; defaultId: string; edgeFrom: string }> = [
     { type: "RECIPE", data: ctx.recipe, defaultId: root.recipe_id ?? "—", edgeFrom: toolId },
     { type: "APC",    data: ctx.apc,    defaultId: root.apc_id    ?? "—", edgeFrom: lotId  },
     { type: "DC",     data: ctx.dc,     defaultId: "DC",                  edgeFrom: lotId  },
     { type: "SPC",    data: ctx.spc,    defaultId: "SPC",                 edgeFrom: lotId  },
+    { type: "OCAP",   data: ctx.ocap,   defaultId: "OCAP",                edgeFrom: lotId  },
   ].filter(d => d.data !== null);
 
-  const N  = discovered.length;
-  const y0 = N <= 1 ? VH / 2 : 60;
-  const dy = N <= 1 ? 0 : (360 - 60) / (N - 1);
+  const N  = lotSide.length;
+  const y0 = N <= 1 ? VH / 2 : 50;
+  const dy = N <= 1 ? 0 : (VH - 100) / (N - 1);
 
-  discovered.forEach(({ type, data, defaultId, edgeFrom }, i) => {
+  lotSide.forEach(({ type, data, defaultId, edgeFrom }, i) => {
     const reg = OBJECT_API_REGISTRY[type];
     const rawId = (data?.objectID as string) ?? defaultId;
     const value = rawId.length > 14 ? rawId.slice(0, 13) + "…" : rawId;
@@ -127,11 +167,14 @@ function buildGraph(ctx: CtxResponse, machineId?: string): { nodes: GraphNode[];
       const params = data?.parameters as Record<string, unknown> | undefined;
       const bias = params?.current_bias as number | undefined;
       if (bias !== undefined) subtext = `${bias >= 0 ? "+" : ""}${bias.toFixed(4)} nm`;
+    } else if (type === "OCAP") {
+      const severity = data?.severity as string | undefined;
+      subtext = severity ?? undefined;
     }
 
     nodes.push({
       id: rawId, type, label: reg?.label ?? type, value,
-      subtext, isOOC: type === "SPC" && isOOC,
+      subtext, isOOC: type === "SPC" && isOOC, isCircle: reg?.isCircle,
       pos: { x: RIGHT_X, y: y0 + i * dy }, paletteIdx: pi++,
     });
     edges.push({ from: edgeFrom, to: rawId });
@@ -243,9 +286,15 @@ export default function TopologyView({
             .node-ooc { animation: pulseRed 2s ease-in-out infinite; }
             @keyframes lotPulse { 0%,100%{opacity:0.55} 50%{opacity:1} }
             .lot-ring { animation: lotPulse 2.5s ease-in-out infinite; }
+            @keyframes objPulse { 0%,100%{opacity:0.4} 50%{opacity:0.85} }
+            .obj-ring { animation: objPulse 3s ease-in-out infinite; }
           `}</style>
           <filter id="blue-glow" x="-30%" y="-30%" width="160%" height="160%">
             <feGaussianBlur stdDeviation="5" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <filter id="pal-glow" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="4" result="blur"/>
             <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
           </filter>
         </defs>
@@ -266,28 +315,47 @@ export default function TopologyView({
           const isActive = activeNode === node.type;
           const pal = PALETTE[node.paletteIdx] ?? PALETTE[0];
 
-          // LOT: circle
+          // Circle nodes: LOT uses blue glow; EC/FDC/OCAP use palette glow
           if (node.isCircle) {
+            const isLot = node.type === "LOT";
+            const CR = isLot ? LOT_R : 32;
+            const circleFill   = isLot ? "#1e3a8a55" : `${pal}18`;
+            const circleStroke = isActive ? "#38bdf8" : (isLot ? "#3b82f6" : pal);
+            const ringFill     = isLot ? "#1e3a8a22" : `${pal}12`;
+            const ringStroke   = isLot ? "#1d4ed844" : `${pal}30`;
+            const labelColor   = isLot ? "#60a5fa" : pal;
+
             return (
               <g key={node.id} onClick={() => onNodeClick?.(node.type)}
                 style={{ cursor: clickable ? "pointer" : "default" }}>
-                <circle cx={node.pos.x} cy={node.pos.y} r={LOT_R + 14}
-                  fill="#1e3a8a22" stroke="#1d4ed844" strokeWidth={1} className="lot-ring"/>
+                <circle cx={node.pos.x} cy={node.pos.y} r={CR + 14}
+                  fill={ringFill} stroke={ringStroke} strokeWidth={1}
+                  className={isLot ? "lot-ring" : "obj-ring"}/>
                 {isActive && (
-                  <circle cx={node.pos.x} cy={node.pos.y} r={LOT_R + 7}
+                  <circle cx={node.pos.x} cy={node.pos.y} r={CR + 7}
                     fill="none" stroke="#38bdf8" strokeWidth={2} opacity={0.7}/>
                 )}
-                <circle cx={node.pos.x} cy={node.pos.y} r={LOT_R}
-                  fill="#1e3a8a55" stroke={isActive ? "#38bdf8" : "#3b82f6"}
-                  strokeWidth={isActive ? 3 : 2.5} filter="url(#blue-glow)"/>
-                <text x={node.pos.x} y={node.pos.y - 10} textAnchor="middle" fill="#60a5fa"
-                  fontSize={9} fontWeight={700} fontFamily="Inter,system-ui" letterSpacing="0.12em">
+                <circle cx={node.pos.x} cy={node.pos.y} r={CR}
+                  fill={circleFill} stroke={circleStroke}
+                  strokeWidth={isActive ? 3 : 2.5}
+                  filter={isLot ? "url(#blue-glow)" : "url(#pal-glow)"}/>
+                <text x={node.pos.x} y={node.pos.y - (node.subtext ? 12 : 6)} textAnchor="middle"
+                  fill={labelColor} fontSize={9} fontWeight={700}
+                  fontFamily="Inter,system-ui" letterSpacing="0.12em">
                   {node.label}
                 </text>
-                <text x={node.pos.x} y={node.pos.y + 9} textAnchor="middle" fill="#ffffff"
-                  fontSize={12} fontWeight={700} fontFamily="'JetBrains Mono',monospace">
+                <text x={node.pos.x} y={node.pos.y + (node.subtext ? 5 : 9)} textAnchor="middle"
+                  fill="#ffffff" fontSize={isLot ? 12 : 10} fontWeight={700}
+                  fontFamily="'JetBrains Mono',monospace">
                   {node.value.length > 10 ? node.value.slice(0, 9) + "…" : node.value}
                 </text>
+                {node.subtext && (
+                  <text x={node.pos.x} y={node.pos.y + 18} textAnchor="middle"
+                    fill={node.isOOC ? "#ef4444" : pal}
+                    fontSize={8} fontWeight={500} fontFamily="'JetBrains Mono',monospace">
+                    {node.subtext}
+                  </text>
+                )}
               </g>
             );
           }
@@ -300,9 +368,13 @@ export default function TopologyView({
           const rx = node.pos.x - NODE_W / 2;
           const ry = node.pos.y - NODE_H / 2;
 
+          const glowColor = node.isOOC ? "#ef4444" : pal;
           return (
             <g key={node.id} onClick={() => onNodeClick?.(node.type)}
-              style={{ cursor: clickable ? "pointer" : "default" }}
+              style={{
+                cursor: clickable ? "pointer" : "default",
+                filter: `drop-shadow(0 0 6px ${glowColor}70)`,
+              }}
               className={node.isOOC ? "node-ooc" : ""}>
               {isActive && (
                 <rect x={rx - 5} y={ry - 5} width={NODE_W + 10} height={NODE_H + 10} rx={NODE_R + 3}

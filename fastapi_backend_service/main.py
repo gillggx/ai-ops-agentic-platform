@@ -666,6 +666,11 @@ _SYSTEM_MEMORIES = [
         "tags": ["api_pattern", "analyze_data", "spc_chart", "get_dc_timeseries"],
         "source": "system",
     },
+    {
+        "content": "【EC/FDC/OCAP 三物件使用時機】製程開始（ProcessStart）→ 查機台硬體狀態：get_equipment_constants(tool_id) 看 ALERT/DRIFT 參數；get_fdc_uchart(tool_id, step) 看缺陷率趨勢。製程結束（ProcessEnd）發現 OOC → 立即呼叫：get_ocap(lot_id, step) 取得處置計畫（triggered_by + ocap_actions）。診斷黃金流程：OOC lot → get_ocap → get_equipment_constants 確認根本原因 → get_process_context 展開細節。",
+        "tags": ["api_pattern", "ec", "fdc", "ocap", "get_equipment_constants", "get_fdc_uchart", "get_ocap", "process_start", "process_end"],
+        "source": "system",
+    },
 ]
 
 

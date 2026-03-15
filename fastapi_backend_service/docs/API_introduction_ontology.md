@@ -548,3 +548,137 @@ Response：
 1. get_object_history  { object_type: "APC", object_id: "APC-005", limit: 20 }
    → 取歷史快照，觀察 rf_power_bias / stability_index / model_r2_score 的趨勢
 ```
+
+---
+
+## 10. `get_equipment_constants` — 機台設備常數 (EC) vs 黃金基準
+
+**用途**：查詢指定機台的設備常數（EC）目前值，與黃金基準比對，找出漂移或異常的參數。
+**時機**：製程開始前（ProcessStart 關聯）診斷機台硬體狀態；或懷疑機台物理參數異常時。
+**端點**：`GET /equipment/{tool_id}/constants`
+
+### 參數
+
+| 參數 | 必填 | 說明 |
+|------|------|------|
+| tool_id | ✅ | 機台 ID，如 `EQP-01` |
+
+### 回傳結構
+
+```json
+{
+  "tool_id": "EQP-01",
+  "constants": {
+    "rf_power_offset":      {"value": 0.03, "setpoint": 0.0, "unit": "W",    "deviation_pct": 3.1, "status": "DRIFT"},
+    "throttle_setpoint":    {"value": 64.8, "setpoint": 65.0,"unit": "%",    "deviation_pct": 0.3, "status": "NORMAL"},
+    "he_backside_pressure": {"value": 10.5, "setpoint": 10.0,"unit": "Torr", "deviation_pct": 5.0, "status": "NORMAL"},
+    "focus_ring_thickness": {"value": 7.8,  "setpoint": 8.5, "unit": "mm",   "deviation_pct": 8.2, "status": "ALERT"},
+    "chamber_wall_temp":    {"value": 61.5, "setpoint": 60.0,"unit": "°C",   "deviation_pct": 2.5, "status": "NORMAL"},
+    "electrode_gap":        {"value": 27.1, "setpoint": 27.0,"unit": "mm",   "deviation_pct": 0.4, "status": "NORMAL"},
+    "rf_match_c1":          {"value": 143.2,"setpoint": 142.0,"unit": "pF",  "deviation_pct": 0.8, "status": "NORMAL"},
+    "rf_match_c2":          {"value": 88.5, "setpoint": 88.0,"unit": "pF",   "deviation_pct": 0.6, "status": "NORMAL"}
+  },
+  "drift_count": 2,
+  "summary": "2 parameter(s) drifting on EQP-01. Most critical: focus_ring_thickness (8.2% deviation)."
+}
+```
+
+**status 含義**：`NORMAL` = 在容差內，`DRIFT` = 輕微漂移（超過容差），`ALERT` = 嚴重漂移（超過容差 2 倍）。
+
+---
+
+## 11. `get_fdc_uchart` — FDC U-管制圖（缺陷率）
+
+**用途**：查詢指定機台（+ 可選步驟）的 FDC U-chart，追蹤每批次的缺陷率時間序列，找出 OOC 批次。
+**時機**：ProcessStart 之後做機台品質趨勢分析；或懷疑某步驟缺陷率偏高時。
+**端點**：`GET /fdc/{tool_id}/uchart`
+
+### 參數
+
+| 參數 | 必填 | 說明 |
+|------|------|------|
+| tool_id | ✅ | 機台 ID，如 `EQP-01` |
+| step | ❌ | 步驟 ID，如 `STEP_023`（不填 = 所有步驟） |
+| limit | ❌ | 最多回傳批次數（預設 50） |
+
+### 回傳結構
+
+```json
+{
+  "tool_id": "EQP-01",
+  "step": "STEP_023",
+  "uchart": [
+    {"lot_id": "LOT-0003", "step": "STEP_023", "event_time": "2026-03-15T04:10:00Z",
+     "u_value": 0.042, "sample_size": 48, "spc_status": "PASS"},
+    {"lot_id": "LOT-0007", "step": "STEP_023", "event_time": "2026-03-15T05:30:00Z",
+     "u_value": 0.091, "sample_size": 50, "spc_status": "OOC"}
+  ],
+  "baseline": {"u_bar": 0.048, "ucl": 0.098, "lcl": 0.0, "n_average": 49.2},
+  "ooc_count": 1,
+  "summary": "EQP-01 STEP_023: 20 lots, u_bar=0.0480, UCL=0.0980, OOC=1/20"
+}
+```
+
+---
+
+## 12. `get_ocap` — OCAP 異常處置計畫
+
+**用途**：針對特定 lot/step 的 OOC 事件，提供 Out-of-Control Action Plan（OCAP），說明觸發原因、診斷方向與建議處置步驟。
+**時機**：ProcessEnd 後偵測到 OOC 時，立即呼叫取得處置指引。
+**端點**：`GET /ocap/{lot_id}/{step}`
+
+### 參數
+
+| 參數 | 必填 | 說明 |
+|------|------|------|
+| lot_id | ✅ | 批次 ID，如 `LOT-0007` |
+| step | ✅ | 步驟 ID，如 `STEP_023` |
+
+### 回傳結構
+
+```json
+{
+  "lot_id": "LOT-0007",
+  "step": "STEP_023",
+  "spc_status": "OOC",
+  "triggered_by": [
+    {"chart": "cd_chart", "parameter": "cd_bias_nm", "violation_type": "beyond_control_limit",
+     "value": 6.2, "ucl": 5.0, "lcl": -5.0}
+  ],
+  "ocap_actions": [
+    {"priority": 1, "action": "立即停止該機台的生產，通知設備工程師"},
+    {"priority": 2, "action": "執行 EC 檢查：確認 focus_ring_thickness 是否磨耗"},
+    {"priority": 3, "action": "比對前後批次的 APC rf_power_bias，排查系統漂移"}
+  ],
+  "escalation": "若 EC 正常但 OOC 持續超過 3 批次，升級至設備預防性維護。",
+  "summary": "LOT-0007 STEP_023: OOC detected on cd_bias_nm. Immediate EC inspection recommended."
+}
+```
+
+**spc_status = PASS 時**：`ocap_actions` 為空，`summary` 說明製程正常，無需處置。
+
+---
+
+### 情境 D：「EQP-03 機台硬體有沒有問題？」（EC 診斷）
+
+```
+1. get_equipment_constants  { tool_id: "EQP-03" }
+   → 查看 constants 裡 status="ALERT" 或 "DRIFT" 的參數
+   → 重點看 focus_ring_thickness、rf_power_offset、electrode_gap
+
+2. get_fdc_uchart  { tool_id: "EQP-03" }
+   → 確認缺陷率 u_bar、最近 OOC 批次數
+```
+
+### 情境 E：「LOT-0007 在 STEP_023 OOC 了，下一步怎麼辦？」（OCAP 診斷）
+
+```
+1. get_ocap  { lot_id: "LOT-0007", step: "STEP_023" }
+   → 取得 triggered_by（哪個參數超限）和 ocap_actions（優先處置步驟）
+
+2. get_equipment_constants  { tool_id: "EQP-03" }（根據 OCAP 指引）
+   → 確認 EC 是否為根本原因
+
+3. get_process_context  { lot_id: "LOT-0007", step: "STEP_023" }
+   → 展開完整 Recipe/APC/DC/SPC 對照分析
+```
