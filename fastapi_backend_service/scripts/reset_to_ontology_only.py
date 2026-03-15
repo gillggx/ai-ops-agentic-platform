@@ -19,7 +19,11 @@ import os
 import sys
 
 # Make sure app package is importable from /opt/aiops/fastapi_backend_service
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _APP_ROOT)
+
+# Change CWD so pydantic-settings finds .env in the correct directory
+os.chdir(_APP_ROOT)
 
 from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
@@ -63,29 +67,49 @@ async def reset():
         print()
 
         # 1. generated_events (FK RESTRICT on skill_definitions)
-        r = await db.execute(delete(GeneratedEventModel))
-        print(f"  Deleted generated_events: {r.rowcount}")
+        try:
+            r = await db.execute(delete(GeneratedEventModel))
+            print(f"  Deleted generated_events: {r.rowcount}")
+        except Exception as e:
+            print(f"  Skipped generated_events: {e}")
+            await db.rollback()
 
         # 2. routine_checks
-        r = await db.execute(delete(RoutineCheckModel))
-        print(f"  Deleted routine_checks:   {r.rowcount}")
+        try:
+            r = await db.execute(delete(RoutineCheckModel))
+            print(f"  Deleted routine_checks:   {r.rowcount}")
+        except Exception as e:
+            print(f"  Skipped routine_checks:   {e}")
+            await db.rollback()
 
         # 3. skills
-        r = await db.execute(delete(SkillDefinitionModel))
-        print(f"  Deleted skill_definitions:{r.rowcount}")
+        try:
+            r = await db.execute(delete(SkillDefinitionModel))
+            print(f"  Deleted skill_definitions:{r.rowcount}")
+        except Exception as e:
+            print(f"  Skipped skill_definitions:{e}")
+            await db.rollback()
 
         # 4. custom MCPs
-        r = await db.execute(delete(MCPDefinitionModel).where(MCPDefinitionModel.mcp_type == "custom"))
-        print(f"  Deleted custom MCPs:      {r.rowcount}")
+        try:
+            r = await db.execute(delete(MCPDefinitionModel).where(MCPDefinitionModel.mcp_type == "custom"))
+            print(f"  Deleted custom MCPs:      {r.rowcount}")
+        except Exception as e:
+            print(f"  Skipped custom MCPs:      {e}")
+            await db.rollback()
 
         # 5. legacy system MCPs not in canonical list
-        r = await db.execute(
-            delete(MCPDefinitionModel).where(
-                (MCPDefinitionModel.mcp_type == "system") &
-                (MCPDefinitionModel.name.notin_(canonical_names))
+        try:
+            r = await db.execute(
+                delete(MCPDefinitionModel).where(
+                    (MCPDefinitionModel.mcp_type == "system") &
+                    (MCPDefinitionModel.name.notin_(canonical_names))
+                )
             )
-        )
-        print(f"  Deleted legacy sys MCPs:  {r.rowcount}")
+            print(f"  Deleted legacy sys MCPs:  {r.rowcount}")
+        except Exception as e:
+            print(f"  Skipped legacy sys MCPs:  {e}")
+            await db.rollback()
 
         await db.commit()
         print()
