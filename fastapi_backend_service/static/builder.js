@@ -413,6 +413,8 @@ async function _renderSystemMcpDrawer(id) {
     smc = await _api('GET', `/mcp-definitions/${id}`);
   }
   const title = id ? `編輯 System MCP — ${_esc(smc?.name || '')}` : '新增 System MCP';
+  // Store the MCP id so _smcTestConnection can use run-with-data (server-side proxy)
+  window._smcCurrentId = id || null;
   const cfg       = smc?.api_config  || { endpoint_url: '', method: 'GET', headers: {} };
   const inSchema  = smc?.input_schema || { fields: [] };
   const inFields  = inSchema.fields || [];
@@ -601,13 +603,20 @@ async function _deleteSystemMcp(id) {
 }
 
 async function _smcTestConnection() {
-  const url    = document.getElementById('smc-url')?.value.trim();
-  const method = document.getElementById('smc-method')?.value || 'GET';
   const resultEl = document.getElementById('smc-test-result');
-  if (!url) { if (resultEl) resultEl.innerHTML = '<span class="text-amber-500">請先填寫 Endpoint URL</span>'; return; }
+  const mcpId    = window._smcCurrentId;
+
+  // System MCP endpoints are on localhost:8001 — cannot be called directly from
+  // the browser. Route through the AIOps backend (run-with-data) which acts as
+  // a server-side proxy. Requires the MCP to already be saved (has an id).
+  if (!mcpId) {
+    if (resultEl) resultEl.innerHTML = '<span class="text-amber-500">請先儲存此 System MCP，再進行測試。</span>';
+    return;
+  }
+
   if (resultEl) resultEl.innerHTML = '<span class="animate-pulse text-slate-400">連線測試中…</span>';
 
-  // Collect any filled-in param values from the field rows
+  // Collect any filled-in param test values from field rows
   const params = {};
   for (let i = 0; i < _smcFieldIndex; i++) {
     if (!document.getElementById(`smc-field-${i}`)) continue;
@@ -618,33 +627,27 @@ async function _smcTestConnection() {
     }
   }
 
-  // Build test param inputs if they don't exist yet
+  // Inject test-value inputs next to field rows if not yet present
   const container = document.getElementById('smc-fields-container');
   let hasTestInputs = !!document.getElementById('smc-test-param-0');
-  if (!hasTestInputs && container) {
-    // Inject small "test value" inputs next to each field row
+  if (!hasTestInputs && container && _smcFieldIndex > 0) {
     for (let i = 0; i < _smcFieldIndex; i++) {
       const row = document.getElementById(`smc-field-${i}`);
-      if (!row) continue;
-      if (!document.getElementById(`smc-test-param-${i}`)) {
-        const inp = document.createElement('input');
-        inp.id = `smc-test-param-${i}`;
-        inp.className = 'builder-input text-xs w-24 shrink-0 border-dashed';
-        inp.placeholder = '測試值';
-        row.insertBefore(inp, row.querySelector('button'));
-      }
+      if (!row || document.getElementById(`smc-test-param-${i}`)) continue;
+      const inp = document.createElement('input');
+      inp.id = `smc-test-param-${i}`;
+      inp.className = 'builder-input text-xs w-24 shrink-0 border-dashed';
+      inp.placeholder = '測試值';
+      row.insertBefore(inp, row.querySelector('button'));
     }
     if (resultEl) resultEl.innerHTML = '<span class="text-slate-400">請在各欄位旁填入測試值，再點擊測試。</span>';
     return;
   }
 
   try {
-    const path = url.replace(/^\/api\/v1/, '');
-    const qp = new URLSearchParams(params);
-    const fullPath = method === 'GET' && qp.toString() ? `${path}?${qp}` : path;
-    const body = method !== 'GET' ? params : undefined;
-    const data = await _api(method, fullPath, body);
-    const preview = JSON.stringify(data, null, 2).slice(0, 800);
+    // Call run-with-data — backend proxies to localhost:8001 server-side
+    const data = await _api('POST', `/mcp-definitions/${mcpId}/run-with-data`, { raw_data: params });
+    const preview = JSON.stringify(data?.dataset ?? data, null, 2).slice(0, 800);
     if (resultEl) resultEl.innerHTML = `
       <div class="text-emerald-600 font-semibold mb-1">✓ 連線成功</div>
       <pre class="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">${_esc(preview)}${preview.length >= 800 ? '\n…（截斷）' : ''}</pre>`;
