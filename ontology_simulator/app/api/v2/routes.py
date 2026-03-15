@@ -390,9 +390,76 @@ def _build_summary(root: dict, recipe: dict | None, apc: dict | None,
 
 # ── GET /trajectory/tool/{tool_id} — Pillar 2: Tool-Centric Trajectory ───────
 
+@router.get("/trajectory/tool/{tool_id}/step/{step}")
+async def get_tool_step_trajectory(
+    tool_id: str,
+    step: str,
+    start_time: datetime | None = Query(None, description="Window start (ISO8601)"),
+    end_time:   datetime | None = Query(None, description="Window end (ISO8601)"),
+    limit: int = Query(200, ge=1, le=1000),
+):
+    """
+    Tool + Step query — all lots that ran a specific step on this tool.
+
+    Returns one entry per lot, ordered newest-first. Optionally filtered by
+    start_time / end_time window (applied to ProcessEnd eventTime).
+    """
+    db = get_db()
+    filt: dict = {"toolID": tool_id, "step": step, "eventType": "TOOL_EVENT"}
+    if start_time or end_time:
+        time_filt: dict = {}
+        if start_time:
+            st = start_time.astimezone(timezone.utc).replace(tzinfo=None) if start_time.tzinfo else start_time
+            time_filt["$gte"] = st
+        if end_time:
+            et = end_time.astimezone(timezone.utc).replace(tzinfo=None) if end_time.tzinfo else end_time
+            time_filt["$lte"] = et
+        filt["eventTime"] = time_filt
+
+    raw = await db.events.find(filt, {"_id": 0}).sort("eventTime", -1).limit(limit * 2).to_list(length=limit * 2)
+
+    # Merge ProcessStart + ProcessEnd per lot
+    lot_map: dict = {}
+    for ev in raw:
+        lot = ev.get("lotID")
+        if lot not in lot_map:
+            lot_map[lot] = {"lot_id": lot, "tool_id": tool_id, "step": step}
+        ev_status = ev.get("status", "ProcessEnd")
+        if ev_status == "ProcessStart":
+            lot_map[lot]["start_time"] = ev["eventTime"].isoformat() + "Z"
+            lot_map[lot]["recipe_id"]  = ev.get("recipeID")
+            lot_map[lot]["apc_id"]     = ev.get("apcID")
+        else:
+            lot_map[lot]["end_time"]        = ev["eventTime"].isoformat() + "Z"
+            lot_map[lot]["spc_status"]      = ev.get("spc_status")
+            lot_map[lot]["dc_snapshot_id"]  = ev.get("dcSnapshotId")
+            lot_map[lot]["spc_snapshot_id"] = ev.get("spcSnapshotId")
+
+    batches = sorted(
+        lot_map.values(),
+        key=lambda b: b.get("end_time") or b.get("start_time") or "",
+        reverse=True,
+    )[:limit]
+
+    summary = (
+        f"Tool {tool_id}, Step {step}: {len(batches)} lot(s) found"
+        + (f" in window [{start_time.isoformat()[:16] if start_time else ''} → {end_time.isoformat()[:16] if end_time else ''}]" if start_time or end_time else "")
+        + f". OOC: {sum(1 for b in batches if b.get('spc_status') == 'OOC')} / {len(batches)}."
+    )
+    return {
+        "tool_id": tool_id,
+        "step":    step,
+        "total_batches": len(batches),
+        "batches": batches,
+        "summary": summary,
+    }
+
+
 @router.get("/trajectory/tool/{tool_id}")
 async def get_tool_trajectory(
     tool_id: str,
+    start_time: datetime | None = Query(None, description="Window start (ISO8601) — filter by ProcessEnd eventTime"),
+    end_time:   datetime | None = Query(None, description="Window end (ISO8601)"),
     limit: int = Query(200, ge=1, le=1000),
     include_state_events: bool = Query(False),
 ):
@@ -403,6 +470,8 @@ async def get_tool_trajectory(
     combining ProcessStart (start_time, recipe, apc) with ProcessEnd (end_time,
     dc, spc, spc_status). In-progress batches (ProcessEnd not yet written) appear
     with end_time=null.
+
+    Optional start_time / end_time filter the window by ProcessEnd eventTime.
     """
     db = get_db()
 
@@ -410,9 +479,20 @@ async def get_tool_trajectory(
     if not tool_doc:
         raise HTTPException(status_code=404, detail=f"Tool '{tool_id}' not found")
 
+    filt: dict = {"toolID": tool_id, "eventType": "TOOL_EVENT"}
+    if start_time or end_time:
+        time_filt: dict = {}
+        if start_time:
+            st = start_time.astimezone(timezone.utc).replace(tzinfo=None) if start_time.tzinfo else start_time
+            time_filt["$gte"] = st
+        if end_time:
+            et = end_time.astimezone(timezone.utc).replace(tzinfo=None) if end_time.tzinfo else end_time
+            time_filt["$lte"] = et
+        filt["eventTime"] = time_filt
+
     cursor = (
         db.events
-        .find({"toolID": tool_id, "eventType": "TOOL_EVENT"})
+        .find(filt)
         .sort("eventTime", 1)
         .limit(limit * 2)   # ×2 because each batch = 2 events
     )
@@ -473,9 +553,18 @@ async def get_tool_trajectory(
 # ── GET /trajectory/lot/{lot_id} — Pillar 3 canonical URL ────────────────────
 
 @router.get("/trajectory/lot/{lot_id}")
-async def get_lot_trajectory_canonical(lot_id: str):
-    """Pillar 3 — Lot-Centric Trajectory (canonical URL)."""
-    return await _lot_trajectory_impl(lot_id)
+async def get_lot_trajectory_canonical(
+    lot_id: str,
+    start_time: datetime | None = Query(None, description="Window start (ISO8601)"),
+    end_time:   datetime | None = Query(None, description="Window end (ISO8601)"),
+    limit:      int            = Query(500, ge=1, le=2000),
+):
+    """Pillar 3 — Lot-Centric Trajectory (canonical URL).
+
+    Optional start_time / end_time narrow results to a specific period.
+    limit caps the number of returned steps (default 500 = full lot history).
+    """
+    return await _lot_trajectory_impl(lot_id, start_time=start_time, end_time=end_time, limit=limit)
 
 
 @router.get("/trajectory/{lot_id}")
@@ -484,7 +573,12 @@ async def get_trajectory(lot_id: str):
     return await _lot_trajectory_impl(lot_id)
 
 
-async def _lot_trajectory_impl(lot_id: str) -> dict:
+async def _lot_trajectory_impl(
+    lot_id: str,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+    limit: int = 500,
+) -> dict:
     """
     Lot-Centric Trace — ordered sequence of steps for this lot.
 
@@ -498,8 +592,19 @@ async def _lot_trajectory_impl(lot_id: str) -> dict:
     if not lot_doc:
         raise HTTPException(status_code=404, detail=f"Lot '{lot_id}' not found")
 
-    cursor = db.events.find({"lotID": lot_id, "eventType": "LOT_EVENT"}).sort("eventTime", 1)
-    events = await cursor.to_list(length=None)
+    filt: dict = {"lotID": lot_id, "eventType": "LOT_EVENT"}
+    if start_time or end_time:
+        time_filt: dict = {}
+        if start_time:
+            st = start_time.astimezone(timezone.utc).replace(tzinfo=None) if start_time.tzinfo else start_time
+            time_filt["$gte"] = st
+        if end_time:
+            et = end_time.astimezone(timezone.utc).replace(tzinfo=None) if end_time.tzinfo else end_time
+            time_filt["$lte"] = et
+        filt["eventTime"] = time_filt
+
+    cursor = db.events.find(filt).sort("eventTime", 1).limit(limit * 2)
+    events = await cursor.to_list(length=limit * 2)
 
     # Group by step → merge ProcessStart + ProcessEnd
     step_map: dict = {}
@@ -521,7 +626,7 @@ async def _lot_trajectory_impl(lot_id: str) -> dict:
     steps = sorted(
         step_map.values(),
         key=lambda s: s.get("start_time") or s.get("end_time") or "",
-    )
+    )[:limit]
 
     return {
         "lot_id":      lot_id,
@@ -538,8 +643,10 @@ _VALID_HISTORY_TYPES = {"APC", "RECIPE", "DC", "SPC"}
 @router.get("/history/{object_type}/{object_id}")
 async def get_object_history(
     object_type: str,
-    object_id: str,
-    limit: int = Query(200, ge=1, le=1000),
+    object_id:   str,
+    start_time:  datetime | None = Query(None, description="Window start (ISO8601)"),
+    end_time:    datetime | None = Query(None, description="Window end (ISO8601)"),
+    limit:       int             = Query(200, ge=1, le=1000),
 ):
     """
     Pillar 4 — Object-Centric Performance History.
@@ -548,6 +655,8 @@ async def get_object_history(
     against the events collection to surface spc_status. The ``process_status``
     field indicates which phase the snapshot was captured in (ProcessStart or
     ProcessEnd), matching the semantics introduced in the two-event model.
+
+    Optional start_time / end_time filter snapshots to a time window.
     """
     obj_type = object_type.upper()
     if obj_type not in _VALID_HISTORY_TYPES:
@@ -558,9 +667,20 @@ async def get_object_history(
 
     db = get_db()
 
+    snap_filt: dict = {"objectID": object_id, "objectName": obj_type}
+    if start_time or end_time:
+        time_filt: dict = {}
+        if start_time:
+            st = start_time.astimezone(timezone.utc).replace(tzinfo=None) if start_time.tzinfo else start_time
+            time_filt["$gte"] = st
+        if end_time:
+            et = end_time.astimezone(timezone.utc).replace(tzinfo=None) if end_time.tzinfo else end_time
+            time_filt["$lte"] = et
+        snap_filt["eventTime"] = time_filt
+
     cursor = (
         db.object_snapshots
-        .find({"objectID": object_id, "objectName": obj_type})
+        .find(snap_filt)
         .sort("eventTime", -1)
         .limit(limit)
     )

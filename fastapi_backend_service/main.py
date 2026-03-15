@@ -296,8 +296,25 @@ _ONTOLOGY_SYSTEM_MCPS = [
         },
     },
     {
+        "name": "get_lot_trajectory",
+        "description": "批次旅程。查詢指定批次的完整製程路徑（步驟序列、機台、Recipe、SPC 結果）。支援時間區間過濾。",
+        "api_config": {
+            "endpoint_url": "http://localhost:8001/api/v2/ontology/trajectory/lot/{lot_id}",
+            "method": "GET",
+            "headers": {},
+        },
+        "input_schema": {
+            "fields": [
+                {"name": "lot_id",     "type": "string",  "description": "批次 ID（e.g. LOT-0001）", "required": True},
+                {"name": "start_time", "type": "string",  "description": "查詢區間起始（ISO8601，可選）", "required": False},
+                {"name": "end_time",   "type": "string",  "description": "查詢區間結束（ISO8601，可選）", "required": False},
+                {"name": "limit",      "type": "integer", "description": "回傳步驟數上限（預設 500）", "required": False},
+            ]
+        },
+    },
+    {
         "name": "get_tool_trajectory",
-        "description": "設備履歷。查詢指定機台最近處理過的批次與 SPC 結果。用途：這台機台異常前跑過哪些貨？",
+        "description": "設備履歷。查詢指定機台最近處理過的批次與 SPC 結果。支援時間區間過濾。用途：這台機台異常前跑過哪些貨？",
         "api_config": {
             "endpoint_url": "http://localhost:8001/api/v2/ontology/trajectory/tool/{tool_id}",
             "method": "GET",
@@ -305,14 +322,34 @@ _ONTOLOGY_SYSTEM_MCPS = [
         },
         "input_schema": {
             "fields": [
-                {"name": "tool_id", "type": "string", "description": "機台 ID（e.g. EQP-01）", "required": True},
-                {"name": "limit",   "type": "integer","description": "回傳筆數上限（預設 50）", "required": False},
+                {"name": "tool_id",    "type": "string",  "description": "機台 ID（e.g. EQP-01）", "required": True},
+                {"name": "start_time", "type": "string",  "description": "查詢區間起始（ISO8601，可選）", "required": False},
+                {"name": "end_time",   "type": "string",  "description": "查詢區間結束（ISO8601，可選）", "required": False},
+                {"name": "limit",      "type": "integer", "description": "回傳批次數上限（預設 200）", "required": False},
+            ]
+        },
+    },
+    {
+        "name": "get_tool_step_trajectory",
+        "description": "機台+步驟查詢。查詢特定機台上，某步驟被哪些批次跑過，以及 SPC 結果。用途：EQP-01 的 STEP_042 OOC 率如何？",
+        "api_config": {
+            "endpoint_url": "http://localhost:8001/api/v2/ontology/trajectory/tool/{tool_id}/step/{step}",
+            "method": "GET",
+            "headers": {},
+        },
+        "input_schema": {
+            "fields": [
+                {"name": "tool_id",    "type": "string",  "description": "機台 ID（e.g. EQP-01）", "required": True},
+                {"name": "step",       "type": "string",  "description": "步驟代碼（e.g. STEP_042）", "required": True},
+                {"name": "start_time", "type": "string",  "description": "查詢區間起始（ISO8601，可選）", "required": False},
+                {"name": "end_time",   "type": "string",  "description": "查詢區間結束（ISO8601，可選）", "required": False},
+                {"name": "limit",      "type": "integer", "description": "回傳批次數上限（預設 200）", "required": False},
             ]
         },
     },
     {
         "name": "get_object_history",
-        "description": "物件效能歷史。查詢 APC 模型、Recipe、DC、SPC 物件的歷史快照序列，了解長期趨勢。",
+        "description": "物件效能歷史。查詢 APC 模型、Recipe、DC、SPC 物件的歷史快照序列。支援時間區間過濾，了解長期趨勢。",
         "api_config": {
             "endpoint_url": "http://localhost:8001/api/v2/ontology/history/{object_type}/{object_id}",
             "method": "GET",
@@ -320,9 +357,11 @@ _ONTOLOGY_SYSTEM_MCPS = [
         },
         "input_schema": {
             "fields": [
-                {"name": "object_type", "type": "string", "description": "物件類型：APC / DC / SPC / RECIPE", "required": True},
-                {"name": "object_id",   "type": "string", "description": "物件 ID（e.g. APC-047）", "required": True},
-                {"name": "limit",       "type": "integer","description": "回傳筆數上限（預設 50）", "required": False},
+                {"name": "object_type", "type": "string",  "description": "物件類型：APC / DC / SPC / RECIPE", "required": True},
+                {"name": "object_id",   "type": "string",  "description": "物件 ID（e.g. APC-047）", "required": True},
+                {"name": "start_time",  "type": "string",  "description": "查詢區間起始（ISO8601，可選）", "required": False},
+                {"name": "end_time",    "type": "string",  "description": "查詢區間結束（ISO8601，可選）", "required": False},
+                {"name": "limit",       "type": "integer", "description": "回傳筆數上限（預設 200）", "required": False},
             ]
         },
     },
