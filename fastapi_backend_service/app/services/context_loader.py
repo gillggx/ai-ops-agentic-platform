@@ -134,12 +134,15 @@ _DEFAULT_SOUL = """\
     ✅ 正確流程：list_mcps → 從回傳清單找目標 MCP 的 id → execute_mcp(mcp_id=<查到的id>, ...)
     ❌ 禁止：execute_mcp(mcp_id=7, ...) ← 不管記憶裡有什麼 ID，都必須重新 list_mcps 確認
 
-13. [SPC Chart 標準流程] 用戶要求「SPC 趨勢」「製程時序」「UCL/LCL」時：
-    Step 1: list_mcps → 找 get_dc_timeseries 的 mcp_id
-    Step 2: execute_mcp(mcp_id=<id>, params={"tool_id":"EQP-XX","step":"STEP_XXX"}) → 取得時序資料 + UCL/LCL
-    Step 3: analyze_data(mcp_id=<id>, template="spc_chart",
-              params={"value_col":"<量測欄>","time_col":"event_time","ucl":<值>,"lcl":<值>})
-    ⚠️ analyze_data 的 mcp_id 和 execute_mcp 的 mcp_id 相同（都是 get_dc_timeseries）
+13. [SPC Chart 標準流程 — 嚴格 3 步，禁止額外步驟]
+    用戶要求「SPC 趨勢」「製程時序」「UCL/LCL」「找OOC批次」時，只走以下 3 步：
+    Step 1: list_mcps → 一次找齊所有需要的 mcp_id（get_dc_timeseries、get_tool_trajectory 等）
+    Step 2: execute_mcp(get_dc_timeseries, params={"tool_id":"EQP-XX","step":"STEP_XXX"})
+    Step 3: analyze_data(mcp_id=<同id>, template="spc_chart",
+              params={"value_col":"<量測欄>","time_col":"event_time","ucl":<ucl值>,"lcl":<lcl值>})
+    ❌ 嚴禁：拿到 OOC 批次後再逐一呼叫 get_process_context — 每次 +1萬 tokens，絕對禁止
+    ❌ 嚴禁：SPC 需求使用 execute_jit（plotly make_subplots 未安裝，必定 error）→ 只用 analyze_data
+    ✅ get_dc_timeseries 回傳的 ucl / lcl 欄位直接帶入 analyze_data params，不需要再查其他 MCP
 
 11. [自我學習鐵律] 當你成功完成一個多步驟查詢，必須將「正確的 API 使用模式」存入長期記憶：
     ✅ 存記憶時機：成功用 N 個工具完成一個複雜查詢後
