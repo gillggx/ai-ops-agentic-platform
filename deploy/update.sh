@@ -7,6 +7,17 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REBUILD=false
 [[ "${1:-}" == "--rebuild-frontend" ]] && REBUILD=true
 
+# Auto-enable rebuild if out/ is missing or package.json changed in this pull
+FRONTEND_DIR="$APP_DIR/ontology_simulator/frontend"
+if [[ ! -d "$FRONTEND_DIR/out" ]]; then
+  echo "⚡  out/ not found — auto-enabling frontend rebuild"
+  REBUILD=true
+elif git -C "$APP_DIR" diff HEAD@{1} HEAD --name-only 2>/dev/null \
+     | grep -qE "^ontology_simulator/frontend/package"; then
+  echo "⚡  package.json changed — auto-enabling frontend rebuild"
+  REBUILD=true
+fi
+
 # ── Helper: wait until an HTTP endpoint returns 2xx (timeout 60s) ─────────
 wait_for_http() {
   local url="$1" label="$2" deadline=$(( $(date +%s) + 60 ))
