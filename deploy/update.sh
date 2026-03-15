@@ -71,22 +71,24 @@ else
   sleep 20
 fi
 
-# Update nginx config from repo (deploy/nginx.conf → /etc/nginx/sites-available/aiops)
-# and reload so any location changes (e.g. /simulator/) take effect immediately.
-# Domain name is read from the existing installed config to avoid needing setup args.
+# Update /etc/nginx/sites-available/aiops from repo so location changes take effect.
+# Domain is read from $APP_DIR/.nginx_domain (written by setup.sh).
 NGINX_CONF="/etc/nginx/sites-available/aiops"
-CURRENT_DOMAIN=$(grep -m1 'server_name ' "$NGINX_CONF" 2>/dev/null | awk '{print $2}' | tr -d ';' || true)
-if [[ -n "$CURRENT_DOMAIN" ]] && sudo -n true 2>/dev/null; then
+DOMAIN_FILE="$APP_DIR/.nginx_domain"
+if [[ -f "$DOMAIN_FILE" ]]; then
+  CURRENT_DOMAIN=$(cat "$DOMAIN_FILE")
   sed "s/YOUR_DOMAIN/$CURRENT_DOMAIN/g" "$APP_DIR/deploy/nginx.conf" \
     | sudo tee "$NGINX_CONF" > /dev/null
   echo "    nginx.conf updated (domain=$CURRENT_DOMAIN)"
+else
+  echo "    ⚠️  .nginx_domain not found — nginx.conf not updated (run setup.sh once)"
 fi
 if sudo -n nginx -t 2>/dev/null && sudo -n nginx -s reload 2>/dev/null; then
   echo "    nginx reload OK"
 elif sudo -n systemctl reload nginx 2>/dev/null; then
   echo "    nginx reload OK (systemctl)"
 else
-  echo "    ⚠️  nginx reload skipped (no sudo access)"
+  echo "    ⚠️  nginx reload skipped"
 fi
 
 echo ""

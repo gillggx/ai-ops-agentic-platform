@@ -16,7 +16,8 @@ set -euo pipefail
 DOMAIN="${1:?用法: bash setup.sh YOUR_DOMAIN YOUR_EMAIL}"
 EMAIL="${2:?用法: bash setup.sh YOUR_DOMAIN YOUR_EMAIL}"
 APP_DIR="/opt/aiops"
-REPO_URL="https://github.com/gillggx/ai-ops-agentic-platform.git"
+REPO_URL="git@github.com:gillggx/ai-ops-agentic-platform.git"
+DEPLOY_KEY="/home/ubuntu/.ssh/github_deploy"
 
 echo "════════════════════════════════════════════════"
 echo "  AI-Ops Agentic Platform — Production Deploy"
@@ -31,6 +32,15 @@ echo "════════════════════════�
 echo ""
 echo "📦  安裝系統套件..."
 apt-get update -qq
+apt-get install -y -qq software-properties-common
+
+# Python 3.11（Ubuntu 20.04 需要 deadsnakes PPA；22.04 內建但也無妨）
+if ! python3.11 --version &>/dev/null 2>&1; then
+  echo "    加入 deadsnakes PPA..."
+  add-apt-repository -y ppa:deadsnakes/ppa
+  apt-get update -qq
+fi
+
 apt-get install -y -qq \
   python3.11 python3.11-venv python3.11-dev python3-pip \
   build-essential libpq-dev \
@@ -63,6 +73,8 @@ echo "✅  系統套件安裝完成"
 # ── 2. 拉取程式碼 ────────────────────────────────────────────────
 echo ""
 echo "📥  拉取程式碼 → $APP_DIR ..."
+# 設定 SSH 使用 deploy key
+export GIT_SSH_COMMAND="ssh -i $DEPLOY_KEY -o StrictHostKeyChecking=no"
 if [ -d "$APP_DIR/.git" ]; then
   git -C "$APP_DIR" pull --ff-only
 else
@@ -174,7 +186,9 @@ sed "s/YOUR_DOMAIN/$DOMAIN/g" "$APP_DIR/deploy/nginx.conf" \
 ln -sf /etc/nginx/sites-available/aiops /etc/nginx/sites-enabled/aiops
 rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
-echo "    ✅  Nginx 設定完成"
+# Save domain so update.sh can re-apply nginx.conf changes without needing args
+echo "$DOMAIN" > "$APP_DIR/.nginx_domain"
+echo "    ✅  Nginx 設定完成（domain saved to .nginx_domain）"
 
 # ── 11. SSL (Let's Encrypt) ──────────────────────────────────────
 echo ""

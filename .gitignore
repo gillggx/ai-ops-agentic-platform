@@ -17,4 +17,4 @@ ontology_simulator/frontend/tsconfig.tsbuildinfo
 
 # Backup files
 *_backup*
-*.local_backup
+*.local_backup.nginx_domain
