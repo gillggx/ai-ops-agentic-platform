@@ -602,35 +602,36 @@ async def _seed_data() -> None:
                     existing.roles = desired
                     logger.info("Updated roles for user: %s", u["username"])
 
-        # ── 0b. Production cleanup ────────────────────────────────────────────
-        # Wipe all user-created data so production always starts clean:
-        # no custom MCPs, no Skills — only ontology system MCPs survive.
-        try:
-            from app.models.generated_event import GeneratedEventModel
-            from app.models.routine_check import RoutineCheckModel
-            from app.models.skill_definition import SkillDefinitionModel
-            from app.models.mcp_definition import MCPDefinitionModel as _MCPClean
+        # ── 0b. Optional cleanup: set env var RESET_TO_ONTOLOGY_ONLY=true to trigger ──
+        # Removes all custom MCPs, Skills, RoutineChecks, GeneratedEvents, and legacy
+        # system MCPs — leaving only the canonical _ONTOLOGY_SYSTEM_MCPS.
+        # Usage:
+        #   RESET_TO_ONTOLOGY_ONLY=true uvicorn main:app          # local
+        #   sudo systemctl set-environment RESET_TO_ONTOLOGY_ONLY=true && sudo systemctl restart aiops
+        #   sudo systemctl unset-environment RESET_TO_ONTOLOGY_ONLY  # clear after reset
+        import os as _os
+        if _os.getenv("RESET_TO_ONTOLOGY_ONLY", "").lower() in ("true", "1", "yes"):
+            try:
+                from app.models.generated_event import GeneratedEventModel
+                from app.models.routine_check import RoutineCheckModel
+                from app.models.skill_definition import SkillDefinitionModel
+                from app.models.mcp_definition import MCPDefinitionModel as _MCPClean
 
-            # 1. generated_events references skill_definitions via RESTRICT → delete first
-            await db.execute(delete(GeneratedEventModel))
-            # 2. routine_checks references skill_definitions via CASCADE → delete explicitly
-            await db.execute(delete(RoutineCheckModel))
-            # 3. Skills
-            await db.execute(delete(SkillDefinitionModel))
-            # 4. Custom MCPs (may reference system MCPs via system_mcp_id → delete customs first)
-            await db.execute(delete(_MCPClean).where(_MCPClean.mcp_type == "custom"))
-            # 5. Old/legacy system MCPs not in the canonical ontology list
-            _canonical_names = {s["name"] for s in _ONTOLOGY_SYSTEM_MCPS}
-            await db.execute(
-                delete(_MCPClean).where(
-                    (_MCPClean.mcp_type == "system") & (_MCPClean.name.notin_(_canonical_names))
+                await db.execute(delete(GeneratedEventModel))
+                await db.execute(delete(RoutineCheckModel))
+                await db.execute(delete(SkillDefinitionModel))
+                await db.execute(delete(_MCPClean).where(_MCPClean.mcp_type == "custom"))
+                _canonical_names = {s["name"] for s in _ONTOLOGY_SYSTEM_MCPS}
+                await db.execute(
+                    delete(_MCPClean).where(
+                        (_MCPClean.mcp_type == "system") & (_MCPClean.name.notin_(_canonical_names))
+                    )
                 )
-            )
-            await db.commit()
-            logger.info("Production cleanup complete — custom MCPs, Skills, legacy system MCPs removed")
-        except Exception as _clean_err:
-            logger.warning("Production cleanup skipped: %s", _clean_err)
-            await db.rollback()
+                await db.commit()
+                logger.info("RESET_TO_ONTOLOGY_ONLY: cleanup complete")
+            except Exception as _clean_err:
+                logger.warning("RESET_TO_ONTOLOGY_ONLY cleanup failed: %s", _clean_err)
+                await db.rollback()
 
         # ── 1. Seed built-in DataSubjects (legacy; keep for backward compat) ──
         for spec in _MOCK_DATA_SUBJECTS:
