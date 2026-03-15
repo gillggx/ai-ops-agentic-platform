@@ -290,3 +290,26 @@ async def get_audit():
         "event_fanout":  {"TOOL_EVENT": tool_events, "LOT_EVENT": lot_events},
         "master_data":   master,
     }
+
+
+# ── Admin: Reset Simulation Data ──────────────────────────────
+# Drops only simulation collections (object_snapshots, events).
+# Seed/master data (lots, tools, recipe_data, apc_state) is preserved.
+
+@router.post("/admin/reset-simulation")
+async def reset_simulation():
+    """Drop simulation collections so the simulator regenerates fresh MES data from scratch.
+
+    Preserved: lots, tools, recipe_data, apc_state (seed/master data).
+    Dropped:   object_snapshots, events (simulation output).
+    """
+    db = get_db()
+    dropped = []
+    for col_name in ("object_snapshots", "events"):
+        await db[col_name].drop()
+        dropped.append(col_name)
+    return {
+        "status":  "ok",
+        "dropped": dropped,
+        "message": "Simulation data reset. Simulator will regenerate MES data on next cycle.",
+    }
