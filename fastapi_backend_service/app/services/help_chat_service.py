@@ -1,19 +1,16 @@
 """Help Chat Service — LLM assistant for answering user usage questions.
 
-Loads product spec and user manual as context, streams answers via Anthropic API.
+Loads product spec and user manual as context, streams answers via the unified LLM client.
 """
 
 import logging
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-import anthropic
-
 from app.config import get_settings
+from app.utils.llm_client import get_llm_client
 
 logger = logging.getLogger(__name__)
-
-_MODEL = get_settings().LLM_MODEL
 
 # Module-level cache so docs are read once per process
 _SYSTEM_PROMPT: Optional[str] = None
@@ -64,8 +61,7 @@ class HelpChatService:
     """Streams answers to user usage questions based on product documentation."""
 
     def __init__(self) -> None:
-        settings = get_settings()
-        self._client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+        self._llm = get_llm_client()
 
     async def stream_chat(
         self,
@@ -92,20 +88,12 @@ class HelpChatService:
         system_prompt = _get_system_prompt()
 
         try:
-            async with self._client.messages.stream(
-                model=_MODEL,
-                max_tokens=get_settings().LLM_MAX_TOKENS_CHAT,
-                system=[
-                    {
-                        "type": "text",
-                        "text": system_prompt,
-                        "cache_control": {"type": "ephemeral"},
-                    }
-                ],
+            async for chunk_text in self._llm.stream(
+                system=system_prompt,
                 messages=messages,
-            ) as stream:
-                async for text in stream.text_stream:
-                    yield {"type": "chat", "message": text}
+                max_tokens=get_settings().LLM_MAX_TOKENS_CHAT,
+            ):
+                yield {"type": "chat", "message": chunk_text}
 
             yield {"type": "done"}
 

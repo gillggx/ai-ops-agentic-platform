@@ -18,27 +18,22 @@ Three capabilities
 import json
 import logging
 
-import anthropic
-
-from app.config import get_settings
 from app.schemas.builder import (
     AutoMapResponse,
     FieldMapping,
     SuggestLogicResponse,
     ValidateLogicResponse,
 )
+from app.utils.llm_client import get_llm_client
 
 logger = logging.getLogger(__name__)
-
-_MODEL = get_settings().LLM_MODEL
 
 
 class BuilderService:
     """LLM-powered design-time helper for the Glass Box Skill Builder."""
 
     def __init__(self) -> None:
-        settings = get_settings()
-        self._client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+        self._llm = get_llm_client()
 
     # ------------------------------------------------------------------
     # /auto-map
@@ -85,13 +80,13 @@ class BuilderService:
 
 只回傳 JSON，不要有其他文字。"""
 
-        response = await self._client.messages.create(
-            model=_MODEL,
+        response = await self._llm.create(
+            system="",
             max_tokens=2048,
             messages=[{"role": "user", "content": prompt}],
         )
 
-        raw = response.content[0].text.strip()
+        raw = response.text.strip()
         # Strip markdown code fences if present
         if raw.startswith("```"):
             raw = raw.split("```")[1]
@@ -147,13 +142,13 @@ MCP 工具的輸出結構（tool_output_schema）為：
 
 只回傳 JSON，不要有其他文字。"""
 
-        response = await self._client.messages.create(
-            model=_MODEL,
+        response = await self._llm.create(
+            system="",
             max_tokens=1024,
             messages=[{"role": "user", "content": prompt}],
         )
 
-        raw = response.content[0].text.strip()
+        raw = response.text.strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
@@ -210,13 +205,13 @@ MCP 工具的輸出結構（tool_output_schema）為：
 
 只回傳 JSON，不要有其他文字。"""
 
-        response = await self._client.messages.create(
-            model=_MODEL,
+        response = await self._llm.create(
+            system="",
             max_tokens=2048,
             messages=[{"role": "user", "content": prompt}],
         )
 
-        raw = response.content[0].text.strip()
+        raw = response.text.strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):

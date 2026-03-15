@@ -54,14 +54,12 @@ import logging
 from collections.abc import AsyncGenerator
 from typing import Any
 
-import anthropic
-
 from app.config import get_settings
 from app.schemas.diagnostic import DiagnoseResponse, ToolCallRecord
 from app.skills import SKILL_REGISTRY
+from app.utils.llm_client import get_llm_client
 
 logger = logging.getLogger(__name__)
-_MODEL = get_settings().LLM_MODEL
 
 # ---------------------------------------------------------------------------
 # System Prompt — triage-first constraint is explicit and non-negotiable
@@ -112,14 +110,14 @@ def _sse(event_type: str, data: dict) -> str:
 def _serialize_content(blocks: list) -> list[dict]:
     """Convert Anthropic SDK content blocks to plain API-compatible dicts.
 
-    ``anthropic >= 0.40`` returns typed Pydantic v2 objects (TextBlock,
-    ToolUseBlock, …) that carry extra fields (``citations``, ``caller``, …).
-    Passing those objects directly back to ``messages.create()`` causes a
-    ``model_dump(by_alias=None)`` crash in pydantic-core.  Serialising only
-    the fields the API actually expects avoids the issue.
+    Kept for backward compatibility. With get_llm_client(), resp.content is
+    already a list of plain dicts — this function is a no-op for those.
     """
     result = []
     for block in blocks:
+        if isinstance(block, dict):
+            result.append(block)
+            continue
         t = getattr(block, "type", None)
         if t == "text":
             result.append({"type": "text", "text": block.text})
@@ -143,8 +141,7 @@ class DiagnosticService:
     """Orchestrates the MCP agentic loop; exposes both batch and streaming APIs."""
 
     def __init__(self, max_turns: int = 10) -> None:
-        settings = get_settings()
-        self._client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+        self._llm = get_llm_client()
         self._max_turns = max_turns
         self._tools = [skill.to_anthropic_tool() for skill in SKILL_REGISTRY.values()]
 
@@ -155,29 +152,33 @@ class DiagnosticService:
     async def _execute_skill(
         self, block: Any
     ) -> tuple[ToolCallRecord | None, dict, bool]:
-        """Dispatch one tool_use block to the matching skill.
+        """Dispatch one tool_use block (plain dict) to the matching skill.
 
         Returns:
             (record, result_dict, is_error)
             ``record`` is ``None`` for unknown tools.
         """
-        skill = SKILL_REGISTRY.get(block.name)
+        # block is now a plain dict from LLMResponse.content
+        tool_name = block["name"] if isinstance(block, dict) else block.name
+        tool_input = block["input"] if isinstance(block, dict) else block.input
+
+        skill = SKILL_REGISTRY.get(tool_name)
         if skill is None:
-            error_result = {"error": f"Unknown tool: {block.name}"}
-            logger.warning("Unknown tool requested: %s", block.name)
+            error_result = {"error": f"Unknown tool: {tool_name}"}
+            logger.warning("Unknown tool requested: %s", tool_name)
             return None, error_result, True
 
         try:
-            result = await skill.execute(**block.input)
+            result = await skill.execute(**tool_input)
             is_error = False
         except Exception as exc:  # noqa: BLE001
             result = {"error": str(exc)}
             is_error = True
-            logger.exception("Skill %s raised an exception", block.name)
+            logger.exception("Skill %s raised an exception", tool_name)
 
         record = ToolCallRecord(
-            tool_name=block.name,
-            tool_input=dict(block.input),
+            tool_name=tool_name,
+            tool_input=dict(tool_input),
             tool_result=result,
         )
         return record, result, is_error
@@ -205,48 +206,47 @@ class DiagnosticService:
 
         for _ in range(self._max_turns):
             turns += 1
-            response = await self._client.messages.create(
-                model=_MODEL,
-                max_tokens=get_settings().LLM_MAX_TOKENS_DIAGNOSTIC,
+            resp = await self._llm.create(
                 system=_SYSTEM_PROMPT,
+                max_tokens=get_settings().LLM_MAX_TOKENS_DIAGNOSTIC,
                 tools=self._tools,
                 messages=messages,
             )
 
             logger.debug(
                 "Agent turn %d — stop_reason=%s blocks=%d",
-                turns, response.stop_reason, len(response.content),
+                turns, resp.stop_reason, len(resp.content),
             )
 
-            messages.append({"role": "assistant", "content": _serialize_content(response.content)})
+            messages.append({"role": "assistant", "content": resp.content})
 
-            if response.stop_reason == "end_turn":
-                for block in response.content:
-                    if block.type == "text":
-                        diagnosis_report = block.text
+            if resp.stop_reason == "end_turn":
+                for block in resp.content:
+                    if block.get("type") == "text":
+                        diagnosis_report = block["text"]
                         break
                 max_turns_reached = False
                 break
 
-            if response.stop_reason != "tool_use":
-                for block in response.content:
-                    if block.type == "text":
-                        diagnosis_report = block.text
+            if resp.stop_reason != "tool_use":
+                for block in resp.content:
+                    if block.get("type") == "text":
+                        diagnosis_report = block["text"]
                         break
-                logger.warning("Unexpected stop_reason=%s", response.stop_reason)
+                logger.warning("Unexpected stop_reason=%s", resp.stop_reason)
                 max_turns_reached = False
                 break
 
             tool_results: list[dict[str, Any]] = []
-            for block in response.content:
-                if block.type != "tool_use":
+            for block in resp.content:
+                if block.get("type") != "tool_use":
                     continue
                 record, result, is_error = await self._execute_skill(block)
                 if record:
                     tool_calls_log.append(record)
                 tool_results.append({
                     "type": "tool_result",
-                    "tool_use_id": block.id,
+                    "tool_use_id": block["id"],
                     "content": json.dumps(result, ensure_ascii=False),
                     **({"is_error": True} if is_error else {}),
                 })
@@ -262,15 +262,14 @@ class DiagnosticService:
                     "立即輸出 Markdown 格式的診斷報告。"
                 ),
             })
-            final_resp = await self._client.messages.create(
-                model=_MODEL,
-                max_tokens=get_settings().LLM_MAX_TOKENS_DIAGNOSTIC,
+            final_resp = await self._llm.create(
                 system=_SYSTEM_PROMPT,
+                max_tokens=get_settings().LLM_MAX_TOKENS_DIAGNOSTIC,
                 messages=messages,
             )
             for block in final_resp.content:
-                if block.type == "text":
-                    diagnosis_report = block.text
+                if block.get("type") == "text":
+                    diagnosis_report = block["text"]
                     break
             turns += 1
 
@@ -306,26 +305,25 @@ class DiagnosticService:
         try:
             for _ in range(self._max_turns):
                 turns += 1
-                response = await self._client.messages.create(
-                    model=_MODEL,
-                    max_tokens=get_settings().LLM_MAX_TOKENS_DIAGNOSTIC,
+                resp = await self._llm.create(
                     system=_SYSTEM_PROMPT,
+                    max_tokens=get_settings().LLM_MAX_TOKENS_DIAGNOSTIC,
                     tools=self._tools,
                     messages=messages,
                 )
 
                 logger.debug(
                     "Stream turn %d — stop_reason=%s blocks=%d",
-                    turns, response.stop_reason, len(response.content),
+                    turns, resp.stop_reason, len(resp.content),
                 )
 
-                messages.append({"role": "assistant", "content": _serialize_content(response.content)})
+                messages.append({"role": "assistant", "content": resp.content})
 
-                if response.stop_reason == "end_turn":
-                    for block in response.content:
-                        if block.type == "text":
+                if resp.stop_reason == "end_turn":
+                    for block in resp.content:
+                        if block.get("type") == "text":
                             yield _sse("report", {
-                                "content": block.text,
+                                "content": block["text"],
                                 "total_turns": turns,
                                 "tools_invoked": [r.model_dump() for r in tool_calls_log],
                             })
@@ -333,28 +331,28 @@ class DiagnosticService:
                     max_turns_reached = False
                     break
 
-                if response.stop_reason != "tool_use":
-                    for block in response.content:
-                        if block.type == "text":
+                if resp.stop_reason != "tool_use":
+                    for block in resp.content:
+                        if block.get("type") == "text":
                             yield _sse("report", {
-                                "content": block.text,
+                                "content": block["text"],
                                 "total_turns": turns,
                                 "tools_invoked": [r.model_dump() for r in tool_calls_log],
                             })
                             break
-                    logger.warning("Unexpected stop_reason=%s", response.stop_reason)
+                    logger.warning("Unexpected stop_reason=%s", resp.stop_reason)
                     max_turns_reached = False
                     break
 
                 # --- Handle tool_use blocks ---
                 tool_results: list[dict[str, Any]] = []
-                for block in response.content:
-                    if block.type != "tool_use":
+                for block in resp.content:
+                    if block.get("type") != "tool_use":
                         continue
 
                     yield _sse("tool_call", {
-                        "tool_name": block.name,
-                        "tool_input": dict(block.input),
+                        "tool_name": block["name"],
+                        "tool_input": dict(block["input"]),
                     })
 
                     record, result, is_error = await self._execute_skill(block)
@@ -362,14 +360,14 @@ class DiagnosticService:
                         tool_calls_log.append(record)
 
                     yield _sse("tool_result", {
-                        "tool_name": block.name,
+                        "tool_name": block["name"],
                         "tool_result": result,
                         "is_error": is_error,
                     })
 
                     tool_results.append({
                         "type": "tool_result",
-                        "tool_use_id": block.id,
+                        "tool_use_id": block["id"],
                         "content": json.dumps(result, ensure_ascii=False),
                         **({"is_error": True} if is_error else {}),
                     })
@@ -385,16 +383,15 @@ class DiagnosticService:
                         "立即輸出 Markdown 格式的診斷報告。"
                     ),
                 })
-                final_resp = await self._client.messages.create(
-                    model=_MODEL,
-                    max_tokens=get_settings().LLM_MAX_TOKENS_DIAGNOSTIC,
+                final_resp = await self._llm.create(
                     system=_SYSTEM_PROMPT,
+                    max_tokens=get_settings().LLM_MAX_TOKENS_DIAGNOSTIC,
                     messages=messages,
                 )
                 for block in final_resp.content:
-                    if block.type == "text":
+                    if block.get("type") == "text":
                         yield _sse("report", {
-                            "content": block.text,
+                            "content": block["text"],
                             "total_turns": turns + 1,
                             "tools_invoked": [r.model_dump() for r in tool_calls_log],
                         })

@@ -16,13 +16,9 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-import anthropic
-
-from app.config import get_settings
+from app.utils.llm_client import get_llm_client
 
 logger = logging.getLogger(__name__)
-
-_MODEL = get_settings().LLM_MODEL
 
 _MAPPING_SYSTEM_PROMPT = """\
 你是一位半導體製程資料映射專家。你的唯一任務是從「Skill 診斷結果數據」中，\
@@ -114,8 +110,7 @@ async def run_llm_mapping(
     Returns a dict of {param_name: value} ready to store in GeneratedEvent.mapped_parameters.
     Never raises — returns {"_mapping_error": str} on failure.
     """
-    settings = get_settings()
-    client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    llm = get_llm_client()
 
     dataset = []
     if mcp_output and isinstance(mcp_output, dict):
@@ -134,13 +129,12 @@ async def run_llm_mapping(
     )
 
     try:
-        response = await client.messages.create(
-            model=_MODEL,
-            max_tokens=1024,
+        response = await llm.create(
             system=_MAPPING_SYSTEM_PROMPT,
+            max_tokens=1024,
             messages=[{"role": "user", "content": prompt}],
         )
-        raw_text = response.content[0].text.strip()
+        raw_text = response.text.strip()
 
         # Strip accidental markdown fences
         if raw_text.startswith("```"):

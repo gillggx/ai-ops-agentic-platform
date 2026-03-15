@@ -10,17 +10,13 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-import anthropic
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.models.agent_tool import AgentToolModel
+from app.utils.llm_client import get_llm_client
 
 logger = logging.getLogger(__name__)
-
-_settings = get_settings()
-_MODEL = _settings.LLM_MODEL
 
 
 def _get_text(content: list) -> str:
@@ -45,7 +41,7 @@ def _extract_json(text: str) -> Dict[str, Any]:
 class AgentToolService:
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
-        self._client = anthropic.AsyncAnthropic(api_key=_settings.ANTHROPIC_API_KEY)
+        self._llm = get_llm_client()
 
     # ── CRUD ────────────────────────────────────────────────────────────────
 
@@ -128,12 +124,12 @@ class AgentToolService:
 {{"reusable": true|false, "name": "簡短工具名稱（英文，不超過30字）", "description": "一句話功能說明（中文）"}}"""
 
         try:
-            response = await self._client.messages.create(
-                model=_MODEL,
+            response = await self._llm.create(
+                system="",
                 max_tokens=256,
                 messages=[{"role": "user", "content": prompt}],
             )
-            text = _get_text(response.content)
+            text = response.text
             result = _extract_json(text)
             if "reusable" not in result:
                 return {"reusable": False, "name": "", "description": ""}

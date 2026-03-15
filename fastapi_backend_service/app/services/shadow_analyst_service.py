@@ -17,16 +17,12 @@ import logging
 import re
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-import anthropic
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
 from app.services import sandbox_service
+from app.utils.llm_client import get_llm_client
 
 logger = logging.getLogger(__name__)
-
-_settings = get_settings()
-_MODEL = _settings.LLM_MODEL
 
 _ANALYSIS_SYSTEM = """\
 你是一位精確的統計分析工程師。
@@ -125,7 +121,7 @@ class ShadowAnalystService:
 
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
-        self._client = anthropic.AsyncAnthropic(api_key=_settings.ANTHROPIC_API_KEY)
+        self._llm = get_llm_client()
 
     async def analyze(
         self,
@@ -335,17 +331,12 @@ class ShadowAnalystService:
             profile_text=profile_text,
         )
         try:
-            resp = await self._client.messages.create(
-                model=_MODEL,
-                max_tokens=1500,
+            resp = await self._llm.create(
                 system=_ANALYSIS_SYSTEM,
+                max_tokens=1500,
                 messages=[{"role": "user", "content": user_msg}],
             )
-            code = ""
-            for block in resp.content:
-                if hasattr(block, "text"):
-                    code = block.text.strip()
-                    break
+            code = resp.text.strip()
             # Strip markdown fences if LLM added them
             code = re.sub(r"^```(?:python)?\n?", "", code)
             code = re.sub(r"\n?```$", "", code)

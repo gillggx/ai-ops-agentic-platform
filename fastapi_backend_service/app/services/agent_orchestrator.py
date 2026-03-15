@@ -44,11 +44,11 @@ import uuid
 from datetime import timedelta, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-import anthropic
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.utils.llm_client import get_llm_client
 from app.models.agent_session import AgentSessionModel
 from app.models.mcp_definition import MCPDefinitionModel
 from app.models.skill_definition import SkillDefinitionModel
@@ -617,9 +617,7 @@ class AgentOrchestrator:
         self._auth_token = auth_token
         self._user_id = user_id
         self._canvas_overrides = canvas_overrides
-        settings = get_settings()
-        self._client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-        self._model = settings.LLM_MODEL
+        self._llm = get_llm_client()
         self._memory_svc = AgentMemoryService(db)
         self._context_loader = ContextLoader(db)
         self._distill_svc = DataDistillationService()
@@ -706,10 +704,10 @@ class AgentOrchestrator:
             logger.info("AgentOrchestrator v14: iteration=%d user=%d", iteration, self._user_id)
 
             try:
-                response = await self._client.messages.create(
-                    model=self._model,
+                response = await self._llm.create(
+                    system=system_blocks if isinstance(system_blocks, str) else
+                           "\n".join(b.get("text", "") for b in system_blocks if isinstance(b, dict)),
                     max_tokens=8192,
-                    system=system_blocks,   # v14: List[Dict] with cache_control
                     tools=TOOL_SCHEMAS,
                     messages=messages,
                 )
@@ -719,23 +717,19 @@ class AgentOrchestrator:
                 yield {"type": "done"}
                 return
 
-            # Emit token usage (v14: includes cache stats)
-            if hasattr(response, "usage") and response.usage:
-                usage = response.usage
-                iter_input = getattr(usage, "input_tokens", 0)
-                iter_output = getattr(usage, "output_tokens", 0)
-                cache_read = getattr(usage, "cache_read_input_tokens", 0)
-                cache_create = getattr(usage, "cache_creation_input_tokens", 0)
-                _session_input_tokens += iter_input
-                yield {
-                    "type": "llm_usage",
-                    "input_tokens": iter_input,
-                    "output_tokens": iter_output,
-                    "cache_read_tokens": cache_read,
-                    "cache_creation_tokens": cache_create,
-                    "cumulative_tokens": _session_input_tokens,
-                    "iteration": iteration,
-                }
+            # Emit token usage
+            iter_input = response.input_tokens
+            iter_output = response.output_tokens
+            _session_input_tokens += iter_input
+            yield {
+                "type": "llm_usage",
+                "input_tokens": iter_input,
+                "output_tokens": iter_output,
+                "cache_read_tokens": 0,
+                "cache_creation_tokens": 0,
+                "cumulative_tokens": _session_input_tokens,
+                "iteration": iteration,
+            }
 
             # Stream thinking blocks
             for thinking_text in _extract_thinking(response.content):
@@ -757,13 +751,13 @@ class AgentOrchestrator:
                 yield _stage_event(4, "running")
                 yield {"type": "synthesis", "text": final_text}
                 yield _stage_event(4, "complete")
-                messages.append({"role": "assistant", "content": _content_to_list(response.content)})
+                messages.append({"role": "assistant", "content": response.content})
                 break
 
             # ── tool_use: Execute tools ────────────────────────────────
             if response.stop_reason == "tool_use":
                 tool_calls = _extract_tool_calls(response.content)
-                messages.append({"role": "assistant", "content": _content_to_list(response.content)})
+                messages.append({"role": "assistant", "content": response.content})
 
                 # v14: Extract <plan> from tool_use response text
                 if not _plan_extracted:
@@ -1004,17 +998,21 @@ class AgentOrchestrator:
                 if _force_synthesis:
                     yield _stage_event(4, "running")
                     try:
-                        synth_resp = await self._client.messages.create(
-                            model=self._model,
+                        _sys_str = (
+                            system_blocks if isinstance(system_blocks, str)
+                            else "\n".join(
+                                b.get("text", "") for b in system_blocks
+                                if isinstance(b, dict)
+                            )
+                        )
+                        synth_resp = await self._llm.create(
+                            system=_sys_str,
                             max_tokens=512,
-                            system=system_blocks,
-                            tool_choice={"type": "none"},
-                            tools=TOOL_SCHEMAS,
                             messages=messages,
                         )
                         final_text = _extract_text(synth_resp.content)
                         yield {"type": "synthesis", "text": final_text}
-                        messages.append({"role": "assistant", "content": _content_to_list(synth_resp.content)})
+                        messages.append({"role": "assistant", "content": synth_resp.content})
                     except Exception as exc:
                         yield {"type": "synthesis", "text": f"執行失敗，請確認參數後再試一次。（{exc}）"}
                     yield _stage_event(4, "complete")

@@ -14,17 +14,14 @@ Usage:
 Provider selection is controlled by the LLM_PROVIDER config:
     - "anthropic"  → Anthropic Claude (default)
     - "ollama"     → Any OpenAI-compatible local model (Ollama, vLLM, LMStudio)
-
-Note: The diagnostic agent tool-use loop (diagnostic_service.py) requires
-Anthropic's proprietary tool_use blocks. When LLM_PROVIDER="ollama", those
-endpoints will fall back to Anthropic automatically (see DiagnosticService).
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +33,8 @@ class LLMResponse:
     """Normalized response from any LLM backend."""
     text: str
     stop_reason: str = "end_turn"
-    # Raw content list kept for Anthropic tool-use loop compatibility
-    # For Ollama responses this is a single-element list [{"type": "text", "text": ...}]
+    # Raw content list kept for tool-use loop compatibility
+    # Each element is a plain dict: {"type": "text"|"tool_use"|"thinking", ...}
     content: List[Dict[str, Any]] = field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0
@@ -55,6 +52,18 @@ class BaseLLMClient:
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> LLMResponse:
         raise NotImplementedError
+
+    async def stream(
+        self,
+        *,
+        system: str,
+        messages: List[Dict[str, Any]],
+        max_tokens: int = 4096,
+    ) -> AsyncIterator[str]:
+        raise NotImplementedError
+        # Make this a proper async generator
+        if False:
+            yield ""
 
 
 # ── Anthropic backend ─────────────────────────────────────────────────────────
@@ -116,6 +125,23 @@ class AnthropicLLMClient(BaseLLMClient):
             output_tokens=getattr(usage, "output_tokens", 0) if usage else 0,
         )
 
+    async def stream(
+        self,
+        *,
+        system: str,
+        messages: List[Dict[str, Any]],
+        max_tokens: int = 4096,
+    ) -> AsyncIterator[str]:
+        """Yield text chunks from Anthropic streaming API."""
+        async with self._client.messages.stream(
+            model=self._model,
+            system=system,
+            max_tokens=max_tokens,
+            messages=messages,
+        ) as s:
+            async for text in s.text_stream:
+                yield text
+
 
 # ── Ollama / OpenAI-compatible backend ───────────────────────────────────────
 
@@ -124,12 +150,108 @@ class OllamaLLMClient(BaseLLMClient):
 
     System prompt is injected as the first message with role='system'
     because OpenAI-compatible APIs don't have a top-level 'system' param.
+    Anthropic-format messages (tool_use / tool_result blocks) are converted
+    to OpenAI function-calling format transparently.
     """
 
     def __init__(self, base_url: str, api_key: str, model: str) -> None:
         import openai as _openai
         self._client = _openai.AsyncOpenAI(base_url=base_url, api_key=api_key)
         self._model = model
+
+    def _to_openai_messages(
+        self,
+        system: str,
+        messages: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Convert Anthropic-format messages to OpenAI format.
+
+        Handles:
+        - Anthropic assistant tool_use blocks → OpenAI tool_calls
+        - Anthropic user tool_result blocks → OpenAI role=tool messages
+        - Plain text content → pass through unchanged
+        """
+        result: List[Dict[str, Any]] = [{"role": "system", "content": system}]
+
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+
+            # ── Assistant message ──────────────────────────────────────
+            if role == "assistant":
+                if isinstance(content, list):
+                    text_parts = []
+                    tool_calls = []
+                    for block in content:
+                        if not isinstance(block, dict):
+                            continue
+                        btype = block.get("type")
+                        if btype == "text":
+                            text_parts.append(block.get("text", ""))
+                        elif btype == "tool_use":
+                            tool_calls.append({
+                                "id": block.get("id", ""),
+                                "type": "function",
+                                "function": {
+                                    "name": block.get("name", ""),
+                                    "arguments": json.dumps(
+                                        block.get("input", {}),
+                                        ensure_ascii=False,
+                                    ),
+                                },
+                            })
+                    oai_msg: Dict[str, Any] = {"role": "assistant"}
+                    if text_parts:
+                        oai_msg["content"] = "\n".join(text_parts)
+                    else:
+                        oai_msg["content"] = None
+                    if tool_calls:
+                        oai_msg["tool_calls"] = tool_calls
+                    result.append(oai_msg)
+                else:
+                    result.append({"role": "assistant", "content": content or ""})
+
+            # ── User message — may contain tool_result blocks ──────────
+            elif role == "user":
+                if isinstance(content, list):
+                    # Check if this is a tool_result message
+                    has_tool_result = any(
+                        isinstance(b, dict) and b.get("type") == "tool_result"
+                        for b in content
+                    )
+                    if has_tool_result:
+                        # Expand each tool_result into a separate role=tool message
+                        for block in content:
+                            if not isinstance(block, dict):
+                                continue
+                            if block.get("type") == "tool_result":
+                                tool_content = block.get("content", "")
+                                result.append({
+                                    "role": "tool",
+                                    "tool_call_id": block.get("tool_use_id", ""),
+                                    "content": tool_content if isinstance(tool_content, str)
+                                               else json.dumps(tool_content, ensure_ascii=False),
+                                })
+                            elif block.get("type") == "text":
+                                result.append({
+                                    "role": "user",
+                                    "content": block.get("text", ""),
+                                })
+                    else:
+                        # Regular user content list (text blocks)
+                        text_parts = [
+                            b.get("text", "") for b in content
+                            if isinstance(b, dict) and b.get("type") == "text"
+                        ]
+                        result.append({"role": "user", "content": "\n".join(text_parts)})
+                else:
+                    result.append({"role": "user", "content": content or ""})
+
+            else:
+                # Pass through other roles unchanged
+                result.append({"role": role, "content": content or ""})
+
+        return result
 
     async def create(
         self,
@@ -139,8 +261,7 @@ class OllamaLLMClient(BaseLLMClient):
         max_tokens: int = 4096,
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> LLMResponse:
-        # Prepend system message
-        full_messages = [{"role": "system", "content": system}] + list(messages)
+        full_messages = self._to_openai_messages(system, messages)
 
         kwargs: Dict[str, Any] = dict(
             model=self._model,
@@ -163,10 +284,30 @@ class OllamaLLMClient(BaseLLMClient):
 
         resp = await self._client.chat.completions.create(**kwargs)
         choice = resp.choices[0]
+
         text = choice.message.content or ""
         stop_reason = choice.finish_reason or "stop"
 
-        content = [{"type": "text", "text": text}]
+        # Build normalised content list
+        content: List[Dict[str, Any]] = []
+        if text:
+            content.append({"type": "text", "text": text})
+
+        # Handle tool_calls in response
+        if choice.message.tool_calls:
+            stop_reason = "tool_use"
+            for tc in choice.message.tool_calls:
+                try:
+                    tc_input = json.loads(tc.function.arguments)
+                except (json.JSONDecodeError, AttributeError):
+                    tc_input = {}
+                content.append({
+                    "type": "tool_use",
+                    "id": tc.id,
+                    "name": tc.function.name,
+                    "input": tc_input,
+                })
+
         usage = getattr(resp, "usage", None)
         return LLMResponse(
             text=text,
@@ -175,6 +316,25 @@ class OllamaLLMClient(BaseLLMClient):
             input_tokens=getattr(usage, "prompt_tokens", 0) if usage else 0,
             output_tokens=getattr(usage, "completion_tokens", 0) if usage else 0,
         )
+
+    async def stream(
+        self,
+        *,
+        system: str,
+        messages: List[Dict[str, Any]],
+        max_tokens: int = 4096,
+    ) -> AsyncIterator[str]:
+        """Yield text chunks from OpenAI-compatible streaming API."""
+        full_messages = self._to_openai_messages(system, messages)
+        response = await self._client.chat.completions.create(
+            model=self._model,
+            max_tokens=max_tokens,
+            messages=full_messages,
+            stream=True,
+        )
+        async for chunk in response:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
 
 
 # ── Factory ───────────────────────────────────────────────────────────────────
