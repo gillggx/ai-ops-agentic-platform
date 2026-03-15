@@ -88,7 +88,7 @@ function getApiBase() {
 // machineId: when provided, the EQUIPMENT display uses this ID (not ctx.root.tool_id).
 // This prevents simulator data races where the same (lot_id, step) appears under
 // multiple machines — the caller always knows the authoritative machine.
-function buildGraph(ctx: CtxResponse, machineId?: string): { nodes: GraphNode[]; edges: GraphEdge[] } {
+function buildGraph(ctx: CtxResponse, machineId?: string, machineStage?: string): { nodes: GraphNode[]; edges: GraphEdge[] } {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   let pi = 0; // palette index — discovery order assigns color
@@ -143,13 +143,15 @@ function buildGraph(ctx: CtxResponse, machineId?: string): { nodes: GraphNode[];
   });
 
   // ── Lot-side objects: RECIPE → TOOL, others → LOT, laid out on RIGHT ─────────
+  // DC / SPC / OCAP are post-process measurements — hide them while the lot is still being processed
+  const isInProgress = machineStage === "STAGE_PROCESS";
   const lotSide: Array<{ type: string; data: Record<string, unknown> | null; defaultId: string; edgeFrom: string }> = [
     { type: "RECIPE", data: ctx.recipe, defaultId: root.recipe_id ?? "—", edgeFrom: toolId },
     { type: "APC",    data: ctx.apc,    defaultId: root.apc_id    ?? "—", edgeFrom: lotId  },
     { type: "DC",     data: ctx.dc,     defaultId: "DC",                  edgeFrom: lotId  },
     { type: "SPC",    data: ctx.spc,    defaultId: "SPC",                 edgeFrom: lotId  },
     { type: "OCAP",   data: ctx.ocap,   defaultId: "OCAP",                edgeFrom: lotId  },
-  ].filter(d => d.data !== null);
+  ].filter(d => d.data !== null && !(isInProgress && ["DC", "SPC", "OCAP"].includes(d.type)));
 
   const N  = lotSide.length;
   const y0 = N <= 1 ? VH / 2 : 50;
@@ -226,7 +228,10 @@ export default function TopologyView({
       .finally(() => setLoading(false));
   }, [lotId, step, anchor]);
 
-  const graph = useMemo(() => ctx ? buildGraph(ctx, machine?.id ?? undefined) : null, [ctx, machine?.id]);
+  const graph = useMemo(
+    () => ctx ? buildGraph(ctx, machine?.id ?? undefined, machine?.stage ?? undefined) : null,
+    [ctx, machine?.id, machine?.stage]
+  );
 
   const clickable = !!onNodeClick;
 
