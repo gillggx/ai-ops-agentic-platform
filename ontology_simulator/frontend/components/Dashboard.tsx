@@ -231,7 +231,7 @@ export default function Dashboard() {
     const apcId   = `APC-${String(stepNum).padStart(3, "0")}`;
     setTraceSnapshot({
       id:              evt.toolID,
-      stage:           "STAGE_PROCESS",
+      stage:           evt.spc_status === "OOC" ? "STAGE_DONE_OOC" : "STAGE_DONE_PASS",
       lotId:           evt.lotID,
       recipe:          evt.recipeID ?? null,
       step:            evt.step,
