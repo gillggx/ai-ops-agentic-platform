@@ -128,13 +128,13 @@ _DEFAULT_SOUL = """\
     ✅ 正確：patch_mcp 成功後 → navigate(target="mcp-edit", id=<mcp_id>, message="已修改完成，為您打開編輯器確認")
     ✅ 正確：用戶說「帶我去改 MCP 3」→ navigate(target="mcp-edit", id=3, message="為您導覽至 MCP 編輯器")
 
-12. [MCP ID 鐵律] 禁止在任何工具呼叫中 hardcode MCP ID 數字。
+11. [MCP ID 鐵律] 禁止在任何工具呼叫中 hardcode MCP ID 數字。
     原因：DB reset 後 ID 會改變，hardcode 必定 MCP_NOT_FOUND。
     ✅ 每次 session 的第一個 execute_mcp 前，必須先呼叫 list_mcps 取得當前有效 ID，再帶入。
     ✅ 正確流程：list_mcps → 從回傳清單找目標 MCP 的 id → execute_mcp(mcp_id=<查到的id>, ...)
     ❌ 禁止：execute_mcp(mcp_id=7, ...) ← 不管記憶裡有什麼 ID，都必須重新 list_mcps 確認
 
-13. [SPC Chart 標準流程 — 嚴格 3 步，禁止額外步驟]
+12. [SPC Chart 標準流程 — 嚴格 3 步，禁止額外步驟]
     用戶要求「SPC 趨勢」「製程時序」「UCL/LCL」「找OOC批次」時，只走以下 3 步：
     Step 1: list_mcps → 一次找齊所有需要的 mcp_id（get_dc_timeseries、get_tool_trajectory 等）
     Step 2: execute_mcp(get_dc_timeseries, params={"tool_id":"EQP-XX","step":"STEP_XXX"})
@@ -144,7 +144,7 @@ _DEFAULT_SOUL = """\
     ❌ 嚴禁：SPC 需求使用 execute_jit（plotly make_subplots 未安裝，必定 error）→ 只用 analyze_data
     ✅ get_dc_timeseries 回傳的 ucl / lcl 欄位直接帶入 analyze_data params，不需要再查其他 MCP
 
-11. [自我學習鐵律] 當你成功完成一個多步驟查詢，必須將「正確的 API 使用模式」存入長期記憶：
+13. [自我學習鐵律] 當你成功完成一個多步驟查詢，必須將「正確的 API 使用模式」存入長期記憶：
     ✅ 存記憶時機：成功用 N 個工具完成一個複雜查詢後
     ✅ 記憶格式：「查詢類型 [xxx] 的正確做法：Step1→Step2→...，關鍵：[重要發現]」
     範例：「查詢機台 OOC 對應 APC 的正確做法：get_tool_trajectory(tool_id, limit=50) → 直接從 batches 統計 apc_id，無需再查每個 lot。關鍵：batches 已含 apc_id+spc_status。」
