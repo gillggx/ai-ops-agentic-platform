@@ -912,6 +912,116 @@ async def get_baseline_stats(
     }
 
 
+# ── GET /timeseries/tool/{tool_id}/step/{step} — DC Parameter Time Series ────
+
+@router.get("/timeseries/tool/{tool_id}/step/{step}")
+async def get_dc_timeseries(
+    tool_id: str,
+    step: str,
+    params: str | None = Query(None, description="Comma-separated DC parameter names to include, e.g. 'chamber_pressure,cf4_flow_sccm'. Omit to return all."),
+    limit: int = Query(50, ge=5, le=500, description="Number of most recent process runs to return"),
+):
+    """
+    DC Parameter Time Series — returns the last N measured values for each DC parameter
+    on a specific (tool_id, step) combination, ordered oldest→newest.
+
+    Designed for SPC charting: each point = one completed process run (ProcessEnd).
+    Include baseline UCL/LCL computed from the same window so the frontend can
+    draw control limits without a separate API call.
+
+    Response:
+    - tool_id, step, sample_count
+    - param_names: list of parameter names in the dataset
+    - series: { param_name: [{ t, lot_id, value }, ...] }  (oldest → newest)
+    - baseline: { param_name: { mean, std_dev, ucl_3sigma, lcl_3sigma } }
+    - spc_status_series: [{ t, lot_id, spc_status }]  (to overlay OOC markers)
+    """
+    import math
+    db = get_db()
+
+    # Fetch DC snapshots for this tool+step, newest first
+    cursor = (
+        db.object_snapshots
+        .find({"toolID": tool_id, "step": step, "objectName": "DC"})
+        .sort("eventTime", -1)
+        .limit(limit)
+    )
+    snaps = await cursor.to_list(length=limit)
+
+    if not snaps:
+        raise HTTPException(404, f"No DC snapshots found for tool_id='{tool_id}' step='{step}'")
+
+    # Reverse to chronological order
+    snaps = list(reversed(snaps))
+
+    # Determine which params to include
+    param_filter = set(p.strip() for p in params.split(",")) if params else None
+
+    # Build series data
+    all_param_names: set[str] = set()
+    for snap in snaps:
+        for k in (snap.get("parameters") or {}).keys():
+            if param_filter is None or k in param_filter:
+                all_param_names.add(k)
+
+    param_names = sorted(all_param_names)
+    series: dict[str, list] = {p: [] for p in param_names}
+
+    for snap in snaps:
+        t = snap["eventTime"].isoformat() + "Z" if snap.get("eventTime") else None
+        lot_id = snap.get("lotID")
+        parameters = snap.get("parameters") or {}
+        for p in param_names:
+            val = parameters.get(p)
+            if val is not None:
+                series[p].append({"t": t, "lot_id": lot_id, "value": round(float(val), 6)})
+
+    # Compute baseline from same window
+    baseline: dict[str, dict] = {}
+    for p in param_names:
+        vals = [pt["value"] for pt in series[p] if pt["value"] is not None]
+        if not vals:
+            continue
+        n    = len(vals)
+        mean = sum(vals) / n
+        std  = math.sqrt(sum((x - mean) ** 2 for x in vals) / n) if n > 1 else 0.0
+        baseline[p] = {
+            "mean":       round(mean, 4),
+            "std_dev":    round(std, 4),
+            "ucl_3sigma": round(mean + 3 * std, 4),
+            "lcl_3sigma": round(mean - 3 * std, 4),
+            "sample_count": n,
+        }
+
+    # Fetch SPC status for same runs (to overlay OOC markers)
+    spc_cursor = (
+        db.object_snapshots
+        .find({"toolID": tool_id, "step": step, "objectName": "SPC"})
+        .sort("eventTime", -1)
+        .limit(limit)
+    )
+    spc_snaps = await spc_cursor.to_list(length=limit)
+    spc_snaps = list(reversed(spc_snaps))
+    spc_status_series = [
+        {
+            "t": s["eventTime"].isoformat() + "Z" if s.get("eventTime") else None,
+            "lot_id": s.get("lotID"),
+            "spc_status": s.get("spc_status") or s.get("parameters", {}).get("spc_status"),
+        }
+        for s in spc_snaps
+    ]
+
+    return {
+        "tool_id":           tool_id,
+        "step":              step,
+        "sample_count":      len(snaps),
+        "param_names":       param_names,
+        "series":            series,
+        "baseline":          baseline,
+        "spc_status_series": spc_status_series,
+    }
+
+
 # ── POST /search — Semantic Event Search ─────────────────────────────────────
 
 @router.post("/search")
@@ -1010,4 +1120,77 @@ async def enumerate_ids():
         "lot_ids":  sorted(lot_docs),
         "tool_ids": sorted(tool_docs),
         "steps":    steps,
+    }
+
+
+# ── GET /tools/status — All Tools Status Overview ────────────────────────────
+
+@router.get("/tools/status")
+async def get_tools_status_overview(
+    recent_batches: int = Query(5, ge=1, le=20, description="Number of recent batches to summarize per tool"),
+):
+    """
+    All-tools status overview — returns Idle/Busy status + recent SPC health for every tool.
+
+    For each tool:
+    - current_status: Idle | Busy (from tools collection)
+    - current_lot: lot currently being processed (if Busy)
+    - recent_ooc_count: number of OOC batches in last N batches
+    - last_spc_status: PASS | OOC | N/A of most recent completed batch
+    - last_activity: timestamp of last ProcessEnd event
+    - total_batches_processed: lifetime batch count
+    """
+    db = get_db()
+    tool_ids = sorted(await db.tools.distinct("tool_id"))
+
+    tools_status = []
+    for tool_id in tool_ids:
+        tool_doc = await db.tools.find_one({"tool_id": tool_id})
+        tool_info = _clean(tool_doc) if tool_doc else {}
+
+        # Get recent TOOL_EVENTs (ProcessEnd) for this tool, newest first
+        cursor = (
+            db.events
+            .find({"toolID": tool_id, "eventType": "TOOL_EVENT", "status": "ProcessEnd"})
+            .sort("eventTime", -1)
+            .limit(recent_batches)
+        )
+        recent_ends = await cursor.to_list(length=recent_batches)
+
+        ooc_count = sum(1 for e in recent_ends if e.get("spc_status") == "OOC")
+        last_spc  = recent_ends[0].get("spc_status", "N/A") if recent_ends else "N/A"
+        last_time = (
+            recent_ends[0]["eventTime"].isoformat() + "Z"
+            if recent_ends and recent_ends[0].get("eventTime") else None
+        )
+
+        # Find in-progress lot (ProcessStart without matching ProcessEnd)
+        current_lot = None
+        if tool_info.get("status") == "Busy":
+            in_prog = await db.events.find_one(
+                {"toolID": tool_id, "eventType": "TOOL_EVENT", "status": "ProcessStart"},
+                sort=[("eventTime", -1)],
+            )
+            if in_prog:
+                current_lot = in_prog.get("lotID")
+
+        total = await db.events.count_documents(
+            {"toolID": tool_id, "eventType": "TOOL_EVENT", "status": "ProcessEnd"}
+        )
+
+        tools_status.append({
+            "tool_id":               tool_id,
+            "current_status":        tool_info.get("status", "Unknown"),
+            "current_lot":           current_lot,
+            "last_spc_status":       last_spc,
+            "recent_ooc_count":      ooc_count,
+            "recent_batches_checked": len(recent_ends),
+            "last_activity":         last_time,
+            "total_batches_processed": total,
+        })
+
+    return {
+        "tool_count":   len(tools_status),
+        "recent_window": recent_batches,
+        "tools":        tools_status,
     }

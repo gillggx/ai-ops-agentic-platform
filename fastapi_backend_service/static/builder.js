@@ -647,10 +647,10 @@ async function _smcTestConnection() {
   try {
     // Call run-with-data — backend proxies to localhost:8001 server-side
     const data = await _api('POST', `/mcp-definitions/${mcpId}/run-with-data`, { raw_data: params });
-    const preview = JSON.stringify(data?.dataset ?? data, null, 2).slice(0, 800);
+    const preview = JSON.stringify(data?.dataset ?? data, null, 2);
     if (resultEl) resultEl.innerHTML = `
       <div class="text-emerald-600 font-semibold mb-1">✓ 連線成功</div>
-      <pre class="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">${_esc(preview)}${preview.length >= 800 ? '\n…（截斷）' : ''}</pre>`;
+      <pre class="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed max-h-[600px] overflow-y-auto">${_esc(preview)}</pre>`;
   } catch (e) {
     if (resultEl) resultEl.innerHTML = `<span class="text-red-500">✗ 連線失敗：${_esc(e.message)}</span>`;
   }
@@ -2258,12 +2258,17 @@ function _renderSkillMcpCard() {
     container.innerHTML = '<p class="text-xs text-slate-500 py-2 px-1 italic">請先選擇上方 MCP。</p>';
     return;
   }
-  const mcp = _mcpDefs.find(m => m.id === _selectedSkillMcp);
+  // Look up in custom MCPs first, then system MCPs
+  const mcp = _mcpDefs.find(m => m.id === _selectedSkillMcp)
+           || _dataSubjects.find(m => m.id === _selectedSkillMcp);
   if (!mcp) return;
-  const ds = _dataSubjects.find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id));
+  const isSystemMcp = mcp.mcp_type === 'system' || _dataSubjects.some(d => d.id === mcp.id);
+  // For custom MCP: params come from parent system MCP's input_schema
+  // For system MCP: params come from its own input_schema
+  const ds = isSystemMcp ? mcp : _dataSubjects.find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id));
   const inputFields = ds?.input_schema?.fields || [];
 
-  const noScriptWarning = mcp.processing_script ? '' :
+  const noScriptWarning = (isSystemMcp || mcp.processing_script) ? '' :
     `<p class="text-xs text-amber-400 mb-2">⚠ 此 MCP 尚未生成 Python 腳本，請先在 MCP Builder 完成試跑後再執行。</p>`;
 
   let paramRows = '';
@@ -2352,18 +2357,20 @@ async function _autoMapMcp() {
 
 async function _executeSkillMcp() {
   const mcpId = _selectedSkillMcp;
-  const mcp = _mcpDefs.find(m => m.id === mcpId);
+  const mcp = _mcpDefs.find(m => m.id === mcpId)
+           || _dataSubjects.find(m => m.id === mcpId);
   const statusEl = document.getElementById('mcp-exec-status');
   const resultEl = document.getElementById('mcp-exec-result');
   const btn      = document.getElementById('mcp-exec-btn');
   if (!mcp || !statusEl || !resultEl) return;
 
-  if (!mcp.processing_script) {
+  const isSystemMcp = mcp.mcp_type === 'system' || _dataSubjects.some(d => d.id === mcp.id);
+  if (!isSystemMcp && !mcp.processing_script) {
     statusEl.innerHTML = '<p class="text-xs text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded-lg px-3 py-2">⚠ 此 MCP 尚未生成 Python 腳本，請先在 MCP Builder 完成試跑並儲存。</p>';
     return;
   }
 
-  const ds = _dataSubjects.find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id));
+  const ds = isSystemMcp ? mcp : _dataSubjects.find(d => d.id === (mcp.system_mcp_id || mcp.data_subject_id));
   if (!ds) {
     statusEl.innerHTML = '<p class="text-xs text-red-400">找不到對應的 System MCP / DataSubject</p>';
     return;
@@ -2438,10 +2445,16 @@ async function _renderSkillDrawer(id) {
   _selectedSkillMcp = sk?.mcp_id || null;
   _skillMcpExecResult = null;
 
-  const mcpOptions = _mcpDefs.map(m => {
+  // MCP dropdown: custom MCPs + system MCPs grouped
+  const customOpts = _mcpDefs.map(m => {
     const ds = _dataSubjects.find(d => d.id === (m.system_mcp_id || m.data_subject_id));
     return `<option value="${m.id}"${_selectedSkillMcp === m.id ? ' selected' : ''}>${_esc(m.name)}${ds ? ' (' + _esc(ds.name) + ')' : ''}</option>`;
   }).join('');
+  const systemOpts = _dataSubjects.map(m =>
+    `<option value="${m.id}"${_selectedSkillMcp === m.id ? ' selected' : ''}>[System] ${_esc(m.name)}</option>`
+  ).join('');
+  const mcpOptions = (customOpts ? `<optgroup label="── Custom MCP ──">${customOpts}</optgroup>` : '')
+                   + (systemOpts ? `<optgroup label="── System MCP ──">${systemOpts}</optgroup>` : '');
 
   const body = `
     <!-- ── 基本設定 ─────────────────────────────────────────────── -->
@@ -2587,7 +2600,8 @@ async function _tryDiagnosisSkill() {
   if (!_selectedSkillMcp) { alert('請先在 Step 1 選擇 MCP'); return; }
 
   // Build MCP sample outputs
-  const mcp = _mcpDefs.find(m => m.id === _selectedSkillMcp);
+  const mcp = _mcpDefs.find(m => m.id === _selectedSkillMcp)
+           || _dataSubjects.find(m => m.id === _selectedSkillMcp);
   const mcpSampleOutputs = {};
   if (mcp) {
     const outputData = _skillMcpExecResult?.output_data || mcp.sample_output;
@@ -2760,7 +2774,8 @@ async function _generateCodeDiagnosis() {
   if (!_selectedSkillMcp) { alert('請先在 Step 1 選擇 MCP'); return; }
 
   // Build MCP sample outputs
-  const mcp = _mcpDefs.find(m => m.id === _selectedSkillMcp);
+  const mcp = _mcpDefs.find(m => m.id === _selectedSkillMcp)
+           || _dataSubjects.find(m => m.id === _selectedSkillMcp);
   const mcpSampleOutputs = {};
   if (mcp) {
     const outputData = _skillMcpExecResult?.output_data || mcp.sample_output;
@@ -6545,21 +6560,13 @@ async function _mceFetchPreview() {
   document.getElementById('mce-format-review-details')?.setAttribute('open', '');
 
   try {
-    const rawUrl = ds.api_config?.endpoint_url || '';
-    if (!rawUrl) throw new Error('System MCP 沒有設定 API endpoint');
-    const path = rawUrl.replace(/^\/api\/v1/, '');
-    const method = (ds.api_config?.method || 'GET').toUpperCase();
-    const qp = new URLSearchParams(formParams);
-    const fullPath = method === 'GET' ? `${path}?${qp}` : path;
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-    const resp = await fetch(`/api/v1${fullPath}`, {
-      method,
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: method !== 'GET' ? JSON.stringify(formParams) : undefined,
-    });
-    const json = await resp.json();
-    const rows = Array.isArray(json) ? json
-      : (json.data ? (Array.isArray(json.data) ? json.data : [json.data]) : [json]);
+    if (!ds.id) throw new Error('System MCP 沒有 id，請先儲存');
+    // Always proxy through backend run-with-data to avoid CORS + absolute-URL concat issues
+    const result = await _api('POST', `/mcp-definitions/${ds.id}/run-with-data`, { raw_data: formParams });
+    const rows = result?.output_data?._raw_dataset
+              ?? result?.output_data?.dataset
+              ?? result?.dataset
+              ?? (Array.isArray(result) ? result : [result]);
     if (drEl) _nbRenderDataGrid(drEl, rows, '無資料回傳');
     if (frEl) _nbRenderSchemaGrid(frEl, ds.output_schema || _nbInferSchemaFromRows(rows));
   } catch(e) {
@@ -6591,22 +6598,21 @@ async function _mcpTryRun() {
 
     _mceLogLine('▶', '開始執行 MCP Try Run');
 
-    // Collect form params and fetch sample data
+    // Collect form params and fetch sample data via backend proxy
     let sampleData = null;
     let formParams = {};
-    const rawUrl = ds.api_config?.endpoint_url || '';
-    if (rawUrl) {
+    if (ds.id) {
       _mceLogLine('📡', `正在撈取 System MCP 資料：${ds.name}…`);
       const fields = ds.input_schema?.fields || [];
       for (const f of fields) {
         const el = document.getElementById(`mce-ds-param-${f.name}`);
         if (el && el.value.trim()) formParams[f.name] = el.value.trim();
       }
-      const method = (ds.api_config?.method || 'GET').toUpperCase();
-      const path = rawUrl.replace(/^\/api\/v1/, '');
-      const qp = new URLSearchParams(formParams);
-      const fullPath = method === 'GET' && qp.toString() ? `${path}?${qp}` : path;
-      sampleData = await _api(method, fullPath, method !== 'GET' ? formParams : undefined);
+      const fetchResult = await _api('POST', `/mcp-definitions/${ds.id}/run-with-data`, { raw_data: formParams });
+      sampleData = fetchResult?.output_data?._raw_dataset
+               ?? fetchResult?.output_data?.dataset
+               ?? fetchResult?.dataset
+               ?? null;
       _mceLogLine('✓', '樣本資料撈取成功', 'text-emerald-600');
     }
 

@@ -14,6 +14,7 @@ v14: Returns List[Dict] (Anthropic content blocks) for Prompt Caching support.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -124,17 +125,36 @@ _DEFAULT_SOUL = """\
     - target 值：mcp-edit (打開現有MCP)、skill-edit (打開現有Skill)、mcp-builder (MCP列表)、skill-builder (Skill列表)
     - id：對應的資源 ID（patch_mcp 成功後傳修改的 mcp_id）
     ✅ 正確：patch_mcp 成功後 → navigate(target="mcp-edit", id=<mcp_id>, message="已修改完成，為您打開編輯器確認")
-    ✅ 正確：用戶說「帶我去改 MCP 3」→ navigate(target="mcp-edit", id=3, message="為您導覽至 MCP 編輯器")"""
+    ✅ 正確：用戶說「帶我去改 MCP 3」→ navigate(target="mcp-edit", id=3, message="為您導覽至 MCP 編輯器")
+
+11. [自我學習鐵律] 當你成功完成一個多步驟查詢，必須將「正確的 API 使用模式」存入長期記憶：
+    ✅ 存記憶時機：成功用 N 個工具完成一個複雜查詢後
+    ✅ 記憶格式：「查詢類型 [xxx] 的正確做法：Step1→Step2→...，關鍵：[重要發現]」
+    範例：「查詢機台 OOC 對應 APC 的正確做法：get_tool_trajectory(tool_id, limit=50) → 直接從 batches 統計 apc_id，無需再查每個 lot。關鍵：batches 已含 apc_id+spc_status。」
+    ✅ 存記憶指令：呼叫 save_memory(content="...", tags=["api_pattern", "系統MCP名稱"])
+    ⚠️ 這樣下次遇到類似問題，RAG 會把正確做法帶進 context，你就不會再走錯路。"""
 
 _SOUL_PARAM_KEY = "AGENT_SOUL_PROMPT"
 
+def _load_api_doc() -> str:
+    """Load the ontology API documentation for agent context. Cached at module level."""
+    doc_path = os.path.join(os.path.dirname(__file__), "../../docs/API_introduction_ontology.md")
+    try:
+        with open(os.path.normpath(doc_path), encoding="utf-8") as f:
+            return f.read()
+    except Exception:
+        return ""
+
+_API_DOC = _load_api_doc()
+
 _OUTPUT_ROUTING = """\
 ⚠️ 輸出格式鐵律（不可違反，優先級最高）：
-1. Chat Bubble（對話框）：只能有一句簡短的狀態報告 + UI 引導語。
-   ✅ 正確範例：「✅ 常態分佈分析完成，發現異常。👉 請檢視右側 AI 分析報告。」
-   ❌ 禁止在標籤外出現 Markdown 表格、多行統計數據、詳細列表。
-2. 詳細分析（數據表格、統計量、Sigma 計算、專家建議）：必須全部包入 <ai_analysis>...</ai_analysis> 標籤。
-3. 若沒有詳細分析需要輸出，則不使用標籤，僅一句對話回覆即可。"""
+1. <ai_analysis> 標籤：**僅用於多步驟診斷分析報告**（SPC 統計、Sigma 計算、OOC 根因分析、多機台比較、專家建議等）。
+   ✅ 使用時機：執行 execute_skill 診斷、跑 SPC/APC 分析、產出多節式報告。
+   ❌ 禁止使用時機：查詢清單、查機台狀態、查批次歷程、查物件快照 — 這類直接回傳資料即可。
+2. 直接回覆（不加標籤）：查詢類結果（清單、表格、狀態）直接用 Markdown 在對話框輸出，不需要任何包裝標籤。
+   ✅ 正確範例：「以下是 10 台機台目前狀態：\n| 機台 | 狀態 |\n|------|------|\n...」
+3. 若結果已由右側 AI 分析面板顯示，則 chat bubble 只需一句引導語，不重複輸出數據。"""
 
 
 class ContextLoader:
@@ -180,14 +200,18 @@ class ContextLoader:
         rag_lines = [f"- {m.content}" for m in memories]
         rag_block = "\n".join(rag_lines) if rag_lines else "(無相關歷史記憶)"
 
-        # ── Block 1: Soul + output rules (stable → cache) ─────────────────────
+        # ── Block 1: Soul + output rules + API doc (stable → cache) ──────────
+        api_doc_section = (
+            f"\n<ontology_api_reference>\n{_API_DOC}\n</ontology_api_reference>"
+            if _API_DOC else ""
+        )
         stable_text = f"""<soul>
 {soul}
   ⚠️ 強制約束：若 <dynamic_memory> 與 <soul> 衝突，一律以 <soul> 鐵律為準。
 </soul>
 <output_routing_rules>
 {_OUTPUT_ROUTING}
-</output_routing_rules>"""
+</output_routing_rules>{api_doc_section}"""
 
         # ── Block 2: Dynamic context (changes each turn → no cache) ───────────
         dynamic_parts = [

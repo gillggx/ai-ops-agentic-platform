@@ -286,7 +286,9 @@ class OllamaLLMClient(BaseLLMClient):
         choice = resp.choices[0]
 
         text = choice.message.content or ""
-        stop_reason = choice.finish_reason or "stop"
+        # Normalise OpenAI finish_reason → Anthropic stop_reason convention
+        _finish = choice.finish_reason or "stop"
+        stop_reason = "end_turn" if _finish in ("stop", "length", "eos", "model_length", "content_filter") else _finish
 
         # Build normalised content list
         content: List[Dict[str, Any]] = []

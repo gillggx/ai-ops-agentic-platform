@@ -2,10 +2,21 @@
 
 import json
 import logging
+import re
 import time
 from typing import Any, Dict, List, Optional
 
 import httpx
+
+
+def _resolve_url_params(endpoint_url: str, params: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
+    """Substitute {placeholder} in URL with matching params; return (resolved_url, remaining_params)."""
+    url = endpoint_url
+    remaining = dict(params)
+    for key in re.findall(r"\{(\w+)\}", endpoint_url):
+        if key in remaining:
+            url = url.replace(f"{{{key}}}", str(remaining.pop(key)))
+    return url, remaining
 
 logger = logging.getLogger(__name__)
 
@@ -690,6 +701,9 @@ class MCPDefinitionService:
             elif isinstance(raw_data, list) and raw_data and isinstance(raw_data[0], dict):
                 params_dict = raw_data[0]
 
+            # Substitute {path_params} and keep remaining as query/body params
+            url, params_dict = _resolve_url_params(url, params_dict)
+
             try:
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     if method == "GET":
@@ -762,12 +776,13 @@ class MCPDefinitionService:
                     else:
                         url = endpoint_url
                     params_dict: Dict[str, Any] = raw_data if isinstance(raw_data, dict) else {}
+                    resolved_url2, query_params2 = _resolve_url_params(url, params_dict)
                     try:
                         async with httpx.AsyncClient(timeout=30.0) as client:
                             if method == "GET":
-                                resp = await client.get(url, params=params_dict, headers=headers)
+                                resp = await client.get(resolved_url2, params=query_params2, headers=headers)
                             else:
-                                resp = await client.post(url, json=params_dict, headers=headers)
+                                resp = await client.post(resolved_url2, json=query_params2, headers=headers)
                             resp.raise_for_status()
                             response_json = resp.json()
                             api_raw_data = response_json if isinstance(response_json, list) else [response_json]
@@ -868,12 +883,13 @@ class MCPDefinitionService:
                     else:
                         url = endpoint_url
                     params_dict: Dict[str, Any] = input_params if isinstance(input_params, dict) else {}
+                    resolved_url, query_params = _resolve_url_params(url, params_dict)
                     try:
                         async with httpx.AsyncClient(timeout=30.0) as client:
                             if method == "GET":
-                                resp = await client.get(url, params=params_dict, headers=headers)
+                                resp = await client.get(resolved_url, params=query_params, headers=headers)
                             else:
-                                resp = await client.post(url, json=params_dict, headers=headers)
+                                resp = await client.post(resolved_url, json=query_params, headers=headers)
                             resp.raise_for_status()
                             response_json = resp.json()
                             api_raw_data = response_json if isinstance(response_json, list) else [response_json]

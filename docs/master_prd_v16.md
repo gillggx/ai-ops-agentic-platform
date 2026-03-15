@@ -1,131 +1,147 @@
-Agentic OS v16: AIOps Application Architecture Spec (含時空溯源引擎)
+Agentic OS v16: AIOps MCP (Model Context Protocol) Registry
 
-本規格書定義 Agentic OS 上層的 AI Ops (智能維運應用) 架構。透過分離「左側的 Control Pane (工程師大腦)」與「右側的 Event Handling Panel (助理處置面板)」，實現廠務知識的系統化。
-本版次 (v16.1) 導入核心靈魂：「Ontology Time Machine (本體時空溯源引擎)」，賦予系統與 AI Agent 穿越過去、完美還原歷史現場的鑑識能力 (Forensic RCA)。
+發布目標：本規格書定義 AI Agent 在執行自動化診斷與維運時，可以呼叫的標準化 API 工具集 (MCPs)。這些 MCP 是 Agent 的「眼睛 (讀取)」、「大腦 (統計)」，以及「雙手 (寫入)」。
+架構原則：摒棄死板的 limit 查詢與硬編碼的警報清單（如 OOC List）。全面導入 「時間區間 (Time Window)」 概念，讓 Agent 能針對特定 Domain 實體 (Lot/Tool/Object) 精準截取歷史片段，並隨時還原現場。
 
-1. 核心靈魂：Ontology Time Machine (本體時空溯源引擎)
+1. 核心時序取證 (High Value - Time-Window Forensics)
 
-在傳統系統中，資料會被覆蓋（例如 Recipe V1 被更新為 V2）。但在本系統中，由於所有 Ontology 關聯皆綁定 eventTime，我們具備了**「時空凍結 (Temporal Context Freeze)」**的能力。
+Agent 用來調閱特定目標歷史軌跡的基礎能力，全面支援 startTime 與 endTime 區間查詢。
 
-還原現場 (Scene Reconstruction)：當使用者輸入一個歷史時間點（如 3 個月前的某個 Lot Process Event），系統的 UI、拓撲圖、關聯資料庫，會瞬間「凍結」並切換回那個毫秒的狀態。
+MCP Name
 
-穿越視角 (Time-Travel Perspective)：
+API Endpoint
 
-看到的 Recipe 不是最新版，而是當時機台正在跑的歷史版本。
+Input Schema
 
-看到的 SPC Chart 會以那天為基準點展開，遮蔽未來的數據。
+用途 (Use Case)
 
-Agent 的診斷邏輯會被強制置入該時空背景進行推論。
+get_process_context
 
-2. 雙角色定義與 UI 實體佈局 (Persona & Layout)
+GET /api/v2/ontology/context
 
-系統的應用層嚴格區分為兩個獨立的工作站，並以不同的 Chat 介面呈現：
+lot_id, step (或 event_time)
 
-👨‍🔬 Persona A: 負責工程師 (PE/EE - Process/Equipment Engineer)
+還原現場。一次取回 Lot+Step 當時的 Recipe/APC/DC/SPC 完整快照。這是 Agent 拿到時序事件後，用來展開細節的最核心 API。
 
-專屬介面：Control Pane (控制面板) —— 固定於畫面左側。
+get_lot_trajectory
 
-時空機應用 (Time-Travel Debugger)：
-PE 可以使用過去的「歷史災難事件」來測試自己剛寫好的 AI Skill。
+GET /api/v2/ontology/trajectory/lot/{lot_id}
 
-PE 輸入指令："將系統切換至 2025-11-15 14:30 的大當機現場，並用我剛寫的 SKILL_OOC_RCA 跑一次，看 Agent 能不能抓出兇手。"
+lot_id,
 
-👷‍♂️ Persona B: 助理工程師 / 輪班技術員 (AE/TE - Assistant Engineer / Technician)
 
-專屬介面：Event Handling Panel (事件處置面板) —— 固定於畫面右側。
 
-時空機應用 (Forensic Investigation)：
-當 AE 接到一筆客訴退貨 (RMA) 的查案任務時。
+start_time (ISO8601),
 
-AE 點擊 Lot 事件，畫面中央的 Topology Map 會泛起一陣藍光（視覺回饋），提示已進入**「歷史還原模式 (Historical Snapshot)」**。
 
-AE 可以在右側 Chat 要求 Agent："幫我調出這批貨在 STEP_045 那天的機台現場，畫出當時的 DC 溫度曲線，並與前後 5 批貨比對。"
 
-3. 核心模組一：Control Pane (PE 左側大腦中心)
+end_time (ISO8601)
 
-這是給工程師打造 Agent 的 Low-Code 儀表板與 Chat 介面。
+批次旅程。查案提問：「這批貨在昨天下午 13:00 到 17:00 之間，到底去過哪些機台？狀態為何？」
 
-Event Overview (全局事件監控)
+get_tool_trajectory
 
-總覽系統所有 Events、未處理狀態，及 Trigger 觸發頻率。
+GET /api/v2/ontology/trajectory/tool/{tool_id}
 
-MCP & Skill Builder (大腦與技能建置)
+tool_id,
 
-設計 MCP：PE 定義 Agent 的工具。特別是必須開放 get_historical_graph_context(eventTime) 這個時空 API 給 Agent。
 
-設計 Skills：將 MCP 封裝成特定的技能。
 
-Trigger Linkage (連動檢查設定)
+start_time,
 
-設定「當 X 事件發生時，自動觸發 Y 技能」。
 
-4. 核心模組二：Event Handling Panel (AE 右側處置面板)
 
-這是專為 AE 快速決策與查案設計的智能助理介面，位於畫面右側。
+end_time
 
-Event Alert & Auto-Diagnostic (事件捕捉與自動診斷)：
+設備履歷。查案提問：「這台機台發生異常前的 2 小時內 (T-2h to T-0)，到底跑過哪些貨？有沒有做過保養？」
 
-異常發生時，右側面板主動彈出 RCA 報告。
+get_object_history
 
-Interactive Time-Machine Chat (時光機對話)：
+GET /api/v2/ontology/history/{type}/{id}
 
-AE 可以要求 Agent 進行時空穿梭。
+object_type, object_id,
 
-💬 AE 指令範例："回到上週三下午的 PM 復機現場，比對當時的 APC 補償與現在有何不同？"
 
-🤖 Agent 回應："🕒 已啟動時空還原。回到 2026-03-04 15:00... 發現當時的 Recipe 是 v4.1，而現在是 v4.2。當時的 APC 補償極限設定較為寬鬆。以下為當時的現場拓撲數據..."
 
-1-Click Disposition (一鍵處置按鈕)：
+start_time,
 
-[ 🔴 HOLD 機台並派發工單 ]
 
-[ 🟢 忽略警告並 Release Lot ]
 
-[ ⚠️ 異常無法判斷，Escalate to PE ]
+end_time
 
-5. AI 技能庫與時光機的結合 (PE 定義的 Skills)
+物件效能。查案提問：「APC-0042 這個演算法模型，在上週三整天的運作表現與補償值為何？」
 
-技能代碼 (由 PE 定義)
+2. 統計與聚合 (High Value - Baseline & Aggregation)
 
-觸發條件 (Event)
+LLM 不擅長處理大量原始數據的數學運算。此類 MCP 提供大數據統計結果，讓 Agent 能判斷「現在的值到底算不算異常」。
 
-賦予 Agent 的時空能力 (MCP)
+MCP Name
 
-Agent 鑑識邏輯 (Forensic Logic)
+API Endpoint
 
-SKILL_RMA_FORENSIC
+Input Schema
 
-收到客訴 Lot ID
+用途 (Use Case)
 
-Time-Travel Context Service
+get_baseline_stats
 
-將系統時鐘撥回加工當下。凍結當時的 Recipe 靜態參數與 APC 狀態，抓出潛在的邊緣失效 (Marginality)。
+GET /api/v2/ontology/stats/baseline
 
-SKILL_OOC_RCA
+tool_id, recipe_id,
 
-收到 SPC OOC 警報
 
-Graph Context Service
 
-鎖定 OOC 當下毫秒，展開關聯圖譜。比對 DC 參數。
+start_time, end_time
 
-SKILL_RECIPE_AUDIT
+Agent 的判斷基準。回傳特定區間內所有 DC 參數的 mean (平均值) 與 std_dev (標準差)。Agent 可藉此計算當前參數是否超過 3-Sigma。
 
-每日凌晨 00:00
+search_semantic_events
 
-Ontology Audit Service
+POST /api/v2/ontology/search
 
-對比昨天與今天的 Recipe Ontology 實體，找出未被授權的版本漂移。
+{"step": "...", "status": "OOC", "tool_id": "..."}
 
-6. 開發與底層驗證規範 (Test Script for Time-Machine)
+交叉比對搜尋。Agent 查案時可提問：「幫我找出過去 24 小時內，同樣在 EQP-01 發生 OOC 的所有 Lot」。
 
-如同團隊 [2026-02-27] 協議，在實作 AIOps 介面前，必須提供測試腳本來驗證「時光機 (Temporal Freeze)」與「雙角色 (Dual-Persona)」的底層邏輯。
+3. 處置與閉環 (High Value - Action & Disposition)
+
+賦予 Agent 寫入權限，讓其查案結果能直接反饋到系統中，實現真正的自動化閉環。
+
+MCP Name
+
+API Endpoint
+
+Input Schema
+
+用途 (Use Case)
+
+execute_disposition
+
+POST /api/v2/aiops/action/disposition
+
+target_type (LOT/TOOL), target_id, action (HOLD/RELEASE), reason
+
+採取行動。Agent 判斷異常嚴重時，可直接呼叫此 MCP 鎖定機台或批次，並附上 Agent 產生的 RCA 報告作為理由。
+
+add_forensic_comment
+
+POST /api/v2/aiops/action/comment
+
+event_id, comment_text
+
+留下線索。Agent 巡檢發現潛在風險，可在此事件貼上 AI 標籤提示人類工程師。
+
+4. 開發與底層驗證規範 (Test Script Requirements)
+
+依照團隊 [2026-02-27] 制定的除錯與驗證協議，後端工程師在實作 API v2.3/v2.4 時，必須確保上述時間區間邏輯能與 Context 還原邏輯完美串接。
 
 開發者行動 (Action Item)：
-請實作一支 Python 腳本 simulate_time_machine.py。該腳本需模擬：
+請撰寫 verify_mcp_time_window_rca.py 腳本，模擬 Agent 完整的思考閉環：
 
-[資料準備] 在 Mock DB 中塞入同一個 Recipe 的兩個版本 (v1 at T-10, v2 at T-0)。
+設定時間區間：定義 T-2h 到 T-0。
 
-[時空穿梭測試] 腳本模擬 Agent 接收到 AE 的指令："查詢 T-5 時間點的現場狀態"。
+呼叫時間軸 API (get_tool_trajectory)：取得 ETCH-LAM-01 在這兩小時內的所有 Events。
 
-[鑑識還原驗證] 腳本呼叫 Ontology Data Services，必須精準印出："🕒 還原 T-5 現場... 取得的 Recipe 版本為 v1 (而非最新的 v2)"，以此證明系統具備真正穿梭過去、凍結歷史的鑑識能力。
+呼叫還原 API (get_process_context)：針對上述拿到的每一個 Event (帶著它的 lot_id 與 step)，跑迴圈呼叫 Context API，把真實的 Process 資料 (DC, APC) 全部印出來。
+
+斷言 (Assert)：確認所有抓出來的事件都嚴格落在指定的 start_time 與 end_time 之間。

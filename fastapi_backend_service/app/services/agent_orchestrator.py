@@ -60,7 +60,7 @@ from app.services.tool_dispatcher import TOOL_SCHEMAS, ToolDispatcher
 
 logger = logging.getLogger(__name__)
 
-MAX_ITERATIONS = 5
+MAX_ITERATIONS = 12
 _SESSION_TTL_HOURS = 24
 _SESSION_MAX_MESSAGES = 12
 _TOOL_RESULT_MAX_CHARS = 6000   # cap for history; live results use _LLM_RESULT_MAX_CHARS
@@ -250,8 +250,15 @@ def _compact_history(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         + "\n</archive_summary>"
     )
 
-    compacted = [{"role": "user", "content": archive_text}] + recent_messages
-    return _clean_history_boundary(compacted)
+    # IMPORTANT: clean recent_messages BEFORE prepending archive.
+    # If recent_messages[0] is user(tool_result), prepending archive would create
+    # two consecutive user messages. Anthropic merges them, making
+    # messages[0].content[1] an orphaned tool_result → 400 error.
+    cleaned_recent = _clean_history_boundary(recent_messages)
+    if not cleaned_recent:
+        return [{"role": "user", "content": archive_text}]
+
+    return [{"role": "user", "content": archive_text}] + cleaned_recent
 
 
 # ── Data Helpers ───────────────────────────────────────────────────────────────
@@ -1020,8 +1027,16 @@ class AgentOrchestrator:
 
                 continue
 
-            # Unexpected stop reason
-            yield {"type": "error", "message": f"意外的 stop_reason: {response.stop_reason}"}
+            # Fallback: treat any non-tool_use stop as end_turn
+            # (handles OpenRouter/Qwen3 returning non-standard finish_reason like "stop")
+            logger.warning("AgentOrchestrator: unexpected stop_reason=%r, treating as end_turn", response.stop_reason)
+            final_text = _extract_text(response.content)
+            if not _plan_extracted:
+                yield _stage_event(2, "complete")
+            yield _stage_event(4, "running")
+            yield {"type": "synthesis", "text": final_text}
+            yield _stage_event(4, "complete")
+            messages.append({"role": "assistant", "content": response.content})
             break
 
         else:
@@ -1083,7 +1098,17 @@ class AgentOrchestrator:
         yield _stage_event(5, "complete")
 
         # Save session with cumulative token count
-        trimmed = _clean_history_boundary(messages[-_SESSION_MAX_MESSAGES:])
+        # Strip ephemeral hidden_data_profile injections before saving — they are
+        # single-turn context only and cause consecutive-user-message issues on reload.
+        persistable = [
+            m for m in messages
+            if not (
+                m.get("role") == "user"
+                and isinstance(m.get("content"), str)
+                and m["content"].startswith("<hidden_data_profile>")
+            )
+        ]
+        trimmed = _clean_history_boundary(persistable[-_SESSION_MAX_MESSAGES:])
         await self._save_session(session_id, trimmed, _session_input_tokens)
         yield {"type": "done", "session_id": session_id}
 

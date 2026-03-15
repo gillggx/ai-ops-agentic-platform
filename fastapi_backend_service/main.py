@@ -190,84 +190,22 @@ _MOCK_DATA_SUBJECTS = [
 
 
 _ONTOLOGY_SYSTEM_MCPS = [
-    {
-        "name": "OntologySim — 批次清單",
-        "description": "OntologySimulator MES：查詢所有批次狀態（Waiting / Processing / Finished）",
-        "api_config": {
-            "endpoint_url": "http://localhost:8001/api/v1/lots",
-            "method": "GET",
-            "headers": {},
-        },
-        "input_schema": {
-            "fields": [
-                {"name": "status", "type": "string", "description": "篩選批次狀態（可選：Waiting / Processing / Finished）", "required": False},
-            ]
-        },
-    },
-    {
-        "name": "OntologySim — 機台狀態",
-        "description": "OntologySimulator MES：查詢全部 10 台機台的即時狀態（Idle / Busy / Hold）",
-        "api_config": {
-            "endpoint_url": "http://localhost:8001/api/v1/tools",
-            "method": "GET",
-            "headers": {},
-        },
-        "input_schema": {"fields": []},
-    },
-    {
-        "name": "OntologySim — 事件時間線",
-        "description": "OntologySimulator MES：查詢製程事件時間線。dedup=true（預設）每步驟只回傳一筆 ProcessEnd，limit 即為唯一步驟數。",
-        "api_config": {
-            "endpoint_url": "http://localhost:8001/api/v1/events",
-            "method": "GET",
-            "headers": {},
-        },
-        "input_schema": {
-            "fields": [
-                {"name": "toolID", "type": "string",  "description": "機台 ID（可選，e.g. EQP-01）", "required": False},
-                {"name": "lotID",  "type": "string",  "description": "批次 ID（可選，e.g. LOT-0001）", "required": False},
-                {"name": "limit",  "type": "integer", "description": "回傳唯一步驟數上限（預設 50，dedup=true 時每步驟 1 筆）", "required": False},
-                {"name": "dedup",  "type": "boolean", "description": "去重複：true（預設）= 每 (lot, step) 只回一筆 ProcessEnd；false = 返回全部原始事件", "required": False},
-            ]
-        },
-    },
-    {
-        "name": "OntologySim — 物件歷史",
-        "description": "OntologySimulator 時間機器：查詢 APC/DC/SPC/Recipe 物件的歷史快照序列",
-        "api_config": {
-            "endpoint_url": "http://localhost:8001/api/v1/analytics/history",
-            "method": "GET",
-            "headers": {},
-        },
-        "input_schema": {
-            "fields": [
-                {"name": "targetID",    "type": "string", "description": "批次或機台 ID（e.g. LOT-0001 / EQP-01）", "required": True},
-                {"name": "objectName",  "type": "string", "description": "物件類型：DC / APC / SPC / RECIPE", "required": True},
-                {"name": "limit",       "type": "integer","description": "回傳快照筆數（預設 20）", "required": False},
-            ]
-        },
-    },
-    {
-        "name": "OntologySim — 時間機器查詢",
-        "description": "OntologySimulator 時間機器：給定時間戳記、步驟、物件，回傳當下的完整快照狀態",
-        "api_config": {
-            "endpoint_url": "http://localhost:8001/api/v1/context/query",
-            "method": "GET",
-            "headers": {},
-        },
-        "input_schema": {
-            "fields": [
-                {"name": "eventTime",   "type": "string", "description": "查詢時間點 (ISO 8601，e.g. 2025-01-04T16:21:00)", "required": True},
-                {"name": "targetID",    "type": "string", "description": "批次或機台 ID", "required": True},
-                {"name": "objectName",  "type": "string", "description": "物件類型：DC / APC / SPC / RECIPE", "required": True},
-                {"name": "step",        "type": "string", "description": "步驟代碼（e.g. STEP_042）", "required": False},
-            ]
-        },
-    },
-    # ── v2 System MCPs (time-window forensics, v16 spec) ──────────────────────
+    # ── v2 Ontology System MCPs ────────────────────────────────────────────────
     {
         "name": "get_process_context",
-        "description": "還原製程現場。一次取回指定 Lot+Step 的 Recipe/APC/DC/SPC 完整快照與 LLM 摘要。Agent 拿到事件後用此 MCP 展開細節。",
+        "description": (
+            "【製程現場完整快照】給定一個 lot_id + step，還原當下的完整製程情境。\n"
+            "回傳結構：{root, tool, recipe, apc, dc, spc, summary}\n"
+            "- root.spc_status: 'PASS' 或 'OOC'（最重要的診斷信號）\n"
+            "- root.in_progress: true 表示該步驟尚未完成（dc/spc 為 null）\n"
+            "- recipe.parameters: Recipe 參數快照（ProcessStart 時刻）\n"
+            "- apc.parameters: APC 模型參數，含 rf_power_bias（ProcessStart 時刻）\n"
+            "- dc.parameters: ~30 個 DC 量測值，如 chamber_pressure, throttle_position_pct（ProcessEnd 時刻）\n"
+            "- spc.charts: xbar_chart/r_chart/s_chart，每個有 status=OOC/PASS\n"
+            "- summary: 一句 LLM 可直接引用的文字摘要\n"
+            "event_time: 可選，填入 get_lot_trajectory 回傳的 start_time，用來鎖定特定 cycle（同一批次同一步驟有多次時使用）\n"
+            "使用時機：已知 lot_id + step，需要看完整物件快照 → 此 MCP。"
+        ),
         "api_config": {
             "endpoint_url": "http://localhost:8001/api/v2/ontology/context",
             "method": "GET",
@@ -275,15 +213,26 @@ _ONTOLOGY_SYSTEM_MCPS = [
         },
         "input_schema": {
             "fields": [
-                {"name": "lot_id",     "type": "string", "description": "批次 ID（e.g. LOT-0001）", "required": True},
-                {"name": "step",       "type": "string", "description": "步驟代碼（e.g. STEP_047）", "required": True},
-                {"name": "event_time", "type": "string", "description": "製程開始時間 ISO8601，用於鎖定特定 cycle（可選）", "required": False},
+                {"name": "lot_id",     "type": "string", "description": "批次 ID，格式 LOT-XXXX，e.g. LOT-0001", "required": True},
+                {"name": "step",       "type": "string", "description": "步驟代碼，格式 STEP_XXX，e.g. STEP_005", "required": True},
+                {"name": "event_time", "type": "string", "description": "ProcessStart 時間（ISO8601），用於多 cycle 時鎖定特定一次，e.g. 2026-03-15T05:55:16（可選）", "required": False},
             ]
         },
     },
     {
         "name": "get_lot_trajectory",
-        "description": "批次旅程。查詢指定批次走過的所有步驟、機台、SPC 狀態。用途：這批貨在哪裡發生 OOC？",
+        "description": (
+            "【批次製程路徑】查詢一個批次走過的所有步驟序列。\n"
+            "回傳結構：{lot_id, total_steps, steps: [{step, tool_id, start_time, end_time, recipe_id, apc_id, spc_status, dc_snapshot_id, spc_snapshot_id}]}\n"
+            "- steps 已去重複（每個 step 一筆，合併 ProcessStart + ProcessEnd）\n"
+            "- spc_status: 'PASS'、'OOC' 或 null（null 表示步驟進行中，尚無 ProcessEnd）\n"
+            "- start_time/end_time: ISO8601 字串，可帶入 get_process_context 的 event_time\n"
+            "使用時機：\n"
+            "  ① 這批貨在哪些步驟發生 OOC？→ 過濾 spc_status='OOC'\n"
+            "  ② 這批貨跑了哪台機台？→ 看 tool_id\n"
+            "  ③ 時間區間過濾：start_time/end_time 填 ISO8601 字串\n"
+            "  ④ 只要最近 N 步：填 limit"
+        ),
         "api_config": {
             "endpoint_url": "http://localhost:8001/api/v2/ontology/trajectory/lot/{lot_id}",
             "method": "GET",
@@ -291,30 +240,33 @@ _ONTOLOGY_SYSTEM_MCPS = [
         },
         "input_schema": {
             "fields": [
-                {"name": "lot_id", "type": "string", "description": "批次 ID（e.g. LOT-0001）", "required": True},
-            ]
-        },
-    },
-    {
-        "name": "get_lot_trajectory",
-        "description": "批次旅程。查詢指定批次的完整製程路徑（步驟序列、機台、Recipe、SPC 結果）。支援時間區間過濾。",
-        "api_config": {
-            "endpoint_url": "http://localhost:8001/api/v2/ontology/trajectory/lot/{lot_id}",
-            "method": "GET",
-            "headers": {},
-        },
-        "input_schema": {
-            "fields": [
-                {"name": "lot_id",     "type": "string",  "description": "批次 ID（e.g. LOT-0001）", "required": True},
-                {"name": "start_time", "type": "string",  "description": "查詢區間起始（ISO8601，可選）", "required": False},
-                {"name": "end_time",   "type": "string",  "description": "查詢區間結束（ISO8601，可選）", "required": False},
-                {"name": "limit",      "type": "integer", "description": "回傳步驟數上限（預設 500）", "required": False},
+                {"name": "lot_id",     "type": "string",  "description": "批次 ID，格式 LOT-XXXX，e.g. LOT-0001", "required": True},
+                {"name": "start_time", "type": "string",  "description": "查詢時間窗口起始（ISO8601），e.g. 2026-03-15T05:00:00（可選）", "required": False},
+                {"name": "end_time",   "type": "string",  "description": "查詢時間窗口結束（ISO8601），e.g. 2026-03-15T12:00:00（可選）", "required": False},
+                {"name": "limit",      "type": "integer", "description": "回傳步驟筆數上限，預設 500（可選）", "required": False},
             ]
         },
     },
     {
         "name": "get_tool_trajectory",
-        "description": "設備履歷。查詢指定機台最近處理過的批次與 SPC 結果。支援時間區間過濾。用途：這台機台異常前跑過哪些貨？",
+        "description": (
+            "【機台批次履歷】查詢一台機台最近處理過的所有批次與步驟。\n"
+            "回傳結構：{tool_id, tool_info, total_batches, batches: [{lot_id, step, start_time, end_time, recipe_id, apc_id, spc_status, dc_snapshot_id, spc_snapshot_id}]}\n"
+            "- 每筆 batch 已含 apc_id + spc_status，**不需要再呼叫其他 API 就能直接統計 APC 與 OOC 的關聯**\n"
+            "- spc_status: 'PASS'、'OOC' 或 null（進行中）\n"
+            "\n"
+            "✅ 正確使用流程（APC OOC 分析）：\n"
+            "  1. 呼叫本 API 取得 batches 清單\n"
+            "  2. 直接從 batches 過濾 spc_status='OOC'，統計各 apc_id 出現次數\n"
+            "  3. 排序得出「OOC 最多的 APC 模型」→ 不需要追查每個 lot\n"
+            "\n"
+            "❌ 錯誤用法：拿到 batches 後再逐一呼叫 get_lot_trajectory 查每個 lot（沒必要，資料已在 batches 裡）\n"
+            "\n"
+            "其他使用時機：\n"
+            "  ① 這台機台最近跑過哪些貨？→ 直接呼叫，不加時間\n"
+            "  ② 某時段的 OOC 率？→ 加 start_time/end_time\n"
+            "  ③ 異常前最後幾批：加 limit，結果已按時間倒序排列（最新在前）"
+        ),
         "api_config": {
             "endpoint_url": "http://localhost:8001/api/v2/ontology/trajectory/tool/{tool_id}",
             "method": "GET",
@@ -322,16 +274,24 @@ _ONTOLOGY_SYSTEM_MCPS = [
         },
         "input_schema": {
             "fields": [
-                {"name": "tool_id",    "type": "string",  "description": "機台 ID（e.g. EQP-01）", "required": True},
-                {"name": "start_time", "type": "string",  "description": "查詢區間起始（ISO8601，可選）", "required": False},
-                {"name": "end_time",   "type": "string",  "description": "查詢區間結束（ISO8601，可選）", "required": False},
-                {"name": "limit",      "type": "integer", "description": "回傳批次數上限（預設 200）", "required": False},
+                {"name": "tool_id",    "type": "string",  "description": "機台 ID，格式 EQP-XX，e.g. EQP-01", "required": True},
+                {"name": "start_time", "type": "string",  "description": "查詢時間窗口起始（ISO8601），可選", "required": False},
+                {"name": "end_time",   "type": "string",  "description": "查詢時間窗口結束（ISO8601），可選", "required": False},
+                {"name": "limit",      "type": "integer", "description": "回傳批次筆數上限，預設 200（可選）", "required": False},
             ]
         },
     },
     {
         "name": "get_tool_step_trajectory",
-        "description": "機台+步驟查詢。查詢特定機台上，某步驟被哪些批次跑過，以及 SPC 結果。用途：EQP-01 的 STEP_042 OOC 率如何？",
+        "description": (
+            "【機台×步驟交叉查詢】查詢某台機台上，特定步驟跑過哪些批次，並列出每批次的 SPC 結果。\n"
+            "回傳結構：{tool_id, step, total_batches, batches: [{lot_id, start_time, end_time, recipe_id, apc_id, spc_status, dc_snapshot_id, spc_snapshot_id}], summary}\n"
+            "- summary 直接寫出 OOC 數量，e.g. 'Tool EQP-01, Step STEP_002: 2 lot(s) found. OOC: 1 / 2.'\n"
+            "使用時機：\n"
+            "  ① 某台機台在某步驟的良率/OOC 率 → 直接看 summary\n"
+            "  ② 找出該步驟所有 OOC 批次 → 過濾 spc_status='OOC'\n"
+            "  ③ 跨時段比較：加 start_time/end_time"
+        ),
         "api_config": {
             "endpoint_url": "http://localhost:8001/api/v2/ontology/trajectory/tool/{tool_id}/step/{step}",
             "method": "GET",
@@ -339,17 +299,29 @@ _ONTOLOGY_SYSTEM_MCPS = [
         },
         "input_schema": {
             "fields": [
-                {"name": "tool_id",    "type": "string",  "description": "機台 ID（e.g. EQP-01）", "required": True},
-                {"name": "step",       "type": "string",  "description": "步驟代碼（e.g. STEP_042）", "required": True},
-                {"name": "start_time", "type": "string",  "description": "查詢區間起始（ISO8601，可選）", "required": False},
-                {"name": "end_time",   "type": "string",  "description": "查詢區間結束（ISO8601，可選）", "required": False},
-                {"name": "limit",      "type": "integer", "description": "回傳批次數上限（預設 200）", "required": False},
+                {"name": "tool_id",    "type": "string",  "description": "機台 ID，格式 EQP-XX，e.g. EQP-01", "required": True},
+                {"name": "step",       "type": "string",  "description": "步驟代碼，格式 STEP_XXX，e.g. STEP_002", "required": True},
+                {"name": "start_time", "type": "string",  "description": "查詢時間窗口起始（ISO8601），可選", "required": False},
+                {"name": "end_time",   "type": "string",  "description": "查詢時間窗口結束（ISO8601），可選", "required": False},
+                {"name": "limit",      "type": "integer", "description": "回傳批次筆數上限，預設 200（可選）", "required": False},
             ]
         },
     },
     {
         "name": "get_object_history",
-        "description": "物件效能歷史。查詢 APC 模型、Recipe、DC、SPC 物件的歷史快照序列。支援時間區間過濾，了解長期趨勢。",
+        "description": (
+            "【物件歷史快照序列】查詢一個物件在不同時間點的參數快照，追蹤長期趨勢。\n"
+            "回傳結構：{object_type, object_id, total_records, history: [{snapshot_id, event_time, lot_id, tool_id, step, spc_status, parameters: {}}]}\n"
+            "object_type 與 object_id 的對應：\n"
+            "  - APC：object_id 格式 APC-XXX（e.g. APC-005），同一個 APC 模型被多批次使用，history 有多筆\n"
+            "       parameters 含：rf_power_bias, model_intercept 等 APC 調整量，用於追蹤 APC 漂移\n"
+            "  - RECIPE：object_id 格式 RCP-XXX（e.g. RCP-018），追蹤 Recipe 參數修改歷史\n"
+            "  - DC：object_id 格式 DC-LOT-XXXX-STEP_XXX-timestamp，每次製程唯一，通常只有 1 筆\n"
+            "       parameters 含：chamber_pressure, foreline_pressure 等 30 個量測值\n"
+            "  - SPC：object_id 格式 SPC-LOT-XXXX-STEP_XXX-timestamp，每次製程唯一，通常只有 1 筆\n"
+            "⚠️ APC/RECIPE 的 object_id 可從 get_lot_trajectory 或 get_process_context 的 apc_id/recipe_id 欄位取得\n"
+            "⚠️ DC/SPC 的 object_id 唯一對應一次製程，要追蹤趨勢應改用 get_tool_trajectory + get_process_context"
+        ),
         "api_config": {
             "endpoint_url": "http://localhost:8001/api/v2/ontology/history/{object_type}/{object_id}",
             "method": "GET",
@@ -357,17 +329,26 @@ _ONTOLOGY_SYSTEM_MCPS = [
         },
         "input_schema": {
             "fields": [
-                {"name": "object_type", "type": "string",  "description": "物件類型：APC / DC / SPC / RECIPE", "required": True},
-                {"name": "object_id",   "type": "string",  "description": "物件 ID（e.g. APC-047）", "required": True},
-                {"name": "start_time",  "type": "string",  "description": "查詢區間起始（ISO8601，可選）", "required": False},
-                {"name": "end_time",    "type": "string",  "description": "查詢區間結束（ISO8601，可選）", "required": False},
-                {"name": "limit",       "type": "integer", "description": "回傳筆數上限（預設 200）", "required": False},
+                {"name": "object_type", "type": "string",  "description": "物件類型：APC / DC / SPC / RECIPE（大寫）", "required": True},
+                {"name": "object_id",   "type": "string",  "description": "物件 ID，e.g. APC-005 或 RCP-018（從 get_lot_trajectory 的 apc_id/recipe_id 欄位取得）", "required": True},
+                {"name": "start_time",  "type": "string",  "description": "查詢時間窗口起始（ISO8601），可選", "required": False},
+                {"name": "end_time",    "type": "string",  "description": "查詢時間窗口結束（ISO8601），可選", "required": False},
+                {"name": "limit",       "type": "integer", "description": "回傳筆數上限，預設 200（可選）", "required": False},
             ]
         },
     },
     {
         "name": "get_baseline_stats",
-        "description": "DC 參數基準統計。回傳指定機台在時間區間內的 DC 參數 mean/std_dev/3-sigma 控制限。Agent 用此判斷當前量測值是否異常。",
+        "description": (
+            "【DC 參數基準統計】計算某台機台歷史上的 DC 參數統計基準（mean/std_dev/3σ 控制限）。\n"
+            "回傳結構：{tool_id, sample_count, param_count, stats: {參數名: {mean, std_dev, min, max, ucl_3sigma, lcl_3sigma}}, summary}\n"
+            "- stats 含 ~30 個 DC 參數，如 chamber_pressure, throttle_position_pct 等\n"
+            "- ucl_3sigma = mean + 3×std_dev，lcl_3sigma = mean - 3×std_dev\n"
+            "使用時機：\n"
+            "  ① 拿到某批次的 DC 量測值後，與此基準比較判斷是否異常\n"
+            "  ② 建立 SPC 控制圖的管制界限\n"
+            "  ③ 搭配 recipe_id 過濾，只統計特定 Recipe 的歷史數據"
+        ),
         "api_config": {
             "endpoint_url": "http://localhost:8001/api/v2/ontology/stats/baseline",
             "method": "GET",
@@ -375,16 +356,28 @@ _ONTOLOGY_SYSTEM_MCPS = [
         },
         "input_schema": {
             "fields": [
-                {"name": "tool_id",    "type": "string", "description": "機台 ID（e.g. EQP-01）", "required": True},
-                {"name": "recipe_id",  "type": "string", "description": "Recipe ID（可選，e.g. RCP-003）", "required": False},
-                {"name": "start_time", "type": "string", "description": "統計區間起始（ISO8601）", "required": False},
-                {"name": "end_time",   "type": "string", "description": "統計區間結束（ISO8601）", "required": False},
+                {"name": "tool_id",    "type": "string", "description": "機台 ID，格式 EQP-XX，e.g. EQP-01", "required": True},
+                {"name": "recipe_id",  "type": "string", "description": "只統計使用此 Recipe 的批次，格式 RCP-XXX，e.g. RCP-013（可選）", "required": False},
+                {"name": "start_time", "type": "string", "description": "統計區間起始（ISO8601），可選", "required": False},
+                {"name": "end_time",   "type": "string", "description": "統計區間結束（ISO8601），可選", "required": False},
             ]
         },
     },
     {
         "name": "search_ooc_events",
-        "description": "跨批次 OOC 事件搜尋。查詢符合條件的 SPC OOC 事件清單。用途：過去 24h EQP-01 有哪些批次 OOC？",
+        "description": (
+            "【跨批次 OOC 事件搜尋】快速搜尋符合條件的 SPC 異常事件，支援多維度過濾。\n"
+            "⚠️ 此 MCP 使用 POST 方法，所有參數放在 JSON body 中。\n"
+            "回傳結構：{total, ooc_count, pass_count, summary, events: [{event_id, lot_id, tool_id, step, spc_status, event_time, dc_snapshot_id, spc_snapshot_id}]}\n"
+            "- summary 已整理好統計摘要，可直接引用\n"
+            "- events 按 event_time 倒序（最新在前）\n"
+            "使用時機（所有參數均可選，全空則回傳最新 50 筆）：\n"
+            "  ① 某機台的全部 OOC：填 tool_id='EQP-01', status='OOC'\n"
+            "  ② 某批次的所有異常：填 lot_id='LOT-0002'\n"
+            "  ③ 某步驟跨機台的 OOC：填 step='STEP_072'\n"
+            "  ④ 時段內異常：填 start_time/end_time\n"
+            "  ⑤ 拿到 event 後，用 dc_snapshot_id 或 lot_id+step 進一步呼叫 get_process_context 展開細節"
+        ),
         "api_config": {
             "endpoint_url": "http://localhost:8001/api/v2/ontology/search",
             "method": "POST",
@@ -392,13 +385,86 @@ _ONTOLOGY_SYSTEM_MCPS = [
         },
         "input_schema": {
             "fields": [
-                {"name": "tool_id",    "type": "string", "description": "機台 ID（可選）", "required": False},
-                {"name": "lot_id",     "type": "string", "description": "批次 ID（可選）", "required": False},
-                {"name": "step",       "type": "string", "description": "步驟代碼（可選）", "required": False},
-                {"name": "status",     "type": "string", "description": "SPC 狀態：OOC 或 PASS（可選）", "required": False},
-                {"name": "start_time", "type": "string", "description": "查詢區間起始（ISO8601）", "required": False},
-                {"name": "end_time",   "type": "string", "description": "查詢區間結束（ISO8601）", "required": False},
-                {"name": "limit",      "type": "integer","description": "回傳筆數上限（預設 50）", "required": False},
+                {"name": "tool_id",    "type": "string",  "description": "機台 ID（可選），e.g. EQP-01", "required": False},
+                {"name": "lot_id",     "type": "string",  "description": "批次 ID（可選），e.g. LOT-0002", "required": False},
+                {"name": "step",       "type": "string",  "description": "步驟代碼（可選），e.g. STEP_072", "required": False},
+                {"name": "status",     "type": "string",  "description": "SPC 狀態過濾：'OOC' 或 'PASS'（可選）", "required": False},
+                {"name": "start_time", "type": "string",  "description": "查詢時間窗口起始（ISO8601），可選", "required": False},
+                {"name": "end_time",   "type": "string",  "description": "查詢時間窗口結束（ISO8601），可選", "required": False},
+                {"name": "limit",      "type": "integer", "description": "回傳筆數上限，預設 50（可選）", "required": False},
+            ]
+        },
+    },
+    {
+        "name": "get_tools_status_overview",
+        "description": (
+            "【機台清單與狀態總覽】一次取得廠內所有機台（EQP-01～EQP-10）的即時狀態。\n"
+            "\n"
+            "回傳欄位說明：\n"
+            "- tool_id: 機台代碼（EQP-01 ~ EQP-10）\n"
+            "- current_status: 機台目前狀態 — 'Busy'（有批次在跑）或 'Idle'（閒置）\n"
+            "- current_lot: 若 Busy，顯示目前正在處理的批次 ID；若 Idle 則為 null\n"
+            "- last_spc_status: 最近一批完成後的 SPC 結果 — 'PASS'、'OOC'、或 'N/A'\n"
+            "- recent_ooc_count: 最近 N 批中 SPC = OOC 的次數（N 由 recent_batches 參數決定，預設 5）\n"
+            "- last_activity: 最後一次 ProcessEnd 時間（ISO8601），代表最後完成批次的時間\n"
+            "- total_batches_processed: 該機台歷史上處理的批次總數\n"
+            "\n"
+            "典型使用情境：\n"
+            "① 「哪些機台是閒置的？」→ 直接查詢，過濾 current_status='Idle'\n"
+            "② 「哪些機台最近有 OOC？」→ 過濾 last_spc_status='OOC' 或 recent_ooc_count > 0\n"
+            "③ 「機台清單和狀態」→ 直接呼叫，無需任何參數\n"
+            "④ 快速判斷整體廠況健康度前的第一步查詢\n"
+            "\n"
+            "⚠️ 此 API 不需要任何必填參數，直接呼叫即可取得所有機台狀態。\n"
+            "⚠️ 若需要某機台的詳細製程歷史，請接著呼叫 get_tool_trajectory（帶入 tool_id）。"
+        ),
+        "api_config": {
+            "endpoint_url": "http://localhost:8001/api/v2/ontology/tools/status",
+            "method": "GET",
+            "headers": {},
+        },
+        "input_schema": {
+            "fields": [
+                {"name": "recent_batches", "type": "integer", "description": "每台機台統計最近幾批的 OOC 情況，預設 5，最大 20（可選）", "required": False},
+            ]
+        },
+    },
+    {
+        "name": "get_dc_timeseries",
+        "description": (
+            "【DC 參數時間序列】取得特定機台 × 站點的 DC 製程參數時間序列，專為 SPC Chart 設計。\n"
+            "\n"
+            "每個資料點 = 一次 ProcessEnd（一批貨跑完這個站），時間順序由舊到新。\n"
+            "\n"
+            "回傳內容：\n"
+            "- series: { 參數名: [{t, lot_id, value}, ...] } — 每個參數的時間序列值\n"
+            "- baseline: { 參數名: {mean, std_dev, ucl_3sigma, lcl_3sigma} } — 同窗口計算的管制界限\n"
+            "- spc_status_series: [{t, lot_id, spc_status}] — 每個時間點是否 OOC，用於標記異常點\n"
+            "- param_names: 所有可用的 DC 參數名稱清單\n"
+            "- sample_count: 回傳的資料點數\n"
+            "\n"
+            "典型使用情境：\n"
+            "① 畫 SPC 趨勢圖：用 series[param] 的 value + baseline[param] 的 ucl/lcl 畫折線圖\n"
+            "② 偵測連續 OOC：分析 spc_status_series 找連續幾點 status=OOC\n"
+            "③ 參數偏移診斷：比較最近幾點的 value 是否持續偏向 UCL 或 LCL 方向\n"
+            "④ 多參數比較：同時看多個 DC 參數的走勢，找出異常根因\n"
+            "\n"
+            "⚠️ 必填：tool_id（機台）和 step（站點）\n"
+            "⚠️ 可選：params（只取指定參數，逗號分隔，e.g. 'chamber_pressure,cf4_flow_sccm'）；limit（預設 50 筆）\n"
+            "⚠️ 與 get_process_context 的差別：get_process_context 是「單批單點」的完整快照；"
+            "get_dc_timeseries 是「多批時間序列」，只有 DC 數值，適合趨勢分析和 SPC 圖表。"
+        ),
+        "api_config": {
+            "endpoint_url": "http://localhost:8001/api/v2/ontology/timeseries/tool/{tool_id}/step/{step}",
+            "method": "GET",
+            "headers": {},
+        },
+        "input_schema": {
+            "fields": [
+                {"name": "tool_id", "type": "string",  "description": "機台代碼，e.g. EQP-01", "required": True},
+                {"name": "step",    "type": "string",  "description": "站點代碼，e.g. STEP_072", "required": True},
+                {"name": "params",  "type": "string",  "description": "要取的 DC 參數名稱（逗號分隔），e.g. 'chamber_pressure,cf4_flow_sccm'，不填則回傳全部（可選）", "required": False},
+                {"name": "limit",   "type": "integer", "description": "回傳最近幾筆製程記錄，預設 50，最大 500（可選）", "required": False},
             ]
         },
     },
@@ -598,7 +664,8 @@ async def _seed_data() -> None:
                         _MCPModel.mcp_type == "system",
                     )
                 )
-                if result.scalar_one_or_none() is None:
+                existing_mcp = result.scalar_one_or_none()
+                if existing_mcp is None:
                     sys_obj = _MCPModel(
                         name=spec["name"],
                         description=spec["description"],
@@ -610,6 +677,12 @@ async def _seed_data() -> None:
                     )
                     db.add(sys_obj)
                     logger.info("Seeded OntologySim system MCP: %s", spec["name"])
+                else:
+                    # Always sync description and schemas from canonical spec
+                    existing_mcp.description = spec["description"]
+                    existing_mcp.api_config = _json.dumps(spec["api_config"], ensure_ascii=False)
+                    existing_mcp.input_schema = _json.dumps(spec["input_schema"], ensure_ascii=False)
+                    logger.info("Updated OntologySim system MCP: %s", spec["name"])
         except Exception as _seed_err2:
             logger.warning("OntologySim MCP seeding skipped: %s", _seed_err2)
             await db.rollback()
