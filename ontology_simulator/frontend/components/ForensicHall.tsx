@@ -46,7 +46,7 @@ export default function ForensicHall() {
     const stepNum = parseInt((step ?? "STEP_000").split("_")[1] ?? "0");
     return {
       id:              toolID,
-      stage:           "STAGE_PROCESS",
+      stage:           "STAGE_DONE_OOC",
       lotId:           lotID,
       recipe:          null,
       step,
