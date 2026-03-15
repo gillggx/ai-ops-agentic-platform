@@ -263,6 +263,105 @@ _ONTOLOGY_SYSTEM_MCPS = [
             ]
         },
     },
+    # ── v2 System MCPs (time-window forensics, v16 spec) ──────────────────────
+    {
+        "name": "get_process_context",
+        "description": "還原製程現場。一次取回指定 Lot+Step 的 Recipe/APC/DC/SPC 完整快照與 LLM 摘要。Agent 拿到事件後用此 MCP 展開細節。",
+        "api_config": {
+            "endpoint_url": "http://localhost:8001/api/v2/ontology/context",
+            "method": "GET",
+            "headers": {},
+        },
+        "input_schema": {
+            "fields": [
+                {"name": "lot_id",     "type": "string", "description": "批次 ID（e.g. LOT-0001）", "required": True},
+                {"name": "step",       "type": "string", "description": "步驟代碼（e.g. STEP_047）", "required": True},
+                {"name": "event_time", "type": "string", "description": "製程開始時間 ISO8601，用於鎖定特定 cycle（可選）", "required": False},
+            ]
+        },
+    },
+    {
+        "name": "get_lot_trajectory",
+        "description": "批次旅程。查詢指定批次走過的所有步驟、機台、SPC 狀態。用途：這批貨在哪裡發生 OOC？",
+        "api_config": {
+            "endpoint_url": "http://localhost:8001/api/v2/ontology/trajectory/lot/{lot_id}",
+            "method": "GET",
+            "headers": {},
+        },
+        "input_schema": {
+            "fields": [
+                {"name": "lot_id", "type": "string", "description": "批次 ID（e.g. LOT-0001）", "required": True},
+            ]
+        },
+    },
+    {
+        "name": "get_tool_trajectory",
+        "description": "設備履歷。查詢指定機台最近處理過的批次與 SPC 結果。用途：這台機台異常前跑過哪些貨？",
+        "api_config": {
+            "endpoint_url": "http://localhost:8001/api/v2/ontology/trajectory/tool/{tool_id}",
+            "method": "GET",
+            "headers": {},
+        },
+        "input_schema": {
+            "fields": [
+                {"name": "tool_id", "type": "string", "description": "機台 ID（e.g. EQP-01）", "required": True},
+                {"name": "limit",   "type": "integer","description": "回傳筆數上限（預設 50）", "required": False},
+            ]
+        },
+    },
+    {
+        "name": "get_object_history",
+        "description": "物件效能歷史。查詢 APC 模型、Recipe、DC、SPC 物件的歷史快照序列，了解長期趨勢。",
+        "api_config": {
+            "endpoint_url": "http://localhost:8001/api/v2/ontology/history/{object_type}/{object_id}",
+            "method": "GET",
+            "headers": {},
+        },
+        "input_schema": {
+            "fields": [
+                {"name": "object_type", "type": "string", "description": "物件類型：APC / DC / SPC / RECIPE", "required": True},
+                {"name": "object_id",   "type": "string", "description": "物件 ID（e.g. APC-047）", "required": True},
+                {"name": "limit",       "type": "integer","description": "回傳筆數上限（預設 50）", "required": False},
+            ]
+        },
+    },
+    {
+        "name": "get_baseline_stats",
+        "description": "DC 參數基準統計。回傳指定機台在時間區間內的 DC 參數 mean/std_dev/3-sigma 控制限。Agent 用此判斷當前量測值是否異常。",
+        "api_config": {
+            "endpoint_url": "http://localhost:8001/api/v2/ontology/stats/baseline",
+            "method": "GET",
+            "headers": {},
+        },
+        "input_schema": {
+            "fields": [
+                {"name": "tool_id",    "type": "string", "description": "機台 ID（e.g. EQP-01）", "required": True},
+                {"name": "recipe_id",  "type": "string", "description": "Recipe ID（可選，e.g. RCP-003）", "required": False},
+                {"name": "start_time", "type": "string", "description": "統計區間起始（ISO8601）", "required": False},
+                {"name": "end_time",   "type": "string", "description": "統計區間結束（ISO8601）", "required": False},
+            ]
+        },
+    },
+    {
+        "name": "search_ooc_events",
+        "description": "跨批次 OOC 事件搜尋。查詢符合條件的 SPC OOC 事件清單。用途：過去 24h EQP-01 有哪些批次 OOC？",
+        "api_config": {
+            "endpoint_url": "http://localhost:8001/api/v2/ontology/search",
+            "method": "POST",
+            "headers": {"Content-Type": "application/json"},
+        },
+        "input_schema": {
+            "fields": [
+                {"name": "tool_id",    "type": "string", "description": "機台 ID（可選）", "required": False},
+                {"name": "lot_id",     "type": "string", "description": "批次 ID（可選）", "required": False},
+                {"name": "step",       "type": "string", "description": "步驟代碼（可選）", "required": False},
+                {"name": "status",     "type": "string", "description": "SPC 狀態：OOC 或 PASS（可選）", "required": False},
+                {"name": "start_time", "type": "string", "description": "查詢區間起始（ISO8601）", "required": False},
+                {"name": "end_time",   "type": "string", "description": "查詢區間結束（ISO8601）", "required": False},
+                {"name": "limit",      "type": "integer","description": "回傳筆數上限（預設 50）", "required": False},
+            ]
+        },
+    },
 ]
 
 
