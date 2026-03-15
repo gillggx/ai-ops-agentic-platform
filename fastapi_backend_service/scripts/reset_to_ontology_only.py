@@ -27,9 +27,11 @@ from sqlalchemy.orm import sessionmaker
 
 
 async def reset():
-    # ── DB URL ────────────────────────────────────────────────────────────────
-    db_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./dev.db")
-    # FastAPI app uses psycopg2-style URLs in env but SQLAlchemy async needs asyncpg
+    # ── DB URL — read from app config (same source as production server) ─────
+    from app.config import get_settings
+    _settings = get_settings()
+    db_url = str(_settings.DATABASE_URL)
+    # SQLAlchemy async requires asyncpg driver for PostgreSQL
     db_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
     db_url = db_url.replace("postgres://", "postgresql+asyncpg://")
 
@@ -50,10 +52,13 @@ async def reset():
     canonical_names = {s["name"] for s in _ONTOLOGY_SYSTEM_MCPS}
 
     async with Session() as db:
-        # Count before
+        # Count before (skip tables that may not exist yet)
         for tbl in ("generated_events", "routine_checks", "skill_definitions", "mcp_definitions"):
-            r = await db.execute(text(f"SELECT COUNT(*) FROM {tbl}"))
-            print(f"  Before — {tbl}: {r.scalar()}")
+            try:
+                r = await db.execute(text(f"SELECT COUNT(*) FROM {tbl}"))
+                print(f"  Before — {tbl}: {r.scalar()}")
+            except Exception:
+                print(f"  Before — {tbl}: (table not found, skipping)")
 
         print()
 
