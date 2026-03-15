@@ -50,6 +50,7 @@ const DISPLAY_NAME: Record<string, string> = {
 interface CtxRoot {
   lot_id: string; step: string; event_id: string; event_time: string;
   spc_status: string | null; recipe_id: string | null; apc_id: string | null; tool_id: string | null;
+  in_progress?: boolean;
 }
 interface CtxResponse {
   root: CtxRoot;

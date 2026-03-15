@@ -41,6 +41,7 @@ interface EventDoc {
   step: string;
   recipeID?: string | null;
   spc_status?: string | null;
+  status?: string | null;
 }
 
 function TraceTimeline({
@@ -64,10 +65,13 @@ function TraceTimeline({
     fetch(url)
       .then(r => r.json())
       .then((docs: EventDoc[]) => {
+        // Dedup by (step, lotID) — keep most-recent event (ProcessEnd wins over ProcessStart
+        // since API returns newest-first). This prevents in-progress ProcessStart events
+        // from showing a spurious PASS badge alongside a completed ProcessEnd row.
         const seen = new Set<string>();
         const deduped = docs.filter(d => {
           if (d.eventType !== "TOOL_EVENT") return false;
-          const key = `${d.eventTime}|${d.step}|${d.lotID}`;
+          const key = `${d.step}|${d.lotID}`;
           if (seen.has(key)) return false;
           seen.add(key);
           return true;
@@ -97,7 +101,8 @@ function TraceTimeline({
         const ts = new Date(evt.eventTime);
         const timeStr = `${String(ts.getHours()).padStart(2,"0")}:${String(ts.getMinutes()).padStart(2,"0")}:${String(ts.getSeconds()).padStart(2,"0")}`;
         const isSelected = selectedTime === evt.eventTime;
-        const isOOC = evt.spc_status === "OOC";
+        const isOOC        = evt.spc_status === "OOC";
+        const isInProgress = evt.status === "ProcessStart";
 
         return (
           <div
@@ -114,7 +119,9 @@ function TraceTimeline({
                 ? "bg-purple-100 border-purple-500"
                 : isOOC
                   ? "bg-amber-50 border-amber-400"
-                  : "bg-white border-slate-300 group-hover:border-purple-400",
+                  : isInProgress
+                    ? "bg-blue-50 border-blue-300"
+                    : "bg-white border-slate-300 group-hover:border-purple-400",
             ].join(" ")} />
 
             <div className="flex items-center justify-between">
@@ -129,9 +136,10 @@ function TraceTimeline({
             </div>
             <div className={`text-[11px] font-mono font-bold mt-0.5 ${isSelected ? "text-purple-900" : "text-slate-700"}`}>
               {evt.step} · {evt.lotID}
-              {!isOOC && (
-                <span className="text-[9px] bg-green-100 text-green-700 px-1 rounded ml-1 font-normal">PASS</span>
-              )}
+              {isInProgress
+                ? <span className="text-[9px] bg-blue-100 text-blue-600 px-1 rounded ml-1 font-normal">⏳ Processing</span>
+                : !isOOC && <span className="text-[9px] bg-green-100 text-green-700 px-1 rounded ml-1 font-normal">PASS</span>
+              }
             </div>
             {evt.recipeID && (
               <div className={`text-[10px] ${isSelected ? "text-purple-500" : "text-slate-400"}`}>

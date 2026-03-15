@@ -239,29 +239,34 @@ async def get_graph_context(
     if ooc_only and req_status == "ProcessEnd":
         filt["spc_status"] = "OOC"
 
-    event = await db.events.find_one(filt, sort=[("eventTime", -1)])
-    if not event:
-        # Fallback: try without status filter (backward compat with old data)
-        filt_fb = {"lotID": lot_id, "step": step, "eventType": "LOT_EVENT"}
-        if ooc_only:
-            filt_fb["spc_status"] = "OOC"
-        event = await db.events.find_one(filt_fb, sort=[("eventTime", -1)])
-    if not event:
-        detail = f"No event found for lot_id='{lot_id}' step='{step}' status='{req_status}'"
-        raise HTTPException(status_code=404, detail=detail)
+    end_event   = await db.events.find_one(filt, sort=[("eventTime", -1)])
+
+    # ── Locate ProcessStart event (always try, regardless of requested phase) ──
+    start_filt: dict = {"lotID": lot_id, "step": step, "status": "ProcessStart", "eventType": "LOT_EVENT"}
+    start_event = await db.events.find_one(start_filt, sort=[("eventTime", -1)])
+
+    # ── Determine authoritative event & phase ─────────────────────────────────
+    # Priority: ProcessEnd (complete) > ProcessStart (in-progress) > 404
+    if end_event:
+        event     = end_event
+        ev_status = "ProcessEnd"
+        in_progress = False
+    elif start_event:
+        # Step is currently in-progress; return partial context (Recipe+APC only)
+        event     = start_event
+        ev_status = "ProcessStart"
+        in_progress = True
+    else:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No event found for lot_id='{lot_id}' step='{step}'",
+        )
+
+    if ooc_only and ev_status != "ProcessEnd":
+        raise HTTPException(status_code=404, detail="No OOC ProcessEnd event found")
 
     event_id   = str(event["_id"])
     event_time = event["eventTime"]
-    ev_status  = event.get("status", req_status)
-
-    # ── If ProcessEnd, also fetch the paired ProcessStart event ───────────────
-    start_event = None
-    if ev_status == "ProcessEnd":
-        start_event = await db.events.find_one(
-            {"lotID": lot_id, "step": step, "status": "ProcessStart", "eventType": "LOT_EVENT"},
-            sort=[("eventTime", -1)],
-        )
-
     start_time = start_event["eventTime"] if start_event else None
 
     # ── Root node ──────────────────────────────────────────────────────────────
@@ -270,6 +275,7 @@ async def get_graph_context(
         "step":           step,
         "event_id":       event_id,
         "process_status": ev_status,
+        "in_progress":    in_progress,
         "event_time":     event_time.isoformat() + "Z",
         "start_time":     start_time.isoformat() + "Z" if start_time else None,
         "spc_status":     event.get("spc_status"),
@@ -282,8 +288,7 @@ async def get_graph_context(
     tool_doc = await db.tools.find_one({"tool_id": event.get("toolID")})
     tool = _clean(tool_doc) if tool_doc else {"tool_id": event.get("toolID"), "status": "unknown"}
 
-    # ── Recipe + APC: from ProcessStart event time ────────────────────────────
-    # Use start_event time if available; else use current event time (old data)
+    # ── Recipe + APC: from ProcessStart event ────────────────────────────────
     recipe_time = start_time if start_time else event_time
     apc_time    = start_time if start_time else event_time
 
