@@ -20,6 +20,9 @@ GET /api/v2/ontology/history/{object_type}/{object_id}
 GET /api/v2/ontology/indices/{object_type}
 GET /api/v2/ontology/enumerate
 """
+import hashlib
+import math
+import random
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
 from bson.errors import InvalidId
@@ -1193,4 +1196,233 @@ async def get_tools_status_overview(
         "tool_count":   len(tools_status),
         "recent_window": recent_batches,
         "tools":        tools_status,
+    }
+
+
+# ── GET /equipment/{tool_id}/constants — Equipment Constants ─────────────────
+
+@router.get("/equipment/{tool_id}/constants")
+async def get_equipment_constants(tool_id: str):
+    """Equipment Constants for a tool — compare current values against golden baseline."""
+    # Generate deterministic EC values based on tool_id seed
+    seed = int(hashlib.md5(tool_id.encode()).hexdigest()[:8], 16)
+    rng = random.Random(seed)
+
+    # Define EC parameters with golden setpoints
+    ec_params = {
+        "rf_power_offset":       {"setpoint": 0.0,    "unit": "W",   "tolerance_pct": 2.0},
+        "throttle_setpoint":     {"setpoint": 65.0,   "unit": "%",   "tolerance_pct": 3.0},
+        "he_backside_pressure":  {"setpoint": 10.0,   "unit": "Torr","tolerance_pct": 5.0},
+        "focus_ring_thickness":  {"setpoint": 8.5,    "unit": "mm",  "tolerance_pct": 8.0},
+        "chamber_wall_temp":     {"setpoint": 60.0,   "unit": "°C",  "tolerance_pct": 4.0},
+        "electrode_gap":         {"setpoint": 27.0,   "unit": "mm",  "tolerance_pct": 1.5},
+        "rf_match_c1":           {"setpoint": 142.0,  "unit": "pF",  "tolerance_pct": 3.0},
+        "rf_match_c2":           {"setpoint": 88.0,   "unit": "pF",  "tolerance_pct": 3.0},
+    }
+
+    constants = {}
+    drift_count = 0
+
+    for param, spec in ec_params.items():
+        # Add small deterministic drift
+        drift_factor = rng.gauss(0, spec["tolerance_pct"] * 0.4)
+        value = round(spec["setpoint"] + spec["setpoint"] * drift_factor / 100, 3) if spec["setpoint"] != 0 else round(drift_factor * 0.01, 4)
+        deviation_pct = abs((value - spec["setpoint"]) / spec["setpoint"] * 100) if spec["setpoint"] != 0 else abs(value) * 10
+
+        if deviation_pct > spec["tolerance_pct"]:
+            status = "ALERT" if deviation_pct > spec["tolerance_pct"] * 2 else "DRIFT"
+            drift_count += 1
+        else:
+            status = "NORMAL"
+
+        constants[param] = {
+            "value": value,
+            "setpoint": spec["setpoint"],
+            "unit": spec["unit"],
+            "tolerance_pct": spec["tolerance_pct"],
+            "deviation_pct": round(deviation_pct, 2),
+            "status": status,
+        }
+
+    # Build summary
+    drift_params = [p for p, v in constants.items() if v["status"] != "NORMAL"]
+    if drift_params:
+        most_critical = max(drift_params, key=lambda p: constants[p]["deviation_pct"])
+        summary = f"{drift_count} parameter(s) drifting on {tool_id}. Most critical: {most_critical} ({constants[most_critical]['deviation_pct']:.1f}% deviation)."
+    else:
+        summary = f"All EC parameters within tolerance on {tool_id}."
+
+    return {
+        "tool_id": tool_id,
+        "constants": constants,
+        "drift_count": drift_count,
+        "summary": summary,
+    }
+
+
+# ── GET /fdc/{tool_id}/uchart — FDC U-Chart ──────────────────────────────────
+
+@router.get("/fdc/{tool_id}/uchart")
+async def get_fdc_uchart(tool_id: str, step: str = None, limit: int = 50):
+    """FDC U-chart: defect count per unit time series for a tool/step."""
+    db = get_db()
+
+    # Fetch recent ProcessEnd events for this tool (and optionally step)
+    query: dict = {"toolID": tool_id, "status": "ProcessEnd", "eventType": "LOT_EVENT"}
+    if step:
+        query["step"] = step
+
+    cursor = (
+        db.events
+        .find(query, {"lotID": 1, "step": 1, "eventTime": 1, "spc_status": 1, "_id": 0})
+        .sort("eventTime", -1)
+        .limit(limit)
+    )
+    records = await cursor.to_list(length=limit)
+
+    if not records:
+        return {
+            "tool_id": tool_id,
+            "step": step,
+            "uchart": [],
+            "baseline": {"u_bar": 0, "ucl": 0, "lcl": 0, "n_average": 50},
+            "ooc_count": 0,
+            "summary": f"No FDC data found for {tool_id}" + (f" step {step}" if step else ""),
+        }
+
+    # Generate U-chart values — correlated with SPC status
+    seed_base = int(hashlib.md5(tool_id.encode()).hexdigest()[:8], 16)
+    uchart_data = []
+
+    for i, rec in enumerate(records):
+        rng = random.Random(seed_base + i)
+        sample_size = rng.randint(45, 55)
+        # OOC batches tend to have higher defect counts
+        base_rate = 0.08 if rec.get("spc_status") == "OOC" else 0.04
+        defect_count = int(rng.gauss(base_rate * sample_size, 1.5))
+        defect_count = max(0, defect_count)
+        u_value = round(defect_count / sample_size, 4)
+
+        event_time = rec.get("eventTime")
+        uchart_data.append({
+            "event_time": event_time.isoformat() + "Z" if event_time else None,
+            "lot_id": rec["lotID"],
+            "step": rec.get("step", step or ""),
+            "defect_count": defect_count,
+            "sample_size": sample_size,
+            "u_value": u_value,
+            "spc_status": rec.get("spc_status", "PASS"),
+        })
+
+    # Calculate U-chart baseline (u-bar and control limits)
+    u_bar = sum(r["u_value"] for r in uchart_data) / len(uchart_data)
+    n_avg = sum(r["sample_size"] for r in uchart_data) / len(uchart_data)
+    ucl = round(u_bar + 3 * math.sqrt(u_bar / n_avg), 4) if u_bar > 0 else 0.0
+    lcl = round(max(0, u_bar - 3 * math.sqrt(u_bar / n_avg)), 4) if u_bar > 0 else 0.0
+
+    # Mark OOC based on U-chart limits
+    ooc_count = 0
+    for r in uchart_data:
+        if r["u_value"] > ucl or (lcl > 0 and r["u_value"] < lcl):
+            r["spc_status"] = "OOC"
+            ooc_count += 1
+
+    uchart_data.sort(key=lambda x: x["event_time"] or "")
+
+    summary = f"{tool_id}" + (f" {step}" if step else "") + f": {len(uchart_data)} lots, u_bar={u_bar:.4f}, UCL={ucl:.4f}, OOC={ooc_count}/{len(uchart_data)}"
+
+    return {
+        "tool_id": tool_id,
+        "step": step,
+        "uchart": uchart_data,
+        "baseline": {"u_bar": round(u_bar, 4), "ucl": ucl, "lcl": lcl, "n_average": round(n_avg, 1)},
+        "ooc_count": ooc_count,
+        "summary": summary,
+    }
+
+
+# ── GET /ocap/{lot_id}/{step} — OCAP Action Plan ──────────────────────────────
+
+@router.get("/ocap/{lot_id}/{step}")
+async def get_ocap(lot_id: str, step: str):
+    """OCAP: Out-of-Control Action Plan for a lot/step."""
+    db = get_db()
+
+    # Fetch process end event to get SPC status
+    record = await db.events.find_one(
+        {"lotID": lot_id, "step": step, "status": "ProcessEnd"},
+        {"spc_status": 1, "spcSnapshotId": 1, "_id": 0}
+    )
+
+    spc_status = record.get("spc_status", "PASS") if record else "PASS"
+
+    # Fetch SPC snapshot for triggered charts
+    triggered_by = []
+    if record and record.get("spcSnapshotId") and spc_status == "OOC":
+        spc_doc = await db.object_snapshots.find_one(
+            {"_id": _oid(record["spcSnapshotId"])} if not isinstance(record.get("spcSnapshotId"), ObjectId)
+            else {"_id": record["spcSnapshotId"]},
+        )
+        if spc_doc:
+            charts = spc_doc.get("charts", {}) or spc_doc.get("parameters", {})
+            for chart_name, chart_data in charts.items():
+                if isinstance(chart_data, dict) and chart_data.get("status") == "OOC":
+                    triggered_by.append({
+                        "chart": chart_name,
+                        "parameter": chart_data.get("parameter", chart_name),
+                        "violation_type": "beyond_control_limit",
+                        "value": chart_data.get("latest_value"),
+                        "ucl": chart_data.get("ucl"),
+                        "lcl": chart_data.get("lcl"),
+                    })
+
+    # If no SPC snapshot data, generate based on spc_status
+    if spc_status == "OOC" and not triggered_by:
+        seed = int(hashlib.md5(f"{lot_id}{step}".encode()).hexdigest()[:8], 16)
+        rng = random.Random(seed)
+        candidates = ["xbar_chart (CD mean shift)", "r_chart (within-wafer range)", "s_chart (std dev spike)"]
+        triggered_by = [{
+            "chart": rng.choice(candidates),
+            "parameter": "cd_mean" if "xbar" in rng.choice(candidates) else "cd_range",
+            "violation_type": "beyond_3sigma",
+            "value": None, "ucl": None, "lcl": None,
+        }]
+
+    # Define OCAP actions based on severity
+    if spc_status != "OOC":
+        actions = []
+        severity = "LOW"
+    else:
+        n_triggered = len(triggered_by)
+        severity = "CRITICAL" if n_triggered >= 3 else "HIGH" if n_triggered == 2 else "MEDIUM"
+
+        actions = [
+            {"priority": 1, "category": "HOLD",    "action": f"Hold lot {lot_id} — do not proceed to next step until root cause confirmed", "owner": "Process Engineer", "deadline_hours": 1},
+            {"priority": 2, "category": "VERIFY",  "action": "Re-measure critical dimension on 5 monitor wafers from same cassette", "owner": "Metrology", "deadline_hours": 2},
+            {"priority": 3, "category": "INSPECT", "action": f"Check equipment constants on {step} tool — focus on rf_power_offset and throttle_setpoint", "owner": "Equipment Engineer", "deadline_hours": 4},
+            {"priority": 4, "category": "REVIEW",  "action": "Compare APC model parameters with last 10 PASS lots — check for model drift", "owner": "APC Engineer", "deadline_hours": 8},
+        ]
+        if severity in ("HIGH", "CRITICAL"):
+            actions.append({
+                "priority": 5, "category": "ESCALATE",
+                "action": "Notify shift supervisor and fab manager — potential systematic issue",
+                "owner": "Shift Engineer", "deadline_hours": 1,
+            })
+
+    chart_names = [t["chart"] for t in triggered_by] if triggered_by else []
+    summary = (
+        f"OOC on {lot_id} {step}: {len(triggered_by)} chart(s) triggered ({', '.join(chart_names)}). "
+        f"Severity={severity}. {len(actions)} action(s) required."
+        if spc_status == "OOC"
+        else f"{lot_id} {step}: SPC PASS — no OCAP required."
+    )
+
+    return {
+        "lot_id": lot_id,
+        "step": step,
+        "spc_status": spc_status,
+        "triggered_by": triggered_by,
+        "actions": actions,
+        "severity": severity,
+        "summary": summary,
     }

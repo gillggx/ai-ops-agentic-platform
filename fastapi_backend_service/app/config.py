@@ -83,6 +83,10 @@ class Config(BaseSettings):
         default="claude-haiku-4-5-20251001",
         description="Anthropic model ID used when LLM_PROVIDER=anthropic",
     )
+    ONTOLOGY_SIM_URL: str = Field(
+        default="http://localhost:8001",
+        description="Base URL of the OntologySimulator service (e.g. http://localhost:8001 or http://sim.internal:8001)",
+    )
     # ── Ollama / OpenAI-compatible settings (used when LLM_PROVIDER=ollama) ──
     OLLAMA_BASE_URL: str = Field(
         default="http://localhost:11434/v1",

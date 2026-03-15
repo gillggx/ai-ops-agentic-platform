@@ -54,6 +54,7 @@ from app.routers.agent_memory_router import router as agent_memory_router
 from app.routers.agent_preference_router import router as agent_preference_router
 
 settings = get_settings()
+_SIM = settings.ONTOLOGY_SIM_URL  # e.g. "http://localhost:8001"
 logger = AppLogger("main").get_logger()
 
 # ---------------------------------------------------------------------------
@@ -207,7 +208,7 @@ _ONTOLOGY_SYSTEM_MCPS = [
             "使用時機：已知 lot_id + step，需要看完整物件快照 → 此 MCP。"
         ),
         "api_config": {
-            "endpoint_url": "http://localhost:8001/api/v2/ontology/context",
+            "endpoint_url": f"{_SIM}/api/v2/ontology/context",
             "method": "GET",
             "headers": {},
         },
@@ -234,7 +235,7 @@ _ONTOLOGY_SYSTEM_MCPS = [
             "⚠️ 此 simulator 時間軸與現實日曆無關。使用者說「今天」→ 不要加 start_time/end_time，直接查。"
         ),
         "api_config": {
-            "endpoint_url": "http://localhost:8001/api/v2/ontology/trajectory/lot/{lot_id}",
+            "endpoint_url": f"{_SIM}/api/v2/ontology/trajectory/lot/{{lot_id}}",
             "method": "GET",
             "headers": {},
         },
@@ -274,7 +275,7 @@ _ONTOLOGY_SYSTEM_MCPS = [
             "  ② 異常前最後幾批：加 limit=20，結果已按時間倒序排列（最新在前）"
         ),
         "api_config": {
-            "endpoint_url": "http://localhost:8001/api/v2/ontology/trajectory/tool/{tool_id}",
+            "endpoint_url": f"{_SIM}/api/v2/ontology/trajectory/tool/{{tool_id}}",
             "method": "GET",
             "headers": {},
         },
@@ -300,7 +301,7 @@ _ONTOLOGY_SYSTEM_MCPS = [
             "⚠️ simulator 時間軸與現實日曆無關，使用者說「今天」→ 不帶時間篩選直接查"
         ),
         "api_config": {
-            "endpoint_url": "http://localhost:8001/api/v2/ontology/trajectory/tool/{tool_id}/step/{step}",
+            "endpoint_url": f"{_SIM}/api/v2/ontology/trajectory/tool/{{tool_id}}/step/{{step}}",
             "method": "GET",
             "headers": {},
         },
@@ -330,7 +331,7 @@ _ONTOLOGY_SYSTEM_MCPS = [
             "⚠️ DC/SPC 的 object_id 唯一對應一次製程，要追蹤趨勢應改用 get_tool_trajectory + get_process_context"
         ),
         "api_config": {
-            "endpoint_url": "http://localhost:8001/api/v2/ontology/history/{object_type}/{object_id}",
+            "endpoint_url": f"{_SIM}/api/v2/ontology/history/{{object_type}}/{{object_id}}",
             "method": "GET",
             "headers": {},
         },
@@ -357,7 +358,7 @@ _ONTOLOGY_SYSTEM_MCPS = [
             "  ③ 搭配 recipe_id 過濾，只統計特定 Recipe 的歷史數據"
         ),
         "api_config": {
-            "endpoint_url": "http://localhost:8001/api/v2/ontology/stats/baseline",
+            "endpoint_url": f"{_SIM}/api/v2/ontology/stats/baseline",
             "method": "GET",
             "headers": {},
         },
@@ -386,7 +387,7 @@ _ONTOLOGY_SYSTEM_MCPS = [
             "  ⑤ 拿到 event 後，用 dc_snapshot_id 或 lot_id+step 進一步呼叫 get_process_context 展開細節"
         ),
         "api_config": {
-            "endpoint_url": "http://localhost:8001/api/v2/ontology/search",
+            "endpoint_url": f"{_SIM}/api/v2/ontology/search",
             "method": "POST",
             "headers": {"Content-Type": "application/json"},
         },
@@ -426,7 +427,7 @@ _ONTOLOGY_SYSTEM_MCPS = [
             "⚠️ 若需要某機台的詳細製程歷史，請接著呼叫 get_tool_trajectory（帶入 tool_id）。"
         ),
         "api_config": {
-            "endpoint_url": "http://localhost:8001/api/v2/ontology/tools/status",
+            "endpoint_url": f"{_SIM}/api/v2/ontology/tools/status",
             "method": "GET",
             "headers": {},
         },
@@ -462,7 +463,7 @@ _ONTOLOGY_SYSTEM_MCPS = [
             "get_dc_timeseries 是「多批時間序列」，只有 DC 數值，適合趨勢分析和 SPC 圖表。"
         ),
         "api_config": {
-            "endpoint_url": "http://localhost:8001/api/v2/ontology/timeseries/tool/{tool_id}/step/{step}",
+            "endpoint_url": f"{_SIM}/api/v2/ontology/timeseries/tool/{{tool_id}}/step/{{step}}",
             "method": "GET",
             "headers": {},
         },
@@ -472,6 +473,85 @@ _ONTOLOGY_SYSTEM_MCPS = [
                 {"name": "step",    "type": "string",  "description": "站點代碼，e.g. STEP_072", "required": True},
                 {"name": "params",  "type": "string",  "description": "要取的 DC 參數名稱（逗號分隔），e.g. 'chamber_pressure,cf4_flow_sccm'，不填則回傳全部（可選）", "required": False},
                 {"name": "limit",   "type": "integer", "description": "回傳最近幾筆製程記錄，預設 50，最大 500（可選）", "required": False},
+            ]
+        },
+    },
+    {
+        "name": "get_equipment_constants",
+        "description": (
+            "【機台設備常數 Equipment Constants】查詢一台機台的當前設備常數與黃金基準比對。\n"
+            "回傳結構：{tool_id, constants: {param_name: {value, setpoint, tolerance_pct, deviation_pct, status}}, drift_count, summary}\n"
+            "- status: 'NORMAL' | 'DRIFT' | 'ALERT'\n"
+            "- drift_count: 偏移超出容忍值的參數數量\n"
+            "- summary: 一句直接可用的摘要（e.g. '3 parameters drifting, rf_power_offset most critical'）\n"
+            "使用時機：\n"
+            "  ① 機台發生異常時，快速確認 EC 是否為根因\n"
+            "  ② 定期巡檢 EC 漂移狀況\n"
+            "  ③ OOC 根因分析時，排除或確認 EC 異常\n"
+            "⚠️ 不需要任何時間參數，直接帶入 tool_id 即可"
+        ),
+        "api_config": {
+            "endpoint_url": f"{_SIM}/api/v2/ontology/equipment/{{tool_id}}/constants",
+            "method": "GET",
+            "headers": {},
+        },
+        "input_schema": {
+            "fields": [
+                {"name": "tool_id", "type": "string", "description": "機台 ID，格式 EQP-XX，e.g. EQP-01", "required": True},
+            ]
+        },
+    },
+    {
+        "name": "get_fdc_uchart",
+        "description": (
+            "【FDC U-Chart 缺陷密度管制圖】查詢一台機台在特定步驟的 FDC 缺陷計數時序，以 U-chart 呈現。\n"
+            "回傳結構：{tool_id, step, uchart: [{event_time, lot_id, defect_count, sample_size, u_value, spc_status}], baseline: {u_bar, ucl, lcl, n_average}, ooc_count, summary}\n"
+            "- u_value = defect_count / sample_size（每單位缺陷數）\n"
+            "- spc_status: 'PASS' | 'OOC'\n"
+            "- baseline.ucl/lcl 為動態控制限（依 u_bar 與 sample_size 計算）\n"
+            "使用時機：\n"
+            "  ① 監控製程缺陷率趨勢（純視覺化）\n"
+            "  ② 結合 SPC OOC 事件做雙重驗證\n"
+            "  ③ 製程改善前後比對\n"
+            "⚠️ 使用 analyze_data(template='spc_chart') 畫圖時：value_col='u_value', time_col='event_time', ucl=baseline.ucl, lcl=baseline.lcl"
+        ),
+        "api_config": {
+            "endpoint_url": f"{_SIM}/api/v2/ontology/fdc/{{tool_id}}/uchart",
+            "method": "GET",
+            "headers": {},
+        },
+        "input_schema": {
+            "fields": [
+                {"name": "tool_id", "type": "string", "description": "機台 ID，格式 EQP-XX，e.g. EQP-01", "required": True},
+                {"name": "step",    "type": "string", "description": "步驟代碼，格式 STEP_XXX，e.g. STEP_002（可選，不填則返回所有步驟）", "required": False},
+                {"name": "limit",   "type": "integer", "description": "回傳批次數上限，預設 50（可選）", "required": False},
+            ]
+        },
+    },
+    {
+        "name": "get_ocap",
+        "description": (
+            "【OCAP 異常處置計畫 Out-of-Control Action Plan】當 SPC_status=OOC 時，查詢對應的標準處置流程。\n"
+            "回傳結構：{lot_id, step, spc_status, triggered_by: [{chart, parameter, violation_type, value, ucl, lcl}], "
+            "actions: [{priority, category, action, owner, deadline_hours}], severity, summary}\n"
+            "- triggered_by: 哪些 SPC chart 觸發 OOC + 違規類型（超出控制限 / 連續趨勢 / 等）\n"
+            "- actions: 依優先序排列的處置步驟，包含負責人與時限\n"
+            "- severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'\n"
+            "使用時機：\n"
+            "  ① 確認某批次 OOC 後，立即查詢應採取哪些行動\n"
+            "  ② 與 get_process_context 搭配，做完整根因分析\n"
+            "  ③ spc_status=PASS 時仍可呼叫，回傳 actions=[] severity='LOW'\n"
+            "⚠️ lot_id + step 都必須填入；可從 get_lot_trajectory 或 get_tool_trajectory 取得"
+        ),
+        "api_config": {
+            "endpoint_url": f"{_SIM}/api/v2/ontology/ocap/{{lot_id}}/{{step}}",
+            "method": "GET",
+            "headers": {},
+        },
+        "input_schema": {
+            "fields": [
+                {"name": "lot_id", "type": "string", "description": "批次 ID，格式 LOT-XXXX，e.g. LOT-0001", "required": True},
+                {"name": "step",   "type": "string", "description": "步驟代碼，格式 STEP_XXX，e.g. STEP_005", "required": True},
             ]
         },
     },
