@@ -1,80 +1,81 @@
-"""DC Service – 30 sensor readings with physical units; SPC-monitored sensors have
-a small excursion probability (~2% each) to drive ~10% overall OOC rate.
+"""DC Service – 30 sensor readings with real semiconductor domain names; SPC-monitored
+sensors have a small excursion probability (~2% each) to drive ~10% overall OOC rate.
 
 Sensor layout:
-  sensor_01–06  : Vacuum / pressure / valve
-  sensor_07–14  : Thermal (ESC, wall, ceiling, gas)
-  sensor_15–22  : RF Power (source/bias) + matching network
-  sensor_23–30  : Gas flow (MFCs + total)
+  Vacuum/pressure  : chamber_pressure, foreline_pressure, loadlock_pressure, ...
+  Thermal (ESC)    : esc_zone1_temp, esc_zone2_temp, esc_zone3_temp, chuck_temp_c, ...
+  RF Power         : rf_forward_power, reflected_power, bias_power_lf_w, ...
+  Gas Flow (MFCs)  : cf4_flow_sccm, o2_flow_sccm, ar_flow_sccm, helium_coolant_press, ...
 """
 import random
 from app.database import get_db
 
 # ── Physical operating ranges ─────────────────────────────────
-# Format: sensor_id -> (lo, hi) in engineering units
+# Format: sensor_name -> (lo, hi) in engineering units
 _SENSOR_RANGES: dict[str, tuple[float, float]] = {
     # ── Vacuum ───────────────────────────────────────────────
-    "sensor_01": (13.0, 17.0),     # Chamber Press    (mTorr)
-    "sensor_02": (0.8,  1.8),      # Foreline Press   (mTorr)
-    "sensor_03": (0.025, 0.075),   # Load Lock Press  (mTorr)
-    "sensor_04": (0.003, 0.010),   # Transfer Press   (mTorr)
-    "sensor_05": (30.0, 70.0),     # Throttle Pos     (%)
-    "sensor_06": (35.0, 65.0),     # Gate Valve Pos   (%)
+    "chamber_pressure":       (13.0,   17.0),    # Chamber Press      (mTorr)
+    "foreline_pressure":       (0.8,    1.8),    # Foreline Press     (mTorr)
+    "loadlock_pressure":      (0.025,  0.075),   # Load Lock Press    (mTorr)
+    "transfer_pressure":      (0.003,  0.010),   # Transfer Press     (mTorr)
+    "throttle_position_pct":  (30.0,   70.0),    # Throttle Pos       (%)
+    "gate_valve_position_pct":(35.0,   65.0),    # Gate Valve Pos     (%)
     # ── Thermal ──────────────────────────────────────────────
-    "sensor_07": (58.0, 62.0),     # ESC Zone1 Temp   (°C)
-    "sensor_08": (58.0, 62.0),     # ESC Zone2 Temp   (°C)
-    "sensor_09": (58.0, 62.0),     # ESC Zone3 Temp   (°C)
-    "sensor_10": (19.0, 21.0),     # Chuck Temp       (°C)
-    "sensor_11": (43.0, 47.0),     # Wall Temp        (°C)
-    "sensor_12": (58.0, 64.0),     # Ceiling Temp     (°C)
-    "sensor_13": (21.0, 24.0),     # Gas Inlet Temp   (°C)
-    "sensor_14": (65.0, 78.0),     # Exhaust Temp     (°C)
+    "esc_zone1_temp":         (58.0,   62.0),    # ESC Zone1 Temp     (°C)
+    "esc_zone2_temp":         (58.0,   62.0),    # ESC Zone2 Temp     (°C)
+    "esc_zone3_temp":         (58.0,   62.0),    # ESC Zone3 Temp     (°C)
+    "chuck_temp_c":           (19.0,   21.0),    # Chuck Temp         (°C)
+    "wall_temp_c":            (43.0,   47.0),    # Wall Temp          (°C)
+    "ceiling_temp_c":         (58.0,   64.0),    # Ceiling Temp       (°C)
+    "gas_inlet_temp_c":       (21.0,   24.0),    # Gas Inlet Temp     (°C)
+    "exhaust_temp_c":         (65.0,   78.0),    # Exhaust Temp       (°C)
     # ── RF Power ─────────────────────────────────────────────
-    "sensor_15": (1440., 1560.),   # Source Power HF  (W)
-    "sensor_16": (8.0,  25.0),     # Source Refl HF   (W)
-    "sensor_17": (330., 470.),     # Bias Power LF    (W)
-    "sensor_18": (4.0,  12.0),     # Bias Refl LF     (W)
-    "sensor_19": (830., 870.),     # Bias Voltage     (V)
-    "sensor_20": (0.36, 0.54),     # Bias Current     (A)
-    "sensor_21": (13.549, 13.571), # Source Freq      (MHz)
-    "sensor_22": (158., 192.),     # Match Cap C1     (pF)
+    "rf_forward_power":      (1440.0, 1560.0),   # Source Power HF    (W)
+    "reflected_power":          (8.0,   25.0),   # Source Refl HF     (W)
+    "bias_power_lf_w":        (330.0,  470.0),   # Bias Power LF      (W)
+    "bias_refl_lf_w":           (4.0,   12.0),   # Bias Refl LF       (W)
+    "bias_voltage_v":         (830.0,  870.0),   # Bias Voltage       (V)
+    "bias_current_a":           (0.36,   0.54),  # Bias Current       (A)
+    "source_freq_mhz":        (13.549, 13.571),  # Source Freq        (MHz)
+    "match_cap_c1_pf":        (158.0,  192.0),   # Match Cap C1       (pF)
     # ── Gas Flow ─────────────────────────────────────────────
-    "sensor_23": (46.,  54.),      # CF4 Flow         (sccm)
-    "sensor_24": (7.5,  12.5),     # O2 Flow          (sccm)
-    "sensor_25": (88.,  112.),     # Ar Flow          (sccm)
-    "sensor_26": (0.0,  3.5),      # N2 Flow          (sccm)
-    "sensor_27": (9.0,  11.0),     # He Flow          (sccm)
-    "sensor_28": (13.0, 17.0),     # CHF3 Flow        (sccm)
-    "sensor_29": (7.5,  12.5),     # C4F8 Flow        (sccm)
-    "sensor_30": (178., 212.),     # Total Flow       (sccm)
+    "cf4_flow_sccm":           (46.0,   54.0),   # CF4 Flow           (sccm)
+    "o2_flow_sccm":             (7.5,   12.5),   # O2 Flow            (sccm)
+    "ar_flow_sccm":            (88.0,  112.0),   # Ar Flow            (sccm)
+    "n2_flow_sccm":             (0.0,    3.5),   # N2 Flow            (sccm)
+    "helium_coolant_press":     (9.0,   11.0),   # He Backside Press  (Torr)
+    "chf3_flow_sccm":          (13.0,   17.0),   # CHF3 Flow          (sccm)
+    "c4f8_flow_sccm":           (7.5,   12.5),   # C4F8 Flow          (sccm)
+    "total_flow_sccm":        (178.0,  212.0),   # Total Flow         (sccm)
 }
 
 # Excursion bounds for the 5 SPC-monitored sensors.
 # These values DEFINITELY breach spc_service.py control limits.
 _SPC_EXCURSION: dict[str, tuple[float, float]] = {
-    "sensor_01": (9.5,  20.5),     # SPC limits 12.5 / 17.5
-    "sensor_07": (53.0, 67.0),     # SPC limits 57.5 / 62.5
-    "sensor_15": (1300., 1700.),   # SPC limits 1430 / 1570
-    "sensor_19": (795.,  915.),    # SPC limits 820 / 880
-    "sensor_23": (36.,   64.),     # SPC limits 44 / 56
+    "chamber_pressure":   (9.5,    20.5),    # SPC limits 12.5 / 17.5
+    "esc_zone1_temp":    (53.0,   67.0),     # SPC limits 57.5 / 62.5
+    "rf_forward_power":  (1300.0, 1700.0),   # SPC limits 1430 / 1570
+    "bias_voltage_v":    (795.0,  915.0),    # SPC limits 820 / 880
+    "cf4_flow_sccm":     (36.0,   64.0),     # SPC limits 44 / 56
 }
 
-# Per-sensor excursion probability → ~10% total OOC from 5 charts
-# math: 1 - (1 - p)^5 ≈ 0.10  →  p ≈ 0.021
-_EXCURSION_PROB = 0.021
+# Per-sensor excursion probability → ~22% total OOC from 5 charts
+# math: 1 - (1 - p)^5 ≈ 0.22  →  p ≈ 0.05
+_EXCURSION_PROB = 0.05
 
 # ── Per-tool drift state ───────────────────────────────────────
 # Slow accumulation simulates tool aging/wear; reset on OOC (maintenance).
-# Format: tool_id → {sensor_id: drift_offset}
+# Format: tool_id → {sensor_name: drift_offset}
 _tool_drifts: dict[str, dict[str, float]] = {}
 
 # Drift rates (engineering units per process step, max random increment)
+# Accelerated 3x so OOC appears within ~10 steps for visible demo effect.
 _DRIFT_RATES: dict[str, float] = {
-    "sensor_01": 0.06,    # Chamber Press mTorr/step → OOC after ~40 steps
-    "sensor_07": 0.05,    # ESC Zone1 Temp °C/step   → OOC after ~50 steps
-    "sensor_15": 2.5,     # Source Power HF W/step   → OOC after ~28 steps
-    "sensor_19": 0.6,     # Bias Voltage V/step      → OOC after ~33 steps
-    "sensor_23": 0.10,    # CF4 Flow sccm/step       → OOC after ~60 steps
+    "chamber_pressure":  0.20,   # Chamber Press mTorr/step → OOC after ~12 steps
+    "esc_zone1_temp":    0.15,   # ESC Zone1 Temp °C/step   → OOC after ~17 steps
+    "rf_forward_power":  8.0,    # Source Power HF W/step   → OOC after ~9 steps
+    "bias_voltage_v":    2.0,    # Bias Voltage V/step      → OOC after ~10 steps
+    "cf4_flow_sccm":     0.35,   # CF4 Flow sccm/step       → OOC after ~17 steps
 }
 
 
@@ -119,6 +120,7 @@ async def upload_snapshot(dc_params: dict, context: dict) -> str:
     ts = context["eventTime"].strftime("%Y%m%d%H%M%S%f")
     snapshot = {
         "eventTime":         context["eventTime"],
+        "status":            context.get("status", "ProcessEnd"),
         "lotID":             context["lotID"],
         "toolID":            context["toolID"],
         "step":              context["step"],

@@ -9,6 +9,7 @@ async def upload_snapshot(recipe_id: str, context: dict) -> str:
 
     snapshot = {
         "eventTime":        context["eventTime"],
+        "status":           context.get("status", "ProcessStart"),
         "lotID":            context["lotID"],
         "toolID":           context["toolID"],
         "step":             context["step"],

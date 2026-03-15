@@ -1,7 +1,7 @@
 import os
 
 # ── Simulation Scale ──────────────────────────────────────────
-TOTAL_LOTS    = int(os.getenv("TOTAL_LOTS", "100"))
+TOTAL_LOTS    = int(os.getenv("TOTAL_LOTS", "20"))
 TOTAL_TOOLS   = 10
 TOTAL_STEPS   = 100
 TOTAL_RECIPES = 20
@@ -9,8 +9,8 @@ TOTAL_RECIPES = 20
 # ── Timing (seconds; dev defaults — prod: set PROCESSING_MIN/MAX to 600/1200) ─
 HEARTBEAT_MIN_SEC  = float(os.getenv("HEARTBEAT_MIN",   "5"))
 HEARTBEAT_MAX_SEC  = float(os.getenv("HEARTBEAT_MAX",   "10"))
-PROCESSING_MIN_SEC = float(os.getenv("PROCESSING_MIN",  "600"))   # 10 min
-PROCESSING_MAX_SEC = float(os.getenv("PROCESSING_MAX",  "900"))   # 15 min
+PROCESSING_MIN_SEC = float(os.getenv("PROCESSING_MIN",  "30"))    # dev: 30s; prod: 600
+PROCESSING_MAX_SEC = float(os.getenv("PROCESSING_MAX",  "60"))    # dev: 60s; prod: 900
 HOLD_PROBABILITY   = float(os.getenv("HOLD_PROBABILITY", "0.05"))   # 5% equipment hold
 
 # ── Lot Recycling ─────────────────────────────────────────────

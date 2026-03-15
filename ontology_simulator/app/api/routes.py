@@ -46,25 +46,8 @@ async def query_context(
     obj = objectName.upper()
     et  = _to_naive_utc(eventTime)
 
-    # ── Step 1: locate anchor event ───────────────────────────
-    event = await db.events.find_one(
-        {
-            "$or": [{"lotID": targetID}, {"toolID": targetID}],
-            "step": step,
-            "eventTime": {"$lte": et},
-        },
-        sort=[("eventTime", -1)],
-    )
-
-    if not event:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No event found for targetID='{targetID}' step='{step}' before {eventTime.isoformat()}",
-        )
-
-    # ── Step 2: return object data ────────────────────────────
-
-    # LOT / TOOL → return current state from master collections
+    # ── LOT / TOOL: live master state — no anchor event needed ────
+    # These always reflect current state; safe to query even when a step is in-progress.
     if obj == "LOT":
         doc = await db.lots.find_one({"lot_id": targetID})
         if not doc:
@@ -77,16 +60,41 @@ async def query_context(
             raise HTTPException(404, f"Tool '{targetID}' not found")
         return _clean(doc)
 
-    # DC / SPC → direct snapshot lookup by snapshot _id stored in event
+    # ── DC / SPC: captured at ProcessEnd — find event that has the snapshot ref ──
+    # (ProcessStart events never have dcSnapshotId/spcSnapshotId; don't time-filter)
     if obj in ("DC", "SPC"):
         snap_id_key = "dcSnapshotId" if obj == "DC" else "spcSnapshotId"
+        event = await db.events.find_one(
+            {
+                "$or": [{"lotID": targetID}, {"toolID": targetID}],
+                "step": step,
+                snap_id_key: {"$exists": True, "$ne": None},
+            },
+            sort=[("eventTime", -1)],
+        )
+        if not event:
+            raise HTTPException(404, f"No {obj} snapshot reference found for step='{step}' — step may still be in progress")
         snap_id_str = event.get(snap_id_key)
-        if not snap_id_str:
-            raise HTTPException(404, f"No {obj} snapshot reference in event")
         snap = await db.object_snapshots.find_one({"_id": ObjectId(snap_id_str)})
         if not snap:
             raise HTTPException(404, f"{obj} snapshot '{snap_id_str}' not found")
         return _clean(snap)
+
+    # ── Step 1: locate anchor event for APC / RECIPE (at or before requested time) ──
+    event = await db.events.find_one(
+        {
+            "$or": [{"lotID": targetID}, {"toolID": targetID}],
+            "step": step,
+            "eventTime": {"$lte": et},
+        },
+        sort=[("eventTime", -1)],
+    )
+
+    if not event:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No completed event for targetID='{targetID}' step='{step}' — step may still be in progress",
+        )
 
     # APC / RECIPE → time-machine lookup (effective_time <= eventTime, closest)
     object_id_map = {

@@ -58,7 +58,7 @@ async def run() -> None:
     deferred_tools  = tools[immediate_count:]
 
     async def _deferred_loop(tid: str) -> None:
-        delay = random.uniform(10, 60)
+        delay = random.uniform(300, 720)
         print(f"[MES] {tid} deferred start in {delay:.0f}s")
         await asyncio.sleep(delay)
         await _machine_loop(tid, queue)
@@ -91,6 +91,8 @@ async def _machine_loop(tool_id: str, queue: asyncio.Queue) -> None:
     """Single machine loop: pull lots from queue, then DB, indefinitely."""
     db = get_db()
     processed = 0
+    pm_counter   = 0
+    pm_threshold = random.randint(8, 12)   # PM every 8-12 lots
 
     while _running:
         # ── Fast path: shared startup queue ──────────────────────
@@ -118,7 +120,8 @@ async def _machine_loop(tool_id: str, queue: asyncio.Queue) -> None:
 
         try:
             await process_step(lot_id, tool_id, step_num)
-            processed += 1
+            processed  += 1
+            pm_counter += 1
         except Exception as exc:
             print(f"[MES] ERROR – {lot_id} on {tool_id} step {step_num}: {exc}")
         finally:
@@ -143,5 +146,39 @@ async def _machine_loop(tool_id: str, queue: asyncio.Queue) -> None:
                     {"lot_id": lot_id},
                     {"$set": {"status": "Waiting", "current_step": next_step}},
                 )
+
+        # ── PM cycle: every pm_threshold lots ────────────────────
+        if pm_counter >= pm_threshold and _running:
+            pm_start_time = datetime.utcnow()
+            await db.tool_events.insert_one({
+                "toolID":    tool_id,
+                "eventType": "PM_START",
+                "eventTime": pm_start_time,
+                "metadata":  {
+                    "reason":              "Scheduled chamber maintenance",
+                    "lots_since_last_pm":  pm_counter,
+                },
+            })
+            print(f"[MES] {tool_id} PM_START (after {pm_counter} lots)")
+            await db.tools.update_one({"tool_id": tool_id}, {"$set": {"status": "Maintenance"}})
+
+            pm_duration = random.uniform(15, 25)   # 15-25s in dev
+            await asyncio.sleep(pm_duration)
+
+            pm_done_time = datetime.utcnow()
+            await db.tool_events.insert_one({
+                "toolID":    tool_id,
+                "eventType": "PM_DONE",
+                "eventTime": pm_done_time,
+                "metadata":  {
+                    "duration_sec":       round(pm_duration, 1),
+                    "lots_since_last_pm": pm_counter,
+                },
+            })
+            print(f"[MES] {tool_id} PM_DONE (took {pm_duration:.1f}s)")
+            await db.tools.update_one({"tool_id": tool_id}, {"$set": {"status": "Idle"}})
+
+            pm_counter   = 0
+            pm_threshold = random.randint(8, 12)   # reset for next cycle
 
     print(f"[MES] {tool_id} stopped — processed {processed} lots.")

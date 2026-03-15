@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Wifi, WifiOff, Activity, AlertTriangle, Radio, Clock } from "lucide-react";
+import { Wifi, WifiOff, Activity, AlertTriangle, Radio, Clock, Search } from "lucide-react";
 import { useMachineStore } from "@/hooks/useMachineStore";
 import { useConsole } from "@/hooks/useConsole";
 import { MachineState } from "@/lib/types";
@@ -9,6 +9,16 @@ import MachineCard from "./MachineCard";
 import TopologyView, { TopoNode } from "./TopologyView";
 import RightInspector from "./RightInspector";
 import ConsolePanel from "./ConsolePanel";
+import NexusCenter from "./NexusCenter";
+import ArchView from "./ArchView";
+import LotTimelinePanel, { LotStepEvent } from "./LotTimelinePanel";
+import ObjectIndexExplorer, {
+  useObjIndex,
+  ObjIndexProvider,
+  ObjIndexLeftPanel,
+  ObjIndexCenterPanel,
+  ObjIndexRightPanel,
+} from "./ObjectIndexExplorer";
 
 function getApiUrl() {
   if (typeof window === "undefined") return "http://localhost:8001/api/v1";
@@ -29,8 +39,8 @@ interface EventDoc {
   lotID: string;
   toolID: string;
   step: string;
-  recipeID?: string;
-  spc_status?: string;
+  recipeID?: string | null;
+  spc_status?: string | null;
 }
 
 function TraceTimeline({
@@ -98,7 +108,6 @@ function TraceTimeline({
               isSelected ? "bg-purple-50 p-2 rounded border border-purple-100 -ml-2 mr-2" : "",
             ].join(" ")}
           >
-            {/* Timeline dot */}
             <div className={[
               "absolute -left-[22px] top-1 w-3 h-3 rounded-full border-2 transition-colors",
               isSelected
@@ -149,8 +158,12 @@ export default function Dashboard() {
   const [traceSnapshot,   setTraceSnapshot]    = useState<MachineState | null>(null);
   const [hideIdle,        setHideIdle]         = useState(false);
   const [clock,           setClock]            = useState("");
+  const [consoleOpen,     setConsoleOpen]      = useState(false);
+  const [centerTab,       setCenterTab]        = useState<"TOPOLOGY" | "NEXUS" | "LOT_TRACE" | "OBJ_INDEX" | "ARCH">("TOPOLOGY");
 
-  // Live clock tick (empty initial value avoids SSR hydration mismatch)
+  // Object Index shared state (Mode C)
+  const objIndexState = useObjIndex();
+
   useEffect(() => {
     if (mode === "TRACE") return;
     setClock(new Date().toTimeString().split(" ")[0]);
@@ -167,7 +180,6 @@ export default function Dashboard() {
 
   const isTrace = mode === "TRACE";
 
-  // TRACE mode: show locked time in clock
   const displayClock = isTrace && traceEventTime
     ? (() => {
         const d = new Date(traceEventTime);
@@ -198,7 +210,7 @@ export default function Dashboard() {
     addLog("USER", "Mode → TRACE");
   }, [addLog]);
 
-  const handleTraceSelect = useCallback((evt: EventDoc) => {
+  const handleTraceSelect = useCallback((evt: EventDoc | LotStepEvent) => {
     setTraceEventTime(evt.eventTime);
     setActiveNode(null);
     const stepNum = parseInt(evt.step.split("_")[1]);
@@ -231,7 +243,6 @@ export default function Dashboard() {
         isTrace ? "bg-indigo-950 border-indigo-900" : "bg-white border-slate-200",
       ].join(" ")}>
 
-        {/* Left: dot + title */}
         <div className="flex items-center gap-3 mr-auto">
           <div className={[
             "w-3 h-3 rounded-sm transition-colors duration-300",
@@ -251,7 +262,6 @@ export default function Dashboard() {
           </h1>
         </div>
 
-        {/* Running count */}
         {!isTrace && (
           <div className="flex items-center gap-1.5 text-xs text-slate-500">
             <Activity size={11} className="text-blue-400" />
@@ -259,7 +269,6 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* HOLD badge */}
         {!isTrace && holdCount > 0 && (
           <div className="flex items-center gap-1.5 text-xs px-2 py-0.5 rounded bg-amber-50 border border-amber-300 text-amber-700">
             <AlertTriangle size={11} />
@@ -267,7 +276,6 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* WS indicator */}
         {!isTrace && (
           <div className={[
             "flex items-center gap-1.5 text-xs px-2 py-0.5 rounded border",
@@ -306,7 +314,20 @@ export default function Dashboard() {
           </button>
         </div>
 
-        {/* Trace Explorer link */}
+        {/* OOC Forensic Hall link */}
+        <button
+          onClick={() => router.push("/forensic")}
+          className={[
+            "flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded border transition-colors",
+            isTrace
+              ? "bg-red-900/40 border-red-700 text-red-300 hover:bg-red-900/60"
+              : "bg-red-50 border-red-200 text-red-600 hover:bg-red-100",
+          ].join(" ")}
+        >
+          <Search size={11} />
+          OOC RCA
+        </button>
+
         <button
           onClick={() => router.push("/history")}
           className={[
@@ -323,7 +344,6 @@ export default function Dashboard() {
           EXPLORER
         </button>
 
-        {/* Audit Tracker link */}
         <button
           onClick={() => router.push("/audit")}
           className={[
@@ -340,7 +360,22 @@ export default function Dashboard() {
           AUDIT
         </button>
 
-        {/* Clock */}
+        <button
+          onClick={() => router.push("/aiops")}
+          className={[
+            "flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded border transition-colors",
+            isTrace
+              ? "bg-purple-900 border-purple-700 text-purple-300 hover:bg-purple-800"
+              : "bg-purple-50 border-purple-200 text-purple-600 hover:bg-purple-100",
+          ].join(" ")}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24"
+               fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9.663 17h4.673M12 3v1m6.364 1.636-.707.707M21 12h-1M4 12H3m3.343-5.657-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+          </svg>
+          LAB
+        </button>
+
         <div className={[
           "font-mono text-[12px] px-3 py-1.5 rounded-md border shadow-inner min-w-[100px] text-center transition-colors duration-300",
           isTrace
@@ -358,7 +393,6 @@ export default function Dashboard() {
 
           {/* ── LEFT panel ─────────────────────────────────────────── */}
           <aside className="border-r border-slate-200 bg-slate-50 overflow-hidden flex flex-col shadow-[4px_0_15px_rgba(0,0,0,0.03)] z-10">
-            {/* Panel header */}
             <div className="px-3 py-2.5 border-b border-slate-200 bg-white shadow-sm shrink-0 flex items-center justify-between">
               <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
                 {isTrace ? "Event Timeline" : "Equipment Setup"}
@@ -368,9 +402,39 @@ export default function Dashboard() {
               </span>
             </div>
 
+            {/* TRACE mode sub-tabs */}
+            {isTrace && (
+              <div className="shrink-0 flex items-center border-b border-slate-200 bg-white px-2">
+                {(["TIMELINE", "LOT_TRACE", "OBJ_INDEX"] as const).map(tab => {
+                  const active =
+                    tab === "TIMELINE"  ? (centerTab === "TOPOLOGY" || centerTab === "NEXUS") :
+                    tab === "LOT_TRACE" ? centerTab === "LOT_TRACE" :
+                                          centerTab === "OBJ_INDEX";
+                  const labels = { TIMELINE: "Timeline", LOT_TRACE: "Lot Trace", OBJ_INDEX: "Obj Index" };
+                  return (
+                    <button
+                      key={tab}
+                      onClick={() => {
+                        if (tab === "TIMELINE")  setCenterTab("TOPOLOGY");
+                        if (tab === "LOT_TRACE") setCenterTab("LOT_TRACE");
+                        if (tab === "OBJ_INDEX") setCenterTab("OBJ_INDEX");
+                      }}
+                      className={[
+                        "text-[9px] font-bold px-2 py-2 border-b-2 transition-colors -mb-px",
+                        active
+                          ? "border-purple-500 text-purple-700"
+                          : "border-transparent text-slate-400 hover:text-purple-500",
+                      ].join(" ")}
+                    >
+                      {labels[tab]}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             {mode === "LIVE" ? (
               <>
-                {/* hide-idle toggle */}
                 <div className="px-3 py-1.5 border-b border-slate-100 bg-white shrink-0 flex items-center justify-end">
                   <button
                     onClick={() => setHideIdle(p => !p)}
@@ -402,77 +466,179 @@ export default function Dashboard() {
                 </div>
               </>
             ) : (
-              <div className="flex-1 overflow-y-auto">
-                {/* Machine picker grid */}
-                <div className="px-2 pt-2 pb-1 grid grid-cols-2 gap-1 border-b border-slate-100">
-                  {sorted.map(m => (
-                    <button
-                      key={m.id}
-                      onClick={() => handleSelectMachine(m)}
-                      className={[
-                        "text-[10px] font-mono px-2 py-1.5 rounded border text-left truncate transition-colors",
-                        m.id === selectedId
-                          ? "bg-purple-50 border-purple-300 text-purple-700"
-                          : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50",
-                      ].join(" ")}
-                    >
-                      {m.id}
-                    </button>
-                  ))}
-                </div>
-                {/* Event timeline */}
-                {selectedId ? (
-                  <div className="pt-3 pb-2">
-                    <TraceTimeline
-                      toolId={selectedId}
+              <div className="flex-1 overflow-y-auto flex flex-col">
+                {/* Machine picker grid (only for Timeline/Nexus sub-tab) */}
+                {(centerTab === "TOPOLOGY" || centerTab === "NEXUS") && (
+                  <div className="px-2 pt-2 pb-1 grid grid-cols-2 gap-1 border-b border-slate-100 shrink-0">
+                    {sorted.map(m => (
+                      <button
+                        key={m.id}
+                        onClick={() => handleSelectMachine(m)}
+                        className={[
+                          "text-[10px] font-mono px-2 py-1.5 rounded border text-left truncate transition-colors",
+                          m.id === selectedId
+                            ? "bg-purple-50 border-purple-300 text-purple-700"
+                            : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50",
+                        ].join(" ")}
+                      >
+                        {m.id}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Timeline (only when Timeline sub-tab active) */}
+                {(centerTab === "TOPOLOGY" || centerTab === "NEXUS") && (
+                  selectedId ? (
+                    <div className="pt-3 pb-2 flex-1 overflow-y-auto">
+                      <TraceTimeline
+                        toolId={selectedId}
+                        selectedTime={traceEventTime}
+                        onSelect={handleTraceSelect}
+                        addLog={addLog}
+                      />
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-slate-400 text-center py-6">Select a machine above</p>
+                  )
+                )}
+
+                {/* Lot Trace */}
+                {centerTab === "LOT_TRACE" && (
+                  <div className="flex-1 overflow-hidden">
+                    <LotTimelinePanel
+                      onStepSelect={handleTraceSelect}
                       selectedTime={traceEventTime}
-                      onSelect={handleTraceSelect}
-                      addLog={addLog}
                     />
                   </div>
-                ) : (
-                  <p className="text-[11px] text-slate-400 text-center py-6">Select a machine above</p>
+                )}
+
+                {/* Obj Index */}
+                {centerTab === "OBJ_INDEX" && (
+                  <ObjIndexProvider state={objIndexState}>
+                    <div className="flex-1 overflow-hidden">
+                      <ObjIndexLeftPanel />
+                    </div>
+                  </ObjIndexProvider>
                 )}
               </div>
             )}
           </aside>
 
-          {/* ── CENTER: Topology canvas ─────────────────────────────── */}
-          <main className="relative bg-white bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] [background-size:24px_24px] overflow-hidden border-r border-slate-200">
-            {/* Title overlay */}
-            <div className="absolute top-5 left-6 z-10 pointer-events-none">
-              <h2 className="text-xl font-bold text-slate-700">
-                {isTrace ? "Historical Snapshot" : "Context Topology"}
-              </h2>
-              <p className="text-xs text-slate-400 mt-0.5 font-medium">
-                {isTrace && traceEventTime
-                  ? `Context locked at ${displayClock}`
-                  : "Click nodes to fetch detailed API data"}
-              </p>
+          {/* ── CENTER ──────────────────────────────────────────────── */}
+          <main className="relative bg-[#0b1120] overflow-hidden border-r border-slate-800 flex flex-col">
+
+            <div className="shrink-0 flex items-center justify-between px-4 pt-3 pb-0 z-10">
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setCenterTab("TOPOLOGY")}
+                  className={[
+                    "text-[10px] font-bold px-2.5 py-1 rounded-md border transition-colors",
+                    centerTab === "TOPOLOGY"
+                      ? "bg-slate-800 text-slate-200 border-slate-600 shadow-sm"
+                      : "bg-transparent text-slate-500 border-transparent hover:text-slate-300",
+                  ].join(" ")}
+                >
+                  TOPOLOGY
+                </button>
+                <button
+                  onClick={() => setCenterTab("NEXUS")}
+                  className={[
+                    "text-[10px] font-bold px-2.5 py-1 rounded-md border transition-colors flex items-center gap-1",
+                    centerTab === "NEXUS"
+                      ? "bg-violet-900/50 text-violet-300 border-violet-700 shadow-sm"
+                      : "bg-transparent text-slate-500 border-transparent hover:text-violet-400",
+                  ].join(" ")}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 24 24"
+                       fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+                    <path d="m8.59 13.51 6.83 3.98M15.41 6.51l-6.82 3.98"/>
+                  </svg>
+                  NEXUS
+                </button>
+                <button
+                  onClick={() => setCenterTab("ARCH")}
+                  className={[
+                    "text-[10px] font-bold px-2.5 py-1 rounded-md border transition-colors flex items-center gap-1",
+                    centerTab === "ARCH"
+                      ? "bg-cyan-900/50 text-cyan-300 border-cyan-700 shadow-sm"
+                      : "bg-transparent text-slate-500 border-transparent hover:text-cyan-400",
+                  ].join(" ")}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="9" height="9" viewBox="0 0 24 24"
+                       fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+                    <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+                  </svg>
+                  ARCH
+                </button>
+              </div>
+
+              {(centerTab === "TOPOLOGY" || centerTab === "LOT_TRACE") && (
+                <div className="pointer-events-none text-right">
+                  <h2 className="text-base font-bold text-slate-300">
+                    {centerTab === "LOT_TRACE" ? "Lot Step Topology" : isTrace ? "Historical Snapshot" : "Context Topology"}
+                  </h2>
+                  <p className="text-[10px] text-slate-500 mt-0">
+                    {centerTab === "LOT_TRACE"
+                      ? traceEventTime ? `Step locked · ${displayClock}` : "Select a step from the timeline"
+                      : isTrace && traceEventTime
+                        ? `Locked at ${displayClock}`
+                        : "Click nodes to fetch detail"}
+                  </p>
+                </div>
+              )}
             </div>
-            <div className="h-full p-4">
-              <TopologyView
-                machine={selected}
-                activeNode={activeNode}
-                onNodeClick={handleNodeClick}
-              />
+
+            <div className="flex-1 overflow-hidden">
+              {(centerTab === "TOPOLOGY" || centerTab === "LOT_TRACE") && (
+                <div className="h-full p-4">
+                  <TopologyView
+                    machine={selected}
+                    activeNode={activeNode}
+                    onNodeClick={handleNodeClick}
+                  />
+                </div>
+              )}
+              {centerTab === "NEXUS" && <NexusCenter />}
+              {centerTab === "ARCH"  && (
+                <ArchView machineCount={machines.filter(m => m.stage !== "STAGE_IDLE").length} />
+              )}
+              {centerTab === "OBJ_INDEX" && (
+                <ObjIndexProvider state={objIndexState}>
+                  <ObjIndexCenterPanel />
+                </ObjIndexProvider>
+              )}
             </div>
+
           </main>
 
-          {/* ── RIGHT: Inspector ──────────────────────────────────────── */}
+          {/* ── RIGHT ───────────────────────────────────────────────── */}
           <aside className="bg-white overflow-hidden shadow-[-4px_0_15px_rgba(0,0,0,0.03)] z-10">
-            <RightInspector
-              machine={selected}
-              activeNode={activeNode}
-              traceEventTime={mode === "TRACE" ? traceEventTime : null}
-              addLog={addLog}
-            />
+            {centerTab === "OBJ_INDEX" ? (
+              <ObjIndexProvider state={objIndexState}>
+                <ObjIndexRightPanel />
+              </ObjIndexProvider>
+            ) : (
+              <RightInspector
+                machine={selected}
+                activeNode={activeNode}
+                traceEventTime={mode === "TRACE" ? traceEventTime : null}
+                addLog={addLog}
+              />
+            )}
           </aside>
         </div>
 
-        {/* ── BOTTOM: Console panel ────────────────────────────────── */}
-        <div className="shrink-0 h-48">
-          <ConsolePanel logs={logs} onClear={clear} />
+        {/* ── BOTTOM: Console ─────────────────────────────────────── */}
+        <div className="shrink-0">
+          <ConsolePanel
+            logs={logs}
+            onClear={clear}
+            isOpen={consoleOpen}
+            onToggle={() => setConsoleOpen(v => !v)}
+          />
         </div>
       </div>
     </div>

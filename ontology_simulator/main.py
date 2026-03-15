@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.database import connect_and_init, disconnect
 from app.mes.simulator import run as run_mes, stop as stop_mes
 from app.api.routes import router
+from app.api.v2.routes import router as router_v2
 from app.ws.manager import manager as ws_manager
 
 
@@ -44,6 +45,7 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(router_v2)
 
 
 @app.websocket("/ws")

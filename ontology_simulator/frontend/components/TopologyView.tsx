@@ -1,239 +1,341 @@
 "use client";
+import { useEffect, useMemo, useState } from "react";
 import { MachineState } from "@/lib/types";
 
-export type TopoNode = "LOT" | "TOOL" | "RECIPE" | "APC" | "DC" | "SPC";
+// ── Object-API Registry ───────────────────────────────────────────────────────
+// Each entry registers the display label and optional query endpoint per type.
+// New object types can be added here; layout logic auto-adapts without hardcoding.
+export const OBJECT_API_REGISTRY: Record<string, {
+  label: string;
+  isCircle?: boolean;
+  queryEndpoint?: (id: string) => string;
+}> = {
+  TOOL:   { label: "EQUIPMENT" },
+  LOT:    { label: "WIP",    isCircle: true, queryEndpoint: id => `/api/v2/ontology/trajectory/${id}` },
+  RECIPE: { label: "RECIPE", queryEndpoint: _id => `/api/v2/ontology/indices/RECIPE` },
+  APC:    { label: "APC",    queryEndpoint: _id => `/api/v2/ontology/indices/APC` },
+  DC:     { label: "DC",     queryEndpoint: _id => `/api/v2/ontology/indices/DC` },
+  SPC:    { label: "SPC",    queryEndpoint: _id => `/api/v2/ontology/indices/SPC` },
+};
 
+// ── 100-Color Ordered Palette (golden-angle HSL) ──────────────────────────────
+// Assigned by node discovery order, NOT hardcoded per type.
+// ~100 visually distinct colors optimised for dark backgrounds.
+const _GA = 137.508;
+const PALETTE: string[] = Array.from({ length: 100 }, (_, i) => {
+  const h = (i * _GA) % 360;
+  const s = 65 + (i % 3) * 10;   // 65 | 75 | 85%
+  const l = 58 + (i % 4) * 4;    // 58 | 62 | 66 | 70%
+  return `hsl(${h.toFixed(0)},${s}%,${l}%)`;
+});
+
+// ── Layout constants ──────────────────────────────────────────────────────────
+const VW = 640, VH = 420;
+const NODE_W = 148, NODE_H = 58, NODE_R = 10;
+const TOOL_POS = { x: 100, y: VH / 2 };
+const LOT_POS  = { x: 320, y: VH / 2 };
+const LOT_R    = 46;
+const RIGHT_X  = 540;
+
+// ── Equipment display names ───────────────────────────────────────────────────
 const DISPLAY_NAME: Record<string, string> = {
   "EQP-01": "ETCH-LAM-01", "EQP-02": "ETCH-LAM-02",
   "EQP-03": "ETCH-LAM-03", "EQP-04": "ETCH-LAM-04",
   "EQP-05": "PHO-ASML-01", "EQP-06": "PHO-ASML-02",
   "EQP-07": "CVD-AMAT-01", "EQP-08": "CVD-AMAT-02",
-  "EQP-09": "IMP-VARIAN-01","EQP-10": "IMP-VARIAN-02",
+  "EQP-09": "IMP-VARIAN-01", "EQP-10": "IMP-VARIAN-02",
 };
 
-// Positions for rect nodes (center x, y)
-const RECT_POSITIONS = {
-  TOOL:   { x: 100, y: 100 },
-  RECIPE: { x: 540, y: 100 },
-  APC:    { x: 540, y: 210 },
-  DC:     { x: 540, y: 320 },
-  SPC:    { x: 100, y: 320 },
-} as const;
+// ── Context API types ─────────────────────────────────────────────────────────
+interface CtxRoot {
+  lot_id: string; step: string; event_id: string; event_time: string;
+  spc_status: string | null; recipe_id: string | null; apc_id: string | null; tool_id: string | null;
+}
+interface CtxResponse {
+  root: CtxRoot;
+  tool:   Record<string, unknown> | null;
+  recipe: Record<string, unknown> | null;
+  apc:    Record<string, unknown> | null;
+  dc:     Record<string, unknown> | null;
+  spc:    Record<string, unknown> | null;
+}
 
-// LOT is a circle at center
-const LOT_POS = { x: 320, y: 210 };
-const LOT_R   = 42;
+// ── Graph types ───────────────────────────────────────────────────────────────
+interface GraphNode {
+  id: string; type: string; label: string; value: string;
+  subtext?: string; isOOC?: boolean; isCircle?: boolean;
+  pos: { x: number; y: number }; paletteIdx: number;
+}
+interface GraphEdge { from: string; to: string; }
 
-const NODE_W = 130, NODE_H = 54;
+// ── API base URL ──────────────────────────────────────────────────────────────
+function getApiBase() {
+  if (typeof window === "undefined") return "http://localhost:8001";
+  const local = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+  return local
+    ? `http://${window.location.hostname}:8001`
+    : `${window.location.origin}/simulator-api`;
+}
 
-const NODE_STYLE: Record<TopoNode, { bg: string; border: string; label: string; labelColor: string }> = {
-  TOOL:   { bg: "#F8FAFC", border: "#94A3B8", label: "EQUIPMENT",  labelColor: "#64748B" },
-  LOT:    { bg: "#EFF6FF", border: "#3B82F6", label: "WIP",        labelColor: "#2563EB" },
-  RECIPE: { bg: "#F0FDF4", border: "#22C55E", label: "RECIPE",     labelColor: "#16A34A" },
-  APC:    { bg: "#F0F9FF", border: "#0EA5E9", label: "APC",        labelColor: "#0284C7" },
-  DC:     { bg: "#EEF2FF", border: "#818CF8", label: "DC",         labelColor: "#4F46E5" },
-  SPC:    { bg: "#FFFBEB", border: "#F59E0B", label: "SPC",        labelColor: "#D97706" },
+// ── Build dynamic graph from context response ─────────────────────────────────
+// machineId: when provided, the EQUIPMENT display uses this ID (not ctx.root.tool_id).
+// This prevents simulator data races where the same (lot_id, step) appears under
+// multiple machines — the caller always knows the authoritative machine.
+function buildGraph(ctx: CtxResponse, machineId?: string): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  const nodes: GraphNode[] = [];
+  const edges: GraphEdge[] = [];
+  let pi = 0; // palette index — discovery order assigns color
+
+  const root  = ctx.root;
+  const isOOC = root.spc_status === "OOC";
+
+  // Root: TOOL (always guaranteed from event)
+  const toolId    = root.tool_id ?? "UNKNOWN";
+  const displayId = machineId ?? toolId;  // caller's machine.id takes precedence
+  nodes.push({ id: toolId, type: "TOOL", label: "EQUIPMENT",
+    value: DISPLAY_NAME[displayId] ?? displayId, pos: TOOL_POS, paletteIdx: pi++ });
+
+  // Layer 2: LOT (circle — it has children)
+  const lotId = root.lot_id;
+  nodes.push({ id: lotId, type: "LOT", label: "WIP",
+    value: lotId, isCircle: true, pos: LOT_POS, paletteIdx: pi++ });
+  edges.push({ from: toolId, to: lotId });
+
+  // Layer 3+: subsystem objects discovered from the event
+  // edgeFrom: RECIPE → TOOL (recipe is a tool configuration); APC/DC/SPC → LOT (lot-tracking)
+  const discovered: Array<{ type: string; data: Record<string, unknown> | null; defaultId: string; edgeFrom: string }> = [
+    { type: "RECIPE", data: ctx.recipe, defaultId: root.recipe_id ?? "—", edgeFrom: toolId },
+    { type: "APC",    data: ctx.apc,    defaultId: root.apc_id    ?? "—", edgeFrom: lotId  },
+    { type: "DC",     data: ctx.dc,     defaultId: "DC",                  edgeFrom: lotId  },
+    { type: "SPC",    data: ctx.spc,    defaultId: "SPC",                 edgeFrom: lotId  },
+  ].filter(d => d.data !== null);
+
+  const N  = discovered.length;
+  const y0 = N <= 1 ? VH / 2 : 60;
+  const dy = N <= 1 ? 0 : (360 - 60) / (N - 1);
+
+  discovered.forEach(({ type, data, defaultId, edgeFrom }, i) => {
+    const reg = OBJECT_API_REGISTRY[type];
+    const rawId = (data?.objectID as string) ?? defaultId;
+    const value = rawId.length > 14 ? rawId.slice(0, 13) + "…" : rawId;
+
+    let subtext: string | undefined;
+    if (type === "SPC") {
+      subtext = isOOC ? "OOC" : "IN_CTRL";
+    } else if (type === "APC") {
+      const params = data?.parameters as Record<string, unknown> | undefined;
+      const bias = params?.current_bias as number | undefined;
+      if (bias !== undefined) subtext = `${bias >= 0 ? "+" : ""}${bias.toFixed(4)} nm`;
+    }
+
+    nodes.push({
+      id: rawId, type, label: reg?.label ?? type, value,
+      subtext, isOOC: type === "SPC" && isOOC,
+      pos: { x: RIGHT_X, y: y0 + i * dy }, paletteIdx: pi++,
+    });
+    edges.push({ from: edgeFrom, to: rawId });
+  });
+
+  return { nodes, edges };
+}
+
+// ── Exported type alias (backward compat for Dashboard/ForensicHall) ──────────
+export type TopoNode = string;
+
+// ── Background style ──────────────────────────────────────────────────────────
+const BG: React.CSSProperties = {
+  background: "#0b1120",
+  backgroundImage: "radial-gradient(#1e293b 1px, transparent 1px)",
+  backgroundSize: "24px 24px",
 };
 
-const EDGES: [TopoNode, TopoNode][] = [
-  ["TOOL",   "LOT"],
-  ["LOT",    "RECIPE"],
-  ["LOT",    "APC"],
-  ["LOT",    "DC"],
-  ["LOT",    "SPC"],
-];
-
-function getCenter(node: TopoNode): { x: number; y: number } {
-  if (node === "LOT") return LOT_POS;
-  return RECT_POSITIONS[node as keyof typeof RECT_POSITIONS];
-}
-
-function nodeValue(type: TopoNode, machine: MachineState): string {
-  switch (type) {
-    case "TOOL":   return DISPLAY_NAME[machine.id] ?? machine.id;
-    case "LOT":    return machine.lotId   ?? "NO WAFER";
-    case "RECIPE": return machine.recipe  ?? "—";
-    case "APC":    return machine.apcId   ?? "—";
-    case "DC":     return machine.lotId ? `DC-${machine.lotId.slice(-4)}-${(machine.step ?? "").slice(-3)}` : "—";
-    case "SPC":    return machine.lotId ? `SPC-${machine.lotId.slice(-4)}` : "SPC CHARTS";
-  }
-}
-
-function nodeSub(type: TopoNode, machine: MachineState): string | null {
-  if (type === "APC" && machine.bias !== null) {
-    const sign = machine.bias >= 0 ? "+" : "";
-    return `${sign}${machine.bias.toFixed(4)} nm Bias`;
-  }
-  return null;
-}
-
+// ── Component ─────────────────────────────────────────────────────────────────
 export default function TopologyView({
   machine,
   activeNode,
   onNodeClick,
 }: {
   machine: MachineState | null;
-  activeNode?: TopoNode | null;
-  onNodeClick?: (node: TopoNode) => void;
+  activeNode?: string | null;
+  onNodeClick?: (nodeId: string) => void;
 }) {
-  if (!machine) {
+  const [ctx,     setCtx]     = useState<CtxResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const lotId = machine?.lotId ?? null;
+  const step  = machine?.step  ?? null;
+
+  // Fetch context graph whenever lot+step changes
+  useEffect(() => {
+    if (!lotId || !step) { setCtx(null); return; }
+    const url = `${getApiBase()}/api/v2/ontology/context?lot_id=${encodeURIComponent(lotId)}&step=${encodeURIComponent(step)}`;
+    setLoading(true);
+    fetch(url)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setCtx(d ?? null))
+      .catch(() => setCtx(null))
+      .finally(() => setLoading(false));
+  }, [lotId, step]);
+
+  const graph = useMemo(() => ctx ? buildGraph(ctx, machine?.id ?? undefined) : null, [ctx, machine?.id]);
+
+  const clickable = !!onNodeClick;
+
+  // ── Empty state ──────────────────────────────────────────────────────────────
+  if (!machine || !machine.lotId) {
     return (
-      <div className="h-full flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-slate-400 text-sm">Select a machine from the left panel</p>
-          <p className="text-slate-300 text-xs mt-1">to view its process topology</p>
+      <div className="h-full flex items-center justify-center rounded-lg" style={BG}>
+        <div className="text-center opacity-40">
+          <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24"
+            fill="none" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+            className="mx-auto mb-4">
+            <rect width="18" height="18" x="3" y="3" rx="2"/>
+            <circle cx="9" cy="9" r="2"/>
+            <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
+          </svg>
+          <p className="text-slate-400 text-sm">Select a machine or OOC alert</p>
+          <p className="text-slate-600 text-xs mt-1">to reconstruct the scene</p>
         </div>
       </div>
     );
   }
 
-  const clickable = !!onNodeClick;
-
-  return (
-    <div className="h-full flex flex-col">
-      <div className="flex-1 flex items-center justify-center p-4">
-        <svg
-          viewBox="0 0 640 420"
-          className="w-full max-w-[620px]"
-          style={{ overflow: "visible" }}
-        >
-          {/* Connecting lines */}
-          {EDGES.map(([from, to]) => {
-            const a = getCenter(from);
-            const b = getCenter(to);
-            const isActiveLine = activeNode === from || activeNode === to;
-            return (
-              <line
-                key={`${from}-${to}`}
-                x1={a.x} y1={a.y} x2={b.x} y2={b.y}
-                stroke={isActiveLine ? "#94a3b8" : "#e2e8f0"}
-                strokeWidth={isActiveLine ? 2.5 : 2}
-              />
-            );
-          })}
-
-          {/* Rect nodes (TOOL, RECIPE, APC, DC, SPC) */}
-          {(Object.keys(RECT_POSITIONS) as (keyof typeof RECT_POSITIONS)[]).map(type => {
-            const pos    = RECT_POSITIONS[type];
-            const style  = NODE_STYLE[type];
-            const value  = nodeValue(type, machine);
-            const sub    = nodeSub(type, machine);
-            const isActive = activeNode === type;
-            const x = pos.x - NODE_W / 2;
-            const y = pos.y - NODE_H / 2;
-
-            return (
-              <g
-                key={type}
-                onClick={() => onNodeClick?.(type)}
-                style={{ cursor: clickable ? "pointer" : "default" }}
-              >
-                {isActive && (
-                  <rect
-                    x={x - 4} y={y - 4}
-                    width={NODE_W + 8} height={NODE_H + 8}
-                    rx={10} fill="none"
-                    stroke={style.border} strokeWidth={2.5} opacity={0.5}
-                  />
-                )}
-                <rect
-                  x={x} y={y} width={NODE_W} height={NODE_H} rx={7}
-                  fill={style.bg}
-                  stroke={style.border}
-                  strokeWidth={isActive ? 2.5 : 1.5}
-                />
-                <text
-                  x={pos.x} y={y + 16}
-                  textAnchor="middle"
-                  fill={style.labelColor}
-                  fontSize={9} fontWeight={700}
-                  fontFamily="Inter, system-ui"
-                  letterSpacing="0.1em"
-                >
-                  {style.label}
-                </text>
-                <text
-                  x={pos.x} y={y + (sub ? 31 : 34)}
-                  textAnchor="middle"
-                  fill="#1E293B"
-                  fontSize={11} fontWeight={500}
-                  fontFamily="'JetBrains Mono', 'Courier New', monospace"
-                >
-                  {value.length > 13 ? value.slice(0, 12) + "…" : value}
-                </text>
-                {sub && (
-                  <text
-                    x={pos.x} y={y + 44}
-                    textAnchor="middle"
-                    fill={machine.biasAlert ? "#D97706" : "#0284C7"}
-                    fontSize={9.5} fontWeight={500}
-                    fontFamily="'JetBrains Mono', 'Courier New', monospace"
-                  >
-                    {sub}
-                  </text>
-                )}
-              </g>
-            );
-          })}
-
-          {/* LOT node — circle */}
-          {(() => {
-            const style    = NODE_STYLE["LOT"];
-            const value    = nodeValue("LOT", machine);
-            const isActive = activeNode === "LOT";
-            return (
-              <g
-                onClick={() => onNodeClick?.("LOT")}
-                style={{ cursor: clickable ? "pointer" : "default" }}
-              >
-                {isActive && (
-                  <circle
-                    cx={LOT_POS.x} cy={LOT_POS.y} r={LOT_R + 6}
-                    fill="none"
-                    stroke={style.border} strokeWidth={2.5} opacity={0.45}
-                  />
-                )}
-                <circle
-                  cx={LOT_POS.x} cy={LOT_POS.y} r={LOT_R}
-                  fill={style.bg}
-                  stroke={style.border}
-                  strokeWidth={isActive ? 2.5 : 2}
-                />
-                <text
-                  x={LOT_POS.x} y={LOT_POS.y - 10}
-                  textAnchor="middle"
-                  fill={style.labelColor}
-                  fontSize={9} fontWeight={700}
-                  fontFamily="Inter, system-ui"
-                  letterSpacing="0.1em"
-                >
-                  {style.label}
-                </text>
-                <text
-                  x={LOT_POS.x} y={LOT_POS.y + 8}
-                  textAnchor="middle"
-                  fill="#1E293B"
-                  fontSize={11} fontWeight={600}
-                  fontFamily="'JetBrains Mono', 'Courier New', monospace"
-                >
-                  {value.length > 10 ? value.slice(0, 9) + "…" : value}
-                </text>
-              </g>
-            );
-          })()}
-        </svg>
+  // ── Loading ───────────────────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="h-full flex items-center justify-center rounded-lg" style={BG}>
+        <span className="text-slate-500 text-xs animate-pulse font-mono">
+          Fetching context graph…
+        </span>
       </div>
+    );
+  }
 
-      {onNodeClick && (
-        <p className="text-[10px] text-slate-400 text-center pb-1">
-          Click a node to inspect its state
-        </p>
-      )}
-      <p className="text-xs text-slate-400 text-center pb-3">
-        {machine.lotId
-          ? `${DISPLAY_NAME[machine.id] ?? machine.id} · ${machine.lotId} · ${machine.step ?? ""}`
-          : `${DISPLAY_NAME[machine.id] ?? machine.id} · Idle`}
-      </p>
+  // ── Fallback to minimal graph (TOOL + LOT only) if context fetch failed ───────
+  const nodes: GraphNode[] = graph?.nodes ?? [
+    { id: machine.id, type: "TOOL", label: "EQUIPMENT",
+      value: DISPLAY_NAME[machine.id] ?? machine.id, pos: TOOL_POS, paletteIdx: 0 },
+    { id: machine.lotId!, type: "LOT", label: "WIP",
+      value: machine.lotId!, isCircle: true, pos: LOT_POS, paletteIdx: 1 },
+  ];
+  const edges: GraphEdge[] = graph?.edges ?? [{ from: machine.id, to: machine.lotId! }];
+
+  const center  = (id: string) => nodes.find(n => n.id === id)?.pos ?? { x: 0, y: 0 };
+  // activeNode stores the node TYPE (e.g. "TOOL", "APC") for RightInspector compat
+  const typeOf  = (id: string) => nodes.find(n => n.id === id)?.type ?? id;
+
+  // ── SVG render ────────────────────────────────────────────────────────────────
+  return (
+    <div className="h-full w-full relative overflow-hidden rounded-lg" style={BG}>
+      <svg viewBox={`0 0 ${VW} ${VH}`} className="w-full h-full" style={{ overflow: "visible" }}>
+        <defs>
+          <style>{`
+            @keyframes dashMove { to { stroke-dashoffset: -60; } }
+            .topo-edge        { fill:none; stroke:#334155; stroke-width:2;   stroke-dasharray:6 4; animation:dashMove 3s linear infinite; }
+            .topo-edge-active { fill:none; stroke:#64748b; stroke-width:2.5; stroke-dasharray:6 4; animation:dashMove 1.8s linear infinite; }
+            @keyframes pulseRed { 0%,100%{filter:drop-shadow(0 0 0px rgba(239,68,68,0))} 50%{filter:drop-shadow(0 0 10px rgba(239,68,68,0.9))} }
+            .node-ooc { animation: pulseRed 2s ease-in-out infinite; }
+            @keyframes lotPulse { 0%,100%{opacity:0.55} 50%{opacity:1} }
+            .lot-ring { animation: lotPulse 2.5s ease-in-out infinite; }
+          `}</style>
+          <filter id="blue-glow" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="5" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+
+        {/* Edges */}
+        {edges.map(({ from, to }) => {
+          const a = center(from), b = center(to);
+          const active = activeNode === typeOf(from) || activeNode === typeOf(to);
+          return (
+            <line key={`${from}→${to}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+              className={active ? "topo-edge-active" : "topo-edge"} />
+          );
+        })}
+
+        {/* Nodes */}
+        {nodes.map(node => {
+          // Compare by type so RightInspector receives "APC" / "RECIPE" etc.
+          const isActive = activeNode === node.type;
+          const pal = PALETTE[node.paletteIdx] ?? PALETTE[0];
+
+          // LOT: circle
+          if (node.isCircle) {
+            return (
+              <g key={node.id} onClick={() => onNodeClick?.(node.type)}
+                style={{ cursor: clickable ? "pointer" : "default" }}>
+                <circle cx={node.pos.x} cy={node.pos.y} r={LOT_R + 14}
+                  fill="#1e3a8a22" stroke="#1d4ed844" strokeWidth={1} className="lot-ring"/>
+                {isActive && (
+                  <circle cx={node.pos.x} cy={node.pos.y} r={LOT_R + 7}
+                    fill="none" stroke="#38bdf8" strokeWidth={2} opacity={0.7}/>
+                )}
+                <circle cx={node.pos.x} cy={node.pos.y} r={LOT_R}
+                  fill="#1e3a8a55" stroke={isActive ? "#38bdf8" : "#3b82f6"}
+                  strokeWidth={isActive ? 3 : 2.5} filter="url(#blue-glow)"/>
+                <text x={node.pos.x} y={node.pos.y - 10} textAnchor="middle" fill="#60a5fa"
+                  fontSize={9} fontWeight={700} fontFamily="Inter,system-ui" letterSpacing="0.12em">
+                  {node.label}
+                </text>
+                <text x={node.pos.x} y={node.pos.y + 9} textAnchor="middle" fill="#ffffff"
+                  fontSize={12} fontWeight={700} fontFamily="'JetBrains Mono',monospace">
+                  {node.value.length > 10 ? node.value.slice(0, 9) + "…" : node.value}
+                </text>
+              </g>
+            );
+          }
+
+          // Rect node: fill/stroke/label derived from palette (or red for OOC)
+          const rectFill  = node.isOOC ? "#450a0a55" : "#1e293b";
+          const stroke    = node.isOOC ? "#ef4444" : pal;
+          const labelFill = node.isOOC ? "#fca5a5" : pal;
+          const valueFill = node.isOOC ? "#fee2e2" : "#f1f5f9";
+          const rx = node.pos.x - NODE_W / 2;
+          const ry = node.pos.y - NODE_H / 2;
+
+          return (
+            <g key={node.id} onClick={() => onNodeClick?.(node.type)}
+              style={{ cursor: clickable ? "pointer" : "default" }}
+              className={node.isOOC ? "node-ooc" : ""}>
+              {isActive && (
+                <rect x={rx - 5} y={ry - 5} width={NODE_W + 10} height={NODE_H + 10} rx={NODE_R + 3}
+                  fill="none" stroke="#38bdf8" strokeWidth={2} opacity={0.6}/>
+              )}
+              <rect x={rx} y={ry} width={NODE_W} height={NODE_H} rx={NODE_R}
+                fill={rectFill} stroke={isActive ? "#38bdf8" : stroke}
+                strokeWidth={isActive ? 2.5 : 1.5}/>
+              <text x={node.pos.x} y={ry + 17} textAnchor="middle" fill={labelFill}
+                fontSize={9} fontWeight={700} fontFamily="Inter,system-ui" letterSpacing="0.12em">
+                {node.label}
+              </text>
+              <text x={node.pos.x} y={ry + (node.subtext ? 33 : 37)} textAnchor="middle" fill={valueFill}
+                fontSize={11} fontWeight={600} fontFamily="'JetBrains Mono',monospace">
+                {node.value}
+              </text>
+              {node.subtext && (
+                <text x={node.pos.x} y={ry + 47} textAnchor="middle"
+                  fill={node.isOOC ? "#ef4444" : pal}
+                  fontSize={9} fontWeight={500} fontFamily="'JetBrains Mono',monospace">
+                  {node.subtext}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+
+      {/* Footer status line */}
+      <div className="absolute bottom-2 left-0 right-0 text-center pointer-events-none">
+        <span className="text-[10px] font-mono text-slate-600">
+          {machine.lotId
+            ? `${DISPLAY_NAME[machine.id] ?? machine.id} · ${machine.lotId} · ${machine.step ?? ""}`
+            : `${DISPLAY_NAME[machine.id] ?? machine.id} · Idle`}
+        </span>
+        {!ctx && !loading && machine.lotId && (
+          <span className="ml-2 text-[10px] font-mono text-amber-700">· fallback</span>
+        )}
+      </div>
     </div>
   );
 }

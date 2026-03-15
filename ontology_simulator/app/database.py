@@ -36,10 +36,12 @@ async def disconnect() -> None:
 
 async def _create_indexes() -> None:
     db = _db
-    await db.object_snapshots.create_index([("objectID", 1), ("objectName", 1), ("eventTime", -1)])
-    await db.object_snapshots.create_index([("lotID", 1), ("objectName", 1), ("eventTime", -1)])
-    await db.events.create_index([("lotID", 1), ("step", 1), ("eventTime", -1)])
-    await db.events.create_index([("toolID", 1), ("step", 1), ("eventTime", -1)])
+    # object_snapshots: queries by (objectID, objectName, status, eventTime)
+    await db.object_snapshots.create_index([("objectID", 1), ("objectName", 1), ("status", 1), ("eventTime", -1)])
+    await db.object_snapshots.create_index([("lotID", 1), ("objectName", 1), ("status", 1), ("eventTime", -1)])
+    # events: queries by (lotID/toolID, step, status, eventType)
+    await db.events.create_index([("lotID", 1), ("step", 1), ("status", 1), ("eventType", 1), ("eventTime", -1)])
+    await db.events.create_index([("toolID", 1), ("step", 1), ("status", 1), ("eventType", 1), ("eventTime", -1)])
     await db.lots.create_index([("lot_id", 1)], unique=True)
     await db.tools.create_index([("tool_id", 1)], unique=True)
     await db.apc_state.create_index([("apc_id", 1)], unique=True)
@@ -71,83 +73,98 @@ async def _seed_tools() -> None:
 
 
 # ── Physical parameter ranges for seeding ────────────────────
-# Each tuple is (lo, hi) in engineering units matching RightInspector labels.
+# Each tuple is (lo, hi) in engineering units.
+# Keys use real semiconductor domain names (no param_N / sensor_N).
 
-_RECIPE_PARAM_RANGES = [
-    (25.0,   35.0),    # param_01  Etch Time         (s)
-    (45.0,   55.0),    # param_02  Etch Depth        (nm)
-    (1.3,    1.8),     # param_03  Etch Rate         (nm/s)
-    (-5.0,   5.0),     # param_04  CD Bias           (nm)
-    (10.0,   20.0),    # param_05  Over-Etch         (%)
-    (13.0,   17.0),    # param_06  Process Press     (mTorr)
-    (0.5,    2.0),     # param_07  Base Press        (mTorr)
-    (40.0,   50.0),    # param_08  Chamber Temp      (°C)
-    (40.0,   50.0),    # param_09  Wall Temp         (°C)
-    (44.0,   56.0),    # param_10  CF4 Setpoint      (sccm)
-    (7.5,    12.5),    # param_11  O2 Setpoint       (sccm)
-    (88.0,   112.0),   # param_12  Ar Setpoint       (sccm)
-    (8.5,    11.5),    # param_13  He Setpoint       (sccm)
-    (1430.,  1570.),   # param_14  Source Power      (W)
-    (330.,   470.),    # param_15  Bias Power        (W)
-    (13.549, 13.571),  # param_16  Source Freq       (MHz)
-    (395.,   405.),    # param_17  Bias Freq         (kHz)
-    (0.30,   0.70),    # param_18  EPD Threshold     (AU)
-    (20.0,   25.0),    # param_19  Min Etch Time     (s)
-    (35.0,   45.0),    # param_20  Max Etch Time     (s)
+_RECIPE_PARAMS: list[tuple[str, float, float]] = [
+    ("etch_time_s",           25.0,   35.0),    # Etch Time         (s)
+    ("target_thickness_nm",   45.0,   55.0),    # Target Thickness  (nm)
+    ("etch_rate_nm_per_s",     1.3,    1.8),    # Etch Rate         (nm/s)
+    ("cd_bias_nm",            -5.0,    5.0),    # CD Bias           (nm)
+    ("over_etch_pct",         10.0,   20.0),    # Over-Etch         (%)
+    ("process_pressure_mtorr",13.0,   17.0),    # Process Press     (mTorr)
+    ("base_pressure_mtorr",    0.5,    2.0),    # Base Press        (mTorr)
+    ("chamber_temp_c",        40.0,   50.0),    # Chamber Temp      (°C)
+    ("wall_temp_c",           40.0,   50.0),    # Wall Temp         (°C)
+    ("cf4_setpoint_sccm",     44.0,   56.0),    # CF4 Setpoint      (sccm)
+    ("o2_setpoint_sccm",       7.5,   12.5),    # O2 Setpoint       (sccm)
+    ("ar_setpoint_sccm",      88.0,  112.0),    # Ar Setpoint       (sccm)
+    ("he_setpoint_sccm",       8.5,   11.5),    # He Setpoint       (sccm)
+    ("source_power_w",      1430.0, 1570.0),    # Source Power      (W)
+    ("bias_power_w",          330.0,  470.0),   # Bias Power        (W)
+    ("source_freq_mhz",    13.549,  13.571),    # Source Freq       (MHz)
+    ("bias_freq_khz",         395.0,  405.0),   # Bias Freq         (kHz)
+    ("epd_threshold_au",       0.30,   0.70),   # EPD Threshold     (AU)
+    ("min_etch_time_s",       20.0,   25.0),    # Min Etch Time     (s)
+    ("max_etch_time_s",       35.0,   45.0),    # Max Etch Time     (s)
 ]
 
-_APC_PARAM_RANGES = [
-    (0.0,    0.05),    # param_01  R2R Bias          (nm)
-    (0.90,   1.10),    # param_02  R2R Gain          (—)
-    (-2.0,   2.0),     # param_03  R2R Offset        (nm)
-    (0.10,   0.40),    # param_04  Model Intercept   (—)
-    (48.0,   52.0),    # param_05  Target CD         (nm)
-    (8.0,    12.0),    # param_06  Target EPD        (s)
-    (90.0,   110.0),   # param_07  Etch Rate         (nm/min)
-    (1.0,    3.0),     # param_08  Uniformity        (%)
-    (0.92,   1.08),    # param_09  FF Correction     (—)
-    (0.20,   0.80),    # param_10  FF Weight         (—)
-    (0.05,   0.25),    # param_11  FF Alpha          (—)
-    (0.10,   0.50),    # param_12  Lot Weight        (—)
-    (0.92,   1.08),    # param_13  FB Correction     (—)
-    (0.05,   0.20),    # param_14  FB Alpha          (—)
-    (0.85,   0.99),    # param_15  Model R²          (—)
-    (0.90,   0.99),    # param_16  Stability Index   (—)
-    (0.001,  0.010),   # param_17  Prediction Error  (nm)
-    (0.90,   0.99),    # param_18  Convergence Idx   (—)
-    (0.001,  0.010),   # param_19  Reg λ             (—)
-    (0.88,   1.12),    # param_20  Response Factor   (—)
+_APC_PARAMS: list[tuple[str, float, float]] = [
+    ("etch_time_offset",       0.0,   0.05),    # Etch Time Offset  (s)
+    ("rf_power_bias",          0.90,   1.10),   # RF Power Bias     (—)
+    ("gas_flow_comp",         -2.0,    2.0),    # Gas Flow Comp     (sccm)
+    ("model_intercept",        0.10,   0.40),   # Model Intercept   (—)
+    ("target_cd_nm",          48.0,   52.0),    # Target CD         (nm)
+    ("target_epd_s",           8.0,   12.0),    # Target EPD        (s)
+    ("etch_rate_pred",        90.0,  110.0),    # Etch Rate Pred    (nm/min)
+    ("uniformity_pct",         1.0,    3.0),    # Uniformity        (%)
+    ("ff_correction",          0.92,   1.08),   # FF Correction     (—)
+    ("ff_weight",              0.20,   0.80),   # FF Weight         (—)
+    ("ff_alpha",               0.05,   0.25),   # FF Alpha          (—)
+    ("lot_weight",             0.10,   0.50),   # Lot Weight        (—)
+    ("fb_correction",          0.92,   1.08),   # FB Correction     (—)
+    ("fb_alpha",               0.05,   0.20),   # FB Alpha          (—)
+    ("model_r2_score",         0.85,   0.99),   # Model R²          (—)
+    ("stability_index",        0.90,   0.99),   # Stability Index   (—)
+    ("prediction_error_nm",    0.001,  0.010),  # Prediction Error  (nm)
+    ("convergence_idx",        0.90,   0.99),   # Convergence Idx   (—)
+    ("reg_lambda",             0.001,  0.010),  # Reg λ             (—)
+    ("response_factor",        0.88,   1.12),   # Response Factor   (—)
 ]
 
 
 async def _seed_recipes() -> None:
-    if await _db.recipe_data.count_documents({}) > 0:
-        return
+    # Force re-seed if existing data still uses legacy param_N naming
+    first = await _db.recipe_data.find_one({})
+    if first:
+        keys = list((first.get("parameters") or {}).keys())
+        if keys and not keys[0].startswith("param_"):
+            return  # Already semantic — skip
+        print("[DB] Detected legacy param_N keys in recipe_data — dropping for re-seed.")
+        await _db.recipe_data.drop()
+
     docs = [
         {
             "recipe_id": f"RCP-{i:03d}",
             "parameters": {
-                f"param_{j:02d}": round(random.uniform(*_RECIPE_PARAM_RANGES[j - 1]), 4)
-                for j in range(1, 21)
+                name: round(random.uniform(lo, hi), 4)
+                for name, lo, hi in _RECIPE_PARAMS
             },
         }
         for i in range(1, TOTAL_RECIPES + 1)
     ]
     await _db.recipe_data.insert_many(docs)
-    print(f"[DB] Seeded {TOTAL_RECIPES} recipes.")
+    print(f"[DB] Seeded {TOTAL_RECIPES} recipes (semantic params).")
 
 
 def _make_apc_params() -> dict:
-    """APC model parameters with physical engineering initial values."""
+    """APC model parameters with real semiconductor domain names."""
     return {
-        f"param_{j:02d}": round(random.uniform(*_APC_PARAM_RANGES[j - 1]), 4)
-        for j in range(1, 21)
+        name: round(random.uniform(lo, hi), 6)
+        for name, lo, hi in _APC_PARAMS
     }
 
 
 async def _seed_apc_models() -> None:
-    if await _db.apc_state.count_documents({}) > 0:
-        return
+    # Force re-seed if existing data still uses legacy param_N naming
+    first = await _db.apc_state.find_one({})
+    if first:
+        keys = list((first.get("parameters") or {}).keys())
+        if keys and not keys[0].startswith("param_"):
+            return  # Already semantic — skip
+        print("[DB] Detected legacy param_N keys in apc_state — dropping for re-seed.")
+        await _db.apc_state.drop()
+
     docs = [
         {
             "apc_id": f"APC-{i:03d}",
@@ -157,4 +174,4 @@ async def _seed_apc_models() -> None:
         for i in range(1, TOTAL_STEPS + 1)
     ]
     await _db.apc_state.insert_many(docs)
-    print(f"[DB] Seeded {TOTAL_STEPS} APC models.")
+    print(f"[DB] Seeded {TOTAL_STEPS} APC models (semantic params).")

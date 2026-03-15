@@ -12,7 +12,7 @@ async def drift_and_upload(apc_id: str, context: dict) -> dict:
     db = get_db()
     apc = await db.apc_state.find_one({"apc_id": apc_id})
 
-    prev_bias = apc["parameters"]["param_01"]
+    prev_bias = apc["parameters"].get("etch_time_offset", 0.0)
 
     # Drift every parameter by ±APC_DRIFT_RATIO
     drifted = {
@@ -29,6 +29,7 @@ async def drift_and_upload(apc_id: str, context: dict) -> dict:
     # Upload snapshot (with mode metadata per v1.1 spec)
     snapshot = {
         "eventTime":        context["eventTime"],
+        "status":           context.get("status", "ProcessStart"),
         "lotID":            context["lotID"],
         "toolID":           context["toolID"],
         "step":             context["step"],
@@ -42,6 +43,6 @@ async def drift_and_upload(apc_id: str, context: dict) -> dict:
     result = await db.object_snapshots.insert_one(snapshot)
     return {
         "snapshot_id": str(result.inserted_id),
-        "new_bias":    drifted["param_01"],
+        "new_bias":    drifted.get("etch_time_offset", 0.0),
         "prev_bias":   prev_bias,
     }
