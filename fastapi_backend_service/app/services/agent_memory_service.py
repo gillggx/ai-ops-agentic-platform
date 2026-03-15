@@ -83,7 +83,14 @@ class AgentMemoryService:
         Splits query into tokens and scores each memory by token hit count.
         Returns top_k by score, then recency.
         """
-        all_memories = await self.list(user_id, limit=_MAX_MEMORIES_PER_USER)
+        # Include user's own memories AND system shared memories (user_id=0)
+        result_own = await self._db.execute(
+            select(AgentMemoryModel)
+            .where(AgentMemoryModel.user_id.in_([user_id, 0]))
+            .order_by(AgentMemoryModel.created_at.desc())
+            .limit(_MAX_MEMORIES_PER_USER)
+        )
+        all_memories = list(result_own.scalars().all())
         if not all_memories:
             return []
 
@@ -134,7 +141,7 @@ class AgentMemoryService:
         if has_filters:
             try:
                 filter_meta["strategy"] = "metadata_prefilter"
-                meta_conditions = [AgentMemoryModel.user_id == user_id]
+                meta_conditions = [AgentMemoryModel.user_id.in_([user_id, 0])]
                 if task_type:
                     meta_conditions.append(AgentMemoryModel.task_type == task_type)
                 if data_subject:
@@ -156,7 +163,7 @@ class AgentMemoryService:
                     result2 = await self._db.execute(
                         select(AgentMemoryModel)
                         .where(
-                            AgentMemoryModel.user_id == user_id,
+                            AgentMemoryModel.user_id.in_([user_id, 0]),
                             AgentMemoryModel.task_type.is_(None),
                             AgentMemoryModel.data_subject.is_(None),
                         )
@@ -177,10 +184,23 @@ class AgentMemoryService:
                 filter_meta["strategy"] = "no_filter_fallback"
                 filter_meta["fallback_reason"] = "migration_pending"
                 await self._db.rollback()
-                candidate_pool = await self.list(user_id, limit=_MAX_MEMORIES_PER_USER)
+                # fallback: include system memories too
+                result_fb = await self._db.execute(
+                    select(AgentMemoryModel)
+                    .where(AgentMemoryModel.user_id.in_([user_id, 0]))
+                    .order_by(AgentMemoryModel.created_at.desc())
+                    .limit(_MAX_MEMORIES_PER_USER)
+                )
+                candidate_pool = list(result_fb.scalars().all())
         else:
             filter_meta["strategy"] = "no_filter_fallback"
-            candidate_pool = await self.list(user_id, limit=_MAX_MEMORIES_PER_USER)
+            result_nf = await self._db.execute(
+                select(AgentMemoryModel)
+                .where(AgentMemoryModel.user_id.in_([user_id, 0]))
+                .order_by(AgentMemoryModel.created_at.desc())
+                .limit(_MAX_MEMORIES_PER_USER)
+            )
+            candidate_pool = list(result_nf.scalars().all())
 
         if not candidate_pool:
             return [], filter_meta

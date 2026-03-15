@@ -560,6 +560,35 @@ _DEFAULT_SYSTEM_PARAMS = [
 ]
 
 
+_SYSTEM_MEMORIES = [
+    {
+        "content": "【MCP ID 鐵律】禁止 hardcode MCP ID 數字。每次 session 的第一個 execute_mcp 前，必須先呼叫 list_mcps 取得當前有效 ID。原因：DB reset 後 ID 會改變。正確流程：list_mcps → 找目標 MCP name → 取 id → execute_mcp(mcp_id=<查到的id>)",
+        "tags": ["iron_rule", "mcp_id", "list_mcps"],
+        "source": "system",
+    },
+    {
+        "content": "【SPC Chart 標準流程 — 嚴格3步】用戶要SPC趨勢/UCL/LCL/OOC批次時：Step1: list_mcps取得get_dc_timeseries的mcp_id → Step2: execute_mcp(get_dc_timeseries, {tool_id, step}) → Step3: analyze_data(spc_chart, {value_col, time_col='event_time', ucl, lcl})。❌禁止用execute_jit畫SPC（make_subplots未安裝）❌禁止逐lot呼叫get_process_context",
+        "tags": ["api_pattern", "spc_chart", "get_dc_timeseries", "analyze_data"],
+        "source": "system",
+    },
+    {
+        "content": "【時間篩選鐵律】simulator時間軸與現實日曆無關。用戶說「今天」「最近」→ 不帶start_time/end_time直接查（結果已按時間倒序，最新在前）。只有用戶明確給出時間戳（如2026-03-15T06:00:00）才使用時間篩選。若加了時間篩選卻回傳空batches → 立即重試不帶時間篩選。",
+        "tags": ["iron_rule", "date_filter", "get_tool_trajectory", "get_lot_trajectory"],
+        "source": "system",
+    },
+    {
+        "content": "【get_tool_trajectory APC OOC分析正確做法】Step1: list_mcps取get_tool_trajectory的id → Step2: execute_mcp(get_tool_trajectory, {tool_id, limit=200}) → Step3: 直接從batches過濾spc_status='OOC'統計apc_id出現次數。關鍵：batches已含apc_id+spc_status，不需要再查每個lot。❌禁止：拿到batches後再逐一呼叫get_lot_trajectory或get_process_context",
+        "tags": ["api_pattern", "get_tool_trajectory", "apc", "ooc"],
+        "source": "system",
+    },
+    {
+        "content": "【analyze_data spc_chart欄位映射】get_dc_timeseries回傳結構：{timeseries:[{event_time, lot_id, step, dc_params:{...}, spc_status}], baseline:{mean, ucl, lcl, param_name}}。映射：value_col=dc_params裡的量測欄名（如chamber_pressure）, time_col='event_time', ucl=baseline.ucl, lcl=baseline.lcl。可用group_col='lot_id'顯示批次標注。",
+        "tags": ["api_pattern", "analyze_data", "spc_chart", "get_dc_timeseries"],
+        "source": "system",
+    },
+]
+
+
 async def _seed_data() -> None:
     """On startup: create default users, built-in DataSubjects/EventTypes, SystemParameters."""
     from sqlalchemy import select, delete
@@ -723,6 +752,40 @@ async def _seed_data() -> None:
                     logger.info("Updated OntologySim system MCP: %s", spec["name"])
         except Exception as _seed_err2:
             logger.warning("OntologySim MCP seeding skipped: %s", _seed_err2)
+            await db.rollback()
+
+        # ── 1d. Seed system shared memories (user_id=0) ───────────────────────
+        try:
+            from app.models.agent_memory import AgentMemoryModel as _MemModel
+            import json as _json2
+            for mem_spec in _SYSTEM_MEMORIES:
+                tags_json = _json2.dumps(mem_spec["tags"], ensure_ascii=False)
+                # Check by content prefix (first 80 chars) to avoid duplicates
+                content_prefix = mem_spec["content"][:80]
+                result = await db.execute(
+                    select(_MemModel).where(
+                        _MemModel.user_id == 0,
+                        _MemModel.content.like(content_prefix[:60] + "%"),
+                    )
+                )
+                existing_mem = result.scalar_one_or_none()
+                if existing_mem is None:
+                    db.add(_MemModel(
+                        user_id=0,
+                        content=mem_spec["content"],
+                        source=mem_spec["source"],
+                        embedding=tags_json,  # store tags as embedding field (text-based)
+                        ref_id=None,
+                    ))
+                    logger.info("Seeded system memory: %s...", mem_spec["content"][:50])
+                else:
+                    # Update content in case it changed
+                    existing_mem.content = mem_spec["content"]
+                    existing_mem.embedding = tags_json
+                    logger.info("Updated system memory: %s...", mem_spec["content"][:50])
+            await db.commit()
+        except Exception as _mem_err:
+            logger.warning("System memory seeding skipped: %s", _mem_err)
             await db.rollback()
 
         # ── 2. Seed built-in EventTypes (create or update attributes) ─────
