@@ -80,7 +80,7 @@ class Config(BaseSettings):
         description="LLM backend: 'anthropic' (Claude) or 'ollama' (OpenAI-compatible local model)",
     )
     LLM_MODEL: str = Field(
-        default="claude-opus-4-6",
+        default="claude-haiku-4-5-20251001",
         description="Anthropic model ID used when LLM_PROVIDER=anthropic",
     )
     # ── Ollama / OpenAI-compatible settings (used when LLM_PROVIDER=ollama) ──
