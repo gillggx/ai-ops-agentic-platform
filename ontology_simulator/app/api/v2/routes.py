@@ -317,14 +317,75 @@ async def get_graph_context(
             spc_snap = await db.object_snapshots.find_one({"_id": _oid(spc_snap_id)})
             spc = _clean(spc_snap) if spc_snap else {"snapshot_id": spc_snap_id, "orphan": True}
 
+    # ── Summary (LLM-readable, concise) ──────────────────────────────────────
+    summary = _build_summary(root, recipe, apc, dc, spc)
+
     return {
-        "root":   root,
-        "tool":   tool,
-        "recipe": recipe,
-        "apc":    apc,
-        "dc":     dc,
-        "spc":    spc,
+        "root":    root,
+        "tool":    tool,
+        "recipe":  recipe,
+        "apc":     apc,
+        "dc":      dc,
+        "spc":     spc,
+        "summary": summary,
     }
+
+
+def _build_summary(root: dict, recipe: dict | None, apc: dict | None,
+                   dc: dict | None, spc: dict | None) -> str:
+    """One-paragraph text summary for LLM consumption.
+    Surfaces only the diagnostically relevant values — no raw parameter dumps.
+    """
+    parts: list[str] = []
+
+    phase = "⏳ In Progress" if root.get("in_progress") else "Complete"
+    ts    = (root.get("event_time") or "")[:19].replace("T", " ")
+    parts.append(f"[{root['lot_id']} @ {root.get('tool_id','?')} {root['step']} | {ts} | {phase}]")
+
+    # Recipe
+    if recipe and not recipe.get("orphan"):
+        rid = recipe.get("objectID") or recipe.get("recipe_id", "?")
+        parts.append(f"Recipe: {rid}")
+
+    # APC
+    if apc and not apc.get("orphan"):
+        aid   = apc.get("objectID") or apc.get("apc_id", "?")
+        params = apc.get("parameters") or {}
+        bias  = params.get("rf_power_bias") or params.get("model_intercept")
+        bias_str = f" bias={bias:.4f}" if isinstance(bias, (int, float)) else ""
+        parts.append(f"APC: {aid}{bias_str}")
+
+    # DC
+    if dc and not dc.get("orphan"):
+        dc_status = dc.get("status", "?")
+        params    = dc.get("parameters") or {}
+        # Surface any OOC parameters (value outside control limits)
+        ooc_fields: list[str] = []
+        for k, v in params.items():
+            if k.endswith("_ucl") or k.endswith("_lcl"):
+                continue
+            ucl = params.get(f"{k}_ucl")
+            lcl = params.get(f"{k}_lcl")
+            if isinstance(v, (int, float)) and isinstance(ucl, (int, float)) and v > ucl:
+                ooc_fields.append(f"{k}={v:.3f}>UCL{ucl:.3f}")
+            elif isinstance(v, (int, float)) and isinstance(lcl, (int, float)) and v < lcl:
+                ooc_fields.append(f"{k}={v:.3f}<LCL{lcl:.3f}")
+        ooc_str = " VIOLATIONS: " + ", ".join(ooc_fields[:3]) if ooc_fields else ""
+        parts.append(f"DC: {dc_status}{ooc_str}")
+
+    # SPC
+    if spc and not spc.get("orphan"):
+        spc_status = root.get("spc_status") or spc.get("status", "?")
+        charts     = spc.get("charts") or {}
+        ooc_charts = [name for name, c in charts.items()
+                      if isinstance(c, dict) and c.get("status") == "OOC"]
+        ooc_str = f" OOC charts: {', '.join(ooc_charts[:3])}" if ooc_charts else ""
+        parts.append(f"SPC: {spc_status}{ooc_str}")
+
+    if root.get("in_progress"):
+        parts.append("DC/SPC not yet available (step in progress).")
+
+    return " | ".join(parts)
 
 
 # ── GET /trajectory/tool/{tool_id} — Pillar 2: Tool-Centric Trajectory ───────
@@ -635,6 +696,183 @@ async def get_object_indices(
         "object_type": obj,
         "count":       len(records),
         "records":     records,
+    }
+
+
+# ── GET /stats/baseline — DC Parameter Baseline Statistics ───────────────────
+
+@router.get("/stats/baseline")
+async def get_baseline_stats(
+    tool_id:    str            = Query(..., description="Tool ID, e.g. EQP-01"),
+    recipe_id:  str | None     = Query(None, description="Optional recipe filter, e.g. RCP-003"),
+    start_time: datetime | None = Query(None, description="Window start (ISO8601)"),
+    end_time:   datetime | None = Query(None, description="Window end (ISO8601)"),
+    limit:      int            = Query(200, ge=10, le=2000),
+):
+    """
+    DC Parameter Baseline Statistics.
+
+    Returns mean and std_dev for every DC parameter across all ProcessEnd
+    snapshots matching the filter window. Agent uses this to compute
+    3-sigma bounds and judge whether a current reading is anomalous.
+
+    Response includes per-parameter: mean, std_dev, min, max, sample_count.
+    Also returns a 'summary' string for direct LLM consumption.
+    """
+    db = get_db()
+
+    filt: dict = {"toolID": tool_id, "objectName": "DC"}
+    if start_time:
+        st = start_time.astimezone(timezone.utc).replace(tzinfo=None) if start_time.tzinfo else start_time
+        filt.setdefault("eventTime", {})["$gte"] = st
+    if end_time:
+        et = end_time.astimezone(timezone.utc).replace(tzinfo=None) if end_time.tzinfo else end_time
+        filt.setdefault("eventTime", {})["$lte"] = et
+
+    # If recipe_id specified, only include snapshots from events using that recipe
+    event_tool_ids: set | None = None
+    if recipe_id:
+        ev_cursor = db.events.find(
+            {"toolID": tool_id, "recipeID": recipe_id, "status": "ProcessEnd"},
+            {"dcSnapshotId": 1}
+        ).limit(limit)
+        evs = await ev_cursor.to_list(length=limit)
+        snap_ids = [_oid(e["dcSnapshotId"]) for e in evs if e.get("dcSnapshotId")]
+        if not snap_ids:
+            raise HTTPException(404, f"No DC snapshots found for tool={tool_id} recipe={recipe_id}")
+        filt["_id"] = {"$in": snap_ids}
+
+    cursor = db.object_snapshots.find(filt).sort("eventTime", -1).limit(limit)
+    snaps  = await cursor.to_list(length=limit)
+
+    if not snaps:
+        raise HTTPException(404, f"No DC snapshots found for tool_id='{tool_id}'")
+
+    # Accumulate per-parameter statistics
+    import math
+    param_values: dict[str, list[float]] = {}
+    for snap in snaps:
+        for k, v in (snap.get("parameters") or {}).items():
+            if isinstance(v, (int, float)) and not math.isnan(v):
+                param_values.setdefault(k, []).append(float(v))
+
+    stats: dict[str, dict] = {}
+    for param, vals in param_values.items():
+        n    = len(vals)
+        mean = sum(vals) / n
+        std  = math.sqrt(sum((x - mean) ** 2 for x in vals) / n) if n > 1 else 0.0
+        stats[param] = {
+            "mean":         round(mean, 6),
+            "std_dev":      round(std, 6),
+            "min":          round(min(vals), 6),
+            "max":          round(max(vals), 6),
+            "sample_count": n,
+            "ucl_3sigma":   round(mean + 3 * std, 6),
+            "lcl_3sigma":   round(mean - 3 * std, 6),
+        }
+
+    # LLM summary
+    window_str = ""
+    if start_time or end_time:
+        window_str = f" [{(start_time or '').isoformat()[:10]} → {(end_time or '').isoformat()[:10]}]"
+    recipe_str = f" recipe={recipe_id}" if recipe_id else ""
+    summary = (
+        f"Baseline stats for {tool_id}{recipe_str}{window_str}: "
+        f"{len(snaps)} samples, {len(stats)} DC parameters. "
+        f"Use ucl_3sigma/lcl_3sigma to judge if current readings are anomalous."
+    )
+
+    return {
+        "tool_id":      tool_id,
+        "recipe_id":    recipe_id,
+        "sample_count": len(snaps),
+        "param_count":  len(stats),
+        "stats":        stats,
+        "summary":      summary,
+    }
+
+
+# ── POST /search — Semantic Event Search ─────────────────────────────────────
+
+@router.post("/search")
+async def search_events(body: dict):
+    """
+    Semantic Event Search.
+
+    Cross-lot / cross-tool OOC correlation query. Agent uses this to ask:
+    'Find all lots that had SPC OOC on EQP-01 in the past 24 hours.'
+
+    Request body:
+      tool_id     (str, optional)
+      lot_id      (str, optional)
+      step        (str, optional)
+      status      (str, optional) — 'OOC' | 'PASS'
+      start_time  (str, ISO8601, optional)
+      end_time    (str, ISO8601, optional)
+      limit       (int, default 50)
+
+    Returns matching ProcessEnd events with lot_id, tool_id, step,
+    spc_status, event_time, and snapshot IDs.
+    """
+    db    = get_db()
+    limit = min(int(body.get("limit", 50)), 200)
+
+    filt: dict = {"eventType": "LOT_EVENT", "status": "ProcessEnd"}
+
+    if body.get("tool_id"):
+        filt["toolID"] = body["tool_id"]
+    if body.get("lot_id"):
+        filt["lotID"] = body["lot_id"]
+    if body.get("step"):
+        filt["step"] = body["step"]
+    if body.get("status"):
+        filt["spc_status"] = body["status"].upper()
+
+    time_filt: dict = {}
+    for key, op in [("start_time", "$gte"), ("end_time", "$lte")]:
+        val = body.get(key)
+        if val:
+            try:
+                dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+                dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+                time_filt[op] = dt
+            except ValueError:
+                pass
+    if time_filt:
+        filt["eventTime"] = time_filt
+
+    cursor = db.events.find(filt).sort("eventTime", -1).limit(limit)
+    events = await cursor.to_list(length=limit)
+
+    results = []
+    for ev in events:
+        results.append({
+            "event_id":         str(ev["_id"]),
+            "lot_id":           ev.get("lotID"),
+            "tool_id":          ev.get("toolID"),
+            "step":             ev.get("step"),
+            "spc_status":       ev.get("spc_status"),
+            "event_time":       ev["eventTime"].isoformat() + "Z",
+            "dc_snapshot_id":   ev.get("dcSnapshotId"),
+            "spc_snapshot_id":  ev.get("spcSnapshotId"),
+        })
+
+    ooc_count  = sum(1 for r in results if r["spc_status"] == "OOC")
+    pass_count = len(results) - ooc_count
+    summary = (
+        f"Found {len(results)} events matching query "
+        f"({ooc_count} OOC, {pass_count} PASS). "
+        + (f"Filtered to tool={body.get('tool_id')}" if body.get("tool_id") else "")
+        + (f", step={body.get('step')}" if body.get("step") else "")
+        + "."
+    )
+
+    return {
+        "total":   len(results),
+        "ooc_count":  ooc_count,
+        "pass_count": pass_count,
+        "summary": summary,
+        "events":  results,
     }
 
 

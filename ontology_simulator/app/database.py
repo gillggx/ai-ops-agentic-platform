@@ -39,6 +39,8 @@ async def _create_indexes() -> None:
     # object_snapshots: queries by (objectID, objectName, status, eventTime)
     await db.object_snapshots.create_index([("objectID", 1), ("objectName", 1), ("status", 1), ("eventTime", -1)])
     await db.object_snapshots.create_index([("lotID", 1), ("objectName", 1), ("status", 1), ("eventTime", -1)])
+    # SPC domain index: tool-centric OOC search (search_ooc_events, get_baseline_stats)
+    await db.object_snapshots.create_index([("toolID", 1), ("objectName", 1), ("status", 1), ("eventTime", -1)])
     # events: queries by (lotID/toolID, step, status, eventType)
     await db.events.create_index([("lotID", 1), ("step", 1), ("status", 1), ("eventType", 1), ("eventTime", -1)])
     await db.events.create_index([("toolID", 1), ("step", 1), ("status", 1), ("eventType", 1), ("eventTime", -1)])
