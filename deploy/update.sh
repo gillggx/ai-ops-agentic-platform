@@ -71,6 +71,16 @@ else
   sleep 20
 fi
 
+# Always reload nginx so updated nginx.conf (e.g. new /simulator/ location) takes effect.
+# nginx -s reload is graceful — no dropped connections.
+if sudo -n nginx -t 2>/dev/null && sudo -n nginx -s reload 2>/dev/null; then
+  echo "    nginx reload OK"
+elif sudo -n systemctl reload nginx 2>/dev/null; then
+  echo "    nginx reload OK (systemctl)"
+else
+  echo "    ⚠️  nginx reload skipped (no sudo access)"
+fi
+
 echo ""
 echo "🔍  Health checks..."
 
