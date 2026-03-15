@@ -562,7 +562,7 @@ _DEFAULT_SYSTEM_PARAMS = [
 
 async def _seed_data() -> None:
     """On startup: create default users, built-in DataSubjects/EventTypes, SystemParameters."""
-    from sqlalchemy import select
+    from sqlalchemy import select, delete
     from app.models.data_subject import DataSubjectModel
     from app.models.event_type import EventTypeModel
     from app.models.system_parameter import SystemParameterModel
@@ -601,6 +601,36 @@ async def _seed_data() -> None:
                 if existing.roles != desired:
                     existing.roles = desired
                     logger.info("Updated roles for user: %s", u["username"])
+
+        # ── 0b. Production cleanup ────────────────────────────────────────────
+        # Wipe all user-created data so production always starts clean:
+        # no custom MCPs, no Skills — only ontology system MCPs survive.
+        try:
+            from app.models.generated_event import GeneratedEventModel
+            from app.models.routine_check import RoutineCheckModel
+            from app.models.skill_definition import SkillDefinitionModel
+            from app.models.mcp_definition import MCPDefinitionModel as _MCPClean
+
+            # 1. generated_events references skill_definitions via RESTRICT → delete first
+            await db.execute(delete(GeneratedEventModel))
+            # 2. routine_checks references skill_definitions via CASCADE → delete explicitly
+            await db.execute(delete(RoutineCheckModel))
+            # 3. Skills
+            await db.execute(delete(SkillDefinitionModel))
+            # 4. Custom MCPs (may reference system MCPs via system_mcp_id → delete customs first)
+            await db.execute(delete(_MCPClean).where(_MCPClean.mcp_type == "custom"))
+            # 5. Old/legacy system MCPs not in the canonical ontology list
+            _canonical_names = {s["name"] for s in _ONTOLOGY_SYSTEM_MCPS}
+            await db.execute(
+                delete(_MCPClean).where(
+                    (_MCPClean.mcp_type == "system") & (_MCPClean.name.notin_(_canonical_names))
+                )
+            )
+            await db.commit()
+            logger.info("Production cleanup complete — custom MCPs, Skills, legacy system MCPs removed")
+        except Exception as _clean_err:
+            logger.warning("Production cleanup skipped: %s", _clean_err)
+            await db.rollback()
 
         # ── 1. Seed built-in DataSubjects (legacy; keep for backward compat) ──
         for spec in _MOCK_DATA_SUBJECTS:
