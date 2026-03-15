@@ -90,10 +90,13 @@ else
   echo "    ❌  journalctl -u ontology-simulator -n 30"
 fi
 
-# 3. Simulator static pages — served by FastAPI at /simulator/
+# 3. Simulator static pages — served by nginx directly at /simulator/
 SIMULATOR_OK=false
-if wait_for_http "http://127.0.0.1:8000/simulator/" "Simulator frontend (/simulator/)"; then
+if wait_for_http "http://127.0.0.1/simulator/" "Simulator frontend (/simulator/)"; then
   SIMULATOR_OK=true
+elif [[ -f "$FRONTEND_DIR/out/index.html" ]]; then
+  echo "    ⚠️  nginx check failed but out/index.html exists — nginx may need reload"
+  sudo nginx -s reload 2>/dev/null && SIMULATOR_OK=true || true
 else
   echo "    ❌  out/ directory may be missing — try with --rebuild-frontend"
 fi
