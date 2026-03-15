@@ -71,8 +71,16 @@ else
   sleep 20
 fi
 
-# Always reload nginx so updated nginx.conf (e.g. new /simulator/ location) takes effect.
-# nginx -s reload is graceful — no dropped connections.
+# Update nginx config from repo (deploy/nginx.conf → /etc/nginx/sites-available/aiops)
+# and reload so any location changes (e.g. /simulator/) take effect immediately.
+# Domain name is read from the existing installed config to avoid needing setup args.
+NGINX_CONF="/etc/nginx/sites-available/aiops"
+CURRENT_DOMAIN=$(grep -m1 'server_name ' "$NGINX_CONF" 2>/dev/null | awk '{print $2}' | tr -d ';' || true)
+if [[ -n "$CURRENT_DOMAIN" ]] && sudo -n true 2>/dev/null; then
+  sed "s/YOUR_DOMAIN/$CURRENT_DOMAIN/g" "$APP_DIR/deploy/nginx.conf" \
+    | sudo tee "$NGINX_CONF" > /dev/null
+  echo "    nginx.conf updated (domain=$CURRENT_DOMAIN)"
+fi
 if sudo -n nginx -t 2>/dev/null && sudo -n nginx -s reload 2>/dev/null; then
   echo "    nginx reload OK"
 elif sudo -n systemctl reload nginx 2>/dev/null; then
@@ -100,13 +108,15 @@ else
   echo "    ❌  journalctl -u ontology-simulator -n 30"
 fi
 
-# 3. Simulator static pages — served by nginx directly at /simulator/
+# 3. Simulator static pages — served by nginx at /simulator/ (HTTPS via port 443)
+# Check via loopback HTTPS; port 80 always returns 301 (false positive).
 SIMULATOR_OK=false
-if wait_for_http "http://127.0.0.1/simulator/" "Simulator frontend (/simulator/)"; then
+if curl -sfk --max-time 5 "https://127.0.0.1/simulator/" -o /dev/null 2>/dev/null; then
+  echo "    ⏳  Waiting for Simulator frontend (/simulator/) ... ✅  UP"
   SIMULATOR_OK=true
 elif [[ -f "$FRONTEND_DIR/out/index.html" ]]; then
-  echo "    ⚠️  nginx check failed but out/index.html exists — nginx may need reload"
-  sudo nginx -s reload 2>/dev/null && SIMULATOR_OK=true || true
+  echo "    ⚠️  nginx HTTPS check failed but out/index.html exists — check nginx logs"
+  echo "    ❌  sudo nginx -t && journalctl -u nginx -n 20"
 else
   echo "    ❌  out/ directory may be missing — try with --rebuild-frontend"
 fi
