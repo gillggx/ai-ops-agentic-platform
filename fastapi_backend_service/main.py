@@ -230,8 +230,8 @@ _ONTOLOGY_SYSTEM_MCPS = [
             "使用時機：\n"
             "  ① 這批貨在哪些步驟發生 OOC？→ 過濾 spc_status='OOC'\n"
             "  ② 這批貨跑了哪台機台？→ 看 tool_id\n"
-            "  ③ 時間區間過濾：start_time/end_time 填 ISO8601 字串\n"
-            "  ④ 只要最近 N 步：填 limit"
+            "  ③ 只要最近 N 步：填 limit\n"
+            "⚠️ 此 simulator 時間軸與現實日曆無關。使用者說「今天」→ 不要加 start_time/end_time，直接查。"
         ),
         "api_config": {
             "endpoint_url": "http://localhost:8001/api/v2/ontology/trajectory/lot/{lot_id}",
@@ -241,8 +241,8 @@ _ONTOLOGY_SYSTEM_MCPS = [
         "input_schema": {
             "fields": [
                 {"name": "lot_id",     "type": "string",  "description": "批次 ID，格式 LOT-XXXX，e.g. LOT-0001", "required": True},
-                {"name": "start_time", "type": "string",  "description": "查詢時間窗口起始（ISO8601），e.g. 2026-03-15T05:00:00（可選）", "required": False},
-                {"name": "end_time",   "type": "string",  "description": "查詢時間窗口結束（ISO8601），e.g. 2026-03-15T12:00:00（可選）", "required": False},
+                {"name": "start_time", "type": "string",  "description": "查詢時間窗口起始（ISO8601），e.g. 2026-03-15T05:00:00（可選）⚠️ 僅在使用者提供明確時間戳時使用，勿從「今天」推算", "required": False},
+                {"name": "end_time",   "type": "string",  "description": "查詢時間窗口結束（ISO8601），e.g. 2026-03-15T12:00:00（可選）⚠️ 同上", "required": False},
                 {"name": "limit",      "type": "integer", "description": "回傳步驟筆數上限，預設 500（可選）", "required": False},
             ]
         },
@@ -255,17 +255,23 @@ _ONTOLOGY_SYSTEM_MCPS = [
             "- 每筆 batch 已含 apc_id + spc_status，**不需要再呼叫其他 API 就能直接統計 APC 與 OOC 的關聯**\n"
             "- spc_status: 'PASS'、'OOC' 或 null（進行中）\n"
             "\n"
+            "⚠️ 日期篩選鐵律：此 simulator 的時間軸與現實日曆無關。\n"
+            "  - 使用者說「今天」、「最近」→ **直接呼叫，不帶 start_time/end_time**（結果已按時間倒序，最新在前）\n"
+            "  - 若加了時間篩選卻回傳空 batches，必須立即重試（不帶時間篩選）再分析\n"
+            "  - 只有在使用者提供明確時間戳（如 '2026-03-15T06:00:00'）時才使用時間篩選\n"
+            "\n"
             "✅ 正確使用流程（APC OOC 分析）：\n"
-            "  1. 呼叫本 API 取得 batches 清單\n"
+            "  1. 呼叫本 API（不帶時間篩選）取得 batches 清單\n"
             "  2. 直接從 batches 過濾 spc_status='OOC'，統計各 apc_id 出現次數\n"
             "  3. 排序得出「OOC 最多的 APC 模型」→ 不需要追查每個 lot\n"
             "\n"
-            "❌ 錯誤用法：拿到 batches 後再逐一呼叫 get_lot_trajectory 查每個 lot（沒必要，資料已在 batches 裡）\n"
+            "❌ 錯誤用法：\n"
+            "  - 把「今天」轉成日曆日期（如 2025-04-05）後當 start_time 傳入 → 一定空\n"
+            "  - 拿到 batches 後再逐一呼叫 get_lot_trajectory（沒必要，資料已在 batches 裡）\n"
             "\n"
             "其他使用時機：\n"
             "  ① 這台機台最近跑過哪些貨？→ 直接呼叫，不加時間\n"
-            "  ② 某時段的 OOC 率？→ 加 start_time/end_time\n"
-            "  ③ 異常前最後幾批：加 limit，結果已按時間倒序排列（最新在前）"
+            "  ② 異常前最後幾批：加 limit=20，結果已按時間倒序排列（最新在前）"
         ),
         "api_config": {
             "endpoint_url": "http://localhost:8001/api/v2/ontology/trajectory/tool/{tool_id}",
@@ -275,8 +281,8 @@ _ONTOLOGY_SYSTEM_MCPS = [
         "input_schema": {
             "fields": [
                 {"name": "tool_id",    "type": "string",  "description": "機台 ID，格式 EQP-XX，e.g. EQP-01", "required": True},
-                {"name": "start_time", "type": "string",  "description": "查詢時間窗口起始（ISO8601），可選", "required": False},
-                {"name": "end_time",   "type": "string",  "description": "查詢時間窗口結束（ISO8601），可選", "required": False},
+                {"name": "start_time", "type": "string",  "description": "查詢時間窗口起始（ISO8601）⚠️ 僅在使用者提供明確時間戳時使用，勿從「今天」推算日期", "required": False},
+                {"name": "end_time",   "type": "string",  "description": "查詢時間窗口結束（ISO8601）⚠️ 同上，勿推算", "required": False},
                 {"name": "limit",      "type": "integer", "description": "回傳批次筆數上限，預設 200（可選）", "required": False},
             ]
         },
@@ -290,7 +296,8 @@ _ONTOLOGY_SYSTEM_MCPS = [
             "使用時機：\n"
             "  ① 某台機台在某步驟的良率/OOC 率 → 直接看 summary\n"
             "  ② 找出該步驟所有 OOC 批次 → 過濾 spc_status='OOC'\n"
-            "  ③ 跨時段比較：加 start_time/end_time"
+            "  ③ 跨時段比較：加 start_time/end_time（需明確時間戳，勿用「今天」推算）\n"
+            "⚠️ simulator 時間軸與現實日曆無關，使用者說「今天」→ 不帶時間篩選直接查"
         ),
         "api_config": {
             "endpoint_url": "http://localhost:8001/api/v2/ontology/trajectory/tool/{tool_id}/step/{step}",
