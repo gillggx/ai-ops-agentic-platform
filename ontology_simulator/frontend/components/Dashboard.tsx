@@ -65,17 +65,23 @@ function TraceTimeline({
     fetch(url)
       .then(r => r.json())
       .then((docs: EventDoc[]) => {
-        // Dedup by (step, lotID) — keep most-recent event (ProcessEnd wins over ProcessStart
-        // since API returns newest-first). This prevents in-progress ProcessStart events
-        // from showing a spurious PASS badge alongside a completed ProcessEnd row.
-        const seen = new Set<string>();
-        const deduped = docs.filter(d => {
-          if (d.eventType !== "TOOL_EVENT") return false;
+        // Group by (step, lotID) — ProcessEnd always wins over ProcessStart.
+        // Prevents recycled lots (same step run again) from showing ⏳ Processing
+        // over an already-completed PASS/OOC result.
+        const groupMap = new Map<string, EventDoc>();
+        for (const d of docs) {
+          if (d.eventType !== "TOOL_EVENT") continue;
           const key = `${d.step}|${d.lotID}`;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
+          const existing = groupMap.get(key);
+          if (!existing) {
+            groupMap.set(key, d);
+          } else if (existing.status === "ProcessStart" && d.status !== "ProcessStart") {
+            groupMap.set(key, d); // ProcessEnd supersedes ProcessStart
+          }
+        }
+        const deduped = Array.from(groupMap.values())
+          .sort((a, b) => new Date(b.eventTime).getTime() - new Date(a.eventTime).getTime())
+          .slice(0, 30);
         addLog("API_RES", `events for ${toolId}: ${deduped.length} steps`);
         setEvents(deduped);
       })
