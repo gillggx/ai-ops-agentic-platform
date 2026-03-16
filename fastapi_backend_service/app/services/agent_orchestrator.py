@@ -98,18 +98,34 @@ async def _preflight_validate(
 ) -> Optional[Dict[str, Any]]:
     """Pre-flight validation — intercept ambiguous/missing params before execution."""
     if tool_name == "execute_mcp":
+        mcp_name = tool_input.get("mcp_name")
         mcp_id = tool_input.get("mcp_id")
-        if not mcp_id:
+        if mcp_name:
+            # Preferred: look up by name
+            result = await db.execute(
+                select(MCPDefinitionModel).where(MCPDefinitionModel.name == mcp_name)
+            )
+            mcp = result.scalar_one_or_none()
+            if not mcp:
+                return {
+                    "status": "error", "code": "MCP_NOT_FOUND",
+                    "message": (
+                        f"⚠️ 找不到名為 '{mcp_name}' 的 MCP。"
+                        "請確認 <mcp_catalog> 中的 name 欄位是否正確。"
+                    ),
+                }
+        elif mcp_id:
+            result = await db.execute(select(MCPDefinitionModel).where(MCPDefinitionModel.id == mcp_id))
+            mcp = result.scalar_one_or_none()
+            if not mcp:
+                return {
+                    "status": "error", "code": "MCP_NOT_FOUND",
+                    "message": f"⚠️ MCP #{mcp_id} 不存在。請呼叫 list_mcps 取得有效的 MCP 列表後重試。",
+                }
+        else:
             return {
                 "status": "error", "code": "MISSING_MCP_ID",
-                "message": "⚠️ execute_mcp 缺少 mcp_id。請先呼叫 list_mcps 確認正確的 MCP ID 後再重試。",
-            }
-        result = await db.execute(select(MCPDefinitionModel).where(MCPDefinitionModel.id == mcp_id))
-        mcp = result.scalar_one_or_none()
-        if not mcp:
-            return {
-                "status": "error", "code": "MCP_NOT_FOUND",
-                "message": f"⚠️ MCP #{mcp_id} 不存在。請呼叫 list_mcps 取得有效的 MCP 列表後重試。",
+                "message": "⚠️ execute_mcp 缺少 mcp_name 或 mcp_id。請使用 <mcp_catalog> 中的 name 欄位直接指定 MCP。",
             }
         # Custom MCP: only validate against its own input_schema (never inherit parent's)
         mcp_type = getattr(mcp, "mcp_type", "custom") or "custom"
@@ -567,10 +583,10 @@ def _derive_fix_rule(
     Returns None if the error should not be persisted (transient / user-rejected).
     """
     if error_code == "MISSING_MCP_ID":
-        return "呼叫 execute_mcp 前必須先呼叫 list_mcps 取得有效 mcp_id"
+        return "呼叫 execute_mcp 時必須提供 mcp_name（填入 <mcp_catalog> 中的 name 欄位），不需要 mcp_id"
     if error_code == "MCP_NOT_FOUND":
-        mcp_id = tool_input.get("mcp_id")
-        return f"MCP #{mcp_id} 不存在，呼叫 execute_mcp 前必須先用 list_mcps 確認 ID"
+        name_hint = tool_input.get("mcp_name") or tool_input.get("mcp_id")
+        return f"MCP '{name_hint}' 不存在，請確認 <mcp_catalog> 中的 name 欄位拼寫是否正確"
     if error_code == "MISSING_PARAMS":
         missing = tool_input.get("missing_params") or []
         return f"呼叫 {tool_name} 缺少必填參數 {missing}，需先向用戶詢問後才能繼續"
@@ -687,6 +703,7 @@ class AgentOrchestrator:
         _new_diagnosis: Optional[Dict] = None
         _plan_extracted = False
         _session_input_tokens = cumulative_tokens
+        _tools_used: list = []   # Phase B: track successful tool calls for success pattern memory
 
         # ══════════════════════════════════════════════════════════════
         # v14: Token Compaction — compact before we start if already over threshold
@@ -709,6 +726,7 @@ class AgentOrchestrator:
         while iteration < MAX_ITERATIONS:
             iteration += 1
             logger.info("AgentOrchestrator v14: iteration=%d user=%d", iteration, self._user_id)
+            logger.info("[DBG] messages_count=%d", len(messages))
 
             try:
                 response = await self._llm.create(
@@ -745,6 +763,44 @@ class AgentOrchestrator:
             # ── end_turn: extract plan then synthesize ─────────────────
             if response.stop_reason == "end_turn":
                 final_text = _extract_text(response.content)
+                import sys as _sys
+                print(f"[ORCH-DBG] iter={iteration} stop=end_turn text_len={len(final_text)} preview={final_text[:200]!r}", file=_sys.stderr, flush=True)
+
+                # Qwen3 / local-model fix: model outputs only a <plan> block, or outputs
+                # a garbage tool-call fragment in text mode (filtered to empty string).
+                # In both cases, nudge the model to use function calling properly.
+                _plan_only = bool(
+                    final_text
+                    and re.match(r"^\s*<plan>[\s\S]*?</plan>\s*$", final_text.strip())
+                )
+                _empty_no_tools = not final_text and not response.content
+
+                _MAX_FC_NUDGES = 2  # avoid wasting tokens if model consistently ignores function calling
+                if (_plan_only or _empty_no_tools) and iteration <= _MAX_FC_NUDGES:
+                    if _plan_only:
+                        plan_match = re.search(r"<plan>([\s\S]*?)</plan>", final_text)
+                        if plan_match and not _plan_extracted:
+                            _plan_extracted = True
+                            yield _stage_event(2, "complete", plan=plan_match.group(1).strip())
+                        # Only add assistant message when content is non-empty
+                        messages.append({"role": "assistant", "content": response.content})
+                    # For empty response: don't add empty assistant message —
+                    # just add a direct nudge to use function calling.
+                    messages.append({"role": "user", "content": "請直接使用 function calling 呼叫工具執行任務，不要用文字描述工具呼叫。"})
+                    continue
+
+                # Phase B: Planning depth validation.
+                # If the model returned a <plan> shorter than 50 chars (shallow planning),
+                # nudge it once to produce a more detailed plan before executing tools.
+                if not _plan_extracted and iteration == 1:
+                    plan_match = re.search(r"<plan>([\s\S]*?)</plan>", final_text)
+                    if plan_match:
+                        plan_text = plan_match.group(1).strip()
+                        if len(plan_text) < 50 and iteration < MAX_ITERATIONS - 1:
+                            # Shallow plan — ask for more detail before proceeding
+                            messages.append({"role": "assistant", "content": response.content})
+                            messages.append({"role": "user", "content": "請詳細列出每個步驟的工具名稱和參數，然後立即開始執行。"})
+                            continue
 
                 # v14: Extract <plan> from first assistant response
                 if not _plan_extracted:
@@ -764,6 +820,8 @@ class AgentOrchestrator:
             # ── tool_use: Execute tools ────────────────────────────────
             if response.stop_reason == "tool_use":
                 tool_calls = _extract_tool_calls(response.content)
+                import sys as _sys
+                print(f"[ORCH-DBG] iter={iteration} stop=tool_use tools={[t['name'] for t in tool_calls]}", file=_sys.stderr, flush=True)
                 messages.append({"role": "assistant", "content": response.content})
 
                 # v14: Extract <plan> from tool_use response text
@@ -840,6 +898,24 @@ class AgentOrchestrator:
                             result = preflight_err
                         else:
                             result = await dispatcher.execute(tool_name, tool_input)
+
+                    # ── Phase B: Stage 4 tool tag RAG ─────────────────────
+                    # After executing, fetch trap memories for this tool and
+                    # append as a warning in the result so the model can
+                    # self-correct in the next iteration.
+                    if isinstance(result, dict) and result.get("status") == "error":
+                        try:
+                            trap_mems, _ = await self._memory_svc.search_with_metadata(
+                                user_id=self._user_id,
+                                query=f"{tool_name} 錯誤 失敗",
+                                top_k=3,
+                                tool_name=tool_name,
+                            )
+                            if trap_mems:
+                                trap_hints = "; ".join(m.content[:80] for m in trap_mems)
+                                result["_trap_hint"] = f"⚠️ 相關歷史記憶：{trap_hints}"
+                        except Exception:
+                            pass
 
                     # ── v14: Programmatic Distillation for data tools ──────
                     if tool_name == "execute_mcp" and isinstance(result, dict) and result.get("status") == "success":
@@ -937,6 +1013,15 @@ class AgentOrchestrator:
                                 "targets": lrd.get("problematic_targets", []),
                                 "message": lrd.get("diagnosis_message", ""),
                             }
+
+                    # Phase B: track successful tool calls for success pattern memory
+                    if isinstance(result, dict) and result.get("status") == "success":
+                        _tools_used.append({
+                            "tool": tool_name,
+                            "mcp_name": tool_input.get("mcp_name", ""),
+                            "params": {k: v for k, v in tool_input.items()
+                                       if k not in ("mcp_id", "mcp_name", "python_code", "params")},
+                        })
 
                     render_card = _build_render_card(tool_name, tool_input, result)
                     done_event: Dict[str, Any] = {
@@ -1094,6 +1179,34 @@ class AgentOrchestrator:
                 }
             except Exception as exc:
                 logger.warning("Preference memory write failed: %s", exc)
+
+        # Phase B: Success pattern memory — write after successful multi-tool synthesis
+        if _tools_used and len(_tools_used) >= 2 and final_text:
+            tool_chain = " → ".join(
+                f"{t['tool']}({t['mcp_name']})" if t["mcp_name"] else t["tool"]
+                for t in _tools_used
+            )
+            pattern_content = (
+                f"【成功模式】{query[:60]} | 工具鏈：{tool_chain} | "
+                f"結果摘要：{final_text[:100]}"
+            )
+            try:
+                pattern_mem = await self._memory_svc.write(
+                    user_id=self._user_id,
+                    content=pattern_content,
+                    source="success_pattern",
+                    task_type="api_pattern",
+                    tool_name=_tools_used[0]["tool"],
+                )
+                yield {
+                    "type": "memory_write",
+                    "source": "success_pattern",
+                    "memory_type": "pattern",
+                    "content": pattern_content[:100],
+                    "memory_id": pattern_mem.id,
+                }
+            except Exception as exc:
+                logger.warning("Success pattern memory write failed: %s", exc)
 
         yield _stage_event(5, "complete")
 

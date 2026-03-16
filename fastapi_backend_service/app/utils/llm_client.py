@@ -20,10 +20,67 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_xml_tool_calls(text: str) -> List[Dict[str, Any]]:
+    """Parse Anthropic-style XML tool calls from text content.
+
+    Handles models (Kimi K2, etc.) that output tool calls as XML instead of
+    using the function calling API.
+
+    Supported formats:
+        <tool_call>
+        <invoke name="tool_name">
+        <parameter name="key">value</parameter>
+        </invoke>
+        </tool_call>
+
+        or without outer <tool_call> wrapper:
+        <invoke name="tool_name">...</invoke>
+    """
+    calls: List[Dict[str, Any]] = []
+
+    def _parse_invoke_block(invoke_body: str, tool_name: str) -> Dict[str, Any]:
+        params: Dict[str, Any] = {}
+        for p_match in re.finditer(
+            r'<parameter\s+name="([^"]+)">([\s\S]*?)</parameter>', invoke_body
+        ):
+            param_name = p_match.group(1)
+            param_value = p_match.group(2).strip()
+            try:
+                params[param_name] = json.loads(param_value)
+            except (json.JSONDecodeError, ValueError):
+                params[param_name] = param_value
+        return {
+            "type": "tool_use",
+            "id": f"call_{uuid.uuid4().hex[:12]}",
+            "name": tool_name,
+            "input": params,
+        }
+
+    # Try <tool_call>...<invoke name="...">...</invoke>...</tool_call>
+    for tc_match in re.finditer(r"<tool_call>([\s\S]*?)</tool_call>", text):
+        tc_body = tc_match.group(1)
+        name_match = re.search(r'<invoke\s+name="([^"]+)"', tc_body)
+        if name_match:
+            calls.append(_parse_invoke_block(tc_body, name_match.group(1)))
+
+    if calls:
+        return calls
+
+    # Fallback: bare <invoke name="...">...</invoke> without <tool_call> wrapper
+    for inv_match in re.finditer(
+        r'<invoke\s+name="([^"]+)">([\s\S]*?)</invoke>', text
+    ):
+        calls.append(_parse_invoke_block(inv_match.group(0), inv_match.group(1)))
+
+    return calls
 
 
 # ── Response container ────────────────────────────────────────────────────────
@@ -261,7 +318,18 @@ class OllamaLLMClient(BaseLLMClient):
         max_tokens: int = 4096,
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> LLMResponse:
-        full_messages = self._to_openai_messages(system, messages)
+        # Prepend a concise function-calling mandate when tools are provided.
+        # Qwen3 / local models tend to output JSON tool calls as plain text
+        # instead of using the function calling API — this instruction fixes it.
+        effective_system = system
+        if tools:
+            effective_system = (
+                "IMPORTANT: You MUST use the function calling API (tool_calls) to invoke tools. "
+                "Do NOT output tool calls as JSON text, XML, or any other text format.\n"
+                "【工具使用規則】必須透過 function calling API 呼叫工具，禁止以任何文字格式輸出工具呼叫。\n\n"
+            ) + system
+
+        full_messages = self._to_openai_messages(effective_system, messages)
 
         kwargs: Dict[str, Any] = dict(
             model=self._model,
@@ -281,6 +349,10 @@ class OllamaLLMClient(BaseLLMClient):
                 }
                 for t in tools
             ]
+            kwargs["tool_choice"] = "auto"
+            # Disable extended thinking for Qwen3 / reasoning models so they use
+            # the function calling API instead of generating JSON inside <think> blocks.
+            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
 
         resp = await self._client.chat.completions.create(**kwargs)
         choice = resp.choices[0]
@@ -288,6 +360,24 @@ class OllamaLLMClient(BaseLLMClient):
         # Normalise OpenAI finish_reason → Anthropic stop_reason convention
         _finish = choice.finish_reason or "stop"
         stop_reason = "end_turn" if _finish in ("stop", "length", "eos", "model_length", "content_filter") else _finish
+
+        import sys as _sys
+        _orig_content = choice.message.content or ""
+        _tc_count = len(choice.message.tool_calls) if choice.message.tool_calls else 0
+        print(f"[LLM-DBG] finish={_finish!r} tool_calls={_tc_count} content_len={len(_orig_content)} content_preview={_orig_content[:300]!r}", file=_sys.stderr, flush=True)
+        # Show full message fields to detect reasoning_content or other hidden fields
+        try:
+            _msg_dict = choice.message.model_dump()
+            _reasoning = _msg_dict.get("reasoning_content") or _msg_dict.get("reasoning")
+            print(f"[LLM-DBG2] reasoning_raw={_reasoning!r}", file=_sys.stderr, flush=True)
+        except Exception as _e:
+            print(f"[LLM-DBG2] model_dump failed: {_e}", file=_sys.stderr, flush=True)
+
+        # Strip Qwen3 / DeepSeek <think>...</think> reasoning blocks from content.
+        # These appear when the model "thinks" in text mode and leak partial JSON
+        # tool-call fragments into choice.message.content.
+        raw_content = _orig_content
+        raw_content = re.sub(r"<think>[\s\S]*?</think>", "", raw_content, flags=re.IGNORECASE).strip()
 
         # Build normalised content list
         content: List[Dict[str, Any]] = []
@@ -310,10 +400,27 @@ class OllamaLLMClient(BaseLLMClient):
                     "input": tc_input,
                 })
         else:
-            # No tool calls — plain text response
-            text = choice.message.content or ""
-            if text:
-                content.append({"type": "text", "text": text})
+            # No function-calling tool_calls — check for XML tool calls first.
+            # Kimi K2 and models trained on Anthropic's format output tool calls as
+            # XML text (<tool_call><invoke name="...">...</invoke></tool_call>)
+            # instead of using the OpenAI function calling API.
+            xml_calls = _parse_xml_tool_calls(raw_content)
+            if xml_calls:
+                stop_reason = "tool_use"
+                text = ""
+                content.extend(xml_calls)
+            else:
+                # Plain text response.
+                # Additional guard: discard broken JSON tool-call fragments that
+                # Qwen3 / reasoning models leak into content alongside thinking blocks.
+                _is_garbage = (
+                    raw_content.startswith('arguments"')
+                    or raw_content.startswith('"arguments"')
+                    or (raw_content.startswith('"') and '": {' in raw_content[:40] and raw_content.endswith("}}"))
+                )
+                text = "" if _is_garbage else raw_content
+                if text:
+                    content.append({"type": "text", "text": text})
 
         usage = getattr(resp, "usage", None)
         return LLMResponse(

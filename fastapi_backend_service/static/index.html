@@ -1072,17 +1072,17 @@
                   <span class="text-[11px] font-mono font-bold text-slate-400 uppercase tracking-widest">Agent Console</span>
                 </div>
                 <div class="flex items-center gap-3">
-                  <!-- v14: 5-stage progress bar -->
-                  <div id="v14-stage-bar" class="flex items-center gap-1" title="v14 五階段進度">
-                    <div class="v14-stage-dot w-5 h-5 rounded-full bg-slate-600 text-[9px] flex items-center justify-center font-bold text-slate-400" data-stage="1" title="情境感知">1</div>
+                  <!-- v16: 5-stage progress bar (maps to v16.1 S1/S2/S4/S5/S6; S3=HITL 按需觸發) -->
+                  <div id="v14-stage-bar" class="flex items-center gap-1" title="v16 六階段進度 (S3=HITL 按需觸發)">
+                    <div class="v14-stage-dot w-5 h-5 rounded-full bg-slate-600 text-[9px] flex items-center justify-center font-bold text-slate-400" data-stage="1" title="S1 · Context Mapping — 語義感知 + 記憶檢索">1</div>
                     <div class="w-3 h-px bg-slate-600"></div>
-                    <div class="v14-stage-dot w-5 h-5 rounded-full bg-slate-600 text-[9px] flex items-center justify-center font-bold text-slate-400" data-stage="2" title="意圖規劃">2</div>
+                    <div class="v14-stage-dot w-5 h-5 rounded-full bg-slate-600 text-[9px] flex items-center justify-center font-bold text-slate-400" data-stage="2" title="S2 · Strategic Planning — 多路徑規劃編排">2</div>
                     <div class="w-3 h-px bg-slate-600"></div>
-                    <div class="v14-stage-dot w-5 h-5 rounded-full bg-slate-600 text-[9px] flex items-center justify-center font-bold text-slate-400" data-stage="3" title="工具執行">3</div>
+                    <div class="v14-stage-dot w-5 h-5 rounded-full bg-slate-600 text-[9px] flex items-center justify-center font-bold text-slate-400" data-stage="3" title="S4 · Parallel Execution — DAG 工具平行執行">3</div>
                     <div class="w-3 h-px bg-slate-600"></div>
-                    <div class="v14-stage-dot w-5 h-5 rounded-full bg-slate-600 text-[9px] flex items-center justify-center font-bold text-slate-400" data-stage="4" title="邏輯推理">4</div>
+                    <div class="v14-stage-dot w-5 h-5 rounded-full bg-slate-600 text-[9px] flex items-center justify-center font-bold text-slate-400" data-stage="4" title="S5 · Self-Reflection — 品質自省與彙整">4</div>
                     <div class="w-3 h-px bg-slate-600"></div>
-                    <div class="v14-stage-dot w-5 h-5 rounded-full bg-slate-600 text-[9px] flex items-center justify-center font-bold text-slate-400" data-stage="5" title="記憶寫入">5</div>
+                    <div class="v14-stage-dot w-5 h-5 rounded-full bg-slate-600 text-[9px] flex items-center justify-center font-bold text-slate-400" data-stage="5" title="S6 · Memory Learning — 知識蒸餾與記憶寫入">5</div>
                   </div>
                   <button onclick="_openTraceInspector()"
                           class="text-[10px] font-mono text-purple-400 hover:text-purple-200 border border-purple-700/50 hover:border-purple-400/60 rounded px-1.5 py-0.5 transition-colors">

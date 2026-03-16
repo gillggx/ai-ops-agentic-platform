@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from app.models.mcp_definition import MCPDefinitionModel
 from app.models.system_parameter import SystemParameterModel
 from app.models.user_preference import UserPreferenceModel
 from app.services.agent_memory_service import AgentMemoryService
@@ -213,10 +214,14 @@ class ContextLoader:
 {_OUTPUT_ROUTING}
 </output_routing_rules>{api_doc_section}"""
 
+        # ── MCP catalog: inject at Stage 1 so model never guesses IDs ─────────
+        mcp_catalog = await self._load_mcp_catalog()
+
         # ── Block 2: Dynamic context (changes each turn → no cache) ───────────
         dynamic_parts = [
             f"<user_preference>\n{pref or '(使用者尚未設定個人偏好)'}\n</user_preference>",
             f"<dynamic_memory>\n{rag_block}\n</dynamic_memory>",
+            f"<mcp_catalog>\n{mcp_catalog}\n</mcp_catalog>",
         ]
         if canvas_overrides:
             overrides_text = "\n".join(f"- {k}: {v}" for k, v in canvas_overrides.items())
@@ -281,3 +286,57 @@ class ContextLoader:
         )
         pref = result.scalar_one_or_none()
         return pref.preferences if pref else None
+
+    async def _load_mcp_catalog(self) -> str:
+        """Load System and Custom MCP lists from DB for direct injection into context.
+
+        This ensures the model always knows MCP names → IDs without needing
+        to call list_mcps / list_system_mcps at runtime.
+        """
+        try:
+            result = await self._db.execute(
+                select(MCPDefinitionModel).order_by(
+                    MCPDefinitionModel.mcp_type.desc(),  # system first
+                    MCPDefinitionModel.id,
+                )
+            )
+            mcps = result.scalars().all()
+        except Exception:
+            return "(MCP 目錄載入失敗)"
+
+        if not mcps:
+            return "(目前無可用 MCP)"
+
+        import json as _json
+
+        system_lines = ["## System MCPs（直接使用 mcp_name 呼叫，後端自動解析 ID）",
+                        "| id | name | 說明 | 必填參數 |",
+                        "|----|------|------|---------|"]
+        custom_lines = ["## Custom MCPs（用於 execute_mcp / analyze_data / execute_jit）",
+                        "| id | name | 說明 |",
+                        "|----|------|------|"]
+
+        for mcp in mcps:
+            desc = (mcp.description or "")[:60].replace("|", "｜")
+            if mcp.mcp_type == "system":
+                # Extract required param names from input_schema
+                required_params = ""
+                if mcp.input_schema:
+                    try:
+                        schema = _json.loads(mcp.input_schema)
+                        fields = schema.get("fields", [])
+                        req = [f["name"] for f in fields if f.get("required")]
+                        required_params = ", ".join(req) if req else "-"
+                    except Exception:
+                        required_params = "-"
+                system_lines.append(f"| {mcp.id} | {mcp.name} | {desc} | {required_params} |")
+            else:
+                custom_lines.append(f"| {mcp.id} | {mcp.name} | {desc} |")
+
+        parts = []
+        if len(system_lines) > 3:
+            parts.append("\n".join(system_lines))
+        if len(custom_lines) > 3:
+            parts.append("\n".join(custom_lines))
+
+        return "\n\n".join(parts) if parts else "(目前無可用 MCP)"

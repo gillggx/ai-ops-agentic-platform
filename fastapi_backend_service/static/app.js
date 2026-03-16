@@ -1624,6 +1624,24 @@ function _diagConsoleClear() {
   if (lines) lines.innerHTML = '';
 }
 
+/// Render a v16.1 S2 plan blueprint as an expanded block in the console
+function _diagLogPlan(planText) {
+  const lines = document.getElementById('diag-console-lines');
+  if (!lines || !planText) return;
+  const row = document.createElement('div');
+  row.style.cssText = 'padding:4px 6px 4px 8px;margin:2px 0;background:rgba(167,139,250,0.08);'
+    + 'border-left:2px solid #7c3aed;border-radius:0 4px 4px 0;';
+  const planLines = planText.split('\n').map(l =>
+    `<div style="color:#c4b5fd;padding:0.5px 0;white-space:pre-wrap;">${_escapeHtml(l)}</div>`
+  ).join('');
+  row.innerHTML = `<div style="color:#a78bfa;font-weight:700;font-size:9px;text-transform:uppercase;`
+    + `letter-spacing:0.06em;margin-bottom:2px;">📋 S2 · Blueprint</div>${planLines}`;
+  lines.appendChild(row);
+  lines.scrollTop = lines.scrollHeight;
+  const dot = document.getElementById('diag-console-dot');
+  if (dot) { dot.classList.remove('hidden'); clearTimeout(_diagConsoleDotTimer); _diagConsoleDotTimer = setTimeout(() => dot.classList.add('hidden'), 2000); }
+}
+
 // type: 'default' (hex color string) | 'learn' (self-learning highlight)
 function _diagLogLine(icon, text, colorOrType = '#94a3b8') {
   const lines = document.getElementById('diag-console-lines');
@@ -2916,10 +2934,13 @@ function _handleV13Event(ev) {
 
     case 'stage_update': {
       const stageNum = ev.stage || 0;
-      const stageLabel = ev.label || `Stage ${stageNum}`;
+      const v16 = _V16_STAGE_MAP[stageNum] || { code: `S${stageNum}`, name: `Stage ${stageNum}`, label: '', color: '#94a3b8' };
       const status = ev.status || 'running';
-      const icon = status === 'complete' ? '✅' : '⏳';
-      _diagLogLine(icon, `Stage ${stageNum} ${status === 'complete' ? '完成' : '執行中'}: ${stageLabel}`, status === 'complete' ? '#4ade80' : '#fbbf24');
+      const isDone = status === 'complete';
+      const icon = isDone ? '✅' : '⏳';
+      const verb = isDone ? '完成' : '執行中';
+      const stageLabel = ev.label || `${v16.code} · ${v16.name}`;
+      _diagLogLine(icon, `${verb} ${v16.code} — ${v16.name}${v16.label ? ' (' + v16.label + ')' : ''}`, isDone ? v16.color : '#fbbf24');
       _v14UpdateStageBar(stageNum, status);
       // [v15.4] Always record stage for Plan tab timeline
       const _existing = _traceStages.find(s => s.stage === stageNum);
@@ -2927,9 +2948,10 @@ function _handleV13Event(ev) {
       if (_existing) Object.assign(_existing, _stageRec);
       else _traceStages.push(_stageRec);
       if (ev.plan) {
-        if (stageNum === 2) _tracePlan = ev.plan;
-        else if (stageNum === 4) _tracePlanDiff = ev.plan;
-        _diagLogLine('📋', `PLAN | ${ev.plan.slice(0, 200)}`, '#93c5fd');
+        if (stageNum === 2) { _tracePlan = ev.plan; _diagLogPlan(ev.plan); }
+        else if (stageNum === 4) { _tracePlanDiff = ev.plan; _diagLogLine('🔄', `S5 Plan Diff | ${ev.plan.slice(0, 120)}`, '#fbbf24'); }
+      } else if (stageNum === 2 && isDone) {
+        _diagLogLine('⚡', 'S2 直接進入工具執行（無 <plan> 標籤）', '#64748b');
       }
       _traceLiveUpdate('plan');
       break;
@@ -2986,7 +3008,16 @@ function _v14HandleNavigate(target, id, message) {
 
 // ── v14: Stage Progress Bar ────────────────────────────────────────────────────
 
+// v16.1 stage mapping: backend stages 1-5 → v16.1 S1/S2/S4/S5/S6
+// (S3=Human-in-the-loop is a special escalation path, not a sequential stage)
 const _V14_STAGE_LABELS = ['', '情境感知', '意圖規劃', '工具執行', '邏輯推理', '記憶寫入'];
+const _V16_STAGE_MAP = {
+  1: { code: 'S1', name: 'Context Mapping',   label: '語義感知 + 記憶檢索', color: '#60a5fa' },
+  2: { code: 'S2', name: 'Strategic Planning', label: '多路徑規劃編排',      color: '#a78bfa' },
+  3: { code: 'S4', name: 'Parallel Execution', label: 'DAG 工具平行執行',    color: '#fbbf24' },
+  4: { code: 'S5', name: 'Self-Reflection',    label: '品質自省與彙整',      color: '#34d399' },
+  5: { code: 'S6', name: 'Memory Learning',    label: '知識蒸餾與記憶寫入',  color: '#f472b6' },
+};
 
 function _v14UpdateStageBar(activeStage, status) {
   const bar = document.getElementById('v14-stage-bar');
@@ -3689,7 +3720,7 @@ function _renderTraceContent(tab) {
     let html = '';
     // Stage timeline — always available
     if (_traceStages.length) {
-      const stageNames = ['', '情境感知', '意圖規劃', '工具執行', '邏輯推理', '記憶寫入'];
+      const stageNames = ['', 'S1 Context Mapping', 'S2 Strategic Planning', 'S4 Parallel Execution', 'S5 Self-Reflection', 'S6 Memory Learning'];
       const stageColors = ['', '#60a5fa', '#a78bfa', '#fbbf24', '#34d399', '#f472b6'];
       html += `<div class="border border-slate-700 rounded-lg p-3 bg-slate-800/40 mb-3">
         <div class="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2">⏱ Stage 執行時序</div>

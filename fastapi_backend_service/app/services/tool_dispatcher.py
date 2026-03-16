@@ -13,6 +13,9 @@ from typing import Any, Dict, List, Optional
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import select
+
+from app.models.mcp_definition import MCPDefinitionModel
 from app.services.agent_memory_service import AgentMemoryService
 
 logger = logging.getLogger(__name__)
@@ -45,14 +48,16 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "description": (
             "執行一個 MCP 節點 (system 或 custom)，回傳 dataset。"
             "system MCP 直接查詢底層 API；custom MCP 執行 Python 腳本。"
+            "【優先使用 mcp_name】直接填入 <mcp_catalog> 中的 name 欄位即可，後端自動解析 ID。"
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "mcp_id": {"type": "integer", "description": "要執行的 MCP ID"},
+                "mcp_name": {"type": "string", "description": "MCP 名稱（優先使用，從 mcp_catalog 取得，例如 'get_tool_trajectory'）"},
+                "mcp_id": {"type": "integer", "description": "MCP ID（備用，當 mcp_name 無法使用時才填）"},
                 "params": {"type": "object", "description": "MCP 輸入參數"},
             },
-            "required": ["mcp_id", "params"],
+            "required": ["params"],
         },
     },
     {
@@ -323,7 +328,8 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "mcp_id": {"type": "integer", "description": "要分析的 MCP ID"},
+                "mcp_name": {"type": "string", "description": "MCP 名稱（優先使用，從 mcp_catalog 取得）"},
+                "mcp_id": {"type": "integer", "description": "MCP ID（備用）"},
                 "run_params": {"type": "object", "description": "MCP 執行參數，例如 {CHART_NAME: 'CD', lot_id: 'L2603001'}"},
                 "template": {
                     "type": "string",
@@ -374,9 +380,10 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "input_schema": {
             "type": "object",
             "properties": {
+                "mcp_name": {"type": "string", "description": "MCP 名稱（優先使用，從 mcp_catalog 取得）"},
                 "mcp_id": {
                     "type": "integer",
-                    "description": "要分析的 MCP ID（Custom MCP）",
+                    "description": "MCP ID（備用）",
                 },
                 "run_params": {
                     "type": "object",
@@ -505,6 +512,23 @@ class ToolDispatcher:
         "agent_tools":  "/api/v1/agent-tools",
     }
 
+    async def _resolve_mcp_id(self, tool_input: Dict[str, Any]) -> Optional[int]:
+        """Resolve mcp_id from mcp_name or mcp_id in tool_input.
+
+        Returns the resolved integer ID, or None if neither provided / not found.
+        Prefers mcp_name over mcp_id for semantic clarity.
+        """
+        mcp_name = tool_input.get("mcp_name")
+        if mcp_name:
+            result = await self._db.execute(
+                select(MCPDefinitionModel).where(MCPDefinitionModel.name == mcp_name)
+            )
+            mcp = result.scalar_one_or_none()
+            if mcp:
+                return mcp.id
+            return None  # name given but not found → surface error to model
+        return tool_input.get("mcp_id")
+
     async def _execute_inner(self, tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a tool and return its result as a dict (inner, no profiling)."""
         logger.info("ToolDispatcher.execute: tool=%s input=%s", tool_name, json.dumps(tool_input, ensure_ascii=False)[:200])
@@ -517,9 +541,20 @@ class ToolDispatcher:
                         body=tool_input.get("params", {}),
                     )
                 case "execute_mcp":
+                    mcp_id = await self._resolve_mcp_id(tool_input)
+                    if mcp_id is None:
+                        name_hint = tool_input.get("mcp_name", "")
+                        return {
+                            "status": "error",
+                            "code": "MCP_NOT_FOUND",
+                            "message": (
+                                f"⚠️ 找不到 MCP '{name_hint}'。"
+                                "請確認 <mcp_catalog> 中的 name 欄位是否正確。"
+                            ),
+                        }
                     return await self._call_api(
                         "POST",
-                        f"/api/v1/execute/mcp/{tool_input['mcp_id']}",
+                        f"/api/v1/execute/mcp/{mcp_id}",
                         body=tool_input.get("params", {}),
                     )
                 case "list_skills":
@@ -591,11 +626,15 @@ class ToolDispatcher:
                     )
                 # ── [v15.6] Structured Analysis Templates ─────────────────
                 case "analyze_data":
+                    mcp_id = await self._resolve_mcp_id(tool_input)
+                    if mcp_id is None:
+                        return {"status": "error", "code": "MCP_NOT_FOUND",
+                                "message": f"找不到 MCP '{tool_input.get('mcp_name', '')}'"}
                     return await self._call_api(
                         "POST",
                         "/api/v1/agent/analyze-data",
                         body={
-                            "mcp_id": tool_input["mcp_id"],
+                            "mcp_id": mcp_id,
                             "run_params": tool_input.get("run_params", {}),
                             "template": tool_input["template"],
                             "params": tool_input.get("params", {}),
@@ -604,11 +643,15 @@ class ToolDispatcher:
                     )
                 # ── [v15.4] JIT Analyze — server-side sandbox ─────────────
                 case "execute_jit":
+                    mcp_id = await self._resolve_mcp_id(tool_input)
+                    if mcp_id is None:
+                        return {"status": "error", "code": "MCP_NOT_FOUND",
+                                "message": f"找不到 MCP '{tool_input.get('mcp_name', '')}'"}
                     return await self._call_api(
                         "POST",
                         "/api/v1/agent/jit-analyze",
                         body={
-                            "mcp_id": tool_input["mcp_id"],
+                            "mcp_id": mcp_id,
                             "run_params": tool_input.get("run_params", {}),
                             "python_code": tool_input["python_code"],
                             "title": tool_input.get("title", "JIT 分析"),

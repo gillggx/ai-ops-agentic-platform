@@ -103,35 +103,7 @@ POST /api/v2/ontology/search
 
 交叉比對搜尋。Agent 查案時可提問：「幫我找出過去 24 小時內，同樣在 EQP-01 發生 OOC 的所有 Lot」。
 
-3. 處置與閉環 (High Value - Action & Disposition)
-
-賦予 Agent 寫入權限，讓其查案結果能直接反饋到系統中，實現真正的自動化閉環。
-
-MCP Name
-
-API Endpoint
-
-Input Schema
-
-用途 (Use Case)
-
-execute_disposition
-
-POST /api/v2/aiops/action/disposition
-
-target_type (LOT/TOOL), target_id, action (HOLD/RELEASE), reason
-
-採取行動。Agent 判斷異常嚴重時，可直接呼叫此 MCP 鎖定機台或批次，並附上 Agent 產生的 RCA 報告作為理由。
-
-add_forensic_comment
-
-POST /api/v2/aiops/action/comment
-
-event_id, comment_text
-
-留下線索。Agent 巡檢發現潛在風險，可在此事件貼上 AI 標籤提示人類工程師。
-
-4. 開發與底層驗證規範 (Test Script Requirements)
+3. 開發與底層驗證規範 (Test Script Requirements)
 
 依照團隊 [2026-02-27] 制定的除錯與驗證協議，後端工程師在實作 API v2.3/v2.4 時，必須確保上述時間區間邏輯能與 Context 還原邏輯完美串接。
 
