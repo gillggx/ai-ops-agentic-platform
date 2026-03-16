@@ -48,16 +48,15 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "description": (
             "執行一個 MCP 節點 (system 或 custom)，回傳 dataset。"
             "system MCP 直接查詢底層 API；custom MCP 執行 Python 腳本。"
-            "【優先使用 mcp_name】直接填入 <mcp_catalog> 中的 name 欄位即可，後端自動解析 ID。"
+            "mcp_name 必填，直接填入 <mcp_catalog> 中的 name 欄位（例如 'get_tool_trajectory'）。"
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "mcp_name": {"type": "string", "description": "MCP 名稱（優先使用，從 mcp_catalog 取得，例如 'get_tool_trajectory'）"},
-                "mcp_id": {"type": "integer", "description": "MCP ID（備用，當 mcp_name 無法使用時才填）"},
+                "mcp_name": {"type": "string", "description": "MCP 名稱，必須與 <mcp_catalog> 中的 name 完全相符，例如 'get_tool_trajectory'"},
                 "params": {"type": "object", "description": "MCP 輸入參數"},
             },
-            "required": ["params"],
+            "required": ["mcp_name", "params"],
         },
     },
     {
@@ -328,8 +327,7 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "mcp_name": {"type": "string", "description": "MCP 名稱（優先使用，從 mcp_catalog 取得）"},
-                "mcp_id": {"type": "integer", "description": "MCP ID（備用）"},
+                "mcp_name": {"type": "string", "description": "MCP 名稱，必須與 <mcp_catalog> 中的 name 完全相符"},
                 "run_params": {"type": "object", "description": "MCP 執行參數，例如 {CHART_NAME: 'CD', lot_id: 'L2603001'}"},
                 "template": {
                     "type": "string",
@@ -349,7 +347,7 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
                 },
                 "title": {"type": "string", "description": "分析標題（可選）"},
             },
-            "required": ["mcp_id", "template", "params"],
+            "required": ["mcp_name", "template", "params"],
         },
     },
     # ── [v15.4] JIT Analyze — server-side sandbox with full MCP dataset ──
@@ -380,11 +378,7 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "mcp_name": {"type": "string", "description": "MCP 名稱（優先使用，從 mcp_catalog 取得）"},
-                "mcp_id": {
-                    "type": "integer",
-                    "description": "MCP ID（備用）",
-                },
+                "mcp_name": {"type": "string", "description": "MCP 名稱，必須與 <mcp_catalog> 中的 name 完全相符"},
                 "run_params": {
                     "type": "object",
                     "description": "MCP 執行參數，例如 {CHART_NAME: 'CD', lot_id: 'L2603001'}",
@@ -398,7 +392,7 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
                     "description": "分析標題，顯示於工作區面板",
                 },
             },
-            "required": ["mcp_id", "python_code"],
+            "required": ["mcp_name", "python_code"],
         },
     },
     # ── [v15.3] Generic Tools (inline / small dataset only) ───────────────
