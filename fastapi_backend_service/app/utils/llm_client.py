@@ -285,19 +285,19 @@ class OllamaLLMClient(BaseLLMClient):
         resp = await self._client.chat.completions.create(**kwargs)
         choice = resp.choices[0]
 
-        text = choice.message.content or ""
         # Normalise OpenAI finish_reason → Anthropic stop_reason convention
         _finish = choice.finish_reason or "stop"
         stop_reason = "end_turn" if _finish in ("stop", "length", "eos", "model_length", "content_filter") else _finish
 
         # Build normalised content list
         content: List[Dict[str, Any]] = []
-        if text:
-            content.append({"type": "text", "text": text})
 
         # Handle tool_calls in response
+        # When tool_calls are present, ignore content text — Qwen3/some models
+        # spuriously put JSON fragments or reasoning in content alongside tool_calls.
         if choice.message.tool_calls:
             stop_reason = "tool_use"
+            text = ""   # discard any text content when model is making tool calls
             for tc in choice.message.tool_calls:
                 try:
                     tc_input = json.loads(tc.function.arguments)
@@ -309,6 +309,11 @@ class OllamaLLMClient(BaseLLMClient):
                     "name": tc.function.name,
                     "input": tc_input,
                 })
+        else:
+            # No tool calls — plain text response
+            text = choice.message.content or ""
+            if text:
+                content.append({"type": "text", "text": text})
 
         usage = getattr(resp, "usage", None)
         return LLMResponse(
