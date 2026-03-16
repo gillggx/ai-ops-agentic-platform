@@ -99,33 +99,27 @@ async def _preflight_validate(
     """Pre-flight validation — intercept ambiguous/missing params before execution."""
     if tool_name == "execute_mcp":
         mcp_name = tool_input.get("mcp_name")
-        mcp_id = tool_input.get("mcp_id")
-        if mcp_name:
-            # Preferred: look up by name
-            result = await db.execute(
-                select(MCPDefinitionModel).where(MCPDefinitionModel.name == mcp_name)
-            )
-            mcp = result.scalar_one_or_none()
-            if not mcp:
-                return {
-                    "status": "error", "code": "MCP_NOT_FOUND",
-                    "message": (
-                        f"⚠️ 找不到名為 '{mcp_name}' 的 MCP。"
-                        "請確認 <mcp_catalog> 中的 name 欄位是否正確。"
-                    ),
-                }
-        elif mcp_id:
-            result = await db.execute(select(MCPDefinitionModel).where(MCPDefinitionModel.id == mcp_id))
-            mcp = result.scalar_one_or_none()
-            if not mcp:
-                return {
-                    "status": "error", "code": "MCP_NOT_FOUND",
-                    "message": f"⚠️ MCP #{mcp_id} 不存在。請呼叫 list_mcps 取得有效的 MCP 列表後重試。",
-                }
-        else:
+        if not mcp_name:
+            # mcp_id is no longer accepted — reject immediately with clear guidance
             return {
-                "status": "error", "code": "MISSING_MCP_ID",
-                "message": "⚠️ execute_mcp 缺少 mcp_name 或 mcp_id。請使用 <mcp_catalog> 中的 name 欄位直接指定 MCP。",
+                "status": "error", "code": "MISSING_MCP_NAME",
+                "message": (
+                    "⚠️ execute_mcp 必須提供 mcp_name。"
+                    "請從 <mcp_catalog> 中找到正確的 name 欄位填入，例如 'get_tool_trajectory'。"
+                    "禁止使用 mcp_id（整數 ID 已棄用）。"
+                ),
+            }
+        result = await db.execute(
+            select(MCPDefinitionModel).where(MCPDefinitionModel.name == mcp_name)
+        )
+        mcp = result.scalar_one_or_none()
+        if not mcp:
+            return {
+                "status": "error", "code": "MCP_NOT_FOUND",
+                "message": (
+                    f"⚠️ 找不到名為 '{mcp_name}' 的 MCP。"
+                    "請確認 <mcp_catalog> 中的 name 欄位是否正確。"
+                ),
             }
         # Custom MCP: only validate against its own input_schema (never inherit parent's)
         mcp_type = getattr(mcp, "mcp_type", "custom") or "custom"
@@ -582,8 +576,8 @@ def _derive_fix_rule(
 
     Returns None if the error should not be persisted (transient / user-rejected).
     """
-    if error_code == "MISSING_MCP_ID":
-        return "呼叫 execute_mcp 時必須提供 mcp_name（填入 <mcp_catalog> 中的 name 欄位），不需要 mcp_id"
+    if error_code in ("MISSING_MCP_ID", "MISSING_MCP_NAME"):
+        return "呼叫 execute_mcp 必須提供 mcp_name（填入 <mcp_catalog> 中的 name 欄位），禁止使用 mcp_id 整數"
     if error_code == "MCP_NOT_FOUND":
         name_hint = tool_input.get("mcp_name") or tool_input.get("mcp_id")
         return f"MCP '{name_hint}' 不存在，請確認 <mcp_catalog> 中的 name 欄位拼寫是否正確"
