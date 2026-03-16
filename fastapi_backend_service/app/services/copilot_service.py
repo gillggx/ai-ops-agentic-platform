@@ -341,11 +341,15 @@ class CopilotService:
 {forced_hint}
 
 ## ⚠️ CRITICAL RULE — 必須嚴格遵守，違反即為系統性錯誤
-If the user's prompt does NOT explicitly contain values for ALL required parameters of the selected tool,
-you MUST NOT set is_ready=true. You MUST set is_ready=false and ask the user to provide the missing values.
-Never assume, fabricate, or substitute default values for required parameters (such as lot_id, tool_id,
-operation_number). The user must explicitly supply them. Executing a tool without confirmed parameter
-values is strictly forbidden.
+**is_ready = true 的條件：** 所有必填參數的值都能從以下任一來源取得：
+  (a) 使用者在當前訊息中明確提供（如「用 EQP-01」「lot_id L12345」）
+  (b) Slot Context 中已存在（之前對話收集到的參數）
+若以上兩種來源都能覆蓋所有必填參數 → **必須** 設 is_ready=true，直接執行，不要再追問。
+
+**is_ready = false 的條件：** 有必填參數缺失（未在訊息中提及，且不在 Slot Context 中）。
+此時 MUST set is_ready=false，在 reply_message 中追問缺少的參數（一次最多問 2 個）。
+
+**禁止：** 自行捏造或用預設值替換缺失參數。使用者沒提供的參數不能假設。
 
 ## 可用工具
 
@@ -383,7 +387,7 @@ values is strictly forbidden.
 8. 從使用者訊息中提取相關參數放入 extracted_params（名稱、MCP ID、診斷條件、cron 表達式等）
 9. 已在 Slot Context 中的參數不算 missing_params
 10. missing_params 只列必填且尚未收集的參數名稱（字串陣列）
-11. 若所有必填參數齊全（含 Slot Context 中已有的，且來自使用者明確提供）→ is_ready = true，同時生成 tab_title
+11. 若所有必填參數齊全（含 Slot Context 中已有的，OR 使用者在當前訊息中明確提供）→ is_ready = true，同時生成 tab_title。參數只要有值就算齊全，不需要使用者特別「再確認一次」。
 12. 若有 missing_params → is_ready = false，在 reply_message 中用繁體中文友善地追問（一次最多問 2 個）
 13. 若是一般問候或聊天 → intent = "general_chat"，在 reply_message 回覆
 14. lot ID 常見格式如 L12345 或 N97A45.00，operation number 是製程站點編號如 3200 或 24981

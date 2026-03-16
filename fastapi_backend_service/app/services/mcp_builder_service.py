@@ -327,6 +327,10 @@ def _extract_json(raw: str) -> Dict[str, Any]:
     after the first closing brace never cause 'Extra data' errors.
     """
     text = raw.strip()
+    # Pre-process: strip Qwen3 / DeepSeek-style <think>...</think> reasoning blocks
+    # These appear before the actual JSON response and can contain partial JSON fragments
+    # that confuse the extraction strategies below.
+    text = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE).strip()
     # Strategy 1: explicit ``` fences (with or without 'json' tag)
     m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
     if m:
