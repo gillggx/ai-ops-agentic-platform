@@ -58,6 +58,10 @@ if $REBUILD; then
 fi
 
 echo "🔁  重啟服務..."
+# Force-release ports before restart to avoid "Address already in use" on stale processes
+sudo -n fuser -k 8000/tcp 2>/dev/null || true
+sudo -n fuser -k 8001/tcp 2>/dev/null || true
+sleep 1
 # Try systemctl first (requires NOPASSWD sudo); fall back to pkill
 # pkill sends SIGTERM to the process; systemd Restart=on-failure will respawn it
 if sudo -n systemctl restart fastapi-backend ontology-simulator 2>/dev/null; then

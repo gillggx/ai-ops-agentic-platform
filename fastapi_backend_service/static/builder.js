@@ -647,10 +647,22 @@ async function _smcTestConnection() {
   try {
     // Call run-with-data — backend proxies to localhost:8001 server-side
     const data = await _api('POST', `/mcp-definitions/${mcpId}/run-with-data`, { raw_data: params });
-    const preview = JSON.stringify(data?.dataset ?? data, null, 2);
-    if (resultEl) resultEl.innerHTML = `
-      <div class="text-emerald-600 font-semibold mb-1">✓ 連線成功</div>
-      <pre class="text-xs text-slate-600 whitespace-pre-wrap leading-relaxed max-h-[600px] overflow-y-auto">${_esc(preview)}</pre>`;
+    // Extract actual API payload: prefer _raw_dataset (original API response)
+    let displayData = data?.output_data?._raw_dataset
+                   ?? data?.output_data?.dataset
+                   ?? data?.output_data
+                   ?? data?.dataset
+                   ?? data;
+    // Unwrap single-item arrays → show as record (vertical key-value) view
+    if (Array.isArray(displayData) && displayData.length === 1 && typeof displayData[0] === 'object') {
+      displayData = displayData[0];
+    }
+    if (resultEl) {
+      resultEl.innerHTML = `
+        <div class="text-emerald-600 font-semibold mb-2">✓ 連線成功</div>
+        ${cjrHtml(displayData, { theme: 'light', maxH: '480px', initDepth: 2, view: 'auto' })}`;
+      cjrHydrate(resultEl);
+    }
   } catch (e) {
     if (resultEl) resultEl.innerHTML = `<span class="text-red-500">✗ 連線失敗：${_esc(e.message)}</span>`;
   }
@@ -1417,6 +1429,7 @@ async function _fetchSample() {
         ${_udv(_sampleData, uid)}
       </div>
     `;
+    cjrHydrate(preview);
   } catch (e) {
     _sampleData = null;
     preview.innerHTML = `<p class="text-xs text-red-400 mt-2">✗ 撈取失敗：${_esc(e.message)}</p>`;
@@ -1670,6 +1683,7 @@ async function _doTryRun(n) {
             ${_udv(errorDump, uid)}
           </div>`;
         statusEl.insertAdjacentHTML('beforeend', itCard);
+        cjrHydrate(statusEl);
         if (tabObj) { tabObj.status = 'error'; _renderTryTabBar(); }
       }
       return;
@@ -1698,6 +1712,7 @@ async function _doTryRun(n) {
 
     if (resultEl) {
       resultEl.innerHTML = _buildResultHtml(result, `(Tab ${tabN})`);
+      cjrHydrate(resultEl);
     }
   } catch (e) {
     clearInterval(_tickInterval);
@@ -1954,6 +1969,7 @@ function _renderSavedTryRunResult(mcp) {
     statusEl.innerHTML = '<p class="text-xs text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2 mb-2">📂 上次試跑結果（儲存快照）— 可直接儲存或重新試跑覆蓋</p>';
   }
   resultEl.innerHTML = _buildResultHtml(savedResult, '（已儲存）');
+  cjrHydrate(resultEl);
 }
 
 /**
@@ -2068,15 +2084,7 @@ function _renderDatasetTable(data) {
  * scrollable pretty-printed JSON block — used when flat table isn't suitable.
  */
 function _renderGrid(data) {
-  const json = JSON.stringify(data, null, 2);
-  return `
-    <div class="border border-slate-200 rounded-xl overflow-hidden">
-      <div class="bg-slate-50 px-3 py-1.5 text-xs text-slate-500 flex items-center gap-2">
-        <span>📋 Raw Data Grid</span>
-        <span class="ml-auto opacity-60">複雜/巢狀資料結構</span>
-      </div>
-      <pre class="bg-white p-3 text-xs text-slate-700 overflow-auto max-h-72 leading-relaxed">${_esc(json)}</pre>
-    </div>`;
+  return cjrHtml(data, { theme: 'light', maxH: '300px', initDepth: 2 });
 }
 
 async function _triggerMcpGenerate(id) {
@@ -2414,6 +2422,7 @@ async function _executeSkillMcp() {
 
     statusEl.innerHTML = '<p class="text-xs text-green-400 bg-green-400/10 border border-green-400/20 rounded-lg px-3 py-2">✓ MCP 數據載入成功！請查看下方結果，再撰寫診斷意圖。</p>';
     resultEl.innerHTML = _buildResultHtml(result, mcp.name);
+    cjrHydrate(resultEl);
 
     // Unlock Code 診斷 button now that MCP data is available
     const diagBtn  = document.getElementById('skill-code-diag-btn');

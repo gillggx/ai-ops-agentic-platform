@@ -836,18 +836,19 @@ function _renderMcpEvidence(mcpOutput, suffix) {
 /** Build an HTML table from an array of row objects. */
 function _buildTableHtml(rows) {
   if (!rows || !rows.length) return '';
-  const cols      = Object.keys(rows[0]);
-  const headerRow = cols.map(c => `<th>${_escapeHtml(String(c))}</th>`).join('');
-  const bodyRows  = rows.map(r =>
-    `<tr>${cols.map(c => `<td>${_escapeHtml(String(r[c] ?? ''))}</td>`).join('')}</tr>`
-  ).join('');
-  return `
-    <div style="overflow-x:auto">
-      <table class="evidence-table">
-        <thead><tr>${headerRow}</tr></thead>
-        <tbody>${bodyRows}</tbody>
-      </table>
-    </div>`;
+  // Single row → default Record view, but user can switch to Grid / Card / Tree
+  if (rows.length === 1) {
+    return cjrHtml(rows, { theme: 'light', maxH: '400px', initDepth: 2, view: 'auto' });
+  }
+  // Multiple rows → CJR Grid (default) with Tree/Card options
+  return cjrHtml(rows, { theme: 'light', maxH: '400px', initDepth: 1, view: 'auto' });
+}
+
+function _buildTableCell(val) {
+  if (val === null || val === undefined) return '<span style="color:#94a3b8">—</span>';
+  if (typeof val !== 'object') return _escapeHtml(String(val));
+  // Nested object/array — inline tree only, no toolbar (toolbar is for top-level results only)
+  return cjrHtml(val, { theme: 'light', maxH: '180px', initDepth: 1, toolbar: false });
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1117,11 +1118,12 @@ function _renderToolCallInput(toolName, toolInput) {
         <span>${toolName}</span>
       </div>
       <div class="section-label">輸入參數</div>
-      <pre class="code-block">${_escapeHtml(JSON.stringify(toolInput, null, 2))}</pre>
+      ${cjrHtml(toolInput, { theme: 'dark', maxH: '200px', initDepth: 2 })}
       <div class="section-label">執行中</div>
       <div class="loading-bar"><div class="loading-bar-inner"></div></div>
     </div>
   `;
+  cjrHydrate(panel);
 }
 
 // ── Render tool result (appended into existing tab panel) ──────
@@ -1142,6 +1144,7 @@ function _renderToolResult(toolName, result, isError) {
     <div class="section-label ${labelClass}">${labelText}</div>
     ${_renderResultContent(toolName, result)}
   `;
+  cjrHydrate(resultDiv);
   toolCard.appendChild(resultDiv);
 }
 
@@ -1150,7 +1153,7 @@ function _renderResultContent(toolName, result) {
   if (toolName === 'mcp_event_triage' && result?.event_type) {
     return _renderEventObject(result);
   }
-  return `<pre class="code-block">${_escapeHtml(JSON.stringify(result, null, 2))}</pre>`;
+  return cjrHtml(result, { theme: 'dark', maxH: '280px', initDepth: 2 });
 }
 
 function _renderEventObject(obj) {
@@ -2152,7 +2155,7 @@ function _renderCopilotMcpPanel(ev) {
     </div>`;
 
   const { panel } = _createWorkspaceTab(tabId, tabTitle, contentHtml);
-  requestAnimationFrame(() => _initChartsInCard(panel));
+  requestAnimationFrame(() => { _initChartsInCard(panel); cjrHydrate(panel); });
 
   // [v15.2] Fire shadow analysis if dataset + data_profile are available
   const rawData = ev.mcp_output?._raw_dataset || ev.mcp_output?.dataset;
@@ -2174,7 +2177,7 @@ function _renderCopilotSkillPanel(ev) {
   const contentHtml = `<div class="p-4">${_renderSkillBlock(ev)}</div>`;
 
   const { panel } = _createWorkspaceTab(tabId, tabTitle, contentHtml);
-  requestAnimationFrame(() => _initChartsInCard(panel));
+  requestAnimationFrame(() => { _initChartsInCard(panel); cjrHydrate(panel); });
 
   // [v15.2] Mirror skill result to shadow panel skill section
   _renderSkillInShadowPanel(ev);
@@ -2235,7 +2238,7 @@ function _renderCopilotAnalysisPanel(ev) {
     </div>`;
 
   const { panel } = _createWorkspaceTab(tabId, tabTitle, contentHtml);
-  requestAnimationFrame(() => _initChartsInCard(panel));
+  requestAnimationFrame(() => { _initChartsInCard(panel); cjrHydrate(panel); });
 }
 
 /**
@@ -3067,7 +3070,7 @@ function _v14ShowApprovalModal(ev) {
         <div class="text-slate-400 text-xs mb-1">工具</div>
         <div class="text-yellow-300 font-mono">${_escapeHtml(ev.tool || '')}</div>
         <div class="text-slate-400 text-xs mt-2 mb-1">參數</div>
-        <div class="text-slate-300 font-mono text-xs break-all">${_escapeHtml(JSON.stringify(ev.input || {}, null, 2).slice(0, 200))}</div>
+        ${cjrHtml(ev.input || {}, { theme: 'dark', maxH: '160px', initDepth: 2 })}
       </div>
       <p class="text-slate-300 text-sm mb-5">${_escapeHtml(ev.message || '')}</p>
       <div class="flex gap-3">
@@ -3085,6 +3088,7 @@ function _v14ShowApprovalModal(ev) {
       </div>
     </div>`;
   document.body.appendChild(modal);
+  cjrHydrate(modal);
 
   // Auto-close after 62s (agent will have timed out)
   setTimeout(() => modal.remove(), 62000);

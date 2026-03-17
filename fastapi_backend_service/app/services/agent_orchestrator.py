@@ -1181,7 +1181,7 @@ class AgentOrchestrator:
                 for t in _tools_used
             )
             pattern_content = (
-                f"【成功模式】{query[:60]} | 工具鏈：{tool_chain} | "
+                f"【成功模式】{message[:60]} | 工具鏈：{tool_chain} | "
                 f"結果摘要：{final_text[:100]}"
             )
             try:
