@@ -671,7 +671,7 @@ def run_per_group_regression(
                 "r_squared": round(r_squared, 4),
             })
 
-    chart_height = max(280, rows * 220 + 60)
+    chart_height = max(320, rows * 280 + 80)
     fig.update_layout(
         title=dict(text=title, font=dict(size=14)),
         height=chart_height,

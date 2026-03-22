@@ -1367,7 +1367,7 @@ function _createWorkspaceTab(tabId, title, contentHtml) {
   // ── Panel (hidden by default, appended to content area) ───────
   const panel = document.createElement('div');
   panel.id        = `ws-panel-${tabId}`;
-  panel.className = 'hidden h-full';
+  panel.className = 'hidden min-h-full';
   panel.innerHTML = contentHtml;
   content.appendChild(panel);
 
@@ -2285,9 +2285,9 @@ function _renderUtilityPanel(card) {
     const chartJson = JSON.stringify(payload.plotly);
     const tableHtml = _renderDataTable(payload.rows);
     bodyHtml = `
-      <div class="evidence-chart-wrapper rounded-lg overflow-hidden border border-slate-200 bg-white">
+      <div class="evidence-chart-wrapper rounded-lg border border-slate-200 bg-white">
         <div class="evidence-chart" data-chart='${chartJson.replace(/'/g, "&#39;")}'
-             style="min-height:360px;"></div>
+             style="min-height:360px; width:100%;"></div>
       </div>
       ${tableHtml ? `<div class="mt-1"><p class="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">📋 資料表</p>${tableHtml}</div>` : ''}`;
   } else {
@@ -2346,7 +2346,7 @@ function _renderUtilityPanel(card) {
   }
 
   const contentHtml = `
-    <div class="p-4 flex flex-col gap-3 h-full overflow-y-auto">
+    <div class="p-4 flex flex-col gap-3">
       <div class="flex items-center gap-2 flex-wrap">
         <span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-violet-100 text-violet-700">⚡ 通用工具</span>
         <span class="text-sm font-semibold text-slate-800">${_escapeHtml(toolName)}</span>
