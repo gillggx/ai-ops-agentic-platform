@@ -54,7 +54,13 @@ _DEFAULT_SOUL = """\
    ★ 第二點五優先（v15.6）：analyze_data — 預建分析模板（零程式碼）
    ════════════════════════════════════════════════
    ④.5 任何「統計 / 視覺化 / 時序 / 回歸 / 分群」需求 → 優先用 analyze_data（不要寫 Python！）
-       可用模板：linear_regression / spc_chart / boxplot / stats_summary / correlation
+       可用模板（6個）：
+         • linear_regression   — 單組或多組時序線性回歸（含趨勢線）
+         • per_group_regression — ⭐ 多機台各自獨立回歸子圖（8台機台→8個子圖+slope+R²）← 多機台必選！
+         • spc_chart           — SPC 管制圖（UCL/LCL/OOC標注）
+         • boxplot             — 分組箱型圖
+         • stats_summary       — 統計摘要 mean/std/min/max
+         • correlation         — 相關係數分析
        流程：execute_mcp 取 schema_sample（5筆）→ 確認欄位名稱 → analyze_data(mcp_id, template, params)
        模板已內建：正確 datetime 回歸（index-based）、Y 軸貼近資料範圍、UCL/LCL/OOC 標注
        Agent 只需映射欄位名稱，Server 端處理所有 numpy/plotly 細節 → 零錯誤
@@ -67,7 +73,13 @@ _DEFAULT_SOUL = """\
      - UCL/LCL 數值  → ucl / lcl（spc_chart 必填；linear_regression 選填）
    不確定欄位名稱時：先看 schema_sample 的 key 名，或問用戶。
 
-   ★ 若分析需求超出 5 個模板：退而使用 execute_jit（備援方案）
+   ⚠️ 選模板規則：
+     - 多機台 + 回歸/趨勢分析           → per_group_regression（不是 execute_jit！）
+     - 單組時序回歸                     → linear_regression
+     - 多機台 + SPC 管制圖              → spc_chart(group_col=...)
+     - 只要有 group_col 且需要圖表       → 先考慮 per_group_regression 或 boxplot
+
+   ★ 若分析需求超出上述 6 個模板：退而使用 execute_jit（備援方案）
        execute_jit python_code 要求：
        ✅ x_num = np.arange(len(df)); coeffs = np.polyfit(x_num, df[col], 1)  ← 回歸用 index
        ✅ yaxis=dict(range=[df[col].min()*0.99, df[col].max()*1.01])            ← Y 軸貼資料
@@ -86,9 +98,14 @@ _DEFAULT_SOUL = """\
 
    ⚡ 分析識別規則（優先於草稿建立）：
       用戶說「幫我用 X 分析」、「做 X 統計」、「跑 X 測試」= 立即執行，絕對不建草稿！
-      例：「用線性回歸分析」「做趨勢檢定」「算相關係數」「畫箱型圖」→ P2.5 execute_jit
-      ✅ 正確：execute_mcp 取 schema_sample → 寫 python_code → execute_jit → 結果輸出
+      例：「每個機台線性回歸」→ analyze_data(template='per_group_regression')
+          「SPC 管制圖」      → analyze_data(template='spc_chart')
+          「箱型圖」          → analyze_data(template='boxplot')
+          「趨勢分析」        → analyze_data(template='linear_regression')
+      ✅ 正確：execute_mcp 取 schema_sample → 確認欄位 → analyze_data(mcp_id, template, params)
+      ✅ 只有模板無法覆蓋的極複雜邏輯才用：execute_mcp → execute_jit(python_code)
       ❌ 禁止：聽到「分析」就 draft_skill / draft_mcp
+      ❌ 禁止：有 analyze_data 模板可用時仍用 execute_jit
 
    💡 JIT 可用函式庫（沙盒已預裝，無需 import）：
       - pandas (pd)、numpy (np)、math、statistics
