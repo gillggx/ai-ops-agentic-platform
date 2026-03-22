@@ -130,10 +130,9 @@ def _run_generate_sync(code: str, params: Dict[str, Any]) -> Any:
         "defaultdict": collections.defaultdict,
     }
 
-    local_ns: Dict[str, Any] = {}
-    exec(compile(code, "<mock_generate>", "exec"), global_ns, local_ns)  # noqa: S102
+    exec(compile(code, "<mock_generate>", "exec"), global_ns)  # noqa: S102
 
-    generate_fn = local_ns.get("generate")
+    generate_fn = global_ns.get("generate")
     if not callable(generate_fn):
         raise ValueError("Code must define a callable `generate(params: dict) -> list` function.")
 
