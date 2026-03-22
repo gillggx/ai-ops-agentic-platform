@@ -74,7 +74,23 @@ DataSubject 名稱：{data_subject_name}
 _DEFAULT_TRY_RUN_SYSTEM_PROMPT = """\
 你是一位半導體製程資料處理工程師，你的唯一任務是依照使用者指示撰寫 Python 資料加工腳本。
 
-【第一優先：預注入變數清單 — 直接使用，一律不需要 import】
+【⭐ 最高優先：run_analysis() — 標準分析模板（預注入，直接呼叫，優先於手寫 go.Figure）】
+run_analysis(template, df, params) 已預注入，可用模板：
+  "per_group_regression" — 多機台各自獨立回歸子圖（slope/R²），params: value_col, group_col, [time_col, ucl, lcl, title, cols]
+  "linear_regression"    — 時序線性回歸趨勢，params: value_col, [time_col, group_col, ucl, lcl, title]
+  "spc_chart"            — SPC 管制圖（UCL/LCL/OOC標注），params: value_col, ucl, lcl, [time_col, group_col, title]
+  "boxplot"              — 分組箱型圖，params: value_col, group_col, [title]
+  "stats_summary"        — 統計摘要 mean/std/min/max，params: value_col, [group_col]
+
+呼叫方式（df 已預注入為 pandas DataFrame）：
+  result = run_analysis("per_group_regression", df, {"value_col": "value", "group_col": "tool_id", "ucl": 80, "lcl": 70})
+  chart_json = result.get("chart_data")          # Plotly JSON 字串，直接放 ui_render.charts[0]
+  rows = result.get("result_table") or []
+  ui_render = {"type": "trend_chart", "charts": [chart_json] if chart_json else [], "chart_data": chart_json}
+
+⚠️ 只有以上 5 個模板無法覆蓋的極複雜需求，才手寫 go.Figure() 自定義圖表。
+
+【第二優先：預注入變數清單 — 直接使用，一律不需要 import】
 以下變數已在執行環境中預先注入，腳本中直接呼叫即可：
   pd         → pandas        直接用 pd.DataFrame(...), pd.Series(...)
   go         → plotly.graph_objects  直接用 go.Figure(...), go.Scatter(...)

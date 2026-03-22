@@ -447,10 +447,12 @@ Skill 的用途：執行這個 MCP，然後根據輸出值判斷狀態 (NORMAL /
 class PromoteJitRequest(BaseModel):
     mcp_id: int
     run_params: Dict[str, Any] = {}
-    python_code: str
+    python_code: str = ""
     title: str = "JIT 分析"
     target: str = "mcp"  # "mcp" | "skill"
     output_keys: List[str] = []  # hint: keys in jit_result for skill meta generation
+    analyze_template: Optional[str] = None   # e.g. "per_group_regression"
+    analyze_params: Dict[str, Any] = {}      # params passed to run_analysis()
 
 
 @router.post(
@@ -470,23 +472,45 @@ async def promote_jit(
     from app.utils.llm_client import get_llm_client
 
     # 1. Wrap python_code → MCP processing_script
-    wrap_prompt = _WRAP_SCRIPT_PROMPT.format(python_code=body.python_code)
+    # Fast path: analyze_template results → generate run_analysis() script directly (no LLM needed)
+    if body.analyze_template:
+        params_repr = json.dumps(body.analyze_params, ensure_ascii=False)
+        processing_script: str = f'''\
+def process(raw_data: dict) -> dict:
     try:
-        llm = get_llm_client()
-        wrap_resp = await llm.create(
-            system="你是一位 Python 專家。請嚴格遵守指示，只回傳 Python 程式碼，不要任何 markdown fence 或說明文字。",
-            messages=[{"role": "user", "content": wrap_prompt}],
-            max_tokens=4096,
-        )
-        processing_script: str = wrap_resp.text.strip()
-        # Strip accidental markdown fences
-        if processing_script.startswith("```"):
-            lines = processing_script.splitlines()
-            processing_script = "\n".join(
-                ln for ln in lines if not ln.strip().startswith("```")
-            ).strip()
-    except Exception as exc:
-        return StandardResponse.error(message=f"LLM 包裝失敗：{exc}")
+        result = run_analysis({body.analyze_template!r}, df, {params_repr})
+        chart_json = result.get("chart_data")
+        rows = result.get("result_table") or result.get("stats") or []
+        if not isinstance(rows, list):
+            rows = [rows]
+        ui_render = {{
+            "type": "trend_chart",
+            "charts": [chart_json] if chart_json else [],
+            "chart_data": chart_json,
+        }}
+        fields = [{{"name": k, "type": "string", "description": ""}} for k in (rows[0].keys() if rows else [])]
+        return {{"output_schema": {{"fields": fields}}, "dataset": rows, "ui_render": ui_render}}
+    except Exception as e:
+        return {{"output_schema": {{"fields": []}}, "dataset": [], "ui_render": {{"type": "table", "charts": [], "chart_data": None}}, "_error": str(e)}}
+'''
+    else:
+        wrap_prompt = _WRAP_SCRIPT_PROMPT.format(python_code=body.python_code)
+        try:
+            llm = get_llm_client()
+            wrap_resp = await llm.create(
+                system="你是一位 Python 專家。請嚴格遵守指示，只回傳 Python 程式碼，不要任何 markdown fence 或說明文字。",
+                messages=[{"role": "user", "content": wrap_prompt}],
+                max_tokens=4096,
+            )
+            processing_script = wrap_resp.text.strip()
+            # Strip accidental markdown fences
+            if processing_script.startswith("```"):
+                lines = processing_script.splitlines()
+                processing_script = "\n".join(
+                    ln for ln in lines if not ln.strip().startswith("```")
+                ).strip()
+        except Exception as exc:
+            return StandardResponse.error(message=f"LLM 包裝失敗：{exc}")
 
     # 2. Resolve system_mcp_id (data source) from the source MCP
     mcp_repo = MCPDefinitionRepository(db)
