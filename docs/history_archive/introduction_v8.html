@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Glass Box AI 診斷引擎 v8 — 產品介紹</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #f8fafc;
+    color: #1e293b;
+    line-height: 1.6;
+  }
+  /* ── Hero ── */
+  .hero {
+    background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 45%, #2563eb 100%);
+    color: white; padding: 80px 40px; text-align: center;
+  }
+  .hero .badge {
+    display: inline-block;
+    background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 9999px; padding: 4px 16px; font-size: 13px;
+    font-weight: 600; letter-spacing: .05em; margin-bottom: 24px; text-transform: uppercase;
+  }
+  .hero h1 { font-size: 48px; font-weight: 800; line-height: 1.15; margin-bottom: 20px; }
+  .hero h1 span { color: #93c5fd; }
+  .hero p { font-size: 20px; color: #bfdbfe; max-width: 680px; margin: 0 auto 36px; }
+  .hero-meta { display: flex; justify-content: center; gap: 32px; flex-wrap: wrap; }
+  .hero-meta .item { text-align: center; }
+  .hero-meta .item .num { font-size: 28px; font-weight: 700; color: #93c5fd; }
+  .hero-meta .item .label { font-size: 13px; color: #bfdbfe; margin-top: 2px; }
+  /* ── Container ── */
+  .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+  section { padding: 72px 0; }
+  section:nth-child(even) { background: white; }
+  /* ── Section labels ── */
+  .section-label {
+    display: inline-block; background: #eff6ff; color: #1e3a8a;
+    border-radius: 6px; padding: 4px 12px; font-size: 12px;
+    font-weight: 700; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 12px;
+  }
+  h2 { font-size: 32px; font-weight: 700; color: #0f172a; margin-bottom: 12px; }
+  h3 { font-size: 20px; font-weight: 600; color: #1e293b; margin-bottom: 8px; }
+  p { font-size: 16px; color: #475569; margin-bottom: 14px; }
+  ul, ol { padding-left: 24px; margin-bottom: 14px; }
+  li { color: #475569; margin-bottom: 6px; font-size: 15px; }
+  strong { color: #1e293b; }
+  /* ── Screenshot ── */
+  .screenshot {
+    border-radius: 12px; overflow: hidden;
+    box-shadow: 0 4px 6px -1px rgba(0,0,0,.07), 0 10px 15px -3px rgba(0,0,0,.1), 0 0 0 1px rgba(0,0,0,.05);
+    margin: 24px 0;
+  }
+  .screenshot img { width: 100%; display: block; }
+  .screenshot-caption { font-size: 13px; color: #94a3b8; text-align: center; margin-top: 8px; margin-bottom: 32px; }
+  /* ── Grid layouts ── */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; align-items: start; }
+  .three-col { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+  .four-col { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+  /* ── Feature card ── */
+  .feature-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; }
+  .feature-icon { font-size: 32px; margin-bottom: 12px; }
+  .feature-card h3 { font-size: 16px; }
+  .feature-card p { font-size: 14px; color: #64748b; margin-top: 6px; }
+  /* ── Pain point card ── */
+  .pain-card {
+    background: #fff5f5; border: 1px solid #fecaca; border-left: 4px solid #ef4444;
+    border-radius: 10px; padding: 18px 20px; margin-bottom: 12px;
+  }
+  .pain-card h3 { font-size: 15px; color: #991b1b; margin-bottom: 6px; }
+  .pain-card p { font-size: 14px; color: #7f1d1d; margin: 0; }
+  /* ── Solution card ── */
+  .solution-card {
+    background: #f0fdf4; border: 1px solid #bbf7d0; border-left: 4px solid #22c55e;
+    border-radius: 10px; padding: 18px 20px; margin-bottom: 12px;
+  }
+  .solution-card h3 { font-size: 15px; color: #166534; margin-bottom: 6px; }
+  .solution-card p { font-size: 14px; color: #14532d; margin: 0; }
+  /* ── Pyramid ── */
+  .pyramid { margin: 32px auto; max-width: 480px; }
+  .pyramid-layer {
+    display: flex; align-items: center; justify-content: center;
+    padding: 14px 20px; margin-bottom: 4px; border-radius: 6px;
+    font-weight: 700; font-size: 15px; color: white; text-align: center;
+  }
+  .pyramid-layer .layer-label { font-size: 11px; font-weight: 600; opacity: .85; margin-left: 10px; }
+  /* ── Chapter header ── */
+  .chapter-hero {
+    background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+    color: white; padding: 40px 0; margin: 0;
+  }
+  .chapter-hero h2 { color: white; font-size: 28px; }
+  .chapter-hero p { color: #bfdbfe; font-size: 16px; }
+  .chapter-num {
+    display: inline-block; background: rgba(255,255,255,0.2);
+    border-radius: 6px; padding: 4px 12px; font-size: 12px;
+    font-weight: 700; letter-spacing: .1em; margin-bottom: 10px;
+    text-transform: uppercase; color: white;
+  }
+  /* ── Tech badge ── */
+  .tech-badge {
+    display: inline-block; background: #f1f5f9; border: 1px solid #e2e8f0;
+    border-radius: 6px; padding: 4px 10px; font-size: 12px; font-weight: 600;
+    color: #475569; margin: 3px;
+  }
+  /* ── Step box ── */
+  .step-box {
+    display: flex; gap: 20px; align-items: flex-start;
+    padding: 20px 24px; background: white; border: 1px solid #e2e8f0;
+    border-radius: 10px; margin-bottom: 12px;
+  }
+  .step-num {
+    width: 36px; height: 36px; flex-shrink: 0;
+    background: #1e3a8a; color: white; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700;
+  }
+  .step-body h3 { font-size: 15px; margin-top: 0; margin-bottom: 4px; }
+  .step-body p { font-size: 14px; color: #64748b; margin: 0; }
+  /* ── SSE event boxes ── */
+  .sse-event {
+    display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+    border-radius: 8px; margin-bottom: 10px; font-size: 14px;
+  }
+  .sse-event .evt-tag {
+    font-family: monospace; font-size: 12px; font-weight: 700;
+    padding: 2px 8px; border-radius: 4px; white-space: nowrap;
+    min-width: 110px; text-align: center;
+  }
+  .sse-event.start { background: #eff6ff; }
+  .sse-event.start .evt-tag { background: #1e3a8a; color: white; }
+  .sse-event.running { background: #f5f3ff; }
+  .sse-event.running .evt-tag { background: #7c3aed; color: white; }
+  .sse-event.done { background: #f0fdf4; }
+  .sse-event.done .evt-tag { background: #16a34a; color: white; }
+  .sse-event.finish { background: #f8fafc; }
+  .sse-event.finish .evt-tag { background: #475569; color: white; }
+  /* ── Report card anatomy ── */
+  .report-mock {
+    background: white; border: 1px solid #e2e8f0; border-radius: 12px;
+    overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,.06);
+  }
+  .report-mock-header {
+    background: #f8fafc; border-bottom: 1px solid #e2e8f0; padding: 10px 16px;
+    display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600;
+  }
+  .report-mock-status {
+    font-size: 11px; font-weight: 700; padding: 2px 8px;
+    border-radius: 9999px; margin-left: auto;
+  }
+  .report-mock-body { padding: 16px; font-size: 13px; color: #475569; }
+  .report-mock-section { margin-bottom: 12px; }
+  .report-mock-label { font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 4px; }
+  .report-mock-table { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; font-family: monospace; font-size: 11px; }
+  /* ── Event card preview ── */
+  .ev-card-preview {
+    background: #fee2e2; border: 1px solid #fecaca; border-left: 4px solid #ef4444;
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .ev-card-preview .ev-title { color: #dc2626; font-weight: 700; font-size: 13px; margin-bottom: 6px; }
+  .ev-card-preview .ev-type { color: #991b1b; font-weight: 700; font-family: monospace; font-size: 15px; }
+  .ev-card-preview .ev-id { color: #dc2626; font-size: 12px; font-family: monospace; margin-bottom: 8px; }
+  .ev-launch-btn {
+    background: #fca5a5; border: 1px solid #f87171; border-radius: 8px;
+    padding: 8px 12px; text-align: center; font-size: 13px; font-weight: 700; color: #7f1d1d;
+  }
+  /* ── Layout preview ── */
+  .layout-preview {
+    background: white; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;
+    display: flex; height: 180px; box-shadow: 0 4px 12px rgba(0,0,0,.06);
+  }
+  .layout-sidebar {
+    width: 60px; background: #1e3a8a; display: flex; flex-direction: column;
+    align-items: center; padding: 12px 0; gap: 8px;
+  }
+  .layout-sidebar .dot { width: 24px; height: 24px; border-radius: 6px; background: rgba(255,255,255,0.2); }
+  .layout-sidebar .dot.active { background: rgba(255,255,255,0.5); }
+  .layout-chat { width: 30%; border-right: 1px solid #e2e8f0; background: #f8fafc; display: flex; flex-direction: column; padding: 10px; gap: 6px; }
+  .layout-chat .chat-bubble { background: white; border: 1px solid #fecaca; border-radius: 6px; padding: 6px 8px; font-size: 10px; color: #991b1b; }
+  .layout-chat .chat-bubble.msg { background: #eff6ff; border-color: #bfdbfe; color: #1e3a8a; align-self: flex-end; }
+  .layout-report { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .layout-report .tab-bar { background: white; border-bottom: 1px solid #e2e8f0; padding: 4px 8px; display: flex; gap: 4px; font-size: 9px; }
+  .layout-report .tab { padding: 3px 8px; border-bottom: 2px solid transparent; color: #64748b; }
+  .layout-report .tab.active { border-bottom-color: #1e3a8a; color: #1e3a8a; font-weight: 700; }
+  .layout-report .card { margin: 8px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; font-size: 10px; color: #475569; flex: 1; }
+  /* ── Callout ── */
+  .callout { border-radius: 8px; padding: 14px 18px; margin: 16px 0; display: flex; gap: 12px; align-items: flex-start; font-size: 14px; }
+  .callout.info { background: #eff6ff; border: 1px solid #bfdbfe; }
+  .callout.tip { background: #f0fdf4; border: 1px solid #bbf7d0; }
+  .callout-icon { font-size: 18px; flex-shrink: 0; }
+  .callout p { margin: 0; color: #334155; font-size: 14px; }
+  /* ── Component arrow ── */
+  .comp-arrow { display: flex; align-items: center; gap: 4px; margin: 8px 0; color: #94a3b8; font-size: 14px; }
+  .comp-arrow .arr { font-size: 20px; }
+  /* ── Quote ── */
+  .quote {
+    border-left: 4px solid #1e3a8a; padding: 16px 20px; margin: 24px 0;
+    background: #eff6ff; border-radius: 0 8px 8px 0;
+  }
+  .quote p { color: #1e3a8a; font-size: 16px; font-style: italic; margin: 0; }
+  /* ── Footer ── */
+  footer { background: #0f172a; color: #94a3b8; padding: 40px 0; text-align: center; }
+  footer .logo { font-size: 18px; font-weight: 700; color: white; margin-bottom: 8px; }
+  footer p { font-size: 13px; }
+  /* ── Print ── */
+  @media print {
+    .chapter-hero { page-break-before: always; }
+    section { page-break-inside: avoid; }
+  }
+  @media (max-width: 768px) { .two-col, .three-col, .four-col { grid-template-columns: 1fr; } .hero h1 { font-size: 32px; } }
+</style>
+</head>
+<body>
+
+<!-- ══════════════════ HERO ══════════════════ -->
+<div class="hero">
+  <div class="badge">Glass Box AI · Product Introduction · v8</div>
+  <h1>讓每一次製程異常<br><span>都有跡可循</span></h1>
+  <p>Glass Box AI 診斷引擎 v8 — 為半導體製程工程師打造的<br>事件驅動式 AI 診斷平台</p>
+  <div class="hero-meta">
+    <div class="item"><div class="num">3</div><div class="label">診斷技能</div></div>
+    <div class="item"><div class="num">4</div><div class="label">MCP 數據工具</div></div>
+    <div class="item"><div class="num">&lt;60s</div><div class="label">平均診斷時間</div></div>
+    <div class="item"><div class="num">100%</div><div class="label">可解釋結論</div></div>
+  </div>
+</div>
+
+<!-- ══════════════════ CHAPTER 1 ══════════════════ -->
+<div class="chapter-hero">
+  <div class="container">
+    <div class="chapter-num">Chapter 1</div>
+    <h2>設計哲學與痛點起源</h2>
+    <p>為什麼傳統排障方式已無法應對現代製程複雜度？Glass Box 如何重新定義診斷體驗？</p>
+  </div>
+</div>
+
+<!-- 1.1 Pain Points -->
+<section>
+  <div class="container">
+    <div class="section-label">Pain Points</div>
+    <h2>傳統排障的三大困境</h2>
+    <p>現代半導體蝕刻製程的每一條控制迴路，都在每個製程批次（Lot）產生數以千計的感測器紀錄與 SPC 數據。當 OOC（Out-of-Control）警報觸發時，工程師面對的是：</p>
+
+    <div style="margin-top:28px;">
+      <div class="pain-card">
+        <h3>🗄️ 資料孤島——數據在那裡，但無法快速存取</h3>
+        <p>SPC 系統、APC（先進製程控制）、MES 配方管理、設備 EC 常數——每個系統都有自己的介面，查詢需要多次登入，資料無法交叉比對。工程師平均需要 30 分鐘以上才能收集齊所有診斷所需的原始資料。</p>
+      </div>
+      <div class="pain-card">
+        <h3>🧠 經驗孤島——Know-how 在人腦裡，無法規模化</h3>
+        <p>資深工程師憑藉多年累積的感覺與直覺進行判斷，但這些知識難以文字化，更難以傳承。新進人員面對相同警報時，往往需要反覆請教，造成大量隱性時間損失。</p>
+      </div>
+      <div class="pain-card">
+        <h3>⏳ 時間孤島——診斷效率受限於人力資源</h3>
+        <p>深夜班或假日班組警報升起時，可能沒有足夠的資深工程師可以立即回應。每延誤一小時，即可能影響數十個 Lot 的生產排程，造成直接的良率與交期損失。</p>
+      </div>
+    </div>
+
+    <div class="screenshot">
+      <img src="screenshots/v7_02_diagnosis_overview.png" alt="Glass Box 主介面概覽">
+    </div>
+    <p class="screenshot-caption">Glass Box AI 診斷引擎 v8 主介面 — 左側為對話區，右側為診斷報告區，整合所有診斷功能於一個視窗</p>
+  </div>
+</section>
+
+<!-- 1.2 Agentic Workflow Solution -->
+<section>
+  <div class="container">
+    <div class="section-label">Agentic Workflow</div>
+    <h2>Agentic Workflow — AI 主動驅動診斷</h2>
+
+    <div class="quote">
+      <p>「Glass Box 不是讓工程師跟 AI 聊天——而是讓 AI 主動執行工程師的 SOP，並將結果以可追溯的方式呈現給人類做最終判斷。」</p>
+    </div>
+
+    <div class="two-col" style="margin-top:24px;">
+      <div>
+        <h3>傳統 AI 輔助模式（問答式）</h3>
+        <ul>
+          <li>工程師需自行收集資料</li>
+          <li>將資料複製貼入 ChatGPT / AI 對話框</li>
+          <li>AI 提供建議，但無法驗證</li>
+          <li>每次都要重複同樣步驟</li>
+          <li>結論無可追溯的數據依據</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Glass Box Agentic 模式</h3>
+        <ul>
+          <li>事件觸發 → AI 自動調度技能</li>
+          <li>AI 主動查詢各系統資料（透過 MCP）</li>
+          <li>每個診斷結論附帶真實數據表格</li>
+          <li>技能可複用、可擴充、可維護</li>
+          <li>工程師只需審閱結論 + 確認行動</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="screenshot" style="margin-top:28px;">
+      <img src="screenshots/v7_06_report_done.png" alt="Agentic 診斷報告">
+    </div>
+    <p class="screenshot-caption">AI 自動完成所有資料查詢與分析，報告卡片中包含真實 MCP 查詢資料表格，結論完全可追溯</p>
+  </div>
+</section>
+
+<!-- 1.3 Component Pyramid -->
+<section>
+  <div class="container">
+    <div class="section-label">Architecture</div>
+    <h2>四層元件金字塔</h2>
+    <p>Glass Box 的架構設計圍繞著一個清晰的四層結構，每一層都有明確的職責：</p>
+
+    <div class="pyramid">
+      <div class="pyramid-layer" style="background:#1e3a8a;width:100%;">
+        🚨 Event（事件）<span class="layer-label">— 觸發點，定義診斷情境</span>
+      </div>
+      <div class="pyramid-layer" style="background:#2563eb;width:85%;margin:0 auto;">
+        📊 Data Subject（資料主題）<span class="layer-label">— 資料語意定義</span>
+      </div>
+      <div class="pyramid-layer" style="background:#3b82f6;width:70%;margin:0 auto;">
+        🔧 MCP（資料查詢工具）<span class="layer-label">— 實際執行查詢</span>
+      </div>
+      <div class="pyramid-layer" style="background:#60a5fa;width:55%;margin:0 auto;color:#1e3a8a;">
+        🧠 Skill（診斷技能）<span class="layer-label" style="color:#1e3a8a;">— AI 推論 + 結論</span>
+      </div>
+    </div>
+
+    <div class="four-col" style="margin-top:28px;">
+      <div class="feature-card">
+        <div class="feature-icon">🚨</div>
+        <h3>Event</h3>
+        <p>定義觸發條件與診斷情境（如 SPC_OOC_Etch_CD），關聯一組 Skill 執行清單</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <h3>Data Subject</h3>
+        <p>描述一個可被查詢的資料主題，包含 Schema、欄位語意、資料來源說明</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔧</div>
+        <h3>MCP 工具</h3>
+        <p>實際執行資料查詢的 Python 腳本，返回結構化資料供 Skill 推論使用</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🧠</div>
+        <h3>Skill</h3>
+        <p>整合 MCP 資料 + AI 提示詞的診斷單元，產出結論與行動建議</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ CHAPTER 2 ══════════════════ -->
+<div class="chapter-hero">
+  <div class="container">
+    <div class="chapter-num">Chapter 2</div>
+    <h2>No-Code MCP Builder</h2>
+    <p>如何讓沒有軟體工程背景的製程工程師，也能為自己的診斷場景建立 AI 數據查詢工具？</p>
+  </div>
+</div>
+
+<!-- 2.1 Data Subject Registration -->
+<section>
+  <div class="container">
+    <div class="section-label">Data Subject</div>
+    <h2>Data Subject 語意化資料登記</h2>
+    <p>每一個診斷場景都需要特定的資料。Data Subject 是對「一類可查詢資料」的語意描述，它告訴系統：這個資料主題是什麼、有哪些欄位、代表什麼意義。</p>
+
+    <div class="two-col">
+      <div>
+        <h3>Data Subject 包含什麼</h3>
+        <ul>
+          <li><strong>名稱（Name）</strong>：英文識別符，如 <code>etch_apc_params</code></li>
+          <li><strong>描述（Description）</strong>：這個資料主題的用途與業務場景說明</li>
+          <li><strong>Schema 定義</strong>：欄位名稱、型別、語意描述（JSON 格式）</li>
+          <li><strong>資料來源標記</strong>：說明資料從哪個系統獲取（APC、MES、設備 API 等）</li>
+        </ul>
+      </div>
+      <div>
+        <h3>為什麼需要 Data Subject？</h3>
+        <p>Data Subject 是橋接「業務語義」與「程式碼」的關鍵。有了它，AI 在 Auto Map 時才能理解每個欄位的含義，進行正確的語意匹配；工程師也能用自然語言描述需求，而不是記憶欄位名稱。</p>
+      </div>
+    </div>
+
+    <div class="screenshot">
+      <img src="screenshots/v7_10_skills_triage.png" alt="Data Subject 管理介面">
+    </div>
+    <p class="screenshot-caption">Builder 的 Data Subject 管理頁面 — 以卡片式顯示所有已登記的資料主題，並可一鍵預覽資料</p>
+  </div>
+</section>
+
+<!-- 2.2 NL to Python Sandbox -->
+<section>
+  <div class="container">
+    <div class="section-label">MCP Script Builder</div>
+    <h2>自然語言 → Python 沙箱腳本</h2>
+    <p>工程師只需用中文或英文描述「我需要查詢什麼資料」，系統自動生成符合 MCP 格式的 Python 腳本，無需任何程式設計背景。</p>
+
+    <div class="three-col">
+      <div class="step-box">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <h3>輸入需求描述</h3>
+          <p>「查詢 APC 的 RF Power 在過去 24 小時的趨勢，若偏差超過 5% 標記為異常」</p>
+        </div>
+      </div>
+      <div class="step-box">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <h3>AI 自動生成腳本</h3>
+          <p>系統根據描述與 Data Subject Schema，生成符合 MCP 輸出格式的 Python 腳本</p>
+        </div>
+      </div>
+      <div class="step-box">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <h3>Try Run 即時驗證</h3>
+          <p>點擊 Try Run，在沙箱環境執行腳本，結果以表格即時顯示</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="screenshot">
+      <img src="screenshots/v7_11_skills_actions.png" alt="MCP Script 生成">
+    </div>
+    <p class="screenshot-caption">MCP 腳本編輯器 — 左側自然語言描述，右側自動生成的 Python 腳本，下方即時顯示 Try Run 結果</p>
+  </div>
+</section>
+
+<!-- 2.3 Universal Data Viewer -->
+<section>
+  <div class="container">
+    <div class="section-label">Universal Data Viewer</div>
+    <h2>Universal Data Viewer — 統一資料預覽</h2>
+    <p>無論 MCP 腳本返回什麼格式的資料，Universal Data Viewer 都能即時以統一格式呈現，讓工程師在開發過程中立即看到資料的實際樣貌。</p>
+
+    <div class="two-col">
+      <div>
+        <h3>支援的顯示格式</h3>
+        <ul>
+          <li><strong>資料表格</strong>（預設）：以分頁表格顯示 dataset 前 15 筆記錄</li>
+          <li><strong>Plotly 圖表</strong>：若 MCP 返回 chart_data，自動渲染互動式圖表</li>
+          <li><strong>JSON 原始輸出</strong>：可折疊查看完整 JSON 結構</li>
+          <li><strong>執行狀態</strong>：耗時、狀態碼、錯誤訊息（若失敗）</li>
+        </ul>
+      </div>
+      <div>
+        <h3>MCP 輸出格式規範</h3>
+        <pre style="background:#1e293b;color:#e2e8f0;padding:14px;border-radius:8px;font-size:12px;">{
+  "dataset": [
+    {"timestamp": "...",
+     "value": 450.2,
+     "status": "NORMAL"},
+    ...
+  ],
+  "ui_render": {
+    "type": "table",
+    "chart_data": null
+  }
+}</pre>
+      </div>
+    </div>
+
+    <div class="callout tip">
+      <span class="callout-icon">💡</span>
+      <p><strong>設計理念：</strong>MCP 的 <code>dataset</code> 不僅用於 AI 推論，也會直接嵌入診斷報告卡片，讓每個結論都有數據依據，完全可追溯。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ CHAPTER 3 ══════════════════ -->
+<div class="chapter-hero">
+  <div class="container">
+    <div class="chapter-num">Chapter 3</div>
+    <h2>Skill 系統的領域知識注入</h2>
+    <p>如何將資深工程師腦海中的 SOP 與判斷邏輯，轉化為可複用、可擴充的 AI 診斷技能？</p>
+  </div>
+</div>
+
+<!-- 3.1 Semantic Auto-Mapping -->
+<section>
+  <div class="container">
+    <div class="section-label">Auto Map</div>
+    <h2>語意自動映射（Semantic Auto-Map）</h2>
+    <p>建立 Skill 時，最繁瑣的步驟之一是設定「MCP 輸出欄位」到「Skill 診斷輸入」的對應關係。Glass Box 的 Auto Map 功能使用 LLM 進行語意理解，自動完成這個步驟。</p>
+
+    <div class="two-col">
+      <div>
+        <h3>傳統手動映射的問題</h3>
+        <ul>
+          <li>工程師需逐欄設定對應關係</li>
+          <li>欄位名稱可能使用縮寫或特殊命名</li>
+          <li>不同 MCP 工具的輸出格式各異</li>
+          <li>映射錯誤不易在早期發現</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Auto Map 做什麼</h3>
+        <ul>
+          <li>分析 MCP 的 Data Subject Schema</li>
+          <li>分析 Skill 的診斷提示詞需求</li>
+          <li>LLM 進行跨系統語意理解</li>
+          <li>自動生成映射表 + 置信度分數</li>
+          <li>異常映射用顏色標示，供人工確認</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="screenshot">
+      <img src="screenshots/v7_13_triage_detail_drawer.png" alt="Auto Map 語意映射">
+    </div>
+    <p class="screenshot-caption">Auto Map 結果 — 自動生成的映射表，每個映射項目包含置信度分數與語意說明</p>
+  </div>
+</section>
+
+<!-- 3.2 Diagnostic Prompting -->
+<section>
+  <div class="container">
+    <div class="section-label">Diagnostic Prompting</div>
+    <h2>診斷提示詞設計（Diagnostic Prompting）</h2>
+    <p>每個 Skill 的核心是一段精心設計的 AI 系統提示詞（System Prompt），它定義了 AI 應該如何解讀 MCP 資料、做出什麼樣的判斷、用什麼格式回答。</p>
+
+    <div class="feature-card" style="margin-bottom:16px;">
+      <h3>提示詞的四個要素</h3>
+      <div class="four-col" style="margin-top:12px;">
+        <div>
+          <div style="font-size:20px;margin-bottom:6px;">🎯</div>
+          <h3 style="font-size:14px;">診斷目標</h3>
+          <p style="font-size:13px;">明確告訴 AI 這個 Skill 要診斷什麼異常、判斷什麼風險</p>
+        </div>
+        <div>
+          <div style="font-size:20px;margin-bottom:6px;">📋</div>
+          <h3 style="font-size:14px;">判斷標準</h3>
+          <p style="font-size:13px;">量化的閾值、比較基準、異常定義（例：偏差 &gt;5% 為異常）</p>
+        </div>
+        <div>
+          <div style="font-size:20px;margin-bottom:6px;">📊</div>
+          <h3 style="font-size:14px;">資料解讀</h3>
+          <p style="font-size:13px;">如何解讀 MCP 返回的欄位（如 saturated 欄位代表什麼意義）</p>
+        </div>
+        <div>
+          <div style="font-size:20px;margin-bottom:6px;">📝</div>
+          <h3 style="font-size:14px;">輸出格式</h3>
+          <p style="font-size:13px;">結論摘要 + 狀態分類（NORMAL/ABNORMAL）+ 建議行動</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout info">
+      <span class="callout-icon">🎓</span>
+      <p><strong>最佳實踐：</strong>將資深工程師的判斷邏輯轉化為提示詞時，重點在於「當 X 指標超過 Y 閾值時，代表 Z 問題，建議採取 W 行動」這個結構。越具體的提示詞，診斷準確率越高。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 3.3 Human SOP Encapsulation -->
+<section>
+  <div class="container">
+    <div class="section-label">SOP Encapsulation</div>
+    <h2>人類 SOP 的封裝與傳承</h2>
+    <p>Glass Box Skill 系統的本質，是將資深工程師的作業程序（SOP）封裝為可執行的 AI 技能單元。每個 Skill 都是一份數位化的製程知識資產。</p>
+
+    <div class="three-col" style="margin-top:24px;">
+      <div class="feature-card">
+        <div class="feature-icon">📖</div>
+        <h3>知識顯性化</h3>
+        <p>將工程師大腦中隱性的判斷標準，轉化為明確的提示詞，讓知識可以被記錄、審閱與修正。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">♻️</div>
+        <h3>技能可複用</h3>
+        <p>同一個 Skill 可被多個 Event 類型引用。APC 飽和檢查 Skill 可同時服務於不同的 SPC OOC 事件。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔄</div>
+        <h3>迭代改善</h3>
+        <p>透過 Validate Logic 功能，定期審視 Skill 的判斷準確率，根據實際診斷結果持續優化提示詞。</p>
+      </div>
+    </div>
+
+    <div class="screenshot">
+      <img src="screenshots/v7_12_skill_detail_drawer.png" alt="Skill 詳情 — SOP 封裝">
+    </div>
+    <p class="screenshot-caption">Skill 詳情抽屜 — 展示完整的技能設定，包含診斷提示詞、MCP 工具組合與映射關係，代表一個完整封裝的製程 SOP</p>
+  </div>
+</section>
+
+<!-- ══════════════════ CHAPTER 4 ══════════════════ -->
+<div class="chapter-hero">
+  <div class="container">
+    <div class="chapter-num">Chapter 4</div>
+    <h2>事件驅動排障體驗</h2>
+    <p>從警報觸發到完整診斷報告，Glass Box v8 如何透過漸進式串流與直覺化介面，重新定義工程師的排障體驗？</p>
+  </div>
+</div>
+
+<!-- 4.1 30/70 Layout -->
+<section>
+  <div class="container">
+    <div class="section-label">UI Design</div>
+    <h2>30/70 黃金分割佈局</h2>
+    <p>v8 的診斷工作站採用精心計算的 <strong>30/70 水平分割佈局</strong>，兼顧互動流暢性與資訊密度。</p>
+
+    <div class="layout-preview" style="margin-bottom:24px;">
+      <div class="layout-sidebar">
+        <div class="dot active"></div>
+        <div class="dot"></div>
+        <div class="dot"></div>
+      </div>
+      <div class="layout-chat">
+        <div class="chat-bubble">⚡ 事件通知<br><strong>SPC_OOC_Etch_CD</strong></div>
+        <div class="chat-bubble msg">🔍 啟動診斷分析</div>
+        <div class="chat-bubble" style="background:#f0fdf4;border-color:#bbf7d0;color:#166534;">⏳ 正在執行 APC 檢查...</div>
+        <div class="chat-bubble" style="background:#f0fdf4;border-color:#bbf7d0;color:#166534;">✅ APC 完成</div>
+      </div>
+      <div class="layout-report">
+        <div style="background:#f0f7ff;border-bottom:1px solid #bfdbfe;padding:6px 10px;font-size:9px;font-weight:700;color:#1e3a8a;">📊 診斷總覽 — 3 個技能 | 2 NORMAL | 1 ABNORMAL</div>
+        <div class="tab-bar">
+          <span class="tab active">✅ APC 檢查</span>
+          <span class="tab">⚠️ 配方偏移</span>
+          <span class="tab">✅ EC 常數</span>
+        </div>
+        <div class="card">APC RF Power 在正常範圍，未發現飽和現象。建議持續觀察電漿穩定性。</div>
+      </div>
+    </div>
+    <p class="screenshot-caption">30/70 佈局預覽：左側 30% 為 Chat 互動區，右側 70% 為診斷報告區（含 Summary Bar + Tab 列 + 報告卡片）</p>
+
+    <div class="two-col">
+      <div>
+        <h3>左側 30%：Chat 互動區</h3>
+        <ul>
+          <li>事件通知卡（紅色警示配色）</li>
+          <li>診斷進度即時回報（⏳/✅/❌）</li>
+          <li>可繼續輸入文字提問</li>
+          <li>操作歷史完整保留</li>
+        </ul>
+      </div>
+      <div>
+        <h3>右側 70%：診斷報告區</h3>
+        <ul>
+          <li>事件標頭 + 參數摘要</li>
+          <li>診斷總覽 Summary Bar（藍色橫幅）</li>
+          <li>每個技能對應一個 Tab</li>
+          <li>完整報告卡片含 MCP 數據表格</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 4.2 Progressive Streaming -->
+<section>
+  <div class="container">
+    <div class="section-label">Progressive Streaming</div>
+    <h2>漸進式 SSE 串流——讓等待有意義</h2>
+    <p>v8 的最大技術革新之一：診斷結果不再是「等所有技能跑完才顯示」，而是採用 <strong>Server-Sent Events（SSE）</strong> 技術，每完成一個技能即立即渲染一張報告 Tab。</p>
+
+    <h3>SSE 事件流詳解</h3>
+    <div style="margin-top:16px;">
+      <div class="sse-event start">
+        <div class="evt-tag">start</div>
+        <div>診斷任務啟動，回傳事件基本資訊與技能總數（<code>skill_count</code>）</div>
+      </div>
+      <div class="sse-event running">
+        <div class="evt-tag">skill_start</div>
+        <div>某技能開始執行，前端 Chat 顯示「⏳ 正在執行 <em>技能名稱</em>...」</div>
+      </div>
+      <div class="sse-event done">
+        <div class="evt-tag">skill_done</div>
+        <div>某技能完成，攜帶完整診斷結果（狀態、結論、MCP 資料），前端立即新增 Tab</div>
+      </div>
+      <div class="sse-event running">
+        <div class="evt-tag">skill_start</div>
+        <div>下一個技能繼續執行...</div>
+      </div>
+      <div class="sse-event done">
+        <div class="evt-tag">skill_done</div>
+        <div>技能完成，再次新增 Tab</div>
+      </div>
+      <div class="sse-event finish">
+        <div class="evt-tag">done</div>
+        <div>全部技能完成，渲染診斷總覽 Summary Bar，解鎖 UI</div>
+      </div>
+    </div>
+
+    <div class="callout info">
+      <span class="callout-icon">💻</span>
+      <p><strong>技術實作：</strong>前端使用 <code>fetch() + ReadableStream</code>（而非 EventSource），以確保能在請求標頭中攜帶 JWT Authorization Token，突破 EventSource 無法設定 Header 的限制。</p>
+    </div>
+
+    <div class="screenshot">
+      <img src="screenshots/v7_04_streaming_start.png" alt="SSE 串流進行中">
+    </div>
+    <p class="screenshot-caption">診斷串流進行中 — Chat 面板即時顯示各技能執行狀態，右側同步渲染完成的技能報告 Tab</p>
+  </div>
+</section>
+
+<!-- 4.3 Report Card Anatomy -->
+<section>
+  <div class="container">
+    <div class="section-label">Report Card</div>
+    <h2>報告卡片解剖——每個結論都有數據依據</h2>
+    <p>每張技能報告卡片是 v8 最重要的資訊呈現單元，包含五個標準區塊：</p>
+
+    <div class="report-mock" style="max-width:560px;margin:24px auto;">
+      <div class="report-mock-header">
+        <span>🔧 mcp_check_apc_params</span>
+        <span class="report-mock-status" style="background:#dcfce7;color:#166534;">✅ NORMAL</span>
+      </div>
+      <div class="report-mock-body">
+        <div class="report-mock-section">
+          <div class="report-mock-label">① 技能識別</div>
+          <div style="font-size:13px;">APC 參數飽和度檢查 · ETC-01 · RF Power</div>
+        </div>
+        <div class="report-mock-section">
+          <div class="report-mock-label">② AI 診斷結論</div>
+          <div style="font-size:13px;color:#1e293b;">APC 的 RF Power 在過去 24 小時內均在正常控制範圍，未發現飽和現象。Kp 值穩定，無需立即介入。</div>
+        </div>
+        <div class="report-mock-section">
+          <div class="report-mock-label">③ MCP 資料證據（前 3 筆）</div>
+          <div class="report-mock-table">
+            <table style="width:100%;font-size:11px;border-collapse:collapse;">
+              <tr style="background:#e2e8f0;"><th style="padding:4px 6px;text-align:left;">timestamp</th><th style="padding:4px 6px;text-align:left;">rf_power</th><th style="padding:4px 6px;text-align:left;">status</th></tr>
+              <tr><td style="padding:3px 6px;">2026-03-01 10:00</td><td style="padding:3px 6px;">450.2</td><td style="padding:3px 6px;color:#166534;">NORMAL</td></tr>
+              <tr><td style="padding:3px 6px;">2026-03-01 10:30</td><td style="padding:3px 6px;">448.8</td><td style="padding:3px 6px;color:#166534;">NORMAL</td></tr>
+              <tr><td style="padding:3px 6px;">2026-03-01 11:00</td><td style="padding:3px 6px;">451.5</td><td style="padding:3px 6px;color:#166534;">NORMAL</td></tr>
+            </table>
+          </div>
+        </div>
+        <div class="report-mock-section">
+          <div class="report-mock-label">④ 建議行動</div>
+          <div style="font-size:13px;color:#1e293b;">持續監控 RF Power 趨勢，若下次 Lot 仍出現 OOC 則建議進行 PM 前預防性保養。</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="four-col" style="margin-top:16px;">
+      <div style="text-align:center;padding:16px;background:white;border:1px solid #e2e8f0;border-radius:10px;">
+        <div style="font-size:24px;margin-bottom:8px;">① 技能識別</div>
+        <p style="font-size:13px;color:#64748b;">技能名稱、MCP 工具、診斷目標設備/參數</p>
+      </div>
+      <div style="text-align:center;padding:16px;background:white;border:1px solid #e2e8f0;border-radius:10px;">
+        <div style="font-size:24px;margin-bottom:8px;">② AI 結論</div>
+        <p style="font-size:13px;color:#64748b;">自然語言診斷結論 + 狀態分類（NORMAL/ABNORMAL）</p>
+      </div>
+      <div style="text-align:center;padding:16px;background:white;border:1px solid #e2e8f0;border-radius:10px;">
+        <div style="font-size:24px;margin-bottom:8px;">③ 數據證據</div>
+        <p style="font-size:13px;color:#64748b;">MCP 實際查詢資料表格，前 15 筆，完全可追溯</p>
+      </div>
+      <div style="text-align:center;padding:16px;background:white;border:1px solid #e2e8f0;border-radius:10px;">
+        <div style="font-size:24px;margin-bottom:8px;">④ 行動建議</div>
+        <p style="font-size:13px;color:#64748b;">具體的工程師行動建議（Human Recommendation）</p>
+      </div>
+    </div>
+
+    <div class="screenshot" style="margin-top:28px;">
+      <img src="screenshots/v7_06_report_done.png" alt="完整報告卡片截圖">
+    </div>
+    <p class="screenshot-caption">完整診斷報告頁面 — 右側三個技能 Tab 各含一張報告卡片，Summary Bar 顯示三個技能的診斷總覽</p>
+  </div>
+</section>
+
+<!-- 4.4 Summary Bar -->
+<section>
+  <div class="container">
+    <div class="section-label">Summary Bar</div>
+    <h2>診斷總覽 Summary Bar</h2>
+    <p>當全部技能執行完畢，報告區頂部（Tab 列上方）自動出現<strong>淡藍色診斷總覽橫幅</strong>，以三欄格式並排呈現所有技能的精簡摘要，讓工程師一眼掌握整體診斷結果。</p>
+
+    <!-- Summary bar mockup -->
+    <div style="background:#f0f7ff;border-bottom:1px solid #bfdbfe;padding:14px 20px;border-radius:10px;margin:24px 0;">
+      <div style="font-size:12px;font-weight:700;color:#1e3a8a;text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;">📊 診斷總覽</div>
+      <div style="display:grid;grid-template-columns:28% 1fr 28%;gap:8px;align-items:start;border-bottom:1px solid #e0eeff;padding-bottom:8px;margin-bottom:8px;">
+        <div style="font-size:11px;font-weight:700;color:#64748b;">技能</div>
+        <div style="font-size:11px;font-weight:700;color:#64748b;">診斷結論</div>
+        <div style="font-size:11px;font-weight:700;color:#64748b;">建議行動</div>
+      </div>
+      <div style="display:grid;grid-template-columns:28% 1fr 28%;gap:8px;align-items:start;padding:5px 0;font-size:12px;border-bottom:1px solid #e0eeff;">
+        <div><span style="background:#dcfce7;color:#166534;padding:2px 6px;border-radius:9999px;font-size:10px;font-weight:700;">✅ NORMAL</span><br><span style="color:#475569;font-size:11px;">APC 飽和檢查</span></div>
+        <div style="color:#475569;">RF Power 未飽和，APC 控制正常。</div>
+        <div style="color:#475569;">持續監控，下次 Lot 跟進。</div>
+      </div>
+      <div style="display:grid;grid-template-columns:28% 1fr 28%;gap:8px;align-items:start;padding:5px 0;font-size:12px;border-bottom:1px solid #e0eeff;">
+        <div><span style="background:#fff7ed;color:#c2410c;padding:2px 6px;border-radius:9999px;font-size:10px;font-weight:700;border:1px solid #fed7aa;">⚠️ ABNORMAL</span><br><span style="color:#475569;font-size:11px;">配方偏移檢查</span></div>
+        <div style="color:#475569;">24 小時內 CD Etch Rate 配方偏移超過容許範圍，MES 有修改記錄。</div>
+        <div style="color:#475569;">立即確認 MES 配方異動，必要時執行 Recipe 回滾。</div>
+      </div>
+      <div style="display:grid;grid-template-columns:28% 1fr 28%;gap:8px;align-items:start;padding:5px 0;font-size:12px;">
+        <div><span style="background:#dcfce7;color:#166534;padding:2px 6px;border-radius:9999px;font-size:10px;font-weight:700;">✅ NORMAL</span><br><span style="color:#475569;font-size:11px;">EC 常數檢查</span></div>
+        <div style="color:#475569;">設備 EC 常數與 Golden 基準吻合，差異低。</div>
+        <div style="color:#475569;">無需立即介入，排程常規 PM 即可。</div>
+      </div>
+    </div>
+    <p class="screenshot-caption">診斷總覽 Summary Bar — 三個技能的精簡摘要並排顯示，2 個 NORMAL、1 個 ABNORMAL，一眼掌握整體診斷狀態</p>
+
+    <div class="callout tip">
+      <span class="callout-icon">🎯</span>
+      <p><strong>設計理念：</strong>Summary Bar 讓工程師在 5 秒內完成初步判斷。若需要深入了解，點擊對應 Tab 即可查看完整報告卡片（含 MCP 數據證據）。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ FOOTER ══════════════════ -->
+<footer>
+  <div class="container">
+    <div class="logo">Glass Box AI 診斷引擎</div>
+    <p>v8.0 · 2026 · 為半導體製程工程師打造</p>
+    <p style="margin-top:12px;">
+      <span style="margin:0 8px;">Event-Driven</span>·
+      <span style="margin:0 8px;">No-Code MCP Builder</span>·
+      <span style="margin:0 8px;">SSE Progressive Streaming</span>·
+      <span style="margin:0 8px;">Explainable AI</span>
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>

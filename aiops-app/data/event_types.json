@@ -1,0 +1,9 @@
+[
+  {
+    "id": "et-005",
+    "name": "OOC",
+    "severity": "warning",
+    "description": "SPC out-of-control event",
+    "created_at": "2026-03-21T08:06:30.853Z"
+  }
+]

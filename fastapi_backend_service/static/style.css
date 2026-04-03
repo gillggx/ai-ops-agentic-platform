@@ -1,0 +1,1582 @@
+/* ══════════════════════════════════════════════════════════════
+   AI Ops — Custom Stylesheet  (Light Theme)
+   Complements Tailwind CDN (no PostCSS / no @apply needed)
+══════════════════════════════════════════════════════════════ */
+
+/* ── Reset & Base ──────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Login Card ─────────────────────────────────────────────── */
+.login-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 20px;
+  padding: 2rem;
+  width: 380px;
+  box-shadow: 0 10px 40px -8px rgba(0, 0, 0, 0.12);
+}
+
+.input-field {
+  display: block;
+  width: 100%;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 8px 12px;
+  font-size: 14px;
+  color: #0f172a;
+  transition: border-color 0.15s;
+  outline: none;
+}
+.input-field:focus { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,0.12); }
+.input-field::placeholder { color: #94a3b8; }
+
+/* ── Tab Buttons ────────────────────────────────────────────── */
+.tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  color: #64748b;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: color 0.15s, background 0.15s;
+  position: relative;
+}
+.tab-btn:hover {
+  color: #1e293b;
+  background: #f1f5f9;
+}
+.active-tab {
+  color: #1e293b !important;
+  background: #ffffff !important;
+  box-shadow: inset 0 -2px 0 #4f46e5;
+}
+
+/* Tab loading spinner */
+.tab-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #cbd5e1;
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+/* Tab done indicator */
+.tab-done {
+  font-size: 12px;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+/* ── Tab Panel ──────────────────────────────────────────────── */
+.tab-panel { display: flex; flex-direction: column; }
+.tab-panel.hidden { display: none; }
+
+/* skill-tab-panels scrolls internally */
+#skill-tab-panels { overflow-y: auto; }
+#skill-tab-panels .skill-tab-panel { display: block; }
+#skill-tab-panels .skill-tab-panel.hidden { display: none; }
+
+/* ── Tool Card ──────────────────────────────────────────────── */
+.tool-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 1.25rem 1.5rem;
+  margin: 1.5rem;
+}
+
+.tool-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+  margin-bottom: 6px;
+  margin-top: 14px;
+}
+
+.code-block {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 12px;
+  color: #475569;
+  overflow-x: auto;
+  white-space: pre;
+  line-height: 1.6;
+}
+
+/* Progress bar animation */
+.loading-bar {
+  height: 3px;
+  background: #e2e8f0;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 14px;
+}
+.loading-bar-inner {
+  height: 100%;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, #3b82f6, transparent);
+  border-radius: 2px;
+  animation: slide 1.2s ease-in-out infinite;
+}
+
+/* ── Event Object (mcp_event_triage result) ─────────────────── */
+.event-object {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.event-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: #f1f5f9;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.event-id {
+  font-family: "SF Mono", monospace;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.event-type-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.08);
+  color: #2563eb;
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.event-body {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.event-field {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.field-label {
+  font-size: 11px;
+  color: #94a3b8;
+  min-width: 72px;
+  padding-top: 2px;
+}
+
+.field-value {
+  font-size: 13px;
+  color: #374151;
+}
+
+/* Urgency badges */
+.urgency-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.urgency-critical { background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5; }
+.urgency-high     { background: #ffedd5; color: #ea580c; border: 1px solid #fdba74; }
+.urgency-medium   { background: #fef9c3; color: #ca8a04; border: 1px solid #fde047; }
+.urgency-low      { background: #dcfce7; color: #16a34a; border: 1px solid #86efac; }
+
+/* Skills list */
+.skills-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.skill-tag {
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: rgba(99, 102, 241, 0.08);
+  color: #4f46e5;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  font-family: "SF Mono", monospace;
+}
+
+/* ── Report Meta ─────────────────────────────────────────────── */
+.report-meta {
+  display: flex;
+  gap: 16px;
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+/* ── Chat Bubbles ────────────────────────────────────────────── */
+.chat-bubble {
+  max-width: 90%;
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  animation: fadeIn 0.2s ease;
+}
+
+/* User message: right-aligned */
+.chat-user {
+  align-self: flex-end;
+  background: #4f46e5;
+  color: #eef2ff;
+  border-bottom-right-radius: 4px;
+  margin-left: auto;
+  text-align: right;
+}
+
+/* Agent / system messages: left-aligned */
+.chat-agent {
+  background: #f8fafc;
+  color: #374151;
+  border: 1px solid #e2e8f0;
+  border-bottom-left-radius: 4px;
+}
+
+/* Markdown content inside agent bubbles */
+.chat-agent table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12px;
+}
+.chat-agent table th,
+.chat-agent table td {
+  border: 1px solid #cbd5e1;
+  padding: 5px 10px;
+  text-align: left;
+}
+.chat-agent table th {
+  background: #e2e8f0;
+  font-weight: 600;
+  color: #1e3a8a;
+}
+.chat-agent table tr:nth-child(even) td {
+  background: #f1f5f9;
+}
+.chat-agent p { margin: 4px 0; }
+.chat-agent ul, .chat-agent ol { margin: 4px 0; padding-left: 18px; }
+.chat-agent li { margin: 2px 0; }
+.chat-agent strong { color: #1e293b; }
+.chat-agent h3 { font-size: 13px; font-weight: 700; margin: 8px 0 4px; color: #1e3a8a; }
+.chat-agent code { background: #e2e8f0; border-radius: 3px; padding: 1px 4px; font-size: 11px; }
+
+/* Tool call notification (smaller, subtle) */
+.chat-tool {
+  background: rgba(99, 102, 241, 0.06);
+  border: 1px solid rgba(99, 102, 241, 0.18);
+  color: #4f46e5;
+  border-radius: 10px;
+  font-size: 12px;
+  padding: 6px 12px;
+}
+.chat-tool code {
+  font-family: "SF Mono", monospace;
+  font-size: 11px;
+}
+
+/* Error message */
+.chat-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #dc2626;
+  border-radius: 10px;
+  font-size: 12px;
+  padding: 8px 12px;
+}
+
+/* System divider */
+.chat-divider {
+  text-align: center;
+  font-size: 11px;
+  color: #94a3b8;
+  padding: 6px 0;
+}
+
+/* ── Markdown Prose (Summary Report) ─────────────────────────── */
+.prose-custom { color: #374151; line-height: 1.7; }
+
+.prose-custom h1 { font-size: 1.4rem; font-weight: 700; color: #0f172a; margin: 0 0 1rem; }
+.prose-custom h2 { font-size: 1.15rem; font-weight: 600; color: #1e293b; margin: 1.5rem 0 0.5rem; padding-bottom: 6px; border-bottom: 1px solid #e2e8f0; }
+.prose-custom h3 { font-size: 1rem; font-weight: 600; color: #374151; margin: 1rem 0 0.4rem; }
+.prose-custom p  { margin: 0.6rem 0; font-size: 14px; }
+
+.prose-custom ul { list-style: disc; padding-left: 1.4rem; margin: 0.5rem 0; }
+.prose-custom ol { list-style: decimal; padding-left: 1.4rem; margin: 0.5rem 0; }
+.prose-custom li { margin: 0.3rem 0; font-size: 14px; }
+
+.prose-custom code {
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 12px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
+  padding: 1px 6px;
+  color: #4f46e5;
+}
+
+.prose-custom pre {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px;
+  overflow-x: auto;
+  margin: 0.8rem 0;
+}
+.prose-custom pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 13px;
+  color: #475569;
+}
+
+.prose-custom strong { color: #0f172a; font-weight: 600; }
+.prose-custom em     { color: #64748b; }
+
+.prose-custom blockquote {
+  border-left: 3px solid #4f46e5;
+  padding-left: 14px;
+  color: #64748b;
+  margin: 0.8rem 0;
+  font-style: italic;
+}
+
+.prose-custom hr { border: none; border-top: 1px solid #e2e8f0; margin: 1.2rem 0; }
+
+.prose-custom a { color: #4f46e5; text-decoration: underline; }
+
+/* ── Animations ──────────────────────────────────────────────── */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes slide {
+  0%   { transform: translateX(-100%); }
+  50%  { transform: translateX(300%); }
+  100% { transform: translateX(-100%); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+/* ── Streaming status ────────────────────────────────────────── */
+.status-streaming .status-dot {
+  background: #f59e0b !important;
+  animation: pulse-dot 1s ease-in-out infinite;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────── */
+::-webkit-scrollbar        { width: 6px; height: 6px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* ── Phase 8: Sidebar nav ───────────────────────────────────── */
+/* Sidebar stays DARK — brand accent "深紫藍色調" */
+.nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  transition: background 0.15s;
+  position: relative;
+}
+.nav-btn:hover { background: rgba(255, 255, 255, 0.12); }
+.active-nav { background: rgba(255, 255, 255, 0.18) !important; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25); }
+
+/* User Manual button — top of sidebar, icon + label stacked */
+.nav-btn-manual {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  padding: 7px 4px 6px;
+  border-radius: 10px;
+  cursor: pointer;
+  background: linear-gradient(135deg, rgba(99,102,241,0.28), rgba(59,130,246,0.22));
+  border: 1px solid rgba(255,255,255,0.22);
+  gap: 3px;
+  color: #e0e7ff;
+  transition: background 0.15s;
+}
+.nav-btn-manual span {
+  font-size: 7.5px;
+  font-weight: 600;
+  line-height: 1.15;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+.nav-btn-manual:hover { background: linear-gradient(135deg, rgba(99,102,241,0.42), rgba(59,130,246,0.36)); }
+
+/* Skill result tab bar inside report panel */
+.skill-tab-btn {
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border-bottom: 2px solid transparent;
+  color: #64748b;
+  cursor: pointer;
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.skill-tab-btn:hover { color: #1e3a8a; }
+.skill-tab-btn.active { border-bottom-color: #1e3a8a; color: #1e3a8a; font-weight: 600; }
+/* Summary tab — slightly bolder to stand out */
+.summary-tab-btn { font-weight: 500; }
+.summary-tab-btn.active { border-bottom-color: #1d4ed8; color: #1d4ed8; }
+
+/* Diagnosis summary bar — now lives inside a p-4 tab panel (card style) */
+.diagnosis-summary-bar {
+  background: #f0f7ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+.diagnosis-summary-bar .summary-row {
+  display: grid;
+  grid-template-columns: 28% 1fr 28%;
+  gap: 8px;
+  align-items: start;
+  padding: 5px 0;
+  border-bottom: 1px solid #e0eeff;
+  font-size: 12px;
+}
+.diagnosis-summary-bar .summary-row:last-child { border-bottom: none; }
+
+/* ── Phase 8: View panels ───────────────────────────────────── */
+.view-panel { display: flex; }
+.view-panel.hidden { display: none !important; }
+
+/* ── Phase 8: Drawer open state ─────────────────────────────── */
+#drawer.drawer-open { transform: translateX(0) !important; }
+
+/* ── Phase 8: Builder form elements ─────────────────────────── */
+.builder-input {
+  width: 100%;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #0f172a;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.builder-input:focus { border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79,70,229,0.1); }
+.builder-input::placeholder { color: #94a3b8; }
+
+.builder-textarea {
+  width: 100%;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #0f172a;
+  outline: none;
+  resize: vertical;
+  transition: border-color 0.15s;
+  line-height: 1.5;
+}
+.builder-textarea:focus { border-color: #4f46e5; box-shadow: 0 0 0 2px rgba(79,70,229,0.1); }
+.builder-textarea::placeholder { color: #94a3b8; }
+
+.builder-select {
+  width: 100%;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #0f172a;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.builder-select:focus { border-color: #4f46e5; }
+.builder-select option { background: #ffffff; color: #0f172a; }
+
+.builder-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #64748b;
+  margin-bottom: 5px;
+}
+.builder-label.required::after { content: " *"; color: #dc2626; }
+
+.builder-field { margin-bottom: 16px; }
+
+.builder-btn-primary {
+  background: #4f46e5;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  padding: 8px 16px;
+}
+.builder-btn-primary:hover { background: #4338ca; }
+.builder-btn-primary:disabled { background: #e2e8f0; color: #94a3b8; cursor: not-allowed; }
+
+.builder-btn-secondary {
+  background: #ffffff;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+  padding: 8px 16px;
+}
+.builder-btn-secondary:hover { border-color: #94a3b8; color: #374151; background: #f8fafc; }
+
+.builder-btn-danger {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  padding: 4px 10px;
+}
+.builder-btn-danger:hover { background: #fee2e2; }
+
+.builder-btn-llm {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(59, 130, 246, 0.08));
+  color: #4f46e5;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.builder-btn-llm:hover { background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(59, 130, 246, 0.15)); }
+.builder-btn-llm:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ── Phase 8: Builder list items ─────────────────────────────── */
+.builder-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.builder-card:hover { border-color: #94a3b8; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+
+.builder-card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1e293b;
+}
+.builder-card-desc {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 3px;
+}
+.builder-card-meta {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.builder-tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(59, 130, 246, 0.07);
+  color: #2563eb;
+  border: 1px solid rgba(59, 130, 246, 0.18);
+}
+.builder-tag-green {
+  background: rgba(22, 163, 74, 0.07);
+  color: #16a34a;
+  border-color: rgba(22, 163, 74, 0.18);
+}
+.builder-tag-purple {
+  background: rgba(99, 102, 241, 0.07);
+  color: #4f46e5;
+  border-color: rgba(99, 102, 241, 0.18);
+}
+.builder-tag-amber {
+  background: rgba(202, 138, 4, 0.07);
+  color: #b45309;
+  border-color: rgba(202, 138, 4, 0.18);
+}
+.builder-tag-builtin {
+  background: rgba(22, 163, 74, 0.06);
+  color: #15803d;
+  border-color: rgba(22, 163, 74, 0.18);
+  font-size: 10px;
+}
+
+/* ── Phase 8: Attribute row ─────────────────────────────────── */
+.attr-row {
+  display: grid;
+  grid-template-columns: 1fr 100px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+.attr-row:last-child { border-bottom: none; }
+
+/* ── Phase 8: LLM result panels ─────────────────────────────── */
+.llm-result-block {
+  background: #faf5ff;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-top: 8px;
+}
+.llm-result-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #4f46e5;
+  margin-bottom: 6px;
+}
+
+/* ── Phase 8: Mapping table ─────────────────────────────────── */
+.mapping-row {
+  display: grid;
+  grid-template-columns: 1fr 24px 1fr 80px;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 0;
+  font-size: 12px;
+}
+.mapping-arrow { text-align: center; color: #94a3b8; }
+.mapping-conf-high { color: #16a34a; }
+.mapping-conf-medium { color: #b45309; }
+.mapping-conf-low { color: #dc2626; }
+
+/* ── Phase 8: LLM loading state ─────────────────────────────── */
+.llm-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  background: rgba(99, 102, 241, 0.04);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  border-radius: 10px;
+  color: #4f46e5;
+  font-size: 13px;
+}
+.llm-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(99, 102, 241, 0.2);
+  border-top-color: #4f46e5;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+/* ── Phase 8: Schema field list ─────────────────────────────── */
+.schema-field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  background: #f8fafc;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.schema-field-name { color: #4f46e5; font-family: "SF Mono", monospace; }
+.schema-field-type { color: #94a3b8; font-size: 11px; }
+.schema-field-desc { color: #64748b; flex: 1; }
+
+/* ── Phase 8.6: Report panel slide-in transition ─────────────── */
+.transition-report {
+  transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              min-width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+/* ── Phase 8.6: Universal Data Viewer (UDV) ─────────────────── */
+.udv-container {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+  font-size: 12px;
+  background: #ffffff;
+}
+.udv-tab-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: #f8fafc;
+  padding: 4px 6px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.udv-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #94a3b8;
+  border-radius: 5px;
+  padding: 2px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.udv-tab:hover { color: #64748b; background: #e2e8f0; }
+.udv-tab-active {
+  background: #ffffff;
+  color: #1e293b;
+  border-color: #e2e8f0;
+}
+.udv-copy-btn {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+.udv-copy-btn:hover { color: #64748b; }
+.udv-panel {
+  padding: 10px;
+  max-height: 320px;
+  overflow: auto;
+}
+.udv-raw-text {
+  color: #475569;
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre;
+  margin: 0;
+}
+.udv-tree-root { line-height: 1.6; }
+.udv-tree-row { padding: 1px 0; }
+.udv-key    { color: #2563eb; font-family: "SF Mono", monospace; }
+.udv-string { color: #16a34a; }
+.udv-number { color: #b45309; }
+.udv-bool   { color: #db2777; }
+.udv-null   { color: #94a3b8; font-style: italic; }
+.udv-bracket { color: #64748b; }
+.udv-toggle {
+  color: #64748b;
+  cursor: pointer;
+  user-select: none;
+  font-size: 11px;
+}
+.udv-toggle:hover { color: #1e293b; }
+.udv-row-toggle { cursor: pointer; user-select: none; }
+.udv-row-toggle:hover { background: rgba(0,0,0,0.03); border-radius: 3px; }
+.udv-sep  { color: #94a3b8; }
+.udv-idx  { color: #4f46e5; font-family: "SF Mono", monospace; font-size: 10px; }
+.udv-more { color: #94a3b8; font-size: 10px; font-style: italic; padding-top: 2px; }
+
+/* ── Phase 8.6: MCP Try-Session Tab Bar ──────────────────────── */
+.try-tab-btn {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #94a3b8;
+  border-radius: 6px;
+  padding: 3px 12px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.try-tab-btn:hover {
+  color: #64748b;
+  background: #e2e8f0;
+}
+.try-tab-btn.active-try {
+  background: #4f46e5;
+  border-color: #4f46e5;
+  color: #ffffff;
+  font-weight: 600;
+}
+.try-tab-btn.try-tab-new {
+  background: transparent;
+  border-style: dashed;
+  color: #94a3b8;
+}
+.try-tab-btn.try-tab-new:hover {
+  color: #64748b;
+  border-color: #94a3b8;
+}
+
+/* ── Phase 8.7: Skill Builder Step Headers ───────────────────── */
+.skill-step-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748b;
+  margin-top: 20px;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.skill-step-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #4f46e5;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 999px;
+  letter-spacing: 0;
+  text-transform: none;
+  flex-shrink: 0;
+}
+
+/* ── Phase 8.7: MCP Info Card (Step 1) ──────────────────────── */
+.mcp-info-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.mcp-info-card-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.mcp-param-tag {
+  display: inline-flex;
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 1px 7px;
+  font-family: monospace;
+  font-size: 11px;
+  color: #2563eb;
+}
+
+/* ── Phase 8.7: Mapping rows with dropdown ───────────────────── */
+.mapping-row {
+  display: grid;
+  grid-template-columns: 1fr 20px 1fr 72px;
+  gap: 6px;
+  align-items: center;
+  padding: 5px 6px;
+  background: #f8fafc;
+  border-radius: 6px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+.mapping-event-select {
+  font-family: monospace;
+  font-size: 11px;
+}
+
+/* ── Event Alert Card — pure Tailwind, no custom CSS needed ─── */
+.chat-event-alert {
+  width: 100%;
+  max-width: 100%;
+  margin: 4px 0;
+}
+
+/* ── Phase 8.10: Pipeline Report Blocks ─────────────────────── */
+.pipeline-report-block {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  overflow: hidden;
+  animation: fadeIn 0.25s ease;
+}
+.pipeline-block-header {
+  background: #f8fafc;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.pipeline-block-status {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 20px;
+  margin-left: auto;
+}
+.pipeline-block-status.normal   { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
+.pipeline-block-status.abnormal { background: #ffedd5; color: #c2410c; border: 1px solid #fdba74; }
+.pipeline-block-status.error    { background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5; }
+.pipeline-block-status.running  { background: #eef2ff; color: #4338ca; border: 1px solid #c7d2fe; }
+.pipeline-block-body {
+  padding: 14px 16px;
+  background: #ffffff;
+}
+.pipeline-evidence-list {
+  list-style: disc;
+  padding-left: 20px;
+  color: #64748b;
+  font-size: 13px;
+  margin-top: 6px;
+}
+.pipeline-recommendation {
+  margin-top: 10px;
+  padding: 10px 14px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-left: 3px solid #16a34a;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #15803d;
+}
+.pipeline-running-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #94a3b8;
+  font-size: 13px;
+  padding: 20px 0;
+  justify-content: center;
+}
+
+/* ── Phase 8.11: Evidence chart area ────────────────────────── */
+.evidence-chart-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #f1f5f9;
+}
+.evidence-chart-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #64748b;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.evidence-chart {
+  width: 100%;
+  min-height: 80px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.evidence-chart img { max-width: 100%; border-radius: 8px; }
+
+/* Evidence data table (when no chart) */
+.evidence-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.evidence-table th {
+  background: #f1f5f9;
+  color: #374151;
+  font-weight: 600;
+  padding: 5px 8px;
+  text-align: left;
+  border: 1px solid #e2e8f0;
+}
+.evidence-table td {
+  padding: 4px 8px;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.evidence-table tr:nth-child(even) td { background: #f8fafc; }
+
+/* MCP call parameters header */
+.mcp-call-params {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+.mcp-param-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 2px 8px;
+}
+.mcp-param-key {
+  color: #64748b;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+.mcp-param-sep { color: #94a3b8; margin: 0 1px; }
+.mcp-param-val { color: #1e293b; font-family: monospace; font-weight: 500; }
+
+/* Evidence chart/data tab bar */
+.evidence-tab-bar {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.evidence-tab-btn {
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #64748b;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  margin-bottom: -1px;
+}
+.evidence-tab-btn:hover { color: #4f46e5; }
+.evidence-tab-btn.active {
+  color: #4f46e5;
+  border-bottom-color: #4f46e5;
+  font-weight: 600;
+}
+.evidence-tab-panel { padding-top: 4px; }
+
+/* Skill problem_object callout */
+.skill-problem-object {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Phase 9 — Copilot Slash Command Menu
+══════════════════════════════════════════════════════════════ */
+
+/* Container — pops up above the textarea */
+.slash-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  box-shadow: 0 8px 32px -4px rgba(0,0,0,0.14), 0 2px 8px -2px rgba(0,0,0,0.08);
+  z-index: 100;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.slash-menu-section {
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.slash-menu-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.slash-menu-item:hover,
+.slash-menu-item.slash-active {
+  background: #f1f5f9;
+}
+
+.slash-menu-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 6px;
+  margin-top: 1px;
+}
+.slash-mcp-badge  { background: #eff6ff; color: #3b82f6; border: 1px solid #bfdbfe; }
+.slash-skill-badge { background: #f5f3ff; color: #7c3aed; border: 1px solid #ddd6fe; }
+
+.slash-menu-item-content { flex: 1; min-width: 0; }
+.slash-menu-item-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1e293b;
+  margin-bottom: 1px;
+}
+.slash-menu-item-desc {
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Copilot question bubble — slot filling prompt from AI */
+.chat-copilot-question {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-left: 3px solid #38bdf8;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #0c4a6e;
+  max-width: 85%;
+}
+
+/* Tool selected indicator above input */
+.copilot-tool-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: #1d4ed8;
+  margin-bottom: 6px;
+}
+.copilot-tool-tag .remove-tag {
+  cursor: pointer;
+  color: #93c5fd;
+  font-size: 14px;
+  line-height: 1;
+}
+.copilot-tool-tag .remove-tag:hover { color: #3b82f6; }
+
+/* ── Multi-Tab Workspace (Phase 9.1) ──────────────────────────── */
+
+/* Tab label: truncate long LLM-generated titles */
+.ws-tab-label {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Close button on each workspace tab */
+.ws-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  font-size: 14px;
+  line-height: 1;
+  color: #94a3b8;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.15s, background-color 0.15s;
+}
+.ws-close-btn:hover {
+  color: #ef4444;
+  background-color: #fee2e2;
+}
+
+/* ── Phase 10: Mobile-First Responsive Layout ─────────────────── */
+
+/* Desktop defaults ─────────── */
+
+/* Chat panel: 30% left column */
+.chat-panel-col {
+  width: 30%;
+  flex-shrink: 0;
+}
+
+/* Workspace panel: remaining 70% */
+.workspace-panel-col {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Mobile view toggle: hidden on desktop */
+#mobile-view-toggle { display: none; }
+
+/* Mobile toggle button base styles */
+.mobile-toggle-btn {
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #64748b;
+  transition: background-color 0.15s, color 0.15s;
+  cursor: pointer;
+  user-select: none;
+}
+.mobile-toggle-btn:active { background-color: #e2e8f0; }
+.mobile-toggle-active {
+  background-color: #eff6ff;
+  color: #1d4ed8;
+}
+
+/* ── Data Tables: horizontal scroll on all screen sizes ──────── */
+.mcp-table-wrap, .skill-evidence-table {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.mcp-table-wrap table, .skill-evidence-table table {
+  min-width: 480px;
+}
+
+/* Ensure Plotly charts are always responsive */
+.plotly-graph-div, .js-plotly-plot {
+  max-width: 100% !important;
+}
+
+/* ── Workspace inner tab bar ─────────────────────────────────── */
+.ws-inner-tab { display: inline-flex; align-items: center; }
+.ws-inner-tab.active-ws-tab {
+  background: #fff; border-color: #e2e8f0;
+  color: #4f46e5; font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+
+/* ── AI Analysis Panel — match draft-preview compact typography ── */
+.ai-analysis-body { font-size: 12px; color: #334155; line-height: 1.55; }
+.ai-analysis-body h1,
+.ai-analysis-body h2,
+.ai-analysis-body h3,
+.ai-analysis-body h4 {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; color: #64748b;
+  margin: 12px 0 5px; padding-bottom: 3px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.ai-analysis-body p { margin: 3px 0 6px; }
+.ai-analysis-body strong { font-weight: 600; color: #1e293b; }
+.ai-analysis-body ul, .ai-analysis-body ol { padding-left: 14px; margin: 3px 0 6px; }
+.ai-analysis-body li { margin: 1px 0; }
+.ai-analysis-body table {
+  width: 100%; border-collapse: collapse;
+  font-size: 11px; margin: 6px 0;
+  overflow-x: auto; display: block;
+}
+.ai-analysis-body thead th {
+  background: #f1f5f9; color: #374151;
+  font-weight: 600; font-size: 10px; text-transform: uppercase;
+  padding: 4px 8px; border: 1px solid #e2e8f0; text-align: left;
+}
+.ai-analysis-body tbody td {
+  padding: 3px 8px; border: 1px solid #e2e8f0; color: #334155;
+}
+.ai-analysis-body tbody tr:nth-child(even) td { background: #f8fafc; }
+
+/* ── Mobile breakpoint (≤ 768px) ──────────────────────────────── */
+@media (max-width: 768px) {
+
+  /* Show mobile toggle bar */
+  #mobile-view-toggle { display: flex; }
+
+  /* Diagnose view becomes a column: toggle-bar on top, panels below */
+  #view-diagnose { flex-direction: column; }
+
+  /* Panels container: relative+overflow for sliding panels */
+  #diagnose-panels {
+    position: relative;
+    overflow: hidden;
+    flex: 1;
+  }
+
+  /* Both panels: absolute, full size, slide via transform */
+  .chat-panel-col {
+    position: absolute;
+    inset: 0;
+    width: 100% !important;
+    z-index: 1;
+    background: #fff;
+    transform: translateX(0);
+    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    flex-shrink: 0 !important;
+  }
+
+  .workspace-panel-col {
+    position: absolute;
+    inset: 0;
+    width: 100% !important;
+    flex: none !important;
+    z-index: 1;
+    background: #fff;
+    border-left: none !important;
+    transform: translateX(100%);
+    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* Chat active: chat shows (left), workspace hides (right) */
+  #diagnose-panels.mobile-chat .chat-panel-col    { transform: translateX(0); }
+  #diagnose-panels.mobile-chat .workspace-panel-col { transform: translateX(100%); }
+
+  /* Workspace active: workspace shows (center), chat hides (left) */
+  #diagnose-panels.mobile-workspace .chat-panel-col    { transform: translateX(-100%); }
+  #diagnose-panels.mobile-workspace .workspace-panel-col { transform: translateX(0); }
+
+  /* Drawer: full-width on mobile */
+  #drawer { width: 100vw !important; }
+
+  /* Header: compact spacing */
+  header { padding: 8px 12px !important; }
+
+  /* Prevent iOS auto-zoom on input focus (font-size ≥ 16px) */
+  #issue-input, .input-field { font-size: 16px; }
+
+  /* Slash menu anchor: slightly narrower so it doesn't clip */
+  #slash-menu-anchor { right: 56px; }
+
+  /* Workspace tab label: allow more space on mobile */
+  .ws-tab-label { max-width: 180px; }
+
+  /* Report cards: ensure text doesn't overflow */
+  .pipeline-block-header, .pipeline-recommendation {
+    word-break: break-word;
+  }
+
+  /* Chat bubbles: slightly smaller on mobile */
+  .chat-user, .chat-agent, .chat-tool, .chat-error {
+    max-width: 95%;
+  }
+}
+
+/* ── Chart Fullscreen Modal ──────────────────────────────────── */
+#chart-fullscreen-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9990;
+  background: rgba(0, 0, 0, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#chart-fullscreen-modal.hidden { display: none; }
+
+#chart-fullscreen-inner {
+  width: 94vw;
+  height: 82vh;
+  background: #0f172a;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+#chart-fullscreen-close {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 9991;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 38px;
+  height: 38px;
+  font-size: 17px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+#chart-fullscreen-close:hover { background: rgba(255, 255, 255, 0.32); }
+
+/* Expand button below each chart */
+.chart-expand-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 3px 10px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.chart-expand-btn:hover { background: #dbeafe; }
+
+/* Mobile portrait: rotate fullscreen chart 90° → simulates landscape */
+@media (max-width: 768px) and (orientation: portrait) {
+  #chart-fullscreen-inner {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    /* swap width/height: screen-height becomes chart-width, screen-width becomes chart-height */
+    width: 100vh;
+    height: 100vw;
+    border-radius: 0;
+    transform: translate(-50%, -50%) rotate(90deg);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Phase 13 — Design System (prd_phase_13_color_system.md)
+   Primary: #0A6EF0  Accent: #2AA3AB  BG: #F8FAFC  Success: #2AA238
+══════════════════════════════════════════════════════════════ */
+
+:root {
+  --p13-primary:    #0A6EF0;
+  --p13-accent:     #2AA3AB;
+  --p13-background: #F8FAFC;
+  --p13-surface:    #FFFFFF;
+  --p13-success:    #2AA238;
+  --p13-text:       #1E293B;
+}
+
+/* ── Sidebar: white background, accent left-border on active ── */
+.nav-btn { color: #64748b; }
+.nav-btn:hover { background: rgba(42, 163, 171, 0.10); color: #1e293b; }
+.active-nav {
+  background: rgba(10, 110, 240, 0.08) !important;
+  box-shadow: inset 3px 0 0 #2AA3AB !important;
+  color: #0A6EF0 !important;
+}
+
+/* ── Main buttons: Primary color ──────────────────────────── */
+.builder-btn-primary           { background: #0A6EF0; }
+.builder-btn-primary:hover     { background: #0860d8; }
+.builder-btn-llm               { color: #0A6EF0; border-color: rgba(10,110,240,0.3);
+                                  background: linear-gradient(135deg,rgba(10,110,240,0.06),rgba(10,110,240,0.04)); }
+.builder-btn-llm:hover         { background: linear-gradient(135deg,rgba(10,110,240,0.14),rgba(10,110,240,0.10)); }
+.skill-step-badge              { background: #0A6EF0; }
+.try-tab-btn.active-try        { background: #0A6EF0; border-color: #0A6EF0; }
+
+/* ── Active tabs: Accent underline ───────────────────────── */
+.active-tab                    { box-shadow: inset 0 -2px 0 #2AA3AB; }
+.skill-tab-btn:hover           { color: #0A6EF0; }
+.skill-tab-btn.active          { border-bottom-color: #2AA3AB; color: #0A6EF0; }
+.summary-tab-btn.active        { border-bottom-color: #0A6EF0; color: #0A6EF0; }
+
+/* ── Focus states: Primary ────────────────────────────────── */
+.input-field:focus             { border-color: #0A6EF0; box-shadow: 0 0 0 2px rgba(10,110,240,0.12); }
+.builder-input:focus           { border-color: #0A6EF0; box-shadow: 0 0 0 2px rgba(10,110,240,0.10); }
+.builder-textarea:focus        { border-color: #0A6EF0; box-shadow: 0 0 0 2px rgba(10,110,240,0.10); }
+.builder-select:focus          { border-color: #0A6EF0; }
+
+/* ── LLM loading state: Primary ──────────────────────────── */
+.llm-loading  { background: rgba(10,110,240,0.04); border-color: rgba(10,110,240,0.15); color: #0A6EF0; }
+.llm-spinner  { border-color: rgba(10,110,240,0.20); border-top-color: #0A6EF0; }
+.llm-result-label { color: #0A6EF0; }
+
+/* ── Status: success uses PRD green ─────────────────────── */
+.pipeline-block-status.normal  { background: #dcfce7; color: #2AA238; border-color: #bbf7d0; }
+.pipeline-recommendation       { border-left-color: #2AA238; color: #2AA238; background: #f0fdf4; }
+
+/* ── Chat user bubble: Primary ──────────────────────────── */
+.chat-user { background: #0A6EF0; }
+
+/* ── Schema field accent ─────────────────────────────────── */
+.schema-field-name { color: #0A6EF0; }
+
+/* ── v12 Dashboard: ping animation for anomaly KPI dot ────── */
+@keyframes ping {
+  75%, 100% { transform: scale(2); opacity: 0; }
+}
+
+/* ── v12 Nested Builder: locked MCP select (auto-bound from Skill) ── */
+#nb-mcp-select:disabled {
+  background-color: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #15803d;
+  opacity: 1;
+  cursor: default;
+}
+
+/* ── v12 Nested Builder: line-clamp utilities ─────────────── */
+.line-clamp-1 { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; }
+.line-clamp-2 { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }

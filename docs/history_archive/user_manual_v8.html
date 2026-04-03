@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Glass Box AI 診斷引擎 v8 — 使用手冊</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #f8fafc;
+    color: #1e293b;
+    line-height: 1.7;
+    font-size: 15px;
+  }
+  nav {
+    position: sticky; top: 0; z-index: 100;
+    background: #1e3a8a;
+    border-bottom: 1px solid #1e40af;
+    padding: 12px 24px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  nav .logo { font-weight: 700; color: white; font-size: 16px; }
+  nav .logo span { color: #93c5fd; }
+  nav .version {
+    background: #1e40af; color: #93c5fd;
+    font-size: 11px; font-weight: 700;
+    padding: 2px 8px; border-radius: 9999px;
+    letter-spacing: .04em;
+  }
+  .layout {
+    display: flex;
+    max-width: 1280px;
+    margin: 0 auto;
+    gap: 0;
+  }
+  .toc {
+    width: 280px;
+    flex-shrink: 0;
+    position: sticky;
+    top: 53px;
+    height: calc(100vh - 53px);
+    overflow-y: auto;
+    padding: 24px 0;
+    border-right: 1px solid #e2e8f0;
+    background: white;
+  }
+  .toc h4 {
+    font-size: 11px; font-weight: 700; color: #94a3b8;
+    text-transform: uppercase; letter-spacing: .08em;
+    padding: 0 20px; margin-bottom: 8px;
+  }
+  .toc a {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 20px; text-decoration: none;
+    font-size: 13px; color: #64748b;
+    transition: all .15s;
+    border-left: 3px solid transparent;
+  }
+  .toc a:hover { background: #f1f5f9; color: #1e293b; border-left-color: #cbd5e1; }
+  .toc a.active { color: #1e3a8a; background: #eff6ff; font-weight: 600; border-left-color: #1e3a8a; }
+  .toc-section { margin-top: 16px; }
+  .toc-section:first-child { margin-top: 0; }
+  .main { flex: 1; padding: 40px 52px; min-width: 0; }
+  .doc-section {
+    margin-bottom: 64px; padding-bottom: 64px;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .doc-section:last-child { border-bottom: none; }
+  .section-num {
+    display: inline-block;
+    background: #eff6ff; color: #1e3a8a;
+    border-radius: 6px; padding: 3px 10px;
+    font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .08em;
+    margin-bottom: 8px;
+  }
+  h1 { font-size: 34px; font-weight: 800; color: #0f172a; margin-bottom: 12px; }
+  h2 { font-size: 24px; font-weight: 700; color: #0f172a; margin-bottom: 10px; margin-top: 8px; }
+  h3 { font-size: 17px; font-weight: 600; color: #1e293b; margin: 24px 0 8px; }
+  p { margin-bottom: 14px; color: #475569; }
+  ul, ol { padding-left: 24px; margin-bottom: 14px; color: #475569; }
+  li { margin-bottom: 6px; }
+  strong { color: #1e293b; }
+  .step { display: flex; gap: 20px; margin-bottom: 36px; align-items: flex-start; }
+  .step-num {
+    width: 36px; height: 36px; flex-shrink: 0;
+    background: #1e3a8a; color: white; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700; margin-top: 2px;
+  }
+  .step-body { flex: 1; }
+  .step-body h3 { margin-top: 0; }
+  .screenshot {
+    border-radius: 10px; overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.04);
+    margin: 16px 0 6px;
+  }
+  .screenshot img { width: 100%; display: block; }
+  .screenshot-cap { font-size: 12px; color: #94a3b8; text-align: center; margin-bottom: 28px; padding: 0 16px; }
+  .screenshot-mock {
+    border-radius: 10px; overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 12px rgba(0,0,0,.08), 0 0 0 1px rgba(0,0,0,.04);
+    margin: 16px 0 6px;
+    background: #f1f5f9;
+    min-height: 120px;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 8px;
+    border: 2px dashed #cbd5e1;
+  }
+  .screenshot-mock .mock-label { font-size: 13px; color: #94a3b8; font-weight: 500; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+  .callout {
+    border-radius: 8px; padding: 14px 18px; margin: 16px 0;
+    display: flex; gap: 12px; align-items: flex-start; font-size: 14px;
+  }
+  .callout.info { background: #eff6ff; border: 1px solid #bfdbfe; }
+  .callout.warning { background: #fff7ed; border: 1px solid #fed7aa; }
+  .callout.tip { background: #f0fdf4; border: 1px solid #bbf7d0; }
+  .callout.important { background: #fdf4ff; border: 1px solid #e9d5ff; }
+  .callout-icon { font-size: 18px; flex-shrink: 0; }
+  .callout p { margin: 0; color: #334155; }
+  code {
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 13px;
+    background: #f1f5f9; padding: 2px 6px; border-radius: 4px; color: #be185d;
+  }
+  pre {
+    background: #1e293b; color: #e2e8f0; padding: 16px 20px;
+    border-radius: 8px; overflow-x: auto; font-size: 13px; line-height: 1.6;
+    margin: 12px 0; font-family: "SF Mono", Menlo, Consolas, monospace;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; font-size: 14px; }
+  th {
+    background: #f8fafc; text-align: left; padding: 10px 14px; font-size: 12px;
+    font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+    color: #64748b; border-bottom: 2px solid #e2e8f0;
+  }
+  td { padding: 10px 14px; color: #475569; border-bottom: 1px solid #f1f5f9; }
+  tr:hover td { background: #f8fafc; }
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 700;
+  }
+  .badge-blue { background: #eff6ff; color: #1e3a8a; }
+  .badge-rose { background: #fff1f2; color: #be123c; }
+  .badge-amber { background: #fffbeb; color: #b45309; }
+  .badge-emerald { background: #f0fdf4; color: #166534; }
+  .badge-slate { background: #f1f5f9; color: #475569; }
+  .badge-purple { background: #f5f3ff; color: #7c3aed; }
+  .new-tag {
+    display: inline-block; background: #dcfce7; color: #166534; border: 1px solid #bbf7d0;
+    border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 700;
+    vertical-align: middle; margin-left: 6px; letter-spacing: .04em;
+  }
+  .sse-flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+  .sse-tag { font-size: 12px; font-weight: 700; font-family: monospace; padding: 3px 10px; border-radius: 4px; }
+  .sse-arrow { color: #94a3b8; font-size: 18px; }
+  .event-card-preview {
+    background: #fee2e2; border: 1px solid #fecaca; border-left: 4px solid #ef4444;
+    border-radius: 10px; padding: 14px 16px; margin: 16px 0;
+  }
+  .event-card-preview .ev-title { color: #dc2626; font-weight: 700; font-size: 13px; }
+  .event-card-preview .ev-type { color: #991b1b; font-weight: 700; font-family: monospace; }
+  .event-card-preview .ev-id { color: #dc2626; font-size: 12px; font-family: monospace; }
+  .tab-preview {
+    display: inline-flex; align-items: center; gap: 6px;
+    border-bottom: 2px solid #1e3a8a; color: #1e3a8a;
+    font-size: 12px; font-weight: 600; padding: 4px 10px;
+  }
+  .sub-step {
+    display: flex; gap: 12px; align-items: flex-start; margin-bottom: 16px;
+    padding: 14px 16px; background: #f8fafc; border: 1px solid #e2e8f0;
+    border-radius: 8px; font-size: 14px;
+  }
+  .sub-step-num {
+    width: 24px; height: 24px; flex-shrink: 0; background: #e2e8f0; color: #64748b;
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700;
+  }
+  @media (max-width: 900px) { .toc { display: none; } .main { padding: 24px; } .two-col { grid-template-columns: 1fr; } }
+  @media print {
+    .toc { display: none; }
+    nav { position: static; }
+    .main { padding: 24px; }
+    .doc-section { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="logo">Glass Box <span>AI 診斷引擎</span></div>
+  <span class="version">v8.0 User Manual</span>
+</nav>
+
+<div class="layout">
+
+<!-- ═══ TOC ═══ -->
+<aside class="toc">
+  <div class="toc-section">
+    <h4>快速開始</h4>
+    <a href="#s1">1. 系統需求與安裝</a>
+    <a href="#s2">2. 登入系統</a>
+    <a href="#s3">3. 介面概覽</a>
+  </div>
+  <div class="toc-section">
+    <h4>事件驅動診斷</h4>
+    <a href="#s4">4. ⚡ 模擬觸發事件</a>
+    <a href="#s5">5. 🔍 啟動串流診斷</a>
+    <a href="#s6">6. 技能 Tab — 逐項查看</a>
+    <a href="#s7">7. 診斷總覽 Summary Bar</a>
+    <a href="#s8">8. 報告 Chat 對話</a>
+  </div>
+  <div class="toc-section">
+    <h4>技能與 MCP 庫</h4>
+    <a href="#s9">9. 事件分診庫</a>
+    <a href="#s10">10. 診斷工具庫（MCP）</a>
+    <a href="#s11">11. Skill 詳情抽屜</a>
+  </div>
+  <div class="toc-section">
+    <h4>AI Skill Builder</h4>
+    <a href="#s12">12. Data Subject 管理</a>
+    <a href="#s13">13. MCP 腳本開發</a>
+    <a href="#s14">14. Skill 建立流程</a>
+    <a href="#s15">15. Try Run 測試</a>
+  </div>
+  <div class="toc-section">
+    <h4>系統設定</h4>
+    <a href="#s16">16. 系統設定</a>
+    <a href="#s17">17. 常見問題</a>
+  </div>
+</aside>
+
+<!-- ═══ MAIN ═══ -->
+<main class="main">
+
+<!-- ─────────────────── SECTION 1 ─────────────────── -->
+<section class="doc-section" id="s1">
+  <div class="section-num">快速開始 · 1</div>
+  <h1>Glass Box AI 診斷引擎 v8<br>使用手冊</h1>
+  <p>本手冊說明 Glass Box AI 診斷引擎 v8 的完整操作流程，涵蓋事件驅動診斷工作站（含即時 SSE 串流）、技能管理、以及 AI Skill Builder Copilot 的完整使用方法。</p>
+
+  <div class="callout info">
+    <span class="callout-icon">🆕</span>
+    <p><strong>v8 主要更新：</strong>全面亮色主題（光線主題）、事件卡片紅色警示配色、診斷結果逐技能 Tab 顯示、診斷總覽 Summary Bar、MCP 資料證據表格嵌入報告卡片。</p>
+  </div>
+
+  <h2>系統需求與安裝</h2>
+
+  <h3>最低需求</h3>
+  <table>
+    <thead><tr><th>項目</th><th>需求</th></tr></thead>
+    <tbody>
+      <tr><td>作業系統</td><td>macOS 12+、Ubuntu 20.04+、Windows 10+</td></tr>
+      <tr><td>Python</td><td>3.10 或更高版本</td></tr>
+      <tr><td>瀏覽器</td><td>Chrome 100+、Firefox 100+、Safari 16+（需支援 Fetch API + ReadableStream）</td></tr>
+      <tr><td>Anthropic API 金鑰</td><td>有效的 <code>ANTHROPIC_API_KEY</code>（claude-opus-4-6 模型）</td></tr>
+      <tr><td>網路</td><td>須可連至 Anthropic API</td></tr>
+    </tbody>
+  </table>
+
+  <h3>後端啟動</h3>
+  <div class="callout warning">
+    <span class="callout-icon">⚠️</span>
+    <p><strong>重要：</strong>必須 <code>cd</code> 進入 <code>fastapi_backend_service/</code> 目錄後再執行，否則模組路徑可能衝突。</p>
+  </div>
+  <pre>cd fastapi_backend_service
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000</pre>
+
+  <p>後端啟動成功後，開啟瀏覽器前往 <code>http://localhost:8000</code> 即可使用（前端靜態檔案由 FastAPI 直接服務）。</p>
+
+  <div class="screenshot">
+    <img src="screenshots/v7_01_login.png" alt="登入頁面 — 白色卡片、Glass Box logo、帳號密碼輸入框">
+  </div>
+  <p class="screenshot-cap">圖 1-1：系統啟動後開啟瀏覽器，自動呈現登入頁面（白色亮色主題）</p>
+</section>
+
+<!-- ─────────────────── SECTION 2 ─────────────────── -->
+<section class="doc-section" id="s2">
+  <div class="section-num">快速開始 · 2</div>
+  <h2>登入系統</h2>
+  <p>開啟瀏覽器，前往 <code>http://localhost:8000</code>，系統自動重導向至登入頁面（<code>/login</code>）。</p>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <h3>輸入帳號密碼</h3>
+      <p>使用預設帳號登入（開發環境）：</p>
+      <ul>
+        <li><strong>帳號（Username）</strong>：<code>gill</code></li>
+        <li><strong>密碼（Password）</strong>：<code>g1i1l2l3</code></li>
+      </ul>
+      <div class="screenshot">
+        <img src="screenshots/v7_01_login.png" alt="登入頁面">
+      </div>
+      <p class="screenshot-cap">圖 2-1：登入頁面 — 輸入帳號密碼後點擊「登入」</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <h3>登入成功</h3>
+      <p>驗證通過後，系統重導向至 AI 診斷中心（<code>/diagnosis</code>）。JWT Token 儲存於 <code>localStorage</code>（鍵名 <code>glassbox_token</code>），有效期 24 小時。</p>
+      <div class="callout tip">
+        <span class="callout-icon">✅</span>
+        <p>重新整理頁面不需重新登入；Token 到期或手動登出才需重新驗證。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────── SECTION 3 ─────────────────── -->
+<section class="doc-section" id="s3">
+  <div class="section-num">快速開始 · 3</div>
+  <h2>介面概覽 <span class="new-tag">v8 更新</span></h2>
+  <p>v8 採用全面<strong>亮色主題（Light Theme）</strong>，以白色為主要內容背景，深海軍藍 Sidebar 作為品牌識別。</p>
+
+  <div class="screenshot">
+    <img src="screenshots/v7_02_diagnosis_overview.png" alt="整體介面">
+  </div>
+  <p class="screenshot-cap">圖 3-1：v8 整體介面 — 深海軍藍 Sidebar（左）＋ 白色主內容區（右）＋ 30/70 分割工作站</p>
+
+  <h3>三大區域</h3>
+  <table>
+    <thead><tr><th>區域</th><th>說明</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Sidebar（左側，深海軍藍 bg-blue-900）</strong></td><td>導覽功能列，白色圖示與文字，登出按鈕</td></tr>
+      <tr><td><strong>Header（頂部，白色）</strong></td><td>頁面標題、用戶名稱、狀態指示器</td></tr>
+      <tr><td><strong>主內容區（右側，白色/slate-50）</strong></td><td>依功能不同顯示診斷工作站或 Builder</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Sidebar 導覽項目</h3>
+  <table>
+    <thead><tr><th>圖示</th><th>名稱</th><th>功能</th></tr></thead>
+    <tbody>
+      <tr><td>⚡</td><td>AI 診斷中心</td><td>事件驅動診斷工作站（30/70 分割）</td></tr>
+      <tr><td>🔧</td><td>技能與事件庫</td><td>查看所有 Skill、MCP 工具、Builder Copilot</td></tr>
+      <tr><td>⚙️</td><td>系統與環境設定</td><td>API 金鑰、System Prompt、模型選擇</td></tr>
+    </tbody>
+  </table>
+
+  <h3>診斷工作站 30/70 分割</h3>
+  <p>AI 診斷中心採用 <strong>30/70 水平分割</strong>：左側 30% 為 Chat 對話區（事件通知 + 互動），右側 70% 為診斷報告區（技能 Tab + 總覽）。</p>
+</section>
+
+<!-- ─────────────────── SECTION 4 ─────────────────── -->
+<section class="doc-section" id="s4">
+  <div class="section-num">事件驅動診斷 · 4</div>
+  <h2>⚡ 模擬觸發事件 <span class="new-tag">v8 配色更新</span></h2>
+  <p>在 Chat 面板底部，點擊「<strong>⚡ 模擬 SPC OOC 觸發</strong>」按鈕，系統即在對話中插入一張<strong>紅色事件通知卡</strong>，模擬生產線 SPC OOC 警報的接收。</p>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <h3>點擊「⚡ 模擬 SPC OOC 觸發」</h3>
+      <p>按鈕位於 Chat 輸入框上方，深藍色寬幅按鈕。每次點擊會產生一個新的事件 ID（<code>EVT-{timestamp}</code>）並插入最新時間戳。</p>
+      <div class="screenshot">
+        <img src="screenshots/v7_03_chat_empty_state.png" alt="Chat 面板空狀態">
+      </div>
+      <p class="screenshot-cap">圖 4-1：Chat 面板 — 底部的「⚡ 模擬 SPC OOC 觸發」按鈕（藍色）</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <h3>出現紅色事件通知卡</h3>
+      <p>事件卡片以<strong>紅色警示配色</strong>顯示於 Chat：</p>
+
+      <!-- 事件卡片預覽 -->
+      <div class="event-card-preview">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+          <span class="ev-title">⚡ 事件通知</span>
+          <span style="font-size:11px;color:#ef4444;margin-left:auto;">2026/03/01 14:35:22</span>
+        </div>
+        <div class="ev-type">SPC_OOC_Etch_CD</div>
+        <div class="ev-id"># EVT-1740812122000</div>
+        <div style="margin:8px 0;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:8px;font-size:12px;font-family:monospace;">
+          <div style="display:flex;justify-content:space-between;"><span style="color:#b91c1c;">equipment_id:</span><span style="color:#7f1d1d;font-weight:600;">ETC-01</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:#b91c1c;">parameter:</span><span style="color:#7f1d1d;font-weight:600;">CD_mean</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:#b91c1c;">control_chart:</span><span style="color:#7f1d1d;font-weight:600;">Xbar-R</span></div>
+        </div>
+        <div style="background:#fca5a5;border:1px solid #f87171;border-radius:8px;padding:8px;text-align:center;font-size:13px;font-weight:700;color:#7f1d1d;">🔍 啟動診斷分析</div>
+      </div>
+      <p style="font-size:12px;color:#94a3b8;text-align:center;margin-top:4px;">（上圖為事件通知卡實際外觀 — 紅色警示配色）</p>
+
+      <p>卡片顯示：事件類型（<code>SPC_OOC_Etch_CD</code>）、設備 ID、量測參數、管制圖類型，以及「<strong>🔍 啟動診斷分析</strong>」按鈕。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────── SECTION 5 ─────────────────── -->
+<section class="doc-section" id="s5">
+  <div class="section-num">事件驅動診斷 · 5</div>
+  <h2>🔍 啟動串流診斷 <span class="new-tag">v8 SSE 漸進串流</span></h2>
+  <p>點擊事件卡片上的「<strong>🔍 啟動診斷分析</strong>」後，系統透過 <strong>Server-Sent Events（SSE）</strong> 逐技能回傳結果，每完成一個技能即立即渲染一張報告 Tab，無需等待全部完成。</p>
+
+  <h3>SSE 事件流程</h3>
+  <div class="sse-flow">
+    <span class="sse-tag" style="background:#eff6ff;color:#1e3a8a;">start</span>
+    <span class="sse-arrow">→</span>
+    <span class="sse-tag" style="background:#f0fdf4;color:#166534;">skill_start</span>
+    <span class="sse-arrow">→</span>
+    <span class="sse-tag" style="background:#fef9c3;color:#854d0e;">skill_done</span>
+    <span class="sse-arrow">→</span>
+    <span class="sse-tag" style="background:#f0fdf4;color:#166534;">skill_start</span>
+    <span class="sse-arrow">→</span>
+    <span class="sse-tag" style="background:#fef9c3;color:#854d0e;">skill_done</span>
+    <span class="sse-arrow">→</span>
+    <span class="sse-tag" style="background:#eff6ff;color:#1e3a8a;">done</span>
+  </div>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <h3>診斷啟動 — Chat 顯示進度訊息</h3>
+      <p>點擊按鈕後，左側 Chat 依序出現：</p>
+      <ul>
+        <li>「⏳ 正在執行 <em>技能名稱</em>…」（技能開始時）</li>
+        <li>「✅ <em>技能名稱</em> 完成」 / 「❌ <em>技能名稱</em> 失敗」（技能結束時）</li>
+      </ul>
+      <div class="screenshot">
+        <img src="screenshots/v7_04_streaming_start.png" alt="診斷進行中 — Chat 訊息串流">
+      </div>
+      <p class="screenshot-cap">圖 5-1：診斷啟動後，Chat 面板即時顯示各技能執行狀態</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <h3>右側報告區 — 逐技能出現 Tab</h3>
+      <p>每收到一個 <code>skill_done</code> 事件，右側報告區即新增一個技能 Tab，同時渲染該技能的完整診斷卡片（含 MCP 資料證據）。</p>
+      <div class="screenshot">
+        <img src="screenshots/v7_05_tools_tab_active.png" alt="技能 Tab 診斷報告">
+      </div>
+      <p class="screenshot-cap">圖 5-2：右側逐技能出現 Tab — 每個 Tab 顯示一個技能的完整診斷報告</p>
+    </div>
+  </div>
+
+  <div class="callout info">
+    <span class="callout-icon">ℹ️</span>
+    <p>SSE 串流使用 <strong>Fetch API + ReadableStream</strong>（非 EventSource），以確保能在請求標頭中傳送 JWT Authorization Token。</p>
+  </div>
+</section>
+
+<!-- ─────────────────── SECTION 6 ─────────────────── -->
+<section class="doc-section" id="s6">
+  <div class="section-num">事件驅動診斷 · 6</div>
+  <h2>技能 Tab — 逐項查看 <span class="new-tag">v8 新功能</span></h2>
+  <p>診斷完成後，右側報告區頂部出現水平 Tab 列，每個 Tab 對應一個技能。</p>
+
+  <h3>Tab 外觀說明</h3>
+  <ul>
+    <li>✅ = 狀態 NORMAL（正常）</li>
+    <li>⚠️ = 狀態 ABNORMAL（異常）</li>
+    <li>❌ = 執行 ERROR</li>
+    <li>Tab 名稱最多顯示 150px（超出則省略號截斷）</li>
+  </ul>
+
+  <h3>Tab 點擊切換</h3>
+  <p>點擊任意 Tab，下方即切換顯示對應技能的完整診斷報告卡片，包含：</p>
+  <ul>
+    <li><strong>狀態徽章</strong>（正常 / 異常 / ERROR）</li>
+    <li><strong>診斷結論</strong>（AI 生成自然語言結論）</li>
+    <li><strong>MCP 資料證據</strong>（真實查詢結果表格）<span class="new-tag">v8 新增</span></li>
+    <li><strong>建議行動</strong>（Human Recommendation）</li>
+  </ul>
+
+  <div class="screenshot">
+    <img src="screenshots/v7_06_report_done.png" alt="技能 Tab 切換">
+  </div>
+  <p class="screenshot-cap">圖 6-1：點擊不同 Tab 切換技能診斷結果，每個 Tab 包含完整報告卡片</p>
+
+  <h3>MCP 資料證據表格</h3>
+  <p>每張報告卡片的中間區域顯示 MCP 工具實際查詢到的原始資料，以表格形式呈現前 15 筆記錄，讓診斷結論有清楚的數據依據。</p>
+</section>
+
+<!-- ─────────────────── SECTION 7 ─────────────────── -->
+<section class="doc-section" id="s7">
+  <div class="section-num">事件驅動診斷 · 7</div>
+  <h2>診斷總覽 Summary Bar <span class="new-tag">v8 新功能</span></h2>
+  <p>當所有技能執行完畢，報告區頂部（Tab 列上方）出現一條<strong>淡藍色總覽橫幅</strong>（診斷總覽 Summary Bar），以三欄格式並排顯示所有技能的精簡摘要。</p>
+
+  <h3>Summary Bar 欄位</h3>
+  <table>
+    <thead><tr><th>欄位</th><th>說明</th></tr></thead>
+    <tbody>
+      <tr><td>技能名稱 + 狀態徽章</td><td>技能縮寫名稱 + 正常/異常/ERROR 標籤</td></tr>
+      <tr><td>診斷結論（中）</td><td>AI 生成的一句話結論摘要</td></tr>
+      <tr><td>建議行動（右）</td><td>建議工程師採取的具體動作</td></tr>
+    </tbody>
+  </table>
+
+  <div class="screenshot">
+    <img src="screenshots/v7_09_report_tab.png" alt="診斷總覽 Summary Bar">
+  </div>
+  <p class="screenshot-cap">圖 7-1：Summary Bar（淡藍色橫幅）— 全部技能完成後出現，三欄式並排摘要</p>
+
+  <div class="callout tip">
+    <span class="callout-icon">💡</span>
+    <p>Summary Bar 提供一鍵瀏覽所有診斷結果的能力；點擊對應 Tab 可深入查看每個技能的完整報告。</p>
+  </div>
+</section>
+
+<!-- ─────────────────── SECTION 8 ─────────────────── -->
+<section class="doc-section" id="s8">
+  <div class="section-num">事件驅動診斷 · 8</div>
+  <h2>報告 Chat 對話</h2>
+  <p>左側 Chat 面板在診斷過程與完成後持續保留所有訊息，可作為操作紀錄。診斷完成後也可繼續輸入文字提問，與 AI 進行對話。</p>
+
+  <h3>Chat 訊息類型</h3>
+  <table>
+    <thead><tr><th>類型</th><th>外觀</th><th>說明</th></tr></thead>
+    <tbody>
+      <tr><td>事件通知卡</td><td>紅色框線卡片</td><td>模擬觸發產生，含啟動診斷按鈕</td></tr>
+      <tr><td>進度訊息</td><td>灰色泡泡（⏳/✅/❌）</td><td>技能執行進度即時回報</td></tr>
+      <tr><td>用戶訊息</td><td>藍色氣泡（右對齊）</td><td>用戶手動輸入的問題</td></tr>
+      <tr><td>AI 回覆</td><td>白色氣泡（左對齊）</td><td>AI 的文字回應</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ─────────────────── SECTION 9 ─────────────────── -->
+<section class="doc-section" id="s9">
+  <div class="section-num">技能與 MCP 庫 · 9</div>
+  <h2>事件分診庫</h2>
+  <p>點擊 Sidebar「🔧 技能與事件庫」，進入技能管理頁面。頁面分為上下兩個區塊：上方為事件分診庫、下方為診斷工具庫。</p>
+
+  <div class="screenshot">
+    <img src="screenshots/v7_07_event_tab.png" alt="事件分診庫">
+  </div>
+  <p class="screenshot-cap">圖 9-1：事件分診庫 — 顯示所有已註冊事件類型與對應的技能清單</p>
+
+  <h3>事件卡片資訊</h3>
+  <ul>
+    <li><strong>事件類型名稱</strong>（如 <code>SPC_OOC_Etch_CD</code>）</li>
+    <li><strong>描述</strong>：事件觸發條件與場景說明</li>
+    <li><strong>對應技能列表</strong>：事件觸發時自動執行的 Skill 清單（含執行順序）</li>
+  </ul>
+</section>
+
+<!-- ─────────────────── SECTION 10 ─────────────────── -->
+<section class="doc-section" id="s10">
+  <div class="section-num">技能與 MCP 庫 · 10</div>
+  <h2>診斷工具庫（MCP）</h2>
+  <p>頁面下方顯示所有已在 Builder 中建立的 <strong>MCP 工具</strong>，以卡片式格局呈現。每張 MCP 卡片包含：工具名稱、Data Subject、狀態徽章、對應的 Python 腳本預覽。</p>
+
+  <div class="screenshot">
+    <img src="screenshots/v7_08_tools_tab_done.png" alt="診斷工具庫">
+  </div>
+  <p class="screenshot-cap">圖 10-1：診斷工具庫 — MCP 工具卡片列表，含 Try Run 測試按鈕</p>
+</section>
+
+<!-- ─────────────────── SECTION 11 ─────────────────── -->
+<section class="doc-section" id="s11">
+  <div class="section-num">技能與 MCP 庫 · 11</div>
+  <h2>Skill 詳情抽屜</h2>
+  <p>在技能卡片上點擊「詳情」，右側滑出詳情抽屜（Drawer），顯示該 Skill 的完整設定，包含：</p>
+  <ul>
+    <li>Skill 名稱 / 描述 / 狀態</li>
+    <li>使用的 MCP 工具列表</li>
+    <li>AI 診斷提示詞（Prompt）預覽</li>
+    <li>映射關係（MCP 輸出欄位 → Skill 推論輸入）</li>
+  </ul>
+  <div class="screenshot">
+    <img src="screenshots/v7_12_skill_detail_drawer.png" alt="Skill 詳情抽屜">
+  </div>
+  <p class="screenshot-cap">圖 11-1：Skill 詳情抽屜 — 點擊技能卡片後從右側滑出</p>
+</section>
+
+<!-- ─────────────────── SECTION 12 ─────────────────── -->
+<section class="doc-section" id="s12">
+  <div class="section-num">AI Skill Builder · 12</div>
+  <h2>Data Subject 管理</h2>
+  <p>AI Skill Builder 的第一個標籤頁為 <strong>Data Subject</strong> 管理。Data Subject 代表一個可被查詢的資料主題（如製程設備的 APC 參數、設備停機記錄、配方差異等）。</p>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <h3>填寫 Data Subject 基本資訊</h3>
+      <ul>
+        <li><strong>名稱（Name）</strong>：英文識別名，如 <code>etch_apc_params</code></li>
+        <li><strong>描述（Description）</strong>：此資料主題的用途說明</li>
+        <li><strong>資料來源（Schema）</strong>：JSON 格式，描述欄位名稱與型別</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <h3>使用 Universal Data Viewer</h3>
+      <p>點擊「預覽資料」後，系統呼叫對應的 MCP 腳本並以表格格式顯示前 N 筆實際資料，讓使用者即時驗證 Data Subject 的資料是否正確。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────── SECTION 13 ─────────────────── -->
+<section class="doc-section" id="s13">
+  <div class="section-num">AI Skill Builder · 13</div>
+  <h2>MCP 腳本開發 <span class="new-tag">v8 更新</span></h2>
+  <p>MCP（Machine Context Provider）是實際執行資料查詢的 Python 腳本。Builder 提供以下兩種方式建立 MCP 腳本：</p>
+
+  <div class="two-col">
+    <div>
+      <h3>方式 A：自然語言描述</h3>
+      <p>在「腳本需求」欄位輸入自然語言描述（如「查詢 APC 的 RF Power 在過去 24 小時的趨勢，若偏差超過 5% 標記為異常」），點擊「AI 生成」，系統自動生成 Python 沙箱腳本。</p>
+    </div>
+    <div>
+      <h3>方式 B：手動編輯</h3>
+      <p>直接在程式碼編輯器中輸入或貼上 Python 腳本，腳本需符合 MCP 輸出格式（返回 <code>dataset</code> 與 <code>ui_render</code> 欄位的字典）。</p>
+    </div>
+  </div>
+
+  <h3>MCP 腳本輸出格式</h3>
+  <pre>{
+  "dataset": [
+    {"timestamp": "2026-03-01T10:00:00", "rf_power": 450.2, "status": "NORMAL"},
+    ...
+  ],
+  "ui_render": {
+    "type": "table",
+    "chart_data": null
+  }
+}</pre>
+
+  <div class="callout tip">
+    <span class="callout-icon">💡</span>
+    <p><strong>Try Run：</strong>開發完成後，點擊「Try Run」即可在沙箱環境中執行腳本，結果以表格即時顯示於頁面下方，無需重啟服務。</p>
+  </div>
+</section>
+
+<!-- ─────────────────── SECTION 14 ─────────────────── -->
+<section class="doc-section" id="s14">
+  <div class="section-num">AI Skill Builder · 14</div>
+  <h2>Skill 建立流程</h2>
+  <p>建立 Skill 分為三個步驟（步驟 A → B → C）：</p>
+
+  <div class="step">
+    <div class="step-num">A</div>
+    <div class="step-body">
+      <h3>事件 + AI 建議</h3>
+      <p>選擇觸發事件類型（如 <code>SPC_OOC_Etch_CD</code>），輸入 Skill 名稱與診斷目標描述，點擊「AI 建議工具」，系統根據事件上下文自動推薦最適合的 MCP 工具組合。</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">B</div>
+    <div class="step-body">
+      <h3>工具選擇 + 語意映射</h3>
+      <p>確認工具組合後，點擊「Auto Map」，系統透過 LLM 自動將 MCP 輸出欄位語意映射至 Skill 診斷所需的輸入欄位（含置信度分數），無需手動設定每個欄位對應關係。</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">C</div>
+    <div class="step-body">
+      <h3>邏輯 + 驗證</h3>
+      <p>設定 AI 診斷提示詞（System Prompt），點擊「Validate」驗證邏輯一致性，確認後點擊「Save Skill」完成建立。</p>
+    </div>
+  </div>
+
+  <div class="screenshot">
+    <img src="screenshots/v7_10_skills_triage.png" alt="Skill Builder 步驟 A">
+  </div>
+  <p class="screenshot-cap">圖 14-1：Skill Builder — 步驟 A（事件選擇 + AI 工具建議）</p>
+
+  <div class="screenshot">
+    <img src="screenshots/v7_11_skills_actions.png" alt="Skill Builder 步驟 B">
+  </div>
+  <p class="screenshot-cap">圖 14-2：步驟 B — Auto Map 自動語意映射（欄位對應關係自動生成）</p>
+</section>
+
+<!-- ─────────────────── SECTION 15 ─────────────────── -->
+<section class="doc-section" id="s15">
+  <div class="section-num">AI Skill Builder · 15</div>
+  <h2>Try Run 測試</h2>
+  <p>每個 MCP 工具在開發或修改後，均可透過「Try Run」功能在沙箱中執行測試，確認腳本邏輯與資料輸出正確。</p>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <h3>設定測試參數</h3>
+      <p>在 Try Run 區域輸入測試用的事件參數（如 <code>equipment_id: ETC-01</code>），點擊「▶ 執行 Try Run」。</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <h3>查看執行結果</h3>
+      <p>系統在頁面下方顯示：</p>
+      <ul>
+        <li><strong>執行狀態</strong>：SUCCESS / ERROR</li>
+        <li><strong>耗時</strong>（ms）</li>
+        <li><strong>資料表格</strong>：<code>dataset</code> 欄位前 15 筆</li>
+        <li><strong>原始 JSON 輸出</strong>：可折疊查看完整輸出</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ─────────────────── SECTION 16 ─────────────────── -->
+<section class="doc-section" id="s16">
+  <div class="section-num">系統設定 · 16</div>
+  <h2>系統設定</h2>
+  <p>點擊 Sidebar「⚙️ 系統與環境設定」，可設定以下項目：</p>
+
+  <table>
+    <thead><tr><th>設定項</th><th>說明</th><th>預設值</th></tr></thead>
+    <tbody>
+      <tr><td>ANTHROPIC_API_KEY</td><td>Anthropic API 金鑰（必填）</td><td>從環境變數讀取</td></tr>
+      <tr><td>模型選擇</td><td>診斷使用的 Claude 模型</td><td>claude-opus-4-6</td></tr>
+      <tr><td>System Prompt</td><td>全域 AI 系統提示詞</td><td>蝕刻製程診斷專家</td></tr>
+      <tr><td>Max Tokens</td><td>每次 AI 回覆的最大 token 數</td><td>4096</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ─────────────────── SECTION 17 ─────────────────── -->
+<section class="doc-section" id="s17">
+  <div class="section-num">系統設定 · 17</div>
+  <h2>常見問題</h2>
+
+  <h3>Q：診斷一直轉圈，沒有出現 Tab</h3>
+  <p>可能原因：</p>
+  <ul>
+    <li>Anthropic API 金鑰未設定或已過期 → 到系統設定頁面更新金鑰</li>
+    <li>網路問題導致 SSE 連線中斷 → 重新整理頁面後再試</li>
+    <li>後端未正常啟動 → 確認 <code>uvicorn main:app --reload</code> 是否在正確目錄執行</li>
+  </ul>
+
+  <h3>Q：MCP 表格沒有資料</h3>
+  <p>MCP 目前使用 Mock 資料，若 <code>dataset</code> 回傳空陣列，可能是 MCP 腳本的 Mock 邏輯未產生資料。到 Builder → 對應 MCP 工具 → Try Run 驗證腳本輸出。</p>
+
+  <h3>Q：登入後立即被登出</h3>
+  <p>JWT Token 已過期（24 小時）。清除瀏覽器 localStorage 後重新登入即可。</p>
+
+  <h3>Q：Builder Auto Map 結果不準確</h3>
+  <p>Auto Map 使用 LLM 進行語意映射，若欄位名稱過於模糊可能映射不準確。建議在 Data Subject Schema 中使用描述性的英文欄位名稱，並在欄位 description 中補充說明。</p>
+
+  <div class="callout info">
+    <span class="callout-icon">📧</span>
+    <p>如需技術支援，請聯絡系統管理員或參考 <code>docs/</code> 目錄下的 PRD 文件。</p>
+  </div>
+</section>
+
+</main>
+</div>
+
+<script>
+  // Active TOC highlight on scroll
+  const sections = document.querySelectorAll('.doc-section[id]');
+  const tocLinks = document.querySelectorAll('.toc a');
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        tocLinks.forEach(l => l.classList.remove('active'));
+        const link = document.querySelector(`.toc a[href="#${e.target.id}"]`);
+        if (link) link.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-20% 0px -70% 0px' });
+  sections.forEach(s => observer.observe(s));
+</script>
+
+</body>
+</html>

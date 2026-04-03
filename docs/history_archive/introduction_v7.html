@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Glass Box AI 診斷引擎 v7 — 產品介紹</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #f8fafc;
+    color: #1e293b;
+    line-height: 1.6;
+  }
+  /* Hero */
+  .hero {
+    background: linear-gradient(135deg, #1e1b4b 0%, #312e81 40%, #4338ca 100%);
+    color: white;
+    padding: 80px 40px;
+    text-align: center;
+  }
+  .hero .badge {
+    display: inline-block;
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 9999px;
+    padding: 4px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: .05em;
+    margin-bottom: 24px;
+    text-transform: uppercase;
+  }
+  .hero h1 {
+    font-size: 48px;
+    font-weight: 800;
+    line-height: 1.15;
+    margin-bottom: 20px;
+  }
+  .hero h1 span { color: #a5b4fc; }
+  .hero p {
+    font-size: 20px;
+    color: #c7d2fe;
+    max-width: 680px;
+    margin: 0 auto 36px;
+  }
+  .hero-meta {
+    display: flex;
+    justify-content: center;
+    gap: 32px;
+    flex-wrap: wrap;
+  }
+  .hero-meta .item { text-align: center; }
+  .hero-meta .item .num {
+    font-size: 28px;
+    font-weight: 700;
+    color: #a5b4fc;
+  }
+  .hero-meta .item .label {
+    font-size: 13px;
+    color: #c7d2fe;
+    margin-top: 2px;
+  }
+  /* Container */
+  .container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+  /* Section */
+  section { padding: 64px 0; }
+  section:nth-child(even) { background: white; }
+  .section-label {
+    display: inline-block;
+    background: #eef2ff;
+    color: #4338ca;
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  h2 {
+    font-size: 32px;
+    font-weight: 700;
+    color: #0f172a;
+    margin-bottom: 12px;
+  }
+  h3 {
+    font-size: 20px;
+    font-weight: 600;
+    color: #1e293b;
+    margin-bottom: 8px;
+  }
+  .sub {
+    font-size: 17px;
+    color: #475569;
+    max-width: 680px;
+    margin-bottom: 40px;
+  }
+  /* Screenshot */
+  .screenshot {
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 6px -1px rgba(0,0,0,.07), 0 10px 15px -3px rgba(0,0,0,.1), 0 0 0 1px rgba(0,0,0,.05);
+    margin: 24px 0;
+  }
+  .screenshot img { width: 100%; display: block; }
+  .screenshot-caption {
+    font-size: 13px;
+    color: #94a3b8;
+    text-align: center;
+    margin-top: 8px;
+    margin-bottom: 32px;
+  }
+  /* Two column */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+    align-items: start;
+  }
+  /* Three col */
+  .three-col {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+  /* Four col */
+  .four-col {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+  }
+  /* Feature card */
+  .feature-card {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 24px;
+  }
+  .feature-icon { font-size: 32px; margin-bottom: 12px; }
+  .feature-card h3 { font-size: 16px; }
+  .feature-card p { font-size: 14px; color: #64748b; margin-top: 6px; }
+  /* Timeline */
+  .timeline { position: relative; padding-left: 32px; }
+  .timeline::before {
+    content: "";
+    position: absolute; left: 8px; top: 8px; bottom: 8px;
+    width: 2px; background: #e2e8f0;
+  }
+  .timeline-item { position: relative; margin-bottom: 28px; }
+  .timeline-item::before {
+    content: "";
+    position: absolute; left: -28px; top: 6px;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: #4338ca;
+    border: 2px solid white;
+    box-shadow: 0 0 0 2px #4338ca;
+  }
+  .timeline-item .phase {
+    font-size: 12px;
+    font-weight: 700;
+    color: #4338ca;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+  }
+  .timeline-item h3 { font-size: 16px; margin: 2px 0; }
+  .timeline-item p { font-size: 14px; color: #64748b; }
+  .timeline-item.active::before { background: #7c3aed; box-shadow: 0 0 0 2px #7c3aed; }
+  .timeline-item.active .phase { color: #7c3aed; }
+  /* Principles */
+  .principle {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 20px;
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    margin-bottom: 12px;
+  }
+  .principle-icon {
+    width: 40px; height: 40px;
+    border-radius: 8px;
+    background: #eef2ff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+  .principle h3 { font-size: 15px; }
+  .principle p { font-size: 14px; color: #64748b; }
+  /* Tech badge */
+  .tech-badge {
+    display: inline-block;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #475569;
+    margin: 3px;
+  }
+  /* Skill card */
+  .skill-card {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 20px;
+  }
+  .skill-card .skill-icon {
+    width: 44px; height: 44px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+    margin-bottom: 12px;
+  }
+  .skill-card h3 { font-size: 14px; font-family: monospace; }
+  .skill-card p { font-size: 13px; color: #64748b; margin-top: 6px; }
+  .skill-card .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 700;
+    margin-top: 8px;
+  }
+  .badge-indigo { background: #eef2ff; color: #4338ca; }
+  .badge-purple { background: #f5f3ff; color: #7c3aed; }
+  .badge-emerald { background: #f0fdf4; color: #166534; }
+  /* Builder flow */
+  .builder-step {
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+    padding: 24px;
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    margin-bottom: 16px;
+  }
+  .builder-step-num {
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; font-weight: 800;
+    flex-shrink: 0;
+    color: white;
+  }
+  .builder-step:nth-child(1) .builder-step-num { background: linear-gradient(135deg, #4338ca, #6366f1); }
+  .builder-step:nth-child(2) .builder-step-num { background: linear-gradient(135deg, #7c3aed, #a855f7); }
+  .builder-step:nth-child(3) .builder-step-num { background: linear-gradient(135deg, #db2777, #ec4899); }
+  .builder-step h3 { font-size: 16px; margin-bottom: 6px; }
+  .builder-step p { font-size: 14px; color: #64748b; }
+  /* SSE flow */
+  .sse-event {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    font-size: 14px;
+  }
+  .sse-event .evt-tag {
+    font-family: monospace;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    min-width: 120px;
+    text-align: center;
+  }
+  .sse-event.session { background: #f0fdf4; }
+  .sse-event.session .evt-tag { background: #dcfce7; color: #166534; }
+  .sse-event.tool_call { background: #eff6ff; }
+  .sse-event.tool_call .evt-tag { background: #dbeafe; color: #1d4ed8; }
+  .sse-event.tool_result { background: #f5f3ff; }
+  .sse-event.tool_result .evt-tag { background: #ede9fe; color: #6d28d9; }
+  .sse-event.report { background: #fefce8; }
+  .sse-event.report .evt-tag { background: #fef9c3; color: #b45309; }
+  /* Comparison table */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    margin: 24px 0;
+  }
+  th {
+    background: #f8fafc;
+    text-align: left;
+    padding: 10px 14px;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: #64748b;
+    border-bottom: 2px solid #e2e8f0;
+  }
+  td {
+    padding: 10px 14px;
+    color: #475569;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  tr:hover td { background: #f8fafc; }
+  td.v7 { color: #4338ca; font-weight: 600; }
+  /* CTA */
+  .cta-section {
+    background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4c1d95 100%);
+    color: white;
+    padding: 80px 40px;
+    text-align: center;
+  }
+  .cta-section h2 { color: white; font-size: 36px; margin-bottom: 16px; }
+  .cta-section p { color: #c7d2fe; font-size: 18px; margin-bottom: 32px; }
+  .cta-btn {
+    display: inline-block;
+    background: white;
+    color: #4338ca;
+    font-weight: 700;
+    font-size: 15px;
+    padding: 14px 32px;
+    border-radius: 10px;
+    text-decoration: none;
+    margin: 6px;
+  }
+  .cta-btn.outline {
+    background: transparent;
+    color: white;
+    border: 2px solid rgba(255,255,255,0.4);
+  }
+  /* Footer */
+  footer {
+    background: #0f172a;
+    color: #64748b;
+    text-align: center;
+    padding: 32px;
+    font-size: 13px;
+  }
+  footer span { color: #a5b4fc; }
+  @media (max-width: 768px) {
+    .hero h1 { font-size: 32px; }
+    .two-col, .three-col, .four-col { grid-template-columns: 1fr; }
+    .hero-meta { gap: 20px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════ HERO -->
+<div class="hero">
+  <div class="badge">v7.0 — Phase 6 + 7.5 Released</div>
+  <h1>Glass Box <span>AI 診斷引擎</span><br>蝕刻製程智慧排障平台</h1>
+  <p>業界首個針對半導體蝕刻製程（Etch）設計的 AI 診斷系統，配備 AI Skill Builder Copilot，讓製程工程師無需撰寫程式碼即可創建新的診斷技能。</p>
+  <div class="hero-meta">
+    <div class="item"><div class="num">5</div><div class="label">蝕刻 MCP 工具</div></div>
+    <div class="item"><div class="num">6</div><div class="label">分診事件類型</div></div>
+    <div class="item"><div class="num">3</div><div class="label">Builder API</div></div>
+    <div class="item"><div class="num">60vw</div><div class="label">寬屏抽屜 UI</div></div>
+    <div class="item"><div class="num">100%</div><div class="label">玻璃盒透明度</div></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ OVERVIEW -->
+<section>
+  <div class="container">
+    <div class="section-label">產品概覽</div>
+    <h2>從 IT 通用到蝕刻製程專用<br>AI 診斷的域專業化突破</h2>
+    <p class="sub">v7 完整替換通用 IT 診斷工具組，全面針對蝕刻製程的核心問題：SPC OOC（統計製程管制失控）、CD 量測異常、配方偏移、APC 補償飽和、設備硬體常數飄移。</p>
+
+    <div class="screenshot">
+      <img src="screenshots/v7_02_diagnosis_overview.png" alt="診斷工作站主畫面 — 左側三 Tab 面板（診斷報告 / 事件分類 / 工具呼叫）+ 右側 Chat 對話區">
+    </div>
+    <div class="screenshot-caption">圖 1：診斷工作站（/diagnosis）— 左右分割佈局，即時顯示 AI 診斷過程</div>
+
+    <div class="three-col" style="margin-top:40px">
+      <div class="principle">
+        <div class="principle-icon">🔬</div>
+        <div>
+          <h3>蝕刻製程專業</h3>
+          <p>所有診斷邏輯、事件分類、工具設計均針對蝕刻製程（Dry Etch）優化，理解 CD、SPC、APC、Recipe 等專業術語。</p>
+        </div>
+      </div>
+      <div class="principle">
+        <div class="principle-icon">🪟</div>
+        <div>
+          <h3>玻璃盒透明 AI</h3>
+          <p>每一個工具呼叫、輸入參數、執行結果即時可見，無黑盒決策。工程師可完整追溯 AI 的診斷推理路徑。</p>
+        </div>
+      </div>
+      <div class="principle">
+        <div class="principle-icon">🏗️</div>
+        <div>
+          <h3>無程式碼建構</h3>
+          <p>AI Skill Builder Copilot 讓製程工程師透過三個步驟，在不撰寫程式碼的情況下建立全新的診斷技能。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════ DIAGNOSIS -->
+<section>
+  <div class="container">
+    <div class="section-label">核心功能 #1</div>
+    <h2>智慧診斷工作站</h2>
+    <p class="sub">輸入蝕刻製程症狀，AI Agent 自動執行多輪工具呼叫，最終生成結構化 Markdown 診斷報告。全程透明，可即時監看每一步。</p>
+
+    <div class="two-col">
+      <div>
+        <h3>⚡ Quick Test 一鍵觸發</h3>
+        <p style="font-size:14px;color:#64748b;margin-bottom:20px">無需手動輸入，點擊 Quick Test 按鈕即可模擬真實 SPC OOC 事件，讓 Boss Demo 隨時就緒。</p>
+
+        <div class="screenshot">
+          <img src="screenshots/v7_03_chat_empty_state.png" alt="Quick Test 按鈕（amber 色）— 點擊後自動送出蝕刻 SPC OOC 診斷請求">
+        </div>
+        <div class="screenshot-caption">圖 2：Quick Test 按鈕 — 一鍵觸發蝕刻 SPC OOC 診斷模擬</div>
+      </div>
+      <div>
+        <h3>🔄 Tab 自動切換狀態機</h3>
+        <p style="font-size:14px;color:#64748b;margin-bottom:20px">診斷過程中，左側面板的 Tab 頁籤會隨 SSE 事件自動切換，讓您無縫跟隨診斷流程。</p>
+
+        <div class="sse-event session">
+          <span class="evt-tag">session_start</span>
+          <span>診斷開始 → 右側顯示「🔄 診斷開始…」</span>
+        </div>
+        <div class="sse-event tool_call">
+          <span class="evt-tag">tool_call</span>
+          <span>→ 自動切換至「工具呼叫」Tab，顯示執行中狀態</span>
+        </div>
+        <div class="sse-event tool_result">
+          <span class="evt-tag">tool_result</span>
+          <span>mcp_event_triage 完成 → 自動切換至「事件分類」Tab</span>
+        </div>
+        <div class="sse-event report">
+          <span class="evt-tag">report</span>
+          <span>最終報告 → 自動切換至「診斷報告」Tab</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="screenshot" style="margin-top:40px">
+      <img src="screenshots/v7_08_tools_tab_done.png" alt="工具呼叫 Tab — 即時顯示 mcp_event_triage → mcp_check_recipe_offset → mcp_check_equipment_constants → mcp_check_apc_params 的執行順序">
+    </div>
+    <div class="screenshot-caption">圖 3：工具呼叫 Tab — 即時追蹤每個 MCP 工具的輸入/輸出</div>
+
+    <div class="two-col" style="margin-top:16px">
+      <div>
+        <div class="screenshot">
+          <img src="screenshots/v7_07_event_tab.png" alt="事件分類 Tab — 顯示 EventObjectCard：event_type、urgency badge、建議工具鏈、分析提示">
+        </div>
+        <div class="screenshot-caption">圖 4：事件分類 Tab — mcp_event_triage 分析結果</div>
+      </div>
+      <div>
+        <div class="screenshot">
+          <img src="screenshots/v7_09_report_tab.png" alt="診斷報告 Tab — 以 .prose-report CSS 渲染的 Markdown 報告">
+        </div>
+        <div class="screenshot-caption">圖 5：診斷報告 Tab — AI 生成的結構化 Markdown 報告</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════ ETCH SKILLS -->
+<section>
+  <div class="container">
+    <div class="section-label">核心功能 #2</div>
+    <h2>蝕刻製程專用 MCP 工具組</h2>
+    <p class="sub">v7 全面替換通用 IT 工具，導入 5 個蝕刻製程專用 MCP Skill，覆蓋從事件分診到具體參數檢查的完整診斷鏈。</p>
+
+    <div class="screenshot">
+      <img src="screenshots/v7_11_skills_actions.png" alt="技能與事件庫頁面（/skills）— 診斷工具庫 Tab 顯示蝕刻工具列表">
+    </div>
+    <div class="screenshot-caption">圖 6：診斷工具庫 — 5 個蝕刻製程 MCP Skill</div>
+
+    <div class="four-col" style="margin-top:40px">
+      <div class="skill-card">
+        <div class="skill-icon" style="background:#eef2ff">🎯</div>
+        <h3>mcp_event_triage</h3>
+        <p>蝕刻事件分診，識別 6 種事件類型並路由到最適工具鏈</p>
+        <span class="badge badge-indigo">分診庫</span>
+      </div>
+      <div class="skill-card">
+        <div class="skill-icon" style="background:#f5f3ff">📋</div>
+        <h3>mcp_check_recipe_offset</h3>
+        <p>對比黃金配方，檢測配方參數是否有人為修改或偏移</p>
+        <span class="badge badge-purple">診斷工具</span>
+      </div>
+      <div class="skill-card">
+        <div class="skill-icon" style="background:#fdf4ff">🔩</div>
+        <h3>mcp_check_equipment_constants</h3>
+        <p>驗證蝕刻機台硬體常數（RF、Gas、Mechanical）規格</p>
+        <span class="badge badge-purple">診斷工具</span>
+      </div>
+      <div class="skill-card">
+        <div class="skill-icon" style="background:#fffbeb">📊</div>
+        <h3>mcp_check_apc_params</h3>
+        <p>評估 APC 補償參數是否接近飽和或發生異常</p>
+        <span class="badge badge-purple">診斷工具</span>
+      </div>
+    </div>
+
+    <div class="two-col" style="margin-top:40px">
+      <div>
+        <div class="screenshot">
+          <img src="screenshots/v7_13_triage_detail_drawer.png" alt="事件分診庫 Tab — mcp_event_triage 詳情 Drawer，顯示 6 條蝕刻分診規則">
+        </div>
+        <div class="screenshot-caption">圖 7：mcp_event_triage 詳情 — 6 條蝕刻分診規則</div>
+      </div>
+      <div>
+        <div class="screenshot">
+          <img src="screenshots/v7_12_skill_detail_drawer.png" alt="mcp_check_recipe_offset 詳情 Drawer — 顯示 Input Schema（JsonViewer 展開）">
+        </div>
+        <div class="screenshot-caption">圖 8：mcp_check_recipe_offset — Input Schema 詳情抽屜</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════ SKILL BUILDER -->
+<section>
+  <div class="container">
+    <div class="section-label">核心功能 #3</div>
+    <h2>AI Skill Builder Copilot</h2>
+    <p class="sub">製程工程師無需撰寫任何程式碼，透過三個步驟與 AI 協作，即可創建符合蝕刻製程知識的全新診斷 Skill。</p>
+
+    <div class="screenshot">
+      <img src="screenshots/v7_14_builder_open.png" alt="SkillBuilderDrawer 全貌 — 60vw 寬的右側滑出抽屜，三個步驟區塊 A / B / C">
+    </div>
+    <div class="screenshot-caption">圖 9：AI Skill Builder Copilot — 60vw 寬的三步驟建構介面</div>
+
+    <div style="margin-top:40px">
+      <div class="builder-step">
+        <div class="builder-step-num">A</div>
+        <div>
+          <h3>區塊 A：選擇事件類型 + 獲取 AI 診斷邏輯建議</h3>
+          <p>從事件下拉選單選擇 <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:12px">SPC_OOC_Etch_CD</code>，系統立即呼叫 <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:12px">POST /api/v1/builder/suggest-logic</code>，AI 分析事件 Schema 後生成 PE（製程工程師）視角的診斷步驟建議，並以卡片形式展示（含「套用」按鈕）。</p>
+        </div>
+      </div>
+      <div class="builder-step">
+        <div class="builder-step-num">B</div>
+        <div>
+          <h3>區塊 B：選擇 MCP 工具 + AI 自動欄位映射</h3>
+          <p>以核取框勾選所需的診斷工具（mcp_check_recipe_offset、mcp_check_equipment_constants、mcp_check_apc_params）。每勾選一個工具，系統自動呼叫 <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:12px">POST /api/v1/builder/auto-map</code>，AI 分析事件欄位與工具輸入 Schema 並生成映射表格，以信心度 badge（高/中/低）標示。</p>
+        </div>
+      </div>
+      <div class="builder-step">
+        <div class="builder-step-num">C</div>
+        <div>
+          <h3>區塊 C：撰寫診斷邏輯 + AI 驗證</h3>
+          <p>在 Textarea 中輸入診斷邏輯 Prompt（或直接套用 A 區塊的 AI 建議），點擊「驗證邏輯」呼叫 <code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:12px">POST /api/v1/builder/validate-logic</code>，AI 回傳驗證分數（0–100）、問題清單和改進建議。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="two-col" style="margin-top:32px">
+      <div>
+        <div class="screenshot">
+          <img src="screenshots/v7_16_builder_section_a.png" alt="區塊 A 詳細截圖 — 事件下拉選單 + AI 建議卡片（含套用按鈕）">
+        </div>
+        <div class="screenshot-caption">圖 10：區塊 A — AI 診斷邏輯建議與 Skeleton 載入動畫</div>
+      </div>
+      <div>
+        <div class="screenshot">
+          <img src="screenshots/v7_17_builder_section_b.png" alt="區塊 B 詳細截圖 — 工具核取框 + 欄位映射表格（含信心度 badge）">
+        </div>
+        <div class="screenshot-caption">圖 11：區塊 B — MCP 工具選擇與 AI 欄位映射表格</div>
+      </div>
+    </div>
+
+    <div class="screenshot" style="margin-top:16px">
+      <img src="screenshots/v7_17_builder_section_b.png" alt="Builder 完整截圖 — 區塊 A/B/C 全覽，含診斷邏輯 Textarea 與驗證結果">
+    </div>
+    <div class="screenshot-caption">圖 12：Skill Builder — 完整三步驟建構流程（區塊 A 選事件 → B 選工具 → C 驗證邏輯）</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════ UX IMPROVEMENTS -->
+<section>
+  <div class="container">
+    <div class="section-label">Phase 7.5 UX 強化</div>
+    <h2>全面優化的使用者體驗</h2>
+    <p class="sub">v7.5 針對 Boss Demo 場景進行了全面 UX 優化，確保每次展示都流暢、專業、令人印象深刻。</p>
+
+    <div class="three-col">
+      <div class="feature-card">
+        <div class="feature-icon">📐</div>
+        <h3>60vw 寬屏抽屜</h3>
+        <p>所有右側滑出抽屜（Skill 詳情、Skill Builder）從固定 480px 改為 60vw（約 1,152px @ 1920px 螢幕），大幅提升可讀性。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">⚡</div>
+        <h3>Quick Test 按鈕</h3>
+        <p>Chat 面板新增一鍵觸發按鈕，amber 色系醒目設計，點擊即送出完整的 SPC OOC 蝕刻診斷請求。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔄</div>
+        <h3>Tab 自動切換</h3>
+        <p>三個 useEffect 精確監聽 SSE 事件：工具呼叫 → 工具 Tab，事件分類 → 分類 Tab，報告完成 → 報告 Tab。</p>
+      </div>
+    </div>
+
+    <div class="screenshot" style="margin-top:40px">
+      <img src="screenshots/v7_12_skill_detail_drawer.png" alt="60vw 寬屏抽屜 — 可完整顯示 JsonViewer 的巢狀 JSON 結構、分診規則卡片等">
+    </div>
+    <div class="screenshot-caption">圖 13：60vw 寬屏 Drawer — 完整顯示技能詳情與 JSON Schema</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════ V5 vs V7 COMPARISON -->
+<section>
+  <div class="container">
+    <div class="section-label">版本比較</div>
+    <h2>v5 → v7 升級摘要</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>功能點</th>
+          <th>v5（通用 IT）</th>
+          <th class="v7">v7（蝕刻製程）</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>診斷領域</td>
+          <td>通用 IT（CPU、記憶體、磁碟）</td>
+          <td class="v7">蝕刻製程（SPC、CD、APC、配方）</td>
+        </tr>
+        <tr>
+          <td>MCP 工具組</td>
+          <td>mcp_mock_cpu_check、mcp_rag_knowledge_search</td>
+          <td class="v7">mcp_check_recipe_offset、mcp_check_equipment_constants、mcp_check_apc_params</td>
+        </tr>
+        <tr>
+          <td>分診規則數</td>
+          <td>7 條（通用 IT）</td>
+          <td class="v7">6 條（蝕刻製程，涵蓋 SPC OOC、配方偏移、APC、CD 漂移等）</td>
+        </tr>
+        <tr>
+          <td>Skill 創建</td>
+          <td>無（需手動撰寫 Python）</td>
+          <td class="v7">AI Skill Builder Copilot（三步驟、三 API、無程式碼）</td>
+        </tr>
+        <tr>
+          <td>Drawer 寬度</td>
+          <td>固定 480px</td>
+          <td class="v7">60vw（自適應視窗寬度）</td>
+        </tr>
+        <tr>
+          <td>Quick Test</td>
+          <td>無</td>
+          <td class="v7">⚡ amber 色 Quick Test 按鈕（預設蝕刻 SPC OOC 場景）</td>
+        </tr>
+        <tr>
+          <td>Tab 切換</td>
+          <td>純手動</td>
+          <td class="v7">SSE 事件驅動自動切換</td>
+        </tr>
+        <tr>
+          <td>快速建議</td>
+          <td>通用 IT 問題</td>
+          <td class="v7">蝕刻製程 4 種典型場景</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════ TECH STACK -->
+<section>
+  <div class="container">
+    <div class="section-label">技術棧</div>
+    <h2>現代化全端技術選型</h2>
+    <p class="sub">前後端分離架構，生產就緒的技術組合。</p>
+
+    <div class="two-col">
+      <div>
+        <h3 style="margin-bottom:16px">後端</h3>
+        <div>
+          <span class="tech-badge">FastAPI 0.109</span>
+          <span class="tech-badge">Python 3.11</span>
+          <span class="tech-badge">SQLAlchemy 2.0 (Async)</span>
+          <span class="tech-badge">Pydantic v2</span>
+          <span class="tech-badge">Anthropic SDK</span>
+          <span class="tech-badge">Claude Opus 4.6</span>
+          <span class="tech-badge">JWT (python-jose)</span>
+          <span class="tech-badge">bcrypt (passlib)</span>
+          <span class="tech-badge">SQLite / PostgreSQL</span>
+          <span class="tech-badge">Uvicorn (ASGI)</span>
+          <span class="tech-badge">SSE (StreamingResponse)</span>
+          <span class="tech-badge">pytest / pytest-asyncio</span>
+        </div>
+      </div>
+      <div>
+        <h3 style="margin-bottom:16px">前端</h3>
+        <div>
+          <span class="tech-badge">React 19.2</span>
+          <span class="tech-badge">Vite 7.3.1</span>
+          <span class="tech-badge">Tailwind CSS 3.4.19</span>
+          <span class="tech-badge">React Router DOM v7</span>
+          <span class="tech-badge">react-markdown</span>
+          <span class="tech-badge">remark-gfm</span>
+          <span class="tech-badge">lucide-react</span>
+          <span class="tech-badge">Fetch API (SSE)</span>
+          <span class="tech-badge">useSSE Hook</span>
+          <span class="tech-badge">Vite Proxy</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="screenshot" style="margin-top:40px">
+      <img src="screenshots/v7_18_settings.png" alt="系統設定頁面 — 顯示模型設定（Claude Opus 4.6）、System Prompt、API 金鑰配置">
+    </div>
+    <div class="screenshot-caption">圖 14：系統設定頁面 — 可設定全局 System Prompt、模型與 API 金鑰</div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════ CTA -->
+<div class="cta-section">
+  <h2>開始使用 Glass Box AI v7</h2>
+  <p>三分鐘內完成部署，立即體驗蝕刻製程 AI 診斷與 Skill Builder Copilot</p>
+  <a href="user_manual_v7.html" class="cta-btn">📖 查看使用手冊</a>
+  <a href="prod_spec_v7.md" class="cta-btn outline">📋 產品規格文件</a>
+</div>
+
+<footer>
+  Glass Box <span>AI 診斷引擎</span> v7.0 — 蝕刻製程智慧排障平台　|　Phase 6 + 7.5　|　2026-02-28
+</footer>
+
+</body>
+</html>

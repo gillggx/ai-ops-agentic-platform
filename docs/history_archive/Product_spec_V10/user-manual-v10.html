@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GlassBox AIoPs — 使用者操作手冊 v10</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: "Helvetica Neue", Arial, "PingFang TC", "Microsoft JhengHei", sans-serif;
+  font-size: 15px; line-height: 1.7; color: #1e293b; background: #f8fafc;
+}
+
+/* ── Cover ─────────────────────────── */
+.cover {
+  background: linear-gradient(145deg, #0f172a 0%, #1e3a8a 60%, #0f172a 100%);
+  color: white; padding: 80px 60px; min-height: 500px;
+  display: flex; flex-direction: column; justify-content: center;
+}
+.cover-badge {
+  display: inline-block; border: 1px solid #6366f1; color: #a5b4fc;
+  font-size: 11px; letter-spacing: 3px; text-transform: uppercase;
+  padding: 4px 14px; border-radius: 20px; margin-bottom: 24px;
+}
+.cover h1 { font-size: 52px; font-weight: 900; margin-bottom: 10px; }
+.cover h1 span { color: #818cf8; }
+.cover .subtitle { font-size: 18px; color: #94a3b8; margin-bottom: 40px; }
+.cover-meta { display: flex; gap: 40px; border-top: 1px solid rgba(255,255,255,.1); padding-top: 24px; }
+.cover-meta dt { font-size: 11px; color: #64748b; text-transform: uppercase; }
+.cover-meta dd { font-size: 14px; color: #e2e8f0; font-weight: 600; }
+
+/* ── Chapter ───────────────────────── */
+.chapter { background: white; max-width: 1000px; margin: 40px auto; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.07); }
+.chapter-header { padding: 32px 40px 20px; border-bottom: 2px solid #f1f5f9; }
+.chapter-num { font-size: 11px; font-weight: 700; color: #6366f1; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 6px; }
+.chapter-header h2 { font-size: 28px; font-weight: 800; color: #0f172a; }
+.chapter-header .desc { font-size: 14px; color: #64748b; margin-top: 6px; border-left: 3px solid #6366f1; padding-left: 12px; }
+.chapter-body { padding: 32px 40px; }
+
+/* New chapter badge */
+.new-badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 10px; margin-left: 12px; vertical-align: middle; }
+.v9-badge  { background: #dbeafe; color: #1d4ed8; }
+.v10-badge { background: #fdf4ff; color: #7c3aed; }
+
+/* ── Section ───────────────────────── */
+.section { margin-bottom: 44px; }
+.section:last-child { margin-bottom: 0; }
+.section h3 { font-size: 18px; font-weight: 700; color: #1e293b; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #e2e8f0; }
+.section h4 { font-size: 14px; font-weight: 700; color: #334155; margin: 16px 0 8px; }
+.section p { margin: 8px 0 12px; font-size: 14px; }
+.section ul, .section ol { padding-left: 22px; margin: 8px 0 12px; }
+.section li { margin: 5px 0; font-size: 14px; }
+
+/* ── Step rows ─────────────────────── */
+.step-row { display: flex; gap: 0; margin: 24px 0; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
+.step-number { width: 56px; background: #6366f1; color: white; display: flex; align-items: flex-start; justify-content: center; padding: 20px 0; flex-shrink: 0; font-size: 22px; font-weight: 900; }
+.step-content { flex: 1; padding: 16px 20px; background: #fafbff; }
+.step-content h4 { font-size: 14px; font-weight: 700; color: #1e293b; margin: 0 0 6px; }
+.step-content p { font-size: 13px; color: #475569; margin: 0; }
+.step-content ul { font-size: 13px; color: #475569; }
+.step-content code { font-family: monospace; font-size: 11px; background: #ede9fe; color: #5b21b6; padding: 1px 5px; border-radius: 3px; }
+
+/* ── Screenshots ───────────────────── */
+.shot { margin: 20px 0; border-radius: 10px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 4px 16px rgba(0,0,0,.1); }
+.shot img { width: 100%; display: block; }
+.shot figcaption { background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 8px 16px; font-size: 12px; color: #64748b; text-align: center; }
+
+/* ── Tables ─────────────────────────── */
+table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+th { background: #1e293b; color: #f1f5f9; padding: 9px 12px; text-align: left; font-weight: 600; font-size: 12px; }
+td { padding: 8px 12px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+tr:nth-child(even) td { background: #f8fafc; }
+
+/* ── Callouts ───────────────────────── */
+.callout { border-radius: 8px; padding: 14px 16px; margin: 14px 0; font-size: 13px; }
+.callout-title { font-weight: 700; margin-bottom: 5px; font-size: 14px; }
+.tip    { background: #f0fdf4; border-left: 4px solid #22c55e; }
+.tip .callout-title { color: #15803d; }
+.info   { background: #eff6ff; border-left: 4px solid #3b82f6; }
+.info .callout-title { color: #1d4ed8; }
+.warn   { background: #fffbeb; border-left: 4px solid #f59e0b; }
+.warn .callout-title { color: #b45309; }
+.mobile { background: linear-gradient(135deg, #fdf4ff, #eff6ff); border-left: 4px solid #8b5cf6; }
+.mobile .callout-title { color: #6d28d9; }
+
+/* ── Badges ─────────────────────────── */
+code { font-family: monospace; font-size: 12px; background: #f1f5f9; color: #6366f1; padding: 2px 6px; border-radius: 3px; border: 1px solid #e2e8f0; }
+.badge { display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 11px; font-weight: 700; }
+.badge-green { background: #dcfce7; color: #15803d; }
+.badge-red   { background: #fee2e2; color: #991b1b; }
+.badge-blue  { background: #dbeafe; color: #1d4ed8; }
+.badge-gray  { background: #f1f5f9; color: #475569; }
+.badge-orange { background: #ffedd5; color: #c2410c; }
+
+/* ── Two column ─────────────────────── */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 14px 0; }
+.col-box { border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; background: #f8fafc; }
+.col-box h4 { margin-top: 0; font-size: 13px; }
+
+/* ── SSE timeline ───────────────────── */
+.sse-timeline { border-left: 3px solid #6366f1; padding-left: 20px; margin: 16px 0; }
+.sse-event { margin: 12px 0; position: relative; }
+.sse-event::before { content: ''; position: absolute; left: -26px; top: 6px; width: 10px; height: 10px; border-radius: 50%; background: #6366f1; }
+.sse-event-type { font-family: monospace; font-size: 12px; font-weight: 700; color: #6366f1; }
+.sse-event-desc { font-size: 13px; color: #475569; }
+.sse-event-payload { background: #0f172a; color: #a5f3fc; font-family: monospace; font-size: 11px; padding: 8px 12px; border-radius: 6px; margin-top: 4px; }
+
+/* ── Tab bar demo ───────────────────── */
+.tab-bar-demo { border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; margin: 14px 0; }
+.tab-bar { display: flex; background: #f8fafc; border-bottom: 1px solid #e2e8f0; padding: 0 8px; gap: 2px; align-items: center; overflow-x: auto; }
+.tab-item { display: flex; align-items: center; gap: 6px; padding: 8px 12px; font-size: 12px; font-weight: 600; color: #64748b; border-bottom: 2px solid transparent; white-space: nowrap; }
+.tab-item.active { color: #6366f1; border-bottom-color: #6366f1; background: white; }
+.tab-close { width: 14px; height: 14px; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; color: #94a3b8; }
+.tab-content-demo { padding: 14px 16px; background: white; font-size: 13px; color: #475569; }
+
+/* ── Slash Command demo ─────────────── */
+.slash-demo { border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; margin: 14px 0; }
+.slash-input-row { background: #f8fafc; padding: 10px 14px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; gap: 8px; }
+.slash-input-row code { font-size: 13px; }
+.slash-menu-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+.slash-menu-item:last-child { border-bottom: none; }
+.slash-menu-item.active { background: #eff6ff; }
+.slash-key { font-family: monospace; font-weight: 700; color: #6366f1; min-width: 100px; }
+.slash-desc { color: #64748b; font-size: 12px; }
+
+/* ── Mobile layout demo ─────────────── */
+.mobile-layout-demo { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 14px 0; }
+.mobile-frame { border: 2px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
+.mobile-frame-header { background: #1e293b; color: white; text-align: center; padding: 8px; font-size: 11px; font-weight: 700; }
+.mobile-toggle-bar { display: flex; background: white; border-bottom: 1px solid #e2e8f0; }
+.mobile-toggle-btn { flex: 1; text-align: center; padding: 10px 6px; font-size: 12px; font-weight: 600; }
+.mobile-toggle-btn.active { background: #eff6ff; color: #1d4ed8; border-bottom: 2px solid #1d4ed8; margin-bottom: -1px; }
+.mobile-toggle-btn:not(.active) { color: #64748b; }
+.mobile-sep { width: 1px; background: #e2e8f0; margin: 8px 0; }
+.mobile-content { background: #f8fafc; padding: 12px; font-size: 12px; color: #334155; min-height: 120px; }
+
+/* ── Gesture diagram ─────────────────── */
+.gesture-diagram { border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; margin: 14px 0; }
+.gesture-row { display: flex; align-items: center; padding: 14px 16px; border-bottom: 1px solid #f1f5f9; gap: 16px; }
+.gesture-row:last-child { border-bottom: none; }
+.gesture-arrow { font-size: 24px; width: 40px; text-align: center; flex-shrink: 0; }
+.gesture-from { flex: 1; font-size: 13px; font-weight: 600; color: #1d4ed8; text-align: center; }
+.gesture-to { flex: 1; font-size: 13px; font-weight: 600; color: #7c3aed; text-align: center; }
+.gesture-sep { font-size: 18px; color: #94a3b8; }
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════
+     COVER
+══════════════════════════ -->
+<div class="cover">
+  <div class="cover-badge">GlassBox AIoPs · User Manual</div>
+  <h1>使用者<span>操作手冊</span></h1>
+  <div class="subtitle">Version 10 — 完整操作說明，含 Copilot 對話、Multi-Tab 工作區、Mobile 手勢操作</div>
+  <dl class="cover-meta">
+    <div><dt>版本</dt><dd>v10</dd></div>
+    <div><dt>日期</dt><dd>2026-03-01</dd></div>
+    <div><dt>AI 引擎</dt><dd>Claude Opus 4.6</dd></div>
+    <div><dt>後端</dt><dd>FastAPI 0.115</dd></div>
+  </dl>
+</div>
+
+<!-- ══════════════════════════
+     CH1: LOGIN
+══════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 1</div>
+    <h2>登入系統</h2>
+    <p class="desc">開啟瀏覽器輸入系統 URL（預設 <code>http://localhost:8000</code>），首先看到登入畫面。</p>
+  </div>
+  <div class="chapter-body">
+    <div class="section">
+      <div class="two-col" style="margin-top:8px;">
+        <div class="col-box">
+          <h4>🔐 方式一：帳號密碼</h4>
+          <ol style="font-size:13px; padding-left:18px; margin-top:8px;">
+            <li>輸入「帳號」：<code>admin</code></li>
+            <li>輸入「密碼」：<code>admin</code></li>
+            <li>點擊 <strong>登入</strong></li>
+          </ol>
+        </div>
+        <div class="col-box">
+          <h4>🪙 方式二：JWT Token</h4>
+          <ol style="font-size:13px; padding-left:18px; margin-top:8px;">
+            <li>將已取得的 Bearer Token 貼入 Token 欄位</li>
+            <li>點擊 <strong>以 Token 登入</strong></li>
+          </ol>
+        </div>
+      </div>
+
+      <div class="callout tip">
+        <div class="callout-title">✅ 內建測試帳號</div>
+        系統啟動自動建立：<code>admin</code>（密碼 <code>admin</code>）與 <code>gill</code>（密碼 <code>gill</code>），皆為超級管理員（IT Admin + Expert PE + General User 三合一）。
+      </div>
+
+      <div class="callout mobile">
+        <div class="callout-title">📱 Mobile 登入提示</div>
+        手機版登入頁面與桌面版相同。登入後系統自動偵測螢幕寬度，切換為 Mobile 全螢幕模式。
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════
+     CH2: MAIN UI
+══════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 2</div>
+    <h2>主介面導覽</h2>
+    <p class="desc">登入後進入主工作介面。v10 在桌面版維持三欄佈局，Mobile 版自動切換為全螢幕單視圖。</p>
+  </div>
+  <div class="chapter-body">
+    <div class="section">
+      <h3>Desktop 版（寬度 &gt; 768px）</h3>
+      <p>桌面版維持經典三欄設計：<strong>左側深藍導覽列</strong> + <strong>30% 對話區（Chat）</strong> + <strong>70% 工作區（Workspace）</strong>。</p>
+
+      <h3 style="margin-top:24px;">左側導覽列功能</h3>
+      <table>
+        <thead><tr><th>圖示</th><th>功能</th><th>說明</th><th>所需角色</th></tr></thead>
+        <tbody>
+          <tr><td>🔬</td><td>診斷站</td><td>事件觸發 + AI 全鏈路診斷（主要操作介面）</td><td>所有角色</td></tr>
+          <tr><td>🗄️</td><td>Data Subject</td><td>管理資料來源 API</td><td>IT Admin / Expert PE</td></tr>
+          <tr><td>⚡</td><td>Event Builder</td><td>定義事件型別與屬性 Schema</td><td>IT Admin / Expert PE</td></tr>
+          <tr><td>🔧</td><td>MCP Builder</td><td>建立 AI 驅動的資料查詢腳本</td><td>IT Admin / Expert PE</td></tr>
+          <tr><td>🤖</td><td>Skill Builder</td><td>組合 MCP + 診斷邏輯，建立診斷技能</td><td>IT Admin / Expert PE</td></tr>
+          <tr><td>⚙️</td><td>系統設定</td><td>管理 AI Prompt 系統參數</td><td>IT Admin</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h3>Mobile 版（寬度 ≤ 768px）</h3>
+      <p>在手機上，左側導覽列自動隱藏，改由<strong>頂部切換列（Toggle Bar）</strong>在 Chat 與 Workspace 之間切換：</p>
+
+      <div class="mobile-layout-demo">
+        <div class="mobile-frame">
+          <div class="mobile-frame-header">📱 Chat 視圖（當前）</div>
+          <div class="mobile-toggle-bar">
+            <div class="mobile-toggle-btn active">💬 對話</div>
+            <div class="mobile-sep"></div>
+            <div class="mobile-toggle-btn">📊 報告</div>
+          </div>
+          <div class="mobile-content">
+            💬 Copilot 對話<br>
+            ⚡ 模擬觸發按鈕<br>
+            🎯 事件警告卡片<br>
+            ⏳ 診斷進度訊息
+          </div>
+        </div>
+        <div class="mobile-frame">
+          <div class="mobile-frame-header">📊 Workspace 視圖</div>
+          <div class="mobile-toggle-bar">
+            <div class="mobile-toggle-btn">💬 對話</div>
+            <div class="mobile-sep"></div>
+            <div class="mobile-toggle-btn active">📊 報告</div>
+          </div>
+          <div class="mobile-content">
+            📑 多 Tab 診斷報告<br>
+            📊 Plotly 趨勢圖表<br>
+            📋 資料表格（可橫滑）<br>
+            💡 AI 建議行動
+          </div>
+        </div>
+      </div>
+
+      <div class="callout mobile">
+        <div class="callout-title">📱 Mobile 切換方式（三種）</div>
+        <ol style="margin: 8px 0 0 0;">
+          <li><strong>點擊頂部切換列</strong>：點「💬 對話」或「📊 報告」按鈕</li>
+          <li><strong>手勢滑動</strong>：在 Chat 視圖向左滑 → Workspace；在 Workspace 向右滑 → Chat</li>
+          <li><strong>AI 自動跳轉</strong>：診斷完成建立新 Tab 時，自動切換至 Workspace</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════
+     CH3: DIAGNOSIS
+══════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 3</div>
+    <h2>事件診斷站 — 完整操作流程</h2>
+    <p class="desc">以 SPC OOC 蝕刻製程異常為範例，示範完整的事件觸發 → AI 診斷 → Multi-Tab 結果解讀流程。</p>
+  </div>
+  <div class="chapter-body">
+
+    <div class="section">
+      <h3>Step 1：點擊模擬觸發事件</h3>
+      <p>在診斷站左側聊天區，點擊 <strong>⚡ 模擬觸發：TETCH01 PM2 發生 SPC OOC</strong> 按鈕，系統在聊天區插入一張紅色事件警告卡片。</p>
+
+      <p>事件卡片包含以下關鍵資訊：</p>
+      <table>
+        <thead><tr><th>欄位</th><th>值（SPC OOC 範例）</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td><code>equipment_id</code></td><td>TETCH01</td><td>蝕刻機台 ID</td></tr>
+          <tr><td><code>chamber_id</code></td><td>PM2</td><td>Process Module 腔體</td></tr>
+          <tr><td><code>spc_chart_id</code></td><td>CD_MEAN</td><td>SPC 管制圖名稱</td></tr>
+          <tr><td><code>measurement_value</code></td><td>102.5 nm</td><td>量測值，超過 UCL (100.0)</td></tr>
+          <tr><td><code>ucl / lcl</code></td><td>100.0 / 90.0</td><td>管制上下限（nm）</td></tr>
+          <tr><td><code>lot_id</code></td><td>LOT-20241201-001</td><td>批次 ID</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h3>Step 2：啟動診斷分析（SSE 串流）</h3>
+      <p>確認事件內容後，點擊事件卡片底部的 <strong>🔍 啟動診斷分析</strong> 按鈕。</p>
+
+      <div class="sse-timeline">
+        <div class="sse-event">
+          <div class="sse-event-type">start</div>
+          <div class="sse-event-desc">診斷開始，右側 Multi-Tab 工作區建立新診斷 Tab，顯示事件 Header</div>
+          <div class="sse-event-payload">{"type":"start","skill_count":3,"event_type":"SPC_OOC_Etch_CD"}</div>
+        </div>
+        <div class="sse-event">
+          <div class="sse-event-type">skill_start × 3</div>
+          <div class="sse-event-desc">各 Skill 開始執行，左側聊天區顯示「⏳ 正在執行 {Skill 名稱}...」</div>
+        </div>
+        <div class="sse-event">
+          <div class="sse-event-type">skill_done × 3（漸進推播）</div>
+          <div class="sse-event-desc">每個 Skill 完成立即在 Tab 內追加診斷卡片，不等待其他 Skill</div>
+          <div class="sse-event-payload">{"type":"skill_done","index":0,"status":"ABNORMAL","diagnosis":"...","recommendation":"..."}</div>
+        </div>
+        <div class="sse-event">
+          <div class="sse-event-type">done</div>
+          <div class="sse-event-desc">全部完成 — Tab 底部顯示診斷摘要列（正常/異常/錯誤計數）</div>
+          <div class="sse-event-payload">{"type":"done","total":3}</div>
+        </div>
+      </div>
+
+      <div class="callout mobile">
+        <div class="callout-title">📱 Mobile 自動跳轉</div>
+        點擊「啟動診斷分析」後，Mobile 版會保持在 Chat 視圖顯示進度訊息。當首個 Skill 完成、工作區建立 Tab 時，系統<strong>自動切換至 📊 報告視圖</strong>，讓您立即看到診斷結果。
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Step 3：解讀 Multi-Tab 診斷報告</h3>
+      <p>v9.1 起，右側報告面板改為 <strong>Multi-Tab 工作區</strong>，每次診斷建立一個新 Tab：</p>
+
+      <div class="tab-bar-demo">
+        <div class="tab-bar">
+          <div class="tab-item active">
+            <span>📊 SPC OOC #1</span>
+            <span class="tab-close">×</span>
+          </div>
+          <div class="tab-item">
+            <span>📊 SPC OOC #2</span>
+            <span class="tab-close">×</span>
+          </div>
+        </div>
+        <div class="tab-content-demo">
+          點擊 Tab 名稱切換不同診斷；點擊 <strong>×</strong> 關閉 Tab
+        </div>
+      </div>
+
+      <p>每張診斷卡片的結構：</p>
+      <table>
+        <thead><tr><th>區塊</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td><span class="badge badge-red">ABNORMAL</span> 狀態</td><td>NORMAL（正常）/ ABNORMAL（異常）/ ERROR（執行錯誤）</td></tr>
+          <tr><td><strong>Evidence</strong></td><td>MCP 腳本查詢回傳的原始資料（關鍵指標值、資料表）</td></tr>
+          <tr><td><strong>📊 數據圖表佐證</strong></td><td>Plotly Trend Chart（SPC）或其他視覺化圖表，可 hover 查看精確數值</td></tr>
+          <tr><td><strong>Diagnosis</strong></td><td>Claude LLM 根據 diagnostic_prompt 生成的診斷結論</td></tr>
+          <tr><td><strong>💡 建議行動</strong></td><td>PE 工程師預設的標準處置流程</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h3>Step 4：診斷摘要列（Summary Bar）</h3>
+      <p>所有 Skill 完成後，Tab 底部顯示整體診斷結果統計：</p>
+      <div class="callout info">
+        <div class="callout-title">ℹ️ SPC Trend Chart 操作提示</div>
+        Plotly 圖表支援互動：<strong>Hover（桌面）/ 長按（手機）</strong>顯示精確數值；可縮放、拖曳查看特定時段；圖表右上角有下載按鈕（PNG）。
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════
+     CH4: MCP BUILDER
+══════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 4</div>
+    <h2>MCP Builder — 建立資料查詢腳本</h2>
+    <p class="desc">MCP 定義「如何從資料來源取得製程資料」。以「SPC 管制圖查詢 MCP」為範例示範四個步驟。</p>
+  </div>
+  <div class="chapter-body">
+
+    <div class="section">
+      <h3>Step 1 — 選定資料源 &amp; 撈取樣本</h3>
+      <div class="step-row">
+        <div class="step-number">1</div>
+        <div class="step-content">
+          <h4>填入 MCP 基本資訊並選定 DataSubject</h4>
+          <p>
+            <strong>MCP 名稱：</strong><code>Query SPC data</code>（英文/底線，唯一識別符）<br>
+            <strong>DataSubject：</strong>下拉選單選擇 <code>SPC_Chart_Data</code><br><br>
+            選定後系統顯示 <strong>Output Schema 欄位參考</strong>（datetime, value, UCL, LCL 等）。
+            填入測試參數 <code>chart_name=CD</code>，點擊 <strong>📥 撈取樣本資料</strong>。
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Step 2–4 — 加工意圖、LLM 腳本生成、試跑</h3>
+      <div class="step-row">
+        <div class="step-number">2</div>
+        <div class="step-content">
+          <h4>填入加工意圖（自然語言）</h4>
+          <p><em>「以 table 的方式回傳，用 Trend chart 呈現，x 軸是 datetime，y 軸是 UCL/LCL 用 orange 顏色，Value 用綠色，超過 UCL/LCL 用紅色點」</em></p>
+        </div>
+      </div>
+
+      <div class="step-row">
+        <div class="step-number">3</div>
+        <div class="step-content">
+          <h4>點擊「⚡ 執行試跑」— Claude 生成腳本 + 沙箱執行</h4>
+          <p>系統呼叫 Claude 根據意圖和 Output Schema 生成 Python 腳本，在 <strong>RestrictedPython 沙箱</strong>執行並驗證輸出格式。</p>
+          <p>成功後顯示：<span class="badge badge-green">已儲存（快照）</span></p>
+        </div>
+      </div>
+
+      <div class="step-row">
+        <div class="step-number">4</div>
+        <div class="step-content">
+          <h4>確認結果，點擊「更新/建立」</h4>
+          <p>確認結果預覽（圖表類型、資料欄位）後點擊儲存，MCP 定義完成。</p>
+        </div>
+      </div>
+
+      <div class="callout warn">
+        <div class="callout-title">⚠️ 沙箱安全限制</div>
+        禁止：<code>import os</code>、<code>import requests</code>、檔案讀寫。允許：<code>json</code>、<code>re</code>、<code>datetime</code>、<code>math</code>、基本資料結構。
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════
+     CH5: SKILL BUILDER
+══════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 5</div>
+    <h2>Skill Builder — 建立診斷技能</h2>
+    <p class="desc">Skill 將 MCP（資料查詢）與診斷邏輯結合，以「SPC 連續異常檢查」技能為範例。</p>
+  </div>
+  <div class="chapter-body">
+
+    <div class="section">
+      <h3>Step 1 — 填入基本資訊</h3>
+      <div class="step-row">
+        <div class="step-number">1</div>
+        <div class="step-content">
+          <h4>Skill 識別資訊</h4>
+          <p>
+            <strong>Skill 名稱：</strong><code>檢查SPC 是否連續異常</code><br>
+            <strong>綁定 MCP：</strong><code>Query SPC data</code><br>
+            <strong>綁定 Event Type：</strong><code>SPC_OOC_Etch_CD</code>
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Step 2 — 設定 Param Mappings（AI Auto-Map）</h3>
+      <div class="step-row">
+        <div class="step-number">2</div>
+        <div class="step-content">
+          <h4>設定事件屬性 → MCP 輸入參數對應</h4>
+          <p>點擊 <strong>🤖 AI Auto-Map</strong>，Claude 語意分析後自動填入 param_mappings 並標示信心度（HIGH/MEDIUM/LOW）。</p>
+          <p>範例結果：<code>spc_chart_id</code>（事件）→ <code>chart_name</code>（MCP）— HIGH 信心</p>
+          <p>檢視 LOW 信心度的項目並手動確認或修正。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Step 3 — 診斷邏輯 + Validate</h3>
+      <div class="step-row">
+        <div class="step-number">3</div>
+        <div class="step-content">
+          <h4>填入診斷邏輯</h4>
+          <p>點擊 <strong>💡 AI 建議邏輯</strong>，Claude 生成 3–5 條業界標準診斷邏輯建議，可直接點選套用。</p>
+          <p>填寫完成後點擊 <strong>✅ Validate Logic</strong>，確認 Prompt 中引用的欄位均存在於 MCP output_schema。</p>
+        </div>
+      </div>
+
+      <div class="step-row">
+        <div class="step-number">4</div>
+        <div class="step-content">
+          <h4>儲存 Skill</h4>
+          <p>點擊 <strong>建立 Skill</strong>（或更新）。儲存後 Skill 自動綁定至所選 Event Type，下次事件觸發時自動執行。</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════
+     CH6: SETTINGS
+══════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 6</div>
+    <h2>系統設定 — AI Prompt 管理</h2>
+    <p class="desc">Settings 模組供 IT Admin 管理控制 AI 行為的核心 System Prompt 參數。</p>
+  </div>
+  <div class="chapter-body">
+    <div class="section">
+      <h3>三個核心系統參數</h3>
+      <table>
+        <thead><tr><th>參數 Key</th><th>作用</th><th>影響功能</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>PROMPT_MCP_GENERATE</code></td>
+            <td>指導 Claude 根據 Schema 和加工意圖生成安全 Python 腳本</td>
+            <td>MCP Builder → 執行試跑的 LLM 腳本生成</td>
+          </tr>
+          <tr>
+            <td><code>PROMPT_MCP_TRY_RUN</code></td>
+            <td>指導 Claude 生成測試輸入並驗證腳本結果</td>
+            <td>MCP Builder → Try Run 試跑驗證</td>
+          </tr>
+          <tr>
+            <td><code>PROMPT_SKILL_DIAGNOSIS</code></td>
+            <td>指導 Claude 根據 MCP 輸出生成結構化診斷報告</td>
+            <td>診斷執行 → 每個 Skill 的 AI 診斷報告</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout warn">
+        <div class="callout-title">⚠️ Prompt 修改影響範圍</div>
+        修改後所有後續 AI 操作都使用新版本 Prompt，建議先在測試環境確認效果。此頁面僅 <strong>IT Admin</strong> 可存取。
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════
+     CH7: COPILOT (V9 NEW)
+══════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 7</div>
+    <h2>Copilot 對話助手 <span class="new-badge v9-badge">v9 新功能</span></h2>
+    <p class="desc">v9 升級對話助手，支援 Slash Command 快捷指令和自然語言觸發診斷。工程師無需按多個按鈕，直接用對話方式操作系統。</p>
+  </div>
+  <div class="chapter-body">
+
+    <div class="section">
+      <h3>使用 Slash Command（斜槓指令）</h3>
+      <p>在對話輸入框輸入 <code>/</code>（半形斜線），系統自動彈出指令選單：</p>
+
+      <div class="slash-demo">
+        <div class="slash-input-row">
+          <code>/</code>
+          <span style="font-size:13px; color:#94a3b8;">— 選單自動出現</span>
+        </div>
+        <div class="slash-menu-item active">
+          <span class="slash-key">/simulate</span>
+          <span class="slash-desc">模擬觸發 SPC OOC 事件，帶入預設參數</span>
+        </div>
+        <div class="slash-menu-item">
+          <span class="slash-key">/diagnose</span>
+          <span class="slash-desc">對當前事件立即啟動 AI 診斷分析</span>
+        </div>
+        <div class="slash-menu-item">
+          <span class="slash-key">/clear</span>
+          <span class="slash-desc">清除聊天紀錄，重設對話狀態</span>
+        </div>
+        <div class="slash-menu-item">
+          <span class="slash-key">/help</span>
+          <span class="slash-desc">顯示所有可用指令說明</span>
+        </div>
+      </div>
+
+      <div class="step-row">
+        <div class="step-number" style="font-size:14px;">操作</div>
+        <div class="step-content">
+          <h4>使用 Slash Command 完成快速診斷</h4>
+          <ol>
+            <li>在對話框輸入 <code>/simulate</code> → 按 Enter（或點擊選單項目）</li>
+            <li>聊天區自動出現 SPC OOC 事件卡片</li>
+            <li>輸入 <code>/diagnose</code> → 系統立即啟動診斷（等同點擊「啟動診斷分析」按鈕）</li>
+          </ol>
+        </div>
+      </div>
+
+      <div class="callout mobile">
+        <div class="callout-title">📱 Mobile 使用 Slash Command</div>
+        手機鍵盤彈出時，Slash 選單自動顯示在輸入框上方，不會被鍵盤遮蓋。點擊指令項目即可執行，無需完整輸入文字。
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>自然語言觸發診斷（LLM Slot-Filling）</h3>
+      <p>除了 Slash Command，工程師可直接輸入自然語言需求，Copilot 的 AI 引擎自動解析並填入事件參數：</p>
+
+      <table>
+        <thead><tr><th>輸入示例</th><th>AI 解析結果</th><th>系統行為</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><em>「幫我診斷 TETCH01 PM2 的 SPC 異常」</em></td>
+            <td>intent=diagnose, is_ready=true<br>equipment_id=TETCH01, chamber_id=PM2</td>
+            <td>自動建立 Tab 並啟動診斷</td>
+          </tr>
+          <tr>
+            <td><em>「查一下最近的蝕刻異常」</em></td>
+            <td>intent=diagnose, is_ready=false</td>
+            <td>Copilot 回覆：「請問是哪台設備？」</td>
+          </tr>
+          <tr>
+            <td><em>「清除對話」</em></td>
+            <td>intent=clear</td>
+            <td>清除聊天紀錄</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout tip">
+        <div class="callout-title">✅ 最佳實踐建議</div>
+        <ul style="margin: 6px 0 0 0;">
+          <li>輸入包含具體設備 ID（如 <code>TETCH01 PM2</code>）可讓 AI 直接執行，無需確認步驟</li>
+          <li>不確定設備名稱時，可先用 <code>/simulate</code> 使用預設事件觸發診斷</li>
+          <li>多次診斷的結果會保留在不同 Tab，可隨時切換對比</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Copilot 對話範例：完整互動流程</h3>
+      <div class="sse-timeline">
+        <div class="sse-event">
+          <div class="sse-event-type">使用者輸入</div>
+          <div class="sse-event-desc">「我想查 TETCH01 PM2 最近的 SPC 異常情況」</div>
+        </div>
+        <div class="sse-event">
+          <div class="sse-event-type">Copilot AI 分析（後台）</div>
+          <div class="sse-event-desc">Claude 解析意圖：intent=diagnose, equipment_id=TETCH01, chamber_id=PM2, is_ready=true</div>
+        </div>
+        <div class="sse-event">
+          <div class="sse-event-type">聊天區顯示</div>
+          <div class="sse-event-desc">「✅ 已識別設備 TETCH01 PM2，正在建立診斷任務 ...」</div>
+        </div>
+        <div class="sse-event">
+          <div class="sse-event-type">系統自動執行</div>
+          <div class="sse-event-desc">建立「TETCH01 PM2 SPC OOC」Tab → 啟動 SSE 診斷串流 → Mobile 自動跳轉至報告視圖</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════
+     CH8: MULTI-TAB WORKSPACE (V9.1 NEW)
+══════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 8</div>
+    <h2>Multi-Tab 工作區操作 <span class="new-badge v9-badge">v9.1 新功能</span></h2>
+    <p class="desc">v9.1 將右側報告面板升級為 Multi-Tab 工作區。每次觸發診斷建立一個新 Tab，多份報告可同時存在並切換對比。</p>
+  </div>
+  <div class="chapter-body">
+
+    <div class="section">
+      <h3>Tab 工作區基本操作</h3>
+      <div class="tab-bar-demo">
+        <div class="tab-bar">
+          <div class="tab-item active">
+            <span>📊 TETCH01 PM2 #1</span>
+            <span class="tab-close">×</span>
+          </div>
+          <div class="tab-item">
+            <span>📊 TETCH02 PM3 #2</span>
+            <span class="tab-close">×</span>
+          </div>
+          <div class="tab-item">
+            <span>📊 SPC OOC #3</span>
+            <span class="tab-close">×</span>
+          </div>
+        </div>
+        <div class="tab-content-demo">
+          目前顯示「TETCH01 PM2 #1」的診斷結果 — 點擊其他 Tab 可切換
+        </div>
+      </div>
+
+      <table>
+        <thead><tr><th>操作</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>切換 Tab</strong></td>
+            <td>點擊 Tab 標題切換至對應診斷報告</td>
+          </tr>
+          <tr>
+            <td><strong>關閉 Tab</strong></td>
+            <td>點擊 Tab 右側 <strong>×</strong> 按鈕關閉（診斷結果不可復原）</td>
+          </tr>
+          <tr>
+            <td><strong>新增 Tab</strong></td>
+            <td>每次點擊「啟動診斷分析」、Copilot 成功執行或 <code>/diagnose</code> 時自動新增</td>
+          </tr>
+          <tr>
+            <td><strong>Tab 命名</strong></td>
+            <td>Copilot 觸發時使用 AI 生成的 <code>tab_title</code>；手動觸發時預設「SPC OOC #N」</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h3>診斷報告卡片詳細說明</h3>
+      <p>每個 Skill 診斷完成後，Tab 內追加一張卡片，包含以下區塊：</p>
+
+      <div class="step-row">
+        <div class="step-number" style="font-size:18px;">①</div>
+        <div class="step-content">
+          <h4>狀態標示 + Skill 名稱</h4>
+          <p>
+            <span class="badge badge-green">NORMAL</span> — 此維度診斷正常，無異常發現<br>
+            <span class="badge badge-red">ABNORMAL</span> — 偵測到異常，需關注<br>
+            <span class="badge" style="background:#ffedd5;color:#c2410c;">ERROR</span> — MCP 執行失敗，資料無法取得
+          </p>
+        </div>
+      </div>
+
+      <div class="step-row">
+        <div class="step-number" style="font-size:18px;">②</div>
+        <div class="step-content">
+          <h4>📊 數據圖表佐證（SPC Skill）</h4>
+          <p>SPC 連續異常分析 Skill 的圖表包含 5 個 trace：</p>
+          <ul>
+            <li>橘色虛線：UCL / LCL 管制界限</li>
+            <li>綠色連線：量測值走勢</li>
+            <li>綠色圓點：正常量測點</li>
+            <li>紅色大圓點：OOC 超限點（突出顯示）</li>
+          </ul>
+          <p>Hover（桌面）/ 長按（手機）可查看精確數值。</p>
+        </div>
+      </div>
+
+      <div class="step-row">
+        <div class="step-number" style="font-size:18px;">③</div>
+        <div class="step-content">
+          <h4>📋 資料表格（Evidence）</h4>
+          <p>MCP 查詢結果的原始資料表格，最多顯示 15 筆。<br>
+          手機版支援<strong>水平捲動</strong>，欄位不被截斷。</p>
+        </div>
+      </div>
+
+      <div class="step-row">
+        <div class="step-number" style="font-size:18px;">④</div>
+        <div class="step-content">
+          <h4>🤖 AI 診斷結論 + 💡 建議行動</h4>
+          <p>Claude 根據 diagnostic_prompt 分析資料後生成的診斷結論，以及 PE 工程師事先定義的標準處置流程。</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════
+     CH9: MOBILE USAGE GUIDE (V10 NEW)
+══════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 9</div>
+    <h2>Mobile 使用指南 <span class="new-badge v10-badge">v10 新功能</span></h2>
+    <p class="desc">v10 完整支援 768px 以下行動裝置。本章說明 Mobile 模式的所有操作方式。</p>
+  </div>
+  <div class="chapter-body">
+
+    <div class="section">
+      <h3>Mobile 模式介面說明</h3>
+      <p>在手機或平板（螢幕寬度 ≤ 768px）開啟系統時，介面自動切換為 Mobile 模式：</p>
+      <ul>
+        <li>左側導覽列自動隱藏（縮短畫面空間）</li>
+        <li>頂部出現「<strong>💬 對話 ｜ 📊 報告</strong>」切換列</li>
+        <li>內容區域佔滿全螢幕（100vw × 100vh）</li>
+        <li>一次只顯示 Chat 或 Workspace 其中之一</li>
+      </ul>
+    </div>
+
+    <div class="section">
+      <h3>三種視圖切換方式</h3>
+
+      <div class="step-row">
+        <div class="step-number" style="font-size:16px;">①</div>
+        <div class="step-content">
+          <h4>點擊頂部切換列（最直覺）</h4>
+          <p>點擊 <strong>💬 對話</strong> 切換至聊天視圖；點擊 <strong>📊 報告</strong> 切換至診斷報告視圖。<br>
+          被點選的按鈕背景變為淺藍色，表示當前所在視圖。</p>
+        </div>
+      </div>
+
+      <div class="step-row">
+        <div class="step-number" style="font-size:16px;">②</div>
+        <div class="step-content">
+          <h4>手勢滑動（更流暢）</h4>
+          <div class="gesture-diagram" style="margin-top:10px;">
+            <div class="gesture-row">
+              <div style="flex:1;font-size:13px;color:#1d4ed8;font-weight:600;">💬 Chat 視圖</div>
+              <div class="gesture-arrow">←</div>
+              <div style="font-size:12px;color:#64748b;">向左滑動</div>
+              <div class="gesture-arrow">→</div>
+              <div style="flex:1;font-size:13px;color:#7c3aed;font-weight:600;text-align:right;">📊 Workspace</div>
+            </div>
+            <div class="gesture-row" style="background:#f8fafc;">
+              <div style="flex:1;font-size:13px;color:#7c3aed;font-weight:600;">📊 Workspace</div>
+              <div class="gesture-arrow">←</div>
+              <div style="font-size:12px;color:#64748b;">向右滑動</div>
+              <div class="gesture-arrow">→</div>
+              <div style="flex:1;font-size:13px;color:#1d4ed8;font-weight:600;text-align:right;">💬 Chat 視圖</div>
+            </div>
+          </div>
+          <p style="margin-top:8px; font-size:13px; color:#64748b;">最小滑動距離 50px，且橫向偏移量須大於縱向偏移量 × 1.5，避免與頁面垂直捲動衝突。</p>
+        </div>
+      </div>
+
+      <div class="step-row">
+        <div class="step-number" style="font-size:16px;">③</div>
+        <div class="step-content">
+          <h4>AI 自動跳轉（診斷完成時）</h4>
+          <p>當 AI 完成首個 Skill 並在 Workspace 建立新 Tab 時，系統<strong>自動切換至 📊 報告視圖</strong>。<br>
+          工程師不需手動切換即可看到最新的診斷結果。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Mobile 完整操作流程（Step by Step）</h3>
+
+      <div class="step-row">
+        <div class="step-number">1</div>
+        <div class="step-content">
+          <h4>登入並進入診斷站</h4>
+          <p>開啟瀏覽器輸入系統網址，登入後自動進入 Mobile 模式，顯示「💬 對話」視圖。</p>
+        </div>
+      </div>
+
+      <div class="step-row">
+        <div class="step-number">2</div>
+        <div class="step-content">
+          <h4>觸發事件（三種方式）</h4>
+          <ul>
+            <li><strong>按鈕</strong>：捲動至「⚡ 模擬觸發」按鈕並點擊</li>
+            <li><strong>Slash Command</strong>：在輸入框輸入 <code>/simulate</code></li>
+            <li><strong>自然語言</strong>：輸入「查 TETCH01 PM2 的 SPC 異常」</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="step-row">
+        <div class="step-number">3</div>
+        <div class="step-content">
+          <h4>啟動診斷</h4>
+          <ul>
+            <li>點擊事件卡片底部「🔍 啟動診斷分析」</li>
+            <li>或輸入 <code>/diagnose</code></li>
+            <li>聊天區顯示「⏳ 正在執行...」進度訊息</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="step-row">
+        <div class="step-number">4</div>
+        <div class="step-content">
+          <h4>AI 自動跳轉至報告</h4>
+          <p>診斷完成建立 Tab 後，系統自動切換至 📊 報告視圖，顯示 Plotly 圖表和診斷卡片。</p>
+        </div>
+      </div>
+
+      <div class="step-row">
+        <div class="step-number">5</div>
+        <div class="step-content">
+          <h4>查看圖表 + 向右滑動返回對話</h4>
+          <p>查看 Plotly 圖表（長按顯示數值，橫向捲動資料表），需要繼續下指令時向右滑動返回 Chat 視圖。</p>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="section">
+      <h3>Mobile 操作注意事項</h3>
+      <table>
+        <thead><tr><th>項目</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>Slash 選單顯示</strong></td>
+            <td>鍵盤彈出時選單自動上移，不會被鍵盤遮擋</td>
+          </tr>
+          <tr>
+            <td><strong>資料表格橫向捲動</strong></td>
+            <td>用手指橫向滑動表格（不觸發視圖切換，因為系統能辨識縱/橫比例）</td>
+          </tr>
+          <tr>
+            <td><strong>Plotly 圖表互動</strong></td>
+            <td>長按圖表上的資料點顯示 Tooltip 數值；雙指縮放查看特定時段</td>
+          </tr>
+          <tr>
+            <td><strong>輸入框字體</strong></td>
+            <td>系統已設定 16px 字體，iOS Safari 不會自動縮放頁面</td>
+          </tr>
+          <tr>
+            <td><strong>橫向 / 直向皆可用</strong></td>
+            <td>橫置手機時工作區空間更大，圖表顯示更完整</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout tip">
+        <div class="callout-title">✅ 建議使用場景</div>
+        <ul style="margin: 6px 0 0 0;">
+          <li><strong>現場巡檢</strong>：在廠房直接用手機查看即時診斷結果，無需回辦公室</li>
+          <li><strong>輪班交接</strong>：上班前用手機確認前一班的製程異常診斷報告</li>
+          <li><strong>緊急處理</strong>：接到警報後立即用 Copilot 語音轉文字輸入，快速啟動診斷</li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════
+     QUICK REFERENCE
+══════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Appendix</div>
+    <h2>快速參考卡</h2>
+    <p class="desc">常用操作一覽，適合列印或設置為書籤。</p>
+  </div>
+  <div class="chapter-body">
+    <div class="section">
+      <h3>Slash Command 速查</h3>
+      <table>
+        <thead><tr><th>指令</th><th>功能</th><th>等同操作</th></tr></thead>
+        <tbody>
+          <tr><td><code>/simulate</code></td><td>模擬觸發 SPC OOC 事件</td><td>點擊「⚡ 模擬觸發」按鈕</td></tr>
+          <tr><td><code>/diagnose</code></td><td>啟動 AI 診斷（需先有事件卡片）</td><td>點擊「🔍 啟動診斷分析」按鈕</td></tr>
+          <tr><td><code>/clear</code></td><td>清除聊天紀錄</td><td>重新整理頁面（不影響 Tab）</td></tr>
+          <tr><td><code>/help</code></td><td>顯示所有指令說明</td><td>—</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h3>Mobile 手勢速查</h3>
+      <table>
+        <thead><tr><th>手勢</th><th>效果</th><th>條件</th></tr></thead>
+        <tbody>
+          <tr><td>向左滑動 ←</td><td>Chat → Workspace</td><td>在 Chat 視圖</td></tr>
+          <tr><td>向右滑動 →</td><td>Workspace → Chat</td><td>在 Workspace 視圖</td></tr>
+          <tr><td>長按圖表</td><td>顯示數值 Tooltip</td><td>Plotly 圖表上</td></tr>
+          <tr><td>橫向滑動表格</td><td>查看所有欄位</td><td>資料表格上</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h3>狀態標示說明</h3>
+      <table>
+        <thead><tr><th>標示</th><th>意義</th><th>建議動作</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="badge badge-green">NORMAL</span></td>
+            <td>此診斷維度正常，無異常發現</td>
+            <td>無需特別處理，繼續監控</td>
+          </tr>
+          <tr>
+            <td><span class="badge badge-red">ABNORMAL</span></td>
+            <td>偵測到異常，需關注</td>
+            <td>閱讀 AI 診斷結論 + 執行建議行動</td>
+          </tr>
+          <tr>
+            <td><span class="badge badge-orange">ERROR</span></td>
+            <td>MCP 執行失敗，無法取得資料</td>
+            <td>確認 DataSubject API 連線狀態，通知 IT Admin</td>
+          </tr>
+          <tr>
+            <td><span class="badge badge-blue">RUNNING</span></td>
+            <td>診斷執行中（SSE 串流）</td>
+            <td>等待結果，可繼續在 Chat 輸入其他指令</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

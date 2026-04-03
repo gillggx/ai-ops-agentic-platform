@@ -1,0 +1,1418 @@
+"""Agent Orchestrator — Agentic OS v14.0
+
+Five-stage transparent loop with Anthropic tool_use:
+
+  Stage 1: Context Load      — Soul + UserPref + RAG + Prompt Caching
+  Stage 2: Intent & Planning — LLM outputs <plan> tag before any tools
+  Stage 3: Tool Execution    — Sandbox distillation + HITL safety gate
+  Stage 4: Reasoning         — LLM synthesises from distilled data
+  Stage 5: Memory Write      — Conflict-aware RAG persistence
+
+v14 New Features:
+  - stage_update SSE (1-5) for full transparency
+  - Sequential Planning: LLM must output <plan> before tool calls
+  - Programmatic Distillation: Pandas stats summary via DataDistillationService
+  - HITL: is_destructive tools pause and emit approval_required SSE
+  - Token Compaction: compact history when cumulative tokens > 60k
+  - Prompt Caching: stable blocks (Soul) get cache_control: ephemeral
+  - Memory Conflict Resolution: UPDATE instead of ADD on contradicting entries
+  - Workspace Sync: canvas_overrides injected as highest-priority context
+
+SSE events emitted:
+  stage_update     — Stage 1-5 transitions (status: running|complete)
+  context_load     — Stage 1 metadata (soul, rag, cache stats)
+  thinking         — LLM <thinking> blocks
+  llm_usage        — Per-iteration token usage (includes cache_read_tokens)
+  token_usage      — Cumulative session tokens (triggers compaction notice)
+  tool_start       — Before each tool execution
+  tool_done        — After each tool execution (+ render_card)
+  approval_required — HITL: destructive tool awaiting user approval
+  synthesis        — Final answer text
+  memory_write     — After conflict-aware memory persistence
+  error            — Any error or MAX_ITERATIONS hit
+  done             — Stream end
+"""
+
+from __future__ import annotations
+
+import asyncio
+import datetime
+import json
+import logging
+import re
+import uuid
+from datetime import timedelta, timezone
+from typing import Any, AsyncIterator, Dict, List, Optional
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import get_settings
+from app.utils.llm_client import get_llm_client
+from app.ontology.models.agent_session import AgentSession as AgentSessionModel
+from app.ontology.models.mcp import MCPDefinition as MCPDefinitionModel
+from app.ontology.models.skill import SkillDefinition as SkillDefinitionModel
+from app.services.agent_memory_service import AgentMemoryService
+from app.services.context_loader import ContextLoader
+from app.services.data_distillation_service import DataDistillationService
+from app.services.task_context_extractor import extract as extract_task_context
+from app.services.tool_dispatcher import TOOL_SCHEMAS, ToolDispatcher
+
+logger = logging.getLogger(__name__)
+
+MAX_ITERATIONS = 12
+_SESSION_TTL_HOURS = 24
+_SESSION_MAX_MESSAGES = 12
+_TOOL_RESULT_MAX_CHARS = 6000   # cap for history; live results use _LLM_RESULT_MAX_CHARS
+_LLM_RESULT_MAX_CHARS  = 8000   # cap applied to every tool_result before adding to messages
+_COMPACTION_TOKEN_THRESHOLD = 60_000  # v14: compact history when exceeded
+
+# v14: Tools that require human approval before execution
+_DESTRUCTIVE_TOOLS = frozenset({
+    "patch_skill_raw",   # modifies skill code directly
+    "draft_routine_check",  # creates scheduled automation
+    "draft_event_skill_link",  # links skill to event type (side-effects)
+})
+
+# v14: HITL approval registry — maps approval_token → asyncio.Event
+# Single-process (uvicorn) safe. For multi-process, use Redis.
+_pending_approvals: Dict[str, Optional[bool]] = {}  # token → True/False/None(pending)
+_approval_events: Dict[str, asyncio.Event] = {}
+
+
+def set_approval(token: str, approved: bool) -> bool:
+    """Called by the /agent/approve/{token} endpoint. Returns False if token unknown."""
+    if token not in _approval_events:
+        return False
+    _pending_approvals[token] = approved
+    _approval_events[token].set()
+    return True
+
+
+# ── Pre-flight Validation ──────────────────────────────────────────────────────
+
+async def _preflight_validate(
+    db: AsyncSession,
+    tool_name: str,
+    tool_input: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Pre-flight validation — intercept ambiguous/missing params before execution."""
+    if tool_name == "execute_mcp":
+        mcp_name = tool_input.get("mcp_name")
+        if not mcp_name:
+            # mcp_id is no longer accepted — reject immediately with clear guidance
+            return {
+                "status": "error", "code": "MISSING_MCP_NAME",
+                "message": (
+                    "⚠️ execute_mcp 必須提供 mcp_name。"
+                    "請從 <mcp_catalog> 中找到正確的 name 欄位填入，例如 'get_tool_trajectory'。"
+                    "禁止使用 mcp_id（整數 ID 已棄用）。"
+                ),
+            }
+        result = await db.execute(
+            select(MCPDefinitionModel).where(MCPDefinitionModel.name == mcp_name)
+        )
+        mcp = result.scalar_one_or_none()
+        if not mcp:
+            return {
+                "status": "error", "code": "MCP_NOT_FOUND",
+                "message": (
+                    f"⚠️ 找不到名為 '{mcp_name}' 的 MCP。"
+                    "請確認 <mcp_catalog> 中的 name 欄位是否正確。"
+                ),
+            }
+        # Custom MCP: only validate against its own input_schema (never inherit parent's)
+        mcp_type = getattr(mcp, "mcp_type", "custom") or "custom"
+        if mcp_type == "system":
+            schema_src = mcp
+        else:
+            schema_src = mcp if getattr(mcp, "input_schema", None) else None
+
+        if schema_src and schema_src.input_schema:
+            try:
+                schema = json.loads(schema_src.input_schema) if isinstance(schema_src.input_schema, str) else schema_src.input_schema
+                fields = schema.get("fields", [])
+                required = [f["name"] for f in fields if f.get("required")]
+                all_field_names = [f["name"] for f in fields]
+                provided = tool_input.get("params") or {}
+                missing = [k for k in required if k not in provided or not provided[k]]
+                if missing:
+                    return {
+                        "status": "error", "code": "MISSING_PARAMS",
+                        "message": (
+                            f"⛔ [STOP — 禁止再次呼叫 execute_mcp] MCP「{mcp.name}」缺少必填查詢參數：{missing}。"
+                            f"你必須立即停止工具呼叫，直接以文字訊息向用戶詢問這些參數的值，等待用戶回答後才能繼續。"
+                        ),
+                        "missing_params": missing,
+                        "required_params": required,
+                    }
+            except Exception:
+                pass
+
+    elif tool_name == "execute_skill":
+        skill_id = tool_input.get("skill_id")
+        if not skill_id:
+            return {
+                "status": "error", "code": "MISSING_SKILL_ID",
+                "message": "⚠️ execute_skill 缺少 skill_id。請先呼叫 list_skills 確認正確的 Skill ID 後再重試。",
+            }
+        result = await db.execute(select(SkillDefinitionModel).where(SkillDefinitionModel.id == skill_id))
+        skill = result.scalar_one_or_none()
+        if not skill:
+            return {
+                "status": "error", "code": "SKILL_NOT_FOUND",
+                "message": f"⚠️ Skill #{skill_id} 不存在。請呼叫 list_skills 取得有效的 Skill 列表後重試。",
+            }
+
+    return None
+
+
+# ── History Utilities ──────────────────────────────────────────────────────────
+
+def _sanitize_history(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Cap oversized tool_result content in loaded history."""
+    cleaned = []
+    for msg in messages:
+        if msg.get("role") == "user" and isinstance(msg.get("content"), list):
+            new_content = []
+            for item in msg["content"]:
+                if isinstance(item, dict) and item.get("type") == "tool_result":
+                    raw = item.get("content", "")
+                    if isinstance(raw, str) and len(raw) > _TOOL_RESULT_MAX_CHARS:
+                        try:
+                            parsed = json.loads(raw)
+                            for key in ("output_data", "ui_render_payload", "_raw_dataset"):
+                                parsed.pop(key, None)
+                            if "llm_readable_data" not in parsed:
+                                parsed["_truncated"] = f"[已截斷，原始 {len(raw)} 字元]"
+                            raw = json.dumps(parsed, ensure_ascii=False)[:_TOOL_RESULT_MAX_CHARS]
+                        except Exception:
+                            raw = raw[:_TOOL_RESULT_MAX_CHARS] + "…[截斷]"
+                        item = {**item, "content": raw}
+                new_content.append(item)
+            cleaned.append({**msg, "content": new_content})
+        else:
+            cleaned.append(msg)
+    return cleaned
+
+
+def _clean_history_boundary(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Remove orphaned tool_result messages from trimmed history front."""
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+        if msg.get("role") == "user":
+            content = msg.get("content", "")
+            is_tool_result = isinstance(content, list) and any(
+                isinstance(b, dict) and b.get("type") == "tool_result"
+                for b in content
+            )
+            if not is_tool_result:
+                break
+            i += 1
+            if i < len(messages) and messages[i].get("role") == "assistant":
+                i += 1
+        else:
+            i += 1
+    return messages[i:]
+
+
+def _compact_history(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """v14: Replace old messages with an <archive_summary> when token budget exceeded.
+
+    Keeps the last 4 messages (2 turns) intact; summarises the rest into a
+    single user message. No LLM call — fast keyword extraction for dev.
+    """
+    if len(messages) <= 4:
+        return messages
+
+    old_messages = messages[:-4]
+    recent_messages = messages[-4:]
+
+    # Build a plain-text archive from old messages
+    archive_lines: List[str] = []
+    for msg in old_messages:
+        role = msg.get("role", "?")
+        content = msg.get("content", "")
+        if isinstance(content, str) and content.strip():
+            archive_lines.append(f"[{role}] {content[:200]}")
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict):
+                    if block.get("type") == "text":
+                        archive_lines.append(f"[{role}] {block.get('text', '')[:200]}")
+                    elif block.get("type") == "tool_result":
+                        archive_lines.append(f"[tool_result] {str(block.get('content', ''))[:150]}")
+
+    archive_text = (
+        "<archive_summary>\n"
+        "以下為本 Session 早期對話摘要（已自動壓縮以節省 Token）：\n"
+        + "\n".join(archive_lines[:20])
+        + "\n</archive_summary>"
+    )
+
+    # IMPORTANT: clean recent_messages BEFORE prepending archive.
+    # If recent_messages[0] is user(tool_result), prepending archive would create
+    # two consecutive user messages. Anthropic merges them, making
+    # messages[0].content[1] an orphaned tool_result → 400 error.
+    cleaned_recent = _clean_history_boundary(recent_messages)
+    if not cleaned_recent:
+        return [{"role": "user", "content": archive_text}]
+
+    return [{"role": "user", "content": archive_text}] + cleaned_recent
+
+
+# ── Data Helpers ───────────────────────────────────────────────────────────────
+
+def _dataset_summary(dataset: List[Any]) -> Dict[str, Any]:
+    n = len(dataset)
+    stats_parts: List[str] = [f"總共 {n} 筆資料"]
+    if n > 0 and isinstance(dataset[0], dict):
+        columns = list(dataset[0].keys())
+        stats_parts.append(f"欄位: {', '.join(columns[:10])}")
+        for key, val in dataset[0].items():
+            if isinstance(val, (int, float)):
+                vals = [r.get(key) for r in dataset if isinstance(r.get(key), (int, float))]
+                if vals:
+                    avg = sum(vals) / len(vals)
+                    stats_parts.append(f"{key} 平均值 {avg:.3f}")
+                    break
+    return {"dataset_summary": "。".join(stats_parts) + "。"}
+
+
+def _trim_for_llm(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    """Strip large rendering payloads before sending to LLM."""
+    if tool_name == "execute_skill":
+        return {k: result[k] for k in ("skill_name", "llm_readable_data", "status") if k in result}
+    if tool_name == "execute_mcp":
+        od = result.get("output_data") or {}
+        dataset = od.get("dataset") or od.get("_raw_dataset") or []
+        trimmed: Dict[str, Any] = {k: result[k] for k in ("status", "mcp_id", "mcp_name", "llm_readable_data") if k in result}
+        trimmed.update(_dataset_summary(dataset) if dataset else {"dataset_summary": "(無資料)"})
+        # Provide schema_sample (5 rows) so Agent can understand columns for writing execute_jit code
+        if isinstance(dataset, list) and dataset:
+            trimmed["schema_sample"] = dataset[:5]
+            trimmed["schema_note"] = (
+                f"共 {len(dataset)} 筆資料，schema_sample 為前 5 筆。"
+                "如需統計/視覺化/回歸分析，優先呼叫 analyze_data(mcp_id=..., template='linear_regression'|'spc_chart'|'boxplot'|'stats_summary'|'correlation', params={value_col:...}) "
+                "（模板已處理 datetime 回歸與 Y 軸）；複雜自定義邏輯才改用 execute_jit。"
+            )
+        return trimmed
+    if tool_name in ("list_skills", "list_mcps", "list_system_mcps"):
+        _HEAVY_FIELDS = ("last_diagnosis_result", "diagnostic_prompt", "param_mappings",
+                         "processing_script", "api_config", "generated_code", "check_output_schema",
+                         "sample_output", "ui_render_config", "input_definition")
+        items = result.get("data") or result.get("items") or []
+        if not isinstance(items, list):
+            return result
+        trimmed_items = []
+        for item in items[:12]:
+            if isinstance(item, dict):
+                clean = {k: v for k, v in item.items() if k not in _HEAVY_FIELDS}
+                for field in ("processing_intent", "description"):
+                    if isinstance(clean.get(field), str) and len(clean[field]) > 300:
+                        clean[field] = clean[field][:300] + "…"
+                trimmed_items.append(clean)
+            else:
+                trimmed_items.append(item)
+        base = {k: v for k, v in result.items() if k not in ("data", "items")}
+        if "data" in result:
+            base["data"] = trimmed_items
+        else:
+            base["items"] = trimmed_items
+        if len(items) > 12:
+            base["_truncated"] = True
+        return base
+    if "data" in result and isinstance(result.get("data"), list) and len(result["data"]) > 8:
+        return {**result, "data": result["data"][:8], "_truncated": True}
+    return result
+
+
+# ── Content Block Helpers ──────────────────────────────────────────────────────
+
+def _extract_text(content: List[Any]) -> str:
+    parts = []
+    for block in content:
+        if hasattr(block, "type") and block.type == "text":
+            parts.append(block.text)
+        elif isinstance(block, dict) and block.get("type") == "text":
+            parts.append(block.get("text", ""))
+    return "\n".join(parts)
+
+
+def _extract_thinking(content: List[Any]) -> List[str]:
+    parts = []
+    for block in content:
+        if hasattr(block, "type") and block.type == "thinking":
+            parts.append(block.thinking)
+        elif isinstance(block, dict) and block.get("type") == "thinking":
+            parts.append(block.get("thinking", ""))
+    return parts
+
+
+def _extract_tool_calls(content: List[Any]) -> List[Any]:
+    return [
+        b for b in content
+        if (hasattr(b, "type") and b.type == "tool_use")
+        or (isinstance(b, dict) and b.get("type") == "tool_use")
+    ]
+
+
+def _content_to_list(content: List[Any]) -> List[Dict]:
+    result = []
+    for block in content:
+        if hasattr(block, "type"):
+            if block.type == "text":
+                result.append({"type": "text", "text": block.text})
+            elif block.type == "tool_use":
+                result.append({
+                    "type": "tool_use",
+                    "id": block.id,
+                    "name": block.name,
+                    "input": block.input,
+                })
+            elif block.type == "thinking":
+                result.append({"type": "thinking", "thinking": block.thinking})
+        elif isinstance(block, dict):
+            result.append(block)
+    return result
+
+
+def _result_summary(result: Dict[str, Any]) -> str:
+    if "error" in result:
+        return f"ERROR: {result['error']}"
+    if "llm_readable_data" in result:
+        lrd = result["llm_readable_data"]
+        if isinstance(lrd, dict):
+            status = lrd.get("status", "?")
+            msg = lrd.get("diagnosis_message", "")[:80]
+            return f"status={status} | {msg}"
+        if "output_data" in result and isinstance(result.get("output_data"), dict):
+            ds = result["output_data"].get("dataset")
+            count = len(ds) if isinstance(ds, list) else result.get("row_count", 0)
+            name = result.get("mcp_name") or f"MCP #{result.get('mcp_id', '?')}"
+            return f"{name} 回傳 {count} 筆資料"
+    if "memories" in result:
+        return f"{result['count']} 條記憶"
+    if "draft_id" in result:
+        return f"draft_id={result['draft_id']}"
+    if "data" in result and isinstance(result["data"], list):
+        return f"{len(result['data'])} 筆資料"
+    return json.dumps(result, ensure_ascii=False)[:100]
+
+
+def _build_render_card(
+    tool_name: str,
+    tool_input: Dict[str, Any],
+    result: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    if tool_name == "execute_skill" and isinstance(result, dict) and "ui_render_payload" in result:
+        lrd = result.get("llm_readable_data") or {}
+        urp = result.get("ui_render_payload") or {}
+        chart_data = urp.get("chart_data")
+        return {
+            "type": "skill",
+            "skill_name": result.get("skill_name", f"Skill #{tool_input.get('skill_id')}"),
+            "status": lrd.get("status", "UNKNOWN"),
+            "conclusion": lrd.get("diagnosis_message", ""),
+            "summary": lrd.get("summary", ""),
+            "problem_object": lrd.get("problematic_targets", []),
+            "mcp_output": {
+                "ui_render": {
+                    "chart_data": chart_data,
+                    "charts": [chart_data] if chart_data else [],
+                },
+                "dataset": urp.get("dataset"),
+                "_raw_dataset": urp.get("dataset"),
+                "_call_params": tool_input.get("params", {}),
+            },
+        }
+
+    if tool_name == "execute_mcp" and isinstance(result, dict) and result.get("status") == "success":
+        od = result.get("output_data") or {}
+        mcp_id = tool_input.get("mcp_id")
+        mcp_name = result.get("mcp_name") or f"MCP #{mcp_id}"
+        dataset = od.get("dataset")
+        raw_dataset = od.get("_raw_dataset") or dataset
+        return {
+            "type": "mcp",
+            "mcp_name": mcp_name,
+            "mcp_output": {
+                "ui_render": od.get("ui_render") or {},
+                "dataset": dataset,
+                "_raw_dataset": raw_dataset,
+                "_call_params": tool_input.get("params", {}),
+                "_is_processed": od.get("_is_processed", True),
+            },
+        }
+
+    _DRAFT_TOOL_TYPE_MAP = {
+        "draft_skill": "skill",
+        "draft_mcp": "mcp",
+        "draft_routine_check": "routine_check",
+        "draft_event_skill_link": "event_skill_link",
+    }
+    if tool_name in _DRAFT_TOOL_TYPE_MAP and isinstance(result, dict) and "draft_id" in result:
+        draft_type = _DRAFT_TOOL_TYPE_MAP[tool_name]
+        deep_link = result.get("deep_link_data") or {}
+        return {
+            "type": "draft",
+            "draft_type": draft_type,
+            "draft_id": result["draft_id"],
+            "auto_fill": deep_link.get("auto_fill") or {},
+        }
+
+    # navigate tool → emit navigation action to frontend
+    if tool_name == "navigate" and isinstance(result, dict) and result.get("action") == "navigate":
+        return {
+            "type": "navigate",
+            "target": result.get("target"),
+            "id": result.get("id"),
+            "message": result.get("message", ""),
+        }
+
+    # [v15.3] execute_utility → chart or stats panel
+    if tool_name == "execute_utility" and isinstance(result, dict):
+        # Unwrap StandardResponse envelope if present
+        tool_result = result.get("data") if "data" in result else result
+        if isinstance(tool_result, dict) and tool_result.get("status") == "success":
+            payload = tool_result.get("payload") or {}
+            return {
+                "type": "utility",
+                "tool_name": tool_input.get("tool_name", "utility"),
+                "summary": tool_result.get("summary", ""),
+                "payload": payload,
+            }
+
+    # [v15.6] analyze_data → chart + result table (pre-built template, MCP-standard output)
+    if tool_name == "analyze_data" and isinstance(result, dict):
+        if result.get("status") == "success":
+            ad_data = result.get("data") or {}
+            chart_json = ad_data.get("chart_json")
+            payload: Dict[str, Any] = {}
+            if chart_json:
+                try:
+                    payload["plotly"] = json.loads(chart_json) if isinstance(chart_json, str) else chart_json
+                except Exception:
+                    payload["chart_json"] = chart_json
+            # Always attach result_table as rows (the per-point data table output)
+            result_table = ad_data.get("result_table")
+            if result_table and isinstance(result_table, list) and result_table:
+                payload["rows"] = result_table
+                payload["columns"] = list(result_table[0].keys())
+            # If no chart (stats_summary), use stats as key-value fallback
+            if not chart_json:
+                stats = ad_data.get("stats") or {}
+                if isinstance(stats, dict):
+                    payload.update(stats)
+            title = ad_data.get("title") or f"{ad_data.get('template', 'analyze_data')} 分析"
+            return {
+                "type": "utility",
+                "tool_name": title,
+                "summary": title,
+                "payload": payload,
+                "row_count": ad_data.get("row_count", 0),
+                "jit_mcp_id": tool_input.get("mcp_id"),
+                "jit_run_params": tool_input.get("run_params", {}),
+                "jit_python_code": "",  # template-based; promote via promote-analysis
+                "jit_title": title,
+                # [v15.6] Template context for promote-analysis endpoint
+                "analyze_template": tool_input.get("template"),
+                "analyze_params": tool_input.get("params", {}),
+                "analyze_stats": ad_data.get("stats") or {},
+            }
+
+    # [v15.4] execute_jit → chart or stats panel (server-side sandbox result)
+    # result is the raw StandardResponse: {"status": "success", "data": {...}}
+    if tool_name == "execute_jit" and isinstance(result, dict):
+        if result.get("status") == "success":
+            jit_data = result.get("data") or {}
+            chart_json = jit_data.get("chart_json")
+            jit_result = jit_data.get("jit_result") or {}
+            payload: Dict[str, Any] = {}
+            if chart_json:
+                try:
+                    payload["plotly"] = json.loads(chart_json) if isinstance(chart_json, str) else chart_json
+                except Exception:
+                    payload["chart_json"] = chart_json
+            else:
+                # Stats-only: render as key-value pairs (exclude large values)
+                payload = {k: v for k, v in jit_result.items()
+                           if not isinstance(v, (list, dict)) or k == "summary"}
+            return {
+                "type": "utility",
+                "tool_name": jit_data.get("title", "JIT 分析"),
+                "summary": jit_data.get("title", "JIT 分析"),
+                "payload": payload,
+                "row_count": jit_data.get("row_count", 0),
+                # [v15.5] Promote-to-MCP/Skill context — passed back to frontend for "固化 ↗" button
+                "jit_mcp_id": tool_input.get("mcp_id"),
+                "jit_run_params": tool_input.get("run_params", {}),
+                "jit_python_code": tool_input.get("python_code", ""),
+                "jit_title": tool_input.get("title", "JIT 分析"),
+            }
+
+    return None
+
+
+# ── v14.1: Trap Rule Derivation ────────────────────────────────────────────────
+
+def _derive_fix_rule(
+    tool_name: str,
+    error_code: str,
+    tool_input: Dict[str, Any],
+    error_msg: str,
+) -> Optional[str]:
+    """Derive a human-readable fix rule from a tool error for Trap memory.
+
+    Returns None if the error should not be persisted (transient / user-rejected).
+    """
+    if error_code in ("MISSING_MCP_ID", "MISSING_MCP_NAME"):
+        return "呼叫 execute_mcp 必須提供 mcp_name（填入 <mcp_catalog> 中的 name 欄位），禁止使用 mcp_id 整數"
+    if error_code == "MCP_NOT_FOUND":
+        name_hint = tool_input.get("mcp_name") or tool_input.get("mcp_id")
+        return f"MCP '{name_hint}' 不存在，請確認 <mcp_catalog> 中的 name 欄位拼寫是否正確"
+    if error_code == "MISSING_PARAMS":
+        missing = tool_input.get("missing_params") or []
+        return f"呼叫 {tool_name} 缺少必填參數 {missing}，需先向用戶詢問後才能繼續"
+    if error_code == "SKILL_NOT_FOUND":
+        skill_id = tool_input.get("skill_id")
+        return f"Skill #{skill_id} 不存在，呼叫 execute_skill 前必須先用 list_skills 確認 ID"
+    if error_code == "APPROVAL_REJECTED":
+        return None  # User rejection — not a bug, no Trap needed
+    # Generic: persist if substantive and not transient
+    if len(error_msg) > 20 and "timeout" not in error_msg.lower():
+        return f"工具 {tool_name} 回傳錯誤，下次注意：{error_msg[:150]}"
+    return None
+
+
+# ── S0 Intent Classification ───────────────────────────────────────────────────
+
+_INTENT_TRIGGER_WORDS = frozenset({
+    "記得", "記住", "幫我記", "以後", "下次", "之後記", "請記",
+    "remember", "keep in mind", "from now on", "next time",
+})
+
+_S0_SYSTEM = (
+    "你是一個意圖分類器，只輸出 JSON，不輸出任何其他內容。\n"
+    "將用戶訊息分類為以下四種意圖之一：\n"
+    "  query      — 診斷/查詢/分析/執行任務\n"
+    "  preference — 用戶要求記住某個規則或偏好（含「記得」「下次」「以後」「幫我記」等詞）\n"
+    "  feedback   — 用戶在糾正 AI 的錯誤或給予反饋\n"
+    "  chitchat   — 打招呼或與任務無關的閒聊\n"
+    "輸出格式（只輸出此 JSON，不要任何解釋）：{\"intent\": \"<query|preference|feedback|chitchat>\"}"
+)
+
+
+async def _classify_intent(message: str, llm) -> str:
+    """S0: Lightweight intent classification. Returns one of: query|preference|feedback|chitchat.
+    Falls back to 'query' on any error to preserve existing behavior.
+    """
+    # Fast-path: keyword check avoids LLM call for obvious preference instructions
+    for trigger in _INTENT_TRIGGER_WORDS:
+        if trigger in message:
+            return "preference"
+    try:
+        resp = await llm.create(
+            system=_S0_SYSTEM,
+            max_tokens=20,
+            messages=[{"role": "user", "content": message}],
+        )
+        raw = _extract_text(resp.content).strip()
+        data = json.loads(raw)
+        intent = data.get("intent", "query")
+        if intent in ("query", "preference", "feedback", "chitchat"):
+            return intent
+    except Exception as exc:
+        logger.warning("S0 intent classification failed (fallback=query): %s", exc)
+    return "query"
+
+
+# ── Stage Labels ───────────────────────────────────────────────────────────────
+
+_STAGE_LABELS = {
+    0: "意圖分流 (Intent Router)",
+    1: "情境感知 (Context Load)",
+    2: "意圖解析與規劃 (Planning)",
+    3: "工具調用與安全審查 (Tool Execution)",
+    4: "邏輯推理與彙整 (Reasoning)",
+    5: "回覆與記憶寫入 (Memory Write)",
+}
+
+
+def _stage_event(stage: int, status: str = "running", **extra: Any) -> Dict[str, Any]:
+    return {
+        "type": "stage_update",
+        "stage": stage,
+        "label": _STAGE_LABELS.get(stage, f"Stage {stage}"),
+        "status": status,
+        **extra,
+    }
+
+
+# ── Main Orchestrator ──────────────────────────────────────────────────────────
+
+class AgentOrchestrator:
+    """v14 Five-stage agentic loop with full observability and safety features."""
+
+    def __init__(
+        self,
+        db: AsyncSession,
+        base_url: str,
+        auth_token: str,
+        user_id: int,
+        canvas_overrides: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self._db = db
+        self._base_url = base_url
+        self._auth_token = auth_token
+        self._user_id = user_id
+        self._canvas_overrides = canvas_overrides
+        self._llm = get_llm_client()
+        self._memory_svc = AgentMemoryService(db)
+        self._context_loader = ContextLoader(db)
+        self._distill_svc = DataDistillationService()
+
+    async def run(
+        self,
+        message: str,
+        session_id: Optional[str] = None,
+    ) -> AsyncIterator[Dict[str, Any]]:
+        return self._run_impl(message, session_id)
+
+    async def _run_impl(
+        self,
+        message: str,
+        session_id: Optional[str],
+    ) -> AsyncIterator[Dict[str, Any]]:
+
+        # ══════════════════════════════════════════════════════════════
+        # Stage 0: Intent Router — classify before full pipeline
+        # ══════════════════════════════════════════════════════════════
+        yield _stage_event(0, "running")
+        intent = await _classify_intent(message, self._llm)
+        yield _stage_event(0, "complete", intent=intent)
+
+        session_id = session_id or str(uuid.uuid4())
+
+        if intent == "preference":
+            yield _stage_event(5, "running")
+            try:
+                mem = await self._memory_svc.write(
+                    user_id=self._user_id,
+                    content=f"[用戶偏好指令] {message}",
+                    source="user_preference",
+                    task_type="preference",
+                )
+                yield {
+                    "type": "memory_write",
+                    "source": "user_preference",
+                    "memory_type": "preference",
+                    "content": message[:120],
+                    "memory_id": mem.id,
+                    "conflict_resolved": False,
+                }
+            except Exception as exc:
+                logger.warning("S0 preference write failed: %s", exc)
+            yield {"type": "synthesis", "text": "好的，已記住。"}
+            yield _stage_event(5, "complete")
+            yield {"type": "done", "session_id": session_id}
+            return
+
+        if intent == "feedback":
+            yield _stage_event(5, "running")
+            try:
+                mem = await self._memory_svc.write(
+                    user_id=self._user_id,
+                    content=f"[用戶反饋] {message}",
+                    source="user_feedback",
+                    task_type="feedback",
+                )
+                yield {
+                    "type": "memory_write",
+                    "source": "user_feedback",
+                    "memory_type": "feedback",
+                    "content": message[:120],
+                    "memory_id": mem.id,
+                    "conflict_resolved": False,
+                }
+            except Exception as exc:
+                logger.warning("S0 feedback write failed: %s", exc)
+            yield _stage_event(5, "complete")
+            # Fall through to S1-S6 so LLM can acknowledge the feedback naturally
+            # (don't return here — let the model respond)
+
+        if intent == "chitchat":
+            yield _stage_event(4, "running")
+            try:
+                resp = await self._llm.create(
+                    system="你是 AI Ops 智能診斷助手。請親切地回應用戶的打招呼或閒聊，保持簡短。",
+                    max_tokens=256,
+                    messages=[{"role": "user", "content": message}],
+                )
+                reply = _extract_text(resp.content)
+            except Exception as exc:
+                reply = "您好！有什麼我可以幫您的嗎？"
+                logger.warning("S0 chitchat LLM failed: %s", exc)
+            yield {"type": "synthesis", "text": reply}
+            yield _stage_event(4, "complete")
+            yield {"type": "done", "session_id": session_id}
+            return
+
+        # ── query / feedback fall-through: run full S1-S6 pipeline ──
+
+        # ══════════════════════════════════════════════════════════════
+        # Stage 1: Context Load & Hybrid Retrieval
+        # ══════════════════════════════════════════════════════════════
+        yield _stage_event(1, "running")
+
+        # v14.1: Extract task context for metadata pre-filtering (no LLM call)
+        _tc_type, _tc_subject, _tc_tool = extract_task_context(message, self._canvas_overrides)
+        _task_context: Dict[str, Optional[str]] = {
+            "task_type": _tc_type,
+            "data_subject": _tc_subject,
+            "tool_name": _tc_tool,
+        }
+
+        system_blocks, context_meta = await self._context_loader.build(
+            user_id=self._user_id,
+            query=message,
+            top_k_memories=5,
+            canvas_overrides=self._canvas_overrides,
+            task_context=_task_context,   # v14.1: pre-filtered memory retrieval
+        )
+        session_id, history, cumulative_tokens = await self._load_session(session_id)
+        context_meta["history_turns"] = len(history) // 2
+        context_meta["cumulative_tokens"] = cumulative_tokens
+
+        yield _stage_event(1, "complete")
+        yield {"type": "context_load", **context_meta}
+
+        # v14: Emit workspace_update if canvas_overrides are active
+        if self._canvas_overrides:
+            yield {"type": "workspace_update", "canvas_overrides": self._canvas_overrides}
+
+        messages: List[Dict[str, Any]] = history + [{"role": "user", "content": message}]
+
+        dispatcher = ToolDispatcher(
+            db=self._db,
+            base_url=self._base_url,
+            auth_token=self._auth_token,
+            user_id=self._user_id,
+        )
+
+        final_text = ""
+        iteration = 0
+        _new_diagnosis: Optional[Dict] = None
+        _plan_extracted = False
+        _session_input_tokens = cumulative_tokens
+        _tools_used: list = []   # Phase B: track successful tool calls for success pattern memory
+
+        # ══════════════════════════════════════════════════════════════
+        # v14: Token Compaction — compact before we start if already over threshold
+        # ══════════════════════════════════════════════════════════════
+        if _session_input_tokens > _COMPACTION_TOKEN_THRESHOLD and len(messages) > 5:
+            logger.info("Token compaction triggered: %d tokens", _session_input_tokens)
+            messages = _compact_history(messages)
+            yield {
+                "type": "token_usage",
+                "cumulative_tokens": _session_input_tokens,
+                "compaction": True,
+                "message": f"Session 已累積 {_session_input_tokens:,} tokens，已壓縮歷史對話。",
+            }
+
+        # ══════════════════════════════════════════════════════════════
+        # Stage 2-4: Tool Use Loop
+        # ══════════════════════════════════════════════════════════════
+        yield _stage_event(2, "running")
+
+        while iteration < MAX_ITERATIONS:
+            iteration += 1
+            logger.info("AgentOrchestrator v14: iteration=%d user=%d", iteration, self._user_id)
+            logger.info("[DBG] messages_count=%d", len(messages))
+
+            try:
+                response = await self._llm.create(
+                    system=system_blocks if isinstance(system_blocks, str) else
+                           "\n".join(b.get("text", "") for b in system_blocks if isinstance(b, dict)),
+                    max_tokens=8192,
+                    tools=TOOL_SCHEMAS,
+                    messages=messages,
+                )
+            except Exception as exc:
+                logger.exception("LLM call failed")
+                yield {"type": "error", "message": f"LLM 呼叫失敗: {exc}"}
+                yield {"type": "done"}
+                return
+
+            # Emit token usage
+            iter_input = response.input_tokens
+            iter_output = response.output_tokens
+            _session_input_tokens += iter_input
+            yield {
+                "type": "llm_usage",
+                "input_tokens": iter_input,
+                "output_tokens": iter_output,
+                "cache_read_tokens": 0,
+                "cache_creation_tokens": 0,
+                "cumulative_tokens": _session_input_tokens,
+                "iteration": iteration,
+            }
+
+            # Stream thinking blocks
+            for thinking_text in _extract_thinking(response.content):
+                yield {"type": "thinking", "text": thinking_text}
+
+            # ── end_turn: extract plan then synthesize ─────────────────
+            if response.stop_reason == "end_turn":
+                final_text = _extract_text(response.content)
+                import sys as _sys
+                print(f"[ORCH-DBG] iter={iteration} stop=end_turn text_len={len(final_text)} preview={final_text[:200]!r}", file=_sys.stderr, flush=True)
+
+                # Qwen3 / local-model fix: model outputs only a <plan> block, or outputs
+                # a garbage tool-call fragment in text mode (filtered to empty string).
+                # In both cases, nudge the model to use function calling properly.
+                _plan_only = bool(
+                    final_text
+                    and re.match(r"^\s*<plan>[\s\S]*?</plan>\s*$", final_text.strip())
+                )
+                _empty_no_tools = not final_text and not response.content
+
+                _MAX_FC_NUDGES = 2  # avoid wasting tokens if model consistently ignores function calling
+                if (_plan_only or _empty_no_tools) and iteration <= _MAX_FC_NUDGES:
+                    if _plan_only:
+                        plan_match = re.search(r"<plan>([\s\S]*?)</plan>", final_text)
+                        if plan_match and not _plan_extracted:
+                            _plan_extracted = True
+                            yield _stage_event(2, "complete", plan=plan_match.group(1).strip())
+                        # Only add assistant message when content is non-empty
+                        messages.append({"role": "assistant", "content": response.content})
+                    # For empty response: don't add empty assistant message —
+                    # just add a direct nudge to use function calling.
+                    messages.append({"role": "user", "content": "請直接使用 function calling 呼叫工具執行任務，不要用文字描述工具呼叫。"})
+                    continue
+
+                # Phase B: Planning depth validation.
+                # If the model returned a <plan> shorter than 50 chars (shallow planning),
+                # nudge it once to produce a more detailed plan before executing tools.
+                if not _plan_extracted and iteration == 1:
+                    plan_match = re.search(r"<plan>([\s\S]*?)</plan>", final_text)
+                    if plan_match:
+                        plan_text = plan_match.group(1).strip()
+                        if len(plan_text) < 50 and iteration < MAX_ITERATIONS - 1:
+                            # Shallow plan — ask for more detail before proceeding
+                            messages.append({"role": "assistant", "content": response.content})
+                            messages.append({"role": "user", "content": "請詳細列出每個步驟的工具名稱和參數，然後立即開始執行。"})
+                            continue
+
+                # v14: Extract <plan> from first assistant response
+                if not _plan_extracted:
+                    plan_match = re.search(r"<plan>([\s\S]*?)</plan>", final_text)
+                    if plan_match:
+                        _plan_extracted = True
+                        yield _stage_event(2, "complete", plan=plan_match.group(1).strip())
+                    else:
+                        yield _stage_event(2, "complete")
+
+                yield _stage_event(4, "running")
+                yield {"type": "synthesis", "text": final_text}
+                yield _stage_event(4, "complete")
+                messages.append({"role": "assistant", "content": response.content})
+                break
+
+            # ── tool_use: Execute tools ────────────────────────────────
+            if response.stop_reason == "tool_use":
+                tool_calls = _extract_tool_calls(response.content)
+                import sys as _sys
+                print(f"[ORCH-DBG] iter={iteration} stop=tool_use tools={[t['name'] for t in tool_calls]}", file=_sys.stderr, flush=True)
+                messages.append({"role": "assistant", "content": response.content})
+
+                # v14: Extract <plan> from tool_use response text
+                if not _plan_extracted:
+                    resp_text = _extract_text(response.content)
+                    plan_match = re.search(r"<plan>([\s\S]*?)</plan>", resp_text)
+                    if plan_match:
+                        _plan_extracted = True
+                        yield _stage_event(2, "complete", plan=plan_match.group(1).strip())
+                    else:
+                        yield _stage_event(2, "complete")
+
+                yield _stage_event(3, "running")
+
+                tool_results = []
+                _force_synthesis = False
+                _profiles_this_round: list = []  # [P0 v15] DataProfiles collected this iteration
+
+                for tc in tool_calls:
+                    tool_id = tc.id if hasattr(tc, "id") else tc.get("id", "")
+                    tool_name = tc.name if hasattr(tc, "name") else tc.get("name", "")
+                    tool_input = tc.input if hasattr(tc, "input") else tc.get("input", {})
+
+                    yield {
+                        "type": "tool_start",
+                        "tool": tool_name,
+                        "input": tool_input,
+                        "iteration": iteration,
+                    }
+
+                    # ── v14: HITL — destructive tool gate ─────────────────
+                    if tool_name in _DESTRUCTIVE_TOOLS:
+                        approval_token = str(uuid.uuid4())[:8]
+                        _approval_events[approval_token] = asyncio.Event()
+                        _pending_approvals[approval_token] = None
+
+                        yield {
+                            "type": "approval_required",
+                            "approval_token": approval_token,
+                            "tool": tool_name,
+                            "input": tool_input,
+                            "message": f"⚠️ 工具「{tool_name}」會修改系統設定，需要您的批准。請點擊「批准」或「拒絕」。",
+                            "timeout_seconds": 60,
+                        }
+
+                        # Wait for approval (60s timeout)
+                        try:
+                            await asyncio.wait_for(
+                                _approval_events[approval_token].wait(),
+                                timeout=60.0,
+                            )
+                            approved = _pending_approvals.get(approval_token, False)
+                        except asyncio.TimeoutError:
+                            approved = False
+                        finally:
+                            _approval_events.pop(approval_token, None)
+                            _pending_approvals.pop(approval_token, None)
+
+                        if not approved:
+                            result = {
+                                "status": "error",
+                                "code": "APPROVAL_REJECTED",
+                                "message": f"用戶拒絕或超時未批准「{tool_name}」操作，已取消執行。",
+                            }
+                            _force_synthesis = True
+                        else:
+                            # Proceed with execution
+                            preflight_err = await _preflight_validate(self._db, tool_name, tool_input)
+                            result = preflight_err if preflight_err else await dispatcher.execute(tool_name, tool_input)
+                    else:
+                        # ── Pre-flight validation ──────────────────────────
+                        preflight_err = await _preflight_validate(self._db, tool_name, tool_input)
+                        if preflight_err:
+                            result = preflight_err
+                        else:
+                            result = await dispatcher.execute(tool_name, tool_input)
+
+                    # ── Phase B: Stage 4 tool tag RAG ─────────────────────
+                    # After executing, fetch trap memories for this tool and
+                    # append as a warning in the result so the model can
+                    # self-correct in the next iteration.
+                    if isinstance(result, dict) and result.get("status") == "error":
+                        try:
+                            trap_mems, _ = await self._memory_svc.search_with_metadata(
+                                user_id=self._user_id,
+                                query=f"{tool_name} 錯誤 失敗",
+                                top_k=3,
+                                tool_name=tool_name,
+                            )
+                            if trap_mems:
+                                trap_hints = "; ".join(m.content[:80] for m in trap_mems)
+                                result["_trap_hint"] = f"⚠️ 相關歷史記憶：{trap_hints}"
+                        except Exception:
+                            pass
+
+                    # ── v14: Programmatic Distillation for data tools ──────
+                    if tool_name == "execute_mcp" and isinstance(result, dict) and result.get("status") == "success":
+                        result = await self._distill_svc.distill_mcp_result(result)
+
+                        # [P1 v15] Auto-persistence: fire-and-forget reusability evaluation
+                        _jit_script = (
+                            result.get("output_data", {}).get("_script") or
+                            result.get("_script") or ""
+                        )
+                        if not _jit_script:
+                            # Fallback: fetch processing_script from MCP record
+                            _mcp_id = tool_input.get("mcp_id")
+                            if _mcp_id:
+                                try:
+                                    from app.ontology.repositories.mcp_definition_repository import MCPDefinitionRepository
+                                    _mcp_repo = MCPDefinitionRepository(self._db)
+                                    _mcp_obj = await _mcp_repo.get_by_id(_mcp_id)
+                                    _jit_script = getattr(_mcp_obj, "processing_script", "") or ""
+                                except Exception:
+                                    pass
+                        if _jit_script:
+                            asyncio.create_task(
+                                self._maybe_persist_tool(
+                                    code=_jit_script,
+                                    context=f"execute_mcp id={tool_input.get('mcp_id')} params={json.dumps(tool_input.get('params', {}), ensure_ascii=False)[:200]}",
+                                )
+                            )
+
+                    # [v15.4] Auto-persist execute_jit code → Agent Tool Chest
+                    if tool_name == "execute_jit" and isinstance(result, dict) and result.get("status") == "success":
+                        _jit_code = tool_input.get("python_code", "")
+                        if _jit_code:
+                            asyncio.create_task(
+                                self._maybe_persist_tool(
+                                    code=_jit_code,
+                                    context=(
+                                        f"execute_jit title={tool_input.get('title', '')} "
+                                        f"mcp_id={tool_input.get('mcp_id')} "
+                                        f"row_count={result.get('data', {}).get('row_count', '?')}"
+                                    ),
+                                )
+                            )
+
+                    # ── Force synthesis on unrecoverable errors ────────────
+                    if isinstance(result, dict) and result.get("status") == "error":
+                        if tool_name in ("execute_mcp", "execute_skill"):
+                            _force_synthesis = True
+                    if isinstance(result, dict) and result.get("code") == "MISSING_PARAMS":
+                        _force_synthesis = True
+
+                    # v14.1: Negative Index / Trap — auto-write on tool error
+                    _is_tool_error = (
+                        isinstance(result, dict)
+                        and result.get("status") == "error"
+                        and tool_name in ("execute_mcp", "execute_skill")
+                    )
+                    if _is_tool_error:
+                        _err_msg = result.get("message") or result.get("error") or "未知錯誤"
+                        _err_code = result.get("code", "")
+                        _fix_rule = _derive_fix_rule(tool_name, _err_code, tool_input, _err_msg)
+                        if _fix_rule:
+                            try:
+                                await self._memory_svc.write_trap(
+                                    user_id=self._user_id,
+                                    tool_name_failed=tool_name,
+                                    error_message=_err_msg,
+                                    fix_applied=_fix_rule,
+                                    task_type=_task_context.get("task_type"),
+                                    data_subject=_task_context.get("data_subject"),
+                                )
+                                logger.info(
+                                    "Trap memory written: tool=%s code=%s", tool_name, _err_code
+                                )
+                                yield {
+                                    "type": "memory_write",
+                                    "source": "trap",
+                                    "memory_type": "trap",
+                                    "tool_name": tool_name,
+                                    "error_code": _err_code or "UNKNOWN",
+                                    "content": _err_msg[:80],
+                                    "fix_rule": _fix_rule[:120],
+                                    "conflict_resolved": False,
+                                }
+                            except Exception as _trap_exc:
+                                logger.warning("Trap write failed: %s", _trap_exc)
+
+                    # Capture ABNORMAL diagnosis for memory
+                    if tool_name == "execute_skill" and isinstance(result, dict):
+                        lrd = result.get("llm_readable_data", {})
+                        if isinstance(lrd, dict) and lrd.get("status") == "ABNORMAL":
+                            _new_diagnosis = {
+                                "skill_id": tool_input.get("skill_id"),
+                                "skill_name": result.get("skill_name", ""),
+                                "targets": lrd.get("problematic_targets", []),
+                                "message": lrd.get("diagnosis_message", ""),
+                            }
+
+                    # Phase B: track successful tool calls for success pattern memory
+                    if isinstance(result, dict) and result.get("status") == "success":
+                        _tools_used.append({
+                            "tool": tool_name,
+                            "mcp_name": tool_input.get("mcp_name", ""),
+                            "params": {k: v for k, v in tool_input.items()
+                                       if k not in ("mcp_id", "mcp_name", "python_code", "params")},
+                        })
+
+                    render_card = _build_render_card(tool_name, tool_input, result)
+                    done_event: Dict[str, Any] = {
+                        "type": "tool_done",
+                        "tool": tool_name,
+                        "result_summary": _result_summary(result),
+                        "iteration": iteration,
+                    }
+                    if render_card:
+                        # [v15.2] Attach data_profile to MCP render_card → frontend fires shadow analysis
+                        if render_card.get("type") == "mcp" and isinstance(result, dict):
+                            _pre_profile = result.get("_data_profile")
+                            if _pre_profile:
+                                render_card["data_profile"] = _pre_profile
+                                render_card["row_count"] = _pre_profile.get("row_count", 0)
+                        done_event["render_card"] = render_card
+                    yield done_event
+
+                    # [P0 v15] Extract DataProfile before trimming (trim drops _data_profile key)
+                    _profile = result.pop("_data_profile", None) if isinstance(result, dict) else None
+                    if _profile:
+                        _profiles_this_round.append(_profile)
+
+                    _tr_content = json.dumps(_trim_for_llm(tool_name, result), ensure_ascii=False)
+                    _cap = _LLM_RESULT_MAX_CHARS
+                    if len(_tr_content) > _cap:
+                        try:
+                            _tr_parsed = json.loads(_tr_content)
+                            for _drop in ("output_data", "ui_render_payload", "_raw_dataset", "dataset"):
+                                _tr_parsed.pop(_drop, None)
+                            # Trim schema_sample to fewer rows if still over limit
+                            if tool_name == "execute_mcp" and "schema_sample" in _tr_parsed:
+                                while len(json.dumps(_tr_parsed, ensure_ascii=False)) > _cap and _tr_parsed["schema_sample"]:
+                                    _tr_parsed["schema_sample"] = _tr_parsed["schema_sample"][:-1]
+                            _tr_content = json.dumps(_tr_parsed, ensure_ascii=False)[:_cap]
+                        except Exception:
+                            _tr_content = _tr_content[:_cap] + "…[截斷]"
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": _tr_content,
+                    })
+
+                yield _stage_event(3, "complete")
+                messages.append({"role": "user", "content": tool_results})
+
+                # [P0 v15] Inject DataProfiles as hidden context for next LLM call
+                if _profiles_this_round:
+                    try:
+                        from app.services.data_profile_service import build_profile_injection_text
+                        _profile_text = build_profile_injection_text(_profiles_this_round)
+                        messages.append({
+                            "role": "user",
+                            "content": f"<hidden_data_profile>\n{_profile_text}\n</hidden_data_profile>",
+                        })
+                        yield {
+                            "type": "context_load",
+                            "source": "data_profile",
+                            "profiles": len(_profiles_this_round),
+                            "columns": [list(p.get("meta", {}).keys()) for p in _profiles_this_round],
+                        }
+                    except Exception as _dp_exc:
+                        logger.warning("DataProfile injection failed (non-blocking): %s", _dp_exc)
+
+                # ── Force synthesis ────────────────────────────────────────
+                if _force_synthesis:
+                    yield _stage_event(4, "running")
+                    try:
+                        _sys_str = (
+                            system_blocks if isinstance(system_blocks, str)
+                            else "\n".join(
+                                b.get("text", "") for b in system_blocks
+                                if isinstance(b, dict)
+                            )
+                        )
+                        synth_resp = await self._llm.create(
+                            system=_sys_str,
+                            max_tokens=512,
+                            messages=messages,
+                        )
+                        final_text = _extract_text(synth_resp.content)
+                        yield {"type": "synthesis", "text": final_text}
+                        messages.append({"role": "assistant", "content": synth_resp.content})
+                    except Exception as exc:
+                        yield {"type": "synthesis", "text": f"執行失敗，請確認參數後再試一次。（{exc}）"}
+                    yield _stage_event(4, "complete")
+                    break
+
+                continue
+
+            # Fallback: treat any non-tool_use stop as end_turn
+            # (handles OpenRouter/Qwen3 returning non-standard finish_reason like "stop")
+            logger.warning("AgentOrchestrator: unexpected stop_reason=%r, treating as end_turn", response.stop_reason)
+            final_text = _extract_text(response.content)
+            if not _plan_extracted:
+                yield _stage_event(2, "complete")
+            yield _stage_event(4, "running")
+            yield {"type": "synthesis", "text": final_text}
+            yield _stage_event(4, "complete")
+            messages.append({"role": "assistant", "content": response.content})
+            break
+
+        else:
+            yield {
+                "type": "error",
+                "message": f"Agent 已達最大迭代上限 ({MAX_ITERATIONS})，強制中斷。請人工協助或簡化請求。",
+                "iteration": iteration,
+            }
+
+        # ══════════════════════════════════════════════════════════════
+        # Stage 5: Memory Write (conflict-aware)
+        # ══════════════════════════════════════════════════════════════
+        yield _stage_event(5, "running")
+
+        if _new_diagnosis:
+            try:
+                mem = await self._memory_svc.write_diagnosis_with_conflict_check(
+                    user_id=self._user_id,
+                    skill_name=_new_diagnosis["skill_name"],
+                    targets=_new_diagnosis["targets"],
+                    diagnosis_message=_new_diagnosis["message"],
+                    skill_id=_new_diagnosis["skill_id"],
+                )
+                if mem:
+                    yield {
+                        "type": "memory_write",
+                        "source": mem.source,
+                        "memory_type": "diagnosis",
+                        "content": mem.content[:100],
+                        "memory_id": mem.id,
+                        "conflict_resolved": getattr(mem, "_conflict_resolved", False),
+                        "skill_name": _new_diagnosis.get("skill_name", ""),
+                        "targets": _new_diagnosis.get("targets", []),
+                    }
+            except Exception as exc:
+                logger.warning("Memory auto-write failed: %s", exc)
+
+        # v14.1: HITL Preference Write — persist canvas_overrides as user preference
+        if self._canvas_overrides:
+            try:
+                pref_mem = await self._memory_svc.write_preference(
+                    user_id=self._user_id,
+                    canvas_overrides=self._canvas_overrides,
+                    task_type=_task_context.get("task_type"),
+                    data_subject=_task_context.get("data_subject"),
+                )
+                yield {
+                    "type": "memory_write",
+                    "source": "hitl_preference",
+                    "memory_type": "preference",
+                    "content": pref_mem.content[:100],
+                    "memory_id": pref_mem.id,
+                    "overrides": list(self._canvas_overrides.keys()),
+                    "conflict_resolved": False,
+                }
+            except Exception as exc:
+                logger.warning("Preference memory write failed: %s", exc)
+
+        # Phase B: Success pattern memory — write after successful multi-tool synthesis
+        if _tools_used and len(_tools_used) >= 2 and final_text:
+            tool_chain = " → ".join(
+                f"{t['tool']}({t['mcp_name']})" if t["mcp_name"] else t["tool"]
+                for t in _tools_used
+            )
+            pattern_content = (
+                f"【成功模式】{message[:60]} | 工具鏈：{tool_chain} | "
+                f"結果摘要：{final_text[:100]}"
+            )
+            try:
+                pattern_mem = await self._memory_svc.write(
+                    user_id=self._user_id,
+                    content=pattern_content,
+                    source="success_pattern",
+                    task_type="api_pattern",
+                    tool_name=_tools_used[0]["tool"],
+                )
+                yield {
+                    "type": "memory_write",
+                    "source": "success_pattern",
+                    "memory_type": "pattern",
+                    "content": pattern_content[:100],
+                    "memory_id": pattern_mem.id,
+                }
+            except Exception as exc:
+                logger.warning("Success pattern memory write failed: %s", exc)
+
+        yield _stage_event(5, "complete")
+
+        # Save session with cumulative token count
+        # Strip ephemeral hidden_data_profile injections before saving — they are
+        # single-turn context only and cause consecutive-user-message issues on reload.
+        persistable = [
+            m for m in messages
+            if not (
+                m.get("role") == "user"
+                and isinstance(m.get("content"), str)
+                and m["content"].startswith("<hidden_data_profile>")
+            )
+        ]
+        trimmed = _clean_history_boundary(persistable[-_SESSION_MAX_MESSAGES:])
+        await self._save_session(session_id, trimmed, _session_input_tokens)
+        yield {"type": "done", "session_id": session_id}
+
+    # ── Session Helpers ───────────────────────────────────────────────────────
+
+    async def _load_session(
+        self, session_id: Optional[str]
+    ) -> tuple[str, List[Dict], int]:
+        """Load or create a session. Returns (session_id, messages, cumulative_tokens)."""
+        if session_id:
+            result = await self._db.execute(
+                select(AgentSessionModel).where(
+                    AgentSessionModel.session_id == session_id,
+                    AgentSessionModel.user_id == self._user_id,
+                )
+            )
+            row = result.scalar_one_or_none()
+            if row:
+                expires = row.expires_at
+                if expires:
+                    if expires.tzinfo is None:
+                        expires = expires.replace(tzinfo=timezone.utc)
+                    if expires < datetime.datetime.now(tz=timezone.utc):
+                        await self._db.delete(row)
+                        await self._db.commit()
+                    else:
+                        try:
+                            raw_history = json.loads(row.messages)
+                            cumulative = getattr(row, "cumulative_tokens", None) or 0
+                            return session_id, _sanitize_history(raw_history), cumulative
+                        except Exception:
+                            pass
+
+        new_id = str(uuid.uuid4())
+        return new_id, [], 0
+
+    async def _save_session(
+        self,
+        session_id: str,
+        messages: List[Dict],
+        cumulative_tokens: int = 0,
+    ) -> None:
+        """Upsert session with 24h TTL and cumulative token count."""
+        try:
+            result = await self._db.execute(
+                select(AgentSessionModel).where(AgentSessionModel.session_id == session_id)
+            )
+            row = result.scalar_one_or_none()
+            expires = datetime.datetime.now(tz=timezone.utc) + timedelta(hours=_SESSION_TTL_HOURS)
+            serialized = json.dumps(messages, ensure_ascii=False)
+
+            if row:
+                row.messages = serialized
+                row.expires_at = expires
+                if hasattr(row, "cumulative_tokens"):
+                    row.cumulative_tokens = cumulative_tokens
+            else:
+                kwargs: Dict[str, Any] = {
+                    "session_id": session_id,
+                    "user_id": self._user_id,
+                    "messages": serialized,
+                    "created_at": datetime.datetime.now(tz=timezone.utc),
+                    "expires_at": expires,
+                }
+                if hasattr(AgentSessionModel, "cumulative_tokens"):
+                    kwargs["cumulative_tokens"] = cumulative_tokens
+                row = AgentSessionModel(**kwargs)
+                self._db.add(row)
+            await self._db.commit()
+        except Exception as exc:
+            logger.warning("Session save failed: %s", exc)
+
+    async def _maybe_persist_tool(self, code: str, context: str = "") -> None:
+        """[P1 v15] Fire-and-forget: evaluate JIT script and optionally save to Agent Tool Chest."""
+        try:
+            from app.services.agent_tool_service import AgentToolService
+            svc = AgentToolService(self._db)
+            eval_result = await svc.evaluate_reusability(code, context)
+            if eval_result.get("reusable"):
+                await svc.create(
+                    user_id=self._user_id,
+                    name=eval_result.get("name", "Unnamed Tool"),
+                    code=code,
+                    description=eval_result.get("description", ""),
+                )
+                logger.info(
+                    "AgentTool auto-saved: name=%s user_id=%s",
+                    eval_result.get("name"), self._user_id,
+                )
+        except Exception as exc:
+            logger.warning("_maybe_persist_tool failed (non-blocking): %s", exc)

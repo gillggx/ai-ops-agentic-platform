@@ -1,0 +1,2209 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Ops</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/cjr.css" />
+</head>
+<body class="bg-slate-50 text-slate-900 h-screen flex flex-col overflow-hidden">
+
+  <!-- ══════════════════════════════════════════════════════════
+       LOGIN SCREEN
+  ═══════════════════════════════════════════════════════════ -->
+  <div id="login-screen" class="flex items-center justify-center h-full">
+    <div class="login-card">
+      <div class="text-center mb-6">
+        <!-- AI Ops Icon -->
+        <div class="flex justify-center mb-3">
+          <div class="w-14 h-14 rounded-2xl bg-blue-500/20 border border-blue-500/30
+                      flex items-center justify-center">
+            <svg class="w-8 h-8 text-blue-400" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+              <path d="M5.636 5.636l2.122 2.121M16.243 16.243l2.121 2.122
+                       M5.636 18.364l2.122-2.122M16.243 7.757l2.121-2.121"/>
+            </svg>
+          </div>
+        </div>
+        <h1 class="text-2xl font-bold tracking-tight text-slate-900" data-i18n="brand">AI Ops</h1>
+        <p class="text-slate-500 text-sm mt-1" data-i18n="brand-sub">AI 診斷智能體 · AIOps</p>
+      </div>
+
+      <div class="space-y-3">
+        <div>
+          <label class="text-xs text-slate-500 font-medium uppercase tracking-wider">Username</label>
+          <input id="login-username" type="text" value="admin"
+            class="input-field mt-1"
+            onkeydown="if(event.key==='Enter')document.getElementById('login-password').focus()" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-500 font-medium uppercase tracking-wider">Password</label>
+          <input id="login-password" type="password" value="admin"
+            class="input-field mt-1"
+            onkeydown="if(event.key==='Enter')loginWithCredentials()" />
+        </div>
+
+        <div id="login-error"
+             class="hidden text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+        </div>
+
+        <button id="login-btn" onclick="loginWithCredentials()"
+          class="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-700
+                 rounded-xl py-2.5 font-semibold text-sm transition-colors"
+          data-i18n="login-btn">
+          登入
+        </button>
+      </div>
+
+      <div class="mt-5 border-t border-slate-200 pt-5">
+        <p class="text-xs text-slate-500 text-center mb-2" data-i18n="paste-token">
+          或直接貼上 JWT Token
+        </p>
+        <div class="flex gap-2">
+          <input id="token-input" type="text" placeholder="eyJhbGc..."
+            class="input-field flex-1 font-mono text-xs" />
+          <button onclick="loginWithToken()"
+            class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs transition-colors border border-slate-200"
+            data-i18n="use-token">
+            使用
+          </button>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 text-center mt-4">
+        <span data-i18n="no-account">未有帳號？請先透過</span>
+        <a href="/docs" target="_blank" class="text-indigo-600 hover:underline">/docs</a>
+        <span data-i18n="create-user">建立使用者。</span>
+      </p>
+    </div>
+  </div>
+
+
+  <!-- ══════════════════════════════════════════════════════════
+       MAIN APP
+  ═══════════════════════════════════════════════════════════ -->
+  <div id="main-app" class="hidden flex flex-col h-full overflow-hidden">
+
+    <!-- Header -->
+    <header class="flex-shrink-0 flex items-center justify-between px-5 py-3
+                   bg-white border-b border-slate-200 shadow-sm">
+      <div class="flex items-center gap-3">
+        <!-- AI Ops Brand -->
+        <div class="flex items-center gap-2">
+          <svg class="w-5 h-5 text-blue-400" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+            <path d="M5.636 5.636l2.122 2.121M16.243 16.243l2.121 2.122
+                     M5.636 18.364l2.122-2.122M16.243 7.757l2.121-2.121"/>
+          </svg>
+          <span class="text-base font-bold" data-i18n="brand">AI Ops</span>
+        </div>
+        <span class="text-xs px-2 py-0.5 rounded-full
+                     bg-blue-100 text-blue-700 border border-blue-200">
+          v12 · Mission Control
+        </span>
+        <div id="status-indicator" class="flex items-center gap-1.5 text-xs text-slate-500">
+          <span class="w-1.5 h-1.5 rounded-full bg-green-400 inline-block"></span>
+          Ready
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <!-- Language Switcher -->
+        <button id="lang-btn" onclick="_toggleLang()"
+          class="text-xs text-slate-600 hover:text-slate-900 border border-slate-300
+                 hover:border-slate-400 hover:bg-slate-50 rounded-lg px-3 py-1.5 transition-colors font-medium">
+          EN
+        </button>
+        <span id="user-badge" class="text-xs text-slate-600 hidden"></span>
+        <button onclick="logout()"
+          class="text-xs text-slate-600 hover:text-slate-900 border border-slate-300
+                 hover:border-slate-400 hover:bg-slate-50 rounded-lg px-3 py-1.5 transition-colors"
+          data-i18n="logout">
+          登出
+        </button>
+        <!-- User Manual / Help — far right -->
+        <button id="nav-help" onclick="toggleHelpPanel()"
+          class="flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-700
+                 border border-blue-200 hover:border-blue-400 hover:bg-blue-50
+                 rounded-lg px-3 py-1.5 transition-colors"
+          title="使用說明 AI 助理">
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+            <path d="M9 7h6M9 11h6M9 15h4"/>
+          </svg>
+          User Manual
+        </button>
+      </div>
+    </header>
+
+    <!-- Body: Sidebar + Views -->
+    <div class="flex flex-1 overflow-hidden">
+
+      <!-- ── LEFT SIDEBAR ── -->
+      <nav id="sidebar"
+        class="flex-shrink-0 flex flex-col items-center gap-1 py-3 px-2
+               bg-white border-r border-slate-200 w-[56px]">
+
+        <!-- Diagnose (first position) -->
+        <button class="nav-btn active-nav" id="nav-diagnose" title="診斷站"
+          onclick="switchView('diagnose')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a7 7 0 1 1 0 14A7 7 0 0 1 12 2z"/>
+            <path d="M12 6v3l2 2"/>
+            <path d="M12 19v3M8.5 20.5l1-1.5M15.5 20.5l-1-1.5"/>
+          </svg>
+        </button>
+
+        <!-- MES Simulator (second position — right after Chat/Diagnose) -->
+        <button class="nav-btn" id="nav-simulator" title="MES 即時模擬器 (OntologySimulator)"
+          onclick="switchView('simulator')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2"/>
+            <path d="M8 21h8M12 17v4"/>
+            <path d="M6 8h4M6 11h2M14 8l2 3-2 3"/>
+          </svg>
+        </button>
+
+        <!-- Dashboard (Mission Control) -->
+        <button class="nav-btn" id="nav-dashboard" title="戰情指揮中心"
+          onclick="switchView('dashboard')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="7" rx="1"/>
+            <rect x="14" y="3" width="7" height="7" rx="1"/>
+            <rect x="14" y="14" width="7" height="7" rx="1"/>
+            <rect x="3" y="14" width="7" height="7" rx="1"/>
+          </svg>
+        </button>
+
+        <!-- Alarms (v18 homepage) -->
+        <button class="nav-btn" id="nav-alarms" title="Alarm 管理中心"
+          onclick="switchView('alarms'); _alarmPage.init();">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11
+                     a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341
+                     C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5
+                     m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+          </svg>
+        </button>
+
+        <!-- Auto-Patrol (v2.0) -->
+        <button class="nav-btn" id="nav-auto-patrols" title="Auto-Patrol — 自動巡查"
+          onclick="switchView('auto-patrols'); _autoPatrolPage.init();">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/>
+            <path d="M21 21l-4.35-4.35"/>
+            <path d="M11 8v3l2 2"/>
+          </svg>
+        </button>
+
+        <!-- Nested Builder -->
+        <button class="nav-btn" id="nav-nested-builder" title="巢狀建構器 (Task+Skill+MCP)"
+          onclick="switchView('nested-builder')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="20" height="18" rx="2"/>
+            <rect x="5" y="6" width="14" height="12" rx="1.5"/>
+            <rect x="8" y="9" width="8" height="6" rx="1"/>
+          </svg>
+        </button>
+
+        <div class="w-6 border-t border-slate-200 my-1"></div>
+
+        <!-- System MCPs (IT Sponsor) -->
+        <button class="nav-btn" id="nav-system-mcps" title="System MCP 管理 (IT Sponsor)"
+          onclick="switchView('system-mcps')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <ellipse cx="12" cy="5" rx="9" ry="3"/>
+            <path d="M21 12c0 1.657-4.03 3-9 3S3 13.657 3 12"/>
+            <path d="M3 5v14c0 1.657 4.03 3 9 3s9-1.343 9-3V5"/>
+            <path d="M9 12l2 2 4-4" stroke-width="1.8"/>
+          </svg>
+        </button>
+
+        <!-- Mock Data Studio -->
+        <button class="nav-btn" id="nav-mock-data-studio" title="Mock Data Studio (模擬資料工廠)"
+          onclick="switchView('mock-data-studio')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="7" rx="1"/>
+            <rect x="14" y="3" width="7" height="7" rx="1"/>
+            <path d="M3 14h7v7H3z" rx="1"/>
+            <path d="M14 14l3.5 3.5M21 14l-3.5 3.5M17.5 17.5V21M17.5 17.5V14"/>
+          </svg>
+        </button>
+
+        <!-- Event Types -->
+        <button class="nav-btn" id="nav-event-types" title="Event Builder"
+          onclick="switchView('event-types')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+            <rect x="9" y="3" width="6" height="4" rx="1"/>
+            <path d="M9 12h6M9 16h4"/>
+          </svg>
+        </button>
+
+        <!-- MCP Builder -->
+        <button class="nav-btn" id="nav-mcp-builder" title="MCP Builder"
+          onclick="switchView('mcp-builder')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06
+                     a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09
+                     A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83
+                     l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09
+                     A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83
+                     l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09
+                     a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83
+                     l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09
+                     a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+
+        <!-- Skill Builder -->
+        <button class="nav-btn" id="nav-skill-builder" title="Skill Builder"
+          onclick="switchView('skill-builder')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <circle cx="12" cy="12" r="6"/>
+            <circle cx="12" cy="12" r="2"/>
+          </svg>
+        </button>
+        <!-- Agent Brain -->
+        <button class="nav-btn" id="nav-agent-brain" title="Agent 大腦設定 (Context Control Center)"
+          onclick="switchView('agent-brain')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.46 2.5 2.5 0 0 1-1.8-3 2.5 2.5 0 0 1-1.8-3A2.5 2.5 0 0 1 2 11a2.5 2.5 0 0 1 1.44-2.25A2.5 2.5 0 0 1 6 6.5V5A2.5 2.5 0 0 1 9.5 2Z"/>
+            <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.46 2.5 2.5 0 0 0 1.8-3 2.5 2.5 0 0 0 1.8-3A2.5 2.5 0 0 0 22 11a2.5 2.5 0 0 0-1.44-2.25A2.5 2.5 0 0 0 18 6.5V5A2.5 2.5 0 0 0 14.5 2Z"/>
+          </svg>
+        </button>
+
+        <!-- Arsenal 武器庫 -->
+        <button class="nav-btn" id="nav-arsenal" title="私有武器庫 (Agent Tools)"
+          onclick="switchView('arsenal')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14.5 10c-.83 0-1.5-.67-1.5-1.5v-5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5z"/>
+            <path d="M20.5 10H19V8.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
+            <path d="M9.5 14c.83 0 1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5S8 21.33 8 20.5v-5c0-.83.67-1.5 1.5-1.5z"/>
+            <path d="M3.5 14H5v1.5c0 .83-.67 1.5-1.5 1.5S2 16.33 2 15.5 2.67 14 3.5 14z"/>
+            <path d="M14 14.5c0-.83.67-1.5 1.5-1.5h5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-5c-.83 0-1.5-.67-1.5-1.5z"/>
+            <path d="M15.5 19H14v1.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5z"/>
+            <path d="M10 9.5C10 8.67 9.33 8 8.5 8h-5C2.67 8 2 8.67 2 9.5S2.67 11 3.5 11h5c.83 0 1.5-.67 1.5-1.5z"/>
+            <path d="M8.5 5H10V3.5C10 2.67 9.33 2 8.5 2S7 2.67 7 3.5 7.67 5 8.5 5z"/>
+          </svg>
+        </button>
+
+        <!-- Tool Catalog 工具目錄 -->
+        <button class="nav-btn" id="nav-tool-catalog" title="工具目錄 (Agent Tool Catalog)"
+          onclick="switchView('tool-catalog')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="7" rx="1"/>
+            <rect x="14" y="3" width="7" height="7" rx="1"/>
+            <rect x="3" y="14" width="7" height="7" rx="1"/>
+            <rect x="14" y="14" width="7" height="7" rx="1"/>
+          </svg>
+        </button>
+
+        <div class="flex-1"></div>
+        <div class="w-6 border-t border-slate-200 my-1"></div>
+
+        <!-- Settings -->
+        <button class="nav-btn" id="nav-settings" title="系統大腦調校 (IT Admin)"
+          onclick="switchView('settings')">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77
+                     a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91
+                     a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+          </svg>
+        </button>
+      </nav>
+
+      <!-- ── VIEW CONTAINER ── -->
+      <div class="flex-1 overflow-hidden flex flex-col">
+
+        <!-- ══ DASHBOARD VIEW ══ -->
+        <!-- ── MES Simulator View (OntologySimulator Next.js iframe) ── -->
+        <div id="view-simulator" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
+          <div class="flex items-center gap-2 px-4 py-2 border-b border-slate-200 bg-white flex-shrink-0">
+            <span class="text-xs font-bold text-slate-700 uppercase tracking-widest">MES 即時模擬器</span>
+            <span class="text-[10px] text-slate-400">OntologySimulator — 需先啟動 port 8001 後端</span>
+            <a href="/simulator/" target="_blank"
+               class="ml-auto text-[10px] text-indigo-500 hover:text-indigo-700 underline">
+              獨立開啟 ↗
+            </a>
+          </div>
+          <iframe id="simulator-iframe" src="/simulator/"
+                  class="flex-1 w-full border-0 bg-slate-50"
+                  title="MES Simulator"
+                  allow="same-origin">
+          </iframe>
+        </div>
+        <div id="view-dashboard" class="view-panel flex-col flex flex-1 overflow-hidden">
+          <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
+                      border-b border-slate-200 bg-white">
+            <div>
+              <h2 class="font-semibold text-base flex items-center gap-2">
+                <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="3" width="7" height="7" rx="1"/>
+                  <rect x="14" y="3" width="7" height="7" rx="1"/>
+                  <rect x="14" y="14" width="7" height="7" rx="1"/>
+                  <rect x="3" y="14" width="7" height="7" rx="1"/>
+                </svg>
+                戰情指揮中心
+              </h2>
+              <p class="text-xs text-slate-500 mt-0.5">Mission Control Dashboard · 排程巡檢全覽</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button onclick="_loadDashboard()"
+                class="text-xs text-slate-500 hover:text-slate-900 border border-slate-300
+                       hover:border-slate-400 hover:bg-slate-50 rounded-lg px-3 py-1.5 transition-colors">
+                ↺ 刷新
+              </button>
+              <button onclick="switchView('nested-builder')"
+                class="builder-btn-primary text-sm px-4 py-2">
+                + 新增排程
+              </button>
+            </div>
+          </div>
+
+          <div id="dashboard-content" class="flex-1 overflow-y-auto p-6">
+            <!-- KPI Cards -->
+            <div class="grid grid-cols-4 gap-4 mb-6" id="dashboard-kpis">
+              <div class="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+                <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">活躍巡檢排程</p>
+                <h3 class="text-3xl font-bold text-slate-900" id="kpi-active-tasks">—</h3>
+              </div>
+              <div class="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+                <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">24H 執行總數</p>
+                <h3 class="text-3xl font-bold text-slate-900" id="kpi-exec-count">—</h3>
+              </div>
+              <div class="bg-white rounded-xl p-4 border border-red-200 shadow-sm relative overflow-hidden">
+                <div class="absolute top-2 right-2 w-2 h-2 rounded-full bg-red-500"
+                     style="animation: ping 1.5s cubic-bezier(0,0,0.2,1) infinite;"></div>
+                <p class="text-xs font-bold text-red-600 uppercase tracking-wider mb-1">攔截異常事件</p>
+                <h3 class="text-3xl font-bold text-red-700" id="kpi-abnormals">—</h3>
+              </div>
+              <div class="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+                <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">資源庫共用率</p>
+                <h3 class="text-3xl font-bold text-slate-900" id="kpi-reuse-rate">—</h3>
+              </div>
+            </div>
+
+            <!-- Two-column layout -->
+            <div class="flex gap-5">
+              <!-- Left: Active Tasks (5/12) -->
+              <div style="width:42%">
+                <div class="flex items-center justify-between mb-3">
+                  <h3 class="font-semibold text-sm text-slate-800 flex items-center gap-1.5">
+                    <span class="w-2 h-2 bg-blue-500 rounded-full inline-block"></span>
+                    監控中的排程 (Active Tasks)
+                  </h3>
+                </div>
+                <div id="dashboard-active-tasks" class="space-y-3">
+                  <div class="text-sm text-slate-400 text-center py-8">載入中...</div>
+                </div>
+              </div>
+
+              <!-- Right: Execution Log (7/12) -->
+              <div class="flex-1">
+                <div class="flex items-center justify-between mb-3">
+                  <h3 class="font-semibold text-sm text-slate-800 flex items-center gap-1.5">
+                    <span class="w-2 h-2 bg-slate-400 rounded-full inline-block"></span>
+                    24H 執行軌跡 (Execution Log)
+                  </h3>
+                </div>
+                <div id="dashboard-exec-log" class="space-y-2">
+                  <div class="text-sm text-slate-400 text-center py-8">載入中...</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div><!-- /view-dashboard -->
+
+        <!-- ══ ALARMS VIEW (v18) ══ -->
+        <div id="view-alarms" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
+
+          <!-- Header -->
+          <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
+                      border-b border-slate-200 bg-white">
+            <div>
+              <h2 class="font-semibold text-base flex items-center gap-2">
+                <svg class="w-4 h-4 text-red-400" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11
+                           a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341
+                           C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5
+                           m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+                </svg>
+                Alarm 管理中心
+              </h2>
+              <p class="text-xs text-slate-500 mt-0.5">由 Skill 自動偵測產生 · 需人工認領與解決</p>
+            </div>
+            <button onclick="_alarmPage.init()"
+              class="text-xs text-slate-500 hover:text-slate-900 border border-slate-300
+                     hover:border-slate-400 hover:bg-slate-50 rounded-lg px-3 py-1.5 transition-colors">
+              ↺ 重新整理
+            </button>
+          </div>
+
+          <!-- Severity badge bar -->
+          <div class="flex-shrink-0 px-6 py-3 bg-white border-b border-slate-100 flex items-center gap-3 flex-wrap">
+            <span class="text-[11px] font-bold text-slate-400 uppercase tracking-widest">嚴重度</span>
+            <div id="alm-badge-bar" class="flex items-center gap-2 flex-wrap">
+              <span class="text-xs text-slate-400">載入中…</span>
+            </div>
+          </div>
+
+          <!-- Filter row -->
+          <div class="flex-shrink-0 px-6 py-3 bg-slate-50 border-b border-slate-200 flex items-center gap-3 flex-wrap">
+            <select id="alm-filter-status" onchange="_alarmPage.applyFilters()"
+                    class="text-xs border border-slate-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400">
+              <option value="active">Active</option>
+              <option value="acknowledged">Acknowledged</option>
+              <option value="resolved">Resolved</option>
+              <option value="all">全部狀態</option>
+            </select>
+            <select id="alm-filter-severity" onchange="_alarmPage.applyFilters()"
+                    class="text-xs border border-slate-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400">
+              <option value="">全部嚴重度</option>
+              <option value="CRITICAL">CRITICAL</option>
+              <option value="HIGH">HIGH</option>
+              <option value="MEDIUM">MEDIUM</option>
+              <option value="LOW">LOW</option>
+            </select>
+            <input id="alm-filter-eqp" type="text" placeholder="機台 ID (可選)"
+                   onchange="_alarmPage.applyFilters()"
+                   class="text-xs border border-slate-300 rounded-lg px-3 py-1.5 w-32 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400" />
+            <select id="alm-filter-days" onchange="_alarmPage.applyFilters()"
+                    class="text-xs border border-slate-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400">
+              <option value="1">今天</option>
+              <option value="7" selected>7 天</option>
+              <option value="30">30 天</option>
+              <option value="90">90 天</option>
+            </select>
+          </div>
+
+          <!-- Alarm list -->
+          <div id="alm-list" class="flex-1 overflow-y-auto p-6 space-y-3">
+            <p class="text-center text-slate-400 py-12 text-sm">載入中…</p>
+          </div>
+
+        </div><!-- /view-alarms -->
+
+
+        <!-- ══ AUTO-PATROL VIEW (v2.0) ══ -->
+        <div id="view-auto-patrols" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
+
+          <!-- Header -->
+          <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
+                      border-b border-slate-200 bg-white">
+            <div>
+              <h2 class="font-semibold text-base flex items-center gap-2">
+                <svg class="w-4 h-4 text-violet-500" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                  <path d="M11 8v3l2 2"/>
+                </svg>
+                Auto-Patrol 自動巡查
+              </h2>
+              <p class="text-xs text-slate-500 mt-0.5">事件驅動 / 排程觸發 → 執行 Skill → 自動建立 Alarm</p>
+            </div>
+            <button onclick="_autoPatrolPage.init()"
+              class="text-xs text-slate-500 hover:text-slate-900 border border-slate-300
+                     rounded-lg px-3 py-1.5 transition-colors flex items-center gap-1.5">
+              ↺ 重新整理
+            </button>
+          </div>
+
+          <!-- Toolbar -->
+          <div class="flex-shrink-0 px-6 py-3 bg-slate-50 border-b border-slate-200 flex items-center gap-3">
+            <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
+              <input type="checkbox" id="ap-filter-active" checked onchange="_autoPatrolPage.applyFilters()"
+                     class="rounded" />
+              只顯示啟用中
+            </label>
+            <button onclick="_autoPatrolPage.openCreate()"
+              class="ml-auto px-4 py-1.5 bg-violet-600 hover:bg-violet-500 text-white
+                     text-xs rounded-lg font-medium transition-colors">
+              + 新增 Auto-Patrol
+            </button>
+          </div>
+
+          <!-- List -->
+          <div class="flex-1 overflow-y-auto px-6 py-4">
+            <div id="ap-list" class="space-y-3">
+              <p class="text-center text-slate-400 text-sm py-12">載入中…</p>
+            </div>
+          </div>
+
+        </div><!-- /view-auto-patrols -->
+
+        <!-- Auto-Patrol Modal -->
+        <div id="ap-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 flex flex-col max-h-[90vh] overflow-hidden">
+            <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+              <h3 id="ap-modal-title" class="font-semibold text-slate-800">新增 Auto-Patrol</h3>
+              <button onclick="_autoPatrolPage.closeModal()"
+                class="text-slate-400 hover:text-slate-700 transition-colors text-xl leading-none">✕</button>
+            </div>
+            <div id="ap-modal-body" class="flex-1 overflow-y-auto px-6 py-5 space-y-4 text-sm">
+              <!-- Filled by JS -->
+            </div>
+            <div class="px-6 py-4 border-t border-slate-200 flex justify-end gap-2">
+              <button onclick="_autoPatrolPage.closeModal()"
+                class="px-4 py-2 text-xs text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50">取消</button>
+              <button id="ap-modal-save" onclick="_autoPatrolPage.save()"
+                class="px-4 py-2 text-xs bg-violet-600 hover:bg-violet-500 text-white rounded-lg font-medium">儲存</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══ NESTED BUILDER VIEW ══ -->
+        <div id="view-nested-builder" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
+          <!-- Header -->
+          <div class="flex-shrink-0 flex items-center justify-between px-6 py-3
+                      border-b border-slate-200 bg-white">
+            <div class="flex items-center gap-3">
+              <button onclick="switchView('dashboard')"
+                      class="text-slate-400 hover:text-slate-700 text-sm flex items-center gap-1 transition-colors">
+                ← 返回
+              </button>
+              <div class="w-px h-4 bg-slate-200"></div>
+              <h2 class="font-semibold text-sm text-slate-900 flex items-center gap-2">
+                <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="2" y="3" width="20" height="18" rx="2"/>
+                  <rect x="5" y="6" width="14" height="12" rx="1.5"/>
+                  <rect x="8" y="9" width="8" height="6" rx="1"/>
+                </svg>
+                巢狀建構器 (Nested Builder)
+              </h2>
+              <span class="text-xs text-slate-400 italic">Task ⊃ Skill ⊃ MCP</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <button id="nb-save-btn" onclick="_nbSaveRoutineCheck()"
+                      class="text-xs text-slate-600 hover:text-slate-900 border border-slate-300
+                             hover:border-slate-400 rounded-lg px-3 py-1.5 transition-colors
+                             disabled:opacity-50 disabled:cursor-not-allowed">
+                💾 儲存排程
+              </button>
+              <button onclick="_tryRunNestedBuilder()" id="nb-header-run-btn"
+                      class="builder-btn-primary text-sm px-4 py-2">
+                ▶ Try Run
+              </button>
+            </div>
+          </div>
+
+          <!-- Body: responsive L/R split on xl, stacked on mobile -->
+          <div class="flex-1 flex flex-col xl:flex-row min-h-0 overflow-hidden">
+
+            <!-- ══ LEFT: Builder Settings ══ -->
+            <div id="nb-builder-left"
+                 class="w-full xl:w-1/2 overflow-y-auto p-6 bg-slate-100
+                        border-b xl:border-b-0 xl:border-r border-slate-200">
+
+              <!-- L1: Task card -->
+              <div class="bg-white rounded-xl shadow-md border border-slate-200 border-l-[8px] border-l-slate-800 p-6">
+
+                <div class="flex items-center gap-2 mb-5">
+                  <span class="text-[10px] font-bold text-slate-500 uppercase tracking-widest
+                               bg-slate-100 px-2 py-0.5 rounded-full border border-slate-300">L1</span>
+                  <h2 class="font-bold text-sm text-slate-900">巡檢任務 (Task)</h2>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4 mb-2">
+                  <div>
+                    <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">任務名稱 *</label>
+                    <input id="nb-task-name" type="text" placeholder="例：SPC 異常巡檢 - TETCH01"
+                           oninput="_nbUpdateEventPreview()"
+                           class="w-full bg-white border border-slate-300 rounded-md p-3 text-sm font-medium
+                                  text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500
+                                  focus:border-blue-500 transition-shadow">
+                  </div>
+                  <div>
+                    <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">執行頻率</label>
+                    <select id="nb-task-interval"
+                            onchange="_nbOnTaskIntervalChange(this.value)"
+                            class="w-full bg-white border border-slate-300 rounded-md px-3 py-2.5 text-sm font-medium
+                                   text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500
+                                   focus:border-blue-500 transition-shadow">
+                      <option value="30m">每 30 分鐘</option>
+                      <option value="1h" selected>每 1 小時</option>
+                      <option value="4h">每 4 小時</option>
+                      <option value="8h">每 8 小時</option>
+                      <option value="12h">每 12 小時</option>
+                      <option value="daily">每天 (指定時間)</option>
+                    </select>
+                  </div>
+                </div>
+                <!-- Daily time + expire_at row (inline) -->
+                <div class="mt-3 grid grid-cols-2 gap-4">
+                  <div id="nb-task-daily-row" class="hidden">
+                    <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">每日執行時間</label>
+                    <input id="nb-task-schedule-time" type="time" value="08:00"
+                           class="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-800
+                                  shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                    <p class="text-xs text-slate-400 mt-0.5">格式 HH:MM，UTC+8</p>
+                  </div>
+                  <div>
+                    <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">效期（到期後自動停用）</label>
+                    <input id="nb-task-expire-at" type="date"
+                           class="w-full bg-white border border-slate-300 rounded-md px-3 py-2 text-sm text-slate-800
+                                  shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                    <p class="text-xs text-slate-400 mt-0.5">留空代表永久有效</p>
+                  </div>
+                </div>
+
+                <!-- L2: Skill card -->
+                <div class="bg-slate-50 rounded-lg shadow-inner border border-slate-200 border-l-[6px] border-l-purple-500 p-5 mt-4">
+
+                  <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-2">
+                      <span class="text-[10px] font-bold text-purple-700 uppercase tracking-widest
+                                   bg-purple-100 px-2 py-0.5 rounded-full border border-purple-200">L2</span>
+                      <h3 class="font-bold text-sm text-purple-900">診斷技能 (Skill)</h3>
+                    </div>
+                    <div class="flex rounded-md border border-slate-200 overflow-hidden shadow-sm">
+                      <button id="nb-skill-mode-select" onclick="_nbSetSkillMode('select')"
+                              class="px-4 py-1.5 bg-purple-600 text-white text-xs font-bold transition-colors">選擇現有</button>
+                      <button id="nb-skill-mode-new" onclick="_nbSetSkillMode('new')"
+                              class="px-4 py-1.5 bg-white text-slate-600 hover:bg-slate-50 text-xs font-medium transition-colors">建立全新</button>
+                    </div>
+                  </div>
+
+                  <!-- Skill: select existing -->
+                  <div id="nb-skill-select-panel">
+                    <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">選擇已有 Skill</label>
+                    <select id="nb-skill-select"
+                            class="w-full bg-white border border-slate-300 rounded-md px-3 py-2.5 text-sm font-medium
+                                   text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500
+                                   focus:border-blue-500 transition-shadow"
+                            onchange="_nbOnSkillSelect()">
+                      <option value="">— 請選擇 —</option>
+                    </select>
+                  </div>
+
+                  <!-- Skill: build new -->
+                  <div id="nb-skill-new-panel" class="hidden space-y-4">
+                    <div>
+                      <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">Skill 名稱 *</label>
+                      <input id="nb-skill-name" type="text" placeholder="例：連續異常檢查"
+                             class="w-full bg-white border border-slate-300 rounded-md p-3 text-sm font-medium
+                                    text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500
+                                    focus:border-blue-500 transition-shadow">
+                    </div>
+                    <div>
+                      <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">異常判斷條件 (Diagnostic Prompt)</label>
+                      <textarea id="nb-skill-prompt" rows="3"
+                                placeholder="例：若 3 個連續數值超過 UCL 或低於 LCL，判定為 ABNORMAL"
+                                class="w-full bg-white border border-slate-300 rounded-md p-3 text-sm font-medium
+                                       text-slate-800 shadow-sm resize-none focus:outline-none focus:ring-2
+                                       focus:ring-blue-500 focus:border-blue-500 transition-shadow"></textarea>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                      <div>
+                        <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">有問題的物件 (Target Object)</label>
+                        <textarea id="nb-skill-target" rows="2"
+                                  placeholder="例：lot_id, tool_id, datetime"
+                                  class="w-full bg-white border border-slate-300 rounded-md p-3 text-sm font-medium
+                                         text-slate-800 shadow-sm resize-none focus:outline-none focus:ring-2
+                                         focus:ring-blue-500 focus:border-blue-500 transition-shadow"></textarea>
+                      </div>
+                      <div>
+                        <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">專家建議處置</label>
+                        <textarea id="nb-skill-action" rows="2"
+                                  placeholder="例：通知 PE 複查，同時暫停相關機台進料"
+                                  class="w-full bg-white border border-slate-300 rounded-md p-3 text-sm font-medium
+                                         text-slate-800 shadow-sm resize-none focus:outline-none focus:ring-2
+                                         focus:ring-blue-500 focus:border-blue-500 transition-shadow"></textarea>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Skill system check (collapsible) -->
+                  <details class="mt-4">
+                    <summary class="text-[11px] font-bold text-slate-400 uppercase tracking-widest cursor-pointer
+                                    hover:text-purple-600 select-none list-none flex items-center gap-1.5 transition-colors">
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                      </svg>
+                      ⚙️ Skill 底層設定檢查（展開）
+                    </summary>
+                    <div class="mt-2 p-3 bg-white border border-purple-100 rounded-lg text-xs space-y-1"
+                         id="nb-skill-system-check">
+                      <p class="text-slate-400 italic">選擇 Skill 後顯示設定摘要</p>
+                    </div>
+                  </details>
+
+                  <!-- L3: MCP card -->
+                  <div class="bg-white rounded-md shadow-sm border border-slate-200 border-l-[4px] border-l-emerald-500 p-4 mt-4">
+
+                    <div class="flex items-center justify-between mb-4">
+                      <div class="flex items-center gap-2">
+                        <span class="text-[10px] font-bold text-emerald-700 uppercase tracking-widest
+                                     bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-200">L3</span>
+                        <h4 class="font-bold text-xs text-emerald-900">資料節點 (MCP)</h4>
+                      </div>
+                      <div class="flex rounded-md border border-slate-200 overflow-hidden shadow-sm">
+                        <button id="nb-mcp-mode-select" onclick="_nbSetMcpMode('select')"
+                                class="px-4 py-1.5 bg-emerald-600 text-white text-xs font-bold transition-colors">選擇現有</button>
+                        <button id="nb-mcp-mode-new" onclick="_nbSetMcpMode('new')"
+                                class="px-4 py-1.5 bg-white text-slate-600 hover:bg-slate-50 text-xs font-medium transition-colors">建立全新</button>
+                      </div>
+                    </div>
+
+                    <!-- MCP: select existing -->
+                    <div id="nb-mcp-select-panel">
+                      <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">選擇已有 MCP</label>
+                      <select id="nb-mcp-select"
+                              class="w-full bg-white border border-slate-300 rounded-md px-3 py-2.5 text-sm font-medium
+                                     text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500
+                                     focus:border-blue-500 transition-shadow"
+                              onchange="_nbOnMcpSelect()">
+                        <option value="">— 請選擇 —</option>
+                      </select>
+                      <div id="nb-mcp-lock-badge" class="hidden mt-2"></div>
+                      <div id="nb-mcp-params-hint" class="mt-2"></div>
+                      <!-- Fetch & Preview button (select mode) -->
+                      <button onclick="_nbFetchPreview()"
+                              class="mt-3 flex items-center gap-1.5 text-xs text-emerald-700 font-semibold
+                                     border border-emerald-300 bg-emerald-50 hover:bg-emerald-100
+                                     rounded-lg px-3 py-1.5 transition-colors">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                        </svg>
+                        👁️ 撈取與預覽樣本 (Fetch & Preview)
+                      </button>
+                    </div>
+
+                    <!-- MCP: build new -->
+                    <div id="nb-mcp-new-panel" class="hidden space-y-4">
+                      <div class="grid grid-cols-2 gap-4">
+                        <div>
+                          <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">MCP 名稱 *</label>
+                          <input id="nb-mcp-name" type="text" placeholder="例：Query SPC Data"
+                                 class="w-full bg-white border border-slate-300 rounded-md p-3 text-sm font-medium
+                                        text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500
+                                        focus:border-blue-500 transition-shadow">
+                        </div>
+                        <div>
+                          <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">Data Subject</label>
+                          <select id="nb-mcp-ds"
+                                  class="w-full bg-white border border-slate-300 rounded-md px-3 py-2.5 text-sm font-medium
+                                         text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500
+                                         focus:border-blue-500 transition-shadow"
+                                  onchange="_nbOnDsChange()">
+                            <option value="">— 請選擇 —</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div>
+                        <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">MCP 說明</label>
+                        <input id="nb-mcp-desc" type="text" placeholder="例：查詢 SPC 連續異常資料並計算統計值"
+                               class="w-full bg-white border border-slate-300 rounded-md p-3 text-sm font-medium
+                                      text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500
+                                      focus:border-blue-500 transition-shadow">
+                      </div>
+                      <!-- Dynamic param form generated by _nbOnDsChange() -->
+                      <div id="nb-mcp-sample-form"></div>
+                      <!-- Fetch & Preview button (new mode) -->
+                      <button onclick="_nbFetchPreview()"
+                              class="flex items-center gap-1.5 text-xs text-emerald-700 font-semibold
+                                     border border-emerald-300 bg-emerald-50 hover:bg-emerald-100
+                                     rounded-lg px-3 py-1.5 transition-colors">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                        </svg>
+                        👁️ 撈取與預覽樣本 (Fetch & Preview)
+                      </button>
+                      <div>
+                        <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">加工意圖 (Processing Intent)</label>
+                        <textarea id="nb-mcp-intent" rows="3"
+                                  placeholder="例：計算 SPC 數據的均值、UCL、LCL，繪製 2 張 trend chart（不同顏色區分正常/超限）"
+                                  class="w-full bg-white border border-slate-300 rounded-md p-3 text-sm font-medium
+                                         text-slate-800 shadow-sm resize-none focus:outline-none focus:ring-2
+                                         focus:ring-blue-500 focus:border-blue-500 transition-shadow"></textarea>
+                      </div>
+                    </div>
+
+                    <!-- Data Review (collapsible, grid format) -->
+                    <details id="nb-data-review-details" class="mt-4">
+                      <summary class="text-[11px] font-bold text-slate-500 uppercase tracking-widest cursor-pointer
+                                      hover:text-emerald-600 select-none list-none flex items-center gap-1.5 transition-colors">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                        👁️ Data Review — 原始資料（展開）
+                      </summary>
+                      <div class="mt-2 max-h-56 overflow-y-auto rounded-lg border border-slate-200">
+                        <div id="nb-data-review">
+                          <p class="text-xs text-slate-400 italic p-3">撈取資料後呈現於此</p>
+                        </div>
+                      </div>
+                    </details>
+
+                    <!-- Format Review (collapsible, grid format) -->
+                    <details id="nb-format-review-details" class="mt-2">
+                      <summary class="text-[11px] font-bold text-emerald-600 uppercase tracking-widest cursor-pointer
+                                      hover:text-emerald-800 select-none list-none flex items-center gap-1.5 transition-colors">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                        📐 Format Review — Output Schema（展開）
+                      </summary>
+                      <div class="mt-2 max-h-48 overflow-y-auto rounded-lg border border-emerald-200">
+                        <div id="nb-format-review">
+                          <p class="text-xs text-slate-400 italic p-3">執行後輸出 Schema 呈現於此</p>
+                        </div>
+                      </div>
+                    </details>
+
+                  </div><!-- /L3 MCP -->
+                </div><!-- /L2 Skill -->
+              </div><!-- /L1 Task -->
+
+              <!-- Event Preview (auto-updates when Skill is selected) -->
+              <div id="nb-event-preview-section" class="mt-4">
+                <div class="border border-slate-200 rounded-lg p-3 bg-slate-50/40 text-xs text-slate-400 italic">
+                  ← 請先選擇 Skill，系統將自動預覽異常時觸發的 Event 格式
+                </div>
+              </div>
+
+            </div><!-- /LEFT builder -->
+
+            <!-- ══ RIGHT: Run Panel with dual tabs ══ -->
+            <div id="nb-panel-right"
+                 class="w-full xl:w-1/2 flex flex-col bg-white min-h-72 xl:min-h-0">
+
+              <!-- Tab bar -->
+              <div class="flex-shrink-0 flex items-center border-b border-slate-200 bg-white">
+                <button id="nb-rtab-btn-logs" onclick="_nbSwitchRightTab('logs')"
+                        class="px-5 py-3 text-xs font-bold text-blue-700 border-b-2 border-blue-600 transition-colors">
+                  📋 Terminal Logs
+                </button>
+                <button id="nb-rtab-btn-report" onclick="_nbSwitchRightTab('report')"
+                        class="px-5 py-3 text-xs font-medium text-slate-500 border-b-2 border-transparent
+                               hover:text-slate-700 transition-colors">
+                  📊 Execution Report
+                </button>
+                <div class="ml-auto flex items-center gap-3 px-4">
+                  <span id="nb-console-status-dot" class="hidden w-2 h-2 rounded-full bg-blue-500"
+                        style="animation: ping 1.2s cubic-bezier(0,0,0.2,1) infinite;"></span>
+                </div>
+              </div>
+
+              <!-- LOGS tab -->
+              <div id="nb-rtab-logs" class="flex-1 overflow-y-auto bg-slate-50 flex flex-col">
+                <!-- Placeholder -->
+                <div id="nb-console-placeholder"
+                     class="flex flex-col items-center justify-center flex-1 text-slate-400 py-10">
+                  <svg class="w-10 h-10 mb-3 opacity-25" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                          d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                  </svg>
+                  <p class="text-sm font-medium text-slate-500">點擊 ▶ Run 執行巡檢模擬</p>
+                  <p class="text-xs mt-1 text-slate-400">先設定左側 Skill 與 MCP 後再執行</p>
+                </div>
+                <!-- Execution Log (light terminal style) -->
+                <div id="nb-exec-log"
+                     class="hidden m-4 bg-white border border-slate-200 rounded-xl overflow-hidden font-mono text-xs">
+                  <div class="bg-slate-100 border-b border-slate-200 px-4 py-2 text-[11px]
+                               font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M8 9l3 3-3 3m5 0h3"/>
+                    </svg>
+                    執行記錄
+                  </div>
+                  <div id="nb-exec-log-lines" class="p-4 space-y-0.5 text-slate-700 overflow-x-hidden"></div>
+                </div>
+              </div>
+
+              <!-- REPORT tab (hidden by default) -->
+              <div id="nb-rtab-report" class="hidden flex-1 overflow-y-auto bg-white">
+
+                <!-- Skill Diagnosis Layer -->
+                <div id="nb-skill-result" class="hidden mx-4 mt-4 mb-3">
+                  <div class="text-[11px] font-bold text-slate-500 uppercase tracking-widest
+                              border-b border-slate-200 pb-2 mb-3 flex items-center gap-1.5">
+                    <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                    </svg>
+                    Skill 診斷報告
+                  </div>
+                  <div id="nb-skill-diagnosis-card"></div>
+                </div>
+
+                <!-- MCP Evidence Layer -->
+                <div id="nb-mcp-result"
+                     class="hidden mx-4 mb-4 bg-emerald-50/30 border border-slate-200
+                            border-l-4 border-l-emerald-500 rounded-xl p-4">
+                  <div class="text-[11px] font-bold text-emerald-700 uppercase tracking-widest
+                              border-b border-emerald-100 pb-2 mb-3 flex items-center gap-1.5">
+                    <svg class="w-3 h-3 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"/>
+                    </svg>
+                    MCP 佐證資料
+                  </div>
+                  <div class="flex gap-0 mb-0 border-b border-emerald-100">
+                    <button id="nb-tab-charting" onclick="_nbSwitchMcpTab('charting')"
+                            class="text-xs px-4 py-2 text-emerald-700 border-b-2 border-emerald-600
+                                   font-bold transition-colors">📊 Charting</button>
+                    <button id="nb-tab-summary" onclick="_nbSwitchMcpTab('summary')"
+                            class="text-xs px-4 py-2 text-slate-500 border-b-2 border-transparent
+                                   hover:text-slate-700 font-medium transition-colors">📑 Summary Data</button>
+                    <button id="nb-tab-raw" onclick="_nbSwitchMcpTab('raw')"
+                            class="text-xs px-4 py-2 text-slate-500 border-b-2 border-transparent
+                                   hover:text-slate-700 font-medium transition-colors">💾 Raw Data</button>
+                  </div>
+                  <div id="nb-mcp-tab-charting" class="pt-3 min-h-24"></div>
+                  <div id="nb-mcp-tab-summary" class="hidden pt-3"></div>
+                  <div id="nb-mcp-tab-raw" class="hidden pt-3"></div>
+                </div>
+
+              </div><!-- /REPORT tab -->
+
+            </div><!-- /RIGHT panel -->
+
+          </div><!-- /body split -->
+        </div><!-- /view-nested-builder -->
+
+
+        <!-- ══ DIAGNOSE VIEW ══ -->
+        <div id="view-diagnose" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
+
+          <!-- Mobile-only view toggle bar (hidden on desktop via CSS) -->
+          <div id="mobile-view-toggle"
+               class="flex-shrink-0 flex items-center gap-2 px-3 py-2
+                      bg-white border-b border-slate-200">
+            <button id="mobile-chat-btn"
+              onclick="_switchMobileView('chat')"
+              class="mobile-toggle-btn mobile-toggle-active flex-1 flex items-center justify-center gap-1.5">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+              </svg>
+              <span data-i18n="mobile-chat">對話</span>
+            </button>
+            <div class="w-px h-5 bg-slate-200"></div>
+            <button id="mobile-ws-btn"
+              onclick="_switchMobileView('workspace')"
+              class="mobile-toggle-btn flex-1 flex items-center justify-center gap-1.5">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0119 5.414V19a2 2 0 01-2 2z"/>
+              </svg>
+              <span data-i18n="mobile-workspace">報告</span>
+            </button>
+          </div>
+
+          <!-- Panels container — flex-row on desktop, relative on mobile -->
+          <div id="diagnose-panels" class="flex flex-1 min-h-0 overflow-hidden">
+
+          <!-- Chat Panel (LEFT, 30%) — Event-Driven layout -->
+          <div id="chat-panel" class="chat-panel-col flex flex-col min-w-0 relative">
+
+            <!-- v13 Agent Mode Toggle -->
+            <div class="flex-shrink-0 flex items-center justify-between px-3 py-1.5
+                        border-b border-slate-100 bg-slate-50">
+              <span class="text-[10px] text-slate-400 font-medium">對話模式</span>
+              <div class="flex bg-white rounded-md border border-slate-200 text-[10px] font-semibold">
+                <button id="chat-mode-v12" onclick="_setChatMode('v12')"
+                  class="px-2.5 py-1 rounded-l-md bg-blue-600 text-white transition-all">
+                  Copilot
+                </button>
+                <button id="chat-mode-v13" onclick="_setChatMode('v13')"
+                  class="px-2.5 py-1 rounded-r-md text-slate-500 hover:text-slate-700 transition-all">
+                  Agent v13
+                </button>
+              </div>
+            </div>
+
+            <div id="chat-history" class="flex-1 overflow-y-auto p-4 space-y-3">
+              <div class="text-center py-8">
+                <p class="text-xs text-slate-400 bg-white border border-slate-200 inline-block px-3 py-1 rounded-full"
+                   data-i18n="chat-assistant">
+                  對話助手
+                </p>
+              </div>
+            </div>
+
+            <!-- Input Area -->
+            <div class="flex-shrink-0 border-t border-slate-200 p-4 bg-white">
+              <!-- ⚡ Quick Trigger Button (CRUCIAL) -->
+              <button onclick="_simulateTrigger('⚡ 模擬觸發：TETCH01 PM2 發生 SPC OOC')"
+                class="w-full mb-2 text-left text-xs px-3 py-2 rounded-lg
+                       bg-amber-50 border border-amber-200 text-amber-700
+                       hover:bg-amber-100 hover:border-amber-300
+                       transition-colors flex items-center gap-2">
+                <svg class="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                </svg>
+                <span data-i18n="sim-trigger">⚡ 模擬觸發：TETCH01 PM2 發生 SPC OOC</span>
+              </button>
+
+              <!-- Copilot tool tag (shown when a tool is pre-selected via slash menu) -->
+              <div id="copilot-tool-tag-wrap" class="hidden"></div>
+
+              <!-- v15.4 Tool Palette — quick tool discovery above input -->
+              <div class="relative mb-1.5" id="tool-palette-wrap">
+                <button onclick="_toolPaletteToggle()"
+                        class="flex items-center gap-1.5 text-xs text-purple-600 hover:text-purple-700 font-semibold transition-colors group">
+                  <svg class="w-3.5 h-3.5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                  </svg>
+                  <span>我的工具庫</span>
+                  <span id="tool-palette-count"
+                        class="hidden bg-purple-100 text-purple-700 text-[10px] rounded-full px-1.5 font-bold leading-5"></span>
+                </button>
+                <!-- Dropdown panel — floats above input row -->
+                <div id="tool-palette-panel"
+                     class="hidden absolute bottom-full left-0 mb-2 bg-white border border-slate-200 rounded-xl shadow-2xl z-50"
+                     style="width:min(420px,90vw);max-height:440px;overflow-y:auto;">
+                  <div id="tool-palette-content" class="p-3"></div>
+                </div>
+              </div>
+
+              <!-- Input row — wrapper has position:relative so slash menu can pop above -->
+              <div class="flex gap-2 items-end" style="position:relative;">
+                <!-- Slash command popup — rendered by JS into #slash-menu-anchor -->
+                <div id="slash-menu-anchor" style="position:absolute;bottom:100%;left:0;right:48px;"></div>
+
+                <textarea id="issue-input"
+                  placeholder="描述症狀，或輸入 '/' 呼叫工具... 例如：我想查 N97A45.00 在 3200 站點的 APC 資料"
+                  class="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2.5
+                         text-sm text-slate-900 resize-none focus:outline-none focus:border-blue-400
+                         placeholder-slate-400 leading-relaxed"
+                  rows="3"
+                  oninput="handleInputChange(event)"
+                  onkeydown="handleInputKey(event)"></textarea>
+                <button id="send-btn" onclick="_sendCopilotMessage()"
+                  class="flex-shrink-0 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-200
+                         disabled:text-slate-400 rounded-xl p-3 transition-colors self-end">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+                  </svg>
+                </button>
+              </div>
+              <div class="flex items-center justify-between mt-2">
+                <p class="text-xs text-slate-400" data-i18n="send-hint">Ctrl + Enter 送出</p>
+                <button onclick="_clearAgentSession()"
+                  title="清除對話歷史，開啟全新 Session（解決 Token 過高問題）"
+                  class="text-[10px] text-slate-400 hover:text-red-500 flex items-center gap-1 transition-colors">
+                  🗑 新對話
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Report Panel (RIGHT, 70% — Multi-Tab Workspace) -->
+          <div id="report-panel"
+               class="workspace-panel-col flex flex-col border-l border-slate-200 overflow-hidden bg-white">
+            <!-- Split-screen workspace: left 70% Data & Chart, right 30% Analysis from AI -->
+            <div id="ws-split-container" class="flex-1 flex min-h-0 overflow-hidden">
+
+              <!-- Left pane: Data & Chart (70%) -->
+              <div id="ws-data-pane" class="flex flex-col min-h-0 overflow-hidden" style="flex:7">
+                <div class="flex-shrink-0 flex items-center px-4 py-2 bg-white border-b border-slate-100">
+                  <span class="text-xs font-bold text-slate-500 uppercase tracking-widest">&#128202; Data &amp; Chart</span>
+                </div>
+                <!-- Result history tab bar (shown when ≥2 results exist) -->
+                <div id="ws-data-tab-bar"
+                     class="hidden flex-shrink-0 flex items-center gap-1 px-3 py-1 bg-slate-50 border-b border-slate-200 overflow-x-auto"></div>
+                <div id="ws-data-content" class="flex-1 overflow-y-auto min-h-0 relative">
+                  <div id="workspace-placeholder"
+                    class="flex flex-col items-center justify-center h-full text-slate-400 py-16">
+                    <svg class="w-14 h-14 mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1"
+                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586
+                           a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                    </svg>
+                    <p class="text-sm" data-i18n="report-placeholder">診斷完成後，AI 報告將呈現在此</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Right pane: Shadow Analysis Panel (30%) — v15.2 -->
+              <div id="ws-analysis-pane" class="flex flex-col min-h-0 overflow-hidden bg-slate-50 border-l border-slate-200" style="flex:3">
+
+                <!-- ── Fixed header ── -->
+                <div class="flex-shrink-0 flex items-center justify-between px-3 py-2 bg-white border-b border-slate-100">
+                  <span class="text-[11px] font-bold text-purple-600 uppercase tracking-widest">🔬 AI 分析面板</span>
+                  <span id="shadow-context-label" class="text-[10px] text-slate-400 truncate ml-2 max-w-[160px]">等待資料中...</span>
+                </div>
+
+                <!-- ── Skill result section (hidden until skill executes) ── -->
+                <div id="shadow-skill-section" class="hidden flex-shrink-0 border-b border-slate-200 bg-white px-3 py-2"></div>
+
+                <!-- ── Shadow analysis body ── -->
+                <div id="shadow-analysis-content" class="flex-1 overflow-y-auto min-h-0">
+
+                  <!-- idle -->
+                  <div id="shadow-idle" class="flex flex-col items-center justify-center h-full text-slate-400 py-16 px-4 text-center">
+                    <span class="text-3xl mb-3 opacity-40">🔬</span>
+                    <p class="text-xs font-medium">執行 MCP 或 Skill 後</p>
+                    <p class="text-[11px] mt-1 opacity-70">AI 將自動分析資料集</p>
+                  </div>
+
+                  <!-- running (hidden) -->
+                  <div id="shadow-running" class="hidden flex flex-col items-center justify-center h-40 gap-2 text-slate-400 py-8">
+                    <span class="text-2xl" style="animation:pulse 1.5s ease-in-out infinite">⚡</span>
+                    <p class="text-xs font-medium text-purple-600">影子工程師計算中...</p>
+                    <p id="shadow-decision-text" class="text-[10px] text-slate-400 text-center px-4 leading-relaxed"></p>
+                  </div>
+
+                  <!-- results (hidden) -->
+                  <div id="shadow-results" class="hidden p-3 space-y-2">
+                    <!-- AI intro sentence -->
+                    <p id="shadow-intro" class="text-[11px] text-slate-500 italic leading-relaxed"></p>
+                    <!-- Stat cards grid -->
+                    <div id="shadow-cards-grid" class="grid grid-cols-2 gap-2"></div>
+                    <!-- Feedback bar removed — agent auto-manages tool saving -->
+                  </div>
+
+                </div><!-- /shadow-analysis-content -->
+              </div><!-- /ws-analysis-pane -->
+
+            </div><!-- /ws-split-container -->
+            <!-- Agent Console — collapsible terminal at bottom of right panel -->
+            <div id="diag-console" class="flex-shrink-0 bg-slate-900 overflow-hidden"
+                 style="height:34px;transition:height 0.2s ease;">
+              <div class="flex items-center justify-between px-3 py-1.5 bg-slate-800 border-b border-slate-700">
+                <div class="flex items-center gap-2">
+                  <span id="diag-console-dot" class="hidden w-2 h-2 rounded-full bg-blue-400"
+                        style="animation:ping 1.2s cubic-bezier(0,0,0.2,1) infinite;"></span>
+                  <svg class="w-3 h-3 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M8 9l3 3-3 3m5 0h3"/>
+                  </svg>
+                  <span class="text-[11px] font-mono font-bold text-slate-400 uppercase tracking-widest">Agent Console</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <!-- v16: 6-stage progress bar — backend stages 1,2,4,5,6; dot 3 = tool loop -->
+                  <div id="v14-stage-bar" class="flex items-center gap-1" title="v16 六階段進度">
+                    <div class="v14-stage-dot w-5 h-5 rounded-full bg-slate-600 text-[9px] flex items-center justify-center font-bold text-slate-400" data-stage="1" title="S1 · Context Load — 記憶檢索 + Soul 載入">1</div>
+                    <div class="w-3 h-px bg-slate-600"></div>
+                    <div class="v14-stage-dot w-5 h-5 rounded-full bg-slate-600 text-[9px] flex items-center justify-center font-bold text-slate-400" data-stage="2" title="S2 · Planning — 意圖規劃">2</div>
+                    <div class="w-3 h-px bg-slate-600"></div>
+                    <div class="v14-stage-dot w-5 h-5 rounded-full bg-slate-600 text-[9px] flex items-center justify-center font-bold text-slate-400" data-stage="3" title="S3 · Tool Execution — 工具呼叫 (backend stage 4)">3</div>
+                    <div class="w-3 h-px bg-slate-600"></div>
+                    <div class="v14-stage-dot w-5 h-5 rounded-full bg-slate-600 text-[9px] flex items-center justify-center font-bold text-slate-400" data-stage="4" title="S4 · Reasoning — 邏輯彙整 (backend stage 4)">4</div>
+                    <div class="w-3 h-px bg-slate-600"></div>
+                    <div class="v14-stage-dot w-5 h-5 rounded-full bg-slate-600 text-[9px] flex items-center justify-center font-bold text-slate-400" data-stage="5" title="S5 · Self-Critique — 數值來源驗證 (backend stage 5)">5</div>
+                    <div class="w-3 h-px bg-slate-600"></div>
+                    <div class="v14-stage-dot w-5 h-5 rounded-full bg-slate-600 text-[9px] flex items-center justify-center font-bold text-slate-400" data-stage="6" title="S6 · Memory Write — 記憶寫入 (backend stage 6)">6</div>
+                  </div>
+                  <button onclick="_openTraceInspector()"
+                          class="text-[10px] font-mono text-purple-400 hover:text-purple-200 border border-purple-700/50 hover:border-purple-400/60 rounded px-1.5 py-0.5 transition-colors">
+                    Detail 🔍
+                  </button>
+                  <button onclick="_diagConsoleClear()"
+                          class="text-[10px] font-mono text-slate-500 hover:text-slate-300 transition-colors">clear</button>
+                  <button onclick="_diagConsoleToggle()" class="text-slate-500 hover:text-slate-300 transition-colors">
+                    <svg id="diag-console-chevron" class="w-3.5 h-3.5" style="transition:transform 0.2s;"
+                         fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div id="diag-console-lines" class="overflow-y-auto overflow-x-hidden p-3 font-mono text-xs space-y-0.5"
+                   style="height:184px;"></div>
+            </div>
+          </div><!-- /report-panel -->
+
+          </div><!-- /diagnose-panels -->
+        </div><!-- /view-diagnose -->
+
+
+        <!-- ══ SYSTEM MCPs VIEW ══ -->
+        <div id="view-system-mcps" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
+          <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
+                      border-b border-slate-200 bg-white">
+            <div>
+              <h2 class="font-semibold text-base flex items-center gap-2">
+                <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <ellipse cx="12" cy="5" rx="9" ry="3"/>
+                  <path d="M21 12c0 1.657-4.03 3-9 3S3 13.657 3 12"/>
+                  <path d="M3 5v14c0 1.657 4.03 3 9 3s9-1.343 9-3V5"/>
+                  <path d="M9 12l2 2 4-4" stroke-width="1.8"/>
+                </svg>
+                System MCP 管理
+              </h2>
+              <p class="text-xs text-slate-500 mt-0.5">定義資料源連線設定，供 Custom MCP 呼叫 (IT Sponsor)</p>
+            </div>
+            <button onclick="openDrawer('smc-create')"
+              class="builder-btn-primary text-sm px-4 py-2">
+              + 新增 System MCP
+            </button>
+          </div>
+          <div id="smc-list" class="flex-1 overflow-y-auto p-6">
+            <div class="text-center text-slate-600 py-12">載入中...</div>
+          </div>
+        </div>
+
+
+        <!-- ══ MOCK DATA STUDIO VIEW ══ -->
+        <div id="view-mock-data-studio" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
+          <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
+                      border-b border-slate-200 bg-white">
+            <div>
+              <h2 class="font-semibold text-base flex items-center gap-2">
+                <svg class="w-4 h-4 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="3" width="7" height="7" rx="1"/>
+                  <rect x="14" y="3" width="7" height="7" rx="1"/>
+                  <path d="M3 14h7v7H3z"/>
+                  <circle cx="17.5" cy="17.5" r="3.5"/>
+                  <path d="M17.5 16v1.5l1 1"/>
+                </svg>
+                Mock Data Studio
+              </h2>
+              <p class="text-xs text-slate-500 mt-0.5">用 Python 建立模擬資料 API，供 System MCP 使用</p>
+            </div>
+            <button onclick="_mdsOpenCreate()"
+              class="builder-btn-primary text-sm px-4 py-2">
+              + 新增 Mock 資料源
+            </button>
+          </div>
+          <!-- List -->
+          <div id="mds-list" class="flex-1 overflow-y-auto p-6 space-y-3">
+            <div class="text-center text-slate-400 py-12 text-sm">載入中...</div>
+          </div>
+        </div>
+
+        <!-- ══ EVENT TYPES VIEW ══ -->
+        <div id="view-event-types" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
+          <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
+                      border-b border-slate-200 bg-white">
+            <div>
+              <h2 class="font-semibold text-base flex items-center gap-2">
+                <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+                  <rect x="9" y="3" width="6" height="4" rx="1"/>
+                  <path d="M9 12h6M9 16h4"/>
+                </svg>
+                <span data-i18n="et-title">Event Type Builder</span>
+              </h2>
+              <p class="text-xs text-slate-500 mt-0.5" data-i18n="et-sub">定義異常事件與屬性 (Expert/PE)</p>
+            </div>
+            <button onclick="openDrawer('et-create')"
+              class="builder-btn-primary text-sm px-4 py-2" data-i18n="et-add">
+              + 新增 Event Type
+            </button>
+          </div>
+          <div id="et-list" class="flex-1 overflow-y-auto p-6">
+            <div class="text-center text-slate-600 py-12">載入中...</div>
+          </div>
+        </div>
+
+
+        <!-- ══ MCP BUILDER VIEW ══ -->
+        <div id="view-mcp-builder" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
+
+          <!-- LIST STATE -->
+          <div id="mce-list-state" class="flex flex-col flex-1 overflow-hidden">
+            <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
+                        border-b border-slate-200 bg-white">
+              <div>
+                <h2 class="font-semibold text-base flex items-center gap-2">
+                  <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                       stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06
+                             a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09
+                             A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83
+                             l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09
+                             A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83
+                             l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09
+                             a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83
+                             l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09
+                             a1.65 1.65 0 0 0-1.51 1z"/>
+                  </svg>
+                  <span data-i18n="mcp-title">MCP Builder</span>
+                </h2>
+                <p class="text-xs text-slate-500 mt-0.5" data-i18n="mcp-sub">資料加工與視覺化建構器 (Expert/PE)</p>
+              </div>
+              <button onclick="_mcpOpenEditor(null)"
+                class="builder-btn-primary text-sm px-4 py-2" data-i18n="mcp-add">
+                + 新增 MCP
+              </button>
+            </div>
+            <div id="mcp-list" class="flex-1 overflow-y-auto p-6">
+              <div class="text-center text-slate-600 py-12">載入中...</div>
+            </div>
+          </div>
+
+          <!-- EDITOR STATE (hidden until _mcpOpenEditor is called) -->
+          <div id="mcp-editor" class="hidden flex-col flex-1 overflow-hidden">
+            <!-- Editor header -->
+            <div class="flex-shrink-0 flex items-center justify-between px-6 py-3 border-b border-slate-200 bg-white">
+              <div class="flex items-center gap-3">
+                <button id="mcp-back-btn" onclick="_mcpBackToList()"
+                        class="text-slate-400 hover:text-slate-700 text-sm flex items-center gap-1 transition-colors">
+                  ← MCP 列表
+                </button>
+                <span class="text-slate-300 text-lg">|</span>
+                <span id="mcp-editor-title" class="font-semibold text-sm text-slate-700">新增 MCP</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <button id="mce-detail-btn" onclick="_openBuilderDetail('mcp')"
+                        class="hidden builder-btn-secondary text-sm px-3 py-2 gap-1 items-center"
+                        title="Detail Inspector">🔍 Details</button>
+                <button onclick="_mcpSave()" class="builder-btn-secondary text-sm px-4 py-2">💾 儲存</button>
+                <button id="mce-run-btn" onclick="_mcpTryRun()" class="builder-btn-primary text-sm px-4 py-2">▶ Try Run</button>
+              </div>
+            </div>
+            <!-- L/R split body -->
+            <div class="flex-1 flex flex-col xl:flex-row min-h-0 overflow-hidden">
+
+              <!-- LEFT: MCP settings -->
+              <div id="mce-builder-left"
+                   class="w-full xl:w-1/2 overflow-y-auto p-6 bg-slate-100
+                          border-b xl:border-b-0 xl:border-r border-slate-200">
+                <input type="hidden" id="mce-edit-id">
+
+                <!-- L3 card -->
+                <div class="bg-white rounded-xl shadow-md border border-slate-200 border-l-[6px] border-l-emerald-500 p-5">
+                  <div class="flex items-center gap-2 mb-4">
+                    <span class="text-[10px] font-bold text-emerald-700 uppercase tracking-widest
+                                 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-200">L3</span>
+                    <h3 class="font-bold text-sm text-emerald-900">資料節點 (MCP)</h3>
+                  </div>
+                  <div class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                      <div>
+                        <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">MCP 名稱 *</label>
+                        <input id="mce-edit-name" type="text" placeholder="例：Query SPC Data"
+                               class="w-full bg-white border border-slate-300 rounded-md p-3 text-sm font-medium
+                                      text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-400
+                                      focus:border-emerald-400 transition-shadow">
+                      </div>
+                      <div>
+                        <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">Data Subject</label>
+                        <select id="mce-edit-ds"
+                                class="w-full bg-white border border-slate-300 rounded-md px-3 py-2.5 text-sm font-medium
+                                       text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-400
+                                       transition-shadow"
+                                onchange="_mceOnDsChange()">
+                          <option value="">— 請選擇 —</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">MCP 說明</label>
+                      <input id="mce-edit-desc" type="text" placeholder="例：查詢 SPC 連續異常資料並計算統計值"
+                             class="w-full bg-white border border-slate-300 rounded-md p-3 text-sm font-medium
+                                    text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-400
+                                    transition-shadow">
+                    </div>
+                    <div id="mce-edit-sample-form"></div>
+                    <button onclick="_mceFetchPreview()"
+                            class="flex items-center gap-1.5 text-xs text-emerald-700 font-semibold
+                                   border border-emerald-300 bg-emerald-50 hover:bg-emerald-100
+                                   rounded-lg px-3 py-1.5 transition-colors">
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                      </svg>
+                      👁️ 撈取與預覽樣本 (Fetch &amp; Preview)
+                    </button>
+                    <div>
+                      <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 block">加工意圖 (Processing Intent)</label>
+                      <textarea id="mce-edit-intent" rows="3"
+                                placeholder="例：計算 SPC 數據的均值、UCL、LCL，繪製 2 張 trend chart（不同顏色區分正常/超限）"
+                                class="w-full bg-white border border-slate-300 rounded-md p-3 text-sm font-medium
+                                       text-slate-800 shadow-sm resize-none focus:outline-none focus:ring-2
+                                       focus:ring-emerald-400 transition-shadow"></textarea>
+                    </div>
+                    <details id="mce-data-review-details" class="mt-2">
+                      <summary class="text-[11px] font-bold text-slate-500 uppercase tracking-widest cursor-pointer
+                                      hover:text-emerald-600 select-none list-none flex items-center gap-1.5 transition-colors">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                        👁️ Data Review — 原始資料（展開）
+                      </summary>
+                      <div class="mt-2 max-h-56 overflow-y-auto rounded-lg border border-slate-200">
+                        <div id="mce-data-review"><p class="text-xs text-slate-400 italic p-3">撈取資料後呈現於此</p></div>
+                      </div>
+                    </details>
+                    <details id="mce-format-review-details" class="mt-2">
+                      <summary class="text-[11px] font-bold text-emerald-600 uppercase tracking-widest cursor-pointer
+                                      hover:text-emerald-800 select-none list-none flex items-center gap-1.5 transition-colors">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                        📐 Format Review — Output Schema（展開）
+                      </summary>
+                      <div class="mt-2 max-h-48 overflow-y-auto rounded-lg border border-emerald-200">
+                        <div id="mce-format-review"><p class="text-xs text-slate-400 italic p-3">執行後輸出 Schema 呈現於此</p></div>
+                      </div>
+                    </details>
+                  </div>
+                </div>
+              </div>
+
+              <!-- RIGHT: Run results -->
+              <div id="mce-panel-right" class="w-full xl:w-1/2 flex flex-col bg-white min-h-72 xl:min-h-0">
+                <!-- Tab bar -->
+                <div class="flex-shrink-0 flex items-center border-b border-slate-200 bg-white">
+                  <button id="mce-rtab-btn-logs" onclick="_mceSwitchRightTab('logs')"
+                          class="px-5 py-3 text-xs font-bold text-blue-700 border-b-2 border-blue-600 transition-colors">
+                    📋 Terminal Logs
+                  </button>
+                  <button id="mce-rtab-btn-report" onclick="_mceSwitchRightTab('report')"
+                          class="px-5 py-3 text-xs font-medium text-slate-500 border-b-2 border-transparent
+                                 hover:text-slate-700 transition-colors">
+                    📊 Execution Report
+                  </button>
+                  <div class="ml-auto flex items-center gap-3 px-4">
+                    <span id="mce-console-status-dot" class="hidden w-2 h-2 rounded-full bg-blue-500"
+                          style="animation: ping 1.2s cubic-bezier(0,0,0.2,1) infinite;"></span>
+                  </div>
+                </div>
+                <!-- LOGS tab -->
+                <div id="mce-rtab-logs" class="flex-1 overflow-y-auto bg-slate-50 flex flex-col">
+                  <div id="mce-console-placeholder"
+                       class="flex flex-col items-center justify-center flex-1 text-slate-400 py-10">
+                    <svg class="w-10 h-10 mb-3 opacity-25" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                            d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                    </svg>
+                    <p class="text-sm font-medium text-slate-500">點擊 ▶ Try Run 執行 MCP 加工</p>
+                    <p class="text-xs mt-1 text-slate-400">先填寫左側 MCP 設定後再執行</p>
+                  </div>
+                  <div id="mce-exec-log"
+                       class="hidden m-4 bg-white border border-slate-200 rounded-xl overflow-hidden font-mono text-xs">
+                    <div class="bg-slate-100 border-b border-slate-200 px-4 py-2 text-[11px]
+                                 font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3"/>
+                      </svg>
+                      執行記錄
+                    </div>
+                    <div id="mce-exec-log-lines" class="p-4 space-y-0.5 text-slate-700 overflow-x-hidden"></div>
+                  </div>
+                </div>
+                <!-- REPORT tab -->
+                <div id="mce-rtab-report" class="hidden flex-1 overflow-y-auto bg-white">
+                  <div id="mce-mcp-result"
+                       class="hidden mx-4 my-4 bg-emerald-50/30 border border-slate-200
+                              border-l-4 border-l-emerald-500 rounded-xl p-4">
+                    <div class="text-[11px] font-bold text-emerald-700 uppercase tracking-widest
+                                border-b border-emerald-100 pb-2 mb-3 flex items-center gap-1.5">
+                      <svg class="w-3 h-3 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"/>
+                      </svg>
+                      MCP 執行結果
+                    </div>
+                    <div class="flex gap-0 mb-0 border-b border-emerald-100">
+                      <button id="mce-tab-charting" onclick="_mceSwitchMcpTab('charting')"
+                              class="text-xs px-4 py-2 text-emerald-700 border-b-2 border-emerald-600 font-bold transition-colors">📊 Charting</button>
+                      <button id="mce-tab-summary" onclick="_mceSwitchMcpTab('summary')"
+                              class="text-xs px-4 py-2 text-slate-500 border-b-2 border-transparent hover:text-slate-700 font-medium transition-colors">📑 Summary Data</button>
+                      <button id="mce-tab-raw" onclick="_mceSwitchMcpTab('raw')"
+                              class="text-xs px-4 py-2 text-slate-500 border-b-2 border-transparent hover:text-slate-700 font-medium transition-colors">💾 Raw Data</button>
+                    </div>
+                    <div id="mce-mcp-tab-charting" class="pt-3 min-h-24"></div>
+                    <div id="mce-mcp-tab-summary" class="hidden pt-3"></div>
+                    <div id="mce-mcp-tab-raw" class="hidden pt-3"></div>
+                  </div>
+                </div>
+                <!-- Feedback section — sticky bottom bar, outside scroll area -->
+                <div id="mce-feedback-section"
+                     class="hidden flex-shrink-0 border-t border-slate-200 bg-white px-4 py-3 flex flex-col gap-2">
+                  <div id="mce-reflection-banner" class="hidden bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    <div class="text-[10px] font-bold text-amber-700 uppercase tracking-widest mb-0.5">💡 AI 反思</div>
+                    <div id="mce-reflection-text" class="text-xs text-amber-800 leading-relaxed"></div>
+                  </div>
+                  <div class="flex items-end gap-2">
+                    <textarea id="mce-feedback-text" rows="2"
+                      placeholder="對結果不滿意？告訴 AI 哪裡不對：例：圖表是空的；應該顯示 OOC 點但沒有..."
+                      class="flex-1 text-xs border border-slate-300 rounded-lg px-3 py-2 resize-none focus:outline-none focus:border-emerald-500"></textarea>
+                    <div class="flex flex-col gap-1.5 flex-shrink-0">
+                      <button onclick="_mceSubmitFeedback(false)" id="mce-feedback-btn-reflect"
+                              class="text-xs px-3 py-1.5 bg-slate-600 hover:bg-slate-500 text-white rounded-lg font-semibold transition-colors whitespace-nowrap">
+                        🔄 修正腳本
+                      </button>
+                      <button onclick="_mceSubmitFeedback(true)" id="mce-feedback-btn-regen"
+                              class="text-xs px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold transition-colors whitespace-nowrap">
+                        ✨ 重新生成
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div><!-- /RIGHT panel -->
+
+            </div><!-- /L/R split -->
+          </div><!-- /mcp-editor -->
+
+        </div><!-- /view-mcp-builder -->
+
+
+        <!-- ══ SKILL BUILDER VIEW ══ -->
+        <div id="view-skill-builder" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
+
+          <!-- ══ LIST STATE ══ -->
+          <div id="sk-list-state" class="flex flex-col flex-1 overflow-hidden">
+            <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
+                        border-b border-slate-200 bg-white">
+              <div>
+                <h2 class="font-semibold text-base flex items-center gap-2">
+                  <svg class="w-4 h-4 text-violet-400" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                       stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2a7 7 0 1 1 0 14A7 7 0 0 1 12 2z"/>
+                    <path d="M9 12l2 2 4-4"/>
+                  </svg>
+                  Skill Designer 2.0
+                </h2>
+                <p class="text-xs text-slate-500 mt-0.5">NL → Python Steps · Event-driven + Schedule Trigger</p>
+              </div>
+              <button onclick="_skOpenEditor(null)"
+                class="builder-btn-primary text-sm px-4 py-2">
+                + 新增 Skill
+              </button>
+            </div>
+            <div id="skill-list" class="flex-1 overflow-y-auto p-6 space-y-3">
+              <p class="text-center text-slate-400 py-12 text-sm">載入中…</p>
+            </div>
+          </div>
+
+          <!-- ══ EDITOR STATE ══ -->
+          <div id="sk-editor" class="hidden flex-col flex-1 overflow-hidden">
+
+            <!-- Editor header -->
+            <div class="flex-shrink-0 flex items-center justify-between px-6 py-3
+                        border-b border-slate-200 bg-white">
+              <div class="flex items-center gap-3">
+                <button onclick="_skV18BackToList()"
+                        class="text-slate-400 hover:text-slate-700 text-sm flex items-center gap-1 transition-colors">
+                  ← Skill 列表
+                </button>
+                <span class="text-slate-300 text-lg">|</span>
+                <span id="sk-editor-title" class="font-semibold text-sm text-slate-700">新增 Skill</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <button onclick="_skV18Save()" class="builder-btn-secondary text-sm px-4 py-2">💾 儲存</button>
+                <button id="skv18-try-btn" onclick="_skV18TryRun()" class="builder-btn-primary text-sm px-4 py-2">▶ Try-Run</button>
+              </div>
+            </div>
+
+            <!-- L / R body -->
+            <div class="flex-1 flex min-h-0 overflow-hidden">
+
+              <!-- ── LEFT: Config + NL Steps ────────────────────── -->
+              <div class="w-2/5 flex flex-col overflow-y-auto bg-slate-50
+                          border-r border-slate-200 p-5 space-y-4">
+                <input type="hidden" id="sk-edit-id">
+
+                <!-- Basic info -->
+                <div class="bg-white rounded-xl border border-slate-200 border-l-[5px] border-l-violet-500 p-4 space-y-3">
+                  <div class="text-[10px] font-bold text-violet-700 uppercase tracking-widest">Skill 基本資訊</div>
+                  <div>
+                    <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">名稱 *</label>
+                    <input id="skv18-name" type="text" placeholder="e.g. SPC_OOC_Chamber_Check"
+                           class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800
+                                  bg-white focus:outline-none focus:ring-2 focus:ring-violet-400 transition-shadow">
+                  </div>
+                  <div>
+                    <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">說明</label>
+                    <textarea id="skv18-desc" rows="2" placeholder="Skill 用途說明"
+                              class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800
+                                     bg-white resize-none focus:outline-none focus:ring-2 focus:ring-violet-400"></textarea>
+                  </div>
+                </div>
+
+                <!-- Trigger config -->
+                <div class="bg-white rounded-xl border border-slate-200 border-l-[5px] border-l-blue-500 p-4 space-y-3">
+                  <div class="text-[10px] font-bold text-blue-700 uppercase tracking-widest">觸發設定</div>
+                  <div>
+                    <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">System Event（可選）</label>
+                    <select id="skv18-trigger-event"
+                            class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800
+                                   bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
+                      <option value="">— 無 Event 觸發（排程 only）—</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">觸發模式</label>
+                    <div class="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-semibold">
+                      <button id="skv18-mode-schedule" onclick="_skV18SetMode('schedule')"
+                              class="flex-1 px-3 py-2 bg-white text-slate-500 hover:bg-slate-50 transition-colors">
+                        定期排程
+                      </button>
+                      <button id="skv18-mode-event" onclick="_skV18SetMode('event')"
+                              class="flex-1 px-3 py-2 bg-white text-slate-500 hover:bg-slate-50 border-x border-slate-200 transition-colors">
+                        Event 驅動
+                      </button>
+                      <button id="skv18-mode-both" onclick="_skV18SetMode('both')"
+                              class="flex-1 px-3 py-2 bg-violet-600 text-white transition-colors">
+                        雙觸發
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">可見範圍</label>
+                    <select id="skv18-visibility"
+                            class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800
+                                   bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
+                      <option value="private">Private（僅自己可見）</option>
+                      <option value="public">Public（所有人可見）</option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- NL → Steps generator -->
+                <div class="bg-white rounded-xl border border-slate-200 border-l-[5px] border-l-emerald-500 p-4 space-y-3">
+                  <div class="text-[10px] font-bold text-emerald-700 uppercase tracking-widest flex items-center gap-2">
+                    NL → Python Steps 生成
+                    <span class="text-[9px] text-emerald-500 normal-case tracking-normal font-medium">LLM 自動分解</span>
+                  </div>
+                  <div>
+                    <label class="text-[11px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">自然語言監控邏輯</label>
+                    <textarea id="skv18-nl-desc" rows="5"
+                              placeholder="例：查 DC 快照，找出所有感測器數值。若 chamber_pressure 超出 UCL 17.5，發出 HIGH 告警。"
+                              class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800
+                                     bg-white resize-none focus:outline-none focus:ring-2 focus:ring-emerald-400 leading-relaxed"></textarea>
+                  </div>
+                  <button id="skv18-gen-btn" onclick="_skV18GenerateSteps()"
+                          class="w-full text-sm font-semibold px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500
+                                 text-white rounded-lg transition-colors">
+                    ✨ Generate Steps
+                  </button>
+                </div>
+
+                <!-- NL Steps list -->
+                <div>
+                  <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 px-1">
+                    Steps (NL 描述) — hover 對應右側 Python
+                  </div>
+                  <div id="skv18-nl-steps" class="space-y-2">
+                    <div class="text-center text-slate-400 py-6 text-xs">尚無 Steps，請先 Generate</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ── RIGHT: Python Code + Try-Run ─────────────────── -->
+              <div class="w-3/5 flex flex-col overflow-hidden bg-slate-900">
+
+                <!-- Python steps panel -->
+                <div id="skv18-py-steps" class="flex-1 overflow-y-auto p-5 space-y-4">
+                  <div class="text-center text-slate-500 py-8 text-xs">LLM 生成後 Python 程式碼將顯示於此</div>
+                </div>
+
+                <!-- Try-Run section -->
+                <div class="flex-shrink-0 border-t border-slate-700 bg-slate-800 p-4">
+                  <div class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">
+                    Try-Run — 沙盒測試（不寫入 DB）
+                  </div>
+                  <div class="grid grid-cols-4 gap-2 mb-3">
+                    <div>
+                      <label class="text-[10px] text-slate-400 mb-0.5 block">Event Type</label>
+                      <input id="skv18-try-event-type" type="text" value="SPC_OOC"
+                             class="w-full bg-slate-700 border border-slate-600 text-slate-200 text-xs
+                                    rounded-md px-2 py-1.5 font-mono focus:outline-none focus:border-violet-500">
+                    </div>
+                    <div>
+                      <label class="text-[10px] text-slate-400 mb-0.5 block">Equipment ID</label>
+                      <input id="skv18-try-eqp" type="text" value="EQP-01"
+                             class="w-full bg-slate-700 border border-slate-600 text-slate-200 text-xs
+                                    rounded-md px-2 py-1.5 font-mono focus:outline-none focus:border-violet-500">
+                    </div>
+                    <div>
+                      <label class="text-[10px] text-slate-400 mb-0.5 block">Lot ID</label>
+                      <input id="skv18-try-lot" type="text" value="LOT-0001"
+                             class="w-full bg-slate-700 border border-slate-600 text-slate-200 text-xs
+                                    rounded-md px-2 py-1.5 font-mono focus:outline-none focus:border-violet-500">
+                    </div>
+                    <div>
+                      <label class="text-[10px] text-slate-400 mb-0.5 block">Step</label>
+                      <input id="skv18-try-step" type="text" value="STEP_091"
+                             class="w-full bg-slate-700 border border-slate-600 text-slate-200 text-xs
+                                    rounded-md px-2 py-1.5 font-mono focus:outline-none focus:border-violet-500">
+                    </div>
+                  </div>
+                  <!-- Console -->
+                  <div id="skv18-console"
+                       class="h-40 overflow-y-auto bg-slate-900 rounded-lg border border-slate-700
+                              p-3 space-y-0.5 font-mono text-xs text-slate-300">
+                  </div>
+                </div>
+
+              </div><!-- /RIGHT -->
+            </div><!-- /L-R body -->
+          </div><!-- /sk-editor -->
+
+        </div><!-- /view-skill-builder -->
+
+        <!-- ══ SETTINGS VIEW ══ -->
+        <div id="view-settings" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
+          <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
+                      border-b border-slate-200 bg-white">
+            <div>
+              <h2 class="font-semibold text-base flex items-center gap-2">
+                <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77
+                           a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91
+                           a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+                </svg>
+                <span data-i18n="settings-title">系統大腦調校 (Prompt Settings)</span>
+              </h2>
+              <p class="text-xs text-slate-500 mt-0.5" data-i18n="settings-sub">IT Admin 維護 LLM Prompt 設定</p>
+            </div>
+            <button onclick="_loadSettings()"
+              class="text-xs text-slate-500 hover:text-slate-900 border border-slate-300
+                     hover:border-slate-400 hover:bg-slate-50 rounded-lg px-3 py-1.5 transition-colors"
+              data-i18n="settings-reload">
+              ↺ 重新載入
+            </button>
+          </div>
+          <div id="settings-body" class="flex-1 overflow-y-auto p-6 space-y-8">
+            <div class="text-center text-slate-600 py-12">載入中...</div>
+          </div>
+        </div>
+
+        <!-- ══ AGENT BRAIN VIEW (v13 Context Control Center) ══ -->
+        <div id="view-agent-brain" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
+          <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
+                      border-b border-slate-200 bg-white">
+            <div>
+              <h2 class="font-semibold text-base flex items-center gap-2">
+                <svg class="w-4 h-4 text-purple-500" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.46 2.5 2.5 0 0 1-1.8-3 2.5 2.5 0 0 1-1.8-3A2.5 2.5 0 0 1 2 11a2.5 2.5 0 0 1 1.44-2.25A2.5 2.5 0 0 1 6 6.5V5A2.5 2.5 0 0 1 9.5 2Z"/>
+                  <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.46 2.5 2.5 0 0 0 1.8-3 2.5 2.5 0 0 0 1.8-3A2.5 2.5 0 0 0 22 11a2.5 2.5 0 0 0-1.44-2.25A2.5 2.5 0 0 0 18 6.5V5A2.5 2.5 0 0 0 14.5 2Z"/>
+                </svg>
+                Agent 大腦設定 — Context Control Center
+              </h2>
+              <p class="text-xs text-slate-500 mt-0.5">管理 Soul 鐵律、個人偏好、長期記憶</p>
+            </div>
+          </div>
+
+          <!-- Three-panel layout -->
+          <div class="flex-1 overflow-y-auto p-6 space-y-8">
+
+            <!-- Panel 1: Soul Admin Editor -->
+            <div class="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="font-semibold text-sm text-slate-900">Soul 鐵律編輯器</h3>
+                  <p class="text-xs text-slate-500">全域不可違反規則 — 影響所有使用者的 Agent 行為</p>
+                </div>
+                <div class="flex gap-2">
+                  <button onclick="_brainLoadSoul()"
+                    class="text-xs px-3 py-1.5 border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-600">
+                    ↺ 載入
+                  </button>
+                  <button onclick="_brainSaveSoul()"
+                    class="text-xs px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-semibold">
+                    儲存 Soul
+                  </button>
+                </div>
+              </div>
+              <textarea id="brain-soul-textarea" rows="8" spellcheck="false"
+                class="w-full bg-slate-50 border border-slate-200 rounded-lg p-3
+                       text-xs font-mono text-slate-800 resize-none focus:outline-none focus:border-purple-400"
+                placeholder="載入中..."></textarea>
+            </div>
+
+            <!-- Panel 2: User Preference -->
+            <div class="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="font-semibold text-sm text-slate-900">個人偏好設定</h3>
+                  <p class="text-xs text-slate-500">Agent 的回答風格與格式偏好 — 送出前 AI 安全審查</p>
+                </div>
+                <div class="flex gap-2">
+                  <button onclick="_brainLoadPref()"
+                    class="text-xs px-3 py-1.5 border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-600">
+                    ↺ 載入
+                  </button>
+                  <button onclick="_brainSavePref()"
+                    class="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-semibold">
+                    儲存偏好
+                  </button>
+                </div>
+              </div>
+              <textarea id="brain-pref-textarea" rows="4" spellcheck="false"
+                class="w-full bg-slate-50 border border-slate-200 rounded-lg p-3
+                       text-xs text-slate-800 resize-none focus:outline-none focus:border-blue-400"
+                placeholder="例如：回答請使用繁體中文，報告結尾附上資料表格..."></textarea>
+              <div id="brain-pref-status" class="text-xs text-slate-400"></div>
+            </div>
+
+            <!-- Panel 3: RAG Memory Manager -->
+            <div class="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="font-semibold text-sm text-slate-900">長期記憶管理</h3>
+                  <p class="text-xs text-slate-500">Agent 的 RAG 記憶庫 — 可搜尋或手動刪除幻覺記憶</p>
+                </div>
+                <div class="flex gap-2">
+                  <button onclick="_brainLoadMemories()"
+                    class="text-xs px-3 py-1.5 border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-600">
+                    ↺ 重新整理
+                  </button>
+                  <button onclick="_brainResetTrapMemories()"
+                    class="text-xs px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-300 rounded-lg"
+                    title="清除所有 Trap 類型的錯誤記憶">
+                    🧹 清除 Trap
+                  </button>
+                  <button onclick="_brainDeleteAllMemories()"
+                    class="text-xs px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg">
+                    全部清除
+                  </button>
+                </div>
+              </div>
+              <!-- Search bar -->
+              <div class="flex gap-2">
+                <input id="brain-memory-search" type="text" placeholder="搜尋記憶關鍵字..."
+                  class="flex-1 text-xs px-3 py-2 border border-slate-200 rounded-lg
+                         focus:outline-none focus:border-blue-400 bg-slate-50"
+                  onkeydown="if(event.key==='Enter') _brainSearchMemories()">
+                <button onclick="_brainSearchMemories()"
+                  class="text-xs px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg">
+                  搜尋
+                </button>
+              </div>
+              <!-- Memory list -->
+              <div id="brain-memory-list" class="space-y-2 max-h-96 overflow-y-auto">
+                <p class="text-xs text-slate-400 text-center py-4">點擊「重新整理」載入記憶</p>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ══ ROUTINE CHECKS VIEW ══ -->
+        <div id="view-routine-checks" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
+          <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
+                      border-b border-slate-200 bg-white">
+            <div>
+              <h2 class="font-semibold text-base flex items-center gap-2">
+                <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+                </svg>
+                排程巡檢管理
+              </h2>
+              <p class="text-xs text-slate-500 mt-0.5">設定主動巡檢排程，定時執行 Skill 並自動生成警報</p>
+            </div>
+            <button onclick="switchView('nested-builder')"
+              class="builder-btn-primary text-sm px-4 py-2">
+              + 新增排程
+            </button>
+          </div>
+          <div id="routine-check-list" class="flex-1 overflow-y-auto p-6">
+            <div class="text-center text-slate-500 py-12 text-sm">載入中...</div>
+          </div>
+        </div>
+
+        <!-- ══ ARSENAL VIEW ══ -->
+        <div id="view-arsenal" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
+
+          <!-- Header -->
+          <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
+                      border-b border-slate-200 bg-white">
+            <div>
+              <h2 class="font-semibold text-base flex items-center gap-2">
+                <svg class="w-4 h-4 text-violet-500" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14.5 10c-.83 0-1.5-.67-1.5-1.5v-5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5z"/>
+                  <path d="M20.5 10H19V8.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
+                  <path d="M9.5 14c.83 0 1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5S8 21.33 8 20.5v-5c0-.83.67-1.5 1.5-1.5z"/>
+                  <path d="M3.5 14H5v1.5c0 .83-.67 1.5-1.5 1.5S2 16.33 2 15.5 2.67 14 3.5 14z"/>
+                  <path d="M14 14.5c0-.83.67-1.5 1.5-1.5h5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-5c-.83 0-1.5-.67-1.5-1.5z"/>
+                  <path d="M15.5 19H14v1.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5z"/>
+                  <path d="M10 9.5C10 8.67 9.33 8 8.5 8h-5C2.67 8 2 8.67 2 9.5S2.67 11 3.5 11h5c.83 0 1.5-.67 1.5-1.5z"/>
+                  <path d="M8.5 5H10V3.5C10 2.67 9.33 2 8.5 2S7 2.67 7 3.5 7.67 5 8.5 5z"/>
+                </svg>
+                私有武器庫 — Agent Tool Chest
+              </h2>
+              <p class="text-xs text-slate-500 mt-0.5">影子分析自動生成、由你親手儲存的專屬分析腳本</p>
+            </div>
+            <div class="flex items-center gap-3">
+              <span id="arsenal-count-badge"
+                    class="hidden text-xs font-bold px-2.5 py-1 rounded-full bg-violet-100 text-violet-700"></span>
+              <button onclick="_arsenalLoad()"
+                      class="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-800
+                             border border-slate-200 rounded-lg px-3 py-1.5 hover:border-slate-300 transition-colors">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+                  <path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+                  <path d="M8 16H3v5"/>
+                </svg>
+                重新整理
+              </button>
+            </div>
+          </div>
+
+          <!-- Grid -->
+          <div class="flex-1 overflow-y-auto p-6">
+            <!-- Loading state -->
+            <div id="arsenal-loading" class="hidden flex items-center justify-center py-20">
+              <div class="flex flex-col items-center gap-3 text-slate-400">
+                <svg class="w-8 h-8 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                <span class="text-sm">載入武器庫中...</span>
+              </div>
+            </div>
+
+            <!-- Empty state -->
+            <div id="arsenal-empty" class="hidden flex flex-col items-center justify-center py-24 text-center">
+              <div class="w-20 h-20 rounded-2xl bg-violet-50 flex items-center justify-center mb-5">
+                <svg class="w-10 h-10 text-violet-300" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14.5 10c-.83 0-1.5-.67-1.5-1.5v-5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5z"/>
+                  <path d="M20.5 10H19V8.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
+                  <path d="M9.5 14c.83 0 1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5S8 21.33 8 20.5v-5c0-.83.67-1.5 1.5-1.5z"/>
+                  <path d="M3.5 14H5v1.5c0 .83-.67 1.5-1.5 1.5S2 16.33 2 15.5 2.67 14 3.5 14z"/>
+                  <path d="M14 14.5c0-.83.67-1.5 1.5-1.5h5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-5c-.83 0-1.5-.67-1.5-1.5z"/>
+                </svg>
+              </div>
+              <p class="text-slate-600 font-semibold text-sm">武器庫空空如也</p>
+              <p class="text-slate-400 text-xs mt-1.5 max-w-xs">
+                在診斷站執行 MCP 查詢後，右側分析面板會出現 <strong class="text-violet-500">💾 儲存</strong> 按鈕，
+                將影子分析腳本鑄入武器庫。
+              </p>
+            </div>
+
+            <!-- Tool cards grid -->
+            <div id="arsenal-grid"
+                 class="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-4"></div>
+          </div>
+
+        </div><!-- /view-arsenal -->
+
+        <!-- ══ TOOL CATALOG VIEW ══ -->
+        <div id="view-tool-catalog" class="view-panel hidden flex-col flex flex-1 overflow-hidden">
+          <!-- Header -->
+          <div class="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white">
+            <div>
+              <h1 class="text-lg font-bold text-slate-800">🗂️ Agent 工具目錄</h1>
+              <p class="text-xs text-slate-500 mt-0.5">目前 Agent 可使用的所有工具清單與說明</p>
+            </div>
+            <button onclick="_toolCatalogLoad()"
+                    class="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-800
+                           border border-slate-200 rounded-lg px-3 py-1.5 hover:border-slate-300 transition-colors">
+              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              重新整理
+            </button>
+          </div>
+          <!-- Content -->
+          <div class="flex-1 overflow-y-auto p-6 space-y-8" id="tool-catalog-body">
+            <div class="flex items-center justify-center py-20 text-slate-400 text-sm">載入中…</div>
+          </div>
+        </div><!-- /view-tool-catalog -->
+
+      </div><!-- /view-container -->
+
+      <!-- ── HELP CHAT PANEL (non-floating, right side) ── -->
+      <div id="help-panel"
+           class="flex-shrink-0 flex-col bg-white border-l border-slate-200 shadow-sm overflow-hidden"
+           style="display:none; width:360px;">
+        <div class="flex-shrink-0 flex items-center justify-between px-4 py-3 bg-blue-700 text-white">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+              <path d="M9 7h6M9 11h6M9 15h4"/>
+            </svg>
+            <span class="text-sm font-semibold">使用說明 AI 助理</span>
+          </div>
+          <button onclick="toggleHelpPanel()" class="text-white/70 hover:text-white text-xl leading-none" title="關閉">✕</button>
+        </div>
+        <div id="help-chat-history" class="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50"></div>
+        <div class="flex-shrink-0 p-3 border-t border-slate-200 bg-white">
+          <div class="flex gap-2">
+            <input id="help-input" type="text" placeholder="詢問系統使用方式..."
+                   class="flex-1 text-sm border border-slate-300 rounded-lg px-3 py-2 bg-white
+                          text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                   onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();_sendHelpMessage();}">
+            <button id="help-send-btn" onclick="_sendHelpMessage()"
+                    class="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg
+                           transition-colors disabled:opacity-50">傳送</button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /body -->
+
+  </div><!-- /main-app -->
+
+
+  <!-- ══════════════════════════════════════════════════════════
+       60VW RIGHT DRAWER (shared)
+  ═══════════════════════════════════════════════════════════ -->
+  <div id="drawer-overlay"
+    class="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 hidden"
+    onclick="closeDrawer()"></div>
+
+  <div id="drawer"
+    class="fixed top-0 right-0 h-full z-50 bg-white border-l border-slate-200
+           flex flex-col shadow-2xl transform translate-x-full transition-transform duration-300"
+    style="width: 60vw;">
+
+    <!-- Drawer Header -->
+    <div class="flex-shrink-0 flex items-center justify-between px-6 py-4
+                border-b border-slate-200 bg-white">
+      <h3 id="drawer-title" class="font-semibold text-base text-slate-900"></h3>
+      <button onclick="closeDrawer()"
+        class="text-slate-400 hover:text-slate-900 rounded-lg p-1.5 hover:bg-slate-100 transition-colors">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Drawer Body -->
+    <div id="drawer-body" class="flex-1 overflow-y-auto p-6 bg-slate-50"></div>
+
+    <!-- Drawer Footer -->
+    <div id="drawer-footer"
+      class="flex-shrink-0 flex items-center justify-end gap-3 px-6 py-4
+             border-t border-slate-200 bg-white"></div>
+  </div>
+
+
+  <!-- ── Chart Fullscreen Modal ──────────────────────────────── -->
+  <div id="chart-fullscreen-modal" class="hidden" onclick="closeChartFullscreen()">
+    <button id="chart-fullscreen-close"
+            onclick="closeChartFullscreen(); event.stopPropagation()"
+            title="關閉">✕</button>
+    <div id="chart-fullscreen-inner" onclick="event.stopPropagation()">
+      <div id="chart-fullscreen-target" style="width:100%;height:100%"></div>
+    </div>
+  </div>
+
+  <!-- ═══ v15.4 Agentic Trace Inspector Overlay ═══ -->
+  <div id="trace-inspector" class="hidden fixed inset-0 z-[200] bg-black/70 backdrop-blur-sm flex items-end"
+       onclick="if(event.target===this)_closeTraceInspector()">
+    <div class="w-full bg-slate-900 border-t border-purple-500/50 rounded-t-2xl shadow-2xl flex flex-col"
+         style="max-height:80vh;">
+      <!-- Header -->
+      <div class="flex items-center justify-between px-4 py-3 border-b border-slate-700 flex-shrink-0">
+        <div class="flex items-center gap-3">
+          <span class="text-purple-300 font-bold text-sm">🔍 Agentic Trace Inspector</span>
+          <span class="text-[10px] text-slate-500 font-mono bg-slate-800 px-2 py-0.5 rounded">v15.4 XAI</span>
+        </div>
+        <button onclick="_closeTraceInspector()"
+                class="text-slate-400 hover:text-white text-xl leading-none w-7 h-7 flex items-center justify-center rounded-md hover:bg-slate-700 transition-colors">✕</button>
+      </div>
+      <!-- Tabs -->
+      <div class="flex border-b border-slate-700 flex-shrink-0 overflow-x-auto">
+        <button id="trace-tab-btn-reasoning" onclick="_traceShowTab('reasoning')"
+                class="flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 border-purple-500 text-purple-300 transition-colors">
+          💭 A. 推理鏈
+        </button>
+        <button id="trace-tab-btn-plan" onclick="_traceShowTab('plan')"
+                class="flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-colors">
+          📋 B. 計畫圖紙
+        </button>
+        <button id="trace-tab-btn-sandbox" onclick="_traceShowTab('sandbox')"
+                class="flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-colors">
+          🔬 C. 沙盒足跡
+        </button>
+        <button id="trace-tab-btn-memory" onclick="_traceShowTab('memory')"
+                class="flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-colors">
+          🧠 D. 記憶溯源
+        </button>
+      </div>
+      <!-- Content -->
+      <div id="trace-content"
+           class="overflow-y-auto flex-1 p-4 space-y-3 font-mono text-xs text-slate-300"
+           style="min-height:220px;"></div>
+    </div>
+  </div>
+
+  <!-- ══ BUILDER DETAIL INSPECTOR ══ -->
+  <div id="builder-detail-inspector"
+       class="hidden fixed inset-0 z-[200] bg-black/70 backdrop-blur-sm flex items-end"
+       onclick="if(event.target===this)_closeBuilderDetail()">
+    <div class="w-full bg-slate-900 border-t border-emerald-500/50 rounded-t-2xl shadow-2xl flex flex-col"
+         style="max-height:80vh;">
+      <!-- Header -->
+      <div class="flex items-center justify-between px-4 py-3 border-b border-slate-700 flex-shrink-0">
+        <div class="flex items-center gap-3">
+          <span id="bdi-title" class="text-emerald-300 font-bold text-sm">🔍 Builder Detail Inspector</span>
+          <span class="text-[10px] text-slate-500 font-mono bg-slate-800 px-2 py-0.5 rounded">XAI</span>
+        </div>
+        <button onclick="_closeBuilderDetail()"
+                class="text-slate-400 hover:text-white text-xl leading-none w-7 h-7 flex items-center justify-center rounded-md hover:bg-slate-700 transition-colors">✕</button>
+      </div>
+      <!-- Tabs -->
+      <div class="flex border-b border-slate-700 flex-shrink-0 overflow-x-auto">
+        <button id="bdi-tab-btn-meta" onclick="_bdiShowTab('meta')"
+                class="flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 border-emerald-500 text-emerald-300 transition-colors">
+          📋 執行元資料
+        </button>
+        <button id="bdi-tab-btn-json" onclick="_bdiShowTab('json')"
+                class="flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-colors">
+          {} Raw JSON
+        </button>
+        <button id="bdi-tab-btn-script" onclick="_bdiShowTab('script')"
+                class="flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-colors">
+          🐍 Processing Script
+        </button>
+        <button id="bdi-tab-btn-diag" onclick="_bdiShowTab('diag')"
+                class="flex-shrink-0 px-4 py-2.5 text-xs font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition-colors">
+          🧪 診斷結果
+        </button>
+      </div>
+      <!-- Content -->
+      <div id="bdi-content"
+           class="overflow-y-auto flex-1 p-4 font-mono text-xs text-slate-300"
+           style="min-height:220px;"></div>
+    </div>
+  </div>
+
+  <script src="/cjr.js"></script>
+  <script src="/app.js"></script>
+  <script src="/builder.js"></script>
+  <script src="/v18.js"></script>
+  <!-- v14.3 Scenario Pilot patch — rollback: remove these 2 lines + delete v143_*.* files -->
+  <link rel="stylesheet" href="/v143_styles.css">
+  <script src="/v143_patch.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>GlassBox AIoPs — 使用者操作手冊 v8</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: "Helvetica Neue", Arial, "PingFang TC", "Microsoft JhengHei", sans-serif;
+  font-size: 15px; line-height: 1.7; color: #1e293b; background: #f8fafc;
+}
+
+/* ── Cover ─────────────────────────── */
+.cover {
+  background: linear-gradient(145deg, #0f172a 0%, #1e3a8a 60%, #0f172a 100%);
+  color: white; padding: 80px 60px; min-height: 500px;
+  display: flex; flex-direction: column; justify-content: center;
+}
+.cover-badge {
+  display: inline-block; border: 1px solid #6366f1; color: #a5b4fc;
+  font-size: 11px; letter-spacing: 3px; text-transform: uppercase;
+  padding: 4px 14px; border-radius: 20px; margin-bottom: 24px;
+}
+.cover h1 { font-size: 52px; font-weight: 900; margin-bottom: 10px; }
+.cover h1 span { color: #818cf8; }
+.cover .subtitle { font-size: 18px; color: #94a3b8; margin-bottom: 40px; }
+.cover-meta { display: flex; gap: 40px; border-top: 1px solid rgba(255,255,255,.1); padding-top: 24px; }
+.cover-meta dt { font-size: 11px; color: #64748b; text-transform: uppercase; }
+.cover-meta dd { font-size: 14px; color: #e2e8f0; font-weight: 600; }
+
+/* ── Chapter ───────────────────────── */
+.chapter { background: white; max-width: 1000px; margin: 40px auto; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.07); }
+.chapter-header { padding: 32px 40px 20px; border-bottom: 2px solid #f1f5f9; }
+.chapter-num { font-size: 11px; font-weight: 700; color: #6366f1; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 6px; }
+.chapter-header h2 { font-size: 28px; font-weight: 800; color: #0f172a; }
+.chapter-header .desc { font-size: 14px; color: #64748b; margin-top: 6px; border-left: 3px solid #6366f1; padding-left: 12px; }
+.chapter-body { padding: 32px 40px; }
+
+/* ── Section ───────────────────────── */
+.section { margin-bottom: 44px; }
+.section:last-child { margin-bottom: 0; }
+.section h3 { font-size: 18px; font-weight: 700; color: #1e293b; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #e2e8f0; }
+.section h4 { font-size: 14px; font-weight: 700; color: #334155; margin: 16px 0 8px; }
+.section p { margin: 8px 0 12px; font-size: 14px; }
+.section ul, .section ol { padding-left: 22px; margin: 8px 0 12px; }
+.section li { margin: 5px 0; font-size: 14px; }
+
+/* ── Step rows ─────────────────────── */
+.step-row { display: flex; gap: 0; margin: 24px 0; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
+.step-number { width: 56px; background: #6366f1; color: white; display: flex; align-items: flex-start; justify-content: center; padding: 20px 0; flex-shrink: 0; font-size: 22px; font-weight: 900; }
+.step-content { flex: 1; padding: 16px 20px; background: #fafbff; }
+.step-content h4 { font-size: 14px; font-weight: 700; color: #1e293b; margin: 0 0 6px; }
+.step-content p { font-size: 13px; color: #475569; margin: 0; }
+.step-content code { font-family: monospace; font-size: 11px; background: #ede9fe; color: #5b21b6; padding: 1px 5px; border-radius: 3px; }
+
+/* ── Screenshots ───────────────────── */
+.shot { margin: 20px 0; border-radius: 10px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 4px 16px rgba(0,0,0,.1); }
+.shot img { width: 100%; display: block; }
+.shot figcaption { background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 8px 16px; font-size: 12px; color: #64748b; text-align: center; }
+
+/* Step + screenshot combined */
+.step-with-shot { margin: 28px 0; }
+.step-with-shot .step-row { margin: 0 0 12px; }
+.step-with-shot .shot { margin: 0; }
+
+/* ── Tables ─────────────────────────── */
+table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+th { background: #1e293b; color: #f1f5f9; padding: 9px 12px; text-align: left; font-weight: 600; font-size: 12px; }
+td { padding: 8px 12px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+tr:nth-child(even) td { background: #f8fafc; }
+
+/* ── Callouts ───────────────────────── */
+.callout { border-radius: 8px; padding: 14px 16px; margin: 14px 0; font-size: 13px; }
+.callout-title { font-weight: 700; margin-bottom: 5px; font-size: 14px; }
+.tip    { background: #f0fdf4; border-left: 4px solid #22c55e; }
+.tip .callout-title { color: #15803d; }
+.info   { background: #eff6ff; border-left: 4px solid #3b82f6; }
+.info .callout-title { color: #1d4ed8; }
+.warn   { background: #fffbeb; border-left: 4px solid #f59e0b; }
+.warn .callout-title { color: #b45309; }
+
+/* ── Badges ─────────────────────────── */
+code { font-family: monospace; font-size: 12px; background: #f1f5f9; color: #6366f1; padding: 2px 6px; border-radius: 3px; border: 1px solid #e2e8f0; }
+.badge { display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 11px; font-weight: 700; }
+.badge-green { background: #dcfce7; color: #15803d; }
+.badge-red   { background: #fee2e2; color: #991b1b; }
+.badge-blue  { background: #dbeafe; color: #1d4ed8; }
+.badge-gray  { background: #f1f5f9; color: #475569; }
+
+/* ── Tabs ───────────────────────────── */
+.tab-demo { border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; margin: 14px 0; }
+.tab-demo-bar { display: flex; background: #f8fafc; border-bottom: 1px solid #e2e8f0; padding: 0 12px; gap: 2px; }
+.tab-demo-btn { padding: 8px 14px; font-size: 12px; font-weight: 600; color: #64748b; border-bottom: 2px solid transparent; }
+.tab-demo-btn.active { color: #6366f1; border-bottom-color: #6366f1; }
+
+/* ── Two column ─────────────────────── */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 14px 0; }
+.col-box { border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; background: #f8fafc; }
+.col-box h4 { margin-top: 0; font-size: 13px; }
+
+/* ── SSE timeline ───────────────────── */
+.sse-timeline { border-left: 3px solid #6366f1; padding-left: 20px; margin: 16px 0; }
+.sse-event { margin: 12px 0; position: relative; }
+.sse-event::before { content: ''; position: absolute; left: -26px; top: 6px; width: 10px; height: 10px; border-radius: 50%; background: #6366f1; }
+.sse-event-type { font-family: monospace; font-size: 12px; font-weight: 700; color: #6366f1; }
+.sse-event-desc { font-size: 13px; color: #475569; }
+.sse-event-payload { background: #0f172a; color: #a5f3fc; font-family: monospace; font-size: 11px; padding: 8px 12px; border-radius: 6px; margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════
+     COVER
+══════════════════════════ -->
+<div class="cover">
+  <div class="cover-badge">GlassBox AIoPs · User Manual</div>
+  <h1>使用者<span>操作手冊</span></h1>
+  <div class="subtitle">Version 8.11 — 完整操作說明，以 SPC OOC 製程異常診斷為範例</div>
+  <dl class="cover-meta">
+    <div><dt>版本</dt><dd>v8.11</dd></div>
+    <div><dt>日期</dt><dd>2026-03-01</dd></div>
+    <div><dt>AI 引擎</dt><dd>Claude Opus 4.6</dd></div>
+    <div><dt>後端</dt><dd>FastAPI 0.115</dd></div>
+  </dl>
+</div>
+
+<!-- ══════════════════════════
+     CH1: LOGIN
+══════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 1</div>
+    <h2>登入系統</h2>
+    <p class="desc">開啟瀏覽器輸入系統 URL（預設 <code>http://localhost:8000</code>），首先看到登入畫面。</p>
+  </div>
+  <div class="chapter-body">
+    <div class="section">
+      <figure class="shot">
+        <img src="user-manual-img/01_login.png" alt="登入頁面">
+        <figcaption>圖 1-1：GlassBox AIoPs 登入頁面 — 支援帳號密碼或直接貼入 JWT Token</figcaption>
+      </figure>
+
+      <div class="two-col" style="margin-top:20px;">
+        <div class="col-box">
+          <h4>🔐 方式一：帳號密碼</h4>
+          <ol style="font-size:13px; padding-left:18px;">
+            <li>輸入「帳號」：<code>admin</code></li>
+            <li>輸入「密碼」：<code>admin</code></li>
+            <li>點擊 <strong>登入</strong></li>
+          </ol>
+        </div>
+        <div class="col-box">
+          <h4>🪙 方式二：JWT Token</h4>
+          <ol style="font-size:13px; padding-left:18px;">
+            <li>將已取得的 Bearer Token 貼入 Token 欄位</li>
+            <li>點擊 <strong>以 Token 登入</strong></li>
+          </ol>
+        </div>
+      </div>
+
+      <div class="callout tip">
+        <div class="callout-title">✅ 內建測試帳號</div>
+        系統啟動自動建立：<code>admin</code>（密碼 <code>admin</code>）與 <code>gill</code>（密碼 <code>gill</code>），皆為超級管理員（IT Admin + Expert PE + General User 三合一）。
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════
+     CH2: MAIN UI
+══════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 2</div>
+    <h2>主介面導覽</h2>
+    <p class="desc">登入後進入主工作介面，分為左側導覽列與中央工作區。</p>
+  </div>
+  <div class="chapter-body">
+    <div class="section">
+      <figure class="shot">
+        <img src="user-manual-img/02_diagnose_home.png" alt="主介面">
+        <figcaption>圖 2-1：主介面 — 左側深藍導覽列（圖示式）+ 中央 30/70 分割工作區（左：對話助手；右：報告面板）</figcaption>
+      </figure>
+
+      <h3 style="margin-top:24px;">左側導覽列功能說明</h3>
+      <table>
+        <thead><tr><th>圖示</th><th>功能</th><th>說明</th><th>所需角色</th></tr></thead>
+        <tbody>
+          <tr><td>🔬</td><td>診斷站</td><td>事件觸發 + AI 全鏈路診斷（主要操作介面）</td><td>所有角色</td></tr>
+          <tr><td>🗄️</td><td>Data Subject</td><td>管理資料來源 API</td><td>IT Admin / Expert PE</td></tr>
+          <tr><td>⚡</td><td>Event Builder</td><td>定義事件型別與屬性 Schema</td><td>IT Admin / Expert PE</td></tr>
+          <tr><td>🔧</td><td>MCP Builder</td><td>建立 AI 驅動的資料查詢腳本</td><td>IT Admin / Expert PE</td></tr>
+          <tr><td>🤖</td><td>Skill Builder</td><td>組合 MCP + 診斷邏輯，建立診斷技能</td><td>IT Admin / Expert PE</td></tr>
+          <tr><td>⚙️</td><td>系統設定</td><td>管理 AI Prompt 系統參數</td><td>IT Admin</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════
+     CH3: DIAGNOSIS
+══════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 3</div>
+    <h2>事件診斷站 — 完整操作流程</h2>
+    <p class="desc">以 SPC OOC（Statistical Process Control Out-Of-Control）蝕刻製程異常為範例，示範完整的事件觸發 → AI 診斷 → 結果解讀流程。</p>
+  </div>
+  <div class="chapter-body">
+
+    <div class="section">
+      <h3>Step 1：點擊模擬觸發事件</h3>
+      <p>在診斷站左側聊天區，點擊 <strong>⚡ 模擬觸發：TETCH01 PM2 發生 SPC OOC</strong> 按鈕，系統在聊天區插入一張紅色事件警告卡片。</p>
+      <figure class="shot">
+        <img src="user-manual-img/03_event_card.png" alt="事件卡片">
+        <figcaption>圖 3-1：點擊模擬觸發後出現的紅色事件警告卡片，包含完整的 SPC OOC 事件屬性</figcaption>
+      </figure>
+      <p>事件卡片包含以下關鍵資訊：</p>
+      <table>
+        <thead><tr><th>欄位</th><th>值（SPC OOC 範例）</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td><code>equipment_id</code></td><td>TETCH01</td><td>蝕刻機台 ID</td></tr>
+          <tr><td><code>chamber_id</code></td><td>PM2</td><td>Process Module 腔體</td></tr>
+          <tr><td><code>spc_chart_id</code></td><td>CD_MEAN</td><td>SPC 管制圖名稱（CD = Critical Dimension）</td></tr>
+          <tr><td><code>measurement_value</code></td><td>102.5 nm</td><td>量測值，超過 UCL (100.0)</td></tr>
+          <tr><td><code>ucl / lcl</code></td><td>100.0 / 90.0</td><td>管制上下限（nm）</td></tr>
+          <tr><td><code>recipe_id</code></td><td>RCP-001</td><td>目前使用的製程配方</td></tr>
+          <tr><td><code>lot_id</code></td><td>LOT-20241201-001</td><td>批次 ID</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h3>Step 2：啟動診斷分析（SSE 串流）</h3>
+      <p>確認事件內容後，點擊事件卡片底部的 <strong>🔍 啟動診斷分析</strong> 按鈕。系統呼叫 <code>POST /api/v1/diagnose/event-driven-stream</code>，以 <strong>Server-Sent Events（SSE）</strong> 串流方式漸進推播診斷結果。</p>
+
+      <div class="sse-timeline">
+        <div class="sse-event">
+          <div class="sse-event-type">start</div>
+          <div class="sse-event-desc">診斷開始，顯示事件 Header 與 Skill 總數（3 個）</div>
+          <div class="sse-event-payload">{"type":"start","skill_count":3,"event_type":"SPC_OOC_Etch_CD"}</div>
+        </div>
+        <div class="sse-event">
+          <div class="sse-event-type">skill_start</div>
+          <div class="sse-event-desc">Skill 1 開始執行 — 左側聊天區顯示「⏳ 正在執行 APC abormal change detection...」</div>
+          <div class="sse-event-payload">{"type":"skill_start","skill_name":"APC abormal change detection","index":0}</div>
+        </div>
+        <div class="sse-event">
+          <div class="sse-event-type">skill_done</div>
+          <div class="sse-event-desc">Skill 1 完成 — 右側報告區立即渲染第一張診斷卡片（不等待其他 Skill）</div>
+          <div class="sse-event-payload">{"type":"skill_done","index":0,"status":"ABNORMAL","diagnosis":"...","recommendation":"..."}</div>
+        </div>
+        <div class="sse-event">
+          <div class="sse-event-type">skill_start / skill_done</div>
+          <div class="sse-event-desc">Skill 2、Skill 3 依序執行並完成，各自渲染診斷卡片</div>
+        </div>
+        <div class="sse-event">
+          <div class="sse-event-type">done</div>
+          <div class="sse-event-desc">全部完成 — 渲染底部診斷摘要列（正常/異常/錯誤計數）</div>
+          <div class="sse-event-payload">{"type":"done","total":3}</div>
+        </div>
+      </div>
+
+      <figure class="shot">
+        <img src="user-manual-img/11_diagnosis_running.png" alt="診斷執行中">
+        <figcaption>圖 3-2：診斷執行中的畫面 — 左側聊天區顯示各 Skill 執行進度，右側報告區以 Tab 形式漸進顯示結果</figcaption>
+      </figure>
+    </div>
+
+    <div class="section">
+      <h3>Step 3：解讀診斷報告 — Skill 1（APC 異常偵測）</h3>
+      <p>右側報告區以 <strong>Tab</strong> 形式呈現每個 Skill 的診斷結果。點擊各 Tab 切換不同技能的報告。</p>
+      <figure class="shot">
+        <img src="user-manual-img/12_diagnosis_results_tab1.png" alt="診斷結果 Tab 1">
+        <figcaption>圖 3-3：Skill 1（APC 異常偵測）診斷報告 — 包含 Evidence 資料表格與 AI 診斷結論</figcaption>
+      </figure>
+
+      <p>每張診斷卡片結構：</p>
+      <table>
+        <thead><tr><th>區塊</th><th>說明</th></tr></thead>
+        <tbody>
+          <tr><td><span class="badge badge-red">ABNORMAL</span> 狀態</td><td>NORMAL（正常）/ ABNORMAL（異常）/ ERROR（執行錯誤）</td></tr>
+          <tr><td><strong>Evidence</strong></td><td>MCP 腳本查詢回傳的原始資料（關鍵指標值、資料表）</td></tr>
+          <tr><td><strong>Diagnosis</strong></td><td>Claude LLM 根據 diagnostic_prompt 生成的診斷結論段落</td></tr>
+          <tr><td><strong>Recommendation</strong></td><td>PE 工程師等級的建議處理行動</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h3>Step 4：查看其他 Skill 的診斷結果</h3>
+      <p>點擊第二、第三個 Tab 查看其餘技能的診斷報告。</p>
+      <figure class="shot">
+        <img src="user-manual-img/13_diagnosis_tab2.png" alt="診斷結果 Tab 2">
+        <figcaption>圖 3-4：Skill 2（配方異動檢查）診斷報告 — 顯示 MES/RMS 最近的配方修改紀錄</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="user-manual-img/14_diagnosis_tab3.png" alt="診斷結果 Tab 3">
+        <figcaption>圖 3-5：Skill 3（SPC 連續異常分析）診斷報告 — 分析 SPC 管制圖連續超限情況</figcaption>
+      </figure>
+    </div>
+
+    <div class="section">
+      <h3>Step 5：診斷摘要列（Summary Bar）</h3>
+      <p>所有 Skill 完成後，報告區底部自動顯示診斷摘要列，快速掌握整體診斷結果分布。</p>
+      <figure class="shot">
+        <img src="user-manual-img/15_diagnosis_summary.png" alt="診斷摘要">
+        <figcaption>圖 3-6：診斷摘要列 — 顯示各 Skill 的狀態計數（正常/異常/錯誤）</figcaption>
+      </figure>
+      <div class="callout info">
+        <div class="callout-title">ℹ️ 關於 SSE 串流的優點</div>
+        系統使用 <strong>Fetch API + ReadableStream</strong> 而非 EventSource，原因是 EventSource 不支援設定 Authorization Header（JWT Token 無法傳遞）。SSE 串流讓每個 Skill 完成後立即顯示結果，無需等待全部完成，大幅提升使用者體驗。
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════
+     CH4: MCP BUILDER
+══════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 4</div>
+    <h2>MCP Builder — 建立資料查詢腳本</h2>
+    <p class="desc">MCP（Modular Check Package）定義「如何從資料來源取得製程資料」。以下以建立「SPC 管制圖查詢 MCP」為完整範例，示範四個步驟。</p>
+  </div>
+  <div class="chapter-body">
+
+    <div class="section">
+      <h3>MCP 清單介面</h3>
+      <figure class="shot">
+        <img src="user-manual-img/04_mcp_list.png" alt="MCP 清單">
+        <figcaption>圖 4-0：MCP Builder 清單介面 — 顯示所有已建立的 MCP，標示是否已完成 LLM 腳本生成</figcaption>
+      </figure>
+      <p>點擊 <strong>+ 新增 MCP</strong>（右上角）開始建立新的 MCP，或點擊任一列進入編輯模式。清單中每個 MCP 標示：<span class="badge badge-green">✓ LLM 已生成</span> 或 <span class="badge" style="background:#fffbeb;color:#b45309;">待 LLM 生成</span>。</p>
+    </div>
+
+    <div class="section">
+      <h3>Step 1 — 選定資料源 &amp; 撈取樣本</h3>
+      <figure class="shot">
+        <img src="user-manual-img/05_mcp_step1_ds_select.png" alt="MCP Step 1">
+        <figcaption>圖 4-1：MCP 建立 Step 1 — 填入名稱/說明，選定 DataSubject（範例：SPC_Chart_Data），系統自動顯示 Output Schema 欄位參考</figcaption>
+      </figure>
+
+      <div class="step-row">
+        <div class="step-number">1</div>
+        <div class="step-content">
+          <h4>填入 MCP 基本資訊並選定 DataSubject</h4>
+          <p>
+            <strong>MCP 名稱：</strong><code>Query SPC data</code>（英文/底線，唯一識別符）<br>
+            <strong>說明：</strong>描述此 MCP 的查詢目的與使用場景<br>
+            <strong>DataSubject：</strong>下拉選單選擇 <code>SPC_Chart_Data</code>（SPC 管制圖資料來源）<br><br>
+            選定 DataSubject 後，系統自動顯示 <strong>Output Schema 欄位參考</strong>，列出 API 回傳的所有欄位（datetime, value, UCL, LCL, tool, lotID, recipe 等），供後續腳本生成參考。
+          </p>
+          <p>在「測試參數」區塊填入 <code>chart_name</code>（如 <code>CD</code>），點擊 <strong>📥 撈取樣本資料</strong>，系統呼叫 DataSubject API 取得真實樣本資料。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Step 2–4 — 加工意圖、LLM 生成腳本、試跑驗證</h3>
+      <figure class="shot">
+        <img src="user-manual-img/06_mcp_step234_intent.png" alt="MCP Step 2-4">
+        <figcaption>圖 4-2：MCP Step 2–4 — 填入加工意圖（自然語言描述），LLM 自動生成 Python 腳本，點擊「執行試跑」在沙箱中驗證</figcaption>
+      </figure>
+
+      <div class="step-row">
+        <div class="step-number">2</div>
+        <div class="step-content">
+          <h4>填入加工意圖（自然語言）</h4>
+          <p>在「加工意圖」文字框中，用中文或英文描述希望 MCP 怎麼處理資料：</p>
+          <p><em>「以 table 的方式回傳，呈現在用 Trend chart，x 軸是 datetime，y 軸是 UCL/LCL 用 orange 的顏色，Value 用綠色，但是超過 UCL/LCL 要用紅色的點」</em></p>
+          <p>Claude 會根據此意圖、DataSubject 的 Output Schema，自動生成符合需求的 Python 腳本。</p>
+        </div>
+      </div>
+
+      <div class="step-row">
+        <div class="step-number">3</div>
+        <div class="step-content">
+          <h4>執行試跑（Try Run）— 沙箱安全執行</h4>
+          <p>點擊 <strong>⚡ 執行試跑 (Try Run)</strong>，系統將腳本放入 <strong>RestrictedPython 沙箱</strong>執行。沙箱禁止所有危險操作（<code>import os</code>、<code>import requests</code> 等），只允許資料處理相關套件。</p>
+          <p>試跑成功後會顯示：<span class="badge badge-green">已儲存（快照）</span>，可直接進行下一步驟無需重新執行。</p>
+        </div>
+      </div>
+
+      <div class="step-row">
+        <div class="step-number">4</div>
+        <div class="step-content">
+          <h4>檢視結果預覽（Step 4）</h4>
+          <p>試跑成功後，系統顯示 <strong>結果預覽（已儲存）</strong>，包含：</p>
+          <ul>
+            <li>輸出資料類型（如 <code>trend_chart</code>）</li>
+            <li>圖表預覽或資料表格</li>
+            <li>Output Schema 欄位驗證結果</li>
+          </ul>
+          <p>確認無誤後點擊 <strong>更新</strong>（或建立）完成 MCP 定義。</p>
+        </div>
+      </div>
+
+      <div class="callout warn">
+        <div class="callout-title">⚠️ 腳本安全沙箱限制</div>
+        AI 生成的腳本在 RestrictedPython 中執行，以下操作被禁止：
+        <ul>
+          <li><code>import os</code>、<code>import sys</code>（禁止系統存取）</li>
+          <li><code>import requests</code>、<code>import urllib</code>（禁止網路連線）</li>
+          <li>任何檔案讀寫操作</li>
+        </ul>
+        允許：<code>json</code>、<code>re</code>、<code>datetime</code>、<code>math</code>、基本資料結構操作。
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════
+     CH5: SKILL BUILDER
+══════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 5</div>
+    <h2>Skill Builder — 建立診斷技能</h2>
+    <p class="desc">Skill 是系統的診斷決策單元，將 MCP（資料查詢）與診斷邏輯結合，並定義事件屬性如何對應到 MCP 輸入參數。以「SPC 連續異常檢查」技能為範例。</p>
+  </div>
+  <div class="chapter-body">
+
+    <div class="section">
+      <h3>Skill 清單介面</h3>
+      <figure class="shot">
+        <img src="user-manual-img/07_skill_list.png" alt="Skill 清單">
+        <figcaption>圖 5-0：Skill Builder 清單介面 — 顯示所有已建立的診斷技能與其綁定的事件型別</figcaption>
+      </figure>
+      <p>點擊 <strong>+ 新增 Skill</strong> 開始建立，或點擊任一列進入編輯模式。</p>
+    </div>
+
+    <div class="section">
+      <h3>Step 1 — 填入 Skill 基本資訊</h3>
+      <figure class="shot">
+        <img src="user-manual-img/08_skill_drawer_top.png" alt="Skill Drawer 頂部">
+        <figcaption>圖 5-1：Skill 建立表單（上半部）— 填入名稱、說明、選擇綁定的 MCP 與 Event Type</figcaption>
+      </figure>
+
+      <div class="step-row">
+        <div class="step-number">1</div>
+        <div class="step-content">
+          <h4>填入 Skill 識別資訊</h4>
+          <p>
+            <strong>Skill 名稱：</strong><code>檢查SPC 是否連續異常</code><br>
+            <strong>說明：</strong>描述此 Skill 的診斷目的<br>
+            <strong>綁定 MCP：</strong>選擇 <code>Query SPC data</code>（剛剛建立的 SPC 查詢 MCP）<br>
+            <strong>綁定 Event Type：</strong>勾選 <code>SPC_OOC_Etch_CD</code>（此 Skill 將在此事件發生時自動執行）
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Step 2 — 設定 Param Mappings（事件屬性 → MCP 輸入）</h3>
+      <figure class="shot">
+        <img src="user-manual-img/09_skill_param_mappings.png" alt="Param Mappings">
+        <figcaption>圖 5-2：param_mappings 設定區 — 定義事件屬性如何對應到 MCP 的輸入參數（可使用 AI Auto-Map 自動填入）</figcaption>
+      </figure>
+
+      <div class="step-row">
+        <div class="step-number">2</div>
+        <div class="step-content">
+          <h4>設定參數對應（param_mappings）</h4>
+          <p><code>param_mappings</code> 定義事件的 params 中哪個欄位要傳給 MCP 的哪個輸入參數，格式為 JSON 陣列：</p>
+          <p><code>[{"mcp_param":"chart_name","source":"event_param","event_field":"spc_chart_id"}]</code></p>
+          <p>點擊 <strong>🤖 AI Auto-Map</strong> 按鈕，Claude 會語意分析事件屬性與 MCP 輸入的對應關係，自動填入並標示每個對應的信心度（HIGH/MEDIUM/LOW）。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Step 3 — 設定診斷邏輯 Prompt</h3>
+      <figure class="shot">
+        <img src="user-manual-img/10_skill_diagnostic_prompt.png" alt="Diagnostic Prompt">
+        <figcaption>圖 5-3：diagnostic_prompt 設定區 — 填入診斷邏輯說明，Claude 執行診斷時依此生成報告</figcaption>
+      </figure>
+
+      <div class="step-row">
+        <div class="step-number">3</div>
+        <div class="step-content">
+          <h4>填入診斷邏輯（diagnostic_prompt）</h4>
+          <p>用自然語言描述診斷判斷條件，Claude 執行診斷時依此邏輯分析 MCP 輸出的資料並生成報告。</p>
+          <p>點擊 <strong>💡 AI 建議邏輯</strong> 按鈕，Claude 以資深 PE 工程師視角，根據 MCP 的 output_schema 生成 3–5 條業界標準的診斷邏輯建議，可直接點選套用。</p>
+          <p>填寫完成後點擊 <strong>✅ Validate Logic</strong>，系統確認 Prompt 中引用的欄位名稱是否都存在於 MCP 的 output_schema 中，避免執行時欄位缺失錯誤。</p>
+        </div>
+      </div>
+
+      <div class="step-row">
+        <div class="step-number">4</div>
+        <div class="step-content">
+          <h4>儲存 Skill 定義</h4>
+          <p>確認所有設定後點擊 <strong>建立 Skill</strong>（或更新）。儲存完成後，此 Skill 自動綁定到所選的 Event Type，下次該事件觸發診斷時會自動執行此技能。</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════
+     CH6: SETTINGS
+══════════════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 6</div>
+    <h2>系統設定 — AI Prompt 管理</h2>
+    <p class="desc">Settings 模組供 IT Admin 管理控制 AI 行為的核心 System Prompt 參數。</p>
+  </div>
+  <div class="chapter-body">
+    <div class="section">
+      <figure class="shot">
+        <img src="user-manual-img/16_settings.png" alt="系統設定">
+        <figcaption>圖 6-1：系統設定頁面 — 顯示三個核心 AI Prompt 系統參數（PROMPT_MCP_GENERATE、PROMPT_MCP_TRY_RUN、PROMPT_SKILL_DIAGNOSIS）</figcaption>
+      </figure>
+
+      <h3>三個核心系統參數</h3>
+      <table>
+        <thead><tr><th>參數 Key</th><th>作用</th><th>影響功能</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>PROMPT_MCP_GENERATE</code></td>
+            <td>指導 Claude 如何根據 DataSubject Schema 和加工意圖生成安全的 Python 腳本</td>
+            <td>MCP Builder → 執行試跑時的 LLM 腳本生成</td>
+          </tr>
+          <tr>
+            <td><code>PROMPT_MCP_TRY_RUN</code></td>
+            <td>指導 Claude 生成測試輸入資料並驗證腳本執行結果</td>
+            <td>MCP Builder → Try Run 試跑驗證</td>
+          </tr>
+          <tr>
+            <td><code>PROMPT_SKILL_DIAGNOSIS</code></td>
+            <td>指導 Claude 如何根據 MCP 輸出資料生成結構化診斷報告（含 diagnosis + recommendation）</td>
+            <td>診斷執行 → 每個 Skill 的 AI 診斷報告生成</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout warn">
+        <div class="callout-title">⚠️ Prompt 修改影響範圍</div>
+        系統參數修改後，所有後續的 AI 操作都會使用新版本 Prompt。建議在測試環境確認效果後再更新正式環境。此頁面僅 <strong>IT Admin</strong> 角色可存取。
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

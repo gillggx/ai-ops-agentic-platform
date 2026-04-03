@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>GlassBox AIoPs — 產品介紹 v8</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: "Helvetica Neue", Arial, "PingFang TC", "Microsoft JhengHei", sans-serif;
+  font-size: 15px; line-height: 1.7; color: #1e293b; background: #f8fafc;
+}
+
+/* ── Cover ─────────────────────────── */
+.cover {
+  background: linear-gradient(150deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+  color: white; padding: 80px 60px; min-height: 480px;
+  display: flex; flex-direction: column; justify-content: center;
+  position: relative; overflow: hidden;
+}
+.cover::before {
+  content: ''; position: absolute; top: -80px; right: -80px;
+  width: 400px; height: 400px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(99,102,241,.3) 0%, transparent 70%);
+}
+.cover-content { position: relative; z-index: 1; }
+.cover-eyebrow { font-size: 11px; letter-spacing: 4px; text-transform: uppercase; color: #818cf8; margin-bottom: 20px; font-weight: 700; }
+.cover h1 { font-size: 54px; font-weight: 900; line-height: 1.1; margin-bottom: 14px; }
+.cover h1 em { font-style: normal; color: #a5b4fc; }
+.cover .tagline { font-size: 17px; color: #94a3b8; margin-bottom: 40px; max-width: 500px; line-height: 1.5; }
+.feature-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 40px; }
+.feature-item { display: flex; align-items: center; gap: 12px; font-size: 14px; color: #c7d2fe; }
+.feature-icon { width: 32px; height: 32px; background: rgba(99,102,241,.3); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+.cover-meta { display: flex; gap: 40px; border-top: 1px solid rgba(255,255,255,.1); padding-top: 20px; }
+.cover-meta dt { font-size: 11px; color: #64748b; }
+.cover-meta dd { font-size: 14px; color: #e2e8f0; font-weight: 600; }
+
+/* ── Chapter ───────────────────────── */
+.chapter { background: white; max-width: 1000px; margin: 40px auto; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,.07); }
+.chapter-header { padding: 32px 40px 20px; border-bottom: 2px solid #f1f5f9; }
+.chapter-num { font-size: 11px; font-weight: 700; color: #6366f1; letter-spacing: 3px; text-transform: uppercase; margin-bottom: 6px; }
+.chapter-header h2 { font-size: 28px; font-weight: 800; color: #0f172a; }
+.chapter-header .lead { font-size: 14px; color: #64748b; margin-top: 8px; border-left: 3px solid #6366f1; padding-left: 12px; }
+.chapter-body { padding: 32px 40px; }
+
+/* ── Sections ──────────────────────── */
+.section { margin-bottom: 48px; }
+.section:last-child { margin-bottom: 0; }
+.section h3 { font-size: 19px; font-weight: 700; color: #1e293b; margin-bottom: 14px; padding-bottom: 8px; border-bottom: 2px solid #f1f5f9; }
+.section h4 { font-size: 14px; font-weight: 700; color: #334155; margin: 14px 0 8px; }
+.section p { margin: 8px 0 12px; font-size: 14px; }
+.section ul, .section ol { padding-left: 22px; margin: 8px 0 12px; }
+.section li { margin: 5px 0; font-size: 14px; }
+
+/* ── Screenshots ───────────────────── */
+.shot { margin: 20px 0; border-radius: 10px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 4px 16px rgba(0,0,0,.1); }
+.shot img { width: 100%; display: block; }
+.shot figcaption { background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 8px 16px; font-size: 12px; color: #64748b; text-align: center; }
+
+/* ── LLM Application Cards ──────────── */
+.llm-card { border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; margin: 16px 0; }
+.llm-card-header { display: flex; align-items: center; gap: 12px; padding: 14px 18px; background: linear-gradient(135deg, #fdf4ff, #ede9fe); border-bottom: 1px solid #e2e8f0; }
+.llm-num { background: #6d28d9; color: white; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800; flex-shrink: 0; }
+.llm-card-header h4 { margin: 0; font-size: 15px; font-weight: 700; color: #3b0764; }
+.llm-badge { background: linear-gradient(135deg, #7c3aed, #6366f1); color: white; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 10px; margin-left: auto; white-space: nowrap; }
+.llm-card-body { padding: 14px 18px; font-size: 13px; color: #475569; }
+.llm-card-body code { font-family: monospace; font-size: 11px; background: #ede9fe; color: #5b21b6; padding: 1px 5px; border-radius: 3px; }
+
+/* ── Layer pyramid ─────────────────── */
+.layer-pyramid { border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; margin: 16px 0; }
+.layer-row { display: flex; border-bottom: 1px solid #e2e8f0; }
+.layer-row:last-child { border-bottom: none; }
+.layer-label { width: 130px; flex-shrink: 0; padding: 14px 16px; font-size: 13px; font-weight: 700; display: flex; flex-direction: column; justify-content: center; }
+.layer-body { flex: 1; padding: 14px 16px; font-size: 13px; color: #334155; border-left: 1px solid #e2e8f0; }
+.layer-body ul { margin: 4px 0; padding-left: 18px; }
+.layer-body li { font-size: 12px; margin: 3px 0; }
+.l-event { background: #ede9fe; color: #5b21b6; }
+.l-skill { background: #dbeafe; color: #1e40af; }
+.l-mcp   { background: #dcfce7; color: #14532d; }
+.l-ds    { background: #fef9c3; color: #713f12; }
+
+/* ── Flow steps ─────────────────────── */
+.flow { border-left: 3px solid #6366f1; padding-left: 20px; margin: 16px 0; }
+.flow-item { margin: 14px 0; position: relative; }
+.flow-item::before { content: ''; position: absolute; left: -27px; top: 5px; width: 12px; height: 12px; border-radius: 50%; background: #6366f1; border: 2px solid white; box-shadow: 0 0 0 2px #6366f1; }
+.flow-item.llm-step::before { background: #7c3aed; box-shadow: 0 0 0 2px #7c3aed; }
+.flow-title { font-size: 14px; font-weight: 700; color: #1e293b; margin-bottom: 3px; }
+.flow-desc { font-size: 13px; color: #64748b; }
+.flow-payload { font-family: monospace; font-size: 11px; background: #0f172a; color: #a5f3fc; padding: 6px 10px; border-radius: 6px; margin-top: 6px; }
+
+/* ── Comparison grid ────────────────── */
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; margin: 16px 0; }
+.compare-col { padding: 18px; }
+.compare-col:first-child { background: #fff1f2; border-right: 1px solid #e2e8f0; }
+.compare-col:last-child { background: #f0fdf4; }
+.compare-title { font-weight: 700; font-size: 14px; margin-bottom: 10px; }
+.compare-col:first-child .compare-title { color: #be123c; }
+.compare-col:last-child .compare-title { color: #15803d; }
+.compare-item { font-size: 13px; color: #475569; padding: 4px 0 4px 18px; position: relative; }
+.compare-item::before { position: absolute; left: 2px; }
+.compare-col:first-child .compare-item::before { content: "✗"; color: #be123c; }
+.compare-col:last-child .compare-item::before { content: "✓"; color: #15803d; }
+
+/* ── Tables ─────────────────────────── */
+table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; }
+th { background: #1e293b; color: #f1f5f9; padding: 9px 12px; text-align: left; font-weight: 600; font-size: 12px; }
+td { padding: 8px 12px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+tr:nth-child(even) td { background: #f8fafc; }
+
+/* ── Callouts ───────────────────────── */
+.callout { border-radius: 8px; padding: 14px 16px; margin: 14px 0; font-size: 13px; }
+.callout-title { font-weight: 700; margin-bottom: 5px; font-size: 14px; }
+.tip    { background: #f0fdf4; border-left: 4px solid #22c55e; }
+.tip .callout-title { color: #15803d; }
+.info   { background: #eff6ff; border-left: 4px solid #3b82f6; }
+.info .callout-title { color: #1d4ed8; }
+.purple { background: #fdf4ff; border-left: 4px solid #a855f7; }
+.purple .callout-title { color: #7c3aed; }
+
+/* ── Code ───────────────────────────── */
+code { font-family: monospace; font-size: 12px; background: #f1f5f9; color: #6366f1; padding: 2px 6px; border-radius: 3px; border: 1px solid #e2e8f0; }
+pre { background: #0f172a; color: #e2e8f0; padding: 16px 18px; border-radius: 8px; font-family: monospace; font-size: 12px; margin: 12px 0; line-height: 1.6; overflow-x: auto; }
+pre .c { color: #64748b; }
+pre .k { color: #a5b4fc; }
+pre .s { color: #86efac; }
+pre .n { color: #fbbf24; }
+
+/* ── Two col ────────────────────────── */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 14px 0; }
+.col-box { border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; background: #f8fafc; }
+</style>
+</head>
+<body>
+
+<!-- ══════════════════
+     COVER
+══════════════════ -->
+<div class="cover">
+  <div class="cover-content">
+    <div class="cover-eyebrow">Product Introduction · v8.11</div>
+    <h1>GlassBox<br><em>AIoPs</em></h1>
+    <p class="tagline">以 AI 驅動的製程異常診斷平台<br>彈性 MCP/Skill 組合 × 六大 LLM 應用場景<br>以 SPC OOC 蝕刻製程異常為範例說明</p>
+    <div class="feature-list">
+      <div class="feature-item"><div class="feature-icon">🔌</div><strong>四層彈性架構</strong> — Event / Skill / MCP / DataSubject，無需改程式即可擴充新診斷場景</div>
+      <div class="feature-item"><div class="feature-icon">🤖</div><strong>六大 LLM 應用</strong> — 腳本生成、試跑驗證、Auto-Map、建議邏輯、邏輯驗證、診斷報告</div>
+      <div class="feature-item"><div class="feature-icon">⚡</div><strong>SSE 漸進式串流</strong> — 每個 Skill 完成即推播，30/70 分割布局即時渲染</div>
+    </div>
+    <dl class="cover-meta">
+      <div><dt>版本</dt><dd>v8.11</dd></div>
+      <div><dt>AI 引擎</dt><dd>Claude Opus 4.6</dd></div>
+      <div><dt>日期</dt><dd>2026-03-01</dd></div>
+    </dl>
+  </div>
+</div>
+
+<!-- ══════════════════
+     CH1: POSITIONING
+══════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 1</div>
+    <h2>系統定位與核心價值</h2>
+    <p class="lead">GlassBox AIoPs 將資深 PE 工程師的診斷知識固化為可配置的「診斷技能（Skill）」，由 AI 在製程異常發生時自動執行，大幅縮短根因分析時間。</p>
+  </div>
+  <div class="chapter-body">
+    <div class="section">
+      <h3>傳統流程 vs. GlassBox AIoPs</h3>
+      <div class="compare">
+        <div class="compare-col">
+          <div class="compare-title">❌ 傳統手動流程</div>
+          <div class="compare-item">接到警報後人工判斷要查哪些系統</div>
+          <div class="compare-item">登入 MES、LIMS、SPC 系統逐一查詢</div>
+          <div class="compare-item">依靠個人經驗比對資料判斷根因</div>
+          <div class="compare-item">手動撰寫診斷報告（格式不一）</div>
+          <div class="compare-item">資深 PE 知識無法系統化傳承</div>
+          <div class="compare-item">每次診斷需重複相同查詢步驟</div>
+        </div>
+        <div class="compare-col">
+          <div class="compare-title">✓ GlassBox AIoPs</div>
+          <div class="compare-item">事件觸發後自動匹配診斷技能（Skill）</div>
+          <div class="compare-item">MCP 自動呼叫各資料來源 API</div>
+          <div class="compare-item">Claude LLM 依診斷邏輯分析並得出結論</div>
+          <div class="compare-item">結構化報告含 Evidence + 建議行動</div>
+          <div class="compare-item">Builder Copilot 固化 PE 知識</div>
+          <div class="compare-item">SSE 串流即時推播，無需等待全部完成</div>
+        </div>
+      </div>
+
+      <h3 style="margin-top:32px;">系統主介面</h3>
+      <figure class="shot">
+        <img src="introduction-img/02_diagnose_home.png" alt="主介面">
+        <figcaption>圖 1-1：系統主介面 — 左側深藍導覽列 + 中央 30/70 分割工作區（對話助手 + 診斷報告）</figcaption>
+      </figure>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════
+     CH2: FOUR LAYERS
+══════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 2</div>
+    <h2>彈性四層組件架構</h2>
+    <p class="lead">系統最核心的設計是四層組件金字塔。每一層都可獨立配置，PE 工程師無需修改程式碼，透過 Builder Copilot 的 UI 即可擴充新的診斷場景。</p>
+  </div>
+  <div class="chapter-body">
+
+    <div class="section">
+      <h3>四層架構定義</h3>
+      <div class="layer-pyramid">
+        <div class="layer-row">
+          <div class="layer-label l-event">⚡<br>Event Type</div>
+          <div class="layer-body">
+            <strong>定義「什麼事件觸發診斷」</strong>，包含事件名稱與屬性 Schema。事件發生時攜帶具體的 params 值。
+            <ul>
+              <li>一個 Event Type 可綁定多個 Skill（平行執行）</li>
+              <li>範例：<code>SPC_OOC_Etch_CD</code>（蝕刻 CD SPC 超出管制界限）</li>
+            </ul>
+          </div>
+        </div>
+        <div class="layer-row">
+          <div class="layer-label l-skill">🤖<br>Skill</div>
+          <div class="layer-body">
+            <strong>定義「如何診斷」</strong>，綁定一個 MCP + param_mappings（事件屬性 → MCP 輸入映射）+ diagnostic_prompt（診斷邏輯）。
+            <ul>
+              <li>同一個 MCP 可被多個 Skill 共用</li>
+              <li>param_mappings 支援 AI Auto-Map 自動生成</li>
+              <li>範例：<code>檢查SPC 是否連續異常</code></li>
+            </ul>
+          </div>
+        </div>
+        <div class="layer-row">
+          <div class="layer-label l-mcp">🔧<br>MCP</div>
+          <div class="layer-body">
+            <strong>定義「如何取資料並前處理」</strong>，包含 input_params、output_schema，以及 AI 生成的 Python processing_script。
+            <ul>
+              <li>腳本在 RestrictedPython 沙箱中安全執行</li>
+              <li>支援四個建置步驟（選 DS → 撈樣本 → 加工意圖 → 試跑）</li>
+              <li>範例：<code>Query SPC data</code></li>
+            </ul>
+          </div>
+        </div>
+        <div class="layer-row">
+          <div class="layer-label l-ds">🗄️<br>DataSubject</div>
+          <div class="layer-body">
+            <strong>定義「資料在哪裡」</strong>，提供 API Endpoint URL、HTTP Method 及 Response Schema。
+            <ul>
+              <li>可指向任意 REST API（工廠 MES、LIMS、SPC 系統）</li>
+              <li>MCP 執行時系統自動呼叫 DataSubject API</li>
+              <li>範例：<code>SPC_Chart_Data</code>（<code>/api/v1/mock/spc-chart</code>）</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <h3>SPC OOC 事件的完整診斷鏈路</h3>
+      <p>以「SPC_OOC_Etch_CD」事件為例，觸發後同時執行三個 Skill，分別從不同維度診斷根因：</p>
+      <table>
+        <thead><tr><th>Skill</th><th>MCP</th><th>DataSubject</th><th>診斷目的</th></tr></thead>
+        <tbody>
+          <tr><td>APC 異常偵測</td><td>apc parameter check</td><td>APC_Data</td><td>APC 參數是否飽和或異常</td></tr>
+          <tr><td>配方異動檢查</td><td>Check recipe data</td><td>Recipe_Data</td><td>MES/RMS 最近是否有配方修改</td></tr>
+          <tr><td>SPC 連續異常分析</td><td>Query SPC data</td><td>SPC_Chart_Data</td><td>SPC 管制圖連續超限情況</td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout tip">
+        <div class="callout-title">✅ 擴充新診斷場景的三步驟（無需改程式碼）</div>
+        <ol>
+          <li>在 <strong>Data Subject</strong> 定義新的 API 資料來源</li>
+          <li>在 <strong>MCP Builder</strong> 建立查詢腳本（AI 自動生成）</li>
+          <li>在 <strong>Skill Builder</strong> 建立技能，綁定 MCP 與 Event Type，設定診斷邏輯</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════
+     CH3: SPC EXAMPLE FLOW
+══════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 3</div>
+    <h2>SPC OOC 診斷完整示範</h2>
+    <p class="lead">從事件觸發到診斷完成，以 SPC OOC 蝕刻異常為例，示範系統的完整執行流程與 SSE 漸進式串流機制。</p>
+  </div>
+  <div class="chapter-body">
+
+    <div class="section">
+      <h3>Step 1：觸發 SPC OOC 事件</h3>
+      <figure class="shot">
+        <img src="introduction-img/03_event_card.png" alt="事件卡片">
+        <figcaption>圖 3-1：SPC OOC 事件警告卡片 — 紅色設計突出緊急性，包含設備、量測值、管制界限等完整屬性</figcaption>
+      </figure>
+      <p>事件攜帶完整的 params：<code>equipment_id=TETCH01</code>、<code>chamber_id=PM2</code>、<code>measurement_value=102.5</code>（超過 UCL=100.0）、<code>spc_chart_id=CD_MEAN</code>。這些屬性會透過各 Skill 的 <code>param_mappings</code> 傳遞給對應的 MCP。</p>
+    </div>
+
+    <div class="section">
+      <h3>Step 2：SSE 串流診斷執行（漸進式渲染）</h3>
+      <p>點擊「啟動診斷分析」後，系統以 <strong>Server-Sent Events</strong> 串流方式逐 Skill 推播結果：</p>
+
+      <div class="flow">
+        <div class="flow-item">
+          <div class="flow-title">→ <code>start</code> 事件：診斷開始</div>
+          <div class="flow-desc">右側報告區初始化，顯示事件 Header（事件型別、ID、params）</div>
+          <div class="flow-payload">{"type":"start","skill_count":3,"event_type":"SPC_OOC_Etch_CD"}</div>
+        </div>
+        <div class="flow-item">
+          <div class="flow-title">→ <code>skill_start</code> × 3：各 Skill 開始</div>
+          <div class="flow-desc">左側聊天區依序顯示「⏳ 正在執行 {Skill 名稱}...」</div>
+        </div>
+        <div class="flow-item llm-step">
+          <div class="flow-title">🤖 LLM → <code>skill_done</code>：每 Skill 完成立即推播</div>
+          <div class="flow-desc">Claude 完成診斷分析後，右側立即追加對應的診斷卡片 Tab，不等待其他 Skill</div>
+          <div class="flow-payload">{"type":"skill_done","index":0,"status":"ABNORMAL","diagnosis":"...","recommendation":"..."}</div>
+        </div>
+        <div class="flow-item">
+          <div class="flow-title">→ <code>done</code>：全部完成</div>
+          <div class="flow-desc">渲染底部診斷摘要列，顯示各狀態計數</div>
+        </div>
+      </div>
+
+      <figure class="shot">
+        <img src="introduction-img/11_diagnosis_running.png" alt="診斷串流執行中">
+        <figcaption>圖 3-2：SSE 串流執行畫面 — 左側聊天區顯示 Skill 執行進度，右側報告區以 Tab 形式漸進顯示各 Skill 的診斷結果</figcaption>
+      </figure>
+
+      <div class="callout info">
+        <div class="callout-title">ℹ️ 為什麼使用 Fetch API 而非 EventSource？</div>
+        瀏覽器的 <code>EventSource</code> API 不支援設定自定義 Header，無法傳遞 JWT Bearer Token。系統改用 <strong>Fetch API + ReadableStream</strong>，在設定 Authorization Header 的同時實現 SSE 串流。
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Step 3：診斷結果 — 三個 Skill 的診斷卡片</h3>
+      <figure class="shot">
+        <img src="introduction-img/12_diagnosis_results.png" alt="診斷結果">
+        <figcaption>圖 3-3：完整診斷結果 — 三個 Skill 各自的診斷報告卡片（Tab 形式），每張包含 Evidence 資料 + AI 診斷結論 + 建議行動</figcaption>
+      </figure>
+
+      <figure class="shot">
+        <img src="introduction-img/13_diagnosis_summary.png" alt="診斷摘要">
+        <figcaption>圖 3-4：底部診斷摘要列 — 全部 Skill 完成後顯示整體結果統計（正常/異常/錯誤計數）</figcaption>
+      </figure>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════
+     CH4: LLM APPLICATIONS
+══════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 4</div>
+    <h2>六大 LLM 應用場景深度解析</h2>
+    <p class="lead">系統在六個關鍵節點應用 <strong>Claude Opus 4.6</strong>，涵蓋從系統建置（Builder Copilot）到運行時診斷分析的完整生命週期。</p>
+  </div>
+  <div class="chapter-body">
+
+    <div class="section">
+      <h3>LLM 應用一覽表</h3>
+      <table>
+        <thead><tr><th>#</th><th>場景</th><th>觸發時機</th><th>API 端點</th><th>System Prompt</th></tr></thead>
+        <tbody>
+          <tr><td>①</td><td>MCP 腳本生成</td><td>Builder：加工意圖 + 試跑</td><td><code>/mcp-definitions/{id}/try-run</code></td><td>PROMPT_MCP_GENERATE</td></tr>
+          <tr><td>②</td><td>MCP 試執行驗證</td><td>Builder：驗證腳本結果</td><td><code>/mcp-definitions/{id}/try-run</code></td><td>PROMPT_MCP_TRY_RUN</td></tr>
+          <tr><td>③</td><td>Auto-Map 參數對應</td><td>Skill Builder：點擊 AI Auto-Map</td><td><code>/builder/auto-map</code></td><td>內建 Prompt</td></tr>
+          <tr><td>④</td><td>建議診斷邏輯</td><td>Skill Builder：點擊 AI 建議邏輯</td><td><code>/builder/suggest-logic</code></td><td>內建 Prompt</td></tr>
+          <tr><td>⑤</td><td>驗證診斷邏輯</td><td>Skill Builder：點擊 Validate Logic</td><td><code>/builder/validate-logic</code></td><td>內建 Prompt</td></tr>
+          <tr><td>⑥</td><td>診斷報告生成</td><td>診斷執行（每個 Skill）</td><td><code>/diagnose/event-driven-stream</code></td><td>PROMPT_SKILL_DIAGNOSIS</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h3>① MCP 腳本自動生成（SPC 查詢範例）</h3>
+
+      <figure class="shot">
+        <img src="introduction-img/05_mcp_step1_ds_select.png" alt="MCP Builder Step 1">
+        <figcaption>圖 4-1：MCP Builder Step 1 — 選定 SPC_Chart_Data 後，系統顯示 Output Schema（datetime, value, UCL, LCL 等欄位），供 LLM 生成腳本參考</figcaption>
+      </figure>
+
+      <div class="llm-card">
+        <div class="llm-card-header">
+          <div class="llm-num">①</div>
+          <h4>MCP 腳本生成 — 使用者只需說「我要什麼樣的資料」</h4>
+          <span class="llm-badge">🤖 Claude Opus 4.6</span>
+        </div>
+        <div class="llm-card-body">
+          <p><strong>使用者輸入（自然語言加工意圖）：</strong></p>
+          <p>「以 table 的方式回傳，呈現在用 Trend chart，x 軸是 datetime，y 軸是 UCL/LCL 用 orange 的顏色，Value 用綠色，但是超過 UCL/LCL 要用紅色的點」</p>
+          <p style="margin-top:10px;"><strong>Claude 生成的 Python 腳本（節錄）：</strong></p>
+          <p>根據 DataSubject 的 Output Schema（datetime, value, UCL, LCL 等欄位）和使用者的可視化需求，Claude 自動生成符合 RestrictedPython 安全規則的資料處理腳本，包含：欄位提取、OOC 點標記、Trend chart 配色設定、輸出格式化。</p>
+
+          <div class="callout tip" style="margin-top:12px;">
+            <div class="callout-title">💬 LLM 主動引導使用者修正加工意圖</div>
+            <p style="margin:0;">若試跑結果不符合預期（如欄位缺失、圖表顯示錯誤），Claude 不只回傳錯誤訊息，而是<strong>直接分析原因並提示使用者如何修正加工意圖（Prompt）</strong>。例如：</p>
+            <ul style="margin:8px 0 0 0;">
+              <li>「您的意圖中未指定 UCL/LCL 欄位來源，請補充：<em>y 軸 UCL/LCL 來自 schema 中的 UCL 和 LCL 欄位</em>」</li>
+              <li>「目前腳本回傳的 chart_data 是 HTML 字串，前端需要 Plotly JSON dict，請在意圖中加入：<em>chart_data 需以 fig.to_dict() 格式回傳</em>」</li>
+            </ul>
+            <p style="margin:8px 0 0 0;">此設計讓 PE 工程師以<strong>對話式迭代</strong>精煉腳本，無需了解 Python 或 Plotly 細節。</p>
+          </div>
+
+          <p style="margin-top:10px;"><strong>System Prompt Key：</strong><code>PROMPT_MCP_GENERATE</code>（在系統設定中可修改）</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>② MCP 試執行驗證（Step 2–4 完整流程）</h3>
+
+      <figure class="shot">
+        <img src="introduction-img/06_mcp_step234_intent.png" alt="MCP Step 2-4">
+        <figcaption>圖 4-2：MCP Step 2–4 — 加工意圖輸入、LLM 生成腳本、試跑執行結果（已儲存快照），確認 output_schema 正確性</figcaption>
+      </figure>
+
+      <div class="llm-card">
+        <div class="llm-card-header">
+          <div class="llm-num">②</div>
+          <h4>試執行驗證 — 沙箱安全執行並驗證輸出格式</h4>
+          <span class="llm-badge">🤖 Claude Opus 4.6</span>
+        </div>
+        <div class="llm-card-body">
+          <p>點擊「⚡ 執行試跑」後，系統執行以下驗證迴圈：</p>
+          <ol>
+            <li>使用 <code>PROMPT_MCP_TRY_RUN</code> 引導 Claude 根據加工意圖生成 Python 腳本</li>
+            <li>呼叫 DataSubject API（<code>SPC_Chart_Data</code>）取得樣本資料</li>
+            <li>在 <strong>RestrictedPython 沙箱</strong>中安全執行生成的腳本</li>
+            <li>比對輸出結構與 output_schema，回傳驗證報告</li>
+          </ol>
+
+          <p style="margin-top:10px;"><strong>若驗證未通過，LLM 主動提示修正方向：</strong></p>
+          <div class="layer-pyramid" style="margin:8px 0;">
+            <div class="layer-row">
+              <div class="layer-label" style="background:#fff1f2;color:#be123c;font-size:12px;">❌ 常見問題</div>
+              <div class="layer-body" style="font-size:12px;">
+                腳本引用了 schema 中不存在的欄位 → Claude 提示：「請將欄位名稱改為 <code>value</code>（現有 schema 中無 <code>measurement</code>）」<br>
+                chart_data 格式錯誤（HTML 而非 Plotly dict） → Claude 提示：「請在意圖末加入：<em>以 fig.to_dict() 回傳圖表資料</em>」<br>
+                沙箱執行逾時 → Claude 提示：「資料量過大，建議在意圖中加入：<em>僅取最近 100 筆資料</em>」
+              </div>
+            </div>
+            <div class="layer-row">
+              <div class="layer-label" style="background:#f0fdf4;color:#15803d;font-size:12px;">✅ 成功後</div>
+              <div class="layer-body" style="font-size:12px;">
+                狀態變更為 <strong>已儲存（快照）</strong>，MCP 定義完成，可直接在 Skill Builder 中選用此 MCP
+              </div>
+            </div>
+          </div>
+
+          <p style="margin-top:8px;">此迭代機制讓 PE 工程師以<strong>對話式 Prompt 修改</strong>取代傳統 Debug 流程，通常 1–2 次迭代即可完成腳本。</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>③④⑤ Skill Builder 的三個 AI 輔助功能</h3>
+
+      <div class="llm-card">
+        <div class="llm-card-header">
+          <div class="llm-num">③</div>
+          <h4>Auto-Map — 語意感知的事件屬性自動對應</h4>
+          <span class="llm-badge">🤖 Claude Opus 4.6</span>
+        </div>
+        <div class="llm-card-body">
+          <p>Skill 需要定義 <code>param_mappings</code>，指定事件的哪個屬性對應到 MCP 的哪個輸入參數。Auto-Map 讓 Claude 自動完成這個映射，並標示每個對應的信心度：</p>
+          <pre><span class="c">// Auto-Map 回傳範例</span>
+{
+  <span class="s">"mcp_param"</span>: <span class="s">"chart_name"</span>,
+  <span class="s">"event_field"</span>: <span class="s">"spc_chart_id"</span>,
+  <span class="s">"confidence"</span>: <span class="s">"HIGH"</span>,
+  <span class="s">"reasoning"</span>: <span class="s">"spc_chart_id 語意對應 chart_name，均為 SPC 管制圖識別符"</span>
+}</pre>
+          <p>信心度（HIGH/MEDIUM/LOW）讓 PE 工程師快速識別需要人工確認的項目。</p>
+        </div>
+      </div>
+
+      <div class="llm-card">
+        <div class="llm-card-header">
+          <div class="llm-num">④</div>
+          <h4>Suggest Logic — 資深 PE 等級的診斷邏輯建議</h4>
+          <span class="llm-badge">🤖 Claude Opus 4.6</span>
+        </div>
+        <div class="llm-card-body">
+          <p>Claude 以<strong>資深半導體製程工程師</strong>的角色，根據事件屬性 Schema 和 MCP output_schema，生成 3–5 條業界標準診斷邏輯，例如：</p>
+          <ul>
+            <li>「當 SPC 管制圖中連續 N 點超過 UCL/LCL，判定為趨勢性失控，需立即執行 PM 評估」</li>
+            <li>「若量測值超出管制上限且偏移量 &gt; 2σ，結合 APC 飽和度判斷是否為系統性漂移」</li>
+            <li>「比較最近 24 小時的 recipe 修改紀錄與 OOC 發生時間，評估配方異動相關性」</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="llm-card">
+        <div class="llm-card-header">
+          <div class="llm-num">⑤</div>
+          <h4>Validate Logic — 防止診斷 Prompt 引用不存在欄位</h4>
+          <span class="llm-badge">🤖 Claude Opus 4.6</span>
+        </div>
+        <div class="llm-card-body">
+          <p>診斷 Prompt 中引用的欄位名稱（如 <code>apc_saturation_level</code>）必須存在於 MCP 的 output_schema，否則執行時會失敗。Validate Logic 讓 Claude 自動比對，回傳：</p>
+          <ul>
+            <li>✅ 所有欄位引用正確 — 可安全儲存</li>
+            <li>❌ 欄位 <code>xxx</code> 不存在於 output_schema — 建議使用 <code>yyy</code></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>⑥ 診斷報告生成 — 核心 LLM 分析引擎</h3>
+
+      <div class="llm-card">
+        <div class="llm-card-header">
+          <div class="llm-num">⑥</div>
+          <h4>診斷報告生成 — 每個 Skill 執行一次 LLM 呼叫</h4>
+          <span class="llm-badge">🤖 Claude Opus 4.6</span>
+        </div>
+        <div class="llm-card-body">
+          <p>每個 Skill 執行流程（以 SPC 連續異常分析為例）：</p>
+          <div class="flow" style="margin: 12px 0;">
+            <div class="flow-item">
+              <div class="flow-title">解析 param_mappings：<code>spc_chart_id → chart_name</code></div>
+              <div class="flow-desc">從事件 params 提取 <code>chart_name=CD_MEAN</code></div>
+            </div>
+            <div class="flow-item">
+              <div class="flow-title">呼叫 SPC_Chart_Data API</div>
+              <div class="flow-desc">HTTP GET <code>/api/v1/mock/spc-chart?chart_name=CD_MEAN</code>，取得 SPC 量測時序資料</div>
+            </div>
+            <div class="flow-item">
+              <div class="flow-title">RestrictedPython 沙箱執行 MCP 腳本</div>
+              <div class="flow-desc">提取關鍵指標（OOC 點數、連續超限次數、趨勢方向），回傳 Standard Payload：<code>{dataset, ui_render: {chart_data}}</code></div>
+            </div>
+            <div class="flow-item" style="background:#f0fdf4;border-radius:8px;padding:10px 14px;margin-left:-4px;">
+              <div class="flow-title" style="color:#15803d;">📊 SPC 案例輸出：Plotly Trend Chart + 資料表格</div>
+              <div class="flow-desc" style="margin-top:6px;">
+                MCP 腳本輸出含兩個部分，前端同時呈現：
+                <ul style="margin:6px 0 0 0;font-size:12px;">
+                  <li><strong>Trend Chart（Plotly）</strong>：5 條 trace — UCL（橘色虛線）、LCL（橘色虛線）、Value 連線（綠色）、正常點（綠色圓點）、OOC 超限點（紅色大圓點），x 軸為 datetime，y 軸為 CD 量測值（nm）</li>
+                  <li><strong>資料表格</strong>：每筆量測記錄（datetime / value / UCL / LCL / tool / lotID / OOC 旗標），最多顯示 15 筆，支援橫向捲動</li>
+                </ul>
+              </div>
+            </div>
+            <div class="flow-item llm-step">
+              <div class="flow-title">🤖 Claude 依 diagnostic_prompt 生成診斷報告</div>
+              <div class="flow-desc">以 <code>PROMPT_SKILL_DIAGNOSIS</code> + <code>diagnostic_prompt</code> + MCP 輸出資料（含完整量測時序）組合 Prompt，Claude 生成含 status / conclusion / evidence / recommendation 的結構化報告</div>
+            </div>
+            <div class="flow-item">
+              <div class="flow-title">SSE 推播 skill_done，前端即時渲染卡片</div>
+              <div class="flow-desc">卡片包含：AI 診斷結論、📊 Trend Chart、資料表格、建議行動 — 無需等待其他 Skill</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════
+     CH5: BUILDER COPILOT
+══════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 5</div>
+    <h2>Builder Copilot — AI 輔助知識建構</h2>
+    <p class="lead">Builder Copilot 是 GlassBox 的核心創新：讓 PE 工程師通過 UI 配置（而非撰寫程式）建構新的診斷場景，AI 負責腳本生成和知識推理。</p>
+  </div>
+  <div class="chapter-body">
+
+    <div class="section">
+      <h3>MCP 建構流程（Step 1 → 4）</h3>
+
+      <figure class="shot">
+        <img src="introduction-img/05_mcp_step1_ds_select.png" alt="MCP Step 1">
+        <figcaption>圖 5-1：MCP Step 1 — 選定 SPC_Chart_Data，系統顯示 Output Schema 欄位參考（datetime, value, UCL, LCL 等），填入測試參數後撈取樣本資料</figcaption>
+      </figure>
+
+      <figure class="shot">
+        <img src="introduction-img/06_mcp_step234_intent.png" alt="MCP Step 2-4">
+        <figcaption>圖 5-2：MCP Step 2–4 — 填入自然語言加工意圖（趨勢圖 + 顏色規則），LLM 自動生成腳本後執行試跑，成功後顯示「已儲存（快照）」</figcaption>
+      </figure>
+
+      <table>
+        <thead><tr><th>步驟</th><th>操作</th><th>AI 介入</th><th>結果</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Step 1</strong></td><td>選定 DataSubject，填測試參數，撈取樣本</td><td>—</td><td>確認 DataSubject 的 API 可正常回傳資料</td></tr>
+          <tr><td><strong>Step 2</strong></td><td>在「加工意圖」欄位輸入自然語言需求</td><td>—</td><td>意圖記錄，供 LLM 生成腳本參考</td></tr>
+          <tr><td><strong>Step 3</strong></td><td>點擊「⚡ 執行試跑」</td><td>Claude 根據意圖 + Schema 生成腳本並沙箱執行 <span class="llm-badge">🤖 LLM ①②</span></td><td>腳本生成 + 試跑驗證通過</td></tr>
+          <tr><td><strong>Step 4</strong></td><td>確認結果預覽（已儲存），點擊「更新/建立」</td><td>—</td><td>MCP 定義完成，<span style="color:#15803d;font-weight:700;">✓ LLM 已生成</span> 標示</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h3>Skill 建構流程（設定、Auto-Map、診斷邏輯）</h3>
+      <table>
+        <thead><tr><th>步驟</th><th>操作</th><th>AI 介入</th><th>結果</th></tr></thead>
+        <tbody>
+          <tr><td>A. 基本設定</td><td>填入 Skill 名稱、說明、選擇 MCP 和 Event Type</td><td>—</td><td>Skill 框架建立</td></tr>
+          <tr><td>B. Auto-Map</td><td>點擊「🤖 AI Auto-Map」</td><td>Claude 語意分析映射關係 <span class="llm-badge">🤖 LLM ③</span></td><td>param_mappings 自動填入（含信心度）</td></tr>
+          <tr><td>C. 確認映射</td><td>人工審查 LOW 信心度項目並修正</td><td>—</td><td>param_mappings 最終確認</td></tr>
+          <tr><td>D. 診斷邏輯</td><td>點擊「💡 AI 建議邏輯」或手動撰寫</td><td>Claude 生成 PE 等級邏輯建議 <span class="llm-badge">🤖 LLM ④</span></td><td>diagnostic_prompt 完成</td></tr>
+          <tr><td>E. 驗證邏輯</td><td>點擊「✅ Validate Logic」</td><td>Claude 確認欄位引用正確性 <span class="llm-badge">🤖 LLM ⑤</span></td><td>確保 Skill 可正常執行</td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout purple">
+        <div class="callout-title">🔮 Builder Copilot 的設計哲學</div>
+        傳統 Expert System 需要程式師將 PE 知識「硬編碼」進系統，知識更新成本極高。GlassBox 的 Builder Copilot 讓 <strong>PE 工程師成為系統設計者</strong>：他們定義「查什麼資料、用什麼邏輯診斷」，Claude 負責「如何取資料、如何寫腳本、如何推理」，達到知識的<strong>可配置、可復用、可迭代</strong>。
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════
+     CH6: SKILL DEEP DIVE
+══════════════════ -->
+<div class="chapter">
+  <div class="chapter-header">
+    <div class="chapter-num">Chapter 6</div>
+    <h2>Skill — 連結事件、資料與 AI 診斷的核心組件</h2>
+    <p class="lead">Skill 是 GlassBox AIoPs 的「智能核心」。它將 <strong>事件觸發時機</strong>、<strong>資料取得方式（MCP）</strong>、<strong>LLM 診斷邏輯</strong> 和 <strong>後續行動定義</strong> 整合為一個可配置的診斷單元，讓 PE 工程師的知識得以系統化複用。</p>
+  </div>
+  <div class="chapter-body">
+
+    <div class="section">
+      <h3>Skill 的四個核心構成</h3>
+      <div class="layer-pyramid">
+        <div class="layer-row">
+          <div class="layer-label l-event">⚡<br>Event 綁定</div>
+          <div class="layer-body">
+            <strong>定義「什麼時候觸發這個 Skill」</strong>
+            <ul>
+              <li>每個 Skill 綁定一個 <strong>Event Type</strong>（如 <code>SPC_OOC_Etch_CD</code>），當該事件發生時，系統自動啟動所有綁定至此 Event 的 Skill</li>
+              <li>同一個 Event Type 可同時綁定多個 Skill（平行執行，每個從不同維度切入診斷）</li>
+              <li><strong>param_mappings</strong>：定義事件攜帶的哪些參數值（如 <code>lot_id</code>、<code>tool_id</code>）要傳入此 Skill 使用的 MCP 查詢</li>
+            </ul>
+            <p style="margin:6px 0 0;font-size:12px;color:#7c3aed;"><em>範例：SPC_OOC_Etch_CD 事件同時觸發 APC 異常偵測、配方異動檢查、SPC 連續異常分析三個 Skill</em></p>
+          </div>
+        </div>
+        <div class="layer-row">
+          <div class="layer-label l-mcp">🔧<br>MCP 連結</div>
+          <div class="layer-body">
+            <strong>定義「要看哪些資料」</strong>
+            <ul>
+              <li>每個 Skill 綁定一個 <strong>MCP</strong>，MCP 負責呼叫 DataSubject API 並執行資料前處理腳本</li>
+              <li>MCP 的輸出（<code>dataset</code> + <code>ui_render</code>）直接作為 LLM 診斷的輸入資料</li>
+              <li>SPC 案例中，MCP「Query SPC data」取回 100 筆量測資料，生成 <strong>Plotly Trend Chart</strong>（UCL/LCL 管制線 + OOC 紅點標記）和完整資料表格，供 LLM 分析與前端呈現</li>
+            </ul>
+          </div>
+        </div>
+        <div class="layer-row">
+          <div class="layer-label" style="background:#fef3c7;color:#92400e;font-size:13px;font-weight:700;">🤖<br>LLM 診斷</div>
+          <div class="layer-body">
+            <strong>定義「如何判斷結論」</strong>
+            <ul>
+              <li>PE 工程師在 <strong>diagnostic_prompt</strong> 中以自然語言寫下判斷邏輯（如：「若連續 4 點超過 UCL，判定為 ABNORMAL」）</li>
+              <li>執行時系統將 <code>diagnostic_prompt</code> + MCP 輸出資料（含量測時序、OOC 統計）組合為 LLM Context</li>
+              <li>Claude 分析後回傳結構化報告：<code>status</code>（NORMAL / ABNORMAL）、<code>conclusion</code>（診斷結論）、<code>evidence</code>（關鍵佐證清單）、<code>summary</code>（摘要）</li>
+              <li>Validate Logic 功能（LLM ⑤）可在建立前自動確認 diagnostic_prompt 中引用的欄位名稱均存在於 MCP output_schema，防止執行期錯誤</li>
+            </ul>
+          </div>
+        </div>
+        <div class="layer-row">
+          <div class="layer-label" style="background:#dbeafe;color:#1e3a8a;font-size:13px;font-weight:700;">📋<br>後續行動</div>
+          <div class="layer-body">
+            <strong>定義「診斷完成後操作員要做什麼」</strong>
+            <ul>
+              <li><strong>human_recommendation</strong> 欄位由 PE 工程師事先定義，描述當此 Skill 判定為異常時操作員的標準處置流程</li>
+              <li>自動呈現在診斷卡片底部「💡 建議行動」區塊，讓現場工程師無需查閱 SOP 手冊即知下一步</li>
+              <li>範例：「立即停機確認 TETCH01 PM2 腔體狀態，聯繫設備工程師評估是否執行 PM 作業，並通知 APC 團隊確認補償模型更新頻率」</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>SPC OOC 案例：三個 Skill 的完整設定</h3>
+      <table>
+        <thead>
+          <tr><th>Skill</th><th>Event 綁定 + param_mappings</th><th>MCP 連結 → 輸出</th><th>LLM 診斷邏輯（摘要）</th><th>建議行動</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>APC 異常偵測</strong></td>
+            <td><code>SPC_OOC_Etch_CD</code><br>lot_id → lot_id<br>operation_number → operation_number</td>
+            <td>apc parameter check<br>→ 最近 24h APC 補償參數表格</td>
+            <td>判斷 APC 補償值是否趨近上/下限（飽和），飽和則 ABNORMAL</td>
+            <td>通知 APC 工程師重新校準補償模型</td>
+          </tr>
+          <tr>
+            <td><strong>配方異動檢查</strong></td>
+            <td><code>SPC_OOC_Etch_CD</code><br>lot_id → lot_id<br>tool_id → tool_id</td>
+            <td>Check recipe data<br>→ 最近 12h Recipe 修改紀錄表格</td>
+            <td>若 OOC 發生前 12h 內有 recipe 異動，且修改欄位為製程關鍵參數，則 ABNORMAL</td>
+            <td>Roll back recipe 至上次穩定版本，通知 RMS 團隊確認</td>
+          </tr>
+          <tr>
+            <td><strong>SPC 連續異常分析</strong></td>
+            <td><code>SPC_OOC_Etch_CD</code><br>（無 param_mappings → 取全量資料）</td>
+            <td>Query SPC data<br>→ 📊 Trend Chart（5 traces）+ 100 筆量測表格</td>
+            <td>若連續 ≥ 4 點超過 UCL/LCL，判定為系統性失控 ABNORMAL；分析漂移方向與速率</td>
+            <td>立即停機確認腔體狀態，評估是否執行 PM，通知 APC 團隊</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout info" style="margin-top:16px;">
+        <div class="callout-title">ℹ️ SPC Skill 的佐證輸出說明</div>
+        SPC 連續異常分析 Skill 執行後，診斷卡片的「📊 數據圖表佐證」區塊自動呈現：
+        <ul style="margin:8px 0 0 0;">
+          <li><strong>Plotly Trend Chart</strong>：橘色虛線為 UCL/LCL 管制線，綠色線段為量測值走勢，綠色圓點為正常點，紅色大圓點為 OOC 超限點；滑鼠 hover 顯示精確數值</li>
+          <li><strong>資料表格</strong>：datetime / value / UCL / LCL / tool / lotID / recipe / OOC 旗標，一覽最近量測紀錄</li>
+        </ul>
+        LLM 可同時看到這份資料，用於在 diagnostic_prompt 的邏輯下分析連續超限情況，而操作員也能直觀看到圖表，快速理解 AI 診斷的依據。
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>Skill 的執行時序</h3>
+      <div class="flow">
+        <div class="flow-item">
+          <div class="flow-title">① Event 觸發：系統接收到 <code>SPC_OOC_Etch_CD</code> 事件</div>
+          <div class="flow-desc">查詢所有綁定至此 Event Type 的 Skill，本例有 3 個</div>
+        </div>
+        <div class="flow-item">
+          <div class="flow-title">② param_mappings 解析</div>
+          <div class="flow-desc">每個 Skill 從事件 params（lot_id, tool_id, operation_number…）解析出自己需要的 MCP 輸入參數</div>
+        </div>
+        <div class="flow-item">
+          <div class="flow-title">③ DataSubject API 呼叫</div>
+          <div class="flow-desc">各 Skill 依序（或可平行）呼叫 MCP 對應的 DataSubject endpoint，取得原始資料</div>
+        </div>
+        <div class="flow-item">
+          <div class="flow-title">④ MCP 腳本沙箱執行</div>
+          <div class="flow-desc">RestrictedPython 沙箱執行 processing_script，輸出 Standard Payload（<code>dataset</code> + <code>ui_render.chart_data</code>）</div>
+        </div>
+        <div class="flow-item llm-step">
+          <div class="flow-title">🤖 ⑤ Claude LLM 診斷分析</div>
+          <div class="flow-desc">diagnostic_prompt + MCP 輸出資料 → Claude 回傳 status / conclusion / evidence / summary JSON</div>
+        </div>
+        <div class="flow-item">
+          <div class="flow-title">⑥ SSE skill_done 推播，前端渲染卡片</div>
+          <div class="flow-desc">卡片包含：狀態徽章（NORMAL / ABNORMAL）、AI 診斷結論、Evidence 清單、📊 Trend Chart、資料表格、💡 建議行動</div>
+          <div class="flow-payload">{"type":"skill_done","status":"ABNORMAL","conclusion":"連續5點超過UCL...","mcp_output":{"dataset":[...],"ui_render":{"type":"trend_chart","chart_data":{...}}}}</div>
+        </div>
+      </div>
+
+      <div class="callout purple" style="margin-top:20px;">
+        <div class="callout-title">🔮 Skill 設計的核心價值</div>
+        <p style="margin:0;">Skill 的設計哲學是將「<strong>診斷知識</strong>」與「<strong>執行機制</strong>」分離：PE 工程師只需用自然語言定義「何時觸發、看什麼資料、如何判斷、建議做什麼」，系統自動處理 API 呼叫、腳本執行、LLM 呼叫、SSE 推播等技術細節。一個 PE 工程師定義的 Skill，可在日後無限次自動執行，讓資深知識從「人腦經驗」轉化為<strong>可量化、可稽核、可迭代</strong>的系統資產。</p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

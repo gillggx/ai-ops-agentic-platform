@@ -1,0 +1,168 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: fastapi-app
+  namespace: default
+  labels:
+    app: fastapi-app
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8001"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  selector:
+    app: fastapi-app
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+    - name: metrics
+      port: 8001
+      targetPort: metrics
+      protocol: TCP
+  sessionAffinity: None
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fastapi-app-nodeport
+  namespace: default
+  labels:
+    app: fastapi-app
+spec:
+  type: NodePort
+  selector:
+    app: fastapi-app
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      nodePort: 30000
+      protocol: TCP
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: fastapi-app-hpa
+  namespace: default
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: fastapi-app
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 15
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+        - type: Pods
+          value: 4
+          periodSeconds: 15
+      selectPolicy: Max
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: fastapi-app-pdb
+  namespace: default
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: fastapi-app
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fastapi-app
+  namespace: default
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: fastapi-app
+  namespace: default
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: fastapi-app
+  namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: fastapi-app
+subjects:
+  - kind: ServiceAccount
+    name: fastapi-app
+    namespace: default
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fastapi-config
+  namespace: default
+data:
+  config.yaml: |
+    app:
+      name: Glass Box AI Diagnostic Platform
+      version: 2.0.0
+    logging:
+      level: INFO
+      format: json
+    features:
+      mcp_server: true
+      skills: true
+      audit_log: true
+      rate_limiting: true
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: fastapi-secrets
+  namespace: default
+type: Opaque
+stringData:
+  database-url: "postgresql+asyncpg://user:password@postgres:5432/fastapi_db"
+  redis-url: "redis://:password@redis:6379/0"
+  secret-key: "your-secret-key-change-in-production"

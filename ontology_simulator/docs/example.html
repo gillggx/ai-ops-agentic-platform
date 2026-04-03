@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>v14.0 Agentic OS - Golden Template</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; color: #334155; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        
+        /* 拓撲圖靜態實線 (拒絕閃爍) */
+        .topo-line { stroke: #e2e8f0; stroke-width: 2; fill: none; }
+        .topo-line-active { stroke: #94a3b8; stroke-width: 2; fill: none; }
+        .topo-line-selected { stroke: #3b82f6; stroke-width: 3; fill: none; }
+        
+        /* 隱藏原生捲軸 */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .console-scroll::-webkit-scrollbar-thumb { background: #475569; }
+        .no-select { user-select: none; }
+
+        /* JSON 語法高亮 */
+        .json-key { color: #93c5fd; } /* blue-300 */
+        .json-str { color: #6ee7b7; } /* emerald-300 */
+        .json-num { color: #fcd34d; } /* amber-300 */
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden selection:bg-indigo-100 no-select">
+
+    <!-- Header -->
+    <header id="app-header" class="h-14 border-b border-slate-200 bg-white flex flex-shrink-0 items-center justify-between px-6 shadow-sm z-20 transition-colors duration-300">
+        <div class="flex items-center gap-4">
+            <div id="header-dot" class="w-3 h-3 rounded-sm bg-blue-600"></div>
+            <h1 class="text-lg font-bold tracking-tight text-slate-800" id="header-title">v14.0 AGENTIC OS <span class="text-slate-400 font-medium ml-2">| LIVE MONITOR</span></h1>
+        </div>
+        <div class="flex items-center gap-4 text-sm font-medium">
+            <div class="flex items-center gap-2 px-3 py-1.5 rounded bg-slate-100 border border-slate-200 cursor-pointer hover:bg-slate-200 transition shadow-sm" onclick="toggleMode()">
+                <span id="mode-dot" class="w-2 h-2 rounded-full bg-green-500"></span>
+                <span id="mode-text" class="text-slate-700 font-bold">LIVE MODE</span>
+            </div>
+            <div class="font-mono text-slate-600 bg-slate-50 px-3 py-1.5 rounded-md border border-slate-200 shadow-inner" id="clock">12:00:00</div>
+        </div>
+    </header>
+
+    <!-- Main Layout (3 Columns) -->
+    <main class="flex-1 flex overflow-hidden">
+        
+        <!-- 左欄：機台清單 / 歷史時間軸 -->
+        <aside class="w-80 border-r border-slate-200 flex flex-col bg-slate-50 z-10 shrink-0 shadow-[4px_0_15px_rgba(0,0,0,0.02)]">
+            <div class="p-3 text-[11px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-200 bg-white shadow-sm flex justify-between items-center" id="left-title">
+                <span>Equipment Setup</span>
+                <span class="text-blue-500">10 Tools</span>
+            </div>
+            
+            <div id="left-content" class="flex-1 overflow-y-auto p-3 space-y-3">
+                <!-- Live Mode: 琥珀色 HOLD 機台 -->
+                <div class="p-3 rounded-lg border-2 border-amber-300 bg-amber-50 shadow-sm cursor-pointer" onclick="logConsole('USER', 'Selected tool: ETCH-LAM-03')">
+                    <div class="flex justify-between items-start mb-1.5">
+                        <span class="font-bold text-amber-800">ETCH-LAM-03</span>
+                        <span class="text-[9px] font-bold text-amber-800 bg-amber-200 border border-amber-300 px-1.5 py-0.5 rounded">HOLD</span>
+                    </div>
+                    <div class="text-[11px] text-amber-700 font-medium mb-2">⚠ SPC Out of Control</div>
+                    <div class="text-[10px] font-bold text-slate-500 hover:text-amber-700">➔ ACKNOWLEDGE & RESET</div>
+                </div>
+
+                <!-- Live Mode: 處理中機台 -->
+                <div class="p-3 rounded-lg border border-slate-200 bg-white shadow-sm cursor-pointer hover:border-blue-400 transition-colors" onclick="selectTool('ETCH-LAM-01')">
+                    <div class="flex justify-between items-start mb-1.5">
+                        <span class="font-bold text-slate-800">ETCH-LAM-01</span>
+                        <span class="text-[9px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded">PROCESSING</span>
+                    </div>
+                    <div class="text-[11px] font-mono font-bold text-slate-500">LOT-0012 <span class="text-slate-400 font-normal ml-1">| STEP_045</span></div>
+                </div>
+
+                <!-- Live Mode: 閒置機台 -->
+                <div class="p-3 rounded-lg border border-slate-200 bg-white shadow-sm cursor-pointer opacity-70 hover:opacity-100 transition-opacity">
+                    <div class="flex justify-between items-center">
+                        <span class="font-bold text-slate-600">PHO-ASML-01</span>
+                        <span class="text-[9px] font-bold text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">STANDBY</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 中欄：拓撲視圖 -->
+        <section class="flex-1 relative flex flex-col bg-white bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] [background-size:24px_24px] min-w-[500px]">
+            <div class="absolute top-6 left-8 z-10">
+                <h2 class="text-2xl font-bold text-slate-800" id="topo-header">Context Topology</h2>
+                <p class="text-sm text-slate-500 mt-1 font-medium" id="topo-sub">Click nodes to fetch detailed API data</p>
+            </div>
+            
+            <div class="flex-1 flex items-center justify-center relative">
+                <div class="relative w-[600px] h-[400px]">
+                    <svg width="600" height="400" class="absolute top-0 left-0 z-0">
+                        <path d="M 150 200 L 300 200" class="topo-line-active" id="line-tool"/>
+                        <path d="M 300 200 L 450 100" class="topo-line-active" id="line-recipe"/>
+                        <path d="M 300 200 L 450 200" class="topo-line-active" id="line-apc"/>
+                        <path d="M 300 200 L 450 300" class="topo-line-active" id="line-dc"/>
+                    </svg>
+
+                    <!-- Tool Node -->
+                    <div id="node-TOOL" class="absolute top-[170px] left-[85px] w-[130px] bg-white border border-slate-300 shadow-sm rounded-lg p-3 text-center cursor-pointer hover:border-blue-400 transition-all z-10" onclick="fetchData('TOOL')">
+                        <div class="text-[10px] font-bold text-slate-400 mb-1">EQUIPMENT</div>
+                        <div class="font-bold text-slate-800 text-sm">ETCH-LAM-01</div>
+                    </div>
+                    
+                    <!-- Lot Node -->
+                    <div id="node-LOT" class="absolute top-[160px] left-[260px] w-[80px] h-[80px] rounded-full bg-blue-50 border-2 border-blue-400 flex flex-col items-center justify-center cursor-pointer hover:shadow-md transition-all z-10" onclick="fetchData('LOT')">
+                        <div class="text-[9px] font-bold text-blue-600">WIP</div>
+                        <div class="font-mono text-[11px] font-bold text-slate-800 mt-1">LOT-0012</div>
+                    </div>
+
+                    <!-- Recipe Node -->
+                    <div id="node-RECIPE" class="absolute top-[75px] left-[450px] w-[140px] bg-white border border-slate-200 shadow-sm rounded-lg p-2 text-center cursor-pointer hover:border-blue-400 transition-all z-10" onclick="fetchData('RECIPE')">
+                        <div class="text-[10px] font-bold text-slate-400 mb-1">RECIPE</div>
+                        <div class="font-mono text-[11px] font-bold text-slate-700">OXIDE-ETCH-V4</div>
+                    </div>
+
+                    <!-- APC Node -->
+                    <div id="node-APC" class="absolute top-[175px] left-[450px] w-[140px] bg-white border border-slate-200 shadow-sm rounded-lg p-2 text-center cursor-pointer hover:border-blue-400 transition-all z-10" onclick="fetchData('APC')">
+                        <div class="text-[10px] font-bold text-slate-400 mb-1">APC CONTROLLER</div>
+                        <div class="font-mono text-[11px] font-bold text-teal-600">APC-MOD-012</div>
+                    </div>
+
+                    <!-- DC Node -->
+                    <div id="node-DC" class="absolute top-[270px] left-[450px] w-[140px] bg-indigo-50 border-2 border-indigo-200 shadow-sm rounded-lg p-3 text-center cursor-pointer hover:border-indigo-400 transition-all z-10" onclick="fetchData('DC')">
+                        <div class="text-[10px] font-bold text-indigo-500 mb-1">DATA COLLECTION</div>
+                        <div class="font-mono text-[11px] font-bold text-slate-800">DC-RAW-0012</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 右欄：API 資料檢視器 -->
+        <aside class="w-[360px] border-l border-slate-200 bg-white flex flex-col shadow-[-4px_0_15px_rgba(0,0,0,0.02)] z-10 shrink-0">
+            <div class="p-4 border-b border-slate-200 bg-slate-50/80">
+                <div class="flex items-center justify-between mb-2">
+                    <span id="right-badge" class="bg-slate-200 text-slate-600 px-2 py-0.5 rounded text-[10px] font-bold border border-slate-300">INSPECTOR</span>
+                    <span id="right-spc" class="hidden text-[9px] font-bold px-1.5 py-0.5 rounded border"></span>
+                </div>
+                <h3 class="font-bold text-slate-800 text-lg font-mono truncate" id="right-title">Ready</h3>
+                <div class="mt-2 flex gap-3 text-[10px] text-slate-400 font-mono" id="right-meta">
+                    Waiting for node selection...
+                </div>
+            </div>
+            
+            <div id="right-loading" class="flex-1 flex flex-col items-center justify-center hidden bg-slate-50/30">
+                <svg class="animate-spin h-6 w-6 text-indigo-500 mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                <div class="text-xs font-mono text-slate-500">Executing API Query...</div>
+            </div>
+
+            <div id="right-content" class="flex-1 overflow-y-auto hidden flex flex-col bg-slate-50">
+                <!-- 預留給 JS 注入高可讀性的 JSON Payload -->
+            </div>
+            
+            <div id="right-empty" class="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-400 bg-slate-50/50">
+                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="mb-3 text-slate-300"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                <p class="text-[11px]">Select a node to inspect payload.</p>
+            </div>
+        </aside>
+
+    </main>
+
+    <!-- 底部：Console 所見即所得終端機 -->
+    <footer class="h-48 border-t border-slate-700 bg-[#0f172a] flex flex-col shrink-0 z-30">
+        <div class="h-8 bg-[#1e293b] flex items-center px-4 border-b border-slate-700 justify-between">
+            <div class="flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>
+                <span class="text-[10px] font-mono text-slate-300 font-bold tracking-wider">SYSTEM TRACE CONSOLE</span>
+            </div>
+            <button onclick="document.getElementById('console-output').innerHTML=''" class="text-[10px] text-slate-500 hover:text-slate-300 uppercase tracking-wider">Clear</button>
+        </div>
+        <div id="console-output" class="flex-1 p-3 overflow-y-auto console-scroll font-mono text-[11px] leading-relaxed text-slate-300 space-y-1">
+            <div><span class="text-slate-500">[12:00:00]</span> <span class="text-blue-400">[SYSTEM]</span> Agentic OS v14.0 Frontend initialized.</div>
+            <div><span class="text-slate-500">[12:00:01]</span> <span class="text-blue-400">[SYSTEM]</span> Connected to wss://localhost:8001/ws</div>
+        </div>
+    </footer>
+
+    <script>
+        let isTraceMode = false;
+        let lockedTime = "2026-03-12T14:05:10Z";
+
+        setInterval(() => {
+            if(!isTraceMode) document.getElementById('clock').innerText = new Date().toTimeString().split(' ')[0];
+        }, 1000);
+
+        function logConsole(type, message, isApi = false) {
+            const out = document.getElementById('console-output');
+            const time = new Date().toTimeString().split(' ')[0];
+            let color = 'text-slate-400';
+            if(type === 'API_REQ') color = 'text-yellow-400';
+            if(type === 'API_RES') color = 'text-green-400';
+            if(type === 'TRACE') color = 'text-purple-400';
+            if(type === 'WS_EVT') color = 'text-sky-400';
+
+            const indent = isApi ? '&nbsp;&nbsp;&nbsp;&nbsp;↳ ' : '';
+            const line = document.createElement('div');
+            line.innerHTML = `<span class="text-slate-600">[${time}]</span> <span class="${color} font-bold">[${type}]</span> ${indent}${message}`;
+            out.appendChild(line);
+            out.scrollTop = out.scrollHeight;
+        }
+
+        // 切換 Live / Trace 模式
+        function toggleMode() {
+            isTraceMode = !isTraceMode;
+            
+            const header = document.getElementById('app-header');
+            const title = document.getElementById('header-title');
+            const dot = document.getElementById('mode-dot');
+            const text = document.getElementById('mode-text');
+            const clock = document.getElementById('clock');
+            const leftTitle = document.getElementById('left-title');
+            const leftContent = document.getElementById('left-content');
+
+            if (isTraceMode) {
+                // UI 變成 Trace 模式 (紫/靛藍色系)
+                header.classList.replace('bg-white', 'bg-indigo-950');
+                header.classList.replace('border-slate-200', 'border-indigo-900');
+                title.innerHTML = `v14.0 AGENTIC OS <span class="text-indigo-300 font-medium ml-2">| EVENT TRACING (RCA)</span>`;
+                title.classList.replace('text-slate-800', 'text-white');
+                document.getElementById('header-dot').classList.replace('bg-blue-600', 'bg-indigo-400');
+                
+                dot.classList.replace('bg-green-500', 'bg-purple-500');
+                text.innerText = "TRACE MODE";
+                text.classList.replace('text-slate-700', 'text-purple-700');
+                clock.innerText = "14:05:10 (LOCKED)";
+                clock.classList.replace('bg-slate-50', 'bg-purple-100');
+                
+                document.getElementById('topo-header').innerText = "Historical Snapshot";
+                document.getElementById('topo-sub').innerText = "Context locked at 14:05:10";
+
+                // 左欄變成 Timeline
+                leftTitle.innerHTML = `<span>Event Timeline</span><span class="text-purple-600">ETCH-LAM-01</span>`;
+                leftContent.innerHTML = `
+                    <div class="relative border-l-2 border-slate-200 ml-3 pl-4 py-2 space-y-4">
+                        <div class="relative cursor-pointer group" onclick="logConsole('TRACE', 'Selected history: 14:22:05')">
+                            <div class="absolute -left-[23px] top-1 w-3 h-3 bg-white border-2 border-slate-300 rounded-full group-hover:border-purple-500"></div>
+                            <div class="text-[10px] font-bold text-slate-500">14:22:05</div>
+                            <div class="text-xs font-mono font-bold text-slate-700">LOT-0012 <span class="text-[9px] bg-green-100 text-green-700 px-1 rounded ml-1">PASS</span></div>
+                        </div>
+                        <div class="relative cursor-pointer group bg-purple-50 p-2 rounded border border-purple-100 -ml-2" onclick="logConsole('TRACE', 'Selected history: 14:05:10')">
+                            <div class="absolute -left-[21px] top-3 w-3 h-3 bg-purple-100 border-2 border-purple-500 rounded-full"></div>
+                            <div class="text-[10px] font-bold text-purple-600">14:05:10 (LOCKED)</div>
+                            <div class="text-xs font-mono font-bold text-purple-900">LOT-0011 <span class="text-[9px] bg-amber-100 text-amber-700 px-1 rounded ml-1">SPC OOC</span></div>
+                        </div>
+                        <div class="relative cursor-pointer group" onclick="logConsole('TRACE', 'Selected history: 13:48:33')">
+                            <div class="absolute -left-[23px] top-1 w-3 h-3 bg-white border-2 border-slate-300 rounded-full group-hover:border-purple-500"></div>
+                            <div class="text-[10px] font-bold text-slate-500">13:48:33</div>
+                            <div class="text-xs font-mono font-bold text-slate-700">LOT-0010 <span class="text-[9px] bg-green-100 text-green-700 px-1 rounded ml-1">PASS</span></div>
+                        </div>
+                    </div>
+                `;
+                logConsole('TRACE', 'Entered RCA Mode. Timeline generated from /api/v1/events.');
+            } else {
+                // 簡易的還原 Reload
+                location.reload();
+            }
+        }
+
+        function selectTool(toolId) {
+            logConsole('USER', `Selected Tool: ${toolId}`);
+            // Reset right panel
+            document.getElementById('right-empty').style.display = 'flex';
+            document.getElementById('right-content').style.display = 'none';
+        }
+
+        // 模擬點擊節點打 API (核心邏輯)
+        function fetchData(nodeType) {
+            // 清除之前的選取框，加上新的
+            ['TOOL', 'LOT', 'RECIPE', 'APC', 'DC'].forEach(id => {
+                const el = document.getElementById(`node-${id}`);
+                el.classList.remove('border-blue-500', 'shadow-md');
+                if(id === 'DC') el.classList.remove('border-indigo-500');
+            });
+            
+            const activeNode = document.getElementById(`node-${nodeType}`);
+            activeNode.classList.add(nodeType === 'DC' ? 'border-indigo-500' : 'border-blue-500', 'shadow-md');
+
+            // UI 狀態切換
+            document.getElementById('right-empty').style.display = 'none';
+            document.getElementById('right-content').style.display = 'none';
+            document.getElementById('right-loading').style.display = 'flex';
+
+            const targetID = "LOT-0012";
+            const step = "STEP_045";
+            let apiUrl = `/api/v1/context/query?targetID=${targetID}&step=${step}&objectName=${nodeType}`;
+            
+            if (isTraceMode) apiUrl += `&eventTime=${lockedTime}`;
+            else apiUrl += `&eventTime=${new Date().toISOString()}`;
+
+            logConsole('API_REQ', `GET ${apiUrl}`);
+
+            // 模擬 600ms 網路延遲
+            setTimeout(() => {
+                logConsole('API_RES', `HTTP 200 OK. Fetched ${nodeType} payload.`, true);
+                renderInspector(nodeType);
+            }, 600);
+        }
+
+        // 渲染右側格式化資料
+        function renderInspector(nodeType) {
+            document.getElementById('right-loading').style.display = 'none';
+            const content = document.getElementById('right-content');
+            content.style.display = 'flex';
+
+            const badge = document.getElementById('right-badge');
+            const title = document.getElementById('right-title');
+            const meta = document.getElementById('right-meta');
+            const spc = document.getElementById('right-spc');
+
+            badge.innerText = nodeType;
+            spc.style.display = 'none';
+
+            if (nodeType === 'DC') {
+                badge.className = "bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded text-[10px] font-bold border border-indigo-200";
+                title.innerText = "DC-RAW-0012";
+                meta.innerHTML = `<span title="Tool">⚙️ ETCH-LAM-01</span> <span title="Step">🏷️ STEP_045</span>`;
+                
+                if (isTraceMode) {
+                    spc.style.display = 'block';
+                    spc.innerText = 'SPC: WARNING';
+                    spc.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded border bg-amber-100 text-amber-700 border-amber-200';
+                } else {
+                    spc.style.display = 'block';
+                    spc.innerText = 'SPC: IN CONTROL';
+                    spc.className = 'text-[9px] font-bold px-1.5 py-0.5 rounded border bg-green-100 text-green-700 border-green-200';
+                }
+
+                // 模擬後端回傳的 JSON Object
+                const mockPayload = {
+                    "eventTime": isTraceMode ? lockedTime : new Date().toISOString(),
+                    "updated_by": "dc_service_v2",
+                    "parameters": {
+                        "chamber_press": 15.02,
+                        "foreline_press": 1.24,
+                        "esc_zone1_temp": 60.5,
+                        "upper_electrode": isTraceMode ? 128.5 : 120.0, // Trace模式下模擬異常數值
+                        "rf_power_hf": 1500.0,
+                        "bias_voltage": 850.0
+                    }
+                };
+
+                // 將 JSON 轉為高亮字串
+                const jsonStr = JSON.stringify(mockPayload.parameters, null, 2)
+                    .replace(/"([^"]+)":/g, '<span class="json-key">"$1"</span>:')
+                    .replace(/: ([0-9.]+)/g, ': <span class="json-num">$1</span>')
+                    .replace(/: "([^"]+)"/g, ': <span class="json-str">"$1"</span>');
+
+                content.innerHTML = `
+                    <div class="px-5 py-3 border-b border-slate-200 bg-white flex justify-between text-[11px] text-slate-500">
+                        <div><span class="text-slate-400">Time:</span> <span class="font-mono text-slate-800">${mockPayload.eventTime.split('T')[1].replace('Z','')}</span></div>
+                        <div><span class="text-slate-400">By:</span> <span class="font-mono text-slate-800">${mockPayload.updated_by}</span></div>
+                    </div>
+                    
+                    <div class="px-5 py-2 bg-slate-100 border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h2"/><path d="M8 17h2"/><path d="M14 13h2"/><path d="M14 17h2"/></svg>
+                        Parsed Parameters (JSON)
+                    </div>
+                    
+                    <div class="flex-1 bg-[#1e293b] p-4 overflow-y-auto">
+                        <pre class="text-[12px] font-mono leading-relaxed text-slate-300 m-0">${jsonStr}</pre>
+                    </div>
+                `;
+            } else {
+                badge.className = "bg-slate-200 text-slate-700 px-2 py-0.5 rounded text-[10px] font-bold border border-slate-300";
+                title.innerText = `${nodeType}-001`;
+                meta.innerHTML = `<span title="Tool">⚙️ ETCH-LAM-01</span>`;
+                content.innerHTML = `<div class="p-8 text-center text-sm text-slate-400">Standard Object Meta-data for ${nodeType}</div>`;
+            }
+        }
+
+        // 模擬背景 WebSocket 接收 MES 事件
+        setInterval(() => {
+            if(!isTraceMode && Math.random() > 0.8) {
+                logConsole('WS_EVT', 'Received HEARTBEAT from MES_Core.');
+            }
+        }, 8000);
+
+    </script>
+</body>
+</html>
