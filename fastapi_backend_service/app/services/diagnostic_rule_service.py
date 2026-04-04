@@ -42,11 +42,19 @@ _FALLBACK_SAMPLES: Dict[str, Any] = {
          "step": "STEP_045", "recipeID": "RCP-007", "spc_status": "PASS", "apcID": "APC-044"},
     ],
     "get_process_context": {
+        # APC: parameters values are plain floats (NOT {"value": float})
+        "APC": {"parameters": {
+            "etch_time_offset": 0.0342,
+            "rf_power_bias": 0.9847,
+            "gas_flow_comp": 1.234,
+            "target_cd_nm": 50.112,
+            "etch_rate_pred": 98.45,
+        }},
+        # SPC: charts contain value/ucl/lcl dicts
         "SPC": {"spc_status": "OOC", "charts": {"xbar_chart": {"value": 18.1, "ucl": 17.5, "lcl": 12.5}}},
-        "APC": {"parameters": {"etch_time_offset": {"value": 0.042}, "etch_time_s": {"value": 30.5}}},
-        "DC":  {"parameters": {"chamber_pressure": {"value": 15.2, "usl": 18.0, "lsl": 12.0},
-                                "gas_flow": {"value": 200.1, "usl": 220.0, "lsl": 180.0}}},
-        "RECIPE": {"parameters": {"etch_time_s": {"value": 30.0}, "pressure": {"value": 15.0}}},
+        # DC: parameters values are plain floats (same pattern as APC)
+        "DC":  {"parameters": {"chamber_pressure": 15.2, "gas_flow": 200.1, "rf_power": 850.0}},
+        "RECIPE": {"parameters": {"etch_time_s": 30.0, "pressure": 15.0}},
     },
 }
 
@@ -60,9 +68,9 @@ _MCP_CATALOG_BRIEF = (
     "\n"
     "- get_process_context  params: targetID(required), step(required), objectName(required)\n"
     "  objectName choices: SPC / DC / APC / RECIPE / EC\n"
-    "  SPC 回傳: {charts: {xbar_chart: {value, ucl, lcl}}, spc_status}\n"
-    "  APC 回傳: {parameters: {<param_name>: {value}}}\n"
-    "  DC  回傳: {parameters: {<sensor_name>: {value, usl, lsl}}}\n"
+    "  SPC 回傳: {spc_status, charts: {xbar_chart: {value: float, ucl: float, lcl: float}}}\n"
+    "  APC 回傳: {parameters: {<param_name>: <float>}}  ← plain float, NOT {value: float}\n"
+    "  DC  回傳: {parameters: {<sensor_name>: <float>}}  ← plain float, NOT {value: float}\n"
     "  用途: 取某批次+步驟的物件詳細數值（需先從 get_process_history 取得 lotID + step）\n"
 )
 
