@@ -162,7 +162,18 @@ class SkillExecutorService:
         lines.append("        _final_findings = _findings")
         lines.append("    except NameError:")
         lines.append("        pass")
-        lines.append("    return {'step_outputs': _step_outputs, 'findings': _final_findings}")
+        # Capture _chart / _charts assigned by LLM code (visualization output)
+        lines.append("    _final_charts = None")
+        lines.append("    try:")
+        lines.append("        _final_charts = _charts if isinstance(_charts, list) else [_charts]")
+        lines.append("    except NameError:")
+        lines.append("        pass")
+        lines.append("    try:")
+        lines.append("        if _final_charts is None and _chart is not None:")
+        lines.append("            _final_charts = [_chart] if isinstance(_chart, dict) else None")
+        lines.append("    except NameError:")
+        lines.append("        pass")
+        lines.append("    return {'step_outputs': _step_outputs, 'findings': _final_findings, 'charts': _final_charts}")
         return "\n".join(lines)
 
     def _build_findings(
@@ -223,12 +234,12 @@ class SkillExecutorService:
         self,
         steps: List[Dict[str, Any]],
         event_payload: Dict[str, Any],
-    ) -> tuple[List[StepResult], Optional[Dict[str, Any]], Optional[str]]:
-        """Execute compiled script. Returns (step_results, raw_findings, error)."""
+    ) -> tuple[List[StepResult], Optional[Dict[str, Any]], Optional[str], Optional[List[Dict[str, Any]]]]:
+        """Execute compiled script. Returns (step_results, raw_findings, error, charts)."""
         try:
             script = self._build_script(steps)
         except ValueError as exc:
-            return [], None, str(exc)
+            return [], None, str(exc), None
 
         step_results: List[StepResult] = []
         # Inject JS-style boolean/null aliases so LLM-generated code works even
@@ -243,6 +254,7 @@ class SkillExecutorService:
             raw_result = raw_result if isinstance(raw_result, dict) else {}
             step_outputs = raw_result.get("step_outputs", {})
             raw_findings = raw_result.get("findings")
+            raw_charts = raw_result.get("charts")
 
             for s in steps:
                 sid = s.get("step_id", "?")
@@ -252,12 +264,12 @@ class SkillExecutorService:
                     status="ok",
                     output=step_outputs.get(sid) if isinstance(step_outputs, dict) else None,
                 ))
-            return step_results, raw_findings, None
+            return step_results, raw_findings, None, raw_charts
 
         except asyncio.TimeoutError:
-            return step_results, None, "執行超時（30秒）"
+            return step_results, None, "執行超時（30秒）", None
         except Exception as exc:
-            return step_results, None, str(exc)
+            return step_results, None, str(exc), None
 
     async def try_run(
         self,
@@ -275,7 +287,7 @@ class SkillExecutorService:
             return SkillTryRunResponse(success=False, error="此 Skill 尚無 steps_mapping")
 
         output_schema = self._skill_repo.get_output_schema(skill)
-        step_results, raw_findings, error = await self._run_script(steps, mock_payload)
+        step_results, raw_findings, error, _charts = await self._run_script(steps, mock_payload)
         elapsed_ms = (time.monotonic() - t0) * 1000
 
         if error:
@@ -308,7 +320,7 @@ class SkillExecutorService:
             return SkillExecuteResponse(success=False, error="此 Skill 尚無 steps_mapping")
 
         output_schema = self._skill_repo.get_output_schema(skill)
-        step_results, raw_findings, error = await self._run_script(steps, event_payload)
+        step_results, raw_findings, error, _charts = await self._run_script(steps, event_payload)
 
         if error:
             return SkillExecuteResponse(success=False, step_results=step_results, error=error)
@@ -327,7 +339,7 @@ class SkillExecutorService:
         if not steps:
             return SkillTryRunResponse(success=False, error="steps_mapping 不能為空")
 
-        step_results, raw_findings, error = await self._run_script(steps, mock_payload)
+        step_results, raw_findings, error, _charts = await self._run_script(steps, mock_payload)
         elapsed_ms = (time.monotonic() - t0) * 1000
 
         if error:

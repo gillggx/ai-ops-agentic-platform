@@ -838,9 +838,13 @@ def _build_render_card(
         if result.get("status") == "success":
             jit_data = result.get("data") or {}
             chart_json = jit_data.get("chart_json")
+            chart_intents = jit_data.get("chart_intents")
             jit_result = jit_data.get("jit_result") or {}
             payload: Dict[str, Any] = {}
-            if chart_json:
+            if chart_intents:
+                # _chart DSL — lightweight chart intent, rendered by frontend
+                payload["chart_intents"] = chart_intents
+            elif chart_json:
                 try:
                     payload["plotly"] = json.loads(chart_json) if isinstance(chart_json, str) else chart_json
                 except Exception:

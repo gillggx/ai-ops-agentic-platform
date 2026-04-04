@@ -5,6 +5,7 @@ import type { AIOpsReportContract, SuggestedAction } from "aiops-contract";
 import { isValidContract, isAgentAction, isHandoffAction } from "aiops-contract";
 import { consumeSSE } from "@/lib/sse";
 import { ContractCard } from "./ContractCard";
+import { ChartIntentRenderer, type ChartIntent } from "./ChartIntentRenderer";
 import type { UiRender } from "@/components/McpChartRenderer";
 import ReactMarkdown from "react-markdown";
 
@@ -36,10 +37,11 @@ interface McpResult {
 
 interface ChatMessage {
   id: number;
-  role: "user" | "agent" | "mcp_result";
+  role: "user" | "agent" | "mcp_result" | "chart_intents";
   content: string;
   contract?: AIOpsReportContract;
   mcpResult?: McpResult;
+  chartIntents?: ChartIntent[];
 }
 
 interface HitlRequest {
@@ -322,6 +324,18 @@ export function AICopilot({
                 }]);
               }
             }
+            // _chart DSL rendering — from execute_jit with chart_intents
+            if (card?.type === "utility") {
+              const payload = card.payload as Record<string, unknown> | undefined;
+              const intents = payload?.chart_intents as ChartIntent[] | undefined;
+              if (intents && Array.isArray(intents) && intents.length > 0) {
+                setChatHistory(prev => [...prev, {
+                  id: nextId(), role: "chart_intents" as const,
+                  content: (card.tool_name as string) ?? "Chart",
+                  chartIntents: intents,
+                }]);
+              }
+            }
             break;
           }
 
@@ -534,7 +548,11 @@ export function AICopilot({
                 alignItems: msg.role === "user" ? "flex-end" : "flex-start",
               }}
             >
-              {msg.role === "mcp_result" && msg.mcpResult ? (
+              {msg.role === "chart_intents" && msg.chartIntents ? (
+                <div style={{ width: "100%", maxWidth: "90%" }}>
+                  <ChartIntentRenderer charts={msg.chartIntents} />
+                </div>
+              ) : msg.role === "mcp_result" && msg.mcpResult ? (
                 <div style={{
                   display: "inline-flex", alignItems: "center", gap: 6,
                   padding: "4px 10px",

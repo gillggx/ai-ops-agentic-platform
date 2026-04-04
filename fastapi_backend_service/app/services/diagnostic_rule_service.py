@@ -90,32 +90,89 @@ RULE: When user description mentions 圖/chart/trend/趨勢/管制圖/分佈, yo
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 
-def _extract_json(text: str) -> str:
-    """Robustly extract the first JSON object from LLM output.
+def _extract_json(text: str) -> dict:
+    """Robustly extract and parse the first JSON object from LLM output.
 
-    Handles:
-    - <think>...</think> blocks (Qwen3 / DeepSeek thinking mode)
-    - Text before/after the JSON object
-    - Markdown fences (```json ... ```)
+    Pipeline: strip think tags → strip markdown → isolate {...} → repair → parse.
+    Returns parsed dict (raises on total failure).
     """
-    # Strip <think>...</think> blocks first
+    # 1. Strip <think>...</think> blocks
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
-    # Strip markdown fences
+    # 2. Strip markdown fences
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.MULTILINE).strip()
-    # Find the outermost {...} block
+    # 3. Isolate outermost {...}
     start = text.find("{")
     if start == -1:
-        return text
+        raise ValueError(f"No JSON object found in LLM output (length={len(text)})")
     depth = 0
-    for i, ch in enumerate(text[start:], start):
+    end = len(text)
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
         if ch == "{":
             depth += 1
         elif ch == "}":
             depth -= 1
             if depth == 0:
-                return text[start : i + 1]
-    # Fallback: return from first { to end (may still fail, but gives better error context)
-    return text[start:]
+                end = i + 1
+                break
+    raw = text[start:end]
+    # 4. Try parse as-is first
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+    # 5. Repair common LLM JSON issues and retry
+    repaired = _repair_json(raw)
+    return json.loads(repaired)
+
+
+def _repair_json(text: str) -> str:
+    """Fix common JSON issues produced by LLMs.
+
+    Handles: trailing commas, JS comments, single quotes, unescaped newlines in strings.
+    """
+    # Remove single-line comments  // ...
+    text = re.sub(r'//[^\n]*', '', text)
+    # Remove multi-line comments  /* ... */
+    text = re.sub(r'/\*.*?\*/', '', text, flags=re.DOTALL)
+    # Remove trailing commas before } or ]
+    text = re.sub(r',\s*([}\]])', r'\1', text)
+    # Replace unescaped newlines inside strings (heuristic: between two ")
+    # Process character by character to find strings and fix them
+    result = []
+    in_str = False
+    escape = False
+    for ch in text:
+        if escape:
+            result.append(ch)
+            escape = False
+            continue
+        if ch == '\\':
+            result.append(ch)
+            escape = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            result.append(ch)
+            continue
+        if in_str and ch == '\n':
+            result.append('\\n')
+            continue
+        result.append(ch)
+    return ''.join(result)
 
 
 def _to_response(obj) -> DiagnosticRuleResponse:
@@ -376,6 +433,7 @@ class DiagnosticRuleService:
 
         confirmed_section = _build_confirmed_section(mcp_calls, sample_responses)
         assembled_steps: List[dict] = []
+        generated_code: List[str] = []
 
         for i, raw_step in enumerate(raw_steps):
             step_id = raw_step["step_id"]
@@ -388,12 +446,14 @@ class DiagnosticRuleService:
                     raw_steps,
                     i,
                     output_schema,
+                    generated_code,
                 )
                 assembled_steps.append({
                     "step_id": step_id,
                     "nl_segment": nl_segment,
                     "python_code": python_code,
                 })
+                generated_code.append(python_code)
                 yield _sse({"type": "step_code", "status": "done", "step_id": step_id})
             except Exception as exc:
                 logger.warning("DR Phase 2b step '%s' failed: %s", step_id, exc)
@@ -461,10 +521,9 @@ Required output format:
         resp = await self._llm.create(
             system=system_prompt,
             messages=[{"role": "user", "content": f"Diagnostic rule description:\n{description}"}],
-            max_tokens=1024,
+            max_tokens=2048,
         )
-        raw = _extract_json(resp.text)
-        return json.loads(raw)
+        return _extract_json(resp.text)
 
     # ── Private: Phase 2a — Step Planner ──────────────────────────────────────
 
@@ -485,6 +544,13 @@ Output ONLY valid JSON. No explanation, no markdown fences.
 
 INPUT vars available in Python scope: equipment_id, lot_id, step, event_time, _input
 
+CRITICAL RULES:
+- Maximum 3-5 steps. NEVER more than 5.
+- Use FOR LOOPS inside a step for repetitive work (e.g. "iterate each process record to fetch APC context").
+- Do NOT create one step per record — that defeats the purpose of loops.
+- Good: "step2: loop through each process record and fetch APC parameters"
+- Bad: "step2: fetch APC for lot 1", "step3: fetch APC for lot 2", ...
+
 {_OUTPUT_SCHEMA_GUIDE}
 
 Required output format (NO python_code — plan only):
@@ -492,7 +558,7 @@ Required output format (NO python_code — plan only):
   "proposal_steps": ["Plain English step 1", "Plain English step 2", ...],
   "steps": [
     {{"step_id": "step1", "nl_segment": "取機台最近 N 次製程清單"}},
-    {{"step_id": "step2", "nl_segment": "逐筆取各批次 APC 參數"}},
+    {{"step_id": "step2", "nl_segment": "用 for loop 逐筆取各批次 APC 參數"}},
     {{"step_id": "step3", "nl_segment": "計算偏移趨勢並判斷 OOC 條件，輸出診斷結果"}}
   ],
   "input_schema": [
@@ -507,12 +573,9 @@ Required output format (NO python_code — plan only):
         resp = await self._llm.create(
             system=system_prompt,
             messages=[{"role": "user", "content": f"Diagnostic rule:\n{description}"}],
-            max_tokens=1024,
+            max_tokens=2048,
         )
-        raw = _extract_json(resp.text)
-        if not raw:
-            raise ValueError("Phase 2a LLM returned empty response")
-        return json.loads(raw)
+        return _extract_json(resp.text)
 
     # ── Private: Phase 2b — Per-Step Code Generator ────────────────────────────
 
@@ -523,6 +586,7 @@ Required output format (NO python_code — plan only):
         all_steps: List[dict],
         step_index: int,
         output_schema: List[dict],
+        previous_code: List[str],
     ) -> str:
         """Phase 2b: generate raw python_code for one step. Output is code only, not JSON."""
         step = all_steps[step_index]
@@ -533,9 +597,35 @@ Required output format (NO python_code — plan only):
             for i, s in enumerate(all_steps)
         )
 
+        # Show previous steps' actual code so variable names are consistent
+        prev_code_section = ""
+        if previous_code:
+            prev_parts = []
+            for i, code in enumerate(previous_code):
+                prev_parts.append(f"# --- {all_steps[i]['step_id']} ---\n{code}")
+            prev_code_section = (
+                "\nCode from previous steps (use the SAME variable names):\n"
+                + "\n\n".join(prev_parts)
+                + "\n"
+            )
+
         last_step_note = ""
         if is_last:
             out_keys = ", ".join(f'"{s["key"]}": <value>' for s in output_schema)
+            # Build chart format hints from output_schema
+            chart_hints = []
+            for s in output_schema:
+                if s.get("type") in ("line_chart", "bar_chart", "scatter_chart"):
+                    xk = s.get("x_key", "index")
+                    yks = s.get("y_keys", ["value"])
+                    chart_hints.append(
+                        f'  "{s["key"]}": must be a LIST of dicts, e.g. '
+                        f'[{{"{xk}": 0, "{yks[0]}": 1.23}}, {{"{xk}": 1, "{yks[0]}": 1.45}}, ...]'
+                    )
+            chart_note = ""
+            if chart_hints:
+                chart_note = "\nCHART DATA FORMAT — outputs for chart-type keys MUST be a list of dicts:\n" + "\n".join(chart_hints)
+
             last_step_note = f"""
 CRITICAL — this is the LAST step. End with exactly:
 _findings = {{
@@ -543,7 +633,7 @@ _findings = {{
     "summary": "<one sentence conclusion in Chinese>",
     "outputs": {{{out_keys}}},
     "impacted_lots": [<lot_id_str>] if condition_met else []
-}}"""
+}}{chart_note}"""
 
         system_prompt = f"""\
 You are a factory AI expert. Write Python code for ONE diagnostic step.
@@ -557,11 +647,14 @@ Special function (awaitable, no import needed):
   await execute_mcp(mcp_name: str, params: dict) -> Any
 
 Forbidden: import, open(), exec(), eval(), os, sys, subprocess, trigger_alarm
-INPUT vars: equipment_id, lot_id, step, event_time, _input
+INPUT: _input dict contains user input (e.g. equipment_id). Also available as top-level vars: equipment_id, lot_id, step, event_time
+SCOPE: All steps share the SAME Python scope. Variables from step 1 are directly available in step 2.
+  Do NOT use _next_input or _input to pass data between steps.
+  _input is ONLY for the original user input, NOT for inter-step data.
+  Just use regular variables — e.g. step 1 sets `process_list = [...]`, step 2 reads `process_list` directly.
 CRITICAL: Every if/else/for/while/try/except block MUST have a body — never leave a block header with no statements.
-Use simple consistent variable names without step prefixes (e.g. `apc_data_list`, not `step2_apc_data_list`).
-
-All steps overview (for variable naming consistency):
+{prev_code_section}
+All steps overview:
 {steps_overview}
 {last_step_note}"""
 

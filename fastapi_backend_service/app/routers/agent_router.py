@@ -362,6 +362,13 @@ async def jit_analyze(
     elif sandbox_result.get("chart_data"):
         chart_json = sandbox_result["chart_data"]
 
+    # 3b. Extract _chart/_charts DSL (lightweight chart intent from LLM code)
+    chart_intents: Optional[list] = None
+    if sandbox_result.get("_charts") and isinstance(sandbox_result["_charts"], list):
+        chart_intents = sandbox_result["_charts"]
+    elif sandbox_result.get("_chart") and isinstance(sandbox_result["_chart"], dict):
+        chart_intents = [sandbox_result["_chart"]]
+
     # 4. Build LLM-readable summary (strip large / chart payloads)
     _SKIP = {"ui_render", "_raw_dataset", "dataset", "chart_data", "output_schema"}
     llm_parts: Dict[str, Any] = {}
@@ -385,6 +392,8 @@ async def jit_analyze(
             "jit_result": sandbox_result,
             "chart_json": chart_json,
             "has_chart": bool(chart_json),
+            "chart_intents": chart_intents,
+            "has_chart_intents": bool(chart_intents),
             "llm_readable_data": json.dumps(llm_parts, ensure_ascii=False)[:2000],
         },
         message=body.title,
