@@ -712,29 +712,37 @@ def _resolve_contract(
 ) -> Optional[Dict[str, Any]]:
     """Return the best contract for a synthesis response.
 
-    Priority:
-    1. LLM-generated <contract> block (parse from text)
-    2. Auto-built SPC contract from last MCP result
-    If the LLM generated a contract but left visualization empty and we have
-    SPC data, we inject the auto-built visualization into the parsed contract.
+    CHART 鐵律 — visualization 只能來自 tool（chart_intents / SPC auto-build）。
+    LLM 若自行在 <contract> 的 visualization 欄位塞 Vega-Lite/Plotly spec，一律丟棄。
 
-    When chart_already_rendered is True (chart_intents sent via render_card),
-    force visualization=[] to prevent duplicate charts on screen.
+    Priority:
+    1. LLM-generated <contract> block (parse from text) — visualization 永遠被清空
+    2. Auto-built SPC contract from last MCP result (backend-generated, allowed)
     """
     parsed = _parse_contract(text)
     auto   = _build_spc_contract(*last_spc_result) if last_spc_result else None
 
-    # Chart already rendered via chart_intents path — strip any LLM-generated viz
-    if chart_already_rendered:
-        if parsed is None:
-            return None
+    # ★ CHART 鐵律：永遠丟棄 LLM 自行生成的 visualization
+    # 圖的唯一合法來源是 tool（chart_intents 透過 render_card 顯示，或 SPC auto-build）
+    if parsed is not None:
+        llm_viz = parsed.get("visualization") or []
+        if llm_viz:
+            logger.warning(
+                "LLM embedded %d visualization items in <contract> — discarded per CHART 鐵律. "
+                "Use execute_skill / execute_jit to render charts via chart_intents instead.",
+                len(llm_viz),
+            )
         parsed["visualization"] = []
-        return parsed
+
+    # Chart already rendered via chart_intents path → no contract-level viz needed
+    if chart_already_rendered:
+        return parsed  # visualization already [] above
 
     if parsed is None:
         return auto
 
-    # LLM generated a contract but no visualization — patch in the SPC chart
+    # Backend-generated SPC auto-contract is the ONLY allowed source of contract
+    # visualization (and even then, chart_intents path is preferred).
     if auto and not parsed.get("visualization"):
         parsed["visualization"] = auto.get("visualization", [])
 

@@ -228,14 +228,22 @@ _ONTOLOGY_SYSTEM_MCPS = [
     {
         "name": "get_process_history",
         "description": (
-            "【製程歷史記錄】查詢某台機台（toolID）或某批次（lotID）最近的製程事件列表。\n"
-            "每筆記錄包含：eventTime、lotID、toolID、step、recipeID、spc_status（PASS/OOC）、apcID。\n"
+            "【製程歷史記錄】查詢某台機台（toolID）或某批次（lotID）的製程事件列表。\n"
+            "每筆記錄包含：eventTime、lotID、toolID、step、recipeID、spc_status（PASS/OOC）、apcID、fdc_class。\n"
+            "\n"
+            "⏰ 時間窗設計：預設 since='7d'（回傳 7 天內事件，上限 500 筆）\n"
+            "  - 問「今天的」→ 用 since='24h'\n"
+            "  - 問「最近一週」→ 不帶 since，用預設 7d\n"
+            "  - 問「本月」→ 用 since='30d'\n"
+            "  - 統計類問題（例如「最差機台」「OOC 排行」）→ 用預設或更大時間窗，取得足夠樣本\n"
+            "  - limit 僅作為上限保護（simulator API 限制最大 500），主要篩選邏輯是時間窗\n"
+            "\n"
             "使用時機：\n"
-            "  ① 查機台最近 N 次的製程記錄 → 傳 toolID + limit\n"
-            "  ② 查批次跑過哪些步驟 → 傳 lotID + limit\n"
-            "  ③ 分析同一 recipe 的 OOC 比率 → 從回傳結果過濾 recipeID，統計 spc_status\n"
-            "⚠️ spc_status 是該步驟的 SPC 綜合結論（PASS / OOC / null）\n"
-            "   若需要進一步查 SPC 圖的 value/ucl/lcl 細節，再呼叫 get_process_context"
+            "  ① 查機台最近事件 → toolID='EQP-01'\n"
+            "  ② 查批次跑過的步驟 → lotID='LOT-0001'\n"
+            "  ③ 統計 recipe 的 OOC 比率 → 從回傳結果過濾 recipeID，計算 spc_status\n"
+            "⚠️ spc_status 是該步驟的 SPC 綜合結論（PASS / OOC / null）；\n"
+            "   若需要 SPC 圖的 value/ucl/lcl 細節，再呼叫 get_process_context"
         ),
         "api_config": {
             "endpoint_url": f"{_SIM}/api/v1/events",
@@ -246,7 +254,8 @@ _ONTOLOGY_SYSTEM_MCPS = [
             "fields": [
                 {"name": "toolID", "type": "string", "description": "機台 ID（格式 EQP-XX，e.g. EQP-01）；toolID 或 lotID 至少提供一個", "required": False},
                 {"name": "lotID",  "type": "string", "description": "批次 ID（格式 LOT-XXXX，e.g. LOT-0001）；toolID 或 lotID 至少提供一個", "required": False},
-                {"name": "limit",  "type": "integer", "description": "最多回傳筆數（1–500，預設 10）", "required": False},
+                {"name": "since",  "type": "string",  "description": "時間窗，格式 '24h' | '7d' | '14d' | '30d'。預設 '7d'", "required": False},
+                {"name": "limit",  "type": "integer", "description": "回傳筆數上限（safety cap），預設 500，最大 500（simulator API 限制）", "required": False},
             ]
         },
     },

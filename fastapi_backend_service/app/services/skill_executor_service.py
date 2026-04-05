@@ -100,6 +100,11 @@ def build_mcp_executor(db, sim_url: str = "http://localhost:8012") -> Callable:
         if mcp_name == "get_process_context":
             resolved = await auto_resolve_process_context_params(resolved, sim_url)
 
+        # Time-window MCPs: resolve `since` → `start_time`
+        from app.services.mcp_definition_service import _TIME_WINDOW_MCPS, _resolve_since_param
+        if mcp_name in _TIME_WINDOW_MCPS:
+            resolved = await _resolve_since_param(mcp_name, resolved, sim_url)
+
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 if method == "POST":

@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -47,6 +48,129 @@ def _normalize_params(params: Dict[str, Any]) -> Dict[str, Any]:
     if "chart_name" in params:
         params = dict(params)  # shallow copy — don't mutate caller's dict
         params["chart_name"] = _normalize_chart_name(params["chart_name"])
+    return params
+
+
+# ── Time-window ("since") parameter handling ──────────────────────────────────
+# MCPs that support time-window filtering (backed by /api/v1/events).
+# When agent passes `since="7d"`, backend transforms it into `start_time=<iso>`
+# by fetching the simulator's latest event time and subtracting the duration.
+_TIME_WINDOW_MCPS = {"list_recent_events", "get_process_history"}
+
+# Per-MCP default time window (applied when agent passes no since / start_time).
+_DEFAULT_SINCE: Dict[str, str] = {
+    "list_recent_events":  "7d",   # 最近事件：預設看 7 天
+    "get_process_history": "7d",   # 製程歷史：預設看 7 天
+}
+
+# Per-MCP safety cap on returned rows (applied when agent passes no limit).
+# OntologySimulator enforces limit <= 500 on /api/v1/events.
+_DEFAULT_LIMIT: Dict[str, int] = {
+    "list_recent_events":  500,
+    "get_process_history": 500,
+}
+_MAX_LIMIT: Dict[str, int] = {
+    "list_recent_events":  500,
+    "get_process_history": 500,
+}
+
+
+def _parse_duration(s: str) -> Optional[timedelta]:
+    """Parse duration strings like '24h', '7d', '30d', '2w' → timedelta.
+
+    Returns None on invalid input (caller should treat as "ignore since").
+    """
+    if not isinstance(s, str):
+        return None
+    m = re.match(r"^\s*(\d+)\s*([hdw])\s*$", s.lower())
+    if not m:
+        return None
+    n = int(m.group(1))
+    unit = m.group(2)
+    if unit == "h":
+        return timedelta(hours=n)
+    if unit == "d":
+        return timedelta(days=n)
+    if unit == "w":
+        return timedelta(weeks=n)
+    return None
+
+
+async def _fetch_simulator_latest_time(sim_base: str) -> Optional[datetime]:
+    """Get the most recent event timestamp from OntologySimulator.
+
+    Simulator's timeline may not match wall-clock time, so we ask it for
+    its own "now". Returns None if the call fails.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{sim_base}/api/v1/events", params={"limit": 1})
+            resp.raise_for_status()
+            data = resp.json()
+            if isinstance(data, list) and data:
+                ts = data[0].get("eventTime")
+                if isinstance(ts, str):
+                    # Handle "2026-04-05T12:11:43.698000" style
+                    return datetime.fromisoformat(ts.replace("Z", "+00:00").split("+")[0])
+    except Exception as exc:
+        logger.warning("_fetch_simulator_latest_time failed: %s", exc)
+    return None
+
+
+async def _resolve_since_param(
+    mcp_name: str,
+    params: Dict[str, Any],
+    sim_base: str,
+) -> Dict[str, Any]:
+    """Transform `since` param → `start_time` ISO timestamp for the simulator.
+
+    Flow:
+      1. If caller already passed `start_time`, respect it (explicit wins).
+      2. Use `params["since"]` or MCP-specific default from _DEFAULT_SINCE.
+      3. Apply default limit if missing.
+      4. Fetch simulator's latest event time.
+      5. Compute cutoff = latest - duration and inject as `start_time`.
+
+    Mutates a copy of params (never the original).
+    """
+    if mcp_name not in _TIME_WINDOW_MCPS:
+        return params
+
+    params = dict(params)  # shallow copy
+
+    # Apply default limit if missing; clamp to per-MCP max (simulator API limit)
+    max_lim = _MAX_LIMIT.get(mcp_name, 500)
+    if "limit" not in params or params.get("limit") in (None, ""):
+        params["limit"] = _DEFAULT_LIMIT.get(mcp_name, 500)
+    else:
+        try:
+            params["limit"] = min(int(params["limit"]), max_lim)
+        except (TypeError, ValueError):
+            params["limit"] = _DEFAULT_LIMIT.get(mcp_name, 500)
+
+    # Explicit start_time wins
+    if params.get("start_time"):
+        params.pop("since", None)
+        return params
+
+    # Determine effective since
+    since_raw = params.pop("since", None) or _DEFAULT_SINCE.get(mcp_name, "7d")
+    duration = _parse_duration(since_raw)
+    if duration is None:
+        logger.warning("MCP '%s': invalid since='%s', skipping time-window filter", mcp_name, since_raw)
+        return params
+
+    latest = await _fetch_simulator_latest_time(sim_base)
+    if latest is None:
+        # Simulator call failed; fall back to no filter (limit will cap the result)
+        return params
+
+    cutoff = latest - duration
+    params["start_time"] = cutoff.isoformat(timespec="seconds")
+    logger.info(
+        "MCP '%s': since=%s → start_time=%s (latest=%s, limit=%s)",
+        mcp_name, since_raw, params["start_time"], latest.isoformat(), params["limit"],
+    )
     return params
 
 
@@ -791,6 +915,12 @@ class MCPDefinitionService:
                 params_dict = raw_data[0]
 
             params_dict = _normalize_params(params_dict)
+
+            # ── Time-window MCPs: resolve `since` → `start_time` ─────────────
+            if obj.name in _TIME_WINDOW_MCPS:
+                params_dict = await _resolve_since_param(
+                    obj.name, params_dict, get_settings().ONTOLOGY_SIM_URL
+                )
 
             # ── get_process_context: auto-resolve eventTime ───────────────────
             if obj.name == "get_process_context":
