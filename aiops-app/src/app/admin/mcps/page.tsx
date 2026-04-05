@@ -884,21 +884,13 @@ function McpDrawer({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function McpBuilderPage() {
-  const [customMcps, setCustomMcps]     = useState<MCPDef[]>([]);
-  const [systemMcps, setSystemMcps]     = useState<MCPDef[]>([]);
-  const [showDrawer, setShowDrawer]     = useState(false);
-  const [editingMcp, setEditingMcp]     = useState<MCPDef | null>(null);
-  const [autoFillDraft, setAutoFillDraft] = useState<Record<string, unknown> | null>(null);
-  const [loading, setLoading]           = useState(true);
+  const [systemMcps, setSystemMcps] = useState<MCPDef[]>([]);
+  const [loading, setLoading]       = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [custom, system] = await Promise.all([
-        apiFetch("GET", "mcp-definitions?type=custom"),
-        apiFetch("GET", "mcp-definitions?type=system"),
-      ]);
-      setCustomMcps(Array.isArray(custom) ? custom : []);
+      const system = await apiFetch("GET", "mcp-definitions?type=system");
       setSystemMcps(Array.isArray(system) ? system : []);
     } finally {
       setLoading(false);
@@ -907,98 +899,54 @@ export default function McpBuilderPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  useEffect(() => {
-    const handleFill = (ev: Event) => {
-      const detail = (ev as CustomEvent<Record<string, unknown>>).detail;
-      setAutoFillDraft(detail && Object.keys(detail).length > 0 ? detail : null);
-      setEditingMcp(null);
-      setShowDrawer(true);
-    };
-    window.addEventListener("admin:fill_mcp", handleFill);
-
-    // Cross-page: agent may have navigated here after storing draft in sessionStorage
-    try {
-      const pending = sessionStorage.getItem("admin:fill_mcp_draft");
-      if (pending) {
-        sessionStorage.removeItem("admin:fill_mcp_draft");
-        const draft = JSON.parse(pending) as Record<string, unknown>;
-        if (Object.keys(draft).length > 0) {
-          setAutoFillDraft(draft);
-          setEditingMcp(null);
-          setShowDrawer(true);
-        }
-      }
-    } catch { /* ignore */ }
-
-    return () => window.removeEventListener("admin:fill_mcp", handleFill);
-  }, []);
-
-  const sysMcpName = (id: number | null) =>
-    systemMcps.find(m => m.id === id)?.name ?? `System MCP #${id}`;
-
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#1a202c" }}>MCP Builder</h1>
-          <p style={{ margin: "4px 0 0", fontSize: 13, color: "#718096" }}>
-            選資料源 → 寫加工意圖 → AI 生成腳本 → 驗證 → 存檔
-          </p>
-        </div>
-        <button onClick={() => { setEditingMcp(null); setShowDrawer(true); }} style={btnStyle("primary")}>
-          + 新增 MCP
-        </button>
+      <div style={{ marginBottom: 24 }}>
+        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#1a202c" }}>System MCPs</h1>
+        <p style={{ margin: "4px 0 0", fontSize: 13, color: "#718096" }}>
+          唯讀：平台註冊的底層資料來源 (System MCPs)。Custom MCP 已廢棄，
+          若需加工/呈現邏輯請改用 <a href="/admin/skills" style={{ color: "#4299e1" }}>Skills</a>。
+        </p>
       </div>
 
       {loading ? (
         <div style={{ textAlign: "center", padding: 48, color: "#718096" }}>載入中…</div>
-      ) : customMcps.length === 0 ? (
+      ) : systemMcps.length === 0 ? (
         <div style={{ background: "#fff", borderRadius: 10, padding: 56, textAlign: "center", border: "1px solid #e2e8f0" }}>
-          <div style={{ fontSize: 40, marginBottom: 12 }}>⚡</div>
-          <p style={{ color: "#718096", fontSize: 15, margin: "0 0 16px" }}>尚未建立任何 Custom MCP</p>
-          <button onClick={() => { setEditingMcp(null); setShowDrawer(true); }} style={btnStyle("primary")}>建立第一個 MCP</button>
+          <p style={{ color: "#718096", fontSize: 15, margin: 0 }}>尚未載入任何 System MCP</p>
         </div>
       ) : (
         <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e2e8f0", overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead>
               <tr style={{ background: "#f7f8fc", borderBottom: "1px solid #e2e8f0" }}>
-                {["名稱", "說明", "資料源", "腳本狀態", "更新時間", ""].map(h => (
+                {["名稱", "說明", "Endpoint"].map(h => (
                   <th key={h} style={{ padding: "10px 16px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#718096", textTransform: "uppercase", letterSpacing: "0.4px" }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {customMcps.map(mcp => (
+              {systemMcps.map(mcp => (
                 <tr key={mcp.id} style={{ borderBottom: "1px solid #f7f8fc" }}>
                   <td style={{ padding: "12px 16px", fontWeight: 600, color: "#1a202c" }}>{mcp.name}</td>
-                  <td style={{ padding: "12px 16px", color: "#4a5568", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{mcp.description || "—"}</td>
-                  <td style={{ padding: "12px 16px", color: "#718096", fontSize: 12 }}>{mcp.system_mcp_id ? sysMcpName(mcp.system_mcp_id) : "—"}</td>
-                  <td style={{ padding: "12px 16px" }}>
-                    {mcp.processing_script
-                      ? <span style={{ background: "#dbeafe", color: "#1e40af", fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10 }}>✓ 已生成</span>
-                      : <span style={{ background: "#fef3c7", color: "#92400e", fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10 }}>待生成</span>
-                    }
-                  </td>
-                  <td style={{ padding: "12px 16px", color: "#718096", fontSize: 12 }}>{new Date(mcp.updated_at).toLocaleString("zh-TW")}</td>
-                  <td style={{ padding: "12px 16px" }}>
-                    <button onClick={() => { setEditingMcp(mcp); setShowDrawer(true); }} style={{ ...btnStyle("ghost"), fontSize: 12, padding: "5px 12px" }}>編輯</button>
+                  <td style={{ padding: "12px 16px", color: "#4a5568", maxWidth: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{mcp.description || "—"}</td>
+                  <td style={{ padding: "12px 16px", color: "#718096", fontSize: 11, fontFamily: "monospace" }}>
+                    {(() => {
+                      const raw = mcp.api_config as unknown;
+                      let cfg: Record<string, unknown> = {};
+                      if (typeof raw === "string") {
+                        try { cfg = JSON.parse(raw); } catch { /* ignore */ }
+                      } else if (raw && typeof raw === "object") {
+                        cfg = raw as Record<string, unknown>;
+                      }
+                      return (cfg.endpoint_url as string) || "—";
+                    })()}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      )}
-
-      {showDrawer && (
-        <McpDrawer
-          editing={editingMcp}
-          initialDraft={editingMcp ? null : autoFillDraft}
-          systemMcps={systemMcps}
-          onClose={() => { setShowDrawer(false); setAutoFillDraft(null); }}
-          onSaved={load}
-        />
       )}
     </div>
   );

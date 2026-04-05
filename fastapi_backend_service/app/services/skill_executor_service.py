@@ -320,13 +320,18 @@ class SkillExecutorService:
             return SkillExecuteResponse(success=False, error="此 Skill 尚無 steps_mapping")
 
         output_schema = self._skill_repo.get_output_schema(skill)
-        step_results, raw_findings, error, _charts = await self._run_script(steps, event_payload)
+        step_results, raw_findings, error, charts = await self._run_script(steps, event_payload)
 
         if error:
             return SkillExecuteResponse(success=False, step_results=step_results, error=error)
 
         findings = self._build_findings(raw_findings, output_schema)
-        return SkillExecuteResponse(success=True, step_results=step_results, findings=findings)
+        return SkillExecuteResponse(
+            success=True,
+            step_results=step_results,
+            findings=findings,
+            charts=charts,
+        )
 
     async def try_run_draft(
         self,

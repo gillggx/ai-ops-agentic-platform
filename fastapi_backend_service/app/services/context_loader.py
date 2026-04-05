@@ -45,21 +45,24 @@ _DEFAULT_SOUL = """\
        必須停止，明確回覆：「查無資料，請確認參數或資料是否存在。」
 
 2. 【工具選擇建議順序 — 依需求靈活判斷，不必死守順序】
-   ⚠️ 【MCP 呼叫鐵律】System MCP 和 Custom MCP 都必須透過 execute_mcp(mcp_name="...", params={...}) 呼叫。
+   ⚠️ 【MCP 呼叫鐵律】System MCP 必須透過 execute_mcp(mcp_name="...", params={...}) 呼叫。
       絕對禁止直接把 mcp_name 當 tool function name 呼叫（例如 get_process_context(...)，這樣會報 Unknown tool）。
+      ⚠️ Custom MCP 已全面廢棄，請改用 Skill（execute_skill）。
    ════════════════════════════════════════════════
    ★ 優先考慮：精準 Skill 匹配（有 SOP 就照 SOP）
    ════════════════════════════════════════════════
-   ① 若用戶需求屬於「診斷」類（判斷 NORMAL/ABNORMAL），先確認是否有符合的 Skill（list_skills 或 search_catalog）。
-   ② 若找到高度吻合的 Skill → 優先選擇 execute_skill，因為 Skill 已封裝完整診斷邏輯與建議。
-   ⚠️ Skill 的本質是「診斷」（回傳 NORMAL / ABNORMAL + 建議）。
-      若用戶只是想「拿資料」或「畫圖」，Skill 不適用，直接跳到下方。
+   ① 不管是「診斷」、「分析」、「視覺化呈現」還是「標準查詢」，先 list_skills 或 search_catalog 確認是否有符合的 Skill。
+   ② 若找到高度吻合的 Skill → 優先選擇 execute_skill，Skill 已封裝完整邏輯（撈資料 + 處理 + 產圖 + 回結論）。
+   ⚠️ Skill 不僅限於診斷用途。畫 chart、跑分析、呈現標準圖表都應優先用 Skill。
+      例如：「看 SPC chart」→ 找「SPC 管制圖呈現」Skill，直接 execute_skill。
+   ⚠️ Skill 產出的 chart 會自動渲染至使用者畫面（chart_intents 機制）。
+      看到 tool result 含 CHART RENDERED 標記時，表示圖已出現，你的任務只是用文字說明結論，禁止再呼叫繪圖工具。
 
    ════════════════════════════════════════════════
-   ★ 其次考慮：Custom MCP（有前例就沿用）
+   ★ 其次考慮：System MCP 撈原始資料
    ════════════════════════════════════════════════
-   ③ 查看 MCP Catalog 中是否有描述相符的 Custom MCP（execute_mcp）。
-   ④ Custom MCP 已封裝完整加工邏輯，直接呼叫通常比自行撰寫程式更快更穩。
+   ③ 沒有合適的 Skill，需要單純查原始資料 → execute_mcp 呼叫 System MCP。
+   ④ 注意：execute_mcp 只撈 raw data，不會自動產生圖表。要呈現圖表請改用 Skill 或 execute_jit。
    ⚠️ execute_agent_tool 只能操作已撈取的 df，無法取代 MCP 做底層資料查詢。
 
    ════════════════════════════════════════════════
@@ -106,8 +109,8 @@ _DEFAULT_SOUL = """\
    ════════════════════════════════════════════════
    ★ 建立/修改資源（僅限用戶明確要求）
    ════════════════════════════════════════════════
-   ⑥ 用戶明確說「建立新技能」→ draft_skill（mcp_ids 只能填 Custom MCP ID）
-   ⑦ 用戶明確說「建立新 MCP」→ 先 list_system_mcps 取 system_mcp_id → 再 draft_mcp
+   ⑥ 用戶明確說「建立新技能」→ draft_skill
+   ⚠️ Custom MCP 已廢棄，draft_mcp 和 list_mcps 不再使用
    ⚠️ 嚴禁在用戶只想「查詢」、「分析」或「診斷」時直接跳到建立草稿！
 
 3. 禁止解析 ui_render_payload：工具回傳中僅允許讀取 llm_readable_data，絕對禁止解析 ui_render_payload。
@@ -369,80 +372,42 @@ class ContextLoader:
         return pref.preferences if pref else None
 
     async def _load_mcp_catalog(self) -> str:
-        """Load System and Custom MCP lists from DB for direct injection into context.
+        """Load System MCP list from DB for direct injection into context.
 
-        This ensures the model always knows MCP names → IDs without needing
-        to call list_mcps / list_system_mcps at runtime.
+        Custom MCPs are deprecated — the catalog shows only System MCPs (raw data
+        sources). For visualization/analysis, the Agent should use Skills via
+        execute_skill (see _load_skill_catalog for that list).
         """
         try:
             result = await self._db.execute(
-                select(MCPDefinitionModel).order_by(
-                    MCPDefinitionModel.mcp_type.desc(),  # system first
-                    MCPDefinitionModel.id,
-                )
+                select(MCPDefinitionModel)
+                .where(MCPDefinitionModel.mcp_type == "system")
+                .order_by(MCPDefinitionModel.id)
             )
             mcps = result.scalars().all()
         except Exception:
             return "(MCP 目錄載入失敗)"
 
         if not mcps:
-            return "(目前無可用 MCP)"
+            return "(目前無可用 System MCP)"
 
         import json as _json
 
-        # System MCPs explicitly hidden by a custom MCP with prefer_over_system=True.
-        # The agent will only see the custom wrapper, not the raw system MCP.
-        hidden_system_ids = {
-            mcp.system_mcp_id
-            for mcp in mcps
-            if mcp.mcp_type != "system"
-            and getattr(mcp, "prefer_over_system", False)
-            and getattr(mcp, "system_mcp_id", None)
-        }
-
-        system_lines = ["## System MCPs（⚠️ 必須透過 execute_mcp(mcp_name=..., params={...}) 呼叫，勿直接用 mcp name 當 tool）",
-                        "| id | name | 說明 | 必填參數 |",
-                        "|----|------|------|---------|"]
-        custom_lines = ["## Custom MCPs（⭐ 優先使用，execute_mcp(mcp_name=..., params={...})）",
+        system_lines = ["## System MCPs（⚠️ 必須透過 execute_mcp(mcp_name=..., params={...}) 呼叫，只負責撈原始資料）",
                         "| id | name | 說明 | 必填參數 |",
                         "|----|------|------|---------|"]
 
         for mcp in mcps:
-            # Use first 120 chars of description to preserve enough context
             desc = (mcp.description or "")[:120].replace("\n", " ").replace("|", "｜")
-            if mcp.mcp_type == "system":
-                if mcp.id in hidden_system_ids:
-                    continue
-                # Extract required param names from input_schema
-                required_params = ""
-                if mcp.input_schema:
-                    try:
-                        schema = _json.loads(mcp.input_schema)
-                        fields = schema.get("fields", [])
-                        req = [f["name"] for f in fields if f.get("required")]
-                        required_params = ", ".join(req) if req else "-"
-                    except Exception:
-                        required_params = "-"
-                system_lines.append(f"| {mcp.id} | {mcp.name} | {desc} | {required_params} |")
-            else:
-                # Extract required param names from input_definition (custom MCPs)
-                required_params = ""
-                raw_idef = mcp.input_definition
-                if raw_idef:
-                    try:
-                        idef = _json.loads(raw_idef) if isinstance(raw_idef, str) else raw_idef
-                        fields = idef.get("fields", [])
-                        req = [f["name"] for f in fields if f.get("required")]
-                        required_params = ", ".join(req) if req else "-"
-                    except Exception:
-                        required_params = "-"
-                custom_lines.append(f"| {mcp.id} | {mcp.name} | {desc} | {required_params} |")
+            required_params = ""
+            if mcp.input_schema:
+                try:
+                    schema = _json.loads(mcp.input_schema)
+                    fields = schema.get("fields", [])
+                    req = [f["name"] for f in fields if f.get("required")]
+                    required_params = ", ".join(req) if req else "-"
+                except Exception:
+                    required_params = "-"
+            system_lines.append(f"| {mcp.id} | {mcp.name} | {desc} | {required_params} |")
 
-        parts = []
-        # Custom MCPs first — they are user-built wrappers and should be preferred
-        if len(custom_lines) > 3:
-            parts.append("\n".join(custom_lines))
-        if len(system_lines) > 3:
-            parts.append("\n".join(system_lines))
-
-        return "\n\n".join(parts) if parts else "(目前無可用 MCP)"
+        return "\n".join(system_lines) if len(system_lines) > 3 else "(目前無可用 System MCP)"

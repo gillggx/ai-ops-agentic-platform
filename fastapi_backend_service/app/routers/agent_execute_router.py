@@ -17,9 +17,10 @@ from app.models.user import UserModel
 from app.repositories.data_subject_repository import DataSubjectRepository
 from app.repositories.mcp_definition_repository import MCPDefinitionRepository
 from app.repositories.skill_definition_repository import SkillDefinitionRepository
+from app.config import get_settings
 from app.services.mcp_builder_service import MCPBuilderService
 from app.services.mcp_definition_service import MCPDefinitionService
-from app.services.skill_execute_service import SkillExecuteService
+from app.services.skill_executor_service import SkillExecutorService, build_mcp_executor
 
 router = APIRouter(prefix="/execute", tags=["agent-execute"])
 
@@ -38,22 +39,57 @@ async def execute_skill(
 ) -> Dict[str, Any]:
     """Execute a Skill and return strictly separated llm/ui payloads.
 
-    The AI agent MUST only read `llm_readable_data`.
-    The frontend MUST only read `ui_render_payload`.
-
-    Request body: free-form dict of parameters required by the Skill's MCP
-    (e.g. {"lot_id": "L2603001", "tool_id": "TETCH01", "operation_number": "3200"})
+    Delegates to SkillExecutorService (steps_mapping model). Agent reads
+    llm_readable_data; ui_render_payload (including chart_intents from _chart DSL)
+    is passed to the frontend render pipeline.
     """
-    # Extract base_url from request for internal DataSubject fetching
-    base_url = f"{request.url.scheme}://{request.url.netloc}"
-
-    svc = SkillExecuteService(
+    settings = get_settings()
+    svc = SkillExecutorService(
         skill_repo=SkillDefinitionRepository(db),
-        mcp_repo=MCPDefinitionRepository(db),
-        ds_repo=DataSubjectRepository(db),
+        mcp_executor=build_mcp_executor(db, sim_url=settings.ONTOLOGY_SIM_URL),
     )
 
-    return await svc.execute(skill_id=skill_id, params=body, base_url=base_url)
+    resp = await svc.execute(skill_id=skill_id, event_payload=body, triggered_by="agent")
+
+    if not resp.success:
+        return {
+            "status": "error",
+            "skill_id": skill_id,
+            "llm_readable_data": {"status": "ERROR", "error": resp.error or "執行失敗"},
+            "ui_render_payload": {"has_chart": False},
+        }
+
+    findings = resp.findings
+    f_dict = findings.model_dump() if findings else {}
+
+    # Build llm_readable_data from findings (what the Agent reads)
+    llm_readable: Dict[str, Any] = {
+        "status": "ABNORMAL" if f_dict.get("condition_met") else "NORMAL",
+        "summary": f_dict.get("summary", ""),
+        "outputs": f_dict.get("outputs", {}),
+        "impacted_lots": f_dict.get("impacted_lots", []),
+    }
+
+    # Build ui_render_payload (what the frontend renders). chart_intents here
+    # triggers ChartIntentRenderer without any heuristic guessing.
+    ui_render_payload: Dict[str, Any] = {
+        "has_chart": bool(resp.charts),
+        "chart_intents": resp.charts or [],
+        "outputs": f_dict.get("outputs", {}),
+    }
+
+    return {
+        "status": "success",
+        "skill_id": skill_id,
+        "skill_name": getattr(
+            await SkillDefinitionRepository(db).get_by_id(skill_id),
+            "name",
+            f"Skill #{skill_id}",
+        ),
+        "llm_readable_data": llm_readable,
+        "ui_render_payload": ui_render_payload,
+        "charts": resp.charts,  # Top-level for render_card consumption
+    }
 
 
 @router.post(

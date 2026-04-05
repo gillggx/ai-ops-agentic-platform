@@ -226,6 +226,7 @@ class SkillExecuteResponse(BaseModel):
     success: bool
     step_results: List[StepResult] = []
     findings: Optional[SkillFindings] = None
+    charts: Optional[List[Dict[str, Any]]] = None  # _chart DSL output from skill steps
     error: Optional[str] = None
 
 

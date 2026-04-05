@@ -484,71 +484,51 @@ def _result_summary(result: Dict[str, Any]) -> str:
     return json.dumps(result, ensure_ascii=False)[:100]
 
 
-def _extract_spc_chart_intents(result: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
-    """Convert an SPC MCP result directly into ChartIntentRenderer DSL format.
+def _notify_chart_rendered(result: Dict[str, Any], chart_intents: List[Dict[str, Any]]) -> None:
+    """Inject a strongly-worded notice into tool result telling the LLM that charts
+    have already been rendered to the user's screen.
 
-    Detects dataset[].data[] rows with value/ucl/lcl/is_ooc and builds a lightweight
-    chart_intent per dataset entry. Returns None if not an SPC result.
+    Why: LLM only sees text, not side effects. Without this notice it keeps calling
+    more plotting tools ("I haven't shown the chart yet") and embeds duplicate
+    Vega-Lite specs in synthesis. The notice + _chart_rendered flag stops both.
+
+    Mutates `result` in place.
     """
-    try:
-        ds = result.get("output_data", {}).get("dataset", [])
-        if not ds or not isinstance(ds, list):
-            return None
+    if not chart_intents:
+        return
 
-        intents: List[Dict[str, Any]] = []
-        for entry in ds:
-            if not isinstance(entry, dict):
-                continue
-            points = entry.get("data", [])
-            if not points or not isinstance(points, list):
-                continue
-            sample = points[0]
-            if not all(k in sample for k in ("value", "ucl", "lcl", "is_ooc")):
-                continue
+    # Build human-readable chart list for the notice
+    chart_lines: List[str] = []
+    for intent in chart_intents:
+        title = intent.get("title", "(untitled)")
+        data_len = len(intent.get("data", [])) if isinstance(intent.get("data"), list) else 0
+        chart_lines.append(f"  • {title}（{data_len} 點）")
+    chart_list = "\n".join(chart_lines)
 
-            ucl = sample.get("ucl")
-            lcl = sample.get("lcl")
-            step = entry.get("step", "")
-            chart_name = entry.get("chart_name", "SPC")
+    notice = (
+        "═══════════════════════════════════════════════\n"
+        "✅ CHART RENDERED — 以下圖表已自動渲染至使用者畫面，使用者已看到：\n"
+        f"{chart_list}\n"
+        "\n"
+        "⛔ 禁止再呼叫繪圖工具（execute_jit / analyze_data / plotly）畫同樣的圖\n"
+        "⛔ synthesis 的 contract.visualization 必須為空陣列 []\n"
+        "✅ 你的唯一任務：用 **文字** 說明觀察結論（OOC 點位、趨勢、建議），不要重畫圖\n"
+        "═══════════════════════════════════════════════\n\n"
+    )
 
-            # Build data points — keep original field names so ChartIntentRenderer
-            # can use them directly in tooltip/highlight
-            data_points = [
-                {
-                    "eventTime": p.get("eventTime", "")[:19].replace("T", " "),
-                    "lotID":     p.get("lotID", ""),
-                    "toolID":    p.get("toolID", ""),
-                    "value":     round(p.get("value", 0), 4) if p.get("value") is not None else None,
-                    "is_ooc":    bool(p.get("is_ooc")),
-                }
-                for p in points
-            ]
+    # Prepend notice to llm_readable_data so LLM sees it first (primacy effect)
+    existing = result.get("llm_readable_data", "")
+    if isinstance(existing, str):
+        result["llm_readable_data"] = notice + existing
+    elif isinstance(existing, dict):
+        # Wrap as JSON string with notice prefix
+        result["llm_readable_data"] = notice + json.dumps(existing, ensure_ascii=False)
+    else:
+        result["llm_readable_data"] = notice
 
-            rules: List[Dict[str, Any]] = []
-            if isinstance(ucl, (int, float)):
-                rules.append({"value": float(ucl), "label": "UCL", "style": "danger"})
-            if isinstance(lcl, (int, float)):
-                rules.append({"value": float(lcl), "label": "LCL", "style": "danger"})
-            if isinstance(ucl, (int, float)) and isinstance(lcl, (int, float)):
-                rules.append({"value": round((float(ucl) + float(lcl)) / 2, 4),
-                              "label": "CL", "style": "center"})
-
-            intents.append({
-                "type":      "line",
-                "title":     f"{step} — {chart_name}",
-                "data":      data_points,
-                "x":         "eventTime",
-                "y":         ["value"],
-                "rules":     rules,
-                "highlight": {"field": "is_ooc", "eq": True},
-                "x_label":   "時間",
-                "y_label":   chart_name,
-            })
-
-        return intents if intents else None
-    except Exception:
-        logger.debug("_extract_spc_chart_intents failed", exc_info=True)
-        return None
+    # Machine-readable flag + titles list (used by synthesis stage)
+    result["_chart_rendered"] = True
+    result["_chart_rendered_titles"] = [intent.get("title", "") for intent in chart_intents]
 
 
 def _is_spc_result(result: Dict[str, Any]) -> bool:
@@ -728,6 +708,7 @@ def _build_spc_contract(mcp_name: str, result: Dict[str, Any]) -> Optional[Dict[
 def _resolve_contract(
     text: str,
     last_spc_result: Optional[tuple],
+    chart_already_rendered: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Return the best contract for a synthesis response.
 
@@ -736,9 +717,19 @@ def _resolve_contract(
     2. Auto-built SPC contract from last MCP result
     If the LLM generated a contract but left visualization empty and we have
     SPC data, we inject the auto-built visualization into the parsed contract.
+
+    When chart_already_rendered is True (chart_intents sent via render_card),
+    force visualization=[] to prevent duplicate charts on screen.
     """
     parsed = _parse_contract(text)
     auto   = _build_spc_contract(*last_spc_result) if last_spc_result else None
+
+    # Chart already rendered via chart_intents path — strip any LLM-generated viz
+    if chart_already_rendered:
+        if parsed is None:
+            return None
+        parsed["visualization"] = []
+        return parsed
 
     if parsed is None:
         return auto
@@ -786,24 +777,32 @@ def _build_render_card(
     if tool_name == "execute_skill" and isinstance(result, dict) and "ui_render_payload" in result:
         lrd = result.get("llm_readable_data") or {}
         urp = result.get("ui_render_payload") or {}
-        chart_data = urp.get("chart_data")
-        return {
+
+        # Modern path: _chart DSL → chart_intents (notify LLM + render directly)
+        chart_intents = result.get("charts") or urp.get("chart_intents")
+        if chart_intents:
+            _notify_chart_rendered(result, chart_intents)
+
+        card: Dict[str, Any] = {
             "type": "skill",
             "skill_name": result.get("skill_name", f"Skill #{tool_input.get('skill_id')}"),
             "status": lrd.get("status", "UNKNOWN"),
-            "conclusion": lrd.get("diagnosis_message", ""),
+            "conclusion": lrd.get("summary", "") or lrd.get("diagnosis_message", ""),
             "summary": lrd.get("summary", ""),
-            "problem_object": lrd.get("problematic_targets", []),
+            "problem_object": lrd.get("impacted_lots", []) or lrd.get("problematic_targets", []),
             "mcp_output": {
                 "ui_render": {
-                    "chart_data": chart_data,
-                    "charts": [chart_data] if chart_data else [],
+                    "chart_data": urp.get("chart_data"),
+                    "charts": [urp["chart_data"]] if urp.get("chart_data") else [],
                 },
                 "dataset": urp.get("dataset"),
                 "_raw_dataset": urp.get("dataset"),
                 "_call_params": tool_input.get("params", {}),
             },
         }
+        if chart_intents:
+            card["chart_intents"] = chart_intents
+        return card
 
     if tool_name == "execute_mcp" and isinstance(result, dict) and result.get("status") == "success":
         od = result.get("output_data") or {}
@@ -812,9 +811,9 @@ def _build_render_card(
         dataset = od.get("dataset")
         raw_dataset = od.get("_raw_dataset") or dataset
 
-        # Auto-detect SPC result → build chart_intents for ChartIntentRenderer
-        chart_intents = _extract_spc_chart_intents(result)
-        card: Dict[str, Any] = {
+        # execute_mcp is now data-only. Visualization responsibility has moved
+        # to Skills (via _chart/_charts DSL). No auto chart_intents detection here.
+        return {
             "type": "mcp",
             "mcp_name": mcp_name,
             "mcp_output": {
@@ -825,9 +824,6 @@ def _build_render_card(
                 "_is_processed": od.get("_is_processed", True),
             },
         }
-        if chart_intents:
-            card["chart_intents"] = chart_intents
-        return card
 
     _DRAFT_TOOL_TYPE_MAP = {
         "draft_skill": "skill",
@@ -917,6 +913,8 @@ def _build_render_card(
             if chart_intents:
                 # _chart DSL — lightweight chart intent, rendered by frontend
                 payload["chart_intents"] = chart_intents
+                # Notify LLM that chart is already on screen — prevents redundant calls
+                _notify_chart_rendered(result, chart_intents)
             elif chart_json:
                 try:
                     payload["plotly"] = json.loads(chart_json) if isinstance(chart_json, str) else chart_json
@@ -1140,6 +1138,7 @@ class AgentOrchestrator:
         _session_input_tokens = cumulative_tokens
         _tools_used: list = []   # Phase B: track successful tool calls for success pattern memory
         _last_spc_result: Optional[tuple] = None  # (mcp_name, result) — auto-contract fallback
+        _chart_already_rendered: bool = False  # True once any tool result injected chart_intents via _notify_chart_rendered
 
         # ══════════════════════════════════════════════════════════════
         # v16: Layered Token Compaction
@@ -1258,7 +1257,7 @@ class AgentOrchestrator:
 
                 yield _stage_event(4, "running")
                 yield {"type": "synthesis", "text": final_text,
-                       "contract": _resolve_contract(final_text, _last_spc_result)}
+                       "contract": _resolve_contract(final_text, _last_spc_result, _chart_already_rendered)}
                 yield _stage_event(4, "complete")
                 messages.append({"role": "assistant", "content": response.content})
                 break
@@ -1349,6 +1348,11 @@ class AgentOrchestrator:
                     if (tool_name == "execute_mcp" and isinstance(result, dict)
                             and _is_spc_result(result)):
                         _last_spc_result = (result.get("mcp_name", tool_name), result)
+
+                    # ── Chart rendered flag: once any tool injects chart_intents, remember it
+                    # so the synthesis stage strips visualization from the contract.
+                    if isinstance(result, dict) and result.get("_chart_rendered"):
+                        _chart_already_rendered = True
 
                     # Trap memory RAG DISABLED — trap memories are no longer written,
                     # so querying them would return stale/incorrect rules.
@@ -1521,7 +1525,8 @@ class AgentOrchestrator:
                         )
                         final_text = _extract_text(synth_resp.content)
                         yield {"type": "synthesis", "text": final_text,
-                               "contract": _resolve_contract(final_text, _last_spc_result)}
+                               "contract": _resolve_contract(final_text, _last_spc_result, _chart_already_rendered)}
+                        # Also strip LLM-generated visualization from final_text when chart_already_rendered
                         messages.append({"role": "assistant", "content": synth_resp.content})
                     except Exception as exc:
                         yield {"type": "synthesis", "text": f"執行失敗，請確認參數後再試一次。（{exc}）"}
