@@ -20,22 +20,33 @@ def _resolve_url_params(endpoint_url: str, params: Dict[str, Any]) -> tuple[str,
 
 logger = logging.getLogger(__name__)
 
-# SPC chart_name short-form aliases → full form expected by the analytics endpoint.
-# e.g. agent sends "xbar"; endpoint requires "xbar_chart".
+# SPC chart_name aliases → full form expected by the analytics endpoint.
+# Handles short forms (xbar), user-facing variants (P-chart, P chart), and case.
 _SPC_CHART_ALIASES: Dict[str, str] = {
-    "xbar": "xbar_chart",
-    "r":    "r_chart",
-    "s":    "s_chart",
-    "p":    "p_chart",
-    "c":    "c_chart",
+    # short forms
+    "xbar": "xbar_chart", "r": "r_chart", "s": "s_chart", "p": "p_chart", "c": "c_chart",
+    # user variants — all case/separator combos normalize to <x>_chart
+    "xbar-chart": "xbar_chart", "xbar chart": "xbar_chart", "x-bar": "xbar_chart", "x_bar": "xbar_chart",
+    "r-chart":    "r_chart",    "r chart":    "r_chart",
+    "s-chart":    "s_chart",    "s chart":    "s_chart",
+    "p-chart":    "p_chart",    "p chart":    "p_chart",
+    "c-chart":    "c_chart",    "c chart":    "c_chart",
 }
+
+
+def _normalize_chart_name(raw: str) -> str:
+    """Normalize any chart_name variant to canonical form (e.g. 'P-chart' → 'p_chart')."""
+    if not isinstance(raw, str):
+        return raw
+    key = raw.strip().lower()
+    return _SPC_CHART_ALIASES.get(key, key)
 
 
 def _normalize_params(params: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize known agent short-form values before forwarding to system MCP endpoints."""
     if "chart_name" in params:
         params = dict(params)  # shallow copy — don't mutate caller's dict
-        params["chart_name"] = _SPC_CHART_ALIASES.get(params["chart_name"], params["chart_name"])
+        params["chart_name"] = _normalize_chart_name(params["chart_name"])
     return params
 
 

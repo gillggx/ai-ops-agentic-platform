@@ -484,6 +484,73 @@ def _result_summary(result: Dict[str, Any]) -> str:
     return json.dumps(result, ensure_ascii=False)[:100]
 
 
+def _extract_spc_chart_intents(result: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    """Convert an SPC MCP result directly into ChartIntentRenderer DSL format.
+
+    Detects dataset[].data[] rows with value/ucl/lcl/is_ooc and builds a lightweight
+    chart_intent per dataset entry. Returns None if not an SPC result.
+    """
+    try:
+        ds = result.get("output_data", {}).get("dataset", [])
+        if not ds or not isinstance(ds, list):
+            return None
+
+        intents: List[Dict[str, Any]] = []
+        for entry in ds:
+            if not isinstance(entry, dict):
+                continue
+            points = entry.get("data", [])
+            if not points or not isinstance(points, list):
+                continue
+            sample = points[0]
+            if not all(k in sample for k in ("value", "ucl", "lcl", "is_ooc")):
+                continue
+
+            ucl = sample.get("ucl")
+            lcl = sample.get("lcl")
+            step = entry.get("step", "")
+            chart_name = entry.get("chart_name", "SPC")
+
+            # Build data points — keep original field names so ChartIntentRenderer
+            # can use them directly in tooltip/highlight
+            data_points = [
+                {
+                    "eventTime": p.get("eventTime", "")[:19].replace("T", " "),
+                    "lotID":     p.get("lotID", ""),
+                    "toolID":    p.get("toolID", ""),
+                    "value":     round(p.get("value", 0), 4) if p.get("value") is not None else None,
+                    "is_ooc":    bool(p.get("is_ooc")),
+                }
+                for p in points
+            ]
+
+            rules: List[Dict[str, Any]] = []
+            if isinstance(ucl, (int, float)):
+                rules.append({"value": float(ucl), "label": "UCL", "style": "danger"})
+            if isinstance(lcl, (int, float)):
+                rules.append({"value": float(lcl), "label": "LCL", "style": "danger"})
+            if isinstance(ucl, (int, float)) and isinstance(lcl, (int, float)):
+                rules.append({"value": round((float(ucl) + float(lcl)) / 2, 4),
+                              "label": "CL", "style": "center"})
+
+            intents.append({
+                "type":      "line",
+                "title":     f"{step} — {chart_name}",
+                "data":      data_points,
+                "x":         "eventTime",
+                "y":         ["value"],
+                "rules":     rules,
+                "highlight": {"field": "is_ooc", "eq": True},
+                "x_label":   "時間",
+                "y_label":   chart_name,
+            })
+
+        return intents if intents else None
+    except Exception:
+        logger.debug("_extract_spc_chart_intents failed", exc_info=True)
+        return None
+
+
 def _is_spc_result(result: Dict[str, Any]) -> bool:
     """Return True when an execute_mcp result contains SPC chart data.
 
@@ -744,7 +811,10 @@ def _build_render_card(
         mcp_name = result.get("mcp_name") or f"MCP #{mcp_id}"
         dataset = od.get("dataset")
         raw_dataset = od.get("_raw_dataset") or dataset
-        return {
+
+        # Auto-detect SPC result → build chart_intents for ChartIntentRenderer
+        chart_intents = _extract_spc_chart_intents(result)
+        card: Dict[str, Any] = {
             "type": "mcp",
             "mcp_name": mcp_name,
             "mcp_output": {
@@ -755,6 +825,9 @@ def _build_render_card(
                 "_is_processed": od.get("_is_processed", True),
             },
         }
+        if chart_intents:
+            card["chart_intents"] = chart_intents
+        return card
 
     _DRAFT_TOOL_TYPE_MAP = {
         "draft_skill": "skill",
