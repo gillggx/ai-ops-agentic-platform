@@ -1256,8 +1256,12 @@ class AgentOrchestrator:
                         yield _stage_event(2, "complete")
 
                 yield _stage_event(4, "running")
-                yield {"type": "synthesis", "text": final_text,
-                       "contract": _resolve_contract(final_text, _last_spc_result, _chart_already_rendered)}
+                _synth_contract = _resolve_contract(final_text, _last_spc_result, _chart_already_rendered)
+                # Strip raw <contract> block from user-visible text when chart already rendered
+                _synth_text = final_text
+                if _chart_already_rendered:
+                    _synth_text = re.sub(r"<contract>[\s\S]*?</contract>", "", _synth_text).strip()
+                yield {"type": "synthesis", "text": _synth_text, "contract": _synth_contract}
                 yield _stage_event(4, "complete")
                 messages.append({"role": "assistant", "content": response.content})
                 break
@@ -1349,11 +1353,6 @@ class AgentOrchestrator:
                             and _is_spc_result(result)):
                         _last_spc_result = (result.get("mcp_name", tool_name), result)
 
-                    # ── Chart rendered flag: once any tool injects chart_intents, remember it
-                    # so the synthesis stage strips visualization from the contract.
-                    if isinstance(result, dict) and result.get("_chart_rendered"):
-                        _chart_already_rendered = True
-
                     # Trap memory RAG DISABLED — trap memories are no longer written,
                     # so querying them would return stale/incorrect rules.
 
@@ -1433,6 +1432,13 @@ class AgentOrchestrator:
                         })
 
                     render_card = _build_render_card(tool_name, tool_input, result)
+
+                    # ── Chart rendered flag: _build_render_card may have injected
+                    # _chart_rendered=True via _notify_chart_rendered (for execute_jit
+                    # and execute_skill chart_intents paths). Check AFTER the call so
+                    # the flag is visible when synthesis runs later.
+                    if isinstance(result, dict) and result.get("_chart_rendered"):
+                        _chart_already_rendered = True
                     done_event: Dict[str, Any] = {
                         "type": "tool_done",
                         "tool": tool_name,
@@ -1543,7 +1549,7 @@ class AgentOrchestrator:
                 yield _stage_event(2, "complete")
             yield _stage_event(4, "running")
             yield {"type": "synthesis", "text": final_text,
-                   "contract": _resolve_contract(final_text, _last_spc_result)}
+                   "contract": _resolve_contract(final_text, _last_spc_result, _chart_already_rendered)}
             yield _stage_event(4, "complete")
             messages.append({"role": "assistant", "content": response.content})
             break

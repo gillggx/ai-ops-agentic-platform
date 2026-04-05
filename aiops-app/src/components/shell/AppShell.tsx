@@ -12,7 +12,6 @@ import type { AIOpsReportContract } from "aiops-contract";
 
 const STUDIO_ITEMS = [
   { href: "/admin/skills",       label: "Diagnostic Rules", icon: "🔧" },
-  { href: "/admin/mcps",         label: "Analysis Views",   icon: "⚡" },
   { href: "/admin/auto-patrols", label: "Auto-Patrols",     icon: "🔍" },
 ];
 
