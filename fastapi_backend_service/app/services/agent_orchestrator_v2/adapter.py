@@ -56,7 +56,8 @@ async def adapt_events(
     _tool_start_count = 0
     _render_card_index = 0
     _current_state = dict(initial_state)
-    _analysis_contract = None  # stashed when execute_analysis produces a contract
+    _analysis_contract = None  # stashed when any tool produces charts for analysis panel
+    _all_chart_intents: list = []  # accumulated from ALL tools (skill, analysis, mcp)
 
     # Opening stage events
     yield _stage_event(1, "running")
@@ -128,9 +129,24 @@ async def adapt_events(
                     }
                     if card:
                         done_event["render_card"] = card
-                    # Stash analysis contract for the synthesis event
-                    if card and card.get("type") == "analysis" and card.get("contract"):
-                        _analysis_contract = card["contract"]
+
+                    # Collect chart_intents from ANY tool (skill, analysis, mcp)
+                    # → all charts go to the analysis panel (center), not copilot (right)
+                    card_charts = None
+                    if card:
+                        if card.get("type") == "analysis" and card.get("contract"):
+                            _analysis_contract = card["contract"]
+                        elif card.get("chart_intents"):
+                            card_charts = card["chart_intents"]
+                        elif card.get("type") == "skill":
+                            # execute_skill may have charts in mcp_output.ui_render
+                            ui = (card.get("mcp_output") or {}).get("ui_render") or {}
+                            if ui.get("chart_intents"):
+                                card_charts = ui["chart_intents"]
+
+                    if card_charts:
+                        _all_chart_intents.extend(card_charts)
+
                     yield done_event
                 if stage:
                     yield _stage_event(stage, "complete")
@@ -139,9 +155,36 @@ async def adapt_events(
                 _seen_synthesis = True
                 output = ev_data.get("output") or {}
                 yield _stage_event(4, "running")
-                # If execute_analysis produced a contract (with visualization),
-                # it takes priority over the LLM-generated contract
-                contract = _analysis_contract or output.get("contract")
+
+                # Build contract for analysis panel:
+                # Priority: explicit analysis contract > auto-built from chart_intents > LLM contract
+                contract = _analysis_contract
+                if not contract and _all_chart_intents:
+                    # Auto-build contract from accumulated chart_intents
+                    from app.services.agent_orchestrator_v2.nodes.tool_execute import _chart_intent_to_vega_lite
+                    visualization = []
+                    for i, chart in enumerate(_all_chart_intents):
+                        try:
+                            vega_spec = _chart_intent_to_vega_lite(chart)
+                            visualization.append({
+                                "id": f"chart_{i}",
+                                "type": "vega-lite",
+                                "title": chart.get("title", f"Chart {i+1}"),
+                                "spec": vega_spec,
+                            })
+                        except Exception:
+                            pass
+                    if visualization:
+                        contract = {
+                            "$schema": "aiops-report/v1",
+                            "summary": output.get("final_text", "")[:200],
+                            "evidence_chain": [],
+                            "visualization": visualization,
+                            "suggested_actions": [],
+                        }
+                if not contract:
+                    contract = output.get("contract")
+
                 yield {
                     "type": "synthesis",
                     "text": output.get("final_text", ""),
