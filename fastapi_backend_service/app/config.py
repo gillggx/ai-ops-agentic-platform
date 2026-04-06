@@ -115,8 +115,8 @@ class Config(BaseSettings):
     )
     # ── Agent Orchestrator version (Phase 2-B) ────────────────────────
     AGENT_ORCHESTRATOR_VERSION: str = Field(
-        default="v1",
-        description="v1 = legacy while-loop, v2 = LangGraph StateGraph",
+        default="v2",
+        description="v1 = legacy while-loop, v2 = LangGraph StateGraph (default since Phase 2-C)",
     )
     LLM_MAX_TOKENS_DIAGNOSTIC: int = Field(
         default=4096,

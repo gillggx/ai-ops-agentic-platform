@@ -85,8 +85,6 @@ class AgentOrchestratorV2:
         }
 
         # Stream LangGraph events and translate to v1 SSE format
-        import sys as _sys
-        print(f"[V2-DBG] Starting graph.astream_events...", file=_sys.stderr, flush=True)
         try:
             event_stream = graph.astream_events(
                 initial_state,
@@ -95,12 +93,9 @@ class AgentOrchestratorV2:
             )
 
             async for v1_event in adapt_events(event_stream, initial_state):
-                print(f"[V2-DBG] yielding event: {v1_event.get('type', '?')}", file=_sys.stderr, flush=True)
                 yield v1_event
         except Exception as exc:
-            import traceback
-            print(f"[V2-DBG] EXCEPTION in graph run: {exc}", file=_sys.stderr, flush=True)
-            traceback.print_exc(file=_sys.stderr)
+            logger.exception("v2 graph run failed")
             yield {"type": "error", "message": f"v2 graph error: {exc}"}
             yield {"type": "done"}
 

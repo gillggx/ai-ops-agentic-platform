@@ -51,6 +51,8 @@ async def adapt_events(
     """
     _seen_context_load = False
     _seen_synthesis = False
+    _seen_self_critique = False
+    _seen_memory = False
     _tool_start_count = 0
     _render_card_index = 0
     _current_state = dict(initial_state)
@@ -140,6 +142,35 @@ async def adapt_events(
                 }
                 yield _stage_event(4, "complete")
 
+            elif ev_name == "self_critique":
+                output = ev_data.get("output") or {}
+                reflection = output.get("reflection_result") or {}
+                yield _stage_event(5, "running")
+                if reflection.get("pass", True):
+                    yield {"type": "reflection_pass"}
+                else:
+                    yield {
+                        "type": "reflection_amendment",
+                        "issues": reflection.get("issues", []),
+                        "amended_text": reflection.get("amended_text", ""),
+                        "issue_count": len(reflection.get("issues", [])),
+                    }
+                yield _stage_event(5, "complete")
+                _seen_self_critique = True
+
+            elif ev_name == "memory_lifecycle":
+                output = ev_data.get("output") or {}
+                yield _stage_event(6, "running")
+                yield {
+                    "type": "memory_write",
+                    "source": "experience_lifecycle_scheduled",
+                    "cited_memory_ids": output.get("cited_memory_ids", []),
+                    "memory_write_scheduled": output.get("memory_write_scheduled", False),
+                    "tool_count": len(_current_state.get("tools_used", [])),
+                }
+                yield _stage_event(6, "complete")
+                _seen_memory = True
+
             elif stage:
                 yield _stage_event(stage, "complete")
 
@@ -149,21 +180,20 @@ async def adapt_events(
             if isinstance(output, dict):
                 _current_state.update(output)
 
-    # ── Final events ───────────────────────────────────────────────
-    # Self-critique placeholder (Phase 2-C will add real node)
-    yield _stage_event(5, "running")
-    yield {"type": "reflection_pass"}
-    yield _stage_event(5, "complete")
+    # ── Final fallback events (in case nodes didn't fire) ──────────
+    if not _seen_self_critique:
+        yield _stage_event(5, "running")
+        yield {"type": "reflection_pass"}
+        yield _stage_event(5, "complete")
 
-    # Memory write placeholder
-    yield _stage_event(6, "running")
-    yield {
-        "type": "memory_write",
-        "source": "experience_lifecycle_scheduled",
-        "cited_memory_ids": _current_state.get("cited_memory_ids", []),
-        "tool_count": len(_current_state.get("tools_used", [])),
-    }
-    yield _stage_event(6, "complete")
+    if not _seen_memory:
+        yield _stage_event(6, "running")
+        yield {
+            "type": "memory_write",
+            "source": "skipped",
+            "tool_count": len(_current_state.get("tools_used", [])),
+        }
+        yield _stage_event(6, "complete")
 
     yield {
         "type": "done",

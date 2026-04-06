@@ -35,6 +35,8 @@ from app.services.agent_orchestrator_v2.nodes.load_context import load_context_n
 from app.services.agent_orchestrator_v2.nodes.llm_call import llm_call_node
 from app.services.agent_orchestrator_v2.nodes.tool_execute import tool_execute_node
 from app.services.agent_orchestrator_v2.nodes.synthesis import synthesis_node
+from app.services.agent_orchestrator_v2.nodes.self_critique import self_critique_node
+from app.services.agent_orchestrator_v2.nodes.memory_lifecycle import memory_lifecycle_node
 
 
 # ── Reducer helpers ──────────────────────────────────────────────────
@@ -87,6 +89,13 @@ class GraphState(TypedDict, total=False):
     final_text: Annotated[str, _replace]
     contract: Annotated[Optional[Dict[str, Any]], _replace]
 
+    # Self-critique
+    reflection_result: Annotated[Optional[Dict[str, Any]], _replace]
+
+    # Memory lifecycle
+    cited_memory_ids: Annotated[List[int], _replace]
+    memory_write_scheduled: Annotated[bool, _replace]
+
 logger = logging.getLogger(__name__)
 
 
@@ -133,23 +142,31 @@ def build_graph() -> StateGraph:
     graph.add_node("llm_call", llm_call_node)
     graph.add_node("tool_execute", tool_execute_node)
     graph.add_node("synthesis", synthesis_node)
+    graph.add_node("self_critique", self_critique_node)
+    graph.add_node("memory_lifecycle", memory_lifecycle_node)
 
     # ── Edges ────────────────────────────────────────────────────────
+    # load_context → llm_call
     graph.set_entry_point("load_context")
     graph.add_edge("load_context", "llm_call")
 
+    # llm_call → tool_execute (if tool_calls) or → synthesis (if end_turn)
     graph.add_conditional_edges(
         "llm_call",
         _should_continue,
         {"tool_execute": "tool_execute", "synthesis": "synthesis"},
     )
 
+    # tool_execute → llm_call (loop) or → synthesis (force/max iterations)
     graph.add_conditional_edges(
         "tool_execute",
         _after_tools,
         {"llm_call": "llm_call", "synthesis": "synthesis"},
     )
 
-    graph.add_edge("synthesis", END)
+    # synthesis → self_critique → memory_lifecycle → END
+    graph.add_edge("synthesis", "self_critique")
+    graph.add_edge("self_critique", "memory_lifecycle")
+    graph.add_edge("memory_lifecycle", END)
 
     return graph
