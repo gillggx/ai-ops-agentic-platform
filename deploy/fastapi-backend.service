@@ -1,5 +1,5 @@
 [Unit]
-Description=AI-Ops FastAPI Backend Service (port 8000)
+Description=AI-Ops FastAPI Backend Service (port 8001)
 After=network.target postgresql.service
 Wants=postgresql.service
 
@@ -9,8 +9,8 @@ User=ubuntu
 Group=ubuntu
 WorkingDirectory=/opt/aiops/fastapi_backend_service
 EnvironmentFile=/opt/aiops/fastapi_backend_service/.env
-ExecStart=/opt/aiops/venv_backend/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 2
-ExecStop=/bin/sh -c 'lsof -ti tcp:8000 | xargs kill -9 2>/dev/null || true'
+ExecStart=/opt/aiops/venv_backend/bin/uvicorn main:app --host 127.0.0.1 --port 8001 --workers 2
+ExecStop=/bin/sh -c 'lsof -ti tcp:8001 | xargs kill -9 2>/dev/null || true'
 KillMode=mixed
 KillSignal=SIGTERM
 TimeoutStopSec=10

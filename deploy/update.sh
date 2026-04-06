@@ -70,7 +70,7 @@ fi
 echo "🔁  重啟服務..."
 # Kill stale processes on target ports
 sudo -n fuser -k 8000/tcp 2>/dev/null || true
-sudo -n fuser -k 3000/tcp 2>/dev/null || true
+sudo -n fuser -k 8001/tcp 2>/dev/null || true
 sudo -n fuser -k 8012/tcp 2>/dev/null || true
 sleep 1
 
@@ -110,18 +110,18 @@ BACKEND_OK=false
 FRONTEND_OK=false
 ONTOLOGY_OK=false
 
-wait_for_http "http://127.0.0.1:8000/health" "FastAPI backend (8000)" && BACKEND_OK=true
-wait_for_http "http://127.0.0.1:3000" "AIOps app (3000)" && FRONTEND_OK=true
+wait_for_http "http://127.0.0.1:8001/health" "FastAPI backend (8001)" && BACKEND_OK=true
+wait_for_http "http://127.0.0.1:8000" "AIOps app (8000)" && FRONTEND_OK=true
 wait_for_http "http://127.0.0.1:8012/api/v1/status" "Ontology simulator (8012)" && ONTOLOGY_OK=true
 
 echo ""
 echo "════════════════════════════════════════"
 echo "  Deploy Summary"
 echo "════════════════════════════════════════"
-$BACKEND_OK  && echo "  ✅  FastAPI backend       (8000)  HEALTHY" \
-             || echo "  ❌  FastAPI backend       (8000)  FAILED"
-$FRONTEND_OK && echo "  ✅  AIOps app             (3000)  HEALTHY" \
-             || echo "  ❌  AIOps app             (3000)  FAILED"
+$FRONTEND_OK && echo "  ✅  AIOps app             (8000)  HEALTHY" \
+             || echo "  ❌  AIOps app             (8000)  FAILED"
+$BACKEND_OK  && echo "  ✅  FastAPI backend       (8001)  HEALTHY" \
+             || echo "  ❌  FastAPI backend       (8001)  FAILED"
 $ONTOLOGY_OK && echo "  ✅  Ontology simulator    (8012)  HEALTHY" \
              || echo "  ❌  Ontology simulator    (8012)  FAILED"
 echo "════════════════════════════════════════"
