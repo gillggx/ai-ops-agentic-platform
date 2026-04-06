@@ -73,7 +73,7 @@ echo "🚀  啟動 OntologySimulator (port 8012)..."
 mkdir -p "$REPO_ROOT/logs"
 LOG_ONTO="$REPO_ROOT/logs/ontology_simulator.log"
 cd "$REPO_ROOT/ontology_simulator"
-PORT=8012 nohup "$ONTOLOGY_PYTHON" main.py > "$LOG_ONTO" 2>&1 &
+nohup "$ONTOLOGY_PYTHON" -m uvicorn main:app --host 0.0.0.0 --port 8012 --log-level info > "$LOG_ONTO" 2>&1 &
 ONTO_PID=$!
 echo "    PID=$ONTO_PID  log=$LOG_ONTO"
 
