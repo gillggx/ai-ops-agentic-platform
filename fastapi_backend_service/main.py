@@ -716,17 +716,16 @@ _DEFAULT_SYSTEM_PARAMS = [
 ]
 
 
-_SYSTEM_MEMORIES = [
-    {
-        "content": "【SPC 限制】❌禁止用execute_jit畫SPC（make_subplots未安裝）❌禁止逐lot呼叫get_process_context",
-        "tags": ["api_pattern", "spc_chart"],
-        "source": "system",
-    },
-    {
-        "content": "【時間篩選鐵律】simulator時間軸與現實日曆無關。用戶說「今天」「最近」→ 不帶start_time/end_time直接查（結果已按時間倒序，最新在前）。只有用戶明確給出時間戳（如2026-03-15T06:00:00）才使用時間篩選。若加了時間篩選卻回傳空batches → 立即重試不帶時間篩選。",
-        "tags": ["iron_rule", "date_filter"],
-        "source": "system",
-    },
+# Phase 1 memory system replaces these static seeds. The reflective
+# experience memory (agent_experience_memory table) now handles learning
+# from successful interactions. Stale system memories caused more harm
+# than good — the "禁止用 execute_jit 畫 SPC" rule directly contradicted
+# the new _chart DSL architecture and kept regenerating every restart.
+_SYSTEM_MEMORIES: list = [
+    # Intentionally empty — Phase 1 memory lifecycle handles all agent learning.
+    # Legacy seeds removed:
+    #   - "SPC 限制" → contradicted _chart DSL, kept regenerating
+    #   - "時間篩選鐵律" → now encoded in soul prompt §1.15, doesn't need RAG
 ]
 
 
