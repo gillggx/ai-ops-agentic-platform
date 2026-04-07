@@ -32,47 +32,53 @@ _MOCK_PARAMS: Dict[str, Any] = {
     "limit": 3,
 }
 
-# Fallback samples shown to Phase 2 LLM when real MCP calls return empty data
-# Gives the LLM concrete field names to write correct code against
-_FALLBACK_SAMPLES: Dict[str, Any] = {
-    "get_process_history": [
-        {"eventTime": "2026-03-15T06:10:00", "lotID": "LOT-0007", "toolID": "EQP-01",
-         "step": "STEP_045", "recipeID": "RCP-007", "spc_status": "OOC", "apcID": "APC-045"},
-        {"eventTime": "2026-03-15T05:50:00", "lotID": "LOT-0006", "toolID": "EQP-01",
-         "step": "STEP_045", "recipeID": "RCP-007", "spc_status": "PASS", "apcID": "APC-044"},
-    ],
-    "get_process_context": {
-        # APC: parameters values are plain floats (NOT {"value": float})
-        "APC": {"parameters": {
-            "etch_time_offset": 0.0342,
-            "rf_power_bias": 0.9847,
-            "gas_flow_comp": 1.234,
-            "target_cd_nm": 50.112,
-            "etch_rate_pred": 98.45,
-        }},
-        # SPC: charts contain value/ucl/lcl dicts
-        "SPC": {"spc_status": "OOC", "charts": {"xbar_chart": {"value": 18.1, "ucl": 17.5, "lcl": 12.5}}},
-        # DC: parameters values are plain floats (same pattern as APC)
-        "DC":  {"parameters": {"chamber_pressure": 15.2, "gas_flow": 200.1, "rf_power": 850.0}},
-        "RECIPE": {"parameters": {"etch_time_s": 30.0, "pressure": 15.0}},
-    },
-}
+# _FALLBACK_SAMPLES removed — MCP catalog is now dynamic from DB.
+# Sample responses come from real MCP calls during Phase 1.5.
 
-# Compact MCP catalog for Phase 1 — only names, purposes, return shapes
-_MCP_CATALOG_BRIEF = (
-    "Available MCPs (use ONLY these):\n"
-    "\n"
-    "- get_process_history  params: toolID(opt), lotID(opt), limit(opt, default 10)\n"
-    "  回傳: [{eventTime, lotID, toolID, step, recipeID, spc_status:'PASS'|'OOC'|null, apcID}]\n"
-    "  用途: 查機台/批次最近 N 次製程清單、recipe check、OOC trend\n"
-    "\n"
-    "- get_process_context  params: targetID(required), step(required), objectName(required)\n"
-    "  objectName choices: SPC / DC / APC / RECIPE / EC\n"
-    "  SPC 回傳: {spc_status, charts: {xbar_chart: {value: float, ucl: float, lcl: float}}}\n"
-    "  APC 回傳: {parameters: {<param_name>: <float>}}  ← plain float, NOT {value: float}\n"
-    "  DC  回傳: {parameters: {<sensor_name>: <float>}}  ← plain float, NOT {value: float}\n"
-    "  用途: 取某批次+步驟的物件詳細數值（需先從 get_process_history 取得 lotID + step）\n"
-)
+async def _build_mcp_catalog_from_db(db) -> str:
+    """Dynamically build MCP catalog from DB system MCPs for LLM prompt injection."""
+    from app.repositories.mcp_definition_repository import MCPDefinitionRepository
+    repo = MCPDefinitionRepository(db)
+    mcps = await repo.get_all_by_type("system")
+
+    lines = ["Available MCPs (use ONLY these):\n"]
+    for mcp in mcps:
+        name = mcp.name
+        desc = (mcp.description or "").split("\n")[0][:120]  # first line, truncated
+
+        # Parse input_schema fields
+        schema_raw = mcp.input_schema
+        if isinstance(schema_raw, str):
+            import json as _j
+            try:
+                schema_raw = _j.loads(schema_raw)
+            except Exception:
+                schema_raw = {}
+        fields = schema_raw.get("fields", []) if isinstance(schema_raw, dict) else []
+
+        params_parts = []
+        for f in fields:
+            fname = f.get("name", "?")
+            ftype = f.get("type", "string")
+            freq = "required" if f.get("required") else "optional"
+            fdesc = f.get("description", "")[:60]
+            params_parts.append(f"    {fname} ({ftype}, {freq}): {fdesc}")
+
+        params_str = "\n".join(params_parts) if params_parts else "    (no parameters)"
+
+        lines.append(f"- {name}")
+        lines.append(f"  {desc}")
+        lines.append(f"  params:")
+        lines.append(params_str)
+        lines.append("")
+
+    lines.append("⚠️ KEY FIELD NAMES in MCP responses:")
+    lines.append("  - get_process_history / list_recent_events returns: eventTime, lotID, toolID, step, recipeID, spc_status, apcID")
+    lines.append("  - spc_status: 'PASS' | 'OOC' | null  ← THIS is the OOC indicator (NOT 'status')")
+    lines.append("  - status: 'ProcessStart' | 'ProcessEnd'  ← event lifecycle, NOT OOC")
+    lines.append("")
+
+    return "\n".join(lines)
 
 _OUTPUT_SCHEMA_GUIDE = """\
 OUTPUT SCHEMA TYPES — pick the most appropriate type for each output field:
@@ -269,24 +275,18 @@ def _build_confirmed_section(mcp_calls: List[dict], sample_responses: Dict[str, 
         tmpl = mc.get("params_template", {})
 
         sample = sample_responses.get(mcp_name)
-        if not sample:
-            if mcp_name == "get_process_context":
-                obj_name = tmpl.get("objectName", "SPC")
-                fb = _FALLBACK_SAMPLES.get("get_process_context", {})
-                sample = fb.get(obj_name) or fb.get("SPC")
-            else:
-                sample = _FALLBACK_SAMPLES.get(mcp_name)
-
         sample_str = ""
         if sample:
             preview = sample[:2] if isinstance(sample, list) else sample
-            note = "  ← fallback example" if not sample_responses.get(mcp_name) else ""
-            sample_str = f"\n   Sample{note}: {json.dumps(preview, ensure_ascii=False)[:500]}"
+            sample_str = f"\n   Sample response: {json.dumps(preview, ensure_ascii=False)[:500]}"
 
         lines.append(
             f"{i}. execute_mcp('{mcp_name}', {json.dumps(tmpl, ensure_ascii=False)})\n"
             f"   Purpose: {purpose}{sample_str}"
         )
+
+    lines.append("")
+    lines.append("⚠️ REMEMBER: OOC detection uses 'spc_status' field, NOT 'status'.")
     return "\n".join(lines)
 
 
@@ -497,18 +497,17 @@ class DiagnosticRuleService:
     # ── Private: Phase 1 — MCP Planner ────────────────────────────────────────
 
     async def _plan_mcps(self, description: str) -> dict:
+        mcp_catalog = await _build_mcp_catalog_from_db(self._db)
         system_prompt = f"""\
 You are a factory AI data planning expert.
 Given a diagnostic rule description, decide which MCPs are needed and in what order.
 Output ONLY valid JSON. No explanation, no markdown fences.
 
-{_MCP_CATALOG_BRIEF}
+{mcp_catalog}
 Rules:
-- Only use MCPs from the list above
+- Only use MCPs from the catalog above
 - Max 5 MCP calls
 - params_template: dynamic values use {{variable_name}} format (e.g. {{{{equipment_id}}}}, {{{{lot_id}}}}, {{{{step}}}})
-- ALWAYS pass toolID={{{{equipment_id}}}} when querying process history for a specific machine
-- For event-driven rules: equipment_id is always available from the trigger event
 - List in execution order
 
 Required output format:
@@ -649,15 +648,16 @@ Special function (awaitable, no import needed):
   await execute_mcp(mcp_name: str, params: dict) -> Any
 
 Forbidden: import, open(), exec(), eval(), os, sys, subprocess, trigger_alarm
-INPUT: _input dict contains user input (e.g. equipment_id). Also available as top-level vars: equipment_id, lot_id, step, event_time
-  For event-driven skills: equipment_id comes from the trigger event payload — always use it to scope MCP queries.
-  Example: await execute_mcp('get_process_history', {{"toolID": equipment_id, "limit": 10}})
 
-⚠️ CRITICAL FIELD NAMES:
-  - OOC status is in 'spc_status' field (NOT 'status'). Values: 'PASS' | 'OOC' | null
-  - 'status' field means 'ProcessStart' | 'ProcessEnd' — NOT OOC status
-  - Always check record.get('spc_status') == 'OOC' for OOC detection
-  - get_process_history returns: eventTime, lotID, toolID, step, recipeID, spc_status, apcID
+INPUT VARIABLES (available as top-level Python vars):
+  equipment_id: str  — target equipment ID (e.g. "EQP-01") from event_payload or user input
+  lot_id: str        — lot ID (e.g. "LOT-0001") — may be empty
+  step: str          — step code (e.g. "STEP_045") — may be empty
+  event_time: str    — ISO8601 timestamp — may be empty
+  _input: dict       — raw input dict (same data as above)
+
+SCOPE: All steps share the SAME Python scope. Variables from step 1 are available in step 2.
+  Do NOT use _next_input or _input to pass data between steps. Just use regular variables.
 SCOPE: All steps share the SAME Python scope. Variables from step 1 are directly available in step 2.
   Do NOT use _next_input or _input to pass data between steps.
   _input is ONLY for the original user input, NOT for inter-step data.
