@@ -50,21 +50,10 @@ async def run() -> None:
     print(f"[MES] Simulation start: {total} lots queued across {TOTAL_TOOLS} tools")
     sim_start = datetime.utcnow()
 
-    # ── Staggered start: 4–6 machines at T=0, rest deferred ────
+    # ── All machines start immediately ──────────────────────────
     tools = [f"EQP-{i:02d}" for i in range(1, TOTAL_TOOLS + 1)]
-    random.shuffle(tools)
-    immediate_count = random.randint(4, 6)
-    immediate_tools = tools[:immediate_count]
-    deferred_tools  = tools[immediate_count:]
-
-    async def _deferred_loop(tid: str) -> None:
-        delay = random.uniform(300, 720)
-        print(f"[MES] {tid} deferred start in {delay:.0f}s")
-        await asyncio.sleep(delay)
-        await _machine_loop(tid, queue)
-
-    coroutines = [_machine_loop(tid, queue) for tid in immediate_tools]
-    coroutines += [_deferred_loop(tid) for tid in deferred_tools]
+    coroutines = [_machine_loop(tid, queue) for tid in tools]
+    print(f"[MES] All {len(tools)} machines starting immediately")
     await asyncio.gather(*coroutines)
 
     elapsed = (datetime.utcnow() - sim_start).total_seconds()
