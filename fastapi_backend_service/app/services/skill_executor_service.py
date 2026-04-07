@@ -96,16 +96,17 @@ def build_mcp_executor(db, sim_url: str = "http://localhost:8012") -> Callable:
 
         method = api_config.get("method", "GET").upper()
 
-        resolved: Dict[str, Any] = dict(params)
-        if mcp_name == "get_process_context":
-            resolved = await auto_resolve_process_context_params(resolved, sim_url)
-
-        # Time-window MCPs: resolve `since` → `start_time`
+        # Normalize params (dedup for event MCPs, object_name→toolID mapping, etc.)
         from app.services.mcp_definition_service import (
+            _normalize_params,
             _TIME_WINDOW_MCPS,
             _resolve_since_param,
             SinceParamError,
         )
+        resolved: Dict[str, Any] = _normalize_params(dict(params), mcp_name=mcp_name)
+
+        if mcp_name == "get_process_context":
+            resolved = await auto_resolve_process_context_params(resolved, sim_url)
         if mcp_name in _TIME_WINDOW_MCPS:
             try:
                 resolved = await _resolve_since_param(mcp_name, resolved, sim_url)
