@@ -61,7 +61,8 @@ async def agent_chat_stream(
     - `error`         — Error or MAX_ITERATIONS hit
     - `done`          — Stream complete (session_id)
     """
-    base_url = f"{request.url.scheme}://{request.url.netloc}"
+    # Always use loopback for internal API calls (avoid nginx round-trip)
+    base_url = f"http://127.0.0.1:{request.url.port or 8001}"
 
     # Extract JWT token from Authorization header for internal API calls
     auth_header = request.headers.get("Authorization", "")

@@ -17,12 +17,26 @@ export async function GET(req: NextRequest) {
   if (status) params.set("status", status);
 
   try {
-    const res = await fetch(
-      `${FASTAPI_BASE}/api/v1/experience-memory?${params.toString()}`,
-      { headers: authHeaders(), cache: "no-store" }
-    );
-    const data = await res.json();
-    return NextResponse.json(data.data ?? []);
+    // Fetch from both memory tables (agent_memories + agent_experience_memory)
+    const [legacyRes, expRes] = await Promise.all([
+      fetch(`${FASTAPI_BASE}/api/v1/agent/memory?${params.toString()}`, {
+        headers: authHeaders(), cache: "no-store",
+      }),
+      fetch(`${FASTAPI_BASE}/api/v1/experience-memory?${params.toString()}`, {
+        headers: authHeaders(), cache: "no-store",
+      }),
+    ]);
+    const legacyData = legacyRes.ok ? await legacyRes.json() : [];
+    const expData = expRes.ok ? await expRes.json() : {};
+    // Merge: legacy returns array directly, experience returns { data: [...] }
+    const legacy = Array.isArray(legacyData) ? legacyData : (legacyData.data ?? []);
+    const experience = Array.isArray(expData) ? expData : (expData.data ?? []);
+    // Tag source for UI distinction
+    const tagged = [
+      ...legacy.map((m: Record<string, unknown>) => ({ ...m, _memory_type: "rag" })),
+      ...experience.map((m: Record<string, unknown>) => ({ ...m, _memory_type: "experience" })),
+    ];
+    return NextResponse.json(tagged);
   } catch (err) {
     console.error("[memories GET]", err);
     return NextResponse.json([], { status: 200 });

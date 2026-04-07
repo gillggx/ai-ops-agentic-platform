@@ -200,8 +200,9 @@ async def run_event_poller(interval: int = _DEFAULT_POLL_INTERVAL) -> None:
 
     logger.info("EventPoller started (interval=%ds, simulator=%s)", interval, sim_url)
 
-    # Initialise last_seen to "now" so we don't replay historical events on startup
-    last_seen = datetime.now(tz=timezone.utc)
+    # Initialise last_seen to 5 min ago so we catch recent OOC events on startup
+    from datetime import timedelta
+    last_seen = datetime.now(tz=timezone.utc) - timedelta(minutes=5)
 
     while True:
         try:
