@@ -443,10 +443,11 @@ async def list_tools():
 
 @router.get("/events")
 async def list_events(
-    toolID: str  = Query(None, description="Filter by tool ID"),
-    lotID:  str  = Query(None, description="Filter by lot ID"),
-    limit:  int  = Query(50, ge=1, le=500),
-    dedup:  bool = Query(False, description="If true, deduplicate: return one ProcessEnd TOOL_EVENT per (lot, step). limit then means number of unique steps."),
+    toolID: str     = Query(None, description="Filter by tool ID"),
+    lotID:  str     = Query(None, description="Filter by lot ID"),
+    start_time: str = Query(None, description="ISO8601 cutoff — only events after this time"),
+    limit:  int     = Query(50, ge=1, le=500),
+    dedup:  bool    = Query(False, description="If true, deduplicate: return one ProcessEnd TOOL_EVENT per (lot, step). limit then means number of unique steps."),
 ):
     """Return the most recent `limit` events, newest-first.
     Used by the TRACE mode timeline panel.
@@ -459,6 +460,13 @@ async def list_events(
         filt["toolID"] = toolID
     if lotID:
         filt["lotID"] = lotID
+    if start_time:
+        from datetime import datetime
+        try:
+            cutoff = datetime.fromisoformat(start_time.replace("Z", "+00:00").split("+")[0])
+            filt["eventTime"] = {"$gte": cutoff}
+        except ValueError:
+            pass
 
     if not dedup:
         cursor = get_db().events.find(filt, {"_id": 0}).sort("eventTime", -1).limit(limit)
