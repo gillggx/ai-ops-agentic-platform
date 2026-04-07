@@ -243,26 +243,29 @@ _ONTOLOGY_SYSTEM_MCPS = [
     {
         "name": "get_process_history",
         "description": (
-            "【製程歷史記錄】查詢某台機台（toolID）或某批次（lotID）的製程事件列表。\n"
-            "每筆記錄包含：eventTime、lotID、toolID、step、recipeID、spc_status（PASS/OOC）、apcID、fdc_class。\n"
+            "【製程歷史記錄】查詢某台機台或某批次的製程事件列表。\n"
             "\n"
-            "⚠️ since 參數格式鐵律（違反會回 INVALID_SINCE 錯誤）：\n"
-            "  ✅ 正確：since='24h' / since='7d' / since='14d' / since='30d'（字串！）\n"
-            "  ❌ 錯誤：since_hours=24 / hours=24 / since=24 / timeRange='today'\n"
+            "⚠️ 必須帶 toolID 或 lotID（至少一個），不帶會回傳無意義的混合資料。\n"
             "\n"
-            "⏰ 時間窗設計：預設 since='7d'（回傳 7 天內事件，上限 500 筆）\n"
-            "  - 問「今天的」→ 用 since='24h'\n"
-            "  - 問「最近一週」→ 不帶 since，用預設 7d\n"
-            "  - 問「本月」→ 用 since='30d'\n"
-            "  - 統計類問題（例如「最差機台」「OOC 排行」）→ 用預設或更大時間窗，取得足夠樣本\n"
-            "  - 回傳筆數上限 500（simulator API 限制），主要篩選邏輯是時間窗\n"
+            "回傳欄位（每筆）：\n"
+            "  eventTime: ISO8601 時間戳\n"
+            "  lotID: 批次 ID\n"
+            "  toolID: 機台 ID\n"
+            "  step: 站點代碼\n"
+            "  recipeID: 配方 ID\n"
+            "  apcID: APC 模型 ID\n"
+            "  spc_status: 'PASS' 或 'OOC'（不是 FAIL、不是 OK）\n"
             "\n"
-            "使用時機：\n"
-            "  ① 查機台最近事件 → toolID='EQP-01'\n"
-            "  ② 查批次跑過的步驟 → lotID='LOT-0001'\n"
-            "  ③ 統計 recipe 的 OOC 比率 → 從回傳結果過濾 recipeID，計算 spc_status\n"
-            "⚠️ spc_status 是該步驟的 SPC 綜合結論（PASS / OOC / null）；\n"
-            "   若需要 SPC 圖的 value/ucl/lcl 細節，再呼叫 get_process_context"
+            "⚠️ 判斷 OOC 必須用 spc_status == 'OOC'。\n"
+            "\n"
+            "since 參數：'24h' / '7d' / '14d' / '30d'（預設 '7d'）\n"
+            "\n"
+            "使用範例：\n"
+            "  查機台 EQP-01 最近事件 → toolID='EQP-01', since='7d'\n"
+            "  查批次 LOT-0001 的歷程 → lotID='LOT-0001'\n"
+            "  統計機台 OOC 率 → toolID='EQP-01'，計算 spc_status=='OOC' 的比例\n"
+            "\n"
+            "若需要 SPC 管制圖的 value/ucl/lcl 細節 → 改用 get_process_context"
         ),
         "api_config": {
             "endpoint_url": f"{_SIM}/api/v1/events",
@@ -271,8 +274,8 @@ _ONTOLOGY_SYSTEM_MCPS = [
         },
         "input_schema": {
             "fields": [
-                {"name": "toolID", "type": "string", "description": "機台 ID（格式 EQP-XX，e.g. EQP-01）；toolID 或 lotID 至少提供一個", "required": False},
-                {"name": "lotID",  "type": "string", "description": "批次 ID（格式 LOT-XXXX，e.g. LOT-0001）；toolID 或 lotID 至少提供一個", "required": False},
+                {"name": "toolID", "type": "string", "description": "⚠️ 必填（或帶 lotID）。機台 ID，格式 EQP-XX，e.g. EQP-01", "required": False},
+                {"name": "lotID",  "type": "string", "description": "⚠️ 必填（或帶 toolID）。批次 ID，格式 LOT-XXXX，e.g. LOT-0001", "required": False},
                 {"name": "since",  "type": "string",  "description": "⚠️ 字串格式：'24h' | '7d' | '14d' | '30d' | '2w'。禁止使用 since_hours=24 或 hours=24。預設 '7d'", "required": False},
             ]
         },
@@ -309,23 +312,26 @@ _ONTOLOGY_SYSTEM_MCPS = [
         "name": "list_recent_events",
         "description": (
             "【最近製程事件】查詢最新的製程事件（已去重，每個 lot+step 只回一筆 ProcessEnd）。\n"
-            "每筆記錄包含：eventTime、lotID、toolID、step、recipeID、apcID、spc_status（PASS/OOC）。\n"
             "\n"
-            "⭐ 查 OOC 記錄請用此 MCP：回傳的 spc_status 欄位可直接統計 OOC 比率。\n"
+            "回傳欄位（每筆）：\n"
+            "  eventTime: ISO8601 時間戳\n"
+            "  lotID: 批次 ID (e.g. LOT-0001)\n"
+            "  toolID: 機台 ID (e.g. EQP-01)\n"
+            "  step: 站點代碼 (e.g. STEP_045)\n"
+            "  recipeID: 配方 ID\n"
+            "  apcID: APC 模型 ID\n"
+            "  spc_status: SPC 判定結果，值只有 'PASS' 或 'OOC'（不是 FAIL、不是 OK、不是 NORMAL）\n"
             "\n"
-            "object_name 支援：\n"
-            "  - LOT：依批次篩選（object_id 格式 LOT-XXXX）\n"
-            "  - TOOL：依機台篩選（object_id 格式 EQP-XX）\n"
-            "  - 不帶：查全廠事件\n"
+            "⚠️ 判斷 OOC 必須用 spc_status == 'OOC'，不要用 'FAIL' 或其他值。\n"
             "\n"
-            "⚠️ since 參數格式鐵律：\n"
-            "  ✅ 正確：since='24h' / since='7d' / since='14d' / since='30d'\n"
-            "  ❌ 錯誤：since_hours=24 / hours=24\n"
+            "篩選參數：\n"
+            "  object_name: TOOL（依機台）/ LOT（依批次）/ 不帶（全廠）\n"
+            "  object_id: 配合 object_name，e.g. EQP-01、LOT-0001\n"
+            "  since: 時間窗 '24h' / '7d' / '14d' / '30d'（預設 '7d'）\n"
             "\n"
-            "使用時機：\n"
-            "  ① 查最近 OOC 事件 → since='24h'，過濾 spc_status='OOC'\n"
-            "  ② 查機台事件 → object_name='TOOL', object_id='EQP-01'\n"
-            "  ③ 統計 OOC 率 → 計算 spc_status='OOC' 的比例"
+            "使用範例：\n"
+            "  查某機台最近事件 → object_name='TOOL', object_id='EQP-01', since='7d'\n"
+            "  統計全廠 OOC 率 → since='24h'，計算 spc_status=='OOC' 的比例"
         ),
         "api_config": {
             "endpoint_url": f"{_SIM}/api/v1/events",
@@ -344,19 +350,28 @@ _ONTOLOGY_SYSTEM_MCPS = [
         "name": "query_object_timeseries",
         "description": (
             "【物件參數時序查詢】查詢 APC/DC/SPC/RECIPE 物件的單一參數時序，自動計算 3σ OOC 旗標。\n"
-            "回傳：{object_name, parameter, total_points, stats{mean,ucl,lcl,std_dev,ooc_count}, data[]}\n"
+            "\n"
+            "回傳：{\n"
+            "  object_name, parameter, total_points,\n"
+            "  stats: {mean, ucl, lcl, std_dev, ooc_count, pass_rate},\n"
+            "  data: [{eventTime, lotID, toolID, value, is_ooc}]\n"
+            "}\n"
+            "\n"
+            "object_id 填什麼（很重要）：\n"
+            "  - SPC → 填 step 代碼，e.g. 'STEP_007'（站點級 SPC 時序）\n"
+            "  - APC → 填 APC model ID，e.g. 'APC-007'\n"
+            "  - DC  → 填機台 ID，e.g. 'EQP-01'\n"
             "\n"
             "parameter 格式：\n"
             "  - SPC：charts.xbar_chart.value / charts.r_chart.value / charts.s_chart.value\n"
             "  - APC：直接用參數名稱，e.g. rf_power_bias\n"
             "  - DC：sensor 顯示名稱，e.g. Chamber Press\n"
+            "  ⚠️ 不確定有哪些 parameter → 先呼叫 get_object_info 查詢 available_fields\n"
             "\n"
-            "⚠️ 不確定有哪些 parameter → 先呼叫 get_object_info 查詢 available_fields\n"
-            "\n"
-            "使用時機：\n"
-            "  ① APC model drift → object_name='APC', object_id='APC-007', parameter='rf_power_bias'\n"
-            "  ② SPC 趨勢 → object_name='SPC', object_id='STEP_007', parameter='charts.xbar_chart.value'\n"
-            "  ③ DC 量測趨勢 → object_name='DC', object_id='EQP-01', parameter='Chamber Press'"
+            "使用範例：\n"
+            "  SPC xbar 趨勢圖 → object_name='SPC', object_id='STEP_007', parameter='charts.xbar_chart.value'\n"
+            "  APC drift 監控 → object_name='APC', object_id='APC-007', parameter='rf_power_bias'\n"
+            "  DC 溫度時序 → object_name='DC', object_id='EQP-01', parameter='Chamber Press'"
         ),
         "api_config": {
             "endpoint_url": f"{_SIM}/api/v1/objects/query",
