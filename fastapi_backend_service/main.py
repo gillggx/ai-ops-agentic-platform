@@ -308,45 +308,8 @@ _ONTOLOGY_SYSTEM_MCPS = [
             ]
         },
     },
-    {
-        "name": "list_recent_events",
-        "description": (
-            "【最近製程事件】查詢最新的製程事件（已去重，每個 lot+step 只回一筆 ProcessEnd）。\n"
-            "\n"
-            "回傳欄位（每筆）：\n"
-            "  eventTime: ISO8601 時間戳\n"
-            "  lotID: 批次 ID (e.g. LOT-0001)\n"
-            "  toolID: 機台 ID (e.g. EQP-01)\n"
-            "  step: 站點代碼 (e.g. STEP_045)\n"
-            "  recipeID: 配方 ID\n"
-            "  apcID: APC 模型 ID\n"
-            "  spc_status: SPC 判定結果，值只有 'PASS' 或 'OOC'（不是 FAIL、不是 OK、不是 NORMAL）\n"
-            "\n"
-            "⚠️ 判斷 OOC 必須用 spc_status == 'OOC'，不要用 'FAIL' 或其他值。\n"
-            "\n"
-            "篩選參數：\n"
-            "  object_name: 只能填 'TOOL' 或 'LOT'（不要填 SPC/APC/DC）\n"
-            "  object_id: TOOL 時填 EQP-XX，LOT 時填 LOT-XXXX\n"
-            "  since: 時間窗 '24h' / '7d' / '14d' / '30d'（預設 '7d'）\n"
-            "\n"
-            "使用範例：\n"
-            "  查某機台最近事件 → object_name='TOOL', object_id='EQP-01', since='7d'\n"
-            "  查全廠最近事件（含 OOC）→ 不帶 object_name，since='24h'\n"
-            "  統計 OOC 率 → 過濾結果中 spc_status=='OOC' 的比例"
-        ),
-        "api_config": {
-            "endpoint_url": f"{_SIM}/api/v1/events",
-            "method": "GET",
-            "headers": {},
-        },
-        "input_schema": {
-            "fields": [
-                {"name": "object_name", "type": "string", "description": "篩選維度：只能填 'TOOL' 或 'LOT'。TOOL=依機台篩選，LOT=依批次篩選。⚠️ 不要填 SPC/APC/DC — 這不是物件類型篩選。不帶則查全廠。", "required": False},
-                {"name": "object_id",   "type": "string", "description": "配合 object_name 的 ID。TOOL 時填 EQP-XX (e.g. EQP-01)，LOT 時填 LOT-XXXX (e.g. LOT-0001)", "required": False},
-                {"name": "since",       "type": "string", "description": "⚠️ 字串格式：'24h' | '7d' | '14d' | '30d' | '2w'。預設 '7d'", "required": False},
-            ]
-        },
-    },
+    # list_recent_events — DISABLED: too similar to get_process_history, LLM confuses them.
+    # Use get_process_history with toolID/lotID instead.
     {
         "name": "query_object_timeseries",
         "description": (

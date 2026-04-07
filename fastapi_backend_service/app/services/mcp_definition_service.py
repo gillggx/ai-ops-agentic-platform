@@ -78,7 +78,7 @@ def _normalize_params(params: Dict[str, Any], mcp_name: str = "") -> Dict[str, A
 # MCPs that support time-window filtering (backed by /api/v1/events).
 # When agent passes `since="7d"`, backend transforms it into `start_time=<iso>`
 # by fetching the simulator's latest event time and subtracting the duration.
-_TIME_WINDOW_MCPS = {"list_recent_events", "get_process_history", "query_object_timeseries"}
+_TIME_WINDOW_MCPS = {"list_recent_events", "get_process_history", "query_object_timeseries"}  # list_recent_events kept for backward compat
 
 # Per-MCP default time window (applied when agent passes no since / start_time).
 _DEFAULT_SINCE: Dict[str, str] = {
