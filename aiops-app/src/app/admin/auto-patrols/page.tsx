@@ -441,15 +441,12 @@ export default function AutoPatrolsPage() {
     reloadList();
   }
 
-  async function handleTrigger(id: number) {
-    const res = await fetch(`/api/admin/auto-patrols/${id}/trigger`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ event_payload: {} }),
-    });
-    const data = await res.json() as { condition_met?: boolean; alarm_created?: boolean; error?: string };
-    if (data.error) alert(`執行失敗: ${data.error}`);
-    else alert(`執行完成 — condition_met: ${data.condition_met}, alarm_created: ${data.alarm_created}`);
-    reloadList();
+  function handleTrigger(id: number) {
+    // Open edit modal for this patrol so user can use the full Try-Run UI
+    const patrol = patrols.find(p => p.id === id);
+    if (patrol) {
+      openEdit(patrol);
+    }
   }
 
   const canSave = form.name.trim().length > 0 && form.steps_mapping.length > 0;
