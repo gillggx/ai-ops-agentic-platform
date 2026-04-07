@@ -150,9 +150,10 @@ async def get_current_user(
     # These are trusted internal callers — skip JWT validation entirely.
     settings = get_settings()
     if token == settings.INTERNAL_API_TOKEN:
+        # Use admin user (id=1) for internal calls — Postgres FK requires a real user
         system_user = UserModel()
-        system_user.id = 0
-        system_user.username = "system"
+        system_user.id = 1
+        system_user.username = "admin"
         system_user.is_active = True
         system_user.is_superuser = True
         return system_user
