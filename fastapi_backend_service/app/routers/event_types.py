@@ -73,34 +73,91 @@ async def delete_event_type(
 @router.get("/{name}/log", response_model=StandardResponse)
 async def get_event_log(
     name: str,
-    limit: int = Query(default=20, ge=1, le=100),
+    limit: int = Query(default=50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     _: UserModel = Depends(get_current_user),
 ):
-    """Return total received count + recent entries for an event type name."""
-    total_result = await db.execute(
+    """Return event detection + skill execution history for an event type.
+
+    Merges two sources:
+    - nats_event_log: events received via NATS/webhook
+    - execution_logs: skill executions triggered by event_poller for this event type
+    """
+    import json as _json
+
+    # ── Source 1: NATS event log (legacy) ─────────────────────────────
+    nats_total_result = await db.execute(
         select(func.count()).where(NatsEventLogModel.event_type_name == name)
     )
-    total: int = total_result.scalar_one()
+    nats_total: int = nats_total_result.scalar_one()
 
-    recent_result = await db.execute(
-        select(NatsEventLogModel)
-        .where(NatsEventLogModel.event_type_name == name)
-        .order_by(NatsEventLogModel.received_at.desc())
-        .limit(limit)
+    # ── Source 2: Execution logs from event_poller ────────────────────
+    # Find skills bound to this event type
+    from app.models.event_type import EventTypeModel
+    from app.models.execution_log import ExecutionLogModel
+    from app.models.skill_definition import SkillDefinitionModel
+
+    et_result = await db.execute(
+        select(EventTypeModel).where(EventTypeModel.name == name)
     )
-    rows = recent_result.scalars().all()
+    et = et_result.scalar_one_or_none()
+
+    exec_logs = []
+    exec_total = 0
+    if et:
+        # Count all poller executions for skills bound to this event type
+        exec_count_result = await db.execute(
+            select(func.count())
+            .select_from(ExecutionLogModel)
+            .join(SkillDefinitionModel, ExecutionLogModel.skill_id == SkillDefinitionModel.id)
+            .where(SkillDefinitionModel.trigger_event_id == et.id)
+            .where(ExecutionLogModel.triggered_by == "event_poller")
+        )
+        exec_total = exec_count_result.scalar_one()
+
+        # Recent execution logs
+        exec_result = await db.execute(
+            select(ExecutionLogModel, SkillDefinitionModel.name.label("skill_name"))
+            .join(SkillDefinitionModel, ExecutionLogModel.skill_id == SkillDefinitionModel.id)
+            .where(SkillDefinitionModel.trigger_event_id == et.id)
+            .where(ExecutionLogModel.triggered_by == "event_poller")
+            .order_by(ExecutionLogModel.started_at.desc())
+            .limit(limit)
+        )
+        for row in exec_result:
+            log = row[0]
+            skill_name = row[1]
+            ctx = {}
+            if log.event_context:
+                try:
+                    ctx = _json.loads(log.event_context)
+                except Exception:
+                    pass
+            llm_data = {}
+            if log.llm_readable_data:
+                try:
+                    llm_data = _json.loads(log.llm_readable_data)
+                except Exception:
+                    pass
+            exec_logs.append({
+                "id": log.id,
+                "skill_id": log.skill_id,
+                "skill_name": skill_name,
+                "equipment_id": ctx.get("equipment_id", ""),
+                "lot_id": ctx.get("lot_id", ""),
+                "step": ctx.get("step", ""),
+                "condition_met": llm_data.get("condition_met", None),
+                "summary": llm_data.get("summary", ""),
+                "action": log.action_dispatched,
+                "status": log.status,
+                "duration_ms": log.duration_ms,
+                "started_at": log.started_at.isoformat() if log.started_at else None,
+            })
 
     return StandardResponse.success(data={
         "event_type_name": name,
-        "total": total,
-        "recent": [
-            {
-                "id": r.id,
-                "equipment_id": r.equipment_id,
-                "lot_id": r.lot_id,
-                "received_at": r.received_at.isoformat() if r.received_at else None,
-            }
-            for r in rows
-        ],
+        "total": nats_total + exec_total,
+        "nats_total": nats_total,
+        "poller_total": exec_total,
+        "recent": exec_logs,
     })

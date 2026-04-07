@@ -10,6 +10,7 @@ Design:
 """
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -85,25 +86,31 @@ async def _process_event(
             mcp_executor=None,
         )
 
+        from app.repositories.auto_patrol_repository import AutoPatrolRepository
+        from app.models.execution_log import ExecutionLogModel
+        patrol_repo = AutoPatrolRepository(db)
+
         for skill in skills:
+            started_at = datetime.now(tz=timezone.utc)
             try:
                 result = await executor.execute(
                     skill_id=skill.id,
                     event_payload=payload,
                     triggered_by="event_poller",
                 )
-                if not result.success:
-                    logger.warning("Poller: skill=%d failed: %s", skill.id, result.error)
-                    continue
+                finished_at = datetime.now(tz=timezone.utc)
+                duration_ms = int((finished_at - started_at).total_seconds() * 1000)
 
-                # Check condition_met from findings → create alarm
+                # Get patrol config for alarm severity/title
+                patrol = await patrol_repo.get_by_skill_id(skill.id)
+
                 findings = result.findings
-                if findings and findings.condition_met:
-                    # Find the auto_patrol that owns this skill to get alarm config
-                    from app.repositories.auto_patrol_repository import AutoPatrolRepository
-                    patrol_repo = AutoPatrolRepository(db)
-                    patrol = await patrol_repo.get_by_skill_id(skill.id)
+                condition_met = findings.condition_met if findings else False
+                summary = findings.summary if findings else ""
+                action = None
 
+                # Create alarm if condition met
+                if result.success and condition_met:
                     alarm_data = {
                         "skill_id": skill.id,
                         "trigger_event": event_type_name,
@@ -113,11 +120,12 @@ async def _process_event(
                         "event_time": payload.get("event_time", ""),
                         "severity": (patrol.alarm_severity if patrol else "HIGH"),
                         "title": (patrol.alarm_title if patrol else skill.name),
-                        "summary": findings.summary or "",
+                        "summary": summary,
                         "status": "active",
                     }
                     alarm = await alarm_repo.create(alarm_data)
                     total_alarms += 1
+                    action = "alarm_created"
                     logger.info(
                         "Poller: skill=%d → ALARM created (id=%s, severity=%s)",
                         skill.id, alarm.id, alarm_data["severity"],
@@ -125,8 +133,30 @@ async def _process_event(
                 else:
                     logger.info(
                         "Poller: skill=%d → condition_met=%s, no alarm",
-                        skill.id, getattr(findings, "condition_met", None),
+                        skill.id, condition_met,
                     )
+
+                # Write execution log (always, regardless of condition_met)
+                exec_log = ExecutionLogModel(
+                    skill_id=skill.id,
+                    auto_patrol_id=patrol.id if patrol else None,
+                    triggered_by="event_poller",
+                    event_context=json.dumps(payload, ensure_ascii=False, default=str),
+                    status="success" if result.success else "error",
+                    llm_readable_data=json.dumps({
+                        "condition_met": condition_met,
+                        "summary": summary,
+                        "outputs": findings.outputs if findings else {},
+                    }, ensure_ascii=False, default=str) if findings else None,
+                    action_dispatched=action,
+                    error_message=result.error if not result.success else None,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    duration_ms=duration_ms,
+                )
+                db.add(exec_log)
+                await db.commit()
+
             except Exception as exc:
                 logger.exception("Poller: unhandled error in skill=%d: %s", skill.id, exc)
 
@@ -191,6 +221,20 @@ async def _poll_once(
             "Poller: matched event type=%s equipment=%s lot=%s step=%s",
             ev_type_name, ev.get("toolID", "?"), ev.get("lotID", "?"), ev.get("step", "?"),
         )
+
+        # Update event_type received count in DB (for Event Registry page)
+        try:
+            from app.models.event_type import EventTypeModel
+            async with AsyncSessionLocal() as _db:
+                from sqlalchemy import update
+                await _db.execute(
+                    update(EventTypeModel)
+                    .where(EventTypeModel.id == ev_type_id)
+                    .values(updated_at=datetime.now(tz=timezone.utc))
+                )
+                await _db.commit()
+        except Exception:
+            pass  # non-blocking
 
         try:
             _poller_stats["skills_triggered"] += 1

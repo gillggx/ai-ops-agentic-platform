@@ -8,12 +8,9 @@ import type { StoredEventType } from "@/lib/store";
 interface EventLog {
   event_type_name: string;
   total: number;
-  recent: {
-    id: number;
-    equipment_id: string | null;
-    lot_id: string | null;
-    received_at: string | null;
-  }[];
+  poller_total?: number;
+  nats_total?: number;
+  recent: Record<string, unknown>[];
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
@@ -175,7 +172,7 @@ export default function EventRegistryPage() {
                     )}
                   </td>
                   <td style={{ padding: "11px 16px", color: "#718096", fontSize: 12 }}>
-                    {log?.recent?.[0]?.received_at ? relativeTime(log.recent[0].received_at) : "—"}
+                    {log?.recent?.[0]?.started_at ? relativeTime(log.recent[0].started_at as string) : (log?.recent?.[0]?.received_at ? relativeTime(log.recent[0].received_at as string) : "—")}
                   </td>
                   <td style={{ padding: "11px 16px" }} onClick={e => e.stopPropagation()}>
                     <button
@@ -209,42 +206,63 @@ export default function EventRegistryPage() {
             <button style={{ background: "none", border: "none", cursor: "pointer", color: "#a0aec0", fontSize: 18 }} onClick={() => setSelected(null)}>×</button>
           </div>
 
-          {/* Log table */}
+          {/* Execution log table */}
           {selectedLog.recent.length === 0 ? (
             <div style={{ padding: "32px", textAlign: "center", color: "#a0aec0", fontSize: 13 }}>
               尚未收到任何 <strong>{selectedName}</strong> 事件
             </div>
           ) : (
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr style={{ background: "#f7f8fc" }}>
-                  {["#", "收到時間", "Equipment", "Lot ID"].map(h => (
-                    <th key={h} style={{ padding: "9px 16px", textAlign: "left", fontWeight: 600, color: "#718096", borderBottom: "1px solid #e2e8f0", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.4px" }}>{h}</th>
+                  {["時間", "Equipment", "Lot", "Step", "Skill", "結果", "Action", "耗時"].map(h => (
+                    <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#718096", borderBottom: "1px solid #e2e8f0", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.4px" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {selectedLog.recent.map((row, i) => (
-                  <tr key={row.id} style={{ borderBottom: "1px solid #f0f0f0" }}>
-                    <td style={{ padding: "9px 16px", color: "#a0aec0", fontFamily: "ui-monospace, monospace", fontSize: 11 }}>{row.id}</td>
-                    <td style={{ padding: "9px 16px", color: "#4a5568", whiteSpace: "nowrap" }}>
-                      {row.received_at ? (
-                        <>
-                          <span style={{ fontWeight: 500 }}>{relativeTime(row.received_at)}</span>
-                          <span style={{ color: "#a0aec0", marginLeft: 8, fontSize: 11 }}>
-                            {new Date(row.received_at).toLocaleString("zh-TW")}
-                          </span>
-                        </>
-                      ) : "—"}
+                {selectedLog.recent.map((row: Record<string, unknown>) => {
+                  const condMet = row.condition_met as boolean | null;
+                  const action = row.action as string | null;
+                  return (
+                  <tr key={row.id as number} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                    <td style={{ padding: "8px 12px", color: "#4a5568", whiteSpace: "nowrap" }}>
+                      {row.started_at ? relativeTime(row.started_at as string) : "—"}
                     </td>
-                    <td style={{ padding: "9px 16px", fontFamily: "ui-monospace, monospace", fontSize: 12, color: "#2d3748" }}>
-                      {row.equipment_id || <span style={{ color: "#a0aec0" }}>—</span>}
+                    <td style={{ padding: "8px 12px", fontFamily: "monospace", color: "#2d3748" }}>
+                      {(row.equipment_id as string) || "—"}
                     </td>
-                    <td style={{ padding: "9px 16px", fontFamily: "ui-monospace, monospace", fontSize: 12, color: "#2d3748" }}>
-                      {row.lot_id || <span style={{ color: "#a0aec0" }}>—</span>}
+                    <td style={{ padding: "8px 12px", fontFamily: "monospace", color: "#2d3748", fontSize: 11 }}>
+                      {(row.lot_id as string) || "—"}
+                    </td>
+                    <td style={{ padding: "8px 12px", fontFamily: "monospace", color: "#718096", fontSize: 11 }}>
+                      {(row.step as string) || "—"}
+                    </td>
+                    <td style={{ padding: "8px 12px", fontSize: 11, color: "#4a5568", maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {(row.skill_name as string) || `#${row.skill_id}`}
+                    </td>
+                    <td style={{ padding: "8px 12px" }}>
+                      {condMet === true ? (
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "#dc2626", background: "#fef2f2", padding: "2px 8px", borderRadius: 10 }}>TRIGGERED</span>
+                      ) : condMet === false ? (
+                        <span style={{ fontSize: 11, fontWeight: 600, color: "#16a34a", background: "#f0fdf4", padding: "2px 8px", borderRadius: 10 }}>OK</span>
+                      ) : (
+                        <span style={{ fontSize: 11, color: "#a0aec0" }}>—</span>
+                      )}
+                    </td>
+                    <td style={{ padding: "8px 12px", fontSize: 11 }}>
+                      {action === "alarm_created" ? (
+                        <span style={{ color: "#dc2626", fontWeight: 600 }}>ALARM</span>
+                      ) : (
+                        <span style={{ color: "#a0aec0" }}>—</span>
+                      )}
+                    </td>
+                    <td style={{ padding: "8px 12px", fontSize: 11, color: "#718096" }}>
+                      {(row.duration_ms as number) ? `${row.duration_ms}ms` : "—"}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}
