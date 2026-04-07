@@ -56,7 +56,28 @@ class AutoPatrolService:
         obj = await self._repo.get_by_id(patrol_id)
         if not obj:
             raise ValueError(f"Auto-Patrol id={patrol_id} 不存在")
-        return self._repo.to_response_dict(obj)
+        result = self._repo.to_response_dict(obj)
+
+        # Include embedded skill's steps_mapping, input_schema, output_schema
+        if obj.skill_id:
+            import json as _json
+            skill_repo = SkillDefinitionRepository(self._repo._db)
+            skill = await skill_repo.get_by_id(obj.skill_id)
+            if skill:
+                try:
+                    result["steps_mapping"] = _json.loads(skill.steps_mapping) if isinstance(skill.steps_mapping, str) else (skill.steps_mapping or [])
+                except Exception:
+                    result["steps_mapping"] = []
+                try:
+                    result["input_schema"] = _json.loads(skill.input_schema) if isinstance(skill.input_schema, str) else (skill.input_schema or [])
+                except Exception:
+                    result["input_schema"] = []
+                try:
+                    result["output_schema"] = _json.loads(skill.output_schema) if isinstance(skill.output_schema, str) else (skill.output_schema or [])
+                except Exception:
+                    result["output_schema"] = []
+
+        return result
 
     async def create(self, body: AutoPatrolCreate, created_by: Optional[int] = None) -> Dict[str, Any]:
         data = body.model_dump()
