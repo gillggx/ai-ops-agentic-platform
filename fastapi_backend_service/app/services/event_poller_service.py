@@ -214,14 +214,22 @@ async def run_event_poller(interval: int = _DEFAULT_POLL_INTERVAL) -> None:
 _poller_last_seen: Optional[datetime] = None
 
 
+_main_loop = None  # set during startup
+
+
+def set_event_loop(loop) -> None:
+    """Called from lifespan to capture the main uvicorn event loop."""
+    global _main_loop
+    _main_loop = loop
+
+
 def poll_once_job() -> None:
-    """Sync entry point for APScheduler — runs async poll in the existing event loop."""
+    """Sync entry point for APScheduler — schedules async poll on uvicorn's event loop."""
     import asyncio
-    loop = asyncio.get_event_loop()
-    if loop.is_running():
-        loop.create_task(_poll_once_async())
+    if _main_loop is not None and _main_loop.is_running():
+        asyncio.run_coroutine_threadsafe(_poll_once_async(), _main_loop)
     else:
-        asyncio.run(_poll_once_async())
+        logger.warning("EventPoller: no event loop available")
 
 
 async def _poll_once_async() -> None:

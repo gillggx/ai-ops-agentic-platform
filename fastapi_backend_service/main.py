@@ -1132,7 +1132,8 @@ async def lifespan(app: FastAPI):
         await load_schedule_patrols_into_scheduler(db)
         break
     # v18: Event-Driven Poller — use APScheduler interval job (reliable in uvicorn)
-    from app.services.event_poller_service import poll_once_job
+    from app.services.event_poller_service import poll_once_job, set_event_loop
+    set_event_loop(asyncio.get_event_loop())
     cron_scheduler.add_job(
         poll_once_job,
         "interval",
