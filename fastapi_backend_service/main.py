@@ -1131,10 +1131,8 @@ async def lifespan(app: FastAPI):
         await load_all_jobs_into_scheduler(db)
         await load_schedule_patrols_into_scheduler(db)
         break
-    # v18: Event-Driven Poller — asyncio.ensure_future (stays in uvicorn event loop)
-    from app.services.event_poller_service import run_event_poller
-    asyncio.ensure_future(run_event_poller(interval=30))
-    logger.info("v18 EventPoller started (interval=30s)")
+    # v18: Event-Driven Poller — started via @app.on_event("startup") below
+    logger.info("v18 EventPoller will start after app startup")
     # v2.0: NATS OOC Event Subscriber (only if NATS is configured and reachable)
     from app.services.nats_subscriber_service import start_nats_subscriber, stop_nats_subscriber
     _nats_url = getattr(settings, "NATS_URL", "") or ""
@@ -1169,6 +1167,17 @@ app = FastAPI(
     redoc_url="/redoc",
     lifespan=lifespan,
 )
+
+# ---------------------------------------------------------------------------
+# Post-startup: Event Poller (must be after app creation, runs in event loop)
+# ---------------------------------------------------------------------------
+
+@app.on_event("startup")
+async def _start_event_poller():
+    from app.services.event_poller_service import run_event_poller
+    asyncio.create_task(run_event_poller(interval=30))
+    logger.info("v18 EventPoller task created in on_event('startup')")
+
 
 # ---------------------------------------------------------------------------
 # Middleware
