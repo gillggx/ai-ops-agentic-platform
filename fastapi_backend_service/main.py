@@ -258,6 +258,8 @@ _ONTOLOGY_SYSTEM_MCPS = [
             "  ⚠️ 所有欄位名稱都是 camelCase：lotID, toolID, eventTime, recipeID, apcID\n"
             "\n"
             "⚠️ 判斷 OOC 必須用 spc_status == 'OOC'。\n"
+            "⚠️ 欄位名稱全部是 camelCase：用 event.get('lotID') 不是 event.get('lot_id')，\n"
+            "   用 event.get('eventTime') 不是 event.get('timestamp')。\n"
             "\n"
             "since 參數：'24h' / '7d' / '14d' / '30d'（預設 '7d'）\n"
             "\n"
@@ -351,7 +353,7 @@ _ONTOLOGY_SYSTEM_MCPS = [
         "input_schema": {
             "fields": [
                 {"name": "object_name", "type": "string", "description": "物件類型：APC / DC / SPC / RECIPE", "required": True},
-                {"name": "object_id",   "type": "string", "description": "物件 ID，e.g. APC-007、EQP-01、STEP_042", "required": True},
+                {"name": "object_id",   "type": "string", "description": "⚠️ SPC 時填 step 代碼 (e.g. STEP_007)，不要填 equipment_id。APC 填 APC model ID (e.g. APC-007)。DC 填 equipment_id (e.g. EQP-01)。", "required": True},
                 {"name": "parameter",   "type": "string", "description": "參數名稱，e.g. rf_power_bias、charts.xbar_chart.value", "required": True},
                 {"name": "since",       "type": "string", "description": "時間窗：'24h' | '7d' | '14d' | '30d'。預設 '7d'", "required": False},
             ]
