@@ -143,6 +143,10 @@ async def _poll_once(
     max_seen = last_seen
 
     for ev_time, ev in new_events:
+        # Always advance max_seen regardless of event type match
+        if max_seen is None or ev_time > max_seen:
+            max_seen = ev_time
+
         # Determine logical event type name:
         # Simulator emits TOOL_EVENT/LOT_EVENT with spc_status field.
         # Map spc_status=OOC → "OOC" event type for Auto-Patrol matching.
@@ -155,24 +159,17 @@ async def _poll_once(
 
         ev_type_id = event_type_map.get(ev_type_name)
         if not ev_type_id:
-            # Unknown event type — skip silently
             continue
 
-        logger.debug(
-            "Poller: new event type=%s equipment=%s lot=%s step=%s",
-            ev_type_name,
-            ev.get("equipmentID", "?"),
-            ev.get("lotID", "?"),
-            ev.get("step", "?"),
+        logger.info(
+            "Poller: matched event type=%s equipment=%s lot=%s step=%s",
+            ev_type_name, ev.get("toolID", "?"), ev.get("lotID", "?"), ev.get("step", "?"),
         )
 
         try:
             await _process_event(ev, ev_type_name, ev_type_id)
         except Exception as exc:
             logger.exception("Poller: _process_event failed: %s", exc)
-
-        if max_seen is None or ev_time > max_seen:
-            max_seen = ev_time
 
     return max_seen
 
