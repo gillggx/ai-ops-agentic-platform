@@ -1133,10 +1133,14 @@ async def lifespan(app: FastAPI):
     from app.services.event_poller_service import run_event_poller
     _poller_task = asyncio.create_task(run_event_poller(interval=30))
     logger.info("v18 EventPoller started (interval=30s)")
-    # v2.0: NATS OOC Event Subscriber
+    # v2.0: NATS OOC Event Subscriber (only if NATS is configured and reachable)
     from app.services.nats_subscriber_service import start_nats_subscriber, stop_nats_subscriber
-    start_nats_subscriber(settings.NATS_URL)
-    logger.info("NATS OOC subscriber started (url=%s)", settings.NATS_URL)
+    _nats_url = getattr(settings, "NATS_URL", "") or ""
+    if _nats_url and _nats_url != "nats://localhost:4222":
+        start_nats_subscriber(_nats_url)
+        logger.info("NATS OOC subscriber started (url=%s)", _nats_url)
+    else:
+        logger.info("NATS subscriber skipped (no NATS server configured)")
     yield
     _poller_task.cancel()
     try:

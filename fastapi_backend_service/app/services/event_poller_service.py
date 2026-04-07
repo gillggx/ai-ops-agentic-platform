@@ -132,7 +132,11 @@ async def _poll_once(
             new_events.append((ev_time, ev))
 
     if not new_events:
+        logger.debug("Poller: no new events since %s", last_seen)
         return last_seen
+
+    ooc_count = sum(1 for _, ev in new_events if ev.get("spc_status") == "OOC")
+    logger.info("Poller: %d new events (%d OOC) since %s", len(new_events), ooc_count, last_seen)
 
     # Sort ascending so we process in order
     new_events.sort(key=lambda x: x[0])
