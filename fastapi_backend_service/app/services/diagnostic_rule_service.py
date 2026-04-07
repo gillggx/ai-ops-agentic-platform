@@ -344,6 +344,106 @@ class DiagnosticRuleService:
 
     # ── LLM Generation — Two-Phase Streaming ──────────────────────────────────
 
+    # ── Fix Skill (error auto-fix or user feedback) ────────────────────────
+
+    async def fix_skill(
+        self,
+        rule_id: int,
+        error_message: str = "",
+        user_feedback: str = "",
+    ) -> dict:
+        """Regenerate all steps for a skill using error context + optional user feedback.
+
+        Returns {"success": bool, "steps_mapping": [...], "error": str|None}.
+        """
+        obj = await self._repo.get_by_id(rule_id)
+        if not obj:
+            return {"success": False, "error": f"Skill id={rule_id} 不存在"}
+
+        description = obj.auto_check_description or obj.description or obj.name
+        steps = json.loads(obj.steps_mapping) if isinstance(obj.steps_mapping, str) else (obj.steps_mapping or [])
+        input_schema = json.loads(obj.input_schema) if isinstance(obj.input_schema, str) else (obj.input_schema or [])
+        output_schema = json.loads(obj.output_schema) if isinstance(obj.output_schema, str) else (obj.output_schema or [])
+
+        # Build current code context
+        current_code = ""
+        for s in steps:
+            current_code += f"\n# --- {s['step_id']}: {s['nl_segment']} ---\n{s['python_code']}\n"
+
+        mcp_catalog = await _build_mcp_catalog_from_db(self._db)
+
+        fix_prompt = f"""\
+You are a factory AI expert. Fix the Python code for a diagnostic skill.
+The skill was executed but FAILED. Regenerate ALL steps with corrected code.
+Output raw Python code ONLY for each step — no JSON wrapper, no markdown.
+
+Rule description: {description}
+
+{mcp_catalog}
+
+Current code that FAILED:
+{current_code}
+
+Error message:
+{error_message}
+
+{"User feedback: " + user_feedback if user_feedback else ""}
+
+INPUT VARIABLES (available as top-level Python vars):
+  equipment_id: str, lot_id: str, step: str, event_time: str, _input: dict
+
+Special function: await execute_mcp(mcp_name: str, params: dict) -> Any
+Forbidden: import, open(), exec(), eval(), os, sys, subprocess
+
+Fix the code and output each step separated by "# === STEP_BREAK ===" marker.
+Step {len(steps)} is the LAST step and MUST end with _findings = {{"condition_met": <bool>, "summary": "<Chinese>", "outputs": {{...}}, "impacted_lots": [...]}}
+"""
+
+        try:
+            resp = await self._llm.create(
+                system=fix_prompt,
+                messages=[{"role": "user", "content": "請修正以上的程式碼。"}],
+                max_tokens=4096,
+            )
+
+            raw_code = resp.text.strip()
+            raw_code = re.sub(r"```(?:python)?\s*|\s*```", "", raw_code, flags=re.MULTILINE).strip()
+            raw_code = re.sub(r"<think>.*?</think>", "", raw_code, flags=re.DOTALL).strip()
+
+            # Split by marker
+            parts = re.split(r"#\s*===\s*STEP_BREAK\s*===", raw_code)
+            parts = [p.strip() for p in parts if p.strip()]
+
+            if len(parts) != len(steps):
+                # Fallback: try to split evenly or use as single block
+                if len(parts) == 1 and len(steps) > 1:
+                    # LLM didn't use markers — put everything in steps
+                    # Best effort: assign all to the steps sequentially
+                    parts = [parts[0]]  # will be handled below
+
+            # Rebuild steps_mapping
+            new_steps = []
+            for i, s in enumerate(steps):
+                code = parts[i] if i < len(parts) else parts[-1] if parts else ""
+                new_steps.append({
+                    "step_id": s["step_id"],
+                    "nl_segment": s["nl_segment"],
+                    "python_code": code,
+                })
+
+            # Save to DB
+            steps_json = json.dumps(new_steps, ensure_ascii=False)
+            await self._repo.update(rule_id, {"steps_mapping": steps_json})
+
+            return {
+                "success": True,
+                "steps_mapping": new_steps,
+                "steps_count": len(new_steps),
+            }
+        except Exception as exc:
+            logger.exception("fix_skill failed: %s", exc)
+            return {"success": False, "error": str(exc)}
+
     async def generate_steps_stream(
         self, body: GenerateRuleStepsRequest
     ) -> AsyncGenerator[str, None]:

@@ -135,6 +135,22 @@ async def try_run_rule(
     return StandardResponse.success(data=result.model_dump())
 
 
+@router.post("/{rule_id}/fix", response_model=StandardResponse)
+async def fix_rule(
+    rule_id: int,
+    body: dict,
+    svc: DiagnosticRuleService = Depends(_get_svc),
+    _: UserModel = Depends(get_current_user),
+):
+    """LLM auto-fix: regenerate steps based on error message + optional user feedback."""
+    result = await svc.fix_skill(
+        rule_id=rule_id,
+        error_message=body.get("error_message", ""),
+        user_feedback=body.get("user_feedback", ""),
+    )
+    return StandardResponse.success(data=result)
+
+
 @router.post("/try-run-draft", response_model=StandardResponse)
 async def try_run_draft(
     body: RuleTryRunDraftRequest,

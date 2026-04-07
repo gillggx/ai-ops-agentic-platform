@@ -113,6 +113,77 @@ const S = {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+// ── Fix Panel (error auto-fix + user feedback) ──────────────────────────────
+
+function FixPanel({ ruleId, errorMessage, onFixed }: { ruleId: number; errorMessage: string; onFixed: () => void }) {
+  const [feedback, setFeedback] = useState("");
+  const [fixing, setFixing] = useState(false);
+  const [fixResult, setFixResult] = useState<string | null>(null);
+
+  async function handleFix() {
+    setFixing(true);
+    setFixResult(null);
+    try {
+      const res = await fetch(`/api/admin/rules/${ruleId}/fix`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          error_message: errorMessage,
+          user_feedback: feedback,
+        }),
+      });
+      const data = await res.json();
+      const result = data?.data ?? data;
+      if (result?.success) {
+        setFixResult(`修正完成（${result.steps_count} steps）。請重新 Try Run 驗證。`);
+        onFixed();
+      } else {
+        setFixResult(`修正失敗：${result?.error || "未知錯誤"}`);
+      }
+    } catch (e) {
+      setFixResult(`修正失敗：${e}`);
+    } finally {
+      setFixing(false);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 12, padding: "12px 14px", background: "#fffbeb", border: "1px solid #fbbf24", borderRadius: 8 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: "#92400e", marginBottom: 8 }}>
+        LLM 自動修正
+      </div>
+      <textarea
+        value={feedback}
+        onChange={e => setFeedback(e.target.value)}
+        placeholder="（選填）描述哪裡有問題，例如：object_id 應該用 step 不是 equipment_id"
+        style={{
+          width: "100%", padding: "8px 10px", borderRadius: 6,
+          border: "1px solid #e2e8f0", fontSize: 12, minHeight: 50,
+          resize: "vertical", boxSizing: "border-box",
+        }}
+      />
+      <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
+        <button
+          onClick={handleFix}
+          disabled={fixing}
+          style={{
+            padding: "6px 16px", borderRadius: 6, border: "none",
+            background: fixing ? "#d69e2e" : "#f59e0b", color: "#fff",
+            fontSize: 12, fontWeight: 600, cursor: fixing ? "wait" : "pointer",
+          }}
+        >
+          {fixing ? "修正中..." : "自動修正"}
+        </button>
+        {fixResult && (
+          <span style={{ fontSize: 12, color: fixResult.includes("失敗") ? "#dc2626" : "#16a34a" }}>
+            {fixResult}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function DiagnosticRulesPage() {
   const [rules, setRules]           = useState<DiagnosticRule[]>([]);
   const [autoPatrols, setAutoPatrols] = useState<AutoPatrol[]>([]);
@@ -752,6 +823,11 @@ export default function DiagnosticRulesPage() {
                   {tryRunResult.findings && <RenderMiddleware findings={tryRunResult.findings} outputSchema={outputSchema} />}
                   {tryRunResult.error && (
                     <div style={{ color: "#c53030", fontSize: 12, marginTop: 4 }}>{tryRunResult.error}</div>
+                  )}
+
+                  {/* Fix button + feedback input */}
+                  {(!tryRunResult.success || tryRunResult.error) && editing?.id && (
+                    <FixPanel ruleId={editing.id} errorMessage={tryRunResult.error || ""} onFixed={() => { setTryRunResult(null); }} />
                   )}
                 </div>
               </div>
