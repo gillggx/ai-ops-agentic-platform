@@ -39,6 +39,12 @@ class AutoPatrolRepository:
         )
         return list(result.scalars().all())
 
+    async def get_by_skill_id(self, skill_id: int) -> Optional[AutoPatrolModel]:
+        result = await self._db.execute(
+            select(AutoPatrolModel).where(AutoPatrolModel.skill_id == skill_id)
+        )
+        return result.scalar_one_or_none()
+
     async def get_by_id(self, patrol_id: int) -> Optional[AutoPatrolModel]:
         result = await self._db.execute(
             select(AutoPatrolModel).where(AutoPatrolModel.id == patrol_id)

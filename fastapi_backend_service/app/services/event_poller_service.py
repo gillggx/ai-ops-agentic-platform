@@ -92,15 +92,40 @@ async def _process_event(
                     event_payload=payload,
                     triggered_by="event_poller",
                 )
-                if result.alarms_created > 0:
+                if not result.success:
+                    logger.warning("Poller: skill=%d failed: %s", skill.id, result.error)
+                    continue
+
+                # Check condition_met from findings → create alarm
+                findings = result.findings
+                if findings and findings.condition_met:
+                    # Find the auto_patrol that owns this skill to get alarm config
+                    from app.repositories.auto_patrol_repository import AutoPatrolRepository
+                    patrol_repo = AutoPatrolRepository(db)
+                    patrol = await patrol_repo.get_by_skill_id(skill.id)
+
+                    alarm_data = {
+                        "skill_id": skill.id,
+                        "trigger_event": event_type_name,
+                        "equipment_id": payload.get("equipment_id", ""),
+                        "lot_id": payload.get("lot_id", ""),
+                        "step": payload.get("step", ""),
+                        "event_time": payload.get("event_time", ""),
+                        "severity": (patrol.alarm_severity if patrol else "HIGH"),
+                        "title": (patrol.alarm_title if patrol else skill.name),
+                        "summary": findings.summary or "",
+                        "status": "active",
+                    }
+                    alarm = await alarm_repo.create(alarm_data)
+                    total_alarms += 1
                     logger.info(
-                        "Poller: skill=%d event=%s → %d alarms created",
-                        skill.id, event_type_name, result.alarms_created,
+                        "Poller: skill=%d → ALARM created (id=%s, severity=%s)",
+                        skill.id, alarm.id, alarm_data["severity"],
                     )
-                    total_alarms += result.alarms_created
-                if not result.success and result.error:
-                    logger.warning(
-                        "Poller: skill=%d failed: %s", skill.id, result.error
+                else:
+                    logger.info(
+                        "Poller: skill=%d → condition_met=%s, no alarm",
+                        skill.id, getattr(findings, "condition_met", None),
                     )
             except Exception as exc:
                 logger.exception("Poller: unhandled error in skill=%d: %s", skill.id, exc)
