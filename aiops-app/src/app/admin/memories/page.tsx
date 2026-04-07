@@ -7,18 +7,25 @@ import { useCallback, useEffect, useState } from "react";
 interface MemoryRow {
   id: number;
   user_id: number;
-  intent_summary: string;
-  abstract_action: string;
-  confidence_score: number;
-  use_count: number;
-  success_count: number;
-  fail_count: number;
-  status: "ACTIVE" | "STALE" | "HUMAN_REJECTED";
+  // Experience memory fields
+  intent_summary?: string;
+  abstract_action?: string;
+  confidence_score?: number;
+  use_count?: number;
+  success_count?: number;
+  fail_count?: number;
+  status?: "ACTIVE" | "STALE" | "HUMAN_REJECTED";
+  source_session_id?: string | null;
+  last_used_at?: string | null;
+  updated_at?: string;
+  // Legacy RAG memory fields
+  content?: string;
+  task_type?: string;
+  tool_name?: string;
+  // Shared
   source: string;
-  source_session_id: string | null;
-  last_used_at: string | null;
   created_at: string;
-  updated_at: string;
+  _memory_type?: "rag" | "experience";
 }
 
 type StatusFilter = "all" | "ACTIVE" | "STALE" | "HUMAN_REJECTED";
@@ -210,54 +217,65 @@ export default function MemoriesPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((m) => (
-                <tr key={m.id} style={{ borderBottom: "1px solid #f7f8fc" }}>
+              {rows.map((m) => {
+                const isLegacy = m._memory_type === "rag";
+                const title = isLegacy
+                  ? (m.content ?? "").slice(0, 80)
+                  : (m.intent_summary ?? "");
+                const detail = isLegacy
+                  ? (m.content ?? "")
+                  : (m.abstract_action ?? "");
+                return (
+                <tr key={`${m._memory_type}-${m.id}`} style={{ borderBottom: "1px solid #f7f8fc" }}>
                   <td style={{ padding: "12px 16px", color: "#a0aec0", fontFamily: "monospace" }}>
                     #{m.id}
+                    {isLegacy && (
+                      <div style={{ fontSize: 9, color: "#a0aec0", marginTop: 2 }}>RAG</div>
+                    )}
                   </td>
                   <td style={{ padding: "12px 16px", maxWidth: 600 }}>
                     <div style={{ fontWeight: 600, color: "#1a202c", marginBottom: 4 }}>
-                      {m.intent_summary}
+                      {title}
                     </div>
                     <div style={{ fontSize: 12, color: "#4a5568", lineHeight: 1.4 }}>
-                      {m.abstract_action.length > 200
-                        ? m.abstract_action.slice(0, 200) + "…"
-                        : m.abstract_action}
+                      {detail.length > 200 ? detail.slice(0, 200) + "…" : detail}
                     </div>
+                    {isLegacy && m.tool_name && (
+                      <div style={{ fontSize: 11, color: "#718096", marginTop: 2 }}>
+                        Tool: {m.tool_name}
+                      </div>
+                    )}
                   </td>
                   <td style={{ padding: "12px 16px" }}>
-                    <HealthBadge score={m.confidence_score} status={m.status} />
+                    {isLegacy ? (
+                      <span style={{ fontSize: 11, color: "#718096", background: "#f7fafc", padding: "2px 8px", borderRadius: 10 }}>
+                        {m.source}
+                      </span>
+                    ) : (
+                      <HealthBadge score={m.confidence_score ?? 5} status={m.status ?? "ACTIVE"} />
+                    )}
                   </td>
                   <td style={{ padding: "12px 16px", color: "#4a5568" }}>
-                    {m.use_count}
+                    {isLegacy ? "—" : (m.use_count ?? 0)}
                   </td>
                   <td style={{ padding: "12px 16px", fontSize: 12 }}>
-                    <span style={{ color: "#38a169" }}>✓{m.success_count}</span>
-                    {" / "}
-                    <span style={{ color: "#e53e3e" }}>✗{m.fail_count}</span>
+                    {isLegacy ? "—" : (
+                      <>
+                        <span style={{ color: "#38a169" }}>✓{m.success_count ?? 0}</span>
+                        {" / "}
+                        <span style={{ color: "#e53e3e" }}>✗{m.fail_count ?? 0}</span>
+                      </>
+                    )}
                   </td>
                   <td style={{ padding: "12px 16px", fontSize: 12, color: "#718096" }}>
-                    {m.last_used_at
-                      ? new Date(m.last_used_at).toLocaleString("zh-TW", {
+                    {(m.last_used_at || m.created_at)
+                      ? new Date(m.last_used_at ?? m.created_at).toLocaleString("zh-TW", {
                           month: "short", day: "numeric",
                           hour: "2-digit", minute: "2-digit",
                         })
                       : "—"}
                   </td>
                   <td style={{ padding: "12px 16px" }}>
-                    {m.status !== "HUMAN_REJECTED" && (
-                      <button
-                        onClick={() => handleReject(m.id)}
-                        style={{
-                          padding: "4px 10px", fontSize: 11,
-                          border: "1px solid #fc8181", background: "#fff5f5",
-                          color: "#c53030", borderRadius: 5, cursor: "pointer",
-                          marginRight: 6,
-                        }}
-                      >
-                        標記錯誤
-                      </button>
-                    )}
                     <button
                       onClick={() => handleDelete(m.id)}
                       style={{
@@ -270,7 +288,8 @@ export default function MemoriesPage() {
                     </button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

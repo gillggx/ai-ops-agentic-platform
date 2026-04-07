@@ -61,8 +61,12 @@ async def agent_chat_stream(
     - `error`         — Error or MAX_ITERATIONS hit
     - `done`          — Stream complete (session_id)
     """
-    # Always use loopback for internal API calls (avoid nginx round-trip)
-    base_url = f"http://127.0.0.1:{request.url.port or 8001}"
+    # Internal loopback — tool_dispatcher calls self via HTTP.
+    # Detect actual listening port from request, fallback to config or 8001.
+    base_url = str(request.base_url).rstrip("/")
+    if "aiops" in base_url or "443" in base_url or "https" in base_url:
+        # Nginx proxied request — use loopback to actual backend port
+        base_url = f"http://127.0.0.1:{request.scope.get('server', ('', 8001))[1]}"
 
     # Extract JWT token from Authorization header for internal API calls
     auth_header = request.headers.get("Authorization", "")
