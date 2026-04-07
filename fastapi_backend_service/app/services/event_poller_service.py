@@ -206,9 +206,14 @@ async def run_event_poller(interval: int = _DEFAULT_POLL_INTERVAL) -> None:
 
     while True:
         try:
-            # Reload event_type_map each cycle so admin additions take effect without restart
             event_type_map = await _load_event_type_map()
-            last_seen = await _poll_once(sim_url, last_seen, event_type_map)
+            if not event_type_map:
+                logger.warning("EventPoller: no event_types in DB — skipping cycle")
+            else:
+                new_last = await _poll_once(sim_url, last_seen, event_type_map)
+                if new_last != last_seen:
+                    logger.info("EventPoller: advanced last_seen %s → %s", last_seen, new_last)
+                last_seen = new_last
         except asyncio.CancelledError:
             logger.info("EventPoller cancelled, shutting down")
             return
