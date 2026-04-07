@@ -1034,6 +1034,7 @@ class MCPDefinitionService:
                 params_dict = raw_data[0]
 
             params_dict = _normalize_params(params_dict, mcp_name=obj.name)
+            logger.info("MCP exec '%s': params after normalize = %s", obj.name, params_dict)
 
             # ── Time-window MCPs: resolve `since` → `start_time` ─────────────
             if obj.name in _TIME_WINDOW_MCPS:
