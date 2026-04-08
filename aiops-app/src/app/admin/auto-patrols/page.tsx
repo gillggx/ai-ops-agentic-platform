@@ -240,6 +240,7 @@ export default function AutoPatrolsPage() {
 
   // Diagnostic plan state
   const [generating, setGenerating]   = useState(false);
+  const [consoleLogs, setConsoleLogs] = useState<{icon: string; text: string}[]>([]);
   const [proposalSteps, setProposalSteps] = useState<string[]>([]);
   const [showCode, setShowCode]       = useState(false);
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
@@ -378,9 +379,13 @@ export default function AutoPatrolsPage() {
     setError("");
     setProposalSteps([]);
     setTryRunResult(null);
+    setConsoleLogs([]);
+
+    const addLog = (icon: string, text: string) =>
+      setConsoleLogs(prev => [...prev, { icon, text }]);
 
     try {
-      const res = await fetch("/api/admin/rules/generate-steps", {
+      const res = await fetch("/api/admin/rules/generate-steps/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -392,28 +397,74 @@ export default function AutoPatrolsPage() {
           },
         }),
       });
-      const data = await res.json() as Record<string, unknown>;
-      if (!res.ok) { setError((data.error as string) ?? "AI 設計失敗"); return; }
 
-      const steps   = (data.steps_mapping  as StepMapping[]) ?? [];
-      const proposal = (data.proposal_steps as string[]) ?? steps.map(s => s.nl_segment);
-      if (steps.length === 0) { setError("AI 未能生成步驟，請修改描述後重試"); return; }
+      if (!res.ok || !res.body) { setError("AI 設計失敗"); return; }
 
-      setForm(f => ({ ...f, steps_mapping: steps, input_schema: (data.input_schema as InputSchemaField[]) ?? [], output_schema: (data.output_schema as OutputSchemaField[]) ?? [] }));
-      setProposalSteps(proposal);
-      setEditedCode(Object.fromEntries(steps.map(s => [s.step_id, s.python_code])));
-      setSelectedStepId(steps[0]?.step_id ?? null);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalResult: Record<string, unknown> | null = null;
 
-      // Show self-test result
-      const selfTest = data.self_test as { status?: string; issues?: string[]; error?: string } | null;
-      if (selfTest) {
-        if (selfTest.status === "pass") {
-          // Good — no action needed
-        } else if (selfTest.status === "warning" && selfTest.issues?.length) {
-          setError(`Self-test 警告：${selfTest.issues.join("; ")}`);
-        } else if (selfTest.status === "fail") {
-          setError(`Self-test 失敗：${selfTest.error || "try-run 執行失敗"}。請用 feedback 修正。`);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const event = JSON.parse(line.slice(6)) as Record<string, unknown>;
+            const type = event.type as string;
+
+            if (type === "phase") {
+              addLog("📦", `Phase ${event.phase}: ${event.message}`);
+            } else if (type === "fetch") {
+              const status = event.status as string;
+              const icon = status === "ok" ? "✅" : status === "error" ? "❌" : "⏳";
+              addLog(icon, `${event.mcp_name} → ${status}${event.shape ? ` (${event.shape})` : ""}${event.error ? ` — ${event.error}` : ""}`);
+            } else if (type === "step_code") {
+              const status = event.status as string;
+              if (status === "generating") {
+                addLog("⏳", `${event.step_id}: ${event.nl_segment}`);
+              } else if (status === "done") {
+                addLog("✅", `${event.step_id} 生成完成`);
+              } else if (status === "error") {
+                addLog("❌", `${event.step_id} 失敗: ${event.error}`);
+              }
+            } else if (type === "self_test") {
+              const st = event.status as string;
+              if (st === "running") addLog("🔍", "Self-test 執行中...");
+              else if (st === "pass") addLog("✅", "Self-test 通過");
+              else if (st === "warning") addLog("⚠️", `Self-test 警告: ${(event.issues as string[])?.join("; ")}`);
+              else if (st === "fail") addLog("❌", `Self-test 失敗: ${event.error}`);
+            } else if (type === "error") {
+              addLog("❌", event.error as string);
+              setError(event.error as string);
+            } else if (type === "done") {
+              finalResult = event.result as Record<string, unknown>;
+            }
+          } catch { /* skip malformed SSE */ }
         }
+      }
+
+      if (finalResult) {
+        const steps = (finalResult.steps_mapping as StepMapping[]) ?? [];
+        const proposal = (finalResult.proposal_steps as string[]) ?? steps.map(s => s.nl_segment);
+        if (steps.length === 0) { setError("AI 未能生成步驟"); return; }
+
+        setForm(f => ({
+          ...f,
+          steps_mapping: steps,
+          input_schema: (finalResult!.input_schema as InputSchemaField[]) ?? [],
+          output_schema: (finalResult!.output_schema as OutputSchemaField[]) ?? [],
+        }));
+        setProposalSteps(proposal);
+        setEditedCode(Object.fromEntries(steps.map(s => [s.step_id, s.python_code])));
+        setSelectedStepId(steps[0]?.step_id ?? null);
+        addLog("🎉", `生成完成 — ${steps.length} 個步驟`);
       }
     } finally {
       setGenerating(false);
@@ -824,6 +875,27 @@ export default function AutoPatrolsPage() {
                   {generating ? "⏳ AI 設計中..." : "✨ 讓 AI 設計監控計畫"}
                 </button>
               </div>
+
+              {/* AI Console */}
+              {consoleLogs.length > 0 && (
+                <div style={{
+                  background: "#1a202c", borderRadius: 8, padding: "10px 14px",
+                  marginBottom: 12, maxHeight: 200, overflowY: "auto",
+                }}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "#718096", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                    AI Console
+                  </div>
+                  {consoleLogs.map((log, i) => (
+                    <div key={i} style={{ fontSize: 11, color: "#e2e8f0", marginBottom: 3, display: "flex", gap: 6 }}>
+                      <span style={{ flexShrink: 0 }}>{log.icon}</span>
+                      <span style={{ color: "#a0aec0" }}>{log.text}</span>
+                    </div>
+                  ))}
+                  {generating && (
+                    <div style={{ fontSize: 11, color: "#fbbf24", marginTop: 4 }}>⏳ 處理中...</div>
+                  )}
+                </div>
+              )}
 
               {/* Proposal steps */}
               {proposalSteps.length > 0 && (
