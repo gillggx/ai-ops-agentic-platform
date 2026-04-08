@@ -260,7 +260,11 @@ def _shape_str(data: Any) -> str:
 
 
 def _resolve_mock_params(params_template: dict) -> dict:
-    """Replace {placeholder} string values with mock values for sample fetching."""
+    """Replace {placeholder} string values with mock values for sample fetching.
+
+    Also ensures event-query MCPs always have toolID or lotID so sample fetch
+    doesn't 400. This guarantees LLM sees real field names (camelCase) in the sample.
+    """
     result = {}
     for k, v in params_template.items():
         if isinstance(v, str) and v.startswith("{") and v.endswith("}") and len(v) > 2:
@@ -268,6 +272,11 @@ def _resolve_mock_params(params_template: dict) -> dict:
             result[k] = _MOCK_PARAMS.get(placeholder, v)
         else:
             result[k] = v
+
+    # Ensure event MCPs always have a target — prevents 400 and guarantees real sample
+    if not result.get("toolID") and not result.get("lotID"):
+        result["toolID"] = _MOCK_PARAMS["toolID"]
+
     return result
 
 
@@ -477,11 +486,43 @@ Step {len(steps)} is the LAST step and MUST end with _findings = {{"condition_me
             yield _sse({"type": "error", "error": "LLM service not configured"})
             return
 
+        # ── Build patrol context for LLM ─────────────────────────────────────
+        patrol_ctx = body.patrol_context
+        patrol_context_text = ""
+        if patrol_ctx:
+            scope_desc = {
+                "all_equipment": "系統會逐台呼叫此 Skill（每次帶入一台 equipment_id）。不需要自己呼叫 list_tools。",
+                "equipment_list": "系統會逐台呼叫此 Skill（每次帶入一台 equipment_id）。不需要自己呼叫 list_tools。",
+                "event_driven": "此 Skill 由 OOC 事件觸發，equipment_id 來自 event payload。",
+            }.get(patrol_ctx.target_scope_type, "")
+
+            data_desc = {
+                "tool_status": "查詢該機台的製程事件（get_process_events）和完整製程資料（get_process_info）。",
+                "recent_ooc": "查詢近期 OOC 事件記錄。",
+                "active_lots": "查詢目前在線的 Lot 清單。",
+            }.get(patrol_ctx.data_context, "")
+
+            patrol_context_text = f"""
+PATROL EXECUTION CONTEXT (very important):
+  trigger_mode: {patrol_ctx.trigger_mode}
+  target_scope: {patrol_ctx.target_scope_type}
+  data_context: {patrol_ctx.data_context}
+
+  {scope_desc}
+  {data_desc}
+
+  Therefore:
+  - equipment_id is ALREADY available as a Python variable (injected by runtime)
+  - Do NOT call list_tools to get equipment list
+  - Do NOT define equipment_id in input_schema (system provides it)
+  - Use equipment_id directly: get_process_events(toolID=equipment_id)
+"""
+
         # ── Phase 1: MCP Planner ──────────────────────────────────────────────
         yield _sse({"type": "phase", "phase": 1, "message": "分析需求，規劃資料來源..."})
 
         try:
-            plan = await self._plan_mcps(body.auto_check_description)
+            plan = await self._plan_mcps(body.auto_check_description, patrol_context_text)
         except Exception as exc:
             logger.warning("DR Phase 1 failed: %s", exc)
             yield _sse({"type": "error", "error": f"Phase 1 失敗: {exc}"})
@@ -521,15 +562,27 @@ Step {len(steps)} is the LAST step and MUST end with _findings = {{"condition_me
         yield _sse({"type": "phase", "phase": "2a", "message": "規劃分析步驟..."})
 
         try:
-            step_plan = await self._plan_steps(body.auto_check_description, mcp_calls, sample_responses)
+            step_plan = await self._plan_steps(body.auto_check_description, mcp_calls, sample_responses, patrol_context_text)
         except Exception as exc:
             logger.warning("DR Phase 2a failed: %s", exc)
             yield _sse({"type": "error", "error": f"Phase 2a 失敗: {exc}"})
             return
 
         raw_steps: List[dict] = step_plan.get("steps", [])
-        input_schema: List[dict] = step_plan.get("input_schema", [])
         output_schema: List[dict] = step_plan.get("output_schema", [])
+
+        # Derive input_schema from patrol context — override LLM's guess
+        if patrol_ctx and patrol_ctx.target_scope_type in ("all_equipment", "equipment_list"):
+            # System injects equipment_id per-machine — skill always gets it
+            input_schema: List[dict] = [
+                {"key": "equipment_id", "type": "string", "required": True, "description": "目標機台 ID（系統自動帶入）"},
+            ]
+        elif patrol_ctx and patrol_ctx.trigger_mode == "event":
+            input_schema = [
+                {"key": "equipment_id", "type": "string", "required": True, "description": "觸發事件的機台 ID（來自 event payload）"},
+            ]
+        else:
+            input_schema = step_plan.get("input_schema", [])
         proposal_steps: List[str] = step_plan.get(
             "proposal_steps", [s.get("nl_segment", "") for s in raw_steps]
         )
@@ -562,7 +615,7 @@ Step {len(steps)} is the LAST step and MUST end with _findings = {{"condition_me
             try:
                 python_code = await self._generate_step_code(
                     body.auto_check_description,
-                    confirmed_section,
+                    confirmed_section + "\n" + patrol_context_text,
                     raw_steps,
                     i,
                     output_schema,
@@ -581,8 +634,9 @@ Step {len(steps)} is the LAST step and MUST end with _findings = {{"condition_me
                 yield _sse({"type": "error", "error": f"Phase 2b 步驟 {step_id} 失敗: {exc}"})
                 return
 
-        # ── Phase 3: Self-Test — auto try-run and validate ────────────────
+        # ── Phase 3: Self-Test — try-run and report (no auto-fix) ─────────
         yield _sse({"type": "self_test", "status": "running"})
+        self_test_report: Dict[str, Any] = {"status": "skipped"}
 
         try:
             from app.services.skill_executor_service import SkillExecutorService, build_mcp_executor
@@ -599,48 +653,42 @@ Step {len(steps)} is the LAST step and MUST end with _findings = {{"condition_me
             )
 
             if test_result.success:
-                # Validate output structure
                 findings = test_result.findings
-                validation_issues = []
+                issues = []
+
                 if findings:
-                    if not hasattr(findings, "condition_met") and not isinstance(findings, dict):
-                        validation_issues.append("missing condition_met")
-                    outputs = findings.outputs if hasattr(findings, "outputs") else (findings.get("outputs") if isinstance(findings, dict) else {})
+                    outputs = findings.outputs if hasattr(findings, "outputs") else {}
                     if not outputs:
-                        validation_issues.append("outputs is empty")
-                    else:
-                        schema_keys = {s["key"] for s in output_schema}
-                        output_keys = set(outputs.keys()) if isinstance(outputs, dict) else set()
-                        missing = schema_keys - output_keys
-                        if missing:
-                            validation_issues.append(f"missing output keys: {missing}")
+                        issues.append("outputs 為空 — 可能 MCP 呼叫失敗或 field name 錯誤")
 
-                if validation_issues:
-                    yield _sse({"type": "self_test", "status": "warning", "issues": validation_issues})
-                else:
-                    yield _sse({"type": "self_test", "status": "pass"})
+                    # Check if table-type outputs have real values (not all None/—)
+                    for s in output_schema:
+                        if s.get("type") == "table" and s["key"] in (outputs or {}):
+                            table_data = outputs[s["key"]]
+                            if isinstance(table_data, list) and table_data:
+                                first_row = table_data[0]
+                                if isinstance(first_row, dict):
+                                    null_count = sum(1 for v in first_row.values() if v is None or v == "" or v == "—")
+                                    if null_count > len(first_row) * 0.5:
+                                        issues.append(f"output '{s['key']}' table 大部分欄位為空 — field name 可能不正確（應用 camelCase: eventTime, lotID, toolID）")
+
+                    # Check schema keys match
+                    schema_keys = {s["key"] for s in output_schema}
+                    output_keys = set(outputs.keys()) if isinstance(outputs, dict) else set()
+                    missing = schema_keys - output_keys
+                    if missing:
+                        issues.append(f"缺少 output keys: {missing}")
+
+                self_test_report = {"status": "warning" if issues else "pass", "issues": issues}
             else:
-                # Try-run failed — attempt auto-fix
-                error_msg = test_result.error or "Unknown error"
-                yield _sse({"type": "self_test", "status": "fail", "error": error_msg})
-                yield _sse({"type": "self_test", "status": "fixing"})
+                self_test_report = {"status": "fail", "error": test_result.error or "Unknown error"}
 
-                fix_result = await self._fix_steps_with_error(
-                    description=body.auto_check_description,
-                    steps=assembled_steps,
-                    error_message=error_msg,
-                    output_schema=output_schema,
-                    confirmed_section=confirmed_section,
-                )
-                if fix_result:
-                    assembled_steps = fix_result
-                    yield _sse({"type": "self_test", "status": "fixed", "steps_count": len(assembled_steps)})
-                else:
-                    yield _sse({"type": "self_test", "status": "fix_failed"})
+            yield _sse({"type": "self_test", **self_test_report})
 
         except Exception as exc:
             logger.warning("Self-test failed (non-blocking): %s", exc)
-            yield _sse({"type": "self_test", "status": "error", "error": str(exc)})
+            self_test_report = {"status": "error", "error": str(exc)}
+            yield _sse({"type": "self_test", **self_test_report})
 
         yield _sse({
             "type": "done",
@@ -725,6 +773,9 @@ Fix the code now. Output {len(steps)} code blocks separated by # === STEP_BREAK 
     async def generate_steps(self, body: GenerateRuleStepsRequest) -> GenerateRuleStepsResponse:
         """Non-streaming wrapper — collects stream events and returns final result."""
         last_error: Optional[str] = None
+        self_test_result: Optional[str] = None
+        self_test_issues: List[str] = []
+
         async for raw in self.generate_steps_stream(body):
             if not raw.startswith("data: "):
                 continue
@@ -732,6 +783,20 @@ Fix the code now. Output {len(steps)} code blocks separated by # === STEP_BREAK 
                 event = json.loads(raw[6:])
             except Exception:
                 continue
+            # Capture self-test events
+            if event.get("type") == "self_test":
+                st = event.get("status", "")
+                if st in ("pass", "fixed"):
+                    self_test_result = st
+                elif st == "fail":
+                    self_test_result = "fail"
+                    self_test_issues.append(event.get("error", ""))
+                elif st == "warning":
+                    self_test_result = "warning"
+                    self_test_issues = event.get("issues", [])
+                elif st == "fix_failed":
+                    self_test_result = "fix_failed"
+
             if event.get("type") == "done":
                 r = event["result"]
                 return GenerateRuleStepsResponse(
@@ -740,6 +805,7 @@ Fix the code now. Output {len(steps)} code blocks separated by # === STEP_BREAK 
                     steps_mapping=r.get("steps_mapping", []),
                     input_schema=r.get("input_schema", []),
                     output_schema=r.get("output_schema", []),
+                    self_test={"status": self_test_result, "issues": self_test_issues} if self_test_result else None,
                 )
             if event.get("type") == "error":
                 last_error = event.get("error", "LLM 生成失敗")
@@ -747,7 +813,7 @@ Fix the code now. Output {len(steps)} code blocks separated by # === STEP_BREAK 
 
     # ── Private: Phase 1 — MCP Planner ────────────────────────────────────────
 
-    async def _plan_mcps(self, description: str) -> dict:
+    async def _plan_mcps(self, description: str, patrol_context_text: str = "") -> dict:
         mcp_catalog = await _build_mcp_catalog_from_db(self._db)
         system_prompt = f"""\
 You are a factory AI data planning expert.
@@ -755,9 +821,10 @@ Given a diagnostic rule description, decide which MCPs are needed and in what or
 Output ONLY valid JSON. No explanation, no markdown fences.
 
 {mcp_catalog}
+{patrol_context_text}
 
 Runtime variables available (use in params_template):
-  equipment_id: target equipment ID (e.g. "EQP-01") — always available for event-driven rules
+  equipment_id: target equipment ID (e.g. "EQP-01") — always available
   lot_id: lot ID — may be empty
   step: step code — may be empty
   event_time: ISO8601 timestamp — may be empty
@@ -791,6 +858,7 @@ Required output format:
         description: str,
         mcp_calls: List[dict],
         sample_responses: Dict[str, Any],
+        patrol_context_text: str = "",
     ) -> dict:
         """Phase 2a: plan step structure only — no python_code. Very short response."""
         confirmed_section = _build_confirmed_section(mcp_calls, sample_responses)
@@ -800,6 +868,7 @@ You are a factory AI monitoring expert. Plan the diagnostic analysis steps.
 Output ONLY valid JSON. No explanation, no markdown fences.
 
 {confirmed_section}
+{patrol_context_text}
 
 INPUT vars available in Python scope: equipment_id, lot_id, step, event_time, _input
 

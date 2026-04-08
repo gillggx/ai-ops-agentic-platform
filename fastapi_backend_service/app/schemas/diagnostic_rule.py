@@ -58,9 +58,17 @@ class DiagnosticRuleResponse(BaseModel):
 
 # ── LLM Builder ───────────────────────────────────────────────────────────────
 
+class PatrolContext(BaseModel):
+    """Context from Auto-Patrol settings — tells LLM how the skill will be executed."""
+    trigger_mode: str = "event"          # "event" | "schedule"
+    data_context: str = "recent_ooc"     # "recent_ooc" | "active_lots" | "tool_status"
+    target_scope_type: str = "all_equipment"  # "event_driven" | "all_equipment" | "equipment_list"
+
+
 class GenerateRuleStepsRequest(BaseModel):
     """Ask LLM to generate steps_mapping + output_schema from auto_check_description."""
     auto_check_description: str = Field(..., min_length=5)
+    patrol_context: Optional[PatrolContext] = None
 
 
 class GenerateRuleStepsResponse(BaseModel):
@@ -69,6 +77,7 @@ class GenerateRuleStepsResponse(BaseModel):
     steps_mapping: List[Dict[str, Any]] = []
     input_schema: List[Dict[str, Any]] = []
     output_schema: List[Dict[str, Any]] = []
+    self_test: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
 

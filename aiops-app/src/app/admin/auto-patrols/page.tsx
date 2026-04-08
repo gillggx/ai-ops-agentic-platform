@@ -383,7 +383,14 @@ export default function AutoPatrolsPage() {
       const res = await fetch("/api/admin/rules/generate-steps", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ auto_check_description: form.auto_check_description.trim() }),
+        body: JSON.stringify({
+          auto_check_description: form.auto_check_description.trim(),
+          patrol_context: {
+            trigger_mode: form.trigger_mode,
+            data_context: form.data_context,
+            target_scope_type: form.target_scope_type,
+          },
+        }),
       });
       const data = await res.json() as Record<string, unknown>;
       if (!res.ok) { setError((data.error as string) ?? "AI 設計失敗"); return; }
@@ -396,6 +403,18 @@ export default function AutoPatrolsPage() {
       setProposalSteps(proposal);
       setEditedCode(Object.fromEntries(steps.map(s => [s.step_id, s.python_code])));
       setSelectedStepId(steps[0]?.step_id ?? null);
+
+      // Show self-test result
+      const selfTest = data.self_test as { status?: string; issues?: string[]; error?: string } | null;
+      if (selfTest) {
+        if (selfTest.status === "pass") {
+          // Good — no action needed
+        } else if (selfTest.status === "warning" && selfTest.issues?.length) {
+          setError(`Self-test 警告：${selfTest.issues.join("; ")}`);
+        } else if (selfTest.status === "fail") {
+          setError(`Self-test 失敗：${selfTest.error || "try-run 執行失敗"}。請用 feedback 修正。`);
+        }
+      }
     } finally {
       setGenerating(false);
     }
