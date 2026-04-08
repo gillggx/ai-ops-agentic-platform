@@ -159,6 +159,79 @@ function emptyForm() {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+// ── Feedback / Auto-Fix Panel ─────────────────────────────────────────────────
+
+function AutoPatrolFixPanel({ skillId, errorMessage, success, onFixed }: {
+  skillId: number; errorMessage: string; success: boolean; onFixed: () => void;
+}) {
+  const [feedback, setFeedback] = useState("");
+  const [fixing, setFixing] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+
+  async function handleFix() {
+    setFixing(true);
+    setResult(null);
+    try {
+      const res = await fetch(`/api/admin/rules/${skillId}/fix`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ error_message: errorMessage, user_feedback: feedback }),
+      });
+      const data = await res.json();
+      const r = data?.data ?? data;
+      if (r?.success) {
+        setResult(`修正完成（${r.steps_count} steps）。請重新 Try Run。`);
+        onFixed();
+      } else {
+        setResult(`修正失敗：${r?.error || "未知錯誤"}`);
+      }
+    } catch (e) {
+      setResult(`修正失敗：${e}`);
+    } finally {
+      setFixing(false);
+    }
+  }
+
+  return (
+    <div style={{
+      background: "#fffbeb", border: "1px solid #fbbf24", borderRadius: 8,
+      padding: "10px 12px",
+    }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: "#92400e", marginBottom: 6 }}>
+        {success ? "結果 Feedback" : "LLM 自動修正"}
+      </div>
+      <textarea
+        value={feedback}
+        onChange={e => setFeedback(e.target.value)}
+        placeholder="描述問題，例如：回傳是 list 不是 dict、field name 用錯了、沒有帶 toolID"
+        style={{
+          width: "100%", padding: "6px 8px", borderRadius: 5,
+          border: "1px solid #e2e8f0", fontSize: 11, minHeight: 40,
+          resize: "vertical", boxSizing: "border-box",
+        }}
+      />
+      <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center" }}>
+        <button
+          onClick={handleFix}
+          disabled={fixing}
+          style={{
+            padding: "5px 14px", borderRadius: 5, border: "none",
+            background: fixing ? "#d69e2e" : "#f59e0b", color: "#fff",
+            fontSize: 11, fontWeight: 600, cursor: fixing ? "wait" : "pointer",
+          }}
+        >
+          {fixing ? "修正中..." : "自動修正"}
+        </button>
+        {result && (
+          <span style={{ fontSize: 11, color: result.includes("失敗") ? "#dc2626" : "#16a34a" }}>
+            {result}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function AutoPatrolsPage() {
   const [patrols, setPatrols]         = useState<AutoPatrol[]>([]);
   const [eventTypes, setEventTypes]   = useState<EventType[]>([]);
@@ -183,6 +256,7 @@ export default function AutoPatrolsPage() {
   const [saving, setSaving]           = useState(false);
   const [error, setError]             = useState("");
   const [editingId, setEditingId]     = useState<number | null>(null);
+  const [editingSkillId, setEditingSkillId] = useState<number | null>(null);
 
   // History viewer state
   const [historyPatrol, setHistoryPatrol] = useState<AutoPatrol | null>(null);
@@ -223,6 +297,7 @@ export default function AutoPatrolsPage() {
 
   async function openEdit(p: AutoPatrol) {
     setEditingId(p.id);
+    setEditingSkillId(p.skill_id);
     setError("");
     setTryRunResult(null);
     setProposalSteps([]);
@@ -884,6 +959,18 @@ export default function AutoPatrolsPage() {
 
                   {tryRunResult.error && !tryRunResult.findings && (
                     <div style={{ padding: "10px 14px", color: "#c53030", fontSize: 13 }}>{tryRunResult.error}</div>
+                  )}
+
+                  {/* Feedback / auto-fix panel */}
+                  {editingSkillId && (
+                    <div style={{ padding: "12px 14px", borderTop: "1px solid #e2e8f0" }}>
+                      <AutoPatrolFixPanel
+                        skillId={editingSkillId}
+                        errorMessage={tryRunResult.error || ""}
+                        success={tryRunResult.success}
+                        onFixed={() => setTryRunResult(null)}
+                      />
+                    </div>
                   )}
                 </div>
               )}
