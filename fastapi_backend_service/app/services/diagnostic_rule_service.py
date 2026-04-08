@@ -665,7 +665,7 @@ PATROL EXECUTION CONTEXT (very important):
                     if not outputs:
                         issues.append("outputs 為空 — 可能 MCP 呼叫失敗或 field name 錯誤")
 
-                    # Check table-type outputs: format + values
+                    # Check table-type outputs: format + column key matching + values
                     for s in output_schema:
                         if s.get("type") == "table" and s["key"] in (outputs or {}):
                             table_data = outputs[s["key"]]
@@ -676,9 +676,20 @@ PATROL EXECUTION CONTEXT (very important):
                             elif isinstance(table_data, list) and table_data:
                                 first_row = table_data[0]
                                 if isinstance(first_row, dict):
+                                    # Check column keys match between output_schema and actual row keys
+                                    schema_cols = {c["key"] for c in s.get("columns", [])}
+                                    row_keys = set(first_row.keys())
+                                    if schema_cols and not schema_cols.intersection(row_keys):
+                                        issues.append(
+                                            f"output '{s['key']}' table column keys 不符 — "
+                                            f"output_schema 定義: {schema_cols}, "
+                                            f"實際 row keys: {row_keys}. "
+                                            f"請確保 code 的 dict keys 與 output_schema columns 一致"
+                                        )
+                                    # Check values
                                     null_count = sum(1 for v in first_row.values() if v is None or v == "" or v == "—" or v == "N/A")
                                     if null_count > len(first_row) * 0.5:
-                                        issues.append(f"output '{s['key']}' table 大部分欄位為空 — field name 可能不正確（應用 camelCase: eventTime, lotID, toolID）")
+                                        issues.append(f"output '{s['key']}' table 大部分欄位為空 — field name 可能不正確")
                                 elif isinstance(first_row, list):
                                     issues.append(f"output '{s['key']}' 格式錯誤 — table type 應該是 list of dicts，不是 list of lists")
                             elif isinstance(table_data, (int, float)):
