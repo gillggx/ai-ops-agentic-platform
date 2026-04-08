@@ -1,8 +1,8 @@
-"""Station Agent – orchestrates 4 object services, writes events, broadcasts WS.
+"""Station Agent – orchestrates 4 object services, writes ONE event per process.
 
-Each (lot, tool, step) now generates TWO events that are merged at query time:
-  ProcessStart (t0): Recipe + APC snapshots captured before processing begins
-  ProcessEnd   (t1): DC + SPC snapshots captured after processing completes
+Each (lot, tool, step) generates:
+  - 1 event (with spc_status)
+  - 4 object_snapshots (DC, SPC, APC, RECIPE) — all with same eventTime
 """
 import asyncio
 import random
@@ -30,59 +30,30 @@ def acknowledge_hold(tool_id: str) -> bool:
 
 async def process_step(lot_id: str, tool_id: str, step_num: int) -> dict:
     """
-    Full processing cycle for one (Lot, Tool, Step) dispatch:
-      ProcessStart phase (t0):
-        1. Upload Recipe + APC snapshots (pre-process state)
-        2. Write ProcessStart TOOL_EVENT + LOT_EVENT
-        3. Broadcast ENTITY_LINK + TOOL_LINK
-      [Process runs: PROCESSING_MIN_SEC ~ PROCESSING_MAX_SEC, with possible HOLD]
-      ProcessEnd phase (t1):
-        4. Generate DC readings + upload DC + SPC snapshots (post-process measurements)
-        5. Write ProcessEnd TOOL_EVENT + LOT_EVENT
-        6. Broadcast METRIC_UPDATE
+    Full processing cycle for one (Lot, Tool, Step):
+      1. Prepare APC drift + Recipe (pre-process, don't write snapshots yet)
+      2. Simulate process time (with possible HOLD)
+      3. Generate DC readings + SPC evaluation
+      4. Write everything at once with unified eventTime:
+         - 1 event
+         - 4 object_snapshots (DC, SPC, APC, RECIPE)
     """
     db = get_db()
-    start_time = datetime.utcnow()
-    step_id    = f"STEP_{step_num:03d}"
-    apc_id     = f"APC-{step_num:03d}"
-    recipe_id  = random.choice(_RECIPE_IDS)
+    step_id   = f"STEP_{step_num:03d}"
+    apc_id    = f"APC-{step_num:03d}"
+    recipe_id = random.choice(_RECIPE_IDS)
 
-    # ── ProcessStart context ───────────────────────────────────
-    ctx_start = {
-        "eventTime": start_time,
-        "lotID":     lot_id,
-        "toolID":    tool_id,
-        "step":      step_id,
-        "status":    "ProcessStart",
-    }
+    # ── Stage 1: Pre-process preparation (no DB writes) ───────
+    # APC drift calculation
+    apc_result = await apc_service.drift_and_prepare(apc_id)
+    new_bias   = apc_result["new_bias"]
+    prev_bias  = apc_result["prev_bias"]
+    apc_params = apc_result["parameters"]
 
-    # ── Stage 1: Upload Recipe + APC at ProcessStart ───────────
-    recipe_snap_id, apc_result = await asyncio.gather(
-        recipe_service.upload_snapshot(recipe_id, ctx_start),
-        apc_service.drift_and_upload(apc_id, ctx_start),
-    )
-    apc_snap_id = apc_result["snapshot_id"]
-    new_bias    = apc_result["new_bias"]
-    prev_bias   = apc_result["prev_bias"]
+    # Recipe lookup
+    recipe_params = await recipe_service.get_params(recipe_id)
 
-    # ── Stage 2: Write ProcessStart events ────────────────────
-    start_event_base = {
-        "eventTime": start_time,
-        "status":    "ProcessStart",
-        "lotID":     lot_id,
-        "toolID":    tool_id,
-        "step":      step_id,
-        "recipeID":  recipe_id,
-        "apcID":     apc_id,
-    }
-    await asyncio.gather(
-        db.events.insert_one({**start_event_base, "eventType": "TOOL_EVENT"}),
-        db.events.insert_one({**start_event_base, "eventType": "LOT_EVENT"}),
-    )
-
-    ts_start = start_time.isoformat() + "Z"
-
-    # ── Stage 3: Broadcast ENTITY_LINK (wafer load) ───────────
+    # ── Stage 2: Broadcast processing start + simulate time ───
     await ws_manager.broadcast({
         "type":       "ENTITY_LINK",
         "machine_id": tool_id,
@@ -90,29 +61,17 @@ async def process_step(lot_id: str, tool_id: str, step_num: int) -> dict:
             "lot_id":    lot_id,
             "recipe":    recipe_id,
             "status":    "PROCESSING",
-            "timestamp": ts_start,
-        },
-    })
-    await asyncio.sleep(3)   # brief wafer-load setup
-
-    await ws_manager.broadcast({
-        "type":       "TOOL_LINK",
-        "machine_id": tool_id,
-        "data": {
-            "apc": {"active": True,  "mode": "Run-to-Run"},
-            "dc":  {"active": True,  "collection_plan": "HIGH_FREQ"},
-            "spc": {"active": True},
+            "timestamp": datetime.utcnow().isoformat() + "Z",
         },
     })
 
-    # ── Simulate real process time with possible HOLD ──────────
+    # Simulate real process time with possible HOLD
     process_time = random.uniform(PROCESSING_MIN_SEC, PROCESSING_MAX_SEC)
 
     if random.random() < HOLD_PROBABILITY:
         hold_after = random.uniform(process_time * 0.15, process_time * 0.70)
         await asyncio.sleep(hold_after)
 
-        hold_ts = datetime.utcnow().isoformat() + "Z"
         hold_event = asyncio.Event()
         _hold_events[tool_id] = hold_event
 
@@ -121,10 +80,10 @@ async def process_step(lot_id: str, tool_id: str, step_num: int) -> dict:
             "machine_id": tool_id,
             "data": {
                 "reason":    "Equipment fault detected — awaiting engineer acknowledge",
-                "timestamp": hold_ts,
+                "timestamp": datetime.utcnow().isoformat() + "Z",
             },
         })
-        print(f"[Agent] ⚠ HOLD – {tool_id} | {lot_id} | {step_id} | waiting for ACK")
+        print(f"[Agent] ⚠ HOLD – {tool_id} | {lot_id} | {step_id}")
 
         try:
             await asyncio.wait_for(hold_event.wait(), timeout=3600.0)
@@ -133,50 +92,43 @@ async def process_step(lot_id: str, tool_id: str, step_num: int) -> dict:
         finally:
             _hold_events.pop(tool_id, None)
 
-        print(f"[Agent] ✓ HOLD cleared – {tool_id} resuming processing")
         remaining = max(0.0, process_time - hold_after)
         await asyncio.sleep(remaining)
     else:
         await asyncio.sleep(process_time)
 
-    # ── ProcessEnd phase ───────────────────────────────────────
-    end_time = datetime.utcnow()
-    ctx_end = {
-        "eventTime": end_time,
+    # ── Stage 3: Process complete — generate measurements ─────
+    dc_readings = dc_service.generate_readings(tool_id)
+    spc_status, spc_charts = spc_service.evaluate(dc_readings)
+
+    # ── Stage 4: Write everything with unified eventTime ──────
+    event_time = datetime.utcnow()
+    ctx = {
+        "eventTime": event_time,
         "lotID":     lot_id,
         "toolID":    tool_id,
         "step":      step_id,
-        "status":    "ProcessEnd",
     }
 
-    # ── Stage 4: Upload DC + SPC at ProcessEnd ─────────────────
-    dc_readings = dc_service.generate_readings(tool_id)
-    dc_snap_id, spc_result = await asyncio.gather(
-        dc_service.upload_snapshot(dc_readings, ctx_end),
-        spc_service.evaluate_and_upload(dc_readings, ctx_end),
-    )
-    spc_snap_id, spc_status = spc_result
-
-    # ── Stage 5: Write ProcessEnd events ──────────────────────
-    end_event_base = {
-        "eventTime":     end_time,
-        "status":        "ProcessEnd",
-        "lotID":         lot_id,
-        "toolID":        tool_id,
-        "step":          step_id,
-        "recipeID":      recipe_id,   # cross-ref back to start
-        "apcID":         apc_id,      # cross-ref back to start
-        "dcSnapshotId":  dc_snap_id,
-        "spcSnapshotId": spc_snap_id,
-        "spc_status":    spc_status,
-    }
+    # Write 4 object snapshots + 1 event in parallel
     await asyncio.gather(
-        db.events.insert_one({**end_event_base, "eventType": "TOOL_EVENT"}),
-        db.events.insert_one({**end_event_base, "eventType": "LOT_EVENT"}),
+        dc_service.upload_snapshot(dc_readings, ctx),
+        spc_service.upload_snapshot(spc_status, spc_charts, ctx),
+        apc_service.upload_snapshot(apc_id, apc_params, ctx),
+        recipe_service.upload_snapshot_from_params(recipe_id, recipe_params, ctx),
+        db.events.insert_one({
+            "eventTime":  event_time,
+            "lotID":      lot_id,
+            "toolID":     tool_id,
+            "step":       step_id,
+            "recipeID":   recipe_id,
+            "apcID":      apc_id,
+            "spc_status": spc_status,
+        }),
     )
 
-    # ── Stage 6: Broadcast METRIC_UPDATE ──────────────────────
-    trend      = "UP" if new_bias > prev_bias else "DOWN"
+    # ── Stage 5: Post-process broadcasts + alerts ─────────────
+    trend     = "UP" if new_bias > prev_bias else "DOWN"
     bias_alert = new_bias > _BIAS_ALERT_THRESHOLD
 
     if spc_status == "OOC" and bias_alert:
@@ -185,7 +137,7 @@ async def process_step(lot_id: str, tool_id: str, step_num: int) -> dict:
             "lotID":     lot_id,
             "step":      step_id,
             "eventType": "ALARM",
-            "eventTime": end_time,
+            "eventTime": event_time,
             "metadata": {
                 "alarm_code": "SPC_OOC_BIAS_ALERT",
                 "spc_status": spc_status,
@@ -194,26 +146,30 @@ async def process_step(lot_id: str, tool_id: str, step_num: int) -> dict:
             },
         })
 
-    reflection = None
     if spc_status == "OOC":
         dc_service.reset_drift(tool_id)
-        reflection = (
-            f"[Agent Reflection] 偵測到 {tool_id} 在 {step_id} 的參數 param_01 偏移"
-            f"（bias={new_bias:.4f}），建議執行線性回歸診斷。"
-        )
+        # Publish OOC to NATS
+        try:
+            from app.services.ooc_event_publisher import publish_ooc_event, OOCEventPayload
+            await publish_ooc_event(OOCEventPayload(
+                equipment_id=tool_id, lot_id=lot_id, step_id=step_id,
+                parameter="xbar_chart", ooc_details={
+                    "rule": "Limit Violation", "value": 0, "ucl": 0, "lcl": 0,
+                },
+                severity="warning",
+            ))
+        except Exception:
+            pass
 
-    ts_end = end_time.isoformat() + "Z"
+    ts_end = event_time.isoformat() + "Z"
     await ws_manager.broadcast({
         "type":       "METRIC_UPDATE",
         "machine_id": tool_id,
         "target":     "APC",
         "data": {
             "bias":       round(new_bias, 6),
-            "unit":       "nm",
             "trend":      trend,
-            "bias_alert": bias_alert,
             "spc_status": spc_status,
-            "reflection": reflection,
             "step":       step_id,
             "lot_id":     lot_id,
             "timestamp":  ts_end,
@@ -225,4 +181,4 @@ async def process_step(lot_id: str, tool_id: str, step_num: int) -> dict:
         f"Recipe={recipe_id} bias={new_bias:.4f}({trend}) SPC={spc_status}"
         + (" ⚠" if spc_status == "OOC" or bias_alert else "")
     )
-    return {"start_time": start_time, "end_time": end_time, "spc_status": spc_status}
+    return {"event_time": event_time, "spc_status": spc_status}

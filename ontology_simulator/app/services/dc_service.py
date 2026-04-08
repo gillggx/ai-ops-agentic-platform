@@ -118,16 +118,13 @@ async def upload_snapshot(dc_params: dict, context: dict) -> str:
     """Store a DC snapshot and return its inserted _id as string."""
     db = get_db()
 
-    ts = context["eventTime"].strftime("%Y%m%d%H%M%S%f")
     snapshot = {
         "eventTime":         context["eventTime"],
-        "status":            context.get("status", "ProcessEnd"),
         "lotID":             context["lotID"],
         "toolID":            context["toolID"],
         "step":              context["step"],
         "objectName":        "DC",
-        "objectID":          f"DC-{context['lotID']}-{context['step']}-{ts}",
-        "collection_plan":   "HIGH_FREQ",
+        "objectID":          context["toolID"],
         "parameters":        dc_params,
         "last_updated_time": context["eventTime"],
         "updated_by":        "dc_service",

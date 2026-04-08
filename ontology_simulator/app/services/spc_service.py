@@ -8,10 +8,7 @@ Charts:
   p_chart     cf4_flow_sccm      sccm    LCL=44     UCL=56
   c_chart     rf_forward_power   W       LCL=1430   UCL=1570
 """
-import asyncio
-
 from app.database import get_db
-from app.services.ooc_event_publisher import OOCDetail, OOCEventPayload, publish_ooc_event
 
 # ── Control chart specs ───────────────────────────────────────
 _CHART_SPECS: dict[str, dict] = {
@@ -23,74 +20,45 @@ _CHART_SPECS: dict[str, dict] = {
 }
 
 
-def evaluate(dc_params: dict) -> tuple[dict, str]:
-    """Evaluate 5 control charts from DC readings; OOC if ANY chart breaches limits."""
+def evaluate(dc_params: dict) -> tuple[str, dict]:
+    """Evaluate 5 control charts from DC readings.
+
+    Returns (spc_status, charts_dict).
+    spc_status: "OOC" if ANY chart breaches, else "PASS".
+    """
     charts: dict[str, dict] = {}
     any_ooc = False
 
     for chart_id, spec in _CHART_SPECS.items():
         value = dc_params.get(spec["sensor"], 0.0)
-        in_ctrl = spec["lcl"] <= value <= spec["ucl"]
-        if not in_ctrl:
+        is_ooc = not (spec["lcl"] <= value <= spec["ucl"])
+        if is_ooc:
             any_ooc = True
         charts[chart_id] = {
             "value": round(value, 4),
             "ucl":   spec["ucl"],
             "lcl":   spec["lcl"],
+            "is_ooc": is_ooc,
         }
 
     status = "OOC" if any_ooc else "PASS"
-    return charts, status
+    return status, charts
 
 
-async def evaluate_and_upload(dc_params: dict, context: dict) -> tuple[str, str]:
-    """Evaluate SPC, store snapshot, return (snapshot_id, status)."""
+async def upload_snapshot(spc_status: str, charts: dict, context: dict) -> str:
+    """Write SPC snapshot with unified eventTime. Returns inserted _id."""
     db = get_db()
-    charts, status = evaluate(dc_params)
-
-    ts = context["eventTime"].strftime("%Y%m%d%H%M%S%f")
     snapshot = {
-        "eventTime":         context["eventTime"],
-        "status":            context.get("status", "ProcessEnd"),
-        "lotID":             context["lotID"],
-        "toolID":            context["toolID"],
-        "step":              context["step"],
-        "objectName":        "SPC",
-        "objectID":          f"SPC-{context['lotID']}-{context['step']}-{ts}",
-        "charts":            charts,
-        "spc_status":        status,
+        "eventTime":        context["eventTime"],
+        "lotID":            context["lotID"],
+        "toolID":           context["toolID"],
+        "step":             context["step"],
+        "objectName":       "SPC",
+        "objectID":         f"SPC-{context['step']}",
+        "charts":           charts,
+        "spc_status":       spc_status,
         "last_updated_time": context["eventTime"],
-        "updated_by":        "spc_service",
+        "updated_by":       "spc_service",
     }
     result = await db.object_snapshots.insert_one(snapshot)
-
-    # ── Publish OOC event to NATS if any chart is out-of-control ─────────────
-    if status == "OOC":
-        # Find the first breached chart to populate ooc_details
-        first_breach = next(
-            (
-                (chart_id, spec, charts[chart_id])
-                for chart_id, spec in _CHART_SPECS.items()
-                if not (spec["lcl"] <= dc_params.get(spec["sensor"], 0.0) <= spec["ucl"])
-            ),
-            None,
-        )
-        if first_breach:
-            chart_id, spec, chart_data = first_breach
-            ooc_payload = OOCEventPayload(
-                equipment_id=context.get("toolID", "UNKNOWN"),
-                lot_id=context.get("lotID", "UNKNOWN"),
-                step_id=context.get("step", "UNKNOWN"),
-                parameter=spec["sensor"],
-                ooc_details=OOCDetail(
-                    rule="Limit Violation",
-                    value=round(dc_params.get(spec["sensor"], 0.0), 4),
-                    ucl=spec["ucl"],
-                    lcl=spec["lcl"],
-                ),
-                severity="warning",
-            )
-            # Fire-and-forget: don't block the simulation pipeline
-            asyncio.create_task(publish_ooc_event(ooc_payload))
-
-    return str(result.inserted_id), status
+    return str(result.inserted_id)

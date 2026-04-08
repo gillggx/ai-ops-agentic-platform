@@ -64,13 +64,6 @@ def _normalize_params(params: Dict[str, Any], mcp_name: str = "") -> Dict[str, A
             params["object_name"] = obj_name
             params["object_id"] = obj_id
 
-    # ── Auto-dedup for event MCPs ─────────────────────────────────────────
-    # list_recent_events / get_process_history hit /api/v1/events which returns
-    # both ProcessStart and ProcessEnd. Only ProcessEnd has spc_status.
-    # Force dedup=true so we only get ProcessEnd (one per lot+step).
-    if mcp_name in ("list_recent_events", "get_process_history"):
-        params["dedup"] = "true"
-
     return params
 
 
@@ -78,25 +71,25 @@ def _normalize_params(params: Dict[str, Any], mcp_name: str = "") -> Dict[str, A
 # MCPs that support time-window filtering (backed by /api/v1/events).
 # When agent passes `since="7d"`, backend transforms it into `start_time=<iso>`
 # by fetching the simulator's latest event time and subtracting the duration.
-_TIME_WINDOW_MCPS = {"list_recent_events", "get_process_history", "query_object_timeseries"}  # list_recent_events kept for backward compat
+_TIME_WINDOW_MCPS = {"get_process_events", "get_process_info", "query_object_timeseries"}
 
 # Per-MCP default time window (applied when agent passes no since / start_time).
 _DEFAULT_SINCE: Dict[str, str] = {
-    "list_recent_events":      "7d",   # 最近事件：預設看 7 天
-    "get_process_history":     "7d",   # 製程歷史：預設看 7 天
+    "get_process_events":      "7d",
+    "get_process_info":        "7d",
     "query_object_timeseries": "7d",   # 物件時序：��設看 7 天
 }
 
 # Per-MCP safety cap on returned rows (applied when agent passes no limit).
 # OntologySimulator enforces limit <= 500 on /api/v1/events.
 _DEFAULT_LIMIT: Dict[str, int] = {
-    "list_recent_events":      500,
-    "get_process_history":     500,
+    "get_process_events":      500,
+    "get_process_info":        100,
     "query_object_timeseries": 500,
 }
 _MAX_LIMIT: Dict[str, int] = {
-    "list_recent_events":      500,
-    "get_process_history":     500,
+    "get_process_events":      500,
+    "get_process_info":        100,
     "query_object_timeseries": 500,
 }
 

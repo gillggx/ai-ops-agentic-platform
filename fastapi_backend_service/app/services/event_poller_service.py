@@ -203,15 +203,10 @@ async def _poll_once(
         if max_seen is None or ev_time > max_seen:
             max_seen = ev_time
 
-        # Determine logical event type name:
-        # Simulator emits TOOL_EVENT/LOT_EVENT with spc_status field.
+        # Every event now has spc_status directly (no ProcessStart/End split).
         # Map spc_status=OOC → "OOC" event type for Auto-Patrol matching.
-        raw_type = ev.get("eventType") or ev.get("event_type", "")
-        spc_status = ev.get("spc_status", "")
-        if spc_status == "OOC":
-            ev_type_name = "OOC"
-        else:
-            ev_type_name = raw_type
+        spc_status = ev.get("spc_status", "PASS")
+        ev_type_name = "OOC" if spc_status == "OOC" else "PROCESS"
 
         ev_type_id = event_type_map.get(ev_type_name)
         if not ev_type_id:

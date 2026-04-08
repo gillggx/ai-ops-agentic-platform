@@ -207,79 +207,80 @@ _MOCK_DATA_SUBJECTS = [
 
 
 _ONTOLOGY_SYSTEM_MCPS = [
-    # ── v1 Ontology System MCPs ────────────────────────────────────────────────
+    # ── v2 Ontology System MCPs (simplified: single event per process) ─────────
     {
-        "name": "get_process_context",
+        "name": "get_process_events",
         "description": (
-            "【製程物件快照】給定 targetID + step + objectName，查詢該製程事件的物件快照。\n"
-            "objectName: DC（感測器 sensor_01~30）/ SPC（管制圖 charts 含 value/ucl/lcl）/ APC / EC / RECIPE / FDC / OCAP\n"
+            "【製程事件查詢】查詢 process event(s)。每筆 event = 一次完整的製程步驟（含 SPC 判定結果）。\n"
             "\n"
-            "⚠️ eventTime 行為鐵律（非常重要）：\n"
-            "  - 若省略 eventTime → 回傳該 targetID+step 最近一次的 snapshot（適合「現在狀態」查詢）\n"
-            "  - 若要查歷史事件（例如從 list_recent_events / get_process_history 拿到的某筆 OOC），\n"
-            "    必須帶入該事件的 eventTime，否則會拿到後來的 snapshot，結論會與原始事件不符\n"
-            "  - 絕對禁止：用 get_process_context 去「驗證」list_recent_events 回傳的 toolID/lotID。\n"
-            "    list_recent_events 的 raw data 是 ground truth，不該被覆寫\n"
+            "Input 決定回一筆或多筆：\n"
+            "  - lotID + step → 該批次在該站的 event（通常一筆）\n"
+            "  - toolID 或 lotID → 該機台/批次的所有 events（多筆，跨 step）\n"
             "\n"
-            "使用時機：\n"
-            "  ① 已知 lot_id + step，查詢該批次在某步驟的**當前**製程數據或 SPC 結果（省略 eventTime）\n"
-            "  ② 已知 equipment_id（toolID）+ step，查詢該機台在某步驟的最新製程數據（省略 eventTime）\n"
-            "  ③ 從 list_recent_events 拿到某筆歷史 OOC 的細節 → 必須帶該筆的 eventTime"
-        ),
-        "api_config": {
-            "endpoint_url": f"{_SIM}/api/v1/context/query",
-            "method": "GET",
-            "headers": {},
-        },
-        "input_schema": {
-            "fields": [
-                {"name": "targetID",   "type": "string", "description": "批次 ID（格式 LOT-XXXX，e.g. LOT-0001）或機台 ID（格式 EQP-XX，e.g. EQP-01）", "required": True},
-                {"name": "step",       "type": "string", "description": "步驟代碼，格式 STEP_XXX，e.g. STEP_091",  "required": True},
-                {"name": "objectName", "type": "string", "description": "物件類型（大寫）：DC / SPC / APC / EC / RECIPE / FDC / OCAP", "required": True},
-                {"name": "eventTime",  "type": "string", "description": "事件時間戳 (ISO8601，e.g. 2026-04-05T10:42:26)。查歷史事件時必填，查當前狀態時可省略", "required": False},
-            ]
-        },
-    },
-    {
-        "name": "get_process_history",
-        "description": (
-            "【製程歷史記錄】查詢某台機台或某批次的製程事件列表。\n"
-            "\n"
-            "⚠️ 必須帶 toolID 或 lotID（至少一個），不帶會回傳無意義的混合資料。\n"
-            "\n"
-            "回傳欄位（每筆，注意大小寫）：\n"
-            "  eventTime: ISO8601 時間戳（camelCase，不是 event_time）\n"
-            "  lotID: 批次 ID（camelCase，不是 lot_id）\n"
-            "  toolID: 機台 ID（camelCase，不是 tool_id）\n"
+            "回傳欄位（每筆，camelCase）：\n"
+            "  eventTime: ISO8601（用 event.get('eventTime')，不是 'timestamp'）\n"
+            "  lotID: 批次 ID（用 event.get('lotID')，不是 'lot_id'）\n"
+            "  toolID: 機台 ID（用 event.get('toolID')，不是 'tool_id'）\n"
             "  step: 站點代碼 e.g. STEP_045\n"
             "  recipeID: 配方 ID\n"
             "  apcID: APC 模型 ID\n"
             "  spc_status: 'PASS' 或 'OOC'（不是 FAIL、不是 OK）\n"
-            "  ⚠️ 所有欄位名稱都是 camelCase：lotID, toolID, eventTime, recipeID, apcID\n"
-            "\n"
-            "⚠️ 判斷 OOC 必須用 spc_status == 'OOC'。\n"
-            "⚠️ 欄位名稱全部是 camelCase：用 event.get('lotID') 不是 event.get('lot_id')，\n"
-            "   用 event.get('eventTime') 不是 event.get('timestamp')。\n"
-            "\n"
-            "since 參數：'24h' / '7d' / '14d' / '30d'（預設 '7d'）\n"
             "\n"
             "使用範例：\n"
-            "  查機台 EQP-01 最近事件 → toolID='EQP-01', since='7d'\n"
-            "  查批次 LOT-0001 的歷程 → lotID='LOT-0001'\n"
-            "  統計機台 OOC 率 → toolID='EQP-01'，計算 spc_status=='OOC' 的比例\n"
+            "  查機台最近事件 → toolID='EQP-01', since='7d'\n"
+            "  查批次在某站 → lotID='LOT-0001', step='STEP_045'\n"
+            "  統計 OOC 率 → 過濾 spc_status=='OOC' 的比例\n"
             "\n"
-            "若需要 SPC 管制圖的 value/ucl/lcl 細節 → 改用 get_process_context"
+            "若需要完整的 DC/SPC/APC/RECIPE 物件資料 → 改用 get_process_info"
         ),
         "api_config": {
-            "endpoint_url": f"{_SIM}/api/v1/events",
+            "endpoint_url": f"{_SIM}/api/v1/process/events",
             "method": "GET",
             "headers": {},
         },
         "input_schema": {
             "fields": [
-                {"name": "toolID", "type": "string", "description": "⚠️ 必填（或帶 lotID）。機台 ID，格式 EQP-XX，e.g. EQP-01", "required": False},
-                {"name": "lotID",  "type": "string", "description": "⚠️ 必填（或帶 toolID）。批次 ID，格式 LOT-XXXX，e.g. LOT-0001", "required": False},
-                {"name": "since",  "type": "string",  "description": "⚠️ 字串格式：'24h' | '7d' | '14d' | '30d' | '2w'。禁止使用 since_hours=24 或 hours=24。預設 '7d'", "required": False},
+                {"name": "toolID",    "type": "string", "description": "機台 ID，e.g. EQP-01。toolID 或 lotID 至少帶一個", "required": False},
+                {"name": "lotID",     "type": "string", "description": "批次 ID，e.g. LOT-0001。toolID 或 lotID 至少帶一個", "required": False},
+                {"name": "step",      "type": "string", "description": "站點代碼，e.g. STEP_045。帶了限定單站，不帶跨站", "required": False},
+                {"name": "eventTime", "type": "string", "description": "ISO8601 精確定位某次 process（可選）", "required": False},
+                {"name": "since",     "type": "string", "description": "時間窗 '24h'/'7d'/'30d'，預設 '7d'", "required": False},
+            ]
+        },
+    },
+    {
+        "name": "get_process_info",
+        "description": (
+            "【製程完整資料】同 get_process_events 的 input，但回傳 event + 完整物件資料。\n"
+            "\n"
+            "根據 event 的 lotID + step + eventTime，自動 join object_snapshots，\n"
+            "回傳 DC sensor values、SPC chart values (value/ucl/lcl)、APC parameters、Recipe parameters。\n"
+            "\n"
+            "回傳格式：\n"
+            "  [{event: {eventTime, lotID, toolID, step, spc_status, ...},\n"
+            "    objects: {\n"
+            "      DC: {objectID, parameters: {sensor_01: {value, display_name}, ...}},\n"
+            "      SPC: {objectID, spc_status, charts: {xbar_chart: {value, ucl, lcl, is_ooc}, ...}},\n"
+            "      APC: {objectID, parameters: {etch_time_offset, rf_power_bias, ...}},\n"
+            "      RECIPE: {objectID, parameters: {etch_time_s, pressure, ...}}\n"
+            "    }}]\n"
+            "\n"
+            "使用範例：\n"
+            "  查某筆 OOC 的完整根因 → lotID='LOT-0001', step='STEP_045'\n"
+            "  查機台最近所有 process 的完整資料 → toolID='EQP-01', since='24h'"
+        ),
+        "api_config": {
+            "endpoint_url": f"{_SIM}/api/v1/process/info",
+            "method": "GET",
+            "headers": {},
+        },
+        "input_schema": {
+            "fields": [
+                {"name": "toolID",    "type": "string", "description": "機台 ID，e.g. EQP-01。toolID 或 lotID 至少帶一個", "required": False},
+                {"name": "lotID",     "type": "string", "description": "批次 ID，e.g. LOT-0001。toolID 或 lotID 至少帶一個", "required": False},
+                {"name": "step",      "type": "string", "description": "站點代碼，e.g. STEP_045（可選）", "required": False},
+                {"name": "eventTime", "type": "string", "description": "ISO8601 精確定位（可選）", "required": False},
+                {"name": "since",     "type": "string", "description": "時間窗 '24h'/'7d'/'30d'，預設 '7d'", "required": False},
             ]
         },
     },
@@ -311,8 +312,6 @@ _ONTOLOGY_SYSTEM_MCPS = [
             ]
         },
     },
-    # list_recent_events — DISABLED: too similar to get_process_history, LLM confuses them.
-    # Use get_process_history with toolID/lotID instead.
     {
         "name": "query_object_timeseries",
         "description": (
@@ -325,11 +324,11 @@ _ONTOLOGY_SYSTEM_MCPS = [
             "}\n"
             "\n"
             "object_id 填什麼（很重要）：\n"
-            "  - SPC → 填 step 代碼（從 get_process_history 回傳的 step 欄位取得），e.g. 'STEP_007'\n"
-            "  - APC → 填 APC model ID（從 get_process_history 回傳的 apcID 欄位取得），e.g. 'APC-007'\n"
+            "  - SPC → 填 step 代碼（從 get_process_events 回傳的 step 欄位取得），e.g. 'STEP_007'\n"
+            "  - APC → 填 APC model ID（從 get_process_events 回傳的 apcID 欄位取得），e.g. 'APC-007'\n"
             "  - DC  → 填機台 ID，e.g. 'EQP-01'\n"
             "\n"
-            "⚠️ 典型流程：先用 get_process_history(toolID=equipment_id) 查到 OOC 記錄的 step，\n"
+            "⚠️ 典型流程：先用 get_process_events(toolID=equipment_id) 查到 OOC 記錄的 step，\n"
             "   再用 query_object_timeseries(object_name='SPC', object_id=step) 查 SPC 時序。\n"
             "\n"
             "parameter 格式（注意完整路徑）：\n"

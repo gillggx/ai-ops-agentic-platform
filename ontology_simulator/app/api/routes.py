@@ -334,6 +334,122 @@ async def get_step_dc(
     }
 
 
+# ── Process Events + Process Info ─────────────────────────────
+
+@router.get("/process/events")
+async def get_process_events(
+    toolID:    Optional[str]      = Query(None),
+    lotID:     Optional[str]      = Query(None),
+    step:      Optional[str]      = Query(None),
+    eventTime: Optional[str]      = Query(None),
+    start_time: Optional[str]     = Query(None),
+    limit:     int                = Query(100, ge=1, le=500),
+):
+    """Query process events. Input determines single or multi:
+    - lotID + step → single event (or few if multiple cycles)
+    - toolID or lotID alone → multiple events across steps
+    """
+    if not toolID and not lotID:
+        raise HTTPException(400, "Must provide toolID or lotID (or both)")
+
+    db = get_db()
+    filt: dict = {}
+    if toolID:
+        filt["toolID"] = toolID
+    if lotID:
+        filt["lotID"] = lotID
+    if step:
+        filt["step"] = step.upper()
+    if eventTime:
+        try:
+            et = datetime.fromisoformat(eventTime.replace("Z", "+00:00").split("+")[0])
+            filt["eventTime"] = et
+        except ValueError:
+            pass
+    if start_time:
+        try:
+            cutoff = datetime.fromisoformat(start_time.replace("Z", "+00:00").split("+")[0])
+            filt.setdefault("eventTime", {})
+            if isinstance(filt["eventTime"], dict):
+                filt["eventTime"]["$gte"] = cutoff
+        except ValueError:
+            pass
+
+    cursor = db.events.find(filt, {"_id": 0}).sort("eventTime", -1).limit(limit)
+    docs = await cursor.to_list(length=limit)
+    return docs
+
+
+@router.get("/process/info")
+async def get_process_info(
+    toolID:    Optional[str]      = Query(None),
+    lotID:     Optional[str]      = Query(None),
+    step:      Optional[str]      = Query(None),
+    eventTime: Optional[str]      = Query(None),
+    start_time: Optional[str]     = Query(None),
+    limit:     int                = Query(50, ge=1, le=100),
+):
+    """Query process events + join complete object data (DC/SPC/APC/RECIPE).
+
+    Same input as /process/events but returns enriched results with full
+    object snapshots joined by lotID + step + eventTime.
+    """
+    if not toolID and not lotID:
+        raise HTTPException(400, "Must provide toolID or lotID (or both)")
+
+    db = get_db()
+    filt: dict = {}
+    if toolID:
+        filt["toolID"] = toolID
+    if lotID:
+        filt["lotID"] = lotID
+    if step:
+        filt["step"] = step.upper()
+    if eventTime:
+        try:
+            et = datetime.fromisoformat(eventTime.replace("Z", "+00:00").split("+")[0])
+            filt["eventTime"] = et
+        except ValueError:
+            pass
+    if start_time:
+        try:
+            cutoff = datetime.fromisoformat(start_time.replace("Z", "+00:00").split("+")[0])
+            filt.setdefault("eventTime", {})
+            if isinstance(filt["eventTime"], dict):
+                filt["eventTime"]["$gte"] = cutoff
+        except ValueError:
+            pass
+
+    cursor = db.events.find(filt, {"_id": 0}).sort("eventTime", -1).limit(limit)
+    events = await cursor.to_list(length=limit)
+
+    results = []
+    for ev in events:
+        # Join object_snapshots by lotID + step + eventTime
+        snap_filt = {
+            "lotID": ev.get("lotID"),
+            "step":  ev.get("step"),
+            "eventTime": ev.get("eventTime"),
+        }
+        snaps = await db.object_snapshots.find(snap_filt, {"_id": 0}).to_list(length=10)
+
+        objects = {}
+        for snap in snaps:
+            obj_name = snap.get("objectName", "")
+            # Remove internal fields, keep the useful data
+            clean = {k: v for k, v in snap.items()
+                     if k not in ("eventTime", "lotID", "toolID", "step",
+                                  "objectName", "last_updated_time", "updated_by")}
+            objects[obj_name] = clean
+
+        results.append({
+            "event": ev,
+            "objects": objects,
+        })
+
+    return results
+
+
 # ── Unified Object Timeseries Query ──────────────────────────
 
 class ObjectQueryRequest(BaseModel):
@@ -594,17 +710,15 @@ async def list_tools():
 
 @router.get("/events")
 async def list_events(
-    toolID: str     = Query(None, description="Filter by tool ID"),
-    lotID:  str     = Query(None, description="Filter by lot ID"),
-    start_time: str = Query(None, description="ISO8601 cutoff — only events after this time"),
-    limit:  int     = Query(50, ge=1, le=500),
-    dedup:  bool    = Query(False, description="If true, deduplicate: return one ProcessEnd TOOL_EVENT per (lot, step). limit then means number of unique steps."),
+    toolID:     Optional[str] = Query(None, description="Filter by tool ID"),
+    lotID:      Optional[str] = Query(None, description="Filter by lot ID"),
+    start_time: Optional[str] = Query(None, description="ISO8601 cutoff"),
+    limit:      int           = Query(50, ge=1, le=500),
 ):
     """Return the most recent `limit` events, newest-first.
-    Used by the TRACE mode timeline panel.
 
-    dedup=true: returns one entry per (lot, step) — ProcessEnd wins, LOT_EVENT filtered out.
-    With dedup=true, limit=50 means 50 unique process steps (not 50 raw documents).
+    Each event is one completed process step. Every event has spc_status.
+    No dedup needed — one event per (lot, step, cycle).
     """
     filt: dict = {}
     if toolID:
@@ -612,38 +726,14 @@ async def list_events(
     if lotID:
         filt["lotID"] = lotID
     if start_time:
-        from datetime import datetime
         try:
             cutoff = datetime.fromisoformat(start_time.replace("Z", "+00:00").split("+")[0])
             filt["eventTime"] = {"$gte": cutoff}
         except ValueError:
             pass
 
-    if not dedup:
-        cursor = get_db().events.find(filt, {"_id": 0}).sort("eventTime", -1).limit(limit)
-        docs   = await cursor.to_list(length=limit)
-        return docs
-
-    # dedup=true: fetch TOOL_EVENT + ProcessEnd only, one entry per (lot, step)
-    filt["eventType"] = "TOOL_EVENT"
-    # Fetch more than needed to absorb ProcessStart events before dedup
-    raw_limit = limit * 4
-    cursor = get_db().events.find(filt, {"_id": 0}).sort("eventTime", -1).limit(raw_limit)
-    docs   = await cursor.to_list(length=raw_limit)
-
-    # Merge: ProcessEnd wins; skip in-progress lots (ProcessStart only, no spc_status)
-    seen: dict = {}
-    for d in docs:  # already newest-first
-        key = (d.get("lotID"), d.get("step"))
-        if key not in seen:
-            seen[key] = d
-        elif d.get("status") == "ProcessEnd" and seen[key].get("status") == "ProcessStart":
-            seen[key] = d  # ProcessEnd always supersedes ProcessStart
-
-    # Only return completed processes (ProcessEnd has spc_status)
-    completed = [d for d in seen.values() if d.get("status") == "ProcessEnd"]
-    deduped = sorted(completed, key=lambda x: x.get("eventTime", ""), reverse=True)[:limit]
-    return deduped
+    cursor = get_db().events.find(filt, {"_id": 0}).sort("eventTime", -1).limit(limit)
+    return await cursor.to_list(length=limit)
 
 
 # ── Equipment HOLD Acknowledge ─────────────────────────────────

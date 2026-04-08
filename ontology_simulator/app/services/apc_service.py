@@ -4,10 +4,10 @@ from app.database import get_db
 from config import APC_DRIFT_RATIO
 
 
-async def drift_and_upload(apc_id: str, context: dict) -> dict:
-    """Apply drift, persist new state, upload snapshot.
+async def drift_and_prepare(apc_id: str) -> dict:
+    """Apply drift to APC params and return new values (NO snapshot write).
 
-    Returns dict with snapshot_id, new_bias (param_01), prev_bias for trend calc.
+    Returns dict with parameters, new_bias, prev_bias.
     """
     db = get_db()
     apc = await db.apc_state.find_one({"apc_id": apc_id})
@@ -26,23 +26,35 @@ async def drift_and_upload(apc_id: str, context: dict) -> dict:
         {"$set": {"parameters": drifted}},
     )
 
-    # Upload snapshot (with mode metadata per v1.1 spec)
+    return {
+        "parameters": drifted,
+        "new_bias":   drifted.get("etch_time_offset", 0.0),
+        "prev_bias":  prev_bias,
+    }
+
+
+async def upload_snapshot(apc_id: str, parameters: dict, context: dict) -> str:
+    """Write APC snapshot with unified eventTime. Returns inserted _id."""
+    db = get_db()
     snapshot = {
         "eventTime":        context["eventTime"],
-        "status":           context.get("status", "ProcessStart"),
         "lotID":            context["lotID"],
         "toolID":           context["toolID"],
         "step":             context["step"],
         "objectName":       "APC",
         "objectID":         apc_id,
         "mode":             "Run-to-Run",
-        "parameters":       drifted,
+        "parameters":       parameters,
         "last_updated_time": context["eventTime"],
         "updated_by":       "apc_service",
     }
     result = await db.object_snapshots.insert_one(snapshot)
-    return {
-        "snapshot_id": str(result.inserted_id),
-        "new_bias":    drifted.get("etch_time_offset", 0.0),
-        "prev_bias":   prev_bias,
-    }
+    return str(result.inserted_id)
+
+
+# Keep backward compat for any code still calling old API
+async def drift_and_upload(apc_id: str, context: dict) -> dict:
+    """Legacy: drift + immediate write. Used by old station_agent."""
+    result = await drift_and_prepare(apc_id)
+    snap_id = await upload_snapshot(apc_id, result["parameters"], context)
+    return {**result, "snapshot_id": snap_id}
