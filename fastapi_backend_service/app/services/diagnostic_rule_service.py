@@ -72,10 +72,15 @@ async def _build_mcp_catalog_from_db(db) -> str:
         lines.append(params_str)
         lines.append("")
 
-    lines.append("⚠️ KEY FIELD NAMES in MCP responses:")
-    lines.append("  - get_process_history / list_recent_events returns: eventTime, lotID, toolID, step, recipeID, spc_status, apcID")
-    lines.append("  - spc_status: 'PASS' | 'OOC' | null  ← THIS is the OOC indicator (NOT 'status')")
-    lines.append("  - status: 'ProcessStart' | 'ProcessEnd'  ← event lifecycle, NOT OOC")
+    lines.append("⚠️ CRITICAL — MCP RESPONSE FORMAT RULES:")
+    lines.append("  1. get_process_events returns a LIST (not dict). Use: events = result if isinstance(result, list) else []")
+    lines.append("  2. get_process_info returns a LIST of {event: {...}, objects: {...}}. Same pattern.")
+    lines.append("  3. ALL field names are camelCase:")
+    lines.append("     event.get('eventTime')  ← NOT 'timestamp'")
+    lines.append("     event.get('lotID')      ← NOT 'lot_id'")
+    lines.append("     event.get('toolID')     ← NOT 'tool_id'")
+    lines.append("     event.get('spc_status') ← 'PASS' or 'OOC' (NOT 'status', NOT 'FAIL')")
+    lines.append("  4. get_process_events does NOT return measurement values. Use get_process_info for DC/SPC/APC data.")
     lines.append("")
 
     return "\n".join(lines)
@@ -361,14 +366,29 @@ class DiagnosticRuleService:
             return {"success": False, "error": f"Skill id={rule_id} 不存在"}
 
         description = obj.auto_check_description or obj.description or obj.name
-        steps = json.loads(obj.steps_mapping) if isinstance(obj.steps_mapping, str) else (obj.steps_mapping or [])
-        input_schema = json.loads(obj.input_schema) if isinstance(obj.input_schema, str) else (obj.input_schema or [])
-        output_schema = json.loads(obj.output_schema) if isinstance(obj.output_schema, str) else (obj.output_schema or [])
+        raw_steps = obj.steps_mapping
+        if isinstance(raw_steps, str):
+            raw_steps = json.loads(raw_steps)
+        # Handle double-encoded JSON string
+        if isinstance(raw_steps, str):
+            raw_steps = json.loads(raw_steps)
+        steps = raw_steps if isinstance(raw_steps, list) else []
+
+        raw_in = obj.input_schema
+        if isinstance(raw_in, str):
+            raw_in = json.loads(raw_in)
+        input_schema = raw_in if isinstance(raw_in, list) else []
+
+        raw_out = obj.output_schema
+        if isinstance(raw_out, str):
+            raw_out = json.loads(raw_out)
+        output_schema = raw_out if isinstance(raw_out, list) else []
 
         # Build current code context
         current_code = ""
         for s in steps:
-            current_code += f"\n# --- {s['step_id']}: {s['nl_segment']} ---\n{s['python_code']}\n"
+            if isinstance(s, dict):
+                current_code += f"\n# --- {s.get('step_id','?')}: {s.get('nl_segment','')} ---\n{s.get('python_code','')}\n"
 
         mcp_catalog = await _build_mcp_catalog_from_db(self._db)
 
