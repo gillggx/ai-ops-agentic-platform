@@ -470,9 +470,8 @@ Step {len(steps)} is the LAST step and MUST end with _findings = {{"condition_me
                     "python_code": code,
                 })
 
-            # Save to DB
-            steps_json = json.dumps(new_steps, ensure_ascii=False)
-            await self._repo.update(rule_id, {"steps_mapping": steps_json})
+            # Save to DB — pass list directly; repo.update will json.dumps it
+            await self._repo.update(rule_id, {"steps_mapping": new_steps})
 
             return {
                 "success": True,
