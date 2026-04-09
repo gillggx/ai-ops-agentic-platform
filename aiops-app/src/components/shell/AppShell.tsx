@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Topbar } from "@/components/layout/Topbar";
 // EquipmentNavigator removed from sidebar — now embedded in Dashboard
 import { AICopilot } from "@/components/copilot/AICopilot";
+import { AnalysisPanel } from "@/components/layout/AnalysisPanel";
 import { AppProvider, useAppContext } from "@/context/AppContext";
 import type { AIOpsReportContract } from "aiops-contract";
 
@@ -135,9 +136,18 @@ function Shell({ children }: { children: React.ReactNode }) {
         {/* Left — contextual sidebar, never unmounts */}
         <ContextualSidebar />
 
-        {/* Center — route content */}
+        {/* Center — route content OR analysis panel overlay */}
         <main style={{ flex: 1, overflowY: "auto", minWidth: 0 }}>
-          {children}
+          {investigateMode && contract ? (
+            <AnalysisPanel
+              contract={contract}
+              onClose={() => { setInvestigateMode(false); setContract(null); }}
+              onAgentMessage={(msg) => setTriggerMessage(msg)}
+              onHandoff={handleHandoff}
+            />
+          ) : (
+            children
+          )}
         </main>
 
         {/* Right — AI Co-Pilot, never unmounts = messages persist */}
