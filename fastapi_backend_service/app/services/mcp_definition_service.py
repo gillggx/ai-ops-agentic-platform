@@ -58,6 +58,10 @@ def _normalize_params(params: Dict[str, Any], mcp_name: str = "") -> Dict[str, A
         if snake in params and camel not in params:
             params[camel] = params.pop(snake)
 
+    # ── query_object_timeseries: step → object_id fallback ─────────────
+    if mcp_name == "query_object_timeseries" and "step" in params and "object_id" not in params:
+        params["object_id"] = params.pop("step")
+
     # ── object_name / object_id → toolID / lotID mapping ─────────────────
     # list_recent_events uses generic object_name/object_id interface;
     # the underlying simulator /api/v1/events expects toolID / lotID.
