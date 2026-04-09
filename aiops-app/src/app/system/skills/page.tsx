@@ -23,9 +23,10 @@ interface SkillRow {
 }
 
 const SOURCE_BADGE: Record<string, { bg: string; color: string; label: string }> = {
+  skill:       { bg: "#f0fff4", color: "#276749", label: "My Skill" },
   rule:        { bg: "#dbeafe", color: "#1e40af", label: "Diagnostic Rule" },
   auto_patrol: { bg: "#fef3c7", color: "#92400e", label: "Auto-Patrol" },
-  legacy:      { bg: "#e2e8f0", color: "#4a5568", label: "Skill" },
+  legacy:      { bg: "#e2e8f0", color: "#4a5568", label: "Legacy" },
 };
 
 // ── Detail section components ────────────────────────────────────────────────
@@ -296,9 +297,10 @@ export default function AllSkillsPage() {
 
       <div style={{ marginTop: 16, fontSize: 12, color: "#a0aec0" }}>
         <strong>類型說明：</strong>
-        {" "}Diagnostic Rule = 由 AI 生成或手動建立的診斷規則；
-        {" "}Auto-Patrol = Auto-Patrol 內嵌的檢查技能；
-        {" "}Skill = 其他用途（SPC 管制圖呈現、promote 的分析等）
+        {" "}My Skill = 使用者建立的常用分析工具（Chat promote 或手動建立）；
+        {" "}Diagnostic Rule = 告警觸發的深度診斷規則；
+        {" "}Auto-Patrol = Event Poller 自動觸發的巡檢技能；
+        {" "}Legacy = 舊版技能
       </div>
     </div>
   );
