@@ -915,8 +915,17 @@ Output ONLY valid JSON. No explanation, no markdown fences.
 {patrol_context_text}
 
 INPUT vars available in Python scope: equipment_id, lot_id, step, event_time, _input
+  These are populated from input_schema at runtime. Use _input.get("key") for all parameters.
 
-CRITICAL RULES:
+CRITICAL RULES — PARAMETERIZATION:
+- This code will be saved as a REUSABLE Skill. It MUST NOT hardcode specific values.
+  ❌ get_process_info(step="STEP_020")       — hardcoded, only works for STEP_020
+  ✅ get_process_info(step=_input.get("step")) — parameterized, works for any step
+- input_schema MUST declare ALL parameters the user mentioned (step, equipment_id, etc.)
+- All user-provided values (step codes, equipment IDs, lot IDs, thresholds) → input_schema params
+- In code, always read from _input.get("key") or the pre-injected variables (equipment_id, step, etc.)
+
+CRITICAL RULES — EFFICIENCY:
 - Maximum 3-5 steps. NEVER more than 5.
 - Call each MCP ONCE, outside of loops. Then loop through the results to process/filter.
   ✅ "step1: fetch all process events" → "step2: loop through results to extract APC params"
@@ -1044,12 +1053,17 @@ Special function (awaitable, no import needed):
 
 Forbidden: import, open(), exec(), eval(), os, sys, subprocess, trigger_alarm
 
-INPUT VARIABLES (available as top-level Python vars):
-  equipment_id: str  — target equipment ID (e.g. "EQP-01") from event_payload or user input
-  lot_id: str        — lot ID (e.g. "LOT-0001") — may be empty
-  step: str          — step code (e.g. "STEP_045") — may be empty
-  event_time: str    — ISO8601 timestamp — may be empty
-  _input: dict       — raw input dict (same data as above)
+INPUT VARIABLES (available as top-level Python vars, populated from input_schema):
+  equipment_id: str  — _input.get("equipment_id", "")
+  lot_id: str        — _input.get("lot_id", "")
+  step: str          — _input.get("step", "")
+  event_time: str    — _input.get("event_time", "")
+  _input: dict       — raw input dict (all input_schema params)
+
+⚠️ PARAMETERIZATION — this code will be saved as a REUSABLE Skill:
+  ❌ NEVER hardcode specific values: get_process_info(step="STEP_020")
+  ✅ ALWAYS use variables: get_process_info(step=step) or get_process_info(step=_input.get("step"))
+  This applies to ALL user-mentioned values: step codes, equipment IDs, lot IDs, thresholds, N values.
 
 SCOPE: All steps share the SAME Python scope. Variables from step 1 are available in step 2.
   Do NOT use _next_input or _input to pass data between steps. Just use regular variables.

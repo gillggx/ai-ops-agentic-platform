@@ -76,7 +76,7 @@ async def run_analysis(
     if body.mode == "auto" and body.description:
         # ── Auto mode: generate steps from description ─────────────────
         from app.services.diagnostic_rule_service import DiagnosticRuleService
-        from app.schemas.diagnostic_rule import GenerateRuleStepsRequest
+        from app.schemas.diagnostic_rule import GenerateRuleStepsRequest, PatrolContext
         from app.utils.llm_client import get_llm_client
 
         gen_svc = DiagnosticRuleService(
@@ -84,8 +84,15 @@ async def run_analysis(
             db=db,
             llm=get_llm_client(),
         )
+
+        # Build description that includes input_params info for parameterization
+        enriched_desc = body.description
+        if body.input_params:
+            param_hint = ", ".join(f"{k}={v}" for k, v in body.input_params.items())
+            enriched_desc += f"\n\n使用者提供的參數（必須設計為 input_schema，code 中用 _input.get() 讀取）：{param_hint}"
+
         gen_result = await gen_svc.generate_steps(
-            GenerateRuleStepsRequest(auto_check_description=body.description)
+            GenerateRuleStepsRequest(auto_check_description=enriched_desc)
         )
         if not gen_result.success or not gen_result.steps_mapping:
             return StandardResponse.error(
