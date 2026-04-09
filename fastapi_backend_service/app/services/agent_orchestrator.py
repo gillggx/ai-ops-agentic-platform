@@ -1060,8 +1060,8 @@ def _build_render_card(
             promote_payload = {
                 "title": data.get("title", ""),
                 "steps_mapping": data.get("steps_mapping", []),
-                "input_schema": data.get("input_schema_inferred", []),
-                "output_schema": [],
+                "input_schema": data.get("input_schema", []),
+                "output_schema": data.get("output_schema", []),
             }
 
             contract = {

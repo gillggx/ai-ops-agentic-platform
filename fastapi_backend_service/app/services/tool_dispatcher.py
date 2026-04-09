@@ -395,17 +395,22 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     {
         "name": "execute_analysis",
         "description": (
-            "【一次性分析工具】執行分析並在分析面板呈現結果（含圖表）。\n"
+            "【動態分析 + 判斷工具】生成可執行的 Python code，在分析面板呈現結果（含圖表）。\n"
+            "★★★ 使用者可以一鍵「儲存為 My Skill」→ 再升級為 Auto-Patrol（自動巡檢告警）。\n"
             "\n"
             "★ 兩種模式：\n"
             "  mode='auto'（預設推薦）：只提供 title + description，後端自動生成分析程式碼並執行。\n"
-            "    → 自動產出 chart、table、診斷結論。用戶提到圖/chart/趨勢時務必用此模式。\n"
+            "    → 自動產出 chart、table、診斷結論。\n"
             "  mode='code'：自行提供 steps（python_code），適合 auto 失敗時的 fallback。\n"
             "\n"
-            "★ 使用時機：\n"
-            "  - 用戶要求畫圖、趨勢分析、SPC chart → 一定用 execute_analysis(mode='auto')\n"
+            "★★★ 必須使用的場景（禁止用 LLM 推理代替）：\n"
+            "  - 任何「判斷條件是否成立」的問題：最近 N 點有幾點 OOC、是否超閾值、是否需要維護\n"
+            "  - 任何「檢查」「驗證」「確認」類問題\n"
+            "  - 理由：只有 execute_analysis 產生的 code 才能儲存為 Skill → 升級為 Auto-Patrol\n"
+            "\n"
+            "★ 也適用於：\n"
+            "  - 複合分析（撈多個 MCP + 交叉比對 + 畫圖）\n"
             "  - <skill_catalog> 裡沒有合適的現成 Skill 時\n"
-            "  - 結果如果有用，使用者可以一鍵儲存為常用 Skill\n"
             "\n"
             "★ steps 格式（跟 Diagnostic Rule 一樣）：\n"
             "  每個 step 的 python_code 在同一個 async scope 裡執行，\n"
@@ -434,7 +439,6 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
             "  }\n"
             "\n"
             "⚠️ 禁止在 python_code 裡 import requests/os/sys/subprocess\n"
-            "⚠️ 不要猜 MCP 參數名 — 先用 get_object_info 查\n"
         ),
         "input_schema": {
             "type": "object",
@@ -731,6 +735,7 @@ class ToolDispatcher:
                             "steps": tool_input.get("steps", []),
                             "input_params": tool_input.get("input_params", {}),
                         },
+                        timeout=120.0,  # auto mode involves LLM code gen → needs longer timeout
                     )
                 # Legacy alias — kept for backward compat
                 case "execute_jit":
@@ -796,10 +801,11 @@ class ToolDispatcher:
         return result
 
     async def _call_api(
-        self, method: str, path: str, body: Optional[Dict] = None
+        self, method: str, path: str, body: Optional[Dict] = None,
+        timeout: float = 30.0,
     ) -> Dict[str, Any]:
         url = f"{self._base_url}{path}"
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             if method == "GET":
                 resp = await client.get(url, headers=self._headers)
             elif method == "POST":

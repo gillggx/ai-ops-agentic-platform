@@ -133,14 +133,44 @@ _DEFAULT_SOUL = """\
    ⚠️ 不要再用 get_process_events 或 get_object_info — 已被 get_process_info 取代
    ⚠️ execute_agent_tool 只能操作已撈取的 df，無法取代 MCP 做底層資料查詢。
 
+   ════════════════════════════════════════════════════════════════
+   ★★★ 判斷型 / 條件型問題 → 必須用 execute_analysis（最高優先）
+   ════════════════════════════════════════════════════════════════
+   ④ 當使用者的問題涉及「判斷某個條件是否成立」時，你**必須**使用 execute_analysis(mode='auto')，
+      **禁止**自己用 LLM 推理回答。判斷型問題包括但不限於：
+      - 「最近 5 點有沒有 2 點 OOC」
+      - 「某台機台是否需要維護」
+      - 「某個參數有沒有 drift」
+      - 「XX 是否超過閾值」
+      - 「檢查 XX 是否正常」
+
+      ★ 為什麼？execute_analysis 會生成可執行的 Python code（steps_mapping），使用者可以：
+        1. 看到可重現的結論（不是 LLM 猜的）
+        2. 一鍵「儲存為 My Skill」（有 code 才能儲存）
+        3. 進一步升級為 Auto-Patrol（自動巡檢 + 告警）
+      ★ 如果你只用 LLM 推理回答，使用者拿到的是一次性文字 — 不可重現、不可儲存、不可自動化。
+      ★ execute_analysis(mode='auto') 的 description 就是使用者的問題原文。
+      ★ input_params 帶入相關的 step / equipment_id / lot_id。
+
+      範例：
+        使用者：「STEP_020 最近 5 點有沒有 2 點 OOC」
+        → execute_analysis(mode='auto', title='STEP_020 SPC 5點2點OOC 檢查',
+            description='檢查 STEP_020 所有 SPC chart 最近 5 個 sample 是否有 ≥2 個 OOC',
+            input_params={step: 'STEP_020'})
+
    ════════════════════════════════════════════════
-   ★ 彈性方案：execute_analysis 動態分析
+   ★ 單純資料查看 / 畫圖：get_process_info
    ════════════════════════════════════════════════
-   ④ <skill_catalog> 裡沒有合適的 Skill，且 get_process_info 的 _charts 不夠用
-      → 使用 execute_analysis 動態生成分析步驟。
+   ⑤ 使用者只是「看看資料」「畫個圖」，不涉及條件判斷：
+      → 用 get_process_info（帶 objectName='SPC' 自動出 5 張 chart）
+      → 不需要 execute_analysis
+
+   ════════════════════════════════════════════════
+   ★ 彈性方案：execute_analysis 也可用於複合分析
+   ════════════════════════════════════════════════
+   ⑥ <skill_catalog> 裡沒有合適的 Skill，且需要複合分析（撈多個 MCP + 交叉比對 + 畫圖）
+      → execute_analysis(mode='auto')
       ★ 結果顯示在中間分析面板，使用者可以一鍵「儲存為 My Skill」。
-      ★ python_code 裡可用 await execute_mcp(mcp_name, params) 撈資料。
-      ★ 最後一步 assign _chart / _charts（圖）和 _findings（結論）。
    ⚠️ 禁止在 python_code 裡 import requests/os/sys/subprocess
 
    ════════════════════════════════════════════════
