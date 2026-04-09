@@ -135,9 +135,9 @@ async def adapt_events(
                     # → all charts go to the analysis panel (center), not copilot (right)
                     card_charts = None
                     if card:
-                        if card.get("type") == "analysis" and card.get("contract"):
+                        if card.get("contract"):
                             _analysis_contract = card["contract"]
-                        elif card.get("chart_intents"):
+                        if card.get("chart_intents"):
                             card_charts = card["chart_intents"]
                         elif card.get("type") == "skill":
                             # execute_skill may have charts in mcp_output.ui_render
