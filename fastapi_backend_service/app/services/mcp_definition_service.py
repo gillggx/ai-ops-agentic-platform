@@ -50,6 +50,14 @@ def _normalize_params(params: Dict[str, Any], mcp_name: str = "") -> Dict[str, A
     if "chart_name" in params:
         params["chart_name"] = _normalize_chart_name(params["chart_name"])
 
+    # ── snake_case → camelCase normalization ──────────────────────────────
+    # Agent LLM sometimes uses snake_case (tool_id, lot_id) instead of camelCase
+    _SNAKE_TO_CAMEL = {"tool_id": "toolID", "lot_id": "lotID", "event_time": "eventTime",
+                       "recipe_id": "recipeID", "apc_id": "apcID", "object_name": "objectName"}
+    for snake, camel in _SNAKE_TO_CAMEL.items():
+        if snake in params and camel not in params:
+            params[camel] = params.pop(snake)
+
     # ── object_name / object_id → toolID / lotID mapping ─────────────────
     # list_recent_events uses generic object_name/object_id interface;
     # the underlying simulator /api/v1/events expects toolID / lotID.
