@@ -224,6 +224,25 @@ export default function MySkillsPage() {
     setTryRunResult(null);
   }
 
+  // ── Bind (upgrade to Auto-Patrol / Diagnostic Rule) ──
+
+  async function handleBind(id: string, bindingType: string) {
+    const label = bindingType === "event" ? "Auto-Patrol" : bindingType === "alarm" ? "Diagnostic Rule" : "Chat Only";
+    if (!confirm(`確定將此 Skill 設為 ${label}？`)) return;
+    const res = await fetch(`/api/admin/my-skills/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ binding_type: bindingType }),
+    });
+    if (res.ok) {
+      alert(`已設為 ${label}`);
+      fetchSkills();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      alert(`設定失敗: ${(err as Record<string, string>).error || "unknown"}`);
+    }
+  }
+
   // ── Auto-scroll console ──
   useEffect(() => {
     consoleRef.current?.scrollTo({ top: consoleRef.current.scrollHeight });
@@ -271,8 +290,17 @@ export default function MySkillsPage() {
                   </span>
                 </div>
               </div>
-              <div style={{ display: "flex", gap: 6 }}>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 <button style={S.btnSm("#4299e1")} onClick={() => openEdit(skill)}>編輯</button>
+                {skill.binding_type === "none" && (
+                  <>
+                    <button style={S.btnSm("#38a169")} onClick={() => handleBind(skill.id, "event")}>設為 Auto-Patrol</button>
+                    <button style={S.btnSm("#805ad5")} onClick={() => handleBind(skill.id, "alarm")}>設為 Diagnostic Rule</button>
+                  </>
+                )}
+                {skill.binding_type !== "none" && (
+                  <button style={S.btnSm("#718096")} onClick={() => handleBind(skill.id, "none")}>解除綁定</button>
+                )}
                 <button style={S.btnSm("#e53e3e")} onClick={() => handleDelete(skill.id)}>刪除</button>
               </div>
             </div>

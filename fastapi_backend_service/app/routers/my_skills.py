@@ -46,6 +46,7 @@ class SkillUpdate(BaseModel):
     input_schema: Optional[List[Dict[str, Any]]] = None
     output_schema: Optional[List[Dict[str, Any]]] = None
     is_active: Optional[bool] = None
+    binding_type: Optional[str] = Field(default=None, pattern="^(none|event|alarm)$")
 
 
 class SkillBindRequest(BaseModel):
