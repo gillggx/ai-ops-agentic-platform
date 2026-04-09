@@ -887,6 +887,24 @@ def _build_render_card(
         }
         if chart_intents:
             card["chart_intents"] = chart_intents
+            # Build contract for AnalysisPanel rendering (no promote — already a Skill)
+            from app.services.agent_orchestrator_v2.nodes.tool_execute import _chart_intent_to_vega_lite
+            visualization = []
+            for i, ci in enumerate(chart_intents):
+                try:
+                    vega_spec = _chart_intent_to_vega_lite(ci)
+                    visualization.append({"id": f"chart_{i}", "type": "vega-lite", "title": ci.get("title", ""), "spec": vega_spec})
+                except Exception:
+                    pass
+            if visualization:
+                skill_name = result.get("skill_name", f"Skill #{tool_input.get('skill_id')}")
+                card["contract"] = {
+                    "$schema": "aiops-report/v1",
+                    "summary": lrd.get("summary", f"{skill_name} 執行結果"),
+                    "evidence_chain": [],
+                    "visualization": visualization,
+                    "suggested_actions": [],  # No promote — already a Skill
+                }
         return card
 
     if tool_name == "execute_mcp" and isinstance(result, dict) and result.get("status") == "success":

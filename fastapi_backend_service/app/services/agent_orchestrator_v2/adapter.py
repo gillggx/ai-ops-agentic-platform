@@ -199,14 +199,14 @@ async def adapt_events(
                 if not contract:
                     contract = output.get("contract")
 
-                # Add promote action to any contract that has visualization
-                if contract and isinstance(contract, dict) and contract.get("visualization"):
+                # Add promote action ONLY for execute_analysis results (has _last_analysis_payload).
+                # execute_skill results already ARE a Skill — no need to promote again.
+                if contract and isinstance(contract, dict) and contract.get("visualization") and _last_analysis_payload:
                     actions = contract.get("suggested_actions", [])
                     has_promote = any(a.get("trigger") == "promote_analysis" for a in actions if isinstance(a, dict))
                     if not has_promote:
                         promote_action: dict = {"label": "儲存為我的 Skill", "trigger": "promote_analysis"}
-                        if _last_analysis_payload:
-                            promote_action["payload"] = _last_analysis_payload
+                        promote_action["payload"] = _last_analysis_payload
                         actions.append(promote_action)
                         contract["suggested_actions"] = actions
 
