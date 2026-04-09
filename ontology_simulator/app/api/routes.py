@@ -349,8 +349,8 @@ async def get_process_events(
     - lotID + step → single event (or few if multiple cycles)
     - toolID or lotID alone → multiple events across steps
     """
-    if not toolID and not lotID:
-        raise HTTPException(400, "Must provide toolID or lotID (or both)")
+    if not toolID and not lotID and not step:
+        raise HTTPException(400, "Must provide toolID, lotID, or step (at least one)")
 
     db = get_db()
     filt: dict = {}
@@ -394,8 +394,8 @@ async def get_process_info(
     Same input as /process/events but returns enriched results with full
     object snapshots joined by lotID + step + eventTime.
     """
-    if not toolID and not lotID:
-        raise HTTPException(400, "Must provide toolID or lotID (or both)")
+    if not toolID and not lotID and not step:
+        raise HTTPException(400, "Must provide toolID, lotID, or step (at least one)")
 
     db = get_db()
     filt: dict = {}
