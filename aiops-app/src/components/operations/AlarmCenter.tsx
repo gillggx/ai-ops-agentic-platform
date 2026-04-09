@@ -490,14 +490,6 @@ export function AlarmCenter() {
 
       {/* Filters */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginBottom: 12, gap: 12 }}>
-        {/* Status tabs removed — show all alarms with status column */}
-        <div style={{ display: "none" }}>
-          {/* hidden — kept for backward compat with state */}
-          <button></button>
-          ))}
-        </div>
-
-        {/* Filters */}
         <div style={{ display: "flex", gap: 8 }}>
           <select
             value={sevFilter}

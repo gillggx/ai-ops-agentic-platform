@@ -211,6 +211,17 @@ async def adapt_events(
                         actions.append(promote_action)
                         contract["suggested_actions"] = actions
 
+                import logging as _log
+                _adapter_logger = _log.getLogger("adapter")
+                if contract:
+                    viz = contract.get("visualization", []) if isinstance(contract, dict) else []
+                    _adapter_logger.info("Adapter synthesis: contract has %d visualizations, %d actions",
+                                        len(viz), len(contract.get("suggested_actions", []) if isinstance(contract, dict) else []))
+                else:
+                    _adapter_logger.info("Adapter synthesis: NO contract")
+                _adapter_logger.info("Adapter: _all_chart_intents=%d, _analysis_contract=%s",
+                                     len(_all_chart_intents), bool(_analysis_contract))
+
                 yield {
                     "type": "synthesis",
                     "text": output.get("final_text", ""),
