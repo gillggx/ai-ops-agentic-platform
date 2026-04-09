@@ -141,6 +141,7 @@ class SkillExecutorService:
     ) -> None:
         self._skill_repo = skill_repo
         self._mcp_executor = mcp_executor
+        self._mcp_call_counts: Dict[str, int] = {}  # tracks MCP call frequency per execution
 
     def _build_script(self, steps: List[Dict[str, Any]]) -> str:
         """Concatenate steps into a single async function with per-step output capture."""
@@ -233,7 +234,12 @@ class SkillExecutorService:
         findings.schema_warnings = _validate_findings_against_schema(findings, output_schema)
         return findings
 
+    def get_mcp_call_counts(self) -> Dict[str, int]:
+        """Return MCP call counts from the last execution (for self-test diagnostics)."""
+        return dict(self._mcp_call_counts)
+
     async def _execute_mcp_wrapper(self, mcp_name: str, params: Dict[str, Any]) -> Any:
+        self._mcp_call_counts[mcp_name] = self._mcp_call_counts.get(mcp_name, 0) + 1
         if self._mcp_executor:
             try:
                 result = await self._mcp_executor(mcp_name, params)
