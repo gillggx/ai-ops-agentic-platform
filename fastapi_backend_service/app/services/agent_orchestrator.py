@@ -1047,7 +1047,7 @@ def _build_render_card(
                 "visualization": visualization,
                 "suggested_actions": [
                     {
-                        "label": "⭐ 儲存為 Diagnostic Rule",
+                        "label": "⭐ 儲存為我的 Skill",
                         "trigger": "promote_analysis",
                         "payload": promote_payload,
                     },
