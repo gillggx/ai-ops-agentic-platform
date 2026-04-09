@@ -1521,13 +1521,21 @@ class AgentOrchestrator:
 
                 yield _stage_event(4, "running")
                 _synth_contract = _resolve_contract(final_text, _last_spc_result, _chart_already_rendered)
-                # execute_analysis contract has visualization — use it when _resolve_contract doesn't
+                logger.info("[SYNTH] _analysis_contract=%s, _chart_already_rendered=%s, _resolve gave viz=%s",
+                            bool(_analysis_contract), _chart_already_rendered,
+                            bool(_synth_contract and _synth_contract.get("visualization")))
+                # execute_analysis / analyze_data contract has visualization — use it when _resolve_contract doesn't
                 if _analysis_contract and (not _synth_contract or not _synth_contract.get("visualization")):
                     _synth_contract = _analysis_contract
+                    logger.info("[SYNTH] Using _analysis_contract with %d viz items",
+                                len(_synth_contract.get("visualization", [])))
                 # Strip raw <contract> block from user-visible text when chart already rendered
                 _synth_text = final_text
                 if _chart_already_rendered:
                     _synth_text = re.sub(r"<contract>[\s\S]*?</contract>", "", _synth_text).strip()
+                logger.info("[SYNTH] Final contract: schema=%s, viz=%d",
+                            _synth_contract.get("$schema") if isinstance(_synth_contract, dict) else None,
+                            len(_synth_contract.get("visualization", [])) if isinstance(_synth_contract, dict) else 0)
                 yield {"type": "synthesis", "text": _synth_text, "contract": _synth_contract}
                 yield _stage_event(4, "complete")
                 messages.append({"role": "assistant", "content": response.content})
@@ -1715,6 +1723,8 @@ class AgentOrchestrator:
                     # Capture contract from any tool render card (analysis, utility w/ chart)
                     if render_card and render_card.get("contract"):
                         _analysis_contract = render_card["contract"]
+                        logger.info("[CAPTURE] _analysis_contract from card type=%s, viz=%d",
+                                    render_card.get("type"), len(_analysis_contract.get("visualization", [])))
                     done_event: Dict[str, Any] = {
                         "type": "tool_done",
                         "tool": tool_name,
