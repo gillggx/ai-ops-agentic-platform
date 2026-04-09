@@ -54,7 +54,6 @@ async def adapt_events(
     _seen_self_critique = False
     _seen_memory = False
     _tool_start_count = 0
-    _render_card_index = 0
     _current_state = dict(initial_state)
     _analysis_contract = None  # stashed when any tool produces charts for analysis panel
     _all_chart_intents: list = []  # accumulated from ALL tools (skill, analysis, mcp)
@@ -76,7 +75,7 @@ async def adapt_events(
             print(f"[ADAPTER] on_chain_end name={ev_name}, output_keys={_keys}", file=_sys.stderr, flush=True)
             if ev_name == "tool_execute":
                 _rc = (_out or {}).get("render_cards", "MISSING")
-                print(f"[ADAPTER] tool_execute render_cards count={len(_rc) if isinstance(_rc, list) else _rc}, _render_card_index={_render_card_index}", file=_sys.stderr, flush=True)
+                print(f"[ADAPTER] tool_execute render_cards count={len(_rc) if isinstance(_rc, list) else _rc}", file=_sys.stderr, flush=True)
 
         # ── Node lifecycle events ──────────────────────────────────
         if ev_type == "on_chain_start":
@@ -127,11 +126,11 @@ async def adapt_events(
 
             elif ev_name == "tool_execute":
                 output = ev_data.get("output") or {}
-                # Emit tool_done for each new render_card
+                # Emit tool_done for each render_card in this node's output.
+                # NOTE: on_chain_end output contains only THIS invocation's new cards,
+                # not the accumulated state (reducer merge happens at state level).
                 new_cards = output.get("render_cards") or []
-                while _render_card_index < len(new_cards):
-                    card = new_cards[_render_card_index]
-                    _render_card_index += 1
+                for card in new_cards:
                     done_event = {
                         "type": "tool_done",
                         "tool": card.get("mcp_name") or card.get("tool_name") or card.get("skill_name", ""),
