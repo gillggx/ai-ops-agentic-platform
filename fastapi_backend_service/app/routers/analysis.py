@@ -32,7 +32,9 @@ class AnalysisStep(BaseModel):
 
 class RunAnalysisRequest(BaseModel):
     title: str = "Ad-hoc 分析"
-    steps: List[AnalysisStep] = Field(..., min_length=1)
+    mode: str = Field(default="code", description="'code' = direct steps, 'auto' = generate from description")
+    description: str = Field(default="", description="For mode=auto: natural language description")
+    steps: List[AnalysisStep] = Field(default_factory=list)
     input_params: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -53,9 +55,13 @@ async def run_analysis(
     db: AsyncSession = Depends(get_db),
     current_user: UserModel = Depends(get_current_user),
 ) -> StandardResponse:
-    """Execute Agent-generated python code in the same sandbox as Diagnostic Rules.
+    """Execute analysis — two modes:
 
-    Returns findings + charts + the original steps_mapping (for promote).
+    mode='code':  Agent provides steps directly (existing behavior)
+    mode='auto':  Agent provides description, backend generates steps via
+                  DiagnosticRuleService.generate_steps() (same pipeline as Skill gen)
+
+    Returns findings + charts + steps_mapping (for promote to Skill).
     """
     settings = get_settings()
     svc = SkillExecutorService(
@@ -63,8 +69,41 @@ async def run_analysis(
         mcp_executor=build_mcp_executor(db, sim_url=settings.ONTOLOGY_SIM_URL),
     )
 
-    steps = [s.model_dump() for s in body.steps]
+    steps = []
+    output_schema = []
+    input_schema_inferred = []
 
+    if body.mode == "auto" and body.description:
+        # ── Auto mode: generate steps from description ─────────────────
+        from app.services.diagnostic_rule_service import DiagnosticRuleService
+        from app.schemas.diagnostic_rule import GenerateRuleStepsRequest
+        from app.utils.llm_client import get_llm_client
+
+        gen_svc = DiagnosticRuleService(
+            repo=SkillDefinitionRepository(db),
+            db=db,
+            llm=get_llm_client(),
+        )
+        gen_result = await gen_svc.generate_steps(
+            GenerateRuleStepsRequest(auto_check_description=body.description)
+        )
+        if not gen_result.success or not gen_result.steps_mapping:
+            return StandardResponse.error(
+                message=f"Auto 分析生成失敗：{gen_result.error or '未能生成步驟'}"
+            )
+
+        steps = gen_result.steps_mapping
+        output_schema = gen_result.output_schema
+        input_schema_inferred = gen_result.input_schema
+    else:
+        # ── Code mode: use provided steps ──────────────────────────────
+        steps = [s.model_dump() for s in body.steps]
+        input_schema_inferred = [
+            {"key": k, "type": "string", "required": True, "description": ""}
+            for k in body.input_params.keys()
+        ]
+
+    # Execute
     step_results, raw_findings, error, charts = await svc._run_script(
         steps=steps,
         event_payload=body.input_params,
@@ -73,16 +112,9 @@ async def run_analysis(
     if error:
         return StandardResponse.error(message=f"分析執行失敗：{error}")
 
-    # Build findings dict
     findings = {}
     if raw_findings and isinstance(raw_findings, dict):
         findings = raw_findings
-
-    # Infer input_schema from input_params keys
-    input_schema_inferred = [
-        {"key": k, "type": "string", "required": True, "description": ""}
-        for k in body.input_params.keys()
-    ]
 
     return StandardResponse.success(
         data={
@@ -94,9 +126,11 @@ async def run_analysis(
                 for sr in step_results
             ],
             # Payload for promote
+            "mode": body.mode,
             "steps_mapping": steps,
             "input_params": body.input_params,
-            "input_schema_inferred": input_schema_inferred,
+            "input_schema": input_schema_inferred,
+            "output_schema": output_schema,
         },
         message=body.title,
     )

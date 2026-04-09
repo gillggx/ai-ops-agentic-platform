@@ -58,6 +58,7 @@ async def adapt_events(
     _current_state = dict(initial_state)
     _analysis_contract = None  # stashed when any tool produces charts for analysis panel
     _all_chart_intents: list = []  # accumulated from ALL tools (skill, analysis, mcp)
+    _last_analysis_payload: dict = {}  # steps_mapping etc for promote
 
     # Opening stage events
     yield _stage_event(1, "running")
@@ -147,6 +148,17 @@ async def adapt_events(
                     if card_charts:
                         _all_chart_intents.extend(card_charts)
 
+                    # Capture analysis payload for promote
+                    if card and card.get("type") == "analysis":
+                        data = card.get("data") or card.get("result") or {}
+                        if isinstance(data, dict) and data.get("steps_mapping"):
+                            _last_analysis_payload = {
+                                "title": data.get("title", ""),
+                                "steps_mapping": data.get("steps_mapping", []),
+                                "input_schema": data.get("input_schema", []),
+                                "output_schema": data.get("output_schema", []),
+                            }
+
                     yield done_event
                 if stage:
                     yield _stage_event(stage, "complete")
@@ -180,10 +192,24 @@ async def adapt_events(
                             "summary": output.get("final_text", "")[:200],
                             "evidence_chain": [],
                             "visualization": visualization,
-                            "suggested_actions": [],
+                            "suggested_actions": [{
+                                "label": "儲存為我的 Skill",
+                                "trigger": "promote_analysis",
+                            }],
                         }
                 if not contract:
                     contract = output.get("contract")
+
+                # Add promote action to any contract that has visualization
+                if contract and isinstance(contract, dict) and contract.get("visualization"):
+                    actions = contract.get("suggested_actions", [])
+                    has_promote = any(a.get("trigger") == "promote_analysis" for a in actions if isinstance(a, dict))
+                    if not has_promote:
+                        promote_action: dict = {"label": "儲存為我的 Skill", "trigger": "promote_analysis"}
+                        if _last_analysis_payload:
+                            promote_action["payload"] = _last_analysis_payload
+                        actions.append(promote_action)
+                        contract["suggested_actions"] = actions
 
                 yield {
                     "type": "synthesis",

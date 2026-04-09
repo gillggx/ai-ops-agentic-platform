@@ -395,13 +395,17 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     {
         "name": "execute_analysis",
         "description": (
-            "【一次性分析工具】執行 Agent 動態生成的分析程式碼，結果顯示在分析面板。\n"
-            "可理解為「動態建立一個一次性 Diagnostic Rule 並立刻執行」。\n"
+            "【一次性分析工具】執行分析並在分析面板呈現結果（含圖表）。\n"
+            "\n"
+            "★ 兩種模式：\n"
+            "  mode='auto'（預設推薦）：只提供 title + description，後端自動生成分析程式碼並執行。\n"
+            "    → 自動產出 chart、table、診斷結論。用戶提到圖/chart/趨勢時務必用此模式。\n"
+            "  mode='code'：自行提供 steps（python_code），適合 auto 失敗時的 fallback。\n"
             "\n"
             "★ 使用時機：\n"
+            "  - 用戶要求畫圖、趨勢分析、SPC chart → 一定用 execute_analysis(mode='auto')\n"
             "  - <skill_catalog> 裡沒有合適的現成 Skill 時\n"
-            "  - 需要撈資料 + 處理 + 畫圖 + 判斷的複合分析\n"
-            "  - 結果如果有用，使用者可以一鍵儲存為常用 Diagnostic Rule\n"
+            "  - 結果如果有用，使用者可以一鍵儲存為常用 Skill\n"
             "\n"
             "★ steps 格式（跟 Diagnostic Rule 一樣）：\n"
             "  每個 step 的 python_code 在同一個 async scope 裡執行，\n"
@@ -439,15 +443,24 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
                     "type": "string",
                     "description": "分析標題（顯示在分析面板頂部）",
                 },
+                "mode": {
+                    "type": "string",
+                    "enum": ["auto", "code"],
+                    "description": "auto=後端自動生成分析（推薦）, code=自行提供 steps python_code",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "mode=auto 時必填：分析需求描述（自然語言），例如「分析 STEP_020 的 SPC xbar chart 趨勢，以 trend chart 呈現」",
+                },
                 "steps": {
                     "type": "array",
-                    "description": "分析步驟清單，每步含 step_id + nl_segment + python_code",
+                    "description": "mode=code 時必填：分析步驟清單",
                     "items": {
                         "type": "object",
                         "properties": {
                             "step_id": {"type": "string"},
-                            "nl_segment": {"type": "string", "description": "此步驟的自然語言說明"},
-                            "python_code": {"type": "string", "description": "Python 程式碼"},
+                            "nl_segment": {"type": "string"},
+                            "python_code": {"type": "string"},
                         },
                         "required": ["step_id", "nl_segment", "python_code"],
                     },
@@ -457,7 +470,7 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
                     "description": "執行參數（例如 {step: 'STEP_013', equipment_id: 'EQP-01'}）",
                 },
             },
-            "required": ["title", "steps", "input_params"],
+            "required": ["title"],
         },
     },
     # ── [v15.3] Generic Tools (inline / small dataset only) ───────────────
@@ -713,6 +726,8 @@ class ToolDispatcher:
                         "/api/v1/analysis/run",
                         body={
                             "title": tool_input.get("title", "Ad-hoc 分析"),
+                            "mode": tool_input.get("mode", "auto"),
+                            "description": tool_input.get("description", tool_input.get("title", "")),
                             "steps": tool_input.get("steps", []),
                             "input_params": tool_input.get("input_params", {}),
                         },
