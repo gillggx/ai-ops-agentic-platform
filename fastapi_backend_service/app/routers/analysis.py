@@ -116,6 +116,27 @@ async def run_analysis(
     if raw_findings and isinstance(raw_findings, dict):
         findings = raw_findings
 
+    # Auto-build _chart DSL from output_schema line_chart definitions
+    # This bridges the gap: Skill uses output_schema, Agent needs _chart DSL
+    if not charts and output_schema and isinstance(findings.get("outputs"), dict):
+        auto_charts = []
+        for s in output_schema:
+            chart_type = s.get("type", "")
+            if chart_type in ("line_chart", "multi_line_chart") and s["key"] in findings["outputs"]:
+                data = findings["outputs"][s["key"]]
+                if isinstance(data, list) and data:
+                    auto_charts.append({
+                        "type": "line",
+                        "title": s.get("label", s["key"]),
+                        "data": data,
+                        "x": s.get("x_key", "eventTime"),
+                        "y": s.get("y_keys", [s.get("y_key", "value")]),
+                        "rules": [],
+                        "highlight": {"field": s.get("highlight_key", "is_ooc"), "eq": True} if s.get("highlight_key") else None,
+                    })
+        if auto_charts:
+            charts = auto_charts
+
     return StandardResponse.success(
         data={
             "title": body.title,
