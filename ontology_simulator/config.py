@@ -24,4 +24,4 @@ MONGODB_DB  = os.getenv("MONGODB_DB",  "semiconductor_sim")
 
 # ── Physics ───────────────────────────────────────────────────
 APC_DRIFT_RATIO  = float(os.getenv("APC_DRIFT_RATIO",  "0.05"))   # ±5% per process
-OOC_PROBABILITY  = float(os.getenv("OOC_PROBABILITY",  "0.20"))   # 20% OOC rate
+OOC_PROBABILITY  = float(os.getenv("OOC_PROBABILITY",  "0.30"))   # 30% OOC rate
