@@ -286,7 +286,9 @@ class SkillAuthoringService:
             # Try to capture the final result from done event
             if sse_line.startswith("data: "):
                 try:
-                    payload = json.loads(sse_line[6:])
+                    # _sse() format: "data: {json}\n\n"
+                    json_str = sse_line[6:].rstrip("\n")
+                    payload = json.loads(json_str)
                     t = payload.get("type", "")
                     if t == "step_plan":
                         # Phase 2a output
@@ -296,11 +298,8 @@ class SkillAuthoringService:
                             input_schema = payload["input_schema"]
                         if payload.get("output_schema"):
                             output_schema = payload["output_schema"]
-                    elif t == "step_code" and payload.get("status") == "done":
-                        # Each step done — payload doesn't have full code, fetch from session later
-                        pass
                     elif t == "done":
-                        # Final result includes assembled steps
+                        # Final result includes assembled steps with python_code
                         result = payload.get("result", {})
                         if result.get("steps_mapping"):
                             steps_mapping = result["steps_mapping"]
@@ -310,8 +309,8 @@ class SkillAuthoringService:
                             output_schema = result["output_schema"]
                     elif t == "error":
                         gen_failed = True
-                except Exception:
-                    pass
+                except Exception as parse_exc:
+                    logger.debug("generate parse failed: %s, line=%s", parse_exc, sse_line[:200])
 
         if gen_failed or not steps_mapping:
             session.state = "drafting"
