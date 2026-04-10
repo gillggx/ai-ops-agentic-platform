@@ -99,33 +99,44 @@ class ExecutionLogRepository:
             # Normalize: triggered_by like "event_poller" or "manual" or "schedule"
             by_trigger[key] = (by_trigger.get(key) or 0) + int(row[1])
 
-        # Last execution status + condition_met count
-        last_q = select(ExecutionLogModel).where(
+        # ALL executions in window (no LIMIT) — for accurate by_equipment + condition_met counts
+        all_q = select(
+            ExecutionLogModel.event_context,
+            ExecutionLogModel.llm_readable_data,
+        ).where(
             and_(
                 ExecutionLogModel.auto_patrol_id == auto_patrol_id,
                 ExecutionLogModel.started_at >= cutoff,
             )
-        ).order_by(ExecutionLogModel.started_at.desc()).limit(50)
-        recent = list((await self._db.execute(last_q)).scalars().all())
+        )
+        all_rows = (await self._db.execute(all_q)).all()
 
         condition_met_count = 0
         by_equipment: Dict[str, int] = {}
-        for r in recent:
+        for ctx_str, lrd_str in all_rows:
             try:
-                lrd = json.loads(r.llm_readable_data) if r.llm_readable_data else {}
+                lrd = json.loads(lrd_str) if lrd_str else {}
                 if lrd.get("condition_met"):
                     condition_met_count += 1
             except Exception:
                 pass
             try:
-                ctx = json.loads(r.event_context) if r.event_context else {}
+                ctx = json.loads(ctx_str) if ctx_str else {}
                 eq = ctx.get("equipment_id") or ""
                 if eq:
                     by_equipment[eq] = by_equipment.get(eq, 0) + 1
             except Exception:
                 pass
 
-        last_status = recent[0].status if recent else None
+        # Last status from a small recent query
+        last_q = select(ExecutionLogModel.status).where(
+            and_(
+                ExecutionLogModel.auto_patrol_id == auto_patrol_id,
+                ExecutionLogModel.started_at >= cutoff,
+            )
+        ).order_by(ExecutionLogModel.started_at.desc()).limit(1)
+        last_row = (await self._db.execute(last_q)).first()
+        last_status = last_row[0] if last_row else None
 
         return {
             "total": int(agg_row[0] or 0),
