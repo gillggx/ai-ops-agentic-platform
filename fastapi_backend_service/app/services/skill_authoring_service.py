@@ -334,6 +334,8 @@ class SkillAuthoringService:
             return
 
         # Save generated artifacts
+        import sys
+        print(f"[AUTHORING] saving session={session.id} state→planned steps={len(steps_mapping)}", file=sys.stderr, flush=True)
         session.current_steps_mapping = json.dumps(steps_mapping, ensure_ascii=False)
         session.current_input_schema = json.dumps(input_schema, ensure_ascii=False)
         session.current_output_schema = json.dumps(output_schema, ensure_ascii=False)
@@ -348,7 +350,11 @@ class SkillAuthoringService:
             "output_schema_count": len(output_schema),
             "timestamp": _now_iso(),
         })
-        await self._save_session(session)
+        try:
+            await self._save_session(session)
+            print(f"[AUTHORING] save committed for session={session.id}", file=sys.stderr, flush=True)
+        except Exception as save_exc:
+            print(f"[AUTHORING] save FAILED: {save_exc}", file=sys.stderr, flush=True)
 
         yield _sse({"type": "state", "state": session.state})
 
