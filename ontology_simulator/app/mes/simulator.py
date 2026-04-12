@@ -175,6 +175,12 @@ async def _machine_loop(tool_id: str, queue: asyncio.Queue) -> None:
             print(f"[MES] {tool_id} PM_DONE (took {pm_duration:.1f}s)")
             await db.tools.update_one({"tool_id": tool_id}, {"$set": {"status": "Idle"}})
 
+            # PM recalibration: reset DC drift + EC constants
+            from app.services import dc_service, ec_service
+            dc_service.reset_drift(tool_id)
+            ec_service.pm_recalibrate(tool_id)
+            print(f"[MES] {tool_id} DC drift + EC constants recalibrated after PM")
+
             pm_counter   = 0
             pm_threshold = random.randint(8, 12)   # reset for next cycle
 

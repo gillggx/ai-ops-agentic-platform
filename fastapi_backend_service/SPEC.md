@@ -297,10 +297,18 @@ from app.services.chart_middleware import register
 register("heatmap", build_heatmap)
 ```
 
+**Tolerant Input Normalize**：
+- `_unwrap_chart_data()` — 自動 unwrap `{"data":[...]}` / `{"records":[...]}` 等 wrapper（line/bar/scatter/multi_line builders 共用）
+- `_normalize_spc_input()` — SPC-specific deep search + nested-by-group flatten + parallel arrays zip
+- `_deep_find_spc_list()` — ≤4 depth DFS 找第一個符合 SPC row pattern 的 list
+
 **整合點**：
 - `SkillExecutorService.execute()` — Skill 執行後自動呼叫 `chart_middleware.process()`
+- `SkillExecutorService.try_run()` — saved rule try-run 後自動呼叫
 - `SkillExecutorService.try_run_draft()` — Try-Run sandbox 執行後同樣呼叫
 - `analysis.py` (`execute_analysis`) — Agent ad-hoc 分析執行後呼叫
+- `render_card.py` (`execute_mcp`) — MCP result 經 classifier 後呼叫（每個 render option 各算一次）
+- `alarms_router.py` — Alarm list API 對每個 DR result 呼叫（生成 alarm detail charts）
 
 ## 7. System MCP 定義（Seed）— MCP v3 三層架構
 
@@ -314,11 +322,52 @@ Agent 透過三個層級的 MCP 漸進式深入調查：
 |-------|----------|----------|------|
 | **L1 — Summary** | `get_process_summary` | `GET /process/summary` | 聚合統計（OOC rates、per-tool breakdown、recent OOC）。MongoDB aggregation pipeline，毫秒回應。適合全廠範圍掃描。 |
 | **L2 — Investigation** | `get_process_info` | `GET /process/info` | 範圍調查。新增 `objectName` 參數可篩選 SPC/DC/APC/RECIPE。回應扁平化（不再有 `{event, objects}` 巢狀）。回傳 pure data，chart 生成由 Backend ChartMiddleware 負責。**一次呼叫取代過去 8 次呼叫。** |
-| **L3 — Deep Dive** | `query_object_timeseries` | `POST /objects/query` | 單一參數深度時序 + 3σ OOC（unchanged） |
+| **L3 — Deep Dive** | `query_object_timeseries` | `POST /objects/query` | 單一參數深度時序 + 3σ OOC。SPC parameter 支援短格式 `xbar_chart`（自動 normalize 為 `charts.xbar_chart.value`） |
 
 **已退役 MCP**：
 - `get_process_events` — 被 `get_process_info` 取代
 - `get_object_info` — 不再需要（data IS the schema）
+
+### 7.3 已停用的 Agent Tools（從 TOOL_SCHEMAS 移除）
+
+| Tool / MCP | 移除原因 |
+|------------|----------|
+| `analyze_data` | 被 `execute_analysis(mode='auto')` 取代 |
+| `execute_jit` | 被 `execute_analysis` 取代，已下線 |
+| `execute_utility` | 150 個 generic tool，從未被使用 |
+| `execute_agent_tool` | Agent private tool chest，從未被使用 |
+| `query_object_timeseries` | LLM 一致選此 MCP 做 SPC 查詢導致 5x 呼叫 + 編造 chart name。get_process_info(objectName='SPC') 一次拿到全部 5 種 chart。Simulator endpoint 保留但 DB MCP 定義已刪除 |
+
+### 7.4 Render Intent Classifier
+
+`render_intent_classifier.py` — 結構驅動的呈現方式分類器：
+
+**設計原則**：
+1. **不靠 user_query 關鍵字** — 純粹檢查 raw data 的結構
+2. **Confirmation > Guessing** — 多種合理呈現時問使用者
+3. **所有 alternative renders 預先計算** — 前端 instant switch，不需 backend roundtrip
+
+**決策規則**：
+
+| 資料結構 | Decision | Primary | Alternatives |
+|---------|----------|---------|--------------|
+| events[] + SPC.charts nested | `auto_chart` | SPC 5 chart | Table / OOC-only / APC multi-line / DC multi-line / Recipe table |
+| events[] ≥ 5 筆 (no SPC) | `ask_user` | — | Table / OOC-only / Summary text |
+| events[] < 5 筆 | `auto_table` | Flat table | — |
+| catalog list (no time) | `auto_table` | Catalog table | — |
+| scalar response | `auto_scalar` | Badge/scalar | — |
+
+**整合點**：`render_card.py` 的 `execute_mcp` 路徑 → 呼叫 classifier → 建 contract.render_decision → 前端 ContractRenderer 讀取。
+
+### 7.5 Chat Console SSE Event 格式
+
+Agent chat 的 SSE events 包含以下改善欄位（方便 console debug）：
+
+| Event | 新增欄位 | 範例 |
+|-------|---------|------|
+| `tool_start` | `params_summary` | `"get_process_info(equipment_id=EQP-01, since=7d)"` |
+| `tool_done` | `result_summary`, `data_shape` | `"100 events (28 OOC)"`, `{"total":100, "ooc_count":28, "render":"auto_chart(5 charts, 5 alts)"}` |
+| `plan` | `text` | `"Step 1: execute_mcp(...) → Step 2: analyze"` |
 
 ### 7.2 輔助 MCP
 

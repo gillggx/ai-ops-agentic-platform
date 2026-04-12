@@ -131,13 +131,18 @@ async def _seed_recipes() -> None:
     if first:
         keys = list((first.get("parameters") or {}).keys())
         if keys and not keys[0].startswith("param_"):
-            return  # Already semantic — skip
+            # Check if version field exists; if not, add it
+            if "version" not in first:
+                await _db.recipe_data.update_many({}, {"$set": {"version": 1}})
+                print("[DB] Added version=1 to existing recipes.")
+            return
         print("[DB] Detected legacy param_N keys in recipe_data — dropping for re-seed.")
         await _db.recipe_data.drop()
 
     docs = [
         {
             "recipe_id": f"RCP-{i:03d}",
+            "version": 1,
             "parameters": {
                 name: round(random.uniform(lo, hi), 4)
                 for name, lo, hi in _RECIPE_PARAMS
@@ -146,7 +151,7 @@ async def _seed_recipes() -> None:
         for i in range(1, TOTAL_RECIPES + 1)
     ]
     await _db.recipe_data.insert_many(docs)
-    print(f"[DB] Seeded {TOTAL_RECIPES} recipes (semantic params).")
+    print(f"[DB] Seeded {TOTAL_RECIPES} recipes (semantic params, version=1).")
 
 
 def _make_apc_params() -> dict:

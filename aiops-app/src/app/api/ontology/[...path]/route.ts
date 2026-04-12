@@ -588,6 +588,22 @@ export async function GET(
   const sp = req.nextUrl.searchParams;
 
   try {
+    // Direct simulator proxy: /api/ontology/process/info → /api/v1/process/info
+    if (path.length === 2 && path[0] === "process" && path[1] === "info") {
+      const res = await fetch(`${ONTOLOGY_BASE}/api/v1/process/info?${sp}`, { cache: "no-store" });
+      return NextResponse.json(await res.json());
+    }
+    // Direct simulator proxy: /api/ontology/process/summary → /api/v1/process/summary
+    if (path.length === 2 && path[0] === "process" && path[1] === "summary") {
+      const res = await fetch(`${ONTOLOGY_BASE}/api/v1/process/summary?${sp}`, { cache: "no-store" });
+      return NextResponse.json(await res.json());
+    }
+    // Direct simulator proxy: /api/ontology/tools → /api/v1/tools
+    if (path.length === 1 && path[0] === "tools") {
+      const res = await fetch(`${ONTOLOGY_BASE}/api/v1/tools`, { cache: "no-store" });
+      return NextResponse.json(await res.json());
+    }
+
     if (path.length === 1 && path[0] === "equipment")
       return await getEquipmentList();
 

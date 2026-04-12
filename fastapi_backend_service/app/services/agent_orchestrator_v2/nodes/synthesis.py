@@ -6,6 +6,11 @@ This node:
   2. Strips <contract> blocks, parses them via _resolve_contract
   3. Applies CHART RENDERED mode (strips visualization when chart_intents rendered)
   4. Strips <plan> tag if present
+
+Note: The visualization-gate keyword detection (previously in this node) was
+removed in favour of the structure-driven render_intent_classifier. MCP results
+now carry their own contract.render_decision built in render_card.py, so the
+agent never has to "guess" how to render data.
 """
 
 from __future__ import annotations

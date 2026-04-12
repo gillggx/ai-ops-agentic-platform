@@ -39,13 +39,12 @@ Production 切換只需改 endpoint_url，程式碼不變。**
 
 | objectName | 主要欄位 | 說明 |
 |------------|---------|------|
-| DC | `sensor_01~30`（各含 value, display_name） | Data Collection 感測器 |
-| SPC | `charts.{xbar,r,s,p,c}_chart`（各含 value, ucl, lcl, is_ooc） | 統計製程管制 |
-| APC | `parameters.param_01~20`, `mode`, `model_version` | Advanced Process Control |
-| EC | `pm_count`, `wafers_since_pm`, `chamber_age_hrs`, `component_health.*` | Equipment Constants |
-| RECIPE | `recipe_id`, `parameters.*` | 配方參數 |
-| FDC | `fault_class`, `confidence`, `model_version` | Fault Detection |
-| OCAP | `priority`, `actions[]` | Out-of-Control Action Plan |
+| DC | `parameters.{30 sensors}` — chamber_pressure, rf_forward_power, etc. | Data Collection 感測器。Exponential drift model + PM reset |
+| SPC | `charts.{xbar,r,s,p,c}_chart` (value, ucl, lcl, is_ooc), `spc_status` | 統計製程管制。5 chart 各監控 1 個 DC sensor |
+| APC | `mode`, `parameters.{20 params}` — active (5) + passive (15) | Advanced Process Control。50% self-correction on active params; passive params drift freely; model_r2 degrades with active drift |
+| RECIPE | `recipe_version`, `parameters.{20 params}` — etch_time_s, source_power_w, etc. | 配方參數。10% version bump per process with ±offset on key params |
+| FDC | `classification` (NORMAL/WARNING/FAULT), `fault_code`, `confidence`, `contributing_sensors`, `description` | Fault Detection & Classification。Rule-based: SPC OOC + DC drift → FAULT; APC model degrading → WARNING |
+| EC | `constants.{8 items}` — each with `{value, nominal, tolerance_pct, deviation_pct, status, unit}` | Equipment Constants。Slow drift + PM recalibration。Status: NORMAL/DRIFT/ALERT |
 
 ## 4. API Endpoints
 
@@ -69,7 +68,7 @@ Production 切換只需改 endpoint_url，程式碼不變。**
 | `GET` | `/api/v1/analytics/step-spc` | 站點級 SPC 管制圖（step + chart_name） |
 | `GET` | `/api/v1/analytics/step-dc` | 站點級 DC 時序（step + parameter） |
 | `GET` | `/api/v1/analytics/history` | 物件快照歷史序列 |
-| `POST` | `/api/v1/objects/query` | **L3** 物件參數時序查詢（object_name + parameter + step + conditions） |
+| `POST` | `/api/v1/objects/query` | **L3** 物件參數時序查詢。SPC parameter 支援短格式（`xbar_chart` 自動 normalize 為 `charts.xbar_chart.value`），object_name 大小寫自動修正 |
 | `GET` | `/api/v1/objects/schema/{object_name}` | 物件 parameter 目錄 |
 
 ### 4.3 Equipment & Lot Trace

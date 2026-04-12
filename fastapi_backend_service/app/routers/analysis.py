@@ -130,13 +130,37 @@ async def run_analysis(
         if auto_charts:
             charts = (charts or []) + auto_charts
 
+    import logging as _logging
+    _alog = _logging.getLogger(__name__)
+    _alog.warning(
+        "[analysis.run] returning charts=%d output_schema_types=%s findings_outputs_keys=%s",
+        len(charts or []),
+        [(s.get("key"), s.get("type")) for s in (output_schema or [])],
+        list((findings.get("outputs") or {}).keys()) if isinstance(findings, dict) else None,
+    )
+    if charts:
+        _first = charts[0]
+        _data = _first.get("data") if isinstance(_first, dict) else None
+        _alog.warning(
+            "[analysis.run] first chart: title=%r data_rows=%s sample_row=%s",
+            _first.get("title") if isinstance(_first, dict) else None,
+            len(_data) if isinstance(_data, list) else "?",
+            str(_data[0])[:200] if isinstance(_data, list) and _data else None,
+        )
+
     return StandardResponse.success(
         data={
             "title": body.title,
             "findings": findings,
             "charts": charts or [],
             "step_results": [
-                {"step_id": sr.step_id, "status": sr.status, "error": sr.error}
+                {
+                    "step_id": sr.step_id,
+                    "nl_segment": sr.nl_segment,
+                    "status": sr.status,
+                    "output": sr.output,
+                    "error": sr.error,
+                }
                 for sr in step_results
             ],
             # Payload for promote

@@ -86,7 +86,83 @@ def _build_render_card(
         dataset = od.get("dataset")
         raw_dataset = od.get("_raw_dataset") or dataset
 
-        return {
+        # ── Render intent classifier: decide how to present this MCP result ──
+        # Principle: structure-driven, not keyword-driven. Classifier inspects
+        # raw_dataset shape and returns a primary render + alternatives.
+        # The contract carries everything the frontend needs to render instantly
+        # AND switch between alternative renders without re-calling the MCP.
+        contract = None
+        try:
+            from app.services.render_intent_classifier import classify_render_intent, build_outputs
+            from app.services.chart_middleware import process as chart_process
+
+            # Use the unwrapped raw response (single dict, not the dataset wrapper list)
+            classify_input = raw_dataset[0] if isinstance(raw_dataset, list) and len(raw_dataset) == 1 else raw_dataset
+            decision = classify_render_intent(classify_input, mcp_name=mcp_name or "")
+
+            def _opt_to_render(opt):
+                """Apply transform → chart_middleware → return frontend-ready render block."""
+                outputs = build_outputs(opt, classify_input)
+                charts = chart_process(outputs, opt.output_schema) if outputs and opt.output_schema else []
+                return {
+                    "id": opt.id,
+                    "label": opt.label,
+                    "kind": opt.kind,
+                    "output_schema": opt.output_schema,
+                    "outputs": outputs,
+                    "charts": charts,
+                    "recommended": opt.recommended,
+                }
+
+            primary_block = _opt_to_render(decision.primary) if decision.primary else None
+            alt_blocks = [_opt_to_render(o) for o in decision.alternatives]
+
+            if decision.kind.value == "ask_user":
+                # Multi-choice: no primary chart, frontend renders a choice card
+                contract = {
+                    "$schema": "aiops-report/v1",
+                    "summary": decision.question or f"取得 {mcp_name} 的資料，要怎麼呈現？",
+                    "evidence_chain": [],
+                    "visualization": [],
+                    "suggested_actions": [],
+                    "render_decision": {
+                        "kind": "ask_user",
+                        "question": decision.question,
+                        "options": alt_blocks,
+                    },
+                }
+            elif primary_block:
+                # Auto render: primary + switchable alternatives
+                contract = {
+                    "$schema": "aiops-report/v1",
+                    "summary": f"已取得 {mcp_name} 的資料",
+                    "evidence_chain": [],
+                    "visualization": [],
+                    "suggested_actions": [],
+                    "findings": {
+                        "condition_met": False,
+                        "summary": "",
+                        "outputs": primary_block["outputs"],
+                    },
+                    "output_schema": primary_block["output_schema"],
+                    "charts": primary_block["charts"],
+                    "render_decision": {
+                        "kind": decision.kind.value,
+                        "primary": primary_block,
+                        "alternatives": alt_blocks,
+                    },
+                }
+                if primary_block["charts"]:
+                    _notify_chart_rendered(result, primary_block["charts"])
+                logger.warning(
+                    "[render_card execute_mcp] mcp=%r kind=%s primary_charts=%d alts=%d",
+                    mcp_name, decision.kind.value, len(primary_block["charts"]), len(alt_blocks),
+                )
+        except Exception as exc:
+            logger.exception("render_card execute_mcp classifier failed: %s", exc)
+            contract = None
+
+        card = {
             "type": "mcp",
             "mcp_name": mcp_name,
             "mcp_output": {
@@ -97,6 +173,9 @@ def _build_render_card(
                 "_is_processed": od.get("_is_processed", True),
             },
         }
+        if contract:
+            card["contract"] = contract
+        return card
 
     # ── draft_* tools ──
     _DRAFT_TOOL_TYPE_MAP = {
@@ -124,97 +203,51 @@ def _build_render_card(
             "message": result.get("message", ""),
         }
 
-    # ── execute_utility ──
-    if tool_name == "execute_utility" and isinstance(result, dict):
-        tool_result = result.get("data") if "data" in result else result
-        if isinstance(tool_result, dict) and tool_result.get("status") == "success":
-            payload = tool_result.get("payload") or {}
-            return {
-                "type": "utility",
-                "tool_name": tool_input.get("tool_name", "utility"),
-                "summary": tool_result.get("summary", ""),
-                "payload": payload,
-            }
-
-    # ── analyze_data ──
-    if tool_name == "analyze_data" and isinstance(result, dict):
-        if result.get("status") == "success":
-            ad_data = result.get("data") or {}
-            chart_json = ad_data.get("chart_json")
-            payload: Dict[str, Any] = {}
-            if chart_json:
-                try:
-                    payload["plotly"] = json.loads(chart_json) if isinstance(chart_json, str) else chart_json
-                except Exception:
-                    payload["chart_json"] = chart_json
-            result_table = ad_data.get("result_table")
-            if result_table and isinstance(result_table, list) and result_table:
-                payload["rows"] = result_table
-                payload["columns"] = list(result_table[0].keys())
-            if not chart_json:
-                stats = ad_data.get("stats") or {}
-                if isinstance(stats, dict):
-                    payload.update(stats)
-            title = ad_data.get("title") or f"{ad_data.get('template', 'analyze_data')} 分析"
-
-            contract = None
-            if payload.get("plotly"):
-                _notify_chart_rendered(result, [payload["plotly"]])
-                contract = {
-                    "$schema": "aiops-report/v1",
-                    "summary": title,
-                    "evidence_chain": [],
-                    "visualization": [{
-                        "id": "analyze_chart",
-                        "type": "plotly",
-                        "title": title,
-                        "spec": payload["plotly"],
-                    }],
-                    "suggested_actions": [],
-                }
-
-            card: Dict[str, Any] = {
-                "type": "utility",
-                "tool_name": title,
-                "summary": title,
-                "payload": payload,
-                "row_count": ad_data.get("row_count", 0),
-                "jit_mcp_id": tool_input.get("mcp_id"),
-                "jit_run_params": tool_input.get("run_params", {}),
-                "jit_python_code": "",
-                "jit_title": title,
-                "analyze_template": tool_input.get("template"),
-                "analyze_params": tool_input.get("params", {}),
-                "analyze_stats": ad_data.get("stats") or {},
-            }
-            if contract:
-                card["contract"] = contract
-            return card
-
     # ── execute_analysis ──
     if tool_name == "execute_analysis" and isinstance(result, dict):
         if result.get("status") == "success":
             data = result.get("data") or {}
             charts = data.get("charts") or []
             findings = data.get("findings") or {}
+            steps_mapping = data.get("steps_mapping") or []
+            step_results = data.get("step_results") or []
 
-            from app.services.agent_orchestrator_v2.nodes.tool_execute import _chart_intent_to_vega_lite
-            visualization = []
-            for i, chart in enumerate(charts):
-                try:
-                    vega_spec = _chart_intent_to_vega_lite(chart)
-                    visualization.append({
-                        "id": f"chart_{i}",
-                        "type": "vega-lite",
-                        "title": chart.get("title", f"Chart {i+1}"),
-                        "spec": vega_spec,
-                    })
-                except Exception:
-                    pass
+            # Index step_results by step_id for quick join with steps_mapping
+            sr_by_id: Dict[str, Dict[str, Any]] = {
+                (sr.get("step_id") or ""): sr for sr in step_results if isinstance(sr, dict)
+            }
+
+            # Build evidence_chain — DR/AP-style, includes python_code + output + status
+            evidence_chain = []
+            for i, s in enumerate(steps_mapping):
+                step_id = s.get("step_id", "")
+                sr = sr_by_id.get(step_id, {})
+                evidence_chain.append({
+                    "step": i + 1,
+                    "step_id": step_id,
+                    "tool": step_id,                            # back-compat
+                    "finding": s.get("nl_segment", ""),         # back-compat
+                    "nl_segment": s.get("nl_segment", ""),
+                    "python_code": s.get("python_code", ""),
+                    "status": sr.get("status", "ok"),
+                    "output": sr.get("output"),
+                    "error": sr.get("error"),
+                })
+
+            # Visualization: passthrough ChartMiddleware DSL — no vega-lite re-conversion
+            visualization = [
+                {
+                    "id": f"chart_{i}",
+                    "type": "chart-dsl",  # frontend renders via ChartListRenderer
+                    "title": chart.get("title", f"Chart {i+1}"),
+                    "chart": chart,
+                }
+                for i, chart in enumerate(charts)
+            ]
 
             promote_payload = {
                 "title": data.get("title", ""),
-                "steps_mapping": data.get("steps_mapping", []),
+                "steps_mapping": steps_mapping,
                 "input_schema": data.get("input_schema", []),
                 "output_schema": data.get("output_schema", []),
             }
@@ -222,11 +255,11 @@ def _build_render_card(
             contract = {
                 "$schema": "aiops-report/v1",
                 "summary": findings.get("summary", data.get("title", "")),
-                "evidence_chain": [
-                    {"step": i + 1, "tool": s.get("step_id", ""), "finding": s.get("nl_segment", "")}
-                    for i, s in enumerate(data.get("steps_mapping", []))
-                ],
+                "findings": findings,                              # full findings → enables RenderMiddleware
+                "output_schema": data.get("output_schema", []),    # needed by RenderMiddleware
+                "evidence_chain": evidence_chain,
                 "visualization": visualization,
+                "charts": charts,                                  # raw chart DSL list
                 "suggested_actions": [
                     {
                         "label": "⭐ 儲存為我的 Skill",
@@ -238,43 +271,32 @@ def _build_render_card(
 
             if charts:
                 _notify_chart_rendered(result, charts)
+                logger.warning(
+                    "[render_card] execute_analysis: %d step(s), %d chart(s), summary=%r",
+                    len(steps_mapping), len(charts), (findings.get("summary") or "")[:80],
+                )
+                _first = charts[0] if isinstance(charts[0], dict) else None
+                _data = (_first or {}).get("data") if _first else None
+                logger.warning(
+                    "[render_card ↳] first chart title=%r data_rows=%s sample=%s",
+                    (_first or {}).get("title") if _first else None,
+                    len(_data) if isinstance(_data, list) else "?",
+                    str(_data[0])[:200] if isinstance(_data, list) and _data else None,
+                )
+            else:
+                logger.warning(
+                    "[render_card] execute_analysis: %d step(s) but NO charts in data['charts'] — "
+                    "raw data keys=%s, output_schema=%s",
+                    len(steps_mapping),
+                    list(data.keys()),
+                    [(s.get("key"), s.get("type")) for s in (data.get("output_schema") or [])],
+                )
 
             return {
                 "type": "analysis",
                 "tool_name": data.get("title", "Ad-hoc 分析"),
                 "summary": findings.get("summary", ""),
                 "contract": contract,
-            }
-
-    # ── execute_jit (legacy) ──
-    if tool_name == "execute_jit" and isinstance(result, dict):
-        if result.get("status") == "success":
-            jit_data = result.get("data") or {}
-            chart_json = jit_data.get("chart_json")
-            chart_intents = jit_data.get("chart_intents")
-            jit_result = jit_data.get("jit_result") or {}
-            payload: Dict[str, Any] = {}
-            if chart_intents:
-                payload["chart_intents"] = chart_intents
-                _notify_chart_rendered(result, chart_intents)
-            elif chart_json:
-                try:
-                    payload["plotly"] = json.loads(chart_json) if isinstance(chart_json, str) else chart_json
-                except Exception:
-                    payload["chart_json"] = chart_json
-            else:
-                payload = {k: v for k, v in jit_result.items()
-                           if not isinstance(v, (list, dict)) or k == "summary"}
-            return {
-                "type": "utility",
-                "tool_name": jit_data.get("title", "JIT 分析"),
-                "summary": jit_data.get("title", "JIT 分析"),
-                "payload": payload,
-                "row_count": jit_data.get("row_count", 0),
-                "jit_mcp_id": tool_input.get("mcp_id"),
-                "jit_run_params": tool_input.get("run_params", {}),
-                "jit_python_code": tool_input.get("python_code", ""),
-                "jit_title": tool_input.get("title", "JIT 分析"),
             }
 
     return None

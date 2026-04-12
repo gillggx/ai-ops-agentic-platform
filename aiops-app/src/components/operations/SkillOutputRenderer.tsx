@@ -48,6 +48,17 @@ export type SkillFindings = {
   impacted_lots?: string[];
 };
 
+/** Chart DSL produced by backend ChartMiddleware. */
+export type ChartDSL = {
+  type: "line" | "bar" | "scatter";
+  title: string;
+  data: Record<string, unknown>[];
+  x: string;
+  y: string[];
+  rules?: { value: number; label: string; style?: "danger" | "warning" | "center" }[];
+  highlight?: { field: string; eq: unknown } | null;
+};
+
 // ── Plotly dynamic import (no SSR) ────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -367,18 +378,142 @@ export function RenderOutputValue({
   return <PrimitiveValue val={val} />;
 }
 
+// ── ChartDSLRenderer (public) ─────────────────────────────────────────────────
+//
+// Renders the chart DSL produced by backend ChartMiddleware.
+// DSL shape: {type, title, data, x, y, rules, highlight}
+// One <ChartDSLRenderer> = one chart panel.
+
+const RULE_COLOR: Record<string, string> = {
+  danger: "#e53e3e",
+  warning: "#dd6b20",
+  center: "#4a5568",
+};
+
+export function ChartDSLRenderer({ chart }: { chart: ChartDSL }): React.ReactElement {
+  const xs = chart.data.map((r, i) => r[chart.x] ?? i);
+  const yKey = chart.y[0] ?? "value";
+  const ys = chart.data.map(r => r[yKey]);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const traces: any[] = [
+    {
+      x: xs,
+      y: ys,
+      name: yKey,
+      type: chart.type === "bar" ? "bar" : "scatter",
+      mode: chart.type === "scatter" ? "markers" : "lines+markers",
+      line: chart.type === "line" ? { color: "#48bb78", width: 2 } : undefined,
+      marker: { color: "#48bb78", size: 5 },
+    },
+  ];
+
+  // Highlight points (e.g. OOC)
+  if (chart.highlight?.field) {
+    const hlField = chart.highlight.field;
+    const hlEq = chart.highlight.eq;
+    const hlRows = chart.data.filter(r => r[hlField] === hlEq);
+    if (hlRows.length > 0) {
+      traces.push({
+        x: hlRows.map(r => r[chart.x]),
+        y: hlRows.map(r => r[yKey]),
+        name: "異常點",
+        type: "scatter",
+        mode: "markers",
+        marker: { color: "#e53e3e", size: 11, symbol: "circle-open", line: { width: 2, color: "#e53e3e" } },
+      });
+    }
+  }
+
+  // Convert rules → plotly horizontal lines (shapes)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const shapes: any[] = (chart.rules ?? []).map(rule => ({
+    type: "line",
+    xref: "paper", x0: 0, x1: 1,
+    yref: "y", y0: rule.value, y1: rule.value,
+    line: { color: RULE_COLOR[rule.style ?? "center"] ?? "#a0aec0", width: 1.5, dash: rule.style === "center" ? "dot" : "dash" },
+  }));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const annotations: any[] = (chart.rules ?? []).map(rule => ({
+    xref: "paper", yref: "y",
+    x: 1, y: rule.value, xanchor: "right", yanchor: "bottom",
+    text: `${rule.label} ${rule.value}`,
+    font: { size: 10, color: RULE_COLOR[rule.style ?? "center"] ?? "#a0aec0" },
+    showarrow: false,
+  }));
+
+  if (chart.data.length === 0) {
+    return (
+      <div style={{ padding: 12, color: "#a0aec0", fontSize: 12, background: "#f7f8fc", borderRadius: 8 }}>
+        {chart.title} — （無資料）
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: "#f7f8fc", borderRadius: 8, overflow: "hidden", marginBottom: 8 }}>
+      <div style={{ padding: "6px 12px", fontSize: 12, fontWeight: 600, color: "#4a5568", borderBottom: "1px solid #e2e8f0" }}>
+        {chart.title}
+      </div>
+      <Plot
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        data={traces as any}
+        layout={{
+          autosize: true,
+          height: 240,
+          margin: { l: 50, r: 80, t: 12, b: 48 },
+          paper_bgcolor: "transparent",
+          plot_bgcolor: "#f7f8fc",
+          font: { family: "Inter, sans-serif", size: 11 },
+          showlegend: false,
+          xaxis: { gridcolor: "#e2e8f0", title: chart.x },
+          yaxis: { gridcolor: "#e2e8f0", title: yKey },
+          shapes,
+          annotations,
+        }}
+        config={{ responsive: true, displayModeBar: false }}
+        style={{ width: "100%" }}
+        useResizeHandler
+      />
+    </div>
+  );
+}
+
+export function ChartListRenderer({ charts }: { charts?: ChartDSL[] | null }): React.ReactElement | null {
+  if (!charts || charts.length === 0) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
+      {charts.map((c, i) => <ChartDSLRenderer key={`${c.title}-${i}`} chart={c} />)}
+    </div>
+  );
+}
+
 // ── RenderMiddleware (public) ──────────────────────────────────────────────────
 
+/** Output schema types whose data is rendered as charts via backend ChartMiddleware.
+ *  These keys are skipped from RenderMiddleware's inline output rendering — the
+ *  charts are drawn separately by <ChartListRenderer charts={tryRunResult.charts}/>. */
+const CHART_MIDDLEWARE_TYPES = new Set([
+  "spc_chart", "line_chart", "bar_chart", "scatter_chart", "multi_line_chart",
+]);
+
 export function RenderMiddleware({
-  findings, outputSchema,
+  findings, outputSchema, charts,
 }: {
   findings: SkillFindings;
   outputSchema?: OutputSchemaField[];
+  charts?: ChartDSL[] | null;
 }): React.ReactElement {
   const isNew = !!findings.outputs && Object.keys(findings.outputs).length > 0;
-  const dataEntries = isNew
+  const allEntries = isNew
     ? Object.entries(findings.outputs ?? {})
     : Object.entries(findings.evidence ?? {});
+
+  // Skip outputs whose schema type is rendered via backend ChartMiddleware
+  const dataEntries = allEntries.filter(([k]) => {
+    const fieldSpec = outputSchema?.find(f => f.key === k);
+    return !(fieldSpec?.type && CHART_MIDDLEWARE_TYPES.has(fieldSpec.type));
+  });
 
   return (
     <div style={{ fontSize: 13 }}>
@@ -400,17 +535,16 @@ export function RenderMiddleware({
         </div>
       </div>
 
-      {/* Outputs */}
+      {/* Non-chart outputs (scalar / badge / table) */}
       {dataEntries.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {dataEntries.map(([k, v]) => {
             const fieldSpec = outputSchema?.find(f => f.key === k);
             const label = fieldSpec?.label ?? k.replace(/_/g, " ");
-            const isChart = fieldSpec?.type && ["line_chart", "bar_chart", "scatter_chart"].includes(fieldSpec.type);
             return (
               <div key={k}>
                 <div style={{
-                  fontSize: 11, fontWeight: 600, color: "#718096", marginBottom: isChart ? 6 : 3,
+                  fontSize: 11, fontWeight: 600, color: "#718096", marginBottom: 3,
                   textTransform: "uppercase", letterSpacing: "0.3px",
                 }}>
                   {label}
@@ -424,6 +558,10 @@ export function RenderMiddleware({
           })}
         </div>
       )}
+
+      {/* Chart DSL from backend ChartMiddleware (spc_chart, line_chart, etc.) */}
+      <ChartListRenderer charts={charts} />
+
 
       {!isNew && dataEntries.length === 0 && (
         <div style={{ fontSize: 12, color: "#718096", fontStyle: "italic" }}>

@@ -2,12 +2,22 @@
 
 import { useEffect, useState, useRef } from "react";
 import { ClarifyDialog, type ClarifyQuestion, type ClarifyAnswer } from "@/components/skill-builder/ClarifyDialog";
+import { RenderMiddleware, type OutputSchemaField, type ChartDSL, type SkillFindings } from "@/components/operations/SkillOutputRenderer";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type StepMapping = { step_id: string; nl_segment: string; python_code: string };
 type InputField = { key: string; type: string; required: boolean; source?: string; description: string };
 type OutputField = { key: string; type: string; label: string; unit?: string };
+
+type TryRunResult = {
+  success?: boolean;
+  step_results?: Array<{ step_id: string; nl_segment: string; status: string; output?: unknown; error?: string }>;
+  findings?: SkillFindings | null;
+  charts?: ChartDSL[] | null;
+  total_elapsed_ms?: number;
+  error?: string;
+};
 
 type Skill = {
   id: string;
@@ -71,7 +81,7 @@ export default function MySkillsPage() {
   const consoleRef = useRef<HTMLDivElement>(null);
 
   // Try-run
-  const [tryRunResult, setTryRunResult] = useState<Record<string, unknown> | null>(null);
+  const [tryRunResult, setTryRunResult] = useState<TryRunResult | null>(null);
 
   // Clarify dialog
   const [clarifyOpen, setClarifyOpen] = useState(false);
@@ -416,12 +426,24 @@ export default function MySkillsPage() {
                 background: tryRunResult.success !== false ? "#f0fff4" : "#fff5f5",
                 border: `1px solid ${tryRunResult.success !== false ? "#9ae6b4" : "#feb2b2"}`,
               }}>
-                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6, color: tryRunResult.success !== false ? "#276749" : "#9b2c2c" }}>
+                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8, color: tryRunResult.success !== false ? "#276749" : "#9b2c2c" }}>
                   {tryRunResult.success !== false ? "✅ Try-Run 成功" : "❌ Try-Run 失敗"}
+                  {tryRunResult.total_elapsed_ms !== undefined && (
+                    <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: "#718096" }}>
+                      ({tryRunResult.total_elapsed_ms.toFixed(0)} ms)
+                    </span>
+                  )}
                 </div>
-                <pre style={{ fontSize: 11, fontFamily: "monospace", whiteSpace: "pre-wrap", maxHeight: 200, overflow: "auto" }}>
-                  {JSON.stringify(tryRunResult, null, 2)}
-                </pre>
+                {tryRunResult.findings && (
+                  <RenderMiddleware
+                    findings={tryRunResult.findings}
+                    outputSchema={outputSchema as OutputSchemaField[]}
+                    charts={tryRunResult.charts}
+                  />
+                )}
+                {tryRunResult.error && (
+                  <div style={{ color: "#c53030", fontSize: 12, marginTop: 4 }}>{tryRunResult.error}</div>
+                )}
               </div>
             )}
           </div>

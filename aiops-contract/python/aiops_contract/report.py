@@ -26,6 +26,25 @@ class EvidenceItem(BaseModel):
     viz_ref: Optional[str] = Field(
         None, description="對應 visualization[].id，可 null"
     )
+    # ── Extended (DR/AP-style execution detail, optional) ──────────────────
+    step_id: Optional[str] = Field(
+        None, description="Skill step_id (e.g. step1)，與 tool 同義（執行細節用）"
+    )
+    nl_segment: Optional[str] = Field(
+        None, description="Plain-language description of what this step does"
+    )
+    python_code: Optional[str] = Field(
+        None, description="Executed python code for this step"
+    )
+    status: Optional[str] = Field(
+        None, description="ok | error"
+    )
+    output: Optional[Any] = Field(
+        None, description="Step output (any JSON-serialisable value)"
+    )
+    error: Optional[str] = Field(
+        None, description="Error message if status == error"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +97,16 @@ SuggestedAction = Union[AgentAction, HandoffAction]
 # Root Contract
 # ---------------------------------------------------------------------------
 
+class SkillFindings(BaseModel):
+    """Skill / Diagnostic Rule findings (mirrors app.schemas.skill_definition.SkillFindings)."""
+
+    condition_met: bool = False
+    summary: Optional[str] = None
+    outputs: Optional[Dict[str, Any]] = None
+    evidence: Optional[Dict[str, Any]] = None
+    impacted_lots: Optional[List[str]] = None
+
+
 class AIOpsReportContract(BaseModel):
     """
     AIOps Report Contract v1
@@ -97,11 +126,21 @@ class AIOpsReportContract(BaseModel):
     )
     visualization: List[VisualizationItem] = Field(
         default_factory=list,
-        description="視覺化區塊列表",
+        description="視覺化區塊列表（legacy — 新格式請用 charts）",
     )
     suggested_actions: List[SuggestedAction] = Field(
         default_factory=list,
         description="建議的後續動作，前端渲染為可點擊按鈕",
+    )
+    # ── Extended (DR/AP-style result, optional for back-compat) ────────────
+    findings: Optional[SkillFindings] = Field(
+        None, description="Full findings — enables RenderMiddleware to draw scalars/badges/tables"
+    )
+    output_schema: Optional[List[Dict[str, Any]]] = Field(
+        None, description="Output schema for the steps — needed by RenderMiddleware"
+    )
+    charts: Optional[List[Dict[str, Any]]] = Field(
+        None, description="Chart DSL list from backend ChartMiddleware"
     )
 
     model_config = {"populate_by_name": True}

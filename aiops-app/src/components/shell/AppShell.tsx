@@ -1,21 +1,19 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Topbar } from "@/components/layout/Topbar";
-// EquipmentNavigator removed from sidebar — now embedded in Dashboard
 import { AICopilot } from "@/components/copilot/AICopilot";
 import { AnalysisPanel } from "@/components/layout/AnalysisPanel";
 import { AppProvider, useAppContext } from "@/context/AppContext";
 import type { AIOpsReportContract } from "aiops-contract";
 
-// ── Sidebar nav items ──────────────────────────────────────────────────────────
-
 // ── Navigation structure ──────────────────────────────────────────────────────
 
 const OPS_ITEMS = [
   { href: "/alarms",             label: "Alarm Center",     icon: "🔔" },
-  { href: "/",                   label: "Dashboard",        icon: "📊" },
+  { href: "/dashboard",          label: "Dashboard",        icon: "📊" },
 ];
 
 const KNOWLEDGE_ITEMS = [
@@ -32,26 +30,31 @@ const ADMIN_ITEMS = [
   { href: "/system/monitor",        label: "System Monitor",  icon: "🖥️" },
 ];
 
-function NavLink({ href, icon, label, active }: {
-  href: string; icon: string; label: string; active: boolean;
+function NavLink({ href, icon, label, active, collapsed }: {
+  href: string; icon: string; label: string; active: boolean; collapsed: boolean;
 }) {
   return (
-    <Link href={href} style={{
+    <Link href={href} title={collapsed ? label : undefined} style={{
       display: "flex", alignItems: "center", gap: 8,
-      padding: "9px 12px", borderRadius: 6,
+      padding: collapsed ? "10px 0" : "9px 12px",
+      justifyContent: collapsed ? "center" : "flex-start",
+      borderRadius: 6,
       color: active ? "#2b6cb0" : "#4a5568",
       background: active ? "#ebf4ff" : "transparent",
-      textDecoration: "none", fontSize: 13,
+      textDecoration: "none", fontSize: collapsed ? 18 : 13,
       fontWeight: active ? 600 : 400, marginBottom: 2,
       transition: "background 0.1s",
     }}>
-      <span style={{ fontSize: 14 }}>{icon}</span>
-      {label}
+      <span style={{ fontSize: collapsed ? 18 : 14, flexShrink: 0 }}>{icon}</span>
+      {!collapsed && <span>{label}</span>}
     </Link>
   );
 }
 
-function SidebarSection({ title }: { title: string }) {
+function SidebarSection({ title, collapsed }: { title: string; collapsed: boolean }) {
+  if (collapsed) {
+    return <div style={{ height: 1, background: "#e2e8f0", margin: "8px 6px" }} />;
+  }
   return (
     <div style={{
       fontSize: 10, fontWeight: 600, color: "#a0aec0",
@@ -62,59 +65,76 @@ function SidebarSection({ title }: { title: string }) {
   );
 }
 
-// ── Left sidebar — changes content based on active tab ─────────────────────────
+// ── Left sidebar — collapsible VS Code style ─────────────────────────────────
 
 function ContextualSidebar() {
   const pathname = usePathname();
+  const [collapsed, setCollapsed] = useState(true);
 
-  const sidebarStyle: React.CSSProperties = {
-    width: 220, flexShrink: 0,
-    background: "#ffffff",
-    borderRight: "1px solid #e2e8f0",
-    display: "flex", flexDirection: "column",
-    overflowY: "auto",
-  };
+  if (pathname.startsWith("/topology")) return null;
 
-  if (pathname.startsWith("/topology")) {
-    return null;
-  }
-
-  // Unified sidebar for all pages (except topology)
-  const isExact = (href: string) => href === "/" ? pathname === "/" : pathname.startsWith(href);
+  const isExact = (href: string) =>
+    href === "/dashboard" ? (pathname === "/" || pathname === "/dashboard") : pathname.startsWith(href);
 
   return (
-    <nav style={sidebarStyle}>
-      <div style={{ padding: "8px", flex: 1 }}>
-        <SidebarSection title="Operations Center" />
+    <nav style={{
+      width: collapsed ? 48 : 200,
+      minWidth: collapsed ? 48 : 200,
+      flexShrink: 0,
+      background: "#ffffff",
+      borderRight: "1px solid #e2e8f0",
+      display: "flex", flexDirection: "column",
+      overflowY: "auto", overflowX: "hidden",
+      transition: "width 0.2s, min-width 0.2s",
+    }}>
+      {/* Header with collapse toggle */}
+      <div style={{
+        padding: collapsed ? "12px 0" : "10px 12px",
+        borderBottom: "1px solid #e2e8f0",
+        display: "flex", alignItems: "center",
+        justifyContent: collapsed ? "center" : "space-between",
+        flexShrink: 0,
+      }}>
+        {!collapsed && <span style={{ fontSize: 14, fontWeight: 700, color: "#1a202c" }}>AIOps</span>}
+        <button onClick={() => setCollapsed(c => !c)} title={collapsed ? "展開選單" : "收合選單"} style={{
+          background: "none", border: "none", cursor: "pointer",
+          color: "#718096", fontSize: 12, padding: "4px",
+        }}>
+          {collapsed ? "▶" : "◀"}
+        </button>
+      </div>
+
+      <div style={{ padding: collapsed ? "4px" : "8px", flex: 1 }}>
+        <SidebarSection title="Operations Center" collapsed={collapsed} />
         {OPS_ITEMS.map(({ href, label, icon }) => (
           <NavLink key={href} href={href} icon={icon} label={label}
-            active={isExact(href)} />
+            active={isExact(href)} collapsed={collapsed} />
         ))}
 
-        <SidebarSection title="Knowledge Studio" />
+        <SidebarSection title="Knowledge Studio" collapsed={collapsed} />
         {KNOWLEDGE_ITEMS.map(({ href, label, icon }) => (
           <NavLink key={href} href={href} icon={icon} label={label}
-            active={isExact(href)} />
+            active={isExact(href)} collapsed={collapsed} />
         ))}
 
-        <SidebarSection title="Admin" />
+        <SidebarSection title="Admin" collapsed={collapsed} />
         {ADMIN_ITEMS.map(({ href, label, icon }) => (
           <NavLink key={href} href={href} icon={icon} label={label}
-            active={isExact(href)} />
+            active={isExact(href)} collapsed={collapsed} />
         ))}
       </div>
     </nav>
   );
 }
 
-// ── Inner shell (needs context) ────────────────────────────────────────────────
+// ── Inner shell ──────────────────────────────────────────────────────────────
 
 function Shell({ children }: { children: React.ReactNode }) {
   const {
-    selectedEquipment,
     triggerMessage, setTriggerMessage,
     contract, setContract,
     investigateMode, setInvestigateMode,
+    selectedEquipment,
   } = useAppContext();
 
   function handleContract(c: AIOpsReportContract) {
@@ -131,14 +151,9 @@ function Shell({ children }: { children: React.ReactNode }) {
       display: "flex", flexDirection: "column",
       height: "100vh", background: "#f7f8fc", overflow: "hidden",
     }}>
-      {/* Top navigation — always visible */}
       <Topbar />
-
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-        {/* Left — contextual sidebar, never unmounts */}
         <ContextualSidebar />
-
-        {/* Center — route content OR analysis panel overlay */}
         <main style={{ flex: 1, overflowY: "auto", minWidth: 0 }}>
           {investigateMode && contract ? (
             <AnalysisPanel
@@ -147,18 +162,12 @@ function Shell({ children }: { children: React.ReactNode }) {
               onAgentMessage={(msg) => setTriggerMessage(msg)}
               onHandoff={handleHandoff}
             />
-          ) : (
-            children
-          )}
+          ) : children}
         </main>
-
-        {/* Right — AI Co-Pilot, never unmounts = messages persist */}
         <aside style={{
           width: 360, flexShrink: 0,
           display: "flex", flexDirection: "column",
-          background: "#ffffff",
-          borderLeft: "1px solid #e2e8f0",
-          overflow: "hidden",
+          background: "#ffffff", borderLeft: "1px solid #e2e8f0", overflow: "hidden",
         }}>
           <AICopilot
             onContract={handleContract}
@@ -172,8 +181,6 @@ function Shell({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-
-// ── Public export ──────────────────────────────────────────────────────────────
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (

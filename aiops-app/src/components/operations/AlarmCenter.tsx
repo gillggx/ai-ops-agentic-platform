@@ -1,7 +1,17 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { RenderMiddleware, type SkillFindings, type OutputSchemaField } from "./SkillOutputRenderer";
+import { RenderMiddleware, type SkillFindings, type OutputSchemaField, type ChartDSL } from "./SkillOutputRenderer";
+
+type DiagnosticResult = {
+  log_id: number;
+  skill_id: number | null;
+  skill_name: string;
+  status: string;
+  findings: SkillFindings | null;
+  output_schema: OutputSchemaField[] | null;
+  charts: ChartDSL[] | null;
+};
 
 type Alarm = {
   id: number;
@@ -23,6 +33,10 @@ type Alarm = {
   diagnostic_log_id: number | null;
   findings: SkillFindings | null;
   output_schema: OutputSchemaField[] | null;
+  charts?: ChartDSL[] | null;
+  // New: full list of DR results (one entry per bound Diagnostic Rule)
+  diagnostic_results?: DiagnosticResult[];
+  // Legacy single-DR fields (back-compat only)
   diagnostic_findings: SkillFindings | null;
   diagnostic_output_schema: OutputSchemaField[] | null;
 };
@@ -92,7 +106,20 @@ function AlarmDetailModal({ alarm, onClose }: { alarm: Alarm; onClose: () => voi
   const [tab, setTab] = useState<"trigger" | "diagnostic">("trigger");
 
   const hasApFindings = alarm.findings && Object.keys(alarm.findings).length > 0;
-  const hasDrFindings = alarm.diagnostic_findings && Object.keys(alarm.diagnostic_findings).length > 0;
+  const diagnosticResults = alarm.diagnostic_results ?? [];
+  // Legacy fallback: if backend didn't provide diagnostic_results but has the old single-field, synthesise one entry
+  const drList: DiagnosticResult[] = diagnosticResults.length > 0
+    ? diagnosticResults
+    : (alarm.diagnostic_findings ? [{
+        log_id: alarm.diagnostic_log_id ?? 0,
+        skill_id: null,
+        skill_name: "Diagnostic Rule",
+        status: "success",
+        findings: alarm.diagnostic_findings,
+        output_schema: alarm.diagnostic_output_schema,
+        charts: null,
+      }] : []);
+  const hasDrFindings = drList.length > 0;
   const parsed = parseSummary(alarm.summary);
   const sev = SEV[alarm.severity] ?? SEV.MEDIUM;
 
@@ -204,7 +231,7 @@ function AlarmDetailModal({ alarm, onClose }: { alarm: Alarm; onClose: () => voi
 
               {/* Rendered findings */}
               {hasApFindings ? (
-                <RenderMiddleware findings={alarm.findings!} outputSchema={alarm.output_schema ?? []} />
+                <RenderMiddleware findings={alarm.findings!} outputSchema={alarm.output_schema ?? []} charts={alarm.charts ?? null} />
               ) : parsed && Object.keys(parsed).length > 0 ? (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                   {Object.entries(parsed).map(([k, v]) => (
@@ -228,40 +255,76 @@ function AlarmDetailModal({ alarm, onClose }: { alarm: Alarm; onClose: () => voi
           {tab === "diagnostic" && (
             <div>
               {hasDrFindings ? (
-                <>
-                  {/* Diagnostic banner */}
-                  <div style={{
-                    background: alarm.diagnostic_findings?.condition_met ? "#fef2f2" : "#f0fdf4",
-                    border: `1px solid ${alarm.diagnostic_findings?.condition_met ? "#fca5a5" : "#86efac"}`,
-                    borderRadius: 8, padding: "14px 16px", marginBottom: 16,
-                  }}>
-                    <div style={{
-                      fontSize: 12, fontWeight: 700, marginBottom: 4,
-                      color: alarm.diagnostic_findings?.condition_met ? "#dc2626" : "#16a34a",
-                    }}>
-                      {alarm.diagnostic_findings?.condition_met
-                        ? "🔴 深度診斷結果 (DIAGNOSTIC RULE)"
-                        : "🟢 深度診斷結果 (DIAGNOSTIC RULE)"}
-                    </div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#1a202c" }}>
-                      {alarm.diagnostic_findings?.condition_met ? "條件達成 — 需要處置" : "條件未達成 — 不需觸發警報"}
-                    </div>
-                    {alarm.diagnostic_findings?.summary && (
-                      <div style={{
-                        marginTop: 8, padding: "8px 12px", borderRadius: 6,
-                        background: alarm.diagnostic_findings.condition_met ? "#fee2e2" : "#dcfce7",
-                        fontSize: 12, color: "#4a5568",
+                <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+                  {drList.map((dr, idx) => {
+                    const metaColor = dr.findings?.condition_met ? "#dc2626" : "#16a34a";
+                    const bannerBg = dr.findings?.condition_met ? "#fef2f2" : "#f0fdf4";
+                    const bannerBorder = dr.findings?.condition_met ? "#fca5a5" : "#86efac";
+                    return (
+                      <div key={dr.log_id || idx} style={{
+                        border: "1px solid #e2e8f0", borderRadius: 10, padding: 0, overflow: "hidden",
                       }}>
-                        {alarm.diagnostic_findings.summary}
-                      </div>
-                    )}
-                  </div>
+                        {/* DR header strip */}
+                        <div style={{
+                          padding: "10px 14px", background: "#f7fafc",
+                          borderBottom: "1px solid #e2e8f0",
+                          display: "flex", alignItems: "center", gap: 8,
+                        }}>
+                          <span style={{
+                            padding: "2px 8px", borderRadius: 4, background: "#2d3748", color: "#fff",
+                            fontSize: 10, fontWeight: 700, letterSpacing: "0.3px",
+                          }}>DR {idx + 1}/{drList.length}</span>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: "#1a202c" }}>
+                            {dr.skill_name || `Rule #${dr.skill_id}`}
+                          </span>
+                          {dr.skill_id && (
+                            <a href={`/admin/skills?edit=${dr.skill_id}`} target="_blank" rel="noreferrer"
+                              style={{
+                                marginLeft: "auto", fontSize: 11, color: "#2b6cb0", textDecoration: "none",
+                              }}
+                            >編輯 ↗</a>
+                          )}
+                        </div>
 
-                  <RenderMiddleware
-                    findings={alarm.diagnostic_findings!}
-                    outputSchema={alarm.diagnostic_output_schema ?? []}
-                  />
-                </>
+                        {/* Diagnostic banner */}
+                        <div style={{ padding: "14px 16px" }}>
+                          <div style={{
+                            background: bannerBg, border: `1px solid ${bannerBorder}`,
+                            borderRadius: 8, padding: "14px 16px", marginBottom: 12,
+                          }}>
+                            <div style={{
+                              fontSize: 12, fontWeight: 700, marginBottom: 4, color: metaColor,
+                            }}>
+                              {dr.findings?.condition_met
+                                ? "🔴 深度診斷結果 (DIAGNOSTIC RULE)"
+                                : "🟢 深度診斷結果 (DIAGNOSTIC RULE)"}
+                            </div>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: "#1a202c" }}>
+                              {dr.findings?.condition_met ? "條件達成 — 需要處置" : "條件未達成 — 不需觸發警報"}
+                            </div>
+                            {dr.findings?.summary && (
+                              <div style={{
+                                marginTop: 8, padding: "8px 12px", borderRadius: 6,
+                                background: dr.findings.condition_met ? "#fee2e2" : "#dcfce7",
+                                fontSize: 12, color: "#4a5568",
+                              }}>
+                                {dr.findings.summary}
+                              </div>
+                            )}
+                          </div>
+
+                          {dr.findings && (
+                            <RenderMiddleware
+                              findings={dr.findings}
+                              outputSchema={dr.output_schema ?? []}
+                              charts={dr.charts ?? null}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               ) : alarm.diagnostic_log_id ? (
                 <div style={{ padding: 32, textAlign: "center", color: "#a0aec0" }}>
                   <div style={{ fontSize: 24, marginBottom: 8 }}>⏳</div>

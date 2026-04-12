@@ -1,9 +1,9 @@
 import os
 
 # ── Simulation Scale ──────────────────────────────────────────
-TOTAL_LOTS    = int(os.getenv("TOTAL_LOTS", "9999"))
+TOTAL_LOTS    = int(os.getenv("TOTAL_LOTS", "99999"))
 TOTAL_TOOLS   = 10
-TOTAL_STEPS   = 100
+TOTAL_STEPS   = 10
 TOTAL_RECIPES = 20
 
 # ── Timing (seconds; dev defaults — prod: set PROCESSING_MIN/MAX to 480/600) ─

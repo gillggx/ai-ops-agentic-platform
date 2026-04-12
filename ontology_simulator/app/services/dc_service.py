@@ -106,10 +106,12 @@ def generate_readings(tool_id: str = "") -> dict:
             val = random.uniform(lo, hi) + drift.get(sensor, 0.0)
         readings[sensor] = round(val, 4)
 
-    # Accumulate drift for next step (tool ages a little more each run)
+    # Accumulate drift: exponential decay + gaussian noise (slow wandering baseline).
+    # 0.98 factor makes old drift slowly fade; gauss(0, rate*0.3) adds trend-like noise.
+    # Net effect: slow tool wear with some recovery, not monotonic step-up.
     if tool_id:
         for s, rate in _DRIFT_RATES.items():
-            drift[s] += random.uniform(0.0, rate)
+            drift[s] = drift[s] * 0.98 + random.gauss(0, rate * 0.3)
 
     return readings
 

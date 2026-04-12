@@ -72,15 +72,8 @@ async def _build_mcp_catalog_from_db(db) -> str:
         lines.append(params_str)
         lines.append("")
 
-    lines.append("⚠️ CRITICAL — MCP RESPONSE FORMAT RULES:")
-    lines.append("  1. get_process_events returns a LIST (not dict). Use: events = result if isinstance(result, list) else []")
-    lines.append("  2. get_process_info returns a LIST of {event: {...}, objects: {...}}. Same pattern.")
-    lines.append("  3. ALL field names are camelCase:")
-    lines.append("     event.get('eventTime')  ← NOT 'timestamp'")
-    lines.append("     event.get('lotID')      ← NOT 'lot_id'")
-    lines.append("     event.get('toolID')     ← NOT 'tool_id'")
-    lines.append("     event.get('spc_status') ← 'PASS' or 'OOC' (NOT 'status', NOT 'FAIL')")
-    lines.append("  4. get_process_events does NOT return measurement values. Use get_process_info for DC/SPC/APC data.")
+    lines.append("⚠️ Response shape and field names — read each MCP's `description` above.")
+    lines.append("    The description is the single source of truth; do not invent shapes from memory.")
     lines.append("")
 
     return "\n".join(lines)
@@ -108,7 +101,16 @@ OUTPUT SCHEMA TYPES — pick the most appropriate type for each output field:
     ✅ [{"eventTime": "2026-...", "lotID": "LOT-001", "spc_status": "PASS"}, ...]
     ❌ {"headers": [...], "rows": [...]}
   - spc_chart: list of FLAT dicts with group_key 區分 chart type
-    ✅ [{"eventTime": "...", "chart_type": "xbar_chart", "value": 14.5, "ucl": 17.5, "lcl": 12.5, "is_ooc": false}, ...]
+    ✅ [
+         {"eventTime": "...", "chart_type": "xbar_chart", "value": 14.5, "ucl": 17.5, "lcl": 12.5, "is_ooc": false},
+         {"eventTime": "...", "chart_type": "r_chart",    "value":  1.2, "ucl":  3.0, "lcl":  0.0, "is_ooc": false},
+         ...
+       ]
+    ❌ NEVER nest by chart_type:
+       {"xbar_chart": {"data_points": [...]}, "r_chart": {"data_points": [...]}}
+    ❌ NEVER nest into a "charts" wrapper:
+       {"charts": {"xbar_chart": [...]}}
+    Why: ChartMiddleware groups by group_key on a flat list. Nested shapes break it.
   - line_chart: list of FLAT dicts
     ✅ [{"eventTime": "...", "value": 14.5}, ...]"""
 
@@ -810,6 +812,25 @@ PATROL EXECUTION CONTEXT (very important):
                                         f"應該是 ISO8601 時間字串（用 event.get('eventTime')）"
                                     )
 
+                    # Check spc_chart shape — must be flat list with group_key, NOT nested by group
+                    for s in output_schema:
+                        if s.get("type") == "spc_chart" and s["key"] in (outputs or {}):
+                            spc_data = outputs[s["key"]]
+                            group_key = s.get("group_key", "chart_type")
+                            if isinstance(spc_data, dict):
+                                issues.append(
+                                    f"output '{s['key']}' spc_chart 格式錯誤 — 應該是 flat list of dicts "
+                                    f"with '{group_key}' 欄位區分 chart type，不是 {{group_name: {{...}}}} 巢狀結構。"
+                                    f"範例: [{{'eventTime':..., '{group_key}':'xbar_chart', 'value':14.5, 'ucl':17.5, 'lcl':12.5, 'is_ooc':false}}, ...]"
+                                )
+                            elif isinstance(spc_data, list) and spc_data:
+                                first = spc_data[0]
+                                if isinstance(first, dict) and group_key not in first:
+                                    issues.append(
+                                        f"output '{s['key']}' spc_chart 缺少 group_key '{group_key}' — "
+                                        f"每筆 record 都必須有 '{group_key}' 欄位（值為 xbar_chart/r_chart/s_chart/p_chart/c_chart）"
+                                    )
+
                     # Check schema keys match
                     schema_keys = {s["key"] for s in output_schema}
                     output_keys = set(outputs.keys()) if isinstance(outputs, dict) else set()
@@ -970,18 +991,28 @@ Runtime variables available (use in params_template):
 
 Rules:
 - Only use MCPs from the catalog above
-- Max 5 MCP calls
+- Max 5 MCP calls (prefer 1-2)
 - params_template: use {{{{variable_name}}}} for dynamic values (e.g. {{{{equipment_id}}}})
 - List in execution order
 
+⚠️ CRITICAL — RESPECT USER'S EXPLICIT VALUES ⚠️
+If the user description contains specific values (numbers, time windows, IDs, thresholds),
+you MUST use those exact values in params_template. **NEVER substitute with your own defaults**.
+Read each MCP's description + input_schema above to find the parameter that matches the user's
+intent — do not invent fields, do not switch to a different MCP to dodge a parameter you
+"don't like".
+
+⚠️ AVOID REDUNDANT MCPS — pick the smallest set of MCPs that already covers the user's need.
+If one MCP's description says it returns the data you need, do not call a second one to "supplement".
+
 Required output format:
 {{
-  "reasoning": "brief explanation of what data is needed and why",
+  "reasoning": "brief explanation of what data is needed and why (must mention any user-given values)",
   "mcp_calls": [
     {{"mcp_name": "<pick from catalog>", "purpose": "<why>", "params_template": {{"toolID": "{{{{equipment_id}}}}"}}}}
   ]
 }}
-Only include MCPs that are truly needed. One MCP can return enough data — don't add extras."""
+Only include MCPs that are truly needed. **One MCP is usually enough**."""
 
         resp = await self._llm.create(
             system=system_prompt,
@@ -1026,6 +1057,12 @@ CRITICAL RULES — EFFICIENCY:
   ✅ "step1: fetch all process events" → "step2: loop through results to extract APC params"
   ❌ "step2: for each event, call get_process_info" (same API called N times = wasteful)
 - MCP calls are expensive. One call returns all data for the given toolID — no need to call per-record.
+
+⚠️ RESPECT USER'S EXPLICIT VALUES ⚠️
+If the user description contains specific values (numbers, time windows, IDs, thresholds),
+the generated code MUST pass those exact values through to the MCP — do not substitute with
+your own defaults. Parameterize via _input.get() / pre-injected vars, but pass through as-is.
+Find the right MCP parameter from the CONFIRMED MCP CALLS section above (not from memory).
 
 {_OUTPUT_SCHEMA_GUIDE}
 

@@ -19,6 +19,19 @@ export interface EvidenceItem {
   finding: string;
   /** 對應 visualization[].id，可 undefined */
   viz_ref?: string;
+  // ── Extended (DR/AP-style execution detail) ────────────────────────────
+  /** Skill step_id (e.g. "step1") — same as `tool` for execute_analysis */
+  step_id?: string;
+  /** Plain-language description of what this step does */
+  nl_segment?: string;
+  /** Python code that was executed for this step */
+  python_code?: string;
+  /** Step execution status */
+  status?: "ok" | "error";
+  /** Step output (any JSON-serialisable value) */
+  output?: unknown;
+  /** Error message if status === "error" */
+  error?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -75,16 +88,49 @@ export type SuggestedAction = AgentAction | HandoffAction;
 // Root Contract
 // ---------------------------------------------------------------------------
 
+/**
+ * Findings produced by Skill / Diagnostic Rule execution.
+ * Mirrors `app.schemas.skill_definition.SkillFindings`.
+ */
+export interface SkillFindings {
+  condition_met: boolean;
+  summary?: string;
+  outputs?: Record<string, unknown>;
+  evidence?: Record<string, unknown>;
+  impacted_lots?: string[];
+}
+
+/**
+ * Chart DSL produced by backend ChartMiddleware.
+ * Frontend renders via <ChartListRenderer />.
+ */
+export interface ChartDSL {
+  type: "line" | "bar" | "scatter";
+  title: string;
+  data: Record<string, unknown>[];
+  x: string;
+  y: string[];
+  rules?: { value: number; label: string; style?: "danger" | "warning" | "center" }[];
+  highlight?: { field: string; eq: unknown } | null;
+}
+
 export interface AIOpsReportContract {
   $schema: typeof SCHEMA_VERSION;
   /** 給人類閱讀的根因結論或回應摘要 */
   summary: string;
   /** 推理過程中每個工具呼叫的關鍵發現 */
   evidence_chain: EvidenceItem[];
-  /** 視覺化區塊列表 */
+  /** 視覺化區塊列表（legacy — 新格式請用 charts） */
   visualization: VisualizationItem[];
   /** 建議的後續動作，前端渲染為可點擊按鈕 */
   suggested_actions: SuggestedAction[];
+  // ── Extended (DR/AP-style result, optional for back-compat) ────────────
+  /** Full findings — enables RenderMiddleware to draw scalars/badges/tables */
+  findings?: SkillFindings;
+  /** Output schema for the steps — needed by RenderMiddleware */
+  output_schema?: Array<Record<string, unknown>>;
+  /** Chart DSL list from backend ChartMiddleware (preferred over visualization) */
+  charts?: ChartDSL[];
 }
 
 // ---------------------------------------------------------------------------

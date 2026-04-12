@@ -328,117 +328,34 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
             "required": ["text"],
         },
     },
-    # ── [v15.1] Agent Tool Chest ───────────────────────────────────────────
-    {
-        "name": "execute_agent_tool",
-        "description": (
-            "【第二優先級】執行你自己先前累積的 Agent Tool（私有工具）。"
-            "適用條件：現有 Skill 不符合，但你的工具庫中有描述相符、曾成功執行過的腳本。"
-            "傳入 tool_id（從 tools_manifest.agent_tools 取得）和 raw_data（已撈取的 df 資料）。"
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "tool_id": {"type": "integer", "description": "Agent Tool ID（從 tools_manifest.agent_tools 取得）"},
-                "raw_data": {
-                    "type": "array",
-                    "items": {"type": "object"},
-                    "description": "要分析的資料集（list-of-dicts，即 df 來源）",
-                },
-            },
-            "required": ["tool_id", "raw_data"],
-        },
-    },
-    # ── [v15.6] Structured Analysis Templates — zero-code chart/stats ─────
-    {
-        "name": "analyze_data",
-        "description": (
-            "【第二點五優先級 v15.6】使用預建分析模板對 MCP 全量資料進行分析。\n"
-            "★ 標準圖表分析必須優先使用此工具（不要寫 Python）：\n"
-            "   linear_regression / spc_chart / boxplot / stats_summary / correlation\n"
-            "優點：模板已內建正確的 datetime 回歸（index-based）、Y 軸範圍設定、UCL/LCL/OOC 標注。\n"
-            "Agent 只需映射欄位名稱（value_col / time_col 等），零程式碼，零錯誤。\n"
-            "流程：\n"
-            "  1. execute_mcp 取 schema_sample（5筆）→ 確認欄位名稱\n"
-            "  2. analyze_data(mcp_id=..., template='linear_regression', params={value_col: '...', time_col: '...'})\n"
-            "  Server 端自動：抓全量資料 → 執行模板 → 回傳 chart_json + stats + llm_readable_data\n"
-            "⚠️ 若分析需求超出 5 個模板範圍（例如多步驟自定義邏輯），才退而使用 execute_jit。\n"
-            "不確定模板參數時：先呼叫 GET /api/v1/agent/analyze-data/templates 查看說明。"
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "mcp_name": {"type": "string", "description": "MCP 名稱，必須與 <mcp_catalog> 中的 name 完全相符"},
-                "run_params": {"type": "object", "description": "MCP 執行參數，例如 {CHART_NAME: 'CD', lot_id: 'L2603001'}"},
-                "template": {
-                    "type": "string",
-                    "enum": ["linear_regression", "spc_chart", "boxplot", "stats_summary", "correlation"],
-                    "description": "分析模板名稱",
-                },
-                "params": {
-                    "type": "object",
-                    "description": (
-                        "模板欄位映射（對應 DataFrame 的欄位名稱）：\n"
-                        "  linear_regression: {value_col(必), time_col?, group_col?, ucl?, lcl?, cl?, title?}\n"
-                        "  spc_chart:         {value_col(必), ucl(必), lcl(必), time_col?, group_col?, cl?, title?}\n"
-                        "  boxplot:           {value_col(必), group_col(必), title?}\n"
-                        "  stats_summary:     {value_col(必), group_col?, title?}\n"
-                        "  correlation:       {col_x(必), col_y(必), group_col?, title?}"
-                    ),
-                },
-                "title": {"type": "string", "description": "分析標題（可選）"},
-            },
-            "required": ["mcp_name", "template", "params"],
-        },
-    },
-    # ── Ad-hoc Analysis (replaces execute_jit) ─────────────────────────
+    # ── Ad-hoc Analysis (the ONLY entry point for analysis + charts) ──────
     {
         "name": "execute_analysis",
         "description": (
-            "【動態分析 + 判斷工具】生成可執行的 Python code，在分析面板呈現結果（含圖表）。\n"
-            "★★★ 使用者可以一鍵「儲存為 My Skill」→ 再升級為 Auto-Patrol（自動巡檢告警）。\n"
+            "== What ==\n"
+            "多步驟 Python 分析 + 判斷。產出的 code 可一鍵儲存為 Skill → Auto-Patrol。\n"
             "\n"
-            "★ 兩種模式：\n"
-            "  mode='auto'（預設推薦）：只提供 title + description，後端自動生成分析程式碼並執行。\n"
-            "    → 自動產出 chart、table、診斷結論。\n"
-            "  mode='code'：自行提供 steps（python_code），適合 auto 失敗時的 fallback。\n"
+            "== IMPORTANT: 什麼時候 **不要** 用 execute_analysis ==\n"
+            "⛔ 如果 <mcp_catalog> 裡有 MCP 能直接拿到使用者要的資料 → **優先用 execute_mcp**。\n"
+            "   execute_mcp 拿到資料後，系統會自動用 chart middleware 畫圖，不需要你做任何事。\n"
+            "   例如：「查 STEP_001 SPC 數據」→ execute_mcp(get_process_info) → 系統自動畫 5 chart。\n"
+            "   不需要 execute_analysis。\n"
             "\n"
-            "★★★ 必須使用的場景（禁止用 LLM 推理代替）：\n"
-            "  - 任何「判斷條件是否成立」的問題：最近 N 點有幾點 OOC、是否超閾值、是否需要維護\n"
-            "  - 任何「檢查」「驗證」「確認」類問題\n"
-            "  - 理由：只有 execute_analysis 產生的 code 才能儲存為 Skill → 升級為 Auto-Patrol\n"
+            "== Use when ==\n"
+            "- 需要「多步 Python 邏輯」的複合分析（例如：跨多筆 lot 比對 APC 參數偏移）\n"
+            "- 需要「判斷條件是否成立」（例如：最近 5 筆有 ≥2 筆 OOC？）\n"
+            "- <skill_catalog> 和 <mcp_catalog> 都找不到能直接完成的現成工具\n"
             "\n"
-            "★ 也適用於：\n"
-            "  - 複合分析（撈多個 MCP + 交叉比對 + 畫圖）\n"
-            "  - <skill_catalog> 裡沒有合適的現成 Skill 時\n"
+            "== mode ==\n"
+            "mode='auto'（推薦）：只給 title + description，後端自動生成分析 code 並執行。\n"
+            "mode='code'：自行提供 steps[].python_code，僅限 auto 失敗時的 fallback。\n"
             "\n"
-            "★ steps 格式（跟 Diagnostic Rule 一樣）：\n"
-            "  每個 step 的 python_code 在同一個 async scope 裡執行，\n"
-            "  可呼叫 await execute_mcp(mcp_name, params) 撈資料。\n"
-            "  可用變數：equipment_id, lot_id, step, event_time, _input\n"
-            "\n"
-            "★ 圖表輸出 — 用戶提到「圖」「chart」「趨勢」「trend」時必須使用：\n"
-            "  在最後一步 assign _chart（單張）或 _charts（多張 list）：\n"
-            "  _chart = {\n"
-            "    'type': 'line',\n"
-            "    'title': 'STEP_020 xbar_chart',\n"
-            "    'data': [{'eventTime': '2026-04-08T12:00:00', 'value': 14.5, 'ucl': 17.5, 'lcl': 12.5, 'is_ooc': False}, ...],\n"
-            "    'x': 'eventTime', 'y': ['value', 'ucl', 'lcl'],\n"
-            "    'rules': [{'value': 17.5, 'label': 'UCL', 'style': 'danger'}, {'value': 12.5, 'label': 'LCL', 'style': 'danger'}],\n"
-            "    'highlight': {'field': 'is_ooc', 'eq': True},\n"
-            "  }\n"
-            "  多張圖表用 _charts = [_chart1, _chart2, ...]，每張各自的 title/data。\n"
-            "  ⚠️ 如果不 assign _chart/_charts，前端不會畫圖！\n"
-            "\n"
-            "★ 診斷結果 — 在最後一步 assign _findings：\n"
-            "  _findings = {\n"
-            "    'condition_met': True/False,\n"
-            "    'summary': '一句話結論',\n"
-            "    'outputs': {...},\n"
-            "    'impacted_lots': [...],\n"
-            "  }\n"
-            "\n"
-            "⚠️ 禁止在 python_code 裡 import requests/os/sys/subprocess\n"
+            "★ mode='code' 只在 mode='auto' 失敗時才用，且 steps[].python_code 應遵循 Skill code 規範：\n"
+            "  - 用 await execute_mcp(mcp_name, params) 撈資料\n"
+            "  - 在最後一步 assign _findings.outputs[key] = data\n"
+            "  - 圖表由 ChartMiddleware 從 output_schema 自動產生，**不要**手動 assign _chart/_charts\n"
+            "  - 可用變數：equipment_id, lot_id, step, event_time, _input\n"
+            "  - 禁止 import requests/os/sys/subprocess\n"
         ),
         "input_schema": {
             "type": "object",
@@ -475,52 +392,6 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
                 },
             },
             "required": ["title"],
-        },
-    },
-    # ── [v15.3] Generic Tools (inline / small dataset only) ───────────────
-    {
-        "name": "execute_utility",
-        "description": (
-            "呼叫兵工廠 150 個原子通用工具（75 分析 + 75 視覺化），僅適合 inline 小型資料（< 20 筆）。\n"
-            "⚠️ 大型 MCP 資料請改用 execute_jit（不需傳遞資料列）。\n"
-            "【分析工具（75）】統計: calc_statistics, find_outliers, correlation_analysis, linear_regression, "
-            "chi_square_test, t_test, anova_test, pca_analysis, kmeans_cluster, dbscan_cluster, "
-            "isolation_forest, z_score_normalize, min_max_scale, robust_scale, winsorize, "
-            "binning_equal_width, binning_quantile, target_encode, label_encode, "
-            "moving_average, exponential_smoothing, seasonal_decompose, acf_pacf, "
-            "change_point_detect, trend_test, granger_causality, cross_correlation, "
-            "time_weighted_average, resample_time_series, interpolate_missing, "
-            "frequency_analysis, top_n_values, value_counts_stats, cross_reference, "
-            "logic_evaluator, spc_control_limits, cpk_ppk, gage_r_r, "
-            "survival_analysis, forecast_ets, forecast_arima, forecast_prophet "
-            "及更多...\n"
-            "【視覺化工具（75）】plot_line, plot_bar, plot_scatter, plot_histogram, plot_box, "
-            "plot_heatmap, plot_pie, plot_area, plot_bubble, plot_violin, "
-            "plot_spc_chart, plot_pareto, plot_waterfall, plot_gantt, "
-            "plot_correlation_matrix, plot_acf_pacf, plot_3d_scatter, plot_3d_surface, "
-            "plot_radar, plot_sankey, plot_treemap, plot_sunburst, "
-            "plot_candlestick, plot_bullet_chart, plot_gauge, plot_event_markers "
-            "及更多...\n"
-            "如用戶問「你有什麼分析工具」，請直接列舉以上類別。"
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "tool_name": {
-                    "type": "string",
-                    "description": "通用工具名稱，例如 'calc_statistics' / 'plot_line'",
-                },
-                "data": {
-                    "type": "array",
-                    "items": {"type": "object"},
-                    "description": "小型資料集（list-of-dicts，< 20 筆）",
-                },
-                "params": {
-                    "type": "object",
-                    "description": "工具專屬參數",
-                },
-            },
-            "required": ["tool_name", "data"],
         },
     },
     {
@@ -577,9 +448,6 @@ class ToolDispatcher:
         "patch_mcp", "patch_skill_raw",
         "search_catalog",   # returns catalog items, not raw datasets
         "execute_analysis",  # result already processed in sandbox
-        "execute_jit",      # legacy alias — kept for backward compat
-        "execute_utility",  # result is already processed by generic tool
-        "analyze_data",     # pre-built template result already processed
     })
 
     # Catalog type → API endpoint mapping
@@ -706,24 +574,7 @@ class ToolDispatcher:
                         "/api/v1/agent/preference",
                         body={"user_id": self._user_id, "text": tool_input["text"]},
                     )
-                # ── [v15.6] Structured Analysis Templates ─────────────────
-                case "analyze_data":
-                    mcp_id = await self._resolve_mcp_id(tool_input)
-                    if mcp_id is None:
-                        return {"status": "error", "code": "MCP_NOT_FOUND",
-                                "message": f"找不到 MCP '{tool_input.get('mcp_name', '')}'"}
-                    return await self._call_api(
-                        "POST",
-                        "/api/v1/agent/analyze-data",
-                        body={
-                            "mcp_id": mcp_id,
-                            "run_params": tool_input.get("run_params", {}),
-                            "template": tool_input["template"],
-                            "params": tool_input.get("params", {}),
-                            "title": tool_input.get("title", ""),
-                        },
-                    )
-                # ── Ad-hoc Analysis (replaces execute_jit) ──────────────
+                # ── Ad-hoc Analysis (the only entry point for analysis + charts) ──────
                 case "execute_analysis":
                     return await self._call_api(
                         "POST",
@@ -736,39 +587,6 @@ class ToolDispatcher:
                             "input_params": tool_input.get("input_params", {}),
                         },
                         timeout=120.0,  # auto mode involves LLM code gen → needs longer timeout
-                    )
-                # Legacy alias — kept for backward compat
-                case "execute_jit":
-                    mcp_id = await self._resolve_mcp_id(tool_input)
-                    if mcp_id is None:
-                        return {"status": "error", "code": "MCP_NOT_FOUND",
-                                "message": f"找不到 MCP '{tool_input.get('mcp_name', '')}'"}
-                    return await self._call_api(
-                        "POST",
-                        "/api/v1/agent/jit-analyze",
-                        body={
-                            "mcp_id": mcp_id,
-                            "run_params": tool_input.get("run_params", {}),
-                            "python_code": tool_input["python_code"],
-                            "title": tool_input.get("title", "JIT 分析"),
-                        },
-                    )
-                # ── [v15.3] Generic Tools (inline / small dataset) ────────
-                case "execute_utility":
-                    return await self._call_api(
-                        "POST",
-                        f"/api/v1/generic-tools/{tool_input['tool_name']}",
-                        body={
-                            "data": tool_input.get("data", []),
-                            "params": tool_input.get("params", {}),
-                        },
-                    )
-                # ── [v15.1] Agent Tool Chest execution ────────────────────
-                case "execute_agent_tool":
-                    return await self._call_api(
-                        "POST",
-                        f"/api/v1/agent-tools/{tool_input['tool_id']}/execute",
-                        body={"raw_data": tool_input.get("raw_data", [])},
                     )
                 # ── [v15.1] Catalog search across skills / mcps / system_mcps / agent_tools
                 case "search_catalog":

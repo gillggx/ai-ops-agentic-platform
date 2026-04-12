@@ -61,12 +61,40 @@ async def list_alarms(
         offset=offset,
     )
 
-    # Collect all execution_log ids to fetch (AP logs + DR logs)
-    all_log_ids = list({
-        lid for a in alarms
-        for lid in (a.execution_log_id, a.diagnostic_log_id) if lid
-    })
+    # ── Fetch ALL DR logs per alarm via triggered_by=f"alarm:<id>" ─────────────
+    # (alarm.diagnostic_log_id is a scalar and only stores the LAST DR run;
+    #  when a patrol has N bound DRs, only the last would display. Here we
+    #  query ExecutionLog directly to get every DR run linked to each alarm.)
+    alarm_ids = [a.id for a in alarms]
+    dr_logs_by_alarm: dict = {aid: [] for aid in alarm_ids}  # alarm_id → [ExecutionLog]
+    if alarm_ids:
+        triggered_by_values = [f"alarm:{aid}" for aid in alarm_ids]
+        dr_log_rows = await db.execute(
+            select(ExecutionLogModel)
+            .where(ExecutionLogModel.triggered_by.in_(triggered_by_values))
+            .order_by(ExecutionLogModel.id)
+        )
+        for log in dr_log_rows.scalars().all():
+            # triggered_by is "alarm:<id>" — strip prefix
+            try:
+                aid = int(log.triggered_by.split(":", 1)[1])
+                dr_logs_by_alarm.setdefault(aid, []).append(log)
+            except Exception:
+                pass
+
+    # Collect all execution_log ids to fetch findings for (AP logs + DR logs)
+    all_log_ids = set()
+    for a in alarms:
+        if a.execution_log_id:
+            all_log_ids.add(a.execution_log_id)
+        if a.diagnostic_log_id:  # legacy back-compat
+            all_log_ids.add(a.diagnostic_log_id)
+    for logs in dr_logs_by_alarm.values():
+        for log in logs:
+            all_log_ids.add(log.id)
+
     findings_map: dict = {}   # log_id → parsed findings dict
+    log_skill_map: dict = {}  # log_id → skill_id
     if all_log_ids:
         log_rows = await db.execute(
             select(ExecutionLogModel).where(ExecutionLogModel.id.in_(all_log_ids))
@@ -76,21 +104,16 @@ async def list_alarms(
                 findings_map[log.id] = json.loads(log.llm_readable_data) if log.llm_readable_data else None
             except Exception:
                 findings_map[log.id] = None
+            log_skill_map[log.id] = log.skill_id
 
-    # Fetch output_schema for skill_ids that appear in logs
-    # AP skill: alarm.skill_id; DR skill: diagnostic log's skill_id
-    dr_log_skill_map: dict = {}   # dr_log_id → skill_id
-    if all_log_ids:
-        # Re-fetch logs to get their skill_ids (needed for DR output_schema)
-        log_skill_rows = await db.execute(
-            select(ExecutionLogModel.id, ExecutionLogModel.skill_id)
-            .where(ExecutionLogModel.id.in_(all_log_ids))
-        )
-        for row in log_skill_rows.fetchall():
-            dr_log_skill_map[row[0]] = row[1]
-
-    all_skill_ids = list({sid for sid in dr_log_skill_map.values()} | {a.skill_id for a in alarms})
-    schema_map: dict = {}   # skill_id → output_schema list
+    # Fetch skill info (name + output_schema) for all skill_ids we'll reference
+    all_skill_ids = set()
+    for a in alarms:
+        all_skill_ids.add(a.skill_id)
+    for sid in log_skill_map.values():
+        all_skill_ids.add(sid)
+    schema_map: dict = {}       # skill_id → output_schema list
+    skill_name_map: dict = {}   # skill_id → name
     if all_skill_ids:
         skill_rows = await db.execute(
             select(SkillDefinitionModel).where(SkillDefinitionModel.id.in_(all_skill_ids))
@@ -101,6 +124,26 @@ async def list_alarms(
                 schema_map[skill.id] = json.loads(raw) if isinstance(raw, str) else (raw or [])
             except Exception:
                 schema_map[skill.id] = []
+            skill_name_map[skill.id] = skill.name
+
+    # Run ChartMiddleware per DR finding to produce chart DSL
+    from app.services.chart_middleware import process as chart_process
+
+    def _build_dr_entry(log) -> dict:
+        sid = log_skill_map.get(log.id)
+        findings = findings_map.get(log.id) or {}
+        output_schema = schema_map.get(sid, []) if sid else []
+        outputs = (findings.get("outputs") or {}) if isinstance(findings, dict) else {}
+        charts = chart_process(outputs, output_schema) if outputs and output_schema else []
+        return {
+            "log_id": log.id,
+            "skill_id": sid,
+            "skill_name": skill_name_map.get(sid, ""),
+            "status": log.status,
+            "findings": findings,
+            "output_schema": output_schema,
+            "charts": charts,
+        }
 
     result = []
     for a in alarms:
@@ -108,9 +151,16 @@ async def list_alarms(
         if a.execution_log_id:
             d["findings"] = findings_map.get(a.execution_log_id)
             d["output_schema"] = schema_map.get(a.skill_id, [])
+            # Auto-generate charts for the Auto-Patrol findings too
+            ap_outputs = (d["findings"] or {}).get("outputs") if d.get("findings") else None
+            if ap_outputs:
+                d["charts"] = chart_process(ap_outputs, d["output_schema"] or [])
+        # New: full list of DR results (one entry per bound Diagnostic Rule)
+        d["diagnostic_results"] = [_build_dr_entry(l) for l in dr_logs_by_alarm.get(a.id, [])]
+        # Legacy single-DR fields (back-compat) — still populated from alarm.diagnostic_log_id
         if a.diagnostic_log_id:
             d["diagnostic_findings"] = findings_map.get(a.diagnostic_log_id)
-            dr_skill_id = dr_log_skill_map.get(a.diagnostic_log_id)
+            dr_skill_id = log_skill_map.get(a.diagnostic_log_id)
             d["diagnostic_output_schema"] = schema_map.get(dr_skill_id, []) if dr_skill_id else []
         result.append(d)
 

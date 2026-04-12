@@ -288,17 +288,32 @@ export function AICopilot({
             break;
           }
 
+          case "plan": {
+            const planText = (ev.text as string) ?? "";
+            if (planText) {
+              addLog(makeLog("📋", `Plan: ${planText.slice(0, 200)}`, "info"));
+            }
+            break;
+          }
+
           case "tool_start": {
-            const inputStr = JSON.stringify(ev.input ?? {});
-            addLog(makeLog("🔧",
-              `${ev.tool ?? ""}(${inputStr.slice(0, 80)}${inputStr.length > 80 ? "…" : ""})`,
-              "tool"
-            ));
+            // Use params_summary (human-readable) if available, else fallback to raw JSON
+            const ps = (ev.params_summary as string) ?? "";
+            const toolName = (ev.tool as string) ?? "";
+            const displayLabel = ps ? `${toolName}(${ps})` : toolName;
+            addLog(makeLog("🔧", displayLabel, "tool"));
             break;
           }
 
           case "tool_done": {
-            addLog(makeLog("✅", `${ev.tool ?? ""} → ${ev.result_summary ?? ""}`, "tool"));
+            const toolLabel = (ev.tool as string) ?? "";
+            const summary = (ev.result_summary as string) ?? "";
+            const ds = ev.data_shape as Record<string, unknown> | undefined;
+            const renderHint = ds?.render as string | undefined;
+            const parts = [toolLabel];
+            if (summary) parts.push(`→ ${summary}`);
+            if (renderHint) parts.push(`[${renderHint}]`);
+            addLog(makeLog("✅", parts.join(" "), "tool"));
             const card = ev.render_card as Record<string, unknown> | undefined;
             if (card?.type === "draft" && card.draft_type === "mcp") {
               const autoFill = (card.auto_fill ?? {}) as Record<string, unknown>;

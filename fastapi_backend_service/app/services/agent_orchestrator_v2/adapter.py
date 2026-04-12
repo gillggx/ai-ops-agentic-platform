@@ -103,14 +103,40 @@ async def adapt_events(
                             "output_tokens": resp_meta.get("output_tokens", 0),
                             "iteration": output.get("current_iteration", 0),
                         }
-                    # Emit tool_start for each tool_call
+                    # Emit <plan> if present in LLM text — shows agent's reasoning in console
+                    _text = last.content if hasattr(last, "content") and isinstance(last.content, str) else ""
+                    import re as _re
+                    _plan_match = _re.search(r"<plan>(.*?)</plan>", _text, _re.DOTALL)
+                    if _plan_match:
+                        yield {
+                            "type": "plan",
+                            "text": _plan_match.group(1).strip(),
+                            "iteration": output.get("current_iteration", 0),
+                        }
+                    # Emit tool_start for each tool_call — with human-readable params_summary
                     if hasattr(last, "tool_calls") and last.tool_calls:
                         for tc in last.tool_calls:
                             _tool_start_count += 1
+                            args = tc.get("args", {})
+                            tool_name = tc.get("name", "")
+                            # Build params_summary: "get_process_info(step=STEP_001, since=7d)"
+                            if tool_name == "execute_mcp":
+                                mcp = args.get("mcp_name", "")
+                                params = args.get("params") or {}
+                                parts = [f"{k}={v}" for k, v in params.items() if v]
+                                ps = f"{mcp}({', '.join(parts)})" if parts else mcp
+                            elif tool_name == "execute_skill":
+                                ps = f"skill_id={args.get('skill_id', '?')}"
+                            elif tool_name == "execute_analysis":
+                                ps = f"mode={args.get('mode','auto')}, title={str(args.get('title',''))[:40]}"
+                            else:
+                                parts = [f"{k}={str(v)[:20]}" for k, v in list(args.items())[:4]]
+                                ps = ", ".join(parts) if parts else ""
                             yield {
                                 "type": "tool_start",
-                                "tool": tc.get("name", ""),
-                                "input": tc.get("args", {}),
+                                "tool": tool_name,
+                                "input": args,
+                                "params_summary": ps,
                                 "iteration": output.get("current_iteration", 0),
                             }
 
@@ -121,10 +147,53 @@ async def adapt_events(
                 # not the accumulated state (reducer merge happens at state level).
                 new_cards = output.get("render_cards") or []
                 for card in new_cards:
+                    tool_label = card.get("mcp_name") or card.get("tool_name") or card.get("skill_name", "")
+                    summary = card.get("summary", "")
+
+                    # Build data_shape for console visibility
+                    data_shape = {}
+                    if card and card.get("type") == "mcp":
+                        mcp_out = card.get("mcp_output") or {}
+                        ds = mcp_out.get("_raw_dataset") or mcp_out.get("dataset") or []
+                        # Unwrap [{total, events:[...]}] envelope
+                        if isinstance(ds, list) and len(ds) == 1 and isinstance(ds[0], dict):
+                            inner = ds[0]
+                            if isinstance(inner.get("events"), list):
+                                evts = inner["events"]
+                                ooc_n = sum(1 for e in evts if isinstance(e, dict) and e.get("spc_status") == "OOC")
+                                data_shape = {"total": inner.get("total", len(evts)), "ooc_count": ooc_n}
+                                summary = f"{data_shape['total']} events ({ooc_n} OOC)"
+                            elif isinstance(inner.get("data"), list):
+                                data_shape = {"total_points": inner.get("total_points", len(inner["data"]))}
+                                summary = f"{data_shape['total_points']} data points"
+                            elif inner.get("total_events") is not None:
+                                data_shape = {k: v for k, v in inner.items() if isinstance(v, (int, float, str, bool))}
+                                summary = f"status snapshot"
+                            else:
+                                data_shape = {"row_count": 1}
+                        elif isinstance(ds, list):
+                            data_shape = {"row_count": len(ds)}
+                            summary = f"{len(ds)} rows"
+                    elif card and card.get("type") == "analysis":
+                        contract = card.get("contract") or {}
+                        charts = contract.get("charts") or []
+                        data_shape = {"charts": len(charts), "steps": len(contract.get("evidence_chain") or [])}
+                        if charts:
+                            summary = f"{len(charts)} chart(s)"
+
+                    # Build render_decision summary for console
+                    rd = (card.get("contract") or {}).get("render_decision") or {}
+                    rd_kind = rd.get("kind")
+                    rd_charts = len((rd.get("primary") or {}).get("charts") or [])
+                    rd_alts = len(rd.get("alternatives") or rd.get("options") or [])
+                    if rd_kind:
+                        data_shape["render"] = f"{rd_kind}({rd_charts} charts, {rd_alts} alts)"
+
                     done_event = {
                         "type": "tool_done",
-                        "tool": card.get("mcp_name") or card.get("tool_name") or card.get("skill_name", ""),
-                        "result_summary": card.get("summary", ""),
+                        "tool": tool_label,
+                        "result_summary": summary,
+                        "data_shape": data_shape,
                         "iteration": _current_state.get("current_iteration", 0),
                     }
                     if card:

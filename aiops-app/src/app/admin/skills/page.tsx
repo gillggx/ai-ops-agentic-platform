@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { RenderMiddleware, RenderOutputValue, type OutputSchemaField } from "@/components/operations/SkillOutputRenderer";
+import { RenderMiddleware, RenderOutputValue, type OutputSchemaField, type ChartDSL } from "@/components/operations/SkillOutputRenderer";
 import { ClarifyDialog, type ClarifyQuestion, type ClarifyAnswer } from "@/components/skill-builder/ClarifyDialog";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -41,6 +41,7 @@ type TryRunResult = {
     evidence?: Record<string, unknown>;
     impacted_lots: string[];
   } | null;
+  charts?: ChartDSL[] | null;
   total_elapsed_ms: number;
   error?: string;
 };
@@ -120,8 +121,13 @@ function FixPanel({ ruleId, errorMessage, onFixed }: { ruleId: string | number; 
   const [feedback, setFeedback] = useState("");
   const [fixing, setFixing] = useState(false);
   const [fixResult, setFixResult] = useState<string | null>(null);
+  const isErrorMode = !!errorMessage;
 
   async function handleFix() {
+    if (!isErrorMode && !feedback.trim()) {
+      setFixResult("請先填寫回饋內容再送出");
+      return;
+    }
     setFixing(true);
     setFixResult(null);
     try {
@@ -148,15 +154,25 @@ function FixPanel({ ruleId, errorMessage, onFixed }: { ruleId: string | number; 
     }
   }
 
+  const headerColor = isErrorMode ? "#92400e" : "#1e40af";
+  const bgColor = isErrorMode ? "#fffbeb" : "#eff6ff";
+  const borderColor = isErrorMode ? "#fbbf24" : "#93c5fd";
+  const btnColor = isErrorMode ? "#f59e0b" : "#3b82f6";
+  const headerText = isErrorMode ? "LLM 自動修正" : "回饋與修正";
+  const placeholder = isErrorMode
+    ? "（選填）描述哪裡有問題，例如：object_id 應該用 step 不是 equipment_id"
+    : "結果有問題嗎？描述邏輯哪裡需要調整，例如：應該用最近 5 次而不是 30 天的資料";
+  const btnLabel = isErrorMode ? (fixing ? "修正中..." : "自動修正") : (fixing ? "送出中..." : "送出回饋並修正");
+
   return (
-    <div style={{ marginTop: 12, padding: "12px 14px", background: "#fffbeb", border: "1px solid #fbbf24", borderRadius: 8 }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: "#92400e", marginBottom: 8 }}>
-        LLM 自動修正
+    <div style={{ marginTop: 12, padding: "12px 14px", background: bgColor, border: `1px solid ${borderColor}`, borderRadius: 8 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: headerColor, marginBottom: 8 }}>
+        {headerText}
       </div>
       <textarea
         value={feedback}
         onChange={e => setFeedback(e.target.value)}
-        placeholder="（選填）描述哪裡有問題，例如：object_id 應該用 step 不是 equipment_id"
+        placeholder={placeholder}
         style={{
           width: "100%", padding: "8px 10px", borderRadius: 6,
           border: "1px solid #e2e8f0", fontSize: 12, minHeight: 50,
@@ -169,11 +185,11 @@ function FixPanel({ ruleId, errorMessage, onFixed }: { ruleId: string | number; 
           disabled={fixing}
           style={{
             padding: "6px 16px", borderRadius: 6, border: "none",
-            background: fixing ? "#d69e2e" : "#f59e0b", color: "#fff",
+            background: fixing ? "#94a3b8" : btnColor, color: "#fff",
             fontSize: 12, fontWeight: 600, cursor: fixing ? "wait" : "pointer",
           }}
         >
-          {fixing ? "修正中..." : "自動修正"}
+          {btnLabel}
         </button>
         {fixResult && (
           <span style={{ fontSize: 12, color: fixResult.includes("失敗") ? "#dc2626" : "#16a34a" }}>
@@ -856,13 +872,13 @@ export default function DiagnosticRulesPage() {
                       </span>
                     )}
                   </div>
-                  {tryRunResult.findings && <RenderMiddleware findings={tryRunResult.findings} outputSchema={outputSchema} />}
+                  {tryRunResult.findings && <RenderMiddleware findings={tryRunResult.findings} outputSchema={outputSchema} charts={tryRunResult.charts} />}
                   {tryRunResult.error && (
                     <div style={{ color: "#c53030", fontSize: 12, marginTop: 4 }}>{tryRunResult.error}</div>
                   )}
 
-                  {/* Fix button + feedback input */}
-                  {(!tryRunResult.success || tryRunResult.error) && editing?.id && (
+                  {/* Feedback / fix panel — always shown after try-run so user can correct logic even on success */}
+                  {editing?.id && (
                     <FixPanel ruleId={editing.id} errorMessage={tryRunResult.error || ""} onFixed={() => { setTryRunResult(null); }} />
                   )}
                 </div>

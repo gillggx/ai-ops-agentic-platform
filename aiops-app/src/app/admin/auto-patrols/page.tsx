@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { RenderMiddleware, type OutputSchemaField } from "@/components/operations/SkillOutputRenderer";
+import { RenderMiddleware, type OutputSchemaField, type ChartDSL } from "@/components/operations/SkillOutputRenderer";
 import { ClarifyDialog, type ClarifyQuestion, type ClarifyAnswer } from "@/components/skill-builder/ClarifyDialog";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -28,7 +28,8 @@ type StepResult = {
 type TryRunResult = {
   success: boolean;
   step_results?: StepResult[];
-  findings: { condition_met: boolean; evidence: Record<string, unknown>; impacted_lots: string[] } | null;
+  findings: { condition_met: boolean; summary?: string; outputs?: Record<string, unknown>; evidence?: Record<string, unknown>; impacted_lots: string[] } | null;
+  charts?: ChartDSL[] | null;
   total_elapsed_ms: number;
   error?: string;
 };
@@ -1107,10 +1108,10 @@ export default function AutoPatrolsPage() {
                     </div>
                   )}
 
-                  {/* Evidence (structured via RenderMiddleware) */}
+                  {/* Evidence + charts (structured via RenderMiddleware) */}
                   {tryRunResult.findings && (
                     <div style={{ padding: "12px 14px" }}>
-                      <RenderMiddleware findings={tryRunResult.findings} outputSchema={form.output_schema} />
+                      <RenderMiddleware findings={tryRunResult.findings} outputSchema={form.output_schema} charts={tryRunResult.charts} />
                     </div>
                   )}
 

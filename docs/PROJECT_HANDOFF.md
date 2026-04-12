@@ -302,21 +302,35 @@ interface AIOpsReportContract {
 
 ### 5.2 模擬規模
 
-- **20 個 Lot**（批次），100 個 Step（製程站點），10 台機台
-- **7 種物件類型**：DC (30 個感測器)、SPC (5 管制圖)、APC (20 參數)、EC、RECIPE、FDC、OCAP
-- **OOC 機率 15%**，APC 每 step drift ±5%
+- **99,999 個 Lot**（批次），10 個 Step（製程站點），10 台機台
+- **6 種物件類型**：DC (30 sensors)、SPC (5 charts)、APC (20 params, active/passive)、RECIPE (20 params, versioned)、FDC (rule-based classification)、EC (8 constants, drift + PM recal)
+- **OOC 機率 20%**，APC 每 step drift ±5% with **50% self-correction** on active params
+- **Recipe 10% 進版** per process (key params ±offset)
+- **DC sensor exponential drift** (slow baseline shift, PM reset)
 - **NATS** 即時發布 OOC 事件 → Backend Auto-Patrol 訂閱
+- 每次 process 產生 **1 event + 6 snapshots** (DC/SPC/APC/RECIPE/FDC/EC)
 
-### 5.3 API 概覽
+### 5.2.1 物件行為模型
 
-20+ REST endpoints，涵蓋：
-- **`/process/summary`** — L1 聚合統計（MongoDB aggregation，毫秒回應）
-- **`/process/info`** — L2 範圍調查（pure data，chart DSL 由 Backend ChartMiddleware 生成）
-- **`/objects/query`** — L3 單一參數深度時序
-- 物件快照查詢（time-machine 回溯到特定 eventTime）
-- SPC/DC 站點級時序分析
-- 批次流轉追蹤（Lot Trace）
-- 設備詳情（DC 趨勢、SPC 報告、事件記錄、設備常數）
+| 物件 | 行為 | Pattern 預期 |
+|------|------|-------------|
+| **APC** | 5 active params (50% 修正) + 15 passive params (自由漂移) + derived metrics (model_r2, stability) | 鋸齒狀 trend（漂移→修正→再漂移） |
+| **Recipe** | 10% 機率 version bump, 調整 etch_time_s/source_power/bias_power ±3~5% | Step function pattern（多數平穩，偶爾跳） |
+| **DC** | Exponential drift (0.98 decay + gaussian noise), PM 後 reset to 0 | Slow wandering baseline + periodic reset |
+| **SPC** | 監控 5 DC sensors, UCL/LCL hardcoded, OOC = ANY chart breach | ~20% OOC rate across all charts |
+| **FDC** | Rule-based: SPC OOC + DC drift → FAULT; APC model degrading → WARNING | NORMAL > WARNING > FAULT distribution |
+| **EC** | 8 constants, 0.1%/process micro-drift, PM 後 recalibrate to nominal ± noise | Slow linear drift, periodic PM reset |
+
+### 5.3 API 概覽（4 個 System MCP）
+
+| MCP | Endpoint | 說明 |
+|-----|----------|------|
+| `get_process_summary` | `/process/summary` | L1 聚合統計（OOC rates, per-tool breakdown） |
+| `get_process_info` | `/process/info` | L2 範圍調查（6 種物件 nested，limit up to 500） |
+| `list_tools` | `/tools` | 機台清單 + 狀態 |
+| `get_simulation_status` | `/status` | 系統狀態快照 |
+
+**已停用 MCP**：`query_object_timeseries` (endpoint 保留但從 LLM catalog 移除)
 
 ---
 

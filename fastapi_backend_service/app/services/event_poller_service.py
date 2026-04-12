@@ -111,34 +111,11 @@ async def _process_event(
                 summary = findings.summary if findings else ""
                 action = None
 
-                # Create alarm if condition met
-                if result.success and condition_met:
-                    alarm_data = {
-                        "skill_id": skill.id,
-                        "trigger_event": event_type_name,
-                        "equipment_id": payload.get("equipment_id", ""),
-                        "lot_id": payload.get("lot_id", ""),
-                        "step": payload.get("step", ""),
-                        "event_time": payload.get("event_time", ""),
-                        "severity": (patrol.alarm_severity if patrol else "HIGH"),
-                        "title": (patrol.alarm_title if patrol else skill.name),
-                        "summary": summary,
-                        "status": "active",
-                    }
-                    alarm = await alarm_repo.create(alarm_data)
-                    total_alarms += 1
-                    action = "alarm_created"
-                    logger.info(
-                        "Poller: skill=%d → ALARM created (id=%s, severity=%s)",
-                        skill.id, alarm.id, alarm_data["severity"],
-                    )
-                else:
-                    logger.info(
-                        "Poller: skill=%d → condition_met=%s, no alarm",
-                        skill.id, condition_met,
-                    )
+                action = "alarm_created" if (result.success and condition_met) else None
 
-                # Write execution log (always, regardless of condition_met)
+                # Write execution log FIRST so we can link it to the alarm.
+                # (Alarm detail UI uses alarm.execution_log_id to show Auto-Patrol findings,
+                #  so we need the exec_log.id available at alarm-create time.)
                 exec_log = ExecutionLogModel(
                     skill_id=skill.id,
                     auto_patrol_id=patrol.id if patrol else None,
@@ -158,11 +135,126 @@ async def _process_event(
                 )
                 db.add(exec_log)
                 await db.commit()
+                await db.refresh(exec_log)
+
+                # Create alarm if condition met
+                if result.success and condition_met:
+                    # Parse event_time to datetime if provided as ISO string
+                    et_raw = payload.get("event_time")
+                    event_time_dt = None
+                    if et_raw:
+                        try:
+                            event_time_dt = datetime.fromisoformat(str(et_raw).replace("Z", "+00:00"))
+                        except Exception:
+                            event_time_dt = None
+
+                    severity = (patrol.alarm_severity if patrol else "HIGH") or "HIGH"
+                    title = (patrol.alarm_title if patrol else skill.name) or skill.name
+                    alarm = await alarm_repo.create(
+                        skill_id=skill.id,
+                        trigger_event=event_type_name,
+                        equipment_id=payload.get("equipment_id", "") or "",
+                        lot_id=payload.get("lot_id", "") or "",
+                        step=payload.get("step") or None,
+                        event_time=event_time_dt,
+                        severity=severity,
+                        title=title,
+                        summary=summary,
+                        execution_log_id=exec_log.id,
+                    )
+                    total_alarms += 1
+                    logger.info(
+                        "Poller: skill=%d → ALARM created (id=%s, severity=%s, exec_log=%s)",
+                        skill.id, alarm.id, severity, exec_log.id,
+                    )
+
+                    # ── Fan-out: trigger all Diagnostic Rules bound to this patrol ──
+                    # (Same behaviour as manual patrol trigger via auto_patrol_service.)
+                    if patrol:
+                        await _trigger_bound_diagnostic_rules_from_poller(
+                            db=db,
+                            executor=executor,
+                            alarm_repo=alarm_repo,
+                            patrol_id=patrol.id,
+                            alarm_id=alarm.id,
+                            alarm_context=payload,
+                        )
+                else:
+                    logger.info(
+                        "Poller: skill=%d → condition_met=%s, no alarm",
+                        skill.id, condition_met,
+                    )
 
             except Exception as exc:
                 logger.exception("Poller: unhandled error in skill=%d: %s", skill.id, exc)
 
     return total_alarms
+
+
+async def _trigger_bound_diagnostic_rules_from_poller(
+    db,
+    executor,
+    alarm_repo,
+    patrol_id: int,
+    alarm_id: int,
+    alarm_context: dict,
+) -> None:
+    """Poller-side DR fan-out. Finds all Diagnostic Rules bound to the patrol
+    (source='rule' + trigger_patrol_id == patrol_id) and executes them.
+
+    Each DR execution becomes an ExecutionLog row with triggered_by=f"alarm:{alarm_id}",
+    which is how alarms_router.list_alarms later discovers them for the detail UI.
+    """
+    from sqlalchemy import select
+    from app.models.skill_definition import SkillDefinitionModel
+    from app.repositories.execution_log_repository import ExecutionLogRepository
+    import time as _time
+
+    try:
+        result = await db.execute(
+            select(SkillDefinitionModel)
+            .where(SkillDefinitionModel.trigger_patrol_id == patrol_id)
+            .where(SkillDefinitionModel.is_active == True)  # noqa: E712
+            .where(SkillDefinitionModel.source == "rule")
+        )
+        dr_skills = result.scalars().all()
+        if not dr_skills:
+            logger.info("Poller DR fan-out: no DRs bound to patrol_id=%d", patrol_id)
+            return
+
+        log_repo = ExecutionLogRepository(db)
+        for dr in dr_skills:
+            logger.info(
+                "Poller DR fan-out: running skill_id=%d (DR '%s') for alarm_id=%d",
+                dr.id, dr.name, alarm_id,
+            )
+            try:
+                dr_log = await log_repo.create(
+                    skill_id=dr.id,
+                    triggered_by=f"alarm:{alarm_id}",
+                    event_context=alarm_context,
+                    auto_patrol_id=None,
+                )
+                t0 = _time.monotonic()
+                dr_result = await executor.execute(
+                    skill_id=dr.id,
+                    event_payload=alarm_context,
+                    triggered_by=f"alarm:{alarm_id}",
+                )
+                dur = int((_time.monotonic() - t0) * 1000)
+                await log_repo.finish(
+                    dr_log,
+                    status="success" if dr_result.success else "error",
+                    llm_readable_data=dr_result.findings.model_dump() if dr_result.findings else None,
+                    error_message=dr_result.error,
+                    duration_ms=dur,
+                )
+                # Also set alarm.diagnostic_log_id (legacy back-compat field) to the LAST DR log
+                await alarm_repo.set_diagnostic_log(alarm_id, dr_log.id)
+            except Exception as exc:
+                logger.exception("Poller DR fan-out failed skill_id=%d: %s", dr.id, exc)
+    except Exception as exc:
+        logger.exception("Poller DR fan-out query failed patrol_id=%d: %s", patrol_id, exc)
 
 
 async def _poll_once(

@@ -70,6 +70,8 @@ from app.routers.monitor_router import router as monitor_router
 from app.routers.analysis import router as analysis_router
 # My Skills (user-created skills for Agent chat)
 from app.routers.my_skills import router as my_skills_router
+# Dashboard briefing (AI-generated fab/tool briefing via SSE)
+from app.routers.briefing import router as briefing_router
 
 settings = get_settings()
 _SIM = settings.ONTOLOGY_SIM_URL  # e.g. "http://localhost:8001"
@@ -216,24 +218,24 @@ _ONTOLOGY_SYSTEM_MCPS = [
     {
         "name": "get_process_summary",
         "description": (
-            "【Layer 1 — 聚合統計】快速取得 OOC 統計、機台分佈、近期異常。不回傳 raw data。\n"
+            "== What ==\n"
+            "OOC 統計、機台分佈、近期異常的聚合視圖。不回傳 raw measurement data。\n"
             "\n"
-            "⭐ 這是你回答「OOC 率多少」「哪些機台有問題」「最近狀況如何」的首選工具。\n"
-            "⭐ 毫秒級回應，可安全用於全廠範圍查詢（不怕資料量大）。\n"
+            "== Use when ==\n"
+            "- 回答「OOC 率多少」「哪些機台有問題」「最近狀況如何」\n"
+            "- 全廠 / 全機台範圍的快速概覽（毫秒級）\n"
             "\n"
-            "回傳：{\n"
+            "== Don't use when ==\n"
+            "- 需要 raw measurement value 或要畫 chart → 用 get_process_info\n"
+            "- 需要單一參數的長期時序 → 用 query_object_timeseries\n"
+            "\n"
+            "== Returns ==\n"
+            "{\n"
             "  total_events, ooc_count, ooc_rate,\n"
-            "  by_tool: [{toolID, count, ooc_count}],\n"
-            "  by_step: [{step, count, ooc_count}],\n"
-            "  recent_ooc: [{eventTime, lotID, toolID, step, spc_status}]  // 最近 5 筆 OOC\n"
+            "  by_tool:   [{toolID, count, ooc_count}, ...],\n"
+            "  by_step:   [{step, count, ooc_count}, ...],\n"
+            "  recent_ooc:[{eventTime, lotID, toolID, step, spc_status}, ...]  // 最近 5 筆\n"
             "}\n"
-            "\n"
-            "使用範例：\n"
-            "  全廠 OOC 狀況 → since='7d'\n"
-            "  STEP_020 OOC 統計 → step='STEP_020', since='7d'\n"
-            "  EQP-01 近況 → toolID='EQP-01', since='24h'\n"
-            "\n"
-            "⚠️ 只回統計數字，不回量測值。需要畫圖或看詳細 → 用 get_process_info。"
         ),
         "api_config": {
             "endpoint_url": f"{_SIM}/api/v1/process/summary",
@@ -252,68 +254,46 @@ _ONTOLOGY_SYSTEM_MCPS = [
     {
         "name": "get_process_info",
         "description": (
-            "【Layer 2 — 範圍調查 + 自動畫圖】取得 event 列表 + 完整物件資料。\n"
+            "== What ==\n"
+            "取得 process events，每筆含 SPC + APC + DC + RECIPE 完整 nested 物件資料。\n"
+            "**一次呼叫拿到所有相關物件**，不需要再呼叫其他 MCP 補資料。\n"
             "\n"
-            "⭐ 這是你畫圖、做根因分析、看詳細數據的主力工具。\n"
-            "⭐ ★★★ 一次呼叫就回傳該機台最近 N 次 process 的所有物件資料 — 不需要再呼叫其他 MCP 補資料。\n"
+            "== Use when ==\n"
+            "- 需要看單筆/多筆 process 的詳細感測資料\n"
+            "- 要做 SPC trend / APC drift / Recipe consistency 分析\n"
+            "- 要拿給系統 chart middleware 自動畫 SPC chart（需 objectName='SPC' 或不帶）\n"
+            "- 查單一 lot 的根因（不帶 objectName，回傳全部 4 種物件）\n"
             "\n"
-            "回傳：{ total, events: [event, event, ...] }\n"
+            "== Don't use when ==\n"
+            "- 只要 OOC 統計數字 → 用 get_process_summary 更快\n"
+            "- 要看單一參數 30+ 天的長期時序 → 用 query_object_timeseries\n"
             "\n"
-            "每個 event 的結構（依 objectName 不同欄位不同）：\n"
-            "  共通欄位（一定有）：eventTime, lotID, toolID, step, spc_status\n"
-            "  objectName='SPC' 時 event 含：\n"
-            "    SPC: {\n"
-            "      charts: {\n"
-            "        xbar_chart: {value, ucl, lcl, is_ooc},\n"
-            "        r_chart:    {value, ucl, lcl, is_ooc},\n"
-            "        s_chart:    {value, ucl, lcl, is_ooc},\n"
-            "        p_chart:    {value, ucl, lcl, is_ooc},\n"
-            "        c_chart:    {value, ucl, lcl, is_ooc}\n"
-            "      },\n"
-            "      spc_status: 'PASS'|'OOC'\n"
+            "== Required params ==\n"
+            "至少帶 toolID / lotID / step 三選一（不帶會回 400）\n"
+            "\n"
+            "== Optional params ==\n"
+            "objectName : 'SPC' | 'APC' | 'DC' | 'RECIPE' | 'FDC' | 'EC'（filter to one；不帶=全回）\n"
+            "since      : '24h' | '7d' | '30d'（時間窗，預設 7d）\n"
+            "limit      : 1~200（最近 N 筆，預設 50；查「最近 N 次 process」用此欄位）\n"
+            "eventTime  : ISO8601（精確定位某次 process）\n"
+            "\n"
+            "== Returns ==\n"
+            "{\n"
+            "  total: int,\n"
+            "  events: [\n"
+            "    {\n"
+            "      eventTime, lotID, toolID, step, spc_status, fdc_classification,\n"
+            "      SPC?:    {charts: {xbar_chart: {value, ucl, lcl, is_ooc}, r_chart, s_chart, p_chart, c_chart}, spc_status},\n"
+            "      APC?:    {objectID, mode, parameters: {etch_time_offset, rf_power_bias, ... ~20 params}},\n"
+            "      DC?:     {objectID, parameters: {chamber_pressure, rf_forward_power, ... ~30 sensors}},\n"
+            "      RECIPE?: {objectID, recipe_version, parameters: {etch_time_s, target_thickness_nm, ...}},\n"
+            "      FDC?:    {classification: 'NORMAL'|'WARNING'|'FAULT', fault_code, confidence, contributing_sensors, description},\n"
+            "      EC?:     {constants: {rf_power_offset: {value, nominal, tolerance_pct, deviation_pct, status, unit}, ...}}\n"
             "    }\n"
-            "  objectName='APC' 時 event 含：\n"
-            "    APC: {\n"
-            "      objectID: 'APC-007',           ← APC 模型 ID（用來判斷是否同一個 APC）\n"
-            "      mode: 'ACTIVE'|'BYPASS',\n"
-            "      parameters: {                   ← APC 控制參數值\n"
-            "        etch_time_offset: 0.015,\n"
-            "        rf_power_bias: 1.05,\n"
-            "        gas_flow_comp: -0.5,\n"
-            "        target_cd_nm: 50.0,\n"
-            "        ... (約 20 個 APC 參數)\n"
-            "      }\n"
-            "    }\n"
-            "  objectName='DC' 時 event 含：\n"
-            "    DC: {\n"
-            "      objectID: 'EQP-01',\n"
-            "      parameters: {                   ← DC sensor 讀值\n"
-            "        chamber_pressure: 14.5,\n"
-            "        rf_forward_power: 1500,\n"
-            "        ... (約 30 個 sensor)\n"
-            "      }\n"
-            "    }\n"
-            "  objectName='RECIPE' 時 event 含：\n"
-            "    RECIPE: {objectID: 'RCP-018', parameters: {etch_time_s: 28, ...}}\n"
+            "  ]\n"
+            "}\n"
             "\n"
-            "objectName 選擇：\n"
-            "  'SPC'    → 看 SPC 管制圖、判斷 OOC\n"
-            "  'APC'    → 看 APC 控制參數、比對 APC 模型一致性\n"
-            "  'DC'     → 看 DC sensor 讀值、根因分析\n"
-            "  'RECIPE' → 看 recipe 參數\n"
-            "  不帶     → 4 種都回（資料量大，除非要做 cross-object 分析）\n"
-            "\n"
-            "使用範例：\n"
-            "  看 SPC chart → toolID='EQP-01', objectName='SPC', since='7d'\n"
-            "  比對 APC 一致性 → toolID='EQP-01', objectName='APC', since='7d'\n"
-            "    → 直接讀 event['APC']['objectID'] 比對是否同 APC\n"
-            "    → 直接讀 event['APC']['parameters'] 比對參數值\n"
-            "  查 OOC 根因 → lotID='LOT-0007'（不帶 objectName，4 種都回）\n"
-            "\n"
-            "⚠️ 【鐵律】這個 MCP 已經一次拿到你要的所有資料，**不需要再呼叫 query_object_timeseries**。\n"
-            "    特別是 APC/DC 的參數值已經在 event[objectName]['parameters'] 裡了，直接讀就好。\n"
-            "    query_object_timeseries 只用於『單一參數的長期趨勢圖』，不是用來補 process info 的資料。\n"
-            "⚠️ 如果只需要統計數字（不需要 raw data）→ 用 get_process_summary 更快。"
+            "events 已按 eventTime DESC 排序。欄位用 camelCase。spc_status 值是 'PASS'|'OOC'。\n"
         ),
         "api_config": {
             "endpoint_url": f"{_SIM}/api/v1/process/info",
@@ -327,59 +307,28 @@ _ONTOLOGY_SYSTEM_MCPS = [
                 {"name": "step",       "type": "string", "description": "站點代碼，e.g. STEP_020", "required": False},
                 {"name": "objectName", "type": "string", "description": "物件篩選：SPC / DC / APC / RECIPE", "required": False},
                 {"name": "eventTime",  "type": "string", "description": "ISO8601 精確定位某次 process（可選）", "required": False},
-                {"name": "since",      "type": "string", "description": "時間窗 '24h'/'7d'/'30d'", "required": False},
+                {"name": "since",      "type": "string", "description": "時間窗 '24h'/'7d'/'30d'（與 limit 二選一；查『最近 N 次』請用 limit）", "required": False},
+                {"name": "limit",      "type": "integer", "description": "回傳最近 N 筆 events（1~500，預設 50）。查『最近 N 次 process』請用此欄位。", "required": False},
             ]
         },
     },
-    {
-        "name": "query_object_timeseries",
-        "description": (
-            "【Layer 3 — 單一參數的長期趨勢圖】查詢一個物件參數在 30 天內的時序，給「畫單一線圖」用。\n"
-            "\n"
-            "⛔⛔⛔ 【嚴禁用法】 ⛔⛔⛔\n"
-            "  ❌ 不要用這個 MCP 去拿『機台最近 N 次 process 的資料』 → 用 get_process_info\n"
-            "  ❌ 不要用這個 MCP 去拿『某個 lot 的詳細資料』 → 用 get_process_info\n"
-            "  ❌ 不要用這個 MCP 去拿『APC parameter 的數值』 → 用 get_process_info(objectName='APC')\n"
-            "  ❌ 不要在 for loop 裡 call 這個 MCP — 會發出大量請求\n"
-            "  ❌ APC 的 parameter 不能填 'charts.xbar_chart.value'（那是 SPC 專用）\n"
-            "\n"
-            "✅ 只在這個情況用：「畫某個參數過去 30 天的趨勢圖」\n"
-            "\n"
-            "回傳：{object_name, parameter, total_points, stats: {mean, ucl, lcl, ooc_count}, data: [{eventTime, value, is_ooc}]}\n"
-            "\n"
-            "正確的 parameter 格式（依 object_name）：\n"
-            "  SPC → 'charts.xbar_chart.value' / 'charts.r_chart.value' / ... / 'charts.c_chart.value'\n"
-            "  APC → 直接 APC 參數名，例如 'rf_power_bias' / 'etch_time_offset' / 'gas_flow_comp'\n"
-            "  DC  → DC sensor 名，例如 'chamber_pressure' / 'rf_forward_power'\n"
-            "\n"
-            "object_id 填法：\n"
-            "  SPC → step 代碼，例如 'STEP_007'\n"
-            "  APC → APC 模型 ID，例如 'APC-007'\n"
-            "  DC  → 機台 ID，例如 'EQP-01'\n"
-            "\n"
-            "範例：「畫 EQP-01 的 rf_forward_power 過去 7 天趨勢」\n"
-            "  → object_name='DC', object_id='EQP-01', parameter='rf_forward_power', since='7d'"
-        ),
-        "api_config": {
-            "endpoint_url": f"{_SIM}/api/v1/objects/query",
-            "method": "POST",
-            "headers": {},
-        },
-        "input_schema": {
-            "fields": [
-                {"name": "object_name", "type": "string", "description": "物件類型：APC / DC / SPC / RECIPE", "required": True},
-                {"name": "object_id",   "type": "string", "description": "SPC→step代碼(STEP_007), APC→model ID(APC-007), DC→機台ID(EQP-01)", "required": True},
-                {"name": "parameter",   "type": "string", "description": "參數名稱。SPC: 'charts.xbar_chart.value'。APC: 直接 APC 參數名 'rf_power_bias'。DC: sensor 名 'chamber_pressure'。⚠️ APC 不能用 'charts.xbar_chart.value'", "required": True},
-                {"name": "since",       "type": "string", "description": "時間窗：'24h' | '7d' | '30d'，預設 '7d'", "required": False},
-            ]
-        },
-    },
+    # query_object_timeseries — DISABLED from LLM catalog.
+    # Endpoint still exists at /api/v1/objects/query but LLM can't see it.
+    # Reason: LLM consistently picks this over get_process_info for SPC queries,
+    # then calls it 5x (once per chart_type) and invents non-existent chart names.
+    # get_process_info(objectName='SPC') returns all 5 charts in one call.
     {
         "name": "list_tools",
         "description": (
-            "【機台清單】列出廠內所有機台及其目前狀態。\n"
-            "回傳：[{tool_id, status}]\n"
-            "使用時機：確認有哪些機台 ID 可用"
+            "== What ==\n"
+            "列出廠內所有機台及其目前狀態。\n"
+            "\n"
+            "== Use when ==\n"
+            "- 確認有哪些機台 ID 可用\n"
+            "- 查每台機台目前是 Busy / Idle / Maintenance\n"
+            "\n"
+            "== Returns ==\n"
+            "[{tool_id, status}, ...]  // 約 10 筆\n"
         ),
         "api_config": {
             "endpoint_url": f"{_SIM}/api/v1/tools",
@@ -391,9 +340,15 @@ _ONTOLOGY_SYSTEM_MCPS = [
     {
         "name": "get_simulation_status",
         "description": (
-            "【模擬器系統狀態】取得 OntologySimulator 目前的整體狀態快照。\n"
-            "回傳：{lots: {Processing, Waiting}, tools: {Busy}, total_events, total_snapshots}\n"
-            "使用時機：了解目前有多少批次在跑、多少機台在忙碌"
+            "== What ==\n"
+            "Simulator 整體狀態快照（系統健康檢查用）。\n"
+            "\n"
+            "== Use when ==\n"
+            "- 了解目前有多少 lot 在跑、多少機台 busy\n"
+            "- 確認 simulator 是否正常運作\n"
+            "\n"
+            "== Returns ==\n"
+            "{lots: {Processing, Waiting}, tools: {Busy}, total_events, total_snapshots}\n"
         ),
         "api_config": {
             "endpoint_url": f"{_SIM}/api/v1/status",
@@ -1238,6 +1193,7 @@ app.include_router(experience_memory_router, prefix=_PREFIX)  # /api/v1/experien
 app.include_router(monitor_router, prefix=_PREFIX)            # /api/v1/system/monitor
 app.include_router(analysis_router, prefix=_PREFIX)            # /api/v1/analysis/run + /promote
 app.include_router(my_skills_router, prefix=_PREFIX)           # /api/v1/my-skills/...
+app.include_router(briefing_router, prefix=_PREFIX)            # /api/v1/briefing
 
 # ---------------------------------------------------------------------------
 # Global Exception Handlers

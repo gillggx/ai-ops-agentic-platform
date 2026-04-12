@@ -51,9 +51,12 @@ def _normalize_params(params: Dict[str, Any], mcp_name: str = "") -> Dict[str, A
         params["chart_name"] = _normalize_chart_name(params["chart_name"])
 
     # ── snake_case → camelCase normalization ──────────────────────────────
-    # Agent LLM sometimes uses snake_case (tool_id, lot_id) instead of camelCase
+    # Agent LLM sometimes uses snake_case (tool_id, lot_id) instead of camelCase.
+    # `equipment_id` is the term the agent system prompt uses everywhere, but the
+    # simulator API only knows `toolID` — so map that too.
     _SNAKE_TO_CAMEL = {"tool_id": "toolID", "lot_id": "lotID", "event_time": "eventTime",
-                       "recipe_id": "recipeID", "apc_id": "apcID"}
+                       "recipe_id": "recipeID", "apc_id": "apcID",
+                       "equipment_id": "toolID"}
     for snake, camel in _SNAKE_TO_CAMEL.items():
         if snake in params and camel not in params:
             params[camel] = params.pop(snake)
@@ -96,12 +99,12 @@ _DEFAULT_SINCE: Dict[str, str] = {
 # OntologySimulator enforces limit <= 500 on /api/v1/events.
 _DEFAULT_LIMIT: Dict[str, int] = {
     "get_process_events":      500,
-    "get_process_info":        100,
+    "get_process_info":        200,
     "query_object_timeseries": 500,
 }
 _MAX_LIMIT: Dict[str, int] = {
     "get_process_events":      500,
-    "get_process_info":        100,
+    "get_process_info":        500,
     "query_object_timeseries": 500,
 }
 
@@ -261,6 +264,15 @@ async def _resolve_since_param(
             params["limit"] = min(int(params["limit"]), max_lim)
         except (TypeError, ValueError):
             params["limit"] = _DEFAULT_LIMIT.get(mcp_name, 500)
+
+    # ── /process/info accepts `since` natively (NOT `start_time`). ────────
+    # Other time-window MCPs expect `start_time` ISO; we convert below.
+    # If we tried to convert here, simulator would 400 on the unknown param.
+    if mcp_name == "get_process_info":
+        if "since" not in params and "eventTime" not in params:
+            params["since"] = _DEFAULT_SINCE.get(mcp_name, "7d")
+        params.pop("start_time", None)  # safety: never leak start_time here
+        return params
 
     # Explicit start_time wins
     if params.get("start_time"):

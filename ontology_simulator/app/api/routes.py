@@ -454,6 +454,14 @@ async def get_process_summary(
                 {"$limit": 5},
                 {"$project": {"_id": 0, "eventTime": 1, "lotID": 1, "toolID": 1, "step": 1, "spc_status": 1}},
             ],
+            "by_tool_step": [
+                {"$group": {
+                    "_id": {"toolID": "$toolID", "step": "$step"},
+                    "count": {"$sum": 1},
+                    "ooc_count": {"$sum": {"$cond": [{"$eq": ["$spc_status", "OOC"]}, 1, 0]}},
+                }},
+                {"$sort": {"_id.toolID": 1, "_id.step": 1}},
+            ],
         }},
     ]
     agg = await db.events.aggregate(pipeline).to_list(length=1)
@@ -471,6 +479,11 @@ async def get_process_summary(
                      for r in facets.get("by_tool", [])],
         "by_step": [{"step": r["_id"], "count": r["count"], "ooc_count": r["ooc_count"]}
                      for r in facets.get("by_step", [])],
+        "by_tool_step": [
+            {"toolID": r["_id"]["toolID"], "step": r["_id"]["step"],
+             "count": r["count"], "ooc_count": r["ooc_count"]}
+            for r in facets.get("by_tool_step", [])
+        ],
         "recent_ooc": facets.get("recent_ooc", []),
     }
 
@@ -483,7 +496,7 @@ async def get_process_info(
     objectName: Optional[str] = Query(None, description="SPC|DC|APC|RECIPE — filter to one object type"),
     eventTime:  Optional[str] = Query(None),
     since:      Optional[str] = Query(None, description="Time window: 24h/7d/30d"),
-    limit:      int           = Query(50, ge=1, le=200),
+    limit:      int           = Query(50, ge=1, le=500),
 ):
     """Query process events + object data, flattened.
 
@@ -578,24 +591,48 @@ async def query_object_timeseries(body: ObjectQueryRequest):
     param = body.parameter
     limit = min(body.limit, 500)
 
+    # ── SPC parameter alias normalize ──────────────────────────────────
+    # LLM and users often write 'xbar_chart' instead of 'charts.xbar_chart.value'.
+    # Auto-expand the short form so the query works without error.
+    _SPC_PARAM_ALIASES = {
+        "xbar_chart": "charts.xbar_chart.value",
+        "r_chart":    "charts.r_chart.value",
+        "s_chart":    "charts.s_chart.value",
+        "p_chart":    "charts.p_chart.value",
+        "c_chart":    "charts.c_chart.value",
+        "xbar":       "charts.xbar_chart.value",
+        "range":      "charts.r_chart.value",
+        "sigma":      "charts.s_chart.value",
+    }
+    if obj == "SPC" and param in _SPC_PARAM_ALIASES:
+        original_param = param
+        param = _SPC_PARAM_ALIASES[param]
+        import logging
+        logging.getLogger(__name__).info(
+            "query_object_timeseries: SPC parameter alias '%s' → '%s'",
+            original_param, param,
+        )
+
     # Build base query
     query: dict = {"objectName": obj}
 
-    # object_id → filter field depends on object_name
+    # object_id → filter field depends on object_name.
+    # Auto-detect format: EQP-* → toolID, APC-* → objectID, else → step.
+    oid = body.object_id.upper()
     if obj == "SPC":
-        query["step"] = body.object_id.upper()
+        query["step"] = oid
     elif obj == "APC":
-        if body.object_id.upper().startswith("APC"):
+        if oid.startswith("APC"):
             query["objectID"] = body.object_id
         else:
-            query["step"] = body.object_id.upper()
+            query["step"] = oid
     elif obj == "DC":
-        if body.object_id.upper().startswith("EQP"):
+        if oid.startswith("EQP"):
             query["toolID"] = body.object_id
         else:
-            query["step"] = body.object_id.upper()
+            query["step"] = oid
     else:
-        query["step"] = body.object_id.upper()
+        query["step"] = oid
 
     # Time filter from since
     if body.since:
