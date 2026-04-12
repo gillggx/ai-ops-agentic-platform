@@ -1058,22 +1058,17 @@ function DashboardInner() {
               </div>
 
               {deepDiveMode === "trend" ? (
-                /* 趨勢分析: existing 6-tab + OOC topology */
-                <div style={{ display: "flex", gap: 16 }}>
-                  <div style={{ flex: 6, minWidth: 0 }}>
-                    <div style={S.tabBar}>
-                      {TABS.map(t => (
-                        <button key={t} style={S.tab(activeTab === t)} onClick={() => setActiveTab(t)}>
-                          {t}
-                        </button>
-                      ))}
-                    </div>
-                    <div style={{ padding: "12px 0" }}>
-                      {TAB_COMPONENTS[activeTab]}
-                    </div>
+                /* 趨勢分析: 6-tab data only */
+                <div>
+                  <div style={S.tabBar}>
+                    {TABS.map(t => (
+                      <button key={t} style={S.tab(activeTab === t)} onClick={() => setActiveTab(t)}>
+                        {t}
+                      </button>
+                    ))}
                   </div>
-                  <div style={{ flex: 4, minWidth: 280 }}>
-                    <OOCTopologyPanel events={events} lastUpdate={lastUpdate} onRefresh={loadData} />
+                  <div style={{ padding: "12px 0" }}>
+                    {TAB_COMPONENTS[activeTab]}
                   </div>
                 </div>
               ) : (
