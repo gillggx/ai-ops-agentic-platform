@@ -28,10 +28,10 @@ From SSE events, check:
 | A2 | STEP_001 的 xbar_chart trend chart | execute_analysis | contract=YES, chart(spc) | ✅ analysis, contract=YES charts=1 viz=1 |
 | A3 | EQP-03 的 DC chamber_pressure 趨勢 | execute_analysis | contract=YES, chart(line) | ✅ analysis, contract=YES charts=1 viz=1 |
 | A4 | EQP-05 列出 OOC 站點和 SPC charts | skill or analysis | contract=YES, chart(spc) + text | ✅ mcp+skill(#22), contract=YES viz=5 |
-| A5 | 比較 EQP-01 和 EQP-02 的 SPC xbar | execute_analysis | contract=YES, chart(multi_line) | ❌ skill#43 fail → mcp×2 → analysis, charts=0 |
-| A6 | EQP-04 STEP_002 的 APC 三參數疊加趨勢 | execute_skill(#40) | contract=YES, chart(multi_line) | (not tested) |
-| A7 | EQP-06 近 7 天的 SPC 5 chart 全圖 | skill(#22~36) or analysis | contract=YES, 5 spc charts | (not tested) |
-| A8 | STEP_003 各機台的 OOC 率比較 | execute_analysis | contract=YES, chart(bar) | (not tested) |
+| A5 | 比較 EQP-01 和 EQP-02 的 SPC xbar | execute_analysis | contract=YES, chart(multi_line) | ❌ skill#43 fail → mcp×2 → analysis, charts=0 viz=0 |
+| A6 | EQP-04 STEP_002 的 APC 三參數疊加趨勢 | execute_skill(#40) | contract=YES, chart(multi_line) | ✅ skill(#40), contract=YES viz=1 |
+| A7 | EQP-06 近 7 天的 SPC 5 chart 全圖 | skill(#22~36) or analysis | contract=YES, 5 spc charts | ❌ mcp → analysis, contract=YES but charts=0 viz=0 |
+| A8 | STEP_003 各機台的 OOC 率比較 | execute_analysis | contract=YES, chart(bar) | ⚠️ LLM 反問時間範圍，沒執行 |
 
 ### Category B: Should produce text only (no Investigate Mode)
 
@@ -40,15 +40,15 @@ From SSE events, check:
 | B1 | 我想看 EQP-02 今天的製程資訊 | execute_mcp(get_process_info) | contract=NO, text with OOC stats | ✅ contract=NO, text has OOC breakdown |
 | B2 | 目前有哪些機台 | execute_mcp(list_tools) | contract=NO, text list | ✅ contract=NO, lists 10 tools |
 | B3 | 全廠 OOC 率是多少 | execute_mcp(get_process_summary) | contract=NO, text with rate | ⚠️ LLM 反問時間範圍，沒直接回答 |
-| B4 | EQP-08 的 FDC 狀態 | execute_mcp(get_process_info) | contract=NO, text with classification | (not tested) |
-| B5 | LOT-001 經過了哪些機台 | execute_mcp(get_process_info) | contract=NO, text list | (not tested) |
+| B4 | EQP-08 的 FDC 狀態 | execute_mcp(get_process_info) | contract=NO, text with classification | ✅ mcp×2, contract=NO, text shows NORMAL + 96% confidence |
+| B5 | LOT-0001 經過了哪些機台 | execute_mcp(get_process_info) | contract=NO, text list | ✅ mcp, contract=NO, text lists EQP-01 STEP_004 + 14 events |
 
 ### Category C: Should produce judgment/analysis (Investigate Mode)
 
 | # | Prompt | Expected Tool | Expected Behavior | 2026-04-13 Result |
 |---|--------|--------------|-------------------|-------------------|
 | C1 | EQP-01 最近有沒有 OOC | execute_analysis | contract=YES, condition_met判斷 | ⚠️ LLM 反問時間範圍，沒直接執行 |
-| C2 | EQP-07 的 Recipe 參數有沒有變動 | execute_analysis | contract=YES, table or text | (not tested) |
+| C2 | EQP-07 的 Recipe 參數有沒有變動 | execute_analysis | contract=YES, table or text | ⚠️ mcp+skill(#24), contract=NO — 只列了最新 Recipe 參數，沒比較歷史變動 |
 
 ---
 
@@ -71,6 +71,18 @@ From SSE events, check:
 **Root cause:** system prompt 歷史殘留 + LLM 慣性。
 **Impact:** 用戶困惑。
 **Fix:** execute_mcp 不再注入 "CHART RENDERED" notice（已修正），但 system prompt 可能仍有殘留描述。
+
+### Issue 4: execute_analysis auto mode 生成 charts=0 (TC A5, A7)
+**Symptom:** execute_analysis 走 auto mode，contract=YES 但 charts=0 viz=0。用戶看到空的 Investigate Mode。
+**Root cause:** auto mode 後端 LLM 生成的 code 沒正確宣告 output_schema chart type，或 chart_middleware 無法從產出的 outputs 格式建圖。
+**Impact:** 明確要求圖表的 case 沒有圖。
+**Fix:** 檢查 diagnostic_rule_service.generate_steps_stream 對 chart type output_schema 的生成品質。可能需要在 auto mode prompt 裡加入 chart_middleware 支援的 type 清單和範例。
+
+### Issue 5: 判斷型問題沒走 execute_analysis (TC C2)
+**Symptom:** 「Recipe 參數有沒有變動」→ LLM 只拿最新一筆 Recipe 列表，沒有做歷史比較。
+**Root cause:** LLM 選了 execute_mcp + execute_skill(#24 最新 Recipe 列表)，而不是用 execute_analysis 做多筆比對。
+**Impact:** 回答不完整 — 列了參數但沒回答「有沒有變動」。
+**Fix:** execute_analysis description 已改為 data pipeline 思維，但 LLM 仍偏好用現有 skill。可能需要在 skill#24 description 加註「此 skill 只看最新一筆，不做歷史比較」。
 
 ---
 
