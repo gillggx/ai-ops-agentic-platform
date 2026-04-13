@@ -83,6 +83,36 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
         if tool_name == "execute_mcp" and isinstance(result, dict) and result.get("status") == "success":
             result = await distill_svc.distill_mcp_result(result)
 
+            # Inject data overview so LLM knows the full picture even when raw data is truncated.
+            # get_process_info returns {total, events:[...]} wrapped in dataset list.
+            od = result.get("output_data") or {}
+            ds = od.get("dataset") or od.get("_raw_dataset") or []
+            if isinstance(ds, list) and len(ds) == 1 and isinstance(ds[0], dict):
+                inner = ds[0]
+                events = inner.get("events")
+                if isinstance(events, list) and len(events) > 5:
+                    ooc_n = sum(1 for e in events if isinstance(e, dict) and e.get("spc_status") == "OOC")
+                    ooc_steps: dict = {}
+                    for e in events:
+                        if isinstance(e, dict) and e.get("spc_status") == "OOC":
+                            s = e.get("step", "?")
+                            ooc_steps[s] = ooc_steps.get(s, 0) + 1
+                    step_summary = ", ".join(f"{s}:{n}" for s, n in sorted(ooc_steps.items(), key=lambda x: -x[1])[:5])
+                    overview = (
+                        f"\n═══ DATA OVERVIEW ═══\n"
+                        f"total_events: {len(events)}, ooc_count: {ooc_n}, ooc_rate: {ooc_n/len(events)*100:.1f}%\n"
+                        f"ooc_by_step: {step_summary or 'none'}\n"
+                        f"═════════════════════\n"
+                    )
+                    # Prepend to llm_readable_data
+                    lrd = result.get("llm_readable_data")
+                    if isinstance(lrd, str):
+                        result["llm_readable_data"] = overview + lrd
+                    elif isinstance(lrd, dict):
+                        result["llm_readable_data"] = {**lrd, "_data_overview": overview}
+                    else:
+                        result["_data_overview"] = overview
+
         # Build render card (for SSE events)
         render_card = _build_render_card(tool_name, tool_input, result)
         if render_card:
