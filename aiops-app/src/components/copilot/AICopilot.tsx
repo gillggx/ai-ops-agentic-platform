@@ -6,6 +6,7 @@ import { isValidContract, isAgentAction, isHandoffAction } from "aiops-contract"
 import { consumeSSE } from "@/lib/sse";
 import { ContractCard } from "./ContractCard";
 import { ChartIntentRenderer, type ChartIntent } from "./ChartIntentRenderer";
+import { ChartDSLRenderer } from "@/components/operations/SkillOutputRenderer";
 import type { UiRender } from "@/components/McpChartRenderer";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -36,6 +37,16 @@ interface McpResult {
   dataset?: unknown[];
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type RenderOptionBlock = { id: string; label: string; kind: string; charts?: any[]; outputs?: any; output_schema?: any[]; recommended?: boolean };
+type RenderDecisionMeta = {
+  kind: string;
+  primary?: RenderOptionBlock;
+  alternatives?: RenderOptionBlock[];
+  question?: string;
+  options?: RenderOptionBlock[];  // for ask_user
+};
+
 interface ChatMessage {
   id: number;
   role: "user" | "agent" | "mcp_result" | "chart_intents";
@@ -43,6 +54,7 @@ interface ChatMessage {
   contract?: AIOpsReportContract;
   mcpResult?: McpResult;
   chartIntents?: ChartIntent[];
+  renderDecision?: RenderDecisionMeta;
 }
 
 interface HitlRequest {
@@ -159,6 +171,54 @@ const MD_CSS = `
 `;
 
 // ---------------------------------------------------------------------------
+// RenderDecisionChips — inline expandable chart switcher for MCP results
+// ---------------------------------------------------------------------------
+
+function RenderDecisionChips({ decision }: { decision: RenderDecisionMeta }) {
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+
+  // Collect all options (primary first, then alternatives)
+  const allOptions: RenderOptionBlock[] = [];
+  if (decision.primary) allOptions.push(decision.primary);
+  if (decision.alternatives) allOptions.push(...decision.alternatives);
+  if (decision.options) allOptions.push(...decision.options);  // ask_user mode
+
+  if (allOptions.length === 0) return null;
+
+  const expanded = expandedIdx !== null ? allOptions[expandedIdx] : null;
+
+  return (
+    <div style={{ maxWidth: "90%", marginTop: 4 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: expanded ? 8 : 0 }}>
+        {allOptions.map((opt, i) => (
+          <button
+            key={opt.id}
+            onClick={() => setExpandedIdx(expandedIdx === i ? null : i)}
+            style={{
+              padding: "3px 10px", fontSize: 11, borderRadius: 12,
+              border: expandedIdx === i ? "1px solid #4299e1" : "1px solid #cbd5e0",
+              background: expandedIdx === i ? "#ebf4ff" : "#fff",
+              color: expandedIdx === i ? "#2b6cb0" : "#4a5568",
+              cursor: "pointer", fontWeight: expandedIdx === i ? 600 : 400,
+            }}
+          >
+            {opt.recommended ? "⭐ " : ""}{opt.label}
+          </button>
+        ))}
+      </div>
+      {expanded && expanded.charts && expanded.charts.length > 0 && (
+        <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, maxHeight: 500, overflowY: "auto" }}>
+          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+          {expanded.charts.map((chart: any, ci: number) => (
+            <ChartDSLRenderer key={ci} chart={chart} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // AICopilot
 // ---------------------------------------------------------------------------
 
@@ -183,6 +243,7 @@ export function AICopilot({
   const sessionIdRef = useRef<string | null>(null);
   const chatEndRef   = useRef<HTMLDivElement>(null);
   const logsEndRef   = useRef<HTMLDivElement>(null);
+  const pendingRenderDecisionRef = useRef<RenderDecisionMeta | null>(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -326,18 +387,10 @@ export function AICopilot({
               const target = card.target as string | undefined;
               if (target) window.location.href = target;
             } else if (card?.type === "mcp") {
-              const mcp_output = card.mcp_output as Record<string, unknown> | undefined;
-              const uiRender = mcp_output?.ui_render as UiRender | undefined;
-              const hasChart = !!uiRender?.chart_data || (uiRender?.charts?.length ?? 0) > 0;
-              if (hasChart) {
-                setChatHistory(prev => [...prev, {
-                  id: nextId(), role: "mcp_result" as const, content: "",
-                  mcpResult: {
-                    mcp_name: (card.mcp_name as string) ?? "MCP",
-                    uiRender: uiRender!,
-                    dataset: (mcp_output?.dataset as unknown[]) ?? [],
-                  },
-                }]);
+              // Capture render_decision for later use by synthesis message
+              const rd = card.render_decision as RenderDecisionMeta | undefined;
+              if (rd) {
+                pendingRenderDecisionRef.current = rd;
               }
             }
             // Charts now always go to the analysis panel (center) via contract.visualization.
@@ -374,7 +427,13 @@ export function AICopilot({
                 contract,
               }]);
             } else if (displayText) {
-              setChatHistory((prev) => [...prev, { id: nextId(), role: "agent", content: displayText }]);
+              // Attach pending render_decision from execute_mcp (chip buttons for chart switching)
+              const rd = pendingRenderDecisionRef.current;
+              pendingRenderDecisionRef.current = null;
+              setChatHistory((prev) => [...prev, {
+                id: nextId(), role: "agent", content: displayText,
+                ...(rd ? { renderDecision: rd } : {}),
+              }]);
             }
             addLog(makeLog("💬", `Synthesis 完成 (${text.length} chars)`, "info"));
             break;
@@ -623,6 +682,9 @@ export function AICopilot({
                     <div style={{ maxWidth: "90%", width: "100%" }}>
                       <ContractCard contract={msg.contract} onTrigger={handleSuggestedAction} />
                     </div>
+                  )}
+                  {msg.role === "agent" && msg.renderDecision && (
+                    <RenderDecisionChips decision={msg.renderDecision} />
                   )}
                 </>
               )}

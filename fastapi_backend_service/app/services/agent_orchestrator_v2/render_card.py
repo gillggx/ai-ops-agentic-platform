@@ -86,22 +86,20 @@ def _build_render_card(
         dataset = od.get("dataset")
         raw_dataset = od.get("_raw_dataset") or dataset
 
-        # ── Render intent classifier: decide how to present this MCP result ──
-        # Principle: structure-driven, not keyword-driven. Classifier inspects
-        # raw_dataset shape and returns a primary render + alternatives.
-        # The contract carries everything the frontend needs to render instantly
-        # AND switch between alternative renders without re-calling the MCP.
-        contract = None
+        # ── Render intent classifier ──
+        # Principle: LLM text answer is the PRIMARY output. Classifier only builds
+        # switchable alternatives (chip buttons) that the user can expand in copilot.
+        # NO contract is produced here — so execute_mcp never triggers Investigate Mode.
+        # Only execute_analysis and execute_skill should trigger Investigate Mode.
+        render_decision_meta = None
         try:
             from app.services.render_intent_classifier import classify_render_intent, build_outputs
             from app.services.chart_middleware import process as chart_process
 
-            # Use the unwrapped raw response (single dict, not the dataset wrapper list)
             classify_input = raw_dataset[0] if isinstance(raw_dataset, list) and len(raw_dataset) == 1 else raw_dataset
             decision = classify_render_intent(classify_input, mcp_name=mcp_name or "")
 
             def _opt_to_render(opt):
-                """Apply transform → chart_middleware → return frontend-ready render block."""
                 outputs = build_outputs(opt, classify_input)
                 charts = chart_process(outputs, opt.output_schema) if outputs and opt.output_schema else []
                 return {
@@ -118,51 +116,28 @@ def _build_render_card(
             alt_blocks = [_opt_to_render(o) for o in decision.alternatives]
 
             if decision.kind.value == "ask_user":
-                # Multi-choice: no primary chart, frontend renders a choice card
-                contract = {
-                    "$schema": "aiops-report/v1",
-                    "summary": decision.question or f"取得 {mcp_name} 的資料，要怎麼呈現？",
-                    "evidence_chain": [],
-                    "visualization": [],
-                    "suggested_actions": [],
-                    "render_decision": {
-                        "kind": "ask_user",
-                        "question": decision.question,
-                        "options": alt_blocks,
-                    },
+                render_decision_meta = {
+                    "kind": "ask_user",
+                    "question": decision.question,
+                    "options": alt_blocks,
                 }
             elif primary_block:
-                # Auto render: primary + switchable alternatives
-                contract = {
-                    "$schema": "aiops-report/v1",
-                    "summary": f"已取得 {mcp_name} 的資料",
-                    "evidence_chain": [],
-                    "visualization": [],
-                    "suggested_actions": [],
-                    "findings": {
-                        "condition_met": False,
-                        "summary": "",
-                        "outputs": primary_block["outputs"],
-                    },
-                    "output_schema": primary_block["output_schema"],
-                    "charts": primary_block["charts"],
-                    "render_decision": {
-                        "kind": decision.kind.value,
-                        "primary": primary_block,
-                        "alternatives": alt_blocks,
-                    },
+                render_decision_meta = {
+                    "kind": decision.kind.value,
+                    "primary": primary_block,
+                    "alternatives": alt_blocks,
                 }
-                if primary_block["charts"]:
-                    _notify_chart_rendered(result, primary_block["charts"])
-                logger.warning(
-                    "[render_card execute_mcp] mcp=%r kind=%s primary_charts=%d alts=%d",
-                    mcp_name, decision.kind.value, len(primary_block["charts"]), len(alt_blocks),
-                )
+            logger.warning(
+                "[render_card execute_mcp] mcp=%r kind=%s charts=%d alts=%d (no contract — LLM text is primary)",
+                mcp_name, decision.kind.value,
+                len((primary_block or {}).get("charts", [])),
+                len(alt_blocks),
+            )
         except Exception as exc:
             logger.exception("render_card execute_mcp classifier failed: %s", exc)
-            contract = None
+            render_decision_meta = None
 
-        card = {
+        card: Dict[str, Any] = {
             "type": "mcp",
             "mcp_name": mcp_name,
             "mcp_output": {
@@ -173,8 +148,8 @@ def _build_render_card(
                 "_is_processed": od.get("_is_processed", True),
             },
         }
-        if contract:
-            card["contract"] = contract
+        if render_decision_meta:
+            card["render_decision"] = render_decision_meta
         return card
 
     # ── draft_* tools ──
