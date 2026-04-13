@@ -46,9 +46,10 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     {
         "name": "execute_mcp",
         "description": (
-            "執行一個 MCP 節點 (system 或 custom)，回傳 dataset。"
-            "system MCP 直接查詢底層 API；custom MCP 執行 Python 腳本。"
-            "mcp_name 必填，直接填入 <mcp_catalog> 中的 name 欄位（例如 'get_tool_trajectory'）。"
+            "直接查詢底層資料源，回傳 raw data（不產生圖表）。"
+            "適合純資料查看（如：機台清單、系統狀態）。"
+            "⚠️ 如果使用者需要圖表或資料處理，應該用 execute_analysis 而非 execute_mcp。"
+            "mcp_name 必填，填入 <mcp_catalog> 中的 name 欄位。"
         ),
         "input_schema": {
             "type": "object",
@@ -333,27 +334,22 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "name": "execute_analysis",
         "description": (
             "== What ==\n"
-            "多步驟 Python 分析 + 判斷。產出的 code 可一鍵儲存為 Skill → Auto-Patrol。\n"
-            "\n"
-            "== IMPORTANT: 什麼時候 **不要** 用 execute_analysis ==\n"
-            "⛔ 如果 <mcp_catalog> 裡有 MCP 能直接拿到使用者要的資料 → **優先用 execute_mcp**。\n"
-            "   execute_mcp 拿到資料後，系統會自動用 chart middleware 畫圖，不需要你做任何事。\n"
-            "   例如：「查 STEP_001 SPC 數據」→ execute_mcp(get_process_info) → 系統自動畫 5 chart。\n"
-            "   不需要 execute_analysis。\n"
+            "規劃並執行一個 data pipeline：撈資料 → 處理 → 產圖/產結論。\n"
+            "產出的 code 可一鍵儲存為 Skill → Auto-Patrol。\n"
             "\n"
             "== Use when ==\n"
-            "- 需要「多步 Python 邏輯」的複合分析（例如：跨多筆 lot 比對 APC 參數偏移）\n"
-            "- 需要「判斷條件是否成立」（例如：最近 5 筆有 ≥2 筆 OOC？）\n"
-            "- <skill_catalog> 和 <mcp_catalog> 都找不到能直接完成的現成工具\n"
+            "- <skill_catalog> 裡沒有現成 Skill 能完成使用者的需求\n"
+            "- 需要圖表（chart）、趨勢分析、條件判斷、複合分析\n"
+            "- 需要資料處理（filter / flatten / aggregate）後再呈現\n"
             "\n"
             "== mode ==\n"
-            "mode='auto'（推薦）：只給 title + description，後端自動生成分析 code 並執行。\n"
-            "mode='code'：自行提供 steps[].python_code，僅限 auto 失敗時的 fallback。\n"
+            "mode='auto'（推薦）：給 title + description，後端自動生成 pipeline code 並執行。\n"
+            "description 要寫清楚 pipeline plan：資料來源 + 處理邏輯 + 呈現方式。\n"
             "\n"
-            "★ mode='code' 只在 mode='auto' 失敗時才用，且 steps[].python_code 應遵循 Skill code 規範：\n"
+            "mode='code'：自行提供 steps[].python_code，僅限 auto 失敗時的 fallback。\n"
             "  - 用 await execute_mcp(mcp_name, params) 撈資料\n"
             "  - 在最後一步 assign _findings.outputs[key] = data\n"
-            "  - 圖表由 ChartMiddleware 從 output_schema 自動產生，**不要**手動 assign _chart/_charts\n"
+            "  - 圖表由 ChartMiddleware 從 output_schema type 自動產生\n"
             "  - 可用變數：equipment_id, lot_id, step, event_time, _input\n"
             "  - 禁止 import requests/os/sys/subprocess\n"
         ),
