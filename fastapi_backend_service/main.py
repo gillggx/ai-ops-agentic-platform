@@ -247,7 +247,7 @@ _ONTOLOGY_SYSTEM_MCPS = [
                 {"name": "toolID", "type": "string", "description": "機台 ID，e.g. EQP-01", "required": False},
                 {"name": "lotID",  "type": "string", "description": "批次 ID，e.g. LOT-0001", "required": False},
                 {"name": "step",   "type": "string", "description": "站點代碼，e.g. STEP_020", "required": False},
-                {"name": "since",  "type": "string", "description": "時間窗 '24h'/'7d'/'30d'，預設 '7d'", "required": False},
+                {"name": "since",  "type": "string", "description": "時間窗 '24h'/'7d'/'30d'，不帶時預設 '24h'", "required": False},
             ]
         },
     },
@@ -273,7 +273,7 @@ _ONTOLOGY_SYSTEM_MCPS = [
             "\n"
             "== Optional params ==\n"
             "objectName : 'SPC' | 'APC' | 'DC' | 'RECIPE' | 'FDC' | 'EC'（filter to one；不帶=全回）\n"
-            "since      : '24h' | '7d' | '30d'（時間窗，預設 7d）\n"
+            "since      : '24h' | '7d' | '30d'（時間窗，不帶時預設 '24h'）\n"
             "limit      : 1~200（最近 N 筆，預設 50；查「最近 N 次 process」用此欄位）\n"
             "eventTime  : ISO8601（精確定位某次 process）\n"
             "\n"
