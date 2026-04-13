@@ -400,47 +400,26 @@ def classify_render_intent(
             alternatives=[],
         )
 
-    # ── Step 5: event list with rich multi-object data (SPC+APC+DC+...) ──
-    # When events contain multiple object types, the user's question determines
-    # what to show — NOT the classifier. Let LLM text synthesis be the answer.
-    # Only auto-chart when data has ONLY SPC and nothing else.
+    # ── Step 5: event list with SPC nested → ASK_USER (multiple renders all valid) ──
     if _is_event_list(data) and _has_spc_charts_nested(data):
         n = len(data) if isinstance(data, list) else 0
-        object_types = sum([
-            _has_apc_parameters(data),
-            _has_dc_parameters(data),
-            _has_recipe_parameters(data),
-            _has_fdc_classification(data),
-            _has_ec_constants(data),
-        ])
-        if object_types >= 2:
-            # Multi-object response (e.g. get_process_info) → text summary primary,
-            # user can switch to specific charts if they want
-            alts_raw = [
-                _build_spc_chart_option(data),
-                _build_apc_param_chart_option(data) if _has_apc_parameters(data) else None,
-                _build_dc_param_chart_option(data) if _has_dc_parameters(data) else None,
-                _build_recipe_table_option(data) if _has_recipe_parameters(data) else None,
-                _build_event_table_option(data),
-                _build_ooc_only_option(data),
-            ]
-            return RenderDecision(
-                kind=RenderKind.AUTO_SCALAR,
-                primary=_build_summary_text_option(),
-                alternatives=[a for a in alts_raw if a is not None],
-            )
-        else:
-            # SPC-only data → auto-chart is appropriate
-            primary = _build_spc_chart_option(data)
-            alts: List[RenderOption] = [
-                _build_event_table_option(data),
-                _build_ooc_only_option(data),
-            ]
-            return RenderDecision(
-                kind=RenderKind.AUTO_CHART,
-                primary=primary,
-                alternatives=alts,
-            )
+        primary = _build_spc_chart_option(data)
+        alts: List[RenderOption] = [
+            _build_event_table_option(data),
+            _build_ooc_only_option(data),
+        ]
+        # APC / DC / RECIPE alternative if event also has those nested structures
+        if _has_apc_parameters(data):
+            alts.append(_build_apc_param_chart_option(data))
+        if _has_dc_parameters(data):
+            alts.append(_build_dc_param_chart_option(data))
+        if _has_recipe_parameters(data):
+            alts.append(_build_recipe_table_option(data))
+        return RenderDecision(
+            kind=RenderKind.AUTO_CHART,  # default to chart, but offer alternatives
+            primary=primary,
+            alternatives=alts,
+        )
 
     # ── Step 6: event list without SPC nested ──
     if _is_event_list(data):
