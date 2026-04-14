@@ -552,7 +552,7 @@ class ToolDispatcher:
 
                         if data_source in _FLATTEN_MCPS and isinstance(flatten_input, dict) and flatten_input.get("events"):
                             flat_result = flatten(flatten_input)
-                            llm_summary = build_llm_summary(flat_result.metadata)
+                            llm_summary = build_llm_summary(flat_result.metadata, flat_result)
                             return {
                                 "status": "success",
                                 "mcp_name": data_source,
@@ -676,17 +676,21 @@ class ToolDispatcher:
                     )
                 # ── Ad-hoc Analysis (the only entry point for analysis + charts) ──────
                 case "execute_analysis":
+                    body = {
+                        "title": tool_input.get("title", "Ad-hoc 分析"),
+                        "mode": tool_input.get("mode", "auto"),
+                        "description": tool_input.get("description", tool_input.get("title", "")),
+                        "steps": tool_input.get("steps", []),
+                        "input_params": tool_input.get("input_params", {}),
+                    }
+                    # Pass flat_data so sandbox code can read it directly
+                    if tool_input.get("_flat_data"):
+                        body["_flat_data"] = tool_input["_flat_data"]
                     return await self._call_api(
                         "POST",
                         "/api/v1/analysis/run",
-                        body={
-                            "title": tool_input.get("title", "Ad-hoc 分析"),
-                            "mode": tool_input.get("mode", "auto"),
-                            "description": tool_input.get("description", tool_input.get("title", "")),
-                            "steps": tool_input.get("steps", []),
-                            "input_params": tool_input.get("input_params", {}),
-                        },
-                        timeout=120.0,  # auto mode involves LLM code gen → needs longer timeout
+                        body=body,
+                        timeout=120.0,
                     )
                 # ── [v15.1] Catalog search across skills / mcps / system_mcps / agent_tools
                 case "search_catalog":

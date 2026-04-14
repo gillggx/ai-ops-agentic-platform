@@ -268,8 +268,14 @@ def _build_metadata(events: List[Dict], total: int, result: FlattenedResult) -> 
     }
 
 
-def build_llm_summary(metadata: Dict[str, Any], sample_events: Optional[List[Dict]] = None) -> str:
-    """Build a concise text summary for LLM diagnosis (replaces DATA OVERVIEW injection)."""
+def build_llm_summary(metadata: Dict[str, Any], flat_result: Optional[FlattenedResult] = None) -> str:
+    """Build a concise text summary for LLM.
+
+    Includes: metadata overview + 3-row sample per dataset (so LLM knows exact field names
+    and data format for execute_analysis code generation).
+    """
+    import json as _json
+
     lines = [
         "═══ DATA OVERVIEW ═══",
         f"total_events: {metadata.get('total_events', 0)}, "
@@ -288,5 +294,27 @@ def build_llm_summary(metadata: Dict[str, Any], sample_events: Optional[List[Dic
         lines.append(f"tools: {', '.join(enums['toolID'])}")
     if enums.get("step"):
         lines.append(f"steps: {', '.join(enums['step'])}")
+
+    # Dataset sizes
+    ds_sizes = metadata.get("dataset_sizes", {})
+    if ds_sizes:
+        lines.append("dataset_sizes: " + ", ".join(f"{k}={v}" for k, v in ds_sizes.items()))
+
+    # Sample rows (3 per dataset) — so LLM knows exact field names and data format
+    if flat_result:
+        lines.append("")
+        lines.append("═══ DATASET SAMPLES (3 rows each, for format reference) ═══")
+        for ds_name in flat_result.available_datasets:
+            ds = flat_result.dataset_for(ds_name)
+            if ds:
+                lines.append(f"\n{ds_name} ({len(ds)} rows):")
+                for row in ds[:3]:
+                    # Truncate long values
+                    compact = {k: (round(v, 6) if isinstance(v, float) else v) for k, v in row.items()}
+                    lines.append(f"  {_json.dumps(compact, ensure_ascii=False, default=str)}")
+
     lines.append("═════════════════════")
+    lines.append("")
+    lines.append("⚠️ 以上 flat_data 已暫存在系統中。如果需要 execute_analysis，")
+    lines.append("   sandbox code 可直接用 _flat_data['spc_data'] 等欄位讀取完整資料，不需要再呼叫 MCP。")
     return "\n".join(lines)

@@ -72,6 +72,9 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
         if preflight_err:
             result = preflight_err
         else:
+            # Inject flat_data into execute_analysis so sandbox can read it directly
+            if tool_name == "execute_analysis" and state.get("flat_data"):
+                tool_input = {**tool_input, "_flat_data": state["flat_data"]}
             result = await dispatcher.execute(tool_name, tool_input)
 
         # Track SPC results for auto-contract fallback

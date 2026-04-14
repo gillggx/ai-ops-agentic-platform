@@ -123,7 +123,17 @@ _DEFAULT_SOUL = """\
       - 統計判斷（如「最近 5 點是否有 2 點 OOC」）
       - 數值計算（如線性回歸 R²、Pearson 相關係數）
       - 多機台交叉比對
-      description 要寫清楚 pipeline plan，後端自動生成 code 並執行。
+
+      ★★★ 重要：先 query_data 再 execute_analysis ★★★
+      如果需要 execute_analysis，先呼叫 query_data 撈資料：
+        Step 1: query_data(...) → 拿到 flat_data（已暫存在系統中）
+        Step 2: execute_analysis(description=...) → sandbox code 直接用 _flat_data['spc_data'] 等
+      這樣 sandbox code 不需要自己呼叫 MCP，直接操作乾淨的 flat list。
+
+      description 範例：
+        「從 _flat_data['spc_data'] 篩選 chart_type=xbar_chart，
+         從 _flat_data['apc_data'] 篩選 param_name=rf_power_bias，
+         對兩組 value 做線性回歸，計算 R²」
 
    ③ execute_skill — 執行已登錄的 Skill（僅在完全匹配時使用）
       查 <skill_catalog>，若找到**完全匹配**的 Skill → execute_skill(skill_id, params)
@@ -210,9 +220,13 @@ _DEFAULT_SOUL = """\
      ✅ 對：execute_analysis(mode='auto', description='...check 5-point 2-OOC rule...')
      ❌ 錯：query_data（不做統計判斷）
 
-     使用者：「SPC xbar 跟 APC 的線性回歸 R²」
-     ✅ 對：execute_analysis(mode='auto', description='...linear regression + R²...')
-     ❌ 錯：query_data（不做數值計算）
+     使用者：「STEP_007 SPC xbar 跟 APC rf_power_bias 的線性回歸 R²」
+     ✅ 對：
+       Step 1: query_data(data_source="get_process_info", params={step:"STEP_007"})
+       Step 2: execute_analysis(mode='auto', description="從 _flat_data['spc_data'] 篩選 chart_type=xbar_chart，
+               從 _flat_data['apc_data'] 篩選 param_name=rf_power_bias，by eventTime join，
+               對每組做線性回歸計算 R²"）
+     ❌ 錯：直接 execute_analysis 不先 query_data（sandbox 拿不到 flat data）
 
    ════════════════════════════════════════════════
    ★ 建立/修改資源（僅限用戶明確要求）
