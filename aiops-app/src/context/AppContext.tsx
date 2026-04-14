@@ -9,6 +9,17 @@ export interface SelectedEquipment {
   status: string;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export interface DataExplorerState {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  flatData: Record<string, any[]>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  metadata: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  uiConfig?: any;
+  queryInfo?: { mcp: string; params: Record<string, unknown>; resultSummary: string };
+}
+
 interface AppContextValue {
   selectedEquipment: SelectedEquipment | null;
   setSelectedEquipment: (eq: SelectedEquipment | null) => void;
@@ -18,6 +29,8 @@ interface AppContextValue {
   setContract: (c: AIOpsReportContract | null) => void;
   investigateMode: boolean;
   setInvestigateMode: (b: boolean) => void;
+  dataExplorer: DataExplorerState | null;
+  setDataExplorer: (de: DataExplorerState | null) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -27,6 +40,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [triggerMessage, setTriggerMessage]       = useState<string | null>(null);
   const [contract, setContract]                   = useState<AIOpsReportContract | null>(null);
   const [investigateMode, setInvestigateMode]     = useState(false);
+  const [dataExplorer, setDataExplorer]           = useState<DataExplorerState | null>(null);
 
   return (
     <AppContext.Provider value={{
@@ -34,6 +48,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       triggerMessage, setTriggerMessage,
       contract, setContract,
       investigateMode, setInvestigateMode,
+      dataExplorer, setDataExplorer,
     }}>
       {children}
     </AppContext.Provider>

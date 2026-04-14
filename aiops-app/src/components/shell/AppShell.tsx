@@ -6,7 +6,9 @@ import { usePathname } from "next/navigation";
 import { Topbar } from "@/components/layout/Topbar";
 import { AICopilot } from "@/components/copilot/AICopilot";
 import { AnalysisPanel } from "@/components/layout/AnalysisPanel";
+import { DataExplorerPanel } from "@/components/layout/DataExplorerPanel";
 import { AppProvider, useAppContext } from "@/context/AppContext";
+import type { DataExplorerState } from "@/context/AppContext";
 import type { AIOpsReportContract } from "aiops-contract";
 
 // ── Navigation structure ──────────────────────────────────────────────────────
@@ -135,11 +137,19 @@ function Shell({ children }: { children: React.ReactNode }) {
     contract, setContract,
     investigateMode, setInvestigateMode,
     selectedEquipment,
+    dataExplorer, setDataExplorer,
   } = useAppContext();
 
   function handleContract(c: AIOpsReportContract) {
     setContract(c);
     setInvestigateMode(true);
+  }
+
+  function handleDataExplorer(de: DataExplorerState) {
+    setDataExplorer(de);
+    // Close investigate mode if open
+    setInvestigateMode(false);
+    setContract(null);
   }
 
   function handleHandoff(mcp: string, params?: Record<string, unknown>) {
@@ -155,7 +165,12 @@ function Shell({ children }: { children: React.ReactNode }) {
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         <ContextualSidebar />
         <main style={{ flex: 1, overflowY: "auto", minWidth: 0 }}>
-          {investigateMode && contract ? (
+          {dataExplorer ? (
+            <DataExplorerPanel
+              state={dataExplorer}
+              onClose={() => setDataExplorer(null)}
+            />
+          ) : investigateMode && contract ? (
             <AnalysisPanel
               contract={contract}
               onClose={() => { setInvestigateMode(false); setContract(null); }}
@@ -171,6 +186,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         }}>
           <AICopilot
             onContract={handleContract}
+            onDataExplorer={handleDataExplorer}
             triggerMessage={triggerMessage}
             onTriggerConsumed={() => setTriggerMessage(null)}
             contextEquipment={selectedEquipment?.name ?? null}

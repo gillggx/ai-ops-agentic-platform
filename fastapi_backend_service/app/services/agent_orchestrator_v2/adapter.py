@@ -239,6 +239,7 @@ async def adapt_events(
                                 "type": "flat_data",
                                 "flat_data": flat_data,
                                 "metadata": flat_meta,
+                                "query_info": card.get("query_info"),
                             }
                         if ui_config:
                             yield {

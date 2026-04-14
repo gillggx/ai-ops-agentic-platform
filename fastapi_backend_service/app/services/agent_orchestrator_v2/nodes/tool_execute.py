@@ -127,12 +127,22 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
                     "available_datasets": _flat_meta.get("available_datasets", []) if _flat_meta else [],
                 }
             # Build render card for SSE
+            # Build query info for frontend display
+            _query_params = tool_input.get("params", {})
+            _total = _flat_meta.get("total_events", 0) if _flat_meta else 0
+            _ooc = _flat_meta.get("ooc_count", 0) if _flat_meta else 0
+            _ooc_rate = _flat_meta.get("ooc_rate", 0) if _flat_meta else 0
             card = {
                 "type": "query_data",
                 "mcp_name": result.get("mcp_name", ""),
                 "flat_data": _flat_data,
                 "flat_metadata": _flat_meta,
                 "ui_config": _ui_config,
+                "query_info": {
+                    "mcp": result.get("mcp_name", ""),
+                    "params": _query_params,
+                    "result_summary": f"{_total} events, {_ooc} OOC ({_ooc_rate}%)",
+                },
             }
             new_render_cards.append(card)
         else:

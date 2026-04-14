@@ -76,6 +76,8 @@ interface ReflectionState {
 
 interface Props {
   onContract?: (contract: AIOpsReportContract) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onDataExplorer?: (state: any) => void;
   triggerMessage?: string | null;
   onTriggerConsumed?: () => void;
   contextEquipment?: string | null;
@@ -239,6 +241,7 @@ function RenderDecisionChips({ decision, onContract }: {
 
 export function AICopilot({
   onContract,
+  onDataExplorer,
   triggerMessage,
   onTriggerConsumed,
   contextEquipment,
@@ -260,7 +263,7 @@ export function AICopilot({
   const logsEndRef   = useRef<HTMLDivElement>(null);
   const pendingRenderDecisionRef = useRef<RenderDecisionMeta | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const pendingFlatDataRef = useRef<{ flatData: Record<string, any[]>; metadata: FlatDataMetadata; uiConfig: UIConfig | null } | null>(null);
+  const pendingFlatDataRef = useRef<{ flatData: Record<string, any[]>; metadata: FlatDataMetadata; uiConfig: UIConfig | null; queryInfo?: any } | null>(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -416,15 +419,18 @@ export function AICopilot({
           }
 
           case "flat_data": {
-            // Generative UI: cache flat data for ChartExplorer
+            // Generative UI: cache flat data for DataExplorer
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const fd = ev.flat_data as Record<string, any[]>;
             const meta = ev.metadata as FlatDataMetadata;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const qInfo = ev.query_info as any;
             if (fd && meta) {
               pendingFlatDataRef.current = {
                 flatData: fd,
                 metadata: meta,
                 uiConfig: pendingFlatDataRef.current?.uiConfig ?? null,
+                queryInfo: qInfo ?? undefined,
               };
               addLog(makeLog("📊", `Data flattened: ${meta.total_events} events, ${meta.available_datasets?.length ?? 0} datasets`, "tool"));
             }
@@ -481,14 +487,14 @@ export function AICopilot({
                 ...(rd ? { renderDecision: rd } : {}),
               }]);
 
-              // If we have flat data with a UI config, add ChartExplorer message
+              // If we have flat data with a UI config, open DataExplorer in center panel
               if (pending?.flatData && pending.metadata && pending.uiConfig) {
-                setChatHistory((prev) => [...prev, {
-                  id: nextId(), role: "chart_explorer" as const, content: "",
+                onDataExplorer?.({
                   flatData: pending.flatData,
-                  flatMetadata: pending.metadata,
-                  uiConfig: pending.uiConfig ?? undefined,
-                }]);
+                  metadata: pending.metadata,
+                  uiConfig: pending.uiConfig,
+                  queryInfo: pending.queryInfo,
+                });
               }
             }
             addLog(makeLog("💬", `Synthesis 完成 (${text.length} chars)`, "info"));
