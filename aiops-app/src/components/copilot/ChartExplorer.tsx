@@ -409,10 +409,20 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
         }
         return (
           <div key={ecIdx} style={{ borderTop: "1px solid #e2e8f0" }}>
-            <div style={{ padding: "4px 16px", fontSize: 11, fontWeight: 600, color: "#718096", display: "flex", justifyContent: "space-between" }}>
-              <span>{ecFilter} ({ecData.length} rows)</span>
+            <div style={{ padding: "4px 16px", fontSize: 11, fontWeight: 600, color: "#718096", display: "flex", alignItems: "center", gap: 8 }}>
+              <span>Filter:</span>
+              <select
+                value={ecFilter}
+                onChange={(e) => setExtraCharts(prev => prev.map((v, i) => i === ecIdx ? e.target.value : v))}
+                style={{ fontSize: 11, padding: "2px 6px", borderRadius: 4, border: "1px solid #cbd5e0" }}
+              >
+                {groupValues.map((v) => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+              <span style={{ color: "#a0aec0" }}>{ecData.length} rows</span>
               <button onClick={() => setExtraCharts(prev => prev.filter((_, i) => i !== ecIdx))}
-                style={{ border: "none", background: "none", color: "#e53e3e", cursor: "pointer", fontSize: 11 }}>x</button>
+                style={{ marginLeft: "auto", border: "none", background: "none", color: "#e53e3e", cursor: "pointer", fontSize: 11 }}>x</button>
             </div>
             <Plot
               data={ecTraces}
