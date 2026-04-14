@@ -117,54 +117,50 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
     return data;
   }, [rawData, initialFilter, filterKey, filterValue]);
 
-  // Group data for chart traces
+  // Auto-select first group value if none selected (one at a time)
+  const effectiveFilterValue = filterValue || (groupValues.length > 0 ? groupValues[0] : "");
+
+  // Apply group filter (always one group at a time, never "All")
+  const displayData = useMemo(() => {
+    if (!groupField || !effectiveFilterValue) return filteredData;
+    return filteredData.filter((r) => String(r[groupField]) === effectiveFilterValue);
+  }, [filteredData, groupField, effectiveFilterValue]);
+
+  // Single trace (one group at a time)
   const traces = useMemo(() => {
-    if (!groupField || !groupValues.length) {
-      // Single trace
-      const xs = filteredData.map((r) => r[config.x]);
-      const ys = filteredData.map((r) => r[config.y]);
-      return [{ x: xs, y: ys, name: config.y, type: "scatter" as const, mode: "lines+markers" as const }];
-    }
-    // Grouped traces
-    const colors = ["#4299e1", "#48bb78", "#ed8936", "#9f7aea", "#e53e3e", "#d69e2e", "#38b2ac", "#667eea"];
-    const activeGroups = filterValue
-      ? [filterValue]
-      : groupValues.slice(0, 8);
+    const xs = displayData.map((r) => r[config.x]);
+    const ys = displayData.map((r) => r[config.y]);
+    // SPC = green line, others = blue
+    const lineColor = activeDataset === "spc_data" ? "#48bb78" : "#4299e1";
+    return [{
+      x: xs, y: ys,
+      name: effectiveFilterValue || config.y,
+      type: "scatter" as const,
+      mode: "lines+markers" as const,
+      line: { color: lineColor, width: 2 },
+      marker: { size: 4, color: lineColor },
+    }];
+  }, [displayData, config, effectiveFilterValue, activeDataset]);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return activeGroups.map((gv, i): any => {
-      const subset = filteredData.filter((r) => String(r[groupField]) === gv);
-      return {
-        x: subset.map((r) => r[config.x]),
-        y: subset.map((r) => r[config.y]),
-        name: gv,
-        type: "scatter",
-        mode: "lines+markers",
-        line: { color: colors[i % colors.length], width: 1.5 },
-        marker: { size: 4 },
-      };
-    });
-  }, [filteredData, groupField, groupValues, config, filterValue]);
-
-  // SPC control lines
+  // SPC control lines — UCL/LCL orange, CL gray dotted
   const shapes = useMemo(() => {
-    if (activeDataset !== "spc_data" || !filteredData.length) return [];
-    const ucl = filteredData[0]?.ucl;
-    const lcl = filteredData[0]?.lcl;
-    const vals = filteredData.map((r) => r.value).filter((v) => typeof v === "number");
-    const cl = vals.length ? vals.reduce((a: number, b: number) => a + b, 0) / vals.length : 0;
+    if (activeDataset !== "spc_data" || !displayData.length) return [];
+    const ucl = displayData[0]?.ucl;
+    const lcl = displayData[0]?.lcl;
+    const vals = displayData.map((r) => r.value).filter((v: unknown) => typeof v === "number") as number[];
+    const cl = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const s: any[] = [];
-    if (ucl != null) s.push({ type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: ucl, y1: ucl, line: { color: "#e53e3e", width: 1, dash: "dash" } });
-    if (lcl != null) s.push({ type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: lcl, y1: lcl, line: { color: "#e53e3e", width: 1, dash: "dash" } });
+    if (ucl != null) s.push({ type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: ucl, y1: ucl, line: { color: "#ed8936", width: 1.5, dash: "dash" } });
+    if (lcl != null) s.push({ type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: lcl, y1: lcl, line: { color: "#ed8936", width: 1.5, dash: "dash" } });
     if (cl) s.push({ type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: cl, y1: cl, line: { color: "#718096", width: 1, dash: "dot" } });
     return s;
-  }, [activeDataset, filteredData]);
+  }, [activeDataset, displayData]);
 
-  // OOC highlights for SPC
+  // OOC highlights for SPC — red circles
   const oocTrace = useMemo(() => {
     if (activeDataset !== "spc_data") return null;
-    const oocPoints = filteredData.filter((r) => r.is_ooc);
+    const oocPoints = displayData.filter((r) => r.is_ooc);
     if (!oocPoints.length) return null;
     return {
       x: oocPoints.map((r) => r[config.x]),
@@ -174,7 +170,7 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
       name: "OOC",
       marker: { color: "#e53e3e", size: 10, symbol: "circle-open", line: { width: 2, color: "#e53e3e" } },
     };
-  }, [activeDataset, filteredData, config]);
+  }, [activeDataset, displayData, config]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const allTraces: any[] = [...traces, ...(oocTrace ? [oocTrace] : [])];
@@ -250,7 +246,7 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
               const cfg = CHART_CONFIGS[overlayLeft.dataset];
               setOverlayLeft(p => ({...p, filterKey: cfg?.group ?? "", filterVal: e.target.value}));
             }} style={{ fontSize: 11, padding: "3px 6px", borderRadius: 4, border: "1px solid #cbd5e0" }}>
-              <option value="">All</option>
+              {/* No "All" — one at a time */}
               {[...new Set((flatData[overlayLeft.dataset] ?? []).map((r: Record<string,unknown>) => String(r[CHART_CONFIGS[overlayLeft.dataset]?.group ?? ""] ?? "")))].filter(Boolean).sort().map(v =>
                 <option key={v} value={v}>{v}</option>
               )}
@@ -264,7 +260,7 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
               const cfg = CHART_CONFIGS[overlayRight.dataset];
               setOverlayRight(p => ({...p, filterKey: cfg?.group ?? "", filterVal: e.target.value}));
             }} style={{ fontSize: 11, padding: "3px 6px", borderRadius: 4, border: "1px solid #cbd5e0" }}>
-              <option value="">All</option>
+              {/* No "All" — one at a time */}
               {[...new Set((flatData[overlayRight.dataset] ?? []).map((r: Record<string,unknown>) => String(r[CHART_CONFIGS[overlayRight.dataset]?.group ?? ""] ?? "")))].filter(Boolean).sort().map(v =>
                 <option key={v} value={v}>{v}</option>
               )}
@@ -313,28 +309,27 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
       )}
 
       {/* ── Single Dataset Mode ── */}
-      {/* Filter Controls */}
+      {/* Filter Controls — one group at a time, no "All" */}
       {!overlayMode && groupField && groupValues.length > 1 && (
         <div style={{ display: "flex", gap: 8, padding: "8px 16px", borderBottom: "1px solid #f0f0f0", alignItems: "center" }}>
           <span style={{ fontSize: 11, color: "#718096" }}>Filter:</span>
           <select
-            value={filterValue}
+            value={effectiveFilterValue}
             onChange={(e) => { setFilterKey(groupField); setFilterValue(e.target.value); }}
             style={{ fontSize: 11, padding: "3px 8px", borderRadius: 4, border: "1px solid #cbd5e0" }}
           >
-            <option value="">All ({groupValues.length})</option>
             {groupValues.map((v) => (
               <option key={v} value={v}>{v}</option>
             ))}
           </select>
           <span style={{ fontSize: 11, color: "#a0aec0" }}>
-            {filteredData.length} rows
+            {displayData.length} rows
           </span>
         </div>
       )}
 
       {/* Chart (single dataset mode) */}
-      {!overlayMode && filteredData.length > 0 ? (
+      {!overlayMode && displayData.length > 0 ? (
         <Plot
           data={allTraces}
           layout={{
@@ -349,6 +344,10 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
             xaxis: { title: config.x, gridcolor: "#e2e8f0" },
             yaxis: { title: config.y, gridcolor: "#e2e8f0" },
             shapes,
+            annotations: activeDataset === "spc_data" && displayData.length > 0 ? [
+              ...(displayData[0]?.ucl != null ? [{ xref: "paper" as const, yref: "y" as const, x: 1, y: displayData[0].ucl, text: `UCL ${displayData[0].ucl}`, font: { size: 9, color: "#ed8936" }, showarrow: false, xanchor: "right" as const }] : []),
+              ...(displayData[0]?.lcl != null ? [{ xref: "paper" as const, yref: "y" as const, x: 1, y: displayData[0].lcl, text: `LCL ${displayData[0].lcl}`, font: { size: 9, color: "#ed8936" }, showarrow: false, xanchor: "right" as const }] : []),
+            ] : [],
           }}
           config={{ responsive: true, displayModeBar: false }}
           style={{ width: "100%" }}
@@ -360,9 +359,9 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
         </div>
       ) : null}
 
-      {/* Data Table — collapsible, shows raw data */}
-      {!overlayMode && filteredData.length > 0 && (
-        <DataTableSection data={filteredData} datasetName={DATASET_LABELS[activeDataset] ?? activeDataset} />
+      {/* Data Table — collapsible, shows filtered data */}
+      {!overlayMode && displayData.length > 0 && (
+        <DataTableSection data={displayData} datasetName={`${DATASET_LABELS[activeDataset] ?? activeDataset} — ${effectiveFilterValue || "all"}`} />
       )}
     </div>
   );
