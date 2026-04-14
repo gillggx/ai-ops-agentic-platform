@@ -536,14 +536,22 @@ class ContextLoader:
         catalog in the system prompt.
         """
         try:
-            # Only load My Skills (binding_type="none") for copilot.
-            # DR (alarm) and AP (event) skills are executed by their own pipelines,
-            # not by copilot — including them causes LLM to pick wrong skills.
+            # Only load My Skills for copilot.
+            # Exclude: DR skills (name starts with [P), AP skills ([auto_patrol]),
+            # Chart-Test skills ([Chart-Test]), and any with binding_type=event/alarm.
+            # These are executed by their own pipelines, not by copilot.
+            from sqlalchemy import and_, or_, not_
             result = await self._db.execute(
                 select(SkillDefinitionModel)
-                .where(SkillDefinitionModel.visibility == "public")
                 .where(SkillDefinitionModel.is_active == True)
-                .where(SkillDefinitionModel.binding_type == "none")
+                .where(not_(SkillDefinitionModel.name.like("[P%")))
+                .where(not_(SkillDefinitionModel.name.like("[auto_patrol]%")))
+                .where(not_(SkillDefinitionModel.name.like("[Chart-Test%")))
+                .where(or_(
+                    SkillDefinitionModel.binding_type == "none",
+                    SkillDefinitionModel.binding_type == None,
+                    SkillDefinitionModel.binding_type == "",
+                ))
                 .order_by(SkillDefinitionModel.id)
             )
             skills = result.scalars().all()
