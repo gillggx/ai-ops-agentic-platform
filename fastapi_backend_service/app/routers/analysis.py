@@ -31,6 +31,8 @@ class AnalysisStep(BaseModel):
 
 
 class RunAnalysisRequest(BaseModel):
+    model_config = {"extra": "allow"}  # allow _flat_data and other extra fields
+
     title: str = "Ad-hoc 分析"
     mode: str = Field(default="code", description="'code' = direct steps, 'auto' = generate from description")
     description: str = Field(default="", description="For mode=auto: natural language description")
@@ -110,10 +112,16 @@ async def run_analysis(
             for k in body.input_params.keys()
         ]
 
+    # Inject _flat_data into event_payload so sandbox code can access it
+    event_payload = dict(body.input_params)
+    extra = body.model_extra or {}
+    if extra.get("_flat_data"):
+        event_payload["_flat_data"] = extra["_flat_data"]
+
     # Execute
     step_results, raw_findings, error, charts = await svc._run_script(
         steps=steps,
-        event_payload=body.input_params,
+        event_payload=event_payload,
     )
 
     if error:

@@ -152,6 +152,7 @@ class SkillExecutorService:
         lines.append("    lot_id       = event_payload.get('lot_id', '')")
         lines.append("    step         = event_payload.get('step', '')")
         lines.append("    event_time   = event_payload.get('event_time', '')")
+        lines.append("    _flat_data   = event_payload.get('_flat_data', {})")
         lines.append("    _step_outputs = {}")
         lines.append("")
 
