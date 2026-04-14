@@ -46,20 +46,26 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     {
         "name": "query_data",
         "description": (
-            "查詢製程資料。系統自動：呼叫 MCP → 扁平化資料 → 產生互動圖表。\n"
-            "你只需指定 data_source（<mcp_catalog> 中的 MCP name）和查詢參數。\n"
-            "回傳的是扁平化後的 metadata（OOC 統計、可用欄位等），不是 raw data。\n"
-            "圖表由前端 ChartExplorer 自動渲染，你不需要寫任何圖表 code。\n"
+            "查詢任何製程資料的統一工具。所有資料查詢都用這個。\n"
             "\n"
-            "== 回傳格式 ==\n"
-            "metadata: {total_events, ooc_count, ooc_rate, ooc_by_step, ooc_by_tool, available_datasets}\n"
-            "你的工作：根據 metadata 用文字回答使用者的問題。\n"
+            "== data_source 選擇（必填，從 <mcp_catalog> 選）==\n"
+            "- get_process_info    → 查詢 process events（含 SPC/APC/DC/RECIPE/FDC/EC）\n"
+            "- get_process_summary → 查詢 OOC 統計、機台/站點分佈（回答「OOC 率」「哪台最差」「今天狀況」）\n"
+            "- list_tools          → 查詢機台清單和狀態（回答「有哪些機台」「機台狀態」）\n"
+            "- get_simulation_status → 系統狀態\n"
             "\n"
-            "== 可選：visualization_hint ==\n"
-            "如果使用者想看圖，加上 visualization_hint 告訴前端初始顯示什麼：\n"
-            '  例：{"data_source": "spc_data", "filter": {"chart_type": "xbar_chart"}}\n'
-            '  例：{"data_source": "apc_data", "filter": {"param_name": "etch_time_offset"}}\n'
-            "不給 hint 時前端不顯示圖表（純文字回答）。"
+            "== 回傳 ==\n"
+            "- get_process_info: 扁平化 metadata（total_events, ooc_count, ooc_rate, ooc_by_step, ooc_by_tool）\n"
+            "- 其他: 原始 JSON（直接包含你需要的所有數據）\n"
+            "根據回傳的數據用文字回答使用者的問題。\n"
+            "\n"
+            "== visualization_hint（可選）==\n"
+            "使用者明確要看圖/趨勢/chart 時才加，前端自動渲染 Data Explorer：\n"
+            '  {"data_source": "spc_data"} — 所有 SPC charts\n'
+            '  {"data_source": "spc_data", "filter": {"chart_type": "xbar_chart"}} — 只看 xbar\n'
+            '  {"data_source": "apc_data", "filter": {"param_name": "etch_time_offset"}} — APC 單參數\n'
+            '  {"data_source": "overlay", "left": {"dataset":"spc_data","field":"value","filter":{"chart_type":"xbar_chart"}}, "right": {"dataset":"apc_data","field":"value","filter":{"param_name":"rf_power_bias"}}} — 雙軸疊圖\n'
+            "不給 hint = 純文字回答，不開圖表。"
         ),
         "input_schema": {
             "type": "object",
