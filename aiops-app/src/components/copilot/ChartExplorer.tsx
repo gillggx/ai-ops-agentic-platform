@@ -63,10 +63,8 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
   const [overlayMode, setOverlayMode] = useState(isOverlay);
 
   // Initialize filter from viz_hint if present
-  const initialFilter = uiConfig?.initial_view?.filter as Record<string, string> | undefined;
-  const initialFilterKey = initialFilter ? Object.keys(initialFilter)[0] ?? "" : "";
-  const initialFilterVal = initialFilter ? String(Object.values(initialFilter)[0] ?? "") : "";
-  const [filterKey, setFilterKey] = useState<string>(initialFilterKey);
+  const vizFilter = uiConfig?.initial_view?.filter as Record<string, string> | undefined;
+  const initialFilterVal = vizFilter ? String(Object.values(vizFilter)[0] ?? "") : "";
   const [filterValue, setFilterValue] = useState<string>(initialFilterVal);
 
   // Multi-chart: array of additional chart panels (each with its own filter value)
@@ -194,7 +192,7 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
         {metadata.available_datasets.map((ds) => (
           <button
             key={ds}
-            onClick={() => { setOverlayMode(false); setActiveDataset(ds); setFilterKey(""); setFilterValue(""); setExtraCharts([]); }}
+            onClick={() => { setOverlayMode(false); setActiveDataset(ds); setFilterValue(""); setExtraCharts([]); }}
             style={{
               padding: "8px 16px", fontSize: 12,
               fontWeight: !overlayMode && activeDataset === ds ? 700 : 400,
@@ -261,12 +259,23 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
             const rightCfg = CHART_CONFIGS[overlayRight.dataset] ?? { x: "eventTime", y: "value" };
             let leftData = flatData[overlayLeft.dataset] ?? [];
             let rightData = flatData[overlayRight.dataset] ?? [];
-            if (overlayLeft.filterKey && overlayLeft.filterVal)
-              leftData = leftData.filter((r: Record<string,unknown>) => String(r[overlayLeft.filterKey]) === overlayLeft.filterVal);
-            if (overlayRight.filterKey && overlayRight.filterVal)
-              rightData = rightData.filter((r: Record<string,unknown>) => String(r[overlayRight.filterKey]) === overlayRight.filterVal);
-            const leftLabel = overlayLeft.filterVal || DATASET_LABELS[overlayLeft.dataset] || overlayLeft.dataset;
-            const rightLabel = overlayRight.filterVal || DATASET_LABELS[overlayRight.dataset] || overlayRight.dataset;
+
+            // Get effective filter values (default to first available group value)
+            const leftGroupField = leftCfg.group ?? (CHART_CONFIGS[overlayLeft.dataset]?.group ?? "");
+            const rightGroupField = rightCfg.group ?? (CHART_CONFIGS[overlayRight.dataset]?.group ?? "");
+            const leftGroupVals = leftGroupField ? [...new Set(leftData.map((r: Record<string,unknown>) => String(r[leftGroupField] ?? "")))].filter(Boolean).sort() : [];
+            const rightGroupVals = rightGroupField ? [...new Set(rightData.map((r: Record<string,unknown>) => String(r[rightGroupField] ?? "")))].filter(Boolean).sort() : [];
+            const effectiveLeftFilter = overlayLeft.filterVal || leftGroupVals[0] || "";
+            const effectiveRightFilter = overlayRight.filterVal || rightGroupVals[0] || "";
+
+            // Always filter to one group
+            if (leftGroupField && effectiveLeftFilter)
+              leftData = leftData.filter((r: Record<string,unknown>) => String(r[leftGroupField]) === effectiveLeftFilter);
+            if (rightGroupField && effectiveRightFilter)
+              rightData = rightData.filter((r: Record<string,unknown>) => String(r[rightGroupField]) === effectiveRightFilter);
+
+            const leftLabel = effectiveLeftFilter || DATASET_LABELS[overlayLeft.dataset] || overlayLeft.dataset;
+            const rightLabel = effectiveRightFilter || DATASET_LABELS[overlayRight.dataset] || overlayRight.dataset;
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const overlayTraces: any[] = [
               { x: leftData.map((r: Record<string,unknown>) => r[leftCfg.x]), y: leftData.map((r: Record<string,unknown>) => r[leftCfg.y]),
@@ -305,7 +314,7 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
           <span style={{ fontSize: 11, color: "#718096" }}>Filter:</span>
           <select
             value={effectiveFilterValue}
-            onChange={(e) => { setFilterKey(groupField); setFilterValue(e.target.value); }}
+            onChange={(e) => { setFilterValue(e.target.value); }}
             style={{ fontSize: 11, padding: "3px 8px", borderRadius: 4, border: "1px solid #cbd5e0" }}
           >
             {groupValues.map((v) => (
