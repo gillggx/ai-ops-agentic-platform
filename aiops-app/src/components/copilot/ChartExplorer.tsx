@@ -61,8 +61,16 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
 
   const [activeDataset, setActiveDataset] = useState(initialDs);
   const [overlayMode, setOverlayMode] = useState(isOverlay);
-  const [filterKey, setFilterKey] = useState<string>("");
-  const [filterValue, setFilterValue] = useState<string>("");
+
+  // Initialize filter from viz_hint if present
+  const initialFilter = uiConfig?.initial_view?.filter as Record<string, string> | undefined;
+  const initialFilterKey = initialFilter ? Object.keys(initialFilter)[0] ?? "" : "";
+  const initialFilterVal = initialFilter ? String(Object.values(initialFilter)[0] ?? "") : "";
+  const [filterKey, setFilterKey] = useState<string>(initialFilterKey);
+  const [filterValue, setFilterValue] = useState<string>(initialFilterVal);
+
+  // Multi-chart: array of additional chart panels (each with its own filter value)
+  const [extraCharts, setExtraCharts] = useState<string[]>([]);
 
   // Overlay state
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -84,11 +92,6 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
   const rawData = flatData[activeDataset] ?? [];
   const config = CHART_CONFIGS[activeDataset] ?? { x: "eventTime", y: "value", title: activeDataset };
 
-  // Apply initial filter from uiConfig
-  const initialFilter = uiConfig?.initial_view?.data_source === activeDataset
-    ? uiConfig.initial_view.filter
-    : undefined;
-
   // Determine available filter options for current dataset
   const groupField = config.group;
   const groupValues = useMemo(() => {
@@ -101,21 +104,8 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
     return [...vals].sort();
   }, [rawData, groupField]);
 
-  // Apply filter
-  const filteredData = useMemo(() => {
-    let data = rawData;
-    // Apply uiConfig initial filter
-    if (initialFilter) {
-      for (const [k, v] of Object.entries(initialFilter)) {
-        data = data.filter((r) => String(r[k]) === String(v));
-      }
-    }
-    // Apply user-selected filter
-    if (filterKey && filterValue) {
-      data = data.filter((r) => String(r[filterKey]) === filterValue);
-    }
-    return data;
-  }, [rawData, initialFilter, filterKey, filterValue]);
+  // filteredData = rawData (no pre-filter — group selection handled by effectiveFilterValue)
+  const filteredData = rawData;
 
   // Auto-select first group value if none selected (one at a time)
   const effectiveFilterValue = filterValue || (groupValues.length > 0 ? groupValues[0] : "");
@@ -204,7 +194,7 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
         {metadata.available_datasets.map((ds) => (
           <button
             key={ds}
-            onClick={() => { setOverlayMode(false); setActiveDataset(ds); setFilterKey(""); setFilterValue(""); }}
+            onClick={() => { setOverlayMode(false); setActiveDataset(ds); setFilterKey(""); setFilterValue(""); setExtraCharts([]); }}
             style={{
               padding: "8px 16px", fontSize: 12,
               fontWeight: !overlayMode && activeDataset === ds ? 700 : 400,
@@ -325,6 +315,31 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
           <span style={{ fontSize: 11, color: "#a0aec0" }}>
             {displayData.length} rows
           </span>
+          {/* Add chart button */}
+          <button
+            onClick={() => {
+              // Add next available group value that's not already shown
+              const shown = new Set([effectiveFilterValue, ...extraCharts]);
+              const next = groupValues.find(v => !shown.has(v));
+              if (next) setExtraCharts(prev => [...prev, next]);
+            }}
+            disabled={extraCharts.length + 1 >= groupValues.length}
+            style={{
+              marginLeft: 8, padding: "2px 8px", fontSize: 11, borderRadius: 4,
+              border: "1px solid #cbd5e0", background: "#fff", cursor: "pointer",
+              color: extraCharts.length + 1 >= groupValues.length ? "#cbd5e0" : "#4299e1",
+            }}
+          >
+            + Chart
+          </button>
+          {extraCharts.length > 0 && (
+            <button
+              onClick={() => setExtraCharts([])}
+              style={{ padding: "2px 8px", fontSize: 11, borderRadius: 4, border: "1px solid #cbd5e0", background: "#fff", cursor: "pointer", color: "#e53e3e" }}
+            >
+              Clear
+            </button>
+          )}
         </div>
       )}
 
@@ -358,6 +373,66 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
           No data for {DATASET_LABELS[activeDataset] ?? activeDataset}
         </div>
       ) : null}
+
+      {/* Extra charts (from + button) */}
+      {!overlayMode && extraCharts.map((ecFilter, ecIdx) => {
+        const ecData = groupField
+          ? filteredData.filter((r) => String(r[groupField]) === ecFilter)
+          : [];
+        if (!ecData.length) return null;
+        const lineColor = activeDataset === "spc_data" ? "#48bb78" : "#4299e1";
+        const ecXs = ecData.map((r) => r[config.x]);
+        const ecYs = ecData.map((r) => r[config.y]);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ecTraces: any[] = [{
+          x: ecXs, y: ecYs, name: ecFilter,
+          type: "scatter", mode: "lines+markers",
+          line: { color: lineColor, width: 2 }, marker: { size: 4, color: lineColor },
+        }];
+        // OOC for SPC
+        if (activeDataset === "spc_data") {
+          const ooc = ecData.filter((r) => r.is_ooc);
+          if (ooc.length) ecTraces.push({
+            x: ooc.map((r) => r[config.x]), y: ooc.map((r) => r[config.y]),
+            type: "scatter", mode: "markers", name: "OOC",
+            marker: { color: "#e53e3e", size: 10, symbol: "circle-open", line: { width: 2, color: "#e53e3e" } },
+          });
+        }
+        // SPC control lines
+        const ucl = ecData[0]?.ucl;
+        const lcl = ecData[0]?.lcl;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ecShapes: any[] = [];
+        if (activeDataset === "spc_data") {
+          if (ucl != null) ecShapes.push({ type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: ucl, y1: ucl, line: { color: "#ed8936", width: 1.5, dash: "dash" } });
+          if (lcl != null) ecShapes.push({ type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: lcl, y1: lcl, line: { color: "#ed8936", width: 1.5, dash: "dash" } });
+        }
+        return (
+          <div key={ecIdx} style={{ borderTop: "1px solid #e2e8f0" }}>
+            <div style={{ padding: "4px 16px", fontSize: 11, fontWeight: 600, color: "#718096", display: "flex", justifyContent: "space-between" }}>
+              <span>{ecFilter} ({ecData.length} rows)</span>
+              <button onClick={() => setExtraCharts(prev => prev.filter((_, i) => i !== ecIdx))}
+                style={{ border: "none", background: "none", color: "#e53e3e", cursor: "pointer", fontSize: 11 }}>x</button>
+            </div>
+            <Plot
+              data={ecTraces}
+              layout={{
+                autosize: true, height: 220,
+                margin: { l: 50, r: 20, t: 8, b: 40 },
+                paper_bgcolor: "transparent", plot_bgcolor: "#fafbfc",
+                font: { family: "Inter, sans-serif", size: 10 },
+                showlegend: false,
+                xaxis: { gridcolor: "#e2e8f0" },
+                yaxis: { gridcolor: "#e2e8f0" },
+                shapes: ecShapes,
+              }}
+              config={{ responsive: true, displayModeBar: false }}
+              style={{ width: "100%" }}
+              useResizeHandler
+            />
+          </div>
+        );
+      })}
 
       {/* Data Table — collapsible, shows filtered data */}
       {!overlayMode && displayData.length > 0 && (
