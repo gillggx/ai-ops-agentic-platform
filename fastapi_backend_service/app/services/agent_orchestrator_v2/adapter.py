@@ -120,22 +120,28 @@ async def adapt_events(
                             args = tc.get("args", {})
                             tool_name = tc.get("name", "")
                             # Build params_summary: "get_process_info(step=STEP_001, since=7d)"
-                            if tool_name == "execute_mcp":
-                                mcp = args.get("mcp_name", "")
+                            if tool_name in ("execute_mcp", "query_data"):
+                                mcp = args.get("mcp_name") or args.get("data_source", "")
                                 params = args.get("params") or {}
-                                parts = [f"{k}={v}" for k, v in params.items() if v]
+                                if isinstance(params, dict):
+                                    parts = [f"{k}={v}" for k, v in params.items() if v and k != "_flat_data"]
+                                else:
+                                    parts = [str(params)[:40]]
                                 ps = f"{mcp}({', '.join(parts)})" if parts else mcp
                             elif tool_name == "execute_skill":
                                 ps = f"skill_id={args.get('skill_id', '?')}"
                             elif tool_name == "execute_analysis":
                                 ps = f"mode={args.get('mode','auto')}, title={str(args.get('title',''))[:40]}"
                             else:
-                                parts = [f"{k}={str(v)[:20]}" for k, v in list(args.items())[:4]]
+                                safe_args = {k: v for k, v in args.items() if k != "_flat_data" and not isinstance(v, (dict, list))}
+                                parts = [f"{k}={str(v)[:20]}" for k, v in list(safe_args.items())[:4]]
                                 ps = ", ".join(parts) if parts else ""
+                            # Strip _flat_data from SSE (too large for frontend)
+                            safe_input = {k: v for k, v in args.items() if k != "_flat_data"} if isinstance(args, dict) else args
                             yield {
                                 "type": "tool_start",
                                 "tool": tool_name,
-                                "input": args,
+                                "input": safe_input,
                                 "params_summary": ps,
                                 "iteration": output.get("current_iteration", 0),
                             }
