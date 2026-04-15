@@ -140,6 +140,7 @@ function Shell({ children }: { children: React.ReactNode }) {
     selectedEquipment,
     dataExplorer, setDataExplorer,
   } = useAppContext();
+  const [copilotOpen, setCopilotOpen] = useState(true);
 
   function handleContract(c: AIOpsReportContract) {
     setContract(c);
@@ -180,23 +181,49 @@ function Shell({ children }: { children: React.ReactNode }) {
             />
           ) : children}
         </main>
-        <aside style={{
-          width: 380, minWidth: 280, maxWidth: "50vw", flexShrink: 0,
-          display: "flex", flexDirection: "column",
-          background: "#ffffff", borderLeft: "1px solid #e2e8f0", overflow: "hidden",
-          resize: "horizontal", direction: "rtl",
-        }}>
-          <div style={{ direction: "ltr", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
-            <AICopilot
-              onContract={handleContract}
-              onDataExplorer={handleDataExplorer}
-              triggerMessage={triggerMessage}
-              onTriggerConsumed={() => setTriggerMessage(null)}
-              contextEquipment={selectedEquipment?.name ?? null}
-              onHandoff={handleHandoff}
-            />
-          </div>
-        </aside>
+        {/* Copilot toggle strip (always visible) */}
+        <div
+          onClick={() => setCopilotOpen(o => !o)}
+          style={{
+            width: 28, flexShrink: 0,
+            display: "flex", flexDirection: "column", alignItems: "center",
+            justifyContent: "center", gap: 6,
+            background: copilotOpen ? "#f7f8fc" : "#ebf8ff",
+            borderLeft: "1px solid #e2e8f0",
+            cursor: "pointer", userSelect: "none",
+            transition: "background 0.15s",
+          }}
+          title={copilotOpen ? "收合 Copilot" : "展開 Copilot"}
+        >
+          <span style={{ fontSize: 14 }}>{copilotOpen ? "▶" : "◀"}</span>
+          <span style={{
+            writingMode: "vertical-rl", fontSize: 11, fontWeight: 600,
+            color: copilotOpen ? "#a0aec0" : "#2b6cb0", letterSpacing: "1px",
+          }}>
+            AI Copilot
+          </span>
+        </div>
+
+        {/* Copilot panel (collapsible) */}
+        {copilotOpen && (
+          <aside style={{
+            width: 380, minWidth: 280, maxWidth: "50vw", flexShrink: 0,
+            display: "flex", flexDirection: "column",
+            background: "#ffffff", borderLeft: "1px solid #e2e8f0", overflow: "hidden",
+            resize: "horizontal", direction: "rtl",
+          }}>
+            <div style={{ direction: "ltr", display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+              <AICopilot
+                onContract={handleContract}
+                onDataExplorer={handleDataExplorer}
+                triggerMessage={triggerMessage}
+                onTriggerConsumed={() => setTriggerMessage(null)}
+                contextEquipment={selectedEquipment?.name ?? null}
+                onHandoff={handleHandoff}
+              />
+            </div>
+          </aside>
+        )}
       </div>
     </div>
   );
