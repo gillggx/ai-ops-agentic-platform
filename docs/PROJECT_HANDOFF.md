@@ -249,15 +249,25 @@ Agent 透過三個層級的 MCP 漸進式深入調查，從全廠概覽到單一
 
 ## 4. AI Agent 技術細節
 
-### 4.1 Agent Orchestrator v2 (LangGraph)
+### 4.1 9-Stage Pipeline Architecture (LangGraph)
 
 ```
-load_context → llm_call → tool_execute → synthesis → self_critique → memory_lifecycle
-                 ↑              │
-                 └── loop ──────┘  (多輪工具呼叫)
+Stage 1: Context Load      → 組裝 system prompt (memory + MCP catalog)
+Stage 2: LLM Planning      → LLM 規劃 pipeline (plan_pipeline tool)
+Stage 3: Data Retrieval     → 呼叫 MCP 撈 raw data
+Stage 4: Data Transform     → 基礎 flatten + 自訂 transform (LLM code gen)
+Stage 5: Compute (optional) → 統計計算 (regression, OOC check)
+Stage 6: Presentation       → UI Config → DataExplorer
+Stage 7: Synthesis          → LLM 文字結論
+Stage 8: Self-Critique      → 反思驗證
+Stage 9: Memory             → 學習經驗寫入
 ```
 
-v1 monolith 已退役，v2 LangGraph StateGraph 為唯一 production 版本。
+**LLM 只有 2 個 tool：**
+- `plan_pipeline` — 規劃 data pipeline（Stage 3~6 由系統自動執行）
+- `execute_skill` — 執行已登錄的 My Skill
+
+`execute_mcp` / `execute_analysis` / `query_data` 仍存在但對 LLM 隱藏（內部使用）。
 
 ### 4.2 Context Engineering
 
@@ -269,28 +279,27 @@ Agent 的 System Prompt 由 Context Loader 組裝：
 4. **RAG Memory** — pgvector cosine + 關鍵字混合檢索相關經驗
 5. **Session History** — 滑動視窗（最近 3 輪原文 + 舊的 LLM 摘要）
 
-### 4.3 Tool Dispatcher
+### 4.3 Pipeline Executor + Data Flattener
 
-Agent 呼叫工具的統一入口，3 種工具：
+**`plan_pipeline` 流程（2026-04-15）：**
 
-- `execute_skill` — 執行現有 Skill（sandbox Python）→ 自動產生 contract → **進入 Investigate Mode**
-- `execute_analysis` — Agent 即時生成分析程式碼 → 自動產生 contract → **進入 Investigate Mode**
-- `execute_mcp` — 呼叫 System MCP（轉發到 OntologySimulator API）→ **不進入 Investigate Mode**，LLM 文字回答為主，chip buttons 供用戶選擇性展開圖表
-
-**execute_mcp 資料呈現流程（2026-04-13）：**
 ```
-execute_mcp → render_intent_classifier 分析資料結構
-  → 產生 render_decision（primary + alternatives）
-  → 不建立 contract → LLM 文字回答是主要輸出
-  → chip buttons（SPC/APC/DC/Recipe/Table/OOC）顯示在 copilot
-  → 用戶點 chip → 建立 contract → 中央 AnalysisPanel 顯示圖表
+LLM 規劃 plan_pipeline(data_retrieval, data_transform?, compute?, presentation?)
+  → Stage 3: pipeline_executor 呼叫 MCP 撈 raw data
+  → Stage 4: data_flattener 扁平化為 6 flat datasets + LLM code gen 自訂 transform
+  → Stage 5: LLM code gen 統計計算（regression/OOC check）→ sandbox 執行
+  → Stage 6: 產生 UI Config → SSE 推送 flat_data + ui_config 到前端
+  → Frontend DataExplorer 渲染互動圖表
 ```
 
-**DATA OVERVIEW 注入**：`get_process_info` 回傳大量 events 時，LLM 只看到截斷的 4000 chars。系統在截斷前注入 `DATA OVERVIEW`（total_events, ooc_count, ooc_rate, ooc_by_step），確保 LLM 能正確回答統計問題。
+**核心元件：**
 
-**ChartMiddleware**：Registry-based 圖表自動生成。支援 `spc_chart`, `line_chart`, `bar_chart`, `scatter_chart`, `multi_line_chart`。LLM code 只需在 output_schema 宣告 type，middleware 自動產生 chart DSL。
+- `data_flattener.py` — 純 Python，將巢狀 ontology JSON 拆為 6 flat datasets（spc/apc/dc/recipe/fdc/ec）+ metadata
+- `pipeline_executor.py` — 執行 Stage 3~6，每個 stage 產生 pipeline_card（for Console display）
+- `DataExplorerPanel.tsx` — 中央面板，含 QuerySummary + ChartExplorer
+- `ChartExplorer.tsx` — 互動圖表（tabs, filter, overlay, multi-chart +按鈕）
 
-**render_intent_classifier**：Structure-driven classifier（不看 user query keywords），偵測 MCP 回傳的資料結構（SPC/APC/DC/Recipe/FDC/EC nested objects），產生 primary render + alternatives。當回傳包含多種 object type 時，不自動選擇任何 chart。
+**LLM 看到的資料：** metadata + 每 dataset 前 3 筆 sample（知道 field names + data format），不看 raw nested JSON。
 
 ### 4.4 AIOps Report Contract
 
