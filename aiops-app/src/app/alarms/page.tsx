@@ -220,25 +220,26 @@ export default function AlarmCenterPage() {
       {/* ── Content: Master-Detail ─────────────────────────────── */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
 
-        {/* Master — Alarm List */}
-        <div style={{ width: 280, minWidth: 220, maxWidth: 340, flexShrink: 0, background: "#fff", borderRight: "1px solid #e0e0e0", overflowY: "auto" }}>
-          {loading && <div style={{ padding: "var(--sp-md)", color: "#a0aec0", fontSize: "var(--fs-sm)" }}>載入中...</div>}
+        {/* Master — Alarm List (compact sidebar) */}
+        <div style={{ width: 220, flexShrink: 0, background: "#fff", borderRight: "1px solid #e0e0e0", overflowY: "auto" }}>
+          {loading && <div style={{ padding: 8, color: "#a0aec0", fontSize: 11 }}>載入中...</div>}
           {alarms.map(a => (
             <div key={a.id} onClick={() => setSelectedId(a.id)} style={{
-              padding: "var(--sp-sm) var(--sp-md)", borderBottom: "1px solid #e8e8e8", cursor: "pointer",
+              padding: "6px 10px", borderBottom: "1px solid #f0f0f0", cursor: "pointer",
               background: selectedId === a.id ? "#e6f7ff" : "transparent",
               borderLeft: selectedId === a.id ? "3px solid #1890ff" : "3px solid transparent",
               transition: "background 0.15s",
             }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: "var(--fs-xs)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2, fontSize: 10 }}>
                 <span style={{ color: SEV_COLOR[a.severity] ?? "#666", fontWeight: 700 }}>● {a.severity}</span>
-                <span style={{ color: "#999" }}>{timeAgo(a.created_at)}</span>
+                <span style={{ color: "#bbb", fontSize: 10 }}>{timeAgo(a.created_at)}</span>
               </div>
-              <div style={{ fontWeight: 600, fontSize: "var(--fs-sm)", lineHeight: 1.4, marginBottom: 2, color: "#262626" }}>
+              <div style={{ fontWeight: 600, fontSize: 11, lineHeight: 1.35, marginBottom: 2, color: "#262626",
+                overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as const }}>
                 {a.title}
               </div>
-              <div style={{ color: "#999", fontSize: "var(--fs-xs)" }}>
-                設備: {a.equipment_id} | 狀態: {a.status === "active" ? "OPEN" : a.status}
+              <div style={{ color: "#aaa", fontSize: 10 }}>
+                {a.equipment_id} | {a.status === "active" ? "OPEN" : a.status}
               </div>
             </div>
           ))}
