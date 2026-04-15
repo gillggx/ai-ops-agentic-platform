@@ -21,20 +21,20 @@ export function DataExplorerPanel({ state, onClose }: Props) {
       {/* Header */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
-        padding: "12px 20px", background: "#fff", borderBottom: "1px solid #e2e8f0",
+        padding: "var(--sp-md) var(--sp-xl)", background: "#fff", borderBottom: "1px solid #e2e8f0",
         flexShrink: 0,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 14, fontWeight: 700, color: "#1a202c" }}>Data Explorer</span>
+          <span style={{ fontSize: "var(--fs-lg)", fontWeight: 700, color: "#1a202c" }}>Data Explorer</span>
           <span style={{
-            fontSize: 11, padding: "2px 8px", borderRadius: 10,
+            fontSize: "var(--fs-xs)", padding: "2px var(--sp-sm)", borderRadius: 10,
             background: "#ebf4ff", color: "#2b6cb0", fontWeight: 600,
           }}>
             Interactive
           </span>
         </div>
         <button onClick={onClose} style={{
-          padding: "4px 12px", fontSize: 12, borderRadius: 4,
+          padding: "var(--sp-xs) var(--sp-md)", fontSize: "var(--fs-sm)", borderRadius: "var(--radius-sm)",
           border: "1px solid #cbd5e0", background: "#fff", cursor: "pointer", color: "#4a5568",
         }}>
           X 結束探索
@@ -42,12 +42,12 @@ export function DataExplorerPanel({ state, onClose }: Props) {
       </div>
 
       {/* Scrollable content */}
-      <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
+      <div style={{ flex: 1, overflowY: "auto", padding: "var(--sp-xl)" }}>
         {/* Query Summary */}
         {queryInfo && (
           <div style={{
-            background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8,
-            padding: "14px 20px", marginBottom: 16,
+            background: "#fff", border: "1px solid #e2e8f0", borderRadius: "var(--radius-md)",
+            padding: "var(--sp-lg) var(--sp-xl)", marginBottom: "var(--sp-lg)",
           }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: "#718096", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.5px" }}>
               Query Summary

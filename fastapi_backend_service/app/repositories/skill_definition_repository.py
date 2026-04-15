@@ -64,11 +64,13 @@ class SkillDefinitionRepository:
         steps = data.pop("steps_mapping", [])
         input_schema = data.pop("input_schema", [])
         output_schema = data.pop("output_schema", [])
+        pipeline_config = data.pop("pipeline_config", None)
         obj = SkillDefinitionModel(
             **data,
             steps_mapping=json.dumps(steps, ensure_ascii=False),
             input_schema=json.dumps(input_schema, ensure_ascii=False),
             output_schema=json.dumps(output_schema, ensure_ascii=False),
+            pipeline_config=json.dumps(pipeline_config, ensure_ascii=False) if pipeline_config else None,
         )
         self._db.add(obj)
         await self._db.commit()
@@ -85,6 +87,9 @@ class SkillDefinitionRepository:
             data["input_schema"] = json.dumps(data["input_schema"], ensure_ascii=False)
         if "output_schema" in data:
             data["output_schema"] = json.dumps(data["output_schema"], ensure_ascii=False)
+        if "pipeline_config" in data:
+            pc = data["pipeline_config"]
+            data["pipeline_config"] = json.dumps(pc, ensure_ascii=False) if pc else None
         for k, v in data.items():
             setattr(obj, k, v)
         await self._db.commit()
@@ -110,3 +115,12 @@ class SkillDefinitionRepository:
     def get_output_schema(self, obj: SkillDefinitionModel) -> List[Dict[str, Any]]:
         """Deserialise output_schema JSON from model."""
         return _j(obj.output_schema)
+
+    def get_pipeline_config(self, obj: SkillDefinitionModel) -> Optional[Dict[str, Any]]:
+        """Deserialise pipeline_config JSON from model. Returns None if not set."""
+        if not obj.pipeline_config:
+            return None
+        try:
+            return json.loads(obj.pipeline_config)
+        except Exception:
+            return None

@@ -45,6 +45,10 @@ class SkillDefinitionModel(Base):
     # Declares what fields this Skill returns in _findings.outputs (render spec)
     output_schema: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="[]")
 
+    # Pipeline config — JSON of Stage 3~6 plan for pipeline-based Skills
+    # When present, execute_skill runs pipeline_executor instead of steps_mapping
+    pipeline_config: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default=None)
+
     # "legacy" | "rule" | "auto_patrol" | "skill"
     # legacy      = old skill records (hidden from new UIs)
     # rule        = Diagnostic Rule (visible in /admin/skills)

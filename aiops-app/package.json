@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "e2e": "playwright test --config e2e/playwright.config.ts",
+    "e2e:install": "playwright install chromium"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
@@ -19,12 +21,14 @@
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
     "react-plotly.js": "^2.6.0",
+    "react-resizable-panels": "^4.10.0",
     "remark-gfm": "^4.0.1",
     "vega": "^5.30.0",
     "vega-embed": "^6.26.0",
     "vega-lite": "^5.21.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",

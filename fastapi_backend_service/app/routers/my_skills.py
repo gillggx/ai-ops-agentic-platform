@@ -38,6 +38,17 @@ class SkillCreate(BaseModel):
     output_schema: List[Dict[str, Any]] = Field(default_factory=list)
 
 
+class SkillFromPipelineRequest(BaseModel):
+    """Save a completed pipeline as a My Skill."""
+    name: str = Field(..., min_length=1, max_length=200)
+    description: str = Field(default="")
+    pipeline_plan: Dict[str, Any] = Field(..., description="LLM plan from Stage 2")
+    transform_code: Optional[str] = Field(default=None, description="Stage 4 generated code")
+    compute_code: Optional[str] = Field(default=None, description="Stage 5 generated code")
+    input_schema: List[Dict[str, Any]] = Field(default_factory=list)
+    output_schema: List[Dict[str, Any]] = Field(default_factory=list)
+
+
 class SkillUpdate(BaseModel):
     name: Optional[str] = Field(default=None, max_length=200)
     description: Optional[str] = None
@@ -80,6 +91,7 @@ def _to_dict(obj) -> Dict[str, Any]:
         "visibility": obj.visibility,
         "is_active": obj.is_active,
         "source": obj.source,
+        "pipeline_config": _j(obj.pipeline_config) if obj.pipeline_config else None,
         "binding_type": getattr(obj, "binding_type", "none"),
         "trigger_mode": obj.trigger_mode,
         "created_by": obj.created_by,
@@ -116,6 +128,48 @@ async def create_skill(
         "created_by": current_user.id,
     })
     return StandardResponse.success(data=_to_dict(obj), message="Skill 建立成功")
+
+
+@router.post("/from-pipeline", response_model=StandardResponse, status_code=201)
+async def create_skill_from_pipeline(
+    body: SkillFromPipelineRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user),
+):
+    """Save a completed pipeline (Stage 3~6) as a My Skill."""
+    repo = SkillDefinitionRepository(db)
+
+    # Build pipeline_config from plan + generated code
+    pipeline_config = dict(body.pipeline_plan)
+    if body.transform_code:
+        pipeline_config.setdefault("data_transform", {})["code"] = body.transform_code
+    if body.compute_code:
+        pipeline_config.setdefault("compute", {})["code"] = body.compute_code
+
+    # Auto-derive input_schema from data_retrieval.params if not provided
+    input_schema = body.input_schema
+    if not input_schema:
+        retrieval_params = (body.pipeline_plan.get("data_retrieval") or {}).get("params", {})
+        input_schema = [
+            {"key": k, "type": "string", "required": True, "description": f"Pipeline param: {k}"}
+            for k, v in retrieval_params.items() if v
+        ]
+
+    obj = await repo.create({
+        "name": body.name,
+        "description": body.description or f"Pipeline Skill: {body.name}",
+        "auto_check_description": body.description or body.name,
+        "steps_mapping": [],
+        "input_schema": input_schema,
+        "output_schema": body.output_schema,
+        "pipeline_config": pipeline_config,
+        "source": _SOURCE,
+        "binding_type": "none",
+        "trigger_mode": "manual",
+        "visibility": "public",
+        "created_by": current_user.id,
+    })
+    return StandardResponse.success(data=_to_dict(obj), message="Pipeline Skill 儲存成功")
 
 
 @router.get("/{skill_id}", response_model=StandardResponse)

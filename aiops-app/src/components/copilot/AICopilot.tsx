@@ -265,6 +265,12 @@ export function AICopilot({
   const pendingRenderDecisionRef = useRef<RenderDecisionMeta | null>(null);
   const [pipelineCards, setPipelineCards] = useState<PipelineCard[]>([]);
   const [pipelineStats, setPipelineStats] = useState<{ llmCalls: number; totalTokens: number }>({ llmCalls: 0, totalTokens: 0 });
+  // Pipeline Skill save state — stores plan + generated code from SSE events
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const lastPipelinePlanRef = useRef<Record<string, any> | null>(null);
+  const lastTransformCodeRef = useRef<string | null>(null);
+  const lastComputeCodeRef = useRef<string | null>(null);
+  const [pipelineSaved, setPipelineSaved] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pendingFlatDataRef = useRef<{ flatData: Record<string, any[]>; metadata: FlatDataMetadata; uiConfig: UIConfig | null; queryInfo?: any } | null>(null);
 
@@ -407,6 +413,14 @@ export function AICopilot({
             const toolName = (ev.tool as string) ?? "";
             const displayLabel = ps ? `${toolName}(${ps})` : toolName;
             addLog(makeLog("🔧", displayLabel, "tool"));
+            // Capture pipeline plan for "Save as My Skill"
+            if (toolName === "plan_pipeline" && ev.input) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              lastPipelinePlanRef.current = ev.input as Record<string, any>;
+              lastTransformCodeRef.current = null;
+              lastComputeCodeRef.current = null;
+              setPipelineSaved(false);
+            }
             break;
           }
 
@@ -497,6 +511,16 @@ export function AICopilot({
             // Add console log (skip if skipped)
             if (status !== "skipped") {
               addLog(makeLog(icon, `${name} ${statusIcon} ${elapsed}s — ${summary}`, status === "error" ? "error" : "tool"));
+            }
+
+            // Capture generated code for "Save as My Skill"
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const stageDetail = ev.detail as Record<string, any> | undefined;
+            if (stageNum === 4 && stageDetail?.custom_code) {
+              lastTransformCodeRef.current = stageDetail.custom_code as string;
+            }
+            if (stageNum === 5 && stageDetail?.code) {
+              lastComputeCodeRef.current = stageDetail.code as string;
             }
 
             // Collect pipeline card for PipelineConsole
@@ -885,6 +909,36 @@ export function AICopilot({
             totalTime={pipelineCards.reduce((sum, c) => sum + (c.elapsed ?? 0), 0)}
             llmCalls={pipelineStats.llmCalls}
             totalTokens={pipelineStats.totalTokens}
+            canSaveAsSkill={!!lastPipelinePlanRef.current && !pipelineSaved && pipelineCards.some(c => c.status === "complete" && c.stage >= 3)}
+            saved={pipelineSaved}
+            onSaveAsSkill={async () => {
+              const plan = lastPipelinePlanRef.current;
+              if (!plan) return;
+              const name = prompt("儲存為 My Skill\n\n名稱：", plan.intent || "Pipeline Skill");
+              if (!name) return;
+              try {
+                const res = await fetch("/api/admin/my-skills/from-pipeline", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    name,
+                    description: plan.intent || name,
+                    pipeline_plan: plan,
+                    transform_code: lastTransformCodeRef.current,
+                    compute_code: lastComputeCodeRef.current,
+                  }),
+                });
+                if (res.ok) {
+                  setPipelineSaved(true);
+                  alert(`已儲存為 Skill: ${name}\n\n前往 Knowledge Studio → My Skills 查看`);
+                } else {
+                  const err = await res.json().catch(() => ({}));
+                  alert(`儲存失敗: ${(err as Record<string, string>).message || res.statusText}`);
+                }
+              } catch (e) {
+                alert(`儲存失敗: ${e instanceof Error ? e.message : "未知錯誤"}`);
+              }
+            }}
           />
           <div ref={logsEndRef} />
         </div>

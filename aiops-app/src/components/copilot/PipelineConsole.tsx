@@ -22,6 +22,9 @@ interface Props {
   totalTime?: number;
   llmCalls?: number;
   totalTokens?: number;
+  canSaveAsSkill?: boolean;
+  saved?: boolean;
+  onSaveAsSkill?: () => void;
 }
 
 const STATUS_STYLE: Record<string, { dot: string; bg: string }> = {
@@ -36,7 +39,7 @@ const STATUS_ICON: Record<string, string> = {
   pending: "⚪", running: "🔄", complete: "✅", skipped: "⏭️", error: "❌",
 };
 
-export function PipelineConsole({ cards, totalTime, llmCalls, totalTokens }: Props) {
+export function PipelineConsole({ cards, totalTime, llmCalls, totalTokens, canSaveAsSkill, saved, onSaveAsSkill }: Props) {
   if (cards.length === 0) {
     return (
       <div style={{ padding: 24, textAlign: "center", color: "#a0aec0", fontSize: 13 }}>
@@ -51,16 +54,34 @@ export function PipelineConsole({ cards, totalTime, llmCalls, totalTokens }: Pro
         <PipelineCardRow key={card.stage} card={card} />
       ))}
 
-      {/* Bottom stats */}
+      {/* Bottom stats + Save button */}
       {totalTime != null && (
         <div style={{
-          padding: "8px 12px", fontSize: 10, color: "#718096",
+          padding: "var(--sp-sm) var(--sp-md)", fontSize: "var(--fs-xs)", color: "#718096",
           borderTop: "1px solid #e2e8f0", background: "#f7f8fc",
-          display: "flex", gap: 12,
+          display: "flex", gap: "var(--sp-md)", alignItems: "center",
         }}>
           <span>Total: {totalTime.toFixed(1)}s</span>
           {llmCalls != null && <span>LLM: {llmCalls} calls</span>}
           {totalTokens != null && <span>Tokens: {(totalTokens / 1000).toFixed(1)}k</span>}
+          <span style={{ flex: 1 }} />
+          {canSaveAsSkill && !saved && (
+            <button
+              onClick={onSaveAsSkill}
+              style={{
+                padding: "3px 10px", fontSize: 11, fontWeight: 600,
+                borderRadius: 4, border: "1px solid #3182ce",
+                background: "#ebf8ff", color: "#2b6cb0", cursor: "pointer",
+              }}
+            >
+              Save as Skill
+            </button>
+          )}
+          {saved && (
+            <span style={{ fontSize: 11, color: "#38a169", fontWeight: 600 }}>
+              Saved
+            </span>
+          )}
         </div>
       )}
     </div>
@@ -77,10 +98,10 @@ function PipelineCardRow({ card }: { card: PipelineCard }) {
       <div
         onClick={() => card.detail && setExpanded(!expanded)}
         style={{
-          padding: "6px 12px",
-          display: "flex", alignItems: "center", gap: 8,
+          padding: "var(--sp-sm) var(--sp-md)",
+          display: "flex", alignItems: "center", gap: "var(--sp-sm)",
           cursor: card.detail ? "pointer" : "default",
-          fontSize: 12,
+          fontSize: "var(--fs-sm)",
         }}
       >
         {/* Stage dot */}

@@ -59,6 +59,25 @@ async def execute_skill(
             "ui_render_payload": {"has_chart": False},
         }
 
+    # ── Pipeline Skill: return pipeline result for SSE/Console rendering ──
+    if resp.pipeline_result:
+        pr = resp.pipeline_result
+        return {
+            "status": "success",
+            "skill_id": skill_id,
+            "skill_name": getattr(
+                await SkillDefinitionRepository(db).get_by_id(skill_id),
+                "name",
+                f"Skill #{skill_id}",
+            ),
+            "is_pipeline_skill": True,
+            "pipeline_cards": pr.get("pipeline_cards", []),
+            "flat_data": pr.get("flat_data"),
+            "flat_metadata": pr.get("flat_metadata"),
+            "ui_config": pr.get("ui_config"),
+            "llm_readable_data": pr.get("llm_summary", ""),
+        }
+
     findings = resp.findings
     f_dict = findings.model_dump() if findings else {}
 

@@ -69,6 +69,10 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
 
   // Multi-chart: array of additional chart panels (each with its own filter value)
   const [extraCharts, setExtraCharts] = useState<string[]>([]);
+  // Chart type selector (line is default, histogram/box for distribution analysis, heatmap for correlation)
+  const [chartType, setChartType] = useState<"line" | "scatter" | "histogram" | "box" | "heatmap">("line");
+  // Time-window range slider toggle
+  const [showRangeSlider, setShowRangeSlider] = useState(false);
 
   // Overlay state
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -160,6 +164,111 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
     };
   }, [activeDataset, displayData, config]);
 
+  // Histogram traces + normal distribution overlay + sigma bands
+  const histogramTraces = useMemo(() => {
+    const values = displayData.map((r) => r[config.y]).filter((v: unknown) => typeof v === "number") as number[];
+    if (values.length < 5) return { traces: [], shapes: [], annotations: [] };
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    const std = Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const t: any[] = [{
+      x: values, type: "histogram" as const, name: effectiveFilterValue || config.y,
+      marker: { color: "#4299e1", opacity: 0.7 },
+      nbinsx: Math.min(30, Math.max(10, Math.round(Math.sqrt(values.length)))),
+    }];
+    // Sigma band shapes
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sigmaShapes: any[] = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sigmaAnnotations: any[] = [];
+    const sigmaColors = ["#38a169", "#d69e2e", "#ed8936", "#e53e3e"];
+    const sigmaLabels = ["1\u03c3", "2\u03c3", "3\u03c3", "4\u03c3"];
+    for (let i = 1; i <= 4; i++) {
+      const color = sigmaColors[i - 1];
+      for (const sign of [-1, 1]) {
+        const val = mean + sign * i * std;
+        sigmaShapes.push({
+          type: "line", xref: "x", yref: "paper", x0: val, x1: val, y0: 0, y1: 1,
+          line: { color, width: 1, dash: i <= 2 ? "dash" : "dot" },
+        });
+      }
+      sigmaAnnotations.push({
+        xref: "x" as const, yref: "paper" as const,
+        x: mean + i * std, y: 1, text: `+${sigmaLabels[i - 1]}`,
+        font: { size: 9, color: sigmaColors[i - 1] }, showarrow: false, yanchor: "bottom" as const,
+      });
+    }
+    // Mean line
+    sigmaShapes.push({
+      type: "line", xref: "x", yref: "paper", x0: mean, x1: mean, y0: 0, y1: 1,
+      line: { color: "#2d3748", width: 2 },
+    });
+    sigmaAnnotations.push({
+      xref: "x" as const, yref: "paper" as const,
+      x: mean, y: 1, text: `\u03bc=${mean.toFixed(2)}`,
+      font: { size: 10, color: "#2d3748" }, showarrow: false, yanchor: "bottom" as const,
+    });
+    return { traces: t, shapes: sigmaShapes, annotations: sigmaAnnotations };
+  }, [displayData, config, effectiveFilterValue]);
+
+  // Box plot traces — group by groupField
+  const boxTraces = useMemo(() => {
+    if (!groupField) {
+      const values = displayData.map((r) => r[config.y]).filter((v: unknown) => typeof v === "number") as number[];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return [{ y: values, type: "box" as const, name: config.y, marker: { color: "#4299e1" }, boxpoints: "outliers" as const }] as any[];
+    }
+    // Show all groups in box plot for comparison
+    const groups = [...new Set(rawData.map((r) => String(r[groupField])))].sort().slice(0, 10);
+    const colors = ["#4299e1", "#48bb78", "#ed8936", "#e53e3e", "#9f7aea", "#d69e2e", "#38b2ac", "#fc8181", "#667eea", "#f6ad55"];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return groups.map((g, i): any => {
+      const values = rawData.filter((r) => String(r[groupField]) === g).map((r) => r[config.y]).filter((v: unknown) => typeof v === "number");
+      return { y: values, type: "box", name: g, marker: { color: colors[i % colors.length] }, boxpoints: "outliers" };
+    });
+  }, [rawData, displayData, config, groupField]);
+
+  // Heatmap trace — for correlation matrix (compute_results with matrix key)
+  const heatmapData = useMemo(() => {
+    // Check if compute_results dataset has matrix data
+    const cr = flatData["compute_results"];
+    if (cr && Array.isArray(cr) && cr.length > 0 && cr[0]?.matrix && cr[0]?.params) {
+      return { params: cr[0].params as string[], matrix: cr[0].matrix as number[][] };
+    }
+    // Fallback: compute correlation from current dataset's numeric fields
+    if (!groupField || !rawData.length) return null;
+    const groups = [...new Set(rawData.map((r) => String(r[groupField])))].sort().slice(0, 10);
+    if (groups.length < 2) return null;
+    const valuesByGroup: Record<string, number[]> = {};
+    for (const g of groups) {
+      valuesByGroup[g] = rawData
+        .filter((r) => String(r[groupField]) === g)
+        .map((r) => r[config.y])
+        .filter((v: unknown) => typeof v === "number") as number[];
+    }
+    // Compute Pearson correlation matrix
+    const n = groups.length;
+    const matrix: number[][] = Array.from({ length: n }, () => Array(n).fill(0));
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        const a = valuesByGroup[groups[i]], b = valuesByGroup[groups[j]];
+        const len = Math.min(a.length, b.length);
+        if (len < 3) { matrix[i][j] = 0; continue; }
+        const ax = a.slice(0, len), bx = b.slice(0, len);
+        const ma = ax.reduce((s, v) => s + v, 0) / len;
+        const mb = bx.reduce((s, v) => s + v, 0) / len;
+        let num = 0, da = 0, db = 0;
+        for (let k = 0; k < len; k++) {
+          const ai = ax[k] - ma, bi = bx[k] - mb;
+          num += ai * bi; da += ai * ai; db += bi * bi;
+        }
+        const denom = Math.sqrt(da * db);
+        matrix[i][j] = denom > 0 ? Math.round((num / denom) * 1000) / 1000 : 0;
+      }
+    }
+    return { params: groups, matrix };
+  }, [flatData, rawData, groupField, config]);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const allTraces: any[] = [...traces, ...(oocTrace ? [oocTrace] : [])];
 
@@ -170,11 +279,11 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "10px 16px", borderBottom: "1px solid #e2e8f0", background: "#f7f8fc",
       }}>
-        <span style={{ fontSize: 14, fontWeight: 700, color: "#1a202c" }}>
+        <span style={{ fontSize: "var(--fs-lg)", fontWeight: 700, color: "#1a202c" }}>
           Data Explorer
         </span>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 11, color: "#718096" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-sm)" }}>
+          <span style={{ fontSize: "var(--fs-xs)", color: "#718096" }}>
             {metadata.total_events} events | {metadata.ooc_count} OOC ({metadata.ooc_rate}%)
           </span>
           {onClose && (
@@ -352,31 +461,165 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
         </div>
       )}
 
+      {/* Chart Type Selector */}
+      {!overlayMode && (
+        <div style={{ display: "flex", gap: 4, padding: "6px 16px", borderBottom: "1px solid #f0f0f0" }}>
+          {(["line", "scatter", "histogram", "box", ...(heatmapData ? ["heatmap" as const] : [])] as const).map((ct) => (
+            <button
+              key={ct}
+              onClick={() => setChartType(ct)}
+              style={{
+                padding: "3px 10px", fontSize: 11, borderRadius: 4,
+                border: chartType === ct ? "1px solid #2b6cb0" : "1px solid #e2e8f0",
+                background: chartType === ct ? "#ebf8ff" : "#fff",
+                color: chartType === ct ? "#2b6cb0" : "#718096",
+                fontWeight: chartType === ct ? 600 : 400,
+                cursor: "pointer",
+              }}
+            >
+              {ct === "line" ? "Line" : ct === "scatter" ? "Scatter" : ct === "histogram" ? "Histogram" : ct === "box" ? "Box Plot" : "Heatmap"}
+            </button>
+          ))}
+          {/* Time range slider toggle — only for time-series charts */}
+          {(chartType === "line" || chartType === "scatter") && (
+            <>
+              <span style={{ width: 1, height: 16, background: "#e2e8f0", margin: "0 4px" }} />
+              <button
+                onClick={() => setShowRangeSlider(v => !v)}
+                style={{
+                  padding: "3px 10px", fontSize: 11, borderRadius: 4,
+                  border: showRangeSlider ? "1px solid #2b6cb0" : "1px solid #e2e8f0",
+                  background: showRangeSlider ? "#ebf8ff" : "#fff",
+                  color: showRangeSlider ? "#2b6cb0" : "#718096",
+                  fontWeight: showRangeSlider ? 600 : 400,
+                  cursor: "pointer",
+                }}
+              >
+                Time Range
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Chart (single dataset mode) */}
       {!overlayMode && displayData.length > 0 ? (
-        <Plot
-          data={allTraces}
-          layout={{
-            autosize: true,
-            height: 320,
-            margin: { l: 50, r: 20, t: 30, b: 50 },
-            paper_bgcolor: "transparent",
-            plot_bgcolor: "#fafbfc",
-            font: { family: "Inter, sans-serif", size: 11 },
-            showlegend: allTraces.length > 1 && allTraces.length <= 8,
-            legend: { orientation: "h" as const, y: -0.2 },
-            xaxis: { title: config.x, gridcolor: "#e2e8f0" },
-            yaxis: { title: config.y, gridcolor: "#e2e8f0" },
-            shapes,
-            annotations: activeDataset === "spc_data" && displayData.length > 0 ? [
-              ...(displayData[0]?.ucl != null ? [{ xref: "paper" as const, yref: "y" as const, x: 1, y: displayData[0].ucl, text: `UCL ${displayData[0].ucl}`, font: { size: 9, color: "#ed8936" }, showarrow: false, xanchor: "right" as const }] : []),
-              ...(displayData[0]?.lcl != null ? [{ xref: "paper" as const, yref: "y" as const, x: 1, y: displayData[0].lcl, text: `LCL ${displayData[0].lcl}`, font: { size: 9, color: "#ed8936" }, showarrow: false, xanchor: "right" as const }] : []),
-            ] : [],
-          }}
-          config={{ responsive: true, displayModeBar: false }}
-          style={{ width: "100%" }}
-          useResizeHandler
-        />
+        chartType === "histogram" ? (
+          displayData.map((r) => r[config.y]).filter((v: unknown) => typeof v === "number").length < 5 ? (
+            <div style={{ padding: 40, textAlign: "center", color: "#a0aec0", fontSize: 13 }}>
+              Histogram requires at least 5 numeric data points
+            </div>
+          ) : (
+            <Plot
+              data={histogramTraces.traces}
+              layout={{
+                autosize: true, height: 350,
+                margin: { l: 50, r: 20, t: 30, b: 50 },
+                paper_bgcolor: "transparent", plot_bgcolor: "#fafbfc",
+                font: { family: "Inter, sans-serif", size: 11 },
+                showlegend: false,
+                xaxis: { title: config.y, gridcolor: "#e2e8f0" },
+                yaxis: { title: "Frequency", gridcolor: "#e2e8f0" },
+                shapes: histogramTraces.shapes,
+                annotations: histogramTraces.annotations,
+                bargap: 0.05,
+              }}
+              config={{ responsive: true, displayModeBar: false }}
+              style={{ width: "100%" }}
+              useResizeHandler
+            />
+          )
+        ) : chartType === "box" ? (
+          <Plot
+            data={boxTraces}
+            layout={{
+              autosize: true, height: 350,
+              margin: { l: 50, r: 20, t: 30, b: 50 },
+              paper_bgcolor: "transparent", plot_bgcolor: "#fafbfc",
+              font: { family: "Inter, sans-serif", size: 11 },
+              showlegend: false,
+              yaxis: { title: config.y, gridcolor: "#e2e8f0" },
+            }}
+            config={{ responsive: true, displayModeBar: false }}
+            style={{ width: "100%" }}
+            useResizeHandler
+          />
+        ) : chartType === "heatmap" && heatmapData ? (
+          <Plot
+            data={[{
+              type: "heatmap" as const,
+              z: heatmapData.matrix,
+              x: heatmapData.params,
+              y: heatmapData.params,
+              colorscale: "RdBu" as const,
+              zmin: -1, zmax: 1,
+              text: heatmapData.matrix.map(row => row.map(v => v.toFixed(2))),
+              hoverinfo: "text" as const,
+              showscale: true,
+            }]}
+            layout={{
+              autosize: true, height: 400,
+              margin: { l: 100, r: 20, t: 30, b: 100 },
+              paper_bgcolor: "transparent", plot_bgcolor: "#fafbfc",
+              font: { family: "Inter, sans-serif", size: 11 },
+              xaxis: { tickangle: -45 },
+            }}
+            config={{ responsive: true, displayModeBar: false }}
+            style={{ width: "100%" }}
+            useResizeHandler
+          />
+        ) : chartType === "scatter" ? (
+          <Plot
+            data={[{
+              ...allTraces[0],
+              mode: "markers" as const,
+              line: undefined,
+              marker: { ...allTraces[0]?.marker, size: 6 },
+            }, ...(oocTrace ? [oocTrace] : [])]}
+            layout={{
+              autosize: true, height: showRangeSlider ? 380 : 320,
+              margin: { l: 50, r: 20, t: 30, b: showRangeSlider ? 80 : 50 },
+              paper_bgcolor: "transparent", plot_bgcolor: "#fafbfc",
+              font: { family: "Inter, sans-serif", size: 11 },
+              showlegend: allTraces.length > 1,
+              legend: { orientation: "h" as const, y: -0.2 },
+              xaxis: {
+                title: config.x, gridcolor: "#e2e8f0",
+                ...(showRangeSlider ? { rangeslider: { visible: true, thickness: 0.08 }, type: "date" as const } : {}),
+              },
+              yaxis: { title: config.y, gridcolor: "#e2e8f0" },
+              shapes,
+            }}
+            config={{ responsive: true, displayModeBar: false }}
+            style={{ width: "100%" }}
+            useResizeHandler
+          />
+        ) : (
+          <Plot
+            data={allTraces}
+            layout={{
+              autosize: true, height: showRangeSlider ? 380 : 320,
+              margin: { l: 50, r: 20, t: 30, b: showRangeSlider ? 80 : 50 },
+              paper_bgcolor: "transparent", plot_bgcolor: "#fafbfc",
+              font: { family: "Inter, sans-serif", size: 11 },
+              showlegend: allTraces.length > 1 && allTraces.length <= 8,
+              legend: { orientation: "h" as const, y: -0.2 },
+              xaxis: {
+                title: config.x, gridcolor: "#e2e8f0",
+                ...(showRangeSlider ? { rangeslider: { visible: true, thickness: 0.08 }, type: "date" as const } : {}),
+              },
+              yaxis: { title: config.y, gridcolor: "#e2e8f0" },
+              shapes,
+              annotations: activeDataset === "spc_data" && displayData.length > 0 ? [
+                ...(displayData[0]?.ucl != null ? [{ xref: "paper" as const, yref: "y" as const, x: 1, y: displayData[0].ucl, text: `UCL ${displayData[0].ucl}`, font: { size: 9, color: "#ed8936" }, showarrow: false, xanchor: "right" as const }] : []),
+                ...(displayData[0]?.lcl != null ? [{ xref: "paper" as const, yref: "y" as const, x: 1, y: displayData[0].lcl, text: `LCL ${displayData[0].lcl}`, font: { size: 9, color: "#ed8936" }, showarrow: false, xanchor: "right" as const }] : []),
+              ] : [],
+            }}
+            config={{ responsive: true, displayModeBar: false }}
+            style={{ width: "100%" }}
+            useResizeHandler
+          />
+        )
       ) : !overlayMode ? (
         <div style={{ padding: 40, textAlign: "center", color: "#a0aec0", fontSize: 13 }}>
           No data for {DATASET_LABELS[activeDataset] ?? activeDataset}

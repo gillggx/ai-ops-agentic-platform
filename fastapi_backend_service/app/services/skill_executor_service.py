@@ -349,6 +349,11 @@ class SkillExecutorService:
         if not skill:
             return SkillExecuteResponse(success=False, error=f"Skill id={skill_id} 不存在")
 
+        # ── Pipeline Skill path — run Stage 3~6 via pipeline_executor ────
+        pipeline_config = self._skill_repo.get_pipeline_config(skill)
+        if pipeline_config:
+            return await self._execute_pipeline_skill(skill_id, pipeline_config, event_payload)
+
         steps = self._skill_repo.steps_mapping(skill)
         if not steps:
             return SkillExecuteResponse(success=False, error="此 Skill 尚無 steps_mapping")
@@ -382,6 +387,78 @@ class SkillExecutorService:
             step_results=step_results,
             findings=findings,
             charts=all_charts,
+        )
+
+    async def _execute_pipeline_skill(
+        self,
+        skill_id: int,
+        pipeline_config: Dict[str, Any],
+        event_payload: Dict[str, Any],
+    ) -> SkillExecuteResponse:
+        """Execute a pipeline-based Skill via pipeline_executor.
+
+        Merges event_payload params into data_retrieval.params, then runs
+        the full Stage 3~6 pipeline. Returns result with pipeline_result
+        attached for SSE/Console rendering.
+        """
+        from app.services.pipeline_executor import execute_pipeline
+        from app.config import get_settings
+
+        # Merge event_payload params into data_retrieval
+        plan = json.loads(json.dumps(pipeline_config))  # deep copy
+        retrieval = plan.get("data_retrieval", {})
+        params = retrieval.get("params", {})
+
+        # Override with event_payload keys (e.g. equipment_id → toolID, step, etc.)
+        param_mapping = {
+            "equipment_id": "toolID",
+            "toolID": "toolID",
+            "step": "step",
+            "lot_id": "lotID",
+            "lotID": "lotID",
+        }
+        for ep_key, param_key in param_mapping.items():
+            val = event_payload.get(ep_key)
+            if val:
+                params[param_key] = val
+        retrieval["params"] = params
+        plan["data_retrieval"] = retrieval
+
+        try:
+            settings = get_settings()
+            # Build a DB session for MCP executor
+            from app.database import async_session_factory
+            async with async_session_factory() as db_session:
+                result = await execute_pipeline(
+                    plan=plan,
+                    db_session=db_session,
+                    sim_url=settings.ONTOLOGY_SIM_URL,
+                )
+        except Exception as exc:
+            logger.exception("Pipeline Skill id=%d execution failed: %s", skill_id, exc)
+            return SkillExecuteResponse(success=False, error=str(exc))
+
+        if result.get("status") != "success":
+            return SkillExecuteResponse(
+                success=False,
+                error=result.get("llm_summary", "Pipeline execution failed"),
+            )
+
+        # Build a lightweight SkillFindings from pipeline result
+        findings = SkillFindings(
+            condition_met=True,
+            summary=result.get("llm_summary", "")[:500],
+            outputs={
+                "pipeline_cards": result.get("pipeline_cards", []),
+                "flat_metadata": result.get("flat_metadata"),
+            },
+        )
+
+        return SkillExecuteResponse(
+            success=True,
+            findings=findings,
+            # Attach full pipeline result for SSE rendering
+            pipeline_result=result,
         )
 
     async def try_run_draft(

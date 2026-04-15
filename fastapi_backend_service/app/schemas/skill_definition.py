@@ -228,6 +228,7 @@ class SkillExecuteResponse(BaseModel):
     step_results: List[StepResult] = []
     findings: Optional[SkillFindings] = None
     charts: Optional[List[Dict[str, Any]]] = None  # _chart DSL output from skill steps
+    pipeline_result: Optional[Dict[str, Any]] = None  # Pipeline Skill: full pipeline_executor result
     error: Optional[str] = None
 
 

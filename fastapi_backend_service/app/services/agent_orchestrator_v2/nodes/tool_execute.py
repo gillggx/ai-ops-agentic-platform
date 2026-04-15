@@ -173,6 +173,17 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
                 },
             }
             new_render_cards.append(card)
+        # Handle execute_skill returning pipeline result (Pipeline Skill)
+        elif (tool_name == "execute_skill" and isinstance(result, dict)
+              and result.get("is_pipeline_skill")):
+            card = {
+                "type": "pipeline",
+                "pipeline_cards": result.get("pipeline_cards", []),
+                "flat_data": result.get("flat_data"),
+                "flat_metadata": result.get("flat_metadata"),
+                "ui_config": result.get("ui_config"),
+            }
+            new_render_cards.append(card)
         else:
             # Build render card (for SSE events)
             render_card = _build_render_card(tool_name, tool_input, result)

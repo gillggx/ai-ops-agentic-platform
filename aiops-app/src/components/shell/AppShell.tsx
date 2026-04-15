@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Group, Panel, Separator } from "react-resizable-panels";
 import { Topbar } from "@/components/layout/Topbar";
 import { AICopilot } from "@/components/copilot/AICopilot";
 import { AnalysisPanel } from "@/components/layout/AnalysisPanel";
@@ -38,12 +39,12 @@ function NavLink({ href, icon, label, active, collapsed }: {
   return (
     <Link href={href} title={collapsed ? label : undefined} style={{
       display: "flex", alignItems: "center", gap: 8,
-      padding: collapsed ? "10px 0" : "9px 12px",
+      padding: collapsed ? "var(--sp-md) 0" : "var(--sp-sm) var(--sp-md)",
       justifyContent: collapsed ? "center" : "flex-start",
-      borderRadius: 6,
+      borderRadius: "var(--radius-md)",
       color: active ? "#2b6cb0" : "#4a5568",
       background: active ? "#ebf4ff" : "transparent",
-      textDecoration: "none", fontSize: collapsed ? 18 : 13,
+      textDecoration: "none", fontSize: collapsed ? 18 : "var(--fs-sm)",
       fontWeight: active ? 600 : 400, marginBottom: 2,
       transition: "background 0.1s",
     }}>
@@ -59,8 +60,8 @@ function SidebarSection({ title, collapsed }: { title: string; collapsed: boolea
   }
   return (
     <div style={{
-      fontSize: 10, fontWeight: 600, color: "#a0aec0",
-      padding: "8px 12px 4px", textTransform: "uppercase", letterSpacing: "0.5px",
+      fontSize: "var(--fs-xs)", fontWeight: 600, color: "#a0aec0",
+      padding: "var(--sp-sm) var(--sp-md) var(--sp-xs)", textTransform: "uppercase", letterSpacing: "0.5px",
     }}>
       {title}
     </div>
@@ -164,35 +165,44 @@ function Shell({ children }: { children: React.ReactNode }) {
       <Topbar />
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         <ContextualSidebar />
-        <main style={{ flex: 1, overflowY: "auto", minWidth: 0 }}>
-          {dataExplorer ? (
-            <DataExplorerPanel
-              state={dataExplorer}
-              onClose={() => setDataExplorer(null)}
-            />
-          ) : investigateMode && contract ? (
-            <AnalysisPanel
-              contract={contract}
-              onClose={() => { setInvestigateMode(false); setContract(null); }}
-              onAgentMessage={(msg) => setTriggerMessage(msg)}
-              onHandoff={handleHandoff}
-            />
-          ) : children}
-        </main>
-        <aside style={{
-          width: 360, flexShrink: 0,
-          display: "flex", flexDirection: "column",
-          background: "#ffffff", borderLeft: "1px solid #e2e8f0", overflow: "hidden",
-        }}>
-          <AICopilot
-            onContract={handleContract}
-            onDataExplorer={handleDataExplorer}
-            triggerMessage={triggerMessage}
-            onTriggerConsumed={() => setTriggerMessage(null)}
-            contextEquipment={selectedEquipment?.name ?? null}
-            onHandoff={handleHandoff}
-          />
-        </aside>
+        <Group orientation="horizontal" style={{ flex: 1 }}>
+          <Panel defaultSize={70} minSize={40}>
+            <main style={{ height: "100%", overflowY: "auto", minWidth: 0 }}>
+              {dataExplorer ? (
+                <DataExplorerPanel
+                  state={dataExplorer}
+                  onClose={() => setDataExplorer(null)}
+                />
+              ) : investigateMode && contract ? (
+                <AnalysisPanel
+                  contract={contract}
+                  onClose={() => { setInvestigateMode(false); setContract(null); }}
+                  onAgentMessage={(msg) => setTriggerMessage(msg)}
+                  onHandoff={handleHandoff}
+                />
+              ) : children}
+            </main>
+          </Panel>
+          <Separator style={{
+            width: 4, background: "#e2e8f0", cursor: "col-resize",
+            transition: "background 0.15s",
+          }} />
+          <Panel defaultSize={30} minSize={20} maxSize={50}>
+            <div style={{
+              height: "100%", display: "flex", flexDirection: "column",
+              background: "#ffffff", borderLeft: "1px solid #e2e8f0", overflow: "hidden",
+            }}>
+              <AICopilot
+                onContract={handleContract}
+                onDataExplorer={handleDataExplorer}
+                triggerMessage={triggerMessage}
+                onTriggerConsumed={() => setTriggerMessage(null)}
+                contextEquipment={selectedEquipment?.name ?? null}
+                onHandoff={handleHandoff}
+              />
+            </div>
+          </Panel>
+        </Group>
       </div>
     </div>
   );
