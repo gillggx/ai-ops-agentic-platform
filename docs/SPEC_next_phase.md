@@ -1,9 +1,9 @@
 # Spec: Next Phase — Skill Pipeline 存儲 + Resizable UI + 進階 Explorer
 
-**Version:** 1.0
-**Date:** 2026-04-15
+**Version:** 2.0
+**Date:** 2026-04-16 (updated)
 **Author:** Gill + Claude
-**Status:** Planning
+**Status:** Implemented
 
 ---
 
@@ -151,18 +151,26 @@ padding: clamp(0.5rem, 0.4rem + 0.5vw, 0.75rem) clamp(0.75rem, 0.6rem + 0.75vw, 
 
 ---
 
-## 6. 優先順序建議
+## 6. Implementation Status (2026-04-16)
 
-| Priority | 項目 | 預估 |
-|----------|------|------|
-| P1 | Skill Pipeline 存儲 | 2 天 |
-| P1 | Resizable Panel | 1 天 |
-| P2 | Explorer Histogram/Distribution | 1 天 |
-| P2 | Playwright E2E | 1 天 |
-| P3 | Correlation Matrix | 1 天 |
-| P3 | Time-window Slider | 1 天 |
-| P3 | rem/clamp 流體化 | 2 天 |
+| Priority | 項目 | 狀態 | 實作摘要 |
+|----------|------|------|---------|
+| P1 | Skill Pipeline 存儲 | ✅ Done | `pipeline_config` DB column + `POST /from-pipeline` API + SkillExecutorService pipeline branch + PipelineConsole "Save as Skill" button |
+| P1 | Resizable Panel | ✅ Done | CSS `resize: horizontal` + collapsible Copilot toggle strip (28px) |
+| P2 | Explorer Histogram/Distribution | ✅ Done | ChartExplorer: Line/Scatter/Histogram/Box Plot selector + sigma bands (1-4σ) |
+| P2 | Playwright E2E | ✅ Done | `e2e/playwright.config.ts` + smoke.spec.ts + data-explorer.spec.ts (1920/1366 viewports) |
+| P3 | Correlation Matrix | ✅ Done | Heatmap chart type (auto-detect compute_results.matrix or client-side Pearson) |
+| P3 | Time-window Slider | ✅ Done | Plotly rangeslider toggle for Line/Scatter modes |
+| P3 | rem/clamp 流體化 | ✅ Done | CSS design tokens in globals.css + applied to 6 components |
+
+### Additional fixes during deployment:
+- Alarm Center left panel: 35% → 220px compact sidebar (aligned with Dashboard)
+- Admin tables (Auto-Patrols, Diagnostic Rules): action buttons `flex nowrap` + scrollable wrapper
+- Copilot panel: collapsible toggle strip instead of `react-resizable-panels` (v4 API broken)
+
+### UI/UX Guidelines
+See [SPEC_ui_guidelines.md](SPEC_ui_guidelines.md) for the consolidated design system.
 
 ---
 
-*此 Spec 為下一階段的 roadmap，待當前 phase 完成後開始。*
+*All 7 items implemented and deployed 2026-04-16.*
