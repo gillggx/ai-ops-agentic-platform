@@ -220,24 +220,24 @@ export default function AlarmCenterPage() {
       {/* ── Content: Master-Detail ─────────────────────────────── */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
 
-        {/* Master (35%) — Alarm List */}
-        <div style={{ width: "28%", minWidth: 240, maxWidth: 420, background: "#fff", borderRight: "1px solid #e0e0e0", overflowY: "auto" }}>
-          {loading && <div style={{ padding: 16, color: "#a0aec0", fontSize: 13 }}>載入中...</div>}
+        {/* Master — Alarm List */}
+        <div style={{ width: 280, minWidth: 220, maxWidth: 340, flexShrink: 0, background: "#fff", borderRight: "1px solid #e0e0e0", overflowY: "auto" }}>
+          {loading && <div style={{ padding: "var(--sp-md)", color: "#a0aec0", fontSize: "var(--fs-sm)" }}>載入中...</div>}
           {alarms.map(a => (
             <div key={a.id} onClick={() => setSelectedId(a.id)} style={{
-              padding: "14px 20px", borderBottom: "1px solid #e8e8e8", cursor: "pointer",
+              padding: "var(--sp-sm) var(--sp-md)", borderBottom: "1px solid #e8e8e8", cursor: "pointer",
               background: selectedId === a.id ? "#e6f7ff" : "transparent",
-              borderLeft: selectedId === a.id ? "4px solid #1890ff" : "4px solid transparent",
+              borderLeft: selectedId === a.id ? "3px solid #1890ff" : "3px solid transparent",
               transition: "background 0.15s",
             }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 13 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: "var(--fs-xs)" }}>
                 <span style={{ color: SEV_COLOR[a.severity] ?? "#666", fontWeight: 700 }}>● {a.severity}</span>
                 <span style={{ color: "#999" }}>{timeAgo(a.created_at)}</span>
               </div>
-              <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.4, marginBottom: 4, color: "#262626" }}>
+              <div style={{ fontWeight: 600, fontSize: "var(--fs-sm)", lineHeight: 1.4, marginBottom: 2, color: "#262626" }}>
                 {a.title}
               </div>
-              <div style={{ color: "#999", fontSize: 13 }}>
+              <div style={{ color: "#999", fontSize: "var(--fs-xs)" }}>
                 設備: {a.equipment_id} | 狀態: {a.status === "active" ? "OPEN" : a.status}
               </div>
             </div>
@@ -250,8 +250,8 @@ export default function AlarmCenterPage() {
           )}
         </div>
 
-        {/* Detail (65%) — Selected Alarm */}
-        <div style={{ flex: 1, background: "#f9f9f9", overflowY: "auto", padding: 24 }}>
+        {/* Detail — Selected Alarm */}
+        <div style={{ flex: 1, background: "#f9f9f9", overflowY: "auto", padding: "var(--sp-xl)" }}>
           {selected ? (
             <AlarmDetail alarm={selected} />
           ) : (
