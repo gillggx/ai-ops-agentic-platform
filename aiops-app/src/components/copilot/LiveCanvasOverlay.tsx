@@ -126,12 +126,16 @@ function LiveCanvasInner({ sessionId, goal, active, events, onClose }: Props) {
     >
       {/* Narration strip — always visible at top */}
       <NarrationStrip active={active} text={narration} sessionId={sessionId} onClose={onClose} />
-      {/* Main body — canvas (left) + live event log (right) */}
-      <div style={{ flex: 1, display: "flex", overflow: "hidden", minHeight: 0 }}>
-        <div style={{ flex: 1, background: "#fff", overflow: "hidden", minWidth: 0 }}>
-          <BuilderLayoutNoProvider mode="session" sessionId={sessionId} fillViewport={false} />
-        </div>
-        <EventLogPanel events={events} active={active} />
+      {/* Phase 5-UX-6: single consolidated body — BuilderLayout fills the area
+          and the event log lives inside the Agent tab (via agentTabContent
+          override) so there's only one right-side panel, not two. */}
+      <div style={{ flex: 1, background: "#fff", overflow: "hidden", minHeight: 0 }}>
+        <BuilderLayoutNoProvider
+          mode="session"
+          sessionId={sessionId}
+          fillViewport={false}
+          agentTabContent={<EventLogPanel events={events} active={active} />}
+        />
       </div>
     </div>
   );
@@ -152,46 +156,40 @@ function EventLogPanel({
   }, [events]);
 
   return (
-    <aside
+    <div
       style={{
-        width: 340,
-        minWidth: 300,
-        flexShrink: 0,
-        borderLeft: "1px solid #334155",
-        background: "#0f172a",
-        color: "#e2e8f0",
+        flex: 1,
         display: "flex",
         flexDirection: "column",
+        background: "#0f172a",
+        color: "#e2e8f0",
         overflow: "hidden",
+        minHeight: 0,
       }}
     >
-      <div
-        style={{
-          padding: "10px 14px",
-          borderBottom: "1px solid #334155",
-          fontSize: 11,
-          fontWeight: 600,
-          color: "#94a3b8",
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          flexShrink: 0,
-        }}
-      >
-        <span style={{ fontSize: 12 }}>✦</span>
-        <span>Agent Log</span>
-        {active && (
+      {active && (
+        <div
+          style={{
+            padding: "6px 14px",
+            borderBottom: "1px solid #334155",
+            fontSize: 10,
+            color: "#94a3b8",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            flexShrink: 0,
+          }}
+        >
           <span
             style={{
               width: 6, height: 6, borderRadius: "50%", background: "#38bdf8",
-              boxShadow: "0 0 8px #38bdf8", marginLeft: "auto",
+              boxShadow: "0 0 8px #38bdf8",
               animation: "pulse 1.2s ease-in-out infinite",
             }}
           />
-        )}
-      </div>
+          <span>AI Agent 工作中</span>
+        </div>
+      )}
       <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
         {events.length === 0 && (
           <div style={{ color: "#64748b", textAlign: "center", marginTop: 20 }}>
@@ -203,7 +201,7 @@ function EventLogPanel({
         ))}
       </div>
       <style>{`@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }`}</style>
-    </aside>
+    </div>
   );
 }
 

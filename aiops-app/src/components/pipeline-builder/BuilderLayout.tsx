@@ -69,6 +69,10 @@ interface Props {
    *  needs this so its own NarrationStrip + EventLogPanel don't get hidden
    *  behind BuilderInner's fixed layer. Default true (existing callers). */
   fillViewport?: boolean;
+  /** Phase 5-UX-6: override the Agent tab content (replaces AgentBuilderPanel).
+   *  LiveCanvasOverlay uses this to put its glass-event log inside the existing
+   *  Agent tab instead of a separate panel, consolidating the right side. */
+  agentTabContent?: React.ReactNode;
 }
 
 export default function BuilderLayout(props: Props) {
@@ -86,7 +90,7 @@ export function BuilderLayoutNoProvider(props: Props) {
   return <BuilderInner {...props} />;
 }
 
-function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, sessionId, initialPrompt, fillViewport = true }: Props) {
+function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, sessionId, initialPrompt, fillViewport = true, agentTabContent }: Props) {
   const { state, actions, selectedNode, selectedEdge } = useBuilder();
   useBuilderKeybindings();
   const router = useRouter();
@@ -806,17 +810,19 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, sess
             setRightTab("agent");
           }}
           agentPanel={
-            <AgentBuilderPanel
-              blockCatalog={catalog}
-              basePipelineId={state.meta.pipelineId ?? null}
-              focusedNodeId={focusedNodeId}
-              focusedNodeLabel={(() => {
-                if (!focusedNodeId) return null;
-                const node = state.pipeline.nodes.find((n) => n.id === focusedNodeId);
-                return node?.display_label ?? node?.block_id ?? focusedNodeId;
-              })()}
-              onClearFocus={() => setFocusedNodeId(null)}
-            />
+            agentTabContent ?? (
+              <AgentBuilderPanel
+                blockCatalog={catalog}
+                basePipelineId={state.meta.pipelineId ?? null}
+                focusedNodeId={focusedNodeId}
+                focusedNodeLabel={(() => {
+                  if (!focusedNodeId) return null;
+                  const node = state.pipeline.nodes.find((n) => n.id === focusedNodeId);
+                  return node?.display_label ?? node?.block_id ?? focusedNodeId;
+                })()}
+                onClearFocus={() => setFocusedNodeId(null)}
+              />
+            )
           }
         />
       </div>
