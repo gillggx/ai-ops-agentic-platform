@@ -130,6 +130,12 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, sess
         } else if (initialPipelineJson) {
           // Phase 5: hydrate from chat's ephemeral pipeline — mark dirty so user can save
           actions.init({ pipeline: initialPipelineJson });
+        } else if (mode === "session") {
+          // Phase 5-UX-6 race fix: in session mode the parent (LiveCanvasOverlay
+          // or /chat/[id] page) owns the BuilderContext and will populate it
+          // via glass-ops as SSE events arrive. This effect's async completion
+          // races with those ops — resetting to empty here wipes out the nodes
+          // the agent just added. So: DO NOT init in session mode.
         } else {
           actions.init({ pipeline: { version: "1.0", name: "新 Pipeline", nodes: [], edges: [], metadata: {} } });
         }
