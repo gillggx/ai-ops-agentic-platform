@@ -17,7 +17,7 @@ import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { BuilderProvider, useBuilder } from "@/context/pipeline-builder/BuilderContext";
 import { listBlocks } from "@/lib/pipeline-builder/api";
-import { applyGlassOp } from "@/lib/pipeline-builder/glass-ops";
+import { applyGlassOp, OP_LABELS, opDetail } from "@/lib/pipeline-builder/glass-ops";
 import type { BlockSpec } from "@/lib/pipeline-builder/types";
 
 // Phase 5-UX-6: use the no-provider variant so operations applied via
@@ -126,12 +126,142 @@ function LiveCanvasInner({ sessionId, goal, active, events, onClose }: Props) {
     >
       {/* Narration strip — always visible at top */}
       <NarrationStrip active={active} text={narration} sessionId={sessionId} onClose={onClose} />
-      {/* Canvas — shares outer BuilderProvider so agent ops mutate it */}
-      <div style={{ flex: 1, background: "#fff", overflow: "hidden" }}>
-        <BuilderLayoutNoProvider mode="session" sessionId={sessionId} />
+      {/* Main body — canvas (left) + live event log (right) */}
+      <div style={{ flex: 1, display: "flex", overflow: "hidden", minHeight: 0 }}>
+        <div style={{ flex: 1, background: "#fff", overflow: "hidden", minWidth: 0 }}>
+          <BuilderLayoutNoProvider mode="session" sessionId={sessionId} />
+        </div>
+        <EventLogPanel events={events} active={active} />
       </div>
     </div>
   );
+}
+
+/** Phase 5-UX-6: scrollable Glass Box event log — shows every chat narration +
+ *  operation as it streams in, so users can follow the agent's reasoning. */
+function EventLogPanel({
+  events,
+  active,
+}: {
+  events: GlassEvent[];
+  active: boolean;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [events]);
+
+  return (
+    <aside
+      style={{
+        width: 340,
+        minWidth: 300,
+        flexShrink: 0,
+        borderLeft: "1px solid #334155",
+        background: "#0f172a",
+        color: "#e2e8f0",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          padding: "10px 14px",
+          borderBottom: "1px solid #334155",
+          fontSize: 11,
+          fontWeight: 600,
+          color: "#94a3b8",
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          flexShrink: 0,
+        }}
+      >
+        <span style={{ fontSize: 12 }}>✦</span>
+        <span>Agent Log</span>
+        {active && (
+          <span
+            style={{
+              width: 6, height: 6, borderRadius: "50%", background: "#38bdf8",
+              boxShadow: "0 0 8px #38bdf8", marginLeft: "auto",
+              animation: "pulse 1.2s ease-in-out infinite",
+            }}
+          />
+        )}
+      </div>
+      <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
+        {events.length === 0 && (
+          <div style={{ color: "#64748b", textAlign: "center", marginTop: 20 }}>
+            等待 Agent 開始…
+          </div>
+        )}
+        {events.map((e, i) => (
+          <EventLine key={i} event={e} />
+        ))}
+      </div>
+      <style>{`@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }`}</style>
+    </aside>
+  );
+}
+
+function EventLine({ event }: { event: GlassEvent }) {
+  if (event.kind === "start") {
+    return (
+      <div style={{ padding: "6px 10px", background: "#1e293b", borderRadius: 4, color: "#7dd3fc", lineHeight: 1.5 }}>
+        <div style={{ fontSize: 10, fontWeight: 600, marginBottom: 2 }}>🎯 目標</div>
+        <div>{event.goal || "—"}</div>
+      </div>
+    );
+  }
+  if (event.kind === "chat" && event.content) {
+    return (
+      <div style={{ padding: "6px 10px", background: "#1e293b", borderRadius: 4, color: "#cbd5e1", lineHeight: 1.6 }}>
+        <span style={{ color: "#38bdf8", marginRight: 4 }}>💬</span>
+        {event.content}
+      </div>
+    );
+  }
+  if (event.kind === "op" && event.op) {
+    const meta = OP_LABELS[event.op] ?? event.op;
+    const detail = opDetail(event.op, event.args ?? {});
+    return (
+      <div
+        style={{
+          padding: "5px 10px",
+          background: "#0c1729",
+          borderLeft: "2px solid #38bdf8",
+          borderRadius: 2,
+          fontFamily: "ui-monospace, monospace",
+          color: "#94a3b8",
+        }}
+      >
+        <div style={{ color: "#f1f5f9", fontWeight: 600, fontSize: 11 }}>
+          🛠 {meta}
+        </div>
+        {detail && (
+          <div style={{ fontSize: 10, marginTop: 2, wordBreak: "break-all" }}>{detail}</div>
+        )}
+      </div>
+    );
+  }
+  if (event.kind === "error") {
+    return (
+      <div style={{ padding: "6px 10px", background: "#7f1d1d", borderRadius: 4, color: "#fecaca" }}>
+        ⚠ {event.message}
+      </div>
+    );
+  }
+  if (event.kind === "done") {
+    return (
+      <div style={{ padding: "8px 10px", background: "#166534", borderRadius: 4, color: "#dcfce7", fontWeight: 500 }}>
+        ✓ {event.summary || "完成"}
+      </div>
+    );
+  }
+  return null;
 }
 
 function NarrationStrip({ active, text, sessionId, onClose }: {
