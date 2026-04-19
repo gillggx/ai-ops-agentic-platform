@@ -382,6 +382,20 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, sess
         )}
         {mode === "session" && (
           <>
+            <button
+              onClick={() => {
+                if (state.dirty) {
+                  const ok = window.confirm("這個 session 未儲存，確定離開？");
+                  if (!ok) return;
+                }
+                router.push("/dashboard");
+              }}
+              title="回 Dashboard（session 內容留存，可從對話列表重開）"
+              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#4F46E5", padding: 0 }}
+            >
+              ← Dashboard
+            </button>
+            <span style={{ color: "#CBD5E1" }}>/</span>
             <span style={{ fontSize: 12, color: "#64748B" }}>💬 Session</span>
             <span style={{ color: "#CBD5E1" }}>/</span>
           </>
