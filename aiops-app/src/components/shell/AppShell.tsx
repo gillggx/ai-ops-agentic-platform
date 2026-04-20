@@ -330,9 +330,9 @@ function Shell({ children }: { children: React.ReactNode }) {
           events={glassEvents}
           onClose={() => setGlassOverlay(null)}
           onSendMessage={(text) => {
-            // Push user bubble into the overlay's event stream + fire the
-            // main chat agent via AIAgentPanel's triggerMessage.
-            pushGlassEvent({ kind: "user", content: text });
+            // Fire the main chat agent via AIAgentPanel's triggerMessage.
+            // AIAgentPanel's onUserMessageSent callback will push the user
+            // bubble into glassEvents (single source — avoid duplicate push).
             setTriggerMessage(text);
             // Mark overlay active again since a new build round is coming
             setGlassOverlay((prev) => prev ? { ...prev, active: true } : null);

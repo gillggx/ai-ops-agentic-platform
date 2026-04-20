@@ -17,7 +17,7 @@ import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { BuilderProvider, useBuilder } from "@/context/pipeline-builder/BuilderContext";
 import { listBlocks } from "@/lib/pipeline-builder/api";
-import { applyGlassOp, OP_LABELS, opDetail } from "@/lib/pipeline-builder/glass-ops";
+import { applyGlassOp, OP_LABELS, opDetail, autoLayoutPipeline } from "@/lib/pipeline-builder/glass-ops";
 import type { BlockSpec } from "@/lib/pipeline-builder/types";
 
 // Phase 5-UX-6: use the no-provider variant so operations applied via
@@ -62,10 +62,14 @@ export default function LiveCanvasOverlay(props: Props) {
 }
 
 function LiveCanvasInner({ sessionId, goal, active, events, onClose, onSendMessage }: Props) {
-  const { actions } = useBuilder();
+  const { state, actions } = useBuilder();
   const [catalog, setCatalog] = useState<BlockSpec[]>([]);
   const [narration, setNarration] = useState<string>(goal ?? "");
   const processedCountRef = useRef(0);
+  // Live state ref so event-processing effect can read latest nodes/edges when
+  // triggering auto-layout on pb_glass_done (avoids stale closures).
+  const stateRef = useRef(state);
+  useEffect(() => { stateRef.current = state; }, [state]);
 
   // Load block catalog once (needed by applyGlassOp)
   useEffect(() => {
@@ -102,6 +106,15 @@ function LiveCanvasInner({ sessionId, goal, active, events, onClose, onSendMessa
         setNarration(e.content);
       } else if (e.kind === "done") {
         setNarration(e.summary ? `✓ ${e.summary}` : "✓ 完成");
+        // Phase 5-UX-6: auto-layout the DAG once agent finishes — nodes were
+        // added at arbitrary positions via add_node; LR-layout tidies them.
+        const cur = stateRef.current.pipeline;
+        if (cur.nodes.length >= 2) {
+          const laidOut = autoLayoutPipeline(cur.nodes, cur.edges);
+          if (laidOut.length > 0) {
+            actions.setNodesAndEdges(laidOut, cur.edges);
+          }
+        }
       } else if (e.kind === "error" && e.message) {
         setNarration(`⚠ ${e.message}`);
       } else if (e.kind === "start" && e.goal) {
