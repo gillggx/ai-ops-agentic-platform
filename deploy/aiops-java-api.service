@@ -1,0 +1,36 @@
+[Unit]
+Description=AIOps Java API (Spring Boot, port 8002 shadow / 8001 cutover)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/aiops/java-backend
+EnvironmentFile=/opt/aiops/java-backend/.env
+ExecStart=/usr/bin/java -server \
+  -Xms512m -Xmx1536m \
+  -XX:+HeapDumpOnOutOfMemoryError \
+  -XX:HeapDumpPath=/var/log/aiops/java-heap-dump.hprof \
+  -Duser.timezone=UTC \
+  -Dfile.encoding=UTF-8 \
+  -jar /opt/aiops/java-backend/build/libs/aiops-api.jar
+ExecStop=/bin/sh -c 'lsof -ti tcp:${AIOPS_JAVA_PORT:-8002} | xargs kill -TERM 2>/dev/null || true'
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aiops-java-api
+
+# Security hardening — mirrors fastapi-backend.service.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/aiops /tmp /var/log/aiops
+
+[Install]
+WantedBy=multi-user.target
