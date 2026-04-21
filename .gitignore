@@ -46,6 +46,17 @@ node_modules/
 out/
 tsconfig.tsbuildinfo
 
+# ── Java / Gradle (java-backend/) ────────────────────────────────────────────
+java-backend/.gradle/
+java-backend/build/
+java-backend/**/build/
+!java-backend/**/src/main/**/build/
+!java-backend/**/src/test/**/build/
+java-backend/bin/
+java-backend/out/
+java-backend/.idea/
+*.class
+
 # ── macOS ─────────────────────────────────────────────────────────────────────
 .DS_Store
 

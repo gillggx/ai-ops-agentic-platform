@@ -1,0 +1,10 @@
+aiops:
+  auth:
+    mode: local
+  cors:
+    allowed-origins: http://localhost:8000,http://localhost:3000
+
+logging:
+  level:
+    com.aiops.api: DEBUG
+    org.springframework.security: INFO

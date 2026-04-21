@@ -1,0 +1,9 @@
+aiops:
+  auth:
+    mode: oidc
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS}
+
+logging:
+  level:
+    com.aiops.api: INFO
