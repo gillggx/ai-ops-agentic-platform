@@ -58,6 +58,32 @@ nano /opt/aiops/python_ai_sidecar/.env
 # Important: PYTHON_SIDECAR_TOKEN in Java .env MUST EQUAL SERVICE_TOKEN in sidecar .env.
 # Same for JAVA_INTERNAL_TOKEN <-> JAVA_INTERNAL_TOKEN.
 
+# SHADOW-MODE EXTRAS (Python owns the schema while Java runs alongside):
+# Add these to /opt/aiops/java-backend/.env:
+#   AIOPS_PROFILE=local                   # OIDC-off, local BCrypt admin seeded
+#   SPRING_JPA_HIBERNATE_DDL_AUTO=none    # don't validate Python's schema
+#   SPRING_FLYWAY_ENABLED=false           # don't re-baseline
+# Phase 7 flips these back once entity types are reconciled with Python's
+# schema (user_id etc. are INT in Python, BIGINT in Java entities).
+
+# CREATE audit_logs (Java-only table Python doesn't touch):
+sudo -u postgres psql aiops_db -c "
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id BIGSERIAL PRIMARY KEY,
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  user_id BIGINT, username VARCHAR(150), roles VARCHAR(100),
+  http_method VARCHAR(10) NOT NULL, endpoint VARCHAR(300) NOT NULL,
+  status_code INTEGER, duration_ms BIGINT,
+  remote_ip VARCHAR(45), user_agent VARCHAR(500),
+  request_body TEXT, error_message TEXT);
+ALTER TABLE audit_logs OWNER TO aiops;
+GRANT ALL ON TABLE audit_logs TO aiops;
+GRANT ALL ON SEQUENCE audit_logs_id_seq TO aiops;
+CREATE INDEX IF NOT EXISTS ix_audit_logs_created_at ON audit_logs(created_at);
+CREATE INDEX IF NOT EXISTS ix_audit_logs_user_id    ON audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS ix_audit_logs_endpoint   ON audit_logs(endpoint);
+"
+
 # Re-run to pick up the real .env values.
 bash deploy/java-update.sh
 ```
