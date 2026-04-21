@@ -1,0 +1,35 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/aiops
+    username: aiops
+    password: aiops
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+  flyway:
+    enabled: false
+
+aiops:
+  auth:
+    mode: local
+    jwt:
+      secret: test-secret-test-secret-test-secret-test
+      expiry-minutes: 60
+      issuer: aiops-api-test
+  oidc:
+    issuer: ''
+    client-id: ''
+    client-secret: ''
+    role-claim: roles
+  sidecar:
+    python:
+      base-url: http://localhost:8050
+      service-token: test-token
+      connect-timeout-ms: 1000
+      read-timeout-ms: 5000
+  audit:
+    retention-days: 90
+    async-queue-size: 100
+  cors:
+    allowed-origins: http://localhost:8000

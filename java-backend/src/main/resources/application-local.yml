@@ -1,3 +1,10 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: update
+  flyway:
+    enabled: false
+
 aiops:
   auth:
     mode: local

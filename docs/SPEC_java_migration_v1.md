@@ -224,7 +224,7 @@ GET  /internal/health               → liveness/readiness
 - [ ] 設 Flyway `baseline-on-migrate=true`，標記現狀為 v1
 
 ### Phase 1: Core Infrastructure（1 week）
-- [ ] 31 個 JPA Entity（1:1 map 現有 SQLAlchemy model）
+- [ ] 29 個 JPA Entity（1:1 map 現有 SQLAlchemy model — 實際點名 29 個 .py 檔）
 - [ ] Repository layer（Spring Data JPA）
 - [ ] 共用 DTO / Error / Response envelope
 - [ ] Exception handler + validation
