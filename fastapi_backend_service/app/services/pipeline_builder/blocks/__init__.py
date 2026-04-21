@@ -4,6 +4,7 @@ from app.services.pipeline_builder.blocks.base import BlockExecutor, BlockExecut
 from app.services.pipeline_builder.blocks.alert import AlertBlockExecutor
 from app.services.pipeline_builder.blocks.any_trigger import AnyTriggerBlockExecutor
 from app.services.pipeline_builder.blocks.chart import ChartBlockExecutor
+from app.services.pipeline_builder.blocks.compute import ComputeBlockExecutor
 from app.services.pipeline_builder.blocks.consecutive_rule import ConsecutiveRuleBlockExecutor
 from app.services.pipeline_builder.blocks.correlation import CorrelationBlockExecutor
 from app.services.pipeline_builder.blocks.count_rows import CountRowsBlockExecutor
@@ -56,6 +57,7 @@ BUILTIN_EXECUTORS: dict[str, type[BlockExecutor]] = {
     "block_chart": ChartBlockExecutor,
     "block_alert": AlertBlockExecutor,
     "block_data_view": DataViewBlockExecutor,
+    "block_compute": ComputeBlockExecutor,
 }
 
 __all__ = [
@@ -65,6 +67,7 @@ __all__ = [
     "AlertBlockExecutor",
     "AnyTriggerBlockExecutor",
     "ChartBlockExecutor",
+    "ComputeBlockExecutor",
     "ConsecutiveRuleBlockExecutor",
     "CorrelationBlockExecutor",
     "CountRowsBlockExecutor",

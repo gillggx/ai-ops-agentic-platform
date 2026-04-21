@@ -1612,6 +1612,67 @@ def _blocks() -> list[dict[str, Any]]:
             },
             "implementation": {"type": "python", "ref": "app.services.pipeline_builder.blocks.data_view:DataViewBlockExecutor"},
         },
+        {
+            "name": "block_compute",
+            "version": "1.0.0",
+            "category": "transform",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "對上游 dataframe **加一個衍生 column**，值由 expression tree 算出。\n"
+                "這是「純值運算」的 primitive — 給下游 rolling_window / threshold / groupby\n"
+                "一個明確的 numeric / boolean 欄位可吃。\n"
+                "\n"
+                "== When to use ==\n"
+                "- ✅ 從 `spc_status` 衍生 `spc_is_any_ooc = (spc_status != 'PASS') as int` 讓 rolling_sum 可用\n"
+                "- ✅ 合併多個 boolean column：`is_any_spc_ooc = xbar_ooc OR r_ooc OR s_ooc`\n"
+                "- ✅ 將字串 cast 成數值 / 反之：`v_num = as_float(v_str)`\n"
+                "- ❌ 做 group 統計 → 用 block_groupby_agg\n"
+                "- ❌ 複雜 regex / apply → 超出本 block 能力\n"
+                "\n"
+                "== Params ==\n"
+                "column      (string, 必填) 新欄位名稱\n"
+                "expression  (object, 必填) expression tree，節點三種：\n"
+                "  literal            42, 'PASS', true, null, [..]\n"
+                "  column ref         {column: 'spc_status'}\n"
+                "  op node            {op: '<name>', operands: [...]}\n"
+                "\n"
+                "== Ops ==\n"
+                "Comparison: eq ne gt gte lt lte\n"
+                "Logical:    and or not\n"
+                "Set:        in not_in     (第二參數為 list)\n"
+                "Arithmetic: add sub mul div\n"
+                "Cast:       as_int as_float as_str as_bool\n"
+                "Null:       coalesce is_null is_not_null\n"
+                "\n"
+                "== Output ==\n"
+                "port: data (dataframe)    原 df + 一個新 column\n"
+                "\n"
+                "== Example ==\n"
+                "加 `spc_is_any_ooc`：\n"
+                "  {\n"
+                "    \"column\": \"spc_is_any_ooc\",\n"
+                "    \"expression\": {\n"
+                "      \"op\": \"as_int\",\n"
+                "      \"operands\": [{\n"
+                "        \"op\": \"ne\",\n"
+                "        \"operands\": [{\"column\": \"spc_status\"}, \"PASS\"]\n"
+                "      }]\n"
+                "    }\n"
+                "  }\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "data", "type": "dataframe"}],
+            "param_schema": {
+                "type": "object",
+                "required": ["column", "expression"],
+                "properties": {
+                    "column": {"type": "string", "title": "新欄位名稱"},
+                    "expression": {"type": "object", "title": "Expression tree"},
+                },
+            },
+            "implementation": {"type": "python", "ref": "app.services.pipeline_builder.blocks.compute:ComputeBlockExecutor"},
+        },
     ]
 
 
