@@ -17,7 +17,7 @@ public record AiopsProperties(
 
 	public record Jwt(String secret, int expiryMinutes, String issuer) {}
 
-	public record Oidc(String issuer, String clientId, String clientSecret, String roleClaim) {}
+	public record Oidc(String issuer, String clientId, String clientSecret, String roleClaim, String jwkSetUri) {}
 
 	public record Sidecar(Python python) {}
 

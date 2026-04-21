@@ -44,11 +44,15 @@ aiops:
       expiry-minutes: ${JWT_EXPIRY_MINUTES:60}
       issuer: aiops-api
   oidc:
-    # Azure AD (tenant-specific issuer)
+    # Azure AD — set OIDC_ISSUER to https://login.microsoftonline.com/<tenant-id>/v2.0
+    # For multi-tenant apps, use .../common/v2.0 (default below).
     issuer: ${OIDC_ISSUER:https://login.microsoftonline.com/common/v2.0}
     client-id: ${OIDC_CLIENT_ID:}
     client-secret: ${OIDC_CLIENT_SECRET:}
     role-claim: ${OIDC_ROLE_CLAIM:roles}
+    # Override for non-Azure providers (Keycloak, Auth0). Blank = auto-derive
+    # from issuer via /discovery/v2.0/keys.
+    jwk-set-uri: ${OIDC_JWK_URI:}
   sidecar:
     python:
       base-url: ${PYTHON_SIDECAR_URL:http://localhost:8050}

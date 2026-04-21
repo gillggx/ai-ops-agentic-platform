@@ -63,7 +63,16 @@ public class SecurityConfig {
 		if (props.auth().mode() == AiopsProperties.Auth.Mode.oidc) {
 			String issuer = props.oidc().issuer();
 			if (issuer != null && !issuer.isBlank()) {
-				http.oauth2ResourceServer(o -> o.jwt(j -> j.jwkSetUri(issuer + "/discovery/v2.0/keys")));
+				// Azure AD multi-tenant and common-endpoint issuers both expose
+				// their JWKS under /discovery/v2.0/keys; for other IdPs (e.g.
+				// Keycloak) point OIDC_JWK_URI at the right path.
+				String jwkUri = props.oidc().jwkSetUri() != null && !props.oidc().jwkSetUri().isBlank()
+						? props.oidc().jwkSetUri()
+						: issuer.replaceFirst("/+$", "") + "/discovery/v2.0/keys";
+				http.oauth2ResourceServer(o -> o.jwt(j -> j
+						.jwkSetUri(jwkUri)
+						.jwtAuthenticationConverter(oidcAuthenticationConverter(props))
+				));
 			}
 		} else {
 			http.addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
@@ -75,5 +84,39 @@ public class SecurityConfig {
 	@Bean
 	public PasswordEncoder passwordEncoder() {
 		return new BCryptPasswordEncoder(12);
+	}
+
+	/**
+	 * Maps Azure AD / OIDC token claims to Spring authorities.
+	 *
+	 * <p>Azure AD puts app roles in the {@code roles} claim by default; some
+	 * tenants use {@code groups}. We accept either (via {@code OIDC_ROLE_CLAIM}).
+	 * Each value is prefixed with {@code ROLE_} so {@code @PreAuthorize("hasRole('IT_ADMIN')")}
+	 * keeps working identically to local-JWT auth.
+	 */
+	private org.springframework.core.convert.converter.Converter<
+			org.springframework.security.oauth2.jwt.Jwt,
+			org.springframework.security.authentication.AbstractAuthenticationToken>
+			oidcAuthenticationConverter(AiopsProperties props) {
+		String roleClaim = props.oidc().roleClaim();
+		if (roleClaim == null || roleClaim.isBlank()) roleClaim = "roles";
+		String claimName = roleClaim;
+		var delegate = new org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter();
+		delegate.setJwtGrantedAuthoritiesConverter(jwt -> {
+			Object raw = jwt.getClaim(claimName);
+			java.util.List<String> values = new java.util.ArrayList<>();
+			if (raw instanceof java.util.Collection<?> c) {
+				for (Object o : c) if (o != null) values.add(String.valueOf(o));
+			} else if (raw instanceof String s && !s.isBlank()) {
+				for (String v : s.split(",")) if (!v.isBlank()) values.add(v.trim());
+			}
+			java.util.List<org.springframework.security.core.GrantedAuthority> out = new java.util.ArrayList<>();
+			for (String v : values) {
+				out.add(new org.springframework.security.core.authority.SimpleGrantedAuthority(
+						v.startsWith("ROLE_") ? v : "ROLE_" + v));
+			}
+			return out;
+		});
+		return delegate;
 	}
 }

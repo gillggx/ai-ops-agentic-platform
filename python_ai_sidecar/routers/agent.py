@@ -1,9 +1,12 @@
-"""Agent chat + Pipeline Builder Glass Box — live in Phase 5b.
+"""Agent chat + Pipeline Builder Glass Box.
 
-- ``/internal/agent/chat``  → ``agent_orchestrator.graph.run_chat_turn`` against Java.
-- ``/internal/agent/build`` → Glass Box scaffold emitting ``pb_glass_*`` events
-  backed by Java's block catalog. Phase 5c plugs in the real ``agent_builder``
-  LangGraph graph; the event envelope is already final.
+Phase 7 hybrid cutover:
+  - Both endpoints try fallback proxy to old Python FastAPI first (when
+    ``FALLBACK_ENABLED=1``) so the Frontend gets the full LangGraph /
+    Glass Box experience while native ports land.
+  - On fallback disabled or upstream error, drops to the native sidecar
+    graph / scaffold (Phase 5b code path).
+  - Phase 8 replaces each fallback with a proper native port.
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ from sse_starlette.sse import EventSourceResponse
 from ..auth import CallerContext, ServiceAuth
 from ..agent_orchestrator.graph import run_chat_turn
 from ..clients.java_client import JavaAPIClient
+from ..fallback import python_proxy as fb
 
 log = logging.getLogger("python_ai_sidecar.agent_router")
 router = APIRouter(prefix="/internal/agent", tags=["agent"])
@@ -39,26 +43,48 @@ class BuildRequest(BaseModel):
     pipeline_snapshot: dict | None = Field(default=None, alias="pipelineSnapshot")
 
 
-@router.post("/chat")
-async def agent_chat(req: ChatRequest, caller: CallerContext = ServiceAuth) -> EventSourceResponse:
-    async def _stream():
-        async for event in run_chat_turn(
+async def _chat_stream(req: ChatRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
+    if fb.fallback_enabled():
+        try:
+            body: dict = {"message": req.message}
+            if req.session_id:
+                body["session_id"] = req.session_id
+            async for ev in fb.stream_sse("/api/v1/agent/chat", body, caller):
+                yield ev
+            return
+        except Exception as ex:  # noqa: BLE001
+            log.warning("chat fallback failed (%s) — using native graph", ex.__class__.__name__)
+            yield fb.format_fallback_error(ex)
+
+    async for event in run_chat_turn(
             user_message=req.message,
             session_id=req.session_id,
-            caller=caller,
-        ):
-            yield event
-    return EventSourceResponse(_stream())
+            caller=caller):
+        yield event
 
 
 async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
+    if fb.fallback_enabled():
+        try:
+            body: dict = {"instruction": req.instruction}
+            if req.pipeline_id is not None:
+                body["pipeline_id"] = req.pipeline_id
+            if req.pipeline_snapshot is not None:
+                body["pipeline_snapshot"] = req.pipeline_snapshot
+            async for ev in fb.stream_sse("/api/v1/agent/build", body, caller):
+                yield ev
+            return
+        except Exception as ex:  # noqa: BLE001
+            log.warning("build fallback failed (%s) — using native scaffold", ex.__class__.__name__)
+            yield fb.format_fallback_error(ex)
+
+    # Native scaffold (Phase 5b): emit pb_glass_* envelope from Java catalog.
     java = JavaAPIClient.for_caller(caller)
     yield {"event": "pb_glass_start", "data": json.dumps({
         "instruction": req.instruction,
         "pipeline_id": req.pipeline_id,
         "caller_user_id": caller.user_id,
     })}
-
     try:
         blocks = await java.list_blocks(status="active")
         yield {"event": "pb_glass_chat", "data": json.dumps({
@@ -73,19 +99,24 @@ async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenera
                     "block": picked.get("name"),
                     "category": picked.get("category"),
                 },
-                "reasoning": "first active block as placeholder (phase 5b)",
+                "reasoning": "first active block as placeholder (native scaffold)",
             })}
         else:
             yield {"event": "pb_glass_chat", "data": json.dumps({
                 "content": "No active blocks — seed pb_blocks first.",
             })}
     except Exception as ex:  # noqa: BLE001
-        log.exception("build stream failure")
+        log.exception("build native failure")
         yield {"event": "pb_glass_error", "data": json.dumps({"message": str(ex)[:200]})}
 
     yield {"event": "pb_glass_done", "data": json.dumps({
-        "summary": "Phase 5b scaffold — real agent_builder comes in 5c.",
+        "summary": "Phase 7 native scaffold — fallback disabled or failed.",
     })}
+
+
+@router.post("/chat")
+async def agent_chat(req: ChatRequest, caller: CallerContext = ServiceAuth) -> EventSourceResponse:
+    return EventSourceResponse(_chat_stream(req, caller))
 
 
 @router.post("/build")
