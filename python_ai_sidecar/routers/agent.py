@@ -49,7 +49,8 @@ async def _chat_stream(req: ChatRequest, caller: CallerContext) -> AsyncGenerato
             body: dict = {"message": req.message}
             if req.session_id:
                 body["session_id"] = req.session_id
-            async for ev in fb.stream_sse("/api/v1/agent/chat", body, caller):
+            # Old Python FastAPI exposes chat at /api/v1/agent/chat/stream.
+            async for ev in fb.stream_sse("/api/v1/agent/chat/stream", body, caller):
                 yield ev
             return
         except Exception as ex:  # noqa: BLE001
