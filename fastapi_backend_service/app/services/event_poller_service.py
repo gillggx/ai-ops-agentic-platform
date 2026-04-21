@@ -94,6 +94,39 @@ async def _process_event(
 
         for skill in skills:
             started_at = datetime.now(tz=timezone.utc)
+
+            # Phase 7c: check patrol first — if it's pipeline-backed, route to
+            # AutoPatrolService (which runs the Pipeline Builder DAG). The pipeline
+            # path handles its own logging + alarm creation; we count the alarm
+            # and continue.
+            patrol_preroute = await patrol_repo.get_by_skill_id(skill.id)
+            if patrol_preroute is not None and getattr(patrol_preroute, "pipeline_id", None) is not None:
+                try:
+                    from app.services.auto_patrol_service import AutoPatrolService
+                    patrol_service = AutoPatrolService(
+                        repo=patrol_repo,
+                        alarm_repo=alarm_repo,
+                        executor=executor,
+                        sim_url=_get_settings().ONTOLOGY_SIM_URL,
+                    )
+                    pipeline_resp = await patrol_service.trigger(
+                        patrol_preroute.id, payload, trigger_mode="event",
+                    )
+                    if getattr(pipeline_resp, "alarm_created", False):
+                        total_alarms += 1
+                    logger.info(
+                        "Event-poller routed event=%s → patrol %d (pipeline_id=%d); alarm_created=%s",
+                        event_type_name, patrol_preroute.id,
+                        patrol_preroute.pipeline_id,
+                        getattr(pipeline_resp, "alarm_created", False),
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "Event-poller pipeline route failed for patrol %d; skipping this skill",
+                        patrol_preroute.id,
+                    )
+                continue  # skip legacy skill path for this skill
+
             try:
                 result = await executor.execute(
                     skill_id=skill.id,
