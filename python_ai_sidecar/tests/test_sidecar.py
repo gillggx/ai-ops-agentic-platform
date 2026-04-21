@@ -97,18 +97,57 @@ def test_sandbox_run_mock():
     assert body["result"]["input_keys"] == ["a"]
 
 
-def test_agent_sse_streams_both_chat_and_build():
+def _install_java_stub(monkeypatch):
+    """Replace JavaAPIClient.for_caller with an in-memory stub so SSE tests
+    don't need a real Java on the wire."""
+    from python_ai_sidecar.clients import java_client as jc
+
+    class StubClient:
+        def __init__(self): self._memories: list[dict] = []
+
+        async def list_mcps(self, *, mcp_type=None):
+            return [{"name": "m_hist", "description": "stub", "mcpType": "system", "inputSchema": "[]"}]
+
+        async def list_skills(self, *, source=None):
+            return [{"name": "s_check", "description": "stub", "triggerMode": "both",
+                     "source": "skill", "isActive": True}]
+
+        async def list_blocks(self, *, category=None, status=None):
+            return [{"name": "load_process_history", "category": "loader", "status": "active"}]
+
+        async def list_agent_memories(self, *, user_id, task_type=None):
+            return list(self._memories)
+
+        async def save_agent_memory(self, body):
+            body = dict(body)
+            body["id"] = len(self._memories) + 1
+            self._memories.append(body)
+            return body
+
+        async def get_agent_session(self, session_id):
+            from python_ai_sidecar.clients.java_client import JavaAPIError
+            raise JavaAPIError(404, "not_found", "session not found")
+
+        async def upsert_agent_session(self, session_id, body):
+            return {"sessionId": session_id, **body}
+
+    monkeypatch.setattr(jc.JavaAPIClient, "for_caller", classmethod(lambda cls, caller: StubClient()))
+
+
+def test_agent_sse_streams_both_chat_and_build(monkeypatch):
     """Covers both SSE endpoints in one test — sse-starlette binds asyncio
     primitives at module-init and gets tangled across fresh TestClient event
     loops on Python 3.14, so splitting these into separate tests fails on the
     second run. Single-TestClient run is a safe, stable reproduction of the
     production behaviour."""
+    _install_java_stub(monkeypatch)
+
     with TestClient(app) as c:
         with c.stream(
             "POST",
             "/internal/agent/chat",
             headers=HEADERS,
-            json={"message": "hello", "session_id": "sess-1"},
+            json={"message": "hello sidecar", "session_id": "sess-1"},
         ) as res:
             assert res.status_code == 200
             chat_payload = b"".join(chunk for chunk in res.iter_bytes()).decode()
@@ -121,12 +160,19 @@ def test_agent_sse_streams_both_chat_and_build():
             assert res.status_code == 200
             build_payload = b"".join(chunk for chunk in res.iter_bytes()).decode()
 
+    # Chat graph now emits open → context → recall → message* → memory → checkpoint → done
     assert "event: open" in chat_payload
+    assert "event: context" in chat_payload
+    assert "event: recall" in chat_payload
     assert "event: message" in chat_payload
+    assert "event: memory" in chat_payload
+    assert "event: checkpoint" in chat_payload
     assert "event: done" in chat_payload
     assert "sess-1" in chat_payload
 
+    # Build scaffold emits pb_glass_start → pb_glass_chat → pb_glass_op → pb_glass_done
     assert "event: pb_glass_start" in build_payload
     assert "event: pb_glass_chat" in build_payload
     assert "event: pb_glass_op" in build_payload
     assert "event: pb_glass_done" in build_payload
+    assert "load_process_history" in build_payload  # from stub block list

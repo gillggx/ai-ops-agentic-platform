@@ -1,94 +1,93 @@
-"""LangGraph chat + Pipeline Builder Glass Box — SSE-streamed.
+"""Agent chat + Pipeline Builder Glass Box — live in Phase 5b.
 
-Phase 4 ships a **mock** response stream so Java can wire and E2E-test the
-proxy. Phase 5 swaps the mock for real ``agent_orchestrator_v2`` /
-``agent_builder`` calls imported from ``fastapi_backend_service``.
+- ``/internal/agent/chat``  → ``agent_orchestrator.graph.run_chat_turn`` against Java.
+- ``/internal/agent/build`` → Glass Box scaffold emitting ``pb_glass_*`` events
+  backed by Java's block catalog. Phase 5c plugs in the real ``agent_builder``
+  LangGraph graph; the event envelope is already final.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
-import time
+import logging
 from typing import AsyncGenerator
 
 from fastapi import APIRouter
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sse_starlette.sse import EventSourceResponse
 
 from ..auth import CallerContext, ServiceAuth
+from ..agent_orchestrator.graph import run_chat_turn
+from ..clients.java_client import JavaAPIClient
 
+log = logging.getLogger("python_ai_sidecar.agent_router")
 router = APIRouter(prefix="/internal/agent", tags=["agent"])
 
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     message: str = Field(..., min_length=1)
-    session_id: str | None = None
+    session_id: str | None = Field(default=None, alias="sessionId")
 
 
 class BuildRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     instruction: str = Field(..., min_length=1)
-    pipeline_id: int | None = None
-    pipeline_snapshot: dict | None = None
-
-
-async def _mock_chat_stream(req: ChatRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
-    """Phase 4 mock — emits an opening event, 3 tokens, and a done event.
-
-    Real implementation (Phase 5+) will forward to the LangGraph orchestrator
-    and re-emit its events 1:1.
-    """
-    yield {
-        "event": "open",
-        "data": json.dumps({
-            "session_id": req.session_id or f"mock-{int(time.time())}",
-            "caller_user_id": caller.user_id,
-        }),
-    }
-    for i, word in enumerate(["Hello,", "Java", f"→ {caller.user_id or 'anonymous'}"]):
-        await asyncio.sleep(0.05)
-        yield {
-            "event": "message",
-            "data": json.dumps({"index": i, "token": word}),
-        }
-    yield {
-        "event": "done",
-        "data": json.dumps({"summary": "mock chat complete"}),
-    }
-
-
-async def _mock_build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
-    """Phase 4 mock for Pipeline Builder Glass Box — emits pb_glass_* events."""
-    yield {
-        "event": "pb_glass_start",
-        "data": json.dumps({
-            "instruction": req.instruction,
-            "pipeline_id": req.pipeline_id,
-            "caller_user_id": caller.user_id,
-        }),
-    }
-    yield {
-        "event": "pb_glass_chat",
-        "data": json.dumps({"content": "思考中... (mock)"}),
-    }
-    yield {
-        "event": "pb_glass_op",
-        "data": json.dumps({
-            "op": "add_node",
-            "payload": {"node_id": "n_mock_1", "block": "load_process_history"},
-        }),
-    }
-    yield {
-        "event": "pb_glass_done",
-        "data": json.dumps({"summary": "mock build complete — replace with real agent_builder"}),
-    }
+    pipeline_id: int | None = Field(default=None, alias="pipelineId")
+    pipeline_snapshot: dict | None = Field(default=None, alias="pipelineSnapshot")
 
 
 @router.post("/chat")
 async def agent_chat(req: ChatRequest, caller: CallerContext = ServiceAuth) -> EventSourceResponse:
-    return EventSourceResponse(_mock_chat_stream(req, caller))
+    async def _stream():
+        async for event in run_chat_turn(
+            user_message=req.message,
+            session_id=req.session_id,
+            caller=caller,
+        ):
+            yield event
+    return EventSourceResponse(_stream())
+
+
+async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
+    java = JavaAPIClient.for_caller(caller)
+    yield {"event": "pb_glass_start", "data": json.dumps({
+        "instruction": req.instruction,
+        "pipeline_id": req.pipeline_id,
+        "caller_user_id": caller.user_id,
+    })}
+
+    try:
+        blocks = await java.list_blocks(status="active")
+        yield {"event": "pb_glass_chat", "data": json.dumps({
+            "content": f"Loaded {len(blocks)} active blocks from Java.",
+        })}
+        picked = blocks[0] if blocks else None
+        if picked:
+            yield {"event": "pb_glass_op", "data": json.dumps({
+                "op": "add_node",
+                "payload": {
+                    "node_id": "n_1",
+                    "block": picked.get("name"),
+                    "category": picked.get("category"),
+                },
+                "reasoning": "first active block as placeholder (phase 5b)",
+            })}
+        else:
+            yield {"event": "pb_glass_chat", "data": json.dumps({
+                "content": "No active blocks — seed pb_blocks first.",
+            })}
+    except Exception as ex:  # noqa: BLE001
+        log.exception("build stream failure")
+        yield {"event": "pb_glass_error", "data": json.dumps({"message": str(ex)[:200]})}
+
+    yield {"event": "pb_glass_done", "data": json.dumps({
+        "summary": "Phase 5b scaffold — real agent_builder comes in 5c.",
+    })}
 
 
 @router.post("/build")
 async def agent_build(req: BuildRequest, caller: CallerContext = ServiceAuth) -> EventSourceResponse:
-    return EventSourceResponse(_mock_build_stream(req, caller))
+    return EventSourceResponse(_build_stream(req, caller))
