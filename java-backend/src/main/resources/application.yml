@@ -55,6 +55,10 @@ aiops:
       service-token: ${PYTHON_SIDECAR_TOKEN:dev-service-token}
       connect-timeout-ms: 5000
       read-timeout-ms: 120000
+  internal:
+    # Token used by the Python sidecar when calling back into Java.
+    token: ${JAVA_INTERNAL_TOKEN:dev-internal-token}
+    allowed-caller-ips: ${JAVA_INTERNAL_ALLOWED_IPS:127.0.0.1,::1,0:0:0:0:0:0:0:1}
   audit:
     retention-days: 90
     async-queue-size: 1000

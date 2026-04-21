@@ -34,18 +34,45 @@ def test_health_rejects_wrong_token():
     assert res.status_code == 401
 
 
-def test_pipeline_execute_mock():
+def test_pipeline_execute_round_trips_via_java(monkeypatch):
+    """Phase 5a: /execute now fetches pipeline via Java and writes execution_log.
+    We stub JavaAPIClient to assert the call pattern without a live Java."""
+    from python_ai_sidecar.clients import java_client as jc
+
+    captured = {"get_calls": [], "post_calls": []}
+
+    class StubClient:
+        def __init__(self, *a, **k): pass
+
+        async def get_pipeline(self, pipeline_id):
+            captured["get_calls"].append(pipeline_id)
+            return {"id": pipeline_id, "name": "stub-pipe",
+                    "pipelineJson": '{"nodes":[{"id":"a"},{"id":"b"}]}'}
+
+        async def create_execution_log(self, body):
+            captured["post_calls"].append(body)
+            return {"id": 777, "status": "success"}
+
+    monkeypatch.setattr(jc.JavaAPIClient, "for_caller", classmethod(lambda cls, caller: StubClient()))
+
     res = client.post(
         "/internal/pipeline/execute",
         headers=HEADERS,
-        json={"pipeline_id": 99, "pipeline_json": {"nodes": [{"id": "a"}]}, "inputs": {"k": "v"}},
+        json={"pipeline_id": 99, "inputs": {"k": "v"}, "triggered_by": "test"},
     )
     assert res.status_code == 200
     body = res.json()
     assert body["ok"] is True
-    assert body["status"] == "mock_success"
-    assert body["mock_output"]["echo"]["pipeline_id"] == 99
-    assert body["mock_output"]["echo"]["inputs_count"] == 1
+    assert body["execution_log_id"] == 777
+    assert body["pipeline"]["id"] == 99
+    assert body["pipeline"]["name"] == "stub-pipe"
+    assert len(body["node_results"]) == 2  # 2 nodes in stub pipelineJson
+
+    # Verify the round-trip made both calls
+    assert captured["get_calls"] == [99]
+    assert len(captured["post_calls"]) == 1
+    assert captured["post_calls"][0]["status"] == "success"
+    assert captured["post_calls"][0]["triggeredBy"] == "test"
 
 
 def test_pipeline_validate_mock():

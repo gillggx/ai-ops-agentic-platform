@@ -17,6 +17,7 @@ class JwtServiceTest {
 						new AiopsProperties.Jwt(secret, expiryMinutes, "aiops-api-test")),
 				new AiopsProperties.Oidc("", "", "", "roles"),
 				new AiopsProperties.Sidecar(new AiopsProperties.Python("http://x", "t", 1000, 1000)),
+				new AiopsProperties.Internal("dev-internal-token", "127.0.0.1"),
 				new AiopsProperties.Audit(90, 100),
 				new AiopsProperties.Cors("http://localhost"));
 	}

@@ -28,6 +28,9 @@ aiops:
       service-token: test-token
       connect-timeout-ms: 1000
       read-timeout-ms: 5000
+  internal:
+    token: dev-internal-token
+    allowed-caller-ips: 127.0.0.1,::1,0:0:0:0:0:0:0:1
   audit:
     retention-days: 90
     async-queue-size: 100

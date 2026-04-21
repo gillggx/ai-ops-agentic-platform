@@ -7,6 +7,7 @@ public record AiopsProperties(
 		Auth auth,
 		Oidc oidc,
 		Sidecar sidecar,
+		Internal internal,
 		Audit audit,
 		Cors cors) {
 
@@ -21,6 +22,9 @@ public record AiopsProperties(
 	public record Sidecar(Python python) {}
 
 	public record Python(String baseUrl, String serviceToken, int connectTimeoutMs, int readTimeoutMs) {}
+
+	/** Reverse direction: Python sidecar calling back into Java. */
+	public record Internal(String token, String allowedCallerIps) {}
 
 	public record Audit(int retentionDays, int asyncQueueSize) {}
 
