@@ -454,7 +454,7 @@ class AutoPatrolService:
 
         # Build registry + execute
         registry = BlockRegistry()
-        await registry.load(self._repo._db)
+        await registry.load_from_db(self._repo._db)
         executor = PipelineExecutor(registry)
         run_repo = PipelineRunRepository(self._repo._db)
         run = await run_repo.create_run(
