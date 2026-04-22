@@ -28,14 +28,16 @@ public class AgentSessionController {
 	public ApiResponse<List<Map<String, Object>>> list(@AuthenticationPrincipal AuthPrincipal caller,
 	                                                    @RequestParam(defaultValue = "30") int limit) {
 		Long uid = caller != null ? caller.userId() : null;
+		int safe = Math.min(Math.max(limit, 1), 200);
+		var pageable = org.springframework.data.domain.PageRequest.of(0, safe,
+				org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "updatedAt"));
 		List<AgentSessionEntity> rows;
 		if (uid == null || uid == 0L) {
-			rows = repository.findAll();
+			rows = repository.findAll(pageable).getContent();
 		} else {
-			rows = repository.findByUserIdOrderByUpdatedAtDesc(uid);
+			rows = repository.findByUserIdOrderByUpdatedAtDesc(uid, pageable);
 		}
-		int safe = Math.min(Math.max(limit, 1), 200);
-		List<Map<String, Object>> out = rows.stream().limit(safe).map(s -> {
+		List<Map<String, Object>> out = rows.stream().map(s -> {
 			Map<String, Object> m = new java.util.HashMap<>();
 			m.put("session_id", s.getSessionId());
 			m.put("user_id", s.getUserId());

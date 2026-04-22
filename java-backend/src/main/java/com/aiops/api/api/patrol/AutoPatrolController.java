@@ -103,7 +103,8 @@ public class AutoPatrolController {
 	public ApiResponse<java.util.List<com.aiops.api.domain.skill.ExecutionLogEntity>> executions(
 			@PathVariable Long id, @RequestParam(defaultValue = "20") int limit) {
 		int safe = Math.min(Math.max(limit, 1), 200);
-		return ApiResponse.ok(execLogRepo.findByAutoPatrolIdOrderByStartedAtDesc(id).stream().limit(safe).toList());
+		var pageable = org.springframework.data.domain.PageRequest.of(0, safe);
+		return ApiResponse.ok(execLogRepo.findByAutoPatrolIdOrderByStartedAtDesc(id, pageable));
 	}
 
 	public static final class Dtos {
