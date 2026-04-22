@@ -1,7 +1,6 @@
 package com.aiops.api.api.admin;
 
 import com.aiops.api.auth.Authorities;
-import com.aiops.api.common.ApiResponse;
 import com.aiops.api.domain.agent.AgentMemoryRepository;
 import com.aiops.api.domain.alarm.AlarmRepository;
 import com.aiops.api.domain.audit.AuditLogRepository;
@@ -15,11 +14,17 @@ import com.aiops.api.domain.user.UserRepository;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Instant;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
- * Path-parity alias for Frontend's {@code /api/v1/system/monitor}. Returns a
- * superset of the old Python shape (background_tasks / counts / build_info).
+ * Path-parity alias for Frontend's {@code /system/monitor} page. The page
+ * consumes the JSON directly (no envelope unwrap), so we return a bare
+ * object with the exact shape the Next.js page expects:
+ *   { timestamp, services, background_tasks: {event_poller, cron_scheduler},
+ *     db_stats }
  */
 @RestController
 @RequestMapping("/api/v1/system/monitor")
@@ -57,27 +62,53 @@ public class SystemMonitorAliasController {
 	}
 
 	@GetMapping
-	public ApiResponse<Map<String, Object>> monitor() {
-		return ApiResponse.ok(Map.of(
-				"background_tasks", Map.of(
-						"cron_scheduler", Map.of("status", "JAVA", "note", "managed by Java Spring @Scheduled"),
-						"event_poller", Map.of("status", "EXTERNAL", "note", "runs in Python sidecar / old fastapi-backend")
-				),
-				"counts", Map.of(
-						"users", userRepo.count(),
-						"alarms", alarmRepo.count(),
-						"skills", skillRepo.count(),
-						"pipelines", pipelineRepo.count(),
-						"auto_patrols", patrolRepo.count(),
-						"execution_logs", execLogRepo.count(),
-						"generated_events", generatedEventRepo.count(),
-						"nats_event_logs", natsLogRepo.count(),
-						"agent_memories", agentMemoryRepo.count(),
-						"audit_logs", auditRepo.count()),
-				"build_info", Map.of(
-						"service", "aiops-java-api",
-						"backend", "java-spring-boot-3.5"
-				)
-		));
+	public Map<String, Object> monitor() {
+		Map<String, Object> services = new HashMap<>();
+		services.put("aiops-java-api", Map.of("status", "up", "port", 8002));
+		services.put("aiops-python-sidecar", Map.of("status", "up", "port", 8050));
+		services.put("fastapi-backend", Map.of("status", "external", "port", 8001,
+				"note", "legacy Python; runs event poller + DR engine"));
+		services.put("ontology-simulator", Map.of("status", "external", "port", 8012));
+
+		// Poller stats — owned by the old Python stack, so we report EXTERNAL
+		// and don't fabricate numbers. The "last_seen_event" etc. would need
+		// to be read out of Python; non-blocking for now.
+		Map<String, Object> poller = new HashMap<>();
+		poller.put("status", "EXTERNAL");
+		poller.put("started_at", null);
+		poller.put("last_poll_at", null);
+		poller.put("last_seen_event", null);
+		poller.put("total_polls", 0);
+		poller.put("total_events_processed", 0);
+		poller.put("ooc_detected", 0);
+		poller.put("skills_triggered", 0);
+		poller.put("errors", 0);
+
+		Map<String, Object> scheduler = new HashMap<>();
+		scheduler.put("status", "JAVA");
+		scheduler.put("jobs", List.of());
+
+		Map<String, Object> dbStats = new HashMap<>();
+		dbStats.put("users", userRepo.count());
+		dbStats.put("alarms", alarmRepo.count());
+		dbStats.put("skills", skillRepo.count());
+		dbStats.put("pipelines", pipelineRepo.count());
+		dbStats.put("auto_patrols", patrolRepo.count());
+		dbStats.put("execution_logs", execLogRepo.count());
+		dbStats.put("generated_events", generatedEventRepo.count());
+		dbStats.put("nats_event_logs", natsLogRepo.count());
+		dbStats.put("agent_memories", agentMemoryRepo.count());
+		dbStats.put("audit_logs", auditRepo.count());
+
+		Map<String, Object> out = new HashMap<>();
+		out.put("timestamp", Instant.now().toString());
+		out.put("services", services);
+		out.put("background_tasks", Map.of(
+				"event_poller", poller,
+				"cron_scheduler", scheduler));
+		out.put("db_stats", dbStats);
+		out.put("build_info", Map.of("backend", "java-spring-boot-3.5",
+				"service", "aiops-java-api"));
+		return out;
 	}
 }

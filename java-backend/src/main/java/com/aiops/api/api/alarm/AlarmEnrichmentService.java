@@ -6,6 +6,7 @@ import com.aiops.api.domain.skill.ExecutionLogRepository;
 import com.aiops.api.domain.skill.SkillDefinitionEntity;
 import com.aiops.api.domain.skill.SkillDefinitionRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,13 +33,16 @@ public class AlarmEnrichmentService {
 	private final ExecutionLogRepository execLogRepo;
 	private final SkillDefinitionRepository skillRepo;
 	private final ObjectMapper mapper;
+	private final ChartMiddleware chartMiddleware;
 
 	public AlarmEnrichmentService(ExecutionLogRepository execLogRepo,
 	                              SkillDefinitionRepository skillRepo,
-	                              ObjectMapper mapper) {
+	                              ObjectMapper mapper,
+	                              ChartMiddleware chartMiddleware) {
 		this.execLogRepo = execLogRepo;
 		this.skillRepo = skillRepo;
 		this.mapper = mapper;
+		this.chartMiddleware = chartMiddleware;
 	}
 
 	public List<AlarmDtos.Summary> enrichSummaries(List<AlarmEntity> alarms) {
@@ -102,6 +106,7 @@ public class AlarmEnrichmentService {
 				a.getAcknowledgedBy(), a.getAcknowledgedAt(), a.getResolvedAt(),
 				a.getExecutionLogId(), a.getDiagnosticLogId(),
 				f.findings, f.outputSchema, f.diagnosticFindings, f.diagnosticOutputSchema,
+				List.of(), // alarm-level charts — Python also returns []
 				f.diagnosticResults);
 	}
 
@@ -114,6 +119,7 @@ public class AlarmEnrichmentService {
 				a.getAcknowledgedBy(), a.getAcknowledgedAt(), a.getResolvedAt(),
 				a.getExecutionLogId(), a.getDiagnosticLogId(), a.getCreatedAt(),
 				f.findings, f.outputSchema, f.diagnosticFindings, f.diagnosticOutputSchema,
+				List.of(),
 				f.diagnosticResults);
 	}
 
@@ -137,10 +143,16 @@ public class AlarmEnrichmentService {
 				.stream()
 				.map(dl -> {
 					SkillDefinitionEntity s = dl.getSkillId() != null ? ctx.skills.get(dl.getSkillId()) : null;
+					Object drFindings = parseJson(dl.getLlmReadableData());
+					Object drOutputSchema = s != null ? parseJson(s.getOutputSchema()) : null;
+					List<Object> drCharts = List.of();
+					if (drFindings instanceof JsonNode fJson && drOutputSchema instanceof JsonNode osJson) {
+						try { drCharts = chartMiddleware.buildCharts(fJson, osJson); }
+						catch (Exception ex) { log.warn("chart-middleware failed for DR log {}: {}", dl.getId(), ex.toString()); }
+					}
 					return new AlarmDtos.DiagnosticResult(
 							dl.getId(), dl.getSkillId(), s != null ? s.getName() : null,
-							dl.getStatus(), parseJson(dl.getLlmReadableData()),
-							s != null ? parseJson(s.getOutputSchema()) : null);
+							dl.getStatus(), drFindings, drOutputSchema, drCharts);
 				})
 				.toList();
 
