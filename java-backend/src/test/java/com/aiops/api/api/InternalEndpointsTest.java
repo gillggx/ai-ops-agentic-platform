@@ -67,7 +67,7 @@ class InternalEndpointsTest {
 		JsonNode node = om.readTree(body);
 		assertThat(node.at("/ok").asBoolean()).isTrue();
 		assertThat(node.at("/data/id").asLong()).isEqualTo(pipelineId);
-		assertThat(node.at("/data/pipelineJson").asText()).contains("n1").contains("n2");
+		assertThat(node.at("/data/pipeline_json").asText()).contains("n1").contains("n2");
 	}
 
 	@Test
@@ -84,7 +84,7 @@ class InternalEndpointsTest {
 		String body = mvc.perform(post("/internal/execution-logs")
 						.header("X-Internal-Token", "dev-internal-token")
 						.contentType(MediaType.APPLICATION_JSON)
-						.content("{\"triggeredBy\":\"test\",\"status\":\"success\",\"durationMs\":42}"))
+						.content("{\"triggered_by\":\"test\",\"status\":\"success\",\"duration_ms\":42}"))
 				.andExpect(status().isOk())
 				.andReturn().getResponse().getContentAsString();
 		JsonNode node = om.readTree(body);

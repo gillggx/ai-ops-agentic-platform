@@ -11,7 +11,7 @@ public record AiopsProperties(
 		Audit audit,
 		Cors cors) {
 
-	public record Auth(Mode mode, Jwt jwt) {
+	public record Auth(Mode mode, Jwt jwt, String sharedSecretToken) {
 		public enum Mode { local, oidc }
 	}
 

@@ -43,6 +43,11 @@ aiops:
       secret: ${JWT_SECRET:dev-secret-change-me-dev-secret-change-me}
       expiry-minutes: ${JWT_EXPIRY_MINUTES:60}
       issuer: aiops-api
+    # Phase 2 compat: when set, Java accepts this exact string (also sent as
+    # Bearer) as an IT_ADMIN shortcut. Used during Frontend cutover so the
+    # existing shared-secret INTERNAL_API_TOKEN keeps working against Java.
+    # Rotate/remove once Frontend moves to Java-issued JWTs.
+    shared-secret-token: ${AIOPS_SHARED_SECRET_TOKEN:}
   oidc:
     # Azure AD — set OIDC_ISSUER to https://login.microsoftonline.com/<tenant-id>/v2.0
     # For multi-tenant apps, use .../common/v2.0 (default below).

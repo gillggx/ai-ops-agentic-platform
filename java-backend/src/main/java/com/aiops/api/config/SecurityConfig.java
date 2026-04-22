@@ -1,6 +1,7 @@
 package com.aiops.api.config;
 
 import com.aiops.api.auth.JwtAuthenticationFilter;
+import com.aiops.api.auth.SharedSecretAuthFilter;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -29,7 +30,8 @@ public class SecurityConfig {
 	public SecurityFilterChain filterChain(HttpSecurity http,
 	                                       UrlBasedCorsConfigurationSource cors,
 	                                       AiopsProperties props,
-	                                       JwtAuthenticationFilter jwtFilter) throws Exception {
+	                                       JwtAuthenticationFilter jwtFilter,
+	                                       SharedSecretAuthFilter sharedSecretFilter) throws Exception {
 		AuthenticationEntryPoint unauthorizedEntry = (req, res, ex) -> {
 			res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
 			res.setContentType("application/json");
@@ -77,6 +79,10 @@ public class SecurityConfig {
 		} else {
 			http.addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
 		}
+
+		// Shared-secret compat filter runs BEFORE JWT so legacy shared-secret tokens
+		// (Frontend's existing INTERNAL_API_TOKEN) are recognised without rewriting the client.
+		http.addFilterBefore(sharedSecretFilter, UsernamePasswordAuthenticationFilter.class);
 
 		return http.build();
 	}

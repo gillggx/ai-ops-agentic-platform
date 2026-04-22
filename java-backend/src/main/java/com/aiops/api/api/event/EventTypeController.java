@@ -72,6 +72,21 @@ public class EventTypeController {
 		return ApiResponse.ok(null);
 	}
 
+	/** Event log — Phase 2 path-parity stub (Python computes from nats_event_logs). */
+	@GetMapping("/{id}/log")
+	@PreAuthorize(Authorities.ANY_ROLE)
+	public ApiResponse<java.util.Map<String, Object>> log(@PathVariable Long id,
+	                                                      @RequestParam(defaultValue = "10") int limit) {
+		EventTypeEntity et = repository.findById(id).orElseThrow(() -> ApiException.notFound("event type"));
+		java.util.Map<String, Object> out = new java.util.HashMap<>();
+		out.put("event_type_name", et.getName());
+		out.put("event_type_id", et.getId());
+		out.put("nats_total", 0L);
+		out.put("poller_total", 0L);
+		out.put("recent", java.util.List.of());
+		return ApiResponse.ok(out);
+	}
+
 	public static final class EventTypeDtos {
 
 		public record Detail(Long id, String name, String description, String source,

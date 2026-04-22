@@ -20,9 +20,12 @@ import java.util.List;
 public class AutoPatrolController {
 
 	private final AutoPatrolRepository repository;
+	private final com.aiops.api.domain.skill.ExecutionLogRepository execLogRepo;
 
-	public AutoPatrolController(AutoPatrolRepository repository) {
+	public AutoPatrolController(AutoPatrolRepository repository,
+	                            com.aiops.api.domain.skill.ExecutionLogRepository execLogRepo) {
 		this.repository = repository;
+		this.execLogRepo = execLogRepo;
 	}
 
 	@GetMapping
@@ -93,6 +96,14 @@ public class AutoPatrolController {
 		if (!repository.existsById(id)) throw ApiException.notFound("auto patrol");
 		repository.deleteById(id);
 		return ApiResponse.ok(null);
+	}
+
+	@GetMapping("/{id}/executions")
+	@PreAuthorize(Authorities.ANY_ROLE)
+	public ApiResponse<java.util.List<com.aiops.api.domain.skill.ExecutionLogEntity>> executions(
+			@PathVariable Long id, @RequestParam(defaultValue = "20") int limit) {
+		int safe = Math.min(Math.max(limit, 1), 200);
+		return ApiResponse.ok(execLogRepo.findByAutoPatrolIdOrderByStartedAtDesc(id).stream().limit(safe).toList());
 	}
 
 	public static final class Dtos {

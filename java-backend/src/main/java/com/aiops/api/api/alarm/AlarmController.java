@@ -31,22 +31,27 @@ public class AlarmController {
 	}
 
 	@GetMapping
-	public ApiResponse<PageResponse<AlarmDtos.Summary>> list(
+	public Object list(
 			@RequestParam(required = false) String status,
 			@RequestParam(defaultValue = "0") int page,
-			@RequestParam(defaultValue = "50") int size) {
+			@RequestParam(defaultValue = "50") int size,
+			@RequestParam(defaultValue = "false") boolean paginated) {
 		int safeSize = Math.min(Math.max(size, 1), 500);
 		var pageable = PageRequest.of(page, safeSize, Sort.by(Sort.Direction.DESC, "createdAt"));
-		Page<AlarmEntity> src = (status == null || status.isBlank())
-				? repository.findAll(pageable)
-				: repository.findAll(pageable); // filter handled in mapper; use spec later
-		Page<AlarmEntity> filtered = src;
+		Page<AlarmEntity> src = repository.findAll(pageable);
+		java.util.List<AlarmDtos.Summary> items;
 		if (status != null && !status.isBlank()) {
-			var list = src.getContent().stream().filter(a -> status.equalsIgnoreCase(a.getStatus())).toList();
-			return ApiResponse.ok(new PageResponse<>(list.size(), page, safeSize,
-					list.stream().map(AlarmDtos::summaryOf).toList()));
+			items = src.getContent().stream()
+					.filter(a -> status.equalsIgnoreCase(a.getStatus()))
+					.map(AlarmDtos::summaryOf).toList();
+		} else {
+			items = src.getContent().stream().map(AlarmDtos::summaryOf).toList();
 		}
-		return ApiResponse.ok(PageResponse.of(filtered, AlarmDtos::summaryOf));
+		if (paginated) {
+			return ApiResponse.ok(new PageResponse<>(src.getTotalElements(), page, safeSize, items));
+		}
+		// Python-compat default: direct array under data.
+		return ApiResponse.ok(items);
 	}
 
 	@GetMapping("/{id}")

@@ -85,6 +85,12 @@ public class McpDefinitionController {
 		return ApiResponse.ok(null);
 	}
 
+	@GetMapping("/catalog")
+	@PreAuthorize(Authorities.ANY_ROLE)
+	public ApiResponse<java.util.List<Dtos.Detail>> catalog() {
+		return ApiResponse.ok(repository.findAll().stream().map(Dtos::detailOf).toList());
+	}
+
 	public static final class Dtos {
 
 		public record Summary(Long id, String name, String description, String mcpType,

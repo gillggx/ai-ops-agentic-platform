@@ -90,7 +90,7 @@ class Phase3aIntegrationTest {
 							.header("Authorization", "Bearer " + onDutyToken))
 					.andExpect(status().isOk())
 					.andExpect(jsonPath("$.data.status").value("acknowledged"))
-					.andExpect(jsonPath("$.data.acknowledgedBy").value("on_duty_phase3"));
+					.andExpect(jsonPath("$.data.acknowledged_by").value("on_duty_phase3"));
 
 			// On-duty CANNOT resolve
 			mvc.perform(post("/api/v1/alarms/" + id + "/resolve")

@@ -66,7 +66,7 @@ class Phase3bIntegrationTest {
 	@Test
 	void skillCrud() throws Exception {
 		String name = "phase3b_skill_" + System.nanoTime();
-		String body = "{\"name\":\"" + name + "\",\"description\":\"sk\",\"triggerMode\":\"both\",\"source\":\"skill\"}";
+		String body = "{\"name\":\"" + name + "\",\"description\":\"sk\",\"trigger_mode\":\"both\",\"source\":\"skill\"}";
 
 		// On-duty cannot create
 		mvc.perform(post("/api/v1/skills").header("Authorization", "Bearer " + onDutyToken)
@@ -78,7 +78,7 @@ class Phase3bIntegrationTest {
 				.andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
 		JsonNode node = om.readTree(res);
 		Long id = node.at("/data/id").asLong();
-		assertThat(node.at("/data/createdBy").asLong()).isPositive();
+		assertThat(node.at("/data/created_by").asLong()).isPositive();
 
 		try {
 			// List visible to on-duty

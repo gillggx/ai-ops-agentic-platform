@@ -14,7 +14,8 @@ class JwtServiceTest {
 	private static AiopsProperties props(String secret, int expiryMinutes) {
 		return new AiopsProperties(
 				new AiopsProperties.Auth(AiopsProperties.Auth.Mode.local,
-						new AiopsProperties.Jwt(secret, expiryMinutes, "aiops-api-test")),
+						new AiopsProperties.Jwt(secret, expiryMinutes, "aiops-api-test"),
+						null),
 				new AiopsProperties.Oidc("", "", "", "roles", ""),
 				new AiopsProperties.Sidecar(new AiopsProperties.Python("http://x", "t", 1000, 1000)),
 				new AiopsProperties.Internal("dev-internal-token", "127.0.0.1"),
