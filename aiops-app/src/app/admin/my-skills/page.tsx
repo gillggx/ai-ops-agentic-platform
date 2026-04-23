@@ -168,9 +168,9 @@ export default function MySkillsPage() {
         const lines = buf.split("\n");
         buf = lines.pop() || "";
         for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
+          if (!line.startsWith("data:")) continue;
           try {
-            const ev = JSON.parse(line.slice(6));
+            const ev = JSON.parse(line.slice(5).replace(/^\s/, ""));
             if (ev.type === "clarify_needed") {
               const qs = (ev.questions ?? []) as ClarifyQuestion[];
               setConsoleLogs(prev => [...prev, `🤔 需要確認 ${qs.length} 件事`]);

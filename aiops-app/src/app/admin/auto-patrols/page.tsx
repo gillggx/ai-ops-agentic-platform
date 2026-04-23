@@ -447,9 +447,10 @@ export default function AutoPatrolsPage() {
         buffer = lines.pop() || "";
 
         for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
+          // Accept both "data: " (Python) and "data:" (Spring SseEmitter) prefixes.
+          if (!line.startsWith("data:")) continue;
           try {
-            const event = JSON.parse(line.slice(6)) as Record<string, unknown>;
+            const event = JSON.parse(line.slice(5).replace(/^\s/, "")) as Record<string, unknown>;
             const type = event.type as string;
 
             if (type === "clarify_needed") {

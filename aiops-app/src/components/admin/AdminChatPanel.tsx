@@ -117,9 +117,9 @@ export function AdminChatPanel({ onFillMcp, onFillSkill, collapsed = false, onTo
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
         for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
+          if (!line.startsWith("data:")) continue;
           try {
-            const ev = JSON.parse(line.slice(6));
+            const ev = JSON.parse(line.slice(5).replace(/^\s/, ""));
             if (ev.type === "text") {
               fullText += ev.text;
               const display = stripFillTags(fullText);

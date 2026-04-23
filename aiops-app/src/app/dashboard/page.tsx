@@ -140,9 +140,12 @@ function BriefingPanel({ scope, toolId }: { scope: "fab" | "tool"; toolId?: stri
         const lines = buf.split("\n");
         buf = lines.pop() ?? "";
         for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
+          // Accept both "data: {...}" (Python sse-starlette) and "data:{...}"
+          // (Spring SseEmitter) — SSE spec allows either.
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).replace(/^\s/, "");
           try {
-            const ev = JSON.parse(line.slice(6));
+            const ev = JSON.parse(payload);
             if (ev.type === "chunk") setText(prev => prev + ev.text);
             else if (ev.type === "error") setText(prev => prev + `\n⚠️ ${ev.message}`);
           } catch { /* ignore */ }

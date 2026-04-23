@@ -491,9 +491,9 @@ function McpDrawer({
         const lines = buf.split("\n");
         buf = lines.pop() ?? "";
         for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
+          if (!line.startsWith("data:")) continue;
           try {
-            const payload = JSON.parse(line.slice(6));
+            const payload = JSON.parse(line.slice(5).replace(/^\s/, ""));
             if (payload.type === "progress")    setTryProgress(payload.message);
             else if (payload.type === "done")  {
               const res = payload.result as TryRunResult;
