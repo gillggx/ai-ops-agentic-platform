@@ -100,9 +100,13 @@ function useBriefing(scope: string, data?: string) {
         const lines = buf.split("\n");
         buf = lines.pop() ?? "";
         for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
+          // Accept both "data: {...}" (Python sse-starlette) and "data:{...}"
+          // (Spring SseEmitter) — SSE spec allows either; the optional space
+          // must be trimmed by the client.
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).replace(/^\s/, "");
           try {
-            const ev = JSON.parse(line.slice(6));
+            const ev = JSON.parse(payload);
             if (ev.type === "chunk") setText(prev => prev + ev.text);
           } catch { /* skip */ }
         }

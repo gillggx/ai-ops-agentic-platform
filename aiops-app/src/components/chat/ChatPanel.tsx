@@ -282,6 +282,56 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
           case "error":
             addLog(makeLog("❌", (ev.message as string) ?? "Agent 發生錯誤", "error"));
             break;
+
+          // --- Agent planning ---
+          case "plan": {
+            const planText = (ev.text as string) ?? "";
+            addLog(makeLog("🧭",
+              `PLAN #${ev.iteration ?? "?"}\n${planText}`,
+              "info"));
+            break;
+          }
+
+          // --- Pipeline Builder Glass Box mode ---
+          // When the agent decides to build a pipeline (e.g. asking for a
+          // trend chart), it streams pb_glass_* events instead of a final
+          // synthesis. Surface them so the chat panel shows activity + a
+          // final answer instead of looking dead.
+          case "pb_glass_start":
+            addLog(makeLog("🧱",
+              `PIPELINE BUILDER | 開始建構：${(ev.goal as string) ?? ""}`,
+              "info"));
+            break;
+
+          case "pb_glass_chat": {
+            const content = (ev.content as string) ?? "";
+            if (content) {
+              setChatHistory((prev) => [...prev, {
+                id: nextId(), role: "agent",
+                content,
+              }]);
+            }
+            break;
+          }
+
+          case "pb_glass_op": {
+            const op = (ev.op as string) ?? "?";
+            addLog(makeLog("⚙️",
+              `PIPELINE OP | ${op}${ev.args ? " " + JSON.stringify(ev.args).slice(0, 80) : ""}`,
+              "tool"));
+            break;
+          }
+
+          case "pb_glass_done": {
+            const pid = ev.pipeline_id ?? ev.saved_pipeline_id;
+            const msg = pid
+              ? `Pipeline 建構完成（id=${pid}）— 請到 Pipeline Builder 查看結果`
+              : "Pipeline 建構結束";
+            setChatHistory((prev) => [...prev, {
+              id: nextId(), role: "agent", content: msg,
+            }]);
+            break;
+          }
         }
       }, (err) => {
         addLog(makeLog("❌", `連線失敗: ${err.message}`, "error"));

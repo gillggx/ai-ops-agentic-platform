@@ -23,8 +23,10 @@ export async function consumeSSE(
       buffer = lines.pop() ?? "";
 
       for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        const raw = line.slice(6).trim();
+        // Accept both "data: {...}" (Python sse-starlette — space after colon)
+        // and "data:{...}" (Spring SseEmitter — no space). SSE spec allows both.
+        if (!line.startsWith("data:")) continue;
+        const raw = line.slice(5).replace(/^\s/, "").trim();
         if (!raw || raw === "[DONE]") continue;
         try {
           onEvent(JSON.parse(raw));
