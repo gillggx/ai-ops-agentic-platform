@@ -657,13 +657,31 @@ class AutoPatrolService:
                             "rows": rows[:20],
                             "total": len(rows),
                         }
+                # Poller's _build_standard_payload emits event_time as an ISO
+                # string; the DB column is TIMESTAMP WITH TIME ZONE. Convert
+                # here (the Skill path already does this; the pipeline path
+                # was missing it → silent DataError + transaction rollback +
+                # no alarm created).
+                et_raw = context.get("event_time")
+                from datetime import datetime as _dt
+                event_time_dt = None
+                if et_raw:
+                    if isinstance(et_raw, _dt):
+                        event_time_dt = et_raw
+                    else:
+                        try:
+                            event_time_dt = _dt.fromisoformat(
+                                str(et_raw).replace("Z", "+00:00")
+                            )
+                        except Exception:
+                            event_time_dt = None
                 alarm = await self._alarm_repo.create(
                     skill_id=None,
                     trigger_event=f"auto_patrol:{patrol_id}",
                     equipment_id=equipment_id,
                     lot_id=lot_id,
                     step=context.get("step"),
-                    event_time=context.get("event_time"),
+                    event_time=event_time_dt,
                     severity=obj.alarm_severity,
                     title=obj.alarm_title or f"[Auto-Patrol] {obj.name}",
                     summary=_json.dumps(evidence_preview, ensure_ascii=False) if evidence_preview else None,
