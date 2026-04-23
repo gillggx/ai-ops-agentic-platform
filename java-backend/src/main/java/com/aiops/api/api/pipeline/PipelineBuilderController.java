@@ -10,10 +10,13 @@ import com.aiops.api.domain.pipeline.PipelineEntity;
 import com.aiops.api.domain.pipeline.PipelineRepository;
 import com.aiops.api.domain.pipeline.PublishedSkillEntity;
 import com.aiops.api.domain.pipeline.PublishedSkillRepository;
+import com.aiops.api.config.AiopsProperties;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.HashMap;
 import java.util.List;
@@ -35,17 +38,26 @@ public class PipelineBuilderController {
 	private final PublishedSkillRepository publishedSkillRepo;
 	private final PipelineAutoCheckTriggerRepository autoCheckRepo;
 	private final ObjectMapper mapper;
+	private final AiopsProperties props;
+	private final WebClient legacyClient;
 
 	public PipelineBuilderController(PipelineRepository pipelineRepo,
 	                                 BlockRepository blockRepo,
 	                                 PublishedSkillRepository publishedSkillRepo,
 	                                 PipelineAutoCheckTriggerRepository autoCheckRepo,
-	                                 ObjectMapper mapper) {
+	                                 ObjectMapper mapper,
+	                                 AiopsProperties props,
+	                                 @Value("${aiops.legacy-backend-url:http://127.0.0.1:8001}") String legacyBackendUrl) {
 		this.pipelineRepo = pipelineRepo;
 		this.blockRepo = blockRepo;
 		this.publishedSkillRepo = publishedSkillRepo;
 		this.autoCheckRepo = autoCheckRepo;
 		this.mapper = mapper;
+		this.props = props;
+		this.legacyClient = WebClient.builder()
+				.baseUrl(legacyBackendUrl)
+				.codecs(c -> c.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))  // pipelines may return big DataFrame previews
+				.build();
 	}
 
 	/** Parse a text column that stores JSON; return original string on parse error. */
@@ -110,5 +122,50 @@ public class PipelineBuilderController {
 		// calls res.json() straight into `setRows(...)` so a wrapped envelope
 		// would crash rendering.
 		return List.of();
+	}
+
+	// ── POST /execute — proxy to legacy Python :8001 ─────────────────────
+	// Full pipeline execution (PipelineExecutor + block registry + MCP calls
+	// to simulator) still lives in Python. Java proxies the call until the
+	// executor is ported. Frontend "Run" button hits this.
+	@PostMapping("/execute")
+	@SuppressWarnings({"unchecked", "rawtypes"})
+	public Map<String, Object> execute(@RequestBody Map<String, Object> body) {
+		String secret = props.auth() != null ? props.auth().sharedSecretToken() : null;
+		if (secret == null || secret.isBlank()) {
+			throw new com.aiops.api.common.ApiException(
+					org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR,
+					"internal_error",
+					"AIOPS_SHARED_SECRET_TOKEN not configured — cannot reach legacy executor");
+		}
+		return legacyClient.post()
+				.uri("/api/v1/pipeline-builder/execute")
+				.header("Authorization", "Bearer " + secret)
+				.header("Content-Type", "application/json")
+				.bodyValue(body)
+				.retrieve()
+				.bodyToMono(Map.class)
+				.block();
+	}
+
+	// ── POST /validate — same pattern (used by agent Glass Box flow) ─────
+	@PostMapping("/validate")
+	@SuppressWarnings({"unchecked", "rawtypes"})
+	public Map<String, Object> validate(@RequestBody Map<String, Object> body) {
+		String secret = props.auth() != null ? props.auth().sharedSecretToken() : null;
+		if (secret == null || secret.isBlank()) {
+			throw new com.aiops.api.common.ApiException(
+					org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR,
+					"internal_error",
+					"AIOPS_SHARED_SECRET_TOKEN not configured");
+		}
+		return legacyClient.post()
+				.uri("/api/v1/pipeline-builder/validate")
+				.header("Authorization", "Bearer " + secret)
+				.header("Content-Type", "application/json")
+				.bodyValue(body)
+				.retrieve()
+				.bodyToMono(Map.class)
+				.block();
 	}
 }
