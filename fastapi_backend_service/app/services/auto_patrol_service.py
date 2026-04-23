@@ -699,21 +699,64 @@ class AutoPatrolService:
             except Exception as exc:
                 logger.exception("AutoPatrol (pipeline) failed to create alarm: %s", exc)
 
-        # Emit execution_log.llm_readable_data in SkillFindings-compatible shape
-        # (condition_met / summary / outputs) so Frontend alarm page renders
-        # correctly. Raw pipeline result_summary is preserved under `outputs`.
+        # Build a Frontend-renderable findings payload:
+        #   outputs     — user-visible data, keyed so Frontend RenderMiddleware
+        #                 can match each value to an output_schema entry
+        #   output_schema — declares how Frontend should render each key
+        #                   (table / scalar / chart / badge); overrides the
+        #                   skill's schema via AlarmEnrichmentService.
+        #   charts      — ready-to-draw ChartDSL objects extracted from the
+        #                 pipeline's terminal chart nodes (block_chart).
+        pipeline_charts = []
+        for ch in (summary.get("charts") or []):
+            spec = ch.get("chart_spec") or {}
+            if not spec:
+                continue
+            # block_chart already emits ChartDSL-compatible {type, title, x, y, data, rules?, highlight?}
+            pipeline_charts.append({
+                "type": spec.get("type", "line"),
+                "title": spec.get("title") or ch.get("title") or "",
+                "x": spec.get("x"),
+                "y": spec.get("y") or [],
+                "data": spec.get("data") or [],
+                **({"rules": spec["rules"]} if spec.get("rules") else {}),
+                **({"highlight": spec["highlight"]} if spec.get("highlight") else {}),
+                **({"y_secondary": spec["y_secondary"]} if spec.get("y_secondary") else {}),
+            })
+
+        evidence_rows = (evidence_preview or {}).get("rows", []) or []
+        evidence_columns = (evidence_preview or {}).get("columns", []) or []
+        output_schema_override = []
+        outputs_dict = {}
+        if evidence_rows:
+            # Keep columns compact — top 8 for the table, drop pipeline-
+            # internal bookkeeping columns.
+            skip_cols = {"triggered_row", "violation_side"}
+            cols = [c for c in evidence_columns if c not in skip_cols][:8]
+            outputs_dict["evidence_rows"] = evidence_rows
+            output_schema_override.append({
+                "key": "evidence_rows",
+                "type": "table",
+                "label": "觸發證據（最近觸發的 row）",
+                "columns": [{"key": c, "label": c} for c in cols],
+            })
+            outputs_dict["triggered_count"] = (evidence_preview or {}).get("total") or len(evidence_rows)
+            output_schema_override.append({
+                "key": "triggered_count",
+                "type": "scalar",
+                "label": "觸發筆數",
+                "unit": "筆",
+            })
+
         findings_payload = {
             "condition_met": condition_met,
             "summary": (obj.alarm_title or obj.name) if condition_met
                        else f"Pipeline {pipeline_id} did not meet condition",
-            "outputs": {
-                "pipeline_id": pipeline_id,
-                "result_summary": summary,
-                "evidence": evidence_preview,
-            } if condition_met else {
-                "pipeline_id": pipeline_id,
-                "result_summary": summary,
-            },
+            "outputs": outputs_dict,
+            # Stored alongside findings so Java's AlarmEnrichmentService can
+            # override the empty skill output_schema for patrol-pipeline alarms.
+            "_alarm_output_schema": output_schema_override,
+            "_alarm_charts": pipeline_charts,
         }
         await log_repo.finish(
             log_entry,

@@ -9,24 +9,24 @@ import org.springframework.stereotype.Component;
 import java.util.*;
 
 /**
- * Builds the {@code dr.charts[]} array the Frontend's ChartListRenderer expects.
+ * Translates a Skill's {@code output_schema} + {@code findings.outputs} into
+ * the ChartDSL shape the Frontend's {@code ChartListRenderer} renders.
  *
- * <p>Inputs:
- *   findings.outputs      — named data bags produced by the skill
- *   output_schema[]       — declares which outputs are chart-shaped
+ * <p>ChartDSL (TypeScript) shape:
+ * <pre>
+ *   { type:"line"|"bar"|"scatter"|"boxplot"|"heatmap"|"distribution",
+ *     title, data:[], x:string, y:string[],
+ *     rules?:[{value,label,style}], highlight?:{field,eq} }
+ * </pre>
  *
- * <p>For each output_schema field whose {@code type} is in
- * {@link #CHART_TYPES}, we take the matching entry from {@code findings.outputs}
- * and emit a {@code ChartDSL}:
- *   { type, title, data, meta? }
- *
- * <p>This mirrors the Python chart_middleware.py behavior so the Frontend
- * renders identically to before cutover.
+ * <p>Schema field with chart type carries the column mapping:
+ *   x_key / value_key / y_keys / group_key / highlight_key / ucl_key / lcl_key.
+ * We translate those into the DSL keys above.
  */
 @Component
 public class ChartMiddleware {
 
-	/** Schema types that are rendered as charts (not inline tables). */
+	/** Schema types that produce charts. */
 	private static final Set<String> CHART_TYPES = Set.of(
 			"spc_chart", "line_chart", "bar_chart", "scatter_chart", "multi_line_chart");
 
@@ -36,7 +36,6 @@ public class ChartMiddleware {
 		this.mapper = mapper;
 	}
 
-	/** Return chart DSL list, or empty list if no chart-type fields. */
 	public List<Object> buildCharts(JsonNode findings, JsonNode outputSchema) {
 		if (findings == null || outputSchema == null || !outputSchema.isArray()) return List.of();
 		JsonNode outputs = findings.path("outputs");
@@ -51,20 +50,30 @@ public class ChartMiddleware {
 			JsonNode slot = outputs.get(key);
 			if (slot == null || slot.isNull()) continue;
 
-			// SPC chart: field.group_key splits data by chart_type into sub-charts.
-			if ("spc_chart".equals(type)) {
-				charts.addAll(buildSpcCharts(field, slot));
-			} else {
-				charts.add(buildSimpleChart(type, field, slot));
+			switch (type) {
+				case "spc_chart" -> charts.addAll(buildSpcCharts(field, slot));
+				case "multi_line_chart" -> charts.addAll(buildMultiLineCharts(field, slot));
+				default -> {
+					Object c = buildSimpleChart(type, field, slot);
+					if (c != null) charts.add(c);
+				}
 			}
 		}
 		return charts;
 	}
 
+	/** SPC chart: split rows by group_key (chart_type) into one sub-chart each,
+	 *  with UCL/LCL rules + OOC highlight. */
 	private List<Object> buildSpcCharts(JsonNode field, JsonNode slot) {
-		JsonNode data = slot.path("data");
-		if (!data.isArray() || data.isEmpty()) return List.of();
+		JsonNode data = resolveDataArray(slot);
+		if (data == null || data.isEmpty()) return List.of();
+
 		String groupKey = field.path("group_key").asText("chart_type");
+		String xKey = field.path("x_key").asText("eventTime");
+		String valueKey = field.path("value_key").asText("value");
+		String uclKey = field.path("ucl_key").asText("ucl");
+		String lclKey = field.path("lcl_key").asText("lcl");
+		String highlightKey = field.path("highlight_key").asText(null);
 		String label = field.path("label").asText("SPC");
 
 		// Group rows by group_key value
@@ -78,43 +87,141 @@ public class ChartMiddleware {
 		int idx = 0;
 		for (Map.Entry<String, ArrayNode> e : groups.entrySet()) {
 			idx++;
+			ArrayNode groupRows = e.getValue();
 			ObjectNode chart = mapper.createObjectNode();
 			chart.put("type", "line");
 			chart.put("title", e.getKey() + " — " + label + " (" + idx + "/" + groups.size() + ")");
-			chart.set("data", e.getValue());
-			// Frontend uses x_key / value_key / ucl_key / lcl_key / highlight_key for rendering
-			copyIfPresent(chart, field, "x_key");
-			copyIfPresent(chart, field, "value_key");
-			copyIfPresent(chart, field, "ucl_key");
-			copyIfPresent(chart, field, "lcl_key");
-			copyIfPresent(chart, field, "highlight_key");
+			chart.put("x", xKey);
+			ArrayNode ys = mapper.createArrayNode();
+			ys.add(valueKey);
+			chart.set("y", ys);
+			chart.set("data", groupRows);
+
+			// UCL/LCL rules (from first row — SPC values are constant per group)
+			if (groupRows.size() > 0) {
+				ArrayNode rules = mapper.createArrayNode();
+				JsonNode first = groupRows.get(0);
+				if (first.has(uclKey) && first.get(uclKey).isNumber()) {
+					ObjectNode ucl = mapper.createObjectNode();
+					ucl.put("value", first.get(uclKey).asDouble());
+					ucl.put("label", "UCL");
+					ucl.put("style", "danger");
+					rules.add(ucl);
+				}
+				if (first.has(lclKey) && first.get(lclKey).isNumber()) {
+					ObjectNode lcl = mapper.createObjectNode();
+					lcl.put("value", first.get(lclKey).asDouble());
+					lcl.put("label", "LCL");
+					lcl.put("style", "danger");
+					rules.add(lcl);
+				}
+				if (rules.size() > 0) chart.set("rules", rules);
+			}
+			// Highlight: OOC points (e.g. is_ooc == true)
+			if (highlightKey != null && !highlightKey.isBlank()) {
+				ObjectNode hl = mapper.createObjectNode();
+				hl.put("field", highlightKey);
+				hl.put("eq", true);
+				chart.set("highlight", hl);
+			}
 			out.add(chart);
 		}
 		return out;
 	}
 
+	/** multi_line_chart: split rows by group_key into one line per group.
+	 *  Frontend expects a single chart with multiple y series (one per group),
+	 *  OR (more practical given data shape) one chart per group. We emit the
+	 *  latter shape — matches SPC split pattern. */
+	private List<Object> buildMultiLineCharts(JsonNode field, JsonNode slot) {
+		JsonNode data = resolveDataArray(slot);
+		if (data == null || data.isEmpty()) return List.of();
+		String groupKey = field.path("group_key").asText("group");
+		String xKey = field.path("x_key").asText("eventTime");
+		String yKey = field.path("y_key").asText(field.path("value_key").asText("value"));
+		String label = field.path("label").asText("Multi-line");
+
+		Map<String, ArrayNode> groups = new LinkedHashMap<>();
+		for (JsonNode row : data) {
+			String g = row.path(groupKey).asText("default");
+			groups.computeIfAbsent(g, k -> mapper.createArrayNode()).add(row);
+		}
+
+		List<Object> out = new ArrayList<>();
+		int idx = 0;
+		for (Map.Entry<String, ArrayNode> e : groups.entrySet()) {
+			idx++;
+			ObjectNode chart = mapper.createObjectNode();
+			chart.put("type", "line");
+			chart.put("title", label + " — " + e.getKey() + " (" + idx + "/" + groups.size() + ")");
+			chart.put("x", xKey);
+			ArrayNode ys = mapper.createArrayNode();
+			ys.add(yKey);
+			chart.set("y", ys);
+			chart.set("data", e.getValue());
+			out.add(chart);
+		}
+		return out;
+	}
+
+	/** Simple line/bar/scatter. */
 	private Object buildSimpleChart(String type, JsonNode field, JsonNode slot) {
-		ObjectNode chart = mapper.createObjectNode();
+		JsonNode data = resolveDataArray(slot);
+		if (data == null) return null;
 		String frontendType = switch (type) {
-			case "line_chart", "multi_line_chart" -> "line";
+			case "line_chart" -> "line";
 			case "bar_chart" -> "bar";
 			case "scatter_chart" -> "scatter";
 			default -> "line";
 		};
+		String xKey = field.path("x_key").asText("eventTime");
+		// y column: prefer explicit value_key / y_key; else first non-x numeric col
+		String yKey = field.path("value_key").asText(
+				field.path("y_key").asText(null));
+		if (yKey == null && data.size() > 0) {
+			for (java.util.Iterator<String> it = data.get(0).fieldNames(); it.hasNext(); ) {
+				String f = it.next();
+				if (!f.equals(xKey) && data.get(0).get(f).isNumber()) {
+					yKey = f;
+					break;
+				}
+			}
+		}
+		if (yKey == null) yKey = "value";
+
+		ObjectNode chart = mapper.createObjectNode();
 		chart.put("type", frontendType);
 		chart.put("title", field.path("label").asText(field.path("key").asText("chart")));
-		// Data may be an array directly OR nested under slot.data
-		JsonNode data = slot.isArray() ? slot : slot.path("data");
-		if (data.isArray()) chart.set("data", data);
-		else chart.set("data", mapper.createArrayNode());
-		copyIfPresent(chart, field, "x_key");
-		copyIfPresent(chart, field, "value_key");
-		copyIfPresent(chart, field, "group_key");
+		chart.put("x", xKey);
+		ArrayNode ys = mapper.createArrayNode();
+		ys.add(yKey);
+		// y_keys from schema (multi-series line_chart)
+		JsonNode yKeys = field.get("y_keys");
+		if (yKeys != null && yKeys.isArray()) {
+			ys = mapper.createArrayNode();
+			yKeys.forEach(ys::add);
+		}
+		chart.set("y", ys);
+		chart.set("data", data);
+
+		// Highlight for line_chart (OOC markers etc)
+		String highlightKey = field.path("highlight_key").asText(null);
+		if (highlightKey != null && !highlightKey.isBlank()) {
+			ObjectNode hl = mapper.createObjectNode();
+			hl.put("field", highlightKey);
+			hl.put("eq", true);
+			chart.set("highlight", hl);
+		}
 		return chart;
 	}
 
-	private static void copyIfPresent(ObjectNode target, JsonNode source, String key) {
-		JsonNode v = source.get(key);
-		if (v != null && !v.isNull()) target.set(key, v);
+	/** Pipelines may emit either a raw [...] or {data:[...], ...}. Normalize. */
+	private JsonNode resolveDataArray(JsonNode slot) {
+		if (slot.isArray()) return slot;
+		if (slot.isObject()) {
+			JsonNode d = slot.get("data");
+			if (d != null && d.isArray()) return d;
+		}
+		return null;
 	}
 }

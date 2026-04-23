@@ -106,7 +106,7 @@ public class AlarmEnrichmentService {
 				a.getAcknowledgedBy(), a.getAcknowledgedAt(), a.getResolvedAt(),
 				a.getExecutionLogId(), a.getDiagnosticLogId(),
 				f.findings, f.outputSchema, f.diagnosticFindings, f.diagnosticOutputSchema,
-				List.of(), // alarm-level charts — Python also returns []
+				f.charts,
 				f.diagnosticResults);
 	}
 
@@ -119,7 +119,7 @@ public class AlarmEnrichmentService {
 				a.getAcknowledgedBy(), a.getAcknowledgedAt(), a.getResolvedAt(),
 				a.getExecutionLogId(), a.getDiagnosticLogId(), a.getCreatedAt(),
 				f.findings, f.outputSchema, f.diagnosticFindings, f.diagnosticOutputSchema,
-				List.of(),
+				f.charts,
 				f.diagnosticResults);
 	}
 
@@ -130,6 +130,25 @@ public class AlarmEnrichmentService {
 
 		Object findings = execLog != null ? parseJson(execLog.getLlmReadableData()) : null;
 		Object outputSchema = skill != null ? parseJson(skill.getOutputSchema()) : null;
+		List<Object> charts = List.of();
+
+		// Pipeline-backed patrols set skill_id=NULL on the alarm (no linked
+		// skill), so the skill-derived output_schema is empty and the alarm
+		// page falls back to raw-JSON-dumping findings.outputs. Honor the
+		// pipeline's self-declared schema + charts stored alongside findings.
+		if (findings instanceof JsonNode fn) {
+			JsonNode schemaOverride = fn.get("_alarm_output_schema");
+			if (schemaOverride != null && schemaOverride.isArray() && schemaOverride.size() > 0) {
+				outputSchema = schemaOverride;
+			}
+			JsonNode chartsOverride = fn.get("_alarm_charts");
+			if (chartsOverride != null && chartsOverride.isArray()) {
+				List<Object> list = new java.util.ArrayList<>();
+				chartsOverride.forEach(list::add);
+				charts = list;
+			}
+		}
+
 		Object diagFindings = diagLog != null ? parseJson(diagLog.getLlmReadableData()) : null;
 		Object diagOutputSchema = null;
 		if (diagLog != null && diagLog.getSkillId() != null) {
@@ -156,7 +175,7 @@ public class AlarmEnrichmentService {
 				})
 				.toList();
 
-		return new EnrichedFields(findings, outputSchema, diagFindings, diagOutputSchema, diagnosticResults);
+		return new EnrichedFields(findings, outputSchema, diagFindings, diagOutputSchema, charts, diagnosticResults);
 	}
 
 	private Object parseJson(String raw) {
@@ -188,5 +207,6 @@ public class AlarmEnrichmentService {
 
 	private record EnrichedFields(Object findings, Object outputSchema,
 	                              Object diagnosticFindings, Object diagnosticOutputSchema,
+	                              List<Object> charts,
 	                              List<AlarmDtos.DiagnosticResult> diagnosticResults) {}
 }
