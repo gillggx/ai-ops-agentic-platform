@@ -67,13 +67,27 @@ def stop() -> None:
 
 
 async def _claim_lot_from_db(db) -> dict | None:
-    """Atomically claim one waiting lot from MongoDB (for recycled lots)."""
-    return await db.lots.find_one_and_update(
-        {"status": "Waiting"},
-        {"$set": {"status": "Processing"}},
-        sort=[("lot_id", 1)],
-        return_document=ReturnDocument.AFTER,
-    )
+    """Atomically claim one waiting lot from MongoDB (for recycled lots).
+
+    Uses random sampling (MongoDB $sample) so all 10 tools don't pile on
+    the lowest lot_id in lockstep — that caused every Processing lot to be
+    stuck at the same current_step (e.g. every heatmap row was STEP_002).
+    """
+    # $sample picks one random Waiting lot; then atomically claim it.
+    cursor = db.lots.aggregate([
+        {"$match": {"status": "Waiting"}},
+        {"$sample": {"size": 1}},
+        {"$project": {"_id": 0, "lot_id": 1}},
+    ])
+    async for picked in cursor:
+        claimed = await db.lots.find_one_and_update(
+            {"lot_id": picked["lot_id"], "status": "Waiting"},
+            {"$set": {"status": "Processing"}},
+            return_document=ReturnDocument.AFTER,
+        )
+        if claimed is not None:
+            return claimed
+    return None
 
 
 async def _machine_loop(tool_id: str, queue: asyncio.Queue) -> None:
