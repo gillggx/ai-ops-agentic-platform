@@ -154,10 +154,27 @@ def _resolve_input_binding(
     Context-flattening: `context` is treated as a flat dict; `$event.x` and
     `$context.x` both read `context[x]` (we don't currently split event vs
     context scopes at the service level — caller merges upstream).
+
+    P1 Phase ε: when `binding` is empty/None, auto-derive `tool_id` from the
+    common event payload shapes (`equipment_id`, `toolID`, `tool_id`). This
+    is the Phase 7c silent-failure root cause — patrols with NULL input_binding
+    were passing empty inputs to the pipeline, which rejected them as
+    MISSING_INPUT and returned no alarm.
     """
     import os
     resolved: Dict[str, Any] = {}
     if not binding:
+        tool_id = (context.get("tool_id")
+                   or context.get("equipment_id")
+                   or context.get("toolID"))
+        if tool_id:
+            resolved["tool_id"] = tool_id
+        # Surface other commonly-referenced event fields for pipelines that
+        # may declare optional inputs (lot_id, step, event_time).
+        for key in ("lot_id", "step", "event_time"):
+            val = context.get(key)
+            if val is not None:
+                resolved[key] = val
         return resolved
     for k, v in binding.items():
         if isinstance(v, str) and v.startswith("$"):
@@ -171,6 +188,14 @@ def _resolve_input_binding(
                 resolved[k] = v
         else:
             resolved[k] = v
+    # Even when binding is provided, backfill tool_id if missing from binding
+    # but present in context. Common case: binding specifies lot_id only.
+    if "tool_id" not in resolved:
+        tool_id = (context.get("tool_id")
+                   or context.get("equipment_id")
+                   or context.get("toolID"))
+        if tool_id:
+            resolved["tool_id"] = tool_id
     return resolved
 
 
