@@ -631,6 +631,7 @@ class AutoPatrolService:
 
         alarm_id: Optional[int] = None
         alarm_created = False
+        evidence_preview = None
         if condition_met and obj.alarm_severity:
             try:
                 equipment_id = str(context.get("equipment_id") or context.get("tool_id") or "")
@@ -641,7 +642,6 @@ class AutoPatrolService:
                 # want the rows that actually fired, so filter on that column.
                 # Falls back to full rows if column absent (older blocks).
                 ev_node_id = summary.get("evidence_node_id")
-                evidence_preview = None
                 if ev_node_id and ev_node_id in result["node_results"]:
                     ev_port = (result["node_results"][ev_node_id].get("preview") or {}).get("evidence")
                     if ev_port:
@@ -681,10 +681,26 @@ class AutoPatrolService:
             except Exception as exc:
                 logger.exception("AutoPatrol (pipeline) failed to create alarm: %s", exc)
 
+        # Emit execution_log.llm_readable_data in SkillFindings-compatible shape
+        # (condition_met / summary / outputs) so Frontend alarm page renders
+        # correctly. Raw pipeline result_summary is preserved under `outputs`.
+        findings_payload = {
+            "condition_met": condition_met,
+            "summary": (obj.alarm_title or obj.name) if condition_met
+                       else f"Pipeline {pipeline_id} did not meet condition",
+            "outputs": {
+                "pipeline_id": pipeline_id,
+                "result_summary": summary,
+                "evidence": evidence_preview,
+            } if condition_met else {
+                "pipeline_id": pipeline_id,
+                "result_summary": summary,
+            },
+        }
         await log_repo.finish(
             log_entry,
             status="success",
-            llm_readable_data=summary or None,
+            llm_readable_data=findings_payload,
             action_dispatched=f"alarm:{alarm_id}" if alarm_id else None,
             duration_ms=duration_ms,
         )
