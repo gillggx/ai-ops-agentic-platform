@@ -39,6 +39,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		return props.auth().mode() != AiopsProperties.Auth.Mode.local;
 	}
 
+	/**
+	 * Re-apply JWT auth on async dispatch (default behavior skips async),
+	 * so SseEmitter post-dispatch cleanup sees a populated SecurityContext
+	 * and AuthorizationFilter does not throw AuthorizationDeniedException.
+	 */
+	@Override
+	protected boolean shouldNotFilterAsyncDispatch() {
+		return false;
+	}
+
 	@Override
 	protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)
 			throws ServletException, IOException {

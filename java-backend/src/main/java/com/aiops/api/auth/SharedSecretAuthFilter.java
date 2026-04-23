@@ -42,6 +42,20 @@ public class SharedSecretAuthFilter extends OncePerRequestFilter {
 		return request.getRequestURI().startsWith("/internal/");
 	}
 
+	/**
+	 * OncePerRequestFilter skips async dispatches by default, which drops the
+	 * SecurityContext when Spring re-runs the filter chain after SseEmitter
+	 * completes. AuthorizationFilter then sees an empty context and throws
+	 * AuthorizationDeniedException, which can't be handled because the SSE
+	 * response is already committed → Tomcat drops the connection → browser
+	 * fetch reader sees 'terminated'. Re-apply the shared-secret auth on
+	 * async dispatch so the context survives.
+	 */
+	@Override
+	protected boolean shouldNotFilterAsyncDispatch() {
+		return false;
+	}
+
 	@Override
 	protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)
 			throws ServletException, IOException {
