@@ -137,9 +137,9 @@ public class SystemMonitorAliasController {
 					.timeout(Duration.ofSeconds(3))
 					.block();
 			if (pyResp == null) return stub;
-			Object data = pyResp.get("data");
-			if (!(data instanceof Map)) return stub;
-			Object tasks = ((Map<String, Object>) data).get("background_tasks");
+			// Python returns a bare {timestamp, services, background_tasks, db_stats};
+			// no {ok, data} envelope here.
+			Object tasks = pyResp.get("background_tasks");
 			if (!(tasks instanceof Map)) return stub;
 			Object p = ((Map<String, Object>) tasks).get("event_poller");
 			if (p instanceof Map) return (Map<String, Object>) p;
