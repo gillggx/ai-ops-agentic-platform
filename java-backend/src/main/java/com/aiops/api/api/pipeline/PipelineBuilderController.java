@@ -10,10 +10,14 @@ import com.aiops.api.domain.pipeline.PipelineEntity;
 import com.aiops.api.domain.pipeline.PipelineRepository;
 import com.aiops.api.domain.pipeline.PublishedSkillEntity;
 import com.aiops.api.domain.pipeline.PublishedSkillRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Path-parity wrapper: Frontend proxies call {@code /api/v1/pipeline-builder/*}
@@ -30,15 +34,52 @@ public class PipelineBuilderController {
 	private final BlockRepository blockRepo;
 	private final PublishedSkillRepository publishedSkillRepo;
 	private final PipelineAutoCheckTriggerRepository autoCheckRepo;
+	private final ObjectMapper mapper;
 
 	public PipelineBuilderController(PipelineRepository pipelineRepo,
 	                                 BlockRepository blockRepo,
 	                                 PublishedSkillRepository publishedSkillRepo,
-	                                 PipelineAutoCheckTriggerRepository autoCheckRepo) {
+	                                 PipelineAutoCheckTriggerRepository autoCheckRepo,
+	                                 ObjectMapper mapper) {
 		this.pipelineRepo = pipelineRepo;
 		this.blockRepo = blockRepo;
 		this.publishedSkillRepo = publishedSkillRepo;
 		this.autoCheckRepo = autoCheckRepo;
+		this.mapper = mapper;
+	}
+
+	/** Parse a text column that stores JSON; return original string on parse error. */
+	private Object parseJsonOrRaw(String raw) {
+		if (raw == null || raw.isBlank()) return null;
+		try { return mapper.readTree(raw); }
+		catch (JsonProcessingException e) { return raw; }
+	}
+
+	/** Convert a BlockEntity to a Frontend-friendly map with JSON text
+	 *  columns parsed. Frontend's BlockSpec.input_schema / output_schema /
+	 *  param_schema / examples expect arrays/objects, not raw strings. */
+	private Map<String, Object> blockDto(BlockEntity b) {
+		Map<String, Object> m = new HashMap<>();
+		m.put("id", b.getId());
+		m.put("name", b.getName());
+		m.put("category", b.getCategory());
+		m.put("version", b.getVersion());
+		m.put("status", b.getStatus());
+		m.put("description", b.getDescription());
+		m.put("input_schema", parseJsonOrRaw(b.getInputSchema()));
+		m.put("output_schema", parseJsonOrRaw(b.getOutputSchema()));
+		m.put("param_schema", parseJsonOrRaw(b.getParamSchema()));
+		m.put("examples", parseJsonOrRaw(b.getExamples()));
+		m.put("output_columns_hint", parseJsonOrRaw(b.getOutputColumnsHint()));
+		m.put("implementation", b.getImplementation());
+		m.put("is_custom", b.getIsCustom());
+		m.put("created_by", b.getCreatedBy());
+		m.put("approved_by", b.getApprovedBy());
+		m.put("approved_at", b.getApprovedAt());
+		m.put("review_note", b.getReviewNote());
+		m.put("created_at", b.getCreatedAt());
+		m.put("updated_at", b.getUpdatedAt());
+		return m;
 	}
 
 	@GetMapping("/pipelines")
@@ -53,8 +94,8 @@ public class PipelineBuilderController {
 	}
 
 	@GetMapping("/blocks")
-	public List<BlockEntity> listBlocks() {
-		return blockRepo.findAll();
+	public List<Map<String, Object>> listBlocks() {
+		return blockRepo.findAll().stream().map(this::blockDto).toList();
 	}
 
 	@GetMapping("/published-skills")
