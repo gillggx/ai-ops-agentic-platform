@@ -41,13 +41,14 @@ const OPS_ITEMS = [
 ];
 
 const KNOWLEDGE_ITEMS = [
+  // Option A UX consolidation (2026-04-23): Pipeline Builder is the single
+  // entry point for building & publishing. Auto-Patrols / Auto-Check Rules /
+  // Published Skills are reachable via Admin → Triggers Overview.
   { href: "/admin/pipeline-builder",  label: "Pipeline Builder",       icon: "🧩" },
-  { href: "/admin/published-skills",  label: "Published Skills",       icon: "📘" },
-  { href: "/admin/auto-patrols",      label: "Auto-Patrols",           icon: "🔍" },
-  { href: "/admin/auto-check-rules",  label: "Auto-Check Rules",       icon: "⚡" },
 ];
 
 const ADMIN_ITEMS = [
+  { href: "/admin/triggers",        label: "Triggers Overview", icon: "🔔" },
   { href: "/system/skills",         label: "Skills",          icon: "⚙️" },
   { href: "/admin/memories",        label: "Agent Memory",    icon: "🧠" },
   { href: "/system/data-sources",   label: "Data Sources",    icon: "🗄️" },
