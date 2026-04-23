@@ -81,6 +81,13 @@ class SkillDefinitionModel(Base):
         Integer, ForeignKey("auto_patrols.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
+    # P1 Phase δ: pipeline-engine binding.
+    # When set, DR execution delegates to Pipeline Builder runner instead of
+    # the legacy Skill executor (steps_mapping / Python code).
+    pipeline_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("pb_pipelines.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
     # Who created this skill
     created_by: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True

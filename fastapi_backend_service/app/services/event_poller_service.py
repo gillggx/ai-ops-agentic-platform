@@ -256,10 +256,13 @@ async def _trigger_bound_diagnostic_rules_from_poller(
             return
 
         log_repo = ExecutionLogRepository(db)
+        # Local import avoids circular (event_poller ↔ auto_patrol)
+        from app.services.auto_patrol_service import run_dr_via_pipeline
         for dr in dr_skills:
+            via_pipeline = dr.pipeline_id is not None
             logger.info(
-                "Poller DR fan-out: running skill_id=%d (DR '%s') for alarm_id=%d",
-                dr.id, dr.name, alarm_id,
+                "Poller DR fan-out: running skill_id=%d pipeline_id=%s (DR '%s') for alarm_id=%d",
+                dr.id, dr.pipeline_id, dr.name, alarm_id,
             )
             try:
                 dr_log = await log_repo.create(
@@ -269,17 +272,28 @@ async def _trigger_bound_diagnostic_rules_from_poller(
                     auto_patrol_id=None,
                 )
                 t0 = _time.monotonic()
-                dr_result = await executor.execute(
-                    skill_id=dr.id,
-                    event_payload=alarm_context,
-                    triggered_by=f"alarm:{alarm_id}",
-                )
+                if via_pipeline:
+                    dr_result = await run_dr_via_pipeline(
+                        db, dr, alarm_id, alarm_context,
+                    )
+                    status = "success" if dr_result["success"] else "error"
+                    findings = dr_result["findings"]
+                    error_msg = dr_result["error"]
+                else:
+                    legacy = await executor.execute(
+                        skill_id=dr.id,
+                        event_payload=alarm_context,
+                        triggered_by=f"alarm:{alarm_id}",
+                    )
+                    status = "success" if legacy.success else "error"
+                    findings = legacy.findings.model_dump() if legacy.findings else None
+                    error_msg = legacy.error
                 dur = int((_time.monotonic() - t0) * 1000)
                 await log_repo.finish(
                     dr_log,
-                    status="success" if dr_result.success else "error",
-                    llm_readable_data=dr_result.findings.model_dump() if dr_result.findings else None,
-                    error_message=dr_result.error,
+                    status=status,
+                    llm_readable_data=findings,
+                    error_message=error_msg,
                     duration_ms=dur,
                 )
                 # Also set alarm.diagnostic_log_id (legacy back-compat field) to the LAST DR log

@@ -33,6 +33,111 @@ from app.services.skill_executor_service import SkillExecutorService
 logger = logging.getLogger(__name__)
 
 
+# ── P1 Phase ε: run a Diagnostic Rule via Pipeline Builder ────────────────
+
+async def run_dr_via_pipeline(
+    db,
+    dr_skill,
+    alarm_id: int,
+    alarm_context: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Execute a DR's bound pipeline and return a findings dict compatible
+    with the legacy Skill executor's result shape.
+
+    Returns {"success": bool, "findings": dict|None, "error": str|None}.
+
+    Findings dict shape (matches SkillFindings.model_dump()):
+      - condition_met: bool
+      - summary: str
+      - outputs: dict (per skill.output_schema)
+    """
+    import json as _json
+    import time as _time
+    from app.repositories.pipeline_repository import PipelineRepository, PipelineRunRepository
+    from app.services.pipeline_builder.block_registry import BlockRegistry
+    from app.services.pipeline_builder.executor import PipelineExecutor
+    from app.schemas.pipeline import PipelineJSON
+
+    pipeline_id = dr_skill.pipeline_id
+    if pipeline_id is None:
+        return {"success": False, "findings": None, "error": "DR has no pipeline_id"}
+
+    pipeline_repo = PipelineRepository(db)
+    pipeline_row = await pipeline_repo.get_by_id(pipeline_id)
+    if pipeline_row is None:
+        return {"success": False, "findings": None,
+                "error": f"pipeline {pipeline_id} not found"}
+    try:
+        pipeline_json = PipelineJSON.model_validate(_json.loads(pipeline_row.pipeline_json))
+    except Exception as e:
+        return {"success": False, "findings": None,
+                "error": f"invalid pipeline JSON: {e}"}
+
+    # Build input resolution — DR pipelines expect `tool_id`, usually sourced
+    # from the alarm's equipment_id. Fall back to other common keys for safety.
+    tool_id = (alarm_context.get("equipment_id")
+               or alarm_context.get("tool_id")
+               or alarm_context.get("toolID") or "")
+    resolved_inputs = {"tool_id": tool_id}
+
+    registry = BlockRegistry()
+    await registry.load_from_db(db)
+    executor = PipelineExecutor(registry)
+    run_repo = PipelineRunRepository(db)
+    run = await run_repo.create_run(
+        pipeline_id=pipeline_id,
+        pipeline_version=pipeline_row.version or "1.0.0",
+        triggered_by=f"alarm:{alarm_id}",
+        status="running",
+    )
+    await db.commit()
+
+    t0 = _time.monotonic()
+    try:
+        result = await executor.execute(pipeline_json, run_id=run.id, inputs=resolved_inputs)
+    except Exception as exc:
+        logger.exception("DR pipeline execution crashed for pipeline=%d: %s", pipeline_id, exc)
+        err = f"{type(exc).__name__}: {exc}"
+        await run_repo.finish_run(run_id=run.id, status="failed",
+                                  node_results={}, error_message=err)
+        await db.commit()
+        return {"success": False, "findings": None, "error": err}
+
+    await run_repo.finish_run(run_id=run.id, status=result["status"],
+                              node_results=result["node_results"],
+                              error_message=result.get("error_message"))
+    await db.commit()
+    logger.info(
+        "DR pipeline run: pipeline=%d alarm=%d status=%s duration_ms=%d",
+        pipeline_id, alarm_id, result["status"],
+        int((_time.monotonic() - t0) * 1000),
+    )
+
+    # Convert pipeline result → SkillFindings-compatible dict.
+    summary = result.get("result_summary") or {}
+    condition_met = bool(summary.get("triggered", False))
+
+    # Aggregate each node's preview rows into outputs keyed by node id.
+    outputs: Dict[str, Any] = {}
+    for node_id, node_res in (result.get("node_results") or {}).items():
+        preview = (node_res or {}).get("preview") or {}
+        for port_name, port_data in preview.items():
+            if port_data and isinstance(port_data, dict) and "rows" in port_data:
+                key = f"{node_id}_{port_name}" if port_name != "data" else node_id
+                outputs[key] = port_data.get("rows")
+
+    summary_text = summary.get("summary") or (
+        f"Pipeline {pipeline_id} triggered" if condition_met else
+        f"Pipeline {pipeline_id} did not meet condition"
+    )
+    findings = {
+        "condition_met": condition_met,
+        "summary": summary_text,
+        "outputs": outputs,
+    }
+    return {"success": result["status"] == "success", "findings": findings, "error": None}
+
+
 # ── Phase 4-B: pipeline input-binding resolver ──────────────────────────────
 
 def _resolve_input_binding(
@@ -594,9 +699,10 @@ class AutoPatrolService:
 
             log_repo = ExecutionLogRepository(self._repo._db)
             for dr in dr_skills:
+                via_pipeline = dr.pipeline_id is not None
                 logger.info(
-                    "DR fan-out: running skill_id=%d (DR '%s') for alarm_id=%d",
-                    dr.id, dr.name, alarm_id,
+                    "DR fan-out: running skill_id=%d pipeline_id=%s (DR '%s') for alarm_id=%d",
+                    dr.id, dr.pipeline_id, dr.name, alarm_id,
                 )
                 try:
                     dr_log = await log_repo.create(
@@ -607,25 +713,36 @@ class AutoPatrolService:
                     )
                     import time as _time
                     t0 = _time.monotonic()
-                    dr_result = await self._executor.execute(
-                        skill_id=dr.id,
-                        event_payload=alarm_context,
-                        triggered_by=f"alarm:{alarm_id}",
-                    )
+                    if via_pipeline:
+                        dr_result = await run_dr_via_pipeline(
+                            self._repo._db, dr, alarm_id, alarm_context,
+                        )
+                        status = "success" if dr_result["success"] else "error"
+                        findings = dr_result["findings"]
+                        error_msg = dr_result["error"]
+                    else:
+                        legacy = await self._executor.execute(
+                            skill_id=dr.id,
+                            event_payload=alarm_context,
+                            triggered_by=f"alarm:{alarm_id}",
+                        )
+                        status = "success" if legacy.success else "error"
+                        findings = legacy.findings.model_dump() if legacy.findings else None
+                        error_msg = legacy.error
                     dur = int((_time.monotonic() - t0) * 1000)
                     await log_repo.finish(
                         dr_log,
-                        status="success" if dr_result.success else "error",
-                        llm_readable_data=dr_result.findings.model_dump() if dr_result.findings else None,
-                        error_message=dr_result.error,
+                        status=status,
+                        llm_readable_data=findings,
+                        error_message=error_msg,
                         duration_ms=dur,
                     )
                     # Link the DR log back to the alarm
                     await self._alarm_repo.set_diagnostic_log(alarm_id, dr_log.id)
                     logger.info(
-                        "DR fan-out done: skill_id=%d alarm_id=%d dr_log_id=%d condition_met=%s",
-                        dr.id, alarm_id, dr_log.id,
-                        dr_result.findings.condition_met if dr_result.findings else False,
+                        "DR fan-out done: skill_id=%d alarm_id=%d dr_log_id=%d via_pipeline=%s condition_met=%s",
+                        dr.id, alarm_id, dr_log.id, via_pipeline,
+                        findings.get("condition_met") if findings else False,
                     )
                 except Exception as exc:
                     logger.exception("DR fan-out failed for skill_id=%d: %s", dr.id, exc)
