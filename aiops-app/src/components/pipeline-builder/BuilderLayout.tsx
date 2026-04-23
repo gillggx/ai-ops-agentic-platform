@@ -40,6 +40,7 @@ import PipelineRunDialog from "./PipelineRunDialog";
 import PipelineInfoModal from "./PipelineInfoModal";
 import PublishReviewModal from "./PublishReviewModal";
 import AutoCheckPublishModal from "./AutoCheckPublishModal";
+import AutoPatrolSetupModal from "./AutoPatrolSetupModal";
 import PipelineThemeStyles from "./PipelineThemeStyles";
 import { blockDisplayName } from "@/lib/pipeline-builder/style";
 // Phase 5-UX-5: right-side Agent|Parameters|Runs tab panel.
@@ -115,6 +116,8 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, sess
   const [publishModalOpen, setPublishModalOpen] = useState(false);
   // Phase 5-UX-7: separate publish modal for auto_check (event binding)
   const [autoCheckModalOpen, setAutoCheckModalOpen] = useState(false);
+  // Option A Phase β: Auto-Patrol setup modal — inline patrol creation without leaving the Builder.
+  const [autoPatrolModalOpen, setAutoPatrolModalOpen] = useState(false);
   const [autoRun, setAutoRun] = useState(false);
   const [toast, setToast] = useState<{ kind: "info" | "error" | "success"; text: string } | null>(null);
   const [nameDraft, setNameDraft] = useState(state.pipeline.name);
@@ -690,6 +693,15 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, sess
               >
                 ✔ Publish
               </button>
+              {/* Option A Phase β: schedule this pipeline as an Auto-Patrol
+                  without leaving the Builder. Available for any kind. */}
+              <button
+                onClick={() => setAutoPatrolModalOpen(true)}
+                style={btn("ghost")}
+                title="Schedule / 事件觸發這個 pipeline — 建立 Auto-Patrol 綁定"
+              >
+                🔔 Schedule as Patrol
+              </button>
               <button onClick={() => handleTransition("draft")} style={btn("ghost")}>
                 ← 退回 Draft
               </button>
@@ -869,6 +881,20 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, sess
             if (state.meta.pipelineId != null) {
               getPipeline(state.meta.pipelineId).then((rec) => actions.init(rec)).catch(() => {});
             }
+          }}
+        />
+      )}
+
+      {/* Option A Phase β: Auto-Patrol setup modal */}
+      {state.meta.pipelineId != null && (
+        <AutoPatrolSetupModal
+          open={autoPatrolModalOpen}
+          pipelineId={state.meta.pipelineId}
+          pipelineName={state.pipeline.name}
+          onClose={() => setAutoPatrolModalOpen(false)}
+          onCreated={(patrolId) => {
+            setAutoPatrolModalOpen(false);
+            showToast("success", `已建立 Auto-Patrol #${patrolId}`);
           }}
         />
       )}

@@ -641,7 +641,7 @@ export function AIAgentPanel({
             else if (op === "connect") detail = ` \`${args.from_node}.${args.from_port}\` → \`${args.to_node}.${args.to_port}\``;
             else if (op === "remove_node") detail = ` \`${args.node_id}\``;
             else if (op === "set_param") detail = ` \`${args.node_id}.${args.key}\``;
-            else if (op === "rename_node") detail = ` \`${args.node_id}\` → \`${args.display_label}\``;
+            else if (op === "rename_node") detail = ` \`${args.node_id}\` → \`${args.label ?? args.display_label ?? "?"}\``;
             setChatHistory((prev) => [...prev, {
               id: nextId(), role: "agent",
               content: `🛠 ${label}${detail}`,

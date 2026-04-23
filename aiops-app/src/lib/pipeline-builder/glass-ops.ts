@@ -86,7 +86,11 @@ export function applyGlassOp(
     }
     if (op === "rename_node") {
       const nodeId = args.node_id as string;
-      const label = args.display_label as string;
+      // Agent emits the new label under `label`; earlier code read
+      // `display_label` which is the RESULT field (what the node became)
+      // not the ARGS field (what was requested). Mismatch caused the
+      // rename to pass `undefined` → Canvas label erased silently.
+      const label = (args.label as string) ?? (args.display_label as string);
       if (!nodeId) return { ok: false, error: "rename_node missing node_id" };
       actions.renameNode(nodeId, label);
       return { ok: true };
