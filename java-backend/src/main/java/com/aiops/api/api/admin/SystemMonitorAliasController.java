@@ -112,6 +112,9 @@ public class SystemMonitorAliasController {
 		return out;
 	}
 
+	private static final org.slf4j.Logger log =
+			org.slf4j.LoggerFactory.getLogger(SystemMonitorAliasController.class);
+
 	/** Fetch poller runtime stats from the legacy Python backend. */
 	@SuppressWarnings("unchecked")
 	private Map<String, Object> fetchPollerStats() {
@@ -127,7 +130,10 @@ public class SystemMonitorAliasController {
 		stub.put("skills_triggered", 0);
 		stub.put("errors", 0);
 
-		if (secret == null || secret.isBlank()) return stub;
+		if (secret == null || secret.isBlank()) {
+			log.warn("poller-stats: no shared-secret configured");
+			return stub;
+		}
 		try {
 			Map<String, Object> pyResp = legacyClient.get()
 					.uri("/api/v1/system/monitor")
@@ -136,15 +142,24 @@ public class SystemMonitorAliasController {
 					.bodyToMono(Map.class)
 					.timeout(Duration.ofSeconds(3))
 					.block();
-			if (pyResp == null) return stub;
+			if (pyResp == null) {
+				log.warn("poller-stats: Python returned null");
+				return stub;
+			}
+			log.debug("poller-stats: pyResp keys={}", pyResp.keySet());
 			// Python returns a bare {timestamp, services, background_tasks, db_stats};
 			// no {ok, data} envelope here.
 			Object tasks = pyResp.get("background_tasks");
-			if (!(tasks instanceof Map)) return stub;
+			if (!(tasks instanceof Map)) {
+				log.warn("poller-stats: no background_tasks in Python response (keys={})", pyResp.keySet());
+				return stub;
+			}
 			Object p = ((Map<String, Object>) tasks).get("event_poller");
 			if (p instanceof Map) return (Map<String, Object>) p;
+			log.warn("poller-stats: no event_poller in background_tasks");
 			return stub;
 		} catch (Exception e) {
+			log.warn("poller-stats fetch failed: {}", e.toString());
 			return stub;
 		}
 	}
