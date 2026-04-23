@@ -53,6 +53,46 @@ public class BriefingController {
 				.build();
 	}
 
+	// ── GET with scope → proxy SSE to Python (LLM-generated briefing) ────
+	// Dashboard 's BriefingPanel expects the same SSE chunks the alarm page
+	// gets via POST. Python's GET /briefing?scope=fab|tool|alarm streams LLM
+	// chunks; Java proxies identically so the dashboard shows real summaries.
+	@GetMapping(params = "scope", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	public SseEmitter getBriefingSse(@RequestParam String scope,
+	                                 @RequestParam(required = false) String toolId) {
+		SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
+		String secret = props.auth() != null ? props.auth().sharedSecretToken() : null;
+		if (secret == null || secret.isBlank()) {
+			try { emitter.send(SseEmitter.event().data("{\"type\":\"error\",\"message\":\"no shared secret\"}")); }
+			catch (IOException ignored) {}
+			emitter.complete();
+			return emitter;
+		}
+		StringBuilder uri = new StringBuilder("/api/v1/briefing?scope=").append(scope);
+		if (toolId != null && !toolId.isBlank()) uri.append("&toolId=").append(toolId);
+		Flux<ServerSentEvent<String>> upstream = legacyBriefingClient.get()
+				.uri(uri.toString())
+				.header("Authorization", "Bearer " + secret)
+				.retrieve()
+				.bodyToFlux(new org.springframework.core.ParameterizedTypeReference<ServerSentEvent<String>>() {});
+		Disposable sub = upstream.subscribe(
+				ev -> { try {
+					var b = SseEmitter.event();
+					if (ev.event() != null) b.name(ev.event());
+					if (ev.id() != null) b.id(ev.id());
+					if (ev.data() != null) b.data(ev.data());
+					emitter.send(b);
+				} catch (IOException ex) { emitter.completeWithError(ex); } },
+				err -> emitter.completeWithError(err),
+				emitter::complete);
+		emitter.onCompletion(sub::dispose);
+		emitter.onTimeout(sub::dispose);
+		emitter.onError(e -> sub.dispose());
+		return emitter;
+	}
+
+	// GET without scope returns the legacy JSON snapshot (alarm counts) —
+	// kept for any fast-path consumers that don't need LLM text.
 	@GetMapping
 	@PreAuthorize(Authorities.ANY_ROLE)
 	public ApiResponse<Map<String, Object>> summary(@RequestParam(defaultValue = "10") int recent) {
