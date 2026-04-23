@@ -312,7 +312,7 @@ def insert_pipelines(conn, pipelines):
         """SELECT (pipeline_json::jsonb -> 'metadata' ->> 'source_skill_id')::int AS sid, id, name
            FROM pb_pipelines
            WHERE pipeline_json::jsonb -> 'metadata' ->> 'source_skill_id' IS NOT NULL
-             AND (pipeline_json::jsonb -> 'metadata' ->> 'source_skill_id')::int = ANY(%s)""",
+             AND (pipeline_json::jsonb -> 'metadata' ->> 'source_skill_id')::int = ANY(%s::int[])""",
         (skill_ids,),
     )
     existing = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
@@ -327,10 +327,10 @@ def insert_pipelines(conn, pipelines):
             skipped += 1
             continue
         cur.execute(
-            """INSERT INTO pb_pipelines(name, description, status, pipeline_json, created_at, updated_at)
-               VALUES (%s, %s, %s, %s::jsonb, now(), now())
+            """INSERT INTO pb_pipelines(name, description, status, version, pipeline_json, created_at, updated_at)
+               VALUES (%s, %s, %s, %s, %s, now(), now())
                RETURNING id""",
-            (name, f"DR Pipeline migrated from Skill #{skill_id}", status, json.dumps(pj)),
+            (name, f"DR Pipeline migrated from Skill #{skill_id}", status, "1.0", json.dumps(pj)),
         )
         new_id = cur.fetchone()[0]
         inserted += 1
