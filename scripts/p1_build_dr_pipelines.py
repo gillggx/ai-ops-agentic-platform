@@ -23,8 +23,7 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any
 
-import psycopg2
-import psycopg2.extras
+import psycopg  # psycopg3
 
 
 # ─── Pipeline JSON templates ─────────────────────────────────────────────────
@@ -347,7 +346,7 @@ def main():
            f"user={os.getenv('PGUSER', 'aiops')} "
            f"password={os.getenv('PGPASSWORD', '')}")
     print(f"connecting to Postgres...")
-    conn = psycopg2.connect(dsn)
+    conn = psycopg.connect(dsn)
     pipelines = build_all()
     print(f"built {len(pipelines)} pipeline records; inserting...")
     inserted, skipped = insert_pipelines(conn, pipelines)
