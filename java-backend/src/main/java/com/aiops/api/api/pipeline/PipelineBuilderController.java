@@ -117,11 +117,28 @@ public class PipelineBuilderController {
 	}
 
 	@GetMapping("/auto-check-rules")
-	public List<Object> listAutoCheckRules() {
-		// Bare list (matches sibling endpoints + Python shape). The page
-		// calls res.json() straight into `setRows(...)` so a wrapped envelope
-		// would crash rendering.
-		return List.of();
+	public List<Map<String, Object>> listAutoCheckRules() {
+		// Returns real rows joined with pipeline name + status so the Frontend
+		// Auto-Check Rules page can list bindings.
+		List<com.aiops.api.domain.pipeline.PipelineAutoCheckTriggerEntity> triggers = autoCheckRepo.findAll();
+		if (triggers.isEmpty()) return List.of();
+
+		// Bulk fetch referenced pipelines for name+status lookup.
+		var pipelineIds = triggers.stream().map(
+				com.aiops.api.domain.pipeline.PipelineAutoCheckTriggerEntity::getPipelineId).toList();
+		var pipelines = pipelineRepo.findAllById(pipelineIds).stream()
+				.collect(java.util.stream.Collectors.toMap(PipelineEntity::getId, p -> p));
+		return triggers.stream().map(t -> {
+			Map<String, Object> m = new HashMap<>();
+			m.put("id", t.getId());
+			m.put("pipeline_id", t.getPipelineId());
+			PipelineEntity p = pipelines.get(t.getPipelineId());
+			m.put("pipeline_name", p != null ? p.getName() : null);
+			m.put("pipeline_status", p != null ? p.getStatus() : null);
+			m.put("event_type", t.getEventType());
+			m.put("created_at", t.getCreatedAt());
+			return m;
+		}).toList();
 	}
 
 	// ── POST /execute — proxy to legacy Python :8001 ─────────────────────

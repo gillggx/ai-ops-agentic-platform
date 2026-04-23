@@ -47,13 +47,6 @@ const KNOWLEDGE_ITEMS = [
   { href: "/admin/auto-check-rules",  label: "Auto-Check Rules",       icon: "⚡" },
 ];
 
-// PR-4E: legacy items demoted below a divider. Still reachable for migration
-// work but visually separated so users know these are frozen.
-const LEGACY_ITEMS = [
-  { href: "/admin/skills",    label: "Legacy Diagnostic Rules", icon: "🔧" },
-  { href: "/admin/my-skills", label: "Legacy Skills",           icon: "⭐" },
-];
-
 const ADMIN_ITEMS = [
   { href: "/system/skills",         label: "Skills",          icon: "⚙️" },
   { href: "/admin/memories",        label: "Agent Memory",    icon: "🧠" },
@@ -145,12 +138,6 @@ function ContextualSidebar() {
 
         <SidebarSection title="Knowledge Studio" collapsed={collapsed} />
         {KNOWLEDGE_ITEMS.map(({ href, label, icon }) => (
-          <NavLink key={href} href={href} icon={icon} label={label}
-            active={isExact(href)} collapsed={collapsed} />
-        ))}
-
-        <SidebarSection title="Legacy (Frozen)" collapsed={collapsed} />
-        {LEGACY_ITEMS.map(({ href, label, icon }) => (
           <NavLink key={href} href={href} icon={icon} label={label}
             active={isExact(href)} collapsed={collapsed} />
         ))}

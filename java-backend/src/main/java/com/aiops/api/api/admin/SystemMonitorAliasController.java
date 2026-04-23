@@ -1,6 +1,7 @@
 package com.aiops.api.api.admin;
 
 import com.aiops.api.auth.Authorities;
+import com.aiops.api.config.AiopsProperties;
 import com.aiops.api.domain.agent.AgentMemoryRepository;
 import com.aiops.api.domain.alarm.AlarmRepository;
 import com.aiops.api.domain.audit.AuditLogRepository;
@@ -11,9 +12,12 @@ import com.aiops.api.domain.pipeline.PipelineRepository;
 import com.aiops.api.domain.skill.ExecutionLogRepository;
 import com.aiops.api.domain.skill.SkillDefinitionRepository;
 import com.aiops.api.domain.user.UserRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.reactive.function.client.WebClient;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
@@ -41,6 +45,8 @@ public class SystemMonitorAliasController {
 	private final NatsEventLogRepository natsLogRepo;
 	private final AgentMemoryRepository agentMemoryRepo;
 	private final AuditLogRepository auditRepo;
+	private final AiopsProperties props;
+	private final WebClient legacyClient;
 
 	public SystemMonitorAliasController(UserRepository userRepo, AlarmRepository alarmRepo,
 	                                    SkillDefinitionRepository skillRepo, PipelineRepository pipelineRepo,
@@ -48,7 +54,9 @@ public class SystemMonitorAliasController {
 	                                    GeneratedEventRepository generatedEventRepo,
 	                                    NatsEventLogRepository natsLogRepo,
 	                                    AgentMemoryRepository agentMemoryRepo,
-	                                    AuditLogRepository auditRepo) {
+	                                    AuditLogRepository auditRepo,
+	                                    AiopsProperties props,
+	                                    @Value("${aiops.legacy-backend-url:http://127.0.0.1:8001}") String legacyBackendUrl) {
 		this.userRepo = userRepo;
 		this.alarmRepo = alarmRepo;
 		this.skillRepo = skillRepo;
@@ -59,6 +67,8 @@ public class SystemMonitorAliasController {
 		this.natsLogRepo = natsLogRepo;
 		this.agentMemoryRepo = agentMemoryRepo;
 		this.auditRepo = auditRepo;
+		this.props = props;
+		this.legacyClient = WebClient.builder().baseUrl(legacyBackendUrl).build();
 	}
 
 	@GetMapping
@@ -70,19 +80,9 @@ public class SystemMonitorAliasController {
 				"note", "legacy Python; runs event poller + DR engine"));
 		services.put("ontology-simulator", Map.of("status", "external", "port", 8012));
 
-		// Poller stats — owned by the old Python stack, so we report EXTERNAL
-		// and don't fabricate numbers. The "last_seen_event" etc. would need
-		// to be read out of Python; non-blocking for now.
-		Map<String, Object> poller = new HashMap<>();
-		poller.put("status", "EXTERNAL");
-		poller.put("started_at", null);
-		poller.put("last_poll_at", null);
-		poller.put("last_seen_event", null);
-		poller.put("total_polls", 0);
-		poller.put("total_events_processed", 0);
-		poller.put("ooc_detected", 0);
-		poller.put("skills_triggered", 0);
-		poller.put("errors", 0);
+		// Poller stats — fetch from Python :8001 where the poller actually
+		// runs. Fall back to a grey-EXTERNAL stub if Python is unreachable.
+		Map<String, Object> poller = fetchPollerStats();
 
 		Map<String, Object> scheduler = new HashMap<>();
 		scheduler.put("status", "JAVA");
@@ -110,5 +110,42 @@ public class SystemMonitorAliasController {
 		out.put("build_info", Map.of("backend", "java-spring-boot-3.5",
 				"service", "aiops-java-api"));
 		return out;
+	}
+
+	/** Fetch poller runtime stats from the legacy Python backend. */
+	@SuppressWarnings("unchecked")
+	private Map<String, Object> fetchPollerStats() {
+		String secret = props.auth() != null ? props.auth().sharedSecretToken() : null;
+		Map<String, Object> stub = new HashMap<>();
+		stub.put("status", "UNREACHABLE");
+		stub.put("started_at", null);
+		stub.put("last_poll_at", null);
+		stub.put("last_seen_event", null);
+		stub.put("total_polls", 0);
+		stub.put("total_events_processed", 0);
+		stub.put("ooc_detected", 0);
+		stub.put("skills_triggered", 0);
+		stub.put("errors", 0);
+
+		if (secret == null || secret.isBlank()) return stub;
+		try {
+			Map<String, Object> pyResp = legacyClient.get()
+					.uri("/api/v1/system/monitor")
+					.header("Authorization", "Bearer " + secret)
+					.retrieve()
+					.bodyToMono(Map.class)
+					.timeout(Duration.ofSeconds(3))
+					.block();
+			if (pyResp == null) return stub;
+			Object data = pyResp.get("data");
+			if (!(data instanceof Map)) return stub;
+			Object tasks = ((Map<String, Object>) data).get("background_tasks");
+			if (!(tasks instanceof Map)) return stub;
+			Object p = ((Map<String, Object>) tasks).get("event_poller");
+			if (p instanceof Map) return (Map<String, Object>) p;
+			return stub;
+		} catch (Exception e) {
+			return stub;
+		}
 	}
 }
