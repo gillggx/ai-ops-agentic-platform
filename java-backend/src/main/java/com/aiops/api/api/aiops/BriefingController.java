@@ -33,7 +33,6 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @RestController
 @RequestMapping("/api/v1/briefing")
-@PreAuthorize(Authorities.ANY_ROLE)
 public class BriefingController {
 
 	private static final long SSE_TIMEOUT_MS = 5L * 60_000L;
@@ -55,6 +54,7 @@ public class BriefingController {
 	}
 
 	@GetMapping
+	@PreAuthorize(Authorities.ANY_ROLE)
 	public ApiResponse<Map<String, Object>> summary(@RequestParam(defaultValue = "10") int recent) {
 		int safeRecent = Math.max(1, Math.min(recent, 50));
 
