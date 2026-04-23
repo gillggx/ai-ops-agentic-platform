@@ -136,7 +136,7 @@ public class AlarmEnrichmentService {
 		// skill), so the skill-derived output_schema is empty and the alarm
 		// page falls back to raw-JSON-dumping findings.outputs. Honor the
 		// pipeline's self-declared schema + charts stored alongside findings.
-		if (findings instanceof JsonNode fn) {
+		if (findings instanceof JsonNode fn && fn.isObject()) {
 			JsonNode schemaOverride = fn.get("_alarm_output_schema");
 			if (schemaOverride != null && schemaOverride.isArray() && schemaOverride.size() > 0) {
 				outputSchema = schemaOverride;
@@ -146,6 +146,67 @@ public class AlarmEnrichmentService {
 				List<Object> list = new java.util.ArrayList<>();
 				chartsOverride.forEach(list::add);
 				charts = list;
+			}
+			// Back-compat for alarms (5813–5838) written before the
+			// schema-override fix — their outputs are {pipeline_id,
+			// result_summary, evidence} with no schema. Map them into
+			// the same {evidence_rows, triggered_count} shape the new
+			// path emits, so the alarm page renders identically.
+			JsonNode outputsNode = fn.get("outputs");
+			boolean hasOverride = schemaOverride != null && schemaOverride.isArray()
+					&& schemaOverride.size() > 0;
+			if (!hasOverride && outputsNode != null && outputsNode.isObject()
+					&& outputsNode.has("evidence") && outputsNode.has("pipeline_id")) {
+				JsonNode evidence = outputsNode.get("evidence");
+				JsonNode rowsNode = evidence != null ? evidence.get("rows") : null;
+				JsonNode columnsNode = evidence != null ? evidence.get("columns") : null;
+				JsonNode totalNode = evidence != null ? evidence.get("total") : null;
+				if (rowsNode != null && rowsNode.isArray()) {
+					com.fasterxml.jackson.databind.node.ObjectNode synthesizedOutputs =
+							mapper.createObjectNode();
+					synthesizedOutputs.set("evidence_rows", rowsNode);
+					synthesizedOutputs.put("triggered_count",
+							totalNode != null && totalNode.isNumber()
+									? totalNode.asInt() : rowsNode.size());
+					((com.fasterxml.jackson.databind.node.ObjectNode) fn)
+							.set("outputs", synthesizedOutputs);
+
+					com.fasterxml.jackson.databind.node.ArrayNode synthesizedSchema =
+							mapper.createArrayNode();
+					com.fasterxml.jackson.databind.node.ObjectNode evSchema =
+							mapper.createObjectNode();
+					evSchema.put("key", "evidence_rows");
+					evSchema.put("type", "table");
+					evSchema.put("label", "觸發證據（最近觸發的 row）");
+					if (columnsNode != null && columnsNode.isArray()) {
+						com.fasterxml.jackson.databind.node.ArrayNode cols =
+								mapper.createArrayNode();
+						java.util.Set<String> skip = java.util.Set.of(
+								"triggered_row", "violation_side");
+						int added = 0;
+						for (JsonNode col : columnsNode) {
+							if (added >= 8) break;
+							String cn = col.asText();
+							if (skip.contains(cn)) continue;
+							com.fasterxml.jackson.databind.node.ObjectNode c =
+									mapper.createObjectNode();
+							c.put("key", cn);
+							c.put("label", cn);
+							cols.add(c);
+							added++;
+						}
+						evSchema.set("columns", cols);
+					}
+					synthesizedSchema.add(evSchema);
+					com.fasterxml.jackson.databind.node.ObjectNode tcSchema =
+							mapper.createObjectNode();
+					tcSchema.put("key", "triggered_count");
+					tcSchema.put("type", "scalar");
+					tcSchema.put("label", "觸發筆數");
+					tcSchema.put("unit", "筆");
+					synthesizedSchema.add(tcSchema);
+					outputSchema = synthesizedSchema;
+				}
 			}
 		}
 
