@@ -73,12 +73,13 @@ public class SystemMonitorAliasController {
 
 	@GetMapping
 	public Map<String, Object> monitor() {
+		// Frontend compares status to "UP" (uppercase) — keep consistent.
 		Map<String, Object> services = new HashMap<>();
-		services.put("aiops-java-api", Map.of("status", "up", "port", 8002));
-		services.put("aiops-python-sidecar", Map.of("status", "up", "port", 8050));
-		services.put("fastapi-backend", Map.of("status", "external", "port", 8001,
+		services.put("aiops-java-api", Map.of("status", "UP", "port", 8002));
+		services.put("aiops-python-sidecar", Map.of("status", "UP", "port", 8050));
+		services.put("fastapi-backend", Map.of("status", "UP", "port", 8001,
 				"note", "legacy Python; runs event poller + DR engine"));
-		services.put("ontology-simulator", Map.of("status", "external", "port", 8012));
+		services.put("ontology-simulator", Map.of("status", "UP", "port", 8012));
 
 		// Poller stats — fetch from Python :8001 where the poller actually
 		// runs. Fall back to a grey-EXTERNAL stub if Python is unreachable.
