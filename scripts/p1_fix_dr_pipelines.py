@@ -54,15 +54,32 @@ def _is_recipe_list(name: str) -> bool:
 
 
 def fix_spc_trend(pj: dict) -> tuple[dict, list[str]]:
-    """Bug A: rolling_window value_column → column."""
+    """Bug A: rolling_window param rewrites — value_column→column,
+    window_size→window, aggregation→func, output_column drop (block auto-names)."""
     patches: list[str] = []
     for node in pj.get("nodes") or []:
-        if node.get("block_id") == "block_rolling_window":
-            params = node.get("params") or {}
-            if "value_column" in params and "column" not in params:
-                params["column"] = params.pop("value_column")
-                node["params"] = params
-                patches.append(f"{node['id']}.rolling_window: value_column → column")
+        if node.get("block_id") != "block_rolling_window":
+            continue
+        params = node.get("params") or {}
+        changed = []
+        if "value_column" in params and "column" not in params:
+            params["column"] = params.pop("value_column")
+            changed.append("value_column→column")
+        if "window_size" in params and "window" not in params:
+            params["window"] = params.pop("window_size")
+            changed.append("window_size→window")
+        if "aggregation" in params and "func" not in params:
+            params["func"] = params.pop("aggregation")
+            changed.append("aggregation→func")
+        # output_column is not in block_rolling_window's schema — block auto-
+        # generates `<column>_rolling_<func>`. Downstream nodes that reference
+        # the old `output_column` name will break; flag for manual.
+        if "output_column" in params:
+            removed_name = params.pop("output_column")
+            changed.append(f"dropped output_column={removed_name!r} (downstream refs may need fix)")
+        if changed:
+            node["params"] = params
+            patches.append(f"{node['id']}.rolling_window: " + ", ".join(changed))
     return pj, patches
 
 
