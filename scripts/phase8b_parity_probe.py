@@ -113,10 +113,11 @@ async def probe_fixture(
     old_token: str, new_token: str,
 ) -> ProbeResult:
     fixture = json.loads(fixture_path.read_text())
+    # triggered_by must be one of the enum: user|agent|schedule|event
     body = {
         "pipeline_json": fixture.get("pipeline_json") or fixture,
         "inputs": fixture.get("inputs") or {},
-        "triggered_by": "phase8b_probe",
+        "triggered_by": fixture.get("triggered_by") or "user",
     }
 
     # Old Python backend uses /api/v1/pipeline-builder/execute with Bearer token.
