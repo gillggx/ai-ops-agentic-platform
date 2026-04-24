@@ -136,6 +136,20 @@ class JavaAPIClient:
         params = {"mcpType": mcp_type} if mcp_type else None
         return await self._get_data("/internal/mcp-definitions", params=params)
 
+    async def get_mcp_by_name(self, name: str) -> Optional[dict]:
+        """Fetch one MCP definition by name. Returns None if not found.
+
+        Used by sidecar-native ``block_mcp_call`` + ``block_mcp_foreach`` to
+        resolve ``mcp_name`` → api_config without a DB session. Java currently
+        lacks a by-name endpoint so we list + filter in Python; fine for the
+        current catalog size (~20 MCPs).
+        """
+        all_mcps = await self.list_mcps()
+        for m in all_mcps:
+            if m.get("name") == name:
+                return m
+        return None
+
     async def create_execution_log(self, body: dict) -> dict:
         return await self._post_data("/internal/execution-logs", body)
 

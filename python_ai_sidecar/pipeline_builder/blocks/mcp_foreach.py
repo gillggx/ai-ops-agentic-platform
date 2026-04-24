@@ -25,8 +25,8 @@ from typing import Any
 import httpx
 import pandas as pd
 
-from python_ai_sidecar.pipeline_builder._sidecar_deps import _get_session_factory
-from python_ai_sidecar.pipeline_builder._sidecar_deps import MCPDefinitionRepository
+from python_ai_sidecar.clients.java_client import JavaAPIClient, JavaAPIError
+from python_ai_sidecar.config import CONFIG
 from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutionError,
     BlockExecutor,
@@ -107,16 +107,24 @@ class McpForeachBlockExecutor(BlockExecutor):
         if max_concurrency < 1:
             max_concurrency = 1
 
-        # Resolve MCP config once
-        factory = _get_session_factory()
-        async with factory() as db:
-            repo = MCPDefinitionRepository(db)
-            mcp = await repo.get_by_name(mcp_name)
-            if mcp is None:
-                raise BlockExecutionError(
-                    code="MCP_NOT_FOUND", message=f"MCP '{mcp_name}' not registered"
-                )
-            api_config_raw = getattr(mcp, "api_config", None) or "{}"
+        # Resolve MCP config once — via Java (sidecar doesn't own the DB).
+        java = JavaAPIClient(
+            base_url=CONFIG.java_api_url,
+            token=CONFIG.java_internal_token,
+            timeout_sec=CONFIG.java_timeout_sec,
+        )
+        try:
+            mcp = await java.get_mcp_by_name(mcp_name)
+        except JavaAPIError as e:
+            raise BlockExecutionError(
+                code="MCP_LOOKUP_FAILED",
+                message=f"Java /internal/mcp-definitions lookup failed: {e.status} {e.message}",
+            ) from None
+        if mcp is None:
+            raise BlockExecutionError(
+                code="MCP_NOT_FOUND", message=f"MCP '{mcp_name}' not registered"
+            )
+        api_config_raw = mcp.get("api_config") or mcp.get("apiConfig") or "{}"
         try:
             api_config = json.loads(api_config_raw) if isinstance(api_config_raw, str) else api_config_raw
         except (TypeError, json.JSONDecodeError) as e:

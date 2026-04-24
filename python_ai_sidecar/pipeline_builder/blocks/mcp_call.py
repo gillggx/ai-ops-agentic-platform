@@ -1,13 +1,20 @@
-"""block_mcp_call — generic MCP dispatcher.
+"""block_mcp_call — generic MCP dispatcher (sidecar-native).
 
-Given an MCP name (from mcp_definitions table), this block:
-  1. looks up the MCP's endpoint + method from api_config
-  2. passes `args` (dict) as query params (GET) or JSON body (POST)
-  3. turns the response into a DataFrame
+Given an MCP name (from mcp_definitions), this block:
+  1. Fetches MCP metadata via Java ``/internal/mcp-definitions``
+     (sidecar doesn't own a DB — Java is the SSOT)
+  2. Issues the MCP's HTTP call (GET query params / POST JSON body)
+  3. Turns the response into a DataFrame
+
+Phase 8-B change: the DB lookup was originally a direct SQLAlchemy call
+(``MCPDefinitionRepository.get_by_name``). The sidecar now uses
+``JavaAPIClient.get_mcp_by_name`` which lists + filters; that's fine at
+current MCP catalog sizes (~20 rows).
 
 Use case: avoid creating a bespoke block for every MCP. For MCPs that already
-have a specialized block (e.g. `block_process_history` wrapping get_process_info),
-prefer the specialized one — it understands response quirks like SPC flatten.
+have a specialized block (e.g. ``block_process_history`` wrapping
+get_process_info), prefer the specialized one — it understands response
+quirks like SPC flatten.
 """
 
 from __future__ import annotations
@@ -19,8 +26,8 @@ from typing import Any
 import httpx
 import pandas as pd
 
-from python_ai_sidecar.pipeline_builder._sidecar_deps import _get_session_factory
-from python_ai_sidecar.pipeline_builder._sidecar_deps import MCPDefinitionRepository
+from python_ai_sidecar.clients.java_client import JavaAPIClient, JavaAPIError
+from python_ai_sidecar.config import CONFIG
 from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutionError,
     BlockExecutor,
@@ -38,13 +45,25 @@ def _flatten_response(resp_json: Any) -> list[dict[str, Any]]:
         return [r for r in resp_json if isinstance(r, dict)]
     if not isinstance(resp_json, dict):
         return []
-    # Common wrappers: { events: [] }, { dataset: [] }, { items: [] }, { data: [] }
     for key in ("events", "dataset", "items", "data", "records", "rows"):
         val = resp_json.get(key)
         if isinstance(val, list):
             return [r for r in val if isinstance(r, dict)]
-    # Bare dict with scalar fields → single-row DF
     return [resp_json]
+
+
+def _make_java_client() -> JavaAPIClient:
+    """Build a sidecar-native JavaAPIClient (no caller context — runs under
+    the shared service token). Block executors are invoked deep in
+    PipelineExecutor where the original request's CallerContext is not
+    threaded through; that's acceptable for reads against
+    ``/internal/mcp-definitions``.
+    """
+    return JavaAPIClient(
+        base_url=CONFIG.java_api_url,
+        token=CONFIG.java_internal_token,
+        timeout_sec=CONFIG.java_timeout_sec,
+    )
 
 
 class McpCallBlockExecutor(BlockExecutor):
@@ -64,17 +83,24 @@ class McpCallBlockExecutor(BlockExecutor):
                 code="INVALID_PARAM", message="args must be an object (dict)"
             )
 
-        # Look up MCP definition from DB
-        factory = _get_session_factory()
-        async with factory() as db:
-            repo = MCPDefinitionRepository(db)
-            mcp = await repo.get_by_name(mcp_name)
-            if mcp is None:
-                raise BlockExecutionError(
-                    code="MCP_NOT_FOUND", message=f"MCP '{mcp_name}' not registered"
-                )
-            api_config_raw = getattr(mcp, "api_config", None) or "{}"
+        # 1) Resolve MCP metadata via Java
+        java = _make_java_client()
+        try:
+            mcp = await java.get_mcp_by_name(mcp_name)
+        except JavaAPIError as e:
+            raise BlockExecutionError(
+                code="MCP_LOOKUP_FAILED",
+                message=f"Java /internal/mcp-definitions lookup failed: {e.status} {e.message}",
+            ) from None
 
+        if mcp is None:
+            raise BlockExecutionError(
+                code="MCP_NOT_FOUND", message=f"MCP '{mcp_name}' not registered"
+            )
+
+        # Java DTO uses apiConfig (camelCase) — per Jackson SNAKE_CASE wire shape
+        # comes through as api_config. Tolerate both.
+        api_config_raw = mcp.get("api_config") or mcp.get("apiConfig") or "{}"
         try:
             api_config = json.loads(api_config_raw) if isinstance(api_config_raw, str) else api_config_raw
         except (TypeError, json.JSONDecodeError) as e:
@@ -97,7 +123,7 @@ class McpCallBlockExecutor(BlockExecutor):
                 message=f"MCP '{mcp_name}' has unsupported method '{method}'",
             )
 
-        # Dispatch
+        # 2) Dispatch to the MCP's own endpoint
         try:
             async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
                 if method == "GET":

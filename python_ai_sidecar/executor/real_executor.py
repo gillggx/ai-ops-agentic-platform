@@ -56,9 +56,10 @@ SIDECAR_NATIVE_BLOCKS: frozenset[str] = frozenset({
     "block_alert",
     "block_data_view",
     "block_compute",
-    # NOT native yet (need Java /internal/mcp/* rewiring):
-    # "block_mcp_call",
-    # "block_mcp_foreach",
+    # Phase 8-B final: rewired to call Java /internal/mcp-definitions
+    # (instead of opening a DB session) in commit below.
+    "block_mcp_call",
+    "block_mcp_foreach",
 })
 
 
