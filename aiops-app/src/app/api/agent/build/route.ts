@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const FASTAPI_BASE = process.env.FASTAPI_BASE_URL ?? "http://localhost:8000";
+// Java cutover v2 note: Java's /api/v1/agent/build is one-step SSE, but the
+// frontend expects the two-step {session_id → /stream/{id}} contract from the
+// legacy Python backend. Pin agent/build proxies to Python until Java or the
+// frontend converges on one flow. AGENT_BUILD_BASE_URL overrides FASTAPI_BASE_URL
+// for just these 4 routes.
+const FASTAPI_BASE = process.env.AGENT_BUILD_BASE_URL
+  ?? process.env.FASTAPI_BASE_URL
+  ?? "http://localhost:8000";
 const TOKEN = process.env.INTERNAL_API_TOKEN ?? "";
 
 function authHeaders(): Record<string, string> {
