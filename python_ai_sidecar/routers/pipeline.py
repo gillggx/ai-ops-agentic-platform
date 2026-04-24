@@ -134,10 +134,11 @@ async def execute(req: ExecuteRequest, caller: CallerContext = ServiceAuth) -> d
             )
             duration_ms = int((time.monotonic() - started) * 1000)
             status = result.get("status") or "error"
+            # Java Jackson uses SNAKE_CASE — send snake_case keys.
             persisted = await java.create_execution_log({
-                "triggeredBy": req.triggered_by or "user",
+                "triggered_by": req.triggered_by or "user",
                 "status": "success" if status == "success" else "error",
-                "llmReadableData": json.dumps({
+                "llm_readable_data": json.dumps({
                     "source": "python_ai_sidecar_native",
                     "pipeline_id": req.pipeline_id,
                     "status": status,
@@ -145,8 +146,8 @@ async def execute(req: ExecuteRequest, caller: CallerContext = ServiceAuth) -> d
                     "result_summary": result.get("result_summary"),
                     "inputs_echo": {k: str(v)[:100] for k, v in (req.inputs or {}).items()},
                 }, ensure_ascii=False, default=str),
-                "durationMs": duration_ms,
-                "errorMessage": result.get("error_message"),
+                "duration_ms": duration_ms,
+                "error_message": result.get("error_message"),
             })
             return {
                 "ok": status == "success",
@@ -188,9 +189,9 @@ async def execute(req: ExecuteRequest, caller: CallerContext = ServiceAuth) -> d
         duration_ms = int((time.monotonic() - started) * 1000)
         status = "success" if walk.get("status") == "success" else "error"
         persisted = await java.create_execution_log({
-            "triggeredBy": req.triggered_by or "user",
+            "triggered_by": req.triggered_by or "user",
             "status": status,
-            "llmReadableData": json.dumps({
+            "llm_readable_data": json.dumps({
                 "source": "python_ai_sidecar_demo",
                 "pipeline_id": req.pipeline_id,
                 "node_results": walk.get("node_results") or {},
@@ -198,8 +199,8 @@ async def execute(req: ExecuteRequest, caller: CallerContext = ServiceAuth) -> d
                 "preview": walk.get("preview") or [],
                 "inputs_echo": {k: str(v)[:100] for k, v in (req.inputs or {}).items()},
             }, ensure_ascii=False),
-            "durationMs": duration_ms,
-            "errorMessage": walk.get("reason") if walk.get("status") == "validation_error" else None,
+            "duration_ms": duration_ms,
+            "error_message": walk.get("reason") if walk.get("status") == "validation_error" else None,
         })
         return {
             "ok": status == "success",
