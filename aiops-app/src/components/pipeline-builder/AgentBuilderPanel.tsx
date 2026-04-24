@@ -86,36 +86,26 @@ export default function AgentBuilderPanel({
     setRunning(true);
 
     try {
-      // 1. Create a new builder session. Phase 5-UX-6 fix: include current
-      // canvas state so follow-up requests (e.g. 「加常態分佈圖」) see the
-      // existing nodes instead of starting fresh.
+      // Phase 8-A A-2: one-step SSE. Java (and sidecar) return the event
+      // stream DIRECTLY on the POST — no intermediate session_id / separate
+      // GET /stream/{id} round-trip. Frontend now reads the SSE from the
+      // POST response body.
       const hasExistingNodes = (state.pipeline.nodes?.length ?? 0) > 0;
-      const createRes = await fetch("/api/agent/build", {
+      abortRef.current?.abort();
+      abortRef.current = new AbortController();
+      const streamRes = await fetch("/api/agent/build", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        signal: abortRef.current.signal,
+        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
         body: JSON.stringify({
           instruction: prompt,
           pipelineId: basePipelineId ?? null,
           pipelineSnapshot: hasExistingNodes ? state.pipeline : null,
         }),
       });
-      if (!createRes.ok) {
-        const errText = await createRes.text().catch(() => "");
-        throw new Error(`Session create failed (${createRes.status}): ${errText.slice(0, 160)}`);
-      }
-      const { session_id } = await createRes.json();
-      if (!session_id) throw new Error("Server returned no session_id");
-
-      // 2. Subscribe via SSE stream
-      abortRef.current?.abort();
-      abortRef.current = new AbortController();
-      const streamRes = await fetch(`/api/agent/build/stream/${session_id}`, {
-        method: "GET",
-        signal: abortRef.current.signal,
-        headers: { Accept: "text/event-stream" },
-      });
       if (!streamRes.ok || !streamRes.body) {
-        throw new Error(`Stream failed (${streamRes.status})`);
+        const errText = await streamRes.text().catch(() => "");
+        throw new Error(`Agent stream failed (${streamRes.status}): ${errText.slice(0, 160)}`);
       }
 
       const reader = streamRes.body.getReader();
