@@ -289,8 +289,7 @@ class AutoPatrolService:
             data["skill_id"] = skill.id
         data["created_by"] = created_by
         obj = await self._repo.create(data)
-        if obj.trigger_mode == "schedule" and obj.cron_expr:
-            _register_patrol_schedule(obj.id, obj.cron_expr)
+        _schedule_patrol_job(obj)
         return self._repo.to_response_dict(obj)
 
     async def update(self, patrol_id: int, body: AutoPatrolUpdate) -> Dict[str, Any]:
@@ -318,8 +317,8 @@ class AutoPatrolService:
             raise ValueError(f"Auto-Patrol id={patrol_id} 不存在")
         # Re-sync scheduler when trigger config changes
         _remove_patrol_schedule(patrol_id)
-        if updated.trigger_mode == "schedule" and updated.cron_expr and updated.is_active:
-            _register_patrol_schedule(updated.id, updated.cron_expr)
+        if updated.is_active:
+            _schedule_patrol_job(updated)
         return self._repo.to_response_dict(updated)
 
     async def delete(self, patrol_id: int) -> None:
@@ -873,6 +872,14 @@ class AutoPatrolService:
 
 # ── APScheduler helpers (module-level) ───────────────────────────────────────
 
+def _schedule_patrol_job(patrol) -> None:
+    """Route a patrol to the right APScheduler trigger based on trigger_mode."""
+    if patrol.trigger_mode == "schedule" and patrol.cron_expr:
+        _register_patrol_schedule(patrol.id, patrol.cron_expr)
+    elif patrol.trigger_mode == "once" and patrol.scheduled_at:
+        _register_patrol_once(patrol.id, patrol.scheduled_at)
+
+
 def _register_patrol_schedule(patrol_id: int, cron_expr: str) -> None:
     """Register a schedule-mode patrol in APScheduler."""
     try:
@@ -894,6 +901,39 @@ def _register_patrol_schedule(patrol_id: int, cron_expr: str) -> None:
         logger.info("Registered schedule patrol id=%d cron='%s'", patrol_id, cron_expr)
     except Exception as exc:
         logger.error("Failed to register patrol schedule id=%d: %s", patrol_id, exc)
+
+
+def _register_patrol_once(patrol_id: int, run_at) -> None:
+    """Register a once-mode patrol via APScheduler DateTrigger.
+
+    Skips if run_at is in the past — auto-deactivation happens in
+    _run_once_patrol() after firing, so expired jobs shouldn't be re-added.
+    """
+    try:
+        from datetime import datetime, timezone
+        from apscheduler.triggers.date import DateTrigger
+        from app.services.cron_scheduler_service import get_scheduler
+        sched = get_scheduler()
+        if not sched.running:
+            logger.warning("Scheduler not running — once patrol %d will be loaded on next startup", patrol_id)
+            return
+        # Normalize to aware UTC to match scheduler
+        run_at_aware = run_at if run_at.tzinfo else run_at.replace(tzinfo=timezone.utc)
+        if run_at_aware <= datetime.now(tz=timezone.utc):
+            logger.warning("once patrol %d scheduled_at is in the past (%s) — not registering",
+                           patrol_id, run_at_aware.isoformat())
+            return
+        sched.add_job(
+            _run_once_patrol,
+            trigger=DateTrigger(run_date=run_at_aware),
+            id=f"patrol_{patrol_id}",
+            kwargs={"patrol_id": patrol_id},
+            replace_existing=True,
+            misfire_grace_time=300,
+        )
+        logger.info("Registered once patrol id=%d run_at='%s'", patrol_id, run_at_aware.isoformat())
+    except Exception as exc:
+        logger.error("Failed to register once patrol id=%d: %s", patrol_id, exc)
 
 
 def _remove_patrol_schedule(patrol_id: int) -> None:
@@ -932,18 +972,82 @@ async def _run_scheduled_patrol(patrol_id: int) -> None:
             logger.exception("Scheduled patrol id=%d failed: %s", patrol_id, exc)
 
 
+async def _run_once_patrol(patrol_id: int) -> None:
+    """One-shot runner — executes the patrol, then deactivates it so the row
+    doesn't get re-armed on next app startup (DateTrigger jobs don't persist
+    past the scheduler memory, but `is_active=True` + `scheduled_at` in the
+    past would confuse the loader).
+    """
+    from app.database import AsyncSessionLocal
+    from app.config import get_settings
+    from app.services.skill_executor_service import SkillExecutorService, build_mcp_executor
+
+    async with AsyncSessionLocal() as db:
+        settings = get_settings()
+        executor = SkillExecutorService(
+            skill_repo=SkillDefinitionRepository(db),
+            mcp_executor=build_mcp_executor(db, sim_url=settings.ONTOLOGY_SIM_URL),
+        )
+        svc = AutoPatrolService(
+            repo=AutoPatrolRepository(db),
+            alarm_repo=AlarmRepository(db),
+            executor=executor,
+            sim_url=settings.ONTOLOGY_SIM_URL,
+        )
+        try:
+            resp = await svc.trigger_by_schedule(patrol_id)
+            logger.info(
+                "Once-patrol id=%d fired — condition_met=%s alarm_created=%s",
+                patrol_id, resp.condition_met, resp.alarm_created,
+            )
+        except Exception as exc:
+            logger.exception("Once-patrol id=%d failed: %s", patrol_id, exc)
+        finally:
+            # Deactivate whether or not the run succeeded — user asked for a
+            # single execution. They can always flip is_active back on manually
+            # to retry, or create a new once-patrol.
+            try:
+                repo = AutoPatrolRepository(db)
+                await repo.update(patrol_id, {"is_active": False})
+            except Exception as exc:
+                logger.warning("Failed to deactivate once-patrol %d after run: %s", patrol_id, exc)
+
+
 async def load_schedule_patrols_into_scheduler(db: AsyncSession) -> None:
-    """Called on app startup — re-register all active schedule-mode patrols."""
-    from sqlalchemy import select
+    """Called on app startup — re-register all active schedule + once patrols.
+
+    Schedule: CronTrigger, always re-registered.
+    Once: DateTrigger, only re-registered if scheduled_at is still in the future
+    (past ones were either already fired or missed during downtime; either way
+    we don't want to re-fire them without explicit user action).
+    """
+    from datetime import datetime, timezone
+    from sqlalchemy import select, or_
     from app.models.auto_patrol import AutoPatrolModel
 
     result = await db.execute(
         select(AutoPatrolModel)
-        .where(AutoPatrolModel.trigger_mode == "schedule")
         .where(AutoPatrolModel.is_active == True)  # noqa: E712
-        .where(AutoPatrolModel.cron_expr.isnot(None))
+        .where(
+            or_(
+                AutoPatrolModel.trigger_mode == "schedule",
+                AutoPatrolModel.trigger_mode == "once",
+            )
+        )
     )
     patrols = result.scalars().all()
+    now = datetime.now(tz=timezone.utc)
+    schedule_count = once_count = 0
     for p in patrols:
-        _register_patrol_schedule(p.id, p.cron_expr)
-    logger.info("Loaded %d schedule-mode patrols into scheduler", len(patrols))
+        if p.trigger_mode == "schedule" and p.cron_expr:
+            _register_patrol_schedule(p.id, p.cron_expr)
+            schedule_count += 1
+        elif p.trigger_mode == "once" and p.scheduled_at:
+            run_at = p.scheduled_at if p.scheduled_at.tzinfo else p.scheduled_at.replace(tzinfo=timezone.utc)
+            if run_at > now:
+                _register_patrol_once(p.id, run_at)
+                once_count += 1
+    logger.info(
+        "Loaded scheduler patrols: schedule=%d, once(future)=%d",
+        schedule_count, once_count,
+    )

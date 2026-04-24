@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { RenderMiddleware, type OutputSchemaField, type ChartDSL } from "@/components/operations/SkillOutputRenderer";
 import { ClarifyDialog, type ClarifyQuestion, type ClarifyAnswer } from "@/components/skill-builder/ClarifyDialog";
 
@@ -12,8 +13,9 @@ type TargetScopeType = "event_driven" | "all_equipment" | "equipment_list";
 
 type AutoPatrol = {
   id: number; name: string; description: string; auto_check_description: string;
-  skill_id: number; trigger_mode: "event" | "schedule";
+  skill_id: number; trigger_mode: "event" | "schedule" | "once";
   event_type_id: number | null; cron_expr: string | null;
+  scheduled_at: string | null;
   data_context: "recent_ooc" | "active_lots" | "tool_status" | null;
   target_scope: { type: TargetScopeType; equipment_ids: string[] } | null;
   alarm_severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | null;
@@ -145,9 +147,11 @@ type InputSchemaField  = { key: string; type: string; required: boolean; default
 function emptyForm() {
   return {
     name: "", description: "", auto_check_description: "",
-    trigger_mode: "event" as "event" | "schedule",
+    trigger_mode: "event" as "event" | "schedule" | "once",
     event_type_id: null as number | null,
     schedule_preset: "1h", daily_time: "08:00",
+    // P3: one-shot — local datetime-local input (YYYY-MM-DDTHH:MM)
+    scheduled_at_local: "",
     data_context: "recent_ooc" as "recent_ooc" | "active_lots" | "tool_status",
     target_scope_type: "all_equipment" as TargetScopeType,
     target_equipment_ids: "",       // comma-separated, only used when type="equipment_list"
@@ -306,6 +310,17 @@ export default function AutoPatrolsPage() {
     }).catch(() => {});
   }, []);
 
+  // Deep-link from /admin/triggers: ?new=1 → auto-open create modal once.
+  const searchParams = useSearchParams();
+  const autoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (autoOpenedRef.current) return;
+    if (searchParams.get("new") === "1") {
+      autoOpenedRef.current = true;
+      openCreate();
+    }
+  }, [searchParams]);  // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Modal helpers ─────────────────────────────────────────────────────────
 
   function openCreate() {
@@ -333,6 +348,17 @@ export default function AutoPatrolsPage() {
     // Derive schedule_preset from cron_expr
     const preset = SCHEDULE_PRESETS.find(s => s.cron === (p.cron_expr ?? ""))?.value ?? "1h";
 
+    // P3: once — convert ISO scheduled_at → datetime-local (YYYY-MM-DDTHH:MM)
+    let scheduledAtLocal = "";
+    if (p.trigger_mode === "once" && p.scheduled_at) {
+      const d = new Date(p.scheduled_at);
+      if (!Number.isNaN(d.getTime())) {
+        // Offset to local timezone so the datetime-local input shows user's wall clock
+        const tzOffsetMs = d.getTimezoneOffset() * 60_000;
+        scheduledAtLocal = new Date(d.getTime() - tzOffsetMs).toISOString().slice(0, 16);
+      }
+    }
+
     const scope = p.target_scope;
     const scopeType: TargetScopeType = scope?.type ?? "all_equipment";
     const scopeIds = (scope?.equipment_ids ?? []).join(", ");
@@ -347,6 +373,7 @@ export default function AutoPatrolsPage() {
       event_type_id:          p.event_type_id,
       schedule_preset:        preset,
       daily_time:             "08:00",
+      scheduled_at_local:     scheduledAtLocal,
       data_context:           p.data_context ?? "recent_ooc",
       target_scope_type:      scopeType,
       target_equipment_ids:   scopeIds,
@@ -567,6 +594,15 @@ export default function AutoPatrolsPage() {
     setError("");
     if (!form.name.trim()) { setError("Patrol 名稱必填"); return; }
     if (form.trigger_mode === "event" && !form.event_type_id) { setError("請選擇事件類型"); return; }
+    // P3 once: validate scheduled_at is in the future
+    let scheduledAtIso: string | null = null;
+    if (form.trigger_mode === "once") {
+      if (!form.scheduled_at_local) { setError("請選指定執行時間"); return; }
+      const d = new Date(form.scheduled_at_local);
+      if (Number.isNaN(d.getTime())) { setError("指定時間格式無效"); return; }
+      if (d.getTime() <= Date.now()) { setError("指定時間必須在未來"); return; }
+      scheduledAtIso = d.toISOString();
+    }
     // Phase 4-B: validate based on execution mode
     if (form.execution_mode === "skill" && form.steps_mapping.length === 0) {
       setError("Skill 模式下請先讓 AI 設計診斷計畫"); return;
@@ -599,6 +635,7 @@ export default function AutoPatrolsPage() {
       cron_expr:              form.trigger_mode === "schedule"
                                 ? cronFromPreset(form.schedule_preset, form.daily_time)
                                 : null,
+      scheduled_at:           scheduledAtIso,
       data_context:           form.trigger_mode === "schedule" ? form.data_context : undefined,
       target_scope:           targetScope,
       alarm_severity:         form.alarm_severity,
@@ -694,11 +731,13 @@ export default function AutoPatrolsPage() {
               <td style={{ ...S.td, fontSize: 12 }}>
                 {p.trigger_mode === "event"
                   ? `⚡ ${eventTypes.find(e => e.id === p.event_type_id)?.name ?? p.event_type_id ?? "—"}`
-                  : `🕐 ${p.cron_expr ?? "—"} · ${
-                      p.data_context === "recent_ooc"  ? "OOC 事件" :
-                      p.data_context === "active_lots" ? "進行中 Lot" :
-                      p.data_context === "tool_status" ? "Tool 狀態" : ""
-                    }`}
+                  : p.trigger_mode === "once"
+                    ? `📌 ${p.scheduled_at ? new Date(p.scheduled_at).toLocaleString() : "—"}${p.is_active ? "" : " · 已執行"}`
+                    : `🕐 ${p.cron_expr ?? "—"} · ${
+                        p.data_context === "recent_ooc"  ? "OOC 事件" :
+                        p.data_context === "active_lots" ? "進行中 Lot" :
+                        p.data_context === "tool_status" ? "Tool 狀態" : ""
+                      }`}
               </td>
               <td style={{ ...S.td, fontSize: 11, minWidth: 200 }}>
                 {(() => {
@@ -806,19 +845,21 @@ export default function AutoPatrolsPage() {
             <div style={S.section}>
               <div style={S.sectionTitle}>② 觸發方式</div>
               <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-                {(["event", "schedule"] as const).map(mode => (
-                  <button key={mode} onClick={() => setForm(f => ({ ...f, trigger_mode: mode }))}
+                {([
+                  { m: "event",    icon: "⚡", label: "事件觸發", desc: "OOC 事件發生時立即執行" },
+                  { m: "schedule", icon: "🕐", label: "排程觸發", desc: "依固定週期定時執行" },
+                  { m: "once",     icon: "📌", label: "指定時間", desc: "一次性：指定時間跑一次後自動停用" },
+                ] as const).map(({ m, icon, label, desc }) => (
+                  <button key={m} onClick={() => setForm(f => ({ ...f, trigger_mode: m }))}
                     style={{
                       flex: 1, padding: "10px 16px", borderRadius: 8, cursor: "pointer",
-                      border: `2px solid ${form.trigger_mode === mode ? "#6366f1" : "#e2e8f0"}`,
-                      background: form.trigger_mode === mode ? "#eef2ff" : "#fff",
-                      color: form.trigger_mode === mode ? "#4338ca" : "#4a5568",
-                      fontWeight: form.trigger_mode === mode ? 600 : 400, fontSize: 13,
+                      border: `2px solid ${form.trigger_mode === m ? "#6366f1" : "#e2e8f0"}`,
+                      background: form.trigger_mode === m ? "#eef2ff" : "#fff",
+                      color: form.trigger_mode === m ? "#4338ca" : "#4a5568",
+                      fontWeight: form.trigger_mode === m ? 600 : 400, fontSize: 13,
                     }}>
-                    {mode === "event" ? "⚡ 事件觸發" : "🕐 排程觸發"}
-                    <div style={{ fontSize: 11, fontWeight: 400, marginTop: 3, color: "#718096" }}>
-                      {mode === "event" ? "OOC 事件發生時立即執行" : "依固定週期定時執行"}
-                    </div>
+                    {icon} {label}
+                    <div style={{ fontSize: 11, fontWeight: 400, marginTop: 3, color: "#718096" }}>{desc}</div>
                   </button>
                 ))}
               </div>
@@ -940,6 +981,21 @@ export default function AutoPatrolsPage() {
                     )}
                   </div>
                 </>
+              )}
+
+              {form.trigger_mode === "once" && (
+                <div style={S.row}>
+                  <label style={S.label}>指定執行時間 *</label>
+                  <input
+                    type="datetime-local"
+                    style={{ ...S.input, width: 240 }}
+                    value={form.scheduled_at_local}
+                    onChange={e => setForm(f => ({ ...f, scheduled_at_local: e.target.value }))}
+                  />
+                  <div style={{ fontSize: 11, color: "#718096", marginTop: 6 }}>
+                    一次性：跑完後 patrol 會自動 <code>is_active=false</code>，不會重覆觸發。
+                  </div>
+                </div>
               )}
             </div>
 

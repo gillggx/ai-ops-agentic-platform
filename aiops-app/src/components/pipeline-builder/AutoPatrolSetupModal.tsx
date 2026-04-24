@@ -6,8 +6,16 @@
  * leaving the Pipeline Builder. Fields are a lean subset of the old
  * /admin/auto-patrols form — skip skill-mode, AI step generation, and
  * diagnostic rule pickers (those live on the legacy page for now).
+ *
+ * P2.2 — schedule picker upgraded from raw cron to SchedulePresetPicker
+ * (每 N 小時 / 每天指定時間 / 一次性指定時間 / 自訂 cron).
  */
 import { useEffect, useState } from "react";
+import {
+  SchedulePresetPicker,
+  cronFromPreset,
+  type SchedulePreset,
+} from "@/components/common/SchedulePresetPicker";
 
 type EventType = { id: number; name: string };
 
@@ -22,8 +30,11 @@ export default function AutoPatrolSetupModal({
 }) {
   const [name, setName]             = useState("");
   const [description, setDesc]      = useState("");
-  const [triggerMode, setTriggerMode] = useState<"schedule" | "event">("event");
-  const [cronExpr, setCron]         = useState("*/5 * * * *");
+  const [triggerMode, setTriggerMode] = useState<"schedule" | "event" | "once">("event");
+  const [preset, setPreset]         = useState<SchedulePreset>("1h");
+  const [dailyTime, setDailyTime]   = useState("09:00");
+  const [scheduledAt, setScheduledAt] = useState("");  // datetime-local format
+  const [customCron, setCustomCron] = useState("*/5 * * * *");
   const [eventTypeId, setEventTypeId] = useState<number | null>(null);
   const [severity, setSeverity]     = useState<"LOW" | "MEDIUM" | "HIGH" | "CRITICAL">("HIGH");
   const [alarmTitle, setAlarmTitle] = useState("");
@@ -49,12 +60,33 @@ export default function AutoPatrolSetupModal({
     setError(null);
   }, [open, pipelineName]);  // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Keep triggerMode in sync with preset: picking "once" in the picker should
+  // switch trigger_mode to "once" so the backend schedules a DateTrigger.
+  useEffect(() => {
+    if (triggerMode === "event") return;
+    if (preset === "once" && triggerMode !== "once") setTriggerMode("once");
+    if (preset !== "once" && triggerMode === "once") setTriggerMode("schedule");
+  }, [preset, triggerMode]);
+
   if (!open) return null;
 
   async function handleSave() {
     if (!name.trim()) { setError("Patrol 名稱必填"); return; }
     if (triggerMode === "event" && eventTypeId == null) { setError("請選事件類型"); return; }
-    if (triggerMode === "schedule" && !cronExpr.trim()) { setError("請填 cron expression"); return; }
+
+    let cronExpr: string | null = null;
+    let scheduledAtIso: string | null = null;
+    if (triggerMode === "schedule") {
+      cronExpr = preset === "custom" ? customCron.trim() : cronFromPreset(preset, dailyTime);
+      if (!cronExpr) { setError("請填入有效的 cron expression"); return; }
+    } else if (triggerMode === "once") {
+      if (!scheduledAt) { setError("請選指定執行時間"); return; }
+      // Convert local datetime to ISO 8601 (with timezone)
+      const d = new Date(scheduledAt);
+      if (Number.isNaN(d.getTime())) { setError("指定時間格式無效"); return; }
+      if (d.getTime() <= Date.now()) { setError("指定時間必須在未來"); return; }
+      scheduledAtIso = d.toISOString();
+    }
 
     // Validate input_binding JSON
     let inputBindingParsed: Record<string, unknown> | null = null;
@@ -70,7 +102,8 @@ export default function AutoPatrolSetupModal({
         name: name.trim(),
         description: description.trim(),
         trigger_mode: triggerMode,
-        cron_expr: triggerMode === "schedule" ? cronExpr.trim() : null,
+        cron_expr: cronExpr,
+        scheduled_at: scheduledAtIso,
         event_type_id: triggerMode === "event" ? eventTypeId : null,
         execution_mode: "pipeline",
         pipeline_id: pipelineId,
@@ -125,11 +158,23 @@ export default function AutoPatrolSetupModal({
           </Field>
 
           <Field label="觸發模式">
-            <div style={{ display: "flex", gap: 12 }}>
-              {(["event", "schedule"] as const).map(m => (
-                <label key={m} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                  <input type="radio" checked={triggerMode === m} onChange={() => setTriggerMode(m)} />
-                  {m === "event" ? "事件觸發 (例如 OOC)" : "排程 (cron)"}
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+              {([
+                { v: "event",    l: "事件觸發 (例如 OOC)" },
+                { v: "schedule", l: "排程觸發" },
+                { v: "once",     l: "一次性指定時間" },
+              ] as const).map(m => (
+                <label key={m.v} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    checked={triggerMode === m.v}
+                    onChange={() => {
+                      setTriggerMode(m.v);
+                      if (m.v === "once") setPreset("once");
+                      else if (m.v === "schedule" && preset === "once") setPreset("1h");
+                    }}
+                  />
+                  {m.l}
                 </label>
               ))}
             </div>
@@ -142,13 +187,23 @@ export default function AutoPatrolSetupModal({
               </select>
             </Field>
           )}
-          {triggerMode === "schedule" && (
-            <Field label="Cron Expression">
-              <input value={cronExpr} onChange={e => setCron(e.target.value)} style={{ ...input, fontFamily: "ui-monospace, monospace" }}
-                placeholder="*/5 * * * *" />
-              <div style={{ fontSize: 11, color: "#a0aec0", marginTop: 2 }}>
-                例：<code>*/5 * * * *</code> 每 5 分鐘 / <code>0 * * * *</code> 每整點
-              </div>
+          {(triggerMode === "schedule" || triggerMode === "once") && (
+            <Field label={triggerMode === "once" ? "指定時間" : "排程設定"}>
+              <SchedulePresetPicker
+                preset={preset}
+                onPresetChange={(p) => {
+                  setPreset(p);
+                  if (p === "once") setTriggerMode("once");
+                  else if (triggerMode === "once") setTriggerMode("schedule");
+                }}
+                dailyTime={dailyTime}
+                onDailyTimeChange={setDailyTime}
+                scheduledAt={scheduledAt}
+                onScheduledAtChange={setScheduledAt}
+                customCron={customCron}
+                onCustomCronChange={setCustomCron}
+                layout="compact"
+              />
             </Field>
           )}
 
@@ -201,7 +256,7 @@ const overlay: React.CSSProperties = {
   display: "flex", alignItems: "center", justifyContent: "center",
 };
 const modal: React.CSSProperties = {
-  background: "#fff", borderRadius: 8, maxWidth: 520, width: "90vw", maxHeight: "90vh",
+  background: "#fff", borderRadius: 8, maxWidth: 560, width: "90vw", maxHeight: "90vh",
   overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
 };
 const header: React.CSSProperties = {

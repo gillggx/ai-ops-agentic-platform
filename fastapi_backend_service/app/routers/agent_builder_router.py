@@ -40,12 +40,20 @@ router = APIRouter(prefix="/agent/build", tags=["agent-builder"])
 
 
 class BuildRequest(BaseModel):
-    prompt: str = Field(..., min_length=1, max_length=4000)
-    base_pipeline_id: Optional[int] = None
+    # Java cutover v2 compat: accept both the legacy Python schema
+    # ({prompt, base_pipeline_id, base_pipeline}) and the new Java schema
+    # ({instruction, pipelineId, pipelineSnapshot}). Pydantic aliases let
+    # either wire-form populate the canonical field. Frontend now sends the
+    # new schema; Java accepts both via its own compat; this keeps the
+    # Python fallback path green for local dev + any un-updated caller.
+    model_config = {"populate_by_name": True}
+
+    prompt: str = Field(..., min_length=1, max_length=4000, alias="instruction")
+    base_pipeline_id: Optional[int] = Field(default=None, alias="pipelineId")
     # Phase 5-UX-6 fix: client can push the current canvas state inline so
     # follow-up requests (「加常態分佈圖」) see the pipeline the previous turn
     # built. Wins over base_pipeline_id if both are provided.
-    base_pipeline: Optional[PipelineJSON] = None
+    base_pipeline: Optional[PipelineJSON] = Field(default=None, alias="pipelineSnapshot")
 
 
 def _get_registry(request: Request) -> BlockRegistry:

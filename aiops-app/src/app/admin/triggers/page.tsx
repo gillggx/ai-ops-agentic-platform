@@ -95,10 +95,31 @@ export default function TriggersOverviewPage() {
 
   return (
     <div style={{ padding: 20, maxWidth: 1400 }}>
-      <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#1a202c" }}>Triggers Overview</h1>
-      <p style={{ margin: "4px 0 16px", fontSize: 13, color: "#718096" }}>
-        跨 pipeline 的綁定總覽：Auto-Patrol（schedule/event） + Auto-Check Rule（event） + Published Skill（on-demand）。
-      </p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#1a202c" }}>Triggers Overview</h1>
+          <p style={{ margin: "4px 0 16px", fontSize: 13, color: "#718096" }}>
+            跨 pipeline 的綁定總覽：Auto-Patrol（schedule/event） + Auto-Check Rule（event） + Published Skill（on-demand）。
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Link href="/admin/auto-patrols?new=1" style={{
+            padding: "8px 16px", fontSize: 13, fontWeight: 600,
+            background: "#16a34a", color: "#fff",
+            borderRadius: 6, textDecoration: "none",
+            boxShadow: "0 1px 3px rgba(22,163,74,0.3)",
+          }}>
+            ＋ 建立 Patrol
+          </Link>
+          <Link href="/admin/pipeline-builder/new?kind=auto_check" style={{
+            padding: "8px 16px", fontSize: 13, fontWeight: 600,
+            background: "#fff", color: "#d46b08",
+            border: "1px solid #d46b08", borderRadius: 6, textDecoration: "none",
+          }} title="Auto-Check 由 pipeline publish 自動建立，到 Pipeline Builder 建立 kind=auto_check 的 pipeline">
+            ＋ 建立 Auto-Check
+          </Link>
+        </div>
+      </div>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         {(["all", "patrol", "rule", "skill"] as const).map(f => (

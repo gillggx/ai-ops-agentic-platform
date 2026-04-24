@@ -121,6 +121,7 @@ class AutoPatrolRepository:
             "trigger_mode": obj.trigger_mode,
             "event_type_id": obj.event_type_id,
             "cron_expr": obj.cron_expr,
+            "scheduled_at": getattr(obj, "scheduled_at", None),
             "data_context": obj.data_context or "recent_ooc",
             "target_scope": self.get_target_scope(obj),
             "alarm_severity": obj.alarm_severity,

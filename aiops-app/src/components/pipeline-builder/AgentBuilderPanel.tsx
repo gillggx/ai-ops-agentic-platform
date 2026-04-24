@@ -94,9 +94,9 @@ export default function AgentBuilderPanel({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt,
-          base_pipeline_id: basePipelineId ?? null,
-          base_pipeline: hasExistingNodes ? state.pipeline : null,
+          instruction: prompt,
+          pipelineId: basePipelineId ?? null,
+          pipelineSnapshot: hasExistingNodes ? state.pipeline : null,
         }),
       });
       if (!createRes.ok) {

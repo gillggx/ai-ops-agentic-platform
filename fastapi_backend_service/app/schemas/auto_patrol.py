@@ -36,9 +36,11 @@ class AutoPatrolCreate(BaseModel):
     description: str = ""
     # Natural language description of what this patrol checks (fed to AI designer)
     auto_check_description: str = ""
-    trigger_mode: str = Field("schedule", pattern="^(event|schedule)$")
+    trigger_mode: str = Field("schedule", pattern="^(event|schedule|once)$")
     event_type_id: Optional[int] = None
     cron_expr: Optional[str] = None
+    # P3: one-shot execution at scheduled_at (used when trigger_mode="once")
+    scheduled_at: Optional[datetime] = None
     # schedule-triggered: which context to fetch and inject as {data}
     data_context: str = Field("recent_ooc", pattern="^(recent_ooc|active_lots|tool_status)$")
     target_scope: TargetScope = Field(default_factory=lambda: TargetScope())
@@ -59,9 +61,10 @@ class AutoPatrolUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=200)
     description: Optional[str] = None
     auto_check_description: Optional[str] = None
-    trigger_mode: Optional[str] = Field(None, pattern="^(event|schedule)$")
+    trigger_mode: Optional[str] = Field(None, pattern="^(event|schedule|once)$")
     event_type_id: Optional[int] = None
     cron_expr: Optional[str] = None
+    scheduled_at: Optional[datetime] = None
     data_context: Optional[str] = Field(None, pattern="^(recent_ooc|active_lots|tool_status)$")
     target_scope: Optional[TargetScope] = None
     alarm_severity: Optional[str] = Field(None, pattern="^(LOW|MEDIUM|HIGH|CRITICAL)$")
@@ -89,6 +92,7 @@ class AutoPatrolResponse(BaseModel):
     trigger_mode: str
     event_type_id: Optional[int]
     cron_expr: Optional[str]
+    scheduled_at: Optional[datetime] = None
     data_context: str
     target_scope: Dict[str, Any]
     alarm_severity: Optional[str]

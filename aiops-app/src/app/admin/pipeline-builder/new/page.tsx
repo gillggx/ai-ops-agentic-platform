@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import type { PipelineJSON } from "@/lib/pipeline-builder/types";
 
 // React Flow can't SSR
@@ -12,6 +13,7 @@ const BuilderLayout = dynamic(() => import("@/components/pipeline-builder/Builde
 type Kind = "auto_patrol" | "auto_check" | "skill";
 
 export default function NewPipelinePage() {
+  const searchParams = useSearchParams();
   const [kind, setKind] = useState<Kind | null>(null);
   // Phase 5: ephemeral pipeline hydrated from Copilot's Edit-in-Builder button
   const [ephemeralPipeline, setEphemeralPipeline] = useState<PipelineJSON | null>(null);
@@ -31,8 +33,13 @@ export default function NewPipelinePage() {
     } catch {
       // ignore malformed payload
     }
+    // Deep-link from Triggers Overview: ?kind=auto_check skips the gate.
+    const q = searchParams.get("kind");
+    if (q === "auto_patrol" || q === "auto_check" || q === "skill") {
+      setKind(q);
+    }
     setCheckedSession(true);
-  }, []);
+  }, [searchParams]);
 
   if (!checkedSession) return null;
 

@@ -693,19 +693,30 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, sess
               >
                 ✔ Publish
               </button>
-              {/* Option A Phase β: schedule this pipeline as an Auto-Patrol
-                  without leaving the Builder. Available for any kind. */}
-              <button
-                onClick={() => setAutoPatrolModalOpen(true)}
-                style={btn("ghost")}
-                title="Schedule / 事件觸發這個 pipeline — 建立 Auto-Patrol 綁定"
-              >
-                🔔 Schedule as Patrol
-              </button>
               <button onClick={() => handleTransition("draft")} style={btn("ghost")}>
                 ← 退回 Draft
               </button>
             </>
+          )}
+          {/* Option A Phase β / P1.4: Schedule-as-Patrol moved out of `locked`-only
+              gate. Now visible for any saved, non-archived pipeline so users can
+              create/edit the Auto-Patrol binding at any lifecycle stage. */}
+          {mode !== "session"
+            && state.meta.pipelineId != null
+            && state.meta.status !== "archived" && (
+            <button
+              onClick={() => setAutoPatrolModalOpen(true)}
+              style={{
+                ...btn("ghost"),
+                border: "1px solid #3182ce",
+                color: "#2c5282",
+                background: "#ebf8ff",
+                fontWeight: 600,
+              }}
+              title="Schedule / 事件觸發這個 pipeline — 建立 Auto-Patrol 綁定（任何階段可用）"
+            >
+              🔔 Schedule as Patrol
+            </button>
           )}
           {state.meta.status === "active" && (
             <>

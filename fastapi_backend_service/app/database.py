@@ -256,9 +256,13 @@ async def _safe_add_columns(conn) -> None:
         ("agent_sessions", "updated_at", "TIMESTAMP"),
         # Phase 4-A: skill_definitions.pipeline_config (declared in ORM model, missing in legacy DB)
         ("skill_definitions", "pipeline_config", "TEXT"),
+        # Phase 4-A follow-on: skill_definitions.pipeline_id — P1 DR migration binds skill 1:1 to pipeline
+        ("skill_definitions", "pipeline_id", "INTEGER REFERENCES pb_pipelines(id) ON DELETE SET NULL"),
         # Phase 4-B: auto_patrols links pipeline (with input_binding) instead of skill
         ("auto_patrols", "pipeline_id", "INTEGER REFERENCES pb_pipelines(id) ON DELETE SET NULL"),
         ("auto_patrols", "input_binding", "TEXT"),
+        # P3: one-shot trigger — DateTrigger fires once at scheduled_at, then deactivates.
+        ("auto_patrols", "scheduled_at", "TIMESTAMP WITH TIME ZONE"),
         # PR-B / Phase 5-lifecycle: pipeline_kind + usage_stats
         ("pb_pipelines", "pipeline_kind", "VARCHAR(20) NOT NULL DEFAULT 'diagnostic'"),
         ("pb_pipelines", "usage_stats", "TEXT NOT NULL DEFAULT '{\"invoke_count\":0,\"last_invoked_at\":null,\"last_triggered_at\":null}'"),

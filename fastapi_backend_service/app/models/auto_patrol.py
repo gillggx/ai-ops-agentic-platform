@@ -35,7 +35,8 @@ class AutoPatrolModel(Base):
     # Example: {"tool_id": "$event.toolID", "ooc_count": 3}
     input_binding: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # "event" | "schedule"
+    # "event" | "schedule" | "once"
+    # P3: "once" → fires a single DateTrigger at scheduled_at, then auto-deactivates.
     trigger_mode: Mapped[str] = mapped_column(
         String(20), nullable=False, default="schedule", server_default="schedule"
     )
@@ -47,6 +48,11 @@ class AutoPatrolModel(Base):
 
     # For trigger_mode="schedule" (cron expression)
     cron_expr: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # For trigger_mode="once" (one-shot DateTrigger — UTC timestamp).
+    scheduled_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Natural language description of what this patrol automatically checks
     auto_check_description: Mapped[str] = mapped_column(

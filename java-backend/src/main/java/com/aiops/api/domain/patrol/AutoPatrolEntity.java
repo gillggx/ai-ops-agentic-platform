@@ -6,6 +6,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.time.OffsetDateTime;
+
 @Getter
 @Setter
 @NoArgsConstructor
@@ -38,7 +40,7 @@ public class AutoPatrolEntity extends Auditable {
 	@Column(name = "input_binding", columnDefinition = "text")
 	private String inputBinding;
 
-	/** event | schedule */
+	/** event | schedule | once */
 	@Column(name = "trigger_mode", nullable = false, length = 20)
 	private String triggerMode = "schedule";
 
@@ -47,6 +49,10 @@ public class AutoPatrolEntity extends Auditable {
 
 	@Column(name = "cron_expr", length = 100)
 	private String cronExpr;
+
+	/** For trigger_mode=once — one-shot DateTrigger fires at this UTC timestamp. */
+	@Column(name = "scheduled_at")
+	private OffsetDateTime scheduledAt;
 
 	@Column(name = "auto_check_description", nullable = false, columnDefinition = "text")
 	private String autoCheckDescription = "";

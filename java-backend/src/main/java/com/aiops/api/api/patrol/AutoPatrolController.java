@@ -53,6 +53,7 @@ public class AutoPatrolController {
 		if (req.description() != null) e.setDescription(req.description());
 		if (req.triggerMode() != null) e.setTriggerMode(req.triggerMode());
 		if (req.cronExpr() != null) e.setCronExpr(req.cronExpr());
+		if (req.scheduledAt() != null) e.setScheduledAt(req.scheduledAt());
 		if (req.eventTypeId() != null) e.setEventTypeId(req.eventTypeId());
 		if (req.pipelineId() != null) e.setPipelineId(req.pipelineId());
 		if (req.skillId() != null) e.setSkillId(req.skillId());
@@ -76,6 +77,7 @@ public class AutoPatrolController {
 		if (req.description() != null) e.setDescription(req.description());
 		if (req.triggerMode() != null) e.setTriggerMode(req.triggerMode());
 		if (req.cronExpr() != null) e.setCronExpr(req.cronExpr());
+		if (req.scheduledAt() != null) e.setScheduledAt(req.scheduledAt());
 		if (req.eventTypeId() != null) e.setEventTypeId(req.eventTypeId());
 		if (req.pipelineId() != null) e.setPipelineId(req.pipelineId());
 		if (req.dataContext() != null) e.setDataContext(req.dataContext());
@@ -115,18 +117,21 @@ public class AutoPatrolController {
 
 		public record Detail(Long id, String name, String description, Long skillId, Long pipelineId,
 		                     String inputBinding, String triggerMode, Long eventTypeId, String cronExpr,
+		                     java.time.OffsetDateTime scheduledAt,
 		                     String autoCheckDescription, String dataContext, String targetScope,
 		                     String alarmSeverity, String alarmTitle, String notifyConfig,
 		                     Boolean isActive, Long createdBy, java.time.OffsetDateTime createdAt,
 		                     java.time.OffsetDateTime updatedAt) {}
 
 		public record CreateRequest(@NotBlank String name, String description, String triggerMode,
-		                            String cronExpr, Long eventTypeId, Long pipelineId, Long skillId,
+		                            String cronExpr, java.time.OffsetDateTime scheduledAt,
+		                            Long eventTypeId, Long pipelineId, Long skillId,
 		                            String dataContext, String targetScope, String autoCheckDescription,
 		                            String alarmSeverity, String alarmTitle, String notifyConfig,
 		                            String inputBinding) {}
 
 		public record UpdateRequest(String description, String triggerMode, String cronExpr,
+		                            java.time.OffsetDateTime scheduledAt,
 		                            Long eventTypeId, Long pipelineId, String dataContext,
 		                            String targetScope, String autoCheckDescription, String alarmSeverity,
 		                            String alarmTitle, String notifyConfig, String inputBinding,
@@ -140,6 +145,7 @@ public class AutoPatrolController {
 		static Detail detailOf(AutoPatrolEntity e) {
 			return new Detail(e.getId(), e.getName(), e.getDescription(), e.getSkillId(), e.getPipelineId(),
 					e.getInputBinding(), e.getTriggerMode(), e.getEventTypeId(), e.getCronExpr(),
+					e.getScheduledAt(),
 					e.getAutoCheckDescription(), e.getDataContext(), e.getTargetScope(),
 					e.getAlarmSeverity(), e.getAlarmTitle(), e.getNotifyConfig(),
 					e.getIsActive(), e.getCreatedBy(), e.getCreatedAt(), e.getUpdatedAt());

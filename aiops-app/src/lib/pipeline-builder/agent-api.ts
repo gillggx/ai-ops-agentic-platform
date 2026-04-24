@@ -63,10 +63,14 @@ export async function createAgentSession(payload: {
   prompt: string;
   base_pipeline_id?: number;
 }): Promise<{ session_id: string }> {
+  // Java cutover v2: backend now uses {instruction, pipelineId, pipelineSnapshot}.
+  // Callers still hand us the old shape — translate here so no other caller breaks.
+  const wireBody: Record<string, unknown> = { instruction: payload.prompt };
+  if (payload.base_pipeline_id != null) wireBody.pipelineId = payload.base_pipeline_id;
   const res = await fetch(`${BASE}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(wireBody),
   });
   if (!res.ok) {
     const text = await res.text();

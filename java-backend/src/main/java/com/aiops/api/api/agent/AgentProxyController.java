@@ -75,10 +75,38 @@ public class AgentProxyController {
 		return v == null ? null : v.toString();
 	}
 
+	// Accepts both the new contract ({instruction, pipelineId, pipelineSnapshot})
+	// and the legacy Python-era contract ({prompt, base_pipeline_id, base_pipeline})
+	// so Frontend clients that were not redeployed with the Java cutover keep working.
+	// Mirrors the chatStreamCompat pattern above.
 	@PostMapping(path = "/build", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-	public SseEmitter build(@Validated @RequestBody BuildRequest req,
+	public SseEmitter build(@RequestBody Map<String, Object> body,
 	                        @AuthenticationPrincipal AuthPrincipal caller) {
+		String instruction = asString(body.get("instruction"));
+		if (instruction == null || instruction.isBlank()) instruction = asString(body.get("prompt"));
+		if (instruction == null || instruction.isBlank()) {
+			throw new com.aiops.api.common.ApiException(
+					org.springframework.http.HttpStatus.BAD_REQUEST,
+					"validation_error", "instruction: must not be blank");
+		}
+		Long pipelineId = asLong(body.get("pipelineId"));
+		if (pipelineId == null) pipelineId = asLong(body.get("base_pipeline_id"));
+		@SuppressWarnings("unchecked")
+		Map<String, Object> snapshot = body.get("pipelineSnapshot") instanceof Map<?, ?> m1
+				? (Map<String, Object>) m1
+				: body.get("base_pipeline") instanceof Map<?, ?> m2
+						? (Map<String, Object>) m2
+						: null;
+		BuildRequest req = new BuildRequest(instruction, pipelineId, snapshot);
 		return bridgeSse(sidecar.postSse("/internal/agent/build", req, caller), "build");
+	}
+
+	private static Long asLong(Object v) {
+		if (v == null) return null;
+		if (v instanceof Number n) return n.longValue();
+		String s = v.toString();
+		if (s.isBlank()) return null;
+		try { return Long.parseLong(s.trim()); } catch (NumberFormatException e) { return null; }
 	}
 
 	private SseEmitter bridgeSse(reactor.core.publisher.Flux<ServerSentEvent<String>> upstream, String tag) {
