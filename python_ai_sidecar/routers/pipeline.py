@@ -20,6 +20,11 @@ from ..auth import CallerContext, ServiceAuth
 from ..clients.java_client import JavaAPIClient, JavaAPIError
 from ..executor.block_runtime import REGISTRY as BLOCK_REGISTRY
 from ..executor.dag import execute_dag
+from ..executor.real_executor import (
+    SIDECAR_NATIVE_BLOCKS,
+    all_blocks_native,
+    execute_native,
+)
 from ..fallback import python_proxy as fb
 
 log = logging.getLogger("python_ai_sidecar.pipeline")
@@ -105,20 +110,80 @@ async def _fallback_execute(req: ExecuteRequest, caller: CallerContext) -> dict 
 
 @router.post("/execute")
 async def execute(req: ExecuteRequest, caller: CallerContext = ServiceAuth) -> dict:
+    """Execute a pipeline.
+
+    Decision tree:
+      1. If all blocks are in SIDECAR_NATIVE_BLOCKS → Phase 8-B native
+         executor (full pandas DAG, validator, RunCache, etc.)
+      2. Else if any block unknown to the sidecar catalog → delegate to :8001
+         via fallback proxy (hybrid mode).
+      3. Else → legacy 6-block demo walker (kept as safety net + for the
+         sub-set of tests that depend on it).
+    """
     java = JavaAPIClient.for_caller(caller)
     entity, effective = await _resolve_pipeline(java, req)
 
-    # Phase 7 hybrid: if the pipeline uses blocks we haven't ported, delegate
-    # to old Python which still has the full block registry.
+    # Phase 8-B fast path: everything in whitelist → native executor.
+    if isinstance(effective, dict) and all_blocks_native(effective):
+        started = time.monotonic()
+        try:
+            result = await execute_native(
+                effective,
+                inputs=req.inputs,
+                run_id=req.pipeline_id,
+            )
+            duration_ms = int((time.monotonic() - started) * 1000)
+            status = result.get("status") or "error"
+            persisted = await java.create_execution_log({
+                "triggeredBy": req.triggered_by or "user",
+                "status": "success" if status == "success" else "error",
+                "llmReadableData": json.dumps({
+                    "source": "python_ai_sidecar_native",
+                    "pipeline_id": req.pipeline_id,
+                    "status": status,
+                    "node_results": result.get("node_results") or {},
+                    "result_summary": result.get("result_summary"),
+                    "inputs_echo": {k: str(v)[:100] for k, v in (req.inputs or {}).items()},
+                }, ensure_ascii=False, default=str),
+                "durationMs": duration_ms,
+                "errorMessage": result.get("error_message"),
+            })
+            return {
+                "ok": status == "success",
+                "execution_log_id": persisted.get("id") if isinstance(persisted, dict) else None,
+                "caller_user_id": caller.user_id,
+                "pipeline": {
+                    "id": entity.get("id") if entity else None,
+                    "name": entity.get("name") if entity else None,
+                    "resolved": entity is not None or effective is not None,
+                },
+                "status": status,
+                "source": "native",
+                "node_results": result.get("node_results") or {},
+                "result_summary": result.get("result_summary"),
+                "duration_ms": duration_ms,
+            }
+        except Exception as ex:  # noqa: BLE001
+            log.exception("native executor failed — falling back to :8001")
+            fallback = await _fallback_execute(req, caller)
+            if fallback is not None:
+                fallback["_native_error"] = str(ex)[:200]
+                return fallback
+            raise HTTPException(
+                status_code=500,
+                detail={"code": "native_and_fallback_failed", "message": str(ex)[:300]},
+            )
+
+    # Hybrid mode: non-native block(s) present → delegate to :8001.
     if _has_unknown_block(effective):
         fallback = await _fallback_execute(req, caller)
         if fallback is not None:
             return fallback
 
+    # Safety net: legacy demo walker (used by /validate tests that pass
+    # fake blocks like load_inline_rows).
     started = time.monotonic()
     try:
-        # Phase 5c: run the real DAG walker. Unknown block names surface as
-        # node-level errors (not an exception) so partial results still persist.
         walk = execute_dag(effective)
         duration_ms = int((time.monotonic() - started) * 1000)
         status = "success" if walk.get("status") == "success" else "error"
@@ -126,7 +191,7 @@ async def execute(req: ExecuteRequest, caller: CallerContext = ServiceAuth) -> d
             "triggeredBy": req.triggered_by or "user",
             "status": status,
             "llmReadableData": json.dumps({
-                "source": "python_ai_sidecar",
+                "source": "python_ai_sidecar_demo",
                 "pipeline_id": req.pipeline_id,
                 "node_results": walk.get("node_results") or {},
                 "terminal_nodes": walk.get("terminal_nodes") or [],
@@ -146,6 +211,7 @@ async def execute(req: ExecuteRequest, caller: CallerContext = ServiceAuth) -> d
                 "resolved": entity is not None or effective is not None,
             },
             "status": status,
+            "source": "demo",
             "node_results": walk.get("node_results") or {},
             "preview": walk.get("preview") or [],
             "duration_ms": duration_ms,
