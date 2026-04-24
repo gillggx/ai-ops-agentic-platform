@@ -84,6 +84,20 @@ export default function AutoPatrolTriggerForm({ value, onChange, eventTypes, com
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value.mode, value.cronExpr, value.scheduledAt]);
 
+  // Auto-select the first event type when event mode is active + eventTypes
+  // just loaded + no selection yet. Saves the user a click when there's only
+  // one registered event type (the common case today).
+  useEffect(() => {
+    if (
+      value.mode === "event"
+      && value.eventTypeId == null
+      && eventTypes.length > 0
+    ) {
+      onChange({ ...value, eventTypeId: eventTypes[0].id });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eventTypes, value.mode]);
+
   const patch = (patch: Partial<AutoPatrolTriggerValue>) => onChange({ ...value, ...patch });
 
   const setMode = (mode: TriggerMode) => {
@@ -157,13 +171,18 @@ export default function AutoPatrolTriggerForm({ value, onChange, eventTypes, com
         ))}
       </div>
 
-      {/* Event: event_type dropdown */}
+      {/* Event: event_type dropdown. Use string values throughout so React's
+          controlled select matches reliably (value={number} vs option value=
+          "1" can be flaky under some toolchains). */}
       {value.mode === "event" && (
         <div style={rowStyle}>
           <label style={labelStyle}>事件類型 *</label>
           <select
-            value={value.eventTypeId ?? ""}
-            onChange={(e) => patch({ eventTypeId: e.target.value ? Number(e.target.value) : null })}
+            value={value.eventTypeId != null ? String(value.eventTypeId) : ""}
+            onChange={(e) => {
+              const raw = e.target.value;
+              patch({ eventTypeId: raw ? Number(raw) : null });
+            }}
             style={inputStyle}
           >
             <option value="">— 選擇事件類型 —</option>
@@ -171,6 +190,11 @@ export default function AutoPatrolTriggerForm({ value, onChange, eventTypes, com
               <option key={et.id} value={String(et.id)}>{et.name}</option>
             ))}
           </select>
+          {eventTypes.length === 0 && (
+            <div style={{ fontSize: 11, color: "#cf1322", marginTop: 4 }}>
+              沒有可選的事件類型 — 請先到 <code>/system/event-registry</code> 註冊。
+            </div>
+          )}
         </div>
       )}
 

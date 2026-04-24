@@ -41,23 +41,27 @@ interface Props {
 export default function AutoCheckTriggerForm({ value, onChange, suggestions }: Props) {
   const parsed = parseEventTypes(value.eventTypesText);
 
+  // When suggestions are available, favour a checkbox-style picker over the
+  // textarea — this is the common case and makes the "bind to alarm events"
+  // semantics obvious. Textarea is still rendered below for power users to
+  // free-type custom trigger_event names.
+  const hasSuggestions = (suggestions?.length ?? 0) > 0;
+
   return (
     <div>
-      <label style={labelStyle}>Event Types *</label>
-      <textarea
-        value={value.eventTypesText}
-        onChange={(e) => onChange({ eventTypesText: e.target.value })}
-        rows={3}
-        placeholder="alarm.OOC, alarm.APC_drift, alarm.recipe_mismatch"
-        style={{ ...inputStyle, fontFamily: "ui-monospace, monospace", fontSize: 12 }}
-      />
-      <div style={{ fontSize: 11, color: "#64748B", marginTop: 4 }}>
-        用逗號或換行分隔。當 alarm 的 <code>trigger_event</code> 符合其中之一，這個 pipeline 自動被呼叫。
+      <label style={labelStyle}>要綁定的 Alarm 觸發事件 *</label>
+      <div style={{
+        background: "#f0f9ff", border: "1px solid #bae6fd",
+        borderRadius: 6, padding: "8px 10px", fontSize: 11,
+        color: "#0369a1", marginBottom: 8, lineHeight: 1.6,
+      }}>
+        <div style={{ fontWeight: 600, marginBottom: 2 }}>💡 Auto-Check = 診斷規則</div>
+        這個 pipeline 會在 <strong>Auto-Patrol 觸發 alarm 時</strong>自動被呼叫執行診斷。勾選下方想綁定的 alarm 事件（alarm 的 <code>trigger_event</code> 欄位比對）。
       </div>
-      {suggestions && suggestions.length > 0 && (
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
-          <span style={{ fontSize: 11, color: "#64748B" }}>建議：</span>
-          {suggestions.map((s) => {
+
+      {hasSuggestions && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+          {suggestions!.map((s) => {
             const picked = parsed.includes(s);
             return (
               <button
@@ -73,22 +77,44 @@ export default function AutoCheckTriggerForm({ value, onChange, suggestions }: P
                   }
                 }}
                 style={{
-                  padding: "3px 9px", borderRadius: 10, fontSize: 11,
-                  border: `1px solid ${picked ? "#7C3AED" : "#E2E8F0"}`,
+                  padding: "6px 12px", borderRadius: 6, fontSize: 12,
+                  border: `1px solid ${picked ? "#7C3AED" : "#CBD5E0"}`,
                   background: picked ? "#F5F3FF" : "#fff",
-                  color: picked ? "#7C3AED" : "#64748B",
+                  color: picked ? "#7C3AED" : "#475569",
+                  fontWeight: picked ? 600 : 400,
                   cursor: "pointer",
                 }}
               >
-                {picked ? "✓ " : "+ "}{s}
+                {picked ? "☑" : "☐"}  {s}
               </button>
             );
           })}
         </div>
       )}
+
+      <details style={{ marginTop: 6 }}>
+        <summary style={{ fontSize: 11, color: "#64748B", cursor: "pointer" }}>
+          + 進階：自訂 trigger_event 字串（{hasSuggestions ? "不在上方清單的" : "沒有 event_type 建議時的"}備用輸入）
+        </summary>
+        <textarea
+          value={value.eventTypesText}
+          onChange={(e) => onChange({ eventTypesText: e.target.value })}
+          rows={3}
+          placeholder="alarm.OOC, alarm.APC_drift, alarm.recipe_mismatch"
+          style={{ ...inputStyle, fontFamily: "ui-monospace, monospace", fontSize: 12, marginTop: 6 }}
+        />
+        <div style={{ fontSize: 11, color: "#a0aec0", marginTop: 4 }}>
+          用逗號或換行分隔。勾選上方建議會自動寫入這個欄位。
+        </div>
+      </details>
+
       {parsed.length > 0 && (
-        <div style={{ fontSize: 11, color: "#475569", marginTop: 6 }}>
-          已選 <strong>{parsed.length}</strong> 個：{parsed.join(", ")}
+        <div style={{
+          marginTop: 10, padding: "6px 10px", borderRadius: 6,
+          background: "#ecfdf5", border: "1px solid #a7f3d0",
+          fontSize: 11, color: "#065f46",
+        }}>
+          ✓ 已綁 <strong>{parsed.length}</strong> 個 alarm 事件：{parsed.join(", ")}
         </div>
       )}
     </div>

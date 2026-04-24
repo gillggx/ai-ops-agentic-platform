@@ -160,13 +160,14 @@ function WizardOrBuilder({
           />
           <KindCard
             emoji="⚡"
-            label="Auto-Check"
-            tagline="Alarm 觸發 → 自動帶入 alarm 資訊跑分析"
+            label="Auto-Check (診斷規則)"
+            tagline="Auto-Patrol 的 Alarm 觸發 → 自動跑這條 pipeline 做診斷"
             bullets={[
+              "= 以前的 Diagnostic Rule",
+              "綁定 Alarm：Auto-Patrol 觸發 alarm 後自動執行",
               "結構需含 block_alert 或 block_chart",
               "**必須宣告 inputs**（alarm payload 依名稱自動填入）",
-              "下一步：選要綁哪些 alarm event_type",
-              "常用於：OOC 後自動診斷 / recipe drift 後自動畫圖",
+              "下一步：選要綁哪些 alarm 事件",
             ]}
             accent="#7C3AED"
             onPick={() => {
