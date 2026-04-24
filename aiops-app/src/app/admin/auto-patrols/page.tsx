@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import { RenderMiddleware, type OutputSchemaField, type ChartDSL } from "@/components/operations/SkillOutputRenderer";
 import { ClarifyDialog, type ClarifyQuestion, type ClarifyAnswer } from "@/components/skill-builder/ClarifyDialog";
 
@@ -311,15 +310,19 @@ export default function AutoPatrolsPage() {
   }, []);
 
   // Deep-link from /admin/triggers: ?new=1 → auto-open create modal once.
-  const searchParams = useSearchParams();
+  // Next.js 15: useSearchParams() forces a Suspense boundary at prerender
+  // time. Since this whole page is "use client" we don't get one for free,
+  // so read from window.location directly — runs post-mount, CSR-safe.
   const autoOpenedRef = useRef(false);
   useEffect(() => {
     if (autoOpenedRef.current) return;
-    if (searchParams.get("new") === "1") {
+    if (typeof window === "undefined") return;
+    const qs = new URLSearchParams(window.location.search);
+    if (qs.get("new") === "1") {
       autoOpenedRef.current = true;
       openCreate();
     }
-  }, [searchParams]);  // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Modal helpers ─────────────────────────────────────────────────────────
 
