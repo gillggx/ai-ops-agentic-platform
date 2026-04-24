@@ -12,7 +12,7 @@
  * against alarm payload keys at runtime (see auto_check_dispatcher).
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { PipelineJSON } from "@/lib/pipeline-builder/types";
 
 interface Props {
@@ -38,6 +38,23 @@ export default function AutoCheckPublishModal({
 
   const declaredInputs = useMemo(() => pipelineJson.inputs ?? [], [pipelineJson]);
 
+  // P4.3: if the wizard stashed event_types in sessionStorage during create,
+  // pre-fill the textarea when this modal opens.
+  useEffect(() => {
+    if (!open) return;
+    try {
+      const raw = sessionStorage.getItem(`pb:pending_auto_check:${pipelineId}`);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { event_types?: string[] };
+        if (parsed?.event_types?.length) {
+          setEventTypesText(parsed.event_types.join(", "));
+        }
+      }
+    } catch {
+      // ignore malformed stash
+    }
+  }, [open, pipelineId]);
+
   if (!open) return null;
 
   const eventTypes = eventTypesText
@@ -62,6 +79,8 @@ export default function AutoCheckPublishModal({
         const text = await res.text().catch(() => "");
         throw new Error(`發佈失敗 (${res.status}): ${text.slice(0, 200)}`);
       }
+      // Clear the wizard stash now that the bind is persisted.
+      try { sessionStorage.removeItem(`pb:pending_auto_check:${pipelineId}`); } catch {}
       onPublished(eventTypes);
     } catch (e) {
       setError((e as Error).message);

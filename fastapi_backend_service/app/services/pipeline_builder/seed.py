@@ -58,11 +58,25 @@ def _blocks() -> list[dict[str, Any]]:
                 "FDC:    fdc_classification, fdc_fault_code, fdc_confidence, fdc_description\n"
                 "EC:     ec_<const>_value / _nominal / _deviation_pct / _status\n"
                 "\n"
+                "== 範圍語意（重要）==\n"
+                "當需求是「所有機台 / 全部機台 / every tool」：\n"
+                "  ✅ 正確：pipeline 宣告 input `$tool_id`，本 block 的 tool_id 參數綁 `$tool_id`；\n"
+                "     搭配 Auto-Patrol `target_scope={type:'all_equipment'}`，runtime 為每台機台 fan-out 一次\n"
+                "  ❌ 錯誤：枚舉 'EQP-01,EQP-02,EQP-03,...' 寫死進 tool_id 參數\n"
+                "     → 新機台上線時不會被自動包含，且違反 fan-out 語意\n"
+                "\n"
+                "當需求明確點名機台（如「EQP-03 的」/「EQP-01 跟 EQP-02」）：\n"
+                "  tool_id 直接寫 'EQP-03' 或 'EQP-01,EQP-02'\n"
+                "\n"
+                "當需求是條件式範圍（如「ABC recipe 的機台」）：\n"
+                "  本 block 沒辦法直接表達；請建議使用者改為「所有機台」+ 後續接 block_filter 過濾 recipe\n"
+                "\n"
                 "== Common mistakes ==\n"
                 "⚠ 欄位名是 flat snake_case，不是巢狀路徑（e.g. spc_xbar_chart_value，不是 spc.xbar.value）\n"
                 "⚠ 時間欄叫 eventTime（camelCase），不是 event_time\n"
                 "⚠ spc_status 是 string ('PASS' | 'OOC')，不是 boolean，也不叫 status\n"
                 "⚠ 三個 filter 都沒填會 NO_FILTER_GIVEN；全部空 events 會得 EMPTY_RESULT\n"
+                "⚠ 「所有機台」請勿枚舉 EQP-ID，請用 `$tool_id` input + Auto-Patrol fan-out（見『範圍語意』段）\n"
                 "\n"
                 "== Errors ==\n"
                 "- MCP_UNREACHABLE : ontology MCP 連不上（check simulator 是否在 8012）\n"
@@ -80,7 +94,16 @@ def _blocks() -> list[dict[str, Any]]:
             "param_schema": {
                 "type": "object",
                 "properties": {
-                    "tool_id":    {"type": "string", "title": "機台 ID (三擇一)", "x-suggestions": "tool_id"},
+                    "tool_id":    {
+                        "type": "string",
+                        "title": "機台 ID (三擇一)",
+                        "x-suggestions": "tool_id",
+                        "description": (
+                            "具體 ID（EQP-01）、逗號清單（EQP-01,EQP-02），或綁 pipeline input（$tool_id）。"
+                            "需求是『所有機台』時請綁 $tool_id 並配合 Auto-Patrol target_scope=all_equipment 做 runtime fan-out，"
+                            "不要枚舉 EQP-ID。"
+                        ),
+                    },
                     "lot_id":     {"type": "string", "title": "批次 ID (三擇一)"},
                     "step":       {"type": "string", "title": "站點 Step (三擇一)", "x-suggestions": "step"},
                     "object_name": {

@@ -2,40 +2,53 @@
 
 /**
  * Phase β of Option A UX consolidation:
- * Create an Auto-Patrol binding for the current pipeline without
+ * Create (or edit) an Auto-Patrol binding for the current pipeline without
  * leaving the Pipeline Builder. Fields are a lean subset of the old
  * /admin/auto-patrols form — skip skill-mode, AI step generation, and
  * diagnostic rule pickers (those live on the legacy page for now).
  *
- * P2.2 — schedule picker upgraded from raw cron to SchedulePresetPicker
- * (每 N 小時 / 每天指定時間 / 一次性指定時間 / 自訂 cron).
+ * P4.1 — trigger UI extracted to AutoPatrolTriggerForm (shared with the
+ * /admin/pipeline-builder/new wizard).
+ * P4.4 — supports edit mode: if an existing patrol is bound, hydrate from
+ * it and PATCH instead of POST.
  */
 import { useEffect, useState } from "react";
-import {
-  SchedulePresetPicker,
-  cronFromPreset,
-  type SchedulePreset,
-} from "@/components/common/SchedulePresetPicker";
+import AutoPatrolTriggerForm, {
+  emptyTrigger,
+  validateTrigger,
+  type AutoPatrolTriggerValue,
+  type EventType,
+} from "./AutoPatrolTriggerForm";
 
-type EventType = { id: number; name: string };
+interface ExistingPatrol {
+  id: number;
+  name: string;
+  description: string;
+  trigger_mode: "event" | "schedule" | "once";
+  event_type_id: number | null;
+  cron_expr: string | null;
+  scheduled_at: string | null;
+  alarm_severity: string | null;
+  alarm_title: string | null;
+  input_binding: Record<string, unknown> | null;
+}
 
 export default function AutoPatrolSetupModal({
-  open, pipelineId, pipelineName, onClose, onCreated,
+  open, pipelineId, pipelineName, onClose, onCreated, existingPatrol,
 }: {
   open: boolean;
   pipelineId: number;
   pipelineName: string;
   onClose: () => void;
   onCreated: (patrolId: number) => void;
+  /** When set, modal opens in EDIT mode — form is prefilled, Save PATCHes. */
+  existingPatrol?: ExistingPatrol | null;
 }) {
+  const isEdit = existingPatrol != null;
+
   const [name, setName]             = useState("");
   const [description, setDesc]      = useState("");
-  const [triggerMode, setTriggerMode] = useState<"schedule" | "event" | "once">("event");
-  const [preset, setPreset]         = useState<SchedulePreset>("1h");
-  const [dailyTime, setDailyTime]   = useState("09:00");
-  const [scheduledAt, setScheduledAt] = useState("");  // datetime-local format
-  const [customCron, setCustomCron] = useState("*/5 * * * *");
-  const [eventTypeId, setEventTypeId] = useState<number | null>(null);
+  const [trigger, setTrigger]       = useState<AutoPatrolTriggerValue>(emptyTrigger());
   const [severity, setSeverity]     = useState<"LOW" | "MEDIUM" | "HIGH" | "CRITICAL">("HIGH");
   const [alarmTitle, setAlarmTitle] = useState("");
   const [inputBinding, setInputBinding] = useState("{}");
@@ -51,42 +64,45 @@ export default function AutoPatrolSetupModal({
       .then(d => {
         const items = Array.isArray(d) ? d : (d?.data ?? []);
         setEventTypes(items as EventType[]);
-        if (items.length > 0 && eventTypeId === null) setEventTypeId(items[0].id);
       })
       .catch(() => setEventTypes([]));
-    // Reset form on re-open
-    setName(`[Patrol] ${pipelineName}`.slice(0, 200));
-    setAlarmTitle(pipelineName);
+    // Hydrate form from existing patrol (edit) or defaults (create)
+    if (existingPatrol) {
+      setName(existingPatrol.name);
+      setDesc(existingPatrol.description || "");
+      setTrigger({
+        mode: existingPatrol.trigger_mode,
+        eventTypeId: existingPatrol.event_type_id,
+        cronExpr: existingPatrol.cron_expr ?? "",
+        scheduledAt: existingPatrol.scheduled_at ?? "",
+      });
+      setSeverity((existingPatrol.alarm_severity as typeof severity) ?? "HIGH");
+      setAlarmTitle(existingPatrol.alarm_title ?? "");
+      setInputBinding(JSON.stringify(existingPatrol.input_binding ?? {}, null, 2));
+    } else {
+      setName(`[Patrol] ${pipelineName}`.slice(0, 200));
+      setDesc("");
+      setTrigger(emptyTrigger());
+      setSeverity("HIGH");
+      setAlarmTitle(pipelineName);
+      setInputBinding("{}");
+    }
     setError(null);
-  }, [open, pipelineName]);  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, pipelineName, existingPatrol]);  // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Keep triggerMode in sync with preset: picking "once" in the picker should
-  // switch trigger_mode to "once" so the backend schedules a DateTrigger.
+  // Default the first event_type when loaded and nothing selected
   useEffect(() => {
-    if (triggerMode === "event") return;
-    if (preset === "once" && triggerMode !== "once") setTriggerMode("once");
-    if (preset !== "once" && triggerMode === "once") setTriggerMode("schedule");
-  }, [preset, triggerMode]);
+    if (trigger.mode === "event" && trigger.eventTypeId == null && eventTypes.length > 0) {
+      setTrigger({ ...trigger, eventTypeId: eventTypes[0].id });
+    }
+  }, [eventTypes, trigger]);
 
   if (!open) return null;
 
   async function handleSave() {
     if (!name.trim()) { setError("Patrol 名稱必填"); return; }
-    if (triggerMode === "event" && eventTypeId == null) { setError("請選事件類型"); return; }
-
-    let cronExpr: string | null = null;
-    let scheduledAtIso: string | null = null;
-    if (triggerMode === "schedule") {
-      cronExpr = preset === "custom" ? customCron.trim() : cronFromPreset(preset, dailyTime);
-      if (!cronExpr) { setError("請填入有效的 cron expression"); return; }
-    } else if (triggerMode === "once") {
-      if (!scheduledAt) { setError("請選指定執行時間"); return; }
-      // Convert local datetime to ISO 8601 (with timezone)
-      const d = new Date(scheduledAt);
-      if (Number.isNaN(d.getTime())) { setError("指定時間格式無效"); return; }
-      if (d.getTime() <= Date.now()) { setError("指定時間必須在未來"); return; }
-      scheduledAtIso = d.toISOString();
-    }
+    const triggerError = validateTrigger(trigger);
+    if (triggerError) { setError(triggerError); return; }
 
     // Validate input_binding JSON
     let inputBindingParsed: Record<string, unknown> | null = null;
@@ -101,10 +117,10 @@ export default function AutoPatrolSetupModal({
       const payload = {
         name: name.trim(),
         description: description.trim(),
-        trigger_mode: triggerMode,
-        cron_expr: cronExpr,
-        scheduled_at: scheduledAtIso,
-        event_type_id: triggerMode === "event" ? eventTypeId : null,
+        trigger_mode: trigger.mode,
+        cron_expr: trigger.mode === "schedule" ? trigger.cronExpr : null,
+        scheduled_at: trigger.mode === "once" ? trigger.scheduledAt : null,
+        event_type_id: trigger.mode === "event" ? trigger.eventTypeId : null,
         execution_mode: "pipeline",
         pipeline_id: pipelineId,
         alarm_severity: severity,
@@ -114,8 +130,12 @@ export default function AutoPatrolSetupModal({
         target_scope: JSON.stringify({ type: "event_driven" }),
         is_active: true,
       };
-      const res = await fetch("/api/admin/auto-patrols", {
-        method: "POST",
+      const url = isEdit
+        ? `/api/admin/auto-patrols/${existingPatrol!.id}`
+        : "/api/admin/auto-patrols";
+      const method = isEdit ? "PATCH" : "POST";
+      const res = await fetch(url, {
+        method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
@@ -124,8 +144,8 @@ export default function AutoPatrolSetupModal({
         throw new Error(`HTTP ${res.status}: ${t.slice(0, 200)}`);
       }
       const body = await res.json();
-      const created = body?.data ?? body;
-      onCreated(created.id);
+      const saved = body?.data ?? body;
+      onCreated(saved.id ?? existingPatrol?.id ?? pipelineId);
       onClose();
     } catch (e) {
       setError((e as Error).message);
@@ -138,14 +158,16 @@ export default function AutoPatrolSetupModal({
     <div style={overlay} onClick={onClose}>
       <div style={modal} onClick={e => e.stopPropagation()}>
         <div style={header}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#1a202c" }}>🔔 Schedule as Auto-Patrol</h3>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#1a202c" }}>
+            🔔 {isEdit ? "編輯 Auto-Patrol" : "建立 Auto-Patrol"}
+          </h3>
           <button onClick={onClose} style={closeBtn}>✕</button>
         </div>
 
         <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, fontSize: 13 }}>
 
           <div style={{ fontSize: 12, color: "#718096" }}>
-            這個 patrol 會定期執行 Pipeline <code style={{ background: "#edf2f7", padding: "2px 6px", borderRadius: 3 }}>#{pipelineId} {pipelineName}</code>，觸發警報時寫入 alarms。
+            這個 patrol 會執行 Pipeline <code style={{ background: "#edf2f7", padding: "2px 6px", borderRadius: 3 }}>#{pipelineId} {pipelineName}</code>，觸發警報時寫入 alarms。
           </div>
 
           <Field label="Patrol 名稱 *">
@@ -157,55 +179,14 @@ export default function AutoPatrolSetupModal({
               placeholder="(可選，說明這個 patrol 做什麼)" />
           </Field>
 
-          <Field label="觸發模式">
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              {([
-                { v: "event",    l: "事件觸發 (例如 OOC)" },
-                { v: "schedule", l: "排程觸發" },
-                { v: "once",     l: "一次性指定時間" },
-              ] as const).map(m => (
-                <label key={m.v} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                  <input
-                    type="radio"
-                    checked={triggerMode === m.v}
-                    onChange={() => {
-                      setTriggerMode(m.v);
-                      if (m.v === "once") setPreset("once");
-                      else if (m.v === "schedule" && preset === "once") setPreset("1h");
-                    }}
-                  />
-                  {m.l}
-                </label>
-              ))}
-            </div>
+          <Field label="觸發設定">
+            <AutoPatrolTriggerForm
+              value={trigger}
+              onChange={setTrigger}
+              eventTypes={eventTypes}
+              compact
+            />
           </Field>
-
-          {triggerMode === "event" && (
-            <Field label="事件類型">
-              <select value={eventTypeId ?? ""} onChange={e => setEventTypeId(Number(e.target.value))} style={input}>
-                {eventTypes.map(et => <option key={et.id} value={et.id}>{et.name}</option>)}
-              </select>
-            </Field>
-          )}
-          {(triggerMode === "schedule" || triggerMode === "once") && (
-            <Field label={triggerMode === "once" ? "指定時間" : "排程設定"}>
-              <SchedulePresetPicker
-                preset={preset}
-                onPresetChange={(p) => {
-                  setPreset(p);
-                  if (p === "once") setTriggerMode("once");
-                  else if (triggerMode === "once") setTriggerMode("schedule");
-                }}
-                dailyTime={dailyTime}
-                onDailyTimeChange={setDailyTime}
-                scheduledAt={scheduledAt}
-                onScheduledAtChange={setScheduledAt}
-                customCron={customCron}
-                onCustomCronChange={setCustomCron}
-                layout="compact"
-              />
-            </Field>
-          )}
 
           <Field label="告警嚴重度">
             <select value={severity} onChange={e => setSeverity(e.target.value as typeof severity)} style={input}>
@@ -232,7 +213,7 @@ export default function AutoPatrolSetupModal({
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
             <button onClick={onClose} style={btn("ghost")} disabled={saving}>取消</button>
             <button onClick={handleSave} style={btn("primary")} disabled={saving}>
-              {saving ? "建立中..." : "建立 Patrol"}
+              {saving ? (isEdit ? "更新中..." : "建立中...") : (isEdit ? "儲存變更" : "建立 Patrol")}
             </button>
           </div>
         </div>

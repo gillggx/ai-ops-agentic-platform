@@ -15,9 +15,22 @@ def examples_by_name() -> dict[str, list[dict[str, Any]]]:
         # ── Sources (2) ───────────────────────────────────────────────────
         "block_process_history": [
             {
-                "name": "EQP-01 SPC 24h",
+                "name": "EQP-01 SPC 24h（點名單一機台）",
                 "summary": "抓一台機台 24 小時的 SPC 寬表（含 xbar/R/S/P/C 所有 chart）",
                 "params": {"tool_id": "EQP-01", "object_name": "SPC", "time_range": "24h", "limit": 100},
+            },
+            {
+                "name": "所有機台 SPC 24h（宣告 $tool_id input）",
+                "summary": (
+                    "使用者說『所有機台』時：pipeline 宣告 input $tool_id，本 block tool_id 綁 $tool_id，"
+                    "搭配 Auto-Patrol target_scope=all_equipment 做 runtime fan-out。"
+                    "❌ 不要枚舉 EQP-01,EQP-02,...（新機台不會被包含）"
+                ),
+                "params": {"tool_id": "$tool_id", "object_name": "SPC", "time_range": "24h", "limit": 100},
+                "upstream_hint": (
+                    "Pipeline 必須先 declare_input {name: 'tool_id', type: 'string', required: true}；"
+                    "Auto-Patrol 綁 target_scope={type:'all_equipment'}，runtime 為每台機台 fan-out 一次"
+                ),
             },
             {
                 "name": "單一 STEP 一週資料",
@@ -28,6 +41,19 @@ def examples_by_name() -> dict[str, list[dict[str, Any]]]:
                 "name": "批號精確追蹤",
                 "summary": "依 lot_id 查 events（送料批追蹤 root cause）",
                 "params": {"lot_id": "LOT-00123", "time_range": "24h"},
+            },
+            {
+                "name": "所有機台最近 10 次 process 超過 3 次 OOC（端到端 Auto-Patrol 範本）",
+                "summary": (
+                    "典型 Auto-Patrol 使用情境。Pipeline 宣告 $tool_id input，block 鏈："
+                    "process_history($tool_id) → filter(OOC) → count_rows → threshold(>=3) → alert。"
+                    "Auto-Patrol 綁 schedule（每小時）+ target_scope=all_equipment 做 fan-out。"
+                ),
+                "params": {"tool_id": "$tool_id", "time_range": "7d", "limit": 10},
+                "upstream_hint": (
+                    "這是『所有機台』範圍語意的正確示範：tool_id 綁 $tool_id（不枚舉），"
+                    "由 Auto-Patrol 的 target_scope 在 runtime 為每台機台跑一次"
+                ),
             },
         ],
         "block_mcp_call": [

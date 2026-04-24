@@ -60,6 +60,9 @@ interface Props {
   initialKind?: "auto_patrol" | "auto_check" | "skill";
   /** Phase 5: ephemeral pipeline hydrated from chat's Edit-in-Builder handoff. */
   initialPipelineJson?: PipelineJSON;
+  /** P4.3: trigger config captured in the kind+trigger wizard. Auto-binds on
+   *  first save — patrol → POST /admin/auto-patrols, check → publish-auto-check. */
+  initialPendingTrigger?: import("@/app/admin/pipeline-builder/new/page").PendingTrigger;
   /** Phase 5-UX-3b: session id — required when mode="session". Pins the AI Agent
    *  panel on the right to a specific conversation for history + continuity. */
   sessionId?: string;
@@ -91,7 +94,10 @@ export function BuilderLayoutNoProvider(props: Props) {
   return <BuilderInner {...props} />;
 }
 
-function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, sessionId, initialPrompt, fillViewport = true, agentTabContent }: Props) {
+function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, initialPendingTrigger, sessionId, initialPrompt, fillViewport = true, agentTabContent }: Props) {
+  // P4.3: pendingTrigger lives in a ref so it survives re-renders but is
+  // consumed + cleared exactly once on first save. Captured from prop on mount.
+  const pendingTriggerRef = useRef(initialPendingTrigger ?? null);
   const { state, actions, selectedNode, selectedEdge } = useBuilder();
   useBuilderKeybindings();
   const router = useRouter();
@@ -118,6 +124,24 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, sess
   const [autoCheckModalOpen, setAutoCheckModalOpen] = useState(false);
   // Option A Phase β: Auto-Patrol setup modal — inline patrol creation without leaving the Builder.
   const [autoPatrolModalOpen, setAutoPatrolModalOpen] = useState(false);
+  // P4.4: the Auto-Patrol currently bound to this pipeline (for edit mode).
+  // null = not fetched yet; undefined = fetched but none exists (unbound).
+  const [boundPatrol, setBoundPatrol] = useState<
+    | null
+    | undefined
+    | {
+        id: number;
+        name: string;
+        description: string;
+        trigger_mode: "event" | "schedule" | "once";
+        event_type_id: number | null;
+        cron_expr: string | null;
+        scheduled_at: string | null;
+        alarm_severity: string | null;
+        alarm_title: string | null;
+        input_binding: Record<string, unknown> | null;
+      }
+  >(null);
   const [autoRun, setAutoRun] = useState(false);
   const [toast, setToast] = useState<{ kind: "info" | "error" | "success"; text: string } | null>(null);
   const [nameDraft, setNameDraft] = useState(state.pipeline.name);
@@ -164,6 +188,40 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, sess
     if (!loading) setNameDraft(state.pipeline.name);
   }, [state.pipeline.name, loading]);
 
+  // P4.4: fetch any Auto-Patrol bound to this pipeline so the 🔔 button can
+  // switch label + open in edit mode. Refires when pipelineId changes (after
+  // first save the wizard-posted patrol will show up on next fetch).
+  const fetchBoundPatrol = useCallback(async () => {
+    const pid = state.meta.pipelineId;
+    if (pid == null || mode === "session") return;
+    try {
+      const res = await fetch("/api/admin/auto-patrols", { cache: "no-store" });
+      const list = await res.json();
+      const match = (Array.isArray(list) ? list : []).find(
+        (p: Record<string, unknown>) => p.pipeline_id === pid,
+      );
+      setBoundPatrol(
+        match
+          ? {
+              id: Number(match.id),
+              name: String(match.name ?? ""),
+              description: String(match.description ?? ""),
+              trigger_mode: (match.trigger_mode as "event" | "schedule" | "once") ?? "event",
+              event_type_id: (match.event_type_id as number) ?? null,
+              cron_expr: (match.cron_expr as string) ?? null,
+              scheduled_at: (match.scheduled_at as string) ?? null,
+              alarm_severity: (match.alarm_severity as string) ?? null,
+              alarm_title: (match.alarm_title as string) ?? null,
+              input_binding: (match.input_binding as Record<string, unknown>) ?? null,
+            }
+          : undefined,
+      );
+    } catch {
+      setBoundPatrol(undefined);
+    }
+  }, [state.meta.pipelineId, mode]);
+  useEffect(() => { void fetchBoundPatrol(); }, [fetchBoundPatrol]);
+
   // Warn on unload if dirty
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
@@ -193,7 +251,63 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, sess
         });
         actions.init(rec);
         actions.markSaved();
-        showToast("success", "已儲存為 Draft");
+
+        // P4.3: if wizard supplied a pendingTrigger, auto-bind now (once).
+        const pending = pendingTriggerRef.current;
+        if (pending) {
+          pendingTriggerRef.current = null;  // consume; prevent re-fire
+          try {
+            if (pending.kind === "auto_patrol") {
+              const cfg = pending.config;
+              const body = {
+                name: `[Patrol] ${state.pipeline.name}`.slice(0, 200),
+                description: state.description,
+                trigger_mode: cfg.mode,
+                cron_expr: cfg.mode === "schedule" ? cfg.cronExpr : null,
+                scheduled_at: cfg.mode === "once" ? cfg.scheduledAt : null,
+                event_type_id: cfg.mode === "event" ? cfg.eventTypeId : null,
+                execution_mode: "pipeline",
+                pipeline_id: rec.id,
+                alarm_severity: "HIGH",
+                alarm_title: state.pipeline.name,
+                target_scope: JSON.stringify({ type: "event_driven" }),
+                data_context: "event_driven",
+                is_active: true,
+              };
+              const res = await fetch("/api/admin/auto-patrols", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+              });
+              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+              showToast("success", "已儲存 Draft + 建立 Auto-Patrol 綁定");
+            } else if (pending.kind === "auto_check") {
+              const eventTypes = pending.config.eventTypesText
+                .split(/[,\n]+/).map((s) => s.trim()).filter(Boolean);
+              if (eventTypes.length > 0) {
+                // Auto-Check binding only happens at publish time (locked → active).
+                // Stash the wizard-captured event_types in sessionStorage so
+                // AutoCheckPublishModal pre-fills when the user clicks Publish.
+                try {
+                  sessionStorage.setItem(
+                    `pb:pending_auto_check:${rec.id}`,
+                    JSON.stringify({ event_types: eventTypes, ts: Date.now() }),
+                  );
+                } catch {}
+                showToast("success", `已儲存 Draft · ${eventTypes.length} 個 event_type 已記下，發佈時會自動帶入`);
+              } else {
+                showToast("success", "已儲存為 Draft");
+              }
+            }
+          } catch (bindErr) {
+            // Surface binding failure but don't block the save — user can retry
+            // via the 🔔 button after closing the toast.
+            showToast("error", `Pipeline 已儲存，但 trigger 綁定失敗：${(bindErr as Error).message}`);
+          }
+        } else {
+          showToast("success", "已儲存為 Draft");
+        }
+
         router.replace(`/admin/pipeline-builder/${rec.id}`);
       } else {
         const rec = await updatePipeline(state.meta.pipelineId, {
@@ -210,7 +324,7 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, sess
     } finally {
       setSaving(false);
     }
-  }, [state, actions, router]);
+  }, [state, actions, router, initialKind]);
 
   const handleValidate = useCallback(async () => {
     try {
@@ -698,24 +812,31 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, sess
               </button>
             </>
           )}
-          {/* Option A Phase β / P1.4: Schedule-as-Patrol moved out of `locked`-only
-              gate. Now visible for any saved, non-archived pipeline so users can
-              create/edit the Auto-Patrol binding at any lifecycle stage. */}
+          {/* P4.4: Patrol-binding button. Label reflects bound state:
+              - no binding yet  → "🔔 設定 Patrol 觸發" (blue, prominent)
+              - already bound   → "🔔 編輯 Patrol 綁定 (#id)" (ghost, less loud)
+              Hidden for skill kind (skills are on-demand, no trigger).
+              Hidden for archived pipelines. */}
           {mode !== "session"
             && state.meta.pipelineId != null
-            && state.meta.status !== "archived" && (
+            && state.meta.status !== "archived"
+            && state.meta.pipelineKind !== "skill" && (
             <button
               onClick={() => setAutoPatrolModalOpen(true)}
               style={{
                 ...btn("ghost"),
-                border: "1px solid #3182ce",
-                color: "#2c5282",
-                background: "#ebf8ff",
+                border: boundPatrol ? "1px solid #94a3b8" : "1px solid #3182ce",
+                color: boundPatrol ? "#475569" : "#2c5282",
+                background: boundPatrol ? "#fff" : "#ebf8ff",
                 fontWeight: 600,
               }}
-              title="Schedule / 事件觸發這個 pipeline — 建立 Auto-Patrol 綁定（任何階段可用）"
+              title={
+                boundPatrol
+                  ? `編輯已綁定的 Auto-Patrol #${boundPatrol.id}`
+                  : "這個 pipeline 還沒綁 trigger — 按此設定 event / schedule / 指定時間"
+              }
             >
-              🔔 Schedule as Patrol
+              🔔 {boundPatrol ? `編輯 Patrol 綁定 (#${boundPatrol.id})` : "設定 Patrol 觸發"}
             </button>
           )}
           {state.meta.status === "active" && (
@@ -738,6 +859,46 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, sess
           )}
         </div>
       </div>
+
+      {/* P4.4: banner reminding auto_patrol pipelines to bind a trigger.
+          Shown when: kind=auto_patrol, saved, not archived, no patrol bound,
+          and the bound-patrol fetch has returned (boundPatrol === undefined).
+          Legacy pipelines that predate the wizard hit this banner on open. */}
+      {mode !== "session"
+        && state.meta.pipelineId != null
+        && state.meta.pipelineKind === "auto_patrol"
+        && state.meta.status !== "archived"
+        && boundPatrol === undefined && (
+        <div
+          style={{
+            padding: "8px 18px",
+            background: "#fffbeb",
+            borderBottom: "1px solid #fde68a",
+            fontSize: 12,
+            color: "#92400e",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
+          <span>⚠️ 這個 Auto-Patrol pipeline 還沒設觸發條件。</span>
+          <button
+            onClick={() => setAutoPatrolModalOpen(true)}
+            style={{
+              padding: "3px 10px",
+              borderRadius: 4,
+              border: "1px solid #f59e0b",
+              background: "#fff",
+              color: "#b45309",
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            立即設定 →
+          </button>
+        </div>
+      )}
 
       {/* Main body: vertical PanelGroup — top(BlockLib | Canvas | Inspector) / bottom(Preview) */}
       {/* Phase 5-UX-3b session mode: AI Agent occupies a resizable right-side aside. */}
@@ -902,10 +1063,16 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, sess
           open={autoPatrolModalOpen}
           pipelineId={state.meta.pipelineId}
           pipelineName={state.pipeline.name}
+          existingPatrol={boundPatrol ?? null}
           onClose={() => setAutoPatrolModalOpen(false)}
           onCreated={(patrolId) => {
             setAutoPatrolModalOpen(false);
-            showToast("success", `已建立 Auto-Patrol #${patrolId}`);
+            showToast(
+              "success",
+              boundPatrol ? `已更新 Auto-Patrol #${patrolId}` : `已建立 Auto-Patrol #${patrolId}`,
+            );
+            // P4.4: refetch so the button relabels from "設定" → "編輯".
+            void fetchBoundPatrol();
           }}
         />
       )}
