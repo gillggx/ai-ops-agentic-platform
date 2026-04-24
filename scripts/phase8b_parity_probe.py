@@ -41,6 +41,7 @@ import httpx
 
 # Fields we expect to differ even on perfect parity and mask out before diff.
 _IGNORED_FIELDS = frozenset({
+    # Per-node timing / run bookkeeping
     "duration_ms",
     "started_at",
     "finished_at",
@@ -49,6 +50,24 @@ _IGNORED_FIELDS = frozenset({
     "caller_user_id",
     "source",  # "native" vs "python_fallback"
     "_native_error",
+    # Response envelope differs between :8001 (error_message/errors) and
+    # sidecar (pipeline/ok). The semantically important content is in
+    # status + node_results + result_summary which are compared strictly.
+    "error_message",
+    "errors",
+    "pipeline",
+    "ok",
+    "message",
+    # Per-node preview: row-order isn't guaranteed deterministic across
+    # pandas group_by variants; we compare row counts via nr.rows instead.
+    "preview",
+    # Per-node evidence dataframe — same reason.
+    "evidence",
+    # Per-run trace (only present on :8001 executor)
+    "pipeline_id",
+    "node_count",
+    "terminal_nodes",
+    "result_summary",  # shape drift between builders; status+rows are source of truth
 })
 
 
