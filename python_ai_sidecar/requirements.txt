@@ -8,3 +8,13 @@ sse-starlette==2.1.3
 httpx==0.28.1
 # Real LLM (Phase 7 B1) — Anthropic Claude client.
 anthropic==0.39.0
+# Phase 8-B: ported pipeline_builder executor + 27 blocks need pandas/numpy/scipy.
+# Pins match what fastapi_backend_service uses so pipelines behave identically.
+pandas==2.2.3
+numpy==2.1.3
+scipy==1.14.1
+# SQLAlchemy is a transitive dep of the ported block_registry.py — kept only so
+# imports don't blow up; the sidecar never opens a DB session (_sidecar_deps.py
+# raises NotImplementedError instead). Can be dropped once block_registry.py is
+# rewired to the seedless path.
+sqlalchemy==2.0.36
