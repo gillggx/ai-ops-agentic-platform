@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
-import type { PipelineJSON } from "@/lib/pipeline-builder/types";
+import type { PipelineInput, PipelineJSON } from "@/lib/pipeline-builder/types";
 import AutoPatrolTriggerForm, {
   emptyTrigger,
   validateTrigger,
@@ -14,6 +14,12 @@ import AutoCheckTriggerForm, {
   validateAutoCheckTrigger,
   type AutoCheckTriggerValue,
 } from "@/components/pipeline-builder/AutoCheckTriggerForm";
+import WizardInputsStep, { validateInputs } from "@/components/pipeline-builder/WizardInputsStep";
+import {
+  getInputSuggestions,
+  suggestionToInput,
+  type WizardTriggerMode,
+} from "@/components/pipeline-builder/wizard-input-suggestions";
 
 // React Flow can't SSR
 const BuilderLayout = dynamic(() => import("@/components/pipeline-builder/BuilderLayout"), {
@@ -21,6 +27,7 @@ const BuilderLayout = dynamic(() => import("@/components/pipeline-builder/Builde
 });
 
 type Kind = "auto_patrol" | "auto_check" | "skill";
+type Step = 1 | 2 | 3;
 
 /** Payload handed to BuilderLayout. Auto-created on first save. */
 export type PendingTrigger =
@@ -30,10 +37,10 @@ export type PendingTrigger =
 
 export default function NewPipelinePage() {
   const [kind, setKind] = useState<Kind | null>(null);
-  // P4.2 — 2-step wizard state. Step 2 only shown for auto_patrol / auto_check.
-  // Skill goes directly to Builder (step=done).
-  const [step, setStep] = useState<1 | 2>(1);
+  // 3-step wizard: kind → trigger (skill skips) → inputs → Builder
+  const [step, setStep] = useState<Step>(1);
   const [pendingTrigger, setPendingTrigger] = useState<PendingTrigger>(null);
+  const [pendingInputs, setPendingInputs] = useState<PipelineInput[]>([]);
 
   // Phase 5: ephemeral pipeline hydrated from Copilot's Edit-in-Builder button
   const [ephemeralPipeline, setEphemeralPipeline] = useState<PipelineJSON | null>(null);
@@ -46,7 +53,7 @@ export default function NewPipelinePage() {
         const payload = JSON.parse(raw) as { pipeline_json?: PipelineJSON; ts?: number };
         if (payload?.pipeline_json) {
           setEphemeralPipeline(payload.pipeline_json);
-          setKind("skill");  // chat-built pipelines default to skill (no trigger needed)
+          setKind("skill");  // chat-built pipelines default to skill
         }
         sessionStorage.removeItem("pb:ephemeral_pipeline");
       }
@@ -54,16 +61,12 @@ export default function NewPipelinePage() {
       // ignore malformed payload
     }
     // Deep-link from Triggers Overview: ?kind=auto_check skips the kind gate.
-    // Read from window.location (CSR-only) — useSearchParams would force a
-    // Suspense boundary at prerender time.
     if (typeof window !== "undefined") {
       const q = new URLSearchParams(window.location.search).get("kind");
       if (q === "auto_patrol" || q === "auto_check" || q === "skill") {
         setKind(q);
-        // Query-param landing goes through the same wizard — step 2 for
-        // auto_patrol/auto_check, straight-through for skill.
-        if (q === "skill") setStep(1);
-        else setStep(2);
+        // For patrol/check go to step 2 (trigger); for skill jump to step 3 (inputs).
+        setStep(q === "skill" ? 3 : 2);
       }
     }
     setCheckedSession(true);
@@ -71,64 +74,74 @@ export default function NewPipelinePage() {
 
   if (!checkedSession) return null;
 
-  // Done: hand off to the Builder with the captured pendingTrigger (if any).
-  const wizardDone = kind != null && (
-    kind === "skill" || step === 1 && kind == null /* never */ ||
-    // For patrol/check, step must have advanced past 2
-    (step === 2 && isTriggerReady(kind, pendingTrigger))
+  return (
+    <WizardOrBuilder
+      kind={kind}
+      setKind={setKind}
+      step={step}
+      setStep={setStep}
+      pendingTrigger={pendingTrigger}
+      setPendingTrigger={setPendingTrigger}
+      pendingInputs={pendingInputs}
+      setPendingInputs={setPendingInputs}
+      ephemeralPipeline={ephemeralPipeline}
+    />
   );
-
-  // Actually simpler: wizard is "done" when user explicitly clicks the
-  // "下一步 → 進 Builder" button, which flips a dedicated flag.
-  // But tracking that through React state is noisy; use kind presence + a
-  // separate `ready` flag below.
-  return <WizardOrBuilder
-    kind={kind}
-    setKind={setKind}
-    step={step}
-    setStep={setStep}
-    pendingTrigger={pendingTrigger}
-    setPendingTrigger={setPendingTrigger}
-    ephemeralPipeline={ephemeralPipeline}
-  />;
-}
-
-function isTriggerReady(kind: Kind | null, t: PendingTrigger): boolean {
-  if (kind === "skill") return true;
-  if (t == null) return false;
-  if (t.kind === "auto_patrol") return validateTrigger(t.config) == null;
-  if (t.kind === "auto_check") return validateAutoCheckTrigger(t.config) == null;
-  return false;
 }
 
 interface WizardProps {
   kind: Kind | null;
   setKind: (k: Kind | null) => void;
-  step: 1 | 2;
-  setStep: (s: 1 | 2) => void;
+  step: Step;
+  setStep: (s: Step) => void;
   pendingTrigger: PendingTrigger;
   setPendingTrigger: (t: PendingTrigger) => void;
+  pendingInputs: PipelineInput[];
+  setPendingInputs: (inputs: PipelineInput[]) => void;
   ephemeralPipeline: PipelineJSON | null;
 }
 
 function WizardOrBuilder({
   kind, setKind, step, setStep,
-  pendingTrigger, setPendingTrigger, ephemeralPipeline,
+  pendingTrigger, setPendingTrigger,
+  pendingInputs, setPendingInputs,
+  ephemeralPipeline,
 }: WizardProps) {
-  // "ready" = user clicked 下一步 to proceed into Builder.
+  // "ready" = user clicked "進 Builder" on the final step.
   const [ready, setReady] = useState(false);
 
-  // Skill skips step 2 — go straight to Builder when kind is picked.
+  // When user lands on step 3 with no prior pendingInputs, pre-populate with
+  // the pre-checked suggestions so the common case is already set.
   useEffect(() => {
-    if (kind === "skill") setReady(true);
-  }, [kind]);
+    if (step !== 3) return;
+    if (pendingInputs.length > 0) return;  // user already picked something
+    if (!kind) return;
+    const triggerMode: WizardTriggerMode =
+      pendingTrigger?.kind === "auto_patrol" ? pendingTrigger.config.mode : null;
+    const defaults = getInputSuggestions(kind, triggerMode)
+      .filter((s) => s.preChecked)
+      .map(suggestionToInput);
+    if (defaults.length > 0) setPendingInputs(defaults);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, kind, pendingTrigger]);
 
   if (ready && kind) {
+    // Hand off to BuilderLayout. Inputs ride on the initial pipeline_json.
+    const initialJson: PipelineJSON = {
+      version: "1.0",
+      name: "新 Pipeline",
+      metadata: {},
+      nodes: ephemeralPipeline?.nodes ?? [],
+      edges: ephemeralPipeline?.edges ?? [],
+      inputs: pendingInputs.length > 0
+        ? pendingInputs
+        : (ephemeralPipeline?.inputs ?? []),
+    };
     return (
       <BuilderLayout
         mode="new"
         initialKind={kind}
-        initialPipelineJson={ephemeralPipeline ?? undefined}
+        initialPipelineJson={initialJson}
         initialPendingTrigger={pendingTrigger}
       />
     );
@@ -138,8 +151,8 @@ function WizardOrBuilder({
   if (step === 1 || !kind) {
     return (
       <GateContainer
-        title="建立新 Pipeline"
-        subtitle="先選 Pipeline 類型 — 不同類型有不同結構檢查 + 發佈路徑。建立後仍可在 draft / validating 階段切換類型，lock / active 之後要 clone 才能改。"
+        title="建立新 Pipeline · Step 1/3"
+        subtitle="先選 Pipeline 類型 — 不同類型有不同結構檢查 + 發佈路徑。下一步會依類型設 trigger + 宣告 inputs。"
       >
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
           <KindCard
@@ -149,6 +162,7 @@ function WizardOrBuilder({
             bullets={[
               "結構需含 block_alert（必要終點）",
               "下一步：設定 event / schedule / 指定時間",
+              "再下一步：宣告 pipeline inputs",
               "常用於：機台巡檢 / SPC OOC 監控",
             ]}
             accent="#B45309"
@@ -166,8 +180,8 @@ function WizardOrBuilder({
               "= 以前的 Diagnostic Rule",
               "綁定 Alarm：Auto-Patrol 觸發 alarm 後自動執行",
               "結構需含 block_alert 或 block_chart",
-              "**必須宣告 inputs**（alarm payload 依名稱自動填入）",
               "下一步：選要綁哪些 alarm 事件",
+              "再下一步：宣告 inputs 接 alarm payload",
             ]}
             accent="#7C3AED"
             onPick={() => {
@@ -184,14 +198,14 @@ function WizardOrBuilder({
               "結構需含 block_chart（必要終點）",
               "禁止含 block_alert",
               "On-demand 呼叫，不需設 trigger",
-              "常用於：Agent 對話中調用查資料",
+              "下一步：宣告 Agent 呼叫時要傳的 inputs",
             ]}
             accent="#166534"
             onPick={() => {
               setKind("skill");
               setPendingTrigger(null);
-              // Skill bypasses step 2 entirely.
-              setReady(true);
+              // Skill bypasses trigger step — go straight to inputs step.
+              setStep(3);
             }}
           />
         </div>
@@ -199,13 +213,31 @@ function WizardOrBuilder({
     );
   }
 
-  // Step 2: Trigger config (auto_patrol / auto_check only)
+  // Step 2: Trigger config (auto_patrol / auto_check only; skill never reaches here)
+  if (step === 2) {
+    return (
+      <TriggerStep
+        kind={kind}
+        pendingTrigger={pendingTrigger}
+        setPendingTrigger={setPendingTrigger}
+        onBack={() => { setStep(1); setPendingTrigger(null); setKind(null); }}
+        onNext={() => setStep(3)}
+      />
+    );
+  }
+
+  // Step 3: Inputs
   return (
-    <TriggerStep
+    <InputsStep
       kind={kind}
       pendingTrigger={pendingTrigger}
-      setPendingTrigger={setPendingTrigger}
-      onBack={() => { setStep(1); setPendingTrigger(null); setKind(null); }}
+      pendingInputs={pendingInputs}
+      setPendingInputs={setPendingInputs}
+      onBack={() => {
+        // auto_patrol/auto_check go back to trigger step; skill goes to kind gate
+        if (kind === "skill") { setStep(1); setKind(null); }
+        else setStep(2);
+      }}
       onNext={() => setReady(true)}
     />
   );
@@ -224,7 +256,6 @@ function TriggerStep({
   const [eventTypeSuggestions, setEventTypeSuggestions] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch event types (patrol: id-dropdown; check: name-suggestion chips)
   useEffect(() => {
     fetch("/api/admin/event-types", { cache: "no-store" })
       .then((r) => r.json())
@@ -250,19 +281,12 @@ function TriggerStep({
 
   return (
     <GateContainer
-      title={kind === "auto_patrol" ? "設定 Auto-Patrol 觸發條件" : "設定 Auto-Check 觸發條件"}
+      title={(kind === "auto_patrol" ? "設定 Auto-Patrol 觸發條件" : "設定 Auto-Check 觸發條件") + " · Step 2/3"}
       subtitle={kind === "auto_patrol"
-        ? "選擇什麼時候跑這個 pipeline — 事件觸發 / 排程 / 一次性指定時間。此設定會在 pipeline 第一次儲存時自動建立 Auto-Patrol 綁定。"
-        : "選擇哪些 alarm event_type 會觸發這個 pipeline。綁定在 pipeline 發佈（→ active）時寫入。"}
+        ? "選擇什麼時候跑這個 pipeline — 事件觸發 / 排程 / 一次性指定時間。下一步會依此設定建議 inputs。"
+        : "選擇哪些 alarm event_type 會觸發這個 pipeline。下一步會建議接 alarm payload 用的 inputs。"}
     >
-      <div
-        style={{
-          padding: 24,
-          border: "1px solid #E2E8F0",
-          borderRadius: 10,
-          background: "#fff",
-        }}
-      >
+      <div style={cardBodyStyle}>
         {kind === "auto_patrol" && pendingTrigger?.kind === "auto_patrol" && (
           <AutoPatrolTriggerForm
             value={pendingTrigger.config}
@@ -284,28 +308,80 @@ function TriggerStep({
           </div>
         )}
 
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 20 }}>
-          <button
-            onClick={onBack}
-            style={{
-              padding: "8px 16px", fontSize: 13, borderRadius: 6, cursor: "pointer",
-              background: "#fff", color: "#4a5568", border: "1px solid #e2e8f0",
-            }}
-          >
-            ← 返回
-          </button>
-          <button
-            onClick={handleNext}
-            style={{
-              padding: "10px 20px", fontSize: 13, fontWeight: 600, borderRadius: 6, cursor: "pointer",
-              background: "#1890ff", color: "#fff", border: "none",
-            }}
-          >
-            下一步 → 進 Builder
-          </button>
-        </div>
+        <WizardNav onBack={onBack} onNext={handleNext} nextLabel="下一步 → 宣告 Inputs" />
       </div>
     </GateContainer>
+  );
+}
+
+function InputsStep({
+  kind, pendingTrigger, pendingInputs, setPendingInputs, onBack, onNext,
+}: {
+  kind: Kind;
+  pendingTrigger: PendingTrigger;
+  pendingInputs: PipelineInput[];
+  setPendingInputs: (inputs: PipelineInput[]) => void;
+  onBack: () => void;
+  onNext: () => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const triggerMode: WizardTriggerMode =
+    pendingTrigger?.kind === "auto_patrol" ? pendingTrigger.config.mode : null;
+
+  const handleNext = () => {
+    const err = validateInputs(pendingInputs);
+    if (err) { setError(err); return; }
+    setError(null);
+    onNext();
+  };
+
+  return (
+    <GateContainer
+      title={`宣告 Pipeline Inputs · Step 3/3`}
+      subtitle="這個 pipeline 在 runtime 會收到哪些變數？勾選常用 inputs 或自訂。至少需要 1 個 — 這是 pipeline 跟外界的契約。"
+    >
+      <div style={cardBodyStyle}>
+        <WizardInputsStep
+          kind={kind}
+          triggerMode={triggerMode}
+          value={pendingInputs}
+          onChange={setPendingInputs}
+        />
+
+        {error && (
+          <div style={{ marginTop: 12, padding: 10, background: "#fff1f0", color: "#cf1322", borderRadius: 6, fontSize: 12 }}>
+            {error}
+          </div>
+        )}
+
+        <WizardNav onBack={onBack} onNext={handleNext} nextLabel="進 Builder →" />
+      </div>
+    </GateContainer>
+  );
+}
+
+function WizardNav({ onBack, onNext, nextLabel }: { onBack: () => void; onNext: () => void; nextLabel: string }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 20 }}>
+      <button
+        onClick={onBack}
+        style={{
+          padding: "8px 16px", fontSize: 13, borderRadius: 6, cursor: "pointer",
+          background: "#fff", color: "#4a5568", border: "1px solid #e2e8f0",
+        }}
+      >
+        ← 返回
+      </button>
+      <button
+        onClick={onNext}
+        style={{
+          padding: "10px 20px", fontSize: 13, fontWeight: 600, borderRadius: 6, cursor: "pointer",
+          background: "#1890ff", color: "#fff", border: "none",
+        }}
+      >
+        {nextLabel}
+      </button>
+    </div>
   );
 }
 
@@ -376,3 +452,10 @@ function KindCard({
     </button>
   );
 }
+
+const cardBodyStyle: React.CSSProperties = {
+  padding: 24,
+  border: "1px solid #E2E8F0",
+  borderRadius: 10,
+  background: "#fff",
+};
