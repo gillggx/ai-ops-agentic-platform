@@ -39,7 +39,10 @@ public class PipelineBuilderController {
 	private final PipelineAutoCheckTriggerRepository autoCheckRepo;
 	private final ObjectMapper mapper;
 	private final AiopsProperties props;
-	private final WebClient legacyClient;
+	// Phase 8-A-1d: forward execute/validate to the Python sidecar instead
+	// of the decommissioned :8001 backend. The sidecar already runs the
+	// 27 BUILTIN_EXECUTORS in-process (block_runtime + pipeline_builder).
+	private final WebClient sidecarClient;
 
 	public PipelineBuilderController(PipelineRepository pipelineRepo,
 	                                 BlockRepository blockRepo,
@@ -47,16 +50,17 @@ public class PipelineBuilderController {
 	                                 PipelineAutoCheckTriggerRepository autoCheckRepo,
 	                                 ObjectMapper mapper,
 	                                 AiopsProperties props,
-	                                 @Value("${aiops.legacy-backend-url:http://127.0.0.1:8001}") String legacyBackendUrl) {
+	                                 WebClient pythonSidecarWebClient) {
 		this.pipelineRepo = pipelineRepo;
 		this.blockRepo = blockRepo;
 		this.publishedSkillRepo = publishedSkillRepo;
 		this.autoCheckRepo = autoCheckRepo;
 		this.mapper = mapper;
 		this.props = props;
-		this.legacyClient = WebClient.builder()
-				.baseUrl(legacyBackendUrl)
-				.codecs(c -> c.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))  // pipelines may return big DataFrame previews
+		// Wrap the auto-configured sidecar client with a larger response
+		// buffer — Pipeline executions can return big DataFrame previews.
+		this.sidecarClient = pythonSidecarWebClient.mutate()
+				.codecs(c -> c.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
 				.build();
 	}
 
@@ -141,23 +145,14 @@ public class PipelineBuilderController {
 		}).toList();
 	}
 
-	// ── POST /execute — proxy to legacy Python :8001 ─────────────────────
-	// Full pipeline execution (PipelineExecutor + block registry + MCP calls
-	// to simulator) still lives in Python. Java proxies the call until the
-	// executor is ported. Frontend "Run" button hits this.
+	// ── POST /execute — forward to sidecar /internal/pipeline/execute ────
+	// The Python sidecar runs the full 27-block executor in-process; service
+	// token is auto-injected by pythonSidecarWebClient (PythonSidecarConfig).
 	@PostMapping("/execute")
 	@SuppressWarnings({"unchecked", "rawtypes"})
 	public Map<String, Object> execute(@RequestBody Map<String, Object> body) {
-		String secret = props.auth() != null ? props.auth().sharedSecretToken() : null;
-		if (secret == null || secret.isBlank()) {
-			throw new com.aiops.api.common.ApiException(
-					org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR,
-					"internal_error",
-					"AIOPS_SHARED_SECRET_TOKEN not configured — cannot reach legacy executor");
-		}
-		return legacyClient.post()
-				.uri("/api/v1/pipeline-builder/execute")
-				.header("Authorization", "Bearer " + secret)
+		return sidecarClient.post()
+				.uri("/internal/pipeline/execute")
 				.header("Content-Type", "application/json")
 				.bodyValue(body)
 				.retrieve()
@@ -165,20 +160,12 @@ public class PipelineBuilderController {
 				.block();
 	}
 
-	// ── POST /validate — same pattern (used by agent Glass Box flow) ─────
+	// ── POST /validate — forward to sidecar /internal/pipeline/validate ──
 	@PostMapping("/validate")
 	@SuppressWarnings({"unchecked", "rawtypes"})
 	public Map<String, Object> validate(@RequestBody Map<String, Object> body) {
-		String secret = props.auth() != null ? props.auth().sharedSecretToken() : null;
-		if (secret == null || secret.isBlank()) {
-			throw new com.aiops.api.common.ApiException(
-					org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR,
-					"internal_error",
-					"AIOPS_SHARED_SECRET_TOKEN not configured");
-		}
-		return legacyClient.post()
-				.uri("/api/v1/pipeline-builder/validate")
-				.header("Authorization", "Bearer " + secret)
+		return sidecarClient.post()
+				.uri("/internal/pipeline/validate")
 				.header("Content-Type", "application/json")
 				.bodyValue(body)
 				.retrieve()
