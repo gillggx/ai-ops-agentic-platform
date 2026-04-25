@@ -21,3 +21,10 @@ scipy==1.14.1
 # raises NotImplementedError instead). Can be dropped once block_registry.py is
 # rewired to the seedless path.
 sqlalchemy==2.0.36
+# Phase 8-A-1d: chat orchestrator native — LangGraph runs in-process here now.
+# pins match fastapi_backend_service so behaviour is identical.
+langchain-core>=0.3.0
+langgraph>=0.2.0
+# Mem0 cloud is the primary semantic-memory backend used by the ported
+# agent_memory_service; if MEM0_API_KEY is unset it silently no-ops.
+mem0ai>=0.1.29
