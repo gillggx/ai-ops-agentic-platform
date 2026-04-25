@@ -96,7 +96,7 @@ python_ai_sidecar/
 | Method | Path | 流向 | 說明 |
 |---|---|---|---|
 | GET | `/internal/health` | – | health probe（不檢 token） |
-| POST | `/internal/agent/chat` | SSE | Phase 8-A：**fallback → :8001 為主**（如 fallback 失敗 / `FALLBACK_ENABLED=0` 才走 native LangGraph） |
+| POST | `/internal/agent/chat` | SSE | **Native** — `AgentOrchestratorV2`（LangGraph）跑 in-process；DB 都走 Java client。Fallback 仍存但 prod `.env` 預設 `FALLBACK_ENABLED=0` |
 | POST | `/internal/agent/build` | SSE | **Native only** — Glass Box builder（Phase 8-A-3 已 drop fallback；失敗就 SSE error event） |
 | POST | `/internal/pipeline/execute` | sync | DAG runner — 跑 pipeline_json，回 row data |
 | POST | `/internal/pipeline/validate` | sync | block 驗證（不執行） |
@@ -121,22 +121,22 @@ python_ai_sidecar/
 
 Block catalog 從 Java `/internal/blocks` 拉（透過 [JavaAPIClient](python_ai_sidecar/clients/java_client.py)）。
 
-## 6. Chat Orchestrator v2（目前走 fallback）
+## 6. Chat Orchestrator v2（native，Phase 8-A-1d 完成）
 
 [agent_orchestrator_v2/](python_ai_sidecar/agent_orchestrator_v2/) — LangGraph StateGraph，6 個 node：
 
-| Node | 任務 | DB coupling |
+| Node | 任務 | DB / 外部依賴 |
 |---|---|---|
-| `load_context` | 讀 MCP / Skill / UserPreference catalog | ✗ DB（透過 sqlalchemy session） |
-| `llm_call` | Claude tool-use | – |
-| `tool_execute` | 分派 MCP / Skill | ✗ DB（透過 tool_dispatcher） |
-| `self_critique` | 自我批判 / 重試 | – |
+| `load_context` | 讀 MCP / Skill / UserPreference / SystemParameter catalog | ✓ Java `/internal/*`（透過 `JavaAPIClient`） |
+| `llm_call` | Claude tool-use | sidecar [llm_client](python_ai_sidecar/agent_helpers_native/llm_client.py)（Anthropic SDK） |
+| `tool_execute` | 分派 MCP / Skill / build_pipeline_live | Java `/internal/pipelines`、`/internal/agent-sessions`、ToolDispatcher 透過 Java client |
+| `self_critique` | 自我批判 / 重試 | sidecar llm_client |
 | `synthesis` | 組 AIOpsReportContract | – |
-| `memory_lifecycle` | mem0 + pgvector 寫入 | ✗ DB |
+| `memory_lifecycle` | abstract memory（LLM）+ Java pgvector 寫入 | sidecar [memory_abstraction](python_ai_sidecar/agent_helpers_native/memory_abstraction.py) + Java `/internal/agent-experience-memories` |
 
-**為什麼還走 fallback：** 4 個 node 仍 expect `db: AsyncSession`，sidecar `_sidecar_deps._get_session_factory()` raise NotImplementedError，所以 sidecar 自己跑會炸。Phase 8-A-1c 結束時決定 build native + chat 留 fallback（[python_proxy.py](python_ai_sidecar/fallback/python_proxy.py) → :8001）。
+**Wiring：** [routers/agent.py:_chat_stream_native](python_ai_sidecar/routers/agent.py) 直接 instantiate `AgentOrchestratorV2(db=None, ...)`。`db=None` 觸發每個 node 走 Java client 路徑。
 
-完成 chat native 需把 4 個 DB-coupled node rewire 到 [JavaAPIClient](python_ai_sidecar/clients/java_client.py) — 估 4-6h，下次 session 處理。
+**Fallback：** 仍存在於 [fallback/python_proxy.py](python_ai_sidecar/fallback/python_proxy.py)，但 prod `.env` 預設 `FALLBACK_ENABLED=0`，因此實際從不命中。Phase 8-D 會徹底刪掉 + 關 :8001（已關，2026-04-25）。
 
 ## 7. Pipeline Builder Executor（27 blocks native）
 
@@ -210,12 +210,12 @@ DB-touching block（`block_mcp_call`, `block_mcp_foreach`）走 [JavaAPIClient](
 
 ## 12. 已知缺口
 
-1. **Chat 還在 fallback** — orchestrator_v2 的 4 個 DB-coupled node 沒 rewire 到 Java client。`:8001` 因此不能關
-2. **`agent_helpers/_model_stubs.py`** — sqlalchemy model 是 stub，真實使用需 port 對應 pydantic DTO
-3. **`block_registry.py` 兩條 path 並存** — `BUILTIN_EXECUTORS` 是純 in-memory（27 blocks works），`load_from_db` 還在但會炸（_get_session_factory NotImplementedError）。應徹底拔 DB path
+1. ~~**Chat 還在 fallback**~~ — ✅ 解決（Phase 8-A-1d, 2026-04-25）：chat 完全 native，:8001 已關
+2. **`agent_helpers/_model_stubs.py`** — sqlalchemy model 是 stub，僅給 in-process 測試 fallback 用
+3. **`block_registry.py` 改走 Java** — `load_from_db` 變成 alias 到 `load_from_java`，DB 路徑已拔；可以再清掉 sqlalchemy import
 4. **`executor/block_runtime.py` 是 6-block 玩具版** — pipeline_builder/ 有 27 blocks 是真實版；兩套 registry 並存容易誤用
-5. **mem0ai / asyncpg / pgvector 沒列在 requirements** — chat fallback 中其實沒用到，但 native 路徑要先補
-6. **`hardcode "$schema": "aiops-report/v1"`** in helpers.py L321/L413 — 應 import aiops_contract.SCHEMA_VERSION
+5. **`hardcode "$schema": "aiops-report/v1"`** in helpers.py L321/L413 — 應 import `aiops_contract.SCHEMA_VERSION`
+6. **`fallback/python_proxy.py`** 仍在 — prod `FALLBACK_ENABLED=0`，下波清理徹底刪掉
 
 ## 13. 變更指南
 

@@ -1,12 +1,13 @@
 # fastapi_backend_service — Spec
 
 **Date:** 2026-04-25
-**HEAD:** 5114b9b
-**Status:** **Decommissioning（Phase 8）** — Living Document
+**HEAD:** 17b9112
+**Status:** **OFFLINE — Decommissioned 2026-04-25** — Living Document
 
-> ⚠️ **本 service 正在逐步退場。** Phase 8 後新功能不准進這個 codebase。
-> 流量大部分已遷到 [Java :8002](../java-backend/SPEC.md) + [Python sidecar :8050](../python_ai_sidecar/SPEC.md)；
-> 此 service 目前僅作為 sidecar 的 chat fallback 上游存在。
+> ⛔ **本 service 已關機**（Phase 8-A-1d 完成）。`fastapi-backend.service` 已 stop + disable。
+> 所有流量走 [Java :8002](../java-backend/SPEC.md) + [Python sidecar :8050](../python_ai_sidecar/SPEC.md)。
+> nginx `/api/v1/`, `/health`, `/docs`, `/openapi.json` 全 reroute 到 `:8002`。
+> 此 codebase 留作 git history 與未來考古；**不准 PR**。
 
 ---
 
