@@ -7,7 +7,10 @@ sse-starlette==2.1.3
 # FastAPI doesn't always pull it in as a hard dep, so pin explicitly.
 httpx==0.28.1
 # Real LLM (Phase 7 B1) — Anthropic Claude client.
-anthropic==0.39.0
+# Phase 8-A-1c: upgraded from 0.39.0 → 0.42+ to drop removed `proxies=` kwarg
+# (httpx 0.28+ removed it; 0.39.0's AsyncHttpxClientWrapper still passes it and
+# explodes at import/init time).
+anthropic>=0.42.0,<1.0.0
 # Phase 8-B: ported pipeline_builder executor + 27 blocks need pandas/numpy/scipy.
 # Pins match what fastapi_backend_service uses so pipelines behave identically.
 pandas==2.2.3
