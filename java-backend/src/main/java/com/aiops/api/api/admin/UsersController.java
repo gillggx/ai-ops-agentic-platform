@@ -4,16 +4,22 @@ import com.aiops.api.auth.AuthPrincipal;
 import com.aiops.api.auth.Authorities;
 import com.aiops.api.auth.Role;
 import com.aiops.api.auth.RoleCodec;
+import com.aiops.api.auth.SegregationOfDuties;
+import com.aiops.api.auth.UserAccountService;
 import com.aiops.api.common.ApiException;
 import com.aiops.api.common.ApiResponse;
 import com.aiops.api.domain.user.RoleChangeLogEntity;
 import com.aiops.api.domain.user.RoleChangeLogRepository;
 import com.aiops.api.domain.user.UserEntity;
 import com.aiops.api.domain.user.UserRepository;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.OffsetDateTime;
@@ -39,13 +45,28 @@ public class UsersController {
 	private final UserRepository userRepository;
 	private final RoleChangeLogRepository logRepository;
 	private final RoleCodec roleCodec;
+	private final UserAccountService userAccountService;
 
 	public UsersController(UserRepository userRepository,
 	                       RoleChangeLogRepository logRepository,
-	                       RoleCodec roleCodec) {
+	                       RoleCodec roleCodec,
+	                       UserAccountService userAccountService) {
 		this.userRepository = userRepository;
 		this.logRepository = logRepository;
 		this.roleCodec = roleCodec;
+		this.userAccountService = userAccountService;
+	}
+
+	@PostMapping
+	@Transactional
+	public ApiResponse<UserDto> createUser(@Validated @RequestBody CreateUserRequest req,
+	                                        @AuthenticationPrincipal AuthPrincipal actor) {
+		Set<Role> roles = parseRoles(req.roles());
+		SegregationOfDuties.validate(roles);
+		UserEntity u = userAccountService.createUser(req.username(), req.email(), req.password(), roles);
+		log.info("actor user_id={} created local user {} with roles {}",
+				actor != null ? actor.userId() : "system", u.getUsername(), roles);
+		return ApiResponse.ok(toDto(u));
 	}
 
 	@GetMapping
@@ -161,4 +182,10 @@ public class UsersController {
 	public record RoleChangeLogDto(Long id, Integer targetUserId, Integer actorUserId,
 	                                String oldRoles, String newRoles, String reason,
 	                                OffsetDateTime changedAt) {}
+
+	public record CreateUserRequest(
+			@NotBlank String username,
+			@NotBlank @Email String email,
+			@NotBlank String password,
+			@NotEmpty List<String> roles) {}
 }
