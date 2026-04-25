@@ -82,11 +82,17 @@ public class AuthController {
 		}
 		Object p = authentication.getPrincipal();
 		if (p instanceof AuthPrincipal ap) {
-			return ApiResponse.ok(Map.of(
-					"id", ap.userId(),
-					"username", ap.username(),
-					"roles", ap.roles().stream().map(Enum::name).toList()
-			));
+			// Enrich with DB fields the principal doesn't carry (email / displayName / oidc_provider)
+			var user = userAccountService.loadUserById(ap.userId());
+			Map<String, Object> body = new java.util.HashMap<>();
+			body.put("id", ap.userId());
+			body.put("username", ap.username());
+			body.put("email", user != null ? user.getEmail() : null);
+			body.put("display_name", user != null && user.getDisplayName() != null
+					? user.getDisplayName() : ap.username());
+			body.put("roles", ap.roles().stream().map(Enum::name).toList());
+			body.put("oidc_provider", user != null ? user.getOidcProvider() : null);
+			return ApiResponse.ok(body);
 		}
 		// OIDC path — principal is a Jwt with subject claim
 		Set<Role> roles = Set.of();
@@ -96,5 +102,31 @@ public class AuthController {
 		));
 	}
 
+	@PutMapping("/me")
+	public ApiResponse<Map<String, Object>> updateMe(@RequestBody UpdateProfileRequest req,
+	                                                  @org.springframework.security.core.annotation.AuthenticationPrincipal AuthPrincipal principal) {
+		if (principal == null) throw ApiException.forbidden("not authenticated");
+		var user = userAccountService.updateDisplayName(principal.userId(), req.displayName());
+		return ApiResponse.ok(Map.of(
+				"id", user.getId(),
+				"username", user.getUsername(),
+				"email", user.getEmail(),
+				"display_name", user.getDisplayName() != null ? user.getDisplayName() : user.getUsername()
+		));
+	}
+
+	@PutMapping("/me/password")
+	public ApiResponse<Map<String, Object>> changePassword(@org.springframework.validation.annotation.Validated
+	                                                        @RequestBody ChangePasswordRequest req,
+	                                                        @org.springframework.security.core.annotation.AuthenticationPrincipal AuthPrincipal principal) {
+		if (principal == null) throw ApiException.forbidden("not authenticated");
+		userAccountService.changePassword(principal.userId(), req.oldPassword(), req.newPassword());
+		return ApiResponse.ok(Map.of("status", "changed"));
+	}
+
 	public record LoginRequest(@NotBlank String username, @NotBlank String password) {}
+	public record UpdateProfileRequest(String displayName) {}
+	public record ChangePasswordRequest(
+			@NotBlank String oldPassword,
+			@NotBlank String newPassword) {}
 }

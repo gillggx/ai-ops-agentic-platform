@@ -60,6 +60,11 @@ public class UserAccountService {
 	}
 
 	@Transactional(readOnly = true)
+	public UserEntity loadUserById(Long id) {
+		return userRepository.findById(id).orElse(null);
+	}
+
+	@Transactional(readOnly = true)
 	public AuthPrincipal loadByUsername(String username) {
 		UserEntity user = userRepository.findByUsername(username)
 				.orElseThrow(() -> ApiException.forbidden("user not found"));
@@ -71,5 +76,38 @@ public class UserAccountService {
 		return userRepository.findById(userId)
 				.map(u -> roleCodec.decode(u.getRoles()))
 				.orElse(EnumSet.noneOf(Role.class));
+	}
+
+	/**
+	 * Change password for a local account. Caller MUST be authenticated as
+	 * the target user. Rejects OIDC-only accounts (no real password) and
+	 * enforces a basic minimum length.
+	 */
+	@Transactional
+	public void changePassword(Long userId, String oldPassword, String newPassword) {
+		UserEntity user = userRepository.findById(userId)
+				.orElseThrow(() -> ApiException.notFound("user"));
+		if (user.getOidcProvider() != null && !user.getOidcProvider().isBlank()) {
+			throw ApiException.badRequest(
+					"此帳號透過 " + user.getOidcProvider() + " 登入，請到該識別提供者變更密碼");
+		}
+		if (!passwordEncoder.matches(oldPassword, user.getHashedPassword())) {
+			throw ApiException.forbidden("舊密碼錯誤");
+		}
+		if (newPassword == null || newPassword.length() < 6) {
+			throw ApiException.badRequest("新密碼長度至少 6 字元");
+		}
+		user.setHashedPassword(passwordEncoder.encode(newPassword));
+		userRepository.save(user);
+	}
+
+	/** Update a user's display_name. Returns the updated entity. */
+	@Transactional
+	public UserEntity updateDisplayName(Long userId, String displayName) {
+		UserEntity user = userRepository.findById(userId)
+				.orElseThrow(() -> ApiException.notFound("user"));
+		user.setDisplayName(displayName == null || displayName.isBlank()
+				? user.getUsername() : displayName.trim());
+		return userRepository.save(user);
 	}
 }

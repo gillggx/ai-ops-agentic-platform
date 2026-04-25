@@ -29,6 +29,10 @@ public class UserEntity extends Auditable {
 	@Column(name = "email", nullable = false, length = 255, unique = true)
 	private String email;
 
+	/** User-facing label. Editable via /me/profile. Falls back to username. */
+	@Column(name = "display_name", length = 150)
+	private String displayName;
+
 	@Column(name = "hashed_password", nullable = false, length = 255)
 	private String hashedPassword;
 
