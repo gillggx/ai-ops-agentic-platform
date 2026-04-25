@@ -103,47 +103,24 @@ async def _build_stream_native(req: BuildRequest, caller: CallerContext) -> Asyn
 
 
 async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
-    """Top-level dispatcher: try native Glass Box first, fall back to :8001
-    on import error or when ANTHROPIC_API_KEY is missing."""
+    """Phase 8-A-3: native-only Glass Box. Fallback removed — native path
+    proved stable in A-1c smoke. If native fails, surface the error as an
+    SSE frame instead of silently proxying to :8001."""
     import os
     if not os.environ.get("ANTHROPIC_API_KEY"):
-        if fb.fallback_enabled():
-            log.info("ANTHROPIC_API_KEY not set — falling back to :8001 for /agent/build")
-            try:
-                body: dict = {"instruction": req.instruction}
-                if req.pipeline_id is not None: body["pipeline_id"] = req.pipeline_id
-                if req.pipeline_snapshot is not None: body["pipeline_snapshot"] = req.pipeline_snapshot
-                async for ev in fb.stream_sse("/api/v1/agent/build", body, caller):
-                    yield ev
-                return
-            except Exception as ex:  # noqa: BLE001
-                yield fb.format_fallback_error(ex)
-                return
         yield {"event": "error", "data": json.dumps({
-            "message": "ANTHROPIC_API_KEY not set + fallback disabled",
+            "message": "ANTHROPIC_API_KEY not set on sidecar — /agent/build unavailable",
         })}
         yield {"event": "done", "data": json.dumps({"status": "failed"})}
         return
 
-    # Native path
     try:
         async for ev in _build_stream_native(req, caller):
             yield ev
-        return
     except Exception as ex:  # noqa: BLE001
-        log.exception("native build failed — falling back to :8001")
-        if fb.fallback_enabled():
-            try:
-                body: dict = {"instruction": req.instruction}
-                if req.pipeline_id is not None: body["pipeline_id"] = req.pipeline_id
-                if req.pipeline_snapshot is not None: body["pipeline_snapshot"] = req.pipeline_snapshot
-                async for ev in fb.stream_sse("/api/v1/agent/build", body, caller):
-                    yield ev
-                return
-            except Exception:  # noqa: BLE001
-                pass
+        log.exception("native build failed")
         yield {"event": "error", "data": json.dumps({
-            "message": f"native + fallback failed: {ex.__class__.__name__}: {str(ex)[:200]}",
+            "message": f"native build failed: {ex.__class__.__name__}: {str(ex)[:200]}",
         })}
         yield {"event": "done", "data": json.dumps({"status": "failed"})}
 
