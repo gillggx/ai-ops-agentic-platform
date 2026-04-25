@@ -37,6 +37,12 @@ class _Settings:
         self.FALLBACK_PYTHON_URL: str = os.environ.get(
             "FALLBACK_PYTHON_URL", "http://localhost:8001"
         )
+        # Phase 8-A: agent_builder + agent_orchestrator_v2 need direct
+        # Anthropic access; key is on the sidecar's env.
+        self.ANTHROPIC_API_KEY: str = os.environ.get("ANTHROPIC_API_KEY", "")
+        self.ANTHROPIC_MODEL: str = os.environ.get(
+            "ANTHROPIC_MODEL", "claude-sonnet-4-20250514"
+        )
 
 
 _settings_singleton: _Settings | None = None

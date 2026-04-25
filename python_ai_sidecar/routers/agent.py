@@ -64,55 +64,88 @@ async def _chat_stream(req: ChatRequest, caller: CallerContext) -> AsyncGenerato
         yield event
 
 
-async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
-    if fb.fallback_enabled():
+async def _build_stream_native(req: BuildRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
+    """Phase 8-A-1c: native Glass Box agent in sidecar.
+
+    Uses the ported `agent_builder.stream_agent_build` (Anthropic SDK +
+    BlockRegistry) directly. No DB session needed — the registry is loaded
+    seed-side, and there's no cross-request state besides what the
+    AgentBuilderSession holds in memory.
+    """
+    import os
+    from python_ai_sidecar.agent_builder.session import AgentBuilderSession
+    from python_ai_sidecar.agent_builder.orchestrator import stream_agent_build
+    from python_ai_sidecar.pipeline_builder.seedless_registry import SeedlessBlockRegistry
+    from python_ai_sidecar.pipeline_builder.pipeline_schema import PipelineJSON
+
+    base_pipeline: PipelineJSON | None = None
+    if req.pipeline_snapshot:
         try:
-            body: dict = {"instruction": req.instruction}
-            if req.pipeline_id is not None:
-                body["pipeline_id"] = req.pipeline_id
-            if req.pipeline_snapshot is not None:
-                body["pipeline_snapshot"] = req.pipeline_snapshot
-            async for ev in fb.stream_sse("/api/v1/agent/build", body, caller):
-                yield ev
-            return
+            base_pipeline = PipelineJSON.model_validate(req.pipeline_snapshot)
         except Exception as ex:  # noqa: BLE001
-            log.warning("build fallback failed (%s) — using native scaffold", ex.__class__.__name__)
-            yield fb.format_fallback_error(ex)
+            log.warning("pipeline_snapshot parse failed (%s) — starting empty", ex)
 
-    # Native scaffold (Phase 5b): emit pb_glass_* envelope from Java catalog.
-    java = JavaAPIClient.for_caller(caller)
-    yield {"event": "pb_glass_start", "data": json.dumps({
-        "instruction": req.instruction,
-        "pipeline_id": req.pipeline_id,
-        "caller_user_id": caller.user_id,
-    })}
-    try:
-        blocks = await java.list_blocks(status="active")
-        yield {"event": "pb_glass_chat", "data": json.dumps({
-            "content": f"Loaded {len(blocks)} active blocks from Java.",
+    session = AgentBuilderSession.new(
+        user_prompt=req.instruction,
+        base_pipeline=base_pipeline,
+        base_pipeline_id=req.pipeline_id,
+    )
+    registry = SeedlessBlockRegistry()
+    registry.load()
+
+    model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+    async for stream_event in stream_agent_build(session, registry, model=model):
+        # StreamEvent: {type, data}; sse_starlette EventSourceResponse takes {event, data}
+        yield {
+            "event": stream_event.type,
+            "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
+        }
+
+
+async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
+    """Top-level dispatcher: try native Glass Box first, fall back to :8001
+    on import error or when ANTHROPIC_API_KEY is missing."""
+    import os
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        if fb.fallback_enabled():
+            log.info("ANTHROPIC_API_KEY not set — falling back to :8001 for /agent/build")
+            try:
+                body: dict = {"instruction": req.instruction}
+                if req.pipeline_id is not None: body["pipeline_id"] = req.pipeline_id
+                if req.pipeline_snapshot is not None: body["pipeline_snapshot"] = req.pipeline_snapshot
+                async for ev in fb.stream_sse("/api/v1/agent/build", body, caller):
+                    yield ev
+                return
+            except Exception as ex:  # noqa: BLE001
+                yield fb.format_fallback_error(ex)
+                return
+        yield {"event": "error", "data": json.dumps({
+            "message": "ANTHROPIC_API_KEY not set + fallback disabled",
         })}
-        picked = blocks[0] if blocks else None
-        if picked:
-            yield {"event": "pb_glass_op", "data": json.dumps({
-                "op": "add_node",
-                "payload": {
-                    "node_id": "n_1",
-                    "block": picked.get("name"),
-                    "category": picked.get("category"),
-                },
-                "reasoning": "first active block as placeholder (native scaffold)",
-            })}
-        else:
-            yield {"event": "pb_glass_chat", "data": json.dumps({
-                "content": "No active blocks — seed pb_blocks first.",
-            })}
-    except Exception as ex:  # noqa: BLE001
-        log.exception("build native failure")
-        yield {"event": "pb_glass_error", "data": json.dumps({"message": str(ex)[:200]})}
+        yield {"event": "done", "data": json.dumps({"status": "failed"})}
+        return
 
-    yield {"event": "pb_glass_done", "data": json.dumps({
-        "summary": "Phase 7 native scaffold — fallback disabled or failed.",
-    })}
+    # Native path
+    try:
+        async for ev in _build_stream_native(req, caller):
+            yield ev
+        return
+    except Exception as ex:  # noqa: BLE001
+        log.exception("native build failed — falling back to :8001")
+        if fb.fallback_enabled():
+            try:
+                body: dict = {"instruction": req.instruction}
+                if req.pipeline_id is not None: body["pipeline_id"] = req.pipeline_id
+                if req.pipeline_snapshot is not None: body["pipeline_snapshot"] = req.pipeline_snapshot
+                async for ev in fb.stream_sse("/api/v1/agent/build", body, caller):
+                    yield ev
+                return
+            except Exception:  # noqa: BLE001
+                pass
+        yield {"event": "error", "data": json.dumps({
+            "message": f"native + fallback failed: {ex.__class__.__name__}: {str(ex)[:200]}",
+        })}
+        yield {"event": "done", "data": json.dumps({"status": "failed"})}
 
 
 @router.post("/chat")
