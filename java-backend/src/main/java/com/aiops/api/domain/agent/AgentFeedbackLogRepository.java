@@ -16,10 +16,19 @@ public interface AgentFeedbackLogRepository extends JpaRepository<AgentFeedbackL
 	Optional<AgentFeedbackLogEntity> findBySessionIdAndMessageIdxAndUserId(
 			String sessionId, Integer messageIdx, Long userId);
 
+	/**
+	 * Recent feedback rows newest-first, optionally filtered by lower-bound time.
+	 * <p>Split into two methods because Postgres' JDBC driver can't infer a
+	 * type for a NULL-typed parameter in ``:since IS NULL OR ...`` patterns
+	 * (raises "could not determine data type of parameter $1").
+	 */
 	@Query("SELECT f FROM AgentFeedbackLogEntity f "
-			+ "WHERE (:since IS NULL OR f.createdAt >= :since) "
+			+ "WHERE f.createdAt >= :since "
 			+ "ORDER BY f.createdAt DESC")
-	List<AgentFeedbackLogEntity> findRecent(
+	List<AgentFeedbackLogEntity> findRecentSince(
 			@Param("since") OffsetDateTime since,
 			Pageable pageable);
+
+	@Query("SELECT f FROM AgentFeedbackLogEntity f ORDER BY f.createdAt DESC")
+	List<AgentFeedbackLogEntity> findRecentAll(Pageable pageable);
 }

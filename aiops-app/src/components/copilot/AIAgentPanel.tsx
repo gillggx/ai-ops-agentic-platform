@@ -1056,17 +1056,18 @@ export function AIAgentPanel({
       m.id === msg.id ? { ...m, feedbackSubmitting: true } : m,
     ));
     try {
+      // Java is configured with Jackson SNAKE_CASE — keys must match.
       const body: Record<string, unknown> = {
-        sessionId: sessionIdRef.current,
-        messageIdx: msg.messageIdx,
+        session_id: sessionIdRef.current,
+        message_idx: msg.messageIdx,
         rating,
       };
       if (rating === -1) {
         body.reason = reason;
-        if (freeText) body.freeText = freeText;
+        if (freeText) body.free_text = freeText;
       }
       // Snapshot the answer so post-hoc review can read context standalone.
-      body.contractSummary = msg.contract?.summary ?? msg.content.slice(0, 500);
+      body.contract_summary = msg.contract?.summary ?? msg.content.slice(0, 500);
       const res = await fetch("/api/agent/feedback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

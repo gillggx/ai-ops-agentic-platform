@@ -96,7 +96,10 @@ public class AgentFeedbackController {
 			@RequestParam(required = false) OffsetDateTime since,
 			@RequestParam(defaultValue = "100") int limit) {
 		int safe = Math.min(Math.max(limit, 1), MAX_LIMIT);
-		var rows = repository.findRecent(since, PageRequest.of(0, safe));
+		var page = PageRequest.of(0, safe);
+		var rows = (since != null)
+				? repository.findRecentSince(since, page)
+				: repository.findRecentAll(page);
 		return ApiResponse.ok(rows.stream().map(FeedbackDto::of).toList());
 	}
 

@@ -83,17 +83,18 @@ fi
 
 # ── Restart services ──────────────────────────────────────────────────────
 echo "🔁  重啟服務..."
+# Phase 8-A-1d: fastapi-backend (:8001) decommissioned 2026-04-25;
+# update.sh no longer restarts it. Java + sidecar redeploy lives in
+# deploy/java-update.sh — run that separately when those change.
 # Kill stale processes on target ports
 sudo -n fuser -k 8000/tcp 2>/dev/null || true
-sudo -n fuser -k 8001/tcp 2>/dev/null || true
 sudo -n fuser -k 8012/tcp 2>/dev/null || true
 sleep 1
 
-if sudo -n systemctl restart fastapi-backend aiops-app ontology-simulator 2>/dev/null; then
+if sudo -n systemctl restart aiops-app ontology-simulator 2>/dev/null; then
   echo "    systemctl restart OK"
 else
   echo "    ⚠️  sudo systemctl unavailable — pkill fallback"
-  pkill -9 -f "venv_backend/bin/uvicorn"  2>/dev/null || true
   pkill -9 -f "node.*standalone/server.js" 2>/dev/null || true
   pkill -9 -f "venv_ontology/bin/uvicorn"  2>/dev/null || true
   echo "    Waiting 20s for systemd to respawn..."
@@ -121,13 +122,19 @@ fi
 echo ""
 echo "🔍  Health checks..."
 
-BACKEND_OK=false
 FRONTEND_OK=false
 ONTOLOGY_OK=false
+JAVA_OK=false
+SIDECAR_OK=false
 
-wait_for_http "http://127.0.0.1:8001/health" "FastAPI backend (8001)" && BACKEND_OK=true
 wait_for_http "http://127.0.0.1:8000" "AIOps app (8000)" && FRONTEND_OK=true
 wait_for_http "http://127.0.0.1:8012/api/v1/status" "Ontology simulator (8012)" && ONTOLOGY_OK=true
+wait_for_http "http://127.0.0.1:8002/api/v1/health" "Java API (8002)" && JAVA_OK=true
+# Sidecar replies 401 without service token — that still means it's UP.
+if curl -sf --max-time 3 http://127.0.0.1:8050/internal/health -o /dev/null 2>/dev/null \
+  || curl -s --max-time 3 -o /dev/null -w "%{http_code}" http://127.0.0.1:8050/internal/agent/chat 2>/dev/null | grep -qE "^(401|405|422)$"; then
+  SIDECAR_OK=true
+fi
 
 echo ""
 echo "════════════════════════════════════════"
@@ -135,13 +142,15 @@ echo "  Deploy Summary"
 echo "════════════════════════════════════════"
 $FRONTEND_OK && echo "  ✅  AIOps app             (8000)  HEALTHY" \
              || echo "  ❌  AIOps app             (8000)  FAILED"
-$BACKEND_OK  && echo "  ✅  FastAPI backend       (8001)  HEALTHY" \
-             || echo "  ❌  FastAPI backend       (8001)  FAILED"
+$JAVA_OK     && echo "  ✅  Java API              (8002)  HEALTHY" \
+             || echo "  ❌  Java API              (8002)  FAILED"
+$SIDECAR_OK  && echo "  ✅  Python sidecar        (8050)  HEALTHY" \
+             || echo "  ❌  Python sidecar        (8050)  FAILED"
 $ONTOLOGY_OK && echo "  ✅  Ontology simulator    (8012)  HEALTHY" \
              || echo "  ❌  Ontology simulator    (8012)  FAILED"
 echo "════════════════════════════════════════"
 
-if ! $BACKEND_OK || ! $FRONTEND_OK || ! $ONTOLOGY_OK; then
+if ! $FRONTEND_OK || ! $JAVA_OK || ! $SIDECAR_OK || ! $ONTOLOGY_OK; then
   echo ""
   echo "❌  Deploy FAILED — check: journalctl -u <service-name> -n 50"
   exit 1
