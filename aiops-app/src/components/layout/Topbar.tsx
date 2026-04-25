@@ -116,6 +116,13 @@ function UserMenu() {
                 登入方式：{provider}
               </div>
             </div>
+
+            <DropdownLink href="/me/profile" icon="⚙️" label="帳號設定" onClick={() => setOpen(false)} />
+            <DropdownLink href="/me/change-password" icon="🔑" label="變更密碼" onClick={() => setOpen(false)} />
+            <DropdownLink href="/me/memories" icon="🧠" label="我的記憶" onClick={() => setOpen(false)} />
+
+            <div style={{ borderTop: "1px solid #f1f5f9" }} />
+
             <button
               onClick={() => signOut({ callbackUrl: "/login" })}
               style={{
@@ -133,6 +140,28 @@ function UserMenu() {
         </>
       )}
     </div>
+  );
+}
+
+function DropdownLink({ href, icon, label, onClick }: {
+  href: string; icon: string; label: string; onClick: () => void;
+}) {
+  return (
+    <a
+      href={href}
+      onClick={onClick}
+      style={{
+        display: "flex", alignItems: "center", gap: 10,
+        padding: "9px 14px",
+        textDecoration: "none", color: "#374151",
+        fontSize: 13, fontWeight: 500,
+      }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
+      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+    >
+      <span style={{ fontSize: 14 }}>{icon}</span>
+      <span>{label}</span>
+    </a>
   );
 }
 
