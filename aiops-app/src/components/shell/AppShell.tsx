@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useSession } from "next-auth/react";
 // Resizable panel via native CSS resize
 import { Topbar } from "@/components/layout/Topbar";
 import { AIAgentPanel } from "@/components/copilot/AIAgentPanel";
@@ -35,6 +36,13 @@ interface GlassEvent {
 
 // ── Navigation structure ──────────────────────────────────────────────────────
 
+// Role-based menu visibility (2026-04-25):
+//   OPS_ITEMS      → all roles (ON_DUTY / PE / IT_ADMIN)
+//   KNOWLEDGE      → PE + IT_ADMIN
+//   ADMIN_ITEMS    → IT_ADMIN only
+// RoleHierarchy in Java: IT_ADMIN > PE > ON_DUTY — a user with IT_ADMIN
+// implicitly has PE + ON_DUTY authority server-side.
+
 const OPS_ITEMS = [
   { href: "/alarms",             label: "Alarm Center",     icon: "🔔" },
   { href: "/dashboard",          label: "Dashboard",        icon: "📊" },
@@ -54,7 +62,18 @@ const ADMIN_ITEMS = [
   { href: "/system/data-sources",   label: "Data Sources",    icon: "🗄️" },
   { href: "/system/event-registry", label: "Event Registry",  icon: "📋" },
   { href: "/system/monitor",        label: "System Monitor",  icon: "🖥️" },
+  { href: "/admin/users",           label: "Users",           icon: "👥" },
 ];
+
+function userCanSeeOps(_roles: string[]): boolean {
+  return true;  // all roles
+}
+function userCanSeeKnowledge(roles: string[]): boolean {
+  return roles.includes("PE") || roles.includes("IT_ADMIN");
+}
+function userCanSeeAdmin(roles: string[]): boolean {
+  return roles.includes("IT_ADMIN");
+}
 
 function NavLink({ href, icon, label, active, collapsed }: {
   href: string; icon: string; label: string; active: boolean; collapsed: boolean;
@@ -96,11 +115,23 @@ function SidebarSection({ title, collapsed }: { title: string; collapsed: boolea
 function ContextualSidebar() {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(true);
+  const session = useSession();
 
   if (pathname.startsWith("/topology")) return null;
 
   const isExact = (href: string) =>
     href === "/dashboard" ? (pathname === "/" || pathname === "/dashboard") : pathname.startsWith(href);
+
+  // Role-based menu filter. When the user is not logged in via NextAuth
+  // (legacy shared-token mode), session is "unauthenticated" → default to
+  // IT_ADMIN so existing UX stays identical. Once OIDC is enabled, session
+  // carries real roles and menu collapses to match.
+  const sessionRoles: string[] = (session?.data as unknown as { roles?: string[] })?.roles ?? [];
+  const roles = sessionRoles.length > 0 ? sessionRoles : ["IT_ADMIN"];  // legacy fallback
+
+  const showOps = userCanSeeOps(roles);
+  const showKnowledge = userCanSeeKnowledge(roles);
+  const showAdmin = userCanSeeAdmin(roles);
 
   return (
     <nav style={{
@@ -131,23 +162,35 @@ function ContextualSidebar() {
       </div>
 
       <div style={{ padding: collapsed ? "4px" : "8px", flex: 1 }}>
-        <SidebarSection title="Operations Center" collapsed={collapsed} />
-        {OPS_ITEMS.map(({ href, label, icon }) => (
-          <NavLink key={href} href={href} icon={icon} label={label}
-            active={isExact(href)} collapsed={collapsed} />
-        ))}
+        {showOps && (
+          <>
+            <SidebarSection title="Operations Center" collapsed={collapsed} />
+            {OPS_ITEMS.map(({ href, label, icon }) => (
+              <NavLink key={href} href={href} icon={icon} label={label}
+                active={isExact(href)} collapsed={collapsed} />
+            ))}
+          </>
+        )}
 
-        <SidebarSection title="Knowledge Studio" collapsed={collapsed} />
-        {KNOWLEDGE_ITEMS.map(({ href, label, icon }) => (
-          <NavLink key={href} href={href} icon={icon} label={label}
-            active={isExact(href)} collapsed={collapsed} />
-        ))}
+        {showKnowledge && (
+          <>
+            <SidebarSection title="Knowledge Studio" collapsed={collapsed} />
+            {KNOWLEDGE_ITEMS.map(({ href, label, icon }) => (
+              <NavLink key={href} href={href} icon={icon} label={label}
+                active={isExact(href)} collapsed={collapsed} />
+            ))}
+          </>
+        )}
 
-        <SidebarSection title="Admin" collapsed={collapsed} />
-        {ADMIN_ITEMS.map(({ href, label, icon }) => (
-          <NavLink key={href} href={href} icon={icon} label={label}
-            active={isExact(href)} collapsed={collapsed} />
-        ))}
+        {showAdmin && (
+          <>
+            <SidebarSection title="Admin" collapsed={collapsed} />
+            {ADMIN_ITEMS.map(({ href, label, icon }) => (
+              <NavLink key={href} href={href} icon={icon} label={label}
+                active={isExact(href)} collapsed={collapsed} />
+            ))}
+          </>
+        )}
       </div>
     </nav>
   );
