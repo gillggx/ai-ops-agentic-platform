@@ -6,6 +6,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.time.OffsetDateTime;
+
 @Getter
 @Setter
 @NoArgsConstructor
@@ -39,4 +41,15 @@ public class UserEntity extends Auditable {
 	/** JSON-serialised list of role strings (legacy TEXT storage). */
 	@Column(name = "roles", nullable = false, columnDefinition = "text")
 	private String roles = "[]";
+
+	/** OIDC provider slug (azure-ad / google / keycloak / okta). NULL = local-only. */
+	@Column(name = "oidc_provider", length = 40)
+	private String oidcProvider;
+
+	/** OIDC subject claim — stable per-provider identity. NULL = local-only. */
+	@Column(name = "oidc_sub", length = 255)
+	private String oidcSub;
+
+	@Column(name = "last_login_at")
+	private OffsetDateTime lastLoginAt;
 }

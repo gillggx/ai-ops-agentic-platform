@@ -57,6 +57,7 @@ public class SecurityConfig {
 								"/actuator/health/**",
 								"/actuator/info",
 								"/api/v1/auth/login",
+								"/api/v1/auth/oidc-upsert",   // shared-secret auth inside controller
 								"/api/v1/health"
 						).permitAll()
 						.anyRequest().authenticated()
@@ -90,6 +91,32 @@ public class SecurityConfig {
 	@Bean
 	public PasswordEncoder passwordEncoder() {
 		return new BCryptPasswordEncoder(12);
+	}
+
+	/**
+	 * IT_ADMIN > PE > ON_DUTY — a user with IT_ADMIN role implicitly satisfies
+	 * any {@code @PreAuthorize("hasRole('PE')")} check, and so on.
+	 * Matches Sidebar menu visibility: IT_ADMIN sees everything (1-9),
+	 * PE sees 1-3, ON_DUTY sees 1-2.
+	 */
+	@Bean
+	public org.springframework.security.access.hierarchicalroles.RoleHierarchy roleHierarchy() {
+		var h = new org.springframework.security.access.hierarchicalroles.RoleHierarchyImpl();
+		h.setHierarchy("ROLE_IT_ADMIN > ROLE_PE\nROLE_PE > ROLE_ON_DUTY");
+		return h;
+	}
+
+	/**
+	 * Wire the hierarchy into method security so @PreAuthorize / hasRole / hasAnyRole
+	 * respect it. Without this, hierarchy only applies to URL-level rules.
+	 */
+	@Bean
+	static org.springframework.security.access.expression.method.DefaultMethodSecurityExpressionHandler
+			methodSecurityExpressionHandler(
+					org.springframework.security.access.hierarchicalroles.RoleHierarchy roleHierarchy) {
+		var handler = new org.springframework.security.access.expression.method.DefaultMethodSecurityExpressionHandler();
+		handler.setRoleHierarchy(roleHierarchy);
+		return handler;
 	}
 
 	/**
