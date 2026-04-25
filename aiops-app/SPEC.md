@@ -1,213 +1,296 @@
-# aiops-app — Spec 2.0
+# aiops-app — Spec
 
-**Date:** 2026-04-06
-**Status:** Living Document (Current Implementation)
+**Date:** 2026-04-25
+**HEAD:** 5114b9b
+**Status:** Living Document（依 code 實況萃取）
 
 ---
 
 ## 1. 定位
 
-AIOps 平台的 **Frontend 應用層**。同時扮演兩個角色：
+AIOps 平台的 **Frontend 應用層**（Next.js 15 standalone）。三個視角：
 
-- **Operations Center** — 值班工程師的操作介面（告警看板、Agent 對話、設備下鑽、批次追蹤）
-- **Knowledge Studio** — 資深工程師的知識管理（Diagnostic Rules、Auto-Patrols、MCP 管理）
-- **System Admin** — IT 管理員的系統設定（Data Sources、Event Registry、All Skills）
+- **Operations Center** — 值班工程師 / 全角色：告警看板、Dashboard AI Briefing、AI Agent 對話、設備下鑽
+- **Knowledge Studio** — PE / IT_ADMIN：Pipeline Builder（單一建構入口，2026-04-23 後 Auto-Patrols / Diagnostic Rules / My Skills 統一收進來）
+- **Admin** — IT_ADMIN：Triggers Overview、Skills、Memory、Data Sources、Event Registry、System Monitor、Users
+
+**邊界：** 不寫商業邏輯，只做 UI 渲染 + API proxy。Frontend `/api/*` route 一律 proxy 到 Java :8002（透過 `FASTAPI_BASE_URL` env）。LLM key 不放這裡（除了 frontend 自用 `@anthropic-ai/sdk` 0.80，幾乎不用）。
 
 ## 2. 技術棧
 
 | Category | Tech | Version |
-|----------|------|---------|
-| Framework | Next.js (App Router) | 15.2.4 |
-| React | React 19 | 19.0.0 |
-| Language | TypeScript | strict mode |
-| Chart (declarative) | Vega-Lite + Vega | 5.21 / 5.30 |
-| Chart (interactive) | Plotly.js | 3.4 |
+|---|---|---|
+| Framework | Next.js (App Router, standalone) | 15.2.4 |
+| React | – | 19.0.0 |
+| Lang | TypeScript（strict） | 5.x |
+| Auth | NextAuth v5 beta | 5.0.0-beta.31 |
+| Chart (declarative) | Vega-Lite + Vega + vega-embed | 5.21 / 5.30 / 6.26 |
+| Chart (interactive) | Plotly.js dist-min + react-plotly | 3.4 / 2.6 |
 | Graph Layout | @xyflow/react + dagre | 12.10 / 2.0 |
-| Markdown | react-markdown + remark-gfm | 10.1 |
-| Contract Types | aiops-contract (local) | `file:../aiops-contract/typescript` |
-| AI SDK | @anthropic-ai/sdk | 0.80 |
+| Markdown | react-markdown + remark-gfm | 10.1 / 4.0 |
+| Resize Panel | react-resizable-panels | 4.10 |
+| Contract | aiops-contract（local file:） | 0.1.0 |
+| AI SDK | @anthropic-ai/sdk（很少用） | 0.80 |
+| E2E | Playwright | 1.59 |
 
-## 3. Navigation & 頁面結構
-
-### 3.0 Sidebar Navigation
-
-```
-OPERATIONS CENTER
-  ├── Alarm Center         /alarms
-  └── Dashboard            /
-
-KNOWLEDGE STUDIO
-  ├── ⭐ My Skills         /admin/my-skills        ← NEW
-  ├── Auto-Patrols         /admin/auto-patrols
-  └── Diagnostic Rules     /admin/skills
-
-ADMIN
-  ├── Skills               /system/skills
-  ├── Agent Memory         /admin/memories
-  ├── Data Sources         /system/data-sources
-  ├── Event Registry       /system/event-registry
-  └── System Monitor       /system/monitor
-```
-
-### 3.1 Operations Center
-
-| Route | Page | 說明 |
-|-------|------|------|
-| `/` | Dashboard | 單頁 Dashboard — 左右兩 card（告警 + 設備總覽）+ Quick Diagnostics |
-
-Dashboard layout：
-- **左 card**：最近關鍵告警 — severity 統計 + alarm list（點擊展開 trigger + diagnostic findings）
-- **右 card**：設備總覽 — KPI（稼動率/運行中/告警/維護）+ equipment grid
-- **底部**：Quick Diagnostics 快捷按鈕 → 觸發 AI Copilot
-
-隱藏路由（不在 sidebar，Agent handoff 用）：
-- `/events` — 全廠事件記錄
-- `/lots` — 批次追蹤
-- `/topology` — 製程物件拓撲圖
-
-### 3.2 Knowledge Studio（/admin）
-
-| Route | Page | 說明 |
-|-------|------|------|
-| `/admin/my-skills` | **My Skills** | 使用者個人 Skill 管理 — 列表、LLM 生成、編輯、Try-Run、刪除、升級（→ Auto-Patrol 或 Diagnostic Rule）。表單建立流程，生成時若 Phase 0 回 `clarify_needed` 則彈出 `ClarifyDialog` 補問 1~2 個商業邏輯問題 |
-| `/admin/auto-patrols` | Auto-Patrols | 自動巡檢排程管理。同樣走表單建立 + 內嵌 clarification 中斷 |
-| `/admin/skills` | Diagnostic Rules | 診斷規則管理（建立 / 編輯 / Try-Run / SSE 生成）。同樣走表單建立 + 內嵌 clarification 中斷 |
-
-### 3.3 Admin
-
-| Route | Page | 說明 |
-|-------|------|------|
-| `/system/skills` | Skills | 全 Skill 總覽 + detail review（Steps / Schema / Metadata） |
-| `/admin/memories` | Agent Memory | 長期記憶管理（approve / reject） |
-| `/system/data-sources` | Data Sources | System MCP 管理（endpoint_url / input_schema / sample fetch） |
-| `/system/event-registry` | Event Registry | 事件登錄與 NATS 監控 |
-
-## 4. 核心 Components
-
-### 4.1 Shell & Layout
-
-| Component | 說明 |
-|-----------|------|
-| `AppShell.tsx` | 頂層 layout — Topbar + Unified Sidebar (3 sections) + Main + AI Copilot |
-| `Topbar.tsx` | 頂部導覽列 |
-| `AnalysisPanel.tsx` | 中央分析結果面板（Contract 渲染，full-page overlay）。現在也渲染 Agent chat 中的 charts（contract flow 修正後，圖表從 Copilot 正確傳遞到 AnalysisPanel） |
-
-### 4.2 AI Copilot（右側面板）
-
-| Component | 說明 |
-|-----------|------|
-| `AICopilot.tsx` | Agent 對話主體 — SSE streaming、triggerMessage、contract state、handoff 處理 |
-| `ChartIntentRenderer.tsx` | _chart DSL → Vega-Lite 動態生成 |
-| `ContractCard.tsx` | Contract 摘要卡片 |
-
-### 4.3 Contract 渲染
-
-| Component | 說明 |
-|-----------|------|
-| `ContractRenderer.tsx` | AIOpsReportContract JSON → 結構化報告（summary + evidence + actions） |
-| `EvidenceChain.tsx` | 證據鏈樹狀顯示 |
-| `SuggestedActions.tsx` | 建議動作按鈕（agent / aiops_handoff / promote_analysis） |
-| `VegaLiteChart.tsx` | Vega-Lite spec 渲染器 |
-| `PlotlyVisualization.tsx` | Plotly 互動圖表 |
-| `KpiCard.tsx` | KPI 指標卡片 |
-
-### 4.4 Inline Clarification（表單建立中斷式補問）
-
-2026-04-09：原本的 `SkillAuthoringChat`（多輪對話式 Skill 建立）已移除。改為在 3 個 admin 頁面既有的表單建立流程中，內嵌一次輕量的 clarification 中斷。
-
-| Component | 說明 |
-|-----------|------|
-| `ClarifyDialog.tsx` | 520px 傳統 form modal（非 chat UI）— 顯示 1~2 個問題，每題 button options + optional freetext + 預設值。被 My Skills / Auto-Patrols / Diagnostic Rules 3 個頁面共用 |
-
-**3 個 admin 頁面的 `handleGenerate` 拆分模式：**
+## 3. App Router 路徑
 
 ```
-handleGenerate(desc)              # 外層，使用者按「生成」按鈕
-  → runGenerateStream(desc, skipClarify=false)
-       ├─ SSE event "clarify_needed" → 停止 streaming → 開啟 ClarifyDialog
-       └─ 正常 stream → 正常顯示
-
-ClarifyDialog onConfirm(answers)
-  → newDesc = desc + "\n\n" + answers 附加
-  → runGenerateStream(newDesc, skipClarify=true)   # 第二次呼叫跳過 Phase 0
+src/app/
+├── layout.tsx                root — SessionProviderWrapper + AppShell
+├── page.tsx                  redirect("/dashboard")
+├── globals.css
+├── login/                    ★ NextAuth v5 login（OIDC + credentials）
+│   ├── page.tsx              server: 列舉 providers + searchParams
+│   └── LoginClient.tsx       client form
+├── dashboard/                Operations Center 主頁（左告警 / 右設備 / 底 Quick Diagnostics）
+├── alarms/                   全廠告警看板
+├── events/                   全廠事件記錄（Agent handoff target）
+├── lots/                     批次追蹤（Agent handoff target）
+├── topology/                 製程物件拓撲圖（隱藏路由，Topology layout 全屏）
+├── chat/                     Agent 對話頁
+├── prototype/                UI prototype 展示（dev-only）
+├── me/                       ★ 個人帳戶
+│   ├── profile/              帳號設定（display_name）
+│   ├── change-password/      密碼變更
+│   └── memories/             我的長期記憶（per-user）
+├── admin/                    ★ Knowledge Studio + Admin（多重 role）
+│   ├── pipeline-builder/     ⭐ 單一建構入口（取代 Skills/Patrols/Rules 三套表單）
+│   ├── triggers/             Triggers Overview — Auto-Patrols + Auto-Check Rules + Published Skills
+│   ├── auto-patrols/         legacy CRUD（仍保留）
+│   ├── auto-check-rules/     legacy CRUD
+│   ├── published-skills/     legacy
+│   ├── automation/           catch-all proxy
+│   ├── memories/             Agent Memory（admin 視角）
+│   ├── mcps/                 MCP 管理
+│   ├── system-mcps/          System MCP 列表
+│   ├── event-types/          Event Type 管理
+│   └── users/                ⭐ Users CRUD + role 變更 + role-history（IT_ADMIN only）
+├── system/                   IT 設定
+│   ├── data-sources/, event-registry/, monitor/, skills/, scripts/, cron-jobs/
+└── api/                      ★ 65 個 proxy route.ts
 ```
 
-這個拆分讓生成流程可以在中途「暫停 / 補問 / 續跑」，不需要獨立的 authoring session。
+## 4. 模組樹（src/）
 
-### 4.5 Ontology 視覺化
+```
+src/
+├── auth.ts                  NextAuth v5 config — Azure AD / Google / Keycloak / Okta + Credentials
+├── middleware.ts            redirect 未登入 → /login（受 AIOPS_AUTH_REQUIRED gating）
+├── app/                     App Router pages + API proxies (見 §3)
+├── components/
+│   ├── shell/AppShell.tsx   ★ 頂層 layout — Topbar + Sidebar + main + AI Agent panel
+│   │                          含 ShellGate（隱藏 shell 在 /login + /api/auth/*）
+│   ├── shell/SessionProviderWrapper.tsx
+│   ├── layout/Topbar.tsx    ★ user 下拉選單（avatar + role badges + 帳號設定 / 變更密碼 / 我的記憶 / 登出）
+│   ├── layout/AnalysisPanel.tsx          ContractRenderer overlay
+│   ├── layout/DataExplorerPanel.tsx
+│   ├── copilot/AIAgentPanel.tsx          AI Agent 對話面板
+│   ├── copilot/LiveCanvasOverlay.tsx     ★ Glass Box 即時建構畫布（pb_glass_* 事件）
+│   ├── copilot/ChartIntentRenderer.tsx
+│   ├── copilot/ContractCard.tsx
+│   ├── copilot/PipelineConsole.tsx + PbPipelineCard.tsx + PbPatchProposalCard.tsx
+│   ├── pipeline-builder/    ★ 28 個 component — Builder Canvas + Block Library + Triggers Wizard
+│   ├── contract/            ContractRenderer / EvidenceChain / SuggestedActions
+│   ├── chat/                ChatPanel
+│   ├── ontology/            TopologyCanvas / EquipmentDetail / OverviewDashboard
+│   ├── operations/          AlarmCenter / SkillOutputRenderer
+│   ├── admin/               admin 頁面共用 component
+│   ├── skill-builder/ClarifyDialog.tsx   inline clarification modal
+│   ├── McpChartRenderer.tsx
+│   └── common/
+├── context/AppContext.tsx   單一 Context Provider
+├── lib/
+│   ├── auth-proxy.ts        ★ getBearerToken / authHeaders — proxy route 共用
+│   ├── sse.ts               SSE 解析
+│   ├── store.ts             local store helpers
+│   └── pipeline-builder/    builder 共用工具
+├── mcp/catalog.ts           前端 MCP catalog（19 個，餵給 Agent system prompt）
+└── types/                   全域 TS type
+```
 
-| Component | 說明 |
-|-----------|------|
-| `TopologyCanvas.tsx` | 九類物件拓撲圖（D3/Canvas，node 顏色語意） |
-| `EquipmentDetail.tsx` | 設備深潛面板（DC/SPC/Event/EC） |
-| `OverviewDashboard.tsx` | 全廠概覽 dashboard |
+## 5. 認證 / 授權
 
-## 5. API Routes（Proxy Layer）
+### 5.1 NextAuth v5 multi-provider（[src/auth.ts](aiops-app/src/auth.ts)）
 
-aiops-app 的 API routes 全部是 **proxy** — 轉發到 `fastapi_backend_service`。
+| Provider | Env 條件 | 說明 |
+|---|---|---|
+| Azure AD | `OIDC_AZURE_CLIENT_ID + SECRET` | tenant 透過 `OIDC_AZURE_TENANT_ID` 指定，default `common/v2.0` |
+| Google | `OIDC_GOOGLE_CLIENT_ID + SECRET` | – |
+| Keycloak | `OIDC_KEYCLOAK_CLIENT_ID + ISSUER` | + secret |
+| Okta | `OIDC_OKTA_CLIENT_ID + ISSUER` | + secret |
+| **Credentials (Local)** | **永遠啟用** | username/password → POST `/api/v1/auth/login` 拿 Java JWT |
 
-### 5.1 主要 Proxy
+### 5.2 OIDC upsert flow
 
-| Frontend API | Backend Target | 說明 |
-|--------------|----------------|------|
-| `POST /api/agent/chat` | `POST /api/v1/agent/chat/stream` | Agent SSE 對話（duplex streaming） |
-| `GET /api/admin/skills` | `GET /api/v1/skill-definitions` | Skill 列表 |
-| `POST /api/admin/rules/generate-steps/stream` | `POST /api/v1/diagnostic-rules/generate-steps/stream` | SSE Rule 生成 |
-| `GET/POST /api/admin/auto-patrols` | `/api/v1/auto-patrols` | Auto-Patrol CRUD |
-| `GET/POST /api/admin/alarms` | `/api/v1/alarms` | 告警管理 |
-| `POST /api/admin/analysis/promote` | `POST /api/v1/analysis/promote` | 分析儲存為 My Skill |
-| `GET/POST/PATCH/DELETE /api/admin/my-skills` | `/api/v1/my-skills` | My Skills CRUD |
-| `POST /api/admin/my-skills/generate-steps/stream` | `POST /api/v1/my-skills/generate-steps/stream` | SSE My Skill 生成 |
-| `POST /api/admin/my-skills/{id}/try-run` | `POST /api/v1/my-skills/{id}/try-run` | My Skill 試跑 |
-| `POST /api/admin/my-skills/{id}/bind` | `POST /api/v1/my-skills/{id}/bind` | 升級 Skill binding_type |
-| `GET /api/admin/automation/*` | `/api/v1/*` | Automation catch-all |
-| `GET /api/ontology/*` | `/api/v1/ontology/*` | Ontology catch-all |
-| `GET /api/mcp-catalog` | — | 回傳 MCP catalog（from store or catalog.ts） |
+OIDC sign-in 成功後：
+1. NextAuth `signIn` callback 收到 `provider` + `sub`
+2. POST Java `/api/v1/auth/oidc-upsert`（`X-Upsert-Secret: AIOPS_OIDC_UPSERT_SECRET`）
+3. Java 找/建本地 user，回 `(access_token, user.roles, user.id)`
+4. NextAuth jwt callback 把 `javaJwt + roles + provider + userId` 寫進 token
 
-## 6. MCP Catalog（src/mcp/catalog.ts）
+→ Session 含 `roles`，所有 proxy route 用 [authHeaders()](aiops-app/src/lib/auth-proxy.ts) 帶 Java JWT 出去。
 
-前端維護的完整 MCP 定義，注入到 Agent 的 system prompt：
+### 5.3 Middleware 強制登入（[middleware.ts](aiops-app/src/middleware.ts)）
 
-| Category | Count | 範例 |
-|----------|-------|------|
-| Data MCPs | 8 | get_dc_timeseries, get_spc_data, get_lot_trace, query_object_parameter |
-| Handoff MCPs | 3 | open_lot_trace, open_drill_down, open_topology |
-| Automation MCPs | 8 | register_cron_job, test_run_skill, dispatch_action |
-| **Total** | **19** | |
+```
+matcher: 全部，除 _next/static, _next/image, favicon
+PUBLIC_PATHS = /login, /api/auth, /_next, /favicon
+未登入 + AIOPS_AUTH_REQUIRED=1 → redirect 到 /login（用 x-forwarded-host 拼 origin）
+未登入 + AIOPS_AUTH_REQUIRED!=1 → 放行（legacy shared-token mode）
+```
 
-> 注意：Data MCPs 是「前端定義、供 Agent 參考」的 catalog，**實際的 System MCP 在 backend DB 中管理**。
-> Catalog 的用途是讓 Agent 知道「有哪些工具可用 + 如何呼叫」。
+### 5.4 Role-based menu filter（[AppShell.tsx:46-76](aiops-app/src/components/shell/AppShell.tsx#L46-L76)）
 
-## 7. State Management
+```ts
+OPS_ITEMS       → all roles            # Alarm + Dashboard
+KNOWLEDGE_ITEMS → PE + IT_ADMIN         # Pipeline Builder
+ADMIN_ITEMS     → IT_ADMIN only         # Triggers / Skills / Memory / Data / Events / Monitor / Users
+```
 
-### AppContext（唯一 Context Provider）
+Role 名來自 session `roles`（值 `IT_ADMIN | PE | ON_DUTY`，與 Java 一致）。Empty roles → 渲染空 sidebar（不再 fallback 全開）。
+
+### 5.5 ShellGate（[AppShell.tsx:386-394](aiops-app/src/components/shell/AppShell.tsx#L386-L394)）
+
+`/login` + `/api/auth/*` 不渲染 Shell（沒 Topbar / Sidebar / AI Agent panel），只渲染 children。
+
+## 6. API Proxy Layer
+
+**65 個 route.ts**，全部透過 [authHeaders()](aiops-app/src/lib/auth-proxy.ts) 拿 token：
+
+```ts
+// 統一 pattern
+const token = (await authHeaders()).Authorization;
+const r = await fetch(`${FASTAPI_BASE_URL}/api/v1/...`, {
+  headers: { Authorization: token, ... },
+});
+```
+
+| 主要 prefix | upstream（Java 接管後） |
+|---|---|
+| `/api/auth/[...nextauth]` | NextAuth route handler（不 proxy） |
+| `/api/me/{profile,password,memories}` | Java `/api/v1/auth/me/*` + per-user memory |
+| `/api/admin/users-manage[/...]` | Java `/api/v1/admin/users` |
+| `/api/admin/auto-patrols[/...]` | Java `/api/v1/auto-patrols` |
+| `/api/admin/alarms[/...]` | Java `/api/v1/alarms` |
+| `/api/admin/rules[/...]` | Java `/api/v1/diagnostic-rules` |
+| `/api/admin/memories[/...]` | Java `/api/v1/agent-memories` (or `/internal/agent-memories`) |
+| `/api/admin/mcps[/...]` | Java `/api/v1/mcp-definitions` |
+| `/api/admin/event-types[/...]` | Java `/api/v1/event-types` |
+| `/api/admin/automation/[...path]` | Java catch-all |
+| `/api/admin/briefing` | Java `/api/v1/briefing` SSE |
+| `/api/admin/monitor` | Java `/api/v1/admin/monitor` |
+| `/api/admin/agent` | Java `/api/v1/agent/*` |
+| `/api/agent/{chat,build,build/stream/[id], session, approve}` | Java `/api/v1/agent/*`（Java 再 SSE proxy 到 sidecar） |
+| `/api/pipeline-builder/{blocks,validate,pipelines,...}` | Java `/api/v1/pipeline-builder/*` |
+| `/api/ontology/[...path]` | Java（因 ontology MCP 在 Java DB） |
+| `/api/mcp-catalog` | 前端 store + `src/mcp/catalog.ts` 合併 |
+
+## 7. AI Agent panel — Glass Box
+
+[copilot/AIAgentPanel.tsx](aiops-app/src/components/copilot/AIAgentPanel.tsx) + [LiveCanvasOverlay.tsx](aiops-app/src/components/copilot/LiveCanvasOverlay.tsx)：
+
+**Build 流程（native，由 sidecar Glass Box agent 直發）：**
+1. 使用者打 `build_pipeline_live` → SSE 串流：
+2. `pb_glass_start` → 開 LiveCanvasOverlay 空畫布
+3. `pb_glass_op` × N → node-by-node 增量繪 canvas
+4. `pb_glass_chat` → 旁白文字
+5. `pb_glass_done` → 顯示 final summary + pipeline_json
+
+**Chat 流程：** SSE 走標準 LangGraph contract，sidecar fallback → :8001 → 回傳 [AIOpsReportContract](../aiops-contract/SPEC.md)，由 [ContractRenderer](aiops-app/src/components/contract/ContractRenderer.tsx) 渲染到 [AnalysisPanel](aiops-app/src/components/layout/AnalysisPanel.tsx)。
+
+**所有圖表只在中央 AnalysisPanel 渲染**，AI Agent panel 只顯示文字 + 動作按鈕。
+
+## 8. Pipeline Builder（Knowledge Studio 唯一入口）
+
+[components/pipeline-builder/](aiops-app/src/components/pipeline-builder/)（28 個 component）：
+
+| Component | 用途 |
+|---|---|
+| `BuilderLayout.tsx` | 主 layout — Block Library 左 / Canvas 中 / Inspector 右 |
+| `BlockLibrary.tsx` + `BlockDocsDrawer.tsx` + `CategoryIcon.tsx` | 27 個 block 目錄（從 Java `/internal/blocks` 拉，類別 + examples） |
+| `AgentBuilderPanel.tsx` | Glass Box — 文字描述 → SSE 串入 LiveCanvasOverlay |
+| `AutoPatrolSetupModal.tsx` + `AutoPatrolTriggerForm.tsx` | Patrol kind + trigger wizard（兩步） |
+| `AutoCheckPublishModal.tsx` + `AutoCheckTriggerForm.tsx` | Auto-Check Rules（綁 alarm attribute） |
+
+**UX 約定（2026-04-23 phase α）：** Knowledge Studio menu 只剩 **Pipeline Builder** 一條，所有 publish kind（Patrol / Check / Skill）在 Builder 內 modal 切換。Auto-Patrols / Diagnostic Rules legacy CRUD 頁面仍在 `/admin/`，但是 secondary 入口。
+
+## 9. State Management
 
 ```typescript
+// AppContext（唯一 Context）
 {
   selectedEquipment: { equipment_id, name, status } | null
-  triggerMessage: string | null           // 觸發 Agent 查詢
-  contract: AIOpsReportContract | null    // 分析結果 → AnalysisPanel
-  investigateMode: boolean                // 切換調查模式
+  triggerMessage: string | null            // 觸發 Agent 查詢
+  contract: AIOpsReportContract | null     // 分析結果 → AnalysisPanel
+  investigateMode: boolean                 // 切換調查模式
+  dataExplorer: DataExplorerState | null   // 資料探勘面板
 }
 ```
 
-## 8. 圖表渲染路徑
+NextAuth session：透過 `useSession()` 取 — 含 `roles / javaJwt / userId / provider`。
 
-```
-Agent tool result
-  → render_card (backend adapter.py)
-    → contract.visualization[] (Vega-Lite spec)
-      → ContractRenderer → VegaLiteChart (中央 AnalysisPanel)
+## 10. Build / Deploy
 
-Agent text response
-  → AICopilot (右側面板, markdown only, 不渲染圖表)
-```
+- **Local：** `npm run dev`（Next.js 15 dev）
+- **Build：** `npm run build` → `.next/standalone/`
+- **Prod：** systemd unit [deploy/aiops-app.service](deploy/aiops-app.service)
+  ```
+  ExecStart=/usr/bin/node .next/standalone/server.js
+  EnvironmentFile=/opt/aiops/aiops-app/.env.local
+  ```
+  - 用 Next.js `output: "standalone"` — 不需要 `node_modules`，整個 server.js + .next/static 自帶
+  - 部署時 update.sh 會 `cp -r .next/static .next/standalone/.next/static`
 
-所有圖表 **只在中央 AnalysisPanel** 渲染，Copilot 只顯示文字。
-
-## 9. 環境變數
+## 11. 環境變數（[.env.example](aiops-app/.env.example) + 實際 .env.local）
 
 | Variable | Default | 說明 |
-|----------|---------|------|
-| `NEXT_PUBLIC_FASTAPI_BASE` | `http://localhost:8000` | Backend API base URL |
-| `AGENT_BASE_URL` | `http://localhost:8000` | Agent chat endpoint |
+|---|---|---|
+| `FASTAPI_BASE_URL` | `http://localhost:8001` → 實際 prod `http://localhost:8002` | Backend proxy target（已切 Java） |
+| `AGENT_BASE_URL` | 同上 | Agent SSE proxy target |
+| `ONTOLOGY_BASE_URL` | `http://localhost:8012` | （透過 Java 取，目前不直連） |
+| `INTERNAL_API_TOKEN` | – | legacy shared bearer（fallback when no session） |
+| `ANTHROPIC_API_KEY` | – | frontend 自用 SDK（很少觸發） |
+| `AIOPS_AUTH_REQUIRED` | – | `1` 啟用嚴格登入；未設仍 legacy fallback |
+| `NEXTAUTH_SECRET` | – | NextAuth session 簽章 |
+| `NEXTAUTH_URL` | – | callback origin |
+| `OIDC_AZURE_*`, `OIDC_GOOGLE_*`, `OIDC_KEYCLOAK_*`, `OIDC_OKTA_*` | – | 4 個 IdP，設了才註冊 |
+| `AIOPS_OIDC_UPSERT_SECRET` | – | NextAuth → Java oidc-upsert 共用密鑰 |
+
+## 12. 已知缺口
+
+1. **65 個 proxy route 散落** — 沒有自動化 OpenAPI client；新增 endpoint 必須在 Frontend 手刻 route.ts，容易漏
+2. **`@anthropic-ai/sdk` 0.80 留在 deps 但幾乎不用** — Glass Box 早期路徑遺留，可移除減少 bundle
+3. **`mcp/catalog.ts` 與 Java DB 並存** — 前端 hardcode 19 MCP，與 DB 不一致時 Agent 會誤導
+4. **legacy admin 頁面（auto-patrols/, auto-check-rules/, published-skills/）** 仍存在 — Pipeline Builder UX 收編後尚未刪除
+5. **`prototype/` 目錄** 是 dev-only，無 route guard — IT_ADMIN 也能誤入
+6. **無 i18n** — UI 中文/英文/日文混用
+7. **react 19 + next 15 + Plotly + Vega 一起 bundle** — `.next/standalone` 體積偏大；未做 dynamic import 分塊
+8. **`AIOPS_AUTH_REQUIRED` 預設為空** — prod 沒手動設就是 legacy fallback
+
+## 13. 變更指南
+
+### 加新 API proxy
+1. 在 `app/api/<scope>/route.ts` 寫 GET/POST
+2. **必用** [authHeaders()](aiops-app/src/lib/auth-proxy.ts) 而非自己 `process.env.INTERNAL_API_TOKEN`
+3. 回傳維持 `{ status, message, data, error_code }` Java 格式
+
+### 加新 page route
+1. 在 `app/<segment>/page.tsx`
+2. 若需登入：middleware 已自動擋（不在 PUBLIC_PATHS）
+3. 若需特定 role：用 `useSession()` 加上 client-side check（IT_ADMIN-only 也應在 server 端 Java endpoint 加 `@PreAuthorize`，**不能**只靠前端隱藏）
+
+### 加新 OIDC provider
+1. `auth.ts` 加 import + provider env-gated push
+2. `availableProviders()` 自動把它列出來給 LoginClient
+3. NextAuth jwt + signIn callback 會自動接（共用 `oidc-upsert` flow）
+
+### 新增 role
+1. Java [Role.java](../java-backend/src/main/java/com/aiops/api/auth/Role.java) + [Authorities.java](../java-backend/src/main/java/com/aiops/api/auth/Authorities.java) + RoleHierarchy
+2. Frontend [AppShell.tsx](aiops-app/src/components/shell/AppShell.tsx) `userCanSeeXxx` 加判斷
+3. session typing 不需改（roles 是 string[]）
+
+### Glass Box 事件擴充
+1. 後端新增 SSE event kind（在 sidecar `agent_builder/orchestrator.py`）
+2. Frontend 在 [AIAgentPanel.tsx](aiops-app/src/components/copilot/AIAgentPanel.tsx) 加 callback prop（`onGlassXxx`）
+3. [AppShell.tsx](aiops-app/src/components/shell/AppShell.tsx) 把 callback wire 到 `LiveCanvasOverlay`
