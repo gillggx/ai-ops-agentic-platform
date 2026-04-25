@@ -228,22 +228,43 @@ class AgentOrchestratorV2:
 
             # Save in v1 format (for the actual session persistence)
             import json as _json
-            from sqlalchemy import select
-            from python_ai_sidecar.agent_helpers._model_stubs import AgentSessionModel
             import datetime as _dt
             from datetime import timedelta, timezone as _tz
 
-            result = await self._db.execute(
-                select(AgentSessionModel).where(
-                    AgentSessionModel.session_id == (_final_session_id or "ephemeral")
+            v1_payload = _json.dumps(full_history, ensure_ascii=False)
+            expires = _dt.datetime.now(tz=_tz.utc) + timedelta(hours=24)
+
+            if self._db is None:
+                # Phase 8-A-1d: native chat — save via Java upsert.
+                from python_ai_sidecar.clients.java_client import JavaAPIClient
+                from python_ai_sidecar.config import CONFIG
+                java = JavaAPIClient(
+                    CONFIG.java_api_url, CONFIG.java_internal_token,
+                    timeout_sec=CONFIG.java_timeout_sec,
                 )
-            )
-            row = result.scalar_one_or_none()
-            if row:
-                row.messages = _json.dumps(full_history, ensure_ascii=False)
-                row.cumulative_tokens = existing_tokens + _total_tokens
-                row.expires_at = _dt.datetime.now(tz=_tz.utc) + timedelta(hours=24)
-                await self._db.commit()
+                try:
+                    await java.upsert_agent_session(_final_session_id or "ephemeral", {
+                        "userId": self._user_id,
+                        "messages": v1_payload,
+                        "cumulativeTokens": existing_tokens + _total_tokens,
+                        "expiresAt": expires.isoformat(),
+                    })
+                except Exception as exc:
+                    logger.warning("session save via java failed: %s", exc)
+            else:
+                from sqlalchemy import select
+                from python_ai_sidecar.agent_helpers._model_stubs import AgentSessionModel
+                result = await self._db.execute(
+                    select(AgentSessionModel).where(
+                        AgentSessionModel.session_id == (_final_session_id or "ephemeral")
+                    )
+                )
+                row = result.scalar_one_or_none()
+                if row:
+                    row.messages = v1_payload
+                    row.cumulative_tokens = existing_tokens + _total_tokens
+                    row.expires_at = expires
+                    await self._db.commit()
             logger.info("Session saved: %s (%d messages, %d tokens)",
                        _final_session_id, len(full_history), existing_tokens + _total_tokens)
         except Exception as exc:

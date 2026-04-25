@@ -30,7 +30,14 @@ async def load_session(
     """Load or create a session. Returns (session_id, history_messages, cumulative_tokens).
 
     history_messages is a list of LangChain message objects (HumanMessage / AIMessage).
+
+    Phase 8-A-1d: when ``db`` is None we route via Java
+    ``/internal/agent-sessions/*``. SQLAlchemy path is retained for
+    in-process tests that want to skip the network.
     """
+    if db is None:
+        return await _load_session_java(session_id, user_id)
+
     if session_id:
         result = await db.execute(
             select(AgentSessionModel).where(
@@ -65,6 +72,10 @@ async def save_session(
     cumulative_tokens: int,
 ) -> None:
     """Persist the latest conversation messages to the session."""
+    if db is None:
+        await _save_session_java(session_id, user_id, messages, cumulative_tokens)
+        return
+
     result = await db.execute(
         select(AgentSessionModel).where(
             AgentSessionModel.session_id == session_id,
@@ -92,6 +103,62 @@ async def save_session(
         if first_user and isinstance(first_user.content, str):
             row.title = first_user.content[:200]
     await db.commit()
+
+
+# ── Java-backed paths (Phase 8-A-1d) ─────────────────────────────────
+
+
+async def _load_session_java(
+    session_id: Optional[str], user_id: int,
+) -> Tuple[str, List[Any], int]:
+    from python_ai_sidecar.clients.java_client import JavaAPIClient
+    from python_ai_sidecar.config import CONFIG
+    java = JavaAPIClient(
+        CONFIG.java_api_url, CONFIG.java_internal_token,
+        timeout_sec=CONFIG.java_timeout_sec,
+    )
+    if session_id:
+        try:
+            row = await java.get_agent_session(session_id)
+            if row and (row.get("userId") == user_id or row.get("user_id") == user_id):
+                history = _parse_history(row.get("messages"))
+                tokens = row.get("cumulativeTokens") or row.get("cumulative_tokens") or 0
+                return session_id, history, tokens
+        except Exception as exc:
+            logger.warning("load_session via java failed (%s) — creating new", exc)
+
+    new_sid = str(uuid.uuid4())
+    try:
+        await java.upsert_agent_session(new_sid, {
+            "userId": user_id, "messages": "[]", "cumulativeTokens": 0,
+        })
+    except Exception as exc:
+        logger.warning("upsert_agent_session (init) failed: %s", exc)
+    return new_sid, [], 0
+
+
+async def _save_session_java(
+    session_id: str, user_id: int, messages: List[Any], cumulative_tokens: int,
+) -> None:
+    from python_ai_sidecar.clients.java_client import JavaAPIClient
+    from python_ai_sidecar.config import CONFIG
+    java = JavaAPIClient(
+        CONFIG.java_api_url, CONFIG.java_internal_token,
+        timeout_sec=CONFIG.java_timeout_sec,
+    )
+    history_json = json.dumps(_messages_to_dicts(messages), ensure_ascii=False)
+    body: Dict[str, Any] = {
+        "userId": user_id,
+        "messages": history_json,
+        "cumulativeTokens": cumulative_tokens,
+    }
+    first_user = next((m for m in messages if isinstance(m, HumanMessage)), None)
+    if first_user and isinstance(first_user.content, str):
+        body["title"] = first_user.content[:200]
+    try:
+        await java.upsert_agent_session(session_id, body)
+    except Exception as exc:
+        logger.warning("save_session via java failed: %s", exc)
 
 
 def _parse_history(raw: Optional[str]) -> List[Any]:

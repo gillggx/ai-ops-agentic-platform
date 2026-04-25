@@ -69,7 +69,7 @@ async def self_critique_node(state: Dict[str, Any], config: RunnableConfig) -> D
         }
 
     # 2. LLM-based: value traceability check
-    from app.utils.llm_client import get_llm_client
+    from python_ai_sidecar.agent_helpers_native.llm_client import get_llm_client
 
     tools_summary = ", ".join(
         f"{t['tool']}({t['mcp_name']})" if t.get("mcp_name") else t["tool"]

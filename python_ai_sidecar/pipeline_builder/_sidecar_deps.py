@@ -43,6 +43,20 @@ class _Settings:
         self.ANTHROPIC_MODEL: str = os.environ.get(
             "ANTHROPIC_MODEL", "claude-sonnet-4-20250514"
         )
+        # Phase 8-A-1d: chat orchestrator native — its llm_client / embedding /
+        # mem0 / data_distillation helpers all read these settings.
+        self.LLM_PROVIDER: str = os.environ.get("LLM_PROVIDER", "anthropic")
+        self.LLM_MODEL: str = os.environ.get("LLM_MODEL", self.ANTHROPIC_MODEL)
+        self.OLLAMA_BASE_URL: str = os.environ.get(
+            "OLLAMA_BASE_URL", "http://localhost:11434"
+        )
+        self.OLLAMA_API_KEY: str = os.environ.get("OLLAMA_API_KEY", "")
+        self.OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", "llama3.1:8b")
+        self.OLLAMA_EMBEDDING_MODEL: str = os.environ.get(
+            "OLLAMA_EMBEDDING_MODEL", "bge-m3"
+        )
+        # mem0 (long-term semantic memory) — only used when key set
+        self.MEM0_API_KEY: str = os.environ.get("MEM0_API_KEY", "")
 
 
 _settings_singleton: _Settings | None = None

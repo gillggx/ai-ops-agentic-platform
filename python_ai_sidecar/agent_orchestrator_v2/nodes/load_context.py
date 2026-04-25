@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str, Any]:
     """Stage 1: build system prompt, retrieve memories, load session history."""
-    db = config["configurable"]["db"]
+    db = config["configurable"].get("db")
     user_id = state["user_id"]
     user_message = state["user_message"]
     canvas_overrides = state.get("canvas_overrides")
@@ -33,7 +33,16 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
         "tool_name": _tc_tool,
     }
 
-    loader = ContextLoader(db)
+    # Phase 8-A-1d: native chat path uses Java client; legacy in-process tests
+    # may still pass a SQLAlchemy session (db != None, java=None).
+    from python_ai_sidecar.clients.java_client import JavaAPIClient
+    from python_ai_sidecar.config import CONFIG
+    java = JavaAPIClient(
+        CONFIG.java_api_url, CONFIG.java_internal_token,
+        timeout_sec=CONFIG.java_timeout_sec,
+    )
+
+    loader = ContextLoader(db, java=java)
     system_blocks, context_meta = await loader.build(
         user_id=user_id,
         query=user_message,

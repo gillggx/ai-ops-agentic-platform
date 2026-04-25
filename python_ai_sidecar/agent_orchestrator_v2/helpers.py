@@ -73,10 +73,40 @@ async def _preflight_validate(
                     "禁止使用 mcp_id（整數 ID 已棄用）。"
                 ),
             }
-        result = await db.execute(
-            select(MCPDefinitionModel).where(MCPDefinitionModel.name == mcp_name)
-        )
-        mcp = result.scalar_one_or_none()
+        # Phase 8-A-1d: when no DB session, route via Java client. The mcp_name
+        # → entity lookup is the only DB read here; everything else is in-memory.
+        if db is None:
+            from python_ai_sidecar.clients.java_client import JavaAPIClient
+            from python_ai_sidecar.config import CONFIG
+            java = JavaAPIClient(
+                CONFIG.java_api_url, CONFIG.java_internal_token,
+                timeout_sec=CONFIG.java_timeout_sec,
+            )
+            mcp_dict = await java.get_mcp_by_name(mcp_name)
+            if mcp_dict is None:
+                return {
+                    "status": "error", "code": "MCP_NOT_FOUND",
+                    "message": (
+                        f"⚠️ 找不到名為 '{mcp_name}' 的 MCP。"
+                        "請確認 <mcp_catalog> 中的 name 欄位是否正確。"
+                    ),
+                }
+            # Wrap in attr-access so the SQLAlchemy-style path below works
+            class _MCP:
+                def __init__(self, d):
+                    self._d = d
+                def __getattr__(self, k):
+                    if k in self._d:
+                        return self._d[k]
+                    parts = k.split("_")
+                    camel = parts[0] + "".join(p.title() for p in parts[1:])
+                    return self._d.get(camel)
+            mcp = _MCP(mcp_dict)
+        else:
+            result = await db.execute(
+                select(MCPDefinitionModel).where(MCPDefinitionModel.name == mcp_name)
+            )
+            mcp = result.scalar_one_or_none()
         if not mcp:
             return {
                 "status": "error", "code": "MCP_NOT_FOUND",

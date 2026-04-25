@@ -93,8 +93,8 @@ def _build_render_card(
         # Only execute_analysis and execute_skill should trigger Investigate Mode.
         render_decision_meta = None
         try:
-            from app.services.render_intent_classifier import classify_render_intent, build_outputs
-            from app.services.chart_middleware import process as chart_process
+            from python_ai_sidecar.agent_helpers_native.render_intent_classifier import classify_render_intent, build_outputs
+            from python_ai_sidecar.agent_helpers_native.chart_middleware import process as chart_process
 
             classify_input = raw_dataset[0] if isinstance(raw_dataset, list) and len(raw_dataset) == 1 else raw_dataset
             decision = classify_render_intent(classify_input, mcp_name=mcp_name or "")

@@ -109,7 +109,7 @@ def _v1_response_to_tool_calls(response) -> List[Dict[str, Any]]:
 
 async def llm_call_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str, Any]:
     """Call the LLM and return an AIMessage (with or without tool_calls)."""
-    from app.utils.llm_client import get_llm_client
+    from python_ai_sidecar.agent_helpers_native.llm_client import get_llm_client
 
     llm = get_llm_client()
     system_text = state.get("system_text") or config["configurable"].get("system_text", "")

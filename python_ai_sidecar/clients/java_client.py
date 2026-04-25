@@ -177,3 +177,78 @@ class JavaAPIClient:
 
     async def create_generated_event(self, body: dict) -> dict:
         return await self._post_data("/internal/generated-events", body)
+
+    # ── Experience memory (Phase 8-A-1d native chat) ──────────────────
+
+    async def search_experience_memory(
+        self,
+        *,
+        user_id: int,
+        query_embedding: list[float],
+        top_k: int = 5,
+        min_similarity: float = 0.6,
+        min_confidence: int = 1,
+    ) -> list[dict]:
+        """pgvector cosine search. Returns list of {memory, similarity}."""
+        body = {
+            "userId": user_id,
+            "queryEmbedding": query_embedding,
+            "topK": top_k,
+            "minSimilarity": min_similarity,
+            "minConfidence": min_confidence,
+        }
+        data = await self._post_data("/internal/agent-experience-memories/search", body)
+        return data or []
+
+    async def write_experience_memory(
+        self,
+        *,
+        user_id: int,
+        intent_summary: str,
+        abstract_action: str,
+        embedding: Optional[list[float]] = None,
+        source: str = "auto",
+        source_session_id: Optional[str] = None,
+        confidence_score: Optional[int] = None,
+        dedup_threshold: Optional[float] = 0.92,
+    ) -> dict:
+        """Insert (or bump dedup) experience memory. Returns {memory, dedupHit, similarity}."""
+        body: dict[str, Any] = {
+            "userId": user_id,
+            "intentSummary": intent_summary,
+            "abstractAction": abstract_action,
+            "source": source,
+        }
+        if embedding is not None:
+            body["embedding"] = embedding
+        if source_session_id is not None:
+            body["sourceSessionId"] = source_session_id
+        if confidence_score is not None:
+            body["confidenceScore"] = confidence_score
+        if dedup_threshold is not None:
+            body["dedupThreshold"] = dedup_threshold
+        return await self._post_data("/internal/agent-experience-memories", body)
+
+    async def feedback_experience_memory(self, memory_id: int, outcome: str) -> dict:
+        env = await self._request(
+            "PUT",
+            f"/internal/agent-experience-memories/{memory_id}/feedback",
+            json={"outcome": outcome},
+        )
+        return env.get("data") if isinstance(env, dict) else env
+
+    async def list_experience_memories(
+        self, *, user_id: int, status: str = "ACTIVE",
+    ) -> list[dict]:
+        params = {"userId": user_id, "status": status}
+        return await self._get_data("/internal/agent-experience-memories", params=params)
+
+    # ── User preference + system parameter ────────────────────────────
+
+    async def get_user_preference(self, user_id: int) -> dict:
+        """Returns {id, userId, preferences, soulOverride}. Empty fields when absent."""
+        return await self._get_data(f"/internal/user-preferences/{user_id}")
+
+    async def get_system_parameter(self, key: str) -> dict:
+        """Returns {id, key, value, description}. Empty fields when absent."""
+        return await self._get_data(f"/internal/system-parameters/{key}")

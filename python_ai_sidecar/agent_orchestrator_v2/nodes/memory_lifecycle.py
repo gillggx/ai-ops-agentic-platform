@@ -40,46 +40,53 @@ async def memory_lifecycle_node(state: Dict[str, Any], config: RunnableConfig) -
     # Fallback: if agent didn't cite but RAG retrieved, credit passively
     feedback_ids = cited_ids or retrieved_memory_ids
 
-    from app.database import AsyncSessionLocal
-    from app.services.experience_memory_service import ExperienceMemoryService
-    from app.services.memory_abstraction import abstract_memory
-    from app.utils.llm_client import get_llm_client
+    # Phase 8-A-1d: native — Java client + ported helpers, no DB session.
+    from python_ai_sidecar.agent_helpers_native.experience_memory_client import (
+        ExperienceMemoryClient,
+    )
+    from python_ai_sidecar.agent_helpers_native.memory_abstraction import abstract_memory
+    from python_ai_sidecar.agent_helpers_native.llm_client import get_llm_client
+    from python_ai_sidecar.clients.java_client import JavaAPIClient
+    from python_ai_sidecar.config import CONFIG
 
     try:
-        async with AsyncSessionLocal() as db:
-            svc = ExperienceMemoryService(db)
+        java = JavaAPIClient(
+            CONFIG.java_api_url, CONFIG.java_internal_token,
+            timeout_sec=CONFIG.java_timeout_sec,
+        )
+        svc = ExperienceMemoryClient(java)
 
-            # 1. Feedback on cited/retrieved memories
-            for mem_id in feedback_ids:
-                try:
-                    await svc.record_feedback(mem_id, outcome="success")
-                except Exception as exc:
-                    logger.warning("Memory feedback failed for id=%d: %s", mem_id, exc)
-
-            # 2. LLM abstraction → new experience memory
+        # 1. Feedback on cited/retrieved memories
+        for mem_id in feedback_ids:
             try:
-                abstraction = await abstract_memory(
-                    llm_client=get_llm_client(),
-                    user_query=user_message,
-                    agent_final_text=final_text,
-                    tool_chain=tools_used,
-                )
+                await svc.record_feedback(mem_id, outcome="success")
             except Exception as exc:
-                logger.warning("Memory abstraction errored: %s", exc)
-                abstraction = None
+                logger.warning("Memory feedback failed for id=%d: %s", mem_id, exc)
 
-            if abstraction is not None:
-                try:
-                    await svc.write(
-                        user_id=user_id,
-                        intent_summary=abstraction["intent_summary"],
-                        abstract_action=abstraction["abstract_action"],
-                        source="auto",
-                        source_session_id=session_id,
-                    )
-                    logger.info("Memory lifecycle: wrote new experience memory for user=%d", user_id)
-                except Exception as exc:
-                    logger.warning("Memory write failed: %s", exc)
+        # 2. LLM abstraction → new experience memory
+        try:
+            abstraction = await abstract_memory(
+                llm_client=get_llm_client(),
+                user_query=user_message,
+                agent_final_text=final_text,
+                tool_chain=tools_used,
+            )
+        except Exception as exc:
+            logger.warning("Memory abstraction errored: %s", exc)
+            abstraction = None
+
+        if abstraction is not None:
+            try:
+                await svc.write(
+                    user_id=user_id,
+                    intent_summary=abstraction["intent_summary"],
+                    abstract_action=abstraction["abstract_action"],
+                    source="auto",
+                    source_session_id=session_id,
+                )
+                logger.info("Memory lifecycle: wrote new experience memory for user=%d", user_id)
+            except Exception as exc:
+                logger.warning("Memory write failed: %s", exc)
     except Exception as exc:
         logger.warning("Memory lifecycle background task failed: %s", exc)
 

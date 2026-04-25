@@ -607,12 +607,16 @@ class ToolDispatcher:
         base_url: str,
         auth_token: str,
         user_id: int,
+        java: Any = None,
     ) -> None:
         self._db = db
         self._base_url = base_url.rstrip("/")
         self._headers = {"Authorization": f"Bearer {auth_token}", "Content-Type": "application/json"}
         self._user_id = user_id
-        self._memory_svc = AgentMemoryService(db)
+        # Phase 8-A-1d: when java client is provided, mcp_id resolution +
+        # memory operations route via Java instead of local SQLAlchemy.
+        self._java = java
+        self._memory_svc = AgentMemoryService(db) if db is not None else None
 
     # Tools that return conversational/structural data — skip DataProfile for these
     _NON_DATA_TOOLS = frozenset({
@@ -642,6 +646,11 @@ class ToolDispatcher:
         """
         mcp_name = tool_input.get("mcp_name")
         if mcp_name:
+            if self._java is not None:
+                mcp = await self._java.get_mcp_by_name(mcp_name)
+                if mcp:
+                    return mcp.get("id")
+                return None
             result = await self._db.execute(
                 select(MCPDefinitionModel).where(MCPDefinitionModel.name == mcp_name)
             )
@@ -700,7 +709,7 @@ class ToolDispatcher:
                     # data that LLM should read directly — no flattening needed.
                     _FLATTEN_MCPS = {"get_process_info"}
                     try:
-                        from app.services.data_flattener import flatten, build_llm_summary
+                        from python_ai_sidecar.agent_helpers_native.data_flattener import flatten, build_llm_summary
                         od = raw_result.get("output_data", {}) if isinstance(raw_result, dict) else {}
                         raw_ds = od.get("_raw_dataset") or od.get("dataset") or []
                         flatten_input = raw_ds[0] if isinstance(raw_ds, list) and len(raw_ds) == 1 and isinstance(raw_ds[0], dict) else raw_ds
@@ -800,7 +809,27 @@ class ToolDispatcher:
                         "deep_link": f"{tool_input.get('target')}:{tool_input.get('id', '')}",
                     }
                 case "search_memory":
+                    # Phase 8-A-1d: route via Java when available (chat native)
                     top_k = tool_input.get("top_k", 5)
+                    if self._java is not None:
+                        rows = await self._java.list_agent_memories(
+                            user_id=self._user_id,
+                            task_type=tool_input.get("task_type"),
+                        )
+                        # Naive client-side keyword filter (no vector search on
+                        # this legacy endpoint; sidecar's experience_memory is
+                        # the proper RAG path).
+                        q = (tool_input.get("query") or "").lower()
+                        if q:
+                            rows = [r for r in rows if q in (r.get("content") or "").lower()]
+                        rows = rows[:top_k]
+                        return {
+                            "memories": rows,
+                            "count": len(rows),
+                            "filter_applied": {"strategy": "java_keyword"},
+                        }
+                    if self._memory_svc is None:
+                        return {"memories": [], "count": 0, "filter_applied": {"strategy": "unavailable"}}
                     memories, filter_applied = await self._memory_svc.search_with_metadata(
                         user_id=self._user_id,
                         query=tool_input["query"],
@@ -814,6 +843,23 @@ class ToolDispatcher:
                         "filter_applied": filter_applied,
                     }
                 case "save_memory":
+                    if self._java is not None:
+                        body = {
+                            "userId": self._user_id,
+                            "content": tool_input["content"],
+                            "source": "agent_request",
+                            "taskType": tool_input.get("task_type"),
+                            "dataSubject": tool_input.get("data_subject"),
+                            "toolName": tool_input.get("tool_name"),
+                        }
+                        saved = await self._java.save_agent_memory(body)
+                        return {
+                            "saved": True,
+                            "memory_id": saved.get("id"),
+                            "content": saved.get("content"),
+                        }
+                    if self._memory_svc is None:
+                        return {"saved": False, "error": "memory service unavailable"}
                     m = await self._memory_svc.write(
                         user_id=self._user_id,
                         content=tool_input["content"],
@@ -866,7 +912,7 @@ class ToolDispatcher:
         # [P0 v15] Smart Sampling Interceptor — skip non-data tools for efficiency
         if tool_name not in self._NON_DATA_TOOLS:
             try:
-                from app.services.data_profile_service import DataProfileService, is_data_source
+                from python_ai_sidecar.agent_helpers_native.data_profile_service import DataProfileService, is_data_source
                 if is_data_source(result):
                     profile = DataProfileService.build_profile(result)
                     if profile:

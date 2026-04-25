@@ -152,18 +152,28 @@ async def _execute_build_pipeline_live(
         return {"status": "failed", "error_message": f"BlockRegistry load failed: {e}"}
 
     # Resolve base pipeline — priority: explicit base_pipeline_id > chat session snapshot
+    # Phase 8-A-1d: pipeline + session lookups go through Java /internal/*
+    # instead of opening a local DB session. The sidecar config carries the
+    # service token; per-request CallerContext is unavailable here so we
+    # build an unauthenticated-from-user-perspective client (Java audit will
+    # see actor=service).
+    from python_ai_sidecar.clients.java_client import JavaAPIClient
+    from python_ai_sidecar.config import CONFIG
+    java = JavaAPIClient(
+        CONFIG.java_api_url,
+        CONFIG.java_internal_token,
+        timeout_sec=CONFIG.java_timeout_sec,
+    )
+
     base_pipeline: Any = None
     base_source = "none"
     if base_pipeline_id is not None:
         try:
-            from sqlalchemy import select as _select
-            from app.models.pipeline import PipelineModel
             import json as _json
-            row = (await db.execute(
-                _select(PipelineModel).where(PipelineModel.id == int(base_pipeline_id))
-            )).scalar_one_or_none()
-            if row and row.pipeline_json:
-                base_pipeline = PipelineJSON.model_validate(_json.loads(row.pipeline_json))
+            row = await java.get_pipeline(int(base_pipeline_id))
+            pipeline_json = (row or {}).get("pipelineJson") or (row or {}).get("pipeline_json")
+            if pipeline_json:
+                base_pipeline = PipelineJSON.model_validate(_json.loads(pipeline_json))
                 base_source = f"pipeline#{base_pipeline_id}"
         except Exception as e:  # noqa: BLE001
             logger.warning("base_pipeline load failed (ignored): %s", e)
@@ -173,17 +183,11 @@ async def _execute_build_pipeline_live(
     # produced (context continuity).
     if base_pipeline is None and chat_session_id and chat_user_id:
         try:
-            from sqlalchemy import select as _select
-            from python_ai_sidecar.agent_helpers._model_stubs import AgentSessionModel
             import json as _json
-            sess_row = (await db.execute(
-                _select(AgentSessionModel).where(
-                    AgentSessionModel.session_id == chat_session_id,
-                    AgentSessionModel.user_id == chat_user_id,
-                )
-            )).scalar_one_or_none()
-            if sess_row and sess_row.last_pipeline_json:
-                snap = _json.loads(sess_row.last_pipeline_json)
+            sess = await java.get_agent_session(str(chat_session_id))
+            last_json = (sess or {}).get("lastPipelineJson") or (sess or {}).get("last_pipeline_json")
+            if last_json and (sess.get("userId") == chat_user_id or sess.get("user_id") == chat_user_id):
+                snap = _json.loads(last_json)
                 if snap.get("nodes"):
                     base_pipeline = PipelineJSON.model_validate(snap)
                     base_source = "session_snapshot"
@@ -379,7 +383,7 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
         _result_summary,
     )
     from python_ai_sidecar.agent_orchestrator_v2.render_card import _build_render_card
-    from app.services.data_distillation_service import DataDistillationService
+    from python_ai_sidecar.agent_helpers_native.data_distillation_service import DataDistillationService
     from python_ai_sidecar.agent_helpers.tool_dispatcher import ToolDispatcher
 
     # Get the last AI message's tool_calls
@@ -388,11 +392,21 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
     if not last_msg or not hasattr(last_msg, "tool_calls") or not last_msg.tool_calls:
         return {}
 
+    # Phase 8-A-1d: ToolDispatcher accepts a Java client so its mcp_id /
+    # save_memory / search_memory paths can route through Java when no
+    # local AsyncSession is supplied (chat native mode).
+    from python_ai_sidecar.clients.java_client import JavaAPIClient
+    from python_ai_sidecar.config import CONFIG
+    java = JavaAPIClient(
+        CONFIG.java_api_url, CONFIG.java_internal_token,
+        timeout_sec=CONFIG.java_timeout_sec,
+    )
     dispatcher = ToolDispatcher(
         db=db,
         base_url=base_url,
         auth_token=auth_token,
         user_id=user_id,
+        java=java,
     )
     distill_svc = DataDistillationService()
 

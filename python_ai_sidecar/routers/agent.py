@@ -1,12 +1,12 @@
 """Agent chat + Pipeline Builder Glass Box.
 
-Phase 7 hybrid cutover:
-  - Both endpoints try fallback proxy to old Python FastAPI first (when
-    ``FALLBACK_ENABLED=1``) so the Frontend gets the full LangGraph /
-    Glass Box experience while native ports land.
-  - On fallback disabled or upstream error, drops to the native sidecar
-    graph / scaffold (Phase 5b code path).
-  - Phase 8 replaces each fallback with a proper native port.
+Phase 8-A-1d: chat goes through AgentOrchestratorV2 (LangGraph) natively.
+DB-coupled nodes were rewired to JavaAPIClient + ported pure-compute helpers
+under ``agent_helpers_native/``; the sidecar no longer needs an AsyncSession.
+
+The old fallback path (proxy → :8001) is retained behind ``FALLBACK_ENABLED=1``
+purely as an emergency rollback switch — production should run with it ``0``.
+Phase 8-D drops the fallback proxy outright + decommissions :8001.
 """
 
 from __future__ import annotations
@@ -20,8 +20,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from sse_starlette.sse import EventSourceResponse
 
 from ..auth import CallerContext, ServiceAuth
-from ..agent_orchestrator.graph import run_chat_turn
 from ..clients.java_client import JavaAPIClient
+from ..config import CONFIG
 from ..fallback import python_proxy as fb
 
 log = logging.getLogger("python_ai_sidecar.agent_router")
@@ -43,25 +43,46 @@ class BuildRequest(BaseModel):
     pipeline_snapshot: dict | None = Field(default=None, alias="pipelineSnapshot")
 
 
+async def _chat_stream_native(req: ChatRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
+    """Phase 8-A-1d: native LangGraph orchestrator.
+
+    The orchestrator uses ``db=None`` and routes every state read/write
+    through JavaAPIClient + the ported pure-compute helpers.
+    """
+    from ..agent_orchestrator_v2.orchestrator import AgentOrchestratorV2
+
+    orchestrator = AgentOrchestratorV2(
+        db=None,
+        base_url=CONFIG.java_api_url,
+        auth_token=CONFIG.java_internal_token,
+        user_id=caller.user_id or 0,
+    )
+    async for v1_event in orchestrator.run(req.message, session_id=req.session_id):
+        # AgentOrchestratorV2 yields v1-style {type, ...} dicts; convert to SSE
+        ev_type = v1_event.get("type") or "message"
+        yield {"event": ev_type, "data": json.dumps(v1_event, ensure_ascii=False)}
+
+
 async def _chat_stream(req: ChatRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
+    """Chat entry — native by default, fallback only when ``FALLBACK_ENABLED=1``.
+
+    Production should run native (``FALLBACK_ENABLED=0``); the fallback is
+    retained as an emergency rollback switch until Phase 8-D drops :8001.
+    """
     if fb.fallback_enabled():
         try:
             body: dict = {"message": req.message}
             if req.session_id:
                 body["session_id"] = req.session_id
-            # Old Python FastAPI exposes chat at /api/v1/agent/chat/stream.
             async for ev in fb.stream_sse("/api/v1/agent/chat/stream", body, caller):
                 yield ev
             return
         except Exception as ex:  # noqa: BLE001
-            log.warning("chat fallback failed (%s) — using native graph", ex.__class__.__name__)
+            log.warning("chat fallback failed (%s) — switching to native graph", ex.__class__.__name__)
             yield fb.format_fallback_error(ex)
 
-    async for event in run_chat_turn(
-            user_message=req.message,
-            session_id=req.session_id,
-            caller=caller):
-        yield event
+    async for ev in _chat_stream_native(req, caller):
+        yield ev
 
 
 async def _build_stream_native(req: BuildRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:

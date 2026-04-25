@@ -27,6 +27,29 @@ from python_ai_sidecar.agent_helpers.agent_memory_service import AgentMemoryServ
 
 logger = logging.getLogger(__name__)
 
+
+class _AttrDict:
+    """Minimal attribute-access wrapper around a Java JSON dict.
+
+    Lets the existing template code (``mcp.description``, ``mcp.input_schema``,
+    ``skill.is_active`` etc.) work transparently against either SQLAlchemy
+    rows or Java-returned dicts. Java DTOs come back camelCase so we also
+    accept snake_case lookups by converting on the fly.
+    """
+
+    __slots__ = ("_d",)
+
+    def __init__(self, d: Dict[str, Any]):
+        self._d = d or {}
+
+    def __getattr__(self, name: str) -> Any:  # noqa: ANN401
+        if name in self._d:
+            return self._d[name]
+        # snake_case → camelCase
+        parts = name.split("_")
+        camel = parts[0] + "".join(p.title() for p in parts[1:])
+        return self._d.get(camel)
+
 _DEFAULT_SOUL = """\
 你是一個工廠 AI 診斷代理人 (Agent)，擁有以下不可違反的鐵律：
 
@@ -308,12 +331,19 @@ _OUTPUT_ROUTING = """\
 class ContextLoader:
     """Assembles the dynamic System Prompt for each agent invocation."""
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(self, db: AsyncSession, java: Any = None) -> None:
         self._db = db
-        self._memory_svc = AgentMemoryService(db)
-        # Phase 1: new reflective memory system (pgvector + health scoring)
-        from app.services.experience_memory_service import ExperienceMemoryService
-        self._exp_memory_svc = ExperienceMemoryService(db)
+        # Phase 8-A-1d: Java-backed paths take over when `java` is supplied.
+        # SQLAlchemy code paths only run when java=None (back-compat for
+        # in-process tests). Production chat path always supplies java.
+        self._java = java
+        self._memory_svc = AgentMemoryService(db) if db is not None else None
+        # Phase 8-A-1d: ExperienceMemoryClient is Java-backed; the legacy
+        # service required AsyncSession.
+        from python_ai_sidecar.agent_helpers_native.experience_memory_client import (
+            ExperienceMemoryClient,
+        )
+        self._exp_memory_svc = ExperienceMemoryClient(java) if java is not None else None
 
     async def build(
         self,
@@ -341,7 +371,7 @@ class ContextLoader:
         # [memory:<id>] tags for the feedback loop.
         _tc = task_context or {}
         exp_memories: List[Tuple[Any, float]] = []
-        if query:
+        if query and self._exp_memory_svc is not None:
             try:
                 exp_memories = await self._exp_memory_svc.retrieve(
                     user_id=user_id,
@@ -353,8 +383,15 @@ class ContextLoader:
                 exp_memories = []
 
         # ── Legacy keyword-based memories (fallback for back-compat) ──────
-        # Only queried when no experience memories hit — eventually removable.
-        if not exp_memories and (query or _tc.get("task_type")):
+        # Phase 8-A-1d: dropped when java client is provided (chat native path).
+        # SQLAlchemy fallback retained only for in-process tests where
+        # AsyncSession is available but Java isn't.
+        if (
+            not exp_memories
+            and self._memory_svc is not None
+            and self._java is None
+            and (query or _tc.get("task_type"))
+        ):
             try:
                 memories, filter_meta = await self._memory_svc.search_with_metadata(
                     user_id=user_id,
@@ -438,7 +475,9 @@ class ContextLoader:
         ]
 
         # Build rag_hits from both paths for the SSE event
-        from app.services.experience_memory_service import ExperienceMemoryService as _ExpSvc
+        from python_ai_sidecar.agent_helpers_native.experience_memory_client import (
+            ExperienceMemoryClient as _ExpSvc,
+        )
         rag_hits: List[Dict[str, Any]] = []
         for mem, sim in exp_memories:
             hit = _ExpSvc.to_dict(mem)
@@ -466,7 +505,22 @@ class ContextLoader:
 
     async def _load_soul(self, user_id: int) -> str:
         """Load Soul prompt: user soul_override > global SystemParameter > default."""
-        # Check user-level override first (Admin-set)
+        # Phase 8-A-1d: Java client path (chat native).
+        if self._java is not None:
+            try:
+                pref = await self._java.get_user_preference(user_id)
+                if pref:
+                    soul_override = pref.get("soulOverride") or pref.get("soul_override")
+                    if soul_override:
+                        return soul_override
+                sp = await self._java.get_system_parameter(_SOUL_PARAM_KEY)
+                if sp and sp.get("value"):
+                    return sp["value"]
+            except Exception as exc:
+                logger.warning("_load_soul (java) failed: %s", exc)
+            return _DEFAULT_SOUL
+
+        # SQLAlchemy fallback for in-process tests
         result = await self._db.execute(
             select(UserPreferenceModel).where(UserPreferenceModel.user_id == user_id)
         )
@@ -474,7 +528,6 @@ class ContextLoader:
         if pref_row and pref_row.soul_override:
             return pref_row.soul_override
 
-        # Load from SystemParameter
         result = await self._db.execute(
             select(SystemParameterModel).where(SystemParameterModel.key == _SOUL_PARAM_KEY)
         )
@@ -486,6 +539,15 @@ class ContextLoader:
 
     async def _load_preference(self, user_id: int) -> Optional[str]:
         """Load user preference text. Returns None if not set."""
+        if self._java is not None:
+            try:
+                pref = await self._java.get_user_preference(user_id)
+                if pref:
+                    return pref.get("preferences")
+            except Exception as exc:
+                logger.warning("_load_preference (java) failed: %s", exc)
+            return None
+
         result = await self._db.execute(
             select(UserPreferenceModel).where(UserPreferenceModel.user_id == user_id)
         )
@@ -493,21 +555,30 @@ class ContextLoader:
         return pref.preferences if pref else None
 
     async def _load_mcp_catalog(self) -> str:
-        """Load System MCP list from DB for direct injection into context.
+        """Load System MCP list from DB / Java for direct injection into context.
 
         Custom MCPs are deprecated — the catalog shows only System MCPs (raw data
         sources). For visualization/analysis, the Agent should use Skills via
         execute_skill (see _load_skill_catalog for that list).
         """
-        try:
-            result = await self._db.execute(
-                select(MCPDefinitionModel)
-                .where(MCPDefinitionModel.mcp_type == "system")
-                .order_by(MCPDefinitionModel.id)
-            )
-            mcps = result.scalars().all()
-        except Exception:
-            return "(MCP 目錄載入失敗)"
+        mcps: List[Any] = []
+        if self._java is not None:
+            try:
+                rows = await self._java.list_mcps(mcp_type="system")
+                # Java returns list of dicts; wrap with attr-access
+                mcps = [_AttrDict(r) for r in (rows or [])]
+            except Exception:
+                return "(MCP 目錄載入失敗)"
+        else:
+            try:
+                result = await self._db.execute(
+                    select(MCPDefinitionModel)
+                    .where(MCPDefinitionModel.mcp_type == "system")
+                    .order_by(MCPDefinitionModel.id)
+                )
+                mcps = list(result.scalars().all())
+            except Exception:
+                return "(MCP 目錄載入失敗)"
 
         if not mcps:
             return "(目前無可用 System MCP)"
@@ -523,7 +594,8 @@ class ContextLoader:
             required_params = ""
             if mcp.input_schema:
                 try:
-                    schema = _json.loads(mcp.input_schema)
+                    raw = mcp.input_schema
+                    schema = _json.loads(raw) if isinstance(raw, str) else raw
                     fields = schema.get("fields", [])
                     req = [f["name"] for f in fields if f.get("required")]
                     required_params = ", ".join(req) if req else "-"
@@ -541,29 +613,43 @@ class ContextLoader:
         a matching Skill exists — that's why this catalog goes *before* the MCP
         catalog in the system prompt.
         """
-        try:
-            # Only load My Skills for copilot.
-            # Exclude: DR skills (name starts with [P), AP skills ([auto_patrol]),
-            # Chart-Test skills ([Chart-Test]), and any with binding_type=event/alarm.
-            # These are executed by their own pipelines, not by copilot.
-            from sqlalchemy import and_, or_, not_
-            result = await self._db.execute(
-                select(SkillDefinitionModel)
-                .where(SkillDefinitionModel.is_active == True)
-                .where(not_(SkillDefinitionModel.name.like("[P%")))
-                .where(not_(SkillDefinitionModel.name.like("[auto_patrol]%")))
-                .where(not_(SkillDefinitionModel.name.like("[Chart-Test%")))
-                .where(or_(
-                    SkillDefinitionModel.binding_type == "none",
-                    SkillDefinitionModel.binding_type == None,
-                    SkillDefinitionModel.binding_type == "",
-                ))
-                .order_by(SkillDefinitionModel.id)
-            )
-            skills = result.scalars().all()
-        except Exception:
-            logger.debug("_load_skill_catalog failed", exc_info=True)
-            return "(Skill 目錄載入失敗)"
+        if self._java is not None:
+            # Java path: list all + filter in Python (small catalog, ~20-50 skills)
+            try:
+                rows = await self._java.list_skills()
+                def _keep(r: dict) -> bool:
+                    if not r.get("isActive", r.get("is_active", True)):
+                        return False
+                    name = r.get("name", "") or ""
+                    if name.startswith("[P") or name.startswith("[auto_patrol]") or name.startswith("[Chart-Test"):
+                        return False
+                    bt = r.get("bindingType") or r.get("binding_type") or ""
+                    return bt in ("", "none")
+                skills = [_AttrDict(r) for r in (rows or []) if _keep(r)]
+                skills.sort(key=lambda s: s.id)
+            except Exception:
+                logger.debug("_load_skill_catalog (java) failed", exc_info=True)
+                return "(Skill 目錄載入失敗)"
+        else:
+            try:
+                from sqlalchemy import and_, or_, not_
+                result = await self._db.execute(
+                    select(SkillDefinitionModel)
+                    .where(SkillDefinitionModel.is_active == True)
+                    .where(not_(SkillDefinitionModel.name.like("[P%")))
+                    .where(not_(SkillDefinitionModel.name.like("[auto_patrol]%")))
+                    .where(not_(SkillDefinitionModel.name.like("[Chart-Test%")))
+                    .where(or_(
+                        SkillDefinitionModel.binding_type == "none",
+                        SkillDefinitionModel.binding_type == None,
+                        SkillDefinitionModel.binding_type == "",
+                    ))
+                    .order_by(SkillDefinitionModel.id)
+                )
+                skills = list(result.scalars().all())
+            except Exception:
+                logger.debug("_load_skill_catalog failed", exc_info=True)
+                return "(Skill 目錄載入失敗)"
 
         if not skills:
             return "(目前無可用 public Skill)"
