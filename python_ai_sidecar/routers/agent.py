@@ -56,6 +56,7 @@ async def _chat_stream_native(req: ChatRequest, caller: CallerContext) -> AsyncG
         base_url=CONFIG.java_api_url,
         auth_token=CONFIG.java_internal_token,
         user_id=caller.user_id or 0,
+        roles=caller.roles,
     )
     async for v1_event in orchestrator.run(req.message, session_id=req.session_id):
         # AgentOrchestratorV2 yields v1-style {type, ...} dicts; convert to SSE

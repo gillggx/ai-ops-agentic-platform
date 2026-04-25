@@ -423,7 +423,10 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
         tc_id = tc.get("id", "")
 
         # Preflight validation
-        preflight_err = await _preflight_validate(db, tool_name, tool_input)
+        preflight_err = await _preflight_validate(
+            db, tool_name, tool_input,
+            caller_roles=config["configurable"].get("caller_roles") or (),
+        )
         if preflight_err:
             result = preflight_err
         elif tool_name == "build_pipeline_live":

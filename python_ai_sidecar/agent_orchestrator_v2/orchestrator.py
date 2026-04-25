@@ -44,11 +44,15 @@ class AgentOrchestratorV2:
         auth_token: str,
         user_id: int,
         canvas_overrides: Optional[Dict[str, Any]] = None,
+        roles: Optional[tuple[str, ...]] = None,
     ) -> None:
         self._db = db
         self._base_url = base_url
         self._auth_token = auth_token
         self._user_id = user_id
+        # Phase v1.3 P0: caller roles drive tool-list filtering in llm_call.
+        # None / empty → fail-closed to ON_DUTY in _is_on_duty_only.
+        self._roles = tuple(roles or ())
         self._canvas_overrides = canvas_overrides
 
     async def run(
@@ -100,6 +104,9 @@ class AgentOrchestratorV2:
                 "base_url": self._base_url,
                 "auth_token": self._auth_token,
                 "user_id": self._user_id,
+                # Phase v1.3 P0: caller roles flow into llm_call._visible_tools
+                # so ON_DUTY users get a restricted tool catalog.
+                "caller_roles": self._roles,
                 "thread_id": session_id or "ephemeral",
                 # Phase 5-UX-5: callback into which tool_execute pushes
                 # pipeline-builder lifecycle events.

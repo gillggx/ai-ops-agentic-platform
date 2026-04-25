@@ -56,12 +56,57 @@ def set_approval(token: str, approved: bool) -> bool:
 
 # ── Pre-flight Validation ──────────────────────────────────────────────────────
 
+# Phase v1.3 P0 — second-line role gate.
+# Even if the LLM somehow hallucinated a tool that wasn't in the visible
+# catalog (out-of-distribution), preflight rejects it. This is defence in
+# depth: tool catalog filter is the primary gate, this is the safety net.
+_ON_DUTY_FORBIDDEN_TOOLS = frozenset({
+    "build_pipeline_live",
+    "propose_pipeline_patch",
+    "save_memory",
+    "update_user_preference",
+    "draft_skill",
+    "build_skill",
+    "draft_mcp",
+    "build_mcp",
+    "draft_routine_check",
+    "draft_event_skill_link",
+    "patch_skill_raw",
+    "patch_mcp",
+})
+
+
+def _caller_is_on_duty_only(roles) -> bool:
+    """Mirror of llm_call._is_on_duty_only — fail-closed on empty roles."""
+    if not roles:
+        return True
+    role_set = {r.upper() for r in roles}
+    if "IT_ADMIN" in role_set or "PE" in role_set:
+        return False
+    return True
+
+
 async def _preflight_validate(
     db: AsyncSession,
     tool_name: str,
     tool_input: Dict[str, Any],
+    caller_roles=None,
 ) -> Optional[Dict[str, Any]]:
-    """Pre-flight validation — intercept ambiguous/missing params before execution."""
+    """Pre-flight validation — intercept ambiguous/missing params before execution.
+
+    Phase v1.3 P0: also rejects role-restricted tools when caller is ON_DUTY.
+    """
+    # Role gate first — regardless of tool well-formedness, ON_DUTY callers
+    # cannot invoke build / write paths even if the LLM tries.
+    if _caller_is_on_duty_only(caller_roles) and tool_name in _ON_DUTY_FORBIDDEN_TOOLS:
+        return {
+            "status": "error", "code": "ROLE_FORBIDDEN",
+            "message": (
+                f"⚠️ 此工具 ({tool_name}) 僅限 PE / IT_ADMIN 使用。"
+                "值班帳號請改用 search_published_skills + invoke_published_skill。"
+            ),
+        }
+
     if tool_name == "execute_mcp":
         mcp_name = tool_input.get("mcp_name")
         if not mcp_name:

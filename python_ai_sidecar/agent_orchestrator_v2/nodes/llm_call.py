@@ -28,10 +28,47 @@ _LLM_HIDDEN_TOOLS = {"execute_mcp", "query_data", "execute_analysis", "propose_p
 # Agent is forced to use build_pipeline_live (or answer with text for knowledge Q).
 _PIPELINE_ONLY_EXTRA_HIDDEN = {"execute_skill"}
 
+# Phase v1.3 P0 — ON_DUTY tool restriction.
+# ON_DUTY users should only be able to consume *published* skills + read raw
+# data; they cannot author new pipelines or write to global memory. Anything
+# in this set is removed from the LLM-visible catalog when caller's only role
+# is ON_DUTY (PE / IT_ADMIN bypass via RoleHierarchy).
+_ON_DUTY_HIDDEN_TOOLS = {
+    "build_pipeline_live",
+    "propose_pipeline_patch",
+    "save_memory",
+    "update_user_preference",
+    "draft_skill",
+    "build_skill",
+    "draft_mcp",
+    "build_mcp",
+    "draft_routine_check",
+    "draft_event_skill_link",
+    "patch_skill_raw",
+    "patch_mcp",
+}
 
-def _visible_tools() -> List[Dict[str, Any]]:
-    """Build LLM-visible tool list, honoring PIPELINE_ONLY_MODE at call time so
-    flips can be hot-reloaded via settings without restart-coupling."""
+
+def _is_on_duty_only(roles: tuple[str, ...] | list[str] | None) -> bool:
+    """True iff caller is strictly ON_DUTY (no PE / IT_ADMIN authority).
+
+    Empty roles are treated as ON_DUTY (fail-closed) so a misconfigured
+    JWT can never elevate a user beyond the most-restricted view.
+    """
+    if not roles:
+        return True
+    role_set = {r.upper() for r in roles}
+    if "IT_ADMIN" in role_set or "PE" in role_set:
+        return False
+    return "ON_DUTY" in role_set or len(role_set) == 0
+
+
+def _visible_tools(roles: tuple[str, ...] | list[str] | None = None) -> List[Dict[str, Any]]:
+    """Build LLM-visible tool list, honoring PIPELINE_ONLY_MODE + caller role.
+
+    Settings flips are read at call time so hot-reload doesn't need a process
+    restart; role gating is fail-closed (empty = ON_DUTY).
+    """
     hidden = set(_LLM_HIDDEN_TOOLS)
     try:
         if get_settings().PIPELINE_ONLY_MODE:
@@ -39,6 +76,8 @@ def _visible_tools() -> List[Dict[str, Any]]:
     except Exception:
         # Settings may not be initialised in some test paths — default safe
         pass
+    if _is_on_duty_only(roles):
+        hidden |= _ON_DUTY_HIDDEN_TOOLS
     return [t for t in TOOL_SCHEMAS if t["name"] not in hidden]
 
 
@@ -121,7 +160,10 @@ async def llm_call_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[s
 
     # Phase 4-C: call _visible_tools() so PIPELINE_ONLY_MODE flag is consulted
     # at invocation time (supports env/config hot-reload without process restart).
-    visible_tools = _visible_tools()
+    # Phase v1.3 P0: caller's roles flow through config so ON_DUTY users get a
+    # restricted catalog (no build_pipeline_live, no memory writes, etc.).
+    caller_roles = config["configurable"].get("caller_roles") or ()
+    visible_tools = _visible_tools(caller_roles)
     try:
         response = await llm.create(
             system=system,

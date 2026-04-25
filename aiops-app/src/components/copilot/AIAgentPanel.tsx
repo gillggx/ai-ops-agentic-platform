@@ -66,6 +66,12 @@ interface ChatMessage {
   flatData?: Record<string, any[]>;
   flatMetadata?: FlatDataMetadata;
   uiConfig?: UIConfig;
+  // Phase v1.3 P0: feedback tracking — only meaningful when role === "agent"
+  // and message originated from a synthesis event. messageIdx is the running
+  // synthesis count within the session so the backend can dedup ratings.
+  messageIdx?: number;
+  feedbackRating?: 1 | -1 | null;   // null = not yet rated
+  feedbackSubmitting?: boolean;
 }
 
 interface HitlRequest {
@@ -282,6 +288,149 @@ function RenderDecisionChips({ decision, onContract }: {
 }
 
 // ---------------------------------------------------------------------------
+// FeedbackBar — 👍 / 👎 row under each agent synthesis message (Phase v1.3 P0).
+// Stays minimal until a rating is submitted; afterwards shrinks to a confirmation.
+// ---------------------------------------------------------------------------
+
+function FeedbackBar({ message, onRate, onOpenReasonModal }: {
+  message: ChatMessage;
+  onRate: (rating: 1) => void;          // 👍 fires inline
+  onOpenReasonModal: () => void;         // 👎 opens reason modal
+}) {
+  const submitting = message.feedbackSubmitting;
+  const rated = message.feedbackRating;
+
+  if (rated) {
+    return (
+      <div style={{
+        display: "inline-flex", alignItems: "center", gap: 4,
+        padding: "2px 8px", marginTop: 4, borderRadius: 10,
+        fontSize: 10, color: "#718096", background: "#f7f8fc",
+      }}>
+        <span>{rated === 1 ? "👍" : "👎"}</span>
+        <span>已記錄</span>
+      </div>
+    );
+  }
+
+  const baseStyle = {
+    background: "transparent", border: "1px solid #e2e8f0",
+    cursor: submitting ? "wait" : "pointer", padding: "2px 8px",
+    borderRadius: 10, fontSize: 12,
+  } as const;
+
+  return (
+    <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+      <button
+        type="button"
+        disabled={submitting}
+        title="這個回答有幫助"
+        style={baseStyle}
+        onClick={() => onRate(1)}
+      >
+        👍
+      </button>
+      <button
+        type="button"
+        disabled={submitting}
+        title="這個回答有問題"
+        style={baseStyle}
+        onClick={onOpenReasonModal}
+      >
+        👎
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// FeedbackReasonModal — 👎 reason picker (Phase v1.3 P0).
+// 3 reason chips + optional free-text. Confirms with `(reason, freeText)`.
+// ---------------------------------------------------------------------------
+
+const FEEDBACK_REASONS = [
+  { code: "data_wrong",    label: "資料錯" },
+  { code: "logic_wrong",   label: "邏輯錯" },
+  { code: "chart_unclear", label: "圖表看不懂" },
+] as const;
+
+function FeedbackReasonModal({ onConfirm, onCancel }: {
+  onConfirm: (reason: string, freeText: string) => void;
+  onCancel: () => void;
+}) {
+  const [reason, setReason] = useState<string | null>(null);
+  const [text, setText] = useState("");
+  return (
+    <div
+      onClick={onCancel}
+      style={{
+        position: "fixed", inset: 0, zIndex: 1000,
+        background: "rgba(0,0,0,0.4)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "#fff", borderRadius: 8, padding: 20, width: 360,
+          maxWidth: "90vw", boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
+        }}
+      >
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, color: "#1a202c" }}>
+          這個回答有什麼問題？
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+          {FEEDBACK_REASONS.map((r) => (
+            <button
+              key={r.code}
+              type="button"
+              onClick={() => setReason(r.code)}
+              style={{
+                padding: "6px 12px", borderRadius: 14, fontSize: 12,
+                cursor: "pointer",
+                border: `1px solid ${reason === r.code ? "#2b6cb0" : "#cbd5e0"}`,
+                background: reason === r.code ? "#ebf4ff" : "#fff",
+                color: reason === r.code ? "#2b6cb0" : "#4a5568",
+                fontWeight: reason === r.code ? 600 : 400,
+              }}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="（選填）可以多說一點嗎？"
+          rows={3}
+          maxLength={500}
+          style={{
+            width: "100%", boxSizing: "border-box", padding: 8,
+            border: "1px solid #e2e8f0", borderRadius: 4,
+            fontSize: 12, resize: "vertical", fontFamily: "inherit",
+          }}
+        />
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+          <button
+            type="button" onClick={onCancel}
+            style={{ padding: "6px 14px", fontSize: 12, border: "1px solid #cbd5e0",
+                     background: "#fff", borderRadius: 4, cursor: "pointer" }}
+          >取消</button>
+          <button
+            type="button"
+            disabled={!reason}
+            onClick={() => reason && onConfirm(reason, text)}
+            style={{ padding: "6px 14px", fontSize: 12, border: "none",
+                     background: reason ? "#2b6cb0" : "#a0aec0", color: "#fff",
+                     borderRadius: 4, cursor: reason ? "pointer" : "not-allowed" }}
+          >送出</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // AICopilot
 // ---------------------------------------------------------------------------
 
@@ -316,6 +465,11 @@ export function AIAgentPanel({
   const [stages, setStages]         = useState<StageState[]>([]);
   const [logs, setLogs]             = useState<LogEntry[]>([]);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  // Phase v1.3 P0: count synthesis events emitted during this session so each
+  // agent answer gets a stable message_idx for the feedback log.
+  const synthesisIdxRef = useRef(0);
+  // Phase v1.3 P0: 👎 modal state — null when closed.
+  const [feedbackModal, setFeedbackModal] = useState<{ messageId: number; messageIdx: number } | null>(null);
   const [hitl, setHitl]             = useState<HitlRequest | null>(null);
   const [tokenIn, setTokenIn]       = useState(0);
   const [tokenOut, setTokenOut]     = useState(0);
@@ -792,6 +946,9 @@ export function AIAgentPanel({
           case "synthesis": {
             const text = (ev.text as string) ?? "";
             const displayText = text.replace(/<contract>[\s\S]*?<\/contract>/g, "").trim();
+            // Phase v1.3 P0 — assign a stable index for feedback dedup.
+            synthesisIdxRef.current += 1;
+            const _msgIdx = synthesisIdxRef.current - 1;
             if (isValidContract(ev.contract)) {
               const contract = ev.contract as AIOpsReportContract;
               onContract?.(contract);
@@ -799,6 +956,8 @@ export function AIAgentPanel({
                 id: nextId(), role: "agent",
                 content: displayText || contract.summary || "",
                 contract,
+                messageIdx: _msgIdx,
+                feedbackRating: null,
               }]);
             } else if (displayText) {
               // Attach flat data from query_data (Generative UI ChartExplorer)
@@ -811,6 +970,8 @@ export function AIAgentPanel({
               setChatHistory((prev) => [...prev, {
                 id: nextId(), role: "agent", content: displayText,
                 ...(rd ? { renderDecision: rd } : {}),
+                messageIdx: _msgIdx,
+                feedbackRating: null,
               }]);
 
               // Open DataExplorer if we have flat data with actual events
@@ -881,6 +1042,53 @@ export function AIAgentPanel({
       setLoading(false);
     }
   }, [loading, onContract, addLog, focusedNodeId, focusedNodeLabel]);
+
+  // Phase v1.3 P0 — submit a 👍 / 👎 rating.
+  // 👍 fires immediately; 👎 opens reason modal which calls back through here.
+  const submitFeedback = useCallback(async (
+    msg: ChatMessage,
+    rating: 1 | -1,
+    reason?: string,
+    freeText?: string,
+  ) => {
+    if (msg.messageIdx === undefined || !sessionIdRef.current) return;
+    setChatHistory((prev) => prev.map((m) =>
+      m.id === msg.id ? { ...m, feedbackSubmitting: true } : m,
+    ));
+    try {
+      const body: Record<string, unknown> = {
+        sessionId: sessionIdRef.current,
+        messageIdx: msg.messageIdx,
+        rating,
+      };
+      if (rating === -1) {
+        body.reason = reason;
+        if (freeText) body.freeText = freeText;
+      }
+      // Snapshot the answer so post-hoc review can read context standalone.
+      body.contractSummary = msg.contract?.summary ?? msg.content.slice(0, 500);
+      const res = await fetch("/api/agent/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const ok = res.ok;
+      setChatHistory((prev) => prev.map((m) =>
+        m.id === msg.id
+          ? { ...m, feedbackSubmitting: false, feedbackRating: ok ? rating : null }
+          : m,
+      ));
+      if (!ok) {
+        const err = await res.json().catch(() => ({}));
+        addLog(makeLog("⚠️", `回饋送出失敗 (${res.status}): ${err.message ?? ""}`, "error"));
+      }
+    } catch (e) {
+      setChatHistory((prev) => prev.map((m) =>
+        m.id === msg.id ? { ...m, feedbackSubmitting: false } : m,
+      ));
+      addLog(makeLog("⚠️", `回饋送出失敗: ${e instanceof Error ? e.message : e}`, "error"));
+    }
+  }, [addLog]);
 
   async function handleSuggestedAction(action: SuggestedAction) {
     if (isAgentAction(action)) {
@@ -1101,6 +1309,13 @@ export function AIAgentPanel({
                   {msg.role === "agent" && msg.renderDecision && (
                     <RenderDecisionChips decision={msg.renderDecision} onContract={onContract} />
                   )}
+                  {msg.role === "agent" && msg.messageIdx !== undefined && (
+                    <FeedbackBar
+                      message={msg}
+                      onRate={() => submitFeedback(msg, 1)}
+                      onOpenReasonModal={() => setFeedbackModal({ messageId: msg.id, messageIdx: msg.messageIdx! })}
+                    />
+                  )}
                 </>
               )}
             </div>
@@ -1292,6 +1507,18 @@ export function AIAgentPanel({
           </button>
         </div>
       </div>
+
+      {/* Phase v1.3 P0 — 👎 reason modal (rendered at panel root so portal-like) */}
+      {feedbackModal && (
+        <FeedbackReasonModal
+          onCancel={() => setFeedbackModal(null)}
+          onConfirm={(reason, freeText) => {
+            const msg = chatHistory.find((m) => m.id === feedbackModal.messageId);
+            if (msg) submitFeedback(msg, -1, reason, freeText);
+            setFeedbackModal(null);
+          }}
+        />
+      )}
     </div>
   );
 }
