@@ -26,7 +26,13 @@ export async function middleware(req: NextRequest) {
     if (process.env.AIOPS_AUTH_REQUIRED !== "1") {
       return NextResponse.next();
     }
-    const loginUrl = new URL("/login", req.url);
+    // Respect reverse-proxy forwarded headers so the redirect lands on the
+    // public hostname (aiops-gill.com) instead of the internal localhost:8000
+    // that Next.js sees inside nginx.
+    const fwdHost = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+    const fwdProto = req.headers.get("x-forwarded-proto") ?? "https";
+    const origin = fwdHost ? `${fwdProto}://${fwdHost}` : req.nextUrl.origin;
+    const loginUrl = new URL("/login", origin);
     loginUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(loginUrl);
   }
