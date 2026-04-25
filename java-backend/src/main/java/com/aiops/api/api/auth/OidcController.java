@@ -111,8 +111,13 @@ public class OidcController {
 			String username = buildUsername(email, req.name(), sub);
 			user.setUsername(username);
 			user.setEmail(email != null && !email.isBlank() ? email : username + "@oidc.local");
-			// Random bcrypt-sized password — user will never use it (OIDC-only account)
-			user.setHashedPassword("$2a$12$" + UUID.randomUUID().toString().replace("-", "").substring(0, 53));
+			// Random bcrypt-sized password — user will never use it (OIDC-only account).
+			// bcrypt hash format is $2a$12$ + 53-char salt+hash. We pad with UUID + zeros;
+			// value is never decoded, just needs to be a non-null string that never matches
+			// any user-supplied password.
+			String pad = (UUID.randomUUID().toString().replace("-", "")
+					+ UUID.randomUUID().toString().replace("-", "")).substring(0, 53);
+			user.setHashedPassword("$2a$12$" + pad);
 			user.setIsActive(Boolean.TRUE);
 			user.setIsSuperuser(Boolean.FALSE);
 			user.setRoles(roleCodec.encode(EnumSet.of(Role.ON_DUTY)));
