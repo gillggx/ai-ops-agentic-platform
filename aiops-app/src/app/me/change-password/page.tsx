@@ -34,7 +34,8 @@ export default function ChangePasswordPage() {
       const res = await fetch("/api/me/password", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ oldPassword, newPassword }),
+        // Java Jackson SNAKE_CASE → send snake_case keys
+        body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));

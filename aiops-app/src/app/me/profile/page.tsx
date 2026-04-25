@@ -39,7 +39,8 @@ export default function ProfilePage() {
       const res = await fetch("/api/me/profile", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ displayName }),
+        // Java Jackson SNAKE_CASE → send snake_case key
+        body: JSON.stringify({ display_name: displayName }),
       });
       if (!res.ok) {
         const t = await res.text();
