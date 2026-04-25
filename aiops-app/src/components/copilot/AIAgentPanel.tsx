@@ -231,6 +231,50 @@ const MD_CSS = `
 `;
 
 // ---------------------------------------------------------------------------
+// IntentChipBar — Phase v1.3 P0 quick-prompt scaffolding.
+// Three chips above the textarea cover the three components a good agent
+// instruction needs: data scope, judgement logic, presentation.
+// Click → prefills the textarea with a template; the [token] placeholders
+// get auto-selected so the user just types over them.
+// ---------------------------------------------------------------------------
+
+const INTENT_CHIPS = [
+  { icon: "🔍", label: "查資料", template: "撈取 [機台代碼] 最近 [24 小時] 的 [SPC 資料]" },
+  { icon: "📐", label: "診斷邏輯", template: "判斷是否符合 [連續 3 次 OOC]" },
+  { icon: "📊", label: "呈現結果", template: "用 [趨勢圖] 呈現結果" },
+] as const;
+
+function IntentChipBar({ onPrefill, disabled }: {
+  onPrefill: (template: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
+      {INTENT_CHIPS.map((c) => (
+        <button
+          key={c.label}
+          type="button"
+          disabled={disabled}
+          onClick={() => onPrefill(c.template)}
+          style={{
+            padding: "3px 10px", fontSize: 11, borderRadius: 12,
+            border: "1px solid #cbd5e0", background: "#fff",
+            color: "#4a5568",
+            cursor: disabled ? "not-allowed" : "pointer",
+            opacity: disabled ? 0.5 : 1,
+            display: "inline-flex", alignItems: "center", gap: 4,
+          }}
+          title={c.template}
+        >
+          <span>{c.icon}</span>
+          <span>{c.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // RenderDecisionChips — inline expandable chart switcher for MCP results
 // ---------------------------------------------------------------------------
 
@@ -485,6 +529,8 @@ export function AIAgentPanel({
     }
   }, [externalSessionId]);
   const chatEndRef   = useRef<HTMLDivElement>(null);
+  // Phase v1.3 P0: textarea ref so chip prefill can auto-select first [token].
+  const inputRef     = useRef<HTMLTextAreaElement>(null);
   const logsEndRef   = useRef<HTMLDivElement>(null);
   const pendingRenderDecisionRef = useRef<RenderDecisionMeta | null>(null);
   const [pipelineCards, setPipelineCards] = useState<PipelineCard[]>([]);
@@ -1464,16 +1510,37 @@ export function AIAgentPanel({
 
       {/* Input */}
       <div style={{ padding: "8px 12px 12px", flexShrink: 0 }}>
+        {/* Phase v1.3 P0 — Intent chips: prefill input with template + auto-select first [token] */}
+        <IntentChipBar
+          disabled={loading}
+          onPrefill={(template) => {
+            const next = input.trim() ? `${input.trim()}\n${template}` : template;
+            setInput(next);
+            // Defer select-after-render so the textarea's value reflects state.
+            requestAnimationFrame(() => {
+              const ta = inputRef.current;
+              if (!ta) return;
+              ta.focus();
+              const m = next.match(/\[[^\]]+\]/);
+              if (m && m.index !== undefined) {
+                ta.setSelectionRange(m.index, m.index + m[0].length);
+              } else {
+                ta.setSelectionRange(next.length, next.length);
+              }
+            });
+          }}
+        />
         <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
           <textarea
+            ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(input); }
             }}
-            placeholder="輸入訊息，Enter 送出..."
+            placeholder="請嘗試：幫我撈取 [EQP-01] 最近 [24 小時] 的 [SPC 資料]，判斷是否 [連續 3 次 OOC]，並用 [趨勢圖] 呈現結果。"
             disabled={loading}
-            rows={2}
+            rows={3}
             style={{
               flex: 1,
               background: "#f7f8fc",
@@ -1486,6 +1553,7 @@ export function AIAgentPanel({
               outline: "none",
               boxSizing: "border-box",
               fontFamily: "inherit",
+              minHeight: 60,
             }}
           />
           <button
