@@ -8,7 +8,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const url = `${BACKEND_BASE}/migrate/skill/${encodeURIComponent(id)}?dry_run=${dryRun}`;
   const res = await fetch(url, {
     method: "POST",
-    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    headers: { ...(await authHeaders()), "Content-Type": "application/json" },
   });
   const data = await res.json();
   return NextResponse.json(data, { status: res.status });

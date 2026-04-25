@@ -5,7 +5,7 @@ export async function GET(req: NextRequest) {
   const includeRetired = req.nextUrl.searchParams.get("include_retired") === "true";
   const res = await fetch(
     `${BACKEND_BASE}/published-skills?include_retired=${includeRetired}`,
-    { headers: authHeaders() },
+    { headers: await authHeaders() },
   );
   const data = await res.json();
   return NextResponse.json(data, { status: res.status });

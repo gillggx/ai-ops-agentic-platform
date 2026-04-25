@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { authHeaders } from "@/lib/auth-proxy";
 
 // Phase 8-A A-2: upstream is one-step SSE (Java + sidecar both return
 // text/event-stream directly on POST). We pipe the stream back to the client

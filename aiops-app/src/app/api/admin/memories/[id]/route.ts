@@ -1,14 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { authHeaders } from "@/lib/auth-proxy";
 
 const FASTAPI_BASE = process.env.FASTAPI_BASE_URL ?? "http://localhost:8000";
-const TOKEN = process.env.INTERNAL_API_TOKEN ?? "";
-
-function authHeaders() {
-  return {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${TOKEN}`,
-  };
-}
 
 export async function DELETE(
   _req: NextRequest,
@@ -18,7 +11,7 @@ export async function DELETE(
   try {
     const res = await fetch(`${FASTAPI_BASE}/api/v1/experience-memory/${id}`, {
       method: "DELETE",
-      headers: authHeaders(),
+      headers: await authHeaders(),
     });
     const data = await res.json();
     return NextResponse.json(data, { status: res.status });

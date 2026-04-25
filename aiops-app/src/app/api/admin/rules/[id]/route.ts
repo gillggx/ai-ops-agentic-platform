@@ -1,14 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { authHeaders } from "@/lib/auth-proxy";
 
 const FASTAPI_BASE = process.env.FASTAPI_BASE_URL ?? "http://localhost:8000";
-const TOKEN = process.env.INTERNAL_API_TOKEN ?? "";
-
-function authHeaders() {
-  return {
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${TOKEN}`,
-  };
-}
 
 export async function PATCH(
   req: NextRequest,
@@ -18,7 +11,7 @@ export async function PATCH(
   const body = await req.json();
   const res = await fetch(`${FASTAPI_BASE}/api/v1/diagnostic-rules/${id}`, {
     method: "PATCH",
-    headers: authHeaders(),
+    headers: await authHeaders(),
     body: JSON.stringify(body),
   });
   const data = await res.json();
@@ -39,7 +32,7 @@ export async function DELETE(
   const { id } = await params;
   const res = await fetch(`${FASTAPI_BASE}/api/v1/diagnostic-rules/${id}`, {
     method: "DELETE",
-    headers: authHeaders(),
+    headers: await authHeaders(),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));

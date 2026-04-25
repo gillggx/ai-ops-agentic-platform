@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { authHeaders } from "@/lib/auth-proxy";
 
 const FASTAPI_BASE = process.env.AGENT_BUILD_BASE_URL
   ?? process.env.FASTAPI_BASE_URL

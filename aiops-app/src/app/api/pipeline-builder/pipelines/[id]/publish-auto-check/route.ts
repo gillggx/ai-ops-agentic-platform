@@ -6,7 +6,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const body = await req.json();
   const res = await fetch(`${BACKEND_BASE}/pipelines/${id}/publish-auto-check`, {
     method: "POST",
-    headers: authHeaders(),
+    headers: await authHeaders(),
     body: JSON.stringify(body),
   });
   const data = await res.json();

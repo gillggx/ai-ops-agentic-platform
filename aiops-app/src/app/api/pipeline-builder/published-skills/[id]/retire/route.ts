@@ -5,7 +5,7 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: strin
   const { id } = await ctx.params;
   const res = await fetch(`${BACKEND_BASE}/published-skills/${id}/retire`, {
     method: "POST",
-    headers: authHeaders(),
+    headers: await authHeaders(),
   });
   const data = await res.json();
   return NextResponse.json(data, { status: res.status });
