@@ -122,12 +122,11 @@ function ContextualSidebar() {
   const isExact = (href: string) =>
     href === "/dashboard" ? (pathname === "/" || pathname === "/dashboard") : pathname.startsWith(href);
 
-  // Role-based menu filter. When the user is not logged in via NextAuth
-  // (legacy shared-token mode), session is "unauthenticated" → default to
-  // IT_ADMIN so existing UX stays identical. Once OIDC is enabled, session
-  // carries real roles and menu collapses to match.
-  const sessionRoles: string[] = (session?.data as unknown as { roles?: string[] })?.roles ?? [];
-  const roles = sessionRoles.length > 0 ? sessionRoles : ["IT_ADMIN"];  // legacy fallback
+  // Role-based menu filter. Trust the NextAuth session — middleware blocks
+  // unauthenticated visitors at /login, so by the time this renders the
+  // session always carries real roles. Empty roles ⇒ render no sections
+  // (a degraded but safe UX over the old "show everything" fallback).
+  const roles: string[] = (session?.data as unknown as { roles?: string[] })?.roles ?? [];
 
   const showOps = userCanSeeOps(roles);
   const showKnowledge = userCanSeeKnowledge(roles);
