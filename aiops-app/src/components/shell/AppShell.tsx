@@ -377,7 +377,18 @@ function Shell({ children }: { children: React.ReactNode }) {
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <AppProvider>
-      <Shell>{children}</Shell>
+      <ShellGate>{children}</ShellGate>
     </AppProvider>
   );
+}
+
+/** Render the full shell for authenticated pages; bypass for /login etc. */
+function ShellGate({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  // Bare pages — no sidebar, no topbar, no copilot. Login etc.
+  const isBare = pathname === "/login" || pathname.startsWith("/api/auth");
+  if (isBare) {
+    return <>{children}</>;
+  }
+  return <Shell>{children}</Shell>;
 }
