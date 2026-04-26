@@ -121,6 +121,9 @@ interface Props {
   onGlassChat?: (ev: { content: string }) => void;
   onGlassError?: (ev: { message: string; op?: string; hint?: string }) => void;
   onGlassDone?: (ev: { status: string; summary?: string; pipeline_json?: unknown }) => void;
+  // v1.4: parent (AppShell) relays plan items to LiveCanvasOverlay so the
+  // checklist stays visible while the overlay covers AIAgentPanel.
+  onPlanItemsChange?: (items: PlanItem[]) => void;
   // Phase 5-UX-6: fired whenever the user sends a message — host uses this to
   // mirror the message into the live canvas overlay's chat panel.
   onUserMessageSent?: (text: string) => void;
@@ -502,6 +505,7 @@ export function AIAgentPanel({
   onGlassChat,
   onGlassError,
   onGlassDone,
+  onPlanItemsChange,
   onUserMessageSent,
   initialPrompt,
 }: Props) {
@@ -517,6 +521,8 @@ export function AIAgentPanel({
   const [feedbackModal, setFeedbackModal] = useState<{ messageId: number; messageIdx: number } | null>(null);
   // v1.4 Plan Panel — agent-emitted todo list, refreshed each turn.
   const [planItems, setPlanItems] = useState<PlanItem[]>([]);
+  // v1.4 — relay plan changes to parent (AppShell → LiveCanvasOverlay).
+  useEffect(() => { onPlanItemsChange?.(planItems); }, [planItems, onPlanItemsChange]);
   // v1.4 Auto-Run — tracks pb_run_* lifecycle for progress display.
   const [autoRun, setAutoRun] = useState<{ status: "idle" | "running" | "done" | "error"; nodeCount?: number; startedAt?: number; durationMs?: number; error?: string }>({ status: "idle" });
   const [hitl, setHitl]             = useState<HitlRequest | null>(null);

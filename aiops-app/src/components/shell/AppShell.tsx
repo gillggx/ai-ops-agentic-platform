@@ -221,6 +221,9 @@ function Shell({ children }: { children: React.ReactNode }) {
   // + mirrored to state so the overlay can re-render on each event.
   const [glassEvents, setGlassEvents] = useState<GlassEvent[]>([]);
   const glassEventsRef = useRef<GlassEvent[]>([]);
+  // v1.4 Plan Panel — relayed from AIAgentPanel so LiveCanvasOverlay
+  // can render the same checklist (overlay covers the AIAgentPanel).
+  const [overlayPlanItems, setOverlayPlanItems] = useState<import("@/components/copilot/PlanRenderer").PlanItem[]>([]);
 
   const pushGlassEvent = (e: GlassEvent) => {
     glassEventsRef.current = [...glassEventsRef.current, e];
@@ -344,6 +347,9 @@ function Shell({ children }: { children: React.ReactNode }) {
                   });
                   setGlassOverlay((prev) => prev ? { ...prev, active: false } : null);
                 }}
+                // v1.4 — relay plan items so LiveCanvasOverlay can show the
+                // same checklist while it covers AIAgentPanel.
+                onPlanItemsChange={setOverlayPlanItems}
               />
             </div>
           </aside>
@@ -358,6 +364,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           goal={glassOverlay.goal}
           active={glassOverlay.active}
           events={glassEvents}
+          planItems={overlayPlanItems}
           onClose={() => setGlassOverlay(null)}
           onSendMessage={(text) => {
             // Fire the main chat agent via AIAgentPanel's triggerMessage.

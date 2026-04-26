@@ -18,6 +18,7 @@ import dynamic from "next/dynamic";
 import { BuilderProvider, useBuilder } from "@/context/pipeline-builder/BuilderContext";
 import { listBlocks } from "@/lib/pipeline-builder/api";
 import { applyGlassOp, OP_LABELS, opDetail, autoLayoutPipeline } from "@/lib/pipeline-builder/glass-ops";
+import { PlanRenderer, type PlanItem } from "./PlanRenderer";
 import type { BlockSpec } from "@/lib/pipeline-builder/types";
 
 // Phase 5-UX-6: use the no-provider variant so operations applied via
@@ -51,6 +52,11 @@ interface Props {
    *  parent wires this to AIAgentPanel so overlay can continue the
    *  conversation in-place (user's next "add histogram" etc.). */
   onSendMessage?: (text: string) => void;
+  /** v1.4: live Plan Panel items relayed from AIAgentPanel (chat agent's
+   *  update_plan tool emits plan / plan_update SSE events; AppShell wires
+   *  them through to here so users see the checklist while the overlay
+   *  covers the rest of the AI Agent panel). */
+  planItems?: PlanItem[];
 }
 
 export default function LiveCanvasOverlay(props: Props) {
@@ -61,7 +67,7 @@ export default function LiveCanvasOverlay(props: Props) {
   );
 }
 
-function LiveCanvasInner({ sessionId, goal, active, events, onClose, onSendMessage }: Props) {
+function LiveCanvasInner({ sessionId, goal, active, events, onClose, onSendMessage, planItems }: Props) {
   const { state, actions } = useBuilder();
   const [catalog, setCatalog] = useState<BlockSpec[]>([]);
   const [narration, setNarration] = useState<string>(goal ?? "");
@@ -152,7 +158,7 @@ function LiveCanvasInner({ sessionId, goal, active, events, onClose, onSendMessa
           sessionId={sessionId}
           fillViewport={false}
           agentTabContent={
-            <GlassChatPanel events={events} active={active} onSendMessage={onSendMessage} />
+            <GlassChatPanel events={events} active={active} onSendMessage={onSendMessage} planItems={planItems} />
           }
         />
       </div>
@@ -167,10 +173,12 @@ function GlassChatPanel({
   events,
   active,
   onSendMessage,
+  planItems,
 }: {
   events: GlassEvent[];
   active: boolean;
   onSendMessage?: (text: string) => void;
+  planItems?: PlanItem[];
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [input, setInput] = useState("");
@@ -196,6 +204,8 @@ function GlassChatPanel({
         minHeight: 0,
       }}
     >
+      {/* v1.4 Plan Panel — relayed from outer chat agent */}
+      <PlanRenderer items={planItems ?? []} />
       <div
         ref={scrollRef}
         style={{
