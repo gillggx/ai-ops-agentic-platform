@@ -324,6 +324,41 @@ class BuilderToolset:
         return {"node_id": node_id, "display_label": label}
 
     # ======================================================================
+    # Plan Panel (v1.4) — Glass Box-side equivalent of orchestrator's update_plan.
+    # The result dict is recognised by orchestrator.py and converted to a
+    # "plan" or "plan_update" StreamEvent so the Frontend can render the
+    # checklist live.
+    # ======================================================================
+
+    async def update_plan(
+        self,
+        action: str,
+        items: Optional[list] = None,
+        id: Optional[str] = None,  # noqa: A002 — schema field name
+        status: Optional[str] = None,
+        note: Optional[str] = None,
+    ) -> dict[str, Any]:
+        action = (action or "create").lower()
+        if action == "create":
+            return {
+                "_plan_action": "create",
+                "items": items or [],
+                "status": "success",
+            }
+        if action == "update":
+            return {
+                "_plan_action": "update",
+                "id": id,
+                "status_value": status,
+                "note": note,
+                "status": "success",
+            }
+        raise ToolError(
+            code="BAD_PLAN_ACTION",
+            message="update_plan.action must be 'create' or 'update'",
+        )
+
+    # ======================================================================
     # Introspection (3)
     # ======================================================================
 

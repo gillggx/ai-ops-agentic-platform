@@ -276,6 +276,24 @@ async def stream_agent_build(
                         "ts": 0.0,
                     },
                 )
+            elif tu.name == "update_plan" and isinstance(result, dict):
+                # v1.4 Plan Panel — convert to plan / plan_update stream events
+                # so AgentBuilderPanel can render the live checklist.
+                if result.get("_plan_action") == "create":
+                    yield StreamEvent(
+                        type="plan",
+                        data={"items": result.get("items") or [], "ts": 0.0},
+                    )
+                elif result.get("_plan_action") == "update":
+                    yield StreamEvent(
+                        type="plan_update",
+                        data={
+                            "id": result.get("id"),
+                            "status": result.get("status_value"),
+                            "note": result.get("note"),
+                            "ts": 0.0,
+                        },
+                    )
             else:
                 yield StreamEvent(
                     type="operation",

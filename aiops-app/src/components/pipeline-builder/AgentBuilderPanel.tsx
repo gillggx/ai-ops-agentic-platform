@@ -20,6 +20,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useBuilder } from "@/context/pipeline-builder/BuilderContext";
 import type { BlockSpec } from "@/lib/pipeline-builder/types";
 import { applyGlassOp, OP_LABELS, opDetail, autoLayoutPipeline } from "@/lib/pipeline-builder/glass-ops";
+import { PlanRenderer, type PlanItem } from "@/components/copilot/PlanRenderer";
 
 type ChatRole = "user" | "agent" | "op" | "error";
 interface ChatLine {
@@ -53,6 +54,8 @@ export default function AgentBuilderPanel({
   const { state, actions } = useBuilder();
   const [input, setInput] = useState("");
   const [lines, setLines] = useState<ChatLine[]>([]);
+  // v1.4 Plan Panel — agent-emitted todo list, refreshed each send.
+  const [planItems, setPlanItems] = useState<PlanItem[]>([]);
   const [running, setRunning] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -83,6 +86,7 @@ export default function AgentBuilderPanel({
       : raw;
     setInput("");
     setLines((p) => [...p, { id: nextId(), role: "user", text: raw }]);
+    setPlanItems([]);
     setRunning(true);
 
     try {
@@ -136,7 +140,17 @@ export default function AgentBuilderPanel({
           let data: Record<string, unknown> = {};
           try { data = dataStr ? JSON.parse(dataStr) : {}; } catch { data = { _raw: dataStr }; }
 
-          if (eventType === "chat") {
+          if (eventType === "plan") {
+            const items = (data.items as PlanItem[]) ?? [];
+            setPlanItems(items.map((it) => ({ ...it })));
+          } else if (eventType === "plan_update") {
+            const id = data.id as string;
+            const status = data.status as PlanItem["status"];
+            const note = data.note as string | undefined;
+            setPlanItems((prev) => prev.map((it) =>
+              it.id === id ? { ...it, status: status ?? it.status, note: note ?? it.note } : it,
+            ));
+          } else if (eventType === "chat") {
             const text = (data.content as string) || "";
             if (text) setLines((p) => [...p, { id: nextId(), role: "agent", text }]);
           } else if (eventType === "operation") {
@@ -189,6 +203,8 @@ export default function AgentBuilderPanel({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#fff" }}>
+      {/* v1.4 — Plan Panel above messages */}
+      <PlanRenderer items={planItems} />
       {/* Messages */}
       <div style={{ flex: 1, overflowY: "auto", padding: "12px 12px 0", display: "flex", flexDirection: "column", gap: 8, minHeight: 0 }}>
         {lines.length === 0 && (

@@ -52,6 +52,7 @@ _SYSTEM_PREAMBLE = """You are an AIOps **Pipeline Builder Agent**. A process eng
 7. **If a tool returns an error**, read the error's `message` + `hint`, correct your inputs, and retry. Don't repeat the same failing call 3+ times.
 8. **Keep `params` minimal.** Start with required fields only; add optional ones only when needed.
 9. **Always rename every node you add.** Right after `add_node` returns a `node_id`, call `rename_node(node_id, label="<short Chinese label>")` so the canvas shows e.g. "STEP_001 SPC 歷史資料" / "xbar 趨勢控制圖" / "常態分佈圖" instead of generic block names. **This applies to follow-up turns too** — when extending an existing canvas with a new node, that new node also gets a Chinese label. Default block names (`block_chart`, `n3` etc.) on the canvas look broken.
+10. **Plan-First (v1.4)**: your **FIRST tool call must be `update_plan(action="create", items=[...])`** with 3-7 high-level Chinese todos for this build. Typical items: 規劃 / 加 source / 加 process / 加 chart / 驗證 / 完成. As you finish each phase, call `update_plan(action="update", id, status="done")`. Skipping the plan or never updating it makes the UI feel stuck — the PE sees a Claude-Code-style live checklist above the chat.
 
 # Safety & constraints
 
@@ -293,6 +294,39 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "type": "object",
             "required": ["node_id", "label"],
             "properties": {"node_id": {"type": "string"}, "label": {"type": "string"}},
+        },
+    },
+    {
+        "name": "update_plan",
+        "description": (
+            "v1.4 Plan Panel — emit/update a Claude-Code-style live todo list shown above the chat.\n"
+            "\n"
+            "**MUST be your FIRST tool call** with action='create' + 3-7 items covering this build "
+            "(typical: 規劃需求 → 加 source → 加 process → 加 chart → 驗證 → 完成).\n"
+            "\n"
+            "As you complete each phase call action='update' with the item id + new status."
+        ),
+        "input_schema": {
+            "type": "object",
+            "required": ["action"],
+            "properties": {
+                "action": {"type": "string", "enum": ["create", "update"]},
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["id", "title", "status"],
+                        "properties": {
+                            "id": {"type": "string"},
+                            "title": {"type": "string"},
+                            "status": {"type": "string", "enum": ["pending", "in_progress", "done", "failed"]},
+                        },
+                    },
+                },
+                "id": {"type": "string"},
+                "status": {"type": "string", "enum": ["pending", "in_progress", "done", "failed"]},
+                "note": {"type": "string"},
+            },
         },
     },
     {
