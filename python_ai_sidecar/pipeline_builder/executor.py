@@ -141,6 +141,17 @@ def _topological_order(pipeline: PipelineJSON) -> list[str]:
                 queue.append(nxt)
 
     if len(order) != len(pipeline.nodes):
+        # Phase 8 debug — caller (frontend) keeps hitting this; log the
+        # actual node IDs + edges so we can see whether canvas state has
+        # phantom edges or duplicate IDs that the UI doesn't show.
+        import logging as _lg
+        _log = _lg.getLogger("python_ai_sidecar.executor.cycle")
+        node_ids = [n.id for n in pipeline.nodes]
+        edges_repr = [f"{e.from_.node}->{e.to.node}" for e in pipeline.edges]
+        _log.error(
+            "cycle detected: nodes=%s (count=%d) edges=%s order_so_far=%s",
+            node_ids, len(pipeline.nodes), edges_repr, order,
+        )
         raise RuntimeError("Pipeline contains a cycle — validator should have caught this")
     return order
 
