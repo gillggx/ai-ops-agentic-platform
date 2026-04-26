@@ -6,6 +6,7 @@ import { isValidContract, isAgentAction, isHandoffAction } from "aiops-contract"
 import { consumeSSE } from "@/lib/sse";
 import { ContractCard } from "./ContractCard";
 import { PlanRenderer, type PlanItem } from "./PlanRenderer";
+import OpsConsole, { type GlassOpEntry } from "./OpsConsole";
 import { ChartIntentRenderer, type ChartIntent } from "./ChartIntentRenderer";
 import { ChartExplorer } from "./ChartExplorer";
 import { PipelineConsole, type PipelineCard } from "./PipelineConsole";
@@ -129,6 +130,10 @@ interface Props {
   // as a manual Run Full would, instead of building a synthetic contract.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onPipelineResult?: (summary: any, nodeResults: Record<string, any>) => void;
+  // v1.5: auto-run lifecycle hooks for the inline PipelineWorkspace.
+  onAutoRunStart?: (nodeCount: number) => void;
+  onAutoRunDone?: (durationMs?: number) => void;
+  onAutoRunError?: (errorMessage: string) => void;
   // Phase 5-UX-6: fired whenever the user sends a message — host uses this to
   // mirror the message into the live canvas overlay's chat panel.
   onUserMessageSent?: (text: string) => void;
@@ -512,6 +517,9 @@ export function AIAgentPanel({
   onGlassDone,
   onPlanItemsChange,
   onPipelineResult,
+  onAutoRunStart,
+  onAutoRunDone,
+  onAutoRunError,
   onUserMessageSent,
   initialPrompt,
 }: Props) {
@@ -527,6 +535,9 @@ export function AIAgentPanel({
   const [feedbackModal, setFeedbackModal] = useState<{ messageId: number; messageIdx: number } | null>(null);
   // v1.4 Plan Panel — agent-emitted todo list, refreshed each turn.
   const [planItems, setPlanItems] = useState<PlanItem[]>([]);
+  // v1.5 — Glass Box build ops accumulate here, surfaced via OpsConsole (default
+  // collapsed). Cleared at the start of every new build session.
+  const [glassOps, setGlassOps] = useState<GlassOpEntry[]>([]);
   // v1.4 — relay plan changes to parent (AppShell → LiveCanvasOverlay).
   useEffect(() => { onPlanItemsChange?.(planItems); }, [planItems, onPlanItemsChange]);
   // v1.4 Auto-Run — tracks pb_run_* lifecycle for progress display.
@@ -856,6 +867,9 @@ export function AIAgentPanel({
           case "pb_glass_start": {
             const goal = ev.goal as string | undefined;
             onGlassStart?.({ session_id: ev.session_id as string, goal });
+            // v1.5 — start fresh: clear ops console; chat shows a single
+            // "正在建立 pipeline" line instead of streaming each op.
+            setGlassOps([]);
             setChatHistory((prev) => [...prev, {
               id: nextId(), role: "agent",
               content: goal ? `🛠️ **正在建立 pipeline**：${goal}` : "🛠️ 正在建立 pipeline…",
@@ -875,14 +889,15 @@ export function AIAgentPanel({
             };
             const label = OP_LABEL_MAP[op] ?? op;
             let detail = "";
-            if (op === "add_node") detail = ` \`${args.block_name ?? ""}\``;
-            else if (op === "connect") detail = ` \`${args.from_node}.${args.from_port}\` → \`${args.to_node}.${args.to_port}\``;
-            else if (op === "remove_node") detail = ` \`${args.node_id}\``;
-            else if (op === "set_param") detail = ` \`${args.node_id}.${args.key}\``;
-            else if (op === "rename_node") detail = ` \`${args.node_id}\` → \`${args.label ?? args.display_label ?? "?"}\``;
-            setChatHistory((prev) => [...prev, {
-              id: nextId(), role: "agent",
-              content: `🛠 ${label}${detail}`,
+            if (op === "add_node") detail = `\`${args.block_name ?? ""}\``;
+            else if (op === "connect") detail = `\`${args.from_node}.${args.from_port}\` → \`${args.to_node}.${args.to_port}\``;
+            else if (op === "remove_node") detail = `\`${args.node_id}\``;
+            else if (op === "set_param") detail = `\`${args.node_id}.${args.key}\``;
+            else if (op === "rename_node") detail = `\`${args.node_id}\` → \`${args.label ?? args.display_label ?? "?"}\``;
+            // v1.5 — append to OpsConsole (collapsible) instead of pushing
+            // every op into chat history.
+            setGlassOps((prev) => [...prev, {
+              id: nextId(), op, label, detail, ts: Date.now(),
             }]);
             break;
           }
@@ -898,11 +913,23 @@ export function AIAgentPanel({
           }
           case "pb_glass_error": {
             const msg = (ev.message as string) ?? "";
+            const opName = ev.op as string | undefined;
             onGlassError?.({
               message: msg,
-              op: ev.op as string | undefined,
+              op: opName,
               hint: ev.hint as string | undefined,
             });
+            // v1.5 — drop into OpsConsole rather than the chat thread; show
+            // a one-line warning bubble in chat too so the user sees there's
+            // something wrong without expanding the console.
+            setGlassOps((prev) => [...prev, {
+              id: nextId(),
+              op: opName ?? "error",
+              label: opName ? `${opName} 失敗` : "錯誤",
+              detail: msg,
+              ts: Date.now(),
+              isError: true,
+            }]);
             setChatHistory((prev) => [...prev, {
               id: nextId(), role: "agent", content: `⚠️ ${msg}`,
             }]);
@@ -1108,67 +1135,33 @@ export function AIAgentPanel({
             sessionIdRef.current = ev.session_id as string;
             break;
 
-          // ── v1.4 Auto-Run after build_pipeline_live ─────────────
+          // ── v1.5 Auto-Run after build_pipeline_live ─────────────
+          // The link card / takeover UI now lives in PipelineWorkspace, so the
+          // chat panel only logs lifecycle and forwards data to AppShell.
           case "pb_run_start": {
             const nodeCount = (ev.node_count as number) ?? 0;
             setAutoRun({ status: "running", nodeCount, startedAt: Date.now() });
             addLog(makeLog("▶", `Auto-run 開始（${nodeCount} nodes）`, "info"));
+            onAutoRunStart?.(nodeCount);
             break;
           }
           case "pb_run_done": {
-            setAutoRun((prev) => ({
-              ...prev,
-              status: "done",
-              durationMs: ev.duration_ms as number | undefined,
-            }));
-            addLog(makeLog("✅", `Auto-run 完成（${ev.duration_ms ?? "?"} ms）`, "info"));
-            // v1.4 — hand result to AppShell which renders PipelineResultsPanel
-            // (same component as manual Run Full, identical layout).
+            const durationMs = ev.duration_ms as number | undefined;
+            setAutoRun((prev) => ({ ...prev, status: "done", durationMs }));
+            addLog(makeLog("✅", `Auto-run 完成（${durationMs ?? "?"} ms）`, "info"));
             const nodeResults = (ev.node_results as Record<string, unknown>) ?? {};
             const summary = ev.result_summary as Record<string, unknown> | undefined;
             if (summary) {
               onPipelineResult?.(summary, nodeResults as Record<string, unknown>);
             }
-            // v1.4 — append "edit in Pipeline Builder" link card to chat
-            // so the user can take over if they want to tweak the pipeline.
-            // /admin/pipeline-builder/new reads pipeline_json from sessionStorage,
-            // so we stash it here under the well-known key.
-            if (lastBuiltPipelineRef.current && typeof window !== "undefined") {
-              try {
-                window.sessionStorage.setItem(
-                  "pb:ephemeral_pipeline",
-                  JSON.stringify(lastBuiltPipelineRef.current),
-                );
-                setChatHistory((prev) => [...prev, {
-                  id: nextId(), role: "agent",
-                  content: "📝 **需要調整這條 pipeline？** [在 Pipeline Builder 開啟編輯 →](/admin/pipeline-builder/new)",
-                }]);
-              } catch {
-                /* sessionStorage unavailable — link card skipped */
-              }
-            }
+            onAutoRunDone?.(durationMs);
             break;
           }
           case "pb_run_error": {
             const errMsg = (ev.error_message as string) ?? "execution failed";
             setAutoRun({ status: "error", error: errMsg });
             addLog(makeLog("❌", `Auto-run 失敗: ${errMsg}`, "error"));
-            // v1.4 — surface the takeover option so user can fix it themselves
-            // without waiting for agent's propose_pipeline_patch retry.
-            if (lastBuiltPipelineRef.current && typeof window !== "undefined") {
-              try {
-                window.sessionStorage.setItem(
-                  "pb:ephemeral_pipeline",
-                  JSON.stringify(lastBuiltPipelineRef.current),
-                );
-                setChatHistory((prev) => [...prev, {
-                  id: nextId(), role: "agent",
-                  content: "🛠 **不想讓 Agent 自動修？** [在 Pipeline Builder 自己改 →](/admin/pipeline-builder/new)",
-                }]);
-              } catch {
-                /* sessionStorage unavailable — link card skipped */
-              }
-            }
+            onAutoRunError?.(errMsg);
             break;
           }
 
@@ -1320,33 +1313,8 @@ export function AIAgentPanel({
           )}
         </div>
 
-        {/* v1.4 — Plan Panel above stages (replaces user-facing progress) */}
-        <PlanRenderer items={planItems} />
-
-        {/* v1.4 — Auto-Run live banner */}
-        {autoRun.status !== "idle" && (
-          <div style={{
-            margin: "6px 12px 0",
-            padding: "6px 10px",
-            borderRadius: 6,
-            fontSize: 11,
-            background: autoRun.status === "error" ? "#fed7d7" : "#ebf4ff",
-            color: autoRun.status === "error" ? "#c53030" : "#2b6cb0",
-            border: `1px solid ${autoRun.status === "error" ? "#feb2b2" : "#bee3f8"}`,
-            display: "flex", alignItems: "center", gap: 6,
-          }}>
-            <span>
-              {autoRun.status === "running" && "▶ Auto-Run 執行中"}
-              {autoRun.status === "done" && `✓ Auto-Run 完成${autoRun.durationMs ? ` (${autoRun.durationMs} ms)` : ""}`}
-              {autoRun.status === "error" && `✕ Auto-Run 失敗：${autoRun.error}`}
-            </span>
-            {autoRun.status === "running" && autoRun.nodeCount && (
-              <span style={{ color: "#a0aec0" }}>· {autoRun.nodeCount} nodes</span>
-            )}
-          </div>
-        )}
-
-        {/* Stage dots */}
+        {/* v1.5 — Stage strip first, then Plan Panel sits directly under so the
+            checklist visually extends the progress strip. */}
         {stages.length > 0 && (
           <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
             {stages.map((s) => (
@@ -1360,6 +1328,26 @@ export function AIAgentPanel({
                 </span>
               </div>
             ))}
+          </div>
+        )}
+
+        <PlanRenderer items={planItems} />
+
+        {autoRun.status !== "idle" && autoRun.status !== "running" && (
+          <div style={{
+            margin: "6px 12px 0",
+            padding: "6px 10px",
+            borderRadius: 6,
+            fontSize: 11,
+            background: autoRun.status === "error" ? "#fed7d7" : "#ebf4ff",
+            color: autoRun.status === "error" ? "#c53030" : "#2b6cb0",
+            border: `1px solid ${autoRun.status === "error" ? "#feb2b2" : "#bee3f8"}`,
+            display: "flex", alignItems: "center", gap: 6,
+          }}>
+            <span>
+              {autoRun.status === "done" && `✓ Auto-Run 完成${autoRun.durationMs ? ` (${autoRun.durationMs} ms)` : ""}`}
+              {autoRun.status === "error" && `✕ Auto-Run 失敗：${autoRun.error}`}
+            </span>
           </div>
         )}
 
@@ -1407,6 +1395,7 @@ export function AIAgentPanel({
       {/* Chat Tab */}
       {activeTab === "chat" && (
         <div style={{ flex: 1, overflowY: "auto", padding: "12px 12px 0", display: "flex", flexDirection: "column", gap: 8, minHeight: 0 }}>
+          <OpsConsole ops={glassOps} />
           {chatHistory.length === 0 && (
             <div style={{ color: "#a0aec0", fontSize: 13, textAlign: "center", paddingTop: 24 }}>
               輸入訊息開始對話

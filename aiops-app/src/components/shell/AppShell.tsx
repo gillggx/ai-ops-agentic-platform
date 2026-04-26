@@ -8,14 +8,23 @@ import { useSession } from "next-auth/react";
 // Resizable panel via native CSS resize
 import { Topbar } from "@/components/layout/Topbar";
 import { AIAgentPanel } from "@/components/copilot/AIAgentPanel";
-import PipelineResultsPanel from "@/components/pipeline-builder/PipelineResultsPanel";
 import { AnalysisPanel } from "@/components/layout/AnalysisPanel";
 import { DataExplorerPanel } from "@/components/layout/DataExplorerPanel";
 import { AppProvider, useAppContext } from "@/context/AppContext";
 import type { DataExplorerState } from "@/context/AppContext";
 import type { AIOpsReportContract } from "aiops-contract";
+import { usePipelineFromGlassOps } from "@/components/copilot/usePipelineFromGlassOps";
+import type { MiniCanvasStatus } from "@/components/copilot/MiniPipelineCanvas";
+
+// Workspace renders ReactFlow → must defer to client-only.
+const PipelineWorkspace = dynamic(
+  () => import("@/components/copilot/PipelineWorkspace"),
+  { ssr: false },
+);
 
 // Live Glass Box overlay — empty canvas that operations stream into.
+// v1.5: kept around for possible "expand to fullscreen" CTA, but not
+// auto-mounted; chat-driven builds render in PipelineWorkspace.
 const LiveCanvasOverlay = dynamic(
   () => import("@/components/copilot/LiveCanvasOverlay"),
   { ssr: false },
@@ -225,17 +234,36 @@ function Shell({ children }: { children: React.ReactNode }) {
   // v1.4 Plan Panel — relayed from AIAgentPanel so LiveCanvasOverlay
   // can render the same checklist (overlay covers the AIAgentPanel).
   const [overlayPlanItems, setOverlayPlanItems] = useState<import("@/components/copilot/PlanRenderer").PlanItem[]>([]);
-  // v1.4 — when chat agent triggers build_pipeline_live + auto-run, the
-  // result lands here and PipelineResultsPanel renders in the center.
-  // Same component the manual Run Full uses, so the layout is identical.
+  // v1.5 — Pipeline Workspace state. Auto-run result + run status drive
+  // the inline center panel that replaces the dashboard while a chat-built
+  // pipeline is active.
   const [pipelineResult, setPipelineResult] = useState<{
     summary: import("@/lib/pipeline-builder/types").PipelineResultSummary;
     nodeResults: Record<string, import("@/lib/pipeline-builder/types").NodeResult>;
   } | null>(null);
+  const [canvasStatus, setCanvasStatus] = useState<MiniCanvasStatus>("idle");
+  const [runError, setRunError] = useState<string | null>(null);
+  const [durationMs, setDurationMs] = useState<number | null>(null);
+  const [runStatuses, setRunStatuses] = useState<Record<string, "success" | "failed" | "skipped" | null>>({});
+
+  const pathname = usePathname();
+
+  // Replay glass events into a PipelineJSON snapshot for the mini canvas.
+  const { pipelineJson, highlightNodeId } = usePipelineFromGlassOps(glassEvents);
 
   const pushGlassEvent = (e: GlassEvent) => {
     glassEventsRef.current = [...glassEventsRef.current, e];
     setGlassEvents(glassEventsRef.current);
+  };
+
+  const resetWorkspace = () => {
+    glassEventsRef.current = [];
+    setGlassEvents([]);
+    setPipelineResult(null);
+    setCanvasStatus("idle");
+    setRunError(null);
+    setDurationMs(null);
+    setRunStatuses({});
   };
 
   function handleContract(c: AIOpsReportContract) {
@@ -263,19 +291,49 @@ function Shell({ children }: { children: React.ReactNode }) {
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         <ContextualSidebar />
         <main style={{ flex: 1, overflowY: "auto", minWidth: 0 }}>
-          {dataExplorer ? (
-            <DataExplorerPanel
-              state={dataExplorer}
-              onClose={() => setDataExplorer(null)}
-            />
-          ) : investigateMode && contract ? (
-            <AnalysisPanel
-              contract={contract}
-              onClose={() => { setInvestigateMode(false); setContract(null); }}
-              onAgentMessage={(msg) => setTriggerMessage(msg)}
-              onHandoff={handleHandoff}
-            />
-          ) : children}
+          {(() => {
+            // v1.5 — when chat agent has activity (build in progress, finished,
+            // or has accumulated a pipeline) AND we're on dashboard root, swap
+            // children for the inline Pipeline Workspace. The user can dismiss
+            // via the workspace's "清除" button to revert to the real dashboard.
+            const showWorkspace =
+              (canvasStatus !== "idle" || pipelineJson !== null) &&
+              (pathname === "/" || pathname === "/dashboard");
+            if (dataExplorer) {
+              return (
+                <DataExplorerPanel
+                  state={dataExplorer}
+                  onClose={() => setDataExplorer(null)}
+                />
+              );
+            }
+            if (investigateMode && contract) {
+              return (
+                <AnalysisPanel
+                  contract={contract}
+                  onClose={() => { setInvestigateMode(false); setContract(null); }}
+                  onAgentMessage={(msg) => setTriggerMessage(msg)}
+                  onHandoff={handleHandoff}
+                />
+              );
+            }
+            if (showWorkspace) {
+              return (
+                <PipelineWorkspace
+                  pipelineJson={pipelineJson}
+                  highlightNodeId={highlightNodeId}
+                  runStatuses={runStatuses}
+                  canvasStatus={canvasStatus}
+                  summary={pipelineResult?.summary ?? null}
+                  nodeResults={pipelineResult?.nodeResults ?? {}}
+                  runError={runError}
+                  durationMs={durationMs}
+                  onReset={resetWorkspace}
+                />
+              );
+            }
+            return children;
+          })()}
         </main>
         {/* Copilot toggle strip (always visible) */}
         <div
@@ -325,11 +383,11 @@ function Shell({ children }: { children: React.ReactNode }) {
                 // its sub-agent's operations here; AppShell mounts the live
                 // canvas overlay so the user watches node-by-node build.
                 onGlassStart={(ev) => {
-                  // v1.4: don't pop a full-screen LiveCanvasOverlay any more.
-                  // Glass Box ops show inline in the chat panel (AIAgentPanel
-                  // appends them as op bubbles); the user stays on dashboard.
-                  // Track ev for any consumer that still wants it, but no
-                  // setGlassOverlay() call.
+                  // v1.5: chat-driven build now renders inside PipelineWorkspace
+                  // in the dashboard center. Reset stale state and flip into
+                  // building mode so the workspace overlay takes over.
+                  resetWorkspace();
+                  setCanvasStatus("building");
                   pushGlassEvent({ kind: "start", sessionId: ev.session_id, goal: ev.goal });
                 }}
                 onGlassOp={(ev) => pushGlassEvent({
@@ -341,20 +399,37 @@ function Shell({ children }: { children: React.ReactNode }) {
                 onGlassChat={(ev) => pushGlassEvent({ kind: "chat", content: ev.content })}
                 onGlassError={(ev) => pushGlassEvent({ kind: "error", message: ev.message })}
                 onGlassDone={(ev) => {
-                  // v1.4: no overlay to deactivate; just append done event.
                   pushGlassEvent({
                     kind: "done",
                     status: ev.status,
                     summary: ev.summary,
                     pipeline_json: ev.pipeline_json,
                   });
+                  // Glass Box build done — auto-run will fire next; canvas
+                  // stays in "building" until pb_run_done lands.
                 }}
-                // v1.4 — relay plan items so LiveCanvasOverlay can show the
-                // same checklist while it covers AIAgentPanel.
                 onPlanItemsChange={setOverlayPlanItems}
-                // v1.4 — auto-run result lands here; AppShell mounts
-                // PipelineResultsPanel (same one as manual Run Full).
-                onPipelineResult={(summary, nodeResults) => setPipelineResult({ summary, nodeResults })}
+                // v1.5 — auto-run callbacks drive the inline workspace.
+                onPipelineResult={(summary, nodeResults) => {
+                  setPipelineResult({ summary, nodeResults });
+                  setCanvasStatus("done");
+                  // Per-node run status lights up the canvas borders.
+                  const stat: Record<string, "success" | "failed" | "skipped" | null> = {};
+                  for (const [nid, nr] of Object.entries(nodeResults)) {
+                    const s = (nr as { status?: string }).status;
+                    if (s === "success" || s === "failed" || s === "skipped") stat[nid] = s;
+                  }
+                  setRunStatuses(stat);
+                }}
+                onAutoRunStart={() => {
+                  // Already in "building" from onGlassStart; just clear stale error.
+                  setRunError(null);
+                }}
+                onAutoRunDone={(ms) => setDurationMs(ms ?? null)}
+                onAutoRunError={(msg) => {
+                  setRunError(msg);
+                  setCanvasStatus("error");
+                }}
               />
             </div>
           </aside>
@@ -380,13 +455,6 @@ function Shell({ children }: { children: React.ReactNode }) {
         />
       )}
 
-      {/* v1.4 — chat-driven pipeline result lands here, same panel as Run Full */}
-      <PipelineResultsPanel
-        open={pipelineResult !== null}
-        onClose={() => setPipelineResult(null)}
-        summary={pipelineResult?.summary ?? null}
-        nodeResults={pipelineResult?.nodeResults ?? {}}
-      />
     </div>
   );
 }

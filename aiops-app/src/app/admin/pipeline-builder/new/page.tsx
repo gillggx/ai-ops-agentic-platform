@@ -44,29 +44,54 @@ export default function NewPipelinePage() {
 
   // Phase 5: ephemeral pipeline hydrated from Copilot's Edit-in-Builder button
   const [ephemeralPipeline, setEphemeralPipeline] = useState<PipelineJSON | null>(null);
+  // v1.5: when ?from=agent + ephemeral pipeline → skip the wizard entirely
+  // and drop the user straight onto the canvas with the agent-built pipeline
+  // already loaded.
+  const [skipWizard, setSkipWizard] = useState(false);
   const [checkedSession, setCheckedSession] = useState(false);
 
   useEffect(() => {
+    let hydrated: PipelineJSON | null = null;
     try {
       const raw = sessionStorage.getItem("pb:ephemeral_pipeline");
       if (raw) {
         const payload = JSON.parse(raw) as { pipeline_json?: PipelineJSON; ts?: number };
         if (payload?.pipeline_json) {
+          hydrated = payload.pipeline_json;
           setEphemeralPipeline(payload.pipeline_json);
-          setKind("skill");  // chat-built pipelines default to skill
         }
         sessionStorage.removeItem("pb:ephemeral_pipeline");
       }
     } catch {
       // ignore malformed payload
     }
-    // Deep-link from Triggers Overview: ?kind=auto_check skips the kind gate.
+
     if (typeof window !== "undefined") {
-      const q = new URLSearchParams(window.location.search).get("kind");
+      const params = new URLSearchParams(window.location.search);
+      const q = params.get("kind");
+      const fromAgent = params.get("from") === "agent";
+      // Heuristic: pipeline_json shape decides the kind. block_alert ⇒ auto_patrol;
+      // block_chart-only ⇒ skill; mixed ⇒ default skill.
+      const inferKind = (pj: PipelineJSON): Kind => {
+        const hasAlert = pj.nodes.some((n) => n.block_id === "block_alert");
+        const hasChart = pj.nodes.some((n) => n.block_id === "block_chart");
+        if (hasAlert) return "auto_patrol";
+        if (hasChart) return "skill";
+        return "skill";
+      };
+
       if (q === "auto_patrol" || q === "auto_check" || q === "skill") {
         setKind(q);
-        // For patrol/check go to step 2 (trigger); for skill jump to step 3 (inputs).
         setStep(q === "skill" ? 3 : 2);
+      } else if (fromAgent && hydrated) {
+        // Agent already built the pipeline — bypass kind gate, trigger config,
+        // and inputs declaration. User can still adjust inside builder.
+        setKind(inferKind(hydrated));
+        setSkipWizard(true);
+      } else if (hydrated) {
+        // Old behavior (chat copy-paste from another flow) — default to skill
+        // and run the wizard so the user can review.
+        setKind("skill");
       }
     }
     setCheckedSession(true);
@@ -85,6 +110,7 @@ export default function NewPipelinePage() {
       pendingInputs={pendingInputs}
       setPendingInputs={setPendingInputs}
       ephemeralPipeline={ephemeralPipeline}
+      skipWizard={skipWizard}
     />
   );
 }
@@ -99,6 +125,7 @@ interface WizardProps {
   pendingInputs: PipelineInput[];
   setPendingInputs: (inputs: PipelineInput[]) => void;
   ephemeralPipeline: PipelineJSON | null;
+  skipWizard: boolean;
 }
 
 function WizardOrBuilder({
@@ -106,9 +133,19 @@ function WizardOrBuilder({
   pendingTrigger, setPendingTrigger,
   pendingInputs, setPendingInputs,
   ephemeralPipeline,
+  skipWizard,
 }: WizardProps) {
   // "ready" = user clicked "進 Builder" on the final step.
   const [ready, setReady] = useState(false);
+
+  // v1.5: when navigated from chat with ?from=agent, hand straight off
+  // to BuilderLayout — no wizard, no kind gate. The hydrated pipeline
+  // is already in ephemeralPipeline.
+  useEffect(() => {
+    if (skipWizard && kind && ephemeralPipeline && !ready) {
+      setReady(true);
+    }
+  }, [skipWizard, kind, ephemeralPipeline, ready]);
 
   // When user lands on step 3 with no prior pendingInputs, pre-populate with
   // the pre-checked suggestions so the common case is already set.

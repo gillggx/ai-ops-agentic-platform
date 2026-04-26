@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<title>AIOps v1.5 UX — Mockup</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, "Helvetica Neue", "PingFang TC", sans-serif;
+    background: #eef1f5; color: #1f2937; padding: 24px;
+  }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  h2.frame-title {
+    margin: 32px 0 12px; font-size: 16px; color: #111827;
+    border-left: 4px solid #2563eb; padding-left: 10px;
+  }
+  .legend {
+    background: #fff7ed; border: 1px solid #fed7aa; padding: 10px 14px;
+    border-radius: 8px; font-size: 13px; color: #9a3412; margin-bottom: 16px;
+    line-height: 1.55;
+  }
+  .legend b { color: #7c2d12; }
+
+  /* App shell */
+  .app {
+    display: grid; grid-template-columns: 56px 1fr 360px;
+    background: #fff; border: 1px solid #d1d5db; border-radius: 12px;
+    height: 720px; overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0,0,0,.06);
+  }
+  .topbar {
+    grid-column: 1 / 4; background: #fff;
+    border-bottom: 1px solid #e5e7eb;
+    padding: 10px 16px; display: flex; align-items: center; gap: 12px;
+    font-weight: 600; font-size: 15px;
+  }
+  .app { grid-template-rows: 48px 1fr; }
+  .sidebar {
+    background: #f9fafb; border-right: 1px solid #e5e7eb;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 12px 0; gap: 14px; font-size: 18px; color: #6b7280;
+  }
+  .sidebar .item { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; cursor: default; }
+  .sidebar .item.active { background: #dbeafe; color: #1d4ed8; }
+
+  /* Center pane — main canvas + results */
+  .center {
+    background: #f3f4f6; padding: 18px; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .center-header {
+    display: flex; align-items: center; gap: 10px; padding-bottom: 4px;
+  }
+  .center-title { font-weight: 600; font-size: 16px; }
+  .center-sub { font-size: 13px; color: #6b7280; }
+
+  /* Mini canvas */
+  .mini-canvas {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+    padding: 18px; min-height: 220px; position: relative;
+    background-image: radial-gradient(#e5e7eb 1px, transparent 1px);
+    background-size: 16px 16px;
+  }
+  .mini-canvas-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .mini-canvas-title {
+    font-size: 13px; font-weight: 600; color: #374151;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .canvas-pill {
+    background: #ecfdf5; color: #047857; font-size: 11px;
+    padding: 2px 8px; border-radius: 12px; border: 1px solid #a7f3d0;
+  }
+  .canvas-pill.building { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+  .canvas-pill.error { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+  .canvas-flow {
+    display: flex; align-items: center; gap: 14px; padding: 16px 4px;
+    flex-wrap: wrap;
+  }
+  .node {
+    background: #fff; border: 2px solid #cbd5e1; border-radius: 8px;
+    padding: 10px 14px; min-width: 130px; text-align: center;
+    box-shadow: 0 2px 4px rgba(0,0,0,.04); position: relative;
+  }
+  .node .node-icon { font-size: 18px; }
+  .node .node-name { font-size: 12px; font-weight: 600; margin-top: 2px; color: #1f2937; }
+  .node .node-sub { font-size: 11px; color: #6b7280; }
+  .node.source { border-color: #60a5fa; background: #eff6ff; }
+  .node.process { border-color: #a78bfa; background: #f5f3ff; }
+  .node.chart { border-color: #34d399; background: #ecfdf5; }
+  .node.alert { border-color: #f87171; background: #fef2f2; }
+  .node.drawing {
+    border-style: dashed;
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  .arrow { color: #94a3b8; font-size: 18px; }
+  @keyframes pulse {
+    0%, 100% { opacity: .55; transform: scale(.97); }
+    50% { opacity: 1; transform: scale(1); }
+  }
+  .canvas-empty {
+    color: #9ca3af; font-size: 13px; text-align: center; padding: 30px 0;
+  }
+
+  /* Inline result block (replaces floating panel) */
+  .results {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .results-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .results-title { font-weight: 600; font-size: 14px; color: #111827; }
+  .results-meta { font-size: 12px; color: #6b7280; }
+  .alert-banner {
+    background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px;
+    padding: 10px 12px; font-size: 13px; color: #991b1b; margin-bottom: 10px;
+    display: flex; align-items: flex-start; gap: 8px;
+  }
+  .alert-banner.success { background: #ecfdf5; border-color: #a7f3d0; color: #065f46; }
+  .chart-block {
+    border: 1px dashed #d1d5db; border-radius: 8px; padding: 14px;
+    background: #fafafa; font-size: 12px; color: #6b7280; text-align: center;
+  }
+  .chart-block .chart-tag {
+    display: inline-block; background: #e0e7ff; color: #3730a3;
+    font-size: 11px; padding: 2px 8px; border-radius: 12px; margin-bottom: 6px;
+  }
+
+  .takeover-card {
+    background: #fff7ed; border: 1px solid #fdba74; border-radius: 8px;
+    padding: 12px 14px; font-size: 13px; color: #9a3412; line-height: 1.5;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  }
+  .takeover-card a { color: #c2410c; font-weight: 600; text-decoration: none; }
+
+  .failure-card {
+    background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .failure-card .fail-title { font-weight: 600; color: #991b1b; font-size: 13px; }
+  .failure-card .fail-msg { font-size: 12px; color: #7f1d1d; margin-top: 4px; line-height: 1.5; }
+  .btn-row { display: flex; gap: 8px; margin-top: 10px; }
+  .btn {
+    font-size: 12px; padding: 6px 12px; border-radius: 6px; border: 1px solid;
+    cursor: pointer; font-weight: 500;
+  }
+  .btn-primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+  .btn-ghost { background: #fff; color: #374151; border-color: #d1d5db; }
+
+  /* Right rail (AI Agent) */
+  .rail {
+    background: #fff; border-left: 1px solid #e5e7eb;
+    display: flex; flex-direction: column; min-width: 0;
+  }
+  .rail-head {
+    padding: 12px 16px; font-weight: 600; font-size: 14px;
+    border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between;
+  }
+  .rail-tabs {
+    display: flex; gap: 4px; padding: 6px 12px; border-bottom: 1px solid #f1f5f9;
+    font-size: 12px;
+  }
+  .rail-tabs .tab {
+    padding: 6px 10px; border-radius: 6px; cursor: default; color: #6b7280;
+  }
+  .rail-tabs .tab.active { background: #eff6ff; color: #1d4ed8; font-weight: 600; }
+  .rail-body { flex: 1; overflow-y: auto; padding: 12px; }
+
+  /* Stage strip */
+  .stages {
+    display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px;
+  }
+  .stage-dot {
+    font-size: 11px; padding: 4px 8px; border-radius: 12px;
+    background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0;
+  }
+  .stage-dot.run { background: #dbeafe; color: #1d4ed8; border-color: #bfdbfe; }
+  .stage-dot.done { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+  .stage-dot.error { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+
+  /* Plan panel — sits BELOW stage strip, integrated */
+  .plan {
+    background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;
+    padding: 12px; margin-bottom: 12px;
+  }
+  .plan-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 8px; font-size: 13px; font-weight: 600; color: #334155;
+  }
+  .plan-progress {
+    font-size: 11px; color: #64748b; background: #fff;
+    padding: 2px 8px; border-radius: 10px; border: 1px solid #e2e8f0;
+  }
+  .plan ul { list-style: none; padding: 0; margin: 0; }
+  .plan li {
+    display: flex; align-items: center; gap: 8px; padding: 4px 0;
+    font-size: 13px; color: #475569;
+  }
+  .plan li .glyph { width: 16px; text-align: center; font-weight: 700; }
+  .plan li.done { color: #94a3b8; text-decoration: line-through; }
+  .plan li.done .glyph { color: #10b981; }
+  .plan li.in-progress { color: #1d4ed8; font-weight: 600; }
+  .plan li.in-progress .glyph { color: #2563eb; animation: pulse 1.4s ease-in-out infinite; }
+  .plan li.pending .glyph { color: #cbd5e1; }
+  .plan li .note {
+    font-size: 11px; color: #92400e; background: #fef3c7;
+    padding: 1px 8px; border-radius: 10px; margin-left: 6px;
+  }
+
+  /* Collapsed ops console */
+  .ops {
+    background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;
+    margin-bottom: 12px; font-size: 12px;
+  }
+  .ops-head {
+    padding: 8px 12px; display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer; color: #475569;
+  }
+  .ops-head .caret { transition: transform .2s; }
+  .ops.expanded .ops-head .caret { transform: rotate(90deg); }
+  .ops-body {
+    padding: 0 12px 10px; display: none; border-top: 1px solid #e2e8f0;
+    color: #64748b; line-height: 1.7;
+  }
+  .ops.expanded .ops-body { display: block; }
+  .ops-row { font-family: ui-monospace, monospace; font-size: 11px; }
+  .ops-row .ts { color: #94a3b8; margin-right: 8px; }
+
+  /* Chat msgs */
+  .msg {
+    background: #f1f5f9; border-radius: 12px; padding: 8px 12px;
+    font-size: 13px; margin-bottom: 8px; line-height: 1.5;
+  }
+  .msg.user { background: #2563eb; color: #fff; align-self: flex-end; max-width: 80%; margin-left: auto; }
+  .msg.agent { background: #f1f5f9; color: #1f2937; max-width: 90%; }
+
+  /* Suggestions */
+  .suggests { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+  .suggests .chip {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 14px;
+    padding: 6px 12px; font-size: 12px; color: #475569; cursor: default;
+  }
+
+  .composer {
+    border-top: 1px solid #f1f5f9; padding: 10px 12px;
+    display: flex; gap: 8px;
+  }
+  .composer textarea {
+    flex: 1; border: 1px solid #d1d5db; border-radius: 6px;
+    padding: 6px 8px; font-size: 12px; resize: none; height: 56px;
+    color: #6b7280;
+  }
+  .composer button {
+    background: #2563eb; color: #fff; border: 0; border-radius: 6px;
+    padding: 0 14px; font-size: 13px; font-weight: 500;
+  }
+
+  /* Diff table */
+  table.diff {
+    border-collapse: collapse; margin-top: 18px; font-size: 13px; width: 100%;
+    background: #fff; border-radius: 8px; overflow: hidden;
+  }
+  table.diff th, table.diff td {
+    border: 1px solid #e5e7eb; padding: 8px 12px; text-align: left;
+    vertical-align: top;
+  }
+  table.diff th { background: #f9fafb; font-weight: 600; }
+  table.diff td.before { background: #fef2f2; color: #991b1b; }
+  table.diff td.after  { background: #ecfdf5; color: #065f46; }
+</style>
+</head>
+<body>
+
+<h1>🎨 AIOps v1.5 UX — Mockup</h1>
+<div class="legend">
+  <b>核心轉向：</b> 中央區塊不再是空白的 dashboard，而是一個<b>嵌入式的 mini Pipeline Canvas</b>（只讀，由 LLM 即時繪製）+ <b>Inline Results</b>（取代 floating pop-up）。
+  右側 AI Agent 仍是入口，但 Plan Panel 整併在 Stage 進度條<b>下方</b>，建構 ops 預設<b>摺疊</b>，避免訊息洪流。
+  <br/>失敗時保留兩條退路（agent patch / 使用者自接），點「編輯」會帶到<b>已載入該 pipeline</b> 的真正 builder canvas（不是新建 wizard）。
+</div>
+
+<!-- ────────────────────────────────────────────────────────────── -->
+<h2 class="frame-title">Frame A — Idle（尚未對話）</h2>
+<div class="app">
+  <div class="topbar">AIOps <span style="margin-left:auto; font-size:13px; color:#6b7280;">gill · IT_ADMIN</span></div>
+  <div class="sidebar">
+    <div class="item">▶</div><div class="item">🔔</div><div class="item">📊</div>
+    <div class="item active">🧩</div><div class="item">⚙</div><div class="item">🧠</div>
+  </div>
+  <div class="center">
+    <div class="center-header">
+      <div class="center-title">🧱 Pipeline Workspace</div>
+      <div class="center-sub">— 透過右側 AI Agent 對話，會在此即時繪製 pipeline 並執行</div>
+    </div>
+    <div class="mini-canvas">
+      <div class="mini-canvas-header">
+        <div class="mini-canvas-title">📐 Canvas</div>
+        <div class="canvas-pill" style="background:#f9fafb; color:#9ca3af; border-color:#e5e7eb;">尚未開始</div>
+      </div>
+      <div class="canvas-empty">
+        💬 在右側對話框輸入需求，例如「幫我看 STEP_001 的 xbar 趨勢」<br/>
+        Agent 會在這裡逐步畫出 pipeline，並自動執行回傳結果。
+      </div>
+    </div>
+  </div>
+  <div class="rail">
+    <div class="rail-head">AI Agent <span style="font-size:11px; color:#9ca3af; font-weight:400;">0 / 0 tok</span></div>
+    <div class="rail-tabs">
+      <div class="tab active">💬 對話</div>
+      <div class="tab">⚙ Console</div>
+    </div>
+    <div class="rail-body">
+      <div style="color:#9ca3af; font-size:12px; text-align:center; padding:24px 0;">輸入訊息開始對話</div>
+      <div class="suggests">
+        <div class="chip">EQP-01 的 APC etch_time_offset 趨勢</div>
+        <div class="chip">STEP_001 的 xbar_chart trend chart</div>
+        <div class="chip">EQP-05 列出 OOC 站點和 SPC charts</div>
+      </div>
+    </div>
+    <div class="composer">
+      <textarea>請嘗試：幫我撈 [EQP-01] 最近 [24 小時] 的 [SPC 資料]，判斷是否 [連續 3 次 OOC]，並用 [趨勢圖] 呈現結果。</textarea>
+      <button>送出</button>
+    </div>
+  </div>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────── -->
+<h2 class="frame-title">Frame B — Building（LLM 正在畫）</h2>
+<div class="app">
+  <div class="topbar">AIOps <span style="margin-left:auto; font-size:13px; color:#6b7280;">gill · IT_ADMIN</span></div>
+  <div class="sidebar">
+    <div class="item">▶</div><div class="item">🔔</div><div class="item">📊</div>
+    <div class="item active">🧩</div><div class="item">⚙</div><div class="item">🧠</div>
+  </div>
+  <div class="center">
+    <div class="center-header">
+      <div class="center-title">🧱 Pipeline Workspace</div>
+      <div class="center-sub">— Agent 正在繪製：「STEP_001 的 xbar trend」</div>
+    </div>
+    <div class="mini-canvas">
+      <div class="mini-canvas-header">
+        <div class="mini-canvas-title">📐 Canvas</div>
+        <div class="canvas-pill building">⏱ 建構中… 已加入 2/3 nodes</div>
+      </div>
+      <div class="canvas-flow">
+        <div class="node source">
+          <div class="node-icon">📦</div>
+          <div class="node-name">STEP_001 SPC 歷史資料</div>
+          <div class="node-sub">block_process_history</div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="node process drawing">
+          <div class="node-icon">📊</div>
+          <div class="node-name">趨勢圖</div>
+          <div class="node-sub">block_chart · 加入中…</div>
+        </div>
+        <div class="arrow" style="opacity:.4;">→</div>
+        <div class="node" style="opacity:.45; border-style:dotted;">
+          <div class="node-icon">？</div>
+          <div class="node-name">下一個 node…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="rail">
+    <div class="rail-head">AI Agent <span style="font-size:11px; color:#9ca3af; font-weight:400;">12.4k / 1.3k tok</span></div>
+    <div class="rail-tabs">
+      <div class="tab active">💬 對話</div>
+      <div class="tab">⚙ Console</div>
+    </div>
+    <div class="rail-body">
+      <!-- Stage strip -->
+      <div class="stages">
+        <div class="stage-dot done">✓ Context</div>
+        <div class="stage-dot done">✓ Planning</div>
+        <div class="stage-dot run">🔄 Build</div>
+        <div class="stage-dot">Execute</div>
+        <div class="stage-dot">Synthesis</div>
+      </div>
+
+      <!-- Plan Panel — directly under stage strip -->
+      <div class="plan">
+        <div class="plan-head">
+          <span>📋 計畫</span>
+          <span class="plan-progress">2 / 5 完成</span>
+        </div>
+        <ul>
+          <li class="done"><span class="glyph">✓</span> 確認 STEP_001 xbar 趨勢需求</li>
+          <li class="done"><span class="glyph">✓</span> 取得 STEP_001 製程資料 <span class="note">已撈 100 筆</span></li>
+          <li class="in-progress"><span class="glyph">◐</span> 建構 chart node</li>
+          <li class="pending"><span class="glyph">○</span> 執行並呈現結果</li>
+          <li class="pending"><span class="glyph">○</span> 分析趨勢結論</li>
+        </ul>
+      </div>
+
+      <!-- Collapsed ops -->
+      <div class="ops">
+        <div class="ops-head">
+          <span><span class="caret">▶</span> 建構過程（3 ops）</span>
+          <span style="color:#94a3b8;">展開細節</span>
+        </div>
+      </div>
+
+      <!-- Chat history -->
+      <div class="msg user">幫我看 STEP_001 的 xbar 趨勢</div>
+      <div class="msg agent">📋 已規劃 5 個步驟，正在建構 pipeline…</div>
+    </div>
+    <div class="composer">
+      <textarea placeholder="可以追問或補充需求…"></textarea>
+      <button disabled style="opacity:.5;">送出</button>
+    </div>
+  </div>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────── -->
+<h2 class="frame-title">Frame C — Done（中央 = canvas + inline results）</h2>
+<div class="app">
+  <div class="topbar">AIOps <span style="margin-left:auto; font-size:13px; color:#6b7280;">gill · IT_ADMIN</span></div>
+  <div class="sidebar">
+    <div class="item">▶</div><div class="item">🔔</div><div class="item">📊</div>
+    <div class="item active">🧩</div><div class="item">⚙</div><div class="item">🧠</div>
+  </div>
+  <div class="center">
+    <div class="center-header">
+      <div class="center-title">🧱 Pipeline Workspace</div>
+      <div class="center-sub">— 已完成「STEP_001 的 xbar trend」（耗時 4.2s）</div>
+      <button class="btn btn-ghost" style="margin-left:auto;">🔁 重新執行</button>
+    </div>
+    <!-- Canvas (collapsed but visible) -->
+    <div class="mini-canvas" style="min-height:auto; padding:14px;">
+      <div class="mini-canvas-header" style="margin-bottom:8px;">
+        <div class="mini-canvas-title">📐 Canvas <span style="color:#9ca3af; font-weight:400; margin-left:6px;">3 nodes · 2 edges</span></div>
+        <div class="canvas-pill">✓ 完成</div>
+      </div>
+      <div class="canvas-flow" style="padding:6px 4px;">
+        <div class="node source"><div class="node-name">STEP_001 SPC</div></div>
+        <div class="arrow">→</div>
+        <div class="node process"><div class="node-name">最近 100 筆</div></div>
+        <div class="arrow">→</div>
+        <div class="node chart"><div class="node-name">📊 趨勢圖</div></div>
+      </div>
+    </div>
+
+    <!-- Inline results -->
+    <div class="results">
+      <div class="results-head">
+        <div class="results-title">📊 Pipeline 結果</div>
+        <div class="results-meta">5 charts · 1 alert · 100 rows</div>
+      </div>
+      <div class="alert-banner success">
+        ✅ <div><b>無 OOC</b> — 連續 100 筆均為 PASS。</div>
+      </div>
+      <div class="chart-block">
+        <div class="chart-tag">Chart #1 — Xbar Trend</div>
+        <div>📈 (mock chart) — eventTime vs spc_xbar_chart_value，含 UCL/LCL 線</div>
+      </div>
+    </div>
+
+    <!-- Takeover -->
+    <div class="takeover-card">
+      <div>
+        📝 <b>需要調整這條 pipeline？</b><br/>
+        <span style="font-size:12px;">改 chart 樣式、加 filter、換時間範圍…</span>
+      </div>
+      <a href="#">在 Pipeline Builder 開啟編輯 →</a>
+    </div>
+  </div>
+
+  <div class="rail">
+    <div class="rail-head">AI Agent <span style="font-size:11px; color:#9ca3af; font-weight:400;">18.2k / 2.1k tok</span></div>
+    <div class="rail-tabs">
+      <div class="tab active">💬 對話</div>
+      <div class="tab">⚙ Console</div>
+    </div>
+    <div class="rail-body">
+      <div class="stages">
+        <div class="stage-dot done">✓ Context</div>
+        <div class="stage-dot done">✓ Planning</div>
+        <div class="stage-dot done">✓ Build</div>
+        <div class="stage-dot done">✓ Execute</div>
+        <div class="stage-dot done">✓ Synthesis</div>
+      </div>
+
+      <div class="plan">
+        <div class="plan-head">
+          <span>📋 計畫</span>
+          <span class="plan-progress">5 / 5 完成 ✨</span>
+        </div>
+        <ul>
+          <li class="done"><span class="glyph">✓</span> 確認 STEP_001 xbar 趨勢需求</li>
+          <li class="done"><span class="glyph">✓</span> 取得 STEP_001 製程資料</li>
+          <li class="done"><span class="glyph">✓</span> 建構 chart node</li>
+          <li class="done"><span class="glyph">✓</span> 執行並呈現結果</li>
+          <li class="done"><span class="glyph">✓</span> 分析趨勢結論</li>
+        </ul>
+      </div>
+
+      <div class="ops">
+        <div class="ops-head">
+          <span><span class="caret">▶</span> 建構過程（5 ops）</span>
+          <span style="color:#94a3b8;">展開細節</span>
+        </div>
+      </div>
+
+      <div class="msg user">幫我看 STEP_001 的 xbar 趨勢</div>
+      <div class="msg agent">✓ <b>已完成</b> — 撈了 100 筆，全部 PASS，趨勢平穩。圖已在中間呈現。</div>
+    </div>
+    <div class="composer">
+      <textarea placeholder="可以接著追問，例如：那 EQP-07 呢？"></textarea>
+      <button>送出</button>
+    </div>
+  </div>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────── -->
+<h2 class="frame-title">Frame D — Failure（保留兩條退路）</h2>
+<div class="app">
+  <div class="topbar">AIOps <span style="margin-left:auto; font-size:13px; color:#6b7280;">gill · IT_ADMIN</span></div>
+  <div class="sidebar">
+    <div class="item">▶</div><div class="item">🔔</div><div class="item">📊</div>
+    <div class="item active">🧩</div><div class="item">⚙</div><div class="item">🧠</div>
+  </div>
+  <div class="center">
+    <div class="center-header">
+      <div class="center-title">🧱 Pipeline Workspace</div>
+      <div class="center-sub">— 執行失敗於 chart node</div>
+    </div>
+    <div class="mini-canvas" style="min-height:auto; padding:14px;">
+      <div class="mini-canvas-header" style="margin-bottom:8px;">
+        <div class="mini-canvas-title">📐 Canvas</div>
+        <div class="canvas-pill error">✕ 執行失敗</div>
+      </div>
+      <div class="canvas-flow" style="padding:6px 4px;">
+        <div class="node source"><div class="node-name">STEP_001 SPC</div></div>
+        <div class="arrow">→</div>
+        <div class="node process"><div class="node-name">最近 100 筆</div></div>
+        <div class="arrow">→</div>
+        <div class="node alert"><div class="node-name">📊 趨勢圖 ✕</div></div>
+      </div>
+    </div>
+
+    <div class="failure-card">
+      <div class="fail-title">❌ 執行失敗 — chart node 找不到 column 'xbar_value'</div>
+      <div class="fail-msg">資料的欄位實際是 <b>spc_xbar_chart_value</b>。Agent 提議自動修正：把 chart 的 y_key 改成 spc_xbar_chart_value。</div>
+      <div class="btn-row">
+        <button class="btn btn-primary">套用並重跑</button>
+        <button class="btn btn-ghost">先看細節</button>
+      </div>
+    </div>
+
+    <div class="takeover-card" style="background:#fef2f2; border-color:#fecaca; color:#991b1b;">
+      <div>
+        🛠 <b>不想讓 Agent 自動修？</b><br/>
+        <span style="font-size:12px;">在 Pipeline Builder 直接打開這條 pipeline 自己改。</span>
+      </div>
+      <a href="#" style="color:#b91c1c;">在 Pipeline Builder 自己改 →</a>
+    </div>
+  </div>
+
+  <div class="rail">
+    <div class="rail-head">AI Agent <span style="font-size:11px; color:#9ca3af; font-weight:400;">22.1k / 2.8k tok</span></div>
+    <div class="rail-tabs">
+      <div class="tab active">💬 對話</div>
+      <div class="tab">⚙ Console</div>
+    </div>
+    <div class="rail-body">
+      <div class="stages">
+        <div class="stage-dot done">✓ Context</div>
+        <div class="stage-dot done">✓ Planning</div>
+        <div class="stage-dot done">✓ Build</div>
+        <div class="stage-dot error">✕ Execute</div>
+        <div class="stage-dot">Synthesis</div>
+      </div>
+
+      <div class="plan">
+        <div class="plan-head">
+          <span>📋 計畫</span>
+          <span class="plan-progress" style="background:#fef2f2; color:#991b1b; border-color:#fecaca;">3 / 5 · 卡住</span>
+        </div>
+        <ul>
+          <li class="done"><span class="glyph">✓</span> 確認需求</li>
+          <li class="done"><span class="glyph">✓</span> 取得製程資料</li>
+          <li class="done"><span class="glyph">✓</span> 建構 chart node</li>
+          <li class="in-progress" style="color:#991b1b;"><span class="glyph" style="color:#dc2626; animation:none;">✕</span> 執行並呈現結果 <span class="note" style="background:#fee2e2; color:#991b1b;">column 不存在</span></li>
+          <li class="pending"><span class="glyph">○</span> 分析趨勢結論</li>
+        </ul>
+      </div>
+
+      <div class="ops expanded">
+        <div class="ops-head">
+          <span><span class="caret">▶</span> 建構過程（4 ops）</span>
+          <span style="color:#94a3b8;">收合</span>
+        </div>
+        <div class="ops-body">
+          <div class="ops-row"><span class="ts">12:04:01</span>+ block_process_history</div>
+          <div class="ops-row"><span class="ts">12:04:02</span>~ rename n1 → STEP_001 SPC</div>
+          <div class="ops-row"><span class="ts">12:04:03</span>+ block_chart (y_key=xbar_value)</div>
+          <div class="ops-row" style="color:#b91c1c;"><span class="ts">12:04:04</span>✕ execute → KeyError</div>
+        </div>
+      </div>
+
+      <div class="msg user">幫我看 STEP_001 的 xbar 趨勢</div>
+      <div class="msg agent">⚠ 執行時 chart node 報錯（column 不存在）。我已在中間提出修補建議。</div>
+    </div>
+    <div class="composer">
+      <textarea placeholder="可以追問或拒絕修補…"></textarea>
+      <button>送出</button>
+    </div>
+  </div>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────── -->
+<h2 class="frame-title">📋 v1.4 vs v1.5 差異總覽</h2>
+<table class="diff">
+  <tr>
+    <th style="width:18%;">Aspect</th>
+    <th>v1.4（現況）</th>
+    <th>v1.5（這份 mockup）</th>
+  </tr>
+  <tr>
+    <td>結果區位置</td>
+    <td class="before">Floating PipelineResultsPanel（pop-up，遮 dashboard）</td>
+    <td class="after">Inline，直接嵌在中央 Canvas 下方</td>
+  </tr>
+  <tr>
+    <td>建構期間中央區</td>
+    <td class="before">空白 dashboard，無視覺進度</td>
+    <td class="after">Mini Pipeline Canvas，逐步繪出 node + edge</td>
+  </tr>
+  <tr>
+    <td>Plan Panel 位置</td>
+    <td class="before">飄在 chat 訊息中（NEW 標）</td>
+    <td class="after">直接放在 Stage 進度條下方，與 console 整合</td>
+  </tr>
+  <tr>
+    <td>建構 ops 訊息</td>
+    <td class="before">每個 op（add_node / rename）都是大 chip 占滿</td>
+    <td class="after">預設摺疊「建構過程（N ops）」，點開才看明細</td>
+  </tr>
+  <tr>
+    <td>「編輯」link 行為</td>
+    <td class="before">跳到 <code>/admin/pipeline-builder/new</code> 但被 wizard Step 1/3 攔截，畫面是空的</td>
+    <td class="after">直接進已載入該 pipeline 的 builder canvas（繞過 wizard）</td>
+  </tr>
+  <tr>
+    <td>跨頁 chat 保留</td>
+    <td class="before">進 builder 後 AIAgentPanel state 重置 → 訊息清空</td>
+    <td class="after">chat history 跨頁存活（global store / sessionStorage）</td>
+  </tr>
+  <tr>
+    <td>失敗退路</td>
+    <td class="before">只有 propose_pipeline_patch 一條（agent 自動修）</td>
+    <td class="after">維持 patch + 紅色「自己改」link（兩條退路並存）</td>
+  </tr>
+</table>
+
+</body>
+</html>
