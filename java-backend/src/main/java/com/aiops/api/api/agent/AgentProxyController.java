@@ -28,12 +28,13 @@ import java.util.Map;
  * the reactive {@code Flux} into an {@link SseEmitter} — which is the MVC-native
  * SSE primitive and plays nicely with the security filter chain.
  *
- * <p>Auth: PE or IT_ADMIN — On-duty read-only users don't hit the AI surface.
+ * <p>Auth: chat is open to ANY_ROLE (ON_DUTY can ask the agent questions —
+ * the sidecar's tool filter denies them build/write tools at the LLM layer);
+ * build / pipeline.execute / sandbox.run stay PE+ since those are write paths.
  */
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/agent")
-@PreAuthorize(Authorities.ADMIN_OR_PE)
 public class AgentProxyController {
 
 	private static final long SSE_TIMEOUT_MS = 10L * 60_000L;
@@ -47,6 +48,7 @@ public class AgentProxyController {
 	// --- SSE paths: chat + build ---
 
 	@PostMapping(path = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	@PreAuthorize(Authorities.ANY_ROLE)
 	public SseEmitter chat(@Validated @RequestBody ChatRequest req,
 	                       @AuthenticationPrincipal AuthPrincipal caller) {
 		return bridgeSse(sidecar.postSse("/internal/agent/chat", req, caller), "chat");
@@ -56,6 +58,7 @@ public class AgentProxyController {
 	// (old Python FastAPI shape). Accept both paths and both field names so the
 	// Next.js proxy keeps working post-cutover without a redeploy.
 	@PostMapping(path = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	@PreAuthorize(Authorities.ANY_ROLE)
 	public SseEmitter chatStreamCompat(@RequestBody Map<String, Object> body,
 	                                   @AuthenticationPrincipal AuthPrincipal caller) {
 		String message = asString(body.get("message"));
@@ -80,6 +83,7 @@ public class AgentProxyController {
 	// so Frontend clients that were not redeployed with the Java cutover keep working.
 	// Mirrors the chatStreamCompat pattern above.
 	@PostMapping(path = "/build", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
 	public SseEmitter build(@RequestBody Map<String, Object> body,
 	                        @AuthenticationPrincipal AuthPrincipal caller) {
 		String instruction = asString(body.get("instruction"));
@@ -139,6 +143,7 @@ public class AgentProxyController {
 	// --- JSON paths: pipeline + sandbox (block() is intentional) ---
 
 	@PostMapping("/pipeline/execute")
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
 	@SuppressWarnings({"unchecked", "rawtypes"})
 	public ApiResponse<Map> pipelineExecute(@RequestBody Map<String, Object> body,
 	                                        @AuthenticationPrincipal AuthPrincipal caller) {
@@ -147,6 +152,7 @@ public class AgentProxyController {
 	}
 
 	@PostMapping("/pipeline/validate")
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
 	@SuppressWarnings({"unchecked", "rawtypes"})
 	public ApiResponse<Map> pipelineValidate(@RequestBody Map<String, Object> body,
 	                                         @AuthenticationPrincipal AuthPrincipal caller) {
@@ -155,6 +161,7 @@ public class AgentProxyController {
 	}
 
 	@PostMapping("/sandbox/run")
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
 	@SuppressWarnings({"unchecked", "rawtypes"})
 	public ApiResponse<Map> sandbox(@RequestBody Map<String, Object> body,
 	                                @AuthenticationPrincipal AuthPrincipal caller) {
@@ -163,6 +170,7 @@ public class AgentProxyController {
 	}
 
 	@GetMapping("/sidecar/health")
+	@PreAuthorize(Authorities.ANY_ROLE)
 	@SuppressWarnings({"unchecked", "rawtypes"})
 	public ApiResponse<Map> sidecarHealth(@AuthenticationPrincipal AuthPrincipal caller) {
 		Map result = sidecar.getJson("/internal/health", Map.class, caller).block();
