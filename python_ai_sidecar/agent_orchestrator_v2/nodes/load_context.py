@@ -85,6 +85,13 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
         "`pb_run_error` come through and you should call `propose_pipeline_patch`\n"
         "with a targeted fix (only ONE retry — if it fails again, explain the issue\n"
         "in plain language and stop).\n"
+        "\n"
+        "**If `build_pipeline_live` itself returns `status='failed'`** (the sub-agent\n"
+        "hit MAX_TURNS / errored out before producing a usable pipeline): DO NOT call\n"
+        "`build_pipeline_live` again with the same goal. The user has already seen\n"
+        "the partial canvas + a takeover link. Just acknowledge in plain language\n"
+        "(\"建構未完成，可以在 Pipeline Builder 自己接手\") and stop — retrying with the\n"
+        "same prompt will hit the same failure mode.\n"
     )
 
     # Phase 5: pipeline-only directive + published-skill-first heuristic + block catalog.

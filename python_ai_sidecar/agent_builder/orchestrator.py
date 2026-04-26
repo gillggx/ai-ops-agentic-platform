@@ -34,7 +34,8 @@ from python_ai_sidecar.pipeline_builder.block_registry import BlockRegistry
 
 logger = logging.getLogger(__name__)
 
-MAX_TURNS = 30
+MAX_TURNS = 50  # bumped 2026-04-26: complex builds (multi-tool overlay,
+                # facet patterns) hit the old 30 cap before calling finish()
 MAX_SAME_TOOL_RETRY = 3  # if Agent calls the same (tool, args) 3x in a row → refuse + hint
 DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_MAX_TOKENS = 4096
