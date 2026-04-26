@@ -24,6 +24,42 @@ from python_ai_sidecar.agent_orchestrator_v2.helpers import (
 )
 
 
+# Phrases that signal the LLM is *aware* it couldn't complete the task
+# and is suggesting next steps rather than asserting unverified data.
+# These commonly appear when an ON_DUTY caller asks for an analysis that
+# has no published skill — the LLM has nothing to call and rightly
+# explains the limitation in plain text.
+_LIMITATION_KEYWORDS = (
+    "找不到",      # no skill found
+    "無法直接",    # can't directly
+    "沒有現成",    # no existing
+    "聯繫 PE",     # contact PE
+    "聯繫 IT_ADMIN",
+    "聯繫 IT-ADMIN",
+    "權限限制",    # permission limit
+    "無權限",
+    "目前無法",    # cannot currently
+    "無法為您",
+    "無法提供",
+    "建議您聯繫",
+    "建議聯絡",
+    "請聯絡",
+)
+
+
+def _looks_like_self_aware_explanation(text: str) -> bool:
+    """Detect a self-aware "I couldn't do this" response.
+
+    Used by self_critique to skip the "all tool calls failed" amendment
+    when the LLM has already explained the limitation gracefully — the
+    amendment would otherwise overwrite a friendly answer with a generic
+    error string, which is worse UX than leaving the original.
+    """
+    if not text:
+        return False
+    return any(kw in text for kw in _LIMITATION_KEYWORDS)
+
+
 async def self_critique_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str, Any]:
     """Stage 5: Self-Critique — verify every concrete value is traceable."""
     final_text = state.get("final_text", "")
@@ -32,8 +68,14 @@ async def self_critique_node(state: Dict[str, Any], config: RunnableConfig) -> D
     if not final_text or len(final_text) < 50:
         return {"reflection_result": {"pass": True}}
 
-    # No tools used → 100% hallucination
+    # No tools used → potentially 100% hallucination, but also valid for
+    # "I couldn't do this" self-aware responses (common when an ON_DUTY
+    # caller asks for an analysis that has no published skill — there's
+    # nothing to call, and the LLM correctly explains the limitation in
+    # plain text). We only flag if the answer reads like asserted data.
     if not tools_used:
+        if _looks_like_self_aware_explanation(final_text):
+            return {"reflection_result": {"pass": True}}
         return {
             "reflection_result": {
                 "pass": False,

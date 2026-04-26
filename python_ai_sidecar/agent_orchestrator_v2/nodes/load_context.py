@@ -113,6 +113,34 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
         import logging as _lg
         _lg.getLogger(__name__).warning("Pipeline-only context injection failed: %s", e)
 
+    # Phase v1.3 P0 — ON_DUTY-specific guidance.
+    # ON_DUTY callers have build_pipeline_live + draft/build/patch/save_*
+    # tools removed from their catalog. Without telling the LLM why, it
+    # tries to fall back to hallucinated tools or gives an unhelpful
+    # answer when no published skill matches. Spell out the recovery
+    # path here so the LLM produces a useful explanation instead.
+    caller_roles = config["configurable"].get("caller_roles") or ()
+    role_set = {r.upper() for r in caller_roles}
+    if role_set and "IT_ADMIN" not in role_set and "PE" not in role_set:
+        # Strict ON_DUTY (or no role at all — fail-closed).
+        system_text += (
+            "\n\n# 角色限制（你正在服務「值班工程師」，權限有限）\n"
+            "你目前可用的工具只有「查詢」+「執行已 published 的 Skill」這條路徑。\n"
+            "**禁止能力**：建新 Pipeline / 建 Skill / 建 MCP / 建規則 / 寫共用記憶 — 這些工具已從你的工具表中移除。\n"
+            "\n"
+            "## 找不到對應 Skill 時的標準回應\n"
+            "如果 `search_published_skills(query)` **沒有適合的命中**，**禁止亂選**或試呼叫被移除的工具。\n"
+            "請直接用文字回覆使用者，內容包含：\n"
+            "  1. 一句話說明：「目前沒有對應的現成 skill 可用」\n"
+            "  2. 簡短列出這個分析需要看的方向（給值班參考用）\n"
+            "  3. 結尾固定句型：「**建議聯繫 PE 或 IT_ADMIN 協助建立此 skill**，或告訴我您想先看哪一筆 raw data，我可以用 `execute_mcp` 直接幫您查。」\n"
+            "\n"
+            "## 退路：raw data 直查\n"
+            "如果使用者改要求看 raw data（單筆告警、特定機台事件、製程歷史），你**仍可以**呼叫\n"
+            "`execute_mcp` + `search_published_skills` + `invoke_published_skill` 直接查詢回覆。\n"
+            "這條路在值班場景超有用——告警背景查證、單機台健康度、批次 trace 都走這。\n"
+        )
+
     # Extract retrieved experience memory IDs for feedback loop
     retrieved_memory_ids = [
         int(h["id"])
