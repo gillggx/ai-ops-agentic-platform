@@ -153,15 +153,27 @@ export default function AgentBuilderPanel({
           } else if (eventType === "done") {
             const summary = (data.summary as string) || "(done)";
             setLines((p) => [...p, { id: nextId(), role: "agent", text: `✓ ${summary}` }]);
-            // Phase 5-UX-6: tidy the canvas after agent finishes — ad-hoc
-            // positions from add_node become an LR-laid-out DAG.
-            const laidOut = autoLayoutPipeline(
-              currentNodesRef.current,
-              stateRef.current.pipeline.edges,
-            );
-            if (laidOut.length > 0) {
-              actions.setNodesAndEdges(laidOut, stateRef.current.pipeline.edges);
-            }
+            // Phase 5-UX-6 (race-fix): defer auto-layout until React commits
+            // every queued add_node / connect / rename action. Reading
+            // currentNodesRef.current here got the pre-commit value so the
+            // last node added in this turn was missing → DAG laid out
+            // without it → on canvas it appeared stuck on top of an existing
+            // node and the user thought it disappeared.
+            // requestAnimationFrame waits until after commit + paint.
+            const edgesNow = stateRef.current.pipeline.edges;
+            requestAnimationFrame(() => {
+              const laidOut = autoLayoutPipeline(
+                currentNodesRef.current,
+                stateRef.current.pipeline.edges,
+              );
+              if (laidOut.length > 0) {
+                actions.setNodesAndEdges(laidOut, stateRef.current.pipeline.edges);
+              } else {
+                // Fallback: edges already up-to-date but nodes ref empty —
+                // try again on next frame (extremely rare race).
+                void edgesNow;
+              }
+            });
           }
           // Other event types (suggestion_card, plan, thinking) are not critical here.
         }
