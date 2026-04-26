@@ -2,12 +2,10 @@ package com.aiops.api.api.aiops;
 
 import com.aiops.api.auth.Authorities;
 import com.aiops.api.common.ApiResponse;
-import com.aiops.api.config.AiopsProperties;
 import com.aiops.api.domain.alarm.AlarmEntity;
 import com.aiops.api.domain.alarm.AlarmRepository;
 import com.aiops.api.domain.event.GeneratedEventEntity;
 import com.aiops.api.domain.event.GeneratedEventRepository;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.MediaType;
@@ -21,15 +19,20 @@ import reactor.core.publisher.Flux;
 
 import java.io.IOException;
 import java.time.OffsetDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Dashboard briefing — quick aggregate view for on-duty users.
- * Rich analytics (LLM-generated summary) comes from the Python sidecar via
- * {@code /api/v1/agent/briefing}; this controller only returns the raw counts
- * the Frontend top bar needs for fast load.
+ * Dashboard briefing — LLM-generated operational summary + raw counts.
+ *
+ * <p>Phase 8-A-1d: SSE briefing now lives in the Python sidecar
+ * ({@code python_ai_sidecar/routers/briefing.py}). This controller forwards
+ * GET / POST to {@code /internal/briefing/sse} via the same
+ * {@code pythonSidecarWebClient} the agent SSE paths use.
+ *
+ * <p>The {@code /api/v1/briefing} (no params) GET is unchanged — it returns
+ * the raw alarm + event counts from Java DB, used by the dashboard top bar.
  */
 @RestController
 @RequestMapping("/api/v1/briefing")
@@ -39,56 +42,25 @@ public class BriefingController {
 
 	private final AlarmRepository alarmRepo;
 	private final GeneratedEventRepository eventRepo;
-	private final AiopsProperties props;
-	private final WebClient legacyBriefingClient;
+	private final WebClient sidecarClient;
 
 	public BriefingController(AlarmRepository alarmRepo, GeneratedEventRepository eventRepo,
-	                          AiopsProperties props,
-	                          @Value("${aiops.legacy-backend-url:http://127.0.0.1:8001}") String legacyBackendUrl) {
+	                          WebClient pythonSidecarWebClient) {
 		this.alarmRepo = alarmRepo;
 		this.eventRepo = eventRepo;
-		this.props = props;
-		this.legacyBriefingClient = WebClient.builder()
-				.baseUrl(legacyBackendUrl)
-				.build();
+		this.sidecarClient = pythonSidecarWebClient;
 	}
 
-	// ── GET with scope → proxy SSE to Python (LLM-generated briefing) ────
-	// Dashboard 's BriefingPanel expects the same SSE chunks the alarm page
-	// gets via POST. Python's GET /briefing?scope=fab|tool|alarm streams LLM
-	// chunks; Java proxies identically so the dashboard shows real summaries.
+	// ── GET with scope → forward to sidecar SSE ──────────────────────────
+	// Dashboard's BriefingPanel hits this with ?scope=fab|tool|alarm.
+	// We translate the query string to a JSON body for the sidecar's POST.
 	@GetMapping(params = "scope", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 	public SseEmitter getBriefingSse(@RequestParam String scope,
 	                                 @RequestParam(required = false) String toolId) {
-		SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
-		String secret = props.auth() != null ? props.auth().sharedSecretToken() : null;
-		if (secret == null || secret.isBlank()) {
-			try { emitter.send(SseEmitter.event().data("{\"type\":\"error\",\"message\":\"no shared secret\"}")); }
-			catch (IOException ignored) {}
-			emitter.complete();
-			return emitter;
-		}
-		StringBuilder uri = new StringBuilder("/api/v1/briefing?scope=").append(scope);
-		if (toolId != null && !toolId.isBlank()) uri.append("&toolId=").append(toolId);
-		Flux<ServerSentEvent<String>> upstream = legacyBriefingClient.get()
-				.uri(uri.toString())
-				.header("Authorization", "Bearer " + secret)
-				.retrieve()
-				.bodyToFlux(new org.springframework.core.ParameterizedTypeReference<ServerSentEvent<String>>() {});
-		Disposable sub = upstream.subscribe(
-				ev -> { try {
-					var b = SseEmitter.event();
-					if (ev.event() != null) b.name(ev.event());
-					if (ev.id() != null) b.id(ev.id());
-					if (ev.data() != null) b.data(ev.data());
-					emitter.send(b);
-				} catch (IOException ex) { emitter.completeWithError(ex); } },
-				err -> emitter.completeWithError(err),
-				emitter::complete);
-		emitter.onCompletion(sub::dispose);
-		emitter.onTimeout(sub::dispose);
-		emitter.onError(e -> sub.dispose());
-		return emitter;
+		Map<String, Object> body = new HashMap<>();
+		body.put("scope", scope);
+		if (toolId != null && !toolId.isBlank()) body.put("toolId", toolId);
+		return forwardToSidecar(body);
 	}
 
 	// GET without scope returns the legacy JSON snapshot (alarm counts) —
@@ -131,35 +103,26 @@ public class BriefingController {
 		));
 	}
 
-	// ── POST → SSE LLM-generated synthesis (proxied to legacy Python :8001) ──
-	// Frontend alarm page posts {scope:"alarm" | "alarm_detail", alarmData:{...}}
-	// and expects a streaming text response. The LLM logic still lives in the
-	// Python stack (app/routers/briefing.py); until it ports to Java, proxy
-	// the SSE stream transparently. The GET variant above is the fast path
-	// (raw counts) used by the dashboard top bar.
+	// ── POST → forward to sidecar SSE ────────────────────────────────────
+	// Frontend alarm page posts {scope, toolId?, alarmData?}; we relay
+	// the exact body since sidecar's BriefingRequest mirrors the schema.
 	@PostMapping(produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 	public SseEmitter postBriefing(@RequestBody Map<String, Object> body) {
+		return forwardToSidecar(body);
+	}
+
+	// ── helpers ──────────────────────────────────────────────────────────
+
+	private SseEmitter forwardToSidecar(Map<String, Object> body) {
 		SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
 
-		String secret = props.auth() != null ? props.auth().sharedSecretToken() : null;
-		if (secret == null || secret.isBlank()) {
-			try {
-				emitter.send(SseEmitter.event().data(
-						"{\"error\":\"AIOPS_SHARED_SECRET_TOKEN not configured — cannot reach legacy briefing\"}"));
-			} catch (IOException ignored) {}
-			emitter.complete();
-			return emitter;
-		}
-
-		Flux<ServerSentEvent<String>> upstream = legacyBriefingClient.post()
-				.uri("/api/v1/briefing")
-				.header("Authorization", "Bearer " + secret)
+		Flux<ServerSentEvent<String>> upstream = sidecarClient.post()
+				.uri("/internal/briefing/sse")
 				.header("Content-Type", "application/json")
 				.bodyValue(body)
 				.retrieve()
 				.bodyToFlux(new org.springframework.core.ParameterizedTypeReference<ServerSentEvent<String>>() {});
 
-		AtomicReference<Disposable> subRef = new AtomicReference<>();
 		Disposable sub = upstream.subscribe(
 				ev -> {
 					try {
@@ -175,7 +138,6 @@ public class BriefingController {
 				err -> emitter.completeWithError(err),
 				emitter::complete
 		);
-		subRef.set(sub);
 		emitter.onCompletion(sub::dispose);
 		emitter.onTimeout(sub::dispose);
 		emitter.onError(e -> sub.dispose());

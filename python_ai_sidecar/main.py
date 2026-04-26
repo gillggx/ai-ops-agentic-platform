@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 
 from .background import event_poller, nats_subscriber
 from .config import CONFIG
-from .routers import agent, health, pipeline, sandbox
+from .routers import agent, briefing, health, pipeline, sandbox
 
 logging.basicConfig(
     level=logging.INFO,
@@ -74,3 +74,4 @@ app.include_router(health.router)
 app.include_router(agent.router)
 app.include_router(pipeline.router)
 app.include_router(sandbox.router)
+app.include_router(briefing.router)
