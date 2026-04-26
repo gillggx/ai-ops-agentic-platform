@@ -28,8 +28,12 @@ import { useRouter } from "next/navigation";
 import { BuilderProvider, useBuilder } from "@/context/pipeline-builder/BuilderContext";
 import { listBlocks } from "@/lib/pipeline-builder/api";
 import { applyGlassOp, autoLayoutPipeline } from "@/lib/pipeline-builder/glass-ops";
-import { PlanRenderer, type PlanItem } from "./PlanRenderer";
+import { type PlanItem } from "./PlanRenderer";
 import ResultsBody from "../pipeline-builder/ResultsBody";
+// PipelineThemeStyles defines the CSS custom properties (--pb-edge, --pb-ok,
+// --pb-accent, …) that DagCanvas + DeletableEdge consume. Without it the edge
+// strokes resolve to `unset` → no visible lines.
+import PipelineThemeStyles from "../pipeline-builder/PipelineThemeStyles";
 import type {
   BlockSpec,
   PipelineResultSummary,
@@ -417,7 +421,11 @@ function CanvasPane({
   narration: string;
 }) {
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%", background: "#FAFAFA" }}>
+    <div
+      data-pb-theme="light"
+      style={{ position: "relative", width: "100%", height: "100%", background: "#FAFAFA" }}
+    >
+      <PipelineThemeStyles />
       <DagCanvas blockCatalog={blockCatalog} readOnly />
       <button
         onClick={onAutoLayout}

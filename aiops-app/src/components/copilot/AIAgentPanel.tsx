@@ -56,7 +56,7 @@ type RenderDecisionMeta = {
 
 interface ChatMessage {
   id: number;
-  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal";
+  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan";
   content: string;
   contract?: AIOpsReportContract;
   mcpResult?: McpResult;
@@ -64,6 +64,9 @@ interface ChatMessage {
   renderDecision?: RenderDecisionMeta;
   pbPipeline?: PbPipelineCardData;
   pbProposal?: PbPatchProposalData;
+  // v1.7: when role === "plan", planItems carries the live checklist that
+  // updates in place via plan_update events keyed off the message id.
+  planItems?: PlanItem[];
   // Generative UI
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   flatData?: Record<string, any[]>;
@@ -495,6 +498,9 @@ export function AIAgentPanel({
   const [feedbackModal, setFeedbackModal] = useState<{ messageId: number; messageIdx: number } | null>(null);
   // v1.4 Plan Panel — agent-emitted todo list, refreshed each turn.
   const [planItems, setPlanItems] = useState<PlanItem[]>([]);
+  // v1.7 — id of the inline plan chat-card so plan_update events know which
+  // message to mutate. Reset at every pb_glass_start.
+  const currentPlanMsgIdRef = useRef<number | null>(null);
   // v1.5 — Glass Box build ops accumulate here, surfaced via OpsConsole (default
   // collapsed). Cleared at the start of every new build session.
   const [glassOps, setGlassOps] = useState<GlassOpEntry[]>([]);
@@ -677,10 +683,18 @@ export function AIAgentPanel({
           }
 
           case "plan": {
-            // v1.4 — checklist items from update_plan tool (Plan Panel renderer)
+            // v1.7 — plan now lives inline in the chat thread, right after
+            // the user's request, so each new build gets its own plan card.
             const items = ev.items as PlanItem[] | undefined;
             if (Array.isArray(items)) {
-              setPlanItems(items.map((it) => ({ ...it })));
+              const cloned = items.map((it) => ({ ...it }));
+              const planMsgId = nextId();
+              currentPlanMsgIdRef.current = planMsgId;
+              setPlanItems(cloned);  // mirror to overlay relay
+              setChatHistory((prev) => [...prev, {
+                id: planMsgId, role: "plan", content: "",
+                planItems: cloned,
+              }]);
               break;
             }
             // Legacy — free-text plan from LLM <plan>...</plan> reasoning
@@ -699,9 +713,22 @@ export function AIAgentPanel({
             const id = ev.id as string;
             const status = ev.status as PlanItem["status"];
             const note = ev.note as string | undefined;
+            const planMsgId = currentPlanMsgIdRef.current;
+            // Update both the standalone planItems mirror (kept for overlay
+            // relay) and the inline plan chat card so users see status flip
+            // to ✓ in place.
             setPlanItems((prev) => prev.map((it) =>
               it.id === id ? { ...it, status: status ?? it.status, note: note ?? it.note } : it,
             ));
+            if (planMsgId != null) {
+              setChatHistory((prev) => prev.map((m) => {
+                if (m.id !== planMsgId || m.role !== "plan") return m;
+                const items = (m.planItems ?? []).map((it) =>
+                  it.id === id ? { ...it, status: status ?? it.status, note: note ?? it.note } : it,
+                );
+                return { ...m, planItems: items };
+              }));
+            }
             break;
           }
 
@@ -830,6 +857,10 @@ export function AIAgentPanel({
             // v1.5 — start fresh: clear ops console; chat shows a single
             // "正在建立 pipeline" line instead of streaming each op.
             setGlassOps([]);
+            // v1.7 — new build means new plan card; drop the ref so the
+            // next plan event creates a fresh chat-message instead of
+            // mutating the previous build's plan in place.
+            currentPlanMsgIdRef.current = null;
             setChatHistory((prev) => [...prev, {
               id: nextId(), role: "agent",
               content: goal ? `🛠️ **正在建立 pipeline**：${goal}` : "🛠️ 正在建立 pipeline…",
@@ -1357,7 +1388,8 @@ export function AIAgentPanel({
       {/* Chat Tab */}
       {activeTab === "chat" && (
         <div style={{ flex: 1, overflowY: "auto", padding: "12px 12px 0", display: "flex", flexDirection: "column", gap: 8, minHeight: 0 }}>
-          <PlanRenderer items={planItems} />
+          {/* v1.7: plan now lives inline in chatHistory as a "plan" message
+              card so each new build's plan appears under that user request. */}
           <OpsConsole ops={glassOps} />
           {chatHistory.length === 0 && (
             <div style={{ color: "#a0aec0", fontSize: 13, textAlign: "center", paddingTop: 24 }}>
@@ -1373,7 +1405,11 @@ export function AIAgentPanel({
                 alignItems: msg.role === "user" ? "flex-end" : "flex-start",
               }}
             >
-              {msg.role === "pb_proposal" && msg.pbProposal ? (
+              {msg.role === "plan" && msg.planItems ? (
+                <div style={{ width: "100%", maxWidth: "100%" }}>
+                  <PlanRenderer items={msg.planItems} />
+                </div>
+              ) : msg.role === "pb_proposal" && msg.pbProposal ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
                   <PbPatchProposalCard
                     proposal={msg.pbProposal}
