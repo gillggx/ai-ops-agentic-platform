@@ -71,6 +71,12 @@ AGENT_STATE_SCHEMA = {
     "flat_data": Optional[Dict[str, Any]],     # FlattenedResult.to_dict()
     "flat_metadata": Optional[Dict[str, Any]], # metadata for LLM + frontend
     "ui_config": Optional[Dict[str, Any]],     # ChartExplorer configuration
+
+    # ── Plan Panel (v1.4) ─────────────────────────────────────────
+    # Live todo list emitted by the agent at the start of each turn.
+    # Each item: {id, title, status: "pending"|"in_progress"|"done"|"failed", note?}
+    # Frontend renders this as a Claude-Code-style progress checklist.
+    "plan_items": List[Dict[str, Any]],
 }
 
 
@@ -100,6 +106,7 @@ DEFAULT_STATE: Dict[str, Any] = {
     "flat_data": None,
     "flat_metadata": None,
     "ui_config": None,
+    "plan_items": [],
 }
 
 

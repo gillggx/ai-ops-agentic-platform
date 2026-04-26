@@ -416,6 +416,10 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
     chart_rendered = state.get("chart_already_rendered", False)
     last_spc = state.get("last_spc_result")
     force_synth = False
+    # v1.4 Plan Panel — accumulated across tool calls in this node invocation.
+    # Carries forward whatever was already in state.plan_items so updates
+    # apply to existing items.
+    plan_items: List[Dict[str, Any]] = list(state.get("plan_items") or [])
 
     for tc in last_msg.tool_calls:
         tool_name = tc["name"]
@@ -446,6 +450,111 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
             if tool_name == "execute_analysis" and state.get("flat_data"):
                 tool_input = {**tool_input, "_flat_data": state["flat_data"]}
             result = await dispatcher.execute(tool_name, tool_input)
+
+        # ── v1.4 Plan Panel — emit plan / plan_update SSE events ─────
+        if (tool_name == "update_plan" and isinstance(result, dict)
+                and result.get("_plan_action")):
+            action = result["_plan_action"]
+            if action == "create":
+                items = result.get("items") or []
+                plan_items = [dict(it) for it in items]
+                if event_emit is not None:
+                    try:
+                        event_emit({"type": "plan", "items": plan_items})
+                    except Exception:  # noqa: BLE001
+                        pass
+            elif action == "update":
+                pid = result.get("id")
+                new_status = result.get("status_value")
+                note = result.get("note")
+                for it in plan_items:
+                    if it.get("id") == pid:
+                        if new_status:
+                            it["status"] = new_status
+                        if note is not None:
+                            it["note"] = note
+                        break
+                if event_emit is not None:
+                    try:
+                        event_emit({
+                            "type": "plan_update",
+                            "id": pid,
+                            "status": new_status,
+                            "note": note,
+                        })
+                    except Exception:  # noqa: BLE001
+                        pass
+
+        # ── v1.4 Auto-Run — chain execute after build_pipeline_live success ─
+        if (tool_name == "build_pipeline_live"
+                and isinstance(result, dict)
+                and result.get("status") in {"finished", "success"}
+                and result.get("pipeline_json")):
+            pipeline_json = result["pipeline_json"]
+            node_count = len((pipeline_json.get("nodes") or []) if isinstance(pipeline_json, dict) else [])
+            if event_emit is not None:
+                try:
+                    event_emit({
+                        "type": "pb_run_start",
+                        "node_count": node_count,
+                    })
+                except Exception:  # noqa: BLE001
+                    pass
+            try:
+                from python_ai_sidecar.executor.real_executor import (
+                    execute_native, all_blocks_native,
+                )
+                if all_blocks_native(pipeline_json):
+                    run_result = await execute_native(
+                        pipeline_json, inputs={}, run_id=None,
+                    )
+                    run_status = run_result.get("status") or "error"
+                    if run_status == "success":
+                        # Attach run result to the build result so synthesis
+                        # can summarise; also surface via SSE for AnalysisPanel.
+                        result["auto_run"] = {
+                            "status": "success",
+                            "node_results": run_result.get("node_results") or {},
+                            "result_summary": run_result.get("result_summary"),
+                            "duration_ms": run_result.get("duration_ms"),
+                        }
+                        if event_emit is not None:
+                            try:
+                                event_emit({
+                                    "type": "pb_run_done",
+                                    "status": "success",
+                                    "node_results": run_result.get("node_results") or {},
+                                    "result_summary": run_result.get("result_summary"),
+                                    "duration_ms": run_result.get("duration_ms"),
+                                })
+                            except Exception:  # noqa: BLE001
+                                pass
+                    else:
+                        err = run_result.get("error_message") or "execution failed"
+                        result["auto_run"] = {"status": "error", "error_message": err}
+                        if event_emit is not None:
+                            try:
+                                event_emit({
+                                    "type": "pb_run_error",
+                                    "error_message": err,
+                                })
+                            except Exception:  # noqa: BLE001
+                                pass
+                else:
+                    # Hybrid pipeline (non-native blocks) — skip auto-run
+                    # for now; user can hit Run Full manually.
+                    result["auto_run"] = {"status": "skipped", "reason": "non-native blocks"}
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("auto-run after build_pipeline_live failed: %s", exc)
+                result["auto_run"] = {"status": "error", "error_message": str(exc)[:300]}
+                if event_emit is not None:
+                    try:
+                        event_emit({
+                            "type": "pb_run_error",
+                            "error_message": str(exc)[:300],
+                        })
+                    except Exception:  # noqa: BLE001
+                        pass
 
         # Track SPC results for auto-contract fallback
         if (tool_name == "execute_mcp" and isinstance(result, dict)
@@ -631,6 +740,9 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
         "chart_already_rendered": chart_rendered,
         "last_spc_result": last_spc,
         "force_synthesis": force_synth or state.get("force_synthesis", False),
+        # v1.4 Plan Panel — propagate the running plan so subsequent nodes
+        # (synthesis, memory_lifecycle) can read final state.
+        "plan_items": plan_items,
     }
     if _state_flat_data:
         result_state["flat_data"] = _state_flat_data

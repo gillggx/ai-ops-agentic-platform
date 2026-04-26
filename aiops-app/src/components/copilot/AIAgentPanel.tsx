@@ -5,6 +5,7 @@ import type { AIOpsReportContract, SuggestedAction } from "aiops-contract";
 import { isValidContract, isAgentAction, isHandoffAction } from "aiops-contract";
 import { consumeSSE } from "@/lib/sse";
 import { ContractCard } from "./ContractCard";
+import { PlanRenderer, type PlanItem } from "./PlanRenderer";
 import { ChartIntentRenderer, type ChartIntent } from "./ChartIntentRenderer";
 import { ChartExplorer } from "./ChartExplorer";
 import { PipelineConsole, type PipelineCard } from "./PipelineConsole";
@@ -514,6 +515,10 @@ export function AIAgentPanel({
   const synthesisIdxRef = useRef(0);
   // Phase v1.3 P0: 👎 modal state — null when closed.
   const [feedbackModal, setFeedbackModal] = useState<{ messageId: number; messageIdx: number } | null>(null);
+  // v1.4 Plan Panel — agent-emitted todo list, refreshed each turn.
+  const [planItems, setPlanItems] = useState<PlanItem[]>([]);
+  // v1.4 Auto-Run — tracks pb_run_* lifecycle for progress display.
+  const [autoRun, setAutoRun] = useState<{ status: "idle" | "running" | "done" | "error"; nodeCount?: number; startedAt?: number; durationMs?: number; error?: string }>({ status: "idle" });
   const [hitl, setHitl]             = useState<HitlRequest | null>(null);
   const [tokenIn, setTokenIn]       = useState(0);
   const [tokenOut, setTokenOut]     = useState(0);
@@ -609,6 +614,8 @@ export function AIAgentPanel({
     setTokenIn(0);
     setTokenOut(0);
     setReflection({ status: null, amendment: "" });
+    setPlanItems([]);
+    setAutoRun({ status: "idle" });
     setInput("");
     setActiveTab("chat");
 
@@ -1069,6 +1076,67 @@ export function AIAgentPanel({
             sessionIdRef.current = ev.session_id as string;
             break;
 
+          // ── v1.4 Plan Panel ─────────────────────────────────────
+          case "plan": {
+            const items = (ev.items as PlanItem[]) ?? [];
+            setPlanItems(items.map((it) => ({ ...it })));
+            break;
+          }
+          case "plan_update": {
+            const id = ev.id as string;
+            const status = ev.status as PlanItem["status"];
+            const note = ev.note as string | undefined;
+            setPlanItems((prev) => prev.map((it) =>
+              it.id === id ? { ...it, status: status ?? it.status, note: note ?? it.note } : it,
+            ));
+            break;
+          }
+
+          // ── v1.4 Auto-Run after build_pipeline_live ─────────────
+          case "pb_run_start": {
+            const nodeCount = (ev.node_count as number) ?? 0;
+            setAutoRun({ status: "running", nodeCount, startedAt: Date.now() });
+            addLog(makeLog("▶", `Auto-run 開始（${nodeCount} nodes）`, "info"));
+            break;
+          }
+          case "pb_run_done": {
+            setAutoRun((prev) => ({
+              ...prev,
+              status: "done",
+              durationMs: ev.duration_ms as number | undefined,
+            }));
+            addLog(makeLog("✅", `Auto-run 完成（${ev.duration_ms ?? "?"} ms）`, "info"));
+            // Build a synthetic contract so the AnalysisPanel renders the
+            // resulting charts/tables. This mirrors how synthesis builds
+            // contracts; we extract chart_intents from node_results.
+            const nodeResults = (ev.node_results as Record<string, unknown>) ?? {};
+            const chartCards: ChartIntent[] = [];
+            for (const r of Object.values(nodeResults)) {
+              const cardLike = (r as Record<string, unknown>)?.preview as Record<string, unknown> | undefined;
+              if (cardLike?.charts && Array.isArray(cardLike.charts)) {
+                chartCards.push(...(cardLike.charts as ChartIntent[]));
+              }
+            }
+            if (chartCards.length > 0) {
+              const contract: AIOpsReportContract = {
+                $schema: "aiops-report/v1",
+                summary: `Auto-run 完成：${chartCards.length} 個圖表`,
+                evidence_chain: [],
+                visualization: [],
+                suggested_actions: [],
+                charts: chartCards,
+              } as AIOpsReportContract;
+              onContract?.(contract);
+            }
+            break;
+          }
+          case "pb_run_error": {
+            const errMsg = (ev.error_message as string) ?? "execution failed";
+            setAutoRun({ status: "error", error: errMsg });
+            addLog(makeLog("❌", `Auto-run 失敗: ${errMsg}`, "error"));
+            break;
+          }
+
           case "error": {
             const errMsg = (ev.message as string) ?? "Agent 發生錯誤";
             addLog(makeLog("❌", errMsg, "error"));
@@ -1216,6 +1284,32 @@ export function AIAgentPanel({
             </span>
           )}
         </div>
+
+        {/* v1.4 — Plan Panel above stages (replaces user-facing progress) */}
+        <PlanRenderer items={planItems} />
+
+        {/* v1.4 — Auto-Run live banner */}
+        {autoRun.status !== "idle" && (
+          <div style={{
+            margin: "6px 12px 0",
+            padding: "6px 10px",
+            borderRadius: 6,
+            fontSize: 11,
+            background: autoRun.status === "error" ? "#fed7d7" : "#ebf4ff",
+            color: autoRun.status === "error" ? "#c53030" : "#2b6cb0",
+            border: `1px solid ${autoRun.status === "error" ? "#feb2b2" : "#bee3f8"}`,
+            display: "flex", alignItems: "center", gap: 6,
+          }}>
+            <span>
+              {autoRun.status === "running" && "▶ Auto-Run 執行中"}
+              {autoRun.status === "done" && `✓ Auto-Run 完成${autoRun.durationMs ? ` (${autoRun.durationMs} ms)` : ""}`}
+              {autoRun.status === "error" && `✕ Auto-Run 失敗：${autoRun.error}`}
+            </span>
+            {autoRun.status === "running" && autoRun.nodeCount && (
+              <span style={{ color: "#a0aec0" }}>· {autoRun.nodeCount} nodes</span>
+            )}
+          </div>
+        )}
 
         {/* Stage dots */}
         {stages.length > 0 && (

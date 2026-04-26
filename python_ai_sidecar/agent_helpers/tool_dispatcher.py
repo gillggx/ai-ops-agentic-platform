@@ -593,6 +593,46 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
             "required": ["catalog"],
         },
     },
+    {
+        "name": "update_plan",
+        "description": (
+            "v1.4 Plan Panel — Claude-Code-style live todo list shown above the chat.\n"
+            "\n"
+            "**第一輪呼叫（必做）**：\n"
+            "  action='create', items=[{id, title, status: 'pending'}]\n"
+            "  3-7 個高層 todo，涵蓋 fetch / process / present / output。\n"
+            "\n"
+            "**進度更新**：\n"
+            "  action='update', id=<existing item id>, status='in_progress'|'done'|'failed'\n"
+            "  選填 note='額外說明'（e.g. \"已加 4 個 nodes\"）。\n"
+            "\n"
+            "你必須在開始任何其他工具之前先 emit 一個 `create` plan，"
+            "讓使用者馬上看到接下來會做什麼。每完成一個階段立刻 update。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "required": ["action"],
+            "properties": {
+                "action": {"type": "string", "enum": ["create", "update"]},
+                "items": {
+                    "type": "array",
+                    "description": "create 時填，建議 3-7 項",
+                    "items": {
+                        "type": "object",
+                        "required": ["id", "title", "status"],
+                        "properties": {
+                            "id": {"type": "string"},
+                            "title": {"type": "string"},
+                            "status": {"type": "string", "enum": ["pending", "in_progress", "done", "failed"]},
+                        },
+                    },
+                },
+                "id": {"type": "string", "description": "update 時的 plan item id"},
+                "status": {"type": "string", "enum": ["pending", "in_progress", "done", "failed"]},
+                "note": {"type": "string"},
+            },
+        },
+    },
 ]
 
 
@@ -807,6 +847,34 @@ class ToolDispatcher:
                         "id": tool_input.get("id"),
                         "message": tool_input.get("message", ""),
                         "deep_link": f"{tool_input.get('target')}:{tool_input.get('id', '')}",
+                    }
+                case "update_plan":
+                    # v1.4 Plan Panel — agent emits/updates a todo list.
+                    # Two modes:
+                    #   action="create" + items=[...] → declare initial plan
+                    #   action="update" + id + status (+ note) → mark progress
+                    # Result is pure metadata; tool_execute relays it as an
+                    # SSE event ("plan" or "plan_update") to the Frontend.
+                    action = (tool_input.get("action") or "create").lower()
+                    if action == "create":
+                        items = tool_input.get("items") or []
+                        return {
+                            "_plan_action": "create",
+                            "items": items,
+                            "status": "success",
+                        }
+                    if action == "update":
+                        return {
+                            "_plan_action": "update",
+                            "id": tool_input.get("id"),
+                            "status_value": tool_input.get("status"),
+                            "note": tool_input.get("note"),
+                            "status": "success",
+                        }
+                    return {
+                        "status": "error",
+                        "code": "BAD_PLAN_ACTION",
+                        "message": "update_plan.action must be 'create' or 'update'",
                     }
                 case "search_memory":
                     # Phase 8-A-1d: route via Java when available (chat native)

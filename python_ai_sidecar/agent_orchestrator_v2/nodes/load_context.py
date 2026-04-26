@@ -57,6 +57,36 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
         b.get("text", "") for b in system_blocks if isinstance(b, dict)
     )
 
+    # v1.4 — Plan Panel directive (independent of pipeline-only mode).
+    # The agent must emit a 3-7 item plan via update_plan(action="create")
+    # BEFORE any other tool call, then update each item as it progresses.
+    # Frontend renders this as a live progress checklist above the chat.
+    system_text += (
+        "\n\n# Plan-First Execution (v1.4 Plan Panel)\n"
+        "**EVERY new turn**, your **FIRST tool call must be `update_plan`** with\n"
+        "`action='create'` and 3-7 high-level todo items covering the work for THIS\n"
+        "request. Items typically follow: 確認需求 → 取資料 → 處理 / 計算 → 呈現結果 → 結論。\n"
+        "\n"
+        "Each item: `{id: \"p1\"|\"p2\"|..., title: \"<short Chinese phrase>\", status: \"pending\"}`.\n"
+        "\n"
+        "As you complete each phase, immediately call `update_plan(action='update', id, status='done')`.\n"
+        "Mark a step `'in_progress'` when you start it, `'done'` when finished, `'failed'` if it errors.\n"
+        "Optional `note` 加額外說明（如「已加 4 個 nodes」、「執行 12.3 秒」）。\n"
+        "\n"
+        "The PE sees a Claude-Code-style live checklist — this is the primary signal\n"
+        "that you're making progress. Skipping the plan or never updating it makes the\n"
+        "UI feel stuck.\n"
+        "\n"
+        "# Auto-Run after Build (chat path only)\n"
+        "After `build_pipeline_live` returns success, the system **automatically runs\n"
+        "the resulting pipeline** and shows results via the AnalysisPanel — you do NOT\n"
+        "need to call execute manually. Just update_plan to mark the relevant items\n"
+        "done and write a short synthesis. If the auto-run fails, you'll see\n"
+        "`pb_run_error` come through and you should call `propose_pipeline_patch`\n"
+        "with a targeted fix (only ONE retry — if it fails again, explain the issue\n"
+        "in plain language and stop).\n"
+    )
+
     # Phase 5: pipeline-only directive + published-skill-first heuristic + block catalog.
     try:
         from python_ai_sidecar.pipeline_builder._sidecar_deps import get_settings
