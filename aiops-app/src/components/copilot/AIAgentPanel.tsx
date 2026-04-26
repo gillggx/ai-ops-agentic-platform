@@ -56,7 +56,7 @@ type RenderDecisionMeta = {
 
 interface ChatMessage {
   id: number;
-  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan";
+  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "ops";
   content: string;
   contract?: AIOpsReportContract;
   mcpResult?: McpResult;
@@ -67,6 +67,9 @@ interface ChatMessage {
   // v1.7: when role === "plan", planItems carries the live checklist that
   // updates in place via plan_update events keyed off the message id.
   planItems?: PlanItem[];
+  // v1.7: when role === "ops", glassOps carries the build-op trail that
+  // accumulates across pb_glass_op events keyed off the message id.
+  glassOps?: GlassOpEntry[];
   // Generative UI
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   flatData?: Record<string, any[]>;
@@ -501,9 +504,13 @@ export function AIAgentPanel({
   // v1.7 — id of the inline plan chat-card so plan_update events know which
   // message to mutate. Reset at every pb_glass_start.
   const currentPlanMsgIdRef = useRef<number | null>(null);
+  // v1.7 — id of the inline ops chat-card so each new pb_glass_op appends to
+  // the right build session's trail. Reset at every pb_glass_start.
+  const currentOpsMsgIdRef = useRef<number | null>(null);
   // v1.5 — Glass Box build ops accumulate here, surfaced via OpsConsole (default
   // collapsed). Cleared at the start of every new build session.
-  const [glassOps, setGlassOps] = useState<GlassOpEntry[]>([]);
+  // v1.7: glassOps standalone state retired — ops now live as a "ops"
+  // chat-message inserted right after the plan card. See currentOpsMsgIdRef.
   // v1.4 — relay plan changes to parent (AppShell → LiveCanvasOverlay).
   useEffect(() => { onPlanItemsChange?.(planItems); }, [planItems, onPlanItemsChange]);
   // v1.4 Auto-Run — tracks pb_run_* lifecycle for progress display.
@@ -854,13 +861,12 @@ export function AIAgentPanel({
           case "pb_glass_start": {
             const goal = ev.goal as string | undefined;
             onGlassStart?.({ session_id: ev.session_id as string, goal });
-            // v1.5 — start fresh: clear ops console; chat shows a single
-            // "正在建立 pipeline" line instead of streaming each op.
-            setGlassOps([]);
-            // v1.7 — new build means new plan card; drop the ref so the
-            // next plan event creates a fresh chat-message instead of
-            // mutating the previous build's plan in place.
+            // v1.7 — new build means fresh plan + ops cards; drop the refs
+            // so the next plan / op event creates new chat-messages instead
+            // of mutating the previous build's cards.
             currentPlanMsgIdRef.current = null;
+            currentOpsMsgIdRef.current = null;
+            setAutoRun({ status: "idle" });
             setChatHistory((prev) => [...prev, {
               id: nextId(), role: "agent",
               content: goal ? `🛠️ **正在建立 pipeline**：${goal}` : "🛠️ 正在建立 pipeline…",
@@ -885,11 +891,26 @@ export function AIAgentPanel({
             else if (op === "remove_node") detail = `\`${args.node_id}\``;
             else if (op === "set_param") detail = `\`${args.node_id}.${args.key}\``;
             else if (op === "rename_node") detail = `\`${args.node_id}\` → \`${args.label ?? args.display_label ?? "?"}\``;
-            // v1.5 — append to OpsConsole (collapsible) instead of pushing
-            // every op into chat history.
-            setGlassOps((prev) => [...prev, {
+            const newEntry: GlassOpEntry = {
               id: nextId(), op, label, detail, ts: Date.now(),
-            }]);
+            };
+            // v1.7: ops live as an inline "ops" chat-message, pushed once per
+            // build session and updated in place via the message id ref so
+            // the build-ops trail sits right under the plan in conversation
+            // order instead of pinned at the top of the rail.
+            const opsMsgId = currentOpsMsgIdRef.current;
+            if (opsMsgId == null) {
+              const newId = nextId();
+              currentOpsMsgIdRef.current = newId;
+              setChatHistory((prev) => [...prev, {
+                id: newId, role: "ops", content: "", glassOps: [newEntry],
+              }]);
+            } else {
+              setChatHistory((prev) => prev.map((m) => {
+                if (m.id !== opsMsgId || m.role !== "ops") return m;
+                return { ...m, glassOps: [...(m.glassOps ?? []), newEntry] };
+              }));
+            }
             break;
           }
           case "pb_glass_chat": {
@@ -910,17 +931,29 @@ export function AIAgentPanel({
               op: opName,
               hint: ev.hint as string | undefined,
             });
-            // v1.5 — drop into OpsConsole rather than the chat thread; show
-            // a one-line warning bubble in chat too so the user sees there's
-            // something wrong without expanding the console.
-            setGlassOps((prev) => [...prev, {
+            const errEntry: GlassOpEntry = {
               id: nextId(),
               op: opName ?? "error",
               label: opName ? `${opName} 失敗` : "錯誤",
               detail: msg,
               ts: Date.now(),
               isError: true,
-            }]);
+            };
+            // v1.7: append to the inline ops chat-message (same pattern as
+            // pb_glass_op), so build errors stay grouped with their build.
+            const opsMsgId = currentOpsMsgIdRef.current;
+            if (opsMsgId == null) {
+              const newId = nextId();
+              currentOpsMsgIdRef.current = newId;
+              setChatHistory((prev) => [...prev, {
+                id: newId, role: "ops", content: "", glassOps: [errEntry],
+              }]);
+            } else {
+              setChatHistory((prev) => prev.map((m) => {
+                if (m.id !== opsMsgId || m.role !== "ops") return m;
+                return { ...m, glassOps: [...(m.glassOps ?? []), errEntry] };
+              }));
+            }
             setChatHistory((prev) => [...prev, {
               id: nextId(), role: "agent", content: `⚠️ ${msg}`,
             }]);
@@ -1388,9 +1421,8 @@ export function AIAgentPanel({
       {/* Chat Tab */}
       {activeTab === "chat" && (
         <div style={{ flex: 1, overflowY: "auto", padding: "12px 12px 0", display: "flex", flexDirection: "column", gap: 8, minHeight: 0 }}>
-          {/* v1.7: plan now lives inline in chatHistory as a "plan" message
-              card so each new build's plan appears under that user request. */}
-          <OpsConsole ops={glassOps} />
+          {/* v1.7: plan + ops both live inline in chatHistory as message
+              cards so each build's progress appears under its request. */}
           {chatHistory.length === 0 && (
             <div style={{ color: "#a0aec0", fontSize: 13, textAlign: "center", paddingTop: 24 }}>
               輸入訊息開始對話
@@ -1408,6 +1440,10 @@ export function AIAgentPanel({
               {msg.role === "plan" && msg.planItems ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
                   <PlanRenderer items={msg.planItems} />
+                </div>
+              ) : msg.role === "ops" && msg.glassOps ? (
+                <div style={{ width: "100%", maxWidth: "100%" }}>
+                  <OpsConsole ops={msg.glassOps} />
                 </div>
               ) : msg.role === "pb_proposal" && msg.pbProposal ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>

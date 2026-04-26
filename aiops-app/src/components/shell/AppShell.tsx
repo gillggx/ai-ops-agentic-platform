@@ -22,7 +22,7 @@ const LiteCanvasOverlay = dynamic(
   () => import("@/components/copilot/LiteCanvasOverlay"),
   { ssr: false },
 );
-type RunPhase = "idle" | "running" | "done" | "error";
+type RunPhase = "idle" | "building" | "build_failed" | "running" | "done" | "error";
 
 interface GlassEvent {
   kind: "start" | "op" | "chat" | "error" | "done" | "user";
@@ -376,6 +376,7 @@ function Shell({ children }: { children: React.ReactNode }) {
                   // Open the Lite Canvas overlay and reset prior state so the
                   // build paints from a clean canvas + Results tab is empty.
                   resetOverlayState();
+                  setRunPhase("building");
                   setGlassOverlay({
                     sessionId: ev.session_id,
                     goal: ev.goal,
@@ -398,8 +399,14 @@ function Shell({ children }: { children: React.ReactNode }) {
                     summary: ev.summary,
                     pipeline_json: ev.pipeline_json,
                   });
-                  // Mark the overlay idle; user can keep it open to inspect or
-                  // ESC/× to close. Auto-run + result panel handle the rest.
+                  // Build done. If the agent gave up (MAX_TURNS, etc.), mark
+                  // the phase build_failed so the overlay flips to Results
+                  // and shows a takeover card. Otherwise stay in "building"
+                  // until pb_run_start flips us to "running".
+                  if (ev.status && ev.status !== "finished" && ev.status !== "success") {
+                    setRunPhase("build_failed");
+                    setRunError(ev.summary ?? `建構未完成（status=${ev.status}）`);
+                  }
                   setGlassOverlay((prev) => prev ? { ...prev, active: false } : prev);
                 }}
                 // Plan items are owned by AIAgentPanel; relay to overlay so the

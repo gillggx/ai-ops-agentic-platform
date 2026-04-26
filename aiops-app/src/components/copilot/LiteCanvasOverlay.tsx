@@ -58,7 +58,14 @@ export interface GlassEvent {
   pipeline_json?: unknown;
 }
 
-export type RunPhase = "idle" | "running" | "done" | "error";
+// idle         — overlay not in use
+// building     — Glass Box agent is drawing onto the canvas
+// build_failed — build hit MAX_TURNS or otherwise stopped without a usable
+//                pipeline (no auto-run will fire)
+// running      — build done, auto-run in progress
+// done         — auto-run completed successfully
+// error        — auto-run completed with an error
+export type RunPhase = "idle" | "building" | "build_failed" | "running" | "done" | "error";
 
 interface Props {
   sessionId: string;
@@ -143,10 +150,25 @@ function Inner({
   // Drain glass events into the canvas.
   useEffect(() => {
     if (!catalog.length) return;
+    // Stream was reset (parent called resetGlassStream on new build) — start
+    // over, otherwise processedCountRef points past the new events forever.
+    if (events.length < processedCountRef.current) {
+      processedCountRef.current = 0;
+    }
     const fresh = events.slice(processedCountRef.current);
     if (fresh.length === 0) return;
     for (const e of fresh) {
-      if (e.kind === "op" && e.op) {
+      if (e.kind === "start") {
+        // New build session — clear the canvas so nodes from a previous
+        // build don't leak in alongside the new ones.
+        actions.init({
+          pipeline: {
+            version: "1.0",
+            name: e.goal || "Lite Canvas Session",
+            nodes: [], edges: [], metadata: {},
+          },
+        });
+      } else if (e.kind === "op" && e.op) {
         applyGlassOp(e.op, e.args ?? {}, e.result ?? {}, actions, catalog);
       } else if (e.kind === "done") {
         const cur = stateRef.current.pipeline;
@@ -161,9 +183,10 @@ function Inner({
     processedCountRef.current = events.length;
   }, [events, catalog, actions]);
 
-  // Auto-switch to Results tab on first run-phase transition into done/error.
+  // Auto-switch to Results tab on first transition into a terminal phase.
+  // build_failed counts because the user needs to see the failure summary.
   useEffect(() => {
-    if (runPhase === "done" || runPhase === "error") {
+    if (runPhase === "done" || runPhase === "error" || runPhase === "build_failed") {
       setResultsBadge("new");
       if (!userPickedTabRef.current) {
         setActiveTab("results");
@@ -205,7 +228,11 @@ function Inner({
   };
 
   const pill = pillFor(runPhase, durationMs);
-  const resultsTabDisabled = runPhase === "idle" || runPhase === "running";
+  // Results tab only available once there's something to show — auto-run
+  // result, an explicit error, or a build that gave up part-way.
+  const resultsTabDisabled = !(
+    runPhase === "done" || runPhase === "error" || runPhase === "build_failed"
+  );
 
   return (
     <div
@@ -249,13 +276,15 @@ function Inner({
               blockCatalog={catalog}
               onAutoLayout={onAutoLayout}
               narration={
-                runPhase === "running" && active
+                runPhase === "running"
                   ? "⏱ 執行中…"
                   : runPhase === "done"
                   ? "✓ Pipeline 已完成 — 可切到「結果」tab 看圖表"
                   : runPhase === "error"
                   ? "✕ 執行失敗 — 切到「結果」tab 看錯誤詳情"
-                  : active
+                  : runPhase === "build_failed"
+                  ? "✕ 建構未完成 — 切到「結果」tab 看為什麼"
+                  : runPhase === "building"
                   ? goal ?? "Agent 正在繪製 pipeline…"
                   : "等待輸入…"
               }
@@ -269,7 +298,12 @@ function Inner({
               display: activeTab === "results" ? "block" : "none",
             }}
           >
-            {runPhase === "error" && runError ? (
+            {runPhase === "build_failed" ? (
+              <FailureView
+                message={runError ?? "Agent 沒能完成 pipeline 建構（可能達到最大步數或缺資料）。可在 Pipeline Builder 自己接手。"}
+                onOpenInBuilder={onOpenInBuilder}
+              />
+            ) : runPhase === "error" && runError ? (
               <FailureView
                 message={runError}
                 onOpenInBuilder={onOpenInBuilder}
@@ -543,7 +577,11 @@ function TakeoverFooter({ onOpenInBuilder }: { onOpenInBuilder: () => void }) {
 function pillFor(phase: RunPhase, durationMs: number | null | undefined) {
   switch (phase) {
     case "idle":
+      return { text: "尚未開始", bg: "#F9FAFB", color: "#6B7280", border: "#E5E7EB" };
+    case "building":
       return { text: "⏱ 建構中…", bg: "#EFF6FF", color: "#1D4ED8", border: "#BFDBFE" };
+    case "build_failed":
+      return { text: "✕ 建構未完成", bg: "#FEF2F2", color: "#B91C1C", border: "#FECACA" };
     case "running":
       return { text: "⏱ 執行中…", bg: "#EFF6FF", color: "#1D4ED8", border: "#BFDBFE" };
     case "done": {
@@ -551,7 +589,7 @@ function pillFor(phase: RunPhase, durationMs: number | null | undefined) {
       return { text: `✓ 完成${sec}`, bg: "#ECFDF5", color: "#047857", border: "#A7F3D0" };
     }
     case "error":
-      return { text: "✕ 失敗", bg: "#FEF2F2", color: "#B91C1C", border: "#FECACA" };
+      return { text: "✕ 執行失敗", bg: "#FEF2F2", color: "#B91C1C", border: "#FECACA" };
   }
 }
 
