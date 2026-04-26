@@ -8,21 +8,21 @@ import { useSession } from "next-auth/react";
 // Resizable panel via native CSS resize
 import { Topbar } from "@/components/layout/Topbar";
 import { AIAgentPanel } from "@/components/copilot/AIAgentPanel";
-import PipelineResultsPanel from "@/components/pipeline-builder/PipelineResultsPanel";
 import { AnalysisPanel } from "@/components/layout/AnalysisPanel";
 import { DataExplorerPanel } from "@/components/layout/DataExplorerPanel";
 import { AppProvider, useAppContext } from "@/context/AppContext";
 import type { DataExplorerState } from "@/context/AppContext";
 import type { AIOpsReportContract } from "aiops-contract";
 
-// Live Glass Box overlay — wraps the real Pipeline Builder canvas
-// (BuilderProvider + DagCanvas) so the user watches the agent draw onto
-// the same canvas they'd hand-edit. Mounted as an absolute layer over
-// sidebar+main, leaves the right AI Agent rail uncovered.
-const LiveCanvasOverlay = dynamic(
-  () => import("@/components/copilot/LiveCanvasOverlay"),
+// v1.6 Lite Canvas overlay — wraps BuilderProvider + DagCanvas (read-only)
+// with two tabs (Canvas / 結果). Pop-up over sidebar+main, leaves the right
+// AI Agent rail uncovered. Replaces the old LiveCanvasOverlay (full
+// BuilderLayout) and the floating PipelineResultsPanel for chat-driven runs.
+const LiteCanvasOverlay = dynamic(
+  () => import("@/components/copilot/LiteCanvasOverlay"),
   { ssr: false },
 );
+type RunPhase = "idle" | "running" | "done" | "error";
 
 interface GlassEvent {
   kind: "start" | "op" | "chat" | "error" | "done" | "user";
@@ -228,12 +228,14 @@ function Shell({ children }: { children: React.ReactNode }) {
   // v1.4 Plan Panel — relayed from AIAgentPanel so LiveCanvasOverlay
   // can render the same checklist (overlay covers the AIAgentPanel).
   const [overlayPlanItems, setOverlayPlanItems] = useState<import("@/components/copilot/PlanRenderer").PlanItem[]>([]);
-  // Final auto-run result lands here so the floating PipelineResultsPanel
-  // can render the same alert+evidence+charts layout as a manual Run Full.
+  // Auto-run lifecycle for the Lite Canvas overlay's Results tab.
   const [pipelineResult, setPipelineResult] = useState<{
     summary: import("@/lib/pipeline-builder/types").PipelineResultSummary;
     nodeResults: Record<string, import("@/lib/pipeline-builder/types").NodeResult>;
   } | null>(null);
+  const [runPhase, setRunPhase] = useState<RunPhase>("idle");
+  const [runError, setRunError] = useState<string | null>(null);
+  const [durationMs, setDurationMs] = useState<number | null>(null);
 
   const pushGlassEvent = (e: GlassEvent) => {
     glassEventsRef.current = [...glassEventsRef.current, e];
@@ -243,6 +245,14 @@ function Shell({ children }: { children: React.ReactNode }) {
   const resetGlassStream = () => {
     glassEventsRef.current = [];
     setGlassEvents([]);
+  };
+
+  const resetOverlayState = () => {
+    resetGlassStream();
+    setPipelineResult(null);
+    setRunPhase("idle");
+    setRunError(null);
+    setDurationMs(null);
   };
 
   function handleContract(c: AIOpsReportContract) {
@@ -314,23 +324,25 @@ function Shell({ children }: { children: React.ReactNode }) {
             </span>
           </div>
 
-          {/* Live Glass Box overlay — auto-opens on pb_glass_start. Reuses the
-              real BuilderProvider + DagCanvas; sits as an absolute layer over
-              sidebar+main+toggle (not over the right AI Agent rail). */}
+          {/* Lite Canvas overlay — auto-opens on pb_glass_start. Hosts a
+              read-only DagCanvas + a "結果" tab that shows the auto-run
+              ResultsBody. Sits as an absolute layer over sidebar+main, not
+              over the right AI Agent rail. */}
           {glassOverlay && (
-            <LiveCanvasOverlay
+            <LiteCanvasOverlay
               sessionId={glassOverlay.sessionId}
               goal={glassOverlay.goal}
               active={glassOverlay.active}
               events={glassEvents}
               planItems={overlayPlanItems}
+              runPhase={runPhase}
+              runError={runError}
+              durationMs={durationMs}
+              summary={pipelineResult?.summary ?? null}
+              nodeResults={pipelineResult?.nodeResults ?? {}}
               onClose={() => {
                 setGlassOverlay(null);
-                resetGlassStream();
-              }}
-              onSendMessage={(text) => {
-                setTriggerMessage(text);
-                setGlassOverlay((prev) => prev ? { ...prev, active: true } : null);
+                resetOverlayState();
               }}
             />
           )}
@@ -361,11 +373,9 @@ function Shell({ children }: { children: React.ReactNode }) {
                 // its sub-agent's operations here; AppShell mounts the live
                 // canvas overlay so the user watches node-by-node build.
                 onGlassStart={(ev) => {
-                  // Open the live overlay (real DagCanvas via BuilderProvider)
-                  // and reset prior state so the user sees the new build draw
-                  // from a clean canvas.
-                  resetGlassStream();
-                  setPipelineResult(null);
+                  // Open the Lite Canvas overlay and reset prior state so the
+                  // build paints from a clean canvas + Results tab is empty.
+                  resetOverlayState();
                   setGlassOverlay({
                     sessionId: ev.session_id,
                     goal: ev.goal,
@@ -395,10 +405,21 @@ function Shell({ children }: { children: React.ReactNode }) {
                 // Plan items are owned by AIAgentPanel; relay to overlay so the
                 // live canvas can show the same checklist if it wants to.
                 onPlanItemsChange={setOverlayPlanItems}
-                // Auto-run result hands data to the floating PipelineResultsPanel,
-                // same component the manual Run Full uses.
                 onPipelineResult={(summary, nodeResults) => {
                   setPipelineResult({ summary, nodeResults });
+                }}
+                onAutoRunStart={() => {
+                  setRunPhase("running");
+                  setRunError(null);
+                  setDurationMs(null);
+                }}
+                onAutoRunDone={(ms) => {
+                  setRunPhase("done");
+                  setDurationMs(ms ?? null);
+                }}
+                onAutoRunError={(msg) => {
+                  setRunPhase("error");
+                  setRunError(msg);
                 }}
               />
             </div>
@@ -406,17 +427,9 @@ function Shell({ children }: { children: React.ReactNode }) {
         )}
       </div>
 
-      {/* Phase 5-UX-6: Live Glass Box canvas overlay. v1.4: no longer auto-opens
-          for chat-driven builds — already mounted inside the relative wrapper
-          above so it covers sidebar+main but leaves the AI Agent rail visible. */}
-
-      {/* Floating result panel — same component the manual Run Full uses. */}
-      <PipelineResultsPanel
-        open={pipelineResult !== null}
-        onClose={() => setPipelineResult(null)}
-        summary={pipelineResult?.summary ?? null}
-        nodeResults={pipelineResult?.nodeResults ?? {}}
-      />
+      {/* v1.6: chat-driven results live inside LiteCanvasOverlay's "結果" tab.
+          Manual Run Full inside BuilderLayout still uses its own
+          PipelineResultsPanel — that mount lives there, not here. */}
     </div>
   );
 }

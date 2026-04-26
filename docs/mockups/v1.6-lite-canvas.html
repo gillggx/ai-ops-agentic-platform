@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<title>AIOps v1.6 — Lite Canvas Overlay</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, "Helvetica Neue", "PingFang TC", sans-serif;
+    background: #eef1f5; color: #1f2937; padding: 24px;
+  }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  h2.frame-title {
+    margin: 32px 0 12px; font-size: 16px; color: #111827;
+    border-left: 4px solid #2563eb; padding-left: 10px;
+  }
+  .legend {
+    background: #fff7ed; border: 1px solid #fed7aa; padding: 10px 14px;
+    border-radius: 8px; font-size: 13px; color: #9a3412; margin-bottom: 16px;
+    line-height: 1.55;
+  }
+  .legend b { color: #7c2d12; }
+
+  /* ── App shell ───────────────────────────────────────────── */
+  .app {
+    background: #fff; border: 1px solid #d1d5db; border-radius: 12px;
+    height: 720px; overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0,0,0,.06);
+    display: grid; grid-template-rows: 48px 1fr;
+  }
+  .topbar {
+    background: #fff; border-bottom: 1px solid #e5e7eb;
+    padding: 10px 16px; display: flex; align-items: center; gap: 12px;
+    font-weight: 600; font-size: 15px;
+  }
+  .row { display: flex; height: 100%; min-height: 0; }
+  .sidebar {
+    width: 56px; flex-shrink: 0;
+    background: #f9fafb; border-right: 1px solid #e5e7eb;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 12px 0; gap: 14px; font-size: 18px; color: #6b7280;
+  }
+  .sidebar .item { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px; }
+  .sidebar .item.active { background: #dbeafe; color: #1d4ed8; }
+
+  /* The "main + overlay container" — relative so the lite-canvas
+     overlay is absolute-positioned within it (covers sidebar+main but
+     NOT the right rail).                                            */
+  .main-wrap { flex: 1; position: relative; min-width: 0; display: flex; }
+  .main {
+    flex: 1; padding: 18px; color: #94a3b8; overflow-y: auto;
+    background: #f3f4f6;
+  }
+  .main .placeholder-card {
+    background: #fff; border: 1px dashed #d1d5db; border-radius: 8px;
+    padding: 40px; text-align: center; font-size: 13px;
+  }
+
+  .copilot-toggle {
+    width: 28px; flex-shrink: 0; background: #f7f8fc;
+    border-left: 1px solid #e2e8f0;
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 6px; font-size: 11px; color: #a0aec0;
+    writing-mode: vertical-rl; font-weight: 600; letter-spacing: 1px;
+  }
+
+  .rail {
+    width: 360px; flex-shrink: 0; background: #fff;
+    border-left: 1px solid #e5e7eb; display: flex; flex-direction: column;
+  }
+  .rail-head {
+    padding: 12px 16px; font-weight: 600; font-size: 14px;
+    border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between;
+  }
+  .rail-tabs {
+    display: flex; gap: 4px; padding: 6px 12px; border-bottom: 1px solid #f1f5f9;
+    font-size: 12px;
+  }
+  .rail-tabs .tab { padding: 6px 10px; border-radius: 6px; color: #6b7280; }
+  .rail-tabs .tab.active { background: #eff6ff; color: #1d4ed8; font-weight: 600; }
+  .rail-body { flex: 1; overflow-y: auto; padding: 12px; font-size: 12px; }
+  .stages { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .stage-dot {
+    font-size: 11px; padding: 4px 8px; border-radius: 12px;
+    background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0;
+  }
+  .stage-dot.run { background: #dbeafe; color: #1d4ed8; border-color: #bfdbfe; }
+  .stage-dot.done { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+  .plan {
+    background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;
+    padding: 12px; margin-bottom: 12px;
+  }
+  .plan-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 8px; font-size: 13px; font-weight: 600; color: #334155;
+  }
+  .plan-progress {
+    font-size: 11px; color: #64748b; background: #fff;
+    padding: 2px 8px; border-radius: 10px; border: 1px solid #e2e8f0;
+  }
+  .plan ul { list-style: none; padding: 0; margin: 0; }
+  .plan li {
+    display: flex; align-items: center; gap: 8px; padding: 4px 0;
+    font-size: 13px; color: #475569;
+  }
+  .plan li .glyph { width: 16px; text-align: center; font-weight: 700; }
+  .plan li.done { color: #94a3b8; text-decoration: line-through; }
+  .plan li.done .glyph { color: #10b981; }
+  .plan li.in-progress { color: #1d4ed8; font-weight: 600; }
+  .plan li.in-progress .glyph { color: #2563eb; animation: pulse 1.4s ease-in-out infinite; }
+  .plan li.pending .glyph { color: #cbd5e1; }
+  @keyframes pulse {
+    0%, 100% { opacity: .55; transform: scale(.97); }
+    50% { opacity: 1; transform: scale(1); }
+  }
+  .ops {
+    background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;
+    margin-bottom: 12px; font-size: 12px; padding: 8px 12px;
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: default; color: #475569;
+  }
+  .msg { background: #f1f5f9; border-radius: 12px; padding: 8px 12px; font-size: 13px; margin-bottom: 8px; line-height: 1.5; }
+  .msg.user { background: #2563eb; color: #fff; max-width: 80%; margin-left: auto; }
+  .msg.agent { background: #f1f5f9; color: #1f2937; max-width: 90%; }
+  .composer { border-top: 1px solid #f1f5f9; padding: 10px 12px; display: flex; gap: 8px; }
+  .composer textarea { flex: 1; border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 8px; font-size: 12px; resize: none; height: 50px; color: #6b7280; }
+  .composer button { background: #2563eb; color: #fff; border: 0; border-radius: 6px; padding: 0 14px; font-size: 13px; }
+
+  /* ── Lite Canvas Overlay ─────────────────────────────────── */
+  .lite-overlay {
+    position: absolute; inset: 0; z-index: 50;
+    background: rgba(15, 23, 42, 0.30);
+    display: flex; flex-direction: column;
+  }
+  .lite-card {
+    margin: 12px; flex: 1; background: #fff; border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(15,23,42,0.18);
+    display: flex; flex-direction: column; overflow: hidden;
+    min-height: 0;
+  }
+  .lite-header {
+    padding: 8px 12px; border-bottom: 1px solid #e5e7eb;
+    background: #f8fafc; display: flex; align-items: center; gap: 12px;
+  }
+  .lite-header .title {
+    font-size: 13px; font-weight: 600; color: #111827;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .lite-pill {
+    font-size: 11px; padding: 2px 8px; border-radius: 12px;
+    border: 1px solid;
+  }
+  .lite-pill.building { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+  .lite-pill.done { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
+  .lite-pill.error { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+
+  .lite-tabs { display: flex; gap: 4px; flex: 1; }
+  .lite-tabs .tab {
+    padding: 5px 14px; border-radius: 6px; font-size: 12px; font-weight: 600;
+    color: #64748b; border: 1px solid transparent; cursor: pointer;
+    background: transparent;
+  }
+  .lite-tabs .tab.active {
+    color: #1d4ed8; background: #eff6ff; border-color: #bfdbfe;
+  }
+  .lite-tabs .tab .badge {
+    margin-left: 6px; background: #fee2e2; color: #b91c1c;
+    border-radius: 10px; padding: 0 6px; font-size: 10px;
+  }
+
+  .lite-actions { display: flex; gap: 8px; }
+  .lite-btn {
+    background: #fff; color: #374151; border: 1px solid #d1d5db;
+    padding: 4px 10px; font-size: 11px; border-radius: 5px; cursor: pointer;
+  }
+  .lite-btn.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+  .lite-btn.danger { background: #fff; color: #b91c1c; border-color: #fecaca; }
+
+  .lite-body {
+    flex: 1; min-height: 0; position: relative; overflow: hidden;
+    background: #fafafa;
+  }
+
+  /* Canvas tab — DAG only, no toolbar / library / inspector */
+  .lite-canvas {
+    width: 100%; height: 100%;
+    background-image: radial-gradient(#e5e7eb 1px, transparent 1px);
+    background-size: 16px 16px;
+    background-color: #fafafa;
+    position: relative;
+  }
+  .lite-canvas-controls {
+    position: absolute; bottom: 14px; left: 14px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .lite-canvas-controls button {
+    width: 30px; height: 30px; background: #fff; border: 1px solid #e5e7eb;
+    border-radius: 5px; font-size: 14px; color: #475569; cursor: pointer;
+  }
+  .lite-canvas-minimap {
+    position: absolute; bottom: 14px; right: 14px;
+    width: 140px; height: 88px; background: #fff;
+    border: 1px solid #e5e7eb; border-radius: 4px;
+  }
+  .lite-canvas-autolayout {
+    position: absolute; top: 14px; right: 14px;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 5px;
+    padding: 5px 12px; font-size: 11px; color: #475569; cursor: pointer;
+  }
+
+  .lite-flow {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center; gap: 14px;
+  }
+  .node {
+    background: #fff; border: 2px solid #cbd5e1; border-radius: 8px;
+    min-width: 140px; padding: 10px 12px; box-shadow: 0 2px 4px rgba(0,0,0,.04);
+    font-size: 11px; color: #1f2937;
+  }
+  .node .cat { font-size: 9px; font-weight: 700; letter-spacing: .05em; color: #64748b; text-transform: uppercase; margin-bottom: 4px; }
+  .node .name { font-weight: 700; font-size: 12px; }
+  .node .params { font-size: 10px; color: #64748b; font-family: ui-monospace,monospace; margin-top: 2px; }
+  .node.source { border-color: #60a5fa; }
+  .node.source .cat { color: #2563eb; }
+  .node.output { border-color: #f87171; }
+  .node.output .cat { color: #dc2626; }
+  .node.process { border-color: #a78bfa; }
+  .node.process .cat { color: #7c3aed; }
+  .node.drawing { border-style: dashed; animation: pulse 1.4s ease-in-out infinite; }
+  .arrow { color: #94a3b8; font-size: 18px; }
+
+  /* Results tab content */
+  .results-body { padding: 18px; overflow-y: auto; height: 100%; background: #f8fafc; }
+  .alert-banner {
+    padding: 12px 14px; border-radius: 8px;
+    background: #c6f6d5; color: #276749; font-size: 12px;
+    display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
+  }
+  .alert-banner.fail { background: #fed7d7; color: #9b2c2c; }
+  .alert-banner h3 { margin: 0; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; }
+  .alert-banner p { margin: 2px 0 0; font-size: 11px; opacity: .8; }
+  .chart-card {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px;
+    margin-bottom: 12px; overflow: hidden;
+  }
+  .chart-card .ch-head {
+    padding: 8px 12px; border-bottom: 1px solid #e5e7eb;
+    background: #f7f8fc; font-size: 12px; color: #475569;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .chart-tag {
+    background: #eef2ff; color: #3730a3; padding: 1px 7px;
+    border-radius: 10px; font-size: 10px; font-weight: 700;
+  }
+  .chart-card .ch-body { padding: 24px; text-align: center; color: #94a3b8; font-size: 13px; }
+
+  /* Footer takeover card on results tab */
+  .takeover {
+    background: #fff7ed; border: 1px solid #fdba74; border-radius: 8px;
+    padding: 12px 14px; font-size: 13px; color: #9a3412;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  }
+  .takeover a { color: #c2410c; font-weight: 600; text-decoration: none; }
+
+  table.diff {
+    border-collapse: collapse; margin-top: 18px; font-size: 13px; width: 100%;
+    background: #fff; border-radius: 8px; overflow: hidden;
+  }
+  table.diff th, table.diff td { border: 1px solid #e5e7eb; padding: 8px 12px; text-align: left; vertical-align: top; }
+  table.diff th { background: #f9fafb; font-weight: 600; }
+  table.diff td.before { background: #fef2f2; color: #991b1b; }
+  table.diff td.after  { background: #ecfdf5; color: #065f46; }
+</style>
+</head>
+<body>
+
+<h1>🎨 AIOps v1.6 — Lite Canvas Overlay</h1>
+<div class="legend">
+  <b>定義：</b> Lite Canvas = 「乾淨 DAG view」 — 沒有 Pipeline Builder 的 toolbar / block library / Parameters inspector，只有畫布、minimap、Auto Layout。
+  <br/><b>定位：</b> Pop-up overlay 蓋住左側 sidebar + 中央 main，不蓋右側 AI Agent rail（chat 持續可用）。
+  <br/><b>切換規則：</b>
+  <ul style="margin: 4px 0 0 18px; padding: 0;">
+    <li>建構中 → Canvas tab；結果 tab disabled（灰）</li>
+    <li>build done + auto-run 跑完（成功或失敗）→ <b>自動切到「📊 結果」</b>tab</li>
+    <li>使用者手動點回 Canvas tab 都隨時可以；結果 tab 一旦有資料，badge 提示常駐</li>
+  </ul>
+  <b>離開：</b> 「× 關閉」 收起 overlay；「🛠 開啟編輯」帶 sessionStorage 跳到真正的 Pipeline Builder。
+</div>
+
+<!-- ────────────────────────────────────────────────────────────── -->
+<h2 class="frame-title">Frame A — Building（Canvas tab，逐步加 node）</h2>
+<div class="app">
+  <div class="topbar">AIOps <span style="margin-left:auto; font-size:13px; color:#6b7280;">gill · IT_ADMIN</span></div>
+  <div class="row">
+    <div class="main-wrap">
+      <div class="sidebar">
+        <div class="item">▶</div><div class="item">🔔</div><div class="item">📊</div>
+        <div class="item active">🧩</div><div class="item">⚙</div><div class="item">🧠</div>
+      </div>
+      <div class="main">
+        <div class="placeholder-card">（原本 dashboard 內容；被 overlay 蓋住）</div>
+      </div>
+
+      <!-- Lite Canvas Overlay -->
+      <div class="lite-overlay">
+        <div class="lite-card">
+          <div class="lite-header">
+            <div class="title">📐 Lite Canvas</div>
+            <span class="lite-pill building">⏱ 建構中… 2 / 3 nodes</span>
+            <div class="lite-tabs">
+              <button class="tab active">📐 Canvas</button>
+              <button class="tab">📊 結果</button>
+            </div>
+            <div class="lite-actions">
+              <button class="lite-btn">🛠 開啟編輯</button>
+              <button class="lite-btn danger">× 關閉</button>
+            </div>
+          </div>
+          <div class="lite-body">
+            <div class="lite-canvas">
+              <div class="lite-canvas-autolayout">⊞ Auto Layout</div>
+              <div class="lite-flow">
+                <div class="node source">
+                  <div class="cat">🗄 Source</div>
+                  <div class="name">STEP_001 SPC 歷史資料</div>
+                  <div class="params">step="STEP_001", limit=100</div>
+                </div>
+                <div class="arrow">→</div>
+                <div class="node output drawing">
+                  <div class="cat">📈 Output</div>
+                  <div class="name">xbar 趨勢控制圖</div>
+                  <div class="params">chart_type="line"</div>
+                </div>
+                <div class="arrow" style="opacity:.4;">→</div>
+                <div class="node" style="opacity:.45; border-style:dotted;">
+                  <div class="cat">？</div>
+                  <div class="name">下一個 node…</div>
+                </div>
+              </div>
+              <div class="lite-canvas-controls">
+                <button>+</button><button>−</button><button>⛶</button>
+              </div>
+              <div class="lite-canvas-minimap"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="copilot-toggle">▶ AI Agent</div>
+    <div class="rail">
+      <div class="rail-head">AI Agent <span style="font-size:11px; color:#9ca3af; font-weight:400;">12.4k / 1.3k tok</span></div>
+      <div class="rail-tabs">
+        <div class="tab active">💬 對話</div>
+        <div class="tab">⚙ Console</div>
+      </div>
+      <div class="rail-body">
+        <div class="stages">
+          <div class="stage-dot done">✓ Context</div>
+          <div class="stage-dot done">✓ Planning</div>
+          <div class="stage-dot run">🔄 Build</div>
+          <div class="stage-dot">Execute</div>
+        </div>
+        <div class="plan">
+          <div class="plan-head"><span>📋 計畫</span><span class="plan-progress">2 / 5 完成</span></div>
+          <ul>
+            <li class="done"><span class="glyph">✓</span> 確認需求</li>
+            <li class="done"><span class="glyph">✓</span> 取得製程資料</li>
+            <li class="in-progress"><span class="glyph">◐</span> 建構 chart node</li>
+            <li class="pending"><span class="glyph">○</span> 執行</li>
+            <li class="pending"><span class="glyph">○</span> 分析</li>
+          </ul>
+        </div>
+        <div class="ops">▶ 建構過程（3 ops） <span style="color:#94a3b8;">展開細節</span></div>
+        <div class="msg user">幫我看 STEP_001 xbar 趨勢</div>
+        <div class="msg agent">📋 已規劃 5 步，正在建構…</div>
+      </div>
+      <div class="composer">
+        <textarea>追問或補充…</textarea>
+        <button disabled style="opacity:.5;">送出</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────── -->
+<h2 class="frame-title">Frame B — Done（Canvas tab，pipeline 完成；結果 tab 出現 NEW badge）</h2>
+<div class="app">
+  <div class="topbar">AIOps <span style="margin-left:auto; font-size:13px; color:#6b7280;">gill · IT_ADMIN</span></div>
+  <div class="row">
+    <div class="main-wrap">
+      <div class="sidebar">
+        <div class="item">▶</div><div class="item">🔔</div><div class="item">📊</div>
+        <div class="item active">🧩</div><div class="item">⚙</div><div class="item">🧠</div>
+      </div>
+      <div class="main">
+        <div class="placeholder-card">（原本 dashboard 內容；被 overlay 蓋住）</div>
+      </div>
+
+      <div class="lite-overlay">
+        <div class="lite-card">
+          <div class="lite-header">
+            <div class="title">📐 Lite Canvas</div>
+            <span class="lite-pill done">✓ 完成（4.2s）</span>
+            <div class="lite-tabs">
+              <button class="tab active">📐 Canvas</button>
+              <button class="tab">📊 結果<span class="badge">NEW</span></button>
+            </div>
+            <div class="lite-actions">
+              <button class="lite-btn">🛠 開啟編輯</button>
+              <button class="lite-btn danger">× 關閉</button>
+            </div>
+          </div>
+          <div class="lite-body">
+            <div class="lite-canvas">
+              <div class="lite-canvas-autolayout">⊞ Auto Layout</div>
+              <div class="lite-flow">
+                <div class="node source">
+                  <div class="cat">🗄 Source</div>
+                  <div class="name">STEP_001 SPC 歷史資料</div>
+                  <div class="params">step="STEP_001"</div>
+                </div>
+                <div class="arrow">→</div>
+                <div class="node output">
+                  <div class="cat">📈 Output</div>
+                  <div class="name">xbar 趨勢控制圖</div>
+                  <div class="params">chart_type="line"</div>
+                </div>
+              </div>
+              <div class="lite-canvas-controls">
+                <button>+</button><button>−</button><button>⛶</button>
+              </div>
+              <div class="lite-canvas-minimap"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="copilot-toggle">▶ AI Agent</div>
+    <div class="rail">
+      <div class="rail-head">AI Agent <span style="font-size:11px; color:#9ca3af; font-weight:400;">18.2k / 2.1k tok</span></div>
+      <div class="rail-tabs"><div class="tab active">💬 對話</div><div class="tab">⚙ Console</div></div>
+      <div class="rail-body">
+        <div class="stages">
+          <div class="stage-dot done">✓ Context</div>
+          <div class="stage-dot done">✓ Planning</div>
+          <div class="stage-dot done">✓ Build</div>
+          <div class="stage-dot done">✓ Execute</div>
+        </div>
+        <div class="plan">
+          <div class="plan-head"><span>📋 計畫</span><span class="plan-progress">5 / 5 完成 ✨</span></div>
+          <ul>
+            <li class="done"><span class="glyph">✓</span> 確認需求</li>
+            <li class="done"><span class="glyph">✓</span> 取得製程資料</li>
+            <li class="done"><span class="glyph">✓</span> 建構 chart node</li>
+            <li class="done"><span class="glyph">✓</span> 執行</li>
+            <li class="done"><span class="glyph">✓</span> 分析</li>
+          </ul>
+        </div>
+        <div class="ops">▶ 建構過程（5 ops） <span style="color:#94a3b8;">展開細節</span></div>
+        <div class="msg user">幫我看 STEP_001 xbar 趨勢</div>
+        <div class="msg agent">✓ 已完成，圖表已生成 — 點上方「📊 結果」tab 看詳情。</div>
+      </div>
+      <div class="composer"><textarea>追問…</textarea><button>送出</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────── -->
+<h2 class="frame-title">Frame C — 結果 tab（切到 results，顯示 alert / charts）</h2>
+<div class="app">
+  <div class="topbar">AIOps <span style="margin-left:auto; font-size:13px; color:#6b7280;">gill · IT_ADMIN</span></div>
+  <div class="row">
+    <div class="main-wrap">
+      <div class="sidebar">
+        <div class="item">▶</div><div class="item">🔔</div><div class="item">📊</div>
+        <div class="item active">🧩</div><div class="item">⚙</div><div class="item">🧠</div>
+      </div>
+      <div class="main">
+        <div class="placeholder-card">（原本 dashboard 內容；被 overlay 蓋住）</div>
+      </div>
+
+      <div class="lite-overlay">
+        <div class="lite-card">
+          <div class="lite-header">
+            <div class="title">📐 Lite Canvas</div>
+            <span class="lite-pill done">✓ 完成（4.2s）</span>
+            <div class="lite-tabs">
+              <button class="tab">📐 Canvas</button>
+              <button class="tab active">📊 結果</button>
+            </div>
+            <div class="lite-actions">
+              <button class="lite-btn">🛠 開啟編輯</button>
+              <button class="lite-btn danger">× 關閉</button>
+            </div>
+          </div>
+          <div class="lite-body">
+            <div class="results-body">
+              <div class="alert-banner">
+                <span style="font-size: 22px;">✓</span>
+                <div>
+                  <h3>NOT TRIGGERED</h3>
+                  <p>100 evidence rows from STEP_001 — 無 OOC，全 PASS。</p>
+                </div>
+              </div>
+              <div class="chart-card">
+                <div class="ch-head">
+                  <span class="chart-tag">#1</span>
+                  <span>Xbar Trend — STEP_001</span>
+                </div>
+                <div class="ch-body">📈 (mock chart) — eventTime × spc_xbar_chart_value，UCL/LCL 紅虛線</div>
+              </div>
+              <div class="takeover">
+                <div>📝 <b>需要調整這條 pipeline？</b></div>
+                <a href="#">在 Pipeline Builder 開啟編輯 →</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="copilot-toggle">▶ AI Agent</div>
+    <div class="rail">
+      <div class="rail-head">AI Agent</div>
+      <div class="rail-tabs"><div class="tab active">💬 對話</div><div class="tab">⚙ Console</div></div>
+      <div class="rail-body">
+        <div class="stages">
+          <div class="stage-dot done">✓ Context</div>
+          <div class="stage-dot done">✓ Planning</div>
+          <div class="stage-dot done">✓ Build</div>
+          <div class="stage-dot done">✓ Execute</div>
+        </div>
+        <div class="plan">
+          <div class="plan-head"><span>📋 計畫</span><span class="plan-progress">5 / 5 ✨</span></div>
+          <ul>
+            <li class="done"><span class="glyph">✓</span> 全部完成</li>
+          </ul>
+        </div>
+        <div class="ops">▶ 建構過程（5 ops） <span style="color:#94a3b8;">展開細節</span></div>
+        <div class="msg user">幫我看 STEP_001 xbar 趨勢</div>
+        <div class="msg agent">✓ 已完成，全 PASS 無 OOC。</div>
+      </div>
+      <div class="composer"><textarea>追問…</textarea><button>送出</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────── -->
+<h2 class="frame-title">Frame D — 失敗路徑（auto-run 跑失敗 → 自動切到結果 tab，紅色錯誤 + 兩條退路）</h2>
+<div class="app">
+  <div class="topbar">AIOps <span style="margin-left:auto; font-size:13px; color:#6b7280;">gill · IT_ADMIN</span></div>
+  <div class="row">
+    <div class="main-wrap">
+      <div class="sidebar">
+        <div class="item">▶</div><div class="item">🔔</div><div class="item">📊</div>
+        <div class="item active">🧩</div><div class="item">⚙</div><div class="item">🧠</div>
+      </div>
+      <div class="main">
+        <div class="placeholder-card">（原本 dashboard 內容；被 overlay 蓋住）</div>
+      </div>
+
+      <div class="lite-overlay">
+        <div class="lite-card">
+          <div class="lite-header">
+            <div class="title">📐 Lite Canvas</div>
+            <span class="lite-pill error">✕ 執行失敗</span>
+            <div class="lite-tabs">
+              <button class="tab">📐 Canvas</button>
+              <button class="tab active">📊 結果</button>
+            </div>
+            <div class="lite-actions">
+              <button class="lite-btn">🛠 開啟編輯</button>
+              <button class="lite-btn danger">× 關閉</button>
+            </div>
+          </div>
+          <div class="lite-body">
+            <div class="results-body">
+              <div class="alert-banner fail">
+                <span style="font-size: 22px;">🚨</span>
+                <div>
+                  <h3>EXECUTION FAILED</h3>
+                  <p>chart node 找不到 column 'xbar_value' — 資料的欄位實際是 <b>spc_xbar_chart_value</b>。</p>
+                </div>
+              </div>
+
+              <!-- Agent 提議自動修補（如果有 propose_pipeline_patch 從 chat 來） -->
+              <div style="background:#fff; border:1px solid #fed7aa; border-radius:8px; padding:14px; margin-bottom:12px;">
+                <div style="font-weight:600; color:#9a3412; font-size:13px;">💡 Agent 修補建議</div>
+                <div style="font-size:12px; color:#9a3412; margin-top:4px; line-height:1.5;">
+                  把 chart node 的 <code>y_key</code> 從 <code>xbar_value</code> 改成 <code>spc_xbar_chart_value</code>，並重新執行。
+                </div>
+                <div style="display:flex; gap:8px; margin-top:10px;">
+                  <button class="lite-btn primary">套用並重跑</button>
+                  <button class="lite-btn">先看細節</button>
+                </div>
+              </div>
+
+              <!-- 自己接手的退路 -->
+              <div class="takeover" style="background:#fef2f2; border-color:#fecaca; color:#991b1b;">
+                <div>🛠 <b>不想讓 Agent 自動修？</b></div>
+                <a href="#" style="color:#b91c1c;">在 Pipeline Builder 自己改 →</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="copilot-toggle">▶ AI Agent</div>
+    <div class="rail">
+      <div class="rail-head">AI Agent</div>
+      <div class="rail-tabs"><div class="tab active">💬 對話</div><div class="tab">⚙ Console</div></div>
+      <div class="rail-body">
+        <div class="stages">
+          <div class="stage-dot done">✓ Context</div>
+          <div class="stage-dot done">✓ Planning</div>
+          <div class="stage-dot done">✓ Build</div>
+          <div class="stage-dot" style="background:#fee2e2; color:#991b1b; border-color:#fecaca;">✕ Execute</div>
+        </div>
+        <div class="plan">
+          <div class="plan-head">
+            <span>📋 計畫</span>
+            <span class="plan-progress" style="background:#fef2f2; color:#991b1b; border-color:#fecaca;">3 / 5 · 卡住</span>
+          </div>
+          <ul>
+            <li class="done"><span class="glyph">✓</span> 確認需求</li>
+            <li class="done"><span class="glyph">✓</span> 取得製程資料</li>
+            <li class="done"><span class="glyph">✓</span> 建構 chart node</li>
+            <li class="in-progress" style="color:#991b1b;">
+              <span class="glyph" style="color:#dc2626; animation:none;">✕</span>
+              執行
+            </li>
+            <li class="pending"><span class="glyph">○</span> 分析</li>
+          </ul>
+        </div>
+        <div class="ops">▶ 建構過程（4 ops） <span style="color:#94a3b8;">展開細節</span></div>
+        <div class="msg user">幫我看 STEP_001 xbar 趨勢</div>
+        <div class="msg agent">⚠ 執行失敗（column 不存在）。已在「📊 結果」tab 提出修補建議。</div>
+      </div>
+      <div class="composer"><textarea>追問或拒絕修補…</textarea><button>送出</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────── -->
+<h2 class="frame-title">📋 v1.5 vs v1.6 差異</h2>
+<table class="diff">
+  <tr>
+    <th style="width:18%;">Aspect</th>
+    <th>v1.5 reverted（剛才這版）</th>
+    <th>v1.6 Lite Canvas（這份 mockup）</th>
+  </tr>
+  <tr>
+    <td>建構期間</td>
+    <td class="before">LiveCanvasOverlay — 完整 BuilderLayout（block library / inspector / toolbar 全在）</td>
+    <td class="after">Lite Canvas — 只有 DAG + minimap + Auto Layout，乾淨</td>
+  </tr>
+  <tr>
+    <td>結果展示</td>
+    <td class="before">浮窗 PipelineResultsPanel（與 Canvas overlay 並存，視覺重）</td>
+    <td class="after">同 overlay 第二個 tab；切過去看，不再多開浮窗</td>
+  </tr>
+  <tr>
+    <td>「進真正 builder」</td>
+    <td class="before">chat 內 markdown link，要捲到底找</td>
+    <td class="after">overlay header 永遠有「🛠 開啟編輯」按鈕</td>
+  </tr>
+  <tr>
+    <td>右側 AI Agent</td>
+    <td class="before">同樣 plan + ops 摺疊（不變）</td>
+    <td class="after">完全不變</td>
+  </tr>
+  <tr>
+    <td>離開動作</td>
+    <td class="before">ESC 或 ×；result panel 各自關</td>
+    <td class="after">overlay 一個 ×（兩個 tab 一起關）</td>
+  </tr>
+</table>
+
+</body>
+</html>
