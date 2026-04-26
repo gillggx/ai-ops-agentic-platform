@@ -102,99 +102,114 @@ export default function ResultsBody({ summary, nodeResults }: Props) {
       {(summary.data_views ?? []).length > 0 && (
         <div style={{ marginTop: 14 }}>
           <div style={sectionHeader}>資料視圖 ({(summary.data_views ?? []).length})</div>
-          {(summary.data_views ?? []).map((v) => {
-            const dvNode = nodeResults[v.node_id];
-            const preview = dvNode?.preview as
-              | { columns?: string[]; rows?: Array<Record<string, unknown>> }
-              | undefined;
-            const cols = preview?.columns ?? [];
-            const rows = preview?.rows ?? [];
-            return (
+          {(summary.data_views ?? []).map((v, i) => (
+            <div
+              key={v.node_id}
+              data-testid={`result-data-view-${v.node_id}`}
+              style={{
+                border: "1px solid #E2E8F0",
+                borderRadius: 6,
+                marginBottom: 10,
+                background: "#fff",
+                overflow: "hidden",
+              }}
+            >
               <div
-                key={v.node_id}
-                data-testid={`result-data-view-${v.node_id}`}
                 style={{
-                  border: "1px solid #E2E8F0",
-                  borderRadius: 6,
-                  marginBottom: 10,
-                  background: "#fff",
-                  overflow: "hidden",
+                  padding: "6px 12px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "#4A5568",
+                  borderBottom: "1px solid #E2E8F0",
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "center",
+                  background: "#F8FAFC",
                 }}
               >
-                <div
+                <span
                   style={{
-                    padding: "6px 12px",
-                    fontSize: 12,
-                    fontWeight: 600,
-                    color: "#4A5568",
-                    borderBottom: "1px solid #E2E8F0",
-                    display: "flex",
-                    gap: 8,
-                    alignItems: "center",
-                    background: "#F8FAFC",
+                    background: "#EFF6FF",
+                    color: "#1E40AF",
+                    padding: "1px 7px",
+                    borderRadius: 10,
+                    fontSize: 10,
+                    fontWeight: 700,
                   }}
                 >
-                  <span style={{ flex: 1 }}>{v.title ?? v.node_id}</span>
-                  <span style={{ color: "#94A3B8", fontWeight: 500 }}>{rows.length} rows</span>
+                  View #{v.sequence ?? i + 1}
+                </span>
+                <span style={{ flex: 1 }}>{v.title}</span>
+                <span style={{ fontSize: 10, color: "#94A3B8", fontFamily: "ui-monospace,monospace" }}>
+                  {v.rows.length} / {v.total_rows} rows
+                </span>
+              </div>
+              {v.description && (
+                <div style={{ padding: "6px 12px", fontSize: 11, color: "#64748B", borderBottom: "1px solid #F1F5F9" }}>
+                  {v.description}
                 </div>
-                <div style={{ maxHeight: 220, overflow: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
-                    <thead>
-                      <tr>
-                        {cols.slice(0, 10).map((c) => (
-                          <th
+              )}
+              <div style={{ maxHeight: 280, overflow: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                  <thead>
+                    <tr style={{ background: "#F7F8FC" }}>
+                      {v.columns.map((c) => (
+                        <th
+                          key={c}
+                          style={{
+                            textAlign: "left",
+                            padding: "5px 10px",
+                            borderBottom: "1px solid #E2E8F0",
+                            position: "sticky",
+                            top: 0,
+                            background: "#F7F8FC",
+                            color: "#4A5568",
+                            fontWeight: 600,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {c}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {v.rows.map((row, ri) => (
+                      <tr key={ri}>
+                        {v.columns.map((c) => (
+                          <td
                             key={c}
                             style={{
-                              textAlign: "left",
-                              padding: "5px 10px",
-                              borderBottom: "1px solid #E2E8F0",
-                              position: "sticky",
-                              top: 0,
-                              background: "#F7F8FC",
-                              color: "#4A5568",
-                              fontWeight: 600,
+                              padding: "4px 10px",
+                              borderBottom: "1px solid #F1F5F9",
+                              color: "#2D3748",
+                              maxWidth: 200,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
                               whiteSpace: "nowrap",
+                              fontFamily: typeof row[c] === "number" ? "ui-monospace,monospace" : undefined,
                             }}
                           >
-                            {c}
-                          </th>
+                            {formatCell(row[c])}
+                          </td>
                         ))}
                       </tr>
-                    </thead>
-                    <tbody>
-                      {rows.slice(0, 40).map((row, ri) => (
-                        <tr key={ri}>
-                          {cols.slice(0, 10).map((c) => (
-                            <td
-                              key={c}
-                              style={{
-                                padding: "4px 10px",
-                                borderBottom: "1px solid #F1F5F9",
-                                color: "#2D3748",
-                                maxWidth: 180,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {formatCell(row[c])}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                      {rows.length === 0 && (
-                        <tr>
-                          <td colSpan={cols.length || 1} style={{ padding: 14, textAlign: "center", color: "#94A3B8" }}>
-                            無資料
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                    ))}
+                    {v.rows.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={v.columns.length || 1}
+                          style={{ padding: 12, textAlign: "center", color: "#94A3B8", fontSize: 11 }}
+                        >
+                          無資料
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
       )}
 

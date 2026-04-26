@@ -292,13 +292,13 @@ function Shell({ children }: { children: React.ReactNode }) {
         <ContextualSidebar />
         <main style={{ flex: 1, overflowY: "auto", minWidth: 0 }}>
           {(() => {
-            // v1.5 — when chat agent has activity (build in progress, finished,
-            // or has accumulated a pipeline) AND we're on dashboard root, swap
-            // children for the inline Pipeline Workspace. The user can dismiss
-            // via the workspace's "清除" button to revert to the real dashboard.
+            // v1.5 — whenever the chat agent has pipeline activity (building,
+            // done, or accumulated state) swap children for the inline
+            // Pipeline Workspace. Skip on Pipeline Builder routes so the
+            // builder canvas itself is never hidden. Click 清除 to revert.
+            const onBuilderRoute = pathname.startsWith("/admin/pipeline-builder");
             const showWorkspace =
-              (canvasStatus !== "idle" || pipelineJson !== null) &&
-              (pathname === "/" || pathname === "/dashboard");
+              !onBuilderRoute && (canvasStatus !== "idle" || pipelineJson !== null);
             if (dataExplorer) {
               return (
                 <DataExplorerPanel
