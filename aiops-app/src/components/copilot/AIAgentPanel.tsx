@@ -124,6 +124,11 @@ interface Props {
   // v1.4: parent (AppShell) relays plan items to LiveCanvasOverlay so the
   // checklist stays visible while the overlay covers AIAgentPanel.
   onPlanItemsChange?: (items: PlanItem[]) => void;
+  // v1.4: chat-driven build_pipeline_live finished + auto-run completed —
+  // hand the result to AppShell which mounts the same PipelineResultsPanel
+  // as a manual Run Full would, instead of building a synthetic contract.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onPipelineResult?: (summary: any, nodeResults: Record<string, any>) => void;
   // Phase 5-UX-6: fired whenever the user sends a message — host uses this to
   // mirror the message into the live canvas overlay's chat panel.
   onUserMessageSent?: (text: string) => void;
@@ -506,6 +511,7 @@ export function AIAgentPanel({
   onGlassError,
   onGlassDone,
   onPlanItemsChange,
+  onPipelineResult,
   onUserMessageSent,
   initialPrompt,
 }: Props) {
@@ -525,6 +531,10 @@ export function AIAgentPanel({
   useEffect(() => { onPlanItemsChange?.(planItems); }, [planItems, onPlanItemsChange]);
   // v1.4 Auto-Run — tracks pb_run_* lifecycle for progress display.
   const [autoRun, setAutoRun] = useState<{ status: "idle" | "running" | "done" | "error"; nodeCount?: number; startedAt?: number; durationMs?: number; error?: string }>({ status: "idle" });
+  // v1.4 — captured from pb_glass_done so the "Open in Pipeline Builder"
+  // link can stash the just-built pipeline into sessionStorage for the
+  // /new route to pick up.
+  const lastBuiltPipelineRef = useRef<unknown | null>(null);
   const [hitl, setHitl]             = useState<HitlRequest | null>(null);
   const [tokenIn, setTokenIn]       = useState(0);
   const [tokenOut, setTokenOut]     = useState(0);
@@ -885,6 +895,8 @@ export function AIAgentPanel({
           }
           case "pb_glass_done": {
             const summary = ev.summary as string | undefined;
+            // v1.4 — stash for the edit-link card later.
+            if (ev.pipeline_json) lastBuiltPipelineRef.current = ev.pipeline_json;
             onGlassDone?.({
               status: (ev.status as string) ?? "finished",
               summary,
@@ -1112,27 +1124,30 @@ export function AIAgentPanel({
               durationMs: ev.duration_ms as number | undefined,
             }));
             addLog(makeLog("✅", `Auto-run 完成（${ev.duration_ms ?? "?"} ms）`, "info"));
-            // Build a synthetic contract so the AnalysisPanel renders the
-            // resulting charts/tables. This mirrors how synthesis builds
-            // contracts; we extract chart_intents from node_results.
+            // v1.4 — hand result to AppShell which renders PipelineResultsPanel
+            // (same component as manual Run Full, identical layout).
             const nodeResults = (ev.node_results as Record<string, unknown>) ?? {};
-            const chartCards: ChartIntent[] = [];
-            for (const r of Object.values(nodeResults)) {
-              const cardLike = (r as Record<string, unknown>)?.preview as Record<string, unknown> | undefined;
-              if (cardLike?.charts && Array.isArray(cardLike.charts)) {
-                chartCards.push(...(cardLike.charts as ChartIntent[]));
-              }
+            const summary = ev.result_summary as Record<string, unknown> | undefined;
+            if (summary) {
+              onPipelineResult?.(summary, nodeResults as Record<string, unknown>);
             }
-            if (chartCards.length > 0) {
-              const contract: AIOpsReportContract = {
-                $schema: "aiops-report/v1",
-                summary: `Auto-run 完成：${chartCards.length} 個圖表`,
-                evidence_chain: [],
-                visualization: [],
-                suggested_actions: [],
-                charts: chartCards,
-              } as AIOpsReportContract;
-              onContract?.(contract);
+            // v1.4 — append "edit in Pipeline Builder" link card to chat
+            // so the user can take over if they want to tweak the pipeline.
+            // /admin/pipeline-builder/new reads pipeline_json from sessionStorage,
+            // so we stash it here under the well-known key.
+            if (lastBuiltPipelineRef.current && typeof window !== "undefined") {
+              try {
+                window.sessionStorage.setItem(
+                  "pb:ephemeral_pipeline",
+                  JSON.stringify(lastBuiltPipelineRef.current),
+                );
+                setChatHistory((prev) => [...prev, {
+                  id: nextId(), role: "agent",
+                  content: "📝 **需要調整這條 pipeline？** [在 Pipeline Builder 開啟編輯 →](/admin/pipeline-builder/new)",
+                }]);
+              } catch {
+                /* sessionStorage unavailable — link card skipped */
+              }
             }
             break;
           }
@@ -1140,6 +1155,22 @@ export function AIAgentPanel({
             const errMsg = (ev.error_message as string) ?? "execution failed";
             setAutoRun({ status: "error", error: errMsg });
             addLog(makeLog("❌", `Auto-run 失敗: ${errMsg}`, "error"));
+            // v1.4 — surface the takeover option so user can fix it themselves
+            // without waiting for agent's propose_pipeline_patch retry.
+            if (lastBuiltPipelineRef.current && typeof window !== "undefined") {
+              try {
+                window.sessionStorage.setItem(
+                  "pb:ephemeral_pipeline",
+                  JSON.stringify(lastBuiltPipelineRef.current),
+                );
+                setChatHistory((prev) => [...prev, {
+                  id: nextId(), role: "agent",
+                  content: "🛠 **不想讓 Agent 自動修？** [在 Pipeline Builder 自己改 →](/admin/pipeline-builder/new)",
+                }]);
+              } catch {
+                /* sessionStorage unavailable — link card skipped */
+              }
+            }
             break;
           }
 

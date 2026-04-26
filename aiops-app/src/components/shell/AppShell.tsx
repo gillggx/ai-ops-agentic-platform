@@ -8,6 +8,7 @@ import { useSession } from "next-auth/react";
 // Resizable panel via native CSS resize
 import { Topbar } from "@/components/layout/Topbar";
 import { AIAgentPanel } from "@/components/copilot/AIAgentPanel";
+import PipelineResultsPanel from "@/components/pipeline-builder/PipelineResultsPanel";
 import { AnalysisPanel } from "@/components/layout/AnalysisPanel";
 import { DataExplorerPanel } from "@/components/layout/DataExplorerPanel";
 import { AppProvider, useAppContext } from "@/context/AppContext";
@@ -224,6 +225,13 @@ function Shell({ children }: { children: React.ReactNode }) {
   // v1.4 Plan Panel — relayed from AIAgentPanel so LiveCanvasOverlay
   // can render the same checklist (overlay covers the AIAgentPanel).
   const [overlayPlanItems, setOverlayPlanItems] = useState<import("@/components/copilot/PlanRenderer").PlanItem[]>([]);
+  // v1.4 — when chat agent triggers build_pipeline_live + auto-run, the
+  // result lands here and PipelineResultsPanel renders in the center.
+  // Same component the manual Run Full uses, so the layout is identical.
+  const [pipelineResult, setPipelineResult] = useState<{
+    summary: import("@/lib/pipeline-builder/types").PipelineResultSummary;
+    nodeResults: Record<string, import("@/lib/pipeline-builder/types").NodeResult>;
+  } | null>(null);
 
   const pushGlassEvent = (e: GlassEvent) => {
     glassEventsRef.current = [...glassEventsRef.current, e];
@@ -317,17 +325,11 @@ function Shell({ children }: { children: React.ReactNode }) {
                 // its sub-agent's operations here; AppShell mounts the live
                 // canvas overlay so the user watches node-by-node build.
                 onGlassStart={(ev) => {
-                  // Keep any pending user bubbles already pushed; only drop
-                  // prior ops/starts from earlier rounds when a fresh build
-                  // starts from cold. For follow-up turns (overlay already
-                  // open), just append a new "start" event.
-                  if (!glassOverlay) {
-                    // Cold start — preserve latest user message if any
-                    const lastUser = [...glassEventsRef.current].reverse().find((e) => e.kind === "user");
-                    glassEventsRef.current = lastUser ? [lastUser] : [];
-                    setGlassEvents(glassEventsRef.current);
-                  }
-                  setGlassOverlay({ sessionId: ev.session_id, goal: ev.goal, active: true });
+                  // v1.4: don't pop a full-screen LiveCanvasOverlay any more.
+                  // Glass Box ops show inline in the chat panel (AIAgentPanel
+                  // appends them as op bubbles); the user stays on dashboard.
+                  // Track ev for any consumer that still wants it, but no
+                  // setGlassOverlay() call.
                   pushGlassEvent({ kind: "start", sessionId: ev.session_id, goal: ev.goal });
                 }}
                 onGlassOp={(ev) => pushGlassEvent({
@@ -339,25 +341,30 @@ function Shell({ children }: { children: React.ReactNode }) {
                 onGlassChat={(ev) => pushGlassEvent({ kind: "chat", content: ev.content })}
                 onGlassError={(ev) => pushGlassEvent({ kind: "error", message: ev.message })}
                 onGlassDone={(ev) => {
+                  // v1.4: no overlay to deactivate; just append done event.
                   pushGlassEvent({
                     kind: "done",
                     status: ev.status,
                     summary: ev.summary,
                     pipeline_json: ev.pipeline_json,
                   });
-                  setGlassOverlay((prev) => prev ? { ...prev, active: false } : null);
                 }}
                 // v1.4 — relay plan items so LiveCanvasOverlay can show the
                 // same checklist while it covers AIAgentPanel.
                 onPlanItemsChange={setOverlayPlanItems}
+                // v1.4 — auto-run result lands here; AppShell mounts
+                // PipelineResultsPanel (same one as manual Run Full).
+                onPipelineResult={(summary, nodeResults) => setPipelineResult({ summary, nodeResults })}
               />
             </div>
           </aside>
         )}
       </div>
 
-      {/* Phase 5-UX-6: Live Glass Box canvas overlay. Auto-opens when chat
-          agent starts build_pipeline_live. Operations stream in real-time. */}
+      {/* Phase 5-UX-6: Live Glass Box canvas overlay. v1.4: no longer auto-opens
+          for chat-driven builds — Glass Box ops render inline in AIAgentPanel.
+          Kept here behind glassOverlay state for any future opt-in flow (e.g. a
+          "expand to live canvas" button). */}
       {glassOverlay && (
         <LiveCanvasOverlay
           sessionId={glassOverlay.sessionId}
@@ -367,15 +374,19 @@ function Shell({ children }: { children: React.ReactNode }) {
           planItems={overlayPlanItems}
           onClose={() => setGlassOverlay(null)}
           onSendMessage={(text) => {
-            // Fire the main chat agent via AIAgentPanel's triggerMessage.
-            // AIAgentPanel's onUserMessageSent callback will push the user
-            // bubble into glassEvents (single source — avoid duplicate push).
             setTriggerMessage(text);
-            // Mark overlay active again since a new build round is coming
             setGlassOverlay((prev) => prev ? { ...prev, active: true } : null);
           }}
         />
       )}
+
+      {/* v1.4 — chat-driven pipeline result lands here, same panel as Run Full */}
+      <PipelineResultsPanel
+        open={pipelineResult !== null}
+        onClose={() => setPipelineResult(null)}
+        summary={pipelineResult?.summary ?? null}
+        nodeResults={pipelineResult?.nodeResults ?? {}}
+      />
     </div>
   );
 }
