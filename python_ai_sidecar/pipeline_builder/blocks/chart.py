@@ -238,8 +238,14 @@ def _build_spc_or_multi_line(
     center_col: Optional[str],
     highlight_col: Optional[str],
     sigma_zones: Optional[list[int]] = None,
+    color_col: Optional[str] = None,
 ) -> dict[str, Any]:
-    """ChartDSL spec for SPC / multi-y / dual-axis modes."""
+    """ChartDSL spec for SPC / multi-y / dual-axis modes.
+
+    If `color_col` is provided, emit a `series_field` so the renderer
+    splits the data into one colored line per group value while keeping
+    the SPC overlay (UCL/LCL/Center) as global rules.
+    """
     rules: list[dict[str, Any]] = []
     ucl_val = _scalar_mean(df, ucl_col)
     lcl_val = _scalar_mean(df, lcl_col)
@@ -279,9 +285,9 @@ def _build_spc_or_multi_line(
                     "color": color,
                 })
 
-    # Trim payload to x + y + y_secondary + highlight
+    # Trim payload to x + y + y_secondary + highlight + color (series_field)
     keep: list[str] = []
-    for col in (x, *y_list, *y_secondary, highlight_col):
+    for col in (x, *y_list, *y_secondary, highlight_col, color_col):
         if col and col not in keep:
             keep.append(col)
     spec: dict[str, Any] = {
@@ -297,6 +303,9 @@ def _build_spc_or_multi_line(
         spec["y_secondary"] = y_secondary
     if highlight_col is not None:
         spec["highlight"] = {"field": highlight_col, "eq": True}
+    if color_col is not None:
+        # Renderer splits data into one trace per distinct value of this field.
+        spec["series_field"] = color_col
     return spec
 
 
@@ -412,12 +421,23 @@ class ChartBlockExecutor(BlockExecutor):
                 code="INVALID_PARAM", message="sigma_zones must be a list of integers (e.g. [1, 2])"
             )
 
+        # `color` (series_field) is also valid in SPC mode — splits one
+        # line into N colored lines (per tool / lot / recipe). Validate
+        # the column up front so invalid values fail fast in either mode.
+        color_col_pre = params.get("color") or None
+        if color_col_pre is not None and color_col_pre not in df.columns:
+            raise BlockExecutionError(
+                code="COLUMN_NOT_FOUND",
+                message=f"Color column '{color_col_pre}' not in data",
+            )
+
         if spc_mode or multi_y or sigma_zones:
             return {
                 "chart_spec": _build_spc_or_multi_line(
                     df, chart_type, x, y_list, y_secondary, title,
                     ucl_col, lcl_col, center_col, highlight_col,
                     sigma_zones=sigma_zones,
+                    color_col=color_col_pre,
                 )
             }
 

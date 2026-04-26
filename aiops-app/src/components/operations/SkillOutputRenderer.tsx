@@ -71,6 +71,10 @@ export type ChartDSL = {
     color?: string;
   }[];
   highlight?: { field: string; eq: unknown } | null;
+  /** v1.7: when present, the renderer groups `data` by this field and
+   *  emits one colored trace per distinct value (e.g. one line per toolID).
+   *  SPC overlays (UCL/LCL/Center) stay as global rules. */
+  series_field?: string;
 };
 
 // ── Plotly dynamic import (no SSR) ────────────────────────────────────────────
@@ -432,40 +436,68 @@ export function ChartDSLRenderer({ chart }: { chart: ChartDSL }): React.ReactEle
 function renderLineBarScatter(chart: ChartDSL): React.ReactElement {
   const primaryY = chart.y ?? [];
   const secondaryY = chart.y_secondary ?? [];
-  const xs = chart.data.map((r, i) => r[chart.x] ?? i);
   const plotType = chart.type === "bar" ? "bar" : "scatter";
   const mode = chart.type === "scatter" ? "markers" : "lines+markers";
+  const seriesField = chart.series_field;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const traces: any[] = [];
 
-  primaryY.forEach((yKey, idx) => {
-    const color = SERIES_COLORS[idx % SERIES_COLORS.length];
-    traces.push({
-      x: xs,
-      y: chart.data.map(r => r[yKey]),
-      name: yKey,
-      type: plotType,
-      mode: plotType === "bar" ? undefined : mode,
-      line: chart.type === "line" ? { color, width: 2 } : undefined,
-      marker: { color, size: 5 },
+  if (seriesField && primaryY.length === 1) {
+    // v1.7: group rows by series_field → one colored trace per group
+    // (e.g. one line per toolID). SPC rules overlay globally.
+    const yKey = primaryY[0];
+    const groups = new Map<string, Record<string, unknown>[]>();
+    for (const row of chart.data) {
+      const key = String(row[seriesField] ?? "default");
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(row);
+    }
+    let gi = 0;
+    groups.forEach((rows, name) => {
+      const color = SERIES_COLORS[gi % SERIES_COLORS.length];
+      traces.push({
+        x: rows.map(r => r[chart.x]),
+        y: rows.map(r => r[yKey]),
+        name,
+        type: plotType,
+        mode: plotType === "bar" ? undefined : mode,
+        line: chart.type === "line" ? { color, width: 2 } : undefined,
+        marker: { color, size: 5 },
+      });
+      gi += 1;
     });
-  });
-  secondaryY.forEach((yKey, idx) => {
-    const color = SERIES_COLORS[(primaryY.length + idx) % SERIES_COLORS.length];
-    traces.push({
-      x: xs,
-      y: chart.data.map(r => r[yKey]),
-      name: `${yKey} (r)`,
-      type: plotType,
-      mode: plotType === "bar" ? undefined : mode,
-      yaxis: "y2",
-      line: chart.type === "line" ? { color, width: 2, dash: "dot" } : undefined,
-      marker: { color, size: 5 },
+  } else {
+    const xs = chart.data.map((r, i) => r[chart.x] ?? i);
+    primaryY.forEach((yKey, idx) => {
+      const color = SERIES_COLORS[idx % SERIES_COLORS.length];
+      traces.push({
+        x: xs,
+        y: chart.data.map(r => r[yKey]),
+        name: yKey,
+        type: plotType,
+        mode: plotType === "bar" ? undefined : mode,
+        line: chart.type === "line" ? { color, width: 2 } : undefined,
+        marker: { color, size: 5 },
+      });
     });
-  });
+    secondaryY.forEach((yKey, idx) => {
+      const color = SERIES_COLORS[(primaryY.length + idx) % SERIES_COLORS.length];
+      traces.push({
+        x: xs,
+        y: chart.data.map(r => r[yKey]),
+        name: `${yKey} (r)`,
+        type: plotType,
+        mode: plotType === "bar" ? undefined : mode,
+        yaxis: "y2",
+        line: chart.type === "line" ? { color, width: 2, dash: "dot" } : undefined,
+        marker: { color, size: 5 },
+      });
+    });
+  }
 
-  // Highlight (OOC)
+  // Highlight (OOC) — applies regardless of series_field; overlays red rings
+  // on rows where highlight.field === highlight.eq.
   if (chart.highlight?.field && primaryY.length > 0) {
     const hlField = chart.highlight.field;
     const hlEq = chart.highlight.eq;

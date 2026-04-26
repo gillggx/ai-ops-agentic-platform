@@ -135,14 +135,21 @@ Don't chain `alert → chart` or `alert → data_view`. Alert is terminal.
   ```
   block_process_history (step="STEP_001", time_range=..., NO tool_id)
     → block_filter (column="toolID", operator="in", value=["EQP-01","EQP-02","EQP-03","EQP-04","EQP-05"])
-    → block_chart  (chart_type="line", x="eventTime", y="spc_xbar_chart_value", color="toolID")
+    → block_chart  (chart_type="line", x="eventTime", y="spc_xbar_chart_value",
+                    color="toolID",
+                    ucl_column="spc_xbar_chart_ucl", lcl_column="spc_xbar_chart_lcl")
+    # If the data has an OOC bool column (e.g. from a logic node) you can also
+    # set highlight_column on top of that — it overlays red rings independent
+    # of the color grouping.
   ```
 
   Key insights:
   - `block_process_history` accepts step alone (no tool_id) → returns ALL tools at that step.
   - `block_filter` operator="in" takes a list of tool_ids in one node — no need for chained ORs / unions.
-  - `block_chart`'s `color="toolID"` parameter renders one colored line per tool on the same chart
-    (Vega-Lite series-by group). That IS the natural way to "overlay/compare 5 tools".
+  - `block_chart`'s `color` parameter works in **both** Classic mode AND SPC mode (with
+    UCL/LCL/Center). When you set `color="toolID"` together with `ucl_column`/`lcl_column`,
+    the renderer emits one colored line per toolID PLUS the global control limits. You get
+    series differentiation AND SPC overlay in one chart — no tradeoff.
   - True side-by-side panels (5 separate plots) are NOT supported by `block_chart` (no facet mode).
     If user explicitly asks for separate panels, explain the limit and offer the overlay version
     with `color=toolID`; only build 5 separate charts as a last resort.
