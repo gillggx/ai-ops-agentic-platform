@@ -243,6 +243,15 @@ async def _execute_build_pipeline_live(
                 payload["pipeline_json"] = (evt.data or {}).get("pipeline_json")
                 payload["summary"] = (evt.data or {}).get("summary")
                 last_status = payload["status"]
+            elif evt_type == "plan":
+                # v1.4 — forward Glass Box's checklist to outer chat stream as-is
+                payload["type"] = "plan"
+                payload["items"] = (evt.data or {}).get("items") or []
+            elif evt_type == "plan_update":
+                payload["type"] = "plan_update"
+                payload["id"] = (evt.data or {}).get("id")
+                payload["status"] = (evt.data or {}).get("status")
+                payload["note"] = (evt.data or {}).get("note")
             else:
                 continue  # skip suggestion_card + other unknown types
             if event_emit is not None:

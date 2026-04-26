@@ -706,16 +706,31 @@ export function AIAgentPanel({
           }
 
           case "plan": {
+            // v1.4 — checklist items from update_plan tool (Plan Panel renderer)
+            const items = ev.items as PlanItem[] | undefined;
+            if (Array.isArray(items)) {
+              setPlanItems(items.map((it) => ({ ...it })));
+              break;
+            }
+            // Legacy — free-text plan from LLM <plan>...</plan> reasoning
             const planText = (ev.text as string) ?? "";
             if (planText) {
               addLog(makeLog("📋", `Plan: ${planText.slice(0, 200)}`, "info"));
-              // Pipeline card
               setPipelineCards((prev) => [...prev.filter(c => c.stage !== 2), {
                 stage: 2, name: "Planning", icon: "🧠", status: "complete",
                 summary: planText.slice(0, 100),
                 detail: { plan: planText },
               }]);
             }
+            break;
+          }
+          case "plan_update": {
+            const id = ev.id as string;
+            const status = ev.status as PlanItem["status"];
+            const note = ev.note as string | undefined;
+            setPlanItems((prev) => prev.map((it) =>
+              it.id === id ? { ...it, status: status ?? it.status, note: note ?? it.note } : it,
+            ));
             break;
           }
 
@@ -936,10 +951,9 @@ export function AIAgentPanel({
             addLog(makeLog(icon, `pb node ${ev.node_id} ${ev.status} (${ev.rows ?? "—"} rows)`, "tool"));
             break;
           }
-          case "pb_run_start":
-          case "pb_run_done":
-            // quiet — covered by tool_start / tool_done already
-            break;
+            // pb_run_start / pb_run_done / pb_run_error are handled below
+            // (v1.4 Auto-Run section) — do NOT add a quiet stub here, JS
+            // switch only runs the first matching case.
 
           case "pipeline_stage": {
             // 9-Stage Pipeline: each stage gets its own console log + stage dot
@@ -1093,22 +1107,6 @@ export function AIAgentPanel({
           case "done":
             sessionIdRef.current = ev.session_id as string;
             break;
-
-          // ── v1.4 Plan Panel ─────────────────────────────────────
-          case "plan": {
-            const items = (ev.items as PlanItem[]) ?? [];
-            setPlanItems(items.map((it) => ({ ...it })));
-            break;
-          }
-          case "plan_update": {
-            const id = ev.id as string;
-            const status = ev.status as PlanItem["status"];
-            const note = ev.note as string | undefined;
-            setPlanItems((prev) => prev.map((it) =>
-              it.id === id ? { ...it, status: status ?? it.status, note: note ?? it.note } : it,
-            ));
-            break;
-          }
 
           // ── v1.4 Auto-Run after build_pipeline_live ─────────────
           case "pb_run_start": {
