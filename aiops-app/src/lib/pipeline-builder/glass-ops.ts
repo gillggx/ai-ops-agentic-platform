@@ -120,7 +120,7 @@ export function opDetail(op: string, args: Record<string, unknown>): string {
     const v = JSON.stringify(args.value);
     return `${args.node_id}.${args.key} = ${v && v.length > 40 ? v.slice(0, 40) + "…" : v}`;
   }
-  if (op === "rename_node") return `${args.node_id} → ${args.display_label}`;
+  if (op === "rename_node") return `${args.node_id} → ${args.label ?? args.display_label ?? "?"}`;
   return "";
 }
 
