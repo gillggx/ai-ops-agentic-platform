@@ -126,6 +126,29 @@ Don't chain `alert → chart` or `alert → data_view`. Alert is terminal.
   When you want to run the SAME analysis on 5 SPC chart types (e.g. regression vs APC for xbar/R/S/P/C),
   use `block_unpivot` to melt the wide table first (id_columns=[eventTime,toolID,...], value_columns=[spc_xbar_chart_value, spc_r_chart_value, ...], variable_name='chart_type'),
   then downstream blocks with `group_by=chart_type` will process all types in one node — no need to build 5 parallel branches.
+
+**Pattern D — overlay N tools / lots / recipes on one chart (CRITICAL — saves 6+ nodes):**
+  When the user asks "把 EQP-01~EQP-05 並排" / "比較這 5 台機台" / "看這幾個 lot 的趨勢",
+  do NOT build 5 separate `block_process_history` sources and chain `block_union` between them
+  — that's 9+ nodes and wastes turns. Use this 3-node pattern instead:
+
+  ```
+  block_process_history (step="STEP_001", time_range=..., NO tool_id)
+    → block_filter (column="toolID", operator="in", value=["EQP-01","EQP-02","EQP-03","EQP-04","EQP-05"])
+    → block_chart  (chart_type="line", x="eventTime", y="spc_xbar_chart_value", color="toolID")
+  ```
+
+  Key insights:
+  - `block_process_history` accepts step alone (no tool_id) → returns ALL tools at that step.
+  - `block_filter` operator="in" takes a list of tool_ids in one node — no need for chained ORs / unions.
+  - `block_chart`'s `color="toolID"` parameter renders one colored line per tool on the same chart
+    (Vega-Lite series-by group). That IS the natural way to "overlay/compare 5 tools".
+  - True side-by-side panels (5 separate plots) are NOT supported by `block_chart` (no facet mode).
+    If user explicitly asks for separate panels, explain the limit and offer the overlay version
+    with `color=toolID`; only build 5 separate charts as a last resort.
+
+  Same pattern applies to comparing N lots (`color="lotID"`), N recipes (`color="recipe_id"`),
+  N production batches, etc.
 """
 
 

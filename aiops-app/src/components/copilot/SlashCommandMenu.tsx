@@ -46,9 +46,9 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     desc: "三條線並列，看製程能力是否退化",
     tpl: "比較 [EQP-01] [STEP_001] 過去 7 天的 R、Cpk、Cpk_std 趨勢" },
   { cat: "spc", ico: "📦", key: "spc-multi-tool",
-    title: "多機台同站點 xbar 並排",
-    desc: "把同一站不同機台的 SPC 趨勢放一起比較",
-    tpl: "把 [EQP-01]~[EQP-05] 在 [STEP_001] 的 xbar 趨勢並排" },
+    title: "多機台同站點 xbar 疊圖比較",
+    desc: "同一張 chart 上以不同顏色顯示多台機台的 xbar 趨勢線（color=toolID）",
+    tpl: "比較 [EQP-01,EQP-02,EQP-03,EQP-04,EQP-05] 在 [STEP_001] 的 xbar 趨勢，畫成一張彩色 line chart（color=toolID）" },
 
   // APC
   { cat: "apc", ico: "📐", key: "apc-drift",
