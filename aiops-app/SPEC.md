@@ -1,7 +1,7 @@
 # aiops-app — Spec
 
 **Date:** 2026-04-26
-**HEAD:** 20d8127
+**HEAD:** 778df37+ (in flight)
 **Status:** Living Document（依 code 實況萃取）
 
 ---
@@ -206,6 +206,7 @@ const r = await fetch(`${FASTAPI_BASE_URL}/api/v1/...`, {
 - 後續每完成一階段呼叫 `update_plan(action="update", id, status="done")`
 - Frontend 收 `plan` / `plan_update` SSE event → in-place 更新 checklist
 - 狀態：pending ○ / in_progress ◐（脈動） / done ✓（劃線） / failed ✕
+- **Plan dedupe**：每輪 build 只應該有 1 張 plan card。AIAgentPanel 用 `currentPlanMsgIdRef` 追蹤當輪 plan 訊息 id，若 agent 違規再 `create` 一次（雖然 prompt 已禁止），就**就地替換 items**而非疊新卡。新 build 開始時 ref reset 為 null。
 
 **v1.4 Auto-Run banner：**
 - `pb_run_start` → 顯示「▶ Auto-Run 執行中（N nodes）」
@@ -213,6 +214,16 @@ const r = await fetch(`${FASTAPI_BASE_URL}/api/v1/...`, {
 - `pb_run_error` → 顯示紅 banner，LLM 自動跟進 `propose_pipeline_patch`
 
 **所有圖表只在中央 AnalysisPanel 渲染**，AI Agent panel 只顯示文字 + Plan + 動作按鈕。
+
+### 7.1 ChartDSL — multi-series overlay (`series_field`)
+
+[SkillOutputRenderer.tsx → renderLineBarScatter](aiops-app/src/components/operations/SkillOutputRenderer.tsx) 處理 ChartDSL spec。當 spec 帶 `series_field` 且 `primaryY.length === 1` 時：
+
+- 把 `data` rows 依 `series_field` 的值分組 → 每組一條 Plotly trace（自動套 SERIES_COLORS palette）
+- UCL / LCL / Center / sigma 線 / OOC highlight 仍以**全域 rules** 疊加（不是 per-group）
+- Legend 強制開啟（`showlegend = primaryY.length > 1 || secondaryY.length > 0 || Boolean(seriesField)`），讓 user 看得出哪條線是哪個 toolID / lotID
+
+→ 對應 sidecar 端 `block_chart` 在 SPC mode 同時 emit `series_field`，frontend 不需要為了多色 line 改寫渲染分支。
 
 ## 8. Pipeline Builder（Knowledge Studio 唯一入口）
 

@@ -1,9 +1,27 @@
 # AIOps Platform — Project Handoff Document
 
-**Version:** 3.0
-**Date:** 2026-04-13
+**Version:** 3.1
+**Date:** 2026-04-27
 **Author:** Gill (Tech Lead)
 **Audience:** Product Manager、DevOps Engineer
+
+---
+
+## 0. 更新紀錄
+
+### v3.1 — 2026-04-27
+
+Pipeline Builder Glass Box agent + multi-tool overlay 修正：
+
+- **block_chart 多機台 overlay**：SPC mode (UCL/LCL) 同時支援 `color="toolID"` 多系列 overlay。後端在 ChartDSL spec emit `series_field`，前端 [SkillOutputRenderer](aiops-app/src/components/operations/SkillOutputRenderer.tsx) 依該 field 分組畫一條 trace per group，UCL/LCL/Center/OOC highlight 仍以全域 rules 疊加。Legend 條件擴大涵蓋 `series_field` 案例（避免單一 y key 但多 trace 時 legend 不見）。
+- **Agent prompt Pattern D**：Glass Box prompt 加入「比較 N 機台/N lot/N recipe 的 trend」標準 3-node 模式（單一 source(step 篩選) + `block_filter operator='in'` + `block_chart color="toolID"`），取代以往 5+ source/union 9-node 結構，並加 anti-pattern 警告 `tool_id="EQP-01,EQP-02,..."` 不能用 comma string。
+- **block_process_history 單值 guard**：runtime 拒絕 `tool_id` / `lot_id` / `step` 收到 comma-separated string 或 list，回傳 `INVALID_PARAM` + hint 指向 `block_filter operator='in'`。原因：底層 ontology query 為 exact match，逗號字串 0 row → 下游在 empty df 上炸不直觀。Description 同步更正。
+- **Plan dedupe**：`update_plan(action="create")` 限每輪 build 1 次（prompt 強制；frontend AIAgentPanel 用 `currentPlanMsgIdRef` 就地替換 plan card），避免 agent 中途重新 create 疊兩張 plan。
+- **Deploy gotcha**：純 `npm run build` 不夠，必須 `cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public`，否則所有 `/_next/static/*` 404。永遠走 [deploy/update.sh](deploy/update.sh)。
+
+### v3.0 — 2026-04-13
+
+初版 handoff（Operations Center / Knowledge Studio / Admin 三視角；9-Stage Pipeline + Pipeline Builder + Auto-Patrol；單一 EC2 deploy）。
 
 ---
 

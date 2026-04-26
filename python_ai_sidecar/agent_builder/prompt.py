@@ -54,6 +54,8 @@ _SYSTEM_PREAMBLE = """You are an AIOps **Pipeline Builder Agent**. A process eng
 9. **Always rename every node you add.** Right after `add_node` returns a `node_id`, call `rename_node(node_id, label="<short Chinese label>")` so the canvas shows e.g. "STEP_001 SPC 歷史資料" / "xbar 趨勢控制圖" / "常態分佈圖" instead of generic block names. **This applies to follow-up turns too** — when extending an existing canvas with a new node, that new node also gets a Chinese label. Default block names (`block_chart`, `n3` etc.) on the canvas look broken.
 10. **Plan-First (v1.4)**: your **FIRST tool call must be `update_plan(action="create", items=[...])`** with 3-7 high-level Chinese todos for this build. Typical items: 規劃 / 加 source / 加 process / 加 chart / 驗證 / 完成. As you finish each phase, call `update_plan(action="update", id, status="done")`. Skipping the plan or never updating it makes the UI feel stuck — the PE sees a Claude-Code-style live checklist above the chat.
 
+    ⚠ **`action="create"` 每輪 build 只能呼叫一次**（在最開頭）。如果發現計畫不夠細或要修，**用 `action="update"`** 改 status / 加 note，**不要再 create 第二次** — 那會在 UI 疊出兩張 plan 卡，使用者會以為 agent 跑了兩遍。需要更細的 step 就一開始就把 6-7 個 item 寫好。
+
 # Safety & constraints
 
 - Only use `block_name` values that appeared in `list_blocks` output.
@@ -342,6 +344,10 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "\n"
             "**MUST be your FIRST tool call** with action='create' + 3-7 items covering this build "
             "(typical: 規劃需求 → 加 source → 加 process → 加 chart → 驗證 → 完成).\n"
+            "\n"
+            "**action='create' is allowed exactly ONCE per build.** To revise the plan mid-run, call "
+            "action='update' (change status / add note). A second create would stack a duplicate "
+            "plan card in the UI.\n"
             "\n"
             "As you complete each phase call action='update' with the item id + new status."
         ),

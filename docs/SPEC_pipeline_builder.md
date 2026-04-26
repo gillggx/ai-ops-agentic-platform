@@ -249,7 +249,7 @@ CREATE TABLE canvas_operations (
 #### 類別四：輸出（Outputs）— 2 個
 | ID | I/O | 說明 |
 |---|---|---|
-| `block_chart` | df → `chart_spec` | 雙 renderer：Vega-Lite（簡單圖）/ Plotly ChartDSL（SPC / 多 y / 雙軸 / boxplot / heatmap） |
+| `block_chart` | df → `chart_spec` | 雙 renderer：Vega-Lite（簡單圖）/ Plotly ChartDSL（SPC / 多 y / 雙軸 / boxplot / heatmap）。**SPC mode 同時支援 `color="<col>"` 多系列 overlay**（emit `series_field`，frontend 一條 trace per 分組值，UCL/LCL/Center 仍全域疊加） |
 | `block_alert` | `triggered`+`evidence` → `alert` (df) | 多 alert 允許（C8 於 β 撤銷） |
 
 **合計：2 + 11 + 8 + 2 = 23 個標準積木**
@@ -637,6 +637,7 @@ Canvas 上 Custom Block：
 | 4-B — Auto patrol → pipeline | ✅ 完成 | `auto_patrols.pipeline_id + input_binding` 欄位；`AutoPatrolService._execute_single_pipeline()` dual-routes 舊 skill vs 新 pipeline；`_resolve_input_binding` 解析 `$event.xxx` / `$context.xxx` / `$ENV.xxx` / literal；Alarm 從 `result_summary.triggered + evidence_node_id preview rows` 決策；舊 skill-based patrols 向下相容 |
 | **4-A/B/C UI surface** | ✅ 完成 | **Skills page** 加 🔄 Pipeline 按鈕（dry-run preview modal + 確認後導向 Builder）；**Auto-patrol form** 加 execution mode tab + Pipeline dropdown + input binding 表格；**Pipeline list** 顯示「↩ from skill #X」chip；**Phase 4-C** 加 `PIPELINE_ONLY_MODE` feature flag — `execute_skill` 工具對 LLM 隱藏，prompt 附 pipeline-only directive |
 | 4 — Migration | ⏳ 未啟動 | 既有 DR → Pipeline JSON；舊 code-gen path 下線；Custom Block 實作 |
+| **Agent Patterns + multi-series overlay** (2026-04-27) | ✅ 完成 | Glass Box prompt 加 **Pattern D** — 多機台/多 lot/多 recipe 用單一 source(step 篩選) + `block_filter` operator='in' + `block_chart` `color="toolID"` (3 nodes，取代 5+ source/union 9 nodes 結構)；`block_chart` SPC mode 接受 `color`，emit ChartDSL `series_field`，前端依該 field 分組 trace；`block_process_history` 加 runtime guard 拒絕 comma-separated `tool_id`/`lot_id`/`step`，hint 指向 block_filter；`update_plan` 強制每輪 build `action="create"` 限 1 次（修改用 `update`）+ frontend AIAgentPanel ref-based plan card 就地替換 |
 
 ### Phase 1 — PoC（4 週，1 人）
 

@@ -615,6 +615,7 @@ export function AIAgentPanel({
     setTokenOut(0);
     setReflection({ status: null, amendment: "" });
     setPlanItems([]);
+    currentPlanMsgIdRef.current = null;
     setAutoRun({ status: "idle" });
     setInput("");
     setActiveTab("chat");
@@ -692,16 +693,27 @@ export function AIAgentPanel({
           case "plan": {
             // v1.7 — plan now lives inline in the chat thread, right after
             // the user's request, so each new build gets its own plan card.
+            // If the agent re-emits create within the same build, replace the
+            // existing card in place instead of stacking a duplicate.
             const items = ev.items as PlanItem[] | undefined;
             if (Array.isArray(items)) {
               const cloned = items.map((it) => ({ ...it }));
-              const planMsgId = nextId();
-              currentPlanMsgIdRef.current = planMsgId;
-              setPlanItems(cloned);  // mirror to overlay relay
-              setChatHistory((prev) => [...prev, {
-                id: planMsgId, role: "plan", content: "",
-                planItems: cloned,
-              }]);
+              const existingId = currentPlanMsgIdRef.current;
+              setPlanItems(cloned);
+              if (existingId != null) {
+                setChatHistory((prev) => prev.map((m) =>
+                  m.id === existingId && m.role === "plan"
+                    ? { ...m, planItems: cloned }
+                    : m,
+                ));
+              } else {
+                const planMsgId = nextId();
+                currentPlanMsgIdRef.current = planMsgId;
+                setChatHistory((prev) => [...prev, {
+                  id: planMsgId, role: "plan", content: "",
+                  planItems: cloned,
+                }]);
+              }
               break;
             }
             // Legacy — free-text plan from LLM <plan>...</plan> reasoning

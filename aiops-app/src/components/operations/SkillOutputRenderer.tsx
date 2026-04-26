@@ -544,7 +544,7 @@ function renderLineBarScatter(chart: ChartDSL): React.ReactElement {
   });
 
   const yAxisTitle = primaryY.length === 1 ? primaryY[0] : primaryY.join(", ");
-  const showLegend = primaryY.length > 1 || secondaryY.length > 0;
+  const showLegend = primaryY.length > 1 || secondaryY.length > 0 || Boolean(seriesField);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const layout: any = {

@@ -1,7 +1,7 @@
 # python_ai_sidecar — Spec
 
 **Date:** 2026-04-26
-**HEAD:** 20d8127
+**HEAD:** 778df37+ (in flight)
 **Status:** Living Document（依 code 實況萃取）
 
 ---
@@ -142,8 +142,8 @@ Block catalog 從 Java `/internal/blocks` 拉（透過 [JavaAPIClient](python_ai
 
 | Event | Trigger | Payload |
 |---|---|---|
-| `plan` | LLM 第一輪呼叫 `update_plan(action="create")` | `{items: [{id, title, status}]}` |
-| `plan_update` | LLM 呼叫 `update_plan(action="update")` 更新進度 | `{id, status, note?}` |
+| `plan` | LLM 第一輪呼叫 `update_plan(action="create")`。**每輪 build 限 1 次**，prompt 端強制；frontend (AIAgentPanel) 端再保險就地替換 plan card | `{items: [{id, title, status}]}` |
+| `plan_update` | LLM 呼叫 `update_plan(action="update")` 更新進度（修改計畫也走這條，不要再 create） | `{id, status, note?}` |
 | `pb_run_start` | `build_pipeline_live` 成功後 auto-run 觸發 | `{node_count}` |
 | `pb_run_done` | auto-run 跑完 | `{status, node_results, duration_ms}` |
 | `pb_run_error` | auto-run 失敗 → LLM 應呼叫 `propose_pipeline_patch` | `{error_message}` |
@@ -166,6 +166,20 @@ block_alert              block_data_view        block_compute
 Block 邏輯與 fastapi_backend_service 完全一致（為了 git blame 乾淨），DB / config 依賴透過 [_sidecar_deps.py](python_ai_sidecar/pipeline_builder/_sidecar_deps.py) 蓋 shim。
 
 DB-touching block（`block_mcp_call`, `block_mcp_foreach`）走 [JavaAPIClient](python_ai_sidecar/clients/java_client.py) → Java `/internal/mcp-definitions`。
+
+### 7.1 block_chart — multi-tool overlay（color in SPC mode）
+
+[chart.py:_build_spc_or_multi_line](python_ai_sidecar/pipeline_builder/blocks/chart.py) 接受 `color_col` argument（從 `params["color"]` 來）。當 SPC overlay (UCL/LCL/Center) 與 `color="toolID"` 同時出現時：
+
+- ChartDSL spec 多帶一個 `series_field` field
+- 前端 [SkillOutputRenderer](aiops-app/src/components/operations/SkillOutputRenderer.tsx) 看到 `series_field` 就 group rows by 該 column，每組一條 Plotly trace（自動套 SERIES_COLORS palette）
+- UCL / LCL / Center / OOC highlight 仍然以**全域 rules** 疊加（不是 per-group）
+
+→ 「比較 5 台機台的 xbar 趨勢」可以一張圖搞定，不用 5 個 source + union（Pattern D，[prompt.py](python_ai_sidecar/agent_builder/prompt.py)）。
+
+### 7.2 block_process_history — single-value guard
+
+[process_history.py](python_ai_sidecar/pipeline_builder/blocks/process_history.py) 開頭做 runtime 拒絕：`tool_id` / `lot_id` / `step` 任一個收到 comma-separated string 或 list 時直接 `INVALID_PARAM` + hint 指向 `block_filter operator='in'`。原因：底層 ontology query 是 exact match，逗號字串會被當成單一值 → 0 row → 下游 block 在 empty df 上炸不直觀錯誤。Description 同步更正（`seed.py`、`param_schema`），不再宣稱「支援逗號分隔」。
 
 ## 8. Fallback Path
 
