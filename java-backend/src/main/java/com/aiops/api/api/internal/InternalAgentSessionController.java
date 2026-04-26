@@ -5,7 +5,6 @@ import com.aiops.api.common.ApiException;
 import com.aiops.api.common.ApiResponse;
 import com.aiops.api.domain.agent.AgentSessionEntity;
 import com.aiops.api.domain.agent.AgentSessionRepository;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
@@ -53,7 +52,11 @@ public class InternalAgentSessionController {
 		return ApiResponse.ok(Dto.of(repository.save(e)));
 	}
 
-	public record UpsertRequest(@NotNull Long userId, @NotBlank String messages,
+	// `messages` is intentionally not @NotBlank: partial upserts (e.g. just
+	// stamping last_pipeline_json after a build) skip it and the controller
+	// leaves the existing value alone. userId is still required so we can't
+	// stamp on a brand-new session row anonymously.
+	public record UpsertRequest(@NotNull Long userId, String messages,
 	                            String workspaceState, String lastPipelineJson,
 	                            Long lastPipelineRunId, Integer cumulativeTokens,
 	                            String title, OffsetDateTime expiresAt) {}
