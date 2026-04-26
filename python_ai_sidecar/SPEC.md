@@ -1,7 +1,7 @@
 # python_ai_sidecar — Spec
 
-**Date:** 2026-04-25
-**HEAD:** 5114b9b
+**Date:** 2026-04-26
+**HEAD:** 20d8127
 **Status:** Living Document（依 code 實況萃取）
 
 ---
@@ -127,16 +127,27 @@ Block catalog 從 Java `/internal/blocks` 拉（透過 [JavaAPIClient](python_ai
 
 | Node | 任務 | DB / 外部依賴 |
 |---|---|---|
-| `load_context` | 讀 MCP / Skill / UserPreference / SystemParameter catalog | ✓ Java `/internal/*`（透過 `JavaAPIClient`） |
-| `llm_call` | Claude tool-use | sidecar [llm_client](python_ai_sidecar/agent_helpers_native/llm_client.py)（Anthropic SDK） |
-| `tool_execute` | 分派 MCP / Skill / build_pipeline_live | Java `/internal/pipelines`、`/internal/agent-sessions`、ToolDispatcher 透過 Java client |
-| `self_critique` | 自我批判 / 重試 | sidecar llm_client |
+| `load_context` | 讀 MCP / Skill / UserPreference / SystemParameter catalog；注入 Plan-First + Auto-Run + ON_DUTY 角色 prompt | ✓ Java `/internal/*`（透過 `JavaAPIClient`） |
+| `llm_call` | Claude tool-use；按 caller_roles filter visible tools (ON_DUTY 限縮 11 個) | sidecar [llm_client](python_ai_sidecar/agent_helpers_native/llm_client.py)（Anthropic SDK） |
+| `tool_execute` | 分派 MCP / Skill / build_pipeline_live；**emit plan / plan_update / pb_run_* SSE events**；`build_pipeline_live` 成功後 chain `execute_native` 自動跑 pipeline | Java `/internal/pipelines`、`/internal/agent-sessions`、ToolDispatcher 透過 Java client |
+| `self_critique` | 自我批判；對「LLM 給 self-aware 限制說明」case 跳過 amendment | sidecar llm_client |
 | `synthesis` | 組 AIOpsReportContract | – |
 | `memory_lifecycle` | abstract memory（LLM）+ Java pgvector 寫入 | sidecar [memory_abstraction](python_ai_sidecar/agent_helpers_native/memory_abstraction.py) + Java `/internal/agent-experience-memories` |
 
-**Wiring：** [routers/agent.py:_chat_stream_native](python_ai_sidecar/routers/agent.py) 直接 instantiate `AgentOrchestratorV2(db=None, ...)`。`db=None` 觸發每個 node 走 Java client 路徑。
+**Wiring：** [routers/agent.py:_chat_stream_native](python_ai_sidecar/routers/agent.py) 直接 instantiate `AgentOrchestratorV2(db=None, roles=caller.roles, ...)`。`db=None` 觸發每個 node 走 Java client 路徑；`roles` 驅動 tool filter。
 
 **Fallback：** 仍存在於 [fallback/python_proxy.py](python_ai_sidecar/fallback/python_proxy.py)，但 prod `.env` 預設 `FALLBACK_ENABLED=0`，因此實際從不命中。Phase 8-D 會徹底刪掉 + 關 :8001（已關，2026-04-25）。
+
+### 6.1 v1.4 SSE event types
+
+| Event | Trigger | Payload |
+|---|---|---|
+| `plan` | LLM 第一輪呼叫 `update_plan(action="create")` | `{items: [{id, title, status}]}` |
+| `plan_update` | LLM 呼叫 `update_plan(action="update")` 更新進度 | `{id, status, note?}` |
+| `pb_run_start` | `build_pipeline_live` 成功後 auto-run 觸發 | `{node_count}` |
+| `pb_run_done` | auto-run 跑完 | `{status, node_results, duration_ms}` |
+| `pb_run_error` | auto-run 失敗 → LLM 應呼叫 `propose_pipeline_patch` | `{error_message}` |
+| `pb_glass_*` | Glass Box sub-agent 即時 ops（已有 since Phase 5-UX-6） | – |
 
 ## 7. Pipeline Builder Executor（27 blocks native）
 

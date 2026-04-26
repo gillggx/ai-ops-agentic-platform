@@ -1,7 +1,7 @@
 # aiops-app — Spec
 
-**Date:** 2026-04-25
-**HEAD:** 5114b9b
+**Date:** 2026-04-26
+**HEAD:** 20d8127
 **Status:** Living Document（依 code 實況萃取）
 
 ---
@@ -186,9 +186,9 @@ const r = await fetch(`${FASTAPI_BASE_URL}/api/v1/...`, {
 | `/api/ontology/[...path]` | Java（因 ontology MCP 在 Java DB） |
 | `/api/mcp-catalog` | 前端 store + `src/mcp/catalog.ts` 合併 |
 
-## 7. AI Agent panel — Glass Box
+## 7. AI Agent panel — Glass Box + Plan + Auto-Run
 
-[copilot/AIAgentPanel.tsx](aiops-app/src/components/copilot/AIAgentPanel.tsx) + [LiveCanvasOverlay.tsx](aiops-app/src/components/copilot/LiveCanvasOverlay.tsx)：
+[copilot/AIAgentPanel.tsx](aiops-app/src/components/copilot/AIAgentPanel.tsx) + [LiveCanvasOverlay.tsx](aiops-app/src/components/copilot/LiveCanvasOverlay.tsx) + [PlanRenderer.tsx](aiops-app/src/components/copilot/PlanRenderer.tsx)（v1.4 新增）：
 
 **Build 流程（native，由 sidecar Glass Box agent 直發）：**
 1. 使用者打 `build_pipeline_live` → SSE 串流：
@@ -196,10 +196,23 @@ const r = await fetch(`${FASTAPI_BASE_URL}/api/v1/...`, {
 3. `pb_glass_op` × N → node-by-node 增量繪 canvas
 4. `pb_glass_chat` → 旁白文字
 5. `pb_glass_done` → 顯示 final summary + pipeline_json
+6. **v1.4：** sidecar 自動 chain `execute_native(pipeline_json)` → 觸發 `pb_run_*` events
+7. AIAgentPanel 從 `pb_run_done.node_results` 抽 chart_intents → 組成 synthetic AIOpsReportContract → 開中央 AnalysisPanel
 
-**Chat 流程：** SSE 走標準 LangGraph contract，sidecar fallback → :8001 → 回傳 [AIOpsReportContract](../aiops-contract/SPEC.md)，由 [ContractRenderer](aiops-app/src/components/contract/ContractRenderer.tsx) 渲染到 [AnalysisPanel](aiops-app/src/components/layout/AnalysisPanel.tsx)。
+**Chat 流程：** SSE 走 LangGraph 完整 stages → 回傳 [AIOpsReportContract](../aiops-contract/SPEC.md)，由 [ContractRenderer](aiops-app/src/components/contract/ContractRenderer.tsx) 渲染到 [AnalysisPanel](aiops-app/src/components/layout/AnalysisPanel.tsx)。
 
-**所有圖表只在中央 AnalysisPanel 渲染**，AI Agent panel 只顯示文字 + 動作按鈕。
+**v1.4 Plan Panel（[PlanRenderer.tsx](aiops-app/src/components/copilot/PlanRenderer.tsx)）：**
+- 每個 turn agent 第一個 tool call 是 `update_plan(action="create")` → 吐 3-7 個 todo
+- 後續每完成一階段呼叫 `update_plan(action="update", id, status="done")`
+- Frontend 收 `plan` / `plan_update` SSE event → in-place 更新 checklist
+- 狀態：pending ○ / in_progress ◐（脈動） / done ✓（劃線） / failed ✕
+
+**v1.4 Auto-Run banner：**
+- `pb_run_start` → 顯示「▶ Auto-Run 執行中（N nodes）」
+- `pb_run_done` → 顯示「✓ 完成 (N ms)」+ 結果丟去 AnalysisPanel
+- `pb_run_error` → 顯示紅 banner，LLM 自動跟進 `propose_pipeline_patch`
+
+**所有圖表只在中央 AnalysisPanel 渲染**，AI Agent panel 只顯示文字 + Plan + 動作按鈕。
 
 ## 8. Pipeline Builder（Knowledge Studio 唯一入口）
 
