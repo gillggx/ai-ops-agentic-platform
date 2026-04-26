@@ -125,15 +125,11 @@ interface Props {
   // v1.4: parent (AppShell) relays plan items to LiveCanvasOverlay so the
   // checklist stays visible while the overlay covers AIAgentPanel.
   onPlanItemsChange?: (items: PlanItem[]) => void;
-  // v1.4: chat-driven build_pipeline_live finished + auto-run completed —
-  // hand the result to AppShell which mounts the same PipelineResultsPanel
-  // as a manual Run Full would, instead of building a synthetic contract.
+  // chat-driven build_pipeline_live finished + auto-run completed — hand
+  // the result to AppShell which mounts the same PipelineResultsPanel as
+  // a manual Run Full would.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onPipelineResult?: (summary: any, nodeResults: Record<string, any>) => void;
-  // v1.5: auto-run lifecycle hooks for the inline PipelineWorkspace.
-  onAutoRunStart?: (nodeCount: number) => void;
-  onAutoRunDone?: (durationMs?: number) => void;
-  onAutoRunError?: (errorMessage: string) => void;
   // Phase 5-UX-6: fired whenever the user sends a message — host uses this to
   // mirror the message into the live canvas overlay's chat panel.
   onUserMessageSent?: (text: string) => void;
@@ -517,9 +513,6 @@ export function AIAgentPanel({
   onGlassDone,
   onPlanItemsChange,
   onPipelineResult,
-  onAutoRunStart,
-  onAutoRunDone,
-  onAutoRunError,
   onUserMessageSent,
   initialPrompt,
 }: Props) {
@@ -1135,14 +1128,11 @@ export function AIAgentPanel({
             sessionIdRef.current = ev.session_id as string;
             break;
 
-          // ── v1.5 Auto-Run after build_pipeline_live ─────────────
-          // The link card / takeover UI now lives in PipelineWorkspace, so the
-          // chat panel only logs lifecycle and forwards data to AppShell.
+          // ── Auto-Run after build_pipeline_live ──────────────────
           case "pb_run_start": {
             const nodeCount = (ev.node_count as number) ?? 0;
             setAutoRun({ status: "running", nodeCount, startedAt: Date.now() });
             addLog(makeLog("▶", `Auto-run 開始（${nodeCount} nodes）`, "info"));
-            onAutoRunStart?.(nodeCount);
             break;
           }
           case "pb_run_done": {
@@ -1154,14 +1144,50 @@ export function AIAgentPanel({
             if (summary) {
               onPipelineResult?.(summary, nodeResults as Record<string, unknown>);
             }
-            onAutoRunDone?.(durationMs);
+            // Stash pipeline so the edit-link card can hand it off via
+            // sessionStorage when the user clicks through to the builder.
+            if (lastBuiltPipelineRef.current && typeof window !== "undefined") {
+              try {
+                window.sessionStorage.setItem(
+                  "pb:ephemeral_pipeline",
+                  JSON.stringify({
+                    pipeline_json: lastBuiltPipelineRef.current,
+                    ts: Date.now(),
+                  }),
+                );
+                setChatHistory((prev) => [...prev, {
+                  id: nextId(), role: "agent",
+                  content: "📝 **需要調整這條 pipeline？** [在 Pipeline Builder 開啟編輯 →](/admin/pipeline-builder/new?from=agent)",
+                }]);
+              } catch {
+                /* sessionStorage unavailable — link card skipped */
+              }
+            }
             break;
           }
           case "pb_run_error": {
             const errMsg = (ev.error_message as string) ?? "execution failed";
             setAutoRun({ status: "error", error: errMsg });
             addLog(makeLog("❌", `Auto-run 失敗: ${errMsg}`, "error"));
-            onAutoRunError?.(errMsg);
+            // Failure path: surface the takeover option so the user can fix it
+            // themselves without waiting for agent's propose_pipeline_patch retry.
+            if (lastBuiltPipelineRef.current && typeof window !== "undefined") {
+              try {
+                window.sessionStorage.setItem(
+                  "pb:ephemeral_pipeline",
+                  JSON.stringify({
+                    pipeline_json: lastBuiltPipelineRef.current,
+                    ts: Date.now(),
+                  }),
+                );
+                setChatHistory((prev) => [...prev, {
+                  id: nextId(), role: "agent",
+                  content: "🛠 **不想讓 Agent 自動修？** [在 Pipeline Builder 自己改 →](/admin/pipeline-builder/new?from=agent)",
+                }]);
+              } catch {
+                /* sessionStorage unavailable — link card skipped */
+              }
+            }
             break;
           }
 

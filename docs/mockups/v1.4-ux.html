@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<title>v1.4 UX Mockup — Plan + Auto-Run + Edit Link</title>
+<style>
+  :root {
+    --blue: #2b6cb0;
+    --blue-light: #ebf4ff;
+    --blue-border: #bee3f8;
+    --bg: #f7f8fc;
+    --text: #1a202c;
+    --muted: #718096;
+    --green: #38a169;
+    --red: #e53e3e;
+    --orange: #d69e2e;
+    --border: #e2e8f0;
+    --note-bg: #fffbe6;
+    --note-border: #ffd666;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: system-ui, -apple-system, "PingFang TC", sans-serif;
+    background: #ddd; color: var(--text); padding: 24px;
+  }
+  h1 { margin: 0 0 8px; font-size: 20px; }
+  h2 { margin: 32px 0 8px; font-size: 14px; color: var(--muted); }
+  .legend {
+    display: flex; gap: 12px; font-size: 11px; color: var(--muted);
+    margin-bottom: 16px;
+  }
+  .legend .swatch { display: inline-flex; align-items: center; gap: 4px; }
+  .legend .box { width: 12px; height: 12px; border-radius: 2px; display: inline-block; }
+  .frame {
+    background: white; border-radius: 8px; padding: 0;
+    margin-bottom: 32px; overflow: hidden;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    border: 1px solid var(--border);
+  }
+  .frame-title {
+    padding: 8px 14px; background: #1a202c; color: white;
+    font-size: 12px; font-weight: 600;
+  }
+  .frame-title small { opacity: 0.7; font-weight: normal; margin-left: 8px; }
+  .layout {
+    display: grid; grid-template-columns: 48px 1fr 380px;
+    height: 540px; background: var(--bg);
+  }
+  .sidebar {
+    background: white; border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 12px 0; gap: 8px;
+  }
+  .sidebar .icon {
+    width: 28px; height: 28px; border-radius: 6px; background: #edf2f7;
+    display: flex; align-items: center; justify-content: center; font-size: 14px;
+  }
+  .sidebar .icon.active { background: var(--blue-light); color: var(--blue); }
+  .center {
+    padding: 16px; overflow-y: auto;
+  }
+  .center-card {
+    background: white; border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px; margin-bottom: 12px;
+  }
+  .center-card h3 { margin: 0 0 12px; font-size: 14px; }
+  .right {
+    background: white; border-left: 1px solid var(--border);
+    display: flex; flex-direction: column;
+  }
+  .right-header {
+    padding: 12px 16px 6px; border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .right-header .title { font-size: 14px; font-weight: 700; }
+  .right-tab { font-size: 12px; color: var(--blue); padding-bottom: 4px; border-bottom: 2px solid var(--blue); display: inline-block; margin-top: 6px; }
+  .right-body { flex: 1; overflow-y: auto; padding: 8px; }
+
+  /* ── NEW: Plan Panel ── */
+  .plan-panel {
+    margin: 8px 4px;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--bg); padding: 8px 12px; font-size: 12px;
+    position: relative;
+  }
+  .plan-panel.new::before {
+    content: "★ NEW"; position: absolute; right: -8px; top: -8px;
+    background: var(--orange); color: white; padding: 2px 6px;
+    border-radius: 8px; font-size: 9px; font-weight: 700;
+  }
+  .plan-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .plan-head .label { font-weight: 600; }
+  .plan-head .count { font-size: 10px; color: var(--muted); }
+  .plan-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+  .plan-item { display: flex; gap: 6px; align-items: flex-start; }
+  .plan-item .glyph { width: 14px; text-align: center; flex-shrink: 0; }
+  .plan-item.pending { color: #a0aec0; }
+  .plan-item.in_progress { color: var(--blue); font-weight: 600; }
+  .plan-item.in_progress .glyph { animation: pulse 1.5s ease-in-out infinite; }
+  .plan-item.done { color: var(--muted); text-decoration: line-through; opacity: 0.65; }
+  .plan-item.failed { color: var(--red); }
+  .plan-item .note { color: #a0aec0; font-size: 10px; font-weight: 400; margin-left: 4px; }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* ── NEW: Auto-Run banner ── */
+  .auto-run-banner {
+    margin: 6px 4px;
+    padding: 6px 10px; border-radius: 6px; font-size: 11px;
+    background: var(--blue-light); color: var(--blue);
+    border: 1px solid var(--blue-border);
+    position: relative;
+  }
+  .auto-run-banner.new::before {
+    content: "★ NEW"; position: absolute; right: -8px; top: -8px;
+    background: var(--orange); color: white; padding: 2px 6px;
+    border-radius: 8px; font-size: 9px; font-weight: 700;
+  }
+  .auto-run-banner.error { background: #fed7d7; color: #c53030; border-color: #feb2b2; }
+
+  /* ── chat bubbles ── */
+  .bubble {
+    margin: 6px 8px; padding: 9px 12px; border-radius: 12px;
+    font-size: 13px; line-height: 1.6; max-width: 90%;
+  }
+  .bubble.user { background: var(--blue); color: white; margin-left: auto; border-bottom-right-radius: 2px; max-width: 80%; }
+  .bubble.agent { background: var(--bg); border: 1px solid var(--border); border-bottom-left-radius: 2px; }
+  .bubble.op {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 6px;
+    background: #f7f8fc; border: 1px solid var(--border);
+    font-size: 11px; color: var(--muted); margin: 4px 8px;
+  }
+  .feedback { display: flex; gap: 4px; margin: 4px 8px 8px; }
+  .feedback button {
+    background: transparent; border: 1px solid var(--border);
+    border-radius: 10px; padding: 2px 8px; font-size: 12px; cursor: pointer;
+  }
+
+  /* ── NEW: Edit link card ── */
+  .edit-link-card {
+    margin: 6px 8px; padding: 10px 12px;
+    background: linear-gradient(90deg, #fffbe6, #fff7d4);
+    border: 1px solid var(--note-border); border-radius: 8px;
+    font-size: 12px; display: flex; align-items: center; gap: 8px;
+    position: relative;
+  }
+  .edit-link-card.new::before {
+    content: "★ NEW"; position: absolute; right: -8px; top: -8px;
+    background: var(--orange); color: white; padding: 2px 6px;
+    border-radius: 8px; font-size: 9px; font-weight: 700;
+  }
+  .edit-link-card a { color: var(--blue); text-decoration: none; font-weight: 600; }
+
+  /* ── center: reuse PipelineResultsPanel layout (same as Run Full) ── */
+  .results-panel {
+    position: relative; background: #fff; border: 1px solid #E2E8F0;
+    border-radius: 8px; box-shadow: 0 12px 24px rgba(15,23,42,0.12);
+    overflow: hidden;
+  }
+  .results-panel .rp-header {
+    padding: 10px 14px; border-bottom: 1px solid #E2E8F0; background: #F8FAFC;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .results-panel .rp-header .rp-title {
+    font-size: 13px; font-weight: 600; color: #0F172A; flex: 1;
+  }
+  .results-panel .rp-body { padding: 14px; }
+  .alert-banner {
+    padding: 10px 14px; border-radius: 6px; font-size: 12px;
+    border: 1px solid; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;
+  }
+  .alert-banner.green { background: #f0fdf4; border-color: #86efac; color: #166534; }
+  .alert-banner.red   { background: #fef2f2; border-color: #fca5a5; color: #991b1b; }
+  .alert-banner.grey  { background: #f8fafc; border-color: #e2e8f0; color: #475569; }
+  .section-header {
+    font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase;
+    margin: 14px 0 6px; letter-spacing: 0.5px;
+  }
+  .chart-mock {
+    background: #fff; border: 1px solid var(--border); border-radius: 6px;
+    height: 220px; position: relative;
+    display: flex; align-items: flex-end; padding: 16px; gap: 4px;
+  }
+  .chart-bar {
+    flex: 1; background: var(--blue); opacity: 0.6; border-radius: 2px 2px 0 0;
+  }
+  .chart-bar.ooc { background: var(--red); opacity: 0.85; }
+  .chart-mock .ucl { position: absolute; left: 12px; right: 12px; top: 50px; border-top: 1px dashed var(--red); }
+  .chart-mock .lcl { position: absolute; left: 12px; right: 12px; bottom: 80px; border-top: 1px dashed var(--red); }
+  .chart-title-row {
+    display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+    background: #F8FAFC; border-bottom: 1px solid #E2E8F0; font-size: 11px;
+  }
+  .chart-tag {
+    background: #EFF6FF; color: #1E40AF; padding: 1px 7px;
+    border-radius: 10px; font-size: 10px; font-weight: 700;
+  }
+
+  /* ── annotations ── */
+  .note {
+    background: var(--note-bg); border-left: 3px solid var(--note-border);
+    padding: 8px 12px; margin: 8px 16px; font-size: 11px; color: #5c4500;
+    border-radius: 0 4px 4px 0;
+  }
+  .note strong { color: #b8860b; }
+
+  /* idle hint */
+  .idle-hint {
+    text-align: center; padding: 60px 16px; color: var(--muted); font-size: 13px;
+  }
+
+  /* ai summary mock */
+  .ai-summary { font-size: 12px; line-height: 1.7; color: #2d3748; }
+  .ai-summary h4 { margin: 8px 0 4px; font-size: 13px; color: var(--text); }
+  .ai-summary li { margin: 2px 0; }
+
+  /* user input area */
+  .input-row {
+    border-top: 1px solid var(--border); padding: 8px 12px; flex-shrink: 0;
+  }
+  .input-chips { display: flex; gap: 6px; margin-bottom: 6px; }
+  .input-chips .chip {
+    padding: 3px 10px; font-size: 11px; border-radius: 12px;
+    background: white; border: 1px solid #cbd5e0; color: #4a5568;
+  }
+  .input-row textarea {
+    width: 100%; padding: 8px; font-size: 12px; border: 1px solid var(--border);
+    border-radius: 6px; resize: none; box-sizing: border-box; height: 50px;
+  }
+</style>
+</head>
+<body>
+
+<h1>AIOps v1.4 — Chat-driven Plan + Auto-Run UX</h1>
+<p style="color: var(--muted); margin: 0 0 12px; font-size: 12px;">
+  4 個關鍵 frame — 從用戶送 prompt 到看結果 + 編輯入口。<strong style="color: var(--orange);">★ NEW</strong> 標籤 = v1.4 新增。
+</p>
+<div class="legend">
+  <span class="swatch"><span class="box" style="background: var(--blue-light); border: 1px solid var(--blue-border);"></span> 既有元件</span>
+  <span class="swatch"><span class="box" style="background: var(--note-bg); border: 1px solid var(--note-border);"></span> v1.4 新增</span>
+</div>
+
+<!-- ─── Frame 1: Idle ─── -->
+<div class="frame">
+  <div class="frame-title">① 起手式：使用者打開 Dashboard <small>留在原畫面，不彈 Overlay</small></div>
+  <div class="layout">
+    <div class="sidebar">
+      <div class="icon">🔔</div>
+      <div class="icon active">📊</div>
+      <div class="icon">🧩</div>
+    </div>
+    <div class="center">
+      <div class="center-card">
+        <h3>✨ AI Summary</h3>
+        <div class="ai-summary">
+          <strong>過去 24 小時重點整理</strong> · 全廠 OOC 率 16.49%
+          <h4>異常熱點</h4>
+          <ul><li>EQP-05: 64 次 (18.1%)</li><li>STEP_005: 56 次 (24.9%)</li></ul>
+          <h4>需立即處理</h4>
+          <ul><li>EQP-02 + STEP_009 (41.4% OOC)</li></ul>
+        </div>
+      </div>
+    </div>
+    <div class="right">
+      <div class="right-header"><div class="title">AI Agent</div><div class="right-tab">💬 對話</div></div>
+      <div class="right-body">
+        <div class="idle-hint">
+          告訴 Agent 你想看什麼…
+        </div>
+      </div>
+      <div class="input-row">
+        <div class="input-chips"><span class="chip">🔍 查資料</span><span class="chip">📐 診斷邏輯</span><span class="chip">📊 呈現結果</span></div>
+        <textarea placeholder="請嘗試：幫我撈取 [EQP-01] 最近 [24 小時] 的 [SPC 資料]…"></textarea>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Frame 2: Plan + Building ─── -->
+<div class="frame">
+  <div class="frame-title">② 用戶送 prompt → Plan 出現 + Glass Box 邊建邊打勾 <small>右側 chat 即時更新，中央保持原狀</small></div>
+  <div class="layout">
+    <div class="sidebar">
+      <div class="icon">🔔</div>
+      <div class="icon active">📊</div>
+      <div class="icon">🧩</div>
+    </div>
+    <div class="center">
+      <div class="center-card">
+        <h3>✨ AI Summary</h3>
+        <div class="ai-summary" style="opacity: 0.6;">（保持，未變動）</div>
+      </div>
+      <div class="note"><strong>注意：</strong>用戶送 prompt 後中央維持原狀；不彈 LiveCanvasOverlay。Glass Box 過程在右側 chat panel 顯示。</div>
+    </div>
+    <div class="right">
+      <div class="right-header"><div class="title">AI Agent <span style="font-size: 10px; color: var(--muted); font-weight: 400;">183k / 1.2k tok</span></div><div class="right-tab">💬 對話</div></div>
+      <div class="right-body">
+        <div class="plan-panel new">
+          <div class="plan-head"><span class="label">📋 計畫</span><span class="count">2/5</span></div>
+          <ul class="plan-list">
+            <li class="plan-item done"><span class="glyph">✓</span><span>確認 STEP_001 xbar 趨勢需求</span></li>
+            <li class="plan-item done"><span class="glyph">✓</span><span>取得 STEP_001 製程資料 <span class="note">— 已撈 100 筆</span></span></li>
+            <li class="plan-item in_progress"><span class="glyph">◐</span><span>建構 chart node</span></li>
+            <li class="plan-item pending"><span class="glyph">○</span><span>執行並呈現結果</span></li>
+            <li class="plan-item pending"><span class="glyph">○</span><span>分析趨勢結論</span></li>
+          </ul>
+        </div>
+        <div class="bubble user">幫我看 STEP_001 的 xbar 趨勢</div>
+        <div class="bubble op">🛠 加入 node block_process_history</div>
+        <div class="bubble op">🛠 重新命名 n1 → STEP_001 SPC 歷史資料</div>
+        <div class="bubble op">🛠 加入 node block_chart</div>
+        <div style="font-size: 11px; color: var(--muted); padding: 4px 8px;">● ● ● 工作中…</div>
+      </div>
+      <div class="input-row">
+        <textarea placeholder="Agent 還在工作中…" disabled></textarea>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Frame 3: Auto-Run + Result ─── -->
+<div class="frame">
+  <div class="frame-title">③ Build 完 → Auto-Run → 中央顯示 chart <small>不需手動按 Run Full；不彈 overlay</small></div>
+  <div class="layout">
+    <div class="sidebar">
+      <div class="icon">🔔</div>
+      <div class="icon active">📊</div>
+      <div class="icon">🧩</div>
+    </div>
+    <div class="center">
+      <!-- v1.4: reuse PipelineResultsPanel exactly the same as manual Run Full -->
+      <div class="results-panel">
+        <div class="rp-header">
+          <span style="font-size: 16px;">📊</span>
+          <span class="rp-title">Pipeline Results</span>
+          <span style="font-size: 10px; color: #94A3B8; font-family: monospace;">3,214 ms · 4 nodes</span>
+          <button style="background: none; border: none; font-size: 18px; cursor: pointer; color: #94A3B8;">×</button>
+        </div>
+        <div class="rp-body">
+          <div class="alert-banner red">
+            <span>⚠</span>
+            <span><strong>STEP_001 xbar OOC：12 筆 / 100 筆 (12%)</strong> · UCL 17.50 / LCL 12.50</span>
+          </div>
+          <div class="section-header">圖表</div>
+          <div style="border: 1px solid #E2E8F0; border-radius: 6px; overflow: hidden;">
+            <div class="chart-title-row">
+              <span class="chart-tag">Chart #1</span>
+              <span style="flex: 1; font-weight: 600;">STEP_001 xbar 控制圖</span>
+              <span style="color: #94A3B8;">100 points</span>
+            </div>
+            <div class="chart-mock">
+              <div class="ucl"></div>
+              <div class="lcl"></div>
+              <div class="chart-bar" style="height: 60%;"></div>
+              <div class="chart-bar" style="height: 55%;"></div>
+              <div class="chart-bar ooc" style="height: 95%;"></div>
+              <div class="chart-bar" style="height: 50%;"></div>
+              <div class="chart-bar" style="height: 65%;"></div>
+              <div class="chart-bar ooc" style="height: 92%;"></div>
+              <div class="chart-bar" style="height: 58%;"></div>
+              <div class="chart-bar" style="height: 62%;"></div>
+              <div class="chart-bar" style="height: 70%;"></div>
+              <div class="chart-bar" style="height: 55%;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="note"><strong>v1.4：</strong>跟手動按 Run Full 的結果版面 <strong>完全一致</strong>（重用 <code>PipelineResultsPanel</code>）；只是觸發點不同 — auto 跑完自動跳出，不用按按鈕。</div>
+    </div>
+    <div class="right">
+      <div class="right-header"><div class="title">AI Agent</div><div class="right-tab">💬 對話</div></div>
+      <div class="right-body">
+        <div class="plan-panel new">
+          <div class="plan-head"><span class="label">📋 計畫</span><span class="count">5/5</span></div>
+          <ul class="plan-list">
+            <li class="plan-item done"><span class="glyph">✓</span><span>確認需求</span></li>
+            <li class="plan-item done"><span class="glyph">✓</span><span>取得資料 <span class="note">— 100 筆</span></span></li>
+            <li class="plan-item done"><span class="glyph">✓</span><span>建構 pipeline <span class="note">— 4 nodes</span></span></li>
+            <li class="plan-item done"><span class="glyph">✓</span><span>執行並呈現 <span class="note">— 3.2 sec</span></span></li>
+            <li class="plan-item done"><span class="glyph">✓</span><span>分析趨勢結論</span></li>
+          </ul>
+        </div>
+        <div class="auto-run-banner new">✓ Auto-Run 完成（3,214 ms · 4 nodes）</div>
+        <div class="bubble user">幫我看 STEP_001 的 xbar 趨勢</div>
+        <div class="bubble agent">
+          ✓ 完成。STEP_001 過去 24h 共 100 筆，xbar OOC 共 12 筆 (12%)。<br>
+          異常集中在 14:00–16:00 區間，建議檢查該時段 APC 參數。
+        </div>
+        <!-- ★ NEW: edit link -->
+        <div class="edit-link-card new">
+          <span>📝</span>
+          <span>需要調整這條 pipeline？</span>
+          <a href="#">在 Pipeline Builder 開啟編輯 →</a>
+        </div>
+        <div class="feedback">
+          <button>👍</button><button>👎</button>
+        </div>
+      </div>
+      <div class="input-row">
+        <div class="input-chips"><span class="chip">🔍 查資料</span><span class="chip">📐 診斷邏輯</span><span class="chip">📊 呈現結果</span></div>
+        <textarea placeholder="繼續對話…"></textarea>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Frame 4: Failure → propose patch ─── -->
+<div class="frame">
+  <div class="frame-title">④ Auto-Run 失敗 → Agent 自動 propose patch <small>不需用戶介入，agent 自我修復</small></div>
+  <div class="layout">
+    <div class="sidebar">
+      <div class="icon">🔔</div>
+      <div class="icon active">📊</div>
+      <div class="icon">🧩</div>
+    </div>
+    <div class="center">
+      <div class="center-card" style="opacity: 0.5;">
+        <h3>📈 STEP_001 xbar 控制圖</h3>
+        <div style="font-size: 12px; color: var(--muted);">（等待重跑）</div>
+      </div>
+    </div>
+    <div class="right">
+      <div class="right-header"><div class="title">AI Agent</div><div class="right-tab">💬 對話</div></div>
+      <div class="right-body">
+        <div class="plan-panel new">
+          <div class="plan-head"><span class="label">📋 計畫</span><span class="count">3/5 · 1 失敗</span></div>
+          <ul class="plan-list">
+            <li class="plan-item done"><span class="glyph">✓</span><span>確認需求</span></li>
+            <li class="plan-item done"><span class="glyph">✓</span><span>取得資料</span></li>
+            <li class="plan-item done"><span class="glyph">✓</span><span>建構 pipeline</span></li>
+            <li class="plan-item failed"><span class="glyph">✕</span><span>執行 — 失敗 <span class="note">— n3 缺 value_column</span></span></li>
+            <li class="plan-item in_progress"><span class="glyph">◐</span><span>修補後重跑</span></li>
+          </ul>
+        </div>
+        <div class="auto-run-banner new error">✕ Auto-Run 失敗：n3 missing param 'value_column'</div>
+        <div class="bubble agent">
+          執行時發現 chart node 缺 <code style="background: #fff; padding: 1px 4px; border-radius: 3px;">value_column</code> 參數。<br>
+          要我把它設為 <code style="background: #fff; padding: 1px 4px; border-radius: 3px;">spc_xbar_chart_value</code> 重跑嗎？
+          <div style="margin-top: 8px; display: flex; gap: 4px; flex-wrap: wrap;">
+            <button style="background: var(--blue); color: white; border: none; padding: 4px 10px; border-radius: 4px; font-size: 11px;">套用並重跑</button>
+            <button style="background: white; border: 1px solid #cbd5e0; padding: 4px 10px; border-radius: 4px; font-size: 11px;">忽略</button>
+          </div>
+        </div>
+        <!-- ★ NEW: user takeover option for failure -->
+        <div class="edit-link-card new" style="background: linear-gradient(90deg, #fef2f2, #fee2e2); border-color: #fca5a5;">
+          <span>🛠</span>
+          <span>不想讓 Agent 自動修？</span>
+          <a href="#" style="color: #b91c1c;">在 Pipeline Builder 自己改 →</a>
+        </div>
+      </div>
+      <div class="input-row">
+        <textarea placeholder="或直接告訴我怎麼修…"></textarea>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2>差異對照（vs 現有）</h2>
+<div style="background: white; border-radius: 8px; padding: 16px; font-size: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+<table style="width: 100%; border-collapse: collapse;">
+  <tr style="background: var(--bg);">
+    <th style="text-align: left; padding: 6px 12px; border: 1px solid var(--border);">行為</th>
+    <th style="text-align: left; padding: 6px 12px; border: 1px solid var(--border);">現有 v1.3</th>
+    <th style="text-align: left; padding: 6px 12px; border: 1px solid var(--border); background: var(--note-bg);">v1.4 目標</th>
+  </tr>
+  <tr><td style="padding: 6px 12px; border: 1px solid var(--border);">Build 觸發</td><td style="padding: 6px 12px; border: 1px solid var(--border);">彈 LiveCanvasOverlay 全螢幕</td><td style="padding: 6px 12px; border: 1px solid var(--border); background: var(--note-bg);"><strong>留 dashboard</strong>，過程在 chat panel</td></tr>
+  <tr><td style="padding: 6px 12px; border: 1px solid var(--border);">進度顯示</td><td style="padding: 6px 12px; border: 1px solid var(--border);">stages bar + glass ops</td><td style="padding: 6px 12px; border: 1px solid var(--border); background: var(--note-bg);"><strong>Plan Panel</strong> + 內聯 op chips</td></tr>
+  <tr><td style="padding: 6px 12px; border: 1px solid var(--border);">執行</td><td style="padding: 6px 12px; border: 1px solid var(--border);">Build 完按 Run Full</td><td style="padding: 6px 12px; border: 1px solid var(--border); background: var(--note-bg);"><strong>Auto-Run</strong>，自動接</td></tr>
+  <tr><td style="padding: 6px 12px; border: 1px solid var(--border);">結果</td><td style="padding: 6px 12px; border: 1px solid var(--border);">canvas 內 chart preview</td><td style="padding: 6px 12px; border: 1px solid var(--border); background: var(--note-bg);">中央 <strong>PipelineResultsPanel</strong>（同 Run Full 版面）</td></tr>
+  <tr><td style="padding: 6px 12px; border: 1px solid var(--border);">編輯入口</td><td style="padding: 6px 12px; border: 1px solid var(--border);">無</td><td style="padding: 6px 12px; border: 1px solid var(--border); background: var(--note-bg);"><strong>chat 一個 link</strong>「在 Pipeline Builder 開啟編輯」</td></tr>
+  <tr><td style="padding: 6px 12px; border: 1px solid var(--border);">失敗復原</td><td style="padding: 6px 12px; border: 1px solid var(--border);">無</td><td style="padding: 6px 12px; border: 1px solid var(--border); background: var(--note-bg);">Agent <strong>主動 propose patch</strong>，1 鍵套用 <strong>+ 用戶可選擇自己接手</strong>進 Pipeline Builder 改</td></tr>
+</table>
+</div>
+
+</body>
+</html>

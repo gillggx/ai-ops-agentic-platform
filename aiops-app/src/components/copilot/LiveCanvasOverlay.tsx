@@ -142,8 +142,10 @@ function LiveCanvasInner({ sessionId, goal, active, events, onClose, onSendMessa
       role="dialog"
       aria-modal="true"
       style={{
-        position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
-        zIndex: 1000, background: "#0f172acc",
+        // v1.5: absolute (not fixed) so the parent in AppShell can confine
+        // the overlay to sidebar+main; right AI Agent rail stays visible.
+        position: "absolute", inset: 0,
+        zIndex: 50, background: "#0f172acc",
         display: "flex", flexDirection: "column",
       }}
     >
