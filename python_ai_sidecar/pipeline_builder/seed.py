@@ -39,14 +39,16 @@ def _blocks() -> list[dict[str, Any]]:
                 "- ❌ 「今天總共幾個 OOC」→ 用 block_mcp_call(get_process_summary)，那是聚合端點，比這個快\n"
                 "\n"
                 "== Params ==\n"
-                "tool_id     (string, 選填) 例 'EQP-01'；支援逗號分隔多機台\n"
-                "lot_id      (string, 選填)\n"
-                "step        (string, 選填) 例 'STEP_013'\n"
+                "tool_id     (string, 選填) 例 'EQP-01' — **單一字串，不接受逗號清單也不接受 list**\n"
+                "lot_id      (string, 選填) 例 'LOT-0234' — 同上，單一字串\n"
+                "step        (string, 選填) 例 'STEP_013' — 同上，單一字串\n"
                 "object_name (string, 選填) '' | SPC | APC | DC | RECIPE | FDC | EC；留空=所有維度寬表\n"
                 "time_range  (string, 預設 24h) 1h / 24h / 7d / 30d\n"
                 "event_time  (string, 選填) 精確時間點 (ISO8601)\n"
                 "limit       (integer, 預設 100, max 200)\n"
                 "**tool_id / lot_id / step 三擇一必填**。\n"
+                "需要查多機台 / 多 lot / 多 step：source 不要設這個欄位，下游接 block_filter\n"
+                "operator='in' value=[...] 過濾。\n"
                 "\n"
                 "== Output ==\n"
                 "port: data (dataframe)\n"
@@ -65,8 +67,12 @@ def _blocks() -> list[dict[str, Any]]:
                 "  ❌ 錯誤：枚舉 'EQP-01,EQP-02,EQP-03,...' 寫死進 tool_id 參數\n"
                 "     → 新機台上線時不會被自動包含，且違反 fan-out 語意\n"
                 "\n"
-                "當需求明確點名機台（如「EQP-03 的」/「EQP-01 跟 EQP-02」）：\n"
-                "  tool_id 直接寫 'EQP-03' 或 'EQP-01,EQP-02'\n"
+                "當需求明確點名單一機台（如「EQP-03 的」）：\n"
+                "  tool_id 直接寫 'EQP-03'\n"
+                "\n"
+                "當需求明確點名多台機台（如「EQP-01 跟 EQP-02 比較」/「EQP-01~EQP-05」）：\n"
+                "  ✅ source 不設 tool_id（保留 step），下游 block_filter operator='in' value=['EQP-01','EQP-02']\n"
+                "  ❌ tool_id='EQP-01,EQP-02' — MCP 只認單值，整段 string 進 Mongo 會 0 row\n"
                 "\n"
                 "當需求是條件式範圍（如「ABC recipe 的機台」）：\n"
                 "  本 block 沒辦法直接表達；請建議使用者改為「所有機台」+ 後續接 block_filter 過濾 recipe\n"
@@ -96,12 +102,13 @@ def _blocks() -> list[dict[str, Any]]:
                 "properties": {
                     "tool_id":    {
                         "type": "string",
-                        "title": "機台 ID (三擇一)",
+                        "title": "機台 ID (三擇一，單值)",
                         "x-suggestions": "tool_id",
                         "description": (
-                            "具體 ID（EQP-01）、逗號清單（EQP-01,EQP-02），或綁 pipeline input（$tool_id）。"
-                            "需求是『所有機台』時請綁 $tool_id 並配合 Auto-Patrol target_scope=all_equipment 做 runtime fan-out，"
-                            "不要枚舉 EQP-ID。"
+                            "**單一機台 ID**，例 'EQP-01'。MCP 只接受單值，不能傳逗號清單也不能傳 list。"
+                            "需要多機台：source 留空，下游 block_filter operator='in' value=[...] 過濾。"
+                            "需要『所有機台』runtime fan-out：綁 $tool_id pipeline input + Auto-Patrol "
+                            "target_scope=all_equipment。"
                         ),
                     },
                     "lot_id":     {"type": "string", "title": "批次 ID (三擇一)"},
