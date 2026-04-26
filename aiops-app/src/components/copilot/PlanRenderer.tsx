@@ -51,7 +51,7 @@ export function PlanRenderer({ items }: Props) {
 
   return (
     <div style={{
-      margin: "8px 12px 0",
+      marginBottom: 4,
       padding: "8px 12px",
       borderRadius: 8,
       border: "1px solid #e2e8f0",

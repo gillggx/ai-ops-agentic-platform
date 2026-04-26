@@ -1332,7 +1332,8 @@ export function AIAgentPanel({
           </div>
         )}
 
-        <PlanRenderer items={planItems} />
+        {/* v1.6: Plan Panel moved into the chat tab body so it scrolls with
+            the conversation instead of being pinned in the rail header. */}
 
         {autoRun.status !== "idle" && autoRun.status !== "running" && (
           <div style={{
@@ -1396,6 +1397,7 @@ export function AIAgentPanel({
       {/* Chat Tab */}
       {activeTab === "chat" && (
         <div style={{ flex: 1, overflowY: "auto", padding: "12px 12px 0", display: "flex", flexDirection: "column", gap: 8, minHeight: 0 }}>
+          <PlanRenderer items={planItems} />
           <OpsConsole ops={glassOps} />
           {chatHistory.length === 0 && (
             <div style={{ color: "#a0aec0", fontSize: 13, textAlign: "center", paddingTop: 24 }}>
