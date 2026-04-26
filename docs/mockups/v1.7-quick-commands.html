@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<title>AIOps v1.7 — Quick Commands · A vs B</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, "Helvetica Neue", "PingFang TC", sans-serif;
+    background: #eef1f5; color: #1f2937; padding: 24px;
+  }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  h2.frame-title {
+    margin: 32px 0 12px; font-size: 16px; color: #111827;
+    border-left: 4px solid #2563eb; padding-left: 10px;
+  }
+  .legend {
+    background: #fff7ed; border: 1px solid #fed7aa; padding: 10px 14px;
+    border-radius: 8px; font-size: 13px; color: #9a3412; margin-bottom: 16px;
+    line-height: 1.55;
+  }
+  .legend b { color: #7c2d12; }
+  .legend code { background: #fff; padding: 1px 6px; border-radius: 3px; font-size: 12px; }
+
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .card {
+    background: #fff; border: 1px solid #d1d5db; border-radius: 12px;
+    padding: 0; overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0,0,0,.06);
+    height: 600px; display: flex; flex-direction: column;
+  }
+  .card-head {
+    padding: 12px 16px; border-bottom: 1px solid #e5e7eb;
+    background: #f8fafc; font-weight: 600; font-size: 14px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .card-head .badge {
+    font-size: 11px; padding: 3px 10px; border-radius: 12px;
+    background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0;
+  }
+
+  .chat-area {
+    flex: 1; padding: 12px; overflow-y: auto;
+    background: #f7f8fc;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .msg { background: #f1f5f9; border-radius: 12px; padding: 8px 12px; font-size: 13px; line-height: 1.5; }
+  .msg.user { background: #2563eb; color: #fff; align-self: flex-end; max-width: 85%; }
+  .msg.agent { color: #1f2937; align-self: flex-start; max-width: 90%; }
+
+  /* ── shared composer ───────────────────────────────────── */
+  .composer {
+    border-top: 1px solid #e5e7eb; padding: 10px 12px;
+    background: #fff; position: relative;
+  }
+  .composer-row { display: flex; gap: 8px; align-items: flex-end; }
+  .composer textarea {
+    flex: 1; border: 1px solid #d1d5db; border-radius: 8px;
+    padding: 8px 10px; font-size: 13px; resize: none; height: 64px;
+    color: #1f2937; outline: none;
+    font-family: inherit;
+  }
+  .composer textarea:focus { border-color: #93c5fd; }
+  .composer textarea::placeholder { color: #94a3b8; }
+  .composer .send {
+    background: #2563eb; color: #fff; border: 0; border-radius: 8px;
+    padding: 0 16px; font-size: 13px; font-weight: 600; height: 36px;
+    cursor: pointer;
+  }
+  .composer .send:disabled { opacity: .5; cursor: default; }
+  .icon-btn {
+    background: #fff; color: #475569; border: 1px solid #d1d5db;
+    width: 36px; height: 36px; border-radius: 8px; cursor: pointer;
+    font-size: 14px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .icon-btn:hover { background: #f1f5f9; }
+  .icon-btn.active { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+
+  /* ── Option A — slash menu ──────────────────────────────── */
+  .slash-menu {
+    position: absolute; bottom: 78px; left: 12px; right: 60px;
+    max-height: 240px; overflow-y: auto;
+    background: #fff; border: 1px solid #d1d5db; border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(15,23,42,.12);
+    z-index: 5;
+    display: none;
+  }
+  .slash-menu.open { display: block; }
+  .slash-menu .group-head {
+    font-size: 10px; color: #94a3b8; letter-spacing: .06em;
+    text-transform: uppercase; font-weight: 700;
+    padding: 8px 12px 4px; background: #f8fafc;
+    position: sticky; top: 0;
+  }
+  .slash-menu .item {
+    padding: 8px 12px; display: flex; align-items: center; gap: 10px;
+    cursor: pointer; font-size: 13px;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .slash-menu .item:last-child { border-bottom: 0; }
+  .slash-menu .item.hl { background: #eff6ff; }
+  .slash-menu .item .ico { font-size: 16px; flex-shrink: 0; }
+  .slash-menu .item .body { flex: 1; min-width: 0; }
+  .slash-menu .item .title { font-weight: 500; color: #1f2937; }
+  .slash-menu .item .desc { font-size: 11px; color: #94a3b8; margin-top: 1px; }
+  .slash-menu .item .key {
+    font-family: ui-monospace, monospace; font-size: 10px;
+    color: #2563eb; background: #eff6ff; padding: 1px 6px; border-radius: 4px;
+  }
+
+  /* ── Option B — popover ─────────────────────────────────── */
+  .popover {
+    position: absolute; bottom: 78px; right: 60px;
+    width: 360px; max-height: 360px;
+    background: #fff; border: 1px solid #d1d5db; border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(15,23,42,.18);
+    z-index: 5;
+    display: none;
+    overflow: hidden;
+    flex-direction: column;
+  }
+  .popover.open { display: flex; }
+  .popover-head {
+    padding: 8px 12px; border-bottom: 1px solid #f1f5f9;
+    background: #f8fafc;
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 12px; font-weight: 600; color: #374151;
+  }
+  .popover-tabs {
+    display: flex; gap: 2px; padding: 6px 8px; background: #f8fafc;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .popover-tabs .tab {
+    flex: 1; padding: 5px 8px; font-size: 11px; font-weight: 600;
+    background: transparent; border: 1px solid transparent; border-radius: 5px;
+    color: #64748b; cursor: pointer;
+  }
+  .popover-tabs .tab.active { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+  .popover-body {
+    flex: 1; overflow-y: auto; padding: 6px 0;
+  }
+  .popover-body .item {
+    padding: 8px 12px; cursor: pointer; font-size: 13px;
+    border-bottom: 1px solid #f7f8fc;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .popover-body .item:hover { background: #f8fafc; }
+  .popover-body .item .ico { font-size: 14px; flex-shrink: 0; width: 18px; text-align: center; }
+  .popover-body .item .body { flex: 1; min-width: 0; }
+  .popover-body .item .title { font-weight: 500; color: #1f2937; }
+  .popover-body .item .desc { font-size: 11px; color: #94a3b8; margin-top: 2px; line-height: 1.35; }
+  .popover-foot {
+    padding: 6px 12px; border-top: 1px solid #f1f5f9; background: #f8fafc;
+    font-size: 11px; color: #94a3b8;
+  }
+
+  .vote {
+    margin-top: 16px; background: #fff; border: 1px solid #d1d5db;
+    border-radius: 12px; padding: 14px 18px; font-size: 13px; color: #1f2937;
+  }
+  .vote b { color: #1d4ed8; }
+</style>
+</head>
+<body>
+
+<h1>🎨 v1.7 Quick Commands — A vs B</h1>
+<div class="legend">
+  <b>左欄 = 方案 A（斜線指令）</b>：在 textarea 輸入 <code>/</code> 跳浮動選單，鍵盤上下鍵選、Enter 套用。
+  <br/><b>右欄 = 方案 B（💡 popover）</b>：點送出鍵旁的 💡 開選單，分類 tab + 點選即套用。
+  <br/>兩邊都能動 — 試完後告訴我選 A、B、或都不要 / 想要混搭。
+</div>
+
+<div class="row">
+
+  <!-- ─────────────────────────────────────────────────────── -->
+  <!-- Option A — slash menu                                    -->
+  <!-- ─────────────────────────────────────────────────────── -->
+  <div class="card" id="cardA">
+    <div class="card-head">
+      A · 斜線指令選單 <span class="badge">輸入 <code style="background:#fff; padding:0 4px;">/</code> 開啟</span>
+    </div>
+    <div class="chat-area">
+      <div class="msg agent">輸入訊息開始對話。試打一個 <code>/</code> 看看。</div>
+    </div>
+    <div class="composer">
+      <div class="slash-menu" id="slashMenuA"></div>
+      <div class="composer-row">
+        <textarea id="taA" placeholder="輸入訊息… 或打 / 開啟指令選單"></textarea>
+        <button class="send" id="sendA">送出</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────── -->
+  <!-- Option B — lightbulb popover                             -->
+  <!-- ─────────────────────────────────────────────────────── -->
+  <div class="card" id="cardB">
+    <div class="card-head">
+      B · 💡 常用指令 popover <span class="badge">點 💡 開啟</span>
+    </div>
+    <div class="chat-area">
+      <div class="msg agent">輸入訊息開始對話。或點 <span style="color:#d97706;">💡</span> 看常用指令。</div>
+    </div>
+    <div class="composer">
+      <div class="popover" id="popoverB">
+        <div class="popover-head">
+          <span>💡 常用指令</span>
+          <span style="color:#94a3b8; font-weight: 400;">點任一項套用</span>
+        </div>
+        <div class="popover-tabs" id="popTabs"></div>
+        <div class="popover-body" id="popBody"></div>
+        <div class="popover-foot">提示：選完還能編輯參數再送出。</div>
+      </div>
+      <div class="composer-row">
+        <textarea id="taB" placeholder="輸入訊息…"></textarea>
+        <button class="icon-btn" id="bulbBtn" title="常用指令">💡</button>
+        <button class="send" id="sendB">送出</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="vote">
+  決定後跟我說：<b>「A」</b>、<b>「B」</b>、<b>「混搭：用 B 但加 / 觸發」</b>，或<b>「兩個都不要，原本 3 個就好」</b>。
+</div>
+
+<script>
+// ── shared command catalog ─────────────────────────────────
+const CATEGORIES = [
+  { key: "spc",    label: "📊 SPC" },
+  { key: "apc",    label: "🔧 APC" },
+  { key: "patrol", label: "📋 巡檢" },
+  { key: "diag",   label: "🩺 診斷" },
+];
+
+const COMMANDS = [
+  // SPC
+  { cat: "spc", ico: "📈", key: "spc-trend",
+    title: "看某機台某站的 xbar 趨勢",
+    desc: "拉最近 N 筆 SPC 資料畫 xbar 控制圖（含 UCL/LCL）",
+    tpl: "幫我看 [EQP-01] [STEP_001] 最近 100 筆 xbar 趨勢" },
+  { cat: "spc", ico: "🔍", key: "spc-ooc",
+    title: "找最近 OOC 集中的機台",
+    desc: "彙總過去 24h 各機台 OOC 次數，找出異常熱點",
+    tpl: "過去 24 小時哪些機台 SPC OOC 最多？列前 5 名" },
+  { cat: "spc", ico: "📊", key: "spc-cpk",
+    title: "比較 R / Cpk / Cpk_std",
+    desc: "三條線並列，看製程能力是否退化",
+    tpl: "比較 [EQP-01] [STEP_001] 過去 7 天的 R、Cpk、Cpk_std 趨勢" },
+  { cat: "spc", ico: "📦", key: "spc-multi-tool",
+    title: "多機台同站點 xbar 並排",
+    desc: "把同一站不同機台的 SPC 趨勢放一起比較",
+    tpl: "把 EQP-01~EQP-05 在 STEP_001 的 xbar 趨勢並排" },
+
+  // APC
+  { cat: "apc", ico: "📐", key: "apc-drift",
+    title: "APC 參數漂移檢查",
+    desc: "看 etch_time_offset 等 APC 參數最近是否有 drift",
+    tpl: "看 [EQP-01] APC etch_time_offset 最近 24 小時是否有漂移" },
+  { cat: "apc", ico: "🔗", key: "apc-corr",
+    title: "APC ↔ SPC 相關性",
+    desc: "找 APC 參數變動跟 SPC OOC 之間的相關性",
+    tpl: "找 [EQP-01] APC etch_time_offset 跟 SPC xbar OOC 的相關性" },
+  { cat: "apc", ico: "🧪", key: "apc-recipe",
+    title: "Recipe 切換前後 APC 比較",
+    desc: "看 recipe 變更後 APC 參數是否跑掉",
+    tpl: "[EQP-01] 在 [recipe X→Y] 切換後 APC 參數有沒有變化？" },
+
+  // 巡檢
+  { cat: "patrol", ico: "🔔", key: "patrol-alarms",
+    title: "今日 alarm 列表",
+    desc: "全廠今日 OPEN 的 HIGH 級告警 + 證據",
+    tpl: "列出今天所有 HIGH 級 alarm（OPEN 狀態），含觸發證據" },
+  { cat: "patrol", ico: "🩹", key: "patrol-status",
+    title: "機台狀態快照",
+    desc: "列各機台目前 idle / processing / down 狀態",
+    tpl: "現在所有機台的狀態快照，標示異常的機台" },
+  { cat: "patrol", ico: "📋", key: "patrol-recipe-consist",
+    title: "Recipe 一致性檢查",
+    desc: "找出全廠跑同一 recipe 但結果有差異的機台",
+    tpl: "全廠跑 recipe [R001] 的機台，xbar 平均值差異 > 1.5σ 的列出來" },
+
+  // 診斷
+  { cat: "diag", ico: "🩺", key: "diag-alarm",
+    title: "Alarm 根因分析",
+    desc: "針對特定 alarm，找出觸發證據 + 可能根因",
+    tpl: "Alarm #[id] 根因分析：列觸發條件、證據資料、相關 APC/SPC" },
+  { cat: "diag", ico: "🔬", key: "diag-ooc-point",
+    title: "OOC 單點深度診斷",
+    desc: "選一個 OOC 點，把附近 process 跟 APC 變化都調出來",
+    tpl: "[LOT-0234] 在 [EQP-01] [STEP_001] 的 OOC 點，前後 30 分鐘的 APC 變化" },
+  { cat: "diag", ico: "🧭", key: "diag-walkback",
+    title: "從 alarm 倒推到製程",
+    desc: "從 alarm → SPC 點 → APC 紀錄 → recipe，一路追回去",
+    tpl: "從 alarm #[id] 倒推：SPC 證據 → APC 紀錄 → 當下 recipe，全部列出" },
+];
+
+const SLASH_GROUPS = CATEGORIES.map(c => ({
+  ...c,
+  items: COMMANDS.filter(cmd => cmd.cat === c.key)
+}));
+
+// ── Option A: slash menu ───────────────────────────────────
+const taA = document.getElementById("taA");
+const slashMenuA = document.getElementById("slashMenuA");
+let slashOpen = false;
+let slashIdx = 0;
+let slashFiltered = [];
+
+function renderSlashMenu(filterText) {
+  slashFiltered = [];
+  let html = "";
+  for (const g of SLASH_GROUPS) {
+    const matches = g.items.filter(it =>
+      !filterText
+      || it.title.includes(filterText)
+      || it.key.startsWith(filterText)
+    );
+    if (matches.length === 0) continue;
+    html += `<div class="group-head">${g.label}</div>`;
+    for (const it of matches) {
+      const idx = slashFiltered.length;
+      slashFiltered.push(it);
+      html += `
+        <div class="item ${idx === slashIdx ? "hl" : ""}" data-idx="${idx}">
+          <span class="ico">${it.ico}</span>
+          <div class="body">
+            <div class="title">${it.title}</div>
+            <div class="desc">${it.desc}</div>
+          </div>
+          <span class="key">/${it.key}</span>
+        </div>`;
+    }
+  }
+  slashMenuA.innerHTML = html || `<div class="item">（找不到符合的指令）</div>`;
+  slashMenuA.querySelectorAll(".item").forEach((el) => {
+    el.addEventListener("mouseenter", () => {
+      slashIdx = parseInt(el.dataset.idx);
+      updateSlashHighlight();
+    });
+    el.addEventListener("click", () => applySlash(slashIdx));
+  });
+}
+function updateSlashHighlight() {
+  slashMenuA.querySelectorAll(".item").forEach((el) => {
+    const i = parseInt(el.dataset.idx);
+    el.classList.toggle("hl", i === slashIdx);
+  });
+}
+function openSlash() { slashOpen = true; slashIdx = 0; renderSlashMenu(""); slashMenuA.classList.add("open"); }
+function closeSlash() { slashOpen = false; slashMenuA.classList.remove("open"); }
+function applySlash(idx) {
+  const it = slashFiltered[idx];
+  if (!it) return;
+  taA.value = it.tpl;
+  closeSlash();
+  taA.focus();
+}
+
+taA.addEventListener("input", (e) => {
+  const v = taA.value;
+  // Trigger on a leading "/" only (simplification for mockup)
+  if (v.startsWith("/")) {
+    const filter = v.slice(1).toLowerCase();
+    if (!slashOpen) openSlash();
+    slashIdx = 0;
+    renderSlashMenu(filter);
+  } else if (slashOpen) {
+    closeSlash();
+  }
+});
+taA.addEventListener("keydown", (e) => {
+  if (!slashOpen) return;
+  if (e.key === "ArrowDown") { e.preventDefault(); slashIdx = Math.min(slashIdx + 1, slashFiltered.length - 1); updateSlashHighlight(); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); slashIdx = Math.max(slashIdx - 1, 0); updateSlashHighlight(); }
+  else if (e.key === "Enter") { e.preventDefault(); applySlash(slashIdx); }
+  else if (e.key === "Escape") { closeSlash(); }
+});
+document.getElementById("sendA").addEventListener("click", () => {
+  if (!taA.value.trim()) return;
+  alert("（mockup）會送出：\n" + taA.value);
+});
+
+// ── Option B: lightbulb popover ────────────────────────────
+const popoverB = document.getElementById("popoverB");
+const taB = document.getElementById("taB");
+const bulbBtn = document.getElementById("bulbBtn");
+let popTab = "spc";
+
+function renderPopover() {
+  // Tabs
+  document.getElementById("popTabs").innerHTML = CATEGORIES.map(c =>
+    `<button class="tab ${c.key === popTab ? "active" : ""}" data-key="${c.key}">${c.label}</button>`
+  ).join("");
+  document.querySelectorAll("#popTabs .tab").forEach(el => {
+    el.addEventListener("click", () => { popTab = el.dataset.key; renderPopover(); });
+  });
+  // Body
+  const items = COMMANDS.filter(c => c.cat === popTab);
+  document.getElementById("popBody").innerHTML = items.map((it, i) => `
+    <div class="item" data-i="${i}">
+      <span class="ico">${it.ico}</span>
+      <div class="body">
+        <div class="title">${it.title}</div>
+        <div class="desc">${it.desc}</div>
+      </div>
+    </div>
+  `).join("");
+  document.querySelectorAll("#popBody .item").forEach(el => {
+    el.addEventListener("click", () => {
+      taB.value = items[parseInt(el.dataset.i)].tpl;
+      popoverB.classList.remove("open");
+      bulbBtn.classList.remove("active");
+      taB.focus();
+    });
+  });
+}
+bulbBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const open = popoverB.classList.toggle("open");
+  bulbBtn.classList.toggle("active", open);
+  if (open) renderPopover();
+});
+document.addEventListener("click", (e) => {
+  if (!popoverB.contains(e.target) && e.target !== bulbBtn) {
+    popoverB.classList.remove("open");
+    bulbBtn.classList.remove("active");
+  }
+});
+document.getElementById("sendB").addEventListener("click", () => {
+  if (!taB.value.trim()) return;
+  alert("（mockup）會送出：\n" + taB.value);
+});
+</script>
+
+</body>
+</html>

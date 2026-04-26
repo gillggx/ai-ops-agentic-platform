@@ -7,6 +7,7 @@ import { consumeSSE } from "@/lib/sse";
 import { ContractCard } from "./ContractCard";
 import { PlanRenderer, type PlanItem } from "./PlanRenderer";
 import OpsConsole, { type GlassOpEntry } from "./OpsConsole";
+import SlashCommandMenu from "./SlashCommandMenu";
 import { ChartIntentRenderer, type ChartIntent } from "./ChartIntentRenderer";
 import { ChartExplorer } from "./ChartExplorer";
 import { PipelineConsole, type PipelineCard } from "./PipelineConsole";
@@ -178,20 +179,8 @@ const LEVEL_COLOR: Record<LogLevel, string> = {
 // Quick prompts by context
 // ---------------------------------------------------------------------------
 
-function getContextPrompts(equipment: string | null | undefined): string[] {
-  if (equipment) {
-    return [
-      `分析 ${equipment} 目前狀態`,
-      `${equipment} 最近 OOC 原因`,
-      `${equipment} 需要排程維護嗎？`,
-    ];
-  }
-  return [
-    "EQP-01 的 APC etch_time_offset 趨勢",
-    "STEP_001 的 xbar_chart trend chart",
-    "EQP-05 列出OOC站點和SPC charts",
-  ];
-}
+// v1.7: contextual quick prompts retired in favour of <SlashCommandMenu/>
+// triggered by typing "/" in the textarea. See SlashCommandMenu.tsx.
 
 // ---------------------------------------------------------------------------
 // Markdown styles — applied to agent message bubble
@@ -252,41 +241,8 @@ const MD_CSS = `
 // get auto-selected so the user just types over them.
 // ---------------------------------------------------------------------------
 
-const INTENT_CHIPS = [
-  { icon: "🔍", label: "查資料", template: "撈取 [機台代碼] 最近 [24 小時] 的 [SPC 資料]" },
-  { icon: "📐", label: "診斷邏輯", template: "判斷是否符合 [連續 3 次 OOC]" },
-  { icon: "📊", label: "呈現結果", template: "用 [趨勢圖] 呈現結果" },
-] as const;
-
-function IntentChipBar({ onPrefill, disabled }: {
-  onPrefill: (template: string) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
-      {INTENT_CHIPS.map((c) => (
-        <button
-          key={c.label}
-          type="button"
-          disabled={disabled}
-          onClick={() => onPrefill(c.template)}
-          style={{
-            padding: "3px 10px", fontSize: 11, borderRadius: 12,
-            border: "1px solid #cbd5e0", background: "#fff",
-            color: "#4a5568",
-            cursor: disabled ? "not-allowed" : "pointer",
-            opacity: disabled ? 0.5 : 1,
-            display: "inline-flex", alignItems: "center", gap: 4,
-          }}
-          title={c.template}
-        >
-          <span>{c.icon}</span>
-          <span>{c.label}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
+// v1.7: IntentChipBar (查資料 / 診斷邏輯 / 呈現結果) retired in favour of
+// <SlashCommandMenu/>. The catalog now lives in SlashCommandMenu.tsx.
 
 // ---------------------------------------------------------------------------
 // RenderDecisionChips — inline expandable chart switcher for MCP results
@@ -528,6 +484,10 @@ export function AIAgentPanel({
   const [stages, setStages]         = useState<StageState[]>([]);
   const [logs, setLogs]             = useState<LogEntry[]>([]);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  // v1.7 — slash command menu (triggered by typing "/" at start of input).
+  const [slashOpen, setSlashOpen] = useState(false);
+  const [slashFilter, setSlashFilter] = useState("");
+  const slashKeyHandlerRef = useRef<((e: React.KeyboardEvent | KeyboardEvent) => boolean) | null>(null);
   // Phase v1.3 P0: count synthesis events emitted during this session so each
   // agent answer gets a stable message_idx for the feedback log.
   const synthesisIdxRef = useRef(0);
@@ -1270,7 +1230,7 @@ export function AIAgentPanel({
     }
   }
 
-  const contextPrompts = getContextPrompts(contextEquipment);
+  // v1.7: contextPrompts removed; slash menu replaces example pills.
 
   // ---------------------------------------------------------------------------
   // Render
@@ -1566,30 +1526,7 @@ export function AIAgentPanel({
         </div>
       )}
 
-      {/* Quick Prompts */}
-      <div style={{ padding: "8px 12px 0", flexShrink: 0 }}>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {contextPrompts.map((p) => (
-            <button
-              key={p}
-              onClick={() => sendMessage(p)}
-              disabled={loading}
-              style={{
-                padding: "4px 10px",
-                background: "#f7f8fc",
-                border: "1px solid #e2e8f0",
-                borderRadius: 12,
-                fontSize: 11,
-                color: "#4a5568",
-                cursor: loading ? "not-allowed" : "pointer",
-                opacity: loading ? 0.5 : 1,
-              }}
-            >
-              {p}
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* v1.7: example-prompt pills retired in favour of slash menu */}
 
       {/* Phase 5-UX-5: focus chip — user's next message targets a specific node */}
       {focusedNodeId && (
@@ -1630,36 +1567,52 @@ export function AIAgentPanel({
       )}
 
       {/* Input */}
-      <div style={{ padding: "8px 12px 12px", flexShrink: 0 }}>
-        {/* Phase v1.3 P0 — Intent chips: prefill input with template + auto-select first [token] */}
-        <IntentChipBar
-          disabled={loading}
-          onPrefill={(template) => {
-            const next = input.trim() ? `${input.trim()}\n${template}` : template;
-            setInput(next);
-            // Defer select-after-render so the textarea's value reflects state.
+      <div style={{ padding: "8px 12px 12px", flexShrink: 0, position: "relative" }}>
+        {/* v1.7 — Slash-command menu. Triggered when textarea starts with "/". */}
+        <SlashCommandMenu
+          open={slashOpen}
+          filter={slashFilter}
+          onPick={(cmd) => {
+            setInput(cmd.tpl);
+            setSlashOpen(false);
             requestAnimationFrame(() => {
               const ta = inputRef.current;
               if (!ta) return;
               ta.focus();
-              const m = next.match(/\[[^\]]+\]/);
+              const m = cmd.tpl.match(/\[[^\]]+\]/);
               if (m && m.index !== undefined) {
                 ta.setSelectionRange(m.index, m.index + m[0].length);
               } else {
-                ta.setSelectionRange(next.length, next.length);
+                ta.setSelectionRange(cmd.tpl.length, cmd.tpl.length);
               }
             });
           }}
+          onClose={() => setSlashOpen(false)}
+          registerKeyHandler={(h) => { slashKeyHandlerRef.current = h; }}
         />
         <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
           <textarea
             ref={inputRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setInput(v);
+              if (v.startsWith("/")) {
+                setSlashOpen(true);
+                setSlashFilter(v.slice(1));
+              } else if (slashOpen) {
+                setSlashOpen(false);
+              }
+            }}
             onKeyDown={(e) => {
+              // Slash menu eats arrow keys / Enter / Esc when open.
+              if (slashOpen && slashKeyHandlerRef.current?.(e)) {
+                e.preventDefault();
+                return;
+              }
               if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(input); }
             }}
-            placeholder="請嘗試：幫我撈取 [EQP-01] 最近 [24 小時] 的 [SPC 資料]，判斷是否 [連續 3 次 OOC]，並用 [趨勢圖] 呈現結果。"
+            placeholder="輸入訊息… 或打 / 開啟常用指令選單"
             disabled={loading}
             rows={3}
             style={{
