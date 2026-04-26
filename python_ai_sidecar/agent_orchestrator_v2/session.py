@@ -111,6 +111,13 @@ async def save_session(
 async def _load_session_java(
     session_id: Optional[str], user_id: int,
 ) -> Tuple[str, List[Any], int]:
+    """Java-backed session load. Anonymous callers (user_id <= 0) get an
+    ephemeral session that lives only in process memory — Java rejects
+    `userId: null` on the agent_sessions write path.
+    """
+    if user_id is None or user_id <= 0:
+        return (session_id or str(uuid.uuid4())), [], 0
+
     from python_ai_sidecar.clients.java_client import JavaAPIClient
     from python_ai_sidecar.config import CONFIG
     java = JavaAPIClient(
@@ -140,6 +147,10 @@ async def _load_session_java(
 async def _save_session_java(
     session_id: str, user_id: int, messages: List[Any], cumulative_tokens: int,
 ) -> None:
+    if user_id is None or user_id <= 0:
+        # Anonymous caller — nothing to persist.
+        return
+
     from python_ai_sidecar.clients.java_client import JavaAPIClient
     from python_ai_sidecar.config import CONFIG
     java = JavaAPIClient(

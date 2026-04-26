@@ -489,24 +489,34 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
         # Phase 5-UX-6: build_pipeline_live persists final canvas snapshot to
         # agent_sessions so /chat/[id] can restore on page reload. No render
         # card — the overlay already showed everything live.
+        # Phase 8-A-1d: native chat path (db=None) routes via Java upsert.
         if tool_name == "build_pipeline_live" and isinstance(result, dict) and result.get("status") in {"finished", "success"}:
             sid = state.get("session_id")
-            if sid:
+            pipeline_json = result.get("pipeline_json")
+            if sid and pipeline_json:
                 try:
-                    from python_ai_sidecar.agent_helpers._model_stubs import AgentSessionModel
-                    from sqlalchemy import select as _select
-                    _sess_row = (await db.execute(
-                        _select(AgentSessionModel).where(
-                            AgentSessionModel.session_id == sid,
-                            AgentSessionModel.user_id == user_id,
-                        )
-                    )).scalar_one_or_none()
-                    if _sess_row is not None and result.get("pipeline_json"):
-                        _sess_row.last_pipeline_json = json.dumps(
-                            result.get("pipeline_json"),
-                            ensure_ascii=False,
-                        )
-                        await db.flush()
+                    if db is None:
+                        # Anonymous caller — skip persist (Java requires userId).
+                        if not user_id or user_id <= 0:
+                            pass
+                        else:
+                            # Java upsert — minimal payload preserves prior fields.
+                            await java.upsert_agent_session(str(sid), {
+                                "userId": user_id,
+                                "lastPipelineJson": json.dumps(pipeline_json, ensure_ascii=False),
+                            })
+                    else:
+                        from python_ai_sidecar.agent_helpers._model_stubs import AgentSessionModel
+                        from sqlalchemy import select as _select
+                        _sess_row = (await db.execute(
+                            _select(AgentSessionModel).where(
+                                AgentSessionModel.session_id == sid,
+                                AgentSessionModel.user_id == user_id,
+                            )
+                        )).scalar_one_or_none()
+                        if _sess_row is not None:
+                            _sess_row.last_pipeline_json = json.dumps(pipeline_json, ensure_ascii=False)
+                            await db.flush()
                 except Exception as e:  # noqa: BLE001
                     logger.warning("session pipeline snapshot writeback failed: %s", e)
 

@@ -57,6 +57,14 @@ class _Settings:
         )
         # mem0 (long-term semantic memory) — only used when key set
         self.MEM0_API_KEY: str = os.environ.get("MEM0_API_KEY", "")
+        # Phase 5 (PIPELINE_ONLY_MODE): forces the chat orchestrator to route
+        # data-analysis questions through build_pipeline_live + plan_pipeline
+        # rather than the legacy direct-MCP path. Off by default so chat works
+        # for ad-hoc queries; flip to "1" when the block catalog covers all
+        # production analysis paths.
+        self.PIPELINE_ONLY_MODE: bool = os.environ.get(
+            "PIPELINE_ONLY_MODE", "0"
+        ).strip() in ("1", "true", "True", "yes")
 
 
 _settings_singleton: _Settings | None = None

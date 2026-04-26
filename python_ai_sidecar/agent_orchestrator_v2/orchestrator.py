@@ -243,21 +243,24 @@ class AgentOrchestratorV2:
 
             if self._db is None:
                 # Phase 8-A-1d: native chat — save via Java upsert.
-                from python_ai_sidecar.clients.java_client import JavaAPIClient
-                from python_ai_sidecar.config import CONFIG
-                java = JavaAPIClient(
-                    CONFIG.java_api_url, CONFIG.java_internal_token,
-                    timeout_sec=CONFIG.java_timeout_sec,
-                )
-                try:
-                    await java.upsert_agent_session(_final_session_id or "ephemeral", {
-                        "userId": self._user_id,
-                        "messages": v1_payload,
-                        "cumulativeTokens": existing_tokens + _total_tokens,
-                        "expiresAt": expires.isoformat(),
-                    })
-                except Exception as exc:
-                    logger.warning("session save via java failed: %s", exc)
+                # Anonymous callers (user_id <= 0) skip persist (Java rejects
+                # null userId; ephemeral session is fine for one-shot calls).
+                if self._user_id and self._user_id > 0:
+                    from python_ai_sidecar.clients.java_client import JavaAPIClient
+                    from python_ai_sidecar.config import CONFIG
+                    java = JavaAPIClient(
+                        CONFIG.java_api_url, CONFIG.java_internal_token,
+                        timeout_sec=CONFIG.java_timeout_sec,
+                    )
+                    try:
+                        await java.upsert_agent_session(_final_session_id or "ephemeral", {
+                            "userId": self._user_id,
+                            "messages": v1_payload,
+                            "cumulativeTokens": existing_tokens + _total_tokens,
+                            "expiresAt": expires.isoformat(),
+                        })
+                    except Exception as exc:
+                        logger.warning("session save via java failed: %s", exc)
             else:
                 from sqlalchemy import select
                 from python_ai_sidecar.agent_helpers._model_stubs import AgentSessionModel
