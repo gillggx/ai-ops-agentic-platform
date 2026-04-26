@@ -164,6 +164,14 @@ async def llm_call_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[s
     # restricted catalog (no build_pipeline_live, no memory writes, etc.).
     caller_roles = config["configurable"].get("caller_roles") or ()
     visible_tools = _visible_tools(caller_roles)
+    # Phase v1.3 P0 debug — confirm role gating actually fires.
+    logger.info(
+        "llm_call: caller_roles=%s visible_tool_count=%d hidden_role_tools=%s",
+        caller_roles,
+        len(visible_tools),
+        [t for t in ("build_pipeline_live", "draft_skill", "save_memory")
+         if t not in {x["name"] for x in visible_tools}],
+    )
     try:
         response = await llm.create(
             system=system,
