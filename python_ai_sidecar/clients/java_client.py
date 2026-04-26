@@ -22,6 +22,30 @@ from ..config import CONFIG
 log = logging.getLogger("python_ai_sidecar.java_client")
 
 
+# camelCase → snake_case (Java JacksonConfig uses SNAKE_CASE for JSON I/O).
+# Sidecar callers write JSON literals in camelCase by convention; we
+# normalise on the wire so they don't have to think about it.
+def _camel_to_snake(name: str) -> str:
+    # Already-snake / all-caps constants pass through unchanged.
+    if not any(c.islower() for c in name):
+        return name
+    out = []
+    for i, ch in enumerate(name):
+        if ch.isupper() and i > 0 and not name[i - 1].isupper():
+            out.append("_")
+        out.append(ch.lower())
+    return "".join(out)
+
+
+def _to_snake_keys(obj: Any) -> Any:  # noqa: ANN401
+    if isinstance(obj, dict):
+        return {_camel_to_snake(k) if isinstance(k, str) else k: _to_snake_keys(v)
+                for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_to_snake_keys(v) for v in obj]
+    return obj
+
+
 class JavaAPIError(RuntimeError):
     """Raised when Java returns a non-2xx or malformed envelope."""
 
@@ -81,6 +105,13 @@ class JavaAPIClient:
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         url = f"{self.base_url}{path}"
         timeout = httpx.Timeout(self.timeout_sec, connect=5.0)
+        # Java JacksonConfig sets PropertyNamingStrategies.SNAKE_CASE so all
+        # incoming JSON must use snake_case keys. Sidecar code writes
+        # camelCase by convention; convert at the wire.
+        if "json" in kwargs and kwargs["json"] is not None:
+            kwargs["json"] = _to_snake_keys(kwargs["json"])
+        if "params" in kwargs and kwargs["params"] is not None:
+            kwargs["params"] = _to_snake_keys(kwargs["params"])
         async with httpx.AsyncClient(timeout=timeout) as client:
             res = await client.request(method, url, headers=self._headers(), **kwargs)
         if res.status_code >= 400:
