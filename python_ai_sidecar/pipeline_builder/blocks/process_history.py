@@ -125,6 +125,31 @@ class ProcessHistoryBlockExecutor(BlockExecutor):
                 hint="原 MCP get_process_info 要求這三個參數至少帶一個",
             )
 
+        # Reject comma-separated values up-front: agents sometimes try to pack
+        # multiple toolIDs into the single `tool_id` field, which silently
+        # matches zero rows. Surface a clear error + the right pattern.
+        for fname, fval in (("tool_id", tool_id), ("lot_id", lot_id), ("step", step)):
+            if isinstance(fval, str) and "," in fval:
+                raise BlockExecutionError(
+                    code="INVALID_PARAM",
+                    message=f"`{fname}` 只接受單一值，不能用逗號分隔（看到：{fval!r}）",
+                    hint=(
+                        "需要查多台機台 / 多 lot / 多 step 時：source 不要設這個欄位，"
+                        "改用 `block_filter` operator='in' value=[ ... ] 過濾。"
+                        "範例：source step='STEP_001' → filter column='toolID' op='in' "
+                        "value=['EQP-01','EQP-02','EQP-03','EQP-04','EQP-05']."
+                    ),
+                )
+            if isinstance(fval, list):
+                raise BlockExecutionError(
+                    code="INVALID_PARAM",
+                    message=f"`{fname}` 只接受單一字串，不能傳 list",
+                    hint=(
+                        "多值請改用 block_filter operator='in'。"
+                        "block_process_history 的 tool_id / lot_id / step 是單一字串。"
+                    ),
+                )
+
         time_range = params.get("time_range", "24h")
         object_name = params.get("object_name") or None
         if object_name and object_name not in _OBJECT_KEYS:

@@ -133,7 +133,7 @@ Don't chain `alert → chart` or `alert → data_view`. Alert is terminal.
   — that's 9+ nodes and wastes turns. Use this 3-node pattern instead:
 
   ```
-  block_process_history (step="STEP_001", time_range=..., NO tool_id)
+  block_process_history (step="STEP_001", time_range=..., NO tool_id)   ← do not set tool_id
     → block_filter (column="toolID", operator="in", value=["EQP-01","EQP-02","EQP-03","EQP-04","EQP-05"])
     → block_chart  (chart_type="line", x="eventTime", y="spc_xbar_chart_value",
                     color="toolID",
@@ -141,6 +141,15 @@ Don't chain `alert → chart` or `alert → data_view`. Alert is terminal.
     # If the data has an OOC bool column (e.g. from a logic node) you can also
     # set highlight_column on top of that — it overlays red rings independent
     # of the color grouping.
+
+  ⚠ ANTI-PATTERN — do NOT do this:
+  ```
+  block_process_history (tool_id="EQP-01,EQP-02,EQP-03,EQP-04,EQP-05", step="STEP_001")
+  ```
+  `block_process_history` accepts `tool_id` as a SINGLE string only — comma-separated
+  values silently match zero rows because the underlying ontology query does
+  `WHERE toolID = '<that whole comma string>'`. Same for `lot_id` and `step`.
+  Multi-value selection is the **block_filter** block's job, not the source's.
   ```
 
   Key insights:
