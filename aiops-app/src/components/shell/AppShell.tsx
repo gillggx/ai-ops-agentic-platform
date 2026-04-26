@@ -294,11 +294,15 @@ function Shell({ children }: { children: React.ReactNode }) {
           {(() => {
             // v1.5 — whenever the chat agent has pipeline activity (building,
             // done, or accumulated state) swap children for the inline
-            // Pipeline Workspace. Skip on Pipeline Builder routes so the
-            // builder canvas itself is never hidden. Click 清除 to revert.
-            const onBuilderRoute = pathname.startsWith("/admin/pipeline-builder");
+            // Pipeline Workspace. Skip ONLY when the user is actually on a
+            // builder canvas (/new or /[id]); the list page (/admin/pipeline-
+            // builder) should still surface the workspace.
+            const onBuilderCanvas =
+              pathname === "/admin/pipeline-builder/new" ||
+              pathname.startsWith("/admin/pipeline-builder/new/") ||
+              /^\/admin\/pipeline-builder\/\d+(\/|$)/.test(pathname);
             const showWorkspace =
-              !onBuilderRoute && (canvasStatus !== "idle" || pipelineJson !== null);
+              !onBuilderCanvas && (canvasStatus !== "idle" || pipelineJson !== null);
             if (dataExplorer) {
               return (
                 <DataExplorerPanel
