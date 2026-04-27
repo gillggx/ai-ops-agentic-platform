@@ -40,6 +40,31 @@ MAX_SAME_TOOL_RETRY = 3  # if Agent calls the same (tool, args) 3x in a row → 
 DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_MAX_TOKENS = 4096
 
+# SPEC_glassbox_continuation — when MAX_TURNS hits, instead of failing, ask
+# the user whether to continue. Each "再給 N 步" budgets +N turns up to
+# ABSOLUTE_MAX_TURNS, after which we hard-fail (loops shouldn't get unlimited
+# extensions).
+MAX_TURNS_PER_CONTINUATION = 20
+ABSOLUTE_MAX_TURNS = 120
+
+
+# In-memory paused-session registry. Keyed by session_id. Lives only in the
+# sidecar process — if the sidecar restarts, paused sessions are lost (user
+# has to start over). This is a deliberate v1 simplification; SPEC §1.1 leaves
+# Java-backed persistence for a future iteration.
+_PAUSED_SESSIONS: dict[str, AgentBuilderSession] = {}
+
+
+def park_paused_session(session: AgentBuilderSession) -> None:
+    """Register a session in the paused registry."""
+    _PAUSED_SESSIONS[session.session_id] = session
+
+
+def take_paused_session(session_id: str) -> Optional[AgentBuilderSession]:
+    """Pop a paused session out of the registry (returns None if not found
+    or already taken — keep idempotent semantics for retry-tolerant clients)."""
+    return _PAUSED_SESSIONS.pop(session_id, None)
+
 
 async def stream_agent_build(
     session: AgentBuilderSession,
@@ -81,21 +106,38 @@ async def stream_agent_build(
         # Mark last tool with cache_control so all tools get cached together
         tools[-1]["cache_control"] = {"type": "ephemeral"}
 
-    # Build initial messages: user prompt + current state summary if base_pipeline was provided
-    user_opening = session.user_prompt
-    if session.pipeline_json.nodes:
-        state_summary = await toolset.get_state()
-        user_opening = (
-            f"{session.user_prompt}\n\n"
-            f"(Note: the pipeline is not empty — current state = {state_summary})"
-        )
-        # Phase 5-UX-6 fix: only pop if dispatch actually recorded something.
-        # Direct get_state() calls bypass dispatch so ops stays empty → pop()
-        # would raise IndexError.
-        if session.operations:
-            session.operations.pop()
+    # SPEC_glassbox_continuation: when the run is resumed (continuation_count > 0),
+    # restore the previous messages list verbatim instead of re-seeding from
+    # user_prompt. Skip the opening chat too — that already fired in turn 1.
+    if session.continuation_count > 0 and session.messages_snapshot:
+        messages: list[dict[str, Any]] = list(session.messages_snapshot)
+        _emit_opening = False
+        # Continuation budget = base + N × per-continuation
+        turn_budget = MAX_TURNS + session.continuation_count * MAX_TURNS_PER_CONTINUATION
+        # Hard cap so a stuck loop can't be extended indefinitely
+        turn_budget = min(turn_budget, ABSOLUTE_MAX_TURNS)
+        # Continue counting from where the previous run left off (messages
+        # already reflects len(operations) turns)
+        turn = MAX_TURNS + (session.continuation_count - 1) * MAX_TURNS_PER_CONTINUATION
+    else:
+        # Build initial messages: user prompt + current state summary if base_pipeline was provided
+        user_opening = session.user_prompt
+        if session.pipeline_json.nodes:
+            state_summary = await toolset.get_state()
+            user_opening = (
+                f"{session.user_prompt}\n\n"
+                f"(Note: the pipeline is not empty — current state = {state_summary})"
+            )
+            # Phase 5-UX-6 fix: only pop if dispatch actually recorded something.
+            # Direct get_state() calls bypass dispatch so ops stays empty → pop()
+            # would raise IndexError.
+            if session.operations:
+                session.operations.pop()
 
-    messages: list[dict[str, Any]] = [{"role": "user", "content": user_opening}]
+        messages: list[dict[str, Any]] = [{"role": "user", "content": user_opening}]
+        _emit_opening = True
+        turn_budget = MAX_TURNS
+        turn = 0
 
     last_tool_key: Optional[str] = None
     same_tool_streak = 0
@@ -103,10 +145,8 @@ async def stream_agent_build(
     # Opening chat
     opening = "規劃中…分析需求、挑選適合的 blocks。"
     session.record_chat_msg = lambda msg: None  # noqa: E731 — dummy for type pre-check
-    _emit_opening = True
 
-    turn = 0
-    while turn < MAX_TURNS:
+    while turn < turn_budget:
         turn += 1
 
         # Cancel check
@@ -333,8 +373,37 @@ async def stream_agent_build(
 
     # --- loop exit ---
     if session.status == "running":
-        # Hit max turns
-        session.mark_failed(f"Reached MAX_TURNS={MAX_TURNS} without calling finish()")
+        # SPEC_glassbox_continuation: hit turn budget. Two cases:
+        #   (a) total used == ABSOLUTE_MAX_TURNS → hard-fail, no more chances
+        #   (b) total used < ABSOLUTE_MAX_TURNS → pause + ask user to continue
+        if turn >= ABSOLUTE_MAX_TURNS:
+            session.mark_failed(
+                f"Reached ABSOLUTE_MAX_TURNS={ABSOLUTE_MAX_TURNS} after "
+                f"{session.continuation_count} continuation(s) without calling finish()"
+            )
+        else:
+            assessment = await _self_assess_progress(client, model, system_blocks, messages)
+            session.messages_snapshot = list(messages)
+            session.mark_paused(reason=f"Hit turn budget ({turn}/{turn_budget}); asked user")
+            park_paused_session(session)
+            yield StreamEvent(
+                type="continuation_request",
+                data={
+                    "session_id": session.session_id,
+                    "turns_used": turn,
+                    "ops_count": len(session.operations),
+                    "completed": assessment.get("completed", []),
+                    "remaining": assessment.get("remaining", []),
+                    "estimate": assessment.get("estimate", 10),
+                    "options": [
+                        {"id": "continue", "label": f"再給 {assessment.get('estimate', 10)} 步",
+                         "additional_turns": min(MAX_TURNS_PER_CONTINUATION, max(5, assessment.get("estimate", 10)))},
+                        {"id": "takeover", "label": "我自己接手"},
+                        {"id": "stop", "label": "停手用現有結果"},
+                    ],
+                    "ts": 0.0,
+                },
+            )
 
     # Emit final "done" event
     yield StreamEvent(
@@ -353,3 +422,72 @@ def _format_tool_error(e: ToolError) -> str:
         payload["hint"] = e.hint
     import json as _json
     return _json.dumps(payload, ensure_ascii=False)
+
+
+async def _self_assess_progress(
+    client: "anthropic.AsyncAnthropic",
+    model: str,
+    system_blocks: list[dict[str, Any]],
+    conversation: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Ask the LLM to summarize what's done + what's left + how many more
+    turns it needs. Result feeds the ContinuationCard.
+
+    Returns {"completed": [...], "remaining": [...], "estimate": int}.
+    Failure-tolerant: any error → generic fallback so the user still sees
+    something useful instead of an empty card.
+    """
+    import json as _json
+
+    fallback = {
+        "completed": ["建構過程進行中（自評失敗）"],
+        "remaining": ["呼叫 finish() 收尾"],
+        "estimate": 10,
+    }
+
+    # Build a tiny one-shot follow-up: re-use the cached system + tools but
+    # append a self-assessment user prompt. Keep messages context so the LLM
+    # actually knows where it is.
+    probe_messages = list(conversation) + [{
+        "role": "user",
+        "content": (
+            "你已經跑完 turn 預算還沒呼叫 finish。請以**JSON 純文字**回答（不要 markdown / 不要 ```fence```）：\n"
+            '{"completed": ["最多 6 個 ≤20 字的已完成項目（例如「加 STEP_001 source」/「設定 xbar chart」）"],\n'
+            '"remaining": ["最多 4 個 ≤20 字的剩餘步驟（例如「驗證 pipeline」/「呼 finish」）"],\n'
+            '"estimate": 5-20 之間的整數，估還需幾 turn 才能 finish}'
+        ),
+    }]
+
+    try:
+        resp = await client.messages.create(
+            model=model,
+            max_tokens=300,
+            system=system_blocks,
+            messages=probe_messages,
+        )
+        text = ""
+        for block in resp.content:
+            if getattr(block, "type", None) == "text":
+                text = block.text
+                break
+        text = (text or "").strip()
+        # Strip code fences if the model ignored "no markdown" hint
+        if text.startswith("```"):
+            text = text.strip("`")
+            if text.lower().startswith("json"):
+                text = text[4:]
+            text = text.strip()
+        decision = _json.loads(text)
+        # Clamp estimate to [5, MAX_TURNS_PER_CONTINUATION]
+        try:
+            est = int(decision.get("estimate", 10))
+            decision["estimate"] = max(5, min(MAX_TURNS_PER_CONTINUATION, est))
+        except (TypeError, ValueError):
+            decision["estimate"] = 10
+        # Clamp list lengths
+        decision["completed"] = (decision.get("completed") or [])[:6]
+        decision["remaining"] = (decision.get("remaining") or [])[:4]
+        return decision
+    except Exception as e:  # noqa: BLE001
+        logger.warning("self-assess failed (%s) — using fallback summary", e)
+        return fallback

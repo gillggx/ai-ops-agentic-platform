@@ -47,6 +47,15 @@ class BuildRequest(BaseModel):
     pipeline_snapshot: dict | None = Field(default=None, alias="pipelineSnapshot")
 
 
+class BuildContinueRequest(BaseModel):
+    """SPEC_glassbox_continuation: resume a paused Glass Box build.
+    `additional_turns` is bounded server-side to MAX_TURNS_PER_CONTINUATION."""
+    model_config = ConfigDict(populate_by_name=True)
+
+    session_id: str = Field(..., alias="sessionId")
+    additional_turns: int = Field(default=20, alias="additionalTurns")
+
+
 async def _chat_stream_native(req: ChatRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
     """Phase 8-A-1d: native LangGraph orchestrator.
 
@@ -161,3 +170,61 @@ async def agent_chat(req: ChatRequest, caller: CallerContext = ServiceAuth) -> E
 @router.post("/build")
 async def agent_build(req: BuildRequest, caller: CallerContext = ServiceAuth) -> EventSourceResponse:
     return EventSourceResponse(_build_stream(req, caller))
+
+
+async def _build_continue_stream(req: BuildContinueRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
+    """SPEC_glassbox_continuation: resume a paused Glass Box build.
+
+    Loads the parked session, bumps continuation_count, and re-enters
+    stream_agent_build which detects the snapshot and resumes from where
+    the previous run paused.
+    """
+    import os
+    from python_ai_sidecar.agent_builder.orchestrator import (
+        stream_agent_build,
+        take_paused_session,
+        MAX_TURNS_PER_CONTINUATION,
+    )
+    from python_ai_sidecar.pipeline_builder.seedless_registry import SeedlessBlockRegistry
+
+    session = take_paused_session(req.session_id)
+    if session is None:
+        yield {"event": "error", "data": json.dumps({
+            "op": "continue", "message": f"session {req.session_id} not found or already taken",
+            "ts": 0.0,
+        }, ensure_ascii=False)}
+        yield {"event": "done", "data": json.dumps({"status": "failed", "summary": "session not found"}, ensure_ascii=False)}
+        return
+
+    if session.status != "paused":
+        yield {"event": "error", "data": json.dumps({
+            "op": "continue", "message": f"session {req.session_id} status={session.status} (need 'paused')",
+            "ts": 0.0,
+        }, ensure_ascii=False)}
+        yield {"event": "done", "data": json.dumps({"status": "failed", "summary": "session not paused"}, ensure_ascii=False)}
+        return
+
+    # Cap the additional turns server-side regardless of what client requested
+    capped = max(5, min(MAX_TURNS_PER_CONTINUATION, int(req.additional_turns or 20)))
+    log.info("build/continue: session=%s continuation=%d → +%d turns",
+             session.session_id, session.continuation_count + 1, capped)
+
+    session.continuation_count += 1
+    session.status = "running"
+
+    registry = SeedlessBlockRegistry()
+    registry.load()
+
+    model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+    async for stream_event in stream_agent_build(session, registry, model=model):
+        yield {
+            "event": stream_event.type,
+            "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
+        }
+
+
+@router.post("/build/continue")
+async def agent_build_continue(
+    req: BuildContinueRequest, caller: CallerContext = ServiceAuth,
+) -> EventSourceResponse:
+    return EventSourceResponse(_build_continue_stream(req, caller))

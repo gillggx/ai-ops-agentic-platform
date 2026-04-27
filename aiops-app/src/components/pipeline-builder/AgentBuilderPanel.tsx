@@ -21,13 +21,15 @@ import { useBuilder } from "@/context/pipeline-builder/BuilderContext";
 import type { BlockSpec } from "@/lib/pipeline-builder/types";
 import { applyGlassOp, OP_LABELS, opDetail, autoLayoutPipeline } from "@/lib/pipeline-builder/glass-ops";
 import { PlanRenderer, type PlanItem } from "@/components/copilot/PlanRenderer";
+import { ContinuationCard, type ContinuationData, type ContinuationOption } from "@/components/copilot/ContinuationCard";
 
-type ChatRole = "user" | "agent" | "op" | "error";
+type ChatRole = "user" | "agent" | "op" | "error" | "continuation";
 interface ChatLine {
   id: number;
   role: ChatRole;
   text: string;
   op?: { label: string; detail: string };
+  continuation?: ContinuationData;
 }
 
 interface Props {
@@ -79,6 +81,100 @@ export default function AgentBuilderPanel({
     }
   }, [actions, blockCatalog]);
 
+  // Shared SSE consumer for both /api/agent/build and /api/agent/build/continue.
+  // Both endpoints emit the same event types; the only thing that differs
+  // upstream is the request body.
+  const consumeBuildStream = useCallback(async (streamRes: Response) => {
+    if (!streamRes.ok || !streamRes.body) {
+      const errText = await streamRes.text().catch(() => "");
+      throw new Error(`Agent stream failed (${streamRes.status}): ${errText.slice(0, 160)}`);
+    }
+    const reader = streamRes.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let frameEnd: number;
+      // eslint-disable-next-line no-cond-assign
+      while ((frameEnd = buffer.indexOf("\n\n")) !== -1) {
+        const frame = buffer.slice(0, frameEnd);
+        buffer = buffer.slice(frameEnd + 2);
+        if (!frame.trim()) continue;
+
+        let eventType = "message";
+        const dataLines: string[] = [];
+        for (const line of frame.split("\n")) {
+          if (line.startsWith("event:")) eventType = line.slice(6).trim();
+          else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+        }
+        const dataStr = dataLines.join("\n");
+        let data: Record<string, unknown> = {};
+        try { data = dataStr ? JSON.parse(dataStr) : {}; } catch { data = { _raw: dataStr }; }
+
+        if (eventType === "plan") {
+          const items = (data.items as PlanItem[]) ?? [];
+          setPlanItems(items.map((it) => ({ ...it })));
+        } else if (eventType === "plan_update") {
+          const id = data.id as string;
+          const status = data.status as PlanItem["status"];
+          const note = data.note as string | undefined;
+          setPlanItems((prev) => prev.map((it) =>
+            it.id === id ? { ...it, status: status ?? it.status, note: note ?? it.note } : it,
+          ));
+        } else if (eventType === "chat") {
+          const text = (data.content as string) || "";
+          if (text) setLines((p) => [...p, { id: nextId(), role: "agent", text }]);
+        } else if (eventType === "operation") {
+          const op = data.op as string;
+          const args = (data.args as Record<string, unknown>) || {};
+          const result = (data.result as Record<string, unknown>) || {};
+          applyOperation(op, args, result);
+          const label = OP_LABELS[op] ?? op;
+          const detail = opDetail(op, args);
+          setLines((p) => [...p, { id: nextId(), role: "op", text: "", op: { label, detail } }]);
+        } else if (eventType === "continuation_request") {
+          // SPEC_glassbox_continuation: agent paused at turn budget, emit a
+          // quick-pick card so user can extend / take over / stop.
+          const cont: ContinuationData = {
+            session_id: data.session_id as string,
+            turns_used: (data.turns_used as number) ?? 0,
+            ops_count: (data.ops_count as number) ?? 0,
+            completed: (data.completed as string[]) ?? [],
+            remaining: (data.remaining as string[]) ?? [],
+            estimate: (data.estimate as number) ?? 10,
+            options: (data.options as ContinuationOption[]) ?? [],
+            resolved: false,
+          };
+          setLines((p) => [...p, { id: nextId(), role: "continuation", text: "", continuation: cont }]);
+        } else if (eventType === "error") {
+          const msg = (data.message as string) || "(unknown error)";
+          setLines((p) => [...p, { id: nextId(), role: "error", text: msg }]);
+        } else if (eventType === "done") {
+          const summary = (data.summary as string) || "(done)";
+          setLines((p) => [...p, { id: nextId(), role: "agent", text: `✓ ${summary}` }]);
+          // Phase 5-UX-6 (race-fix): defer auto-layout until React commits
+          // every queued add_node / connect / rename action.
+          const edgesNow = stateRef.current.pipeline.edges;
+          requestAnimationFrame(() => {
+            const laidOut = autoLayoutPipeline(
+              currentNodesRef.current,
+              stateRef.current.pipeline.edges,
+            );
+            if (laidOut.length > 0) {
+              actions.setNodesAndEdges(laidOut, stateRef.current.pipeline.edges);
+            } else {
+              void edgesNow;
+            }
+          });
+        }
+      }
+    }
+  }, [actions, applyOperation]);
+
   const sendMessage = useCallback(async (raw: string) => {
     if (!raw.trim() || running) return;
     const prompt = focusedNodeId
@@ -90,10 +186,6 @@ export default function AgentBuilderPanel({
     setRunning(true);
 
     try {
-      // Phase 8-A A-2: one-step SSE. Java (and sidecar) return the event
-      // stream DIRECTLY on the POST — no intermediate session_id / separate
-      // GET /stream/{id} round-trip. Frontend now reads the SSE from the
-      // POST response body.
       const hasExistingNodes = (state.pipeline.nodes?.length ?? 0) > 0;
       abortRef.current?.abort();
       abortRef.current = new AbortController();
@@ -107,91 +199,7 @@ export default function AgentBuilderPanel({
           pipelineSnapshot: hasExistingNodes ? state.pipeline : null,
         }),
       });
-      if (!streamRes.ok || !streamRes.body) {
-        const errText = await streamRes.text().catch(() => "");
-        throw new Error(`Agent stream failed (${streamRes.status}): ${errText.slice(0, 160)}`);
-      }
-
-      const reader = streamRes.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        // Parse SSE frames split on \n\n
-        let frameEnd: number;
-        // eslint-disable-next-line no-cond-assign
-        while ((frameEnd = buffer.indexOf("\n\n")) !== -1) {
-          const frame = buffer.slice(0, frameEnd);
-          buffer = buffer.slice(frameEnd + 2);
-          if (!frame.trim()) continue;
-
-          // Parse event: X / data: {...}
-          let eventType = "message";
-          const dataLines: string[] = [];
-          for (const line of frame.split("\n")) {
-            if (line.startsWith("event:")) eventType = line.slice(6).trim();
-            else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
-          }
-          const dataStr = dataLines.join("\n");
-          let data: Record<string, unknown> = {};
-          try { data = dataStr ? JSON.parse(dataStr) : {}; } catch { data = { _raw: dataStr }; }
-
-          if (eventType === "plan") {
-            const items = (data.items as PlanItem[]) ?? [];
-            setPlanItems(items.map((it) => ({ ...it })));
-          } else if (eventType === "plan_update") {
-            const id = data.id as string;
-            const status = data.status as PlanItem["status"];
-            const note = data.note as string | undefined;
-            setPlanItems((prev) => prev.map((it) =>
-              it.id === id ? { ...it, status: status ?? it.status, note: note ?? it.note } : it,
-            ));
-          } else if (eventType === "chat") {
-            const text = (data.content as string) || "";
-            if (text) setLines((p) => [...p, { id: nextId(), role: "agent", text }]);
-          } else if (eventType === "operation") {
-            const op = data.op as string;
-            const args = (data.args as Record<string, unknown>) || {};
-            const result = (data.result as Record<string, unknown>) || {};
-            applyOperation(op, args, result);
-            const label = OP_LABELS[op] ?? op;
-            const detail = opDetail(op, args);
-            setLines((p) => [...p, { id: nextId(), role: "op", text: "", op: { label, detail } }]);
-          } else if (eventType === "error") {
-            const msg = (data.message as string) || "(unknown error)";
-            setLines((p) => [...p, { id: nextId(), role: "error", text: msg }]);
-          } else if (eventType === "done") {
-            const summary = (data.summary as string) || "(done)";
-            setLines((p) => [...p, { id: nextId(), role: "agent", text: `✓ ${summary}` }]);
-            // Phase 5-UX-6 (race-fix): defer auto-layout until React commits
-            // every queued add_node / connect / rename action. Reading
-            // currentNodesRef.current here got the pre-commit value so the
-            // last node added in this turn was missing → DAG laid out
-            // without it → on canvas it appeared stuck on top of an existing
-            // node and the user thought it disappeared.
-            // requestAnimationFrame waits until after commit + paint.
-            const edgesNow = stateRef.current.pipeline.edges;
-            requestAnimationFrame(() => {
-              const laidOut = autoLayoutPipeline(
-                currentNodesRef.current,
-                stateRef.current.pipeline.edges,
-              );
-              if (laidOut.length > 0) {
-                actions.setNodesAndEdges(laidOut, stateRef.current.pipeline.edges);
-              } else {
-                // Fallback: edges already up-to-date but nodes ref empty —
-                // try again on next frame (extremely rare race).
-                void edgesNow;
-              }
-            });
-          }
-          // Other event types (suggestion_card, plan, thinking) are not critical here.
-        }
-      }
+      await consumeBuildStream(streamRes);
     } catch (e) {
       if ((e as Error).name !== "AbortError") {
         setLines((p) => [...p, { id: nextId(), role: "error", text: `連線失敗：${(e as Error).message}` }]);
@@ -199,7 +207,53 @@ export default function AgentBuilderPanel({
     } finally {
       setRunning(false);
     }
-  }, [running, focusedNodeId, focusedNodeLabel, basePipelineId, applyOperation]);
+  }, [running, focusedNodeId, focusedNodeLabel, basePipelineId, state.pipeline, consumeBuildStream]);
+
+  const handleContinuationPick = useCallback(async (lineId: number, opt: ContinuationOption) => {
+    // Mark the card resolved so its buttons disable.
+    setLines((p) => p.map((l) =>
+      l.id === lineId && l.continuation
+        ? { ...l, continuation: { ...l.continuation, resolved: true } }
+        : l,
+    ));
+    // Find the card data so we know which session_id to act on.
+    const card = lines.find((l) => l.id === lineId)?.continuation;
+    if (!card) return;
+
+    if (opt.id === "stop") {
+      // Just keep the partial canvas as-is.
+      setLines((p) => [...p, { id: nextId(), role: "agent", text: "已停手，partial pipeline 保留在 canvas。" }]);
+      return;
+    }
+    if (opt.id === "takeover") {
+      // v1: tell user to keep working in the current builder; partial canvas is
+      // already mounted in the hosting page, no navigation needed.
+      setLines((p) => [...p, { id: nextId(), role: "agent", text: "你接手吧 — partial canvas 已在此頁面，可直接編輯。" }]);
+      return;
+    }
+    // opt.id === "continue"
+    setRunning(true);
+    try {
+      abortRef.current?.abort();
+      abortRef.current = new AbortController();
+      const streamRes = await fetch("/api/agent/build/continue", {
+        method: "POST",
+        signal: abortRef.current.signal,
+        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+        body: JSON.stringify({
+          session_id: card.session_id,
+          additional_turns: opt.additional_turns ?? card.estimate ?? 20,
+        }),
+      });
+      await consumeBuildStream(streamRes);
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") {
+        setLines((p) => [...p, { id: nextId(), role: "error", text: `Continue 失敗：${(e as Error).message}` }]);
+      }
+    } finally {
+      setRunning(false);
+    }
+  }, [lines, consumeBuildStream]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#fff" }}>
@@ -215,7 +269,15 @@ export default function AgentBuilderPanel({
           </div>
         )}
         {lines.map((l) => (
-          <MessageRow key={l.id} line={l} />
+          l.role === "continuation" && l.continuation ? (
+            <ContinuationCard
+              key={l.id}
+              data={l.continuation}
+              onPick={(opt) => handleContinuationPick(l.id, opt)}
+            />
+          ) : (
+            <MessageRow key={l.id} line={l} />
+          )
         ))}
         {running && (
           <div style={{ fontSize: 11, color: "#94a3b8", padding: "4px 8px" }}>● ● ● 工作中…</div>
