@@ -28,3 +28,8 @@ langgraph>=0.2.0
 # Mem0 cloud is the primary semantic-memory backend used by the ported
 # agent_memory_service; if MEM0_API_KEY is unset it silently no-ops.
 mem0ai>=0.1.29
+# Phase 2 context engineering — tiktoken powers fast offline token counting
+# for context-budget gating + history-summarization thresholds. The
+# token_counter helper falls back to a CJK-aware char heuristic when tiktoken
+# is missing, so this dep is best-effort, not strictly required.
+tiktoken>=0.7.0

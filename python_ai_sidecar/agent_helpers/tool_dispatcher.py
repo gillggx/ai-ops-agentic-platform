@@ -989,6 +989,11 @@ class ToolDispatcher:
             except Exception as exc:
                 logger.warning("Smart Sampling interceptor failed (non-blocking): %s", exc)
 
+        # Phase 2-E: tool result truncation safety net. Without this, a single
+        # process_history that returns 50k rows feeds 200k+ tokens straight into
+        # the next iteration's prompt and detonates the ReAct loop.
+        result = _truncate_oversized_result(result, tool_name=tool_name)
+
         return result
 
     async def _invoke_published_skill(self, tool_input: Dict[str, Any]) -> Dict[str, Any]:
@@ -1097,3 +1102,95 @@ class ToolDispatcher:
             ]
 
         return {"catalog": catalog, "query": query, "total": len(items), "items": items}
+
+
+# ── Phase 2-E: tool result truncation safety net ─────────────────────────
+
+# Tokens, not chars. 4000 tokens is "generous enough for one-pass insight" but
+# nowhere near the multi-50k-token results that detonate context. Tool authors
+# already pass `limit` params for soft control; this is the hard backstop.
+TOOL_RESULT_TOKEN_CAP = 4000
+
+# Tools whose result the LLM legitimately needs in full (small / structured /
+# already capped upstream). Skip truncation for these to avoid surprises.
+_NEVER_TRUNCATE = {
+    "update_plan", "explain", "finish",  # control-plane tools
+    "save_memory",  # memory writes return small ack
+}
+
+
+def _truncate_oversized_result(result: Any, *, tool_name: str = "") -> Any:
+    """If `result` JSON-serializes to more than TOOL_RESULT_TOKEN_CAP tokens,
+    smart-truncate large list fields and attach `_truncated: true` flag."""
+    if tool_name in _NEVER_TRUNCATE:
+        return result
+    if not isinstance(result, dict):
+        return result
+
+    try:
+        from python_ai_sidecar.agent_helpers_native.token_counter import count_tokens
+        serialized = json.dumps(result, ensure_ascii=False, default=str)
+        tokens = count_tokens(serialized)
+    except Exception:  # noqa: BLE001
+        return result
+
+    if tokens <= TOOL_RESULT_TOKEN_CAP:
+        return result
+
+    truncated = _smart_truncate_dict(result, tokens, count_tokens)
+    if truncated is not result:
+        truncated["_truncated"] = True
+        truncated["_original_size_tokens"] = tokens
+        truncated["_truncation_hint"] = (
+            "Result was capped — narrow your filters (date range, equipment, step) and "
+            "re-call the tool if you need more rows."
+        )
+        logger.info(
+            "tool_result truncated: tool=%s original=%d tokens cap=%d",
+            tool_name, tokens, TOOL_RESULT_TOKEN_CAP,
+        )
+    return truncated
+
+
+def _smart_truncate_dict(d: Dict[str, Any], current_tokens: int, count_fn) -> Dict[str, Any]:
+    """Walk shallow dict fields and shrink the largest list-of-dict / list / str
+    fields until under cap. We mutate a shallow copy so the original dict
+    (which may be in caches / memos elsewhere) is not affected."""
+    out: Dict[str, Any] = dict(d)
+
+    # Identify list-shaped fields ranked by their JSON size — biggest first.
+    candidates: List[tuple[str, int]] = []
+    for k, v in out.items():
+        if k.startswith("_"):  # internal flags — leave alone
+            continue
+        if isinstance(v, list) and v:
+            try:
+                candidates.append((k, count_fn(json.dumps(v, ensure_ascii=False, default=str))))
+            except Exception:  # noqa: BLE001
+                continue
+    candidates.sort(key=lambda kv: kv[1], reverse=True)
+
+    target = TOOL_RESULT_TOKEN_CAP
+    for key, _size in candidates:
+        if current_tokens <= target:
+            break
+        original_list = out[key]
+        # Halve until under target; keep at least 5 items so the LLM still
+        # sees representative samples.
+        keep = max(5, len(original_list) // 2)
+        while keep < len(original_list):
+            out[key] = original_list[:keep]
+            try:
+                current_tokens = count_fn(json.dumps(out, ensure_ascii=False, default=str))
+            except Exception:  # noqa: BLE001
+                break
+            if current_tokens <= target:
+                break
+            keep = max(5, keep // 2)
+            if keep <= 5:
+                out[key] = original_list[:keep]
+                break
+        out[f"_{key}_total_count"] = len(original_list)
+        out[f"_{key}_kept_count"] = len(out[key]) if isinstance(out[key], list) else 0
+
+    return out

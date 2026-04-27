@@ -88,6 +88,7 @@ async def intent_classifier_node(
     # downstream can lean on it.
     picked, cleaned = _strip_intent_prefix(user_message)
     if picked is not None:
+        logger.info("intent_classifier: bypass via [intent=%s] prefix", picked)
         return {"intent": "clarified", "intent_hint": picked, "user_message": cleaned}
 
     pb_emit = config.get("configurable", {}).get("pb_event_emit") if config else None
@@ -111,6 +112,9 @@ async def intent_classifier_node(
         return {"intent": "clear_chart"}
 
     intent = (decision.get("intent") or "clear_chart").lower()
+    confidence = decision.get("confidence")
+    logger.info("intent_classifier: decided intent=%s confidence=%s msg=%r",
+                intent, confidence, user_message[:80])
 
     if intent == "vague" and isinstance(decision.get("clarify"), dict):
         clarify = decision["clarify"]

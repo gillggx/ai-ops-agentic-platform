@@ -164,8 +164,24 @@ async def llm_call_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[s
     messages = state.get("messages", [])
     iteration = state.get("current_iteration", 0) + 1
 
-    # Convert LangChain messages → v1 format
+    # Convert LangChain messages → v1 format. _langchain_messages_to_v1 may
+    # absorb a leading SystemMessage and override system_text — keep its
+    # output as the source of truth for the cacheable block below.
     system, v1_messages = _langchain_messages_to_v1(messages, system_text)
+
+    # Phase 2-A: wrap system in an Anthropic content-block list with a single
+    # ephemeral cache breakpoint at the end so the catalog + tool defs +
+    # role + plan-first + use-snapshot rules become cacheable. After the first
+    # iteration in a chat turn, subsequent iterations hit the cache and the
+    # 25k token static prefix costs ~10× less. OpenAI-compat clients flatten
+    # this back to string and ignore cache_control (see OllamaLLMClient).
+    cacheable_system = [
+        {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}},
+    ]
+    # Same idea for tool defs — Anthropic lets you mark cache_control on the
+    # *last* tool to cache the whole list. See:
+    # https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching#caching-tool-definitions
+    # We mutate a copy so we don't pollute the shared TOOL_SCHEMAS registry.
 
     # Phase 4-C: call _visible_tools() so PIPELINE_ONLY_MODE flag is consulted
     # at invocation time (supports env/config hot-reload without process restart).
@@ -181,12 +197,24 @@ async def llm_call_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[s
         [t for t in ("build_pipeline_live", "draft_skill", "save_memory")
          if t not in {x["name"] for x in visible_tools}],
     )
+
+    # Phase 2-A cont'd: clone the tool list and stamp cache_control on the
+    # last tool so Anthropic caches the entire tool block alongside system.
+    # Mutating in-place would persist into the shared TOOL_SCHEMAS registry
+    # across iterations (already happens naturally but explicit is safer).
+    cacheable_tools = [dict(t) for t in visible_tools]
+    if cacheable_tools:
+        cacheable_tools[-1] = {
+            **cacheable_tools[-1],
+            "cache_control": {"type": "ephemeral"},
+        }
+
     try:
         response = await llm.create(
-            system=system,
+            system=cacheable_system,
             messages=v1_messages,
             max_tokens=8192,
-            tools=visible_tools,
+            tools=cacheable_tools,
         )
     except Exception as exc:
         logger.exception("LLM call failed at iteration %d", iteration)

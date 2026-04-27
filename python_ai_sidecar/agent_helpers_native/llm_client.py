@@ -116,11 +116,21 @@ class BaseLLMClient:
     async def create(
         self,
         *,
-        system: str,
+        system: "str | List[Dict[str, Any]]",
         messages: List[Dict[str, Any]],
         max_tokens: int = 4096,
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> LLMResponse:
+        """Create an LLM completion.
+
+        `system` accepts either a plain string OR an Anthropic content-block
+        list (e.g. `[{"type":"text","text":"...","cache_control":{...}}]`).
+        Subclasses for non-Anthropic providers MUST flatten the list back to
+        string and drop unsupported fields like `cache_control`.
+
+        `tools[-1]["cache_control"]` (Anthropic prompt caching) is similarly
+        consumed by AnthropicLLMClient and ignored by OpenAI-compat clients.
+        """
         raise NotImplementedError
 
     async def stream(
@@ -148,11 +158,14 @@ class AnthropicLLMClient(BaseLLMClient):
     async def create(
         self,
         *,
-        system: str,
+        system: "str | List[Dict[str, Any]]",
         messages: List[Dict[str, Any]],
         max_tokens: int = 4096,
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> LLMResponse:
+        # Anthropic accepts both string and content-block list for `system`.
+        # Caller is responsible for placing cache_control breakpoints; we just
+        # pass through. Same for `tools[i]["cache_control"]`.
         kwargs: Dict[str, Any] = dict(
             model=self._model,
             max_tokens=max_tokens,
@@ -230,9 +243,24 @@ class OllamaLLMClient(BaseLLMClient):
         self._client = _openai.AsyncOpenAI(base_url=base_url, api_key=api_key)
         self._model = model
 
+    @staticmethod
+    def _flatten_system(system: "str | List[Dict[str, Any]]") -> str:
+        """Anthropic accepts a list of content blocks (with cache_control);
+        OpenAI-compat APIs only take a single string. Concatenate the text
+        fields and silently drop `cache_control` / non-text blocks."""
+        if isinstance(system, str):
+            return system
+        if isinstance(system, list):
+            parts: List[str] = []
+            for blk in system:
+                if isinstance(blk, dict) and blk.get("type") == "text":
+                    parts.append(blk.get("text", "") or "")
+            return "\n".join(parts)
+        return str(system or "")
+
     def _to_openai_messages(
         self,
-        system: str,
+        system: "str | List[Dict[str, Any]]",
         messages: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
         """Convert Anthropic-format messages to OpenAI format.
@@ -242,7 +270,8 @@ class OllamaLLMClient(BaseLLMClient):
         - Anthropic user tool_result blocks → OpenAI role=tool messages
         - Plain text content → pass through unchanged
         """
-        result: List[Dict[str, Any]] = [{"role": "system", "content": system}]
+        system_str = self._flatten_system(system)
+        result: List[Dict[str, Any]] = [{"role": "system", "content": system_str}]
 
         for msg in messages:
             role = msg.get("role", "user")
@@ -328,7 +357,7 @@ class OllamaLLMClient(BaseLLMClient):
     async def create(
         self,
         *,
-        system: str,
+        system: "str | List[Dict[str, Any]]",
         messages: List[Dict[str, Any]],
         max_tokens: int = 4096,
         tools: Optional[List[Dict[str, Any]]] = None,
@@ -336,13 +365,16 @@ class OllamaLLMClient(BaseLLMClient):
         # Prepend a concise function-calling mandate when tools are provided.
         # Qwen3 / local models tend to output JSON tool calls as plain text
         # instead of using the function calling API — this instruction fixes it.
-        effective_system = system
+        # Flatten cache-block list down to string first; OpenAI-compat APIs
+        # only accept a string `system`.
+        system_str = self._flatten_system(system)
+        effective_system = system_str
         if tools:
             effective_system = (
                 "IMPORTANT: You MUST use the function calling API (tool_calls) to invoke tools. "
                 "Do NOT output tool calls as JSON text, XML, or any other text format.\n"
                 "【工具使用規則】必須透過 function calling API 呼叫工具，禁止以任何文字格式輸出工具呼叫。\n\n"
-            ) + system
+            ) + system_str
 
         full_messages = self._to_openai_messages(effective_system, messages)
 

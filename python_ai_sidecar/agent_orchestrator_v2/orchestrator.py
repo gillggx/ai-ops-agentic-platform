@@ -209,14 +209,21 @@ class AgentOrchestratorV2:
             full_history = _messages_to_dicts(existing_history) + this_turn
 
             # Sliding window: keep last 3 turns (6 messages) as raw.
-            # Also trigger compression if total text exceeds TOKEN_THRESHOLD
-            # even within the window (long tool results can bloat a single turn).
+            # Phase 2-C: switch from char-based (8k chars ≈ 2k tokens, way too
+            # tight for a 200k-window model) to token-based via tiktoken with a
+            # CJK-aware heuristic fallback. New threshold = 50k tokens leaves
+            # ~3-4× safety margin before MAX_ITERATIONS / context cap kicks in.
+            from python_ai_sidecar.agent_helpers_native.token_counter import count_tokens
             RAW_WINDOW = 6
-            TOKEN_THRESHOLD = 8000  # ~chars; rough proxy for tokens (1 token ≈ 2 chars for Chinese)
-            total_chars = sum(len(m.get("content", "")) for m in full_history)
-            needs_compress = len(full_history) > RAW_WINDOW or total_chars > TOKEN_THRESHOLD
+            TOKEN_THRESHOLD = 50_000  # tokens, not chars
+            total_tokens_est = sum(count_tokens(m.get("content", "") or "") for m in full_history)
+            needs_compress = len(full_history) > RAW_WINDOW or total_tokens_est > TOKEN_THRESHOLD
 
             if needs_compress and len(full_history) > 2:
+                logger.info(
+                    "history compression triggered: messages=%d tokens≈%d (threshold=%d)",
+                    len(full_history), total_tokens_est, TOKEN_THRESHOLD,
+                )
                 old_part = full_history[:-RAW_WINDOW]
                 recent_part = full_history[-RAW_WINDOW:]
 

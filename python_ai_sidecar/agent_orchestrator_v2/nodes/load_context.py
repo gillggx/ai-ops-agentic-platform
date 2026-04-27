@@ -205,6 +205,25 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
         f"{current_state_block}\n\n{user_message}" if current_state_block else user_message
     )
 
+    # Part B follow-on: teach the agent to USE the snapshot before reaching for
+    # tools. Without this, the pipeline-only directive above ("search_published_skills
+    # first") wins and the agent burns 7 LLM turns on a question whose answer is
+    # already sitting in <current_state>.
+    if current_state_block:
+        system_text += (
+            "\n\n# Use <current_state> first (Part B)\n"
+            "Each user message is now prepended with a `<current_state>` block carrying live\n"
+            "system state (active alarms with severity + age, user_focus equipment). When the\n"
+            "user's question can be answered **directly** from that block — e.g.:\n"
+            "  - 「現在有幾個 alarm」/ 「哪台機台 alarm 最嚴重」\n"
+            "  - 「最近哪些機台 OOC」/ 「列出 alarm 清單」\n"
+            "  - 「目前狀況」when the snapshot already shows it\n"
+            "**answer in plain text from the snapshot. Do NOT call search_published_skills /\n"
+            "execute_skill / build_pipeline_live for these.** Tool calls are for *new* analysis\n"
+            "the snapshot doesn't cover. Ignoring this rule wastes 5-10x tokens and triggers\n"
+            "MAX_ITERATIONS.\n"
+        )
+
     # Build initial messages: history + current user message (with prepended state)
     messages = list(history_messages) + [HumanMessage(content=enriched_user_message)]
 
