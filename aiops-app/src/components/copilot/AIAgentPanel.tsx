@@ -55,10 +55,27 @@ type RenderDecisionMeta = {
   options?: RenderOptionBlock[];  // for ask_user
 };
 
+interface ClarifyOption {
+  id: string;
+  label: string;
+  preview?: string;
+}
+
+interface ClarifyData {
+  question: string;
+  options: ClarifyOption[];
+  fallbackLabel?: string;
+  // Echoes the original user message so the re-submit can re-attach it
+  // after the [intent=<id>] prefix.
+  originalMessage: string;
+  resolved?: boolean;  // flips to true once user picks; hides the buttons
+}
+
 interface ChatMessage {
   id: number;
-  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "ops";
+  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "ops" | "clarify";
   content: string;
+  clarify?: ClarifyData;
   contract?: AIOpsReportContract;
   mcpResult?: McpResult;
   chartIntents?: ChartIntent[];
@@ -701,6 +718,28 @@ export function AIAgentPanel({
             setTokenOut((p) => p + outTok);
             setPipelineStats((p) => ({ llmCalls: p.llmCalls + 1, totalTokens: p.totalTokens + inTok + outTok }));
             addLog(makeLog("🔢", `LLM #${ev.iteration ?? "?"} in=${inTok} out=${outTok}`, "token"));
+            break;
+          }
+
+          case "clarify": {
+            // Part A: agent-side intent classifier flagged the query as vague.
+            // Render a quick-pick card; user click re-submits with [intent=<id>] prefix.
+            const question = (ev.question as string) ?? "你想看哪一面？";
+            const options = (ev.options as ClarifyOption[]) ?? [];
+            const fallbackLabel = (ev.fallback_label as string | undefined)
+                || (ev.fallbackLabel as string | undefined)
+                || "全部都要（建完整 pipeline）";
+            // Find most recent user message in this turn for re-submit.
+            let originalMessage = "";
+            setChatHistory((prev) => {
+              for (let i = prev.length - 1; i >= 0; i--) {
+                if (prev[i].role === "user") { originalMessage = prev[i].content; break; }
+              }
+              return [...prev, {
+                id: nextId(), role: "clarify", content: "",
+                clarify: { question, options, fallbackLabel, originalMessage, resolved: false },
+              }];
+            });
             break;
           }
 
@@ -1467,6 +1506,22 @@ export function AIAgentPanel({
                 <div style={{ width: "100%", maxWidth: "100%" }}>
                   <PlanRenderer items={msg.planItems} />
                 </div>
+              ) : msg.role === "clarify" && msg.clarify ? (
+                <div style={{ width: "100%", maxWidth: "100%" }}>
+                  <ClarifyCard data={msg.clarify} onPick={(intentId) => {
+                    setChatHistory((prev) => prev.map((m) =>
+                      m.id === msg.id && m.clarify
+                        ? { ...m, clarify: { ...m.clarify, resolved: true } }
+                        : m,
+                    ));
+                    const original = msg.clarify?.originalMessage ?? "";
+                    if (intentId === "__fallback__") {
+                      void sendMessage(original);
+                    } else {
+                      void sendMessage(`[intent=${intentId}] ${original}`);
+                    }
+                  }} />
+                </div>
               ) : msg.role === "ops" && msg.glassOps ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
                   <OpsConsole ops={msg.glassOps} />
@@ -1760,6 +1815,82 @@ export function AIAgentPanel({
           }}
         />
       )}
+    </div>
+  );
+}
+
+
+// Part A — clarify quick-pick card. Inline because it's tightly coupled to
+// the AIAgentPanel chat-history shape (ChatMessage.clarify) and only used here.
+function ClarifyCard({
+  data,
+  onPick,
+}: {
+  data: ClarifyData;
+  onPick: (intentId: string) => void;
+}) {
+  const disabled = !!data.resolved;
+  return (
+    <div style={{
+      width: "100%",
+      border: "1px solid #cbd5e0",
+      borderRadius: 8,
+      padding: "12px 14px",
+      background: "#f7fafc",
+      fontSize: 13,
+      color: "#2d3748",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600, marginBottom: 8 }}>
+        <span>🤔</span>
+        <span>{data.question}</span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {data.options.map((opt) => (
+          <button
+            key={opt.id}
+            disabled={disabled}
+            onClick={() => onPick(opt.id)}
+            style={{
+              textAlign: "left",
+              padding: "8px 10px",
+              border: "1px solid #e2e8f0",
+              borderRadius: 6,
+              background: disabled ? "#edf2f7" : "#ffffff",
+              cursor: disabled ? "default" : "pointer",
+              opacity: disabled ? 0.6 : 1,
+              fontSize: 13,
+              color: "#2d3748",
+            }}
+          >
+            <span style={{ fontWeight: 600 }}>{opt.label}</span>
+            {opt.preview && (
+              <span style={{ marginLeft: 8, color: "#718096", fontSize: 12 }}>
+                {opt.preview}
+              </span>
+            )}
+          </button>
+        ))}
+        {data.fallbackLabel && (
+          <button
+            disabled={disabled}
+            onClick={() => onPick("__fallback__")}
+            style={{
+              textAlign: "left",
+              padding: "6px 10px",
+              border: "1px dashed #cbd5e0",
+              borderRadius: 6,
+              background: "transparent",
+              cursor: disabled ? "default" : "pointer",
+              opacity: disabled ? 0.6 : 1,
+              fontSize: 12,
+              color: "#4a5568",
+              marginTop: 2,
+            }}
+          >
+            {data.fallbackLabel}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

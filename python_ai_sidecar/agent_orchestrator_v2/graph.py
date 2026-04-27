@@ -32,6 +32,7 @@ from langgraph.graph.message import add_messages
 
 from python_ai_sidecar.agent_orchestrator_v2.state import MAX_ITERATIONS
 from python_ai_sidecar.agent_orchestrator_v2.nodes.load_context import load_context_node
+from python_ai_sidecar.agent_orchestrator_v2.nodes.intent_classifier import intent_classifier_node
 from python_ai_sidecar.agent_orchestrator_v2.nodes.llm_call import llm_call_node
 from python_ai_sidecar.agent_orchestrator_v2.nodes.tool_execute import tool_execute_node
 from python_ai_sidecar.agent_orchestrator_v2.nodes.synthesis import synthesis_node
@@ -62,8 +63,14 @@ class GraphState(TypedDict, total=False):
     # Input (set once, never overwritten by nodes)
     user_id: int
     session_id: Optional[str]
-    user_message: str
+    user_message: Annotated[str, _replace]
     canvas_overrides: Optional[Dict[str, Any]]
+    client_context: Optional[Dict[str, Any]]
+    # Part A — intent classifier output. "clear_chart" / "clear_rca" /
+    # "clear_status" / "vague" / "clarified" (re-submit). Read by llm_call to
+    # tweak guidance; read by graph routing to short-circuit on vague.
+    intent: Annotated[str, _replace]
+    intent_hint: Annotated[Optional[str], _replace]
 
     # Messages — merge via add_messages (handles dedup by id)
     messages: Annotated[Sequence[AnyMessage], add_messages]
@@ -102,6 +109,17 @@ class GraphState(TypedDict, total=False):
     ui_config: Annotated[Optional[Dict[str, Any]], _replace]
 
 logger = logging.getLogger(__name__)
+
+
+def _route_after_intent(state: Dict[str, Any]) -> Literal["synthesis", "llm_call"]:
+    """Part A: skip llm_call when classifier marked the query as `vague`.
+
+    The classifier itself emitted a `clarify` SSE event and seeded a synthetic
+    AIMessage onto state.messages, so synthesis just renders that and stops.
+    """
+    if state.get("force_synthesis") or state.get("intent") == "vague":
+        return "synthesis"
+    return "llm_call"
 
 
 def _should_continue(state: Dict[str, Any]) -> Literal["tool_execute", "synthesis"]:
@@ -144,6 +162,7 @@ def build_graph() -> StateGraph:
 
     # ── Nodes ────────────────────────────────────────────────────────
     graph.add_node("load_context", load_context_node)
+    graph.add_node("intent_classifier", intent_classifier_node)
     graph.add_node("llm_call", llm_call_node)
     graph.add_node("tool_execute", tool_execute_node)
     graph.add_node("synthesis", synthesis_node)
@@ -151,9 +170,14 @@ def build_graph() -> StateGraph:
     graph.add_node("memory_lifecycle", memory_lifecycle_node)
 
     # ── Edges ────────────────────────────────────────────────────────
-    # load_context → llm_call
+    # load_context → intent_classifier → (vague→synthesis | else→llm_call)
     graph.set_entry_point("load_context")
-    graph.add_edge("load_context", "llm_call")
+    graph.add_edge("load_context", "intent_classifier")
+    graph.add_conditional_edges(
+        "intent_classifier",
+        _route_after_intent,
+        {"synthesis": "synthesis", "llm_call": "llm_call"},
+    )
 
     # llm_call → tool_execute (if tool_calls) or → synthesis (if end_turn)
     graph.add_conditional_edges(

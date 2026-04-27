@@ -152,6 +152,15 @@ async def llm_call_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[s
 
     llm = get_llm_client()
     system_text = state.get("system_text") or config["configurable"].get("system_text", "")
+    # Part A: when the user just resolved a clarify card, surface the chosen
+    # intent to the LLM as a hint so it goes straight to the right tool.
+    intent_hint = state.get("intent_hint")
+    if intent_hint:
+        system_text += (
+            f"\n\n# User intent hint (from clarify card)\n"
+            f"User picked **{intent_hint}** — focus the response on that direction; "
+            f"don't ask again, don't go broader.\n"
+        )
     messages = state.get("messages", [])
     iteration = state.get("current_iteration", 0) + 1
 
