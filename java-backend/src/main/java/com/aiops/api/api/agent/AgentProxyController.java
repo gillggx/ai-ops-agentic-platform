@@ -70,7 +70,15 @@ public class AgentProxyController {
 		}
 		String sessionId = asString(body.get("sessionId"));
 		if (sessionId == null || sessionId.isBlank()) sessionId = asString(body.get("session_id"));
-		ChatRequest req = new ChatRequest(message, sessionId);
+		// Part B: forward client_context (selected_equipment_id etc.) if present.
+		// Accept both camelCase and snake_case from the frontend.
+		@SuppressWarnings("unchecked")
+		Map<String, Object> clientContext = body.get("clientContext") instanceof Map<?, ?> m1
+				? (Map<String, Object>) m1
+				: body.get("client_context") instanceof Map<?, ?> m2
+						? (Map<String, Object>) m2
+						: null;
+		ChatRequest req = new ChatRequest(message, sessionId, clientContext);
 		return bridgeSse(sidecar.postSse("/internal/agent/chat", req, caller), "chat");
 	}
 
@@ -179,7 +187,7 @@ public class AgentProxyController {
 
 	// --- DTOs ---
 
-	public record ChatRequest(@NotBlank String message, String sessionId) {}
+	public record ChatRequest(@NotBlank String message, String sessionId, Map<String, Object> clientContext) {}
 
 	public record BuildRequest(@NotBlank String instruction, Long pipelineId, Map<String, Object> pipelineSnapshot) {}
 }

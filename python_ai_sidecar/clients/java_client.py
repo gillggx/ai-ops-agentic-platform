@@ -181,6 +181,15 @@ class JavaAPIClient:
                 return m
         return None
 
+    async def get_agent_context_snapshot(self, *, selected_equipment_id: Optional[str] = None) -> dict:
+        """Fetch dynamic context snapshot (active alarms + user focus) for
+        injection into the agent's <current_state> block. See
+        SPEC_context_engineering Part B."""
+        params: dict[str, str] = {}
+        if selected_equipment_id:
+            params["selected_equipment_id"] = selected_equipment_id
+        return await self._get_data("/internal/agent-context-snapshot", params=params or None)
+
     async def create_execution_log(self, body: dict) -> dict:
         return await self._post_data("/internal/execution-logs", body)
 

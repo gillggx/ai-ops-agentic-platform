@@ -59,6 +59,7 @@ class AgentOrchestratorV2:
         self,
         message: str,
         session_id: Optional[str] = None,
+        client_context: Optional[Dict[str, Any]] = None,
     ) -> AsyncIterator[Dict[str, Any]]:
         """Run the agent graph and yield v1-compatible SSE events.
 
@@ -81,6 +82,7 @@ class AgentOrchestratorV2:
             "session_id": session_id,
             "user_message": message,
             "canvas_overrides": self._canvas_overrides,
+            "client_context": client_context or {},
         }
 
         # Phase 5-UX-5: event bus for tool → SSE progressive events.

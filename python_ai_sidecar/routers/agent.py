@@ -33,6 +33,10 @@ class ChatRequest(BaseModel):
 
     message: str = Field(..., min_length=1)
     session_id: str | None = Field(default=None, alias="sessionId")
+    # Part B (SPEC_context_engineering): client-side state hint for the agent.
+    # Currently carries `selected_equipment_id` from AppContext.selectedEquipment;
+    # may grow with `current_page`, `last_viewed_alarm_id`, etc.
+    client_context: dict | None = Field(default=None, alias="clientContext")
 
 
 class BuildRequest(BaseModel):
@@ -58,7 +62,9 @@ async def _chat_stream_native(req: ChatRequest, caller: CallerContext) -> AsyncG
         user_id=caller.user_id or 0,
         roles=caller.roles,
     )
-    async for v1_event in orchestrator.run(req.message, session_id=req.session_id):
+    async for v1_event in orchestrator.run(
+        req.message, session_id=req.session_id, client_context=req.client_context,
+    ):
         # AgentOrchestratorV2 yields v1-style {type, ...} dicts; convert to SSE
         ev_type = v1_event.get("type") or "message"
         yield {"event": ev_type, "data": json.dumps(v1_event, ensure_ascii=False)}

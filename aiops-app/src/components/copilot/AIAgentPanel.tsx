@@ -15,6 +15,7 @@ import PbPipelineCard, { type PbPipelineCardData } from "./PbPipelineCard";
 import PbPatchProposalCard, { type PbPatchProposalData, type PipelinePatch } from "./PbPatchProposalCard";
 import type { UiRender } from "@/components/McpChartRenderer";
 import type { FlatDataMetadata, UIConfig } from "@/context/FlatDataContext";
+import { useAppContext } from "@/context/AppContext";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -485,6 +486,9 @@ export function AIAgentPanel({
   onUserMessageSent,
   initialPrompt,
 }: Props) {
+  // Part B (SPEC_context_engineering): pull selected equipment from AppContext
+  // so chat requests can carry user focus to the agent's load_context_node.
+  const { selectedEquipment } = useAppContext();
   const [input, setInput]           = useState("");
   const [loading, setLoading]       = useState(false);
   const [stages, setStages]         = useState<StageState[]>([]);
@@ -624,10 +628,20 @@ export function AIAgentPanel({
     onUserMessageSent?.(message);
 
     try {
+      // Part B (SPEC_context_engineering): pass user-side state to the agent.
+      // Currently `selected_equipment_id` only; future: current_page, last alarm, etc.
+      const clientContext: Record<string, string> = {};
+      if (selectedEquipment?.equipment_id) {
+        clientContext.selected_equipment_id = selectedEquipment.equipment_id;
+      }
       const res = await fetch("/api/agent/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: messageToSend, session_id: sessionIdRef.current }),
+        body: JSON.stringify({
+          message: messageToSend,
+          session_id: sessionIdRef.current,
+          ...(Object.keys(clientContext).length > 0 ? { client_context: clientContext } : {}),
+        }),
       });
 
       if (!res.ok) {

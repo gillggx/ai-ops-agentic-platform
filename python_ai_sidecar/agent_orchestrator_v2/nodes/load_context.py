@@ -19,11 +19,18 @@ logger = logging.getLogger(__name__)
 
 
 async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[str, Any]:
-    """Stage 1: build system prompt, retrieve memories, load session history."""
+    """Stage 1: build system prompt, retrieve memories, load session history.
+
+    Part B (SPEC_context_engineering): also fetches a dynamic-state snapshot
+    (active alarms + user focus) from Java and prepends a <current_state>
+    block to the user message so the LLM has prior context instead of
+    reasoning from scratch.
+    """
     db = config["configurable"].get("db")
     user_id = state["user_id"]
     user_message = state["user_message"]
     canvas_overrides = state.get("canvas_overrides")
+    client_context = state.get("client_context") or {}
 
     # Task context extraction (same as v1)
     _tc_type, _tc_subject, _tc_tool = extract_task_context(user_message)
@@ -191,8 +198,15 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
         db, state.get("session_id"), user_id,
     )
 
-    # Build initial messages: history + current user message
-    messages = list(history_messages) + [HumanMessage(content=user_message)]
+    # Part B: dynamic-state block. Best-effort — failure should never block
+    # the chat (fall back to "no context, agent reasons from scratch").
+    current_state_block = await _build_current_state_block(java, client_context)
+    enriched_user_message = (
+        f"{current_state_block}\n\n{user_message}" if current_state_block else user_message
+    )
+
+    # Build initial messages: history + current user message (with prepended state)
+    messages = list(history_messages) + [HumanMessage(content=enriched_user_message)]
 
     context_meta["history_turns"] = len(history_messages) // 2
     context_meta["cumulative_tokens"] = cumulative_tokens
@@ -206,3 +220,54 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
         "messages": messages,
         "history_turns": context_meta["history_turns"],
     }
+
+
+async def _build_current_state_block(java, client_context: Dict[str, Any]) -> str:
+    """Fetch agent-context-snapshot from Java + format as <current_state>...</current_state>.
+
+    Returns "" when the snapshot is empty AND there's no client focus — no point
+    sending an empty block. Failures are swallowed (logged); chat should still
+    work without dynamic context.
+    """
+    try:
+        selected = client_context.get("selected_equipment_id")
+        snapshot = await java.get_agent_context_snapshot(selected_equipment_id=selected)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("agent-context-snapshot fetch failed (%s) — proceeding without dynamic context", e)
+        return ""
+
+    alarms = snapshot.get("active_alarms") or []
+    user_focus = snapshot.get("user_focus") or {}
+    if not alarms and not user_focus:
+        return ""
+
+    lines: list[str] = []
+    if alarms:
+        # Cap to ~10 lines, keep entries terse: "EQP-03 STEP_001 OOC@2h (HIGH)"
+        rendered = []
+        for a in alarms[:10]:
+            eq = a.get("equipment_id") or "?"
+            step = a.get("step") or "-"
+            sev = (a.get("severity") or "").upper() or "MEDIUM"
+            age = a.get("age_seconds") or 0
+            age_str = _format_age(int(age))
+            title = a.get("title") or ""
+            rendered.append(f"  - {eq} {step} active@{age_str} ({sev}){' — ' + title if title else ''}")
+        lines.append(f"active_alarms ({len(alarms)}):")
+        lines.extend(rendered)
+    if user_focus.get("selected_equipment_id"):
+        lines.append(f"user_focus: {user_focus['selected_equipment_id']}")
+
+    body = "\n".join(lines)
+    as_of = snapshot.get("as_of") or ""
+    return f"<current_state ts=\"{as_of}\">\n{body}\n</current_state>"
+
+
+def _format_age(seconds: int) -> str:
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    if seconds < 86400:
+        return f"{seconds // 3600}h"
+    return f"{seconds // 86400}d"
