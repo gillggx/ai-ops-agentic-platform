@@ -1445,35 +1445,36 @@ export function AIAgentPanel({
         borderBottom: "1px solid #e2e8f0",
         flexShrink: 0,
       }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 14, fontWeight: 700, color: "#1a202c" }}>AI Agent</span>
-            {contextEquipment && (
-              <span style={{
-                fontSize: 11,
-                padding: "2px 8px",
-                background: "#ebf4ff",
-                color: "#2b6cb0",
-                borderRadius: 10,
-                fontWeight: 500,
-              }}>
-                {contextEquipment}
-              </span>
-            )}
-          </div>
-          {(tokenIn > 0 || tokenOut > 0 || cacheWrite > 0 || cacheRead > 0) && (
-            <span
-              title={`Input: ${tokenIn.toLocaleString()}\nOutput: ${tokenOut.toLocaleString()}\nCache write (×$3.75/Mtok): ${cacheWrite.toLocaleString()}\nCache read  (×$0.30/Mtok): ${cacheRead.toLocaleString()}\nApprox cost: $${(
-                (tokenIn * 3 + tokenOut * 15 + cacheWrite * 3.75 + cacheRead * 0.3) / 1_000_000
-              ).toFixed(4)}`}
-              style={{ fontSize: 10, color: "#a0aec0", fontFamily: "monospace" }}
-            >
-              in {tokenIn.toLocaleString()} · out {tokenOut.toLocaleString()}
-              {cacheRead > 0 && <> · cache↓{(cacheRead / 1000).toFixed(1)}k</>}
-              {cacheWrite > 0 && <> · cache↑{(cacheWrite / 1000).toFixed(1)}k</>}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: "#1a202c" }}>AI Agent</span>
+          {contextEquipment && (
+            <span style={{
+              fontSize: 11,
+              padding: "2px 8px",
+              background: "#ebf4ff",
+              color: "#2b6cb0",
+              borderRadius: 10,
+              fontWeight: 500,
+            }}>
+              {contextEquipment}
             </span>
           )}
         </div>
+        {(tokenIn > 0 || tokenOut > 0 || cacheWrite > 0 || cacheRead > 0) && (
+          <div
+            title={`Input: ${tokenIn.toLocaleString()}\nOutput: ${tokenOut.toLocaleString()}\nCache write (×$3.75/Mtok): ${cacheWrite.toLocaleString()}\nCache read  (×$0.30/Mtok): ${cacheRead.toLocaleString()}\nApprox cost: $${(
+              (tokenIn * 3 + tokenOut * 15 + cacheWrite * 3.75 + cacheRead * 0.3) / 1_000_000
+            ).toFixed(4)}`}
+            style={{ fontSize: 10, color: "#a0aec0", fontFamily: "monospace", marginBottom: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+          >
+            in {tokenIn.toLocaleString()} · out {tokenOut.toLocaleString()}
+            {cacheRead > 0 && <> · cache↓{(cacheRead / 1000).toFixed(1)}k</>}
+            {cacheWrite > 0 && <> · cache↑{(cacheWrite / 1000).toFixed(1)}k</>}
+            {(cacheRead + cacheWrite) > 0 && (
+              <> · ~${((tokenIn * 3 + tokenOut * 15 + cacheWrite * 3.75 + cacheRead * 0.3) / 1_000_000).toFixed(3)}</>
+            )}
+          </div>
+        )}
 
         {/* SPEC_glassbox_continuation §B — live Glass Box turn counter shown
             above the plan card. Goes orange at 70%, red at 90%. Hidden when
