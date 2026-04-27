@@ -107,7 +107,11 @@ async def adapt_events(
                             "type": "llm_usage",
                             "input_tokens": resp_meta.get("input_tokens", 0),
                             "output_tokens": resp_meta.get("output_tokens", 0),
+                            # Phase 2-A: cache visibility
+                            "cache_creation_input_tokens": resp_meta.get("cache_creation_input_tokens", 0),
+                            "cache_read_input_tokens": resp_meta.get("cache_read_input_tokens", 0),
                             "iteration": output.get("current_iteration", 0),
+                            "source": "v2_chat",
                         }
                     # Emit <plan> if present in LLM text — shows agent's reasoning in console
                     _text = last.content if hasattr(last, "content") and isinstance(last.content, str) else ""

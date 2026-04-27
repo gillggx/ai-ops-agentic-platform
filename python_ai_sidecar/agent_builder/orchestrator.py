@@ -180,6 +180,45 @@ async def stream_agent_build(
             )
             break
 
+        # Phase 2-A token transparency: surface every Glass Box LLM call to the
+        # outer SSE stream so the chat UI can show the real cost (including the
+        # cache_creation × $3.75 / cache_read × $0.30 split). Without this the
+        # only counter the user sees is V2 chat's outer turns, which underreports
+        # by ~10x when build_pipeline_live is invoked.
+        _usage = getattr(resp, "usage", None)
+        if _usage is not None:
+            yield StreamEvent(
+                type="glass_usage",
+                data={
+                    "turn": turn,
+                    "input_tokens": getattr(_usage, "input_tokens", 0) or 0,
+                    "output_tokens": getattr(_usage, "output_tokens", 0) or 0,
+                    "cache_creation_input_tokens": getattr(_usage, "cache_creation_input_tokens", 0) or 0,
+                    "cache_read_input_tokens": getattr(_usage, "cache_read_input_tokens", 0) or 0,
+                    "ts": 0.0,
+                },
+            )
+
+        # ABC progress estimates (SPEC_glassbox_continuation §B):
+        #   - turn 1 → initial estimate (skip — no signal yet, would just guess)
+        #   - every 5 turns → ongoing counter
+        #   - 70% of budget → soft warning (still running, not pausing)
+        _percent = (turn / max(turn_budget, 1)) * 100
+        _at_threshold = (_percent >= 70 and not session.continuation_count)
+        _is_periodic = (turn % 5 == 0)
+        if _is_periodic or _at_threshold:
+            yield StreamEvent(
+                type="glass_progress",
+                data={
+                    "turn_used": turn,
+                    "turn_budget": turn_budget,
+                    "absolute_max": ABSOLUTE_MAX_TURNS,
+                    "percent": int(_percent),
+                    "warning": _at_threshold,
+                    "ts": 0.0,
+                },
+            )
+
         if _emit_opening:
             # After the first Claude response we can mark thinking as started for UI
             yield StreamEvent(type="chat", data={"content": opening, "highlight_nodes": [], "ts": 0.0})
@@ -395,11 +434,19 @@ async def stream_agent_build(
                     "completed": assessment.get("completed", []),
                     "remaining": assessment.get("remaining", []),
                     "estimate": assessment.get("estimate", 10),
+                    # 60+ ops 的 build 使用者不會選「停手用 partial」 — 直接 2 選 1
                     "options": [
-                        {"id": "continue", "label": f"再給 {assessment.get('estimate', 10)} 步",
-                         "additional_turns": min(MAX_TURNS_PER_CONTINUATION, max(5, assessment.get("estimate", 10)))},
-                        {"id": "takeover", "label": "我自己接手"},
-                        {"id": "stop", "label": "停手用現有結果"},
+                        {
+                            "id": "continue",
+                            "label": f"再給 {assessment.get('estimate', 10)} 步",
+                            "preview": "Agent 從 turn " + str(turn + 1) + " 接續，自動完成驗證 + finish",
+                            "additional_turns": min(MAX_TURNS_PER_CONTINUATION, max(5, assessment.get("estimate", 10))),
+                        },
+                        {
+                            "id": "takeover",
+                            "label": "我自己接手",
+                            "preview": "在 Pipeline Builder 直接編輯 partial pipeline",
+                        },
                     ],
                     "ts": 0.0,
                 },

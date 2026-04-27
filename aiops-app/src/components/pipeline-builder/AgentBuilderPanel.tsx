@@ -220,11 +220,6 @@ export default function AgentBuilderPanel({
     const card = lines.find((l) => l.id === lineId)?.continuation;
     if (!card) return;
 
-    if (opt.id === "stop") {
-      // Just keep the partial canvas as-is.
-      setLines((p) => [...p, { id: nextId(), role: "agent", text: "已停手，partial pipeline 保留在 canvas。" }]);
-      return;
-    }
     if (opt.id === "takeover") {
       // v1: tell user to keep working in the current builder; partial canvas is
       // already mounted in the hosting page, no navigation needed.

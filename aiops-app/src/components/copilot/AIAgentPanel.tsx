@@ -545,6 +545,14 @@ export function AIAgentPanel({
   const [hitl, setHitl]             = useState<HitlRequest | null>(null);
   const [tokenIn, setTokenIn]       = useState(0);
   const [tokenOut, setTokenOut]     = useState(0);
+  // Phase 2-A: cache transparency. cacheWrite is the one-time $3.75/MTok cost
+  // of populating the cache; cacheRead is the recurring $0.30/MTok discount.
+  // Sum across V2 chat + Glass Box subagent calls.
+  const [cacheWrite, setCacheWrite] = useState(0);
+  const [cacheRead, setCacheRead]   = useState(0);
+  // SPEC_glassbox_continuation §B: live Glass Box turn counter shown above
+  // the plan card. {turn_used, turn_budget, percent, warning}.
+  const [glassProgress, setGlassProgress] = useState<{ turn_used: number; turn_budget: number; percent: number; warning: boolean } | null>(null);
   const [activeTab, setActiveTab]   = useState<"chat" | "console">("chat");
   const [reflection, setReflection] = useState<ReflectionState>({ status: null, amendment: "" });
 
@@ -636,6 +644,9 @@ export function AIAgentPanel({
     setHitl(null);
     setTokenIn(0);
     setTokenOut(0);
+    setCacheWrite(0);
+    setCacheRead(0);
+    setGlassProgress(null);
     setReflection({ status: null, amendment: "" });
     setPlanItems([]);
     currentPlanMsgIdRef.current = null;
@@ -716,10 +727,41 @@ export function AIAgentPanel({
           case "llm_usage": {
             const inTok  = (ev.input_tokens  as number) ?? 0;
             const outTok = (ev.output_tokens as number) ?? 0;
+            const ccw    = (ev.cache_creation_input_tokens as number) ?? 0;
+            const crd    = (ev.cache_read_input_tokens     as number) ?? 0;
             setTokenIn((p)  => p + inTok);
             setTokenOut((p) => p + outTok);
-            setPipelineStats((p) => ({ llmCalls: p.llmCalls + 1, totalTokens: p.totalTokens + inTok + outTok }));
-            addLog(makeLog("🔢", `LLM #${ev.iteration ?? "?"} in=${inTok} out=${outTok}`, "token"));
+            setCacheWrite((p) => p + ccw);
+            setCacheRead((p)  => p + crd);
+            setPipelineStats((p) => ({ llmCalls: p.llmCalls + 1, totalTokens: p.totalTokens + inTok + outTok + ccw + crd }));
+            addLog(makeLog("🔢", `LLM #${ev.iteration ?? "?"} in=${inTok} out=${outTok} cache(w=${ccw} r=${crd})`, "token"));
+            break;
+          }
+
+          case "glass_usage": {
+            // Phase 2-A: Glass Box subagent's per-LLM-call usage. Same
+            // accumulation as llm_usage so the chat-panel counter reflects
+            // the real total cost, not just the outer chat turns.
+            const inTok  = (ev.input_tokens  as number) ?? 0;
+            const outTok = (ev.output_tokens as number) ?? 0;
+            const ccw    = (ev.cache_creation_input_tokens as number) ?? 0;
+            const crd    = (ev.cache_read_input_tokens     as number) ?? 0;
+            setTokenIn((p)  => p + inTok);
+            setTokenOut((p) => p + outTok);
+            setCacheWrite((p) => p + ccw);
+            setCacheRead((p)  => p + crd);
+            setPipelineStats((p) => ({ llmCalls: p.llmCalls + 1, totalTokens: p.totalTokens + inTok + outTok + ccw + crd }));
+            addLog(makeLog("🔢", `Glass turn ${ev.turn ?? "?"} in=${inTok} out=${outTok} cache(w=${ccw} r=${crd})`, "token"));
+            break;
+          }
+
+          case "glass_progress": {
+            setGlassProgress({
+              turn_used: (ev.turn_used as number) ?? 0,
+              turn_budget: (ev.turn_budget as number) ?? 50,
+              percent: (ev.percent as number) ?? 0,
+              warning: !!ev.warning,
+            });
             break;
           }
 
@@ -1419,12 +1461,46 @@ export function AIAgentPanel({
               </span>
             )}
           </div>
-          {(tokenIn > 0 || tokenOut > 0) && (
-            <span style={{ fontSize: 10, color: "#a0aec0", fontFamily: "monospace" }}>
-              {tokenIn.toLocaleString()} / {tokenOut.toLocaleString()} tok
+          {(tokenIn > 0 || tokenOut > 0 || cacheWrite > 0 || cacheRead > 0) && (
+            <span
+              title={`Input: ${tokenIn.toLocaleString()}\nOutput: ${tokenOut.toLocaleString()}\nCache write (×$3.75/Mtok): ${cacheWrite.toLocaleString()}\nCache read  (×$0.30/Mtok): ${cacheRead.toLocaleString()}\nApprox cost: $${(
+                (tokenIn * 3 + tokenOut * 15 + cacheWrite * 3.75 + cacheRead * 0.3) / 1_000_000
+              ).toFixed(4)}`}
+              style={{ fontSize: 10, color: "#a0aec0", fontFamily: "monospace" }}
+            >
+              in {tokenIn.toLocaleString()} · out {tokenOut.toLocaleString()}
+              {cacheRead > 0 && <> · cache↓{(cacheRead / 1000).toFixed(1)}k</>}
+              {cacheWrite > 0 && <> · cache↑{(cacheWrite / 1000).toFixed(1)}k</>}
             </span>
           )}
         </div>
+
+        {/* SPEC_glassbox_continuation §B — live Glass Box turn counter shown
+            above the plan card. Goes orange at 70%, red at 90%. Hidden when
+            no Glass Box build is active. */}
+        {glassProgress && (
+          <div style={{
+            fontSize: 11,
+            color: glassProgress.percent >= 90 ? "#c53030" : glassProgress.warning ? "#c05621" : "#4a5568",
+            background: glassProgress.percent >= 90 ? "#fed7d7" : glassProgress.warning ? "#feebc8" : "#edf2f7",
+            border: "1px solid",
+            borderColor: glassProgress.percent >= 90 ? "#fc8181" : glassProgress.warning ? "#f6ad55" : "#e2e8f0",
+            borderRadius: 4,
+            padding: "4px 8px",
+            marginBottom: 6,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}>
+            <span>🔧 Glass Box</span>
+            <span style={{ fontFamily: "monospace" }}>
+              {glassProgress.turn_used}/{glassProgress.turn_budget} turns ({glassProgress.percent}%)
+            </span>
+            {glassProgress.warning && (
+              <span style={{ fontWeight: 600 }}>· 接近上限</span>
+            )}
+          </div>
+        )}
 
         {/* v1.5 — Stage strip first, then Plan Panel sits directly under so the
             checklist visually extends the progress strip. */}
@@ -1555,7 +1631,6 @@ export function AIAgentPanel({
                     ));
                     const card = msg.continuation;
                     if (!card) return;
-                    if (opt.id === "stop") return;
                     if (opt.id === "takeover") {
                       // v1: tell user to keep editing in Pipeline Builder; cross-page
                       // handoff with paused state is a follow-up spec.

@@ -252,6 +252,32 @@ async def _execute_build_pipeline_live(
                 payload["id"] = (evt.data or {}).get("id")
                 payload["status"] = (evt.data or {}).get("status")
                 payload["note"] = (evt.data or {}).get("note")
+            elif evt_type == "continuation_request":
+                # SPEC_glassbox_continuation: forward Glass Box's pause card
+                # through the chat stream so AIAgentPanel can render it.
+                payload["type"] = "continuation_request"
+                d = evt.data or {}
+                payload["session_id"] = d.get("session_id")
+                payload["turns_used"] = d.get("turns_used")
+                payload["ops_count"] = d.get("ops_count")
+                payload["completed"] = d.get("completed") or []
+                payload["remaining"] = d.get("remaining") or []
+                payload["estimate"] = d.get("estimate")
+                payload["options"] = d.get("options") or []
+            elif evt_type == "glass_usage":
+                # Phase 2-A: surface Glass Box per-LLM-call token cost
+                # (input + output + cache_creation + cache_read) to the chat UI.
+                payload["type"] = "glass_usage"
+                d = evt.data or {}
+                for k in ("turn", "input_tokens", "output_tokens",
+                          "cache_creation_input_tokens", "cache_read_input_tokens"):
+                    payload[k] = d.get(k, 0)
+            elif evt_type == "glass_progress":
+                # SPEC_glassbox_continuation §B/A: live turn counter + 70% warning.
+                payload["type"] = "glass_progress"
+                d = evt.data or {}
+                for k in ("turn_used", "turn_budget", "absolute_max", "percent", "warning"):
+                    payload[k] = d.get(k)
             else:
                 continue  # skip suggestion_card + other unknown types
             if event_emit is not None:

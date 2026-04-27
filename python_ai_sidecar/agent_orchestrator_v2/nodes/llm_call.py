@@ -238,6 +238,10 @@ async def llm_call_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[s
             "input_tokens": response.input_tokens,
             "output_tokens": response.output_tokens,
             "stop_reason": response.stop_reason,
+            # Phase 2-A: surface cache stats so the SSE adapter can stream
+            # them to the UI; cache_read is what makes the discount visible.
+            "cache_creation_input_tokens": response.cache_creation_input_tokens,
+            "cache_read_input_tokens": response.cache_read_input_tokens,
         },
     )
 

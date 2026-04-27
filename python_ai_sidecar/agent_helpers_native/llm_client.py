@@ -108,6 +108,12 @@ class LLMResponse:
     content: List[Dict[str, Any]] = field(default_factory=list)
     input_tokens: int = 0
     output_tokens: int = 0
+    # Anthropic prompt cache stats (Phase 2-A): cache_creation is the one-time
+    # cost to write a cacheable block ($3.75/MTok); cache_read is the discount
+    # we pay every iteration after that ($0.30/MTok vs $3/MTok input). Both
+    # are 0 on OpenAI-compat providers that don't support caching.
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
 
 
 # ── Base interface ─────────────────────────────────────────────────────────────
@@ -207,6 +213,8 @@ class AnthropicLLMClient(BaseLLMClient):
             content=content,
             input_tokens=getattr(usage, "input_tokens", 0) if usage else 0,
             output_tokens=getattr(usage, "output_tokens", 0) if usage else 0,
+            cache_creation_input_tokens=getattr(usage, "cache_creation_input_tokens", 0) or 0 if usage else 0,
+            cache_read_input_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0 if usage else 0,
         )
 
     async def stream(

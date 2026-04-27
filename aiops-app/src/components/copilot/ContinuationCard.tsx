@@ -8,8 +8,11 @@ import React from "react";
 // the card; the onPick callback owns the actual fetch / navigation.
 
 export interface ContinuationOption {
-  id: "continue" | "takeover" | "stop";
+  // 2026-04-27: dropped "stop" — at 60+ ops nobody picks "use partial",
+  // so the card stays focused on the two productive paths.
+  id: "continue" | "takeover";
   label: string;
+  preview?: string;
   additional_turns?: number;
 }
 
@@ -29,15 +32,18 @@ interface Props {
   onPick: (option: ContinuationOption) => void;
 }
 
+// Style mirrors ClarifyCard: light grey card, Q at top, list of buttons each
+// with bold label + grey preview. Two short summary lines (done / remaining)
+// kept compact so the buttons stay above the fold.
 export function ContinuationCard({ data, onPick }: Props) {
   const disabled = !!data.resolved;
   return (
     <div style={{
       width: "100%",
-      border: "1px solid #f6ad55",
+      border: "1px solid #cbd5e0",
       borderRadius: 8,
       padding: "12px 14px",
-      background: "#fffaf0",
+      background: "#f7fafc",
       fontSize: 13,
       color: "#2d3748",
     }}>
@@ -46,53 +52,49 @@ export function ContinuationCard({ data, onPick }: Props) {
         <span>已跑 {data.turns_used} 步、{data.ops_count} 個 ops，估計再 {data.estimate} 步可完成</span>
       </div>
 
-      {data.completed.length > 0 && (
-        <div style={{ marginBottom: 6 }}>
-          <strong style={{ color: "#2f855a" }}>已完成：</strong>
-          <ul style={{ margin: "2px 0 0 18px", padding: 0, fontSize: 12, color: "#4a5568" }}>
-            {data.completed.map((c, i) => (
-              <li key={i}>✓ {c}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {data.remaining.length > 0 && (
-        <div style={{ marginBottom: 10 }}>
-          <strong style={{ color: "#c05621" }}>還剩：</strong>
-          <ul style={{ margin: "2px 0 0 18px", padding: 0, fontSize: 12, color: "#4a5568" }}>
-            {data.remaining.map((r, i) => (
-              <li key={i}>○ {r}</li>
-            ))}
-          </ul>
+      {(data.completed.length > 0 || data.remaining.length > 0) && (
+        <div style={{ marginBottom: 10, fontSize: 12, color: "#4a5568" }}>
+          {data.completed.length > 0 && (
+            <div style={{ marginBottom: 4 }}>
+              <span style={{ color: "#2f855a", fontWeight: 600 }}>已完成：</span>
+              <span>{data.completed.join("、")}</span>
+            </div>
+          )}
+          {data.remaining.length > 0 && (
+            <div>
+              <span style={{ color: "#c05621", fontWeight: 600 }}>還剩：</span>
+              <span>{data.remaining.join("、")}</span>
+            </div>
+          )}
         </div>
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {data.options.map((opt) => {
-          const isPrimary = opt.id === "continue";
-          return (
-            <button
-              key={opt.id}
-              disabled={disabled}
-              onClick={() => onPick(opt)}
-              style={{
-                textAlign: "left",
-                padding: "8px 10px",
-                border: isPrimary ? "1px solid #ed8936" : "1px solid #e2e8f0",
-                borderRadius: 6,
-                background: disabled ? "#edf2f7" : isPrimary ? "#feebc8" : "#ffffff",
-                cursor: disabled ? "default" : "pointer",
-                opacity: disabled ? 0.6 : 1,
-                fontSize: 13,
-                color: "#2d3748",
-                fontWeight: isPrimary ? 600 : 400,
-              }}
-            >
-              {opt.label}
-            </button>
-          );
-        })}
+        {data.options.map((opt) => (
+          <button
+            key={opt.id}
+            disabled={disabled}
+            onClick={() => onPick(opt)}
+            style={{
+              textAlign: "left",
+              padding: "8px 10px",
+              border: "1px solid #e2e8f0",
+              borderRadius: 6,
+              background: disabled ? "#edf2f7" : "#ffffff",
+              cursor: disabled ? "default" : "pointer",
+              opacity: disabled ? 0.6 : 1,
+              fontSize: 13,
+              color: "#2d3748",
+            }}
+          >
+            <span style={{ fontWeight: 600 }}>{opt.label}</span>
+            {opt.preview && (
+              <span style={{ marginLeft: 8, color: "#718096", fontSize: 12 }}>
+                {opt.preview}
+              </span>
+            )}
+          </button>
+        ))}
       </div>
 
       {disabled && (
