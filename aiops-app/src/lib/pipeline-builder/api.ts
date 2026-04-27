@@ -44,9 +44,31 @@ export async function listPipelines(status?: PipelineStatus): Promise<PipelineSu
   return unwrap<PipelineSummary[]>(res);
 }
 
+// 2026-04-27 fix — Java's PipelineEntity.pipelineJson is a `text` column
+// mapped to String, so the JSON ships across the wire as a JSON-encoded
+// string ("{\"version\":\"1.0\",...}") instead of a nested object. Frontend
+// code assumes it's already an object (and calls .nodes / .edges / .inputs
+// directly), so BuilderLayout's edit page crashed with
+// "Cannot read properties of undefined (reading 'length')". This helper
+// hydrates pipeline_json into the typed shape on every PipelineRecord
+// response so downstream consumers (BuilderContext, validators, save UI)
+// don't have to know about the wire format.
+function hydratePipelineJson(rec: PipelineRecord): PipelineRecord {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const raw = rec as any;
+  if (typeof raw?.pipeline_json === "string") {
+    try {
+      raw.pipeline_json = JSON.parse(raw.pipeline_json);
+    } catch {
+      raw.pipeline_json = { version: "1.0", name: raw.name ?? "Broken Pipeline", nodes: [], edges: [], metadata: {} };
+    }
+  }
+  return rec;
+}
+
 export async function getPipeline(id: number): Promise<PipelineRecord> {
   const res = await fetch(`${BASE}/pipelines/${id}`, { cache: "no-store" });
-  return unwrap<PipelineRecord>(res);
+  return hydratePipelineJson(await unwrap<PipelineRecord>(res));
 }
 
 export async function createPipeline(payload: {
@@ -61,7 +83,7 @@ export async function createPipeline(payload: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  return unwrap<PipelineRecord>(res);
+  return hydratePipelineJson(await unwrap<PipelineRecord>(res));
 }
 
 export async function updatePipeline(
@@ -73,7 +95,7 @@ export async function updatePipeline(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  return unwrap<PipelineRecord>(res);
+  return hydratePipelineJson(await unwrap<PipelineRecord>(res));
 }
 
 /** Legacy wrapper — prefer transitionPipeline(). Kept for older UI paths. */
