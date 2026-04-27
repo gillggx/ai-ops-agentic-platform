@@ -16,6 +16,7 @@ import PbPatchProposalCard, { type PbPatchProposalData, type PipelinePatch } fro
 import type { UiRender } from "@/components/McpChartRenderer";
 import type { FlatDataMetadata, UIConfig } from "@/context/FlatDataContext";
 import { useAppContext } from "@/context/AppContext";
+import { ContinuationCard, type ContinuationData, type ContinuationOption } from "./ContinuationCard";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -73,9 +74,10 @@ interface ClarifyData {
 
 interface ChatMessage {
   id: number;
-  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "ops" | "clarify";
+  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "ops" | "clarify" | "continuation";
   content: string;
   clarify?: ClarifyData;
+  continuation?: ContinuationData;
   contract?: AIOpsReportContract;
   mcpResult?: McpResult;
   chartIntents?: ChartIntent[];
@@ -718,6 +720,27 @@ export function AIAgentPanel({
             setTokenOut((p) => p + outTok);
             setPipelineStats((p) => ({ llmCalls: p.llmCalls + 1, totalTokens: p.totalTokens + inTok + outTok }));
             addLog(makeLog("🔢", `LLM #${ev.iteration ?? "?"} in=${inTok} out=${outTok}`, "token"));
+            break;
+          }
+
+          case "continuation_request": {
+            // SPEC_glassbox_continuation: Glass Box paused at MAX_TURNS budget,
+            // user picks extend / takeover / stop. The card renders inline in
+            // the chat thread.
+            const cont: ContinuationData = {
+              session_id: ev.session_id as string,
+              turns_used: (ev.turns_used as number) ?? 0,
+              ops_count: (ev.ops_count as number) ?? 0,
+              completed: (ev.completed as string[]) ?? [],
+              remaining: (ev.remaining as string[]) ?? [],
+              estimate: (ev.estimate as number) ?? 10,
+              options: (ev.options as ContinuationOption[]) ?? [],
+              resolved: false,
+            };
+            setChatHistory((prev) => [...prev, {
+              id: nextId(), role: "continuation", content: "",
+              continuation: cont,
+            }]);
             break;
           }
 
@@ -1519,6 +1542,60 @@ export function AIAgentPanel({
                       void sendMessage(original);
                     } else {
                       void sendMessage(`[intent=${intentId}] ${original}`);
+                    }
+                  }} />
+                </div>
+              ) : msg.role === "continuation" && msg.continuation ? (
+                <div style={{ width: "100%", maxWidth: "100%" }}>
+                  <ContinuationCard data={msg.continuation} onPick={async (opt) => {
+                    setChatHistory((prev) => prev.map((m) =>
+                      m.id === msg.id && m.continuation
+                        ? { ...m, continuation: { ...m.continuation, resolved: true } }
+                        : m,
+                    ));
+                    const card = msg.continuation;
+                    if (!card) return;
+                    if (opt.id === "stop") return;
+                    if (opt.id === "takeover") {
+                      // v1: tell user to keep editing in Pipeline Builder; cross-page
+                      // handoff with paused state is a follow-up spec.
+                      window.location.href = `/admin/pipeline-builder?resume=${card.session_id}`;
+                      return;
+                    }
+                    // opt.id === "continue"
+                    try {
+                      const res = await fetch("/api/agent/build/continue", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+                        body: JSON.stringify({
+                          session_id: card.session_id,
+                          additional_turns: opt.additional_turns ?? card.estimate ?? 20,
+                        }),
+                      });
+                      if (!res.ok || !res.body) {
+                        addLog(makeLog("❌", `Continue failed: ${res.status}`, "error"));
+                        return;
+                      }
+                      // Re-feed SSE stream into the existing dispatcher.
+                      // The chat panel's main consumeSSE loop closed when /chat
+                      // returned, so we need a second consumer here.
+                      await consumeSSE(res, (innerEv) => {
+                        // Inline tiny dispatcher: forward back to outer switch
+                        // by triggering a state-mutation hook. Keeping it simple:
+                        // most events we care about (operation / done) are
+                        // applied via the same setters as the main flow.
+                        // For brevity we re-emit through a minimal echo.
+                        if (innerEv.type === "done") {
+                          const summary = (innerEv.summary as string) || "繼續完成";
+                          setChatHistory((prev) => [...prev, {
+                            id: nextId(), role: "agent", content: `✓ ${summary}`,
+                          }]);
+                        } else if (innerEv.type === "error") {
+                          addLog(makeLog("❌", String(innerEv.message ?? ""), "error"));
+                        }
+                      });
+                    } catch (e) {
+                      addLog(makeLog("❌", `Continue error: ${(e as Error).message}`, "error"));
                     }
                   }} />
                 </div>

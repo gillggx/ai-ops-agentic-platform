@@ -110,5 +110,14 @@ DEFAULT_STATE: Dict[str, Any] = {
 }
 
 
-# Max iterations before force-synthesis (safety cap)
-MAX_ITERATIONS = 10
+# Max iterations before force-synthesis (safety cap).
+# 2026-04-27: bumped 10 → 25. The original 10 was tuned for direct
+# chat / Q&A; once `build_pipeline_live` joined the tool catalog the outer
+# loop routinely needs:
+#   1× create-plan + 1× invoke-build + N× update_plan(per phase)
+#   + a couple of synthesis-prep calls
+# which clears 10 easily even when the inner Glass Box ran fine. 25 is the
+# new safety cap; if a chat genuinely needs more, SPEC_glassbox_continuation
+# v2 should extend the continuation_request UX to the chat path so the user
+# decides instead of force_synthesis silently kicking in.
+MAX_ITERATIONS = 25
