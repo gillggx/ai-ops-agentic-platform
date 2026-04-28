@@ -307,6 +307,63 @@ class BuilderToolset:
         node.params = {**node.params, key: value}
         return {"node_id": node_id, "params": dict(node.params)}
 
+    async def declare_input(
+        self,
+        name: str,
+        type: str = "string",
+        required: bool = True,
+        example: Optional[Any] = None,
+        description: str = "",
+    ) -> dict[str, Any]:
+        """SPEC_patrol_pipeline_wiring §1.5 — declare a `$name` pipeline input.
+
+        Use this **before** writing a user-mentioned instance value (EQP-XX,
+        STEP_XXX, LOT-XXX, lot_id, recipe_id, ...) into a node param. After
+        declaring, reference the variable as `$name` in set_param so the
+        pipeline is reusable across patrols / lots / runs.
+
+        Idempotent: declaring the same name twice updates example/description
+        instead of raising.
+        """
+        from python_ai_sidecar.pipeline_builder.pipeline_schema import PipelineInput
+
+        valid_types = {"string", "integer", "number", "boolean"}
+        if type not in valid_types:
+            raise ToolError(
+                code="INVALID_PARAM",
+                message=f"type '{type}' invalid (allowed: {sorted(valid_types)})",
+            )
+        if not name or not name.strip():
+            raise ToolError(code="INVALID_PARAM", message="input name is required")
+        nm = name.lstrip("$").strip()  # accept "$equipment_id" or "equipment_id"
+        if not nm.isidentifier():
+            raise ToolError(
+                code="INVALID_PARAM",
+                message=f"input name '{nm}' must be a valid identifier (letters/digits/underscore)",
+            )
+
+        pipeline = self.session.pipeline_json
+        existing = next((i for i in pipeline.inputs if i.name == nm), None)
+        if existing is not None:
+            # idempotent: refresh example / description
+            if example is not None:
+                existing.example = example
+            if description:
+                existing.description = description
+            existing.required = bool(required)
+            existing.type = type  # type: ignore[assignment]
+            return {"input": existing.model_dump(), "updated": True}
+
+        new_input = PipelineInput(
+            name=nm,
+            type=type,  # type: ignore[arg-type]
+            required=bool(required),
+            example=example,
+            description=description or None,
+        )
+        pipeline.inputs = list(pipeline.inputs) + [new_input]
+        return {"input": new_input.model_dump(), "created": True}
+
     async def move_node(self, node_id: str, position: dict[str, float]) -> dict[str, Any]:
         pipeline = self.session.pipeline_json
         node = next((n for n in pipeline.nodes if n.id == node_id), None)
@@ -438,7 +495,34 @@ class BuilderToolset:
     async def validate(self) -> dict[str, Any]:
         validator = PipelineValidator(self.registry.catalog)
         errs = validator.validate(self.session.pipeline_json)
-        return {"valid": len(errs) == 0, "errors": errs}
+
+        # SPEC_patrol_pipeline_wiring §1.5 — declared-but-unused warnings.
+        # Catches the case where the agent declared an input but forgot to
+        # actually reference $name in any node param. Doesn't fail validation
+        # (the pipeline still runs with default values) but flags so the agent
+        # has a chance to fix before finish.
+        warnings: list[dict[str, Any]] = []
+        pipeline = self.session.pipeline_json
+        declared_names = {inp.name for inp in (pipeline.inputs or [])}
+        if declared_names:
+            referenced: set[str] = set()
+            for n in pipeline.nodes:
+                for v in (n.params or {}).values():
+                    if isinstance(v, str) and v.startswith("$"):
+                        referenced.add(v[1:].split(".")[0])
+                    elif isinstance(v, list):
+                        for item in v:
+                            if isinstance(item, str) and item.startswith("$"):
+                                referenced.add(item[1:].split(".")[0])
+            unused = declared_names - referenced
+            if unused:
+                warnings.append({
+                    "code": "INPUT_DECLARED_BUT_UNUSED",
+                    "message": f"Inputs declared but never referenced: {sorted(unused)}",
+                    "hint": "Did you forget to set_param(node, key, '$<name>')? Or remove the input if it's not needed.",
+                })
+
+        return {"valid": len(errs) == 0, "errors": errs, "warnings": warnings}
 
     # ======================================================================
     # Communication (1 in MVP)

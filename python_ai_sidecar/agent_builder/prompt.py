@@ -79,6 +79,37 @@ This means:
 
 For "N consecutive rising / falling" rules, insert `block_delta` upstream of `block_consecutive_rule` — it produces an `is_rising` / `is_falling` bool column that consecutive_rule can tail-check.
 
+# 🔴 Pipeline Inputs — value-as-variable rule（**最重要的硬規則**）
+
+每個 user prompt 提到的「**實例值**」都要當變數處理，不能寫 literal：
+
+| User 提到 | 你做什麼 |
+|---|---|
+| 機台代碼 (EQP-XX, TC10, 機台編號) | `declare_input(name="equipment_id", example="EQP-01")` → set_param value=`"$equipment_id"` |
+| 站點代碼 (STEP_XXX, 站別) | `declare_input(name="step", example="STEP_001")` → set_param value=`"$step"` |
+| 批次代碼 (LOT-XXXX, lot id) | `declare_input(name="lot_id", example="LOT-12345")` → set_param value=`"$lot_id"` |
+| Recipe (recipe_id) | `declare_input(name="recipe_id", example="...")` → set_param value=`"$recipe_id"` |
+
+**為什麼**：寫 literal `tool_id="EQP-01"` 的 pipeline 是「只能查 EQP-01」的死板查詢；寫 `tool_id="$equipment_id"` 是「給機台 ID 就查那台」的可重用模板。Auto-Patrol、Chat 重新呼叫、批次跑都靠這個變數機制。
+
+## 已宣告 input 的處理（重要）
+
+如果 user 的 opening message 出現「**Pipeline 已宣告的 inputs**」段（這代表 wizard 端 user 已先宣告變數），那 **MUST 用 `$name` 引用**，**禁寫 literal**，即使 user 在 prompt 裡明示了 example 值（e.g. user 說「對 EQP-01 跑」但 wizard 已宣告 `$equipment_id` example=EQP-01 → 你必寫 `$equipment_id` 不是 `"EQP-01"`）。
+
+## 範例
+
+```
+User: "對 EQP-01 跑 SPC OOC check"
+
+❌ 錯：直接寫 literal
+  add_node(block_process_history) → set_param(n1, "tool_id", "EQP-01")
+
+✅ 對：先宣告變數，再用 $name 引用
+  declare_input(name="equipment_id", type="string", required=True,
+                example="EQP-01", description="目標機台 ID")
+  add_node(block_process_history) → set_param(n1, "tool_id", "$equipment_id")
+```
+
 # Output wiring — Chart vs Data View vs Alert
 
 You have THREE output primitives:
@@ -309,6 +340,42 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "node_id": {"type": "string"},
                 "key": {"type": "string"},
                 "value": {"description": "Any JSON-compatible value."},
+            },
+        },
+    },
+    {
+        "name": "declare_input",
+        "description": (
+            "SPEC_patrol_pipeline_wiring §1.5 — declare a pipeline-level $name variable.\n"
+            "\n"
+            "**MUST call this BEFORE writing any user-mentioned instance value** "
+            "(EQP-XX 機台 ID, STEP_XXX 站點, LOT-XXX 批次, recipe_id 等) into a node param. "
+            "After declaring, use `$name` in set_param value (e.g., `tool_id: \"$equipment_id\"`) "
+            "instead of the literal. This makes the pipeline reusable by Auto-Patrol / "
+            "Auto-Check / chat re-invocation passing different values per run.\n"
+            "\n"
+            "Idempotent: re-declaring an existing name refreshes example/description.\n"
+            "\n"
+            "Common patterns:\n"
+            "  • user 說「對 EQP-01 跑 SPC」 → declare_input(name='equipment_id', example='EQP-01') "
+            "→ set_param(node, 'tool_id', '$equipment_id')\n"
+            "  • user 說「STEP_001 的 trend」 → declare_input(name='step', example='STEP_001') "
+            "→ set_param(source, 'step', '$step')\n"
+            "  • user 說「LOT-12345」 → declare_input(name='lot_id', example='LOT-12345') "
+            "→ set_param(filter, 'value', '$lot_id')\n"
+            "\n"
+            "**Already-declared inputs** (visible in the user message preamble) MUST be "
+            "referenced by `$name` even if user explicitly typed an example value."
+        ),
+        "input_schema": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+                "name": {"type": "string", "description": "Variable name without $ prefix (e.g., 'equipment_id')"},
+                "type": {"type": "string", "enum": ["string", "integer", "number", "boolean"], "default": "string"},
+                "required": {"type": "boolean", "default": True},
+                "example": {"description": "Default example value (用來 preview / Inspector placeholder)"},
+                "description": {"type": "string", "description": "1-line 中文 hint for human user"},
             },
         },
     },

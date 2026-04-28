@@ -238,6 +238,78 @@ def render(template: dict, context: dict) -> dict:
 
 ---
 
+## 1.5 — Agent ↔ Pipeline Inputs Coupling (補 2026-04-28)
+
+### 問題
+
+User 在 wizard 宣告 `$equipment_id`（example=EQP-01），然後 agent build → agent 把 user prompt 裡的「EQP-01」**寫死成 literal** `tool_id="EQP-01"`，沒有用 `$equipment_id` 引用。Run 時 user 填 EQP-05 → pipeline 還是查 EQP-01。
+
+Root cause：
+- `agent_builder/orchestrator.py` 的 `build_system_prompt(registry)` 只 inject block catalog + 規則，**沒讀** `session.pipeline_json.inputs`
+- 即使 user prompt 提到 EQP-01 / STEP_001 / LOT-X 這類**實例值**，agent 沒被指示「這應該是變數」
+- agent 的 toolset 沒有 `declare_input` — 即使想自己宣告也辦不到
+
+### 三層方案（合做）
+
+| 方案 | 角色 | 實作 |
+|---|---|---|
+| **Option 1**（主要）| 「**用 user 已宣告的 inputs**」 | orchestrator inject `Pipeline 已宣告 inputs: ...` 進 user opening message；prompt.py 加硬規則「凡 source block param 對應已宣告 input → 必寫 `$name`，不寫 literal」 |
+| **Option 2**（兜底）| 「**Agent 自己宣告**」 | 新 `declare_input` tool；prompt.py 規則：「user prompt 裡的 EQP-XX / STEP_XXX / LOT-XXX / lot_id 要先 `declare_input` 再 `$name` 引用」 |
+| **Option 3**（救火）| 「**Inspector 自動偵測 + 一鍵綁**」 | Pipeline 已存在但 param 是 literal 時，UI 偵測 input.example 跟 param 值一樣 → 顯示 [⚡ 綁定] 按鈕 |
+
+### 實作 Option 1+2
+
+#### `agent_builder/orchestrator.py`
+在 `stream_agent_build()` build initial messages 前，組一段 inputs context 注入 user opening：
+
+```python
+inputs_hint = ""
+declared = session.pipeline_json.inputs or []
+if declared:
+    lines = [f"  - $「{i.name}」({i.type}{', required' if i.required else ''}, example={i.example})"
+             for i in declared]
+    inputs_hint = (
+        "\n\n# Pipeline 已宣告的 inputs（你必須引用這些變數而非寫死字面值）：\n"
+        + "\n".join(lines)
+        + "\n\n⚠ 凡 source / filter block 的 param 值對應上述 input 時（如 tool_id、step、lot_id），"
+        "**必寫 `$name`，禁寫 literal**。否則 pipeline 無法被 patrol 重複用。"
+    )
+user_opening = session.user_prompt + inputs_hint
+```
+
+#### `agent_builder/tools.py` 新增 `declare_input`
+```python
+async def declare_input(
+    self, name: str, type: str = "string", required: bool = True,
+    example: Optional[str] = None, description: str = "",
+) -> dict[str, Any]:
+    """Add a `$<name>` input variable to pipeline_json.inputs."""
+    # validation: name unique, type ∈ {string, number, boolean}
+    # mutate session.pipeline_json.inputs
+```
+
+#### `agent_builder/prompt.py` 加變數使用規則
+- 「Variable extraction rule」段：規範 instance-like 值（EQP-XX、STEP_XXX、LOT-XXX）→ 必先 declare_input
+- 「Pipeline.inputs awareness rule」段：source / filter 的 param 對應已宣告 input → 必用 `$name`
+- 在 Pattern A-D 的範例裡加上一條「Pattern 0：input declaration first」
+
+### Effort
+
+- orchestrator.py inject inputs context：0.1 day
+- declare_input tool：0.15 day
+- prompt.py rules + example：0.15 day
+- Test (no inputs / 1 input / 2 inputs / agent self-declare path)：0.1 day
+
+**總共 0.5 day**。
+
+### Edge Cases
+
+- User 宣告了 input 但 agent 還是寫 literal（LLM 偶爾不聽話）→ validate() tool 加檢查：若 input 已宣告但無任何 node param 引用 `$name`，回 warning（不阻塞 finish）
+- User 沒宣告 input + agent 自己 declare 多餘的 → finish 時 cull 沒被 node 引用的 inputs（避免 wizard 顯示沒用的變數）
+- 同名衝突（user 宣告 `equipment_id`，agent 又 declare `equipment_id`）→ declare_input idempotent，已存在就更新 example/description 不報錯
+
+---
+
 ## 5. UX Examples
 
 ### Example A: 「OOC event 一發生，跑 SPC 檢查」

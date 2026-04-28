@@ -134,6 +134,30 @@ async def stream_agent_build(
             if session.operations:
                 session.operations.pop()
 
+        # SPEC_patrol_pipeline_wiring §1.5 — surface pre-declared inputs so the
+        # agent uses `$name` references instead of writing user-mentioned
+        # values as literals. Without this hint the LLM doesn't know that
+        # the pipeline already has variable slots and silently hard-codes
+        # EQP-01 / STEP_001 / etc.
+        declared_inputs = session.pipeline_json.inputs or []
+        if declared_inputs:
+            lines = []
+            for inp in declared_inputs:
+                ex = getattr(inp, "example", None) or getattr(inp, "default", None)
+                req = "required" if getattr(inp, "required", False) else "optional"
+                desc = getattr(inp, "description", "") or ""
+                lines.append(
+                    f"  - $`{inp.name}` ({inp.type}, {req})"
+                    + (f" — example: {ex}" if ex else "")
+                    + (f" — {desc}" if desc else "")
+                )
+            user_opening += (
+                "\n\n# Pipeline 已宣告的 inputs（**你必須引用變數，不寫 literal**）\n"
+                + "\n".join(lines)
+                + "\n\n⚠ 凡 source / filter block 的 param 對應上述 input（如 tool_id、step、lot_id），"
+                "**必寫 `$name`、禁寫字面值**。否則 pipeline 無法被 patrol 重複呼叫。"
+            )
+
         messages: list[dict[str, Any]] = [{"role": "user", "content": user_opening}]
         _emit_opening = True
         turn_budget = MAX_TURNS
