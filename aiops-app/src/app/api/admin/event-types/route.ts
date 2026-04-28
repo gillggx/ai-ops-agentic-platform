@@ -1,26 +1,43 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readEventTypes, writeEventTypes, StoredEventType } from "@/lib/store";
+import { authHeaders } from "@/lib/auth-proxy";
+
+const FASTAPI_BASE = process.env.FASTAPI_BASE_URL ?? "http://localhost:8000";
+
+// SPEC_patrol_pipeline_wiring §1.1 — event_types is now Java-owned (was
+// localStorage). Java path keeps name/description/source/isActive/attributes/
+// diagnosisSkillIds in pg, which is what the patrol wizard input-mapping
+// step needs to read attribute schemas off.
 
 export async function GET() {
-  return NextResponse.json(readEventTypes());
+  try {
+    const res = await fetch(`${FASTAPI_BASE}/api/v1/event-types`, {
+      headers: await authHeaders(),
+      cache: "no-store",
+    });
+    const body = await res.json();
+    const list = body.data ?? body ?? [];
+    return NextResponse.json(Array.isArray(list) ? list : []);
+  } catch (err) {
+    console.error("[event-types GET]", err);
+    return NextResponse.json([], { status: 200 });
+  }
 }
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const types = readEventTypes();
-
-  if (types.some((t) => t.name === body.name)) {
-    return NextResponse.json({ error: `Event type '${body.name}' already exists` }, { status: 409 });
+  // body shape: { name, description, source?, isActive?, attributes? }
+  // attributes is a JSON-encoded string [{name,type,required,description,enum?}, ...]
+  const res = await fetch(`${FASTAPI_BASE}/api/v1/event-types`, {
+    method: "POST",
+    headers: await authHeaders(),
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    return NextResponse.json(
+      { error: data.message ?? data.detail ?? data.error?.message ?? "建立失敗" },
+      { status: res.status },
+    );
   }
-
-  const newType: StoredEventType = {
-    id: `et-${Date.now()}`,
-    name: body.name,
-    severity: body.severity ?? "info",
-    description: body.description ?? "",
-    created_at: new Date().toISOString(),
-  };
-
-  writeEventTypes([...types, newType]);
-  return NextResponse.json(newType, { status: 201 });
+  return NextResponse.json(data.data ?? data, { status: 201 });
 }

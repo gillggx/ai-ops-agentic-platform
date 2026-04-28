@@ -64,7 +64,12 @@ async def _resolve_pipeline(java: JavaAPIClient, req: ExecuteRequest) -> tuple[d
             if ex.status == 404:
                 raise HTTPException(status_code=404, detail=f"pipeline {req.pipeline_id} not found in Java")
             raise
-        raw = entity.get("pipelineJson")
+        # JavaAPIClient._request normalises response keys to snake_case, so
+        # the field we get back is `pipeline_json` (not the Java-side
+        # camelCase `pipelineJson`). Reading the camelCase key returned None
+        # and made the executor see an empty {} → "pipeline_json failed
+        # schema validation" 500 (caught 2026-04-28 during pipeline audit).
+        raw = entity.get("pipeline_json") or entity.get("pipelineJson")
         effective = json.loads(raw) if isinstance(raw, str) and raw else raw
         return entity, effective if isinstance(effective, dict) else {}
     if req.pipeline_json is not None:

@@ -48,6 +48,12 @@ public class EventTypeController {
 		e.setDescription(req.description() == null ? "" : req.description());
 		e.setSource(req.source() == null ? "simulator" : req.source());
 		e.setIsActive(req.isActive() == null ? Boolean.TRUE : req.isActive());
+		// SPEC_patrol_pipeline_wiring §1.1 — attributes ships as a JSON-encoded
+		// string ([{name,type,required,...}, ...]) so the frontend's attribute
+		// editor can round-trip without us re-serialising it.
+		if (req.attributes() != null && !req.attributes().isBlank()) {
+			e.setAttributes(req.attributes());
+		}
 		return ApiResponse.ok(EventTypeDtos.of(repository.save(e)));
 	}
 
@@ -60,6 +66,7 @@ public class EventTypeController {
 		if (req.description() != null) e.setDescription(req.description());
 		if (req.source() != null) e.setSource(req.source());
 		if (req.isActive() != null) e.setIsActive(req.isActive());
+		if (req.attributes() != null) e.setAttributes(req.attributes());
 		return ApiResponse.ok(EventTypeDtos.of(repository.save(e)));
 	}
 
@@ -92,9 +99,10 @@ public class EventTypeController {
 		public record Detail(Long id, String name, String description, String source,
 		                     Boolean isActive, String attributes, String diagnosisSkillIds) {}
 
-		public record CreateRequest(@NotBlank String name, String description, String source, Boolean isActive) {}
+		public record CreateRequest(@NotBlank String name, String description, String source,
+		                            Boolean isActive, String attributes) {}
 
-		public record UpdateRequest(String description, String source, Boolean isActive) {}
+		public record UpdateRequest(String description, String source, Boolean isActive, String attributes) {}
 
 		static Detail of(EventTypeEntity e) {
 			return new Detail(e.getId(), e.getName(), e.getDescription(), e.getSource(),
