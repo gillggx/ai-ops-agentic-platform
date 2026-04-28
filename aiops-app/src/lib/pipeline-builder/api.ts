@@ -23,11 +23,28 @@ async function unwrap<T>(res: Response): Promise<T> {
     data = text;
   }
   if (!res.ok) {
-    const msg =
-      (data && typeof data === "object" && ("detail" in data || "error" in data))
-        ? JSON.stringify(data)
-        : `HTTP ${res.status}`;
+    // Java envelope: {ok:false, data:null, error:{message,...}}
+    let msg = `HTTP ${res.status}`;
+    if (data && typeof data === "object") {
+      const obj = data as Record<string, unknown>;
+      if ("error" in obj && obj.error && typeof obj.error === "object") {
+        const err = obj.error as Record<string, unknown>;
+        msg = (typeof err.message === "string" ? err.message : null) ?? JSON.stringify(err);
+      } else if ("detail" in obj || "error" in obj) {
+        msg = JSON.stringify(data);
+      }
+    }
     throw new Error(msg);
+  }
+  // Java envelope: {ok:true, data:{...}, error:null, timestamp:"..."} —
+  // unwrap to inner `.data` so callers see the actual record.
+  if (
+    data &&
+    typeof data === "object" &&
+    "ok" in (data as Record<string, unknown>) &&
+    "data" in (data as Record<string, unknown>)
+  ) {
+    return (data as { data: T }).data;
   }
   return data as T;
 }
