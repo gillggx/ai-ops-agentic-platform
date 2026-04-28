@@ -78,10 +78,22 @@ export async function createPipeline(payload: {
   pipeline_kind?: "auto_patrol" | "auto_check" | "skill";
   pipeline_json: PipelineJSON;
 }): Promise<PipelineRecord> {
+  // Symmetric to hydratePipelineJson on read: Java's PipelineController
+  // CreateRequest.pipelineJson is typed as String (text column), so we send
+  // the nested PipelineJSON object as a JSON-encoded string. Without this,
+  // Jackson rejects with HttpMessageNotReadableException → 500.
+  const wirePayload = {
+    ...payload,
+    pipeline_json: payload.pipeline_json
+      ? (typeof payload.pipeline_json === "string"
+          ? payload.pipeline_json
+          : JSON.stringify(payload.pipeline_json))
+      : undefined,
+  };
   const res = await fetch(`${BASE}/pipelines`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(wirePayload),
   });
   return hydratePipelineJson(await unwrap<PipelineRecord>(res));
 }
@@ -90,10 +102,18 @@ export async function updatePipeline(
   id: number,
   payload: { name?: string; description?: string; pipeline_json?: PipelineJSON }
 ): Promise<PipelineRecord> {
+  const wirePayload = {
+    ...payload,
+    pipeline_json: payload.pipeline_json
+      ? (typeof payload.pipeline_json === "string"
+          ? payload.pipeline_json
+          : JSON.stringify(payload.pipeline_json))
+      : undefined,
+  };
   const res = await fetch(`${BASE}/pipelines/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(wirePayload),
   });
   return hydratePipelineJson(await unwrap<PipelineRecord>(res));
 }
