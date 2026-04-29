@@ -22,6 +22,13 @@ export type TargetScope =
  *  parents that need event_driven simply don't render the picker. */
 export type PickedScope = Exclude<TargetScope, { type: "event_driven" }>;
 
+/** Default seed used by callers that need an initial PickedScope before the
+ *  user has interacted (wizard kind-pick, fresh modal open). */
+export const defaultPickedScope: PickedScope = {
+  type: "all_equipment",
+  fanout_cap: 20,
+};
+
 interface Props {
   value: PickedScope;
   onChange: (next: PickedScope) => void;

@@ -21,6 +21,7 @@ import {
   type WizardTriggerMode,
 } from "@/components/pipeline-builder/wizard-input-suggestions";
 import AutoPatrolScopePicker, {
+  defaultPickedScope,
   validatePickedScope,
   type PickedScope,
 } from "@/components/pipeline-builder/AutoPatrolScopePicker";
@@ -43,13 +44,6 @@ export type PendingTrigger =
   | { kind: "auto_patrol"; config: AutoPatrolTriggerValue; scope: PickedScope }
   | { kind: "auto_check"; config: AutoCheckTriggerValue }
   | null;
-
-/** Default scope used whenever the user lands on the trigger step for an
- *  auto_patrol — picker pre-seeds at "all_equipment" with cap=20. */
-export const defaultPickedScope: PickedScope = {
-  type: "all_equipment",
-  fanout_cap: 20,
-};
 
 export default function NewPipelinePage() {
   const [kind, setKind] = useState<Kind | null>(null);
