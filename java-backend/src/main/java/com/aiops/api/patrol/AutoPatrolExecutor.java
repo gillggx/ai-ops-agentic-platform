@@ -6,6 +6,8 @@ import com.aiops.api.domain.patrol.AutoPatrolEntity;
 import com.aiops.api.domain.patrol.AutoPatrolRepository;
 import com.aiops.api.domain.pipeline.PipelineEntity;
 import com.aiops.api.domain.pipeline.PipelineRepository;
+import com.aiops.api.domain.pipeline.PipelineRunEntity;
+import com.aiops.api.domain.pipeline.PipelineRunRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -40,6 +42,7 @@ public class AutoPatrolExecutor {
 
 	private final AutoPatrolRepository patrolRepo;
 	private final PipelineRepository pipelineRepo;
+	private final PipelineRunRepository pipelineRunRepo;
 	private final AlarmRepository alarmRepo;
 	private final SimulatorClient simulatorClient;
 	private final ObjectMapper objectMapper;
@@ -48,6 +51,7 @@ public class AutoPatrolExecutor {
 
 	public AutoPatrolExecutor(AutoPatrolRepository patrolRepo,
 	                          PipelineRepository pipelineRepo,
+	                          PipelineRunRepository pipelineRunRepo,
 	                          AlarmRepository alarmRepo,
 	                          SimulatorClient simulatorClient,
 	                          ObjectMapper objectMapper,
@@ -55,6 +59,7 @@ public class AutoPatrolExecutor {
 	                          @Value("${aiops.sidecar.python.service-token}") String sidecarServiceToken) {
 		this.patrolRepo = patrolRepo;
 		this.pipelineRepo = pipelineRepo;
+		this.pipelineRunRepo = pipelineRunRepo;
 		this.alarmRepo = alarmRepo;
 		this.simulatorClient = simulatorClient;
 		this.objectMapper = objectMapper;
@@ -62,38 +67,112 @@ public class AutoPatrolExecutor {
 		this.sidecarWebClient = WebClient.builder().baseUrl(sidecarBaseUrl).build();
 	}
 
-	/** Cron tick / once-fire entry point. Called from AutoPatrolSchedulerService. */
+	/** Returned by {@link #executePatrol} so callers (manual /trigger
+	 *  endpoint, scheduler thread) can summarise what happened without
+	 *  re-querying pb_pipeline_runs. {@code runId} points at the row
+	 *  that was just written so the UI can deep-link to it. */
+	public record PatrolRunResult(
+			Long runId,
+			Long patrolId,
+			Long pipelineId,
+			int fanoutCount,
+			int triggeredCount,
+			String status,
+			String errorMessage) {
+
+		static PatrolRunResult failed(Long patrolId, Long pipelineId,
+		                              int fanoutCount, int triggeredCount, String error) {
+			return new PatrolRunResult(null, patrolId, pipelineId,
+					fanoutCount, triggeredCount, "failed", error);
+		}
+	}
+
+	/** Write the pipeline_runs row + return a summary mirror to the caller. */
+	private PatrolRunResult persistRunAndReturn(Long patrolId, Long pipelineId,
+	                                             String pipelineVersion, String triggeredBy,
+	                                             int fanoutCount, int triggeredCount,
+	                                             String status, String errorMessage,
+	                                             List<Map<String, Object>> targetSummaries) {
+		PipelineRunEntity run = new PipelineRunEntity();
+		run.setPipelineId(pipelineId);
+		run.setPipelineVersion(pipelineVersion != null ? pipelineVersion : "1.0.0");
+		run.setTriggeredBy(triggeredBy);
+		run.setStatus(status);
+		run.setFinishedAt(OffsetDateTime.now());
+		if (errorMessage != null) run.setErrorMessage(truncate(errorMessage, 4000));
+		Map<String, Object> nodeResults = new HashMap<>();
+		nodeResults.put("patrol_id", patrolId);
+		nodeResults.put("fanout_count", fanoutCount);
+		nodeResults.put("triggered_count", triggeredCount);
+		nodeResults.put("targets", targetSummaries);
+		try {
+			run.setNodeResults(objectMapper.writeValueAsString(nodeResults));
+		} catch (Exception ex) {
+			run.setNodeResults("{\"error\":\"failed to serialize node_results\"}");
+		}
+		try {
+			run = pipelineRunRepo.save(run);
+		} catch (Exception ex) {
+			log.warn("Failed to write pb_pipeline_runs row for patrol {}: {}",
+					patrolId, ex.getMessage());
+		}
+		return new PatrolRunResult(run.getId(), patrolId, pipelineId,
+				fanoutCount, triggeredCount, status, errorMessage);
+	}
+
+	private static String truncate(String s, int max) {
+		if (s == null || s.length() <= max) return s;
+		return s.substring(0, max);
+	}
+
+	/** Cron tick / once-fire / manual /trigger entry point.
+	 *
+	 *  <p>Always writes a {@code pb_pipeline_runs} row (one per fire, not per
+	 *  target) summarising what happened. Returns the same summary so the
+	 *  manual /trigger endpoint can hand it to the UI directly. Skips that
+	 *  produce no work (pipeline missing, archived, scope empty) still write
+	 *  a row so the user can see "this patrol fired but had nothing to do". */
 	@Transactional
-	public void executePatrol(Long patrolId) {
+	public PatrolRunResult executePatrol(Long patrolId) {
+		String triggeredBy = "auto_patrol";
 		AutoPatrolEntity patrol = patrolRepo.findById(patrolId).orElse(null);
 		if (patrol == null) {
 			log.warn("executePatrol: patrol id={} not found (was it deleted?)", patrolId);
-			return;
-		}
-		if (!Boolean.TRUE.equals(patrol.getIsActive())) {
-			log.debug("executePatrol: patrol id={} inactive; skip", patrolId);
-			return;
+			return PatrolRunResult.failed(patrolId, null, 0, 0, "patrol not found");
 		}
 		Long pipelineId = patrol.getPipelineId();
 		if (pipelineId == null) {
 			log.warn("executePatrol: patrol id={} has no pipeline_id; skip", patrolId);
-			return;
+			return persistRunAndReturn(patrolId, null, "1.0.0", triggeredBy, 0, 0,
+					"failed", "patrol has no pipeline_id", List.of());
 		}
 		PipelineEntity pipeline = pipelineRepo.findById(pipelineId).orElse(null);
 		if (pipeline == null) {
 			log.warn("executePatrol: patrol id={} → pipeline id={} not found; skip", patrolId, pipelineId);
-			return;
+			return persistRunAndReturn(patrolId, pipelineId, "1.0.0", triggeredBy, 0, 0,
+					"failed", "pipeline not found", List.of());
 		}
-		// Pipeline must be in a runnable state; archived = no-op.
+		String pipelineVersion = pipeline.getVersion() != null ? pipeline.getVersion() : "1.0.0";
+		// Pipeline must be in a runnable state; archived = no-op (still
+		// recorded so user can see the skip + reason).
 		if ("archived".equals(pipeline.getStatus())) {
 			log.info("executePatrol: patrol id={} → pipeline id={} archived; skip", patrolId, pipelineId);
-			return;
+			return persistRunAndReturn(patrolId, pipelineId, pipelineVersion, triggeredBy, 0, 0,
+					"skipped", "pipeline is archived", List.of());
 		}
 
-		List<Map<String, Object>> targets = expandScope(patrol);
+		List<Map<String, Object>> targets;
+		try {
+			targets = expandScope(patrol);
+		} catch (Exception ex) {
+			log.warn("executePatrol: patrol id={} scope expansion failed: {}", patrolId, ex.getMessage());
+			return persistRunAndReturn(patrolId, pipelineId, pipelineVersion, triggeredBy, 0, 0,
+					"failed", "scope expansion failed: " + ex.getMessage(), List.of());
+		}
 		if (targets.isEmpty()) {
-			log.info("executePatrol: patrol id={} scope expanded to 0 targets; nothing to run", patrolId);
-			return;
+			log.info("executePatrol: patrol id={} scope expanded to 0 targets", patrolId);
+			return persistRunAndReturn(patrolId, pipelineId, pipelineVersion, triggeredBy, 0, 0,
+					"success", null, List.of());
 		}
 
 		Map<String, Object> bindingTemplate = parseBinding(patrol.getInputBinding());
@@ -102,17 +181,31 @@ public class AutoPatrolExecutor {
 				patrolId, pipelineId, targets.size(), patrol.getTriggerMode());
 
 		int triggeredCount = 0;
+		List<Map<String, Object>> targetSummaries = new ArrayList<>();
 		for (Map<String, Object> target : targets) {
 			Map<String, Object> inputs = resolveBinding(bindingTemplate, target);
 			Map<String, Object> result = callSidecar(pipelineId, inputs);
-			if (result == null) continue;
-			if (isTriggered(result)) {
-				writeAlarm(patrol, target, result);
-				triggeredCount++;
+			Map<String, Object> tSum = new HashMap<>();
+			tSum.put("tool_id", target.get("tool_id"));
+			if (target.get("step") != null) tSum.put("step", target.get("step"));
+			if (result == null) {
+				tSum.put("status", "sidecar_error");
+				tSum.put("triggered", false);
+			} else {
+				boolean triggered = isTriggered(result);
+				tSum.put("status", "ok");
+				tSum.put("triggered", triggered);
+				if (triggered) {
+					writeAlarm(patrol, target, result);
+					triggeredCount++;
+				}
 			}
+			targetSummaries.add(tSum);
 		}
 		log.info("executePatrol: patrol id={} done — {}/{} targets triggered",
 				patrolId, triggeredCount, targets.size());
+		return persistRunAndReturn(patrolId, pipelineId, pipelineVersion, triggeredBy,
+				targets.size(), triggeredCount, "success", null, targetSummaries);
 	}
 
 	// ── Scope expansion ───────────────────────────────────────────────────

@@ -8,6 +8,8 @@ import com.aiops.api.domain.pipeline.PipelineAutoCheckTriggerEntity;
 import com.aiops.api.domain.pipeline.PipelineAutoCheckTriggerRepository;
 import com.aiops.api.domain.pipeline.PipelineEntity;
 import com.aiops.api.domain.pipeline.PipelineRepository;
+import com.aiops.api.domain.pipeline.PipelineRunEntity;
+import com.aiops.api.domain.pipeline.PipelineRunRepository;
 import com.aiops.api.domain.pipeline.PublishedSkillEntity;
 import com.aiops.api.domain.pipeline.PublishedSkillRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -32,17 +34,20 @@ public class PipelineController {
 	private final PipelineRepository repository;
 	private final PublishedSkillRepository publishedSkillRepository;
 	private final PipelineAutoCheckTriggerRepository autoCheckTriggerRepository;
+	private final PipelineRunRepository pipelineRunRepository;
 	private final PipelineDocGenerator docGenerator;
 	private final ObjectMapper objectMapper;
 
 	public PipelineController(PipelineRepository repository,
 	                          PublishedSkillRepository publishedSkillRepository,
 	                          PipelineAutoCheckTriggerRepository autoCheckTriggerRepository,
+	                          PipelineRunRepository pipelineRunRepository,
 	                          PipelineDocGenerator docGenerator,
 	                          ObjectMapper objectMapper) {
 		this.repository = repository;
 		this.publishedSkillRepository = publishedSkillRepository;
 		this.autoCheckTriggerRepository = autoCheckTriggerRepository;
+		this.pipelineRunRepository = pipelineRunRepository;
 		this.docGenerator = docGenerator;
 		this.objectMapper = objectMapper;
 	}
@@ -233,6 +238,19 @@ public class PipelineController {
 		return ApiResponse.ok(result);
 	}
 
+	@GetMapping("/{id}/runs")
+	@PreAuthorize(Authorities.ANY_ROLE)
+	public ApiResponse<List<PipelineDtos.RunSummary>> listRuns(@PathVariable Long id,
+	                                                            @RequestParam(defaultValue = "20") int limit) {
+		int safe = Math.max(1, Math.min(limit, 200));
+		List<PipelineRunEntity> all = pipelineRunRepository.findByPipelineIdOrderByStartedAtDesc(id);
+		List<PipelineDtos.RunSummary> out = new java.util.ArrayList<>();
+		for (int i = 0; i < Math.min(all.size(), safe); i++) {
+			out.add(PipelineDtos.runSummaryOf(all.get(i)));
+		}
+		return ApiResponse.ok(out);
+	}
+
 	@PostMapping("/{id}/fork")
 	@Transactional
 	@PreAuthorize(Authorities.ADMIN_OR_PE)
@@ -393,6 +411,18 @@ public class PipelineController {
 				@jakarta.validation.constraints.NotNull
 				@jakarta.validation.constraints.Size(min = 1, message = "event_types must contain at least one entry")
 				List<String> eventTypes) {}
+
+		public record RunSummary(Long id, Long pipelineId, String pipelineVersion,
+		                         String triggeredBy, String status,
+		                         String nodeResults, String errorMessage,
+		                         OffsetDateTime startedAt, OffsetDateTime finishedAt) {}
+
+		static RunSummary runSummaryOf(PipelineRunEntity e) {
+			return new RunSummary(e.getId(), e.getPipelineId(), e.getPipelineVersion(),
+					e.getTriggeredBy(), e.getStatus(),
+					e.getNodeResults(), e.getErrorMessage(),
+					e.getStartedAt(), e.getFinishedAt());
+		}
 
 		static Summary summaryOf(PipelineEntity e) {
 			return new Summary(e.getId(), e.getName(), e.getDescription(), e.getStatus(),

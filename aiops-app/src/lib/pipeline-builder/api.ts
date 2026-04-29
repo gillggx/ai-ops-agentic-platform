@@ -167,6 +167,35 @@ export async function clonePipeline(id: number): Promise<PipelineRecord> {
   return forkPipeline(id);
 }
 
+// Phase A — pb_pipeline_runs read API.
+
+export interface PipelineRunSummary {
+  id: number;
+  pipeline_id: number | null;
+  pipeline_version: string;
+  triggered_by: string;
+  /** running | success | failed | skipped | validation_error */
+  status: string;
+  /** JSON text — for auto_patrol fires it carries
+   *  {patrol_id, fanout_count, triggered_count, targets:[{tool_id, status, triggered}]}.
+   *  Caller can JSON.parse if it needs to drill in. */
+  node_results: string | null;
+  error_message: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export async function listPipelineRuns(
+  pipelineId: number,
+  limit = 20,
+): Promise<PipelineRunSummary[]> {
+  const res = await fetch(
+    `${BASE}/pipelines/${pipelineId}/runs?limit=${limit}`,
+    { cache: "no-store" },
+  );
+  return unwrap<PipelineRunSummary[]>(res);
+}
+
 // PR-C — Publishing + Registry
 
 export interface DraftDoc {

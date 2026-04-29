@@ -847,6 +847,43 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
               🔔 {boundPatrol ? `編輯 Patrol 綁定 (#${boundPatrol.id})` : "設定 Patrol 觸發"}
             </button>
           )}
+          {/* Phase A — Run Now button: only when this pipeline has a bound
+              Auto-Patrol. Synchronous fire (scope expansion + sidecar exec).
+              Result toast shows fanout/triggered counts so user can
+              eyeball-verify without diving into the Runs tab. */}
+          {mode !== "session" && boundPatrol && (
+            <button
+              onClick={async () => {
+                if (!boundPatrol) return;
+                showToast("info", `▶️ 觸發 Patrol #${boundPatrol.id}…`);
+                try {
+                  const res = await fetch(`/api/admin/auto-patrols/${boundPatrol.id}/trigger`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: "{}",
+                  });
+                  const body = await res.json();
+                  if (!res.ok) {
+                    showToast("error", `觸發失敗：${body.error ?? res.statusText}`);
+                    return;
+                  }
+                  const fanout = body.fanout_count ?? 0;
+                  const triggered = body.triggered_count ?? 0;
+                  showToast(
+                    triggered > 0 ? "error" : "success",
+                    `Patrol fired · fanout=${fanout} triggered=${triggered}（看 Runs tab）`,
+                  );
+                  setRightTab("runs");
+                } catch (e) {
+                  showToast("error", `觸發失敗：${(e as Error).message}`);
+                }
+              }}
+              style={{ ...btn("ghost"), border: "1px solid #16a34a", color: "#15803d", background: "#f0fdf4", fontWeight: 600 }}
+              title="同步觸發 patrol（fan-out + 寫 alarm/run 紀錄）"
+            >
+              ▶️ Run Now
+            </button>
+          )}
           {state.meta.status === "active" && (
             <>
               <button onClick={handleClone} style={btn("ghost")} title="複製為可編輯的 Draft">
@@ -994,6 +1031,7 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
           blockCatalog={catalog}
           readOnly={readOnly}
           runResult={runResult}
+          pipelineId={state.meta.pipelineId ?? null}
           tab={rightTab}
           setRightTab={setRightTab}
           onAskAgent={(nodeId) => {

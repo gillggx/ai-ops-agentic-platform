@@ -22,13 +22,16 @@ public class AutoPatrolController {
 	private final AutoPatrolRepository repository;
 	private final com.aiops.api.domain.skill.ExecutionLogRepository execLogRepo;
 	private final com.aiops.api.patrol.AutoPatrolSchedulerService schedulerService;
+	private final com.aiops.api.patrol.AutoPatrolExecutor executor;
 
 	public AutoPatrolController(AutoPatrolRepository repository,
 	                            com.aiops.api.domain.skill.ExecutionLogRepository execLogRepo,
-	                            com.aiops.api.patrol.AutoPatrolSchedulerService schedulerService) {
+	                            com.aiops.api.patrol.AutoPatrolSchedulerService schedulerService,
+	                            com.aiops.api.patrol.AutoPatrolExecutor executor) {
 		this.repository = repository;
 		this.execLogRepo = execLogRepo;
 		this.schedulerService = schedulerService;
+		this.executor = executor;
 	}
 
 	@GetMapping
@@ -106,6 +109,28 @@ public class AutoPatrolController {
 		repository.deleteById(id);
 		schedulerService.unregister(id);
 		return ApiResponse.ok(null);
+	}
+
+	/**
+	 * Manually trigger a patrol — synchronously runs the executor (scope
+	 * expansion → per-target sidecar execute → alarm write) and returns a
+	 * summary. Skips the {@code is_active} check on purpose so admins can
+	 * test paused patrols without flipping the flag.
+	 */
+	@PostMapping("/{id}/trigger")
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public ApiResponse<java.util.Map<String, Object>> trigger(@PathVariable Long id) {
+		if (!repository.existsById(id)) throw ApiException.notFound("auto patrol");
+		var result = executor.executePatrol(id);
+		java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+		body.put("run_id", result.runId());
+		body.put("patrol_id", result.patrolId());
+		body.put("pipeline_id", result.pipelineId());
+		body.put("fanout_count", result.fanoutCount());
+		body.put("triggered_count", result.triggeredCount());
+		body.put("status", result.status());
+		body.put("error_message", result.errorMessage());
+		return ApiResponse.ok(body);
 	}
 
 	@GetMapping("/{id}/executions")
