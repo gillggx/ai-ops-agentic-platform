@@ -53,9 +53,14 @@ class PipelineValidator:
             block_catalog: Map (name, version) → block spec dict.
             enforce_pipeline_status: If set (e.g. "production"), C3 rule requires
                 all blocks to have at least the same status level.
-            enforce_kind: PR-B. If set, runs C11/C12 kind-specific structural checks:
+            enforce_kind: PR-B. If set, runs C11/C12/C13 kind-specific structural checks:
                 "auto_patrol" → must end with ≥1 block_alert; no chart-only pipeline
-                "diagnostic" → must have ≥1 block_chart and zero block_alert
+                "auto_check"  → must have ≥1 block_chart and zero block_alert
+                                (only auto_patrol produces alarms; auto_check is
+                                 the diagnostic-on-alarm path, surfaces results
+                                 as charts to avoid alarm-loop recursion)
+                "skill"       → must have ≥1 block_chart and zero block_alert
+                "diagnostic" → legacy alias of "skill"
         """
         self.catalog = block_catalog
         self.enforce_pipeline_status = enforce_pipeline_status
@@ -338,12 +343,28 @@ class PipelineValidator:
                     ),
                 }
         elif self.enforce_kind == "auto_check":
-            if not has_alert and not has_chart:
+            # Phase C correction: only auto_patrol can produce alarms. auto_check
+            # is the diagnostic-on-alarm path and must surface results as charts —
+            # if it could write block_alert, that alarm would fan out to its own
+            # auto_check binding (alarm → check → alarm → check loop) and cause
+            # unbounded recursion via EventDispatchService.
+            if not has_chart:
                 yield {
-                    "rule": "C13_AUTO_CHECK_NEEDS_OUTPUT",
+                    "rule": "C13_AUTO_CHECK_NEEDS_CHART",
                     "message": (
-                        "Auto-Check pipelines must include at least one block_alert "
-                        "or block_chart (the engineer needs to see the check result)."
+                        "Auto-Check pipelines must include at least one block_chart "
+                        "(diagnostic results are surfaced as charts; alerting is "
+                        "auto_patrol's job)."
+                    ),
+                }
+            if has_alert:
+                yield {
+                    "rule": "C13_AUTO_CHECK_FORBIDS_ALERT",
+                    "message": (
+                        "Auto-Check pipelines must NOT contain block_alert — only "
+                        "auto_patrol produces alarms. Auto-Check fires on an alarm "
+                        "to diagnose; emitting another alarm would loop back into "
+                        "the same dispatcher (alarm → check → alarm → check)."
                     ),
                 }
             if not declared_inputs:

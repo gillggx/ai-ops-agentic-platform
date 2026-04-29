@@ -75,6 +75,16 @@ public class AutoCheckExecutor {
 			log.info("auto_check: pipeline id={} archived; skip", pipelineId);
 			return;
 		}
+		// Safety net: validator rejects auto_check pipelines containing
+		// block_alert at publish time, but legacy data published before that
+		// rule may still be lurking. Refuse to fire those — emitting an alarm
+		// from auto_check would re-enter EventDispatchService.dispatchAlarm
+		// and loop indefinitely.
+		if (pipelineHasBlockAlert(pipeline)) {
+			log.warn("auto_check: pipeline id={} contains block_alert (only auto_patrol may emit alarms); refusing to fire — republish without block_alert",
+					pipelineId);
+			return;
+		}
 
 		// Mirror equipment_id ↔ tool_id same as patrol event mode so the
 		// pipeline can declare either name on its inputs.
@@ -168,7 +178,31 @@ public class AutoCheckExecutor {
 		return out;
 	}
 
-	/** Read TypeReference suppressed-import dummy for future expansion. */
-	@SuppressWarnings("unused")
+	/** Static type token shared by sidecar response + pipeline_json parsing. */
 	private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
+
+	/** Parse pipeline_json and look for any block_alert node. Best-effort —
+	 *  malformed JSON or missing nodes returns false (the executor will then
+	 *  attempt the run and any sidecar issue surfaces in the run row). */
+	@SuppressWarnings("unchecked")
+	private boolean pipelineHasBlockAlert(PipelineEntity pipeline) {
+		String raw = pipeline.getPipelineJson();
+		if (raw == null || raw.isBlank()) return false;
+		try {
+			Map<String, Object> json = objectMapper.readValue(raw, MAP_TYPE);
+			Object nodes = json.get("nodes");
+			if (!(nodes instanceof java.util.List<?> list)) return false;
+			for (Object n : list) {
+				if (n instanceof Map<?, ?> m
+						&& "block_alert".equals(((Map<String, Object>) m).get("block_id"))) {
+					return true;
+				}
+			}
+			return false;
+		} catch (Exception ex) {
+			log.debug("pipelineHasBlockAlert: parse failed for pipeline {}: {}",
+					pipeline.getId(), ex.getMessage());
+			return false;
+		}
+	}
 }
