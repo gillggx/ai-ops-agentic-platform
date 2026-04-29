@@ -6,6 +6,11 @@ import com.aiops.api.common.ApiException;
 import com.aiops.api.common.ApiResponse;
 import com.aiops.api.domain.pipeline.PipelineEntity;
 import com.aiops.api.domain.pipeline.PipelineRepository;
+import com.aiops.api.domain.pipeline.PublishedSkillEntity;
+import com.aiops.api.domain.pipeline.PublishedSkillRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -23,9 +28,18 @@ import java.util.Set;
 public class PipelineController {
 
 	private final PipelineRepository repository;
+	private final PublishedSkillRepository publishedSkillRepository;
+	private final PipelineDocGenerator docGenerator;
+	private final ObjectMapper objectMapper;
 
-	public PipelineController(PipelineRepository repository) {
+	public PipelineController(PipelineRepository repository,
+	                          PublishedSkillRepository publishedSkillRepository,
+	                          PipelineDocGenerator docGenerator,
+	                          ObjectMapper objectMapper) {
 		this.repository = repository;
+		this.publishedSkillRepository = publishedSkillRepository;
+		this.docGenerator = docGenerator;
+		this.objectMapper = objectMapper;
 	}
 
 	@GetMapping
@@ -111,6 +125,130 @@ public class PipelineController {
 		return ApiResponse.ok(PipelineDtos.detailOf(repository.save(e)));
 	}
 
+	@PostMapping("/{id}/publish/draft-doc")
+	@Transactional
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public ApiResponse<Map<String, Object>> publishDraftDoc(@PathVariable Long id) {
+		PipelineEntity e = repository.findById(id).orElseThrow(() -> ApiException.notFound("pipeline"));
+		// Allow draft-doc generation from validating OR locked (preview before locking).
+		if (!"validating".equals(e.getStatus()) && !"locked".equals(e.getStatus())) {
+			throw ApiException.conflict("Can only generate doc for validating/locked pipelines (got '"
+					+ e.getStatus() + "')");
+		}
+		Map<String, Object> pipelineJson = parsePipelineJson(e.getPipelineJson());
+		String kind = e.getPipelineKind() == null ? "diagnostic" : e.getPipelineKind();
+		Map<String, Object> doc = docGenerator.generate(
+				e.getId(), e.getName(), e.getVersion(), kind,
+				e.getDescription() == null ? "" : e.getDescription(),
+				pipelineJson);
+		try {
+			e.setAutoDoc(objectMapper.writeValueAsString(doc));
+		} catch (JsonProcessingException ex) {
+			throw new ApiException(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR,
+					"serialize_failed", "failed to serialize draft doc: " + ex.getMessage());
+		}
+		repository.save(e);
+		return ApiResponse.ok(doc);
+	}
+
+	@PostMapping("/{id}/publish")
+	@Transactional
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public ApiResponse<Map<String, Object>> publish(@PathVariable Long id,
+	                                                 @Validated @RequestBody PipelineDtos.PublishRequest req) {
+		PipelineEntity e = repository.findById(id).orElseThrow(() -> ApiException.notFound("pipeline"));
+		if (!"locked".equals(e.getStatus())) {
+			throw ApiException.conflict("Pipeline must be 'locked' before publish (got '"
+					+ e.getStatus() + "')");
+		}
+		String kind = e.getPipelineKind();
+		// Phase 5-UX-7: legacy "diagnostic" treated as "skill" for back-compat.
+		if ("diagnostic".equals(kind)) kind = "skill";
+		if (!"skill".equals(kind)) {
+			throw ApiException.conflict("Only skill pipelines go to the Skill Registry. "
+					+ "kind='" + e.getPipelineKind() + "' routes elsewhere: "
+					+ "auto_patrol → /admin/auto-patrols binding, "
+					+ "auto_check → /pipelines/{id}/publish-auto-check with event_types.");
+		}
+
+		Map<String, Object> doc = req.reviewedDoc();
+		if (doc == null) throw ApiException.badRequest("reviewed_doc is required");
+		List<String> required = List.of("slug", "name", "use_case", "inputs_schema", "outputs_schema");
+		List<String> missing = new java.util.ArrayList<>();
+		for (String f : required) {
+			Object v = doc.get(f);
+			if (v == null || (v instanceof String s && s.isBlank())
+					|| (v instanceof java.util.Collection<?> c && c.isEmpty())
+					|| (v instanceof Map<?, ?> m && m.isEmpty())) {
+				missing.add(f);
+			}
+		}
+		if (!missing.isEmpty()) {
+			throw new ApiException(org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY,
+					"missing_fields", "reviewed_doc missing fields: " + missing);
+		}
+
+		String slug = String.valueOf(doc.get("slug"));
+		publishedSkillRepository.findBySlug(slug).ifPresent(existing -> {
+			if ("active".equals(existing.getStatus())) {
+				throw ApiException.conflict("slug '" + slug
+						+ "' already exists — retire the old version or rename");
+			}
+		});
+
+		PublishedSkillEntity skill = new PublishedSkillEntity();
+		skill.setPipelineId(e.getId());
+		skill.setPipelineVersion(e.getVersion());
+		skill.setSlug(slug);
+		Object docName = doc.get("name");
+		skill.setName((docName instanceof String s && !s.isBlank()) ? s : e.getName());
+		skill.setUseCase(stringOrEmpty(doc.get("use_case")));
+		skill.setWhenToUse(jsonOr(doc.get("when_to_use"), "[]"));
+		skill.setInputsSchema(jsonOr(doc.get("inputs_schema"), "[]"));
+		skill.setOutputsSchema(jsonOr(doc.get("outputs_schema"), "{}"));
+		Object example = doc.get("example_invocation");
+		if (example != null) skill.setExampleInvocation(jsonOr(example, "null"));
+		skill.setTags(jsonOr(doc.get("tags"), "[]"));
+		skill.setStatus("active");
+		skill.setPublishedBy(req.publishedBy() == null ? "admin" : req.publishedBy());
+		publishedSkillRepository.save(skill);
+
+		// Pipeline locked → active.
+		e.setStatus("active");
+		e.setPublishedAt(OffsetDateTime.now());
+		repository.save(e);
+
+		Map<String, Object> result = new java.util.LinkedHashMap<>();
+		result.put("id", e.getId());
+		result.put("name", e.getName());
+		result.put("status", e.getStatus());
+		result.put("pipeline_kind", e.getPipelineKind());
+		result.put("version", e.getVersion());
+		result.put("published_slug", slug);
+		return ApiResponse.ok(result);
+	}
+
+	private Map<String, Object> parsePipelineJson(String raw) {
+		if (raw == null || raw.isBlank()) return Map.of();
+		try {
+			return objectMapper.readValue(raw, new TypeReference<Map<String, Object>>() {});
+		} catch (JsonProcessingException ex) {
+			throw ApiException.badRequest("pipeline_json is not valid JSON: " + ex.getMessage());
+		}
+	}
+
+	private String stringOrEmpty(Object o) {
+		return o == null ? "" : String.valueOf(o);
+	}
+
+	private String jsonOr(Object o, String fallback) {
+		try {
+			return objectMapper.writeValueAsString(o);
+		} catch (JsonProcessingException ex) {
+			return fallback;
+		}
+	}
+
 	@PostMapping("/{id}/archive")
 	@Transactional
 	@PreAuthorize(Authorities.ADMIN_OR_PE)
@@ -150,6 +288,8 @@ public class PipelineController {
 		                            String pipelineJson, String autoDoc) {}
 
 		public record TransitionRequest(@NotBlank String to, String notes) {}
+
+		public record PublishRequest(Map<String, Object> reviewedDoc, String publishedBy) {}
 
 		static Summary summaryOf(PipelineEntity e) {
 			return new Summary(e.getId(), e.getName(), e.getDescription(), e.getStatus(),
