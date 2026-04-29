@@ -48,6 +48,7 @@ public class AutoPatrolExecutor {
 	private final ObjectMapper objectMapper;
 	private final WebClient sidecarWebClient;
 	private final String sidecarServiceToken;
+	private final org.springframework.context.ApplicationContext applicationContext;
 
 	public AutoPatrolExecutor(AutoPatrolRepository patrolRepo,
 	                          PipelineRepository pipelineRepo,
@@ -55,6 +56,7 @@ public class AutoPatrolExecutor {
 	                          AlarmRepository alarmRepo,
 	                          SimulatorClient simulatorClient,
 	                          ObjectMapper objectMapper,
+	                          org.springframework.context.ApplicationContext applicationContext,
 	                          @Value("${aiops.sidecar.python.base-url}") String sidecarBaseUrl,
 	                          @Value("${aiops.sidecar.python.service-token}") String sidecarServiceToken) {
 		this.patrolRepo = patrolRepo;
@@ -63,6 +65,7 @@ public class AutoPatrolExecutor {
 		this.alarmRepo = alarmRepo;
 		this.simulatorClient = simulatorClient;
 		this.objectMapper = objectMapper;
+		this.applicationContext = applicationContext;
 		this.sidecarServiceToken = sidecarServiceToken;
 		this.sidecarWebClient = WebClient.builder().baseUrl(sidecarBaseUrl).build();
 	}
@@ -125,16 +128,29 @@ public class AutoPatrolExecutor {
 		return s.substring(0, max);
 	}
 
-	/** Cron tick / once-fire / manual /trigger entry point.
+	/** Cron tick / once-fire / manual /trigger entry point. See the overload
+	 *  for event-mode firing with a payload. */
+	@Transactional
+	public PatrolRunResult executePatrol(Long patrolId) {
+		return executePatrol(patrolId, null);
+	}
+
+	/** Cron tick / once-fire / manual /trigger / event-driven entry point.
 	 *
 	 *  <p>Always writes a {@code pb_pipeline_runs} row (one per fire, not per
 	 *  target) summarising what happened. Returns the same summary so the
 	 *  manual /trigger endpoint can hand it to the UI directly. Skips that
 	 *  produce no work (pipeline missing, archived, scope empty) still write
-	 *  a row so the user can see "this patrol fired but had nothing to do". */
+	 *  a row so the user can see "this patrol fired but had nothing to do".
+	 *
+	 *  <p>{@code eventPayload}: when non-null and the patrol's scope is
+	 *  {@code event_driven}, the payload becomes the single fan-out target
+	 *  (no simulator call) — typical fields are {@code equipment_id},
+	 *  {@code tool_id}, {@code lot_id}, {@code step}. Cron / once / manual
+	 *  callers should pass null. */
 	@Transactional
-	public PatrolRunResult executePatrol(Long patrolId) {
-		String triggeredBy = "auto_patrol";
+	public PatrolRunResult executePatrol(Long patrolId, Map<String, Object> eventPayload) {
+		String triggeredBy = eventPayload != null ? "auto_patrol_event" : "auto_patrol";
 		AutoPatrolEntity patrol = patrolRepo.findById(patrolId).orElse(null);
 		if (patrol == null) {
 			log.warn("executePatrol: patrol id={} not found (was it deleted?)", patrolId);
@@ -163,7 +179,7 @@ public class AutoPatrolExecutor {
 
 		List<Map<String, Object>> targets;
 		try {
-			targets = expandScope(patrol);
+			targets = expandScope(patrol, eventPayload);
 		} catch (Exception ex) {
 			log.warn("executePatrol: patrol id={} scope expansion failed: {}", patrolId, ex.getMessage());
 			return persistRunAndReturn(patrolId, pipelineId, pipelineVersion, triggeredBy, 0, 0,
@@ -211,17 +227,33 @@ public class AutoPatrolExecutor {
 	// ── Scope expansion ───────────────────────────────────────────────────
 
 	@SuppressWarnings("unchecked")
-	List<Map<String, Object>> expandScope(AutoPatrolEntity patrol) {
+	List<Map<String, Object>> expandScope(AutoPatrolEntity patrol, Map<String, Object> eventPayload) {
 		Map<String, Object> scope = parseScope(patrol.getTargetScope());
 		String type = String.valueOf(scope.getOrDefault("type", "event_driven"));
 		int cap = ((Number) scope.getOrDefault("fanout_cap", DEFAULT_FANOUT_CAP)).intValue();
 
 		switch (type) {
 			case "event_driven" -> {
-				// schedule/once shouldn't reach here — but if a patrol was
-				// configured as event but firing via cron somehow, skip.
-				log.warn("patrol id={} scope=event_driven but reached executor; skip", patrol.getId());
-				return List.of();
+				// Event-mode patrols receive the event payload — pass it through
+				// as the single target so binding templates can resolve both
+				// $event.X (event convention) and $loop.X against the same map.
+				// Cron / once paths reach here with eventPayload=null (mis-
+				// configured patrol) and we can only skip with a warn.
+				if (eventPayload == null) {
+					log.warn("patrol id={} scope=event_driven but no event payload (cron-fired event-mode patrol?); skip",
+							patrol.getId());
+					return List.of();
+				}
+				// Mirror equipment_id ↔ tool_id so a binding written either way
+				// resolves correctly (block_process_history.tool_id is the param
+				// name; event payloads typically carry equipment_id).
+				Map<String, Object> target = new HashMap<>(eventPayload);
+				if (target.get("tool_id") == null && target.get("equipment_id") != null) {
+					target.put("tool_id", target.get("equipment_id"));
+				} else if (target.get("equipment_id") == null && target.get("tool_id") != null) {
+					target.put("equipment_id", target.get("tool_id"));
+				}
+				return List.of(target);
 			}
 			case "all_equipment" -> {
 				List<Map<String, Object>> all = simulatorClient.listAllTools();
@@ -268,18 +300,26 @@ public class AutoPatrolExecutor {
 
 	// ── Input binding ─────────────────────────────────────────────────────
 
-	/** Resolve "$loop.X" tokens in the binding template against a target map.
-	 *  Literal values pass through unchanged. */
+	/** Resolve "$loop.X" / "$event.X" tokens in the binding template against
+	 *  a target map. Both prefixes look up the same map — for schedule/once
+	 *  this is the per-iteration scope expansion target; for event-mode
+	 *  patrols it is the raw event payload. Literal values pass through
+	 *  unchanged. */
 	Map<String, Object> resolveBinding(Map<String, Object> template, Map<String, Object> target) {
 		Map<String, Object> out = new HashMap<>();
 		for (Map.Entry<String, Object> e : template.entrySet()) {
 			Object v = e.getValue();
-			if (v instanceof String s && s.startsWith("$loop.")) {
-				String key = s.substring("$loop.".length());
-				out.put(e.getKey(), target.get(key));
-			} else {
-				out.put(e.getKey(), v);
+			if (v instanceof String s) {
+				if (s.startsWith("$loop.")) {
+					out.put(e.getKey(), target.get(s.substring("$loop.".length())));
+					continue;
+				}
+				if (s.startsWith("$event.")) {
+					out.put(e.getKey(), target.get(s.substring("$event.".length())));
+					continue;
+				}
 			}
+			out.put(e.getKey(), v);
 		}
 		// Convenience: if template is empty and target has tool_id, expose it
 		// so the pipeline can still bind by name.
@@ -356,8 +396,17 @@ public class AutoPatrolExecutor {
 		}
 		alarm.setTitle(title.length() > 300 ? title.substring(0, 300) : title);
 		alarm.setStatus("active");
-		alarmRepo.save(alarm);
+		AlarmEntity saved = alarmRepo.save(alarm);
 		log.info("alarm written: patrol={} tool={} title='{}'", patrol.getId(), toolId, title);
+		// Phase C — patrol-written alarms also fan out to auto_check pipelines
+		// bound to the same trigger_event. Resolve dispatcher via context to
+		// dodge the cyclical AutoPatrolExecutor ↔ EventDispatchService graph.
+		try {
+			EventDispatchService dispatch = applicationContext.getBean(EventDispatchService.class);
+			dispatch.dispatchAlarm(saved);
+		} catch (Exception ex) {
+			log.warn("failed to dispatch alarm id={} to auto_check: {}", saved.getId(), ex.getMessage());
+		}
 	}
 
 	// ── Helpers ───────────────────────────────────────────────────────────

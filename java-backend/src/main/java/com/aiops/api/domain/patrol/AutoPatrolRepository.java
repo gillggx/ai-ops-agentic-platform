@@ -10,4 +10,10 @@ public interface AutoPatrolRepository extends JpaRepository<AutoPatrolEntity, Lo
 	List<AutoPatrolEntity> findByIsActiveTrue();
 	List<AutoPatrolEntity> findByTriggerMode(String triggerMode);
 	List<AutoPatrolEntity> findByPipelineId(Long pipelineId);
+
+	/** Phase C — event-mode dispatch lookup. Used by EventDispatchService when
+	 *  a generated_events row is written to find every active patrol that
+	 *  should fire on this event_type. */
+	List<AutoPatrolEntity> findByTriggerModeAndEventTypeIdAndIsActiveTrue(
+			String triggerMode, Long eventTypeId);
 }

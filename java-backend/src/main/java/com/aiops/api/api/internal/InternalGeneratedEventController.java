@@ -4,6 +4,7 @@ import com.aiops.api.auth.InternalAuthority;
 import com.aiops.api.common.ApiResponse;
 import com.aiops.api.domain.event.GeneratedEventEntity;
 import com.aiops.api.domain.event.GeneratedEventRepository;
+import com.aiops.api.patrol.EventDispatchService;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,9 +18,12 @@ import org.springframework.web.bind.annotation.*;
 public class InternalGeneratedEventController {
 
 	private final GeneratedEventRepository repository;
+	private final EventDispatchService dispatchService;
 
-	public InternalGeneratedEventController(GeneratedEventRepository repository) {
+	public InternalGeneratedEventController(GeneratedEventRepository repository,
+	                                        EventDispatchService dispatchService) {
 		this.repository = repository;
+		this.dispatchService = dispatchService;
 	}
 
 	@PostMapping
@@ -32,7 +36,11 @@ public class InternalGeneratedEventController {
 		if (req.mappedParameters() != null) e.setMappedParameters(req.mappedParameters());
 		e.setSkillConclusion(req.skillConclusion());
 		if (req.status() != null) e.setStatus(req.status());
-		return ApiResponse.ok(Dto.of(repository.save(e)));
+		GeneratedEventEntity saved = repository.save(e);
+		// Phase C — fan out to event-mode auto_patrols. Async + swallow errors
+		// so the writer's response isn't held up by downstream patrol fires.
+		dispatchService.dispatchGeneratedEvent(saved.getEventTypeId(), saved.getMappedParameters());
+		return ApiResponse.ok(Dto.of(saved));
 	}
 
 	public record CreateRequest(@NotNull Long eventTypeId, @NotNull Long sourceSkillId,
