@@ -19,6 +19,15 @@ import type { PipelineInput, PipelineInputType } from "@/lib/pipeline-builder/ty
 
 export type WizardKind = "auto_patrol" | "auto_check" | "skill";
 export type WizardTriggerMode = "event" | "schedule" | "once" | null;
+/** Subset of TargetScope.type that's relevant to the input suggester — only
+ *  schedule/once-mode patrols carry a non-event scope, and only by_step
+ *  changes which inputs the runtime expects (it injects $loop.step in
+ *  addition to $loop.tool_id). Others can pass undefined. */
+export type WizardScopeType =
+  | "all_equipment"
+  | "specific_equipment"
+  | "by_step"
+  | undefined;
 
 export interface InputSuggestion {
   name: string;
@@ -36,6 +45,7 @@ export interface InputSuggestion {
 export function getInputSuggestions(
   kind: WizardKind,
   triggerMode: WizardTriggerMode,
+  scopeType?: WizardScopeType,
 ): InputSuggestion[] {
   if (kind === "auto_patrol") {
     if (triggerMode === "event") {
@@ -70,7 +80,10 @@ export function getInputSuggestions(
         },
       ];
     }
-    // schedule or once — no event payload, fan-out is the key concern
+    // schedule or once — no event payload, fan-out is the key concern.
+    // When scopeType=by_step the runtime injects $loop.step too, so step
+    // becomes critical in that case (still optional for the other scopes).
+    const stepRequired = scopeType === "by_step";
     return [
       {
         name: "tool_id",
@@ -80,6 +93,16 @@ export function getInputSuggestions(
         critical: true,
         description:
           "綁 target_scope=all_equipment 時 Auto-Patrol Service 會在 runtime 為每台機台注入一次此值做 fan-out。強烈建議宣告，否則只能寫死 EQP-ID。",
+      },
+      {
+        name: "step",
+        type: "string",
+        required: stepRequired,
+        preChecked: stepRequired,
+        critical: stepRequired,
+        description: stepRequired
+          ? "目標範圍 = 指定站點 → runtime 會注入 $loop.step 給 pipeline。必填。"
+          : "選擇性：如果 pipeline 需要區分製程站點，宣告這個。",
       },
       {
         name: "time_range",

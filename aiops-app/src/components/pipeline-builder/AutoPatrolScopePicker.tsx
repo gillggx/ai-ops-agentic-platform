@@ -165,6 +165,15 @@ const inputStyle: React.CSSProperties = {
   fontSize: 12,
 };
 
+/** Pipeline input names that the runtime will populate via $loop.X for a
+ *  given non-event scope. The wizard uses this to gate Step 3 — if the
+ *  pipeline doesn't declare these names, fan-out will silently produce
+ *  empty inputs at runtime. */
+export function requiredInputsForScope(s: PickedScope): string[] {
+  if (s.type === "by_step") return ["tool_id", "step"];
+  return ["tool_id"];  // all_equipment / specific_equipment both inject tool_id
+}
+
 /** Validation helper — reused by wizard's validateTrigger. */
 export function validatePickedScope(s: PickedScope): string | null {
   if (s.type === "specific_equipment" && s.equipment_ids.length === 0) {

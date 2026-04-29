@@ -18,18 +18,25 @@ import {
   kindLabel,
   suggestionToInput,
   type WizardKind,
+  type WizardScopeType,
   type WizardTriggerMode,
 } from "./wizard-input-suggestions";
 
 interface Props {
   kind: WizardKind;
   triggerMode: WizardTriggerMode;
+  /** Scope picked in Step 2 (auto_patrol + non-event only). Affects which
+   *  inputs are pre-checked and marked critical (e.g. by_step → step). */
+  scopeType?: WizardScopeType;
   value: PipelineInput[];
   onChange: (next: PipelineInput[]) => void;
 }
 
-export default function WizardInputsStep({ kind, triggerMode, value, onChange }: Props) {
-  const suggestions = useMemo(() => getInputSuggestions(kind, triggerMode), [kind, triggerMode]);
+export default function WizardInputsStep({ kind, triggerMode, scopeType, value, onChange }: Props) {
+  const suggestions = useMemo(
+    () => getInputSuggestions(kind, triggerMode, scopeType),
+    [kind, triggerMode, scopeType],
+  );
   const rationale = useMemo(() => kindInputRationale(kind, triggerMode), [kind, triggerMode]);
 
   // Custom-add row state

@@ -22,6 +22,7 @@ import {
 } from "@/components/pipeline-builder/wizard-input-suggestions";
 import AutoPatrolScopePicker, {
   defaultPickedScope,
+  requiredInputsForScope,
   validatePickedScope,
   type PickedScope,
 } from "@/components/pipeline-builder/AutoPatrolScopePicker";
@@ -165,7 +166,10 @@ function WizardOrBuilder({
     if (!kind) return;
     const triggerMode: WizardTriggerMode =
       pendingTrigger?.kind === "auto_patrol" ? pendingTrigger.config.mode : null;
-    const defaults = getInputSuggestions(kind, triggerMode)
+    const scopeType = pendingTrigger?.kind === "auto_patrol"
+      ? pendingTrigger.scope.type
+      : undefined;
+    const defaults = getInputSuggestions(kind, triggerMode, scopeType)
       .filter((s) => s.preChecked)
       .map(suggestionToInput);
     if (defaults.length > 0) setPendingInputs(defaults);
@@ -410,9 +414,32 @@ function InputsStep({
   const triggerMode: WizardTriggerMode =
     pendingTrigger?.kind === "auto_patrol" ? pendingTrigger.config.mode : null;
 
+  // Scope from Step 2 — used to gate the "next" button so the user can't ship
+  // a pipeline whose declared inputs don't match what the runtime will inject.
+  const patrolScope =
+    pendingTrigger?.kind === "auto_patrol" && pendingTrigger.config.mode !== "event"
+      ? pendingTrigger.scope
+      : null;
+
   const handleNext = () => {
     const err = validateInputs(pendingInputs);
     if (err) { setError(err); return; }
+    if (patrolScope) {
+      const required = requiredInputsForScope(patrolScope);
+      const declared = new Set(pendingInputs.map((i) => i.name));
+      const missing = required.filter((n) => !declared.has(n));
+      if (missing.length > 0) {
+        const scopeLabel =
+          patrolScope.type === "all_equipment" ? "所有機台"
+          : patrolScope.type === "specific_equipment" ? "指定機台"
+          : "指定站點";
+        setError(
+          `目標範圍 = 「${scopeLabel}」→ pipeline 必須宣告 input：${missing.join(", ")}。` +
+          `runtime 會把 $loop.${missing[0]} 注入這個欄位，沒宣告就拿不到值。`,
+        );
+        return;
+      }
+    }
     setError(null);
     onNext();
   };
@@ -426,6 +453,7 @@ function InputsStep({
         <WizardInputsStep
           kind={kind}
           triggerMode={triggerMode}
+          scopeType={patrolScope?.type}
           value={pendingInputs}
           onChange={setPendingInputs}
         />
