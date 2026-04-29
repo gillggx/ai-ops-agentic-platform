@@ -133,6 +133,13 @@ interface Props {
   // "builder" so the agent treats every prompt as a pipeline-modification
   // intent by default.
   agentMode?: "chat" | "builder";
+  // Phase E3 follow-up: current canvas pipeline_json. When set (only in
+  // builder context), the orchestrator surfaces declared inputs in the
+  // user opening message so the LLM reuses $name references instead of
+  // inventing parallel ones. Also carried into build_pipeline_live so
+  // Glass Box subsessions see the same canvas state.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  pipelineSnapshot?: any | null;
   // Phase 5-UX-5: fired during build_pipeline execution so a session-mode
   // host can draw the DAG structure immediately (all nodes pending) and
   // then light up each node as it finishes.
@@ -511,6 +518,7 @@ export function AIAgentPanel({
   onUserMessageSent,
   initialPrompt,
   agentMode = "chat",
+  pipelineSnapshot,
 }: Props) {
   // Part B (SPEC_context_engineering): pull selected equipment from AppContext
   // so chat requests can carry user focus to the agent's load_context_node.
@@ -586,6 +594,12 @@ export function AIAgentPanel({
   const [pipelineSaved, setPipelineSaved] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pendingFlatDataRef = useRef<{ flatData: Record<string, any[]>; metadata: FlatDataMetadata; uiConfig: UIConfig | null; queryInfo?: any } | null>(null);
+
+  // Phase E3 follow-up: keep pipelineSnapshot in a ref so sendMessage's
+  // fetch body always reads the latest canvas state without re-creating the
+  // callback every time the user moves a node.
+  const pipelineSnapshotRef = useRef(pipelineSnapshot);
+  useEffect(() => { pipelineSnapshotRef.current = pipelineSnapshot; }, [pipelineSnapshot]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -671,6 +685,16 @@ export function AIAgentPanel({
       if (selectedEquipment?.equipment_id) {
         clientContext.selected_equipment_id = selectedEquipment.equipment_id;
       }
+      // Phase E3 follow-up: in builder mode, ship the current canvas
+      // pipeline_json so the orchestrator can surface declared inputs in
+      // the user opening message AND so build_pipeline_live's Glass Box
+      // subsession sees the same canvas state. Skip in chat mode (no
+      // canvas, would just be noise).
+      const snapshot = agentMode === "builder" ? pipelineSnapshotRef.current : null;
+      const sendSnapshot =
+        snapshot &&
+        typeof snapshot === "object" &&
+        ((snapshot.nodes?.length ?? 0) > 0 || (snapshot.inputs?.length ?? 0) > 0);
       const res = await fetch("/api/agent/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -681,6 +705,7 @@ export function AIAgentPanel({
           // Phase E2: tell backend whether we're in chat or builder context
           // so the orchestrator's mode-aware system prompt section kicks in.
           mode: agentMode,
+          ...(sendSnapshot ? { pipeline_snapshot: snapshot } : {}),
         }),
       });
 

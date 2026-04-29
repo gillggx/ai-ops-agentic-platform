@@ -80,6 +80,18 @@ def _resolve_inputs(pipeline: PipelineJSON, runtime_inputs: dict[str, Any]) -> d
                 resolved[decl.name] = _coerce_input(decl.default, decl.type)
             except ValueError:
                 resolved[decl.name] = decl.default
+        elif getattr(decl, "example", None) is not None:
+            # Phase E3 follow-up: when no default but an example is set,
+            # use it as the fallback value. Auto-Run on the Builder canvas
+            # would otherwise red-banner every time the agent declares an
+            # input with example="EQP-01" but no default — the example
+            # value is the natural "preview" value, so use it. Production
+            # runtime callers (Auto-Patrol fan-out, manual /trigger) supply
+            # their own runtime_inputs and bypass this branch.
+            try:
+                resolved[decl.name] = _coerce_input(decl.example, decl.type)
+            except ValueError:
+                resolved[decl.name] = decl.example
         elif decl.required:
             raise BlockExecutionError(
                 code="MISSING_INPUT",

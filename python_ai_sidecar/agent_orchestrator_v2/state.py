@@ -38,6 +38,11 @@ AGENT_STATE_SCHEMA = {
     # for any pipeline modification request. chat mode keeps current Q&A
     # / one-shot defaults.
     "mode": str,
+    # Phase E3 follow-up: snapshot of the canvas the user is on, sent by
+    # AIAgentPanel when mounted in BuilderLayout. load_context surfaces
+    # any declared inputs so the agent reuses $name instead of inventing
+    # parallel ones. None when called from chat /admin without a canvas.
+    "pipeline_snapshot": Optional[Dict[str, Any]],
 
     # ── Conversation (LangGraph-managed message list) ───────────────
     "messages": Annotated[Sequence[AnyMessage], add_messages],
@@ -114,6 +119,7 @@ DEFAULT_STATE: Dict[str, Any] = {
     "ui_config": None,
     "plan_items": [],
     "mode": "chat",
+    "pipeline_snapshot": None,
 }
 
 

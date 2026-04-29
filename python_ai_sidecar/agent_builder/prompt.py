@@ -79,20 +79,36 @@ This means:
 
 For "N consecutive rising / falling" rules, insert `block_delta` upstream of `block_consecutive_rule` — it produces an `is_rising` / `is_falling` bool column that consecutive_rule can tail-check.
 
-# 🔴 Pipeline Inputs — value-as-variable rule（**最重要的硬規則**）
+# 🔴 Pipeline Inputs — value-as-variable rule（**情境決定，不是無腦套用**）
 
-每個 user prompt 提到的「**實例值**」都要當變數處理，不能寫 literal：
+User 提到的「實例值」（EQP-XX, STEP_XXX, LOT-XXX, recipe_id 等）**何時宣告變數、何時寫字面值**取決於情境：
 
-| User 提到 | 你做什麼 |
-|---|---|
-| 機台代碼 (EQP-XX, TC10, 機台編號) | `declare_input(name="tool_id", example="EQP-01")` → set_param value=`"$tool_id"` |
-| 站點代碼 (STEP_XXX, 站別) | `declare_input(name="step", example="STEP_001")` → set_param value=`"$step"` |
-| 批次代碼 (LOT-XXXX, lot id) | `declare_input(name="lot_id", example="LOT-12345")` → set_param value=`"$lot_id"` |
-| Recipe (recipe_id) | `declare_input(name="recipe_id", example="...")` → set_param value=`"$recipe_id"` |
+## Decision tree — 你必須先判斷情境
 
-**為什麼**：寫 literal `tool_id="EQP-01"` 的 pipeline 是「只能查 EQP-01」的死板查詢；寫 `tool_id="$tool_id"` 是「給機台 ID 就查那台」的可重用模板。Auto-Patrol、Chat 重新呼叫、批次跑都靠這個變數機制。
+1. **User opening 段含「Pipeline 已宣告的 inputs」/「當前 canvas 已宣告的 inputs」清單** → **MUST 用清單裡的 `$name`**，**禁止**寫 literal、**禁止**另開同義詞 input。這是最高優先規則（清單即 ground truth）。
 
-**命名慣例**：宣告的 input name **直接用對應 block param 的名字**（block_process_history 的 param 叫 `tool_id`，input 就叫 `tool_id`；block 的 param 叫 `step`，input 就叫 `step`）。Auto-Patrol fan-out runtime 也預期這個名稱（`$loop.tool_id`），慣例一致時整條 chain 才接得起來。
+2. **No declared inputs in opening, BUT context 暗示 patrol / 排程 / 多機台 fan-out** → declare $X variable，下方 set_param 用 `$X`。指標：
+   - 對話提到「auto-patrol」/「每小時跑」/「所有機台」/「reusable」/「batch」/「每次」
+   - User 設了 trigger/cron 而 pipeline 還空
+   - 系統 hint 說「這是 patrol 模板」
+
+3. **No declared inputs in opening, AND user 是一次性具體查詢** (single value, ad-hoc) → **寫 literal**，**不要** declare_input。指標：
+   - 「對 EQP-01 跑」「看 LOT-12345」這種具體值 + 沒提 reusable
+   - Builder canvas 還空、沒綁 trigger
+   - Chat 模式 + 一次性問題
+
+## 命名慣例（when declaring is appropriate）
+
+| User 提到 | declare_input | set_param value |
+|---|---|---|
+| 機台代碼 (EQP-XX, TC10) | `name="tool_id", example="EQP-01"` | `"$tool_id"` |
+| 站點代碼 (STEP_XXX) | `name="step", example="STEP_001"` | `"$step"` |
+| 批次代碼 (LOT-XXXX) | `name="lot_id", example="LOT-12345"` | `"$lot_id"` |
+| Recipe (recipe_id) | `name="recipe_id", example="..."` | `"$recipe_id"` |
+
+input `name` **直接用對應 block param 的名字**（block_process_history 的 param 叫 `tool_id`，input 就叫 `tool_id`）。Auto-Patrol fan-out runtime 預期 `$loop.tool_id`，慣例一致整條 chain 才接得起來。
+
+**不要混搭** — 一個 pipeline 內 `$tool_id` 跟 `$equipment_id` 二選一，**只用 user opening 提供的那個**。
 
 ## 已宣告 input 的處理（**最高優先**）
 
@@ -115,17 +131,42 @@ User opening 含：
   set_param(n1, "tool_id", "$tool_id")       ← 不需 declare_input，已存在
 ```
 
-## 範例（無 wizard 預先宣告的情況）
+## 範例（按情境分）
+
+### A. User 一次性具體查詢，沒 reusable 暗示 → literal
 
 ```
-User: "對 EQP-01 跑 SPC OOC check"
+User: "對 EQP-01 跑 SPC OOC check"（chat ad-hoc）
 
-❌ 錯：直接寫 literal
+✅ 對：直接寫 literal（一次性，不需 templatize）
   add_node(block_process_history) → set_param(n1, "tool_id", "EQP-01")
+```
 
-✅ 對：先宣告變數，再用 $name 引用（input name = block param name）
+### B. User 設了 patrol / 排程 / 多機台 → declare
+
+```
+User: "建一個每小時檢查所有機台 SPC 的 patrol"
+
+✅ 對：declare $tool_id（patrol fan-out runtime 會 inject 各機台值）
   declare_input(name="tool_id", type="string", required=True,
-                example="EQP-01", description="目標機台 ID")
+                example="EQP-01", description="目標機台（auto-patrol 會 fan-out）")
+  add_node(block_process_history) → set_param(n1, "tool_id", "$tool_id")
+```
+
+### C. Canvas 已宣告 input → reuse，禁止另開
+
+```
+User opening 含：
+  ## 當前 canvas 已宣告的 inputs（**MUST 用這些 $name 引用**）
+    - $`tool_id` (string, required) — example: EQP-01
+
+User: "把 SPC chart 加進來"
+
+❌ 大錯：另開 equipment_id
+  declare_input(name="equipment_id", example="EQP-01")
+  set_param(n1, "tool_id", "$equipment_id")  ← 跑不起來
+
+✅ 對：直接用 $tool_id（不需 declare，已存在）
   add_node(block_process_history) → set_param(n1, "tool_id", "$tool_id")
 ```
 

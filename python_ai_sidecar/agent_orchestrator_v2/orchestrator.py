@@ -61,6 +61,7 @@ class AgentOrchestratorV2:
         session_id: Optional[str] = None,
         client_context: Optional[Dict[str, Any]] = None,
         mode: str = "chat",
+        pipeline_snapshot: Optional[Dict[str, Any]] = None,
     ) -> AsyncIterator[Dict[str, Any]]:
         """Run the agent graph and yield v1-compatible SSE events.
 
@@ -91,6 +92,7 @@ class AgentOrchestratorV2:
             "canvas_overrides": self._canvas_overrides,
             "client_context": client_context or {},
             "mode": mode if mode in ("chat", "builder") else "chat",
+            "pipeline_snapshot": pipeline_snapshot,
         }
 
         # Phase 5-UX-5: event bus for tool → SSE progressive events.

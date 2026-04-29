@@ -252,6 +252,48 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
             "summarising what changed afterwards.\n"
         )
 
+        # Phase E3 follow-up: surface canvas snapshot so the agent reuses
+        # already-declared $name references and doesn't invent parallel
+        # ones. Mirrors agent_builder/orchestrator.py:142 which does the
+        # same thing for direct /agent/build calls.
+        snapshot = state.get("pipeline_snapshot") or {}
+        declared = snapshot.get("inputs") or []
+        nodes = snapshot.get("nodes") or []
+        if declared or nodes:
+            lines: list[str] = []
+            if declared:
+                lines.append("\n## 當前 canvas 已宣告的 inputs（**MUST 用這些 $name 引用**）")
+                for inp in declared:
+                    if not isinstance(inp, dict):
+                        continue
+                    name = inp.get("name")
+                    if not name:
+                        continue
+                    typ = inp.get("type") or "string"
+                    req = "required" if inp.get("required") else "optional"
+                    desc = inp.get("description") or ""
+                    ex = inp.get("example") or inp.get("default")
+                    extra = (f" — example: {ex}" if ex else "") + (f" — {desc}" if desc else "")
+                    lines.append(f"  - $`{name}` ({typ}, {req}){extra}")
+                lines.append(
+                    "  ⚠ 凡 source / filter block 的 param 對應上述 input（如 tool_id、step），\n"
+                    "    **必寫 `$name`、禁寫字面值；禁止用同義詞另開**（例如 list 列了\n"
+                    "    `$tool_id`，**不要**自己 declare `equipment_id` 然後寫 `$equipment_id`，\n"
+                    "    那會跟既有 input 對不上、Auto-Patrol fan-out / Auto-Run 都會失敗）。"
+                )
+            if nodes:
+                node_count = len(nodes)
+                terminal_kinds = sorted({
+                    n.get("block_id", "") for n in nodes if isinstance(n, dict)
+                    and n.get("block_id") in ("block_alert", "block_chart", "block_data_view")
+                })
+                lines.append(
+                    f"\n## 當前 canvas 已有 {node_count} 個 nodes" +
+                    (f"（含 {', '.join(terminal_kinds)}）" if terminal_kinds else "") +
+                    "。修改既有結構優先於整個重建。"
+                )
+            system_text += "\n" + "\n".join(lines) + "\n"
+
     # Build initial messages: history + current user message (with prepended state)
     messages = list(history_messages) + [HumanMessage(content=enriched_user_message)]
 

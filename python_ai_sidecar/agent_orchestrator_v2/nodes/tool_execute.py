@@ -178,6 +178,20 @@ async def _execute_build_pipeline_live(
         except Exception as e:  # noqa: BLE001
             logger.warning("base_pipeline load failed (ignored): %s", e)
 
+    # Phase E3 follow-up: tool_execute_node injects the orchestrator's
+    # state.pipeline_snapshot here when builder-mode and no explicit
+    # base_pipeline_id. This is the user's CURRENT canvas (with declared
+    # inputs / nodes) — takes priority over the agent_session snapshot
+    # below because canvas state is fresher.
+    if base_pipeline is None:
+        canvas_snap = tool_input.get("_state_pipeline_snapshot")
+        if canvas_snap and (canvas_snap.get("nodes") or canvas_snap.get("inputs")):
+            try:
+                base_pipeline = PipelineJSON.model_validate(canvas_snap)
+                base_source = "canvas_snapshot"
+            except Exception as e:  # noqa: BLE001
+                logger.warning("canvas_snapshot validate failed (ignored): %s", e)
+
     # Phase 5-UX-6 fix: if no explicit base, carry forward the chat session's
     # last canvas snapshot so follow-up requests see what the previous build
     # produced (context continuity).
@@ -473,6 +487,13 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
             # sub-agent, streams per-operation events to chat SSE.
             # Pass chat session context so the sub-agent carries canvas snapshot
             # across follow-up turns.
+            # Phase E3 follow-up: also forward the canvas snapshot from
+            # builder-mode requests via a synthetic _state_pipeline_snapshot
+            # entry on tool_input, picked up by _execute_build_pipeline_live
+            # when no explicit base_pipeline_id is supplied.
+            snap = state.get("pipeline_snapshot")
+            if snap and not tool_input.get("base_pipeline_id"):
+                tool_input = {**tool_input, "_state_pipeline_snapshot": snap}
             result = await _execute_build_pipeline_live(
                 db,
                 tool_input,

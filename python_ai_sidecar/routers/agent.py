@@ -43,6 +43,12 @@ class ChatRequest(BaseModel):
     # is the default intent. Sent by AIAgentPanel when mounted inside
     # BuilderLayout (via E3 wiring).
     mode: str | None = Field(default=None)
+    # Phase E3 follow-up: when AIAgentPanel runs in builder context, the
+    # current canvas pipeline_json (with its declared inputs) flows here so
+    # the orchestrator can surface "Pipeline 已宣告的 inputs" in the user
+    # opening message — same context the Glass Box subsession used to get
+    # via /agent/build's pipelineSnapshot param.
+    pipeline_snapshot: dict | None = Field(default=None, alias="pipelineSnapshot")
 
 
 class BuildRequest(BaseModel):
@@ -82,6 +88,7 @@ async def _chat_stream_native(req: ChatRequest, caller: CallerContext) -> AsyncG
         session_id=req.session_id,
         client_context=req.client_context,
         mode=req.mode or "chat",
+        pipeline_snapshot=req.pipeline_snapshot,
     ):
         # AgentOrchestratorV2 yields v1-style {type, ...} dicts; convert to SSE
         ev_type = v1_event.get("type") or "message"

@@ -1057,6 +1057,7 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
                 mode="session"
                 agentMode="builder"
                 sessionId={sessionId ?? `pb-${state.meta.pipelineId ?? "new"}`}
+                pipelineSnapshot={state.pipeline}
                 onGlassOp={(ev) => applyGlassOpToCanvas(ev, actions, catalog)}
                 contextEquipment={null}
                 focusedNodeId={focusedNodeId}
