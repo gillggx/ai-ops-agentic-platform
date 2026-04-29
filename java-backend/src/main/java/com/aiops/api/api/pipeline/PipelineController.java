@@ -303,9 +303,42 @@ public class PipelineController {
 			throw ApiException.conflict("publish-auto-check is only for pipeline_kind='auto_check' (got '"
 					+ e.getPipelineKind() + "').");
 		}
-		List<String> eventTypes = req.eventTypes();
-		if (eventTypes == null || eventTypes.isEmpty()) {
+		List<Object> rawEventTypes = req.eventTypes();
+		if (rawEventTypes == null || rawEventTypes.isEmpty()) {
 			throw ApiException.badRequest("event_types must contain at least one entry");
+		}
+
+		// Phase D — accept either of two body shapes:
+		//   ["spc.ooc", "cpk.drop"]                                       (legacy)
+		//   [{event_type: "spc.ooc", match_filter: {severity: ["HIGH"]}}] (new)
+		// Build a normalised list of (event_type, match_filter_json | null) pairs
+		// before writing rows so dedupe + write loop stays simple.
+		List<EventTypeBinding> bindings = new java.util.ArrayList<>();
+		for (Object raw : rawEventTypes) {
+			if (raw instanceof String s) {
+				String trimmed = s.trim();
+				if (!trimmed.isEmpty()) bindings.add(new EventTypeBinding(trimmed, null));
+			} else if (raw instanceof Map<?, ?> m) {
+				Object et = m.get("event_type");
+				if (!(et instanceof String s) || s.isBlank()) continue;
+				Object mf = m.get("match_filter");
+				String mfJson = null;
+				if (mf instanceof Map<?, ?> || mf instanceof List<?>) {
+					try {
+						mfJson = objectMapper.writeValueAsString(mf);
+					} catch (JsonProcessingException ex) {
+						throw ApiException.badRequest("match_filter for '" + s + "' is not serialisable: "
+								+ ex.getMessage());
+					}
+				} else if (mf instanceof String s2 && !s2.isBlank()) {
+					// already-stringified JSON — accept as-is
+					mfJson = s2;
+				}
+				bindings.add(new EventTypeBinding(s.trim(), mfJson));
+			}
+		}
+		if (bindings.isEmpty()) {
+			throw ApiException.badRequest("event_types must contain at least one valid entry");
 		}
 
 		// Atomic replace: drop existing bindings, then insert the new set, then flip
@@ -315,14 +348,18 @@ public class PipelineController {
 		autoCheckTriggerRepository.deleteByPipelineId(id);
 		autoCheckTriggerRepository.flush();
 		java.util.Set<String> seen = new java.util.LinkedHashSet<>();
-		for (String et : eventTypes) {
-			if (et == null) continue;
-			String trimmed = et.trim();
-			if (trimmed.isEmpty() || !seen.add(trimmed)) continue;
+		List<Map<String, Object>> resultBindings = new java.util.ArrayList<>();
+		for (EventTypeBinding b : bindings) {
+			if (!seen.add(b.eventType)) continue;
 			PipelineAutoCheckTriggerEntity t = new PipelineAutoCheckTriggerEntity();
 			t.setPipelineId(id);
-			t.setEventType(trimmed);
+			t.setEventType(b.eventType);
+			t.setMatchFilter(b.matchFilterJson);
 			autoCheckTriggerRepository.save(t);
+			Map<String, Object> rb = new java.util.LinkedHashMap<>();
+			rb.put("event_type", b.eventType);
+			rb.put("match_filter", b.matchFilterJson);
+			resultBindings.add(rb);
 		}
 
 		e.setStatus("active");
@@ -336,8 +373,13 @@ public class PipelineController {
 		result.put("pipeline_kind", e.getPipelineKind());
 		result.put("version", e.getVersion());
 		result.put("event_types", new java.util.ArrayList<>(seen));
+		result.put("bindings", resultBindings);
 		return ApiResponse.ok(result);
 	}
+
+	/** Internal pair used while normalising the publish-auto-check body
+	 *  before writing rows. */
+	private record EventTypeBinding(String eventType, String matchFilterJson) {}
 
 	@SuppressWarnings("unchecked")
 	private Map<String, Object> asMap(Object o) {
@@ -407,10 +449,17 @@ public class PipelineController {
 
 		public record PublishRequest(Map<String, Object> reviewedDoc, String publishedBy) {}
 
+		/** Phase D — body accepts a heterogeneous list:
+		 *    ["spc.ooc", "cpk.drop"]
+		 *  OR
+		 *    [{event_type: "spc.ooc", match_filter: {severity: ["HIGH"]}}, ...]
+		 *  Each element is either a String (legacy) or an Object with
+		 *  {event_type, match_filter?}. PipelineController.publish_auto_check
+		 *  normalises both shapes before writing trigger rows. */
 		public record PublishAutoCheckRequest(
 				@jakarta.validation.constraints.NotNull
 				@jakarta.validation.constraints.Size(min = 1, message = "event_types must contain at least one entry")
-				List<String> eventTypes) {}
+				List<Object> eventTypes) {}
 
 		public record RunSummary(Long id, Long pipelineId, String pipelineVersion,
 		                         String triggeredBy, String status,

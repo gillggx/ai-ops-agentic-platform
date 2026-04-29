@@ -28,4 +28,10 @@ public class PipelineAutoCheckTriggerEntity extends CreatedAtOnly {
 
 	@Column(name = "event_type", nullable = false, length = 128)
 	private String eventType;
+
+	/** Phase D — JSON object {alarm_field: value | [value,...]}. NULL means
+	 *  no filter (every alarm with matching event_type fires the pipeline).
+	 *  Evaluated by EventDispatchService.matchFilter. */
+	@Column(name = "match_filter", columnDefinition = "text")
+	private String matchFilter;
 }
