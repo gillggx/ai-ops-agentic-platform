@@ -523,23 +523,70 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
                 pid = result.get("id")
                 new_status = result.get("status_value")
                 note = result.get("note")
-                for it in plan_items:
-                    if it.get("id") == pid:
-                        if new_status:
-                            it["status"] = new_status
-                        if note is not None:
-                            it["note"] = note
-                        break
-                if event_emit is not None:
-                    try:
-                        event_emit({
-                            "type": "plan_update",
-                            "id": pid,
-                            "status": new_status,
-                            "note": note,
-                        })
-                    except Exception:  # noqa: BLE001
-                        pass
+
+                # Phase E3 follow-up — Builder-mode anti-pattern guard.
+                # In builder mode the agent must not mark a plan item "done"
+                # with a note that says it's waiting for the user. The user
+                # is on a canvas with declared inputs — the right move is
+                # to reuse the $name and call build_pipeline_live, not park
+                # waiting for clarification. Mutate the tool result into an
+                # error so the LLM sees "you can't do that, try again" and
+                # the graph routes back through llm_call instead of going
+                # to synthesis with a half-finished plan.
+                anti_pattern = (
+                    state.get("mode") == "builder"
+                    and new_status == "done"
+                    and isinstance(note, str)
+                    and any(kw in note for kw in (
+                        "等待使用者", "需要使用者", "等待用戶", "需要用戶",
+                        "請使用者提供", "請用戶提供", "等候使用者",
+                    ))
+                )
+                if anti_pattern:
+                    # Mutate result into an error so the LLM sees "you can't
+                    # do that, try again" — graph routes back through
+                    # llm_call. Do NOT mutate plan_items or emit plan_update
+                    # so the UI doesn't flash a misleading 'done' state.
+                    result.clear()
+                    result.update({
+                        "status": "error",
+                        "code": "BUILDER_WAITS_USER_FORBIDDEN",
+                        "message": (
+                            "Builder mode forbids marking a plan item 'done' "
+                            "while waiting on the user. The canvas already "
+                            "has declared inputs (see the user opening's "
+                            "'當前 canvas 已宣告的 inputs' section) — REUSE "
+                            "those $names and call build_pipeline_live to "
+                            "build the pipeline structure now. Do NOT stop. "
+                            "Re-call update_plan with status='in_progress' "
+                            "(NOT 'done', and NO 'waiting for user' note) and "
+                            "immediately invoke build_pipeline_live."
+                        ),
+                    })
+                    logger.warning(
+                        "tool_execute: blocked builder-mode 'waiting for user' "
+                        "anti-pattern on plan item id=%s note=%r",
+                        pid, note,
+                    )
+
+                if not anti_pattern:
+                    for it in plan_items:
+                        if it.get("id") == pid:
+                            if new_status:
+                                it["status"] = new_status
+                            if note is not None:
+                                it["note"] = note
+                            break
+                    if event_emit is not None:
+                        try:
+                            event_emit({
+                                "type": "plan_update",
+                                "id": pid,
+                                "status": new_status,
+                                "note": note,
+                            })
+                        except Exception:  # noqa: BLE001
+                            pass
 
         # ── v1.4 Auto-Run — chain execute after build_pipeline_live success ─
         if (tool_name == "build_pipeline_live"
