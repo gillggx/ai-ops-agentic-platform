@@ -259,6 +259,14 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
           try {
             if (pending.kind === "auto_patrol") {
               const cfg = pending.config;
+              // Event-mode patrols resolve the target from the alarm payload at
+              // runtime, so target_scope is implicitly event_driven and the
+              // wizard never asks the user. Schedule/once-mode patrols carry the
+              // scope picked in Step 2 — all_equipment / specific_equipment /
+              // by_step + fanout_cap.
+              const scopeJson = cfg.mode === "event"
+                ? { type: "event_driven" as const }
+                : pending.scope;
               const body = {
                 name: `[Patrol] ${state.pipeline.name}`.slice(0, 200),
                 description: state.description,
@@ -270,8 +278,8 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
                 pipeline_id: rec.id,
                 alarm_severity: "HIGH",
                 alarm_title: state.pipeline.name,
-                target_scope: JSON.stringify({ type: "event_driven" }),
-                data_context: "event_driven",
+                target_scope: JSON.stringify(scopeJson),
+                data_context: cfg.mode === "event" ? "event_driven" : "scheduled",
                 is_active: true,
               };
               const res = await fetch("/api/admin/auto-patrols", {

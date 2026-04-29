@@ -20,6 +20,10 @@ import {
   suggestionToInput,
   type WizardTriggerMode,
 } from "@/components/pipeline-builder/wizard-input-suggestions";
+import AutoPatrolScopePicker, {
+  validatePickedScope,
+  type PickedScope,
+} from "@/components/pipeline-builder/AutoPatrolScopePicker";
 
 // React Flow can't SSR
 const BuilderLayout = dynamic(() => import("@/components/pipeline-builder/BuilderLayout"), {
@@ -29,11 +33,23 @@ const BuilderLayout = dynamic(() => import("@/components/pipeline-builder/Builde
 type Kind = "auto_patrol" | "auto_check" | "skill";
 type Step = 1 | 2 | 3;
 
-/** Payload handed to BuilderLayout. Auto-created on first save. */
+/** Payload handed to BuilderLayout. Auto-created on first save.
+ *
+ *  For auto_patrol the wizard also captures `scope` — only relevant for
+ *  schedule/once triggers (event triggers ignore scope and resolve target
+ *  from the alarm payload at runtime). The scope is stuffed into the
+ *  AutoPatrolEntity.target_scope JSON column on first save. */
 export type PendingTrigger =
-  | { kind: "auto_patrol"; config: AutoPatrolTriggerValue }
+  | { kind: "auto_patrol"; config: AutoPatrolTriggerValue; scope: PickedScope }
   | { kind: "auto_check"; config: AutoCheckTriggerValue }
   | null;
+
+/** Default scope used whenever the user lands on the trigger step for an
+ *  auto_patrol — picker pre-seeds at "all_equipment" with cap=20. */
+export const defaultPickedScope: PickedScope = {
+  type: "all_equipment",
+  fanout_cap: 20,
+};
 
 export default function NewPipelinePage() {
   const [kind, setKind] = useState<Kind | null>(null);
@@ -205,7 +221,11 @@ function WizardOrBuilder({
             accent="#B45309"
             onPick={() => {
               setKind("auto_patrol");
-              setPendingTrigger({ kind: "auto_patrol", config: emptyTrigger() });
+              setPendingTrigger({
+                kind: "auto_patrol",
+                config: emptyTrigger(),
+                scope: defaultPickedScope,
+              });
               setStep(2);
             }}
           />
@@ -308,6 +328,12 @@ function TriggerStep({
     if (kind === "auto_patrol" && pendingTrigger?.kind === "auto_patrol") {
       const err = validateTrigger(pendingTrigger.config);
       if (err) { setError(err); return; }
+      // Validate scope only when trigger mode is non-event (event-mode patrols
+      // don't use scope; the runtime resolves target from the alarm payload).
+      if (pendingTrigger.config.mode !== "event") {
+        const scopeErr = validatePickedScope(pendingTrigger.scope);
+        if (scopeErr) { setError(scopeErr); return; }
+      }
     } else if (kind === "auto_check" && pendingTrigger?.kind === "auto_check") {
       const err = validateAutoCheckTrigger(pendingTrigger.config);
       if (err) { setError(err); return; }
@@ -316,18 +342,27 @@ function TriggerStep({
     onNext();
   };
 
+  const showScopePicker =
+    kind === "auto_patrol" &&
+    pendingTrigger?.kind === "auto_patrol" &&
+    (pendingTrigger.config.mode === "schedule" || pendingTrigger.config.mode === "once");
+
   return (
     <GateContainer
       title={(kind === "auto_patrol" ? "設定 Auto-Patrol 觸發條件" : "設定 Auto-Check 觸發條件") + " · Step 2/3"}
       subtitle={kind === "auto_patrol"
-        ? "選擇什麼時候跑這個 pipeline — 事件觸發 / 排程 / 一次性指定時間。下一步會依此設定建議 inputs。"
+        ? "選擇什麼時候跑這個 pipeline — 事件觸發 / 排程 / 一次性指定時間。排程/一次性模式還要選「目標範圍」，下一步會依此設定建議 inputs。"
         : "選擇哪些 alarm event_type 會觸發這個 pipeline。下一步會建議接 alarm payload 用的 inputs。"}
     >
       <div style={cardBodyStyle}>
         {kind === "auto_patrol" && pendingTrigger?.kind === "auto_patrol" && (
           <AutoPatrolTriggerForm
             value={pendingTrigger.config}
-            onChange={(next) => setPendingTrigger({ kind: "auto_patrol", config: next })}
+            onChange={(next) => setPendingTrigger({
+              kind: "auto_patrol",
+              config: next,
+              scope: pendingTrigger.scope,
+            })}
             eventTypes={eventTypes}
           />
         )}
@@ -337,6 +372,22 @@ function TriggerStep({
             onChange={(next) => setPendingTrigger({ kind: "auto_check", config: next })}
             suggestions={eventTypeSuggestions}
           />
+        )}
+
+        {showScopePicker && pendingTrigger?.kind === "auto_patrol" && (
+          <div style={{ marginTop: 18, paddingTop: 18, borderTop: "1px dashed #E2E8F0" }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#475569", marginBottom: 8 }}>
+              目標範圍 — 排程 / 一次性觸發時，cron 跑的瞬間要跑哪些機台
+            </div>
+            <AutoPatrolScopePicker
+              value={pendingTrigger.scope}
+              onChange={(next) => setPendingTrigger({
+                kind: "auto_patrol",
+                config: pendingTrigger.config,
+                scope: next,
+              })}
+            />
+          </div>
         )}
 
         {error && (

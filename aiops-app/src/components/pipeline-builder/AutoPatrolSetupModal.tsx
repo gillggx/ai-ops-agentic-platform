@@ -19,6 +19,11 @@ import AutoPatrolTriggerForm, {
   type AutoPatrolTriggerValue,
   type EventType,
 } from "./AutoPatrolTriggerForm";
+import AutoPatrolScopePicker, {
+  validatePickedScope,
+  type PickedScope,
+  type TargetScope,
+} from "./AutoPatrolScopePicker";
 
 interface ExistingPatrol {
   id: number;
@@ -34,15 +39,8 @@ interface ExistingPatrol {
   target_scope?: string | TargetScope | null;
 }
 
-// SPEC_patrol_pipeline_wiring §1.2 — scope describes how a non-event
-// trigger picks the equipment(s) to bind into pipeline.inputs.
-type TargetScope =
-  | { type: "event_driven" }
-  | { type: "all_equipment"; fanout_cap?: number }
-  | { type: "specific_equipment"; equipment_ids: string[]; fanout_cap?: number }
-  | { type: "by_step"; step: string; fanout_cap?: number };
-
 const DEFAULT_FANOUT_CAP = 20;
+const DEFAULT_PICKED_SCOPE: PickedScope = { type: "all_equipment", fanout_cap: DEFAULT_FANOUT_CAP };
 
 interface EventTypeWithAttrs {
   id: number;
@@ -81,10 +79,7 @@ export default function AutoPatrolSetupModal({
   const [error, setError]           = useState<string | null>(null);
   // SPEC §1.2 — scope state. Only relevant when trigger.mode is schedule/once;
   // event-mode patrols always store {type:"event_driven"} server-side.
-  const [scopeType, setScopeType] = useState<"all_equipment" | "specific_equipment" | "by_step">("all_equipment");
-  const [scopeEquipmentIds, setScopeEquipmentIds] = useState<string>("");  // CSV "EQP-01,EQP-02"
-  const [scopeStep, setScopeStep] = useState<string>("");
-  const [fanoutCap, setFanoutCap] = useState<number>(DEFAULT_FANOUT_CAP);
+  const [pickedScope, setPickedScope] = useState<PickedScope>(DEFAULT_PICKED_SCOPE);
 
   useEffect(() => {
     if (!open) return;
@@ -109,28 +104,34 @@ export default function AutoPatrolSetupModal({
       setSeverity((existingPatrol.alarm_severity as typeof severity) ?? "HIGH");
       setAlarmTitle(existingPatrol.alarm_title ?? "");
       setInputBinding(JSON.stringify(existingPatrol.input_binding ?? {}, null, 2));
-      // Hydrate scope from existing patrol's target_scope
+      // Hydrate scope from existing patrol's target_scope.
       try {
         const ts: TargetScope = typeof existingPatrol.target_scope === "string"
           ? JSON.parse(existingPatrol.target_scope || "{}")
           : (existingPatrol.target_scope as TargetScope) || { type: "event_driven" };
         if (ts.type === "specific_equipment") {
-          setScopeType("specific_equipment");
-          setScopeEquipmentIds((ts.equipment_ids ?? []).join(","));
-          setFanoutCap(ts.fanout_cap ?? DEFAULT_FANOUT_CAP);
+          setPickedScope({
+            type: "specific_equipment",
+            equipment_ids: ts.equipment_ids ?? [],
+            fanout_cap: ts.fanout_cap ?? DEFAULT_FANOUT_CAP,
+          });
         } else if (ts.type === "by_step") {
-          setScopeType("by_step");
-          setScopeStep(ts.step ?? "");
-          setFanoutCap(ts.fanout_cap ?? DEFAULT_FANOUT_CAP);
+          setPickedScope({
+            type: "by_step",
+            step: ts.step ?? "",
+            fanout_cap: ts.fanout_cap ?? DEFAULT_FANOUT_CAP,
+          });
         } else if (ts.type === "all_equipment") {
-          setScopeType("all_equipment");
-          setFanoutCap(ts.fanout_cap ?? DEFAULT_FANOUT_CAP);
+          setPickedScope({
+            type: "all_equipment",
+            fanout_cap: ts.fanout_cap ?? DEFAULT_FANOUT_CAP,
+          });
         } else {
-          // event_driven — keep defaults; user can flip mode later
-          setScopeType("all_equipment");
+          // event_driven — keep picker defaults; user can flip mode later
+          setPickedScope(DEFAULT_PICKED_SCOPE);
         }
       } catch {
-        setScopeType("all_equipment");
+        setPickedScope(DEFAULT_PICKED_SCOPE);
       }
     } else {
       setName(`[Patrol] ${pipelineName}`.slice(0, 200));
@@ -139,10 +140,7 @@ export default function AutoPatrolSetupModal({
       setSeverity("HIGH");
       setAlarmTitle(pipelineName);
       setInputBinding("{}");
-      setScopeType("all_equipment");
-      setScopeEquipmentIds("");
-      setScopeStep("");
-      setFanoutCap(DEFAULT_FANOUT_CAP);
+      setPickedScope(DEFAULT_PICKED_SCOPE);
     }
     setError(null);
   }, [open, pipelineName, existingPatrol]);  // eslint-disable-line react-hooks/exhaustive-deps
@@ -181,7 +179,7 @@ export default function AutoPatrolSetupModal({
       // Loop variables — backend AutoPatrolService expands target_scope into
       // these per-iteration values.
       out.tool_id = "$loop.tool_id";
-      if (scopeType === "by_step") out.step = "$loop.step";
+      if (pickedScope.type === "by_step") out.step = "$loop.step";
     }
     setInputBinding(JSON.stringify(out, null, 2));
   }
@@ -204,15 +202,10 @@ export default function AutoPatrolSetupModal({
     let scopeJson: TargetScope;
     if (trigger.mode === "event") {
       scopeJson = { type: "event_driven" };
-    } else if (scopeType === "specific_equipment") {
-      const ids = scopeEquipmentIds.split(",").map(s => s.trim()).filter(Boolean);
-      if (ids.length === 0) { setError("「指定機台」需至少 1 台"); return; }
-      scopeJson = { type: "specific_equipment", equipment_ids: ids, fanout_cap: fanoutCap };
-    } else if (scopeType === "by_step") {
-      if (!scopeStep.trim()) { setError("「指定站點」需填 step"); return; }
-      scopeJson = { type: "by_step", step: scopeStep.trim(), fanout_cap: fanoutCap };
     } else {
-      scopeJson = { type: "all_equipment", fanout_cap: fanoutCap };
+      const scopeError = validatePickedScope(pickedScope);
+      if (scopeError) { setError(scopeError); return; }
+      scopeJson = pickedScope;
     }
 
     setSaving(true);
@@ -295,49 +288,7 @@ export default function AutoPatrolSetupModal({
           {/* SPEC §1.2 — scope picker only when trigger ≠ event */}
           {(trigger.mode === "schedule" || trigger.mode === "once") && (
             <Field label="目標範圍">
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12 }}>
-                {([
-                  { v: "all_equipment" as const, label: "所有機台", desc: `cron 跑時抓 simulator 全部機台 list（最多 ${fanoutCap} 台）` },
-                  { v: "specific_equipment" as const, label: "指定機台", desc: "在下方填 EQP-01,EQP-02 (CSV)" },
-                  { v: "by_step" as const, label: "指定站點", desc: "選 step → 抓該 step 所有機台（cap 適用）" },
-                ]).map(opt => (
-                  <label key={opt.v} style={{ display: "flex", alignItems: "flex-start", gap: 6, cursor: "pointer" }}>
-                    <input type="radio" checked={scopeType === opt.v} onChange={() => setScopeType(opt.v)} />
-                    <span>
-                      <span style={{ fontWeight: 600 }}>{opt.label}</span>
-                      <span style={{ color: "#718096", marginLeft: 6 }}>— {opt.desc}</span>
-                    </span>
-                  </label>
-                ))}
-                {scopeType === "specific_equipment" && (
-                  <input
-                    style={input}
-                    value={scopeEquipmentIds}
-                    onChange={e => setScopeEquipmentIds(e.target.value)}
-                    placeholder="EQP-01, EQP-02, EQP-03"
-                  />
-                )}
-                {scopeType === "by_step" && (
-                  <input
-                    style={input}
-                    value={scopeStep}
-                    onChange={e => setScopeStep(e.target.value)}
-                    placeholder="STEP_001"
-                  />
-                )}
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 11, color: "#718096" }}>Fanout cap (上限)：</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={500}
-                    style={{ ...input, width: 80, padding: "4px 8px" }}
-                    value={fanoutCap}
-                    onChange={e => setFanoutCap(parseInt(e.target.value || "20", 10))}
-                  />
-                  <span style={{ fontSize: 10, color: "#a0aec0" }}>(超過 cap 會截斷 + 寫 warning alarm)</span>
-                </div>
-              </div>
+              <AutoPatrolScopePicker value={pickedScope} onChange={setPickedScope} />
             </Field>
           )}
 

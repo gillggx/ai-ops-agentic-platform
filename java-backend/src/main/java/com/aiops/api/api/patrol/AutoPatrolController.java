@@ -21,11 +21,14 @@ public class AutoPatrolController {
 
 	private final AutoPatrolRepository repository;
 	private final com.aiops.api.domain.skill.ExecutionLogRepository execLogRepo;
+	private final com.aiops.api.patrol.AutoPatrolSchedulerService schedulerService;
 
 	public AutoPatrolController(AutoPatrolRepository repository,
-	                            com.aiops.api.domain.skill.ExecutionLogRepository execLogRepo) {
+	                            com.aiops.api.domain.skill.ExecutionLogRepository execLogRepo,
+	                            com.aiops.api.patrol.AutoPatrolSchedulerService schedulerService) {
 		this.repository = repository;
 		this.execLogRepo = execLogRepo;
+		this.schedulerService = schedulerService;
 	}
 
 	@GetMapping
@@ -65,7 +68,9 @@ public class AutoPatrolController {
 		if (req.notifyConfig() != null) e.setNotifyConfig(req.notifyConfig());
 		if (req.inputBinding() != null) e.setInputBinding(req.inputBinding());
 		e.setCreatedBy(caller.userId());
-		return ApiResponse.ok(Dtos.detailOf(repository.save(e)));
+		AutoPatrolEntity saved = repository.save(e);
+		schedulerService.refresh(saved.getId());
+		return ApiResponse.ok(Dtos.detailOf(saved));
 	}
 
 	@PutMapping("/{id}")
@@ -88,7 +93,9 @@ public class AutoPatrolController {
 		if (req.notifyConfig() != null) e.setNotifyConfig(req.notifyConfig());
 		if (req.inputBinding() != null) e.setInputBinding(req.inputBinding());
 		if (req.isActive() != null) e.setIsActive(req.isActive());
-		return ApiResponse.ok(Dtos.detailOf(repository.save(e)));
+		AutoPatrolEntity saved = repository.save(e);
+		schedulerService.refresh(saved.getId());
+		return ApiResponse.ok(Dtos.detailOf(saved));
 	}
 
 	@DeleteMapping("/{id}")
@@ -97,6 +104,7 @@ public class AutoPatrolController {
 	public ApiResponse<Void> delete(@PathVariable Long id) {
 		if (!repository.existsById(id)) throw ApiException.notFound("auto patrol");
 		repository.deleteById(id);
+		schedulerService.unregister(id);
 		return ApiResponse.ok(null);
 	}
 

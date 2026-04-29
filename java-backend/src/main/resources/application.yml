@@ -64,6 +64,8 @@ aiops:
       service-token: ${PYTHON_SIDECAR_TOKEN:dev-service-token}
       connect-timeout-ms: 5000
       read-timeout-ms: 120000
+  simulator:
+    base-url: ${ONTOLOGY_SIM_URL:http://localhost:8012}
   internal:
     # Token used by the Python sidecar when calling back into Java.
     token: ${JAVA_INTERNAL_TOKEN:dev-internal-token}

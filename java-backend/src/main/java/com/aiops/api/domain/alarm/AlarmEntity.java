@@ -27,7 +27,11 @@ public class AlarmEntity extends CreatedAtOnly {
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Long id;
 
-	@Column(name = "skill_id", nullable = false)
+	/** Nullable: pipeline-based auto-patrols write alarms with skill_id=null
+	 *  (no SkillDefinition row tied to them). DB schema has been nullable
+	 *  since the pipeline-builder split; this field was incorrectly marked
+	 *  nullable=false in JPA before. */
+	@Column(name = "skill_id")
 	private Long skillId;
 
 	@Column(name = "trigger_event", nullable = false, length = 100)
