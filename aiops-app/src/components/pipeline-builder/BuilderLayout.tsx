@@ -52,7 +52,7 @@ import AgentBuilderPanel from "./AgentBuilderPanel";
 // Phase E3: AIAgentPanel now used in BuilderLayout too (single agent UX).
 // AgentBuilderPanel kept only as a fallback in case the new wiring regresses;
 // will be deleted once mode="builder" + onGlassOp path is verified in prod.
-import AIAgentPanel from "@/components/copilot/AIAgentPanel";
+import { AIAgentPanel } from "@/components/copilot/AIAgentPanel";
 import { applyGlassOpToCanvas } from "@/context/pipeline-builder/useAgentStream";
 
 interface Props {
