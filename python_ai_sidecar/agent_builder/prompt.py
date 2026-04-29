@@ -85,18 +85,37 @@ For "N consecutive rising / falling" rules, insert `block_delta` upstream of `bl
 
 | User 提到 | 你做什麼 |
 |---|---|
-| 機台代碼 (EQP-XX, TC10, 機台編號) | `declare_input(name="equipment_id", example="EQP-01")` → set_param value=`"$equipment_id"` |
+| 機台代碼 (EQP-XX, TC10, 機台編號) | `declare_input(name="tool_id", example="EQP-01")` → set_param value=`"$tool_id"` |
 | 站點代碼 (STEP_XXX, 站別) | `declare_input(name="step", example="STEP_001")` → set_param value=`"$step"` |
 | 批次代碼 (LOT-XXXX, lot id) | `declare_input(name="lot_id", example="LOT-12345")` → set_param value=`"$lot_id"` |
 | Recipe (recipe_id) | `declare_input(name="recipe_id", example="...")` → set_param value=`"$recipe_id"` |
 
-**為什麼**：寫 literal `tool_id="EQP-01"` 的 pipeline 是「只能查 EQP-01」的死板查詢；寫 `tool_id="$equipment_id"` 是「給機台 ID 就查那台」的可重用模板。Auto-Patrol、Chat 重新呼叫、批次跑都靠這個變數機制。
+**為什麼**：寫 literal `tool_id="EQP-01"` 的 pipeline 是「只能查 EQP-01」的死板查詢；寫 `tool_id="$tool_id"` 是「給機台 ID 就查那台」的可重用模板。Auto-Patrol、Chat 重新呼叫、批次跑都靠這個變數機制。
 
-## 已宣告 input 的處理（重要）
+**命名慣例**：宣告的 input name **直接用對應 block param 的名字**（block_process_history 的 param 叫 `tool_id`，input 就叫 `tool_id`；block 的 param 叫 `step`，input 就叫 `step`）。Auto-Patrol fan-out runtime 也預期這個名稱（`$loop.tool_id`），慣例一致時整條 chain 才接得起來。
 
-如果 user 的 opening message 出現「**Pipeline 已宣告的 inputs**」段（這代表 wizard 端 user 已先宣告變數），那 **MUST 用 `$name` 引用**，**禁寫 literal**，即使 user 在 prompt 裡明示了 example 值（e.g. user 說「對 EQP-01 跑」但 wizard 已宣告 `$equipment_id` example=EQP-01 → 你必寫 `$equipment_id` 不是 `"EQP-01"`）。
+## 已宣告 input 的處理（**最高優先**）
 
-## 範例
+如果 user 的 opening message 出現「**Pipeline 已宣告的 inputs**」段（這代表 wizard 端 user 已先宣告變數），那：
+
+1. **MUST 用該段列出的 `$name` 引用** — 這個 list 是 ground truth
+2. **禁寫 literal** — 即使 user 在 prompt 裡寫了 example 值
+3. **禁止偏離該段另創新名字** — 例如 list 列了 `$tool_id`，**不要**自己 declare 一個 `equipment_id` 然後寫 `$equipment_id`，會跟 wizard / Auto-Patrol fan-out 對不上，pipeline 跑不起來
+
+```
+User opening 含：
+  # Pipeline 已宣告的 inputs
+    - $`tool_id` (string, required) — example: EQP-01
+
+❌ 大錯：另開 equipment_id
+  declare_input(name="equipment_id", example="EQP-01")
+  set_param(n1, "tool_id", "$equipment_id")  ← references 找不到，runtime UNDECLARED_INPUT_REF
+
+✅ 對：直接用 wizard 已宣告的 $tool_id
+  set_param(n1, "tool_id", "$tool_id")       ← 不需 declare_input，已存在
+```
+
+## 範例（無 wizard 預先宣告的情況）
 
 ```
 User: "對 EQP-01 跑 SPC OOC check"
@@ -104,10 +123,10 @@ User: "對 EQP-01 跑 SPC OOC check"
 ❌ 錯：直接寫 literal
   add_node(block_process_history) → set_param(n1, "tool_id", "EQP-01")
 
-✅ 對：先宣告變數，再用 $name 引用
-  declare_input(name="equipment_id", type="string", required=True,
+✅ 對：先宣告變數，再用 $name 引用（input name = block param name）
+  declare_input(name="tool_id", type="string", required=True,
                 example="EQP-01", description="目標機台 ID")
-  add_node(block_process_history) → set_param(n1, "tool_id", "$equipment_id")
+  add_node(block_process_history) → set_param(n1, "tool_id", "$tool_id")
 ```
 
 # Output wiring — Chart vs Data View vs Alert
@@ -350,28 +369,37 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "\n"
             "**MUST call this BEFORE writing any user-mentioned instance value** "
             "(EQP-XX 機台 ID, STEP_XXX 站點, LOT-XXX 批次, recipe_id 等) into a node param. "
-            "After declaring, use `$name` in set_param value (e.g., `tool_id: \"$equipment_id\"`) "
+            "After declaring, use `$name` in set_param value (e.g., `tool_id: \"$tool_id\"`) "
             "instead of the literal. This makes the pipeline reusable by Auto-Patrol / "
             "Auto-Check / chat re-invocation passing different values per run.\n"
+            "\n"
+            "**Naming convention**: input `name` should match the corresponding block param "
+            "name exactly (block_process_history.tool_id ⇒ declare_input(name='tool_id'); "
+            "block.step ⇒ declare_input(name='step')). The Auto-Patrol fan-out runtime "
+            "also assumes this convention ($loop.tool_id), so it keeps the whole chain "
+            "wired up.\n"
             "\n"
             "Idempotent: re-declaring an existing name refreshes example/description.\n"
             "\n"
             "Common patterns:\n"
-            "  • user 說「對 EQP-01 跑 SPC」 → declare_input(name='equipment_id', example='EQP-01') "
-            "→ set_param(node, 'tool_id', '$equipment_id')\n"
+            "  • user 說「對 EQP-01 跑 SPC」 → declare_input(name='tool_id', example='EQP-01') "
+            "→ set_param(node, 'tool_id', '$tool_id')\n"
             "  • user 說「STEP_001 的 trend」 → declare_input(name='step', example='STEP_001') "
             "→ set_param(source, 'step', '$step')\n"
             "  • user 說「LOT-12345」 → declare_input(name='lot_id', example='LOT-12345') "
             "→ set_param(filter, 'value', '$lot_id')\n"
             "\n"
-            "**Already-declared inputs** (visible in the user message preamble) MUST be "
-            "referenced by `$name` even if user explicitly typed an example value."
+            "**Already-declared inputs** (visible in the user message preamble under "
+            "'Pipeline 已宣告的 inputs') MUST be referenced by THAT EXACT `$name` even "
+            "if user explicitly typed an example value. Do NOT declare a parallel "
+            "input under a different name (e.g. wizard pre-declared $tool_id → don't "
+            "create $equipment_id; reuse $tool_id directly)."
         ),
         "input_schema": {
             "type": "object",
             "required": ["name"],
             "properties": {
-                "name": {"type": "string", "description": "Variable name without $ prefix (e.g., 'equipment_id')"},
+                "name": {"type": "string", "description": "Variable name without $ prefix (e.g., 'tool_id')"},
                 "type": {"type": "string", "enum": ["string", "integer", "number", "boolean"], "default": "string"},
                 "required": {"type": "boolean", "default": True},
                 "example": {"description": "Default example value (用來 preview / Inspector placeholder)"},
