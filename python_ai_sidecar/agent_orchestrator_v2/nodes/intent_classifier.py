@@ -83,6 +83,17 @@ async def intent_classifier_node(
     if not user_message.strip():
         return {"intent": "clear_chart"}
 
+    # Phase E3 follow-up: in builder mode the user is on a Pipeline Builder
+    # canvas — they're (almost certainly) asking for pipeline construction
+    # or modification. Don't gate them through vague-clarify; let the LLM
+    # judge whether to declare \$inputs / build directly. Otherwise vague
+    # references like 「該站點」 trigger a clarify card and the agent stalls
+    # at "計畫 0/4 — 等待使用者提供站點資訊" while the user expects it to
+    # just declare a \$step input and proceed.
+    if state.get("mode") == "builder":
+        logger.info("intent_classifier: bypass for builder mode (msg=%r)", user_message[:80])
+        return {"intent": "clear_chart"}
+
     # Re-submit from clarify card — bypass classification.
     # Strip prefix from user_message + record intent_hint so llm_call
     # downstream can lean on it.

@@ -57,4 +57,35 @@ public class SimulatorClient {
 			return List.of();
 		}
 	}
+
+	/** Return the {@code limit} most recent events from the simulator,
+	 *  optionally filtered to events whose {@code eventTime} is strictly
+	 *  greater than {@code sinceIso} (ISO-8601 timestamp). Returns empty
+	 *  list on any error so a transient simulator hiccup doesn't kill the
+	 *  poll loop. Phase F — used by EventPollerService. */
+	public List<Map<String, Object>> listRecentEvents(String sinceIso, int limit) {
+		int safe = Math.max(1, Math.min(limit, 500));
+		StringBuilder uri = new StringBuilder("/api/v1/events?limit=").append(safe);
+		if (sinceIso != null && !sinceIso.isBlank()) {
+			uri.append("&start_time=").append(sinceIso);
+		}
+		try {
+			String body = webClient.get()
+					.uri(uri.toString())
+					.accept(MediaType.APPLICATION_JSON)
+					.retrieve()
+					.bodyToMono(String.class)
+					.timeout(Duration.ofSeconds(10))
+					.onErrorResume(ex -> {
+						log.warn("simulator /events failed: {}", ex.getMessage());
+						return Mono.empty();
+					})
+					.block();
+			if (body == null || body.isBlank()) return List.of();
+			return objectMapper.readValue(body, TOOLS_TYPE);  // same shape: List<Map>
+		} catch (Exception ex) {
+			log.warn("simulator events parse failed: {}", ex.getMessage());
+			return List.of();
+		}
+	}
 }
