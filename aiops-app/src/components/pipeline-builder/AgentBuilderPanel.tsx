@@ -186,7 +186,15 @@ export default function AgentBuilderPanel({
     setRunning(true);
 
     try {
-      const hasExistingNodes = (state.pipeline.nodes?.length ?? 0) > 0;
+      // Send snapshot whenever the canvas has *anything* the agent should
+      // know about — nodes OR pipeline-level inputs. The wizard hands off
+      // with empty nodes but declared inputs (e.g. tool_id), and without
+      // those the orchestrator's "Pipeline 已宣告的 inputs" preamble is
+      // empty → agent falls back to its prompt-example reference name
+      // ($equipment_id) instead of using the actual declared name.
+      const hasExistingNodes  = (state.pipeline.nodes?.length ?? 0) > 0;
+      const hasDeclaredInputs = (state.pipeline.inputs?.length ?? 0) > 0;
+      const sendSnapshot = hasExistingNodes || hasDeclaredInputs;
       abortRef.current?.abort();
       abortRef.current = new AbortController();
       const streamRes = await fetch("/api/agent/build", {
@@ -196,7 +204,7 @@ export default function AgentBuilderPanel({
         body: JSON.stringify({
           instruction: prompt,
           pipelineId: basePipelineId ?? null,
-          pipelineSnapshot: hasExistingNodes ? state.pipeline : null,
+          pipelineSnapshot: sendSnapshot ? state.pipeline : null,
         }),
       });
       await consumeBuildStream(streamRes);
