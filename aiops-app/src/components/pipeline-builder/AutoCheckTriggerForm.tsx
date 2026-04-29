@@ -36,9 +36,15 @@ interface Props {
   onChange: (next: AutoCheckTriggerValue) => void;
   /** Optional suggested event_type names fetched from server. */
   suggestions?: string[];
+  /** Optional active auto_patrol list. Each becomes a checkbox that maps
+   *  to `auto_patrol:{id}` trigger_event token (the string written by
+   *  AutoPatrolExecutor.writeAlarm when a patrol fires an alarm). */
+  patrolSuggestions?: Array<{ id: number; name: string }>;
 }
 
-export default function AutoCheckTriggerForm({ value, onChange, suggestions }: Props) {
+export default function AutoCheckTriggerForm({
+  value, onChange, suggestions, patrolSuggestions,
+}: Props) {
   const parsed = parseEventTypes(value.eventTypesText);
 
   // When suggestions are available, favour a checkbox-style picker over the
@@ -46,6 +52,15 @@ export default function AutoCheckTriggerForm({ value, onChange, suggestions }: P
   // semantics obvious. Textarea is still rendered below for power users to
   // free-type custom trigger_event names.
   const hasSuggestions = (suggestions?.length ?? 0) > 0;
+  const hasPatrols = (patrolSuggestions?.length ?? 0) > 0;
+
+  const togglePick = (token: string) => {
+    if (parsed.includes(token)) {
+      onChange({ eventTypesText: parsed.filter((x) => x !== token).join(", ") });
+    } else {
+      onChange({ eventTypesText: [...parsed, token].join(", ") });
+    }
+  };
 
   return (
     <div>
@@ -60,36 +75,47 @@ export default function AutoCheckTriggerForm({ value, onChange, suggestions }: P
       </div>
 
       {hasSuggestions && (
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
-          {suggestions!.map((s) => {
-            const picked = parsed.includes(s);
-            return (
-              <button
-                key={s}
-                type="button"
-                onClick={() => {
-                  if (picked) {
-                    const next = parsed.filter((x) => x !== s).join(", ");
-                    onChange({ eventTypesText: next });
-                  } else {
-                    const next = [...parsed, s].join(", ");
-                    onChange({ eventTypesText: next });
-                  }
-                }}
-                style={{
-                  padding: "6px 12px", borderRadius: 6, fontSize: 12,
-                  border: `1px solid ${picked ? "#7C3AED" : "#CBD5E0"}`,
-                  background: picked ? "#F5F3FF" : "#fff",
-                  color: picked ? "#7C3AED" : "#475569",
-                  fontWeight: picked ? 600 : 400,
-                  cursor: "pointer",
-                }}
-              >
-                {picked ? "☑" : "☐"}  {s}
-              </button>
-            );
-          })}
-        </div>
+        <>
+          <div style={sectionTitleStyle}>📋 從事件類型 (event_types)</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+            {suggestions!.map((s) => {
+              const picked = parsed.includes(s);
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => togglePick(s)}
+                  style={chipStyle(picked, "#7C3AED", "#F5F3FF")}
+                >
+                  {picked ? "☑" : "☐"}  {s}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {hasPatrols && (
+        <>
+          <div style={sectionTitleStyle}>🔔 從現有 Auto-Patrol（綁定該 patrol 觸發的 alarm）</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+            {patrolSuggestions!.map((p) => {
+              const token = `auto_patrol:${p.id}`;
+              const picked = parsed.includes(token);
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => togglePick(token)}
+                  style={chipStyle(picked, "#0891B2", "#ECFEFF")}
+                  title={`綁定 trigger_event="${token}"`}
+                >
+                  {picked ? "☑" : "☐"}  Patrol #{p.id} 「{p.name}」
+                </button>
+              );
+            })}
+          </div>
+        </>
       )}
 
       <details style={{ marginTop: 6 }}>
@@ -128,6 +154,27 @@ const labelStyle: React.CSSProperties = {
   color: "#4a5568",
   marginBottom: 4,
 };
+
+const sectionTitleStyle: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 600,
+  color: "#475569",
+  marginTop: 6,
+  marginBottom: 4,
+};
+
+function chipStyle(picked: boolean, accent: string, bg: string): React.CSSProperties {
+  return {
+    padding: "6px 12px",
+    borderRadius: 6,
+    fontSize: 12,
+    border: `1px solid ${picked ? accent : "#CBD5E0"}`,
+    background: picked ? bg : "#fff",
+    color: picked ? accent : "#475569",
+    fontWeight: picked ? 600 : 400,
+    cursor: "pointer",
+  };
+}
 
 const inputStyle: React.CSSProperties = {
   width: "100%",

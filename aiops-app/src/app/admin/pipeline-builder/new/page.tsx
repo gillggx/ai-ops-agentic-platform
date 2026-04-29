@@ -309,6 +309,7 @@ function TriggerStep({
 }) {
   const [eventTypes, setEventTypes] = useState<EventType[]>([]);
   const [eventTypeSuggestions, setEventTypeSuggestions] = useState<string[]>([]);
+  const [patrolSuggestions, setPatrolSuggestions] = useState<Array<{ id: number; name: string }>>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -320,6 +321,20 @@ function TriggerStep({
         setEventTypeSuggestions((items as EventType[]).map((e) => e.name));
       })
       .catch(() => { setEventTypes([]); setEventTypeSuggestions([]); });
+
+    // Phase E1: also fetch active auto_patrols so user can bind to a
+    // patrol-fired alarm via auto_patrol:{id} token.
+    fetch("/api/admin/auto-patrols?active_only=true", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => {
+        const items = Array.isArray(d) ? d : (d?.data ?? []);
+        setPatrolSuggestions(
+          (items as Array<{ id: number; name: string }>)
+            .filter((p) => p && p.id != null && p.name)
+            .map((p) => ({ id: p.id, name: p.name })),
+        );
+      })
+      .catch(() => setPatrolSuggestions([]));
   }, []);
 
   const handleNext = () => {
@@ -369,6 +384,7 @@ function TriggerStep({
             value={pendingTrigger.config}
             onChange={(next) => setPendingTrigger({ kind: "auto_check", config: next })}
             suggestions={eventTypeSuggestions}
+            patrolSuggestions={patrolSuggestions}
           />
         )}
 
