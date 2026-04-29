@@ -699,8 +699,12 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
                         result["_data_overview"] = overview
 
         # Phase 5-UX-6: build_pipeline_live persists final canvas snapshot to
-        # agent_sessions so /chat/[id] can restore on page reload. No render
-        # card — the overlay already showed everything live.
+        # agent_sessions so /chat/[id] can restore on page reload.
+        # In builder mode the canvas overlay already shows everything live, so
+        # we don't push a render_card. In chat mode the user has no canvas in
+        # front of them — the pipeline result + run output need to render
+        # inline as a PbPipelineCard, otherwise the build "disappears" from
+        # the chat thread and the user can't review/edit/run it.
         # Phase 8-A-1d: native chat path (db=None) routes via Java upsert.
         if tool_name == "build_pipeline_live" and isinstance(result, dict) and result.get("status") in {"finished", "success"}:
             sid = state.get("session_id")
@@ -731,6 +735,24 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
                             await db.flush()
                 except Exception as e:  # noqa: BLE001
                     logger.warning("session pipeline snapshot writeback failed: %s", e)
+
+            # Chat-mode render_card so PbPipelineCard renders inline with
+            # Edit-in-Builder / Save-as-Skill / Expand CTAs. Builder mode
+            # skips this — the canvas overlay already presents everything.
+            # Card shape mirrors PbPipelineAdHocCard (PbPipelineCard.tsx):
+            #   { type, pipeline_json, node_results, result_summary, run_id }
+            # node_results / result_summary come from the auto-run (above).
+            # Empty dict for node_results when auto_run skipped/failed — UI
+            # falls back to "no results yet, hit Edit in Builder to run".
+            if state.get("mode") != "builder" and pipeline_json:
+                ar = result.get("auto_run") or {}
+                new_render_cards.append({
+                    "type": "pb_pipeline",
+                    "pipeline_json": pipeline_json,
+                    "node_results": ar.get("node_results") or {},
+                    "result_summary": ar.get("result_summary"),
+                    "run_id": None,
+                })
 
         # PR-C: invoke_published_skill also returns a pb pipeline summary
         if tool_name == "invoke_published_skill" and isinstance(result, dict) and result.get("status") == "success":

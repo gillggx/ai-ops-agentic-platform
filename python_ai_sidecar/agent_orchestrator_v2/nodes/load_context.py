@@ -64,47 +64,70 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
         b.get("text", "") for b in system_blocks if isinstance(b, dict)
     )
 
-    # v1.4 — Plan Panel directive (independent of pipeline-only mode).
-    # The agent must emit a 3-7 item plan via update_plan(action="create")
+    # Phase E2/E3: hoisted to top so all downstream sections can branch on it.
+    # builder mode = canvas-side prompts (Pipeline Builder); chat mode = default.
+    mode = state.get("mode") or "chat"
+
+    # v1.4 — Plan Panel directive (mode-aware).
+    # The agent must emit a 3-item plan via update_plan(action="create")
     # BEFORE any other tool call, then update each item as it progresses.
     # Frontend renders this as a live progress checklist above the chat.
-    system_text += (
-        "\n\n# Plan-First Execution (v1.4 Plan Panel)\n"
-        "**EVERY new turn**, your **FIRST tool call must be `update_plan`** with\n"
-        "`action='create'` and 3-7 high-level todo items covering the work for THIS\n"
-        "request. Items typically follow: 確認需求 → 取資料 → 處理 / 計算 → 呈現結果 → 結論。\n"
-        "\n"
-        "Each item: `{id: \"p1\"|\"p2\"|..., title: \"<short Chinese phrase>\", status: \"pending\"}`.\n"
-        "\n"
-        "As you complete each phase, immediately call `update_plan(action='update', id, status='done')`.\n"
-        "Mark a step `'in_progress'` when you start it, `'done'` when finished, `'failed'` if it errors.\n"
-        "Optional `note` 加額外說明（如「已加 4 個 nodes」、「執行 12.3 秒」）。\n"
-        "\n"
-        "The PE sees a Claude-Code-style live checklist — this is the primary signal\n"
-        "that you're making progress. Skipping the plan or never updating it makes the\n"
-        "UI feel stuck.\n"
-        "\n"
-        "# Auto-Run after Build (chat path only)\n"
-        "After `build_pipeline_live` returns success, the system **automatically runs\n"
-        "the resulting pipeline** and shows results via the AnalysisPanel — you do NOT\n"
-        "need to call execute manually. Just update_plan to mark the relevant items\n"
-        "done and write a short synthesis. If the auto-run fails, you'll see\n"
-        "`pb_run_error` come through and you should call `propose_pipeline_patch`\n"
-        "with a targeted fix (only ONE retry — if it fails again, explain the issue\n"
-        "in plain language and stop).\n"
-        "\n"
-        "**If `build_pipeline_live` itself returns `status='failed'`** (the sub-agent\n"
-        "hit MAX_TURNS / errored out before producing a usable pipeline): DO NOT call\n"
-        "`build_pipeline_live` again with the same goal. The user has already seen\n"
-        "the partial canvas + a takeover link. Just acknowledge in plain language\n"
-        "(\"建構未完成，可以在 Pipeline Builder 自己接手\") and stop — retrying with the\n"
-        "same prompt will hit the same failure mode.\n"
-    )
+    if mode == "builder":
+        system_text += (
+            "\n\n# Plan-First Execution (Builder Mode)\n"
+            "**EVERY new turn**, your **FIRST tool call must be `update_plan`** with\n"
+            "`action='create'` and a **3-item** plan focused on pipeline construction:\n"
+            "  - p1: 規劃 pipeline 結構（不是「確認需求」— 使用者已經在 canvas 上了）\n"
+            "  - p2: 呼叫 build_pipeline_live 建/改\n"
+            "  - p3: 收尾 / 短文字 summary\n"
+            "\n"
+            "Each item: `{id: \"p1\"|\"p2\"|\"p3\", title: \"<short Chinese phrase>\", status: \"pending\"}`.\n"
+            "\n"
+            "**禁止**：把 p1 mark 為 'done' 並 note 'waiting for user' / '等待使用者' / '需要使用者' —\n"
+            "tool_execute 會 mutate 成 error 強制你重來。Builder 模式沒有「等使用者指定值」這個動作，\n"
+            "使用者隨時能在 canvas 填值，你只要把 pipeline 結構建好。\n"
+        )
+    else:
+        system_text += (
+            "\n\n# Plan-First Execution (v1.4 Plan Panel)\n"
+            "**EVERY new turn**, your **FIRST tool call must be `update_plan`** with\n"
+            "`action='create'` and 3-7 high-level todo items covering the work for THIS\n"
+            "request. Items typically follow: 確認需求 → 取資料 → 處理 / 計算 → 呈現結果 → 結論。\n"
+            "\n"
+            "Each item: `{id: \"p1\"|\"p2\"|..., title: \"<short Chinese phrase>\", status: \"pending\"}`.\n"
+            "\n"
+            "As you complete each phase, immediately call `update_plan(action='update', id, status='done')`.\n"
+            "Mark a step `'in_progress'` when you start it, `'done'` when finished, `'failed'` if it errors.\n"
+            "Optional `note` 加額外說明（如「已加 4 個 nodes」、「執行 12.3 秒」）。\n"
+            "\n"
+            "The PE sees a Claude-Code-style live checklist — this is the primary signal\n"
+            "that you're making progress. Skipping the plan or never updating it makes the\n"
+            "UI feel stuck.\n"
+            "\n"
+            "# Auto-Run after Build (chat path only)\n"
+            "After `build_pipeline_live` returns success, the system **automatically runs\n"
+            "the resulting pipeline** and shows results via the AnalysisPanel — you do NOT\n"
+            "need to call execute manually. Just update_plan to mark the relevant items\n"
+            "done and write a short synthesis. If the auto-run fails, you'll see\n"
+            "`pb_run_error` come through and you should call `propose_pipeline_patch`\n"
+            "with a targeted fix (only ONE retry — if it fails again, explain the issue\n"
+            "in plain language and stop).\n"
+            "\n"
+            "**If `build_pipeline_live` itself returns `status='failed'`** (the sub-agent\n"
+            "hit MAX_TURNS / errored out before producing a usable pipeline): DO NOT call\n"
+            "`build_pipeline_live` again with the same goal. The user has already seen\n"
+            "the partial canvas + a takeover link. Just acknowledge in plain language\n"
+            "(\"建構未完成，可以在 Pipeline Builder 自己接手\") and stop — retrying with the\n"
+            "same prompt will hit the same failure mode.\n"
+        )
 
     # Phase 5: pipeline-only directive + published-skill-first heuristic + block catalog.
+    # Skipped in builder mode — that path has its own routing rules below and the
+    # "search published skill first / ask user before build" heuristic actively
+    # interferes with builder-mode's "build_pipeline_live directly" flow.
     try:
         from python_ai_sidecar.pipeline_builder._sidecar_deps import get_settings
-        if get_settings().PIPELINE_ONLY_MODE:
+        if get_settings().PIPELINE_ONLY_MODE and mode != "builder":
             # Inject pb block catalog so LLM knows the 26 blocks it can use in build_pipeline
             try:
                 from python_ai_sidecar.pipeline_builder.block_registry import BlockRegistry
@@ -209,7 +232,10 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
     # tools. Without this, the pipeline-only directive above ("search_published_skills
     # first") wins and the agent burns 7 LLM turns on a question whose answer is
     # already sitting in <current_state>.
-    if current_state_block:
+    # Skipped in builder mode — there the user's intent is pipeline construction,
+    # not status Q&A; this directive's "answer in plain text, do NOT call
+    # build_pipeline_live" rule directly contradicts builder-mode's flow.
+    if current_state_block and mode != "builder":
         system_text += (
             "\n\n# Use <current_state> first (Part B)\n"
             "Each user message is now prepended with a `<current_state>` block carrying live\n"
@@ -224,43 +250,47 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
             "MAX_ITERATIONS.\n"
         )
 
-    # Phase E2: mode-aware section. Same orchestrator handles both chat
-    # turns (mode="chat", default — keep current behaviour, no extra prompt
-    # to avoid regressions) and Pipeline-Builder canvas-side prompts
-    # (mode="builder", aggressive build_pipeline_live). For chat mode we
-    # let the existing PIPELINE_ONLY_MODE / Use<current_state> rules drive.
-    mode = state.get("mode") or "chat"
+    # Phase E2/E3: builder-mode section. Overrides Plan-First / Pipeline-Only /
+    # Use<current_state> sections above (which are now skipped when mode==builder,
+    # but we still spell out the routing here so the LLM has one canonical
+    # contract instead of inferring from absence).
     if mode == "builder":
         system_text += (
-            "\n\n# Pipeline-Builder Mode (Phase E2)\n"
+            "\n\n# Pipeline-Builder Mode (CANONICAL — overrides any earlier directive)\n"
             "User is on a Pipeline Builder canvas with the pipeline open in front of them.\n"
             "Their intent is **almost always pipeline modification / construction**, not Q&A.\n"
             "\n"
-            "## 🚫 不要停下來等使用者「指定值」 — 這是最常見的 anti-pattern\n"
-            "User 用「該站點」「該機台」「這個 lot」這類**模糊指代**，是要你**templatize 後直接\n"
-            "建**，不是要你停下來問「請問哪個站點?」。處理方式：\n"
-            "  - Canvas 已宣告 input（snapshot 列了 $name）→ **重用 $name**，proceed build。\n"
-            "  - Canvas 沒宣告 → 你呼叫 declare_input + 用 $name；告訴使用者「我宣告了 $step\n"
-            "    input，runtime 提供值就會跑」。\n"
-            "  - **絕對不要** mark plan item 為「等待使用者指定 ___」然後 stop。那是 chat\n"
-            "    模式的處理方式，builder 模式 user 已經在畫面上、隨時能填值，你的工作是\n"
-            "    把 pipeline 結構建出來。\n"
+            "## ✅ 你只有兩個 productive 動作\n"
+            "  1. `update_plan` — 維護 3-item 計畫（規劃 / build / 收尾）\n"
+            "  2. `build_pipeline_live(goal=...)` — 委派給 Glass Box sub-agent 建 / 改 pipeline\n"
             "\n"
-            "## Routing rules\n"
-            "  - 「加一個 chart」/「改 cron」/「換 alert 規則」/「檢查 OOC」/ vague\n"
-            "    structural goals → call `build_pipeline_live` directly (no '要建嗎'\n"
-            "    confirmation — user's already in the builder, that IS the confirmation)\n"
-            "  - 「為什麼這條 pipeline 失敗」/「這個 block 做什麼」 → answer in plain text\n"
-            "  - When the user references **declared inputs** of the current pipeline\n"
-            "    (e.g. tool_id, step), pass them through to build_pipeline_live's `goal`\n"
-            "    so the sub-agent uses the SAME variable names.\n"
-            "  - Pipeline already has declared inputs in its snapshot → DO NOT\n"
-            "    re-declare them under a different name. Reuse the exact `$name`.\n"
+            "其他 tools（execute_mcp / search_published_skills / invoke_published_skill）\n"
+            "**幾乎不會用到** — 不要繞道去查資料或找 skill，直接 build。\n"
             "\n"
-            "## Plan rules（builder 專用）\n"
-            "  - p1 應該是「規劃 pipeline 結構」，**不是**「確認需求」。\n"
-            "  - 不要把 p1 mark done 後 stop — 必須接著呼 build_pipeline_live。\n"
-            "  - update_plan 的 note 不該包含「等待使用者...」字樣。\n"
+            "## ❗ 絕對禁止的 anti-patterns\n"
+            "  - ❌ 呼叫 `declare_input` — **這個工具不存在於你的工具表**。declare_input 是\n"
+            "    Glass Box sub-agent 的 Glass Op；你不能直接呼叫，要透過 build_pipeline_live\n"
+            "    委派。如果使用者用模糊指代（「該站點」「該機台」），把它寫進 goal 裡：\n"
+            "    `goal=\"檢查 $step 站點的所有 SPC charts...\"`，sub-agent 會自己 declare $step。\n"
+            "  - ❌ Mark plan item 'done' 並 note 「等待使用者...」/「需要使用者...」 —\n"
+            "    tool_execute 會把這個 result mutate 成 error 強制重來。Builder 模式裡使用者\n"
+            "    隨時能在 canvas 填值，你的工作是把結構建好，不是停下來問。\n"
+            "  - ❌ 「找不到現成 skill，要不要建一條？」這種 confirmation —\n"
+            "    user 已經在 builder canvas 上，那本身就是 confirmation；直接 build。\n"
+            "\n"
+            "## Routing examples\n"
+            "  | User msg | Action |\n"
+            "  |---|---|\n"
+            "  | 「加一個 chart」 | build_pipeline_live(goal=\"加一個 ... chart\") |\n"
+            "  | 「檢查該站點 SPC，連 2 次 OOC 告警」 | build_pipeline_live(goal=\"檢查 $step 站點所有 SPC charts，連 2 次都 OOC 就告警\") |\n"
+            "  | 「換 alert 嚴重度為 HIGH」 | build_pipeline_live(goal=\"把 alert block 的 severity 改 HIGH\") |\n"
+            "  | 「為什麼這條 pipeline 失敗」 | 純文字回答，不呼工具 |\n"
+            "  | 「這個 block 做什麼」 | 純文字回答 |\n"
+            "\n"
+            "## Plan template（builder 專用，3 items）\n"
+            "  - p1: 「規劃 pipeline 結構」（**不是**「確認需求」）\n"
+            "  - p2: 「呼叫 build_pipeline_live 建/改」\n"
+            "  - p3: 「收尾 / 短文字 summary」\n"
             "\n"
             "Style: terse, builder-engineer-to-builder-engineer. The PE will see the\n"
             "canvas update live as you call build_pipeline_live; you only need a sentence\n"
