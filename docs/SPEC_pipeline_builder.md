@@ -219,7 +219,7 @@ CREATE TABLE canvas_operations (
 | `block_process_history` | `data` (df) | 底層 MCP `get_process_info`；SPC/APC/DC/RECIPE/FDC/EC flatten |
 | **`block_mcp_call`** *(δ)* | `data` (df) | 通用 MCP 呼叫器；`mcp_name` + `args` 查 mcp_definitions 表，自動 flatten events/dataset/items/data/records/rows 回傳 |
 
-#### 類別二：處理（Transforms）— 11 個
+#### 類別二：處理（Transforms）— 13 個
 | ID | I/O | 說明 |
 |---|---|---|
 | `block_filter` | df → df | column/operator/value 過濾 |
@@ -230,7 +230,9 @@ CREATE TABLE canvas_operations (
 | `block_delta` | df → df | 相鄰點 delta + is_rising / is_falling 旗標 |
 | `block_sort` *(α)* | df → df | 多欄排序 + optional top-N |
 | `block_histogram` *(α)* | df → df | 分布直方圖 (bin_left/right/center/count/density) |
-| `block_unpivot` *(β)* | df → df | Wide→long melt（搭配 group_by 處理多 chart type） |
+| `block_unpivot` *(β)* | df → df | Wide→long melt（generic；SPC/APC 場景優先用下方專用 block） |
+| **`block_spc_long_form`** *(V6)* | df → df | process_history wide → SPC long format；output 固定 `chart_name / value / ucl / lcl / is_ooc`，0 param |
+| **`block_apc_long_form`** *(V6)* | df → df | process_history wide → APC long format；output 固定 `param_name / value`，0 param |
 | `block_union` *(β)* | df + df → df | 縱向合併 (outer / intersect schema) |
 | **`block_ewma`** *(γ)* | df → df | 指數加權移動平均（α smoothing） |
 
@@ -252,7 +254,7 @@ CREATE TABLE canvas_operations (
 | `block_chart` | df → `chart_spec` | 雙 renderer：Vega-Lite（簡單圖）/ Plotly ChartDSL（SPC / 多 y / 雙軸 / boxplot / heatmap）。**SPC mode 同時支援 `color="<col>"` 多系列 overlay**（emit `series_field`，frontend 一條 trace per 分組值，UCL/LCL/Center 仍全域疊加） |
 | `block_alert` | `triggered`+`evidence` → `alert` (df) | 多 alert 允許（C8 於 β 撤銷） |
 
-**合計：2 + 11 + 8 + 2 = 23 個標準積木**
+**合計：2 + 13 + 8 + 2 = 25 個標準積木**（sidecar BUILTIN_EXECUTORS 含 `block_count_rows` / `block_compute` / `block_data_view` / `block_mcp_foreach` 共 29，部分內部用）
 
 **Validator 規則**：C1–C7 + C9（C8 SINGLE_ALERT 於 Phase β 撤銷；多 alert 合法）
 
@@ -261,6 +263,7 @@ CREATE TABLE canvas_operations (
 - Phase β（已完成）— `block_unpivot` / `block_union` / `block_cpk` / `block_any_trigger` + WECO 補 R3/R4/R7/R8 + 拔 C8
 - **Phase γ（已完成）** — `block_correlation` / `block_hypothesis_test` / `block_ewma`
 - **Phase δ（已完成）** — `block_mcp_call`（通用 MCP wrapper）
+- **V6（2026-04-30）** — `block_spc_long_form` / `block_apc_long_form` purpose-built reshape；解決 LLM 用 generic unpivot 時 column naming 不一致 → 詳見 [SPEC_agent_builder_reliability_v1.md](./SPEC_agent_builder_reliability_v1.md)
 - Phase 4（未啟動）— diagnostic_rules migration + Custom Block + 舊 code-gen 下線
 
 ### 3.3 積木實作介面（Block Implementation Contract）

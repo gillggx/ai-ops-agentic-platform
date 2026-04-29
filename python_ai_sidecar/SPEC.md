@@ -76,7 +76,7 @@ python_ai_sidecar/
 │   ├── pipeline_schema.py        pipeline DSL
 │   ├── executor.py               DAG runner
 │   ├── cache.py / column_aliases.py / doc_generator.py / prompt_hint.py
-│   └── blocks/__init__.py        ★ BUILTIN_EXECUTORS dict — 27 blocks
+│   └── blocks/__init__.py        ★ BUILTIN_EXECUTORS dict — 29 blocks
 ├── executor/                     ★ 簡化版 6-block runtime（早期 Phase）
 │   ├── block_runtime.py          REGISTRY: load_inline_rows / filter_rows / count_rows / group_count / render_table / render_line_chart
 │   ├── dag.py
@@ -149,19 +149,22 @@ Block catalog 從 Java `/internal/blocks` 拉（透過 [JavaAPIClient](python_ai
 | `pb_run_error` | auto-run 失敗 → LLM 應呼叫 `propose_pipeline_patch` | `{error_message}` |
 | `pb_glass_*` | Glass Box sub-agent 即時 ops（已有 since Phase 5-UX-6） | – |
 
-## 7. Pipeline Builder Executor（27 blocks native）
+## 7. Pipeline Builder Executor（29 blocks native）
 
-[pipeline_builder/blocks/](python_ai_sidecar/pipeline_builder/blocks/) — 每個 block 一個 file，繼承 [BlockExecutor](python_ai_sidecar/pipeline_builder/blocks/base.py)，在 [`__init__.py`](python_ai_sidecar/pipeline_builder/blocks/__init__.py#L33-L61) 統一登錄到 `BUILTIN_EXECUTORS`：
+[pipeline_builder/blocks/](python_ai_sidecar/pipeline_builder/blocks/) — 每個 block 一個 file，繼承 [BlockExecutor](python_ai_sidecar/pipeline_builder/blocks/base.py)，在 [`__init__.py`](python_ai_sidecar/pipeline_builder/blocks/__init__.py) 統一登錄到 `BUILTIN_EXECUTORS`：
 
 ```
 block_process_history    block_filter           block_join             block_groupby_agg
 block_shift_lag          block_rolling_window   block_threshold        block_consecutive_rule
 block_delta              block_weco_rules       block_linear_regression block_histogram
-block_sort               block_unpivot          block_union            block_cpk
-block_any_trigger        block_correlation      block_hypothesis_test  block_ewma
-block_mcp_call           block_mcp_foreach      block_count_rows       block_chart
-block_alert              block_data_view        block_compute
+block_sort               block_unpivot          block_spc_long_form    block_apc_long_form
+block_union              block_cpk              block_any_trigger      block_correlation
+block_hypothesis_test    block_ewma             block_mcp_call         block_mcp_foreach
+block_count_rows         block_chart            block_alert            block_data_view
+block_compute
 ```
+
+**`block_spc_long_form` / `block_apc_long_form`** (V6, 2026-04-30) — purpose-built reshape blocks for SPC patrol pipelines. process_history 直出 wide 格式（`spc_<chart>_*` / `apc_<param>`），這兩個 block 攤平成 long DF 並**固定 output 欄位名為 `chart_name` / `param_name`**，免除 LLM 用 generic `block_unpivot` 時自選 `chart_type` / `metric` 等不一致名稱的踩坑。詳見 [SPEC_agent_builder_reliability_v1.md](docs/SPEC_agent_builder_reliability_v1.md)。
 
 Block 邏輯與 fastapi_backend_service 完全一致（為了 git blame 乾淨），DB / config 依賴透過 [_sidecar_deps.py](python_ai_sidecar/pipeline_builder/_sidecar_deps.py) 蓋 shim。
 
