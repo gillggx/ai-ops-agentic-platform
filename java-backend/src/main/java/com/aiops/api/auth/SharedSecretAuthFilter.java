@@ -64,8 +64,15 @@ public class SharedSecretAuthFilter extends OncePerRequestFilter {
 			String authHeader = req.getHeader("Authorization");
 			if (authHeader != null && authHeader.startsWith("Bearer ")
 					&& secret.equals(authHeader.substring("Bearer ".length()))) {
+				// userId=1L points at the admin seed row in `users`. Previously
+				// 0L, which violated pb_pipelines.created_by FK whenever the
+				// shared-secret bearer hit a controller that calls
+				// `caller.userId()` (create / fork pipeline, etc.). The
+				// shared-secret is already trusted as IT_ADMIN; aligning to
+				// the admin user_id keeps server-to-server / smoke flows
+				// working without touching prod user JWT paths.
 				AuthPrincipal principal = new AuthPrincipal(
-						0L, "shared-secret-admin", EnumSet.of(Role.IT_ADMIN));
+						1L, "shared-secret-admin", EnumSet.of(Role.IT_ADMIN));
 				var auth = new UsernamePasswordAuthenticationToken(
 						principal, null,
 						List.of(new SimpleGrantedAuthority(Role.IT_ADMIN.authority())));
