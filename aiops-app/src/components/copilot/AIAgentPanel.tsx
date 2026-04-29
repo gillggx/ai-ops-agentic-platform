@@ -127,6 +127,12 @@ interface Props {
   // "session"              — does NOT render inline card; fires onPipelineUpdate so
   //                          the hosting BuilderLayout can update canvas + results.
   mode?: "standalone" | "session";
+  // Phase E2: backend orchestrator mode hint — "chat" (default) or "builder".
+  // Sent with each /api/agent/chat call so the SAME orchestrator biases its
+  // tool-choice + prompt section appropriately. BuilderLayout passes
+  // "builder" so the agent treats every prompt as a pipeline-modification
+  // intent by default.
+  agentMode?: "chat" | "builder";
   // Phase 5-UX-5: fired during build_pipeline execution so a session-mode
   // host can draw the DAG structure immediately (all nodes pending) and
   // then light up each node as it finishes.
@@ -504,6 +510,7 @@ export function AIAgentPanel({
   onAutoRunError,
   onUserMessageSent,
   initialPrompt,
+  agentMode = "chat",
 }: Props) {
   // Part B (SPEC_context_engineering): pull selected equipment from AppContext
   // so chat requests can carry user focus to the agent's load_context_node.
@@ -671,6 +678,9 @@ export function AIAgentPanel({
           message: messageToSend,
           session_id: sessionIdRef.current,
           ...(Object.keys(clientContext).length > 0 ? { client_context: clientContext } : {}),
+          // Phase E2: tell backend whether we're in chat or builder context
+          // so the orchestrator's mode-aware system prompt section kicks in.
+          mode: agentMode,
         }),
       });
 

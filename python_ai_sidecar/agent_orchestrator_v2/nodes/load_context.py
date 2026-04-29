@@ -224,6 +224,34 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
             "MAX_ITERATIONS.\n"
         )
 
+    # Phase E2: mode-aware section. Same orchestrator handles both chat
+    # turns (mode="chat", default — keep current behaviour, no extra prompt
+    # to avoid regressions) and Pipeline-Builder canvas-side prompts
+    # (mode="builder", aggressive build_pipeline_live). For chat mode we
+    # let the existing PIPELINE_ONLY_MODE / Use<current_state> rules drive.
+    mode = state.get("mode") or "chat"
+    if mode == "builder":
+        system_text += (
+            "\n\n# Pipeline-Builder Mode (Phase E2)\n"
+            "User is on a Pipeline Builder canvas with the pipeline open in front of them.\n"
+            "Their intent is **almost always pipeline modification / construction**, not Q&A.\n"
+            "\n"
+            "Routing rules:\n"
+            "  - 「加一個 chart」/「改 cron」/「換 alert 規則」/ vague structural goals\n"
+            "      → call `build_pipeline_live` directly (no '要建嗎' confirmation needed —\n"
+            "        user's already in the builder, that IS the confirmation)\n"
+            "  - 「為什麼這條 pipeline 失敗」/「這個 block 做什麼」 → answer in plain text\n"
+            "  - When the user references **declared inputs** of the current pipeline\n"
+            "    (e.g. tool_id, step), pass them through to build_pipeline_live's `goal`\n"
+            "    so the sub-agent uses the SAME variable names.\n"
+            "  - Pipeline already has declared inputs in its snapshot → DO NOT\n"
+            "    re-declare them under a different name. Reuse the exact `$name`.\n"
+            "\n"
+            "Style: terse, builder-engineer-to-builder-engineer. The PE will see the\n"
+            "canvas update live as you call build_pipeline_live; you only need a sentence\n"
+            "summarising what changed afterwards.\n"
+        )
+
     # Build initial messages: history + current user message (with prepended state)
     messages = list(history_messages) + [HumanMessage(content=enriched_user_message)]
 

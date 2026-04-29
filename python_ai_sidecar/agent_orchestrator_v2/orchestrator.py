@@ -60,6 +60,7 @@ class AgentOrchestratorV2:
         message: str,
         session_id: Optional[str] = None,
         client_context: Optional[Dict[str, Any]] = None,
+        mode: str = "chat",
     ) -> AsyncIterator[Dict[str, Any]]:
         """Run the agent graph and yield v1-compatible SSE events.
 
@@ -71,6 +72,12 @@ class AgentOrchestratorV2:
         PipelineExecutor callback. A background relay task drains the queue
         and yields the events alongside the graph's own SSE events, giving
         the chat UI a live stream of `pb_structure` + `pb_node_start/done`.
+
+        Phase E2: `mode` distinguishes chat-style requests ({@code "chat"})
+        from pipeline-builder canvas-side requests ({@code "builder"}). It
+        flows through state and modifies the system prompt so the SAME
+        agent biases differently — builder mode preferes aggressive
+        build_pipeline_live invocation; chat mode prefers literals and Q&A.
         """
         import asyncio as _asyncio
         graph = _get_compiled_graph()
@@ -83,6 +90,7 @@ class AgentOrchestratorV2:
             "user_message": message,
             "canvas_overrides": self._canvas_overrides,
             "client_context": client_context or {},
+            "mode": mode if mode in ("chat", "builder") else "chat",
         }
 
         # Phase 5-UX-5: event bus for tool → SSE progressive events.

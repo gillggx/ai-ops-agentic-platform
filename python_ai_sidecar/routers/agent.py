@@ -37,6 +37,12 @@ class ChatRequest(BaseModel):
     # Currently carries `selected_equipment_id` from AppContext.selectedEquipment;
     # may grow with `current_page`, `last_viewed_alarm_id`, etc.
     client_context: dict | None = Field(default=None, alias="clientContext")
+    # Phase E2: "chat" (default) or "builder". When "builder", the agent
+    # biases toward aggressive build_pipeline_live invocation because the
+    # caller is on the Pipeline Builder canvas and pipeline modification
+    # is the default intent. Sent by AIAgentPanel when mounted inside
+    # BuilderLayout (via E3 wiring).
+    mode: str | None = Field(default=None)
 
 
 class BuildRequest(BaseModel):
@@ -72,7 +78,10 @@ async def _chat_stream_native(req: ChatRequest, caller: CallerContext) -> AsyncG
         roles=caller.roles,
     )
     async for v1_event in orchestrator.run(
-        req.message, session_id=req.session_id, client_context=req.client_context,
+        req.message,
+        session_id=req.session_id,
+        client_context=req.client_context,
+        mode=req.mode or "chat",
     ):
         # AgentOrchestratorV2 yields v1-style {type, ...} dicts; convert to SSE
         ev_type = v1_event.get("type") or "message"

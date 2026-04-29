@@ -32,6 +32,12 @@ AGENT_STATE_SCHEMA = {
     "session_id": Optional[str],
     "user_message": str,
     "canvas_overrides": Optional[Dict[str, Any]],
+    # Phase E2: "chat" (default) or "builder" — controls system-prompt
+    # bias. builder mode lives behind /agent/build (Pipeline Builder
+    # canvas-side panel) and tells the LLM to favour build_pipeline_live
+    # for any pipeline modification request. chat mode keeps current Q&A
+    # / one-shot defaults.
+    "mode": str,
 
     # ── Conversation (LangGraph-managed message list) ───────────────
     "messages": Annotated[Sequence[AnyMessage], add_messages],
@@ -107,6 +113,7 @@ DEFAULT_STATE: Dict[str, Any] = {
     "flat_metadata": None,
     "ui_config": None,
     "plan_items": [],
+    "mode": "chat",
 }
 
 
