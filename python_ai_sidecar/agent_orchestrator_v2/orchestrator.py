@@ -110,6 +110,13 @@ class AgentOrchestratorV2:
 
         # Config carries request-scoped dependencies (DB session, auth, etc.)
         # so nodes can access them without being coupled to FastAPI.
+        # recursion_limit: LangGraph's hop budget across the whole graph.
+        # Default is 25, which is too tight for builder turns that involve
+        # update_plan → build_pipeline_live → pb_run_error → propose_patch
+        # → update_plan → done (~14 hops minimum, more if Glass Box auto-run
+        # fails and retries). 60 hops ≈ 30 tool calls — plenty of head-room
+        # without inviting infinite loops (the anti-pattern guards in
+        # tool_execute kick in well before that).
         config = {
             "configurable": {
                 "db": self._db,
@@ -124,6 +131,7 @@ class AgentOrchestratorV2:
                 # pipeline-builder lifecycle events.
                 "pb_event_emit": _pb_event_emit,
             },
+            "recursion_limit": 60,
         }
 
         # Stream LangGraph events and translate to v1 SSE format.

@@ -3,6 +3,7 @@
 from python_ai_sidecar.pipeline_builder.blocks.base import BlockExecutor, BlockExecutionError
 from python_ai_sidecar.pipeline_builder.blocks.alert import AlertBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.any_trigger import AnyTriggerBlockExecutor
+from python_ai_sidecar.pipeline_builder.blocks.apc_long_form import ApcLongFormBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.chart import ChartBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.compute import ComputeBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.consecutive_rule import ConsecutiveRuleBlockExecutor
@@ -24,6 +25,7 @@ from python_ai_sidecar.pipeline_builder.blocks.process_history import ProcessHis
 from python_ai_sidecar.pipeline_builder.blocks.rolling_window import RollingWindowBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.shift_lag import ShiftLagBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.sort import SortBlockExecutor
+from python_ai_sidecar.pipeline_builder.blocks.spc_long_form import SpcLongFormBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.threshold import ThresholdBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.union import UnionBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.unpivot import UnpivotBlockExecutor
@@ -45,6 +47,8 @@ BUILTIN_EXECUTORS: dict[str, type[BlockExecutor]] = {
     "block_histogram": HistogramBlockExecutor,
     "block_sort": SortBlockExecutor,
     "block_unpivot": UnpivotBlockExecutor,
+    "block_spc_long_form": SpcLongFormBlockExecutor,
+    "block_apc_long_form": ApcLongFormBlockExecutor,
     "block_union": UnionBlockExecutor,
     "block_cpk": CpkBlockExecutor,
     "block_any_trigger": AnyTriggerBlockExecutor,
@@ -66,6 +70,7 @@ __all__ = [
     "BUILTIN_EXECUTORS",
     "AlertBlockExecutor",
     "AnyTriggerBlockExecutor",
+    "ApcLongFormBlockExecutor",
     "ChartBlockExecutor",
     "ComputeBlockExecutor",
     "ConsecutiveRuleBlockExecutor",
@@ -87,6 +92,7 @@ __all__ = [
     "RollingWindowBlockExecutor",
     "ShiftLagBlockExecutor",
     "SortBlockExecutor",
+    "SpcLongFormBlockExecutor",
     "ThresholdBlockExecutor",
     "UnionBlockExecutor",
     "UnpivotBlockExecutor",
