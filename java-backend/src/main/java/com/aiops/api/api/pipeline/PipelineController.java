@@ -4,6 +4,8 @@ import com.aiops.api.auth.AuthPrincipal;
 import com.aiops.api.auth.Authorities;
 import com.aiops.api.common.ApiException;
 import com.aiops.api.common.ApiResponse;
+import com.aiops.api.domain.pipeline.PipelineAutoCheckTriggerEntity;
+import com.aiops.api.domain.pipeline.PipelineAutoCheckTriggerRepository;
 import com.aiops.api.domain.pipeline.PipelineEntity;
 import com.aiops.api.domain.pipeline.PipelineRepository;
 import com.aiops.api.domain.pipeline.PublishedSkillEntity;
@@ -29,15 +31,18 @@ public class PipelineController {
 
 	private final PipelineRepository repository;
 	private final PublishedSkillRepository publishedSkillRepository;
+	private final PipelineAutoCheckTriggerRepository autoCheckTriggerRepository;
 	private final PipelineDocGenerator docGenerator;
 	private final ObjectMapper objectMapper;
 
 	public PipelineController(PipelineRepository repository,
 	                          PublishedSkillRepository publishedSkillRepository,
+	                          PipelineAutoCheckTriggerRepository autoCheckTriggerRepository,
 	                          PipelineDocGenerator docGenerator,
 	                          ObjectMapper objectMapper) {
 		this.repository = repository;
 		this.publishedSkillRepository = publishedSkillRepository;
+		this.autoCheckTriggerRepository = autoCheckTriggerRepository;
 		this.docGenerator = docGenerator;
 		this.objectMapper = objectMapper;
 	}
@@ -228,6 +233,99 @@ public class PipelineController {
 		return ApiResponse.ok(result);
 	}
 
+	@PostMapping("/{id}/fork")
+	@Transactional
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public ApiResponse<PipelineDtos.Detail> fork(@PathVariable Long id,
+	                                              @AuthenticationPrincipal AuthPrincipal caller) {
+		PipelineEntity src = repository.findById(id).orElseThrow(() -> ApiException.notFound("pipeline"));
+		// PR-B: clone allowed from any non-draft state (including archived, so users
+		// can revive retired pipelines). Drafts are already editable in place.
+		if ("draft".equals(src.getStatus())) {
+			throw ApiException.conflict("Cannot clone a draft — just edit it directly");
+		}
+
+		Map<String, Object> payload = parsePipelineJson(src.getPipelineJson());
+		Object metaRaw = payload.get("metadata");
+		Map<String, Object> meta = (metaRaw instanceof Map<?, ?>)
+				? new java.util.LinkedHashMap<>(asMap(metaRaw))
+				: new java.util.LinkedHashMap<>();
+		meta.put("fork_of", src.getId());
+		meta.put("forked_at", OffsetDateTime.now().toString());
+		payload.put("metadata", meta);
+
+		PipelineEntity forked = new PipelineEntity();
+		forked.setName(src.getName() + " (clone)");
+		forked.setDescription(src.getDescription() == null ? "" : src.getDescription());
+		forked.setStatus("draft");
+		forked.setPipelineKind(src.getPipelineKind());
+		forked.setVersion(src.getVersion());
+		forked.setParentId(src.getId());
+		forked.setCreatedBy(caller.userId());
+		try {
+			forked.setPipelineJson(objectMapper.writeValueAsString(payload));
+		} catch (JsonProcessingException ex) {
+			throw new ApiException(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR,
+					"serialize_failed", "Failed to serialize pipeline_json: " + ex.getMessage());
+		}
+		return ApiResponse.ok(PipelineDtos.detailOf(repository.save(forked)));
+	}
+
+	@PostMapping("/{id}/publish-auto-check")
+	@Transactional
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public ApiResponse<Map<String, Object>> publishAutoCheck(@PathVariable Long id,
+	                                                          @Validated @RequestBody PipelineDtos.PublishAutoCheckRequest req) {
+		PipelineEntity e = repository.findById(id).orElseThrow(() -> ApiException.notFound("pipeline"));
+		if (!"locked".equals(e.getStatus())) {
+			throw ApiException.conflict("Pipeline must be 'locked' before publish (got '"
+					+ e.getStatus() + "')");
+		}
+		if (!"auto_check".equals(e.getPipelineKind())) {
+			throw ApiException.conflict("publish-auto-check is only for pipeline_kind='auto_check' (got '"
+					+ e.getPipelineKind() + "').");
+		}
+		List<String> eventTypes = req.eventTypes();
+		if (eventTypes == null || eventTypes.isEmpty()) {
+			throw ApiException.badRequest("event_types must contain at least one entry");
+		}
+
+		// Atomic replace: drop existing bindings, then insert the new set, then flip
+		// pipeline → active. flush() so subsequent inserts in this transaction don't
+		// collide with the (pipeline_id, event_type) unique constraint on rows that
+		// the JPQL DELETE has already removed.
+		autoCheckTriggerRepository.deleteByPipelineId(id);
+		autoCheckTriggerRepository.flush();
+		java.util.Set<String> seen = new java.util.LinkedHashSet<>();
+		for (String et : eventTypes) {
+			if (et == null) continue;
+			String trimmed = et.trim();
+			if (trimmed.isEmpty() || !seen.add(trimmed)) continue;
+			PipelineAutoCheckTriggerEntity t = new PipelineAutoCheckTriggerEntity();
+			t.setPipelineId(id);
+			t.setEventType(trimmed);
+			autoCheckTriggerRepository.save(t);
+		}
+
+		e.setStatus("active");
+		e.setPublishedAt(OffsetDateTime.now());
+		repository.save(e);
+
+		Map<String, Object> result = new java.util.LinkedHashMap<>();
+		result.put("id", e.getId());
+		result.put("name", e.getName());
+		result.put("status", e.getStatus());
+		result.put("pipeline_kind", e.getPipelineKind());
+		result.put("version", e.getVersion());
+		result.put("event_types", new java.util.ArrayList<>(seen));
+		return ApiResponse.ok(result);
+	}
+
+	@SuppressWarnings("unchecked")
+	private Map<String, Object> asMap(Object o) {
+		return (o instanceof Map<?, ?>) ? (Map<String, Object>) o : Map.of();
+	}
+
 	private Map<String, Object> parsePipelineJson(String raw) {
 		if (raw == null || raw.isBlank()) return Map.of();
 		try {
@@ -290,6 +388,11 @@ public class PipelineController {
 		public record TransitionRequest(@NotBlank String to, String notes) {}
 
 		public record PublishRequest(Map<String, Object> reviewedDoc, String publishedBy) {}
+
+		public record PublishAutoCheckRequest(
+				@jakarta.validation.constraints.NotNull
+				@jakarta.validation.constraints.Size(min = 1, message = "event_types must contain at least one entry")
+				List<String> eventTypes) {}
 
 		static Summary summaryOf(PipelineEntity e) {
 			return new Summary(e.getId(), e.getName(), e.getDescription(), e.getStatus(),
