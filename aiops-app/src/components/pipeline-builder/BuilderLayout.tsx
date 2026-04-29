@@ -49,6 +49,11 @@ import RightTabbedPanel from "./RightTabbedPanel";
 // The unified AIAgentPanel was one-shot (build_pipeline in a single tool call);
 // user wants to watch the agent pull nodes onto the canvas step by step.
 import AgentBuilderPanel from "./AgentBuilderPanel";
+// Phase E3: AIAgentPanel now used in BuilderLayout too (single agent UX).
+// AgentBuilderPanel kept only as a fallback in case the new wiring regresses;
+// will be deleted once mode="builder" + onGlassOp path is verified in prod.
+import AIAgentPanel from "@/components/copilot/AIAgentPanel";
+import { applyGlassOpToCanvas } from "@/context/pipeline-builder/useAgentStream";
 
 interface Props {
   // Phase 5-UX-3b: "session" = /chat/[id] tab mode. Hosts AI Agent on the right
@@ -1041,9 +1046,19 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
           }}
           agentPanel={
             agentTabContent ?? (
-              <AgentBuilderPanel
-                blockCatalog={catalog}
-                basePipelineId={state.meta.pipelineId ?? null}
+              // Phase E3: Builder context now uses the SAME AIAgentPanel as
+              // /chat/[id] — one agent panel everywhere. mode="session" hides
+              // the inline pb_pipeline result card (BuilderLayout's canvas IS
+              // the result); agentMode="builder" tells the orchestrator to
+              // skip "要建嗎?" confirmations because the user is already on
+              // a canvas. Glass Box ops stream live via onGlassOp which calls
+              // applyGlassOpToCanvas (shared with LiveCanvasOverlay).
+              <AIAgentPanel
+                mode="session"
+                agentMode="builder"
+                sessionId={sessionId ?? `pb-${state.meta.pipelineId ?? "new"}`}
+                onGlassOp={(ev) => applyGlassOpToCanvas(ev, actions, catalog)}
+                contextEquipment={null}
                 focusedNodeId={focusedNodeId}
                 focusedNodeLabel={(() => {
                   if (!focusedNodeId) return null;

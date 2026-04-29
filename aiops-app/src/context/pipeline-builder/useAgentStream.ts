@@ -349,7 +349,13 @@ function describeOp(e: AgentStreamEventOperation): string {
   }
 }
 
-/** Apply a single operation event to the BuilderContext so canvas reflects Agent's work in real time. */
+/** Apply a single operation event to the BuilderContext so canvas reflects Agent's work in real time.
+ *
+ *  Phase E3: also exported as `applyGlassOpToCanvas` (small adapter) so
+ *  BuilderLayout can wire AIAgentPanel.onGlassOp directly into the same
+ *  BuilderContext mutation path that AgentBuilderPanel uses internally,
+ *  keeping a single source of truth for "what Glass Box ops do to the canvas".
+ */
 function applyOperationToCanvas(
   e: AgentStreamEventOperation,
   actions: ReturnType<typeof useBuilder>["actions"],
@@ -422,4 +428,24 @@ function applyOperationToCanvas(
   } catch (err) {
     console.error("applyOperationToCanvas failed", op, err);
   }
+}
+
+/**
+ * Phase E3 adapter — flat (op, args, result) → AgentStreamEventOperation
+ * shape expected by applyOperationToCanvas. Lets BuilderLayout wire
+ * AIAgentPanel.onGlassOp without copy-pasting the switch logic.
+ */
+export function applyGlassOpToCanvas(
+  ev: { op: string; args: Record<string, unknown>; result: Record<string, unknown> },
+  actions: ReturnType<typeof useBuilder>["actions"],
+  blockCatalog: BlockSpec[]
+): void {
+  applyOperationToCanvas(
+    {
+      type: "operation",
+      data: ev,
+    } as AgentStreamEventOperation,
+    actions,
+    blockCatalog,
+  );
 }
