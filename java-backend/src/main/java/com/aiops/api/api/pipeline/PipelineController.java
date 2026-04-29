@@ -15,6 +15,8 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/api/v1/pipelines")
@@ -65,10 +67,47 @@ public class PipelineController {
 		if ("locked".equalsIgnoreCase(e.getStatus()) || "archived".equalsIgnoreCase(e.getStatus())) {
 			throw ApiException.conflict("pipeline is " + e.getStatus() + "; cannot mutate");
 		}
+		if (req.name() != null) e.setName(req.name());
 		if (req.description() != null) e.setDescription(req.description());
 		if (req.pipelineKind() != null) e.setPipelineKind(req.pipelineKind());
 		if (req.pipelineJson() != null) e.setPipelineJson(req.pipelineJson());
 		if (req.autoDoc() != null) e.setAutoDoc(req.autoDoc());
+		return ApiResponse.ok(PipelineDtos.detailOf(repository.save(e)));
+	}
+
+	// 5-stage lifecycle: draft → validating → locked → active → archived.
+	// Phase 1 ports the state machine + timestamps; structural validation
+	// (PipelineValidator + kind-specific checks) is deferred to Phase 2.
+	private static final Map<String, Set<String>> ALLOWED_TRANSITIONS = Map.of(
+			"draft",      Set.of("validating", "archived"),
+			"validating", Set.of("locked", "draft"),
+			"locked",     Set.of("active", "draft"),
+			"active",     Set.of("archived"),
+			"archived",   Set.of()
+	);
+
+	@PostMapping("/{id}/transition")
+	@Transactional
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public ApiResponse<PipelineDtos.Detail> transition(@PathVariable Long id,
+	                                                    @Validated @RequestBody PipelineDtos.TransitionRequest req) {
+		PipelineEntity e = repository.findById(id).orElseThrow(() -> ApiException.notFound("pipeline"));
+		String from = e.getStatus();
+		String to = req.to();
+		Set<String> allowed = ALLOWED_TRANSITIONS.getOrDefault(from, Set.of());
+		if (!allowed.contains(to)) {
+			throw ApiException.conflict("Cannot transition from '" + from + "' to '" + to
+					+ "'. Allowed: " + allowed);
+		}
+		e.setStatus(to);
+		OffsetDateTime now = OffsetDateTime.now();
+		switch (to) {
+			case "locked"   -> e.setLockedAt(now);
+			case "active"   -> e.setPublishedAt(now);
+			case "archived" -> e.setArchivedAt(now);
+			case "draft"    -> { e.setLockedAt(null); e.setLockedBy(null); }
+			default -> {}
+		}
 		return ApiResponse.ok(PipelineDtos.detailOf(repository.save(e)));
 	}
 
@@ -107,8 +146,10 @@ public class PipelineController {
 		public record CreateRequest(@NotBlank String name, String description, String pipelineKind,
 		                            String pipelineJson, String version) {}
 
-		public record UpdateRequest(String description, String pipelineKind, String pipelineJson,
-		                            String autoDoc) {}
+		public record UpdateRequest(String name, String description, String pipelineKind,
+		                            String pipelineJson, String autoDoc) {}
+
+		public record TransitionRequest(@NotBlank String to, String notes) {}
 
 		static Summary summaryOf(PipelineEntity e) {
 			return new Summary(e.getId(), e.getName(), e.getDescription(), e.getStatus(),
