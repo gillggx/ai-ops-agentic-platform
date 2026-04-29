@@ -94,9 +94,13 @@ public class EventPollerService {
 		log.info("EventPollerService init: watermark={}", iso);
 	}
 
-	@Scheduled(fixedDelay = 30_000, initialDelay = 15_000)
+	// Cron form is more reliably picked up by Spring's @EnableScheduling
+	// scanner than fixedDelay across some classpath/proxy combos. "*/30
+	// * * * * *" = every 30 seconds, every minute.
+	@Scheduled(cron = "*/30 * * * * *")
 	@Transactional
 	public void poll() {
+		log.debug("EventPoller: tick");
 		String since = watermark.get();
 		List<Map<String, Object>> events;
 		try {
