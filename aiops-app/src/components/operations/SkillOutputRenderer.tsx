@@ -4,7 +4,7 @@
  * SkillOutputRenderer
  *
  * Shared render primitives for Skill findings output_schema.
- * Used by: skills/page.tsx, auto-patrols/page.tsx, AlarmCenter.tsx
+ * Used by: skills/page.tsx, auto-patrols/page.tsx, alarms/page.tsx
  *
  * Supported output_schema types:
  *   scalar       → number / string with optional unit
