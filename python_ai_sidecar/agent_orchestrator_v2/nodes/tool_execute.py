@@ -482,6 +482,42 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
         )
         if preflight_err:
             result = preflight_err
+        elif tool_name == "confirm_pipeline_intent":
+            # Builder-mode "ask before act" mechanism. The LLM has decided the
+            # prompt is too ambiguous to translate into a pipeline directly;
+            # it's writing down its understanding (inputs / logic / presentation)
+            # for the user to confirm via a copilot card. We don't actually
+            # build anything here — just emit the SSE event and force this
+            # turn to synthesis so the agent stops and waits for the user's
+            # next message (which carries [intent_confirmed:<id>] prefix).
+            import uuid as _uuid
+            card_id = f"intent-{_uuid.uuid4().hex[:8]}"
+            spec_payload = {
+                "card_id": card_id,
+                "inputs": tool_input.get("inputs") or [],
+                "logic": tool_input.get("logic") or "",
+                "presentation": tool_input.get("presentation") or "mixed",
+                "alternatives": tool_input.get("alternatives") or [],
+            }
+            if event_emit is not None:
+                try:
+                    event_emit({
+                        "type": "design_intent_confirm",
+                        **spec_payload,
+                    })
+                except Exception:  # noqa: BLE001
+                    pass
+            result = {
+                "status": "awaiting_user_confirmation",
+                "card_id": card_id,
+                "message": (
+                    "Design-intent card emitted to user. STOP this turn — do not "
+                    "call build_pipeline_live yet. Wait for the user's next message; "
+                    "if it begins with [intent_confirmed:<id>] then call "
+                    "build_pipeline_live with the spec."
+                ),
+                "_force_synthesis": True,
+            }
         elif tool_name == "build_pipeline_live":
             # Phase 5-UX-6: Glass Box pipeline build — spawns agent_builder
             # sub-agent, streams per-operation events to chat SSE.
@@ -839,6 +875,11 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
             if tool_name in ("execute_mcp", "execute_skill"):
                 if result.get("code") != "MISSING_PARAMS":
                     force_synth = True
+
+        # Phase F1: confirm_pipeline_intent always force-synthesises so the
+        # agent stops this turn and waits for the user's confirmation message.
+        if isinstance(result, dict) and result.get("_force_synthesis"):
+            force_synth = True
 
         # Convert result to ToolMessage (trimmed for LLM context)
         result_content = _trim_result_for_llm(result)

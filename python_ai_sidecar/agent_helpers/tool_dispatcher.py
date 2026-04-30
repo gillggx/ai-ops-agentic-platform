@@ -25,6 +25,71 @@ logger = logging.getLogger(__name__)
 
 TOOL_SCHEMAS: List[Dict[str, Any]] = [
     {
+        "name": "confirm_pipeline_intent",
+        "description": (
+            "在 builder mode 遇到模糊 prompt 時，先把你「打算建什麼」用結構化方式寫下來，\n"
+            "讓 user 點 ✅ 確認再 build，避免又花一輪建錯。\n"
+            "\n"
+            "什麼算模糊（任一條件成立就用本工具）：\n"
+            "  1. 含模糊指代：「該機台」「該站」「這個 lot」「最近一次」\n"
+            "  2. 跨領域：同時提多種 metric 來源（SPC + APC + FDC）卻沒指定要看哪一種\n"
+            "  3. 動詞模糊：「分析一下」「確認」「看看」（用戶沒指定要做什麼產出）\n"
+            "  4. 呈現方式不明：沒提 chart / table / alert\n"
+            "\n"
+            "什麼算具體（直接 build_pipeline_live，不用本工具）：\n"
+            "  - 「把 alert severity 改 HIGH」（精確動作）\n"
+            "  - 「檢查 STEP_001 SPC charts 連 2 次 OOC 告警」（精確 input + 規則 + 輸出）\n"
+            "  - 「加一張 EQP-01 xbar trend chart」（精確 metric + 圖表）\n"
+            "\n"
+            "本 tool 不真的建 pipeline — 只 emit 一張 design-intent 卡片給 user 看。User\n"
+            "點 ✅ 後系統會自動發 follow-up `[intent_confirmed:<id>]` 訊息給你，那時你才呼\n"
+            "build_pipeline_live。User 點 ✏️ 改、或 ❌ 取消，會自然中斷流程。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "required": ["inputs", "logic", "presentation"],
+            "properties": {
+                "inputs": {
+                    "type": "array",
+                    "description": "你判斷 pipeline 要拿哪些 input 的清單。每項一個物件。",
+                    "items": {
+                        "type": "object",
+                        "required": ["name", "source"],
+                        "properties": {
+                            "name": {"type": "string", "description": "input 名（e.g. equipment_id, step）"},
+                            "source": {
+                                "type": "string",
+                                "enum": ["user_input", "event_payload", "literal"],
+                                "description": "user_input=希望使用者填；event_payload=auto-patrol 從事件帶來；literal=寫死",
+                            },
+                            "rationale": {"type": "string", "description": "為何要這個 input（一句話）"},
+                        },
+                    },
+                },
+                "logic": {
+                    "type": "string",
+                    "description": "1-2 句白話描述 pipeline 在算什麼（不寫 block name）",
+                },
+                "presentation": {
+                    "type": "string",
+                    "enum": ["alert", "chart", "table", "scalar", "mixed"],
+                    "description": "輸出形式 — alert=告警/chart=圖表/table=表格/scalar=單一數值/mixed=多種",
+                },
+                "alternatives": {
+                    "type": "array",
+                    "description": "0-2 個你想到的『也可能是這樣解讀』，給 user 對照（選填）",
+                    "items": {
+                        "type": "object",
+                        "required": ["summary"],
+                        "properties": {
+                            "summary": {"type": "string", "description": "另一種解讀（一句話）"},
+                        },
+                    },
+                },
+            },
+        },
+    },
+    {
         "name": "build_pipeline_live",
         "description": (
             "Phase 5-UX-6: 為資料問題動手建一條 pipeline，逐步把 node 拖到 canvas 上。\n"

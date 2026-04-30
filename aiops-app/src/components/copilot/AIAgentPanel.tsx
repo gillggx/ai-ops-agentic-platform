@@ -17,6 +17,7 @@ import type { UiRender } from "@/components/McpChartRenderer";
 import type { FlatDataMetadata, UIConfig } from "@/context/FlatDataContext";
 import { useAppContext } from "@/context/AppContext";
 import { ContinuationCard, type ContinuationData, type ContinuationOption } from "./ContinuationCard";
+import { DesignIntentCard, type DesignIntentData, type DesignIntentChoice } from "./DesignIntentCard";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -74,10 +75,14 @@ interface ClarifyData {
 
 interface ChatMessage {
   id: number;
-  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "ops" | "clarify" | "continuation";
+  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "ops" | "clarify" | "continuation" | "design_intent";
   content: string;
   clarify?: ClarifyData;
   continuation?: ContinuationData;
+  designIntent?: DesignIntentData;
+  /** For role === "design_intent": the user prompt that produced this card,
+   *  needed to compose the [intent_confirmed:<id>] follow-up message. */
+  designIntentPrompt?: string;
   contract?: AIOpsReportContract;
   mcpResult?: McpResult;
   chartIntents?: ChartIntent[];
@@ -572,6 +577,9 @@ export function AIAgentPanel({
   const [reflection, setReflection] = useState<ReflectionState>({ status: null, amendment: "" });
 
   const sessionIdRef = useRef<string | null>(externalSessionId ?? null);
+  // Track the most recent user-typed prompt so design_intent_confirm cards
+  // can carry it forward when the user clicks ✅ / ✏️.
+  const lastUserPromptRef = useRef<string>("");
   // When parent changes externalSessionId (e.g. /chat/[id] hydration finishes),
   // keep the ref in sync so next chat POST targets the right conversation.
   useEffect(() => {
@@ -656,6 +664,9 @@ export function AIAgentPanel({
       ? `[Focused on ${focusedNodeLabel ?? focusedNodeId} (${focusedNodeId})]\n`
       : "";
     const messageToSend = focusPrefix + message;
+    // Track the latest user prompt so design_intent_confirm cards can attach
+    // it to themselves; the follow-up "confirm" reply needs the original.
+    lastUserPromptRef.current = message;
 
     setLoading(true);
     setStages([]);
@@ -797,6 +808,26 @@ export function AIAgentPanel({
               percent: (ev.percent as number) ?? 0,
               warning: !!ev.warning,
             });
+            break;
+          }
+
+          case "design_intent_confirm": {
+            // SPEC_design_intent_confirm: agent decided the prompt is too
+            // ambiguous to translate directly into a pipeline. Show the
+            // structured intent for the user to confirm / edit / cancel.
+            const design: DesignIntentData = {
+              card_id: (ev.card_id as string) ?? `intent-${Date.now()}`,
+              inputs: (ev.inputs as DesignIntentData["inputs"]) ?? [],
+              logic: (ev.logic as string) ?? "",
+              presentation: (ev.presentation as DesignIntentData["presentation"]) ?? "mixed",
+              alternatives: (ev.alternatives as DesignIntentData["alternatives"]) ?? [],
+              resolved: false,
+            };
+            setChatHistory((prev) => [...prev, {
+              id: nextId(), role: "design_intent", content: "",
+              designIntent: design,
+              designIntentPrompt: lastUserPromptRef.current,
+            }]);
             break;
           }
 
@@ -1709,6 +1740,50 @@ export function AIAgentPanel({
                       addLog(makeLog("❌", `Continue error: ${(e as Error).message}`, "error"));
                     }
                   }} />
+                </div>
+              ) : msg.role === "design_intent" && msg.designIntent ? (
+                <div style={{ width: "100%", maxWidth: "100%" }}>
+                  <DesignIntentCard
+                    data={msg.designIntent}
+                    originalPrompt={msg.designIntentPrompt ?? ""}
+                    onPick={(choice: DesignIntentChoice, design: DesignIntentData) => {
+                      setChatHistory((prev) => prev.map((m) =>
+                        m.id === msg.id && m.designIntent
+                          ? { ...m, designIntent: { ...m.designIntent, resolved: true } }
+                          : m,
+                      ));
+                      const original = msg.designIntentPrompt ?? "";
+                      if (choice === "cancel") {
+                        // No follow-up — just acknowledge in chat.
+                        setChatHistory((prev) => [...prev, {
+                          id: nextId(), role: "agent",
+                          content: "已取消這次設計。需要的話請重新描述。",
+                        }]);
+                        return;
+                      }
+                      if (choice === "edit") {
+                        // Pre-fill the input with the original prompt + a brief
+                        // hint of what's confirmed; user can revise and resend.
+                        const hint = `[基於上次卡片] 原 prompt：${original}\n` +
+                          `輸入：${design.inputs.map((i) => "$" + i.name).join(", ")}\n` +
+                          `邏輯：${design.logic}\n` +
+                          `呈現：${design.presentation}\n` +
+                          `修改點：`;
+                        setInput(hint);
+                        return;
+                      }
+                      // choice === "confirm" → auto follow-up with prefix +
+                      // canonical spec so the agent skips re-confirming.
+                      const specBlock = JSON.stringify({
+                        inputs: design.inputs,
+                        logic: design.logic,
+                        presentation: design.presentation,
+                      });
+                      const followUp = `[intent_confirmed:${design.card_id}] ${original}\n\n` +
+                        `已對齊的 spec（請依此 build）: ${specBlock}`;
+                      void sendMessage(followUp);
+                    }}
+                  />
                 </div>
               ) : msg.role === "ops" && msg.glassOps ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
