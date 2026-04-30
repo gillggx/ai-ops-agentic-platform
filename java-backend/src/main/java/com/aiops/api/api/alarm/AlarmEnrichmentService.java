@@ -260,7 +260,7 @@ public class AlarmEnrichmentService {
 		// pipeline-run side. (V7 dropped the FK so the id can land in either
 		// table.)
 		if (a.getDiagnosticLogId() != null) {
-			Optional<PipelineRunEntity> pr = safeFindRun(a.getDiagnosticLogId().intValue());
+			Optional<PipelineRunEntity> pr = safeFindRun(a.getDiagnosticLogId());
 			if (pr.isPresent()) {
 				PipelineRunEntity run = pr.get();
 				JsonNode runNode = parseJsonNode(run.getNodeResults());
@@ -290,7 +290,7 @@ public class AlarmEnrichmentService {
 				charts, diagnosticResults, triggerDvs, diagnosticDvs, diagnosticCharts, diagnosticAlert);
 	}
 
-	private Optional<PipelineRunEntity> safeFindRun(Integer id) {
+	private Optional<PipelineRunEntity> safeFindRun(Long id) {
 		try {
 			return pipelineRunRepo.findById(id);
 		} catch (Exception ex) {
