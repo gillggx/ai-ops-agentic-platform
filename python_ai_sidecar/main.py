@@ -34,6 +34,19 @@ async def lifespan(app: FastAPI):
         "python_ai_sidecar starting on port %s | allowed_callers=%s | java_api_url=%s",
         CONFIG.port, CONFIG.allowed_caller_ips, CONFIG.java_api_url,
     )
+    # Boot-time drift check: BUILTIN_EXECUTORS vs SIDECAR_NATIVE_BLOCKS vs
+    # pb_blocks DB. Logs at ERROR level if any registry is out of sync —
+    # see _boot_invariants.py for context on the four-layer registration.
+    try:
+        from ._boot_invariants import check_block_consistency
+        from .clients.java_client import JavaAPIClient
+        await check_block_consistency(
+            JavaAPIClient(CONFIG.java_api_url, CONFIG.java_internal_token,
+                          timeout_sec=CONFIG.java_timeout_sec)
+        )
+    except Exception as exc:  # noqa: BLE001 — invariants must never block boot
+        log.warning("boot invariant check itself failed: %s", exc)
+
     await event_poller.get_instance().start()
     await nats_subscriber.get_instance().start()
     try:

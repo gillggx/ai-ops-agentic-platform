@@ -118,6 +118,14 @@ class GraphState(TypedDict, total=False):
     flat_metadata: Annotated[Optional[Dict[str, Any]], _replace]
     ui_config: Annotated[Optional[Dict[str, Any]], _replace]
 
+
+# Module-level invariant: every key passed by orchestrator.run() into
+# initial_state MUST be declared in GraphState above, otherwise LangGraph
+# silently drops it and downstream nodes read None. Fails import on drift.
+from python_ai_sidecar._boot_invariants import assert_graph_state_covers_run_kwargs
+assert_graph_state_covers_run_kwargs(GraphState.__annotations__.keys())
+
+
 logger = logging.getLogger(__name__)
 
 

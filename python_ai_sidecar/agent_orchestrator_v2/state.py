@@ -1,94 +1,26 @@
-"""AgentState — single source of truth for the LangGraph agent loop.
+"""state.py — defaults + constants for the LangGraph agent loop.
 
-Replaces the scattered local variables in v1's _run_impl:
-  _tools_used, _last_spc_result, _chart_already_rendered,
-  _force_synthesis, _plan_extracted, _retrieved_memory_ids, etc.
+⚠️ The **schema** (TypedDict + reducers) lives in
+[graph.py:GraphState](graph.py). LangGraph uses *that* as the
+authoritative shape; anything not declared in GraphState is silently
+dropped from initial_state. Don't add a new state field here without
+also adding it to GraphState.
 
-All nodes read from and write to this state via partial dict updates.
+This module exposes only:
+  - DEFAULT_STATE  — initial values spread into orchestrator.run()'s
+                     initial_state dict
+  - MAX_ITERATIONS — outer-loop safety cap
+
+The previous AGENT_STATE_SCHEMA dict and AgentState dict-subclass were
+deleted in 2026-04-30 after they masked a real bug — they looked
+authoritative but graph.py:GraphState was actually canonical, so adding
+`mode` / `pipeline_snapshot` to AGENT_STATE_SCHEMA gave false confidence
+that the wiring was complete when in fact LangGraph still saw nothing.
 """
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Dict, List, Optional, Sequence
-
-from langchain_core.messages import AnyMessage
-from langgraph.graph.message import add_messages
-
-
-class AgentState(dict):
-    """LangGraph state for one agent chat turn.
-
-    Using dict subclass so LangGraph can treat it as a TypedDict-like
-    while still being mutable for node updates.
-    """
-    pass
-
-
-# TypedDict-style annotation for LangGraph — keys and their reducers.
-# add_messages merges new messages into the list (handles duplicates by id).
-AGENT_STATE_SCHEMA = {
-    # ── Input ───────────────────────────────────────────────────────
-    "user_id": int,
-    "session_id": Optional[str],
-    "user_message": str,
-    "canvas_overrides": Optional[Dict[str, Any]],
-    # Phase E2: "chat" (default) or "builder" — controls system-prompt
-    # bias. builder mode lives behind /agent/build (Pipeline Builder
-    # canvas-side panel) and tells the LLM to favour build_pipeline_live
-    # for any pipeline modification request. chat mode keeps current Q&A
-    # / one-shot defaults.
-    "mode": str,
-    # Phase E3 follow-up: snapshot of the canvas the user is on, sent by
-    # AIAgentPanel when mounted in BuilderLayout. load_context surfaces
-    # any declared inputs so the agent reuses $name instead of inventing
-    # parallel ones. None when called from chat /admin without a canvas.
-    "pipeline_snapshot": Optional[Dict[str, Any]],
-
-    # ── Conversation (LangGraph-managed message list) ───────────────
-    "messages": Annotated[Sequence[AnyMessage], add_messages],
-
-    # ── Context (built by load_context node) ────────────────────────
-    "system_blocks": List[Dict[str, Any]],       # Anthropic-style content blocks
-    "system_text": str,                           # flattened system prompt string
-    "retrieved_memory_ids": List[int],
-    "context_meta": Dict[str, Any],               # soul_preview, rag_hits, etc.
-    "history_turns": int,
-
-    # ── Tool execution tracking ─────────────────────────────────────
-    "tools_used": List[Dict[str, Any]],           # [{tool, mcp_name, params, result_text}]
-    "current_iteration": int,
-    "render_cards": List[Dict[str, Any]],          # accumulated for SSE tool_done events
-
-    # ── Flags (previously scattered local vars) ─────────────────────
-    "chart_already_rendered": bool,
-    "last_spc_result": Optional[tuple],
-    "force_synthesis": bool,
-    "plan_extracted": bool,
-
-    # ── Outputs ─────────────────────────────────────────────────────
-    "final_text": str,
-    "contract": Optional[Dict[str, Any]],
-    "reflection_result": Optional[Dict[str, Any]],
-
-    # ── HITL ────────────────────────────────────────────────────────
-    "pending_approval_token": Optional[str],
-    "pending_approval_tool": Optional[Dict[str, Any]],
-
-    # ── Memory lifecycle ────────────────────────────────────────────
-    "cited_memory_ids": List[int],
-    "memory_write_scheduled": bool,
-
-    # ── Generative UI (data pipeline) ─────────────────────────────
-    "flat_data": Optional[Dict[str, Any]],     # FlattenedResult.to_dict()
-    "flat_metadata": Optional[Dict[str, Any]], # metadata for LLM + frontend
-    "ui_config": Optional[Dict[str, Any]],     # ChartExplorer configuration
-
-    # ── Plan Panel (v1.4) ─────────────────────────────────────────
-    # Live todo list emitted by the agent at the start of each turn.
-    # Each item: {id, title, status: "pending"|"in_progress"|"done"|"failed", note?}
-    # Frontend renders this as a Claude-Code-style progress checklist.
-    "plan_items": List[Dict[str, Any]],
-}
+from typing import Any, Dict
 
 
 # Default values for a fresh state (used by graph invocation)
