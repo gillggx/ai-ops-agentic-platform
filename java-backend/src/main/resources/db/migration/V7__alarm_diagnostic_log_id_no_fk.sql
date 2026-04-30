@@ -1,0 +1,21 @@
+-- V7 — Drop the stale alarms.diagnostic_log_id FK to execution_logs.
+--
+-- Originally diagnostic_log_id referenced execution_logs(id), back when
+-- diagnostic runs were persisted there. Phase C moved auto_check runs
+-- into pb_pipeline_runs (different table) so the FK now blocks the
+-- AutoCheckExecutor backlink with:
+--   ERROR: insert or update on table "alarms" violates foreign key
+--   constraint "alarms_diagnostic_log_id_fkey"
+--   Detail: Key (diagnostic_log_id)=(1217) is not present in table "execution_logs".
+--
+-- We drop the FK rather than re-point it because:
+--   1. Either source could legitimately be a "diagnostic log" — keeping
+--      it FK-free lets us evolve the run-storage strategy without schema
+--      churn.
+--   2. The application already validates the id via repository lookup,
+--      so DB-level RI adds little.
+--
+-- alarms.execution_log_id keeps its FK — that one still references
+-- execution_logs (canonical patrol-side run target via sidecar).
+
+ALTER TABLE alarms DROP CONSTRAINT IF EXISTS alarms_diagnostic_log_id_fkey;
