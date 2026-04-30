@@ -54,6 +54,45 @@ export default function AutoCheckPublishModal({
   const [error, setError] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
 
+  // Step 1 picker — let user CHECK existing event_types / patrols instead of
+  // typing trigger_event strings. We fetch on modal open; per-row chip input
+  // remains available for advanced/custom values.
+  const [eventTypeOptions, setEventTypeOptions] = useState<string[]>([]);
+  const [patrolOptions, setPatrolOptions] = useState<Array<{
+    id: number; name: string; pipeline_name?: string | null;
+  }>>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    fetch("/api/admin/event-types", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => {
+        const items = Array.isArray(d) ? d : (d?.data ?? []);
+        if (!cancelled) {
+          setEventTypeOptions(
+            (items as Array<{ name?: string }>)
+              .map((e) => e?.name).filter((n): n is string => !!n),
+          );
+        }
+      })
+      .catch(() => {});
+    fetch("/api/admin/auto-patrols?active_only=true", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => {
+        const items = Array.isArray(d) ? d : (d?.data ?? []);
+        if (!cancelled) {
+          setPatrolOptions(
+            (items as Array<{ id: number; name: string; pipeline_name?: string | null }>)
+              .filter((p) => p && p.id != null && p.name)
+              .map((p) => ({ id: p.id, name: p.name, pipeline_name: p.pipeline_name ?? null })),
+          );
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [open]);
+
   const declaredInputs = useMemo(() => pipelineJson.inputs ?? [], [pipelineJson]);
 
   // P4.3: if the wizard stashed event_types in sessionStorage during create,
@@ -92,6 +131,25 @@ export default function AutoCheckPublishModal({
 
   function removeRow(rid: number) {
     setRows((prev) => (prev.length === 1 ? prev : prev.filter((r) => r.rid !== rid)));
+  }
+
+  /** Toggle a picker chip: add a new binding row with that event_type, or
+   *  remove the existing row that holds it. Filter blank rows so we don't
+   *  leave empties when the user un-checks the only picked chip. */
+  function togglePick(eventType: string) {
+    setRows((prev) => {
+      const idx = prev.findIndex((r) => r.event_type.trim() === eventType);
+      if (idx >= 0) {
+        const next = prev.filter((_, i) => i !== idx);
+        return next.length === 0 ? [newRow()] : next;
+      }
+      // Replace the first blank row if any, otherwise append.
+      const blankIdx = prev.findIndex((r) => !r.event_type.trim());
+      if (blankIdx >= 0) {
+        return prev.map((r, i) => i === blankIdx ? { ...r, event_type: eventType } : r);
+      }
+      return [...prev, newRow(eventType)];
+    });
   }
 
   async function handlePublish() {
@@ -148,8 +206,67 @@ export default function AutoCheckPublishModal({
           <Section title="Step 1 · 綁定 alarm 觸發條件">
             <p style={textStyle}>
               alarm 的 <code style={codeStyle}>trigger_event</code> 吻合任一筆設定且
-              附加條件全過時，這條 pipeline 會被自動執行。
+              附加條件全過時，這條 pipeline 會被自動執行。**勾選下方建議**或在
+              下方 binding row 自訂字串（兩者皆可）。
             </p>
+
+            {/* Picker — checkboxes for known event_types + active patrols. */}
+            {(eventTypeOptions.length > 0 || patrolOptions.length > 0) && (
+              <div style={{
+                marginBottom: 10, padding: 10,
+                background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6,
+              }}>
+                {eventTypeOptions.length > 0 && (
+                  <div style={{ marginBottom: patrolOptions.length > 0 ? 8 : 0 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#475569", marginBottom: 4 }}>
+                      📋 從事件類型 (event_types)
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {eventTypeOptions.map((name) => {
+                        const picked = rows.some((r) => r.event_type.trim() === name);
+                        return (
+                          <button
+                            key={name}
+                            type="button"
+                            onClick={() => togglePick(name)}
+                            style={chipStyle(picked, "#0EA5E9", "#F0F9FF")}
+                            title={`綁定 trigger_event="${name}"`}
+                          >
+                            {picked ? "☑" : "☐"} {name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {patrolOptions.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#475569", marginBottom: 4 }}>
+                      🔔 從現有 Auto-Patrol（綁定該 patrol 觸發的 alarm）
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {patrolOptions.map((p) => {
+                        const token = `auto_patrol:${p.id}`;
+                        const picked = rows.some((r) => r.event_type.trim() === token);
+                        const label = p.pipeline_name || p.name;
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => togglePick(token)}
+                            style={chipStyle(picked, "#0891B2", "#ECFEFF")}
+                            title={`綁定 trigger_event="${token}"`}
+                          >
+                            {picked ? "☑" : "☐"} Patrol #{p.id} 「{label}」
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {rows.map((row) => (
                 <BindingEditor
@@ -160,7 +277,7 @@ export default function AutoCheckPublishModal({
                   removable={rows.length > 1}
                 />
               ))}
-              <button onClick={addRow} style={addBindingBtnStyle}>＋ 加一個 binding</button>
+              <button onClick={addRow} style={addBindingBtnStyle}>＋ 加一個 binding（自訂字串）</button>
             </div>
           </Section>
 
@@ -435,6 +552,19 @@ function ChipInput({
       />
     </div>
   );
+}
+
+function chipStyle(picked: boolean, accent: string, bg: string): React.CSSProperties {
+  return {
+    padding: "6px 12px",
+    borderRadius: 6,
+    fontSize: 12,
+    border: `1px solid ${picked ? accent : "#CBD5E0"}`,
+    background: picked ? bg : "#fff",
+    color: picked ? accent : "#475569",
+    fontWeight: picked ? 600 : 400,
+    cursor: "pointer",
+  };
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

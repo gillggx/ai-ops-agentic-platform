@@ -5,6 +5,8 @@ import com.aiops.api.common.ApiException;
 import com.aiops.api.common.ApiResponse;
 import com.aiops.api.domain.agent.AgentExperienceMemoryEntity;
 import com.aiops.api.domain.agent.AgentExperienceMemoryRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
@@ -39,6 +41,9 @@ public class InternalAgentExperienceMemoryController {
 	private static final int MAX_CONFIDENCE = 10;
 
 	private final AgentExperienceMemoryRepository repository;
+
+	@PersistenceContext
+	private EntityManager em;
 
 	public InternalAgentExperienceMemoryController(AgentExperienceMemoryRepository repository) {
 		this.repository = repository;
@@ -92,16 +97,33 @@ public class InternalAgentExperienceMemoryController {
 			}
 		}
 
-		AgentExperienceMemoryEntity m = new AgentExperienceMemoryEntity();
-		m.setUserId(req.userId());
-		m.setIntentSummary(truncate(req.intentSummary(), 500));
-		m.setAbstractAction(req.abstractAction());
-		m.setEmbedding(vecLit);
-		m.setConfidenceScore(req.confidenceScore() != null ? req.confidenceScore() : 5);
-		m.setStatus("ACTIVE");
-		m.setSource(req.source() != null ? req.source() : "auto");
-		m.setSourceSessionId(req.sourceSessionId());
-		m = repository.save(m);
+		// Hibernate sends embedding as VARCHAR by default; pgvector column
+		// rejects implicit cast → SQLGrammarException at insert. Use a native
+		// query with explicit `?::vector` so the cast happens in postgres.
+		// SELECT-side queries already go via repository.searchByEmbedding which
+		// uses native SQL and is unaffected.
+		final int score = req.confidenceScore() != null ? req.confidenceScore() : 5;
+		final String source = req.source() != null ? req.source() : "auto";
+		final String intentSummary = truncate(req.intentSummary(), 500);
+		Number newId = (Number) em.createNativeQuery(
+				"INSERT INTO agent_experience_memory ("
+				+ "user_id, intent_summary, abstract_action, embedding, "
+				+ "confidence_score, status, source, source_session_id, "
+				+ "use_count, success_count, fail_count, created_at, updated_at) "
+				+ "VALUES (?, ?, ?, CAST(? AS vector), ?, ?, ?, ?, 0, 0, 0, NOW(), NOW()) "
+				+ "RETURNING id"
+			)
+			.setParameter(1, req.userId())
+			.setParameter(2, intentSummary)
+			.setParameter(3, req.abstractAction())
+			.setParameter(4, vecLit)
+			.setParameter(5, score)
+			.setParameter(6, "ACTIVE")
+			.setParameter(7, source)
+			.setParameter(8, req.sourceSessionId())
+			.getSingleResult();
+		AgentExperienceMemoryEntity m = repository.findById(newId.longValue())
+				.orElseThrow(() -> ApiException.notFound("memory"));
 		log.info("memory written user={} id={} intent={}", req.userId(), m.getId(),
 				truncate(req.intentSummary(), 60));
 		return ApiResponse.ok(new WriteResult(MemoryDto.of(m), false, 0.0));
