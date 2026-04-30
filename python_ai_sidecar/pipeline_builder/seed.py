@@ -977,6 +977,83 @@ def _blocks() -> list[dict[str, Any]]:
             "implementation": {"type": "python", "ref": "app.services.pipeline_builder.blocks.unpivot:UnpivotBlockExecutor"},
         },
         {
+            "name": "block_spc_long_form",
+            "version": "1.0.0",
+            "category": "transform",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "Process-History wide → SPC long format reshape (purpose-built).\n"
+                "把 process_history 直出的 spc_<chart>_value/_ucl/_lcl/_is_ooc 欄位攤平成長表，\n"
+                "downstream 用 group_by=chart_name 一次掃所有 chart。\n"
+                "\n"
+                "== When to use ==\n"
+                "- ✅ 「站點所有 SPC charts 任一連 N 次 OOC 就告警」→ 經典組合\n"
+                "- ✅ 「對每張 chart 各跑一次 regression / cpk」→ groupby chart_name\n"
+                "- ❌ 只處理 1 張特定 chart → 直接 filter 那張的欄位即可，不用 reshape\n"
+                "- ❌ APC 參數 → 用 block_apc_long_form\n"
+                "\n"
+                "== Output columns（固定）==\n"
+                "eventTime, toolID, lotID, step, spc_status, fdc_classification (passthrough)\n"
+                "chart_name (string), value, ucl, lcl, is_ooc (bool)\n"
+                "⚠ 欄位**固定叫 chart_name**，不是 chart_type / chart / metric。\n"
+                "\n"
+                "== 經典 pipeline ==\n"
+                "process_history(step=$step) → spc_long_form\n"
+                "  → consecutive_rule(flag_column=is_ooc, count=2,\n"
+                "                     sort_by=eventTime, group_by=chart_name)\n"
+                "  → alert(severity=HIGH)\n"
+                "\n"
+                "== Errors ==\n"
+                "- INVALID_INPUT  : data 不是 DataFrame\n"
+                "- NO_SPC_COLUMNS : 上游沒 spc_*_<field> 欄位\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "data", "type": "dataframe"}],
+            "param_schema": {"type": "object", "properties": {}},
+            "output_columns_hint": ["chart_name", "value", "ucl", "lcl", "is_ooc"],
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.spc_long_form:SpcLongFormBlockExecutor"},
+        },
+        {
+            "name": "block_apc_long_form",
+            "version": "1.0.0",
+            "category": "transform",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "Process-History wide → APC long format reshape (purpose-built).\n"
+                "把 process_history 直出的 apc_<param> 欄位攤平成長表，downstream 用\n"
+                "group_by=param_name 一次處理所有 APC 參數。\n"
+                "\n"
+                "== When to use ==\n"
+                "- ✅ 「任一 APC 參數連 N 次超過 X」→ apc_long_form → threshold → consecutive_rule\n"
+                "- ✅ 「對每個 APC 參數做 boxplot / histogram」→ groupby param_name\n"
+                "- ❌ 只看 1 個指定參數 → 直接用該欄位即可\n"
+                "- ❌ SPC chart → 用 block_spc_long_form\n"
+                "\n"
+                "== Output columns（固定）==\n"
+                "eventTime, toolID, lotID, step, spc_status, fdc_classification, apc_id (id 欄)\n"
+                "param_name (string, 已剝 apc_ 前綴), value\n"
+                "⚠ 欄位**固定叫 param_name**，不是 parameter / metric / apc_param。\n"
+                "\n"
+                "== 經典 pipeline ==\n"
+                "process_history(step=$step) → apc_long_form\n"
+                "  → threshold(value_column=value, op='>', threshold=100)\n"
+                "  → consecutive_rule(flag_column=triggered_row, count=3,\n"
+                "                     sort_by=eventTime, group_by=param_name)\n"
+                "  → alert(severity=HIGH)\n"
+                "\n"
+                "== Errors ==\n"
+                "- INVALID_INPUT  : data 不是 DataFrame\n"
+                "- NO_APC_COLUMNS : 上游沒 apc_<param> 欄位\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "data", "type": "dataframe"}],
+            "param_schema": {"type": "object", "properties": {}},
+            "output_columns_hint": ["param_name", "value"],
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.apc_long_form:ApcLongFormBlockExecutor"},
+        },
+        {
             "name": "block_union",
             "version": "1.0.0",
             "category": "transform",
