@@ -78,7 +78,19 @@ public class AgentProxyController {
 				: body.get("client_context") instanceof Map<?, ?> m2
 						? (Map<String, Object>) m2
 						: null;
-		ChatRequest req = new ChatRequest(message, sessionId, clientContext);
+		// Phase E2/E3: when AIAgentPanel runs inside BuilderLayout it ships
+		// `mode="builder"` plus `pipeline_snapshot` (the current canvas
+		// pipeline_json with its declared inputs). Without this passthrough
+		// the sidecar's mode-aware prompt never activates and Glass Box
+		// sub-agent rebuilds without honoring declared $name inputs.
+		String mode = asString(body.get("mode"));
+		@SuppressWarnings("unchecked")
+		Map<String, Object> pipelineSnapshot = body.get("pipelineSnapshot") instanceof Map<?, ?> ps1
+				? (Map<String, Object>) ps1
+				: body.get("pipeline_snapshot") instanceof Map<?, ?> ps2
+						? (Map<String, Object>) ps2
+						: null;
+		ChatRequest req = new ChatRequest(message, sessionId, clientContext, mode, pipelineSnapshot);
 		return bridgeSse(sidecar.postSse("/internal/agent/chat", req, caller), "chat");
 	}
 
@@ -207,7 +219,8 @@ public class AgentProxyController {
 
 	// --- DTOs ---
 
-	public record ChatRequest(@NotBlank String message, String sessionId, Map<String, Object> clientContext) {}
+	public record ChatRequest(@NotBlank String message, String sessionId, Map<String, Object> clientContext,
+	                          String mode, Map<String, Object> pipelineSnapshot) {}
 
 	public record BuildRequest(@NotBlank String instruction, Long pipelineId, Map<String, Object> pipelineSnapshot) {}
 }
