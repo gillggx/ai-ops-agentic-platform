@@ -1,5 +1,7 @@
 package com.aiops.api.patrol;
 
+import com.aiops.api.domain.alarm.AlarmEntity;
+import com.aiops.api.domain.alarm.AlarmRepository;
 import com.aiops.api.domain.pipeline.PipelineEntity;
 import com.aiops.api.domain.pipeline.PipelineRepository;
 import com.aiops.api.domain.pipeline.PipelineRunEntity;
@@ -39,17 +41,20 @@ public class AutoCheckExecutor {
 
 	private final PipelineRepository pipelineRepo;
 	private final PipelineRunRepository pipelineRunRepo;
+	private final AlarmRepository alarmRepo;
 	private final ObjectMapper objectMapper;
 	private final WebClient sidecarWebClient;
 	private final String sidecarServiceToken;
 
 	public AutoCheckExecutor(PipelineRepository pipelineRepo,
 	                         PipelineRunRepository pipelineRunRepo,
+	                         AlarmRepository alarmRepo,
 	                         ObjectMapper objectMapper,
 	                         @Value("${aiops.sidecar.python.base-url}") String sidecarBaseUrl,
 	                         @Value("${aiops.sidecar.python.service-token}") String sidecarServiceToken) {
 		this.pipelineRepo = pipelineRepo;
 		this.pipelineRunRepo = pipelineRunRepo;
+		this.alarmRepo = alarmRepo;
 		this.objectMapper = objectMapper;
 		this.sidecarServiceToken = sidecarServiceToken;
 		// 16 MiB buffer — pipeline results with data_view rows / full process_history
@@ -125,11 +130,28 @@ public class AutoCheckExecutor {
 		} catch (Exception ex) {
 			run.setNodeResults("{\"error\":\"failed to serialize node_results\"}");
 		}
+		PipelineRunEntity savedRun = null;
 		try {
-			pipelineRunRepo.save(run);
+			savedRun = pipelineRunRepo.save(run);
 		} catch (Exception ex) {
 			log.warn("auto_check: failed to persist run row for pipeline={}: {}",
 					pipelineId, ex.getMessage());
+		}
+
+		// Wire the diagnostic run id back onto the source alarm so the alarm
+		// detail UI / API can deep-link to "what auto_check found out". Without
+		// this, alarm.diagnostic_log_id stays NULL and the user sees no
+		// connection between the alarm and the diagnostic pipeline output.
+		if (savedRun != null && sourceAlarmId != null) {
+			try {
+				alarmRepo.findById(sourceAlarmId).ifPresent(a -> {
+					a.setDiagnosticLogId(savedRun.getId().longValue());
+					alarmRepo.save(a);
+				});
+			} catch (Exception ex) {
+				log.warn("auto_check: failed to backlink diagnostic_log_id on alarm={}: {}",
+						sourceAlarmId, ex.getMessage());
+			}
 		}
 	}
 

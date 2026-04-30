@@ -441,8 +441,14 @@ public class AutoPatrolExecutor {
 		alarm.setSummary(summary);
 
 		alarm.setStatus("active");
+		// Link to the sidecar-side pipeline run so the alarm UI / Java
+		// /alarms/{id}/run endpoint can fetch the n1..n7 node_results +
+		// data_views (i.e. the actual 5 process events that triggered).
+		Object execLogId = result.get("execution_log_id");
+		if (execLogId instanceof Number n) alarm.setExecutionLogId(n.longValue());
 		AlarmEntity saved = alarmRepo.save(alarm);
-		log.info("alarm written: patrol={} tool={} title='{}'", patrol.getId(), toolId, title);
+		log.info("alarm written: patrol={} tool={} title='{}' execution_log_id={}",
+				patrol.getId(), toolId, title, alarm.getExecutionLogId());
 		// Phase C — patrol-written alarms also fan out to auto_check pipelines
 		// bound to the same trigger_event. Resolve dispatcher via context to
 		// dodge the cyclical AutoPatrolExecutor ↔ EventDispatchService graph.
