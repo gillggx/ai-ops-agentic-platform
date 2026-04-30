@@ -34,9 +34,30 @@ _SEVERITIES = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
 
 
 def _render_template(tpl: str, row: dict[str, Any]) -> str:
+    """Substitute every {key} in `tpl` whose key is present in `row`; leave
+    unknown placeholders as-is so a downstream layer (e.g. Java patrol's
+    fillPlaceholdersFromTarget) can fill them from the event payload.
+
+    str.format with `**row` aborts the whole substitution on the first
+    KeyError, so {count} stayed literal whenever the template also had
+    {toolID} (toolID wasn't in the count_rows evidence row).
+    """
+    import re
+    if not tpl or "{" not in tpl:
+        return tpl
+
+    def _sub(m: "re.Match[str]") -> str:
+        key = m.group(1)
+        if key not in row:
+            return m.group(0)  # leave {key} for downstream substitution
+        v = row[key]
+        if v is None:
+            return ""
+        return str(v)
+
     try:
-        return tpl.format(**row)
-    except (KeyError, IndexError, ValueError):
+        return re.sub(r"\{([A-Za-z_][A-Za-z_0-9]*)\}", _sub, tpl)
+    except Exception:  # noqa: BLE001 — defensive; never break pipeline on template
         return tpl
 
 
