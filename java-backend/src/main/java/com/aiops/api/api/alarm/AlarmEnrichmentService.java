@@ -1,6 +1,8 @@
 package com.aiops.api.api.alarm;
 
 import com.aiops.api.domain.alarm.AlarmEntity;
+import com.aiops.api.domain.pipeline.PipelineRunEntity;
+import com.aiops.api.domain.pipeline.PipelineRunRepository;
 import com.aiops.api.domain.skill.ExecutionLogEntity;
 import com.aiops.api.domain.skill.ExecutionLogRepository;
 import com.aiops.api.domain.skill.SkillDefinitionEntity;
@@ -32,15 +34,18 @@ public class AlarmEnrichmentService {
 
 	private final ExecutionLogRepository execLogRepo;
 	private final SkillDefinitionRepository skillRepo;
+	private final PipelineRunRepository pipelineRunRepo;
 	private final ObjectMapper mapper;
 	private final ChartMiddleware chartMiddleware;
 
 	public AlarmEnrichmentService(ExecutionLogRepository execLogRepo,
 	                              SkillDefinitionRepository skillRepo,
+	                              PipelineRunRepository pipelineRunRepo,
 	                              ObjectMapper mapper,
 	                              ChartMiddleware chartMiddleware) {
 		this.execLogRepo = execLogRepo;
 		this.skillRepo = skillRepo;
+		this.pipelineRunRepo = pipelineRunRepo;
 		this.mapper = mapper;
 		this.chartMiddleware = chartMiddleware;
 	}
@@ -107,7 +112,9 @@ public class AlarmEnrichmentService {
 				a.getExecutionLogId(), a.getDiagnosticLogId(),
 				f.findings, f.outputSchema, f.diagnosticFindings, f.diagnosticOutputSchema,
 				f.charts,
-				f.diagnosticResults);
+				f.diagnosticResults,
+				f.triggerDataViews, f.diagnosticDataViews,
+				f.diagnosticCharts, f.diagnosticAlert);
 	}
 
 	private AlarmDtos.Detail buildDetail(AlarmEntity a, Ctx ctx) {
@@ -120,7 +127,9 @@ public class AlarmEnrichmentService {
 				a.getExecutionLogId(), a.getDiagnosticLogId(), a.getCreatedAt(),
 				f.findings, f.outputSchema, f.diagnosticFindings, f.diagnosticOutputSchema,
 				f.charts,
-				f.diagnosticResults);
+				f.diagnosticResults,
+				f.triggerDataViews, f.diagnosticDataViews,
+				f.diagnosticCharts, f.diagnosticAlert);
 	}
 
 	private EnrichedFields buildFields(AlarmEntity a, Ctx ctx) {
@@ -236,7 +245,100 @@ public class AlarmEnrichmentService {
 				})
 				.toList();
 
-		return new EnrichedFields(findings, outputSchema, diagFindings, diagOutputSchema, charts, diagnosticResults);
+		// Pipeline-native rendering: pull data_views (and charts/alerts) directly
+		// from result_summary so the alarm UI can render the actual triggering
+		// rows + diagnostic output without going through the legacy DR / skill
+		// schema path. This is what the user sees when the alarm came from a
+		// pipeline-mode patrol (block_alert + block_data_view), not the
+		// legacy diagnostic_rules format.
+		List<AlarmDtos.DataView> triggerDvs = extractDataViewsFromExecLog(execLog);
+		List<AlarmDtos.DataView> diagnosticDvs = List.of();
+		List<Object> diagnosticCharts = List.of();
+		Object diagnosticAlert = null;
+		// auto_check writes to pb_pipeline_runs, not execution_logs — so when
+		// diagLog is null but diagnostic_log_id is set, look it up on the
+		// pipeline-run side. (V7 dropped the FK so the id can land in either
+		// table.)
+		if (a.getDiagnosticLogId() != null) {
+			Optional<PipelineRunEntity> pr = safeFindRun(a.getDiagnosticLogId().intValue());
+			if (pr.isPresent()) {
+				PipelineRunEntity run = pr.get();
+				JsonNode runNode = parseJsonNode(run.getNodeResults());
+				if (runNode != null) {
+					JsonNode rs = runNode.get("result_summary");
+					if (rs != null && rs.isObject()) {
+						diagnosticDvs = extractDataViews(rs.get("data_views"));
+						JsonNode chartsNode = rs.get("charts");
+						if (chartsNode != null && chartsNode.isArray()) {
+							List<Object> list = new java.util.ArrayList<>();
+							chartsNode.forEach(list::add);
+							diagnosticCharts = list;
+						}
+						JsonNode alertsNode = rs.get("alerts");
+						if (alertsNode != null && alertsNode.isArray() && alertsNode.size() > 0) {
+							diagnosticAlert = alertsNode.get(0);
+						}
+					}
+					// Surface as legacy diagnosticFindings too so old UI paths
+					// still render *something* meaningful.
+					if (diagFindings == null) diagFindings = runNode;
+				}
+			}
+		}
+
+		return new EnrichedFields(findings, outputSchema, diagFindings, diagOutputSchema,
+				charts, diagnosticResults, triggerDvs, diagnosticDvs, diagnosticCharts, diagnosticAlert);
+	}
+
+	private Optional<PipelineRunEntity> safeFindRun(Integer id) {
+		try {
+			return pipelineRunRepo.findById(id);
+		} catch (Exception ex) {
+			log.debug("alarm enrichment: pipeline_run lookup failed for id={}: {}", id, ex.getMessage());
+			return Optional.empty();
+		}
+	}
+
+	private List<AlarmDtos.DataView> extractDataViewsFromExecLog(ExecutionLogEntity log) {
+		if (log == null) return List.of();
+		JsonNode root = parseJsonNode(log.getLlmReadableData());
+		if (root == null) return List.of();
+		JsonNode rs = root.get("result_summary");
+		if (rs == null) return List.of();
+		return extractDataViews(rs.get("data_views"));
+	}
+
+	private List<AlarmDtos.DataView> extractDataViews(JsonNode dvNode) {
+		if (dvNode == null || !dvNode.isArray()) return List.of();
+		List<AlarmDtos.DataView> out = new java.util.ArrayList<>();
+		for (JsonNode dv : dvNode) {
+			List<String> cols = new java.util.ArrayList<>();
+			JsonNode colsNode = dv.get("columns");
+			if (colsNode != null && colsNode.isArray()) {
+				colsNode.forEach(c -> cols.add(c.asText()));
+			}
+			List<Object> rows = new java.util.ArrayList<>();
+			JsonNode rowsNode = dv.get("rows");
+			if (rowsNode != null && rowsNode.isArray()) {
+				rowsNode.forEach(rows::add);
+			}
+			Integer total = dv.has("total_rows") && dv.get("total_rows").isNumber()
+					? dv.get("total_rows").asInt() : rows.size();
+			out.add(new AlarmDtos.DataView(
+					textOrNull(dv.get("title")),
+					textOrNull(dv.get("description")),
+					cols, rows, total));
+		}
+		return out;
+	}
+
+	private static String textOrNull(JsonNode n) {
+		return n == null || n.isNull() ? null : n.asText();
+	}
+
+	private JsonNode parseJsonNode(String raw) {
+		if (raw == null || raw.isBlank()) return null;
+		try { return mapper.readTree(raw); } catch (JsonProcessingException e) { return null; }
 	}
 
 	private Object parseJson(String raw) {
@@ -269,5 +371,9 @@ public class AlarmEnrichmentService {
 	private record EnrichedFields(Object findings, Object outputSchema,
 	                              Object diagnosticFindings, Object diagnosticOutputSchema,
 	                              List<Object> charts,
-	                              List<AlarmDtos.DiagnosticResult> diagnosticResults) {}
+	                              List<AlarmDtos.DiagnosticResult> diagnosticResults,
+	                              List<AlarmDtos.DataView> triggerDataViews,
+	                              List<AlarmDtos.DataView> diagnosticDataViews,
+	                              List<Object> diagnosticCharts,
+	                              Object diagnosticAlert) {}
 }

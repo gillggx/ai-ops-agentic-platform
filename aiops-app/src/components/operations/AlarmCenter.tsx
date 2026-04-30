@@ -13,6 +13,23 @@ type DiagnosticResult = {
   charts: ChartDSL[] | null;
 };
 
+// Pipeline-mode data view (one block_data_view node output).
+type DataView = {
+  title: string | null;
+  description: string | null;
+  columns: string[];
+  rows: Record<string, unknown>[];
+  total_rows: number;
+};
+
+type AlertEmission = {
+  severity?: string;
+  title?: string;
+  message?: string;
+  evidence_count?: number;
+  emitted_at?: string;
+} | null;
+
 type Alarm = {
   id: number;
   skill_id: number;
@@ -39,6 +56,11 @@ type Alarm = {
   // Legacy single-DR fields (back-compat only)
   diagnostic_findings: SkillFindings | null;
   diagnostic_output_schema: OutputSchemaField[] | null;
+  // Pipeline-mode views (block_data_view outputs from the execution / auto_check run)
+  trigger_data_views?: DataView[];
+  diagnostic_data_views?: DataView[];
+  diagnostic_charts?: ChartDSL[];
+  diagnostic_alert?: AlertEmission;
 };
 
 // ── Severity config ────────────────────────────────────────────────────────────
@@ -102,8 +124,88 @@ function StatusChip({ status }: { status: string }) {
 
 // ── Alarm Detail Modal ────────────────────────────────────────────────────────
 
+function DataViewTable({ dv }: { dv: DataView }) {
+  // Compact, monospaced table — 8 cols max, 10 rows max in alarm modal.
+  const cols = (dv.columns || []).slice(0, 8);
+  const rows = (dv.rows || []).slice(0, 10);
+  if (cols.length === 0 && rows.length === 0) {
+    return <div style={{ fontSize: 12, color: "#a0aec0" }}>無資料</div>;
+  }
+  return (
+    <div style={{
+      border: "1px solid #e2e8f0", borderRadius: 8, overflow: "hidden",
+      background: "#fff", marginBottom: 12,
+    }}>
+      {dv.title && (
+        <div style={{
+          padding: "8px 12px", background: "#f7fafc",
+          borderBottom: "1px solid #e2e8f0",
+          fontSize: 12, fontWeight: 700, color: "#2d3748",
+        }}>
+          📋 {dv.title}
+          {dv.total_rows > rows.length && (
+            <span style={{ marginLeft: 8, fontSize: 10, color: "#a0aec0", fontWeight: 400 }}>
+              ({rows.length}/{dv.total_rows} 列)
+            </span>
+          )}
+        </div>
+      )}
+      {dv.description && (
+        <div style={{ padding: "6px 12px", fontSize: 11, color: "#718096", borderBottom: "1px solid #f0f4f8" }}>
+          {dv.description}
+        </div>
+      )}
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: "monospace" }}>
+          <thead>
+            <tr style={{ background: "#f7fafc" }}>
+              {cols.map((c) => (
+                <th key={c} style={{
+                  padding: "6px 8px", textAlign: "left", color: "#4a5568",
+                  borderBottom: "1px solid #e2e8f0", fontWeight: 600, whiteSpace: "nowrap",
+                }}>{c}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, ri) => (
+              <tr key={ri} style={{ borderBottom: "1px solid #f0f4f8" }}>
+                {cols.map((c) => {
+                  const v = row[c];
+                  const isOOC = c.endsWith("_is_ooc") && v === true;
+                  const isTriggered = c === "triggered_row" && v === true;
+                  const isOOCStatus = c === "spc_status" && v === "OOC";
+                  const highlight = isOOC || isTriggered || isOOCStatus;
+                  return (
+                    <td key={c} style={{
+                      padding: "6px 8px", whiteSpace: "nowrap",
+                      color: highlight ? "#dc2626" : "#2d3748",
+                      fontWeight: highlight ? 700 : 400,
+                      background: highlight ? "#fef2f2" : "transparent",
+                    }}>
+                      {v === null || v === undefined ? "—"
+                        : typeof v === "object" ? JSON.stringify(v)
+                        : typeof v === "number" ? (Number.isInteger(v) ? String(v) : v.toFixed(3))
+                        : String(v)}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function AlarmDetailModal({ alarm, onClose }: { alarm: Alarm; onClose: () => void }) {
   const [tab, setTab] = useState<"trigger" | "diagnostic">("trigger");
+
+  const triggerDvs = alarm.trigger_data_views ?? [];
+  const diagnosticDvs = alarm.diagnostic_data_views ?? [];
+  const diagnosticCharts = alarm.diagnostic_charts ?? [];
+  const diagnosticAlert = alarm.diagnostic_alert ?? null;
 
   const hasApFindings = alarm.findings && Object.keys(alarm.findings).length > 0;
   const diagnosticResults = alarm.diagnostic_results ?? [];
@@ -229,7 +331,20 @@ function AlarmDetailModal({ alarm, onClose }: { alarm: Alarm; onClose: () => voi
                 )}
               </div>
 
-              {/* Rendered findings */}
+              {/* Pipeline-mode trigger evidence (block_data_view rows from the patrol pipeline) */}
+              {triggerDvs.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{
+                    fontSize: 11, fontWeight: 700, color: "#4a5568",
+                    textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8,
+                  }}>
+                    觸發證據（patrol pipeline 回傳）
+                  </div>
+                  {triggerDvs.map((dv, i) => <DataViewTable key={i} dv={dv} />)}
+                </div>
+              )}
+
+              {/* Rendered findings — legacy DR / skill format */}
               {hasApFindings ? (
                 <RenderMiddleware findings={alarm.findings!} outputSchema={alarm.output_schema ?? []} charts={alarm.charts ?? null} />
               ) : parsed && Object.keys(parsed).length > 0 ? (
@@ -246,14 +361,48 @@ function AlarmDetailModal({ alarm, onClose }: { alarm: Alarm; onClose: () => voi
                     </div>
                   ))}
                 </div>
-              ) : (
+              ) : triggerDvs.length === 0 ? (
                 <div style={{ fontSize: 12, color: "#a0aec0" }}>{alarm.summary || "無觸發資料"}</div>
-              )}
+              ) : null}
             </div>
           )}
 
           {tab === "diagnostic" && (
             <div>
+              {/* Pipeline-mode diagnostic output (auto_check pb_pipeline_runs result_summary) */}
+              {(diagnosticDvs.length > 0 || diagnosticCharts.length > 0 || diagnosticAlert) && (
+                <div style={{
+                  border: "1px solid #e2e8f0", borderRadius: 10,
+                  padding: "14px 16px", marginBottom: 16, background: "#fff",
+                }}>
+                  <div style={{
+                    fontSize: 11, fontWeight: 700, color: "#4a5568",
+                    textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8,
+                  }}>
+                    Auto-Check 診斷 (pipeline run)
+                  </div>
+                  {diagnosticAlert?.title && (
+                    <div style={{
+                      background: "#fef2f2", border: "1px solid #fca5a5",
+                      borderRadius: 8, padding: "10px 14px", marginBottom: 12,
+                    }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#dc2626", marginBottom: 4 }}>
+                        ⚠ {diagnosticAlert.title}
+                      </div>
+                      {diagnosticAlert.message && (
+                        <div style={{ fontSize: 12, color: "#4a5568" }}>{diagnosticAlert.message}</div>
+                      )}
+                    </div>
+                  )}
+                  {diagnosticDvs.map((dv, i) => <DataViewTable key={i} dv={dv} />)}
+                  {diagnosticCharts.length > 0 && (
+                    <div style={{ fontSize: 11, color: "#718096" }}>
+                      {diagnosticCharts.length} 張 chart（請至完整 Pipeline Run 頁面檢視）
+                    </div>
+                  )}
+                </div>
+              )}
+
               {hasDrFindings ? (
                 <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
                   {drList.map((dr, idx) => {
@@ -325,6 +474,8 @@ function AlarmDetailModal({ alarm, onClose }: { alarm: Alarm; onClose: () => voi
                     );
                   })}
                 </div>
+              ) : (diagnosticDvs.length > 0 || diagnosticCharts.length > 0 || diagnosticAlert) ? (
+                null
               ) : alarm.diagnostic_log_id ? (
                 <div style={{ padding: 32, textAlign: "center", color: "#a0aec0" }}>
                   <div style={{ fontSize: 24, marginBottom: 8 }}>⏳</div>

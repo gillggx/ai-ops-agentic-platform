@@ -17,7 +17,9 @@ public final class AlarmDtos {
 	                      Object findings, Object outputSchema,
 	                      Object diagnosticFindings, Object diagnosticOutputSchema,
 	                      List<Object> charts,
-	                      List<DiagnosticResult> diagnosticResults) {}
+	                      List<DiagnosticResult> diagnosticResults,
+	                      List<DataView> triggerDataViews, List<DataView> diagnosticDataViews,
+	                      List<Object> diagnosticCharts, Object diagnosticAlert) {}
 
 	public record Detail(Long id, Long skillId, String triggerEvent, String equipmentId,
 	                     String lotId, String step, OffsetDateTime eventTime,
@@ -28,7 +30,14 @@ public final class AlarmDtos {
 	                     Object findings, Object outputSchema,
 	                     Object diagnosticFindings, Object diagnosticOutputSchema,
 	                     List<Object> charts,
-	                     List<DiagnosticResult> diagnosticResults) {}
+	                     List<DiagnosticResult> diagnosticResults,
+	                     List<DataView> triggerDataViews, List<DataView> diagnosticDataViews,
+	                     List<Object> diagnosticCharts, Object diagnosticAlert) {}
+
+	/** Direct view of a pipeline data_view node output (table). The pipeline
+	 *  may emit multiple; ordered as block_data_view's `sequence` param. */
+	public record DataView(String title, String description, List<String> columns,
+	                       List<Object> rows, Integer totalRows) {}
 
 	// NOTE: field names match the Python shape — log_id (not execution_log_id).
 	public record DiagnosticResult(Long log_id, Long skill_id, String skill_name,
@@ -41,7 +50,8 @@ public final class AlarmDtos {
 				e.getSummary(), e.getEventTime(), e.getCreatedAt(),
 				e.getAcknowledgedBy(), e.getAcknowledgedAt(), e.getResolvedAt(),
 				e.getExecutionLogId(), e.getDiagnosticLogId(),
-				null, null, null, null, List.of(), List.of());
+				null, null, null, null, List.of(), List.of(),
+				List.of(), List.of(), List.of(), null);
 	}
 
 	static Detail detailOf(AlarmEntity e) {
@@ -50,6 +60,7 @@ public final class AlarmDtos {
 				e.getTitle(), e.getSummary(), e.getStatus(),
 				e.getAcknowledgedBy(), e.getAcknowledgedAt(), e.getResolvedAt(),
 				e.getExecutionLogId(), e.getDiagnosticLogId(), e.getCreatedAt(),
-				null, null, null, null, List.of(), List.of());
+				null, null, null, null, List.of(), List.of(),
+				List.of(), List.of(), List.of(), null);
 	}
 }
