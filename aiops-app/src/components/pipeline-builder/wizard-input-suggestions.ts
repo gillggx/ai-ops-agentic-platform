@@ -40,6 +40,12 @@ export interface InputSuggestion {
    *  enables Auto-Patrol target_scope=all_equipment fan-out). Rendered with a
    *  badge so users understand why it matters. */
   critical?: boolean;
+  /** Preview value used by Auto-Run on the canvas + Inspector placeholder.
+   *  Without this, an Auto-Run with empty inputs resolves $name → null →
+   *  block fails MISSING_PARAM (e.g. process_history "三選一" rule). At
+   *  runtime the real value comes from event payload / patrol fan-out
+   *  / user input, so example is purely for preview. */
+  example?: string | number | boolean;
 }
 
 export function getInputSuggestions(
@@ -55,6 +61,7 @@ export function getInputSuggestions(
           type: "string",
           required: true,
           preChecked: true,
+          example: "EQP-01",
           description: "從 event payload 取得發生事件的機台 ID（常見於 OOC/APC_drift 等 event）",
         },
         {
@@ -62,6 +69,7 @@ export function getInputSuggestions(
           type: "string",
           required: false,
           preChecked: false,
+          example: "LOT-12345",
           description: "從 event payload 取得批次 ID（lot 級事件才需要）",
         },
         {
@@ -69,6 +77,7 @@ export function getInputSuggestions(
           type: "string",
           required: false,
           preChecked: false,
+          example: "STEP_001",
           description: "製程站點，例如 STEP_013（step 級事件才需要）",
         },
         {
@@ -76,6 +85,7 @@ export function getInputSuggestions(
           type: "string",
           required: false,
           preChecked: false,
+          example: "2026-04-30T00:00:00Z",
           description: "事件發生時間（ISO 8601 字串）",
         },
       ];
@@ -91,6 +101,7 @@ export function getInputSuggestions(
         required: true,
         preChecked: true,
         critical: true,
+        example: "EQP-01",
         description:
           "綁 target_scope=all_equipment 時 Auto-Patrol Service 會在 runtime 為每台機台注入一次此值做 fan-out。強烈建議宣告，否則只能寫死 EQP-ID。",
       },
@@ -100,6 +111,7 @@ export function getInputSuggestions(
         required: stepRequired,
         preChecked: stepRequired,
         critical: stepRequired,
+        example: "STEP_001",
         description: stepRequired
           ? "目標範圍 = 指定站點 → runtime 會注入 $loop.step 給 pipeline。必填。"
           : "選擇性：如果 pipeline 需要區分製程站點，宣告這個。",
@@ -109,6 +121,7 @@ export function getInputSuggestions(
         type: "string",
         required: false,
         preChecked: false,
+        example: "24h",
         description: "預設時間窗，例如 24h / 7d（pipeline 裡的 block_process_history 可以綁這個）",
       },
     ];
@@ -121,6 +134,7 @@ export function getInputSuggestions(
         required: true,
         preChecked: true,
         critical: true,
+        example: "EQP-01",
         description: "Alarm 發生在哪台機台（alarm payload 會自動填入）",
       },
       {
@@ -128,6 +142,7 @@ export function getInputSuggestions(
         type: "string",
         required: false,
         preChecked: false,
+        example: "LOT-12345",
         description: "Alarm 對應的批次 ID",
       },
       {
@@ -135,6 +150,7 @@ export function getInputSuggestions(
         type: "string",
         required: false,
         preChecked: false,
+        example: "STEP_001",
         description: "Alarm 發生時的製程站點",
       },
       {
@@ -142,6 +158,7 @@ export function getInputSuggestions(
         type: "string",
         required: false,
         preChecked: false,
+        example: "2026-04-30T00:00:00Z",
         description: "Alarm 產生時間（ISO 8601）",
       },
       {
@@ -149,6 +166,7 @@ export function getInputSuggestions(
         type: "string",
         required: false,
         preChecked: false,
+        example: "OOC",
         description: "觸發這個 alarm 的 event_type 名稱（例如 OOC）",
       },
       {
@@ -156,6 +174,7 @@ export function getInputSuggestions(
         type: "string",
         required: false,
         preChecked: false,
+        example: "HIGH",
         description: "Alarm 嚴重度（LOW / MEDIUM / HIGH / CRITICAL）",
       },
       {
@@ -163,6 +182,7 @@ export function getInputSuggestions(
         type: "string",
         required: false,
         preChecked: false,
+        example: "範例：SPC 連續 2 次 OOC 觸發告警",
         description: "Alarm 摘要訊息（人類可讀）",
       },
       {
@@ -170,6 +190,7 @@ export function getInputSuggestions(
         type: "integer",
         required: false,
         preChecked: false,
+        example: 1,
         description: "Alarm 是由哪個 Auto-Patrol 產生（可用於 filter / trace）",
       },
     ];
@@ -181,6 +202,7 @@ export function getInputSuggestions(
       type: "string",
       required: true,
       preChecked: true,
+      example: "EQP-01",
       description: "Agent 要查哪台機台時傳入（大多數 skill 用到）",
     },
     {
@@ -188,6 +210,7 @@ export function getInputSuggestions(
       type: "string",
       required: false,
       preChecked: false,
+      example: "LOT-12345",
       description: "Agent 要查特定批次時傳入",
     },
     {
@@ -195,6 +218,7 @@ export function getInputSuggestions(
       type: "string",
       required: false,
       preChecked: false,
+      example: "STEP_001",
       description: "Agent 要鎖在特定 step 時傳入",
     },
     {
@@ -202,6 +226,7 @@ export function getInputSuggestions(
       type: "string",
       required: false,
       preChecked: false,
+      example: "24h",
       description: "查詢時間窗，例如 24h / 7d",
     },
     {
@@ -209,6 +234,7 @@ export function getInputSuggestions(
       type: "integer",
       required: false,
       preChecked: false,
+      example: 100,
       description: "回傳筆數上限",
     },
   ];
@@ -224,6 +250,9 @@ export function suggestionToInput(s: InputSuggestion): PipelineInput {
     type: s.type,
     required: s.required,
     description: s.description,
+    // Carry the example so Auto-Run on the canvas resolves $name without a
+    // user-supplied value. Empty string and missing both fall through.
+    ...(s.example !== undefined ? { example: s.example } : {}),
   };
 }
 
