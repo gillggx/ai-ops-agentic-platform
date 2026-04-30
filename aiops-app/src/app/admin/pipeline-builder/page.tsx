@@ -15,7 +15,10 @@ const STATUS_FILTERS: Array<PipelineStatus | "all"> = [
   "archived",
 ];
 
-type KindFilter = "all" | "auto_patrol" | "diagnostic";
+// Phase 5-UX-7+ replaced "diagnostic" with "auto_check"; "skill" is the
+// reusable on-demand pipeline kind. "diagnostic" kept only as a legacy
+// fallback for pre-cutover rows whose pipeline_kind is null.
+type KindFilter = "all" | "auto_patrol" | "auto_check" | "skill";
 
 export default function PipelineBuilderListPage() {
   const [items, setItems] = useState<PipelineSummary[]>([]);
@@ -26,9 +29,14 @@ export default function PipelineBuilderListPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
 
-  const visibleItems = items.filter(
-    (p) => kindFilter === "all" || (p.pipeline_kind ?? "diagnostic") === kindFilter,
-  );
+  // Treat legacy "diagnostic" kind rows as auto_check so they appear under
+  // the new tab (and don't become invisible after the rename).
+  const visibleItems = items.filter((p) => {
+    if (kindFilter === "all") return true;
+    const raw = p.pipeline_kind ?? "auto_check";
+    const normalised = raw === "diagnostic" ? "auto_check" : raw;
+    return normalised === kindFilter;
+  });
 
   const load = async () => {
     setLoading(true);
@@ -74,9 +82,9 @@ export default function PipelineBuilderListPage() {
         </div>
       </div>
 
-      {/* Kind tabs — Auto Patrol vs Diagnostic */}
+      {/* Kind tabs — Auto Patrol / Auto-Check / Skill */}
       <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
-        {(["all", "auto_patrol", "diagnostic"] as KindFilter[]).map((k) => (
+        {(["all", "auto_patrol", "auto_check", "skill"] as KindFilter[]).map((k) => (
           <button
             key={k}
             onClick={() => setKindFilter(k)}
@@ -93,7 +101,10 @@ export default function PipelineBuilderListPage() {
               letterSpacing: "0.02em",
             }}
           >
-            {k === "all" ? "全部類型" : k === "auto_patrol" ? "🔍 Auto Patrol" : "🩺 Diagnostic Rule"}
+            {k === "all" ? "全部類型"
+              : k === "auto_patrol" ? "🔍 Auto Patrol"
+              : k === "auto_check" ? "🔬 Auto-Check"
+              : "📚 Skill"}
           </button>
         ))}
       </div>
