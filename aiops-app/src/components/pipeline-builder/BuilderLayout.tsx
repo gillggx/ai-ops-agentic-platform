@@ -1225,6 +1225,7 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
           pipelineId={state.meta.pipelineId}
           pipelineName={state.pipeline.name}
           pipelineJson={state.pipeline}
+          pipelineStatus={state.meta.status ?? null}
           onPublished={(eventTypes) => {
             setAutoCheckModalOpen(false);
             showToast("success", `已綁 ${eventTypes.length} 個 event_type + 發佈`);

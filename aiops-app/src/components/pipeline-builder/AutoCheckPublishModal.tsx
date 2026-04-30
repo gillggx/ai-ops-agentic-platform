@@ -25,6 +25,10 @@ interface Props {
   pipelineName: string;
   pipelineJson: PipelineJSON;
   onPublished: (eventTypes: string[]) => void;
+  /** Current pipeline status — when "active" we upsert bindings without
+   *  going through publish (which expects status="locked"). When "locked"
+   *  or "draft" we run the publish flow that flips status → active. */
+  pipelineStatus?: string | null;
 }
 
 interface BindingRow {
@@ -49,7 +53,9 @@ export default function AutoCheckPublishModal({
   pipelineName,
   pipelineJson,
   onPublished,
+  pipelineStatus,
 }: Props) {
+  const isUpsert = pipelineStatus === "active";
   const [rows, setRows] = useState<BindingRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
@@ -95,24 +101,73 @@ export default function AutoCheckPublishModal({
 
   const declaredInputs = useMemo(() => pipelineJson.inputs ?? [], [pipelineJson]);
 
-  // P4.3: if the wizard stashed event_types in sessionStorage during create,
-  // pre-fill the rows when this modal opens. (Pre-D format is plain string[].)
+  // Pre-fill order on open:
+  //   1. Already-saved bindings on the server (active pipelines)
+  //   2. Wizard stash from create flow (sessionStorage, pre-publish)
+  //   3. One blank row (empty starting state)
   useEffect(() => {
     if (!open) return;
-    let initial: BindingRow[] = [];
-    try {
-      const raw = sessionStorage.getItem(`pb:pending_auto_check:${pipelineId}`);
-      if (raw) {
-        const parsed = JSON.parse(raw) as { event_types?: string[] };
-        if (parsed?.event_types?.length) {
-          initial = parsed.event_types.map((et) => newRow(et));
+    let cancelled = false;
+    (async () => {
+      let initial: BindingRow[] = [];
+
+      // 1. Server-side existing bindings — only meaningful for already-published
+      //    pipelines, but harmless to query for draft/locked too (returns []).
+      try {
+        const res = await fetch(
+          `/api/admin/pipelines/${pipelineId}/auto-check-triggers`,
+          { cache: "no-store" },
+        );
+        if (res.ok) {
+          const json = await res.json();
+          const data = (json?.data ?? json) as Array<{
+            eventType?: string; event_type?: string;
+            matchFilter?: Record<string, string[]> | null;
+            match_filter?: Record<string, string[]> | null;
+          }>;
+          if (Array.isArray(data) && data.length > 0) {
+            initial = data
+              .map((b) => {
+                const et = b.eventType ?? b.event_type ?? "";
+                if (!et) return null;
+                const row = newRow(et);
+                const mf = b.matchFilter ?? b.match_filter ?? null;
+                if (mf && typeof mf === "object") {
+                  row.match_filter = Object.fromEntries(
+                    Object.entries(mf).map(([k, v]) => [
+                      k, Array.isArray(v) ? v : [String(v)],
+                    ]),
+                  );
+                }
+                return row;
+              })
+              .filter((r): r is BindingRow => r !== null);
+          }
+        }
+      } catch {
+        // network failure — fall through to stash / blank
+      }
+
+      // 2. Fallback: wizard stash from create flow.
+      if (initial.length === 0) {
+        try {
+          const raw = sessionStorage.getItem(`pb:pending_auto_check:${pipelineId}`);
+          if (raw) {
+            const parsed = JSON.parse(raw) as { event_types?: string[] };
+            if (parsed?.event_types?.length) {
+              initial = parsed.event_types.map((et) => newRow(et));
+            }
+          }
+        } catch {
+          // ignore malformed stash
         }
       }
-    } catch {
-      // ignore malformed stash
-    }
-    if (initial.length === 0) initial = [newRow()];
-    setRows(initial);
+
+      // 3. One blank row to start.
+      if (initial.length === 0) initial = [newRow()];
+      if (!cancelled) setRows(initial);
+    })();
+    return () => { cancelled = true; };
   }, [open, pipelineId]);
 
   if (!open) return null;
@@ -169,8 +224,13 @@ export default function AutoCheckPublishModal({
             : { event_type: r.event_type.trim() };
         }),
       };
-      const res = await fetch(`/api/pipeline-builder/pipelines/${pipelineId}/publish-auto-check`, {
-        method: "POST",
+      // active pipeline → just upsert bindings (no status transition).
+      // locked / draft → publish flow flips status to active.
+      const url = isUpsert
+        ? `/api/admin/pipelines/${pipelineId}/auto-check-triggers`
+        : `/api/pipeline-builder/pipelines/${pipelineId}/publish-auto-check`;
+      const res = await fetch(url, {
+        method: isUpsert ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
@@ -194,7 +254,9 @@ export default function AutoCheckPublishModal({
         <div style={{ padding: "14px 18px", borderBottom: "1px solid #E2E8F0", display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 18 }}>⚡</span>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A" }}>發佈 Auto-Check</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#0F172A" }}>
+              {isUpsert ? `編輯 Auto-Check 來源 (#${pipelineId})` : "發佈 Auto-Check"}
+            </div>
             <div style={{ fontSize: 11, color: "#64748B" }}>{pipelineName}</div>
           </div>
           <button onClick={onClose} style={closeBtnStyle}>×</button>
@@ -339,7 +401,9 @@ export default function AutoCheckPublishModal({
             style={btnStyle("primary")}
             disabled={publishing || eventTypesNonEmpty.length === 0 || declaredInputs.length === 0}
           >
-            {publishing ? "發佈中…" : "確定發佈"}
+            {publishing
+              ? (isUpsert ? "儲存中…" : "發佈中…")
+              : (isUpsert ? "💾 儲存綁定" : "確定發佈")}
           </button>
         </div>
       </div>

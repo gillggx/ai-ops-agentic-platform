@@ -426,6 +426,82 @@ public class PipelineController {
 		return ApiResponse.ok(null);
 	}
 
+	/** P5: replace the auto_check binding set on an already-published pipeline.
+	 *  Mirrors publishAutoCheck's binding-replace logic but skips the
+	 *  locked → active transition (the pipeline is already active). Used by
+	 *  the canvas's "編輯 Auto-Check 來源" button so users can change which
+	 *  alarms route to a live pipeline without re-running the publish flow. */
+	@PutMapping("/{id}/auto-check-triggers")
+	@Transactional
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public ApiResponse<Map<String, Object>> upsertAutoCheckTriggers(@PathVariable Long id,
+	                                                                @Validated @RequestBody PipelineDtos.PublishAutoCheckRequest req) {
+		PipelineEntity e = repository.findById(id).orElseThrow(() -> ApiException.notFound("pipeline"));
+		if (!"auto_check".equals(e.getPipelineKind())) {
+			throw ApiException.conflict("upsert-auto-check-triggers requires pipeline_kind='auto_check' (got '"
+					+ e.getPipelineKind() + "').");
+		}
+		if ("archived".equals(e.getStatus())) {
+			throw ApiException.conflict("cannot modify bindings on an archived pipeline");
+		}
+		List<Object> rawEventTypes = req.eventTypes();
+		if (rawEventTypes == null || rawEventTypes.isEmpty()) {
+			throw ApiException.badRequest("event_types must contain at least one entry");
+		}
+		List<EventTypeBinding> bindings = parseEventTypeBindings(rawEventTypes);
+		if (bindings.isEmpty()) {
+			throw ApiException.badRequest("event_types must contain at least one valid entry");
+		}
+		autoCheckTriggerRepository.deleteByPipelineId(id);
+		autoCheckTriggerRepository.flush();
+		java.util.Set<String> seen = new java.util.LinkedHashSet<>();
+		List<Map<String, Object>> resultBindings = new java.util.ArrayList<>();
+		for (EventTypeBinding b : bindings) {
+			if (!seen.add(b.eventType)) continue;
+			PipelineAutoCheckTriggerEntity t = new PipelineAutoCheckTriggerEntity();
+			t.setPipelineId(id);
+			t.setEventType(b.eventType);
+			t.setMatchFilter(b.matchFilterJson);
+			autoCheckTriggerRepository.save(t);
+			Map<String, Object> rb = new java.util.LinkedHashMap<>();
+			rb.put("event_type", b.eventType);
+			rb.put("match_filter", b.matchFilterJson);
+			resultBindings.add(rb);
+		}
+		Map<String, Object> body = new java.util.LinkedHashMap<>();
+		body.put("pipeline_id", id);
+		body.put("bindings", resultBindings);
+		body.put("count", resultBindings.size());
+		return ApiResponse.ok(body);
+	}
+
+	private List<EventTypeBinding> parseEventTypeBindings(List<Object> rawEventTypes) {
+		List<EventTypeBinding> bindings = new java.util.ArrayList<>();
+		for (Object raw : rawEventTypes) {
+			if (raw instanceof String s) {
+				String trimmed = s.trim();
+				if (!trimmed.isEmpty()) bindings.add(new EventTypeBinding(trimmed, null));
+			} else if (raw instanceof Map<?, ?> m) {
+				Object et = m.get("event_type");
+				if (!(et instanceof String s) || s.isBlank()) continue;
+				Object mf = m.get("match_filter");
+				String mfJson = null;
+				if (mf instanceof Map<?, ?> || mf instanceof List<?>) {
+					try {
+						mfJson = objectMapper.writeValueAsString(mf);
+					} catch (JsonProcessingException ex) {
+						throw ApiException.badRequest("match_filter for '" + s + "' is not serialisable: "
+								+ ex.getMessage());
+					}
+				} else if (mf instanceof String s2 && !s2.isBlank()) {
+					mfJson = s2;
+				}
+				bindings.add(new EventTypeBinding(s.trim(), mfJson));
+			}
+		}
+		return bindings;
+	}
+
 	/** Phase D follow-up: list the auto_check trigger bindings for one
 	 *  pipeline. Used by the canvas banner to show "this pipeline is
 	 *  triggered by alarm.X / patrol Y" without having to open the modal. */
