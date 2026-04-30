@@ -66,6 +66,16 @@ class GraphState(TypedDict, total=False):
     user_message: Annotated[str, _replace]
     canvas_overrides: Optional[Dict[str, Any]]
     client_context: Optional[Dict[str, Any]]
+    # Phase E2: "chat" (default) or "builder" — controls system-prompt bias.
+    # Only present in TypedDict so LangGraph propagates it through nodes;
+    # without this key the run() kwarg is silently dropped from initial_state
+    # and load_context.py always sees state.get("mode") == None → "chat".
+    mode: Annotated[str, _replace]
+    # Phase E3 follow-up: snapshot of the canvas the user is on (with declared
+    # inputs / nodes). load_context surfaces it to the user-facing system prompt
+    # AND tool_execute injects it as _state_pipeline_snapshot for build_pipeline_live
+    # so Glass Box sub-agent reuses $name references instead of writing literals.
+    pipeline_snapshot: Annotated[Optional[Dict[str, Any]], _replace]
     # Part A — intent classifier output. "clear_chart" / "clear_rca" /
     # "clear_status" / "vague" / "clarified" (re-submit). Read by llm_call to
     # tweak guidance; read by graph routing to short-circuit on vague.
