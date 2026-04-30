@@ -1,6 +1,8 @@
 package com.aiops.api.api.alarm;
 
 import com.aiops.api.domain.alarm.AlarmEntity;
+import com.aiops.api.domain.pipeline.PipelineEntity;
+import com.aiops.api.domain.pipeline.PipelineRepository;
 import com.aiops.api.domain.pipeline.PipelineRunEntity;
 import com.aiops.api.domain.pipeline.PipelineRunRepository;
 import com.aiops.api.domain.skill.ExecutionLogEntity;
@@ -35,17 +37,20 @@ public class AlarmEnrichmentService {
 	private final ExecutionLogRepository execLogRepo;
 	private final SkillDefinitionRepository skillRepo;
 	private final PipelineRunRepository pipelineRunRepo;
+	private final PipelineRepository pipelineRepo;
 	private final ObjectMapper mapper;
 	private final ChartMiddleware chartMiddleware;
 
 	public AlarmEnrichmentService(ExecutionLogRepository execLogRepo,
 	                              SkillDefinitionRepository skillRepo,
 	                              PipelineRunRepository pipelineRunRepo,
+	                              PipelineRepository pipelineRepo,
 	                              ObjectMapper mapper,
 	                              ChartMiddleware chartMiddleware) {
 		this.execLogRepo = execLogRepo;
 		this.skillRepo = skillRepo;
 		this.pipelineRunRepo = pipelineRunRepo;
+		this.pipelineRepo = pipelineRepo;
 		this.mapper = mapper;
 		this.chartMiddleware = chartMiddleware;
 	}
@@ -114,7 +119,8 @@ public class AlarmEnrichmentService {
 				f.charts,
 				f.diagnosticResults,
 				f.triggerDataViews, f.diagnosticDataViews,
-				f.diagnosticCharts, f.diagnosticAlert);
+				f.diagnosticCharts, f.diagnosticAlert,
+				f.autoCheckRuns);
 	}
 
 	private AlarmDtos.Detail buildDetail(AlarmEntity a, Ctx ctx) {
@@ -129,7 +135,8 @@ public class AlarmEnrichmentService {
 				f.charts,
 				f.diagnosticResults,
 				f.triggerDataViews, f.diagnosticDataViews,
-				f.diagnosticCharts, f.diagnosticAlert);
+				f.diagnosticCharts, f.diagnosticAlert,
+				f.autoCheckRuns);
 	}
 
 	private EnrichedFields buildFields(AlarmEntity a, Ctx ctx) {
@@ -286,8 +293,57 @@ public class AlarmEnrichmentService {
 			}
 		}
 
+		// P5+: an alarm may fire MULTIPLE auto_check pipelines (each binding
+		// in pipeline_auto_check_triggers writes its own pb_pipeline_runs row).
+		// alarm.diagnostic_log_id only points at ONE (last writer wins) so the
+		// UI lost the others. Collect every run keyed off this alarm and
+		// surface them as autoCheckRuns; the legacy singleton fields above
+		// stay populated from diagnostic_log_id for backwards compat.
+		List<AlarmDtos.AutoCheckRun> autoCheckRuns = new java.util.ArrayList<>();
+		try {
+			List<PipelineRunEntity> allRuns = pipelineRunRepo.findAllByAlarmId(a.getId());
+			java.util.Set<Long> pipelineIds = new java.util.LinkedHashSet<>();
+			for (PipelineRunEntity r : allRuns) {
+				if (r.getPipelineId() != null) pipelineIds.add(r.getPipelineId());
+			}
+			java.util.Map<Long, String> nameById = pipelineIds.isEmpty() ? java.util.Map.of()
+					: java.util.stream.StreamSupport.stream(
+							pipelineRepo.findAllById(pipelineIds).spliterator(), false)
+					.collect(java.util.stream.Collectors.toMap(
+							PipelineEntity::getId, PipelineEntity::getName, (x, y) -> x));
+			for (PipelineRunEntity r : allRuns) {
+				JsonNode runNode = parseJsonNode(r.getNodeResults());
+				List<AlarmDtos.DataView> dvs = List.of();
+				List<Object> chartsList = List.of();
+				Object alert = null;
+				if (runNode != null) {
+					JsonNode rs = runNode.get("result_summary");
+					if (rs != null && rs.isObject()) {
+						dvs = extractDataViews(rs.get("data_views"));
+						JsonNode chartsNode = rs.get("charts");
+						if (chartsNode != null && chartsNode.isArray()) {
+							List<Object> list = new java.util.ArrayList<>();
+							chartsNode.forEach(list::add);
+							chartsList = list;
+						}
+						JsonNode alertsNode = rs.get("alerts");
+						if (alertsNode != null && alertsNode.isArray() && alertsNode.size() > 0) {
+							alert = alertsNode.get(0);
+						}
+					}
+				}
+				autoCheckRuns.add(new AlarmDtos.AutoCheckRun(
+						r.getId(), r.getPipelineId(), nameById.get(r.getPipelineId()),
+						r.getStatus(), dvs, chartsList, alert));
+			}
+		} catch (Exception ex) {
+			log.debug("alarm enrichment: failed to collect auto-check runs for alarm {}: {}",
+					a.getId(), ex.getMessage());
+		}
+
 		return new EnrichedFields(findings, outputSchema, diagFindings, diagOutputSchema,
-				charts, diagnosticResults, triggerDvs, diagnosticDvs, diagnosticCharts, diagnosticAlert);
+				charts, diagnosticResults, triggerDvs, diagnosticDvs, diagnosticCharts, diagnosticAlert,
+				autoCheckRuns);
 	}
 
 	private Optional<PipelineRunEntity> safeFindRun(Long id) {
@@ -375,5 +431,6 @@ public class AlarmEnrichmentService {
 	                              List<AlarmDtos.DataView> triggerDataViews,
 	                              List<AlarmDtos.DataView> diagnosticDataViews,
 	                              List<Object> diagnosticCharts,
-	                              Object diagnosticAlert) {}
+	                              Object diagnosticAlert,
+	                              List<AlarmDtos.AutoCheckRun> autoCheckRuns) {}
 }

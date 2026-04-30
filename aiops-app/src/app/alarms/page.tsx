@@ -50,6 +50,18 @@ type AlertEmission = {
   emitted_at?: string;
 } | null;
 
+// One auto_check pipeline's full result for an alarm (multiple per alarm
+// when several auto_check pipelines bind to the same trigger_event).
+type AutoCheckRun = {
+  run_id: number;
+  pipeline_id: number;
+  pipeline_name: string | null;
+  status: string;
+  data_views: DataView[];
+  charts: ChartDSL[];
+  alert: AlertEmission;
+};
+
 type Alarm = {
   id: number;
   skill_id: number;
@@ -74,6 +86,10 @@ type Alarm = {
   diagnostic_data_views?: DataView[];
   diagnostic_charts?: ChartDSL[];
   diagnostic_alert?: AlertEmission;
+  // P5+ multi-run: every auto_check pipeline that fired for this alarm.
+  // alarm.diagnostic_log_id only tracked the last writer, hiding the
+  // others; this carries them all so the UI can render every section.
+  auto_check_runs?: AutoCheckRun[];
 };
 
 // ── Styles ─────────────────────────────────────────────────────────────────────
@@ -382,6 +398,13 @@ function AlarmDetail({ alarm }: { alarm: Alarm }) {
   const diagnosticDvs = alarm.diagnostic_data_views ?? [];
   const diagnosticCharts = alarm.diagnostic_charts ?? [];
   const diagnosticAlert = alarm.diagnostic_alert ?? null;
+  // Multi-run preferred — when every bound auto_check pipeline fired we want
+  // to surface them all, not just the last writer (alarm.diagnostic_log_id
+  // race condition). Fall back to the singleton fields when the list is empty
+  // (older alarms predating the multi-run enrichment).
+  const autoCheckRuns = alarm.auto_check_runs ?? [];
+  const hasAnyAutoCheck = autoCheckRuns.length > 0
+    || diagnosticDvs.length > 0 || diagnosticCharts.length > 0 || !!diagnosticAlert;
 
   // Pipeline-mode banner: an alarm in DB is proof of triggering. Legacy
   // findings.condition_met only applied to the old DR-style format.
@@ -455,7 +478,7 @@ function AlarmDetail({ alarm }: { alarm: Alarm }) {
 
       {/* Tabs: Trigger Event | Evidence */}
       <div style={{ display: "flex", borderBottom: "1px solid #e0e0e0", marginBottom: 16 }}>
-        {([["trigger", "🔴 觸發原因"], ["evidence", `📊 深度診斷 (${drs.length + ((diagnosticDvs.length > 0 || diagnosticCharts.length > 0 || diagnosticAlert) ? 1 : 0)})`]] as const).map(([key, label]) => (
+        {([["trigger", "🔴 觸發原因"], ["evidence", `📊 深度診斷 (${drs.length + (autoCheckRuns.length > 0 ? autoCheckRuns.length : (hasAnyAutoCheck ? 1 : 0))})`]] as const).map(([key, label]) => (
           <button key={key} onClick={() => setDetailTab(key as "trigger" | "evidence")} style={{
             padding: "10px 20px", fontSize: 13, fontWeight: detailTab === key ? 700 : 400,
             color: detailTab === key ? "#1890ff" : "#666", cursor: "pointer",
@@ -521,38 +544,89 @@ function AlarmDetail({ alarm }: { alarm: Alarm }) {
 
       {detailTab === "evidence" && (
         <div>
-          {/* Pipeline-mode auto_check output (preferred when present) */}
-          {(diagnosticDvs.length > 0 || diagnosticCharts.length > 0 || diagnosticAlert) && (
-            <div style={{
-              border: "1px solid #e0e0e0", borderRadius: 8,
-              padding: "14px 16px", marginBottom: 16, background: "#fff",
-            }}>
-              <div style={{
-                fontSize: 11, fontWeight: 700, color: "#595959",
-                textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8,
+          {/* Multi-run mode (preferred): one card per auto_check pipeline that
+              fired for this alarm. The pipeline name is the user-given one
+              (e.g. "顯示最後一次 OOC 的 recipe 參數") so the user can tell
+              which result is which. */}
+          {autoCheckRuns.length > 0 ? (
+            autoCheckRuns.map((run, idx) => (
+              <div key={run.run_id} style={{
+                border: "1px solid #e0e0e0", borderRadius: 8,
+                padding: "14px 16px", marginBottom: 16, background: "#fff",
               }}>
-                Auto-Check 診斷 (pipeline run #{alarm.diagnostic_log_id})
-              </div>
-              {diagnosticAlert?.title && (
                 <div style={{
-                  background: "#fff5f5", border: "1px solid #fca5a5",
-                  borderRadius: 8, padding: "10px 14px", marginBottom: 12,
+                  fontSize: 12, fontWeight: 700, color: "#1e293b",
+                  marginBottom: 10,
+                  display: "flex", alignItems: "center", gap: 8,
                 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#dc2626", marginBottom: 4 }}>
-                    ⚠ {diagnosticAlert.title}
+                  <span style={{
+                    padding: "2px 8px", borderRadius: 4,
+                    background: "#e0f2fe", color: "#075985",
+                    fontSize: 10, fontWeight: 700, letterSpacing: "0.3px",
+                  }}>AC {idx + 1}/{autoCheckRuns.length}</span>
+                  <span>{run.pipeline_name || `Pipeline #${run.pipeline_id}`}</span>
+                  <span style={{ marginLeft: "auto", fontSize: 11, color: "#94a3b8" }}>
+                    run #{run.run_id} · {run.status}
+                  </span>
+                </div>
+                {run.alert?.title && (
+                  <div style={{
+                    background: "#fff5f5", border: "1px solid #fca5a5",
+                    borderRadius: 8, padding: "10px 14px", marginBottom: 12,
+                  }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#dc2626", marginBottom: 4 }}>
+                      ⚠ {run.alert.title}
+                    </div>
+                    {run.alert.message && (
+                      <div style={{ fontSize: 12, color: "#4a5568" }}>{run.alert.message}</div>
+                    )}
                   </div>
-                  {diagnosticAlert.message && (
-                    <div style={{ fontSize: 12, color: "#4a5568" }}>{diagnosticAlert.message}</div>
-                  )}
+                )}
+                {run.data_views.map((dv, i) => <DataViewTable key={i} dv={dv} />)}
+                {run.charts.length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    <ChartListRenderer charts={run.charts} />
+                  </div>
+                )}
+                {run.data_views.length === 0 && run.charts.length === 0 && !run.alert && (
+                  <div style={{ fontSize: 12, color: "#94a3b8" }}>（這次跑沒有產出明細）</div>
+                )}
+              </div>
+            ))
+          ) : (
+            // Legacy singleton fallback for older alarms (pre-multi-run enrichment).
+            (diagnosticDvs.length > 0 || diagnosticCharts.length > 0 || diagnosticAlert) && (
+              <div style={{
+                border: "1px solid #e0e0e0", borderRadius: 8,
+                padding: "14px 16px", marginBottom: 16, background: "#fff",
+              }}>
+                <div style={{
+                  fontSize: 11, fontWeight: 700, color: "#595959",
+                  textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8,
+                }}>
+                  Auto-Check 診斷 (pipeline run #{alarm.diagnostic_log_id})
                 </div>
-              )}
-              {diagnosticDvs.map((dv, i) => <DataViewTable key={i} dv={dv} />)}
-              {diagnosticCharts.length > 0 && (
-                <div style={{ marginTop: 8 }}>
-                  <ChartListRenderer charts={diagnosticCharts} />
-                </div>
-              )}
-            </div>
+                {diagnosticAlert?.title && (
+                  <div style={{
+                    background: "#fff5f5", border: "1px solid #fca5a5",
+                    borderRadius: 8, padding: "10px 14px", marginBottom: 12,
+                  }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#dc2626", marginBottom: 4 }}>
+                      ⚠ {diagnosticAlert.title}
+                    </div>
+                    {diagnosticAlert.message && (
+                      <div style={{ fontSize: 12, color: "#4a5568" }}>{diagnosticAlert.message}</div>
+                    )}
+                  </div>
+                )}
+                {diagnosticDvs.map((dv, i) => <DataViewTable key={i} dv={dv} />)}
+                {diagnosticCharts.length > 0 && (
+                  <div style={{ marginTop: 8 }}>
+                    <ChartListRenderer charts={diagnosticCharts} />
+                  </div>
+                )}
+              </div>
+            )
           )}
 
           {drs.length > 0 && (
@@ -563,7 +637,7 @@ function AlarmDetail({ alarm }: { alarm: Alarm }) {
             </>
           )}
 
-          {drs.length === 0 && diagnosticDvs.length === 0 && diagnosticCharts.length === 0 && !diagnosticAlert && (
+          {drs.length === 0 && !hasAnyAutoCheck && (
             <div style={{ padding: 24, textAlign: "center", color: "#a0aec0" }}>（無深度診斷結果）</div>
           )}
         </div>
