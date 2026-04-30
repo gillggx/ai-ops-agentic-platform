@@ -119,7 +119,12 @@ public class AlarmClusterService {
 			int sampled = 0;
 			for (PipelineRunEntity r : runs) {
 				if (r.getStartedAt() != null && r.getFinishedAt() != null) {
-					totalMs += Duration.between(r.getStartedAt(), r.getFinishedAt()).toMillis();
+					long ms = Duration.between(r.getStartedAt(), r.getFinishedAt()).toMillis();
+					// finished_at < started_at appears for runs that the
+					// scheduler stamped before kicking off the executor —
+					// treat as zero so the strip never shows -0.0s.
+					if (ms < 0) ms = 0;
+					totalMs += ms;
 					sampled++;
 				}
 			}
