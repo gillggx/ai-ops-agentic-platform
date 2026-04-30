@@ -143,14 +143,17 @@ public class AutoCheckExecutor {
 		// this, alarm.diagnostic_log_id stays NULL and the user sees no
 		// connection between the alarm and the diagnostic pipeline output.
 		if (savedRun != null && sourceAlarmId != null) {
-			try {
-				alarmRepo.findById(sourceAlarmId).ifPresent(a -> {
-					a.setDiagnosticLogId(savedRun.getId().longValue());
-					alarmRepo.save(a);
-				});
-			} catch (Exception ex) {
-				log.warn("auto_check: failed to backlink diagnostic_log_id on alarm={}: {}",
-						sourceAlarmId, ex.getMessage());
+			final Long runId = savedRun.getId() != null ? savedRun.getId().longValue() : null;
+			if (runId != null) {
+				try {
+					alarmRepo.findById(sourceAlarmId).ifPresent(a -> {
+						a.setDiagnosticLogId(runId);
+						alarmRepo.save(a);
+					});
+				} catch (Exception ex) {
+					log.warn("auto_check: failed to backlink diagnostic_log_id on alarm={}: {}",
+							sourceAlarmId, ex.getMessage());
+				}
 			}
 		}
 	}
