@@ -44,6 +44,8 @@ SIDECAR_NATIVE_BLOCKS: frozenset[str] = frozenset({
     "block_rolling_window",
     "block_weco_rules",
     "block_unpivot",
+    "block_spc_long_form",
+    "block_apc_long_form",
     "block_union",
     "block_cpk",
     "block_any_trigger",
