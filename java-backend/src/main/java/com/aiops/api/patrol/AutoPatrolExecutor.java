@@ -321,10 +321,23 @@ public class AutoPatrolExecutor {
 			}
 			out.put(e.getKey(), v);
 		}
-		// Convenience: if template is empty and target has tool_id, expose it
-		// so the pipeline can still bind by name.
-		if (out.isEmpty() && target.get("tool_id") != null) {
-			out.put("tool_id", target.get("tool_id"));
+		// Convenience: when input_binding is empty / NULL the pipeline still
+		// needs to receive its declared inputs. Pass through every scalar
+		// field on the target (event payload for event-mode, fan-out target
+		// for schedule-mode) so the pipeline can pick whichever name(s) it
+		// declared (equipment_id, tool_id, step, lot_id, etc.) — sidecar
+		// logs a warning for each non-declared input and ignores it.
+		// Pre-V6 fallback only added tool_id, which broke pipelines that
+		// declared equipment_id (the canonical Patrol-event-mode wizard
+		// suggestion).
+		if (out.isEmpty()) {
+			for (Map.Entry<String, Object> e : target.entrySet()) {
+				Object v = e.getValue();
+				// Skip nested structures — only pass scalars / strings to keep
+				// the input shape predictable for _resolve_params.
+				if (v == null || v instanceof Map || v instanceof List) continue;
+				out.put(e.getKey(), v);
+			}
 		}
 		return out;
 	}
