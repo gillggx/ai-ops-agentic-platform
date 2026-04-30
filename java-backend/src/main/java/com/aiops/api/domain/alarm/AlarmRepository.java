@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 
 @Repository
@@ -17,4 +18,14 @@ public interface AlarmRepository extends JpaRepository<AlarmEntity, Long> {
 			+ "FROM alarms WHERE (:status IS NULL OR status = :status) "
 			+ "GROUP BY LOWER(COALESCE(severity, 'medium'))", nativeQuery = true)
 	List<Object[]> countBySeverityGrouped(@Param("status") String status);
+
+	/** Used by AlarmClusterService.computeClusters — pulls every alarm in
+	 *  the time window (defaults to last 24h on the controller) into memory
+	 *  for grouping. Indexed by event_time so this stays cheap up to ~10k
+	 *  rows; we group by equipment_id in Java rather than SQL because
+	 *  sparkline + bay derivation are easier in app code. */
+	List<AlarmEntity> findByEventTimeAfterOrderByEventTimeDesc(OffsetDateTime since);
+
+	/** Cluster-level batch ack — fetch every active alarm for one tool. */
+	List<AlarmEntity> findByEquipmentIdAndStatus(String equipmentId, String status);
 }

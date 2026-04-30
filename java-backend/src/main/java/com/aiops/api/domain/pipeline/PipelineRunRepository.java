@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.List;
 
@@ -34,4 +35,14 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRunEntity, 
 		"ORDER BY started_at DESC",
 		nativeQuery = true)
 	List<PipelineRunEntity> findAllByAlarmIds(@Param("alarmIdsText") Collection<String> alarmIdsText);
+
+	/** auto_check runs in the last hour — KPI strip pulls count + avg
+	 *  latency. Restrict to runs that came from an alarm (auto_check
+	 *  always sets source_alarm_id; pipelines run from the chat agent or
+	 *  direct test wouldn't have it). */
+	@Query(value = "SELECT * FROM pb_pipeline_runs " +
+		"WHERE started_at > :since " +
+		"  AND node_results::jsonb->>'source_alarm_id' IS NOT NULL",
+		nativeQuery = true)
+	List<PipelineRunEntity> findAutoCheckRunsSince(@Param("since") OffsetDateTime since);
 }

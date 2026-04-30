@@ -26,10 +26,40 @@ public class AlarmController {
 
 	private final AlarmRepository repository;
 	private final AlarmEnrichmentService enrichment;
+	private final AlarmClusterService clusterService;
 
-	public AlarmController(AlarmRepository repository, AlarmEnrichmentService enrichment) {
+	public AlarmController(AlarmRepository repository,
+	                       AlarmEnrichmentService enrichment,
+	                       AlarmClusterService clusterService) {
 		this.repository = repository;
 		this.enrichment = enrichment;
+		this.clusterService = clusterService;
+	}
+
+	/** Cluster-first list view (Alarm Center redesign). Groups alarms by
+	 *  equipment_id within the {@code sinceHours} window. See
+	 *  SPEC_alarm_center_redesign_v1 §2.2. */
+	@GetMapping("/clusters")
+	public ApiResponse<AlarmClusterDtos.ClusterListResponse> clusters(
+			@RequestParam(name = "since_hours", defaultValue = "24") int sinceHours,
+			@RequestParam(required = false) String status) {
+		return ApiResponse.ok(clusterService.computeClusters(sinceHours, status));
+	}
+
+	@GetMapping("/kpis")
+	public ApiResponse<AlarmClusterDtos.Kpis> kpis(
+			@RequestParam(name = "since_hours", defaultValue = "24") int sinceHours) {
+		return ApiResponse.ok(clusterService.computeKpis(sinceHours));
+	}
+
+	@PostMapping("/cluster-ack")
+	public ApiResponse<AlarmClusterDtos.ClusterAckResponse> clusterAck(
+			@RequestBody AlarmClusterDtos.ClusterAckRequest body,
+			@AuthenticationPrincipal AuthPrincipal caller) {
+		if (body == null || body.equipmentId() == null || body.equipmentId().isBlank()) {
+			throw ApiException.badRequest("equipment_id required");
+		}
+		return ApiResponse.ok(clusterService.ackCluster(body.equipmentId(), caller.username()));
 	}
 
 	@GetMapping
