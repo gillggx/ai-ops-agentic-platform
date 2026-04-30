@@ -455,7 +455,7 @@ function AlarmDetail({ alarm }: { alarm: Alarm }) {
 
       {/* Tabs: Trigger Event | Evidence */}
       <div style={{ display: "flex", borderBottom: "1px solid #e0e0e0", marginBottom: 16 }}>
-        {([["trigger", "🔴 觸發原因"], ["evidence", `📊 深度診斷 (${drs.length})`]] as const).map(([key, label]) => (
+        {([["trigger", "🔴 觸發原因"], ["evidence", `📊 深度診斷 (${drs.length + ((diagnosticDvs.length > 0 || diagnosticCharts.length > 0 || diagnosticAlert) ? 1 : 0)})`]] as const).map(([key, label]) => (
           <button key={key} onClick={() => setDetailTab(key as "trigger" | "evidence")} style={{
             padding: "10px 20px", fontSize: 13, fontWeight: detailTab === key ? 700 : 400,
             color: detailTab === key ? "#1890ff" : "#666", cursor: "pointer",

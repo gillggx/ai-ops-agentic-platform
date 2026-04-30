@@ -459,7 +459,9 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
     )
     distill_svc = DataDistillationService()
 
-    tool_messages: List[ToolMessage] = []
+    # Allow AIMessage too (e.g. clean follow-up text after confirm_pipeline_intent
+    # so synthesis doesn't dump the raw tool-result JSON as the final answer).
+    tool_messages: List[Any] = []
     new_tools_used: List[Dict[str, Any]] = []
     new_render_cards: List[Dict[str, Any]] = []
     chart_rendered = state.get("chart_already_rendered", False)
@@ -888,6 +890,18 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
             tool_call_id=tc_id,
             name=tool_name,
         ))
+
+        # F1 follow-up: confirm_pipeline_intent's tool result is a JSON dict
+        # carrying internal "STOP this turn" instructions for the LLM. With
+        # force_synthesis=True the synthesis node would render that dict as
+        # the final user-visible text. Inject a clean AIMessage *after* the
+        # ToolMessage so synthesis uses this as the last message instead.
+        if (tool_name == "confirm_pipeline_intent"
+                and isinstance(result, dict)
+                and result.get("status") == "awaiting_user_confirmation"):
+            tool_messages.append(AIMessage(
+                content="我已寫下要建的內容（見上方卡片），請確認 ✅ 後我會開始建。",
+            ))
 
     # Collect flat_data/ui_config from pipeline or query_data results
     _state_flat_data = None

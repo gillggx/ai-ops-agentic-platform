@@ -149,11 +149,15 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
                 "     a. First call `search_published_skills(query=<user goal>)`.\n"
                 "     b. If a result matches well, call `invoke_published_skill(slug, inputs)`.\n"
                 "     c. **If no good match**: DO NOT immediately call `build_pipeline_live`.\n"
-                "        First tell the user in one short sentence: \"找不到現成 skill，要不要\n"
-                "        我幫你建一條？\"（或「沒有現成的分析可用，我可以用 Pipeline Builder\n"
-                "        建一條新的，要嗎？」）— 等使用者同意（\"好\" / \"可以\" / \"ok\"）再呼叫\n"
-                "        `build_pipeline_live(goal=\"...\")`. 這是強制的禮貌性確認，因為\n"
-                "        build_pipeline_live 會接管使用者畫面開 canvas overlay。\n"
+                "        Decide based on prompt clarity:\n"
+                "        - **Ambiguous prompt**（含「該機台/該站/最近一次/分析」、跨 metric 來源、\n"
+                "          沒指定呈現方式）→ call `confirm_pipeline_intent(inputs, logic, presentation)`\n"
+                "          **first** so the user can ✅ confirm before we build. This applies in\n"
+                "          chat mode too — silently building the wrong thing wastes a full Glass\n"
+                "          Box session and the user has to ask again.\n"
+                "        - **Clear prompt**（具體 input + 具體 metric + 具體呈現）→ tell user\n"
+                "          「找不到現成 skill，要不要我幫你建一條？」, wait for 「好/可以/ok」, then\n"
+                "          call `build_pipeline_live(goal=\"...\")`.\n"
                 "     d. 若使用者一開始就明確表達要「建 pipeline / 建新 skill」則可直接呼叫，\n"
                 "        不用再問一次。\n"
                 "\n"
@@ -345,6 +349,32 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
         snapshot = state.get("pipeline_snapshot") or {}
         declared = snapshot.get("inputs") or []
         nodes = snapshot.get("nodes") or []
+        kind = snapshot.get("_kind")  # "auto_patrol" | "auto_check" | "skill" | None
+        if kind:
+            kind_hints = {
+                "auto_patrol": (
+                    "## 🔔 Pipeline kind: auto_patrol\n"
+                    "  - Inputs typically `event_payload` (event-mode 從 OOC event 帶 equipment_id/step/lot_id)\n"
+                    "    或 `user_input` (schedule/once 模式由使用者填入)\n"
+                    "  - 不要把 input 標成 user_input 如果 trigger_mode=event — runtime 會從 event payload 帶。\n"
+                ),
+                "auto_check": (
+                    "## 🔬 Pipeline kind: auto_check\n"
+                    "  - 這條 pipeline 是用來**接收 alarm**做進一步診斷的。\n"
+                    "  - Inputs 幾乎全部是 `event_payload`（從 alarm payload 自動帶入：\n"
+                    "    equipment_id / lot_id / step / event_time / trigger_event / severity）。\n"
+                    "  - **不要** 把 equipment_id/step 等標成 `user_input` — runtime 是 alarm 自動帶的。\n"
+                    "  - 不會自己生 alarm（無 block_alert），只是分析給 user 看。\n"
+                ),
+                "skill": (
+                    "## 📚 Pipeline kind: skill\n"
+                    "  - 給 Agent / 使用者依需求呼叫的可重用 pipeline。\n"
+                    "  - Inputs 通常是 `user_input` (Agent / 使用者每次呼叫時填)。\n"
+                ),
+            }
+            if kind in kind_hints:
+                system_text += "\n" + kind_hints[kind]
+
         if declared or nodes:
             lines: list[str] = []
             if declared:

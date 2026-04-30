@@ -3,7 +3,7 @@ import { BACKEND_BASE, authHeaders } from "../../../_common";
 
 export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const res = await fetch(`${BACKEND_BASE}/pipelines/${id}/deprecate`, {
+  const res = await fetch(`${BACKEND_BASE}/pipelines/${id}/archive`, {
     method: "POST",
     headers: await authHeaders(),
   });

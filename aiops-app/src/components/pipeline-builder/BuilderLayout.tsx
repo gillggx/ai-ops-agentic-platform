@@ -825,15 +825,15 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
               </button>
             </>
           )}
-          {/* P4.4: Patrol-binding button. Label reflects bound state:
-              - no binding yet  → "🔔 設定 Patrol 觸發" (blue, prominent)
-              - already bound   → "🔔 編輯 Patrol 綁定 (#id)" (ghost, less loud)
-              Hidden for skill kind (skills are on-demand, no trigger).
-              Hidden for archived pipelines. */}
+          {/* P4.4: Trigger-binding button. Routing by pipeline_kind:
+              - auto_patrol  → AutoPatrolSetupModal（event / schedule / once）
+              - auto_check   → AutoCheckPublishModal（綁哪個 alarm 觸發此 pipeline）
+              - skill / null → 隱藏（skills are on-demand, no trigger）
+              Bound state changes the label. Hidden for archived. */}
           {mode !== "session"
             && state.meta.pipelineId != null
             && state.meta.status !== "archived"
-            && state.meta.pipelineKind !== "skill" && (
+            && state.meta.pipelineKind === "auto_patrol" && (
             <button
               onClick={() => setAutoPatrolModalOpen(true)}
               style={{
@@ -850,6 +850,24 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
               }
             >
               🔔 {boundPatrol ? `編輯 Patrol 綁定 (#${boundPatrol.id})` : "設定 Patrol 觸發"}
+            </button>
+          )}
+          {mode !== "session"
+            && state.meta.pipelineId != null
+            && state.meta.status !== "archived"
+            && state.meta.pipelineKind === "auto_check" && (
+            <button
+              onClick={() => setAutoCheckModalOpen(true)}
+              style={{
+                ...btn("ghost"),
+                border: "1px solid #3182ce",
+                color: "#2c5282",
+                background: "#ebf8ff",
+                fontWeight: 600,
+              }}
+              title="設定 / 編輯 — 哪個 alarm event 來時要 fire 這條 auto-check pipeline"
+            >
+              🔔 設定 Auto-Check 來源
             </button>
           )}
           {/* Phase A — Run Now button: only when this pipeline has a bound
@@ -1057,7 +1075,12 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
                 mode="session"
                 agentMode="builder"
                 sessionId={sessionId ?? `pb-${state.meta.pipelineId ?? "new"}`}
-                pipelineSnapshot={state.pipeline}
+                // Inject `_kind` into the snapshot so the orchestrator's
+                // builder section knows whether this is auto_patrol /
+                // auto_check / skill — drives confirm_pipeline_intent's
+                // input.source classification (auto_check inputs come from
+                // alarm payload, not user_input).
+                pipelineSnapshot={{ ...state.pipeline, _kind: state.meta.pipelineKind ?? null }}
                 onGlassOp={(ev) => applyGlassOpToCanvas(ev, actions, catalog)}
                 contextEquipment={null}
                 focusedNodeId={focusedNodeId}

@@ -283,7 +283,9 @@ export async function deletePipeline(id: number): Promise<void> {
 }
 
 export async function deprecatePipeline(id: number): Promise<PipelineSummary> {
-  const res = await fetch(`${BASE}/pipelines/${id}/deprecate`, { method: "POST" });
+  // Java backend exposes /archive (not /deprecate). Function name kept for
+  // backwards-compat with existing callers; URL is the canonical one.
+  const res = await fetch(`${BASE}/pipelines/${id}/archive`, { method: "POST" });
   return unwrap<PipelineSummary>(res);
 }
 
