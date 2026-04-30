@@ -39,7 +39,7 @@ interface Props {
   /** Optional active auto_patrol list. Each becomes a checkbox that maps
    *  to `auto_patrol:{id}` trigger_event token (the string written by
    *  AutoPatrolExecutor.writeAlarm when a patrol fires an alarm). */
-  patrolSuggestions?: Array<{ id: number; name: string }>;
+  patrolSuggestions?: Array<{ id: number; name: string; pipeline_name?: string | null }>;
 }
 
 export default function AutoCheckTriggerForm({
@@ -110,7 +110,7 @@ export default function AutoCheckTriggerForm({
                   style={chipStyle(picked, "#0891B2", "#ECFEFF")}
                   title={`綁定 trigger_event="${token}"`}
                 >
-                  {picked ? "☑" : "☐"}  Patrol #{p.id} 「{p.name}」
+                  {picked ? "☑" : "☐"}  Patrol #{p.id} 「{p.pipeline_name || p.name}」
                 </button>
               );
             })}

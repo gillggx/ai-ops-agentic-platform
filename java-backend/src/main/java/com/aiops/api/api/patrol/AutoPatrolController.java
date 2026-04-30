@@ -6,6 +6,8 @@ import com.aiops.api.common.ApiException;
 import com.aiops.api.common.ApiResponse;
 import com.aiops.api.domain.patrol.AutoPatrolEntity;
 import com.aiops.api.domain.patrol.AutoPatrolRepository;
+import com.aiops.api.domain.pipeline.PipelineEntity;
+import com.aiops.api.domain.pipeline.PipelineRepository;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -20,15 +22,18 @@ import java.util.List;
 public class AutoPatrolController {
 
 	private final AutoPatrolRepository repository;
+	private final PipelineRepository pipelineRepo;
 	private final com.aiops.api.domain.skill.ExecutionLogRepository execLogRepo;
 	private final com.aiops.api.patrol.AutoPatrolSchedulerService schedulerService;
 	private final com.aiops.api.patrol.AutoPatrolExecutor executor;
 
 	public AutoPatrolController(AutoPatrolRepository repository,
+	                            PipelineRepository pipelineRepo,
 	                            com.aiops.api.domain.skill.ExecutionLogRepository execLogRepo,
 	                            com.aiops.api.patrol.AutoPatrolSchedulerService schedulerService,
 	                            com.aiops.api.patrol.AutoPatrolExecutor executor) {
 		this.repository = repository;
+		this.pipelineRepo = pipelineRepo;
 		this.execLogRepo = execLogRepo;
 		this.schedulerService = schedulerService;
 		this.executor = executor;
@@ -39,7 +44,21 @@ public class AutoPatrolController {
 	public ApiResponse<List<Dtos.Summary>> list(@RequestParam(required = false) Boolean active) {
 		List<AutoPatrolEntity> all = Boolean.TRUE.equals(active)
 				? repository.findByIsActiveTrue() : repository.findAll();
-		return ApiResponse.ok(all.stream().map(Dtos::summaryOf).toList());
+		// Build pipeline_id → pipeline.name map so the wizard / picker can show
+		// users the bound pipeline's name (the patrol's own name is often a
+		// generic auto-generated string like "[Patrol] 新 Pipeline").
+		java.util.Set<Long> pids = all.stream()
+				.map(AutoPatrolEntity::getPipelineId)
+				.filter(java.util.Objects::nonNull)
+				.collect(java.util.stream.Collectors.toSet());
+		java.util.Map<Long, String> nameById = pids.isEmpty() ? java.util.Map.of()
+				: java.util.stream.StreamSupport.stream(
+						pipelineRepo.findAllById(pids).spliterator(), false)
+				.collect(java.util.stream.Collectors.toMap(
+						PipelineEntity::getId, PipelineEntity::getName, (a, b) -> a));
+		return ApiResponse.ok(all.stream()
+				.map(e -> Dtos.summaryOf(e, nameById.get(e.getPipelineId())))
+				.toList());
 	}
 
 	@GetMapping("/{id}")
@@ -145,7 +164,7 @@ public class AutoPatrolController {
 	public static final class Dtos {
 
 		public record Summary(Long id, String name, String triggerMode, String cronExpr,
-		                      Boolean isActive, Long pipelineId, Long skillId,
+		                      Boolean isActive, Long pipelineId, String pipelineName, Long skillId,
 		                      java.time.OffsetDateTime updatedAt) {}
 
 		public record Detail(Long id, String name, String description, Long skillId, Long pipelineId,
@@ -170,9 +189,15 @@ public class AutoPatrolController {
 		                            String alarmTitle, String notifyConfig, String inputBinding,
 		                            Boolean isActive) {}
 
-		static Summary summaryOf(AutoPatrolEntity e) {
+		static Summary summaryOf(AutoPatrolEntity e, String pipelineName) {
 			return new Summary(e.getId(), e.getName(), e.getTriggerMode(), e.getCronExpr(),
-					e.getIsActive(), e.getPipelineId(), e.getSkillId(), e.getUpdatedAt());
+					e.getIsActive(), e.getPipelineId(), pipelineName, e.getSkillId(), e.getUpdatedAt());
+		}
+
+		// Back-compat overload: callers that don't have the join data yet pass
+		// null for pipelineName so the response still serialises.
+		static Summary summaryOf(AutoPatrolEntity e) {
+			return summaryOf(e, null);
 		}
 
 		static Detail detailOf(AutoPatrolEntity e) {

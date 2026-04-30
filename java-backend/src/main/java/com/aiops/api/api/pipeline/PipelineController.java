@@ -426,11 +426,35 @@ public class PipelineController {
 		return ApiResponse.ok(null);
 	}
 
+	/** Phase D follow-up: list the auto_check trigger bindings for one
+	 *  pipeline. Used by the canvas banner to show "this pipeline is
+	 *  triggered by alarm.X / patrol Y" without having to open the modal. */
+	@GetMapping("/{id}/auto-check-triggers")
+	@PreAuthorize(Authorities.ANY_ROLE)
+	public ApiResponse<List<PipelineDtos.AutoCheckTriggerView>> listAutoCheckTriggers(@PathVariable Long id) {
+		var rows = autoCheckTriggerRepository.findByPipelineId(id);
+		List<PipelineDtos.AutoCheckTriggerView> out = new java.util.ArrayList<>();
+		for (var t : rows) {
+			Object filter = null;
+			String mf = t.getMatchFilter();
+			if (mf != null && !mf.isBlank()) {
+				try { filter = objectMapper.readValue(mf, java.util.Map.class); }
+				catch (Exception ignored) { filter = null; }
+			}
+			out.add(new PipelineDtos.AutoCheckTriggerView(
+					t.getId(), t.getPipelineId(), t.getEventType(), filter, t.getCreatedAt()));
+		}
+		return ApiResponse.ok(out);
+	}
+
 	public static final class PipelineDtos {
 
 		public record Summary(Long id, String name, String description, String status,
 		                      String pipelineKind, String version, Long createdBy,
 		                      java.time.OffsetDateTime updatedAt) {}
+
+		public record AutoCheckTriggerView(Long id, Long pipelineId, String eventType,
+		                                   Object matchFilter, java.time.OffsetDateTime createdAt) {}
 
 		public record Detail(Long id, String name, String description, String status,
 		                     String pipelineKind, String version, String pipelineJson,

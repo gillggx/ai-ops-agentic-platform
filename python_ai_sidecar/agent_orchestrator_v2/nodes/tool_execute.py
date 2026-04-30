@@ -16,7 +16,7 @@ import logging
 from typing import Any, Dict, List
 from langchain_core.runnables import RunnableConfig
 
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 
 logger = logging.getLogger(__name__)
 

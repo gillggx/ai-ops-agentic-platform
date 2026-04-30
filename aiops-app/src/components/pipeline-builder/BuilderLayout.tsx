@@ -131,6 +131,12 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
   const [autoPatrolModalOpen, setAutoPatrolModalOpen] = useState(false);
   // P4.4: the Auto-Patrol currently bound to this pipeline (for edit mode).
   // null = not fetched yet; undefined = fetched but none exists (unbound).
+  // P5 Auto-Check binding visibility: show user which alarm event_types
+  // currently route to this pipeline. Backend table:
+  //   pipeline_auto_check_triggers(pipeline_id, event_type, match_filter)
+  const [autoCheckBindings, setAutoCheckBindings] = useState<
+    Array<{ event_type: string; match_filter: Record<string, string[]> | null }> | null
+  >(null);
   const [boundPatrol, setBoundPatrol] = useState<
     | null
     | undefined
@@ -226,6 +232,47 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
     }
   }, [state.meta.pipelineId, mode]);
   useEffect(() => { void fetchBoundPatrol(); }, [fetchBoundPatrol]);
+
+  // Fetch auto_check trigger bindings (kind=auto_check only). Lets the canvas
+  // banner display "this pipeline is triggered by alarm.X / patrol Y" so the
+  // user can confirm the wiring at a glance instead of opening the modal.
+  useEffect(() => {
+    if (mode === "session") return;
+    if (state.meta.pipelineKind !== "auto_check") {
+      setAutoCheckBindings(null);
+      return;
+    }
+    if (state.meta.pipelineId == null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/admin/pipelines/${state.meta.pipelineId}/auto-check-triggers`,
+          { cache: "no-store" },
+        );
+        if (!res.ok) { setAutoCheckBindings([]); return; }
+        const json = await res.json();
+        // Java DTO uses camelCase (eventType / matchFilter), Python era used
+        // snake_case. Accept both for graceful migration.
+        const data = (json?.data ?? json) as Array<{
+          eventType?: string; event_type?: string;
+          matchFilter?: Record<string, string[]> | null;
+          match_filter?: Record<string, string[]> | null;
+        }>;
+        if (!cancelled) {
+          setAutoCheckBindings(
+            (Array.isArray(data) ? data : []).map((b) => ({
+              event_type: b.eventType ?? b.event_type ?? "",
+              match_filter: b.matchFilter ?? b.match_filter ?? null,
+            })).filter((b) => b.event_type),
+          );
+        }
+      } catch {
+        if (!cancelled) setAutoCheckBindings([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [state.meta.pipelineId, state.meta.pipelineKind, mode]);
 
   // Warn on unload if dirty
   useEffect(() => {
@@ -927,6 +974,52 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
           )}
         </div>
       </div>
+
+      {/* P5: auto_check pipelines — show which alarm event_types currently
+          route to this pipeline. Empty array = saved but no binding yet. */}
+      {mode !== "session"
+        && state.meta.pipelineId != null
+        && state.meta.pipelineKind === "auto_check"
+        && state.meta.status !== "archived"
+        && autoCheckBindings != null && (
+        <div
+          style={{
+            padding: "8px 18px",
+            background: autoCheckBindings.length > 0 ? "#ecfeff" : "#fffbeb",
+            borderBottom: "1px solid",
+            borderBottomColor: autoCheckBindings.length > 0 ? "#a5f3fc" : "#fde68a",
+            fontSize: 12,
+            color: autoCheckBindings.length > 0 ? "#155e75" : "#92400e",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          {autoCheckBindings.length > 0 ? (
+            <>
+              <span style={{ fontWeight: 600 }}>🔬 Auto-Check 已綁定</span>
+              <span>當 alarm 的 trigger_event 符合以下時 fire 這條 pipeline：</span>
+              {autoCheckBindings.map((b, i) => (
+                <code key={i} style={{
+                  padding: "2px 8px", borderRadius: 4,
+                  background: "#fff", border: "1px solid #a5f3fc",
+                  fontFamily: "ui-monospace, monospace", fontSize: 11,
+                }}>
+                  {b.event_type}
+                  {b.match_filter && Object.keys(b.match_filter).length > 0 && (
+                    <span style={{ marginLeft: 6, color: "#0891b2" }}>
+                      + {Object.keys(b.match_filter).length} filter
+                    </span>
+                  )}
+                </code>
+              ))}
+            </>
+          ) : (
+            <span>⚠️ 這個 Auto-Check pipeline 還沒綁任何 alarm 事件 — 按右上「設定 Auto-Check 來源」設定。</span>
+          )}
+        </div>
+      )}
 
       {/* P4.4: banner reminding auto_patrol pipelines to bind a trigger.
           Shown when: kind=auto_patrol, saved, not archived, no patrol bound,

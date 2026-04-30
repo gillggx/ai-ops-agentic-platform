@@ -309,7 +309,7 @@ function TriggerStep({
 }) {
   const [eventTypes, setEventTypes] = useState<EventType[]>([]);
   const [eventTypeSuggestions, setEventTypeSuggestions] = useState<string[]>([]);
-  const [patrolSuggestions, setPatrolSuggestions] = useState<Array<{ id: number; name: string }>>([]);
+  const [patrolSuggestions, setPatrolSuggestions] = useState<Array<{ id: number; name: string; pipeline_name?: string | null }>>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -329,9 +329,9 @@ function TriggerStep({
       .then((d) => {
         const items = Array.isArray(d) ? d : (d?.data ?? []);
         setPatrolSuggestions(
-          (items as Array<{ id: number; name: string }>)
+          (items as Array<{ id: number; name: string; pipeline_name?: string | null }>)
             .filter((p) => p && p.id != null && p.name)
-            .map((p) => ({ id: p.id, name: p.name })),
+            .map((p) => ({ id: p.id, name: p.name, pipeline_name: p.pipeline_name ?? null })),
         );
       })
       .catch(() => setPatrolSuggestions([]));
