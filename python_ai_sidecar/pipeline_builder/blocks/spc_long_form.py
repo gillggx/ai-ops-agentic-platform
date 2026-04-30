@@ -90,4 +90,12 @@ class SpcLongFormBlockExecutor(BlockExecutor):
             frames.append(sub)
 
         out = pd.concat(frames, axis=0, ignore_index=True)
+        # Sort newest-first by eventTime so previews / data_views show a
+        # representative cross-chart sample. Concat groups all xbar rows
+        # then all r rows etc., which makes a max_rows=10 data_view look
+        # like the block "only emits xbar".
+        if "eventTime" in out.columns:
+            out = out.sort_values(
+                ["eventTime", "chart_name"], ascending=[False, True],
+            ).reset_index(drop=True)
         return {"data": out}

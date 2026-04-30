@@ -73,4 +73,10 @@ class ApcLongFormBlockExecutor(BlockExecutor):
         )
         # Strip the `apc_` prefix so the param_name column is human-friendly
         out["param_name"] = out["param_name"].str.removeprefix(_APC_PREFIX)
+        # Same UX consideration as spc_long_form — sort newest-first so
+        # data_view / preview don't show a single param dominating.
+        if "eventTime" in out.columns:
+            out = out.sort_values(
+                ["eventTime", "param_name"], ascending=[False, True],
+            ).reset_index(drop=True)
         return {"data": out}
