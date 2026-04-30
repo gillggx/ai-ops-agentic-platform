@@ -207,6 +207,28 @@ function AlarmDetailModal({ alarm, onClose }: { alarm: Alarm; onClose: () => voi
   const diagnosticCharts = alarm.diagnostic_charts ?? [];
   const diagnosticAlert = alarm.diagnostic_alert ?? null;
 
+  // Pipeline-mode banner: an alarm row in the DB IS the proof it triggered.
+  // Legacy DR-style condition_met (false → "條件未達成") doesn't apply when
+  // the alarm came from a pipeline's block_alert. Treat any of these as
+  // "triggered":
+  //   1. legacy findings.condition_met = true
+  //   2. pipeline result_summary.triggered = true (via findings)
+  //   3. block_alert produced a row (alarm.diagnostic_alert is non-null
+  //      OR alarm has data_views or alarm summary != "")
+  // The "未觸發" banner is reserved for diagnostic-only views where
+  // auto_check ran and found "all clear" — handled separately on that tab.
+  const findingsObj = (alarm.findings as Record<string, unknown>) ?? null;
+  const findingsTriggered = findingsObj && (
+    findingsObj.condition_met === true
+    || ((findingsObj.result_summary as Record<string, unknown> | undefined)?.triggered === true)
+  );
+  const triggered = !!findingsTriggered || triggerDvs.length > 0 || !!alarm.summary;
+  const triggerSummary =
+    (findingsObj?.summary as string | undefined)
+    ?? ((findingsObj?.result_summary as Record<string, unknown> | undefined)?.summary as string | undefined)
+    ?? alarm.summary
+    ?? null;
+
   const hasApFindings = alarm.findings && Object.keys(alarm.findings).length > 0;
   const diagnosticResults = alarm.diagnostic_results ?? [];
   // Legacy fallback: if backend didn't provide diagnostic_results but has the old single-field, synthesise one entry
@@ -307,26 +329,26 @@ function AlarmDetailModal({ alarm, onClose }: { alarm: Alarm; onClose: () => voi
             <div>
               {/* Trigger banner */}
               <div style={{
-                background: alarm.findings?.condition_met ? "#fef2f2" : "#f0fdf4",
-                border: `1px solid ${alarm.findings?.condition_met ? "#fca5a5" : "#86efac"}`,
+                background: triggered ? "#fef2f2" : "#f0fdf4",
+                border: `1px solid ${triggered ? "#fca5a5" : "#86efac"}`,
                 borderRadius: 8, padding: "14px 16px", marginBottom: 16,
               }}>
                 <div style={{
                   fontSize: 12, fontWeight: 700, marginBottom: 4,
-                  color: alarm.findings?.condition_met ? "#dc2626" : "#16a34a",
+                  color: triggered ? "#dc2626" : "#16a34a",
                 }}>
-                  {alarm.findings?.condition_met ? "🔴 觸發原因 (AUTO-PATROL)" : "🟢 觸發原因 (AUTO-PATROL)"}
+                  {triggered ? "🔴 觸發原因 (AUTO-PATROL)" : "🟢 觸發原因 (AUTO-PATROL)"}
                 </div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#1a202c" }}>
-                  {alarm.findings?.condition_met ? "條件達成 — 將觸發警報" : "條件未達成"}
+                  {triggered ? "條件達成 — 已觸發警報" : "條件未達成"}
                 </div>
-                {alarm.findings?.summary && (
+                {triggerSummary && (
                   <div style={{
                     marginTop: 8, padding: "8px 12px", borderRadius: 6,
-                    background: alarm.findings.condition_met ? "#fee2e2" : "#dcfce7",
+                    background: triggered ? "#fee2e2" : "#dcfce7",
                     fontSize: 12, color: "#4a5568", fontFamily: "monospace",
                   }}>
-                    {alarm.findings.summary}
+                    {triggerSummary}
                   </div>
                 )}
               </div>
