@@ -71,11 +71,13 @@ public class AlarmEnrichmentService {
 		Set<Long> execIds = new HashSet<>();
 		Set<Long> skillIds = new HashSet<>();
 		List<String> triggerKeys = new ArrayList<>();
+		List<String> alarmIdTexts = new ArrayList<>();
 		for (AlarmEntity a : alarms) {
 			if (a.getExecutionLogId() != null) execIds.add(a.getExecutionLogId());
 			if (a.getDiagnosticLogId() != null) execIds.add(a.getDiagnosticLogId());
 			if (a.getSkillId() != null) skillIds.add(a.getSkillId());
 			triggerKeys.add("alarm:" + a.getId());
+			if (a.getId() != null) alarmIdTexts.add(String.valueOf(a.getId()));
 		}
 
 		// Pull diagnostic exec logs; their skill_ids also need to be in the skill map.
@@ -104,7 +106,45 @@ public class AlarmEnrichmentService {
 			if (aid != null) diagsByAlarmId.computeIfAbsent(aid, k -> new ArrayList<>()).add(dl);
 		}
 
-		return new Ctx(execsById, skillsById, diagsByAlarmId);
+		// One bulk JSONB scan instead of N. Group by source_alarm_id parsed
+		// from each run's node_results. Pipeline names also batched.
+		Map<Long, List<PipelineRunEntity>> runsByAlarmId = new HashMap<>();
+		Map<Long, String> pipelineNameById = Map.of();
+		if (!alarmIdTexts.isEmpty()) {
+			List<PipelineRunEntity> runs;
+			try {
+				runs = pipelineRunRepo.findAllByAlarmIds(alarmIdTexts);
+			} catch (Exception ex) {
+				log.warn("alarm enrichment: batch run lookup failed: {}", ex.toString());
+				runs = List.of();
+			}
+			Set<Long> pipelineIds = new LinkedHashSet<>();
+			for (PipelineRunEntity r : runs) {
+				JsonNode runNode = parseJsonNode(r.getNodeResults());
+				Long aid = parseSourceAlarmId(runNode);
+				if (aid != null) {
+					runsByAlarmId.computeIfAbsent(aid, k -> new ArrayList<>()).add(r);
+				}
+				if (r.getPipelineId() != null) pipelineIds.add(r.getPipelineId());
+			}
+			if (!pipelineIds.isEmpty()) {
+				pipelineNameById = StreamSupport.stream(
+						pipelineRepo.findAllById(pipelineIds).spliterator(), false)
+						.collect(Collectors.toMap(
+								PipelineEntity::getId, PipelineEntity::getName, (x, y) -> x));
+			}
+		}
+
+		return new Ctx(execsById, skillsById, diagsByAlarmId, runsByAlarmId, pipelineNameById);
+	}
+
+	private static Long parseSourceAlarmId(JsonNode runNode) {
+		if (runNode == null) return null;
+		JsonNode v = runNode.get("source_alarm_id");
+		if (v == null || v.isNull()) return null;
+		if (v.isNumber()) return v.asLong();
+		try { return Long.parseLong(v.asText().trim()); }
+		catch (NumberFormatException e) { return null; }
 	}
 
 	private AlarmDtos.Summary buildSummary(AlarmEntity a, Ctx ctx) {
@@ -293,52 +333,36 @@ public class AlarmEnrichmentService {
 			}
 		}
 
-		// P5+: an alarm may fire MULTIPLE auto_check pipelines (each binding
-		// in pipeline_auto_check_triggers writes its own pb_pipeline_runs row).
-		// alarm.diagnostic_log_id only points at ONE (last writer wins) so the
-		// UI lost the others. Collect every run keyed off this alarm and
-		// surface them as autoCheckRuns; the legacy singleton fields above
-		// stay populated from diagnostic_log_id for backwards compat.
+		// P5+: an alarm may fire MULTIPLE auto_check pipelines. Runs are
+		// pre-loaded in loadContext() (one bulk JSONB scan); we just look
+		// up by alarm id here. alarm.diagnostic_log_id only points at one
+		// run so UI used to lose the others.
 		List<AlarmDtos.AutoCheckRun> autoCheckRuns = new java.util.ArrayList<>();
-		try {
-			List<PipelineRunEntity> allRuns = pipelineRunRepo.findAllByAlarmId(a.getId());
-			java.util.Set<Long> pipelineIds = new java.util.LinkedHashSet<>();
-			for (PipelineRunEntity r : allRuns) {
-				if (r.getPipelineId() != null) pipelineIds.add(r.getPipelineId());
-			}
-			java.util.Map<Long, String> nameById = pipelineIds.isEmpty() ? java.util.Map.of()
-					: java.util.stream.StreamSupport.stream(
-							pipelineRepo.findAllById(pipelineIds).spliterator(), false)
-					.collect(java.util.stream.Collectors.toMap(
-							PipelineEntity::getId, PipelineEntity::getName, (x, y) -> x));
-			for (PipelineRunEntity r : allRuns) {
-				JsonNode runNode = parseJsonNode(r.getNodeResults());
-				List<AlarmDtos.DataView> dvs = List.of();
-				List<Object> chartsList = List.of();
-				Object alert = null;
-				if (runNode != null) {
-					JsonNode rs = runNode.get("result_summary");
-					if (rs != null && rs.isObject()) {
-						dvs = extractDataViews(rs.get("data_views"));
-						JsonNode chartsNode = rs.get("charts");
-						if (chartsNode != null && chartsNode.isArray()) {
-							List<Object> list = new java.util.ArrayList<>();
-							chartsNode.forEach(list::add);
-							chartsList = list;
-						}
-						JsonNode alertsNode = rs.get("alerts");
-						if (alertsNode != null && alertsNode.isArray() && alertsNode.size() > 0) {
-							alert = alertsNode.get(0);
-						}
+		List<PipelineRunEntity> allRuns = ctx.runsByAlarmId.getOrDefault(a.getId(), List.of());
+		for (PipelineRunEntity r : allRuns) {
+			JsonNode runNode = parseJsonNode(r.getNodeResults());
+			List<AlarmDtos.DataView> dvs = List.of();
+			List<Object> chartsList = List.of();
+			Object alert = null;
+			if (runNode != null) {
+				JsonNode rs = runNode.get("result_summary");
+				if (rs != null && rs.isObject()) {
+					dvs = extractDataViews(rs.get("data_views"));
+					JsonNode chartsNode = rs.get("charts");
+					if (chartsNode != null && chartsNode.isArray()) {
+						List<Object> list = new java.util.ArrayList<>();
+						chartsNode.forEach(list::add);
+						chartsList = list;
+					}
+					JsonNode alertsNode = rs.get("alerts");
+					if (alertsNode != null && alertsNode.isArray() && alertsNode.size() > 0) {
+						alert = alertsNode.get(0);
 					}
 				}
-				autoCheckRuns.add(new AlarmDtos.AutoCheckRun(
-						r.getId(), r.getPipelineId(), nameById.get(r.getPipelineId()),
-						r.getStatus(), dvs, chartsList, alert));
 			}
-		} catch (Exception ex) {
-			log.debug("alarm enrichment: failed to collect auto-check runs for alarm {}: {}",
-					a.getId(), ex.getMessage());
+			autoCheckRuns.add(new AlarmDtos.AutoCheckRun(
+					r.getId(), r.getPipelineId(), ctx.pipelineNameById.get(r.getPipelineId()),
+					r.getStatus(), dvs, chartsList, alert));
 		}
 
 		return new EnrichedFields(findings, outputSchema, diagFindings, diagOutputSchema,
@@ -422,7 +446,9 @@ public class AlarmEnrichmentService {
 
 	private record Ctx(Map<Long, ExecutionLogEntity> execs,
 	                   Map<Long, SkillDefinitionEntity> skills,
-	                   Map<Long, List<ExecutionLogEntity>> diagsByAlarmId) {}
+	                   Map<Long, List<ExecutionLogEntity>> diagsByAlarmId,
+	                   Map<Long, List<PipelineRunEntity>> runsByAlarmId,
+	                   Map<Long, String> pipelineNameById) {}
 
 	private record EnrichedFields(Object findings, Object outputSchema,
 	                              Object diagnosticFindings, Object diagnosticOutputSchema,
