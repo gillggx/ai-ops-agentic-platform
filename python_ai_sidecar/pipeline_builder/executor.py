@@ -328,6 +328,34 @@ def _collect_data_view_summaries(
     return [v[2] for v in views]
 
 
+def _collect_alerts(
+    pipeline: PipelineJSON,
+    cache: "RunCache",
+) -> list[dict[str, Any]]:
+    """Collect every block_alert node's emitted alert row(s).
+
+    block_alert outputs a 0-or-1-row DataFrame named 'alert' with columns
+    [severity, title, message, evidence_count, first_event_time,
+     last_event_time, emitted_at, triggered]. We forward those rows verbatim
+    so callers (Java AutoPatrolExecutor.writeAlarm) can use the templated
+    title/message instead of dumping the whole result_summary as JSON.
+    """
+    out: list[dict[str, Any]] = []
+    for node in pipeline.nodes:
+        if node.block_id != "block_alert":
+            continue
+        outputs = cache.get(node.id)
+        if outputs is None:
+            continue
+        df = outputs.get("alert")
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            continue
+        for _, row in df.iterrows():
+            entry = {"node_id": node.id, **row.to_dict()}
+            out.append(entry)
+    return out
+
+
 def _build_result_summary(
     pipeline: PipelineJSON,
     cache: "RunCache",
@@ -339,7 +367,8 @@ def _build_result_summary(
     terminal_id = _pick_terminal_logic_node(pipeline, cache)
     charts = _collect_chart_summaries(pipeline, cache)
     data_views = _collect_data_view_summaries(pipeline, cache)
-    if terminal_id is None and not charts and not data_views:
+    alerts = _collect_alerts(pipeline, cache)
+    if terminal_id is None and not charts and not data_views and not alerts:
         return None
 
     if terminal_id is not None:
@@ -357,6 +386,7 @@ def _build_result_summary(
         "evidence_rows": evidence_rows,
         "charts": charts,
         "data_views": data_views,
+        "alerts": alerts,
     }
 
 

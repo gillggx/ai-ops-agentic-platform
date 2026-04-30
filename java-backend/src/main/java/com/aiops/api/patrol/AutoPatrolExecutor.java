@@ -67,7 +67,13 @@ public class AutoPatrolExecutor {
 		this.objectMapper = objectMapper;
 		this.applicationContext = applicationContext;
 		this.sidecarServiceToken = sidecarServiceToken;
-		this.sidecarWebClient = WebClient.builder().baseUrl(sidecarBaseUrl).build();
+		// 16 MiB buffer — pipeline executions (esp. with block_data_view rows
+		// or full process_history dumps) routinely exceed Spring's default
+		// 256 KiB ceiling, which silently aborts auto_check parsing.
+		this.sidecarWebClient = WebClient.builder()
+				.baseUrl(sidecarBaseUrl)
+				.codecs(c -> c.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
+				.build();
 	}
 
 	/** Returned by {@link #executePatrol} so callers (manual /trigger
@@ -393,21 +399,47 @@ public class AutoPatrolExecutor {
 		Object stepRaw = target.get("step");
 		if (stepRaw != null) alarm.setStep(String.valueOf(stepRaw));
 		alarm.setEventTime(OffsetDateTime.now());
-		alarm.setSeverity(patrol.getAlarmSeverity() != null ? patrol.getAlarmSeverity() : "MEDIUM");
-		String title = patrol.getAlarmTitle();
+
+		// Pull templated title/message/severity from the pipeline's block_alert
+		// output if present (preferred — uses the user-authored templates with
+		// placeholders already filled). Fall back to patrol-level fields when
+		// the pipeline has no alert block or it produced no row.
+		Map<String, Object> firstAlert = pickFirstAlert(result);
+		String alertTitle = firstAlert != null ? asString(firstAlert.get("title")) : null;
+		String alertMessage = firstAlert != null ? asString(firstAlert.get("message")) : null;
+		String alertSeverity = firstAlert != null ? asString(firstAlert.get("severity")) : null;
+
+		String severity = alertSeverity != null && !alertSeverity.isBlank()
+				? alertSeverity
+				: (patrol.getAlarmSeverity() != null ? patrol.getAlarmSeverity() : "MEDIUM");
+		alarm.setSeverity(severity);
+
+		String title = alertTitle;
+		if (title == null || title.isBlank()) title = patrol.getAlarmTitle();
 		if (title == null || title.isBlank()) title = "[Auto-Patrol] " + patrol.getName();
-		// Compose summary as compact JSON of result_summary + tool context
-		Map<String, Object> summary = new HashMap<>();
-		summary.put("tool_id", toolId);
-		summary.put("patrol_id", patrol.getId());
-		summary.put("pipeline_id", patrol.getPipelineId());
-		summary.put("result_summary", result.get("result_summary"));
-		try {
-			alarm.setSummary(objectMapper.writeValueAsString(summary));
-		} catch (Exception ex) {
-			alarm.setSummary("{\"error\":\"failed to serialize summary\"}");
-		}
+		// Replace any unfilled {placeholder} (e.g. {toolID}, {step}) with values
+		// from the event payload — the pipeline's block_alert can't see fields
+		// stripped earlier in the DAG (e.g. count_rows discards row context).
+		title = fillPlaceholdersFromTarget(title, target, result);
 		alarm.setTitle(title.length() > 300 ? title.substring(0, 300) : title);
+
+		String summary = alertMessage;
+		if (summary != null) {
+			summary = fillPlaceholdersFromTarget(summary, target, result);
+		} else {
+			// No pipeline-emitted message → write a compact JSON breadcrumb
+			// (tool / patrol / pipeline ids + result_summary) so the alarm
+			// still carries trace context for follow-up debugging.
+			Map<String, Object> fallback = new HashMap<>();
+			fallback.put("tool_id", toolId);
+			fallback.put("patrol_id", patrol.getId());
+			fallback.put("pipeline_id", patrol.getPipelineId());
+			fallback.put("result_summary", result.get("result_summary"));
+			try { summary = objectMapper.writeValueAsString(fallback); }
+			catch (Exception ex) { summary = "{\"error\":\"failed to serialize summary\"}"; }
+		}
+		alarm.setSummary(summary);
+
 		alarm.setStatus("active");
 		AlarmEntity saved = alarmRepo.save(alarm);
 		log.info("alarm written: patrol={} tool={} title='{}'", patrol.getId(), toolId, title);
@@ -423,6 +455,51 @@ public class AutoPatrolExecutor {
 	}
 
 	// ── Helpers ───────────────────────────────────────────────────────────
+
+	/** Pluck the first alert row from result.result_summary.alerts, if any. */
+	@SuppressWarnings("unchecked")
+	private Map<String, Object> pickFirstAlert(Map<String, Object> result) {
+		Object rs = result.get("result_summary");
+		if (!(rs instanceof Map<?, ?> rsMap)) return null;
+		Object alerts = ((Map<String, Object>) rsMap).get("alerts");
+		if (!(alerts instanceof List<?> list) || list.isEmpty()) return null;
+		Object first = list.get(0);
+		return first instanceof Map<?, ?> ? (Map<String, Object>) first : null;
+	}
+
+	/** Replace {placeholder} occurrences in `tpl` with values from the target
+	 *  event payload (with toolID ↔ tool_id mirroring), then fall back to
+	 *  result_summary scalars (e.g. evidence_count). Unresolved placeholders
+	 *  pass through unchanged so the user can spot them. */
+	private String fillPlaceholdersFromTarget(String tpl, Map<String, Object> target,
+	                                          Map<String, Object> result) {
+		if (tpl == null || tpl.isEmpty() || tpl.indexOf('{') < 0) return tpl;
+		Map<String, Object> ctx = new HashMap<>(target);
+		// Common naming aliases the pipeline-side templates use.
+		if (ctx.get("toolID") == null && ctx.get("tool_id") != null) ctx.put("toolID", ctx.get("tool_id"));
+		if (ctx.get("equipmentID") == null && ctx.get("equipment_id") != null) ctx.put("equipmentID", ctx.get("equipment_id"));
+		if (ctx.get("lotID") == null && ctx.get("lot_id") != null) ctx.put("lotID", ctx.get("lot_id"));
+		// Pull a few useful scalars from result_summary.
+		Object rs = result.get("result_summary");
+		if (rs instanceof Map<?, ?> rsMap) {
+			@SuppressWarnings("unchecked")
+			Map<String, Object> rsm = (Map<String, Object>) rsMap;
+			ctx.putIfAbsent("evidence_count", rsm.get("evidence_rows"));
+			ctx.putIfAbsent("evidence_rows", rsm.get("evidence_rows"));
+		}
+		// Naive {key} replacement — we don't support format specifiers.
+		String out = tpl;
+		for (Map.Entry<String, Object> e : ctx.entrySet()) {
+			Object v = e.getValue();
+			if (v == null) continue;
+			out = out.replace("{" + e.getKey() + "}", String.valueOf(v));
+		}
+		return out;
+	}
+
+	private static String asString(Object v) {
+		return v == null ? null : v.toString();
+	}
 
 	private Map<String, Object> parseScope(String json) {
 		if (json == null || json.isBlank()) return Map.of("type", "event_driven");

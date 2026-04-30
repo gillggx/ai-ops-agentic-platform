@@ -33,6 +33,10 @@ public class PythonSidecarConfig {
 				.defaultHeader("X-Service-Token", python.serviceToken())
 				.defaultHeader(HttpHeaders.ACCEPT, "application/json")
 				.clientConnector(new ReactorClientHttpConnector(httpClient))
+				// 16 MiB — pipeline results / agent SSE bursts routinely exceed
+				// Spring's 256 KiB default. Aligns with AutoPatrolExecutor /
+				// AutoCheckExecutor's locally-built WebClients.
+				.codecs(c -> c.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
 				.build();
 	}
 }

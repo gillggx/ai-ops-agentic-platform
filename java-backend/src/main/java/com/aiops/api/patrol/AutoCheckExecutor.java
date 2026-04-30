@@ -52,7 +52,13 @@ public class AutoCheckExecutor {
 		this.pipelineRunRepo = pipelineRunRepo;
 		this.objectMapper = objectMapper;
 		this.sidecarServiceToken = sidecarServiceToken;
-		this.sidecarWebClient = WebClient.builder().baseUrl(sidecarBaseUrl).build();
+		// 16 MiB buffer — pipeline results with data_view rows / full process_history
+		// dumps routinely exceed Spring WebClient's default 256 KiB ceiling and
+		// would otherwise abort response parsing with DataBufferLimitException.
+		this.sidecarWebClient = WebClient.builder()
+				.baseUrl(sidecarBaseUrl)
+				.codecs(c -> c.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
+				.build();
 	}
 
 	/** Run an auto_check pipeline. Always writes a pb_pipeline_runs row.
