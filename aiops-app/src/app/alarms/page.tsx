@@ -499,8 +499,13 @@ function AlarmDetail({ alarm }: { alarm: Alarm }) {
             </div>
           )}
 
-          {/* Legacy DR-style render — only if findings has actual content */}
-          {alarm.findings && Object.keys(alarm.findings).length > 0 && (
+          {/* Legacy DR-style render — ONLY for old alarms that don't have
+              pipeline data_views. Pipeline-mode alarms already have a
+              complete picture above (banner + trigger evidence table) and
+              the legacy renderer would overlay its own confusing
+              "🟢 條件未達成 — 不觸發警報" banner + "請重新生成診斷計畫"
+              hint when findings.condition_met is undefined. */}
+          {triggerDvs.length === 0 && alarm.findings && Object.keys(alarm.findings).length > 0 && (
             <RenderMiddleware
               findings={alarm.findings}
               outputSchema={alarm.output_schema ?? []}
