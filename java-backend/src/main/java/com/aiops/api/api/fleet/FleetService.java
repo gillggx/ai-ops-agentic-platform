@@ -154,12 +154,12 @@ public class FleetService {
 	                                           Map<String, Object> simRow,
 	                                           OffsetDateTime since,
 	                                           OffsetDateTime now) {
-		int oocCount = 0, fdc = 0, openAlarms = 0;
+		int alarmOocCount = 0, fdc = 0, openAlarms = 0;
 		String latestAlarmTitle = null;
 		OffsetDateTime latestAlarmAt = null;
 		for (AlarmEntity a : alarms) {
 			String trig = a.getTriggerEvent() == null ? "" : a.getTriggerEvent().toLowerCase();
-			if (trig.contains("ooc") || trig.contains("spc")) oocCount++;
+			if (trig.contains("ooc") || trig.contains("spc")) alarmOocCount++;
 			if (trig.contains("fdc")) fdc++;
 			if ("active".equalsIgnoreCase(a.getStatus())) openAlarms++;
 			OffsetDateTime t = a.getEventTime() != null ? a.getEventTime() : a.getCreatedAt();
@@ -170,8 +170,15 @@ public class FleetService {
 			}
 		}
 
-		// lots24h: prefer simulator-provided count, fallback to distinct lot_id from alarms.
-		int lots24h = parseInt(simRow.get("lots_24h"));
+		// Source priority: simulator's by_tool aggregation (every SPC event,
+		// not just the ones that triggered a patrol alarm) → fallback to
+		// alarm-derived count when simulator is empty / unreachable.
+		int simOocCount = parseInt(simRow.get("ooc_count"));
+		int simEventCount = parseInt(simRow.get("count"));
+		int oocCount = simOocCount > 0 ? simOocCount : alarmOocCount;
+		// lots24h reuses simulator event count as a proxy (simulator has no
+		// per-lot count today). Distinct lot_id from alarms is the fallback.
+		int lots24h = simEventCount;
 		if (lots24h == 0) {
 			Set<String> lots = new HashSet<>();
 			for (AlarmEntity a : alarms) {
@@ -182,10 +189,15 @@ public class FleetService {
 		double oocPct = lots24h > 0 ? (double) oocCount / lots24h * 100 : 0;
 
 		// hourly[24] — OOC alarm count per hour bucket, oldest → newest.
+		// Caveat: only counts alarms that fired (e.g. patrol ≥3 OOC rule),
+		// so visualisation under-reports vs the simulator's raw OOC density.
 		List<Integer> hourly = bucketHourly(alarms, since, now);
 
-		// score → health
-		int score = 100 - (oocCount * 5 + openAlarms * 3 + fdc * 2);
+		// score = 100 − (oocPct·2 + openAlarms·3 + fdc·2), clamped.
+		// Rate-based (not absolute count) so a tool with 50 OOC out of 300
+		// events doesn't auto-zero the score. Tuned for ~10-30% rate range.
+		int penalty = (int) Math.round(oocPct * 2 + openAlarms * 3.0 + fdc * 2.0);
+		int score = 100 - penalty;
 		if (score < 0) score = 0;
 		if (score > 100) score = 100;
 		String health = score >= HEALTHY_THRESHOLD ? "healthy"
@@ -319,9 +331,12 @@ public class FleetService {
 	// ── Helpers ────────────────────────────────────────────────────────────
 
 	private List<Map<String, Object>> fetchToolsFromSimulator() {
+		// Simulator exposes /api/v1/tools returning a flat array of
+		// {tool_id, status}. We normalise to {tool_id, name, status} so
+		// buildEquipment can read either form.
 		try {
 			JsonNode root = simulatorClient.get()
-					.uri("/api/v1/equipment")
+					.uri("/api/v1/tools")
 					.retrieve()
 					.bodyToMono(JsonNode.class)
 					.block(Duration.ofSeconds(8));
@@ -331,7 +346,7 @@ public class FleetService {
 			TypeReference<List<Map<String, Object>>> typeRef = new TypeReference<>() {};
 			return mapper.convertValue(items, typeRef);
 		} catch (Exception ex) {
-			log.warn("simulator equipment fetch failed: {}", ex.toString());
+			log.warn("simulator tools fetch failed: {}", ex.toString());
 			return List.of();
 		}
 	}
