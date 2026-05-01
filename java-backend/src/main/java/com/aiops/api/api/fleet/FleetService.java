@@ -237,13 +237,17 @@ public class FleetService {
 
 	private List<Integer> bucketHourly(List<AlarmEntity> alarms,
 	                                   OffsetDateTime since, OffsetDateTime now) {
+		// Count every alarm row into the hour bucket — in v1 every alarm
+		// surfaced by the patrol pipeline is an OOC-derived signal, so the
+		// trigger_event column ('auto_patrol:N') doesn't carry the
+		// 'ooc'/'spc' literal we used to gate on; gating on it nulled the
+		// strip. Relax the filter; mis-counting a non-OOC patrol alarm in
+		// the strip is a much smaller sin than rendering all-zero rows.
 		long winMs = Math.max(Duration.between(since, now).toMillis(), 1);
 		int[] buckets = new int[SPARK_BUCKETS];
 		for (AlarmEntity a : alarms) {
 			OffsetDateTime t = a.getEventTime() != null ? a.getEventTime() : a.getCreatedAt();
 			if (t == null) continue;
-			String trig = a.getTriggerEvent() == null ? "" : a.getTriggerEvent().toLowerCase();
-			if (!(trig.contains("ooc") || trig.contains("spc"))) continue;
 			long offset = Duration.between(since, t).toMillis();
 			int idx = (int) Math.min(SPARK_BUCKETS - 1, Math.max(0, offset * SPARK_BUCKETS / winMs));
 			buckets[idx]++;
@@ -632,11 +636,15 @@ public class FleetService {
 
 	private static OffsetDateTime parseInstant(Object v) {
 		if (v == null) return null;
-		try { return OffsetDateTime.parse(String.valueOf(v)); }
-		catch (Exception ex) {
-			try { return java.time.Instant.parse(String.valueOf(v)).atOffset(ZoneOffset.UTC); }
-			catch (Exception ex2) { return null; }
-		}
+		String s = String.valueOf(v);
+		// 1. Full ISO with offset: "2026-05-01T02:55:38.065Z" / "+08:00"
+		try { return OffsetDateTime.parse(s); } catch (Exception ignored) {}
+		// 2. Bare instant ending in Z
+		try { return java.time.Instant.parse(s).atOffset(ZoneOffset.UTC); } catch (Exception ignored) {}
+		// 3. Naive ISO local-datetime ("2026-05-01T02:55:38.065000") — the
+		//    simulator emits this. Treat as UTC.
+		try { return java.time.LocalDateTime.parse(s).atOffset(ZoneOffset.UTC); } catch (Exception ignored) {}
+		return null;
 	}
 
 	@SuppressWarnings("unchecked")
