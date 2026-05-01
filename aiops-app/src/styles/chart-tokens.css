@@ -1,0 +1,90 @@
+/* Chart engine theme tokens — read by every chart in
+ * src/components/pipeline-builder/charts/* via lib/theme.ts.
+ *
+ * Loaded once by BuilderLayout (and any other surface that hosts charts).
+ * Values are scoped to `:root` so individual chart cards can override locally
+ * by setting CSS variables on their wrapper div. */
+
+:root {
+  /* Colors */
+  --chart-data: #2563EB;          /* primary data series */
+  --chart-secondary: #64748B;     /* secondary / dual-axis */
+  --chart-alert: #DC2626;         /* alarm / OOC / outlier */
+  --chart-warn: #d97706;
+  --chart-good: #059669;
+
+  /* Surface + grid */
+  --chart-bg: #ffffff;
+  --chart-grid: #e8e7e3;
+  --chart-grid-strong: #c8c6c0;
+  --chart-ink: #1a1a17;
+  --chart-ink-2: #4a4a45;
+  --chart-ink-3: #75736d;
+
+  /* Geometry tunables */
+  --chart-stroke: 1.4;
+  --chart-fill-op: 0.18;
+  --chart-point-r: 2.6;
+
+  /* Sequential palette (color-blind-safe, viridis-ish) */
+  --vir-0: #440154;
+  --vir-1: #404387;
+  --vir-2: #29788E;
+  --vir-3: #22A784;
+  --vir-4: #79D151;
+  --vir-5: #FDE724;
+
+  /* Diverging palette (centered) */
+  --div-neg-3: #1e3a8a;
+  --div-neg-2: #2563eb;
+  --div-neg-1: #93c5fd;
+  --div-zero: #f5f5f0;
+  --div-pos-1: #fca5a5;
+  --div-pos-2: #dc2626;
+  --div-pos-3: #7f1d1d;
+
+  /* Fonts (referenced by tooltip + axis labels). Builder pages already
+   * link Inter Tight + JetBrains Mono via next/font; we mirror the names. */
+  --chart-font-sans: 'Inter Tight', 'IBM Plex Sans', -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Roboto, sans-serif;
+  --chart-font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo,
+    monospace;
+}
+
+/* Default chart container styles — applied to elements matching the
+ * `.pb-chart-card` class. Individual chart components add their own SVG
+ * styling on top. */
+.pb-chart-card {
+  background: var(--chart-bg);
+  color: var(--chart-ink);
+  font-family: var(--chart-font-sans);
+}
+
+.pb-chart-card svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.pb-chart-card .axis-label,
+.pb-chart-card .axis-title {
+  font-family: var(--chart-font-mono);
+  font-size: 10px;
+  fill: var(--chart-ink-2);
+}
+
+.pb-chart-card .axis-title {
+  font-size: 11px;
+  font-weight: 600;
+  fill: var(--chart-ink);
+}
+
+.pb-chart-card .grid-line {
+  stroke: var(--chart-grid);
+  stroke-width: 1;
+}
+
+.pb-chart-card .axis-line {
+  stroke: var(--chart-grid-strong);
+  stroke-width: 1;
+}
