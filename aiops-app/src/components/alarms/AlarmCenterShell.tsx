@@ -20,7 +20,6 @@ export function AlarmCenterShell() {
 
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
   const [sevFilter, setSevFilter] = useState<"all" | "high" | "med" | "low">("all");
-  const [bayFilter, setBayFilter] = useState<"all" | "A" | "B" | "C">("all");
 
   const refresh = useCallback(async () => {
     setLoadingClusters(true);
@@ -69,8 +68,6 @@ export function AlarmCenterShell() {
         totalAlarms={totalAlarms}
         sevFilter={sevFilter}
         setSevFilter={setSevFilter}
-        bayFilter={bayFilter}
-        setBayFilter={setBayFilter}
         selectedClusterId={selectedClusterId}
         onSelect={setSelectedClusterId}
         loading={loadingClusters}

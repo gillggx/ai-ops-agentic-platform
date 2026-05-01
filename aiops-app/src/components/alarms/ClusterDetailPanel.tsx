@@ -95,7 +95,6 @@ export function ClusterDetailPanel({ cluster, onAcked }: {
           <span><strong>{cluster.open_count}</strong> open</span>
           {cluster.ack_count > 0 && <span><strong>{cluster.ack_count}</strong> acknowledged</span>}
           {cluster.affected_lots > 0 && <span><strong>{cluster.affected_lots}</strong> lots</span>}
-          {cluster.bay && <span>BAY-{cluster.bay}</span>}
           <span style={{ flexBasis: "100%" }} />
           <span>{fmtDateRange(cluster.first_at, cluster.last_at)}</span>
           {cluster.cause && <span>cause: {cluster.cause}</span>}

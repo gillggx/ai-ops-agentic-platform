@@ -38,7 +38,6 @@ export function ClusterCard({ cluster, selected, onClick }: {
         <div className="cluster-card__head">
           <span className="cluster-card__sev-tag">{SEV_LABEL[cluster.severity] ?? "—"}</span>
           <span className="cluster-card__tool">{cluster.equipment_id}</span>
-          {cluster.bay && <span className="cluster-card__bay">BAY-{cluster.bay}</span>}
           <span className="cluster-card__time">{timeAgo(cluster.last_at)}</span>
         </div>
         <div className="cluster-card__title">{cluster.title}</div>
