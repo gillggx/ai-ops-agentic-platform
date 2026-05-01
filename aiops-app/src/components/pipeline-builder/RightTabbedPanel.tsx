@@ -72,25 +72,31 @@ export default function RightTabbedPanel({
     >
       <RightTabsBar tab={tab} setRightTab={setRightTab} />
       <div style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        {tab === "agent" && agentPanel}
-        {tab === "parameters" && (
-          <div style={{ flex: 1, overflow: "auto", background: "#fff" }}>
-            {selectedEdge ? (
-              <EdgeInspector blockCatalog={blockCatalog} readOnly={readOnly} />
-            ) : selectedNode ? (
-              <NodeInspector
-                blockCatalog={blockCatalog}
-                readOnly={readOnly}
-                onAskAgent={onAskAgent}
-              />
-            ) : (
-              <div style={{ padding: 20, fontSize: 12, color: "#94a3b8", textAlign: "center", marginTop: 40 }}>
-                先點選 canvas 上的 node / edge 以檢視參數
-              </div>
-            )}
-          </div>
-        )}
-        {tab === "runs" && <RunsRightTab runResult={runResult} pipelineId={pipelineId ?? null} />}
+        {/* Keep all three tab panels mounted; toggle visibility via CSS so
+            switching tabs doesn't unmount the Agent (which would discard
+            chat history + open SSE stream). React will skip the hidden
+            subtrees during paint, so the cost of always-mounted is small. */}
+        <div style={{ flex: tab === "agent" ? 1 : 0, minHeight: 0, display: tab === "agent" ? "flex" : "none", flexDirection: "column" }}>
+          {agentPanel}
+        </div>
+        <div style={{ flex: tab === "parameters" ? 1 : 0, minHeight: 0, overflow: "auto", background: "#fff", display: tab === "parameters" ? "block" : "none" }}>
+          {selectedEdge ? (
+            <EdgeInspector blockCatalog={blockCatalog} readOnly={readOnly} />
+          ) : selectedNode ? (
+            <NodeInspector
+              blockCatalog={blockCatalog}
+              readOnly={readOnly}
+              onAskAgent={onAskAgent}
+            />
+          ) : (
+            <div style={{ padding: 20, fontSize: 12, color: "#94a3b8", textAlign: "center", marginTop: 40 }}>
+              先點選 canvas 上的 node / edge 以檢視參數
+            </div>
+          )}
+        </div>
+        <div style={{ flex: tab === "runs" ? 1 : 0, minHeight: 0, display: tab === "runs" ? "flex" : "none", flexDirection: "column" }}>
+          <RunsRightTab runResult={runResult} pipelineId={pipelineId ?? null} />
+        </div>
       </div>
     </aside>
   );

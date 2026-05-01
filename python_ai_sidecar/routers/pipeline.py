@@ -42,6 +42,17 @@ class ValidateRequest(BaseModel):
     pipeline_json: dict
 
 
+class PreviewRequest(BaseModel):
+    """Run pipeline up to (and including) `node_id` and return that node's
+    preview rows. Does NOT persist a PipelineRun. Mirrors the old
+    fastapi-backend's POST /api/v1/pipeline-builder/preview that the
+    Builder's RUN PREVIEW button used before the Java cutover."""
+    pipeline_json: dict
+    node_id: str
+    sample_size: int = 100
+    inputs: dict[str, Any] | None = None
+
+
 def _node_count(pipeline_json: dict | None) -> int:
     if not isinstance(pipeline_json, dict):
         return 0
@@ -254,5 +265,97 @@ async def validate(req: ValidateRequest, caller: CallerContext = ServiceAuth) ->
         "node_count": len(node_results),
         "errors": errors,
         "terminal_nodes": walk.get("terminal_nodes") or [],
+        "caller_user_id": caller.user_id,
+    }
+
+
+@router.post("/preview")
+async def preview(req: PreviewRequest, caller: CallerContext = ServiceAuth) -> dict:
+    """Truncate pipeline to ancestors of {node_id}, run them, return the
+    target node's rows. Used by Builder's RUN PREVIEW button so the user
+    can inspect a node's output mid-design without saving the pipeline.
+
+    Inputs default to each declared input's `example` value when caller
+    didn't supply one — same behavior as the old fastapi-backend route
+    so a fresh draft pipeline previews cleanly without manual binding."""
+    pipeline_json = req.pipeline_json or {}
+    nodes = pipeline_json.get("nodes") or []
+    edges = pipeline_json.get("edges") or []
+    node_ids = {n.get("id") for n in nodes if n.get("id")}
+    target = req.node_id
+    if target not in node_ids:
+        raise HTTPException(status_code=404, detail=f"node '{target}' not in pipeline")
+
+    # BFS upstream from target collecting ancestors (inclusive).
+    ancestors = {target}
+    frontier = {target}
+    while frontier:
+        next_frontier: set[str] = set()
+        for e in edges:
+            from_node = (e.get("from") or {}).get("node")
+            to_node = (e.get("to") or {}).get("node")
+            if to_node in frontier and from_node and from_node not in ancestors:
+                ancestors.add(from_node)
+                next_frontier.add(from_node)
+        frontier = next_frontier
+
+    truncated_dict = {
+        **pipeline_json,
+        "nodes": [n for n in nodes if n.get("id") in ancestors],
+        "edges": [
+            e for e in edges
+            if (e.get("from") or {}).get("node") in ancestors
+               and (e.get("to") or {}).get("node") in ancestors
+        ],
+    }
+
+    # Pydantic-parse the truncated subgraph; if it fails we surface the
+    # exception text rather than 500-ing.
+    from python_ai_sidecar.pipeline_builder.executor import PipelineJSON
+    try:
+        pipeline = PipelineJSON.model_validate(truncated_dict)
+    except Exception as ex:  # noqa: BLE001
+        return {
+            "status": "validation_error",
+            "errors": [{"rule": "PARSE", "message": str(ex)[:400]}],
+            "caller_user_id": caller.user_id,
+        }
+
+    # Default each declared input's value to its `example` if caller didn't
+    # provide one — keeps the preview useful on a fresh draft.
+    preview_inputs = dict(req.inputs or {})
+    for decl in pipeline.inputs or []:
+        name = getattr(decl, "name", None)
+        if not name:
+            continue
+        if preview_inputs.get(name) is None:
+            example = getattr(decl, "example", None)
+            if example is not None:
+                preview_inputs[name] = example
+
+    from python_ai_sidecar.executor.real_executor import get_real_executor
+    executor = get_real_executor()
+    try:
+        result = await executor.execute(
+            pipeline,
+            preview_sample_size=req.sample_size,
+            inputs=preview_inputs,
+        )
+    except Exception as ex:  # noqa: BLE001
+        log.exception("preview executor failed")
+        return {
+            "status": "error",
+            "error_message": f"executor failed: {ex}"[:400],
+            "caller_user_id": caller.user_id,
+        }
+
+    node_results = result.get("node_results") or {}
+    target_result = node_results.get(target)
+    return {
+        "status": result.get("status", "success"),
+        "target": target,
+        "node_result": target_result,
+        "all_node_results": node_results,
+        "result_summary": result.get("result_summary"),
         "caller_user_id": caller.user_id,
     }

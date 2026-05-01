@@ -172,4 +172,20 @@ public class PipelineBuilderController {
 				.bodyToMono(Map.class)
 				.block();
 	}
+
+	// ── POST /preview — forward to sidecar /internal/pipeline/preview.
+	// Builder's RUN PREVIEW button needs this. The route was missed during
+	// the cutover from fastapi-backend; without it the frontend got a
+	// 'Internal server error' from a 404-as-NoResourceFoundException.
+	@PostMapping("/preview")
+	@SuppressWarnings({"unchecked", "rawtypes"})
+	public Map<String, Object> preview(@RequestBody Map<String, Object> body) {
+		return sidecarClient.post()
+				.uri("/internal/pipeline/preview")
+				.header("Content-Type", "application/json")
+				.bodyValue(body)
+				.retrieve()
+				.bodyToMono(Map.class)
+				.block();
+	}
 }
