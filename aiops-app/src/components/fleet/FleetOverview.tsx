@@ -88,7 +88,7 @@ export function FleetOverview({ onOpenTool }: { onOpenTool?: (id: string) => voi
         }}
       />
 
-      <ToolList tools={equipment} concerns={concerns} onOpenTool={openTool} />
+      <ToolList tools={equipment} onOpenTool={openTool} />
 
       {loading && equipment.length === 0 && (
         <div className="fleet-overview__empty">載入中…</div>

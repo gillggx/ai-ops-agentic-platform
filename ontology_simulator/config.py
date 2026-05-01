@@ -24,4 +24,7 @@ MONGODB_DB  = os.getenv("MONGODB_DB",  "semiconductor_sim")
 
 # ── Physics ───────────────────────────────────────────────────
 APC_DRIFT_RATIO  = float(os.getenv("APC_DRIFT_RATIO",  "0.05"))   # ±5% per process
-OOC_PROBABILITY  = float(os.getenv("OOC_PROBABILITY",  "0.30"))   # 30% OOC rate
+OOC_PROBABILITY  = float(os.getenv("OOC_PROBABILITY",  "0.07"))   # 7% baseline OOC rate
+# Lowered from 0.30 (saturated dashboard with 9/10 crit). Drift-driven OOC
+# (chamber/heater wear) still kicks in via dc_service._DRIFT_RATES so the
+# tail of the distribution still trips alarms — just less often per step.

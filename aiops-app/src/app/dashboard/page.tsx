@@ -1000,7 +1000,9 @@ function DashboardInner() {
 
   return (
     <div style={S.page}>
-      {/* ── Sidebar ────────────────────────────────────────── */}
+      {/* ── Sidebar ── only in Mode B (drilled into one tool); Mode A is
+            the new fleet overview which has its own ranked list. */}
+      {toolId && (
       <div style={S.sidebar(sidebarCollapsed)}>
         <div style={S.sidebarHeader}>
           {!sidebarCollapsed && <span style={{ fontSize: 13, fontWeight: 700, color: "#1a202c" }}>🏭 設備清單</span>}
@@ -1029,6 +1031,7 @@ function DashboardInner() {
           </div>
         ))}
       </div>
+      )}
 
       {/* ── Main Content — single vertical scroll ────────────── */}
       <div style={S.main}>

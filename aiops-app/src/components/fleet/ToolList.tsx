@@ -2,22 +2,15 @@
 
 import { useState } from "react";
 import { HourStrip, Pill, StatusDot, TrendArrow } from "./primitives";
-import type { FleetConcern, FleetEquipment } from "./types";
+import type { FleetEquipment } from "./types";
 
 type Filter = "all" | "crit" | "warn";
 
-export function ToolList({ tools, concerns, onOpenTool }: {
+export function ToolList({ tools, onOpenTool }: {
   tools: FleetEquipment[];
-  concerns: FleetConcern[];
   onOpenTool: (id: string) => void;
 }) {
   const [filter, setFilter] = useState<Filter>("all");
-  const concernByTool = new Map<string, FleetConcern>();
-  for (const c of concerns) {
-    for (const t of c.tools) {
-      if (!concernByTool.has(t)) concernByTool.set(t, c);
-    }
-  }
 
   const visible = tools.filter(t => {
     if (filter === "crit") return t.health === "crit";
@@ -68,12 +61,10 @@ export function ToolList({ tools, concerns, onOpenTool }: {
         <div className="label">OOC Rate</div>
         <div className="label">24h OOC %</div>
         <div className="label">事件 / 趨勢</div>
-        <div className="label">AI 提示</div>
         <div></div>
       </div>
 
       {visible.map((t, i) => {
-        const concern = concernByTool.get(t.id);
         return (
           <div
             key={t.id}
@@ -115,16 +106,6 @@ export function ToolList({ tools, concerns, onOpenTool }: {
                 {t.lots24h} LOTs · {t.fdc} FDC · {t.alarms} alarm
               </div>
               <div style={{ marginTop: 2 }}><TrendArrow dir={t.trend} /></div>
-            </div>
-            <div>
-              {concern ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  <span style={{ fontSize: 11 }}>✦</span>
-                  <span className="micro mono">{Math.round(concern.confidence * 100)}%</span>
-                </div>
-              ) : (
-                <span className="micro" style={{ color: "var(--c-ink-4)" }}>—</span>
-              )}
             </div>
             <div style={{ textAlign: "right" }}>
               <button className="btn btn-ghost" style={{ height: 24, padding: "0 8px" }}>檢視 →</button>
