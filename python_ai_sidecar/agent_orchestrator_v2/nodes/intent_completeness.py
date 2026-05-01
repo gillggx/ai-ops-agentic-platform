@@ -16,11 +16,18 @@ Decision:
                    guess + alternatives, force_synthesis to stop the turn.
 
 Bypass conditions (return complete without calling the LLM):
-  - mode == "builder"            — canvas context already pins the intent
   - intent in {"vague","clarified"}      — earlier nodes handled clarification
-  - intent in {"knowledge_*"}     — knowledge replies don't build pipelines
+  - intent does NOT start with "clear_"   — fallback / unknown
   - user_message contains [intent_confirmed:<id>] — user already confirmed
   - user_message contains [intent=<id>]   — clarify-card pick (other path)
+
+NOTE on builder mode:
+  We deliberately do NOT bypass for mode=="builder". Even when the user is
+  staring at a Pipeline Builder canvas, "presentation 不明" is a real concern
+  — without an explicit chart/table/alert hint, the sub-agent picks a default
+  that may not match user intent. The classification prompt is permissive
+  enough that pure modification verbs ("改成 5 天") classify as `complete`
+  (the existing canvas IS the presentation), so we won't over-fire.
 """
 from __future__ import annotations
 
@@ -125,9 +132,9 @@ async def intent_completeness_node(
     intent = (state.get("intent") or "").lower()
 
     # ── Bypass conditions (return without calling the LLM) ─────────
-    if mode == "builder":
-        logger.info("intent_completeness: bypass (builder mode)")
-        return {}
+    # We intentionally do NOT bypass for mode=="builder" — see module docstring.
+    # Pure-modification prompts ("改成 5 天") classify as complete; ambiguous
+    # ones ("分析 EQP-07 OOC") still deserve a confirm card on canvas too.
     if intent in ("vague", "clarified"):
         logger.info("intent_completeness: bypass (intent=%s already routed)", intent)
         return {}
