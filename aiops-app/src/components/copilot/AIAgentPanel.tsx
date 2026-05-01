@@ -193,6 +193,11 @@ interface Props {
   onPbPipelineExpand?: (card: PbPipelineCardData) => void;
   // Optional seed prompt; auto-sent once when the panel first mounts.
   initialPrompt?: string | null;
+  // When true, the host already renders the pipeline DAG + results in a
+  // separate surface (the Lite Canvas overlay), so chat should NOT echo a
+  // second copy of the charts / DAG. Instead we leave a compact chip so the
+  // user still sees a chat trace of the event.
+  liteCanvasActive?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -524,6 +529,7 @@ export function AIAgentPanel({
   initialPrompt,
   agentMode = "chat",
   pipelineSnapshot,
+  liteCanvasActive = false,
 }: Props) {
   // Part B (SPEC_context_engineering): pull selected equipment from AppContext
   // so chat requests can carry user focus to the agent's load_context_node.
@@ -989,15 +995,26 @@ export function AIAgentPanel({
               }]);
             } else if (card?.type === "pb_pipeline" || card?.type === "pb_pipeline_published") {
               const pbCard = card as unknown as PbPipelineCardData;
-              if (mode === "session" && onPipelineUpdate) {
+              const sessionMode = mode === "session" && onPipelineUpdate;
+              if (sessionMode) {
                 // Phase 5-UX-3b session mode: canvas lives in host — just notify
                 // + leave a compact chip in chat so the user sees what changed.
                 onPipelineUpdate(pbCard);
+              }
+              if (sessionMode || liteCanvasActive) {
+                // Either the host page (BuilderLayout) or the Lite Canvas
+                // overlay is already drawing the DAG + results. Avoid echoing a
+                // second copy of the charts in chat — leave a compact chip
+                // instead so the user still has a trace of the event.
                 const nodeCount = pbCard.type === "pb_pipeline"
                   ? (pbCard.pipeline_json?.nodes?.length ?? 0)
                   : 0;
+                const edgeCount = pbCard.type === "pb_pipeline"
+                  ? (pbCard.pipeline_json?.edges?.length ?? 0)
+                  : 0;
+                const where = sessionMode ? "已套用至畫布" : "↗ 已顯示於左側 Lite Canvas";
                 const chipText = pbCard.type === "pb_pipeline"
-                  ? `🛠️ Pipeline 已更新 · ${nodeCount} nodes · 已套用至畫布`
+                  ? `🛠️ Pipeline 已完成 · ${nodeCount} nodes / ${edgeCount} edges · ${where}`
                   : `📌 已執行已發佈 Skill: ${pbCard.skill_name ?? pbCard.slug ?? ""}`;
                 setChatHistory((prev) => [...prev, {
                   id: nextId(),
@@ -1005,7 +1022,8 @@ export function AIAgentPanel({
                   content: chipText,
                 }]);
               } else {
-                // Standalone mode (main shell / Alarm Center): render full card inline.
+                // True standalone (no Lite Canvas, no session host) — render
+                // full card inline so the user can still inspect the result.
                 setChatHistory((prev) => [...prev, {
                   id: nextId(),
                   role: "pb_pipeline",

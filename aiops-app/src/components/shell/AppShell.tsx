@@ -364,6 +364,11 @@ function Shell({ children }: { children: React.ReactNode }) {
                 onTriggerConsumed={() => setTriggerMessage(null)}
                 contextEquipment={selectedEquipment?.name ?? null}
                 onHandoff={handleHandoff}
+                // Suppress in-chat pb_pipeline card while the Lite Canvas
+                // overlay is mounted — its left-side surface already shows the
+                // DAG + results, so a second inline copy would just be
+                // duplicate visual noise.
+                liteCanvasActive={!!glassOverlay}
                 // Phase 5-UX-6: mirror every user message into the overlay
                 // event stream so the chat-style panel shows user bubbles.
                 onUserMessageSent={(text) => {
