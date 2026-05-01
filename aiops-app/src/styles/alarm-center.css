@@ -293,6 +293,55 @@
   font-family: var(--font-mono);
 }
 
+/* ── Full-screen alarm detail modal (95% viewport) ────────────── */
+.alarm-detail-modal {
+  position: fixed;
+  inset: 0;
+  background: oklch(20% 0.01 60 / 0.55);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.15s ease-out;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.alarm-detail-modal__panel {
+  width: 95vw;
+  height: 95vh;
+  background: var(--surface);
+  border-radius: 14px;
+  box-shadow: var(--shadow-lg, 0 24px 60px oklch(20% 0.02 60 / 0.25));
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.alarm-detail-modal__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 28px 36px;
+}
+.alarm-detail-modal__close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  font-size: 14px;
+  color: var(--text-2);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+  transition: 0.12s;
+}
+.alarm-detail-modal__close:hover { background: var(--bg-sunk); color: var(--text); }
+
 /* ── Responsive ───────────────────────────────────────────────── */
 @media (max-width: 900px) {
   .alarm-center { grid-template-columns: minmax(0, 1fr); grid-template-rows: 56px 44px auto 1fr; }
