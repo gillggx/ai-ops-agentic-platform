@@ -231,6 +231,16 @@ async def llm_call_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[s
     # Extract text content (strip thinking blocks same as v1)
     text = response.text or ""
 
+    # ── DEBUG: which tools did Claude pick this turn? Helps diagnose whether
+    # ambiguity-gate prompt is being honored. Remove after diagnosis.
+    logger.info(
+        "llm_call.decision iteration=%d stop=%s tools=%s text_preview=%r",
+        iteration,
+        response.stop_reason,
+        [tc.get("name") for tc in tool_calls],
+        text[:160] if text else "",
+    )
+
     ai_msg = AIMessage(
         content=text,
         tool_calls=tool_calls if tool_calls else [],

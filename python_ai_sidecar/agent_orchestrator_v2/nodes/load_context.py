@@ -434,6 +434,29 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
     context_meta["history_turns"] = len(history_messages) // 2
     context_meta["cumulative_tokens"] = cumulative_tokens
 
+    # ── DEBUG: dump system_text composition for ambiguity-gate diagnosis ──
+    # Remove after we've finished diagnosing chat-mode confirm_pipeline_intent.
+    try:
+        from python_ai_sidecar.pipeline_builder._sidecar_deps import get_settings as _gs
+        _po = _gs().PIPELINE_ONLY_MODE
+    except Exception:
+        _po = "?"
+    _stage_a_present = "Stage A · Ambiguity gate" in system_text
+    _confirm_rule_present = "confirm_pipeline_intent" in system_text
+    _builder_canonical_present = "Pipeline-Builder Mode (CANONICAL" in system_text
+    logger.info(
+        "load_context.debug session=%s mode=%s pipeline_only=%s "
+        "system_len=%d stage_a=%s confirm_rule=%s builder_canonical=%s "
+        "user_msg=%r",
+        session_id, mode, _po,
+        len(system_text), _stage_a_present, _confirm_rule_present,
+        _builder_canonical_present,
+        (user_message[:120] if isinstance(user_message, str) else None),
+    )
+    # Also dump the full system_text once per request at DEBUG level so we can
+    # `journalctl -u aiops-python-sidecar | grep load_context.dump` and see it.
+    logger.info("load_context.dump session=%s system_text=<<<\n%s\n>>>", session_id, system_text)
+
     return {
         "session_id": session_id,
         "system_blocks": system_blocks,
