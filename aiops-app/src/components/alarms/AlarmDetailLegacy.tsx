@@ -13,6 +13,7 @@ import {
   RenderMiddleware, ChartListRenderer,
   type SkillFindings, type OutputSchemaField, type ChartDSL,
 } from "@/components/operations/SkillOutputRenderer";
+import { DRErrorBoundary } from "@/components/alarms/DRErrorBoundary";
 
 // ── Types (mirror of app/alarms/page.tsx originals) ──────────
 
@@ -396,50 +397,60 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
       {detailTab === "evidence" && (
         <div>
           {autoCheckRuns.length > 0 ? (
-            autoCheckRuns.map((run, idx) => (
-              <div key={run.run_id} style={{
-                border: "1px solid #e0e0e0", borderRadius: 8,
-                padding: "14px 16px", marginBottom: 16, background: "#fff",
-              }}>
-                <div style={{
-                  fontSize: 12, fontWeight: 700, color: "#1e293b",
-                  marginBottom: 10,
-                  display: "flex", alignItems: "center", gap: 8,
-                }}>
-                  <span style={{
-                    padding: "2px 8px", borderRadius: 4,
-                    background: "#e0f2fe", color: "#075985",
-                    fontSize: 10, fontWeight: 700, letterSpacing: "0.3px",
-                  }}>AC {idx + 1}/{autoCheckRuns.length}</span>
-                  <span>{run.pipeline_name || `Pipeline #${run.pipeline_id}`}</span>
-                  <span style={{ marginLeft: "auto", fontSize: 11, color: "#94a3b8" }}>
-                    run #{run.run_id} · {run.status}
-                  </span>
-                </div>
-                {run.alert?.title && (
+            autoCheckRuns.map((run, idx) => {
+              const dvs = run.data_views ?? [];
+              const charts = run.charts ?? [];
+              return (
+                <DRErrorBoundary
+                  key={run.run_id ?? `ac-${idx}`}
+                  label={`Auto-Check ${idx + 1}/${autoCheckRuns.length}`}
+                  logId={run.run_id ?? null}
+                >
                   <div style={{
-                    background: "#fff5f5", border: "1px solid #fca5a5",
-                    borderRadius: 8, padding: "10px 14px", marginBottom: 12,
+                    border: "1px solid #e0e0e0", borderRadius: 8,
+                    padding: "14px 16px", marginBottom: 16, background: "#fff",
                   }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#dc2626", marginBottom: 4 }}>
-                      ⚠ {run.alert.title}
+                    <div style={{
+                      fontSize: 12, fontWeight: 700, color: "#1e293b",
+                      marginBottom: 10,
+                      display: "flex", alignItems: "center", gap: 8,
+                    }}>
+                      <span style={{
+                        padding: "2px 8px", borderRadius: 4,
+                        background: "#e0f2fe", color: "#075985",
+                        fontSize: 10, fontWeight: 700, letterSpacing: "0.3px",
+                      }}>AC {idx + 1}/{autoCheckRuns.length}</span>
+                      <span>{run.pipeline_name || `Pipeline #${run.pipeline_id}`}</span>
+                      <span style={{ marginLeft: "auto", fontSize: 11, color: "#94a3b8" }}>
+                        run #{run.run_id} · {run.status}
+                      </span>
                     </div>
-                    {run.alert.message && (
-                      <div style={{ fontSize: 12, color: "#4a5568" }}>{run.alert.message}</div>
+                    {run.alert?.title && (
+                      <div style={{
+                        background: "#fff5f5", border: "1px solid #fca5a5",
+                        borderRadius: 8, padding: "10px 14px", marginBottom: 12,
+                      }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#dc2626", marginBottom: 4 }}>
+                          ⚠ {run.alert.title}
+                        </div>
+                        {run.alert.message && (
+                          <div style={{ fontSize: 12, color: "#4a5568" }}>{run.alert.message}</div>
+                        )}
+                      </div>
+                    )}
+                    {dvs.map((dv, i) => <DataViewTable key={i} dv={dv} />)}
+                    {charts.length > 0 && (
+                      <div style={{ marginTop: 8 }}>
+                        <ChartListRenderer charts={charts} />
+                      </div>
+                    )}
+                    {dvs.length === 0 && charts.length === 0 && !run.alert && (
+                      <div style={{ fontSize: 12, color: "#94a3b8" }}>（這次跑沒有產出明細）</div>
                     )}
                   </div>
-                )}
-                {run.data_views.map((dv, i) => <DataViewTable key={i} dv={dv} />)}
-                {run.charts.length > 0 && (
-                  <div style={{ marginTop: 8 }}>
-                    <ChartListRenderer charts={run.charts} />
-                  </div>
-                )}
-                {run.data_views.length === 0 && run.charts.length === 0 && !run.alert && (
-                  <div style={{ fontSize: 12, color: "#94a3b8" }}>（這次跑沒有產出明細）</div>
-                )}
-              </div>
-            ))
+                </DRErrorBoundary>
+              );
+            })
           ) : (
             (diagnosticDvs.length > 0 || diagnosticCharts.length > 0 || diagnosticAlert) && (
               <div style={{
@@ -476,7 +487,13 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
           )}
 
           {drs.length > 0 && drs.map((dr, idx) => (
-            <DRAccordion key={dr.log_id} dr={dr} index={idx} total={drs.length} />
+            <DRErrorBoundary
+              key={dr.log_id ?? `dr-${idx}`}
+              label={`DR ${idx + 1}/${drs.length}：${dr.skill_name || `Rule #${dr.skill_id ?? "?"}`}`}
+              logId={dr.log_id ?? null}
+            >
+              <DRAccordion dr={dr} index={idx} total={drs.length} />
+            </DRErrorBoundary>
           ))}
 
           {drs.length === 0 && !hasAnyAutoCheck && (

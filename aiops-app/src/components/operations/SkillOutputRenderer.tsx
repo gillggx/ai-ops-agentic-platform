@@ -417,19 +417,28 @@ const RULE_COLOR: Record<string, string> = {
 };
 
 export function ChartDSLRenderer({ chart }: { chart: ChartDSL }): React.ReactElement {
-  if (chart.data.length === 0) {
+  // Defensive normalize — backend can omit fields when pipeline result is malformed.
+  // We coerce to safe defaults so downstream renderers never throw on .length / [0].
+  const safe: ChartDSL = {
+    ...chart,
+    data: Array.isArray(chart?.data) ? chart.data : [],
+    x: typeof chart?.x === "string" ? chart.x : "index",
+    y: Array.isArray(chart?.y) ? chart.y : [],
+    rules: Array.isArray(chart?.rules) ? chart.rules : [],
+  };
+  if (safe.data.length === 0 || safe.y.length === 0) {
     return (
       <div style={{ padding: 12, color: "#a0aec0", fontSize: 12, background: "#f7f8fc", borderRadius: 8 }}>
-        {chart.title} — （無資料）
+        {safe.title || "Chart"} — （無資料）
       </div>
     );
   }
 
   // Dispatch by chart type
-  if (chart.type === "boxplot") return renderBoxplot(chart);
-  if (chart.type === "heatmap") return renderHeatmap(chart);
-  if (chart.type === "distribution") return renderDistribution(chart);
-  return renderLineBarScatter(chart);
+  if (safe.type === "boxplot") return renderBoxplot(safe);
+  if (safe.type === "heatmap") return renderHeatmap(safe);
+  if (safe.type === "distribution") return renderDistribution(safe);
+  return renderLineBarScatter(safe);
 }
 
 // ── Line / Bar / Scatter (+ multi-y / dual-axis / SPC rules / highlight) ─────
