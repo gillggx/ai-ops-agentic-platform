@@ -647,6 +647,265 @@ public class FleetService {
 		return null;
 	}
 
+	// ── Phase 3: lineage view ─────────────────────────────────────────
+
+	public FleetDtos.LineageResponse computeLineage(String equipmentId, String lotIdParam) {
+		OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+		List<Map<String, Object>> events = fetchProcessEvents(equipmentId, 200);
+
+		// Group events by lotID (keep insertion order = simulator order = newest first).
+		Map<String, List<Map<String, Object>>> byLot = new LinkedHashMap<>();
+		for (Map<String, Object> ev : events) {
+			String lot = String.valueOf(ev.getOrDefault("lotID", ""));
+			if (lot.isBlank()) continue;
+			byLot.computeIfAbsent(lot, k -> new ArrayList<>()).add(ev);
+		}
+
+		// Build lot summaries (top 10) — duration = oldest→newest event span in min.
+		List<FleetDtos.LotSummary> lots = new ArrayList<>();
+		for (Map.Entry<String, List<Map<String, Object>>> entry : byLot.entrySet()) {
+			if (lots.size() >= 10) break;
+			lots.add(buildLotSummary(entry.getKey(), entry.getValue()));
+		}
+
+		// Pick selected lot (param if present + valid, else first).
+		String chosenLotId = lotIdParam != null && byLot.containsKey(lotIdParam)
+				? lotIdParam
+				: (lots.isEmpty() ? null : lots.get(0).lotId());
+
+		FleetDtos.SelectedLotDetail selected = null;
+		if (chosenLotId != null) {
+			List<Map<String, Object>> lotEvents = byLot.get(chosenLotId);
+			selected = buildSelectedLotDetail(equipmentId, chosenLotId, lotEvents, events);
+		}
+
+		return new FleetDtos.LineageResponse(equipmentId, now, lots, selected);
+	}
+
+	private static FleetDtos.LotSummary buildLotSummary(String lotId, List<Map<String, Object>> evs) {
+		// evs is newest-first from the simulator.
+		String recipe = "";
+		String started = "";
+		boolean anyOoc = false, anyWarn = false;
+		OffsetDateTime first = null, last = null;
+		for (Map<String, Object> ev : evs) {
+			Map<?, ?> rec = ev.get("RECIPE") instanceof Map<?, ?> r ? r : null;
+			if (recipe.isBlank() && rec != null && rec.get("recipe_version") != null) {
+				recipe = "v" + rec.get("recipe_version");
+			}
+			String spc = String.valueOf(ev.getOrDefault("spc_status", "PASS"));
+			if ("OOC".equalsIgnoreCase(spc)) anyOoc = true;
+			Map<?, ?> fdc = ev.get("FDC") instanceof Map<?, ?> f ? f : null;
+			if (fdc != null) {
+				String cls = String.valueOf(fdc.getOrDefault("classification", "NORMAL")).toUpperCase();
+				if ("FAULT".equals(cls)) anyOoc = true;
+				else if ("WARNING".equals(cls)) anyWarn = true;
+			}
+			OffsetDateTime t = parseInstant(ev.get("eventTime"));
+			if (t != null) {
+				if (first == null || t.isBefore(first)) first = t;
+				if (last == null || t.isAfter(last)) last = t;
+			}
+		}
+		if (last != null) started = last.toString();
+		int durationMin = (first != null && last != null)
+				? (int) Math.max(1, Duration.between(first, last).toMinutes())
+				: evs.size();
+		String status = anyOoc ? "ooc" : anyWarn ? "warn" : "ok";
+		return new FleetDtos.LotSummary(lotId, recipe, started, evs.size(), durationMin, status);
+	}
+
+	@SuppressWarnings("unchecked")
+	private FleetDtos.SelectedLotDetail buildSelectedLotDetail(String equipmentId, String lotId,
+	                                                           List<Map<String, Object>> lotEvents,
+	                                                           List<Map<String, Object>> allEvents) {
+		FleetDtos.LotSummary summary = buildLotSummary(lotId, lotEvents);
+		Map<String, Object> latest = lotEvents.isEmpty() ? Map.of() : lotEvents.get(0);
+
+		// ── Lineage nodes ─────────────────────────────────────
+		List<FleetDtos.LineageNode> inputs = new ArrayList<>();
+		List<FleetDtos.LineageNode> processCol = new ArrayList<>();
+		List<FleetDtos.LineageNode> outcomes = new ArrayList<>();
+
+		// RECIPE
+		Map<String, Object> recipe = latest.get("RECIPE") instanceof Map<?, ?> r ? (Map<String, Object>) r : Map.of();
+		String recipeVer = recipe.get("recipe_version") != null ? "v" + recipe.get("recipe_version") : "—";
+		inputs.add(new FleetDtos.LineageNode("RECIPE", recipeVer, recipe.get("recipe_name") != null
+				? String.valueOf(recipe.get("recipe_name")) : "current recipe", "info", false));
+
+		// EC
+		Map<String, Object> ec = latest.get("EC") instanceof Map<?, ?> e ? (Map<String, Object>) e : Map.of();
+		Map<String, Object> consts = ec.get("constants") instanceof Map<?, ?> c ? (Map<String, Object>) c : Map.of();
+		String ecState = "ok";
+		String ecSub = "constants 正常";
+		for (Map.Entry<String, Object> e : consts.entrySet()) {
+			if (!(e.getValue() instanceof Map<?, ?> m)) continue;
+			String st = String.valueOf(((Map<String, Object>) m).getOrDefault("status", "NORMAL")).toUpperCase();
+			if ("ALERT".equals(st)) {
+				ecState = "crit";
+				ecSub = e.getKey() + " ALERT";
+				break;
+			} else if ("DRIFT".equals(st) && "ok".equals(ecState)) {
+				ecState = "warn";
+				ecSub = e.getKey() + " 偏離";
+			}
+		}
+		inputs.add(new FleetDtos.LineageNode("EC", "EC constants", ecSub, ecState, false));
+
+		// FDC
+		Map<String, Object> fdc = latest.get("FDC") instanceof Map<?, ?> f ? (Map<String, Object>) f : Map.of();
+		String classif = String.valueOf(fdc.getOrDefault("classification", "NORMAL")).toUpperCase();
+		String fdcState = "FAULT".equals(classif) ? "crit" : "WARNING".equals(classif) ? "warn" : "ok";
+		String fdcSub = String.valueOf(fdc.getOrDefault("fault_code", ""));
+		if (fdcSub.isBlank() || "null".equals(fdcSub)) fdcSub = "no anomaly";
+		inputs.add(new FleetDtos.LineageNode("FDC", "FDC " + classif, fdcSub, fdcState, false));
+
+		// TOOL — pull score/health from listEquipment for visual continuity.
+		FleetDtos.Equipment eqRow = listEquipment(24).equipment().stream()
+				.filter(x -> x.id().equals(equipmentId)).findFirst().orElse(null);
+		String toolState = eqRow != null
+				? (eqRow.health().equals("healthy") ? "ok" : eqRow.health())
+				: "ok";
+		String toolSub = eqRow != null ? "health " + eqRow.score() + "/100" : "—";
+		processCol.add(new FleetDtos.LineageNode("TOOL", equipmentId, toolSub, toolState, true));
+
+		// LOT
+		processCol.add(new FleetDtos.LineageNode("LOT", lotId,
+				summary.durationMin() + " min · " + summary.events() + " 事件",
+				summary.status().equals("ooc") ? "crit" : summary.status().equals("warn") ? "warn" : "ok",
+				false));
+
+		// STEPS
+		java.util.LinkedHashSet<String> steps = new java.util.LinkedHashSet<>();
+		String oocStep = null;
+		for (Map<String, Object> ev : lotEvents) {
+			String step = String.valueOf(ev.getOrDefault("step", ""));
+			if (!step.isBlank()) steps.add(step);
+			if ("OOC".equalsIgnoreCase(String.valueOf(ev.getOrDefault("spc_status", ""))) && oocStep == null) {
+				oocStep = step;
+			}
+		}
+		String stepsValue = steps.isEmpty() ? "—"
+				: steps.size() == 1 ? steps.iterator().next()
+				: steps.iterator().next() + " → " + new ArrayList<>(steps).get(steps.size() - 1);
+		processCol.add(new FleetDtos.LineageNode("STEPS", stepsValue,
+				oocStep != null ? "OOC at " + oocStep : steps.size() + " steps",
+				oocStep != null ? "crit" : "ok", false));
+
+		// SPC outcome
+		int oocInLot = 0;
+		for (Map<String, Object> ev : lotEvents) {
+			if ("OOC".equalsIgnoreCase(String.valueOf(ev.getOrDefault("spc_status", "PASS")))) oocInLot++;
+		}
+		outcomes.add(new FleetDtos.LineageNode("SPC",
+				oocInLot > 0 ? "OOC × " + oocInLot : "pass",
+				oocInLot > 0 ? "本 LOT 累計 OOC" : "全部 chart 在限",
+				oocInLot > 0 ? "crit" : "ok", false));
+
+		// APC outcome — fb_correction summary.
+		Map<String, Object> apc = latest.get("APC") instanceof Map<?, ?> a ? (Map<String, Object>) a : Map.of();
+		Map<String, Object> apcParams = apc.get("parameters") instanceof Map<?, ?> p ? (Map<String, Object>) p : Map.of();
+		Object fbRaw = apcParams.get("fb_correction");
+		String apcValue = "stable";
+		String apcSub = "active params 正常";
+		String apcState = "ok";
+		if (fbRaw instanceof Number fbNum) {
+			double fb = fbNum.doubleValue();
+			double driftPct = (fb - 0.92) / 0.92 * 100;
+			apcValue = String.format("fb=%.2f", fb);
+			apcSub = String.format("基準 0.92 · %+.0f%%", driftPct);
+			if (Math.abs(driftPct) >= 50) apcState = "crit";
+			else if (Math.abs(driftPct) >= 20) apcState = "warn";
+		}
+		outcomes.add(new FleetDtos.LineageNode("APC", apcValue, apcSub, apcState, false));
+
+		// DC outcome
+		Map<String, Object> dc = latest.get("DC") instanceof Map<?, ?> d ? (Map<String, Object>) d : Map.of();
+		boolean dcHasParams = dc.get("parameters") instanceof Map<?, ?>;
+		outcomes.add(new FleetDtos.LineageNode("DC",
+				dcHasParams ? "pass" : "—",
+				dcHasParams ? "全部感測正常" : "近期無資料", "ok", false));
+
+		FleetDtos.LineageFlow flow = new FleetDtos.LineageFlow(inputs, processCol, outcomes);
+
+		// ── Parameters table ─────────────────────────────────
+		List<FleetDtos.ParameterRow> params = buildParameterRows(latest, allEvents);
+
+		return new FleetDtos.SelectedLotDetail(summary, flow, params);
+	}
+
+	@SuppressWarnings("unchecked")
+	private List<FleetDtos.ParameterRow> buildParameterRows(Map<String, Object> latest,
+	                                                        List<Map<String, Object>> allEvents) {
+		// Active APC params + key DC sensors + key EC constants.
+		String[] apcKeys = {"fb_correction", "rf_power_bias", "etch_time_offset", "gas_flow_comp", "ff_correction"};
+		String[] dcKeys = {"chamber_pressure", "esc_zone1_temp", "rf_forward_power", "bias_voltage_v", "cf4_flow_sccm"};
+		String[] ecKeys = {"ec_temp_03", "ec_pressure_main"};
+
+		Map<String, Object> apc = latest.get("APC") instanceof Map<?, ?> a ? (Map<String, Object>) a : Map.of();
+		Map<String, Object> apcParams = apc.get("parameters") instanceof Map<?, ?> p ? (Map<String, Object>) p : Map.of();
+		Map<String, Object> dc = latest.get("DC") instanceof Map<?, ?> d ? (Map<String, Object>) d : Map.of();
+		Map<String, Object> dcParams = dc.get("parameters") instanceof Map<?, ?> p ? (Map<String, Object>) p : Map.of();
+		Map<String, Object> ec = latest.get("EC") instanceof Map<?, ?> e ? (Map<String, Object>) e : Map.of();
+		Map<String, Object> ecConsts = ec.get("constants") instanceof Map<?, ?> c ? (Map<String, Object>) c : Map.of();
+
+		List<FleetDtos.ParameterRow> rows = new ArrayList<>();
+		for (String k : apcKeys) {
+			if (!apcParams.containsKey(k)) continue;
+			rows.add(buildParamRow(k, "APC", apcParams.get(k), allEvents,
+					ev -> ((Map<String, Object>) ((Map<?, ?>) ev.getOrDefault("APC", Map.of())).getOrDefault("parameters", Map.of())).get(k)));
+		}
+		for (String k : dcKeys) {
+			if (!dcParams.containsKey(k)) continue;
+			rows.add(buildParamRow(k, "DC", dcParams.get(k), allEvents,
+					ev -> ((Map<String, Object>) ((Map<?, ?>) ev.getOrDefault("DC", Map.of())).getOrDefault("parameters", Map.of())).get(k)));
+		}
+		for (String k : ecKeys) {
+			if (!ecConsts.containsKey(k)) continue;
+			Object v = ecConsts.get(k);
+			if (v instanceof Map<?, ?> m) v = ((Map<String, Object>) m).get("value");
+			rows.add(buildParamRow(k, "EC", v, allEvents, ev -> {
+				Map<String, Object> ec2 = ((Map<?, ?>) ev.getOrDefault("EC", Map.of())) instanceof Map<?, ?> e1
+						? (Map<String, Object>) ev.get("EC") : Map.of();
+				Map<String, Object> consts2 = ec2.get("constants") instanceof Map<?, ?> c1
+						? (Map<String, Object>) ec2.get("constants") : Map.of();
+				Object cv = consts2.get(k);
+				return cv instanceof Map<?, ?> cm ? ((Map<String, Object>) cm).get("value") : cv;
+			}));
+		}
+
+		// Sort: crit → warn → ok
+		rows.sort(Comparator.comparingInt(p -> "crit".equals(p.state()) ? 0 : "warn".equals(p.state()) ? 1 : 2));
+		return rows;
+	}
+
+	private FleetDtos.ParameterRow buildParamRow(String name, String group, Object latestVal,
+	                                             List<Map<String, Object>> allEvents,
+	                                             java.util.function.Function<Map<String, Object>, Object> picker) {
+		Double v = toDouble(latestVal);
+		List<Double> history = new ArrayList<>();
+		for (Map<String, Object> ev : allEvents) {
+			Double hv = toDouble(picker.apply(ev));
+			if (hv != null) history.add(hv);
+			if (history.size() >= 10) break;
+		}
+		java.util.Collections.reverse(history);
+		double baseline = history.isEmpty() ? (v == null ? 0 : v)
+				: history.subList(0, Math.min(history.size(), 5)).stream()
+						.mapToDouble(Double::doubleValue).average().orElse(0);
+		double current = v == null ? baseline : v;
+		double driftPct = baseline != 0 ? (current - baseline) / Math.abs(baseline) * 100 : 0;
+		String state = Math.abs(driftPct) >= 50 ? "crit" : Math.abs(driftPct) >= 20 ? "warn" : "ok";
+		String delta = String.format("%+.0f%%", driftPct);
+		return new FleetDtos.ParameterRow(name, group, v, baseline, delta, state, history);
+	}
+
+	private static Double toDouble(Object v) {
+		if (v == null) return null;
+		if (v instanceof Number n) return n.doubleValue();
+		try { return Double.parseDouble(String.valueOf(v)); } catch (Exception ignored) { return null; }
+	}
+
 	@SuppressWarnings("unchecked")
 	private List<Map<String, Object>> fetchProcessEvents(String toolId, int limit) {
 		try {

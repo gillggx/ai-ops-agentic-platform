@@ -116,4 +116,54 @@ public final class FleetDtos {
 			OffsetDateTime asOf,
 			List<SpcTrace> charts
 	) {}
+
+	// ── Phase 3: process lineage view ─────────────────────────
+
+	public record LotSummary(
+			String lotId,
+			String recipe,
+			String started,    // ISO-8601 (could be naive)
+			int events,
+			int durationMin,
+			String status      // "ooc" | "warn" | "ok"
+	) {}
+
+	/** One node on the 3-column lineage flow.
+	 *  state: "crit" | "warn" | "ok" | "info" | "neutral" */
+	public record LineageNode(
+			String title,      // "RECIPE" | "EC" | "FDC" | "TOOL" | "LOT" | "STEPS" | "SPC" | "APC" | "DC"
+			String value,
+			String sub,
+			String state,
+			boolean highlight
+	) {}
+
+	public record LineageFlow(
+			List<LineageNode> inputs,
+			List<LineageNode> process,
+			List<LineageNode> outcomes
+	) {}
+
+	public record ParameterRow(
+			String name,
+			String group,
+			Double value,
+			Double baseline,
+			String delta,
+			String state,         // "crit" | "warn" | "ok"
+			List<Double> history  // last N samples for sparkline
+	) {}
+
+	public record SelectedLotDetail(
+			LotSummary lot,
+			LineageFlow lineage,
+			List<ParameterRow> parameters
+	) {}
+
+	public record LineageResponse(
+			String equipmentId,
+			OffsetDateTime asOf,
+			List<LotSummary> lots,
+			SelectedLotDetail selected
+	) {}
 }

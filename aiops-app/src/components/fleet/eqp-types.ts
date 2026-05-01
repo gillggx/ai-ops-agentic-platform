@@ -42,3 +42,51 @@ export interface SpcTraceResponse {
   as_of: string;
   charts: SpcTrace[];
 }
+
+// ── Phase 3: lineage view ───────────────────────────────────
+
+export interface LotSummary {
+  lot_id: string;
+  recipe: string;
+  started: string;
+  events: number;
+  duration_min: number;
+  status: "ooc" | "warn" | "ok";
+}
+
+export interface LineageNode {
+  title: string;
+  value: string;
+  sub: string;
+  state: "crit" | "warn" | "ok" | "info" | "neutral";
+  highlight: boolean;
+}
+
+export interface LineageFlow {
+  inputs: LineageNode[];
+  process: LineageNode[];
+  outcomes: LineageNode[];
+}
+
+export interface ParameterRow {
+  name: string;
+  group: string;
+  value: number | null;
+  baseline: number;
+  delta: string;
+  state: "crit" | "warn" | "ok";
+  history: number[];
+}
+
+export interface SelectedLotDetail {
+  lot: LotSummary;
+  lineage: LineageFlow;
+  parameters: ParameterRow[];
+}
+
+export interface LineageResponse {
+  equipment_id: string;
+  as_of: string;
+  lots: LotSummary[];
+  selected: SelectedLotDetail | null;
+}

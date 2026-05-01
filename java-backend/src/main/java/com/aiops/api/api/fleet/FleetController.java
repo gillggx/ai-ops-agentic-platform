@@ -68,4 +68,11 @@ public class FleetController {
 			@RequestParam(defaultValue = "100") int limit) {
 		return ApiResponse.ok(service.computeSpcTrace(id, limit));
 	}
+
+	@GetMapping("/equipment/{id}/lineage")
+	public ApiResponse<FleetDtos.LineageResponse> lineage(
+			@org.springframework.web.bind.annotation.PathVariable String id,
+			@RequestParam(name = "lot_id", required = false) String lotId) {
+		return ApiResponse.ok(service.computeLineage(id, lotId));
+	}
 }

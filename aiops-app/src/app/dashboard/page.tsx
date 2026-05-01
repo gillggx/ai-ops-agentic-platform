@@ -1043,50 +1043,11 @@ function DashboardInner() {
         )}
 
         {toolId && (
-          /* Mode B: Phase 2 EQP detail (handoff design) is the primary
-             view. The legacy 6-tab raw-data + ProcessTracePanel stay
-             accessible via the 「詳細參數」/「製程溯源」 sub-tabs below. */
-          <div>
-            <EqpDetail toolId={toolId} onBack={() => router.push("/dashboard")} />
-
-            <div style={{ padding: "0 24px 20px" }}>
-              <div style={{ display: "flex", gap: 0, marginBottom: 16, marginTop: 8 }}>
-                {([
-                  { key: "trend" as DeepDiveMode, icon: "📈", label: "詳細參數" },
-                  { key: "trace" as DeepDiveMode, icon: "🔍", label: "製程溯源" },
-                ] as const).map(m => (
-                  <button key={m.key} onClick={() => setDeepDiveMode(m.key)} style={{
-                    padding: "10px 20px", fontSize: 13, fontWeight: deepDiveMode === m.key ? 700 : 400,
-                    color: deepDiveMode === m.key ? "#2b6cb0" : "#718096",
-                    background: deepDiveMode === m.key ? "#ebf4ff" : "#fff",
-                    border: "1px solid #e2e8f0",
-                    borderBottom: deepDiveMode === m.key ? "2px solid #2b6cb0" : "1px solid #e2e8f0",
-                    cursor: "pointer", borderRadius: m.key === "trend" ? "8px 0 0 0" : "0 8px 0 0",
-                  }}>
-                    {m.icon} {m.label}
-                  </button>
-                ))}
-                {loading && <span style={{ marginLeft: 12, padding: "10px 0", fontSize: 11, color: "#4299e1", alignSelf: "center" }}>載入中...</span>}
-              </div>
-
-              {deepDiveMode === "trend" ? (
-                <div>
-                  <div style={S.tabBar}>
-                    {TABS.map(t => (
-                      <button key={t} style={S.tab(activeTab === t)} onClick={() => setActiveTab(t)}>
-                        {t}
-                      </button>
-                    ))}
-                  </div>
-                  <div style={{ padding: "12px 0" }}>
-                    {TAB_COMPONENTS[activeTab]}
-                  </div>
-                </div>
-              ) : (
-                <ProcessTracePanel events={events} toolId={toolId} />
-              )}
-            </div>
-          </div>
+          /* Mode B: Phase 3 EQP detail (handoff design) — header / module
+             5-light / top tabs (健康趨勢 ⇆ 製程溯源 with 3 sub-tabs) all
+             live inside <EqpDetail/>. The legacy 6-tab and ProcessTracePanel
+             have been removed; 拓樸圖 sub-tab embeds TopologyCanvas. */
+          <EqpDetail toolId={toolId} onBack={() => router.push("/dashboard")} />
         )}
       </div>
     </div>

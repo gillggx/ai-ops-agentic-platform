@@ -5,12 +5,17 @@ import { Pill, StatusDot } from "../primitives";
 import { ModuleStatusRow } from "./ModuleStatusRow";
 import { HealthTimeline } from "./HealthTimeline";
 import { SpcChart } from "./SpcChart";
+import { LineageView } from "./lineage/LineageView";
+import { TopologyTab } from "./lineage/TopologyTab";
 import type {
   ModuleStatus, ModulesResponse,
-  TimelineEvent, TimelineResponse,
+  TimelineResponse,
   SpcTrace, SpcTraceResponse,
 } from "../eqp-types";
 import type { FleetConcern, FleetEquipment } from "../types";
+
+type TopTab = "trend" | "lineage";
+type LineageSubTab = "topology" | "flow" | "params";
 
 const FONT_LINK = "https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap";
 
@@ -24,6 +29,8 @@ export function EqpDetail({ toolId, onBack }: { toolId: string; onBack?: () => v
   const [timeline, setTimeline] = useState<TimelineResponse | null>(null);
   const [traces, setTraces] = useState<SpcTrace[]>([]);
   const [activeChart, setActiveChart] = useState<string>("c_chart");
+  const [topTab, setTopTab] = useState<TopTab>("trend");
+  const [lineageSub, setLineageSub] = useState<LineageSubTab>("flow");
 
   // Lazy-load fonts (same as Mode A).
   useEffect(() => {
@@ -130,34 +137,86 @@ export function EqpDetail({ toolId, onBack }: { toolId: string; onBack?: () => v
       {/* Module status row */}
       <ModuleStatusRow modules={modules} />
 
-      {/* Health timeline */}
-      {timeline && <HealthTimeline events={timeline.events} since={timeline.since} asOf={timeline.as_of} />}
+      {/* Top-level tabs */}
+      <div style={{ display: "flex", borderBottom: "1px solid var(--c-line)", gap: 0 }}>
+        {([
+          ["trend", "📈 健康趨勢"],
+          ["lineage", "🔍 製程溯源"],
+        ] as const).map(([k, label]) => (
+          <button
+            key={k}
+            onClick={() => setTopTab(k as TopTab)}
+            style={{
+              padding: "10px 18px", fontSize: 13,
+              fontWeight: topTab === k ? 600 : 400,
+              color: topTab === k ? "var(--c-ink-1)" : "var(--c-ink-3)",
+              background: "transparent",
+              border: "none",
+              borderBottom: topTab === k ? "2px solid var(--c-ink-1)" : "2px solid transparent",
+              marginBottom: -1,
+              cursor: "pointer", fontFamily: "inherit",
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
-      {/* Trend drill-down */}
-      <div className="surface" style={{ padding: "14px 16px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
-          <div className="h2">趨勢</div>
+      {topTab === "trend" && (
+        <>
+          {timeline && <HealthTimeline events={timeline.events} since={timeline.since} asOf={timeline.as_of} />}
+          <div className="surface" style={{ padding: "14px 16px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+              <div className="h2">趨勢</div>
+              <div style={{ display: "flex", gap: 4 }}>
+                {(traces.length === 0 ? ["c_chart", "p_chart", "r_chart"] : traces.map(t => t.chart)).map(k => (
+                  <button
+                    key={k}
+                    onClick={() => setActiveChart(k)}
+                    className={`btn ${activeChart === k ? "btn-primary" : "btn-ghost"}`}
+                    style={{ height: 24, padding: "0 8px", fontSize: 11 }}
+                  >
+                    {k.replace("_chart", "").toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {trace ? (
+              <SpcChart trace={trace} />
+            ) : (
+              <div className="micro" style={{ color: "var(--c-ink-3)", padding: 16 }}>
+                (此 chart 沒 trace；切換上方 tab 看其他)
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {topTab === "lineage" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {/* sub tabs */}
           <div style={{ display: "flex", gap: 4 }}>
-            {(traces.length === 0 ? ["c_chart", "p_chart", "r_chart"] : traces.map(t => t.chart)).map(k => (
+            {([
+              ["flow", "流程溯源"],
+              ["params", "參數檢視"],
+              ["topology", "拓樸圖"],
+            ] as const).map(([k, label]) => (
               <button
                 key={k}
-                onClick={() => setActiveChart(k)}
-                className={`btn ${activeChart === k ? "btn-primary" : "btn-ghost"}`}
-                style={{ height: 24, padding: "0 8px", fontSize: 11 }}
+                onClick={() => setLineageSub(k as LineageSubTab)}
+                className={`btn ${lineageSub === k ? "btn-primary" : "btn-ghost"}`}
+                style={{ height: 26, padding: "0 12px", fontSize: 12 }}
               >
-                {k.replace("_chart", "").toUpperCase()}
+                {label}
               </button>
             ))}
           </div>
+
+          {lineageSub === "flow" && <LineageView toolId={toolId} mode="flow" />}
+          {lineageSub === "params" && <LineageView toolId={toolId} mode="params" />}
+          {lineageSub === "topology" && <TopologyTab toolId={toolId} />}
         </div>
-        {trace ? (
-          <SpcChart trace={trace} />
-        ) : (
-          <div className="micro" style={{ color: "var(--c-ink-3)", padding: 16 }}>
-            (此 chart 沒 trace；切換上方 tab 看其他)
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }
