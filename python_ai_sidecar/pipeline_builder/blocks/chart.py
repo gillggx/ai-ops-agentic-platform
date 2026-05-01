@@ -323,6 +323,44 @@ class ChartBlockExecutor(BlockExecutor):
         if not isinstance(df, pd.DataFrame):
             raise BlockExecutionError(code="INVALID_INPUT", message="'data' must be DataFrame")
 
+        # ── Facet (small multiples) ─────────────────────────────────
+        # When `facet` is set, group input rows by that column and emit
+        # one chart spec per distinct value. Each panel keeps its own y
+        # axis (UCL/LCL recomputed per group when the columns are
+        # provided). chart_spec then comes out as a list, and
+        # _collect_chart_summaries fans it into one entry per panel.
+        # Use case: SPC long-form data with chart_name = {C,P,R,Xbar,S}
+        # → 5 distinct trend charts in one block.
+        facet_col = params.get("facet") or None
+        if facet_col is not None:
+            if facet_col not in df.columns:
+                raise BlockExecutionError(
+                    code="COLUMN_NOT_FOUND",
+                    message=f"facet column '{facet_col}' not in data",
+                )
+            sub_params = {k: v for k, v in params.items() if k != "facet"}
+            specs: list[dict[str, Any]] = []
+            base_title = params.get("title")
+            # Preserve insertion order — pandas groupby returns in encounter order.
+            for group_key, group_df in df.groupby(facet_col, sort=False):
+                gp = dict(sub_params)
+                if base_title:
+                    gp["title"] = f"{base_title} — {group_key}"
+                else:
+                    gp["title"] = str(group_key)
+                # Recurse without infinite loop — explicitly drop facet on the
+                # nested call.
+                sub_inputs = {**inputs, "data": group_df.reset_index(drop=True)}
+                sub_result = await self.execute(
+                    params=gp, inputs=sub_inputs, context=context,
+                )
+                spec = sub_result.get("chart_spec")
+                if isinstance(spec, list):
+                    specs.extend(spec)
+                elif spec is not None:
+                    specs.append(spec)
+            return {"chart_spec": specs}
+
         chart_type = params.get("chart_type", "line")
         if chart_type not in _CHART_TYPES:
             raise BlockExecutionError(

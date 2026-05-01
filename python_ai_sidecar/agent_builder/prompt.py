@@ -252,12 +252,19 @@ Don't chain `alert → chart` or `alert → data_view`. Alert is terminal.
     UCL/LCL/Center). When you set `color="toolID"` together with `ucl_column`/`lcl_column`,
     the renderer emits one colored line per toolID PLUS the global control limits. You get
     series differentiation AND SPC overlay in one chart — no tradeoff.
-  - True side-by-side panels (5 separate plots) are NOT supported by `block_chart` (no facet mode).
-    If user explicitly asks for separate panels, explain the limit and offer the overlay version
-    with `color=toolID`; only build 5 separate charts as a last resort.
+  - **`facet="<column>"` (NEW) — true side-by-side panels.** When the y-axis scale differs
+    across categories (e.g. SPC `chart_name`: C ~1500, P ~50, R ~850), one overlay would
+    squash everything. `facet` groups input rows by that column and emits **N independent
+    charts**, each with its own y-axis + UCL/LCL. Pipeline:
+    `process_history → spc_long_form → chart(facet="chart_name", x="eventTime",
+     y="value", ucl_column="ucl", lcl_column="lcl", highlight_column="is_ooc")`
+    → 5 separate trend charts in one node, no hardcoded filter+chart pairs.
+    Pick `color` if y-scales match (same metric across N tools); pick `facet` if y-scales
+    differ (different metrics like the 5 SPC chart types). NEVER hand-build N filter+chart
+    pairs — that's exactly what facet replaces.
 
-  Same pattern applies to comparing N lots (`color="lotID"`), N recipes (`color="recipe_id"`),
-  N production batches, etc.
+  Same overlay pattern applies to comparing N lots (`color="lotID"`), N recipes
+  (`color="recipe_id"`), N production batches, etc.
 """
 
 

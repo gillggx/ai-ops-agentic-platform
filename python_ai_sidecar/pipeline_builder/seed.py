@@ -642,11 +642,26 @@ def _blocks() -> list[dict[str, Any]]:
                 "  y: string | string[]  — 單值或多值（多值時自動畫多條線）\n"
                 "  y_secondary: string[] — 右側 Y 軸系列（雙軸，e.g. TC16 SPC xbar + APC rf_power）\n"
                 "\n"
+                "== color vs facet — 重要差異 ==\n"
+                "  color  → 同一張圖、多條彩色線（共用 y 軸）；適合 y scale 相同的分組\n"
+                "           例：tool_id={EQP-01,EQP-02} 同一個 fb_correction 趨勢疊圖\n"
+                "  facet  → N 張獨立 chart（各自 y 軸、各自 UCL/LCL）；y scale 不同時用\n"
+                "           例：SPC long-form `chart_name`={C,P,R,Xbar,S} 五張獨立 trend\n"
+                "           output 變成 chart_spec[]，Pipeline Results / 警報詳情會逐張渲染\n"
+                "  ⚠ 兩者擇一：facet 已分開，再加 color 多此一舉；如果 y scale 相同，先試 color\n"
+                "\n"
                 "== SPC 場景建議搭配 ==\n"
                 "  chart_type='line', x='eventTime', y='spc_xbar_chart_value',\n"
                 "  ucl_column='spc_xbar_chart_ucl', lcl_column='spc_xbar_chart_lcl',\n"
                 "  highlight_column='spc_xbar_chart_is_ooc'\n"
                 "→ 標準 xbar 控制圖：值折線 + UCL/LCL 紅虛線 + OOC 紅圈\n"
+                "\n"
+                "== SPC long-form (一次顯示所有 chart trending) ==\n"
+                "  上游：block_spc_long_form 把 SPC 攤平成 chart_name/value/ucl/lcl 欄位\n"
+                "  搭配：chart_type='line', facet='chart_name', x='eventTime',\n"
+                "        y='value', ucl_column='ucl', lcl_column='lcl', highlight_column='is_ooc'\n"
+                "→ 自動產 5 張獨立 chart（C/P/R/Xbar/S），各自 y 軸 + 各自 UCL/LCL；\n"
+                "  新增 chart 類型不用改 pipeline\n"
                 "\n"
                 "== Boxplot 用法 ==\n"
                 "  chart_type='boxplot', y='spc_xbar_chart_value', group_by='toolID'\n"
@@ -670,6 +685,7 @@ def _blocks() -> list[dict[str, Any]]:
                 "⚠ boxplot 必須給 group_by（類別軸），y 是數值；x 不用\n"
                 "⚠ heatmap 需要 long-format df（每 row = 一 cell），常搭 block_correlation 輸出\n"
                 "⚠ distribution 吃 raw 數值欄位，不要先 histogram；block_chart 會自己 bin\n"
+                "⚠ 想做「依分類各畫一張」(small multiples) → 用 facet 而不是手動拉 N 個 filter+chart pair\n"
                 "\n"
                 "== Errors ==\n"
                 "- COLUMN_NOT_FOUND      : x / y / ucl_column / lcl_column 等引用欄位不存在\n"
@@ -697,7 +713,12 @@ def _blocks() -> list[dict[str, Any]]:
                     "show_sigma_lines": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 6}, "default": [1, 2, 3], "title": "Distribution σ 線 (1..6)"},
                     # v3.5 SPC line chart extra
                     "sigma_zones":      {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 6}, "title": "SPC ±σ zones 線 (e.g. [1, 2])"},
-                    "color": {"type": "string", "x-column-source": "input.data"},
+                    "color": {"type": "string", "x-column-source": "input.data", "title": "color (series within ONE chart, same y-axis)"},
+                    # v4 facet: small multiples — group by this column, emit
+                    # one independent chart per distinct value (each with its
+                    # own y-axis + UCL/LCL). Use when y-scales differ across
+                    # categories (e.g. SPC chart_name = {C,P,R,Xbar,S}).
+                    "facet": {"type": "string", "x-column-source": "input.data", "title": "facet (split into N independent charts, one per group)"},
                     # v1.3 B2 style panel
                     "title": {"type": "string", "title": "標題"},
                     "color_scheme": {

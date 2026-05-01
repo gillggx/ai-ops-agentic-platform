@@ -282,13 +282,28 @@ def _collect_chart_summaries(
         seq = int(seq_raw) if isinstance(seq_raw, int) else 10_000  # unsequenced → end
         # Stable tie-break: position.x (left → right on canvas)
         px = float(node.position.x) if node.position else 0.0
-        entry = {
-            "node_id": node.id,
-            "sequence": seq if isinstance(seq_raw, int) else None,
-            "title": (node.params or {}).get("title") or node.display_label or node.id,
-            "chart_spec": spec,
-        }
-        charts.append((seq, px, entry))
+        base_title = (node.params or {}).get("title") or node.display_label or node.id
+        # When the block emitted a facet (chart_spec = [s1, s2, …]),
+        # expand into one summary entry per panel so result_summary.charts
+        # is a flat list of charts.
+        if isinstance(spec, list):
+            for i, sub in enumerate(spec):
+                entry = {
+                    "node_id": f"{node.id}#{i}",
+                    "sequence": seq if isinstance(seq_raw, int) else None,
+                    "title": (sub.get("title") if isinstance(sub, dict) else None) or f"{base_title} ({i+1})",
+                    "chart_spec": sub,
+                }
+                # Tie-break stable across siblings: nudge px by index.
+                charts.append((seq, px + i * 0.01, entry))
+        else:
+            entry = {
+                "node_id": node.id,
+                "sequence": seq if isinstance(seq_raw, int) else None,
+                "title": base_title,
+                "chart_spec": spec,
+            }
+            charts.append((seq, px, entry))
     charts.sort(key=lambda t: (t[0], t[1]))
     return [c[2] for c in charts]
 
