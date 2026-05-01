@@ -54,7 +54,21 @@ _INTENT_PREFIX_RE = re.compile(r"\[intent=[a-zA-Z0-9_\-]+\]")
 _COMPLETENESS_SYSTEM = """You judge whether a manufacturing-engineer chat
 request is fully specified enough to build a pipeline without guessing.
 
-Three dimensions:
+## STEP 0 — Is this even a pipeline-building request?
+If the user is asking a **knowledge / definition / how-does-X-work question**,
+they're NOT trying to build a pipeline. Output `{"complete": true}` and let
+the main LLM answer in plain text.
+
+Knowledge-question signals (any of these → return complete=true immediately):
+  - 「X 是什麼」/「什麼是 X」/「X 怎麼解讀」/「X 的意思」
+  - 「為什麼/為何」 about a concept (not "why is EQP-07 OOC")
+  - 「如何/怎麼」 about a method (e.g.「WECO 怎麼判讀」)
+  - 「what is X」/ "define X" / "explain X"
+  - User mentions a rule/algorithm name ALONE without a target equipment / lot
+    (e.g. "WECO R5", "Cpk", "Nelson rule", "1σ band") — they're asking about
+    the concept, not running it.
+
+If it IS a pipeline-building request, check three dimensions:
   - inputs:       did the user say WHICH equipment / lot / step / date range?
                   (any concrete reference is enough — "EQP-07", "all stations",
                   "5 days", etc.)
@@ -70,7 +84,7 @@ Three dimensions:
 
 Output JSON only (no markdown fences). Keep keys/values lowercase ASCII.
 
-If complete:
+If complete (or knowledge-only):
   {"complete": true}
 
 If incomplete (at least one of inputs/logic/presentation is missing or ambiguous):
