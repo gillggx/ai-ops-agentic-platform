@@ -60,7 +60,10 @@ export function Pill({ kind = "neutral", children }: { kind?: Severity; children
 // ── Hour strip — 24-bucket OOC heat strip ──────────────────────
 
 function heatColor(v: number, max = 35): string {
-  if (v <= 0) return "#fafaf9";
+  // 0-bucket gets a faint visible gray (was #fafaf9 = page bg, which made
+  // empty hours render as invisible gaps and the whole strip looked skewed
+  // when 24h activity was spotty).
+  if (v <= 0) return "#ededea";
   const t = Math.min(1, v / max);
   if (t < 0.33) {
     const k = t / 0.33;
