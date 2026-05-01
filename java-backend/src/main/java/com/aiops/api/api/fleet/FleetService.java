@@ -141,10 +141,30 @@ public class FleetService {
 		}
 		double fleetOocRate = oocSamples > 0 ? oocSum / oocSamples : 0;
 
-		// total_events not available locally — keep at 0; v2 hits ontology /summary.
+		// total_events from simulator's fab-wide summary (one extra HTTP
+		// hit; cheap relative to the full fleet enrich). Affected_lots
+		// stays alarm-derived for v1; patrol-fired alarms rarely carry a
+		// specific lot_id so this often shows 0.
+		int totalEvents = fetchSimTotalEvents();
+
 		return new FleetDtos.FleetStats(
-				roundOne(fleetOocRate), oocEvents, 0, fdcAlerts,
+				roundOne(fleetOocRate), oocEvents, totalEvents, fdcAlerts,
 				openAlarms, affectedLots.size(), critCount, warnCount, now);
+	}
+
+	private int fetchSimTotalEvents() {
+		try {
+			JsonNode root = simulatorClient.get()
+					.uri(uri -> uri.path("/api/v1/process/summary").queryParam("since", "24h").build())
+					.retrieve()
+					.bodyToMono(JsonNode.class)
+					.block(Duration.ofSeconds(5));
+			if (root == null) return 0;
+			return root.path("total_events").asInt(0);
+		} catch (Exception ex) {
+			log.warn("simulator total_events fetch failed: {}", ex.toString());
+			return 0;
+		}
 	}
 
 	// ── Equipment row builder ──────────────────────────────────────────────
@@ -193,10 +213,14 @@ public class FleetService {
 		// so visualisation under-reports vs the simulator's raw OOC density.
 		List<Integer> hourly = bucketHourly(alarms, since, now);
 
-		// score = 100 − (oocPct·2 + openAlarms·3 + fdc·2), clamped.
-		// Rate-based (not absolute count) so a tool with 50 OOC out of 300
-		// events doesn't auto-zero the score. Tuned for ~10-30% rate range.
-		int penalty = (int) Math.round(oocPct * 2 + openAlarms * 3.0 + fdc * 2.0);
+		// score = 100 − (oocPct·2 + capped_alarms·3 + capped_fdc·2), clamped.
+		// alarms is capped at 10 because patrol can fire dozens per tool in
+		// 24h and the contribution would otherwise dominate; the rate-based
+		// oocPct term already captures sustained pressure. Tuned for ~10-30%
+		// OOC range.
+		int cappedAlarms = Math.min(openAlarms, 10);
+		int cappedFdc = Math.min(fdc, 5);
+		int penalty = (int) Math.round(oocPct * 2 + cappedAlarms * 3.0 + cappedFdc * 2.0);
 		int score = 100 - penalty;
 		if (score < 0) score = 0;
 		if (score > 100) score = 100;
