@@ -292,10 +292,13 @@ export async function deprecatePipeline(id: number): Promise<PipelineSummary> {
 export async function validatePipeline(
   pipeline_json: PipelineJSON
 ): Promise<{ valid: boolean; errors: ValidationErrorItem[] }> {
+  // Sidecar's /internal/pipeline/validate expects {pipeline_json: {...}};
+  // Java just forwards the body verbatim. The previous version posted the
+  // raw graph and tripped a 422 'pipeline_json field required'.
   const res = await fetch(`${BASE}/validate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(pipeline_json),
+    body: JSON.stringify({ pipeline_json }),
   });
   return unwrap(res);
 }
