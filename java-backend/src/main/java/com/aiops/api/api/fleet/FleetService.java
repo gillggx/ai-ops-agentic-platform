@@ -448,31 +448,27 @@ public class FleetService {
 					a.getStep() != null ? "STEP " + a.getStep() : ""));
 		}
 
-		// Lane: lot — distinct LOT IDs from process_history (one event per LOT
-		// at first sighting). Hits the simulator with a tool filter.
+		// Lane: lot — only OOC lots (one dot per problem-LOT). Healthy lots
+		// fire constantly in this simulator and would saturate the strip
+		// (~600 dots in earlier render). Whoever wants the full LOT history
+		// uses 「製程溯源」/「LOT scrubber」 instead.
+		// Lane: recipe — disabled. The simulator emits a different
+		// recipe_version per event (v265, v269, v273…) rather than holding
+		// a tool's version stable, so any "diff vs last seen" heuristic
+		// emits hundreds of spurious changes. Re-enable once the simulator
+		// exposes a stable per-tool recipe state.
 		List<Map<String, Object>> events500 = fetchProcessEvents(equipmentId, 500);
 		Set<String> seenLots = new java.util.LinkedHashSet<>();
-		String lastRecipeVer = null;
 		for (Map<String, Object> ev : events500) {
 			OffsetDateTime t = parseInstant(ev.get("eventTime"));
 			if (t == null || t.isBefore(since)) continue;
 			String lot = String.valueOf(ev.getOrDefault("lotID", ""));
-			if (!lot.isBlank() && !seenLots.contains(lot)) {
-				seenLots.add(lot);
-				String spcStatus = String.valueOf(ev.getOrDefault("spc_status", "PASS"));
-				String sev = "OOC".equalsIgnoreCase(spcStatus) ? "crit" : "ok";
-				events.add(new FleetDtos.TimelineEvent(t, "lot", sev,
-						lot, "STEP " + ev.getOrDefault("step", "?")));
-			}
-			// Lane: recipe — emit one event per version transition.
-			Map<?, ?> recipe = ev.get("RECIPE") instanceof Map<?, ?> r ? r : null;
-			String ver = recipe != null && recipe.get("recipe_version") != null
-					? String.valueOf(recipe.get("recipe_version")) : null;
-			if (ver != null && lastRecipeVer != null && !ver.equals(lastRecipeVer)) {
-				events.add(new FleetDtos.TimelineEvent(t, "recipe", "info",
-						"v" + lastRecipeVer + " → v" + ver, ""));
-			}
-			if (ver != null) lastRecipeVer = ver;
+			if (lot.isBlank() || seenLots.contains(lot)) continue;
+			String spcStatus = String.valueOf(ev.getOrDefault("spc_status", "PASS"));
+			if (!"OOC".equalsIgnoreCase(spcStatus)) continue; // skip pass lots
+			seenLots.add(lot);
+			events.add(new FleetDtos.TimelineEvent(t, "lot", "crit",
+					lot, "STEP " + ev.getOrDefault("step", "?")));
 		}
 
 		// Sort newest → oldest for transport stability.
@@ -682,22 +678,27 @@ public class FleetService {
 		return new FleetDtos.LineageResponse(equipmentId, now, lots, selected);
 	}
 
+	@SuppressWarnings("unchecked")
 	private static FleetDtos.LotSummary buildLotSummary(String lotId, List<Map<String, Object>> evs) {
 		// evs is newest-first from the simulator.
 		String recipe = "";
 		String started = "";
 		boolean anyOoc = false, anyWarn = false;
 		OffsetDateTime first = null, last = null;
-		for (Map<String, Object> ev : evs) {
-			Map<?, ?> rec = ev.get("RECIPE") instanceof Map<?, ?> r ? r : null;
-			if (recipe.isBlank() && rec != null && rec.get("recipe_version") != null) {
-				recipe = "v" + rec.get("recipe_version");
+		String latestStep = "";
+		String latestEventTime = "";
+		for (int i = 0; i < evs.size(); i++) {
+			Map<String, Object> ev = evs.get(i);
+			Object rec = ev.get("RECIPE");
+			if (recipe.isBlank() && rec instanceof Map<?, ?> recMap) {
+				Object rv = ((Map<String, Object>) recMap).get("recipe_version");
+				if (rv != null) recipe = "v" + rv;
 			}
 			String spc = String.valueOf(ev.getOrDefault("spc_status", "PASS"));
 			if ("OOC".equalsIgnoreCase(spc)) anyOoc = true;
 			Object rawFdc = ev.get("FDC");
 			if (rawFdc instanceof Map<?, ?> fdcMap) {
-				Object cf = fdcMap.get("classification");
+				Object cf = ((Map<String, Object>) fdcMap).get("classification");
 				String cls = (cf == null ? "NORMAL" : String.valueOf(cf)).toUpperCase();
 				if ("FAULT".equals(cls)) anyOoc = true;
 				else if ("WARNING".equals(cls)) anyWarn = true;
@@ -707,13 +708,23 @@ public class FleetService {
 				if (first == null || t.isBefore(first)) first = t;
 				if (last == null || t.isAfter(last)) last = t;
 			}
+			// First iteration = newest event from simulator. Capture the step
+			// + raw eventTime so /api/ontology/topology can be queried (it
+			// requires lot + step + eventTime, otherwise 400s).
+			if (i == 0) {
+				Object stepObj = ev.get("step");
+				if (stepObj != null) latestStep = String.valueOf(stepObj);
+				Object etRaw = ev.get("eventTime");
+				if (etRaw != null) latestEventTime = String.valueOf(etRaw);
+			}
 		}
 		if (last != null) started = last.toString();
 		int durationMin = (first != null && last != null)
 				? (int) Math.max(1, Duration.between(first, last).toMinutes())
 				: evs.size();
 		String status = anyOoc ? "ooc" : anyWarn ? "warn" : "ok";
-		return new FleetDtos.LotSummary(lotId, recipe, started, evs.size(), durationMin, status);
+		return new FleetDtos.LotSummary(lotId, recipe, started, evs.size(), durationMin, status,
+				latestStep, latestEventTime);
 	}
 
 	@SuppressWarnings("unchecked")

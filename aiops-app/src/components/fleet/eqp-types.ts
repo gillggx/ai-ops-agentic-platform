@@ -52,6 +52,8 @@ export interface LotSummary {
   events: number;
   duration_min: number;
   status: "ooc" | "warn" | "ok";
+  latest_step: string;
+  latest_event_time: string;     // raw simulator eventTime — feed to /topology
 }
 
 export interface LineageNode {

@@ -26,15 +26,21 @@ export function TopologyTab({ toolId }: { toolId: string }) {
         const lineageRes = await fetch(`/api/admin/fleet/equipment/${toolId}/lineage`);
         if (!lineageRes.ok) throw new Error(`lineage HTTP ${lineageRes.status}`);
         const lineage = await lineageRes.json();
-        const lotId = lineage?.selected?.lot?.lot_id ?? lineage?.lots?.[0]?.lot_id;
-        if (!lotId) {
+        const lot = lineage?.selected?.lot ?? lineage?.lots?.[0];
+        const lotId = lot?.lot_id;
+        const step = lot?.latest_step;
+        const eventTime = lot?.latest_event_time;
+        if (!lotId || !step || !eventTime) {
           if (!cancelled) {
-            setErr("無 LOT 可供拓樸");
+            setErr("缺少 LOT / step / eventTime — 無法查詢拓樸");
             setLoading(false);
           }
           return;
         }
-        const url = `/api/ontology/topology?lot=${encodeURIComponent(lotId)}&tool=${encodeURIComponent(toolId)}`;
+        // /api/ontology/topology requires lot + step + eventTime (otherwise 400).
+        const url = `/api/ontology/topology?lot=${encodeURIComponent(lotId)}`
+          + `&step=${encodeURIComponent(step)}`
+          + `&eventTime=${encodeURIComponent(eventTime)}`;
         const res = await fetch(url);
         if (!res.ok) throw new Error(`topology HTTP ${res.status}`);
         const data = await res.json();

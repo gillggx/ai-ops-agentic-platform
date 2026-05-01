@@ -122,10 +122,12 @@ public final class FleetDtos {
 	public record LotSummary(
 			String lotId,
 			String recipe,
-			String started,    // ISO-8601 (could be naive)
+			String started,         // ISO-8601 (could be naive)
 			int events,
 			int durationMin,
-			String status      // "ooc" | "warn" | "ok"
+			String status,          // "ooc" | "warn" | "ok"
+			String latestStep,      // for topology query (?step=)
+			String latestEventTime  // for topology query (?eventTime=) — raw simulator value
 	) {}
 
 	/** One node on the 3-column lineage flow.
