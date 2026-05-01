@@ -695,9 +695,10 @@ public class FleetService {
 			}
 			String spc = String.valueOf(ev.getOrDefault("spc_status", "PASS"));
 			if ("OOC".equalsIgnoreCase(spc)) anyOoc = true;
-			Map<?, ?> fdc = ev.get("FDC") instanceof Map<?, ?> f ? f : null;
-			if (fdc != null) {
-				String cls = String.valueOf(fdc.getOrDefault("classification", "NORMAL")).toUpperCase();
+			Object rawFdc = ev.get("FDC");
+			if (rawFdc instanceof Map<?, ?> fdcMap) {
+				Object cf = fdcMap.get("classification");
+				String cls = (cf == null ? "NORMAL" : String.valueOf(cf)).toUpperCase();
 				if ("FAULT".equals(cls)) anyOoc = true;
 				else if ("WARNING".equals(cls)) anyWarn = true;
 			}
@@ -853,25 +854,18 @@ public class FleetService {
 		for (String k : apcKeys) {
 			if (!apcParams.containsKey(k)) continue;
 			rows.add(buildParamRow(k, "APC", apcParams.get(k), allEvents,
-					ev -> ((Map<String, Object>) ((Map<?, ?>) ev.getOrDefault("APC", Map.of())).getOrDefault("parameters", Map.of())).get(k)));
+					ev -> pickNestedParam(ev, "APC", k)));
 		}
 		for (String k : dcKeys) {
 			if (!dcParams.containsKey(k)) continue;
 			rows.add(buildParamRow(k, "DC", dcParams.get(k), allEvents,
-					ev -> ((Map<String, Object>) ((Map<?, ?>) ev.getOrDefault("DC", Map.of())).getOrDefault("parameters", Map.of())).get(k)));
+					ev -> pickNestedParam(ev, "DC", k)));
 		}
 		for (String k : ecKeys) {
 			if (!ecConsts.containsKey(k)) continue;
 			Object v = ecConsts.get(k);
 			if (v instanceof Map<?, ?> m) v = ((Map<String, Object>) m).get("value");
-			rows.add(buildParamRow(k, "EC", v, allEvents, ev -> {
-				Map<String, Object> ec2 = ((Map<?, ?>) ev.getOrDefault("EC", Map.of())) instanceof Map<?, ?> e1
-						? (Map<String, Object>) ev.get("EC") : Map.of();
-				Map<String, Object> consts2 = ec2.get("constants") instanceof Map<?, ?> c1
-						? (Map<String, Object>) ec2.get("constants") : Map.of();
-				Object cv = consts2.get(k);
-				return cv instanceof Map<?, ?> cm ? ((Map<String, Object>) cm).get("value") : cv;
-			}));
+			rows.add(buildParamRow(k, "EC", v, allEvents, ev -> pickEcConst(ev, k)));
 		}
 
 		// Sort: crit → warn → ok
@@ -898,6 +892,28 @@ public class FleetService {
 		String state = Math.abs(driftPct) >= 50 ? "crit" : Math.abs(driftPct) >= 20 ? "warn" : "ok";
 		String delta = String.format("%+.0f%%", driftPct);
 		return new FleetDtos.ParameterRow(name, group, v, baseline, delta, state, history);
+	}
+
+	/** Reach into ev[group].parameters[key] safely. group ∈ APC|DC. */
+	@SuppressWarnings("unchecked")
+	private static Object pickNestedParam(Map<String, Object> ev, String group, String key) {
+		Object g = ev.get(group);
+		if (!(g instanceof Map<?, ?> gMap)) return null;
+		Object params = ((Map<String, Object>) gMap).get("parameters");
+		if (!(params instanceof Map<?, ?> pMap)) return null;
+		return ((Map<String, Object>) pMap).get(key);
+	}
+
+	/** Reach into ev.EC.constants[key] (which may itself be {value, status, ...}). */
+	@SuppressWarnings("unchecked")
+	private static Object pickEcConst(Map<String, Object> ev, String key) {
+		Object ec = ev.get("EC");
+		if (!(ec instanceof Map<?, ?> ecMap)) return null;
+		Object consts = ((Map<String, Object>) ecMap).get("constants");
+		if (!(consts instanceof Map<?, ?> cMap)) return null;
+		Object cv = ((Map<String, Object>) cMap).get(key);
+		if (cv instanceof Map<?, ?> mv) return ((Map<String, Object>) mv).get("value");
+		return cv;
 	}
 
 	private static Double toDouble(Object v) {
