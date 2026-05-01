@@ -17,6 +17,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import ReactMarkdown from "react-markdown";
 import { FleetOverview } from "@/components/fleet/FleetOverview";
+import { EqpDetail } from "@/components/fleet/eqp/EqpDetail";
 
 // Lazy-load Plotly (no SSR)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1042,17 +1043,16 @@ function DashboardInner() {
         )}
 
         {toolId && (
-        <div style={{ padding: 20 }}>
-          {/* Tool-scoped AI Summary (Mode B only). */}
-          <BriefingPanel scope="tool" toolId={toolId} />
+          /* Mode B: Phase 2 EQP detail (handoff design) is the primary
+             view. The legacy 6-tab raw-data + ProcessTracePanel stay
+             accessible via the 「詳細參數」/「製程溯源」 sub-tabs below. */
+          <div>
+            <EqpDetail toolId={toolId} onBack={() => router.push("/dashboard")} />
 
-          {toolId ? (
-            /* Mode B: Tool Deep Dive — top-level tabs */
-            <div style={{ marginTop: 20 }}>
-              {/* Top-level mode tabs */}
-              <div style={{ display: "flex", gap: 0, marginBottom: 16 }}>
+            <div style={{ padding: "0 24px 20px" }}>
+              <div style={{ display: "flex", gap: 0, marginBottom: 16, marginTop: 8 }}>
                 {([
-                  { key: "trend" as DeepDiveMode, icon: "📈", label: "趨勢分析" },
+                  { key: "trend" as DeepDiveMode, icon: "📈", label: "詳細參數" },
                   { key: "trace" as DeepDiveMode, icon: "🔍", label: "製程溯源" },
                 ] as const).map(m => (
                   <button key={m.key} onClick={() => setDeepDiveMode(m.key)} style={{
@@ -1070,7 +1070,6 @@ function DashboardInner() {
               </div>
 
               {deepDiveMode === "trend" ? (
-                /* 趨勢分析: 6-tab data only */
                 <div>
                   <div style={S.tabBar}>
                     {TABS.map(t => (
@@ -1084,12 +1083,10 @@ function DashboardInner() {
                   </div>
                 </div>
               ) : (
-                /* 製程溯源: Process Trace & Inspector */
                 <ProcessTracePanel events={events} toolId={toolId} />
               )}
             </div>
-          ) : null /* Mode A handled by <FleetOverview /> above */}
-        </div>
+          </div>
         )}
       </div>
     </div>

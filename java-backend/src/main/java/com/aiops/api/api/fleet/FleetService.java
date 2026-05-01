@@ -417,4 +417,247 @@ public class FleetService {
 	private static double roundOne(double v) {
 		return Math.round(v * 10.0) / 10.0;
 	}
+
+	// ── Phase 2: per-equipment detail ────────────────────────────────────
+
+	public FleetDtos.TimelineResponse computeTimeline(String equipmentId, int sinceHours) {
+		OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+		OffsetDateTime since = now.minusHours(Math.max(sinceHours, 1));
+
+		List<FleetDtos.TimelineEvent> events = new ArrayList<>();
+
+		// Lane: ooc / apc / fdc / ec — derived from alarms (active or recent
+		// active for this equipment within window).
+		for (AlarmEntity a : alarmRepo.findByEquipmentIdAndStatus(equipmentId, "active")) {
+			OffsetDateTime t = a.getEventTime() != null ? a.getEventTime() : a.getCreatedAt();
+			if (t == null || t.isBefore(since)) continue;
+			String trig = a.getTriggerEvent() == null ? "" : a.getTriggerEvent().toLowerCase();
+			String lane;
+			if (trig.contains("ooc") || trig.contains("spc")) lane = "ooc";
+			else if (trig.contains("apc")) lane = "apc";
+			else if (trig.contains("fdc")) lane = "fdc";
+			else if (trig.contains("ec") || trig.contains("temp")) lane = "ec";
+			else lane = "ooc"; // default — unrecognised patrol still surfaces
+			String sev = severityToLane(a.getSeverity());
+			events.add(new FleetDtos.TimelineEvent(t, lane, sev,
+					a.getTitle() != null ? a.getTitle() : ("alarm #" + a.getId()),
+					a.getStep() != null ? "STEP " + a.getStep() : ""));
+		}
+
+		// Lane: lot — distinct LOT IDs from process_history (one event per LOT
+		// at first sighting). Hits the simulator with a tool filter.
+		List<Map<String, Object>> events500 = fetchProcessEvents(equipmentId, 500);
+		Set<String> seenLots = new java.util.LinkedHashSet<>();
+		String lastRecipeVer = null;
+		for (Map<String, Object> ev : events500) {
+			OffsetDateTime t = parseInstant(ev.get("eventTime"));
+			if (t == null || t.isBefore(since)) continue;
+			String lot = String.valueOf(ev.getOrDefault("lotID", ""));
+			if (!lot.isBlank() && !seenLots.contains(lot)) {
+				seenLots.add(lot);
+				String spcStatus = String.valueOf(ev.getOrDefault("spc_status", "PASS"));
+				String sev = "OOC".equalsIgnoreCase(spcStatus) ? "crit" : "ok";
+				events.add(new FleetDtos.TimelineEvent(t, "lot", sev,
+						lot, "STEP " + ev.getOrDefault("step", "?")));
+			}
+			// Lane: recipe — emit one event per version transition.
+			Map<?, ?> recipe = ev.get("RECIPE") instanceof Map<?, ?> r ? r : null;
+			String ver = recipe != null && recipe.get("recipe_version") != null
+					? String.valueOf(recipe.get("recipe_version")) : null;
+			if (ver != null && lastRecipeVer != null && !ver.equals(lastRecipeVer)) {
+				events.add(new FleetDtos.TimelineEvent(t, "recipe", "info",
+						"v" + lastRecipeVer + " → v" + ver, ""));
+			}
+			if (ver != null) lastRecipeVer = ver;
+		}
+
+		// Sort newest → oldest for transport stability.
+		events.sort(Comparator.comparing(
+				FleetDtos.TimelineEvent::t,
+				Comparator.nullsLast(Comparator.reverseOrder())));
+
+		return new FleetDtos.TimelineResponse(equipmentId, since, now, events);
+	}
+
+	public FleetDtos.ModulesResponse computeModules(String equipmentId, int sinceHours) {
+		OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+		OffsetDateTime since = now.minusHours(Math.max(sinceHours, 1));
+
+		// SPC: count OOC alarms (or simulator OOC events).
+		int oocAlarms = 0;
+		Set<String> oocSteps = new java.util.LinkedHashSet<>();
+		for (AlarmEntity a : alarmRepo.findByEquipmentIdAndStatus(equipmentId, "active")) {
+			OffsetDateTime t = a.getEventTime() != null ? a.getEventTime() : a.getCreatedAt();
+			if (t == null || t.isBefore(since)) continue;
+			String trig = a.getTriggerEvent() == null ? "" : a.getTriggerEvent().toLowerCase();
+			if (trig.contains("ooc") || trig.contains("spc")) {
+				oocAlarms++;
+				if (a.getStep() != null && !a.getStep().isBlank()) oocSteps.add(a.getStep());
+			}
+		}
+		String spcState = oocAlarms >= 3 ? "crit" : oocAlarms >= 1 ? "warn" : "ok";
+		String spcValue = oocAlarms > 0 ? oocAlarms + " OOC" : "pass";
+		String spcSub = oocSteps.isEmpty() ? "近 24h" : String.join(", ", oocSteps);
+
+		// APC / FDC / DC / EC: derive from latest process event (simulator).
+		List<Map<String, Object>> latest = fetchProcessEvents(equipmentId, 1);
+		Map<String, Object> e = latest.isEmpty() ? Map.of() : latest.get(0);
+
+		FleetDtos.ModuleStatus apcMod = buildApcModule(e);
+		FleetDtos.ModuleStatus fdcMod = buildFdcModule(e);
+		FleetDtos.ModuleStatus dcMod = buildDcModule(e);
+		FleetDtos.ModuleStatus ecMod = buildEcModule(e);
+
+		List<FleetDtos.ModuleStatus> modules = List.of(
+				new FleetDtos.ModuleStatus("SPC", spcState, spcValue, spcSub),
+				apcMod, fdcMod, dcMod, ecMod);
+
+		return new FleetDtos.ModulesResponse(equipmentId, now, modules);
+	}
+
+	@SuppressWarnings("unchecked")
+	private static FleetDtos.ModuleStatus buildApcModule(Map<String, Object> e) {
+		Map<String, Object> apc = e.get("APC") instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
+		Map<String, Object> params = apc.get("parameters") instanceof Map<?, ?> p ? (Map<String, Object>) p : Map.of();
+		// Look at fb_correction; if its absolute value > 1.5 (baseline ~0.9), drift detected.
+		Object raw = params.get("fb_correction");
+		if (raw instanceof Number n) {
+			double fb = n.doubleValue();
+			double driftPct = Math.abs(fb - 0.92) / 0.92 * 100;
+			if (driftPct >= 20) return new FleetDtos.ModuleStatus("APC", "warn",
+					String.format("fb %+.0f%%", fb >= 0.92 ? driftPct : -driftPct),
+					"基準 0.92");
+		}
+		return new FleetDtos.ModuleStatus("APC", "ok", "stable", "active params 正常");
+	}
+
+	@SuppressWarnings("unchecked")
+	private static FleetDtos.ModuleStatus buildFdcModule(Map<String, Object> e) {
+		Map<String, Object> fdc = e.get("FDC") instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
+		String classif = String.valueOf(fdc.getOrDefault("classification", "NORMAL")).toUpperCase();
+		String state = "FAULT".equals(classif) ? "crit" : "WARNING".equals(classif) ? "warn" : "ok";
+		String value = "FAULT".equals(classif) ? "FAULT" : "WARNING".equals(classif) ? "WARNING" : "normal";
+		String sub = String.valueOf(fdc.getOrDefault("fault_code", ""));
+		if (sub.isBlank() || "null".equals(sub)) sub = "no anomaly";
+		return new FleetDtos.ModuleStatus("FDC", state, value, sub);
+	}
+
+	private static FleetDtos.ModuleStatus buildDcModule(Map<String, Object> e) {
+		// DC isn't currently flagged independently; show pass when there is a recent event.
+		boolean hasEvent = e.get("DC") instanceof Map<?, ?>;
+		return new FleetDtos.ModuleStatus("DC", "ok", hasEvent ? "pass" : "—",
+				hasEvent ? "全部感測正常" : "近期無資料");
+	}
+
+	@SuppressWarnings("unchecked")
+	private static FleetDtos.ModuleStatus buildEcModule(Map<String, Object> e) {
+		Map<String, Object> ec = e.get("EC") instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
+		Map<String, Object> consts = ec.get("constants") instanceof Map<?, ?> c ? (Map<String, Object>) c : Map.of();
+		int alerts = 0, drifts = 0;
+		String firstAlert = null;
+		for (Map.Entry<String, Object> entry : consts.entrySet()) {
+			if (!(entry.getValue() instanceof Map<?, ?> v)) continue;
+			String status = String.valueOf(((Map<String, Object>) v).getOrDefault("status", "NORMAL")).toUpperCase();
+			if ("ALERT".equals(status)) {
+				alerts++;
+				if (firstAlert == null) firstAlert = entry.getKey();
+			} else if ("DRIFT".equals(status)) {
+				drifts++;
+				if (firstAlert == null) firstAlert = entry.getKey();
+			}
+		}
+		String state = alerts > 0 ? "crit" : drifts > 0 ? "warn" : "ok";
+		String value = alerts > 0 ? alerts + " alert" : drifts > 0 ? drifts + " drift" : "stable";
+		String sub = firstAlert != null ? firstAlert : "constants 正常";
+		return new FleetDtos.ModuleStatus("EC", state, value, sub);
+	}
+
+	@SuppressWarnings({"unchecked", "rawtypes"})
+	public FleetDtos.SpcTraceResponse computeSpcTrace(String equipmentId, int limit) {
+		OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+		List<Map<String, Object>> events = fetchProcessEvents(equipmentId, limit);
+
+		// Process events are newest-first from the simulator; reverse for chart x-axis.
+		List<Map<String, Object>> ordered = new ArrayList<>(events);
+		java.util.Collections.reverse(ordered);
+
+		Map<String, List<Double>> valuesByChart = new LinkedHashMap<>();
+		Map<String, List<OffsetDateTime>> timesByChart = new LinkedHashMap<>();
+		Map<String, double[]> limitsByChart = new HashMap<>(); // {ucl, lcl}
+
+		String[] keys = {"c_chart", "p_chart", "r_chart"};
+		for (String k : keys) {
+			valuesByChart.put(k, new ArrayList<>());
+			timesByChart.put(k, new ArrayList<>());
+		}
+
+		for (Map<String, Object> ev : ordered) {
+			OffsetDateTime t = parseInstant(ev.get("eventTime"));
+			Map<String, Object> spc = ev.get("SPC") instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
+			Map<String, Object> charts = spc.get("charts") instanceof Map<?, ?> c ? (Map<String, Object>) c : Map.of();
+			for (String k : keys) {
+				if (!(charts.get(k) instanceof Map<?, ?> ch)) continue;
+				Object v = ((Map<String, Object>) ch).get("value");
+				if (!(v instanceof Number n)) continue;
+				valuesByChart.get(k).add(n.doubleValue());
+				if (t != null) timesByChart.get(k).add(t);
+				if (!limitsByChart.containsKey(k)) {
+					double ucl = ((Map<String, Object>) ch).get("ucl") instanceof Number un ? un.doubleValue() : 0;
+					double lcl = ((Map<String, Object>) ch).get("lcl") instanceof Number ln ? ln.doubleValue() : 0;
+					limitsByChart.put(k, new double[] { ucl, lcl });
+				}
+			}
+		}
+
+		List<FleetDtos.SpcTrace> out = new ArrayList<>();
+		for (String k : keys) {
+			List<Double> vs = valuesByChart.get(k);
+			if (vs.isEmpty()) continue;
+			double[] lim = limitsByChart.getOrDefault(k, new double[]{0, 0});
+			double target = vs.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+			out.add(new FleetDtos.SpcTrace(k, vs, timesByChart.get(k), lim[0], lim[1], target));
+		}
+		return new FleetDtos.SpcTraceResponse(equipmentId, now, out);
+	}
+
+	private static String severityToLane(String severity) {
+		if (severity == null) return "warn";
+		return switch (severity.toUpperCase()) {
+			case "CRITICAL", "HIGH" -> "crit";
+			case "MEDIUM", "MED" -> "warn";
+			case "LOW" -> "info";
+			default -> "warn";
+		};
+	}
+
+	private static OffsetDateTime parseInstant(Object v) {
+		if (v == null) return null;
+		try { return OffsetDateTime.parse(String.valueOf(v)); }
+		catch (Exception ex) {
+			try { return java.time.Instant.parse(String.valueOf(v)).atOffset(ZoneOffset.UTC); }
+			catch (Exception ex2) { return null; }
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	private List<Map<String, Object>> fetchProcessEvents(String toolId, int limit) {
+		try {
+			JsonNode root = simulatorClient.get()
+					.uri(uri -> uri.path("/api/v1/process/info")
+							.queryParam("toolID", toolId)
+							.queryParam("limit", limit)
+							.build())
+					.retrieve()
+					.bodyToMono(JsonNode.class)
+					.block(Duration.ofSeconds(8));
+			if (root == null) return List.of();
+			JsonNode events = root.get("events");
+			if (events == null || !events.isArray()) return List.of();
+			TypeReference<List<Map<String, Object>>> typeRef = new TypeReference<>() {};
+			return mapper.convertValue(events, typeRef);
+		} catch (Exception ex) {
+			log.warn("simulator process_info fetch failed for {}: {}", toolId, ex.toString());
+			return List.of();
+		}
+	}
 }

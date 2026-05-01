@@ -67,4 +67,53 @@ public final class FleetDtos {
 			int warnCount,
 			OffsetDateTime asOf
 	) {}
+
+	// ── Phase 2: per-equipment detail ──────────────────────────
+
+	/** One event on the multi-lane health timeline.
+	 *  {@code lane} maps to the y-axis row: ooc / apc / fdc / ec / recipe / lot. */
+	public record TimelineEvent(
+			OffsetDateTime t,
+			String lane,
+			String severity,    // "crit" | "warn" | "info" | "ok"
+			String label,
+			String detail
+	) {}
+
+	public record TimelineResponse(
+			String equipmentId,
+			OffsetDateTime since,
+			OffsetDateTime asOf,
+			List<TimelineEvent> events
+	) {}
+
+	/** One status card in the 5-light module row. */
+	public record ModuleStatus(
+			String key,         // "SPC" | "APC" | "FDC" | "DC" | "EC"
+			String state,       // "crit" | "warn" | "ok"
+			String value,       // big number / phrase
+			String sub          // 1-line caption
+	) {}
+
+	public record ModulesResponse(
+			String equipmentId,
+			OffsetDateTime asOf,
+			List<ModuleStatus> modules
+	) {}
+
+	/** Single SPC chart trace + control limits. */
+	public record SpcTrace(
+			String chart,
+			List<Double> values,
+			List<OffsetDateTime> times,
+			double ucl,
+			double lcl,
+			double target
+	) {}
+
+	public record SpcTraceResponse(
+			String equipmentId,
+			OffsetDateTime asOf,
+			List<SpcTrace> charts
+	) {}
 }

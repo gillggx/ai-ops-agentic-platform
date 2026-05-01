@@ -45,4 +45,27 @@ public class FleetController {
 			@RequestParam(name = "since_hours", defaultValue = "24") int sinceHours) {
 		return ApiResponse.ok(service.computeStats(sinceHours));
 	}
+
+	// ── Phase 2 — per-equipment detail ─────────────────────────
+
+	@GetMapping("/equipment/{id}/timeline")
+	public ApiResponse<FleetDtos.TimelineResponse> timeline(
+			@org.springframework.web.bind.annotation.PathVariable String id,
+			@RequestParam(name = "since_hours", defaultValue = "24") int sinceHours) {
+		return ApiResponse.ok(service.computeTimeline(id, sinceHours));
+	}
+
+	@GetMapping("/equipment/{id}/modules")
+	public ApiResponse<FleetDtos.ModulesResponse> modules(
+			@org.springframework.web.bind.annotation.PathVariable String id,
+			@RequestParam(name = "since_hours", defaultValue = "24") int sinceHours) {
+		return ApiResponse.ok(service.computeModules(id, sinceHours));
+	}
+
+	@GetMapping("/equipment/{id}/spc-trace")
+	public ApiResponse<FleetDtos.SpcTraceResponse> spcTrace(
+			@org.springframework.web.bind.annotation.PathVariable String id,
+			@RequestParam(defaultValue = "100") int limit) {
+		return ApiResponse.ok(service.computeSpcTrace(id, limit));
+	}
 }
