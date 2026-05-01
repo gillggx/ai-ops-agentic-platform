@@ -581,25 +581,24 @@ public class FleetService {
 		List<Map<String, Object>> ordered = new ArrayList<>(events);
 		java.util.Collections.reverse(ordered);
 
+		// Discover chart_names dynamically — different recipes / tools may
+		// emit different sets (xbar / R / S / P / C / future …). Hardcoding
+		// {C, P, R} hid two of the existing five SPC charts.
 		Map<String, List<Double>> valuesByChart = new LinkedHashMap<>();
 		Map<String, List<OffsetDateTime>> timesByChart = new LinkedHashMap<>();
 		Map<String, double[]> limitsByChart = new HashMap<>(); // {ucl, lcl}
-
-		String[] keys = {"c_chart", "p_chart", "r_chart"};
-		for (String k : keys) {
-			valuesByChart.put(k, new ArrayList<>());
-			timesByChart.put(k, new ArrayList<>());
-		}
 
 		for (Map<String, Object> ev : ordered) {
 			OffsetDateTime t = parseInstant(ev.get("eventTime"));
 			Map<String, Object> spc = ev.get("SPC") instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
 			Map<String, Object> charts = spc.get("charts") instanceof Map<?, ?> c ? (Map<String, Object>) c : Map.of();
-			for (String k : keys) {
-				if (!(charts.get(k) instanceof Map<?, ?> ch)) continue;
+			for (Map.Entry<String, Object> entry : charts.entrySet()) {
+				String k = entry.getKey();
+				if (!(entry.getValue() instanceof Map<?, ?> ch)) continue;
 				Object v = ((Map<String, Object>) ch).get("value");
 				if (!(v instanceof Number n)) continue;
-				valuesByChart.get(k).add(n.doubleValue());
+				valuesByChart.computeIfAbsent(k, x -> new ArrayList<>()).add(n.doubleValue());
+				timesByChart.computeIfAbsent(k, x -> new ArrayList<>());
 				if (t != null) timesByChart.get(k).add(t);
 				if (!limitsByChart.containsKey(k)) {
 					double ucl = ((Map<String, Object>) ch).get("ucl") instanceof Number un ? un.doubleValue() : 0;
@@ -610,7 +609,10 @@ public class FleetService {
 		}
 
 		List<FleetDtos.SpcTrace> out = new ArrayList<>();
-		for (String k : keys) {
+		// Stable sort by chart name so the dropdown order doesn't jitter.
+		List<String> orderedKeys = new ArrayList<>(valuesByChart.keySet());
+		java.util.Collections.sort(orderedKeys);
+		for (String k : orderedKeys) {
 			List<Double> vs = valuesByChart.get(k);
 			if (vs.isEmpty()) continue;
 			double[] lim = limitsByChart.getOrDefault(k, new double[]{0, 0});

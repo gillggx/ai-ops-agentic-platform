@@ -168,24 +168,35 @@ export function EqpDetail({ toolId, onBack }: { toolId: string; onBack?: () => v
           <div className="surface" style={{ padding: "14px 16px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
               <div className="h2">趨勢</div>
-              <div style={{ display: "flex", gap: 4 }}>
-                {(traces.length === 0 ? ["c_chart", "p_chart", "r_chart"] : traces.map(t => t.chart)).map(k => (
-                  <button
-                    key={k}
-                    onClick={() => setActiveChart(k)}
-                    className={`btn ${activeChart === k ? "btn-primary" : "btn-ghost"}`}
-                    style={{ height: 24, padding: "0 8px", fontSize: 11 }}
-                  >
-                    {k.replace("_chart", "").toUpperCase()}
-                  </button>
+              {/* Chart picker — populated dynamically from /spc-trace so any
+                  chart_name the simulator emits is selectable (xbar / R / S /
+                  P / C / future). Was hardcoded to C/P/R; now it reflects the
+                  actual data. */}
+              <select
+                value={activeChart}
+                onChange={e => setActiveChart(e.target.value)}
+                disabled={traces.length === 0}
+                style={{
+                  height: 28, padding: "0 10px", fontSize: 12,
+                  border: "1px solid var(--c-line-strong)",
+                  borderRadius: 6, background: "var(--c-bg)",
+                  color: "var(--c-ink-1)", cursor: traces.length ? "pointer" : "not-allowed",
+                  fontFamily: "inherit",
+                }}
+              >
+                {traces.length === 0 && <option value="">(無資料)</option>}
+                {traces.map(t => (
+                  <option key={t.chart} value={t.chart}>
+                    {t.chart.replace("_chart", "").toUpperCase()} chart
+                  </option>
                 ))}
-              </div>
+              </select>
             </div>
             {trace ? (
               <SpcChart trace={trace} />
             ) : (
               <div className="micro" style={{ color: "var(--c-ink-3)", padding: 16 }}>
-                (此 chart 沒 trace；切換上方 tab 看其他)
+                {traces.length === 0 ? "(此機台 24h 內無 SPC trace)" : "(切換選單看其他 chart)"}
               </div>
             )}
           </div>
