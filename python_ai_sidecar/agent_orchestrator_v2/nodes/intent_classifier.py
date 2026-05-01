@@ -6,6 +6,7 @@ Decision:
   clear_chart   — user explicitly asks for a chart
   clear_rca     — user asks why / root cause
   clear_status  — user asks for current state / count
+  knowledge     — definition / how-does-it-work question (pure concept Q&A)
   vague         — open-ended status check; emit clarify event + force synthesis
 
 When vague: pushes a `clarify` SSE event via pb_event_emit, replaces the
@@ -15,6 +16,10 @@ detour).
 
 When the user re-submits with a `[intent=<id>] <message>` prefix (selected
 from the clarify card), we bypass classification entirely.
+
+knowledge intent passes through to llm_call so Claude can answer in plain
+text. The downstream intent_completeness node also bypasses non-clear_*
+intents, so knowledge skips the spec-completeness gate naturally.
 """
 from __future__ import annotations
 
@@ -33,17 +38,27 @@ logger = logging.getLogger(__name__)
 
 _CLARIFY_PROMPT_REPLY = "我先確認一下你想看哪一面 ↑ 從上面選一個方向，或選「全部都要」我幫你建完整 pipeline。"
 
-_CLASSIFIER_SYSTEM = """You classify a manufacturing-engineer's chat request into ONE of four buckets.
+_CLASSIFIER_SYSTEM = """You classify a manufacturing-engineer's chat request into ONE of five buckets.
 
 Buckets:
   - clear_chart   "give me X chart" / 圖表 / 趨勢圖 / xbar / distribution / SPC / 顯示
-  - clear_rca     "why is X OOC" / 為什麼 / 根因 / 連續 / 異常原因 / 怎麼會
+  - clear_rca     "why is X OOC" / 為什麼 X 異常 / 根因 / 連續 / 異常原因 / 怎麼會
   - clear_status  "how many alarms now" / 現在有幾個 / 列表 / 清單 / OOC 機台
-  - vague         open-ended / 「最近怎樣」/ 「狀況如何」/ unclear scope
+  - knowledge     pure definition / concept / how-does-X-work question:
+                    「X 是什麼」/「什麼是 X」/「X 怎麼解讀」/「X 的意思」
+                    「what is X」/「define X」/「explain X」
+                    「為什麼/為何」 about a CONCEPT (e.g. "為什麼用 SPC", not
+                    "為什麼 EQP-07 OOC"); a rule / algorithm name STANDING
+                    ALONE without a target equipment ("WECO R5", "Cpk",
+                    "Nelson rule") = knowledge.
+                  ⚠ "為什麼 EQP-07 OOC" stays as clear_rca (has a target).
+  - vague         open-ended / 「最近怎樣」/ 「狀況如何」/ unclear scope.
+                  Don't use vague for knowledge questions — those go to
+                  knowledge.
 
 Output JSON only (no markdown code fences):
 
-For non-vague:
+For clear_*/knowledge:
   {"intent": "<bucket>", "confidence": 0.0-1.0}
 
 For vague — provide 2-3 disambiguation options:
@@ -56,8 +71,9 @@ For vague — provide 2-3 disambiguation options:
    }}
 
 Be aggressive about labeling clear queries — the user explicitly mentioned a chart
-type, said why/為什麼, or asked for a count/list. Only fall back to vague when
-the request is genuinely ambiguous about scope (chart? alarm? RCA? something else?).
+type, said why/為什麼 about a target, or asked for a count/list. Only fall back to
+vague when the request is genuinely ambiguous about scope (chart? alarm? RCA?
+something else?). Definitions / concept Q&A → knowledge, never vague.
 """
 
 
