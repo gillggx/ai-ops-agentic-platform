@@ -33,6 +33,7 @@ from langgraph.graph.message import add_messages
 from python_ai_sidecar.agent_orchestrator_v2.state import MAX_ITERATIONS
 from python_ai_sidecar.agent_orchestrator_v2.nodes.load_context import load_context_node
 from python_ai_sidecar.agent_orchestrator_v2.nodes.intent_classifier import intent_classifier_node
+from python_ai_sidecar.agent_orchestrator_v2.nodes.intent_completeness import intent_completeness_node
 from python_ai_sidecar.agent_orchestrator_v2.nodes.llm_call import llm_call_node
 from python_ai_sidecar.agent_orchestrator_v2.nodes.tool_execute import tool_execute_node
 from python_ai_sidecar.agent_orchestrator_v2.nodes.synthesis import synthesis_node
@@ -129,13 +130,26 @@ assert_graph_state_covers_run_kwargs(GraphState.__annotations__.keys())
 logger = logging.getLogger(__name__)
 
 
-def _route_after_intent(state: Dict[str, Any]) -> Literal["synthesis", "llm_call"]:
-    """Part A: skip llm_call when classifier marked the query as `vague`.
-
-    The classifier itself emitted a `clarify` SSE event and seeded a synthetic
-    AIMessage onto state.messages, so synthesis just renders that and stops.
+def _route_after_intent(state: Dict[str, Any]) -> Literal["synthesis", "intent_completeness", "llm_call"]:
+    """Route after intent_classifier:
+      - vague (or any other force_synthesis): straight to synthesis (clarify card already emitted).
+      - clear_chart / clear_rca / clear_status: through completeness gate first.
+      - clarified (re-submit from clarify card): skip gate, go to llm_call.
     """
     if state.get("force_synthesis") or state.get("intent") == "vague":
+        return "synthesis"
+    intent = (state.get("intent") or "").lower()
+    if intent.startswith("clear_"):
+        return "intent_completeness"
+    return "llm_call"
+
+
+def _route_after_completeness(state: Dict[str, Any]) -> Literal["synthesis", "llm_call"]:
+    """Route after intent_completeness:
+      - incomplete (force_synthesis): synthesis renders the design-intent card.
+      - complete (no flag set): proceed to llm_call as normal.
+    """
+    if state.get("force_synthesis"):
         return "synthesis"
     return "llm_call"
 
@@ -181,6 +195,7 @@ def build_graph() -> StateGraph:
     # ── Nodes ────────────────────────────────────────────────────────
     graph.add_node("load_context", load_context_node)
     graph.add_node("intent_classifier", intent_classifier_node)
+    graph.add_node("intent_completeness", intent_completeness_node)
     graph.add_node("llm_call", llm_call_node)
     graph.add_node("tool_execute", tool_execute_node)
     graph.add_node("synthesis", synthesis_node)
@@ -188,12 +203,26 @@ def build_graph() -> StateGraph:
     graph.add_node("memory_lifecycle", memory_lifecycle_node)
 
     # ── Edges ────────────────────────────────────────────────────────
-    # load_context → intent_classifier → (vague→synthesis | else→llm_call)
+    # load_context → intent_classifier
+    #   ├─ vague                    → synthesis (clarify card already emitted)
+    #   ├─ clear_*                  → intent_completeness
+    #   │     ├─ incomplete         → synthesis (design-intent card emitted)
+    #   │     └─ complete           → llm_call
+    #   └─ clarified / fallback     → llm_call
     graph.set_entry_point("load_context")
     graph.add_edge("load_context", "intent_classifier")
     graph.add_conditional_edges(
         "intent_classifier",
         _route_after_intent,
+        {
+            "synthesis": "synthesis",
+            "intent_completeness": "intent_completeness",
+            "llm_call": "llm_call",
+        },
+    )
+    graph.add_conditional_edges(
+        "intent_completeness",
+        _route_after_completeness,
         {"synthesis": "synthesis", "llm_call": "llm_call"},
     )
 
