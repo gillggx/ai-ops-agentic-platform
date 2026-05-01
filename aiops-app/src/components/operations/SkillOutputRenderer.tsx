@@ -419,12 +419,20 @@ const RULE_COLOR: Record<string, string> = {
 export function ChartDSLRenderer({ chart }: { chart: ChartDSL }): React.ReactElement {
   // Defensive normalize — backend can omit fields when pipeline result is malformed.
   // We coerce to safe defaults so downstream renderers never throw on .length / [0].
+  // Also: pipeline_executor wraps each chart as {title, node_id, sequence, chart_spec}
+  // when emitting result_summary.charts; pull the inner spec out if present so the
+  // alarm-page path renders the same charts the Pipeline Builder ResultsBody does.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const wrapped = chart as any;
+  const inner = wrapped?.chart_spec && typeof wrapped.chart_spec === "object"
+    ? { ...wrapped.chart_spec, title: wrapped.chart_spec.title ?? wrapped.title }
+    : chart;
   const safe: ChartDSL = {
-    ...chart,
-    data: Array.isArray(chart?.data) ? chart.data : [],
-    x: typeof chart?.x === "string" ? chart.x : "index",
-    y: Array.isArray(chart?.y) ? chart.y : [],
-    rules: Array.isArray(chart?.rules) ? chart.rules : [],
+    ...inner,
+    data: Array.isArray(inner?.data) ? inner.data : [],
+    x: typeof inner?.x === "string" ? inner.x : "index",
+    y: Array.isArray(inner?.y) ? inner.y : [],
+    rules: Array.isArray(inner?.rules) ? inner.rules : [],
   };
   if (safe.data.length === 0 || safe.y.length === 0) {
     return (
