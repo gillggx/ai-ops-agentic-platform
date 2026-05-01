@@ -11,10 +11,12 @@
  *   - Collapsible equipment sidebar (280px ↔ 48px)
  */
 
+import "@/styles/fleet-overview.css";
 import { Suspense, useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import ReactMarkdown from "react-markdown";
+import { FleetOverview } from "@/components/fleet/FleetOverview";
 
 // Lazy-load Plotly (no SSR)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1030,12 +1032,16 @@ function DashboardInner() {
 
       {/* ── Main Content — single vertical scroll ────────────── */}
       <div style={S.main}>
+        {/* Mode A (no toolId) → new fleet overview (replaces FabHeatmap +
+            BriefingPanel). Mode B keeps the legacy 6-tab layout below. */}
+        {!toolId && (
+          <FleetOverview onOpenTool={(id) => router.push(`/dashboard?toolId=${id}`)} />
+        )}
+
+        {toolId && (
         <div style={{ padding: 20 }}>
-          {/* AI Summary (collapsible) */}
-          <BriefingPanel
-            scope={toolId ? "tool" : "fab"}
-            toolId={toolId ?? undefined}
-          />
+          {/* Tool-scoped AI Summary (Mode B only). */}
+          <BriefingPanel scope="tool" toolId={toolId} />
 
           {toolId ? (
             /* Mode B: Tool Deep Dive — top-level tabs */
@@ -1079,13 +1085,9 @@ function DashboardInner() {
                 <ProcessTracePanel events={events} toolId={toolId} />
               )}
             </div>
-          ) : (
-            /* Mode A: Fab Overview */
-            <div style={{ marginTop: 20 }}>
-              <FabHeatmap summary={summary} />
-            </div>
-          )}
+          ) : null /* Mode A handled by <FleetOverview /> above */}
         </div>
+        )}
       </div>
     </div>
   );

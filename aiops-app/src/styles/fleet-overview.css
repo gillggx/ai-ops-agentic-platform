@@ -1,0 +1,201 @@
+/* Fleet Overview tokens — scoped to .fleet-overview to avoid bleeding
+   into the rest of the app. Source: /Users/gill/AIOps - Tool healthy
+   check/tokens.css. Inter + IBM Plex Mono are loaded by the page on
+   mount (see app/dashboard/page.tsx). */
+
+.fleet-overview {
+  /* Type */
+  --font-sans: "Inter Tight", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Neutrals */
+  --c-bg:        #ffffff;
+  --c-bg-soft:   #fafaf9;
+  --c-bg-sunken: #f4f4f2;
+  --c-line:      #e8e8e4;
+  --c-line-strong: #d4d4cf;
+  --c-ink-1:     #18181a;
+  --c-ink-2:     #4a4a4d;
+  --c-ink-3:     #76767a;
+  --c-ink-4:     #a4a4a8;
+
+  /* Semantic */
+  --c-ok:    #2f8a5b;
+  --c-ok-bg: #eaf4ee;
+  --c-warn:  #b87a1f;
+  --c-warn-bg: #faf2e3;
+  --c-crit:  #b8392f;
+  --c-crit-bg: #f7e7e4;
+  --c-info:  #3a64b8;
+  --c-info-bg: #eaf0f9;
+  --c-neutral: #76767a;
+  --c-neutral-bg: #f4f4f2;
+
+  /* Accent */
+  --c-accent: #2a2a2d;
+  --c-accent-soft: #ededea;
+
+  /* Radii / elevation */
+  --r-3: 8px;
+  --e-1: 0 1px 2px rgba(20,20,24,.04);
+
+  font-family: var(--font-sans);
+  color: var(--c-ink-1);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.005em;
+}
+
+.fleet-overview *, .fleet-overview *::before, .fleet-overview *::after { box-sizing: border-box; }
+.fleet-overview .mono { font-family: var(--font-mono); font-feature-settings: "tnum"; }
+
+/* ── Layout ─────────────────────────────────────────────────── */
+.fleet-overview {
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 100%;
+}
+
+.fleet-overview__topbar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.fleet-overview__title { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; }
+
+.surface { background: var(--c-bg); border: 1px solid var(--c-line); border-radius: var(--r-3); }
+.label { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--c-ink-3); font-weight: 500; }
+.h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.25; }
+.h2 { font-size: 16px; font-weight: 600; line-height: 1.3; }
+.h3 { font-size: 14px; font-weight: 600; line-height: 1.35; }
+.small { font-size: 12px; color: var(--c-ink-2); }
+.micro { font-size: 11px; color: var(--c-ink-3); }
+
+/* ── Hero ────────────────────────────────────────────────────── */
+.hero { padding: 20px 24px; display: grid; grid-template-columns: 1fr 280px; gap: 24px; }
+.hero__head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.hero__head__icon { font-size: 14px; }
+.hero__sidebar { border-left: 1px solid var(--c-line); padding-left: 24px; }
+.hero__metric-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 6px 0; border-bottom: 1px solid var(--c-line);
+}
+.hero__metric-row:last-child { border-bottom: none; }
+.hero__metric-row__val { font-family: var(--font-mono); font-size: 14px; }
+.hero__metric-row__val--crit { color: var(--c-crit); }
+.hero__metric-row__val--warn { color: var(--c-warn); }
+.hero__metric-row__val--info { color: var(--c-info); }
+
+/* ── Concern cards ───────────────────────────────────────────── */
+.concerns-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.concern { padding: 14px 16px; }
+.concern__head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.concern__index { font-family: var(--font-mono); font-size: 12px; color: var(--c-ink-3); }
+.concern__title { font-size: 14px; font-weight: 600; line-height: 1.4; margin-bottom: 6px; }
+.concern__detail { font-size: 12px; color: var(--c-ink-2); margin-bottom: 10px; line-height: 1.5; }
+.concern__chips { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+.concern__actions { padding-left: 16px; margin: 0 0 10px; font-size: 12px; color: var(--c-ink-2); }
+.concern__actions li { margin-bottom: 2px; }
+.concern__buttons { display: flex; gap: 6px; }
+
+/* Severity stripes — applied inset on cards/rows. */
+.stripe-crit { box-shadow: inset 3px 0 0 var(--c-crit); }
+.stripe-warn { box-shadow: inset 3px 0 0 var(--c-warn); }
+.stripe-ok   { box-shadow: inset 3px 0 0 var(--c-ok); }
+.stripe-info { box-shadow: inset 3px 0 0 var(--c-info); }
+
+/* Pills */
+.pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 20px; padding: 0 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+.pill-ok   { color: var(--c-ok);   background: var(--c-ok-bg); }
+.pill-warn { color: var(--c-warn); background: var(--c-warn-bg); }
+.pill-crit { color: var(--c-crit); background: var(--c-crit-bg); }
+.pill-info { color: var(--c-info); background: var(--c-info-bg); }
+.pill-neutral { color: var(--c-ink-2); background: var(--c-neutral-bg); }
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 24px; padding: 0 10px;
+  border: 1px solid var(--c-line-strong);
+  background: var(--c-bg);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--c-ink-1);
+  cursor: pointer;
+  font-family: inherit;
+  transition: background .12s, border-color .12s;
+}
+.btn:hover { background: var(--c-bg-sunken); }
+.btn-ghost { border-color: transparent; background: transparent; }
+.btn-ghost:hover { background: var(--c-bg-sunken); }
+.btn-primary { background: var(--c-ink-1); color: #fff; border-color: var(--c-ink-1); }
+.btn-primary:hover { background: #000; }
+
+/* ── Ranked tool list ───────────────────────────────────────── */
+.tool-list { padding: 0; overflow: hidden; }
+.tool-list__header {
+  padding: 12px 16px; border-bottom: 1px solid var(--c-line);
+  display: flex; justify-content: space-between; align-items: center;
+}
+.tool-list__filters { display: flex; gap: 6px; }
+.tool-list__cols, .tool-list__row {
+  display: grid;
+  grid-template-columns: 32px 2.4fr 1fr 1.1fr 2fr 1fr 0.9fr 80px;
+  gap: 12px;
+  padding: 12px 16px;
+  align-items: center;
+  border-bottom: 1px solid var(--c-line);
+}
+.tool-list__cols { background: var(--c-bg-sunken); padding: 8px 16px; }
+.tool-list__row { cursor: pointer; transition: background .12s; }
+.tool-list__row:last-child { border-bottom: none; }
+.tool-list__row:hover { background: var(--c-bg-soft); }
+.tool-list__row--crit { background: rgba(184,57,47,0.025); }
+.tool-list__rank { font-family: var(--font-mono); font-size: 12px; color: var(--c-ink-3); }
+.tool-list__id-line { display: flex; align-items: center; gap: 8px; }
+.tool-list__id { font-size: 14px; font-weight: 600; font-family: var(--font-mono); }
+.tool-list__note { color: var(--c-ink-2); font-size: 11px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-list__ooc-pct { font-family: var(--font-mono); font-size: 14px; }
+.tool-list__ooc-pct--crit { color: var(--c-crit); }
+.tool-list__ooc-pct--warn { color: var(--c-warn); }
+.tool-list__ooc-sub { font-family: var(--font-mono); font-size: 11px; color: var(--c-ink-3); }
+.tool-list__hour-axis { font-family: var(--font-mono); font-size: 10px; color: var(--c-ink-3); margin-top: 2px; }
+
+/* ── Status dot ─────────────────────────────────────────────── */
+.status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.status-dot--crit { background: var(--c-crit); }
+.status-dot--warn { background: var(--c-warn); }
+.status-dot--healthy, .status-dot--ok { background: var(--c-ok); }
+.status-dot--info { background: var(--c-info); }
+.status-dot--neutral { background: var(--c-ink-4); }
+
+/* ── Empty state ────────────────────────────────────────────── */
+.fleet-overview__empty {
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--c-ink-3);
+  font-size: 13px;
+}
+
+/* ── Loading bar (briefing stream) ──────────────────────────── */
+.cursor-blink {
+  display: inline-block;
+  width: 8px;
+  height: 14px;
+  background: var(--c-info);
+  animation: blink 1s step-end infinite;
+  margin-right: 6px;
+  vertical-align: text-bottom;
+}
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }

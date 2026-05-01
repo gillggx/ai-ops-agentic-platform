@@ -102,6 +102,25 @@ _ALARM_SYNTHESIS_PROMPT = """\
 {data}
 """
 
+_FLEET_BRIEFING_PROMPT = """\
+你是半導體廠資深值班工程師。以下是當前全廠 Fleet 視角的聚合數據（包含每台機台的健康度、OOC 計數、告警、趨勢）。
+
+請用**正好 2-3 句中文**寫出 Hero 簡報，幫值班同事一秒抓到「現在最該擔心什麼」：
+
+- **第 1 句：整體一句話結論** — Fleet OOC 率 + 多少台需立即介入 + 多少台需關注。
+- **第 2 句：點名嚴重的 1-2 台** — 用 mono 字體標機台 ID（如 `EQP-04`），講具體 OOC 計數或趨勢。
+- **第 3 句（可選）：跨機台模式** — 有沒有同 step 群聚或 chamber 共用問題。
+
+⚠️ 嚴格規則：
+- 2-3 句，不超過 60 字／句，不分段、不列點、不下標題。
+- 只用以下數據，不要捏造機台或數字。
+- 缺少的數據略過不提，禁止「資料不足」「無法評估」等敗筆。
+- 機台 ID 用反引號包起來，例如 `EQP-04`。
+
+--- 數據 ---
+{data}
+"""
+
 
 _SYSTEM_PROMPT = (
     "你是半導體廠資深值班工程師，用專業簡潔的語氣寫交班簡報。"
@@ -250,9 +269,13 @@ async def _stream_briefing(prompt: str) -> AsyncGenerator[dict, None]:
 
 
 class BriefingRequest(BaseModel):
-    scope: str = "fab"          # fab | tool | alarm | alarm_detail
+    scope: str = "fab"          # fab | tool | alarm | alarm_detail | fleet
     toolId: Optional[str] = None
     alarmData: Optional[Any] = None  # accepts dict (preferred) or stringified JSON
+    # New for scope=fleet — frontend posts the already-aggregated stats
+    # (equipment list + concerns + fleet stats) so the sidecar doesn't
+    # have to recompute. Shape mirrors FleetController responses.
+    fleetData: Optional[Any] = None
 
 
 async def _build_prompt(req: BriefingRequest) -> str:
@@ -267,11 +290,51 @@ async def _build_prompt(req: BriefingRequest) -> str:
         return _ALARM_QUEUE_PROMPT.format(data=_serialize_alarm_data(req.alarmData))
     if req.scope == "alarm_detail":
         return _ALARM_SYNTHESIS_PROMPT.format(data=_serialize_alarm_data(req.alarmData))
+    if req.scope == "fleet":
+        return _FLEET_BRIEFING_PROMPT.format(data=_summarize_fleet_data(req.fleetData))
     # Default: fab
     raw = await _fetch_fab_data()
     return _FAB_BRIEFING_PROMPT.format(
         data=json.dumps(raw, ensure_ascii=False, default=str)[:3000],
     )
+
+
+def _summarize_fleet_data(data: Any) -> str:
+    """Compact text summary of FleetController's aggregated payload —
+    keeps the LLM context window small + nudges it toward the rows
+    that matter (crit + warn first). Falls back to raw JSON dump on
+    unexpected shape."""
+    if data is None:
+        return "(無 fleet 數據)"
+    if isinstance(data, str):
+        return data[:3000]
+    if not isinstance(data, dict):
+        return json.dumps(data, ensure_ascii=False, default=str)[:3000]
+
+    lines: list[str] = []
+    stats = data.get("stats") or {}
+    if stats:
+        lines.append(
+            f"fleet_ooc_rate: {stats.get('fleet_ooc_rate', 0)}%, "
+            f"crit: {stats.get('crit_count', 0)}, warn: {stats.get('warn_count', 0)}, "
+            f"open_alarms: {stats.get('open_alarms', 0)}, "
+            f"affected_lots: {stats.get('affected_lots', 0)}"
+        )
+    eqs = data.get("equipment") or []
+    crit_rows = [e for e in eqs if e.get("health") == "crit"]
+    warn_rows = [e for e in eqs if e.get("health") == "warn"]
+    for e in (crit_rows + warn_rows)[:5]:
+        lines.append(
+            f"{e.get('id')}: health={e.get('health')} score={e.get('score')} "
+            f"ooc={e.get('ooc')}% oocCount={e.get('oocCount')} "
+            f"alarms={e.get('alarms')} trend={e.get('trend')} note=\"{e.get('note', '')}\""
+        )
+    concerns = data.get("concerns") or []
+    if concerns:
+        lines.append("--- top concerns ---")
+        for c in concerns[:3]:
+            lines.append(f"[{c.get('severity')}] {c.get('title')} ({c.get('detail', '')[:120]})")
+    return "\n".join(lines)[:3000]
 
 
 def _serialize_alarm_data(data: Any) -> str:
