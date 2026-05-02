@@ -120,6 +120,67 @@ public class PipelineBuilderController {
 				? publishedSkillRepo.findByStatus(status) : publishedSkillRepo.findAll();
 	}
 
+	/**
+	 * Keyword search across published skills — used by the LLM agent's
+	 * {@code search_published_skills} tool. Simple case-insensitive substring
+	 * scoring across name / use_case / when_to_use / tags / slug. Ranking is
+	 * intentionally naive (count substring matches across fields) since the
+	 * registry is small (typically &lt; 50 active skills) and pgvector
+	 * embeddings haven't been wired yet.
+	 *
+	 * <p>Returns top-K active rows with the same shape as the GET endpoint.
+	 * Empty query → returns top-K alphabetical by name.
+	 */
+	@PostMapping("/published-skills/search")
+	public List<PublishedSkillEntity> searchPublishedSkills(@RequestBody SearchRequest req) {
+		final String q = (req == null || req.query() == null) ? "" : req.query().trim().toLowerCase();
+		final int topK = (req == null || req.topK() == null || req.topK() <= 0)
+				? 5
+				: Math.min(req.topK(), 50);
+
+		List<PublishedSkillEntity> active = publishedSkillRepo.findByStatus("active");
+		if (q.isEmpty()) {
+			return active.stream()
+					.sorted((a, b) -> a.getName().compareToIgnoreCase(b.getName()))
+					.limit(topK)
+					.toList();
+		}
+
+		final String[] terms = q.split("\\s+");
+		return active.stream()
+				.map(skill -> Map.entry(skill, scoreSkill(skill, terms)))
+				.filter(e -> e.getValue() > 0)
+				.sorted((a, b) -> Integer.compare(b.getValue(), a.getValue()))
+				.limit(topK)
+				.map(Map.Entry::getKey)
+				.toList();
+	}
+
+	private static int scoreSkill(PublishedSkillEntity s, String[] terms) {
+		String hay = (
+				(s.getName() == null ? "" : s.getName()) + " " +
+				(s.getUseCase() == null ? "" : s.getUseCase()) + " " +
+				(s.getWhenToUse() == null ? "" : s.getWhenToUse()) + " " +
+				(s.getTags() == null ? "" : s.getTags()) + " " +
+				(s.getSlug() == null ? "" : s.getSlug())
+		).toLowerCase();
+		int score = 0;
+		for (String t : terms) {
+			if (t.isBlank()) continue;
+			int idx = 0;
+			while ((idx = hay.indexOf(t, idx)) >= 0) {
+				score++;
+				idx += t.length();
+			}
+		}
+		return score;
+	}
+
+	public record SearchRequest(
+			String query,
+			@com.fasterxml.jackson.annotation.JsonProperty("top_k") Integer topK
+	) {}
+
 	@GetMapping("/auto-check-rules")
 	public List<Map<String, Object>> listAutoCheckRules() {
 		// Returns real rows joined with pipeline name + status so the Frontend
