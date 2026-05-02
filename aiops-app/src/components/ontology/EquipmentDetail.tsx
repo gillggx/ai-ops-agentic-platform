@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { VegaLiteChart } from "@/components/contract/visualizations/VegaLiteChart";
+import { SvgChartRenderer } from "@/components/pipeline-builder/charts";
+import "@/styles/chart-tokens.css";
 
 interface Equipment {
   equipment_id: string;
@@ -50,56 +51,23 @@ const SEVERITY_COLOR: Record<string, string> = {
   critical: "#e53e3e", warning: "#d69e2e", info: "#718096",
 };
 
-function buildSpcSpec(dc: DcData): Record<string, unknown> {
-  const ruleData = [
-    { label: "UCL", y: dc.ucl, color: "#e53e3e" },
-    { label: "Mean", y: dc.mean, color: "#718096" },
-    { label: "LCL", y: dc.lcl, color: "#3182ce" },
-  ];
-
+// Build a ChartSpec for the SVG engine's LineChart. Replaced the original
+// hand-built Vega-Lite spec on 2026-05-02 cleanup; LineChart already handles
+// rules (UCL/Mean/LCL) + highlight (OOC red rings) + ISO time x-axis.
+function buildSpcChartSpec(dc: DcData): Record<string, unknown> {
   return {
-    $schema: "https://vega.github.io/schema/vega-lite/v5.json",
-    width: "container",
-    height: 220,
-    background: "transparent",
-    layer: [
-      // Control limit rules
-      {
-        data: { values: ruleData },
-        mark: { type: "rule", strokeDash: [4, 3], strokeWidth: 1.5 },
-        encoding: {
-          y: { field: "y", type: "quantitative" },
-          color: {
-            field: "label",
-            scale: { domain: ["UCL", "Mean", "LCL"], range: ["#e53e3e", "#a0aec0", "#3182ce"] },
-            legend: { title: "Control Limits", orient: "bottom-right", labelFontSize: 10, titleFontSize: 10 },
-          },
-          strokeDash: { value: [4, 3] },
-        },
-      },
-      // Main line
-      {
-        data: { values: dc.data },
-        mark: { type: "line", color: "#3182ce", strokeWidth: 1.5 },
-        encoding: {
-          x: { field: "timestamp", type: "temporal", axis: { labelAngle: -30, labelFontSize: 10, title: null } },
-          y: { field: "value", type: "quantitative", axis: { title: "Value", labelFontSize: 10, titleFontSize: 11 } },
-        },
-      },
-      // OOC dots
-      {
-        data: { values: dc.data.filter((p) => p.is_ooc) },
-        mark: { type: "point", filled: true, color: "#e53e3e", size: 60 },
-        encoding: {
-          x: { field: "timestamp", type: "temporal" },
-          y: { field: "value", type: "quantitative" },
-          tooltip: [
-            { field: "timestamp", type: "temporal", title: "時間" },
-            { field: "value", type: "quantitative", title: "數值" },
-          ],
-        },
-      },
+    __dsl: true,
+    type: "line",
+    title: "Temperature SPC",
+    data: dc.data,
+    x: "timestamp",
+    y: ["value"],
+    rules: [
+      { value: dc.ucl, label: "UCL", style: "danger" },
+      { value: dc.mean, label: "Mean", style: "center" },
+      { value: dc.lcl, label: "LCL", style: "danger" },
     ],
+    highlight: { field: "is_ooc", eq: true },
   };
 }
 
@@ -152,7 +120,7 @@ export function EquipmentDetail({ equipmentId, onBack, onAskAgent }: Props) {
 
   const statusColor = STATUS_COLOR[equipment?.status ?? ""] ?? "#a0aec0";
   const oocCount = dc?.data.filter((p) => p.is_ooc).length ?? 0;
-  const spcSpec = dc ? buildSpcSpec(dc) : null;
+  const spcSpec = dc ? buildSpcChartSpec(dc) : null;
 
   return (
     <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 20 }}>
@@ -268,7 +236,7 @@ export function EquipmentDetail({ equipmentId, onBack, onAskAgent }: Props) {
           Temperature SPC 管制圖（最近 24 小時）
         </div>
         {spcSpec ? (
-          <VegaLiteChart spec={spcSpec} />
+          <SvgChartRenderer spec={spcSpec} height={220} />
         ) : (
           <div style={{ height: 220, display: "flex", alignItems: "center", justifyContent: "center", color: "#a0aec0", fontSize: 12 }}>
             無 SPC 資料
