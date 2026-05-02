@@ -14,3 +14,8 @@ export * from './types';
 export { default as LineChart, renderLineChart } from './LineChart';
 export { default as BarChart, renderBarChart } from './BarChart';
 export { default as ScatterChart, renderScatterChart } from './ScatterChart';
+
+// EDA (PR-C).
+export { default as BoxPlot, renderBoxPlot } from './BoxPlot';
+export { default as Splom, renderSplom } from './Splom';
+export { default as Histogram, renderHistogram } from './Histogram';
