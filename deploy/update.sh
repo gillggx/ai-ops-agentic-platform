@@ -36,17 +36,11 @@ echo "🔄  拉取最新程式碼..."
 git -C "$APP_DIR" pull --ff-only
 
 # ── Python dependencies ───────────────────────────────────────────────────
-echo "🐍  更新 pip 依賴..."
-/opt/aiops/venv_backend/bin/pip install -q \
-  -r "$APP_DIR/fastapi_backend_service/requirements.txt" asyncpg
+# fastapi_backend_service decommissioned 2026-05-02 — venv_backend retired.
+# Sidecar deps + alembic migrations live with the sidecar's own update path.
+echo "🐍  更新 ontology pip 依賴..."
 /opt/aiops/venv_ontology/bin/pip install -q \
   -r "$APP_DIR/ontology_simulator/requirements.txt"
-
-# ── Alembic migrations ────────────────────────────────────────────────────
-echo "🗃️   執行 Alembic migrations..."
-cd "$APP_DIR/fastapi_backend_service"
-export PYTHONPATH="$APP_DIR/fastapi_backend_service"
-/opt/aiops/venv_backend/bin/alembic upgrade head 2>/dev/null || echo "    ⚠️  alembic skipped (no migration head)"
 
 # ── aiops-app build (Next.js standalone) ──────────────────────────────────
 REBUILD_APP=false
