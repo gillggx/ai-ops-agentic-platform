@@ -527,4 +527,148 @@ def examples_by_name() -> dict[str, list[dict[str, Any]]]:
                 "upstream_hint": "block_process_history(metric='cd_value') 直接接 — 給 USL+LSL 才會算 Cpk",
             },
         ],
+        # ── PR-H — SPC + Diagnostic chart blocks ──────────────────────
+        "block_xbar_r": [
+            {
+                "name": "Lot-level SPC X̄/R chart",
+                "summary": "5-wafer subgroup per lot, full WECO R1-R8 detection",
+                "params": {
+                    "value_column": "thickness",
+                    "subgroup_column": "lot_id",
+                    "subgroup_size": 5,
+                    "title": "Thickness X̄/R by lot",
+                },
+                "upstream_hint": "block_process_history(metric='thickness') → 此處（含 lot_id 分組欄位）",
+            },
+        ],
+        "block_imr": [
+            {
+                "name": "Single-shot endpoint I-MR",
+                "summary": "destructive test 的單值 SPC（無 subgroup）",
+                "params": {"value_column": "endpoint_time", "title": "Endpoint time I-MR"},
+                "upstream_hint": "raw 量測值欄位即可，自動算 moving range",
+            },
+        ],
+        "block_ewma_cusum": [
+            {
+                "name": "EWMA λ=0.2 small-shift detector",
+                "summary": "敏感度比 X̄/R 高，適合偵測 0.5σ shift",
+                "params": {"value_column": "thickness", "mode": "ewma", "lambda": 0.2, "title": "Thickness EWMA"},
+                "upstream_hint": "block_filter(spc_status='PASS') 看 in-control 樣本的 small drift",
+            },
+        ],
+        "block_pareto": [
+            {
+                "name": "Defect type Pareto",
+                "summary": "缺陷類型按 count 遞減 + 累計 % 線",
+                "params": {"category_column": "defect_code", "value_column": "count", "cumulative_threshold": 80, "title": "Defect Pareto"},
+                "upstream_hint": "block_groupby_agg(group_by=defect_code, agg={count: count})",
+            },
+        ],
+        "block_variability_gauge": [
+            {
+                "name": "Lot › Wafer › Tool variability",
+                "summary": "三層分組看 shift 來源（lot 之間？wafer 之間？tool？）",
+                "params": {"value_column": "thickness", "levels": ["lot", "wafer", "tool"], "title": "Thickness variability"},
+                "upstream_hint": "block_process_history → 此處（含 lot/wafer/tool 三個欄位）",
+            },
+        ],
+        "block_parallel_coords": [
+            {
+                "name": "Recipe profile colored by yield",
+                "summary": "5 個 recipe params 並列軸，yield<92 高亮紅色",
+                "params": {
+                    "dimensions": ["rf_power", "pressure", "gas_flow", "temp", "yield_pct"],
+                    "color_by": "yield_pct",
+                    "alert_below": 92,
+                    "title": "Recipe profile",
+                },
+                "upstream_hint": "block_join recipe + yield 表 → 此處",
+            },
+        ],
+        "block_probability_plot": [
+            {
+                "name": "Normality check before Cpk",
+                "summary": "Q-Q plot + Anderson-Darling p-value 確認資料常態",
+                "params": {"value_column": "thickness", "title": "Thickness normality"},
+                "upstream_hint": "block_filter(spc_status='PASS') 排除 OOC 後檢測常態",
+            },
+        ],
+        "block_heatmap_dendro": [
+            {
+                "name": "FDC correlation matrix (clustered)",
+                "summary": "對 correlation matrix 做 hierarchical clustering 重排",
+                "params": {
+                    "matrix": [[1, 0.8, -0.3], [0.8, 1, -0.2], [-0.3, -0.2, 1]],
+                    "dim_labels": ["RF", "Pressure", "Yield"],
+                    "cluster": True,
+                    "title": "FDC correlations",
+                },
+                "upstream_hint": "block_correlation 輸出 matrix + 此處視覺化（或 long-form mode）",
+            },
+        ],
+        # ── PR-I — Wafer chart blocks ─────────────────────────────────
+        "block_wafer_heatmap": [
+            {
+                "name": "49-site thickness wafer map",
+                "summary": "IDW 插值 + edge ring drift 視覺化",
+                "params": {
+                    "x_column": "x",
+                    "y_column": "y",
+                    "value_column": "thickness",
+                    "wafer_radius_mm": 150,
+                    "unit": "Å",
+                    "color_mode": "viridis",
+                    "title": "Wafer thickness map",
+                },
+                "upstream_hint": "block_process_history(metric='thickness', include_xy=true) → 此處",
+            },
+        ],
+        "block_defect_stack": [
+            {
+                "name": "Multi-wafer defect overlay",
+                "summary": "最近 N wafer 的缺陷空間分佈，按 code 著色",
+                "params": {
+                    "x_column": "x",
+                    "y_column": "y",
+                    "defect_column": "defect_code",
+                    "wafer_radius_mm": 150,
+                    "title": "Defect stack (last 20 wafers)",
+                },
+                "upstream_hint": "block_filter(time>=last_24h) → 此處",
+            },
+        ],
+        "block_spatial_pareto": [
+            {
+                "name": "Yield zone heatmap",
+                "summary": "wafer 切方格，每格平均 yield，最差格框黑色",
+                "params": {
+                    "x_column": "x",
+                    "y_column": "y",
+                    "value_column": "yield_pct",
+                    "grid_n": 12,
+                    "wafer_radius_mm": 150,
+                    "unit": "%",
+                    "title": "Yield by zone",
+                },
+                "upstream_hint": "block_join(wafer_xy, yield_per_die) → 此處",
+            },
+        ],
+        "block_trend_wafer_maps": [
+            {
+                "name": "Pre/post PM thickness drift",
+                "summary": "7 天 wafer mini-maps，PM 日紅虛線框",
+                "params": {
+                    "x_column": "x",
+                    "y_column": "y",
+                    "value_column": "thickness",
+                    "time_column": "wafer_date",
+                    "pm_column": "is_pm_day",
+                    "cols": 7,
+                    "wafer_radius_mm": 150,
+                    "title": "Thickness over time",
+                },
+                "upstream_hint": "block_process_history(since=7d, include_xy=true) + 標記 pm_day 欄位",
+            },
+        ],
     }

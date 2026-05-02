@@ -65,6 +65,19 @@ SIDECAR_NATIVE_BLOCKS: frozenset[str] = frozenset({
     "block_box_plot",
     "block_splom",
     "block_histogram_chart",
+    # PR-H + PR-I — SPC + Diagnostic + Wafer chart blocks (Stage 2 parts 2/3 + 3/3)
+    "block_xbar_r",
+    "block_imr",
+    "block_ewma_cusum",
+    "block_pareto",
+    "block_variability_gauge",
+    "block_parallel_coords",
+    "block_probability_plot",
+    "block_heatmap_dendro",
+    "block_wafer_heatmap",
+    "block_defect_stack",
+    "block_spatial_pareto",
+    "block_trend_wafer_maps",
     # Phase 8-B final: rewired to call Java /internal/mcp-definitions
     # (instead of opening a DB session) in commit below.
     "block_mcp_call",

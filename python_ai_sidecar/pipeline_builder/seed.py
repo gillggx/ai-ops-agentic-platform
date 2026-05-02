@@ -2051,6 +2051,425 @@ def _blocks() -> list[dict[str, Any]]:
             },
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.histogram_chart:HistogramChartBlockExecutor"},
         },
+        # ── PR-H — SPC + Diagnostic chart blocks (Stage 2 part 2/3) ────────
+        {
+            "name": "block_xbar_r",
+            "version": "1.0.0",
+            "category": "output",
+            "status": "production",
+            "description": (
+                "== What ==\nProper X̄/R control chart with full WECO R1-R8 highlighting.\n\n"
+                "== When to use ==\n"
+                "- ✅ subgroup-size SPC monitoring（每批 5 個 wafer 量量算 X̄/R）\n"
+                "- ✅ 想要 WECO R2/R3/R4/R6/R7/R8 自動偵測（不只 OOC）\n"
+                "- ❌ 單測量（n=1）→ 用 block_imr\n"
+                "- ❌ small-shift 偵測 → 用 block_ewma_cusum\n\n"
+                "== Params ==\n"
+                "subgroups:        number[][], opt — 預先 aggregated subgroup arrays\n"
+                "value_column:     string — 數值欄位（與 subgroup_column 配合 raw rows path）\n"
+                "subgroup_column:  string, opt — group 欄位（lot_id, wafer_id 等）\n"
+                "subgroup_size:    int, opt — 估 σ 用的 n（預設取出現最多的 group size）\n"
+                "weco_rules:       string[], opt — 例 ['R1','R2','R5']，預設 R1-R8 全開\n"
+                "title:            string, opt\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "chart_spec", "type": "dict"}],
+            "param_schema": {
+                "type": "object",
+                "properties": {
+                    "subgroups": {"type": "array"},
+                    "value_column": {"type": "string"},
+                    "subgroup_column": {"type": "string"},
+                    "subgroup_size": {"type": "integer", "minimum": 2, "maximum": 10},
+                    "weco_rules": {"type": "array", "items": {"type": "string"}},
+                    "title": {"type": "string"},
+                },
+            },
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.xbar_r:XbarRBlockExecutor"},
+        },
+        {
+            "name": "block_imr",
+            "version": "1.0.0",
+            "category": "output",
+            "status": "production",
+            "description": (
+                "== What ==\nIndividual + Moving Range chart for un-subgrouped (n=1) data with WECO R1-R8.\n\n"
+                "== When to use ==\n"
+                "- ✅ 每筆只一個量測值（destructive test, single-shot endpoint）\n"
+                "- ❌ subgroup data → 用 block_xbar_r（更敏感）\n\n"
+                "== Params ==\n"
+                "values:        number[], opt — 預先 aggregated values\n"
+                "value_column:  string — 與 values 二擇一\n"
+                "weco_rules:    string[], opt\n"
+                "title:         string, opt\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "chart_spec", "type": "dict"}],
+            "param_schema": {
+                "type": "object",
+                "properties": {
+                    "values": {"type": "array"},
+                    "value_column": {"type": "string"},
+                    "weco_rules": {"type": "array", "items": {"type": "string"}},
+                    "title": {"type": "string"},
+                },
+            },
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.imr:IMRBlockExecutor"},
+        },
+        {
+            "name": "block_ewma_cusum",
+            "version": "1.0.0",
+            "category": "output",
+            "status": "production",
+            "description": (
+                "== What ==\nEWMA + CUSUM small-shift detector. Distinct from `block_ewma` (transform).\n"
+                "Two modes: 'ewma' (time-varying limits) or 'cusum' (SH/SL paths with H+/H− interval).\n\n"
+                "== When to use ==\n"
+                "- ✅ 製程小偏移偵測（< 1σ shift）— 比 X̄/R 更敏感\n"
+                "- ✅ EWMA λ=0.2 是工廠常用值；CUSUM k=0.5 + h=4 是 1σ shift 的 ARL=10 配置\n"
+                "- ❌ 單純 smoothing（不需要 chart） → 用 block_ewma\n\n"
+                "== Params ==\n"
+                "values:        number[], opt — 與 value_column 二擇一\n"
+                "value_column:  string\n"
+                "mode:          'ewma' | 'cusum'，default 'ewma'\n"
+                "lambda:        number, default 0.2 — EWMA smoothing\n"
+                "k:             number, default 0.5 — CUSUM reference (σ units)\n"
+                "h:             number, default 4 — CUSUM decision interval (σ units)\n"
+                "target:        number, opt — 覆寫 μ\n"
+                "title:         string, opt\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "chart_spec", "type": "dict"}],
+            "param_schema": {
+                "type": "object",
+                "properties": {
+                    "values": {"type": "array"},
+                    "value_column": {"type": "string"},
+                    "mode": {"type": "string", "enum": ["ewma", "cusum"], "default": "ewma"},
+                    "lambda": {"type": "number", "minimum": 0.05, "maximum": 1, "default": 0.2},
+                    "k": {"type": "number", "default": 0.5},
+                    "h": {"type": "number", "default": 4},
+                    "target": {"type": "number"},
+                    "title": {"type": "string"},
+                },
+            },
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.ewma_cusum:EwmaCusumBlockExecutor"},
+        },
+        {
+            "name": "block_pareto",
+            "version": "1.0.0",
+            "category": "output",
+            "status": "production",
+            "description": (
+                "== What ==\nPareto chart — 遞減排序 bars + 累計 % line + 80% 參考線。「找最大貢獻者」場景必備。\n\n"
+                "== When to use ==\n"
+                "- ✅ 「最常見的缺陷類型」「哪幾台機台貢獻 80% OOC」「lot 失敗 root cause」\n"
+                "- ❌ 順序固定的類別（時間 / step) → 用 block_bar_chart\n\n"
+                "== Params ==\n"
+                "category_column:        string, required — 類別欄位\n"
+                "value_column:           string, required — 計數欄位\n"
+                "cumulative_threshold:   number, default 80 — 紅色參考線（80/20 rule）\n"
+                "title:                  string, opt\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "chart_spec", "type": "dict"}],
+            "param_schema": {
+                "type": "object",
+                "required": ["category_column", "value_column"],
+                "properties": {
+                    "category_column": {"type": "string"},
+                    "value_column": {"type": "string"},
+                    "cumulative_threshold": {"type": "number", "minimum": 0, "maximum": 100, "default": 80},
+                    "title": {"type": "string"},
+                },
+            },
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.pareto:ParetoBlockExecutor"},
+        },
+        {
+            "name": "block_variability_gauge",
+            "version": "1.0.0",
+            "category": "output",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "多階分組變異分解 — jittered points + 每組均值粗線 + 連線顯示 lot/wafer/tool 階層 shifts。\n\n"
+                "== When to use ==\n"
+                "- ✅ 「不同 lot 之間有沒有 shift」「同 lot 不同 wafer 變異多大」「tool-to-tool」\n"
+                "- ❌ 純看分佈 → 用 block_box_plot 或 block_histogram_chart\n\n"
+                "== Params ==\n"
+                "value_column:  string, required\n"
+                "levels:        string[], required — 由外到內，e.g. ['lot','wafer','tool']\n"
+                "title:         string, opt\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "chart_spec", "type": "dict"}],
+            "param_schema": {
+                "type": "object",
+                "required": ["value_column", "levels"],
+                "properties": {
+                    "value_column": {"type": "string"},
+                    "levels": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+                    "title": {"type": "string"},
+                },
+            },
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.variability_gauge:VariabilityGaugeBlockExecutor"},
+        },
+        {
+            "name": "block_parallel_coords",
+            "version": "1.0.0",
+            "category": "output",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "Parallel coordinates — N axes 並列，每筆 row 一條多段折線。互動：drag axis 設 brush 範圍，dblclick 清除。\n\n"
+                "== When to use ==\n"
+                "- ✅ 「Recipe 5+ params 探索 yield 為何低」（color_by='Yield%' + alert_below=92）\n"
+                "- ✅ 多維 outlier 找：先 brush 已知異常範圍，看其他維度是否同步\n"
+                "- ❌ 只 2 維 → 用 block_scatter_chart\n\n"
+                "== Params ==\n"
+                "dimensions:    string[], required, length >= 2 — 軸的欄位\n"
+                "color_by:      string, opt — 上色欄位（通常是 yield 或 quality）\n"
+                "alert_below:   number, opt — < threshold 的 row 改紅色\n"
+                "title:         string, opt\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "chart_spec", "type": "dict"}],
+            "param_schema": {
+                "type": "object",
+                "required": ["dimensions"],
+                "properties": {
+                    "dimensions": {"type": "array", "items": {"type": "string"}, "minItems": 2},
+                    "color_by": {"type": "string"},
+                    "alert_below": {"type": "number"},
+                    "title": {"type": "string"},
+                },
+            },
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.parallel_coords:ParallelCoordsBlockExecutor"},
+        },
+        {
+            "name": "block_probability_plot",
+            "version": "1.0.0",
+            "category": "output",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "Normal Q-Q plot + Anderson-Darling p-value annotation. 用於檢定資料是否常態分佈。\n\n"
+                "== When to use ==\n"
+                "- ✅ 「Cpk 算前先確認常態性」「outlier 是真離群還是分佈本身偏」\n"
+                "- ✅ AD p ≥ 0.05 → 常態 ✓；否則 ⚠ non-normal\n"
+                "- ❌ 純看 distribution shape → 用 block_histogram_chart（更直覺）\n\n"
+                "== Params ==\n"
+                "values:        number[], opt — 二擇一\n"
+                "value_column:  string\n"
+                "title:         string, opt\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "chart_spec", "type": "dict"}],
+            "param_schema": {
+                "type": "object",
+                "properties": {
+                    "values": {"type": "array"},
+                    "value_column": {"type": "string"},
+                    "title": {"type": "string"},
+                },
+            },
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.probability_plot:ProbabilityPlotBlockExecutor"},
+        },
+        {
+            "name": "block_heatmap_dendro",
+            "version": "1.0.0",
+            "category": "output",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "Clustered heatmap — single-linkage agglomerative clustering on (1-|value|)\n"
+                "distance；row + col 重排，附 top + right dendrograms。\n\n"
+                "== When to use ==\n"
+                "- ✅ 「FDC 哪幾組 params 強相關」（matrix 模式：先跑 block_correlation 拿到 matrix）\n"
+                "- ✅ 「哪幾個 step × tool 同步異常」（long-form 模式）\n"
+                "- ❌ 不需 cluster → 用 block_chart(heatmap)（更輕）\n\n"
+                "== Params ==\n"
+                "matrix:           number[][], opt — N×N 矩陣（與 dim_labels 配對）\n"
+                "dim_labels:       string[], opt — matrix 的 row/col 標籤\n"
+                "x_column / y_column / value_column: long-form mode（與 matrix 二擇一）\n"
+                "cluster:          bool, default true\n"
+                "title:            string, opt\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "chart_spec", "type": "dict"}],
+            "param_schema": {
+                "type": "object",
+                "properties": {
+                    "matrix": {"type": "array"},
+                    "dim_labels": {"type": "array", "items": {"type": "string"}},
+                    "x_column": {"type": "string"},
+                    "y_column": {"type": "string"},
+                    "value_column": {"type": "string"},
+                    "cluster": {"type": "boolean", "default": True},
+                    "title": {"type": "string"},
+                },
+            },
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.heatmap_dendro:HeatmapDendroBlockExecutor"},
+        },
+        # ── PR-I — Wafer chart blocks (Stage 2 part 3/3) ───────────────────
+        {
+            "name": "block_wafer_heatmap",
+            "version": "1.0.0",
+            "category": "output",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "Circle wafer outline + IDW interpolated value field over (x,y) measurement\n"
+                "sites + optional measurement-point overlay. Uniformity stats (μ/σ/range/±%).\n\n"
+                "== When to use ==\n"
+                "- ✅ 「49-site thickness 空間分佈」「edge ring drift」「center-to-edge slope」\n"
+                "- ❌ defect 類別空間分佈 → 用 block_defect_stack\n\n"
+                "== Params ==\n"
+                "x_column / y_column:  座標欄位（mm 單位，center 為原點）— default 'x' / 'y'\n"
+                "value_column:         required — measurement 值\n"
+                "wafer_radius_mm:      default 150（300mm wafer）\n"
+                "notch:                'top' | 'bottom' | 'left' | 'right'，default 'bottom'\n"
+                "unit:                 string, opt — legend / tooltip 單位（'Å', 'nm'）\n"
+                "color_mode:           'viridis' | 'diverging'，default 'viridis'\n"
+                "show_points:          bool, default true\n"
+                "grid_n:               int, default 60 — 插值解析度\n"
+                "title:                string, opt\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "chart_spec", "type": "dict"}],
+            "param_schema": {
+                "type": "object",
+                "required": ["value_column"],
+                "properties": {
+                    "x_column": {"type": "string", "default": "x"},
+                    "y_column": {"type": "string", "default": "y"},
+                    "value_column": {"type": "string"},
+                    "wafer_radius_mm": {"type": "number", "default": 150},
+                    "notch": {"type": "string", "enum": ["top", "bottom", "left", "right"], "default": "bottom"},
+                    "unit": {"type": "string"},
+                    "color_mode": {"type": "string", "enum": ["viridis", "diverging"], "default": "viridis"},
+                    "show_points": {"type": "boolean", "default": True},
+                    "grid_n": {"type": "integer", "minimum": 10, "maximum": 200, "default": 60},
+                    "title": {"type": "string"},
+                },
+            },
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.wafer_heatmap:WaferHeatmapBlockExecutor"},
+        },
+        {
+            "name": "block_defect_stack",
+            "version": "1.0.0",
+            "category": "output",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "Wafer outline + 缺陷點按 defect_code 著色 + clickable legend toggle 顯示。\n\n"
+                "== When to use ==\n"
+                "- ✅ 「最近 N wafer 的 defect 空間分佈」「Particle 是否聚集在 edge」\n"
+                "- ❌ 連續變數 → 用 block_wafer_heatmap\n\n"
+                "== Params ==\n"
+                "x_column / y_column:  座標欄位 — default 'x' / 'y'\n"
+                "defect_column:        缺陷類型欄位 — default 'defect_code'\n"
+                "codes:                string[], opt — 限制顯示哪些 codes（預設 auto）\n"
+                "wafer_radius_mm:      default 150\n"
+                "notch:                default 'bottom'\n"
+                "title:                string, opt\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "chart_spec", "type": "dict"}],
+            "param_schema": {
+                "type": "object",
+                "properties": {
+                    "x_column": {"type": "string", "default": "x"},
+                    "y_column": {"type": "string", "default": "y"},
+                    "defect_column": {"type": "string", "default": "defect_code"},
+                    "codes": {"type": "array", "items": {"type": "string"}},
+                    "wafer_radius_mm": {"type": "number", "default": 150},
+                    "notch": {"type": "string", "enum": ["top", "bottom", "left", "right"], "default": "bottom"},
+                    "title": {"type": "string"},
+                },
+            },
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.defect_stack:DefectStackBlockExecutor"},
+        },
+        {
+            "name": "block_spatial_pareto",
+            "version": "1.0.0",
+            "category": "output",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "Yield (or any value) binned 到 wafer grid，diverging palette 著色，**worst cell 黑框 highlight**。\n\n"
+                "== When to use ==\n"
+                "- ✅ 「yield 哪一區最差」「edge yield drop 嚴重程度」\n"
+                "- ❌ 連續 thickness 分佈 → 用 block_wafer_heatmap\n\n"
+                "== Params ==\n"
+                "x_column / y_column:  default 'x' / 'y'\n"
+                "value_column:         required — yield_pct 或類似\n"
+                "wafer_radius_mm:      default 150\n"
+                "grid_n:               int, default 12 — 切格數\n"
+                "notch:                default 'bottom'\n"
+                "unit:                 string, opt — '%' 等\n"
+                "title:                string, opt\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "chart_spec", "type": "dict"}],
+            "param_schema": {
+                "type": "object",
+                "required": ["value_column"],
+                "properties": {
+                    "x_column": {"type": "string", "default": "x"},
+                    "y_column": {"type": "string", "default": "y"},
+                    "value_column": {"type": "string"},
+                    "wafer_radius_mm": {"type": "number", "default": 150},
+                    "grid_n": {"type": "integer", "minimum": 4, "maximum": 50, "default": 12},
+                    "notch": {"type": "string", "enum": ["top", "bottom", "left", "right"], "default": "bottom"},
+                    "unit": {"type": "string"},
+                    "title": {"type": "string"},
+                },
+            },
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.spatial_pareto:SpatialParetoBlockExecutor"},
+        },
+        {
+            "name": "block_trend_wafer_maps",
+            "version": "1.0.0",
+            "category": "output",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "Small-multiples grid of mini wafer heatmaps over time. Shared color domain.\n"
+                "PM days (`pm_column`=true) 框紅虛線。\n\n"
+                "== When to use ==\n"
+                "- ✅ 「pre/post PM 空間分佈變化」「過去 7 天 wafer drift」「lot-to-lot 重複性」\n"
+                "- ❌ 單一 wafer 細看 → 用 block_wafer_heatmap\n\n"
+                "== Params ==\n"
+                "maps:           list, opt — pre-aggregated [{date, points:[{x,y,v}], is_pm}, ...]\n"
+                "x_column / y_column / value_column / time_column: long-form mode\n"
+                "pm_column:      string, opt — bool 欄位標 PM 日\n"
+                "wafer_radius_mm: default 150\n"
+                "cols:           int, opt — grid 欄數（預設 = maps 數）\n"
+                "grid_n:         int, default 28\n"
+                "notch:          default 'bottom'\n"
+                "title:          string, opt\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "chart_spec", "type": "dict"}],
+            "param_schema": {
+                "type": "object",
+                "properties": {
+                    "maps": {"type": "array"},
+                    "x_column": {"type": "string", "default": "x"},
+                    "y_column": {"type": "string", "default": "y"},
+                    "value_column": {"type": "string"},
+                    "time_column": {"type": "string"},
+                    "pm_column": {"type": "string"},
+                    "wafer_radius_mm": {"type": "number", "default": 150},
+                    "cols": {"type": "integer", "minimum": 1},
+                    "grid_n": {"type": "integer", "minimum": 10, "maximum": 100, "default": 28},
+                    "notch": {"type": "string", "enum": ["top", "bottom", "left", "right"], "default": "bottom"},
+                    "title": {"type": "string"},
+                },
+            },
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.trend_wafer_maps:TrendWaferMapsBlockExecutor"},
+        },
     ]
 
 
