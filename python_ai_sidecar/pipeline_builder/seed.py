@@ -1801,6 +1801,256 @@ def _blocks() -> list[dict[str, Any]]:
             },
             "implementation": {"type": "python", "ref": "app.services.pipeline_builder.blocks.compute:ComputeBlockExecutor"},
         },
+        # ── PR-G — primitives + EDA chart blocks ──────────────────────────
+        # Stage 2 part 1/3 of the 18-block charting overhaul. Each block emits
+        # a ChartDSL `chart_spec` (`__dsl=true`) that the new SVG engine routes
+        # via `ChartRenderer`'s lookup table to a dedicated React component.
+        {
+            "name": "block_line_chart",
+            "version": "1.0.0",
+            "category": "output",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "Line / multi-line chart with optional control rules + highlight overlay.\n"
+                "Output `chart_spec` with type='line' that the SVG engine renders via\n"
+                "the dedicated LineChart component.\n"
+                "\n"
+                "== When to use ==\n"
+                "- ✅ 純時序趨勢（thickness over time / count per hour / event_time vs value）\n"
+                "- ✅ 多條線疊圖（y 是 array，e.g. xbar + ucl + lcl 都當 y series）\n"
+                "- ✅ 雙 Y 軸（y_secondary 給第二軸 series，e.g. SPC 值 + APC 補償）\n"
+                "- ✅ 一個欄位 group 出多條彩色線：series_field='toolID'\n"
+                "- ❌ 嚴格的 SPC X̄/R 控制圖（subgroup 算 σ + WECO） → 用 block_xbar_r\n"
+                "- ❌ 純值分佈 → 用 block_histogram_chart\n"
+                "\n"
+                "== Params ==\n"
+                "x:                 string, required — x 軸欄位（time / index / category）\n"
+                "y:                 string | string[], required — y series 欄位\n"
+                "y_secondary:       string[], opt — 右側 y 軸 series\n"
+                "series_field:      string, opt — group rows 出多條 color trace\n"
+                "rules:             array, opt — [{value, label, style?, color?}] 水平參考線\n"
+                "highlight_field:   string, opt — bool 欄位（matched rows 紅圈 overlay）\n"
+                "highlight_eq:      any, opt — match 條件值，預設 true\n"
+                "title:             string, opt\n"
+                "\n"
+                "== Output ==\n"
+                "chart_spec (dict): type='line', data, x, y, [y_secondary, rules, highlight, series_field]\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "chart_spec", "type": "dict"}],
+            "param_schema": {
+                "type": "object",
+                "required": ["x", "y"],
+                "properties": {
+                    "x": {"type": "string"},
+                    "y": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]},
+                    "y_secondary": {"type": "array", "items": {"type": "string"}},
+                    "series_field": {"type": "string"},
+                    "rules": {"type": "array"},
+                    "highlight_field": {"type": "string"},
+                    "highlight_eq": {},
+                    "title": {"type": "string"},
+                },
+            },
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.line_chart:LineChartBlockExecutor"},
+        },
+        {
+            "name": "block_bar_chart",
+            "version": "1.0.0",
+            "category": "output",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "Categorical bar / grouped-bar chart. Multiple `y` columns produce side-by-\n"
+                "side grouped bars per category.\n"
+                "\n"
+                "== When to use ==\n"
+                "- ✅ 「按 EQP 比較 OOC count」「每個 step 的 alarm 數」\n"
+                "- ❌ 排序 + 累計 % 的 80/20 分析 → 用 block_pareto（自動排序 + 累計線）\n"
+                "- ❌ 連續時間軸 → 用 block_line_chart\n"
+                "\n"
+                "== Params ==\n"
+                "x:               string, required — 類別欄位\n"
+                "y:               string | string[], required — bar 高度欄位\n"
+                "rules:           array, opt — 水平 threshold 線\n"
+                "highlight_field/highlight_eq: 同 line_chart\n"
+                "title:           string, opt\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "chart_spec", "type": "dict"}],
+            "param_schema": {
+                "type": "object",
+                "required": ["x", "y"],
+                "properties": {
+                    "x": {"type": "string"},
+                    "y": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]},
+                    "rules": {"type": "array"},
+                    "highlight_field": {"type": "string"},
+                    "highlight_eq": {},
+                    "title": {"type": "string"},
+                },
+            },
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.bar_chart:BarChartBlockExecutor"},
+        },
+        {
+            "name": "block_scatter_chart",
+            "version": "1.0.0",
+            "category": "output",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "Scatter plot — markers only. Use for correlation / dispersion / x-vs-y.\n"
+                "`series_field` (single y) splits into one colored series per group.\n"
+                "\n"
+                "== When to use ==\n"
+                "- ✅ 「RF Power vs Thickness 是否相關」「stage_time vs OOC%」\n"
+                "- ❌ 多參數矩陣相關 (5+ params) → 用 block_splom（更密集）\n"
+                "- ❌ 趨勢線 → 用 block_line_chart\n"
+                "\n"
+                "== Params ==\n"
+                "同 block_line_chart 但無 y_secondary。\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "chart_spec", "type": "dict"}],
+            "param_schema": {
+                "type": "object",
+                "required": ["x", "y"],
+                "properties": {
+                    "x": {"type": "string"},
+                    "y": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]},
+                    "series_field": {"type": "string"},
+                    "rules": {"type": "array"},
+                    "highlight_field": {"type": "string"},
+                    "highlight_eq": {},
+                    "title": {"type": "string"},
+                },
+            },
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.scatter_chart:ScatterChartBlockExecutor"},
+        },
+        {
+            "name": "block_box_plot",
+            "version": "1.0.0",
+            "category": "output",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "Box plot — IQR + whiskers + outlier dots, with optional nested grouping\n"
+                "bracket (e.g. inner=Chamber, outer=Tool).\n"
+                "\n"
+                "== When to use ==\n"
+                "- ✅ 「比較不同 chamber 的 thickness 分散」「per-tool 數值差異」\n"
+                "- ✅ 嵌套分群（tool > chamber）→ 設 group_by_secondary\n"
+                "- ❌ 只想看分佈不分組 → 用 block_histogram_chart\n"
+                "- ❌ 純看 raw 數值列表 → 用 block_data_view\n"
+                "\n"
+                "== Params ==\n"
+                "x:                  string, required — 內層分組欄位（e.g. chamber）\n"
+                "y:                  string, required — 數值欄位（要算 quartiles 的）\n"
+                "group_by_secondary: string, opt — 外層 bracket 欄位（e.g. tool）\n"
+                "show_outliers:      bool, default true\n"
+                "expanded:           bool, default true（按 outer label 可展開/收合）\n"
+                "y_label:            string, opt — y 軸標題（預設 = y 欄位名）\n"
+                "title:              string, opt\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "chart_spec", "type": "dict"}],
+            "param_schema": {
+                "type": "object",
+                "required": ["x", "y"],
+                "properties": {
+                    "x": {"type": "string"},
+                    "y": {"type": "string"},
+                    "group_by_secondary": {"type": "string"},
+                    "show_outliers": {"type": "boolean", "default": True},
+                    "expanded": {"type": "boolean", "default": True},
+                    "y_label": {"type": "string"},
+                    "title": {"type": "string"},
+                },
+            },
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.box_plot:BoxPlotBlockExecutor"},
+        },
+        {
+            "name": "block_splom",
+            "version": "1.0.0",
+            "category": "output",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "Scatter Plot Matrix — N × N grid for FDC parameter exploration.\n"
+                "  - Diagonal: density curves\n"
+                "  - Lower triangle: scatter\n"
+                "  - Upper triangle: |Pearson r| heatmap\n"
+                "\n"
+                "== When to use ==\n"
+                "- ✅ 「5+ FDC params 之間哪幾個有相關」「對照 outlier 在哪幾個 dim 異常」\n"
+                "- ❌ 只看 2 個變數 → 用 block_scatter_chart\n"
+                "- ❌ 純 correlation matrix（不看 raw scatter） → 用 block_heatmap_dendro\n"
+                "\n"
+                "== Params ==\n"
+                "dimensions:     string[], required, length >= 2\n"
+                "outlier_field:  string, opt — bool 欄位，true 的 row scatter 會用 alert 色\n"
+                "title:          string, opt\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "chart_spec", "type": "dict"}],
+            "param_schema": {
+                "type": "object",
+                "required": ["dimensions"],
+                "properties": {
+                    "dimensions": {"type": "array", "items": {"type": "string"}, "minItems": 2},
+                    "outlier_field": {"type": "string"},
+                    "title": {"type": "string"},
+                },
+            },
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.splom:SplomBlockExecutor"},
+        },
+        {
+            "name": "block_histogram_chart",
+            "version": "1.0.0",
+            "category": "output",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "Distribution histogram with optional USL/LSL/target spec lines + normal-fit\n"
+                "curve + auto Cpk/Cp/ppm annotation.\n"
+                "\n"
+                "⚠ NAMING — 注意跟 `block_histogram` (transform, 算 bin counts) 區分。\n"
+                "本 block 是 chart 輸出，可以吃 raw values（自動 binning）或預先 binned 的\n"
+                "data（含 bin_center + count 欄位）。\n"
+                "\n"
+                "== When to use ==\n"
+                "- ✅ 「CD 分佈 + spec window」「thickness 落在 USL/LSL 之間多少 ppm」\n"
+                "- ✅ 想看 Cpk → 給 USL + LSL 即可，自動算\n"
+                "- ❌ 只想要 bin counts（給後續 pipeline 用） → 用 block_histogram\n"
+                "\n"
+                "== Params ==\n"
+                "value_column:   string, required (raw mode) — 數值欄位\n"
+                "                若 data 已是 pre-binned (bin_center + count)，可省略\n"
+                "usl, lsl:       number, opt — spec 上下限（兩者都給才算 Cpk）\n"
+                "target:         number, opt — 目標值（綠色虛線）\n"
+                "bins:           int, opt, default 28（raw mode 才用到）\n"
+                "show_normal:    bool, default true\n"
+                "unit:           string, opt — x 軸標題後綴（'nm', 'Å', etc.）\n"
+                "title:          string, opt\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "chart_spec", "type": "dict"}],
+            "param_schema": {
+                "type": "object",
+                "properties": {
+                    "value_column": {"type": "string"},
+                    "usl": {"type": "number"},
+                    "lsl": {"type": "number"},
+                    "target": {"type": "number"},
+                    "bins": {"type": "integer", "minimum": 4, "maximum": 200},
+                    "show_normal": {"type": "boolean", "default": True},
+                    "unit": {"type": "string"},
+                    "title": {"type": "string"},
+                },
+            },
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.histogram_chart:HistogramChartBlockExecutor"},
+        },
     ]
 
 

@@ -58,6 +58,13 @@ SIDECAR_NATIVE_BLOCKS: frozenset[str] = frozenset({
     "block_alert",
     "block_data_view",
     "block_compute",
+    # PR-G — primitives + EDA chart blocks (Stage 2 part 1/3)
+    "block_line_chart",
+    "block_bar_chart",
+    "block_scatter_chart",
+    "block_box_plot",
+    "block_splom",
+    "block_histogram_chart",
     # Phase 8-B final: rewired to call Java /internal/mcp-definitions
     # (instead of opening a DB session) in commit below.
     "block_mcp_call",

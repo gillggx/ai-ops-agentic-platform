@@ -428,4 +428,103 @@ def examples_by_name() -> dict[str, list[dict[str, Any]]]:
                 "upstream_hint": "Logic 的 evidence → Filter(triggered_row=True) → 本節點",
             },
         ],
+        # ── PR-G — 6 chart blocks (Stage 2 part 1/3) ─────────────────
+        "block_line_chart": [
+            {
+                "name": "SPC X̄ trend with UCL/LCL",
+                "summary": "Time-series xbar chart with control limits + OOC red ring overlay",
+                "params": {
+                    "x": "eventTime",
+                    "y": "spc_xbar_chart_value",
+                    "rules": [
+                        {"value": 17.5, "label": "UCL", "style": "danger"},
+                        {"value": 16.31, "label": "CL", "style": "center"},
+                        {"value": 12.5, "label": "LCL", "style": "danger"},
+                    ],
+                    "highlight_field": "spc_xbar_chart_is_ooc",
+                    "title": "EQP-01 SPC X̄ trend",
+                },
+                "upstream_hint": "block_process_history → 此處（保留 spc_xbar_chart_is_ooc bool 欄位）",
+            },
+            {
+                "name": "Multi-tool overlay",
+                "summary": "Group rows by tool → one colored line per tool",
+                "params": {
+                    "x": "eventTime",
+                    "y": "value",
+                    "series_field": "toolID",
+                    "title": "Tool 對比 trend",
+                },
+                "upstream_hint": "資料含多個 toolID，series_field 自動拆分成多色 trace",
+            },
+        ],
+        "block_bar_chart": [
+            {
+                "name": "OOC count per equipment",
+                "summary": "每個 EQP 過去 24h 的 OOC 次數",
+                "params": {
+                    "x": "equipment_id",
+                    "y": "ooc_count",
+                    "rules": [{"value": 10, "label": "alert threshold", "style": "warning"}],
+                    "title": "Equipment OOC count (24h)",
+                },
+                "upstream_hint": "block_groupby_agg(group_by=equipment_id, agg={ooc_count: sum})",
+            },
+        ],
+        "block_scatter_chart": [
+            {
+                "name": "RF Power vs Thickness correlation",
+                "summary": "兩個 FDC 變數散點，看是否有相關性",
+                "params": {
+                    "x": "rf_power",
+                    "y": "thickness",
+                    "series_field": "tool_id",
+                    "title": "RF vs Thickness",
+                },
+                "upstream_hint": "block_filter(spc_status='PASS') → 此處看 in-control 樣本的相關",
+            },
+        ],
+        "block_box_plot": [
+            {
+                "name": "Tool > Chamber thickness 分散",
+                "summary": "嵌套分組 box plot — 每個 tool 內部 chamber 的差異",
+                "params": {
+                    "x": "chamber",
+                    "y": "thickness",
+                    "group_by_secondary": "tool",
+                    "show_outliers": True,
+                    "y_label": "Thickness (Å)",
+                    "title": "Thickness by Tool / Chamber",
+                },
+                "upstream_hint": "block_process_history(metric='thickness') 直接接過來",
+            },
+        ],
+        "block_splom": [
+            {
+                "name": "FDC parameter matrix",
+                "summary": "5 個 FDC params 的 N×N scatter matrix",
+                "params": {
+                    "dimensions": ["rf_power", "pressure", "gas_flow", "temp", "endpoint"],
+                    "outlier_field": "is_ooc",
+                    "title": "FDC Parameter Matrix",
+                },
+                "upstream_hint": "block_filter / block_process_history → 含全部 dimensions 欄位 + 一個 bool outlier 欄位",
+            },
+        ],
+        "block_histogram_chart": [
+            {
+                "name": "CD spec window with Cpk",
+                "summary": "raw 值 distribution + USL/LSL/target + 自動 Cpk 註記",
+                "params": {
+                    "value_column": "cd_value",
+                    "usl": 47.0,
+                    "lsl": 43.0,
+                    "target": 45.0,
+                    "bins": 32,
+                    "unit": "nm",
+                    "title": "CD distribution",
+                },
+                "upstream_hint": "block_process_history(metric='cd_value') 直接接 — 給 USL+LSL 才會算 Cpk",
+            },
+        ],
     }
