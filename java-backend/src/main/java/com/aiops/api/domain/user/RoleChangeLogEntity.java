@@ -24,10 +24,10 @@ public class RoleChangeLogEntity {
 	private Long id;
 
 	@Column(name = "target_user_id", nullable = false)
-	private Integer targetUserId;
+	private Long targetUserId;
 
 	@Column(name = "actor_user_id")
-	private Integer actorUserId;
+	private Long actorUserId;
 
 	@Column(name = "old_roles", nullable = false, columnDefinition = "text")
 	private String oldRoles;

@@ -107,8 +107,8 @@ public class UsersController {
 		user = userRepository.save(user);
 
 		var logEntry = new RoleChangeLogEntity();
-		logEntry.setTargetUserId(user.getId().intValue());
-		logEntry.setActorUserId(actor != null ? Long.valueOf(actor.userId()).intValue() : null);
+		logEntry.setTargetUserId(user.getId());
+		logEntry.setActorUserId(actor != null ? Long.valueOf(actor.userId()) : null);
 		logEntry.setOldRoles(oldRolesJson);
 		logEntry.setNewRoles(user.getRoles());
 		logEntry.setReason(req.reason());
@@ -138,7 +138,7 @@ public class UsersController {
 
 	@GetMapping("/{id}/role-history")
 	public ApiResponse<List<RoleChangeLogDto>> roleHistory(@PathVariable Long id) {
-		var logs = logRepository.findByTargetUserIdOrderByChangedAtDesc(id.intValue());
+		var logs = logRepository.findByTargetUserIdOrderByChangedAtDesc(id);
 		return ApiResponse.ok(logs.stream().map(this::toLogDto).toList());
 	}
 
@@ -179,7 +179,7 @@ public class UsersController {
 
 	public record SetActiveRequest(Boolean isActive) {}
 
-	public record RoleChangeLogDto(Long id, Integer targetUserId, Integer actorUserId,
+	public record RoleChangeLogDto(Long id, Long targetUserId, Long actorUserId,
 	                                String oldRoles, String newRoles, String reason,
 	                                OffsetDateTime changedAt) {}
 
