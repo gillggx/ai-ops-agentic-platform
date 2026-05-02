@@ -31,12 +31,16 @@ import {
   XbarR, IMR, EwmaCusum,
   Pareto, VariabilityGauge, ParallelCoords, ProbabilityPlot, HeatmapDendro,
   WaferHeatmap, DefectStack, SpatialPareto, TrendWaferMaps,
+  StyleAdjuster, themeStyle, DEFAULT_THEME,
+  type ChartCardTheme,
   type ChartSpec,
 } from '.';
 
 interface Props {
   spec: ChartSpec | Record<string, unknown> | null | undefined;
   height?: number;
+  /** Disable the per-card StyleAdjuster ✦ button (e.g. for thumbnails / SSR previews). */
+  noStyleAdjuster?: boolean;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -105,7 +109,13 @@ function PlaceholderUnknown({ type }: { type: string }) {
   );
 }
 
-export default function SvgChartRenderer({ spec, height }: Props) {
+export default function SvgChartRenderer({ spec, height, noStyleAdjuster }: Props) {
+  // Per-card theme state — lives for the lifetime of this card. CSS vars
+  // cascade from this host div into the chart's own `.pb-chart-card`,
+  // so we don't need to thread a `theme` prop through every chart
+  // component.
+  const [theme, setTheme] = React.useState<ChartCardTheme>({ ...DEFAULT_THEME });
+
   const inner = unwrapSpec(spec);
   if (!inner || typeof inner.type !== 'string') {
     return <PlaceholderEmpty title="(no spec)" message="ChartSpec missing or has no type" />;
@@ -122,5 +132,17 @@ export default function SvgChartRenderer({ spec, height }: Props) {
   }
   const Component = TYPE_MAP[inner.type as string];
   if (!Component) return <PlaceholderUnknown type={inner.type} />;
-  return <Component spec={inner} height={height} />;
+
+  // Wrap with theme host — CSS vars cascade into the chart's own
+  // `.pb-chart-card`, StyleAdjuster ✦ overlays in the top-right.
+  // `position: relative` is required by .pb-style-btn's absolute positioning.
+  return (
+    <div
+      className="pb-chart-card-host"
+      style={{ position: 'relative', width: '100%', ...themeStyle(theme) }}
+    >
+      {!noStyleAdjuster && <StyleAdjuster theme={theme} setTheme={setTheme} />}
+      <Component spec={inner} height={height} />
+    </div>
+  );
 }
