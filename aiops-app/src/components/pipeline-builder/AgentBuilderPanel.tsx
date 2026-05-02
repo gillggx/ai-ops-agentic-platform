@@ -17,19 +17,23 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useBuilder } from "@/context/pipeline-builder/BuilderContext";
 import type { BlockSpec } from "@/lib/pipeline-builder/types";
 import { applyGlassOp, OP_LABELS, opDetail, autoLayoutPipeline } from "@/lib/pipeline-builder/glass-ops";
 import { PlanRenderer, type PlanItem } from "@/components/copilot/PlanRenderer";
 import { ContinuationCard, type ContinuationData, type ContinuationOption } from "@/components/copilot/ContinuationCard";
 
-type ChatRole = "user" | "agent" | "op" | "error" | "continuation";
+type ChatRole = "user" | "agent" | "op" | "error" | "continuation" | "advisor";
 interface ChatLine {
   id: number;
   role: ChatRole;
   text: string;
   op?: { label: string; detail: string };
   continuation?: ContinuationData;
+  /** When role==='advisor' — markdown body + which advisor bucket fired. */
+  advisor?: { kind: string; markdown: string; meta?: Record<string, unknown> };
 }
 
 interface Props {
@@ -150,26 +154,46 @@ export default function AgentBuilderPanel({
             resolved: false,
           };
           setLines((p) => [...p, { id: nextId(), role: "continuation", text: "", continuation: cont }]);
+        } else if (eventType === "advisor_answer") {
+          // Builder Mode Block Advisor (2026-05-02) — Q&A path emits a
+          // markdown card instead of canvas operations. Don't apply
+          // anything to the canvas; just render the answer in the chat
+          // column. No auto-layout on done — canvas wasn't touched.
+          const kind = (data.kind as string) || "answer";
+          const md = (data.markdown as string) || "";
+          setLines((p) => [...p, {
+            id: nextId(),
+            role: "advisor",
+            text: "",
+            advisor: { kind, markdown: md, meta: data },
+          }]);
         } else if (eventType === "error") {
           const msg = (data.message as string) || "(unknown error)";
           setLines((p) => [...p, { id: nextId(), role: "error", text: msg }]);
         } else if (eventType === "done") {
-          const summary = (data.summary as string) || "(done)";
-          setLines((p) => [...p, { id: nextId(), role: "agent", text: `✓ ${summary}` }]);
-          // Phase 5-UX-6 (race-fix): defer auto-layout until React commits
-          // every queued add_node / connect / rename action.
-          const edgesNow = stateRef.current.pipeline.edges;
-          requestAnimationFrame(() => {
-            const laidOut = autoLayoutPipeline(
-              currentNodesRef.current,
-              stateRef.current.pipeline.edges,
-            );
-            if (laidOut.length > 0) {
-              actions.setNodesAndEdges(laidOut, stateRef.current.pipeline.edges);
-            } else {
-              void edgesNow;
-            }
-          });
+          // Advisor path didn't touch the canvas — skip the "✓ done" summary
+          // line and the auto-layout pass. The advisor_answer card is
+          // already in the chat column.
+          if (data.status === "advisor_done") {
+            // no-op
+          } else {
+            const summary = (data.summary as string) || "(done)";
+            setLines((p) => [...p, { id: nextId(), role: "agent", text: `✓ ${summary}` }]);
+            // Phase 5-UX-6 (race-fix): defer auto-layout until React commits
+            // every queued add_node / connect / rename action.
+            const edgesNow = stateRef.current.pipeline.edges;
+            requestAnimationFrame(() => {
+              const laidOut = autoLayoutPipeline(
+                currentNodesRef.current,
+                stateRef.current.pipeline.edges,
+              );
+              if (laidOut.length > 0) {
+                actions.setNodesAndEdges(laidOut, stateRef.current.pipeline.edges);
+              } else {
+                void edgesNow;
+              }
+            });
+          }
         }
       }
     }
@@ -391,6 +415,43 @@ function MessageRow({ line }: { line: ChatLine }) {
       <div style={{ display: "flex", justifyContent: "flex-start" }}>
         <div style={{ maxWidth: "90%", padding: "8px 12px", borderRadius: 6, fontSize: 12, background: "#fef2f2", color: "#b91c1c", border: "1px solid #fecaca" }}>
           ⚠ {line.text}
+        </div>
+      </div>
+    );
+  }
+  if (line.role === "advisor" && line.advisor) {
+    // Block Advisor card — markdown body for EXPLAIN / COMPARE / RECOMMEND
+    // / AMBIGUOUS responses. Distinct background so users can tell at a
+    // glance this is "Q&A about blocks", not "I'm building something on the
+    // canvas".
+    const kindLabel: Record<string, string> = {
+      explain: "📖 Block 說明",
+      compare: "⚖️ Block 對比",
+      recommend: "💡 Block 推薦",
+      ambiguous: "🤔 請再說明",
+      compare_failed: "⚠ 對比失敗",
+    };
+    const label = kindLabel[line.advisor.kind] ?? "Advisor";
+    return (
+      <div style={{ display: "flex", justifyContent: "flex-start" }}>
+        <div style={{
+          maxWidth: "95%",
+          padding: "10px 14px",
+          borderRadius: "12px 12px 12px 2px",
+          fontSize: 13,
+          background: "#fefce8",
+          color: "#1a202c",
+          border: "1px solid #fde68a",
+          lineHeight: 1.6,
+        }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 6 }}>
+            {label}
+          </div>
+          <div className="advisor-md">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {line.advisor.markdown}
+            </ReactMarkdown>
+          </div>
         </div>
       </div>
     );

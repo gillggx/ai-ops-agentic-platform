@@ -112,13 +112,39 @@ async def _build_stream_native(req: BuildRequest, caller: CallerContext) -> Asyn
     BlockRegistry) directly. No DB session needed — the registry is loaded
     seed-side, and there's no cross-request state besides what the
     AgentBuilderSession holds in memory.
+
+    Builder Mode Block Advisor (2026-05-02): the user's message is first
+    classified — if it's a block Q&A (EXPLAIN/COMPARE/RECOMMEND) or
+    ambiguous, we route to ``stream_block_advisor`` instead of the build
+    flow, so the panel answers questions about blocks without polluting
+    the canvas. Flow stays in code (graph-deterministic), not in prompt
+    — see CLAUDE.md "流程是 agent 決定，LLM 是大腦".
     """
     import os
     from python_ai_sidecar.agent_builder.session import AgentBuilderSession
     from python_ai_sidecar.agent_builder.orchestrator import stream_agent_build
+    from python_ai_sidecar.agent_builder.advisor import (
+        classify_advisor_intent, stream_block_advisor,
+    )
+    from python_ai_sidecar.clients.java_client import JavaAPIClient
     from python_ai_sidecar.pipeline_builder.seedless_registry import SeedlessBlockRegistry
     from python_ai_sidecar.pipeline_builder.pipeline_schema import PipelineJSON
 
+    # ── Step 0: classify intent (graph-level routing) ───────────────────
+    intent, confidence, reason = await classify_advisor_intent(req.instruction)
+    log.info("build/native: intent=%s conf=%.2f reason=%r", intent, confidence, reason)
+
+    if intent != "BUILD":
+        # Q&A path — answer directly, no pipeline mutation.
+        java = JavaAPIClient.for_caller(caller)
+        async for stream_event in stream_block_advisor(req.instruction, intent, java=java):
+            yield {
+                "event": stream_event.type,
+                "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
+            }
+        return
+
+    # ── BUILD path (existing Glass Box flow) ────────────────────────────
     base_pipeline: PipelineJSON | None = None
     if req.pipeline_snapshot:
         try:

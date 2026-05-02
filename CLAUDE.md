@@ -51,6 +51,57 @@ Skill 的 `description` 欄位必須清楚說明：
 
 **理由：** Agent 選 Skill 時只看 `name` + `description`。如果 description 模糊，Agent 會選錯 Skill。
 
+### 4. Block Description 也是如此（Pipeline Builder）
+
+Pipeline Builder block 的 `description` / `param_schema` / `examples` 欄位是 **唯一**的 block 文件來源：
+
+- Glass Box agent 建 pipeline 時讀它（既有）
+- **Builder Mode Block Advisor**（2026-05-02 新增）回答 user「這個 block 怎麼用 / A vs B / 我該用哪個」也讀它
+- BlockDocsDrawer 給 user 看的也是它
+
+如果三邊不一致 = description 過時 = LLM 跟 user 都拿到錯的資訊。改 block 行為 → 一定要同時改 description / param_schema / examples。
+
+---
+
+## Agent Behaviour Principles
+
+### 流程（flow）由 graph 決定，LLM 只做 reasoning
+
+**Hard rule**: 任何「下一步該做什麼 / 該呼叫哪個 tool」的決策**禁止**塞進 LLM system prompt。改寫成 graph node + deterministic dispatch。
+
+**理由**：
+- LLM 自由意志會違抗 prompt 規則（已多次證實）
+- prompt 寫的 flow 不可單測；graph node 是 pure function 可單測
+- 出錯時 graph 知道是哪個 node fail，prompt-flow 只能猜「LLM 又走偏了」
+
+**正確示範**：
+- Chat orchestrator 的 `intent_classifier` node → 5 buckets → graph 路由到 llm_call vs synthesis
+- Chat orchestrator 的 `intent_completeness` gate → deterministic check → 路由到 clarify vs llm_call
+- Builder Glass Box 的 `classify_advisor_intent` → 5 buckets (BUILD/EXPLAIN/COMPARE/RECOMMEND/AMBIGUOUS) → graph 路由到 build vs advisor
+
+**錯誤示範**：
+```python
+# ❌ 把 flow 塞進 prompt
+system_prompt = """
+若 user 問 block 用法 → 呼叫 explain_block tool
+若 user 想對比 → 呼叫 compare_blocks tool
+若 user 想建構 → 直接 add_node
+"""
+```
+LLM 看心情選哪個，且 prompt 改一個字行為就漂移。
+
+**正確做法**：classifier node 先決定 bucket，每 bucket 對應**固定**的後續 node 序列。LLM 在每個 node 內只做思考型工作（分類 / 抽參 / 寫答），不決定下一步。
+
+### 各 surface 的 agent stack 對照
+
+| Surface | Endpoint | Orchestrator | 路由方式 |
+|---|---|---|---|
+| Chat panel (operations) | `/internal/agent/chat` | `agent_orchestrator_v2` (LangGraph) | `intent_classifier` + `intent_completeness` graph nodes |
+| Builder Glass Box (build instruction) | `/internal/agent/build` | `agent_builder.stream_agent_build` (Anthropic loop) | tool-use loop, tools 在 prompt 列出 |
+| Builder Block Advisor (Q&A) | `/internal/agent/build` (same endpoint) | `agent_builder.advisor.stream_block_advisor` | `classify_advisor_intent` graph dispatch |
+
+`/internal/agent/build` 入口先跑 `classify_advisor_intent`：BUILD → 既有 Glass Box；非 BUILD → advisor graph。
+
 ---
 
 ## Coding Standards
@@ -71,10 +122,11 @@ Skill 的 `description` 欄位必須清楚說明：
 
 ### Deploy
 
-- `deploy/update.sh` 是唯一的 deploy 入口
-- systemd services：aiops-app (8000), fastapi-backend (8001), ontology-simulator (8012)
+- `deploy/update.sh`：frontend + simulator（會自動 systemctl restart aiops-app + ontology-simulator）
+- `deploy/java-update.sh`：Java + sidecar（rebuild jar + venv，restart aiops-java-api + aiops-python-sidecar）
+- systemd services：aiops-app (8000), aiops-java-api (8002), aiops-python-sidecar (8050), ontology-simulator (8012)
+- ⚠️ `update.sh` 不會重啟 sidecar 跟 Java — 改動 sidecar 或 Java 後要跑 `java-update.sh`
 - Frontend 用 `output: "standalone"` 模式
-- Single worker for backend（background tasks 需要）
 
 ### Database
 
@@ -88,15 +140,21 @@ Skill 的 `description` 欄位必須清楚說明：
 ## Architecture Boundaries
 
 ```
-aiops-app (Frontend)
-  → 只做 UI 渲染 + API proxy
-  → 不直接呼叫 simulator
+aiops-app :8000 (Frontend, Next.js standalone)
+  → 只做 UI 渲染 + /api/ proxy
+  → 不直接呼叫 simulator / sidecar / Java
 
-fastapi_backend_service (Backend + Agent)
-  → 所有業務邏輯在這裡
-  → Agent 模組未來可拆分（orchestrator_v2/, context_loader, tool_dispatcher）
+java-backend :8002 (Spring Boot, sole DB owner)
+  → 所有 PostgreSQL 讀寫、auth (JWT)、business CRUD
+  → /api/v1/* (user-facing, JWT) + /internal/* (service-to-service, X-Internal-Token)
+  → Pipeline registry, skill registry, alarms, role audit
 
-ontology_simulator (Data Source)
+python_ai_sidecar :8050 (LangGraph + Pipeline Executor)
+  → Agent 全部住這裡 (chat orchestrator_v2, Glass Box builder, Block Advisor)
+  → 27 BUILTIN_EXECUTORS + 18 chart blocks 在 sidecar in-process 跑
+  → 透過 JavaAPIClient 與 Java 對話；NEVER 直接連 PostgreSQL
+
+ontology_simulator :8012 (Data Source)
   → 純資料服務，不知道 Agent 的存在
   → API 介面與 production ontology 完全相同
 
@@ -104,3 +162,5 @@ aiops-contract (Shared Types)
   → Agent ↔ Frontend 的共用型別（AIOpsReportContract）
   → 雙語言：TypeScript + Python
 ```
+
+**Phase 8-A-1d cutover (2026-04-25)**：fastapi_backend_service (:8001) decommissioned，所有路徑走 Java + sidecar。`fastapi_backend_service/` 目錄還在 repo 但 runtime 不啟動。

@@ -171,6 +171,20 @@ class JavaAPIClient:
             params["status"] = status
         return await self._get_data("/internal/blocks", params=params or None)
 
+    async def get_block_by_name(self, name: str) -> Optional[dict]:
+        """Fetch one block definition by exact name. Returns None if not found.
+
+        Used by builder advisor (block Q&A) so each lookup hits Java for
+        always-fresh description/param_schema/examples instead of the
+        boot-time BlockRegistry snapshot. Java currently lacks a by-name
+        endpoint so we list + filter; fine for the catalog size (~50 blocks).
+        """
+        all_blocks = await self.list_blocks()
+        for b in all_blocks:
+            if b.get("name") == name:
+                return b
+        return None
+
     async def list_mcps(self, *, mcp_type: Optional[str] = None) -> list[dict]:
         params = {"mcpType": mcp_type} if mcp_type else None
         return await self._get_data("/internal/mcp-definitions", params=params)

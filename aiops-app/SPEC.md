@@ -215,6 +215,24 @@ const r = await fetch(`${FASTAPI_BASE_URL}/api/v1/...`, {
 
 **所有圖表只在中央 AnalysisPanel 渲染**，AI Agent panel 只顯示文字 + Plan + 動作按鈕。
 
+### 7.2 Builder Mode Block Advisor (2026-05-02)
+
+`/internal/agent/build` 不再只負責「建 pipeline」— 入口先 **graph-level intent classifier** 把訊息分為 5 桶：
+
+| Intent | 路由 | UI 表現 |
+|---|---|---|
+| `BUILD` | 既有 Glass Box `stream_agent_build` | canvas 增量繪製 + plan card |
+| `EXPLAIN` | `advisor.stream_block_advisor` → fetch 1 block from Java → markdown | 黃底 advisor 卡（📖 Block 說明） |
+| `COMPARE` | fetch ≥2 blocks → markdown table | 黃底 advisor 卡（⚖️ Block 對比） |
+| `RECOMMEND` | keyword search registry → top-3 + rationale | 黃底 advisor 卡（💡 Block 推薦） |
+| `AMBIGUOUS` | 直接 yield 澄清訊息（無 LLM call） | 黃底 advisor 卡（🤔 請再說明） |
+
+**設計原則**：flow 全在 graph、LLM 只做 reasoning。advisor 從不擁有 tool list — classifier 決 bucket 後，每個 bucket 走**固定** node 序列：classify → extract（抽 block 名 / 關鍵字）→ fetch（Java `/internal/blocks`，always-fresh）→ synthesize（markdown）。詳見 [CLAUDE.md "Agent Behaviour Principles"](../CLAUDE.md)。
+
+**為什麼 fetch 走 Java 而不是 sidecar in-process registry**：BlockRegistry 是 boot-time snapshot；改 description 後 sidecar 不重啟看不到。advisor 每次 `JavaAPIClient.get_block_by_name` 拿到當下最新版本，符合 CLAUDE.md「Block Description 是唯一文件來源」原則。
+
+**SSE event 新類型**：`advisor_answer { kind, markdown, ... }`（type literal 在 [agent_builder/session.py](python_ai_sidecar/agent_builder/session.py)）。`done` 事件帶 `status: "advisor_done"` 讓前端知道**不要**跑 auto-layout（canvas 沒被 mutate）。
+
 ### 7.1 ChartDSL — multi-series overlay (`series_field`)
 
 [SkillOutputRenderer.tsx → renderLineBarScatter](aiops-app/src/components/operations/SkillOutputRenderer.tsx) 處理 ChartDSL spec。當 spec 帶 `series_field` 且 `primaryY.length === 1` 時：
@@ -233,7 +251,7 @@ const r = await fetch(`${FASTAPI_BASE_URL}/api/v1/...`, {
 |---|---|
 | `BuilderLayout.tsx` | 主 layout — Block Library 左 / Canvas 中 / Inspector 右 |
 | `BlockLibrary.tsx` + `BlockDocsDrawer.tsx` + `CategoryIcon.tsx` | 27 個 block 目錄（從 Java `/internal/blocks` 拉，類別 + examples） |
-| `AgentBuilderPanel.tsx` | Glass Box — 文字描述 → SSE 串入 LiveCanvasOverlay |
+| `AgentBuilderPanel.tsx` | Glass Box build SSE → LiveCanvasOverlay；2026-05-02 起也渲染 Block Advisor 的 markdown 卡（黃底，`role: "advisor"`）|
 | `AutoPatrolSetupModal.tsx` + `AutoPatrolTriggerForm.tsx` | Patrol kind + trigger wizard（兩步） |
 | `AutoCheckPublishModal.tsx` + `AutoCheckTriggerForm.tsx` | Auto-Check Rules（綁 alarm attribute） |
 

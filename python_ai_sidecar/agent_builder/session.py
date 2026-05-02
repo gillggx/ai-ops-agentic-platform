@@ -80,7 +80,14 @@ class StreamEvent:
     """Unit of communication from backend orchestrator to SSE client."""
     # PR-E3b: `suggestion_card` — agent proposes a series of actions without
     # applying them; frontend renders a card with Apply/Dismiss buttons.
-    type: Literal["chat", "operation", "error", "done", "suggestion_card", "continuation_request"]
+    # `advisor_answer` is emitted by the Block Advisor (agent_builder/advisor)
+    # when the user's message is a Q&A intent (EXPLAIN/COMPARE/RECOMMEND/AMBIGUOUS)
+    # rather than a build instruction. Carries `{kind, markdown, ...}`.
+    type: Literal[
+        "chat", "operation", "error", "done",
+        "suggestion_card", "continuation_request",
+        "advisor_answer",
+    ]
     data: dict[str, Any]
 
     def to_sse(self) -> str:
