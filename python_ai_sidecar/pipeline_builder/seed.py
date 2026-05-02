@@ -619,6 +619,17 @@ def _blocks() -> list[dict[str, Any]]:
             "category": "output",
             "status": "production",
             "description": (
+                "⚠ **建議改用 dedicated chart blocks**（PR-G/H/I 後 18 個）。\n"
+                "本 block_chart 仍 production — 留作 multi-purpose fallback +\n"
+                "保留 `facet` 功能（一個 input 出 N 張獨立 chart，dedicated 沒實作）。\n"
+                "選 dedicated 對 LLM 較易選對工具：\n"
+                "  - line/bar/scatter → block_line_chart / block_bar_chart / block_scatter_chart\n"
+                "  - boxplot → block_box_plot          - distribution → block_histogram_chart\n"
+                "  - SPC 嚴格 X̄/R + WECO → block_xbar_r / block_imr / block_ewma_cusum\n"
+                "  - 排序 + 累計 % → block_pareto      - QQ → block_probability_plot\n"
+                "  - wafer → block_wafer_heatmap / block_defect_stack / block_spatial_pareto\n"
+                "**只有需要 facet（同 input 切 N panel）時才用本 block。**\n"
+                "\n"
                 "== What ==\n"
                 "產生圖表 spec（chart_spec）。預設 Vega-Lite（單 y 簡單圖）；符合下列條件會自動切\n"
                 "到 ChartDSL (Plotly) 模式：\n"

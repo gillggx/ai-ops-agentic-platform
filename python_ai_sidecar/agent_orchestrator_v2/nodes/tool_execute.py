@@ -472,6 +472,46 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
     # apply to existing items.
     plan_items: List[Dict[str, Any]] = list(state.get("plan_items") or [])
 
+    # Self-test: detect a degenerate "for-loop calls same MCP repeatedly"
+    # pattern by walking state.tools_used (history of THIS run) for the same
+    # signature. Threshold = 3; the warning is appended to the result so the
+    # LLM sees it next iteration and can break the loop.
+    prior_calls = state.get("tools_used") or []
+    repeat_warnings: dict[str, str] = {}  # tc_id → warning string
+
+    def _sig(name: str, args: dict[str, Any]) -> str:
+        try:
+            return name + ":" + json.dumps(args, sort_keys=True, default=str)
+        except Exception:
+            return name + ":" + str(args)
+
+    LOOP_THRESHOLD = 3
+    LOOP_WATCHED = ("execute_mcp", "execute_skill", "search_published_skills",
+                    "invoke_published_skill")
+    if last_msg.tool_calls:
+        # Build signature counter from prior_calls (sigs already saved).
+        prior_sig_count: dict[str, int] = {}
+        for prev in prior_calls:
+            n = prev.get("name") or prev.get("tool_name") or ""
+            a = prev.get("input") or prev.get("args") or {}
+            if n in LOOP_WATCHED:
+                s = _sig(n, a)
+                prior_sig_count[s] = prior_sig_count.get(s, 0) + 1
+        for tc in last_msg.tool_calls:
+            n = tc.get("name") or ""
+            if n not in LOOP_WATCHED:
+                continue
+            s = _sig(n, tc.get("args") or {})
+            if prior_sig_count.get(s, 0) + 1 >= LOOP_THRESHOLD:
+                repeat_warnings[tc.get("id", "")] = (
+                    f"⚠ You've called {n} with these exact arguments "
+                    f"{prior_sig_count.get(s, 0) + 1} times in this run — likely a "
+                    f"degenerate loop. Most MCPs return ALL matching rows in one "
+                    f"call (see the MCP description); change params, aggregate "
+                    f"upstream with block_groupby_agg, or stop and synthesize "
+                    f"with what you have."
+                )
+
     for tc in last_msg.tool_calls:
         tool_name = tc["name"]
         tool_input = tc.get("args", {})
@@ -882,6 +922,11 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
         # agent stops this turn and waits for the user's confirmation message.
         if isinstance(result, dict) and result.get("_force_synthesis"):
             force_synth = True
+
+        # Loop self-test: if this exact tool+args was called >=3 times this
+        # run, surface the warning to the LLM by wrapping the result.
+        if tc_id in repeat_warnings and isinstance(result, dict):
+            result = {**result, "_loop_warning": repeat_warnings[tc_id]}
 
         # Convert result to ToolMessage (trimmed for LLM context)
         result_content = _trim_result_for_llm(result)

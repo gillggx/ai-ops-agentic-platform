@@ -17,6 +17,7 @@ CLAUDE.md compliance:
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -617,6 +618,17 @@ def _summarize_preview(preview: Optional[dict[str, Any]], sample_size: int) -> d
                     "encoding": snap.get("encoding"),
                     "data_values_count": len((snap.get("data") or {}).get("values") or []),
                 }
+                _attach_chart_warnings(summary[port], snap)
+            elif isinstance(snap, dict) and snap.get("__dsl") is True:
+                # New SVG-engine chart_spec
+                summary[port] = {
+                    "type": "chart_spec",
+                    "chart_type": snap.get("type"),
+                    "x": snap.get("x"),
+                    "y": snap.get("y"),
+                    "data_values_count": len(snap.get("data") or []),
+                }
+                _attach_chart_warnings(summary[port], snap)
             else:
                 summary[port] = {"type": "dict", "keys": list((snap or {}).keys())[:20]}
         elif t == "list":
@@ -624,3 +636,56 @@ def _summarize_preview(preview: Optional[dict[str, Any]], sample_size: int) -> d
         else:
             summary[port] = {"type": t, "value": block.get("value")}
     return summary
+
+
+# ── Self-test: chart x_key ISO8601 validation ─────────────────────────────────
+# Stage-2 follow-up. We've burned hours on chart_spec shape mismatches before
+# (`block_chart_facet` SPC trend with x_key='timestamp' but values were integer
+# indices). When the chart's x column name suggests a time field but the
+# rendered values aren't ISO8601, warn the LLM in the preview summary so it
+# can patch params without waiting for visual feedback.
+
+# Lightweight ISO8601 sniffer — same regex shape as charts/lib/axis.ts.
+_ISO_DATE_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$"
+)
+_TIME_KEY_HINTS = ("time", "Time", "TIME", "date", "Date", "timestamp", "Timestamp")
+
+
+def _looks_like_iso(v: Any) -> bool:
+    if isinstance(v, str):
+        return bool(_ISO_DATE_RE.match(v.strip()))
+    return False
+
+
+def _attach_chart_warnings(summary_out: dict[str, Any], spec: dict[str, Any]) -> None:
+    """Append a `warnings` list when the chart spec has likely-wrong x values.
+
+    Detects: x column name contains a time hint (eventTime / timestamp /
+    date_recorded …) but the first non-null data value isn't ISO8601 — almost
+    certainly the producer forgot to coerce or used the wrong field.
+    """
+    warnings: list[str] = []
+
+    x = spec.get("x")
+    data = spec.get("data") or []
+    if isinstance(x, str) and any(h in x for h in _TIME_KEY_HINTS):
+        # Look at first 3 non-null values to avoid one stray null tripping the check.
+        sample_values = []
+        for row in data[:10]:
+            if isinstance(row, dict):
+                v = row.get(x)
+                if v is not None:
+                    sample_values.append(v)
+                    if len(sample_values) >= 3:
+                        break
+        if sample_values and not any(_looks_like_iso(v) for v in sample_values):
+            warnings.append(
+                f"x column '{x}' looks like a time field but values are not ISO8601 "
+                f"(first sample: {sample_values[0]!r}). Cast upstream with "
+                f"`block_compute` (e.g. expression: `as_iso8601`) or pick the right "
+                f"column."
+            )
+
+    if warnings:
+        summary_out["warnings"] = warnings
