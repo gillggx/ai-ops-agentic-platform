@@ -38,3 +38,22 @@ export {
   IMR_D4,
   type SpcConstants,
 } from './lib/spc';
+
+// Diagnostic (PR-E).
+export { default as Pareto, renderPareto } from './Pareto';
+export { default as VariabilityGauge, renderVariabilityGauge } from './VariabilityGauge';
+export { default as ParallelCoords, renderParallelCoords } from './ParallelCoords';
+export { default as ProbabilityPlot, renderProbabilityPlot } from './ProbabilityPlot';
+export { default as HeatmapDendro, renderHeatmapDendro } from './HeatmapDendro';
+
+// Wafer (PR-F).
+export { default as WaferHeatmap, renderWaferHeatmap } from './WaferHeatmap';
+export { default as DefectStack, renderDefectStack } from './DefectStack';
+export { default as SpatialPareto, renderSpatialPareto } from './SpatialPareto';
+export { default as TrendWaferMaps, renderTrendWaferMaps } from './TrendWaferMaps';
+export {
+  idwGrid,
+  drawWaferOutline,
+  type Notch,
+  type WaferPoint,
+} from './lib/wafer';
