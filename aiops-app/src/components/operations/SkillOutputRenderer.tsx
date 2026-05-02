@@ -20,8 +20,8 @@
  *   highlight_key → optional boolean key: true points get red markers
  */
 
-import dynamic from "next/dynamic";
 import { useMemo } from "react";
+import SvgChartRenderer from "@/components/pipeline-builder/charts/SvgChartRenderer";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -77,32 +77,6 @@ export type ChartDSL = {
   series_field?: string;
 };
 
-// ── Plotly dynamic import (no SSR) ────────────────────────────────────────────
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const Plot = dynamic(async () => {
-  const Plotly = await import("plotly.js-dist-min");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const factory = (await import("react-plotly.js/factory")).default as (p: any) => React.ComponentType<any>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return { default: factory((Plotly as any).default ?? Plotly) };
-}, {
-  ssr: false,
-  loading: () => <div style={{ padding: 24, textAlign: "center", color: "#a0aec0", fontSize: 13 }}>載入圖表中...</div>,
-});
-
-// ── Auto-color palette ─────────────────────────────────────────────────────────
-
-const SERIES_COLORS = [
-  "#48bb78", // green
-  "#ed8936", // orange
-  "#4299e1", // blue
-  "#9f7aea", // purple
-  "#38b2ac", // teal
-  "#f56565", // red
-  "#ecc94b", // yellow
-];
-
 // ── Chart renderer ─────────────────────────────────────────────────────────────
 
 function ChartOutputRenderer({
@@ -111,80 +85,33 @@ function ChartOutputRenderer({
   val: unknown;
   field: OutputSchemaField;
 }): React.ReactElement {
-  const plotlyType = field.type === "bar_chart" ? "bar"
-                   : field.type === "scatter_chart" ? "scatter"
-                   : "scatter"; // line_chart
-
-  const mode = field.type === "bar_chart" ? undefined
-             : field.type === "scatter_chart" ? "markers"
-             : "lines+markers";
+  const chartType = field.type === "bar_chart" ? "bar"
+                  : field.type === "scatter_chart" ? "scatter"
+                  : "line"; // line_chart
 
   const rows = Array.isArray(val) ? val as Record<string, unknown>[] : [];
 
-  const traces = useMemo(() => {
-    if (rows.length === 0) return [];
+  const spec = useMemo(() => {
+    if (rows.length === 0) return null;
     const xKey = field.x_key ?? "index";
     const yKeys = field.y_keys ?? Object.keys(rows[0] ?? {}).filter(k => k !== xKey && k !== field.highlight_key);
-    const xs = rows.map((r, i) => r[xKey] ?? i);
+    return {
+      __dsl: true,
+      type: chartType,
+      data: rows.map((r, i) => ({ ...r, [xKey]: r[xKey] ?? i })),
+      x: xKey,
+      y: yKeys,
+      ...(field.highlight_key ? { highlight: { field: field.highlight_key, eq: true } } : {}),
+    };
+  }, [rows, chartType, field]);
 
-    const seriesTraces = yKeys.map((yk, idx) => ({
-      x: xs,
-      y: rows.map(r => r[yk]),
-      name: yk,
-      type: plotlyType,
-      mode,
-      line: field.type === "line_chart" ? { color: SERIES_COLORS[idx % SERIES_COLORS.length], width: 2 } : undefined,
-      marker: { color: SERIES_COLORS[idx % SERIES_COLORS.length], size: 5 },
-    }));
-
-    // Highlight trace (e.g. OOC points in red)
-    if (field.highlight_key) {
-      const hlKey = field.highlight_key;
-      const hlRows = rows.filter(r => r[hlKey]);
-      if (hlRows.length > 0) {
-        const xKey2 = field.x_key ?? "index";
-        const yKey = yKeys[0];
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        seriesTraces.push({
-          x: hlRows.map((r, i) => r[xKey2] ?? rows.indexOf(r) ?? i),
-          y: hlRows.map(r => r[yKey]),
-          name: "異常點",
-          type: "scatter",
-          mode: "markers",
-          marker: { color: "#e53e3e", size: 10, symbol: "circle-open", line: { width: 2, color: "#e53e3e" } } as any,
-          line: undefined,
-        } as any);
-      }
-    }
-
-    return seriesTraces;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [val, field]);
-
-  if (rows.length === 0) {
+  if (rows.length === 0 || !spec) {
     return <span style={{ color: "#a0aec0", fontSize: 12 }}>（無資料）</span>;
   }
 
   return (
-    <div style={{ background: "#f7f8fc", borderRadius: 8, overflow: "hidden" }}>
-      <Plot
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        data={traces as any}
-        layout={{
-          autosize: true,
-          height: 280,
-          margin: { l: 45, r: 16, t: 24, b: 48 },
-          paper_bgcolor: "transparent",
-          plot_bgcolor: "#f7f8fc",
-          font: { family: "Inter, sans-serif", size: 11 },
-          legend: { orientation: "h", y: -0.25, x: 0 },
-          xaxis: { gridcolor: "#e2e8f0", title: field.x_key ?? "index" },
-          yaxis: { gridcolor: "#e2e8f0" },
-        }}
-        config={{ responsive: true, displayModeBar: false }}
-        style={{ width: "100%" }}
-        useResizeHandler
-      />
+    <div className="pb-chart-card" style={{ background: "#f7f8fc", borderRadius: 8, overflow: "hidden", padding: 8 }}>
+      <SvgChartRenderer spec={spec} height={280} />
     </div>
   );
 }
@@ -220,60 +147,24 @@ function MultiChartRenderer({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {groups.map(([groupName, groupRows], gi) => {
-        const xs = groupRows.map((r, i) => r[xKey] ?? i);
-        const ys = groupRows.map(r => r[yKey]);
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const traces: any[] = [
-          {
-            x: xs,
-            y: ys,
-            name: yKey,
-            type: "scatter",
-            mode: "lines+markers",
-            line: { color: SERIES_COLORS[gi % SERIES_COLORS.length], width: 2 },
-            marker: { color: SERIES_COLORS[gi % SERIES_COLORS.length], size: 5 },
-          },
-        ];
-
-        // Highlight points
-        if (highlightKey) {
-          const hlRows = groupRows.filter(r => r[highlightKey]);
-          if (hlRows.length > 0) {
-            traces.push({
-              x: hlRows.map((r, i) => r[xKey] ?? i),
-              y: hlRows.map(r => r[yKey]),
-              name: "異常點",
-              type: "scatter",
-              mode: "markers",
-              marker: { color: "#e53e3e", size: 10, symbol: "circle-open" },
-            });
-          }
-        }
-
+      {groups.map(([groupName, groupRows]) => {
+        const data = groupRows.map((r, i) => ({ ...r, [xKey]: r[xKey] ?? i }));
+        const spec = {
+          __dsl: true,
+          type: "line",
+          data,
+          x: xKey,
+          y: [yKey],
+          ...(highlightKey ? { highlight: { field: highlightKey, eq: true } } : {}),
+        };
         return (
           <div key={groupName} style={{ background: "#f7f8fc", borderRadius: 8, overflow: "hidden" }}>
             <div style={{ padding: "6px 12px", fontSize: 12, fontWeight: 600, color: "#4a5568", borderBottom: "1px solid #e2e8f0" }}>
               {groupName}
             </div>
-            <Plot
-              data={traces as any}
-              layout={{
-                autosize: true,
-                height: 200,
-                margin: { l: 45, r: 16, t: 8, b: 40 },
-                paper_bgcolor: "transparent",
-                plot_bgcolor: "#f7f8fc",
-                font: { family: "Inter, sans-serif", size: 10 },
-                showlegend: false,
-                xaxis: { gridcolor: "#e2e8f0", title: xKey },
-                yaxis: { gridcolor: "#e2e8f0" },
-              }}
-              config={{ responsive: true, displayModeBar: false }}
-              style={{ width: "100%" }}
-              useResizeHandler
-            />
+            <div className="pb-chart-card" style={{ padding: 4 }}>
+              <SvgChartRenderer spec={spec} height={200} />
+            </div>
           </div>
         );
       })}
@@ -406,16 +297,9 @@ export function RenderOutputValue({
 
 // ── ChartDSLRenderer (public) ─────────────────────────────────────────────────
 //
-// Stage 4 dispatcher delegate. All real rendering now lives in the new SVG
-// engine at @/components/pipeline-builder/charts. Both the alarm-detail
-// RenderMiddleware path AND Pipeline Builder ResultsBody flow through this
-// single function, so the SVG engine reaches every consumer in one cut.
-//
-// The Plotly-based ChartOutputRenderer / MultiChartRenderer above remain
-// untouched — those handle output_schema-driven charts, a separate path
-// that downstream consumers (dashboard, contract, ChartIntent, McpChart,
-// etc.) also rely on. Migrating those is future work.
-import SvgChartRenderer from "@/components/pipeline-builder/charts/SvgChartRenderer";
+// Stage 4 dispatcher delegate. All real rendering lives in the SVG engine at
+// @/components/pipeline-builder/charts. Both the alarm-detail RenderMiddleware
+// path AND Pipeline Builder ResultsBody flow through this single function.
 import "@/styles/chart-tokens.css";
 
 export function ChartDSLRenderer({ chart }: { chart: ChartDSL }): React.ReactElement {

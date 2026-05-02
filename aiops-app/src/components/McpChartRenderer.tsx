@@ -3,37 +3,22 @@
 /**
  * McpChartRenderer
  *
- * Renders AIOps MCP ui_render output.
+ * Renders AIOps MCP `ui_render` output via the SVG chart engine.
  * Supports:
- *   - Plotly JSON string(s) in ui_render.charts[]
- *   - matplotlib base64 PNG in ui_render.chart_data (data:image/png;base64,...)
+ *   - Plotly JSON string(s) in `ui_render.charts[]` — adapted to ChartSpec.
+ *   - matplotlib base64 PNG in `ui_render.chart_data` (data:image/png;base64,...)
  *   - table fallback (ui_render.type === "table" or no charts)
+ *
+ * Plotly is no longer a runtime dependency — the adapter normalises the most
+ * common trace shapes (scatter+lines+markers, bar, box, histogram, heatmap)
+ * into our internal ChartSpec; unsupported shapes render a placeholder card.
  *
  * Usage:
  *   <McpChartRenderer uiRender={output_data.ui_render} dataset={output_data.dataset} />
  */
 
-import dynamic from "next/dynamic";
-import { useMemo, useState } from "react";
-
-// Plotly must be dynamically imported — no SSR support.
-// Use factory pattern with plotly.js-dist-min to avoid loading the full bundle.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const Plot = dynamic(async () => {
-  const Plotly = await import("plotly.js-dist-min");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const createPlotlyComponent = (await import("react-plotly.js/factory")).default as (p: any) => React.ComponentType<any>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const PlotComponent = createPlotlyComponent((Plotly as any).default ?? Plotly);
-  return { default: PlotComponent };
-}, {
-  ssr: false,
-  loading: () => (
-    <div style={{ padding: 24, textAlign: "center", color: "#a0aec0", fontSize: 13 }}>
-      載入圖表中...
-    </div>
-  ),
-});
+import { useState } from "react";
+import SvgChartRenderer from "@/components/pipeline-builder/charts/SvgChartRenderer";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -43,10 +28,20 @@ export interface UiRender {
   chart_data: string | null; // charts[0] alias (legacy compat)
 }
 
+interface PlotlyTrace {
+  type?: string;
+  mode?: string;
+  name?: string;
+  x?: unknown[];
+  y?: unknown[];
+  z?: unknown[][];
+  text?: unknown[];
+}
+
 interface PlotlySpec {
-  data: object[];
-  layout: object;
-  config?: object;
+  data: PlotlyTrace[];
+  layout?: Record<string, unknown>;
+  config?: Record<string, unknown>;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -65,28 +60,197 @@ function isBase64Png(s: string) {
   return typeof s === "string" && s.startsWith("data:image/");
 }
 
+function plotlyTitle(layout: Record<string, unknown> | undefined): string | undefined {
+  if (!layout) return undefined;
+  const t = layout.title;
+  if (typeof t === "string") return t;
+  if (t && typeof t === "object" && typeof (t as { text?: unknown }).text === "string") {
+    return (t as { text: string }).text;
+  }
+  return undefined;
+}
+
+function axisTitle(layout: Record<string, unknown> | undefined, axis: "xaxis" | "yaxis"): string | undefined {
+  const ax = layout?.[axis] as { title?: unknown } | undefined;
+  if (!ax) return undefined;
+  if (typeof ax.title === "string") return ax.title;
+  if (ax.title && typeof ax.title === "object" && typeof (ax.title as { text?: unknown }).text === "string") {
+    return (ax.title as { text: string }).text;
+  }
+  return undefined;
+}
+
+/**
+ * Adapt a Plotly JSON spec into our internal ChartSpec.
+ *
+ * Returns null when the trace shape isn't covered — caller renders an
+ * "unsupported" placeholder so the user still sees something useful.
+ */
+function plotlyToChartSpec(spec: PlotlySpec): Record<string, unknown> | null {
+  const traces = (spec.data ?? []).filter(t => t && typeof t === "object");
+  if (traces.length === 0) return null;
+
+  const title = plotlyTitle(spec.layout);
+  const xField = axisTitle(spec.layout, "xaxis") || "x";
+  const yField = axisTitle(spec.layout, "yaxis") || "value";
+
+  const first = traces[0];
+  const traceType = (first.type || "scatter").toLowerCase();
+
+  // ── histogram: fold all x[] into single histogram input ───────────
+  if (traceType === "histogram") {
+    const xs = (first.x ?? []) as number[];
+    const data = xs.map(v => ({ [yField]: v }));
+    return {
+      __dsl: true,
+      type: "histogram",
+      title,
+      data,
+      x: yField,
+      y: [yField],
+    };
+  }
+
+  // ── box: each trace becomes one group ─────────────────────────────
+  if (traceType === "box") {
+    const data: Record<string, unknown>[] = [];
+    traces.forEach((t, i) => {
+      const ys = (t.y ?? []) as number[];
+      const group = (t.name ?? `Series ${i + 1}`) as string;
+      ys.forEach(v => data.push({ group, value: v }));
+    });
+    return {
+      __dsl: true,
+      type: "box_plot",
+      title,
+      data,
+      x: "group",
+      y: ["value"],
+      group_by: "group",
+    };
+  }
+
+  // ── heatmap: z[][] → flattened {x, y, value} rows ─────────────────
+  if (traceType === "heatmap") {
+    const z = (first.z ?? []) as number[][];
+    const xs = (first.x ?? z[0]?.map((_, i) => i) ?? []) as unknown[];
+    const ys = (first.y ?? z.map((_, i) => i) ?? []) as unknown[];
+    const data: Record<string, unknown>[] = [];
+    z.forEach((row, ri) => {
+      row.forEach((v, ci) => {
+        data.push({
+          row: String(ys[ri] ?? ri),
+          col: String(xs[ci] ?? ci),
+          value: v,
+        });
+      });
+    });
+    return {
+      __dsl: true,
+      type: "heatmap",
+      title,
+      data,
+      x: "col",
+      y: ["row"],
+      value_field: "value",
+    };
+  }
+
+  // ── bar: one trace = single series, multi-trace = grouped bars ────
+  if (traceType === "bar") {
+    if (traces.length === 1) {
+      const xs = (first.x ?? []) as unknown[];
+      const ys = (first.y ?? []) as number[];
+      const data = xs.map((x, i) => ({ [xField]: x, [yField]: ys[i] }));
+      return {
+        __dsl: true,
+        type: "bar",
+        title,
+        data,
+        x: xField,
+        y: [yField],
+      };
+    }
+    // Multi-trace bar → series_field with stacked rows.
+    const data: Record<string, unknown>[] = [];
+    traces.forEach((t, i) => {
+      const xs = (t.x ?? []) as unknown[];
+      const ys = (t.y ?? []) as number[];
+      const series = (t.name ?? `Series ${i + 1}`) as string;
+      xs.forEach((x, k) => data.push({ [xField]: x, [yField]: ys[k], series }));
+    });
+    return {
+      __dsl: true,
+      type: "bar",
+      title,
+      data,
+      x: xField,
+      y: [yField],
+      series_field: "series",
+    };
+  }
+
+  // ── scatter / scattergl: lines+markers → line, markers → scatter ──
+  if (traceType === "scatter" || traceType === "scattergl") {
+    const mode = (first.mode || "lines").toLowerCase();
+    const isLine = mode.includes("lines");
+    const chartType = isLine ? "line" : "scatter";
+
+    if (traces.length === 1) {
+      const xs = (first.x ?? []) as unknown[];
+      const ys = (first.y ?? []) as number[];
+      const data = xs.map((x, i) => ({ [xField]: x, [yField]: ys[i] }));
+      return {
+        __dsl: true,
+        type: chartType,
+        title,
+        data,
+        x: xField,
+        y: [yField],
+      };
+    }
+    // Multi-series → series_field
+    const data: Record<string, unknown>[] = [];
+    traces.forEach((t, i) => {
+      const xs = (t.x ?? []) as unknown[];
+      const ys = (t.y ?? []) as number[];
+      const series = (t.name ?? `Series ${i + 1}`) as string;
+      xs.forEach((x, k) => data.push({ [xField]: x, [yField]: ys[k], series }));
+    });
+    return {
+      __dsl: true,
+      type: chartType,
+      title,
+      data,
+      x: xField,
+      y: [yField],
+      series_field: "series",
+    };
+  }
+
+  return null;
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function PlotlyChart({ spec, title }: { spec: PlotlySpec; title?: string }) {
-  const layout = useMemo(() => ({
-    autosize: true,
-    height: 360,
-    margin: { l: 50, r: 20, t: title ? 55 : 30, b: 80 },
-    paper_bgcolor: "transparent",
-    plot_bgcolor: "#f7f8fc",
-    font: { family: "Inter, sans-serif", size: 11 },
-    ...(spec.layout as object),
-  }), [spec.layout, title]);
-
-  return (
-    <Plot
-      data={spec.data}
-      layout={layout}
-      config={{ responsive: true, displayModeBar: true, displaylogo: false }}
-      style={{ width: "100%" }}
-      useResizeHandler
-    />
-  );
+function PlotlyAdapted({ spec }: { spec: PlotlySpec }) {
+  const chartSpec = plotlyToChartSpec(spec);
+  if (!chartSpec) {
+    const traceType = (spec.data?.[0]?.type as string) || "unknown";
+    return (
+      <div style={{
+        padding: 16, textAlign: "center",
+        border: "1px dashed #fcd34d", borderRadius: 6,
+        background: "#fffbeb", color: "#92400e", fontSize: 12,
+      }}>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>
+          ⚠ Plotly trace type not supported by SVG engine
+        </div>
+        <div>type=<code>{traceType}</code> — 此圖表類型暫未提供 SVG 對應元件。</div>
+      </div>
+    );
+  }
+  return <SvgChartRenderer spec={chartSpec} height={360} />;
 }
 
 function DataTable({ rows }: { rows: Record<string, unknown>[] }) {
@@ -192,7 +356,7 @@ export function McpChartRenderer({
       {/* Content */}
       <div style={{ padding: compact ? 8 : 16 }}>
         {tab?.type === "plotly" && (
-          <PlotlyChart spec={plotlyCharts[tab.idx]} />
+          <PlotlyAdapted spec={plotlyCharts[tab.idx]} />
         )}
         {tab?.type === "png" && (
           // eslint-disable-next-line @next/next/no-img-element

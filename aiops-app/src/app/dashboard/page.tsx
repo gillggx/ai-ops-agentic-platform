@@ -14,20 +14,10 @@
 import "@/styles/fleet-overview.css";
 import { Suspense, useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import dynamic from "next/dynamic";
 import ReactMarkdown from "react-markdown";
 import { FleetOverview } from "@/components/fleet/FleetOverview";
 import { EqpDetail } from "@/components/fleet/eqp/EqpDetail";
-
-// Lazy-load Plotly (no SSR)
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const Plot = dynamic(async () => {
-  const Plotly = await import("plotly.js-dist-min");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const factory = (await import("react-plotly.js/factory")).default as (p: any) => React.ComponentType<any>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return { default: factory((Plotly as any).default ?? Plotly) };
-}, { ssr: false, loading: () => <div style={{ padding: 24, textAlign: "center", color: "#a0aec0" }}>載入圖表...</div> });
+import SvgChartRenderer from "@/components/pipeline-builder/charts/SvgChartRenderer";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -284,51 +274,38 @@ function SPCTab({ events }: { events: ProcessEvent[] }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {groups.map(([chartType, rows]) => {
-        const xs = rows.map(r => String(r.eventTime).slice(5, 19));
-        const ys = rows.map(r => r.value as number);
         const ucl = (rows[0]?.ucl as number) ?? 0;
         const lcl = (rows[0]?.lcl as number) ?? 0;
+        const ys = rows.map(r => r.value as number);
         const cl = ys.length > 0 ? ys.reduce((a, b) => a + b, 0) / ys.length : 0;
-        const oocIdx = rows.map((r, i) => r.is_ooc ? i : -1).filter(i => i >= 0);
+        const data = rows.map(r => ({
+          eventTime: String(r.eventTime).slice(5, 19),
+          value: r.value as number,
+          is_ooc: !!r.is_ooc,
+        }));
+
+        const spec = {
+          __dsl: true,
+          type: "line",
+          data,
+          x: "eventTime",
+          y: ["value"],
+          rules: [
+            { value: ucl, label: "UCL", style: "danger" },
+            { value: cl, label: "CL", style: "center" },
+            { value: lcl, label: "LCL", style: "danger" },
+          ],
+          highlight: { field: "is_ooc", eq: true },
+        };
 
         return (
           <div key={chartType} style={{ background: "#fff", borderRadius: 8, border: "1px solid #e2e8f0", overflow: "hidden" }}>
             <div style={{ padding: "6px 12px", fontSize: 12, fontWeight: 600, color: "#4a5568", borderBottom: "1px solid #e2e8f0" }}>
               {TITLE_MAP[chartType] ?? chartType}
             </div>
-            <Plot
-              data={[
-                { x: xs, y: ys, type: "scatter", mode: "lines+markers", name: "value",
-                  line: { color: "#48bb78", width: 2 }, marker: { size: 4, color: "#48bb78" } },
-                ...(oocIdx.length > 0 ? [{
-                  x: oocIdx.map(i => xs[i]),
-                  y: oocIdx.map(i => ys[i]),
-                  type: "scatter" as const, mode: "markers" as const, name: "OOC",
-                  marker: { color: "#e53e3e", size: 10, symbol: "circle-open", line: { width: 2, color: "#e53e3e" } },
-                }] : []),
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              ] as any}
-              layout={{
-                autosize: true, height: 180, margin: { l: 45, r: 16, t: 8, b: 36 },
-                paper_bgcolor: "transparent", plot_bgcolor: "#fafbfc",
-                font: { family: "Inter, sans-serif", size: 10 },
-                showlegend: false,
-                xaxis: { gridcolor: "#e2e8f0" },
-                yaxis: { gridcolor: "#e2e8f0" },
-                shapes: [
-                  { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: ucl, y1: ucl, line: { color: "#e53e3e", width: 1, dash: "dash" } },
-                  { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: lcl, y1: lcl, line: { color: "#e53e3e", width: 1, dash: "dash" } },
-                  { type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: cl, y1: cl, line: { color: "#718096", width: 1, dash: "dot" } },
-                ],
-                annotations: [
-                  { xref: "paper", yref: "y", x: 1, y: ucl, text: `UCL ${ucl}`, font: { size: 9, color: "#e53e3e" }, showarrow: false, xanchor: "right" },
-                  { xref: "paper", yref: "y", x: 1, y: lcl, text: `LCL ${lcl}`, font: { size: 9, color: "#e53e3e" }, showarrow: false, xanchor: "right" },
-                ],
-              }}
-              config={{ responsive: true, displayModeBar: false }}
-              style={{ width: "100%" }}
-              useResizeHandler
-            />
+            <div className="pb-chart-card" style={{ padding: 8 }}>
+              <SvgChartRenderer spec={spec} height={180} />
+            </div>
           </div>
         );
       })}
@@ -816,6 +793,63 @@ function OOCTopologyPanel({ events, lastUpdate, onRefresh }: { events: ProcessEv
   );
 }
 
+// Sequential green→red HTML grid (replaces Plotly heatmap).
+// OOC rate (0-100%) bucketed: green ≤15, yellow ≤25, orange ≤40, light red ≤60, red ≤100.
+function oocCellColor(rate: number): string {
+  if (rate <= 15) return "#c6f6d5";
+  if (rate <= 25) return "#fefcbf";
+  if (rate <= 40) return "#fbd38d";
+  if (rate <= 60) return "#feb2b2";
+  return "#fc8181";
+}
+
+function OocRateGrid({
+  toolIds, steps, zMatrix, textMatrix,
+}: {
+  toolIds: string[]; steps: string[]; zMatrix: number[][]; textMatrix: string[][];
+}) {
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ borderCollapse: "collapse", fontSize: 11, fontFamily: "Inter, sans-serif" }}>
+        <thead>
+          <tr>
+            <th style={{ padding: "6px 8px", textAlign: "left", color: "#4a5568", borderBottom: "1px solid #e2e8f0" }}>Step \ Tool</th>
+            {toolIds.map(t => (
+              <th key={t} style={{ padding: "6px 8px", color: "#4a5568", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>{t}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {steps.map((step, ri) => (
+            <tr key={step}>
+              <td style={{ padding: "6px 8px", color: "#2d3748", fontWeight: 600, borderRight: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>{step}</td>
+              {toolIds.map((_, ci) => {
+                const rate = zMatrix[ri]?.[ci] ?? 0;
+                const text = textMatrix[ri]?.[ci] ?? "";
+                return (
+                  <td
+                    key={ci}
+                    title={`Tool: ${toolIds[ci]} · Step: ${step} · OOC: ${text}`}
+                    style={{
+                      padding: "6px 8px", textAlign: "center",
+                      background: oocCellColor(rate),
+                      color: rate > 60 ? "#742a2a" : "#1a202c",
+                      borderRight: "1px solid #fff", borderBottom: "1px solid #fff",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {text}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function FabHeatmap({ summary }: { summary: Record<string, unknown> }) {
   const byToolStep = (summary.by_tool_step as Array<Record<string, unknown>>) ?? [];
   const byTool = (summary.by_tool as Array<Record<string, unknown>>) ?? [];
@@ -849,29 +883,31 @@ function FabHeatmap({ summary }: { summary: Record<string, unknown> }) {
 
   // Fallback: if no by_tool_step data yet, show simple bar chart
   if (zMatrix.length === 0 || toolIds.length === 0) {
-    const ids = byTool.map(t => String(t.toolID));
-    const rates = byTool.map(t => {
+    const data = byTool.map(t => {
       const c = Number(t.count ?? 0);
       const o = Number(t.ooc_count ?? 0);
-      return c > 0 ? (o / c * 100) : 0;
+      return {
+        toolID: String(t.toolID),
+        ooc_rate: c > 0 ? (o / c * 100) : 0,
+      };
     });
+    const spec = {
+      __dsl: true,
+      type: "bar",
+      data,
+      x: "toolID",
+      y: ["ooc_rate"],
+      rules: [
+        { value: 15, label: "Warn 15%", style: "warning" },
+        { value: 30, label: "Alert 30%", style: "danger" },
+      ],
+    };
     return (
       <div style={{ padding: "16px 24px" }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: "#1a202c", marginBottom: 12 }}>全廠 OOC Rate by Tool (24h)</div>
-        <Plot
-          data={[{ x: ids, y: rates, type: "bar",
-            marker: { color: rates.map(r => r > 30 ? "#e53e3e" : r > 15 ? "#ed8936" : "#48bb78") },
-            text: rates.map(r => `${r.toFixed(1)}%`), textposition: "outside",
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          }] as any}
-          layout={{ autosize: true, height: 250, margin: { l: 40, r: 16, t: 8, b: 40 },
-            paper_bgcolor: "transparent", plot_bgcolor: "#fafbfc",
-            font: { family: "Inter, sans-serif", size: 11 },
-            xaxis: { title: "Machine" }, yaxis: { title: "OOC %" },
-          }}
-          config={{ responsive: true, displayModeBar: false }}
-          style={{ width: "100%" }} useResizeHandler
-        />
+        <div className="pb-chart-card">
+          <SvgChartRenderer spec={spec} height={250} />
+        </div>
       </div>
     );
   }
@@ -881,41 +917,7 @@ function FabHeatmap({ summary }: { summary: Record<string, unknown> }) {
       <div style={{ fontSize: 14, fontWeight: 700, color: "#1a202c", marginBottom: 12 }}>
         全廠 SPC OOC Rate Heatmap — Tool × Step (24h)
       </div>
-      <Plot
-        data={[{
-          z: zMatrix,
-          x: toolIds,
-          y: steps,
-          type: "heatmap",
-          colorscale: [
-            [0, "#f0fff4"],     // 0% — green
-            [0.15, "#c6f6d5"],  // 15%
-            [0.25, "#fefcbf"],  // 25% — yellow
-            [0.40, "#fbd38d"],  // 40% — orange
-            [0.60, "#feb2b2"],  // 60%
-            [1, "#e53e3e"],     // 100% — red
-          ],
-          text: textMatrix,
-          texttemplate: "%{text}",
-          hovertemplate: "Tool: %{x}<br>Step: %{y}<br>OOC Rate: %{z:.1f}%<extra></extra>",
-          showscale: true,
-          colorbar: { title: "OOC %", titleside: "right" },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        }] as any}
-        layout={{
-          autosize: true,
-          height: Math.max(200, steps.length * 40 + 80),
-          margin: { l: 80, r: 80, t: 8, b: 50 },
-          paper_bgcolor: "transparent",
-          plot_bgcolor: "#fafbfc",
-          font: { family: "Inter, sans-serif", size: 11 },
-          xaxis: { title: "Machine", side: "bottom" },
-          yaxis: { title: "Step", autorange: "reversed" as const },
-        }}
-        config={{ responsive: true, displayModeBar: false }}
-        style={{ width: "100%" }}
-        useResizeHandler
-      />
+      <OocRateGrid toolIds={toolIds} steps={steps} zMatrix={zMatrix} textMatrix={textMatrix} />
       {/* Summary stats below heatmap */}
       <div style={{ display: "flex", gap: 24, marginTop: 16 }}>
         <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "12px 20px", flex: 1 }}>

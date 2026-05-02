@@ -1,16 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import { ChartDSLRenderer, type ChartDSL } from "@/components/operations/SkillOutputRenderer";
+import { VegaLiteChart } from "@/components/contract/visualizations/VegaLiteChart";
 
 /**
- * ChartRenderer — dispatcher between two chart stacks:
- *   - Vega-Lite (block_chart classic mode) → vega-embed
- *   - ChartDSL   (block_chart SPC mode)    → Plotly (shared with auto-patrol)
+ * ChartRenderer — dispatcher between chart stacks:
+ *   - empty card (placeholder)
+ *   - table     (HTML table)
+ *   - ChartDSL  (block_chart SPC mode)   → SvgChartRenderer (via ChartDSLRenderer)
+ *   - Vega-Lite (block_chart classic)    → SvgChartRenderer (via VegaLiteChart adapter)
  *
  * Decision:
- *   spec.__dsl === true OR has `rules` / `highlight`  → ChartDSL (Plotly)
- *   otherwise → Vega-Lite
+ *   spec.__dsl === true OR has `rules` / `highlight`  → ChartDSL
+ *   has $schema "vega-lite" OR mark+encoding         → Vega-Lite adapter
  */
 
 interface Props {
@@ -168,99 +170,28 @@ function formatCell(v: unknown): string {
   return String(v);
 }
 
-/** Vega-Lite default places color legends on the right which clips easily in
- *  side panels. We post-process the spec to move legends to bottom + force an
- *  autosize so the chart fills its container. */
-function _tuneVegaLayout(raw: unknown): object {
-  if (!raw || typeof raw !== "object") return raw as object;
-  const spec = { ...(raw as Record<string, unknown>) };
-  // Ensure legend sits below plot area — avoids right-side clipping.
-  const existingConfig = (spec.config as Record<string, unknown> | undefined) ?? {};
-  spec.config = {
-    ...existingConfig,
-    legend: {
-      ...((existingConfig.legend as Record<string, unknown> | undefined) ?? {}),
-      orient: "bottom",
-      columns: 3,
-    },
-  };
-  // autosize=fit lets the SVG expand to container width naturally.
-  spec.autosize = { type: "fit", contains: "padding" };
-  return spec;
-}
-
-function VegaChartRenderer({ spec, height }: Props) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setError(null);
-    const el = containerRef.current;
-    if (!el) return;
-    if (!looksLikeVegaLite(spec)) {
-      setError("不是有效的 Vega-Lite spec（缺 $schema 或 mark/encoding）");
-      return;
-    }
-    const tuned = _tuneVegaLayout(spec);
-    (async () => {
-      try {
-        const mod = await import("vega-embed");
-        const embed = mod.default;
-        await embed(el, tuned, { actions: false, renderer: "svg" });
-      } catch (e) {
-        if (!cancelled) setError((e as Error).message);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (el) el.innerHTML = "";
-    };
-  }, [spec]);
-
-  if (error) {
+function VegaChartRenderer({ spec }: Props) {
+  if (!looksLikeVegaLite(spec)) {
     return (
-      <div data-testid="chart-render-error" style={{ padding: 12 }}>
-        <div
-          style={{
-            color: "#B91C1C",
-            background: "#FEF2F2",
-            border: "1px solid #FECACA",
-            borderRadius: 4,
-            padding: 8,
-            fontSize: 12,
-            marginBottom: 8,
-          }}
-        >
-          Chart render failed: {error}
-        </div>
-        <pre
-          style={{
-            fontSize: 10,
-            background: "#F8FAFC",
-            padding: 8,
-            borderRadius: 3,
-            overflow: "auto",
-            maxHeight: 200,
-            color: "#334155",
-          }}
-        >
-          {JSON.stringify(spec, null, 2)}
-        </pre>
+      <div
+        data-testid="chart-render-error"
+        style={{
+          padding: 12,
+          color: "#B91C1C",
+          background: "#FEF2F2",
+          border: "1px solid #FECACA",
+          borderRadius: 4,
+          fontSize: 12,
+        }}
+      >
+        不是有效的 Vega-Lite spec（缺 $schema 或 mark/encoding）
       </div>
     );
   }
-
   return (
-    <div
-      data-testid="chart-renderer"
-      ref={containerRef}
-      style={{
-        padding: 12,
-        minHeight: height ?? 220,
-        overflow: "auto",
-      }}
-    />
+    <div data-testid="chart-renderer" style={{ padding: 12 }}>
+      <VegaLiteChart spec={spec as Record<string, unknown>} />
+    </div>
   );
 }
 

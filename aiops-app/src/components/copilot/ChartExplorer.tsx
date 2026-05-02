@@ -3,24 +3,18 @@
 /**
  * ChartExplorer — interactive chart explorer for Generative UI.
  *
- * Receives flat data from backend (via SSE) and renders interactive Plotly charts.
- * User can switch between datasets (SPC/APC/DC/...) and change filters
- * without any API calls — all data is cached in FlatDataContext.
+ * Receives flat data from backend (via SSE) and renders charts via the SVG
+ * chart engine. Switching between datasets (SPC/APC/DC/...) and changing
+ * filters happens client-side without API calls — all data is cached in
+ * FlatDataContext.
+ *
+ * Plotly was removed in P2-1: every chart is now a ChartSpec passed to
+ * SvgChartRenderer. The dual-axis overlay uses LineChart's `y_secondary`.
  */
 
 import { useState, useMemo } from "react";
-import dynamic from "next/dynamic";
+import SvgChartRenderer from "@/components/pipeline-builder/charts/SvgChartRenderer";
 import type { FlatDataMetadata, UIConfig } from "@/context/FlatDataContext";
-
-// Lazy-load Plotly
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const Plot = dynamic(async () => {
-  const Plotly = await import("plotly.js-dist-min");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const factory = (await import("react-plotly.js/factory")).default as (p: any) => React.ComponentType<any>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return { default: factory((Plotly as any).default ?? Plotly) };
-}, { ssr: false, loading: () => <div style={{ padding: 16, textAlign: "center", color: "#a0aec0" }}>Loading chart...</div> });
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -71,8 +65,6 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
   const [extraCharts, setExtraCharts] = useState<string[]>([]);
   // Chart type selector (line is default, histogram/box for distribution analysis, heatmap for correlation)
   const [chartType, setChartType] = useState<"line" | "scatter" | "histogram" | "box" | "heatmap">("line");
-  // Time-window range slider toggle
-  const [showRangeSlider, setShowRangeSlider] = useState(false);
 
   // Overlay state
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -118,124 +110,29 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
     return filteredData.filter((r) => String(r[groupField]) === effectiveFilterValue);
   }, [filteredData, groupField, effectiveFilterValue]);
 
-  // Single trace (one group at a time)
-  const traces = useMemo(() => {
-    const xs = displayData.map((r) => r[config.x]);
-    const ys = displayData.map((r) => r[config.y]);
-    // SPC = green line, others = blue
-    const lineColor = activeDataset === "spc_data" ? "#48bb78" : "#4299e1";
-    return [{
-      x: xs, y: ys,
-      name: effectiveFilterValue || config.y,
-      type: "scatter" as const,
-      mode: "lines+markers" as const,
-      line: { color: lineColor, width: 2 },
-      marker: { size: 4, color: lineColor },
-    }];
-  }, [displayData, config, effectiveFilterValue, activeDataset]);
-
-  // SPC control lines — UCL/LCL orange, CL gray dotted
-  const shapes = useMemo(() => {
-    if (activeDataset !== "spc_data" || !displayData.length) return [];
+  // SPC: build rules + highlight from UCL/LCL/CL
+  const spcRulesAndHighlight = useMemo(() => {
+    if (activeDataset !== "spc_data" || !displayData.length) return { rules: [] as Array<Record<string, unknown>>, highlight: undefined };
     const ucl = displayData[0]?.ucl;
     const lcl = displayData[0]?.lcl;
     const vals = displayData.map((r) => r.value).filter((v: unknown) => typeof v === "number") as number[];
     const cl = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const s: any[] = [];
-    if (ucl != null) s.push({ type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: ucl, y1: ucl, line: { color: "#ed8936", width: 1.5, dash: "dash" } });
-    if (lcl != null) s.push({ type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: lcl, y1: lcl, line: { color: "#ed8936", width: 1.5, dash: "dash" } });
-    if (cl) s.push({ type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: cl, y1: cl, line: { color: "#718096", width: 1, dash: "dot" } });
-    return s;
+    const rules: Array<Record<string, unknown>> = [];
+    if (typeof ucl === "number") rules.push({ value: ucl, label: "UCL", style: "danger" });
+    if (typeof lcl === "number") rules.push({ value: lcl, label: "LCL", style: "danger" });
+    if (cl) rules.push({ value: cl, label: "CL", style: "center" });
+    return {
+      rules,
+      highlight: { field: "is_ooc", eq: true } as Record<string, unknown>,
+    };
   }, [activeDataset, displayData]);
 
-  // OOC highlights for SPC — red circles
-  const oocTrace = useMemo(() => {
-    if (activeDataset !== "spc_data") return null;
-    const oocPoints = displayData.filter((r) => r.is_ooc);
-    if (!oocPoints.length) return null;
-    return {
-      x: oocPoints.map((r) => r[config.x]),
-      y: oocPoints.map((r) => r[config.y]),
-      type: "scatter" as const,
-      mode: "markers" as const,
-      name: "OOC",
-      marker: { color: "#e53e3e", size: 10, symbol: "circle-open", line: { width: 2, color: "#e53e3e" } },
-    };
-  }, [activeDataset, displayData, config]);
-
-  // Histogram traces + normal distribution overlay + sigma bands
-  const histogramTraces = useMemo(() => {
-    const values = displayData.map((r) => r[config.y]).filter((v: unknown) => typeof v === "number") as number[];
-    if (values.length < 5) return { traces: [], shapes: [], annotations: [] };
-    const mean = values.reduce((a, b) => a + b, 0) / values.length;
-    const std = Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const t: any[] = [{
-      x: values, type: "histogram" as const, name: effectiveFilterValue || config.y,
-      marker: { color: "#4299e1", opacity: 0.7 },
-      nbinsx: Math.min(30, Math.max(10, Math.round(Math.sqrt(values.length)))),
-    }];
-    // Sigma band shapes
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sigmaShapes: any[] = [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sigmaAnnotations: any[] = [];
-    const sigmaColors = ["#38a169", "#d69e2e", "#ed8936", "#e53e3e"];
-    const sigmaLabels = ["1\u03c3", "2\u03c3", "3\u03c3", "4\u03c3"];
-    for (let i = 1; i <= 4; i++) {
-      const color = sigmaColors[i - 1];
-      for (const sign of [-1, 1]) {
-        const val = mean + sign * i * std;
-        sigmaShapes.push({
-          type: "line", xref: "x", yref: "paper", x0: val, x1: val, y0: 0, y1: 1,
-          line: { color, width: 1, dash: i <= 2 ? "dash" : "dot" },
-        });
-      }
-      sigmaAnnotations.push({
-        xref: "x" as const, yref: "paper" as const,
-        x: mean + i * std, y: 1, text: `+${sigmaLabels[i - 1]}`,
-        font: { size: 9, color: sigmaColors[i - 1] }, showarrow: false, yanchor: "bottom" as const,
-      });
-    }
-    // Mean line
-    sigmaShapes.push({
-      type: "line", xref: "x", yref: "paper", x0: mean, x1: mean, y0: 0, y1: 1,
-      line: { color: "#2d3748", width: 2 },
-    });
-    sigmaAnnotations.push({
-      xref: "x" as const, yref: "paper" as const,
-      x: mean, y: 1, text: `\u03bc=${mean.toFixed(2)}`,
-      font: { size: 10, color: "#2d3748" }, showarrow: false, yanchor: "bottom" as const,
-    });
-    return { traces: t, shapes: sigmaShapes, annotations: sigmaAnnotations };
-  }, [displayData, config, effectiveFilterValue]);
-
-  // Box plot traces — group by groupField
-  const boxTraces = useMemo(() => {
-    if (!groupField) {
-      const values = displayData.map((r) => r[config.y]).filter((v: unknown) => typeof v === "number") as number[];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return [{ y: values, type: "box" as const, name: config.y, marker: { color: "#4299e1" }, boxpoints: "outliers" as const }] as any[];
-    }
-    // Show all groups in box plot for comparison
-    const groups = [...new Set(rawData.map((r) => String(r[groupField])))].sort().slice(0, 10);
-    const colors = ["#4299e1", "#48bb78", "#ed8936", "#e53e3e", "#9f7aea", "#d69e2e", "#38b2ac", "#fc8181", "#667eea", "#f6ad55"];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return groups.map((g, i): any => {
-      const values = rawData.filter((r) => String(r[groupField]) === g).map((r) => r[config.y]).filter((v: unknown) => typeof v === "number");
-      return { y: values, type: "box", name: g, marker: { color: colors[i % colors.length] }, boxpoints: "outliers" };
-    });
-  }, [rawData, displayData, config, groupField]);
-
-  // Heatmap trace — for correlation matrix (compute_results with matrix key)
+  // Heatmap correlation matrix (compute_results or derived)
   const heatmapData = useMemo(() => {
-    // Check if compute_results dataset has matrix data
     const cr = flatData["compute_results"];
     if (cr && Array.isArray(cr) && cr.length > 0 && cr[0]?.matrix && cr[0]?.params) {
       return { params: cr[0].params as string[], matrix: cr[0].matrix as number[][] };
     }
-    // Fallback: compute correlation from current dataset's numeric fields
     if (!groupField || !rawData.length) return null;
     const groups = [...new Set(rawData.map((r) => String(r[groupField])))].sort().slice(0, 10);
     if (groups.length < 2) return null;
@@ -246,7 +143,6 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
         .map((r) => r[config.y])
         .filter((v: unknown) => typeof v === "number") as number[];
     }
-    // Compute Pearson correlation matrix
     const n = groups.length;
     const matrix: number[][] = Array.from({ length: n }, () => Array(n).fill(0));
     for (let i = 0; i < n; i++) {
@@ -268,9 +164,6 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
     }
     return { params: groups, matrix };
   }, [flatData, rawData, groupField, config]);
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const allTraces: any[] = [...traces, ...(oocTrace ? [oocTrace] : [])];
 
   return (
     <div style={{ background: "#fff", borderRadius: 8, border: "1px solid #e2e8f0", overflow: "hidden" }}>
@@ -313,7 +206,6 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
             {DATASET_LABELS[ds] ?? ds}
           </button>
         ))}
-        {/* Overlay tab — only if >= 2 datasets */}
         {metadata.available_datasets.length >= 2 && (
           <button
             onClick={() => setOverlayMode(true)}
@@ -343,7 +235,6 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
               const cfg = CHART_CONFIGS[overlayLeft.dataset];
               setOverlayLeft(p => ({...p, filterKey: cfg?.group ?? "", filterVal: e.target.value}));
             }} style={{ fontSize: 11, padding: "3px 6px", borderRadius: 4, border: "1px solid #cbd5e0" }}>
-              {/* No "All" — one at a time */}
               {[...new Set((flatData[overlayLeft.dataset] ?? []).map((r: Record<string,unknown>) => String(r[CHART_CONFIGS[overlayLeft.dataset]?.group ?? ""] ?? "")))].filter(Boolean).sort().map(v =>
                 <option key={v} value={v}>{v}</option>
               )}
@@ -357,62 +248,16 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
               const cfg = CHART_CONFIGS[overlayRight.dataset];
               setOverlayRight(p => ({...p, filterKey: cfg?.group ?? "", filterVal: e.target.value}));
             }} style={{ fontSize: 11, padding: "3px 6px", borderRadius: 4, border: "1px solid #cbd5e0" }}>
-              {/* No "All" — one at a time */}
               {[...new Set((flatData[overlayRight.dataset] ?? []).map((r: Record<string,unknown>) => String(r[CHART_CONFIGS[overlayRight.dataset]?.group ?? ""] ?? "")))].filter(Boolean).sort().map(v =>
                 <option key={v} value={v}>{v}</option>
               )}
             </select>
           </div>
-          {(() => {
-            const leftCfg = CHART_CONFIGS[overlayLeft.dataset] ?? { x: "eventTime", y: "value" };
-            const rightCfg = CHART_CONFIGS[overlayRight.dataset] ?? { x: "eventTime", y: "value" };
-            let leftData = flatData[overlayLeft.dataset] ?? [];
-            let rightData = flatData[overlayRight.dataset] ?? [];
-
-            // Get effective filter values (default to first available group value)
-            const leftGroupField = leftCfg.group ?? (CHART_CONFIGS[overlayLeft.dataset]?.group ?? "");
-            const rightGroupField = rightCfg.group ?? (CHART_CONFIGS[overlayRight.dataset]?.group ?? "");
-            const leftGroupVals = leftGroupField ? [...new Set(leftData.map((r: Record<string,unknown>) => String(r[leftGroupField] ?? "")))].filter(Boolean).sort() : [];
-            const rightGroupVals = rightGroupField ? [...new Set(rightData.map((r: Record<string,unknown>) => String(r[rightGroupField] ?? "")))].filter(Boolean).sort() : [];
-            const effectiveLeftFilter = overlayLeft.filterVal || leftGroupVals[0] || "";
-            const effectiveRightFilter = overlayRight.filterVal || rightGroupVals[0] || "";
-
-            // Always filter to one group
-            if (leftGroupField && effectiveLeftFilter)
-              leftData = leftData.filter((r: Record<string,unknown>) => String(r[leftGroupField]) === effectiveLeftFilter);
-            if (rightGroupField && effectiveRightFilter)
-              rightData = rightData.filter((r: Record<string,unknown>) => String(r[rightGroupField]) === effectiveRightFilter);
-
-            const leftLabel = effectiveLeftFilter || DATASET_LABELS[overlayLeft.dataset] || overlayLeft.dataset;
-            const rightLabel = effectiveRightFilter || DATASET_LABELS[overlayRight.dataset] || overlayRight.dataset;
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const overlayTraces: any[] = [
-              { x: leftData.map((r: Record<string,unknown>) => r[leftCfg.x]), y: leftData.map((r: Record<string,unknown>) => r[leftCfg.y]),
-                name: leftLabel, type: "scatter", mode: "lines+markers",
-                line: { color: "#4299e1", width: 1.5 }, marker: { size: 4 }, yaxis: "y" },
-              { x: rightData.map((r: Record<string,unknown>) => r[rightCfg.x]), y: rightData.map((r: Record<string,unknown>) => r[rightCfg.y]),
-                name: rightLabel, type: "scatter", mode: "lines+markers",
-                line: { color: "#ed8936", width: 1.5 }, marker: { size: 4 }, yaxis: "y2" },
-            ];
-            return (
-              <Plot
-                data={overlayTraces}
-                layout={{
-                  autosize: true, height: 350,
-                  margin: { l: 60, r: 60, t: 30, b: 50 },
-                  paper_bgcolor: "transparent", plot_bgcolor: "#fafbfc",
-                  font: { family: "Inter, sans-serif", size: 11 },
-                  showlegend: true, legend: { orientation: "h" as const, y: -0.2 },
-                  xaxis: { title: "eventTime", gridcolor: "#e2e8f0" },
-                  yaxis: { title: leftLabel, titlefont: { color: "#4299e1" }, tickfont: { color: "#4299e1" }, gridcolor: "#e2e8f0" },
-                  yaxis2: { title: rightLabel, titlefont: { color: "#ed8936" }, tickfont: { color: "#ed8936" }, overlaying: "y" as const, side: "right" as const },
-                }}
-                config={{ responsive: true, displayModeBar: false }}
-                style={{ width: "100%" }}
-                useResizeHandler
-              />
-            );
-          })()}
+          <OverlayChart
+            flatData={flatData}
+            left={overlayLeft}
+            right={overlayRight}
+          />
         </div>
       )}
 
@@ -433,10 +278,8 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
           <span style={{ fontSize: 11, color: "#a0aec0" }}>
             {displayData.length} rows
           </span>
-          {/* Add chart button */}
           <button
             onClick={() => {
-              // Add next available group value that's not already shown
               const shown = new Set([effectiveFilterValue, ...extraCharts]);
               const next = groupValues.find(v => !shown.has(v));
               if (next) setExtraCharts(prev => [...prev, next]);
@@ -480,146 +323,20 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
               {ct === "line" ? "Line" : ct === "scatter" ? "Scatter" : ct === "histogram" ? "Histogram" : ct === "box" ? "Box Plot" : "Heatmap"}
             </button>
           ))}
-          {/* Time range slider toggle — only for time-series charts */}
-          {(chartType === "line" || chartType === "scatter") && (
-            <>
-              <span style={{ width: 1, height: 16, background: "#e2e8f0", margin: "0 4px" }} />
-              <button
-                onClick={() => setShowRangeSlider(v => !v)}
-                style={{
-                  padding: "3px 10px", fontSize: 11, borderRadius: 4,
-                  border: showRangeSlider ? "1px solid #2b6cb0" : "1px solid #e2e8f0",
-                  background: showRangeSlider ? "#ebf8ff" : "#fff",
-                  color: showRangeSlider ? "#2b6cb0" : "#718096",
-                  fontWeight: showRangeSlider ? 600 : 400,
-                  cursor: "pointer",
-                }}
-              >
-                Time Range
-              </button>
-            </>
-          )}
         </div>
       )}
 
       {/* Chart (single dataset mode) */}
       {!overlayMode && displayData.length > 0 ? (
-        chartType === "histogram" ? (
-          displayData.map((r) => r[config.y]).filter((v: unknown) => typeof v === "number").length < 5 ? (
-            <div style={{ padding: 40, textAlign: "center", color: "#a0aec0", fontSize: 13 }}>
-              Histogram requires at least 5 numeric data points
-            </div>
-          ) : (
-            <Plot
-              data={histogramTraces.traces}
-              layout={{
-                autosize: true, height: 350,
-                margin: { l: 50, r: 20, t: 30, b: 50 },
-                paper_bgcolor: "transparent", plot_bgcolor: "#fafbfc",
-                font: { family: "Inter, sans-serif", size: 11 },
-                showlegend: false,
-                xaxis: { title: config.y, gridcolor: "#e2e8f0" },
-                yaxis: { title: "Frequency", gridcolor: "#e2e8f0" },
-                shapes: histogramTraces.shapes,
-                annotations: histogramTraces.annotations,
-                bargap: 0.05,
-              }}
-              config={{ responsive: true, displayModeBar: false }}
-              style={{ width: "100%" }}
-              useResizeHandler
-            />
-          )
-        ) : chartType === "box" ? (
-          <Plot
-            data={boxTraces}
-            layout={{
-              autosize: true, height: 350,
-              margin: { l: 50, r: 20, t: 30, b: 50 },
-              paper_bgcolor: "transparent", plot_bgcolor: "#fafbfc",
-              font: { family: "Inter, sans-serif", size: 11 },
-              showlegend: false,
-              yaxis: { title: config.y, gridcolor: "#e2e8f0" },
-            }}
-            config={{ responsive: true, displayModeBar: false }}
-            style={{ width: "100%" }}
-            useResizeHandler
-          />
-        ) : chartType === "heatmap" && heatmapData ? (
-          <Plot
-            data={[{
-              type: "heatmap" as const,
-              z: heatmapData.matrix,
-              x: heatmapData.params,
-              y: heatmapData.params,
-              colorscale: "RdBu" as const,
-              zmin: -1, zmax: 1,
-              text: heatmapData.matrix.map(row => row.map(v => v.toFixed(2))),
-              hoverinfo: "text" as const,
-              showscale: true,
-            }]}
-            layout={{
-              autosize: true, height: 400,
-              margin: { l: 100, r: 20, t: 30, b: 100 },
-              paper_bgcolor: "transparent", plot_bgcolor: "#fafbfc",
-              font: { family: "Inter, sans-serif", size: 11 },
-              xaxis: { tickangle: -45 },
-            }}
-            config={{ responsive: true, displayModeBar: false }}
-            style={{ width: "100%" }}
-            useResizeHandler
-          />
-        ) : chartType === "scatter" ? (
-          <Plot
-            data={[{
-              ...allTraces[0],
-              mode: "markers" as const,
-              line: undefined,
-              marker: { ...allTraces[0]?.marker, size: 6 },
-            }, ...(oocTrace ? [oocTrace] : [])]}
-            layout={{
-              autosize: true, height: showRangeSlider ? 380 : 320,
-              margin: { l: 50, r: 20, t: 30, b: showRangeSlider ? 80 : 50 },
-              paper_bgcolor: "transparent", plot_bgcolor: "#fafbfc",
-              font: { family: "Inter, sans-serif", size: 11 },
-              showlegend: allTraces.length > 1,
-              legend: { orientation: "h" as const, y: -0.2 },
-              xaxis: {
-                title: config.x, gridcolor: "#e2e8f0",
-                ...(showRangeSlider ? { rangeslider: { visible: true, thickness: 0.08 }, type: "date" as const } : {}),
-              },
-              yaxis: { title: config.y, gridcolor: "#e2e8f0" },
-              shapes,
-            }}
-            config={{ responsive: true, displayModeBar: false }}
-            style={{ width: "100%" }}
-            useResizeHandler
-          />
-        ) : (
-          <Plot
-            data={allTraces}
-            layout={{
-              autosize: true, height: showRangeSlider ? 380 : 320,
-              margin: { l: 50, r: 20, t: 30, b: showRangeSlider ? 80 : 50 },
-              paper_bgcolor: "transparent", plot_bgcolor: "#fafbfc",
-              font: { family: "Inter, sans-serif", size: 11 },
-              showlegend: allTraces.length > 1 && allTraces.length <= 8,
-              legend: { orientation: "h" as const, y: -0.2 },
-              xaxis: {
-                title: config.x, gridcolor: "#e2e8f0",
-                ...(showRangeSlider ? { rangeslider: { visible: true, thickness: 0.08 }, type: "date" as const } : {}),
-              },
-              yaxis: { title: config.y, gridcolor: "#e2e8f0" },
-              shapes,
-              annotations: activeDataset === "spc_data" && displayData.length > 0 ? [
-                ...(displayData[0]?.ucl != null ? [{ xref: "paper" as const, yref: "y" as const, x: 1, y: displayData[0].ucl, text: `UCL ${displayData[0].ucl}`, font: { size: 9, color: "#ed8936" }, showarrow: false, xanchor: "right" as const }] : []),
-                ...(displayData[0]?.lcl != null ? [{ xref: "paper" as const, yref: "y" as const, x: 1, y: displayData[0].lcl, text: `LCL ${displayData[0].lcl}`, font: { size: 9, color: "#ed8936" }, showarrow: false, xanchor: "right" as const }] : []),
-              ] : [],
-            }}
-            config={{ responsive: true, displayModeBar: false }}
-            style={{ width: "100%" }}
-            useResizeHandler
-          />
-        )
+        <SingleChart
+          chartType={chartType}
+          displayData={displayData}
+          rawData={rawData}
+          config={config}
+          groupField={groupField}
+          spcExtras={spcRulesAndHighlight}
+          heatmapData={heatmapData}
+        />
       ) : !overlayMode ? (
         <div style={{ padding: 40, textAlign: "center", color: "#a0aec0", fontSize: 13 }}>
           No data for {DATASET_LABELS[activeDataset] ?? activeDataset}
@@ -632,33 +349,22 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
           ? filteredData.filter((r) => String(r[groupField]) === ecFilter)
           : [];
         if (!ecData.length) return null;
-        const lineColor = activeDataset === "spc_data" ? "#48bb78" : "#4299e1";
-        const ecXs = ecData.map((r) => r[config.x]);
-        const ecYs = ecData.map((r) => r[config.y]);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const ecTraces: any[] = [{
-          x: ecXs, y: ecYs, name: ecFilter,
-          type: "scatter", mode: "lines+markers",
-          line: { color: lineColor, width: 2 }, marker: { size: 4, color: lineColor },
-        }];
-        // OOC for SPC
-        if (activeDataset === "spc_data") {
-          const ooc = ecData.filter((r) => r.is_ooc);
-          if (ooc.length) ecTraces.push({
-            x: ooc.map((r) => r[config.x]), y: ooc.map((r) => r[config.y]),
-            type: "scatter", mode: "markers", name: "OOC",
-            marker: { color: "#e53e3e", size: 10, symbol: "circle-open", line: { width: 2, color: "#e53e3e" } },
-          });
-        }
-        // SPC control lines
         const ucl = ecData[0]?.ucl;
         const lcl = ecData[0]?.lcl;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const ecShapes: any[] = [];
+        const rules: Array<Record<string, unknown>> = [];
         if (activeDataset === "spc_data") {
-          if (ucl != null) ecShapes.push({ type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: ucl, y1: ucl, line: { color: "#ed8936", width: 1.5, dash: "dash" } });
-          if (lcl != null) ecShapes.push({ type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: lcl, y1: lcl, line: { color: "#ed8936", width: 1.5, dash: "dash" } });
+          if (typeof ucl === "number") rules.push({ value: ucl, label: "UCL", style: "danger" });
+          if (typeof lcl === "number") rules.push({ value: lcl, label: "LCL", style: "danger" });
         }
+        const spec = {
+          __dsl: true,
+          type: "line",
+          data: ecData,
+          x: config.x,
+          y: [config.y],
+          rules,
+          highlight: activeDataset === "spc_data" ? { field: "is_ooc", eq: true } : undefined,
+        };
         return (
           <div key={ecIdx} style={{ borderTop: "1px solid #e2e8f0" }}>
             <div style={{ padding: "4px 16px", fontSize: 11, fontWeight: 600, color: "#718096", display: "flex", alignItems: "center", gap: 8 }}>
@@ -676,22 +382,9 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
               <button onClick={() => setExtraCharts(prev => prev.filter((_, i) => i !== ecIdx))}
                 style={{ marginLeft: "auto", border: "none", background: "none", color: "#e53e3e", cursor: "pointer", fontSize: 11 }}>x</button>
             </div>
-            <Plot
-              data={ecTraces}
-              layout={{
-                autosize: true, height: 220,
-                margin: { l: 50, r: 20, t: 8, b: 40 },
-                paper_bgcolor: "transparent", plot_bgcolor: "#fafbfc",
-                font: { family: "Inter, sans-serif", size: 10 },
-                showlegend: false,
-                xaxis: { gridcolor: "#e2e8f0" },
-                yaxis: { gridcolor: "#e2e8f0" },
-                shapes: ecShapes,
-              }}
-              config={{ responsive: true, displayModeBar: false }}
-              style={{ width: "100%" }}
-              useResizeHandler
-            />
+            <div className="pb-chart-card" style={{ padding: 4 }}>
+              <SvgChartRenderer spec={spec} height={220} />
+            </div>
           </div>
         );
       })}
@@ -700,6 +393,194 @@ export function ChartExplorer({ flatData, metadata, uiConfig, onClose }: Props) 
       {!overlayMode && displayData.length > 0 && (
         <DataTableSection data={displayData} datasetName={`${DATASET_LABELS[activeDataset] ?? activeDataset} — ${effectiveFilterValue || "all"}`} />
       )}
+    </div>
+  );
+}
+
+// ── Single chart dispatcher (line / scatter / histogram / box / heatmap) ────
+
+function SingleChart({
+  chartType, displayData, rawData, config, groupField, spcExtras, heatmapData,
+}: {
+  chartType: "line" | "scatter" | "histogram" | "box" | "heatmap";
+  displayData: Record<string, unknown>[];
+  rawData: Record<string, unknown>[];
+  config: { x: string; y: string; group?: string };
+  groupField?: string;
+  spcExtras: { rules: Array<Record<string, unknown>>; highlight?: Record<string, unknown> };
+  heatmapData: { params: string[]; matrix: number[][] } | null;
+}) {
+  if (chartType === "histogram") {
+    const numericCount = displayData.map((r) => r[config.y]).filter((v) => typeof v === "number").length;
+    if (numericCount < 5) {
+      return (
+        <div style={{ padding: 40, textAlign: "center", color: "#a0aec0", fontSize: 13 }}>
+          Histogram requires at least 5 numeric data points
+        </div>
+      );
+    }
+    const spec = {
+      __dsl: true,
+      type: "histogram",
+      data: displayData,
+      x: config.y,
+      y: [config.y],
+    };
+    return (
+      <div className="pb-chart-card" style={{ padding: 8 }}>
+        <SvgChartRenderer spec={spec} height={350} />
+      </div>
+    );
+  }
+
+  if (chartType === "box") {
+    if (!groupField) {
+      const spec = {
+        __dsl: true,
+        type: "box_plot",
+        data: displayData.map(r => ({ group: "all", value: r[config.y] })),
+        x: "group",
+        y: ["value"],
+        group_by: "group",
+      };
+      return (
+        <div className="pb-chart-card" style={{ padding: 8 }}>
+          <SvgChartRenderer spec={spec} height={350} />
+        </div>
+      );
+    }
+    const groups = [...new Set(rawData.map((r) => String(r[groupField])))].sort().slice(0, 10);
+    const data: Array<Record<string, unknown>> = [];
+    for (const g of groups) {
+      for (const r of rawData) {
+        if (String(r[groupField]) === g && typeof r[config.y] === "number") {
+          data.push({ group: g, value: r[config.y] });
+        }
+      }
+    }
+    const spec = {
+      __dsl: true,
+      type: "box_plot",
+      data,
+      x: "group",
+      y: ["value"],
+      group_by: "group",
+    };
+    return (
+      <div className="pb-chart-card" style={{ padding: 8 }}>
+        <SvgChartRenderer spec={spec} height={350} />
+      </div>
+    );
+  }
+
+  if (chartType === "heatmap" && heatmapData) {
+    // Long-form rows so HeatmapDendro renders a labelled matrix.
+    const data: Array<Record<string, unknown>> = [];
+    heatmapData.params.forEach((rp, ri) => {
+      heatmapData.params.forEach((cp, ci) => {
+        data.push({ row: rp, col: cp, value: heatmapData.matrix[ri][ci] });
+      });
+    });
+    const spec = {
+      __dsl: true,
+      type: "heatmap",
+      data,
+      x: "col",
+      y: ["row"],
+      x_column: "col",
+      y_column: "row",
+      value_column: "value",
+      cluster: false,
+    };
+    return (
+      <div className="pb-chart-card" style={{ padding: 8 }}>
+        <SvgChartRenderer spec={spec} height={400} />
+      </div>
+    );
+  }
+
+  // line / scatter
+  const spec = {
+    __dsl: true,
+    type: chartType,
+    data: displayData,
+    x: config.x,
+    y: [config.y],
+    rules: spcExtras.rules,
+    highlight: spcExtras.highlight,
+  };
+  return (
+    <div className="pb-chart-card" style={{ padding: 8 }}>
+      <SvgChartRenderer spec={spec} height={chartType === "scatter" ? 320 : 320} />
+    </div>
+  );
+}
+
+// ── Overlay (dual-axis line) ────────────────────────────────────────────────
+
+function OverlayChart({
+  flatData, left, right,
+}: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  flatData: Record<string, any[]>;
+  left: { dataset: string; field: string; filterKey: string; filterVal: string };
+  right: { dataset: string; field: string; filterKey: string; filterVal: string };
+}) {
+  const leftCfg = CHART_CONFIGS[left.dataset] ?? { x: "eventTime", y: "value" };
+  const rightCfg = CHART_CONFIGS[right.dataset] ?? { x: "eventTime", y: "value" };
+
+  let leftData = flatData[left.dataset] ?? [];
+  let rightData = flatData[right.dataset] ?? [];
+
+  const leftGroupField = leftCfg.group ?? "";
+  const rightGroupField = rightCfg.group ?? "";
+  const leftGroupVals = leftGroupField
+    ? [...new Set(leftData.map((r: Record<string, unknown>) => String(r[leftGroupField] ?? "")))].filter(Boolean).sort()
+    : [];
+  const rightGroupVals = rightGroupField
+    ? [...new Set(rightData.map((r: Record<string, unknown>) => String(r[rightGroupField] ?? "")))].filter(Boolean).sort()
+    : [];
+  const effectiveLeftFilter = left.filterVal || leftGroupVals[0] || "";
+  const effectiveRightFilter = right.filterVal || rightGroupVals[0] || "";
+
+  if (leftGroupField && effectiveLeftFilter) {
+    leftData = leftData.filter((r: Record<string, unknown>) => String(r[leftGroupField]) === effectiveLeftFilter);
+  }
+  if (rightGroupField && effectiveRightFilter) {
+    rightData = rightData.filter((r: Record<string, unknown>) => String(r[rightGroupField]) === effectiveRightFilter);
+  }
+
+  const leftLabel = effectiveLeftFilter || DATASET_LABELS[left.dataset] || left.dataset;
+  const rightLabel = effectiveRightFilter || DATASET_LABELS[right.dataset] || right.dataset;
+
+  // Merge by eventTime — left primary, right secondary.
+  const byTime = new Map<string, Record<string, unknown>>();
+  for (const r of leftData) {
+    const key = String(r[leftCfg.x] ?? "");
+    if (!key) continue;
+    byTime.set(key, { ...(byTime.get(key) ?? {}), [leftCfg.x]: r[leftCfg.x], [leftLabel]: r[leftCfg.y] });
+  }
+  for (const r of rightData) {
+    const key = String(r[rightCfg.x] ?? "");
+    if (!key) continue;
+    byTime.set(key, { ...(byTime.get(key) ?? {}), [leftCfg.x]: r[rightCfg.x], [rightLabel]: r[rightCfg.y] });
+  }
+  const merged = [...byTime.values()].sort((a, b) =>
+    String(a[leftCfg.x]).localeCompare(String(b[leftCfg.x]))
+  );
+
+  const spec = {
+    __dsl: true,
+    type: "line",
+    data: merged,
+    x: leftCfg.x,
+    y: [leftLabel],
+    y_secondary: [rightLabel],
+  };
+
+  return (
+    <div className="pb-chart-card" style={{ padding: 8 }}>
+      <SvgChartRenderer spec={spec} height={350} />
     </div>
   );
 }
@@ -747,7 +628,6 @@ function DataTableSection({ data, datasetName }: { data: Record<string, unknown>
                     if (typeof v === "number") display = Number.isInteger(v) ? String(v) : v.toFixed(4);
                     else if (typeof v === "boolean") display = v ? "true" : "false";
                     else display = String(v ?? "—");
-                    // Truncate eventTime for readability
                     if (c === "eventTime" && typeof v === "string") display = v.slice(0, 19);
                     return (
                       <td key={c} style={{ padding: "3px 8px", borderBottom: "1px solid #edf2f7", whiteSpace: "nowrap" }}>
