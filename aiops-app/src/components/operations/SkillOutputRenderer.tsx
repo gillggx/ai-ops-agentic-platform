@@ -416,37 +416,24 @@ const RULE_COLOR: Record<string, string> = {
   center: "#4a5568",
 };
 
-export function ChartDSLRenderer({ chart }: { chart: ChartDSL }): React.ReactElement {
-  // Defensive normalize — backend can omit fields when pipeline result is malformed.
-  // We coerce to safe defaults so downstream renderers never throw on .length / [0].
-  // Also: pipeline_executor wraps each chart as {title, node_id, sequence, chart_spec}
-  // when emitting result_summary.charts; pull the inner spec out if present so the
-  // alarm-page path renders the same charts the Pipeline Builder ResultsBody does.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const wrapped = chart as any;
-  const inner = wrapped?.chart_spec && typeof wrapped.chart_spec === "object"
-    ? { ...wrapped.chart_spec, title: wrapped.chart_spec.title ?? wrapped.title }
-    : chart;
-  const safe: ChartDSL = {
-    ...inner,
-    data: Array.isArray(inner?.data) ? inner.data : [],
-    x: typeof inner?.x === "string" ? inner.x : "index",
-    y: Array.isArray(inner?.y) ? inner.y : [],
-    rules: Array.isArray(inner?.rules) ? inner.rules : [],
-  };
-  if (safe.data.length === 0 || safe.y.length === 0) {
-    return (
-      <div style={{ padding: 12, color: "#a0aec0", fontSize: 12, background: "#f7f8fc", borderRadius: 8 }}>
-        {safe.title || "Chart"} — （無資料）
-      </div>
-    );
-  }
+// Stage 4 dispatcher delegate. The legacy switch (renderBoxplot / renderHeatmap
+// / renderDistribution / renderLineBarScatter — all Plotly-based) below is
+// dead code kept for one release as a rollback safety net; Stage 6 cleanup
+// removes them along with the plotly.js + react-plotly.js + vega-embed deps.
+//
+// All real rendering now lives under @/components/pipeline-builder/charts.
+// Both the alarm-detail RenderMiddleware path AND Pipeline Builder
+// ResultsBody flow through this single function, so the new SVG engine
+// reaches every consumer in one cut.
+import SvgChartRenderer from "@/components/pipeline-builder/charts/SvgChartRenderer";
+import "@/styles/chart-tokens.css";
 
-  // Dispatch by chart type
-  if (safe.type === "boxplot") return renderBoxplot(safe);
-  if (safe.type === "heatmap") return renderHeatmap(safe);
-  if (safe.type === "distribution") return renderDistribution(safe);
-  return renderLineBarScatter(safe);
+export function ChartDSLRenderer({ chart }: { chart: ChartDSL }): React.ReactElement {
+  return (
+    <div className="pb-chart-card" style={{ width: "100%", marginBottom: 8 }}>
+      <SvgChartRenderer spec={chart as unknown as Record<string, unknown>} />
+    </div>
+  );
 }
 
 // ── Line / Bar / Scatter (+ multi-y / dual-axis / SPC rules / highlight) ─────

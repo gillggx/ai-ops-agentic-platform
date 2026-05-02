@@ -66,3 +66,6 @@ export {
   DEFAULT_THEME,
   type ChartCardTheme,
 } from './StyleAdjuster';
+
+// Stage 4 dispatcher (replaces ChartDSLRenderer's per-type switch).
+export { default as SvgChartRenderer } from './SvgChartRenderer';
