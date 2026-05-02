@@ -51,7 +51,7 @@ $desc$,
   '{"type": "object", "required": ["x", "y"], "properties": {"x": {"type": "string"}, "y": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]}, "y_secondary": {"type": "array", "items": {"type": "string"}}, "series_field": {"type": "string"}, "rules": {"type": "array"}, "highlight_field": {"type": "string"}, "highlight_eq": {}, "title": {"type": "string"}}}',
   '{"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.line_chart:LineChartBlockExecutor"}',
   '[]',
-  NULL,
+  '[]',
   false
 )
 ON CONFLICT (name, version) DO UPDATE SET
@@ -92,7 +92,7 @@ $desc$,
   '{"type": "object", "required": ["x", "y"], "properties": {"x": {"type": "string"}, "y": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]}, "rules": {"type": "array"}, "highlight_field": {"type": "string"}, "highlight_eq": {}, "title": {"type": "string"}}}',
   '{"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.bar_chart:BarChartBlockExecutor"}',
   '[]',
-  NULL,
+  '[]',
   false
 )
 ON CONFLICT (name, version) DO UPDATE SET
@@ -129,7 +129,7 @@ $desc$,
   '{"type": "object", "required": ["x", "y"], "properties": {"x": {"type": "string"}, "y": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]}, "series_field": {"type": "string"}, "rules": {"type": "array"}, "highlight_field": {"type": "string"}, "highlight_eq": {}, "title": {"type": "string"}}}',
   '{"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.scatter_chart:ScatterChartBlockExecutor"}',
   '[]',
-  NULL,
+  '[]',
   false
 )
 ON CONFLICT (name, version) DO UPDATE SET
@@ -173,7 +173,7 @@ $desc$,
   '{"type": "object", "required": ["x", "y"], "properties": {"x": {"type": "string"}, "y": {"type": "string"}, "group_by_secondary": {"type": "string"}, "show_outliers": {"type": "boolean", "default": true}, "expanded": {"type": "boolean", "default": true}, "y_label": {"type": "string"}, "title": {"type": "string"}}}',
   '{"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.box_plot:BoxPlotBlockExecutor"}',
   '[]',
-  NULL,
+  '[]',
   false
 )
 ON CONFLICT (name, version) DO UPDATE SET
@@ -214,7 +214,7 @@ $desc$,
   '{"type": "object", "required": ["dimensions"], "properties": {"dimensions": {"type": "array", "items": {"type": "string"}, "minItems": 2}, "outlier_field": {"type": "string"}, "title": {"type": "string"}}}',
   '{"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.splom:SplomBlockExecutor"}',
   '[]',
-  NULL,
+  '[]',
   false
 )
 ON CONFLICT (name, version) DO UPDATE SET
@@ -262,7 +262,7 @@ $desc$,
   '{"type": "object", "properties": {"value_column": {"type": "string"}, "usl": {"type": "number"}, "lsl": {"type": "number"}, "target": {"type": "number"}, "bins": {"type": "integer", "minimum": 4, "maximum": 200}, "show_normal": {"type": "boolean", "default": true}, "unit": {"type": "string"}, "title": {"type": "string"}}}',
   '{"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.histogram_chart:HistogramChartBlockExecutor"}',
   '[]',
-  NULL,
+  '[]',
   false
 )
 ON CONFLICT (name, version) DO UPDATE SET
