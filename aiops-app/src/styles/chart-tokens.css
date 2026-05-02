@@ -55,10 +55,39 @@
  * `.pb-chart-card` class. Individual chart components add their own SVG
  * styling on top. */
 .pb-chart-card {
+  width: 100%;
   background: var(--chart-bg);
   color: var(--chart-ink);
   font-family: var(--chart-font-sans);
 }
+
+/* Placeholder cards for "no spec" / "unknown type" states emitted by the
+ * Stage 4 dispatcher. Inline hex colors were replaced with theme tokens so
+ * the placeholder respects per-card overrides set via StyleAdjuster. */
+.pb-chart-empty,
+.pb-chart-unknown {
+  padding: 16px;
+  text-align: center;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.pb-chart-empty {
+  border: 1px dashed var(--chart-grid-strong);
+  background: #f8fafc;
+  color: var(--chart-ink-3);
+}
+.pb-chart-unknown {
+  border: 1px dashed #fcd34d;
+  background: #fffbeb;
+  color: #92400e;
+}
+.pb-chart-empty .pb-chart-ph-title,
+.pb-chart-unknown .pb-chart-ph-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.pb-chart-empty .pb-chart-ph-title { color: var(--chart-ink-2); }
 
 .pb-chart-card svg {
   display: block;

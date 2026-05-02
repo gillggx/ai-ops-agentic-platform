@@ -193,7 +193,7 @@ export default function ParallelCoords({ spec, height }: Props) {
   );
 
   return (
-    <div className="pb-chart-card" style={{ width: '100%', height: height ?? 320 }}>
+    <div className="pb-chart-card" style={{ height: height ?? 320 }}>
       <svg ref={ref} role="img" aria-label={spec.title ?? 'Parallel coordinates'} />
     </div>
   );

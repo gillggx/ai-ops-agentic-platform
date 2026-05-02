@@ -185,7 +185,7 @@ export default function DefectStack({ spec, height }: Props) {
     [spec, visible, onToggle],
   );
   return (
-    <div className="pb-chart-card" style={{ width: '100%', height: height ?? 380 }}>
+    <div className="pb-chart-card" style={{ height: height ?? 380 }}>
       <svg ref={ref} role="img" aria-label={spec.title ?? 'Defect stack map'} />
     </div>
   );

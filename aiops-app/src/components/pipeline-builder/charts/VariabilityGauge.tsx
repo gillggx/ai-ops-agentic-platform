@@ -191,7 +191,7 @@ function render(svg: SVGSVGElement, spec: ChartSpec) {
 export default function VariabilityGauge({ spec, height }: Props) {
   const ref = useSvgChart((svg) => render(svg, spec), [spec]);
   return (
-    <div className="pb-chart-card" style={{ width: '100%', height: height ?? 340 }}>
+    <div className="pb-chart-card" style={{ height: height ?? 340 }}>
       <svg ref={ref} role="img" aria-label={spec.title ?? 'Variability gauge'} />
     </div>
   );

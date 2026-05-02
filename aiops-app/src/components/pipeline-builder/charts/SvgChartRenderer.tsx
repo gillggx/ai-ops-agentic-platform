@@ -87,21 +87,8 @@ function unwrapSpec(input: any): ChartSpec | null {
 
 function PlaceholderEmpty({ title, message }: { title?: string; message?: string }) {
   return (
-    <div
-      data-testid="svg-chart-empty"
-      style={{
-        padding: 16,
-        textAlign: 'center',
-        border: '1px dashed #cbd5e0',
-        borderRadius: 6,
-        background: '#f8fafc',
-        color: '#64748b',
-        fontSize: 12,
-      }}
-    >
-      <div style={{ fontSize: 13, fontWeight: 600, color: '#475569', marginBottom: 4 }}>
-        {title || 'No data'}
-      </div>
+    <div data-testid="svg-chart-empty" className="pb-chart-empty">
+      <div className="pb-chart-ph-title">{title || 'No data'}</div>
       <div>{message || '上游無資料 — 圖無法繪製'}</div>
     </div>
   );
@@ -109,19 +96,8 @@ function PlaceholderEmpty({ title, message }: { title?: string; message?: string
 
 function PlaceholderUnknown({ type }: { type: string }) {
   return (
-    <div
-      data-testid="svg-chart-unknown"
-      style={{
-        padding: 16,
-        textAlign: 'center',
-        border: '1px dashed #fcd34d',
-        borderRadius: 6,
-        background: '#fffbeb',
-        color: '#92400e',
-        fontSize: 12,
-      }}
-    >
-      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+    <div data-testid="svg-chart-unknown" className="pb-chart-unknown">
+      <div className="pb-chart-ph-title">
         ⚠ Unknown chart type: <code>{type}</code>
       </div>
       <div>新 chart 類型未在 dispatcher 註冊；請在 SvgChartRenderer.tsx TYPE_MAP 補上。</div>

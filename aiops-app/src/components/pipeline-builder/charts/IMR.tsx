@@ -93,7 +93,7 @@ export default function IMR({ spec, height }: Props) {
     });
   }, [spec]);
   return (
-    <div className="pb-chart-card" style={{ width: '100%', height: height ?? 360 }}>
+    <div className="pb-chart-card" style={{ height: height ?? 360 }}>
       <svg ref={ref} role="img" aria-label={spec.title ?? 'I-MR chart'} />
     </div>
   );

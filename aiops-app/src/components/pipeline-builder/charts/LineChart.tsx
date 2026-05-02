@@ -329,7 +329,7 @@ function render(svg: SVGSVGElement, spec: ChartSpec) {
 export default function LineChart({ spec, height }: Props) {
   const ref = useSvgChart((svg) => render(svg, spec), [spec]);
   return (
-    <div className="pb-chart-card" style={{ width: '100%', height: height ?? 280 }}>
+    <div className="pb-chart-card" style={{ height: height ?? 280 }}>
       <svg ref={ref} role="img" aria-label={spec.title ?? 'Line chart'} />
     </div>
   );

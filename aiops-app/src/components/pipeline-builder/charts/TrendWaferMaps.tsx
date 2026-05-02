@@ -171,7 +171,7 @@ function render(svg: SVGSVGElement, spec: ChartSpec) {
 export default function TrendWaferMaps({ spec, height }: Props) {
   const ref = useSvgChart((svg) => render(svg, spec), [spec]);
   return (
-    <div className="pb-chart-card" style={{ width: '100%', height: height ?? 240 }}>
+    <div className="pb-chart-card" style={{ height: height ?? 240 }}>
       <svg ref={ref} role="img" aria-label={spec.title ?? 'Trend wafer maps'} />
     </div>
   );

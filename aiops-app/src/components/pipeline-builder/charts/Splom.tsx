@@ -206,7 +206,7 @@ export default function Splom({ spec, height }: Props) {
   const ref = useSvgChart((svg) => render(svg, spec), [spec]);
   // Square-ish: each cell ~ height/n; default 360 fits 5×5 reasonably.
   return (
-    <div className="pb-chart-card" style={{ width: '100%', height: height ?? 360 }}>
+    <div className="pb-chart-card" style={{ height: height ?? 360 }}>
       <svg ref={ref} role="img" aria-label={spec.title ?? 'Scatter plot matrix'} />
     </div>
   );

@@ -190,7 +190,7 @@ function render(svg: SVGSVGElement, spec: ChartSpec) {
 export default function Pareto({ spec, height }: Props) {
   const ref = useSvgChart((svg) => render(svg, spec), [spec]);
   return (
-    <div className="pb-chart-card" style={{ width: '100%', height: height ?? 320 }}>
+    <div className="pb-chart-card" style={{ height: height ?? 320 }}>
       <svg ref={ref} role="img" aria-label={spec.title ?? 'Pareto chart'} />
     </div>
   );
