@@ -7,6 +7,7 @@ const PUBLIC_PATHS = [
   "/api/auth",          // NextAuth callbacks
   "/_next",
   "/favicon",
+  "/dev/",              // chart engine preview, removed at Stage 6 cleanup
 ];
 
 function isPublicPath(pathname: string): boolean {
