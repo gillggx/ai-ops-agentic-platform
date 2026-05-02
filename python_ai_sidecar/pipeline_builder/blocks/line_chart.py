@@ -20,6 +20,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
+from python_ai_sidecar.pipeline_builder.blocks._chart_facet import maybe_facet
 
 
 def _normalize_y(raw: Any) -> list[str]:
@@ -65,6 +66,28 @@ class LineChartBlockExecutor(BlockExecutor):
         if not isinstance(df, pd.DataFrame):
             raise BlockExecutionError(code="INVALID_INPUT", message="'data' must be a DataFrame")
 
+        # Facet (small multiples) — split by column, render one panel per
+        # group. Pass `_render_one` as the inner so we don't recurse into
+        # facet inside facet. Returns None when `facet` param isn't set.
+        faceted = await maybe_facet(
+            params=params, inputs=inputs, context=context,
+            inner=self._render_one,
+        )
+        if faceted is not None:
+            return faceted
+
+        return await self._render_one(params, inputs, context)
+
+    async def _render_one(
+        self,
+        params: dict[str, Any],
+        inputs: dict[str, Any],
+        context: ExecutionContext,
+    ) -> dict[str, Any]:
+        df = inputs.get("data")
+        if not isinstance(df, pd.DataFrame):
+            raise BlockExecutionError(code="INVALID_INPUT", message="'data' must be a DataFrame")
+
         x = self.require(params, "x")
         y = _normalize_y(params.get("y"))
         if not y:
@@ -89,14 +112,44 @@ class LineChartBlockExecutor(BlockExecutor):
             cols.append(series_field)
         _validate_columns(df, cols, label="line_chart")
 
-        rules = params.get("rules") or []
+        rules = list(params.get("rules") or [])
+
+        # SPC-style column shorthands — `ucl_column` / `lcl_column` / `center_column`
+        # take the first row's value of the named column and emit a rule line.
+        # Inherited from block_chart (which is being retired); lets users
+        # author SPC charts without computing static rule values up front.
+        # Multiple rows must share the same control limits; if upstream emits
+        # per-row varying values we just use row 0 (good enough for static
+        # control charts where UCL/LCL come from the SPC config table).
+        def _row0(col_name: str | None) -> Any:
+            if not col_name or col_name not in df.columns or df.empty:
+                return None
+            v = df[col_name].iloc[0]
+            try:
+                fv = float(v)
+                return fv if pd.notna(v) else None
+            except (TypeError, ValueError):
+                return None
+
+        ucl = _row0(params.get("ucl_column"))
+        lcl = _row0(params.get("lcl_column"))
+        center = _row0(params.get("center_column"))
+        if ucl is not None:
+            rules.append({"value": ucl, "label": "UCL", "style": "danger"})
+        if center is not None:
+            rules.append({"value": center, "label": "Center", "style": "center"})
+        if lcl is not None:
+            rules.append({"value": lcl, "label": "LCL", "style": "danger"})
+
         highlight = None
-        hf = params.get("highlight_field")
+        # `highlight_column` is the legacy block_chart name; `highlight_field`
+        # is the new canonical name. Accept both for migration ease.
+        hf = params.get("highlight_field") or params.get("highlight_column")
         if hf is not None:
             if hf not in df.columns:
                 raise BlockExecutionError(
                     code="COLUMN_NOT_FOUND",
-                    message=f"highlight_field '{hf}' not in data",
+                    message=f"highlight column '{hf}' not in data",
                 )
             highlight = {"field": hf, "eq": params.get("highlight_eq", True)}
 

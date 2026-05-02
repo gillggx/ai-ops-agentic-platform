@@ -267,11 +267,14 @@ def _collect_chart_summaries(
     """Gather all chart nodes in pipeline, sorted by 'sequence' param (fallback: position.x).
 
     Returns [{ node_id, sequence, title?, chart_spec }] ordered for display.
+
+    A "chart node" = any node whose output dict has a `chart_spec` key. Used
+    to be `block_id == 'block_chart'` only; widened 2026-05-02 to cover all
+    18 dedicated chart blocks (block_line_chart / block_xbar_r / etc.) +
+    any future chart block — duck-type by output shape, not block_id.
     """
     charts: list[tuple[int, float, dict[str, Any]]] = []
     for node in pipeline.nodes:
-        if node.block_id != "block_chart":
-            continue
         outputs = cache.get(node.id)
         if outputs is None:
             continue

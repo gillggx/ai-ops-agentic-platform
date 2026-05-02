@@ -1843,13 +1843,20 @@ def _blocks() -> list[dict[str, Any]]:
                 "rules:             array, opt — [{value, label, style?, color?}] 水平參考線\n"
                 "highlight_field:   string, opt — bool 欄位（matched rows 紅圈 overlay）\n"
                 "highlight_eq:      any, opt — match 條件值，預設 true\n"
+                "ucl_column:        string, opt — 取 column 第一筆當 UCL rule 線（SPC 簡寫）\n"
+                "lcl_column:        string, opt — 同上，LCL\n"
+                "center_column:     string, opt — 同上，Center\n"
+                "highlight_column:  string, opt — 同 highlight_field（block_chart 舊名）\n"
+                "facet:             string, opt — 按此欄位 group → 一個 group 一張獨立小圖\n"
+                "                  （e.g. SPC long-form 用 facet='chart_name' 一次出 X̄/R/S/P/C 5 張）\n"
                 "title:             string, opt\n"
                 "\n"
                 "== Output ==\n"
-                "chart_spec (dict): type='line', data, x, y, [y_secondary, rules, highlight, series_field]\n"
+                "chart_spec (dict | dict[]): type='line', data, x, y, …\n"
+                "  facet 啟用時 chart_spec 是 list；frontend 攤平成多張 panel\n"
                 "\n== Keywords ==\n"
                 "time series 时序 時序, trend 趋势 趨勢, line chart 折线图 折線圖, "
-                "multi-line, dual-axis 双轴 雙軸\n"
+                "multi-line, dual-axis 双轴 雙軸, facet small multiples 小倍数 小倍數\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "chart_spec", "type": "dict"}],
@@ -1864,6 +1871,11 @@ def _blocks() -> list[dict[str, Any]]:
                     "rules": {"type": "array"},
                     "highlight_field": {"type": "string"},
                     "highlight_eq": {},
+                    "ucl_column": {"type": "string", "x-column-source": "input.data"},
+                    "lcl_column": {"type": "string", "x-column-source": "input.data"},
+                    "center_column": {"type": "string", "x-column-source": "input.data"},
+                    "highlight_column": {"type": "string", "x-column-source": "input.data"},
+                    "facet": {"type": "string", "title": "facet — split into N panels by column"},
                     "title": {"type": "string"},
                 },
             },
