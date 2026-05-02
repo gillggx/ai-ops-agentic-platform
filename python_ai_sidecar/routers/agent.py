@@ -22,7 +22,6 @@ from sse_starlette.sse import EventSourceResponse
 from ..auth import CallerContext, ServiceAuth
 from ..clients.java_client import JavaAPIClient
 from ..config import CONFIG
-from ..fallback import python_proxy as fb
 
 log = logging.getLogger("python_ai_sidecar.agent_router")
 router = APIRouter(prefix="/internal/agent", tags=["agent"])
@@ -96,23 +95,12 @@ async def _chat_stream_native(req: ChatRequest, caller: CallerContext) -> AsyncG
 
 
 async def _chat_stream(req: ChatRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
-    """Chat entry — native by default, fallback only when ``FALLBACK_ENABLED=1``.
+    """Chat entry — always native via the in-process LangGraph orchestrator.
 
-    Production should run native (``FALLBACK_ENABLED=0``); the fallback is
-    retained as an emergency rollback switch until Phase 8-D drops :8001.
+    The :8001 fallback proxy was retired in 2026-05-02 cleanup; the native
+    orchestrator (rewired to Java client in Phase 8-A-1d) covers the full
+    chat surface end-to-end.
     """
-    if fb.fallback_enabled():
-        try:
-            body: dict = {"message": req.message}
-            if req.session_id:
-                body["session_id"] = req.session_id
-            async for ev in fb.stream_sse("/api/v1/agent/chat/stream", body, caller):
-                yield ev
-            return
-        except Exception as ex:  # noqa: BLE001
-            log.warning("chat fallback failed (%s) — switching to native graph", ex.__class__.__name__)
-            yield fb.format_fallback_error(ex)
-
     async for ev in _chat_stream_native(req, caller):
         yield ev
 

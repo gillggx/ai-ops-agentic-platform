@@ -25,7 +25,6 @@ from ..executor.real_executor import (
     all_blocks_native,
     execute_native,
 )
-from ..fallback import python_proxy as fb
 
 log = logging.getLogger("python_ai_sidecar.pipeline")
 router = APIRouter(prefix="/internal/pipeline", tags=["pipeline"])
@@ -88,42 +87,6 @@ async def _resolve_pipeline(java: JavaAPIClient, req: ExecuteRequest) -> tuple[d
     return None, None
 
 
-def _has_unknown_block(pipeline_json: dict | None) -> bool:
-    if not isinstance(pipeline_json, dict):
-        return False
-    for n in pipeline_json.get("nodes") or []:
-        block = n.get("block") or n.get("type")
-        if block and block not in BLOCK_REGISTRY:
-            return True
-    return False
-
-
-async def _fallback_execute(req: ExecuteRequest, caller: CallerContext) -> dict | None:
-    """Proxy /execute to old Python's equivalent endpoint. Returns None if
-    fallback disabled or upstream fails (caller falls back to native DAG)."""
-    if not fb.fallback_enabled():
-        return None
-    try:
-        body: dict = {}
-        if req.pipeline_id is not None:
-            body["pipeline_id"] = req.pipeline_id
-        if req.pipeline_json is not None:
-            body["pipeline_json"] = req.pipeline_json
-        if req.inputs is not None:
-            body["inputs"] = req.inputs
-        body["triggered_by"] = req.triggered_by
-        upstream = await fb.post_json("/api/v1/pipeline-builder/execute", body, caller)
-        return {
-            "ok": True,
-            "caller_user_id": caller.user_id,
-            "source": "python_fallback",
-            "upstream": upstream,
-        }
-    except Exception as ex:  # noqa: BLE001 — try native executor instead
-        log.warning("pipeline/execute fallback failed (%s) — using native DAG walker", ex.__class__.__name__)
-        return None
-
-
 @router.post("/execute")
 async def execute(req: ExecuteRequest, caller: CallerContext = ServiceAuth) -> dict:
     """Execute a pipeline.
@@ -131,10 +94,12 @@ async def execute(req: ExecuteRequest, caller: CallerContext = ServiceAuth) -> d
     Decision tree:
       1. If all blocks are in SIDECAR_NATIVE_BLOCKS → Phase 8-B native
          executor (full pandas DAG, validator, RunCache, etc.)
-      2. Else if any block unknown to the sidecar catalog → delegate to :8001
-         via fallback proxy (hybrid mode).
-      3. Else → legacy 6-block demo walker (kept as safety net + for the
+      2. Else → legacy 6-block demo walker (kept as safety net + for the
          sub-set of tests that depend on it).
+
+    The :8001 fallback proxy was retired in 2026-05-02 cleanup; native
+    executor covers all 47 production blocks, and the legacy walker still
+    catches test-only fake blocks like load_inline_rows.
     """
     java = JavaAPIClient.for_caller(caller)
     entity, effective = await _resolve_pipeline(java, req)
@@ -181,24 +146,16 @@ async def execute(req: ExecuteRequest, caller: CallerContext = ServiceAuth) -> d
                 "duration_ms": duration_ms,
             }
         except Exception as ex:  # noqa: BLE001
-            log.exception("native executor failed — falling back to :8001")
-            fallback = await _fallback_execute(req, caller)
-            if fallback is not None:
-                fallback["_native_error"] = str(ex)[:200]
-                return fallback
+            log.exception("native executor failed")
             raise HTTPException(
                 status_code=500,
-                detail={"code": "native_and_fallback_failed", "message": str(ex)[:300]},
+                detail={"code": "native_executor_failed", "message": str(ex)[:300]},
             )
 
-    # Hybrid mode: non-native block(s) present → delegate to :8001.
-    if _has_unknown_block(effective):
-        fallback = await _fallback_execute(req, caller)
-        if fallback is not None:
-            return fallback
-
     # Safety net: legacy demo walker (used by /validate tests that pass
-    # fake blocks like load_inline_rows).
+    # fake blocks like load_inline_rows). For non-native real-world blocks
+    # this will fail and the caller sees an error — the :8001 fallback was
+    # retired since native executor covers all production blocks.
     started = time.monotonic()
     try:
         walk = execute_dag(effective)
