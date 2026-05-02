@@ -1847,6 +1847,9 @@ def _blocks() -> list[dict[str, Any]]:
                 "\n"
                 "== Output ==\n"
                 "chart_spec (dict): type='line', data, x, y, [y_secondary, rules, highlight, series_field]\n"
+                "\n== Keywords ==\n"
+                "time series 时序 時序, trend 趋势 趨勢, line chart 折线图 折線圖, "
+                "multi-line, dual-axis 双轴 雙軸\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "chart_spec", "type": "dict"}],
@@ -1887,6 +1890,9 @@ def _blocks() -> list[dict[str, Any]]:
                 "rules:           array, opt — 水平 threshold 線\n"
                 "highlight_field/highlight_eq: 同 line_chart\n"
                 "title:           string, opt\n"
+                "\n== Keywords ==\n"
+                "bar chart 长条图 長條圖 柱状图 柱狀圖, comparison 比较 比較, "
+                "count 计数 計數, ranking 排名, categorical 类别 類別\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "chart_spec", "type": "dict"}],
@@ -1921,6 +1927,9 @@ def _blocks() -> list[dict[str, Any]]:
                 "\n"
                 "== Params ==\n"
                 "同 block_line_chart 但無 y_secondary。\n"
+                "\n== Keywords ==\n"
+                "scatter plot 散点图 散點圖 散布图 散布圖, correlation 相关 相關, "
+                "x-vs-y, dispersion 分散\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "chart_spec", "type": "dict"}],
@@ -1963,6 +1972,10 @@ def _blocks() -> list[dict[str, Any]]:
                 "expanded:           bool, default true（按 outer label 可展開/收合）\n"
                 "y_label:            string, opt — y 軸標題（預設 = y 欄位名）\n"
                 "title:              string, opt\n"
+                "\n== Keywords ==\n"
+                "box plot 箱型图 箱型圖 盒须图 盒鬚圖, distribution 分布 分佈, "
+                "IQR, outlier 异常点 異常點 离群值 離群值, "
+                "group comparison 组间比较 組間比較\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "chart_spec", "type": "dict"}],
@@ -2002,6 +2015,9 @@ def _blocks() -> list[dict[str, Any]]:
                 "dimensions:     string[], required, length >= 2\n"
                 "outlier_field:  string, opt — bool 欄位，true 的 row scatter 會用 alert 色\n"
                 "title:          string, opt\n"
+                "\n== Keywords ==\n"
+                "scatter matrix 散布矩阵 散布矩陣 SPLOM, pairwise 配对 配對, "
+                "multi-variable correlation 多变量相关 多變量相關\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "chart_spec", "type": "dict"}],
@@ -2044,6 +2060,9 @@ def _blocks() -> list[dict[str, Any]]:
                 "show_normal:    bool, default true\n"
                 "unit:           string, opt — x 軸標題後綴（'nm', 'Å', etc.）\n"
                 "title:          string, opt\n"
+                "\n== Keywords ==\n"
+                "histogram 直方图 直方圖, distribution 分布 分佈, frequency 频率 頻率, "
+                "normality, normal distribution 正态分布 常態分佈, 鐘形\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "chart_spec", "type": "dict"}],
@@ -2082,6 +2101,11 @@ def _blocks() -> list[dict[str, Any]]:
                 "subgroup_size:    int, opt — 估 σ 用的 n（預設取出現最多的 group size）\n"
                 "weco_rules:       string[], opt — 例 ['R1','R2','R5']，預設 R1-R8 全開\n"
                 "title:            string, opt\n"
+                "\n== Keywords ==\n"
+                "SPC 统计制程管制 統計製程管制, control chart 管制图 管制圖, "
+                "X-bar R X̄/R, WECO, OOC out of control, "
+                "outlier 异常点 異常點 离群值 離群值, anomaly 异常 異常, "
+                "anomaly detection 异常检测 異常檢測, subgroup 子群组 子群組\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "chart_spec", "type": "dict"}],
@@ -2113,6 +2137,10 @@ def _blocks() -> list[dict[str, Any]]:
                 "value_column:  string — 與 values 二擇一\n"
                 "weco_rules:    string[], opt\n"
                 "title:         string, opt\n"
+                "\n== Keywords ==\n"
+                "SPC, control chart 管制图 管制圖, IMR individual moving range, "
+                "OOC, outlier 异常点 異常點, anomaly 异常 異常, "
+                "single measurement n=1 单测量 單測量\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "chart_spec", "type": "dict"}],
@@ -2148,6 +2176,10 @@ def _blocks() -> list[dict[str, Any]]:
                 "h:             number, default 4 — CUSUM decision interval (σ units)\n"
                 "target:        number, opt — 覆寫 μ\n"
                 "title:         string, opt\n"
+                "\n== Keywords ==\n"
+                "SPC, EWMA, CUSUM, small shift 微小偏移, drift 漂移, "
+                "trend detection 趋势侦测 趨勢偵測, early warning 早期警示 早期预警, "
+                "anomaly 异常 異常, outlier 异常点 異常點\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "chart_spec", "type": "dict"}],
@@ -2181,6 +2213,10 @@ def _blocks() -> list[dict[str, Any]]:
                 "value_column:           string, required — 計數欄位\n"
                 "cumulative_threshold:   number, default 80 — 紅色參考線（80/20 rule）\n"
                 "title:                  string, opt\n"
+                "\n== Keywords ==\n"
+                "Pareto, 80/20, top-N, ranking 排序, cumulative 累计 累計, "
+                "root cause 主要原因 主要因素, contributor 贡献 貢獻, "
+                "frequency analysis 频率分析 頻率分析\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "chart_spec", "type": "dict"}],
@@ -2211,6 +2247,11 @@ def _blocks() -> list[dict[str, Any]]:
                 "value_column:  string, required\n"
                 "levels:        string[], required — 由外到內，e.g. ['lot','wafer','tool']\n"
                 "title:         string, opt\n"
+                "\n== Keywords ==\n"
+                "variability 变异 變異, dispersion 分散, "
+                "variance decomposition 变异分解 變異分解, "
+                "between-group within-group, lot-to-lot tool-to-tool, "
+                "repeatability 重复性 重複性, shift detection 漂移偵測\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "chart_spec", "type": "dict"}],
@@ -2242,6 +2283,10 @@ def _blocks() -> list[dict[str, Any]]:
                 "color_by:      string, opt — 上色欄位（通常是 yield 或 quality）\n"
                 "alert_below:   number, opt — < threshold 的 row 改紅色\n"
                 "title:         string, opt\n"
+                "\n== Keywords ==\n"
+                "parallel coordinates 平行座标 平行座標, "
+                "multi-dimensional 多维 多維, profile, recipe comparison, "
+                "brushing 刷选 刷選, multi-param outlier 多参数 多參數\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "chart_spec", "type": "dict"}],
@@ -2273,6 +2318,10 @@ def _blocks() -> list[dict[str, Any]]:
                 "values:        number[], opt — 二擇一\n"
                 "value_column:  string\n"
                 "title:         string, opt\n"
+                "\n== Keywords ==\n"
+                "QQ plot Q-Q plot, normality test 常态检定 常態檢定, "
+                "Anderson-Darling AD test, distribution test, "
+                "normality 正态性 常態性, Cpk preparation 常态分布检测 常態分佈檢測\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "chart_spec", "type": "dict"}],
@@ -2305,6 +2354,10 @@ def _blocks() -> list[dict[str, Any]]:
                 "x_column / y_column / value_column: long-form mode（與 matrix 二擇一）\n"
                 "cluster:          bool, default true\n"
                 "title:            string, opt\n"
+                "\n== Keywords ==\n"
+                "heatmap 热图 熱圖, correlation matrix 相关矩阵 相關矩陣, "
+                "clustering 聚类 聚類, dendrogram 树状图 樹狀圖, "
+                "hierarchical 阶层分群 階層分群, similarity 相似度\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "chart_spec", "type": "dict"}],
@@ -2345,6 +2398,11 @@ def _blocks() -> list[dict[str, Any]]:
                 "show_points:          bool, default true\n"
                 "grid_n:               int, default 60 — 插值解析度\n"
                 "title:                string, opt\n"
+                "\n== Keywords ==\n"
+                "wafer 晶圆 晶圓, wafer map 晶圆图 晶圓圖, "
+                "spatial 空间分布 空間分佈, IDW interpolation 内插 內插, "
+                "uniformity 均匀性 均勻性, edge ring center-to-edge, "
+                "thickness map 厚度图 厚度圖\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "chart_spec", "type": "dict"}],
@@ -2384,6 +2442,9 @@ def _blocks() -> list[dict[str, Any]]:
                 "wafer_radius_mm:      default 150\n"
                 "notch:                default 'bottom'\n"
                 "title:                string, opt\n"
+                "\n== Keywords ==\n"
+                "wafer 晶圆 晶圓, defect 缺陷, particle 颗粒 顆粒, "
+                "defect map 缺陷地图 缺陷地圖, spatial defect 空间缺陷 空間缺陷\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "chart_spec", "type": "dict"}],
@@ -2420,6 +2481,10 @@ def _blocks() -> list[dict[str, Any]]:
                 "notch:                default 'bottom'\n"
                 "unit:                 string, opt — '%' 等\n"
                 "title:                string, opt\n"
+                "\n== Keywords ==\n"
+                "wafer 晶圆 晶圓, yield 良率, spatial ranking, "
+                "worst region 最差区域 最差區域, edge yield 边缘良率 邊緣良率, "
+                "yield map 良率图 良率圖\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "chart_spec", "type": "dict"}],
@@ -2460,6 +2525,10 @@ def _blocks() -> list[dict[str, Any]]:
                 "grid_n:         int, default 28\n"
                 "notch:          default 'bottom'\n"
                 "title:          string, opt\n"
+                "\n== Keywords ==\n"
+                "wafer 晶圆 晶圓, time series 时序 時序, multi-wafer 多片 多晶圓, "
+                "small multiples 小倍数 小倍數, PM comparison 维护比较 維護比較, "
+                "drift 漂移, lot-to-lot 批次差异 批次差異\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "chart_spec", "type": "dict"}],
