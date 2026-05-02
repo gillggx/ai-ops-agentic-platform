@@ -57,3 +57,12 @@ export {
   type Notch,
   type WaferPoint,
 } from './lib/wafer';
+
+// Style adjuster (per-chart theme override).
+export {
+  default as StyleAdjuster,
+  themeStyle,
+  PALETTES,
+  DEFAULT_THEME,
+  type ChartCardTheme,
+} from './StyleAdjuster';

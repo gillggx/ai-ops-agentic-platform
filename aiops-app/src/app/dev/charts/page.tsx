@@ -18,6 +18,8 @@ import {
   XbarR, IMR, EwmaCusum,
   Pareto, VariabilityGauge, ParallelCoords, ProbabilityPlot, HeatmapDendro,
   WaferHeatmap, DefectStack, SpatialPareto, TrendWaferMaps,
+  StyleAdjuster, themeStyle, DEFAULT_THEME,
+  type ChartCardTheme,
 } from '@/components/pipeline-builder/charts';
 import '@/styles/chart-tokens.css';
 import {
@@ -41,19 +43,24 @@ interface CardProps {
 }
 
 function Card({ idx, group, title, hint, children, wide, height }: CardProps) {
+  // Each card holds its own theme; StyleAdjuster mutates it; CSS vars
+  // applied via themeStyle() propagate down to every chart inside the card.
+  const [theme, setTheme] = React.useState<ChartCardTheme>({ ...DEFAULT_THEME });
   return (
     <div
+      className="pb-chart-card"
       style={{
         gridColumn: wide ? 'span 2' : undefined,
-        background: '#fff',
         border: '1px solid #d8d6d0',
         borderRadius: 6,
         padding: '14px 16px',
         boxShadow: '0 1px 0 rgba(0,0,0,0.02)',
         display: 'flex',
         flexDirection: 'column',
+        ...themeStyle(theme),
       }}
     >
+      <StyleAdjuster theme={theme} setTheme={setTheme} />
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
         <span
           style={{
@@ -72,8 +79,8 @@ function Card({ idx, group, title, hint, children, wide, height }: CardProps) {
           fontFamily: 'Inter Tight, sans-serif',
           fontWeight: 600,
           fontSize: 14,
-          color: '#1a1a17',
           marginBottom: 2,
+          paddingRight: 32, // space for the ✦ button
         }}
       >
         {title}

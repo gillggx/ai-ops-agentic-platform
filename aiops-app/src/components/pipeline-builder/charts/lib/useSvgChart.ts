@@ -48,16 +48,26 @@ export function useSvgChart(
     const ro = new ResizeObserver(run);
     ro.observe(svg);
 
-    let mo: MutationObserver | null = null;
-    const card = svg.closest(PARENT_CARD_SELECTOR);
-    if (card) {
-      mo = new MutationObserver(run);
-      mo.observe(card, { attributes: true, attributeFilter: ['style', 'class'] });
+    // Walk up to find every `.pb-chart-card` ancestor and observe each one.
+    // This matters when a chart is rendered inside a host that ALSO uses
+    // `.pb-chart-card` (e.g. the StyleAdjuster preview card overrides CSS
+    // variables on the outer wrapper); without watching the outer one, the
+    // CSS cascade applies but the observer never fires and the chart stays
+    // stale.
+    const observers: MutationObserver[] = [];
+    let p: HTMLElement | null = svg.parentElement;
+    while (p) {
+      if (p.matches(PARENT_CARD_SELECTOR)) {
+        const mo = new MutationObserver(run);
+        mo.observe(p, { attributes: true, attributeFilter: ['style', 'class'] });
+        observers.push(mo);
+      }
+      p = p.parentElement;
     }
 
     return () => {
       ro.disconnect();
-      mo?.disconnect();
+      for (const m of observers) m.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
