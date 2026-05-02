@@ -19,3 +19,22 @@ export { default as ScatterChart, renderScatterChart } from './ScatterChart';
 export { default as BoxPlot, renderBoxPlot } from './BoxPlot';
 export { default as Splom, renderSplom } from './Splom';
 export { default as Histogram, renderHistogram } from './Histogram';
+
+// SPC (PR-D).
+export { default as XbarR, computeXbarR } from './XbarR';
+export { default as IMR, computeIMR } from './IMR';
+export { default as EwmaCusum, renderEwmaCusum } from './EwmaCusum';
+export {
+  wecoCheck,
+  wecoCheckAll,
+  ALL_WECO_RULES,
+  type WecoRuleId,
+  type WecoViolation,
+} from './lib/weco';
+export {
+  spcConstants,
+  rangeSigma,
+  IMR_D2,
+  IMR_D4,
+  type SpcConstants,
+} from './lib/spc';
