@@ -781,14 +781,16 @@ class ToolDispatcher:
         try:
             match tool_name:
                 case "search_published_skills":
-                    return await self._call_api(
-                        "POST",
-                        "/api/v1/pipeline-builder/published-skills/search",
-                        body={
-                            "query": tool_input.get("query", ""),
-                            "top_k": tool_input.get("top_k", 5),
-                        },
-                    )
+                    # Use JavaAPIClient (X-Internal-Token on /internal/*) since
+                    # the sidecar's auth_token is the internal token, not a
+                    # user JWT — the public /api/v1/* endpoint would 401.
+                    if self._java is not None:
+                        rows = await self._java.search_published_skills(
+                            tool_input.get("query", ""),
+                            tool_input.get("top_k", 5) or 5,
+                        )
+                        return rows  # list of skill dicts
+                    return {"status": "error", "message": "Java client not configured"}
                 case "invoke_published_skill":
                     return await self._invoke_published_skill(tool_input)
                 case "execute_skill":
@@ -1078,11 +1080,10 @@ class ToolDispatcher:
             return {"status": "error", "message": "slug is required"}
         inputs = tool_input.get("inputs") or {}
 
-        # 1. Find the published skill
-        search = await self._call_api(
-            "POST", "/api/v1/pipeline-builder/published-skills/search",
-            body={"query": slug, "top_k": 20},
-        )
+        # 1. Find the published skill via internal search (X-Internal-Token).
+        if self._java is None:
+            return {"status": "error", "message": "Java client not configured"}
+        search = await self._java.search_published_skills(slug, 20)
         match = None
         if isinstance(search, list):
             for row in search:
@@ -1092,22 +1093,33 @@ class ToolDispatcher:
         if match is None:
             return {"status": "error", "message": f"Published skill '{slug}' not found"}
 
-        # 2. Load its pipeline definition
+        # 2. Load its pipeline definition via internal endpoint.
         pipe_id = match.get("pipeline_id")
-        pipe = await self._call_api("GET", f"/api/v1/pipeline-builder/pipelines/{pipe_id}")
+        if pipe_id is None:
+            return {"status": "error", "message": "Skill row missing pipeline_id"}
+        pipe = await self._java.get_pipeline(pipe_id)
         if not isinstance(pipe, dict) or "pipeline_json" not in pipe:
             return {"status": "error", "message": f"Pipeline {pipe_id} payload not available"}
 
-        # 3. Execute with provided inputs (telemetry bumps via pipeline_id)
-        exec_result = await self._call_api(
-            "POST", "/api/v1/pipeline-builder/execute",
-            body={
-                "pipeline_json": pipe["pipeline_json"],
-                "triggered_by": "agent",
-                "inputs": inputs,
-                "pipeline_id": pipe_id,
-            },
-        )
+        # 3. Execute via sidecar's own /internal/pipeline/execute — same
+        # process, native executor, telemetry bumps via pipeline_id.
+        import httpx
+        from python_ai_sidecar.config import CONFIG
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            r = await client.post(
+                "http://127.0.0.1:8050/internal/pipeline/execute",
+                headers={"X-Service-Token": CONFIG.service_token},
+                json={
+                    "pipeline_json": pipe["pipeline_json"],
+                    "triggered_by": "agent",
+                    "inputs": inputs,
+                    "pipeline_id": pipe_id,
+                },
+            )
+            try:
+                exec_result = r.json()
+            except Exception:
+                exec_result = {"status": "error", "message": f"Executor HTTP {r.status_code}"}
         if not isinstance(exec_result, dict):
             return {"status": "error", "message": "Executor returned non-dict"}
 

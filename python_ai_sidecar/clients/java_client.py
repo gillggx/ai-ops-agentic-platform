@@ -141,6 +141,14 @@ class JavaAPIClient:
 
     # ---- typed methods ----
 
+    async def search_published_skills(self, query: str, top_k: int = 5) -> list[dict]:
+        """POST /internal/published-skills/search → ranked top-K active skills."""
+        result = await self._post_data(
+            "/internal/published-skills/search",
+            {"query": query or "", "top_k": top_k},
+        )
+        return result if isinstance(result, list) else []
+
     async def get_pipeline(self, pipeline_id: int) -> dict:
         return await self._get_data(f"/internal/pipelines/{pipeline_id}")
 
