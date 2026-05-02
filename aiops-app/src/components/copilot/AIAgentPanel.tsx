@@ -817,6 +817,31 @@ export function AIAgentPanel({
             break;
           }
 
+          case "advisor_answer": {
+            // 2026-05-02: Builder Mode Block Advisor — chat orchestrator
+            // routed an EXPLAIN/COMPARE/RECOMMEND/AMBIGUOUS intent to the
+            // advisor graph; the markdown reply lands here. We render it
+            // as an `agent` chat message (not a special role) so it flows
+            // with the conversation; the kindLabel prefix tells the user
+            // it's a structured Q&A response, not a generic chat.
+            const kindLabels: Record<string, string> = {
+              explain: "📖 Block 說明",
+              compare: "⚖️ Block 對比",
+              recommend: "💡 Block 推薦",
+              ambiguous: "🤔 請再說明",
+              compare_failed: "⚠ 對比失敗",
+              error: "⚠ 錯誤",
+            };
+            const kind = (ev.kind as string) || "answer";
+            const md = (ev.markdown as string) || "";
+            const label = kindLabels[kind] ?? "";
+            const body = label ? `**${label}**\n\n${md}` : md;
+            setChatHistory((prev) => [...prev, {
+              id: nextId(), role: "agent", content: body,
+            }]);
+            break;
+          }
+
           case "design_intent_confirm": {
             // SPEC_design_intent_confirm: agent decided the prompt is too
             // ambiguous to translate directly into a pipeline. Show the

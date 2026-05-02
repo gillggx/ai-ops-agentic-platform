@@ -33,7 +33,9 @@ from langgraph.graph.message import add_messages
 from python_ai_sidecar.agent_orchestrator_v2.state import MAX_ITERATIONS
 from python_ai_sidecar.agent_orchestrator_v2.nodes.load_context import load_context_node
 from python_ai_sidecar.agent_orchestrator_v2.nodes.intent_classifier import intent_classifier_node
+from python_ai_sidecar.agent_orchestrator_v2.nodes.intent_classifier_builder import intent_classifier_builder_node
 from python_ai_sidecar.agent_orchestrator_v2.nodes.intent_completeness import intent_completeness_node
+from python_ai_sidecar.agent_orchestrator_v2.nodes.advisor_dispatch import advisor_dispatch_node
 from python_ai_sidecar.agent_orchestrator_v2.nodes.llm_call import llm_call_node
 from python_ai_sidecar.agent_orchestrator_v2.nodes.tool_execute import tool_execute_node
 from python_ai_sidecar.agent_orchestrator_v2.nodes.synthesis import synthesis_node
@@ -130,15 +132,25 @@ assert_graph_state_covers_run_kwargs(GraphState.__annotations__.keys())
 logger = logging.getLogger(__name__)
 
 
-def _route_after_intent(state: Dict[str, Any]) -> Literal["synthesis", "intent_completeness", "llm_call"]:
-    """Route after intent_classifier:
-      - vague (or any other force_synthesis): straight to synthesis (clarify card already emitted).
-      - clear_chart / clear_rca / clear_status: through completeness gate first.
-      - clarified (re-submit from clarify card): skip gate, go to llm_call.
+def _route_after_intent(state: Dict[str, Any]) -> Literal["synthesis", "intent_completeness", "llm_call", "advisor_dispatch"]:
+    """Route after intent_classifier (chat or builder):
+      - vague                     → synthesis (clarify card already emitted)
+      - clear_chart/rca/status    → intent_completeness (then llm_call or synthesis)
+      - clarified / knowledge     → llm_call directly
+      - builder_explain/compare/recommend/ambiguous → advisor_dispatch
+        (advisor handles Q&A, force_synthesis short-circuits to synthesis)
+      - builder_build_new / build_modify   → llm_call (load_context already
+        biased system prompt with the bucket via state.intent)
     """
     if state.get("force_synthesis") or state.get("intent") == "vague":
         return "synthesis"
     intent = (state.get("intent") or "").lower()
+    # Builder Q&A buckets → advisor graph
+    if intent in {"builder_explain", "builder_compare", "builder_recommend", "builder_ambiguous"}:
+        return "advisor_dispatch"
+    # Builder BUILD buckets → llm_call (load_context picks the right prompt)
+    if intent in {"builder_build_new", "builder_build_modify", "builder_knowledge"}:
+        return "llm_call"
     if intent.startswith("clear_"):
         return "intent_completeness"
     return "llm_call"
@@ -194,8 +206,12 @@ def build_graph() -> StateGraph:
 
     # ── Nodes ────────────────────────────────────────────────────────
     graph.add_node("load_context", load_context_node)
+    # Builder-mode classifier runs first; if mode != 'builder' it returns
+    # an empty patch and the chat classifier takes over below.
+    graph.add_node("intent_classifier_builder", intent_classifier_builder_node)
     graph.add_node("intent_classifier", intent_classifier_node)
     graph.add_node("intent_completeness", intent_completeness_node)
+    graph.add_node("advisor_dispatch", advisor_dispatch_node)
     graph.add_node("llm_call", llm_call_node)
     graph.add_node("tool_execute", tool_execute_node)
     graph.add_node("synthesis", synthesis_node)
@@ -203,14 +219,43 @@ def build_graph() -> StateGraph:
     graph.add_node("memory_lifecycle", memory_lifecycle_node)
 
     # ── Edges ────────────────────────────────────────────────────────
-    # load_context → intent_classifier
-    #   ├─ vague                    → synthesis (clarify card already emitted)
-    #   ├─ clear_*                  → intent_completeness
-    #   │     ├─ incomplete         → synthesis (design-intent card emitted)
-    #   │     └─ complete           → llm_call
-    #   └─ clarified / fallback     → llm_call
+    # load_context → intent_classifier_builder (gate; only acts when mode='builder')
+    #               → intent_classifier (chat fallback when builder didn't claim)
+    #   builder buckets:
+    #     ├─ builder_build_*       → llm_call
+    #     ├─ builder_explain/...   → advisor_dispatch → synthesis
+    #     └─ builder_ambiguous     → advisor_dispatch (clarify msg)
+    #   chat buckets:
+    #     ├─ vague                 → synthesis (clarify card already emitted)
+    #     ├─ clear_*               → intent_completeness
+    #     │     ├─ incomplete      → synthesis (design-intent card emitted)
+    #     │     └─ complete        → llm_call
+    #     └─ clarified / knowledge → llm_call
     graph.set_entry_point("load_context")
-    graph.add_edge("load_context", "intent_classifier")
+    graph.add_edge("load_context", "intent_classifier_builder")
+
+    def _route_after_builder(state: Dict[str, Any]) -> Literal["intent_classifier", "advisor_dispatch", "llm_call", "synthesis"]:
+        """If builder classifier set a builder_* intent, route directly.
+        Otherwise hand off to the chat-mode classifier."""
+        intent = (state.get("intent") or "").lower()
+        if intent in {"builder_explain", "builder_compare", "builder_recommend", "builder_ambiguous"}:
+            return "advisor_dispatch"
+        if intent in {"builder_build_new", "builder_build_modify", "builder_knowledge"}:
+            return "llm_call"
+        # Not a builder intent → chat classifier
+        return "intent_classifier"
+
+    graph.add_conditional_edges(
+        "intent_classifier_builder",
+        _route_after_builder,
+        {
+            "intent_classifier": "intent_classifier",
+            "advisor_dispatch": "advisor_dispatch",
+            "llm_call": "llm_call",
+            "synthesis": "synthesis",
+        },
+    )
+
     graph.add_conditional_edges(
         "intent_classifier",
         _route_after_intent,
@@ -218,8 +263,13 @@ def build_graph() -> StateGraph:
             "synthesis": "synthesis",
             "intent_completeness": "intent_completeness",
             "llm_call": "llm_call",
+            "advisor_dispatch": "advisor_dispatch",
         },
     )
+
+    # advisor_dispatch sets force_synthesis=True + injects an AIMessage,
+    # so it goes straight to synthesis (which renders the markdown).
+    graph.add_edge("advisor_dispatch", "synthesis")
     graph.add_conditional_edges(
         "intent_completeness",
         _route_after_completeness,
