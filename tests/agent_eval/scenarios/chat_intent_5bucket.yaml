@@ -1,0 +1,45 @@
+suite: chat_intent_5bucket
+endpoint: /internal/agent/chat
+description: |
+  Chat orchestrator's 5-bucket classifier (clear_chart / clear_rca /
+  clear_status / knowledge / vague). Uses chat mode (not builder), so
+  the 7-bucket builder classifier doesn't intercept.
+default_body:
+  mode: chat
+
+cases:
+  - id: clear_chart_001
+    description: 「畫 X chart」明確要求圖
+    input:
+      message: "畫 EQP-05 thickness 過去 24 小時的 SPC trend"
+    expect:
+      min_event_count: 3
+
+  - id: clear_rca_001
+    description: 「為什麼 OOC」根因詢問
+    input:
+      message: "為什麼 EQP-07 STEP_005 連續 OOC?"
+    expect:
+      min_event_count: 3
+
+  - id: clear_status_001
+    description: 「現在多少 alarm」現況查詢
+    input:
+      message: "現在還有幾個 active alarm?"
+    expect:
+      min_event_count: 3
+
+  - id: knowledge_001
+    description: 概念題（不該觸發 build / advisor）
+    input:
+      message: "WECO R5 是什麼?"
+    expect:
+      sse_event_types_exclude: [advisor_answer, plan, glass_usage, pb_pipeline]
+      min_event_count: 1
+
+  - id: vague_001
+    description: 「最近怎樣」應該觸發 clarify card
+    input:
+      message: "最近 fab 狀況怎樣?"
+    expect:
+      min_event_count: 1

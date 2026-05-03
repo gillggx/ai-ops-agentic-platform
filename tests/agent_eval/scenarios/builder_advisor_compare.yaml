@@ -1,0 +1,34 @@
+suite: builder_advisor_compare
+endpoint: /internal/agent/build
+description: |
+  Block Advisor COMPARE path — given 2+ block names + comparison verb,
+  advisor must fetch all + synthesize a side-by-side comparison.
+default_body: {}
+
+cases:
+  - id: compare_xbar_imr
+    description: 兩個 SPC chart family 對比
+    input:
+      message: "block_xbar_r 跟 block_imr 差在哪?"
+    expect:
+      sse_event_types_include: [advisor_answer]
+      advisor_kind: compare
+      answer_contains_any: ["X̄/R", "IMR", "subgroup", "n=1"]
+
+  - id: compare_filter_threshold
+    description: filter vs threshold transform 對比
+    input:
+      message: "filter 跟 threshold 差在哪?"
+    expect:
+      sse_event_types_include: [advisor_answer]
+      advisor_kind: compare
+      answer_contains_any: ["filter", "threshold", "evidence", "trigger"]
+
+  - id: compare_chart_vs_dedicated
+    description: 老 mega-block vs 新 dedicated（驗 advisor 能處理 deprecated）
+    input:
+      message: "block_chart 跟 block_line_chart 哪個比較好用?"
+    expect:
+      sse_event_types_include: [advisor_answer]
+      advisor_kind: compare
+      answer_contains_any: ["line_chart", "chart"]

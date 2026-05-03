@@ -1,0 +1,44 @@
+suite: builder_advisor_recommend
+endpoint: /internal/agent/build
+description: |
+  Block Advisor RECOMMEND path — given a use-case description, advisor
+  must extract keywords + score blocks + return top-K candidates.
+  Verifies the keyword enrichment work (V14 migration) is paying off.
+default_body: {}
+
+cases:
+  - id: recommend_spc_outlier
+    description: 找 SPC 異常點 — 應推 SPC family
+    input:
+      message: "我有一筆 SPC data 想看異常點，該用哪個 block?"
+    expect:
+      sse_event_types_include: [advisor_answer]
+      advisor_kind: recommend
+      candidates_include_any: [block_xbar_r, block_imr, block_ewma_cusum]
+
+  - id: recommend_wafer_spatial
+    description: Wafer 空間分布 — 應推 wafer family
+    input:
+      message: "想看 49-site wafer 厚度空間分布"
+    expect:
+      sse_event_types_include: [advisor_answer]
+      advisor_kind: recommend
+      candidates_include_any: [block_wafer_heatmap, block_trend_wafer_maps, block_spatial_pareto]
+
+  - id: recommend_correlation
+    description: 多參數相關 — 應推 splom / heatmap_dendro / scatter
+    input:
+      message: "想做 5 個 FDC 參數相關性分析用哪個?"
+    expect:
+      sse_event_types_include: [advisor_answer]
+      advisor_kind: recommend
+      candidates_include_any: [block_splom, block_heatmap_dendro, block_correlation, block_scatter_chart]
+
+  - id: recommend_pareto
+    description: Top-N / 80-20 — 應推 pareto
+    input:
+      message: "想知道哪幾台機台貢獻最多 OOC，做 80/20 分析"
+    expect:
+      sse_event_types_include: [advisor_answer]
+      advisor_kind: recommend
+      candidates_include_any: [block_pareto, block_bar_chart]

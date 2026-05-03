@@ -1,0 +1,1345 @@
+{
+  "timestamp": "2026-05-03T22-33-24",
+  "suites": [
+    {
+      "suite": "builder_advisor_compare",
+      "endpoint": "/internal/agent/build",
+      "total": 3,
+      "passed": 3,
+      "rate": 1.0,
+      "cases": [
+        {
+          "id": "compare_xbar_imr",
+          "description": "兩個 SPC chart family 對比",
+          "input_message": "block_xbar_r 跟 block_imr 差在哪?",
+          "passed": true,
+          "elapsed_sec": 9.87,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "advisor_answer",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_include",
+              "passed": true,
+              "msg": "all required events present: ['advisor_answer']"
+            },
+            {
+              "name": "advisor_kind",
+              "passed": true,
+              "msg": "kind expected=compare actual=compare"
+            },
+            {
+              "name": "answer_contains_any",
+              "passed": true,
+              "msg": "matched=['X̄/R', 'IMR', 'n=1'] (looked for ['X̄/R', 'IMR', 'subgroup', 'n=1'])"
+            }
+          ]
+        },
+        {
+          "id": "compare_filter_threshold",
+          "description": "filter vs threshold transform 對比",
+          "input_message": "filter 跟 threshold 差在哪?",
+          "passed": true,
+          "elapsed_sec": 14.04,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "advisor_answer",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_include",
+              "passed": true,
+              "msg": "all required events present: ['advisor_answer']"
+            },
+            {
+              "name": "advisor_kind",
+              "passed": true,
+              "msg": "kind expected=compare actual=compare"
+            },
+            {
+              "name": "answer_contains_any",
+              "passed": true,
+              "msg": "matched=['filter', 'threshold', 'evidence', 'trigger'] (looked for ['filter', 'threshold', 'evidence', 'trigger'])"
+            }
+          ]
+        },
+        {
+          "id": "compare_chart_vs_dedicated",
+          "description": "老 mega-block vs 新 dedicated（驗 advisor 能處理 deprecated）",
+          "input_message": "block_chart 跟 block_line_chart 哪個比較好用?",
+          "passed": true,
+          "elapsed_sec": 9.71,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "advisor_answer",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_include",
+              "passed": true,
+              "msg": "all required events present: ['advisor_answer']"
+            },
+            {
+              "name": "advisor_kind",
+              "passed": true,
+              "msg": "kind expected=compare actual=compare"
+            },
+            {
+              "name": "answer_contains_any",
+              "passed": true,
+              "msg": "matched=['line_chart', 'chart'] (looked for ['line_chart', 'chart'])"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "suite": "builder_advisor_explain",
+      "endpoint": "/internal/agent/build",
+      "total": 4,
+      "passed": 4,
+      "rate": 1.0,
+      "cases": [
+        {
+          "id": "explain_xbar_r_keywords",
+          "description": "SPC X̄/R block 用途說明，必含 WECO + subgroup",
+          "input_message": "block_xbar_r 怎麼用?",
+          "passed": true,
+          "elapsed_sec": 9.03,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "advisor_answer",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_include",
+              "passed": true,
+              "msg": "all required events present: ['advisor_answer']"
+            },
+            {
+              "name": "advisor_kind",
+              "passed": true,
+              "msg": "kind expected=explain actual=explain"
+            },
+            {
+              "name": "answer_contains_any",
+              "passed": true,
+              "msg": "matched=['WECO', 'subgroup', 'X̄'] (looked for ['WECO', 'subgroup', 'X̄'])"
+            },
+            {
+              "name": "block_name_equals",
+              "passed": true,
+              "msg": "block_name expected=block_xbar_r actual=block_xbar_r"
+            }
+          ]
+        },
+        {
+          "id": "explain_wafer_heatmap",
+          "description": "Wafer block 用途說明，必含 IDW / 49-site / spatial",
+          "input_message": "block_wafer_heatmap 用來幹嘛?",
+          "passed": true,
+          "elapsed_sec": 11.73,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "advisor_answer",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_include",
+              "passed": true,
+              "msg": "all required events present: ['advisor_answer']"
+            },
+            {
+              "name": "advisor_kind",
+              "passed": true,
+              "msg": "kind expected=explain actual=explain"
+            },
+            {
+              "name": "answer_contains_any",
+              "passed": true,
+              "msg": "matched=['IDW', 'uniformity', '49', 'wafer', '空間'] (looked for ['IDW', 'uniformity', '49', 'wafer', 'spatial', '空間'])"
+            },
+            {
+              "name": "block_name_equals",
+              "passed": true,
+              "msg": "block_name expected=block_wafer_heatmap actual=block_wafer_heatmap"
+            }
+          ]
+        },
+        {
+          "id": "explain_pareto",
+          "description": "Pareto block 80/20 概念",
+          "input_message": "pareto 圖怎麼用?",
+          "passed": true,
+          "elapsed_sec": 10.64,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "advisor_answer",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_include",
+              "passed": true,
+              "msg": "all required events present: ['advisor_answer']"
+            },
+            {
+              "name": "advisor_kind",
+              "passed": true,
+              "msg": "kind expected=explain actual=explain"
+            },
+            {
+              "name": "answer_contains_any",
+              "passed": true,
+              "msg": "matched=['80', '排序', '累計'] (looked for ['80', '排序', '累計', 'ranking'])"
+            }
+          ]
+        },
+        {
+          "id": "explain_filter",
+          "description": "一般 transform block 而非 chart",
+          "input_message": "block_filter 是做什麼的?",
+          "passed": true,
+          "elapsed_sec": 9.52,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "advisor_answer",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_include",
+              "passed": true,
+              "msg": "all required events present: ['advisor_answer']"
+            },
+            {
+              "name": "advisor_kind",
+              "passed": true,
+              "msg": "kind expected=explain actual=explain"
+            },
+            {
+              "name": "answer_contains_any",
+              "passed": true,
+              "msg": "matched=['filter', '篩', '條件'] (looked for ['filter', '篩', 'row', '條件'])"
+            },
+            {
+              "name": "block_name_equals",
+              "passed": true,
+              "msg": "block_name expected=block_filter actual=block_filter"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "suite": "builder_advisor_recommend",
+      "endpoint": "/internal/agent/build",
+      "total": 4,
+      "passed": 4,
+      "rate": 1.0,
+      "cases": [
+        {
+          "id": "recommend_spc_outlier",
+          "description": "找 SPC 異常點 — 應推 SPC family",
+          "input_message": "我有一筆 SPC data 想看異常點，該用哪個 block?",
+          "passed": true,
+          "elapsed_sec": 16.9,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "advisor_answer",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_include",
+              "passed": true,
+              "msg": "all required events present: ['advisor_answer']"
+            },
+            {
+              "name": "advisor_kind",
+              "passed": true,
+              "msg": "kind expected=recommend actual=recommend"
+            },
+            {
+              "name": "candidates_include_any",
+              "passed": true,
+              "msg": "got ['block_xbar_r', 'block_chart', 'block_process_history'] matched=['block_xbar_r']"
+            }
+          ]
+        },
+        {
+          "id": "recommend_wafer_spatial",
+          "description": "Wafer 空間分布 — 應推 wafer family",
+          "input_message": "想看 49-site wafer 厚度空間分布",
+          "passed": true,
+          "elapsed_sec": 17.24,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "advisor_answer",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_include",
+              "passed": true,
+              "msg": "all required events present: ['advisor_answer']"
+            },
+            {
+              "name": "advisor_kind",
+              "passed": true,
+              "msg": "kind expected=recommend actual=recommend"
+            },
+            {
+              "name": "candidates_include_any",
+              "passed": true,
+              "msg": "got ['block_chart', 'block_wafer_heatmap', 'block_histogram_chart'] matched=['block_wafer_heatmap']"
+            }
+          ]
+        },
+        {
+          "id": "recommend_correlation",
+          "description": "多參數相關 — 應推 splom / heatmap_dendro / scatter",
+          "input_message": "想做 5 個 FDC 參數相關性分析用哪個?",
+          "passed": true,
+          "elapsed_sec": 16.01,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "advisor_answer",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_include",
+              "passed": true,
+              "msg": "all required events present: ['advisor_answer']"
+            },
+            {
+              "name": "advisor_kind",
+              "passed": true,
+              "msg": "kind expected=recommend actual=recommend"
+            },
+            {
+              "name": "candidates_include_any",
+              "passed": true,
+              "msg": "got ['block_correlation', 'block_process_history', 'block_chart'] matched=['block_correlation']"
+            }
+          ]
+        },
+        {
+          "id": "recommend_pareto",
+          "description": "Top-N / 80-20 — 應推 pareto",
+          "input_message": "想知道哪幾台機台貢獻最多 OOC，做 80/20 分析",
+          "passed": true,
+          "elapsed_sec": 16.3,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "advisor_answer",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_include",
+              "passed": true,
+              "msg": "all required events present: ['advisor_answer']"
+            },
+            {
+              "name": "advisor_kind",
+              "passed": true,
+              "msg": "kind expected=recommend actual=recommend"
+            },
+            {
+              "name": "candidates_include_any",
+              "passed": true,
+              "msg": "got ['block_process_history', 'block_pareto', 'block_compute'] matched=['block_pareto']"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "suite": "builder_intent_7bucket",
+      "endpoint": "/internal/agent/build",
+      "total": 12,
+      "passed": 11,
+      "rate": 0.917,
+      "cases": [
+        {
+          "id": "build_new_001",
+          "description": "明確的「建新 SPC pipeline」指令",
+          "input_message": "幫我建一個 SPC pipeline 監控 STEP_007 thickness",
+          "passed": true,
+          "elapsed_sec": 85.54,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "glass_usage",
+            "chat",
+            "plan",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "plan_update",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "glass_progress",
+            "operation",
+            "glass_usage",
+            "plan_update",
+            "glass_usage",
+            "plan_update",
+            "glass_usage",
+            "chat",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "glass_progress",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "plan_update",
+            "glass_usage",
+            "plan_update",
+            "glass_usage",
+            "glass_progress",
+            "chat",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "plan_update",
+            "glass_usage",
+            "glass_progress",
+            "plan_update",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "glass_progress",
+            "plan_update",
+            "glass_usage",
+            "plan_update",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "plan_update",
+            "glass_usage",
+            "plan_update",
+            "glass_usage",
+            "glass_progress",
+            "chat",
+            "glass_usage",
+            "plan_update",
+            "glass_usage",
+            "operation",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_exclude",
+              "passed": true,
+              "msg": "none of ['advisor_answer'] appeared"
+            },
+            {
+              "name": "min_event_count",
+              "passed": true,
+              "msg": "events=72 (min=3)"
+            }
+          ]
+        },
+        {
+          "id": "build_new_002",
+          "description": "「從零做」變體",
+          "input_message": "從零做一個良率分析 pipeline",
+          "passed": true,
+          "elapsed_sec": 120.07,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "glass_usage",
+            "chat",
+            "plan",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "plan_update",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "glass_progress",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "plan_update",
+            "glass_usage",
+            "chat",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "glass_progress",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "glass_progress",
+            "operation",
+            "glass_usage",
+            "plan_update",
+            "glass_usage",
+            "chat",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "glass_progress",
+            "operation",
+            "glass_usage",
+            "error",
+            "glass_usage",
+            "error",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "glass_progress",
+            "operation",
+            "glass_usage",
+            "plan_update",
+            "glass_usage",
+            "chat",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "glass_progress",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "glass_progress",
+            "operation",
+            "glass_usage",
+            "glass_progress",
+            "operation",
+            "glass_usage",
+            "glass_progress",
+            "operation",
+            "glass_usage",
+            "glass_progress",
+            "operation",
+            "glass_usage",
+            "glass_progress",
+            "operation",
+            "glass_usage",
+            "glass_progress",
+            "plan_update",
+            "glass_usage",
+            "glass_progress",
+            "chat",
+            "glass_usage",
+            "glass_progress",
+            "operation",
+            "glass_usage",
+            "glass_progress",
+            "plan_update",
+            "glass_usage",
+            "glass_progress",
+            "operation",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_exclude",
+              "passed": true,
+              "msg": "none of ['advisor_answer'] appeared"
+            }
+          ]
+        },
+        {
+          "id": "build_modify_001",
+          "description": "加 block 到既有 canvas",
+          "input_message": "加一個 filter block 篩 OOC=true",
+          "passed": true,
+          "elapsed_sec": 19.16,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "glass_usage",
+            "chat",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "glass_progress",
+            "chat",
+            "glass_usage",
+            "chat",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_exclude",
+              "passed": true,
+              "msg": "none of ['advisor_answer'] appeared"
+            }
+          ]
+        },
+        {
+          "id": "build_modify_002",
+          "description": "連接動作",
+          "input_message": "把 xbar_r 接到 process_history 後面",
+          "passed": true,
+          "elapsed_sec": 60.51,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "glass_usage",
+            "chat",
+            "plan",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "plan_update",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "glass_progress",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "plan_update",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "glass_progress",
+            "plan_update",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "glass_progress",
+            "operation",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "plan_update",
+            "glass_usage",
+            "operation",
+            "glass_usage",
+            "plan_update",
+            "glass_usage",
+            "glass_progress",
+            "chat",
+            "glass_usage",
+            "plan_update",
+            "glass_usage",
+            "operation",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_exclude",
+              "passed": true,
+              "msg": "none of ['advisor_answer'] appeared"
+            }
+          ]
+        },
+        {
+          "id": "explain_001",
+          "description": "詢問 block 用法",
+          "input_message": "block_xbar_r 是做什麼的?",
+          "passed": true,
+          "elapsed_sec": 9.01,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "advisor_answer",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_include",
+              "passed": true,
+              "msg": "all required events present: ['advisor_answer']"
+            },
+            {
+              "name": "advisor_kind",
+              "passed": true,
+              "msg": "kind expected=explain actual=explain"
+            },
+            {
+              "name": "answer_contains_any",
+              "passed": true,
+              "msg": "matched=['X̄/R', 'WECO', 'subgroup', '管制'] (looked for ['X̄/R', 'WECO', 'subgroup', '管制'])"
+            },
+            {
+              "name": "block_name_equals",
+              "passed": true,
+              "msg": "block_name expected=block_xbar_r actual=block_xbar_r"
+            }
+          ]
+        },
+        {
+          "id": "explain_002",
+          "description": "中文偏口語的 block 詢問",
+          "input_message": "ewma_cusum 怎麼用啊?",
+          "passed": true,
+          "elapsed_sec": 11.05,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "advisor_answer",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_include",
+              "passed": true,
+              "msg": "all required events present: ['advisor_answer']"
+            },
+            {
+              "name": "advisor_kind",
+              "passed": true,
+              "msg": "kind expected=explain actual=explain"
+            },
+            {
+              "name": "answer_contains_any",
+              "passed": true,
+              "msg": "matched=['EWMA', 'CUSUM', '偏移'] (looked for ['EWMA', 'CUSUM', '偏移'])"
+            }
+          ]
+        },
+        {
+          "id": "compare_001",
+          "description": "兩 block 對比",
+          "input_message": "filter 跟 threshold 差在哪?",
+          "passed": true,
+          "elapsed_sec": 11.89,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "advisor_answer",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_include",
+              "passed": true,
+              "msg": "all required events present: ['advisor_answer']"
+            },
+            {
+              "name": "advisor_kind",
+              "passed": true,
+              "msg": "kind expected=compare actual=compare"
+            },
+            {
+              "name": "answer_contains_any",
+              "passed": true,
+              "msg": "matched=['filter', 'threshold'] (looked for ['filter', 'threshold'])"
+            }
+          ]
+        },
+        {
+          "id": "compare_002",
+          "description": "SPC chart 之間對比",
+          "input_message": "block_xbar_r vs block_imr 哪個適合 n=1?",
+          "passed": true,
+          "elapsed_sec": 9.94,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "advisor_answer",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_include",
+              "passed": true,
+              "msg": "all required events present: ['advisor_answer']"
+            },
+            {
+              "name": "advisor_kind",
+              "passed": true,
+              "msg": "kind expected=compare actual=compare"
+            },
+            {
+              "name": "answer_contains_any",
+              "passed": true,
+              "msg": "matched=['IMR', 'n=1'] (looked for ['IMR', 'n=1', 'individual'])"
+            }
+          ]
+        },
+        {
+          "id": "recommend_001",
+          "description": "描述 use case 找 block",
+          "input_message": "我有一筆 SPC data 想看異常點，該用哪個 block?",
+          "passed": true,
+          "elapsed_sec": 18.03,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "advisor_answer",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_include",
+              "passed": true,
+              "msg": "all required events present: ['advisor_answer']"
+            },
+            {
+              "name": "advisor_kind",
+              "passed": true,
+              "msg": "kind expected=recommend actual=recommend"
+            },
+            {
+              "name": "candidates_include_any",
+              "passed": true,
+              "msg": "got ['block_xbar_r', 'block_chart', 'block_process_history'] matched=['block_xbar_r']"
+            }
+          ]
+        },
+        {
+          "id": "recommend_002",
+          "description": "Wafer 空間分析 use case",
+          "input_message": "想看 wafer 空間缺陷分布，用哪個?",
+          "passed": true,
+          "elapsed_sec": 15.38,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "advisor_answer",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_include",
+              "passed": true,
+              "msg": "all required events present: ['advisor_answer']"
+            },
+            {
+              "name": "advisor_kind",
+              "passed": true,
+              "msg": "kind expected=recommend actual=recommend"
+            },
+            {
+              "name": "candidates_include_any",
+              "passed": true,
+              "msg": "got ['block_defect_stack', 'block_chart', 'block_wafer_heatmap'] matched=['block_defect_stack', 'block_wafer_heatmap']"
+            }
+          ]
+        },
+        {
+          "id": "knowledge_001",
+          "description": "概念題（WECO 是什麼）",
+          "input_message": "WECO R5 是什麼意思?",
+          "passed": false,
+          "elapsed_sec": 20.76,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "advisor_answer",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_exclude",
+              "passed": false,
+              "msg": "forbidden event types appeared: ['advisor_answer']"
+            },
+            {
+              "name": "min_event_count",
+              "passed": true,
+              "msg": "events=2 (min=1)"
+            }
+          ]
+        },
+        {
+          "id": "ambiguous_001",
+          "description": "太模糊（單一 block 名沒動詞 + 沒疑問）",
+          "input_message": "block_xbar_r",
+          "passed": true,
+          "elapsed_sec": 2.37,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "advisor_answer",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_include",
+              "passed": true,
+              "msg": "all required events present: ['advisor_answer']"
+            },
+            {
+              "name": "advisor_kind",
+              "passed": true,
+              "msg": "kind expected=ambiguous actual=ambiguous"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "suite": "chat_intent_5bucket",
+      "endpoint": "/internal/agent/chat",
+      "total": 5,
+      "passed": 5,
+      "rate": 1.0,
+      "cases": [
+        {
+          "id": "clear_chart_001",
+          "description": "「畫 X chart」明確要求圖",
+          "input_message": "畫 EQP-05 thickness 過去 24 小時的 SPC trend",
+          "passed": true,
+          "elapsed_sec": 5.03,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "stage_update",
+            "stage_update",
+            "stage_update",
+            "context_load",
+            "stage_update",
+            "design_intent_confirm",
+            "stage_update",
+            "synthesis",
+            "stage_update",
+            "stage_update",
+            "stage_update",
+            "reflection_pass",
+            "stage_update",
+            "stage_update",
+            "stage_update",
+            "memory_write",
+            "stage_update",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "min_event_count",
+              "passed": true,
+              "msg": "events=18 (min=3)"
+            }
+          ]
+        },
+        {
+          "id": "clear_rca_001",
+          "description": "「為什麼 OOC」根因詢問",
+          "input_message": "為什麼 EQP-07 STEP_005 連續 OOC?",
+          "passed": true,
+          "elapsed_sec": 4.67,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "stage_update",
+            "stage_update",
+            "stage_update",
+            "context_load",
+            "stage_update",
+            "design_intent_confirm",
+            "stage_update",
+            "synthesis",
+            "stage_update",
+            "stage_update",
+            "stage_update",
+            "reflection_pass",
+            "stage_update",
+            "stage_update",
+            "stage_update",
+            "memory_write",
+            "stage_update",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "min_event_count",
+              "passed": true,
+              "msg": "events=18 (min=3)"
+            }
+          ]
+        },
+        {
+          "id": "clear_status_001",
+          "description": "「現在多少 alarm」現況查詢",
+          "input_message": "現在還有幾個 active alarm?",
+          "passed": true,
+          "elapsed_sec": 4.41,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "stage_update",
+            "stage_update",
+            "stage_update",
+            "context_load",
+            "stage_update",
+            "design_intent_confirm",
+            "stage_update",
+            "synthesis",
+            "stage_update",
+            "stage_update",
+            "stage_update",
+            "reflection_pass",
+            "stage_update",
+            "stage_update",
+            "stage_update",
+            "memory_write",
+            "stage_update",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "min_event_count",
+              "passed": true,
+              "msg": "events=18 (min=3)"
+            }
+          ]
+        },
+        {
+          "id": "knowledge_001",
+          "description": "概念題（不該觸發 build / advisor）",
+          "input_message": "WECO R5 是什麼?",
+          "passed": true,
+          "elapsed_sec": 12.15,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "stage_update",
+            "stage_update",
+            "stage_update",
+            "context_load",
+            "stage_update",
+            "llm_usage",
+            "stage_update",
+            "stage_update",
+            "synthesis",
+            "stage_update",
+            "stage_update",
+            "stage_update",
+            "reflection_amendment",
+            "stage_update",
+            "stage_update",
+            "stage_update",
+            "memory_write",
+            "stage_update",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_exclude",
+              "passed": true,
+              "msg": "none of ['advisor_answer', 'plan', 'glass_usage', 'pb_pipeline'] appeared"
+            },
+            {
+              "name": "min_event_count",
+              "passed": true,
+              "msg": "events=19 (min=1)"
+            }
+          ]
+        },
+        {
+          "id": "vague_001",
+          "description": "「最近怎樣」應該觸發 clarify card",
+          "input_message": "最近 fab 狀況怎樣?",
+          "passed": true,
+          "elapsed_sec": 3.43,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "stage_update",
+            "stage_update",
+            "stage_update",
+            "context_load",
+            "stage_update",
+            "clarify",
+            "stage_update",
+            "synthesis",
+            "stage_update",
+            "stage_update",
+            "stage_update",
+            "reflection_pass",
+            "stage_update",
+            "stage_update",
+            "stage_update",
+            "memory_write",
+            "stage_update",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "min_event_count",
+              "passed": true,
+              "msg": "events=18 (min=1)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "suite": "knowledge_no_tools",
+      "endpoint": "/internal/agent/build",
+      "total": 2,
+      "passed": 0,
+      "rate": 0.0,
+      "cases": [
+        {
+          "id": "knowledge_weco_r5",
+          "description": "純概念，不該 build",
+          "input_message": "WECO R5 是什麼意思?",
+          "passed": false,
+          "elapsed_sec": 19.86,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "advisor_answer",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_exclude",
+              "passed": false,
+              "msg": "forbidden event types appeared: ['advisor_answer']"
+            },
+            {
+              "name": "min_event_count",
+              "passed": true,
+              "msg": "events=2 (min=1)"
+            }
+          ]
+        },
+        {
+          "id": "knowledge_cpk_definition",
+          "description": "Cpk 概念",
+          "input_message": "Cpk 跟 Ppk 差在哪?",
+          "passed": false,
+          "elapsed_sec": 3.38,
+          "http_status": 200,
+          "error": null,
+          "event_types": [
+            "advisor_answer",
+            "done"
+          ],
+          "scores": [
+            {
+              "name": "http_ok",
+              "passed": true,
+              "msg": "http=200"
+            },
+            {
+              "name": "sse_event_types_exclude",
+              "passed": false,
+              "msg": "forbidden event types appeared: ['advisor_answer']"
+            },
+            {
+              "name": "min_event_count",
+              "passed": true,
+              "msg": "events=2 (min=1)"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

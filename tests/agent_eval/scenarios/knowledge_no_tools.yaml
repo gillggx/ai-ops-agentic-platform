@@ -1,0 +1,24 @@
+suite: knowledge_no_tools
+endpoint: /internal/agent/build
+description: |
+  KNOWLEDGE bucket guarantee — concept questions in builder mode must
+  NOT trigger build_pipeline_live, advisor graph, or chart rendering.
+  Only synthesis-class events expected.
+default_body: {}
+
+cases:
+  - id: knowledge_weco_r5
+    description: 純概念，不該 build
+    input:
+      message: "WECO R5 是什麼意思?"
+    expect:
+      sse_event_types_exclude: [advisor_answer, plan, glass_usage, pb_pipeline]
+      min_event_count: 1
+
+  - id: knowledge_cpk_definition
+    description: Cpk 概念
+    input:
+      message: "Cpk 跟 Ppk 差在哪?"
+    expect:
+      sse_event_types_exclude: [advisor_answer, plan, glass_usage, pb_pipeline]
+      min_event_count: 1

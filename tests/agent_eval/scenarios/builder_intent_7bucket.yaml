@@ -1,0 +1,108 @@
+suite: builder_intent_7bucket
+endpoint: /internal/agent/build
+description: |
+  7-bucket builder classifier sanity (BUILD_NEW / BUILD_MODIFY / EXPLAIN /
+  COMPARE / RECOMMEND / KNOWLEDGE / AMBIGUOUS). Verifies the entry-point
+  intent_classifier_builder routes correctly to advisor vs Glass Box.
+default_body: {}
+
+cases:
+  - id: build_new_001
+    description: 明確的「建新 SPC pipeline」指令
+    input:
+      message: "幫我建一個 SPC pipeline 監控 STEP_007 thickness"
+    expect:
+      sse_event_types_exclude: [advisor_answer]
+      min_event_count: 3
+
+  - id: build_new_002
+    description: 「從零做」變體
+    input:
+      message: "從零做一個良率分析 pipeline"
+    expect:
+      sse_event_types_exclude: [advisor_answer]
+
+  - id: build_modify_001
+    description: 加 block 到既有 canvas
+    input:
+      message: "加一個 filter block 篩 OOC=true"
+    expect:
+      sse_event_types_exclude: [advisor_answer]
+
+  - id: build_modify_002
+    description: 連接動作
+    input:
+      message: "把 xbar_r 接到 process_history 後面"
+    expect:
+      sse_event_types_exclude: [advisor_answer]
+
+  - id: explain_001
+    description: 詢問 block 用法
+    input:
+      message: "block_xbar_r 是做什麼的?"
+    expect:
+      sse_event_types_include: [advisor_answer]
+      advisor_kind: explain
+      block_name_equals: block_xbar_r
+      answer_contains_any: ["X̄/R", "WECO", "subgroup", "管制"]
+
+  - id: explain_002
+    description: 中文偏口語的 block 詢問
+    input:
+      message: "ewma_cusum 怎麼用啊?"
+    expect:
+      sse_event_types_include: [advisor_answer]
+      advisor_kind: explain
+      answer_contains_any: ["EWMA", "CUSUM", "偏移"]
+
+  - id: compare_001
+    description: 兩 block 對比
+    input:
+      message: "filter 跟 threshold 差在哪?"
+    expect:
+      sse_event_types_include: [advisor_answer]
+      advisor_kind: compare
+      answer_contains_any: ["filter", "threshold"]
+
+  - id: compare_002
+    description: SPC chart 之間對比
+    input:
+      message: "block_xbar_r vs block_imr 哪個適合 n=1?"
+    expect:
+      sse_event_types_include: [advisor_answer]
+      advisor_kind: compare
+      answer_contains_any: ["IMR", "n=1", "individual"]
+
+  - id: recommend_001
+    description: 描述 use case 找 block
+    input:
+      message: "我有一筆 SPC data 想看異常點，該用哪個 block?"
+    expect:
+      sse_event_types_include: [advisor_answer]
+      advisor_kind: recommend
+      candidates_include_any: [block_xbar_r, block_imr, block_ewma_cusum]
+
+  - id: recommend_002
+    description: Wafer 空間分析 use case
+    input:
+      message: "想看 wafer 空間缺陷分布，用哪個?"
+    expect:
+      sse_event_types_include: [advisor_answer]
+      advisor_kind: recommend
+      candidates_include_any: [block_defect_stack, block_wafer_heatmap, block_spatial_pareto]
+
+  - id: knowledge_001
+    description: 概念題（WECO 是什麼）
+    input:
+      message: "WECO R5 是什麼意思?"
+    expect:
+      sse_event_types_exclude: [advisor_answer, plan, glass_usage]
+      min_event_count: 1
+
+  - id: ambiguous_001
+    description: 太模糊（單一 block 名沒動詞 + 沒疑問）
+    input:
+      message: "block_xbar_r"
+    expect:
+      sse_event_types_include: [advisor_answer]
+      advisor_kind: ambiguous

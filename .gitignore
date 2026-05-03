@@ -71,3 +71,7 @@ aiops-app/playwright/.cache/
 
 # ── Local testing screenshots ────────────────────────────────────────────────
 screenshots/
+
+# Agent eval per-run reports (kept gitignored; baseline.json IS committed)
+tests/agent_eval/reports/
+tests/agent_eval/__pycache__/

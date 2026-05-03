@@ -1,0 +1,46 @@
+suite: builder_advisor_explain
+endpoint: /internal/agent/build
+description: |
+  Block Advisor EXPLAIN path — given a single block name, advisor must
+  fetch its description from Java and synthesize a markdown answer.
+default_body: {}
+
+cases:
+  - id: explain_xbar_r_keywords
+    description: SPC X̄/R block 用途說明，必含 WECO + subgroup
+    input:
+      message: "block_xbar_r 怎麼用?"
+    expect:
+      sse_event_types_include: [advisor_answer]
+      advisor_kind: explain
+      block_name_equals: block_xbar_r
+      answer_contains_any: ["WECO", "subgroup", "X̄"]
+
+  - id: explain_wafer_heatmap
+    description: Wafer block 用途說明，必含 IDW / 49-site / spatial
+    input:
+      message: "block_wafer_heatmap 用來幹嘛?"
+    expect:
+      sse_event_types_include: [advisor_answer]
+      advisor_kind: explain
+      block_name_equals: block_wafer_heatmap
+      answer_contains_any: ["IDW", "uniformity", "49", "wafer", "spatial", "空間"]
+
+  - id: explain_pareto
+    description: Pareto block 80/20 概念
+    input:
+      message: "pareto 圖怎麼用?"
+    expect:
+      sse_event_types_include: [advisor_answer]
+      advisor_kind: explain
+      answer_contains_any: ["80", "排序", "累計", "ranking"]
+
+  - id: explain_filter
+    description: 一般 transform block 而非 chart
+    input:
+      message: "block_filter 是做什麼的?"
+    expect:
+      sse_event_types_include: [advisor_answer]
+      advisor_kind: explain
+      block_name_equals: block_filter
+      answer_contains_any: ["filter", "篩", "row", "條件"]
