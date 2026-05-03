@@ -105,7 +105,7 @@ export function ClusterDetailPanel({ cluster, onAcked }: {
   const inDetailMode = selectedAlarmId != null;
 
   return (
-    <main className="alarm-center__detail" aria-label="Cluster detail">
+    <main className="alarm-center__detail" aria-label="Cluster detail" data-tour-id="alarm-detail">
       <header className="cluster-detail__head">
         <h1 className="cluster-detail__title">
           {cluster.equipment_id}{" "}
@@ -170,7 +170,7 @@ function ListView({ cluster, synthesis, onPick }: {
 }) {
   return (
     <>
-      <section className="cluster-synthesis">
+      <section className="cluster-synthesis" data-tour-id="alarm-dr">
         <div className="cluster-synthesis__title">✨ AI 診斷報告 | {cluster.equipment_id}</div>
         <div className="cluster-synthesis__meta">
           {cluster.count} alarms · {SEV_LABEL[cluster.severity] ?? cluster.severity} · {fmtDateRange(cluster.first_at, cluster.last_at)}

@@ -58,6 +58,7 @@ export default function RightTabbedPanel({
 
   return (
     <aside
+      data-tour-id="pb-inspector"
       style={{
         width: 380,
         minWidth: 320,
@@ -76,7 +77,7 @@ export default function RightTabbedPanel({
             switching tabs doesn't unmount the Agent (which would discard
             chat history + open SSE stream). React will skip the hidden
             subtrees during paint, so the cost of always-mounted is small. */}
-        <div style={{ flex: tab === "agent" ? 1 : 0, minHeight: 0, display: tab === "agent" ? "flex" : "none", flexDirection: "column" }}>
+        <div data-tour-id="pb-agent-panel" style={{ flex: tab === "agent" ? 1 : 0, minHeight: 0, display: tab === "agent" ? "flex" : "none", flexDirection: "column" }}>
           {agentPanel}
         </div>
         <div style={{ flex: tab === "parameters" ? 1 : 0, minHeight: 0, overflow: "auto", background: "#fff", display: tab === "parameters" ? "block" : "none" }}>

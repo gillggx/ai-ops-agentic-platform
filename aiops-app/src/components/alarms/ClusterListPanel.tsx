@@ -42,7 +42,7 @@ export function ClusterListPanel({
   }, [clusters]);
 
   return (
-    <aside className="alarm-center__list" aria-label="Cluster list">
+    <aside className="alarm-center__list" aria-label="Cluster list" data-tour-id="alarm-list">
       <div className="alarm-center__list-header">
         <span>Clusters · {filtered.length}/{clusters.length}</span>
         <span style={{ color: "var(--text-4)" }}>{totalAlarms} alarms</span>

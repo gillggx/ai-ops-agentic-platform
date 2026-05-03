@@ -915,7 +915,7 @@ function FabHeatmap({ summary }: { summary: Record<string, unknown> }) {
   }
 
   return (
-    <div style={{ padding: "16px 24px" }}>
+    <div data-tour-id="fleet-heatmap" style={{ padding: "16px 24px" }}>
       <div style={{ fontSize: 14, fontWeight: 700, color: "#1a202c", marginBottom: 12 }}>
         全廠 SPC OOC Rate Heatmap — Tool × Step (24h)
       </div>

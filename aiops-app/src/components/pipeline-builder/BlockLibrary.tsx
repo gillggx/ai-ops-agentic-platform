@@ -78,6 +78,7 @@ export default function BlockLibrary({ readOnly }: Props) {
 
   return (
     <div
+      data-tour-id="pb-library"
       style={{
         width: 220,
         minWidth: 220,

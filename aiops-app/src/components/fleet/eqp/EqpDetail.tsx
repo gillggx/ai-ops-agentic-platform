@@ -204,7 +204,7 @@ export function EqpDetail({ toolId, onBack }: { toolId: string; onBack?: () => v
       )}
 
       {topTab === "lineage" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div data-tour-id="eqp-lineage" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {/* sub tabs */}
           <div style={{ display: "flex", gap: 4 }}>
             {([

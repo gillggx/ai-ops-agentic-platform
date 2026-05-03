@@ -88,7 +88,9 @@ export function FleetOverview({ onOpenTool }: { onOpenTool?: (id: string) => voi
         }}
       />
 
-      <ToolList tools={equipment} onOpenTool={openTool} />
+      <div data-tour-id="fleet-equipment-list">
+        <ToolList tools={equipment} onOpenTool={openTool} />
+      </div>
 
       {loading && equipment.length === 0 && (
         <div className="fleet-overview__empty">載入中…</div>

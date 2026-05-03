@@ -767,6 +767,7 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
           </label>
           <button
             data-testid="btn-run"
+            data-tour-id="pb-run-full"
             onClick={handleRun}
             style={{ ...btn("primary"), background: "#16A34A", borderColor: "#16A34A" }}
             title="執行整條 pipeline — 節點上會顯示每個 node 的 rows / error 徽章"
@@ -1070,7 +1071,7 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
           <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
             <div style={{ flex: 1, display: "flex", overflow: "hidden", minHeight: 0 }}>
               <BlockLibrary readOnly={readOnly} />
-              <div style={{ flex: 1, overflow: "hidden" }}>
+              <div data-tour-id="pb-canvas" style={{ flex: 1, overflow: "hidden" }}>
                 <DagCanvas
                   blockCatalog={catalog}
                   readOnly={readOnly}
@@ -1100,7 +1101,7 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
             <Panel defaultSize="70%" minSize="30%">
               <div style={{ height: "100%", display: "flex", overflow: "hidden" }}>
                 <BlockLibrary readOnly={readOnly} />
-                <div style={{ flex: 1, overflow: "hidden" }}>
+                <div data-tour-id="pb-canvas" style={{ flex: 1, overflow: "hidden" }}>
                   <DagCanvas
                     blockCatalog={catalog}
                     readOnly={readOnly}
