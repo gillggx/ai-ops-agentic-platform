@@ -19,7 +19,27 @@ interface Props {
   focusedRunIds?: Set<string> | null;     // when present, only focused runs counted
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+const MIN_MS  = 60 * 1000;
+const HOUR_MS = 60 * MIN_MS;
+const DAY_MS  = 24 * HOUR_MS;
+
+/**
+ * Pick a bucket size that gives us ~80–200 bins across the outer window.
+ * Granularities: 5m / 15m / 1h / 6h / 1d.
+ */
+function pickBucketMs(spanMs: number): number {
+  if (spanMs <=  4 * HOUR_MS) return  5 * MIN_MS;   // ≤4h → 5min bins (48 bins)
+  if (spanMs <= 24 * HOUR_MS) return 15 * MIN_MS;   // ≤1d → 15min bins (96 bins)
+  if (spanMs <=  3 * DAY_MS)  return  1 * HOUR_MS;  // ≤3d → 1h bins
+  if (spanMs <= 14 * DAY_MS)  return  6 * HOUR_MS;  // ≤2w → 6h bins
+  return DAY_MS;
+}
+
+function fmtBucketLabel(bucketMs: number): string {
+  if (bucketMs >= DAY_MS)  return `${bucketMs / DAY_MS}d`;
+  if (bucketMs >= HOUR_MS) return `${bucketMs / HOUR_MS}h`;
+  return `${bucketMs / MIN_MS}m`;
+}
 
 export default function Timeline({ outerWindow, selected, onChange, runs, focusedRunIds }: Props) {
   const ref = useRef<HTMLDivElement>(null);
@@ -28,19 +48,21 @@ export default function Timeline({ outerWindow, selected, onChange, runs, focuse
   const t0 = outerWindow[0];
   const t1 = outerWindow[1];
   const span = t1 - t0;
-  const totalDays = Math.max(1, Math.round(span / DAY_MS));
+  const bucketMs = useMemo(() => pickBucketMs(span), [span]);
+  const totalBins = Math.max(1, Math.ceil(span / bucketMs));
+  const minSelMs  = bucketMs;          // selection can shrink down to 1 bucket
 
-  // Bin runs into N day-buckets
+  // Bin runs into N buckets
   const bins = useMemo(() => {
-    const arr = new Array(totalDays).fill(0).map(() => ({ ok: 0, warn: 0, alarm: 0 }));
+    const arr = new Array(totalBins).fill(0).map(() => ({ ok: 0, warn: 0, alarm: 0 }));
     for (const r of runs) {
-      const i = Math.min(totalDays - 1, Math.floor((Date.parse(r.eventTime) - t0) / DAY_MS));
+      const i = Math.min(totalBins - 1, Math.floor((Date.parse(r.eventTime) - t0) / bucketMs));
       if (i < 0) continue;
       if (focusedRunIds && !focusedRunIds.has(r.id)) continue;
       arr[i][r.status]++;
     }
     return arr;
-  }, [runs, focusedRunIds, t0, totalDays]);
+  }, [runs, focusedRunIds, t0, totalBins, bucketMs]);
 
   const w0pct = ((selected[0] - t0) / span) * 100;
   const w1pct = ((selected[1] - t0) / span) * 100;
@@ -60,9 +82,9 @@ export default function Timeline({ outerWindow, selected, onChange, runs, focuse
       const dT   = dPct * span;
       let n0 = drag.start[0], n1 = drag.start[1];
       if (drag.mode === "left") {
-        n0 = Math.max(t0, Math.min(n1 - DAY_MS, drag.start[0] + dT));
+        n0 = Math.max(t0, Math.min(n1 - minSelMs, drag.start[0] + dT));
       } else if (drag.mode === "right") {
-        n1 = Math.max(n0 + DAY_MS, Math.min(t1, drag.start[1] + dT));
+        n1 = Math.max(n0 + minSelMs, Math.min(t1, drag.start[1] + dT));
       } else {
         const w = drag.start[1] - drag.start[0];
         n0 = Math.max(t0, Math.min(t1 - w, drag.start[0] + dT));
@@ -83,7 +105,13 @@ export default function Timeline({ outerWindow, selected, onChange, runs, focuse
   const fmt    = (t: number) => new Date(t).toLocaleString("zh-TW", {
     hour12: false, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit",
   });
-  const fmtDay = (t: number) => new Date(t).toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" });
+  const fmtTick = (t: number) => bucketMs >= DAY_MS
+    ? new Date(t).toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" })
+    : new Date(t).toLocaleString("zh-TW", { hour12: false, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const fmtSpanLabel = () => {
+    if (span >= DAY_MS) return `${(span / DAY_MS).toFixed(span >= 7 * DAY_MS ? 0 : 1)} D`;
+    return `${Math.round(span / HOUR_MS)} H`;
+  };
 
   return (
     <div style={{
@@ -95,7 +123,7 @@ export default function Timeline({ outerWindow, selected, onChange, runs, focuse
         fontSize: 9.5, letterSpacing: "0.08em", color: "#999",
         marginBottom: 4, textTransform: "uppercase",
       }}>
-        <span>TIMELINE · {totalDays} D</span>
+        <span>TIMELINE · {fmtSpanLabel()} · {fmtBucketLabel(bucketMs)} bins</span>
         <span style={{ fontFamily: "ui-monospace, Menlo, monospace", letterSpacing: 0 }}>
           {fmt(selected[0])} → {fmt(selected[1])}
         </span>
@@ -135,8 +163,8 @@ export default function Timeline({ outerWindow, selected, onChange, runs, focuse
         </div>
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, color: "#bbb", marginTop: 3 }}>
-        <span>{fmtDay(t0)}</span>
-        <span>{fmtDay(t0 + span * 0.5)}</span>
+        <span>{fmtTick(t0)}</span>
+        <span>{fmtTick(t0 + span * 0.5)}</span>
         <span>NOW</span>
       </div>
     </div>

@@ -64,7 +64,6 @@ function TopologyPageInner() {
       <TopologyWorkbench
         mode="standalone"
         initialFocus={focus}
-        initialView="trace"
       />
     </div>
   );

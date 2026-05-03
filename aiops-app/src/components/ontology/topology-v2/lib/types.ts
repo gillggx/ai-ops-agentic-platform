@@ -70,30 +70,12 @@ export interface FocusRef {
   id:   string;
 }
 
-export type ViewKind = "trace" | "graph" | Kind;   // 9 total: trace, graph, + 7 per-kind
-
-export const VIEW_LABEL: Record<ViewKind, string> = {
-  trace:  "Trace",
-  graph:  "Graph",
-  tool:   "Tool",
-  lot:    "Lot",
-  recipe: "Recipe",
-  apc:    "APC",
-  step:   "Step",
-  fdc:    "FDC",
-  spc:    "SPC",
-};
-
 export interface TweaksState {
-  density:        "compact" | "comfy" | "loose";
-  anomalyEmph:    "none" | "subtle" | "strong";
-  showFocusPanel: boolean;
-  linkStyle:      "underline" | "border" | "tint";   // TraceView lane styling
+  anomalyEmph: "none" | "subtle" | "strong";
+  linkStyle:   "underline" | "border" | "tint";   // TraceView lane styling
 }
 
 export const DEFAULT_TWEAKS: TweaksState = {
-  density:        "comfy",
-  anomalyEmph:    "subtle",
-  showFocusPanel: true,
-  linkStyle:      "underline",
+  anomalyEmph: "subtle",
+  linkStyle:   "underline",
 };

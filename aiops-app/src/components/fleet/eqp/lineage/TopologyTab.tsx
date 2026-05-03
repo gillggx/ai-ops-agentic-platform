@@ -24,7 +24,6 @@ export function TopologyTab({ toolId }: { toolId: string }) {
       <TopologyWorkbench
         mode="embedded"
         initialFocus={{ kind: "tool", id: toolId }}
-        initialView="trace"
       />
     </div>
   );

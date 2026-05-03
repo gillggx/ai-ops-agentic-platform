@@ -31,15 +31,6 @@ export default function TweaksPanel({ state, onChange, onClose }: Props) {
         }}>×</button>
       </div>
 
-      <Section label="Density">
-        <Radio value={state.density} onChange={(v) => set("density", v)}
-               options={[
-                 { value: "compact", label: "Compact" },
-                 { value: "comfy",   label: "Comfy"   },
-                 { value: "loose",   label: "Loose"   },
-               ]} />
-      </Section>
-
       <Section label="Anomaly emphasis">
         <Radio value={state.anomalyEmph} onChange={(v) => set("anomalyEmph", v)}
                options={[
@@ -49,24 +40,13 @@ export default function TweaksPanel({ state, onChange, onClose }: Props) {
                ]} />
       </Section>
 
-      <Section label="Lane links (Trace)">
+      <Section label="Lane links">
         <Radio value={state.linkStyle} onChange={(v) => set("linkStyle", v)}
                options={[
                  { value: "underline", label: "Underline" },
                  { value: "border",    label: "Border"    },
                  { value: "tint",      label: "Tint"      },
                ]} />
-      </Section>
-
-      <Section label="Detail">
-        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-          <input
-            type="checkbox"
-            checked={state.showFocusPanel}
-            onChange={(e) => set("showFocusPanel", e.target.checked)}
-          />
-          <span style={{ color: "#444" }}>Show focus panel</span>
-        </label>
       </Section>
     </div>
   );
