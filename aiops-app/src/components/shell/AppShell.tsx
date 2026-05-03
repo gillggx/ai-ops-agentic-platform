@@ -57,13 +57,8 @@ const KNOWLEDGE_ITEMS = [
   // entry point for building & publishing. Auto-Patrols / Auto-Check Rules /
   // Published Skills are reachable via Admin → Triggers Overview.
   { href: "/admin/pipeline-builder",  label: "Pipeline Builder",       icon: "🧩" },
-];
-
-// Help section — visible to all logged-in roles. Currently the chart
-// component catalog (/help/charts); future: agent-prompt cookbook,
-// keyboard shortcuts cheatsheet, etc.
-const HELP_ITEMS = [
-  { href: "/help/charts", label: "Chart Catalog", icon: "📚" },
+  // Chart catalog — 18 chart components catalog + per-user style preference.
+  { href: "/help/charts",             label: "Chart Catalog",          icon: "📚" },
 ];
 
 const ADMIN_ITEMS = [
@@ -201,13 +196,6 @@ function ContextualSidebar() {
             ))}
           </>
         )}
-
-        {/* Help — bottom section, all logged-in roles see it */}
-        <SidebarSection title="Help" collapsed={collapsed} />
-        {HELP_ITEMS.map(({ href, label, icon }) => (
-          <NavLink key={href} href={href} icon={icon} label={label}
-            active={isExact(href)} collapsed={collapsed} />
-        ))}
       </div>
     </nav>
   );
