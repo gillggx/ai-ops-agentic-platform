@@ -11,8 +11,6 @@
  *                    dropdown switcher)
  *   - llmPrompts   = 1-2 example natural-language prompts a user can paste
  *                    into AIAgentPanel to build this chart via the agent
- *   - hasAdvanced  = whether this chart has chart-specific Advanced controls
- *                    (drives the "Advanced" tab visibility on its detail page)
  *
  * Source for `group / title / hint` matches the existing /dev/charts page so
  * we keep visual consistency. block-description metadata (用途 / 何時用 /
@@ -51,8 +49,6 @@ export interface ChartCatalogEntry {
   hint: string;
   examples: ChartExample[];
   llmPrompts: string[];
-  /** When true, detail page shows Advanced tab in Style section. */
-  hasAdvanced: boolean;
 }
 
 export const CHART_CATALOG: ChartCatalogEntry[] = [
@@ -69,7 +65,6 @@ export const CHART_CATALOG: ChartCatalogEntry[] = [
       "畫 EQP-05 thickness 過去 24 小時趨勢，標 UCL/LCL/Center 三條線",
       "把 SPC value 跟 APC rf_power_bias 雙軸疊圖",
     ],
-    hasAdvanced: true,  // y_secondary color, rule line styles, highlight marker
   },
   {
     id: "bar", blockId: "block_bar_chart", chartType: "bar",
@@ -83,7 +78,6 @@ export const CHART_CATALOG: ChartCatalogEntry[] = [
       "全廠各機台 24h OOC count bar chart，超過 30% 標紅",
       "每個 step 的 alarm 數量比較",
     ],
-    hasAdvanced: false,
   },
   {
     id: "scatter", blockId: "block_scatter_chart", chartType: "scatter",
@@ -97,7 +91,6 @@ export const CHART_CATALOG: ChartCatalogEntry[] = [
       "RF Power 跟 thickness 的散布圖看相關性",
       "stage_time vs OOC% 散布",
     ],
-    hasAdvanced: false,
   },
 
   // ── EDA ────────────────────────────────────────────────────────────
@@ -113,7 +106,6 @@ export const CHART_CATALOG: ChartCatalogEntry[] = [
       "比較 4 台機台的 thickness 分布",
       "每個 lot 的 CD 變異 box plot，巢狀分組顯示 wafer 階層",
     ],
-    hasAdvanced: true, // outlier marker, IQR fill α, group bracket
   },
   {
     id: "splom", blockId: "block_splom", chartType: "splom",
@@ -127,7 +119,6 @@ export const CHART_CATALOG: ChartCatalogEntry[] = [
       "5 個 FDC sensor 兩兩散布矩陣，異常點標紅",
       "Recipe 主要參數的 pairwise correlation",
     ],
-    hasAdvanced: true, // density curve color, |r| heatmap palette
   },
   {
     id: "histogram", blockId: "block_histogram_chart", chartType: "histogram",
@@ -141,7 +132,6 @@ export const CHART_CATALOG: ChartCatalogEntry[] = [
       "STEP_007 thickness 直方圖，給 USL=15.5 LSL=14.5 算 Cpk",
       "EQP-03 的 RF power 分布看常態性",
     ],
-    hasAdvanced: true, // normal curve color, USL/LSL line color, ppm toggle
   },
 
   // ── SPC ────────────────────────────────────────────────────────────
@@ -157,7 +147,6 @@ export const CHART_CATALOG: ChartCatalogEntry[] = [
       "STEP_007 thickness 的 X̄/R 管制圖，subgroup_size=5，所有 WECO 規則開",
       "幫我建一個 lot-level X̄/R chart 監控 spc_xbar_chart_value",
     ],
-    hasAdvanced: true, // WECO R1-R8 colors, σ zone overlay, subgroup separator
   },
   {
     id: "imr", blockId: "block_imr", chartType: "imr",
@@ -171,7 +160,6 @@ export const CHART_CATALOG: ChartCatalogEntry[] = [
       "EQP-04 endpoint thickness 的 IMR chart，WECO R1+R2",
       "destructive test 的 individual chart",
     ],
-    hasAdvanced: true, // WECO colors, MR limit color
   },
   {
     id: "ewma_cusum", blockId: "block_ewma_cusum", chartType: "ewma_cusum",
@@ -186,7 +174,6 @@ export const CHART_CATALOG: ChartCatalogEntry[] = [
       "EQP-02 的 EWMA chart，λ=0.2 抓緩慢漂移",
       "CUSUM 偵測 STEP_005 RF power 的 1σ shift",
     ],
-    hasAdvanced: true, // mode toggle, decision interval shading color
   },
 
   // ── Diagnostic ─────────────────────────────────────────────────────
@@ -202,7 +189,6 @@ export const CHART_CATALOG: ChartCatalogEntry[] = [
       "全廠最常見的 defect type pareto",
       "哪幾台機台貢獻 80% OOC 事件",
     ],
-    hasAdvanced: true, // cumulative line color, 80% threshold line color
   },
   {
     id: "variability_gauge", blockId: "block_variability_gauge", chartType: "variability_gauge",
@@ -216,7 +202,6 @@ export const CHART_CATALOG: ChartCatalogEntry[] = [
       "Thickness 變異分解成 lot / wafer / tool 三層",
       "比較 lot-to-lot 跟 wafer-to-wafer 的變異哪個大",
     ],
-    hasAdvanced: false,
   },
   {
     id: "parallel_coords", blockId: "block_parallel_coords", chartType: "parallel_coords",
@@ -230,7 +215,6 @@ export const CHART_CATALOG: ChartCatalogEntry[] = [
       "Recipe 6 個關鍵參數 vs Yield 的平行座標，yield<92 標紅",
       "FDC 多參數同時看哪幾組數值跑掉",
     ],
-    hasAdvanced: true, // brush color, alert_below color, axis order
   },
   {
     id: "probability_plot", blockId: "block_probability_plot", chartType: "probability_plot",
@@ -244,7 +228,6 @@ export const CHART_CATALOG: ChartCatalogEntry[] = [
       "EQP-03 thickness 是否常態分布，給 AD test p-value",
       "Cpk 算之前先看 QQ plot",
     ],
-    hasAdvanced: false,
   },
   {
     id: "heatmap_dendro", blockId: "block_heatmap_dendro", chartType: "heatmap_dendro",
@@ -258,7 +241,6 @@ export const CHART_CATALOG: ChartCatalogEntry[] = [
       "FDC 全部 sensor 兩兩相關矩陣，cluster 排序",
       "哪幾個 step 的 OOC 同步發生",
     ],
-    hasAdvanced: true, // viridis/diverging toggle, cluster on/off, dendrogram visibility
   },
 
   // ── Wafer ──────────────────────────────────────────────────────────
@@ -274,7 +256,6 @@ export const CHART_CATALOG: ChartCatalogEntry[] = [
       "WAFER-001 的 49-site thickness wafer heatmap",
       "edge ring drift 比較，notch 朝下",
     ],
-    hasAdvanced: true, // notch position, color_mode (viridis/diverging), grid_n, show_points, wafer_radius_mm, unit
   },
   {
     id: "defect_stack", blockId: "block_defect_stack", chartType: "defect_stack",
@@ -288,7 +269,6 @@ export const CHART_CATALOG: ChartCatalogEntry[] = [
       "最近 50 wafer 的 defect 空間分布，按缺陷類型著色",
       "Particle 是否聚集在 edge ring",
     ],
-    hasAdvanced: true, // defect_code visibility toggle, max codes shown
   },
   {
     id: "spatial_pareto", blockId: "block_spatial_pareto", chartType: "spatial_pareto",
@@ -302,7 +282,6 @@ export const CHART_CATALOG: ChartCatalogEntry[] = [
       "WAFER-001 的 yield 空間 pareto，找最差區域",
       "Edge yield drop 嚴重程度",
     ],
-    hasAdvanced: true, // grid_n, unit
   },
   {
     id: "trend_wafer_maps", blockId: "block_trend_wafer_maps", chartType: "trend_wafer_maps",
@@ -316,7 +295,6 @@ export const CHART_CATALOG: ChartCatalogEntry[] = [
       "EQP-04 過去 7 天每天 wafer 空間分布 small multiples，PM 日標紅",
       "Lot-to-lot 重複性比較",
     ],
-    hasAdvanced: true, // PM marker style, grid cols, panel size
   },
 ];
 

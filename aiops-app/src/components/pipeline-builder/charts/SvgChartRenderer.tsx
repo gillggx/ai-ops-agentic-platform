@@ -156,7 +156,6 @@ export default function SvgChartRenderer({ spec, height, noStyleAdjuster }: Prop
         <StyleAdjuster
           theme={theme}
           setTheme={setTheme}
-          chartType={inner.type}
           onSaveAsDefault={() => saveAsDefault(theme)}
         />
       )}

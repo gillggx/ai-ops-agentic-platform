@@ -80,28 +80,17 @@ export function themeStyle(theme: ChartCardTheme): React.CSSProperties {
   } as React.CSSProperties;
 }
 
-import { ADVANCED_SETTINGS, type AdvancedProps } from "./advanced";
-import type { ChartType } from "./types";
-
 interface Props {
   theme: ChartCardTheme;
   setTheme: React.Dispatch<React.SetStateAction<ChartCardTheme>>;
-  /** Optional — when present, enables the Advanced tab for this chart type. */
-  chartType?: ChartType;
-  /** Optional — used by Advanced tab to read/write per-chart spec overrides. */
-  advancedProps?: AdvancedProps;
-  /** Optional — when present, shows "儲存為預設" button on Simple tab. */
+  /** Optional — when present, shows "儲存為預設" button at the bottom. */
   onSaveAsDefault?: () => void | Promise<void>;
 }
 
-export default function StyleAdjuster({ theme, setTheme, chartType, advancedProps, onSaveAsDefault }: Props) {
+export default function StyleAdjuster({ theme, setTheme, onSaveAsDefault }: Props) {
   const [open, setOpen] = React.useState(false);
-  const [tab, setTab] = React.useState<"simple" | "advanced">("simple");
   const [saveStatus, setSaveStatus] = React.useState<"idle" | "saving" | "ok" | "err">("idle");
   const popRef = React.useRef<HTMLDivElement | null>(null);
-
-  const AdvancedComp = chartType ? ADVANCED_SETTINGS[chartType] : undefined;
-  const hasAdvanced = !!AdvancedComp && !!advancedProps;
 
   React.useEffect(() => {
     if (!open) return;
@@ -150,106 +139,68 @@ export default function StyleAdjuster({ theme, setTheme, chartType, advancedProp
             </button>
           </div>
 
-          {/* Tab bar — only show when Advanced is available for this chart */}
-          {hasAdvanced && (
-            <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
-              <button
-                type="button"
-                onClick={() => setTab("simple")}
-                style={{
-                  flex: 1, padding: "4px 8px", fontSize: 11, fontWeight: 600,
-                  border: "1px solid var(--chart-grid-strong)",
-                  borderRadius: 3,
-                  background: tab === "simple" ? "var(--chart-data)" : "#fff",
-                  color: tab === "simple" ? "#fff" : "var(--chart-ink-2)",
-                  cursor: "pointer",
-                }}
-              >Simple</button>
-              <button
-                type="button"
-                onClick={() => setTab("advanced")}
-                style={{
-                  flex: 1, padding: "4px 8px", fontSize: 11, fontWeight: 600,
-                  border: "1px solid var(--chart-grid-strong)",
-                  borderRadius: 3,
-                  background: tab === "advanced" ? "var(--chart-data)" : "#fff",
-                  color: tab === "advanced" ? "#fff" : "var(--chart-ink-2)",
-                  cursor: "pointer",
-                }}
-              >Advanced</button>
-            </div>
-          )}
-
-          {(!hasAdvanced || tab === "simple") && (
-            <>
-              <div className="pb-style-row">
-                <label>Palette</label>
-                <select
-                  value={theme.palette}
-                  onChange={(e) => applyPalette(e.target.value as keyof typeof PALETTES)}
-                >
-                  {Object.keys(PALETTES).map((p) => (
-                    <option key={p} value={p}>{p}</option>
-                  ))}
-                </select>
-              </div>
-
-              {(['data', 'alert', 'secondary', 'bg', 'grid'] as const).map((k) => (
-                <div key={k} className="pb-style-row">
-                  <label>{k === 'bg' ? 'Background' : k.charAt(0).toUpperCase() + k.slice(1)}</label>
-                  <input
-                    type="color"
-                    value={theme[k]}
-                    onChange={(e) => setK(k, e.target.value)}
-                  />
-                  <span className="pb-style-val">{theme[k]}</span>
-                </div>
+          <div className="pb-style-row">
+            <label>Palette</label>
+            <select
+              value={theme.palette}
+              onChange={(e) => applyPalette(e.target.value as keyof typeof PALETTES)}
+            >
+              {Object.keys(PALETTES).map((p) => (
+                <option key={p} value={p}>{p}</option>
               ))}
+            </select>
+          </div>
 
-              <div className="pb-style-h">Sizing</div>
-              <div className="pb-style-row">
-                <label>Stroke</label>
-                <input type="range" min={0.5} max={4} step={0.1} value={theme.stroke}
-                  onChange={(e) => setK('stroke', +e.target.value)} />
-                <span className="pb-style-val">{theme.stroke.toFixed(1)}</span>
-              </div>
-              <div className="pb-style-row">
-                <label>Point r</label>
-                <input type="range" min={1} max={6} step={0.2} value={theme.pointR}
-                  onChange={(e) => setK('pointR', +e.target.value)} />
-                <span className="pb-style-val">{theme.pointR.toFixed(1)}</span>
-              </div>
-              <div className="pb-style-row">
-                <label>Fill α</label>
-                <input type="range" min={0} max={0.9} step={0.05} value={theme.fillOp}
-                  onChange={(e) => setK('fillOp', +e.target.value)} />
-                <span className="pb-style-val">{theme.fillOp.toFixed(2)}</span>
-              </div>
-              <div className="pb-style-row">
-                <label>Axis fs</label>
-                <input type="range" min={8} max={14} step={0.5} value={theme.axisFs}
-                  onChange={(e) => setK('axisFs', +e.target.value)} />
-                <span className="pb-style-val">{theme.axisFs}</span>
-              </div>
-              <div className="pb-style-row">
-                <label>Show grid</label>
-                <button
-                  type="button"
-                  className={`pb-style-toggle${theme.showGrid ? ' on' : ''}`}
-                  onClick={() => setK('showGrid', !theme.showGrid)}
-                >
-                  {theme.showGrid ? 'ON' : 'OFF'}
-                </button>
-              </div>
-            </>
-          )}
+          {(['data', 'alert', 'secondary', 'bg', 'grid'] as const).map((k) => (
+            <div key={k} className="pb-style-row">
+              <label>{k === 'bg' ? 'Background' : k.charAt(0).toUpperCase() + k.slice(1)}</label>
+              <input
+                type="color"
+                value={theme[k]}
+                onChange={(e) => setK(k, e.target.value)}
+              />
+              <span className="pb-style-val">{theme[k]}</span>
+            </div>
+          ))}
 
-          {hasAdvanced && tab === "advanced" && AdvancedComp && advancedProps && (
-            <AdvancedComp {...advancedProps} />
-          )}
+          <div className="pb-style-h">Sizing</div>
+          <div className="pb-style-row">
+            <label>Stroke</label>
+            <input type="range" min={0.5} max={4} step={0.1} value={theme.stroke}
+              onChange={(e) => setK('stroke', +e.target.value)} />
+            <span className="pb-style-val">{theme.stroke.toFixed(1)}</span>
+          </div>
+          <div className="pb-style-row">
+            <label>Point r</label>
+            <input type="range" min={1} max={6} step={0.2} value={theme.pointR}
+              onChange={(e) => setK('pointR', +e.target.value)} />
+            <span className="pb-style-val">{theme.pointR.toFixed(1)}</span>
+          </div>
+          <div className="pb-style-row">
+            <label>Fill α</label>
+            <input type="range" min={0} max={0.9} step={0.05} value={theme.fillOp}
+              onChange={(e) => setK('fillOp', +e.target.value)} />
+            <span className="pb-style-val">{theme.fillOp.toFixed(2)}</span>
+          </div>
+          <div className="pb-style-row">
+            <label>Axis fs</label>
+            <input type="range" min={8} max={14} step={0.5} value={theme.axisFs}
+              onChange={(e) => setK('axisFs', +e.target.value)} />
+            <span className="pb-style-val">{theme.axisFs}</span>
+          </div>
+          <div className="pb-style-row">
+            <label>Show grid</label>
+            <button
+              type="button"
+              className={`pb-style-toggle${theme.showGrid ? ' on' : ''}`}
+              onClick={() => setK('showGrid', !theme.showGrid)}
+            >
+              {theme.showGrid ? 'ON' : 'OFF'}
+            </button>
+          </div>
 
           {/* Save-as-default button — only when caller wired an onSaveAsDefault */}
-          {onSaveAsDefault && tab === "simple" && (
+          {onSaveAsDefault && (
             <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid var(--chart-grid)" }}>
               <button
                 type="button"

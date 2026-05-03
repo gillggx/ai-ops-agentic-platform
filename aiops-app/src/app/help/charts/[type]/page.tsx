@@ -52,17 +52,10 @@ export default function ChartDetailPage() {
   }, [userTheme]);
 
   // Spec patch state — Advanced controls write here. Cleared on example switch.
-  const baseSpec = React.useMemo(
+  const liveSpec = React.useMemo(
     () => entry?.examples[exampleIdx].spec() ?? null,
     [entry, exampleIdx]
   );
-  const [patch, setPatch] = React.useState<Record<string, unknown>>({});
-  React.useEffect(() => { setPatch({}); }, [exampleIdx, idStr]);
-
-  const liveSpec = React.useMemo(() => {
-    if (!baseSpec) return null;
-    return { ...baseSpec, ...patch };
-  }, [baseSpec, patch]);
 
   const [blockMeta, setBlockMeta] = React.useState<BlockMeta | null>(null);
   const [metaLoading, setMetaLoading] = React.useState(true);
@@ -208,23 +201,6 @@ export default function ChartDetailPage() {
                   <option key={i} value={i}>{ex.label}</option>
                 ))}
               </select>
-              {Object.keys(patch).length > 0 && (
-                <button
-                  onClick={() => setPatch({})}
-                  style={{
-                    padding: "4px 10px",
-                    fontSize: 11,
-                    border: "1px solid #d8d6d0",
-                    borderRadius: 4,
-                    background: "#fff",
-                    cursor: "pointer",
-                    color: "#75736d",
-                  }}
-                  title="把 Advanced 改的設定重置"
-                >
-                  Reset advanced
-                </button>
-              )}
             </div>
           )}
         </div>
@@ -244,11 +220,6 @@ export default function ChartDetailPage() {
               initial theme for ALL future chart renders for this user
               (Pipeline Builder results / Alarm Detail / Dashboard / Chat). */}
           <Section title="樣式設定">
-            <div style={{ fontSize: 11, color: "#75736d", marginBottom: 8, lineHeight: 1.6 }}>
-              {entry.hasAdvanced
-                ? "Simple = 11 項跨 chart 通用控制（顏色 / 線粗 / 字級）；Advanced = 此 chart 獨有的設定（如 SPC WECO 規則顏色、Wafer notch 位置等）。"
-                : "此 chart 的 Simple 11 項控制已涵蓋全部可調設定，無 Advanced 選項。"}
-            </div>
             <div style={{
               fontSize: 11,
               color: "#1d4ed8",
@@ -282,8 +253,6 @@ export default function ChartDetailPage() {
               <StyleAdjuster
                 theme={theme}
                 setTheme={setTheme}
-                chartType={entry.chartType}
-                advancedProps={{ baseSpec: baseSpec as Record<string, unknown>, patch, setPatch }}
                 onSaveAsDefault={() => saveAsDefault(theme)}
               />
             </div>
