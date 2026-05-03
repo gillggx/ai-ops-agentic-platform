@@ -26,6 +26,7 @@ from python_ai_sidecar.agent_builder.advisor.extract import (
 from python_ai_sidecar.agent_builder.advisor.synthesize import (
     synthesize_compare,
     synthesize_explain,
+    synthesize_knowledge,
     synthesize_recommend,
 )
 from python_ai_sidecar.agent_builder.session import StreamEvent
@@ -37,10 +38,18 @@ logger = logging.getLogger(__name__)
 _RECOMMEND_TOP_K = 3
 
 
-def _score_block_for_keywords(block: dict, keywords: list[str]) -> int:
-    """Naïve substring score across name + description + category. The
-    same scoring shape used by Java's PublishedSkill search, so results
-    are predictable. pgvector embedding upgrade is future work."""
+def _score_block_for_keywords(block: dict, keywords: list[str]) -> float:
+    """Naïve substring score across name + description + category + tags.
+    Same scoring shape Java's PublishedSkill search uses. pgvector embedding
+    upgrade is future work.
+
+    Deprecation penalty (2026-05-03): blocks with ``status='deprecated'`` get
+    multiplied by 0.3 so legacy mega-blocks (like ``block_chart``) don't
+    out-score active dedicated replacements just because their description
+    happens to mention multiple chart_type options. Surfaced by eval harness
+    case ``recommend_001`` — SPC outlier query was returning ``block_chart``
+    over the dedicated SPC family.
+    """
     haystack = " ".join(
         str(block.get(field) or "") for field in ("name", "description", "category", "tags")
     ).lower()
@@ -49,8 +58,6 @@ def _score_block_for_keywords(block: dict, keywords: list[str]) -> int:
         kw_lower = kw.strip().lower()
         if not kw_lower:
             continue
-        # Each occurrence counts; longer keyword matches weight more (rough
-        # IDF proxy).
         idx = 0
         while True:
             hit = haystack.find(kw_lower, idx)
@@ -58,6 +65,9 @@ def _score_block_for_keywords(block: dict, keywords: list[str]) -> int:
                 break
             score += max(1, len(kw_lower) // 3)
             idx = hit + len(kw_lower)
+
+    if (block.get("status") or "").lower() == "deprecated":
+        score = score * 0.3
     return score
 
 
@@ -102,6 +112,11 @@ async def stream_block_advisor(
 
     if intent == "RECOMMEND":
         async for ev in _run_recommend(user_message, java):
+            yield ev
+        return
+
+    if intent == "KNOWLEDGE":
+        async for ev in _run_knowledge(user_message):
             yield ev
         return
 
@@ -205,3 +220,15 @@ async def _run_recommend(
         },
     )
     yield StreamEvent(type="done", data={"status": "advisor_done", "intent": "RECOMMEND"})
+
+
+async def _run_knowledge(user_message: str) -> AsyncGenerator[StreamEvent, None]:
+    """Concept Q&A — pure LLM markdown answer, no Java fetch / no tool use.
+    Subjects are domain terms (WECO, Cpk, ANOVA, etc.) that aren't blocks
+    so there's nothing to look up. The reply is a small markdown card."""
+    md = await synthesize_knowledge(user_message)
+    yield StreamEvent(
+        type="advisor_answer",
+        data={"kind": "knowledge", "markdown": md},
+    )
+    yield StreamEvent(type="done", data={"status": "advisor_done", "intent": "KNOWLEDGE"})

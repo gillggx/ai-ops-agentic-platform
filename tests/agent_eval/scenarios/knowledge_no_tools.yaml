@@ -1,24 +1,30 @@
 suite: knowledge_no_tools
 endpoint: /internal/agent/build
 description: |
-  KNOWLEDGE bucket guarantee — concept questions in builder mode must
-  NOT trigger build_pipeline_live, advisor graph, or chart rendering.
-  Only synthesis-class events expected.
+  KNOWLEDGE bucket guarantee — concept questions (NOT block questions) in
+  builder mode must:
+    - route to advisor's KNOWLEDGE bucket → emit advisor_answer kind=knowledge
+    - NOT trigger build_pipeline_live (no plan/glass_usage events)
+    - NOT trigger Java block lookup (KNOWLEDGE doesn't fetch /internal/blocks)
 default_body: {}
 
 cases:
   - id: knowledge_weco_r5
-    description: 純概念，不該 build
+    description: WECO R5 概念，不該觸發 build / plan
     input:
       message: "WECO R5 是什麼意思?"
     expect:
-      sse_event_types_exclude: [advisor_answer, plan, glass_usage, pb_pipeline]
-      min_event_count: 1
+      sse_event_types_include: [advisor_answer]
+      sse_event_types_exclude: [plan, glass_usage, pb_pipeline]
+      advisor_kind: knowledge
+      answer_contains_any: ["WECO", "R5", "規則", "管制", "rule"]
 
   - id: knowledge_cpk_definition
-    description: Cpk 概念
+    description: Cpk vs Ppk 概念對比（不是 block 對比，是統計指標）
     input:
       message: "Cpk 跟 Ppk 差在哪?"
     expect:
-      sse_event_types_exclude: [advisor_answer, plan, glass_usage, pb_pipeline]
-      min_event_count: 1
+      sse_event_types_include: [advisor_answer]
+      sse_event_types_exclude: [plan, glass_usage, pb_pipeline]
+      advisor_kind: knowledge
+      answer_contains_any: ["Cpk", "Ppk", "process capability", "製程能力"]

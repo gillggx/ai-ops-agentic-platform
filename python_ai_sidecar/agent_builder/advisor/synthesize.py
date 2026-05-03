@@ -192,3 +192,55 @@ def _fallback_recommend(candidates: list[dict[str, Any]]) -> str:
     for b in candidates[:3]:
         lines.append(f"### {b.get('name')}\n{b.get('description') or '(no description)'}\n")
     return "\n".join(lines)
+
+
+# ── KNOWLEDGE ────────────────────────────────────────────────────────
+
+_KNOWLEDGE_SYSTEM = """You answer manufacturing / SPC / statistics domain
+concept questions for a fab process engineer. The user is on a Pipeline
+Builder canvas but their question is conceptual — NOT about a specific
+block, NOT a request to build anything.
+
+Format the answer in markdown:
+  ## {term}
+  **是什麼**：1-2 句白話定義
+  **怎麼用 / 怎麼算**：1-3 句說明，包含關鍵公式 / 規則
+  **跟 ___ 的差別**：對比相關概念（如果用戶有問或 obvious）
+  **常見場景**：1-2 個實際 fab 場景（半導體 SPC / APC / FDC / Recipe）
+  **相關 block**：如果有對應的 Pipeline Builder block，列 1-2 個（block_xxx）
+
+Rules:
+- Reply in user's language (Chinese if user wrote Chinese, else English).
+- ≤ 200 words.
+- For SPC / WECO / control chart / Cpk / Ppk / ANOVA / Anderson-Darling
+  / EWMA / CUSUM / Pareto / 80-20 rule etc. — give the standard textbook
+  definition + fab-specific context.
+- Don't invent block names you're not sure exist. If you don't know a
+  related block, omit the section.
+- Don't suggest building a pipeline (user didn't ask).
+"""
+
+
+async def synthesize_knowledge(user_question: str) -> str:
+    """Concept Q&A — pure markdown answer, no Java fetch, no tools.
+    The LLM is the only knowledge source (concept definitions are stable
+    enough that we don't need to ground them in DB)."""
+    client = get_llm_client()
+    try:
+        resp = await client.create(
+            system=_KNOWLEDGE_SYSTEM,
+            messages=[{"role": "user", "content": user_question}],
+            max_tokens=_MAX_OUTPUT_TOKENS,
+        )
+        return (resp.text or "").strip() or _fallback_knowledge(user_question)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("advisor.synthesize_knowledge failed (%s) — fallback", e)
+        return _fallback_knowledge(user_question)
+
+
+def _fallback_knowledge(user_question: str) -> str:
+    return (
+        f"## 抱歉，無法回答\n\n"
+        f"LLM 暫時無法回應你的問題：「{user_question}」\n\n"
+        "請稍後再試，或上 [Knowledge Studio → Chart Catalog](/help/charts) 找相關 block。"
+    )

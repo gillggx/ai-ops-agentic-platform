@@ -92,12 +92,14 @@ cases:
       candidates_include_any: [block_defect_stack, block_wafer_heatmap, block_spatial_pareto]
 
   - id: knowledge_001
-    description: 概念題（WECO 是什麼）
+    description: 概念題（WECO 是什麼）— advisor 用 KNOWLEDGE bucket 回 markdown
     input:
       message: "WECO R5 是什麼意思?"
     expect:
-      sse_event_types_exclude: [advisor_answer, plan, glass_usage]
-      min_event_count: 1
+      sse_event_types_include: [advisor_answer]
+      sse_event_types_exclude: [plan, glass_usage, pb_pipeline]
+      advisor_kind: knowledge
+      answer_contains_any: ["WECO", "R5", "規則", "管制", "rule"]
 
   - id: ambiguous_001
     description: 太模糊（單一 block 名沒動詞 + 沒疑問）
