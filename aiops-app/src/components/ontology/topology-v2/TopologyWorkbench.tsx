@@ -15,7 +15,7 @@
  * document.body, sized 100vw / 100vh, ESC to exit.
  */
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { FocusRef, TweaksState, DEFAULT_TWEAKS } from "./lib/types";
 import { useTopologyRuns } from "./lib/useTopologyRuns";
@@ -58,6 +58,29 @@ export default function TopologyWorkbench({
   const { data, loading, error } = useTopologyRuns({ from: fromIso, to: toIso });
 
   const allRuns     = data?.runs ?? [];
+
+  // Auto-fit window once after first data load. Wall-clock "last 6 h" often
+  // misses the simulator's actual event burst — instead snap to the latest 6 h
+  // of real data, so the user sees something on first render. Disabled once
+  // the user manually drags the timeline.
+  const userScrubbed = useRef(false);
+  const autoFittedRef = useRef(false);
+  useEffect(() => {
+    if (autoFittedRef.current || userScrubbed.current) return;
+    if (!allRuns.length) return;
+    const latestT = Math.max(...allRuns.map((r) => Date.parse(r.eventTime)));
+    if (!Number.isFinite(latestT)) return;
+    const newStart = Math.max(outerWindow[0], latestT - 6 * HOUR_MS);
+    const newEnd   = Math.min(outerWindow[1], latestT + 5 * 60 * 1000);   // tiny buffer
+    setWindowRange([newStart, newEnd]);
+    autoFittedRef.current = true;
+  }, [allRuns, outerWindow]);
+
+  const handleWindowChange = (range: [number, number]) => {
+    userScrubbed.current = true;
+    setWindowRange(range);
+  };
+
   const visibleRuns = useMemo(
     () => runsInWindow(allRuns, windowRange[0], windowRange[1]),
     [allRuns, windowRange],
@@ -104,14 +127,29 @@ export default function TopologyWorkbench({
       />
 
       <div style={{ flex: 1, position: "relative", display: "flex", minHeight: 0, overflow: "hidden" }}>
-        <TraceView
-          runs={visibleRuns}
-          ontology={ontology}
-          windowRange={windowRange}
-          focus={focus}
-          onFocus={setFocus}
-          linkStyle={tweaks.linkStyle}
-        />
+        {visibleRuns.length === 0 ? (
+          <div style={{
+            flex: 1, display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center",
+            color: "#aaa", fontSize: 12, letterSpacing: "0.04em", gap: 8,
+          }}>
+            <div>目前選定的時間範圍沒有 runs</div>
+            <div style={{ fontSize: 11, color: "#bbb" }}>
+              {allRuns.length > 0
+                ? `下方 timeline 共 ${allRuns.length} runs，拖動 selection rectangle 到有資料的時段`
+                : "outer 2 天內沒有 runs — simulator 可能未啟動"}
+            </div>
+          </div>
+        ) : (
+          <TraceView
+            runs={visibleRuns}
+            ontology={ontology}
+            windowRange={windowRange}
+            focus={focus}
+            onFocus={setFocus}
+            linkStyle={tweaks.linkStyle}
+          />
+        )}
       </div>
 
       {(loading || error) && (
@@ -129,7 +167,7 @@ export default function TopologyWorkbench({
       <Timeline
         outerWindow={outerWindow}
         selected={windowRange}
-        onChange={setWindowRange}
+        onChange={handleWindowChange}
         runs={allRuns}
       />
 
