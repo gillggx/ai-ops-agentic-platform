@@ -54,10 +54,21 @@ export function TopologyTab({ toolId }: { toolId: string }) {
     return () => { cancelled = true; };
   }, [toolId]);
 
+  // .surface (background + border-radius) needs to be a flex column so
+  // TopologyCanvas's outer `display: flex; flex: 1` can claim height.
+  // Without this the canvas collapses to 0 effective height and renders
+  // empty — the bug user reported when 拓樸圖 sub-tab shows blank.
   return (
-    <div className="surface" style={{ padding: 16, minHeight: 480 }}>
-      {loading && <div className="micro" style={{ color: "var(--c-ink-3)" }}>載入中…</div>}
-      {err && <div className="small" style={{ color: "var(--c-crit)" }}>載入失敗：{err}</div>}
+    <div
+      className="surface"
+      style={{ minHeight: 600, height: 600, display: "flex", flexDirection: "column", overflow: "hidden" }}
+    >
+      {loading && (
+        <div className="micro" style={{ padding: 16, color: "var(--c-ink-3)" }}>載入中…</div>
+      )}
+      {err && (
+        <div className="small" style={{ padding: 16, color: "var(--c-crit)" }}>載入失敗：{err}</div>
+      )}
       {!loading && !err && <TopologyCanvas snapshot={snapshot} centerType="TOOL" />}
     </div>
   );
