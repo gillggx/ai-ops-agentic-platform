@@ -26,6 +26,8 @@ import AutoPatrolScopePicker, {
   validatePickedScope,
   type PickedScope,
 } from "@/components/pipeline-builder/AutoPatrolScopePicker";
+import SurfaceTour from "@/components/tour/SurfaceTour";
+import { PIPELINE_BUILDER_STEPS } from "@/components/tour/steps/pipeline-builder";
 
 // React Flow can't SSR
 const BuilderLayout = dynamic(() => import("@/components/pipeline-builder/BuilderLayout"), {
@@ -189,12 +191,15 @@ function WizardOrBuilder({
         : (ephemeralPipeline?.inputs ?? []),
     };
     return (
-      <BuilderLayout
-        mode="new"
-        initialKind={kind}
-        initialPipelineJson={initialJson}
-        initialPendingTrigger={pendingTrigger}
-      />
+      <>
+        <BuilderLayout
+          mode="new"
+          initialKind={kind}
+          initialPipelineJson={initialJson}
+          initialPendingTrigger={pendingTrigger}
+        />
+        <SurfaceTour surfaceId="pipeline-builder" steps={PIPELINE_BUILDER_STEPS} />
+      </>
     );
   }
 

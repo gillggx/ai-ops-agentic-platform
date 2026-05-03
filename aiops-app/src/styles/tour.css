@@ -1,0 +1,269 @@
+/* Tour / Onboarding overlay + Cross-surface Command Palette + HelpButton.
+ *
+ * Self-contained CSS — declares its own --tour-* variables instead of
+ * leaking the reference design's --c-* names (which collide with existing
+ * fleet-overview.css that uses --c-ink-1/2/3/4 + --c-line). All values
+ * align with chart-tokens.css for visual consistency.
+ */
+
+:root {
+  --tour-bg: #ffffff;
+  --tour-border: #e8e8e4;
+  --tour-border-strong: #d4d4cf;
+  --tour-ink: #18181a;
+  --tour-ink-2: #4a4a4d;
+  --tour-ink-3: #76767a;
+  --tour-primary: #2563eb;
+  --tour-primary-strong: #1d4ed8;
+  --tour-alert: #dc2626;
+  --tour-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+/* ── Spotlight mask + bubble ─────────────────────────────────────────── */
+.tour-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  pointer-events: none;
+}
+.tour-mask svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: auto;
+}
+.tour-bubble {
+  position: fixed;
+  z-index: 1001;
+  background: var(--tour-bg);
+  border: 1px solid var(--tour-border);
+  border-radius: 8px;
+  box-shadow: 0 12px 36px rgba(0,0,0,0.22), 0 2px 6px rgba(0,0,0,0.08);
+  width: 320px;
+  padding: 14px 16px 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  pointer-events: auto;
+  animation: tourPop 0.18s ease-out;
+}
+@keyframes tourPop {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.tour-bubble .tb-step {
+  font-size: 9.5px;
+  font-family: var(--tour-mono);
+  color: var(--tour-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 4px;
+}
+.tour-bubble .tb-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--tour-ink);
+  margin-bottom: 6px;
+}
+.tour-bubble .tb-body {
+  color: var(--tour-ink-2);
+  margin-bottom: 12px;
+}
+.tour-bubble .tb-body code {
+  font-family: var(--tour-mono);
+  font-size: 10.5px;
+  background: #f0eee8;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.tour-bubble .tb-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tour-bubble .tb-progress {
+  display: flex;
+  gap: 3px;
+  flex: 1;
+}
+.tour-bubble .tb-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--tour-border-strong);
+  transition: background .15s, width .15s;
+}
+.tour-bubble .tb-dot.on {
+  background: var(--tour-primary);
+  width: 14px;
+  border-radius: 3px;
+}
+.tour-bubble button {
+  font: inherit;
+  font-size: 11.5px;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid var(--tour-border);
+  background: var(--tour-bg);
+  color: var(--tour-ink);
+}
+.tour-bubble button:hover { background: #fafaf7; }
+.tour-bubble button.primary {
+  background: var(--tour-primary);
+  color: #fff;
+  border-color: var(--tour-primary);
+}
+.tour-bubble button.primary:hover { background: var(--tour-primary-strong); }
+.tour-bubble button.skip {
+  border: none;
+  color: var(--tour-ink-3);
+  padding: 5px 6px;
+}
+.tour-bubble .tb-arrow {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: var(--tour-bg);
+  transform: rotate(45deg);
+  border: 1px solid var(--tour-border);
+}
+.tour-bubble .tb-arrow.top    { top: -7px; left: 24px; border-right: none; border-bottom: none; }
+.tour-bubble .tb-arrow.bottom { bottom: -7px; left: 24px; border-left: none; border-top: none; }
+.tour-bubble .tb-arrow.left   { left: -7px; top: 24px; border-right: none; border-top: none; }
+.tour-bubble .tb-arrow.right  { right: -7px; top: 24px; border-left: none; border-bottom: none; }
+
+/* ── Help / re-launch button (bottom-left, floating) ─────────────────── */
+.tour-help {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  z-index: 100;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--tour-ink);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tour-help:hover { background: var(--tour-primary); }
+
+/* ── Command Palette (Cmd+K, cross-surface) ──────────────────────────── */
+.tour-cmdk-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(20,20,17,0.18);
+  z-index: 1050;
+}
+.tour-cmdk-panel {
+  position: fixed;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 580px;
+  max-width: calc(100vw - 32px);
+  max-height: 70vh;
+  background: var(--tour-bg);
+  border: 1px solid var(--tour-border);
+  border-radius: 8px;
+  box-shadow: 0 16px 44px rgba(0,0,0,0.22);
+  z-index: 1051;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: tourPop 0.16s ease-out;
+}
+.tour-cmdk-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--tour-border);
+}
+.tour-cmdk-h .ic { font-size: 14px; color: var(--tour-ink-3); }
+.tour-cmdk-h input {
+  flex: 1;
+  border: none;
+  outline: none;
+  font: inherit;
+  font-size: 13px;
+  background: transparent;
+  color: var(--tour-ink);
+}
+.tour-cmdk-h .kbd {
+  font-family: var(--tour-mono);
+  font-size: 10px;
+  padding: 1px 5px;
+  background: #f0eee8;
+  border-radius: 3px;
+  color: var(--tour-ink-3);
+}
+.tour-cmdk-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  flex: 1;
+}
+.tour-cmdk-group-h {
+  padding: 8px 10px 4px;
+  font-size: 9.5px;
+  font-family: var(--tour-mono);
+  color: var(--tour-ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.tour-cmdk-list li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--tour-ink);
+}
+.tour-cmdk-list li:hover,
+.tour-cmdk-list li.active {
+  background: #f0f4ff;
+  color: var(--tour-primary);
+}
+.tour-cmdk-list li .ic {
+  width: 18px;
+  text-align: center;
+}
+.tour-cmdk-list li .label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tour-cmdk-list li .meta {
+  margin-left: auto;
+  font-family: var(--tour-mono);
+  font-size: 9.5px;
+  color: var(--tour-ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+.tour-cmdk-empty {
+  padding: 24px 12px;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--tour-ink-3);
+}
+.tour-cmdk-loading {
+  padding: 12px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--tour-ink-3);
+  font-family: var(--tour-mono);
+}

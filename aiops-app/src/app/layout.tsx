@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "@/styles/tour.css";
 import { AppShell } from "@/components/shell/AppShell";
 import SessionProviderWrapper from "@/components/shell/SessionProviderWrapper";
+import { TourRoot } from "@/components/tour/TourRoot";
 
 export const metadata: Metadata = {
   title: "AIOps",
@@ -13,7 +15,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="zh-TW">
       <body>
         <SessionProviderWrapper>
-          <AppShell>{children}</AppShell>
+          <TourRoot>
+            <AppShell>{children}</AppShell>
+          </TourRoot>
         </SessionProviderWrapper>
       </body>
     </html>

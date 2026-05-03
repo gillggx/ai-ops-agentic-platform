@@ -18,6 +18,8 @@ import ReactMarkdown from "react-markdown";
 import { FleetOverview } from "@/components/fleet/FleetOverview";
 import { EqpDetail } from "@/components/fleet/eqp/EqpDetail";
 import SvgChartRenderer from "@/components/pipeline-builder/charts/SvgChartRenderer";
+import SurfaceTour from "@/components/tour/SurfaceTour";
+import { FLEET_STEPS } from "@/components/tour/steps/fleet";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1059,8 +1061,11 @@ function DashboardInner() {
 
 export default function DashboardPage() {
   return (
-    <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#a0aec0" }}>載入中...</div>}>
-      <DashboardInner />
-    </Suspense>
+    <>
+      <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#a0aec0" }}>載入中...</div>}>
+        <DashboardInner />
+      </Suspense>
+      <SurfaceTour surfaceId="fleet" steps={FLEET_STEPS} />
+    </>
   );
 }

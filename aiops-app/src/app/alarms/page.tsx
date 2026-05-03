@@ -11,6 +11,8 @@
 import "@/styles/alarm-center.css";
 import { useEffect } from "react";
 import { AlarmCenterShell } from "@/components/alarms/AlarmCenterShell";
+import SurfaceTour from "@/components/tour/SurfaceTour";
+import { ALARM_CENTER_STEPS } from "@/components/tour/steps/alarm-center";
 
 const FONT_LINK = "https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap";
 
@@ -27,5 +29,10 @@ export default function AlarmCenterPage() {
     document.head.appendChild(link);
   }, []);
 
-  return <AlarmCenterShell />;
+  return (
+    <>
+      <AlarmCenterShell />
+      <SurfaceTour surfaceId="alarm-center" steps={ALARM_CENTER_STEPS} />
+    </>
+  );
 }
