@@ -59,6 +59,13 @@ const KNOWLEDGE_ITEMS = [
   { href: "/admin/pipeline-builder",  label: "Pipeline Builder",       icon: "🧩" },
 ];
 
+// Help section — visible to all logged-in roles. Currently the chart
+// component catalog (/help/charts); future: agent-prompt cookbook,
+// keyboard shortcuts cheatsheet, etc.
+const HELP_ITEMS = [
+  { href: "/help/charts", label: "Chart Catalog", icon: "📚" },
+];
+
 const ADMIN_ITEMS = [
   { href: "/admin/triggers",        label: "Triggers Overview", icon: "🔔" },
   { href: "/system/skills",         label: "Skills",          icon: "⚙️" },
@@ -194,6 +201,13 @@ function ContextualSidebar() {
             ))}
           </>
         )}
+
+        {/* Help — bottom section, all logged-in roles see it */}
+        <SidebarSection title="Help" collapsed={collapsed} />
+        {HELP_ITEMS.map(({ href, label, icon }) => (
+          <NavLink key={href} href={href} icon={icon} label={label}
+            active={isExact(href)} collapsed={collapsed} />
+        ))}
       </div>
     </nav>
   );

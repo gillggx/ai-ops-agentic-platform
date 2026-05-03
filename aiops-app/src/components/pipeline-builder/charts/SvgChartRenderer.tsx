@@ -35,6 +35,7 @@ import {
   type ChartCardTheme,
   type ChartSpec,
 } from '.';
+import { useUserChartTheme } from '@/lib/charts/useUserChartTheme';
 
 interface Props {
   spec: ChartSpec | Record<string, unknown> | null | undefined;
@@ -110,11 +111,21 @@ function PlaceholderUnknown({ type }: { type: string }) {
 }
 
 export default function SvgChartRenderer({ spec, height, noStyleAdjuster }: Props) {
-  // Per-card theme state — lives for the lifetime of this card. CSS vars
-  // cascade from this host div into the chart's own `.pb-chart-card`,
-  // so we don't need to thread a `theme` prop through every chart
-  // component.
-  const [theme, setTheme] = React.useState<ChartCardTheme>({ ...DEFAULT_THEME });
+  // Per-card theme state — initial value comes from the user's saved
+  // preference (cached, fetched once per session). CSS vars cascade from
+  // this host div into the chart's own `.pb-chart-card`, so we don't
+  // need to thread a `theme` prop through every chart component.
+  // After mount, the hook may resolve and update the cached theme;
+  // we apply it to local state via effect (one-shot — don't clobber
+  // user's per-card ✦ tweaks).
+  const { theme: userTheme, saveAsDefault } = useUserChartTheme();
+  const [theme, setTheme] = React.useState<ChartCardTheme>(userTheme);
+  const initFromUserRef = React.useRef(false);
+  React.useEffect(() => {
+    if (initFromUserRef.current) return;
+    setTheme(userTheme);
+    initFromUserRef.current = true;
+  }, [userTheme]);
 
   const inner = unwrapSpec(spec);
   if (!inner || typeof inner.type !== 'string') {
@@ -141,7 +152,14 @@ export default function SvgChartRenderer({ spec, height, noStyleAdjuster }: Prop
       className="pb-chart-card-host"
       style={{ position: 'relative', width: '100%', ...themeStyle(theme) }}
     >
-      {!noStyleAdjuster && <StyleAdjuster theme={theme} setTheme={setTheme} />}
+      {!noStyleAdjuster && (
+        <StyleAdjuster
+          theme={theme}
+          setTheme={setTheme}
+          chartType={inner.type}
+          onSaveAsDefault={() => saveAsDefault(theme)}
+        />
+      )}
       <Component spec={inner} height={height} />
     </div>
   );
