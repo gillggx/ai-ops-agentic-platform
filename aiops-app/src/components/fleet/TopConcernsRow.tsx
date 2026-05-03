@@ -9,7 +9,7 @@ export function TopConcernsRow({ concerns, onDrill }: {
 }) {
   if (!concerns || concerns.length === 0) return null;
   return (
-    <div>
+    <div data-tour-id="fleet-concerns">
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
         <div className="h2">AI 摘要 — 最該關心的 3 件事</div>
         <span className="micro" style={{ color: "var(--c-ink-3)" }}>

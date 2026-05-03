@@ -32,7 +32,7 @@ export default function AlarmCenterPage() {
   return (
     <>
       <AlarmCenterShell />
-      <SurfaceTour surfaceId="alarm-center" steps={ALARM_CENTER_STEPS} />
+      <SurfaceTour surfaceId="alarm-center" steps={ALARM_CENTER_STEPS} version={2} />
     </>
   );
 }

@@ -81,7 +81,7 @@ export function FleetBriefingHero({ stats, equipment, concerns }: {
   ];
 
   return (
-    <div className="surface hero">
+    <div className="surface hero" data-tour-id="fleet-briefing">
       <div>
         <div className="hero__head">
           <span className="hero__head__icon">✦</span>

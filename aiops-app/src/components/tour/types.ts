@@ -22,7 +22,7 @@ export interface TourStep {
   selectorRect?: () => { left: number; top: number; width: number; height: number } | null;
 }
 
-export type SurfaceId = "pipeline-builder" | "alarm-center" | "fleet";
+export type SurfaceId = "pipeline-builder" | "alarm-center" | "fleet" | "fleet-eqp";
 
 export interface PaletteItem {
   /** Stable id used for keyboard nav + selection callback. */

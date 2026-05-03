@@ -12,7 +12,7 @@ export type { TourStep, SurfaceId, PaletteItem, PaletteSource } from "./types";
 
 export { PIPELINE_BUILDER_STEPS } from "./steps/pipeline-builder";
 export { ALARM_CENTER_STEPS } from "./steps/alarm-center";
-export { FLEET_STEPS } from "./steps/fleet";
+export { FLEET_STEPS, EQP_DETAIL_STEPS } from "./steps/fleet";
 
 export {
   makePipelinesSource,

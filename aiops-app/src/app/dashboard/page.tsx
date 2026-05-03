@@ -19,7 +19,7 @@ import { FleetOverview } from "@/components/fleet/FleetOverview";
 import { EqpDetail } from "@/components/fleet/eqp/EqpDetail";
 import SvgChartRenderer from "@/components/pipeline-builder/charts/SvgChartRenderer";
 import SurfaceTour from "@/components/tour/SurfaceTour";
-import { FLEET_STEPS } from "@/components/tour/steps/fleet";
+import { FLEET_STEPS, EQP_DETAIL_STEPS } from "@/components/tour/steps/fleet";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1054,6 +1054,14 @@ function DashboardInner() {
           <EqpDetail toolId={toolId} onBack={() => router.push("/dashboard")} />
         )}
       </div>
+
+      {/* Surface-specific tour: Mode A → fleet overview tour; Mode B → EQP
+          deep dive tour. Each surface remembers its own first-visit flag.
+          Version 2 — rewrote Mode A steps to use FleetBriefingHero +
+          TopConcernsRow + ToolList anchors that actually exist in DOM. */}
+      {toolId
+        ? <SurfaceTour surfaceId="fleet-eqp" steps={EQP_DETAIL_STEPS} version={1} />
+        : <SurfaceTour surfaceId="fleet" steps={FLEET_STEPS} version={2} />}
     </div>
   );
 }
@@ -1061,11 +1069,8 @@ function DashboardInner() {
 
 export default function DashboardPage() {
   return (
-    <>
-      <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#a0aec0" }}>載入中...</div>}>
-        <DashboardInner />
-      </Suspense>
-      <SurfaceTour surfaceId="fleet" steps={FLEET_STEPS} />
-    </>
+    <Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "#a0aec0" }}>載入中...</div>}>
+      <DashboardInner />
+    </Suspense>
   );
 }
