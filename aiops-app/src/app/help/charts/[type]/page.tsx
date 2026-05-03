@@ -240,23 +240,54 @@ export default function ChartDetailPage() {
         overflow: "hidden",
       }}>
         <div style={{ flex: 1, overflowY: "auto", padding: "20px 22px" }}>
-          <Link
-            href={`/admin/pipeline-builder/new?from=catalog&block=${entry.blockId}`}
-            style={{
-              display: "block",
-              padding: "10px 14px",
-              background: "#2563eb",
-              color: "#fff",
-              textDecoration: "none",
+          {/* Style settings — top of panel. Saving as default sets the
+              initial theme for ALL future chart renders for this user
+              (Pipeline Builder results / Alarm Detail / Dashboard / Chat). */}
+          <Section title="樣式設定">
+            <div style={{ fontSize: 11, color: "#75736d", marginBottom: 8, lineHeight: 1.6 }}>
+              {entry.hasAdvanced
+                ? "Simple = 11 項跨 chart 通用控制（顏色 / 線粗 / 字級）；Advanced = 此 chart 獨有的設定（如 SPC WECO 規則顏色、Wafer notch 位置等）。"
+                : "此 chart 的 Simple 11 項控制已涵蓋全部可調設定，無 Advanced 選項。"}
+            </div>
+            <div style={{
+              fontSize: 11,
+              color: "#1d4ed8",
+              background: "#eff6ff",
+              border: "1px solid #bfdbfe",
+              borderRadius: 4,
+              padding: "8px 10px",
+              marginBottom: 10,
+              lineHeight: 1.55,
+            }}>
+              💾 點 ✦ 面板底的「儲存為我的預設樣式」後，
+              <strong>新建 pipeline 時所有 chart 的初始樣式都會套用這組設定</strong>
+              （Pipeline Builder Results / Alarm Center / Dashboard 也跟著生效）。
+              個別 chart 卡仍可即時用 ✦ 暫時微調（不影響預設）。
+            </div>
+            <div style={{
+              padding: 12,
+              border: "1px solid #e8e8e4",
               borderRadius: 6,
-              fontSize: 12,
-              fontWeight: 600,
-              textAlign: "center",
-              marginBottom: 18,
-            }}
-          >
-            📋 用此 block 建 pipeline
-          </Link>
+              background: "#fafaf8",
+              minHeight: 56,
+              position: "relative",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              ...themeStyle(theme),
+            }}>
+              <div style={{ fontSize: 11, color: "#75736d" }}>
+                點右上 ✦ 開啟設定面板
+              </div>
+              <StyleAdjuster
+                theme={theme}
+                setTheme={setTheme}
+                chartType={entry.chartType}
+                advancedProps={{ baseSpec: baseSpec as Record<string, unknown>, patch, setPatch }}
+                onSaveAsDefault={() => saveAsDefault(theme)}
+              />
+            </div>
+          </Section>
 
           <Section title="說明">
             {metaLoading ? (
@@ -314,36 +345,25 @@ export default function ChartDetailPage() {
             ))}
           </Section>
 
-          <Section title="樣式設定">
-            <div style={{ fontSize: 11, color: "#75736d", marginBottom: 10 }}>
-              {entry.hasAdvanced
-                ? "Simple = 11 項跨 chart 通用控制（顏色 / 線粗 / 字級）；Advanced = 此 chart 獨有的設定（如 SPC WECO 規則顏色、Wafer notch 位置等）。"
-                : "此 chart 的 Simple 11 項控制已涵蓋全部可調設定，無 Advanced 選項。"}
-            </div>
-            <div style={{
-              padding: 12,
-              border: "1px solid #e8e8e4",
+          {/* CTA at bottom — natural conclusion after user has read 用途/
+              prompt/style. Goes to /new with ?block=... prefill. */}
+          <Link
+            href={`/admin/pipeline-builder/new?from=catalog&block=${entry.blockId}`}
+            style={{
+              display: "block",
+              padding: "12px 14px",
+              background: "#2563eb",
+              color: "#fff",
+              textDecoration: "none",
               borderRadius: 6,
-              background: "#fafaf8",
-              minHeight: 56,
-              position: "relative",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              ...themeStyle(theme),
-            }}>
-              <div style={{ fontSize: 11, color: "#75736d" }}>
-                點右上 ✦ 開啟設定面板
-              </div>
-              <StyleAdjuster
-                theme={theme}
-                setTheme={setTheme}
-                chartType={entry.chartType}
-                advancedProps={{ baseSpec: baseSpec as Record<string, unknown>, patch, setPatch }}
-                onSaveAsDefault={() => saveAsDefault(theme)}
-              />
-            </div>
-          </Section>
+              fontSize: 13,
+              fontWeight: 600,
+              textAlign: "center",
+              marginTop: 8,
+            }}
+          >
+            📋 用此 block 建 pipeline →
+          </Link>
         </div>
       </aside>
     </div>
