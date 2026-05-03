@@ -1050,7 +1050,7 @@ function DashboardInner() {
           /* Mode B: Phase 3 EQP detail (handoff design) — header / module
              5-light / top tabs (健康趨勢 ⇆ 製程溯源 with 3 sub-tabs) all
              live inside <EqpDetail/>. The legacy 6-tab and ProcessTracePanel
-             have been removed; 拓樸圖 sub-tab embeds TopologyCanvas. */
+             have been removed; 拓樸圖 sub-tab embeds the v2 TopologyWorkbench. */
           <EqpDetail toolId={toolId} onBack={() => router.push("/dashboard")} />
         )}
       </div>

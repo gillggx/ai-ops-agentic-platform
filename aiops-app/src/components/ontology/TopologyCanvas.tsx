@@ -1,5 +1,12 @@
 "use client";
 
+/**
+ * @deprecated Replaced by `topology-v2/TopologyWorkbench`. The new workbench
+ * uses 28-day windowed RUNS aggregation + multi-lane trace + 9 view kinds +
+ * fullscreen, instead of single-snapshot React Flow + Dagre. Kept around for
+ * one release as fallback; remove after no callers reference it.
+ */
+
 import { useState, useMemo, useCallback } from "react";
 import {
   ReactFlow,

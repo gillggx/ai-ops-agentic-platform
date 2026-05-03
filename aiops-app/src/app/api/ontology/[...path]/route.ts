@@ -395,6 +395,104 @@ async function getObjectList(type: string) {
   return NextResponse.json({ type, total: items.length, items });
 }
 
+/**
+ * Topology RUNS aggregate — feeds the new TopologyWorkbench (multi-lane trace,
+ * 28-day scrubber). One RUN = one completed process step (the simulator's
+ * `events` collection already yields tuples of (eventTime, lot, tool, step,
+ * recipe, apc, spc_status, fdc_classification) — i.e. each event IS a run).
+ *
+ * Filters supported:
+ *   from, to       — ISO timestamps (window). Defaults to last 28 days → now.
+ *   focus_kind     — lot|tool|recipe|apc|step|fdc|spc (optional)
+ *   focus_id       — id corresponding to focus_kind (optional)
+ *   limit          — max runs (cap 500, simulator's hard limit)
+ *
+ * Returns: { runs: RunRecord[], window: {from, to}, kindStats: {kind: count} }
+ */
+async function getTopologyRuns(searchParams: URLSearchParams) {
+  const limit     = Math.min(Number(searchParams.get("limit") ?? "500"), 500);
+  const focusKind = (searchParams.get("focus_kind") ?? "").toLowerCase();
+  const focusId   = searchParams.get("focus_id") ?? "";
+
+  // Default window = last 28 days
+  const now      = Date.now();
+  const fromMs   = searchParams.get("from")
+                  ? Date.parse(searchParams.get("from") as string)
+                  : now - 28 * 24 * 60 * 60 * 1000;
+  const toMs     = searchParams.get("to")
+                  ? Date.parse(searchParams.get("to") as string)
+                  : now;
+  const fromIso  = new Date(fromMs).toISOString();
+  const toIso    = new Date(toMs).toISOString();
+
+  // Push tool/lot filter to simulator (other kinds get filtered in Node)
+  const qs = new URLSearchParams({ start_time: fromIso, limit: String(limit) });
+  if (focusKind === "tool") qs.set("toolID", focusId);
+  if (focusKind === "lot")  qs.set("lotID",  focusId);
+
+  const res = await fetch(`${ONTOLOGY_BASE}/api/v1/events?${qs}`, { cache: "no-store" });
+  if (!res.ok) throw new Error(`events ${res.status}`);
+  const raw = await res.json() as Record<string, unknown>[];
+
+  const statusOf = (e: Record<string, unknown>): "ok" | "warn" | "alarm" => {
+    const spc = (e.spc_status as string) ?? "";
+    const fdc = (e.fdc_classification as string) ?? "";
+    if (spc === "FAIL" || (fdc && fdc !== "NORMAL")) return "alarm";
+    if (spc === "OOC")  return "warn";
+    return "ok";
+  };
+
+  const runs = raw
+    .filter((e) => {
+      const t = Date.parse(e.eventTime as string);
+      if (Number.isFinite(t) && (t < fromMs || t > toMs)) return false;
+      if (!focusKind || !focusId) return true;
+      switch (focusKind) {
+        case "lot":    return e.lotID    === focusId;
+        case "tool":   return e.toolID   === focusId;
+        case "recipe": return e.recipeID === focusId;
+        case "apc":    return e.apcID    === focusId;
+        case "step":   return e.step     === focusId;
+        case "fdc":    return (e.fdc_classification ?? "") === focusId;
+        case "spc":    return (e.spc_status ?? "") === focusId;
+        default:       return true;
+      }
+    })
+    .map((e, i) => ({
+      id:        `${e.toolID ?? ""}-${e.lotID ?? ""}-${e.step ?? ""}-${i}`,
+      eventTime: e.eventTime as string,
+      lotID:     (e.lotID    as string) ?? "",
+      toolID:    (e.toolID   as string) ?? "",
+      step:      (e.step     as string) ?? "",
+      recipeID:  (e.recipeID as string) ?? "",
+      apcID:     (e.apcID    as string) ?? "",
+      fdcID:     (e.fdc_classification as string) ?? "",
+      spcID:     (e.spc_status         as string) ?? "",
+      status:    statusOf(e),
+    }));
+
+  // Sort oldest-first so timeline scrubber gets natural ordering
+  runs.sort((a, b) => Date.parse(a.eventTime) - Date.parse(b.eventTime));
+
+  const kindStats = {
+    tool:   new Set(runs.map((r) => r.toolID).filter(Boolean)).size,
+    lot:    new Set(runs.map((r) => r.lotID).filter(Boolean)).size,
+    step:   new Set(runs.map((r) => r.step).filter(Boolean)).size,
+    recipe: new Set(runs.map((r) => r.recipeID).filter(Boolean)).size,
+    apc:    new Set(runs.map((r) => r.apcID).filter(Boolean)).size,
+    fdc:    new Set(runs.map((r) => r.fdcID).filter(Boolean)).size,
+    spc:    new Set(runs.map((r) => r.spcID).filter(Boolean)).size,
+  };
+
+  return NextResponse.json({
+    runs,
+    window:    { from: fromIso, to: toIso },
+    kindStats,
+    truncated: raw.length >= limit,
+  });
+}
+
+
 async function getTopologySnapshot(searchParams: URLSearchParams) {
   const lotId     = searchParams.get("lot") ?? "";
   const step      = searchParams.get("step") ?? "";
@@ -624,6 +722,10 @@ export async function GET(
 
     if (path.length === 1 && path[0] === "topology")
       return await getTopologySnapshot(sp);
+
+    // GET /api/ontology/topology/runs?from=&to=&focus_kind=&focus_id=&limit=
+    if (path.length === 2 && path[0] === "topology" && path[1] === "runs")
+      return await getTopologyRuns(sp);
 
     // GET /api/ontology/objects?type=RECIPE|APC
     if (path.length === 1 && path[0] === "objects")
