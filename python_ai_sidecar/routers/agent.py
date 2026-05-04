@@ -245,11 +245,16 @@ async def _build_continue_stream(req: BuildContinueRequest, caller: CallerContex
     registry = SeedlessBlockRegistry()
     registry.load()
 
+    from python_ai_sidecar.agent_builder.event_wrapper import wrap_build_event_for_chat
+
     model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
     async for stream_event in stream_agent_build(session, registry, model=model):
+        wrapped = wrap_build_event_for_chat(stream_event, session.session_id)
+        if wrapped is None:
+            continue
         yield {
-            "event": stream_event.type,
-            "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
+            "event": wrapped["type"],
+            "data": json.dumps(wrapped, default=str, ensure_ascii=False),
         }
 
 

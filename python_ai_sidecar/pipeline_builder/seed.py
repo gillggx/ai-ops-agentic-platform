@@ -200,6 +200,7 @@ def _blocks() -> list[dict[str, Any]]:
                 "⚠ column 名稱要完全一致（case-sensitive + snake_case）\n"
                 "⚠ 比較 boolean 欄位時 value 給 True/False（Python bool），不是字串 'True'\n"
                 "⚠ contains 只對 string column 有意義；數值欄位會出錯\n"
+                "⚠ **value 是 filter 專屬 param**；如果你要做的是「判斷有沒有違規 + 輸出 evidence」，不是過濾，請改用 block_threshold（threshold 用 'target' 或 'upper_bound'/'lower_bound'，不是 'value'）\n"
                 "\n"
                 "== Errors ==\n"
                 "- COLUMN_NOT_FOUND : column 名稱打錯 / 上游沒這欄\n"
@@ -276,6 +277,7 @@ def _blocks() -> list[dict[str, Any]]:
                 "  - 不確定 → 先 run_preview 上游。\n"
                 "\n"
                 "== Common mistakes ==\n"
+                "⚠ **不要用 'value' 這個 param** — 那是 block_filter 的，threshold 是 Mode A 用 'upper_bound'/'lower_bound'、Mode B 用 'target'。寫 set_param(threshold_node, 'value', X) 一定 fail\n"
                 "⚠ 別以為 evidence 只含違規列 — 它是 **全部 rows**，triggered_row 欄位才是違規旗標\n"
                 "⚠ Mode A / Mode B 擇一：同時給 bound_type + operator 時 Mode A 優先\n"
                 "⚠ column 要是數值型（除非用 ==/!=）；string 欄 + > / < 會出錯\n"
@@ -284,6 +286,7 @@ def _blocks() -> list[dict[str, Any]]:
                 "- COLUMN_NOT_FOUND : column 不在上游 df\n"
                 "- MISSING_BOUND    : Mode A 沒給對應 bound\n"
                 "- INVALID_MODE     : 兩 mode 的參數都沒給完整\n"
+                "- PARAM_NOT_IN_SCHEMA: 用了 'value'/其他不認得的 key（threshold 只認 column / bound_type / upper_bound / lower_bound / operator / target）\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [

@@ -568,6 +568,11 @@ export function AIAgentPanel({
   // link can stash the just-built pipeline into sessionStorage for the
   // /new route to pick up.
   const lastBuiltPipelineRef = useRef<unknown | null>(null);
+  // Bug 2 fix (2026-05-05): continuation SSE consumer used to ignore every
+  // pb_glass_* event, leaving the chat panel stuck on the pre-pause state
+  // even after the build resumed and finished. Park the main dispatcher
+  // here so /agent/build/continue can re-enter the same handler.
+  const buildStreamHandlerRef = useRef<((ev: Record<string, unknown>) => void) | null>(null);
   const [hitl, setHitl]             = useState<HitlRequest | null>(null);
   const [tokenIn, setTokenIn]       = useState(0);
   const [tokenOut, setTokenOut]     = useState(0);
@@ -740,7 +745,7 @@ export function AIAgentPanel({
         return;
       }
 
-      await consumeSSE(res, (ev) => {
+      const handleStreamEvent = (ev: Record<string, unknown>) => {
         const type = ev.type as string;
 
         switch (type) {
@@ -1450,7 +1455,9 @@ export function AIAgentPanel({
             break;
           }
         }
-      }, (err) => {
+      };
+      buildStreamHandlerRef.current = handleStreamEvent;
+      await consumeSSE(res, handleStreamEvent, (err) => {
         addLog(makeLog("❌", `連線失敗: ${err.message}`, "error"));
       });
     } finally {
@@ -1770,24 +1777,20 @@ export function AIAgentPanel({
                         addLog(makeLog("❌", `Continue failed: ${res.status}`, "error"));
                         return;
                       }
-                      // Re-feed SSE stream into the existing dispatcher.
-                      // The chat panel's main consumeSSE loop closed when /chat
-                      // returned, so we need a second consumer here.
-                      await consumeSSE(res, (innerEv) => {
-                        // Inline tiny dispatcher: forward back to outer switch
-                        // by triggering a state-mutation hook. Keeping it simple:
-                        // most events we care about (operation / done) are
-                        // applied via the same setters as the main flow.
-                        // For brevity we re-emit through a minimal echo.
-                        if (innerEv.type === "done") {
-                          const summary = (innerEv.summary as string) || "繼續完成";
-                          setChatHistory((prev) => [...prev, {
-                            id: nextId(), role: "agent", content: `✓ ${summary}`,
-                          }]);
-                        } else if (innerEv.type === "error") {
-                          addLog(makeLog("❌", String(innerEv.message ?? ""), "error"));
-                        }
-                      });
+                      // Bug 2 fix: route continuation events through the
+                      // same dispatcher as the first build pass. Backend
+                      // /build/continue now wraps events as pb_glass_*
+                      // (event_wrapper.wrap_build_event_for_chat) so the
+                      // main switch picks up canvas ops, plan updates and
+                      // the final done card.
+                      const handler = buildStreamHandlerRef.current;
+                      if (handler) {
+                        await consumeSSE(res, handler, (err) => {
+                          addLog(makeLog("❌", `Continue 連線失敗: ${err.message}`, "error"));
+                        });
+                      } else {
+                        addLog(makeLog("❌", "Continue handler unavailable — refresh the page", "error"));
+                      }
                     } catch (e) {
                       addLog(makeLog("❌", `Continue error: ${(e as Error).message}`, "error"));
                     }
