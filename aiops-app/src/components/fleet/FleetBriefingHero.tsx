@@ -66,10 +66,11 @@ export function FleetBriefingHero({ stats, equipment, concerns }: {
     } finally { setLoading(false); }
   }, [fleetData, stats]);
 
-  // Re-stream whenever stats/concerns/equipment shape changes meaningfully.
-  // Use stats.as_of as the cache key — it ticks every refresh.
-  const cacheKey = stats?.as_of ?? "";
-  useEffect(() => { refresh(); }, [cacheKey]); // eslint-disable-line
+  // 2026-05-04 cost cut: removed auto-refresh-on-stats-change. Auto-firing
+  // every dashboard tick (default 5min) on every open tab burned ~288 LLM
+  // calls/day/tab even when nobody was looking. AI briefing is now
+  // explicitly user-triggered via the "↻ 重新生成" button. The deterministic
+  // fallback below covers the empty state.
 
   const fleetOoc = stats ? stats.fleet_ooc_rate.toFixed(2) + "%" : "—";
   const cards: { k: string; v: string; sev?: "crit" | "warn" | "info" }[] = [
@@ -103,6 +104,11 @@ export function FleetBriefingHero({ stats, equipment, concerns }: {
             <span style={{ color: "var(--c-ink-3)" }}>
               <span className="cursor-blink" />
               AI 分析整廠狀態中…
+            </span>
+          )}
+          {!loading && !text && (
+            <span style={{ color: "var(--c-ink-3)", fontSize: 14, fontWeight: 400 }}>
+              點上方「↻ 重新生成」產生 AI 摘要（消耗 LLM token，按需觸發）
             </span>
           )}
           {text && <ReactMarkdown>{text}</ReactMarkdown>}

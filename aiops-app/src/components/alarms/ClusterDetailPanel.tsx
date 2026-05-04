@@ -36,7 +36,11 @@ export function ClusterDetailPanel({ cluster, onAcked }: {
       trigger_events: cluster.trigger_events,
     },
   }) : "", [cluster]);
-  const synthesis = useBriefing("alarm", briefingData);
+  // Cache key = cluster_id + open_count + last_at. Re-opening the same
+  // cluster within TTL replays cached text. Any state change (new alarms,
+  // ACK / resolve) shifts the count or last_at and invalidates.
+  const synthesis = useBriefing("alarm", briefingData,
+    cluster ? `${cluster.cluster_id}:${cluster.open_count}:${cluster.last_at ?? ""}` : undefined);
   useEffect(() => { if (cluster) synthesis.refresh(); }, [cluster?.cluster_id]); // eslint-disable-line
 
   const [acking, setAcking] = useState(false);

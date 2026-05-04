@@ -350,8 +350,26 @@ export default function TraceView({
           padding: "8px 18px", fontSize: 10, color: INK_3, letterSpacing: "0.08em",
         }}>
           <span style={{ fontWeight: 600, color: INK }}>TRACE</span>
-          <Knob label="ZOOM"  value={zoom}        min={1}   max={4} step={0.25} onChange={setZoom}        fmt={(v) => `${v.toFixed(2)}×`} />
-          <Knob label="TICKS" value={tickDensity} min={0.5} max={3} step={0.25} onChange={setTickDensity} fmt={(v) => `${v.toFixed(2)}×`} />
+          {/* 2026-05-04: zoom max 4 → 20 because 2-day windows with all events
+              clustered in the last hour were squished even at 4×. Tick label
+              now shows the actual unit (1 tick / hour or / day). */}
+          <Knob label="ZOOM"  value={zoom}        min={1}   max={20} step={0.5} onChange={setZoom}        fmt={(v) => `${v.toFixed(1)}×`} />
+          <Knob
+            label="TICKS"
+            value={tickDensity}
+            min={0.5}
+            max={3}
+            step={0.25}
+            onChange={setTickDensity}
+            fmt={(v) => {
+              // span in ms → expected major-tick unit at this density.
+              // < 1 day window: per-hour ticks; ≥ 1 day: per-day. Density
+              // multiplies that base, so 1× = baseline, 2× = double freq.
+              const isHourly = span < 24 * 60 * 60 * 1000;
+              const baseLabel = isHourly ? "/hour" : "/day";
+              return `${v.toFixed(2)}× ${baseLabel}`;
+            }}
+          />
           <div style={{ flex: 1 }} />
           <span style={{ color: INK_3, fontSize: 9.5 }}>
             {selected ? "click background to release · " : "hover to highlight · "}
@@ -589,7 +607,10 @@ function TimePointer({ t0, t1, pointerT, setPointerT, labelW, padR, density, are
         padding: "0 18px", fontSize: 9.5, letterSpacing: "0.12em", color: INK_3,
         position: "sticky", left: 0, background: PAPER,
       }}>
-        TIME · {Math.round(span / 86400000)} D<br />
+        {/* 2026-05-04: dropped redundant "TIME · N D" header — same info is
+            already in the TIMELINE scrubber below this view. Only the live
+            pointer time is useful here as you scrub left/right. */}
+        CURSOR<br />
         <span style={{ color: INK, fontWeight: 500, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, letterSpacing: 0 }}>
           {fmtPointer(pointerT)}
         </span>

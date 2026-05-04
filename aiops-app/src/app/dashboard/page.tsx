@@ -153,7 +153,9 @@ function BriefingPanel({ scope, toolId }: { scope: "fab" | "tool"; toolId?: stri
     }
   }, [scope, toolId]);
 
-  useEffect(() => { fetchBriefing(); }, [fetchBriefing]);
+  // 2026-05-04 cost cut: removed auto-fire on mount + dashboard 5-min refresh
+  // re-trigger. AI briefing now only fires when user clicks 「🔄 重新生成」.
+  // Empty state shows a hint instead of silently burning tokens.
 
   return (
     <div style={{ background: "#fff", border: "1px solid #e8e8e8", borderRadius: 8, overflow: "hidden", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
@@ -204,7 +206,9 @@ function BriefingPanel({ scope, toolId }: { scope: "fab" | "tool"; toolId?: stri
               <span>AI 正在分析資料並生成簡報...</span>
             </div>
           ) : (
-            <span style={{ color: "#a0aec0" }}>（無簡報）</span>
+            <span style={{ color: "#a0aec0" }}>
+              點上方「🔄 重新生成」產生 AI 簡報（消耗 LLM token，按需觸發）
+            </span>
           )}
         </div>
       </div>

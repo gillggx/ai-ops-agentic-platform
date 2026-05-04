@@ -89,13 +89,33 @@ export function timeAgo(iso: string): string {
 
 // ── SSE Briefing fetcher ─────────────────────────────────────
 
-export function useBriefing(scope: string, data?: string) {
+// 2026-05-04 cost cut: in-memory briefing cache. Same (scope + cacheKey)
+// returned within TTL replays the cached text instead of firing a new LLM
+// stream. Re-clicks on the same alarm/cluster used to burn one call each.
+// Module-scoped Map = shared across mounts within the same tab. TTL 10min
+// — short enough that fresh alarm context (status flips, new evidence)
+// still gets a re-render; long enough to absorb tab-switching loops.
+const _BRIEFING_CACHE = new Map<string, { text: string; ts: number }>();
+const _BRIEFING_TTL_MS = 10 * 60 * 1000;
+
+export function useBriefing(scope: string, data?: string, cacheKey?: string) {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const fetch_ = useCallback(async () => {
+  const fetch_ = useCallback(async (forceFresh = false) => {
+    const fullKey = `${scope}:${cacheKey ?? data ?? ""}`;
+    if (!forceFresh && cacheKey) {
+      const cached = _BRIEFING_CACHE.get(fullKey);
+      if (cached && Date.now() - cached.ts < _BRIEFING_TTL_MS) {
+        setText(cached.text);
+        setLoading(false);
+        return;
+      }
+    }
+
     setLoading(true);
     setText("");
+    let collected = "";
     try {
       const isAlarmScope = scope === "alarm" || scope === "alarm_detail";
       let res: Response;
@@ -124,13 +144,19 @@ export function useBriefing(scope: string, data?: string) {
           const payload = line.slice(5).replace(/^\s/, "");
           try {
             const ev = JSON.parse(payload);
-            if (ev.type === "chunk") setText(prev => prev + ev.text);
+            if (ev.type === "chunk") {
+              collected += ev.text;
+              setText(prev => prev + ev.text);
+            }
           } catch { /* skip */ }
         }
       }
+      if (cacheKey && collected) {
+        _BRIEFING_CACHE.set(fullKey, { text: collected, ts: Date.now() });
+      }
     } catch { setText("⚠️ 簡報載入失敗"); }
     finally { setLoading(false); }
-  }, [scope, data]);
+  }, [scope, data, cacheKey]);
 
   return { text, loading, refresh: fetch_ };
 }
@@ -303,7 +329,9 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
     pass_dr_count: drs.filter(dr => !dr.findings?.condition_met).length,
   }), [alarm, drs]);
 
-  const synthesis = useBriefing("alarm_detail", synthesisData);
+  // Cache key = alarm.id + status — re-opening same alarm within 10min
+  // replays cached text. Status change (ACK / resolved) invalidates.
+  const synthesis = useBriefing("alarm_detail", synthesisData, `${alarm.id}:${alarm.status ?? ""}`);
   useEffect(() => { synthesis.refresh(); }, [alarm.id]); // eslint-disable-line
 
   return (

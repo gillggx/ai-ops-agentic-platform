@@ -63,6 +63,12 @@ export default function AgentBuilderPanel({
   // v1.4 Plan Panel — agent-emitted todo list, refreshed each send.
   const [planItems, setPlanItems] = useState<PlanItem[]>([]);
   const [running, setRunning] = useState(false);
+  // Synchronous lock so rapid Enter / double-click can't fire a second
+  // /api/agent/build before the React `running` state update lands.
+  // 2026-05-04: prod logs showed 11 build calls (status=422 + a few 200) in
+  // a single second from the same session_id when user mashed Enter; the
+  // useState-based guard misses because state updates are async.
+  const runningLockRef = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   // Local canvas snapshot keyed to this panel, used to reconcile if agent
@@ -200,7 +206,10 @@ export default function AgentBuilderPanel({
   }, [actions, applyOperation]);
 
   const sendMessage = useCallback(async (raw: string) => {
-    if (!raw.trim() || running) return;
+    // Synchronous lock first — prevents rapid Enter from firing a second
+    // request before setRunning(true) commits. See runningLockRef comment.
+    if (!raw.trim() || runningLockRef.current) return;
+    runningLockRef.current = true;
     const prompt = focusedNodeId
       ? `[Focused on ${focusedNodeLabel ?? focusedNodeId} (${focusedNodeId})]\n${raw}`
       : raw;
@@ -238,8 +247,9 @@ export default function AgentBuilderPanel({
       }
     } finally {
       setRunning(false);
+      runningLockRef.current = false;
     }
-  }, [running, focusedNodeId, focusedNodeLabel, basePipelineId, state.pipeline, consumeBuildStream]);
+  }, [focusedNodeId, focusedNodeLabel, basePipelineId, state.pipeline, consumeBuildStream]);
 
   const handleContinuationPick = useCallback(async (lineId: number, opt: ContinuationOption) => {
     // Mark the card resolved so its buttons disable.
@@ -259,6 +269,8 @@ export default function AgentBuilderPanel({
       return;
     }
     // opt.id === "continue"
+    if (runningLockRef.current) return;
+    runningLockRef.current = true;
     setRunning(true);
     try {
       abortRef.current?.abort();
@@ -279,6 +291,7 @@ export default function AgentBuilderPanel({
       }
     } finally {
       setRunning(false);
+      runningLockRef.current = false;
     }
   }, [lines, consumeBuildStream]);
 

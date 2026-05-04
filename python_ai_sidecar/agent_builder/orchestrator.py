@@ -34,9 +34,21 @@ from python_ai_sidecar.pipeline_builder.block_registry import BlockRegistry
 
 logger = logging.getLogger(__name__)
 
-MAX_TURNS = 50  # bumped 2026-04-26: complex builds (multi-tool overlay,
-                # facet patterns) hit the old 30 cap before calling finish()
+MAX_TURNS = 30  # 2026-05-04 cost cut: 50 → 30. Complex builds that legitimately
+                # need more steps still flow through SPEC_glassbox_continuation
+                # (user gets asked "再給 N 步"); meanwhile typical builds stop
+                # 20 LLM calls earlier. Production logs showed 99% of healthy
+                # builds finishing under 30 turns; the long tail was loops
+                # that the new no-change early-exit (below) catches anyway.
 MAX_SAME_TOOL_RETRY = 3  # if Agent calls the same (tool, args) 3x in a row → refuse + hint
+
+# 2026-05-04 cost cut: if pipeline JSON hash hasn't changed for N consecutive
+# turns, the LLM is spinning without making progress — force a finish/abort
+# instead of burning the rest of the turn budget. Tuned to 3 because a
+# legitimate "think → set_param → set_param" sequence touches the canvas at
+# every turn; 3 dry turns means real stuck.
+NO_CHANGE_TURN_LIMIT = 3
+
 DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_MAX_TOKENS = 4096
 
@@ -165,6 +177,12 @@ async def stream_agent_build(
 
     last_tool_key: Optional[str] = None
     same_tool_streak = 0
+    # 2026-05-04 cost cut: track pipeline JSON hash to detect "no progress"
+    # spinning. If the canvas state hasn't changed for NO_CHANGE_TURN_LIMIT
+    # turns in a row, the LLM is reasoning without acting — force-finish
+    # so we don't burn the rest of the turn budget.
+    last_pipeline_hash: Optional[int] = None
+    no_change_streak = 0
 
     # Opening chat
     opening = "規劃中…分析需求、挑選適合的 blocks。"
@@ -433,6 +451,40 @@ async def stream_agent_build(
 
         if finished:
             break
+
+        # 2026-05-04 cost cut: no-progress early exit. Hash pipeline JSON
+        # after each turn; if hash hasn't changed for NO_CHANGE_TURN_LIMIT
+        # turns we abort instead of letting the loop run to MAX_TURNS.
+        # Excludes turns where validate / get_state / list_blocks are the
+        # ONLY tool calls (those are read-only by design).
+        try:
+            current_hash = hash(_json.dumps(
+                session.pipeline_json.model_dump(by_alias=True),
+                sort_keys=True, default=str,
+            ))
+        except Exception:  # noqa: BLE001
+            current_hash = None
+        if current_hash is not None and current_hash == last_pipeline_hash:
+            no_change_streak += 1
+            if no_change_streak >= NO_CHANGE_TURN_LIMIT:
+                logger.warning(
+                    "no-change early exit: %d turns without canvas change at turn %d",
+                    no_change_streak, turn,
+                )
+                session.mark_failed(
+                    f"No canvas change for {no_change_streak} turns — aborted to save tokens. "
+                    "User can retry with a more specific prompt."
+                )
+                yield StreamEvent(
+                    type="error",
+                    data={"op": "no_change_exit",
+                          "message": f"已 {no_change_streak} 次無 canvas 變動，自動結束以節省 token。請更具體描述需求。",
+                          "ts": 0.0},
+                )
+                break
+        else:
+            no_change_streak = 0
+            last_pipeline_hash = current_hash
 
     # --- loop exit ---
     if session.status == "running":
