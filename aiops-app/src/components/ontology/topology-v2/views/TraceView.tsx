@@ -102,8 +102,34 @@ export default function TraceView({
   const [selected, setSelected] = useState<Selected | null>(null);
   const [hoverRun, setHoverRun] = useState<HoverRun | null>(null);
   const [origin,   setOrigin]   = useState<Record<string, LaneOrigin>>({});
-  const [zoom,     setZoom]     = useState<number>(1.5);
+  // 2026-05-04: pick a zoom that keeps events readable by default. Each
+  // event card needs ~80px to be readable; if the window is dense (many
+  // events per hour), default to a higher zoom so they don't visually
+  // overlap. User can still drag the ZOOM slider 1×-20× from there.
+  const initialZoom = useMemo(() => {
+    const n = runs.length;
+    if (n <= 0) return 2;
+    // Rough heuristic: target ≥ 80px per event. With baseW ≈ 1200 and
+    // n events, needed zoom = (n * 80) / baseW. Clamp to [2, 8] —
+    // anything wider than 8× by default scrolls too much; user can
+    // crank further with the slider if they want.
+    const target = (n * 80) / 1200;
+    return Math.max(2, Math.min(8, Math.ceil(target * 2) / 2));
+  }, [runs.length]);
+  const [zoom,     setZoom]     = useState<number>(initialZoom);
   const [tickDensity, setTickDensity] = useState<number>(1);
+
+  // Re-fit zoom when runs reload (e.g. focus changes pull a different set).
+  // Skip if user has manually adjusted — once they touch the slider we
+  // respect their choice.
+  const userZoomedRef = useRef(false);
+  useEffect(() => {
+    if (!userZoomedRef.current) setZoom(initialZoom);
+  }, [initialZoom]);
+  const onZoomChange = (v: number) => {
+    userZoomedRef.current = true;
+    setZoom(v);
+  };
 
   // External focus changes (e.g. from search) → ensure that id is a lane
   useEffect(() => {
@@ -351,9 +377,11 @@ export default function TraceView({
         }}>
           <span style={{ fontWeight: 600, color: INK }}>TRACE</span>
           {/* 2026-05-04: zoom max 4 → 20 because 2-day windows with all events
-              clustered in the last hour were squished even at 4×. Tick label
-              now shows the actual unit (1 tick / hour or / day). */}
-          <Knob label="ZOOM"  value={zoom}        min={1}   max={20} step={0.5} onChange={setZoom}        fmt={(v) => `${v.toFixed(1)}×`} />
+              clustered in the last hour were squished even at 4×. Default
+              zoom now scales with run density (initialZoom) so events are
+              readable on first paint. Tick label shows the actual unit
+              (1 tick / hour or / day). */}
+          <Knob label="ZOOM"  value={zoom}        min={1}   max={20} step={0.5} onChange={onZoomChange}    fmt={(v) => `${v.toFixed(1)}×`} />
           <Knob
             label="TICKS"
             value={tickDensity}
