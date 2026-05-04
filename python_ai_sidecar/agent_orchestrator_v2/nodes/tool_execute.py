@@ -304,7 +304,42 @@ async def _execute_build_pipeline_live(
         return {"status": "failed", "error_message": f"Sub-agent crashed: {type(e).__name__}: {e}"}
 
     final_pipeline = session.pipeline_json.model_dump(by_alias=True)
-    return {
+
+    # Safety net: even though set_param/add_node reject undeclared $refs early,
+    # scan one more time before handing the result to the outer LLM. Catches
+    # any leftover bad placeholders from a base pipeline or paused/cancelled
+    # session that bypassed the eager checks.
+    placeholder_errors: list[dict[str, Any]] = []
+    try:
+        from python_ai_sidecar.pipeline_builder.validator import PipelineValidator
+        validator_safety = PipelineValidator(block_registry.catalog)
+        all_errors = validator_safety.validate(session.pipeline_json)
+        placeholder_errors = [
+            e for e in all_errors if e.get("rule") == "C10_UNDECLARED_INPUT_REF"
+        ]
+    except Exception as exc:  # noqa: BLE001
+        # Don't fail the build because of a validator crash — log and move on.
+        logger.warning("post-build safety validator crashed: %s", exc)
+
+    if placeholder_errors:
+        # Downgrade status so outer LLM treats this as fixable, not "done".
+        last_status = "validation_error"
+        if event_emit is not None:
+            try:
+                event_emit({
+                    "type": "pb_glass_error",
+                    "session_id": session.session_id,
+                    "op": "post_build_validate",
+                    "message": (
+                        f"Pipeline has {len(placeholder_errors)} undeclared "
+                        f"placeholder reference(s). Canvas not committed."
+                    ),
+                    "hint": "; ".join(e["message"] for e in placeholder_errors[:3]),
+                })
+            except Exception:  # noqa: BLE001
+                pass
+
+    result_dict: Dict[str, Any] = {
         "status": last_status,
         "pipeline_json": final_pipeline,
         "summary": session.summary or f"已建立 pipeline（{len(final_pipeline.get('nodes') or [])} nodes, {op_count} operations）",
@@ -319,6 +354,14 @@ async def _execute_build_pipeline_live(
             "summary_for_user": session.summary,
         },
     }
+    if placeholder_errors:
+        result_dict["validation_errors"] = placeholder_errors
+        result_dict["error_message"] = (
+            f"Build rejected — {len(placeholder_errors)} placeholder reference(s) "
+            "are undeclared. Either declare the input via declare_input(), "
+            "rewrite to a literal value, or use canonical $tool_id."
+        )
+    return result_dict
 
 
 async def _execute_propose_pipeline_patch(

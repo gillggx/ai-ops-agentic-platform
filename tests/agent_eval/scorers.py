@@ -165,6 +165,47 @@ def block_name_equals(expect: dict[str, Any], obs: "ObservedRun") -> ScoreResult
     )
 
 
+def pipeline_no_undeclared_refs(expect: dict[str, Any], obs: "ObservedRun") -> ScoreResult | None:
+    """`pipeline_no_undeclared_refs: true` — the final pipeline_json (from
+    pb_glass_done event) must not contain any `$xxx` placeholder that isn't
+    declared in pipeline.inputs.
+
+    Pins the eager-validator invariant: even if the Glass Box LLM hallucinates
+    a placeholder name, the eager check on set_param/add_node should reject
+    it and the LLM should self-correct, so the final canvas is clean.
+    """
+    if not expect.get("pipeline_no_undeclared_refs"):
+        return None
+    done = obs.first_event_data("pb_glass_done")
+    if not done:
+        return ScoreResult(
+            name="pipeline_no_undeclared_refs",
+            passed=False,
+            message="no pb_glass_done event — build never finished",
+        )
+    pipeline = done.get("pipeline_json") or {}
+    declared = {inp.get("name") for inp in (pipeline.get("inputs") or [])}
+    bad: list[str] = []
+    for node in (pipeline.get("nodes") or []):
+        nid = node.get("id")
+        for k, v in (node.get("params") or {}).items():
+            if isinstance(v, str) and v.startswith("$"):
+                ref = v[1:]
+                if ref not in declared:
+                    bad.append(f"{nid}.{k}={v}")
+    if bad:
+        return ScoreResult(
+            name="pipeline_no_undeclared_refs",
+            passed=False,
+            message=f"undeclared $refs: {bad[:5]}",
+        )
+    return ScoreResult(
+        name="pipeline_no_undeclared_refs",
+        passed=True,
+        message="no undeclared $refs",
+    )
+
+
 def min_event_count(expect: dict[str, Any], obs: "ObservedRun") -> ScoreResult | None:
     """`min_event_count: 3` — must have at least N SSE events (sanity check
     that the orchestrator at least responded with content)."""
@@ -190,4 +231,5 @@ ALL_SCORERS: list[Callable[[dict[str, Any], "ObservedRun"], ScoreResult | None]]
     candidates_include_any,
     block_name_equals,
     min_event_count,
+    pipeline_no_undeclared_refs,
 ]

@@ -108,6 +108,47 @@ def _port_type(spec: Optional[dict[str, Any]], port: str, kind: str) -> Optional
     return None
 
 
+def _check_placeholder_declared(
+    pipeline: PipelineJSON,
+    value: Any,
+    *,
+    param_key: str,
+    node_id: Optional[str] = None,
+) -> None:
+    """Reject `$xxx` values that don't reference a declared pipeline input.
+
+    Left-shifts validator rule C10 from finish() to write-time so a bad
+    placeholder never reaches the canvas via SSE op events. Raised early,
+    the LLM sees the error in its tool-use loop and can fix in-place.
+
+    Only checks `$xxx` strings. Literals (e.g. "EQP-01") pass through.
+    """
+    if not isinstance(value, str) or not value.startswith("$"):
+        return
+    ref = value[1:]
+    declared = {inp.name for inp in (pipeline.inputs or [])}
+    if ref in declared:
+        return
+    where = f"node '{node_id}' " if node_id else ""
+    declared_list = ", ".join(f"${n}" for n in sorted(declared)) or "(none)"
+    raise ToolError(
+        code="UNDECLARED_INPUT_REF",
+        message=(
+            f"{where}param '{param_key}' references {value} "
+            f"but pipeline.inputs has no '{ref}' declared. "
+            f"Currently declared inputs: {declared_list}."
+        ),
+        hint=(
+            "Fix one of these ways: "
+            f"(a) write a literal value (e.g. \"EQP-01\") instead of {value}; "
+            f"(b) call declare_input(name='{ref}', example=...) first, then "
+            f"reference {value}; "
+            "(c) reuse the canonical name $tool_id (already declared in most "
+            "patrol-ready pipelines) instead of inventing a new one."
+        ),
+    )
+
+
 # ---------------------------------------------------------------------------
 # BuilderToolset
 # ---------------------------------------------------------------------------
@@ -197,6 +238,10 @@ class BuilderToolset:
                 hint="Call list_blocks() to see available blocks.",
             )
         pipeline = self.session.pipeline_json
+        # Reject `$xxx` placeholders that don't match a declared input before
+        # the node hits canvas via SSE — see _check_placeholder_declared.
+        for k, v in (params or {}).items():
+            _check_placeholder_declared(pipeline, v, param_key=k)
         desired = position or {"x": 40.0 + 200.0 * len(pipeline.nodes), "y": 80.0}
         final_pos = _smart_offset(pipeline.nodes, desired)
         node_id = _gen_node_id(pipeline.nodes)
@@ -299,8 +344,21 @@ class BuilderToolset:
                 hint=f"Allowed keys: {sorted(props.keys())}",
             )
         prop = props[key]
+        # Reject `$xxx` placeholders that don't match a declared input before
+        # the value lands on canvas via SSE — see _check_placeholder_declared.
+        # Done before enum check because $xxx never matches an enum literally.
+        _check_placeholder_declared(pipeline, value, param_key=key, node_id=node_id)
         enum = prop.get("enum")
-        if enum is not None and value not in enum and value is not None and value != "":
+        # Skip enum check for $xxx placeholders — they're resolved at runtime,
+        # so the literal "$tool_id" wouldn't satisfy any concrete enum.
+        is_placeholder = isinstance(value, str) and value.startswith("$")
+        if (
+            enum is not None
+            and not is_placeholder
+            and value not in enum
+            and value is not None
+            and value != ""
+        ):
             raise ToolError(
                 code="PARAM_ENUM_VIOLATION",
                 message=f"Value {value!r} not in allowed enum for '{key}': {enum}",

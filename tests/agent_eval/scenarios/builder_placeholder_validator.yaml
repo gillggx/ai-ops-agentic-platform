@@ -1,0 +1,47 @@
+suite: builder_placeholder_validator
+endpoint: /internal/agent/build
+description: |
+  Glass Box must produce a canvas free of undeclared `$xxx` placeholders.
+  Regression target: chat-mode build for "EQP-01 STEP_001 xbar 趨勢" once
+  produced `set_param(n1, "tool_id", "$EquipmentID")` (LLM invented a
+  placeholder name without declaring it). Full Run on the resulting canvas
+  blew up with UNDECLARED_INPUT_REF.
+
+  The eager check on set_param/add_node now rejects that drift before it
+  hits canvas SSE; the post-build safety net catches whatever slips through.
+  These scenarios exercise prompts where the LLM is most tempted to invent
+  variable names.
+default_body: {}
+
+cases:
+  - id: eqp_step_xbar_literal
+    description: |
+      Specific EQP + STEP — LLM should write literals (EQP-01, STEP_001),
+      not invent $EquipmentID. If it does invent, the eager check rejects
+      and the final pipeline must end clean.
+    input:
+      message: "幫我看 [EQP-01] [STEP_001] 最近 100 筆 xbar 趨勢"
+    expect:
+      pipeline_no_undeclared_refs: true
+      sse_event_types_include: [pb_glass_done]
+
+  - id: all_equipment_patrol
+    description: |
+      "所有機台" → LLM should declare $tool_id input (canonical) and use
+      it. Regression target: not inventing $EquipmentID / $equipment_id
+      on top of an already-declared $tool_id.
+    input:
+      message: "所有機台過去 24 小時 SPC OOC 次數，超過 3 次告警"
+    expect:
+      pipeline_no_undeclared_refs: true
+      sse_event_types_include: [pb_glass_done]
+
+  - id: lot_specific_chart
+    description: |
+      LOT-123 specific — LLM shouldn't reach for $LotID; either literal
+      or canonical $lot_id (declared with example).
+    input:
+      message: "LOT-123 跑完整個 process flow 各站 SPC chart"
+    expect:
+      pipeline_no_undeclared_refs: true
+      sse_event_types_include: [pb_glass_done]
