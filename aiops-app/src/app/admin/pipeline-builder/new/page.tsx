@@ -82,7 +82,11 @@ export default function NewPipelinePage() {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
       const q = params.get("kind");
-      const fromAgent = params.get("from") === "agent";
+      // PbPipelineCard.handleEditInBuilder uses ?from=chat; AIAgentPanel
+      // uses ?from=agent. Both mean "Glass Box already built it, drop user
+      // onto canvas, skip wizard."
+      const fromParam = params.get("from");
+      const fromAgent = fromParam === "agent" || fromParam === "chat";
       // Heuristic: pipeline_json shape decides the kind. block_alert ⇒ auto_patrol;
       // block_chart-only ⇒ skill; mixed ⇒ default skill.
       const inferKind = (pj: PipelineJSON): Kind => {
