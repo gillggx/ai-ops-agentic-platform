@@ -225,6 +225,18 @@ async def stream_agent_build(
                 tools=tools,
                 messages=send_messages,
             )
+            # 2026-05-04 cache debug: per-turn token & cache breakdown.
+            _u = getattr(resp, "usage", None)
+            if _u is not None:
+                logger.info(
+                    "glass_turn=%d: in=%d out=%d cache_create=%d cache_read=%d msgs=%d",
+                    turn,
+                    getattr(_u, "input_tokens", 0) or 0,
+                    getattr(_u, "output_tokens", 0) or 0,
+                    getattr(_u, "cache_creation_input_tokens", 0) or 0,
+                    getattr(_u, "cache_read_input_tokens", 0) or 0,
+                    len(send_messages),
+                )
         except Exception as e:  # noqa: BLE001
             logger.exception("Claude call failed at turn %s", turn)
             session.mark_failed(f"LLM call failed: {type(e).__name__}: {e}")

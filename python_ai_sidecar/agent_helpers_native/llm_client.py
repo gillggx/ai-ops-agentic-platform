@@ -207,6 +207,21 @@ class AnthropicLLMClient(BaseLLMClient):
                 content.append({"type": "thinking", "thinking": getattr(block, "thinking", "")})
 
         usage = getattr(resp, "usage", None)
+        # 2026-05-04 cache debug instrumentation: log per-call so we can spot
+        # cache misses across a session. Cheap (one log line per LLM call).
+        if usage is not None:
+            import logging as _lg
+            _lg.getLogger("python_ai_sidecar.cache_debug").info(
+                "llm_create: in=%d out=%d cache_create=%d cache_read=%d sys_chars=%d msgs=%d tools=%d",
+                getattr(usage, "input_tokens", 0) or 0,
+                getattr(usage, "output_tokens", 0) or 0,
+                getattr(usage, "cache_creation_input_tokens", 0) or 0,
+                getattr(usage, "cache_read_input_tokens", 0) or 0,
+                len(system) if isinstance(system, str)
+                  else sum(len(b.get("text", "")) for b in (system or []) if isinstance(b, dict)),
+                len(messages or []),
+                len(tools or []),
+            )
         return LLMResponse(
             text=text,
             stop_reason=str(getattr(resp, "stop_reason", "end_turn")),
