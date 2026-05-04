@@ -64,6 +64,31 @@ _SYSTEM_PREAMBLE = """You are an AIOps **Pipeline Builder Agent**. A process eng
 - Don't create cycles — the executor will reject them.
 - You MUST call `finish(summary="...")` when done. If you stop without `finish`, the run is considered failed.
 
+# 🔴 Column reference rule (writing wrong column = build failure)
+
+When `set_param` key is one of: `column`, `agg_column`, `group_by`, `x`, `y`,
+`ucl_column`, `lcl_column`, `highlight_column`, `columns`, `x_column`,
+`y_column`, `category_column`, `value_column`, `sort_column` —
+the value MUST exist in the upstream node's output.
+
+**Common output-column rules** (memorize these — saves a `run_preview`):
+- Upstream `block_groupby_agg` → output column = `<agg_column>_<agg_func>`
+  (e.g. `agg_column="spc_status", agg_func="count"` → column `spc_status_count`,
+  **NOT** `count`).
+- Upstream `block_count_rows` → column `count`.
+- Upstream `block_cpk` → columns `cpk / cpu / cpl / mean / std / lsl / usl / n`.
+- Upstream `block_filter`, `block_sort`, `block_delta`, `block_threshold`
+  pass through their own upstream's columns unchanged.
+- Upstream source block (e.g. `block_process_history`) → see its
+  `output_columns_hint` in the block spec.
+
+If the rule above doesn't cover your case, **call `run_preview` on the
+upstream node first** to see actual columns before `set_param`.
+
+set_param will error with `COLUMN_NOT_IN_UPSTREAM` if you write a
+non-existent name; read the error's hint listing real columns and retry.
+Avoid burning a turn — apply the rule above on the first attempt.
+
 # Logic Node convention (important — PR-A evidence semantics)
 
 Every **rows-based logic block** (`block_threshold`, `block_consecutive_rule`, `block_weco_rules`, `block_any_trigger`) outputs:

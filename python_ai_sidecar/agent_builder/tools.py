@@ -108,6 +108,174 @@ def _port_type(spec: Optional[dict[str, Any]], port: str, kind: str) -> Optional
     return None
 
 
+# 2026-05-04: column-ref validation. Many transform/output blocks reference
+# upstream column names (sort.column, filter.column, chart.x, data_view.columns
+# etc.). The most common Glass Box failure is the LLM picking a column name
+# that doesn't actually exist in the upstream — e.g. `sort.column='count'`
+# when upstream is `groupby_agg(agg_column='spc_status', agg_func='count')`
+# whose actual output column is `spc_status_count`. Auto-run fails on the
+# downstream block. This helper computes the expected column set for a node's
+# upstream so set_param can reject obvious mistakes at write time.
+
+# Keys whose value should reference an upstream column. List values
+# (block_data_view.columns, block_sort.columns) get each element checked.
+COLUMN_REF_KEYS: frozenset = frozenset({
+    "column", "agg_column", "group_by",
+    "x", "y",
+    "ucl_column", "lcl_column", "highlight_column",
+    "columns",
+    "x_column", "y_column",
+    "category_column", "value_column",
+    "sort_column",
+})
+
+
+def _find_upstream_node(pipeline: PipelineJSON, node_id: str) -> Optional[PipelineNode]:
+    """Return the FIRST upstream node feeding `node_id` via any data edge.
+    Caller usually only cares about the dataframe upstream — chained transforms
+    have one inbound data edge."""
+    for edge in pipeline.edges:
+        if edge.to.node == node_id:
+            for n in pipeline.nodes:
+                if n.id == edge.from_.node:
+                    return n
+    return None
+
+
+def _expected_upstream_columns(
+    pipeline: PipelineJSON,
+    node: PipelineNode,
+    registry: BlockRegistry,
+    *,
+    depth: int = 0,
+) -> Optional[list[str]]:
+    """Compute the column names node's upstream is expected to emit.
+
+    Returns:
+        list[str]      — known column names (use to validate set_param)
+        None           — upstream not yet connected, or schema unknowable
+
+    Recurses through pass-through blocks (filter / sort) up to 5 levels.
+    Dynamic-output blocks (groupby_agg / count_rows) compute columns from
+    the upstream's own params. Static blocks return their output_columns_hint.
+    """
+    if depth > 5:
+        return None
+    upstream = _find_upstream_node(pipeline, node.id)
+    if upstream is None:
+        return None
+    spec = registry.get_spec(upstream.block_id, upstream.block_version)
+    if spec is None:
+        return None
+    block_id = upstream.block_id
+    params = upstream.params or {}
+
+    # Dynamic output blocks: column names depend on params
+    if block_id == "block_groupby_agg":
+        cols: list[str] = []
+        group_by = (params.get("group_by") or "").strip()
+        if group_by:
+            cols.extend([g.strip() for g in group_by.split(",") if g.strip()])
+        agg_col = params.get("agg_column")
+        agg_fn = params.get("agg_func")
+        if agg_col and agg_fn:
+            cols.append(f"{agg_col}_{agg_fn}")
+        return cols or None
+
+    if block_id == "block_count_rows":
+        # count_rows produces a 1-row dataframe with a 'count' column
+        return ["count"]
+
+    if block_id == "block_cpk":
+        return ["cpk", "cpu", "cpl", "mean", "std", "lsl", "usl", "n"]
+
+    if block_id == "block_linear_regression":
+        return ["slope", "intercept", "r_squared", "p_value", "n"]
+
+    if block_id == "block_hypothesis_test":
+        return ["test", "statistic", "p_value", "significant", "n"]
+
+    if block_id == "block_correlation":
+        return ["x_column", "y_column", "pearson_r", "spearman_r", "n"]
+
+    # Pass-through blocks: same columns as their upstream
+    if block_id in ("block_filter", "block_sort", "block_delta", "block_threshold"):
+        return _expected_upstream_columns(pipeline, upstream, registry, depth=depth + 1)
+
+    # Static-hint blocks (sources): use output_columns_hint from registry
+    hint = spec.get("output_columns_hint") or []
+    if isinstance(hint, list) and hint:
+        cols = []
+        for c in hint:
+            if isinstance(c, dict) and c.get("name"):
+                cols.append(c["name"])
+            elif isinstance(c, str):
+                cols.append(c)
+        return cols or None
+
+    return None
+
+
+def _check_column_in_upstream(
+    pipeline: PipelineJSON,
+    node: PipelineNode,
+    registry: BlockRegistry,
+    *,
+    param_key: str,
+    value: Any,
+) -> None:
+    """Raise ToolError when value references a column the upstream won't
+    emit. No-op when upstream schema is unknown (LLM is expected to
+    run_preview first per the system-prompt 'Column reference rule')."""
+    if param_key not in COLUMN_REF_KEYS:
+        return
+
+    # Collect candidate column-name strings to check
+    candidates: list[str] = []
+    if isinstance(value, str):
+        # Skip placeholder refs — those are validated separately
+        if value.startswith("$"):
+            return
+        candidates = [value]
+    elif isinstance(value, list):
+        for v in value:
+            if isinstance(v, str) and not v.startswith("$"):
+                candidates.append(v)
+            elif isinstance(v, dict):
+                # block_sort columns: [{column, order}]
+                col = v.get("column")
+                if isinstance(col, str) and not col.startswith("$"):
+                    candidates.append(col)
+    if not candidates:
+        return
+
+    expected = _expected_upstream_columns(pipeline, node, registry)
+    if expected is None:
+        return  # unknown — let LLM proceed; runtime executor catches
+    expected_set = set(expected)
+
+    bad = [c for c in candidates if c not in expected_set]
+    if not bad:
+        return
+
+    upstream = _find_upstream_node(pipeline, node.id)
+    upstream_label = (upstream.block_id if upstream else "?")
+    raise ToolError(
+        code="COLUMN_NOT_IN_UPSTREAM",
+        message=(
+            f"node '{node.id}' param '{param_key}' references column(s) "
+            f"{bad!r} but upstream '{upstream_label}' outputs {sorted(expected_set)}."
+        ),
+        hint=(
+            f"Use one of {sorted(expected_set)}. "
+            "Or call run_preview on the upstream node to confirm column names. "
+            "For groupby_agg upstream, the aggregated column is named "
+            "`<agg_column>_<agg_func>` (e.g. `spc_status_count`), not just "
+            "the agg_func name."
+        ),
+    )
+
+
 def _check_placeholder_declared(
     pipeline: PipelineJSON,
     value: Any,
@@ -280,6 +448,10 @@ class BuilderToolset:
         # the node hits canvas via SSE — see _check_placeholder_declared.
         for k, v in (params or {}).items():
             _check_placeholder_declared(pipeline, v, param_key=k)
+        # Column-ref check is deferred to set_param time; add_node is usually
+        # called before the upstream edge exists (so we can't validate yet).
+        # If params include column refs at add_node time, they'll be re-checked
+        # the next time set_param touches them.
         desired = position or {"x": 40.0 + 200.0 * len(pipeline.nodes), "y": 80.0}
         final_pos = _smart_offset(pipeline.nodes, desired)
         node_id = _gen_node_id(pipeline.nodes)
@@ -386,6 +558,16 @@ class BuilderToolset:
         # the value lands on canvas via SSE — see _check_placeholder_declared.
         # Done before enum check because $xxx never matches an enum literally.
         _check_placeholder_declared(pipeline, value, param_key=key, node_id=node_id)
+        # 2026-05-04: column-ref validation. If this param references an
+        # upstream column (sort.column / filter.column / chart.x / etc.)
+        # and the upstream's output schema is computable, reject obviously
+        # wrong names (e.g. 'count' when upstream groupby_agg emits
+        # 'spc_status_count'). LLM gets a clear hint instead of finding
+        # out at auto-run time.
+        _check_column_in_upstream(
+            pipeline, node, self.registry,
+            param_key=key, value=value,
+        )
         enum = prop.get("enum")
         # Skip enum check for $xxx placeholders — they're resolved at runtime,
         # so the literal "$tool_id" wouldn't satisfy any concrete enum.
