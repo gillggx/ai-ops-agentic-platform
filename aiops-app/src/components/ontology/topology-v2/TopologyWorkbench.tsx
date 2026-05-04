@@ -37,12 +37,16 @@ export default function TopologyWorkbench({
   mode = "embedded",
   initialFocus = null,
 }: Props) {
-  // outerWindow: data fetch range + timeline scrub scope (last 2 days).
-  // windowRange: user-selected sub-window for the trace view (last 6 h default).
+  // outerWindow: data fetch range + timeline scrub scope. Default 1 day
+  // (was 2d, but with simulator's 7 lots/h × 10 tools that's already 1680
+  // events — plenty to read at hour granularity). User picks via the
+  // timeline's window dropdown.
+  const [outerWindowMs, setOuterWindowMs] = useState<number>(DAY_MS);
+  const [now0, setNow0] = useState<number>(() => Date.now());
+  // Re-anchor "now" when window changes so the right edge stays aligned.
   const outerWindow = useMemo<[number, number]>(() => {
-    const now = Date.now();
-    return [now - 2 * DAY_MS, now];
-  }, []);
+    return [now0 - outerWindowMs, now0];
+  }, [now0, outerWindowMs]);
   const [focus,       setFocus]      = useState<FocusRef | null>(initialFocus);
   const [query,       setQuery]      = useState<string>("");
   const [windowRange, setWindowRange] = useState<[number, number]>(() => {
@@ -169,6 +173,17 @@ export default function TopologyWorkbench({
         selected={windowRange}
         onChange={handleWindowChange}
         runs={allRuns}
+        windowSizeMs={outerWindowMs}
+        onWindowSizeChange={(ms) => {
+          // Snap to fresh "now" so the right edge stays at present time.
+          setNow0(Date.now());
+          setOuterWindowMs(ms);
+          // Reset the inner selection to the right end of the new window so
+          // user immediately sees recent data; auto-fit will refine on next
+          // data load.
+          autoFittedRef.current = false;
+          userScrubbed.current = false;
+        }}
       />
 
       {showTweaks && (

@@ -661,7 +661,10 @@ export function AIAgentPanel({
     }
   }, [addLog]);
 
-  const sendMessage = useCallback(async (message: string) => {
+  const sendMessage = useCallback(async (
+    message: string,
+    extraContext?: Record<string, unknown>,
+  ) => {
     if (!message.trim() || loading) return;
 
     // Phase 5-UX-5: prepend focus context so LLM knows which node the
@@ -698,9 +701,15 @@ export function AIAgentPanel({
     try {
       // Part B (SPEC_context_engineering): pass user-side state to the agent.
       // Currently `selected_equipment_id` only; future: current_page, last alarm, etc.
-      const clientContext: Record<string, string> = {};
+      const clientContext: Record<string, unknown> = {};
       if (selectedEquipment?.equipment_id) {
         clientContext.selected_equipment_id = selectedEquipment.equipment_id;
+      }
+      // 2026-05-04: caller can attach extra context (e.g. intent_spec from
+      // the design intent confirm card) so we don't need to inline JSON
+      // into the user_message text.
+      if (extraContext) {
+        Object.assign(clientContext, extraContext);
       }
       // Phase E3 follow-up: in builder mode, ship the current canvas
       // pipeline_json so the orchestrator can surface declared inputs in
@@ -1804,27 +1813,20 @@ export function AIAgentPanel({
                         }]);
                         return;
                       }
-                      if (choice === "edit") {
-                        // Pre-fill the input with the original prompt + a brief
-                        // hint of what's confirmed; user can revise and resend.
-                        const hint = `[基於上次卡片] 原 prompt：${original}\n` +
-                          `輸入：${design.inputs.map((i) => "$" + i.name).join(", ")}\n` +
-                          `邏輯：${design.logic}\n` +
-                          `呈現：${design.presentation}\n` +
-                          `修改點：`;
-                        setInput(hint);
-                        return;
-                      }
-                      // choice === "confirm" → auto follow-up with prefix +
-                      // canonical spec so the agent skips re-confirming.
-                      const specBlock = JSON.stringify({
-                        inputs: design.inputs,
-                        logic: design.logic,
-                        presentation: design.presentation,
+                      // choice === "confirm" — design may be the original or
+                      // user-edited via the inline form. 2026-05-04: spec
+                      // travels via client_context.intent_spec instead of
+                      // being inlined as JSON in the user_message text, so
+                      // the chat history shows only human-readable content.
+                      const followUp = `[intent_confirmed:${design.card_id}] ${original}`;
+                      void sendMessage(followUp, {
+                        intent_spec: {
+                          card_id: design.card_id,
+                          inputs: design.inputs,
+                          logic: design.logic,
+                          presentation: design.presentation,
+                        },
                       });
-                      const followUp = `[intent_confirmed:${design.card_id}] ${original}\n\n` +
-                        `已對齊的 spec（請依此 build）: ${specBlock}`;
-                      void sendMessage(followUp);
                     }}
                   />
                 </div>

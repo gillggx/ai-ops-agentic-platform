@@ -117,7 +117,6 @@ export default function TraceView({
     return Math.max(2, Math.min(8, Math.ceil(target * 2) / 2));
   }, [runs.length]);
   const [zoom,     setZoom]     = useState<number>(initialZoom);
-  const [tickDensity, setTickDensity] = useState<number>(1);
 
   // Re-fit zoom when runs reload (e.g. focus changes pull a different set).
   // Skip if user has manually adjusted — once they touch the slider we
@@ -174,8 +173,8 @@ export default function TraceView({
     setOrigin({});
     setSelected(null);
     setHoverRun(null);
-    setZoom(1.5);
-    setTickDensity(1);
+    setZoom(initialZoom);
+    userZoomedRef.current = false;
   };
 
   // ── Responsive width ───────────────────────────────────────────────────
@@ -376,28 +375,11 @@ export default function TraceView({
           padding: "8px 18px", fontSize: 10, color: INK_3, letterSpacing: "0.08em",
         }}>
           <span style={{ fontWeight: 600, color: INK }}>TRACE</span>
-          {/* 2026-05-04: zoom max 4 → 20 because 2-day windows with all events
-              clustered in the last hour were squished even at 4×. Default
-              zoom now scales with run density (initialZoom) so events are
-              readable on first paint. Tick label shows the actual unit
-              (1 tick / hour or / day). */}
+          {/* 2026-05-04 v3: TICKS slider removed (used to control bottom
+              TimeRail's tick density, but TimeRail itself is now gone —
+              hover any event card to see the timestamp). ZOOM auto-scales
+              with run density on first paint and locks once user drags. */}
           <Knob label="ZOOM"  value={zoom}        min={1}   max={20} step={0.5} onChange={onZoomChange}    fmt={(v) => `${v.toFixed(1)}×`} />
-          <Knob
-            label="TICKS"
-            value={tickDensity}
-            min={0.5}
-            max={3}
-            step={0.25}
-            onChange={setTickDensity}
-            fmt={(v) => {
-              // span in ms → expected major-tick unit at this density.
-              // < 1 day window: per-hour ticks; ≥ 1 day: per-day. Density
-              // multiplies that base, so 1× = baseline, 2× = double freq.
-              const isHourly = span < 24 * 60 * 60 * 1000;
-              const baseLabel = isHourly ? "/hour" : "/day";
-              return `${v.toFixed(2)}× ${baseLabel}`;
-            }}
-          />
           <div style={{ flex: 1 }} />
           <span style={{ color: INK_3, fontSize: 9.5 }}>
             {selected ? "click background to release · " : "hover to highlight · "}
@@ -485,8 +467,8 @@ export default function TraceView({
 
           {/* Lane-to-lane connectors + brackets */}
           <svg style={{ position: "absolute", left: LABEL_W, top: 0, width: areaW, height: "100%", pointerEvents: "none" }}>
-            <line x1={xForT(pointerT)} y1={0} x2={xForT(pointerT)} y2="100%"
-                  stroke={ACCENT} strokeOpacity={0.35} strokeWidth={1} strokeDasharray="3 3" />
+            {/* 2026-05-04 v3: dashed pointer line removed alongside the
+                CURSOR row. Bottom TIMELINE shows window state instead. */}
             {linkStyle === "tint" && connectors.map((c, i) => (
               <line key={i} x1={c.ax} y1={c.ay} x2={c.ax} y2={c.childTop}
                     stroke={INK} strokeWidth={2.2} strokeDasharray="6 4" opacity={0.55} />
@@ -504,8 +486,9 @@ export default function TraceView({
           </svg>
         </div>
 
-        <TimePointer t0={t0} t1={t1} pointerT={pointerT} setPointerT={onPointerChange}
-                     labelW={LABEL_W} padR={PAD_R} density={tickDensity} areaW={areaW} />
+        {/* 2026-05-04 v3: TimePointer (CURSOR row) removed. The bottom
+            TIMELINE scrubber has window controls and event hover provides
+            per-event timestamps directly. */}
       </div>
 
       {selected && (
@@ -581,114 +564,9 @@ function Block({
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// TimePointer — sticky bottom time ruler with movable cursor
-// ─────────────────────────────────────────────────────────────────────────
-
-interface PointerProps {
-  t0: number; t1: number; pointerT: number; setPointerT: (t: number) => void;
-  labelW: number; padR: number; density: number; areaW: number;
-}
-
-function TimePointer({ t0, t1, pointerT, setPointerT, labelW, padR, density, areaW }: PointerProps) {
-  const span = t1 - t0;
-  const ref = useRef<HTMLDivElement>(null);
-
-  const onDown = (e: React.MouseEvent) => {
-    const move = (ev: MouseEvent) => {
-      if (!ref.current) return;
-      const r = ref.current.getBoundingClientRect();
-      const x = Math.max(0, Math.min(r.width, ev.clientX - r.left));
-      setPointerT(t0 + (x / r.width) * span);
-    };
-    move(e.nativeEvent);
-    const up = () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
-  };
-
-  // Tick scale: scale by span, capped to keep tick count manageable
-  const hours = Math.max(1, Math.round(span / HR));
-  const minorEvery = Math.max(1, Math.round((hours / 48) * (2 / density)));
-  const majorEvery = Math.max(minorEvery * 2, Math.round((hours / 48) * (6 / density)));
-  const ticks: { t: number; major: boolean; day: boolean }[] = [];
-  for (let i = 0; i <= hours; i += minorEvery) {
-    const t = t0 + i * HR;
-    const d = new Date(t);
-    ticks.push({ t, major: i % majorEvery === 0, day: d.getHours() === 0 });
-  }
-  const pct = ((pointerT - t0) / span) * 100;
-  const fmtPointer = (t: number) => new Date(t).toLocaleString("en-US",
-    { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-
-  return (
-    <div style={{
-      position: "sticky", bottom: 0, background: PAPER, zIndex: 4,
-      borderTop: `1px solid ${HAIR}`,
-      display: "grid", gridTemplateColumns: `${labelW}px ${areaW}px ${padR}px`,
-      padding: "10px 0",
-    }}>
-      <div style={{
-        padding: "0 18px", fontSize: 9.5, letterSpacing: "0.12em", color: INK_3,
-        position: "sticky", left: 0, background: PAPER,
-      }}>
-        {/* 2026-05-04: dropped redundant "TIME · N D" header — same info is
-            already in the TIMELINE scrubber below this view. Only the live
-            pointer time is useful here as you scrub left/right. */}
-        CURSOR<br />
-        <span style={{ color: INK, fontWeight: 500, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11, letterSpacing: 0 }}>
-          {fmtPointer(pointerT)}
-        </span>
-      </div>
-      <div ref={ref} onMouseDown={onDown} style={{
-        position: "relative", height: 36, cursor: "ew-resize", userSelect: "none",
-      }}>
-        <div style={{ position: "absolute", left: 0, right: 0, top: 18, height: 1, background: HAIR }} />
-        {ticks.map((tk, i) => {
-          const x = ((tk.t - t0) / span) * 100;
-          return (
-            <div key={i} style={{
-              position: "absolute", left: `${x}%`, top: 18,
-              width: 1, height: tk.major ? 9 : 4,
-              background: tk.major ? INK_2 : INK_3, opacity: tk.major ? 0.7 : 0.4,
-              transform: "translateX(-0.5px)",
-            }} />
-          );
-        })}
-        {ticks.filter((tk) => tk.day || tk.t === t0).map((tk, i) => {
-          const x = ((tk.t - t0) / span) * 100;
-          const d = new Date(tk.t);
-          return (
-            <div key={`day-${i}`} style={{
-              position: "absolute", left: `${x}%`, top: 0,
-              fontSize: 9.5, color: INK, fontWeight: 600, letterSpacing: "0.05em",
-              transform: x < 5 ? "translateX(2px)" : "translateX(-50%)",
-              whiteSpace: "nowrap",
-            }}>
-              {d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
-            </div>
-          );
-        })}
-        <div style={{
-          position: "absolute", left: `${pct}%`, top: 0, bottom: 0,
-          width: 0, transform: "translateX(-50%)",
-        }}>
-          <div style={{
-            position: "absolute", left: "50%", top: 8, bottom: 0,
-            width: 2, background: ACCENT, transform: "translateX(-50%)",
-          }} />
-          <svg width="14" height="14" style={{ position: "absolute", left: "50%", top: 0, transform: "translateX(-50%)" }}>
-            <polygon points="7,12 0,0 14,0" fill={ACCENT} />
-          </svg>
-        </div>
-      </div>
-      <div />
-    </div>
-  );
-}
+// 2026-05-04 v3: TimePointer (CURSOR row) deleted. Bottom TIMELINE
+// scrubber replaces its time-ruler role + adds window controls; per-event
+// timestamps surface via tooltip on event hover.
 
 // ─────────────────────────────────────────────────────────────────────────
 // SelectedPanel — right side panel after a click

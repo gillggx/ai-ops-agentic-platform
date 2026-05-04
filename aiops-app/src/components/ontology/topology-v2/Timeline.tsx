@@ -17,7 +17,21 @@ interface Props {
   onChange:    (range: [number, number]) => void;
   runs:        RunRecord[];               // all runs in outerWindow
   focusedRunIds?: Set<string> | null;     // when present, only focused runs counted
+  // 2026-05-04: outer window is now user-adjustable. Parent owns the
+  // canonical value and updates it via this callback when user picks a
+  // different size from the dropdown row.
+  onWindowSizeChange?: (newSpanMs: number) => void;
+  windowSizeMs?: number;                  // current outer span in ms (for highlighting)
 }
+
+// Available outer window choices for the picker. Tuple = (ms, label).
+const WINDOW_OPTIONS: Array<[number, string]> = [
+  [6 * 60 * 60 * 1000,           "6h"],
+  [24 * 60 * 60 * 1000,          "1d"],
+  [2 * 24 * 60 * 60 * 1000,      "2d"],
+  [7 * 24 * 60 * 60 * 1000,      "7d"],
+  [30 * 24 * 60 * 60 * 1000,     "30d"],
+];
 
 const MIN_MS  = 60 * 1000;
 const HOUR_MS = 60 * MIN_MS;
@@ -41,7 +55,10 @@ function fmtBucketLabel(bucketMs: number): string {
   return `${bucketMs / MIN_MS}m`;
 }
 
-export default function Timeline({ outerWindow, selected, onChange, runs, focusedRunIds }: Props) {
+export default function Timeline({
+  outerWindow, selected, onChange, runs, focusedRunIds,
+  onWindowSizeChange, windowSizeMs,
+}: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<{ mode: "left" | "right" | "move"; startX: number; start: [number, number]; rect: DOMRect } | null>(null);
 
@@ -119,11 +136,40 @@ export default function Timeline({ outerWindow, selected, onChange, runs, focuse
       padding: "8px 18px 10px", flex: "0 0 auto",
     }}>
       <div style={{
-        display: "flex", justifyContent: "space-between",
+        display: "flex", justifyContent: "space-between", alignItems: "center",
         fontSize: 9.5, letterSpacing: "0.08em", color: "#999",
         marginBottom: 4, textTransform: "uppercase",
       }}>
-        <span>TIMELINE · {fmtSpanLabel()} · {fmtBucketLabel(bucketMs)} bins</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span>TIMELINE · {fmtSpanLabel()} · {fmtBucketLabel(bucketMs)} bins</span>
+          {/* Window-size picker (2026-05-04). Parent owns the canonical
+              outerWindow; we just emit onWindowSizeChange when user picks. */}
+          {onWindowSizeChange && (
+            <span style={{ display: "flex", gap: 2 }}>
+              {WINDOW_OPTIONS.map(([ms, label]) => {
+                const active = windowSizeMs === ms;
+                return (
+                  <button
+                    key={label}
+                    onClick={() => onWindowSizeChange(ms)}
+                    style={{
+                      fontSize: 9.5, letterSpacing: "0.05em",
+                      padding: "1px 6px", borderRadius: 2,
+                      border: active ? "1px solid #111" : "1px solid #ddd",
+                      background: active ? "#111" : "#fff",
+                      color: active ? "#fff" : "#666",
+                      cursor: "pointer",
+                      textTransform: "uppercase",
+                      fontWeight: active ? 600 : 400,
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </span>
+          )}
+        </span>
         <span style={{ fontFamily: "ui-monospace, Menlo, monospace", letterSpacing: 0 }}>
           {fmt(selected[0])} → {fmt(selected[1])}
         </span>
@@ -162,11 +208,69 @@ export default function Timeline({ outerWindow, selected, onChange, runs, focuse
                style={{ position: "absolute", right: -4, top: 0, bottom: 0, width: 8, cursor: "ew-resize" }} />
         </div>
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, color: "#bbb", marginTop: 3 }}>
-        <span>{fmtTick(t0)}</span>
-        <span>{fmtTick(t0 + span * 0.5)}</span>
-        <span>NOW</span>
-      </div>
+      {/* Hour-level x-axis ticks (2026-05-04). Computes tick stride from
+          span: ≤6h → every hour, ≤1d → every 4h, ≤2d → every 6h, ≤7d → every
+          1d, >7d → every 7d. Caps at ~12 visible labels so layout doesn't
+          overflow. */}
+      <TimelineAxis t0={t0} span={span} />
     </div>
   );
+}
+
+// ── X-axis tick labels with adaptive stride ────────────────────────────
+function TimelineAxis({ t0, span }: { t0: number; span: number }) {
+  const stride = pickTickStrideMs(span);
+  const fmt = (t: number, includeDate: boolean) => {
+    const d = new Date(t);
+    if (stride >= DAY_MS) {
+      return d.toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" });
+    }
+    const time = d.toLocaleString("zh-TW", { hour12: false, hour: "2-digit", minute: "2-digit" });
+    if (includeDate) {
+      const date = d.toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" });
+      return `${date} ${time}`;
+    }
+    return time;
+  };
+  // First tick aligned to stride boundary at or after t0
+  const firstTick = Math.ceil(t0 / stride) * stride;
+  const ticks: number[] = [];
+  for (let t = firstTick; t <= t0 + span; t += stride) ticks.push(t);
+  // Cap at 12 ticks max so it never overflows
+  const step = Math.max(1, Math.ceil(ticks.length / 12));
+  const visible = ticks.filter((_, i) => i % step === 0);
+  return (
+    <div style={{
+      position: "relative", height: 14, marginTop: 4,
+      fontSize: 9.5, color: "#bbb",
+    }}>
+      {visible.map((t, i) => {
+        const pct = ((t - t0) / span) * 100;
+        // Add the date prefix only on the first label and on day-boundary ticks
+        const d = new Date(t);
+        const includeDate = i === 0 || (stride < DAY_MS && d.getHours() === 0);
+        return (
+          <span key={t} style={{
+            position: "absolute", left: `${pct}%`,
+            transform: pct < 5 ? "translateX(0)" : pct > 95 ? "translateX(-100%)" : "translateX(-50%)",
+            whiteSpace: "nowrap",
+          }}>
+            {fmt(t, includeDate)}
+          </span>
+        );
+      })}
+      <span style={{
+        position: "absolute", right: 0,
+        fontWeight: 600, color: "#999",
+      }}>NOW</span>
+    </div>
+  );
+}
+
+function pickTickStrideMs(span: number): number {
+  if (span <=  6 * HOUR_MS) return HOUR_MS;          // every hour
+  if (span <= 24 * HOUR_MS) return 4 * HOUR_MS;      // every 4 hours
+  if (span <=  2 * DAY_MS)  return 6 * HOUR_MS;      // every 6 hours
+  if (span <=  7 * DAY_MS)  return DAY_MS;           // every day
+  return 7 * DAY_MS;                                 // every week
 }

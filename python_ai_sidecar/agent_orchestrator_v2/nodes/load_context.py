@@ -32,6 +32,31 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
     canvas_overrides = state.get("canvas_overrides")
     client_context = state.get("client_context") or {}
 
+    # 2026-05-04: when the user confirms a design intent card, the frontend
+    # now ships the spec via client_context.intent_spec instead of inlining
+    # JSON into the user_message text. Re-augment the user_message with a
+    # human-readable rendering so the LLM still has the full spec context
+    # WITHOUT raw JSON appearing in the chat transcript.
+    intent_spec = client_context.pop("intent_spec", None) if isinstance(client_context, dict) else None
+    if intent_spec and isinstance(intent_spec, dict) and "[intent_confirmed:" in user_message:
+        try:
+            inputs_render = "\n".join(
+                f"  - ${i.get('name', '?')}"
+                + (f" ({i.get('source', 'user_input')})" if i.get('source') else "")
+                + (f" — {i.get('rationale', '')}" if i.get('rationale') else "")
+                for i in (intent_spec.get("inputs") or [])
+            ) or "  (none)"
+            spec_block = (
+                "\n\n# 已對齊 spec（來自 user 確認的 design intent card）\n"
+                f"Inputs（**請用這些 canonical names 給 build_pipeline_live**）:\n{inputs_render}\n"
+                f"Logic: {intent_spec.get('logic', '')}\n"
+                f"Presentation: {intent_spec.get('presentation', 'mixed_chart_alert')}"
+            )
+            user_message = user_message + spec_block
+        except Exception:  # noqa: BLE001
+            # Best-effort augmentation — never block the chat on bad spec.
+            pass
+
     # Task context extraction (same as v1)
     _tc_type, _tc_subject, _tc_tool = extract_task_context(user_message)
     task_context = {

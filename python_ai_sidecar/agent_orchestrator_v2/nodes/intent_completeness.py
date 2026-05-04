@@ -72,14 +72,40 @@ If it IS a pipeline-building request, check three dimensions:
   - inputs:       did the user say WHICH equipment / lot / step / date range?
                   (any concrete reference is enough — "EQP-07", "all stations",
                   "5 days", etc.)
+
+                  When emitting the `inputs` array in your guess, use ONLY
+                  these canonical names (the downstream Glass Box's HOT
+                  blocks expect exactly these keys):
+                    tool_id      — 機台 (EQP-XX)
+                    step         — 站點 (STEP_XXX)
+                    lot_id       — 批號 (LOT-XXXX)
+                    recipe_id    — 配方 (RCP-XXX)
+                    apc_id       — APC 模型 (APC-XXX)
+                    time_range   — 時間區間 (24h / 7d / "5 processes")
+                    threshold    — 數值門檻
+                    object_name  — 觀測對象 (SPC / APC / FDC / EC)
+
+                  ⚠ DO NOT invent new names like `equipment`, `timeframe_1`,
+                  `eqp_07_recent_5_processes`, etc. The Glass Box can only
+                  bind canonical names to its block params; non-canonical
+                  ones get the build stuck and waste turns. If the user
+                  needs two time-range values (e.g. "last 1 day" + "last 5
+                  processes"), declare two inputs both named `time_range`
+                  is NOT allowed — instead give the second one a clear
+                  semantic name like `recent_window` only AFTER all 8
+                  canonical names are exhausted (rare).
   - logic:        did the user say WHAT to compute? (OOC rate, count,
                   trend, cpk, threshold check, etc.)
   - presentation: did the user say HOW to present?
-                  Explicit cues: 表格/列表/table/清單 → table
-                                  圖/圖表/趨勢圖/chart/折線/長條 → chart
-                                  告警/alert/通知 → alert
-                                  數值/scalar/單一數字 → scalar
-                                  pareto/分佈圖/直方圖 → chart
+                  Pick the most specific kind from the canonical list:
+                    line_chart        — 折線/趨勢圖/趨勢分析 (time-series)
+                    bar_chart         — 長條圖/Pareto/分組計數
+                    control_chart     — 管制圖/SPC chart/UCL/LCL
+                    heatmap           — 熱圖/雙維度密度
+                    table             — 表格/列表/清單
+                    alert             — 告警/通知/超過門檻就 fire
+                    mixed_table_alert — 表格 + 告警同時呈現
+                    mixed_chart_alert — 圖表 + 告警同時呈現
                   If user said NONE of these — presentation is missing.
 
 Output JSON only (no markdown fences). Keep keys/values lowercase ASCII.
@@ -98,7 +124,7 @@ If incomplete (at least one of inputs/logic/presentation is missing or ambiguous
          "rationale": "<one short sentence>"}
       ],
       "logic": "<one-sentence plain language description>",
-      "presentation": "alert|chart|table|scalar|mixed",
+      "presentation": "line_chart|bar_chart|control_chart|heatmap|table|alert|mixed_table_alert|mixed_chart_alert",
       "alternatives": [
         {"summary": "<another way to interpret, ≤30 chars>"}
       ]
@@ -118,6 +144,106 @@ _FORCE_SYNTH_REPLY = (
     "我先跟你確認要建什麼 ↑\n"
     "點 ✅ 開始建、✏️ 想修改、❌ 取消。"
 )
+
+
+# Canonical input names — must match the keys Glass Box's HOT blocks accept
+# so the build doesn't hunt for a non-existent param. Mapping on the right
+# is keyed by lowercase user-supplied name (after stripping leading $) and
+# returns the canonical key. Anything not matched falls back to the raw
+# (sanitized) name.
+_CANONICAL_INPUTS: set[str] = {
+    "tool_id", "step", "lot_id", "recipe_id", "apc_id",
+    "time_range", "threshold", "object_name",
+}
+_INPUT_NAME_ALIASES: dict[str, str] = {
+    # equipment / tool
+    "equipment":     "tool_id",
+    "equipment_id":  "tool_id",
+    "machine":       "tool_id",
+    "machine_id":    "tool_id",
+    "eqp":           "tool_id",
+    "eqp_id":        "tool_id",
+    "tool":          "tool_id",
+    # step
+    "step_id":       "step",
+    "station":       "step",
+    "station_id":    "step",
+    # lot
+    "lot":           "lot_id",
+    "batch":         "lot_id",
+    "batch_id":      "lot_id",
+    # recipe
+    "recipe":        "recipe_id",
+    "recipe_version":"recipe_id",
+    # APC
+    "apc":           "apc_id",
+    # time
+    "timeframe":     "time_range",
+    "timeframe_1":   "time_range",
+    "timeframe_2":   "time_range",
+    "time_window":   "time_range",
+    "duration":      "time_range",
+    "period":        "time_range",
+    # object
+    "subsystem":     "object_name",
+    "object":        "object_name",
+}
+
+# Allowed presentation kinds — must match the 8-way enum surfaced to the
+# DesignIntentCard radio. Old values (alert/chart/table/scalar/mixed) get
+# remapped to the closest new kind for back-compat with cached intents.
+_CANONICAL_PRESENTATION: set[str] = {
+    "line_chart", "bar_chart", "control_chart", "heatmap",
+    "table", "alert", "mixed_table_alert", "mixed_chart_alert",
+}
+_PRESENTATION_ALIASES: dict[str, str] = {
+    "chart":      "line_chart",     # ambiguous "chart" defaults to line
+    "scalar":     "table",          # single-number → small table
+    "mixed":      "mixed_chart_alert",
+    "histogram":  "bar_chart",
+    "pareto":     "bar_chart",
+    "spc":        "control_chart",
+    "spc_chart":  "control_chart",
+    "trend":      "line_chart",
+}
+
+
+def _normalize_input(raw: dict) -> dict:
+    """Force a canonical input name. Falls back to the raw name when no
+    sensible mapping exists (rare — caller should still be able to use
+    those, just with worse Glass Box matching).
+    """
+    if not isinstance(raw, dict):
+        return raw
+    name_in = (raw.get("name") or "").strip().lstrip("$").lower()
+    if not name_in:
+        return raw
+    if name_in in _CANONICAL_INPUTS:
+        canonical = name_in
+    elif name_in in _INPUT_NAME_ALIASES:
+        canonical = _INPUT_NAME_ALIASES[name_in]
+    else:
+        # Last-mile heuristic: substring match against canonical keys.
+        canonical = next(
+            (c for c in _CANONICAL_INPUTS if c in name_in or name_in in c),
+            name_in,
+        )
+    out = dict(raw)
+    out["name"] = canonical
+    return out
+
+
+def _normalize_presentation(raw: str | None) -> str:
+    """Map LLM's presentation string to the canonical 8-way enum."""
+    if not raw:
+        return "mixed_chart_alert"
+    val = raw.strip().lower()
+    if val in _CANONICAL_PRESENTATION:
+        return val
+    if val in _PRESENTATION_ALIASES:
+        return _PRESENTATION_ALIASES[val]
+    # Unknown → safe default that shows both data + warning if any
+    return "mixed_chart_alert"
 
 
 def _has_bypass_prefix(msg: str) -> bool:
@@ -189,11 +315,17 @@ async def intent_completeness_node(
     missing = decision.get("missing") or []
 
     card_id = f"intent-{uuid.uuid4().hex[:8]}"
+    # Normalize input names to canonical keys before sending the card to
+    # the user. Even with the prompt rule, LLMs occasionally invent names
+    # like $equipment or $timeframe_1 — Glass Box's HOT blocks can't bind
+    # those, so the build gets stuck. This deterministic post-process
+    # ensures whatever lands in the spec is something the builder can use.
+    normalized_inputs = [_normalize_input(i) for i in (guess.get("inputs") or [])]
     spec_payload = {
         "card_id": card_id,
-        "inputs": guess.get("inputs") or [],
+        "inputs": normalized_inputs,
         "logic": guess.get("logic") or "",
-        "presentation": guess.get("presentation") or "mixed",
+        "presentation": _normalize_presentation(guess.get("presentation")),
         "alternatives": guess.get("alternatives") or [],
     }
 
