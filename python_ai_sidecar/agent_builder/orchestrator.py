@@ -34,12 +34,15 @@ from python_ai_sidecar.pipeline_builder.block_registry import BlockRegistry
 
 logger = logging.getLogger(__name__)
 
-MAX_TURNS = 30  # 2026-05-04 cost cut: 50 → 30. Complex builds that legitimately
-                # need more steps still flow through SPEC_glassbox_continuation
-                # (user gets asked "再給 N 步"); meanwhile typical builds stop
-                # 20 LLM calls earlier. Production logs showed 99% of healthy
-                # builds finishing under 30 turns; the long tail was loops
-                # that the new no-change early-exit (below) catches anyway.
+MAX_TURNS = 80  # 2026-05-04 (revised): bumped 50 → 80. The earlier 30-turn
+                # cut was too aggressive — a clean 5-node build burns ~25
+                # turns (list_blocks + 5×add_node + 5-10×set_param +
+                # 4×connect_edge + validate-fix-loop + finish), so anything
+                # more complex tripped the cap and burned MORE on the
+                # SPEC_glassbox_continuation self-assess prompt. The real
+                # cost gate is the no-change early exit below (3 stale
+                # turns → abort), not MAX_TURNS. 80 leaves comfortable
+                # headroom for legitimate ~10-node builds.
 MAX_SAME_TOOL_RETRY = 3  # if Agent calls the same (tool, args) 3x in a row → refuse + hint
 
 # 2026-05-04 cost cut: if pipeline JSON hash hasn't changed for N consecutive
