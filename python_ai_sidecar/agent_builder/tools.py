@@ -207,20 +207,58 @@ class BuilderToolset:
         """Return block catalog from DB (filtered by category if given)."""
         catalog = self.registry.catalog
         items = []
+        # 2026-05-04 cost cut: list_blocks now returns 1-line summary per
+        # block instead of the full description / param_schema / examples
+        # blob. Saved ~15K tokens per tool result. Caller must use
+        # explain_block() to fetch the full spec for blocks they want to
+        # add to the canvas.
         for (name, version), spec in catalog.items():
             if category and spec.get("category") != category:
                 continue
+            desc = (spec.get("description") or "").strip()
+            head = desc.split("\n", 1)[0].strip() if desc else ""
+            if len(head) > 100:
+                head = head[:100].rsplit(" ", 1)[0] + "…"
             items.append({
                 "name": name,
                 "version": version,
                 "category": spec.get("category"),
                 "status": spec.get("status"),
-                "description": spec.get("description"),
-                "input_schema": spec.get("input_schema"),
-                "output_schema": spec.get("output_schema"),
-                "param_schema": spec.get("param_schema"),
+                "summary": head,
             })
-        return {"blocks": items, "count": len(items)}
+        return {
+            "blocks": items,
+            "count": len(items),
+            "hint": "Call explain_block(block_name) for full param_schema + examples before adding to canvas.",
+        }
+
+    async def explain_block(
+        self,
+        block_name: str,
+        block_version: str = "1.0.0",
+    ) -> dict[str, Any]:
+        """Return full spec for one block: description, ports, param_schema,
+        examples. Companion to the slim list_blocks index — use before
+        add_node so the LLM picks correct params on the first try.
+        """
+        spec = self.registry.get_spec(block_name, block_version)
+        if spec is None:
+            raise ToolError(
+                code="BLOCK_NOT_FOUND",
+                message=f"Block '{block_name}@{block_version}' not in catalog",
+                hint="Browse list_blocks() for available names.",
+            )
+        return {
+            "name": block_name,
+            "version": block_version,
+            "category": spec.get("category"),
+            "status": spec.get("status"),
+            "description": spec.get("description"),
+            "input_schema": spec.get("input_schema") or [],
+            "output_schema": spec.get("output_schema") or [],
+            "param_schema": spec.get("param_schema") or {},
+            "examples": spec.get("examples") or [],
+        }
 
     async def add_node(
         self,

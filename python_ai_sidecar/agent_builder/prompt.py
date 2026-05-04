@@ -44,7 +44,7 @@ _SYSTEM_PREAMBLE = """You are an AIOps **Pipeline Builder Agent**. A process eng
 # Operating principles
 
 1. **Plan before acting.** Skim the request, think about which blocks you need, then start.
-2. **Use `list_blocks` first** to confirm what's available; don't assume block names.
+2. **Catalog flow:** the system prompt above already shows full spec for HOT blocks (process_history, filter, alert, chart, data_view, sort, xbar_r) and a 1-line index for the rest. For any block in the index that you plan to use, call `explain_block(block_name)` once to fetch full param_schema + examples before `add_node`. Do NOT repeatedly call `list_blocks` — the index is already in your context.
 3. **When a param is a column name** (e.g. `Filter.column`, `Threshold.column`), call `preview` on the upstream node first to see what columns exist. Never guess column names.
 4. **After every 2-3 operations**, call `explain(...)` with a one-sentence rationale so the PE knows why you're doing what you're doing.
 5. **Before `finish`, always call `validate`** — if errors, fix them first. The moment `validate` returns `{valid: true}`, your VERY NEXT tool call must be `finish(summary="…")`. Do NOT add extra `explain` / `preview` / `list_blocks` calls between a passing validate and finish — those waste turns and the run will be marked failed if you stop without calling `finish`.
@@ -268,56 +268,138 @@ Don't chain `alert → chart` or `alert → data_view`. Alert is terminal.
 """
 
 
-def _format_block_catalog(catalog: dict[tuple[str, str], dict[str, Any]]) -> str:
-    """Render the block catalog as a compact text block for the system prompt."""
-    lines: list[str] = []
-    # Group by category for easier LLM reading
-    by_cat: dict[str, list[tuple[str, str, dict[str, Any]]]] = {}
-    for (name, version), spec in catalog.items():
-        by_cat.setdefault(spec.get("category") or "other", []).append((name, version, spec))
+# Hot-path blocks — full spec stays in the system prompt so the LLM can
+# build typical pipelines without round-tripping explain_block 5+ times
+# per turn. Anything not on this list goes through the lazy index → user
+# explicitly explain_block() to fetch full description / param_schema /
+# examples on demand. Tuned 2026-05-04 from production usage_stats.
+HOT_BLOCK_NAMES: tuple[str, ...] = (
+    "block_process_history",
+    "block_filter",
+    "block_alert",
+    "block_chart",
+    "block_data_view",
+    "block_sort",
+    "block_xbar_r",
+)
+
+
+def _first_sentence(text: str, max_chars: int = 100) -> str:
+    """Extract the leading 'one-liner' from a multi-line description.
+
+    Strategy: trim to first newline-delimited paragraph, then cap at
+    max_chars at a word boundary. Keeps the catalog index dense while
+    staying informative enough that the LLM can decide which block to
+    explain_block().
+    """
+    if not text:
+        return ""
+    head = text.strip().split("\n", 1)[0].strip()
+    if len(head) <= max_chars:
+        return head
+    cut = head[:max_chars].rsplit(" ", 1)[0]
+    return cut + "…"
+
+
+def _format_block_index(catalog: dict[tuple[str, str], dict[str, Any]]) -> str:
+    """One-line summary per block, grouped by category. ~80 chars × 47 ≈ 1K tokens."""
+    by_cat: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+    for (name, _version), spec in catalog.items():
+        by_cat.setdefault(spec.get("category") or "other", []).append((name, spec))
 
     order = ["source", "transform", "logic", "output", "custom", "other"]
+    lines: list[str] = []
     for cat in order:
         items = by_cat.get(cat) or []
         if not items:
             continue
-        lines.append(f"\n## Category: {cat.upper()}")
-        for name, version, spec in sorted(items, key=lambda x: x[0]):
-            lines.append(f"\n### `{name}` (v{version})")
-            lines.append("**Description:**")
-            lines.append(spec.get("description", "").strip())
-            input_ports = spec.get("input_schema") or []
-            output_ports = spec.get("output_schema") or []
-            if input_ports:
-                lines.append(f"**Input ports:** {json.dumps(input_ports, ensure_ascii=False)}")
-            if output_ports:
-                lines.append(f"**Output ports:** {json.dumps(output_ports, ensure_ascii=False)}")
-            param_schema = spec.get("param_schema") or {}
-            if param_schema:
-                lines.append(f"**param_schema:** `{json.dumps(param_schema, ensure_ascii=False)}`")
-            # Surface concrete examples so the Agent copies real-world param sets
-            # instead of inventing them. Each entry: {name, summary, params, upstream_hint?}
-            examples = spec.get("examples") or []
-            if examples:
-                lines.append("**Examples:**")
-                for ex in examples:
-                    bullet = f"- *{ex.get('name', 'example')}* — {ex.get('summary', '')}"
-                    if ex.get("upstream_hint"):
-                        bullet += f" [{ex['upstream_hint']}]"
-                    lines.append(bullet)
-                    params = ex.get("params") or {}
-                    if params:
-                        lines.append(f"  params: `{json.dumps(params, ensure_ascii=False)}`")
+        lines.append(f"\n## {cat.upper()}")
+        for name, spec in sorted(items, key=lambda x: x[0]):
+            summary = _first_sentence(spec.get("description") or "")
+            lines.append(f"- `{name}` — {summary}")
     return "\n".join(lines)
 
 
+def _format_full_spec(name: str, spec: dict[str, Any]) -> str:
+    """Full description + ports + param_schema + examples for one block.
+
+    Used both for hot-block injection in the system prompt and as the
+    return value of the explain_block tool.
+    """
+    lines: list[str] = []
+    version = spec.get("version") or "1.0.0"
+    lines.append(f"### `{name}` (v{version}, {spec.get('category') or 'other'})")
+    lines.append("**Description:**")
+    lines.append((spec.get("description") or "").strip())
+    input_ports = spec.get("input_schema") or []
+    output_ports = spec.get("output_schema") or []
+    if input_ports:
+        lines.append(f"**Input ports:** {json.dumps(input_ports, ensure_ascii=False)}")
+    if output_ports:
+        lines.append(f"**Output ports:** {json.dumps(output_ports, ensure_ascii=False)}")
+    param_schema = spec.get("param_schema") or {}
+    if param_schema:
+        lines.append(f"**param_schema:** `{json.dumps(param_schema, ensure_ascii=False)}`")
+    examples = spec.get("examples") or []
+    if examples:
+        lines.append("**Examples:**")
+        for ex in examples:
+            bullet = f"- *{ex.get('name', 'example')}* — {ex.get('summary', '')}"
+            if ex.get("upstream_hint"):
+                bullet += f" [{ex['upstream_hint']}]"
+            lines.append(bullet)
+            params = ex.get("params") or {}
+            if params:
+                lines.append(f"  params: `{json.dumps(params, ensure_ascii=False)}`")
+    return "\n".join(lines)
+
+
+def _format_hot_blocks(catalog: dict[tuple[str, str], dict[str, Any]]) -> str:
+    """Full spec for HOT_BLOCK_NAMES only — these stay resident in the prompt."""
+    by_name: dict[str, dict[str, Any]] = {}
+    for (name, _v), spec in catalog.items():
+        by_name[name] = spec
+    blocks: list[str] = []
+    for name in HOT_BLOCK_NAMES:
+        spec = by_name.get(name)
+        if spec is not None:
+            blocks.append(_format_full_spec(name, spec))
+    return "\n\n".join(blocks)
+
+
 def build_system_prompt(registry: BlockRegistry) -> str:
-    catalog_text = _format_block_catalog(registry.catalog)
+    """Tiered catalog: full spec for hot blocks + 1-line index for the rest.
+
+    2026-05-04 cost cut: previous version dumped every block's full
+    description + examples + param_schema (~20K tokens) on every Glass Box
+    turn. Profiling caught builds spending more on cached catalog reads
+    than on actual reasoning. The new layout:
+      - Hot blocks (≈7 of 47): full spec in system prompt
+      - Other blocks: 1-line summary in the catalog index
+      - LLM calls explain_block(name) on demand for full details
+
+    Result: ~25K → ~5K system prompt tokens.
+    """
+    catalog = registry.catalog
+    index_text = _format_block_index(catalog)
+    hot_text = _format_hot_blocks(catalog)
     return f"""{_SYSTEM_PREAMBLE}
 
-# Available blocks ({len(registry.catalog)} total)
+# Available blocks ({len(catalog)} total)
 
-{catalog_text}
+The catalog has two tiers:
+1. **Hot blocks** below — full spec resident in this prompt; use freely.
+2. **Index** further down — 1-line summary per block. Call
+   `explain_block(block_name)` to fetch full description + param_schema +
+   examples for any block before adding it to the canvas.
+
+## Hot blocks (full spec — use directly)
+
+{hot_text}
+
+## Block index (call explain_block to expand)
+
+{index_text}
 """
 
 
@@ -329,7 +411,13 @@ def build_system_prompt(registry: BlockRegistry) -> str:
 TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "name": "list_blocks",
-        "description": "List blocks available in the catalog. Returns each block's schemas — call this first to see what you have.",
+        "description": (
+            "Browse the block catalog index (1-line summary per block, grouped by "
+            "category). The system prompt already contains this index plus full "
+            "spec for HOT blocks (process_history, filter, alert, chart, etc.) — "
+            "call list_blocks only if you need to filter to a category. For full "
+            "param_schema / examples of any specific block, call explain_block."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -337,6 +425,30 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "type": "string",
                     "enum": ["source", "transform", "logic", "output", "custom"],
                     "description": "Optional category filter.",
+                },
+            },
+        },
+    },
+    {
+        "name": "explain_block",
+        "description": (
+            "Fetch full specification for ONE block: description, input/output "
+            "ports, param_schema, and examples. Use this BEFORE add_node for any "
+            "block that isn't in the system prompt's hot-blocks section. Cheap "
+            "(one tool call) compared to inventing wrong params and burning "
+            "validate-fix turns."
+        ),
+        "input_schema": {
+            "type": "object",
+            "required": ["block_name"],
+            "properties": {
+                "block_name": {
+                    "type": "string",
+                    "description": "Exact block name (e.g. 'block_groupby_agg').",
+                },
+                "block_version": {
+                    "type": "string",
+                    "description": "Optional; defaults to '1.0.0'.",
                 },
             },
         },

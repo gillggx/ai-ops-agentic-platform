@@ -29,6 +29,7 @@ from python_ai_sidecar.agent_builder.session import (
     StreamEvent,
 )
 from python_ai_sidecar.agent_builder.tools import BuilderToolset, ToolError
+from python_ai_sidecar.agent_builder.compression import compress_messages
 from python_ai_sidecar.pipeline_builder.block_registry import BlockRegistry
 
 
@@ -207,6 +208,14 @@ async def stream_agent_build(
             )
             return
 
+        # 2026-05-04 cost cut: history compression. Past
+        # COMPRESSION_TRIGGER_TURNS, replace older (assistant + tool_result)
+        # pairs with one synthetic synopsis assistant message that
+        # summarizes operations + current canvas state. Pure deterministic
+        # — no extra LLM call. Falls back to original messages on any
+        # internal error so this never breaks a build.
+        send_messages = compress_messages(messages, session)
+
         # Call Claude
         try:
             resp = await client.messages.create(
@@ -214,7 +223,7 @@ async def stream_agent_build(
                 max_tokens=DEFAULT_MAX_TOKENS,
                 system=system_blocks,
                 tools=tools,
-                messages=messages,
+                messages=send_messages,
             )
         except Exception as e:  # noqa: BLE001
             logger.exception("Claude call failed at turn %s", turn)
