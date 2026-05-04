@@ -18,7 +18,7 @@ from app.database import get_db
 from app.services import recipe_service, apc_service, dc_service, spc_service
 from app.services import fdc_service, ec_service
 from app.ws.manager import manager as ws_manager
-from config import PROCESSING_MIN_SEC, PROCESSING_MAX_SEC, HOLD_PROBABILITY
+from config import PROCESSING_MIN_SEC, PROCESSING_MAX_SEC, HOLD_PROBABILITY, HOLD_TIMEOUT_SEC
 
 _RECIPE_IDS = [f"RCP-{i:03d}" for i in range(1, 21)]
 _BIAS_ALERT_THRESHOLD = 0.05
@@ -103,9 +103,9 @@ async def process_step(lot_id: str, tool_id: str, step_num: int) -> dict:
         print(f"[Agent] ⚠ HOLD – {tool_id} | {lot_id} | {step_id}")
 
         try:
-            await asyncio.wait_for(hold_event.wait(), timeout=3600.0)
+            await asyncio.wait_for(hold_event.wait(), timeout=HOLD_TIMEOUT_SEC)
         except asyncio.TimeoutError:
-            print(f"[Agent] HOLD timeout – {tool_id} auto-releasing")
+            print(f"[Agent] HOLD timeout ({HOLD_TIMEOUT_SEC}s) – {tool_id} auto-releasing")
         finally:
             _hold_events.pop(tool_id, None)
 
@@ -141,8 +141,14 @@ async def process_step(lot_id: str, tool_id: str, step_num: int) -> dict:
         recipe_service.upload_snapshot_from_params(recipe_id, recipe_params, ctx, recipe_version),
         fdc_service.upload_snapshot(fdc_result, ctx),
         ec_service.upload_snapshot(ec_data, ctx),
+        # Phase Y: explicit eventType lets consumers tell PROCESS_END events
+        # apart from future PROCESS_START / HEARTBEAT emissions (currently we
+        # only write the END so the row count == lot-step count). Existing
+        # queries that don't filter on eventType continue to work because we
+        # default-write PROCESS_END.
         db.events.insert_one({
             "eventTime":          event_time,
+            "eventType":          "PROCESS_END",
             "lotID":              lot_id,
             "toolID":             tool_id,
             "step":               step_id,

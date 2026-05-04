@@ -950,6 +950,166 @@ async def get_audit():
     }
 
 
+# ── Admin: Live Snapshot (per-tool throughput + warnings) ─────
+# Designed for the /admin/simulator-health UI. Computes everything from
+# the events collection — no in-memory state — so a service restart
+# doesn't lose the picture. Calls aggregate over (now - 1h) so cost is
+# bounded even with months of history in mongo.
+
+_SIM_BOOT_TIME = datetime.utcnow()
+
+
+@router.get("/admin/snapshot")
+async def admin_snapshot():
+    """Live simulator health snapshot for the admin UI.
+
+    Returns:
+      - config: declared SLO (process duration, OOC rate, etc.)
+      - health: aggregate signals (events/min, lag, active tools)
+      - per_tool: every tool's lots/h, last event, warnings
+      - warnings: top-level fault list (lag > 12min, lots/h < 3, etc.)
+
+    Computed from events in the last 1 hour. No persistent state — a
+    sidecar restart does not lose the snapshot.
+    """
+    from config import (
+        PROCESSING_MIN_SEC, PROCESSING_MAX_SEC,
+        HEARTBEAT_MIN_SEC, HEARTBEAT_MAX_SEC,
+        HOLD_PROBABILITY, HOLD_TIMEOUT_SEC,
+        OOC_PROBABILITY, TOTAL_TOOLS, TOTAL_LOTS, RECYCLE_LOTS,
+    )
+    from datetime import timedelta
+    db = get_db()
+    now = datetime.utcnow()
+    one_hour_ago = now - timedelta(hours=1)
+    ten_min_ago  = now - timedelta(minutes=10)
+
+    # Expected per-tool throughput from declared duration:
+    # 60 min / 9 min mean ≈ 6.7 lots/hour. Allow 50% slack on the low side.
+    expected_duration_min = (PROCESSING_MIN_SEC + PROCESSING_MAX_SEC) / 2.0 / 60.0
+    expected_lots_per_hour = 60.0 / expected_duration_min if expected_duration_min > 0 else 0.0
+    min_acceptable_lots_per_hour = expected_lots_per_hour * 0.5
+
+    # ── Per-tool stats (events in last 1h) ─────────────────────
+    pipeline = [
+        {"$match": {"eventTime": {"$gte": one_hour_ago}}},
+        {"$group": {
+            "_id":            "$toolID",
+            "events":         {"$sum": 1},
+            "lots":           {"$addToSet": "$lotID"},
+            "last_event":     {"$max": "$eventTime"},
+            "ooc":            {"$sum": {"$cond": [{"$eq": ["$spc_status", "OOC"]}, 1, 0]}},
+            "current_lot":    {"$last": "$lotID"},
+            "current_step":   {"$last": "$step"},
+        }},
+        {"$project": {
+            "_id":          0,
+            "tool_id":      "$_id",
+            "events_1h":    "$events",
+            "lots_per_h":   {"$size": "$lots"},
+            "last_event":   "$last_event",
+            "ooc_count":    "$ooc",
+            "current_lot":  "$current_lot",
+            "current_step": "$current_step",
+        }},
+        {"$sort": {"tool_id": 1}},
+    ]
+    per_tool_raw = await db.events.aggregate(pipeline).to_list(length=None)
+
+    # Make sure all configured tools surface, even those with 0 events
+    seen = {t["tool_id"] for t in per_tool_raw}
+    all_tool_ids = [f"EQP-{i:02d}" for i in range(1, TOTAL_TOOLS + 1)]
+    for tid in all_tool_ids:
+        if tid not in seen:
+            per_tool_raw.append({
+                "tool_id": tid, "events_1h": 0, "lots_per_h": 0,
+                "last_event": None, "ooc_count": 0,
+                "current_lot": None, "current_step": None,
+            })
+    per_tool_raw.sort(key=lambda t: t["tool_id"])
+
+    # Compute warnings + lag for each tool
+    warnings: list[dict] = []
+    per_tool: list[dict] = []
+    for t in per_tool_raw:
+        last = t.get("last_event")
+        lag_sec = int((now - last).total_seconds()) if last else None
+        # Tool is "stuck" if last event > 2 × max process duration ago
+        # (i.e. should have completed at least one lot since then).
+        stuck_threshold = PROCESSING_MAX_SEC * 2
+        is_stuck = lag_sec is not None and lag_sec > stuck_threshold
+        is_under_throughput = t["lots_per_h"] < min_acceptable_lots_per_hour
+
+        tool_warnings: list[str] = []
+        if is_stuck:
+            tool_warnings.append(f"stuck: no event for {lag_sec}s (>{int(stuck_threshold)}s)")
+        if is_under_throughput and lag_sec is not None:
+            tool_warnings.append(
+                f"throughput low: {t['lots_per_h']} lots/h "
+                f"(expected ≥{min_acceptable_lots_per_hour:.1f})"
+            )
+
+        per_tool.append({
+            **t,
+            "last_event":   last.isoformat() + "Z" if last else None,
+            "lag_sec":      lag_sec,
+            "warnings":     tool_warnings,
+        })
+        for w in tool_warnings:
+            warnings.append({"tool_id": t["tool_id"], "issue": w})
+
+    # ── Aggregate health ──────────────────────────────────────
+    events_1h  = await db.events.count_documents({"eventTime": {"$gte": one_hour_ago}})
+    events_10m = await db.events.count_documents({"eventTime": {"$gte": ten_min_ago}})
+    last_global = await db.events.find_one({}, sort=[("eventTime", -1)])
+    last_event_time = last_global["eventTime"] if last_global else None
+    global_lag_sec = int((now - last_event_time).total_seconds()) if last_event_time else None
+    active_tools = sum(
+        1 for t in per_tool
+        if t["lag_sec"] is not None and t["lag_sec"] < PROCESSING_MAX_SEC * 2
+    )
+    if global_lag_sec is not None and global_lag_sec > 60:
+        warnings.insert(0, {
+            "tool_id": "*",
+            "issue": f"global lag {global_lag_sec}s — simulator may be down",
+        })
+
+    # Average process duration (from successive events on same tool, last 1h)
+    # Approximation only: sum of events / total tools / hour.
+    avg_lots_per_hour_per_tool = events_1h / max(1, TOTAL_TOOLS)
+    avg_duration_sec = (3600.0 / avg_lots_per_hour_per_tool) if avg_lots_per_hour_per_tool > 0 else None
+
+    return {
+        "now":         now.isoformat() + "Z",
+        "uptime_sec":  int((now - _SIM_BOOT_TIME).total_seconds()),
+        "config": {
+            "processing_min_sec":  PROCESSING_MIN_SEC,
+            "processing_max_sec":  PROCESSING_MAX_SEC,
+            "heartbeat_min_sec":   HEARTBEAT_MIN_SEC,
+            "heartbeat_max_sec":   HEARTBEAT_MAX_SEC,
+            "hold_probability":    HOLD_PROBABILITY,
+            "hold_timeout_sec":    HOLD_TIMEOUT_SEC,
+            "ooc_probability":     OOC_PROBABILITY,
+            "total_tools":         TOTAL_TOOLS,
+            "total_lots":          TOTAL_LOTS,
+            "recycle_lots":        RECYCLE_LOTS,
+            "expected_lots_per_hour_per_tool": round(expected_lots_per_hour, 2),
+        },
+        "health": {
+            "events_total":        await db.events.count_documents({}),
+            "events_1h":           events_1h,
+            "events_10m":          events_10m,
+            "last_event_time":     last_event_time.isoformat() + "Z" if last_event_time else None,
+            "global_lag_sec":      global_lag_sec,
+            "active_tools":        active_tools,
+            "configured_tools":    TOTAL_TOOLS,
+            "avg_observed_duration_sec": int(avg_duration_sec) if avg_duration_sec else None,
+        },
+        "per_tool": per_tool,
+        "warnings": warnings,
+    }
+
+
 # ── Admin: Reset Simulation Data ──────────────────────────────
 # Drops only simulation collections (object_snapshots, events).
 # Seed/master data (lots, tools, recipe_data, apc_state) is preserved.

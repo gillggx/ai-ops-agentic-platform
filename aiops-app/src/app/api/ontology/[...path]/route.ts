@@ -414,11 +414,15 @@ async function getTopologyRuns(searchParams: URLSearchParams) {
   const focusKind = (searchParams.get("focus_kind") ?? "").toLowerCase();
   const focusId   = searchParams.get("focus_id") ?? "";
 
-  // Default window = last 28 days
+  // Default window = last 24 hours.
+  // Was 28d, but combined with limit=500 it caused Topology to sample
+  // 500 events from a 28d window while Health Timeline shows 24h —
+  // visually they looked like inconsistent data sources. Both now
+  // default to 24h so a tool focus shows the same window of activity.
   const now      = Date.now();
   const fromMs   = searchParams.get("from")
                   ? Date.parse(searchParams.get("from") as string)
-                  : now - 28 * 24 * 60 * 60 * 1000;
+                  : now - 24 * 60 * 60 * 1000;
   const toMs     = searchParams.get("to")
                   ? Date.parse(searchParams.get("to") as string)
                   : now;

@@ -62,13 +62,14 @@ const KNOWLEDGE_ITEMS = [
 ];
 
 const ADMIN_ITEMS = [
-  { href: "/admin/triggers",        label: "Triggers Overview", icon: "🔔" },
-  { href: "/system/skills",         label: "Skills",          icon: "⚙️" },
-  { href: "/admin/memories",        label: "Agent Memory",    icon: "🧠" },
-  { href: "/system/data-sources",   label: "Data Sources",    icon: "🗄️" },
-  { href: "/system/event-registry", label: "Event Registry",  icon: "📋" },
-  { href: "/system/monitor",        label: "System Monitor",  icon: "🖥️" },
-  { href: "/admin/users",           label: "Users",           icon: "👥" },
+  { href: "/admin/triggers",          label: "Triggers Overview", icon: "🔔" },
+  { href: "/system/skills",           label: "Skills",            icon: "⚙️" },
+  { href: "/admin/memories",          label: "Agent Memory",      icon: "🧠" },
+  { href: "/system/data-sources",     label: "Data Sources",      icon: "🗄️" },
+  { href: "/system/event-registry",   label: "Event Registry",    icon: "📋" },
+  { href: "/system/monitor",          label: "System Monitor",    icon: "🖥️" },
+  { href: "/admin/simulator-health",  label: "Simulator Health",  icon: "💓" },
+  { href: "/admin/users",             label: "Users",             icon: "👥" },
 ];
 
 function userCanSeeOps(_roles: string[]): boolean {

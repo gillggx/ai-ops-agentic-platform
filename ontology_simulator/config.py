@@ -6,12 +6,17 @@ TOTAL_TOOLS   = 10
 TOTAL_STEPS   = 10
 TOTAL_RECIPES = 20
 
-# ── Timing (seconds; dev defaults — prod: set PROCESSING_MIN/MAX to 480/600) ─
+# ── Timing (seconds; canonical contract: 8-10 min process, see SPEC §2.1) ──
 HEARTBEAT_MIN_SEC  = float(os.getenv("HEARTBEAT_MIN",   "5"))
 HEARTBEAT_MAX_SEC  = float(os.getenv("HEARTBEAT_MAX",   "10"))
-PROCESSING_MIN_SEC = float(os.getenv("PROCESSING_MIN",  "180"))   # 3 min
-PROCESSING_MAX_SEC = float(os.getenv("PROCESSING_MAX",  "300"))   # 5 min
-HOLD_PROBABILITY   = float(os.getenv("HOLD_PROBABILITY", "0.05"))   # 5% equipment hold
+PROCESSING_MIN_SEC = float(os.getenv("PROCESSING_MIN",  "480"))   # 8 min
+PROCESSING_MAX_SEC = float(os.getenv("PROCESSING_MAX",  "600"))   # 10 min
+HOLD_PROBABILITY   = float(os.getenv("HOLD_PROBABILITY", "0.02"))   # 2% equipment hold (was 5%)
+# HOLD timeout: tool sits idle this long before auto-release if engineer
+# never acknowledges. Was 3600s (1h) — caused tools to look "stuck" for an
+# hour in mongo while real activity continued elsewhere. 300s (5min) keeps
+# the demo of HOLD visible without burning per-tool time budget.
+HOLD_TIMEOUT_SEC   = float(os.getenv("HOLD_TIMEOUT_SEC", "300"))
 
 # ── Lot Recycling ─────────────────────────────────────────────
 # True  → finished lots reset to step 1 (run forever)

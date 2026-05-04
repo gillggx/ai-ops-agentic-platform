@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { FocusRef, RunsResponse } from "./types";
 
 interface Args {
-  from?:  string;          // ISO; default = 28 days ago
+  from?:  string;          // ISO; server default = 24h ago (aligned w/ Health Timeline)
   to?:    string;          // ISO; default = now
   focus?: FocusRef | null;
   limit?: number;          // default 500 (server cap)
