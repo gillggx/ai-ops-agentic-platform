@@ -42,8 +42,14 @@ export default function TopologyWorkbench({
   // events — plenty to read at hour granularity). User picks via the
   // timeline's window dropdown.
   const [outerWindowMs, setOuterWindowMs] = useState<number>(DAY_MS);
+  // 2026-05-04 v2: auto-advance "now" every 30s so a long-open page keeps
+  // trailing recent events instead of showing a stale snapshot. If user
+  // explicitly picks a window size we re-anchor to fresh now (see below).
   const [now0, setNow0] = useState<number>(() => Date.now());
-  // Re-anchor "now" when window changes so the right edge stays aligned.
+  useEffect(() => {
+    const t = setInterval(() => setNow0(Date.now()), 30 * 1000);
+    return () => clearInterval(t);
+  }, []);
   const outerWindow = useMemo<[number, number]>(() => {
     return [now0 - outerWindowMs, now0];
   }, [now0, outerWindowMs]);

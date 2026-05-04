@@ -94,72 +94,121 @@ export function DesignIntentCard({ data, onPick }: Props) {
     ?? PRESENT_OPTIONS.find((o) => o.kind === "mixed_chart_alert")!;
 
   return (
-    <div style={{
-      width: "100%",
-      border: "1px solid #cbd5e0",
-      borderRadius: 8,
-      padding: "14px 16px",
-      background: "#f7fafc",
-      fontSize: 13,
-      color: "#2d3748",
-    }}>
+    <>
       <div style={{
-        display: "flex", alignItems: "center", gap: 6,
-        fontWeight: 700, marginBottom: 10, color: "#1a202c",
+        width: "100%",
+        border: "1px solid #cbd5e0",
+        borderRadius: 8,
+        padding: "14px 16px",
+        background: "#f7fafc",
+        fontSize: 13,
+        color: "#2d3748",
       }}>
-        <span>🛠</span>
-        <span>{editing ? "編輯規格 — 改完按「確認修改」" : "我想為你建這條 pipeline — 你看對嗎？"}</span>
-      </div>
+        <div style={{
+          display: "flex", alignItems: "center", gap: 6,
+          fontWeight: 700, marginBottom: 10, color: "#1a202c",
+        }}>
+          <span>🛠</span>
+          <span>我想為你建這條 pipeline — 你看對嗎？</span>
+        </div>
 
-      {editing ? (
-        <EditForm
-          draft={draft}
-          onChange={setDraft}
-        />
-      ) : (
         <ReadView data={data} present={present} />
-      )}
 
-      {/* Buttons */}
-      <div style={{
-        display: "flex", gap: 8, marginTop: 12,
-        opacity: disabled ? 0.5 : 1,
-      }}>
-        {editing ? (
-          <>
-            <button
-              onClick={() => { setEditing(false); onPick("confirm", draft); }}
-              style={btnStyle("primary")}
-            >✅ 確認修改並開始建</button>
-            <button
-              onClick={() => { setDraft(data); setEditing(false); }}
-              style={btnStyle("secondary")}
-            >↩ 取消修改</button>
-          </>
-        ) : (
-          <>
-            <button
-              disabled={disabled}
-              onClick={() => onPick("confirm", data)}
-              style={btnStyle(disabled ? "secondary-disabled" : "primary")}
-            >✅ 開始建</button>
-            <button
-              disabled={disabled}
-              onClick={() => { setDraft(data); setEditing(true); }}
-              style={btnStyle(disabled ? "secondary-disabled" : "secondary")}
-            >✏️ 想修改</button>
-            <button
-              disabled={disabled}
-              onClick={() => onPick("cancel", data)}
-              style={btnStyle(disabled ? "secondary-disabled" : "secondary")}
-            >❌ 取消</button>
-          </>
+        {/* Buttons */}
+        <div style={{
+          display: "flex", gap: 8, marginTop: 12,
+          opacity: disabled ? 0.5 : 1,
+        }}>
+          <button
+            disabled={disabled}
+            onClick={() => onPick("confirm", data)}
+            style={btnStyle(disabled ? "secondary-disabled" : "primary")}
+          >✅ 開始建</button>
+          <button
+            disabled={disabled}
+            onClick={() => { setDraft(data); setEditing(true); }}
+            style={btnStyle(disabled ? "secondary-disabled" : "secondary")}
+          >✏️ 想修改</button>
+          <button
+            disabled={disabled}
+            onClick={() => onPick("cancel", data)}
+            style={btnStyle(disabled ? "secondary-disabled" : "secondary")}
+          >❌ 取消</button>
+        </div>
+
+        {disabled && (
+          <div style={{ marginTop: 8, fontSize: 11, color: "#a0aec0" }}>已選擇</div>
         )}
       </div>
 
-      {disabled && (
-        <div style={{ marginTop: 8, fontSize: 11, color: "#a0aec0" }}>已選擇</div>
+      {/* 2026-05-04 v3: editor lives in a modal so the chat sidebar isn't
+          cramped by the 8-radio + JSON fallback form taking 700+px. */}
+      {editing && (
+        <EditModal
+          draft={draft}
+          onChange={setDraft}
+          onConfirm={() => { setEditing(false); onPick("confirm", draft); }}
+          onCancel={() => { setDraft(data); setEditing(false); }}
+        />
       )}
+    </>
+  );
+}
+
+
+// ── Edit modal (popup) ───────────────────────────────────────────────
+
+function EditModal({
+  draft, onChange, onConfirm, onCancel,
+}: {
+  draft: DesignIntentData;
+  onChange: (next: DesignIntentData) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
+      style={{
+        position: "fixed", inset: 0, zIndex: 1000,
+        background: "rgba(15, 23, 42, 0.45)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <div style={{
+        width: "min(640px, 100%)",
+        maxHeight: "90vh", overflowY: "auto",
+        background: "#fff", borderRadius: 8,
+        boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
+        padding: "20px 24px",
+      }}>
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          marginBottom: 16,
+        }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#1a202c" }}>
+            🛠 編輯規格 — 改完按「確認修改」
+          </div>
+          <button
+            onClick={onCancel}
+            style={{
+              background: "transparent", border: "none", cursor: "pointer",
+              fontSize: 18, color: "#a0aec0", padding: 4,
+            }}
+            title="關閉"
+          >✕</button>
+        </div>
+        <EditForm draft={draft} onChange={onChange} />
+        <div style={{
+          display: "flex", gap: 8, marginTop: 16,
+          paddingTop: 14, borderTop: "1px solid #e2e8f0",
+          justifyContent: "flex-end",
+        }}>
+          <button onClick={onCancel} style={btnStyle("secondary")}>↩ 取消修改</button>
+          <button onClick={onConfirm} style={btnStyle("primary")}>✅ 確認修改並開始建</button>
+        </div>
+      </div>
     </div>
   );
 }
