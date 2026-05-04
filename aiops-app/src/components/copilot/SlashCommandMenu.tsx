@@ -49,6 +49,10 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     title: "多機台同站點 xbar 疊圖比較",
     desc: "同一張 chart 上以不同顏色顯示多台機台的 xbar 趨勢線（color=toolID）",
     tpl: "比較 [EQP-01,EQP-02,EQP-03,EQP-04,EQP-05] 在 [STEP_001] 的 xbar 趨勢，畫成一張彩色 line chart（color=toolID）" },
+  { cat: "spc", ico: "📉", key: "spc-drift",
+    title: "Drift 偵測 + 分佈診斷三件組",
+    desc: "EWMA-CUSUM 抓小幅漂移 + Box plot 看 lot 變異 + Q-Q 檢定常態性",
+    tpl: "過去 7 天 [EQP-01] [STEP_001] 的 spc_xbar_chart_value：(1) block_ewma_cusum (mode='cusum', k=0.5, h=4) 偵測 < 1σ 小幅 drift；(2) block_box_plot 比較各 lot 之間的分佈差異；(3) block_probability_plot 檢定是否符合常態（給 Cpk 計算打底）" },
 
   // APC
   { cat: "apc", ico: "📐", key: "apc-drift",
