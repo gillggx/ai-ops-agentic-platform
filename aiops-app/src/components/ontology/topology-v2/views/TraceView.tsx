@@ -161,12 +161,12 @@ export default function TraceView({
   // ── Layout constants ───────────────────────────────────────────────────
   const LABEL_W  = 170;
   const PAD_R    = 24;
-  const CENTER_W = 86;
-  const CENTER_H = 26;
-  const SAT_W    = 64;
-  const SAT_H    = 18;
-  const RING_R   = 60;
-  const LANE_H   = 240;
+  const CENTER_W = 120;
+  const CENTER_H = 36;
+  const SAT_W    = 88;
+  const SAT_H    = 26;
+  const RING_R   = 88;
+  const LANE_H   = 220;
 
   const reset = () => {
     setLanes(initialLanes);
@@ -346,11 +346,13 @@ export default function TraceView({
             />
           );
         })}
-        {/* centre */}
+        {/* centre — show the lane's protagonist (e.g. "LOT-0089"), not the
+            composite run.id ("EQP-07-LOT-0089-STEP_002"). The kindLabel
+            already carries the kind ("LOT · RUN"). */}
         <Block
           x={x} y={yC} w={CENTER_W} h={CENTER_H}
           kindLabel={`${protKind ? KIND_LABEL[protKind] : ""} · RUN`}
-          name={run.id.slice(0, 18)}
+          name={ontology.objs.get(protagonistId)?.name ?? protagonistId}
           alarm={isAlarm}
           lit={isSel}
           accent
@@ -544,14 +546,14 @@ function Block({
             fill={fill} stroke={stroke} strokeWidth={sw}
             strokeDasharray={expanded ? "3 2" : "none"} />
       {kindLabel && (
-        <text x={px + 6} y={py + 7.5} fontSize="6" fill={INK_3} fontWeight="600" letterSpacing="0.12em">
+        <text x={px + 6} y={py + 10} fontSize="8" fill={INK_3} fontWeight="600" letterSpacing="0.12em">
           {kindLabel}
         </text>
       )}
       <text
         x={px + 6}
-        y={py + h - (kindLabel ? 5 : 5)}
-        fontSize={kindLabel ? "9" : "10"}
+        y={py + h - 6}
+        fontSize={kindLabel ? "12" : "13"}
         fontFamily="ui-monospace, Menlo, monospace"
         fill={alarm ? ACCENT : INK}
         fontWeight={lit ? 600 : ((depth === "fg" || expanded) ? 600 : 500)}
