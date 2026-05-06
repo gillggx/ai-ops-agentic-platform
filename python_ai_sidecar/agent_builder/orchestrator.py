@@ -46,12 +46,14 @@ MAX_TURNS = 80  # 2026-05-04 (revised): bumped 50 → 80. The earlier 30-turn
                 # headroom for legitimate ~10-node builds.
 MAX_SAME_TOOL_RETRY = 3  # if Agent calls the same (tool, args) 3x in a row → refuse + hint
 
-# 2026-05-04 (revised, removed): the previous "no canvas change for N
-# turns → abort" exit produced more false positives than real saves —
-# legitimate complex builds where LLM is fanning explain_block / validate
-# calls before adding the next node would trip it. MAX_TURNS=80 + the
-# existing SPEC_glassbox_continuation pause-and-ask handle long builds
-# already; we don't need an extra eager stop here.
+# 2026-05-06: re-introduce a guarded early-exit, but this time only fire
+# when the LLM produces ZERO tool calls for N consecutive turns (pure-
+# text reasoning). The earlier canvas-hash version mis-fired on healthy
+# builds doing explain_block / validate; counting len(session.operations)
+# (which grows on EVERY tool call including read-only) lets those count
+# as progress while still catching the "LLM stuck yapping" failure mode
+# we saw at turn 88-100 burning tokens with no actions.
+NO_TOOL_CALL_TURN_LIMIT = 5
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
 DEFAULT_MAX_TOKENS = 4096
@@ -181,6 +183,9 @@ async def stream_agent_build(
 
     last_tool_key: Optional[str] = None
     same_tool_streak = 0
+    # Track operations count for no-tool-call early exit (NO_TOOL_CALL_TURN_LIMIT)
+    last_ops_count = -1
+    no_tool_streak = 0
 
     # Opening chat
     opening = "規劃中…分析需求、挑選適合的 blocks。"
@@ -469,6 +474,38 @@ async def stream_agent_build(
 
         if finished:
             break
+
+        # 2026-05-06: no-tool-call early exit. Counts only turns where the
+        # LLM produced ZERO tool_use blocks (pure-text reasoning). Read-
+        # only tool calls (explain_block / validate / get_state) bump
+        # session.operations and reset the streak — we treat those as
+        # legitimate progress. Catches the failure mode where the LLM
+        # decides it's stuck and starts narrating instead of acting.
+        current_ops_count = len(session.operations)
+        if current_ops_count == last_ops_count:
+            no_tool_streak += 1
+            if no_tool_streak >= NO_TOOL_CALL_TURN_LIMIT:
+                logger.warning(
+                    "no-tool-call early exit: %d turns of pure-text reasoning at turn %d",
+                    no_tool_streak, turn,
+                )
+                session.mark_failed(
+                    f"Aborted: agent went {no_tool_streak} turns without calling any tool "
+                    "(stuck reasoning). User can retry with a more specific prompt."
+                )
+                yield StreamEvent(
+                    type="error",
+                    data={"op": "no_tool_call_exit",
+                          "message": (
+                              f"Agent 連 {no_tool_streak} 次回合都沒呼叫工具（卡在純思考），"
+                              "已自動結束以節省 token。請重新給更具體的指示。"
+                          ),
+                          "ts": 0.0},
+                )
+                break
+        else:
+            no_tool_streak = 0
+            last_ops_count = current_ops_count
 
     # --- loop exit ---
     if session.status == "running":
