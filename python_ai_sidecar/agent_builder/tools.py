@@ -249,6 +249,26 @@ def _expected_upstream_columns(
     return _columns_for_block_port(pipeline, upstream, registry, from_port, depth=depth)
 
 
+_TEMPLATE_TOKEN_RE = re.compile(r"<[^>]+>")
+
+
+def _column_matches_expected(candidate: str, expected: list[str]) -> bool:
+    """True if candidate equals a literal entry OR matches a template
+    entry like 'apc_<param_name>' (treated as regex 'apc_.+'). Source
+    blocks emit dynamic columns (APC params, DC sensors, recipe params,
+    EC constants) whose hint entries are templated; without this,
+    legitimate column refs like 'apc_etch_time_offset' fail the literal
+    set membership check."""
+    for entry in expected:
+        if entry == candidate:
+            return True
+        if "<" in entry and ">" in entry:
+            pattern = _TEMPLATE_TOKEN_RE.sub(".+", re.escape(entry).replace(r"\<", "<").replace(r"\>", ">"))
+            if re.fullmatch(pattern, candidate):
+                return True
+    return False
+
+
 def _alternative_port_match(
     pipeline: PipelineJSON,
     upstream: PipelineNode,
@@ -265,13 +285,12 @@ def _alternative_port_match(
     output_ports = _ports(spec, "output_schema")
     if len(output_ports) <= 1:
         return None
-    needed = set(requested_columns)
     for port in output_ports:
         port_name = port.get("port")
         if not port_name or port_name == current_port:
             continue
         cols = _columns_for_block_port(pipeline, upstream, registry, port_name)
-        if cols and needed.issubset(set(cols)):
+        if cols and all(_column_matches_expected(c, cols) for c in requested_columns):
             return port_name, cols
     return None
 
@@ -312,11 +331,11 @@ def _check_column_in_upstream(
     expected = _expected_upstream_columns(pipeline, node, registry)
     if expected is None:
         return  # unknown — let LLM proceed; runtime executor catches
-    expected_set = set(expected)
 
-    bad = [c for c in candidates if c not in expected_set]
+    bad = [c for c in candidates if not _column_matches_expected(c, expected)]
     if not bad:
         return
+    expected_set = set(expected)
 
     edge_info = _find_upstream_edge(pipeline, node.id)
     upstream = edge_info[0] if edge_info else None
