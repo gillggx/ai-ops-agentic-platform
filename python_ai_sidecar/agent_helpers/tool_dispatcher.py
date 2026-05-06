@@ -1103,14 +1103,23 @@ class ToolDispatcher:
 
         # 3. Execute via sidecar's own /internal/pipeline/execute — same
         # process, native executor, telemetry bumps via pipeline_id.
+        # Java returns pipeline_json as a TEXT string; the sidecar's request
+        # schema wants a dict, so parse before forwarding.
         import httpx
+        import json as _json
         from python_ai_sidecar.config import CONFIG
+        pipeline_payload = pipe["pipeline_json"]
+        if isinstance(pipeline_payload, str):
+            try:
+                pipeline_payload = _json.loads(pipeline_payload)
+            except Exception as exc:  # noqa: BLE001
+                return {"status": "error", "message": f"pipeline_json parse failed: {exc}"}
         async with httpx.AsyncClient(timeout=120.0) as client:
             r = await client.post(
                 "http://127.0.0.1:8050/internal/pipeline/execute",
                 headers={"X-Service-Token": CONFIG.service_token},
                 json={
-                    "pipeline_json": pipe["pipeline_json"],
+                    "pipeline_json": pipeline_payload,
                     "triggered_by": "agent",
                     "inputs": inputs,
                     "pipeline_id": pipe_id,
