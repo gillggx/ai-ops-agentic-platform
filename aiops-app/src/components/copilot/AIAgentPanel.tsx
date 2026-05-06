@@ -1758,9 +1758,21 @@ export function AIAgentPanel({
                     const card = msg.continuation;
                     if (!card) return;
                     if (opt.id === "takeover") {
-                      // v1: tell user to keep editing in Pipeline Builder; cross-page
-                      // handoff with paused state is a follow-up spec.
-                      window.location.href = `/admin/pipeline-builder?resume=${card.session_id}`;
+                      // Stash the partial pipeline (came in via the paused
+                      // pb_glass_done event) and reuse the /new hydration
+                      // path that PbPipelineCard's "Edit in Builder" already
+                      // uses — the previous URL pointed at the list page,
+                      // which had no resume handler.
+                      const partial = lastBuiltPipelineRef.current;
+                      if (partial) {
+                        try {
+                          sessionStorage.setItem("pb:ephemeral_pipeline", JSON.stringify({
+                            pipeline_json: partial,
+                            ts: Date.now(),
+                          }));
+                        } catch { /* quota exceeded — proceed with empty canvas */ }
+                      }
+                      window.location.href = "/admin/pipeline-builder/new?from=agent";
                       return;
                     }
                     // opt.id === "continue"

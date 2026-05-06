@@ -134,35 +134,36 @@ def _find_upstream_node(pipeline: PipelineJSON, node_id: str) -> Optional[Pipeli
     """Return the FIRST upstream node feeding `node_id` via any data edge.
     Caller usually only cares about the dataframe upstream — chained transforms
     have one inbound data edge."""
+    edge_info = _find_upstream_edge(pipeline, node_id)
+    return edge_info[0] if edge_info else None
+
+
+def _find_upstream_edge(
+    pipeline: PipelineJSON, node_id: str
+) -> Optional[tuple[PipelineNode, str]]:
+    """Return (upstream_node, from_port) for the first edge feeding node_id.
+    Port info matters for multi-port blocks like block_linear_regression
+    where stats/data/ci ports emit completely different schemas."""
     for edge in pipeline.edges:
         if edge.to.node == node_id:
             for n in pipeline.nodes:
                 if n.id == edge.from_.node:
-                    return n
+                    return n, edge.from_.port
     return None
 
 
-def _expected_upstream_columns(
+def _columns_for_block_port(
     pipeline: PipelineJSON,
-    node: PipelineNode,
+    upstream: PipelineNode,
     registry: BlockRegistry,
+    from_port: str,
     *,
     depth: int = 0,
 ) -> Optional[list[str]]:
-    """Compute the column names node's upstream is expected to emit.
-
-    Returns:
-        list[str]      — known column names (use to validate set_param)
-        None           — upstream not yet connected, or schema unknowable
-
-    Recurses through pass-through blocks (filter / sort) up to 5 levels.
-    Dynamic-output blocks (groupby_agg / count_rows) compute columns from
-    the upstream's own params. Static blocks return their output_columns_hint.
-    """
+    """Schema for `upstream`'s output on a specific port. Multi-port blocks
+    (linear_regression with stats/data/ci) need this; single-port blocks
+    ignore the port arg."""
     if depth > 5:
-        return None
-    upstream = _find_upstream_node(pipeline, node.id)
-    if upstream is None:
         return None
     spec = registry.get_spec(upstream.block_id, upstream.block_version)
     if spec is None:
@@ -170,7 +171,24 @@ def _expected_upstream_columns(
     block_id = upstream.block_id
     params = upstream.params or {}
 
-    # Dynamic output blocks: column names depend on params
+    # ── Multi-port blocks ────────────────────────────────────────────────
+    if block_id == "block_linear_regression":
+        if from_port == "data":
+            # Pass-through: LR `data` port preserves upstream cols + adds
+            # <y_column>_pred / <y_column>_residual / group. To validate
+            # something like x="eventTime" downstream, recurse to find the
+            # LR's own upstream cols.
+            inner = _expected_upstream_columns(pipeline, upstream, registry, depth=depth + 1) or []
+            y = params.get("y_column")
+            extras = [f"{y}_pred", f"{y}_residual", "group"] if y else ["group"]
+            return list(inner) + extras
+        if from_port == "ci":
+            x_col = params.get("x_column", "x")
+            return [x_col, "pred", "ci_lower", "ci_upper", "group"]
+        # Default / "stats" port
+        return ["slope", "intercept", "r_squared", "p_value", "n", "stderr", "group"]
+
+    # ── Dynamic-output blocks: column names depend on params ─────────────
     if block_id == "block_groupby_agg":
         cols: list[str] = []
         group_by = (params.get("group_by") or "").strip()
@@ -183,14 +201,10 @@ def _expected_upstream_columns(
         return cols or None
 
     if block_id == "block_count_rows":
-        # count_rows produces a 1-row dataframe with a 'count' column
         return ["count"]
 
     if block_id == "block_cpk":
         return ["cpk", "cpu", "cpl", "mean", "std", "lsl", "usl", "n"]
-
-    if block_id == "block_linear_regression":
-        return ["slope", "intercept", "r_squared", "p_value", "n"]
 
     if block_id == "block_hypothesis_test":
         return ["test", "statistic", "p_value", "significant", "n"]
@@ -205,14 +219,60 @@ def _expected_upstream_columns(
     # Static-hint blocks (sources): use output_columns_hint from registry
     hint = spec.get("output_columns_hint") or []
     if isinstance(hint, list) and hint:
-        cols = []
+        cols2 = []
         for c in hint:
             if isinstance(c, dict) and c.get("name"):
-                cols.append(c["name"])
+                cols2.append(c["name"])
             elif isinstance(c, str):
-                cols.append(c)
-        return cols or None
+                cols2.append(c)
+        return cols2 or None
 
+    return None
+
+
+def _expected_upstream_columns(
+    pipeline: PipelineJSON,
+    node: PipelineNode,
+    registry: BlockRegistry,
+    *,
+    depth: int = 0,
+) -> Optional[list[str]]:
+    """Compute the columns node's upstream is expected to emit on the
+    actual connecting port. Recurses through pass-through blocks up to
+    5 levels."""
+    if depth > 5:
+        return None
+    edge_info = _find_upstream_edge(pipeline, node.id)
+    if edge_info is None:
+        return None
+    upstream, from_port = edge_info
+    return _columns_for_block_port(pipeline, upstream, registry, from_port, depth=depth)
+
+
+def _alternative_port_match(
+    pipeline: PipelineJSON,
+    upstream: PipelineNode,
+    registry: BlockRegistry,
+    current_port: str,
+    requested_columns: list[str],
+) -> Optional[tuple[str, list[str]]]:
+    """If a non-current port of `upstream` would actually contain
+    `requested_columns`, return (better_port_name, that_port_columns).
+    Used to nudge the LLM toward switching ports instead of giving up."""
+    spec = registry.get_spec(upstream.block_id, upstream.block_version)
+    if not spec:
+        return None
+    output_ports = _ports(spec, "output_schema")
+    if len(output_ports) <= 1:
+        return None
+    needed = set(requested_columns)
+    for port in output_ports:
+        port_name = port.get("port")
+        if not port_name or port_name == current_port:
+            continue
+        cols = _columns_for_block_port(pipeline, upstream, registry, port_name)
+        if cols and needed.issubset(set(cols)):
+            return port_name, cols
     return None
 
 
@@ -258,16 +318,36 @@ def _check_column_in_upstream(
     if not bad:
         return
 
-    upstream = _find_upstream_node(pipeline, node.id)
+    edge_info = _find_upstream_edge(pipeline, node.id)
+    upstream = edge_info[0] if edge_info else None
+    current_port = edge_info[1] if edge_info else "?"
     upstream_label = (upstream.block_id if upstream else "?")
+
+    # If a sibling port on the same upstream actually has the requested
+    # columns, surface that — saves the LLM from a multi-turn guess loop
+    # (the linear_regression stats vs data vs ci confusion).
+    port_hint = ""
+    if upstream is not None:
+        alt = _alternative_port_match(pipeline, upstream, registry, current_port, bad)
+        if alt is not None:
+            alt_port, alt_cols = alt
+            port_hint = (
+                f"⚠ The columns {bad!r} ARE available on '{upstream_label}'s "
+                f"`{alt_port}` port (outputs {sorted(alt_cols)}). You connected "
+                f"to the `{current_port}` port — disconnect and reconnect using "
+                f"`{alt_port}` instead. "
+            )
+
     raise ToolError(
         code="COLUMN_NOT_IN_UPSTREAM",
         message=(
             f"node '{node.id}' param '{param_key}' references column(s) "
-            f"{bad!r} but upstream '{upstream_label}' outputs {sorted(expected_set)}."
+            f"{bad!r} but upstream '{upstream_label}' (port `{current_port}`) "
+            f"outputs {sorted(expected_set)}."
         ),
         hint=(
-            f"Use one of {sorted(expected_set)}. "
+            port_hint
+            + f"Use one of {sorted(expected_set)}. "
             "Or call run_preview on the upstream node to confirm column names. "
             "For groupby_agg upstream, the aggregated column is named "
             "`<agg_column>_<agg_func>` (e.g. `spc_status_count`), not just "
