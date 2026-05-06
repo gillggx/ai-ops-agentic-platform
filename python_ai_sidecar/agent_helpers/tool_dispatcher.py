@@ -1123,8 +1123,27 @@ class ToolDispatcher:
         if not isinstance(exec_result, dict):
             return {"status": "error", "message": "Executor returned non-dict"}
 
-        # Summarize for LLM — Agent shouldn't need to parse every node_result
+        # Summarize for LLM — Agent shouldn't need to parse every node_result.
+        # data_views must come through so list-type skills (list-apcs, list-tools
+        # etc., which output via block_data_view rather than chart_spec) actually
+        # surface their rows; without this the LLM sees triggered=false / charts=[]
+        # and concludes "no data".
         summary = exec_result.get("result_summary") or {}
+        raw_views = summary.get("data_views") if isinstance(summary, dict) else None
+        compact_views: list[dict[str, Any]] = []
+        if isinstance(raw_views, list):
+            for v in raw_views:
+                if not isinstance(v, dict):
+                    continue
+                rows = v.get("rows") or []
+                compact_views.append({
+                    "title": v.get("title"),
+                    "columns": v.get("columns") or [],
+                    "row_count": len(rows) if isinstance(rows, list) else 0,
+                    # cap to 50 rows to keep tool result LLM-friendly; full rows
+                    # still rendered in the UI's Pipeline Results panel
+                    "rows": rows[:50] if isinstance(rows, list) else [],
+                })
         return {
             "status": exec_result.get("status", "unknown"),
             "slug": slug,
@@ -1132,6 +1151,7 @@ class ToolDispatcher:
             "triggered": bool(summary.get("triggered")) if isinstance(summary, dict) else False,
             "evidence_rows": (summary.get("evidence_rows") if isinstance(summary, dict) else 0),
             "charts": (summary.get("charts") if isinstance(summary, dict) else []) or [],
+            "data_views": compact_views,
             "run_id": exec_result.get("run_id"),
             "error_message": exec_result.get("error_message"),
         }
