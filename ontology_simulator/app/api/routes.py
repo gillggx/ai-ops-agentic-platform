@@ -863,11 +863,16 @@ async def list_tools():
 @router.get("/list-steps")
 async def list_steps():
     """Return the configured process steps. Static — derived from
-    config.TOTAL_STEPS so chat agent can answer 'which steps exist'."""
+    config.TOTAL_STEPS so chat agent can answer 'which steps exist'.
+
+    Wrapped under `data` key so block_mcp_call's auto-flatten yields one
+    row per step (the auto-flatten checks: events/dataset/items/data/
+    records/rows in that order, so any non-recognized wrapper key like
+    'steps'/'apcs'/'charts' would degrade to a single-row blob)."""
     from config import TOTAL_STEPS
     return {
         "total": TOTAL_STEPS,
-        "steps": [
+        "data": [
             {"name": f"STEP_{i:03d}", "description": f"Process step {i}"}
             for i in range(1, TOTAL_STEPS + 1)
         ],
@@ -877,7 +882,8 @@ async def list_steps():
 @router.get("/list-apcs")
 async def list_apcs():
     """Distinct APC config IDs known to the system. Pulled from the
-    object_snapshots collection (canonical APC config registry)."""
+    object_snapshots collection (canonical APC config registry).
+    `data` key (not `apcs`) so block_mcp_call auto-flattens correctly."""
     db = get_db()
     apc_ids = await db.object_snapshots.distinct(
         "objectID", {"objectName": "APC"}
@@ -885,17 +891,18 @@ async def list_apcs():
     apc_ids_sorted = sorted([a for a in apc_ids if isinstance(a, str)])
     return {
         "total": len(apc_ids_sorted),
-        "apcs": [{"apcID": a} for a in apc_ids_sorted],
+        "data": [{"apcID": a} for a in apc_ids_sorted],
     }
 
 
 @router.get("/list-spcs")
 async def list_spcs():
     """Static list of supported SPC chart types. Each row of process_info
-    carries SPC.charts.<type> with value/ucl/lcl/is_ooc."""
+    carries SPC.charts.<type> with value/ucl/lcl/is_ooc.
+    `data` key (not `charts`) so block_mcp_call auto-flattens correctly."""
     return {
         "total": 5,
-        "charts": [
+        "data": [
             {"chart": "xbar_chart", "description": "Process mean (X̄)"},
             {"chart": "r_chart",    "description": "Range (R)"},
             {"chart": "s_chart",    "description": "Standard deviation (S)"},

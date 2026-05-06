@@ -34,7 +34,7 @@ VALUES
     || E'- 「系統有哪些 step」「總共幾站」\n'
     || E'- 跟 list_active_lots 對照看 lot 還剩多少步沒跑\n\n'
     || E'== Returns ==\n'
-    || E'{total: int, steps: [{name: ''STEP_001'', description}, ...]}\n',
+    || E'{total: int, data: [{name: ''STEP_001'', description}, ...]}\n',
     '',
     '{"endpoint_url": "http://localhost:8012/api/v1/list-steps", "method": "GET", "headers": {}}',
     '{"fields": []}'
@@ -47,7 +47,7 @@ VALUES
     || E'- 「系統現在有幾個 APC」「APC 名單」\n'
     || E'- 想看某個 APC 的歷史時，先用這個確認 ID\n\n'
     || E'== Returns ==\n'
-    || E'{total: int, apcs: [{apcID: ''APC-003''}, ...]}\n\n'
+    || E'{total: int, data: [{apcID: ''APC-003''}, ...]}\n\n'
     || E'== Common mistakes ==\n'
     || E'⚠ 這只列 APC config object（可重用、跨 lot 共享）。要看某筆 process 的\n'
     || E'  APC parameter 數值請用 get_process_info（events[].APC.parameters）\n',
@@ -64,7 +64,7 @@ VALUES
     || E'- 「SPC 有哪幾種 chart」「除了 xbar 還有什麼可看」\n'
     || E'- 寫 pipeline 前確認可用的 SPC 欄位\n\n'
     || E'== Returns ==\n'
-    || E'{total: int, charts: [{chart: ''xbar_chart'', description}, ...]}\n'
+    || E'{total: int, data: [{chart: ''xbar_chart'', description}, ...]}\n'
     || E'  目前 5 種：xbar / r / s / p / c\n\n'
     || E'== Common mistakes ==\n'
     || E'⚠ chart 名是 ''xbar_chart''（含 _chart 後綴），不是單純 ''xbar''\n'
