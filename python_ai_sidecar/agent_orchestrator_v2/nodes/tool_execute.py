@@ -192,21 +192,14 @@ async def _execute_build_pipeline_live(
             except Exception as e:  # noqa: BLE001
                 logger.warning("canvas_snapshot validate failed (ignored): %s", e)
 
-    # Phase 5-UX-6 fix: if no explicit base, carry forward the chat session's
-    # last canvas snapshot so follow-up requests see what the previous build
-    # produced (context continuity).
-    if base_pipeline is None and chat_session_id and chat_user_id:
-        try:
-            import json as _json
-            sess = await java.get_agent_session(str(chat_session_id))
-            last_json = (sess or {}).get("lastPipelineJson") or (sess or {}).get("last_pipeline_json")
-            if last_json and (sess.get("userId") == chat_user_id or sess.get("user_id") == chat_user_id):
-                snap = _json.loads(last_json)
-                if snap.get("nodes"):
-                    base_pipeline = PipelineJSON.model_validate(snap)
-                    base_source = "session_snapshot"
-        except Exception as e:  # noqa: BLE001
-            logger.warning("session snapshot hydration failed (ignored): %s", e)
+    # 2026-05-07: dropped the silent "carry forward chat session's last
+    # pipeline" fallback that used to live here. It made follow-up chat
+    # prompts inherit the previous build's nodes — so a fresh question
+    # like "幫我統計各站點 OOC count" extended the previous APC drift
+    # pipeline instead of starting clean, and Lite Canvas showed mixed
+    # results from both builds. Explicit base_pipeline_id (e.g. "edit
+    # pipeline #N") and builder-mode canvas_snapshot still inherit; chat
+    # mode now starts from scratch every prompt.
     logger.info("build_pipeline_live base=%s, goal=%r", base_source, goal[:80])
 
     # Create & register session
