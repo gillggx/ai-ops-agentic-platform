@@ -260,16 +260,16 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "description": (
             "查詢任何製程資料的統一工具。所有資料查詢都用這個。\n"
             "\n"
-            "== data_source 選擇（必填，從 <mcp_catalog> 選）==\n"
-            "- get_process_info    → 查詢 process events（含 SPC/APC/DC/RECIPE/FDC/EC）\n"
-            "- get_process_summary → 查詢 OOC 統計、機台/站點分佈（回答「OOC 率」「哪台最差」「今天狀況」）\n"
-            "- list_tools          → 查詢機台清單和狀態（回答「有哪些機台」「機台狀態」）\n"
-            "- get_simulation_status → 系統狀態\n"
+            "== data_source 選擇（必填）==\n"
+            "從 <mcp_catalog>（系統 prompt 動態注入）裡挑 `name` 欄位填入。\n"
+            "挑選原則：讀每個 MCP 的 description（用途 / 回傳欄位 / 典型問題都寫在裡面），\n"
+            "和使用者問題語意 match 度最高的那個 MCP。\n"
+            "**不要憑記憶猜 MCP 名稱** — catalog 是唯一真相，新 MCP 隨時會加。\n"
             "\n"
             "== 回傳 ==\n"
-            "- get_process_info: 扁平化 metadata（total_events, ooc_count, ooc_rate, ooc_by_step, ooc_by_tool）\n"
-            "- 其他: 原始 JSON（直接包含你需要的所有數據）\n"
-            "根據回傳的數據用文字回答使用者的問題。\n"
+            "扁平化的 process events 會帶 metadata（total_events, ooc_count, ooc_rate,\n"
+            "ooc_by_step, ooc_by_tool）；其他 MCP 回原始 JSON。根據回傳的數據用文字\n"
+            "回答使用者的問題。\n"
             "\n"
             "== visualization_hint（可選）==\n"
             "使用者明確要看圖/趨勢/chart 時才加，前端自動渲染 Data Explorer：\n"
@@ -284,7 +284,7 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
             "properties": {
                 "data_source": {
                     "type": "string",
-                    "description": "MCP 名稱，填入 <mcp_catalog> 中的 name（如 'get_process_info', 'get_process_summary', 'list_tools'）",
+                    "description": "MCP 名稱 — 從 <mcp_catalog> 的 name 欄位選一個",
                 },
                 "params": {
                     "type": "object",

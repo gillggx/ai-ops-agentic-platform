@@ -114,7 +114,7 @@ async def _preflight_validate(
                 "status": "error", "code": "MISSING_MCP_NAME",
                 "message": (
                     "⚠️ execute_mcp 必須提供 mcp_name。"
-                    "請從 <mcp_catalog> 中找到正確的 name 欄位填入，例如 'get_tool_trajectory'。"
+                    "請從 <mcp_catalog> 中找到正確的 name 欄位填入。"
                     "禁止使用 mcp_id（整數 ID 已棄用）。"
                 ),
             }
