@@ -1764,6 +1764,18 @@ export function AIAgentPanel({
                       return;
                     }
                     // opt.id === "continue"
+                    // 2026-05-06: continuation runs were silently working but
+                    // the chat panel showed nothing — no loading spinner, no
+                    // "Agent is continuing" message — so the user thought
+                    // nothing happened (and only realised it had finished
+                    // when they wandered into the Builder). Now we set the
+                    // loading state, drop a "繼續中…" status message, and
+                    // clear loading whether SSE finishes cleanly or errors.
+                    setLoading(true);
+                    setChatHistory((prev) => [...prev, {
+                      id: nextId(), role: "agent",
+                      content: `▶ Agent 繼續中（再 ${opt.additional_turns ?? card.estimate ?? 20} 步）…`,
+                    }]);
                     try {
                       const res = await fetch("/api/agent/build/continue", {
                         method: "POST",
@@ -1777,12 +1789,9 @@ export function AIAgentPanel({
                         addLog(makeLog("❌", `Continue failed: ${res.status}`, "error"));
                         return;
                       }
-                      // Bug 2 fix: route continuation events through the
-                      // same dispatcher as the first build pass. Backend
-                      // /build/continue now wraps events as pb_glass_*
-                      // (event_wrapper.wrap_build_event_for_chat) so the
-                      // main switch picks up canvas ops, plan updates and
-                      // the final done card.
+                      // Route continuation events through the same dispatcher
+                      // as the first build pass (backend /build/continue wraps
+                      // events as pb_glass_* via event_wrapper.wrap_build_event_for_chat).
                       const handler = buildStreamHandlerRef.current;
                       if (handler) {
                         await consumeSSE(res, handler, (err) => {
@@ -1793,6 +1802,8 @@ export function AIAgentPanel({
                       }
                     } catch (e) {
                       addLog(makeLog("❌", `Continue error: ${(e as Error).message}`, "error"));
+                    } finally {
+                      setLoading(false);
                     }
                   }} />
                 </div>
