@@ -1,10 +1,21 @@
 import os
 
 # ── Simulation Scale ──────────────────────────────────────────
-TOTAL_LOTS    = int(os.getenv("TOTAL_LOTS", "99999"))
+# 2026-05-06: switch from "pre-create 99999 lots, $sample randomly" to
+# "keep ~20 lots in-flight, top up batches of 10 when active count drops".
+# This raises the avg events-per-lot from 2.62 → ~20 (full STEP_001 →
+# STEP_020 lifecycle) so trace lanes and lot-level trends have enough
+# signal to be useful.
+TOTAL_LOTS    = int(os.getenv("TOTAL_LOTS", "99999"))   # legacy: still respected for backfill
 TOTAL_TOOLS   = 10
-TOTAL_STEPS   = 10
+TOTAL_STEPS   = 20                                        # was 10
 TOTAL_RECIPES = 20
+
+# Lot pacer — keep concurrent in-flight lots near a target. New batches
+# are created lazily only when active count falls below the target.
+ACTIVE_LOT_TARGET = int(os.getenv("ACTIVE_LOT_TARGET", "20"))
+LOT_BATCH_SIZE    = int(os.getenv("LOT_BATCH_SIZE",    "10"))
+PACER_INTERVAL_SEC = float(os.getenv("PACER_INTERVAL_SEC", "10"))
 
 # ── Timing (seconds; canonical contract: 8-10 min process, see SPEC §2.1) ──
 HEARTBEAT_MIN_SEC  = float(os.getenv("HEARTBEAT_MIN",   "5"))
@@ -20,8 +31,11 @@ HOLD_TIMEOUT_SEC   = float(os.getenv("HOLD_TIMEOUT_SEC", "300"))
 
 # ── Lot Recycling ─────────────────────────────────────────────
 # True  → finished lots reset to step 1 (run forever)
-# False → finished lots stay Finished (finite run)
-RECYCLE_LOTS = os.getenv("RECYCLE_LOTS", "true").lower() == "true"
+# False → finished lots stay Finished, lot pacer creates new ones
+# 2026-05-06: default flipped to False so the pacer's "top up when below
+# target" model has somewhere to push — recycle would keep the same lot
+# IDs forever and defeat the new-lot-creation contract.
+RECYCLE_LOTS = os.getenv("RECYCLE_LOTS", "false").lower() == "true"
 
 # ── MongoDB ───────────────────────────────────────────────────
 MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")

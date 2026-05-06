@@ -829,8 +829,25 @@ async def get_status():
 
 
 @router.get("/lots")
-async def list_lots(status: str = Query(None, description="Filter by status")):
-    filt = {"status": status} if status else {}
+async def list_lots(
+    status: str = Query(
+        None,
+        description=(
+            "Filter by status. Single value (e.g. 'Waiting') or comma-"
+            "separated list ('Waiting,Processing'). Use 'active' as a "
+            "shortcut for 'Waiting,Processing'."
+        ),
+    ),
+):
+    filt: dict = {}
+    if status:
+        if status.lower() == "active":
+            filt["status"] = {"$in": ["Waiting", "Processing"]}
+        elif "," in status:
+            parts = [s.strip() for s in status.split(",") if s.strip()]
+            filt["status"] = {"$in": parts}
+        else:
+            filt["status"] = status
     docs = await get_db().lots.find(filt, {"_id": 0}).to_list(length=None)
     return docs
 
@@ -839,6 +856,53 @@ async def list_lots(status: str = Query(None, description="Filter by status")):
 async def list_tools():
     docs = await get_db().tools.find({}, {"_id": 0}).to_list(length=None)
     return docs
+
+
+# ── List endpoints for system MCPs (2026-05-06) ───────────────
+
+@router.get("/list-steps")
+async def list_steps():
+    """Return the configured process steps. Static — derived from
+    config.TOTAL_STEPS so chat agent can answer 'which steps exist'."""
+    from config import TOTAL_STEPS
+    return {
+        "total": TOTAL_STEPS,
+        "steps": [
+            {"name": f"STEP_{i:03d}", "description": f"Process step {i}"}
+            for i in range(1, TOTAL_STEPS + 1)
+        ],
+    }
+
+
+@router.get("/list-apcs")
+async def list_apcs():
+    """Distinct APC config IDs known to the system. Pulled from the
+    object_snapshots collection (canonical APC config registry)."""
+    db = get_db()
+    apc_ids = await db.object_snapshots.distinct(
+        "objectID", {"objectName": "APC"}
+    )
+    apc_ids_sorted = sorted([a for a in apc_ids if isinstance(a, str)])
+    return {
+        "total": len(apc_ids_sorted),
+        "apcs": [{"apcID": a} for a in apc_ids_sorted],
+    }
+
+
+@router.get("/list-spcs")
+async def list_spcs():
+    """Static list of supported SPC chart types. Each row of process_info
+    carries SPC.charts.<type> with value/ucl/lcl/is_ooc."""
+    return {
+        "total": 5,
+        "charts": [
+            {"chart": "xbar_chart", "description": "Process mean (X̄)"},
+            {"chart": "r_chart",    "description": "Range (R)"},
+            {"chart": "s_chart",    "description": "Standard deviation (S)"},
+            {"chart": "p_chart",    "description": "Defective fraction (P)"},
+            {"chart": "c_chart",    "description": "Defect count (C)"},
+        ],
+    }
 
 
 # ── Event Timeline (TRACE mode) ───────────────────────────────

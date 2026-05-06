@@ -1,13 +1,17 @@
-"""MES Simulator – queue-driven dispatch of 100 Lots across 10 Tools.
+"""MES Simulator – paced lot lifecycle across 10 Tools.
 
-Architecture:
+Architecture (2026-05-06 redesign):
   - Stuck "Processing" lots from previous runs are reset to "Waiting" on startup.
-  - All waiting lots are loaded into an asyncio.Queue at startup.
-  - 10 machine coroutines run concurrently; each pops a lot, processes it,
-    then immediately grabs the next one.
-  - When the initial queue empties (recycled lots are in MongoDB, not the queue),
-    each machine falls back to an atomic DB claim so work never stops.
-  - Staggered start: 4–6 machines at T=0, rest deferred 300–720 s.
+  - One-time cleanup: if a legacy DB has thousands of pre-seeded Waiting lots,
+    trim down to ACTIVE_LOT_TARGET so the pacer model isn't drowned.
+  - 10 machine coroutines run concurrently; each atomically claims any
+    Waiting lot from MongoDB ($sample) and runs one step, then either
+    advances current_step or marks the lot Finished at STEP_020.
+  - A lot pacer coroutine wakes every PACER_INTERVAL_SEC, counts active
+    lots (Waiting + Processing). If active < ACTIVE_LOT_TARGET it batch-
+    creates LOT_BATCH_SIZE new lots with sequential IDs. This keeps the
+    in-flight population near the target without ever pre-creating
+    99,999 lots up front.
 """
 import asyncio
 import random
@@ -15,7 +19,10 @@ from datetime import datetime
 from pymongo import ReturnDocument
 from app.database import get_db
 from app.agent.station_agent import process_step
-from config import TOTAL_TOOLS, TOTAL_STEPS, RECYCLE_LOTS
+from config import (
+    TOTAL_TOOLS, TOTAL_STEPS, RECYCLE_LOTS,
+    ACTIVE_LOT_TARGET, LOT_BATCH_SIZE, PACER_INTERVAL_SEC,
+)
 
 _running = False
 
@@ -35,30 +42,83 @@ async def run() -> None:
         )
         print(f"[MES] Reset {stuck} stuck lots → Waiting")
 
-    # ── Load all waiting lots into the shared queue ─────────────
-    lots = await db.lots.find({"status": "Waiting"}).sort("lot_id", 1).to_list(length=None)
-    if not lots:
-        print("[MES] No waiting lots — nothing to do.")
-        _running = False
-        return
+    # ── One-time cleanup of legacy bulk-seeded Waiting lots ────
+    await _cleanup_excess_waiting(db)
 
-    queue: asyncio.Queue = asyncio.Queue()
-    for lot in lots:
-        queue.put_nowait(lot)
-
-    total = queue.qsize()
-    print(f"[MES] Simulation start: {total} lots queued across {TOTAL_TOOLS} tools")
+    print(f"[MES] Simulation start: pacer target={ACTIVE_LOT_TARGET}, "
+          f"batch={LOT_BATCH_SIZE}, total_steps={TOTAL_STEPS}")
     sim_start = datetime.utcnow()
 
-    # ── All machines start immediately ──────────────────────────
+    # ── Pacer + all machines run concurrently, both pulling from DB ──
     tools = [f"EQP-{i:02d}" for i in range(1, TOTAL_TOOLS + 1)]
-    coroutines = [_machine_loop(tid, queue) for tid in tools]
-    print(f"[MES] All {len(tools)} machines starting immediately")
+    queue: asyncio.Queue = asyncio.Queue()  # always-empty placeholder; machines fall through to DB
+    coroutines = [_machine_loop(tid, queue) for tid in tools] + [_lot_pacer()]
+    print(f"[MES] {len(tools)} machines + 1 pacer starting")
     await asyncio.gather(*coroutines)
 
     elapsed = (datetime.utcnow() - sim_start).total_seconds()
-    print(f"[MES] All lots processed in {elapsed/60:.1f} min. Simulator idle.")
+    print(f"[MES] Stopped after {elapsed/60:.1f} min.")
     _running = False
+
+
+async def _cleanup_excess_waiting(db) -> None:
+    """One-time trim of legacy 99,999-pre-seeded DBs. Keeps the lowest
+    ACTIVE_LOT_TARGET Waiting lot_ids and deletes the rest. No-ops once
+    the DB is already paced, since count never exceeds target by much."""
+    waiting = await db.lots.count_documents({"status": "Waiting"})
+    if waiting <= ACTIVE_LOT_TARGET * 3:
+        return
+    keep_cursor = db.lots.find(
+        {"status": "Waiting"}, {"_id": 0, "lot_id": 1}
+    ).sort("lot_id", 1).limit(ACTIVE_LOT_TARGET)
+    keep_ids = {doc["lot_id"] async for doc in keep_cursor}
+    res = await db.lots.delete_many({
+        "status": "Waiting",
+        "lot_id": {"$nin": list(keep_ids)},
+    })
+    print(f"[MES] Cleanup: removed {res.deleted_count} excess Waiting lots, "
+          f"kept {len(keep_ids)}")
+
+
+async def _create_lot_batch(db, n: int) -> str:
+    """Insert n new Waiting lots with sequential IDs continuing from the
+    highest existing lot_id. Returns the new max lot_id."""
+    last = await db.lots.find_one(
+        {}, sort=[("lot_id", -1)], projection={"_id": 0, "lot_id": 1},
+    )
+    last_num = 0
+    if last and isinstance(last.get("lot_id"), str) and last["lot_id"].startswith("LOT-"):
+        try:
+            last_num = int(last["lot_id"][4:])
+        except ValueError:
+            pass
+    docs = [
+        {"lot_id": f"LOT-{last_num + i + 1:04d}", "current_step": 1,
+         "status": "Waiting", "cycle": 0}
+        for i in range(n)
+    ]
+    await db.lots.insert_many(docs)
+    return f"LOT-{last_num + n:04d}"
+
+
+async def _lot_pacer() -> None:
+    """Periodically top up the Waiting pool when in-flight count drops
+    below target. Definition of "active" = Waiting + Processing — the
+    user's intent is "lots that haven't finished yet"."""
+    db = get_db()
+    while _running:
+        try:
+            active = await db.lots.count_documents(
+                {"status": {"$in": ["Waiting", "Processing"]}}
+            )
+            if active < ACTIVE_LOT_TARGET:
+                new_max = await _create_lot_batch(db, LOT_BATCH_SIZE)
+                print(f"[MES] Pacer: active={active} < {ACTIVE_LOT_TARGET}, "
+                      f"+{LOT_BATCH_SIZE} new → tail={new_max}")
+        except Exception as exc:
+            print(f"[MES] Pacer error (will retry): {exc}")
+        await asyncio.sleep(PACER_INTERVAL_SEC)
+    print("[MES] Pacer stopped.")
 
 
 def stop() -> None:

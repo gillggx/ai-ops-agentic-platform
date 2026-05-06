@@ -53,14 +53,19 @@ async def _create_indexes() -> None:
 # ── Seeders (idempotent) ──────────────────────────────────────
 
 async def _seed_lots() -> None:
+    # 2026-05-06: stop pre-seeding all 99999 lots up front — the lot pacer
+    # in app/mes/simulator.py creates new lots in batches once active count
+    # drops below ACTIVE_LOT_TARGET. Seed just the initial batch (20) so
+    # machines have something to claim on first boot.
+    from config import ACTIVE_LOT_TARGET
     if await _db.lots.count_documents({}) > 0:
         return
     docs = [
         {"lot_id": f"LOT-{i:04d}", "current_step": 1, "status": "Waiting", "cycle": 0}
-        for i in range(1, TOTAL_LOTS + 1)
+        for i in range(1, ACTIVE_LOT_TARGET + 1)
     ]
     await _db.lots.insert_many(docs)
-    print(f"[DB] Seeded {TOTAL_LOTS} lots.")
+    print(f"[DB] Seeded {ACTIVE_LOT_TARGET} initial lots (pacer takes over from here).")
 
 
 async def _seed_tools() -> None:
