@@ -2,7 +2,7 @@
 
 Wraps the 5 list-type system MCPs behind a single block with a `kind` enum:
   tool → list_tools
-  lot  → list_lots
+  lot  → list_active_lots
   step → list_steps
   apc  → list_apcs
   spc  → list_spcs
@@ -26,7 +26,7 @@ from python_ai_sidecar.pipeline_builder.blocks.mcp_call import McpCallBlockExecu
 
 KIND_TO_MCP: dict[str, str] = {
     "tool": "list_tools",
-    "lot": "list_lots",
+    "lot": "list_active_lots",
     "step": "list_steps",
     "apc": "list_apcs",
     "spc": "list_spcs",

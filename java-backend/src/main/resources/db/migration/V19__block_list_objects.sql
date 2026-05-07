@@ -1,7 +1,7 @@
 -- V19 — Single dispatch block for the 5 list-type system MCPs.
 --
 -- Why: agents and users were going through block_mcp_call with mcp_name=
--- 'list_tools' / 'list_lots' / etc. for ontology master lookups. Hard to
+-- 'list_tools' / 'list_active_lots' / etc. for ontology master lookups. Hard to
 -- discover from the BlockDocsDrawer (no dedicated entry) and the MCP name
 -- string is an avoidable failure mode (typos, version drift). One typed
 -- block with a kind enum keeps maintenance low (one row, one executor)
@@ -27,7 +27,7 @@ $desc$== What ==
 
 == kind → MCP 對應 ==
 - kind='tool' → list_tools  （回傳每台機台 + status / busy_lot）
-- kind='lot'  → list_lots   （回傳 active lot + current_step / cycle）
+- kind='lot'  → list_active_lots   （回傳 active lot + current_step / cycle）
 - kind='step' → list_steps  （回傳 process flow 的 step 清單）
 - kind='apc'  → list_apcs   （回傳 APC 參數 master）
 - kind='spc'  → list_spcs   （回傳 SPC chart 類型 master）
@@ -56,7 +56,7 @@ $desc$,
   '[{"port": "data", "type": "dataframe"}]',
   '{"type": "object", "required": ["kind"], "properties": {"kind": {"type": "string", "enum": ["tool", "lot", "step", "apc", "spc"], "title": "物件類別"}, "args": {"type": "object", "title": "MCP 參數 (object)"}}}',
   '{"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.list_objects:ListObjectsBlockExecutor"}',
-  '[{"name": "列機台清單", "summary": "kind=tool → list_tools；回傳所有機台 + status / busy_lot", "params": {"kind": "tool", "args": {}}}, {"name": "列 active 批次", "summary": "kind=lot → list_lots；回傳 active lot + current_step / cycle", "params": {"kind": "lot", "args": {}}}, {"name": "列 process flow 站點", "summary": "kind=step → list_steps；回傳所有 STEP_xxx 清單", "params": {"kind": "step", "args": {}}}, {"name": "列 APC 參數 master", "summary": "kind=apc → list_apcs；回傳 APC 參數定義", "params": {"kind": "apc", "args": {}}}, {"name": "列 SPC chart 類型", "summary": "kind=spc → list_spcs；回傳 SPC chart 類型 master", "params": {"kind": "spc", "args": {}}}]',
+  '[{"name": "列機台清單", "summary": "kind=tool → list_tools；回傳所有機台 + status / busy_lot", "params": {"kind": "tool", "args": {}}}, {"name": "列 active 批次", "summary": "kind=lot → list_active_lots；回傳 active lot + current_step / cycle", "params": {"kind": "lot", "args": {}}}, {"name": "列 process flow 站點", "summary": "kind=step → list_steps；回傳所有 STEP_xxx 清單", "params": {"kind": "step", "args": {}}}, {"name": "列 APC 參數 master", "summary": "kind=apc → list_apcs；回傳 APC 參數定義", "params": {"kind": "apc", "args": {}}}, {"name": "列 SPC chart 類型", "summary": "kind=spc → list_spcs；回傳 SPC chart 類型 master", "params": {"kind": "spc", "args": {}}}]',
   '[]',
   false
 )
@@ -74,7 +74,7 @@ ON CONFLICT (name, version) DO UPDATE SET
 
 -- ─── 2. UPDATE block_mcp_call.description — redirect list-type MCPs ─────
 -- The agent should reach for block_list_objects when it wants list_tools /
--- list_lots / etc., not the generic dispatcher. Patch the existing block
+-- list_active_lots / etc., not the generic dispatcher. Patch the existing block
 -- description so the LLM sees the redirect every time it inspects the
 -- block. (Static seed.py SSOT also updated to keep both surfaces aligned.)
 UPDATE pb_blocks
@@ -82,7 +82,7 @@ SET description = replace(
       description,
       '- ✅ 呼叫**沒有專用 block** 的 MCP：list_tools / get_alarm_list / get_tool_status / get_process_summary',
       E'- ✅ 呼叫**沒有專用 block** 的 MCP：get_alarm_list / get_tool_status / get_process_summary\n'
-      || '- ❌ list_tools / list_lots / list_steps / list_apcs / list_spcs → 用 block_list_objects(kind=...)'
+      || '- ❌ list_tools / list_active_lots / list_steps / list_apcs / list_spcs → 用 block_list_objects(kind=...)'
     ),
     updated_at = now()
 WHERE name = 'block_mcp_call'

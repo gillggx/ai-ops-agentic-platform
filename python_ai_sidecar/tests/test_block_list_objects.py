@@ -31,7 +31,7 @@ CTX = ExecutionContext()
     "kind,expected_mcp",
     [
         ("tool", "list_tools"),
-        ("lot", "list_lots"),
+        ("lot", "list_active_lots"),
         ("step", "list_steps"),
         ("apc", "list_apcs"),
         ("spc", "list_spcs"),
@@ -110,7 +110,7 @@ def test_kind_map_covers_5_known_list_mcps() -> None:
     """Guards against accidental kind drift / typo in MCP name."""
     assert KIND_TO_MCP == {
         "tool": "list_tools",
-        "lot": "list_lots",
+        "lot": "list_active_lots",
         "step": "list_steps",
         "apc": "list_apcs",
         "spc": "list_spcs",

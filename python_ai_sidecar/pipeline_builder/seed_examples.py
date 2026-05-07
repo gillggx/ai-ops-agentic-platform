@@ -76,7 +76,7 @@ def examples_by_name() -> dict[str, list[dict[str, Any]]]:
             },
             {
                 "name": "列 active 批次",
-                "summary": "kind=lot → list_lots；回傳 active lot + current_step / cycle",
+                "summary": "kind=lot → list_active_lots；回傳 active lot + current_step / cycle",
                 "params": {"kind": "lot", "args": {}},
             },
             {
