@@ -33,6 +33,11 @@ interface Props {
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS  = 24 * HOUR_MS;
 
+function windowSizeLabel(ms: number): string {
+  if (ms >= DAY_MS) return `${Math.round(ms / DAY_MS)} 天`;
+  return `${Math.round(ms / HOUR_MS)} 小時`;
+}
+
 export default function TopologyWorkbench({
   mode = "embedded",
   initialFocus = null,
@@ -143,11 +148,11 @@ export default function TopologyWorkbench({
             alignItems: "center", justifyContent: "center",
             color: "#aaa", fontSize: 12, letterSpacing: "0.04em", gap: 8,
           }}>
-            <div>目前選定的時間範圍沒有 runs</div>
+            <div>此時段無 runs</div>
             <div style={{ fontSize: 11, color: "#bbb" }}>
               {allRuns.length > 0
-                ? `下方 timeline 共 ${allRuns.length} runs，拖動 selection rectangle 到有資料的時段`
-                : "outer 2 天內沒有 runs — simulator 可能未啟動"}
+                ? `下方 timeline 還有 ${allRuns.length} 筆 runs · 拖 brush 到有紅色或灰色 bar 的時段`
+                : `${windowSizeLabel(outerWindowMs)} 內沒有 runs · 切到較長範圍找最近活動`}
             </div>
           </div>
         ) : (
@@ -181,12 +186,18 @@ export default function TopologyWorkbench({
         runs={allRuns}
         windowSizeMs={outerWindowMs}
         onWindowSizeChange={(ms) => {
-          // Snap to fresh "now" so the right edge stays at present time.
-          setNow0(Date.now());
+          // 2026-05-08 — explicitly reset the inner brush window when outer
+          // changes. The previous implementation only flipped the auto-fit
+          // refs, but when the old `windowRange` fell outside the new outer
+          // (e.g. switching 7d → 6h while brush was 4 days back), `visibleRuns`
+          // computed empty before auto-fit fired → the empty-state message
+          // misleadingly said "simulator 可能未啟動". Snap brush to the right
+          // quarter of the new outer immediately; auto-fit will narrow it
+          // further on the next data load.
+          const now = Date.now();
+          setNow0(now);
           setOuterWindowMs(ms);
-          // Reset the inner selection to the right end of the new window so
-          // user immediately sees recent data; auto-fit will refine on next
-          // data load.
+          setWindowRange([now - ms / 4, now]);
           autoFittedRef.current = false;
           userScrubbed.current = false;
         }}

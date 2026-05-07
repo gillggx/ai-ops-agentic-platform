@@ -13,6 +13,10 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
     "@dagrejs/dagre": "^2.0.4",
+    "@visx/axis": "^3.12.0",
+    "@visx/brush": "^3.12.0",
+    "@visx/group": "^3.12.0",
+    "@visx/scale": "^3.12.0",
     "@xyflow/react": "^12.10.1",
     "aiops-contract": "file:../aiops-contract/typescript",
     "next": "15.2.4",

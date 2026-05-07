@@ -29,6 +29,11 @@ const HAIR    = "#e6e8ec";
 const PAPER   = "#fff";
 const PAPER_2 = "#fafbfc";
 const ACCENT  = "#c96442";
+// 2026-05-08 — focus shifted from "fade out everything else" to
+// "tint the focused node + related run". Lines stay at fixed solid colour.
+const FOCUS_BG    = "#fef3c7";   // warm yellow — clicked node
+const FOCUS_RING  = "#d97706";   // amber border for clicked node
+const RELATED_BG  = "#f3f4f6";   // light grey — same run as the clicked node
 
 // 7 fixed angles around the centre (one per kind). Stable per-kind so adjacent
 // events offset their satellites at predictable positions.
@@ -314,14 +319,15 @@ export default function TraceView({
 
     return (
       <g>
-        {/* spokes */}
+        {/* spokes — fixed solid colour regardless of focus; emphasis is
+            conveyed by the satellite/center BLOCK background instead. */}
         {satPos.map(({ k, sx, sy }) => (
           <line
             key={`sp-${k}`}
             x1={x} y1={yC} x2={sx} y2={sy}
-            stroke={focused ? INK_2 : HAIR}
-            strokeWidth={focused ? 1.2 : 1}
-            opacity={dimmed ? 0.25 : (focused ? 1 : 0.7)}
+            stroke={INK_2}
+            strokeWidth={1}
+            opacity={1}
           />
         ))}
         {/* satellites */}
@@ -452,7 +458,7 @@ export default function TraceView({
                   )}
                   <svg width={areaW} height={LANE_H} style={{ position: "absolute", inset: 0, overflow: "visible" }}>
                     <line x1={0} y1={LANE_H / 2} x2={areaW} y2={LANE_H / 2}
-                          stroke={HAIR} strokeWidth={1} strokeDasharray="2 4" />
+                          stroke={INK_3} strokeWidth={1} strokeDasharray="2 4" opacity={0.6} />
                     {/* z-order: dimmed first, focused last */}
                     {events
                       .filter((r) => !(activeFocus && activeFocus.runId === r.id && activeFocus.lane === idx))
@@ -530,23 +536,47 @@ function Block({
   onClick, onMouseEnter, onMouseLeave,
 }: BlockProps) {
   const px = x - w / 2, py = y - h / 2;
-  const opacity = depth === "bg" ? 0.22 : 1;
-  const stroke  = expanded ? INK
-                : (accent ? ACCENT
-                : (lit    ? INK
-                : (depth === "fg" ? INK_2 : HAIR)));
-  const sw     = expanded ? 1.3 : (lit ? 1.5 : (depth === "fg" ? 1.2 : 1));
-  const fill   = expanded ? "#f0eee9"
-               : (accent  ? "#fff7f3"
-               : (lit     ? "#f4f5f7" : PAPER));
+
+  // 2026-05-08 — focus model rewritten:
+  //   focused node (clicked + same run): bright yellow background, amber stroke
+  //   same-run-as-focused (depth=fg, lit=false): light grey background
+  //   unrelated (depth=bg): white background, lighter text — but the wrapper
+  //     <g> stays opaque so connecting lines + lane structure remain readable.
+  //   normal: white background, ink stroke
+  const isFocused  = lit  && depth === "fg";
+  const isInFocusRun = !lit && depth === "fg";
+  const isDim      = depth === "bg";
+
+  const stroke = expanded   ? INK
+              : isFocused  ? FOCUS_RING
+              : accent     ? ACCENT
+              : isDim      ? HAIR
+              : INK_2;
+  const sw     = expanded   ? 1.3
+              : isFocused  ? 1.6
+              : isInFocusRun ? 1.2
+              : 1;
+  const fill   = expanded     ? "#f0eee9"
+              : isFocused    ? FOCUS_BG
+              : isInFocusRun ? RELATED_BG
+              : accent       ? "#fff7f3"
+              : PAPER;
+  const textFill = alarm ? ACCENT
+                : isDim ? INK_3
+                : INK;
+  const labelFill = isDim ? "#cdd2da" : INK_3;
+  const textWeight = isFocused ? 700
+                  : (isInFocusRun || expanded) ? 600
+                  : 500;
+
   return (
-    <g style={{ cursor: "pointer", opacity, transition: "opacity .18s" }}
+    <g style={{ cursor: "pointer" }}
        onClick={onClick} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>
       <rect x={px} y={py} width={w} height={h} rx={2}
             fill={fill} stroke={stroke} strokeWidth={sw}
             strokeDasharray={expanded ? "3 2" : "none"} />
       {kindLabel && (
-        <text x={px + 6} y={py + 10} fontSize="8" fill={INK_3} fontWeight="600" letterSpacing="0.12em">
+        <text x={px + 6} y={py + 10} fontSize="8" fill={labelFill} fontWeight="600" letterSpacing="0.12em">
           {kindLabel}
         </text>
       )}
@@ -555,8 +585,8 @@ function Block({
         y={py + h - 6}
         fontSize={kindLabel ? "12" : "13"}
         fontFamily="ui-monospace, Menlo, monospace"
-        fill={alarm ? ACCENT : INK}
-        fontWeight={lit ? 600 : ((depth === "fg" || expanded) ? 600 : 500)}
+        fill={textFill}
+        fontWeight={textWeight}
       >
         {name}
       </text>
