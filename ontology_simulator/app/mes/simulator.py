@@ -189,14 +189,15 @@ async def _machine_loop(tool_id: str, queue: asyncio.Queue) -> None:
 
         await db.tools.update_one({"tool_id": tool_id}, {"$set": {"status": "Busy"}})
 
+        # Step advancement is INSIDE the try, only after process_step succeeds.
+        # On Exception OR asyncio.CancelledError (graceful shutdown), the lot
+        # stays in Processing/current_step=N — startup's "Reset stuck lots" puts
+        # it back to Waiting at the same step, and a machine retries it.
+        # finally only releases the tool's Busy flag.
         try:
             await process_step(lot_id, tool_id, step_num)
             processed  += 1
             pm_counter += 1
-        except Exception as exc:
-            print(f"[MES] ERROR – {lot_id} on {tool_id} step {step_num}: {exc}")
-        finally:
-            await db.tools.update_one({"tool_id": tool_id}, {"$set": {"status": "Idle"}})
 
             next_step = step_num + 1
             if next_step > TOTAL_STEPS:
@@ -217,6 +218,10 @@ async def _machine_loop(tool_id: str, queue: asyncio.Queue) -> None:
                     {"lot_id": lot_id},
                     {"$set": {"status": "Waiting", "current_step": next_step}},
                 )
+        except Exception as exc:
+            print(f"[MES] ERROR – {lot_id} on {tool_id} step {step_num}: {exc}")
+        finally:
+            await db.tools.update_one({"tool_id": tool_id}, {"$set": {"status": "Idle"}})
 
         # ── PM cycle: every pm_threshold lots ────────────────────
         if pm_counter >= pm_threshold and _running:
