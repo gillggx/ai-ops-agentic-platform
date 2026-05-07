@@ -58,14 +58,41 @@ def examples_by_name() -> dict[str, list[dict[str, Any]]]:
         ],
         "block_mcp_call": [
             {
-                "name": "列機台清單",
-                "summary": "呼叫 list_tools MCP 取得所有機台 + 狀態",
-                "params": {"mcp_name": "list_tools", "args": {}},
+                "name": "查告警清單",
+                "summary": "呼叫 get_alarm_list，過濾 HIGH severity（list_tools 等請改用 block_list_objects）",
+                "params": {"mcp_name": "get_alarm_list", "args": {"severity": "HIGH", "limit": 50}},
             },
             {
-                "name": "查告警清單",
-                "summary": "呼叫 get_alarm_list，過濾 HIGH severity",
-                "params": {"mcp_name": "get_alarm_list", "args": {"severity": "HIGH", "limit": 50}},
+                "name": "OOC 摘要",
+                "summary": "呼叫 get_process_summary 拿 24h aggregate",
+                "params": {"mcp_name": "get_process_summary", "args": {"since": "24h"}},
+            },
+        ],
+        "block_list_objects": [
+            {
+                "name": "列機台清單",
+                "summary": "kind=tool → list_tools；回傳所有機台 + status / busy_lot",
+                "params": {"kind": "tool", "args": {}},
+            },
+            {
+                "name": "列 active 批次",
+                "summary": "kind=lot → list_lots；回傳 active lot + current_step / cycle",
+                "params": {"kind": "lot", "args": {}},
+            },
+            {
+                "name": "列 process flow 站點",
+                "summary": "kind=step → list_steps；回傳所有 STEP_xxx 清單",
+                "params": {"kind": "step", "args": {}},
+            },
+            {
+                "name": "列 APC 參數 master",
+                "summary": "kind=apc → list_apcs；回傳 APC 參數定義（id / step / param 名）",
+                "params": {"kind": "apc", "args": {}},
+            },
+            {
+                "name": "列 SPC chart 類型",
+                "summary": "kind=spc → list_spcs；回傳 SPC chart 類型 master（xbar/r/s/p/c）",
+                "params": {"kind": "spc", "args": {}},
             },
         ],
 

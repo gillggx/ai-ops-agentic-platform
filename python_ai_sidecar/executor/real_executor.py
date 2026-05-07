@@ -82,6 +82,7 @@ SIDECAR_NATIVE_BLOCKS: frozenset[str] = frozenset({
     # (instead of opening a DB session) in commit below.
     "block_mcp_call",
     "block_mcp_foreach",
+    "block_list_objects",
 })
 
 

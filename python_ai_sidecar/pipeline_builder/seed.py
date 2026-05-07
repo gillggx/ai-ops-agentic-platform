@@ -35,7 +35,7 @@ def _blocks() -> list[dict[str, Any]]:
                 "- ✅ 「EQP-01 最近 50 次 SPC xbar 趨勢」→ tool_id=EQP-01\n"
                 "- ✅ 「LOT-123 在 STEP_004 的 APC etch_time_offset」→ lot_id + step\n"
                 "- ✅ 「最近 24 小時 OOC 事件」→ time_range=24h，下游 filter(spc_status=='OOC')\n"
-                "- ❌ 「現在哪些機台在跑 / 機台清單」→ 用 block_mcp_call(list_tools)\n"
+                "- ❌ 「現在哪些機台在跑 / 機台 / 批次 / 站點清單」→ 用 block_list_objects(kind=...)\n"
                 "- ❌ 「今天總共幾個 OOC」→ 用 block_mcp_call(get_process_summary)，那是聚合端點，比這個快\n"
                 "\n"
                 "== Params ==\n"
@@ -1443,9 +1443,10 @@ def _blocks() -> list[dict[str, Any]]:
                 "帶 args 去 GET 或 POST，回傳 DataFrame。**單次** call，不 foreach。\n"
                 "\n"
                 "== When to use ==\n"
-                "- ✅ 呼叫**沒有專用 block** 的 MCP：list_tools / get_alarm_list / get_tool_status / get_process_summary\n"
+                "- ✅ 呼叫**沒有專用 block** 的 MCP：get_alarm_list / get_tool_status / get_process_summary\n"
                 "- ✅ 快速 aggregate 類 API（比 flatten 全表再聚合省）\n"
                 "- ❌ `get_process_info` → **用 block_process_history**（它懂 flatten 邏輯 + SPC 欄位展開）\n"
+                "- ❌ list_tools / list_lots / list_steps / list_apcs / list_spcs → 用 block_list_objects(kind=...)\n"
                 "- ❌ 每 row 呼叫一次（for-each enrichment）→ 用 block_mcp_foreach\n"
                 "- ❌ MCP 沒註冊在 mcp_definitions → MCP_NOT_FOUND（要先 seed）\n"
                 "\n"
@@ -1482,6 +1483,69 @@ def _blocks() -> list[dict[str, Any]]:
             "implementation": {"type": "python", "ref": "app.services.pipeline_builder.blocks.mcp_call:McpCallBlockExecutor"},
             "output_columns_hint": [
                 {"name": "<dynamic>", "type": "object", "description": "欄位取決於 MCP 的回傳結構；若要查 process 資料優先用 block_process_history（已 flatten）。對於 list_tools / get_alarm_list 等簡單回傳，每個回傳 object 的 key 會成為一個 column"},
+            ],
+        },
+        {
+            "name": "block_list_objects",
+            "version": "1.0.0",
+            "category": "source",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "列出 ontology master 物件清單（機台 / 批次 / 站點 / APC 參數 / SPC chart）。\n"
+                "用 `kind` enum 一次選一種，內部 dispatch 到對應 system MCP 並回傳 DataFrame。\n"
+                "\n"
+                "== When to use ==\n"
+                "- ✅ 「列出所有機台」「目前有哪些 active lot」「這 20 站的清單」→ kind=tool/lot/step\n"
+                "- ✅ 「APC 參數有哪些」「SPC chart 類型」→ kind=apc/spc\n"
+                "- ✅ 想做 enrichment（每個 tool 跑一次某查詢）→ 接 block_mcp_foreach\n"
+                "- ❌ 查 process 歷史 / 趨勢 → 用 block_process_history\n"
+                "- ❌ 查告警 / 摘要 / 沒在 5 種 kind 內的 list MCP → 用 block_mcp_call\n"
+                "\n"
+                "== kind → MCP 對應 ==\n"
+                "- kind='tool' → list_tools  （回傳每台機台 + status / busy_lot）\n"
+                "- kind='lot'  → list_lots   （回傳 active lot + current_step / cycle）\n"
+                "- kind='step' → list_steps  （回傳 process flow 的 step 清單）\n"
+                "- kind='apc'  → list_apcs   （回傳 APC 參數 master）\n"
+                "- kind='spc'  → list_spcs   （回傳 SPC chart 類型 master）\n"
+                "\n"
+                "== Params ==\n"
+                "kind (string, required) 五擇一: 'tool' | 'lot' | 'step' | 'apc' | 'spc'\n"
+                "args (object, optional)  forward 給對應 MCP 的 query params；多數 list MCP 不需要參數\n"
+                "\n"
+                "== Output ==\n"
+                "port: data (dataframe) — 欄位由對應 MCP 的回傳結構決定（每個 object 的 key 變一個 column）。\n"
+                "查欄位細節請看對應 MCP 的 description（從 mcp_definitions 動態讀）。\n"
+                "\n"
+                "== Common mistakes ==\n"
+                "⚠ 跟 block_mcp_call 的差異：本 block 只服務 5 種 list 類；其他 MCP 仍走 block_mcp_call\n"
+                "⚠ kind 是 enum 字串（'tool' / 'lot' / ...），不是 MCP 名（'list_tools'）；寫錯 → INVALID_PARAM\n"
+                "⚠ args 是 object（dict），不是 string\n"
+                "\n"
+                "== Errors ==\n"
+                "- INVALID_PARAM      : kind 不在 5 種 enum 內，或 args 型別不對\n"
+                "- MCP_NOT_FOUND      : 對應 MCP 沒註冊（需檢查 system MCP seed）\n"
+                "- INVALID_MCP_CONFIG : MCP api_config 缺 endpoint_url\n"
+                "- MCP_HTTP_ERROR     : MCP 回 4xx/5xx\n"
+                "- MCP_UNREACHABLE    : 網路不通\n"
+            ),
+            "input_schema": [],
+            "output_schema": [{"port": "data", "type": "dataframe"}],
+            "param_schema": {
+                "type": "object",
+                "required": ["kind"],
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": ["tool", "lot", "step", "apc", "spc"],
+                        "title": "物件類別",
+                    },
+                    "args": {"type": "object", "title": "MCP 參數 (object)"},
+                },
+            },
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.list_objects:ListObjectsBlockExecutor"},
+            "output_columns_hint": [
+                {"name": "<dynamic>", "type": "object", "description": "欄位由對應 MCP 回傳結構決定。kind=tool→tool_id/status/...，kind=lot→lot_id/current_step/...，etc."},
             ],
         },
         {

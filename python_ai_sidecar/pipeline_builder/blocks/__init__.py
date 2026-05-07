@@ -27,6 +27,7 @@ from python_ai_sidecar.pipeline_builder.blocks.imr import IMRBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.line_chart import LineChartBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.join import JoinBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.linear_regression import LinearRegressionBlockExecutor
+from python_ai_sidecar.pipeline_builder.blocks.list_objects import ListObjectsBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.mcp_call import McpCallBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.mcp_foreach import McpForeachBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.parallel_coords import ParallelCoordsBlockExecutor
@@ -73,6 +74,7 @@ BUILTIN_EXECUTORS: dict[str, type[BlockExecutor]] = {
     "block_correlation": CorrelationBlockExecutor,
     "block_hypothesis_test": HypothesisTestBlockExecutor,
     "block_ewma": EwmaBlockExecutor,
+    "block_list_objects": ListObjectsBlockExecutor,
     "block_mcp_call": McpCallBlockExecutor,
     "block_mcp_foreach": McpForeachBlockExecutor,
     "block_count_rows": CountRowsBlockExecutor,
@@ -132,6 +134,7 @@ __all__ = [
     "JoinBlockExecutor",
     "LinearRegressionBlockExecutor",
     "LineChartBlockExecutor",
+    "ListObjectsBlockExecutor",
     "McpCallBlockExecutor",
     "McpForeachBlockExecutor",
     "ParallelCoordsBlockExecutor",
