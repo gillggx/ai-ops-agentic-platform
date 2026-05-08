@@ -33,3 +33,6 @@ mem0ai>=0.1.29
 # token_counter helper falls back to a CJK-aware char heuristic when tiktoken
 # is missing, so this dep is best-effort, not strictly required.
 tiktoken>=0.7.0
+# Phase 9-B: propose_personal_rule tool validates schedule_cron + computes
+# next-3-fires preview. croniter is the standard cron parser in Python.
+croniter>=2.0,<4.0

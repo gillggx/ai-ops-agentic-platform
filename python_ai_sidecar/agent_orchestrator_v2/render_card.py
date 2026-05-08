@@ -274,4 +274,17 @@ def _build_render_card(
                 "contract": contract,
             }
 
+    # ── propose_personal_rule (Phase 9-B) — emit rule_proposal card so the
+    # chat panel can render the confirmation UI. The card carries the
+    # full rule_draft so the user's "儲存規則" button POSTs the same
+    # bytes to /api/v1/rules without an extra round-trip through chat. ──
+    if (tool_name == "propose_personal_rule"
+            and isinstance(result, dict)
+            and result.get("status") == "draft_ready"):
+        return {
+            "type": "rule_proposal",
+            "rule_draft": result.get("rule_draft") or {},
+            "preview": result.get("preview") or {},
+        }
+
     return None

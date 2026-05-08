@@ -237,6 +237,76 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         },
     },
     {
+        "name": "propose_personal_rule",
+        "description": (
+            "Phase 9 (Agent-Authored Rules): 把目前對話中產出的分析「固化」成一條\n"
+            "排程跑、推播到使用者鈴鐺 inbox 的個人規則。\n"
+            "\n"
+            "使用時機：\n"
+            "  - 使用者說「以後每週/每天/每小時自動跑這個 / 通知我」\n"
+            "  - 使用者把剛剛 chat 裡的分析存成可重跑的規則\n"
+            "\n"
+            "你必須直接 inline 產出完整 pipeline_json — 不要要求使用者描述\n"
+            "pipeline，你已經知道 block catalog（system prompt 有列出）。\n"
+            "Pipeline 必須符合 PipelineJSON schema（version, name, nodes[], edges[]）。\n"
+            "\n"
+            "kind 五擇一：\n"
+            "  - personal_briefing: 每天定時的廠區重點摘要\n"
+            "  - weekly_report: 每週彙整（OOC top-N、過去一週趨勢）\n"
+            "  - saved_query: user 命名的可重跑查詢（無排程；trigger 由 user 手動）\n"
+            "  - watch_rule: 條件達成才推播（暫由 schedule polling 實作）\n"
+            "  → ⚠️ 沒有現成 skill 對應使用者需求時才用 propose_personal_rule。\n"
+            "    若有 skill 已能滿足，先用 invoke_published_skill 執行給看，\n"
+            "    確認對的再問要不要存成 rule。\n"
+            "\n"
+            "schedule_cron 用標準 5-field cron（min hour dom month dow）：\n"
+            "  - 每天 7:30          → '30 7 * * *'\n"
+            "  - 每週一 8:00        → '0 8 * * 1'\n"
+            "  - 每小時             → '0 * * * *'\n"
+            "  - kind=saved_query 可省略（由 user 手動觸發）\n"
+            "\n"
+            "notification_template 可包 {placeholder} 變數，runtime 用 pipeline\n"
+            "輸出的鍵值替換。如沒填，runtime 會用 result_summary 當 body。\n"
+            "\n"
+            "回傳：draft Rule Artifact + 預覽（next 3 fires / pipeline 摘要）。\n"
+            "前端會渲染成 confirmation card，user 按「儲存規則」才真的寫入 DB。\n"
+            "**這個 tool 不會自己寫 DB**。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "required": ["name", "kind", "pipeline_json"],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "規則名稱，用 user 看得懂的中/英文（e.g. '每週一 OOC top-5'）",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "1-2 句 user-facing 說明（選填）",
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": ["personal_briefing", "weekly_report", "saved_query", "watch_rule"],
+                },
+                "schedule_cron": {
+                    "type": "string",
+                    "description": "5-field cron expression. saved_query 可省略",
+                },
+                "pipeline_json": {
+                    "type": "object",
+                    "description": (
+                        "完整 PipelineJSON（version='1.0', name, inputs[], nodes[], edges[]）。"
+                        "Block 必須在 catalog 內、param 必須符合 block 的 param_schema。"
+                    ),
+                },
+                "notification_template": {
+                    "type": "string",
+                    "description": "推播訊息 body 模板，可放 {placeholder}（選填，預設用 result_summary）",
+                },
+            },
+        },
+    },
+    {
         "name": "execute_skill",
         "description": (
             "執行一個已登錄的診斷技能 (Skill)，自動撈取資料並執行診斷。"
@@ -793,6 +863,8 @@ class ToolDispatcher:
                     return {"status": "error", "message": "Java client not configured"}
                 case "invoke_published_skill":
                     return await self._invoke_published_skill(tool_input)
+                case "propose_personal_rule":
+                    return await self._propose_personal_rule(tool_input)
                 case "execute_skill":
                     # PR-4E: deprecated path — logged so we can track remaining
                     # legacy usage before Phase 4-F hard-removes it.
@@ -1219,6 +1291,100 @@ class ToolDispatcher:
 
         return {"catalog": catalog, "query": query, "total": len(items), "items": items}
 
+    async def _propose_personal_rule(self, tool_input: Dict[str, Any]) -> Dict[str, Any]:
+        """Phase 9-B: validate the LLM's rule draft + return preview for user
+        confirmation. Does NOT write to DB — frontend POSTs to /api/v1/rules
+        after the user clicks "儲存規則" on the confirmation card.
+
+        Validations:
+          - name / kind / pipeline_json present
+          - kind in allowed enum
+          - schedule_cron is a valid 5-field cron (saved_query may omit)
+          - pipeline_json structurally valid (uses sidecar PipelineValidator
+            via headless route — checks block existence + param schema)
+
+        Side-effects: none. Pure spec validation.
+        """
+        from croniter import croniter  # type: ignore  # 9-B-runtime dep
+        from datetime import datetime, timezone, timedelta
+
+        ALLOWED_KINDS = {"personal_briefing", "weekly_report", "saved_query", "watch_rule"}
+
+        name = (tool_input.get("name") or "").strip()
+        kind = tool_input.get("kind")
+        cron = (tool_input.get("schedule_cron") or "").strip()
+        pipeline_json = tool_input.get("pipeline_json") or {}
+        template = tool_input.get("notification_template") or ""
+        description = tool_input.get("description") or ""
+
+        if not name:
+            return {"status": "error", "message": "name is required"}
+        if kind not in ALLOWED_KINDS:
+            return {"status": "error", "message": f"kind must be one of {sorted(ALLOWED_KINDS)}"}
+        if kind != "saved_query" and not cron:
+            return {"status": "error", "message": "schedule_cron required for non-saved_query kinds"}
+        if not isinstance(pipeline_json, dict) or not pipeline_json.get("nodes"):
+            return {"status": "error", "message": "pipeline_json must be a PipelineJSON dict with non-empty nodes[]"}
+
+        # Cron validation + next-3-fires preview
+        next_fires: List[str] = []
+        if cron:
+            try:
+                base = datetime.now(timezone.utc) + timedelta(seconds=1)
+                it = croniter(cron, base)
+                for _ in range(3):
+                    next_fires.append(it.get_next(datetime).astimezone().isoformat(timespec="minutes"))
+            except Exception as e:  # croniter raises various validation errors
+                return {"status": "error", "message": f"invalid schedule_cron: {e}"}
+
+        # Pipeline structural validation (cheap — no actual MCP calls)
+        pipeline_summary = ""
+        try:
+            from python_ai_sidecar.pipeline_builder.pipeline_schema import PipelineJSON
+            pj = PipelineJSON.model_validate({
+                "version": pipeline_json.get("version", "1.0"),
+                "name": pipeline_json.get("name") or name,
+                "metadata": pipeline_json.get("metadata", {}),
+                "inputs": pipeline_json.get("inputs", []),
+                "nodes": pipeline_json.get("nodes", []),
+                "edges": pipeline_json.get("edges", []),
+            })
+            pipeline_summary = " → ".join(n.block_id for n in pj.nodes)
+        except Exception as e:
+            return {"status": "error", "message": f"pipeline_json schema validation failed: {e}"}
+
+        # Block existence check via SeedlessBlockRegistry (in-process)
+        try:
+            from python_ai_sidecar.pipeline_builder.seedless_registry import SeedlessBlockRegistry
+            reg = SeedlessBlockRegistry()
+            reg.load()
+            unknown = [n.block_id for n in pj.nodes if reg.get_spec(n.block_id, n.block_version) is None]
+            if unknown:
+                return {"status": "error", "message": f"unknown blocks: {sorted(set(unknown))}"}
+        except Exception as e:
+            logger.warning("propose_personal_rule: block-existence check skipped (%s)", e)
+
+        # Build the canonical Rule Artifact draft for the frontend confirm card.
+        draft = {
+            "name": name,
+            "description": description,
+            "kind": kind,
+            "schedule_cron": cron or None,
+            "pipeline_json": pipeline_json,
+            "notification_channels": [{"type": "in_app"}],
+            "notification_template": template or None,
+        }
+        return {
+            "status": "draft_ready",
+            "rule_draft": draft,
+            "preview": {
+                "pipeline_summary": pipeline_summary,
+                "node_count": len(pipeline_json.get("nodes", [])),
+                "next_3_fires": next_fires,
+                "schedule_human": cron or "manual (saved_query)",
+            },
+        }
+
 
 # ── Phase 2-E: tool result truncation safety net ─────────────────────────
 
@@ -1232,6 +1398,9 @@ TOOL_RESULT_TOKEN_CAP = 4000
 _NEVER_TRUNCATE = {
     "update_plan", "explain", "finish",  # control-plane tools
     "save_memory",  # memory writes return small ack
+    # Phase 9-B: rule_draft + preview must reach the frontend confirmation
+    # card intact — truncation would corrupt pipeline_json mid-tree.
+    "propose_personal_rule",
 }
 
 
