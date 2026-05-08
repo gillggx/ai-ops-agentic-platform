@@ -9,19 +9,20 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+/** Java backend uses Jackson SNAKE_CASE, so all DTO fields arrive as snake_case. */
 interface Rule {
   id: number;
   name: string;
   description: string;
   kind: string;
-  scheduleCron: string | null;
-  pipelineId: number | null;
-  isActive: boolean;
-  notificationChannels: string | null;
-  notificationTemplate: string | null;
-  lastDispatchedAt: string | null;
-  createdAt: string;
-  createdBy: number | null;
+  schedule_cron: string | null;
+  pipeline_id: number | null;
+  is_active: boolean;
+  notification_channels: string | null;
+  notification_template: string | null;
+  last_dispatched_at: string | null;
+  created_at: string;
+  created_by: number | null;
 }
 
 const KIND_LABEL: Record<string, string> = {
@@ -35,6 +36,9 @@ export default function RulesPage() {
   const [rules, setRules] = useState<Rule[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editCron, setEditCron] = useState("");
+  const [editTemplate, setEditTemplate] = useState("");
 
   const fetchRules = useCallback(async () => {
     setLoading(true);
@@ -57,7 +61,7 @@ export default function RulesPage() {
     await fetch(`/api/rules/${rule.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isActive: !rule.isActive }),
+      body: JSON.stringify({ is_active: !rule.is_active }),
     });
     fetchRules();
   };
@@ -65,6 +69,34 @@ export default function RulesPage() {
   const deleteRule = async (rule: Rule) => {
     if (!confirm(`確定刪除規則「${rule.name}」？`)) return;
     await fetch(`/api/rules/${rule.id}`, { method: "DELETE" });
+    fetchRules();
+  };
+
+  const startEdit = (rule: Rule) => {
+    setEditingId(rule.id);
+    setEditCron(rule.schedule_cron ?? "");
+    setEditTemplate(rule.notification_template ?? "");
+  };
+
+  const saveEdit = async (rule: Rule) => {
+    const body: Record<string, unknown> = {};
+    if (editCron !== (rule.schedule_cron ?? "")) body.schedule_cron = editCron;
+    if (editTemplate !== (rule.notification_template ?? "")) body.notification_template = editTemplate;
+    if (Object.keys(body).length === 0) {
+      setEditingId(null);
+      return;
+    }
+    const res = await fetch(`/api/rules/${rule.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert(`儲存失敗：${err?.error?.message ?? res.status}`);
+      return;
+    }
+    setEditingId(null);
     fetchRules();
   };
 
@@ -127,26 +159,29 @@ export default function RulesPage() {
                     <span style={kindBadge}>{KIND_LABEL[r.kind] ?? r.kind}</span>
                   </td>
                   <td style={{ ...tdStyle, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 11 }}>
-                    {r.scheduleCron ?? "— manual —"}
+                    {r.schedule_cron ?? "— manual —"}
                   </td>
                   <td style={{ ...tdStyle, fontSize: 11, color: "#64748b" }}>
-                    {r.lastDispatchedAt
-                      ? new Date(r.lastDispatchedAt).toLocaleString("zh-TW", { hour12: false })
+                    {r.last_dispatched_at
+                      ? new Date(r.last_dispatched_at).toLocaleString("zh-TW", { hour12: false })
                       : "從未"}
                   </td>
                   <td style={tdStyle}>
                     <span style={{
                       ...stateBadge,
-                      background: r.isActive ? "#dcfce7" : "#fef3c7",
-                      color: r.isActive ? "#166534" : "#92400e",
+                      background: r.is_active ? "#dcfce7" : "#fef3c7",
+                      color: r.is_active ? "#166534" : "#92400e",
                     }}>
-                      {r.isActive ? "● 啟用中" : "⏸ 已暫停"}
+                      {r.is_active ? "● 啟用中" : "⏸ 已暫停"}
                     </span>
                   </td>
                   <td style={tdStyle}>
-                    <div style={{ display: "flex", gap: 6 }}>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <button onClick={() => startEdit(r)} style={btnStyle}>
+                        編輯
+                      </button>
                       <button onClick={() => togglePause(r)} style={btnStyle}>
-                        {r.isActive ? "暫停" : "啟用"}
+                        {r.is_active ? "暫停" : "啟用"}
                       </button>
                       <button onClick={() => deleteRule(r)} style={{ ...btnStyle, color: "#dc2626", borderColor: "#fecaca" }}>
                         刪除
@@ -155,6 +190,43 @@ export default function RulesPage() {
                   </td>
                 </tr>
               ))}
+              {editingId !== null && (() => {
+                const r = rules.find(x => x.id === editingId);
+                if (!r) return null;
+                return (
+                  <tr key={`edit-${editingId}`} style={{ background: "#fffbeb", borderTop: "1px solid #fcd34d" }}>
+                    <td colSpan={6} style={{ padding: "16px 18px" }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#78350f", marginBottom: 10 }}>
+                        ✏️ 編輯規則：{r.name}
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12, marginBottom: 10 }}>
+                        <div>
+                          <label style={{ fontSize: 10, color: "#92400e", letterSpacing: "0.06em", fontWeight: 600, textTransform: "uppercase" }}>排程 cron (5-field)</label>
+                          <input
+                            value={editCron}
+                            onChange={(e) => setEditCron(e.target.value)}
+                            placeholder="0 8 * * 1"
+                            style={{ width: "100%", padding: "5px 8px", border: "1px solid #fcd34d", borderRadius: 4, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12 }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 10, color: "#92400e", letterSpacing: "0.06em", fontWeight: 600, textTransform: "uppercase" }}>推播訊息模板</label>
+                          <input
+                            value={editTemplate}
+                            onChange={(e) => setEditTemplate(e.target.value)}
+                            placeholder="例：上週 OOC top-5: {top_tools}"
+                            style={{ width: "100%", padding: "5px 8px", border: "1px solid #fcd34d", borderRadius: 4, fontSize: 12 }}
+                          />
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                        <button onClick={() => setEditingId(null)} style={btnStyle}>取消</button>
+                        <button onClick={() => saveEdit(r)} style={{ ...btnStyle, background: "#3b82f6", color: "#fff", borderColor: "#3b82f6" }}>儲存</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })()}
             </tbody>
           </table>
         </div>

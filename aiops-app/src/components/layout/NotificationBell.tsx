@@ -10,12 +10,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+/** Java DTO ships SNAKE_CASE (Jackson PropertyNamingStrategy.SNAKE_CASE). */
 interface InboxItem {
   id: number;
-  ruleId: number | null;
+  rule_id: number | null;
   payload: string;
-  readAt: string | null;
-  createdAt: string;
+  read_at: string | null;
+  created_at: string;
 }
 
 interface ParsedPayload {
@@ -41,7 +42,7 @@ export function NotificationBell() {
       if (!res.ok) return;
       const payload = body.data ?? body;
       setItems(payload.items ?? []);
-      setUnread(Number(payload.unreadCount ?? 0));
+      setUnread(Number(payload.unread_count ?? payload.unreadCount ?? 0));
     } catch {
       // silent — bell is best-effort
     }
@@ -138,7 +139,7 @@ export function NotificationBell() {
               <div style={{ maxHeight: 360, overflowY: "auto" }}>
                 {items.map((it) => {
                   const p = parsePayload(it.payload);
-                  const isUnread = !it.readAt;
+                  const isUnread = !it.read_at;
                   return (
                     <div
                       key={it.id}
@@ -163,7 +164,7 @@ export function NotificationBell() {
                         </div>
                       )}
                       <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 4 }}>
-                        {new Date(it.createdAt).toLocaleString("zh-TW", { hour12: false })}
+                        {new Date(it.created_at).toLocaleString("zh-TW", { hour12: false })}
                         {p.rule_id != null && (
                           <a href={`/rules`} style={{ marginLeft: 8, color: "#3b82f6", textDecoration: "none" }}>
                             管理規則
