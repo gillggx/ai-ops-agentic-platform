@@ -32,13 +32,22 @@ const KIND_LABEL: Record<string, string> = {
   watch_rule: "條件觸發",
 };
 
+interface PipelineSummary {
+  id: number;
+  name: string;
+  blockNames: string[];   // ordered block_id list, for "what does this rule do"
+  lastRunPayload: string | null;  // rendered notification body from most recent fire
+}
+
 export default function RulesPage() {
   const [rules, setRules] = useState<Rule[]>([]);
+  const [pipelineMap, setPipelineMap] = useState<Map<number, PipelineSummary>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editCron, setEditCron] = useState("");
   const [editTemplate, setEditTemplate] = useState("");
+  const [expandedId, setExpandedId] = useState<number | null>(null);
 
   const fetchRules = useCallback(async () => {
     setLoading(true);
@@ -47,7 +56,63 @@ export default function RulesPage() {
       const res = await fetch("/api/rules", { cache: "no-store" });
       const body = await res.json();
       if (!res.ok) throw new Error(body?.error?.message || `HTTP ${res.status}`);
-      setRules(body.data ?? body);
+      const list: Rule[] = body.data ?? body;
+      setRules(list);
+
+      // Pull each unique pipeline for display ("what does this rule do").
+      // Resolved in parallel; missing pipelines fall back to "(unavailable)".
+      const ids = Array.from(new Set(list.map(r => r.pipeline_id).filter((x): x is number => x != null)));
+      const pairs = await Promise.all(ids.map(async (id) => {
+        try {
+          const pr = await fetch(`/api/admin/pipelines/${id}`, { cache: "no-store" });
+          if (!pr.ok) return null;
+          const pd = await pr.json();
+          const pj = typeof pd.pipeline_json === "string"
+            ? JSON.parse(pd.pipeline_json)
+            : (pd.pipeline_json ?? {});
+          const blockNames: string[] = Array.isArray(pj.nodes)
+            ? pj.nodes.map((n: { block_id?: string }) => String(n.block_id ?? "?"))
+            : [];
+          // Try to grab the most recent inbox payload for this rule via /api/notifications/inbox
+          // — done once per page load below in a separate fetch — we don't loop here.
+          return [id, { id, name: pd.name ?? `pipeline ${id}`, blockNames, lastRunPayload: null }] as const;
+        } catch {
+          return null;
+        }
+      }));
+      const m = new Map<number, PipelineSummary>();
+      for (const p of pairs) if (p) m.set(p[0], p[1]);
+
+      // One pass through inbox to attach the latest payload per rule_id.
+      try {
+        const ir = await fetch("/api/notifications/inbox?limit=20", { cache: "no-store" });
+        const ib = await ir.json();
+        const items = (ib.data?.items ?? ib.items ?? []) as Array<{ rule_id: number | null; payload: string }>;
+        const latestByRule = new Map<number, string>();
+        for (const it of items) {
+          if (it.rule_id != null && !latestByRule.has(it.rule_id)) {
+            latestByRule.set(it.rule_id, it.payload);
+          }
+        }
+        for (const r of list) {
+          if (r.pipeline_id != null && r.id != null) {
+            const summary = m.get(r.pipeline_id);
+            if (summary) {
+              const raw = latestByRule.get(r.id);
+              if (raw) {
+                try {
+                  const j = JSON.parse(raw);
+                  summary.lastRunPayload = String(j.body ?? raw).slice(0, 200);
+                } catch {
+                  summary.lastRunPayload = raw.slice(0, 200);
+                }
+              }
+            }
+          }
+        }
+      } catch { /* best-effort */ }
+
+      setPipelineMap(m);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -147,7 +212,7 @@ export default function RulesPage() {
               </tr>
             </thead>
             <tbody>
-              {rules.map((r) => (
+              {rules.flatMap((r) => [
                 <tr key={r.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
                   <td style={tdStyle}>
                     <div style={{ fontWeight: 600, color: "#0f172a" }}>{r.name}</div>
@@ -177,9 +242,20 @@ export default function RulesPage() {
                   </td>
                   <td style={tdStyle}>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      <button onClick={() => startEdit(r)} style={btnStyle}>
-                        編輯
+                      <button onClick={() => setExpandedId(expandedId === r.id ? null : r.id)} style={btnStyle}>
+                        {expandedId === r.id ? "收起" : "細節"}
                       </button>
+                      <button onClick={() => startEdit(r)} style={btnStyle}>
+                        改排程
+                      </button>
+                      {r.pipeline_id != null && (
+                        <a
+                          href={`/admin/pipeline-builder/${r.pipeline_id}`}
+                          style={{ ...btnStyle, textDecoration: "none", display: "inline-block" }}
+                        >
+                          改 pipeline
+                        </a>
+                      )}
                       <button onClick={() => togglePause(r)} style={btnStyle}>
                         {r.is_active ? "暫停" : "啟用"}
                       </button>
@@ -188,8 +264,66 @@ export default function RulesPage() {
                       </button>
                     </div>
                   </td>
-                </tr>
-              ))}
+                </tr>,
+                expandedId === r.id && (() => {
+                  const ps = r.pipeline_id != null ? pipelineMap.get(r.pipeline_id) : undefined;
+                  return (
+                    <tr key={`detail-${r.id}`} style={{ background: "#f8fafc" }}>
+                      <td colSpan={6} style={{ padding: "14px 18px" }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                          <div>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: "#475569", letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 4 }}>
+                              這條規則執行什麼 pipeline
+                            </div>
+                            <div style={{ fontSize: 12, color: "#334155", marginBottom: 6 }}>
+                              {ps ? <><b>{ps.name}</b> <span style={{ color: "#94a3b8" }}>(id={ps.id})</span></> : "(pipeline 不可讀)"}
+                            </div>
+                            {ps && ps.blockNames.length > 0 && (
+                              <div style={{
+                                fontFamily: "ui-monospace, Menlo, monospace",
+                                fontSize: 11, color: "#475569",
+                                lineHeight: 1.7,
+                              }}>
+                                {ps.blockNames.map((n, i) => (
+                                  <span key={i}>
+                                    {i > 0 && <span style={{ color: "#cbd5e0" }}> → </span>}
+                                    <span style={{
+                                      background: "#e0f2fe", color: "#075985",
+                                      padding: "1px 6px", borderRadius: 3,
+                                    }}>{n}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: "#475569", letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 4 }}>
+                              上次推到鈴鐺的訊息
+                            </div>
+                            <div style={{
+                              background: "#fff",
+                              border: "1px solid #e2e8f0",
+                              borderRadius: 6,
+                              padding: "10px 12px",
+                              fontSize: 12,
+                              color: "#1f2937",
+                              minHeight: 40,
+                              whiteSpace: "pre-wrap",
+                            }}>
+                              {ps?.lastRunPayload ?? <span style={{ color: "#94a3b8" }}>從未推播 — 等下次排程觸發或手動 trigger</span>}
+                            </div>
+                            <div style={{ fontSize: 11, color: "#64748b", marginTop: 6 }}>
+                              <b>模板：</b><span style={{ fontFamily: "ui-monospace, Menlo, monospace", color: "#475569" }}>
+                                {r.notification_template ?? "(空 — 用 result_summary 當 body)"}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })(),
+              ].filter(Boolean))}
               {editingId !== null && (() => {
                 const r = rules.find(x => x.id === editingId);
                 if (!r) return null;
