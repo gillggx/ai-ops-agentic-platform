@@ -1,4 +1,4 @@
-package com.aiops.api.patrol;
+package com.aiops.scheduler.patrol;
 
 import com.aiops.api.domain.event.EventTypeEntity;
 import com.aiops.api.domain.event.EventTypeRepository;

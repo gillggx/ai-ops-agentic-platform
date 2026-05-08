@@ -1,4 +1,4 @@
-package com.aiops.api.audit;
+package com.aiops.scheduler.audit;
 
 import com.aiops.api.config.AiopsProperties;
 import com.aiops.api.domain.audit.AuditLogRepository;
@@ -12,6 +12,12 @@ import java.time.OffsetDateTime;
 /**
  * Deletes audit log entries older than {@code aiops.audit.retention-days}.
  * Runs daily at 03:15 server time.
+ *
+ * <p>Phase 2 (project-restructure): moved from {@code java-backend
+ * com.aiops.api.audit} into the new java-scheduler module so the API
+ * service no longer carries any {@code @Scheduled} responsibilities.
+ * Repository + properties bean are reused via the gradle project
+ * dependency.
  */
 @Slf4j
 @Component

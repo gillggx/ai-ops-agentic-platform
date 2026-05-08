@@ -73,3 +73,12 @@ tasks.withType<Test> {
 tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
 	archiveFileName.set("aiops-api.jar")
 }
+
+// Enable the regular `jar` task so :java-backend can be consumed as a library
+// dependency by :java-scheduler (Spring Boot's plugin disables it by default).
+// The library jar gets the "library" classifier so it doesn't collide with
+// the executable bootJar's filename.
+tasks.named<Jar>("jar") {
+	enabled = true
+	archiveClassifier.set("library")
+}

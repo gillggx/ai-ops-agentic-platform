@@ -1,4 +1,4 @@
-package com.aiops.api.patrol;
+package com.aiops.scheduler.patrol;
 
 import com.aiops.api.domain.patrol.AutoPatrolEntity;
 import com.aiops.api.domain.patrol.AutoPatrolRepository;
@@ -141,5 +141,32 @@ public class AutoPatrolSchedulerService {
 	/** Visible for testing / admin debugging. */
 	public int activeCount() {
 		return activeJobs.size();
+	}
+
+	/** P2 — alias for HTTP /internal/scheduler/sync/{id} from the API service. */
+	public void reconcileOne(Long patrolId) {
+		refresh(patrolId);
+	}
+
+	/**
+	 * P2 — periodic reconcile against DB state. Catches drift caused by
+	 * (a) sync HTTP calls that failed silently and (b) scheduler restarts
+	 * where new patrols were created while we were down. Runs every 60 s;
+	 * idempotent (uses set diff, not full re-register).
+	 */
+	@org.springframework.scheduling.annotation.Scheduled(fixedDelay = 60_000)
+	public void reconcileAll() {
+		List<AutoPatrolEntity> dbActive = patrolRepo.findByIsActiveTrue();
+		java.util.Set<Long> wanted = new java.util.HashSet<>();
+		for (AutoPatrolEntity p : dbActive) wanted.add(p.getId());
+		java.util.Set<Long> have = new java.util.HashSet<>(activeJobs.keySet());
+		// Add missing
+		for (AutoPatrolEntity p : dbActive) {
+			if (!have.contains(p.getId())) register(p);
+		}
+		// Remove stale
+		for (Long id : have) {
+			if (!wanted.contains(id)) unregister(id);
+		}
 	}
 }

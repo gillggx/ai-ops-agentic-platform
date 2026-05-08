@@ -1,4 +1,4 @@
-package com.aiops.api.patrol;
+package com.aiops.scheduler.patrol;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

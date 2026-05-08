@@ -24,19 +24,16 @@ public class AutoPatrolController {
 	private final AutoPatrolRepository repository;
 	private final PipelineRepository pipelineRepo;
 	private final com.aiops.api.domain.skill.ExecutionLogRepository execLogRepo;
-	private final com.aiops.api.patrol.AutoPatrolSchedulerService schedulerService;
-	private final com.aiops.api.patrol.AutoPatrolExecutor executor;
+	private final com.aiops.api.scheduler.SchedulerHttpClient scheduler;
 
 	public AutoPatrolController(AutoPatrolRepository repository,
 	                            PipelineRepository pipelineRepo,
 	                            com.aiops.api.domain.skill.ExecutionLogRepository execLogRepo,
-	                            com.aiops.api.patrol.AutoPatrolSchedulerService schedulerService,
-	                            com.aiops.api.patrol.AutoPatrolExecutor executor) {
+	                            com.aiops.api.scheduler.SchedulerHttpClient scheduler) {
 		this.repository = repository;
 		this.pipelineRepo = pipelineRepo;
 		this.execLogRepo = execLogRepo;
-		this.schedulerService = schedulerService;
-		this.executor = executor;
+		this.scheduler = scheduler;
 	}
 
 	@GetMapping
@@ -91,7 +88,7 @@ public class AutoPatrolController {
 		if (req.inputBinding() != null) e.setInputBinding(req.inputBinding());
 		e.setCreatedBy(caller.userId());
 		AutoPatrolEntity saved = repository.save(e);
-		schedulerService.refresh(saved.getId());
+		scheduler.syncPatrol(saved.getId());
 		return ApiResponse.ok(Dtos.detailOf(saved));
 	}
 
@@ -116,7 +113,7 @@ public class AutoPatrolController {
 		if (req.inputBinding() != null) e.setInputBinding(req.inputBinding());
 		if (req.isActive() != null) e.setIsActive(req.isActive());
 		AutoPatrolEntity saved = repository.save(e);
-		schedulerService.refresh(saved.getId());
+		scheduler.syncPatrol(saved.getId());
 		return ApiResponse.ok(Dtos.detailOf(saved));
 	}
 
@@ -126,7 +123,7 @@ public class AutoPatrolController {
 	public ApiResponse<Void> delete(@PathVariable Long id) {
 		if (!repository.existsById(id)) throw ApiException.notFound("auto patrol");
 		repository.deleteById(id);
-		schedulerService.unregister(id);
+		scheduler.syncPatrol(id);   // patrol gone from DB → scheduler will unregister on its next reconcile
 		return ApiResponse.ok(null);
 	}
 
@@ -140,16 +137,11 @@ public class AutoPatrolController {
 	@PreAuthorize(Authorities.ADMIN_OR_PE)
 	public ApiResponse<java.util.Map<String, Object>> trigger(@PathVariable Long id) {
 		if (!repository.existsById(id)) throw ApiException.notFound("auto patrol");
-		var result = executor.executePatrol(id);
-		java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
-		body.put("run_id", result.runId());
-		body.put("patrol_id", result.patrolId());
-		body.put("pipeline_id", result.pipelineId());
-		body.put("fanout_count", result.fanoutCount());
-		body.put("triggered_count", result.triggeredCount());
-		body.put("status", result.status());
-		body.put("error_message", result.errorMessage());
-		return ApiResponse.ok(body);
+		// Phase 2: scheduler runs the patrol over HTTP. Sync 30 s timeout —
+		// caller (UI button) blocks on the spinner. Throws 503 if scheduler
+		// unreachable so the user gets a visible error rather than silence.
+		java.util.Map<String, Object> result = scheduler.triggerPatrol(id);
+		return ApiResponse.ok(result);
 	}
 
 	@GetMapping("/{id}/executions")

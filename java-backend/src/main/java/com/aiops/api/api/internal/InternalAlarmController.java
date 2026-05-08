@@ -4,7 +4,7 @@ import com.aiops.api.auth.InternalAuthority;
 import com.aiops.api.common.ApiResponse;
 import com.aiops.api.domain.alarm.AlarmEntity;
 import com.aiops.api.domain.alarm.AlarmRepository;
-import com.aiops.api.patrol.EventDispatchService;
+import com.aiops.api.scheduler.SchedulerHttpClient;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,12 +20,12 @@ import java.time.OffsetDateTime;
 public class InternalAlarmController {
 
 	private final AlarmRepository repository;
-	private final EventDispatchService dispatchService;
+	private final SchedulerHttpClient scheduler;
 
 	public InternalAlarmController(AlarmRepository repository,
-	                                EventDispatchService dispatchService) {
+	                                SchedulerHttpClient scheduler) {
 		this.repository = repository;
-		this.dispatchService = dispatchService;
+		this.scheduler = scheduler;
 	}
 
 	@PostMapping
@@ -44,8 +44,8 @@ public class InternalAlarmController {
 		e.setExecutionLogId(req.executionLogId());
 		e.setDiagnosticLogId(req.diagnosticLogId());
 		AlarmEntity saved = repository.save(e);
-		// Phase C — fan out alarm → auto_check pipelines.
-		dispatchService.dispatchAlarm(saved);
+		// Phase 2 — fan out via scheduler (fail-open).
+		scheduler.dispatchAlarm(saved.getId());
 		return ApiResponse.ok(Dto.of(saved));
 	}
 

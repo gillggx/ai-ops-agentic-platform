@@ -38,13 +38,16 @@ wait_for_http() {
 echo "🔄  Pulling latest..."
 git -C "$APP_DIR" pull --ff-only
 
-# ── Java fat jar ─────────────────────────────────────────────────────────
-echo "☕  Building Java fat jar..."
-cd "$JAVA_DIR"
+# ── Java fat jars ────────────────────────────────────────────────────────
+# 2026-05-09 P2-A: gradle wrapper now lives at the repo root because the
+# build is multi-project (:java-backend + :java-scheduler). Build both
+# subprojects' bootJars in one gradle invocation.
+echo "☕  Building Java fat jars (api + scheduler)..."
+cd "$APP_DIR"
 export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/temurin-21-jdk-amd64}"
 export PATH="$JAVA_HOME/bin:$PATH"
-./gradlew bootJar --no-daemon -q
-ls -la "$JAVA_DIR/build/libs/aiops-api.jar"
+./gradlew :java-backend:bootJar :java-scheduler:bootJar --no-daemon -q
+ls -la "$JAVA_DIR/build/libs/aiops-api.jar" "$APP_DIR/java-scheduler/build/libs/aiops-scheduler.jar" 2>&1 | head -4
 
 # ── Python sidecar venv ──────────────────────────────────────────────────
 echo "🐍  Syncing sidecar venv..."
@@ -57,26 +60,36 @@ fi
 # ── systemd units (idempotent install) ───────────────────────────────────
 echo "📌  Installing / refreshing systemd units..."
 sudo install -m 0644 "$APP_DIR/deploy/aiops-java-api.service"        /etc/systemd/system/
+sudo install -m 0644 "$APP_DIR/deploy/aiops-java-scheduler.service" /etc/systemd/system/
 sudo install -m 0644 "$APP_DIR/deploy/aiops-python-sidecar.service" /etc/systemd/system/
 sudo systemctl daemon-reload
 
 # Env file bootstraps — only create if missing so real secrets aren't overwritten.
 JAVA_ENV="$JAVA_DIR/.env"
+SCHEDULER_ENV="$APP_DIR/java-scheduler/.env"
 SIDECAR_ENV="$SIDECAR_DIR/.env"
 if [[ ! -f "$JAVA_ENV" ]]; then
   cp "$APP_DIR/deploy/aiops-java-api.env.example" "$JAVA_ENV"
   echo "    ⚠️  $JAVA_ENV created from template — fill in real secrets before continuing."
+fi
+if [[ ! -f "$SCHEDULER_ENV" ]]; then
+  cp "$APP_DIR/deploy/aiops-java-scheduler.env.example" "$SCHEDULER_ENV"
+  echo "    ⚠️  $SCHEDULER_ENV created from template — fill in real secrets before continuing."
 fi
 if [[ ! -f "$SIDECAR_ENV" ]]; then
   cp "$APP_DIR/deploy/aiops-python-sidecar.env.example" "$SIDECAR_ENV"
   echo "    ⚠️  $SIDECAR_ENV created from template — fill in real secrets before continuing."
 fi
 
-# ── Restart (order matters: Java first so sidecar can reach /internal/*) ─
+# ── Restart (order matters: API first → scheduler depends on API for some
+# domain seeds; sidecar last so it can reach Java /internal/*). ──────────
 echo "🚀  Restarting services..."
-sudo systemctl enable aiops-java-api.service aiops-python-sidecar.service
+sudo systemctl enable aiops-java-api.service aiops-java-scheduler.service aiops-python-sidecar.service
 sudo systemctl restart aiops-java-api.service
 wait_for_http "http://127.0.0.1:${AIOPS_JAVA_PORT:-8002}/actuator/health" "Java API"
+
+sudo systemctl restart aiops-java-scheduler.service
+wait_for_http "http://127.0.0.1:${AIOPS_SCHEDULER_PORT:-8003}/actuator/health" "Java Scheduler"
 
 sudo systemctl restart aiops-python-sidecar.service
 wait_for_http "http://127.0.0.1:8050/internal/health" "Python sidecar (will 401 without token — timeout here means service down)" \
@@ -94,7 +107,8 @@ else
 fi
 
 echo ""
-echo "✅  Java + Sidecar deploy complete."
-echo "    - Java API : $(systemctl is-active aiops-java-api) on port ${AIOPS_JAVA_PORT:-8002}"
-echo "    - Sidecar  : $(systemctl is-active aiops-python-sidecar) on port 8050"
+echo "✅  Java API + Scheduler + Sidecar deploy complete."
+echo "    - Java API       : $(systemctl is-active aiops-java-api) on port ${AIOPS_JAVA_PORT:-8002}"
+echo "    - Java Scheduler : $(systemctl is-active aiops-java-scheduler) on port ${AIOPS_SCHEDULER_PORT:-8003}"
+echo "    - Sidecar        : $(systemctl is-active aiops-python-sidecar) on port 8050"
 echo "    - Frontend (:8000) + ontology (:8012) untouched — run deploy/update.sh for those"

@@ -1,0 +1,60 @@
+server:
+  port: ${AIOPS_SCHEDULER_PORT:8003}
+  shutdown: graceful
+
+spring:
+  application:
+    name: aiops-scheduler
+  profiles:
+    active: ${AIOPS_PROFILE:local}
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/aiops}
+    username: ${DB_USER:aiops}
+    password: ${DB_PASSWORD:aiops}
+    hikari:
+      maximum-pool-size: 8
+      minimum-idle: 1
+      connection-timeout: 10000
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: false
+        jdbc:
+          time_zone: UTC
+        envers:
+          audit_table_suffix: _aud
+          store_data_at_delete: true
+  # Flyway is owned by aiops-java-api — scheduler must NOT run migrations.
+  flyway:
+    enabled: false
+
+# AiopsProperties is shared with java-backend (via project dep). Keep keys
+# aligned so the scheduler reads the same retention / sidecar / simulator
+# configuration that the API service does.
+aiops:
+  audit:
+    retention-days: ${AIOPS_AUDIT_RETENTION_DAYS:90}
+  sidecar:
+    python:
+      base-url: ${PYTHON_SIDECAR_URL:http://localhost:8050}
+      service-token: ${PYTHON_SIDECAR_TOKEN:dev-only-do-not-use-in-prod}
+  simulator:
+    base-url: ${ONTOLOGY_SIM_URL:http://localhost:8012}
+
+logging:
+  level:
+    root: INFO
+    com.aiops: INFO
+    org.hibernate.SQL: WARN
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized

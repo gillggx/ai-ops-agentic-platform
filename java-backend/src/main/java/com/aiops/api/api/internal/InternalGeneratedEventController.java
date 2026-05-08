@@ -4,7 +4,7 @@ import com.aiops.api.auth.InternalAuthority;
 import com.aiops.api.common.ApiResponse;
 import com.aiops.api.domain.event.GeneratedEventEntity;
 import com.aiops.api.domain.event.GeneratedEventRepository;
-import com.aiops.api.patrol.EventDispatchService;
+import com.aiops.api.scheduler.SchedulerHttpClient;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,12 +18,12 @@ import org.springframework.web.bind.annotation.*;
 public class InternalGeneratedEventController {
 
 	private final GeneratedEventRepository repository;
-	private final EventDispatchService dispatchService;
+	private final SchedulerHttpClient scheduler;
 
 	public InternalGeneratedEventController(GeneratedEventRepository repository,
-	                                        EventDispatchService dispatchService) {
+	                                        SchedulerHttpClient scheduler) {
 		this.repository = repository;
-		this.dispatchService = dispatchService;
+		this.scheduler = scheduler;
 	}
 
 	@PostMapping
@@ -37,9 +37,10 @@ public class InternalGeneratedEventController {
 		e.setSkillConclusion(req.skillConclusion());
 		if (req.status() != null) e.setStatus(req.status());
 		GeneratedEventEntity saved = repository.save(e);
-		// Phase C — fan out to event-mode auto_patrols. Async + swallow errors
-		// so the writer's response isn't held up by downstream patrol fires.
-		dispatchService.dispatchGeneratedEvent(saved.getEventTypeId(), saved.getMappedParameters());
+		// Phase 2 — fan out to event-mode auto_patrols via the scheduler
+		// service. Best-effort: a scheduler outage doesn't fail the event
+		// write; scheduler's reconcileAll loop catches drift on next tick.
+		scheduler.dispatchEvent(saved.getEventTypeId(), saved.getMappedParameters());
 		return ApiResponse.ok(Dto.of(saved));
 	}
 

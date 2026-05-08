@@ -70,6 +70,11 @@ aiops:
     # Token used by the Python sidecar when calling back into Java.
     token: ${JAVA_INTERNAL_TOKEN:dev-internal-token}
     allowed-caller-ips: ${JAVA_INTERNAL_ALLOWED_IPS:127.0.0.1,::1,0:0:0:0:0:0:0:1}
+  # Phase 2 — separate Java Scheduler service (:8003) hosting all
+  # @Scheduled jobs + AutoPatrolExecutor. SchedulerHttpClient reads these.
+  scheduler:
+    base-url: ${AIOPS_SCHEDULER_BASE_URL:http://localhost:8003}
+    internal-token: ${AIOPS_SCHEDULER_INTERNAL_TOKEN:dev-only-do-not-use-in-prod}
   audit:
     retention-days: 90
     async-queue-size: 1000

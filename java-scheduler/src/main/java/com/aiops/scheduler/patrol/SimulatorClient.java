@@ -1,4 +1,4 @@
-package com.aiops.api.patrol;
+package com.aiops.scheduler.patrol;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;

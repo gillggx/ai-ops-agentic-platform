@@ -1,0 +1,36 @@
+[Unit]
+Description=AIOps Java Scheduler (Spring Boot, port 8003)
+After=network.target postgresql.service aiops-java-api.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/aiops/java-scheduler
+EnvironmentFile=/opt/aiops/java-scheduler/.env
+ExecStart=/usr/bin/java -server \
+  -Xms256m -Xmx768m \
+  -XX:+HeapDumpOnOutOfMemoryError \
+  -XX:HeapDumpPath=/var/log/aiops/scheduler-heap-dump.hprof \
+  -Duser.timezone=UTC \
+  -Dfile.encoding=UTF-8 \
+  -jar /opt/aiops/java-scheduler/build/libs/aiops-scheduler.jar
+ExecStop=/bin/sh -c 'lsof -ti tcp:${AIOPS_SCHEDULER_PORT:-8003} | xargs kill -TERM 2>/dev/null || true'
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aiops-java-scheduler
+
+# Security hardening (mirrors aiops-java-api).
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/aiops /tmp /var/log/aiops
+
+[Install]
+WantedBy=multi-user.target
