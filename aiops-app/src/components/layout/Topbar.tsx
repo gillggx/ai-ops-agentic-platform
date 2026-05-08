@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useSession, signOut } from "next-auth/react";
+import { NotificationBell } from "./NotificationBell";
 
 const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
   IT_ADMIN: { bg: "#fef2f2", color: "#991b1b" },
@@ -10,6 +11,7 @@ const ROLE_COLORS: Record<string, { bg: string; color: string }> = {
 };
 
 export function Topbar() {
+  const { data: session } = useSession();
   return (
     <header style={{
       height: 48,
@@ -22,11 +24,13 @@ export function Topbar() {
       position: "sticky",
       top: 0,
       zIndex: 100,
+      gap: 10,
     }}>
       <span style={{ fontWeight: 700, fontSize: "var(--fs-xl)", color: "#2b6cb0", letterSpacing: "-0.3px" }}>
         AIOps
       </span>
       <div style={{ flex: 1 }} />
+      {session && <NotificationBell />}
       <UserMenu />
     </header>
   );

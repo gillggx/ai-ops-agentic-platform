@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import type { AIOpsReportContract } from "aiops-contract";
 import { isValidContract } from "aiops-contract";
 import { consumeSSE } from "@/lib/sse";
+import { RuleProposalCard } from "@/components/copilot/RuleProposalCard";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -29,6 +30,12 @@ interface ChatMessage {
   id: number;
   role: "user" | "agent";
   content: string;
+  /** Optional render card embedded in agent message (Phase 9 rule_proposal etc.). */
+  card?: {
+    type: "rule_proposal";
+    rule_draft: Parameters<typeof RuleProposalCard>[0]["ruleDraft"];
+    preview: Parameters<typeof RuleProposalCard>[0]["preview"];
+  };
 }
 
 interface HitlRequest {
@@ -208,6 +215,22 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
                                  : toolName === "delete_memory"  ? ["🗑️", "DELETE MEMORY ✓"]
                                  : ["✅", "DONE"];
             addLog(makeLog(icon, `${prefix} → ${toolName} | ${(ev.result_summary ?? "") as string}`, "tool"));
+
+            // Phase 9 — propose_personal_rule emits a rule_proposal render
+            // card; surface it as an inline confirmation card in chat.
+            const renderCard = ev.render_card as { type?: string; rule_draft?: unknown; preview?: unknown } | undefined;
+            if (renderCard?.type === "rule_proposal" && renderCard.rule_draft) {
+              setChatHistory((prev) => [...prev, {
+                id: nextId(),
+                role: "agent",
+                content: "",
+                card: {
+                  type: "rule_proposal",
+                  rule_draft: renderCard.rule_draft as Parameters<typeof RuleProposalCard>[0]["ruleDraft"],
+                  preview: (renderCard.preview ?? {}) as Parameters<typeof RuleProposalCard>[0]["preview"],
+                },
+              }]);
+            }
             break;
           }
 
@@ -430,19 +453,28 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
               display: "flex",
               justifyContent: msg.role === "user" ? "flex-end" : "flex-start",
             }}>
-              <div style={{
-                maxWidth: "85%",
-                padding: "10px 14px",
-                borderRadius: msg.role === "user" ? "12px 12px 2px 12px" : "12px 12px 12px 2px",
-                fontSize: 13,
-                lineHeight: 1.6,
-                whiteSpace: "pre-wrap",
-                background: msg.role === "user" ? "#2b6cb0" : "#1a202c",
-                color: msg.role === "user" ? "#bee3f8" : "#e2e8f0",
-                border: msg.role === "agent" ? "1px solid #2d3748" : "none",
-              }}>
-                {msg.content}
-              </div>
+              {msg.card?.type === "rule_proposal" ? (
+                <div style={{ maxWidth: "95%", width: "100%" }}>
+                  <RuleProposalCard
+                    ruleDraft={msg.card.rule_draft}
+                    preview={msg.card.preview}
+                  />
+                </div>
+              ) : (
+                <div style={{
+                  maxWidth: "85%",
+                  padding: "10px 14px",
+                  borderRadius: msg.role === "user" ? "12px 12px 2px 12px" : "12px 12px 12px 2px",
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                  whiteSpace: "pre-wrap",
+                  background: msg.role === "user" ? "#2b6cb0" : "#1a202c",
+                  color: msg.role === "user" ? "#bee3f8" : "#e2e8f0",
+                  border: msg.role === "agent" ? "1px solid #2d3748" : "none",
+                }}>
+                  {msg.content}
+                </div>
+              )}
             </div>
           ))}
           {loading && (
