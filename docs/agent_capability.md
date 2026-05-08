@@ -4,6 +4,13 @@
 > is already wired up, and what is still gap. Updated as we pick items off
 > for design / build. The primary endpoint is `/internal/agent/chat` →
 > `agent_orchestrator_v2` (LangGraph) running inside the python sidecar.
+>
+> **🛠 2026-05-08 update**: items marked **[Phase 9]** below are folded into
+> the Agent-Authored Rules design. See
+> [PHASE_9_AGENT_AUTHORED_RULES.md](PHASE_9_AGENT_AUTHORED_RULES.md) for the
+> architectural thesis ("agent specs rules at design-time, code runs them
+> at runtime") and build sequence. Overall AIOps phase status lives in
+> [AIOPS_ROADMAP.md](AIOPS_ROADMAP.md).
 
 ## Use case map
 
@@ -15,7 +22,7 @@
 | A2 | 歷史時段比較 | 「今天 OOC 數 vs 昨天」「上週 vs 本週」 | ❌ gap — needs a time-bisect wrapper that splits the query and diffs |
 | A3 | 跨物件 reverse lookup | 「APC-007 上週影響過哪些 lot」 | ⚠️ partial — works via builder but no chat-native shortcut |
 | A4 | 異常 RCA / 為什麼 | 「為什麼 EQP-03 一直 alarm」 | ✅ done via tool-use loop; quality dependent on prompt |
-| A5 | 自然語言 briefing | 「今天廠區重點」「過夜事件摘要」 | ⚠️ partial — `/briefing/sse` endpoint exists but no chat hook |
+| A5 | 自然語言 briefing | 「今天廠區重點」「過夜事件摘要」 | ⚠️ partial — `/briefing/sse` endpoint exists but no chat hook **[Phase 9-A — `personal_briefing` rule kind]** |
 
 ### B. Action / write operations (none in production yet)
 
@@ -23,8 +30,8 @@
 |----|---|---|---|
 | B1 | Acknowledge alarm / hold | 「ack 掉 EQP-05 hold」 | medium — needs audit log + confirm dialog |
 | B2 | Pause / resume patrol | 「patrol 3 停掉」「重新開」 | low–medium |
-| B3 | Save chat result as skill | 「把這個分析存成 skill 叫 daily_ooc_check」 | low — high-value chat→artifact path ⭐ |
-| B4 | Schedule / subscribe | 「每天 8 點 send overnight OOC 統計」 | low — wraps cron-trigger |
+| B3 | Save chat result as skill | 「把這個分析存成 skill 叫 daily_ooc_check」 | low — high-value chat→artifact path ⭐ **[Phase 9-B/9-C]** |
+| B4 | Schedule / subscribe | 「每天 8 點 send overnight OOC 統計」 | low — wraps cron-trigger **[Phase 9-A/9-B]** |
 | B5 | Build alarm rule | 「EQP-03 連 3 次 OOC 就告警」 | medium — better routed through builder spec |
 
 ### C. Conversational / learning
@@ -63,3 +70,4 @@ These two are conceptually the same path's two endpoints (mid-task spec vs post-
 ## History
 
 - 2026-05-08 — first draft, scoped from chat with user; P0 = user's two; P1 added by agent for review.
+- 2026-05-08 (later) — user pivoted the framing from "what can the agent do" to **user-scenario** thinking (4 scenarios: shift handoff / weekly report / drilling / incident RCA). User added the architectural constraint **"agent generates rules, code runs them"** — agent must NOT be in the runtime hot path, only at spec-creation time. This crystallised into [PHASE_9_AGENT_AUTHORED_RULES.md](PHASE_9_AGENT_AUTHORED_RULES.md).
