@@ -86,8 +86,12 @@ public class AutoPatrolSchedulerService {
 				log.warn("patrol id={} trigger_mode=schedule but cron_expr is empty; skip", p.getId());
 				return false;
 			}
+			// Spring's CronTrigger expects 6 fields (sec min hour dom mon dow).
+			// User-facing tooling (Phase 9 ScheduleEditor) writes the standard
+			// 5-field crontab format. Prefix "0 " (= second 0) so both work.
+			String normalized = cron.trim().split("\\s+").length == 5 ? "0 " + cron.trim() : cron;
 			try {
-				CronTrigger trigger = new CronTrigger(cron);
+				CronTrigger trigger = new CronTrigger(normalized);
 				ScheduledFuture<?> future = taskScheduler.schedule(
 						() -> safeExecute(p.getId()), trigger);
 				activeJobs.put(p.getId(), future);
