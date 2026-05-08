@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { ScheduleEditor } from "@/components/copilot/ScheduleEditor";
 
 /** Java backend uses Jackson SNAKE_CASE, so all DTO fields arrive as snake_case. */
 interface Rule {
@@ -333,25 +334,18 @@ export default function RulesPage() {
                       <div style={{ fontSize: 12, fontWeight: 600, color: "#78350f", marginBottom: 10 }}>
                         ✏️ 編輯規則：{r.name}
                       </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12, marginBottom: 10 }}>
-                        <div>
-                          <label style={{ fontSize: 10, color: "#92400e", letterSpacing: "0.06em", fontWeight: 600, textTransform: "uppercase" }}>排程 cron (5-field)</label>
-                          <input
-                            value={editCron}
-                            onChange={(e) => setEditCron(e.target.value)}
-                            placeholder="0 8 * * 1"
-                            style={{ width: "100%", padding: "5px 8px", border: "1px solid #fcd34d", borderRadius: 4, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12 }}
-                          />
-                        </div>
-                        <div>
-                          <label style={{ fontSize: 10, color: "#92400e", letterSpacing: "0.06em", fontWeight: 600, textTransform: "uppercase" }}>推播訊息模板</label>
-                          <input
-                            value={editTemplate}
-                            onChange={(e) => setEditTemplate(e.target.value)}
-                            placeholder="例：上週 OOC top-5: {top_tools}"
-                            style={{ width: "100%", padding: "5px 8px", border: "1px solid #fcd34d", borderRadius: 4, fontSize: 12 }}
-                          />
-                        </div>
+                      <div style={{ marginBottom: 12 }}>
+                        <label style={{ fontSize: 10, color: "#92400e", letterSpacing: "0.06em", fontWeight: 600, textTransform: "uppercase", display: "block", marginBottom: 4 }}>排程</label>
+                        <ScheduleEditor value={editCron} onChange={setEditCron} />
+                      </div>
+                      <div style={{ marginBottom: 10 }}>
+                        <label style={{ fontSize: 10, color: "#92400e", letterSpacing: "0.06em", fontWeight: 600, textTransform: "uppercase", display: "block", marginBottom: 4 }}>推播訊息模板</label>
+                        <input
+                          value={editTemplate}
+                          onChange={(e) => setEditTemplate(e.target.value)}
+                          placeholder="例：上週 OOC top-5: {top_tools}"
+                          style={{ width: "100%", padding: "5px 8px", border: "1px solid #fcd34d", borderRadius: 4, fontSize: 12 }}
+                        />
                       </div>
                       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                         <button onClick={() => setEditingId(null)} style={btnStyle}>取消</button>

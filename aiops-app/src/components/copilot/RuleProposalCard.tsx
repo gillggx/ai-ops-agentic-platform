@@ -8,6 +8,7 @@
  */
 
 import { useState } from "react";
+import { ScheduleEditor } from "./ScheduleEditor";
 
 interface RuleDraft {
   name: string;
@@ -57,6 +58,7 @@ const KIND_LABEL: Record<string, string> = {
 export function RuleProposalCard({ ruleDraft, preview, onSaved }: Props) {
   const [name, setName] = useState(ruleDraft.name);
   const [template, setTemplate] = useState(ruleDraft.notification_template || "");
+  const [scheduleCron, setScheduleCron] = useState(ruleDraft.schedule_cron ?? "");
   const [saving, setSaving] = useState(false);
   const [savedId, setSavedId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -72,7 +74,7 @@ export function RuleProposalCard({ ruleDraft, preview, onSaved }: Props) {
           name,
           description: ruleDraft.description ?? "",
           kind: ruleDraft.kind,
-          schedule_cron: ruleDraft.schedule_cron,
+          schedule_cron: scheduleCron || ruleDraft.schedule_cron,
           pipeline_json: JSON.stringify(ruleDraft.pipeline_json),
           notification_channels: JSON.stringify(ruleDraft.notification_channels ?? [{ type: "in_app" }]),
           notification_template: template || null,
@@ -122,16 +124,17 @@ export function RuleProposalCard({ ruleDraft, preview, onSaved }: Props) {
         />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-        <div>
-          <label style={lblStyle}>排程 cron</label>
-          <div style={fieldStyle}>{ruleDraft.schedule_cron ?? "(saved query — 手動觸發)"}</div>
+      {ruleDraft.kind === "saved_query" ? (
+        <div style={{ marginBottom: 10 }}>
+          <label style={lblStyle}>排程</label>
+          <div style={fieldStyle}>(saved query — 手動觸發，無排程)</div>
         </div>
-        <div>
-          <label style={lblStyle}>頻率說明</label>
-          <div style={fieldStyle}>{preview.schedule_human ?? "—"}</div>
+      ) : (
+        <div style={{ marginBottom: 10 }}>
+          <label style={lblStyle}>排程</label>
+          <ScheduleEditor value={scheduleCron} onChange={setScheduleCron} />
         </div>
-      </div>
+      )}
 
       <div style={{ marginBottom: 10 }}>
         <label style={lblStyle}>Pipeline ({preview.node_count ?? 0} blocks)</label>
