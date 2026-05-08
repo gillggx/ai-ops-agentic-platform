@@ -1047,7 +1047,7 @@ async def admin_snapshot():
         PROCESSING_MIN_SEC, PROCESSING_MAX_SEC,
         HEARTBEAT_MIN_SEC, HEARTBEAT_MAX_SEC,
         HOLD_PROBABILITY, HOLD_TIMEOUT_SEC,
-        OOC_PROBABILITY, TOTAL_TOOLS, TOTAL_LOTS, RECYCLE_LOTS,
+        OOC_PROBABILITY, TOTAL_TOOLS,
     )
     from datetime import timedelta
     db = get_db()
@@ -1162,8 +1162,6 @@ async def admin_snapshot():
             "hold_timeout_sec":    HOLD_TIMEOUT_SEC,
             "ooc_probability":     OOC_PROBABILITY,
             "total_tools":         TOTAL_TOOLS,
-            "total_lots":          TOTAL_LOTS,
-            "recycle_lots":        RECYCLE_LOTS,
             "expected_lots_per_hour_per_tool": round(expected_lots_per_hour, 2),
         },
         "health": {

@@ -3,7 +3,7 @@ import random
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from config import (
     MONGODB_URI, MONGODB_DB,
-    TOTAL_LOTS, TOTAL_TOOLS, TOTAL_STEPS, TOTAL_RECIPES,
+    TOTAL_TOOLS, TOTAL_STEPS, TOTAL_RECIPES,
 )
 
 _client: AsyncIOMotorClient = None

@@ -20,7 +20,7 @@ from pymongo import ReturnDocument
 from app.database import get_db
 from app.agent.station_agent import process_step
 from config import (
-    TOTAL_TOOLS, TOTAL_STEPS, RECYCLE_LOTS,
+    TOTAL_TOOLS, TOTAL_STEPS,
     ACTIVE_LOT_TARGET, LOT_BATCH_SIZE, PACER_INTERVAL_SEC,
 )
 
@@ -201,18 +201,16 @@ async def _machine_loop(tool_id: str, queue: asyncio.Queue) -> None:
 
             next_step = step_num + 1
             if next_step > TOTAL_STEPS:
-                if RECYCLE_LOTS:
-                    await db.lots.update_one(
-                        {"lot_id": lot_id},
-                        {"$set": {"status": "Waiting", "current_step": 1},
-                         "$inc": {"cycle": 1}},
-                    )
-                    print(f"[MES] {lot_id} recycled (cycle done).")
-                else:
-                    await db.lots.update_one(
-                        {"lot_id": lot_id}, {"$set": {"status": "Finished"}}
-                    )
-                    print(f"[MES] {lot_id} FINISHED.")
+                # Lot completed all 20 steps → mark Finished. The pacer's
+                # active-count threshold drops below target → fresh lots
+                # get created with sequential IDs. (Removed 2026-05-08:
+                # RECYCLE_LOTS=true branch that reset step=1 + cycle++
+                # forever — incompatible with the pacer's new-lot
+                # contract; see config.py history note.)
+                await db.lots.update_one(
+                    {"lot_id": lot_id}, {"$set": {"status": "Finished"}}
+                )
+                print(f"[MES] {lot_id} FINISHED.")
             else:
                 await db.lots.update_one(
                     {"lot_id": lot_id},
