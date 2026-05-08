@@ -19,11 +19,26 @@ interface RuleDraft {
   notification_template?: string | null;
 }
 
+interface PreviewRun {
+  status?: string;                   // success | failed | skipped
+  result_summary?: string | null;
+  duration_ms?: number;
+  nodes?: Array<{
+    node?: string;
+    status?: string;
+    rows?: number | null;
+    duration_ms?: number;
+    columns?: string[] | null;
+    rows_total?: number | null;
+  }>;
+}
+
 interface RulePreview {
   pipeline_summary?: string;
   node_count?: number;
   next_3_fires?: string[];
   schedule_human?: string;
+  preview_run?: PreviewRun;
 }
 
 interface Props {
@@ -131,6 +146,48 @@ export function RuleProposalCard({ ruleDraft, preview, onSaved }: Props) {
           <ul style={{ margin: 0, paddingLeft: 18, color: "#cbd5e0", fontSize: 12, fontFamily: "ui-monospace, Menlo, monospace" }}>
             {preview.next_3_fires!.map((t, i) => <li key={i}>{t}</li>)}
           </ul>
+        </div>
+      )}
+
+      {/* Preview run output — show the user what THIS rule will produce
+          before they commit. Phase 9-fix: always rendered when present so
+          schedule-first flow (case 2) gets verification surface. */}
+      {preview.preview_run && (
+        <div style={{ marginBottom: 10 }}>
+          <label style={lblStyle}>
+            預覽輸出 ({preview.preview_run.status === "success" ? "✓" : "⚠"} status: {preview.preview_run.status ?? "—"}
+            {preview.preview_run.duration_ms != null && `, ${preview.preview_run.duration_ms}ms`})
+          </label>
+          {preview.preview_run.result_summary && (
+            <div style={{ ...fieldStyle, marginBottom: 6 }}>
+              {preview.preview_run.result_summary}
+            </div>
+          )}
+          {(preview.preview_run.nodes?.length ?? 0) > 0 && (
+            <div style={{
+              background: "#0d1117",
+              border: "1px solid #2d3748",
+              borderRadius: 4,
+              padding: "6px 8px",
+              fontSize: 11,
+              fontFamily: "ui-monospace, Menlo, monospace",
+              color: "#cbd5e0",
+            }}>
+              {preview.preview_run.nodes!.map((n, i) => (
+                <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0", borderBottom: i < preview.preview_run!.nodes!.length - 1 ? "1px dashed #2d3748" : "none" }}>
+                  <span style={{ color: n.status === "success" ? "#48bb78" : "#fc8181", minWidth: 14 }}>
+                    {n.status === "success" ? "✓" : "✗"}
+                  </span>
+                  <span style={{ color: "#a0aec0", minWidth: 60 }}>{n.node ?? "?"}</span>
+                  <span style={{ color: "#cbd5e0" }}>
+                    {n.rows != null ? `${n.rows} rows` : "—"}
+                    {n.rows_total != null && n.rows_total !== n.rows ? ` / ${n.rows_total} total` : ""}
+                    {n.columns?.length ? `  cols: ${n.columns.slice(0, 4).join(", ")}${n.columns.length > 4 ? `…+${n.columns.length - 4}` : ""}` : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

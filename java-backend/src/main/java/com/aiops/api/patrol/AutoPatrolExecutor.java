@@ -265,6 +265,15 @@ public class AutoPatrolExecutor {
 		int cap = ((Number) scope.getOrDefault("fanout_cap", DEFAULT_FANOUT_CAP)).intValue();
 
 		switch (type) {
+			case "personal" -> {
+				// Phase 9 — personal rule runs ONCE with no fan-out. The
+				// pipeline's declared inputs (e.g. time-range default = 7d)
+				// are the source of truth, not per-tool target expansion.
+				// The empty target satisfies the loop's contract while
+				// letting the pipeline run with whatever inputs were bound
+				// at create time (currently always {} for v0.9-A).
+				return List.of(new HashMap<>());
+			}
 			case "event_driven" -> {
 				// Event-mode patrols receive the event payload — pass it through
 				// as the single target so binding templates can resolve both

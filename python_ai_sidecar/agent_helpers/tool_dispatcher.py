@@ -1292,9 +1292,17 @@ class ToolDispatcher:
         return {"catalog": catalog, "query": query, "total": len(items), "items": items}
 
     async def _propose_personal_rule(self, tool_input: Dict[str, Any]) -> Dict[str, Any]:
-        """Phase 9-B: validate the LLM's rule draft + return preview for user
-        confirmation. Does NOT write to DB — frontend POSTs to /api/v1/rules
-        after the user clicks "儲存規則" on the confirmation card.
+        """Phase 9-B (with 9-fix preview): validate the LLM's rule draft,
+        run the pipeline ONCE for preview, return draft + actual output for
+        user confirmation. Does NOT write to DB — frontend POSTs to
+        /api/v1/rules after the user clicks "儲存規則".
+
+        Why preview: case-2 flows (user describes recurring need without
+        having run it first) need to see what the rule will actually
+        produce *before* committing to a schedule. Always running once
+        keeps the user's mental model identical regardless of whether
+        they've seen the output already (case-1 path just sees it again
+        — ~10s cost is acceptable).
 
         Validations:
           - name / kind / pipeline_json present
@@ -1303,7 +1311,10 @@ class ToolDispatcher:
           - pipeline_json structurally valid (uses sidecar PipelineValidator
             via headless route — checks block existence + param schema)
 
-        Side-effects: none. Pure spec validation.
+        Preview run: synchronously calls execute_native with empty inputs.
+        If the pipeline fails / requires inputs, surface the error so the
+        LLM can refine the request rather than silently scheduling a
+        broken rule.
         """
         from croniter import croniter  # type: ignore  # 9-B-runtime dep
         from datetime import datetime, timezone, timedelta
@@ -1364,6 +1375,59 @@ class ToolDispatcher:
         except Exception as e:
             logger.warning("propose_personal_rule: block-existence check skipped (%s)", e)
 
+        # Run the pipeline once to give the user actual output to look at
+        # before they commit to a schedule. We only surface a SUMMARY of the
+        # run — full row data would explode the chat payload.
+        preview_run: Dict[str, Any] = {"status": "skipped", "reason": "preview not attempted"}
+        try:
+            from python_ai_sidecar.executor.real_executor import execute_native
+            run = await execute_native(pipeline_json, inputs={}, run_id=None)
+            run_status = run.get("status") or "unknown"
+            node_results = run.get("node_results") or {}
+            # Distil into something small + actionable for the card.
+            terminal_summaries: List[Dict[str, Any]] = []
+            for node_id, nr in (node_results.items() if isinstance(node_results, dict) else []):
+                if not isinstance(nr, dict):
+                    continue
+                preview = nr.get("preview") or {}
+                data = preview.get("data") if isinstance(preview, dict) else None
+                cols = (data or {}).get("columns") if isinstance(data, dict) else None
+                rows_total = (data or {}).get("total") if isinstance(data, dict) else None
+                terminal_summaries.append({
+                    "node": node_id,
+                    "status": nr.get("status"),
+                    "rows": nr.get("rows"),
+                    "duration_ms": int(nr.get("duration_ms") or 0),
+                    "columns": cols,
+                    "rows_total": rows_total,
+                })
+            preview_run = {
+                "status": run_status,
+                "result_summary": run.get("result_summary"),
+                "duration_ms": run.get("duration_ms"),
+                "nodes": terminal_summaries[-6:],  # cap so payload stays small
+            }
+            if run_status != "success":
+                # Surface the failure as the tool response so the LLM can
+                # rephrase / refine instead of letting the user save a
+                # broken rule.
+                err = ""
+                for nr in (node_results.values() if isinstance(node_results, dict) else []):
+                    if isinstance(nr, dict) and nr.get("status") in ("error", "failed") and nr.get("error"):
+                        err = str(nr.get("error"))[:200]
+                        break
+                return {
+                    "status": "preview_failed",
+                    "message": f"預覽執行失敗（status={run_status}）: {err or '(no error detail)'}",
+                    "preview_run": preview_run,
+                }
+        except Exception as e:
+            logger.exception("propose_personal_rule preview failed")
+            return {
+                "status": "preview_failed",
+                "message": f"預覽執行錯誤: {e}",
+            }
+
         # Build the canonical Rule Artifact draft for the frontend confirm card.
         draft = {
             "name": name,
@@ -1382,6 +1446,7 @@ class ToolDispatcher:
                 "node_count": len(pipeline_json.get("nodes", [])),
                 "next_3_fires": next_fires,
                 "schedule_human": cron or "manual (saved_query)",
+                "preview_run": preview_run,
             },
         }
 

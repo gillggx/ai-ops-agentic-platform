@@ -109,9 +109,11 @@ public class UserRulesController {
 		rule.setNotificationChannels(req.notificationChannels() == null
 				? "[{\"type\":\"in_app\"}]" : req.notificationChannels());
 		rule.setNotificationTemplate(req.notificationTemplate());
-		// Personal rules don't generate alarms, so leave alarm_severity / title null.
-		// target_scope unused for personal rules; keep default JSON literal so
-		// the NOT NULL column is satisfied.
+		// Personal rules use the `personal` scope: AutoPatrolExecutor expands
+		// to a single empty target so the pipeline runs once per fire (no
+		// per-tool fan-out — that's the alarm-patrol model). Override the
+		// AutoPatrolEntity default of '{"type":"event_driven"}'.
+		rule.setTargetScope("{\"type\":\"personal\"}");
 		rule = ruleRepo.save(rule);
 
 		return ApiResponse.ok(Dtos.ruleOf(rule));
