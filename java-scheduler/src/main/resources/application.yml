@@ -15,6 +15,17 @@ spring:
       maximum-pool-size: 8
       minimum-idle: 1
       connection-timeout: 10000
+  # Phase 3 — Redis for distributed locks (multi-pod scheduler safety).
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      timeout: 3000ms
+      lettuce:
+        pool:
+          max-active: 8
+          min-idle: 1
+          max-wait: 2000ms
   jpa:
     open-in-view: false
     hibernate:
@@ -37,6 +48,10 @@ spring:
 aiops:
   audit:
     retention-days: ${AIOPS_AUDIT_RETENTION_DAYS:90}
+  # Phase 3 — distributed lock policy (multi-pod scheduler).
+  lock:
+    namespace: ${AIOPS_LOCK_NAMESPACE:aiops:lock}
+    fail-open: ${AIOPS_LOCK_FAIL_OPEN:true}    # Redis down → run anyway + warn log
   sidecar:
     python:
       base-url: ${PYTHON_SIDECAR_URL:http://localhost:8050}

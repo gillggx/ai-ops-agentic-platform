@@ -31,6 +31,8 @@ dependencies {
 	implementation("org.springframework.boot:spring-boot-starter-web")
 	implementation("org.springframework.boot:spring-boot-starter-webflux")
 	implementation("org.springframework.boot:spring-boot-starter-validation")
+	// Phase 3 — distributed lock backend (Redis SET NX EX + Lua release).
+	implementation("org.springframework.boot:spring-boot-starter-data-redis")
 
 	// JPA extras matching java-backend (so entity classes load identically).
 	implementation("org.hibernate.orm:hibernate-envers")

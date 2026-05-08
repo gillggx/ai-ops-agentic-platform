@@ -64,8 +64,9 @@ apt install -y mongodb-org || {
 }
 systemctl enable --now mongod
 
-# PostgreSQL + Nginx + Certbot
-apt install -y postgresql postgresql-contrib nginx certbot python3-certbot-nginx
+# PostgreSQL + Redis (Phase 3 distributed lock) + Nginx + Certbot
+apt install -y postgresql postgresql-contrib redis-server nginx certbot python3-certbot-nginx
+systemctl enable --now redis-server
 
 # ── 2. 建立 /opt/aiops 目錄 ─────────────────────────────────────
 echo ""

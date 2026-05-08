@@ -4,6 +4,7 @@ import com.aiops.api.domain.event.EventTypeEntity;
 import com.aiops.api.domain.event.EventTypeRepository;
 import com.aiops.api.domain.event.GeneratedEventEntity;
 import com.aiops.api.domain.event.GeneratedEventRepository;
+import com.aiops.scheduler.lock.DistributedLockService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
@@ -12,6 +13,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -64,6 +66,7 @@ public class EventPollerService {
 	private final GeneratedEventRepository generatedEventRepo;
 	private final EventDispatchService dispatchService;
 	private final ObjectMapper objectMapper;
+	private final DistributedLockService lockService;
 
 	/** ISO-8601 string of the latest eventTime we've successfully ingested.
 	 *  Held in memory; on cold start we fall back to "now - 5 minutes" so
@@ -74,12 +77,14 @@ public class EventPollerService {
 	                          EventTypeRepository eventTypeRepo,
 	                          GeneratedEventRepository generatedEventRepo,
 	                          EventDispatchService dispatchService,
-	                          ObjectMapper objectMapper) {
+	                          ObjectMapper objectMapper,
+	                          DistributedLockService lockService) {
 		this.simulatorClient = simulatorClient;
 		this.eventTypeRepo = eventTypeRepo;
 		this.generatedEventRepo = generatedEventRepo;
 		this.dispatchService = dispatchService;
 		this.objectMapper = objectMapper;
+		this.lockService = lockService;
 	}
 
 	@PostConstruct
@@ -98,8 +103,15 @@ public class EventPollerService {
 	// scanner than fixedDelay across some classpath/proxy combos. "*/30
 	// * * * * *" = every 30 seconds, every minute.
 	@Scheduled(cron = "*/30 * * * * *")
-	@Transactional
 	public void poll() {
+		// Phase 3 — only one scheduler pod polls per tick. TTL 60s gives
+		// 2× safety over the 30s tick interval; if a pod crashes mid-poll,
+		// the lock auto-releases by the second-next tick.
+		lockService.runWithLock("event_poller", Duration.ofSeconds(60), this::doPoll);
+	}
+
+	@Transactional
+	void doPoll() {
 		log.debug("EventPoller: tick");
 		String since = watermark.get();
 		List<Map<String, Object>> events;

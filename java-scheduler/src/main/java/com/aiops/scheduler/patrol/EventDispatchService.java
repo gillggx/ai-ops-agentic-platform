@@ -5,12 +5,14 @@ import com.aiops.api.domain.patrol.AutoPatrolEntity;
 import com.aiops.api.domain.patrol.AutoPatrolRepository;
 import com.aiops.api.domain.pipeline.PipelineAutoCheckTriggerEntity;
 import com.aiops.api.domain.pipeline.PipelineAutoCheckTriggerRepository;
+import com.aiops.scheduler.lock.DistributedLockService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,17 +47,20 @@ public class EventDispatchService {
 	private final AutoPatrolExecutor patrolExecutor;
 	private final AutoCheckExecutor autoCheckExecutor;
 	private final ObjectMapper objectMapper;
+	private final DistributedLockService lockService;
 
 	public EventDispatchService(AutoPatrolRepository patrolRepo,
 	                            PipelineAutoCheckTriggerRepository autoCheckRepo,
 	                            AutoPatrolExecutor patrolExecutor,
 	                            AutoCheckExecutor autoCheckExecutor,
-	                            ObjectMapper objectMapper) {
+	                            ObjectMapper objectMapper,
+	                            DistributedLockService lockService) {
 		this.patrolRepo = patrolRepo;
 		this.autoCheckRepo = autoCheckRepo;
 		this.patrolExecutor = patrolExecutor;
 		this.autoCheckExecutor = autoCheckExecutor;
 		this.objectMapper = objectMapper;
+		this.lockService = lockService;
 	}
 
 	/** Generated events → event-mode auto_patrols. */
@@ -74,11 +79,21 @@ public class EventDispatchService {
 		}
 		log.info("dispatchGeneratedEvent: event_type_id={} → {} patrol(s)", eventTypeId, matched.size());
 		for (AutoPatrolEntity patrol : matched) {
-			try {
-				patrolExecutor.executePatrol(patrol.getId(), payload);
-			} catch (Exception ex) {
-				log.warn("dispatchGeneratedEvent: patrol id={} threw: {}",
-						patrol.getId(), ex.getMessage(), ex);
+			// Phase 3 — same patrol-level lock as the cron path
+			// (AutoPatrolSchedulerService.safeExecute) so a patrol fired
+			// from BOTH cron AND event at the same instant only runs once.
+			String key = "patrol:" + patrol.getId();
+			boolean ran = lockService.runWithLock(key, Duration.ofMinutes(5), () -> {
+				try {
+					patrolExecutor.executePatrol(patrol.getId(), payload);
+				} catch (Exception ex) {
+					log.warn("dispatchGeneratedEvent: patrol id={} threw: {}",
+							patrol.getId(), ex.getMessage(), ex);
+				}
+			});
+			if (!ran) {
+				log.debug("dispatchGeneratedEvent: patrol id={} skipped — another fire holds the lock",
+						patrol.getId());
 			}
 		}
 	}

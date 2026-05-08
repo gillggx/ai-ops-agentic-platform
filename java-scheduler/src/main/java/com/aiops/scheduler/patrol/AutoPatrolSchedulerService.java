@@ -2,12 +2,14 @@ package com.aiops.scheduler.patrol;
 
 import com.aiops.api.domain.patrol.AutoPatrolEntity;
 import com.aiops.api.domain.patrol.AutoPatrolRepository;
+import com.aiops.scheduler.lock.DistributedLockService;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.support.CronTrigger;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.Date;
 import java.util.List;
@@ -34,15 +36,18 @@ public class AutoPatrolSchedulerService {
 	private final TaskScheduler taskScheduler;
 	private final AutoPatrolRepository patrolRepo;
 	private final AutoPatrolExecutor executor;
+	private final DistributedLockService lockService;
 
 	private final Map<Long, ScheduledFuture<?>> activeJobs = new ConcurrentHashMap<>();
 
 	public AutoPatrolSchedulerService(TaskScheduler taskScheduler,
 	                                  AutoPatrolRepository patrolRepo,
-	                                  AutoPatrolExecutor executor) {
+	                                  AutoPatrolExecutor executor,
+	                                  DistributedLockService lockService) {
 		this.taskScheduler = taskScheduler;
 		this.patrolRepo = patrolRepo;
 		this.executor = executor;
+		this.lockService = lockService;
 	}
 
 	/**
@@ -134,11 +139,21 @@ public class AutoPatrolSchedulerService {
 	}
 
 	private void safeExecute(Long patrolId) {
-		try {
-			executor.executePatrol(patrolId);
-		} catch (Exception ex) {
-			// One bad patrol must NOT crash the scheduler thread.
-			log.error("patrol id={} execution threw uncaught exception: {}", patrolId, ex.getMessage(), ex);
+		// Phase 3 — per-patrol lock so two pods don't fire the same patrol
+		// concurrently. TTL 5min gives 10× safety over typical patrol runs
+		// (process_history → sidecar dispatch usually < 30s).
+		String key = "patrol:" + patrolId;
+		boolean ran = lockService.runWithLock(key, Duration.ofMinutes(5), () -> {
+			try {
+				executor.executePatrol(patrolId);
+			} catch (Exception ex) {
+				// One bad patrol must NOT crash the scheduler thread.
+				log.error("patrol id={} execution threw uncaught exception: {}",
+						patrolId, ex.getMessage(), ex);
+			}
+		});
+		if (!ran) {
+			log.debug("patrol id={} skipped — another pod has the lock", patrolId);
 		}
 	}
 
@@ -160,6 +175,16 @@ public class AutoPatrolSchedulerService {
 	 */
 	@org.springframework.scheduling.annotation.Scheduled(fixedDelay = 60_000)
 	public void reconcileAll() {
+		// Phase 3 — only one pod reconciles per tick. TTL 90s gives 1.5×
+		// over the 60s tick interval. (Reconcile is a read-DB-then-register
+		// loop; the TaskScheduler register itself is in-process per pod, so
+		// each pod still has its own activeJobs map. Lock here just prevents
+		// two pods from logging duplicate "registered cron='...'" lines and
+		// fighting over set diffs.)
+		lockService.runWithLock("reconcile_all", Duration.ofSeconds(90), this::doReconcile);
+	}
+
+	private void doReconcile() {
 		List<AutoPatrolEntity> dbActive = patrolRepo.findByIsActiveTrue();
 		java.util.Set<Long> wanted = new java.util.HashSet<>();
 		for (AutoPatrolEntity p : dbActive) wanted.add(p.getId());
