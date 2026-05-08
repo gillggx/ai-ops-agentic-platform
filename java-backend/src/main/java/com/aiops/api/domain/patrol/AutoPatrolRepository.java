@@ -16,4 +16,7 @@ public interface AutoPatrolRepository extends JpaRepository<AutoPatrolEntity, Lo
 	 *  should fire on this event_type. */
 	List<AutoPatrolEntity> findByTriggerModeAndEventTypeIdAndIsActiveTrue(
 			String triggerMode, Long eventTypeId);
+
+	/** Phase 9 — personal rules owned by a user (kind != shared_alarm). */
+	List<AutoPatrolEntity> findByCreatedByAndKindNot(Long createdBy, String kind);
 }

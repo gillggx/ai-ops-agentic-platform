@@ -2,6 +2,7 @@ package com.aiops.api.patrol;
 
 import com.aiops.api.domain.alarm.AlarmEntity;
 import com.aiops.api.domain.alarm.AlarmRepository;
+import com.aiops.api.domain.notification.NotificationDispatchService;
 import com.aiops.api.domain.patrol.AutoPatrolEntity;
 import com.aiops.api.domain.patrol.AutoPatrolRepository;
 import com.aiops.api.domain.pipeline.PipelineEntity;
@@ -44,6 +45,7 @@ public class AutoPatrolExecutor {
 	private final PipelineRepository pipelineRepo;
 	private final PipelineRunRepository pipelineRunRepo;
 	private final AlarmRepository alarmRepo;
+	private final NotificationDispatchService notificationDispatch;
 	private final SimulatorClient simulatorClient;
 	private final ObjectMapper objectMapper;
 	private final WebClient sidecarWebClient;
@@ -54,6 +56,7 @@ public class AutoPatrolExecutor {
 	                          PipelineRepository pipelineRepo,
 	                          PipelineRunRepository pipelineRunRepo,
 	                          AlarmRepository alarmRepo,
+	                          NotificationDispatchService notificationDispatch,
 	                          SimulatorClient simulatorClient,
 	                          ObjectMapper objectMapper,
 	                          org.springframework.context.ApplicationContext applicationContext,
@@ -63,6 +66,7 @@ public class AutoPatrolExecutor {
 		this.pipelineRepo = pipelineRepo;
 		this.pipelineRunRepo = pipelineRunRepo;
 		this.alarmRepo = alarmRepo;
+		this.notificationDispatch = notificationDispatch;
 		this.simulatorClient = simulatorClient;
 		this.objectMapper = objectMapper;
 		this.applicationContext = applicationContext;
@@ -226,8 +230,30 @@ public class AutoPatrolExecutor {
 		}
 		log.info("executePatrol: patrol id={} done — {}/{} targets triggered",
 				patrolId, triggeredCount, targets.size());
-		return persistRunAndReturn(patrolId, pipelineId, pipelineVersion, triggeredBy,
+		PatrolRunResult result = persistRunAndReturn(patrolId, pipelineId, pipelineVersion, triggeredBy,
 				targets.size(), triggeredCount, "success", null, targetSummaries);
+
+		// Phase 9 — personal-rule dispatch. shared_alarm path is the legacy
+		// behaviour (alarms already written above by writeAlarm). For personal
+		// rules, every successful fire writes a row to the owner's inbox —
+		// briefings / reports don't carry a per-row "triggered" notion, the
+		// notification is the rule's deliverable.
+		if (!"shared_alarm".equals(patrol.getKind()) && patrol.getCreatedBy() != null) {
+			try {
+				Map<String, Object> dispatchPayload = new HashMap<>();
+				dispatchPayload.put("fanout_count", targets.size());
+				dispatchPayload.put("triggered_count", triggeredCount);
+				dispatchPayload.put("targets", targetSummaries);
+				dispatchPayload.put("kind", patrol.getKind());
+				notificationDispatch.dispatch(patrol, result.runId(), dispatchPayload);
+			} catch (Exception ex) {
+				// Inbox write must never fail the patrol fire — the run is already
+				// persisted; just log the dispatch failure.
+				log.warn("dispatch failed for personal rule {}: {}", patrolId, ex.getMessage());
+			}
+		}
+
+		return result;
 	}
 
 	// ── Scope expansion ───────────────────────────────────────────────────

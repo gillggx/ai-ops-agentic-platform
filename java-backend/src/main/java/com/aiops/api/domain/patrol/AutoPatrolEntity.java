@@ -79,4 +79,25 @@ public class AutoPatrolEntity extends Auditable {
 
 	@Column(name = "created_by")
 	private Long createdBy;
+
+	// ── Phase 9 (2026-05-08): Personal rule fields ──────────────────────────
+	// `kind=shared_alarm` (default for existing rows) keeps the legacy
+	// alarm-generating behaviour. Other kinds (personal_briefing /
+	// weekly_report / saved_query / watch_rule) signal NotificationDispatch
+	// to push to inbox instead of generating alarms.
+
+	/** shared_alarm | personal_briefing | weekly_report | saved_query | watch_rule */
+	@Column(name = "kind", nullable = false, length = 40)
+	private String kind = "shared_alarm";
+
+	/** JSON array — Phase 9-A only honours [{"type":"in_app"}]. */
+	@Column(name = "notification_channels", columnDefinition = "text")
+	private String notificationChannels;
+
+	/** "上週 OOC top-5: {top_tools}" — placeholders resolved against pipeline output. */
+	@Column(name = "notification_template", columnDefinition = "text")
+	private String notificationTemplate;
+
+	@Column(name = "last_dispatched_at")
+	private OffsetDateTime lastDispatchedAt;
 }
