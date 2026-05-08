@@ -1,5 +1,5 @@
 [Unit]
-Description=AIOps Java API (Spring Boot, port 8002 shadow / 8001 cutover)
+Description=AIOps Java API (Spring Boot, port 8002)
 After=network.target postgresql.service
 Wants=postgresql.service
 
@@ -26,7 +26,7 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=aiops-java-api
 
-# Security hardening — mirrors fastapi-backend.service.
+# Security hardening.
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only

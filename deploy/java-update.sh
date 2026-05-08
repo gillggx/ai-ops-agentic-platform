@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # deploy/java-update.sh — build + restart the Java API + Python sidecar.
 #
-# Runs in "shadow mode" by default (Java on :8002 alongside old Python on
-# :8001). Frontend keeps hitting Python until FASTAPI_BASE_URL is flipped and
-# Next.js is restarted (see cutover section in deploy/README-java.md).
+# Runs against :8002 (Java API) and :8050 (Python sidecar). The frontend
+# (aiops-app on :8000) and ontology-simulator (:8012) live in update.sh —
+# run them separately. Java uses Flyway migrations checked into
+# java-backend/src/main/resources/db/migration/ (note: prod sets
+# flyway.enabled=false, so V*.sql additions need a manual psql -f after
+# `git pull`).
 #
 # Usage on the EC2 box:
 #     cd /opt/aiops
@@ -91,9 +94,7 @@ else
 fi
 
 echo ""
-echo "✅  Java shadow deploy complete."
+echo "✅  Java + Sidecar deploy complete."
 echo "    - Java API : $(systemctl is-active aiops-java-api) on port ${AIOPS_JAVA_PORT:-8002}"
 echo "    - Sidecar  : $(systemctl is-active aiops-python-sidecar) on port 8050"
-echo "    - Old Python fastapi-backend untouched (still on :8001)"
-echo ""
-echo "To cut Frontend traffic over to Java, see deploy/README-java.md §Cutover."
+echo "    - Frontend (:8000) + ontology (:8012) untouched — run deploy/update.sh for those"

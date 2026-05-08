@@ -3,14 +3,19 @@
 # 用法：sudo bash setup.sh YOUR_DOMAIN YOUR_EMAIL
 # 例如：sudo bash setup.sh aiops.example.com admin@example.com
 #
-# 本腳本會：
-#   1. 安裝系統依賴（Python 3.11, Node.js 20, MongoDB, PostgreSQL, Nginx, Certbot）
-#   2. 建立 /opt/aiops 目錄結構
-#   3. 設定 Python virtualenv + 安裝 pip 依賴
-#   4. 建置 Next.js 靜態資產
-#   5. 初始化 PostgreSQL DB + 執行 Alembic migration
-#   6. 安裝 systemd 服務
-#   7. 設定 Nginx + 取得 SSL 憑證
+# 本腳本會（針對 4 個 active 服務）：
+#   1. 系統依賴（Python 3.11, Node.js 20, Java 21, MongoDB, PostgreSQL, Redis, Nginx, Certbot）
+#   2. 建立 /opt/aiops 目錄
+#   3. Python virtualenv (sidecar / ontology)
+#   4. 建置 ontology_simulator Next.js 前端
+#   5. PostgreSQL DB + user
+#   6. systemd 服務（aiops-app + aiops-java-api + aiops-python-sidecar + ontology-simulator）
+#   7. Nginx + SSL + UFW
+#
+# 後續更新走 deploy/update.sh + deploy/java-update.sh，不再跑這個腳本。
+#
+# 2026-05-09 · P1 cleanup: removed fastapi-backend bootstrap (service retired
+# 2026-04-25). Java is now the sole DB owner and uses Flyway, not Alembic.
 
 set -euo pipefail
 DOMAIN="${1:?用法: bash setup.sh YOUR_DOMAIN YOUR_EMAIL}"
@@ -19,78 +24,72 @@ APP_DIR="/opt/aiops"
 REPO_URL="git@github.com:gillggx/ai-ops-agentic-platform.git"
 DEPLOY_KEY="/home/ubuntu/.ssh/github_deploy"
 
-echo "════════════════════════════════════════════════"
-echo "  AI-Ops Agentic Platform — Production Deploy"
-echo "  Domain : $DOMAIN"
-echo "  Email  : $EMAIL"
-echo "════════════════════════════════════════════════"
-
-# ── 0. 確認以 root 執行 ──────────────────────────────────────────
-[[ $EUID -eq 0 ]] || { echo "❌  請以 root 或 sudo 執行"; exit 1; }
-
-# ── 1. 系統套件 ──────────────────────────────────────────────────
-echo ""
-echo "📦  安裝系統套件..."
-apt-get update -qq
-apt-get install -y -qq software-properties-common
-
-# Python 3.11（Ubuntu 20.04 需要 deadsnakes PPA；22.04 內建但也無妨）
-if ! python3.11 --version &>/dev/null 2>&1; then
-  echo "    加入 deadsnakes PPA..."
-  add-apt-repository -y ppa:deadsnakes/ppa
-  apt-get update -qq
+if [ "$EUID" -ne 0 ]; then
+  echo "❌  請用 sudo 執行：sudo bash setup.sh $DOMAIN $EMAIL"
+  exit 1
 fi
 
-apt-get install -y -qq \
-  python3.11 python3.11-venv python3.11-dev python3-pip \
-  build-essential libpq-dev \
-  postgresql postgresql-contrib \
-  nginx certbot python3-certbot-nginx \
-  git curl gnupg lsof ufw
+# ── 1. 系統依賴 ──────────────────────────────────────────────────
+echo "📦  安裝系統依賴..."
+apt update -y
+apt install -y software-properties-common curl gnupg
+
+# Python 3.11
+add-apt-repository -y ppa:deadsnakes/ppa
+apt update -y
+apt install -y python3.11 python3.11-venv python3.11-dev python3-pip
 
 # Node.js 20
-if ! command -v node &>/dev/null; then
-  echo "📦  安裝 Node.js 20..."
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-  apt-get install -y nodejs
-fi
+curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+apt install -y nodejs
 
-# MongoDB 7
-if ! command -v mongod &>/dev/null; then
-  echo "📦  安裝 MongoDB 7..."
-  curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc | \
-    gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
-  echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] \
-    https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" \
+# Java 21 (Temurin)
+apt install -y wget apt-transport-https
+mkdir -p /etc/apt/keyrings
+wget -O - https://packages.adoptium.net/artifactory/api/gpg/key/public \
+  | gpg --dearmor > /etc/apt/keyrings/adoptium.gpg
+echo "deb [signed-by=/etc/apt/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(awk -F= '/^VERSION_CODENAME/{print$2}' /etc/os-release) main" \
+  > /etc/apt/sources.list.d/adoptium.list
+apt update -y
+apt install -y temurin-21-jdk
+
+# MongoDB 7.0
+apt install -y mongodb-org || {
+  curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc \
+    | gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor
+  echo "deb [signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" \
     > /etc/apt/sources.list.d/mongodb-org-7.0.list
-  apt-get update -qq
-  apt-get install -y -qq mongodb-org
-  systemctl enable mongod --now
+  apt update -y
+  apt install -y mongodb-org
+}
+systemctl enable --now mongod
+
+# PostgreSQL + Nginx + Certbot
+apt install -y postgresql postgresql-contrib nginx certbot python3-certbot-nginx
+
+# ── 2. 建立 /opt/aiops 目錄 ─────────────────────────────────────
+echo ""
+echo "📂  建立 $APP_DIR..."
+mkdir -p "$APP_DIR"
+if [ ! -d "$APP_DIR/.git" ]; then
+  if [ -f "$DEPLOY_KEY" ]; then
+    GIT_SSH_COMMAND="ssh -i $DEPLOY_KEY -o StrictHostKeyChecking=no" \
+      git clone "$REPO_URL" "$APP_DIR"
+  else
+    echo "⚠️   $DEPLOY_KEY 不存在；請手動 git clone $REPO_URL 到 $APP_DIR 後重跑"
+    exit 1
+  fi
 fi
 
-echo "✅  系統套件安裝完成"
-
-# ── 2. 拉取程式碼 ────────────────────────────────────────────────
+# ── 3. Python virtualenv (sidecar) ──────────────────────────────
 echo ""
-echo "📥  拉取程式碼 → $APP_DIR ..."
-# 設定 SSH 使用 deploy key
-export GIT_SSH_COMMAND="ssh -i $DEPLOY_KEY -o StrictHostKeyChecking=no"
-if [ -d "$APP_DIR/.git" ]; then
-  git -C "$APP_DIR" pull --ff-only
-else
-  git clone "$REPO_URL" "$APP_DIR"
-fi
+echo "🐍  設定 Python sidecar virtualenv..."
+python3.11 -m venv /opt/aiops/venv_sidecar
+/opt/aiops/venv_sidecar/bin/pip install -q --upgrade pip
+/opt/aiops/venv_sidecar/bin/pip install -q \
+  -r "$APP_DIR/python_ai_sidecar/requirements.txt"
 
-# ── 3. Python virtualenv — FastAPI Backend ───────────────────────
-echo ""
-echo "🐍  設定 FastAPI Backend virtualenv..."
-python3.11 -m venv /opt/aiops/venv_backend
-/opt/aiops/venv_backend/bin/pip install -q --upgrade pip
-/opt/aiops/venv_backend/bin/pip install -q \
-  -r "$APP_DIR/fastapi_backend_service/requirements.txt" \
-  asyncpg  # PostgreSQL async driver
-
-# ── 4. Python virtualenv — OntologySimulator ────────────────────
+# ── 4. Python virtualenv (ontology) ─────────────────────────────
 echo ""
 echo "🐍  設定 OntologySimulator virtualenv..."
 python3.11 -m venv /opt/aiops/venv_ontology
@@ -98,51 +97,51 @@ python3.11 -m venv /opt/aiops/venv_ontology
 /opt/aiops/venv_ontology/bin/pip install -q \
   -r "$APP_DIR/ontology_simulator/requirements.txt"
 
-# ── 5. 建置 Next.js 靜態資產 ─────────────────────────────────────
+# ── 5. 建置 ontology_simulator Next.js 前端 ─────────────────────
 echo ""
-echo "🔨  建置 Next.js 靜態資產..."
+echo "🔨  建置 ontology_simulator/frontend..."
 cd "$APP_DIR/ontology_simulator/frontend"
 npm ci --silent
 npm run build
 echo "✅  Next.js build 完成 → ontology_simulator/frontend/out/"
 
-# ── 6. 設定環境變數檔案 ──────────────────────────────────────────
+# ── 6. 環境變數檔案（範本提示） ─────────────────────────────────
 echo ""
 echo "⚙️   檢查環境變數檔案..."
-BACKEND_ENV="$APP_DIR/fastapi_backend_service/.env"
+JAVA_ENV="$APP_DIR/java-backend/.env"
+SIDECAR_ENV="$APP_DIR/python_ai_sidecar/.env"
 ONTOLOGY_ENV="$APP_DIR/ontology_simulator/.env"
 
-if [ ! -f "$BACKEND_ENV" ]; then
-  cp "$APP_DIR/deploy/.env.backend.template" "$BACKEND_ENV"
-  echo "⚠️   請編輯 $BACKEND_ENV 填入真實值，然後重新執行本腳本的後半段（或 systemctl restart fastapi-backend）"
-  echo "    nano $BACKEND_ENV"
-  echo ""
-  echo "    至少需要填寫："
-  echo "      DATABASE_URL   — PostgreSQL 連線字串"
-  echo "      SECRET_KEY     — 隨機 64 字元字串（openssl rand -hex 32）"
-  echo "      ANTHROPIC_API_KEY"
-  echo "      SERVER_BASE_URL=https://$DOMAIN"
-  echo ""
-fi
+for env_file in "$JAVA_ENV" "$SIDECAR_ENV" "$ONTOLOGY_ENV"; do
+  if [ ! -f "$env_file" ]; then
+    template="${env_file%/.env}/.env.example"
+    if [ -f "$template" ]; then
+      cp "$template" "$env_file"
+      echo "    ✅  建立 $env_file（從 .env.example）"
+    else
+      echo "    ⚠️   缺少 $env_file 且無 .env.example — 請手動建立"
+    fi
+  fi
+done
 
-if [ ! -f "$ONTOLOGY_ENV" ]; then
-  cp "$APP_DIR/deploy/.env.ontology.template" "$ONTOLOGY_ENV"
-  echo "✅  建立 $ONTOLOGY_ENV（預設值可直接用）"
-fi
-
-# ── 7. 設定 PostgreSQL ───────────────────────────────────────────
+# ── 7. PostgreSQL DB / user ─────────────────────────────────────
 echo ""
 echo "🐘  設定 PostgreSQL..."
 PG_USER="aiops"
 PG_DB="aiops_db"
-# 讀取現有密碼或產生新的
-if grep -q "YOUR_PG_PASSWORD" "$BACKEND_ENV" 2>/dev/null; then
+PG_PASS=$(grep -oP '(?<=DB_PASSWORD=)\S+' "$JAVA_ENV" 2>/dev/null || true)
+if [ -z "$PG_PASS" ]; then
   PG_PASS=$(openssl rand -hex 16)
-  sed -i "s/YOUR_PG_PASSWORD/$PG_PASS/g" "$BACKEND_ENV"
-  sed -i "s/YOUR_DOMAIN/$DOMAIN/g" "$BACKEND_ENV"
-  echo "    ✅  自動產生 PostgreSQL 密碼並寫入 .env"
-else
-  PG_PASS=$(grep DATABASE_URL "$BACKEND_ENV" | grep -oP '(?<=:)[^@]+(?=@)' || echo "")
+  if [ -f "$JAVA_ENV" ]; then
+    if grep -q "^DB_PASSWORD=" "$JAVA_ENV"; then
+      sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=$PG_PASS|" "$JAVA_ENV"
+    else
+      echo "DB_PASSWORD=$PG_PASS" >> "$JAVA_ENV"
+    fi
+    echo "    ✅  自動產生 PostgreSQL 密碼並寫入 java-backend/.env"
+  else
+    echo "    ⚠️   $JAVA_ENV 不存在，密碼僅暫存於本次 setup：$PG_PASS"
+  fi
 fi
 
 sudo -u postgres psql -tc "SELECT 1 FROM pg_user WHERE usename='$PG_USER'" | grep -q 1 || \
@@ -150,35 +149,35 @@ sudo -u postgres psql -tc "SELECT 1 FROM pg_user WHERE usename='$PG_USER'" | gre
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='$PG_DB'" | grep -q 1 || \
   sudo -u postgres psql -c "CREATE DATABASE $PG_DB OWNER $PG_USER;"
 echo "    ✅  PostgreSQL DB: $PG_DB / user: $PG_USER"
+echo "    ℹ️   Java 使用 Flyway 管 schema（application-prod.yml flyway.enabled=false 時要手動 psql -f V*.sql）"
 
-# ── 8. Alembic Migrations ────────────────────────────────────────
-echo ""
-echo "🗃️   執行 Alembic migrations..."
-cd "$APP_DIR/fastapi_backend_service"
-/opt/aiops/venv_backend/bin/alembic upgrade head && echo "✅  Migrations 完成"
-
-# ── 9. systemd 服務 ──────────────────────────────────────────────
+# ── 8. systemd 服務 ─────────────────────────────────────────────
 echo ""
 echo "⚙️   安裝 systemd 服務..."
-# 把 WorkingDirectory / ExecStart 裡的 /opt/aiops 指向實際目錄
-install -m 644 "$APP_DIR/deploy/fastapi-backend.service"  /etc/systemd/system/
-install -m 644 "$APP_DIR/deploy/ontology-simulator.service" /etc/systemd/system/
-
-# 如果 ubuntu user 不存在，嘗試用當前 sudo 使用者
 REAL_USER="${SUDO_USER:-ubuntu}"
-sed -i "s/User=ubuntu/User=$REAL_USER/g" /etc/systemd/system/fastapi-backend.service
-sed -i "s/Group=ubuntu/Group=$REAL_USER/g" /etc/systemd/system/fastapi-backend.service
-sed -i "s/User=ubuntu/User=$REAL_USER/g" /etc/systemd/system/ontology-simulator.service
-sed -i "s/Group=ubuntu/Group=$REAL_USER/g" /etc/systemd/system/ontology-simulator.service
-# 確保 ReadWritePaths 包含正確目錄
+
+# 4 個 active 服務 + ontology
+for unit in aiops-app aiops-java-api aiops-python-sidecar ontology-simulator; do
+  if [ -f "$APP_DIR/deploy/$unit.service" ]; then
+    install -m 644 "$APP_DIR/deploy/$unit.service" /etc/systemd/system/
+    sed -i "s/User=ubuntu/User=$REAL_USER/g; s/Group=ubuntu/Group=$REAL_USER/g" \
+      "/etc/systemd/system/$unit.service"
+  else
+    echo "    ⚠️   missing $APP_DIR/deploy/$unit.service — 跳過"
+  fi
+done
+
 chown -R "$REAL_USER:$REAL_USER" "$APP_DIR"
-
 systemctl daemon-reload
-systemctl enable fastapi-backend ontology-simulator
-systemctl restart fastapi-backend ontology-simulator
-echo "    ✅  fastapi-backend.service + ontology-simulator.service 已啟動"
 
-# ── 10. Nginx 設定 ───────────────────────────────────────────────
+# Java + sidecar 需要先 build/install — 不在這裡 enable，由首次跑 java-update.sh 接手
+# Ontology simulator 可以直接啟
+systemctl enable ontology-simulator
+systemctl restart ontology-simulator
+echo "    ✅  ontology-simulator 已啟動"
+echo "    ℹ️   Java + sidecar + frontend 請執行 bash deploy/java-update.sh + bash deploy/update.sh"
+
+# ── 9. Nginx 設定 ───────────────────────────────────────────────
 echo ""
 echo "🌐  設定 Nginx..."
 sed "s/YOUR_DOMAIN/$DOMAIN/g" "$APP_DIR/deploy/nginx.conf" \
@@ -186,42 +185,41 @@ sed "s/YOUR_DOMAIN/$DOMAIN/g" "$APP_DIR/deploy/nginx.conf" \
 ln -sf /etc/nginx/sites-available/aiops /etc/nginx/sites-enabled/aiops
 rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
-# Save domain so update.sh can re-apply nginx.conf changes without needing args
 echo "$DOMAIN" > "$APP_DIR/.nginx_domain"
 echo "    ✅  Nginx 設定完成（domain saved to .nginx_domain）"
 
-# ── 11. SSL (Let's Encrypt) ──────────────────────────────────────
+# ── 10. SSL (Let's Encrypt) ─────────────────────────────────────
 echo ""
 echo "🔒  取得 SSL 憑證..."
 mkdir -p /var/www/certbot
 certbot --nginx -d "$DOMAIN" --email "$EMAIL" --agree-tos --non-interactive --redirect
 echo "    ✅  SSL 憑證安裝完成"
 
-# ── 12. 防火牆 ───────────────────────────────────────────────────
+# ── 11. 防火牆 ──────────────────────────────────────────────────
 echo ""
 echo "🔥  設定 UFW 防火牆..."
 ufw allow OpenSSH
 ufw allow 'Nginx Full'
 ufw --force enable
-echo "    ✅  UFW: SSH + HTTP + HTTPS 開放，8000/8001 對外封閉"
+echo "    ✅  UFW: SSH + HTTP + HTTPS 開放；8000/8002/8050/8012 不對外"
 
 # ── 完成 ────────────────────────────────────────────────────────
 echo ""
 echo "════════════════════════════════════════════════"
-echo "  🎉  部署完成！"
+echo "  🎉  系統依賴 + 基礎服務就緒！"
 echo ""
 echo "  🌐  前端          https://$DOMAIN"
 echo "  📊  MES 模擬器    https://$DOMAIN/simulator/"
-echo "  📡  API Docs      https://$DOMAIN/docs"
 echo ""
-echo "  📋  服務狀態："
-echo "      systemctl status fastapi-backend"
-echo "      systemctl status ontology-simulator"
+echo "  📋  下一步："
+echo "      cd $APP_DIR"
+echo "      bash deploy/java-update.sh   # Java + Python sidecar"
+echo "      bash deploy/update.sh        # aiops-app + ontology-simulator"
+echo ""
+echo "  🔍  狀態檢查："
+echo "      systemctl status aiops-app aiops-java-api aiops-python-sidecar ontology-simulator"
 echo ""
 echo "  📝  Log："
-echo "      journalctl -u fastapi-backend -f"
-echo "      journalctl -u ontology-simulator -f"
-echo ""
-echo "  🔄  更新部署："
-echo "      cd $APP_DIR && git pull && bash deploy/update.sh"
+echo "      journalctl -u aiops-java-api -f"
+echo "      journalctl -u aiops-python-sidecar -f"
 echo "════════════════════════════════════════════════"

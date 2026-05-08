@@ -1,6 +1,6 @@
 [Unit]
 Description=AIOps Frontend (Next.js standalone, port 8000)
-After=network.target fastapi-backend.service
+After=network.target aiops-java-api.service
 
 [Service]
 Type=simple

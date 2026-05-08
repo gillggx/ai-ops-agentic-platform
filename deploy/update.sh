@@ -36,8 +36,9 @@ echo "🔄  拉取最新程式碼..."
 git -C "$APP_DIR" pull --ff-only
 
 # ── Python dependencies ───────────────────────────────────────────────────
-# fastapi_backend_service decommissioned 2026-05-02 — venv_backend retired.
-# Sidecar deps + alembic migrations live with the sidecar's own update path.
+# update.sh only re-syncs ontology venv. Java + sidecar live in
+# java-update.sh because they require gradle build / sidecar venv refresh
+# that this lighter script doesn't carry.
 echo "🐍  更新 ontology pip 依賴..."
 /opt/aiops/venv_ontology/bin/pip install -q \
   -r "$APP_DIR/ontology_simulator/requirements.txt"
@@ -77,10 +78,9 @@ fi
 
 # ── Restart services ──────────────────────────────────────────────────────
 echo "🔁  重啟服務..."
-# Phase 8-A-1d: fastapi-backend (:8001) decommissioned 2026-04-25;
-# update.sh no longer restarts it. Java + sidecar redeploy lives in
-# deploy/java-update.sh — run that separately when those change.
-# Kill stale processes on target ports
+# update.sh covers aiops-app + ontology-simulator. Java + sidecar redeploy
+# lives in deploy/java-update.sh — run that separately when those change.
+# Kill stale processes on target ports.
 sudo -n fuser -k 8000/tcp 2>/dev/null || true
 sudo -n fuser -k 8012/tcp 2>/dev/null || true
 sleep 1
