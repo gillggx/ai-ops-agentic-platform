@@ -54,16 +54,37 @@ Block 目錄:
 
 
 def _format_catalog(catalog: dict[tuple[str, str], dict[str, Any]]) -> str:
-    """Single source of truth for block info — DB description (CLAUDE.md §1)."""
+    """Single source of truth for block info — DB description (CLAUDE.md §1).
+
+    Each line: name@version  in=[...]  out=[...]  params={key:enum-or-type, ...}
+    Param enum/type info is critical — without it the LLM passes user phrases
+    like 'spc_xbar_chart_value' to enum params expecting 'SPC'/'APC'/etc.
+    """
     lines = []
     for (name, version), spec in sorted(catalog.items()):
         desc = (spec.get("description") or "").strip().split("\n", 1)[0]
-        if len(desc) > 140:
-            desc = desc[:140].rsplit(" ", 1)[0] + "…"
+        if len(desc) > 120:
+            desc = desc[:120].rsplit(" ", 1)[0] + "…"
         in_ports = [p.get("port") for p in (spec.get("input_schema") or [])]
         out_ports = [p.get("port") for p in (spec.get("output_schema") or [])]
+        param_props = ((spec.get("param_schema") or {}).get("properties") or {})
+        param_hints = []
+        for k, v in param_props.items():
+            if not isinstance(v, dict):
+                continue
+            enum = v.get("enum")
+            if enum is not None:
+                # Cap to 6 enum values + ellipsis to keep prompt size sane.
+                preview = enum[:6]
+                more = "" if len(enum) <= 6 else f"…+{len(enum)-6}"
+                param_hints.append(f"{k}∈{preview}{more}")
+            else:
+                t = v.get("type") or "?"
+                param_hints.append(f"{k}:{t}")
+        params_str = ", ".join(param_hints) if param_hints else "(none)"
         lines.append(
-            f"- {name}@{version}  in={in_ports}  out={out_ports}  — {desc}"
+            f"- {name}@{version}  in={in_ports}  out={out_ports}  "
+            f"params={{{params_str}}}  — {desc}"
         )
     return "\n".join(lines)
 

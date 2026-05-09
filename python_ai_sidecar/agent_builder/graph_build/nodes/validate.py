@@ -31,12 +31,14 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
 
     registry = SeedlessBlockRegistry()
     registry.load()
-    # HARD errors trigger repair_plan (LLM must fix). SOFT errors are advisory
-    # warnings — LLM context limits make some of these unrepairable (e.g. domain
-    # mapping "spc_xbar_chart_value" → category 'SPC'), so we let the plan
-    # proceed and surface the warnings in build_finalized.
-    errors: list[str] = []           # hard — block plan
-    warnings: list[str] = []         # soft — advisory only
+    # All validation findings are HARD by default. plan_node now exposes
+    # enum + type hints in the block catalog (see _format_catalog), so the
+    # LLM can pick the right enum on the first try; if it still gets it
+    # wrong, repair_plan has the same hints to fix it. Letting param-value
+    # mismatches through as soft warnings broke the runtime auto-run after
+    # build.
+    errors: list[str] = []
+    warnings: list[str] = []  # reserved for future advisory-only checks
 
     # Defensive normalization first — Haiku regularly stuffs the version into
     # block_id (e.g. "block_xbar_r@1.0.0") AND populates block_version, so
@@ -91,7 +93,7 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
                     continue
                 msg = _check_param_value(schema_props[k], k, v)
                 if msg:
-                    warnings.append(f"Op#{idx}: add_node({op.block_id}) {msg}")
+                    errors.append(f"Op#{idx}: add_node({op.block_id}) {msg}")
 
         elif op.type == OpType.SET_PARAM:
             if op.node_id not in id_to_block:
@@ -110,7 +112,7 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
             else:
                 msg = _check_param_value(schema_props[key], key, params.get("value"))
                 if msg:
-                    warnings.append(f"Op#{idx}: set_param {msg}")
+                    errors.append(f"Op#{idx}: set_param {msg}")
 
         elif op.type == OpType.CONNECT:
             if op.src_id not in id_to_block:
