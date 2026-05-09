@@ -5,6 +5,8 @@ import com.aiops.api.config.JacksonConfig;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
+import org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration;
+import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
@@ -30,11 +32,22 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * internal HTTP surface ({@code /internal/scheduler/*}) for the API
  * service to call.
  */
-@SpringBootApplication(scanBasePackages = {
-		"com.aiops.scheduler",
-		"com.aiops.api.sidecar",                // PythonSidecarConfig (WebClient + token bean)
-		"com.aiops.api.domain.notification",    // NotificationDispatchService — used by AutoPatrolExecutor
-})
+@SpringBootApplication(
+		scanBasePackages = {
+				"com.aiops.scheduler",
+				"com.aiops.api.sidecar",                // PythonSidecarConfig (WebClient + token bean)
+				"com.aiops.api.domain.notification",    // NotificationDispatchService — used by AutoPatrolExecutor
+		},
+		// Spring Security ends up on the classpath transitively via the
+		// :java-backend project dep. Without this exclude, Spring Boot
+		// auto-configures default basic auth on every endpoint (including
+		// /internal/scheduler/*), so the SchedulerHttpClient gets 401 even
+		// with a valid X-Internal-Token. The scheduler does its own token
+		// check inside InternalSchedulerController.requireToken().
+		exclude = {
+				SecurityAutoConfiguration.class,
+				UserDetailsServiceAutoConfiguration.class,
+		})
 @EnableConfigurationProperties(AiopsProperties.class)
 @Import(JacksonConfig.class)                    // SNAKE_CASE Jackson config
 @EnableJpaRepositories(basePackages = "com.aiops.api.domain")
