@@ -214,6 +214,10 @@ export interface TriggerConfig {
   timezone?: string;
   align?: boolean;
   skip?: string[];
+  // header summary (apply to all trigger types) — Phase 11 v2 polish
+  sla_seconds?: number;        // "complete in < {sla_seconds}s"
+  evidence_window_lots?: number;   // "last N lots"
+  evidence_window_days?: number;   // "...· N days"
 }
 
 export interface SuggestedAction {
@@ -263,6 +267,15 @@ export interface SkillDetail extends SkillSummary {
   steps: string;               // JSON string of SkillStep[]
   test_cases: string;
   created_at: string;
+  confirm_check?: string | null;   // Phase 11 v2 — JSON string or null
+}
+
+/** Phase 11 v2 — optional CONFIRM (gating) step shape. */
+export interface ConfirmCheck {
+  description: string;
+  ai_summary?: string;
+  pipeline_id: number | null;
+  must_pass?: boolean;
 }
 
 export function safeParse<T>(s: string | undefined | null, fallback: T): T {

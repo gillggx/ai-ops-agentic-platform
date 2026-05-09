@@ -10,25 +10,49 @@
  * Mode C: Auto Patrol — cron expression (Every N min/hour/day) with skip
  *         conditions and Next-4-fires preview.
  */
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Icon } from "./atoms";
 import type { TriggerConfig as TC } from "./atoms";
 
-const SYSTEM_EVENTS = [
-  { id: "OCAP_TRIGGERED",     label: "OCAP_TRIGGERED",      desc: "SPC system flags Out-of-Control Action Plan",        owner: "SPC",   color: "var(--fail)" },
-  { id: "FDC_VIOLATION",      label: "FDC_VIOLATION",       desc: "Fault Detection & Classification anomaly",            owner: "FDC",   color: "var(--fail)" },
-  { id: "CHAMBER_MATCH_FAIL", label: "CHAMBER_MATCH_FAIL",  desc: "Chamber matching deviation across tools",             owner: "EE",    color: "var(--warn)" },
-  { id: "PM_DUE",             label: "PM_DUE",              desc: "Preventive maintenance window approaching",           owner: "EQ",    color: "var(--warn)" },
-  { id: "RECIPE_DEVIATION",   label: "RECIPE_DEVIATION",    desc: "APC adjusted recipe outside guard-band",              owner: "APC",   color: "var(--warn)" },
-  { id: "WAFER_SCRAP",        label: "WAFER_SCRAP",         desc: "Wafer scrap event raised by yield system",            owner: "Yield", color: "var(--fail)" },
-];
+// Phase 11 v2 — system events come from the Java event_types catalog.
+// Pre-Phase 12 this list was 6 prototype-only strings hardcoded here, none
+// of which were registered as actual event_type rows. V24 migration seeds
+// the catalog with the events the simulator + backend really emit.
+type SystemEventDef = {
+  id: string;
+  label: string;
+  desc: string;
+  owner: string;     // derived from prefix
+  color: string;     // derived from heuristic
+};
+
+function ownerOf(name: string): string {
+  // Heuristic: take prefix before first underscore as owner tag.
+  const pref = name.split("_")[0].toUpperCase();
+  if (["SPC", "FDC", "APC", "PM", "EQUIPMENT"].includes(pref)) return pref === "EQUIPMENT" ? "EQ" : pref;
+  if (name.includes("RECIPE")) return "RECIPE";
+  if (name.includes("MONITOR")) return "QA";
+  if (name.includes("ALARM")) return "ALARM";
+  if (name.includes("ENGINEER")) return "ENG";
+  return "SYS";
+}
+
+function colorFor(owner: string): string {
+  if (["SPC", "FDC", "ALARM"].includes(owner)) return "var(--fail)";
+  if (["APC", "ENG", "RECIPE"].includes(owner)) return "var(--warn)";
+  return "var(--ai)";
+}
 
 const USER_OPS = [">=", ">", "=", "<", "<=", "changed", "drift"];
 
-function summary(t: TC): { kind: string; value: string; color: string } {
+function summary(t: TC, events: SystemEventDef[]): { kind: string; value: string; color: string } {
   if (t.type === "system") {
-    const ev = SYSTEM_EVENTS.find((e) => e.id === t.event_type);
-    return { kind: "Event", value: ev?.label || "—", color: ev?.color || "var(--ink-3)" };
+    const ev = events.find((e) => e.id === t.event_type);
+    return {
+      kind: "Event",
+      value: ev?.label || t.event_type || "—",
+      color: ev?.color || "var(--ink-3)",
+    };
   }
   if (t.type === "user") {
     return { kind: "Custom", value: `when ${t.metric ?? ""} ${t.op ?? ""} ${t.value ?? ""}`.trim(), color: "var(--ai)" };
@@ -42,6 +66,38 @@ function summary(t: TC): { kind: string; value: string; color: string } {
   };
 }
 
+// Phase 11 v2 — fetch event_types catalog once per editor mount.
+function useEventCatalog(): { events: SystemEventDef[]; loading: boolean } {
+  const [events, setEvents] = useState<SystemEventDef[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/admin/event-types")
+      .then((r) => r.ok ? r.json() : [])
+      .then((rows: Array<Record<string, unknown>>) => {
+        if (cancelled) return;
+        const list: SystemEventDef[] = (Array.isArray(rows) ? rows : [])
+          .filter((r) => r.is_active !== false && r.isActive !== false)
+          .map((r) => {
+            const name = String(r.name ?? "");
+            const owner = ownerOf(name);
+            return {
+              id: name,
+              label: name,
+              desc: String(r.description ?? ""),
+              owner,
+              color: colorFor(owner),
+            };
+          });
+        setEvents(list);
+      })
+      .catch(() => setEvents([]))
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+  return { events, loading };
+}
+
 export function TriggerConfigEditor({
   trigger, setTrigger, readOnly,
 }: {
@@ -50,13 +106,21 @@ export function TriggerConfigEditor({
   readOnly?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const s = summary(trigger);
+  const { events, loading } = useEventCatalog();
+  const s = summary(trigger, events);
 
   const types = [
     { id: "system" as const,   label: "System Event", color: "var(--fail)" },
     { id: "user" as const,     label: "User-Defined", color: "var(--ai)" },
     { id: "schedule" as const, label: "Auto Patrol",  color: "var(--pass)" },
   ];
+
+  // Phase 11 v2 — header summary now binds to trigger state. Defaults match
+  // legacy strings ("complete in < 90s" / "last 5 lots") so existing rows
+  // render unchanged when these fields are absent.
+  const slaSec  = trigger.sla_seconds ?? 90;
+  const winLots = trigger.evidence_window_lots ?? 5;
+  const winDays = trigger.evidence_window_days;
 
   return (
     <div style={{
@@ -68,32 +132,45 @@ export function TriggerConfigEditor({
       <button onClick={() => !readOnly && setOpen(!open)} style={{
         all: "unset", display: "block", width: "100%",
         padding: "14px 16px", cursor: readOnly ? "default" : "pointer",
+        boxSizing: "border-box",
       }}>
         <div style={{
-          display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr 1fr auto", gap: 16, alignItems: "center",
+          // Phase 11 v2 — last column is min-content so the Configure pill
+          // never gets cut off on narrow viewports. Earlier "auto" let the
+          // grid track shrink below the button's intrinsic width.
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) min-content",
+          gap: 16, alignItems: "center",
         }}>
-          <div>
+          <div style={{ minWidth: 0 }}>
             <div className="mono" style={{ fontSize: 9.5, color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 4 }}>
               TRIGGER · {s.kind.toUpperCase()}
             </div>
             <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <span style={{ width: 6, height: 6, borderRadius: 999, background: s.color }}/>
-              <span className="mono" style={{ fontSize: 12.5, color: "var(--ink)" }}>{s.value || "—"}</span>
+              <span className="mono" style={{ fontSize: 12.5, color: "var(--ink)" }}>
+                {loading ? "…" : (s.value || "—")}
+              </span>
             </div>
           </div>
-          <div style={{ borderLeft: "1px solid var(--line)", paddingLeft: 16 }}>
+          <div style={{ borderLeft: "1px solid var(--line)", paddingLeft: 16, minWidth: 0 }}>
             <div className="mono" style={{ fontSize: 9.5, color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 4 }}>SCOPE</div>
-            <div style={{ fontSize: 12.5 }}>
+            <div style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               <span className="mono">{trigger.scope || "—"}</span>
             </div>
           </div>
-          <div style={{ borderLeft: "1px solid var(--line)", paddingLeft: 16 }}>
+          <div style={{ borderLeft: "1px solid var(--line)", paddingLeft: 16, minWidth: 0 }}>
             <div className="mono" style={{ fontSize: 9.5, color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 4 }}>SLA</div>
-            <div style={{ fontSize: 12.5 }}>complete in <span className="mono">&lt; 90s</span></div>
+            <div style={{ fontSize: 12.5 }}>
+              complete in <span className="mono">&lt; {slaSec}s</span>
+            </div>
           </div>
-          <div style={{ borderLeft: "1px solid var(--line)", paddingLeft: 16 }}>
+          <div style={{ borderLeft: "1px solid var(--line)", paddingLeft: 16, minWidth: 0 }}>
             <div className="mono" style={{ fontSize: 9.5, color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 4 }}>EVIDENCE WINDOW</div>
-            <div style={{ fontSize: 12.5 }}>last <span className="mono">5 lots</span></div>
+            <div style={{ fontSize: 12.5 }}>
+              last <span className="mono">{winLots} lots</span>
+              {winDays != null && (<> · <span className="mono">{winDays} days</span></>)}
+            </div>
           </div>
           {!readOnly && (
             <div style={{
@@ -101,6 +178,7 @@ export function TriggerConfigEditor({
               padding: "5px 10px", borderRadius: 6,
               border: "1px solid var(--line-strong)", background: "var(--surface)",
               color: "var(--ink-2)", fontSize: 11.5,
+              flexShrink: 0, whiteSpace: "nowrap",
             }}>
               <Icon.Pencil/> {open ? "Done" : "Configure"}
             </div>
@@ -129,11 +207,46 @@ export function TriggerConfigEditor({
               {(trigger.type === "schedule" || !trigger.type) && "依固定時間間隔執行 (Auto Patrol)。"}
             </span>
           </div>
-          {trigger.type === "system"   && <SystemEventConfig trigger={trigger} setTrigger={setTrigger}/>}
+          {trigger.type === "system"   && <SystemEventConfig trigger={trigger} setTrigger={setTrigger} events={events} loading={loading}/>}
           {trigger.type === "user"     && <UserEventConfig   trigger={trigger} setTrigger={setTrigger}/>}
           {(trigger.type === "schedule" || !trigger.type) && <ScheduleConfig trigger={trigger} setTrigger={setTrigger}/>}
+
+          {/* Phase 11 v2 — header bindings (SLA / evidence window). Always
+              shown so author can override defaults regardless of trigger type. */}
+          <HeaderBindings trigger={trigger} setTrigger={setTrigger}/>
         </div>
       )}
+    </div>
+  );
+}
+
+function HeaderBindings({
+  trigger, setTrigger,
+}: {
+  trigger: TC;
+  setTrigger: (t: TC) => void;
+}) {
+  const set = (patch: Partial<TC>) => setTrigger({ ...trigger, ...patch });
+  return (
+    <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px dashed var(--line)", display: "flex", gap: 18, flexWrap: "wrap" }}>
+      <Field label="SLA (seconds)" hint="header 顯示「complete in < N s」">
+        <Input mono width={100}
+          value={String(trigger.sla_seconds ?? 90)}
+          onChange={(v) => set({ sla_seconds: Math.max(1, Math.min(3600, parseInt(v) || 90)) })}
+          placeholder="90"/>
+      </Field>
+      <Field label="EVIDENCE · LOTS" hint="header 顯示「last N lots」">
+        <Input mono width={80}
+          value={String(trigger.evidence_window_lots ?? 5)}
+          onChange={(v) => set({ evidence_window_lots: Math.max(1, parseInt(v) || 5) })}
+          placeholder="5"/>
+      </Field>
+      <Field label="EVIDENCE · DAYS" hint="optional · 加上時間窗">
+        <Input mono width={80}
+          value={trigger.evidence_window_days != null ? String(trigger.evidence_window_days) : ""}
+          onChange={(v) => set({ evidence_window_days: v.trim() ? Math.max(1, parseInt(v) || 0) || undefined : undefined })}
+          placeholder="3"/>
+      </Field>
     </div>
   );
 }
@@ -199,20 +312,37 @@ function Input({ value, onChange, placeholder, mono = false, width }: {
   );
 }
 
-function SystemEventConfig({ trigger, setTrigger }: { trigger: TC; setTrigger: (t: TC) => void }) {
+function SystemEventConfig({
+  trigger, setTrigger, events, loading,
+}: {
+  trigger: TC;
+  setTrigger: (t: TC) => void;
+  events: SystemEventDef[];
+  loading: boolean;
+}) {
   const [q, setQ] = useState("");
-  const filtered = SYSTEM_EVENTS.filter((e) =>
+  const filtered = events.filter((e) =>
     !q.trim() || e.label.toLowerCase().includes(q.toLowerCase()) || e.desc.toLowerCase().includes(q.toLowerCase()),
   );
-  const sel = SYSTEM_EVENTS.find((e) => e.id === trigger.event_type);
+  const sel = events.find((e) => e.id === trigger.event_type);
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 24 }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <Field label="EVENT SOURCE" hint="平台已註冊的 system event">
-          <Input value={q} onChange={setQ} placeholder="搜尋 event…  e.g. OCAP / FDC / PM"/>
+          <Input value={q} onChange={setQ} placeholder="搜尋 event…  e.g. OOC / FDC / PM"/>
         </Field>
         <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 220, overflowY: "auto" }}>
+          {loading && (
+            <div style={{ fontSize: 12, color: "var(--ink-3)", padding: "10px 12px" }}>
+              loading event catalog…
+            </div>
+          )}
+          {!loading && filtered.length === 0 && (
+            <div style={{ fontSize: 12, color: "var(--ink-3)", padding: "10px 12px" }}>
+              （目前沒有匹配的 event，IT_ADMIN 可在 /admin/event-types 新增）
+            </div>
+          )}
           {filtered.map((e) => {
             const active = e.id === trigger.event_type;
             return (

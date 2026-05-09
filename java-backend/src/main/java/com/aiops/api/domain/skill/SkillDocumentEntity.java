@@ -87,4 +87,23 @@ public class SkillDocumentEntity extends Auditable {
      */
     @Column(name = "stats", nullable = false, columnDefinition = "text")
     private String stats = "{}";
+
+    /**
+     * Phase 11 v2 — optional CONFIRM step (gating). NULL = no gate, run goes
+     * straight from TRIGGER to CHECKLIST. Otherwise: trigger fires → confirm
+     * pipeline runs → if pass, checklist runs; if fail (and must_pass=true),
+     * the entire run is marked "skipped_by_confirm" and no alarm is emitted.
+     *
+     * <p>Shape:
+     * <pre>
+     * {
+     *   "description": "近 1h OOC 次數 ≥ 3 才視為真的異常",
+     *   "ai_summary":  "查 spc.ooc_count 並與閾值 3 比較…",
+     *   "pipeline_id": 42,
+     *   "must_pass":   true
+     * }
+     * </pre>
+     */
+    @Column(name = "confirm_check", columnDefinition = "text")
+    private String confirmCheck;
 }

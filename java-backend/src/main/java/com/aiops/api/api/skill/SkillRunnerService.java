@@ -101,28 +101,57 @@ public class SkillRunnerService {
         List<Map<String, Object>> steps = parseSteps(skill.getSteps());
         List<Map<String, Object>> stepResults = new ArrayList<>();
 
-        for (Map<String, Object> step : steps) {
-            String stepId = String.valueOf(step.get("id"));
-            Number pipelineIdNum = (Number) step.get("pipeline_id");
-            Long pipelineId = pipelineIdNum != null ? pipelineIdNum.longValue() : null;
-
-            sink.tryEmitNext(RunEvent.stepStart(stepId));
-
-            Map<String, Object> stepResult;
-            if (pipelineId == null) {
-                stepResult = stepResultPending(stepId, "no pipeline bound");
+        // Phase 11 v2 — CONFIRM step (optional gate). If present and fails,
+        // skip the entire CHECKLIST and mark run "skipped_by_confirm" so
+        // downstream materializers don't write an alarm.
+        Map<String, Object> confirmConfig = parseJsonObject(skill.getConfirmCheck());
+        boolean skipChecklist = false;
+        Map<String, Object> confirmResult = null;
+        if (!confirmConfig.isEmpty()) {
+            Number cpId = (Number) confirmConfig.get("pipeline_id");
+            Long confirmPipelineId = cpId != null ? cpId.longValue() : null;
+            sink.tryEmitNext(RunEvent.confirmStart());
+            if (confirmPipelineId == null) {
+                confirmResult = stepResultPending("confirm", "no confirm pipeline bound");
             } else {
-                stepResult = runOneStep(stepId, pipelineId, triggerPayload, caller);
+                confirmResult = runOneStep("confirm", confirmPipelineId, triggerPayload, caller);
             }
-            stepResults.add(stepResult);
-            sink.tryEmitNext(RunEvent.stepDone(stepResult));
+            sink.tryEmitNext(RunEvent.confirmDone(confirmResult));
+            boolean mustPass = !Boolean.FALSE.equals(confirmConfig.get("must_pass"));
+            String confirmStatus = String.valueOf(confirmResult.get("status"));
+            if (mustPass && !"pass".equals(confirmStatus)) {
+                skipChecklist = true;
+            }
         }
 
-        run.setStatus("completed");
+        if (!skipChecklist) {
+            for (Map<String, Object> step : steps) {
+                String stepId = String.valueOf(step.get("id"));
+                Number pipelineIdNum = (Number) step.get("pipeline_id");
+                Long pipelineId = pipelineIdNum != null ? pipelineIdNum.longValue() : null;
+
+                sink.tryEmitNext(RunEvent.stepStart(stepId));
+
+                Map<String, Object> stepResult;
+                if (pipelineId == null) {
+                    stepResult = stepResultPending(stepId, "no pipeline bound");
+                } else {
+                    stepResult = runOneStep(stepId, pipelineId, triggerPayload, caller);
+                }
+                stepResults.add(stepResult);
+                sink.tryEmitNext(RunEvent.stepDone(stepResult));
+            }
+        }
+
+        run.setStatus(skipChecklist ? "skipped_by_confirm" : "completed");
         run.setFinishedAt(OffsetDateTime.now());
         run.setDurationMs((int) (System.currentTimeMillis() - started));
         try {
-            run.setStepResults(mapper.writeValueAsString(stepResults));
+            // Persist confirm result alongside step_results for replay UI.
+            Map<String, Object> persisted = new HashMap<>();
+            persisted.put("steps", stepResults);
+            if (confirmResult != null) persisted.put("confirm", confirmResult);
+            run.setStepResults(mapper.writeValueAsString(persisted));
         } catch (Exception e) {
             run.setStepResults("[]");
         }
@@ -137,6 +166,15 @@ public class SkillRunnerService {
 
         sink.tryEmitNext(RunEvent.done(run.getId(), stepResults));
         sink.tryEmitComplete();
+    }
+
+    private Map<String, Object> parseJsonObject(String json) {
+        if (json == null || json.isBlank()) return Map.of();
+        try {
+            return mapper.readValue(json, JSON_MAP_TYPE);
+        } catch (Exception e) {
+            return Map.of();
+        }
     }
 
     @Transactional
@@ -287,6 +325,12 @@ public class SkillRunnerService {
         }
         static RunEvent stepDone(Map<String, Object> result) {
             return new RunEvent("step_done", result);
+        }
+        static RunEvent confirmStart() {
+            return new RunEvent("confirm_start", Map.of());
+        }
+        static RunEvent confirmDone(Map<String, Object> result) {
+            return new RunEvent("confirm_done", result);
         }
         static RunEvent done(Long runId, List<Map<String, Object>> stepResults) {
             return new RunEvent("done", Map.of("run_id", runId, "step_results", stepResults));

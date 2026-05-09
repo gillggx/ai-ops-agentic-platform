@@ -158,6 +158,13 @@ public class SkillDocumentController {
         if (req.version() != null) e.setVersion(req.version());
         if (req.triggerConfig() != null) e.setTriggerConfig(req.triggerConfig());
         if (req.steps() != null) e.setSteps(req.steps());
+        // Phase 11 v2: confirmCheck is nullable — empty string clears the gate,
+        // a JSON blob installs/replaces it. We can't distinguish "field absent"
+        // from "null" in record DTOs cleanly, so the convention is: caller MUST
+        // send confirmCheck="" to clear, or omit the entire field to leave it.
+        if (req.confirmCheck() != null) {
+            e.setConfirmCheck(req.confirmCheck().isBlank() ? null : req.confirmCheck());
+        }
 
         // Phase 11 — materialize / clear trigger rows on status transitions.
         String newStatus = e.getStatus();
@@ -169,12 +176,99 @@ public class SkillDocumentController {
                 int n = materializer.clear(e);
                 log.info("skill {} unpublished (draft) — cleared {} rows", e.getSlug(), n);
             }
-        } else if ("stable".equals(newStatus) && (req.triggerConfig() != null || req.steps() != null)) {
-            // Already published and trigger/steps changed → re-materialize.
+        } else if ("stable".equals(newStatus)
+                && (req.triggerConfig() != null || req.steps() != null || req.confirmCheck() != null)) {
+            // Already published and trigger/steps/confirm changed → re-materialize.
             int n = materializer.materialize(e);
             log.info("skill {} re-materialized {} rows after stable-edit", e.getSlug(), n);
         }
         return ApiResponse.ok(Dtos.detailOf(e));
+    }
+
+    /**
+     * Phase 11 v2 — set or replace the CONFIRM (gating) step. Mirrors
+     * /steps POST: takes natural-language text, calls sidecar to translate
+     * into a pipeline ending in block_step_check, persists the pipeline as a
+     * pb_pipelines row, and stores a JSON blob into skill.confirm_check.
+     *
+     * <p>Body: {"text": "近 1h OOC 次數 ≥ 3 才繼續"}
+     * <p>To remove the confirm step entirely, call DELETE /confirm-check.
+     */
+    @PostMapping("/{slug}/confirm-check")
+    @PreAuthorize(Authorities.ADMIN_OR_PE)
+    @Transactional
+    public ApiResponse<Dtos.Detail> setConfirmCheck(@PathVariable String slug,
+                                                    @RequestBody Map<String, Object> body,
+                                                    @AuthenticationPrincipal AuthPrincipal caller) {
+        String text = String.valueOf(body.getOrDefault("text", "")).trim();
+        if (text.isBlank()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "validation_error", "text required");
+        }
+        SkillDocumentEntity skill = repository.findBySlug(slug)
+                .orElseThrow(() -> ApiException.notFound("skill"));
+
+        Map<String, Object> req = Map.of("text", text);
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        Map result;
+        try {
+            result = sidecar.postJson("/internal/agent/skill/translate-step", req, Map.class, caller)
+                    .block(java.time.Duration.ofMinutes(2));
+        } catch (Exception ex) {
+            log.warn("confirm-check translate failed: {}", ex.toString());
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "translate_failed",
+                    "sidecar unavailable: " + ex.getMessage());
+        }
+        if (result == null) {
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "translate_failed",
+                    "sidecar returned null");
+        }
+        String resStatus = String.valueOf(result.getOrDefault("status", ""));
+        Object pj = result.get("pipeline_json");
+        String summary = String.valueOf(result.getOrDefault("summary", ""));
+
+        Long pipelineId = null;
+        String aiSummary = summary;
+        if ("finished".equals(resStatus) && pj instanceof Map) {
+            // Persist the new pipeline as a pb_pipelines row (same as steps).
+            PipelineEntity pe = new PipelineEntity();
+            pe.setName("[Skill] " + skill.getTitle() + " · confirm");
+            pe.setDescription(text);
+            pe.setStatus("draft");
+            pe.setPipelineKind("diagnostic");
+            try {
+                pe.setPipelineJson(mapper.writeValueAsString(pj));
+            } catch (Exception e) {
+                throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "pipeline_save_failed", e.getMessage());
+            }
+            pe.setCreatedBy(caller != null ? caller.userId() : null);
+            pipelineId = pipelineRepo.save(pe).getId();
+        } else {
+            aiSummary = "(translation 失敗) "
+                    + result.getOrDefault("error_message", "translation incomplete");
+        }
+
+        Map<String, Object> confirm = new java.util.HashMap<>();
+        confirm.put("description", text);
+        confirm.put("ai_summary", aiSummary);
+        confirm.put("pipeline_id", pipelineId);
+        confirm.put("must_pass", true);          // default; UI can flip later
+        try {
+            skill.setConfirmCheck(mapper.writeValueAsString(confirm));
+        } catch (Exception e) {
+            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "confirm_serialization", e.getMessage());
+        }
+        return ApiResponse.ok(Dtos.detailOf(skill));
+    }
+
+    /** Phase 11 v2 — drop the CONFIRM step. */
+    @DeleteMapping("/{slug}/confirm-check")
+    @PreAuthorize(Authorities.ADMIN_OR_PE)
+    @Transactional
+    public ApiResponse<Dtos.Detail> clearConfirmCheck(@PathVariable String slug) {
+        SkillDocumentEntity skill = repository.findBySlug(slug)
+                .orElseThrow(() -> ApiException.notFound("skill"));
+        skill.setConfirmCheck(null);
+        return ApiResponse.ok(Dtos.detailOf(skill));
     }
 
     @DeleteMapping("/{slug}")

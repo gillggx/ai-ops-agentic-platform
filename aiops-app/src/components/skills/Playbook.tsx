@@ -19,6 +19,7 @@ import { useRouter } from "next/navigation";
 import {
   Icon, Badge, Btn, safeParse,
   type SkillDetail, type SkillStep, type TriggerConfig as TC, type SuggestedAction,
+  type ConfirmCheck,
 } from "./atoms";
 import { TriggerConfigEditor } from "./TriggerConfig";
 import PipelineCanvasMini, { type MiniBlock } from "./PipelineCanvasMini";
@@ -41,6 +42,7 @@ export default function Playbook({
   const [title, setTitle] = useState("");
   const [trigger, setTrigger] = useState<TC>({ type: "schedule", every: 4, unit: "hour" });
   const [steps, setSteps] = useState<SkillStep[]>([]);
+  const [confirmCheck, setConfirmCheck] = useState<ConfirmCheck | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const dirtyRef = useRef(dirty);
@@ -68,6 +70,9 @@ export default function Playbook({
         setTitle(json.data.title);
         setTrigger(safeParse<TC>(json.data.trigger_config, { type: "schedule", every: 4, unit: "hour" }));
         setSteps(safeParse<SkillStep[]>(json.data.steps, []));
+        setConfirmCheck(json.data.confirm_check
+          ? safeParse<ConfirmCheck | null>(json.data.confirm_check, null)
+          : null);
         setDirty(false);
       })
       .catch((e: Error) => { if (!cancelled) setError(e.message); })
@@ -332,6 +337,18 @@ export default function Playbook({
               testCase={selectedCase}
               onRerun={() => { setShowSummary(false); setShowCaseSelector(true); }}
               onClose={() => setShowSummary(false)}
+            />
+          )}
+
+          {/* Phase 11 v2 — CONFIRMATION (optional gating step). Author mode
+              shows the slot even when empty (so user can add); Run mode hides
+              the section entirely if no confirm step is configured. */}
+          {(mode === "author" || confirmCheck) && (
+            <ConfirmSection
+              slug={slug}
+              mode={mode}
+              confirmCheck={confirmCheck}
+              onSet={(cc) => { setConfirmCheck(cc); markDirty(); }}
             />
           )}
 
@@ -924,19 +941,28 @@ function AddStep({ onAdd }: { onAdd: (text: string) => Promise<void> }) {
     }
   };
 
+  const inputRef = useRef<HTMLInputElement>(null);
+
   return (
     <div style={{ padding: "20px 0 64px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 0" }}>
-        <div style={{
-          flexShrink: 0,
-          width: 28, height: 28, borderRadius: 6,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          background: "var(--surface)", border: "1px dashed var(--line-strong)",
-          color: "var(--ink-3)",
-        }}>
+        {/* Phase 11 v2 — was a decorative div; now a real button that
+            focuses the input. User feedback 2026-05-09: 「我就是不能點 +」 */}
+        <button
+          type="button"
+          aria-label="新增檢查步驟"
+          onClick={() => inputRef.current?.focus()}
+          style={{
+            flexShrink: 0,
+            width: 28, height: 28, borderRadius: 6,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            background: "var(--surface)", border: "1px dashed var(--line-strong)",
+            color: "var(--ink-3)", cursor: "pointer", padding: 0,
+          }}>
           <Icon.Plus/>
-        </div>
+        </button>
         <input
+          ref={inputRef}
           value={draft}
           disabled={thinking}
           onChange={(e) => setDraft(e.target.value)}
@@ -1176,5 +1202,143 @@ function SummaryReport({
         </div>
       </div>
     </section>
+  );
+}
+
+/* ── Phase 11 v2: CONFIRM section (gating step) ────────────────────── */
+
+function ConfirmSection({
+  slug, mode, confirmCheck, onSet,
+}: {
+  slug: string;
+  mode: "author" | "run";
+  confirmCheck: ConfirmCheck | null;
+  onSet: (cc: ConfirmCheck | null) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const setStep = async (text: string) => {
+    if (!text.trim()) return;
+    setBusy(true); setError(null);
+    try {
+      const r = await fetch(`/api/skill-documents/${encodeURIComponent(slug)}/confirm-check`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error?.message ?? `HTTP ${r.status}`);
+      // Server returns updated SkillDetail.detail — extract confirm_check
+      const cc = j.data?.confirm_check ? safeParse<ConfirmCheck>(j.data.confirm_check, { description: text, pipeline_id: null }) : null;
+      onSet(cc);
+      setDraft("");
+    } catch (e) { setError(String(e)); }
+    finally { setBusy(false); }
+  };
+
+  const removeStep = async () => {
+    setBusy(true); setError(null);
+    try {
+      const r = await fetch(`/api/skill-documents/${encodeURIComponent(slug)}/confirm-check`, { method: "DELETE" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      onSet(null);
+    } catch (e) { setError(String(e)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div style={{ marginTop: 30 }}>
+      <div style={{
+        display: "flex", alignItems: "center", gap: 10,
+        padding: "10px 0 18px", marginTop: 6,
+      }}>
+        <span className="mono" style={{ fontSize: 10.5, color: "var(--ai)", letterSpacing: "0.08em" }}>
+          CONFIRMATION · {confirmCheck ? "1 STEP" : "OPTIONAL"} · IS IT REAL?
+        </span>
+        <span style={{ flex: 1, height: 1, background: "var(--line)" }}/>
+        <span style={{ fontSize: 11, color: "var(--ink-3)" }}>only proceed if pass</span>
+      </div>
+
+      {confirmCheck ? (
+        <div style={{
+          display: "grid", gridTemplateColumns: "auto 1fr",
+          gap: 14, alignItems: "start",
+          padding: "14px 16px", borderRadius: 8,
+          background: "var(--surface)",
+          border: "1px solid var(--ai-bg)",
+          borderLeft: "3px solid var(--ai)",
+        }}>
+          <span className="mono" style={{
+            fontSize: 11, color: "var(--ai)",
+            background: "var(--ai-bg)", padding: "3px 8px", borderRadius: 4,
+            whiteSpace: "nowrap",
+          }}>C1</span>
+          <div>
+            <div style={{ fontSize: 14, color: "var(--ink)", fontWeight: 500 }}>
+              {confirmCheck.description}
+            </div>
+            {confirmCheck.ai_summary && (
+              <div style={{
+                marginTop: 6, fontSize: 12, color: "var(--ink-3)",
+                display: "inline-flex", alignItems: "center", gap: 6,
+              }}>
+                <Badge kind="ai">✨ AI parsed</Badge>
+                <span>{confirmCheck.ai_summary}</span>
+              </div>
+            )}
+            {mode === "author" && (
+              <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+                <Btn kind="ghost" onClick={removeStep} disabled={busy}>
+                  — remove confirmation step
+                </Btn>
+              </div>
+            )}
+            {error && <div style={{ marginTop: 6, fontSize: 11, color: "var(--fail)" }}>⚠ {error}</div>}
+          </div>
+        </div>
+      ) : mode === "author" ? (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 14,
+          padding: "14px 0", borderTop: "1px dashed var(--line)",
+          borderBottom: "1px dashed var(--line)",
+        }}>
+          <button
+            type="button"
+            aria-label="設定 CONFIRM 步驟"
+            onClick={() => inputRef.current?.focus()}
+            style={{
+              flexShrink: 0, width: 28, height: 28, borderRadius: 6,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              background: "var(--surface)", border: "1px dashed var(--ai)",
+              color: "var(--ai)", cursor: "pointer", padding: 0,
+            }}>
+            <Icon.Plus/>
+          </button>
+          <input
+            ref={inputRef}
+            value={draft}
+            disabled={busy}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") void setStep(draft); }}
+            placeholder="（選填）先確認一個條件，例如「最近 1h OOC ≥ 3 才繼續」"
+            style={{
+              flex: 1, fontSize: 14, padding: "6px 0",
+              border: "none", background: "transparent",
+              color: "var(--ink)", outline: "none", fontFamily: "inherit",
+            }}
+          />
+          <Btn kind="ghost" disabled={!draft.trim() || busy} icon={<Icon.Spark/>}
+            onClick={() => void setStep(draft)}>
+            {busy ? "AI parsing…" : "Translate to pipeline"}
+          </Btn>
+        </div>
+      ) : null}
+      {error && !confirmCheck && (
+        <div style={{ fontSize: 11, color: "var(--fail)", paddingLeft: 42, marginTop: 6 }}>⚠ {error}</div>
+      )}
+    </div>
   );
 }

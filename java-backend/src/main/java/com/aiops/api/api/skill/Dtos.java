@@ -23,7 +23,7 @@ final class Dtos {
             OffsetDateTime updatedAt
     ) {}
 
-    /** Playbook detail — includes steps. */
+    /** Playbook detail — includes steps + (Phase 11 v2) confirm_check. */
     record Detail(
             Long id, String slug, String title, String version,
             String stage, String domain, String description,
@@ -32,6 +32,7 @@ final class Dtos {
             String steps,
             String testCases,
             String stats,
+            String confirmCheck,        // Phase 11 v2 — JSON or null (no gate)
             OffsetDateTime createdAt, OffsetDateTime updatedAt
     ) {}
 
@@ -55,7 +56,8 @@ final class Dtos {
             String certifiedBy,
             String version,
             String triggerConfig,
-            String steps
+            String steps,
+            String confirmCheck               // Phase 11 v2 — JSON, null clears
     ) {}
 
     static Summary summaryOf(SkillDocumentEntity e) {
@@ -74,6 +76,7 @@ final class Dtos {
                 e.getStage(), e.getDomain(), e.getDescription(),
                 e.getStatus(), e.getCertifiedBy(), e.getAuthorUserId(),
                 e.getTriggerConfig(), e.getSteps(), e.getTestCases(), e.getStats(),
+                e.getConfirmCheck(),
                 e.getCreatedAt(), e.getUpdatedAt()
         );
     }

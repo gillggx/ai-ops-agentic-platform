@@ -64,6 +64,17 @@ public class SkillMaterializeService {
             return 0;
         }
 
+        // Phase 11 v2 — if skill has a CONFIRM step, log it. The auto-dispatch
+        // path (event poller / cron scheduler) currently does NOT enforce the
+        // gate — only the explicit SkillRunner.run() path (manual Test, UI Run)
+        // honors confirm_check. Wiring the gate into the dispatcher is a
+        // follow-up; for now publishing succeeds but the gate is bypassed at
+        // event-fire time.
+        if (skill.getConfirmCheck() != null && !skill.getConfirmCheck().isBlank()) {
+            log.info("skill {} has CONFIRM step — gate enforced on UI Run only, not yet on auto-dispatch",
+                    skill.getSlug());
+        }
+
         List<Map<String, Object>> steps = parseList(skill.getSteps());
         int materialized = 0;
         for (Map<String, Object> step : steps) {
