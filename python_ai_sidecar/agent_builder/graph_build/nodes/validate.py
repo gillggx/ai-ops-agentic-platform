@@ -184,6 +184,14 @@ def _check_param_value(prop_schema: dict[str, Any], key: str, value: Any) -> str
     enum = prop_schema.get("enum")
     if enum is not None and value not in enum:
         return f"param '{key}' value {value!r} not in allowed enum {enum}"
+    # Numeric range guard — only meaningful after the type check passes.
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        mn = prop_schema.get("minimum")
+        mx = prop_schema.get("maximum")
+        if mn is not None and value < mn:
+            return f"param '{key}' value {value} < minimum {mn}"
+        if mx is not None and value > mx:
+            return f"param '{key}' value {value} > maximum {mx}"
     return None
 
 

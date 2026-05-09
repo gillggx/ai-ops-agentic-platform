@@ -158,7 +158,11 @@ class ProcessHistoryBlockExecutor(BlockExecutor):
                 message=f"object_name 必須是 {sorted(_OBJECT_KEYS)} 之一，或留空代表全部",
             )
         event_time = params.get("event_time")
-        limit = int(params.get("limit", 100))
+        # Simulator API caps limit at 500. Clamp here so the block keeps
+        # working when an LLM/user passes a higher value (otherwise upstream
+        # returns 422 and the user sees an opaque error).
+        raw_limit = int(params.get("limit", 100))
+        limit = max(1, min(raw_limit, 500))
 
         query: dict[str, Any] = {"since": time_range, "limit": limit}
         if tool_id:

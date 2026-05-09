@@ -78,8 +78,17 @@ def _format_catalog(catalog: dict[tuple[str, str], dict[str, Any]]) -> str:
                 preview = enum[:6]
                 more = "" if len(enum) <= 6 else f"…+{len(enum)-6}"
                 param_hints.append(f"{k}∈{preview}{more}")
+                continue
+            t = v.get("type") or "?"
+            # Surface min/max so LLM doesn't pick out-of-range numbers (e.g.
+            # block_process_history.limit caps at 200; without this hint the
+            # LLM happily passes 1000 and the upstream returns 422).
+            mn = v.get("minimum")
+            mx = v.get("maximum")
+            if mn is not None or mx is not None:
+                rng = f"[{mn if mn is not None else '?'}..{mx if mx is not None else '?'}]"
+                param_hints.append(f"{k}:{t}{rng}")
             else:
-                t = v.get("type") or "?"
                 param_hints.append(f"{k}:{t}")
         params_str = ", ".join(param_hints) if param_hints else "(none)"
         lines.append(
