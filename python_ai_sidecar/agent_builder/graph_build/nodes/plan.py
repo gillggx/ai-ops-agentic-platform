@@ -98,6 +98,43 @@ def _strip_fence(text: str) -> str:
     return text.strip()
 
 
+def _extract_first_json_object(text: str) -> dict[str, Any]:
+    """Parse the first balanced JSON object from text. Tolerates trailing
+    explanation text (a Haiku habit when the prompt asks for JSON only)."""
+    text = _strip_fence(text)
+    # Fast path — pure JSON.
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    # Slow path — find the outermost {...} block by brace counting.
+    start = text.find("{")
+    if start < 0:
+        raise ValueError("no JSON object found in LLM output")
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return json.loads(text[start:i + 1])
+    raise ValueError("unbalanced JSON object in LLM output")
+
+
 async def plan_node(state: BuildGraphState) -> dict[str, Any]:
     """LLM produces a structured plan. Errors here downgrade gracefully —
     validate_plan_node will catch them and route to repair_plan."""
@@ -122,10 +159,9 @@ async def plan_node(state: BuildGraphState) -> dict[str, Any]:
         resp = await client.create(
             system=system,
             messages=[{"role": "user", "content": user_msg}],
-            max_tokens=4096,
+            max_tokens=8192,  # Haiku 4.5 max; large plans (10+ ops) can overflow 4096
         )
-        text = _strip_fence(resp.text or "")
-        decision = json.loads(text)
+        decision = _extract_first_json_object(resp.text or "")
     except Exception as ex:  # noqa: BLE001
         logger.warning("plan_node: LLM/parse failed (%s) — empty plan returned", ex)
         return {

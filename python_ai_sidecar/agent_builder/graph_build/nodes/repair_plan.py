@@ -48,6 +48,12 @@ def _strip_fence(text: str) -> str:
     return _FENCE_RE.sub("", text.strip()).strip()
 
 
+def _extract_json(text: str) -> dict[str, Any]:
+    """Tolerant of trailing explanation text — same logic as plan_node."""
+    from python_ai_sidecar.agent_builder.graph_build.nodes.plan import _extract_first_json_object
+    return _extract_first_json_object(text)
+
+
 async def repair_plan_node(state: BuildGraphState) -> dict[str, Any]:
     attempts = state.get("plan_repair_attempts", 0) + 1
     errors = state.get("plan_validation_errors") or []
@@ -74,10 +80,9 @@ async def repair_plan_node(state: BuildGraphState) -> dict[str, Any]:
         resp = await client.create(
             system=_SYSTEM,
             messages=[{"role": "user", "content": user_msg}],
-            max_tokens=4096,
+            max_tokens=8192,
         )
-        text = _strip_fence(resp.text or "")
-        decision = json.loads(text)
+        decision = _extract_json(resp.text or "")
         new_plan = decision.get("plan") or []
     except Exception as ex:  # noqa: BLE001
         logger.warning("repair_plan_node: LLM/parse failed (%s)", ex)
