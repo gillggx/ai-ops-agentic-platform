@@ -31,7 +31,7 @@ import java.util.Set;
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/v1/skills")
+@RequestMapping("/api/v1/skill-documents")
 public class SkillDocumentController {
 
     private static final Set<String> VALID_STAGES = Set.of("patrol", "diagnose");
