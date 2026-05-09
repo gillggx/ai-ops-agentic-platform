@@ -8,16 +8,23 @@ import com.aiops.api.domain.skill.SkillDocumentEntity;
 import com.aiops.api.domain.skill.SkillDocumentRepository;
 import com.aiops.api.domain.skill.SkillRunEntity;
 import com.aiops.api.domain.skill.SkillRunRepository;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.constraints.NotBlank;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import reactor.core.Disposable;
 
+import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -37,13 +44,22 @@ public class SkillDocumentController {
     private static final Set<String> VALID_STAGES = Set.of("patrol", "diagnose");
     private static final Set<String> VALID_STATUS = Set.of("draft", "stable");
 
+    private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
+    private static final long SSE_TIMEOUT_MS = 5L * 60_000L;
+
     private final SkillDocumentRepository repository;
     private final SkillRunRepository runRepository;
+    private final SkillRunnerService runner;
+    private final ObjectMapper mapper;
 
     public SkillDocumentController(SkillDocumentRepository repository,
-                                   SkillRunRepository runRepository) {
+                                   SkillRunRepository runRepository,
+                                   SkillRunnerService runner,
+                                   ObjectMapper mapper) {
         this.repository = repository;
         this.runRepository = runRepository;
+        this.runner = runner;
+        this.mapper = mapper;
     }
 
     /** Library listing — returns the full list, optionally filtered by stage. */
@@ -145,5 +161,49 @@ public class SkillDocumentController {
                 ? runRepository.findBySkillIdOrderByTriggeredAtDesc(e.getId())
                 : runRepository.findBySkillIdAndIsTestOrderByTriggeredAtDesc(e.getId(), test);
         return ApiResponse.ok(runs);
+    }
+
+    /**
+     * Run the skill end-to-end (all steps in order). SSE stream emits
+     * step_start / step_done / done events.
+     *
+     * <p>Body: {"trigger_payload": {...}, "is_test": bool}
+     * <p>is_test=true marks the run as sandbox (no notification, excluded from
+     * stats); used by the Test modal in the frontend.
+     */
+    @PostMapping(path = "/{slug}/run", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @PreAuthorize(Authorities.ADMIN_OR_PE)
+    public SseEmitter run(@PathVariable String slug,
+                          @RequestBody Map<String, Object> body,
+                          @AuthenticationPrincipal AuthPrincipal caller) {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> payload = body.get("trigger_payload") instanceof Map<?, ?> p
+                ? (Map<String, Object>) p : Map.of();
+        boolean isTest = Boolean.TRUE.equals(body.get("is_test"));
+
+        SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
+        Disposable subscription = runner.run(slug, payload, isTest, caller).subscribe(
+                ev -> {
+                    try {
+                        emitter.send(SseEmitter.event()
+                                .name(ev.type())
+                                .data(mapper.writeValueAsString(ev.data())));
+                    } catch (IOException ioe) {
+                        log.debug("SSE client gone on skill {}: {}", slug, ioe.getMessage());
+                        emitter.completeWithError(ioe);
+                    } catch (Exception ex) {
+                        log.warn("SSE serialization failed: {}", ex.toString());
+                    }
+                },
+                err -> {
+                    log.warn("SkillRunner error on {}: {}", slug, err.toString());
+                    emitter.completeWithError(err);
+                },
+                emitter::complete
+        );
+        emitter.onTimeout(subscription::dispose);
+        emitter.onError(e -> subscription.dispose());
+        emitter.onCompletion(subscription::dispose);
+        return emitter;
     }
 }
