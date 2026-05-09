@@ -1,0 +1,1153 @@
+"use client";
+
+/**
+ * Skill Playbook — port of prototype `Skill Playbook.html` + `app.jsx`.
+ *
+ * Two modes:
+ *   - author (URL /skills/[slug]/edit): editable text, TriggerConfig open,
+ *     pipeline expand, "Confirm pipeline" / "Edit blocks" / "Open Builder",
+ *     bottom AddStep input.
+ *   - run    (URL /skills/[slug]):     read-only steps, status pills,
+ *     SummaryReport after run, RunTimeline rail.
+ *
+ * Both share the same StepBlock/ExpandedPipeline/SuggestionPanel components
+ * (matches prototype's design where switching is a `t.mode` flag).
+ */
+import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import {
+  Icon, Badge, Btn, safeParse,
+  type SkillDetail, type SkillStep, type TriggerConfig as TC, type SuggestedAction,
+} from "./atoms";
+import { TriggerConfigEditor } from "./TriggerConfig";
+import PipelineCanvasMini, { type MiniBlock } from "./PipelineCanvasMini";
+import TestCaseSelector, { type TestCase } from "./TestCaseSelector";
+
+interface ApiDetail { ok: boolean; data: SkillDetail; error?: { message: string } | null }
+
+export default function Playbook({
+  slug, mode,
+}: {
+  slug: string;
+  mode: "author" | "run";
+}) {
+  const router = useRouter();
+  const [skill, setSkill] = useState<SkillDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Local edits
+  const [title, setTitle] = useState("");
+  const [trigger, setTrigger] = useState<TC>({ type: "schedule", every: 4, unit: "hour" });
+  const [steps, setSteps] = useState<SkillStep[]>([]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const dirtyRef = useRef(dirty);
+  useEffect(() => { dirtyRef.current = dirty; }, [dirty]);
+
+  // Run state
+  const [runStatuses, setRunStatuses] = useState<Record<string, "queued" | "running" | "done">>({});
+  const [runActiveStep, setRunActiveStep] = useState<string | null>(null);
+  const [runState, setRunState] = useState<"idle" | "running" | "done">("idle");
+  const [runResults, setRunResults] = useState<Record<string, { status: "pass" | "fail"; value: string; note: string }>>({});
+  const [showCaseSelector, setShowCaseSelector] = useState(false);
+  const [selectedCase, setSelectedCase] = useState<TestCase | null>(null);
+  const [showSummary, setShowSummary] = useState(false);
+
+  /* Load */
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/skill-documents/${encodeURIComponent(slug)}`, { cache: "no-store" })
+      .then(async (res) => {
+        const json = (await res.json()) as ApiDetail;
+        if (cancelled) return;
+        if (!res.ok || !json.ok) throw new Error(json.error?.message || `HTTP ${res.status}`);
+        setSkill(json.data);
+        setTitle(json.data.title);
+        setTrigger(safeParse<TC>(json.data.trigger_config, { type: "schedule", every: 4, unit: "hour" }));
+        setSteps(safeParse<SkillStep[]>(json.data.steps, []));
+        setDirty(false);
+      })
+      .catch((e: Error) => { if (!cancelled) setError(e.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [slug]);
+
+  /* Author mode auto-expand pending step */
+  useEffect(() => {
+    if (mode === "author" && expandedId === null) {
+      const pending = steps.find((s) => s.pending && !s.confirmed);
+      if (pending) setExpandedId(pending.id);
+    }
+  }, [mode, steps, expandedId]);
+
+  const markDirty = () => setDirty(true);
+
+  /* Save */
+  const onSave = async () => {
+    if (!skill) return;
+    const body = {
+      title,
+      trigger_config: JSON.stringify(trigger),
+      steps: JSON.stringify(steps),
+    };
+    const res = await fetch(`/api/skill-documents/${encodeURIComponent(slug)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.ok) {
+      alert("儲存失敗：" + (json.error?.message || res.status));
+      return;
+    }
+    setDirty(false);
+  };
+
+  const onPublish = async () => {
+    if (!skill) return;
+    if (!confirm("Publish 後 trigger 會生效並開始持續執行。確認 publish？")) return;
+    await onSave();
+    const res = await fetch(`/api/skill-documents/${encodeURIComponent(slug)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "stable" }),
+    });
+    if (res.ok) router.refresh();
+  };
+
+  /* Run + test simulation */
+  const onRunClick = () => {
+    setShowSummary(false);
+    setShowCaseSelector(true);
+  };
+
+  const runSkill = async (testCase: TestCase | null, triggerPayload: Record<string, unknown>) => {
+    setSelectedCase(testCase);
+    setShowCaseSelector(false);
+    setShowSummary(false);
+    setRunState("running");
+    setRunStatuses(Object.fromEntries(steps.map((s) => [s.id, "queued"])));
+    setRunResults({});
+
+    try {
+      const res = await fetch(`/api/skill-documents/${encodeURIComponent(slug)}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+        body: JSON.stringify({
+          trigger_payload: triggerPayload,
+          is_test: testCase != null,
+        }),
+      });
+      if (!res.ok || !res.body) {
+        // Fallback simulation: mark each step running → done sequentially
+        await simulateRun();
+        return;
+      }
+      // SSE consumer
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx: number;
+        // eslint-disable-next-line no-cond-assign
+        while ((idx = buffer.indexOf("\n\n")) !== -1) {
+          const frame = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          if (!frame.trim()) continue;
+          let evt = "message"; const dataLines: string[] = [];
+          for (const line of frame.split("\n")) {
+            if (line.startsWith("event:")) evt = line.slice(6).trim();
+            else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+          }
+          let data: Record<string, unknown> = {};
+          try { data = JSON.parse(dataLines.join("\n")); } catch { /* ignore */ }
+          if (evt === "step_start") {
+            const sid = data.step_id as string;
+            setRunActiveStep(sid);
+            setRunStatuses((prev) => ({ ...prev, [sid]: "running" }));
+          } else if (evt === "step_done") {
+            const sid = data.step_id as string;
+            const status = (data.status as "pass" | "fail") || "pass";
+            const value = (data.value as string) || "";
+            const note = (data.note as string) || "";
+            setRunStatuses((prev) => ({ ...prev, [sid]: "done" }));
+            setRunResults((prev) => ({ ...prev, [sid]: { status, value, note } }));
+          } else if (evt === "done") {
+            setRunState("done");
+            setRunActiveStep(null);
+            setShowSummary(true);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("run failed, falling back to client simulation:", e);
+      await simulateRun();
+    }
+  };
+
+  const simulateRun = async () => {
+    // Backend-less fallback so author can preview UX without SkillRunner
+    for (const s of steps) {
+      setRunActiveStep(s.id);
+      setRunStatuses((prev) => ({ ...prev, [s.id]: "running" }));
+      await new Promise((r) => setTimeout(r, 500));
+      const status = Math.random() > 0.5 ? "pass" : "fail";
+      setRunResults((prev) => ({
+        ...prev,
+        [s.id]: {
+          status,
+          value: status === "pass" ? "All checks ok" : "Threshold exceeded",
+          note: "(simulated)",
+        },
+      }));
+      setRunStatuses((prev) => ({ ...prev, [s.id]: "done" }));
+    }
+    setRunActiveStep(null);
+    setRunState("done");
+    setShowSummary(true);
+  };
+
+  const resetRun = () => {
+    setRunState("idle");
+    setRunStatuses({});
+    setRunActiveStep(null);
+    setRunResults({});
+  };
+
+  const confirmStep = (id: string) => {
+    setSteps((prev) => prev.map((s) => s.id === id ? { ...s, confirmed: true, pending: false } : s));
+    markDirty();
+  };
+
+  const updateStepText = (id: string, text: string) => {
+    setSteps((prev) => prev.map((s) => s.id === id ? { ...s, text } : s));
+    markDirty();
+  };
+
+  const updateStepActions = (id: string, actions: SuggestedAction[]) => {
+    setSteps((prev) => prev.map((s) => s.id === id ? { ...s, suggested_actions: actions } : s));
+    markDirty();
+  };
+
+  const removeStep = (id: string) => {
+    setSteps((prev) => prev.filter((s) => s.id !== id));
+    markDirty();
+  };
+
+  const addStep = async (text: string) => {
+    const id = "s" + Date.now().toString(36);
+    setSteps((prev) => [...prev, {
+      id,
+      order: prev.length + 1,
+      text,
+      ai_summary: "AI 解析中…",
+      pipeline_id: null,
+      confirmed: false,
+      pending: true,
+      suggested_actions: [],
+      badge: { kind: "ai", label: "AI Generated" },
+    }]);
+    setExpandedId(id);
+    markDirty();
+    // TODO 11-B.AddStep: fetch /api/agent/build with skill_step mode + persist pipeline_id
+  };
+
+  if (loading) {
+    return (
+      <div className="skill-surface" style={{ padding: 60, textAlign: "center", color: "var(--ink-3)" }}>
+        <span className="skill-spinner" style={{ marginRight: 8 }}/> 載入中…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="skill-surface" style={{ padding: 60, textAlign: "center" }}>
+        <div style={{ color: "var(--fail)", fontSize: 14, fontWeight: 500 }}>載入失敗：{error}</div>
+        <Link href="/skills" style={{ marginTop: 12, display: "inline-block", color: "var(--ink-2)", textDecoration: "underline" }}>
+          回 Library
+        </Link>
+      </div>
+    );
+  }
+  if (!skill) return null;
+
+  return (
+    <div className="skill-surface">
+      <TopBar
+        slug={slug}
+        title={title}
+        mode={mode}
+        runState={runState}
+        dirty={dirty}
+        onTitleChange={(v) => { setTitle(v); markDirty(); }}
+        onSave={onSave}
+        onPublish={onPublish}
+        onRun={onRunClick}
+        onReset={resetRun}
+      />
+
+      <div style={{
+        display: "flex", justifyContent: "center",
+        gap: 0, maxWidth: 1400, margin: "0 auto",
+      }}>
+        <main style={{ flex: 1, maxWidth: 860, padding: "0 28px 80px" }}>
+          <PlaybookHeader skill={skill} title={title} trigger={trigger} setTrigger={(t) => { setTrigger(t); markDirty(); }} mode={mode}/>
+
+          {showSummary && runState === "done" && (
+            <SummaryReport
+              steps={steps}
+              results={runResults}
+              testCase={selectedCase}
+              onRerun={() => { setShowSummary(false); setShowCaseSelector(true); }}
+              onClose={() => setShowSummary(false)}
+            />
+          )}
+
+          <div style={{
+            display: "flex", alignItems: "center", gap: 10,
+            padding: "10px 0 18px", marginTop: 6,
+          }}>
+            <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)", letterSpacing: "0.08em" }}>
+              CHECKLIST · {steps.length} STEP{steps.length === 1 ? "" : "S"}
+            </span>
+            <span style={{ flex: 1, height: 1, background: "var(--line)" }}/>
+            <span style={{ fontSize: 11, color: "var(--ink-3)" }}>
+              {steps.filter((s) => s.confirmed).length} / {steps.length} confirmed
+            </span>
+          </div>
+
+          {steps.map((s, i) => (
+            <StepBlock
+              key={s.id}
+              step={s} index={i}
+              mode={mode}
+              expanded={expandedId === s.id}
+              onToggle={() => setExpandedId(expandedId === s.id ? null : s.id)}
+              runStatus={runStatuses[s.id]}
+              runResult={runResults[s.id]}
+              onConfirm={() => confirmStep(s.id)}
+              onTextChange={(t) => updateStepText(s.id, t)}
+              onActionsChange={(a) => updateStepActions(s.id, a)}
+              onRemove={() => removeStep(s.id)}
+            />
+          ))}
+
+          {steps.length === 0 && mode === "run" && (
+            <div style={{
+              marginTop: 30, padding: "32px 18px", textAlign: "center",
+              border: "1px dashed var(--line-strong)", borderRadius: 10,
+              color: "var(--ink-3)", fontSize: 13,
+            }}>
+              這個 skill 還沒有任何 step — 請先在 Author 模式新增。
+            </div>
+          )}
+
+          {mode === "author" && <AddStep onAdd={addStep}/>}
+        </main>
+
+        {runState !== "idle" && (
+          <RunTimeline
+            steps={steps}
+            runState={runState}
+            activeStepId={runActiveStep}
+            runStatuses={runStatuses}
+            runResults={runResults}
+          />
+        )}
+      </div>
+
+      <TestCaseSelector
+        open={showCaseSelector}
+        skillTriggerType={trigger.type ?? "schedule"}
+        eventType={trigger.event_type}
+        onClose={() => setShowCaseSelector(false)}
+        onStart={(testCase, payload) => runSkill(testCase, payload)}
+      />
+    </div>
+  );
+}
+
+function TopBar({
+  slug, title, mode, runState, dirty, onTitleChange, onSave, onPublish, onRun, onReset,
+}: {
+  slug: string;
+  title: string;
+  mode: "author" | "run";
+  runState: "idle" | "running" | "done";
+  dirty: boolean;
+  onTitleChange: (v: string) => void;
+  onSave: () => void;
+  onPublish: () => void;
+  onRun: () => void;
+  onReset: () => void;
+}) {
+  return (
+    <div style={{
+      position: "sticky", top: 0, zIndex: 20,
+      background: "var(--bg)",
+      borderBottom: "1px solid var(--line)",
+      padding: "10px 28px",
+      display: "flex", alignItems: "center", gap: 16,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--ink-3)" }}>
+        <Link href="/skills" style={{ cursor: "pointer" }}>Skills Library</Link>
+        <span style={{ color: "var(--ink-4)" }}>/</span>
+        {mode === "author"
+          ? <input value={title} onChange={(e) => onTitleChange(e.target.value)}
+              style={{ border: "none", background: "transparent", color: "var(--ink)", fontWeight: 500, outline: "none", fontFamily: "inherit", fontSize: 12.5, minWidth: 240 }}/>
+          : <span style={{ color: "var(--ink)", fontWeight: 500 }}>{title}</span>}
+      </div>
+
+      <div style={{ flex: 1 }} />
+
+      <div style={{
+        display: "flex", padding: 2, borderRadius: 8,
+        background: "var(--surface-2)", border: "1px solid var(--line)",
+      }}>
+        <Link href={`/skills/${encodeURIComponent(slug)}/edit`} style={{
+          padding: "5px 12px", borderRadius: 6, border: "none",
+          background: mode === "author" ? "var(--surface)" : "transparent",
+          color: mode === "author" ? "var(--ink)" : "var(--ink-3)",
+          fontSize: 12, fontWeight: 500, cursor: "pointer",
+          boxShadow: mode === "author" ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
+          textDecoration: "none",
+        }}>Author</Link>
+        <Link href={`/skills/${encodeURIComponent(slug)}`} style={{
+          padding: "5px 12px", borderRadius: 6, border: "none",
+          background: mode === "run" ? "var(--surface)" : "transparent",
+          color: mode === "run" ? "var(--ink)" : "var(--ink-3)",
+          fontSize: 12, fontWeight: 500, cursor: "pointer",
+          boxShadow: mode === "run" ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
+          textDecoration: "none",
+        }}>Execute</Link>
+      </div>
+
+      <div style={{ width: 1, height: 20, background: "var(--line)" }}/>
+
+      {mode === "author" && (
+        <>
+          <Btn kind="ghost" onClick={onSave} disabled={!dirty}>{dirty ? "Save Draft" : "Saved"}</Btn>
+          <Btn kind="secondary" onClick={onPublish}>Publish</Btn>
+        </>
+      )}
+      {runState === "idle" || runState === "done" ? (
+        <Btn kind="primary" icon={<Icon.Play/>} onClick={onRun}>
+          {runState === "done" ? "Re-run Skill" : (mode === "author" ? "Test Skill" : "Run Skill")}
+        </Btn>
+      ) : (
+        <Btn kind="secondary" icon={<Icon.Loop/>} onClick={onReset}>Stop</Btn>
+      )}
+    </div>
+  );
+}
+
+function PlaybookHeader({
+  skill, title, trigger, setTrigger, mode,
+}: {
+  skill: SkillDetail;
+  title: string;
+  trigger: TC;
+  setTrigger: (t: TC) => void;
+  mode: "author" | "run";
+}) {
+  return (
+    <div style={{ padding: "44px 0 28px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+        <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)", letterSpacing: "0.06em" }}>
+          SKILL · {(skill.stage || "").toUpperCase()} · ADVISORY
+        </span>
+        <Badge kind="muted" dim>v{skill.version} · {skill.status}</Badge>
+        {skill.domain && <Badge kind="muted" dim>Domain · {skill.domain}</Badge>}
+      </div>
+
+      <h1 style={{
+        margin: 0, fontSize: 32, fontWeight: 600, letterSpacing: "-0.015em",
+        color: "var(--ink)", lineHeight: 1.15,
+      }}>
+        {title}
+      </h1>
+
+      <div style={{
+        display: "flex", alignItems: "center", gap: 18, marginTop: 16,
+        fontSize: 12.5, color: "var(--ink-2)",
+      }}>
+        {skill.certified_by && <Badge kind="pass" icon={<Icon.Check/>}>Certified by {skill.certified_by}</Badge>}
+        {skill.certified_by && <span style={{ color: "var(--ink-4)" }}>·</span>}
+        <span style={{ color: "var(--ink-3)" }}>Updated <span className="mono">{skill.updated_at ? new Date(skill.updated_at).toLocaleDateString() : "—"}</span></span>
+      </div>
+
+      <TriggerConfigEditor trigger={trigger} setTrigger={setTrigger} readOnly={mode === "run"}/>
+
+      {skill.description && (
+        <p style={{
+          marginTop: 22, marginBottom: 0,
+          fontSize: 14.5, lineHeight: 1.65, color: "var(--ink-2)",
+          textWrap: "pretty", maxWidth: 720,
+        }}>
+          {skill.description}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function StepBlock({
+  step, index, mode, expanded, onToggle, runStatus, runResult,
+  onConfirm, onTextChange, onActionsChange, onRemove,
+}: {
+  step: SkillStep;
+  index: number;
+  mode: "author" | "run";
+  expanded: boolean;
+  onToggle: () => void;
+  runStatus?: "queued" | "running" | "done";
+  runResult?: { status: "pass" | "fail"; value: string; note: string };
+  onConfirm: () => void;
+  onTextChange: (t: string) => void;
+  onActionsChange: (a: SuggestedAction[]) => void;
+  onRemove: () => void;
+}) {
+  const isRunning = runStatus === "running";
+  const isDone = runStatus === "done";
+
+  const runPill = (() => {
+    if (mode !== "run") return null;
+    if (isRunning) return <Badge kind="muted" icon={<span className="skill-spinner"/>}>Running…</Badge>;
+    if (!isDone) return <Badge kind="muted" dim>Pending</Badge>;
+    if (runResult?.status === "pass") return <Badge kind="pass" icon={<Icon.Check/>}>Pass</Badge>;
+    if (runResult?.status === "fail") return <Badge kind="fail" icon={<Icon.X/>}>Fail</Badge>;
+    return null;
+  })();
+
+  return (
+    <div style={{
+      position: "relative",
+      padding: "18px 0",
+      borderTop: index === 0 ? "1px solid var(--line)" : "none",
+      borderBottom: "1px solid var(--line)",
+    }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
+        <div style={{
+          flexShrink: 0,
+          width: 28, height: 28, borderRadius: 6,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: expanded ? "var(--accent)" : "var(--surface-2)",
+          color: expanded ? "var(--bg)" : "var(--ink-2)",
+          border: `1px solid ${expanded ? "var(--accent)" : "var(--line)"}`,
+          fontSize: 12, fontWeight: 600, marginTop: 1,
+          transition: "all 120ms",
+        }} className="mono">
+          {String(index + 1).padStart(2, "0")}
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {mode === "author" ? (
+            <textarea
+              value={step.text}
+              onChange={(e) => onTextChange(e.target.value)}
+              rows={1}
+              style={{
+                width: "100%",
+                fontSize: 16, lineHeight: 1.55, color: "var(--ink)",
+                fontWeight: 450, outline: "none", padding: "1px 0",
+                border: "none", background: "transparent", resize: "vertical",
+                fontFamily: "inherit",
+              }}
+              placeholder="描述這個檢查步驟…"
+            />
+          ) : (
+            <div style={{ fontSize: 16, lineHeight: 1.55, color: "var(--ink)", fontWeight: 450 }}>
+              {step.text}
+            </div>
+          )}
+
+          <div style={{
+            marginTop: 10,
+            display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+          }}>
+            <Badge kind="ai" icon={<Icon.Spark/>}>{step.badge?.label || "AI Generated"}</Badge>
+            <span className="mono" style={{
+              fontSize: 11, color: "var(--ink-3)",
+              display: "inline-flex", alignItems: "center", gap: 5,
+            }}>
+              <Icon.Spark/>
+              {step.ai_summary || "(no summary)"}
+            </span>
+            {step.pending && !step.confirmed && (
+              <Badge kind="warn">⌛ Awaiting your confirmation</Badge>
+            )}
+
+            <span style={{ flex: 1 }}/>
+
+            {runPill}
+
+            <button onClick={onToggle} style={{
+              border: "1px solid var(--sys-line)", background: "var(--surface)",
+              padding: "3px 8px", borderRadius: 6, cursor: "pointer",
+              fontSize: 11.5, color: "var(--ink-2)",
+              display: "inline-flex", alignItems: "center", gap: 4,
+            }}>
+              <Icon.Spark/>
+              <span className="mono" style={{ fontSize: 10.5 }}>
+                {expanded ? "Hide" : (mode === "run" ? "View logic" : "Inspect pipeline")}
+              </span>
+              <Icon.Chevron/>
+            </button>
+          </div>
+
+          {expanded && (
+            <ExpandedPipeline
+              step={step}
+              mode={mode}
+              isRunning={isRunning}
+              onConfirm={onConfirm}
+              onActionsChange={onActionsChange}
+              onRemove={onRemove}
+            />
+          )}
+
+          {mode === "run" && isDone && runResult && (
+            <RunResultInline result={runResult} step={step}/>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ExpandedPipeline({
+  step, mode, isRunning, onConfirm, onActionsChange, onRemove,
+}: {
+  step: SkillStep;
+  mode: "author" | "run";
+  isRunning: boolean;
+  onConfirm: () => void;
+  onActionsChange: (a: SuggestedAction[]) => void;
+  onRemove: () => void;
+}) {
+  // Synthesize a simple block diagram from step.pipeline_id metadata.
+  // 11-A.5 will pull the actual pipeline_json from /api/v1/pipelines/{id}.
+  const blocks: MiniBlock[] = step.pipeline_id != null ? [
+    { id: "src",   kind: "source",    title: "Pipeline #" + step.pipeline_id, params: "(loaded from Builder)" },
+    { id: "chk",   kind: "check",     title: "block_step_check",              params: "" },
+  ] : [
+    { id: "stub",  kind: "transform", title: "(尚未生成 pipeline)", params: "" },
+  ];
+
+  return (
+    <div style={{
+      marginTop: 14,
+      background: "var(--sys-bg)",
+      border: "1px solid var(--sys-line)", borderRadius: 10,
+      overflow: "hidden",
+      boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.4)",
+    }}>
+      <div style={{
+        padding: "10px 14px",
+        display: "flex", alignItems: "center", gap: 8,
+        borderBottom: "1px solid var(--sys-line)",
+        background: "var(--surface)",
+      }}>
+        <Icon.Spark/>
+        <span className="mono" style={{ fontSize: 11, color: "var(--ink-2)", fontWeight: 500, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+          AI-translated pipeline
+        </span>
+        <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>
+          · {blocks.length} blocks
+        </span>
+        <span style={{ flex: 1 }}/>
+        {step.confirmed
+          ? <Badge kind="pass" icon={<Icon.Check/>}>Confirmed</Badge>
+          : <Badge kind="warn">Pending review</Badge>}
+      </div>
+
+      <div style={{ padding: "8px 14px", background: "var(--bg-soft)" }}>
+        <PipelineCanvasMini blocks={blocks} dense/>
+      </div>
+
+      {mode === "author" && (
+        <SuggestedActionsEditor
+          actions={step.suggested_actions ?? []}
+          onChange={onActionsChange}
+        />
+      )}
+
+      {mode === "author" && (
+        <div style={{
+          padding: "10px 14px", borderTop: "1px solid var(--line)",
+          display: "flex", alignItems: "center", gap: 8,
+          background: "var(--surface)",
+        }}>
+          {!step.confirmed ? (
+            <>
+              <Btn kind="primary" icon={<Icon.Check/>} onClick={onConfirm}>Confirm pipeline</Btn>
+              {step.pipeline_id != null && (
+                <Link href={`/admin/pipeline-builder/${step.pipeline_id}?return=skill`} style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  padding: "6px 11px", borderRadius: 6,
+                  background: "var(--surface)", color: "var(--ink)",
+                  border: "1px solid var(--line-strong)",
+                  fontSize: 12.5, fontWeight: 500, textDecoration: "none",
+                }}>
+                  <Icon.Pencil/> Edit blocks
+                </Link>
+              )}
+            </>
+          ) : (
+            <>
+              {step.pipeline_id != null && (
+                <Link href={`/admin/pipeline-builder/${step.pipeline_id}?return=skill`} style={{
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  padding: "6px 11px", borderRadius: 6,
+                  background: "var(--surface)", color: "var(--ink)",
+                  border: "1px solid var(--line-strong)",
+                  fontSize: 12.5, fontWeight: 500, textDecoration: "none",
+                }}>
+                  <Icon.Pencil/> Edit blocks
+                </Link>
+              )}
+            </>
+          )}
+          <span style={{ flex: 1 }}/>
+          {!isRunning && (
+            <Btn kind="ghost" onClick={onRemove}>
+              <Icon.X/> Remove step
+            </Btn>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SuggestedActionsEditor({
+  actions, onChange,
+}: { actions: SuggestedAction[]; onChange: (a: SuggestedAction[]) => void }) {
+  const upd = (i: number, patch: Partial<SuggestedAction>) => {
+    onChange(actions.map((a, idx) => idx === i ? { ...a, ...patch } : a));
+  };
+  const del = (i: number) => onChange(actions.filter((_, idx) => idx !== i));
+  const add = () => onChange([
+    ...actions,
+    { id: "a" + Date.now().toString(36), title: "", detail: "", rationale: "", confidence: "med" },
+  ]);
+
+  return (
+    <div style={{ padding: "12px 14px", borderTop: "1px solid var(--line)", background: "var(--surface)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8,
+                    fontSize: 10.5, fontWeight: 600, letterSpacing: "0.06em",
+                    color: "var(--ink-3)", textTransform: "uppercase" }}>
+        <Icon.Spark/> Suggested next actions (when this step fails)
+        <span style={{ flex: 1 }}/>
+        <span style={{ fontSize: 10, color: "var(--ink-4)", textTransform: "none", fontWeight: 400, letterSpacing: 0 }}>
+          ✨ advisory only · 不會自動執行
+        </span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {actions.map((a, i) => (
+          <div key={a.id} style={{
+            padding: "8px 10px", background: "var(--surface-2)",
+            border: "1px solid var(--line)", borderRadius: 6,
+            display: "flex", flexDirection: "column", gap: 6,
+          }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input value={a.title} onChange={(e) => upd(i, { title: e.target.value })}
+                placeholder="建議行動的標題（e.g. 回退 APC recipe）"
+                style={{ flex: 1, padding: "5px 8px", border: "1px solid var(--line)", borderRadius: 4,
+                         fontSize: 12.5, background: "var(--surface)", outline: "none", fontFamily: "inherit" }}/>
+              <select value={a.confidence} onChange={(e) => upd(i, { confidence: e.target.value as "high" | "med" | "low" })}
+                style={{ padding: "5px 8px", border: "1px solid var(--line)", borderRadius: 4, fontSize: 11.5, fontFamily: "inherit" }}>
+                <option value="high">high</option>
+                <option value="med">med</option>
+                <option value="low">low</option>
+              </select>
+              <button onClick={() => del(i)} style={{
+                border: "1px solid var(--line)", background: "var(--surface)",
+                color: "var(--fail)", padding: "4px 8px", borderRadius: 4,
+                cursor: "pointer", fontSize: 11,
+              }}>delete</button>
+            </div>
+            <input value={a.detail} onChange={(e) => upd(i, { detail: e.target.value })}
+              placeholder="詳細描述（e.g. rev. 18 為最後一個 stable revision）"
+              style={{ padding: "5px 8px", border: "1px solid var(--line)", borderRadius: 4,
+                       fontSize: 12, background: "var(--surface)", outline: "none", fontFamily: "inherit" }}/>
+            <input value={a.rationale ?? ""} onChange={(e) => upd(i, { rationale: e.target.value })}
+              placeholder="✨ Why（e.g. APC recipe 異動時間與 OOC 高度重疊）"
+              className="mono"
+              style={{ padding: "5px 8px", border: "1px solid var(--line)", borderRadius: 4,
+                       fontSize: 11, background: "var(--surface)", outline: "none", color: "var(--ink-3)" }}/>
+          </div>
+        ))}
+      </div>
+      <button onClick={add} style={{
+        marginTop: 8,
+        all: "unset", cursor: "pointer",
+        padding: "6px 11px", borderRadius: 6,
+        background: "var(--surface-2)", color: "var(--ink-2)",
+        border: "1px dashed var(--line-strong)",
+        fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6,
+      }}>
+        <Icon.Plus/> Add suggested action
+      </button>
+    </div>
+  );
+}
+
+function RunResultInline({
+  result, step,
+}: {
+  result: { status: "pass" | "fail"; value: string; note: string };
+  step: SkillStep;
+}) {
+  const isFail = result.status === "fail";
+  return (
+    <div style={{
+      marginTop: 12,
+      padding: "12px 14px",
+      borderRadius: 8,
+      background: isFail ? "var(--fail-bg)" : "var(--pass-bg)",
+      border: `1px solid ${isFail ? "var(--fail)" : "var(--pass)"}`,
+      borderLeftWidth: 3,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ color: isFail ? "var(--fail)" : "var(--pass)", display: "inline-flex" }}>
+          {isFail ? <Icon.X/> : <Icon.Check/>}
+        </span>
+        <strong style={{ fontSize: 13, color: "var(--ink)" }}>{result.value}</strong>
+        <span style={{ fontSize: 12, color: "var(--ink-2)" }}>· {result.note}</span>
+      </div>
+      {isFail && step.suggested_actions && step.suggested_actions.length > 0 && (
+        <SuggestionPanel actions={step.suggested_actions}/>
+      )}
+    </div>
+  );
+}
+
+function SuggestionPanel({ actions }: { actions: SuggestedAction[] }) {
+  return (
+    <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid color-mix(in oklch, var(--fail), transparent 80%)" }}>
+      <div style={{
+        display: "flex", alignItems: "center", gap: 6,
+        fontSize: 10.5, fontWeight: 600, letterSpacing: "0.06em",
+        color: "var(--ink-3)", textTransform: "uppercase", marginBottom: 10,
+      }}>
+        <Icon.Spark/> Suggested next actions
+        <span style={{ flex: 1 }}/>
+        <span style={{ fontSize: 10, color: "var(--ink-4)", textTransform: "none", fontWeight: 400, letterSpacing: 0 }}>
+          ✨ advisory only · not executed automatically
+        </span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {actions.map((a) => (
+          <div key={a.id} style={{
+            display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 12, alignItems: "flex-start",
+            padding: "10px 12px",
+            background: "var(--surface)",
+            border: "1px solid var(--line)",
+            borderLeft: `2px solid ${a.confidence === "high" ? "var(--ai)" : "var(--line-strong)"}`,
+            borderRadius: 6,
+          }}>
+            <span style={{
+              width: 20, height: 20, borderRadius: 5, marginTop: 1,
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              background: a.confidence === "high" ? "var(--ai-bg)" : "var(--surface-2)",
+              color: a.confidence === "high" ? "var(--ai)" : "var(--ink-3)",
+            }}><Icon.Spark/></span>
+            <div>
+              <div style={{ fontSize: 12.5, color: "var(--ink)", fontWeight: 500 }}>{a.title}</div>
+              <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 3, lineHeight: 1.55 }}>{a.detail}</div>
+              {a.rationale && (
+                <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-4)", marginTop: 6, lineHeight: 1.5 }}>
+                  ✨ why · {a.rationale}
+                </div>
+              )}
+            </div>
+            <span className="mono" style={{
+              fontSize: 10, padding: "2px 7px", borderRadius: 999,
+              background: "var(--surface-2)", color: "var(--ink-3)",
+              border: "1px solid var(--line)", whiteSpace: "nowrap",
+            }}>
+              {a.confidence}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AddStep({ onAdd }: { onAdd: (text: string) => Promise<void> }) {
+  const [draft, setDraft] = useState("");
+  const [thinking, setThinking] = useState(false);
+
+  const submit = async () => {
+    if (!draft.trim()) return;
+    setThinking(true);
+    try {
+      await onAdd(draft.trim());
+      setDraft("");
+    } finally {
+      setThinking(false);
+    }
+  };
+
+  return (
+    <div style={{ padding: "20px 0 64px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 0" }}>
+        <div style={{
+          flexShrink: 0,
+          width: 28, height: 28, borderRadius: 6,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: "var(--surface)", border: "1px dashed var(--line-strong)",
+          color: "var(--ink-3)",
+        }}>
+          <Icon.Plus/>
+        </div>
+        <input
+          value={draft}
+          disabled={thinking}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") void submit(); }}
+          placeholder="新增一個檢查步驟，用自然語言描述即可…"
+          style={{
+            flex: 1, fontSize: 15, padding: "6px 0",
+            border: "none", background: "transparent",
+            color: "var(--ink)", outline: "none",
+            fontFamily: "inherit",
+          }}
+        />
+        {thinking ? (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--ai)" }}>
+            <span className="skill-spinner"/>
+            AI parsing…
+          </span>
+        ) : (
+          <Btn kind="ghost" onClick={() => void submit()} disabled={!draft.trim()} icon={<Icon.Spark/>}>
+            Translate to pipeline
+          </Btn>
+        )}
+      </div>
+      <div style={{ paddingLeft: 42, fontSize: 11.5, color: "var(--ink-4)" }}>
+        Tip · 用「if/check/count/compare」這類動詞最容易被 AI 翻成 pipeline。
+      </div>
+    </div>
+  );
+}
+
+function RunTimeline({
+  steps, runState, activeStepId, runStatuses, runResults,
+}: {
+  steps: SkillStep[];
+  runState: "idle" | "running" | "done";
+  activeStepId: string | null;
+  runStatuses: Record<string, "queued" | "running" | "done">;
+  runResults: Record<string, { status: "pass" | "fail"; value: string; note: string }>;
+}) {
+  return (
+    <aside style={{
+      position: "sticky", top: 56,
+      width: 280, flexShrink: 0,
+      padding: 18,
+      maxHeight: "calc(100vh - 70px)",
+      overflowY: "auto",
+    }}>
+      <div style={{
+        background: "var(--surface)",
+        border: "1px solid var(--line)", borderRadius: 10,
+        padding: "14px 14px 10px",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          <span style={{ width: 6, height: 6, borderRadius: 999, background: runState === "done" ? "var(--pass)" : "var(--ai)" }}/>
+          <span style={{ fontSize: 12.5, fontWeight: 600 }}>
+            {runState === "done" ? "Execution complete" : "Executing skill"}
+          </span>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          {steps.map((s, i) => {
+            const st = runStatuses[s.id] || "queued";
+            const result = runResults[s.id];
+            const dotColor = st === "done"
+              ? (result?.status === "fail" ? "var(--fail)" : "var(--pass)")
+              : st === "running" ? "var(--ai)"
+              : "var(--line-strong)";
+            return (
+              <div key={s.id} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "8px 0" }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
+                  <span style={{
+                    width: 9, height: 9, borderRadius: 999, background: dotColor,
+                    boxShadow: st === "running" ? "0 0 0 4px var(--ai-bg)" : "none",
+                    transition: "all 200ms",
+                  }}/>
+                  {i < steps.length - 1 && (
+                    <div style={{ width: 1, flex: 1, minHeight: 18, background: "var(--line)", marginTop: 2 }}/>
+                  )}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, color: "var(--ink-2)", fontWeight: 500, lineHeight: 1.35 }}>
+                    Step {i + 1}
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2, lineHeight: 1.4 }}>
+                    {st === "queued" && "Queued"}
+                    {st === "running" && "Running…"}
+                    {st === "done" && result?.status === "pass" && (result.value || "Pass")}
+                    {st === "done" && result?.status === "fail" && <span style={{ color: "var(--fail)" }}>{result.value}</span>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function SummaryReport({
+  steps, results, testCase, onRerun, onClose,
+}: {
+  steps: SkillStep[];
+  results: Record<string, { status: "pass" | "fail"; value: string; note: string }>;
+  testCase: TestCase | null;
+  onRerun: () => void;
+  onClose: () => void;
+}) {
+  const failed = steps.filter((s) => results[s.id]?.status === "fail");
+  const passed = steps.filter((s) => results[s.id]?.status === "pass");
+  const hasFail = failed.length > 0;
+
+  return (
+    <section style={{
+      margin: "6px 0 32px", borderRadius: 12,
+      background: "var(--surface)",
+      border: "1px solid var(--line-strong)",
+      overflow: "hidden",
+      boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+    }}>
+      <div style={{ padding: "18px 20px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "flex-start", gap: 14 }}>
+        <span style={{
+          width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          background: hasFail ? "var(--fail-bg)" : "var(--pass-bg)",
+          color: hasFail ? "var(--fail)" : "var(--pass)",
+        }}>
+          {hasFail ? <Icon.Bolt/> : <Icon.Check/>}
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="mono" style={{ fontSize: 9.5, letterSpacing: "0.08em", color: "var(--ink-3)" }}>
+            DIAGNOSTIC SUMMARY · {testCase ? "DRY-RUN" : "LIVE"}
+          </div>
+          <h2 style={{ margin: "4px 0 0", fontSize: 18, fontWeight: 600, letterSpacing: "-0.01em", color: "var(--ink)" }}>
+            {hasFail
+              ? `${failed.length} finding${failed.length > 1 ? "s" : ""} flagged · ${passed.length} of ${steps.length} checks passed`
+              : `All ${steps.length} checks passed · no issue detected`}
+          </h2>
+          {testCase && (
+            <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--ink-3)" }}>
+              Test case · <span style={{ color: "var(--ink-2)" }}>{testCase.title}</span>
+            </div>
+          )}
+        </div>
+        <button onClick={onClose} title="Dismiss summary" style={{
+          all: "unset", cursor: "pointer", padding: 6, borderRadius: 4,
+          color: "var(--ink-3)",
+        }}><Icon.X/></button>
+      </div>
+
+      <div style={{ padding: "16px 20px" }}>
+        {hasFail && (
+          <>
+            <div className="mono" style={{ fontSize: 9.5, letterSpacing: "0.08em", color: "var(--ink-3)", marginBottom: 10 }}>FINDINGS</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 18 }}>
+              {failed.map((s) => {
+                const idx = steps.findIndex((x) => x.id === s.id);
+                const r = results[s.id];
+                return (
+                  <div key={s.id} style={{
+                    padding: "12px 14px",
+                    border: "1px solid var(--fail)",
+                    background: "var(--fail-bg)",
+                    borderRadius: 8,
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <span className="mono" style={{ fontSize: 10, color: "var(--fail)", padding: "1px 7px", border: "1px solid var(--fail)", borderRadius: 4, fontWeight: 600 }}>
+                        STEP {String(idx + 1).padStart(2, "0")}
+                      </span>
+                      <strong style={{ fontSize: 13.5, color: "var(--ink)" }}>{r?.value}</strong>
+                    </div>
+                    <div style={{ marginTop: 7, fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.55 }}>
+                      <span style={{ color: "var(--ink-3)" }}>Step ·</span> {s.text}
+                    </div>
+                    {r?.note && (
+                      <div className="mono" style={{ marginTop: 4, fontSize: 11.5, color: "var(--ink-2)" }}>
+                        <span style={{ color: "var(--ink-3)" }}>detail ·</span> {r.note}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {/* Suggested actions aggregated from failed steps */}
+            {failed.flatMap((s) => s.suggested_actions ?? []).length > 0 && (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+                  <span className="mono" style={{ fontSize: 9.5, letterSpacing: "0.08em", color: "var(--ink-3)" }}>SUGGESTED NEXT ACTIONS</span>
+                  <span className="mono" style={{ fontSize: 10, color: "var(--ink-4)" }}>· ✨ advisory · 不會自動執行</span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 18 }}>
+                  {failed.flatMap((s) => s.suggested_actions ?? []).map((a) => (
+                    <div key={a.id} style={{
+                      display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 14, alignItems: "flex-start",
+                      padding: "12px 14px",
+                      background: "var(--sys-bg)",
+                      border: "1px solid var(--sys-line)",
+                      borderRadius: 8,
+                    }}>
+                      <span style={{
+                        width: 22, height: 22, borderRadius: 6, marginTop: 1,
+                        display: "inline-flex", alignItems: "center", justifyContent: "center",
+                        background: a.confidence === "high" ? "var(--ai-bg)" : "var(--surface)",
+                        color: a.confidence === "high" ? "var(--ai)" : "var(--ink-3)",
+                        border: "1px solid var(--sys-line)",
+                      }}><Icon.Spark/></span>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: "var(--ink)" }}>{a.title}</div>
+                        <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 3, lineHeight: 1.55 }}>{a.detail}</div>
+                        {a.rationale && (
+                          <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-4)", marginTop: 6, lineHeight: 1.5 }}>
+                            ✨ why · {a.rationale}
+                          </div>
+                        )}
+                      </div>
+                      <span className="mono" style={{
+                        fontSize: 10, padding: "2px 8px", borderRadius: 999,
+                        background: "var(--surface)", border: "1px solid var(--sys-line)", color: "var(--ink-3)",
+                        whiteSpace: "nowrap",
+                      }}>
+                        {a.confidence}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </>
+        )}
+        <div style={{
+          paddingTop: 14, borderTop: "1px solid var(--line)",
+          display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+        }}>
+          <Btn kind="ghost">Export PDF report</Btn>
+          {testCase && <Btn kind="ghost">Add to regression set</Btn>}
+          <span style={{ flex: 1 }}/>
+          <Btn kind="primary" icon={<Icon.Loop/>} onClick={onRerun}>Run with another case</Btn>
+        </div>
+      </div>
+    </section>
+  );
+}

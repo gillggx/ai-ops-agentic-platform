@@ -22,3 +22,53 @@
 *, *::before, *::after { box-sizing: border-box; }
 body { margin: 0; font-family: system-ui, sans-serif; background: #f7f8fc; color: #1a202c; }
 a { color: inherit; }
+
+/* ── Phase 11 Skill Document tokens ──────────────────────────────────────
+   Copied from prototype Skill Playbook.html so /skills + /skills/[slug]
+   render exactly like the design. Wrap with .skill-surface to scope. */
+.skill-surface {
+  --bg: #ffffff;
+  --bg-soft: #f5f7fa;
+  --surface: #ffffff;
+  --surface-2: #f7f9fc;
+  --sys-bg: #f3f6fb;
+  --sys-line: #d9e0ec;
+  --line: #ebeef3;
+  --line-strong: #d4d8e0;
+  --ink: #14130f;
+  --ink-2: #3b3a35;
+  --ink-3: #6b6960;
+  --ink-4: #9a988d;
+  --accent: #1c1c1a;
+  --pass: oklch(0.58 0.13 152);
+  --pass-bg: oklch(0.96 0.04 152);
+  --fail: oklch(0.58 0.18 28);
+  --fail-bg: oklch(0.96 0.04 28);
+  --warn: oklch(0.72 0.14 75);
+  --warn-bg: oklch(0.96 0.05 75);
+  --ai: oklch(0.50 0.13 268);
+  --ai-bg: oklch(0.97 0.02 268);
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+  font-size: 14px;
+  line-height: 1.5;
+  min-height: 100vh;
+}
+.skill-surface .mono {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-feature-settings: "ss02", "cv11";
+}
+.skill-surface button { font: inherit; color: inherit; }
+.skill-spinner {
+  width: 9px; height: 9px;
+  border-radius: 999px;
+  border: 1.6px solid var(--ink-3);
+  border-top-color: transparent;
+  animation: skill-spin 0.7s linear infinite;
+  display: inline-block;
+}
+@keyframes skill-spin { to { transform: rotate(360deg); } }
+@keyframes skill-modal-in { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
