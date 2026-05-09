@@ -72,14 +72,18 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
                 errors.append(f"Op#{idx}: logical id '{logical_id}' duplicated")
             declared_ids.add(logical_id)
             id_to_block[logical_id] = (op.block_id, op.block_version or "1.0.0")
-            # Validate initial params against schema (best-effort)
+            # Validate initial params against schema (best-effort).
             schema_props = ((spec.get("param_schema") or {}).get("properties") or {})
-            for k in (op.params or {}).keys():
+            for k, v in (op.params or {}).items():
                 if k not in schema_props:
                     errors.append(
                         f"Op#{idx}: add_node({op.block_id}) initial param '{k}' "
                         f"not in schema. Allowed: {list(schema_props.keys())}"
                     )
+                    continue
+                msg = _check_param_value(schema_props[k], k, v)
+                if msg:
+                    errors.append(f"Op#{idx}: add_node({op.block_id}) {msg}")
 
         elif op.type == OpType.SET_PARAM:
             if op.node_id not in id_to_block:
@@ -88,12 +92,17 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
             block_name, block_version = id_to_block[op.node_id]
             spec = registry.get_spec(block_name, block_version) or {}
             schema_props = ((spec.get("param_schema") or {}).get("properties") or {})
-            key = (op.params or {}).get("key")
+            params = op.params or {}
+            key = params.get("key")
             if key not in schema_props:
                 errors.append(
                     f"Op#{idx}: set_param key '{key}' not in {block_name} schema. "
                     f"Allowed: {list(schema_props.keys())}"
                 )
+            else:
+                msg = _check_param_value(schema_props[key], key, params.get("value"))
+                if msg:
+                    errors.append(f"Op#{idx}: set_param {msg}")
 
         elif op.type == OpType.CONNECT:
             if op.src_id not in id_to_block:
@@ -140,6 +149,32 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
     if plan_was_cleaned:
         update["plan"] = plan_raw  # propagate cleaned block_ids to call_tool_node
     return update
+
+
+def _check_param_value(prop_schema: dict[str, Any], key: str, value: Any) -> str | None:
+    """Mirror PipelineValidator C6_PARAM_SCHEMA logic for one param value.
+
+    Catches enum / type mismatches at plan time so repair_plan can fix them
+    instead of the build silently producing a pipeline that fails the final
+    validator (and confuses the user with status=failed despite ok ops).
+
+    Returns an error message string, or None if the value passes.
+    """
+    if value is None:
+        return None  # nullability is not enforced at this layer
+    expected_type = prop_schema.get("type")
+    if expected_type == "string" and not isinstance(value, str):
+        return f"param '{key}' expected string, got {type(value).__name__} {value!r}"
+    if expected_type == "integer" and not isinstance(value, int):
+        return f"param '{key}' expected integer, got {type(value).__name__} {value!r}"
+    if expected_type == "number" and not isinstance(value, (int, float)):
+        return f"param '{key}' expected number, got {type(value).__name__} {value!r}"
+    if expected_type == "boolean" and not isinstance(value, bool):
+        return f"param '{key}' expected boolean, got {type(value).__name__} {value!r}"
+    enum = prop_schema.get("enum")
+    if enum is not None and value not in enum:
+        return f"param '{key}' value {value!r} not in allowed enum {enum}"
+    return None
 
 
 def _strip_block_id_version(op_raw: dict[str, Any]) -> dict[str, Any]:

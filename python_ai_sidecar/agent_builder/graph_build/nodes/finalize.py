@@ -37,25 +37,34 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
     pipeline = PipelineJSON.model_validate(final_dict)
     registry = SeedlessBlockRegistry()
     registry.load()
-    # PipelineValidator wants the catalog dict directly (not a registry).
-    # validate() returns list[dict] with keys like {rule, message, severity?}.
+    # Run the same validator the canvas Save flow uses, but treat its issues
+    # as ADVISORY warnings — not build failures. The Glass Box contract is
+    # that the returned pipeline is a draft on canvas; user explicitly
+    # clicks Save to persist (and that's where blocking validation happens).
+    # Marking the build "failed" because of a param-enum complaint mismatched
+    # the user's mental model — the canvas DID get nodes & edges.
     validator = PipelineValidator(registry.catalog)
     issues = validator.validate(pipeline)
-    n_blocking = sum(
-        1 for i in issues
-        if (i.get("severity") if isinstance(i, dict) else getattr(i, "severity", None)) != "warning"
-    )
 
     n_ok_ops = sum(1 for op in plan if op.get("result_status") == "ok")
     n_failed_ops = sum(1 for op in plan if op.get("result_status") == "error")
 
-    status = "finished" if n_blocking == 0 else "failed"
+    # Status reflects the BUILD ENGINE's success, not pipeline validity.
+    # Engine succeeded if any op completed and we have a non-empty canvas.
+    if len(pipeline.nodes) == 0 or n_ok_ops == 0:
+        status = "failed"
+    else:
+        status = "finished"
+
+    issue_summary = (
+        f" ⚠ {len(issues)} validator warning(s) — review on canvas before saving"
+        if issues else ""
+    )
     summary = (
         f"Built {len(pipeline.nodes)} node(s), {len(pipeline.edges)} edge(s); "
-        f"plan ops ok={n_ok_ops} failed={n_failed_ops}; "
-        f"validator issues={len(issues)} (blocking={n_blocking})"
+        f"plan ops ok={n_ok_ops} failed={n_failed_ops}{issue_summary}"
     )
-    logger.info("finalize_node: %s", summary)
+    logger.info("finalize_node: status=%s | %s", status, summary)
 
     return {
         "status": status,
@@ -65,7 +74,8 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
             "ok": status == "finished",
             "node_count": len(pipeline.nodes),
             "edge_count": len(pipeline.edges),
-            "blocking_issues": n_blocking,
+            "validator_warnings": len(issues),
+            "validator_issues": issues[:5],  # cap to keep SSE small
             "summary": summary,
         })],
     }
