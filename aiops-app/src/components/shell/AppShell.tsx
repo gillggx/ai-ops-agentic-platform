@@ -53,6 +53,10 @@ const OPS_ITEMS = [
 ];
 
 const KNOWLEDGE_ITEMS = [
+  // Phase 11 — Skill as Knowledge Document. Authors here write the
+  // playbook (TRIGGER → CONFIRM → CHECKLIST) using natural language;
+  // each step compiles down to a pipeline via the Pipeline Builder.
+  { href: "/skills",                  label: "Skill Library",          icon: "📖" },
   // Option A UX consolidation (2026-04-23): Pipeline Builder is the single
   // entry point for building & publishing. Auto-Patrols / Auto-Check Rules /
   // Published Skills are reachable via Admin → Triggers Overview.
