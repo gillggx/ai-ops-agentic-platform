@@ -41,6 +41,7 @@ from python_ai_sidecar.pipeline_builder.blocks.sort import SortBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.spatial_pareto import SpatialParetoBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.spc_long_form import SpcLongFormBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.splom import SplomBlockExecutor
+from python_ai_sidecar.pipeline_builder.blocks.step_check import StepCheckBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.threshold import ThresholdBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.trend_wafer_maps import TrendWaferMapsBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.union import UnionBlockExecutor
@@ -102,6 +103,8 @@ BUILTIN_EXECUTORS: dict[str, type[BlockExecutor]] = {
     "block_defect_stack": DefectStackBlockExecutor,
     "block_spatial_pareto": SpatialParetoBlockExecutor,
     "block_trend_wafer_maps": TrendWaferMapsBlockExecutor,
+    # Phase 11 — Skill terminal block (skill-step pipelines must end here)
+    "block_step_check": StepCheckBlockExecutor,
 }
 
 __all__ = [
@@ -124,6 +127,7 @@ __all__ = [
     "DeltaBlockExecutor",
     "EwmaBlockExecutor",
     "EwmaCusumBlockExecutor",
+    "StepCheckBlockExecutor",
     "FilterBlockExecutor",
     "GroupByAggBlockExecutor",
     "HeatmapDendroBlockExecutor",

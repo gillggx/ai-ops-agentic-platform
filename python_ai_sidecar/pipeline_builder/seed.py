@@ -2669,6 +2669,82 @@ def _blocks() -> list[dict[str, Any]]:
             },
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.trend_wafer_maps:TrendWaferMapsBlockExecutor"},
         },
+        {
+            "name": "block_step_check",
+            "version": "1.0.0",
+            "category": "check",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "Phase 11 Skill terminal block. Aggregates upstream rows to a scalar, "
+                "compares against a threshold/baseline, emits {pass:bool, value, note} "
+                "the SkillRunner reads. **Every Skill step's pipeline MUST end with this block.**\n\n"
+                "== When to use ==\n"
+                "- ✅ Skill step 結尾的 pass/fail check：「最近 5 lot OOC count >= 3」「APC recipe changed」\n"
+                "- ✅ 量化比較類：count / sum / mean / max / min / last / exists\n"
+                "- ❌ 想出圖 → 不要用這個，用 chart blocks\n"
+                "- ❌ 一般 pipeline (非 skill 用) → block_threshold / block_consecutive_rule 才是對的\n\n"
+                "== Params ==\n"
+                "aggregate (string, default='count') ∈ count / sum / mean / max / min / last / exists\n"
+                "column    (string, opt)  非 count / exists 時必填，被 aggregate 計算的 column\n"
+                "operator  (string, default='>=')  ∈ >= / > / = / < / <= / changed / drift\n"
+                "threshold (number, opt)   numeric 比較必填\n"
+                "baseline  (any, opt)      operator='changed' 必填；'drift' 必填\n"
+                "\n== Output ==\n"
+                "port: check (dataframe，1 row)：pass | value | threshold | operator | aggregate | column | note | evidence_rows\n"
+                "\n== Examples ==\n"
+                "- 最近 5 lot 內 OOC ≥ 3：upstream block_filter(spc_status='OOC') → step_check(aggregate='count', operator='>=', threshold=3)\n"
+                "- 平均 cd_bias > 2.5σ：upstream → step_check(aggregate='mean', column='cd_bias', operator='>', threshold=2.5)\n"
+                "- recipe rev 變了：upstream → step_check(aggregate='last', column='recipe_rev', operator='changed', baseline=18)\n"
+                "\n== Keywords ==\n"
+                "skill step check 检查 檢查, threshold 门槛 門檻, pass fail, terminal, "
+                "aggregate count sum mean, comparison 比较 比較\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "check", "type": "dataframe"}],
+            "param_schema": {
+                "type": "object",
+                "required": ["operator"],
+                "properties": {
+                    "aggregate": {
+                        "type": "string",
+                        "enum": ["count", "sum", "mean", "max", "min", "last", "exists"],
+                        "default": "count",
+                    },
+                    "column":    {"type": "string"},
+                    "operator":  {
+                        "type": "string",
+                        "enum": [">=", ">", "=", "<", "<=", "changed", "drift"],
+                        "default": ">=",
+                    },
+                    "threshold": {"type": "number"},
+                    "baseline":  {},
+                },
+            },
+            "examples": [
+                {
+                    "label": "OOC count ≥ 3 in last 5 lots",
+                    "params": {"aggregate": "count", "operator": ">=", "threshold": 3},
+                },
+                {
+                    "label": "recipe revision changed",
+                    "params": {"aggregate": "last", "column": "recipe_rev", "operator": "changed", "baseline": 18},
+                },
+                {
+                    "label": "cd_bias drift over 1σ from baseline",
+                    "params": {"aggregate": "mean", "column": "cd_bias", "operator": "drift", "baseline": 0, "threshold": 1.0},
+                },
+            ],
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.step_check:StepCheckBlockExecutor"},
+            "output_columns_hint": [
+                {"name": "pass", "type": "boolean", "description": "True if the check passed"},
+                {"name": "value", "type": "any", "description": "Aggregated scalar value"},
+                {"name": "threshold", "type": "any", "description": "Threshold the value was compared against"},
+                {"name": "operator", "type": "string", "description": "Comparison operator"},
+                {"name": "note", "type": "string", "description": "Human-readable summary"},
+                {"name": "evidence_rows", "type": "integer", "description": "Number of upstream rows feeding the check"},
+            ],
+        },
     ]
 
 
