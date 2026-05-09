@@ -24,6 +24,8 @@ export const Icon = {
   Play:    (p?: object) => <svg {...I(11)} fill="currentColor" {...p}><path d="M4 2.5v11l9-5.5z"/></svg>,
   Pencil:  (p?: object) => <svg {...I(12)} fill="none" {...p}><path d="M11 2.5l2.5 2.5L5 13.5H2.5V11L11 2.5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/></svg>,
   Loop:    (p?: object) => <svg {...I(13)} fill="none" {...p}><path d="M3 8a5 5 0 019-3l1.5-1.5M13 8a5 5 0 01-9 3L2.5 12.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>,
+  MoreH:   (p?: object) => <svg {...I(14)} fill="currentColor" {...p}><circle cx="3.5" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="12.5" cy="8" r="1.3"/></svg>,
+  Drag:    (p?: object) => <svg {...I(10)} fill="currentColor" {...p}><circle cx="3" cy="3" r="1"/><circle cx="3" cy="8" r="1"/><circle cx="3" cy="13" r="1"/><circle cx="8" cy="3" r="1"/><circle cx="8" cy="8" r="1"/><circle cx="8" cy="13" r="1"/></svg>,
 };
 
 /* ── Badge ─────────────────────────────────────────────────────────── */

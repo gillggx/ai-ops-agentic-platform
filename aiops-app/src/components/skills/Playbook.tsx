@@ -234,10 +234,8 @@ export default function Playbook({
     setRunResults({});
   };
 
-  const confirmStep = (id: string) => {
-    setSteps((prev) => prev.map((s) => s.id === id ? { ...s, confirmed: true, pending: false } : s));
-    markDirty();
-  };
+  // Phase 11 v5 — sign-off removed. step.confirmed is now set automatically
+  // by bind-pipeline (binding from Builder = confirmed). No manual toggle.
 
   const updateStepText = (id: string, text: string) => {
     setSteps((prev) => prev.map((s) => s.id === id ? { ...s, text } : s));
@@ -254,48 +252,30 @@ export default function Playbook({
     markDirty();
   };
 
-  const addStep = async (text: string) => {
-    // Optimistic placeholder so the user sees something immediately.
-    const tempId = "s_pending_" + Date.now().toString(36);
-    setSteps((prev) => [...prev, {
-      id: tempId,
-      order: prev.length + 1,
-      text,
-      ai_summary: "AI 解析中…",
-      pipeline_id: null,
-      confirmed: false,
-      pending: true,
-      suggested_actions: [],
-      badge: { kind: "ai", label: "AI parsing…" },
-    }]);
-    setExpandedId(tempId);
-
+  /** Phase 11 v5 — open Pipeline Builder for any slot (confirm | step:NEW |
+   *  step:<id>). Replaces the silent AI translate. The Builder Confirm
+   *  banner POSTs back to /bind-pipeline; window-focus refresh on this page
+   *  picks up the new pipeline_id. */
+  const openSlotInBuilder = useCallback(async (slot: string, instruction: string) => {
+    if (!instruction.trim() && slot.startsWith("step:NEW")) return;
     try {
-      const res = await fetch(`/api/skill-documents/${encodeURIComponent(slug)}/steps`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.ok) throw new Error(json.error?.message || `HTTP ${res.status}`);
-      // Server has appended the real step + pipeline_id; refresh from response.
-      const detail = json.data as SkillDetail;
-      const newSteps = safeParse<SkillStep[]>(detail.steps, []);
-      setSteps(newSteps);
-      const last = newSteps[newSteps.length - 1];
-      if (last) setExpandedId(last.id);
-      // Skill itself was server-modified — clear dirty so we don't double-save.
-      setSkill(detail);
-      setDirty(false);
+      const r = await fetch(
+        `/api/skill-documents/${encodeURIComponent(slug)}/builder-url?`
+        + `slot=${encodeURIComponent(slot)}`
+        + `&instruction=${encodeURIComponent(instruction)}`,
+      );
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error?.message ?? `HTTP ${r.status}`);
+      const url = j.data?.builder_url ?? j.builder_url;
+      if (!url) throw new Error("builder_url missing");
+      window.open(url, "_blank", "noopener");
     } catch (e) {
-      setSteps((prev) => prev.map((s) =>
-        s.id === tempId ? {
-          ...s,
-          ai_summary: "(AI 翻譯失敗) " + (e as Error).message,
-          badge: { kind: "ai", label: "Translation failed" },
-        } : s,
-      ));
+      alert("Open Builder failed: " + String(e));
     }
+  }, [slug]);
+
+  const addStep = async (text: string) => {
+    await openSlotInBuilder("step:NEW", text);
   };
 
   if (loading) {
@@ -384,10 +364,12 @@ export default function Playbook({
               onToggle={() => setExpandedId(expandedId === s.id ? null : s.id)}
               runStatus={runStatuses[s.id]}
               runResult={runResults[s.id]}
-              onConfirm={() => confirmStep(s.id)}
               onTextChange={(t) => updateStepText(s.id, t)}
               onActionsChange={(a) => updateStepActions(s.id, a)}
               onRemove={() => removeStep(s.id)}
+              onOpenInBuilder={(text) => void openSlotInBuilder(`step:${s.id}`, text)}
+              onActionsExpand={() => setExpandedId(expandedId === s.id ? null : s.id)}
+              actionsExpanded={expandedId === s.id}
             />
           ))}
 
@@ -554,9 +536,74 @@ function PlaybookHeader({
   );
 }
 
+/** Phase 11 v5 — trailing per-step action menu. Shows a ⋯ button by default;
+ *  on click reveals a small absolute-positioned dropdown. Used in author mode
+ *  so each step row can be a single prose line + this discreet menu. */
+function StepActionMenu({ items }: {
+  items: Array<{ label: string; icon?: React.ReactNode; onClick: () => void; danger?: boolean }>;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [open]);
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button
+        type="button"
+        aria-label="step actions"
+        onClick={() => setOpen(!open)}
+        style={{
+          all: "unset", cursor: "pointer",
+          width: 26, height: 26, borderRadius: 5,
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          color: open ? "var(--ink)" : "var(--ink-3)",
+          background: open ? "var(--surface-2)" : "transparent",
+        }}>
+        <Icon.MoreH/>
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", top: "100%", right: 0, marginTop: 4,
+          minWidth: 200, padding: 4,
+          background: "var(--surface)", border: "1px solid var(--line-strong)",
+          borderRadius: 8, boxShadow: "0 6px 24px rgba(0,0,0,0.08)",
+          zIndex: 20,
+        }}>
+          {items.map((it, i) => (
+            <button key={i}
+              onClick={() => { setOpen(false); it.onClick(); }}
+              style={{
+                all: "unset", cursor: "pointer",
+                display: "flex", alignItems: "center", gap: 9,
+                padding: "7px 10px", borderRadius: 5,
+                fontSize: 12.5,
+                color: it.danger ? "var(--fail)" : "var(--ink)",
+                width: "calc(100% - 0px)", boxSizing: "border-box",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--surface-2)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+              {it.icon && <span style={{ width: 14, display: "inline-flex" }}>{it.icon}</span>}
+              <span>{it.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StepBlock({
   step, index, mode, expanded, onToggle, runStatus, runResult,
-  onConfirm, onTextChange, onActionsChange, onRemove,
+  onTextChange, onActionsChange, onRemove,
+  onOpenInBuilder,
+  onActionsExpand, actionsExpanded,
 }: {
   step: SkillStep;
   index: number;
@@ -565,10 +612,12 @@ function StepBlock({
   onToggle: () => void;
   runStatus?: "queued" | "running" | "done";
   runResult?: { status: "pass" | "fail"; value: string; note: string };
-  onConfirm: () => void;
   onTextChange: (t: string) => void;
   onActionsChange: (a: SuggestedAction[]) => void;
   onRemove: () => void;
+  onOpenInBuilder: (instruction: string) => void;
+  onActionsExpand: () => void;
+  actionsExpanded: boolean;
 }) {
   const isRunning = runStatus === "running";
   const isDone = runStatus === "done";
@@ -582,6 +631,90 @@ function StepBlock({
     return null;
   })();
 
+  const hasPipeline = step.pipeline_id != null;
+  const actionsCount = step.suggested_actions?.length ?? 0;
+
+  // Phase 11 v5 — Author mode = slim doc-style row. Trailing area is either:
+  //   ● [✨ Build →] CTA when there's no pipeline yet, OR
+  //   ● ⋯ menu (Refine / Inspect / Suggested actions / Remove) when bound.
+  // No pipeline canvas mini, no "AI summary" string, no "Awaiting your
+  // confirmation" badge — those are Execute-only. Sign-off is implicit:
+  // binding from Builder = confirmed.
+  if (mode === "author") {
+    return (
+      <div style={{
+        position: "relative",
+        padding: "16px 0",
+        borderTop: index === 0 ? "1px solid var(--line)" : "none",
+        borderBottom: "1px solid var(--line)",
+      }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
+          <div style={{
+            flexShrink: 0,
+            width: 28, height: 28, borderRadius: 6,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            background: "var(--surface-2)", color: "var(--ink-2)",
+            border: "1px solid var(--line)",
+            fontSize: 12, fontWeight: 600, marginTop: 1,
+          }} className="mono">
+            {String(index + 1).padStart(2, "0")}
+          </div>
+
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+              <textarea
+                value={step.text}
+                onChange={(e) => onTextChange(e.target.value)}
+                rows={1}
+                style={{
+                  flex: 1,
+                  fontSize: 16, lineHeight: 1.55, color: "var(--ink)",
+                  fontWeight: 450, outline: "none", padding: "1px 0",
+                  border: "none", background: "transparent", resize: "vertical",
+                  fontFamily: "inherit",
+                }}
+                placeholder="描述這個檢查步驟…"
+              />
+              {!hasPipeline ? (
+                <button
+                  onClick={() => onOpenInBuilder(step.text)}
+                  style={{
+                    flexShrink: 0,
+                    display: "inline-flex", alignItems: "center", gap: 5,
+                    padding: "5px 11px", borderRadius: 6,
+                    background: "var(--ai)", color: "#fff",
+                    border: "none", cursor: "pointer",
+                    fontSize: 12, fontWeight: 500,
+                  }}>
+                  <Icon.Spark/> Build →
+                </button>
+              ) : (
+                <StepActionMenu items={[
+                  { label: "Refine in Pipeline Builder", icon: <Icon.Spark/>,
+                    onClick: () => onOpenInBuilder(step.text) },
+                  { label: "Inspect blocks ↗", icon: <Icon.Pencil/>,
+                    onClick: () => window.open(`/admin/pipeline-builder/${step.pipeline_id}`, "_blank", "noopener") },
+                  { label: actionsExpanded ? "Hide suggested actions" : `Suggested actions (${actionsCount})`,
+                    icon: <Icon.Spark/>, onClick: onActionsExpand },
+                  { label: "Remove step", icon: <Icon.X/>, danger: true, onClick: onRemove },
+                ]}/>
+              )}
+            </div>
+
+            {actionsExpanded && (
+              <SuggestedActionsEditor
+                actions={step.suggested_actions ?? []}
+                onChange={onActionsChange}
+              />
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Execute mode — keep rich rendering with pipeline canvas mini, AI summary,
+  // run pill, expand toggle. Sign-off button is gone (bind = confirmed).
   return (
     <div style={{
       position: "relative",
@@ -604,25 +737,9 @@ function StepBlock({
         </div>
 
         <div style={{ flex: 1, minWidth: 0 }}>
-          {mode === "author" ? (
-            <textarea
-              value={step.text}
-              onChange={(e) => onTextChange(e.target.value)}
-              rows={1}
-              style={{
-                width: "100%",
-                fontSize: 16, lineHeight: 1.55, color: "var(--ink)",
-                fontWeight: 450, outline: "none", padding: "1px 0",
-                border: "none", background: "transparent", resize: "vertical",
-                fontFamily: "inherit",
-              }}
-              placeholder="描述這個檢查步驟…"
-            />
-          ) : (
-            <div style={{ fontSize: 16, lineHeight: 1.55, color: "var(--ink)", fontWeight: 450 }}>
-              {step.text}
-            </div>
-          )}
+          <div style={{ fontSize: 16, lineHeight: 1.55, color: "var(--ink)", fontWeight: 450 }}>
+            {step.text}
+          </div>
 
           <div style={{
             marginTop: 10,
@@ -636,9 +753,6 @@ function StepBlock({
               <Icon.Spark/>
               {step.ai_summary || "(no summary)"}
             </span>
-            {step.pending && !step.confirmed && (
-              <Badge kind="warn">⌛ Awaiting your confirmation</Badge>
-            )}
 
             <span style={{ flex: 1 }}/>
 
@@ -652,7 +766,7 @@ function StepBlock({
             }}>
               <Icon.Spark/>
               <span className="mono" style={{ fontSize: 10.5 }}>
-                {expanded ? "Hide" : (mode === "run" ? "View logic" : "Inspect pipeline")}
+                {expanded ? "Hide" : "View logic"}
               </span>
               <Icon.Chevron/>
             </button>
@@ -661,15 +775,11 @@ function StepBlock({
           {expanded && (
             <ExpandedPipeline
               step={step}
-              mode={mode}
               isRunning={isRunning}
-              onConfirm={onConfirm}
-              onActionsChange={onActionsChange}
-              onRemove={onRemove}
             />
           )}
 
-          {mode === "run" && isDone && runResult && (
+          {isDone && runResult && (
             <RunResultInline result={runResult} step={step}/>
           )}
         </div>
@@ -678,18 +788,16 @@ function StepBlock({
   );
 }
 
+/** Phase 11 v5 — Execute-only, read-only pipeline mini canvas. Author mode
+ *  no longer renders this (use ⋯ → Inspect blocks instead). */
 function ExpandedPipeline({
-  step, mode, isRunning, onConfirm, onActionsChange, onRemove,
+  step, isRunning,
 }: {
   step: SkillStep;
-  mode: "author" | "run";
   isRunning: boolean;
-  onConfirm: () => void;
-  onActionsChange: (a: SuggestedAction[]) => void;
-  onRemove: () => void;
 }) {
+  void isRunning;
   // Synthesize a simple block diagram from step.pipeline_id metadata.
-  // 11-A.5 will pull the actual pipeline_json from /api/v1/pipelines/{id}.
   const blocks: MiniBlock[] = step.pipeline_id != null ? [
     { id: "src",   kind: "source",    title: "Pipeline #" + step.pipeline_id, params: "(loaded from Builder)" },
     { id: "chk",   kind: "check",     title: "block_step_check",              params: "" },
@@ -719,66 +827,19 @@ function ExpandedPipeline({
           · {blocks.length} blocks
         </span>
         <span style={{ flex: 1 }}/>
-        {step.confirmed
-          ? <Badge kind="pass" icon={<Icon.Check/>}>Confirmed</Badge>
-          : <Badge kind="warn">Pending review</Badge>}
+        {step.pipeline_id != null && (
+          <Link href={`/admin/pipeline-builder/${step.pipeline_id}`} target="_blank" style={{
+            fontSize: 11, color: "var(--ai)", textDecoration: "none",
+            display: "inline-flex", alignItems: "center", gap: 4,
+          }}>
+            Inspect ↗
+          </Link>
+        )}
       </div>
 
       <div style={{ padding: "8px 14px", background: "var(--bg-soft)" }}>
         <PipelineCanvasMini blocks={blocks} dense/>
       </div>
-
-      {mode === "author" && (
-        <SuggestedActionsEditor
-          actions={step.suggested_actions ?? []}
-          onChange={onActionsChange}
-        />
-      )}
-
-      {mode === "author" && (
-        <div style={{
-          padding: "10px 14px", borderTop: "1px solid var(--line)",
-          display: "flex", alignItems: "center", gap: 8,
-          background: "var(--surface)",
-        }}>
-          {!step.confirmed ? (
-            <>
-              <Btn kind="primary" icon={<Icon.Check/>} onClick={onConfirm}>Confirm pipeline</Btn>
-              {step.pipeline_id != null && (
-                <Link href={`/admin/pipeline-builder/${step.pipeline_id}?return=skill`} style={{
-                  display: "inline-flex", alignItems: "center", gap: 6,
-                  padding: "6px 11px", borderRadius: 6,
-                  background: "var(--surface)", color: "var(--ink)",
-                  border: "1px solid var(--line-strong)",
-                  fontSize: 12.5, fontWeight: 500, textDecoration: "none",
-                }}>
-                  <Icon.Pencil/> Edit blocks
-                </Link>
-              )}
-            </>
-          ) : (
-            <>
-              {step.pipeline_id != null && (
-                <Link href={`/admin/pipeline-builder/${step.pipeline_id}?return=skill`} style={{
-                  display: "inline-flex", alignItems: "center", gap: 6,
-                  padding: "6px 11px", borderRadius: 6,
-                  background: "var(--surface)", color: "var(--ink)",
-                  border: "1px solid var(--line-strong)",
-                  fontSize: 12.5, fontWeight: 500, textDecoration: "none",
-                }}>
-                  <Icon.Pencil/> Edit blocks
-                </Link>
-              )}
-            </>
-          )}
-          <span style={{ flex: 1 }}/>
-          {!isRunning && (
-            <Btn kind="ghost" onClick={onRemove}>
-              <Icon.X/> Remove step
-            </Btn>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -991,16 +1052,16 @@ function AddStep({ onAdd }: { onAdd: (text: string) => Promise<void> }) {
         {thinking ? (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--ai)" }}>
             <span className="skill-spinner"/>
-            AI parsing…
+            Opening Builder…
           </span>
         ) : (
           <Btn kind="ghost" onClick={() => void submit()} disabled={!draft.trim()} icon={<Icon.Spark/>}>
-            Translate to pipeline
+            Build →
           </Btn>
         )}
       </div>
       <div style={{ paddingLeft: 42, fontSize: 11.5, color: "var(--ink-4)" }}>
-        Tip · 用「if/check/count/compare」這類動詞最容易被 AI 翻成 pipeline。
+        Tip · 寫一句檢查邏輯，按 Build 會開 Pipeline Builder 帶你完成。
       </div>
     </div>
   );
@@ -1291,7 +1352,7 @@ function ConfirmSection({
 
       {confirmCheck ? (
         <div style={{
-          display: "grid", gridTemplateColumns: "auto 1fr",
+          display: "grid", gridTemplateColumns: "auto 1fr auto",
           gap: 14, alignItems: "start",
           padding: "14px 16px", borderRadius: 8,
           background: "var(--surface)",
@@ -1307,7 +1368,10 @@ function ConfirmSection({
             <div style={{ fontSize: 14, color: "var(--ink)", fontWeight: 500 }}>
               {confirmCheck.description}
             </div>
-            {confirmCheck.ai_summary && (
+            {/* Phase 11 v5 — AI summary, Inspect link, Pending badges
+                are Execute-only. Author mode hides these to keep the prose
+                row clean; actions live in the trailing ⋯ menu. */}
+            {mode === "run" && confirmCheck.ai_summary && (
               <div style={{
                 marginTop: 6, fontSize: 12, color: "var(--ink-3)",
                 display: "inline-flex", alignItems: "center", gap: 6,
@@ -1316,7 +1380,7 @@ function ConfirmSection({
                 <span>{confirmCheck.ai_summary}</span>
               </div>
             )}
-            {confirmCheck.pipeline_id != null && (
+            {mode === "run" && confirmCheck.pipeline_id != null && (
               <div style={{ marginTop: 8 }}>
                 <a
                   href={`/admin/pipeline-builder/${confirmCheck.pipeline_id}`}
@@ -1331,20 +1395,20 @@ function ConfirmSection({
                 </a>
               </div>
             )}
-            {mode === "author" && (
-              <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
-                <Btn kind="ghost"
-                  onClick={() => void openInBuilder(confirmCheck.description, "confirm")}
-                  disabled={busy}>
-                  ↻ rebuild in Pipeline Builder
-                </Btn>
-                <Btn kind="ghost" onClick={removeStep} disabled={busy}>
-                  — remove confirmation step
-                </Btn>
-              </div>
-            )}
             {error && <div style={{ marginTop: 6, fontSize: 11, color: "var(--fail)" }}>⚠ {error}</div>}
           </div>
+          {mode === "author" && (
+            <StepActionMenu items={[
+              { label: "Refine in Pipeline Builder", icon: <Icon.Spark/>,
+                onClick: () => void openInBuilder(confirmCheck.description, "confirm") },
+              ...(confirmCheck.pipeline_id != null
+                ? [{ label: "Inspect blocks ↗", icon: <Icon.Pencil/>,
+                    onClick: () => window.open(`/admin/pipeline-builder/${confirmCheck.pipeline_id}`, "_blank", "noopener") }]
+                : []),
+              { label: "Remove confirmation step", icon: <Icon.X/>, danger: true,
+                onClick: () => void removeStep() },
+            ]}/>
+          )}
         </div>
       ) : mode === "author" ? (
         <div style={{
@@ -1379,7 +1443,7 @@ function ConfirmSection({
           />
           <Btn kind="ghost" disabled={!draft.trim() || busy} icon={<Icon.Spark/>}
             onClick={() => void openInBuilder(draft)}>
-            {busy ? "Opening Builder…" : "Build in Pipeline Builder ↗"}
+            {busy ? "Opening Builder…" : "Build →"}
           </Btn>
         </div>
       ) : null}
