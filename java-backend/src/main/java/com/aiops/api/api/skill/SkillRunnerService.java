@@ -150,7 +150,7 @@ public class SkillRunnerService {
             body.put("pipeline_json", mapper.readValue(pipelineJson, JSON_MAP_TYPE));
             body.put("inputs", payload != null ? payload : Map.of());
 
-            @SuppressWarnings({"unchecked", "rawtypes"})
+            @SuppressWarnings("rawtypes")
             Map result = sidecar.postJson("/internal/pipeline/execute", body, Map.class, caller)
                     .block(Duration.ofSeconds(60));
             return parseRunResult(stepId, result, System.currentTimeMillis() - t0);
@@ -160,14 +160,16 @@ public class SkillRunnerService {
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> parseRunResult(String stepId, Map<?, ?> result, long elapsedMs) {
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private Map<String, Object> parseRunResult(String stepId, Map result, long elapsedMs) {
         if (result == null) return stepResultError(stepId, "sidecar returned null");
         String overall = String.valueOf(result.get("status"));
         if (!"success".equals(overall)) {
             return stepResultError(stepId, "pipeline " + overall + ": " + result.get("error_message"));
         }
-        Map<String, Object> nodeResults = (Map<String, Object>) result.getOrDefault("node_results", Map.of());
+        Object nrObj = result.get("node_results");
+        Map<String, Object> nodeResults = nrObj instanceof Map<?, ?>
+                ? (Map<String, Object>) nrObj : Map.of();
         // Find the block_step_check output. Convention: last node's output port "check".
         Map<String, Object> stepCheck = null;
         for (Map.Entry<String, Object> e : nodeResults.entrySet()) {
