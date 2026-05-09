@@ -28,4 +28,8 @@ public interface AlarmRepository extends JpaRepository<AlarmEntity, Long> {
 
 	/** Cluster-level batch ack — fetch every active alarm for one tool. */
 	List<AlarmEntity> findByEquipmentIdAndStatus(String equipmentId, String status);
+
+	/** Phase 11 — past-event replay: find recent alarms triggered by a given
+	 *  event_type. Used by Skill Test modal's Past event tab. */
+	List<AlarmEntity> findTop30ByTriggerEventOrderByCreatedAtDesc(String triggerEvent);
 }

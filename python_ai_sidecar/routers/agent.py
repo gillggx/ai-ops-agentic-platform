@@ -207,3 +207,32 @@ async def agent_build_confirm(
     """Resume a graph_build session paused at confirm_gate. Only used when
     AGENT_BUILD_GRAPH=v2 — v1 doesn't have this gate."""
     return EventSourceResponse(_build_confirm_stream(req, caller))
+
+
+# ── Phase 11: Skill-step translation (sync) ──────────────────────────────
+
+
+class SkillStepTranslateRequest(BaseModel):
+    """Phase 11 — translate a Skill step's NL description into a pipeline
+    ending in block_step_check. Java's POST /skill-documents/{slug}/steps
+    calls this synchronously (block until done) and persists the resulting
+    pipeline_json as a new pb_pipelines row.
+    """
+    model_config = ConfigDict(populate_by_name=True)
+
+    text: str = Field(..., min_length=1, description="Natural language step description")
+    base_pipeline: dict | None = Field(default=None, alias="basePipeline")
+
+
+@router.post("/skill/translate-step")
+async def skill_translate_step(
+    req: SkillStepTranslateRequest, caller: CallerContext = ServiceAuth,
+):
+    """Sync skill-step translator — drives graph_build with skill_step_mode=True
+    and skip_confirm=True, returns the final pipeline_json."""
+    from python_ai_sidecar.agent_builder.graph_build import translate_skill_step
+    result = await translate_skill_step(
+        instruction=req.text,
+        base_pipeline=req.base_pipeline,
+    )
+    return result

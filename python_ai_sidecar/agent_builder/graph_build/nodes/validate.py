@@ -166,6 +166,25 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
         order_errors = _check_op_order_and_column_refs(plan_raw, parsed, registry, state)
         errors.extend(order_errors)
 
+    # Pass 4 — Phase 11 skill-step terminal check.
+    # When the caller is creating a Skill step's pipeline, the plan must end
+    # with an add_node for block_step_check. SkillRunner reads that node's
+    # output to decide pass/fail; without it the step has no verdict.
+    if not errors and state.get("skill_step_mode"):
+        terminal_ok = False
+        for op in reversed(parsed):
+            if op is None:
+                continue
+            if op.type == OpType.ADD_NODE:
+                terminal_ok = (op.block_id == "block_step_check")
+                break
+        if not terminal_ok:
+            errors.append(
+                "skill_step_mode: pipeline must end with add_node block_step_check "
+                "(needed for SkillRunner to read pass/fail). Add a final step_check "
+                "node operating on the upstream filter/aggregate result."
+            )
+
     logger.info("validate_plan_node: %d hard errors, %d soft warnings, plan_cleaned=%s",
                 len(errors), len(warnings), plan_was_cleaned)
 

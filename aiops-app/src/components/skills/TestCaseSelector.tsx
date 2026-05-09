@@ -33,10 +33,11 @@ const SYNTHETIC_BASELINE: TestCase = {
 };
 
 export default function TestCaseSelector({
-  open, skillTriggerType, eventType,
+  open, slug, skillTriggerType, eventType,
   onClose, onStart,
 }: {
   open: boolean;
+  slug: string;
   skillTriggerType: "system" | "user" | "schedule";
   eventType?: string;
   onClose: () => void;
@@ -50,17 +51,17 @@ export default function TestCaseSelector({
     tool_id: "EQP-01", lot_id: "LOT-0001", severity: "med",
   });
 
-  /* Load past events when modal opens */
+  /* Load past events when modal opens — type is implicit from skill's trigger_config */
+  void skillTriggerType; void eventType;
   useEffect(() => {
-    if (!open) return;
+    if (!open || !slug) return;
     setPastLoading(true);
-    // TODO 11-C: real endpoint /api/skill-documents/past-events?type=...&event_type=...
-    fetch(`/api/skill-documents/past-events?type=${skillTriggerType}${eventType ? `&event_type=${eventType}` : ""}`)
+    fetch(`/api/skill-documents/${encodeURIComponent(slug)}/past-events`)
       .then(async (res) => res.ok ? (await res.json()).data as TestCase[] : [])
       .catch(() => [])
       .then((rows) => setPastCases(rows ?? []))
       .finally(() => setPastLoading(false));
-  }, [open, skillTriggerType, eventType]);
+  }, [open, slug]);
 
   const allCases = useMemo<TestCase[]>(() => [...pastCases, SYNTHETIC_BASELINE], [pastCases]);
   const sel = allCases.find((c) => c.id === selected) ?? SYNTHETIC_BASELINE;

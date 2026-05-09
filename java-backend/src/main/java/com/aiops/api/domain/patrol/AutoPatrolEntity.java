@@ -16,7 +16,8 @@ import java.time.OffsetDateTime;
 		indexes = {
 				@Index(name = "ix_auto_patrols_skill_id", columnList = "skill_id"),
 				@Index(name = "ix_auto_patrols_pipeline_id", columnList = "pipeline_id"),
-				@Index(name = "ix_auto_patrols_event_type_id", columnList = "event_type_id")
+				@Index(name = "ix_auto_patrols_event_type_id", columnList = "event_type_id"),
+				@Index(name = "ix_auto_patrols_skill_doc_id", columnList = "skill_doc_id")
 		})
 public class AutoPatrolEntity extends Auditable {
 
@@ -33,6 +34,12 @@ public class AutoPatrolEntity extends Auditable {
 	/** Legacy link — skill_id now optional, pipeline_id is new path. */
 	@Column(name = "skill_id")
 	private Long skillId;
+
+	/** Phase 11 — set when this row was materialized from a skill_documents
+	 *  row. Multiple auto_patrol rows may share the same skill_doc_id (one
+	 *  per skill step). Used for de-publish cleanup. */
+	@Column(name = "skill_doc_id")
+	private Long skillDocId;
 
 	@Column(name = "pipeline_id")
 	private Long pipelineId;

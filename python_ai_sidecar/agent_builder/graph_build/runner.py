@@ -41,6 +41,7 @@ async def stream_graph_build(
     user_id: Optional[int] = None,
     session_id: Optional[str] = None,
     skip_confirm: bool = False,
+    skill_step_mode: bool = False,
 ) -> AsyncGenerator[StreamEvent, None]:
     """Run the graph from the start. Yields StreamEvent as nodes complete.
 
@@ -63,6 +64,7 @@ async def stream_graph_build(
         base_pipeline=base_pipeline,
         user_id=user_id,
         skip_confirm=skip_confirm,
+        skill_step_mode=skill_step_mode,
     )
     logger.info("stream_graph_build: starting session=%s", sid)
 
@@ -168,6 +170,60 @@ async def dry_run_plan(
         "validation_errors": errors,
         "n_ops": len(plan),
         "ok": len(errors) == 0 and len(plan) > 0,
+    }
+
+
+async def translate_skill_step(
+    *,
+    instruction: str,
+    base_pipeline: Optional[dict] = None,
+) -> dict[str, Any]:
+    """Phase 11 — sync (block-until-done) translator for a Skill step's
+    natural-language description into a pipeline ending in block_step_check.
+
+    Drives the same graph_build engine as Builder/Chat but with
+    skill_step_mode=True (validate enforces step_check terminator) and
+    skip_confirm=True (no confirm gate; this is a direct API call from
+    Java's POST /skill-documents/{slug}/steps).
+
+    Returns:
+      {pipeline_json, summary, expected_outputs, status, error_message}
+    """
+    final_pipeline: Optional[dict] = None
+    summary: Optional[str] = None
+    expected: list[str] = []
+    status: str = "running"
+    last_error: Optional[str] = None
+
+    async for ev in stream_graph_build(
+        instruction=instruction,
+        base_pipeline=base_pipeline,
+        skip_confirm=True,
+        skill_step_mode=True,
+    ):
+        if ev.type == "plan_proposed":
+            summary = (ev.data or {}).get("summary") or summary
+            outs = (ev.data or {}).get("expected_outputs") or []
+            if isinstance(outs, list):
+                expected = [str(o) for o in outs]
+        elif ev.type == "build_finalized":
+            data = ev.data or {}
+            status = "success" if data.get("ok") else "failed"
+            summary = (data.get("summary") or summary) or summary
+        elif ev.type == "done":
+            data = ev.data or {}
+            final_pipeline = data.get("pipeline_json") or final_pipeline
+            status = data.get("status") or status
+            summary = (data.get("summary") or summary) or summary
+        elif ev.type == "error":
+            last_error = (ev.data or {}).get("message") or last_error
+
+    return {
+        "status": status,
+        "pipeline_json": final_pipeline,
+        "summary": summary or "",
+        "expected_outputs": expected,
+        "error_message": last_error,
     }
 
 

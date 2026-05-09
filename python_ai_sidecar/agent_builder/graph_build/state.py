@@ -42,6 +42,9 @@ class BuildGraphState(TypedDict, total=False):
     # conversation IS the confirmation; pausing the chat orchestrator
     # mid-tool to wait for a UI click would break the conversational flow.
     skip_confirm: bool
+    # Phase 11 — Skill step mode. When True, plan_node prompt forces the
+    # pipeline to end with block_step_check (the Skill terminal block).
+    skill_step_mode: bool
 
     # ── Execute stage ─────────────────────────────────────────────────
     cursor: int                          # plan[cursor] is the next op
@@ -62,6 +65,7 @@ def initial_state(
     base_pipeline: Optional[dict],
     user_id: Optional[int] = None,
     skip_confirm: bool = False,
+    skill_step_mode: bool = False,
 ) -> BuildGraphState:
     return BuildGraphState(
         session_id=session_id,
@@ -75,6 +79,7 @@ def initial_state(
         is_from_scratch=False,
         user_confirmed=None,
         skip_confirm=skip_confirm,
+        skill_step_mode=skill_step_mode,
         cursor=0,
         logical_to_real={},
         failed_op_idx=None,

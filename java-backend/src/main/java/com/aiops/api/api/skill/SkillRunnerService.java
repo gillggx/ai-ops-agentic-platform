@@ -127,8 +127,44 @@ public class SkillRunnerService {
             run.setStepResults("[]");
         }
         runRepo.save(run);
+
+        // Phase 11-D — refresh stats on the skill (excludes test runs from
+        // counters; test runs still recorded for historical replay but
+        // mustn't pollute marketplace metrics).
+        if (Boolean.FALSE.equals(run.getIsTest())) {
+            updateSkillStats(skill, run);
+        }
+
         sink.tryEmitNext(RunEvent.done(run.getId(), stepResults));
         sink.tryEmitComplete();
+    }
+
+    @Transactional
+    void updateSkillStats(SkillDocumentEntity skill, SkillRunEntity lastRun) {
+        try {
+            Map<String, Object> stats;
+            try {
+                stats = new HashMap<>(skill.getStats() == null || skill.getStats().isBlank()
+                        ? Map.of()
+                        : mapper.readValue(skill.getStats(), JSON_MAP_TYPE));
+            } catch (Exception e) {
+                stats = new HashMap<>();
+            }
+            int prevTotal = stats.get("runs_total") instanceof Number n ? n.intValue() : 0;
+            stats.put("runs_total", prevTotal + 1);
+            stats.put("last_run_at", lastRun.getTriggeredAt() != null
+                    ? lastRun.getTriggeredAt().toString() : OffsetDateTime.now().toString());
+
+            // runs_30d — count via repo query
+            OffsetDateTime since = OffsetDateTime.now().minusDays(30);
+            long runs30d = runRepo.countNonTestSince(skill.getId(), since);
+            stats.put("runs_30d", runs30d);
+
+            skill.setStats(mapper.writeValueAsString(stats));
+            skillRepo.save(skill);
+        } catch (Exception e) {
+            log.warn("skill {} stats update failed: {}", skill.getSlug(), e.toString());
+        }
     }
 
     private Map<String, Object> runOneStep(String stepId,

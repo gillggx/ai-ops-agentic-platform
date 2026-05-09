@@ -17,6 +17,10 @@ from python_ai_sidecar.agent_builder.graph_build.runner import (
     stream_graph_build,
     resume_graph_build,
     dry_run_plan,
+    translate_skill_step,
 )
 
-__all__ = ["stream_graph_build", "resume_graph_build", "dry_run_plan"]
+__all__ = [
+    "stream_graph_build", "resume_graph_build",
+    "dry_run_plan", "translate_skill_step",
+]

@@ -18,4 +18,12 @@ public interface PipelineAutoCheckTriggerRepository extends JpaRepository<Pipeli
 	@Modifying
 	@Query("DELETE FROM PipelineAutoCheckTriggerEntity t WHERE t.pipelineId = :pipelineId")
 	int deleteByPipelineId(@Param("pipelineId") Long pipelineId);
+
+	/** Phase 11 — find rows materialized from a skill_documents row. */
+	List<PipelineAutoCheckTriggerEntity> findBySkillDocId(Long skillDocId);
+
+	/** Phase 11 — bulk-delete materialized rows on de-publish. */
+	@Modifying
+	@Query("DELETE FROM PipelineAutoCheckTriggerEntity t WHERE t.skillDocId = :skillDocId")
+	int deleteBySkillDocId(@Param("skillDocId") Long skillDocId);
 }

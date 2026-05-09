@@ -13,7 +13,8 @@ import lombok.Setter;
 @Table(name = "pipeline_auto_check_triggers",
 		indexes = {
 				@Index(name = "ix_pipeline_auto_check_triggers_pipeline_id", columnList = "pipeline_id"),
-				@Index(name = "ix_pipeline_auto_check_triggers_event_type", columnList = "event_type")
+				@Index(name = "ix_pipeline_auto_check_triggers_event_type", columnList = "event_type"),
+				@Index(name = "ix_auto_check_skill_doc", columnList = "skill_doc_id")
 		},
 		uniqueConstraints = @UniqueConstraint(name = "uq_pacheck_pipeline_event",
 				columnNames = {"pipeline_id", "event_type"}))
@@ -34,4 +35,9 @@ public class PipelineAutoCheckTriggerEntity extends CreatedAtOnly {
 	 *  Evaluated by EventDispatchService.matchFilter. */
 	@Column(name = "match_filter", columnDefinition = "text")
 	private String matchFilter;
+
+	/** Phase 11 — set when this row was materialized from a skill_documents
+	 *  trigger_config. Multiple rows may share skill_doc_id (one per step). */
+	@Column(name = "skill_doc_id")
+	private Long skillDocId;
 }

@@ -241,9 +241,10 @@ export default function Playbook({
   };
 
   const addStep = async (text: string) => {
-    const id = "s" + Date.now().toString(36);
+    // Optimistic placeholder so the user sees something immediately.
+    const tempId = "s_pending_" + Date.now().toString(36);
     setSteps((prev) => [...prev, {
-      id,
+      id: tempId,
       order: prev.length + 1,
       text,
       ai_summary: "AI 解析中…",
@@ -251,11 +252,36 @@ export default function Playbook({
       confirmed: false,
       pending: true,
       suggested_actions: [],
-      badge: { kind: "ai", label: "AI Generated" },
+      badge: { kind: "ai", label: "AI parsing…" },
     }]);
-    setExpandedId(id);
-    markDirty();
-    // TODO 11-B.AddStep: fetch /api/agent/build with skill_step mode + persist pipeline_id
+    setExpandedId(tempId);
+
+    try {
+      const res = await fetch(`/api/skill-documents/${encodeURIComponent(slug)}/steps`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error(json.error?.message || `HTTP ${res.status}`);
+      // Server has appended the real step + pipeline_id; refresh from response.
+      const detail = json.data as SkillDetail;
+      const newSteps = safeParse<SkillStep[]>(detail.steps, []);
+      setSteps(newSteps);
+      const last = newSteps[newSteps.length - 1];
+      if (last) setExpandedId(last.id);
+      // Skill itself was server-modified — clear dirty so we don't double-save.
+      setSkill(detail);
+      setDirty(false);
+    } catch (e) {
+      setSteps((prev) => prev.map((s) =>
+        s.id === tempId ? {
+          ...s,
+          ai_summary: "(AI 翻譯失敗) " + (e as Error).message,
+          badge: { kind: "ai", label: "Translation failed" },
+        } : s,
+      ));
+    }
   };
 
   if (loading) {
@@ -364,6 +390,7 @@ export default function Playbook({
 
       <TestCaseSelector
         open={showCaseSelector}
+        slug={slug}
         skillTriggerType={trigger.type ?? "schedule"}
         eventType={trigger.event_type}
         onClose={() => setShowCaseSelector(false)}

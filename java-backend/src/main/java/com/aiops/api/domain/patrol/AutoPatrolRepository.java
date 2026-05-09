@@ -1,6 +1,9 @@
 package com.aiops.api.domain.patrol;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -19,4 +22,11 @@ public interface AutoPatrolRepository extends JpaRepository<AutoPatrolEntity, Lo
 
 	/** Phase 9 — personal rules owned by a user (kind != shared_alarm). */
 	List<AutoPatrolEntity> findByCreatedByAndKindNot(Long createdBy, String kind);
+
+	/** Phase 11 — materialization tracking. */
+	List<AutoPatrolEntity> findBySkillDocId(Long skillDocId);
+
+	@Modifying
+	@Query("DELETE FROM AutoPatrolEntity p WHERE p.skillDocId = :skillDocId")
+	int deleteBySkillDocId(@Param("skillDocId") Long skillDocId);
 }

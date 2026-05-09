@@ -252,7 +252,14 @@ async def plan_node(state: BuildGraphState) -> dict[str, Any]:
         if has_existing else "\n\n目前 canvas 是空的 — from-scratch build."
     )
 
-    user_msg = state["instruction"] + canvas_hint
+    skill_step_mode = bool(state.get("skill_step_mode"))
+    skill_hint = (
+        "\n\n⚠ SKILL STEP MODE — pipeline 必須以 `block_step_check` 結尾（pass/fail check）。"
+        "用例：block_filter→block_step_check (aggregate='count', operator='>=', threshold=N) "
+        "判斷有沒有達到觸發條件。chart 類 block 不適用此模式。"
+        if skill_step_mode else ""
+    )
+    user_msg = state["instruction"] + canvas_hint + skill_hint
     client = get_llm_client()
     try:
         resp = await client.create(
