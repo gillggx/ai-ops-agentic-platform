@@ -77,6 +77,13 @@ export type Alarm = {
   diagnostic_charts?: ChartDSL[];
   diagnostic_alert?: AlertEmission;
   auto_check_runs?: AutoCheckRun[];
+  // Phase 12: ack / disposition
+  acked_by?: number | null;
+  acked_at?: string | null;
+  disposition?: string | null;
+  disposition_reason?: string | null;
+  disposed_by?: number | null;
+  disposed_at?: string | null;
 };
 
 export function timeAgo(iso: string): string {
@@ -343,6 +350,8 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
         {alarm.title} • {timeAgo(alarm.created_at)}
       </p>
 
+      <DispositionBar alarm={alarm} />
+
       <div style={{
         background: "#fff",
         border: "1px solid #e2e8f0", borderLeft: "4px solid #4299e1",
@@ -529,6 +538,108 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+
+// ── Phase 12: Disposition / Ack action bar ───────────────────────────
+// Shows current ack + disposition state and offers buttons. Posts via
+// the Next.js /api proxy which forwards to Java's /api/v1/alarms/{id}/{ack|dispose}.
+// Local state mirrors the optimistic update so the bar reflects the
+// new status without a full reload — the parent page can also re-fetch.
+
+const _DISPOSITIONS: Array<{ key: string; label: string; tone: string }> = [
+  { key: "release", label: "Release",  tone: "#16a34a" },
+  { key: "hold",    label: "Hold",     tone: "#d97706" },
+  { key: "rerun",   label: "Re-run",   tone: "#2563eb" },
+  { key: "scrap",   label: "Scrap",    tone: "#dc2626" },
+];
+
+function DispositionBar({ alarm }: { alarm: Alarm }) {
+  const [acked, setAcked]           = useState<boolean>(!!alarm.acked_at);
+  const [disposition, setDisp]      = useState<string | null>(alarm.disposition ?? null);
+  const [reason, setReason]         = useState<string>(alarm.disposition_reason ?? "");
+  const [busy, setBusy]             = useState<string | null>(null);
+  const [error, setError]           = useState<string | null>(null);
+
+  const ack = useCallback(async () => {
+    setBusy("ack"); setError(null);
+    try {
+      const r = await fetch(`/api/admin/alarms/${alarm.id}/ack`, { method: "POST" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setAcked(true);
+    } catch (e) { setError(String(e)); }
+    finally { setBusy(null); }
+  }, [alarm.id]);
+
+  const dispose = useCallback(async (key: string) => {
+    if (!reason.trim()) { setError("請填寫處置原因"); return; }
+    setBusy(key); setError(null);
+    try {
+      const r = await fetch(`/api/admin/alarms/${alarm.id}/dispose`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ disposition: key, reason }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setDisp(key);
+      setAcked(true);
+    } catch (e) { setError(String(e)); }
+    finally { setBusy(null); }
+  }, [alarm.id, reason]);
+
+  return (
+    <div style={{
+      background: "#fff",
+      border: "1px solid #e2e8f0", borderLeft: "4px solid #f59e0b",
+      borderRadius: 8, padding: "12px 16px", marginBottom: 16,
+      display: "flex", flexDirection: "column", gap: 10,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: "#595959" }}>
+          🛠 處置 (Disposition)
+        </span>
+        <span style={{ fontSize: 11, color: "#a0aec0" }}>
+          ack: {acked ? "✅ acknowledged" : "⏳ 未確認"}
+          {disposition && <> ・ disposition: <strong style={{ color: "#1f2937" }}>{disposition}</strong></>}
+        </span>
+        {!acked && (
+          <button onClick={ack} disabled={busy !== null}
+            style={{ marginLeft: "auto", padding: "4px 12px", fontSize: 12, fontWeight: 600,
+              background: "#f59e0b", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}>
+            {busy === "ack" ? "..." : "Acknowledge"}
+          </button>
+        )}
+      </div>
+
+      {!disposition && (
+        <>
+          <input
+            type="text" placeholder="處置原因 (required for dispose)"
+            value={reason} onChange={e => setReason(e.target.value)}
+            style={{ padding: "6px 10px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 4 }}
+          />
+          <div style={{ display: "flex", gap: 8 }}>
+            {_DISPOSITIONS.map(d => (
+              <button key={d.key}
+                onClick={() => dispose(d.key)} disabled={busy !== null}
+                style={{ padding: "6px 14px", fontSize: 12, fontWeight: 600,
+                  background: d.tone, color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}>
+                {busy === d.key ? "..." : d.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {disposition && reason && (
+        <div style={{ fontSize: 11, color: "#4a5568" }}>
+          原因: <span style={{ color: "#1f2937" }}>{reason}</span>
+        </div>
+      )}
+
+      {error && <div style={{ fontSize: 11, color: "#dc2626" }}>⚠ {error}</div>}
     </div>
   );
 }

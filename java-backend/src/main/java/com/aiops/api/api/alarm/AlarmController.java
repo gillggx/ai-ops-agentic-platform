@@ -98,9 +98,54 @@ public class AlarmController {
 		if ("resolved".equalsIgnoreCase(e.getStatus())) {
 			throw ApiException.conflict("alarm already resolved");
 		}
+		OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
 		e.setStatus("acknowledged");
 		e.setAcknowledgedBy(caller.username());
-		e.setAcknowledgedAt(OffsetDateTime.now(ZoneOffset.UTC));
+		e.setAcknowledgedAt(now);
+		// Phase 12: structured ack — only stamp once. Re-acks keep first ack.
+		if (e.getAckedAt() == null) {
+			e.setAckedBy(caller.userId());
+			e.setAckedAt(now);
+		}
+		return ApiResponse.ok(enrichment.enrichDetail(repository.save(e)));
+	}
+
+	/**
+	 * Phase 12 — record an end-state for the alarm.
+	 *  release | hold | scrap | rerun
+	 *
+	 * Body: {"disposition": "...", "reason": "..."}
+	 * Side-effect: also flips status → "resolved" so downstream filters
+	 * stop showing this alarm in the active list.
+	 */
+	@PostMapping("/{id}/dispose")
+	@Transactional
+	public ApiResponse<AlarmDtos.Detail> dispose(@PathVariable Long id,
+	                                             @RequestBody AlarmDtos.DisposeRequest body,
+	                                             @AuthenticationPrincipal AuthPrincipal caller) {
+		AlarmEntity e = repository.findById(id).orElseThrow(() -> ApiException.notFound("alarm"));
+		if (body == null || body.disposition() == null || body.disposition().isBlank()) {
+			throw ApiException.badRequest("disposition required (release | hold | scrap | rerun)");
+		}
+		String d = body.disposition().toLowerCase();
+		if (!java.util.Set.of("release", "hold", "scrap", "rerun").contains(d)) {
+			throw ApiException.badRequest("invalid disposition: " + body.disposition());
+		}
+		OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+		// If never acked, dispose implies ack.
+		if (e.getAckedAt() == null) {
+			e.setAckedBy(caller.userId());
+			e.setAckedAt(now);
+			e.setAcknowledgedBy(caller.username());
+			e.setAcknowledgedAt(now);
+		}
+		e.setDisposition(d);
+		e.setDispositionReason(body.reason());
+		e.setDisposedBy(caller.userId());
+		e.setDisposedAt(now);
+		// Disposing closes the alarm.
+		e.setStatus("resolved");
+		if (e.getResolvedAt() == null) e.setResolvedAt(now);
 		return ApiResponse.ok(enrichment.enrichDetail(repository.save(e)));
 	}
 

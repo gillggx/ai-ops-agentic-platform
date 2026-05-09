@@ -48,6 +48,10 @@ async def _create_indexes() -> None:
     await db.tools.create_index([("tool_id", 1)], unique=True)
     await db.apc_state.create_index([("apc_id", 1)], unique=True)
     await db.recipe_data.create_index([("recipe_id", 1)], unique=True)
+    # Phase 12 — audit trail for APC / Recipe parameter changes.
+    await db.parameter_audit_log.create_index([("objectName", 1), ("objectID", 1), ("eventTime", -1)])
+    await db.parameter_audit_log.create_index([("source", 1), ("eventTime", -1)])
+    await db.parameter_audit_log.create_index([("parameter", 1), ("eventTime", -1)])
 
 
 # ── Seeders (idempotent) ──────────────────────────────────────
@@ -58,10 +62,24 @@ async def _seed_lots() -> None:
     # drops below ACTIVE_LOT_TARGET. Seed just the initial batch (20) so
     # machines have something to claim on first boot.
     from config import ACTIVE_LOT_TARGET
-    if await _db.lots.count_documents({}) > 0:
+    existing = await _db.lots.count_documents({})
+    if existing > 0:
+        # Phase 12 retro-fit — fill lot_type='production' on legacy rows.
+        n = await _db.lots.update_many(
+            {"lot_type": {"$exists": False}},
+            {"$set": {"lot_type": "production"}},
+        )
+        if n.modified_count:
+            print(f"[DB] Retro-fitted lot_type='production' on {n.modified_count} existing lot(s).")
         return
     docs = [
-        {"lot_id": f"LOT-{i:04d}", "current_step": 1, "status": "Waiting", "cycle": 0}
+        {
+            "lot_id": f"LOT-{i:04d}",
+            "current_step": 1,
+            "status": "Waiting",
+            "cycle": 0,
+            "lot_type": "production",
+        }
         for i in range(1, ACTIVE_LOT_TARGET + 1)
     ]
     await _db.lots.insert_many(docs)
@@ -69,14 +87,30 @@ async def _seed_lots() -> None:
 
 
 async def _seed_tools() -> None:
-    if await _db.tools.count_documents({}) > 0:
+    """Phase 12: tools seeded with `chambers` field. If existing rows lack
+    `chambers`, retro-fit so Phase 12 chamber-aware code works on existing
+    DBs without a wipe."""
+    from config import CHAMBERS_PER_TOOL
+
+    chambers = [f"CH-{c}" for c in range(1, CHAMBERS_PER_TOOL + 1)]
+
+    existing = await _db.tools.count_documents({})
+    if existing > 0:
+        # Retro-fit: any tool missing `chambers` gets it.
+        n = await _db.tools.update_many(
+            {"chambers": {"$exists": False}},
+            {"$set": {"chambers": chambers}},
+        )
+        if n.modified_count:
+            print(f"[DB] Retro-fitted chambers={chambers} on {n.modified_count} existing tool(s).")
         return
+
     docs = [
-        {"tool_id": f"EQP-{i:02d}", "status": "Idle"}
+        {"tool_id": f"EQP-{i:02d}", "status": "Idle", "chambers": chambers}
         for i in range(1, TOTAL_TOOLS + 1)
     ]
     await _db.tools.insert_many(docs)
-    print(f"[DB] Seeded {TOTAL_TOOLS} tools.")
+    print(f"[DB] Seeded {TOTAL_TOOLS} tools, {len(chambers)} chambers each.")
 
 
 # ── Physical parameter ranges for seeding ────────────────────

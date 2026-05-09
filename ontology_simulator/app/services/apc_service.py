@@ -9,6 +9,7 @@ Passive params (15): drift freely, no correction. model_r2_score / stability_ind
 """
 import random
 from app.database import get_db
+from app.services import audit_service
 from config import APC_DRIFT_RATIO
 
 # ── Active vs Passive classification ──────────────────────────────────────────
@@ -61,9 +62,11 @@ async def drift_and_prepare(apc_id: str, prev_spc_status: str = "PASS") -> dict:
     targets = await _ensure_initial_values(apc_id, apc["parameters"])
 
     drifted = {}
+    audit_changes: list[tuple[str, float, float]] = []
     for k, v in apc["parameters"].items():
         # Apply random drift (same for all params)
         new_val = v * (1 + random.uniform(-APC_DRIFT_RATIO, APC_DRIFT_RATIO))
+        corrected = False
 
         if k in ACTIVE_PARAMS:
             # Active params: chance of self-correction toward target
@@ -72,8 +75,13 @@ async def drift_and_prepare(apc_id: str, prev_spc_status: str = "PASS") -> dict:
                 target = targets.get(k, v)
                 correction = (target - new_val) * CORRECTION_STRENGTH
                 new_val = new_val + correction
+                corrected = True
 
         drifted[k] = round(new_val, 6)
+        if corrected:
+            # Phase 12: log the auto-correction so skills can show
+            # "APC self-corrected param X by Δ on T due to Y" timelines.
+            audit_changes.append((k, v, drifted[k]))
 
     # Derived passive params: degrade based on active param total drift
     total_active_drift = 0.0
@@ -98,6 +106,17 @@ async def drift_and_prepare(apc_id: str, prev_spc_status: str = "PASS") -> dict:
         {"apc_id": apc_id},
         {"$set": {"parameters": drifted}},
     )
+
+    # Phase 12: bulk-audit any self-corrections that just happened.
+    if audit_changes:
+        await audit_service.record_changes(
+            object_name="APC",
+            object_id=apc_id,
+            changes=audit_changes,
+            source="apc_auto_correct",
+            reason="self-correction toward target",
+            metadata={"prev_spc_status": prev_spc_status},
+        )
 
     return {
         "parameters": drifted,

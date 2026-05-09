@@ -39,9 +39,15 @@ def acknowledge_hold(tool_id: str) -> bool:
     return False
 
 
-async def process_step(lot_id: str, tool_id: str, step_num: int) -> dict:
+async def process_step(
+    lot_id: str,
+    tool_id: str,
+    step_num: int,
+    chamber_id: str = "CH-1",
+    lot_type: str = "production",
+) -> dict:
     """
-    Full processing cycle for one (Lot, Tool, Step):
+    Full processing cycle for one (Lot, Tool, Chamber, Step):
       1. Prepare APC drift + Recipe (pre-process)
       2. Simulate process time (with possible HOLD)
       3. Generate DC readings + SPC evaluation
@@ -50,6 +56,10 @@ async def process_step(lot_id: str, tool_id: str, step_num: int) -> dict:
       6. Write everything at once with unified eventTime:
          - 1 event
          - 6 object_snapshots (DC, SPC, APC, RECIPE, FDC, EC)
+
+    Phase 12: chamber_id is the actual chamber (CH-1..CH-4) that processed
+    this wafer. lot_type ('production' | 'monitor') feeds SPC limits and
+    flows through onto every snapshot row.
     """
     db = get_db()
     step_id   = f"STEP_{step_num:03d}"
@@ -115,14 +125,14 @@ async def process_step(lot_id: str, tool_id: str, step_num: int) -> dict:
         await asyncio.sleep(process_time)
 
     # ── Stage 3: Process complete — generate measurements ─────
-    dc_readings = dc_service.generate_readings(tool_id)
-    spc_status, spc_charts = spc_service.evaluate(dc_readings)
+    dc_readings = dc_service.generate_readings(tool_id, chamber_id)
+    spc_status, spc_charts = spc_service.evaluate(dc_readings, lot_type=lot_type)
 
     # ── Stage 4: FDC classification ───────────────────────────
     fdc_result = fdc_service.classify(dc_readings, spc_status, apc_params)
 
     # ── Stage 5: EC drift ─────────────────────────────────────
-    ec_data = ec_service.apply_process_drift(tool_id)
+    ec_data = ec_service.apply_process_drift(tool_id, chamber_id)
 
     # ── Stage 6: Write everything with unified eventTime ──────
     event_time = datetime.utcnow()
@@ -130,6 +140,8 @@ async def process_step(lot_id: str, tool_id: str, step_num: int) -> dict:
         "eventTime": event_time,
         "lotID":     lot_id,
         "toolID":    tool_id,
+        "chamberID": chamber_id,           # Phase 12
+        "lot_type":  lot_type,             # Phase 12
         "step":      step_id,
     }
 
@@ -151,6 +163,8 @@ async def process_step(lot_id: str, tool_id: str, step_num: int) -> dict:
             "eventType":          "PROCESS_END",
             "lotID":              lot_id,
             "toolID":             tool_id,
+            "chamberID":          chamber_id,        # Phase 12
+            "lot_type":           lot_type,          # Phase 12
             "step":               step_id,
             "recipeID":           recipe_id,
             "apcID":              apc_id,
@@ -215,8 +229,9 @@ async def process_step(lot_id: str, tool_id: str, step_num: int) -> dict:
 
     log_fdc = f" FDC={fdc_result.classification}" if fdc_result.classification != "NORMAL" else ""
     log_recipe = f" Recipe={recipe_id}v{recipe_version}" + (" ↑BUMP" if recipe_result.get("version_bumped") else "")
+    log_kind = f"[{lot_type[:3].upper()}]" if lot_type != "production" else ""
     print(
-        f"[Agent] {lot_id} | {step_id} | {tool_id} | "
+        f"[Agent] {lot_id}{log_kind} | {step_id} | {tool_id}/{chamber_id} | "
         f"{log_recipe} bias={new_bias:.4f}({trend}) SPC={spc_status}{log_fdc}"
         + (" ⚠" if spc_status == "OOC" or bias_alert else "")
     )

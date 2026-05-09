@@ -160,7 +160,10 @@ public class AlarmEnrichmentService {
 				f.diagnosticResults,
 				f.triggerDataViews, f.diagnosticDataViews,
 				f.diagnosticCharts, f.diagnosticAlert,
-				f.autoCheckRuns);
+				f.autoCheckRuns,
+				a.getAckedBy(), a.getAckedAt(),
+				a.getDisposition(), a.getDispositionReason(),
+				a.getDisposedBy(), a.getDisposedAt());
 	}
 
 	private AlarmDtos.Detail buildDetail(AlarmEntity a, Ctx ctx) {
@@ -176,7 +179,10 @@ public class AlarmEnrichmentService {
 				f.diagnosticResults,
 				f.triggerDataViews, f.diagnosticDataViews,
 				f.diagnosticCharts, f.diagnosticAlert,
-				f.autoCheckRuns);
+				f.autoCheckRuns,
+				a.getAckedBy(), a.getAckedAt(),
+				a.getDisposition(), a.getDispositionReason(),
+				a.getDisposedBy(), a.getDisposedAt());
 	}
 
 	private EnrichedFields buildFields(AlarmEntity a, Ctx ctx) {

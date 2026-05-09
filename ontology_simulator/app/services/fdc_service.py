@@ -25,21 +25,85 @@ class FDCResult:
 
 # ── Fault rules ───────────────────────────────────────────────────────────────
 
-# DC sensor thresholds for WARNING (tighter than SPC limits)
+# DC sensor thresholds for WARNING (tighter than SPC limits) — Phase 12
+# expanded to ~30 sensors. Each maps to a domain-specific fault code so
+# downstream skills can group by fault family (FDC_VACUUM_*, FDC_RF_*, etc.).
 _DC_WARNING_THRESHOLDS = {
-    "chamber_pressure":  (13.5, 16.5),   # SPC limits are 12.5/17.5
-    "rf_forward_power": (1450, 1550),     # SPC limits are 1430/1570
-    "bias_voltage_v":    (830, 870),      # SPC limits are 820/880
-    "esc_zone1_temp":    (58.5, 61.5),    # SPC limits are 57.5/62.5
-    "cf4_flow_sccm":     (46, 54),        # SPC limits are 44/56
+    # ── Vacuum / pressure ───────────────────────────────────────
+    "chamber_pressure":     (13.5,  16.5),
+    "foreline_pressure":     (0.9,   1.7),
+    "loadlock_pressure":    (0.030, 0.070),
+    "throttle_position_pct":(32.0,  68.0),
+    "turbo_pump_speed_rpm": (28000, 32000),
+    "turbo_pump_temp_c":    (39.0,  44.0),
+    "fore_pump_current_a":   (3.2,   5.3),
+    # ── RF Power ────────────────────────────────────────────────
+    "rf_forward_power":    (1450,  1550),
+    "reflected_power":       (8,    22),
+    "rf_2nd_harmonic_w":     (5.0,  16.0),
+    "bias_power_lf_w":      (340,   460),
+    "bias_voltage_v":       (832,   868),
+    "vpp_v":                (185,   215),
+    "match_tune_position":  (42.0,  58.0),
+    # ── Thermal ─────────────────────────────────────────────────
+    "esc_zone1_temp":       (58.5,  61.5),
+    "esc_zone2_temp":       (58.5,  61.5),
+    "esc_zone3_temp":       (58.5,  61.5),
+    "esc_zone4_temp":       (58.5,  61.5),
+    "chuck_temp_c":         (19.3,  20.7),
+    "wall_temp_c":          (43.5,  46.5),
+    "showerhead_temp_c":    (56.0,  64.0),
+    # ── Gas Flow ────────────────────────────────────────────────
+    "cf4_flow_sccm":        (46,    54),
+    "o2_flow_sccm":          (8.0,  12.0),
+    "ar_flow_sccm":         (90,   110),
+    "helium_coolant_press":  (9.3,  10.7),
+    "total_flow_sccm":     (180,   210),
+    # ── OES / EPD ───────────────────────────────────────────────
+    "oes_endpoint_signal":   (0.25, 0.75),
+    "oes_band_f_703nm":      (0.22, 0.43),
+    "epd_intensity":         (0.32, 0.68),
+    # ── Contamination (RGA) ─────────────────────────────────────
+    "rga_h2o_partial":       (1.5e-9, 4.5e-9),
 }
 
 _FAULT_CODES = {
-    "chamber_pressure": "VACUUM_LEAK_001",
-    "rf_forward_power": "RF_DRIFT_001",
-    "bias_voltage_v":   "BIAS_SHIFT_001",
-    "esc_zone1_temp":   "THERMAL_DRIFT_001",
-    "cf4_flow_sccm":    "GAS_FLOW_001",
+    # Vacuum
+    "chamber_pressure":     "FDC_VAC_PRESSURE_DRIFT",
+    "foreline_pressure":    "FDC_VAC_FORELINE_DRIFT",
+    "loadlock_pressure":    "FDC_VAC_LOADLOCK_LEAK",
+    "throttle_position_pct":"FDC_VAC_THROTTLE_STUCK",
+    "turbo_pump_speed_rpm": "FDC_VAC_TURBO_DEGRADE",
+    "turbo_pump_temp_c":    "FDC_VAC_TURBO_HOT",
+    "fore_pump_current_a":  "FDC_VAC_FORE_PUMP_LOAD",
+    # RF
+    "rf_forward_power":     "FDC_RF_SOURCE_DRIFT",
+    "reflected_power":      "FDC_RF_REFL_HIGH",
+    "rf_2nd_harmonic_w":    "FDC_RF_HARMONIC_HIGH",
+    "bias_power_lf_w":      "FDC_RF_BIAS_DRIFT",
+    "bias_voltage_v":       "FDC_RF_BIAS_VOLT_DRIFT",
+    "vpp_v":                "FDC_RF_VPP_DRIFT",
+    "match_tune_position":  "FDC_RF_MATCH_OFF",
+    # Thermal
+    "esc_zone1_temp":       "FDC_THERMAL_ESC1_DRIFT",
+    "esc_zone2_temp":       "FDC_THERMAL_ESC2_DRIFT",
+    "esc_zone3_temp":       "FDC_THERMAL_ESC3_DRIFT",
+    "esc_zone4_temp":       "FDC_THERMAL_ESC4_DRIFT",
+    "chuck_temp_c":         "FDC_THERMAL_CHUCK_DRIFT",
+    "wall_temp_c":          "FDC_THERMAL_WALL_DRIFT",
+    "showerhead_temp_c":    "FDC_THERMAL_SHOWER_DRIFT",
+    # Gas
+    "cf4_flow_sccm":        "FDC_GAS_CF4_DEVIATION",
+    "o2_flow_sccm":         "FDC_GAS_O2_DEVIATION",
+    "ar_flow_sccm":         "FDC_GAS_AR_DEVIATION",
+    "helium_coolant_press": "FDC_GAS_HE_BACKSIDE",
+    "total_flow_sccm":      "FDC_GAS_TOTAL_DEVIATION",
+    # OES / EPD
+    "oes_endpoint_signal":  "FDC_OES_ENDPOINT_OFF",
+    "oes_band_f_703nm":     "FDC_OES_F_BAND_DRIFT",
+    "epd_intensity":        "FDC_EPD_SIGNAL_LOW",
+    # Contamination
+    "rga_h2o_partial":      "FDC_RGA_H2O_HIGH",
 }
 
 

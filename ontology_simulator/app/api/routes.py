@@ -1206,3 +1206,149 @@ async def reset_simulation():
         "dropped": dropped,
         "message": "Simulation data reset. All lots reset to STEP_001. Restart simulator to begin fresh.",
     }
+
+
+# ── Phase 12: Parameter audit log query + force-event admin ──────────────────
+
+@router.get("/audit-log")
+async def query_parameter_audit_log(
+    object_name: Optional[str] = Query(None, description="APC | RECIPE"),
+    object_id:   Optional[str] = Query(None, description="e.g. APC-001 / RCP-007"),
+    parameter:   Optional[str] = Query(None, description="parameter name"),
+    source:      Optional[str] = Query(
+        None,
+        description="apc_auto_correct | recipe_version_bump | engineer:* (prefix match)",
+    ),
+    since:       Optional[str] = Query("7d", description="24h | 7d | 30d"),
+    limit:       int           = Query(200, ge=1, le=2000),
+):
+    """Phase 12 — query the parameter_audit_log collection.
+
+    Returns rows newest-first. Skills (RECIPE_TRACE, APC_AUDIT) call this
+    to render "who/what changed parameter X on date Y" timelines and
+    histogram-by-source plots.
+    """
+    db = get_db()
+    q: dict = {}
+    if object_name: q["objectName"] = object_name
+    if object_id:   q["objectID"]   = object_id
+    if parameter:   q["parameter"]  = parameter
+    if source:
+        if source.endswith("*"):
+            q["source"] = {"$regex": f"^{source[:-1]}"}
+        else:
+            q["source"] = source
+
+    cutoff = _since_to_cutoff(since)
+    if cutoff:
+        q["eventTime"] = {"$gte": cutoff}
+
+    rows = await (
+        db.parameter_audit_log
+        .find(q, {"_id": 0})
+        .sort("eventTime", -1)
+        .limit(limit)
+        .to_list(length=limit)
+    )
+    for r in rows:
+        if isinstance(r.get("eventTime"), datetime):
+            r["eventTime"] = r["eventTime"].isoformat() + "Z"
+
+    return {
+        "data":  rows,
+        "count": len(rows),
+        "query": {k: v for k, v in q.items() if k != "eventTime"},
+        "since": since,
+    }
+
+
+# Force-event endpoint: lets admin/skill demos drop a deterministic
+# event into the simulator without waiting for organic OOC. 3 event_types
+# supported per Phase 12 user spec:
+#   - "OOC_SPC"  : write a fake PROCESS_END row with spc_status=OOC
+#   - "FAULT_FDC": write a fake PROCESS_END row with fdc_classification=FAULT
+#   - "ALARM"    : write a tool_events ALARM row
+class ForceEventRequest(BaseModel):
+    event_type: str          # "OOC_SPC" | "FAULT_FDC" | "ALARM"
+    tool_id:    str
+    lot_id:     Optional[str] = None
+    step:       Optional[str] = None      # STEP_001
+    chamber_id: Optional[str] = None      # CH-1..CH-4
+    note:       Optional[str] = None      # free text → metadata.note
+
+
+_FORCE_EVENT_TYPES = {"OOC_SPC", "FAULT_FDC", "ALARM"}
+
+
+@router.post("/admin/force-event")
+async def force_event(req: ForceEventRequest):
+    """Inject a deterministic event for skill demos / admin testing.
+
+    Phase 12. Caller-supplied tool/lot/step + event_type → writes the
+    corresponding row(s). Returns the inserted document IDs.
+    """
+    if req.event_type not in _FORCE_EVENT_TYPES:
+        raise HTTPException(
+            400,
+            f"event_type must be one of {sorted(_FORCE_EVENT_TYPES)}",
+        )
+
+    db   = get_db()
+    now  = datetime.utcnow()
+    step = req.step or "STEP_001"
+    lot  = req.lot_id or "LOT-FORCE"
+    chamber = req.chamber_id or "CH-1"
+    inserted: list[str] = []
+
+    if req.event_type == "OOC_SPC":
+        result = await db.events.insert_one({
+            "eventTime":          now,
+            "eventType":          "PROCESS_END",
+            "lotID":              lot,
+            "toolID":              req.tool_id,
+            "chamberID":          chamber,
+            "lot_type":           "production",
+            "step":               step,
+            "spc_status":         "OOC",
+            "fdc_classification": "WARNING",
+            "_forced":            True,
+            "_note":              req.note or "force-event admin",
+        })
+        inserted.append(str(result.inserted_id))
+    elif req.event_type == "FAULT_FDC":
+        result = await db.events.insert_one({
+            "eventTime":          now,
+            "eventType":          "PROCESS_END",
+            "lotID":              lot,
+            "toolID":              req.tool_id,
+            "chamberID":          chamber,
+            "lot_type":           "production",
+            "step":               step,
+            "spc_status":         "OOC",
+            "fdc_classification": "FAULT",
+            "_forced":            True,
+            "_note":              req.note or "force-event admin",
+        })
+        inserted.append(str(result.inserted_id))
+    else:  # ALARM
+        result = await db.tool_events.insert_one({
+            "toolID":    req.tool_id,
+            "lotID":     lot,
+            "step":      step,
+            "eventType": "ALARM",
+            "eventTime": now,
+            "metadata":  {
+                "alarm_code": "FORCED_ALARM",
+                "chamber_id": chamber,
+                "note":       req.note or "force-event admin",
+                "_forced":    True,
+            },
+        })
+        inserted.append(str(result.inserted_id))
+
+    return {
+        "status":     "ok",
+        "event_type": req.event_type,
+        "inserted":   inserted,
+        "eventTime":  now.isoformat() + "Z",
+    }

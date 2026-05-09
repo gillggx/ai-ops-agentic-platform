@@ -10,6 +10,24 @@ TOTAL_TOOLS   = 10
 TOTAL_STEPS   = 20                                        # was 10
 TOTAL_RECIPES = 20
 
+# Phase 12 — chamber dimension. Each tool has N chambers; per-process
+# chamber routing is random (per user decision: chambers each process
+# random, not per-lot fixed). Chamber-level data lets cross-chamber match
+# / drift / utilization skills work.
+CHAMBERS_PER_TOOL = int(os.getenv("CHAMBERS_PER_TOOL", "4"))
+
+# Phase 12 — monitor lot generator. Every Nth production lot, a monitor
+# lot is interleaved (special step subset, looser SPC limits).
+MONITOR_LOT_EVERY     = int(os.getenv("MONITOR_LOT_EVERY",     "20"))
+# SPC limits: production = mean ± 1.5σ; monitor = mean ± 2.0σ (looser).
+SPC_SD_PRODUCTION     = float(os.getenv("SPC_SD_PRODUCTION",   "1.5"))
+SPC_SD_MONITOR        = float(os.getenv("SPC_SD_MONITOR",      "2.0"))
+
+# Phase 12 — daily manual override cron. 1-2 random APC/recipe edits per
+# 24h to populate parameter_audit_log with "engineer:<name>" rows.
+MANUAL_OVERRIDE_PER_DAY_MIN = int(os.getenv("MANUAL_OVERRIDE_MIN", "1"))
+MANUAL_OVERRIDE_PER_DAY_MAX = int(os.getenv("MANUAL_OVERRIDE_MAX", "2"))
+
 # Lot pacer — keep concurrent in-flight lots near a target. New batches
 # are created lazily only when active count falls below the target.
 # Finished lots stay Finished (no recycle); pacer creates fresh sequential

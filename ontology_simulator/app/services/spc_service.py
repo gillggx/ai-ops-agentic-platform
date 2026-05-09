@@ -1,43 +1,74 @@
-"""SPC Service – 5 control charts, each tracking a SPECIFIC sensor with physical
-control limits.  OOC status is derived from ACTUAL limit violations, not randomness.
+"""SPC Service – Phase 12 expansion: 12 control charts (was 5), each tracking
+a specific DC sensor with mean ± k·σ control limits. The k factor depends on
+lot_type (production = 1.5σ ≈ 86.6% confidence; monitor = 2.0σ ≈ 95.4%) so
+monitor lots OOC less often than production at the same drift level.
 
-Charts:
-  xbar_chart  chamber_pressure   mTorr   LCL=12.5   UCL=17.5
-  r_chart     bias_voltage_v     V       LCL=820    UCL=880
-  s_chart     esc_zone1_temp     °C      LCL=57.5   UCL=62.5
-  p_chart     cf4_flow_sccm      sccm    LCL=44     UCL=56
-  c_chart     rf_forward_power   W       LCL=1430   UCL=1570
+OOC status is derived from ACTUAL limit violations, not randomness.
+
+Charts (sensor → spec):
+  xbar_chart        chamber_pressure         (mTorr)
+  r_chart           bias_voltage_v           (V)
+  s_chart           esc_zone1_temp           (°C)
+  p_chart           cf4_flow_sccm            (sccm)
+  c_chart           rf_forward_power         (W)
+  imr_pressure      foreline_pressure        (mTorr)  individual measurement
+  cusum_temp        chuck_temp_c             (°C)     cumulative shift
+  ewma_bias         bias_power_lf_w          (W)      exp-weighted moving avg
+  cpk_etch          rf_2nd_harmonic_w        (W)      capability index proxy
+  oes_endpoint      oes_endpoint_signal      (au)     end-point composite
+  rga_h2o_chart     rga_h2o_partial          (Torr)   contamination signal
+  match_tune_chart  match_tune_position      (%)      auto-tune drift
 """
 from app.database import get_db
+from config import SPC_SD_PRODUCTION, SPC_SD_MONITOR
 
 # ── Control chart specs ───────────────────────────────────────
+# Each chart: {sensor, mean, sd}. UCL/LCL = mean ± k·sd, k from lot_type.
+# Mean & SD are picked so production (k=1.5) limits roughly match the
+# legacy hardcoded values, keeping baseline OOC rate stable.
 _CHART_SPECS: dict[str, dict] = {
-    "xbar_chart": {"sensor": "chamber_pressure",  "ucl": 17.5,   "lcl": 12.5},
-    "r_chart":    {"sensor": "bias_voltage_v",     "ucl": 880.0,  "lcl": 820.0},
-    "s_chart":    {"sensor": "esc_zone1_temp",     "ucl": 62.5,   "lcl": 57.5},
-    "p_chart":    {"sensor": "cf4_flow_sccm",      "ucl": 56.0,   "lcl": 44.0},
-    "c_chart":    {"sensor": "rf_forward_power",   "ucl": 1570.0, "lcl": 1430.0},
+    "xbar_chart":       {"sensor": "chamber_pressure",      "mean": 15.00,    "sd": 1.667},
+    "r_chart":          {"sensor": "bias_voltage_v",         "mean": 850.00,   "sd": 20.0},
+    "s_chart":          {"sensor": "esc_zone1_temp",         "mean": 60.00,    "sd": 1.667},
+    "p_chart":          {"sensor": "cf4_flow_sccm",          "mean": 50.00,    "sd": 4.0},
+    "c_chart":          {"sensor": "rf_forward_power",       "mean": 1500.00,  "sd": 46.67},
+    # Phase 12 new charts ----------------------------------------------------
+    "imr_pressure":     {"sensor": "foreline_pressure",      "mean":  1.30,    "sd": 0.30},
+    "cusum_temp":       {"sensor": "chuck_temp_c",           "mean": 20.00,    "sd": 0.667},
+    "ewma_bias":        {"sensor": "bias_power_lf_w",        "mean": 400.00,   "sd": 33.0},
+    "cpk_etch":         {"sensor": "rf_2nd_harmonic_w",      "mean":  11.0,    "sd": 3.0},
+    "oes_endpoint":     {"sensor": "oes_endpoint_signal",    "mean":  0.50,    "sd": 0.16},
+    "rga_h2o_chart":    {"sensor": "rga_h2o_partial",        "mean":  3e-9,    "sd": 1e-9},
+    "match_tune_chart": {"sensor": "match_tune_position",    "mean": 50.00,    "sd": 5.0},
 }
 
 
-def evaluate(dc_params: dict) -> tuple[str, dict]:
-    """Evaluate 5 control charts from DC readings.
+def evaluate(dc_params: dict, lot_type: str = "production") -> tuple[str, dict]:
+    """Evaluate 12 control charts from DC readings.
 
-    Returns (spc_status, charts_dict).
-    spc_status: "OOC" if ANY chart breaches, else "PASS".
+    Phase 12: lot_type widens / tightens the control limits.
+      - production: ±1.5σ (default, legacy behaviour)
+      - monitor:    ±2.0σ (looser; monitor lots are check vehicles, not
+                           expected to OOC frequently)
+      - other:      ±1.5σ (engineering / qual)
     """
+    k = SPC_SD_MONITOR if lot_type == "monitor" else SPC_SD_PRODUCTION
     charts: dict[str, dict] = {}
     any_ooc = False
 
     for chart_id, spec in _CHART_SPECS.items():
         value = dc_params.get(spec["sensor"], 0.0)
-        is_ooc = not (spec["lcl"] <= value <= spec["ucl"])
+        ucl = spec["mean"] + k * spec["sd"]
+        lcl = spec["mean"] - k * spec["sd"]
+        is_ooc = not (lcl <= value <= ucl)
         if is_ooc:
             any_ooc = True
         charts[chart_id] = {
-            "value": round(value, 4),
-            "ucl":   spec["ucl"],
-            "lcl":   spec["lcl"],
+            "value":  round(value, 6),
+            "ucl":    round(ucl, 6),
+            "lcl":    round(lcl, 6),
+            "mean":   round(spec["mean"], 6),
+            "sd":     round(spec["sd"], 6),
             "is_ooc": is_ooc,
         }
 
@@ -52,6 +83,8 @@ async def upload_snapshot(spc_status: str, charts: dict, context: dict) -> str:
         "eventTime":        context["eventTime"],
         "lotID":            context["lotID"],
         "toolID":           context["toolID"],
+        "chamberID":        context.get("chamberID"),    # Phase 12
+        "lot_type":         context.get("lot_type", "production"),
         "step":             context["step"],
         "objectName":       "SPC",
         "objectID":         f"SPC-{context['step']}",

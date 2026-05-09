@@ -20,7 +20,11 @@ public final class AlarmDtos {
 	                      List<DiagnosticResult> diagnosticResults,
 	                      List<DataView> triggerDataViews, List<DataView> diagnosticDataViews,
 	                      List<Object> diagnosticCharts, Object diagnosticAlert,
-	                      List<AutoCheckRun> autoCheckRuns) {}
+	                      List<AutoCheckRun> autoCheckRuns,
+	                      // Phase 12 dispose fields
+	                      Long ackedBy, OffsetDateTime ackedAt,
+	                      String disposition, String dispositionReason,
+	                      Long disposedBy, OffsetDateTime disposedAt) {}
 
 	public record Detail(Long id, Long skillId, String triggerEvent, String equipmentId,
 	                     String lotId, String step, OffsetDateTime eventTime,
@@ -34,7 +38,14 @@ public final class AlarmDtos {
 	                     List<DiagnosticResult> diagnosticResults,
 	                     List<DataView> triggerDataViews, List<DataView> diagnosticDataViews,
 	                     List<Object> diagnosticCharts, Object diagnosticAlert,
-	                     List<AutoCheckRun> autoCheckRuns) {}
+	                     List<AutoCheckRun> autoCheckRuns,
+	                     // Phase 12 dispose fields
+	                     Long ackedBy, OffsetDateTime ackedAt,
+	                     String disposition, String dispositionReason,
+	                     Long disposedBy, OffsetDateTime disposedAt) {}
+
+	/** POST /api/v1/alarms/{id}/dispose body. */
+	public record DisposeRequest(String disposition, String reason) {}
 
 	/** Direct view of a pipeline data_view node output (table). The pipeline
 	 *  may emit multiple; ordered as block_data_view's `sequence` param. */
@@ -59,7 +70,10 @@ public final class AlarmDtos {
 				e.getAcknowledgedBy(), e.getAcknowledgedAt(), e.getResolvedAt(),
 				e.getExecutionLogId(), e.getDiagnosticLogId(),
 				null, null, null, null, List.of(), List.of(),
-				List.of(), List.of(), List.of(), null, List.of());
+				List.of(), List.of(), List.of(), null, List.of(),
+				e.getAckedBy(), e.getAckedAt(),
+				e.getDisposition(), e.getDispositionReason(),
+				e.getDisposedBy(), e.getDisposedAt());
 	}
 
 	static Detail detailOf(AlarmEntity e) {
@@ -69,6 +83,9 @@ public final class AlarmDtos {
 				e.getAcknowledgedBy(), e.getAcknowledgedAt(), e.getResolvedAt(),
 				e.getExecutionLogId(), e.getDiagnosticLogId(), e.getCreatedAt(),
 				null, null, null, null, List.of(), List.of(),
-				List.of(), List.of(), List.of(), null, List.of());
+				List.of(), List.of(), List.of(), null, List.of(),
+				e.getAckedBy(), e.getAckedAt(),
+				e.getDisposition(), e.getDispositionReason(),
+				e.getDisposedBy(), e.getDisposedAt());
 	}
 }

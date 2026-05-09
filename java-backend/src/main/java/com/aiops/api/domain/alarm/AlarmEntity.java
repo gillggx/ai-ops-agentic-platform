@@ -77,4 +77,28 @@ public class AlarmEntity extends CreatedAtOnly {
 
 	@Column(name = "diagnostic_log_id")
 	private Long diagnosticLogId;
+
+	// ── Phase 12: structured ack / disposition ──────────────────────────
+	// Differs from acknowledgedBy/acknowledgedAt above — those are loose
+	// string fields predating real auth. The Phase 12 columns FK back to
+	// users(id) so audit queries can join role/email/etc.
+
+	@Column(name = "acked_by")
+	private Long ackedBy;
+
+	@Column(name = "acked_at", columnDefinition = "timestamp with time zone")
+	private OffsetDateTime ackedAt;
+
+	/** release | hold | scrap | rerun  (NULL = not yet disposed) */
+	@Column(name = "disposition", length = 20)
+	private String disposition;
+
+	@Column(name = "disposition_reason", columnDefinition = "text")
+	private String dispositionReason;
+
+	@Column(name = "disposed_by")
+	private Long disposedBy;
+
+	@Column(name = "disposed_at", columnDefinition = "timestamp with time zone")
+	private OffsetDateTime disposedAt;
 }

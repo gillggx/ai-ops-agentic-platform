@@ -10,6 +10,7 @@ mostly flat with occasional jumps, like real fab recipe revisions.
 """
 import random
 from app.database import get_db
+from app.services import audit_service
 
 VERSION_BUMP_PROBABILITY = 0.10
 
@@ -39,16 +40,31 @@ async def get_and_maybe_bump_params(recipe_id: str) -> dict:
         # Version bump: adjust key params
         version += 1
         bumped = True
+        audit_changes: list[tuple[str, float, float]] = []
         for param_name, max_pct in _BUMP_PARAMS.items():
             if param_name in params:
-                offset = params[param_name] * random.uniform(-max_pct, max_pct)
-                params[param_name] = round(params[param_name] + offset, 4)
+                old_val = params[param_name]
+                offset = old_val * random.uniform(-max_pct, max_pct)
+                new_val = round(old_val + offset, 4)
+                params[param_name] = new_val
+                audit_changes.append((param_name, old_val, new_val))
 
         # Persist new version + params
         await db.recipe_data.update_one(
             {"recipe_id": recipe_id},
             {"$set": {"parameters": params, "version": version}},
         )
+
+        # Phase 12: audit log the bump
+        if audit_changes:
+            await audit_service.record_changes(
+                object_name="RECIPE",
+                object_id=recipe_id,
+                changes=audit_changes,
+                source="recipe_version_bump",
+                reason=f"auto version bump v{version - 1} → v{version}",
+                metadata={"new_version": version, "prev_version": version - 1},
+            )
 
     return {
         "parameters": params,
