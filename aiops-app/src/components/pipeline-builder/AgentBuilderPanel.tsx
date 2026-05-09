@@ -223,6 +223,28 @@ export default function AgentBuilderPanel({
             id: nextId(), role: ok ? "agent" : "error",
             text: `${ok ? "✓" : "⚠"} ${summary}`,
           }]);
+        } else if (eventType === "runtime_check_ok") {
+          const n = (data.node_count as number) ?? 0;
+          setLines((p) => [...p, { id: nextId(), role: "agent",
+            text: `✅ Runtime check：pipeline 跑通（${n} nodes 都 ok）` }]);
+        } else if (eventType === "runtime_check_failed") {
+          const failures = (data.failures as Array<{ node_id?: string; error?: string }>) ?? [];
+          const first = failures[0] || {};
+          const nid = first.node_id ?? "?";
+          const errMsg = first.error ?? (data.error as string) ?? "(unknown)";
+          setLines((p) => [...p, { id: nextId(), role: "error",
+            text: `Runtime check 發現問題：node ${nid} — ${String(errMsg).slice(0, 200)}` }]);
+        } else if (eventType === "runtime_check_timeout") {
+          setLines((p) => [...p, { id: nextId(), role: "agent",
+            text: `⏱ Runtime check 超時（>${data.timeout_sec ?? 10}s）— 已建好 pipeline 但無法在 build 階段先驗一遍。` }]);
+        } else if (eventType === "runtime_check_skipped") {
+          const reason = (data.reason as string) || "unknown";
+          setLines((p) => [...p, { id: nextId(), role: "agent",
+            text: `⏭ Runtime check 跳過（${reason}）` }]);
+        } else if (eventType === "runtime_check_no_data") {
+          const msg = (data.message as string) || "pipeline 跑通但沒回任何資料";
+          setLines((p) => [...p, { id: nextId(), role: "agent",
+            text: `ℹ ${msg}` }]);
         } else if (eventType === "plan") {
           const items = (data.items as PlanItem[]) ?? [];
           setPlanItems(items.map((it) => ({ ...it })));

@@ -103,6 +103,35 @@ def wrap_build_event_for_chat(
         payload["summary"] = data.get("summary") or ""
         # build_finalized doesn't carry pipeline_json itself — done event will.
         payload["pipeline_json"] = None
+    elif evt_type == "runtime_check_ok":
+        # Phase 10-C Fix 4 — finalize dry-run passed. Surface as a small
+        # narration so user knows the canvas IS runnable; not just built.
+        n = data.get("node_count") or 0
+        payload["type"] = "pb_glass_chat"
+        payload["content"] = f"✅ Runtime check：pipeline 跑通 ({n} nodes 都 ok)"
+    elif evt_type == "runtime_check_failed":
+        failed = data.get("failures") or []
+        first = failed[0] if failed else {}
+        nid = first.get("node_id") or "?"
+        err = first.get("error") or data.get("error") or "(unknown)"
+        payload["type"] = "pb_glass_error"
+        payload["message"] = f"⚠ Runtime check 發現問題：node {nid} — {str(err)[:200]}"
+        payload["op"] = None
+        payload["hint"] = "Pipeline 已建在 canvas，請在 builder 開啟 node 修參數後再 run。"
+    elif evt_type == "runtime_check_timeout":
+        payload["type"] = "pb_glass_chat"
+        payload["content"] = (
+            f"⏱ Runtime check 超時（>{data.get('timeout_sec', 10)}s）— "
+            "已建好 pipeline 但無法在 build 階段先驗一遍，請手動 run。"
+        )
+    elif evt_type == "runtime_check_skipped":
+        reason = data.get("reason") or "unknown"
+        payload["type"] = "pb_glass_chat"
+        payload["content"] = f"⏭ Runtime check 跳過（{reason}）"
+    elif evt_type == "runtime_check_no_data":
+        msg = data.get("message") or "pipeline 跑通但沒回任何資料"
+        payload["type"] = "pb_glass_chat"
+        payload["content"] = f"ℹ {msg}"
     elif evt_type in (
         "plan_validating",   # noisy — internal validation step
         "op_dispatched",     # paired with op_completed; redundant

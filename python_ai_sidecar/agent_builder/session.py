@@ -92,6 +92,10 @@ class StreamEvent:
         "confirm_pending", "confirm_received",
         "op_dispatched", "op_completed", "op_error", "op_repaired",
         "build_finalized",
+        # Phase 10-C Fix 4 — finalize dry-run:
+        "runtime_check_ok", "runtime_check_failed",
+        "runtime_check_timeout", "runtime_check_skipped",
+        "runtime_check_no_data",
     ]
     data: dict[str, Any]
 
