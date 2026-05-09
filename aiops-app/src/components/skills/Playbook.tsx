@@ -13,7 +13,7 @@
  * Both share the same StepBlock/ExpandedPipeline/SuggestionPanel components
  * (matches prototype's design where switching is a `t.mode` flag).
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -59,8 +59,9 @@ export default function Playbook({
   const [selectedCase, setSelectedCase] = useState<TestCase | null>(null);
   const [showSummary, setShowSummary] = useState(false);
 
-  /* Load */
-  useEffect(() => {
+  /* Load (extracted into a callback so children can trigger re-fetch
+     after an external bind — e.g. Pipeline Builder tab confirms back). */
+  const reload = useCallback(() => {
     let cancelled = false;
     setLoading(true);
     fetch(`/api/skill-documents/${encodeURIComponent(slug)}`, { cache: "no-store" })
@@ -83,7 +84,10 @@ export default function Playbook({
       .catch((e: Error) => { if (!cancelled) setError(e.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
+
+  useEffect(() => { return reload(); }, [reload]);
 
   /* Author mode auto-expand pending step */
   useEffect(() => {
@@ -354,6 +358,7 @@ export default function Playbook({
               mode={mode}
               confirmCheck={confirmCheck}
               onSet={(cc) => { setConfirmCheck(cc); markDirty(); }}
+              onReload={reload}
             />
           )}
 
@@ -1216,36 +1221,50 @@ function SummaryReport({
 /* ── Phase 11 v2: CONFIRM section (gating step) ────────────────────── */
 
 function ConfirmSection({
-  slug, mode, confirmCheck, onSet,
+  slug, mode, confirmCheck, onSet, onReload,
 }: {
   slug: string;
   mode: "author" | "run";
   confirmCheck: ConfirmCheck | null;
   onSet: (cc: ConfirmCheck | null) => void;
+  onReload: () => void;
 }) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const setStep = async (text: string) => {
-    if (!text.trim()) return;
+  // Phase 11 v4: Translate now opens Pipeline Builder (new tab) instead
+  // of running silent AI translation. The Builder hosts Glass Box + manual
+  // editing; on Confirm it POSTs back to /bind-pipeline which updates the
+  // skill's confirm_check. We refresh on window focus to pick up the bind.
+  const openInBuilder = async (text: string, slot: string = "confirm") => {
+    if (!text.trim() && slot === "confirm") return;
     setBusy(true); setError(null);
     try {
-      const r = await fetch(`/api/skill-documents/${encodeURIComponent(slug)}/confirm-check`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
+      const r = await fetch(
+        `/api/skill-documents/${encodeURIComponent(slug)}/builder-url?`
+        + `slot=${encodeURIComponent(slot)}`
+        + `&instruction=${encodeURIComponent(text)}`,
+      );
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error?.message ?? `HTTP ${r.status}`);
-      // Server returns updated SkillDetail.detail — extract confirm_check
-      const cc = j.data?.confirm_check ? safeParse<ConfirmCheck>(j.data.confirm_check, { description: text, pipeline_id: null }) : null;
-      onSet(cc);
+      const url = j.data?.builder_url ?? j.builder_url;
+      if (!url) throw new Error("builder_url missing in response");
+      window.open(url, "_blank", "noopener");
+      // Drop draft text — banner in Builder will carry it.
       setDraft("");
     } catch (e) { setError(String(e)); }
     finally { setBusy(false); }
   };
+
+  // When user comes back from Builder tab, refresh the skill detail to
+  // pick up the new confirm_check binding.
+  useEffect(() => {
+    const onFocus = () => onReload();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [onReload]);
 
   const removeStep = async () => {
     setBusy(true); setError(null);
@@ -1297,8 +1316,28 @@ function ConfirmSection({
                 <span>{confirmCheck.ai_summary}</span>
               </div>
             )}
+            {confirmCheck.pipeline_id != null && (
+              <div style={{ marginTop: 8 }}>
+                <a
+                  href={`/admin/pipeline-builder/${confirmCheck.pipeline_id}`}
+                  target="_blank"
+                  rel="noopener"
+                  style={{
+                    fontSize: 11.5, color: "var(--ai)", textDecoration: "none",
+                    display: "inline-flex", alignItems: "center", gap: 4,
+                  }}
+                >
+                  Inspect pipeline ↗
+                </a>
+              </div>
+            )}
             {mode === "author" && (
               <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+                <Btn kind="ghost"
+                  onClick={() => void openInBuilder(confirmCheck.description, "confirm")}
+                  disabled={busy}>
+                  ↻ rebuild in Pipeline Builder
+                </Btn>
                 <Btn kind="ghost" onClick={removeStep} disabled={busy}>
                   — remove confirmation step
                 </Btn>
@@ -1330,7 +1369,7 @@ function ConfirmSection({
             value={draft}
             disabled={busy}
             onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") void setStep(draft); }}
+            onKeyDown={(e) => { if (e.key === "Enter") void openInBuilder(draft); }}
             placeholder="（選填）先確認一個條件，例如「最近 1h OOC ≥ 3 才繼續」"
             style={{
               flex: 1, fontSize: 14, padding: "6px 0",
@@ -1339,8 +1378,8 @@ function ConfirmSection({
             }}
           />
           <Btn kind="ghost" disabled={!draft.trim() || busy} icon={<Icon.Spark/>}
-            onClick={() => void setStep(draft)}>
-            {busy ? "AI parsing…" : "Translate to pipeline"}
+            onClick={() => void openInBuilder(draft)}>
+            {busy ? "Opening Builder…" : "Build in Pipeline Builder ↗"}
           </Btn>
         </div>
       ) : null}

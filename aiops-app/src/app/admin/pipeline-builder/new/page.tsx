@@ -28,6 +28,11 @@ import AutoPatrolScopePicker, {
 } from "@/components/pipeline-builder/AutoPatrolScopePicker";
 import SurfaceTour from "@/components/tour/SurfaceTour";
 import { PIPELINE_BUILDER_STEPS } from "@/components/tour/steps/pipeline-builder";
+import SkillEmbedBanner, {
+  bootstrapSkillCtxFromUrl,
+  readSkillCtx,
+  seedInputsFromCtx,
+} from "@/components/pipeline-builder/SkillEmbedBanner";
 
 // React Flow can't SSR
 const BuilderLayout = dynamic(() => import("@/components/pipeline-builder/BuilderLayout"), {
@@ -87,6 +92,10 @@ export default function NewPipelinePage() {
       // onto canvas, skip wizard."
       const fromParam = params.get("from");
       const fromAgent = fromParam === "agent" || fromParam === "chat";
+      // Phase 11 v4: ?embed=skill = launched from a Skill page. Bootstrap
+      // sessionStorage ctx + seed inputs from event/target → skip wizard.
+      const skillCtx = bootstrapSkillCtxFromUrl();
+
       // Heuristic: pipeline_json shape decides the kind. block_alert ⇒ auto_patrol;
       // block_chart-only ⇒ skill; mixed ⇒ default skill.
       const inferKind = (pj: PipelineJSON): Kind => {
@@ -97,7 +106,17 @@ export default function NewPipelinePage() {
         return "skill";
       };
 
-      if (q === "auto_patrol" || q === "auto_check" || q === "skill") {
+      if (skillCtx) {
+        // Skill embed: kind="skill" (no alert; ends in step_check), seed inputs
+        // from the trigger event payload or schedule target.
+        setKind("skill");
+        const seeded = seedInputsFromCtx(skillCtx).map((s) => ({
+          name: s.name, type: s.type, required: s.required,
+          description: s.description ?? "",
+        })) as PipelineInput[];
+        setPendingInputs(seeded);
+        setSkipWizard(true);
+      } else if (q === "auto_patrol" || q === "auto_check" || q === "skill") {
         setKind(q);
         setStep(q === "skill" ? 3 : 2);
       } else if (fromAgent && hydrated) {
@@ -158,11 +177,13 @@ function WizardOrBuilder({
   // v1.5: when navigated from chat with ?from=agent, hand straight off
   // to BuilderLayout — no wizard, no kind gate. The hydrated pipeline
   // is already in ephemeralPipeline.
+  // Phase 11 v4: ?embed=skill also skips the wizard but has no ephemeral
+  // pipeline — just seeded inputs. Allow skipWizard regardless.
   useEffect(() => {
-    if (skipWizard && kind && ephemeralPipeline && !ready) {
+    if (skipWizard && kind && !ready) {
       setReady(true);
     }
-  }, [skipWizard, kind, ephemeralPipeline, ready]);
+  }, [skipWizard, kind, ready]);
 
   // When user lands on step 3 with no prior pendingInputs, pre-populate with
   // the pre-checked suggestions so the common case is already set.
@@ -194,13 +215,17 @@ function WizardOrBuilder({
         ? pendingInputs
         : (ephemeralPipeline?.inputs ?? []),
     };
+    // Phase 11 v4: pipelineId is null on /new (gets one after first save +
+    // BuilderLayout navigates to /[id]). Banner shows "press Save first" hint.
     return (
       <>
+        <SkillEmbedBanner pipelineId={null}/>
         <BuilderLayout
           mode="new"
           initialKind={kind}
           initialPipelineJson={initialJson}
           initialPendingTrigger={pendingTrigger}
+          initialPrompt={readSkillCtx()?.instruction}
         />
         <SurfaceTour surfaceId="pipeline-builder" steps={PIPELINE_BUILDER_STEPS} />
       </>

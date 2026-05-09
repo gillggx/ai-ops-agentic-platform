@@ -271,6 +271,167 @@ public class SkillDocumentController {
         return ApiResponse.ok(Dtos.detailOf(skill));
     }
 
+    /**
+     * Phase 11 v4 — return the Pipeline Builder URL the frontend should
+     * open (in a new tab) when user wants to author a pipeline for one
+     * of this skill's slots. The URL carries:
+     *   - skill_doc_id      : binds back when Builder hits Confirm
+     *   - slot              : confirm | step:NEW | step:&lt;existing-step-id&gt;
+     *   - instruction       : NL prompt to seed Glass Box
+     *   - trigger_type      : event | schedule
+     *   - trigger_event     : event name when type=event
+     *   - target_*          : target.kind / target.ids when type=schedule
+     *
+     * Builder embed mode reads these and pre-binds inputs, then on Confirm
+     * POSTs to {@code /bind-pipeline} below to wire the resulting
+     * pipeline_id back into the skill.
+     */
+    @GetMapping("/{slug}/builder-url")
+    @PreAuthorize(Authorities.ADMIN_OR_PE)
+    public ApiResponse<Map<String, Object>> builderUrl(@PathVariable String slug,
+                                                        @RequestParam String slot,
+                                                        @RequestParam(required = false, defaultValue = "") String instruction) {
+        if (!slot.equals("confirm") && !slot.startsWith("step:")) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "validation_error",
+                    "slot must be 'confirm' or 'step:<id>'");
+        }
+        SkillDocumentEntity skill = repository.findBySlug(slug)
+                .orElseThrow(() -> ApiException.notFound("skill"));
+
+        Map<String, Object> trig = parseJson(skill.getTriggerConfig());
+        StringBuilder qs = new StringBuilder();
+        qs.append("?embed=skill")
+          .append("&skill_slug=").append(java.net.URLEncoder.encode(slug, java.nio.charset.StandardCharsets.UTF_8))
+          .append("&skill_doc_id=").append(skill.getId())
+          .append("&slot=").append(java.net.URLEncoder.encode(slot, java.nio.charset.StandardCharsets.UTF_8));
+        if (!instruction.isBlank()) {
+            qs.append("&instruction=").append(java.net.URLEncoder.encode(instruction, java.nio.charset.StandardCharsets.UTF_8));
+        }
+        String type = String.valueOf(trig.getOrDefault("type", "event"));
+        // legacy "system" → "event"
+        if ("system".equals(type)) type = "event";
+        qs.append("&trigger_type=").append(java.net.URLEncoder.encode(type, java.nio.charset.StandardCharsets.UTF_8));
+        if ("event".equals(type)) {
+            String ev = String.valueOf(trig.getOrDefault("event",
+                    trig.getOrDefault("event_type", "")));
+            if (!ev.isBlank()) qs.append("&trigger_event=").append(java.net.URLEncoder.encode(ev, java.nio.charset.StandardCharsets.UTF_8));
+        } else if ("schedule".equals(type)) {
+            Object targetObj = trig.get("target");
+            if (targetObj instanceof Map<?, ?> tm) {
+                Object kind = tm.get("kind");
+                if (kind != null) qs.append("&target_kind=").append(java.net.URLEncoder.encode(String.valueOf(kind), java.nio.charset.StandardCharsets.UTF_8));
+                Object ids = tm.get("ids");
+                if (ids instanceof java.util.List<?> idList && !idList.isEmpty()) {
+                    String joined = String.join(",", idList.stream().map(String::valueOf).toList());
+                    qs.append("&target_ids=").append(java.net.URLEncoder.encode(joined, java.nio.charset.StandardCharsets.UTF_8));
+                }
+            }
+        }
+
+        String url = "/admin/pipeline-builder/new" + qs;
+        return ApiResponse.ok(Map.of(
+                "builder_url", url,
+                "skill_id",    skill.getId(),
+                "slot",        slot
+        ));
+    }
+
+    /**
+     * Phase 11 v4 — Pipeline Builder calls this on Confirm to bind the
+     * just-built pipeline back into the requesting skill's slot.
+     *
+     * <p>Body: {"slot": "confirm" | "step:s1", "pipeline_id": 42, "summary": "..."}
+     */
+    @PostMapping("/{slug}/bind-pipeline")
+    @PreAuthorize(Authorities.ADMIN_OR_PE)
+    @Transactional
+    public ApiResponse<Dtos.Detail> bindPipeline(@PathVariable String slug,
+                                                  @RequestBody Map<String, Object> body) {
+        SkillDocumentEntity skill = repository.findBySlug(slug)
+                .orElseThrow(() -> ApiException.notFound("skill"));
+        String slot = String.valueOf(body.getOrDefault("slot", "")).trim();
+        Object pid = body.get("pipeline_id");
+        if (!(pid instanceof Number pn)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "validation_error", "pipeline_id required");
+        }
+        Long pipelineId = pn.longValue();
+        String summary = String.valueOf(body.getOrDefault("summary", ""));
+        String description = String.valueOf(body.getOrDefault("description", summary));
+
+        // Stamp ownership on the pipeline row so future cleanup / lifecycle
+        // logic can find skill-bound pipelines.
+        PipelineEntity pe = pipelineRepo.findById(pipelineId)
+                .orElseThrow(() -> ApiException.notFound("pipeline"));
+        pe.setParentSkillDocId(skill.getId());
+        pe.setParentSlot(slot);
+        // Phase 11 v4: under Skill ownership, lifecycle is driven by Skill.
+        // We park the pipeline at status="linked" so it doesn't show up in
+        // the free-standing pipeline list as draft / orphan.
+        pe.setStatus("linked");
+        pipelineRepo.save(pe);
+
+        if ("confirm".equals(slot)) {
+            Map<String, Object> confirm = new java.util.HashMap<>();
+            confirm.put("description", description);
+            confirm.put("ai_summary", summary);
+            confirm.put("pipeline_id", pipelineId);
+            confirm.put("must_pass", true);
+            try {
+                skill.setConfirmCheck(mapper.writeValueAsString(confirm));
+            } catch (Exception e) {
+                throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "confirm_serialization", e.getMessage());
+            }
+        } else if (slot.startsWith("step:")) {
+            String stepId = slot.substring("step:".length());
+            // step:NEW → append; step:<existing-id> → update.
+            updateStepPipelineId(skill, stepId, pipelineId, description, summary);
+        } else {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "validation_error",
+                    "slot must be 'confirm' or 'step:<id|NEW>'");
+        }
+
+        return ApiResponse.ok(Dtos.detailOf(skill));
+    }
+
+    @SuppressWarnings("unchecked")
+    private void updateStepPipelineId(SkillDocumentEntity skill, String stepId,
+                                       Long pipelineId, String description, String summary) {
+        try {
+            List<Map<String, Object>> stepsList = mapper.readValue(
+                    skill.getSteps() == null || skill.getSteps().isBlank() ? "[]" : skill.getSteps(),
+                    new TypeReference<List<Map<String, Object>>>() {});
+            if ("NEW".equalsIgnoreCase(stepId) || stepsList.stream().noneMatch(
+                    s -> stepId.equals(String.valueOf(s.get("id"))))) {
+                String newId = "s" + (stepsList.size() + 1) + "_" + Long.toHexString(System.currentTimeMillis());
+                Map<String, Object> step = new java.util.HashMap<>();
+                step.put("id", newId);
+                step.put("order", stepsList.size() + 1);
+                step.put("text", description);
+                step.put("ai_summary", summary);
+                step.put("pipeline_id", pipelineId);
+                step.put("confirmed", true);
+                step.put("pending", false);
+                step.put("suggested_actions", List.of());
+                step.put("badge", Map.of("kind", "ai", "label", "Pipeline Builder"));
+                stepsList.add(step);
+            } else {
+                for (Map<String, Object> s : stepsList) {
+                    if (stepId.equals(String.valueOf(s.get("id")))) {
+                        s.put("pipeline_id", pipelineId);
+                        if (!description.isBlank()) s.put("text", description);
+                        if (!summary.isBlank()) s.put("ai_summary", summary);
+                        s.put("pending", false);
+                        s.put("confirmed", true);
+                        break;
+                    }
+                }
+            }
+            skill.setSteps(mapper.writeValueAsString(stepsList));
+        } catch (Exception e) {
+            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "steps_serialization", e.getMessage());
+        }
+    }
+
     @DeleteMapping("/{slug}")
     @PreAuthorize(Authorities.ADMIN_OR_PE)
     @Transactional

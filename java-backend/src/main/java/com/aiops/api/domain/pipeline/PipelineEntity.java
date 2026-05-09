@@ -72,4 +72,17 @@ public class PipelineEntity extends Auditable {
 	/** Self-reference for pipeline fork / version chain. */
 	@Column(name = "parent_id")
 	private Long parentId;
+
+	/**
+	 * Phase 11 v4 — when set, this pipeline is owned by a Skill. Its
+	 * lifecycle is driven by skill_documents.status (the Skill is the
+	 * single publish gate); the pipeline's own {@code status} field is
+	 * effectively ignored by SkillMaterializeService.
+	 */
+	@Column(name = "parent_skill_doc_id")
+	private Long parentSkillDocId;
+
+	/** Slot the pipeline fills in its parent skill — {@code confirm} | {@code step:s1} | ... */
+	@Column(name = "parent_slot", length = 40)
+	private String parentSlot;
 }
