@@ -201,7 +201,11 @@ def generate_readings(tool_id: str = "", chamber_id: str = "") -> dict:
             if sensor in _DRIFT_RATES:
                 chamber_bias = math.sin(phase) * (hi - lo) * 0.05
             val = random.uniform(lo, hi) + drift.get(sensor, 0.0) + chamber_bias
-        readings[sensor] = round(val, 4)
+        # Phase 12: 4-decimal round nukes precision for sub-µ scale sensors
+        # (rga_h2o_partial ~1e-9 → 0). Use 12 decimals so RGA / leak-rate /
+        # other small-scale sensors round-trip safely while regular
+        # engineering units still display cleanly via downstream `toFixed`.
+        readings[sensor] = round(val, 12)
 
     if tool_id:
         for s, rate in _DRIFT_RATES.items():

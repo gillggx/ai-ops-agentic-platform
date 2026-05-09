@@ -69,12 +69,15 @@ def evaluate(dc_params: dict, lot_type: str = "production") -> tuple[str, dict]:
         is_ooc = not (lcl <= value <= ucl)
         if is_ooc:
             any_ooc = True
+        # Phase 12: 6-decimal round nukes sub-µ scale charts (rga_h2o ~1e-9
+        # rounds to 0). 12 decimals keeps small-scale sensors visible while
+        # still trimming float noise on regular engineering scales.
         charts[chart_id] = {
-            "value":  round(value, 6),
-            "ucl":    round(ucl, 6),
-            "lcl":    round(lcl, 6),
-            "mean":   round(spec["mean"], 6),
-            "sd":     round(spec["sd"], 6),
+            "value":  round(value, 12),
+            "ucl":    round(ucl, 12),
+            "lcl":    round(lcl, 12),
+            "mean":   round(spec["mean"], 12),
+            "sd":     round(spec["sd"], 12),
             "is_ooc": is_ooc,
         }
 
