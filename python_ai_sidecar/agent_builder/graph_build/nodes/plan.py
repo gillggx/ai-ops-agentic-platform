@@ -33,6 +33,9 @@ Op type 共 5 種:
   4. 一次出完整 plan — 後面不能再補 op
   5. block 必須來自下面的目錄；不要編造 block_id
   6. 如需 preview/debug 輸出，可在中間或末尾加 run_preview op
+  7. **block_id 不要帶 @version 後綴**。block_id 跟 block_version 是兩個分開的欄位：
+     ✅ 對：{"block_id":"block_xbar_r", "block_version":"1.0.0"}
+     ❌ 錯：{"block_id":"block_xbar_r@1.0.0", "block_version":"1.0.0"}（會找不到 block）
 
 Block 目錄:
 {BLOCK_CATALOG}

@@ -33,6 +33,16 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
     registry.load()
     errors: list[str] = []
 
+    # Defensive normalization first — Haiku regularly stuffs the version into
+    # block_id (e.g. "block_xbar_r@1.0.0") AND populates block_version, so
+    # lookups become "block_xbar_r@1.0.0@1.0.0" and miss the catalog. Strip
+    # the @version suffix in-place on the raw plan so call_tool_node sees the
+    # cleaned id too. We do this before pydantic parse so any error message
+    # already shows the cleaned form.
+    cleaned_plan = [_strip_block_id_version(op) for op in plan_raw]
+    plan_was_cleaned = any(c is not o for c, o in zip(cleaned_plan, plan_raw))
+    plan_raw = cleaned_plan
+
     # Pass 1 — Op pydantic schema
     parsed: list[Op] = []
     for idx, raw in enumerate(plan_raw):
@@ -117,15 +127,46 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
             if op.node_id not in id_to_block:
                 errors.append(f"Op#{idx}: {op.type.value} targets unknown node '{op.node_id}'")
 
-    logger.info("validate_plan_node: %d errors found", len(errors))
+    logger.info("validate_plan_node: %d errors found, plan_cleaned=%s",
+                len(errors), plan_was_cleaned)
 
-    return {
+    update: dict[str, Any] = {
         "plan_validation_errors": errors,
         "sse_events": [_event(
             "plan_validating",
             {"errors": errors, "ok": len(errors) == 0},
         )],
     }
+    if plan_was_cleaned:
+        update["plan"] = plan_raw  # propagate cleaned block_ids to call_tool_node
+    return update
+
+
+def _strip_block_id_version(op_raw: dict[str, Any]) -> dict[str, Any]:
+    """Strip a trailing '@<digit>...' suffix from add_node.block_id.
+
+    Haiku regularly produces block_id='block_xbar_r@1.0.0' AND populates
+    block_version='1.0.0' separately, so registry lookup becomes
+    ('block_xbar_r@1.0.0', '1.0.0') and misses every catalog entry. This
+    normalizes block_id to 'block_xbar_r' so downstream lookup succeeds
+    without burning a repair_plan attempt on a pure formatting issue.
+    """
+    if not isinstance(op_raw, dict):
+        return op_raw
+    if op_raw.get("type") != "add_node":
+        return op_raw
+    bid = op_raw.get("block_id")
+    if not isinstance(bid, str) or "@" not in bid:
+        return op_raw
+    head, _, tail = bid.rpartition("@")
+    if head and tail and tail[:1].isdigit():
+        cleaned = dict(op_raw)
+        cleaned["block_id"] = head
+        # Honor the suffix as version if block_version is missing.
+        if not cleaned.get("block_version"):
+            cleaned["block_version"] = tail
+        return cleaned
+    return op_raw
 
 
 def _event(name: str, data: dict[str, Any]) -> dict[str, Any]:
