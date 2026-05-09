@@ -25,13 +25,22 @@ import { applyGlassOp, OP_LABELS, opDetail, autoLayoutPipeline } from "@/lib/pip
 import { PlanRenderer, type PlanItem } from "@/components/copilot/PlanRenderer";
 import { ContinuationCard, type ContinuationData, type ContinuationOption } from "@/components/copilot/ContinuationCard";
 
-type ChatRole = "user" | "agent" | "op" | "error" | "continuation" | "advisor";
+type ChatRole = "user" | "agent" | "op" | "error" | "continuation" | "advisor" | "confirm";
+interface ConfirmData {
+  session_id: string;
+  plan_summary: string;
+  plan_ops: string[];
+  n_ops: number;
+  resolved: boolean;
+}
 interface ChatLine {
   id: number;
   role: ChatRole;
   text: string;
   op?: { label: string; detail: string };
   continuation?: ContinuationData;
+  /** Phase 10 (graph_build v2) — confirm_pending card. */
+  confirm?: ConfirmData;
   /** When role==='advisor' — markdown body + which advisor bucket fired. */
   advisor?: { kind: string; markdown: string; meta?: Record<string, unknown> };
 }
@@ -125,7 +134,99 @@ export default function AgentBuilderPanel({
         let data: Record<string, unknown> = {};
         try { data = dataStr ? JSON.parse(dataStr) : {}; } catch { data = { _raw: dataStr }; }
 
-        if (eventType === "plan") {
+        if (eventType === "plan_proposed") {
+          // Phase 10 (graph_build v2): plan came back from plan_node.
+          // Just log a chat note; the visible confirm card is emitted on
+          // confirm_pending (only fires for FROM_SCRATCH builds).
+          const summary = (data.summary as string) || "";
+          const fromScratch = data.from_scratch as boolean;
+          if (summary) {
+            setLines((p) => [...p, {
+              id: nextId(), role: "agent",
+              text: fromScratch ? `📋 plan: ${summary}` : `📋 ${summary}`,
+            }]);
+          }
+        } else if (eventType === "plan_validating") {
+          // Pure-progress event; usually silent unless errors are present.
+          const errors = (data.errors as string[]) ?? [];
+          if (errors.length > 0) {
+            setLines((p) => [...p, {
+              id: nextId(), role: "agent",
+              text: `🔧 plan 有 ${errors.length} 個問題，正在修...`,
+            }]);
+          }
+        } else if (eventType === "plan_repaired") {
+          const ok = data.ok as boolean;
+          const attempt = data.attempt as number;
+          const fix = (data.fix_summary as string) || "";
+          setLines((p) => [...p, {
+            id: nextId(), role: ok ? "agent" : "error",
+            text: `${ok ? "🔧" : "✗"} plan repair attempt ${attempt}: ${fix}`,
+          }]);
+        } else if (eventType === "confirm_pending") {
+          // Phase 10: render confirm card with Apply / Cancel buttons.
+          const cd: ConfirmData = {
+            session_id: (data.session_id as string) || "",
+            plan_summary: (data.plan_summary as string) || "(no summary)",
+            plan_ops: (data.plan_ops as string[]) ?? [],
+            n_ops: (data.n_ops as number) ?? 0,
+            resolved: false,
+          };
+          setLines((p) => [...p, { id: nextId(), role: "confirm", text: "", confirm: cd }]);
+          // Stream pauses here — waiting on user POST to /confirm.
+        } else if (eventType === "confirm_received") {
+          // Just an ACK; UI already toggled card.resolved.
+        } else if (eventType === "op_dispatched") {
+          // Could show "running op #N" but it's noisy; defer to op_completed.
+        } else if (eventType === "op_completed") {
+          // Translate v2 op shape into v1 glass-ops shape so applyGlassOp works.
+          const op = (data.op as Record<string, unknown>) || {};
+          const result = (data.result as Record<string, unknown>) || {};
+          const opType = op.type as string;
+          // Build v1-style args dict from v2 op fields.
+          const v1Args: Record<string, unknown> = {};
+          if (opType === "add_node") {
+            v1Args.block_name = op.block_id;
+            v1Args.block_version = op.block_version ?? "1.0.0";
+            v1Args.params = op.params ?? {};
+          } else if (opType === "connect") {
+            v1Args.from_node = op.src_id;
+            v1Args.from_port = op.src_port;
+            v1Args.to_node = op.dst_id;
+            v1Args.to_port = op.dst_port;
+          } else if (opType === "set_param") {
+            const p = (op.params as Record<string, unknown>) || {};
+            v1Args.node_id = op.node_id;
+            v1Args.key = p.key;
+            v1Args.value = p.value;
+          } else if (opType === "remove_node") {
+            v1Args.node_id = op.node_id;
+          }
+          applyOperation(opType, v1Args, result);
+          const label = OP_LABELS[opType] ?? opType;
+          const detail = opDetail(opType, v1Args);
+          setLines((p) => [...p, { id: nextId(), role: "op", text: "", op: { label, detail } }]);
+        } else if (eventType === "op_error") {
+          const op = (data.op as Record<string, unknown>) || {};
+          const cursor = data.cursor as number;
+          const msg = (op.error_message as string) || "(no msg)";
+          setLines((p) => [...p, { id: nextId(), role: "error", text: `op #${cursor} (${op.type}) failed: ${msg}` }]);
+        } else if (eventType === "op_repaired") {
+          const ok = data.ok as boolean;
+          const cursor = data.cursor as number;
+          const attempt = data.attempt as number;
+          setLines((p) => [...p, {
+            id: nextId(), role: ok ? "agent" : "error",
+            text: `${ok ? "🔧" : "✗"} op#${cursor} repair attempt ${attempt}`,
+          }]);
+        } else if (eventType === "build_finalized") {
+          const ok = data.ok as boolean;
+          const summary = (data.summary as string) || "";
+          setLines((p) => [...p, {
+            id: nextId(), role: ok ? "agent" : "error",
+            text: `${ok ? "✓" : "⚠"} ${summary}`,
+          }]);
+        } else if (eventType === "plan") {
           const items = (data.items as PlanItem[]) ?? [];
           setPlanItems(items.map((it) => ({ ...it })));
         } else if (eventType === "plan_update") {
@@ -251,6 +352,42 @@ export default function AgentBuilderPanel({
     }
   }, [focusedNodeId, focusedNodeLabel, basePipelineId, state.pipeline, consumeBuildStream]);
 
+  const handleConfirmPick = useCallback(async (lineId: number, confirmed: boolean) => {
+    // Phase 10 (graph_build v2): user replied to plan_proposal at confirm_gate.
+    setLines((p) => p.map((l) =>
+      l.id === lineId && l.confirm
+        ? { ...l, confirm: { ...l.confirm, resolved: true } }
+        : l,
+    ));
+    const card = lines.find((l) => l.id === lineId)?.confirm;
+    if (!card) return;
+    if (runningLockRef.current && !confirmed) {
+      // user just cancels; don't fire request
+      setLines((p) => [...p, { id: nextId(), role: "agent", text: "已取消這次 build。" }]);
+      return;
+    }
+    runningLockRef.current = true;
+    setRunning(true);
+    try {
+      abortRef.current?.abort();
+      abortRef.current = new AbortController();
+      const streamRes = await fetch("/api/agent/build/confirm", {
+        method: "POST",
+        signal: abortRef.current.signal,
+        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+        body: JSON.stringify({ sessionId: card.session_id, confirmed }),
+      });
+      await consumeBuildStream(streamRes);
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") {
+        setLines((p) => [...p, { id: nextId(), role: "error", text: `Confirm 失敗：${(e as Error).message}` }]);
+      }
+    } finally {
+      setRunning(false);
+      runningLockRef.current = false;
+    }
+  }, [lines, consumeBuildStream]);
+
   const handleContinuationPick = useCallback(async (lineId: number, opt: ContinuationOption) => {
     // Mark the card resolved so its buttons disable.
     setLines((p) => p.map((l) =>
@@ -314,6 +451,12 @@ export default function AgentBuilderPanel({
               key={l.id}
               data={l.continuation}
               onPick={(opt) => handleContinuationPick(l.id, opt)}
+            />
+          ) : l.role === "confirm" && l.confirm ? (
+            <ConfirmCard
+              key={l.id}
+              data={l.confirm}
+              onPick={(confirmed) => handleConfirmPick(l.id, confirmed)}
             />
           ) : (
             <MessageRow key={l.id} line={l} />
@@ -480,3 +623,80 @@ function MessageRow({ line }: { line: ChatLine }) {
 }
 
 // OP_LABELS + opDetail moved to @/lib/pipeline-builder/glass-ops
+
+
+/**
+ * Phase 10 (graph_build v2) — confirm card. Rendered when sidecar emits
+ * confirm_pending after plan_node finishes for a FROM_SCRATCH build.
+ *
+ * User picks Apply → POST /api/agent/build/confirm {confirmed: true} → graph
+ * resumes from interrupt(); UI consumes the resumed SSE stream (op_dispatched,
+ * op_completed, build_finalized, done).
+ */
+function ConfirmCard({
+  data,
+  onPick,
+}: {
+  data: ConfirmData;
+  onPick: (confirmed: boolean) => void;
+}) {
+  return (
+    <div style={{ display: "flex", justifyContent: "flex-start" }}>
+      <div style={{
+        maxWidth: "95%",
+        padding: "12px 14px",
+        borderRadius: "12px 12px 12px 2px",
+        fontSize: 13,
+        background: "#fef9c3",
+        color: "#1a202c",
+        border: "1.5px dashed #ca8a04",
+        lineHeight: 1.55,
+      }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#854d0e", marginBottom: 6 }}>
+          🛑 等你確認 — 即將建 {data.n_ops} 個 op
+        </div>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>{data.plan_summary}</div>
+        <ul style={{ margin: "0 0 10px", paddingLeft: 18, fontSize: 12, color: "#3f3f46" }}>
+          {data.plan_ops.slice(0, 12).map((s, i) => <li key={i}>{s}</li>)}
+          {data.plan_ops.length > 12 && (
+            <li style={{ color: "#71717a" }}>… +{data.plan_ops.length - 12} more</li>
+          )}
+        </ul>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={() => onPick(true)}
+            disabled={data.resolved}
+            style={{
+              background: data.resolved ? "#e5e7eb" : "#16a34a",
+              color: data.resolved ? "#9ca3af" : "#fff",
+              border: "none",
+              borderRadius: 6,
+              padding: "6px 14px",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: data.resolved ? "not-allowed" : "pointer",
+            }}
+          >
+            {data.resolved ? "已決定" : "Apply"}
+          </button>
+          <button
+            onClick={() => onPick(false)}
+            disabled={data.resolved}
+            style={{
+              background: "transparent",
+              color: data.resolved ? "#9ca3af" : "#b91c1c",
+              border: `1px solid ${data.resolved ? "#e5e7eb" : "#fca5a5"}`,
+              borderRadius: 6,
+              padding: "6px 14px",
+              fontSize: 12,
+              fontWeight: 500,
+              cursor: data.resolved ? "not-allowed" : "pointer",
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

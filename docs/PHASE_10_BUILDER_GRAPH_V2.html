@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>Phase 10 — Builder Mode Graph v2 (Graph-Heavy Refactor)</title>
+<style>
+  :root {
+    --bg: #fafbfc; --ink: #1f2937; --ink-2: #4b5563;
+    --muted: #9ca3af; --border: #d1d5db;
+    --node-graph: #dbeafe; --node-graph-bd: #2563eb;
+    --node-llm: #fef3c7; --node-llm-bd: #d97706;
+    --node-tool: #f3e8ff; --node-tool-bd: #7c3aed;
+    --node-mutate: #fee2e2; --node-mutate-bd: #dc2626;
+    --node-readonly: #d1fae5; --node-readonly-bd: #059669;
+    --node-gate: #fde68a; --node-gate-bd: #b45309;
+    --arrow: #6b7280;
+    --ok: #059669; --warn: #d97706; --bad: #dc2626;
+  }
+  body {
+    font-family: -apple-system, "Helvetica Neue", "PingFang TC", sans-serif;
+    background: var(--bg); color: var(--ink);
+    padding: 24px 32px; line-height: 1.55;
+    max-width: 1280px; margin: 0 auto;
+  }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 28px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 14px; margin: 18px 0 6px; color: var(--ink-2); }
+  p, li { font-size: 13.5px; color: var(--ink-2); }
+  code { background: #eef2f7; padding: 1px 5px; border-radius: 3px; font-size: 12.5px; color: #b45309; }
+  .meta { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+  .legend {
+    display: flex; gap: 14px; flex-wrap: wrap;
+    background: #fff; border: 1px solid var(--border);
+    padding: 10px 14px; border-radius: 8px; margin: 12px 0 18px;
+    font-size: 12.5px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-swatch { width: 14px; height: 14px; border-radius: 3px; border: 1.5px solid; }
+  .swatch-graph    { background: var(--node-graph); border-color: var(--node-graph-bd); }
+  .swatch-llm      { background: var(--node-llm); border-color: var(--node-llm-bd); }
+  .swatch-readonly { background: var(--node-readonly); border-color: var(--node-readonly-bd); }
+  .swatch-mutate   { background: var(--node-mutate); border-color: var(--node-mutate-bd); }
+  .swatch-gate     { background: var(--node-gate); border-color: var(--node-gate-bd); }
+
+  .flow {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 0; padding: 12px 0;
+  }
+  .node {
+    border: 2px solid var(--border); background: #fff;
+    border-radius: 10px; padding: 8px 14px;
+    min-width: 280px; max-width: 540px; text-align: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  .node-title { font-weight: 600; font-size: 13px; }
+  .node-sub { font-size: 11.5px; color: var(--ink-2); margin-top: 2px; }
+  .node-file { font-size: 11px; color: var(--muted); margin-top: 2px; font-family: monospace; }
+  .node-graph    { background: var(--node-graph); border-color: var(--node-graph-bd); }
+  .node-llm      { background: var(--node-llm); border-color: var(--node-llm-bd); }
+  .node-readonly { background: var(--node-readonly); border-color: var(--node-readonly-bd); }
+  .node-mutate   { background: var(--node-mutate); border-color: var(--node-mutate-bd); }
+  .node-gate     { background: var(--node-gate); border-color: var(--node-gate-bd); border-style: dashed; }
+
+  .arrow { width: 2px; height: 22px; background: var(--arrow); position: relative; }
+  .arrow::after {
+    content: ""; position: absolute; bottom: -2px; left: -4px;
+    border: 5px solid transparent; border-top-color: var(--arrow);
+  }
+  .arrow-label {
+    position: absolute; left: 12px; top: 4px;
+    font-size: 11.5px; color: var(--ink-2); white-space: nowrap;
+  }
+  .branch-row {
+    display: flex; gap: 28px; align-items: flex-start; justify-content: center;
+    width: 100%;
+  }
+  .branch-col {
+    display: flex; flex-direction: column; align-items: center;
+    flex: 1; max-width: 480px;
+  }
+  table.cmp {
+    width: 100%; border-collapse: collapse; margin: 8px 0;
+    font-size: 12.5px; background: #fff;
+  }
+  table.cmp th, table.cmp td {
+    border: 1px solid var(--border); padding: 7px 9px; text-align: left;
+    vertical-align: top;
+  }
+  table.cmp th { background: #f3f4f6; font-weight: 600; }
+  .pill {
+    display: inline-block; padding: 1px 7px; border-radius: 10px;
+    font-size: 11px; font-weight: 600;
+  }
+  .pill-current { background: #fee2e2; color: #991b1b; }
+  .pill-proposed { background: #d1fae5; color: #065f46; }
+  .pill-llm { background: var(--node-llm); color: #92400e; }
+  .pill-graph { background: var(--node-graph); color: #1e3a8a; }
+  pre.json {
+    background: #1f2937; color: #f9fafb; padding: 10px 14px;
+    border-radius: 6px; font-size: 12px; overflow-x: auto;
+    line-height: 1.45;
+  }
+  .section-box {
+    background: #fff; border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px 22px; margin: 12px 0;
+  }
+  .step {
+    display: flex; gap: 12px; margin: 6px 0;
+    border-left: 3px solid var(--node-graph-bd); padding-left: 12px;
+  }
+  .step-llm { border-left-color: var(--node-llm-bd); }
+  .step-num {
+    background: var(--node-graph-bd); color: white;
+    width: 22px; height: 22px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; font-weight: 600; font-size: 12px;
+  }
+  .step-llm .step-num { background: var(--node-llm-bd); }
+  .step-body { flex: 1; font-size: 13px; }
+  .step-body code { font-size: 12px; }
+  .gap-issue {
+    background: #fee2e2; border: 1.5px dashed var(--bad);
+    color: #991b1b; padding: 8px 12px; border-radius: 6px;
+    font-size: 12.5px; margin-top: 8px; max-width: 540px;
+  }
+  .check { color: var(--ok); font-weight: 600; }
+  .cross { color: var(--bad); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>Phase 10 — Builder Mode Graph v2 (Graph-Heavy Refactor)</h1>
+<p class="meta">
+  Spec date: 2026-05-09 · status: APPROVED, in development · branch: main · feature flag: <code>AGENT_BUILD_GRAPH=v2</code>
+</p>
+
+<p>
+  把 Builder Mode <code>/agent/build</code> 從「1 個 graph node + 80-turn 自由 LLM tool-use loop」改寫成
+  <b>10-node LangGraph state machine</b>。LLM 決策權壓縮到 3 個窄推理任務（plan / repair_plan / repair_op），
+  graph 控制流程、驗證、retry、confirm gate、finalize。
+</p>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-swatch swatch-graph"></div>Graph node (deterministic — pure code)</div>
+  <div class="legend-item"><div class="legend-swatch swatch-llm"></div>LLM call (Haiku 4.5, narrow reasoning)</div>
+  <div class="legend-item"><div class="legend-swatch swatch-readonly"></div>Read-only canvas access</div>
+  <div class="legend-item"><div class="legend-swatch swatch-mutate"></div>Mutating canvas tools</div>
+  <div class="legend-item"><div class="legend-swatch swatch-gate"></div>Gate (interrupt — 等 user)</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2>① 設計原則</h2>
+<div class="section-box">
+  <ul style="margin: 6px 0;">
+    <li><b>LLM 不決定 flow</b>：「下一步做什麼」永遠由 graph cursor 決定，不是 LLM 看著辦。</li>
+    <li><b>LLM 只回答 graph 問的具體問題</b>：產 plan / 修壞掉的 plan / 修壞掉的 op args。</li>
+    <li><b>每個 graph node 都是 pure function</b>：可單測、可 stub LLM、可看 trace。</li>
+    <li><b>Confirm gate 是 graph node 不是 prompt 規則</b>：強制中斷 → 等 user → resume。</li>
+    <li><b>Retry / escalation 政策寫在 graph 不在 LLM</b>：repair_op 失敗 N 次升級到 repair_plan。</li>
+    <li><b>跟舊 <code>stream_agent_build</code> 並存</b>：env flag <code>AGENT_BUILD_GRAPH=v2</code>，灰度切換。</li>
+  </ul>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2>② Before vs After</h2>
+<table class="cmp">
+  <thead>
+    <tr><th style="width:30%;">維度</th>
+        <th style="width:35%;">舊 (stream_agent_build) <span class="pill pill-current">v1</span></th>
+        <th style="width:35%;">新 (graph_build) <span class="pill pill-proposed">v2</span></th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Graph node 數</td><td>1（classify_advisor_intent）</td><td>10</td></tr>
+    <tr><td>LLM 角色</td><td>80-turn 自由 tool-use loop</td><td>3 種窄推理：plan / repair_plan / repair_op</td></tr>
+    <tr><td>LLM 看到的 prompt</td><td>「30 個 tools，自己決定怎麼做」</td><td>「這個 op 失敗了，幫我改 args」 / 「給我 plan JSON」</td></tr>
+    <tr><td>失敗處理</td><td>LLM 自己看著辦，可能放棄、可能死循環</td><td>Graph 強制 max_attempts，超過升級到上一層</td></tr>
+    <tr><td>Confirm gate</td><td>無</td><td>有（FROM_SCRATCH 強制；INCREMENTAL 直通）</td></tr>
+    <tr><td>可單測</td><td>e2e only</td><td>每 node 都可 unit test（stub LLM）</td></tr>
+    <tr><td>Mid-flight 加 op</td><td>支援（LLM 自由）</td><td><span class="cross">不支援</span>（plan 一次成形，要改 → 重 plan）</td></tr>
+    <tr><td>LLM cost / latency</td><td>1 long session（多 turn）</td><td>3-4 short calls（更便宜，但 round trip 多一些）</td></tr>
+    <tr><td>Model</td><td>Sonnet（預設）</td><td>Haiku 4.5（全部）</td></tr>
+  </tbody>
+</table>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2>③ 完整 Graph 拓樸</h2>
+<div class="section-box">
+<div class="flow">
+  <div class="node"><div class="node-title">POST /agent/build</div>
+    <div class="node-sub">req.instruction + pipeline_snapshot</div>
+    <div class="node-file">routers/agent.py</div>
+  </div>
+  <div class="arrow"></div>
+
+  <div class="node node-graph"><div class="node-title">classify_advisor_intent</div>
+    <div class="node-sub">6 buckets — 不變（複用 v1）</div>
+    <div class="node-file">advisor/classifier.py</div>
+  </div>
+  <div class="arrow"></div>
+
+  <div class="branch-row">
+    <!-- 非 BUILD -->
+    <div class="branch-col">
+      <div class="node node-graph" style="background:#e0e7ff;">
+        <div class="node-title">intent ≠ BUILD</div>
+      </div>
+      <div class="arrow"></div>
+      <div class="node node-readonly"><div class="node-title">stream_block_advisor</div>
+        <div class="node-sub">advisor sub-graph（不變）</div></div>
+    </div>
+
+    <!-- BUILD: 進入 graph_build -->
+    <div class="branch-col">
+      <div class="node node-graph" style="background:#fee2e2; border-color:#dc2626;">
+        <div class="node-title">intent == BUILD</div>
+        <div class="node-sub">進入 graph_build StateGraph</div>
+      </div>
+      <div class="arrow"></div>
+
+      <div class="node node-llm"><div class="node-title">[1] plan_node</div>
+        <div class="node-sub">LLM call: 產 plan = list[Op]</div>
+        <div class="node-file">graph_build/nodes/plan.py</div>
+      </div>
+      <div class="arrow"></div>
+
+      <div class="node node-graph"><div class="node-title">[2] validate_plan_node</div>
+        <div class="node-sub">查 block exists / params schema / DAG</div>
+        <div class="node-file">graph_build/nodes/validate.py</div>
+      </div>
+      <div class="arrow"><span class="arrow-label">errors → repair_plan ↓</span></div>
+
+      <div class="node node-llm" style="margin-bottom:6px;"><div class="node-title">[3] repair_plan_node</div>
+        <div class="node-sub">LLM 看 errors → 出修正版 plan</div>
+        <div class="node-file">graph_build/nodes/repair_plan.py</div>
+      </div>
+      <div class="node-sub" style="margin-bottom: 8px; color: var(--bad);">attempts > 2 → END (status=plan_unfixable)</div>
+      <div class="arrow"><span class="arrow-label">回 validate_plan</span></div>
+
+      <div class="node node-graph"><div class="node-title">routing: is_from_scratch?</div>
+        <div class="node-sub">判定: 空 canvas + plan ≥ 3 ops</div>
+      </div>
+      <div class="arrow"></div>
+
+      <div class="branch-row" style="margin: 4px 0; max-width: 520px;">
+        <div class="branch-col" style="max-width: 240px;">
+          <div class="node node-gate" style="min-width:180px;"><div class="node-title">[4] confirm_gate_node</div>
+            <div class="node-sub">FROM_SCRATCH<br>emit plan_proposed SSE → interrupt()<br>等 POST /confirm</div>
+            <div class="node-file">graph_build/nodes/confirm.py</div>
+          </div>
+        </div>
+        <div class="branch-col" style="max-width: 220px;">
+          <div class="node" style="min-width:160px;"><div class="node-title">INCREMENTAL</div>
+            <div class="node-sub">直通，不卡 confirm</div>
+          </div>
+        </div>
+      </div>
+      <div class="arrow"></div>
+
+      <div class="node node-graph"><div class="node-title">[5] dispatch_op_node (loop body)</div>
+        <div class="node-sub">cursor++; 看 op.type 路由到對應 tool</div>
+        <div class="node-file">graph_build/nodes/dispatch.py</div>
+      </div>
+      <div class="arrow"></div>
+
+      <div class="node node-mutate"><div class="node-title">[6] call_tool_node</div>
+        <div class="node-sub">直接呼叫 BuilderToolset 既有方法<br>add_node / connect / set_param / preview / remove_node</div>
+        <div class="node-file">graph_build/nodes/execute.py</div>
+      </div>
+      <div class="arrow"><span class="arrow-label">error → repair_op ↓</span></div>
+
+      <div class="node node-llm" style="margin-bottom:6px;"><div class="node-title">[7] repair_op_node</div>
+        <div class="node-sub">LLM 看 error msg + op → 改 args</div>
+        <div class="node-file">graph_build/nodes/repair_op.py</div>
+      </div>
+      <div class="node-sub" style="margin-bottom: 8px;">attempts ≤ 2 → 重 dispatch；attempts > 2 → 升級 repair_plan</div>
+      <div class="arrow"></div>
+
+      <div class="node node-graph"><div class="node-title">routing: cursor &lt; len(plan)?</div>
+        <div class="node-sub">是 → 回 dispatch_op；否 → finalize</div>
+      </div>
+      <div class="arrow"></div>
+
+      <div class="node node-graph"><div class="node-title">[8] finalize_node</div>
+        <div class="node-sub">PipelineValidator + persist + 設 final_pipeline</div>
+        <div class="node-file">graph_build/nodes/finalize.py</div>
+      </div>
+      <div class="arrow"></div>
+
+      <div class="node"><div class="node-title">END</div>
+        <div class="node-sub">emit build_finalized SSE → done</div></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2>④ Op schema (一次成形 plan)</h2>
+<p>plan 是 <code>list[Op]</code>，每個 Op 是 5 種 type 之一。LLM 在 plan_node 一次產出整個 list，後續不允許 mid-flight 加 op（E8 決議）。</p>
+
+<pre class="json">class OpType(str, Enum):
+    ADD_NODE    = "add_node"     # 加 1 個 node
+    CONNECT     = "connect"      # 接 2 個 node
+    SET_PARAM   = "set_param"    # 改 node 的 1 個 param
+    RUN_PREVIEW = "run_preview"  # 預覽 node 輸出（debug）
+    REMOVE_NODE = "remove_node"  # 移除 node
+
+class Op(BaseModel):
+    type: OpType
+    block_id: str | None      # ADD_NODE
+    block_version: str | None # ADD_NODE  (default "1.0.0")
+    node_id: str | None       # SET_PARAM / REMOVE_NODE / RUN_PREVIEW (logical id e.g. "n1")
+    src_id: str | None        # CONNECT (logical)
+    src_port: str | None      # CONNECT
+    dst_id: str | None        # CONNECT
+    dst_port: str | None      # CONNECT
+    params: dict | None       # ADD_NODE (initial) / SET_PARAM ({"key":..., "value":...})
+    # graph 執行階段填回:
+    result_node_id: str | None = None    # add_node 真實產出的 id
+    result_status: Literal["pending","ok","error"] = "pending"
+    error_message: str | None = None
+    repair_attempts: int = 0</pre>
+
+<p><b>Logical vs real node_id</b>：LLM 在 plan 用邏輯 id 「n1, n2, n3」串連，graph 在 add_node 完成時把真實 id 填回 <code>result_node_id</code>，並把後續 op 的 <code>node_id / src_id / dst_id</code> 替換成真實 id。LLM 不需要知道真實 id 怎麼算。</p>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2>⑤ BuildGraphState (LangGraph state schema)</h2>
+<pre class="json">class BuildGraphState(TypedDict):
+    # 輸入（不變）
+    instruction: str
+    base_pipeline: dict | None       # PipelineJSON dump
+    user_id: int
+
+    # plan stage
+    plan: list[dict]                 # list[Op] (model_dump)
+    plan_validation_errors: list[str]
+    plan_repair_attempts: int
+
+    # confirm stage
+    is_from_scratch: bool
+    user_confirmed: bool | None      # None = 等待中
+
+    # execute stage
+    cursor: int                      # 目前執行到 plan[cursor]
+    logical_to_real: dict[str, str]  # {"n1": "n3", "n2": "n4"} 邏輯 → 真實 id
+    failed_op_idx: int | None        # 升級到 repair_plan 用
+
+    # output
+    final_pipeline: dict | None
+    sse_events: list[dict]           # node 累積 SSE，graph runtime flush
+    status: Literal["running","needs_confirm","plan_unfixable","cancelled","finished","failed"]
+    summary: str | None</pre>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2>⑥ LLM 三個窄推理任務的 prompt 對比</h2>
+
+<h3 class="pill pill-llm">[1] plan_node</h3>
+<pre class="json">SYSTEM: 你是 pipeline planner。把 user instruction 拆成 list[Op]。
+  - 用邏輯 id n1, n2, n3 串接（不要編真實 id）
+  - 每個 add_node 必須緊接著該 node 需要的 set_param
+  - 連線用 connect op，src_id/dst_id 都用邏輯 id
+  - 一次出完整 plan，後面不能補
+  - block 目錄: { … 從 SeedlessBlockRegistry 動態組 … }
+
+USER: <instruction>
+
+OUTPUT: {"plan": [{"type":"add_node","block_id":"...","params":{...}},
+                  {"type":"add_node",...},
+                  {"type":"connect","src_id":"n1","src_port":"out","dst_id":"n2","dst_port":"in"},
+                  ...]}</pre>
+
+<h3 class="pill pill-llm">[3] repair_plan_node</h3>
+<pre class="json">SYSTEM: 你寫的 plan 有 schema/邏輯錯誤。下面是 errors，給我修正版 plan。
+  - 不要新增需求，只修錯
+  - 保留沒錯的 op 結構不動
+
+USER: original plan: <plan json>
+      errors: ["Op#3: block 'foo' not in registry",
+               "Op#5: param 'k' missing required field"]
+
+OUTPUT: {"plan": [...] }  // 同 plan_node format</pre>
+
+<h3 class="pill pill-llm">[7] repair_op_node</h3>
+<pre class="json">SYSTEM: 這個 op 執行失敗。看 error msg 改 args，type 不要動。
+USER: op: {type: set_param, node_id: n5, params: {key:"k", value:"high"}}
+      error: "k must be number, got 'high'"
+OUTPUT: {"op": {type: set_param, node_id: n5, params: {key:"k", value: 4}}}</pre>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2>⑦ Confirm gate 的 SSE / interrupt 流程</h2>
+<div class="section-box">
+<pre class="json">┌─────────── server (sidecar) ───────────┐         ┌─────── client (前端) ────────┐
+│                                         │         │                               │
+│  [4] confirm_gate_node:                 │ SSE →   │ onPlanProposed(plan, summary) │
+│     emit plan_proposed (JSON of plan)   │ ────►   │   render confirm card         │
+│     emit confirm_pending                │         │                               │
+│     interrupt()  ← graph 暫停           │         │ user 按 Apply                 │
+│     state 寫進 LangGraph MemorySaver    │         │   POST /agent/build/{sid}/confirm
+│                                         │ ◄────── │     {confirmed: true}         │
+│  router 端 receive POST:                │         │                               │
+│     graph.invoke(None, config={...sid…})│         │   reconnect SSE (or keep open)│
+│     ← graph 從 interrupt 處 resume      │         │                               │
+│     繼續 dispatch_op loop               │ SSE →   │ onOpDispatched / onOpCompleted│
+│                                         │         │                               │
+└─────────────────────────────────────────┘         └───────────────────────────────┘</pre>
+
+<p>
+  <b>Checkpointer 選擇</b>：v1 用 LangGraph 內建 <code>MemorySaver</code>（in-process）。
+  Sidecar 是單 pod，重啟會掉；但目前 v1 行為已經是這樣（<code>_PAUSED_SESSIONS</code> 也是 in-memory），所以沒退化。
+  v2.x 升級成 Redis 時換 <code>RedisSaver</code> 即可，無需改 graph 程式碼。
+</p>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2>⑧ SSE event 增量</h2>
+<table class="cmp">
+  <thead><tr><th>event 名稱</th><th>節點 emit</th><th>data 格式（簡略）</th></tr></thead>
+  <tbody>
+    <tr><td><code>plan_proposed</code></td><td>plan_node 後</td><td>{ plan: [...], summary: "建 4 個 block..." }</td></tr>
+    <tr><td><code>plan_validating</code></td><td>validate_plan_node 開始</td><td>{ }</td></tr>
+    <tr><td><code>plan_repaired</code></td><td>repair_plan_node 完成</td><td>{ attempt: N, fix_summary: "..." }</td></tr>
+    <tr><td><code>confirm_pending</code></td><td>confirm_gate_node interrupt 前</td><td>{ session_id, plan_summary }</td></tr>
+    <tr><td><code>confirm_received</code></td><td>resume 時</td><td>{ confirmed: bool }</td></tr>
+    <tr><td><code>op_dispatched</code></td><td>dispatch_op_node</td><td>{ cursor, op }</td></tr>
+    <tr><td><code>op_completed</code></td><td>call_tool 成功</td><td>{ cursor, op, result }</td></tr>
+    <tr><td><code>op_repaired</code></td><td>repair_op_node 成功</td><td>{ cursor, attempt, fix_summary }</td></tr>
+    <tr><td><code>build_finalized</code></td><td>finalize_node</td><td>{ pipeline_id, node_count, edge_count }</td></tr>
+    <tr><td><code>done</code></td><td>END（不變）</td><td>{ status, pipeline_json, summary }</td></tr>
+  </tbody>
+</table>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2>⑨ 模組布局</h2>
+<pre class="json">python_ai_sidecar/agent_builder/
+├── orchestrator.py           (舊 stream_agent_build — 保留作 v1 fallback)
+├── advisor/                  (advisor sub-graph — 不動)
+└── graph_build/              ← 新
+    ├── __init__.py           (export build_pipeline_graph)
+    ├── ops.py                (Op + OpType)
+    ├── state.py              (BuildGraphState)
+    ├── graph.py              (StateGraph 組裝 + checkpointer + run/resume)
+    ├── runner.py             (stream_graph_build async generator → StreamEvent)
+    └── nodes/
+        ├── __init__.py
+        ├── plan.py           (plan_node — LLM #1)
+        ├── validate.py       (validate_plan_node — pure)
+        ├── repair_plan.py    (repair_plan_node — LLM #2)
+        ├── confirm.py        (confirm_gate_node — interrupt)
+        ├── dispatch.py       (dispatch_op_node — pure routing)
+        ├── execute.py        (call_tool_node — calls BuilderToolset)
+        ├── repair_op.py      (repair_op_node — LLM #3)
+        └── finalize.py       (finalize_node — validator + persist)</pre>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2>⑩ Migration 策略</h2>
+<table class="cmp">
+  <thead><tr><th>階段</th><th>FF 設定</th><th>行為</th><th>持續</th></tr></thead>
+  <tbody>
+    <tr><td>P0 dev</td><td><code>AGENT_BUILD_GRAPH=v1</code> (default)</td><td>所有人走舊 path</td><td>—</td></tr>
+    <tr><td>P1 灰度</td><td>per-request header <code>X-Build-Graph: v2</code></td><td>QA 帳號試 v2，admin 帳號還在 v1</td><td>1 週</td></tr>
+    <tr><td>P2 切換</td><td><code>AGENT_BUILD_GRAPH=v2</code></td><td>所有人預設 v2，舊 path 留 fallback</td><td>2 週</td></tr>
+    <tr><td>P3 清理</td><td>移除 env flag</td><td>刪掉 v1 path（<code>stream_agent_build</code>）</td><td>—</td></tr>
+  </tbody>
+</table>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2>⑪ 已決議的設計題（user 拍板）</h2>
+<table class="cmp">
+  <thead><tr><th>題目</th><th>結論</th></tr></thead>
+  <tbody>
+    <tr><td>E8 mid-flight 加 op</td><td><span class="cross">不支援</span> — plan 一次成形，要改重 plan</td></tr>
+    <tr><td>E9 confirm gate 持久化</td><td>LangGraph MemorySaver（in-process），跟 sidecar lifecycle 綁；之後可換 RedisSaver</td></tr>
+    <tr><td>E11 LLM model</td><td>plan / repair_plan / repair_op <b>全部用 Haiku 4.5</b>，重點在 graph，不在 model</td></tr>
+  </tbody>
+</table>
+
+<p style="margin-top: 28px; color: var(--muted); font-size: 12px;">
+  Generated 2026-05-09 · Owner: Claude (Tech Lead) · Approved by: gill ·
+  Implementation tracker: see TodoWrite list inside session
+</p>
+
+</body>
+</html>

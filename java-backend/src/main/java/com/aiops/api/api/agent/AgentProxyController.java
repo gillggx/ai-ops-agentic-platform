@@ -125,7 +125,30 @@ public class AgentProxyController {
 		return bridgeSse(sidecar.postSse("/internal/agent/build", req, caller), "build");
 	}
 
-	// SPEC_glassbox_continuation — resume a paused build.
+	// Phase 10 (graph_build v2) — resume a paused build at confirm_gate.
+	// Body: { sessionId | session_id, confirmed: bool }
+	@PostMapping(path = "/build/confirm", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public SseEmitter buildConfirm(@RequestBody Map<String, Object> body,
+	                               @AuthenticationPrincipal AuthPrincipal caller) {
+		String sessionId = asString(body.get("sessionId"));
+		if (sessionId == null || sessionId.isBlank()) sessionId = asString(body.get("session_id"));
+		if (sessionId == null || sessionId.isBlank()) {
+			throw new com.aiops.api.common.ApiException(
+					org.springframework.http.HttpStatus.BAD_REQUEST,
+					"validation_error", "session_id: must not be blank");
+		}
+		Object confirmedRaw = body.get("confirmed");
+		boolean confirmed = confirmedRaw instanceof Boolean b
+				? b
+				: confirmedRaw != null && Boolean.parseBoolean(confirmedRaw.toString());
+		Map<String, Object> req = new java.util.HashMap<>();
+		req.put("session_id", sessionId);
+		req.put("confirmed", confirmed);
+		return bridgeSse(sidecar.postSse("/internal/agent/build/confirm", req, caller), "build_confirm");
+	}
+
+	// SPEC_glassbox_continuation — resume a paused build (v1 path).
 	@PostMapping(path = "/build/continue", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 	@PreAuthorize(Authorities.ADMIN_OR_PE)
 	public SseEmitter buildContinue(@RequestBody Map<String, Object> body,

@@ -169,10 +169,63 @@ async def _build_stream_native(req: BuildRequest, caller: CallerContext) -> Asyn
         }
 
 
+async def _build_stream_graph_v2(req: BuildRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
+    """Phase 10: graph-heavy native build via LangGraph StateGraph.
+
+    Skips the v1 free-LLM tool-use loop entirely. Flow lives in
+    agent_builder.graph_build (10-node graph); LLM only does plan /
+    repair_plan / repair_op narrow tasks. See PHASE_10_BUILDER_GRAPH_V2.html.
+
+    Still goes through `classify_advisor_intent` first — non-BUILD intents
+    keep going through `stream_block_advisor` (advisor sub-graph unchanged).
+    """
+    from python_ai_sidecar.agent_builder.advisor import (
+        classify_advisor_intent, stream_block_advisor,
+    )
+    from python_ai_sidecar.agent_builder.graph_build import stream_graph_build
+    from python_ai_sidecar.clients.java_client import JavaAPIClient
+
+    intent, conf, reason = await classify_advisor_intent(req.instruction)
+    log.info("build/v2: intent=%s conf=%.2f reason=%r", intent, conf, reason)
+
+    if intent != "BUILD":
+        java = JavaAPIClient.for_caller(caller)
+        async for stream_event in stream_block_advisor(req.instruction, intent, java=java):
+            yield {
+                "event": stream_event.type,
+                "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
+            }
+        return
+
+    async for stream_event in stream_graph_build(
+        instruction=req.instruction,
+        base_pipeline=req.pipeline_snapshot,
+        user_id=caller.user_id,
+    ):
+        yield {
+            "event": stream_event.type,
+            "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
+        }
+
+
+def _build_graph_version() -> str:
+    """v1 = stream_agent_build (Anthropic tool-use loop)
+       v2 = graph_build (LangGraph 10-node state machine)
+       env: AGENT_BUILD_GRAPH (default v1 during P1 grace period).
+       Per-request override: header X-Build-Graph (set by frontend for QA accounts).
+    """
+    import os
+    return (os.environ.get("AGENT_BUILD_GRAPH") or "v1").strip().lower()
+
+
 async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
     """Phase 8-A-3: native-only Glass Box. Fallback removed — native path
     proved stable in A-1c smoke. If native fails, surface the error as an
-    SSE frame instead of silently proxying to :8001."""
+    SSE frame instead of silently proxying to :8001.
+
+    Phase 10: feature-flag-gated v2 graph_build. AGENT_BUILD_GRAPH=v2 → new
+    LangGraph state machine; default (v1) keeps the existing free-LLM loop.
+    """
     import os
     if not os.environ.get("ANTHROPIC_API_KEY"):
         yield {"event": "error", "data": json.dumps({
@@ -181,13 +234,16 @@ async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenera
         yield {"event": "done", "data": json.dumps({"status": "failed"})}
         return
 
+    version = _build_graph_version()
+    streamer = _build_stream_graph_v2 if version == "v2" else _build_stream_native
+
     try:
-        async for ev in _build_stream_native(req, caller):
+        async for ev in streamer(req, caller):
             yield ev
     except Exception as ex:  # noqa: BLE001
-        log.exception("native build failed")
+        log.exception("build (%s) failed", version)
         yield {"event": "error", "data": json.dumps({
-            "message": f"native build failed: {ex.__class__.__name__}: {str(ex)[:200]}",
+            "message": f"build ({version}) failed: {ex.__class__.__name__}: {str(ex)[:200]}",
         })}
         yield {"event": "done", "data": json.dumps({"status": "failed"})}
 
@@ -263,3 +319,45 @@ async def agent_build_continue(
     req: BuildContinueRequest, caller: CallerContext = ServiceAuth,
 ) -> EventSourceResponse:
     return EventSourceResponse(_build_continue_stream(req, caller))
+
+
+# ── Phase 10: graph_build v2 confirm endpoint ─────────────────────────────
+
+
+class BuildConfirmRequest(BaseModel):
+    """Phase 10: resume a paused graph_build session after confirm_pending."""
+    model_config = ConfigDict(populate_by_name=True)
+
+    session_id: str = Field(..., alias="sessionId")
+    confirmed: bool = Field(...)
+
+
+async def _build_confirm_stream(
+    req: BuildConfirmRequest, caller: CallerContext,
+) -> AsyncGenerator[dict, None]:
+    from python_ai_sidecar.agent_builder.graph_build import resume_graph_build
+
+    try:
+        async for stream_event in resume_graph_build(
+            session_id=req.session_id, confirmed=req.confirmed,
+        ):
+            yield {
+                "event": stream_event.type,
+                "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
+            }
+    except Exception as ex:  # noqa: BLE001
+        log.exception("build/confirm failed for session=%s", req.session_id)
+        yield {"event": "error", "data": json.dumps({
+            "message": f"build/confirm failed: {ex.__class__.__name__}: {str(ex)[:200]}",
+            "session_id": req.session_id,
+        }, ensure_ascii=False)}
+        yield {"event": "done", "data": json.dumps({"status": "failed"})}
+
+
+@router.post("/build/confirm")
+async def agent_build_confirm(
+    req: BuildConfirmRequest, caller: CallerContext = ServiceAuth,
+) -> EventSourceResponse:
+    """Resume a graph_build session paused at confirm_gate. Only used when
+    AGENT_BUILD_GRAPH=v2 — v1 doesn't have this gate."""
+    return EventSourceResponse(_build_confirm_stream(req, caller))

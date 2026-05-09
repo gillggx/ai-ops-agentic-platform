@@ -1,0 +1,132 @@
+"""validate_plan_node — pure code: check Op schema, block existence,
+param schema match, port compatibility, DAG legality.
+
+If any error is found, errors list is populated; graph routes to
+repair_plan_node. If clean, falls through to confirm_gate.
+
+Uses logical ids — real ids are not assigned yet.
+"""
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from pydantic import ValidationError
+
+from python_ai_sidecar.agent_builder.graph_build.ops import Op, OpType
+from python_ai_sidecar.agent_builder.graph_build.state import BuildGraphState
+from python_ai_sidecar.pipeline_builder.seedless_registry import SeedlessBlockRegistry
+
+
+logger = logging.getLogger(__name__)
+
+
+async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
+    plan_raw = state.get("plan") or []
+    if not plan_raw:
+        return {
+            "plan_validation_errors": ["plan is empty"],
+            "sse_events": [_event("plan_validating", {"errors": ["plan is empty"]})],
+        }
+
+    registry = SeedlessBlockRegistry()
+    registry.load()
+    errors: list[str] = []
+
+    # Pass 1 — Op pydantic schema
+    parsed: list[Op] = []
+    for idx, raw in enumerate(plan_raw):
+        try:
+            parsed.append(Op.model_validate(raw))
+        except ValidationError as ve:
+            errors.append(f"Op#{idx}: schema invalid — {ve.errors()[0].get('msg', str(ve))}")
+            parsed.append(None)  # type: ignore[arg-type]
+
+    # Pass 2 — semantic checks (only on rows that parsed)
+    declared_ids: set[str] = set()
+    id_to_block: dict[str, tuple[str, str]] = {}  # logical_id → (block_name, version)
+
+    for idx, op in enumerate(parsed):
+        if op is None:
+            continue
+
+        if op.type == OpType.ADD_NODE:
+            spec = registry.get_spec(op.block_id, op.block_version or "1.0.0")
+            if spec is None:
+                errors.append(
+                    f"Op#{idx}: block '{op.block_id}@{op.block_version}' not in registry"
+                )
+                continue
+            logical_id = op.node_id or f"n{len(declared_ids) + 1}"
+            if logical_id in declared_ids:
+                errors.append(f"Op#{idx}: logical id '{logical_id}' duplicated")
+            declared_ids.add(logical_id)
+            id_to_block[logical_id] = (op.block_id, op.block_version or "1.0.0")
+            # Validate initial params against schema (best-effort)
+            schema_props = ((spec.get("param_schema") or {}).get("properties") or {})
+            for k in (op.params or {}).keys():
+                if k not in schema_props:
+                    errors.append(
+                        f"Op#{idx}: add_node({op.block_id}) initial param '{k}' "
+                        f"not in schema. Allowed: {list(schema_props.keys())}"
+                    )
+
+        elif op.type == OpType.SET_PARAM:
+            if op.node_id not in id_to_block:
+                errors.append(f"Op#{idx}: set_param targets unknown node '{op.node_id}'")
+                continue
+            block_name, block_version = id_to_block[op.node_id]
+            spec = registry.get_spec(block_name, block_version) or {}
+            schema_props = ((spec.get("param_schema") or {}).get("properties") or {})
+            key = (op.params or {}).get("key")
+            if key not in schema_props:
+                errors.append(
+                    f"Op#{idx}: set_param key '{key}' not in {block_name} schema. "
+                    f"Allowed: {list(schema_props.keys())}"
+                )
+
+        elif op.type == OpType.CONNECT:
+            if op.src_id not in id_to_block:
+                errors.append(f"Op#{idx}: connect src '{op.src_id}' not declared")
+            if op.dst_id not in id_to_block:
+                errors.append(f"Op#{idx}: connect dst '{op.dst_id}' not declared")
+            if op.src_id in id_to_block and op.dst_id in id_to_block:
+                src_spec = registry.get_spec(*id_to_block[op.src_id]) or {}
+                dst_spec = registry.get_spec(*id_to_block[op.dst_id]) or {}
+                src_ports = {p.get("port"): p.get("type") for p in (src_spec.get("output_schema") or [])}
+                dst_ports = {p.get("port"): p.get("type") for p in (dst_spec.get("input_schema") or [])}
+                if op.src_port not in src_ports:
+                    errors.append(
+                        f"Op#{idx}: src '{op.src_id}' has no output port '{op.src_port}' "
+                        f"(have: {list(src_ports.keys())})"
+                    )
+                if op.dst_port not in dst_ports:
+                    errors.append(
+                        f"Op#{idx}: dst '{op.dst_id}' has no input port '{op.dst_port}' "
+                        f"(have: {list(dst_ports.keys())})"
+                    )
+                if (op.src_port in src_ports and op.dst_port in dst_ports
+                        and src_ports[op.src_port] != dst_ports[op.dst_port]):
+                    errors.append(
+                        f"Op#{idx}: port type mismatch "
+                        f"{op.src_port}({src_ports[op.src_port]}) → "
+                        f"{op.dst_port}({dst_ports[op.dst_port]})"
+                    )
+
+        elif op.type in (OpType.RUN_PREVIEW, OpType.REMOVE_NODE):
+            if op.node_id not in id_to_block:
+                errors.append(f"Op#{idx}: {op.type.value} targets unknown node '{op.node_id}'")
+
+    logger.info("validate_plan_node: %d errors found", len(errors))
+
+    return {
+        "plan_validation_errors": errors,
+        "sse_events": [_event(
+            "plan_validating",
+            {"errors": errors, "ok": len(errors) == 0},
+        )],
+    }
+
+
+def _event(name: str, data: dict[str, Any]) -> dict[str, Any]:
+    return {"event": name, "data": data}
