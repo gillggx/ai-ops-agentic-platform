@@ -12,6 +12,7 @@ import random
 from dataclasses import dataclass, field, asdict
 from typing import List
 from app.database import get_db
+from app.services.dc_service import _SENSOR_RANGES as _DC_RANGES
 
 
 @dataclass
@@ -25,47 +26,44 @@ class FDCResult:
 
 # ── Fault rules ───────────────────────────────────────────────────────────────
 
-# DC sensor thresholds for WARNING (tighter than SPC limits) — Phase 12
-# expanded to ~30 sensors. Each maps to a domain-specific fault code so
-# downstream skills can group by fault family (FDC_VACUUM_*, FDC_RF_*, etc.).
-_DC_WARNING_THRESHOLDS = {
-    # ── Vacuum / pressure ───────────────────────────────────────
-    "chamber_pressure":     (13.5,  16.5),
-    "foreline_pressure":     (0.9,   1.7),
-    "loadlock_pressure":    (0.030, 0.070),
-    "throttle_position_pct":(32.0,  68.0),
-    "turbo_pump_speed_rpm": (28000, 32000),
-    "turbo_pump_temp_c":    (39.0,  44.0),
-    "fore_pump_current_a":   (3.2,   5.3),
-    # ── RF Power ────────────────────────────────────────────────
-    "rf_forward_power":    (1450,  1550),
-    "reflected_power":       (8,    22),
-    "rf_2nd_harmonic_w":     (5.0,  16.0),
-    "bias_power_lf_w":      (340,   460),
-    "bias_voltage_v":       (832,   868),
-    "vpp_v":                (185,   215),
-    "match_tune_position":  (42.0,  58.0),
-    # ── Thermal ─────────────────────────────────────────────────
-    "esc_zone1_temp":       (58.5,  61.5),
-    "esc_zone2_temp":       (58.5,  61.5),
-    "esc_zone3_temp":       (58.5,  61.5),
-    "esc_zone4_temp":       (58.5,  61.5),
-    "chuck_temp_c":         (19.3,  20.7),
-    "wall_temp_c":          (43.5,  46.5),
-    "showerhead_temp_c":    (56.0,  64.0),
-    # ── Gas Flow ────────────────────────────────────────────────
-    "cf4_flow_sccm":        (46,    54),
-    "o2_flow_sccm":          (8.0,  12.0),
-    "ar_flow_sccm":         (90,   110),
-    "helium_coolant_press":  (9.3,  10.7),
-    "total_flow_sccm":     (180,   210),
-    # ── OES / EPD ───────────────────────────────────────────────
-    "oes_endpoint_signal":   (0.25, 0.75),
-    "oes_band_f_703nm":      (0.22, 0.43),
-    "epd_intensity":         (0.32, 0.68),
-    # ── Contamination (RGA) ─────────────────────────────────────
-    "rga_h2o_partial":       (1.5e-9, 4.5e-9),
+# DC sensor warning bands. Phase 12 originally hardcoded tighter-than-DC-
+# normal bands per sensor, but with ~30 sensors the binomial probability
+# of ≥2 sensors landing outside (Check 3 trip condition) approaches 100%
+# even on noise — so MULTI_SENSOR_DRIFT fired on every event.
+#
+# Fix: derive warning bands from the DC physical range itself
+# (`dc_service._SENSOR_RANGES`). Sensors marked _EARLY_WARN_SENSORS get a
+# narrowed band (catches drift before full excursion) — these are the 5
+# SPC-monitored sensors which also have intentional excursion injection.
+# Other sensors use their natural DC range as the warning band, so the
+# warning fires only when something genuinely pushes the value outside its
+# normal envelope (drift accumulation, real fault, force-event).
+
+# Sensors that get an inward margin on their warning band (early warning).
+_EARLY_WARN_SENSORS = {
+    "chamber_pressure", "esc_zone1_temp", "rf_forward_power",
+    "bias_voltage_v", "cf4_flow_sccm",
 }
+# Fraction of (hi - lo) trimmed from each side for early-warn sensors.
+_EARLY_WARN_MARGIN = 0.10
+
+
+def _warn_band(sensor: str) -> tuple[float, float]:
+    """Pick a warning band (lo, hi) for `sensor`. Defaults to its DC
+    physical range; early-warn sensors get a tighter band so drift fires
+    a warning before the value crosses the full excursion threshold."""
+    lo, hi = _DC_RANGES.get(sensor, (0.0, 0.0))
+    if sensor in _EARLY_WARN_SENSORS:
+        margin = (hi - lo) * _EARLY_WARN_MARGIN
+        return (lo + margin, hi - margin)
+    return (lo, hi)
+
+
+# Build the table from the DC ranges + fault-code keys below. Each fault
+# code key implicitly defines which sensors FDC monitors; thresholds come
+# from _warn_band so they can never disagree with the DC physical range.
+def _build_warn_thresholds(fault_keys):
+    return {s: _warn_band(s) for s in fault_keys if s in _DC_RANGES}
 
 _FAULT_CODES = {
     # Vacuum
@@ -105,6 +103,11 @@ _FAULT_CODES = {
     # Contamination
     "rga_h2o_partial":      "FDC_RGA_H2O_HIGH",
 }
+
+# Build the warning thresholds table from DC physical ranges (see comment
+# block above). Done here, after _FAULT_CODES is declared, since it tells
+# us which sensors FDC monitors.
+_DC_WARNING_THRESHOLDS = _build_warn_thresholds(_FAULT_CODES.keys())
 
 
 def classify(
