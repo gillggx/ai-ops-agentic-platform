@@ -16,6 +16,7 @@ See docs/PHASE_10_BUILDER_GRAPH_V2.html for the design.
 from python_ai_sidecar.agent_builder.graph_build.runner import (
     stream_graph_build,
     resume_graph_build,
+    dry_run_plan,
 )
 
-__all__ = ["stream_graph_build", "resume_graph_build"]
+__all__ = ["stream_graph_build", "resume_graph_build", "dry_run_plan"]

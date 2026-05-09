@@ -1,7 +1,13 @@
-"""Shared StreamEvent → `pb_glass_*` mapping. Used by both the chat
-orchestrator's build_pipeline_live tool AND the /build/continue router so
-continuation events reach the frontend dispatcher in the same shape as the
-first build pass."""
+"""Shared StreamEvent → `pb_glass_*` mapping.
+
+Used by the chat orchestrator's build_pipeline_live tool to relay graph
+build events into the chat SSE channel. Phase 10-B: handles both the
+legacy v1 events (chat/operation/error) AND the v2 events
+(plan_proposed/op_completed/build_finalized/...) emitted by graph_build.
+
+Frontend (chat panel + lite canvas) only knows about pb_glass_*; this
+wrapper is the only place that translates v2 op shape → v1 args/result
+shape so existing apply_glass_op() logic keeps working."""
 
 from __future__ import annotations
 
@@ -63,6 +69,88 @@ def wrap_build_event_for_chat(
         payload["type"] = "glass_progress"
         for k in ("turn_used", "turn_budget", "absolute_max", "percent", "warning"):
             payload[k] = data.get(k)
+
+    # ── Phase 10-B: v2 graph_build events ─────────────────────────────
+    elif evt_type == "plan_proposed":
+        # Surface as a chat narration so the user sees what the agent intends.
+        # Lite canvas already shows nothing (no nodes added yet) so this is
+        # mainly for the chat column.
+        summary = (data.get("summary") or "").strip()
+        if not summary:
+            return None
+        payload["type"] = "pb_glass_chat"
+        payload["content"] = f"📋 計畫：{summary}"
+    elif evt_type == "plan_repaired":
+        ok = data.get("ok")
+        if not ok:
+            return None  # silent — repair will retry or escalate
+        payload["type"] = "pb_glass_chat"
+        attempt = data.get("attempt", 1)
+        payload["content"] = f"🔧 自動修正了 plan（第 {attempt} 次）"
+    elif evt_type == "op_completed":
+        # Translate v2 op → v1 args/result so apply_glass_op keeps working.
+        op_obj = data.get("op") or {}
+        result = data.get("result") or {}
+        op_type = op_obj.get("type")
+        v1_args = _v2_op_to_v1_args(op_obj)
+        if v1_args is None:
+            return None
+        payload["type"] = "pb_glass_op"
+        payload["op"] = op_type
+        payload["args"] = v1_args
+        payload["result"] = result
+    elif evt_type == "op_error":
+        op_obj = data.get("op") or {}
+        msg = op_obj.get("error_message") or "(no error msg)"
+        payload["type"] = "pb_glass_error"
+        payload["message"] = f"op#{data.get('cursor')} ({op_obj.get('type')}) failed: {msg}"
+        payload["op"] = op_obj.get("type")
+        payload["hint"] = None
+    elif evt_type == "build_finalized":
+        payload["type"] = "pb_glass_done"
+        payload["status"] = "finished" if data.get("ok") else "failed"
+        payload["summary"] = data.get("summary") or ""
+        # build_finalized doesn't carry pipeline_json itself — done event will.
+        payload["pipeline_json"] = None
+    elif evt_type in (
+        "plan_validating",   # noisy — internal validation step
+        "op_dispatched",     # paired with op_completed; redundant
+        "op_repaired",       # retry will surface as op_completed/op_error
+        "confirm_pending",   # MUST NOT happen in chat (skip_confirm=True)
+        "confirm_received",  # builder-only ACK
+    ):
+        return None
     else:
         return None
     return payload
+
+
+def _v2_op_to_v1_args(op_obj: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """Translate a v2 Op dict (with type + typed fields) into the v1 args
+    dict that glass-ops.ts apply_glass_op() expects."""
+    op_type = op_obj.get("type")
+    if op_type == "add_node":
+        return {
+            "block_name": op_obj.get("block_id"),
+            "block_version": op_obj.get("block_version") or "1.0.0",
+            "params": op_obj.get("params") or {},
+        }
+    if op_type == "connect":
+        return {
+            "from_node": op_obj.get("src_id"),
+            "from_port": op_obj.get("src_port"),
+            "to_node": op_obj.get("dst_id"),
+            "to_port": op_obj.get("dst_port"),
+        }
+    if op_type == "set_param":
+        params = op_obj.get("params") or {}
+        return {
+            "node_id": op_obj.get("node_id"),
+            "key": params.get("key"),
+            "value": params.get("value"),
+        }
+    if op_type == "remove_node":
+        return {"node_id": op_obj.get("node_id")}
+    if op_type == "run_preview":
+        return {"node_id": op_obj.get("node_id")}
+    return None

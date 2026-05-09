@@ -137,6 +137,18 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
                     "type": "integer",
                     "description": "選填。若使用者正在改某條既有 pipeline，傳它的 id，sub-agent 會從當前狀態接續編輯",
                 },
+                "show_plan": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "選填，預設 false。若使用者**明確**要求先看 plan 再決定是否執行（"
+                        "「先給我看 plan」「先看一下計劃」「show me the plan first」「不要直接建，"
+                        "先列出步驟」之類），設為 true。此模式下系統只跑 plan 規劃 + 驗證，"
+                        "不會 mutate canvas，回傳 plan 摘要與步驟清單給你；你念給 user 聽，"
+                        "等 user 同意後再呼叫一次本工具（show_plan=false）真的建。\n"
+                        "若 user 沒明說要看 plan，**不要**設 true — 直接 build 比較流暢。"
+                    ),
+                },
             },
         },
     },

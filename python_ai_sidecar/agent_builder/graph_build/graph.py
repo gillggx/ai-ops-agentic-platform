@@ -49,7 +49,12 @@ logger = logging.getLogger(__name__)
 # ── Routing functions ──────────────────────────────────────────────────────
 
 def _route_after_validate(state: BuildGraphState) -> str:
-    """Plan good? → confirm_gate (or skip to dispatch). Errors? → repair_plan."""
+    """Plan good? → confirm_gate (or skip to dispatch). Errors? → repair_plan.
+
+    skip_confirm=True (Chat Mode) bypasses confirm_gate even on FROM_SCRATCH:
+    the chat conversation IS the confirmation; pausing the chat orchestrator
+    mid-tool to wait for a UI click would break the conversational flow.
+    """
     errors = state.get("plan_validation_errors") or []
     if errors:
         attempts = state.get("plan_repair_attempts", 0)
@@ -57,6 +62,8 @@ def _route_after_validate(state: BuildGraphState) -> str:
             logger.warning("route_after_validate: plan_unfixable (attempts=%d)", attempts)
             return "finalize"  # finalize will mark status=failed since no pipeline produced
         return "repair_plan"
+    if state.get("skip_confirm"):
+        return "dispatch_op"
     if state.get("is_from_scratch"):
         return "confirm_gate"
     return "dispatch_op"

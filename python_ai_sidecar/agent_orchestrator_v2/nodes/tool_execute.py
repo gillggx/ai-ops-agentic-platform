@@ -116,47 +116,34 @@ async def _execute_build_pipeline_live(
     chat_session_id: Any = None,
     chat_user_id: Any = None,
 ) -> Dict[str, Any]:
-    """Phase 5-UX-6: Glass Box pipeline build.
+    """Phase 10-B: unified build via graph_build (LangGraph 10-node state machine).
 
-    Spawns an agent_builder sub-session and relays its SSE events
-    (chat / operation / error / done) as pb_glass_* events through the
-    chat's SSE channel. The frontend mounts/updates a canvas overlay in
-    real-time while this tool runs.
+    Both Builder Mode (/agent/build) and Chat Mode (this tool) share the
+    same engine. Chat passes skip_confirm=True so the graph never pauses
+    on confirm_gate — the chat conversation IS the confirmation.
 
-    Context continuity: if the chat session already has a canvas snapshot
-    (agent_sessions.last_pipeline_json), hydrate the sub-agent with it so
-    follow-up turns ("加一張常態分佈圖") see the existing nodes instead of
-    starting from scratch. Explicit `base_pipeline_id` (DB pipeline) wins
-    over session snapshot.
-
-    Returns to the chat LLM a compact summary once the sub-agent finishes.
+    show_plan=True: dry-run only — runs plan_node + validate_plan_node,
+    returns the plan as a tool result for the chat LLM to narrate. No
+    canvas mutation, no SSE events. Used when user explicitly asks
+    "先給我看 plan".
     """
-    from python_ai_sidecar.agent_builder.orchestrator import stream_agent_build
-    from python_ai_sidecar.agent_builder.session import AgentBuilderSession
-    from python_ai_sidecar.agent_builder.registry import get_session_registry
-    from python_ai_sidecar.pipeline_builder.block_registry import BlockRegistry
+    from python_ai_sidecar.agent_builder.graph_build import (
+        stream_graph_build, dry_run_plan,
+    )
+    from python_ai_sidecar.agent_builder.event_wrapper import wrap_build_event_for_chat
     from python_ai_sidecar.pipeline_builder.pipeline_schema import PipelineJSON
 
     goal = (tool_input.get("goal") or "").strip()
     notes = (tool_input.get("notes") or "").strip()
     base_pipeline_id = tool_input.get("base_pipeline_id")
+    show_plan = bool(tool_input.get("show_plan"))
     if not goal:
         return {"status": "validation_error", "error_message": "goal is required"}
     prompt = goal if not notes else f"{goal}\n\n補充 context:\n{notes}"
 
-    # Load block registry (shared with main PipelineExecutor)
-    block_registry = BlockRegistry()
-    try:
-        await block_registry.load_from_db(db)
-    except Exception as e:  # noqa: BLE001
-        return {"status": "failed", "error_message": f"BlockRegistry load failed: {e}"}
-
-    # Resolve base pipeline — priority: explicit base_pipeline_id > chat session snapshot
-    # Phase 8-A-1d: pipeline + session lookups go through Java /internal/*
-    # instead of opening a local DB session. The sidecar config carries the
-    # service token; per-request CallerContext is unavailable here so we
-    # build an unauthenticated-from-user-perspective client (Java audit will
-    # see actor=service).
+    # ── Resolve base pipeline ─────────────────────────────────────────
+    # Same precedence as before: explicit base_pipeline_id (Java DB lookup) >
+    # builder-mode canvas snapshot > clean slate.
     from python_ai_sidecar.clients.java_client import JavaAPIClient
     from python_ai_sidecar.config import CONFIG
     java = JavaAPIClient(
@@ -165,72 +152,81 @@ async def _execute_build_pipeline_live(
         timeout_sec=CONFIG.java_timeout_sec,
     )
 
-    base_pipeline: Any = None
+    base_pipeline_dict: Any = None
     base_source = "none"
     if base_pipeline_id is not None:
         try:
             import json as _json
             row = await java.get_pipeline(int(base_pipeline_id))
-            pipeline_json = (row or {}).get("pipelineJson") or (row or {}).get("pipeline_json")
-            if pipeline_json:
-                base_pipeline = PipelineJSON.model_validate(_json.loads(pipeline_json))
+            raw = (row or {}).get("pipelineJson") or (row or {}).get("pipeline_json")
+            if raw:
+                pj = PipelineJSON.model_validate(_json.loads(raw))
+                base_pipeline_dict = pj.model_dump(by_alias=True)
                 base_source = f"pipeline#{base_pipeline_id}"
         except Exception as e:  # noqa: BLE001
             logger.warning("base_pipeline load failed (ignored): %s", e)
 
-    # Phase E3 follow-up: tool_execute_node injects the orchestrator's
-    # state.pipeline_snapshot here when builder-mode and no explicit
-    # base_pipeline_id. This is the user's CURRENT canvas (with declared
-    # inputs / nodes) — takes priority over the agent_session snapshot
-    # below because canvas state is fresher.
-    if base_pipeline is None:
+    if base_pipeline_dict is None:
         canvas_snap = tool_input.get("_state_pipeline_snapshot")
         if canvas_snap and (canvas_snap.get("nodes") or canvas_snap.get("inputs")):
             try:
-                base_pipeline = PipelineJSON.model_validate(canvas_snap)
+                pj = PipelineJSON.model_validate(canvas_snap)
+                base_pipeline_dict = pj.model_dump(by_alias=True)
                 base_source = "canvas_snapshot"
             except Exception as e:  # noqa: BLE001
                 logger.warning("canvas_snapshot validate failed (ignored): %s", e)
 
-    # 2026-05-07: dropped the silent "carry forward chat session's last
-    # pipeline" fallback that used to live here. It made follow-up chat
-    # prompts inherit the previous build's nodes — so a fresh question
-    # like "幫我統計各站點 OOC count" extended the previous APC drift
-    # pipeline instead of starting clean, and Lite Canvas showed mixed
-    # results from both builds. Explicit base_pipeline_id (e.g. "edit
-    # pipeline #N") and builder-mode canvas_snapshot still inherit; chat
-    # mode now starts from scratch every prompt.
-    logger.info("build_pipeline_live base=%s, goal=%r", base_source, goal[:80])
+    logger.info("build_pipeline_live: base=%s, show_plan=%s, goal=%r",
+                base_source, show_plan, goal[:80])
 
-    # Create & register session
-    session = AgentBuilderSession.new(
-        user_prompt=prompt,
-        base_pipeline=base_pipeline,
-        base_pipeline_id=base_pipeline_id,
-    )
-    registry = get_session_registry()
-    registry.start_cleanup()
-    await registry.register(session)
+    # ── show_plan path: dry-run, no mutation, no SSE ──────────────────
+    if show_plan:
+        try:
+            dr = await dry_run_plan(
+                instruction=prompt,
+                base_pipeline=base_pipeline_dict,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.exception("build_pipeline_live dry_run_plan crashed")
+            return {"status": "failed",
+                    "error_message": f"plan dry-run crashed: {type(e).__name__}: {e}"}
 
-    # Signal frontend to open canvas overlay
+        # Compact plan summary the chat LLM can read aloud.
+        ops_summaries = [_op_one_liner(op) for op in (dr.get("plan") or [])]
+        return {
+            "status": "plan_only",
+            "plan_summary": dr.get("summary") or "",
+            "ops": ops_summaries,
+            "n_ops": dr.get("n_ops") or 0,
+            "validation_errors": dr.get("validation_errors") or [],
+            "ok": bool(dr.get("ok")),
+            "next_step_hint": (
+                "念出 plan 給 user，問他要不要 build。同意 → 再呼叫一次 build_pipeline_live "
+                "（show_plan=false 或省略），相同 goal。"
+            ),
+        }
+
+    # ── Normal build path: stream graph with skip_confirm=True ────────
+    import uuid as _uuid
+    sid = str(_uuid.uuid4())
+
     if event_emit is not None:
         try:
-            event_emit({
-                "type": "pb_glass_start",
-                "session_id": session.session_id,
-                "goal": goal,
-            })
+            event_emit({"type": "pb_glass_start", "session_id": sid, "goal": goal})
         except Exception:  # noqa: BLE001
             pass
 
-    from python_ai_sidecar.agent_builder.event_wrapper import wrap_build_event_for_chat
-
-    # Relay events
     op_count = 0
     last_status: str = "running"
+    final_pipeline: Any = base_pipeline_dict
     try:
-        async for evt in stream_agent_build(session, block_registry):
-            payload = wrap_build_event_for_chat(evt, session.session_id)
+        async for evt in stream_graph_build(
+            instruction=prompt,
+            base_pipeline=base_pipeline_dict,
+            session_id=sid,
+            skip_confirm=True,  # chat conversation IS the confirmation
+        ):
+            payload = wrap_build_event_for_chat(evt, sid)
             if payload is None:
                 continue
             if payload["type"] == "pb_glass_op":
@@ -242,36 +238,46 @@ async def _execute_build_pipeline_live(
                     event_emit(payload)
                 except Exception:  # noqa: BLE001
                     pass
+            # The graph's `done` StreamEvent carries the final pipeline_json —
+            # capture from it when wrap returned a pb_glass_done.
+            if evt.type == "done" and evt.data:
+                final_pipeline = evt.data.get("pipeline_json") or final_pipeline
+                last_status = evt.data.get("status") or last_status
     except Exception as e:  # noqa: BLE001
-        logger.exception("build_pipeline_live sub-agent crashed")
-        return {"status": "failed", "error_message": f"Sub-agent crashed: {type(e).__name__}: {e}"}
+        logger.exception("build_pipeline_live graph crashed")
+        return {"status": "failed",
+                "error_message": f"graph crashed: {type(e).__name__}: {e}"}
 
-    final_pipeline = session.pipeline_json.model_dump(by_alias=True)
+    if final_pipeline is None:
+        # Graph never finalized — return what we have.
+        final_pipeline = base_pipeline_dict or {
+            "version": "1.0", "nodes": [], "edges": [], "metadata": {}, "inputs": [],
+        }
 
-    # Safety net: even though set_param/add_node reject undeclared $refs early,
-    # scan one more time before handing the result to the outer LLM. Catches
-    # any leftover bad placeholders from a base pipeline or paused/cancelled
-    # session that bypassed the eager checks.
+    # Safety net: scan once more for undeclared $placeholder refs. The graph's
+    # call_tool_node already rejects bad refs at add_node/set_param time, but
+    # if the base_pipeline came in with stale placeholders this catches them.
     placeholder_errors: list[dict[str, Any]] = []
     try:
         from python_ai_sidecar.pipeline_builder.validator import PipelineValidator
-        validator_safety = PipelineValidator(block_registry.catalog)
-        all_errors = validator_safety.validate(session.pipeline_json)
+        from python_ai_sidecar.pipeline_builder.seedless_registry import SeedlessBlockRegistry
+        seedless = SeedlessBlockRegistry()
+        seedless.load()
+        validator_safety = PipelineValidator(seedless.catalog)
+        all_errors = validator_safety.validate(final_pipeline)
         placeholder_errors = [
             e for e in all_errors if e.get("rule") == "C10_UNDECLARED_INPUT_REF"
         ]
     except Exception as exc:  # noqa: BLE001
-        # Don't fail the build because of a validator crash — log and move on.
         logger.warning("post-build safety validator crashed: %s", exc)
 
     if placeholder_errors:
-        # Downgrade status so outer LLM treats this as fixable, not "done".
         last_status = "validation_error"
         if event_emit is not None:
             try:
                 event_emit({
                     "type": "pb_glass_error",
-                    "session_id": session.session_id,
+                    "session_id": sid,
                     "op": "post_build_validate",
                     "message": (
                         f"Pipeline has {len(placeholder_errors)} undeclared "
@@ -282,19 +288,21 @@ async def _execute_build_pipeline_live(
             except Exception:  # noqa: BLE001
                 pass
 
+    nodes_n = len(final_pipeline.get("nodes") or [])
+    summary_text = f"已建立 pipeline（{nodes_n} nodes, {op_count} operations）"
     result_dict: Dict[str, Any] = {
         "status": last_status,
         "pipeline_json": final_pipeline,
-        "summary": session.summary or f"已建立 pipeline（{len(final_pipeline.get('nodes') or [])} nodes, {op_count} operations）",
-        "node_count": len(final_pipeline.get("nodes") or []),
+        "summary": summary_text,
+        "node_count": nodes_n,
         "edge_count": len(final_pipeline.get("edges") or []),
         "run_status": last_status,
         "llm_readable_data": {
             "goal": goal,
             "final_status": last_status,
-            "nodes_built": len(final_pipeline.get("nodes") or []),
+            "nodes_built": nodes_n,
             "operations_taken": op_count,
-            "summary_for_user": session.summary,
+            "summary_for_user": summary_text,
         },
     }
     if placeholder_errors:
@@ -305,6 +313,26 @@ async def _execute_build_pipeline_live(
             "rewrite to a literal value, or use canonical $tool_id."
         )
     return result_dict
+
+
+def _op_one_liner(op_dict: Dict[str, Any]) -> str:
+    """Compact human-readable summary of one Op (for show_plan tool result)."""
+    t = op_dict.get("type", "?")
+    if t == "add_node":
+        return f"add {op_dict.get('block_id')} (as {op_dict.get('node_id', '?')})"
+    if t == "connect":
+        return (
+            f"connect {op_dict.get('src_id')}.{op_dict.get('src_port')} → "
+            f"{op_dict.get('dst_id')}.{op_dict.get('dst_port')}"
+        )
+    if t == "set_param":
+        p = op_dict.get("params") or {}
+        return f"{op_dict.get('node_id')}.{p.get('key', '?')} = {p.get('value', '?')!r}"
+    if t == "remove_node":
+        return f"remove {op_dict.get('node_id')}"
+    if t == "run_preview":
+        return f"preview {op_dict.get('node_id')}"
+    return t
 
 
 async def _execute_propose_pipeline_patch(

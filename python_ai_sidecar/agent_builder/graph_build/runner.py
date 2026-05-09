@@ -40,11 +40,18 @@ async def stream_graph_build(
     base_pipeline: Optional[dict] = None,
     user_id: Optional[int] = None,
     session_id: Optional[str] = None,
+    skip_confirm: bool = False,
 ) -> AsyncGenerator[StreamEvent, None]:
     """Run the graph from the start. Yields StreamEvent as nodes complete.
 
-    If a confirm_gate fires, yields a `confirm_pending` event with session_id
-    and stops. Resume by calling resume_graph_build(session_id, confirmed).
+    Args:
+        skip_confirm: When True, the graph bypasses confirm_gate even for
+            FROM_SCRATCH builds. Used by Chat Mode where the conversation
+            itself is the confirmation. Builder Mode passes False so users
+            still see the Apply/Cancel card before any canvas mutation.
+
+    If confirm_gate fires (skip_confirm=False + FROM_SCRATCH), yields
+    `confirm_pending` and returns; caller resumes via resume_graph_build().
     """
     sid = session_id or str(uuid.uuid4())
     graph = build_graph()
@@ -55,6 +62,7 @@ async def stream_graph_build(
         instruction=instruction,
         base_pipeline=base_pipeline,
         user_id=user_id,
+        skip_confirm=skip_confirm,
     )
     logger.info("stream_graph_build: starting session=%s", sid)
 
@@ -106,6 +114,61 @@ async def stream_graph_build(
             "session_id": sid,
         },
     )
+
+
+async def dry_run_plan(
+    *,
+    instruction: str,
+    base_pipeline: Optional[dict] = None,
+) -> dict[str, Any]:
+    """Plan-only mode for Chat's `show_plan` use case.
+
+    Runs plan_node + validate_plan_node manually (no StateGraph, no
+    checkpointer, no SSE) and returns the plan + validation status. Used
+    by Chat Mode when the user explicitly asks "先給我看 plan" — the
+    chat LLM narrates the plan to the user, and a follow-up call (with
+    show_plan=False) does the actual build.
+
+    No canvas mutation. No tool calls. Two LLM calls max (plan + maybe
+    one repair_plan if validation fails on first pass).
+    """
+    from python_ai_sidecar.agent_builder.graph_build.nodes.plan import plan_node
+    from python_ai_sidecar.agent_builder.graph_build.nodes.validate import validate_plan_node
+    from python_ai_sidecar.agent_builder.graph_build.nodes.repair_plan import (
+        repair_plan_node, MAX_PLAN_REPAIR,
+    )
+
+    state = initial_state(
+        session_id="dry_run_" + uuid.uuid4().hex[:8],
+        instruction=instruction,
+        base_pipeline=base_pipeline,
+        skip_confirm=True,  # irrelevant — we never reach confirm_gate
+    )
+
+    plan_update = await plan_node(state)
+    state.update(plan_update)  # type: ignore[arg-type]
+
+    val_update = await validate_plan_node(state)
+    state.update(val_update)  # type: ignore[arg-type]
+    errors: list[str] = list(state.get("plan_validation_errors") or [])
+
+    # One repair shot in dry-run — same budget as full graph.
+    if errors and len(state.get("plan") or []) > 0:
+        repair_update = await repair_plan_node(state)
+        state.update(repair_update)  # type: ignore[arg-type]
+        if state.get("plan"):
+            val2 = await validate_plan_node(state)
+            state.update(val2)  # type: ignore[arg-type]
+            errors = list(state.get("plan_validation_errors") or [])
+
+    plan = state.get("plan") or []
+    return {
+        "plan": plan,
+        "summary": state.get("summary") or "",
+        "validation_errors": errors,
+        "n_ops": len(plan),
+        "ok": len(errors) == 0 and len(plan) > 0,
+    }
 
 
 async def resume_graph_build(

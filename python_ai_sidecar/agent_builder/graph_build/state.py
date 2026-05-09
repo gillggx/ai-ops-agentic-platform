@@ -34,6 +34,11 @@ class BuildGraphState(TypedDict, total=False):
     # ── Confirm stage ─────────────────────────────────────────────────
     is_from_scratch: bool
     user_confirmed: Optional[bool]  # None = not yet asked / waiting
+    # When True, _route_after_validate skips confirm_gate entirely. Used by
+    # Chat Mode (in-process build_pipeline_live tool) where the chat
+    # conversation IS the confirmation; pausing the chat orchestrator
+    # mid-tool to wait for a UI click would break the conversational flow.
+    skip_confirm: bool
 
     # ── Execute stage ─────────────────────────────────────────────────
     cursor: int                          # plan[cursor] is the next op
@@ -53,6 +58,7 @@ def initial_state(
     instruction: str,
     base_pipeline: Optional[dict],
     user_id: Optional[int] = None,
+    skip_confirm: bool = False,
 ) -> BuildGraphState:
     return BuildGraphState(
         session_id=session_id,
@@ -64,6 +70,7 @@ def initial_state(
         plan_repair_attempts=0,
         is_from_scratch=False,
         user_confirmed=None,
+        skip_confirm=skip_confirm,
         cursor=0,
         logical_to_real={},
         failed_op_idx=None,
