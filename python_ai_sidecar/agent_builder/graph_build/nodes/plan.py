@@ -28,7 +28,11 @@ Op type 共 5 種:
 
 規則:
   1. 用邏輯 id n1, n2, n3, ... 編號（不要編真實 id）
-  2. 順序：先 add_node，緊接該 node 的 set_param，最後才 connect
+  2. **op 順序硬性規則**（違反就會被擋）:
+     a) add_node — 加入這個 block，可帶 initial params (純值，不要帶 column-ref)
+     b) connect  — 把上游接進來
+     c) set_param — 寫 column-ref 參數（value_column / x / y / column / agg_column 等）
+     ⚠ column-ref 的 set_param 必須在 connect 之後，否則沒有 upstream 可查
   3. connect 的 src_id / dst_id 都用邏輯 id
   4. 一次出完整 plan — 後面不能再補 op
   5. block 必須來自下面的目錄；不要編造 block_id
@@ -36,6 +40,19 @@ Op type 共 5 種:
   7. **block_id 不要帶 @version 後綴**。block_id 跟 block_version 是兩個分開的欄位：
      ✅ 對：{"block_id":"block_xbar_r", "block_version":"1.0.0"}
      ❌ 錯：{"block_id":"block_xbar_r@1.0.0", "block_version":"1.0.0"}（會找不到 block）
+  8. **column-ref 一定要用上游真實的 column 名**。每個 block 在 catalog 都標了 out_cols=[...]，
+     下游 set_param value_column / x / y 等就從 upstream 的 out_cols 挑。例如：
+        block_process_history out_cols=[eventTime, toolID, ..., spc_xbar_chart_value, ...]
+     → 接 block_ewma_cusum 時 value_column='spc_xbar_chart_value'（不是 'xbar' 不是 'value'）
+
+✅ 正確 op 順序範例:
+  Op#0 add_node block_process_history → n1, params={tool_id:'EQP-01', step:'STEP_001'}
+  Op#1 add_node block_ewma_cusum → n2
+  Op#2 connect n1.data → n2.data
+  Op#3 set_param n2 value_column='spc_xbar_chart_value'   ← connect 之後才寫
+
+❌ 錯誤示範（會被擋下來）:
+  add_node n2 → set_param n2 value_column=...  ← 沒有 upstream 可參考
 
 Block 目錄:
 {BLOCK_CATALOG}
@@ -53,12 +70,47 @@ Block 目錄:
 """
 
 
+_OUT_COL_PREVIEW_CAP = 12
+
+# Phase 10-C Fix 1b: transform-block output column rules. Hard-coded because
+# transforms compute their output columns dynamically from upstream — no static
+# `output_columns_hint` can capture this. Keep in sync with each block's
+# implementation; CI invariant test catches drift.
+_TRANSFORM_OUT_RULES: dict[str, str] = {
+    "block_filter": "preserves upstream",
+    "block_sort": "preserves upstream",
+    "block_select": "subset of upstream (whichever 'columns' param picks)",
+    "block_rename": "upstream renamed",
+    "block_drop_duplicates": "preserves upstream",
+    "block_pivot": "depends on pivot params",
+    "block_groupby_agg": "[<group_by> cols] + <agg_column>_<agg_func>",
+    "block_linear_regression": "stats port: [slope, intercept, r_squared, p_value, n, stderr, group]; "
+                               "data port: upstream + <y_column>_pred + <y_column>_residual + group; "
+                               "ci port: [<x_column>, pred, ci_lower, ci_upper, group]",
+    "block_xbar_r": "preserves upstream + xbar/r/sigma derived columns",
+    "block_ewma_cusum": "preserves upstream + ewma/cusum/signal columns",
+    "block_cpk": "[group, cpk, cp, mean, std]",
+    "block_hypothesis_test": "[group, statistic, p_value, reject_null]",
+    "block_spc_long_form": "[eventTime, toolID, lotID, step, chart_name, value, ucl, lcl, is_ooc, spc_status]",
+    "block_apc_long_form": "[eventTime, toolID, lotID, step, parameter, value]",
+    "block_data_view": "preserves upstream (display only)",
+    "block_box_plot": "preserves upstream (chart only)",
+    "block_probability_plot": "preserves upstream (chart only)",
+    "block_alert": "preserves upstream + alert_id, alert_severity",
+}
+
+
 def _format_catalog(catalog: dict[tuple[str, str], dict[str, Any]]) -> str:
     """Single source of truth for block info — DB description (CLAUDE.md §1).
 
-    Each line: name@version  in=[...]  out=[...]  params={key:enum-or-type, ...}
-    Param enum/type info is critical — without it the LLM passes user phrases
-    like 'spc_xbar_chart_value' to enum params expecting 'SPC'/'APC'/etc.
+    Each line carries:
+      name@version  in=[...]  out=[...]  params={key:type-or-enum-or-range,...}
+      out_cols=[...] (or transform rule)  — short description
+
+    Surfacing param enum + range + output column names is critical. Without
+    them the LLM blindly passes user phrases ('spc_xbar_chart_value') to enum
+    params, picks out-of-range numbers (limit=1000 vs max 200), or references
+    column names that don't exist in upstream output.
     """
     lines = []
     for (name, version), spec in sorted(catalog.items()):
@@ -74,15 +126,11 @@ def _format_catalog(catalog: dict[tuple[str, str], dict[str, Any]]) -> str:
                 continue
             enum = v.get("enum")
             if enum is not None:
-                # Cap to 6 enum values + ellipsis to keep prompt size sane.
                 preview = enum[:6]
                 more = "" if len(enum) <= 6 else f"…+{len(enum)-6}"
                 param_hints.append(f"{k}∈{preview}{more}")
                 continue
             t = v.get("type") or "?"
-            # Surface min/max so LLM doesn't pick out-of-range numbers (e.g.
-            # block_process_history.limit caps at 200; without this hint the
-            # LLM happily passes 1000 and the upstream returns 422).
             mn = v.get("minimum")
             mx = v.get("maximum")
             if mn is not None or mx is not None:
@@ -91,11 +139,43 @@ def _format_catalog(catalog: dict[tuple[str, str], dict[str, Any]]) -> str:
             else:
                 param_hints.append(f"{k}:{t}")
         params_str = ", ".join(param_hints) if param_hints else "(none)"
+        out_cols_str = _format_out_cols(name, spec)
         lines.append(
             f"- {name}@{version}  in={in_ports}  out={out_ports}  "
-            f"params={{{params_str}}}  — {desc}"
+            f"params={{{params_str}}}\n"
+            f"    out_cols={out_cols_str}\n"
+            f"    — {desc}"
         )
     return "\n".join(lines)
+
+
+def _format_out_cols(block_name: str, spec: dict[str, Any]) -> str:
+    """Fix 1: surface block's output columns to LLM.
+
+    Priority order:
+      1. transform rule (hardcoded; preserves/derives from upstream)
+      2. output_columns_hint from spec (static columns, e.g. source blocks)
+      3. fallback "?" — LLM should treat as unknown
+    """
+    rule = _TRANSFORM_OUT_RULES.get(block_name)
+    if rule is not None:
+        return rule
+    hint = spec.get("output_columns_hint") or []
+    if not hint:
+        return "?"
+    names = []
+    for col in hint:
+        if isinstance(col, dict):
+            n = col.get("name")
+            if n:
+                names.append(n)
+        elif isinstance(col, str):
+            names.append(col)
+    if not names:
+        return "?"
+    preview = names[:_OUT_COL_PREVIEW_CAP]
+    more = "" if len(names) <= _OUT_COL_PREVIEW_CAP else f"…+{len(names)-_OUT_COL_PREVIEW_CAP}"
+    return f"[{', '.join(preview)}{more}]"
 
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.DOTALL)

@@ -1,5 +1,6 @@
 """validate_plan_node — pure code: check Op schema, block existence,
-param schema match, port compatibility, DAG legality.
+param schema match, port compatibility, DAG legality, op order,
+and column-ref correctness against the logical pipeline.
 
 If any error is found, errors list is populated; graph routes to
 repair_plan_node. If clean, falls through to confirm_gate.
@@ -15,6 +16,17 @@ from pydantic import ValidationError
 
 from python_ai_sidecar.agent_builder.graph_build.ops import Op, OpType
 from python_ai_sidecar.agent_builder.graph_build.state import BuildGraphState
+from python_ai_sidecar.agent_builder.tools import (
+    COLUMN_REF_KEYS,
+    _columns_for_block_port,
+)
+from python_ai_sidecar.pipeline_builder.pipeline_schema import (
+    EdgeEndpoint,
+    NodePosition,
+    PipelineEdge,
+    PipelineJSON,
+    PipelineNode,
+)
 from python_ai_sidecar.pipeline_builder.seedless_registry import SeedlessBlockRegistry
 
 
@@ -146,6 +158,14 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
             if op.node_id not in id_to_block:
                 errors.append(f"Op#{idx}: {op.type.value} targets unknown node '{op.node_id}'")
 
+    # Pass 3 — op-order + column-ref pre-check (Fix 2 + Fix 3 of Phase 10-C).
+    # Walks plan in order, builds a transient PipelineJSON as it goes; at each
+    # set_param with a column-ref key, requires the target node to already have
+    # an inbound edge AND verifies the chosen column exists in upstream output.
+    if not errors:  # don't bother if pass 2 already failed — repair_plan first
+        order_errors = _check_op_order_and_column_refs(plan_raw, parsed, registry, state)
+        errors.extend(order_errors)
+
     logger.info("validate_plan_node: %d hard errors, %d soft warnings, plan_cleaned=%s",
                 len(errors), len(warnings), plan_was_cleaned)
 
@@ -159,6 +179,168 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
     if plan_was_cleaned:
         update["plan"] = plan_raw  # propagate cleaned block_ids to call_tool_node
     return update
+
+
+def _check_op_order_and_column_refs(
+    plan_raw: list[dict[str, Any]],
+    parsed: list[Op],
+    registry: SeedlessBlockRegistry,
+    state: BuildGraphState,
+) -> list[str]:
+    """Phase 10-C Fix 2 + Fix 3.
+
+    Walks the plan in order, maintaining a transient PipelineJSON. At each
+    set_param touching a COLUMN_REF_KEYS param:
+      - require target node has at least one inbound data edge (Fix 2)
+      - require value to be a column in upstream's expected output (Fix 3)
+
+    Reuses tools.py `_columns_for_block_port` so the logic matches what the
+    existing v1 BuilderToolset.set_param does at write time — the only
+    difference is we run it BEFORE call_tool so the LLM sees the error in
+    plan-time and repair_plan can fix it.
+    """
+    errors: list[str] = []
+
+    # Seed transient pipeline from base_pipeline (incremental builds).
+    base = state.get("base_pipeline")
+    if base:
+        try:
+            transient = PipelineJSON.model_validate(base)
+        except Exception:  # noqa: BLE001
+            transient = _empty_pipeline()
+    else:
+        transient = _empty_pipeline()
+
+    # Track logical→real id mapping for incremental builds where base nodes
+    # have real ids; new add_node ops use logical ids n1..nN. They coexist.
+    next_logical_idx = 1
+    logical_id_set: set[str] = {n.id for n in transient.nodes}
+
+    # Class registry — we need to look up BlockRegistry-shaped catalog for
+    # _columns_for_block_port. SeedlessBlockRegistry has the same .catalog
+    # and .get_spec interface so it works as a drop-in.
+    for idx, (raw, op) in enumerate(zip(plan_raw, parsed)):
+        if op is None:
+            continue
+
+        if op.type == OpType.ADD_NODE:
+            logical_id = op.node_id
+            if not logical_id:
+                logical_id = f"n{next_logical_idx}"
+                next_logical_idx += 1
+            logical_id_set.add(logical_id)
+            transient.nodes.append(PipelineNode(
+                id=logical_id,
+                block_id=op.block_id,
+                block_version=op.block_version or "1.0.0",
+                position=NodePosition(x=0, y=0),
+                params=dict(op.params or {}),
+            ))
+
+        elif op.type == OpType.CONNECT:
+            if op.src_id in logical_id_set and op.dst_id in logical_id_set:
+                edge_id = f"e{len(transient.edges) + 1}"
+                transient.edges.append(PipelineEdge(
+                    id=edge_id,
+                    **{"from": EdgeEndpoint(node=op.src_id, port=op.src_port or "data")},
+                    to=EdgeEndpoint(node=op.dst_id, port=op.dst_port or "data"),
+                ))
+
+        elif op.type == OpType.SET_PARAM:
+            if not op.node_id or op.node_id not in logical_id_set:
+                continue  # already flagged in pass 2
+            params = op.params or {}
+            key = params.get("key")
+            value = params.get("value")
+            if key not in COLUMN_REF_KEYS:
+                # Apply param to transient (so downstream column derivations
+                # see updates like agg_column on groupby_agg).
+                _apply_set_param(transient, op.node_id, key, value)
+                continue
+
+            # Fix 2 — column-ref needs an inbound edge first.
+            target_node = next((n for n in transient.nodes if n.id == op.node_id), None)
+            inbound = [
+                e for e in transient.edges if e.to.node == op.node_id
+            ]
+            if target_node is None:
+                continue  # shouldn't happen
+            if not inbound:
+                errors.append(
+                    f"Op#{idx}: set_param '{key}' on node '{op.node_id}' BEFORE any "
+                    f"connect — column-ref params must come AFTER connecting upstream"
+                )
+                continue
+
+            # Fix 3 — value must be in upstream's expected output columns.
+            try:
+                upstream_cols = _resolve_upstream_cols(transient, op.node_id, registry)
+            except Exception as ex:  # noqa: BLE001
+                logger.warning("col-ref pre-check unavailable for %s: %s", op.node_id, ex)
+                _apply_set_param(transient, op.node_id, key, value)
+                continue
+            if upstream_cols is None:
+                # fail-open: can't compute (multi-port edge case etc.)
+                _apply_set_param(transient, op.node_id, key, value)
+                continue
+
+            # value can be string column name OR list of strings.
+            bad = []
+            if isinstance(value, list):
+                bad = [v for v in value if isinstance(v, str) and v not in upstream_cols]
+            elif isinstance(value, str):
+                # tolerate $placeholder refs (resolved at runtime)
+                if value and not value.startswith("$") and value not in upstream_cols:
+                    bad = [value]
+            if bad:
+                preview = upstream_cols[:8]
+                more = "" if len(upstream_cols) <= 8 else f"…+{len(upstream_cols)-8}"
+                errors.append(
+                    f"Op#{idx}: set_param '{key}'={bad!r} on node '{op.node_id}' — "
+                    f"value not in upstream columns. Available: {preview}{more}"
+                )
+                continue
+
+            _apply_set_param(transient, op.node_id, key, value)
+
+    return errors
+
+
+def _empty_pipeline() -> PipelineJSON:
+    return PipelineJSON(
+        version="1.0",
+        name="(transient)",
+        metadata={},
+        inputs=[],
+        nodes=[],
+        edges=[],
+    )
+
+
+def _apply_set_param(pipeline: PipelineJSON, node_id: str, key: str, value: Any) -> None:
+    node = next((n for n in pipeline.nodes if n.id == node_id), None)
+    if node is None or not key:
+        return
+    node.params = {**(node.params or {}), key: value}
+
+
+def _resolve_upstream_cols(
+    pipeline: PipelineJSON,
+    node_id: str,
+    registry: SeedlessBlockRegistry,
+) -> list[str] | None:
+    """Find first inbound edge → ask tools._columns_for_block_port for that
+    upstream node's output schema on the matching port."""
+    for edge in pipeline.edges:
+        if edge.to.node != node_id:
+            continue
+        upstream = next((n for n in pipeline.nodes if n.id == edge.from_.node), None)
+        if upstream is None:
+            continue
+        return _columns_for_block_port(
+            pipeline, upstream, registry, edge.from_.port,
+        )
+    return None
 
 
 def _check_param_value(prop_schema: dict[str, Any], key: str, value: Any) -> str | None:
