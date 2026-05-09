@@ -31,7 +31,12 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
 
     registry = SeedlessBlockRegistry()
     registry.load()
-    errors: list[str] = []
+    # HARD errors trigger repair_plan (LLM must fix). SOFT errors are advisory
+    # warnings — LLM context limits make some of these unrepairable (e.g. domain
+    # mapping "spc_xbar_chart_value" → category 'SPC'), so we let the plan
+    # proceed and surface the warnings in build_finalized.
+    errors: list[str] = []           # hard — block plan
+    warnings: list[str] = []         # soft — advisory only
 
     # Defensive normalization first — Haiku regularly stuffs the version into
     # block_id (e.g. "block_xbar_r@1.0.0") AND populates block_version, so
@@ -72,7 +77,10 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
                 errors.append(f"Op#{idx}: logical id '{logical_id}' duplicated")
             declared_ids.add(logical_id)
             id_to_block[logical_id] = (op.block_id, op.block_version or "1.0.0")
-            # Validate initial params against schema (best-effort).
+            # Validate initial params against schema. Param KEY mismatch is a
+            # hard error (LLM hallucinated a non-existent param). Param VALUE
+            # mismatch (enum/type) is a soft warning — repair_plan often can't
+            # fix domain mapping issues, so we let the plan proceed.
             schema_props = ((spec.get("param_schema") or {}).get("properties") or {})
             for k, v in (op.params or {}).items():
                 if k not in schema_props:
@@ -83,7 +91,7 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
                     continue
                 msg = _check_param_value(schema_props[k], k, v)
                 if msg:
-                    errors.append(f"Op#{idx}: add_node({op.block_id}) {msg}")
+                    warnings.append(f"Op#{idx}: add_node({op.block_id}) {msg}")
 
         elif op.type == OpType.SET_PARAM:
             if op.node_id not in id_to_block:
@@ -102,7 +110,7 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
             else:
                 msg = _check_param_value(schema_props[key], key, params.get("value"))
                 if msg:
-                    errors.append(f"Op#{idx}: set_param {msg}")
+                    warnings.append(f"Op#{idx}: set_param {msg}")
 
         elif op.type == OpType.CONNECT:
             if op.src_id not in id_to_block:
@@ -136,14 +144,14 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
             if op.node_id not in id_to_block:
                 errors.append(f"Op#{idx}: {op.type.value} targets unknown node '{op.node_id}'")
 
-    logger.info("validate_plan_node: %d errors found, plan_cleaned=%s",
-                len(errors), plan_was_cleaned)
+    logger.info("validate_plan_node: %d hard errors, %d soft warnings, plan_cleaned=%s",
+                len(errors), len(warnings), plan_was_cleaned)
 
     update: dict[str, Any] = {
         "plan_validation_errors": errors,
         "sse_events": [_event(
             "plan_validating",
-            {"errors": errors, "ok": len(errors) == 0},
+            {"errors": errors, "warnings": warnings, "ok": len(errors) == 0},
         )],
     }
     if plan_was_cleaned:
