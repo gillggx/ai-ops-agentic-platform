@@ -30,7 +30,11 @@
 | **8-A** | ✅ shipped 2026-04-25 | Glass Box builder + chat orchestrator_v2 ported into sidecar; fastapi-backend (:8001) decommissioned | [PHASE_8_A_RUNBOOK.md](PHASE_8_A_RUNBOOK.md) |
 | **8-B** | ✅ shipped 2026-04-25 | 27 → 48 BUILTIN_EXECUTORS native in sidecar; legacy walker retired | [PHASE_8_SESSION_REPORT.md](PHASE_8_SESSION_REPORT.md) |
 | **8-D** | ✅ shipped | Live data pipelines (DR/Patrol migration to Phase 8 native) | [PHASE_8_D_RUNBOOK.md](PHASE_8_D_RUNBOOK.md) |
-| **9** | 🛠 **design draft** | Agent-Authored Rules — chat output becomes runnable rule artifacts (cron + pipeline + channel) | [PHASE_9_AGENT_AUTHORED_RULES.md](PHASE_9_AGENT_AUTHORED_RULES.md) |
+| **9** | ✅ shipped 2026-05-08~09 | Agent-Authored Rules — chat output becomes runnable rule artifacts (cron + pipeline + channel) | [PHASE_9_AGENT_AUTHORED_RULES.md](PHASE_9_AGENT_AUTHORED_RULES.md) |
+| **Restructure P1** | ✅ shipped 2026-05-09 | Remove retired fastapi_backend_service (-95k LOC) + cleanup deploy scripts | commits 584e7d9, d3c364e, f70fa8a, 1f538d1 |
+| **Restructure P2** | ✅ shipped 2026-05-09 | Split java-scheduler service from java-backend; SchedulerHttpClient + reconcile loop | commit 91be3f9 |
+| **Restructure P3** | ✅ shipped 2026-05-09 | Redis-backed distributed lock for multi-pod scheduler | commit 900ccb7 |
+| **Restructure P4** | ✅ shipped 2026-05-09 | Internal-network audit + warm-cache script + transfer doc | [INTERNAL_NETWORK_TRANSFER.md](INTERNAL_NETWORK_TRANSFER.md) |
 | **10** | 📋 backlog | Write operations from chat (ack alarm / hold tool / pause patrol) + audit | TBD |
 | **11** | 📋 backlog | Multi-tenant team rules (sharing / RBAC on personal rules) | TBD |
 
