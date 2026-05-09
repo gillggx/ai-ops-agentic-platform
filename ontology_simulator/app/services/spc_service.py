@@ -33,13 +33,19 @@ _CHART_SPECS: dict[str, dict] = {
     "p_chart":          {"sensor": "cf4_flow_sccm",          "mean": 50.00,    "sd": 4.0},
     "c_chart":          {"sensor": "rf_forward_power",       "mean": 1500.00,  "sd": 46.67},
     # Phase 12 new charts ----------------------------------------------------
-    "imr_pressure":     {"sensor": "foreline_pressure",      "mean":  1.30,    "sd": 0.30},
-    "cusum_temp":       {"sensor": "chuck_temp_c",           "mean": 20.00,    "sd": 0.667},
-    "ewma_bias":        {"sensor": "bias_power_lf_w",        "mean": 400.00,   "sd": 33.0},
-    "cpk_etch":         {"sensor": "rf_2nd_harmonic_w",      "mean":  11.0,    "sd": 3.0},
-    "oes_endpoint":     {"sensor": "oes_endpoint_signal",    "mean":  0.50,    "sd": 0.16},
-    "rga_h2o_chart":    {"sensor": "rga_h2o_partial",        "mean":  3e-9,    "sd": 1e-9},
-    "match_tune_chart": {"sensor": "match_tune_position",    "mean": 50.00,    "sd": 5.0},
+    # SD chosen so UCL/LCL (mean ± 1.5σ for production) sits just outside
+    # the DC physical range from dc_service._SENSOR_RANGES. Original Phase 12
+    # SDs were too tight (e.g. cpk_etch UCL=15.5 with DC range 5-18 → 50%
+    # natural OOC), inflating SPC OOC rate to ~100% on every event. These
+    # widened values restore natural OOC ≈ baseline; intentional drift /
+    # excursion injection in dc_service still trips the original 5 charts.
+    "imr_pressure":     {"sensor": "foreline_pressure",      "mean":  1.30,    "sd":  0.40},
+    "cusum_temp":       {"sensor": "chuck_temp_c",           "mean": 20.00,    "sd":  0.80},
+    "ewma_bias":        {"sensor": "bias_power_lf_w",        "mean": 400.00,   "sd": 55.0},
+    "cpk_etch":         {"sensor": "rf_2nd_harmonic_w",      "mean":  11.5,    "sd":  5.5},
+    "oes_endpoint":     {"sensor": "oes_endpoint_signal",    "mean":  0.50,    "sd":  0.25},
+    "rga_h2o_chart":    {"sensor": "rga_h2o_partial",        "mean":  3e-9,    "sd":  1.6e-9},
+    "match_tune_chart": {"sensor": "match_tune_position",    "mean": 50.00,    "sd":  8.0},
 }
 
 
