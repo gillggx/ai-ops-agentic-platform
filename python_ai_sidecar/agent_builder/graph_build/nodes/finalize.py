@@ -37,9 +37,14 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
     pipeline = PipelineJSON.model_validate(final_dict)
     registry = SeedlessBlockRegistry()
     registry.load()
-    validator = PipelineValidator(registry)
+    # PipelineValidator wants the catalog dict directly (not a registry).
+    # validate() returns list[dict] with keys like {rule, message, severity?}.
+    validator = PipelineValidator(registry.catalog)
     issues = validator.validate(pipeline)
-    n_blocking = sum(1 for i in issues if i.severity == "error")
+    n_blocking = sum(
+        1 for i in issues
+        if (i.get("severity") if isinstance(i, dict) else getattr(i, "severity", None)) != "warning"
+    )
 
     n_ok_ops = sum(1 for op in plan if op.get("result_status") == "ok")
     n_failed_ops = sum(1 for op in plan if op.get("result_status") == "error")
