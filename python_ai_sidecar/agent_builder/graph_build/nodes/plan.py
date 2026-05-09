@@ -60,6 +60,10 @@ Block 目錄:
 只輸出 JSON，不要 markdown fence:
 {
   "plan_summary": "<一句話描述要建什麼>",
+  "expected_outputs": [
+    "<跑完 user 會看到的 artifact，每行一個 — 用 user-facing 語言>",
+    "..."
+  ],
   "plan": [
     {"type":"add_node", "block_id":"...", "block_version":"1.0.0", "node_id":"n1", "params":{...}},
     {"type":"set_param", "node_id":"n1", "params":{"key":"...", "value":...}},
@@ -67,6 +71,12 @@ Block 目錄:
     ...
   ]
 }
+
+expected_outputs 範例（描述 user 會看到的東西，不是 ops 列表）:
+  ✅ ["📈 EWMA-CUSUM drift trend", "📦 各 lot 的 box-plot", "📉 Q-Q 常態檢定圖"]
+  ✅ ["📋 OOC 機台清單表", "📊 各站點 OOC 比例 bar chart"]
+  ❌ ["add block_xbar_r", "set_param value_column", ...]   ← 這是 ops 不是 outputs
+  ❌ ["build pipeline"]                                     ← 太籠統
 """
 
 
@@ -264,13 +274,18 @@ async def plan_node(state: BuildGraphState) -> dict[str, Any]:
 
     plan_list = decision.get("plan") or []
     summary = (decision.get("plan_summary") or "").strip() or "(no summary)"
+    expected_outputs_raw = decision.get("expected_outputs") or []
+    expected_outputs = [
+        s.strip() for s in expected_outputs_raw
+        if isinstance(s, str) and s.strip()
+    ][:8]
 
     # Determine FROM_SCRATCH heuristic: empty canvas + plan ≥ 3 ops
     is_from_scratch = (not has_existing) and (len(plan_list) >= 3)
 
     logger.info(
-        "plan_node: produced %d ops, from_scratch=%s, summary=%r",
-        len(plan_list), is_from_scratch, summary[:80],
+        "plan_node: produced %d ops, %d outputs, from_scratch=%s, summary=%r",
+        len(plan_list), len(expected_outputs), is_from_scratch, summary[:80],
     )
 
     return {
@@ -278,9 +293,11 @@ async def plan_node(state: BuildGraphState) -> dict[str, Any]:
         "is_from_scratch": is_from_scratch,
         "plan_validation_errors": [],
         "summary": summary,
+        "expected_outputs": expected_outputs,
         "sse_events": [_event("plan_proposed", {
             "plan": plan_list,
             "summary": summary,
+            "expected_outputs": expected_outputs,
             "from_scratch": is_from_scratch,
         })],
     }

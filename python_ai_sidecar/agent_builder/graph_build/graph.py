@@ -41,6 +41,7 @@ from python_ai_sidecar.agent_builder.graph_build.nodes.repair_op import (
     repair_op_node,
 )
 from python_ai_sidecar.agent_builder.graph_build.nodes.finalize import finalize_node
+from python_ai_sidecar.agent_builder.graph_build.nodes.layout import layout_node
 
 
 logger = logging.getLogger(__name__)
@@ -125,6 +126,7 @@ def build_graph():
     g.add_node("call_tool", call_tool_node)
     g.add_node("repair_op", repair_op_node)
     g.add_node("finalize", finalize_node)
+    g.add_node("layout", layout_node)
 
     g.add_edge(START, "plan")
     g.add_edge("plan", "validate")
@@ -156,7 +158,8 @@ def build_graph():
         },
     )
     g.add_edge("repair_op", "call_tool")
-    g.add_edge("finalize", END)
+    g.add_edge("finalize", "layout")
+    g.add_edge("layout", END)
 
     checkpointer = MemorySaver()
     _compiled = g.compile(checkpointer=checkpointer)

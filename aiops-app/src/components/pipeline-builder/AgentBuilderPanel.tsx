@@ -21,12 +21,14 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useBuilder } from "@/context/pipeline-builder/BuilderContext";
 import type { BlockSpec } from "@/lib/pipeline-builder/types";
-import { applyGlassOp, OP_LABELS, opDetail, autoLayoutPipeline } from "@/lib/pipeline-builder/glass-ops";
+import { applyGlassOp, OP_LABELS, opDetail } from "@/lib/pipeline-builder/glass-ops";
 import { PlanRenderer, type PlanItem } from "@/components/copilot/PlanRenderer";
 type ChatRole = "user" | "agent" | "op" | "error" | "advisor" | "confirm";
 interface ConfirmData {
   session_id: string;
   plan_summary: string;
+  /** Phase 10-D: user-facing artifact preview, e.g. ["📈 CUSUM trend", "📦 Box-plot"]. */
+  expected_outputs: string[];
   plan_ops: string[];
   n_ops: number;
   resolved: boolean;
@@ -165,6 +167,7 @@ export default function AgentBuilderPanel({
           const cd: ConfirmData = {
             session_id: (data.session_id as string) || "",
             plan_summary: (data.plan_summary as string) || "(no summary)",
+            expected_outputs: (data.expected_outputs as string[]) ?? [],
             plan_ops: (data.plan_ops as string[]) ?? [],
             n_ops: (data.n_ops as number) ?? 0,
             resolved: false,
@@ -283,28 +286,28 @@ export default function AgentBuilderPanel({
           const msg = (data.message as string) || "(unknown error)";
           setLines((p) => [...p, { id: nextId(), role: "error", text: msg }]);
         } else if (eventType === "done") {
-          // Advisor path didn't touch the canvas — skip the "✓ done" summary
-          // line and the auto-layout pass. The advisor_answer card is
-          // already in the chat column.
+          // Advisor path didn't touch the canvas — skip the "✓ done" summary.
+          // The advisor_answer card is already in the chat column.
           if (data.status === "advisor_done") {
             // no-op
           } else {
             const summary = (data.summary as string) || "(done)";
             setLines((p) => [...p, { id: nextId(), role: "agent", text: `✓ ${summary}` }]);
-            // Phase 5-UX-6 (race-fix): defer auto-layout until React commits
-            // every queued add_node / connect / rename action.
-            const edgesNow = stateRef.current.pipeline.edges;
-            requestAnimationFrame(() => {
-              const laidOut = autoLayoutPipeline(
-                currentNodesRef.current,
-                stateRef.current.pipeline.edges,
-              );
-              if (laidOut.length > 0) {
-                actions.setNodesAndEdges(laidOut, stateRef.current.pipeline.edges);
-              } else {
-                void edgesNow;
-              }
-            });
+            // Phase 10-D: backend layout_node now ships canvas with positions
+            // already laid out, so the frontend dagre pass is gone. If the
+            // backend pipeline_json arrived in `done.data.pipeline_json` we
+            // can trust those coordinates; the live add_node ops have already
+            // applied raw positions which the layout_node-driven final pass
+            // overrides via state.pipeline.nodes (BuilderContext keeps the
+            // latest write).
+            const finalPj = data.pipeline_json as { nodes?: Array<{ id: string; position?: { x: number; y: number } }> } | null;
+            if (finalPj && Array.isArray(finalPj.nodes) && finalPj.nodes.length > 0) {
+              const laidOut = currentNodesRef.current.map((n) => {
+                const pj = finalPj.nodes!.find((m) => m.id === n.id);
+                return pj?.position ? { ...n, position: { x: pj.position.x, y: pj.position.y } } : n;
+              });
+              actions.setNodesAndEdges(laidOut, stateRef.current.pipeline.edges);
+            }
           }
         }
       }
@@ -611,12 +614,28 @@ function ConfirmCard({
           🛑 等你確認 — 即將建 {data.n_ops} 個 op
         </div>
         <div style={{ fontWeight: 600, marginBottom: 8 }}>{data.plan_summary}</div>
-        <ul style={{ margin: "0 0 10px", paddingLeft: 18, fontSize: 12, color: "#3f3f46" }}>
-          {data.plan_ops.slice(0, 12).map((s, i) => <li key={i}>{s}</li>)}
-          {data.plan_ops.length > 12 && (
-            <li style={{ color: "#71717a" }}>… +{data.plan_ops.length - 12} more</li>
-          )}
-        </ul>
+        {data.expected_outputs.length > 0 && (
+          <div style={{ marginBottom: 10, padding: "8px 10px", background: "#fef3c7",
+                        borderRadius: 6, border: "1px solid #fcd34d" }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#78350f", marginBottom: 4 }}>
+              📊 跑完會看到
+            </div>
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "#3f3f46" }}>
+              {data.expected_outputs.map((s, i) => <li key={i}>{s}</li>)}
+            </ul>
+          </div>
+        )}
+        <details style={{ marginBottom: 10 }}>
+          <summary style={{ fontSize: 11, fontWeight: 600, color: "#52525b", cursor: "pointer" }}>
+            ▶ 建構 ops（{data.n_ops} 個）
+          </summary>
+          <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 12, color: "#3f3f46" }}>
+            {data.plan_ops.slice(0, 12).map((s, i) => <li key={i}>{s}</li>)}
+            {data.plan_ops.length > 12 && (
+              <li style={{ color: "#71717a" }}>… +{data.plan_ops.length - 12} more</li>
+            )}
+          </ul>
+        </details>
         <div style={{ display: "flex", gap: 8 }}>
           <button
             onClick={() => onPick(true)}

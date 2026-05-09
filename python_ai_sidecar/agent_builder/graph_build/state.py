@@ -30,6 +30,9 @@ class BuildGraphState(TypedDict, total=False):
     plan: list[dict]                # list[Op] dumped
     plan_validation_errors: list[str]
     plan_repair_attempts: int
+    # User-facing description of what artifacts will be produced — shown
+    # in the confirm card so the user knows what to expect before approving.
+    expected_outputs: list[str]
 
     # ── Confirm stage ─────────────────────────────────────────────────
     is_from_scratch: bool
@@ -68,6 +71,7 @@ def initial_state(
         plan=[],
         plan_validation_errors=[],
         plan_repair_attempts=0,
+        expected_outputs=[],
         is_from_scratch=False,
         user_confirmed=None,
         skip_confirm=skip_confirm,

@@ -6,6 +6,7 @@ This block produces a chart_spec only.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import pandas as pd
@@ -16,6 +17,9 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     ExecutionContext,
 )
 from python_ai_sidecar.pipeline_builder.blocks.line_chart import _records
+
+
+logger = logging.getLogger(__name__)
 
 
 class EwmaCusumBlockExecutor(BlockExecutor):
@@ -50,6 +54,7 @@ class EwmaCusumBlockExecutor(BlockExecutor):
         }
         if isinstance(params.get("values"), list):
             spec["values"] = params["values"]
+            target_data: pd.Series | None = pd.Series(params["values"], dtype="float64")
         else:
             value_col = params.get("value_column") or None
             if not value_col:
@@ -57,8 +62,36 @@ class EwmaCusumBlockExecutor(BlockExecutor):
             if value_col not in df.columns:
                 raise BlockExecutionError(code="COLUMN_NOT_FOUND", message=f"value_column '{value_col}' not in data")
             spec["value_column"] = value_col
-        for k in ("lambda", "k", "h", "target"):
+            try:
+                target_data = pd.to_numeric(df[value_col], errors="coerce").dropna()
+            except Exception:  # noqa: BLE001
+                target_data = None
+
+        for k in ("lambda", "k", "h"):
             v = params.get(k)
             if isinstance(v, (int, float)):
                 spec[k] = float(v)
+
+        # Phase 10-D Fix B — defensive target handling.
+        # CUSUM = Σ max(0, x_i − target − k). Without a sensible target,
+        # values stay positive every step → S(t) ramps linearly to a meaningless
+        # plot. LLM frequently omits target or sets it to 0 (especially when
+        # user prompt didn't mention a setpoint). Default behavior:
+        #   - target is set + non-zero: honor it
+        #   - target missing / null: use data mean
+        #   - target == 0: log warn, still substitute mean (matches the
+        #     "almost always wrong on real metrology data" reality)
+        target = params.get("target")
+        if isinstance(target, (int, float)) and target != 0:
+            spec["target"] = float(target)
+        elif target_data is not None and not target_data.empty:
+            auto = float(target_data.mean())
+            spec["target"] = auto
+            if isinstance(target, (int, float)) and target == 0:
+                logger.warning(
+                    "ewma_cusum: target=0 substituted with data mean=%.3f "
+                    "(target=0 produces a monotonic ramp on non-zero data)",
+                    auto,
+                )
+        # else: leave spec["target"] unset; frontend will fall back to its own default
         return {"chart_spec": spec}

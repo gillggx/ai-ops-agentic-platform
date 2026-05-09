@@ -36,6 +36,7 @@ async def confirm_gate_node(state: BuildGraphState) -> dict[str, Any]:
     user_response = interrupt({
         "session_id": state.get("session_id"),
         "plan_summary": plan_summary,
+        "expected_outputs": state.get("expected_outputs") or [],
         "plan_ops": [_op_summary(op) for op in plan],
         "n_ops": len(plan),
     })
