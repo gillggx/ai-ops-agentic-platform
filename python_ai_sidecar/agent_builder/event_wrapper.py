@@ -64,13 +64,20 @@ def wrap_build_event_for_chat(
     # ── Phase 10-B: v2 graph_build events ─────────────────────────────
     elif evt_type == "plan_proposed":
         # Surface as a chat narration so the user sees what the agent intends.
-        # Lite canvas already shows nothing (no nodes added yet) so this is
-        # mainly for the chat column.
+        # Phase 10-D: include expected_outputs so chat user (no confirm card)
+        # still gets the "📊 跑完會看到 …" preview.
         summary = (data.get("summary") or "").strip()
         if not summary:
             return None
+        outputs = data.get("expected_outputs") or []
+        lines = [f"📋 計畫：{summary}"]
+        if outputs:
+            lines.append("")
+            lines.append("📊 跑完會看到：")
+            for o in outputs[:6]:
+                lines.append(f"  • {o}")
         payload["type"] = "pb_glass_chat"
-        payload["content"] = f"📋 計畫：{summary}"
+        payload["content"] = "\n".join(lines)
     elif evt_type == "plan_repaired":
         ok = data.get("ok")
         if not ok:

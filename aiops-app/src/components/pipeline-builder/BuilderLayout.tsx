@@ -1176,6 +1176,22 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
                 // alarm payload, not user_input).
                 pipelineSnapshot={{ ...state.pipeline, _kind: state.meta.pipelineKind ?? null }}
                 onGlassOp={(ev) => applyGlassOpToCanvas(ev, actions, catalog)}
+                // Phase 10-D: graph_build's layout_node lays out positions
+                // server-side and ships them in the final pipeline_json. Apply
+                // those over the live add_node positions so the canvas ends
+                // tidy (source on left, charts fanned out on right).
+                onGlassDone={(ev) => {
+                  const pj = ev.pipeline_json as
+                    | { nodes?: Array<{ id: string; position?: { x: number; y: number } }> }
+                    | null
+                    | undefined;
+                  if (!pj?.nodes) return;
+                  for (const n of pj.nodes) {
+                    if (n.position && typeof n.position.x === "number" && typeof n.position.y === "number") {
+                      actions.moveNode(n.id, { x: n.position.x, y: n.position.y });
+                    }
+                  }
+                }}
                 contextEquipment={null}
                 focusedNodeId={focusedNodeId}
                 focusedNodeLabel={(() => {
