@@ -5,6 +5,7 @@ import com.aiops.api.config.JacksonConfig;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
+import org.springframework.boot.actuate.autoconfigure.security.servlet.ManagementWebSecurityAutoConfiguration;
 import org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration;
 import org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -39,14 +40,19 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 				"com.aiops.api.domain.notification",    // NotificationDispatchService — used by AutoPatrolExecutor
 		},
 		// Spring Security ends up on the classpath transitively via the
-		// :java-backend project dep. Without this exclude, Spring Boot
+		// :java-backend project dep. Without these excludes, Spring Boot
 		// auto-configures default basic auth on every endpoint (including
 		// /internal/scheduler/*), so the SchedulerHttpClient gets 401 even
 		// with a valid X-Internal-Token. The scheduler does its own token
 		// check inside InternalSchedulerController.requireToken().
+		// ManagementWebSecurityAutoConfiguration must also be excluded —
+		// it depends on HttpSecurity which only exists when the main
+		// SecurityAutoConfiguration is active; otherwise context refresh
+		// fails with "No qualifying bean of type HttpSecurity".
 		exclude = {
 				SecurityAutoConfiguration.class,
 				UserDetailsServiceAutoConfiguration.class,
+				ManagementWebSecurityAutoConfiguration.class,
 		})
 @EnableConfigurationProperties(AiopsProperties.class)
 @Import(JacksonConfig.class)                    // SNAKE_CASE Jackson config
