@@ -1,35 +1,35 @@
 "use client";
 
 /**
- * TriggerConfig — port of prototype's collapsible 3-mode trigger panel.
+ * TriggerConfig — Phase 11 v3 (doc-style).
  *
- * Mode A: System Event — picks from SYSTEM_EVENTS list, optional payload
- *         filter expression.
- * Mode B: User-Defined — auto-generates a Rule {source, metric, op, value,
- *         window, debounce, severity}.
- * Mode C: Auto Patrol — cron expression (Every N min/hour/day) with skip
- *         conditions and Next-4-fires preview.
+ * Author mode renders the trigger as a single, non-editable prose sentence
+ * ("TRIGGER · OOC 發生時 trigger（針對 event payload 所帶的對象）"). Run /
+ * Execute mode renders the same sentence but key tokens are inline pills
+ * that, when clicked, expand a small editor below for that one field.
+ *
+ * Replaces the v2 collapsible grid panel that exposed scope / SLA /
+ * evidence-window / etc. — those v2 fields were too "form-like" for the
+ * "skill = knowledge document" design philosophy.
  */
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Icon } from "./atoms";
 import type { TriggerConfig as TC } from "./atoms";
 
-// Phase 11 v2 — system events come from the Java event_types catalog.
-// Pre-Phase 12 this list was 6 prototype-only strings hardcoded here, none
-// of which were registered as actual event_type rows. V24 migration seeds
-// the catalog with the events the simulator + backend really emit.
+// ── Catalog fetch (same as v2) ───────────────────────────────────────
 type SystemEventDef = {
   id: string;
   label: string;
   desc: string;
-  owner: string;     // derived from prefix
-  color: string;     // derived from heuristic
+  owner: string;
+  color: string;
 };
 
 function ownerOf(name: string): string {
-  // Heuristic: take prefix before first underscore as owner tag.
   const pref = name.split("_")[0].toUpperCase();
-  if (["SPC", "FDC", "APC", "PM", "EQUIPMENT"].includes(pref)) return pref === "EQUIPMENT" ? "EQ" : pref;
+  if (["SPC", "FDC", "APC", "PM", "EQUIPMENT"].includes(pref)) {
+    return pref === "EQUIPMENT" ? "EQ" : pref;
+  }
   if (name.includes("RECIPE")) return "RECIPE";
   if (name.includes("MONITOR")) return "QA";
   if (name.includes("ALARM")) return "ALARM";
@@ -43,30 +43,6 @@ function colorFor(owner: string): string {
   return "var(--ai)";
 }
 
-const USER_OPS = [">=", ">", "=", "<", "<=", "changed", "drift"];
-
-function summary(t: TC, events: SystemEventDef[]): { kind: string; value: string; color: string } {
-  if (t.type === "system") {
-    const ev = events.find((e) => e.id === t.event_type);
-    return {
-      kind: "Event",
-      value: ev?.label || t.event_type || "—",
-      color: ev?.color || "var(--ink-3)",
-    };
-  }
-  if (t.type === "user") {
-    return { kind: "Custom", value: `when ${t.metric ?? ""} ${t.op ?? ""} ${t.value ?? ""}`.trim(), color: "var(--ai)" };
-  }
-  return {
-    kind: "Cron",
-    value: t.every != null && t.unit
-      ? `every ${t.every} ${t.unit}${t.every > 1 ? "s" : ""}`
-      : (t.cron ?? "—"),
-    color: "var(--pass)",
-  };
-}
-
-// Phase 11 v2 — fetch event_types catalog once per editor mount.
 function useEventCatalog(): { events: SystemEventDef[]; loading: boolean } {
   const [events, setEvents] = useState<SystemEventDef[]>([]);
   const [loading, setLoading] = useState(true);
@@ -98,475 +74,423 @@ function useEventCatalog(): { events: SystemEventDef[]; loading: boolean } {
   return { events, loading };
 }
 
-export function TriggerConfigEditor({
-  trigger, setTrigger, readOnly,
+// ── Hardcoded EQP / station id list (matches simulator config) ──────
+// Keeping in sync with ontology_simulator/config.py: TOTAL_TOOLS = 10.
+// If the fleet grows, swap to fetch /api/admin/equipment.
+const TOOL_IDS = Array.from({ length: 10 }, (_, i) => `EQP-${String(i + 1).padStart(2, "0")}`);
+const STATION_IDS = ["PHOTO", "ETCH", "CMP", "IMP", "DIFF", "THIN"];
+
+// ── Inline pill primitives ──────────────────────────────────────────
+function InlinePill({
+  children, onClick, accent, mono, disabled,
 }: {
-  trigger: TC;
-  setTrigger: (t: TC) => void;
-  readOnly?: boolean;
+  children: ReactNode;
+  onClick?: () => void;
+  accent?: boolean;
+  mono?: boolean;
+  disabled?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
-  const { events, loading } = useEventCatalog();
-  const s = summary(trigger, events);
-
-  const types = [
-    { id: "system" as const,   label: "System Event", color: "var(--fail)" },
-    { id: "user" as const,     label: "User-Defined", color: "var(--ai)" },
-    { id: "schedule" as const, label: "Auto Patrol",  color: "var(--pass)" },
-  ];
-
-  // Phase 11 v2 — header summary now binds to trigger state. Defaults match
-  // legacy strings ("complete in < 90s" / "last 5 lots") so existing rows
-  // render unchanged when these fields are absent.
-  const slaSec  = trigger.sla_seconds ?? 90;
-  const winLots = trigger.evidence_window_lots ?? 5;
-  const winDays = trigger.evidence_window_days;
-
+  const styles: CSSProperties = {
+    all: "unset",
+    cursor: disabled ? "default" : "pointer",
+    display: "inline-flex", alignItems: "center", gap: 4,
+    padding: "1px 7px", borderRadius: 4,
+    background: accent ? "var(--ai-bg)" : "var(--surface-2)",
+    color: accent ? "var(--ai)" : "var(--ink)",
+    border: `1px dashed ${accent ? "color-mix(in oklch, var(--ai), transparent 60%)" : "var(--line-strong)"}`,
+    fontSize: 13.5, fontWeight: 500, lineHeight: 1.4,
+    fontFamily: mono ? "JetBrains Mono, ui-monospace, monospace" : "inherit",
+  };
   return (
-    <div style={{
-      marginTop: 24,
-      background: "var(--surface-2)",
-      border: "1px solid var(--line)", borderRadius: 10,
-      overflow: "hidden",
-    }}>
-      <button onClick={() => !readOnly && setOpen(!open)} style={{
-        all: "unset", display: "block", width: "100%",
-        padding: "14px 16px", cursor: readOnly ? "default" : "pointer",
-        boxSizing: "border-box",
-      }}>
-        <div style={{
-          // Phase 11 v2 — last column is min-content so the Configure pill
-          // never gets cut off on narrow viewports. Earlier "auto" let the
-          // grid track shrink below the button's intrinsic width.
-          display: "grid",
-          gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) min-content",
-          gap: 16, alignItems: "center",
-        }}>
-          <div style={{ minWidth: 0 }}>
-            <div className="mono" style={{ fontSize: 9.5, color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 4 }}>
-              TRIGGER · {s.kind.toUpperCase()}
-            </div>
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <span style={{ width: 6, height: 6, borderRadius: 999, background: s.color }}/>
-              <span className="mono" style={{ fontSize: 12.5, color: "var(--ink)" }}>
-                {loading ? "…" : (s.value || "—")}
-              </span>
-            </div>
-          </div>
-          <div style={{ borderLeft: "1px solid var(--line)", paddingLeft: 16, minWidth: 0 }}>
-            <div className="mono" style={{ fontSize: 9.5, color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 4 }}>SCOPE</div>
-            <div style={{ fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              <span className="mono">{trigger.scope || "—"}</span>
-            </div>
-          </div>
-          <div style={{ borderLeft: "1px solid var(--line)", paddingLeft: 16, minWidth: 0 }}>
-            <div className="mono" style={{ fontSize: 9.5, color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 4 }}>SLA</div>
-            <div style={{ fontSize: 12.5 }}>
-              complete in <span className="mono">&lt; {slaSec}s</span>
-            </div>
-          </div>
-          <div style={{ borderLeft: "1px solid var(--line)", paddingLeft: 16, minWidth: 0 }}>
-            <div className="mono" style={{ fontSize: 9.5, color: "var(--ink-3)", letterSpacing: "0.08em", marginBottom: 4 }}>EVIDENCE WINDOW</div>
-            <div style={{ fontSize: 12.5 }}>
-              last <span className="mono">{winLots} lots</span>
-              {winDays != null && (<> · <span className="mono">{winDays} days</span></>)}
-            </div>
-          </div>
-          {!readOnly && (
-            <div style={{
-              display: "inline-flex", alignItems: "center", gap: 5,
-              padding: "5px 10px", borderRadius: 6,
-              border: "1px solid var(--line-strong)", background: "var(--surface)",
-              color: "var(--ink-2)", fontSize: 11.5,
-              flexShrink: 0, whiteSpace: "nowrap",
-            }}>
-              <Icon.Pencil/> {open ? "Done" : "Configure"}
-            </div>
-          )}
-        </div>
-      </button>
-
-      {open && !readOnly && (
-        <div style={{
-          padding: "18px 16px", borderTop: "1px solid var(--line)",
-          background: "var(--surface)",
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-            <Seg
-              value={trigger.type ?? "system"}
-              options={types.map((t) => ({
-                id: t.id,
-                label: t.label,
-                icon: <span style={{ width: 6, height: 6, borderRadius: 999, background: t.color }}/>,
-              }))}
-              onChange={(id) => setTrigger({ ...trigger, type: id as "system" | "user" | "schedule" })}
-            />
-            <span style={{ fontSize: 11.5, color: "var(--ink-3)" }}>
-              {trigger.type === "system"   && "綁定平台已知的 system event。"}
-              {trigger.type === "user"     && "由使用者自訂 metric 與條件，平台會持續監聽。"}
-              {(trigger.type === "schedule" || !trigger.type) && "依固定時間間隔執行 (Auto Patrol)。"}
-            </span>
-          </div>
-          {trigger.type === "system"   && <SystemEventConfig trigger={trigger} setTrigger={setTrigger} events={events} loading={loading}/>}
-          {trigger.type === "user"     && <UserEventConfig   trigger={trigger} setTrigger={setTrigger}/>}
-          {(trigger.type === "schedule" || !trigger.type) && <ScheduleConfig trigger={trigger} setTrigger={setTrigger}/>}
-
-          {/* Phase 11 v2 — header bindings (SLA / evidence window). Always
-              shown so author can override defaults regardless of trigger type. */}
-          <HeaderBindings trigger={trigger} setTrigger={setTrigger}/>
-        </div>
-      )}
-    </div>
+    <button onClick={disabled ? undefined : onClick} style={styles} disabled={disabled}>
+      {children}
+    </button>
   );
 }
 
-function HeaderBindings({
-  trigger, setTrigger,
-}: {
-  trigger: TC;
-  setTrigger: (t: TC) => void;
+function Pill({ active, onClick, children, color }: {
+  active?: boolean;
+  onClick?: () => void;
+  children: ReactNode;
+  color?: string;
 }) {
-  const set = (patch: Partial<TC>) => setTrigger({ ...trigger, ...patch });
   return (
-    <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px dashed var(--line)", display: "flex", gap: 18, flexWrap: "wrap" }}>
-      <Field label="SLA (seconds)" hint="header 顯示「complete in < N s」">
-        <Input mono width={100}
-          value={String(trigger.sla_seconds ?? 90)}
-          onChange={(v) => set({ sla_seconds: Math.max(1, Math.min(3600, parseInt(v) || 90)) })}
-          placeholder="90"/>
-      </Field>
-      <Field label="EVIDENCE · LOTS" hint="header 顯示「last N lots」">
-        <Input mono width={80}
-          value={String(trigger.evidence_window_lots ?? 5)}
-          onChange={(v) => set({ evidence_window_lots: Math.max(1, parseInt(v) || 5) })}
-          placeholder="5"/>
-      </Field>
-      <Field label="EVIDENCE · DAYS" hint="optional · 加上時間窗">
-        <Input mono width={80}
-          value={trigger.evidence_window_days != null ? String(trigger.evidence_window_days) : ""}
-          onChange={(v) => set({ evidence_window_days: v.trim() ? Math.max(1, parseInt(v) || 0) || undefined : undefined })}
-          placeholder="3"/>
-      </Field>
-    </div>
+    <button onClick={onClick} style={{
+      all: "unset", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6,
+      padding: "3px 9px", borderRadius: 5,
+      background: active ? (color || "var(--ink)") : "var(--surface-2)",
+      color: active ? "var(--bg)" : "var(--ink)",
+      border: `1px solid ${active ? (color || "var(--ink)") : "var(--line-strong)"}`,
+      fontSize: 13, fontWeight: 450,
+    }}>{children}</button>
   );
 }
 
-function Seg<T extends string>({
-  value, options, onChange,
-}: {
-  value: T;
-  options: { id: T; label: string; icon?: ReactNode }[];
-  onChange: (id: T) => void;
+function Editor({ title, children, onClose }: {
+  title: string;
+  children: ReactNode;
+  onClose: () => void;
 }) {
   return (
     <div style={{
-      display: "inline-flex", padding: 2, borderRadius: 8,
-      background: "var(--surface-2)", border: "1px solid var(--line)",
+      marginTop: 8, padding: "14px 16px",
+      background: "var(--surface)",
+      border: "1px solid var(--line)", borderRadius: 8,
     }}>
-      {options.map((o) => (
-        <button key={o.id} onClick={() => onChange(o.id)}
-          style={{
-            display: "inline-flex", alignItems: "center", gap: 7,
-            padding: "6px 12px", borderRadius: 6, border: "none",
-            background: value === o.id ? "var(--surface)" : "transparent",
-            color: value === o.id ? "var(--ink)" : "var(--ink-3)",
-            fontSize: 12, fontWeight: 500, cursor: "pointer",
-            boxShadow: value === o.id ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
-          }}>
-          {o.icon}{o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <span className="mono" style={{ fontSize: 9.5, letterSpacing: "0.08em", color: "var(--ink-3)" }}>{label}</span>
-        {hint && <span style={{ fontSize: 11, color: "var(--ink-4)" }}>{hint}</span>}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)", letterSpacing: "0.08em" }}>{title}</span>
+        <button onClick={onClose} style={{ all: "unset", cursor: "pointer", color: "var(--ink-3)", fontSize: 11.5 }}>Done</button>
       </div>
       {children}
     </div>
   );
 }
 
-function Input({ value, onChange, placeholder, mono = false, width }: {
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  mono?: boolean;
-  width?: number | string;
-}) {
-  return (
-    <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
-      className={mono ? "mono" : ""}
-      style={{
-        padding: "7px 10px", fontSize: mono ? 12 : 13,
-        border: "1px solid var(--line-strong)", background: "var(--surface)",
-        color: "var(--ink)", borderRadius: 6, outline: "none",
-        fontFamily: mono ? "JetBrains Mono, ui-monospace, monospace" : "inherit",
-        width: width != null ? width : "100%",
-      }}/>
-  );
+// ── Helpers ─────────────────────────────────────────────────────────
+
+/** Coerce legacy v1/v2 trigger shape into v3 canonical (event/schedule/target). */
+export function migrateTrigger(t: TC): TC {
+  const out: TC = { ...t };
+  // system → event
+  if (out.type === "system") {
+    out.type = "event";
+    if (!out.event && out.event_type) out.event = out.event_type;
+  }
+  // legacy schedule flat fields → schedule.*
+  if ((out.type === "schedule" || !out.type) && !out.schedule) {
+    if (out.unit === "hour" && out.every) {
+      out.schedule = { mode: "hourly", every: out.every };
+    } else if (out.unit === "minute" && out.every) {
+      // Map minute-based intervals to nearest hourly bucket; keep `every` minutes
+      out.schedule = { mode: "hourly", every: Math.max(1, Math.round(out.every / 60) || 1) };
+    } else if (out.unit === "day" && out.every) {
+      out.schedule = { mode: "daily", time: "08:00" };
+    }
+  }
+  // best-effort scope → target
+  if (!out.target) {
+    const s = (out.scope ?? "").trim();
+    if (!s) {
+      out.target = { kind: "all", ids: [] };
+    } else {
+      // tool_id IN ('EQP-01','EQP-02') → ids
+      const m = s.match(/['"]([A-Z0-9_-]+)['"]/g);
+      if (m && m.length) {
+        const ids = m.map((x) => x.replace(/['"]/g, ""));
+        out.target = { kind: "tools", ids };
+      } else {
+        out.target = { kind: "all", ids: [] };
+      }
+    }
+  }
+  // strip legacy v2 header fields — UI doesn't show them anymore
+  delete out.sla_seconds;
+  delete out.evidence_window_lots;
+  delete out.evidence_window_days;
+  return out;
 }
 
-function SystemEventConfig({
-  trigger, setTrigger, events, loading,
+/** Render-only helper used by both author + run modes. */
+function buildDescription(t: TC, eventLabel: string | null, targetText: string): string {
+  if (t.type === "event") {
+    return `${eventLabel || t.event || "—"} 發生時 trigger（針對 event payload 所帶的對象）`;
+  }
+  const m = t.schedule?.mode ?? "hourly";
+  if (m === "hourly") return `每 ${t.schedule?.every ?? 4} 小時檢查 ${targetText}`;
+  return `每日 ${t.schedule?.time ?? "08:00"} 檢查 ${targetText}`;
+}
+
+// ── Main component ──────────────────────────────────────────────────
+
+export function TriggerConfigEditor({
+  trigger, setTrigger, mode,
 }: {
   trigger: TC;
   setTrigger: (t: TC) => void;
-  events: SystemEventDef[];
-  loading: boolean;
+  mode: "author" | "run";
 }) {
-  const [q, setQ] = useState("");
-  const filtered = events.filter((e) =>
-    !q.trim() || e.label.toLowerCase().includes(q.toLowerCase()) || e.desc.toLowerCase().includes(q.toLowerCase()),
-  );
-  const sel = events.find((e) => e.id === trigger.event_type);
+  const { events, loading } = useEventCatalog();
+  const [editing, setEditing] = useState<null | "type" | "event" | "schedule" | "target">(null);
 
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 24 }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        <Field label="EVENT SOURCE" hint="平台已註冊的 system event">
-          <Input value={q} onChange={setQ} placeholder="搜尋 event…  e.g. OOC / FDC / PM"/>
-        </Field>
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 220, overflowY: "auto" }}>
-          {loading && (
-            <div style={{ fontSize: 12, color: "var(--ink-3)", padding: "10px 12px" }}>
-              loading event catalog…
-            </div>
-          )}
-          {!loading && filtered.length === 0 && (
-            <div style={{ fontSize: 12, color: "var(--ink-3)", padding: "10px 12px" }}>
-              （目前沒有匹配的 event，IT_ADMIN 可在 /admin/event-types 新增）
-            </div>
-          )}
-          {filtered.map((e) => {
-            const active = e.id === trigger.event_type;
-            return (
-              <button key={e.id} onClick={() => setTrigger({ ...trigger, event_type: e.id })}
-                style={{
-                  all: "unset", cursor: "pointer",
-                  display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 12, alignItems: "center",
-                  padding: "9px 12px", borderRadius: 6,
-                  background: active ? "var(--surface-2)" : "transparent",
-                  border: `1px solid ${active ? "var(--ink-2)" : "var(--line)"}`,
-                }}>
-                <span style={{ width: 6, height: 6, borderRadius: 999, background: e.color }}/>
-                <div>
-                  <div className="mono" style={{ fontSize: 12, color: "var(--ink)", fontWeight: 500 }}>{e.label}</div>
-                  <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>{e.desc}</div>
-                </div>
-                <span className="mono" style={{ fontSize: 10, color: "var(--ink-4)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{e.owner}</span>
-              </button>
-            );
-          })}
-        </div>
-        <Field label="ADDITIONAL FILTERS" hint="只在 payload 符合條件時觸發">
-          <Input mono
-            value={trigger.scope ?? ""}
-            onChange={(v) => setTrigger({ ...trigger, scope: v })}
-            placeholder="tool_id IN ('EQP-01','EQP-02')"/>
-        </Field>
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <Field label="PAYLOAD SCHEMA" hint="event 觸發時可用的變數">
-          <pre className="mono" style={{
-            margin: 0, padding: 12, background: "var(--bg-soft)",
-            border: "1px solid var(--line)", borderRadius: 6,
-            fontSize: 11, color: "var(--ink-2)", lineHeight: 1.7, whiteSpace: "pre-wrap",
-          }}>{`{
-  event_id:        ${sel?.label || "—"},
-  fired_at:        timestamp,
-  tool_id:         string,
-  lot_id:          string,
-  process_id:      string,
-  spc_chart:       string,
-  severity:        "low"|"med"|"high",
-  raw_payload:     object
-}`}</pre>
-        </Field>
-        <div style={{ fontSize: 11.5, color: "var(--ink-3)", lineHeight: 1.5 }}>
-          這些欄位會以 <span className="mono" style={{ color: "var(--ink-2)" }}>$variable</span> 形式注入到下方
-          每個 step 的 pipeline 中，無需手動配線。
-        </div>
-      </div>
-    </div>
-  );
-}
+  const ev = events.find((e) => e.id === trigger.event);
+  const targetText =
+    !trigger.target || trigger.target.kind === "all" ? "所有機台"
+    : trigger.target.kind === "tools" ? (trigger.target.ids.join(", ") || "（未指定機台）")
+    : (trigger.target.ids.join(" / ") || "（未指定站點）") + " 站";
 
-function UserEventConfig({ trigger, setTrigger }: { trigger: TC; setTrigger: (t: TC) => void }) {
-  const set = (patch: Partial<TC>) => setTrigger({ ...trigger, ...patch });
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 24 }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        <Field label="EVENT NAME" hint="此 trigger 將以此名稱被其他 skill 引用">
-          <Input mono value={trigger.name ?? ""} onChange={(v) => set({ name: v })} placeholder="e.g. CD_BIAS_DRIFT"/>
-        </Field>
-        <Field label="WATCHED METRIC" hint="平台會持續監聽這個訊號">
-          <div style={{ display: "flex", gap: 8 }}>
-            <select value={trigger.source ?? "spc.xbar_chart"} onChange={(e) => set({ source: e.target.value })}
-              style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--line-strong)", background: "var(--surface)", color: "var(--ink)", borderRadius: 6, fontFamily: "JetBrains Mono, monospace" }}>
-              <option>spc.xbar_chart</option>
-              <option>fdc.tool_health</option>
-              <option>apc.recipe_offset</option>
-              <option>yield.bin_count</option>
-            </select>
-            <Input mono width={180} value={trigger.metric ?? ""} onChange={(v) => set({ metric: v })} placeholder="cd_bias"/>
-          </div>
-        </Field>
-        <Field label="CONDITION">
-          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-            <span className="mono" style={{ fontSize: 12, color: "var(--ink-3)" }}>when</span>
-            <span className="mono" style={{ fontSize: 12, color: "var(--ink)", padding: "6px 10px", background: "var(--surface-2)", borderRadius: 6 }}>{trigger.metric || "—"}</span>
-            <select value={trigger.op ?? ">="} onChange={(e) => set({ op: e.target.value })}
-              style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--line-strong)", background: "var(--surface)", color: "var(--ink)", borderRadius: 6, fontFamily: "JetBrains Mono, monospace" }}>
-              {USER_OPS.map((o) => <option key={o}>{o}</option>)}
-            </select>
-            <Input mono width={120} value={trigger.value ?? ""} onChange={(v) => set({ value: v })} placeholder="3"/>
-            <span className="mono" style={{ fontSize: 12, color: "var(--ink-3)" }}>for</span>
-            <Input mono width={80} value={trigger.window ?? ""} onChange={(v) => set({ window: v })} placeholder="5 lots"/>
-          </div>
-        </Field>
-        <Field label="DEBOUNCE" hint="同一 trigger 在此期間內不會重複觸發">
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <Input mono width={80} value={trigger.debounce ?? ""} onChange={(v) => set({ debounce: v })} placeholder="30m"/>
-            <Seg
-              value={trigger.severity ?? "med"}
-              options={[
-                { id: "low", label: "Low" },
-                { id: "med", label: "Med" },
-                { id: "high", label: "High" },
-              ]}
-              onChange={(id) => set({ severity: id })}
-            />
-          </div>
-        </Field>
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <Field label="GENERATED RULE" hint="平台將部署為持續監聽 rule">
-          <pre className="mono" style={{
-            margin: 0, padding: 12, background: "var(--bg-soft)",
-            border: "1px solid var(--line)", borderRadius: 6,
-            fontSize: 11, color: "var(--ink-2)", lineHeight: 1.7, whiteSpace: "pre-wrap",
-          }}>{`rule "${trigger.name || "UNTITLED"}" {
-  source:   ${trigger.source ?? "—"}
-  metric:   ${trigger.metric ?? "—"}
-  when:     value ${trigger.op ?? "—"} ${trigger.value ?? "—"}
-  window:   ${trigger.window ?? "—"}
-  debounce: ${trigger.debounce ?? "—"}
-  severity: ${trigger.severity ?? "—"}
-}`}</pre>
-        </Field>
-      </div>
-    </div>
-  );
-}
+  const description = buildDescription(trigger, ev?.label ?? null, targetText);
+  const setEvent = (id: string) => { setTrigger({ ...trigger, event: id }); setEditing(null); };
+  const setSched = (patch: Partial<NonNullable<TC["schedule"]>>) => setTrigger({
+    ...trigger, schedule: { ...(trigger.schedule ?? { mode: "hourly", every: 4 }), ...patch },
+  });
+  const setTarget = (target: NonNullable<TC["target"]>) => setTrigger({ ...trigger, target });
 
-function ScheduleConfig({ trigger, setTrigger }: { trigger: TC; setTrigger: (t: TC) => void }) {
-  const set = (patch: Partial<TC>) => setTrigger({ ...trigger, ...patch });
-  const every = trigger.every ?? 4;
-  const unit = trigger.unit ?? "hour";
-  const skip = trigger.skip ?? [];
-
-  const cron =
-    unit === "minute" ? `*/${every} * * * *` :
-    unit === "hour"   ? `0 */${every} * * *` :
-                        `0 0 */${every} * *`;
-
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 24 }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        <Field label="INTERVAL" hint="auto patrol 執行頻率">
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <span style={{ fontSize: 12, color: "var(--ink-3)" }}>Every</span>
-            <Input mono width={70} value={String(every)} onChange={(v) => set({ every: parseInt(v) || 1 })}/>
-            <Seg
-              value={unit}
-              options={[
-                { id: "minute", label: "Min" },
-                { id: "hour",   label: "Hour" },
-                { id: "day",    label: "Day" },
-              ]}
-              onChange={(id) => set({ unit: id as "minute" | "hour" | "day" })}
-            />
-          </div>
-        </Field>
-        <Field label="TIMEZONE">
-          <select value={trigger.timezone ?? "Asia/Taipei (UTC+8)"} onChange={(e) => set({ timezone: e.target.value })}
-            style={{ padding: "7px 10px", fontSize: 12, border: "1px solid var(--line-strong)", background: "var(--surface)", color: "var(--ink)", borderRadius: 6, fontFamily: "inherit" }}>
-            <option>Asia/Taipei (UTC+8)</option>
-            <option>Asia/Tokyo (UTC+9)</option>
-            <option>UTC</option>
-          </select>
-        </Field>
-        <Field label="SKIP CONDITIONS" hint="符合任一條件時跳過此次執行">
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {[
-              { id: "tool_idle",  label: "Tool idle / down" },
-              { id: "lot_locked", label: "Lot held" },
-              { id: "no_change",  label: "No upstream change" },
-              { id: "in_pm",      label: "Tool in PM" },
-            ].map((c) => {
-              const active = skip.includes(c.id);
-              return (
-                <button key={c.id}
-                  onClick={() => set({
-                    skip: active ? skip.filter((x) => x !== c.id) : [...skip, c.id],
-                  })}
-                  style={{
-                    all: "unset", cursor: "pointer",
-                    padding: "5px 10px", borderRadius: 999,
-                    fontSize: 11.5,
-                    background: active ? "var(--ink)" : "var(--surface)",
-                    color: active ? "var(--bg)" : "var(--ink-2)",
-                    border: `1px solid ${active ? "var(--ink)" : "var(--line-strong)"}`,
-                  }}>
-                  {active ? "✓ " : ""}{c.label}
-                </button>
-              );
-            })}
-          </div>
-        </Field>
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <Field label="CRON EXPRESSION" hint="自動產生">
-          <pre className="mono" style={{
-            margin: 0, padding: 12, background: "var(--bg-soft)",
-            border: "1px solid var(--line)", borderRadius: 6,
-            fontSize: 12, color: "var(--ink)", letterSpacing: "0.02em",
-          }}>{cron}</pre>
-        </Field>
-        <Field label="NEXT EXECUTIONS" hint="預覽未來 4 次觸發時間">
-          <NextRunPreview every={every} unit={unit}/>
-        </Field>
-      </div>
-    </div>
-  );
-}
-
-function NextRunPreview({ every, unit }: { every: number; unit: "minute" | "hour" | "day" }) {
-  const intervalMin = unit === "hour" ? every * 60 : unit === "day" ? every * 1440 : every;
-  const now = new Date();
-  const slots = Array.from({ length: 4 }, (_, i) => new Date(now.getTime() + intervalMin * 60_000 * (i + 1)));
-  const fmt = (d: Date) => `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  return (
-    <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-      {slots.map((d, i) => (
-        <div key={i} style={{
-          padding: "6px 10px", background: "var(--surface)",
-          border: "1px solid var(--line)", borderRadius: 6,
-          fontSize: 11, color: "var(--ink-2)",
+  // ── Author mode: pure prose, no inline edit ─────────────────────────
+  if (mode === "author") {
+    return (
+      <div style={{ marginTop: 24 }}>
+        <div style={{
+          fontSize: 16, lineHeight: 1.7, color: "var(--ink)",
+          padding: "16px 0 4px",
         }}>
-          <span className="mono">{fmt(d)}</span>
-          {i === 0 && <span style={{ marginLeft: 6, color: "var(--ai)", fontSize: 10 }}>· next</span>}
+          <span className="mono" style={{
+            fontSize: 10.5, color: "var(--ink-3)",
+            letterSpacing: "0.08em", marginRight: 10,
+          }}>TRIGGER</span>
+          {loading ? "…" : description}
         </div>
-      ))}
-      <div style={{ padding: "6px 10px", fontSize: 11, color: "var(--ink-4)" }}>
-        + {Math.max(0, Math.round((24 * 60) / intervalMin) - 4)} more / day
       </div>
+    );
+  }
+
+  // ── Run / Execute mode: prose with inline pills + expandable editors ─
+  return (
+    <div style={{ marginTop: 24 }}>
+      <div style={{
+        fontSize: 16, lineHeight: 1.7, color: "var(--ink)",
+        padding: "16px 0 14px",
+      }}>
+        <span className="mono" style={{
+          fontSize: 10.5, color: "var(--ink-3)",
+          letterSpacing: "0.08em", marginRight: 10,
+        }}>TRIGGER</span>
+        當{" "}
+        <InlinePill onClick={() => setEditing(editing === "type" ? null : "type")}>
+          {trigger.type === "event" ? "Event 發生" : "排程時間到"}
+          <Chev open={editing === "type"}/>
+        </InlinePill>
+        {trigger.type === "event" ? (
+          <>
+            {" — "}
+            <InlinePill mono accent onClick={() => setEditing(editing === "event" ? null : "event")}>
+              {ev?.label || trigger.event || "—"}
+              <Chev open={editing === "event"}/>
+            </InlinePill>
+          </>
+        ) : (
+          <>
+            {" — "}
+            <InlinePill mono accent onClick={() => setEditing(editing === "schedule" ? null : "schedule")}>
+              {trigger.schedule?.mode === "daily"
+                ? `每日 ${trigger.schedule.time ?? "08:00"}`
+                : `每 ${trigger.schedule?.every ?? 4} 小時`}
+              <Chev open={editing === "schedule"}/>
+            </InlinePill>
+          </>
+        )}
+        {trigger.type === "schedule" && (
+          <>
+            {" · 對象 "}
+            <InlinePill onClick={() => setEditing(editing === "target" ? null : "target")}>
+              {targetText}
+              <Chev open={editing === "target"}/>
+            </InlinePill>
+          </>
+        )}
+        {trigger.type === "event" && (
+          <span style={{ color: "var(--ink-3)", fontSize: 12.5, marginLeft: 8 }}>
+            · 對象來自 event payload
+          </span>
+        )}
+      </div>
+
+      <div style={{
+        fontSize: 12, color: "var(--ink-3)",
+        marginBottom: editing ? 14 : 0, fontStyle: "italic",
+      }}>
+        → {description}
+      </div>
+
+      {editing === "type" && (
+        <Editor onClose={() => setEditing(null)} title="Trigger 類型">
+          <div style={{ display: "flex", gap: 8 }}>
+            <Pill active={trigger.type === "event"} color="var(--fail)"
+              onClick={() => { setTrigger({ ...trigger, type: "event" }); setEditing(null); }}>
+              <span style={{
+                width: 6, height: 6, borderRadius: 999,
+                background: trigger.type === "event" ? "var(--bg)" : "var(--fail)",
+              }}/>
+              Event-driven
+            </Pill>
+            <Pill active={trigger.type === "schedule"} color="var(--pass)"
+              onClick={() => { setTrigger({ ...trigger, type: "schedule" }); setEditing(null); }}>
+              <span style={{
+                width: 6, height: 6, borderRadius: 999,
+                background: trigger.type === "schedule" ? "var(--bg)" : "var(--pass)",
+              }}/>
+              定期排程
+            </Pill>
+          </div>
+        </Editor>
+      )}
+
+      {editing === "event" && (
+        <Editor onClose={() => setEditing(null)} title="選擇 system event">
+          {loading ? (
+            <div style={{ fontSize: 12, color: "var(--ink-3)" }}>loading event catalog…</div>
+          ) : events.length === 0 ? (
+            <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+              （沒有已註冊的 event_type，IT_ADMIN 可在 /admin/event-types 新增）
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+              {events.map((e) => {
+                const active = e.id === trigger.event;
+                return (
+                  <button key={e.id} onClick={() => setEvent(e.id)}
+                    style={{
+                      all: "unset", cursor: "pointer",
+                      display: "grid", gridTemplateColumns: "auto 1fr", gap: 10, alignItems: "center",
+                      padding: "9px 11px", borderRadius: 6,
+                      background: active ? "var(--surface-2)" : "transparent",
+                      border: `1px solid ${active ? "var(--ink-2)" : "var(--line)"}`,
+                    }}>
+                    <span style={{ width: 6, height: 6, borderRadius: 999, background: e.color }}/>
+                    <div>
+                      <div className="mono" style={{ fontSize: 12, color: "var(--ink)", fontWeight: 500 }}>
+                        {e.label}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 2 }}>
+                        {e.desc}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </Editor>
+      )}
+
+      {editing === "schedule" && (
+        <Editor onClose={() => setEditing(null)} title="排程設定">
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Pill active={(trigger.schedule?.mode ?? "hourly") === "hourly"}
+                onClick={() => setSched({ mode: "hourly", every: trigger.schedule?.every ?? 4 })}>
+                每 N 小時
+              </Pill>
+              <Pill active={trigger.schedule?.mode === "daily"}
+                onClick={() => setSched({ mode: "daily", time: trigger.schedule?.time ?? "08:00" })}>
+                每日固定時間
+              </Pill>
+            </div>
+            {(trigger.schedule?.mode ?? "hourly") === "hourly" ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, color: "var(--ink-3)" }}>每</span>
+                <select
+                  value={trigger.schedule?.every ?? 4}
+                  onChange={(e) => setSched({ every: parseInt(e.target.value) })}
+                  style={{
+                    padding: "6px 10px", fontSize: 12.5,
+                    border: "1px solid var(--line-strong)",
+                    background: "var(--surface)", color: "var(--ink)",
+                    borderRadius: 5, fontFamily: "JetBrains Mono, monospace",
+                  }}>
+                  {[1, 2, 3, 4, 6, 8, 12].map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+                <span style={{ fontSize: 12, color: "var(--ink-3)" }}>小時跑一次（最短 1h、最長 12h）</span>
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 12, color: "var(--ink-3)" }}>每日</span>
+                <input
+                  type="time" value={trigger.schedule?.time ?? "08:00"}
+                  onChange={(e) => setSched({ time: e.target.value })}
+                  style={{
+                    padding: "6px 10px", fontSize: 12.5,
+                    border: "1px solid var(--line-strong)",
+                    background: "var(--surface)", color: "var(--ink)",
+                    borderRadius: 5, fontFamily: "JetBrains Mono, monospace",
+                  }}/>
+                <span style={{ fontSize: 12, color: "var(--ink-3)" }}>（Asia/Taipei）</span>
+              </div>
+            )}
+          </div>
+        </Editor>
+      )}
+
+      {editing === "target" && (
+        <Editor onClose={() => setEditing(null)} title="檢查對象">
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Pill active={!trigger.target || trigger.target.kind === "all"}
+                onClick={() => setTarget({ kind: "all", ids: [] })}>所有機台</Pill>
+              <Pill active={trigger.target?.kind === "tools"}
+                onClick={() => setTarget({
+                  kind: "tools",
+                  ids: trigger.target?.ids?.length ? trigger.target.ids : ["EQP-01", "EQP-02"],
+                })}>指定機台</Pill>
+              <Pill active={trigger.target?.kind === "stations"}
+                onClick={() => setTarget({
+                  kind: "stations",
+                  ids: trigger.target?.ids?.length ? trigger.target.ids : ["PHOTO"],
+                })}>指定站點</Pill>
+            </div>
+            {trigger.target?.kind === "tools" && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {TOOL_IDS.map((id) => {
+                  const active = trigger.target?.ids?.includes(id) ?? false;
+                  return (
+                    <button key={id}
+                      onClick={() => setTarget({
+                        kind: "tools",
+                        ids: active
+                          ? (trigger.target?.ids ?? []).filter((x) => x !== id)
+                          : [...(trigger.target?.ids ?? []), id],
+                      })}
+                      style={{
+                        all: "unset", cursor: "pointer",
+                        padding: "5px 10px", borderRadius: 999, fontSize: 11.5,
+                        background: active ? "var(--ink)" : "var(--surface)",
+                        color: active ? "var(--bg)" : "var(--ink-2)",
+                        border: `1px solid ${active ? "var(--ink)" : "var(--line-strong)"}`,
+                        fontFamily: "JetBrains Mono, monospace",
+                      }}>
+                      {active ? "✓ " : ""}{id}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {trigger.target?.kind === "stations" && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {STATION_IDS.map((id) => {
+                  const active = trigger.target?.ids?.includes(id) ?? false;
+                  return (
+                    <button key={id}
+                      onClick={() => setTarget({
+                        kind: "stations",
+                        ids: active
+                          ? (trigger.target?.ids ?? []).filter((x) => x !== id)
+                          : [...(trigger.target?.ids ?? []), id],
+                      })}
+                      style={{
+                        all: "unset", cursor: "pointer",
+                        padding: "5px 10px", borderRadius: 999, fontSize: 11.5,
+                        background: active ? "var(--ink)" : "var(--surface)",
+                        color: active ? "var(--bg)" : "var(--ink-2)",
+                        border: `1px solid ${active ? "var(--ink)" : "var(--line-strong)"}`,
+                      }}>
+                      {active ? "✓ " : ""}{id}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </Editor>
+      )}
     </div>
+  );
+}
+
+function Chev({ open }: { open: boolean }) {
+  // Icon.Chevron's prop type is `object`, so we wrap in a span to apply
+  // the rotate transform without fighting the typedef.
+  return (
+    <span style={{ display: "inline-flex", transform: open ? "rotate(180deg)" : "none" }}>
+      <Icon.Chevron/>
+    </span>
   );
 }

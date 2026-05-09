@@ -191,14 +191,39 @@ export function Sparkline({ value, max = 1500 }: { value: number; max?: number }
   );
 }
 
-/* ── Skill type (matches Java DTO snake_case wire) ────────────────── */
+/* ── Skill type (matches Java DTO snake_case wire) ──────────────────
+ *
+ * Phase 11 v3 schema (doc-style):
+ *
+ *   { type: "event",    event: "OOC", target: {kind:"all", ids:[]} }
+ *   { type: "schedule", schedule: {mode:"hourly", every: 4},
+ *                       target: {kind:"tools", ids:["EQP-01","EQP-02"]} }
+ *
+ * Old v1/v2 fields (system / event_type / scope / cron / sla_seconds / ...)
+ * are kept on the type so loaders can read legacy DB rows; on save we
+ * re-emit only the v3 fields. See Playbook.tsx::migrateTrigger for the
+ * one-shot upgrade path.
+ */
 export interface TriggerConfig {
-  type?: "system" | "user" | "schedule";
-  // system
+  // ── v3 canonical fields ────────────────────────────────────────────
+  type?: "event" | "schedule" | "user" | "system";   // "system" is legacy-alias for "event"
+  event?: string;                  // when type==="event" — name from event_types
+  schedule?: {
+    mode?: "hourly" | "daily";
+    every?: number;                // hourly mode
+    time?: string;                 // daily mode "HH:MM"
+  };
+  target?: {
+    kind: "all" | "tools" | "stations";
+    ids: string[];
+  };
+
+  // ── Legacy fields (deprecated, retained for backward-compat read) ──
+  // system → event
   event_type?: string;
   match_filter?: Record<string, unknown>;
   scope?: string;
-  // user
+  // user (still allowed, hidden from author UI in v3)
   name?: string;
   source?: string;
   metric?: string;
@@ -207,17 +232,17 @@ export interface TriggerConfig {
   window?: string;
   debounce?: string;
   severity?: string;
-  // schedule
+  // schedule (legacy flat fields → schedule.*)
   cron?: string;
   every?: number;
   unit?: "minute" | "hour" | "day";
   timezone?: string;
   align?: boolean;
   skip?: string[];
-  // header summary (apply to all trigger types) — Phase 11 v2 polish
-  sla_seconds?: number;        // "complete in < {sla_seconds}s"
-  evidence_window_lots?: number;   // "last N lots"
-  evidence_window_days?: number;   // "...· N days"
+  // v2 header summary — dropped from UI in v3
+  sla_seconds?: number;
+  evidence_window_lots?: number;
+  evidence_window_days?: number;
 }
 
 export interface SuggestedAction {

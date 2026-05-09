@@ -21,7 +21,7 @@ import {
   type SkillDetail, type SkillStep, type TriggerConfig as TC, type SuggestedAction,
   type ConfirmCheck,
 } from "./atoms";
-import { TriggerConfigEditor } from "./TriggerConfig";
+import { TriggerConfigEditor, migrateTrigger } from "./TriggerConfig";
 import PipelineCanvasMini, { type MiniBlock } from "./PipelineCanvasMini";
 import TestCaseSelector, { type TestCase } from "./TestCaseSelector";
 
@@ -40,7 +40,9 @@ export default function Playbook({
 
   // Local edits
   const [title, setTitle] = useState("");
-  const [trigger, setTrigger] = useState<TC>({ type: "schedule", every: 4, unit: "hour" });
+  const [trigger, setTrigger] = useState<TC>({
+    type: "event", event: "OOC", target: { kind: "all", ids: [] },
+  });
   const [steps, setSteps] = useState<SkillStep[]>([]);
   const [confirmCheck, setConfirmCheck] = useState<ConfirmCheck | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -68,7 +70,10 @@ export default function Playbook({
         if (!res.ok || !json.ok) throw new Error(json.error?.message || `HTTP ${res.status}`);
         setSkill(json.data);
         setTitle(json.data.title);
-        setTrigger(safeParse<TC>(json.data.trigger_config, { type: "schedule", every: 4, unit: "hour" }));
+        setTrigger(migrateTrigger(safeParse<TC>(
+          json.data.trigger_config,
+          { type: "event", event: "OOC", target: { kind: "all", ids: [] } },
+        )));
         setSteps(safeParse<SkillStep[]>(json.data.steps, []));
         setConfirmCheck(json.data.confirm_check
           ? safeParse<ConfirmCheck | null>(json.data.confirm_check, null)
@@ -408,8 +413,11 @@ export default function Playbook({
       <TestCaseSelector
         open={showCaseSelector}
         slug={slug}
-        skillTriggerType={trigger.type ?? "schedule"}
-        eventType={trigger.event_type}
+        skillTriggerType={
+          trigger.type === "event" || trigger.type === "system" ? "system"
+          : trigger.type === "user" ? "user" : "schedule"
+        }
+        eventType={trigger.event ?? trigger.event_type}
         onClose={() => setShowCaseSelector(false)}
         onStart={(testCase, payload) => runSkill(testCase, payload)}
       />
@@ -526,7 +534,7 @@ function PlaybookHeader({
         <span style={{ color: "var(--ink-3)" }}>Updated <span className="mono">{skill.updated_at ? new Date(skill.updated_at).toLocaleDateString() : "—"}</span></span>
       </div>
 
-      <TriggerConfigEditor trigger={trigger} setTrigger={setTrigger} readOnly={mode === "run"}/>
+      <TriggerConfigEditor trigger={trigger} setTrigger={setTrigger} mode={mode}/>
 
       {skill.description && (
         <p style={{

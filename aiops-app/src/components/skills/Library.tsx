@@ -316,12 +316,20 @@ function StageSection({
 function SkillRow({ skill }: { skill: SkillSummary }) {
   const trig = safeParse<TriggerConfig>(skill.trigger_config, {});
   const stats = safeParse<SkillStats>(skill.stats, {});
-  const trigKind: "system" | "user" | "schedule" = trig.type ?? "schedule";
-  const trigLabel = trig.type === "system"
-    ? trig.event_type ?? "?"
-    : trig.type === "user"
-    ? trig.name ?? "(custom)"
-    : trig.cron ?? "—";
+  // Phase 11 v3 — "event" replaces "system"; map for the existing kind icon.
+  const trigKind: "system" | "user" | "schedule" =
+    trig.type === "event" || trig.type === "system" ? "system"
+    : trig.type === "user" ? "user"
+    : "schedule";
+  const trigLabel = trigKind === "system"
+    ? (trig.event ?? trig.event_type ?? "?")
+    : trigKind === "user"
+    ? (trig.name ?? "(custom)")
+    : (trig.schedule?.mode === "daily"
+        ? `每日 ${trig.schedule.time ?? "08:00"}`
+        : trig.schedule?.mode === "hourly"
+          ? `每 ${trig.schedule.every ?? 4}h`
+          : trig.cron ?? "—");
 
   return (
     <Link href={`/skills/${encodeURIComponent(skill.slug)}`}
