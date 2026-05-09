@@ -7,7 +7,7 @@ Architecture (SPEC v2 — flow in graph, LLM only thinks):
         ↓
     [Node 1] classify_intent → BUILD | EXPLAIN | COMPARE | RECOMMEND | AMBIGUOUS
         ↓
-        ├─ BUILD       → caller falls back to stream_agent_build (no advisor)
+        ├─ BUILD       → caller falls back to stream_graph_build (no advisor)
         ├─ EXPLAIN     → extract_block_target → java.get_block_by_name → synthesize_explain
         ├─ COMPARE     → extract_block_targets → java.list_blocks (filter) → synthesize_compare
         ├─ RECOMMEND   → extract_use_case_keywords → registry.search → synthesize_recommend

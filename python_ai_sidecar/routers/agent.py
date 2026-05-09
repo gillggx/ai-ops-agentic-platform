@@ -58,15 +58,6 @@ class BuildRequest(BaseModel):
     pipeline_snapshot: dict | None = Field(default=None, alias="pipelineSnapshot")
 
 
-class BuildContinueRequest(BaseModel):
-    """SPEC_glassbox_continuation: resume a paused Glass Box build.
-    `additional_turns` is bounded server-side to MAX_TURNS_PER_CONTINUATION."""
-    model_config = ConfigDict(populate_by_name=True)
-
-    session_id: str = Field(..., alias="sessionId")
-    additional_turns: int = Field(default=20, alias="additionalTurns")
-
-
 async def _chat_stream_native(req: ChatRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
     """Phase 8-A-1d: native LangGraph orchestrator.
 
@@ -105,128 +96,25 @@ async def _chat_stream(req: ChatRequest, caller: CallerContext) -> AsyncGenerato
         yield ev
 
 
-async def _build_stream_native(req: BuildRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
-    """Phase 8-A-1c: native Glass Box agent in sidecar.
+async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
+    """Phase 10-B: unified Glass Box build via graph_build (LangGraph).
 
-    Uses the ported `agent_builder.stream_agent_build` (Anthropic SDK +
-    BlockRegistry) directly. No DB session needed — the registry is loaded
-    seed-side, and there's no cross-request state besides what the
-    AgentBuilderSession holds in memory.
+    1. classify_advisor_intent → 6 buckets (BUILD vs Q&A advisor)
+    2. BUILD → stream_graph_build (10-node graph; FROM_SCRATCH pauses on
+       confirm_gate, frontend POSTs /build/confirm to resume)
+    3. Q&A → stream_block_advisor (unchanged advisor sub-graph)
 
-    Builder Mode Block Advisor (2026-05-02): the user's message is first
-    classified — if it's a block Q&A (EXPLAIN/COMPARE/RECOMMEND) or
-    ambiguous, we route to ``stream_block_advisor`` instead of the build
-    flow, so the panel answers questions about blocks without polluting
-    the canvas. Flow stays in code (graph-deterministic), not in prompt
-    — see CLAUDE.md "流程是 agent 決定，LLM 是大腦".
+    The old v1 stream_agent_build (Anthropic 80-turn free tool-use loop)
+    was retired in this commit. No more feature flag — graph is the only
+    path.
     """
     import os
-    from python_ai_sidecar.agent_builder.session import AgentBuilderSession
-    from python_ai_sidecar.agent_builder.orchestrator import stream_agent_build
-    from python_ai_sidecar.agent_builder.advisor import (
-        classify_advisor_intent, stream_block_advisor,
-    )
-    from python_ai_sidecar.clients.java_client import JavaAPIClient
-    from python_ai_sidecar.pipeline_builder.seedless_registry import SeedlessBlockRegistry
-    from python_ai_sidecar.pipeline_builder.pipeline_schema import PipelineJSON
-
-    # ── Step 0: classify intent (graph-level routing) ───────────────────
-    intent, confidence, reason = await classify_advisor_intent(req.instruction)
-    log.info("build/native: intent=%s conf=%.2f reason=%r", intent, confidence, reason)
-
-    if intent != "BUILD":
-        # Q&A path — answer directly, no pipeline mutation.
-        java = JavaAPIClient.for_caller(caller)
-        async for stream_event in stream_block_advisor(req.instruction, intent, java=java):
-            yield {
-                "event": stream_event.type,
-                "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
-            }
-        return
-
-    # ── BUILD path (existing Glass Box flow) ────────────────────────────
-    base_pipeline: PipelineJSON | None = None
-    if req.pipeline_snapshot:
-        try:
-            base_pipeline = PipelineJSON.model_validate(req.pipeline_snapshot)
-        except Exception as ex:  # noqa: BLE001
-            log.warning("pipeline_snapshot parse failed (%s) — starting empty", ex)
-
-    session = AgentBuilderSession.new(
-        user_prompt=req.instruction,
-        base_pipeline=base_pipeline,
-        base_pipeline_id=req.pipeline_id,
-    )
-    registry = SeedlessBlockRegistry()
-    registry.load()
-
-    model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
-    async for stream_event in stream_agent_build(session, registry, model=model):
-        # StreamEvent: {type, data}; sse_starlette EventSourceResponse takes {event, data}
-        yield {
-            "event": stream_event.type,
-            "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
-        }
-
-
-async def _build_stream_graph_v2(req: BuildRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
-    """Phase 10: graph-heavy native build via LangGraph StateGraph.
-
-    Skips the v1 free-LLM tool-use loop entirely. Flow lives in
-    agent_builder.graph_build (10-node graph); LLM only does plan /
-    repair_plan / repair_op narrow tasks. See PHASE_10_BUILDER_GRAPH_V2.html.
-
-    Still goes through `classify_advisor_intent` first — non-BUILD intents
-    keep going through `stream_block_advisor` (advisor sub-graph unchanged).
-    """
     from python_ai_sidecar.agent_builder.advisor import (
         classify_advisor_intent, stream_block_advisor,
     )
     from python_ai_sidecar.agent_builder.graph_build import stream_graph_build
     from python_ai_sidecar.clients.java_client import JavaAPIClient
 
-    intent, conf, reason = await classify_advisor_intent(req.instruction)
-    log.info("build/v2: intent=%s conf=%.2f reason=%r", intent, conf, reason)
-
-    if intent != "BUILD":
-        java = JavaAPIClient.for_caller(caller)
-        async for stream_event in stream_block_advisor(req.instruction, intent, java=java):
-            yield {
-                "event": stream_event.type,
-                "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
-            }
-        return
-
-    async for stream_event in stream_graph_build(
-        instruction=req.instruction,
-        base_pipeline=req.pipeline_snapshot,
-        user_id=caller.user_id,
-    ):
-        yield {
-            "event": stream_event.type,
-            "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
-        }
-
-
-def _build_graph_version() -> str:
-    """v1 = stream_agent_build (Anthropic tool-use loop)
-       v2 = graph_build (LangGraph 10-node state machine)
-       env: AGENT_BUILD_GRAPH (default v1 during P1 grace period).
-       Per-request override: header X-Build-Graph (set by frontend for QA accounts).
-    """
-    import os
-    return (os.environ.get("AGENT_BUILD_GRAPH") or "v1").strip().lower()
-
-
-async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
-    """Phase 8-A-3: native-only Glass Box. Fallback removed — native path
-    proved stable in A-1c smoke. If native fails, surface the error as an
-    SSE frame instead of silently proxying to :8001.
-
-    Phase 10: feature-flag-gated v2 graph_build. AGENT_BUILD_GRAPH=v2 → new
-    LangGraph state machine; default (v1) keeps the existing free-LLM loop.
-    """
-    import os
     if not os.environ.get("ANTHROPIC_API_KEY"):
         yield {"event": "error", "data": json.dumps({
             "message": "ANTHROPIC_API_KEY not set on sidecar — /agent/build unavailable",
@@ -234,16 +122,33 @@ async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenera
         yield {"event": "done", "data": json.dumps({"status": "failed"})}
         return
 
-    version = _build_graph_version()
-    streamer = _build_stream_graph_v2 if version == "v2" else _build_stream_native
-
     try:
-        async for ev in streamer(req, caller):
-            yield ev
+        intent, conf, reason = await classify_advisor_intent(req.instruction)
+        log.info("build: intent=%s conf=%.2f reason=%r", intent, conf, reason)
+
+        if intent != "BUILD":
+            java = JavaAPIClient.for_caller(caller)
+            async for stream_event in stream_block_advisor(req.instruction, intent, java=java):
+                yield {
+                    "event": stream_event.type,
+                    "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
+                }
+            return
+
+        async for stream_event in stream_graph_build(
+            instruction=req.instruction,
+            base_pipeline=req.pipeline_snapshot,
+            user_id=caller.user_id,
+            skip_confirm=False,  # Builder Mode shows the Apply/Cancel card
+        ):
+            yield {
+                "event": stream_event.type,
+                "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
+            }
     except Exception as ex:  # noqa: BLE001
-        log.exception("build (%s) failed", version)
+        log.exception("build failed")
         yield {"event": "error", "data": json.dumps({
-            "message": f"build ({version}) failed: {ex.__class__.__name__}: {str(ex)[:200]}",
+            "message": f"build failed: {ex.__class__.__name__}: {str(ex)[:200]}",
         })}
         yield {"event": "done", "data": json.dumps({"status": "failed"})}
 
@@ -258,74 +163,15 @@ async def agent_build(req: BuildRequest, caller: CallerContext = ServiceAuth) ->
     return EventSourceResponse(_build_stream(req, caller))
 
 
-async def _build_continue_stream(req: BuildContinueRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
-    """SPEC_glassbox_continuation: resume a paused Glass Box build.
-
-    Loads the parked session, bumps continuation_count, and re-enters
-    stream_agent_build which detects the snapshot and resumes from where
-    the previous run paused.
-    """
-    import os
-    from python_ai_sidecar.agent_builder.orchestrator import (
-        stream_agent_build,
-        take_paused_session,
-        MAX_TURNS_PER_CONTINUATION,
-    )
-    from python_ai_sidecar.pipeline_builder.seedless_registry import SeedlessBlockRegistry
-
-    session = take_paused_session(req.session_id)
-    if session is None:
-        yield {"event": "error", "data": json.dumps({
-            "op": "continue", "message": f"session {req.session_id} not found or already taken",
-            "ts": 0.0,
-        }, ensure_ascii=False)}
-        yield {"event": "done", "data": json.dumps({"status": "failed", "summary": "session not found"}, ensure_ascii=False)}
-        return
-
-    if session.status != "paused":
-        yield {"event": "error", "data": json.dumps({
-            "op": "continue", "message": f"session {req.session_id} status={session.status} (need 'paused')",
-            "ts": 0.0,
-        }, ensure_ascii=False)}
-        yield {"event": "done", "data": json.dumps({"status": "failed", "summary": "session not paused"}, ensure_ascii=False)}
-        return
-
-    # Cap the additional turns server-side regardless of what client requested
-    capped = max(5, min(MAX_TURNS_PER_CONTINUATION, int(req.additional_turns or 20)))
-    log.info("build/continue: session=%s continuation=%d → +%d turns",
-             session.session_id, session.continuation_count + 1, capped)
-
-    session.continuation_count += 1
-    session.status = "running"
-
-    registry = SeedlessBlockRegistry()
-    registry.load()
-
-    from python_ai_sidecar.agent_builder.event_wrapper import wrap_build_event_for_chat
-
-    model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
-    async for stream_event in stream_agent_build(session, registry, model=model):
-        wrapped = wrap_build_event_for_chat(stream_event, session.session_id)
-        if wrapped is None:
-            continue
-        yield {
-            "event": wrapped["type"],
-            "data": json.dumps(wrapped, default=str, ensure_ascii=False),
-        }
-
-
-@router.post("/build/continue")
-async def agent_build_continue(
-    req: BuildContinueRequest, caller: CallerContext = ServiceAuth,
-) -> EventSourceResponse:
-    return EventSourceResponse(_build_continue_stream(req, caller))
-
-
-# ── Phase 10: graph_build v2 confirm endpoint ─────────────────────────────
+# ── Phase 10: graph_build confirm endpoint (resume after confirm_gate) ────
 
 
 class BuildConfirmRequest(BaseModel):
-    """Phase 10: resume a paused graph_build session after confirm_pending."""
+    """Phase 10-B: resume a paused graph_build session after confirm_pending.
+
+    Only fires for Builder Mode FROM_SCRATCH builds. Chat Mode passes
+    skip_confirm=True so confirm_gate never fires there.
+    """
     model_config = ConfigDict(populate_by_name=True)
 
     session_id: str = Field(..., alias="sessionId")

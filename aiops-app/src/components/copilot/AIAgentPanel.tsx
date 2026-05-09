@@ -16,7 +16,6 @@ import PbPatchProposalCard, { type PbPatchProposalData, type PipelinePatch } fro
 import type { UiRender } from "@/components/McpChartRenderer";
 import type { FlatDataMetadata, UIConfig } from "@/context/FlatDataContext";
 import { useAppContext } from "@/context/AppContext";
-import { ContinuationCard, type ContinuationData, type ContinuationOption } from "./ContinuationCard";
 import { DesignIntentCard, type DesignIntentData, type DesignIntentChoice } from "./DesignIntentCard";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -75,10 +74,9 @@ interface ClarifyData {
 
 interface ChatMessage {
   id: number;
-  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "ops" | "clarify" | "continuation" | "design_intent";
+  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "ops" | "clarify" | "design_intent";
   content: string;
   clarify?: ClarifyData;
-  continuation?: ContinuationData;
   designIntent?: DesignIntentData;
   /** For role === "design_intent": the user prompt that produced this card,
    *  needed to compose the [intent_confirmed:<id>] follow-up message. */
@@ -872,27 +870,6 @@ export function AIAgentPanel({
               id: nextId(), role: "design_intent", content: "",
               designIntent: design,
               designIntentPrompt: lastUserPromptRef.current,
-            }]);
-            break;
-          }
-
-          case "continuation_request": {
-            // SPEC_glassbox_continuation: Glass Box paused at MAX_TURNS budget,
-            // user picks extend / takeover / stop. The card renders inline in
-            // the chat thread.
-            const cont: ContinuationData = {
-              session_id: ev.session_id as string,
-              turns_used: (ev.turns_used as number) ?? 0,
-              ops_count: (ev.ops_count as number) ?? 0,
-              completed: (ev.completed as string[]) ?? [],
-              remaining: (ev.remaining as string[]) ?? [],
-              estimate: (ev.estimate as number) ?? 10,
-              options: (ev.options as ContinuationOption[]) ?? [],
-              resolved: false,
-            };
-            setChatHistory((prev) => [...prev, {
-              id: nextId(), role: "continuation", content: "",
-              continuation: cont,
             }]);
             break;
           }
@@ -1744,78 +1721,6 @@ export function AIAgentPanel({
                       void sendMessage(original);
                     } else {
                       void sendMessage(`[intent=${intentId}] ${original}`);
-                    }
-                  }} />
-                </div>
-              ) : msg.role === "continuation" && msg.continuation ? (
-                <div style={{ width: "100%", maxWidth: "100%" }}>
-                  <ContinuationCard data={msg.continuation} onPick={async (opt) => {
-                    setChatHistory((prev) => prev.map((m) =>
-                      m.id === msg.id && m.continuation
-                        ? { ...m, continuation: { ...m.continuation, resolved: true } }
-                        : m,
-                    ));
-                    const card = msg.continuation;
-                    if (!card) return;
-                    if (opt.id === "takeover") {
-                      // Stash the partial pipeline (came in via the paused
-                      // pb_glass_done event) and reuse the /new hydration
-                      // path that PbPipelineCard's "Edit in Builder" already
-                      // uses — the previous URL pointed at the list page,
-                      // which had no resume handler.
-                      const partial = lastBuiltPipelineRef.current;
-                      if (partial) {
-                        try {
-                          sessionStorage.setItem("pb:ephemeral_pipeline", JSON.stringify({
-                            pipeline_json: partial,
-                            ts: Date.now(),
-                          }));
-                        } catch { /* quota exceeded — proceed with empty canvas */ }
-                      }
-                      window.location.href = "/admin/pipeline-builder/new?from=agent";
-                      return;
-                    }
-                    // opt.id === "continue"
-                    // 2026-05-06: continuation runs were silently working but
-                    // the chat panel showed nothing — no loading spinner, no
-                    // "Agent is continuing" message — so the user thought
-                    // nothing happened (and only realised it had finished
-                    // when they wandered into the Builder). Now we set the
-                    // loading state, drop a "繼續中…" status message, and
-                    // clear loading whether SSE finishes cleanly or errors.
-                    setLoading(true);
-                    setChatHistory((prev) => [...prev, {
-                      id: nextId(), role: "agent",
-                      content: `▶ Agent 繼續中（再 ${opt.additional_turns ?? card.estimate ?? 20} 步）…`,
-                    }]);
-                    try {
-                      const res = await fetch("/api/agent/build/continue", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-                        body: JSON.stringify({
-                          session_id: card.session_id,
-                          additional_turns: opt.additional_turns ?? card.estimate ?? 20,
-                        }),
-                      });
-                      if (!res.ok || !res.body) {
-                        addLog(makeLog("❌", `Continue failed: ${res.status}`, "error"));
-                        return;
-                      }
-                      // Route continuation events through the same dispatcher
-                      // as the first build pass (backend /build/continue wraps
-                      // events as pb_glass_* via event_wrapper.wrap_build_event_for_chat).
-                      const handler = buildStreamHandlerRef.current;
-                      if (handler) {
-                        await consumeSSE(res, handler, (err) => {
-                          addLog(makeLog("❌", `Continue 連線失敗: ${err.message}`, "error"));
-                        });
-                      } else {
-                        addLog(makeLog("❌", "Continue handler unavailable — refresh the page", "error"));
-                      }
-                    } catch (e) {
-                      addLog(makeLog("❌", `Continue error: ${(e as Error).message}`, "error"));
-                    } finally {
-                      setLoading(false);
                     }
                   }} />
                 </div>

@@ -49,15 +49,6 @@ def wrap_build_event_for_chat(
         payload["id"] = data.get("id")
         payload["status"] = data.get("status")
         payload["note"] = data.get("note")
-    elif evt_type == "continuation_request":
-        payload["type"] = "continuation_request"
-        payload["session_id"] = data.get("session_id")
-        payload["turns_used"] = data.get("turns_used")
-        payload["ops_count"] = data.get("ops_count")
-        payload["completed"] = data.get("completed") or []
-        payload["remaining"] = data.get("remaining") or []
-        payload["estimate"] = data.get("estimate")
-        payload["options"] = data.get("options") or []
     elif evt_type == "glass_usage":
         payload["type"] = "glass_usage"
         for k in (

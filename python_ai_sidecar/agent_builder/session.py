@@ -23,7 +23,7 @@ from typing import Any, Literal, Optional
 from python_ai_sidecar.pipeline_builder.pipeline_schema import PipelineJSON
 
 
-SessionStatus = Literal["running", "finished", "failed", "cancelled", "needs_input", "paused"]
+SessionStatus = Literal["running", "finished", "failed", "cancelled", "needs_input"]
 
 
 def _now_ts() -> float:
@@ -84,9 +84,14 @@ class StreamEvent:
     # when the user's message is a Q&A intent (EXPLAIN/COMPARE/RECOMMEND/AMBIGUOUS)
     # rather than a build instruction. Carries `{kind, markdown, ...}`.
     type: Literal[
+        # Legacy v1 + advisor:
         "chat", "operation", "error", "done",
-        "suggestion_card", "continuation_request",
-        "advisor_answer",
+        "suggestion_card", "advisor_answer",
+        # Phase 10 graph_build v2:
+        "plan_proposed", "plan_validating", "plan_repaired",
+        "confirm_pending", "confirm_received",
+        "op_dispatched", "op_completed", "op_error", "op_repaired",
+        "build_finalized",
     ]
     data: dict[str, Any]
 
@@ -121,16 +126,6 @@ class AgentBuilderSession:
     finished_at: Optional[float] = None
     # Cancellation (cooperative)
     cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
-    # Continuation (SPEC_glassbox_continuation): how many times the user has
-    # already said "再給 N 步" for this build. Used by the orchestrator to
-    # tell apart fresh runs vs already-extended-N-times when deciding the
-    # ABSOLUTE_MAX_TURNS guard.
-    continuation_count: int = 0
-    # Continuation: snapshot of the in-flight conversation messages list when
-    # the run is paused. Stored as Anthropic-format dicts (already JSON-safe).
-    # Only populated on pause; ignored on a fresh run (orchestrator builds
-    # this from user_prompt + pipeline_json).
-    messages_snapshot: Optional[list[dict[str, Any]]] = None
 
     # ----------------------------------------------------------------------
     # Constructors
@@ -183,16 +178,6 @@ class AgentBuilderSession:
     def mark_cancelled(self) -> None:
         self.status = "cancelled"
         self.finished_at = _now_ts()
-
-    def mark_paused(self, reason: Optional[str] = None) -> None:
-        """SPEC_glassbox_continuation: pause the run instead of failing on
-        MAX_TURNS, so the user can decide whether to continue / take over /
-        stop. The session keeps its pipeline_json + operations + chat so a
-        subsequent /build/continue can resume from exactly here."""
-        self.status = "paused"
-        if reason:
-            self.summary = reason
-        # NOTE: do NOT set finished_at — the run isn't over.
 
     def request_cancel(self) -> None:
         self.cancel_event.set()

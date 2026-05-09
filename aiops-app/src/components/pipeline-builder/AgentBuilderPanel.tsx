@@ -23,9 +23,7 @@ import { useBuilder } from "@/context/pipeline-builder/BuilderContext";
 import type { BlockSpec } from "@/lib/pipeline-builder/types";
 import { applyGlassOp, OP_LABELS, opDetail, autoLayoutPipeline } from "@/lib/pipeline-builder/glass-ops";
 import { PlanRenderer, type PlanItem } from "@/components/copilot/PlanRenderer";
-import { ContinuationCard, type ContinuationData, type ContinuationOption } from "@/components/copilot/ContinuationCard";
-
-type ChatRole = "user" | "agent" | "op" | "error" | "continuation" | "advisor" | "confirm";
+type ChatRole = "user" | "agent" | "op" | "error" | "advisor" | "confirm";
 interface ConfirmData {
   session_id: string;
   plan_summary: string;
@@ -38,8 +36,7 @@ interface ChatLine {
   role: ChatRole;
   text: string;
   op?: { label: string; detail: string };
-  continuation?: ContinuationData;
-  /** Phase 10 (graph_build v2) — confirm_pending card. */
+  /** Phase 10 (graph_build) — confirm_pending card. */
   confirm?: ConfirmData;
   /** When role==='advisor' — markdown body + which advisor bucket fired. */
   advisor?: { kind: string; markdown: string; meta?: Record<string, unknown> };
@@ -100,9 +97,9 @@ export default function AgentBuilderPanel({
     }
   }, [actions, blockCatalog]);
 
-  // Shared SSE consumer for both /api/agent/build and /api/agent/build/continue.
-  // Both endpoints emit the same event types; the only thing that differs
-  // upstream is the request body.
+  // Shared SSE consumer for /api/agent/build and /api/agent/build/confirm.
+  // Both endpoints emit the same v2 graph_build event types; only the
+  // request body differs.
   const consumeBuildStream = useCallback(async (streamRes: Response) => {
     if (!streamRes.ok || !streamRes.body) {
       const errText = await streamRes.text().catch(() => "");
@@ -247,20 +244,6 @@ export default function AgentBuilderPanel({
           const label = OP_LABELS[op] ?? op;
           const detail = opDetail(op, args);
           setLines((p) => [...p, { id: nextId(), role: "op", text: "", op: { label, detail } }]);
-        } else if (eventType === "continuation_request") {
-          // SPEC_glassbox_continuation: agent paused at turn budget, emit a
-          // quick-pick card so user can extend / take over / stop.
-          const cont: ContinuationData = {
-            session_id: data.session_id as string,
-            turns_used: (data.turns_used as number) ?? 0,
-            ops_count: (data.ops_count as number) ?? 0,
-            completed: (data.completed as string[]) ?? [],
-            remaining: (data.remaining as string[]) ?? [],
-            estimate: (data.estimate as number) ?? 10,
-            options: (data.options as ContinuationOption[]) ?? [],
-            resolved: false,
-          };
-          setLines((p) => [...p, { id: nextId(), role: "continuation", text: "", continuation: cont }]);
         } else if (eventType === "advisor_answer") {
           // Builder Mode Block Advisor (2026-05-02) — Q&A path emits a
           // markdown card instead of canvas operations. Don't apply
@@ -388,50 +371,6 @@ export default function AgentBuilderPanel({
     }
   }, [lines, consumeBuildStream]);
 
-  const handleContinuationPick = useCallback(async (lineId: number, opt: ContinuationOption) => {
-    // Mark the card resolved so its buttons disable.
-    setLines((p) => p.map((l) =>
-      l.id === lineId && l.continuation
-        ? { ...l, continuation: { ...l.continuation, resolved: true } }
-        : l,
-    ));
-    // Find the card data so we know which session_id to act on.
-    const card = lines.find((l) => l.id === lineId)?.continuation;
-    if (!card) return;
-
-    if (opt.id === "takeover") {
-      // v1: tell user to keep working in the current builder; partial canvas is
-      // already mounted in the hosting page, no navigation needed.
-      setLines((p) => [...p, { id: nextId(), role: "agent", text: "你接手吧 — partial canvas 已在此頁面，可直接編輯。" }]);
-      return;
-    }
-    // opt.id === "continue"
-    if (runningLockRef.current) return;
-    runningLockRef.current = true;
-    setRunning(true);
-    try {
-      abortRef.current?.abort();
-      abortRef.current = new AbortController();
-      const streamRes = await fetch("/api/agent/build/continue", {
-        method: "POST",
-        signal: abortRef.current.signal,
-        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-        body: JSON.stringify({
-          session_id: card.session_id,
-          additional_turns: opt.additional_turns ?? card.estimate ?? 20,
-        }),
-      });
-      await consumeBuildStream(streamRes);
-    } catch (e) {
-      if ((e as Error).name !== "AbortError") {
-        setLines((p) => [...p, { id: nextId(), role: "error", text: `Continue 失敗：${(e as Error).message}` }]);
-      }
-    } finally {
-      setRunning(false);
-      runningLockRef.current = false;
-    }
-  }, [lines, consumeBuildStream]);
-
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#fff" }}>
       {/* v1.4 — Plan Panel above messages */}
@@ -446,13 +385,7 @@ export default function AgentBuilderPanel({
           </div>
         )}
         {lines.map((l) => (
-          l.role === "continuation" && l.continuation ? (
-            <ContinuationCard
-              key={l.id}
-              data={l.continuation}
-              onPick={(opt) => handleContinuationPick(l.id, opt)}
-            />
-          ) : l.role === "confirm" && l.confirm ? (
+          l.role === "confirm" && l.confirm ? (
             <ConfirmCard
               key={l.id}
               data={l.confirm}
