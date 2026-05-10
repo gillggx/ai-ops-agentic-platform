@@ -637,24 +637,12 @@ export function AIAgentPanel({
 
   // Phase 5-UX-3b: session mode — auto-send the seed prompt once when the
   // panel first mounts (from /chat/new?prompt=... flow).
+  // Phase 11 v6 — also auto-fires for Skill embed (BuilderLayout passes
+  // `initialPrompt` from sessionStorage skill ctx).
   const initialPromptFiredRef = useRef(false);
   useEffect(() => {
-    // Phase 11 v6 — temporary diagnostic for skill embed auto-fire debug.
-    // Remove once e2e is green.
-    if (typeof window !== "undefined") {
-      // eslint-disable-next-line no-console
-      console.log("[AIAgentPanel] auto-fire check", {
-        fired: initialPromptFiredRef.current,
-        hasInitialPrompt: !!initialPrompt,
-        initialPromptPreview: initialPrompt?.slice(0, 40),
-        hasExternalSessionId: !!externalSessionId,
-        externalSessionId,
-      });
-    }
     if (!initialPromptFiredRef.current && initialPrompt && externalSessionId) {
       initialPromptFiredRef.current = true;
-      // eslint-disable-next-line no-console
-      console.log("[AIAgentPanel] auto-fire firing sendMessage");
       sendMessage(initialPrompt);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
