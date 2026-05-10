@@ -146,18 +146,24 @@ def _blocks() -> list[dict[str, Any]]:
                 {"name": "spc_s_chart_value", "type": "number", "when_present": "SPC + chart_type=s_chart"},
                 {"name": "spc_p_chart_value", "type": "number", "when_present": "SPC + chart_type=p_chart"},
                 {"name": "spc_c_chart_value", "type": "number", "when_present": "SPC + chart_type=c_chart"},
-                # APC — dynamic per param_name
+                # APC — instance ID + dynamic params
+                {"name": "apc_id", "type": "string", "description": "APC 模型 instance ID，e.g. APC-009（為 user 在 TRACE view 看到的 APC 名稱）", "when_present": "object_name=APC"},
                 {"name": "apc_<param_name>", "type": "number", "description": "APC 參數值，<param_name> 會展開，e.g. apc_etch_time_offset / apc_rf_power_bias / apc_chamber_pressure", "when_present": "object_name=APC"},
-                # DC — dynamic per sensor
+                # DC — chamber instance + dynamic sensors
+                {"name": "dc_id", "type": "string", "description": "DC 物件 instance ID（少見；通常用 dc_chamber_id 表示腔體）", "when_present": "object_name=DC"},
+                {"name": "dc_chamber_id", "type": "string", "description": "DC chamber instance，e.g. CH-1 / CH-2", "when_present": "object_name=DC"},
                 {"name": "dc_<sensor_name>", "type": "number", "description": "DC sensor 讀值，e.g. dc_temperature / dc_gas_flow", "when_present": "object_name=DC"},
-                # RECIPE
+                # RECIPE — instance ID + version + dynamic params
+                {"name": "recipe_id", "type": "string", "description": "Recipe instance ID，e.g. RCP-001（為 user 在 TRACE view 看到的 recipe 名稱）", "when_present": "object_name=RECIPE"},
                 {"name": "recipe_version", "type": "string", "when_present": "object_name=RECIPE"},
                 {"name": "recipe_<param_name>", "type": "number", "description": "Recipe 參數設定值", "when_present": "object_name=RECIPE"},
-                # FDC
+                # FDC — instance ID + classification fields
+                {"name": "fdc_id", "type": "string", "description": "FDC 模型 instance ID", "when_present": "object_name=FDC"},
                 {"name": "fdc_fault_code", "type": "string", "when_present": "object_name=FDC"},
                 {"name": "fdc_confidence", "type": "number", "when_present": "object_name=FDC"},
                 {"name": "fdc_description", "type": "string", "when_present": "object_name=FDC"},
-                # EC
+                # EC — instance ID + per-constant fields
+                {"name": "ec_id", "type": "string", "description": "EC instance ID", "when_present": "object_name=EC"},
                 {"name": "ec_<const>_value", "type": "number", "when_present": "object_name=EC"},
                 {"name": "ec_<const>_deviation_pct", "type": "number", "when_present": "object_name=EC"},
             ],
@@ -1133,6 +1139,17 @@ def _blocks() -> list[dict[str, Any]]:
                 "      → bar_chart(x='param_name', y='value_count')\n"
                 "    要看跨機台分佈：process_history 別 filter $tool_id（撈全廠），\n"
                 "    要看單機分佈：process_history 用 tool_id=$tool_id。\n"
+                "    ⚠ 此模式下每根 bar 高度可能相近 — 因為每個 OOC event 都帶全部 ~20 個\n"
+                "    APC params。要看「哪個 APC 模型 instance 觸發 OOC」改用 (D)。\n"
+                "\n"
+                "(D) APC OOC count by APC instance（看哪台 APC 模型最常觸發 OOC）:\n"
+                "    process_history(object_name='APC')\n"
+                "      → filter(column='spc_status', operator='==', value='OOC')\n"
+                "      → groupby_agg(group_by='apc_id', agg_column='lotID', agg_func='count')\n"
+                "      → bar_chart(x='apc_id', y='lotID_count', title='APC instance OOC 次數')\n"
+                "    這條**不需要 apc_long_form**（不需要展開 params），直接用 process_history\n"
+                "    的 apc_id 欄位即可。apc_id 是 user 在 TRACE view 看到的 APC-001/APC-009 等\n"
+                "    instance name。\n"
                 "\n"
                 "== Errors ==\n"
                 "- INVALID_INPUT  : data 不是 DataFrame\n"

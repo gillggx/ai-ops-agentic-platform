@@ -551,9 +551,15 @@ async def get_process_info(
         snaps = await db.object_snapshots.find(snap_filt, {"_id": 0}).to_list(length=10)
         for snap in snaps:
             obj_name = snap.get("objectName", "")
+            # 2026-05-11: keep objectID — it's the instance identifier (e.g.
+            # APC-009, RCP-001) that user sees in TRACE view. Stripping it
+            # had hidden critical info: agent couldn't groupby APC instance
+            # for "OOC count by APC model" analysis. DC's chamberID was
+            # already passing through (not in strip list), so this restores
+            # symmetry across object families.
             clean = {k: v for k, v in snap.items()
                      if k not in ("eventTime", "lotID", "toolID", "step",
-                                  "objectName", "objectID", "last_updated_time", "updated_by")}
+                                  "objectName", "last_updated_time", "updated_by")}
             row[obj_name] = clean
 
         results.append(row)

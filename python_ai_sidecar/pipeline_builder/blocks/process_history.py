@@ -42,6 +42,19 @@ def _flatten_spc(row: dict[str, Any], spc: dict[str, Any]) -> None:
                 row[f"spc_{chart_name}_{subkey}"] = chart_obj[subkey]
 
 
+def _flatten_object_id(row: dict[str, Any], obj: dict[str, Any], prefix: str) -> None:
+    """obj.objectID → <prefix>_id (e.g. APC.objectID='APC-009' → apc_id='APC-009').
+
+    2026-05-11: simulator now returns objectID for every object snapshot
+    (was being stripped). Surface it as a flat column so downstream blocks
+    can groupby by APC/RECIPE/FDC instance — e.g. "OOC count by APC model"
+    becomes a clean groupby on `apc_id`.
+    """
+    oid = obj.get("objectID")
+    if oid is not None:
+        row[f"{prefix}_id"] = oid
+
+
 def _flatten_params(row: dict[str, Any], obj: dict[str, Any], prefix: str) -> None:
     """obj.parameters[k] → <prefix>_<k>; unwrap nested {value,...} dicts to scalar."""
     params = obj.get("parameters") or {}
@@ -58,6 +71,15 @@ def _flatten_recipe(row: dict[str, Any], recipe: dict[str, Any]) -> None:
     if "recipe_version" in recipe:
         row["recipe_version"] = recipe["recipe_version"]
     _flatten_params(row, recipe, "recipe")
+
+
+def _flatten_dc(row: dict[str, Any], dc: dict[str, Any]) -> None:
+    """DC.chamberID is the chamber instance identifier (CH-1, CH-2, ...);
+    keep as `dc_chamber_id` to mirror apc_id/recipe_id naming."""
+    cid = dc.get("chamberID")
+    if cid is not None:
+        row["dc_chamber_id"] = cid
+    _flatten_params(row, dc, "dc")
 
 
 def _flatten_fdc(row: dict[str, Any], fdc: dict[str, Any]) -> None:
@@ -90,14 +112,19 @@ def _flatten_event(ev: dict[str, Any], object_name: Optional[str]) -> dict[str, 
     if "SPC" in include and isinstance(ev.get("SPC"), dict):
         _flatten_spc(row, ev["SPC"])
     if "APC" in include and isinstance(ev.get("APC"), dict):
+        _flatten_object_id(row, ev["APC"], "apc")
         _flatten_params(row, ev["APC"], "apc")
     if "DC" in include and isinstance(ev.get("DC"), dict):
-        _flatten_params(row, ev["DC"], "dc")
+        _flatten_object_id(row, ev["DC"], "dc")
+        _flatten_dc(row, ev["DC"])
     if "RECIPE" in include and isinstance(ev.get("RECIPE"), dict):
+        _flatten_object_id(row, ev["RECIPE"], "recipe")
         _flatten_recipe(row, ev["RECIPE"])
     if "FDC" in include and isinstance(ev.get("FDC"), dict):
+        _flatten_object_id(row, ev["FDC"], "fdc")
         _flatten_fdc(row, ev["FDC"])
     if "EC" in include and isinstance(ev.get("EC"), dict):
+        _flatten_object_id(row, ev["EC"], "ec")
         _flatten_ec(row, ev["EC"])
 
     return row
