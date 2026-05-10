@@ -335,10 +335,40 @@ export default function Playbook({
   /** Phase 11 v5 — open Pipeline Builder for any slot (confirm | step:NEW |
    *  step:<id>). Replaces the silent AI translate. The Builder Confirm
    *  banner POSTs back to /bind-pipeline; window-focus refresh on this page
-   *  picks up the new pipeline_id. */
+   *  picks up the new pipeline_id.
+   *
+   *  Phase 11 v12 — persist any pending step edits to DB BEFORE opening
+   *  Builder. Same reason as ConfirmSection.openInBuilder: if user only
+   *  presses Save (not Done) in Builder and comes back, the local prose
+   *  shouldn't be wiped by reload-on-focus. */
   const openSlotInBuilder = useCallback(async (slot: string, instruction: string) => {
     if (!instruction.trim() && slot.startsWith("step:NEW")) return;
     try {
+      // Pre-save current local steps + title so they survive Builder navigation.
+      // For step:<existing-id>, instruction may have been just-typed in the
+      // textarea — make sure the in-memory `steps` reflects that before PUT.
+      let stepsToSave = steps;
+      if (slot.startsWith("step:") && !slot.startsWith("step:NEW")) {
+        const stepId = slot.substring("step:".length);
+        stepsToSave = steps.map((s) => s.id === stepId ? { ...s, text: instruction } : s);
+      }
+      const putRes = await fetch(`/api/skill-documents/${encodeURIComponent(slug)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          trigger_config: JSON.stringify(trigger),
+          steps: JSON.stringify(stepsToSave),
+        }),
+      });
+      if (!putRes.ok) {
+        const ej = await putRes.json().catch(() => ({}));
+        throw new Error(`存草稿失敗 (HTTP ${putRes.status}) — ` + (ej?.error?.message ?? ""));
+      }
+      // Sync local state with what we just persisted to keep the UI consistent
+      if (stepsToSave !== steps) setSteps(stepsToSave);
+      setDirty(false);
+
       const r = await fetch(
         `/api/skill-documents/${encodeURIComponent(slug)}/builder-url?`
         + `slot=${encodeURIComponent(slot)}`
@@ -352,7 +382,7 @@ export default function Playbook({
     } catch (e) {
       alert("Open Builder failed: " + String(e));
     }
-  }, [slug]);
+  }, [slug, steps, title, trigger]);
 
   const addStep = async (text: string) => {
     await openSlotInBuilder("step:NEW", text);
@@ -438,19 +468,19 @@ export default function Playbook({
             />
           )}
 
-          {/* Phase 11 v2 — CONFIRMATION (optional gating step). Author mode
-              shows the slot even when empty (so user can add); Run mode hides
-              the section entirely if no confirm step is configured. */}
-          {(mode === "author" || confirmCheck) && (
-            <ConfirmSection
-              slug={slug}
-              mode={mode}
-              confirmCheck={confirmCheck}
-              onSet={(cc) => { setConfirmCheck(cc); markDirty(); }}
-              onReload={reload}
-              onInspect={openInspect}
-            />
-          )}
+          {/* Phase 11 v12 — ALARM GATE section ALWAYS visible (both modes).
+              Empty state shows the「+ 加 alarm gate」input so operator in
+              Execute can add c1 without switching to Author. Was previously
+              gated to mode==author which contradicted the mode-unification
+              feedback「2 個 mode 都要一致，只是顯示的方式不同」. */}
+          <ConfirmSection
+            slug={slug}
+            mode={mode}
+            confirmCheck={confirmCheck}
+            onSet={(cc) => { setConfirmCheck(cc); markDirty(); }}
+            onReload={reload}
+            onInspect={openInspect}
+          />
 
           <div style={{
             display: "flex", alignItems: "center", gap: 10,
@@ -484,15 +514,9 @@ export default function Playbook({
             />
           ))}
 
-          {steps.length === 0 && mode === "run" && (
-            <div style={{
-              marginTop: 30, padding: "32px 18px", textAlign: "center",
-              border: "1px dashed var(--line-strong)", borderRadius: 10,
-              color: "var(--ink-3)", fontSize: 13,
-            }}>
-              這個 skill 還沒有任何 step — 請先在 Author 模式新增。
-            </div>
-          )}
+          {/* Phase 11 v12 — removed the「請先在 Author 模式新增」hint that
+              contradicted v10's mode-unification. AddStep is below and works
+              in both modes; there's no Author-only path anymore. */}
 
           {/* Phase 11 v10 — AddStep available in BOTH modes (per user
               feedback: 兩個 mode 的功能應該一致 — operator 在 Execute 時
@@ -2089,10 +2113,40 @@ function ConfirmSection({
   // of running silent AI translation. The Builder hosts Glass Box + manual
   // editing; on Confirm it POSTs back to /bind-pipeline which updates the
   // skill's confirm_check. We refresh on window focus to pick up the bind.
+  //
+  // Phase 11 v12: persist the description to DB BEFORE opening Builder so
+  // if user just presses Save (not Done) in Builder and comes back, the
+  // c1 prose is preserved (otherwise reload-on-focus wipes the local draft
+  // — user reported「按 save 後回來 skill 的設定頁面，它被清空了」).
   const openInBuilder = async (text: string, slot: string = "confirm") => {
     if (!text.trim() && slot === "confirm") return;
     setBusy(true); setError(null);
     try {
+      // Pre-save the c1 description so the prose survives if user never
+      // hits "Done — bind to Skill" in Builder. We keep pipeline_id from
+      // any existing confirmCheck (refine path) or set null (fresh build).
+      if (slot === "confirm") {
+        const existingPid = confirmCheck?.pipeline_id ?? null;
+        const cc = {
+          description: text,
+          ai_summary: confirmCheck?.ai_summary ?? "",
+          pipeline_id: existingPid,
+          must_pass: true,
+        };
+        const putRes = await fetch(`/api/skill-documents/${encodeURIComponent(slug)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ confirm_check: JSON.stringify(cc) }),
+        });
+        if (!putRes.ok) {
+          const ej = await putRes.json().catch(() => ({}));
+          throw new Error(`存 c1 描述失敗 (HTTP ${putRes.status}) — ` + (ej?.error?.message ?? ""));
+        }
+        // Tell parent to refresh local state from DB so the C1 card renders
+        // immediately (otherwise it appears only after window-focus reload).
+        onSet(cc);
+      }
+
       const r = await fetch(
         `/api/skill-documents/${encodeURIComponent(slug)}/builder-url?`
         + `slot=${encodeURIComponent(slot)}`
@@ -2256,8 +2310,8 @@ function ConfirmSection({
           }}
         >— remove last confirmation step</button>
       )}
-      {/* Original empty-author input (kept verbatim) */}
-      {!confirmCheck && mode === "author" ? (
+      {/* Phase 11 v12 — empty-c1 input visible in BOTH modes (mode parity) */}
+      {!confirmCheck ? (
         <div style={{
           display: "flex", alignItems: "center", gap: 14,
           padding: "14px 0", borderTop: "1px dashed var(--line)",
