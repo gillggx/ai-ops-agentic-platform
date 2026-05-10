@@ -141,10 +141,16 @@ def _detect_bar_x_axis(
     msg: str, declared: set[str], snap: dict[str, Any],
 ) -> Dimension | None:
     """User wants bar chart but didn't pin the x-axis dimension.
-    Common confusions: 各機台 vs 各 param vs 各時間段."""
+    Common confusions: 各機台 vs 各 APC param vs 各 APC instance vs 各時間段.
+
+    by_param vs by_apc_instance is THE distinction users always miss:
+    - by_param   = bar per APC parameter (etch_time_offset, rf_power_bias…)
+                   → degenerate for OOC count (every event has all params)
+    - by_apc_instance = bar per APC model (APC-001, APC-009…)
+                   → what user actually wants for "哪個 APC 觸發 OOC"
+    """
     if not any(tok.lower() in msg.lower() for tok in _BAR_TOKENS):
         return None
-    # If user says "各機台 bar chart" — x-axis is implicit (toolID)
     explicit_x = (
         any(tok in msg for tok in _MULTI_TOOL_TOKENS) or
         "各 param" in msg or "各參數" in msg or
@@ -156,6 +162,7 @@ def _detect_bar_x_axis(
         dimension="bar_x_axis",
         options=[
             Option(value="by_machine"),
+            Option(value="by_apc_instance"),
             Option(value="by_param"),
             Option(value="by_time"),
         ],
@@ -288,7 +295,8 @@ _OPTION_HINT = {
     ("metric", "fdc"): "filter event_type=FDC on raw process_history",
     ("metric", "all"): "process each family then union",
     ("bar_x_axis", "by_machine"): "x=toolID — needs cross-machine source",
-    ("bar_x_axis", "by_param"): "x=param_name (APC) or chart_name (SPC), needs long_form",
+    ("bar_x_axis", "by_apc_instance"): "x=apc_id (APC-001/APC-009/…) — direct from process_history, no long_form needed",
+    ("bar_x_axis", "by_param"): "x=param_name (APC param sensors) or chart_name (SPC), needs long_form. ⚠ for OOC count this is degenerate (all bars same height — every event has all params)",
     ("bar_x_axis", "by_time"): "x=hour_bucket / day_bucket, needs time groupby",
     ("time_grain", "raw_events"): "one row per event",
     ("time_grain", "hourly"): "groupby hour",
@@ -418,8 +426,14 @@ _RESOLUTION_GOAL_HINTS: dict[tuple[str, str], str] = {
 
     ("bar_x_axis", "by_machine"):
         "（user 確認 x 軸=各機台）bar chart x=toolID — 注意 source process_history **不能** filter $tool_id 否則只剩一根 bar",
+    ("bar_x_axis", "by_apc_instance"):
+        "（user 確認 x 軸=各 APC instance）bar chart x=apc_id（值如 APC-001/APC-009）— "
+        "**不需要 apc_long_form**，直接 process_history → filter spc_status=OOC → "
+        "groupby_agg(group_by='apc_id', agg_column='lotID', agg_func='count') → bar_chart(x='apc_id')",
     ("bar_x_axis", "by_param"):
-        "（user 確認 x 軸=各 parameter）bar chart x=param_name (APC) 或 chart_name (SPC)，必先用 long_form block",
+        "（user 確認 x 軸=各 APC sensor parameter）bar chart x=param_name (APC) 或 chart_name (SPC)，必先用 long_form block。"
+        "⚠ 對「OOC count」這種統計，by_param 結果會是 degenerate（每 bar 高度相同）— 因為每個 event 都帶全部 ~20 個 APC params。"
+        "如果 user 想看「哪個 APC 模型觸發 OOC」應該用 by_apc_instance。",
     ("bar_x_axis", "by_time"):
         "（user 確認 x 軸=時間）bar chart x=hour_bucket 或 day_bucket，需先用 groupby_agg by time bucket",
 
