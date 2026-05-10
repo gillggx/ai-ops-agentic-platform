@@ -554,17 +554,37 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
           zIndex: 5,
         }}
       >
-        {mode !== "session" && (
-          <>
-            <button
-              onClick={() => router.push("/admin/pipeline-builder")}
-              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#4F46E5", padding: 0 }}
-            >
-              ← List
-            </button>
-            <span style={{ color: "#CBD5E1" }}>/</span>
-          </>
-        )}
+        {mode !== "session" && (() => {
+          // Phase 11 v6 — when launched from a Skill (sessionStorage ctx),
+          // the back link should return to the parent Skill detail page,
+          // not the (now-redirected) Pipeline Builder list. Read the ctx
+          // here instead of importing SkillEmbedBanner to avoid a cycle.
+          let backHref = "/admin/pipeline-builder";
+          let backLabel = "← List";
+          if (typeof window !== "undefined") {
+            try {
+              const raw = sessionStorage.getItem("pb:skill_embed_ctx");
+              if (raw) {
+                const ctx = JSON.parse(raw) as { skill_slug?: string };
+                if (ctx?.skill_slug) {
+                  backHref = `/skills/${encodeURIComponent(ctx.skill_slug)}/edit`;
+                  backLabel = `← back to Skill`;
+                }
+              }
+            } catch { /* ignore */ }
+          }
+          return (
+            <>
+              <button
+                onClick={() => router.push(backHref)}
+                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#4F46E5", padding: 0 }}
+              >
+                {backLabel}
+              </button>
+              <span style={{ color: "#CBD5E1" }}>/</span>
+            </>
+          );
+        })()}
         {mode === "session" && (
           <>
             <button

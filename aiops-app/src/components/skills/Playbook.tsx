@@ -799,12 +799,52 @@ function StepBlock({
               </span>
               <Icon.Chevron/>
             </button>
+
+            {/* Phase 11 v6 — actions are available in BOTH modes (per spec:
+                Execute = same actions + extra views). Author hides views;
+                here we keep both views (canvas mini below) AND the action
+                menu so an operator can still Refine / Inspect / etc. */}
+            {hasPipeline && (
+              <StepActionMenu items={[
+                { label: "Refine in Pipeline Builder", icon: <Icon.Spark/>,
+                  onClick: () => onOpenInBuilder(step.text) },
+                { label: "Inspect blocks ↗", icon: <Icon.Pencil/>,
+                  onClick: () => window.open(`/admin/pipeline-builder/${step.pipeline_id}`, "_blank", "noopener") },
+                { label: actionsExpanded ? "Hide suggested actions" : `Suggested actions (${actionsCount})`,
+                  icon: <Icon.Spark/>, onClick: onActionsExpand },
+                { label: "Remove step", icon: <Icon.X/>, danger: true, onClick: onRemove },
+              ]}/>
+            )}
+            {!hasPipeline && (
+              <button
+                onClick={() => onOpenInBuilder(step.text)}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 5,
+                  padding: "5px 11px", borderRadius: 6,
+                  background: "var(--ai)", color: "#fff",
+                  border: "none", cursor: "pointer",
+                  fontSize: 12, fontWeight: 500,
+                }}>
+                <Icon.Spark/> Build →
+              </button>
+            )}
           </div>
 
           {expanded && (
             <ExpandedPipeline
               step={step}
               isRunning={isRunning}
+            />
+          )}
+
+          {/* Phase 11 v6 — Suggested actions editor in Execute mode too
+              (operator can record action notes during a run / triage).
+              Same toggle as Author's ⋯ menu item. */}
+          {actionsExpanded && (
+            <SuggestedActionsEditor
+              actions={step.suggested_actions ?? []}
+              onChange={onActionsChange}
+              onClose={onActionsExpand}
             />
           )}
 
@@ -1411,22 +1451,42 @@ function ConfirmSection({
           gap: 14, alignItems: "start",
           padding: "14px 16px", borderRadius: 8,
           background: "var(--surface)",
-          border: "1px solid var(--ai-bg)",
-          borderLeft: "3px solid var(--ai)",
+          // Phase 11 v6 — visually flag stale state when pipeline_id is null
+          // (description survives but underlying pipeline was deleted). The
+          // C1 card shows orange-ish so user knows it isn't a complete slot
+          // and the action becomes "Build" not "Refine".
+          border: confirmCheck.pipeline_id == null
+            ? "1px solid #FDE68A"
+            : "1px solid var(--ai-bg)",
+          borderLeft: confirmCheck.pipeline_id == null
+            ? "3px solid #D97706"
+            : "3px solid var(--ai)",
         }}>
           <span className="mono" style={{
-            fontSize: 11, color: "var(--ai)",
-            background: "var(--ai-bg)", padding: "3px 8px", borderRadius: 4,
+            fontSize: 11,
+            color: confirmCheck.pipeline_id == null ? "#92400E" : "var(--ai)",
+            background: confirmCheck.pipeline_id == null ? "#FEF3C7" : "var(--ai-bg)",
+            padding: "3px 8px", borderRadius: 4,
             whiteSpace: "nowrap",
           }}>C1</span>
           <div>
             <div style={{ fontSize: 14, color: "var(--ink)", fontWeight: 500 }}>
               {confirmCheck.description}
             </div>
-            {/* Phase 11 v5 — AI summary, Inspect link, Pending badges
-                are Execute-only. Author mode hides these to keep the prose
-                row clean; actions live in the trailing ⋯ menu. */}
-            {mode === "run" && confirmCheck.ai_summary && (
+            {/* Phase 11 v6 — stale flag: pipeline_id null but description
+                exists. Tells user the slot needs rebuild before run/test. */}
+            {confirmCheck.pipeline_id == null && (
+              <div style={{
+                marginTop: 6, fontSize: 11.5, color: "#92400E",
+                display: "inline-flex", alignItems: "center", gap: 6,
+              }}>
+                ⚠ underlying pipeline was deleted — click <strong>Build</strong> to rebuild from this description
+              </div>
+            )}
+            {/* AI summary, Inspect link, Pending badges are Execute-only.
+                Author mode hides these to keep the prose row clean; actions
+                live in the trailing ⋯ menu. */}
+            {mode === "run" && confirmCheck.ai_summary && confirmCheck.pipeline_id != null && (
               <div style={{
                 marginTop: 6, fontSize: 12, color: "var(--ink-3)",
                 display: "inline-flex", alignItems: "center", gap: 6,
@@ -1452,14 +1512,28 @@ function ConfirmSection({
             )}
             {error && <div style={{ marginTop: 6, fontSize: 11, color: "var(--fail)" }}>⚠ {error}</div>}
           </div>
-          {mode === "author" && (
+          {/* Phase 11 v6 — actions row: stale → big yellow Build CTA;
+              healthy → ⋯ menu (Refine/Inspect/Remove). */}
+          {confirmCheck.pipeline_id == null ? (
+            <button
+              onClick={() => void openInBuilder(confirmCheck.description, "confirm")}
+              disabled={busy}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 5,
+                padding: "5px 11px", borderRadius: 6,
+                background: "#D97706", color: "#fff",
+                border: "none", cursor: busy ? "wait" : "pointer",
+                fontSize: 12, fontWeight: 500,
+                whiteSpace: "nowrap",
+              }}>
+              <Icon.Spark/> Build →
+            </button>
+          ) : (
             <StepActionMenu items={[
               { label: "Refine in Pipeline Builder", icon: <Icon.Spark/>,
                 onClick: () => void openInBuilder(confirmCheck.description, "confirm") },
-              ...(confirmCheck.pipeline_id != null
-                ? [{ label: "Inspect blocks ↗", icon: <Icon.Pencil/>,
-                    onClick: () => window.open(`/admin/pipeline-builder/${confirmCheck.pipeline_id}`, "_blank", "noopener") }]
-                : []),
+              { label: "Inspect blocks ↗", icon: <Icon.Pencil/>,
+                onClick: () => window.open(`/admin/pipeline-builder/${confirmCheck.pipeline_id}`, "_blank", "noopener") },
               { label: "Remove confirmation step", icon: <Icon.X/>, danger: true,
                 onClick: () => void removeStep() },
             ]}/>

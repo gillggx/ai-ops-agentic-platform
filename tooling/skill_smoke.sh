@@ -167,8 +167,19 @@ assert_eq "$FAKE_PID" "$CC_PID2" "pipeline_id unchanged after refine bind"
 NUM_PIPES=$(psql $PG_DSN -tAc "SELECT COUNT(*) FROM pb_pipelines WHERE parent_skill_doc_id=$SKILL_ID" | tr -d ' ')
 assert_eq "1" "$NUM_PIPES" "exactly 1 pipeline owned by skill (no version chain orphan)"
 
-# ── 8. Done ───────────────────────────────────────────────────────────
-green "[8/8] all assertions passed"
+# ── 8. Dangling pipeline ref → builder-url should fall back to /new ──
+blue "[8/9] orphan pb_pipelines row, then GET /builder-url same slot"
+psql $PG_DSN -c "DELETE FROM pb_pipelines WHERE id=$FAKE_PID" >/dev/null
+RESP3=$(curl -sf -G "$JAVA_BASE/api/v1/skill-documents/$SLUG/builder-url" \
+  -H "$AH" --data-urlencode "slot=confirm" --data-urlencode "instruction=after orphan")
+URL3=$(echo "$RESP3" | jq -r .data.builder_url)
+assert_match "^/admin/pipeline-builder/new\?" "$URL3" "dangling ref → URL falls back to /new"
+[[ ! "$URL3" =~ existing_pipeline_id ]] && green "  ✓ no existing_pipeline_id in URL (correct: ref was orphaned)" || { red "✗ stale existing_pipeline_id leaked"; exit 1; }
+# Mark FAKE_PID consumed so cleanup trap doesn't try to verify FK CASCADE.
+unset FAKE_PID
+
+# ── 9. Done ───────────────────────────────────────────────────────────
+green "[9/9] all assertions passed"
 echo
 green "┌─────────────────────────────────────────────┐"
 green "│  Skill → Builder → Bind → Refine OK ✓        │"

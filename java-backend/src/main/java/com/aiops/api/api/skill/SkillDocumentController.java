@@ -650,12 +650,12 @@ public class SkillDocumentController {
      */
     @SuppressWarnings("unchecked")
     private Long lookupSlotPipelineId(SkillDocumentEntity skill, String slot) {
+        Long candidate = null;
         if ("confirm".equals(slot)) {
             Map<String, Object> cc = parseJson(skill.getConfirmCheck());
             Object pid = cc.get("pipeline_id");
-            return pid instanceof Number n ? n.longValue() : null;
-        }
-        if (slot.startsWith("step:") && !"step:NEW".equalsIgnoreCase(slot)) {
+            candidate = (pid instanceof Number n) ? n.longValue() : null;
+        } else if (slot.startsWith("step:") && !"step:NEW".equalsIgnoreCase(slot)) {
             String stepId = slot.substring("step:".length());
             try {
                 List<Map<String, Object>> stepsList = mapper.readValue(
@@ -664,12 +664,23 @@ public class SkillDocumentController {
                 for (Map<String, Object> s : stepsList) {
                     if (stepId.equals(String.valueOf(s.get("id")))) {
                         Object pid = s.get("pipeline_id");
-                        return pid instanceof Number n ? n.longValue() : null;
+                        candidate = (pid instanceof Number n) ? n.longValue() : null;
+                        break;
                     }
                 }
             } catch (Exception ignored) {}
         }
-        return null;
+        // Phase 11 v6 — verify the pipeline still exists. JSON refs on
+        // skill_documents don't have a pg-managed FK, so out-of-band deletes
+        // (V26 cleanup, manual psql, race) can leave dangling ids. Returning
+        // null here lets builder-url fall back to /new + lets the UI show the
+        // C1 / step card as "needs rebuild" rather than chasing a 404.
+        if (candidate != null && !pipelineRepo.existsById(candidate)) {
+            log.info("skill {} slot {} ref pipeline {} no longer exists — treating as unbound",
+                    skill.getSlug(), slot, candidate);
+            return null;
+        }
+        return candidate;
     }
 
     /**
