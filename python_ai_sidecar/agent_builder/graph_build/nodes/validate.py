@@ -347,6 +347,18 @@ def _check_op_order_and_column_refs(
     return errors
 
 
+# Phase 11 v14: blocks where a key normally in COLUMN_REF_KEYS is actually
+# the OUTPUT column name (not a ref to upstream). For these, skip the
+# upstream-existence check on that key.
+#   block_compute.column        : new column to add (output)
+#   block_groupby_agg.agg_column : new aggregated column name (output)
+#                                  but `group_by` IS an upstream ref
+_OUTPUT_COLUMN_KEYS_BY_BLOCK: dict[str, set[str]] = {
+    "block_compute": {"column"},
+    "block_groupby_agg": {"agg_column"},
+}
+
+
 def _final_column_ref_check(
     pipeline: PipelineJSON,
     registry: SeedlessBlockRegistry,
@@ -358,9 +370,12 @@ def _final_column_ref_check(
     for node in pipeline.nodes:
         if not node.params:
             continue
+        skip_keys = _OUTPUT_COLUMN_KEYS_BY_BLOCK.get(node.block_id, set())
         for key, value in node.params.items():
             if key not in COLUMN_REF_KEYS:
                 continue
+            if key in skip_keys:
+                continue  # this param NAMES an output column, not an upstream ref
             try:
                 upstream_cols = _resolve_upstream_cols(pipeline, node.id, registry)
             except Exception:  # noqa: BLE001
