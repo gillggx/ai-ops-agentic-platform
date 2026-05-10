@@ -1064,7 +1064,16 @@ def _blocks() -> list[dict[str, Any]]:
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "data", "type": "dataframe"}],
             "param_schema": {"type": "object", "properties": {}},
-            "output_columns_hint": ["chart_name", "value", "ucl", "lcl", "is_ooc"],
+            # Phase 11 v14: include passthrough cols (process_history fields
+            # that survive the reshape). Was missing → validate column-ref
+            # check showed only 5 cols and might cause false positives if
+            # downstream uses one of the passthrough fields. Keep order:
+            # passthrough first (matches actual execution output).
+            "output_columns_hint": [
+                "eventTime", "toolID", "lotID", "step",
+                "spc_status", "fdc_classification",
+                "chart_name", "value", "ucl", "lcl", "is_ooc",
+            ],
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.spc_long_form:SpcLongFormBlockExecutor"},
         },
         {

@@ -331,7 +331,100 @@ def _check_op_order_and_column_refs(
 
             _apply_set_param(transient, op.node_id, key, value)
 
+    # Phase 11 v14 — FINAL-PASS column-ref recheck. Walks every node in
+    # the now-built transient pipeline and verifies that every COLUMN_REF
+    # param resolves to a column that actually exists in the current
+    # upstream output. Catches the case where the LLM put a column-ref
+    # directly in `add_node params={...}` (Pass 3 only walks set_param ops),
+    # or where a connect was rewired AFTER the original set_param.
+    #
+    # User-reported bug: step_check.column='ooc_count' with step_check
+    # wired to spc_long_form (no ooc_count) — got past validate, fired
+    # at runtime.
+    final_errors = _final_column_ref_check(transient, registry)
+    errors.extend(final_errors)
+
     return errors
+
+
+def _final_column_ref_check(
+    pipeline: PipelineJSON,
+    registry: SeedlessBlockRegistry,
+) -> list[str]:
+    """Re-check every column-ref param against the final transient pipeline
+    state. Catches refs left behind in add_node's initial params (Pass 3
+    only checks set_param ops) and refs invalidated by later rewiring."""
+    errors: list[str] = []
+    for node in pipeline.nodes:
+        if not node.params:
+            continue
+        for key, value in node.params.items():
+            if key not in COLUMN_REF_KEYS:
+                continue
+            try:
+                upstream_cols = _resolve_upstream_cols(pipeline, node.id, registry)
+            except Exception:  # noqa: BLE001
+                continue  # fail-open
+            if upstream_cols is None:
+                continue  # fail-open (multi-port etc.)
+            bad: list[str] = []
+            if isinstance(value, list):
+                bad = [v for v in value if isinstance(v, str) and v not in upstream_cols]
+            elif isinstance(value, str):
+                if value and not value.startswith("$") and value not in upstream_cols:
+                    bad = [value]
+            if not bad:
+                continue
+            preview = upstream_cols[:8]
+            more = "" if len(upstream_cols) <= 8 else f"…+{len(upstream_cols)-8}"
+            # Producer hint — find a node in the pipeline whose declared
+            # output_columns_hint contains the missing column. Lets the LLM
+            # rewire instead of guessing.
+            hint = _find_producer_hint(pipeline, registry, bad)
+            errors.append(
+                f"node '{node.id}' ({node.block_id}): {key}={bad!r} not in upstream "
+                f"columns. Available: {preview}{more}.{hint}"
+            )
+    return errors
+
+
+def _find_producer_hint(
+    pipeline: PipelineJSON,
+    registry: SeedlessBlockRegistry,
+    missing_cols: list[str],
+) -> str:
+    """Scan the transient pipeline for nodes whose output COULD contain any
+    of the missing column names. Returns a short hint string for repair_plan
+    or empty string if no candidate found.
+
+    Looks at:
+      1. block's output_columns_hint (static cols declared in seed.py)
+      2. block_compute / block_groupby_agg : `column` / `agg_column` param
+         is the dynamically-added column name
+    """
+    candidates: list[tuple[str, str]] = []  # (node_id, why)
+    for node in pipeline.nodes:
+        spec = registry.get_spec(node.block_id, node.block_version) or {}
+        # 1. static hint
+        for hint_col in (spec.get("output_columns_hint") or []):
+            name = hint_col.get("name") if isinstance(hint_col, dict) else hint_col
+            if name in missing_cols:
+                candidates.append((node.id, f"{node.block_id} declares '{name}'"))
+                break
+        # 2. dynamic add (compute / groupby_agg name a new column via params)
+        params = node.params or {}
+        added_col = None
+        if node.block_id == "block_compute":
+            added_col = params.get("column")
+        elif node.block_id == "block_groupby_agg":
+            added_col = params.get("agg_column") or params.get("column")
+        if added_col and added_col in missing_cols:
+            candidates.append((node.id, f"{node.block_id} adds '{added_col}' via params"))
+
+    if not candidates:
+        return " (no node in this plan produces this column — add a block_compute or block_groupby_agg upstream)"
+    nodes_list = ", ".join(f"{nid} ({why})" for nid, why in candidates[:3])
+    return f" — try connecting from: {nodes_list}"
 
 
 def _empty_pipeline() -> PipelineJSON:
