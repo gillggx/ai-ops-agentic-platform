@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, Dict, List
 from langchain_core.runnables import RunnableConfig
 
@@ -109,6 +110,95 @@ async def _execute_build_pipeline(
     }
 
 
+# ── Phase 11 v18: chat-injected notes scrubber ───────────────────────
+#
+# The chat orchestrator's LLM auto-fills `notes` when calling
+# build_pipeline_live, often pulling from active_alarms / context snapshot.
+# That content frequently contradicts the user's actual instruction
+# (e.g. user said「用 $tool_id parametric」but chat agent appended
+# 「當前告警涉及 EQP-09 / EQP-03，需對各機台分別查詢」).
+#
+# This helper applies deterministic filters on `notes` BEFORE it reaches
+# the inner builder. Two layers:
+#   (1) Drop lines containing literal tool/lot/step IDs IF the canvas
+#       already has a declared input of the same role (so $tool_id is
+#       respected, not overridden).
+#   (2) Drop lines that prescribe a specific block_X to use OR contain
+#       structural directives like「需對各機台分別查詢」— those are
+#       builder's responsibility.
+#
+# Conservative — only matches well-known patterns. User's legitimate
+# qualitative notes (time-range, qualitative filter) pass through.
+
+_LITERAL_ID_PATTERNS = [
+    # role  -> regex to detect literal IDs of that kind
+    ("tool_id",     re.compile(r"\bEQP-\d+\b", re.IGNORECASE)),
+    ("equipment_id", re.compile(r"\bEQP-\d+\b", re.IGNORECASE)),
+    ("lot_id",      re.compile(r"\bLOT-\d+\b", re.IGNORECASE)),
+    ("step",        re.compile(r"\bSTEP_\d+\b", re.IGNORECASE)),
+    ("chamber_id",  re.compile(r"\bCH-[A-Z0-9]+\b", re.IGNORECASE)),
+    ("recipe_id",   re.compile(r"\bRECIPE-[A-Z0-9-]+\b", re.IGNORECASE)),
+]
+
+_BLOCK_REC_RE = re.compile(r"\bblock_[a-z_][a-z0-9_]*\b", re.IGNORECASE)
+_DIRECTIVE_PATTERNS = [
+    re.compile(r"需對各機台.*?查詢"),
+    re.compile(r"分別查詢"),
+    re.compile(r"預期用\s*block_"),
+    re.compile(r"建議用\s*block_"),
+    re.compile(r"應該用\s*block_"),
+    re.compile(r"請用\s*block_"),
+]
+
+
+def _scrub_chat_notes(notes: str, base_pipeline: dict | None) -> tuple[str, list[str]]:
+    """Filter chat-injected notes against canvas-declared inputs + structural
+    directives. Returns (scrubbed_notes, dropped_lines). When notes is empty
+    or no filters trigger, returns the input unchanged."""
+    if not notes:
+        return notes, []
+    declared_names: set[str] = set()
+    if isinstance(base_pipeline, dict):
+        for inp in (base_pipeline.get("inputs") or []):
+            if isinstance(inp, dict):
+                nm = inp.get("name")
+                if nm:
+                    declared_names.add(nm)
+
+    kept: list[str] = []
+    dropped: list[str] = []
+    for raw_line in notes.splitlines():
+        line = raw_line.rstrip()
+        if not line.strip():
+            kept.append(line)
+            continue
+        drop_reason = None
+
+        # (1) literal IDs that conflict with declared inputs
+        for role, pat in _LITERAL_ID_PATTERNS:
+            if role in declared_names and pat.search(line):
+                drop_reason = f"literal {role} conflicts with declared $name"
+                break
+
+        # (2) explicit block prescription
+        if drop_reason is None and _BLOCK_REC_RE.search(line):
+            drop_reason = "prescribes specific block_X (builder decides)"
+
+        # (3) structural directives
+        if drop_reason is None:
+            for pat in _DIRECTIVE_PATTERNS:
+                if pat.search(line):
+                    drop_reason = "structural directive (builder decides)"
+                    break
+
+        if drop_reason:
+            dropped.append(f"{line}    # dropped: {drop_reason}")
+        else:
+            kept.append(line)
+
+    return "\n".join(kept).strip(), dropped
+
+
 async def _execute_build_pipeline_live(
     db: Any,
     tool_input: Dict[str, Any],
@@ -143,7 +233,6 @@ async def _execute_build_pipeline_live(
     skill_step_mode = bool(tool_input.get("_skill_step_mode"))
     if not goal:
         return {"status": "validation_error", "error_message": "goal is required"}
-    prompt = goal if not notes else f"{goal}\n\n補充 context:\n{notes}"
 
     # ── Resolve base pipeline ─────────────────────────────────────────
     # Same precedence as before: explicit base_pipeline_id (Java DB lookup) >
@@ -182,6 +271,24 @@ async def _execute_build_pipeline_live(
 
     logger.info("build_pipeline_live: base=%s, show_plan=%s, goal=%r",
                 base_source, show_plan, goal[:80])
+
+    # ── Phase 11 v18: deterministic notes filter ──────────────────────
+    # Strip auto-generated chat-context that conflicts with user intent
+    # (literal tool/lot/step IDs that override declared $name parametric
+    # inputs; specific block recommendations that override builder's choice;
+    # 「需對各機台分別查詢」-style structural directives). Per CLAUDE.md
+    # 「flow 由 graph 決定」: chat agent's free interpretation is bounded
+    # by this graph-level filter, not by prompt rules alone.
+    filtered_notes, dropped_lines = _scrub_chat_notes(notes, base_pipeline_dict)
+    if dropped_lines:
+        logger.info("notes_filter: dropped %d line(s) %r", len(dropped_lines), dropped_lines)
+        # Audit trail: the trace's plan_node entry will show the FINAL
+        # prompt (post-scrub). This logger.info gives the diff for
+        # journalctl correlation. (Tracer instance is created later
+        # inside stream_graph_build, so we don't have a direct handle.)
+        logger.info("notes_filter raw=%r filtered=%r dropped=%r",
+                    notes, filtered_notes, dropped_lines)
+    prompt = goal if not filtered_notes else f"{goal}\n\n補充 context:\n{filtered_notes}"
 
     # ── show_plan path: dry-run, no mutation, no SSE ──────────────────
     if show_plan:

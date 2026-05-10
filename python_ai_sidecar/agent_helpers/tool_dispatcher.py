@@ -131,7 +131,18 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
                 },
                 "notes": {
                     "type": "string",
-                    "description": "選填的額外 context，例如已知的機台/批次/時間範圍 filter",
+                    "description": (
+                        "選填的額外 context。**只能放 user 講過的話**裡 builder 還用得到的部分，"
+                        "**不要**自己腦補加東西進來。\n\n"
+                        "✗ 不要塞具體 tool/lot/step ID（如 EQP-09、STEP_008、LOT-1234）—\n"
+                        "  若 canvas 已宣告 $tool_id / $lot_id / $step input，builder 會自己用 parametric ref；\n"
+                        "  你塞進來反而誤導它 hardcode 特定值。\n"
+                        "✗ 不要指定要用哪個 block（如『預期用 block_consecutive_rule』）— builder 自己選。\n"
+                        "✗ 不要塞『需對各機台分別查詢』這類結構性指示 — builder 自決。\n"
+                        "✗ 不要塞 active alarm 的內容當 context — alarm 跟 build pipeline 是兩件事。\n\n"
+                        "✓ 可以放：user 真的講過的 time-range（『過去 24h』）、qualitative filter（『排除 dev tool』）、\n"
+                        "  user 解釋的 domain term（『xbar 是 SPC 的 X-bar chart』）。"
+                    ),
                 },
                 "base_pipeline_id": {
                     "type": "integer",
