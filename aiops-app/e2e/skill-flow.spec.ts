@@ -73,16 +73,26 @@ test.describe("Skill flow — full GUI with real agent", () => {
       console.log("[3/8] popup opened", builderTab.url().slice(0, 80));
 
       // ── 4. Wait for AIAgentPanel to auto-fire prompt + build canvas ──
-      // SkillEmbedBanner should be visible
+      builderTab.on("dialog", (d) => d.dismiss().catch(() => {}));
       await expect(builderTab.locator("text=Building CONFIRM")).toBeVisible({ timeout: 15_000 });
-      // Agent panel mounts; auto-fired prompt → SSE → canvas nodes appear.
-      // Poll for at least 2 nodes (a source block + block_step_check).
       console.log("    waiting for Glass Box agent to build canvas (up to 90s)…");
-      await builderTab.waitForFunction(
-        () => document.querySelectorAll(".react-flow__node").length >= 2,
-        null,
-        { timeout: 90_000, polling: 2000 },
-      );
+      try {
+        await builderTab.waitForFunction(
+          () => document.querySelectorAll(".react-flow__node").length >= 2,
+          null,
+          { timeout: 90_000, polling: 2000 },
+        );
+      } catch (e) {
+        // Diagnostic: snapshot what the agent left on screen so we can debug
+        // out-of-band. Common fail: skill_step_mode not propagated, agent
+        // ends up building chart/alert pipeline instead of step_check.
+        await builderTab.screenshot({ path: "playwright-report/agent-timeout-builder-tab.png", fullPage: true });
+        const agentText = await builderTab.locator('[data-testid="agent-panel"], aside, [class*="AIAgent"]').first().innerText().catch(() => "(no agent panel found)");
+        console.log("AGENT PANEL CONTENT (first 800 chars):\n" + agentText.slice(0, 800));
+        const canvasText = await builderTab.locator('main, .react-flow').first().innerText().catch(() => "(no canvas)");
+        console.log("CANVAS CONTENT (first 400 chars):\n" + canvasText.slice(0, 400));
+        throw e;
+      }
       const nodeCount = await builderTab.locator(".react-flow__node").count();
       console.log(`[4/8] agent built ${nodeCount} canvas nodes`);
 
