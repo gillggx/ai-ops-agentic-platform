@@ -261,6 +261,16 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
     current_state_block = await _build_current_state_block(
         java, client_context, mode=mode,
     )
+
+    # Phase 1 (V32, 2026-05-11) — Agent Knowledge integration.
+    #   1. Lexicon: rewrite user_message inline so jargon (「打點」) gets a
+    #      standard-term gloss the LLM understands. Done early so the
+    #      enriched_user_message below also benefits.
+    #   2. Directives: surface user-owned prompt rules as a dedicated block
+    #      appended to system_text after Soul + output_routing_rules.
+    #   3. Knowledge / Examples (Phase 2): RAG-based retrieval embeds the
+    #      user message + queries pgvector for top-K relevant rows.
+    user_message = await _maybe_apply_lexicon(java, user_id, user_message)
     enriched_user_message = (
         f"{current_state_block}\n\n{user_message}" if current_state_block else user_message
     )
@@ -484,11 +494,41 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
                 )
             system_text += "\n" + "\n".join(lines) + "\n"
 
+    # Phase 1+2 (V32, 2026-05-11): inject Agent Knowledge surfaces.
+    # Order matters — directives are MUST-DO rules so they go first; knowledge
+    # is supporting context (top-3 RAG); examples are few-shot last so the
+    # model sees them as the most-recent style guide.
+    scope_skill = (client_context or {}).get("skill_slug")
+    scope_tool  = (client_context or {}).get("selected_equipment_id")
+    scope_recipe = (client_context or {}).get("recipe_id")
+
+    directives_block, fired_directive_ids = await _build_directives_block(
+        java, user_id=user_id, session_id=session_id,
+        skill_slug=scope_skill, tool_id=scope_tool, recipe_id=scope_recipe,
+    )
+    if directives_block:
+        system_text += "\n\n" + directives_block
+
+    knowledge_block = await _build_knowledge_block(
+        java, user_id=user_id, query_text=user_message,
+        skill_slug=scope_skill, tool_id=scope_tool, recipe_id=scope_recipe,
+    )
+    if knowledge_block:
+        system_text += "\n\n" + knowledge_block
+
+    examples_block = await _build_examples_block(
+        java, user_id=user_id, query_text=user_message,
+        skill_slug=scope_skill, tool_id=scope_tool, recipe_id=scope_recipe,
+    )
+    if examples_block:
+        system_text += "\n\n" + examples_block
+
     # Build initial messages: history + current user message (with prepended state)
     messages = list(history_messages) + [HumanMessage(content=enriched_user_message)]
 
     context_meta["history_turns"] = len(history_messages) // 2
     context_meta["cumulative_tokens"] = cumulative_tokens
+    context_meta["fired_directive_ids"] = fired_directive_ids
 
     return {
         "session_id": session_id,
@@ -564,3 +604,186 @@ def _format_age(seconds: int) -> str:
     if seconds < 86400:
         return f"{seconds // 3600}h"
     return f"{seconds // 86400}d"
+
+
+# ── Phase 1+2 (V32, 2026-05-11) — Agent Knowledge integration ─────────
+#
+# Lexicon rewrites the user message inline ("打點" → "打點 (= OOC excursion)")
+# so jargon doesn't trip up the LLM. Directives prepend always-on user rules
+# to the system prompt. Knowledge does pgvector cosine search and surfaces
+# top-K relevant facts. Examples do similarity search on input_text and
+# surface as few-shot pairs.
+#
+# All four are best-effort — Java unreachable / embedding service down →
+# graceful skip with warning, agent still functions without enrichment.
+
+
+async def _maybe_apply_lexicon(
+    java, user_id: int, user_message: str,
+) -> str:
+    """Substring-match jargon terms in the user message + annotate with their
+    standard term. Keeps original wording (so user recognises their own input)
+    + adds "(= STANDARD)" inline so the LLM understands. Bumps `uses` counter
+    fire-and-forget per match. Returns unchanged message on any error."""
+    try:
+        lex = await java.list_lexicon(user_id=user_id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("lexicon fetch failed (%s) — skipping rewrite", e)
+        return user_message
+    if not lex:
+        return user_message
+    out = user_message
+    for entry in lex:
+        term = (entry.get("term") or "").strip()
+        std = (entry.get("standard") or "").strip()
+        if not term or not std or term not in out:
+            continue
+        # Don't double-annotate if already present
+        marker = f"{term} (= {std})"
+        if marker in out:
+            continue
+        out = out.replace(term, marker, 1)  # first occurrence only
+        # fire-and-forget bump
+        try:
+            await java.bump_lexicon_use(lexicon_id=entry["id"])
+        except Exception:  # noqa: BLE001
+            pass
+    return out
+
+
+async def _build_directives_block(
+    java, *, user_id: int, session_id: Optional[str],
+    skill_slug: Optional[str], tool_id: Optional[str], recipe_id: Optional[str],
+) -> tuple[str, list[int]]:
+    """Fetch active directives matching scope + render as a system_text block.
+    Returns (block_text, [directive_ids_fired]). Empty string when none.
+
+    Each fetched directive is recorded as a 'fire' (audit log) so the UI's
+    Recent Triggers panel + uses count stay accurate.
+    """
+    try:
+        rows = await java.list_active_directives(
+            user_id=user_id, skill_slug=skill_slug,
+            tool_id=tool_id, recipe_id=recipe_id, limit=8,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("directives fetch failed (%s) — skipping injection", e)
+        return "", []
+    if not rows:
+        return "", []
+    lines = ["## Active directives（user-owned rules — MUST follow）"]
+    fired_ids: list[int] = []
+    for r in rows:
+        scope = r.get("scope_type", "global")
+        sval = r.get("scope_value")
+        scope_label = scope if not sval else f"{scope}:{sval}"
+        prio = (r.get("priority") or "med").upper()
+        lines.append(f"  - [{prio} · {scope_label}] {r.get('title','')}")
+        body = (r.get("body") or "").strip()
+        if body:
+            lines.append(f"      {body}")
+        rid = r.get("id")
+        if rid is not None:
+            fired_ids.append(int(rid))
+    # Fire-and-forget audit
+    ctx = f"session={session_id}"[:200] if session_id else None
+    for rid in fired_ids:
+        try:
+            await java.record_directive_fire(
+                directive_id=rid, session_id=session_id, context=ctx,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+    return "\n".join(lines), fired_ids
+
+
+def _vec_to_pg_literal(vec: list[float]) -> str:
+    """pgvector accepts '[v1,v2,...]' string literal. Compact format —
+    avoid scientific notation issues by formatting with 6 decimals."""
+    return "[" + ",".join(f"{x:.6f}" for x in vec) + "]"
+
+
+async def _embed_query(text: str) -> Optional[list[float]]:
+    """Generate embedding for a query string using the existing Ollama
+    embedding client. Returns None on failure so callers skip RAG."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    try:
+        from python_ai_sidecar.agent_helpers_native.embedding_client import (
+            get_embedding_client,
+        )
+        client = get_embedding_client()
+        return await client.embed(text)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("query embed failed (%s) — skipping RAG retrieval", e)
+        return None
+
+
+async def _build_knowledge_block(
+    java, *, user_id: int, query_text: str,
+    skill_slug: Optional[str], tool_id: Optional[str], recipe_id: Optional[str],
+) -> str:
+    """RAG: embed query, fetch top-3 most similar knowledge rows, render."""
+    vec = await _embed_query(query_text)
+    if vec is None:
+        return ""
+    try:
+        rows = await java.search_knowledge(
+            user_id=user_id, query_vec_literal=_vec_to_pg_literal(vec),
+            skill_slug=skill_slug, tool_id=tool_id, recipe_id=recipe_id, limit=3,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("knowledge search failed (%s)", e)
+        return ""
+    if not rows:
+        return ""
+    lines = ["## Retrieved domain knowledge（top-3 by relevance）"]
+    for r in rows:
+        scope = r.get("scope_type", "global")
+        sval = r.get("scope_value")
+        scope_label = scope if not sval else f"{scope}:{sval}"
+        prio = (r.get("priority") or "med").upper()
+        lines.append(f"  - [{prio} · {scope_label}] {r.get('title','')}")
+        body = (r.get("body") or "").strip()
+        if body:
+            lines.append(f"      {body}")
+        # Bump usage fire-and-forget
+        rid = r.get("id")
+        if rid is not None:
+            try:
+                await java.bump_knowledge_use(int(rid))
+            except Exception:  # noqa: BLE001
+                pass
+    return "\n".join(lines)
+
+
+async def _build_examples_block(
+    java, *, user_id: int, query_text: str,
+    skill_slug: Optional[str], tool_id: Optional[str], recipe_id: Optional[str],
+) -> str:
+    """Few-shot: top-2 examples whose input_text most resembles current query."""
+    vec = await _embed_query(query_text)
+    if vec is None:
+        return ""
+    try:
+        rows = await java.search_examples(
+            user_id=user_id, query_vec_literal=_vec_to_pg_literal(vec),
+            skill_slug=skill_slug, tool_id=tool_id, recipe_id=recipe_id, limit=2,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("examples search failed (%s)", e)
+        return ""
+    if not rows:
+        return ""
+    lines = ["## Few-shot style examples（reference for response shape）"]
+    for r in rows:
+        title = r.get("title") or "(untitled)"
+        inp = (r.get("input_text") or "").strip()
+        out = (r.get("output_text") or "").strip()
+        lines.append(f"  ── {title} ──")
+        lines.append(f"  USER: {inp}")
+        lines.append(f"  IDEAL RESPONSE:")
+        for ln in out.splitlines():
+            lines.append(f"    {ln}")
+    return "\n".join(lines)

@@ -305,6 +305,113 @@ class JavaAPIClient:
         params = {"userId": user_id, "status": status}
         return await self._get_data("/internal/agent-experience-memories", params=params)
 
+    # ── Agent Knowledge surface (V32, 2026-05-11) ──────────────────────
+    # Per-user prompt directives + lexicon + RAG knowledge + few-shot
+    # examples. context_loader retrieves these to enrich the system prompt
+    # at conversation start.
+
+    async def list_active_directives(
+        self, *, user_id: int,
+        skill_slug: Optional[str] = None,
+        tool_id: Optional[str] = None,
+        recipe_id: Optional[str] = None,
+        limit: int = 8,
+    ) -> list[dict]:
+        params: dict[str, Any] = {"user_id": user_id, "limit": limit}
+        if skill_slug: params["skill_slug"] = skill_slug
+        if tool_id: params["tool_id"] = tool_id
+        if recipe_id: params["recipe_id"] = recipe_id
+        return await self._get_data(
+            "/internal/agent-knowledge/directives/active", params=params,
+        )
+
+    async def record_directive_fire(
+        self, *, directive_id: int,
+        session_id: Optional[str] = None,
+        context: Optional[str] = None,
+    ) -> dict:
+        body = {"session_id": session_id or "", "context": context or ""}
+        return await self._post_data(
+            f"/internal/agent-knowledge/directives/{directive_id}/fire", body,
+        )
+
+    async def list_lexicon(self, *, user_id: int) -> list[dict]:
+        return await self._get_data(
+            "/internal/agent-knowledge/lexicon", params={"user_id": user_id},
+        )
+
+    async def bump_lexicon_use(self, *, lexicon_id: int) -> dict:
+        return await self._post_data(
+            f"/internal/agent-knowledge/lexicon/{lexicon_id}/use", {},
+        )
+
+    async def search_knowledge(
+        self, *, user_id: int, query_vec_literal: str,
+        skill_slug: Optional[str] = None,
+        tool_id: Optional[str] = None,
+        recipe_id: Optional[str] = None,
+        limit: int = 3,
+    ) -> list[dict]:
+        body = {
+            "user_id": user_id,
+            "query_vec": query_vec_literal,   # "[0.1,0.2,...]" pgvector literal
+            "skill_slug": skill_slug,
+            "tool_id": tool_id,
+            "recipe_id": recipe_id,
+            "limit": limit,
+        }
+        return await self._post_data("/internal/agent-knowledge/knowledge/search", body)
+
+    async def search_examples(
+        self, *, user_id: int, query_vec_literal: str,
+        skill_slug: Optional[str] = None,
+        tool_id: Optional[str] = None,
+        recipe_id: Optional[str] = None,
+        limit: int = 2,
+    ) -> list[dict]:
+        body = {
+            "user_id": user_id,
+            "query_vec": query_vec_literal,
+            "skill_slug": skill_slug,
+            "tool_id": tool_id,
+            "recipe_id": recipe_id,
+            "limit": limit,
+        }
+        return await self._post_data("/internal/agent-knowledge/examples/search", body)
+
+    async def put_knowledge_embedding(self, knowledge_id: int, embedding_literal: str) -> dict:
+        env = await self._request(
+            "PUT",
+            f"/internal/agent-knowledge/knowledge/{knowledge_id}/embedding",
+            json={"embedding": embedding_literal},
+        )
+        return env.get("data") if isinstance(env, dict) else env
+
+    async def put_example_embedding(self, example_id: int, embedding_literal: str) -> dict:
+        env = await self._request(
+            "PUT",
+            f"/internal/agent-knowledge/examples/{example_id}/embedding",
+            json={"embedding": embedding_literal},
+        )
+        return env.get("data") if isinstance(env, dict) else env
+
+    async def list_knowledge_missing_embeddings(self, *, limit: int = 20) -> list[dict]:
+        return await self._get_data(
+            "/internal/agent-knowledge/knowledge/missing-embeddings",
+            params={"limit": limit},
+        )
+
+    async def list_examples_missing_embeddings(self, *, limit: int = 20) -> list[dict]:
+        return await self._get_data(
+            "/internal/agent-knowledge/examples/missing-embeddings",
+            params={"limit": limit},
+        )
+
+    async def bump_knowledge_use(self, knowledge_id: int) -> dict:
+        return await self._post_data(
+            f"/internal/agent-knowledge/knowledge/{knowledge_id}/use", {},
+        )
+
     # ── User preference + system parameter ────────────────────────────
 
     async def get_user_preference(self, user_id: int) -> dict:
