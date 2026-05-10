@@ -62,6 +62,14 @@ test.describe("Skill flow — full GUI with real agent", () => {
         context.waitForEvent("page"),
         page.locator('button:has-text("Build →")').first().click(),
       ]);
+      // Phase 11 v6 — surface browser console logs from the popup so
+      // [AIAgentPanel] diagnostic prints land in the Playwright run output.
+      builderTab.on("console", (msg) => {
+        const txt = msg.text();
+        if (txt.includes("AIAgentPanel") || txt.includes("[skill") || txt.includes("auto-fire")) {
+          console.log("    [popup]", msg.type(), txt.slice(0, 200));
+        }
+      });
       await builderTab.waitForLoadState("domcontentloaded");
       // URL should carry embed=skill + instruction. Java URLEncoder uses
       // form encoding (`+` for spaces), so normalise both sides before
