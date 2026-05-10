@@ -83,6 +83,9 @@ SIDECAR_NATIVE_BLOCKS: frozenset[str] = frozenset({
     "block_mcp_call",
     "block_mcp_foreach",
     "block_list_objects",
+    # Phase 11 — Skill step terminator. Aggregates upstream df to a scalar +
+    # compares to threshold; emits {pass, value, note} for SkillRunner.
+    "block_step_check",
 })
 
 
