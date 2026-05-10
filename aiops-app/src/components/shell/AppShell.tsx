@@ -53,21 +53,21 @@ const OPS_ITEMS = [
 ];
 
 const KNOWLEDGE_ITEMS = [
-  // Phase 11 — Skill as Knowledge Document. Authors here write the
-  // playbook (TRIGGER → CONFIRM → CHECKLIST) using natural language;
-  // each step compiles down to a pipeline via the Pipeline Builder.
+  // Phase 11 v6 — Skill Library is the SINGLE knowledge-authoring entry
+  // point. Pipeline Builder is no longer linked from the main nav; it
+  // reachable only via Skill → Build/Refine → embed=skill (see
+  // SkillEmbedBanner). Direct hits to /admin/pipeline-builder redirect
+  // back to /skills.
   { href: "/skills",                  label: "Skill Library",          icon: "📖" },
-  // Option A UX consolidation (2026-04-23): Pipeline Builder is the single
-  // entry point for building & publishing. Auto-Patrols / Auto-Check Rules /
-  // Published Skills are reachable via Admin → Triggers Overview.
-  { href: "/admin/pipeline-builder",  label: "Pipeline Builder",       icon: "🧩" },
   // Chart catalog — 18 chart components catalog + per-user style preference.
   { href: "/help/charts",             label: "Chart Catalog",          icon: "📚" },
 ];
 
 const ADMIN_ITEMS = [
+  // Phase 11 v6: Triggers Overview retained as read-only audit; "Skills"
+  // (Phase 9 chat-skill admin page at /system/skills) is hidden — the
+  // new Skill Library at /skills replaces it.
   { href: "/admin/triggers",          label: "Triggers Overview", icon: "🔔" },
-  { href: "/system/skills",           label: "Skills",            icon: "⚙️" },
   { href: "/admin/memories",          label: "Agent Memory",      icon: "🧠" },
   { href: "/system/data-sources",     label: "Data Sources",      icon: "🗄️" },
   { href: "/system/event-registry",   label: "Event Registry",    icon: "📋" },

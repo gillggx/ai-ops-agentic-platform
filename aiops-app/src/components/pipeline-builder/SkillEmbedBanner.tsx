@@ -23,6 +23,9 @@ export interface SkillEmbedCtx {
   trigger_event?: string;
   target_kind?: "all" | "tools" | "stations";
   target_ids?: string[];
+  /** Phase 11 v6 — set when refining an existing slot's pipeline; banner
+   *  renders as "Refining" and the Done callback updates same row. */
+  existing_pipeline_id?: number;
   /** Inputs we seeded into the pipeline at start time. */
   seeded_input_names?: string[];
 }
@@ -57,6 +60,7 @@ export function bootstrapSkillCtxFromUrl(): SkillEmbedCtx | null {
   const slot = p.get("slot");
   if (!slug || !docId || !slot) return null;
   const trigType = p.get("trigger_type") === "schedule" ? "schedule" : "event";
+  const existingPid = Number(p.get("existing_pipeline_id"));
   const ctx: SkillEmbedCtx = {
     skill_slug: slug,
     skill_doc_id: docId,
@@ -66,6 +70,7 @@ export function bootstrapSkillCtxFromUrl(): SkillEmbedCtx | null {
     trigger_event: p.get("trigger_event") ?? undefined,
     target_kind: (p.get("target_kind") as "all" | "tools" | "stations" | null) ?? undefined,
     target_ids: p.get("target_ids")?.split(",").filter(Boolean),
+    existing_pipeline_id: Number.isFinite(existingPid) && existingPid > 0 ? existingPid : undefined,
   };
   writeSkillCtx(ctx);
   return ctx;
@@ -137,6 +142,11 @@ export default function SkillEmbedBanner({ pipelineId }: { pipelineId?: number |
       ? `event=${ctx.trigger_event ?? "(none)"} (input ← event payload)`
       : `schedule · target=${ctx.target_kind ?? "all"}${ctx.target_ids?.length ? ` (${ctx.target_ids.join(", ")})` : ""}`;
 
+  // Phase 11 v6 — refine vs build mode (banner copy + colour cues).
+  const isRefine = ctx.existing_pipeline_id != null;
+  const verbZh = isRefine ? "調整" : "建立";
+  const verbEn = isRefine ? "Refining" : "Building";
+
   const canBind = pipelineId != null;
 
   return (
@@ -148,14 +158,28 @@ export default function SkillEmbedBanner({ pipelineId }: { pipelineId?: number |
       display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap",
       fontFamily: "system-ui, -apple-system, sans-serif",
     }}>
-      <span style={{ fontSize: 18 }}>📖</span>
+      <span style={{ fontSize: 18 }}>{isRefine ? "🛠" : "📖"}</span>
       <div style={{ flex: 1, fontSize: 13, color: "#78350F" }}>
-        <strong>為 Skill「{ctx.skill_slug}」建立 {slotLabel}</strong>
+        <strong>{verbEn} {slotLabel} for Skill「{ctx.skill_slug}」</strong>
+        {isRefine && (
+          <span style={{ marginLeft: 8, fontSize: 11, color: "#92400E" }}>
+            · pipeline #{ctx.existing_pipeline_id} (will update in place)
+          </span>
+        )}
         <div style={{ fontSize: 11.5, color: "#92400E", marginTop: 2 }}>
           {triggerSummary}
           {ctx.instruction && <> · 📝 「{ctx.instruction}」</>}
         </div>
       </div>
+      <a
+        href={`/skills/${encodeURIComponent(ctx.skill_slug)}/edit`}
+        style={{
+          padding: "6px 12px", fontSize: 11.5, fontWeight: 500,
+          color: "#78350F", textDecoration: "none",
+          background: "transparent", border: "1px dashed #D97706", borderRadius: 5,
+        }}>
+        ← back to Skill
+      </a>
       {!canBind && (
         <span style={{ fontSize: 11.5, color: "#92400E", fontStyle: "italic" }}>
           先按 Save 取得 pipeline id，再點 Done
@@ -183,7 +207,7 @@ export default function SkillEmbedBanner({ pipelineId }: { pipelineId?: number |
           opacity: busy ? 0.6 : 1,
         }}
       >
-        {busy ? "Binding…" : "Done — bind to Skill ↵"}
+        {busy ? "Binding…" : (isRefine ? `Done — update Skill ${verbZh}` : "Done — bind to Skill ↵")}
       </button>
       {error && (
         <div style={{ fontSize: 11, color: "#B91C1C", flexBasis: "100%" }}>⚠ {error}</div>

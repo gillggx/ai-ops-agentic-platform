@@ -132,6 +132,24 @@ export default function Playbook({
     if (res.ok) router.refresh();
   };
 
+  const onDelete = async () => {
+    if (!skill) return;
+    const stepCount = steps.length;
+    const hasConfirm = !!confirmCheck;
+    const pipelineCount = steps.filter((s) => s.pipeline_id != null).length + (hasConfirm && confirmCheck.pipeline_id ? 1 : 0);
+    const summary = `這個 skill 有 ${stepCount} 個 checklist step` +
+                    (hasConfirm ? "、1 個 confirm check" : "") +
+                    `、共 ${pipelineCount} 條 pipeline 會一起被刪除。`;
+    if (!confirm(`確認刪除「${title || slug}」？\n\n${summary}\n\n此動作不可還原。`)) return;
+    const res = await fetch(`/api/skill-documents/${encodeURIComponent(slug)}`, { method: "DELETE" });
+    if (res.ok) {
+      router.replace("/skills");
+    } else {
+      const j = await res.json().catch(() => ({}));
+      alert("刪除失敗：" + (j?.error?.message ?? `HTTP ${res.status}`));
+    }
+  };
+
   /* Run + test simulation */
   const onRunClick = () => {
     setShowSummary(false);
@@ -310,6 +328,7 @@ export default function Playbook({
         onPublish={onPublish}
         onRun={onRunClick}
         onReset={resetRun}
+        onDelete={onDelete}
       />
 
       <div style={{
@@ -413,7 +432,7 @@ export default function Playbook({
 }
 
 function TopBar({
-  slug, title, mode, runState, dirty, onTitleChange, onSave, onPublish, onRun, onReset,
+  slug, title, mode, runState, dirty, onTitleChange, onSave, onPublish, onRun, onReset, onDelete,
 }: {
   slug: string;
   title: string;
@@ -425,6 +444,7 @@ function TopBar({
   onPublish: () => void;
   onRun: () => void;
   onReset: () => void;
+  onDelete: () => void;
 }) {
   return (
     <div style={{
@@ -481,6 +501,14 @@ function TopBar({
         </Btn>
       ) : (
         <Btn kind="secondary" icon={<Icon.Loop/>} onClick={onReset}>Stop</Btn>
+      )}
+
+      {/* Phase 11 v6 — Skill-level ⋯ menu (Delete + future actions). */}
+      {mode === "author" && (
+        <StepActionMenu items={[
+          { label: "Delete this skill", icon: <Icon.X/>, danger: true,
+            onClick: onDelete },
+        ]}/>
       )}
     </div>
   );
@@ -705,6 +733,7 @@ function StepBlock({
               <SuggestedActionsEditor
                 actions={step.suggested_actions ?? []}
                 onChange={onActionsChange}
+                onClose={onActionsExpand}
               />
             )}
           </div>
@@ -845,8 +874,12 @@ function ExpandedPipeline({
 }
 
 function SuggestedActionsEditor({
-  actions, onChange,
-}: { actions: SuggestedAction[]; onChange: (a: SuggestedAction[]) => void }) {
+  actions, onChange, onClose,
+}: {
+  actions: SuggestedAction[];
+  onChange: (a: SuggestedAction[]) => void;
+  onClose?: () => void;     // Phase 11 v6 — close the editor (× button + ESC)
+}) {
   const upd = (i: number, patch: Partial<SuggestedAction>) => {
     onChange(actions.map((a, idx) => idx === i ? { ...a, ...patch } : a));
   };
@@ -855,6 +888,14 @@ function SuggestedActionsEditor({
     ...actions,
     { id: "a" + Date.now().toString(36), title: "", detail: "", rationale: "", confidence: "med" },
   ]);
+
+  // ESC closes the editor — fires only when this editor is mounted.
+  useEffect(() => {
+    if (!onClose) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
 
   return (
     <div style={{ padding: "12px 14px", borderTop: "1px solid var(--line)", background: "var(--surface)" }}>
@@ -866,6 +907,20 @@ function SuggestedActionsEditor({
         <span style={{ fontSize: 10, color: "var(--ink-4)", textTransform: "none", fontWeight: 400, letterSpacing: 0 }}>
           ✨ advisory only · 不會自動執行
         </span>
+        {onClose && (
+          <button
+            type="button"
+            aria-label="close suggested actions"
+            onClick={onClose}
+            title="ESC to close"
+            style={{
+              all: "unset", cursor: "pointer",
+              padding: "0 4px", marginLeft: 8,
+              fontSize: 14, lineHeight: 1, color: "var(--ink-3)",
+              borderRadius: 3,
+            }}
+          >×</button>
+        )}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {actions.map((a, i) => (

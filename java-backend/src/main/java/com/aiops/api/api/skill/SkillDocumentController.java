@@ -307,6 +307,13 @@ public class SkillDocumentController {
         if (!instruction.isBlank()) {
             qs.append("&instruction=").append(java.net.URLEncoder.encode(instruction, java.nio.charset.StandardCharsets.UTF_8));
         }
+        // Phase 11 v6 — if the slot already has a bound pipeline, carry its
+        // id so the Builder embed mode loads the existing JSON instead of
+        // dropping the user onto a blank canvas. Refine = update same row.
+        Long existingPipelineId = lookupSlotPipelineId(skill, slot);
+        if (existingPipelineId != null) {
+            qs.append("&existing_pipeline_id=").append(existingPipelineId);
+        }
         String type = String.valueOf(trig.getOrDefault("type", "event"));
         // legacy "system" → "event"
         if ("system".equals(type)) type = "event";
@@ -328,7 +335,14 @@ public class SkillDocumentController {
             }
         }
 
-        String url = "/admin/pipeline-builder/new" + qs;
+        // Phase 11 v6 — refine path: existing pipeline → /[id] edit route
+        // already loads the pipeline_json + supports Glass Box / inputs
+        // editing. The Skill embed query params still flow through so the
+        // banner + bind callback work the same way.
+        String basePath = (existingPipelineId != null)
+                ? ("/admin/pipeline-builder/" + existingPipelineId)
+                : "/admin/pipeline-builder/new";
+        String url = basePath + qs;
         return ApiResponse.ok(Map.of(
                 "builder_url", url,
                 "skill_id",    skill.getId(),
@@ -626,6 +640,36 @@ public class SkillDocumentController {
         } catch (Exception e) {
             return Map.of();
         }
+    }
+
+    /**
+     * Phase 11 v6 — find the pipeline_id currently bound to {@code slot} on
+     * this skill (or {@code null} if the slot has no pipeline yet). Used by
+     * builder-url to seed the Builder embed mode with the existing
+     * pipeline so "Refine" doesn't drop the user onto a blank canvas.
+     */
+    @SuppressWarnings("unchecked")
+    private Long lookupSlotPipelineId(SkillDocumentEntity skill, String slot) {
+        if ("confirm".equals(slot)) {
+            Map<String, Object> cc = parseJson(skill.getConfirmCheck());
+            Object pid = cc.get("pipeline_id");
+            return pid instanceof Number n ? n.longValue() : null;
+        }
+        if (slot.startsWith("step:") && !"step:NEW".equalsIgnoreCase(slot)) {
+            String stepId = slot.substring("step:".length());
+            try {
+                List<Map<String, Object>> stepsList = mapper.readValue(
+                        skill.getSteps() == null || skill.getSteps().isBlank() ? "[]" : skill.getSteps(),
+                        new TypeReference<List<Map<String, Object>>>() {});
+                for (Map<String, Object> s : stepsList) {
+                    if (stepId.equals(String.valueOf(s.get("id")))) {
+                        Object pid = s.get("pipeline_id");
+                        return pid instanceof Number n ? n.longValue() : null;
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        return null;
     }
 
     /**

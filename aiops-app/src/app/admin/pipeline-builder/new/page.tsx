@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { PipelineInput, PipelineJSON } from "@/lib/pipeline-builder/types";
 import AutoPatrolTriggerForm, {
   emptyTrigger,
@@ -67,6 +68,8 @@ export default function NewPipelinePage() {
   // already loaded.
   const [skipWizard, setSkipWizard] = useState(false);
   const [checkedSession, setCheckedSession] = useState(false);
+  const [shouldRedirect, setShouldRedirect] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     let hydrated: PipelineJSON | null = null;
@@ -128,12 +131,23 @@ export default function NewPipelinePage() {
         // Old behavior (chat copy-paste from another flow) — default to skill
         // and run the wizard so the user can review.
         setKind("skill");
+      } else if (!fromAgent && !skillCtx && !q) {
+        // Phase 11 v6 — no embed=skill, no ?from=agent, no ?kind: bare
+        // navigation to /admin/pipeline-builder/new is no longer a public
+        // entry point. Redirect to the Skill Library.
+        setShouldRedirect(true);
       }
     }
     setCheckedSession(true);
   }, []);
 
+  // Redirect after render so router is available.
+  useEffect(() => {
+    if (shouldRedirect) router.replace("/skills");
+  }, [shouldRedirect, router]);
+
   if (!checkedSession) return null;
+  if (shouldRedirect) return null;
 
   return (
     <WizardOrBuilder

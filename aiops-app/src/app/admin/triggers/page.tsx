@@ -102,21 +102,17 @@ export default function TriggersOverviewPage() {
             跨 pipeline 的綁定總覽：Auto-Patrol（schedule/event） + Auto-Check Rule（event） + Published Skill（on-demand）。
           </p>
         </div>
+        {/* Phase 11 v6 — Triggers Overview is read-only audit. Patrols /
+            Auto-Checks are now created exclusively via Skill → Build flow.
+            Both legacy Create CTAs hidden; "View in Skill Library" replaces
+            them as the entry point. */}
         <div style={{ display: "flex", gap: 8 }}>
-          <Link href="/admin/auto-patrols?new=1" style={{
+          <Link href="/skills" style={{
             padding: "8px 16px", fontSize: 13, fontWeight: 600,
-            background: "#16a34a", color: "#fff",
+            background: "#0F172A", color: "#fff",
             borderRadius: 6, textDecoration: "none",
-            boxShadow: "0 1px 3px rgba(22,163,74,0.3)",
           }}>
-            ＋ 建立 Patrol
-          </Link>
-          <Link href="/admin/pipeline-builder/new?kind=auto_check" style={{
-            padding: "8px 16px", fontSize: 13, fontWeight: 600,
-            background: "#fff", color: "#d46b08",
-            border: "1px solid #d46b08", borderRadius: 6, textDecoration: "none",
-          }} title="Auto-Check 由 pipeline publish 自動建立，到 Pipeline Builder 建立 kind=auto_check 的 pipeline">
-            ＋ 建立 Auto-Check
+            📖 Open Skill Library
           </Link>
         </div>
       </div>
