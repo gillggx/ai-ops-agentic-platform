@@ -141,6 +141,15 @@ def _format_catalog(catalog: dict[tuple[str, str], dict[str, Any]]) -> str:
         param_props = (param_schema.get("properties") or {})
         param_hints = []
         has_freeform_object = False
+        # 2026-05-10: chart (category=output) blocks always get full description
+        # treatment. Param choice for chart blocks is intent-driven (facet vs
+        # series_field vs y_secondary vs single y; chart_type variants etc.) —
+        # cannot be conveyed in a one-line summary, so the description's
+        # `== When to use ==` / `== Params ==` sections must reach the LLM.
+        # Without this, the carefully-authored "facet='chart_name' splits SPC
+        # long-form into one chart per chart_name" example was invisible and
+        # LLM produced one big chart with series_field instead.
+        is_chart_block = (spec.get("category") == "output")
         for k, v in param_props.items():
             if not isinstance(v, dict):
                 continue
@@ -182,11 +191,12 @@ def _format_catalog(catalog: dict[tuple[str, str], dict[str, Any]]) -> str:
             f"    out_cols={out_cols_str}\n"
             f"    — {first_line}"
         )
-        if has_freeform_object:
+        if has_freeform_object or is_chart_block:
             # Inject the full description (already authored in DB) so the LLM
             # sees the embedded grammar / examples instead of inventing.
             indented = "      " + full_desc.replace("\n", "\n      ")
-            lines.append(f"    [Full schema for {name}]\n{indented}")
+            label = "Full schema" if has_freeform_object else "Full description"
+            lines.append(f"    [{label} for {name}]\n{indented}")
             examples = spec.get("examples") or []
             if examples:
                 # examples is a list of {title?, params}. Include first 2.
@@ -328,10 +338,16 @@ async def plan_node(state: BuildGraphState) -> dict[str, Any]:
         inputs_hint = ""
 
     skill_step_mode = bool(state.get("skill_step_mode"))
+    # 2026-05-10: hint 只說「方向」(每個 skill step 都需要 pass/fail gate)，
+    # 不說「chart 不適用」— 那是錯的、且越權干涉 block 用法。
+    # 真實情境：skill 觸發後常需要附帶圖表佐證（e.g. 連續 OOC 觸發時，告警附
+    # 各 SPC chart 的 trend 給 user 看）。chart 可作為 side branch 與
+    # step_check 並存。block 怎麼用、param 怎麼帶請看上方 catalog 的 block 描述。
     skill_hint = (
-        "\n\n⚠ SKILL STEP MODE — pipeline 必須以 `block_step_check` 結尾（pass/fail check）。"
-        "用例：block_filter→block_step_check (aggregate='count', operator='>=', threshold=N) "
-        "判斷有沒有達到觸發條件。chart 類 block 不適用此模式。"
+        "\n\n⚠ SKILL STEP MODE — 此 pipeline 是 Skill 的一個 step，必須含一個"
+        " `block_step_check` 作為 pass/fail 觸發 gate（決定要不要觸發後續動作）。"
+        "其他 block（含視覺化 chart）可作為 side branches 與 step_check 並存"
+        "— 圖表不影響觸發判定，但會附在告警 payload 給 user 看。"
         if skill_step_mode else ""
     )
     user_msg = state["instruction"] + canvas_hint + inputs_hint + skill_hint

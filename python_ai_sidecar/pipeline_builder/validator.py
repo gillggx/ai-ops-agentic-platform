@@ -101,6 +101,16 @@ class PipelineValidator:
         # C7 start/end presence
         errors.extend(self._check_endpoints(pipeline))
 
+        # 2026-05-10: C14/C15 — structural connectivity checks. Caught a bug
+        # where the LLM produced an "incremental edit" with orphan nodes
+        # (no edges in/out) and source-less downstream nodes (referenced by
+        # outgoing edges but with no incoming feed). Both render fine on the
+        # canvas but blank-screen the React Flow renderer at the next
+        # interaction; runtime would also fail because non-source blocks need
+        # data on their input port.
+        errors.extend(self._check_orphan_nodes(pipeline))
+        errors.extend(self._check_source_less_nodes(pipeline))
+
         # C9 chart sequence sanity (duplicate warning)
         # NOTE: C8 (single-alert) was removed in Phase β — monitoring multiple SPC
         # chart types cleanly needs one alert per chart. Multi-alert strategy is
@@ -319,6 +329,69 @@ class PipelineValidator:
             yield {"rule": "C7_ENDPOINTS", "message": "Pipeline must contain at least one source block"}
         if not outputs:
             yield {"rule": "C7_ENDPOINTS", "message": "Pipeline must contain at least one output block"}
+
+    def _check_orphan_nodes(self, pipeline: PipelineJSON) -> Iterable[dict[str, Any]]:
+        """C14: nodes with NO edges in or out. A 1-node pipeline is fine
+        (single source emits its own result), so we only flag orphans when
+        the pipeline has > 1 node."""
+        if len(pipeline.nodes) <= 1:
+            return
+        node_in: dict[str, int] = {n.id: 0 for n in pipeline.nodes}
+        node_out: dict[str, int] = {n.id: 0 for n in pipeline.nodes}
+        for edge in pipeline.edges:
+            if edge.from_.node in node_out:
+                node_out[edge.from_.node] += 1
+            if edge.to.node in node_in:
+                node_in[edge.to.node] += 1
+        for node in pipeline.nodes:
+            if node_in[node.id] == 0 and node_out[node.id] == 0:
+                yield {
+                    "rule": "C14_ORPHAN_NODE",
+                    "message": (
+                        f"Node '{node.id}' ({node.block_id}) is orphan — "
+                        f"no edges connect it. Either remove it or wire it "
+                        f"into the pipeline."
+                    ),
+                    "node_id": node.id,
+                }
+
+    def _check_source_less_nodes(self, pipeline: PipelineJSON) -> Iterable[dict[str, Any]]:
+        """C15: non-source nodes that have outgoing edges but no incoming
+        edges. They will receive no data at runtime even though downstream
+        nodes depend on them — silently breaking the chain."""
+        # Source-category blocks legitimately have no incoming edge.
+        source_node_ids: set[str] = set()
+        for node in pipeline.nodes:
+            spec = self.catalog.get(self._catalog_key(node))
+            if spec and spec.get("category") == "source":
+                source_node_ids.add(node.id)
+
+        node_in: dict[str, int] = {n.id: 0 for n in pipeline.nodes}
+        node_out: dict[str, int] = {n.id: 0 for n in pipeline.nodes}
+        for edge in pipeline.edges:
+            if edge.from_.node in node_out:
+                node_out[edge.from_.node] += 1
+            if edge.to.node in node_in:
+                node_in[edge.to.node] += 1
+
+        for node in pipeline.nodes:
+            if node.id in source_node_ids:
+                continue
+            # Only complain when this node is actually used downstream — a
+            # disconnected non-source with no out edges is already caught by
+            # C14 (orphan). C15 fires when downstream depends on it but
+            # nothing feeds it.
+            if node_in[node.id] == 0 and node_out[node.id] > 0:
+                yield {
+                    "rule": "C15_SOURCE_LESS_NODE",
+                    "message": (
+                        f"Node '{node.id}' ({node.block_id}) has outgoing "
+                        f"edges but no incoming feed — downstream nodes will "
+                        f"receive no data. Connect an upstream block to its "
+                        f"input port."
+                    ),
+                    "node_id": node.id,
+                }
 
     def _check_kind_constraints(self, pipeline: PipelineJSON) -> Iterable[dict[str, Any]]:
         """Phase 5-UX-7 C11/C12/C13 — structural constraints tied to pipeline_kind.

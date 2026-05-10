@@ -63,29 +63,50 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
     pipeline = PipelineJSON.model_validate(final_dict)
     registry = SeedlessBlockRegistry()
     registry.load()
-    # Run the same validator the canvas Save flow uses, but treat its issues
-    # as ADVISORY warnings — not build failures. The Glass Box contract is
-    # that the returned pipeline is a draft on canvas; user explicitly
-    # clicks Save to persist (and that's where blocking validation happens).
-    # Marking the build "failed" because of a param-enum complaint mismatched
-    # the user's mental model — the canvas DID get nodes & edges.
+    # Run the same validator the canvas Save flow uses. Most issues are
+    # ADVISORY warnings (param-enum complaints, etc.) — the Glass Box
+    # contract is that the returned pipeline is a draft and user explicitly
+    # clicks Save to persist.
+    #
+    # 2026-05-10 EXCEPTION: structural errors (C14 orphan, C15 source-less,
+    # C6 missing required param) are treated as BUILD-BLOCKING. They produce
+    # pipelines that crash React Flow on canvas (white-screen) or fail at
+    # runtime, and silently letting them through past finalize is what gave
+    # the user the blank-canvas symptom. With these flagged as failed, the
+    # frontend can show an error card instead of trying to render a broken
+    # graph.
     validator = PipelineValidator(registry.catalog)
     issues = validator.validate(pipeline)
+    _STRUCTURAL_RULES = {"C6_PARAM_SCHEMA", "C14_ORPHAN_NODE", "C15_SOURCE_LESS_NODE"}
+    structural_issues = [i for i in issues if i.get("rule") in _STRUCTURAL_RULES]
+    advisory_issues = [i for i in issues if i.get("rule") not in _STRUCTURAL_RULES]
 
     n_ok_ops = sum(1 for op in plan if op.get("result_status") == "ok")
     n_failed_ops = sum(1 for op in plan if op.get("result_status") == "error")
 
-    # Status reflects the BUILD ENGINE's success, not pipeline validity.
-    # Engine succeeded if any op completed and we have a non-empty canvas.
+    # Status reflects the BUILD ENGINE's success, not pipeline validity —
+    # but structural errors are loud enough to fail the build (see comment
+    # above).
     if len(pipeline.nodes) == 0 or n_ok_ops == 0:
         status = "failed"
+    elif structural_issues:
+        status = "failed_structural"
     else:
         status = "finished"
 
-    issue_summary = (
-        f" ⚠ {len(issues)} validator warning(s) — review on canvas before saving"
-        if issues else ""
-    )
+    if structural_issues:
+        issue_summary = (
+            f" ❌ {len(structural_issues)} structural error(s) — "
+            f"pipeline cannot be safely rendered. Try the build again "
+            f"(the agent will read the same descriptions and usually fixes "
+            f"it on the second attempt)."
+        )
+    elif advisory_issues:
+        issue_summary = (
+            f" ⚠ {len(advisory_issues)} validator warning(s) — review on canvas"
+        )
+    else:
+        issue_summary = ""
     summary = (
         f"Built {len(pipeline.nodes)} node(s), {len(pipeline.edges)} edge(s); "
         f"plan ops ok={n_ok_ops} failed={n_failed_ops}{issue_summary}"
@@ -97,8 +118,9 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
         "ok": status == "finished",
         "node_count": len(pipeline.nodes),
         "edge_count": len(pipeline.edges),
-        "validator_warnings": len(issues),
-        "validator_issues": issues[:5],  # cap to keep SSE small
+        "validator_warnings": len(advisory_issues),
+        "validator_issues": advisory_issues[:5],  # cap to keep SSE small
+        "structural_errors": structural_issues[:5],
         "summary": summary,
     })]
 

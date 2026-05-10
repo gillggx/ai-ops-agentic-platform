@@ -226,6 +226,22 @@ export default function AgentBuilderPanel({
             id: nextId(), role: ok ? "agent" : "error",
             text: `${ok ? "✓" : "⚠"} ${summary}`,
           }]);
+          // 2026-05-10: surface structural errors prominently. Without this,
+          // a build that produced orphan/source-less nodes silently rendered
+          // a broken canvas (white-screen risk). Now user sees an explicit
+          // error with each issue so they know to retry.
+          const structuralErrors = (data.structural_errors as Array<{ rule?: string; message?: string; node_id?: string }>) || [];
+          if (structuralErrors.length > 0) {
+            const lines = structuralErrors.slice(0, 5).map((e) => {
+              const rule = e.rule || "?";
+              const node = e.node_id ? ` [${e.node_id}]` : "";
+              return `  • ${rule}${node}: ${e.message || "(no message)"}`;
+            }).join("\n");
+            setLines((p) => [...p, {
+              id: nextId(), role: "error",
+              text: `❌ Pipeline 結構問題（${structuralErrors.length} 項）— 請重試一次：\n${lines}`,
+            }]);
+          }
         } else if (eventType === "runtime_check_ok") {
           const n = (data.node_count as number) ?? 0;
           setLines((p) => [...p, { id: nextId(), role: "agent",

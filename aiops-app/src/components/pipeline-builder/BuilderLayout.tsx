@@ -26,6 +26,7 @@ import type {
 import { Group as PanelGroup, Panel, Separator as PanelResizeHandle } from "react-resizable-panels";
 import BlockLibrary from "./BlockLibrary";
 import DagCanvas from "./DagCanvas";
+import { CanvasErrorBoundary } from "./CanvasErrorBoundary";
 import NodeInspector from "./NodeInspector";
 import EdgeInspector from "./EdgeInspector";
 import DataPreviewPanel from "./DataPreviewPanel";
@@ -1107,21 +1108,23 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
             <div style={{ flex: 1, display: "flex", overflow: "hidden", minHeight: 0 }}>
               <BlockLibrary readOnly={readOnly} />
               <div data-tour-id="pb-canvas" style={{ flex: 1, overflow: "hidden" }}>
-                <DagCanvas
-                  blockCatalog={catalog}
-                  readOnly={readOnly}
-                  runStatuses={runStatuses}
-                  onPortError={(msg) => showToast("error", msg)}
-                  onAgentPin={(nodeId) => {
-                    actions.select(nodeId);
-                    const node = state.pipeline.nodes.find((n) => n.id === nodeId);
-                    const label = node?.display_label ?? node?.block_id ?? nodeId;
-                    window.open(
-                      `/chat/new?prompt=${encodeURIComponent(`針對 ${label} (${nodeId}) 提問：`)}`,
-                      "_blank",
-                    );
-                  }}
-                />
+                <CanvasErrorBoundary>
+                  <DagCanvas
+                    blockCatalog={catalog}
+                    readOnly={readOnly}
+                    runStatuses={runStatuses}
+                    onPortError={(msg) => showToast("error", msg)}
+                    onAgentPin={(nodeId) => {
+                      actions.select(nodeId);
+                      const node = state.pipeline.nodes.find((n) => n.id === nodeId);
+                      const label = node?.display_label ?? node?.block_id ?? nodeId;
+                      window.open(
+                        `/chat/new?prompt=${encodeURIComponent(`針對 ${label} (${nodeId}) 提問：`)}`,
+                        "_blank",
+                      );
+                    }}
+                  />
+                </CanvasErrorBoundary>
               </div>
               {/* Phase 5-UX-5: NodeInspector / EdgeInspector moved into right
                   tabbed panel (Parameters tab). */}
@@ -1137,12 +1140,14 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
               <div style={{ height: "100%", display: "flex", overflow: "hidden" }}>
                 <BlockLibrary readOnly={readOnly} />
                 <div data-tour-id="pb-canvas" style={{ flex: 1, overflow: "hidden" }}>
-                  <DagCanvas
-                    blockCatalog={catalog}
-                    readOnly={readOnly}
-                    runStatuses={runStatuses}
-                    onPortError={(msg) => showToast("error", msg)}
-                  />
+                  <CanvasErrorBoundary>
+                    <DagCanvas
+                      blockCatalog={catalog}
+                      readOnly={readOnly}
+                      runStatuses={runStatuses}
+                      onPortError={(msg) => showToast("error", msg)}
+                    />
+                  </CanvasErrorBoundary>
                 </div>
                 {/* Phase 5-UX-5: NodeInspector / EdgeInspector moved into right
                     tabbed panel (Parameters tab). */}
