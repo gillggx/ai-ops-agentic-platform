@@ -101,8 +101,13 @@ _TRANSFORM_OUT_RULES: dict[str, str] = {
     "block_ewma_cusum": "preserves upstream + ewma/cusum/signal columns",
     "block_cpk": "[group, cpk, cp, mean, std]",
     "block_hypothesis_test": "[group, statistic, p_value, reject_null]",
-    "block_spc_long_form": "[eventTime, toolID, lotID, step, chart_name, value, ucl, lcl, is_ooc, spc_status]",
-    "block_apc_long_form": "[eventTime, toolID, lotID, step, parameter, value]",
+    "block_spc_long_form": "[eventTime, toolID, lotID, step, spc_status, fdc_classification, chart_name, value, ucl, lcl, is_ooc]",
+    # 2026-05-11: was wrong on two counts — said 'parameter' instead of
+    # 'param_name', and missed the passthrough cols (spc_status etc). LLM
+    # then couldn't reference spc_status as the OOC marker for APC and
+    # synthesised wrong logic like `value != null`. APC has NO is_ooc;
+    # OOC is process-level via spc_status.
+    "block_apc_long_form": "[eventTime, toolID, lotID, step, spc_status, fdc_classification, apc_id, param_name, value]",
     "block_data_view": "preserves upstream (display only)",
     "block_box_plot": "preserves upstream (chart only)",
     "block_probability_plot": "preserves upstream (chart only)",
@@ -150,6 +155,13 @@ def _format_catalog(catalog: dict[tuple[str, str], dict[str, Any]]) -> str:
         # long-form into one chart per chart_name" example was invisible and
         # LLM produced one big chart with series_field instead.
         is_chart_block = (spec.get("category") == "output")
+        # 2026-05-11: also surface full description when the author marked
+        # critical anti-pattern warnings (`== ⚠`) — those are the cases
+        # where LLM gets the block "wrong by default" without explicit
+        # guidance. apc_long_form's "APC 沒有 is_ooc, OOC 看 spc_status"
+        # warning was invisible without this. Just `== When to use ==` is
+        # too broad (every block has it; would 2× the catalog token cost).
+        has_critical_warning = "== ⚠" in full_desc
         for k, v in param_props.items():
             if not isinstance(v, dict):
                 continue
@@ -191,11 +203,14 @@ def _format_catalog(catalog: dict[tuple[str, str], dict[str, Any]]) -> str:
             f"    out_cols={out_cols_str}\n"
             f"    — {first_line}"
         )
-        if has_freeform_object or is_chart_block:
+        if has_freeform_object or is_chart_block or has_critical_warning:
             # Inject the full description (already authored in DB) so the LLM
             # sees the embedded grammar / examples instead of inventing.
             indented = "      " + full_desc.replace("\n", "\n      ")
-            label = "Full schema" if has_freeform_object else "Full description"
+            label = (
+                "Full schema" if has_freeform_object
+                else "Full description"
+            )
             lines.append(f"    [{label} for {name}]\n{indented}")
             examples = spec.get("examples") or []
             if examples:

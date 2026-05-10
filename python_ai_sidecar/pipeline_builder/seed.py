@@ -1099,20 +1099,40 @@ def _blocks() -> list[dict[str, Any]]:
                 "== When to use ==\n"
                 "- ✅ 「任一 APC 參數連 N 次超過 X」→ apc_long_form → threshold → consecutive_rule\n"
                 "- ✅ 「對每個 APC 參數做 boxplot / histogram」→ groupby param_name\n"
+                "- ✅ 「APC OOC count by parameter」→ filter spc_status=OOC → groupby_agg(group_by=param_name, count)\n"
                 "- ❌ 只看 1 個指定參數 → 直接用該欄位即可\n"
                 "- ❌ SPC chart → 用 block_spc_long_form\n"
                 "\n"
                 "== Output columns（固定）==\n"
-                "eventTime, toolID, lotID, step, spc_status, fdc_classification, apc_id (id 欄)\n"
-                "param_name (string, 已剝 apc_ 前綴), value\n"
+                "Passthrough (從 process_history 直接帶下來):\n"
+                "  eventTime, toolID, lotID, step, spc_status, fdc_classification, apc_id\n"
+                "Reshape 結果:\n"
+                "  param_name (string, 已剝 apc_ 前綴), value (該 param 的測量值)\n"
                 "⚠ 欄位**固定叫 param_name**，不是 parameter / metric / apc_param。\n"
                 "\n"
+                "== ⚠ 重要：APC 沒有 is_ooc 欄位 ==\n"
+                "APC long_form 的 `value` 是 raw measurement，**不是** OOC 標記。\n"
+                "OOC 是 process 級的概念，看 `spc_status` 欄位（'OOC' / 'PASS'）— 這欄位\n"
+                "由 process_history 決定該 process 整體是否 OOC，APC + SPC 都共用。\n"
+                "\n"
+                "❌ 錯誤示範：用 `value != null` 當 OOC marker → 那只是 measurement 計數\n"
+                "✅ 正確：filter `spc_status == 'OOC'` 取出 OOC 過的 process，再 groupby param_name\n"
+                "\n"
                 "== 經典 pipeline ==\n"
-                "process_history(step=$step) → apc_long_form\n"
-                "  → threshold(value_column=value, op='>', threshold=100)\n"
-                "  → consecutive_rule(flag_column=triggered_row, count=3,\n"
-                "                     sort_by=eventTime, group_by=param_name)\n"
-                "  → alert(severity=HIGH)\n"
+                "(A) APC threshold-based 連續觸發告警:\n"
+                "    process_history(step=$step) → apc_long_form\n"
+                "      → threshold(value_column=value, op='>', threshold=100)\n"
+                "      → consecutive_rule(flag_column=triggered_row, count=3,\n"
+                "                         sort_by=eventTime, group_by=param_name)\n"
+                "      → alert(severity=HIGH)\n"
+                "\n"
+                "(B) APC OOC count by parameter（看哪個 APC 參數常出問題）:\n"
+                "    process_history(...) → apc_long_form\n"
+                "      → filter(column='spc_status', operator='==', value='OOC')\n"
+                "      → groupby_agg(group_by='param_name', agg_column='value', agg_func='count')\n"
+                "      → bar_chart(x='param_name', y='value_count')\n"
+                "    要看跨機台分佈：process_history 別 filter $tool_id（撈全廠），\n"
+                "    要看單機分佈：process_history 用 tool_id=$tool_id。\n"
                 "\n"
                 "== Errors ==\n"
                 "- INVALID_INPUT  : data 不是 DataFrame\n"
@@ -1121,7 +1141,14 @@ def _blocks() -> list[dict[str, Any]]:
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "data", "type": "dataframe"}],
             "param_schema": {"type": "object", "properties": {}},
-            "output_columns_hint": ["param_name", "value"],
+            # 2026-05-11: was just [param_name, value], missing the
+            # passthrough cols. spc_status especially matters because it's
+            # the OOC marker (not is_ooc — APC has no is_ooc).
+            "output_columns_hint": [
+                "eventTime", "toolID", "lotID", "step",
+                "spc_status", "fdc_classification", "apc_id",
+                "param_name", "value",
+            ],
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.apc_long_form:ApcLongFormBlockExecutor"},
         },
         {
