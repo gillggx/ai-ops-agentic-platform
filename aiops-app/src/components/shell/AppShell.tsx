@@ -59,6 +59,10 @@ const KNOWLEDGE_ITEMS = [
   // SkillEmbedBanner). Direct hits to /admin/pipeline-builder redirect
   // back to /skills.
   { href: "/skills",                  label: "Skill Library",          icon: "📖" },
+  // 2026-05-11: Agent Rules & Knowledge — user-owned prompt directives,
+  // RAG facts, jargon lexicon, and few-shot examples that the chat
+  // orchestrator's context_loader retrieves to enrich the system prompt.
+  { href: "/agent-knowledge",         label: "Rules & Knowledge",      icon: "📓" },
   // Chart catalog — 18 chart components catalog + per-user style preference.
   { href: "/help/charts",             label: "Chart Catalog",          icon: "📚" },
 ];

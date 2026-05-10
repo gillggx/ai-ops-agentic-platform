@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from .background import event_poller, nats_subscriber
+from .background import event_poller, nats_subscriber, embedding_backfill
 from .config import CONFIG
 from .routers import agent, briefing, health, pipeline, sandbox
 
@@ -49,12 +49,14 @@ async def lifespan(app: FastAPI):
 
     await event_poller.get_instance().start()
     await nats_subscriber.get_instance().start()
+    await embedding_backfill.get_instance().start()
     try:
         yield
     finally:
         log.info("python_ai_sidecar shutting down background tasks")
         await event_poller.get_instance().stop()
         await nats_subscriber.get_instance().stop()
+        await embedding_backfill.get_instance().stop()
 
 
 app = FastAPI(
