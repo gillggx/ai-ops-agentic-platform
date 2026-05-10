@@ -5,8 +5,10 @@
 
 export type BlockCategory = "source" | "transform" | "logic" | "output" | "custom";
 export type BlockStatus = "draft" | "pi_run" | "production" | "deprecated";
-/** PR-B: 5-stage pipeline lifecycle. Backend maps legacy names on migration. */
-export type PipelineStatus = "draft" | "validating" | "locked" | "active" | "archived";
+/** PR-B: 5-stage pipeline lifecycle. Backend maps legacy names on migration.
+ *  Phase 11 v6 — "linked" added for skill-owned pipelines (parent_skill_doc_id
+ *  IS NOT NULL). Lifecycle is driven by the parent Skill, not pb_pipelines.status. */
+export type PipelineStatus = "draft" | "validating" | "locked" | "active" | "archived" | "linked";
 
 export interface PortSpec {
   port: string;

@@ -64,13 +64,17 @@ export function blockDisplayName(blockName: string): string {
     .join(" ");
 }
 
-/** PR-D1: higher-saturation status pills with kind-colored tints. */
+/** PR-D1: higher-saturation status pills with kind-colored tints.
+ *  Phase 11 v6 — added "linked" for skill-owned pipelines (their lifecycle
+ *  is driven by skill_documents.status; pb_pipelines.status is parked at
+ *  this fixed value so they don't pollute the free-standing pipeline list). */
 export const STATUS_COLORS: Record<PipelineStatus, { bg: string; fg: string; label: string }> = {
   draft:       { bg: "#F1F5F9", fg: "#475569", label: "● Draft" },
   validating:  { bg: "#FEF3C7", fg: "#92400E", label: "🟡 Validating" },
   locked:      { bg: "#FFEDD5", fg: "#9A3412", label: "🟠 Locked" },
   active:      { bg: "#DCFCE7", fg: "#15803D", label: "🔵 Active" },
   archived:    { bg: "#F1F5F9", fg: "#64748B", label: "⚪ Archived" },
+  linked:      { bg: "#EDE9FE", fg: "#5B21B6", label: "🔗 Linked to Skill" },
 };
 
 /** Block status — orthogonal from pipeline status (blocks still use old enum). */

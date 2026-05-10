@@ -42,8 +42,9 @@ export interface BuilderState {
   description: string;
   meta: {
     pipelineId: number | null;
-    // PR-B: 5-stage lifecycle (same type as PipelineStatus)
-    status: "draft" | "validating" | "locked" | "active" | "archived";
+    // PR-B: 5-stage lifecycle (same type as PipelineStatus). Phase 11 v6
+    // adds "linked" for skill-owned pipelines.
+    status: "draft" | "validating" | "locked" | "active" | "archived" | "linked";
     version: string;
     parentId: number | null;
     // Phase 5-UX-7: 3-kind classification (auto_patrol | auto_check | skill)
