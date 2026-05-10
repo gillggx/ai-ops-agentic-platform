@@ -252,7 +252,15 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
 
     # Part B: dynamic-state block. Best-effort — failure should never block
     # the chat (fall back to "no context, agent reasons from scratch").
-    current_state_block = await _build_current_state_block(java, client_context)
+    # 2026-05-11: in builder mode the alarm list is noise that triggers
+    # per-machine fan-out — LLM sees "EQP-09 + EQP-03 are alarming" and
+    # decides to call build_pipeline_live N times "one per failing tool"
+    # even though the user already declared $tool_id as a parameter.
+    # Pass mode in so the snapshot only includes user_focus (the user's
+    # explicit click signal) in builder mode, not the broadcast alarm list.
+    current_state_block = await _build_current_state_block(
+        java, client_context, mode=mode,
+    )
     enriched_user_message = (
         f"{current_state_block}\n\n{user_message}" if current_state_block else user_message
     )
@@ -473,12 +481,21 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
     }
 
 
-async def _build_current_state_block(java, client_context: Dict[str, Any]) -> str:
+async def _build_current_state_block(
+    java, client_context: Dict[str, Any], mode: str = "chat",
+) -> str:
     """Fetch agent-context-snapshot from Java + format as <current_state>...</current_state>.
 
     Returns "" when the snapshot is empty AND there's no client focus — no point
     sending an empty block. Failures are swallowed (logged); chat should still
     work without dynamic context.
+
+    2026-05-11: in builder mode (`mode="builder"`), the broadcast `active_alarms`
+    list is suppressed. It was causing the LLM to fan-out per-failing-tool
+    ("user wants SPC trend skill + EQP-09/EQP-03 are alarming → build 2 skills")
+    when the user already declared `$tool_id` as a pipeline parameter. The
+    user_focus line is still emitted because that represents the user's
+    *explicit* click on a specific machine (not background noise).
     """
     try:
         selected = client_context.get("selected_equipment_id")
@@ -489,6 +506,11 @@ async def _build_current_state_block(java, client_context: Dict[str, Any]) -> st
 
     alarms = snapshot.get("active_alarms") or []
     user_focus = snapshot.get("user_focus") or {}
+    is_builder = (mode == "builder")
+    # In builder mode, drop the alarm list entirely (noise) but keep user_focus.
+    if is_builder:
+        alarms = []
+
     if not alarms and not user_focus:
         return ""
 
