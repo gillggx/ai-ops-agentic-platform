@@ -13,7 +13,7 @@
  * Both share the same StepBlock/ExpandedPipeline/SuggestionPanel components
  * (matches prototype's design where switching is a `t.mode` flag).
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -26,6 +26,30 @@ import PipelineCanvasMini, { type MiniBlock } from "./PipelineCanvasMini";
 import TestCaseSelector, { type TestCase } from "./TestCaseSelector";
 
 interface ApiDetail { ok: boolean; data: SkillDetail; error?: { message: string } | null }
+
+/** Phase 11 v9 — full SSE step_done payload from SkillRunnerService.parseRunResult.
+ *  threshold / operator / duration_ms were previously dropped by the
+ *  frontend; SummaryReport now needs them to render a real pipeline-result
+ *  table (per user feedback「report 應該看得到 pipeline 結果」). */
+type StepRunResult = {
+  status: "pass" | "fail";
+  value: string;
+  note: string;
+  threshold?: string | number | null;
+  operator?: string | null;
+  duration_ms?: number | null;
+};
+
+function parseRunResult(data: Record<string, unknown>): StepRunResult {
+  return {
+    status: (data.status as "pass" | "fail") || "pass",
+    value: (data.value as string) ?? "",
+    note: (data.note as string) ?? "",
+    threshold: (data.threshold as string | number | null | undefined) ?? null,
+    operator: (data.operator as string | null | undefined) ?? null,
+    duration_ms: (data.duration_ms as number | null | undefined) ?? null,
+  };
+}
 
 export default function Playbook({
   slug, mode,
@@ -54,11 +78,11 @@ export default function Playbook({
   const [runStatuses, setRunStatuses] = useState<Record<string, "queued" | "running" | "done">>({});
   const [runActiveStep, setRunActiveStep] = useState<string | null>(null);
   const [runState, setRunState] = useState<"idle" | "running" | "done">("idle");
-  const [runResults, setRunResults] = useState<Record<string, { status: "pass" | "fail"; value: string; note: string }>>({});
+  const [runResults, setRunResults] = useState<Record<string, StepRunResult>>({});
   // Phase 11 v7 — Confirm step has its own status/result so the timeline can
   // show「正在跑 C1…」instead of UI 看起來卡死（之前 SSE confirm_* 事件被丟掉）
   const [confirmRunStatus, setConfirmRunStatus] = useState<"queued" | "running" | "done" | null>(null);
-  const [confirmRunResult, setConfirmRunResult] = useState<{ status: "pass" | "fail"; value: string; note: string } | null>(null);
+  const [confirmRunResult, setConfirmRunResult] = useState<StepRunResult | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [showCaseSelector, setShowCaseSelector] = useState(false);
   const [selectedCase, setSelectedCase] = useState<TestCase | null>(null);
@@ -224,22 +248,16 @@ export default function Playbook({
             setConfirmRunStatus("running");
             setRunActiveStep("__confirm__");
           } else if (evt === "confirm_done") {
-            const status = (data.status as "pass" | "fail") || "pass";
-            const value = (data.value as string) || "";
-            const note = (data.note as string) || "";
             setConfirmRunStatus("done");
-            setConfirmRunResult({ status, value, note });
+            setConfirmRunResult(parseRunResult(data));
           } else if (evt === "step_start") {
             const sid = data.step_id as string;
             setRunActiveStep(sid);
             setRunStatuses((prev) => ({ ...prev, [sid]: "running" }));
           } else if (evt === "step_done") {
             const sid = data.step_id as string;
-            const status = (data.status as "pass" | "fail") || "pass";
-            const value = (data.value as string) || "";
-            const note = (data.note as string) || "";
             setRunStatuses((prev) => ({ ...prev, [sid]: "done" }));
-            setRunResults((prev) => ({ ...prev, [sid]: { status, value, note } }));
+            setRunResults((prev) => ({ ...prev, [sid]: parseRunResult(data) }));
           } else if (evt === "done") {
             setRunState("done");
             setRunActiveStep(null);
@@ -387,6 +405,9 @@ export default function Playbook({
               testCase={selectedCase}
               onRerun={() => { setShowSummary(false); setShowCaseSelector(true); }}
               onClose={() => setShowSummary(false)}
+              confirmCheck={confirmCheck}
+              confirmRunResult={confirmRunResult}
+              onInspect={openInspect}
             />
           )}
 
@@ -561,16 +582,14 @@ function TopBar({
 
       <div style={{ width: 1, height: 20, background: "var(--line)" }}/>
 
-      {mode === "author" && (
-        <>
-          <Btn kind="ghost" onClick={onSave} disabled={!dirty}>{dirty ? "Save Draft" : "Saved"}</Btn>
-          {/* Phase 11 v7 — was「Publish」(misleading marketplace wording).
-              真實語意 = 啟用 trigger 自動執行；改名以避免歧義。 */}
-          <Btn kind="secondary" onClick={onPublish}>
-            Activate Trigger
-          </Btn>
-        </>
-      )}
+      {/* Phase 11 v9 — toolbar buttons identical across Author + Execute
+          (per user feedback: 兩個 mode 的功能應該一致). Execute mode previously
+          hid Save / Activate / ⋯ which forced operators to switch tabs to
+          deactivate or delete. */}
+      <Btn kind="ghost" onClick={onSave} disabled={!dirty}>{dirty ? "Save Draft" : "Saved"}</Btn>
+      <Btn kind="secondary" onClick={onPublish}>
+        Activate Trigger
+      </Btn>
       {runState === "idle" || runState === "done" ? (
         <Btn kind="primary" icon={<Icon.Play/>} onClick={onRun}>
           {runState === "done" ? "Re-run Skill" : (mode === "author" ? "Test Skill" : "Run Skill")}
@@ -579,13 +598,10 @@ function TopBar({
         <Btn kind="secondary" icon={<Icon.Loop/>} onClick={onReset}>Stop</Btn>
       )}
 
-      {/* Phase 11 v6 — Skill-level ⋯ menu (Delete + future actions). */}
-      {mode === "author" && (
-        <StepActionMenu items={[
-          { label: "Delete this skill", icon: <Icon.X/>, danger: true,
-            onClick: onDelete },
-        ]}/>
-      )}
+      <StepActionMenu items={[
+        { label: "Delete this skill", icon: <Icon.X/>, danger: true,
+          onClick: onDelete },
+      ]}/>
     </div>
   );
 }
@@ -902,7 +918,7 @@ function StepBlock({
   expanded: boolean;
   onToggle: () => void;
   runStatus?: "queued" | "running" | "done";
-  runResult?: { status: "pass" | "fail"; value: string; note: string };
+  runResult?: StepRunResult;
   onTextChange: (t: string) => void;
   onActionsChange: (a: SuggestedAction[]) => void;
   onRemove: () => void;
@@ -1306,7 +1322,7 @@ function SuggestedActionsEditor({
 function RunResultInline({
   result, step,
 }: {
-  result: { status: "pass" | "fail"; value: string; note: string };
+  result: StepRunResult;
   step: SkillStep;
 }) {
   const isFail = result.status === "fail";
@@ -1463,10 +1479,10 @@ function RunTimeline({
   runState: "idle" | "running" | "done";
   activeStepId: string | null;
   runStatuses: Record<string, "queued" | "running" | "done">;
-  runResults: Record<string, { status: "pass" | "fail"; value: string; note: string }>;
+  runResults: Record<string, StepRunResult>;
   confirmCheck: ConfirmCheck | null;
   confirmRunStatus: "queued" | "running" | "done" | null;
-  confirmRunResult: { status: "pass" | "fail"; value: string; note: string } | null;
+  confirmRunResult: StepRunResult | null;
 }) {
   void activeStepId;
   // Phase 11 v7 — render the C1 confirm row first when a confirm step exists,
@@ -1564,18 +1580,308 @@ function RunTimeline({
   );
 }
 
+/* ── Phase 11 v9 — Summary Report (alarm-center pattern) ───────────────
+ *  Replaces the v8 thin "FINDINGS" list. Now renders:
+ *    1. VerdictHeader   — pass/fail banner (alarm raised vs no alarm)
+ *    2. SynthesisStrip  — derived two-line summary (gate + checklist)
+ *    3. GateResultCard  — C1 detail with pipeline result table (if any)
+ *    4. Per-step card   — pipeline result + InlineActions
+ *  All data sourced from existing SSE payload (status/value/note/threshold/
+ *  operator/duration_ms) plus step.suggested_actions. No backend change. */
+
+function PipelineResultTable({ result }: { result: StepRunResult }) {
+  const rows: [string, React.ReactNode][] = [];
+  if (result.value !== "" && result.value != null) rows.push(["value", result.value]);
+  if (result.operator) rows.push(["operator", result.operator]);
+  if (result.threshold != null && result.threshold !== "") rows.push(["threshold", String(result.threshold)]);
+  if (result.note) rows.push(["note", result.note]);
+  if (result.duration_ms != null) rows.push(["elapsed", `${result.duration_ms} ms`]);
+  if (rows.length === 0) {
+    return (
+      <div style={{ padding: "8px 12px", color: "var(--ink-3)", fontSize: 11.5, fontStyle: "italic" }}>
+        (pipeline 沒回傳明細)
+      </div>
+    );
+  }
+  return (
+    <div className="mono" style={{
+      marginTop: 10,
+      padding: "8px 12px", borderRadius: 6,
+      background: "var(--bg-soft)", border: "1px solid var(--line)",
+      fontSize: 11.5, color: "var(--ink-2)",
+      display: "grid", gridTemplateColumns: "auto 1fr", gap: "3px 12px",
+    }}>
+      {rows.map(([k, v]) => (
+        <React.Fragment key={k}>
+          <span style={{ color: "var(--ink-3)" }}>{k}:</span>
+          <span style={{ wordBreak: "break-word" }}>{v}</span>
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
+function VerdictHeader({
+  verdict, testCase, onClose,
+}: {
+  verdict: { kind: "alarm" | "no_alarm" | "gate_blocked" | "error"; title: string; subtitle: string };
+  testCase: TestCase | null;
+  onClose: () => void;
+}) {
+  const isFail = verdict.kind === "alarm" || verdict.kind === "gate_blocked" || verdict.kind === "error";
+  return (
+    <div style={{
+      padding: "18px 20px", borderBottom: "1px solid var(--line)",
+      display: "flex", alignItems: "flex-start", gap: 14,
+    }}>
+      <span style={{
+        width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+        display: "inline-flex", alignItems: "center", justifyContent: "center",
+        background: isFail ? "var(--fail-bg)" : "var(--pass-bg)",
+        color: isFail ? "var(--fail)" : "var(--pass)",
+      }}>
+        {isFail ? <Icon.Bolt/> : <Icon.Check/>}
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="mono" style={{ fontSize: 9.5, letterSpacing: "0.08em", color: "var(--ink-3)" }}>
+          DIAGNOSTIC REPORT · {testCase ? "DRY-RUN" : "LIVE"}
+        </div>
+        <h2 style={{
+          margin: "4px 0 0", fontSize: 18, fontWeight: 600,
+          letterSpacing: "-0.01em",
+          color: isFail ? "var(--fail)" : "var(--pass)",
+        }}>
+          {verdict.title}
+        </h2>
+        <div style={{ marginTop: 6, fontSize: 12.5, color: "var(--ink-2)" }}>
+          {verdict.subtitle}
+        </div>
+        {testCase && (
+          <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--ink-3)" }}>
+            Test case · <span style={{ color: "var(--ink-2)" }}>{testCase.title}</span>
+          </div>
+        )}
+      </div>
+      <button onClick={onClose} title="Dismiss report" style={{
+        all: "unset", cursor: "pointer", padding: 6, borderRadius: 4,
+        color: "var(--ink-3)",
+      }}><Icon.X/></button>
+    </div>
+  );
+}
+
+function SynthesisStrip({
+  hasGate, gateResult, passCount, failCount, totalSteps, gateBlocked,
+}: {
+  hasGate: boolean;
+  gateResult: StepRunResult | null;
+  passCount: number;
+  failCount: number;
+  totalSteps: number;
+  gateBlocked: boolean;
+}) {
+  const lines: React.ReactNode[] = [];
+  if (hasGate) {
+    if (gateResult?.status === "pass") {
+      lines.push(<span key="g">⚡ Gate C1 <strong>PASS</strong> · 已啟動 checklist</span>);
+    } else if (gateResult?.status === "fail") {
+      lines.push(<span key="g">⛔ Gate C1 <strong>FAIL</strong> · {gateBlocked ? "checklist 已跳過" : "降級提示，仍跑 checklist"}</span>);
+    } else {
+      lines.push(<span key="g">⏳ Gate C1 未完成</span>);
+    }
+  }
+  if (totalSteps > 0 && !gateBlocked) {
+    lines.push(<span key="c">⚙ Checklist · <strong style={{ color: "var(--pass)" }}>{passCount} pass</strong> / <strong style={{ color: failCount > 0 ? "var(--fail)" : "var(--ink-3)" }}>{failCount} fail</strong></span>);
+  }
+  if (lines.length === 0) return null;
+  return (
+    <div style={{
+      padding: "12px 20px", background: "var(--bg-soft)",
+      borderBottom: "1px solid var(--line)",
+      display: "flex", flexDirection: "column", gap: 4,
+      fontSize: 12.5, color: "var(--ink-2)",
+    }}>
+      {lines}
+    </div>
+  );
+}
+
+function GateResultCard({
+  confirmCheck, gateResult, gateBlocked, onInspect,
+}: {
+  confirmCheck: ConfirmCheck;
+  gateResult: StepRunResult | null;
+  gateBlocked: boolean;
+  onInspect: (id: number) => void;
+}) {
+  const status = gateResult?.status;
+  const isFail = status === "fail";
+  const accent = isFail ? "var(--fail)" : status === "pass" ? "var(--pass)" : "var(--line-strong)";
+  const accentBg = isFail ? "var(--fail-bg)" : status === "pass" ? "var(--pass-bg)" : "var(--surface-2)";
+  return (
+    <section style={{ marginTop: 12, padding: "0 20px" }}>
+      <div className="mono" style={{ fontSize: 9.5, letterSpacing: "0.08em", color: "var(--ai)", marginBottom: 8 }}>
+        ALARM GATE · C1
+      </div>
+      <div style={{
+        padding: "14px 16px", borderRadius: 10,
+        background: "var(--surface)",
+        border: `1px solid ${accent}`, borderLeft: `4px solid ${accent}`,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span className="mono" style={{
+            fontSize: 10, fontWeight: 600,
+            color: accent, padding: "2px 8px", borderRadius: 4,
+            background: accentBg, border: `1px solid ${accent}`,
+          }}>
+            {status === "pass" ? "🟢 PASS · 條件達成" : status === "fail" ? "🔴 FAIL · 條件未達成" : "—"}
+          </span>
+          {gateBlocked && (
+            <span className="mono" style={{
+              fontSize: 10, color: "var(--fail)", padding: "2px 8px",
+              background: "var(--fail-bg)", border: "1px solid var(--fail)",
+              borderRadius: 4, fontWeight: 600,
+            }}>checklist skipped</span>
+          )}
+          <span style={{ flex: 1 }}/>
+          {confirmCheck.pipeline_id != null && (
+            <button
+              type="button"
+              onClick={() => { if (confirmCheck.pipeline_id != null) onInspect(confirmCheck.pipeline_id); }}
+              style={{
+                all: "unset", cursor: "pointer",
+                fontSize: 11, color: "var(--ai)",
+              }}>Inspect ↗</button>
+          )}
+        </div>
+        <div style={{ marginTop: 8, fontSize: 14, color: "var(--ink)", fontWeight: 500, lineHeight: 1.5 }}>
+          {confirmCheck.description}
+        </div>
+        {gateResult && <PipelineResultTable result={gateResult}/>}
+      </div>
+    </section>
+  );
+}
+
+function StepResultCard({
+  step, index, result, onInspect,
+}: {
+  step: SkillStep;
+  index: number;
+  result: StepRunResult | undefined;
+  onInspect: (id: number) => void;
+}) {
+  const status = result?.status;
+  const isFail = status === "fail";
+  const isPass = status === "pass";
+  const [open, setOpen] = useState(isFail);   // pass steps collapsed by default
+  const accent = isFail ? "var(--fail)" : isPass ? "var(--pass)" : "var(--line-strong)";
+  const accentBg = isFail ? "var(--fail-bg)" : isPass ? "var(--pass-bg)" : "var(--surface-2)";
+  const stepNum = String(index + 1).padStart(2, "0");
+  const actions = step.suggested_actions ?? [];
+
+  return (
+    <div style={{
+      padding: "12px 14px", borderRadius: 10,
+      background: "var(--surface)",
+      border: `1px solid ${accent}`, borderLeft: `4px solid ${accent}`,
+    }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          all: "unset", cursor: "pointer", width: "100%",
+          display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+        }}>
+        <span className="mono" style={{
+          fontSize: 10, fontWeight: 600,
+          color: accent, padding: "2px 8px", borderRadius: 4,
+          background: accentBg, border: `1px solid ${accent}`,
+        }}>
+          STEP {stepNum} · {status === "pass" ? "PASS" : status === "fail" ? "FAIL" : "—"}
+        </span>
+        <span style={{ flex: 1, fontSize: 13.5, color: "var(--ink)", fontWeight: 500, lineHeight: 1.45 }}>
+          {step.text}
+        </span>
+        {step.pipeline_id != null && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); if (step.pipeline_id != null) onInspect(step.pipeline_id); }}
+            style={{
+              all: "unset", cursor: "pointer",
+              fontSize: 11, color: "var(--ai)", marginRight: 8,
+            }}>Inspect ↗</button>
+        )}
+        <span style={{
+          fontSize: 11, color: "var(--ink-3)", display: "inline-flex", alignItems: "center", gap: 2,
+        }}>
+          {open ? "Hide" : "View"} <Icon.Chevron/>
+        </span>
+      </button>
+      {open && (
+        <>
+          {result && <PipelineResultTable result={result}/>}
+          {/* Suggested actions: HALT callout for high, soft row for med/low */}
+          <InlineActions actions={actions} mode="run"/>
+          {actions.length === 0 && isFail && (
+            <div style={{
+              marginTop: 10, padding: "8px 12px", borderRadius: 6,
+              background: "var(--surface-2)", color: "var(--ink-3)",
+              fontSize: 11.5, fontStyle: "italic",
+            }}>
+              這個 step 沒設定 suggested action — 在 Author mode 加上「若 fail 該怎麼做」會更實用。
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function SummaryReport({
   steps, results, testCase, onRerun, onClose,
+  confirmCheck, confirmRunResult, onInspect,
 }: {
   steps: SkillStep[];
-  results: Record<string, { status: "pass" | "fail"; value: string; note: string }>;
+  results: Record<string, StepRunResult>;
   testCase: TestCase | null;
   onRerun: () => void;
   onClose: () => void;
+  confirmCheck: ConfirmCheck | null;
+  confirmRunResult: StepRunResult | null;
+  onInspect: (id: number) => void;
 }) {
-  const failed = steps.filter((s) => results[s.id]?.status === "fail");
   const passed = steps.filter((s) => results[s.id]?.status === "pass");
-  const hasFail = failed.length > 0;
+  const failed = steps.filter((s) => results[s.id]?.status === "fail");
+
+  const hasGate = !!confirmCheck;
+  // Java's SkillRunner default: must_pass=true unless explicitly false
+  const mustPass = confirmCheck ? !((confirmCheck as { must_pass?: boolean }).must_pass === false) : false;
+  const gateBlocked = hasGate && mustPass && confirmRunResult?.status === "fail";
+
+  const verdict = (() => {
+    if (gateBlocked) {
+      return {
+        kind: "gate_blocked" as const,
+        title: "ALARM GATE FAILED · checklist 已跳過",
+        subtitle: "C1 條件未達成 — 不視為真正的告警情境，未執行後續診斷。",
+      };
+    }
+    if (failed.length === 0 && (!hasGate || confirmRunResult?.status === "pass")) {
+      return {
+        kind: "no_alarm" as const,
+        title: `NO ALARM · all ${steps.length} check${steps.length === 1 ? "" : "s"} passed`,
+        subtitle: hasGate
+          ? "Gate 通過 + 所有 checklist 都 pass — 沒有需要工程師處理的事項。"
+          : "所有 checklist 都 pass — 沒有需要工程師處理的事項。",
+      };
+    }
+    return {
+      kind: "alarm" as const,
+      title: `ALARM RAISED · ${failed.length} finding${failed.length === 1 ? "" : "s"} flagged`,
+      subtitle: `${passed.length} of ${steps.length} check${steps.length === 1 ? "" : "s"} passed · 請依下方建議行動處理。`,
+    };
+  })();
 
   return (
     <section style={{
@@ -1585,126 +1891,53 @@ function SummaryReport({
       overflow: "hidden",
       boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
     }}>
-      <div style={{ padding: "18px 20px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "flex-start", gap: 14 }}>
-        <span style={{
-          width: 36, height: 36, borderRadius: 8, flexShrink: 0,
-          display: "inline-flex", alignItems: "center", justifyContent: "center",
-          background: hasFail ? "var(--fail-bg)" : "var(--pass-bg)",
-          color: hasFail ? "var(--fail)" : "var(--pass)",
-        }}>
-          {hasFail ? <Icon.Bolt/> : <Icon.Check/>}
-        </span>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="mono" style={{ fontSize: 9.5, letterSpacing: "0.08em", color: "var(--ink-3)" }}>
-            DIAGNOSTIC SUMMARY · {testCase ? "DRY-RUN" : "LIVE"}
-          </div>
-          <h2 style={{ margin: "4px 0 0", fontSize: 18, fontWeight: 600, letterSpacing: "-0.01em", color: "var(--ink)" }}>
-            {hasFail
-              ? `${failed.length} finding${failed.length > 1 ? "s" : ""} flagged · ${passed.length} of ${steps.length} checks passed`
-              : `All ${steps.length} checks passed · no issue detected`}
-          </h2>
-          {testCase && (
-            <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--ink-3)" }}>
-              Test case · <span style={{ color: "var(--ink-2)" }}>{testCase.title}</span>
-            </div>
-          )}
-        </div>
-        <button onClick={onClose} title="Dismiss summary" style={{
-          all: "unset", cursor: "pointer", padding: 6, borderRadius: 4,
-          color: "var(--ink-3)",
-        }}><Icon.X/></button>
-      </div>
+      <VerdictHeader verdict={verdict} testCase={testCase} onClose={onClose}/>
 
-      <div style={{ padding: "16px 20px" }}>
-        {hasFail && (
-          <>
-            <div className="mono" style={{ fontSize: 9.5, letterSpacing: "0.08em", color: "var(--ink-3)", marginBottom: 10 }}>FINDINGS</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 18 }}>
-              {failed.map((s) => {
-                const idx = steps.findIndex((x) => x.id === s.id);
-                const r = results[s.id];
-                return (
-                  <div key={s.id} style={{
-                    padding: "12px 14px",
-                    border: "1px solid var(--fail)",
-                    background: "var(--fail-bg)",
-                    borderRadius: 8,
-                  }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                      <span className="mono" style={{ fontSize: 10, color: "var(--fail)", padding: "1px 7px", border: "1px solid var(--fail)", borderRadius: 4, fontWeight: 600 }}>
-                        STEP {String(idx + 1).padStart(2, "0")}
-                      </span>
-                      <strong style={{ fontSize: 13.5, color: "var(--ink)" }}>{r?.value}</strong>
-                    </div>
-                    <div style={{ marginTop: 7, fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.55 }}>
-                      <span style={{ color: "var(--ink-3)" }}>Step ·</span> {s.text}
-                    </div>
-                    {r?.note && (
-                      <div className="mono" style={{ marginTop: 4, fontSize: 11.5, color: "var(--ink-2)" }}>
-                        <span style={{ color: "var(--ink-3)" }}>detail ·</span> {r.note}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            {/* Suggested actions aggregated from failed steps */}
-            {failed.flatMap((s) => s.suggested_actions ?? []).length > 0 && (
-              <>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-                  <span className="mono" style={{ fontSize: 9.5, letterSpacing: "0.08em", color: "var(--ink-3)" }}>SUGGESTED NEXT ACTIONS</span>
-                  <span className="mono" style={{ fontSize: 10, color: "var(--ink-4)" }}>· ✨ advisory · 不會自動執行</span>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 18 }}>
-                  {failed.flatMap((s) => s.suggested_actions ?? []).map((a) => (
-                    <div key={a.id} style={{
-                      display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 14, alignItems: "flex-start",
-                      padding: "12px 14px",
-                      background: "var(--sys-bg)",
-                      border: "1px solid var(--sys-line)",
-                      borderRadius: 8,
-                    }}>
-                      <span style={{
-                        width: 22, height: 22, borderRadius: 6, marginTop: 1,
-                        display: "inline-flex", alignItems: "center", justifyContent: "center",
-                        background: a.confidence === "high" ? "var(--ai-bg)" : "var(--surface)",
-                        color: a.confidence === "high" ? "var(--ai)" : "var(--ink-3)",
-                        border: "1px solid var(--sys-line)",
-                      }}><Icon.Spark/></span>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 500, color: "var(--ink)" }}>{a.detail || a.title}</div>
-                        {a.detail && a.title && (
-                          <div style={{ fontSize: 11, color: "var(--ink-4)", marginTop: 2 }}>{a.title}</div>
-                        )}
-                        {a.rationale && (
-                          <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-4)", marginTop: 6, lineHeight: 1.5 }}>
-                            ✨ why · {a.rationale}
-                          </div>
-                        )}
-                      </div>
-                      <span className="mono" style={{
-                        fontSize: 10, padding: "2px 8px", borderRadius: 999,
-                        background: "var(--surface)", border: "1px solid var(--sys-line)", color: "var(--ink-3)",
-                        whiteSpace: "nowrap",
-                      }}>
-                        {a.confidence}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </>
-        )}
-        <div style={{
-          paddingTop: 14, borderTop: "1px solid var(--line)",
-          display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
-        }}>
-          <Btn kind="ghost">Export PDF report</Btn>
-          {testCase && <Btn kind="ghost">Add to regression set</Btn>}
-          <span style={{ flex: 1 }}/>
-          <Btn kind="primary" icon={<Icon.Loop/>} onClick={onRerun}>Run with another case</Btn>
-        </div>
+      <SynthesisStrip
+        hasGate={hasGate}
+        gateResult={confirmRunResult}
+        passCount={passed.length}
+        failCount={failed.length}
+        totalSteps={steps.length}
+        gateBlocked={gateBlocked}
+      />
+
+      {hasGate && (
+        <GateResultCard
+          confirmCheck={confirmCheck}
+          gateResult={confirmRunResult}
+          gateBlocked={gateBlocked}
+          onInspect={onInspect}
+        />
+      )}
+
+      {!gateBlocked && steps.length > 0 && (
+        <section style={{ marginTop: 16, padding: "0 20px" }}>
+          <div className="mono" style={{ fontSize: 9.5, letterSpacing: "0.08em", color: "var(--ink-3)", marginBottom: 8 }}>
+            CHECKLIST · {steps.length} STEP{steps.length === 1 ? "" : "S"}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {steps.map((s, i) => (
+              <StepResultCard
+                key={s.id}
+                step={s}
+                index={i}
+                result={results[s.id]}
+                onInspect={onInspect}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      <div style={{
+        margin: "20px 20px 16px", paddingTop: 14, borderTop: "1px solid var(--line)",
+        display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+      }}>
+        <Btn kind="ghost">Export PDF report</Btn>
+        {testCase && <Btn kind="ghost">Add to regression set</Btn>}
+        <span style={{ flex: 1 }}/>
+        <Btn kind="primary" icon={<Icon.Loop/>} onClick={onRerun}>Run with another case</Btn>
       </div>
     </section>
   );
