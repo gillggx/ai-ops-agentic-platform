@@ -245,12 +245,19 @@ public class SkillRunnerService {
         Map<String, Object> nodeResults = nrObj instanceof Map<?, ?>
                 ? (Map<String, Object>) nrObj : Map.of();
         // Find the block_step_check output. Convention: last node's output port "check".
+        // Phase 11 v6 — sidecar's pipeline_executor wraps block return values
+        // in "preview" (with shape {type: "dataframe", columns, rows, total}),
+        // not "outputs". Check both for forward-compat.
         Map<String, Object> stepCheck = null;
         for (Map.Entry<String, Object> e : nodeResults.entrySet()) {
             Map<String, Object> nr = (Map<String, Object>) e.getValue();
-            Map<String, Object> outputs = (Map<String, Object>) nr.getOrDefault("outputs", Map.of());
-            if (outputs.containsKey("check")) {
-                stepCheck = (Map<String, Object>) outputs.get("check");
+            for (String key : new String[]{"outputs", "preview"}) {
+                Object portsObj = nr.get(key);
+                if (!(portsObj instanceof Map<?, ?> ports)) continue;
+                if (ports.containsKey("check")) {
+                    stepCheck = (Map<String, Object>) ports.get("check");
+                    break;
+                }
             }
         }
         Map<String, Object> sr = new HashMap<>();
