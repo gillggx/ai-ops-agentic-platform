@@ -594,7 +594,11 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
             # Phase 11 v6 — when canvas snapshot says _kind="skill_step",
             # forward skill_step_mode=True so graph_build's validate node
             # enforces block_step_check terminator + plan_node hints toward it.
-            if isinstance(snap, dict) and snap.get("_kind") == "skill_step":
+            snap_kind = snap.get("_kind") if isinstance(snap, dict) else None
+            logger.info("tool_execute build_pipeline_live: snap_kind=%r snap_keys=%s",
+                        snap_kind,
+                        list(snap.keys())[:10] if isinstance(snap, dict) else None)
+            if snap_kind == "skill_step":
                 tool_input = {**tool_input, "_skill_step_mode": True}
             result = await _execute_build_pipeline_live(
                 db,
