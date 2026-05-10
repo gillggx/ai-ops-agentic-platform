@@ -83,14 +83,16 @@ test.describe("Skill flow — full GUI with real agent", () => {
           { timeout: 90_000, polling: 2000 },
         );
       } catch (e) {
-        // Diagnostic: snapshot what the agent left on screen so we can debug
-        // out-of-band. Common fail: skill_step_mode not propagated, agent
-        // ends up building chart/alert pipeline instead of step_check.
         await builderTab.screenshot({ path: "playwright-report/agent-timeout-builder-tab.png", fullPage: true });
         const agentText = await builderTab.locator('[data-testid="agent-panel"], aside, [class*="AIAgent"]').first().innerText().catch(() => "(no agent panel found)");
-        console.log("AGENT PANEL CONTENT (first 800 chars):\n" + agentText.slice(0, 800));
-        const canvasText = await builderTab.locator('main, .react-flow').first().innerText().catch(() => "(no canvas)");
-        console.log("CANVAS CONTENT (first 400 chars):\n" + canvasText.slice(0, 400));
+        console.log("AGENT PANEL CONTENT (last 800 chars):\n" + agentText.slice(-800));
+        // Dump all visible buttons so we can see what's blocking interaction
+        const buttons = await builderTab.locator('button:visible').all();
+        console.log(`VISIBLE BUTTONS (${buttons.length}):`);
+        for (let i = 0; i < Math.min(buttons.length, 20); i++) {
+          const t = await buttons[i].innerText().catch(() => "?");
+          console.log(`  - ${JSON.stringify(t.slice(0, 80))}`);
+        }
         throw e;
       }
       const nodeCount = await builderTab.locator(".react-flow__node").count();
