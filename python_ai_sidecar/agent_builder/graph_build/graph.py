@@ -34,6 +34,7 @@ from python_ai_sidecar.agent_builder.graph_build.nodes.repair_plan import (
     repair_plan_node,
 )
 from python_ai_sidecar.agent_builder.graph_build.nodes.confirm import confirm_gate_node
+from python_ai_sidecar.agent_builder.graph_build.nodes.canvas_reset import canvas_reset_node
 from python_ai_sidecar.agent_builder.graph_build.nodes.dispatch import dispatch_op_node
 from python_ai_sidecar.agent_builder.graph_build.nodes.execute import call_tool_node
 from python_ai_sidecar.agent_builder.graph_build.nodes.repair_op import (
@@ -55,6 +56,10 @@ def _route_after_validate(state: BuildGraphState) -> str:
     skip_confirm=True (Chat Mode) bypasses confirm_gate even on FROM_SCRATCH:
     the chat conversation IS the confirmation; pausing the chat orchestrator
     mid-tool to wait for a UI click would break the conversational flow.
+
+    Phase 11 v13 — when is_from_scratch + skip_confirm, route through
+    canvas_reset first so leftover nodes from earlier build_pipeline_live
+    calls don't bleed into the new build (user reported orphan-node bug).
     """
     errors = state.get("plan_validation_errors") or []
     if errors:
@@ -63,17 +68,18 @@ def _route_after_validate(state: BuildGraphState) -> str:
             logger.warning("route_after_validate: plan_unfixable (attempts=%d)", attempts)
             return "finalize"  # finalize will mark status=failed since no pipeline produced
         return "repair_plan"
-    if state.get("skip_confirm"):
-        return "dispatch_op"
     if state.get("is_from_scratch"):
+        if state.get("skip_confirm"):
+            return "canvas_reset"
         return "confirm_gate"
     return "dispatch_op"
 
 
 def _route_after_confirm(state: BuildGraphState) -> str:
-    """User confirmed? → start executing. Rejected? → END (finalize w/ no-op)."""
+    """User confirmed? → canvas_reset (always — user said yes to a fresh
+    build) → dispatch. Rejected? → END (finalize w/ no-op)."""
     if state.get("user_confirmed") is True:
-        return "dispatch_op"
+        return "canvas_reset"
     return "finalize"
 
 
@@ -122,6 +128,7 @@ def build_graph():
     g.add_node("validate", validate_plan_node)
     g.add_node("repair_plan", repair_plan_node)
     g.add_node("confirm_gate", confirm_gate_node)
+    g.add_node("canvas_reset", canvas_reset_node)
     g.add_node("dispatch_op", dispatch_op_node)
     g.add_node("call_tool", call_tool_node)
     g.add_node("repair_op", repair_op_node)
@@ -136,6 +143,7 @@ def build_graph():
         {
             "repair_plan": "repair_plan",
             "confirm_gate": "confirm_gate",
+            "canvas_reset": "canvas_reset",
             "dispatch_op": "dispatch_op",
             "finalize": "finalize",
         },
@@ -144,8 +152,10 @@ def build_graph():
     g.add_conditional_edges(
         "confirm_gate",
         _route_after_confirm,
-        {"dispatch_op": "dispatch_op", "finalize": "finalize"},
+        {"canvas_reset": "canvas_reset", "finalize": "finalize"},
     )
+    # canvas_reset → dispatch_op (always — runs once for from_scratch builds)
+    g.add_edge("canvas_reset", "dispatch_op")
     g.add_edge("dispatch_op", "call_tool")
     g.add_conditional_edges(
         "call_tool",

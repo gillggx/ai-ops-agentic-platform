@@ -121,26 +121,36 @@ def _format_catalog(catalog: dict[tuple[str, str], dict[str, Any]]) -> str:
     them the LLM blindly passes user phrases ('spc_xbar_chart_value') to enum
     params, picks out-of-range numbers (limit=1000 vs max 200), or references
     column names that don't exist in upstream output.
+
+    Phase 11 v13 — when a block has any free-form `object` param (e.g.
+    block_compute.expression, block_mcp_call.args), the one-line summary
+    can't possibly convey the schema, and the LLM blindly invents shapes.
+    For those blocks we emit the FULL DB description + DB examples after
+    the summary line. Whitelist is computed dynamically from param_schema
+    (no hardcoded block-name list).
     """
     lines = []
     for (name, version), spec in sorted(catalog.items()):
-        desc = (spec.get("description") or "").strip().split("\n", 1)[0]
-        if len(desc) > 120:
-            desc = desc[:120].rsplit(" ", 1)[0] + "…"
+        full_desc = (spec.get("description") or "").strip()
+        first_line = full_desc.split("\n", 1)[0]
+        if len(first_line) > 120:
+            first_line = first_line[:120].rsplit(" ", 1)[0] + "…"
         in_ports = [p.get("port") for p in (spec.get("input_schema") or [])]
         out_ports = [p.get("port") for p in (spec.get("output_schema") or [])]
-        param_props = ((spec.get("param_schema") or {}).get("properties") or {})
+        param_schema = spec.get("param_schema") or {}
+        param_props = (param_schema.get("properties") or {})
         param_hints = []
+        has_freeform_object = False
         for k, v in param_props.items():
             if not isinstance(v, dict):
                 continue
+            t = v.get("type") or "?"
             enum = v.get("enum")
             if enum is not None:
                 preview = enum[:6]
                 more = "" if len(enum) <= 6 else f"…+{len(enum)-6}"
                 param_hints.append(f"{k}∈{preview}{more}")
                 continue
-            t = v.get("type") or "?"
             mn = v.get("minimum")
             mx = v.get("maximum")
             if mn is not None or mx is not None:
@@ -148,14 +158,37 @@ def _format_catalog(catalog: dict[tuple[str, str], dict[str, Any]]) -> str:
                 param_hints.append(f"{k}:{t}{rng}")
             else:
                 param_hints.append(f"{k}:{t}")
+            # An `object` param with no `properties` of its own = free-form
+            # dict the LLM has to invent. These need the full description.
+            if t == "object" and not v.get("properties"):
+                has_freeform_object = True
         params_str = ", ".join(param_hints) if param_hints else "(none)"
         out_cols_str = _format_out_cols(name, spec)
         lines.append(
             f"- {name}@{version}  in={in_ports}  out={out_ports}  "
             f"params={{{params_str}}}\n"
             f"    out_cols={out_cols_str}\n"
-            f"    — {desc}"
+            f"    — {first_line}"
         )
+        if has_freeform_object:
+            # Inject the full description (already authored in DB) so the LLM
+            # sees the embedded grammar / examples instead of inventing.
+            indented = "      " + full_desc.replace("\n", "\n      ")
+            lines.append(f"    [Full schema for {name}]\n{indented}")
+            examples = spec.get("examples") or []
+            if examples:
+                # examples is a list of {title?, params}. Include first 2.
+                import json as _json
+                for i, ex in enumerate(examples[:2]):
+                    if not isinstance(ex, dict):
+                        continue
+                    ex_params = ex.get("params") or ex
+                    try:
+                        ex_str = _json.dumps(ex_params, ensure_ascii=False, indent=2)
+                    except (TypeError, ValueError):
+                        continue
+                    ex_indented = "      " + ex_str.replace("\n", "\n      ")
+                    lines.append(f"    [Example {i+1} for {name}]\n{ex_indented}")
     return "\n".join(lines)
 
 

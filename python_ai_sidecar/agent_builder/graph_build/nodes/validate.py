@@ -10,6 +10,7 @@ Uses logical ids — real ids are not assigned yet.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from pydantic import ValidationError
@@ -165,6 +166,14 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
     if not errors:  # don't bother if pass 2 already failed — repair_plan first
         order_errors = _check_op_order_and_column_refs(plan_raw, parsed, registry, state)
         errors.extend(order_errors)
+
+    # Pass 4.5 — Phase 11 v13. Block-specific deep validators for params
+    # whose schema is too free-form for pass-2 (free-form `object` types).
+    # Per CLAUDE.md「flow 由 graph 決定」this lives here as a deterministic
+    # validator, NOT as prompt rules — repair_plan picks it up and re-prompts.
+    if not errors:
+        deep_errors = await _check_freeform_object_params(parsed)
+        errors.extend(deep_errors)
 
     # Pass 4 — Phase 11 skill-step terminal check.
     # When the caller is creating a Skill step's pipeline, the plan must end
@@ -425,3 +434,215 @@ def _strip_block_id_version(op_raw: dict[str, Any]) -> dict[str, Any]:
 
 def _event(name: str, data: dict[str, Any]) -> dict[str, Any]:
     return {"event": name, "data": data}
+
+
+# ── Phase 11 v13 — block-specific deep validators ──────────────────────
+#
+# Pass 4.5 looks at every (add_node | set_param) for blocks whose param
+# schema is a free-form object (block_compute.expression, block_mcp_call.args).
+# Pass 2's generic `_check_param_value` only checks `type=='object'` — it
+# can't tell whether the dict is structurally legal. These validators
+# implement the structural rules in code (CLAUDE.md flow-in-graph rule),
+# so repair_plan can pick up the error and re-prompt the LLM with the
+# FIX suggestion in the error message.
+#
+# All structural rules come from the BLOCK / MCP DB description — not
+# hardcoded here. We just walk the shape declared upstream.
+
+
+def _accumulate_node_params(parsed: list[Op]) -> dict[str, dict[str, Any]]:
+    """Replay add_node + set_param ops to compute the final params each
+    logical node id will have. Returns {logical_id: {block_id, params}}."""
+    state: dict[str, dict[str, Any]] = {}
+    for op in parsed:
+        if op is None:
+            continue
+        if op.type == OpType.ADD_NODE and op.node_id:
+            state[op.node_id] = {
+                "block_id": op.block_id,
+                "params": dict(op.params or {}),
+            }
+        elif op.type == OpType.SET_PARAM and op.node_id and op.node_id in state:
+            params = op.params or {}
+            key = params.get("key")
+            value = params.get("value")
+            if key is not None:
+                state[op.node_id]["params"][key] = value
+    return state
+
+
+def _walk_compute_expression(node: Any, path: str) -> list[str]:
+    """Recursively check that ``node`` matches the expression grammar:
+       literal | {column: str} | {op: str, operands: list}.
+    Grammar source = python_ai_sidecar.pipeline_builder.blocks.compute._eval."""
+    errors: list[str] = []
+    if node is None or isinstance(node, (bool, int, float, str)):
+        return errors  # literal — OK
+    if isinstance(node, list):
+        return errors  # list literal — OK (e.g. for `in` op)
+    if not isinstance(node, dict):
+        errors.append(
+            f"{path}: must be literal | {{column: ...}} | {{op: ..., operands: [...]}}; "
+            f"got {type(node).__name__}"
+        )
+        return errors
+    if "column" in node:
+        col = node["column"]
+        if not isinstance(col, str) or not col:
+            errors.append(f"{path}.column: must be a non-empty string; got {col!r}")
+        return errors
+    if "op" in node:
+        operands = node.get("operands")
+        if not isinstance(operands, list):
+            errors.append(
+                f"{path}: op '{node['op']}' missing 'operands' list "
+                f"(got keys={sorted(node.keys())[:5]})"
+            )
+            return errors
+        for i, child in enumerate(operands):
+            errors.extend(_walk_compute_expression(child, f"{path}.operands[{i}]"))
+        return errors
+    errors.append(
+        f"{path}: dict node must have 'column' or 'op' key "
+        f"(got keys={sorted(node.keys())[:5]} — see block_compute description for grammar)"
+    )
+    return errors
+
+
+async def _check_mcp_call_args(node_id: str, args: Any) -> list[str]:
+    """Check block_mcp_call.args against the MCP's DB-declared input_schema.
+
+    Required fields (input_schema entries with required=true) MUST be
+    present in args. We DO NOT hardcode any MCP-name-specific rules —
+    the source of truth is mcp_definitions.input_schema in the Java DB.
+    """
+    errors: list[str] = []
+    if not isinstance(args, dict):
+        errors.append(
+            f"node '{node_id}' (mcp_call): args must be an object/dict, "
+            f"got {type(args).__name__}"
+        )
+        return errors
+    # mcp_name is a sibling param (not inside args). Caller passes us only
+    # args. The mcp_name lookup is done by caller.
+    return errors
+
+
+async def _check_freeform_object_params(parsed: list[Op]) -> list[str]:
+    """Pass 4.5 entry: replay ops, find blocks with free-form object params,
+    walk shape against grammar, query MCP DB schema for mcp_call args.
+
+    Returns a list of error strings already prefixed with op-style locator;
+    repair_plan_node will feed them back to the LLM verbatim.
+    """
+    from python_ai_sidecar.clients.java_client import JavaAPIClient
+    from python_ai_sidecar.config import CONFIG
+
+    errors: list[str] = []
+    accumulated = _accumulate_node_params(parsed)
+
+    # Collect mcp_name → set of nodes referencing it so we batch fetch
+    # mcp_definitions (one HTTP per unique MCP).
+    mcp_refs: dict[str, list[tuple[str, dict]]] = {}
+
+    for node_id, info in accumulated.items():
+        block_id = info.get("block_id")
+        params = info.get("params") or {}
+
+        if block_id == "block_compute":
+            expr = params.get("expression")
+            if expr is not None:
+                expr_errors = _walk_compute_expression(expr, f"node '{node_id}'.expression")
+                errors.extend(expr_errors)
+
+        elif block_id == "block_mcp_call":
+            mcp_name = params.get("mcp_name")
+            args = params.get("args", {})
+            shape_errors = await _check_mcp_call_args(node_id, args)
+            errors.extend(shape_errors)
+            if isinstance(mcp_name, str) and mcp_name:
+                mcp_refs.setdefault(mcp_name, []).append((node_id, params))
+
+    # Resolve MCP definitions once (per unique mcp_name) and check args
+    # against declared required fields.
+    if mcp_refs:
+        try:
+            client = JavaAPIClient(
+                CONFIG.java_api_url, CONFIG.java_internal_token,
+                CONFIG.aiops_shared_secret_token,
+            )
+            for mcp_name, refs in mcp_refs.items():
+                try:
+                    mcp_def = await client.get_mcp_by_name(mcp_name)
+                except Exception as ex:  # noqa: BLE001
+                    logger.warning("validate: failed to fetch MCP '%s' schema: %s", mcp_name, ex)
+                    continue
+                if not mcp_def:
+                    errors.append(
+                        f"mcp_call: unknown mcp_name '{mcp_name}' "
+                        f"(not registered in mcp_definitions)"
+                    )
+                    continue
+                input_schema = mcp_def.get("input_schema") or mcp_def.get("inputSchema") or []
+                # input_schema may be either a JSON-Schema-ish {properties:...}
+                # OR a list of {name,type,required,description} entries
+                # (mcp_definitions stores list-of-entries — see the MCP we
+                # already inspected). Handle both.
+                required_names: list[str] = []
+                if isinstance(input_schema, list):
+                    required_names = [
+                        e.get("name") for e in input_schema
+                        if isinstance(e, dict) and e.get("required") is True and e.get("name")
+                    ]
+                elif isinstance(input_schema, dict):
+                    required_names = list(input_schema.get("required") or [])
+
+                # MCP-level "at least one of" semantics aren't in JSON-Schema
+                # by default. We rely on description's「Required params」
+                # section if present (DB description is the source of truth
+                # per CLAUDE.md). Pattern: "至少帶 X / Y / Z" line.
+                desc = (mcp_def.get("description") or "")
+                at_least_one_of = _parse_at_least_one_of(desc)
+
+                for node_id, params in refs:
+                    args = params.get("args") or {}
+                    if not isinstance(args, dict):
+                        continue
+                    # Hard required (required=true)
+                    missing_req = [n for n in required_names if n not in args]
+                    if missing_req:
+                        errors.append(
+                            f"node '{node_id}' (mcp_call '{mcp_name}'): "
+                            f"missing required args {missing_req}. "
+                            f"See mcp_definitions.{mcp_name}.input_schema."
+                        )
+                    # At-least-one-of
+                    if at_least_one_of and not any(k in args for k in at_least_one_of):
+                        errors.append(
+                            f"node '{node_id}' (mcp_call '{mcp_name}'): "
+                            f"args must include at least ONE of {at_least_one_of}. "
+                            f"This MCP returns 400 if all are missing — see its description."
+                        )
+        except Exception as ex:  # noqa: BLE001
+            logger.warning("validate: MCP resolution batch failed: %s", ex)
+
+    return errors
+
+
+_AT_LEAST_RE = re.compile(
+    r"至少帶?\s*([A-Za-z_][A-Za-z0-9_]*(?:\s*[/、]\s*[A-Za-z_][A-Za-z0-9_]*)+)",
+)
+
+
+def _parse_at_least_one_of(description: str) -> list[str]:
+    """Find「至少帶 toolID / lotID / step」-style lines in MCP description.
+    Returns the listed param names. Empty list if pattern not found.
+    """
+    if not description:
+        return []
+    m = _AT_LEAST_RE.search(description)
+    if not m:
+        return []
+    raw = m.group(1)
+    parts = [p.strip() for p in re.split(r"[/、]", raw)]
+    return [p for p in parts if p]
