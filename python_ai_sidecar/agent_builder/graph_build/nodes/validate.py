@@ -568,8 +568,9 @@ async def _check_freeform_object_params(parsed: list[Op]) -> list[str]:
     if mcp_refs:
         try:
             client = JavaAPIClient(
-                CONFIG.java_api_url, CONFIG.java_internal_token,
-                CONFIG.aiops_shared_secret_token,
+                base_url=CONFIG.java_api_url,
+                token=CONFIG.java_internal_token,
+                timeout_sec=CONFIG.java_timeout_sec,
             )
             for mcp_name, refs in mcp_refs.items():
                 try:
