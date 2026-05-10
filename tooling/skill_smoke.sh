@@ -127,11 +127,12 @@ assert_match "instruction=" "$URL" "URL has instruction"
 
 # ── 4. Insert fake pipeline ──────────────────────────────────────────
 blue "[4/8] INSERT fake pb_pipelines row"
-FAKE_PID=$(psql $PG_DSN -tAc "
+PSQL_OUT=$(psql $PG_DSN -tAc "
   INSERT INTO pb_pipelines (name, description, status, version, pipeline_json)
   VALUES ('smoke fake', 'smoke', 'draft', '1.0.0',
           '{\"version\":\"1.0\",\"name\":\"smoke\",\"nodes\":[],\"edges\":[],\"inputs\":[]}')
-  RETURNING id;" | head -n 1 | tr -d ' \r\n')
+  RETURNING id;")
+FAKE_PID=$(printf '%s\n' "$PSQL_OUT" | sed -n '1p' | tr -d ' \r\n')
 assert_match "^[0-9]+$" "$FAKE_PID" "fake pipeline created (id=$FAKE_PID)"
 
 # ── 5. Bind to confirm slot ──────────────────────────────────────────
