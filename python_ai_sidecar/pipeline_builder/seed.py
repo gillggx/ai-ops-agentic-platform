@@ -1773,6 +1773,28 @@ def _blocks() -> list[dict[str, Any]]:
                 },
             },
             "implementation": {"type": "python", "ref": "app.services.pipeline_builder.blocks.sort:SortBlockExecutor"},
+            # Phase 11 v15: examples for the array-of-objects shape that
+            # LLMs frequently miswrite (saw `columns=[3]` literal in user
+            # report). Catalog formatter inlines these so the agent learns
+            # the shape from data, not prompt.
+            "examples": [
+                {
+                    "title": "排序 by 單欄 desc + top-N",
+                    "params": {
+                        "columns": [{"column": "ooc_count", "order": "desc"}],
+                        "limit": 3,
+                    },
+                },
+                {
+                    "title": "多欄排序 (toolID asc, eventTime desc)",
+                    "params": {
+                        "columns": [
+                            {"column": "toolID", "order": "asc"},
+                            {"column": "eventTime", "order": "desc"},
+                        ],
+                    },
+                },
+            ],
         },
         {
             "name": "block_alert",

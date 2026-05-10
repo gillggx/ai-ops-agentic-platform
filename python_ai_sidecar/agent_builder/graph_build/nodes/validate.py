@@ -617,6 +617,40 @@ def _walk_compute_expression(node: Any, path: str) -> list[str]:
     return errors
 
 
+def _check_sort_columns(cols: Any, path: str) -> list[str]:
+    """Validate block_sort.columns shape: must be list of {column, order?}.
+    Source of truth = python_ai_sidecar.pipeline_builder.blocks.sort:
+    InvalidSortSpec raised when entry is not dict or missing 'column'."""
+    errors: list[str] = []
+    if not isinstance(cols, list):
+        errors.append(
+            f"{path}: must be a list of {{column, order}}, got {type(cols).__name__}. "
+            f"Example: [{{'column':'ooc_count','order':'desc'}}]"
+        )
+        return errors
+    if not cols:
+        errors.append(f"{path}: empty list — at least one {{column, order}} required")
+        return errors
+    for i, entry in enumerate(cols):
+        if not isinstance(entry, dict):
+            errors.append(
+                f"{path}[{i}]: must be {{column, order}} dict, got "
+                f"{type(entry).__name__}({entry!r}). Example: "
+                f"{{'column':'ooc_count','order':'desc'}}"
+            )
+            continue
+        if "column" not in entry or not isinstance(entry["column"], str) or not entry["column"]:
+            errors.append(
+                f"{path}[{i}]: missing 'column' key (got keys={sorted(entry.keys())[:5]})"
+            )
+        order = entry.get("order")
+        if order is not None and order not in ("asc", "desc"):
+            errors.append(
+                f"{path}[{i}]: order='{order}' invalid (must be 'asc' or 'desc')"
+            )
+    return errors
+
+
 async def _check_mcp_call_args(node_id: str, args: Any) -> list[str]:
     """Check block_mcp_call.args against the MCP's DB-declared input_schema.
 
@@ -662,6 +696,12 @@ async def _check_freeform_object_params(parsed: list[Op]) -> list[str]:
             if expr is not None:
                 expr_errors = _walk_compute_expression(expr, f"node '{node_id}'.expression")
                 errors.extend(expr_errors)
+
+        elif block_id == "block_sort":
+            cols = params.get("columns")
+            if cols is not None:
+                sort_errors = _check_sort_columns(cols, f"node '{node_id}'.columns")
+                errors.extend(sort_errors)
 
         elif block_id == "block_mcp_call":
             mcp_name = params.get("mcp_name")

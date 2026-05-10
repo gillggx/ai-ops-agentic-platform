@@ -158,10 +158,22 @@ def _format_catalog(catalog: dict[tuple[str, str], dict[str, Any]]) -> str:
                 param_hints.append(f"{k}:{t}{rng}")
             else:
                 param_hints.append(f"{k}:{t}")
-            # An `object` param with no `properties` of its own = free-form
-            # dict the LLM has to invent. These need the full description.
+            # Phase 11 v15: schema-heavy detection. The LLM cannot guess any
+            # of these from a one-line summary:
+            #   (a) free-form object (no nested properties)
+            #   (b) array of objects (items.type=='object' or items.properties exists)
+            #   (c) free-form array (items missing entirely)
+            # All three need the full DB description + examples to be reliably
+            # generated. Detection is dynamic — no block-name allow-list.
             if t == "object" and not v.get("properties"):
                 has_freeform_object = True
+            elif t == "array":
+                items = v.get("items") or {}
+                items_t = items.get("type") if isinstance(items, dict) else None
+                if items_t == "object" or (isinstance(items, dict) and items.get("properties")):
+                    has_freeform_object = True
+                elif not items:
+                    has_freeform_object = True
         params_str = ", ".join(param_hints) if param_hints else "(none)"
         out_cols_str = _format_out_cols(name, spec)
         lines.append(
