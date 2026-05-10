@@ -251,10 +251,27 @@ export interface TriggerConfig {
 
 export interface SuggestedAction {
   id: string;
-  title: string;
-  detail: string;
+  // 2026-05-11: simplified to plain text per action. `text` is the new
+  // canonical field. Old fields (title/detail/rationale/confidence) kept
+  // optional for back-compat with existing skill_documents rows; the
+  // editor + display normalize via toActionText() below.
+  text?: string;
+  halt?: boolean;     // optional: replaces confidence='high' (HALT styling)
+  // ── Legacy fields (read-only fallback) ────────────────────────────────
+  title?: string;
+  detail?: string;
   rationale?: string;
-  confidence: "high" | "med" | "low";
+  confidence?: "high" | "med" | "low";
+}
+
+/** Canonical text accessor — handles both new (text) and legacy (detail/title) shapes. */
+export function toActionText(a: SuggestedAction): string {
+  return (a.text ?? a.detail ?? a.title ?? "").trim();
+}
+
+/** Canonical halt accessor — bridges new boolean and legacy confidence='high'. */
+export function isActionHalt(a: SuggestedAction): boolean {
+  return a.halt === true || a.confidence === "high";
 }
 
 export interface SkillStep {

@@ -18,6 +18,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Icon, Badge, Btn, safeParse,
+  toActionText, isActionHalt,
   type SkillDetail, type SkillStep, type TriggerConfig as TC, type SuggestedAction,
   type ConfirmCheck,
 } from "./atoms";
@@ -911,54 +912,54 @@ function InlineActions({
   if (mode === "author") {
     return (
       <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
-        {actions.map((a) => (
-          <div key={a.id} style={{
-            fontSize: 12.5, color: "var(--ink-3)", lineHeight: 1.5,
-            paddingLeft: 4,
-          }}>
-            <span style={{ color: "var(--ink-4)", marginRight: 6 }}>└ 若符合 ·</span>
-            <span style={{ color: "var(--ink-2)" }}>{a.detail || a.title || "(empty action)"}</span>
-            {a.detail && a.title && (
-              <span style={{ color: "var(--ink-4)", marginLeft: 6, fontSize: 11 }}>· {a.title}</span>
-            )}
-          </div>
-        ))}
+        {actions.map((a) => {
+          const text = toActionText(a);
+          const halt = isActionHalt(a);
+          return (
+            <div key={a.id} style={{
+              fontSize: 12.5, color: "var(--ink-3)", lineHeight: 1.5,
+              paddingLeft: 4,
+            }}>
+              <span style={{ color: "var(--ink-4)", marginRight: 6 }}>└ 若符合 ·</span>
+              {halt && (
+                <span style={{ color: "var(--fail)", fontWeight: 600, marginRight: 6 }}>⚠ HALT</span>
+              )}
+              <span style={{ color: "var(--ink-2)" }}>{text || "(empty action)"}</span>
+            </div>
+          );
+        })}
       </div>
     );
   }
-  // Execute mode — high-confidence actions render as a HALT callout with
-  // a red border-left bar (matches new mock); med/low render as a softer row.
+  // Execute mode — HALT actions render as red callout, others render as
+  // a softer row. With the simplified text-only model, the visual hierarchy
+  // is just halt vs not-halt (was: high vs med vs low confidence).
   return (
     <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
       {actions.map((a) => {
-        const isHalt = a.confidence === "high";
+        const halt = isActionHalt(a);
+        const text = toActionText(a);
         return (
           <div key={a.id} style={{
             padding: "10px 14px", borderRadius: 8,
-            background: isHalt ? "var(--fail-bg)" : "var(--surface-2)",
-            borderLeft: isHalt ? "3px solid var(--fail)" : "3px solid var(--line-strong)",
+            background: halt ? "var(--fail-bg)" : "var(--surface-2)",
+            borderLeft: halt ? "3px solid var(--fail)" : "3px solid var(--line-strong)",
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
-              {isHalt ? (
+              {halt && (
                 <span className="mono" style={{
                   fontSize: 10, fontWeight: 600,
                   color: "var(--fail)",
                   padding: "2px 8px", borderRadius: 4,
                   background: "var(--surface)", border: "1px solid var(--fail)",
                 }}>HALT</span>
-              ) : (
-                <span className="mono" style={{
-                  fontSize: 10, color: "var(--ink-3)",
-                  padding: "2px 8px", borderRadius: 4,
-                  background: "var(--surface)", border: "1px solid var(--line)",
-                }}>{(a.confidence || "med").toUpperCase()}</span>
               )}
-              <span style={{ fontSize: 11, color: isHalt ? "var(--fail)" : "var(--ink-3)" }}>
-                {isHalt ? "若 fail → 停機 / 禁用" : "若 fail → 建議行動"}
+              <span style={{ fontSize: 11, color: halt ? "var(--fail)" : "var(--ink-3)" }}>
+                {halt ? "若 fail → 停機 / 禁用" : "若 fail → 建議行動"}
               </span>
             </div>
             <div style={{ fontSize: 13.5, color: "var(--ink)", fontWeight: 500, lineHeight: 1.5 }}>
-              {a.detail || a.title || "(empty action)"}
+              {text || "(empty action)"}
             </div>
             {a.rationale && (
               <div className="mono" style={{ marginTop: 4, fontSize: 11, color: "var(--ink-3)", lineHeight: 1.5 }}>
@@ -1293,9 +1294,12 @@ function SuggestedActionsEditor({
     onChange(actions.map((a, idx) => idx === i ? { ...a, ...patch } : a));
   };
   const del = (i: number) => onChange(actions.filter((_, idx) => idx !== i));
+  // 2026-05-11: new entries use the simplified shape (text + halt only).
+  // Legacy entries with title/detail/rationale/confidence still load + edit
+  // (the input below reads via toActionText() and writes back to text).
   const add = () => onChange([
     ...actions,
-    { id: "a" + Date.now().toString(36), title: "", detail: "", rationale: "", confidence: "med" },
+    { id: "a" + Date.now().toString(36), text: "", halt: false },
   ]);
 
   // ESC closes the editor — fires only when this editor is mounted.
@@ -1332,44 +1336,59 @@ function SuggestedActionsEditor({
         )}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {actions.map((a, i) => (
-          <div key={a.id} style={{
-            padding: "8px 10px", background: "var(--surface-2)",
-            border: "1px solid var(--line)", borderRadius: 6,
-            display: "flex", flexDirection: "column", gap: 6,
-          }}>
-            {/* Phase 11 v8 — DETAIL is now the primary field (shown inline
-                on the step row). TITLE is optional; legacy data keeps it
-                but new entries can leave blank. confidence drives HALT. */}
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <input value={a.detail} onChange={(e) => upd(i, { detail: e.target.value })}
-                placeholder="若 step fail 時建議的行動（e.g. 禁用該 chamber · 轉排生產至其他 chamber）"
-                style={{ flex: 1, padding: "5px 8px", border: "1px solid var(--line)", borderRadius: 4,
-                         fontSize: 12.5, background: "var(--surface)", outline: "none", fontFamily: "inherit" }}/>
-              <select value={a.confidence} onChange={(e) => upd(i, { confidence: e.target.value as "high" | "med" | "low" })}
-                title="high → HALT 紅色 callout；med/low → 一般灰色"
-                style={{ padding: "5px 8px", border: "1px solid var(--line)", borderRadius: 4, fontSize: 11.5, fontFamily: "inherit" }}>
-                <option value="high">high (HALT)</option>
-                <option value="med">med</option>
-                <option value="low">low</option>
-              </select>
-              <button onClick={() => del(i)} style={{
-                border: "1px solid var(--line)", background: "var(--surface)",
-                color: "var(--fail)", padding: "4px 8px", borderRadius: 4,
-                cursor: "pointer", fontSize: 11,
-              }}>delete</button>
+        {actions.map((a, i) => {
+          const text = toActionText(a);
+          const halt = isActionHalt(a);
+          return (
+            <div key={a.id} style={{
+              display: "flex", gap: 6, alignItems: "center",
+              padding: "6px 8px",
+              background: halt ? "color-mix(in oklch, var(--fail), transparent 92%)" : "var(--surface-2)",
+              border: `1px solid ${halt ? "color-mix(in oklch, var(--fail), transparent 70%)" : "var(--line)"}`,
+              borderRadius: 6,
+            }}>
+              <span style={{
+                fontSize: 11, color: "var(--ink-3)", whiteSpace: "nowrap",
+                fontWeight: 500,
+              }}>↳ 若符合</span>
+              <input
+                value={text}
+                onChange={(e) => upd(i, { text: e.target.value })}
+                placeholder="描述對應的行動…（e.g. 禁用該 chamber · 轉排生產至其他 chamber）"
+                style={{
+                  flex: 1, padding: "5px 8px",
+                  border: "1px solid var(--line)", borderRadius: 4,
+                  fontSize: 12.5, background: "var(--surface)",
+                  outline: "none", fontFamily: "inherit",
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => upd(i, { halt: !halt })}
+                title={halt ? "HALT marker on — 紅色 callout" : "標記為 HALT (高優先 / 紅色顯示)"}
+                aria-pressed={halt}
+                style={{
+                  all: "unset", cursor: "pointer",
+                  padding: "3px 8px", borderRadius: 4,
+                  fontSize: 10.5, fontWeight: 600,
+                  color: halt ? "var(--bg)" : "var(--ink-3)",
+                  background: halt ? "var(--fail)" : "transparent",
+                  border: `1px solid ${halt ? "var(--fail)" : "var(--line-strong)"}`,
+                }}
+              >⚠ HALT</button>
+              <button
+                type="button"
+                onClick={() => del(i)}
+                aria-label="remove action"
+                style={{
+                  all: "unset", cursor: "pointer",
+                  padding: "0 6px", color: "var(--ink-4)",
+                  fontSize: 14, lineHeight: 1,
+                }}
+              >×</button>
             </div>
-            <input value={a.title} onChange={(e) => upd(i, { title: e.target.value })}
-              placeholder="(可省略) 短標題 — 預設用上方描述當標題"
-              style={{ padding: "5px 8px", border: "1px solid var(--line)", borderRadius: 4,
-                       fontSize: 11.5, background: "var(--surface)", outline: "none", color: "var(--ink-3)", fontFamily: "inherit" }}/>
-            <input value={a.rationale ?? ""} onChange={(e) => upd(i, { rationale: e.target.value })}
-              placeholder="✨ Why（e.g. APC recipe 異動時間與 OOC 高度重疊）"
-              className="mono"
-              style={{ padding: "5px 8px", border: "1px solid var(--line)", borderRadius: 4,
-                       fontSize: 11, background: "var(--surface)", outline: "none", color: "var(--ink-3)" }}/>
-          </div>
-        ))}
+          );
+        })}
       </div>
       <button onClick={add} style={{
         marginTop: 8,
@@ -1379,7 +1398,7 @@ function SuggestedActionsEditor({
         border: "1px dashed var(--line-strong)",
         fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6,
       }}>
-        <Icon.Plus/> Add suggested action
+        <Icon.Plus/> 多加一個
       </button>
     </div>
   );
@@ -1430,41 +1449,42 @@ function SuggestionPanel({ actions }: { actions: SuggestedAction[] }) {
         </span>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {actions.map((a) => (
-          <div key={a.id} style={{
-            display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 12, alignItems: "flex-start",
-            padding: "10px 12px",
-            background: "var(--surface)",
-            border: "1px solid var(--line)",
-            borderLeft: `2px solid ${a.confidence === "high" ? "var(--ai)" : "var(--line-strong)"}`,
-            borderRadius: 6,
-          }}>
-            <span style={{
-              width: 20, height: 20, borderRadius: 5, marginTop: 1,
-              display: "inline-flex", alignItems: "center", justifyContent: "center",
-              background: a.confidence === "high" ? "var(--ai-bg)" : "var(--surface-2)",
-              color: a.confidence === "high" ? "var(--ai)" : "var(--ink-3)",
-            }}><Icon.Spark/></span>
-            <div>
-              <div style={{ fontSize: 12.5, color: "var(--ink)", fontWeight: 500 }}>{a.detail || a.title}</div>
-              {a.detail && a.title && (
-                <div style={{ fontSize: 11, color: "var(--ink-4)", marginTop: 2 }}>{a.title}</div>
-              )}
-              {a.rationale && (
-                <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-4)", marginTop: 6, lineHeight: 1.5 }}>
-                  ✨ why · {a.rationale}
-                </div>
+        {actions.map((a) => {
+          const text = toActionText(a);
+          const halt = isActionHalt(a);
+          return (
+            <div key={a.id} style={{
+              display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 12, alignItems: "flex-start",
+              padding: "10px 12px",
+              background: "var(--surface)",
+              border: "1px solid var(--line)",
+              borderLeft: `2px solid ${halt ? "var(--fail)" : "var(--line-strong)"}`,
+              borderRadius: 6,
+            }}>
+              <span style={{
+                width: 20, height: 20, borderRadius: 5, marginTop: 1,
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                background: halt ? "var(--fail-bg)" : "var(--surface-2)",
+                color: halt ? "var(--fail)" : "var(--ink-3)",
+              }}><Icon.Spark/></span>
+              <div>
+                <div style={{ fontSize: 12.5, color: "var(--ink)", fontWeight: 500 }}>{text || "(empty action)"}</div>
+                {a.rationale && (
+                  <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-4)", marginTop: 6, lineHeight: 1.5 }}>
+                    ✨ why · {a.rationale}
+                  </div>
+                )}
+              </div>
+              {halt && (
+                <span className="mono" style={{
+                  fontSize: 10, padding: "2px 7px", borderRadius: 999,
+                  background: "var(--fail-bg)", color: "var(--fail)",
+                  border: "1px solid var(--fail)", whiteSpace: "nowrap",
+                }}>HALT</span>
               )}
             </div>
-            <span className="mono" style={{
-              fontSize: 10, padding: "2px 7px", borderRadius: 999,
-              background: "var(--surface-2)", color: "var(--ink-3)",
-              border: "1px solid var(--line)", whiteSpace: "nowrap",
-            }}>
-              {a.confidence}
-            </span>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
