@@ -381,6 +381,10 @@ async def _execute_build_pipeline_live(
         parse_resolutions_from_prefix, augment_goal_for_resolutions,
     )
     resolutions = parse_resolutions_from_prefix(chat_user_message)
+    logger.info(
+        "build_pipeline_live: chat_user_message_prefix=%r resolutions=%s",
+        (chat_user_message or "")[:120], resolutions,
+    )
     if resolutions:
         scrubbed_goal = augment_goal_for_resolutions(scrubbed_goal, resolutions)
         logger.info("build_pipeline_live: applied %d resolution hints: %s",
@@ -820,6 +824,10 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
             # the graph guarantees it.
             forced_clars: list[dict[str, Any]] = []
             user_msg_for_check = state.get("user_message") or ""
+            logger.info(
+                "build_pipeline_live intercept: user_msg_prefix=%r",
+                user_msg_for_check[:120],
+            )
             if not user_msg_for_check.startswith("[intent_confirmed:"):
                 from python_ai_sidecar.agent_orchestrator_v2.dimensional_clarifier import (
                     build_clarifications,
