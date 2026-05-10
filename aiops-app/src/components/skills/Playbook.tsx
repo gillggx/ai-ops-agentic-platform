@@ -370,7 +370,15 @@ export default function Playbook({
         gap: 0, maxWidth: 1400, margin: "0 auto",
       }}>
         <main style={{ flex: 1, maxWidth: 860, padding: "0 28px 80px" }}>
-          <PlaybookHeader skill={skill} title={title} trigger={trigger} setTrigger={(t) => { setTrigger(t); markDirty(); }} mode={mode}/>
+          <PlaybookHeader
+            skill={skill}
+            title={title}
+            trigger={trigger}
+            setTrigger={(t) => { setTrigger(t); markDirty(); }}
+            mode={mode}
+            hasConfirm={!!confirmCheck}
+            stepCount={steps.length}
+          />
 
           {showSummary && runState === "done" && (
             <SummaryReport
@@ -582,14 +590,90 @@ function TopBar({
   );
 }
 
+/** Phase 11 v8 — overview chips + arrows showing the playbook flow:
+ *  TRIGGER → ALARM GATE (if any) → CHECKLIST → OUTCOME (advisory only).
+ *  Pure-presentational, derives from existing trigger/confirm/steps state. */
+function FlowDiagram({
+  triggerLabel, hasAlarmGate, alarmGateSteps, checklistSteps,
+}: {
+  triggerLabel: string;
+  hasAlarmGate: boolean;
+  alarmGateSteps: number;
+  checklistSteps: number;
+}) {
+  const Chip = ({ kind, label, mono = false }: { kind: "trigger" | "gate" | "list" | "outcome"; label: React.ReactNode; mono?: boolean }) => {
+    const dot = {
+      trigger: "var(--fail)",
+      gate:    "var(--ai)",
+      list:    "var(--warn)",
+      outcome: "var(--ai)",
+    }[kind];
+    const small = {
+      trigger: "TRIGGER",
+      gate:    `ALARM GATE · ${alarmGateSteps} STEP${alarmGateSteps === 1 ? "" : "S"}`,
+      list:    "CHECKLIST",
+      outcome: "OUTCOME",
+    }[kind];
+    return (
+      <div style={{
+        display: "inline-flex", flexDirection: "column", gap: 4,
+        padding: "8px 14px", borderRadius: 8,
+        background: "var(--surface)", border: "1px solid var(--line)",
+        minWidth: 130,
+      }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span style={{ width: 6, height: 6, borderRadius: 999, background: dot }}/>
+          <span className="mono" style={{ fontSize: 9.5, color: "var(--ink-3)", letterSpacing: "0.06em" }}>
+            {small}
+          </span>
+        </span>
+        <span className={mono ? "mono" : undefined} style={{
+          fontSize: mono ? 12 : 12.5, color: "var(--ink)", fontWeight: 500,
+        }}>{label}</span>
+      </div>
+    );
+  };
+  const Arrow = ({ note }: { note?: string }) => (
+    <span style={{
+      display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 2,
+      color: "var(--ink-3)", fontSize: 16, padding: "0 4px",
+    }}>
+      {note && <span className="mono" style={{ fontSize: 9.5, lineHeight: 1.2 }}>{note}</span>}
+      <span style={{ fontSize: 18, lineHeight: 1 }}>→</span>
+    </span>
+  );
+  return (
+    <div style={{
+      marginTop: 18, padding: "14px 16px",
+      background: "var(--surface-2)", border: "1px solid var(--line)",
+      borderRadius: 10,
+      display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap",
+    }}>
+      <Chip kind="trigger" label={triggerLabel || "—"} mono/>
+      <Arrow/>
+      {hasAlarmGate ? (
+        <>
+          <Chip kind="gate" label="進一步確認 · 達標才告警"/>
+          <Arrow note="if all pass → alarm"/>
+        </>
+      ) : null}
+      <Chip kind="list" label={`診斷 · ${checklistSteps} step${checklistSteps === 1 ? "" : "s"}`}/>
+      <Arrow/>
+      <Chip kind="outcome" label="advisory only"/>
+    </div>
+  );
+}
+
 function PlaybookHeader({
-  skill, title, trigger, setTrigger, mode,
+  skill, title, trigger, setTrigger, mode, hasConfirm, stepCount,
 }: {
   skill: SkillDetail;
   title: string;
   trigger: TC;
   setTrigger: (t: TC) => void;
   mode: "author" | "run";
+  hasConfirm: boolean;
+  stepCount: number;
 }) {
   return (
     <div style={{ padding: "44px 0 28px" }}>
@@ -618,6 +702,25 @@ function PlaybookHeader({
       </div>
 
       <TriggerConfigEditor trigger={trigger} setTrigger={setTrigger} mode={mode}/>
+
+      {/* Phase 11 v8 — flow overview chips so reader sees TRIGGER → ALARM
+          GATE → CHECKLIST → OUTCOME at a glance, instead of having to
+          scroll through three sections to figure out the playbook shape. */}
+      <FlowDiagram
+        triggerLabel={
+          trigger.type === "event" || trigger.type === "system"
+            ? (trigger.event ?? trigger.event_type ?? "(none)")
+            : trigger.type === "user" ? (trigger.name ?? "user-triggered")
+            : (trigger.schedule?.mode === "daily"
+              ? `daily ${trigger.schedule.time ?? "08:00"}`
+              : trigger.schedule?.mode === "hourly"
+                ? `every ${trigger.schedule.every ?? 4}h`
+                : trigger.cron ?? "schedule")
+        }
+        hasAlarmGate={hasConfirm}
+        alarmGateSteps={hasConfirm ? 1 : 0}
+        checklistSteps={stepCount}
+      />
 
       {skill.description && (
         <p style={{
@@ -691,6 +794,98 @@ function StepActionMenu({ items }: {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Phase 11 v8 — small "✨ pipeline ready" badge so author/operator sees
+ *  at-a-glance that a step is wired (matches new mock).  Only shown when
+ *  pipeline_id is bound. */
+function PipelineReadyBadge() {
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 4,
+      padding: "2px 8px", borderRadius: 999,
+      background: "var(--ai-bg)", color: "var(--ai)",
+      fontSize: 11, fontWeight: 500, whiteSpace: "nowrap",
+    }}>
+      <Icon.Spark/> pipeline ready
+    </span>
+  );
+}
+
+/** Phase 11 v8 — render a step's suggested_actions inline beneath the step
+ *  prose (Author: subtle "└ 若符合 · …" lines; Execute: HALT-style callout
+ *  for confidence=high, plain row otherwise). Replaces the previous design
+ *  which hid actions behind ⋯ menu count. detail-first: title is optional
+ *  (legacy data has it, new entries can leave blank). */
+function InlineActions({
+  actions, mode,
+}: {
+  actions: SuggestedAction[];
+  mode: "author" | "run";
+}) {
+  if (!actions || actions.length === 0) return null;
+  if (mode === "author") {
+    return (
+      <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+        {actions.map((a) => (
+          <div key={a.id} style={{
+            fontSize: 12.5, color: "var(--ink-3)", lineHeight: 1.5,
+            paddingLeft: 4,
+          }}>
+            <span style={{ color: "var(--ink-4)", marginRight: 6 }}>└ 若符合 ·</span>
+            <span style={{ color: "var(--ink-2)" }}>{a.detail || a.title || "(empty action)"}</span>
+            {a.detail && a.title && (
+              <span style={{ color: "var(--ink-4)", marginLeft: 6, fontSize: 11 }}>· {a.title}</span>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  }
+  // Execute mode — high-confidence actions render as a HALT callout with
+  // a red border-left bar (matches new mock); med/low render as a softer row.
+  return (
+    <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+      {actions.map((a) => {
+        const isHalt = a.confidence === "high";
+        return (
+          <div key={a.id} style={{
+            padding: "10px 14px", borderRadius: 8,
+            background: isHalt ? "var(--fail-bg)" : "var(--surface-2)",
+            borderLeft: isHalt ? "3px solid var(--fail)" : "3px solid var(--line-strong)",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
+              {isHalt ? (
+                <span className="mono" style={{
+                  fontSize: 10, fontWeight: 600,
+                  color: "var(--fail)",
+                  padding: "2px 8px", borderRadius: 4,
+                  background: "var(--surface)", border: "1px solid var(--fail)",
+                }}>HALT</span>
+              ) : (
+                <span className="mono" style={{
+                  fontSize: 10, color: "var(--ink-3)",
+                  padding: "2px 8px", borderRadius: 4,
+                  background: "var(--surface)", border: "1px solid var(--line)",
+                }}>{(a.confidence || "med").toUpperCase()}</span>
+              )}
+              <span style={{ fontSize: 11, color: isHalt ? "var(--fail)" : "var(--ink-3)" }}>
+                {isHalt ? "若 fail → 停機 / 禁用" : "若 fail → 建議行動"}
+              </span>
+            </div>
+            <div style={{ fontSize: 13.5, color: "var(--ink)", fontWeight: 500, lineHeight: 1.5 }}>
+              {a.detail || a.title || "(empty action)"}
+            </div>
+            {a.rationale && (
+              <div className="mono" style={{ marginTop: 4, fontSize: 11, color: "var(--ink-3)", lineHeight: 1.5 }}>
+                ✨ why · {a.rationale}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -786,17 +981,27 @@ function StepBlock({
                   <Icon.Spark/> Build →
                 </button>
               ) : (
-                <StepActionMenu items={[
-                  { label: "Refine in Pipeline Builder", icon: <Icon.Spark/>,
-                    onClick: () => onOpenInBuilder(step.text) },
-                  { label: "Inspect blocks ↗", icon: <Icon.Pencil/>,
-                    onClick: () => { if (step.pipeline_id != null) onInspect(step.pipeline_id); } },
-                  { label: actionsExpanded ? "Hide suggested actions" : `Suggested actions (${actionsCount})`,
-                    icon: <Icon.Spark/>, onClick: onActionsExpand },
-                  { label: "Remove step", icon: <Icon.X/>, danger: true, onClick: onRemove },
-                ]}/>
+                <>
+                  {/* Phase 11 v8 — green chip so author sees at a glance the
+                      step has a pipeline bound. Replaces the silent "no
+                      indication" state where only the ⋯ menu hinted. */}
+                  <PipelineReadyBadge/>
+                  <StepActionMenu items={[
+                    { label: "Refine in Pipeline Builder", icon: <Icon.Spark/>,
+                      onClick: () => onOpenInBuilder(step.text) },
+                    { label: "Inspect blocks ↗", icon: <Icon.Pencil/>,
+                      onClick: () => { if (step.pipeline_id != null) onInspect(step.pipeline_id); } },
+                    { label: actionsExpanded ? "Hide suggested actions editor" : `Edit suggested actions (${actionsCount})`,
+                      icon: <Icon.Spark/>, onClick: onActionsExpand },
+                    { label: "Remove step", icon: <Icon.X/>, danger: true, onClick: onRemove },
+                  ]}/>
+                </>
               )}
             </div>
+
+            {/* Phase 11 v8 — actions render inline so reader doesn't need to
+                open ⋯ menu to discover them. ⋯ menu still has the editor. */}
+            <InlineActions actions={step.suggested_actions ?? []} mode="author"/>
 
             {actionsExpanded && (
               <SuggestedActionsEditor
@@ -874,15 +1079,18 @@ function StepBlock({
                 here we keep both views (canvas mini below) AND the action
                 menu so an operator can still Refine / Inspect / etc. */}
             {hasPipeline && (
-              <StepActionMenu items={[
-                { label: "Refine in Pipeline Builder", icon: <Icon.Spark/>,
-                  onClick: () => onOpenInBuilder(step.text) },
-                { label: "Inspect blocks ↗", icon: <Icon.Pencil/>,
-                  onClick: () => { if (step.pipeline_id != null) onInspect(step.pipeline_id); } },
-                { label: actionsExpanded ? "Hide suggested actions" : `Suggested actions (${actionsCount})`,
-                  icon: <Icon.Spark/>, onClick: onActionsExpand },
-                { label: "Remove step", icon: <Icon.X/>, danger: true, onClick: onRemove },
-              ]}/>
+              <>
+                <PipelineReadyBadge/>
+                <StepActionMenu items={[
+                  { label: "Refine in Pipeline Builder", icon: <Icon.Spark/>,
+                    onClick: () => onOpenInBuilder(step.text) },
+                  { label: "Inspect blocks ↗", icon: <Icon.Pencil/>,
+                    onClick: () => { if (step.pipeline_id != null) onInspect(step.pipeline_id); } },
+                  { label: actionsExpanded ? "Hide suggested actions editor" : `Edit suggested actions (${actionsCount})`,
+                    icon: <Icon.Spark/>, onClick: onActionsExpand },
+                  { label: "Remove step", icon: <Icon.X/>, danger: true, onClick: onRemove },
+                ]}/>
+              </>
             )}
             {!hasPipeline && (
               <button
@@ -906,6 +1114,10 @@ function StepBlock({
               onInspect={onInspect}
             />
           )}
+
+          {/* Phase 11 v8 — operator-facing inline action callouts.
+              high confidence → HALT red bar; med/low → softer row. */}
+          <InlineActions actions={step.suggested_actions ?? []} mode="run"/>
 
           {/* Phase 11 v6 — Suggested actions editor in Execute mode too
               (operator can record action notes during a run / triage).
@@ -1044,14 +1256,18 @@ function SuggestedActionsEditor({
             border: "1px solid var(--line)", borderRadius: 6,
             display: "flex", flexDirection: "column", gap: 6,
           }}>
+            {/* Phase 11 v8 — DETAIL is now the primary field (shown inline
+                on the step row). TITLE is optional; legacy data keeps it
+                but new entries can leave blank. confidence drives HALT. */}
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <input value={a.title} onChange={(e) => upd(i, { title: e.target.value })}
-                placeholder="建議行動的標題（e.g. 回退 APC recipe）"
+              <input value={a.detail} onChange={(e) => upd(i, { detail: e.target.value })}
+                placeholder="若 step fail 時建議的行動（e.g. 禁用該 chamber · 轉排生產至其他 chamber）"
                 style={{ flex: 1, padding: "5px 8px", border: "1px solid var(--line)", borderRadius: 4,
                          fontSize: 12.5, background: "var(--surface)", outline: "none", fontFamily: "inherit" }}/>
               <select value={a.confidence} onChange={(e) => upd(i, { confidence: e.target.value as "high" | "med" | "low" })}
+                title="high → HALT 紅色 callout；med/low → 一般灰色"
                 style={{ padding: "5px 8px", border: "1px solid var(--line)", borderRadius: 4, fontSize: 11.5, fontFamily: "inherit" }}>
-                <option value="high">high</option>
+                <option value="high">high (HALT)</option>
                 <option value="med">med</option>
                 <option value="low">low</option>
               </select>
@@ -1061,10 +1277,10 @@ function SuggestedActionsEditor({
                 cursor: "pointer", fontSize: 11,
               }}>delete</button>
             </div>
-            <input value={a.detail} onChange={(e) => upd(i, { detail: e.target.value })}
-              placeholder="詳細描述（e.g. rev. 18 為最後一個 stable revision）"
+            <input value={a.title} onChange={(e) => upd(i, { title: e.target.value })}
+              placeholder="(可省略) 短標題 — 預設用上方描述當標題"
               style={{ padding: "5px 8px", border: "1px solid var(--line)", borderRadius: 4,
-                       fontSize: 12, background: "var(--surface)", outline: "none", fontFamily: "inherit" }}/>
+                       fontSize: 11.5, background: "var(--surface)", outline: "none", color: "var(--ink-3)", fontFamily: "inherit" }}/>
             <input value={a.rationale ?? ""} onChange={(e) => upd(i, { rationale: e.target.value })}
               placeholder="✨ Why（e.g. APC recipe 異動時間與 OOC 高度重疊）"
               className="mono"
@@ -1148,8 +1364,10 @@ function SuggestionPanel({ actions }: { actions: SuggestedAction[] }) {
               color: a.confidence === "high" ? "var(--ai)" : "var(--ink-3)",
             }}><Icon.Spark/></span>
             <div>
-              <div style={{ fontSize: 12.5, color: "var(--ink)", fontWeight: 500 }}>{a.title}</div>
-              <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 3, lineHeight: 1.55 }}>{a.detail}</div>
+              <div style={{ fontSize: 12.5, color: "var(--ink)", fontWeight: 500 }}>{a.detail || a.title}</div>
+              {a.detail && a.title && (
+                <div style={{ fontSize: 11, color: "var(--ink-4)", marginTop: 2 }}>{a.title}</div>
+              )}
               {a.rationale && (
                 <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-4)", marginTop: 6, lineHeight: 1.5 }}>
                   ✨ why · {a.rationale}
@@ -1454,8 +1672,10 @@ function SummaryReport({
                         border: "1px solid var(--sys-line)",
                       }}><Icon.Spark/></span>
                       <div>
-                        <div style={{ fontSize: 13, fontWeight: 500, color: "var(--ink)" }}>{a.title}</div>
-                        <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 3, lineHeight: 1.55 }}>{a.detail}</div>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: "var(--ink)" }}>{a.detail || a.title}</div>
+                        {a.detail && a.title && (
+                          <div style={{ fontSize: 11, color: "var(--ink-4)", marginTop: 2 }}>{a.title}</div>
+                        )}
                         {a.rationale && (
                           <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-4)", marginTop: 6, lineHeight: 1.5 }}>
                             ✨ why · {a.rationale}
@@ -1556,10 +1776,10 @@ function ConfirmSection({
         padding: "10px 0 18px", marginTop: 6,
       }}>
         <span className="mono" style={{ fontSize: 10.5, color: "var(--ai)", letterSpacing: "0.08em" }}>
-          CONFIRMATION · {confirmCheck ? "1 STEP" : "OPTIONAL"} · IS IT REAL?
+          ALARM GATE · {confirmCheck ? "1 STEP" : "OPTIONAL"} · 進一步確認是否要告警
         </span>
         <span style={{ flex: 1, height: 1, background: "var(--line)" }}/>
-        <span style={{ fontSize: 11, color: "var(--ink-3)" }}>only proceed if pass</span>
+        <span style={{ fontSize: 11, color: "var(--ink-3)" }}>全部成立 → 發告警 + 走 checklist</span>
       </div>
 
       {confirmCheck ? (
@@ -1587,8 +1807,11 @@ function ConfirmSection({
             whiteSpace: "nowrap",
           }}>C1</span>
           <div>
-            <div style={{ fontSize: 14, color: "var(--ink)", fontWeight: 500 }}>
-              {confirmCheck.description}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 14, color: "var(--ink)", fontWeight: 500, flex: 1, minWidth: 0 }}>
+                {confirmCheck.description}
+              </div>
+              {confirmCheck.pipeline_id != null && <PipelineReadyBadge/>}
             </div>
             {/* Phase 11 v6 — stale flag: pipeline_id null but description
                 exists. Tells user the slot needs rebuild before run/test. */}
@@ -1657,6 +1880,26 @@ function ConfirmSection({
           )}
         </div>
       ) : mode === "author" ? (
+        // unreachable — handled by upper branch
+        <></>
+      ) : null}
+      {/* Phase 11 v8 — quick "remove" link below the C1 card so the action
+          isn't buried in the ⋯ menu (per new design mock). Author mode only. */}
+      {confirmCheck && mode === "author" && (
+        <button
+          type="button"
+          onClick={() => void removeStep()}
+          disabled={busy}
+          style={{
+            all: "unset", cursor: busy ? "wait" : "pointer",
+            marginTop: 8, marginLeft: 8,
+            fontSize: 11.5, color: "var(--ink-3)",
+            fontStyle: "italic",
+          }}
+        >— remove last confirmation step</button>
+      )}
+      {/* Original empty-author input (kept verbatim) */}
+      {!confirmCheck && mode === "author" ? (
         <div style={{
           display: "flex", alignItems: "center", gap: 14,
           padding: "14px 0", borderTop: "1px dashed var(--line)",
