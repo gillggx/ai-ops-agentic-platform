@@ -31,6 +31,18 @@ interface ApiDetail { ok: boolean; data: SkillDetail; error?: { message: string 
  *  threshold / operator / duration_ms were previously dropped by the
  *  frontend; SummaryReport now needs them to render a real pipeline-result
  *  table (per user feedback「report 應該看得到 pipeline 結果」). */
+/** Per-node dataframe preview from sidecar (passed through Java
+ *  SkillRunner.extractDataViews). Compatible-ish with alarms' DataView
+ *  but with extra node_id/block/port for context. */
+type SkillDataView = {
+  node_id: string;
+  block: string;
+  port: string;
+  columns: string[];
+  rows: Record<string, unknown>[];
+  total: number;
+};
+
 type StepRunResult = {
   status: "pass" | "fail";
   value: string;
@@ -38,9 +50,23 @@ type StepRunResult = {
   threshold?: string | number | null;
   operator?: string | null;
   duration_ms?: number | null;
+  data_views?: SkillDataView[];
 };
 
 function parseRunResult(data: Record<string, unknown>): StepRunResult {
+  const rawDvs = (data.data_views as unknown[]) ?? [];
+  const data_views: SkillDataView[] = Array.isArray(rawDvs)
+    ? rawDvs
+        .filter((d): d is Record<string, unknown> => !!d && typeof d === "object")
+        .map((d) => ({
+          node_id: String(d.node_id ?? ""),
+          block: String(d.block ?? ""),
+          port: String(d.port ?? ""),
+          columns: Array.isArray(d.columns) ? (d.columns as unknown[]).map(String) : [],
+          rows: Array.isArray(d.rows) ? (d.rows as Record<string, unknown>[]) : [],
+          total: typeof d.total === "number" ? d.total : 0,
+        }))
+    : [];
   return {
     status: (data.status as "pass" | "fail") || "pass",
     value: (data.value as string) ?? "",
@@ -48,6 +74,7 @@ function parseRunResult(data: Record<string, unknown>): StepRunResult {
     threshold: (data.threshold as string | number | null | undefined) ?? null,
     operator: (data.operator as string | null | undefined) ?? null,
     duration_ms: (data.duration_ms as number | null | undefined) ?? null,
+    data_views,
   };
 }
 
@@ -467,7 +494,10 @@ export default function Playbook({
             </div>
           )}
 
-          {mode === "author" && <AddStep onAdd={addStep}/>}
+          {/* Phase 11 v10 — AddStep available in BOTH modes (per user
+              feedback: 兩個 mode 的功能應該一致 — operator 在 Execute 時
+              也想加新 check). */}
+          <AddStep onAdd={addStep}/>
         </main>
 
         {runState !== "idle" && (
@@ -1589,6 +1619,96 @@ function RunTimeline({
  *  All data sourced from existing SSE payload (status/value/note/threshold/
  *  operator/duration_ms) plus step.suggested_actions. No backend change. */
 
+/** Phase 11 v10 — render one dataframe preview as a compact table.
+ *  Mirrors alarm-center DataViewTable styling with skill-specific header
+ *  (node_id · block · port · row count). Cap visual to 8 cols × 20 rows. */
+function SkillDataViewTable({ dv }: { dv: SkillDataView }) {
+  const cols = dv.columns.slice(0, 8);
+  const rows = dv.rows.slice(0, 20);
+  if (cols.length === 0 && rows.length === 0) return null;
+  const fmt = (v: unknown): string => {
+    if (v === null || v === undefined) return "—";
+    if (typeof v === "object") return JSON.stringify(v);
+    if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(3);
+    return String(v);
+  };
+  return (
+    <div style={{
+      marginTop: 8, border: "1px solid var(--line)", borderRadius: 6,
+      background: "var(--surface)", overflow: "hidden",
+    }}>
+      <div style={{
+        padding: "6px 10px", background: "var(--bg-soft)",
+        borderBottom: "1px solid var(--line)",
+        display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+        fontSize: 11,
+      }}>
+        <span style={{ color: "var(--ink-2)", fontWeight: 600 }}>📋 {dv.block || dv.node_id}</span>
+        <span className="mono" style={{ color: "var(--ink-3)" }}>·{dv.port}</span>
+        <span style={{ flex: 1 }}/>
+        <span className="mono" style={{ color: "var(--ink-3)" }}>
+          {rows.length}{dv.total > rows.length ? ` / ${dv.total}` : ""} rows
+        </span>
+      </div>
+      <div style={{ overflowX: "auto", maxHeight: 320 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: "ui-monospace, monospace" }}>
+          <thead>
+            <tr style={{ background: "var(--bg-soft)" }}>
+              {cols.map((c) => (
+                <th key={c} style={{
+                  padding: "5px 8px", textAlign: "left", color: "var(--ink-3)",
+                  borderBottom: "1px solid var(--line)", fontWeight: 600,
+                  whiteSpace: "nowrap", position: "sticky", top: 0, background: "var(--bg-soft)",
+                }}>{c}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, ri) => (
+              <tr key={ri} style={{ borderBottom: "1px solid var(--line)" }}>
+                {cols.map((c) => {
+                  const v = row[c];
+                  // Highlight OOC-ish cells (matches alarm-center convention).
+                  const highlight =
+                    (c === "spc_status" && v === "OOC") ||
+                    (c.endsWith("_is_ooc") && v === true) ||
+                    (c === "triggered_row" && v === true);
+                  return (
+                    <td key={c} style={{
+                      padding: "5px 8px", whiteSpace: "nowrap",
+                      color: highlight ? "var(--fail)" : "var(--ink)",
+                      background: highlight ? "var(--fail-bg)" : "transparent",
+                      fontWeight: highlight ? 600 : 400,
+                    }}>{fmt(v)}</td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/** Phase 11 v10 — section header + list of data view tables.
+ *  Returns null when there's nothing to show, to keep cards compact. */
+function PipelineDataSection({ views }: { views: SkillDataView[] | undefined }) {
+  if (!views || views.length === 0) return null;
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div className="mono" style={{
+        fontSize: 9.5, letterSpacing: "0.06em", color: "var(--ink-3)", marginBottom: 6,
+      }}>
+        📊 PIPELINE DATA · {views.length} VIEW{views.length === 1 ? "" : "S"}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {views.map((dv, i) => <SkillDataViewTable key={i} dv={dv}/>)}
+      </div>
+    </div>
+  );
+}
+
 function PipelineResultTable({ result }: { result: StepRunResult }) {
   const rows: [string, React.ReactNode][] = [];
   if (result.value !== "" && result.value != null) rows.push(["value", result.value]);
@@ -1758,6 +1878,7 @@ function GateResultCard({
           {confirmCheck.description}
         </div>
         {gateResult && <PipelineResultTable result={gateResult}/>}
+        <PipelineDataSection views={gateResult?.data_views}/>
       </div>
     </section>
   );
@@ -1821,6 +1942,10 @@ function StepResultCard({
       {open && (
         <>
           {result && <PipelineResultTable result={result}/>}
+          {/* Phase 11 v10 — show the actual dataframes the pipeline produced
+              (not just the boolean check verdict). Operator needs the data
+              to understand WHY the check pass/failed. */}
+          <PipelineDataSection views={result?.data_views}/>
           {/* Suggested actions: HALT callout for high, soft row for med/low */}
           <InlineActions actions={actions} mode="run"/>
           {actions.length === 0 && isFail && (

@@ -263,6 +263,11 @@ public class SkillRunnerService {
         Map<String, Object> sr = new HashMap<>();
         sr.put("step_id", stepId);
         sr.put("duration_ms", elapsedMs);
+        // Phase 11 v10 — pass through sidecar's per-node dataframe previews so
+        // the report can show what data the pipeline actually fetched (not
+        // just the boolean check verdict). User feedback: 「我要看 pipeline
+        // 的資料本身，不只是 yes/no」.
+        sr.put("data_views", extractDataViews(nodeResults));
         if (stepCheck == null) {
             // Pipeline ran but no step_check output — treat as fail with diagnostic note
             sr.put("status", "fail");
@@ -280,6 +285,50 @@ public class SkillRunnerService {
         sr.put("threshold", row.get("threshold"));
         sr.put("operator", row.get("operator"));
         return sr;
+    }
+
+    /** Iterate node_results, collect every output port whose value is a
+     *  dataframe preview ({type:"dataframe", columns, rows, total}). Skips
+     *  the "check" port (already shown as the verdict). Caps total payload
+     *  at 3 views per step, 20 rows per view, 8 cols per view. */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private List<Map<String, Object>> extractDataViews(Map<String, Object> nodeResults) {
+        final int MAX_VIEWS = 3;
+        final int MAX_ROWS  = 20;
+        final int MAX_COLS  = 8;
+        List<Map<String, Object>> views = new ArrayList<>();
+        for (Map.Entry<String, Object> e : nodeResults.entrySet()) {
+            if (views.size() >= MAX_VIEWS) break;
+            String nodeId = e.getKey();
+            if (!(e.getValue() instanceof Map<?, ?> nr)) continue;
+            String blockName = String.valueOf(((Map<String, Object>) nr).getOrDefault("block", ""));
+            for (String key : new String[]{"outputs", "preview"}) {
+                Object portsObj = ((Map<String, Object>) nr).get(key);
+                if (!(portsObj instanceof Map<?, ?> ports)) continue;
+                for (Map.Entry<?, ?> pe : ports.entrySet()) {
+                    if (views.size() >= MAX_VIEWS) break;
+                    String port = String.valueOf(pe.getKey());
+                    if ("check".equals(port)) continue;
+                    if (!(pe.getValue() instanceof Map<?, ?> portVal)) continue;
+                    if (!"dataframe".equals(String.valueOf(((Map<String, Object>) portVal).get("type")))) continue;
+                    Object colsObj = ((Map<String, Object>) portVal).get("columns");
+                    Object rowsObj = ((Map<String, Object>) portVal).get("rows");
+                    Object totalObj = ((Map<String, Object>) portVal).get("total");
+                    if (!(colsObj instanceof List<?>)) continue;
+                    List<Object> cols = (List<Object>) colsObj;
+                    List<Object> rows = rowsObj instanceof List<?> ? (List<Object>) rowsObj : List.of();
+                    Map<String, Object> view = new HashMap<>();
+                    view.put("node_id", nodeId);
+                    view.put("block", blockName);
+                    view.put("port", port);
+                    view.put("columns", cols.subList(0, Math.min(cols.size(), MAX_COLS)));
+                    view.put("rows", rows.subList(0, Math.min(rows.size(), MAX_ROWS)));
+                    view.put("total", totalObj instanceof Number n ? n.intValue() : rows.size());
+                    views.add(view);
+                }
+            }
+        }
+        return views;
     }
 
     private List<Map<String, Object>> parseSteps(String json) {
