@@ -212,6 +212,19 @@ async def intent_classifier_builder_node(
     nodes = snapshot.get("nodes") if isinstance(snapshot, dict) else None
     has_canvas_nodes = bool(nodes)
 
+    # Phase 11 v6 — when launched from a Skill embed flow, the user's intent
+    # to BUILD is unambiguous (they typed prose on the Skill page and pressed
+    # "Build →", which opened the Builder tab). Skip the RECOMMEND/EXPLAIN
+    # classifier path so the orchestrator goes straight to build_pipeline_live
+    # instead of treating the prose as "advise me which block to use".
+    kind = snapshot.get("_kind") if isinstance(snapshot, dict) else None
+    if kind == "skill_step":
+        intent = "BUILD_MODIFY" if has_canvas_nodes else "BUILD_NEW"
+        confidence = 1.0
+        reason = "skill_step ctx — user pressed Build on Skill page; bypass advisor."
+        intent_str = f"builder_{intent.lower()}"
+        return {"intent": intent_str, "intent_hint": reason}
+
     intent, confidence, reason = await classify_builder_intent(
         user_message, has_canvas_nodes=has_canvas_nodes,
     )
