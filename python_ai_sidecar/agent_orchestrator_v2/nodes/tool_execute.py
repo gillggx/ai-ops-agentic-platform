@@ -199,6 +199,83 @@ def _scrub_chat_notes(notes: str, base_pipeline: dict | None) -> tuple[str, list
     return "\n".join(kept).strip(), dropped
 
 
+_CONJUNCTION_DEDUPE_PATTERNS = [
+    # Pairs of "$X 和 $X" / "$X 與 $X" / "$X、$X" / "$X, $X" → "$X"
+    # Run these AFTER substitution so we collapse repeated parametric refs.
+    (re.compile(r"(\$\w+)\s*[、,]\s*\$\w+"), r"\1"),
+    (re.compile(r"(\$\w+)\s*[和與]\s*\$\w+"), r"\1"),
+    (re.compile(r"(\$\w+)\s+and\s+\$\w+", re.IGNORECASE), r"\1"),
+]
+
+# Map of declared-input ROLE → regex for the corresponding literal ID kind.
+# Used by _scrub_chat_goal: when role is in declared_names, replace each
+# literal match with `$<role>` so the LLM uses parametric refs.
+_LITERAL_ROLE_PATTERNS = [
+    ("tool_id",      re.compile(r"\bEQP-\d+\b", re.IGNORECASE)),
+    ("equipment_id", re.compile(r"\bEQP-\d+\b", re.IGNORECASE)),
+    ("lot_id",       re.compile(r"\bLOT-\d+\b", re.IGNORECASE)),
+    ("step",         re.compile(r"\bSTEP_\d+\b", re.IGNORECASE)),
+    ("chamber_id",   re.compile(r"\bCH-[A-Z0-9]+\b", re.IGNORECASE)),
+    ("recipe_id",    re.compile(r"\bRECIPE-[A-Z0-9-]+\b", re.IGNORECASE)),
+]
+
+
+def _scrub_chat_goal(goal: str, base_pipeline: dict | None) -> tuple[str, list[str]]:
+    """Replace literal IDs in `goal` with $name refs when canvas has
+    a declared input of the same role. Then dedupe conjunctions like
+    「$tool_id 和 $tool_id」 down to a single ref.
+
+    Per CLAUDE.md「flow 由 graph 決定」: chat orchestrator may auto-
+    expand「EQP」→「EQP-09 和 EQP-03」(active alarm context), but the
+    inner builder is single-tool parametric (scheduler fan-out handles
+    multi-tool). This scrubber enforces that invariant deterministically.
+
+    Returns (scrubbed_goal, change_log).
+    """
+    if not goal or not isinstance(base_pipeline, dict):
+        return goal, []
+    declared_names: set[str] = set()
+    for inp in (base_pipeline.get("inputs") or []):
+        if isinstance(inp, dict):
+            nm = inp.get("name")
+            if nm:
+                declared_names.add(nm)
+    if not declared_names:
+        return goal, []
+
+    changes: list[str] = []
+    out = goal
+    for role, pat in _LITERAL_ROLE_PATTERNS:
+        if role not in declared_names:
+            continue
+        matches = list(pat.finditer(out))
+        if not matches:
+            continue
+        # Replace each match with $role
+        unique_literals = sorted({m.group(0) for m in matches})
+        out = pat.sub(f"${role}", out)
+        changes.append(
+            f"replaced {unique_literals} → ${role} (declared input)"
+        )
+
+    # Dedupe collapsed conjunctions iteratively until stable
+    for _ in range(5):  # safety cap
+        prev = out
+        for dedupe_pat, repl in _CONJUNCTION_DEDUPE_PATTERNS:
+            out = dedupe_pat.sub(repl, out)
+        if out == prev:
+            break
+    if out != goal and not changes:
+        # Conjunction-only collapse without literal replacement (rare)
+        changes.append("collapsed redundant $name conjunctions")
+    elif out != goal:
+        # Note that conjunctions were also collapsed (informational)
+        if any(c in goal for c in ("和", "與", "、", ", ")):
+            changes.append("collapsed conjunctions like「X 和 Y」 → single $ref")
+
+    return out, changes
+
+
 async def _execute_build_pipeline_live(
     db: Any,
     tool_input: Dict[str, Any],
@@ -281,14 +358,20 @@ async def _execute_build_pipeline_live(
     # by this graph-level filter, not by prompt rules alone.
     filtered_notes, dropped_lines = _scrub_chat_notes(notes, base_pipeline_dict)
     if dropped_lines:
-        logger.info("notes_filter: dropped %d line(s) %r", len(dropped_lines), dropped_lines)
-        # Audit trail: the trace's plan_node entry will show the FINAL
-        # prompt (post-scrub). This logger.info gives the diff for
-        # journalctl correlation. (Tracer instance is created later
-        # inside stream_graph_build, so we don't have a direct handle.)
         logger.info("notes_filter raw=%r filtered=%r dropped=%r",
                     notes, filtered_notes, dropped_lines)
-    prompt = goal if not filtered_notes else f"{goal}\n\n補充 context:\n{filtered_notes}"
+
+    # ── Phase 11 v19: scrub `goal` itself ─────────────────────────────
+    # The chat orchestrator sometimes hardcodes literal tool IDs INTO the
+    # goal field (not just notes), e.g. user said「過去 EQP 24h」→ chat
+    # expands to「EQP-09 和 EQP-03 過去 24h」using active-alarm context.
+    # Replace such literals with `$name` when matching declared input
+    # exists, then collapse「$X 和 $X」conjunctions.
+    scrubbed_goal, goal_changes = _scrub_chat_goal(goal, base_pipeline_dict)
+    if goal_changes:
+        logger.info("goal_scrub raw=%r scrubbed=%r changes=%r",
+                    goal, scrubbed_goal, goal_changes)
+    prompt = scrubbed_goal if not filtered_notes else f"{scrubbed_goal}\n\n補充 context:\n{filtered_notes}"
 
     # ── show_plan path: dry-run, no mutation, no SSE ──────────────────
     if show_plan:
