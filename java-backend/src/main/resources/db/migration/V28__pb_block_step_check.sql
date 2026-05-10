@@ -7,6 +7,9 @@
 -- Boot invariant in python_ai_sidecar/_boot_invariants.py warned about
 -- this drift; V28 closes it.
 
+-- pb_blocks.name has no unique constraint, so use DELETE+INSERT to be idempotent.
+DELETE FROM pb_blocks WHERE name = 'block_step_check';
+
 INSERT INTO pb_blocks (
   name, category, version, status, description,
   input_schema, output_schema, param_schema,
@@ -79,14 +82,4 @@ $$,
     {"name": "note", "type": "string"}
   ]$$,
   FALSE
-)
-ON CONFLICT (name) DO UPDATE SET
-  status = 'active',
-  category = EXCLUDED.category,
-  description = EXCLUDED.description,
-  input_schema = EXCLUDED.input_schema,
-  output_schema = EXCLUDED.output_schema,
-  param_schema = EXCLUDED.param_schema,
-  implementation = EXCLUDED.implementation,
-  examples = EXCLUDED.examples,
-  output_columns_hint = EXCLUDED.output_columns_hint;
+);
