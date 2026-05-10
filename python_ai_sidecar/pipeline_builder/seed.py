@@ -1484,6 +1484,35 @@ def _blocks() -> list[dict[str, Any]]:
             "output_columns_hint": [
                 {"name": "<dynamic>", "type": "object", "description": "欄位取決於 MCP 的回傳結構；若要查 process 資料優先用 block_process_history（已 flatten）。對於 list_tools / get_alarm_list 等簡單回傳，每個回傳 object 的 key 會成為一個 column"},
             ],
+            # Phase 11 v13: examples surfaced in catalog. Includes a
+            # get_process_info case so the LLM sees that the MCP requires
+            # at least one of toolID/lotID/step. This is data, not
+            # prompt — `args` shape needs to be discoverable from examples
+            # because the param schema is free-form `object`.
+            "examples": [
+                {
+                    "title": "list_tools — args may be empty",
+                    "params": {"mcp_name": "list_tools", "args": {}},
+                },
+                {
+                    "title": "get_alarm_list with filter",
+                    "params": {"mcp_name": "get_alarm_list", "args": {"severity": "HIGH", "limit": 50}},
+                },
+                {
+                    "title": "get_process_info — must include toolID OR lotID OR step",
+                    "params": {
+                        "mcp_name": "get_process_info",
+                        "args": {"toolID": "EQP-01", "limit": 5},
+                    },
+                },
+                {
+                    "title": "get_process_info by lot+step",
+                    "params": {
+                        "mcp_name": "get_process_info",
+                        "args": {"lotID": "LOT-0001", "step": "STEP_010"},
+                    },
+                },
+            ],
         },
         {
             "name": "block_list_objects",
@@ -1915,6 +1944,36 @@ def _blocks() -> list[dict[str, Any]]:
                     "expression": {"type": "object", "title": "Expression tree"},
                 },
             },
+            # Phase 11 v13: examples surfaced in catalog for free-form
+            # `object` params (LLM was inventing wrong shapes without these).
+            "examples": [
+                {
+                    "title": "spc_status != PASS as int (canonical OOC flag)",
+                    "params": {
+                        "column": "spc_is_any_ooc",
+                        "expression": {
+                            "op": "as_int",
+                            "operands": [{
+                                "op": "ne",
+                                "operands": [{"column": "spc_status"}, "PASS"],
+                            }],
+                        },
+                    },
+                },
+                {
+                    "title": "OR multiple boolean is_ooc columns",
+                    "params": {
+                        "column": "any_ooc",
+                        "expression": {
+                            "op": "or",
+                            "operands": [
+                                {"column": "spc_xbar_chart_is_ooc"},
+                                {"column": "spc_r_chart_is_ooc"},
+                            ],
+                        },
+                    },
+                },
+            ],
             "implementation": {"type": "python", "ref": "app.services.pipeline_builder.blocks.compute:ComputeBlockExecutor"},
         },
         # ── PR-G — primitives + EDA chart blocks ──────────────────────────
