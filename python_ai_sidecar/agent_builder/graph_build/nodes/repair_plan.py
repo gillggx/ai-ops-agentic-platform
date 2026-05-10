@@ -76,6 +76,12 @@ async def repair_plan_node(state: BuildGraphState) -> dict[str, Any]:
     )
 
     client = get_llm_client()
+    # Phase 11 v17 — opt-in trace.
+    from python_ai_sidecar.agent_builder.graph_build.trace import (
+        get_current_tracer, trace_event_to_sse,
+    )
+    tracer = get_current_tracer()
+    extra_sse: list[dict[str, Any]] = []
     try:
         resp = await client.create(
             system=_SYSTEM,
@@ -84,8 +90,22 @@ async def repair_plan_node(state: BuildGraphState) -> dict[str, Any]:
         )
         decision = _extract_json(resp.text or "")
         new_plan = decision.get("plan") or []
+        if tracer is not None:
+            entry = tracer.record_llm(
+                node="repair_plan_node",
+                system=_SYSTEM,
+                user_msg=user_msg,
+                raw_response=resp.text or "",
+                parsed=decision,
+                attempt=attempts,
+                input_errors=errors,
+            )
+            sse = trace_event_to_sse(entry, kind="llm_call")
+            if sse: extra_sse.append(sse)
     except Exception as ex:  # noqa: BLE001
         logger.warning("repair_plan_node: LLM/parse failed (%s)", ex)
+        if tracer is not None:
+            tracer.record_step("repair_plan_node", status="failed", attempt=attempts, error=str(ex))
         return {
             "plan_repair_attempts": attempts,
             "plan_validation_errors": errors + [f"repair_plan failed: {ex}"],
@@ -95,15 +115,28 @@ async def repair_plan_node(state: BuildGraphState) -> dict[str, Any]:
         }
 
     logger.info("repair_plan_node: attempt %d → %d ops", attempts, len(new_plan))
+    if tracer is not None:
+        step_entry = tracer.record_step(
+            "repair_plan_node",
+            status="ok",
+            attempt=attempts,
+            n_ops=len(new_plan),
+            input_errors=errors[:5],
+        )
+        sse = trace_event_to_sse(step_entry, kind="step")
+        if sse: extra_sse.append(sse)
     return {
         "plan": new_plan,
         "plan_repair_attempts": attempts,
         "plan_validation_errors": [],  # cleared; re-validated next
-        "sse_events": [_event("plan_repaired", {
-            "attempt": attempts,
-            "fix_summary": f"repaired plan now has {len(new_plan)} ops",
-            "ok": True,
-        })],
+        "sse_events": [
+            _event("plan_repaired", {
+                "attempt": attempts,
+                "fix_summary": f"repaired plan now has {len(new_plan)} ops",
+                "ok": True,
+            }),
+            *extra_sse,
+        ],
     }
 
 

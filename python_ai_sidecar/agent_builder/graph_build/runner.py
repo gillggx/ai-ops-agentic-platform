@@ -21,6 +21,7 @@ from langgraph.types import Command
 
 from python_ai_sidecar.agent_builder.graph_build.graph import build_graph
 from python_ai_sidecar.agent_builder.graph_build.state import initial_state
+from python_ai_sidecar.agent_builder.graph_build.trace import make_tracer
 from python_ai_sidecar.agent_builder.session import StreamEvent
 
 
@@ -68,20 +69,38 @@ async def stream_graph_build(
     )
     logger.info("stream_graph_build: starting session=%s", sid)
 
+    # Phase 11 v17 — opt-in BuildTracer (BUILDER_TRACE_DIR env). When the
+    # env var is unset, tracer is None and nodes' record_step() are no-ops.
+    # Per CLAUDE.md「flow 由 graph 決定」this is purely observational and
+    # never affects routing or LLM output.
+    tracer = make_tracer(
+        instruction=instruction,
+        session_id=sid,
+        skip_confirm=skip_confirm,
+        skill_step_mode=skill_step_mode,
+        base_pipeline=base_pipeline,
+    )
+
     last_state: dict = {}
     interrupted = False
 
-    # Stream node-by-node updates. astream(stream_mode="values") yields the
-    # full state after each node finishes, which lets us flush sse_events
-    # incrementally. interrupt() shows up as a special __interrupt__ entry.
-    async for chunk in graph.astream(init, config=config, stream_mode="values"):
-        last_state = chunk if isinstance(chunk, dict) else {}
-        # Each chunk's sse_events accumulates state-wide, so we only flush
-        # the deltas — but MemorySaver returns the full list each time.
-        # Simpler approach: just emit each chunk's events, frontend tolerates
-        # duplicates by id (we'll use cursor / event order).
-        for ev in _flush_sse_events(last_state):
-            yield ev
+    if tracer is not None:
+        await tracer.__aenter__()
+    try:
+        # Stream node-by-node updates. astream(stream_mode="values") yields
+        # the full state after each node finishes, which lets us flush
+        # sse_events incrementally. interrupt() shows up as a special
+        # __interrupt__ entry.
+        async for chunk in graph.astream(init, config=config, stream_mode="values"):
+            last_state = chunk if isinstance(chunk, dict) else {}
+            for ev in _flush_sse_events(last_state):
+                yield ev
+    finally:
+        if tracer is not None:
+            tracer.set_final_pipeline(
+                last_state.get("final_pipeline") or last_state.get("base_pipeline")
+            )
+            await tracer.__aexit__(None, None, None)
 
     # Check if graph paused on interrupt
     state_obj = await graph.aget_state(config)

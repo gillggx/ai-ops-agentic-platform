@@ -336,6 +336,12 @@ async def plan_node(state: BuildGraphState) -> dict[str, Any]:
     )
     user_msg = state["instruction"] + canvas_hint + inputs_hint + skill_hint
     client = get_llm_client()
+    # Phase 11 v17 — opt-in BuildTracer captures full LLM exchange.
+    from python_ai_sidecar.agent_builder.graph_build.trace import (
+        get_current_tracer, trace_event_to_sse,
+    )
+    tracer = get_current_tracer()
+    extra_sse: list[dict[str, Any]] = []
     try:
         resp = await client.create(
             system=system,
@@ -343,8 +349,20 @@ async def plan_node(state: BuildGraphState) -> dict[str, Any]:
             max_tokens=8192,  # Haiku 4.5 max; large plans (10+ ops) can overflow 4096
         )
         decision = _extract_first_json_object(resp.text or "")
+        if tracer is not None:
+            entry = tracer.record_llm(
+                node="plan_node",
+                system=system,
+                user_msg=user_msg,
+                raw_response=resp.text or "",
+                parsed=decision,
+            )
+            sse = trace_event_to_sse(entry, kind="llm_call")
+            if sse: extra_sse.append(sse)
     except Exception as ex:  # noqa: BLE001
         logger.warning("plan_node: LLM/parse failed (%s) — empty plan returned", ex)
+        if tracer is not None:
+            tracer.record_step("plan_node", status="failed", error=str(ex))
         return {
             "plan": [],
             "plan_validation_errors": [f"plan_node failed: {ex}"],
@@ -369,19 +387,34 @@ async def plan_node(state: BuildGraphState) -> dict[str, Any]:
         "plan_node: produced %d ops, %d outputs, from_scratch=%s, summary=%r",
         len(plan_list), len(expected_outputs), is_from_scratch, summary[:80],
     )
+    if tracer is not None:
+        step_entry = tracer.record_step(
+            "plan_node",
+            status="ok",
+            n_ops=len(plan_list),
+            n_outputs=len(expected_outputs),
+            is_from_scratch=is_from_scratch,
+            summary=summary[:200],
+        )
+        sse = trace_event_to_sse(step_entry, kind="step")
+        if sse: extra_sse.append(sse)
 
+    sse_events_list = [
+        _event("plan_proposed", {
+            "plan": plan_list,
+            "summary": summary,
+            "expected_outputs": expected_outputs,
+            "from_scratch": is_from_scratch,
+        }),
+        *extra_sse,
+    ]
     return {
         "plan": plan_list,
         "is_from_scratch": is_from_scratch,
         "plan_validation_errors": [],
         "summary": summary,
         "expected_outputs": expected_outputs,
-        "sse_events": [_event("plan_proposed", {
-            "plan": plan_list,
-            "summary": summary,
-            "expected_outputs": expected_outputs,
-            "from_scratch": is_from_scratch,
-        })],
+        "sse_events": sse_events_list,
     }
 
 

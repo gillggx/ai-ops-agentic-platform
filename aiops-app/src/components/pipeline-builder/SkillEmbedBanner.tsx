@@ -10,7 +10,7 @@
  * /api/skill-documents/{slug}/bind-pipeline, then closes the tab.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const SS_KEY = "pb:skill_embed_ctx";
 
@@ -81,6 +81,14 @@ export default function SkillEmbedBanner({ pipelineId }: { pipelineId?: number |
   const [ctx, setCtx] = useState<SkillEmbedCtx | null>(() => readSkillCtx());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Phase 11 v18 — silent auto-bind: when in skill embed mode, every time
+  // the Builder's own Save produces a fresh pipelineId, POST it to the
+  // skill so user doesn't have to remember the green Done button. Tracks
+  // last-bound id to avoid spamming bind on every parent re-render.
+  // User reported: 「按 save 後回來看還是沒記錄到」 → root cause was Save
+  // ≠ Done in this UI; auto-bind eliminates that distinction.
+  const lastAutoBoundRef = useRef<number | null>(null);
+  const [autoBoundAt, setAutoBoundAt] = useState<number | null>(null);
 
   // Refresh ctx if sessionStorage changes from another tab.
   useEffect(() => {
@@ -88,6 +96,43 @@ export default function SkillEmbedBanner({ pipelineId }: { pipelineId?: number |
     window.addEventListener("storage", handler);
     return () => window.removeEventListener("storage", handler);
   }, []);
+
+  // Auto-bind effect — runs whenever ctx + pipelineId are both set and
+  // the pipelineId hasn't been bound yet this session. Silent (no UI flash);
+  // the small「✓ auto-bound」chip is the only feedback so user knows it's safe to leave.
+  useEffect(() => {
+    if (!ctx || !pipelineId) return;
+    if (lastAutoBoundRef.current === pipelineId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/skill-documents/${encodeURIComponent(ctx.skill_slug)}/bind-pipeline`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              slot: ctx.slot,
+              pipeline_id: pipelineId,
+              description: ctx.instruction,
+              summary: `Built via Pipeline Builder · ${ctx.slot}`,
+            }),
+          },
+        );
+        if (!res.ok) {
+          // Don't break user's session; just log + leave Done button as fallback.
+          console.warn("auto-bind failed:", res.status);
+          return;
+        }
+        if (cancelled) return;
+        lastAutoBoundRef.current = pipelineId;
+        setAutoBoundAt(Date.now());
+      } catch (e) {
+        console.warn("auto-bind error:", e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [ctx, pipelineId]);
 
   const onCancel = useCallback(() => {
     if (!confirm("離開後不會把這個 pipeline 綁回 Skill — 你之後仍可在 Pipeline Builder 找到它。確定取消？")) return;
@@ -183,6 +228,20 @@ export default function SkillEmbedBanner({ pipelineId }: { pipelineId?: number |
       {!canBind && (
         <span style={{ fontSize: 11.5, color: "#92400E", fontStyle: "italic" }}>
           先按 Save 取得 pipeline id，再點 Done
+        </span>
+      )}
+      {/* Phase 11 v18 — auto-bind status. autoBoundAt set by the silent
+          bind effect when Save successfully writes pipeline_id back to
+          skill. User can safely close the tab once they see this. */}
+      {autoBoundAt && (
+        <span title={`auto-bound at ${new Date(autoBoundAt).toLocaleTimeString()}`}
+          style={{
+            fontSize: 11.5, color: "#15803D",
+            padding: "3px 8px", borderRadius: 4,
+            background: "#DCFCE7", border: "1px solid #86EFAC",
+            display: "inline-flex", alignItems: "center", gap: 4,
+          }}>
+          ✓ 已自動綁回 Skill
         </span>
       )}
       <button
