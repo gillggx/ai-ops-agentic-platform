@@ -297,6 +297,36 @@ async def plan_node(state: BuildGraphState) -> dict[str, Any]:
         if has_existing else "\n\n目前 canvas 是空的 — from-scratch build."
     )
 
+    # Phase 11 v16: surface pipeline-level declared inputs so the LLM uses
+    # `$name` references in node params instead of hardcoding example values.
+    # User reported: had `$tool_id` declared in Pipeline Inputs UI but agent
+    # still hardcoded EQP-03/EQP-09 + union — plan_node simply wasn't told
+    # about declared inputs. Source: state.base_pipeline.inputs (set by
+    # canvas snapshot upload).
+    declared_inputs = base_pipeline.get("inputs") or []
+    if declared_inputs:
+        lines = []
+        for inp in declared_inputs:
+            if not isinstance(inp, dict):
+                continue
+            nm = inp.get("name")
+            if not nm:
+                continue
+            t = inp.get("type", "string")
+            req = "required" if inp.get("required") else "optional"
+            ex = inp.get("example")
+            ex_str = f", example={ex!r}" if ex is not None else ""
+            desc = inp.get("description") or ""
+            desc_str = f" — {desc}" if desc else ""
+            lines.append(f"  ${nm} ({t}, {req}{ex_str}){desc_str}")
+        inputs_hint = (
+            "\n\n⚡ Pipeline-level inputs ALREADY declared (use $name refs in node params, "
+            "DO NOT hardcode literal values — that defeats parametric reuse):\n"
+            + "\n".join(lines)
+        )
+    else:
+        inputs_hint = ""
+
     skill_step_mode = bool(state.get("skill_step_mode"))
     skill_hint = (
         "\n\n⚠ SKILL STEP MODE — pipeline 必須以 `block_step_check` 結尾（pass/fail check）。"
@@ -304,7 +334,7 @@ async def plan_node(state: BuildGraphState) -> dict[str, Any]:
         "判斷有沒有達到觸發條件。chart 類 block 不適用此模式。"
         if skill_step_mode else ""
     )
-    user_msg = state["instruction"] + canvas_hint + skill_hint
+    user_msg = state["instruction"] + canvas_hint + inputs_hint + skill_hint
     client = get_llm_client()
     try:
         resp = await client.create(
