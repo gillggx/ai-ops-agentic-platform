@@ -809,30 +809,83 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
             # sub-agent, streams per-operation events to chat SSE.
             # Pass chat session context so the sub-agent carries canvas snapshot
             # across follow-up turns.
-            # Phase E3 follow-up: also forward the canvas snapshot from
-            # builder-mode requests via a synthetic _state_pipeline_snapshot
-            # entry on tool_input, picked up by _execute_build_pipeline_live
-            # when no explicit base_pipeline_id is supplied.
             snap = state.get("pipeline_snapshot")
-            if snap and not tool_input.get("base_pipeline_id"):
-                tool_input = {**tool_input, "_state_pipeline_snapshot": snap}
-            # Phase 11 v6 — when canvas snapshot says _kind="skill_step",
-            # forward skill_step_mode=True so graph_build's validate node
-            # enforces block_step_check terminator + plan_node hints toward it.
-            snap_kind = snap.get("_kind") if isinstance(snap, dict) else None
-            logger.info("tool_execute build_pipeline_live: snap_kind=%r snap_keys=%s",
-                        snap_kind,
-                        list(snap.keys())[:10] if isinstance(snap, dict) else None)
-            if snap_kind == "skill_step":
-                tool_input = {**tool_input, "_skill_step_mode": True}
-            result = await _execute_build_pipeline_live(
-                db,
-                tool_input,
-                event_emit=event_emit,
-                chat_session_id=state.get("session_id"),
-                chat_user_id=user_id,
-                chat_user_message=state.get("user_message") or "",
-            )
+
+            # 2026-05-11: graph-level intercept. Run dimension detectors
+            # against the user's prompt + declared inputs. If any dimension
+            # fires AND the user hasn't already confirmed (no
+            # [intent_confirmed:] prefix), force a confirm card BEFORE
+            # building. This is the "graph not prompt" fix per CLAUDE.md —
+            # the LLM doesn't have to remember to call confirm_pipeline_intent;
+            # the graph guarantees it.
+            forced_clars: list[dict[str, Any]] = []
+            user_msg_for_check = state.get("user_message") or ""
+            if not user_msg_for_check.startswith("[intent_confirmed:"):
+                from python_ai_sidecar.agent_orchestrator_v2.dimensional_clarifier import (
+                    build_clarifications,
+                )
+                snap_dict = snap if isinstance(snap, dict) else {}
+                try:
+                    forced_clars = await build_clarifications(
+                        user_msg=user_msg_for_check,
+                        declared_inputs=snap_dict.get("inputs"),
+                        pipeline_snapshot=snap_dict,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("forced clarifier failed (%s)", e)
+                    forced_clars = []
+
+            if forced_clars:
+                import uuid as _uuid
+                card_id = f"intent-{_uuid.uuid4().hex[:8]}"
+                spec_payload = {
+                    "card_id": card_id,
+                    "inputs": [],
+                    "logic": (tool_input.get("goal") or "")[:200],
+                    "presentation": "mixed_chart_alert",
+                    "alternatives": [],
+                    "clarifications": forced_clars,
+                }
+                if event_emit is not None:
+                    try:
+                        event_emit({"type": "design_intent_confirm", **spec_payload})
+                    except Exception:  # noqa: BLE001
+                        pass
+                result = {
+                    "status": "awaiting_user_confirmation",
+                    "card_id": card_id,
+                    "clarifications_count": len(forced_clars),
+                    "message": (
+                        f"Detected {len(forced_clars)} ambiguous dimension(s). "
+                        "Showing confirm card for user to pick. STOP this turn — "
+                        "do not retry build_pipeline_live; wait for the user's "
+                        "next message with [intent_confirmed:<id> dim=val ...] "
+                        "prefix."
+                    ),
+                    "_force_synthesis": True,
+                }
+                logger.info("build_pipeline_live: intercepted by clarifier (%d dims)",
+                            len(forced_clars))
+            else:
+                if snap and not tool_input.get("base_pipeline_id"):
+                    tool_input = {**tool_input, "_state_pipeline_snapshot": snap}
+                # Phase 11 v6 — when canvas snapshot says _kind="skill_step",
+                # forward skill_step_mode=True so graph_build's validate node
+                # enforces block_step_check terminator.
+                snap_kind = snap.get("_kind") if isinstance(snap, dict) else None
+                logger.info("tool_execute build_pipeline_live: snap_kind=%r snap_keys=%s",
+                            snap_kind,
+                            list(snap.keys())[:10] if isinstance(snap, dict) else None)
+                if snap_kind == "skill_step":
+                    tool_input = {**tool_input, "_skill_step_mode": True}
+                result = await _execute_build_pipeline_live(
+                    db,
+                    tool_input,
+                    event_emit=event_emit,
+                    chat_session_id=state.get("session_id"),
+                    chat_user_id=user_id,
+                    chat_user_message=state.get("user_message") or "",
+                )
         else:
             # Inject flat_data into execute_analysis so sandbox can read it directly
             if tool_name == "execute_analysis" and state.get("flat_data"):
