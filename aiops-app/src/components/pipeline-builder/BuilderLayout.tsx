@@ -1189,6 +1189,12 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
                 mode="session"
                 agentMode="builder"
                 sessionId={sessionId ?? `pb-${state.meta.pipelineId ?? "new"}`}
+                // Phase 11 v6 — when launched from a Skill embed flow, the
+                // user's NL instruction comes in via the URL/sessionStorage
+                // ctx. AIAgentPanel auto-sends `initialPrompt` once on mount
+                // (see initialPromptFiredRef at L640) so the user doesn't
+                // re-type it inside the agent panel.
+                initialPrompt={initialPrompt ?? undefined}
                 // Inject `_kind` into the snapshot so the orchestrator's
                 // builder section knows whether this is auto_patrol /
                 // auto_check / skill — drives confirm_pipeline_intent's
