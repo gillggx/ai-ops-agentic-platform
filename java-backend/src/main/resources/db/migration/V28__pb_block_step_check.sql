@@ -18,7 +18,9 @@ INSERT INTO pb_blocks (
   'block_step_check',
   'output',
   '1.0.0',
-  'active',
+  -- BLOCK_STATUS_COLORS only knows draft|pi_run|production|deprecated;
+  -- 'active' would crash CustomNode (.fg on undefined).
+  'production',
   $$== What ==
 Skill step terminator. Aggregates upstream dataframe to a scalar value,
 compares against a threshold, emits a structured check record:

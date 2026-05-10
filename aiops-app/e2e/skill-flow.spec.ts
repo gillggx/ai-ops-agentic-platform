@@ -29,7 +29,7 @@ const PASS = process.env.PW_PASS ?? "ITAdmin@2026";
 test.describe("Skill flow — full GUI with real agent", () => {
   test.skip(!process.env.ANTHROPIC_LIVE,
     "Set ANTHROPIC_LIVE=1 to run against real Anthropic (spends tokens)");
-  test.setTimeout(240_000); // 4 min: agent ~30s + tab dance + reloads
+  test.setTimeout(360_000); // 6 min: agent up to 3 min + tab dance + reloads
 
   test("create → C1 build with agent → bind → C1 visible → cleanup",
     async ({ context, page, request }) => {
@@ -69,6 +69,13 @@ test.describe("Skill flow — full GUI with real agent", () => {
         if (txt.includes("AIAgentPanel") || txt.includes("[skill") || txt.includes("auto-fire")) {
           console.log("    [popup]", msg.type(), txt.slice(0, 200));
         }
+        // Capture client-side errors so test logs surface them
+        if (msg.type() === "error" || msg.type() === "warning") {
+          console.log("    [popup-err]", msg.type(), txt.slice(0, 400));
+        }
+      });
+      builderTab.on("pageerror", (err) => {
+        console.log("    [pageerror]", err.message.slice(0, 400));
       });
       builderTab.on("response", async (res) => {
         const url = res.url();
@@ -115,7 +122,7 @@ test.describe("Skill flow — full GUI with real agent", () => {
         await builderTab.waitForFunction(
           () => document.querySelectorAll(".react-flow__node").length >= 2,
           null,
-          { timeout: 90_000, polling: 2000 },
+          { timeout: 180_000, polling: 2000 },
         );
       } catch (e) {
         await builderTab.screenshot({ path: "playwright-report/agent-timeout-builder-tab.png", fullPage: true });
@@ -186,16 +193,90 @@ test.describe("Skill flow — full GUI with real agent", () => {
       await expect(page.locator(":text-is('C1')")).toBeVisible();
       // The "underlying pipeline was deleted" warning must NOT appear
       await expect(page.getByText("underlying pipeline was deleted")).not.toBeVisible();
-      console.log("[7/8] C1 bound + visible on Skill page");
+      console.log("[7/9] C1 bound + visible on Skill page");
 
-      // ── 8. Cleanup ────────────────────────────────────────────
-      // Use the page's session cookies to call DELETE /api/skill-documents/<slug>
+      // ── 8. Run the skill end-to-end via /run SSE ──────────────
+      // The bound C1 pipeline is now the only step. Drive a real run with
+      // a mock OOC payload so the SkillRunner fires the pipeline against
+      // the simulator's actual data — what 「跑的動」 means in production.
       const cookies = await context.cookies();
       const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+      const runRes = await request.post(
+        `${BASE}/api/skill-documents/${slug}/run`,
+        {
+          headers: {
+            Cookie: cookieHeader,
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
+          },
+          data: {
+            trigger_payload: {
+              tool_id: "EQP-01",
+              lot_id: "LOT-0001",
+              step: "STEP_005",
+              chamber_id: "CH-1",
+              spc_chart: "xbar_chart",
+              severity: "high",
+            },
+            is_test: true,
+          },
+          timeout: 120_000,
+        },
+      );
+      expect(runRes.ok()).toBeTruthy();
+
+      // Parse SSE frames out of the body. Look for a confirm_done with
+      // status pass|fail (NOT error) to prove the pipeline ran for real.
+      const sseBody = await runRes.text();
+      const events: Array<{ event: string; data: Record<string, unknown> }> = [];
+      for (const frame of sseBody.split(/\n\n/)) {
+        const lines = frame.split("\n");
+        let evt = "message";
+        const dataLines: string[] = [];
+        for (const ln of lines) {
+          if (ln.startsWith("event:")) evt = ln.slice(6).trim();
+          else if (ln.startsWith("data:")) dataLines.push(ln.slice(5).trim());
+        }
+        if (dataLines.length) {
+          try { events.push({ event: evt, data: JSON.parse(dataLines.join("\n")) }); }
+          catch { /* ignore */ }
+        }
+      }
+      const confirmDone = events.find((e) => e.event === "confirm_done");
+      const done = events.find((e) => e.event === "done");
+      console.log(`[8/9] /run SSE got ${events.length} events`);
+      console.log(`        types: ${[...new Set(events.map((e) => e.event))].join(",")}`);
+      if (confirmDone) {
+        console.log(`        confirm result: status=${confirmDone.data.status} value=${confirmDone.data.value} note=${(confirmDone.data.note as string)?.slice(0, 100)}`);
+      }
+      if (done) {
+        console.log(`        run done: ${JSON.stringify(done.data).slice(0, 200)}`);
+      }
+      expect(confirmDone, "expected at least one confirm_done event").toBeTruthy();
+      expect(["pass", "fail"], "confirm step must return real pass/fail (not error)")
+        .toContain(confirmDone!.data.status);
+      // 跑的動 means: pipeline ran AND read pass/fail from block_step_check.
+      // value="error" means SkillRunner couldn't find a step_check output OR
+      // pipeline status was not "success" — i.e. pipeline didn't actually
+      // complete. That's NOT 跑的動.
+      if (confirmDone!.data.value === "error") {
+        // Skip cleanup so the skill survives for manual psql / browser
+        // inspection. Print enough info to find it.
+        console.log("PIPELINE FAILED AT RUNTIME — skill kept for inspection:");
+        console.log("  slug:", slug);
+        console.log("  full SSE events:");
+        for (const ev of events) {
+          console.log("   ", ev.event, JSON.stringify(ev.data).slice(0, 300));
+        }
+        throw new Error(`pipeline ran but value="error" — agent didn't produce a step_check terminator OR pipeline failed. note=${confirmDone!.data.note}`);
+      }
+      console.log("[8/9] skill ran end-to-end with real verdict");
+
+      // ── 9. Cleanup ────────────────────────────────────────────
       const del = await request.delete(`${BASE}/api/skill-documents/${slug}`, {
         headers: { Cookie: cookieHeader },
       });
       expect(del.ok()).toBeTruthy();
-      console.log("[8/8] cleanup complete");
+      console.log("[9/9] cleanup complete");
     });
 });
