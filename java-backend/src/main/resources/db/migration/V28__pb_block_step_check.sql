@@ -60,15 +60,22 @@ port: check (dataframe) — exactly 1 row
 ⚠ Wrong operator name (e.g. ">=3" instead of ">=", "3") → INVALID_PARAM
 ⚠ Treating block_step_check as visualisation — it's the verdict, not the chart
 $$,
-  $${"data": {"type": "dataframe", "required": true}}$$,
-  $${"check": {"type": "dataframe", "row_count": 1, "columns": ["pass", "value", "threshold", "operator", "note"]}}$$,
+  -- input_schema: array of {port, type} (matches block_alert convention)
+  $$[{"port": "data", "type": "dataframe", "required": true}]$$,
+  -- output_schema: array of {port, type}
+  $$[{"port": "check", "type": "dataframe"}]$$,
+  -- param_schema: JSON Schema object (NOT array)
   $${
-    "operator": {"type": "string", "required": true, "enum": [">=", ">", "=", "<", "<=", "changed", "drift"]},
-    "threshold": {"type": "any"},
-    "aggregate": {"type": "string", "default": "count", "enum": ["count", "sum", "mean", "max", "min", "last", "exists"]},
-    "column": {"type": "string"},
-    "baseline": {"type": "any"},
-    "note": {"type": "string"}
+    "type": "object",
+    "required": ["operator"],
+    "properties": {
+      "operator":  {"type": "string", "enum": [">=", ">", "=", "<", "<=", "changed", "drift"]},
+      "threshold": {},
+      "aggregate": {"type": "string", "default": "count", "enum": ["count", "sum", "mean", "max", "min", "last", "exists"]},
+      "column":    {"type": "string"},
+      "baseline":  {},
+      "note":      {"type": "string"}
+    }
   }$$,
   'native:block_step_check',
   $$[
