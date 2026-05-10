@@ -62,12 +62,23 @@ test.describe("Skill flow — full GUI with real agent", () => {
         context.waitForEvent("page"),
         page.locator('button:has-text("Build →")').first().click(),
       ]);
-      // Phase 11 v6 — surface browser console logs from the popup so
-      // [AIAgentPanel] diagnostic prints land in the Playwright run output.
+      // Phase 11 v6 — surface browser console logs + network from the popup
+      // so [AIAgentPanel] diagnostic prints land in the Playwright run output.
       builderTab.on("console", (msg) => {
         const txt = msg.text();
         if (txt.includes("AIAgentPanel") || txt.includes("[skill") || txt.includes("auto-fire")) {
           console.log("    [popup]", msg.type(), txt.slice(0, 200));
+        }
+      });
+      builderTab.on("response", async (res) => {
+        const url = res.url();
+        if (url.includes("/api/agent/chat") || url.includes("/api/agent/build")) {
+          console.log(`    [net] ${res.status()} ${res.request().method()} ${url.slice(0, 120)}`);
+        }
+      });
+      builderTab.on("requestfailed", (req) => {
+        if (req.url().includes("/api/")) {
+          console.log(`    [net-fail] ${req.method()} ${req.url().slice(0, 120)} — ${req.failure()?.errorText}`);
         }
       });
       await builderTab.waitForLoadState("domcontentloaded");
@@ -82,6 +93,22 @@ test.describe("Skill flow — full GUI with real agent", () => {
 
       // ── 4. Wait for AIAgentPanel to auto-fire prompt + build canvas ──
       builderTab.on("dialog", (d) => d.dismiss().catch(() => {}));
+      // Phase 11 v6 — Pipeline Builder shows an 8-step onboarding tour for
+      // first-time users (rendered via SurfaceTour as a fixed-position
+      // tour-bubble over the canvas). It blocks all canvas interaction.
+      // ESC dismisses the entire tour. For the product itself, skill embed
+      // should suppress tour (separate fix tracked in v6 to-remove memory).
+      try {
+        await builderTab.keyboard.press("Escape");
+        await builderTab.waitForFunction(
+          () => !document.querySelector(".tour-bubble") && !document.querySelector(".tour-mask"),
+          null,
+          { timeout: 5_000 },
+        );
+        console.log("    tour dismissed");
+      } catch {
+        // Tour didn't dismiss — proceed anyway, may overlay canvas.
+      }
       await expect(builderTab.locator("text=Building CONFIRM")).toBeVisible({ timeout: 15_000 });
       console.log("    waiting for Glass Box agent to build canvas (up to 90s)…");
       try {
@@ -92,14 +119,38 @@ test.describe("Skill flow — full GUI with real agent", () => {
         );
       } catch (e) {
         await builderTab.screenshot({ path: "playwright-report/agent-timeout-builder-tab.png", fullPage: true });
-        const agentText = await builderTab.locator('[data-testid="agent-panel"], aside, [class*="AIAgent"]').first().innerText().catch(() => "(no agent panel found)");
-        console.log("AGENT PANEL CONTENT (last 800 chars):\n" + agentText.slice(-800));
-        // Dump all visible buttons so we can see what's blocking interaction
+        // Phase 11 v6 — diagnostic: count iframes + dump modal-shaped divs +
+        // dump html length so we can tell if page is intact.
+        const diag = await builderTab.evaluate(() => {
+          const ifs = document.querySelectorAll("iframe").length;
+          const all = document.querySelectorAll("*").length;
+          const role = document.querySelectorAll('[role="dialog"], [aria-modal="true"]').length;
+          const fixed = Array.from(document.querySelectorAll("div"))
+            .filter((d) => {
+              const s = window.getComputedStyle(d);
+              return (s.position === "fixed" || s.position === "absolute") && s.zIndex && Number(s.zIndex) >= 50;
+            })
+            .slice(0, 5)
+            .map((d) => ({
+              text: (d.textContent || "").slice(0, 200),
+              z: window.getComputedStyle(d).zIndex,
+              top: window.getComputedStyle(d).top,
+              tag: d.className?.toString?.().slice(0, 80) || "",
+            }));
+          return { ifs, all, role, fixed, html_len: document.documentElement.outerHTML.length };
+        }).catch((err) => `ERROR ${err}`);
+        console.log("DIAG:", JSON.stringify(diag, null, 2));
         const buttons = await builderTab.locator('button:visible').all();
         console.log(`VISIBLE BUTTONS (${buttons.length}):`);
-        for (let i = 0; i < Math.min(buttons.length, 20); i++) {
+        for (let i = 0; i < Math.min(buttons.length, 25); i++) {
           const t = await buttons[i].innerText().catch(() => "?");
-          console.log(`  - ${JSON.stringify(t.slice(0, 80))}`);
+          if (t.trim()) console.log(`  - ${JSON.stringify(t.slice(0, 80))}`);
+        }
+        // Count canvas nodes via various selectors
+        const variants = [".react-flow__node", "[data-id]", "[class*='Node']"];
+        for (const sel of variants) {
+          const n = await builderTab.locator(sel).count().catch(() => -1);
+          console.log(`  selector ${sel} → ${n} matches`);
         }
         throw e;
       }

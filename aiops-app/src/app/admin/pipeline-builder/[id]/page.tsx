@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import SurfaceTour from "@/components/tour/SurfaceTour";
 import { PIPELINE_BUILDER_STEPS } from "@/components/tour/steps/pipeline-builder";
-import SkillEmbedBanner, { bootstrapSkillCtxFromUrl } from "@/components/pipeline-builder/SkillEmbedBanner";
+import SkillEmbedBanner, { bootstrapSkillCtxFromUrl, readSkillCtx } from "@/components/pipeline-builder/SkillEmbedBanner";
 
 const BuilderLayout = dynamic(() => import("@/components/pipeline-builder/BuilderLayout"), {
   ssr: false,
@@ -29,11 +29,12 @@ export default function EditPipelinePage() {
   }
   if (!ready) return null;
 
+  const inSkillEmbed = readSkillCtx() != null;
   return (
     <>
       <SkillEmbedBanner pipelineId={id}/>
       <BuilderLayout mode="edit" pipelineId={id} />
-      <SurfaceTour surfaceId="pipeline-builder" steps={PIPELINE_BUILDER_STEPS} />
+      {!inSkillEmbed && <SurfaceTour surfaceId="pipeline-builder" steps={PIPELINE_BUILDER_STEPS} />}
     </>
   );
 }

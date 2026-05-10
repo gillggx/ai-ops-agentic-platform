@@ -231,6 +231,11 @@ function WizardOrBuilder({
     };
     // Phase 11 v4: pipelineId is null on /new (gets one after first save +
     // BuilderLayout navigates to /[id]). Banner shows "press Save first" hint.
+    // Phase 11 v6 — when launched via Skill embed, suppress the onboarding
+    // tour. The tour mask + bubble are fixed-position and cover the canvas;
+    // for skill authors who're focused on building one step they don't need
+    // the 8-step pipeline-builder walkthrough every time.
+    const inSkillEmbed = readSkillCtx() != null;
     return (
       <>
         <SkillEmbedBanner pipelineId={null}/>
@@ -241,7 +246,7 @@ function WizardOrBuilder({
           initialPendingTrigger={pendingTrigger}
           initialPrompt={readSkillCtx()?.instruction}
         />
-        <SurfaceTour surfaceId="pipeline-builder" steps={PIPELINE_BUILDER_STEPS} />
+        {!inSkillEmbed && <SurfaceTour surfaceId="pipeline-builder" steps={PIPELINE_BUILDER_STEPS} />}
       </>
     );
   }
