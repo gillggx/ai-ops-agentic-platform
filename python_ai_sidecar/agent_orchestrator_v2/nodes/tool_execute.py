@@ -137,6 +137,10 @@ async def _execute_build_pipeline_live(
     notes = (tool_input.get("notes") or "").strip()
     base_pipeline_id = tool_input.get("base_pipeline_id")
     show_plan = bool(tool_input.get("show_plan"))
+    # Phase 11 v6 — set by tool_execute when canvas snapshot _kind="skill_step".
+    # Threads through to stream_graph_build so validate node enforces
+    # block_step_check terminator (= what SkillRunner reads pass/fail from).
+    skill_step_mode = bool(tool_input.get("_skill_step_mode"))
     if not goal:
         return {"status": "validation_error", "error_message": "goal is required"}
     prompt = goal if not notes else f"{goal}\n\n補充 context:\n{notes}"
@@ -225,6 +229,7 @@ async def _execute_build_pipeline_live(
             base_pipeline=base_pipeline_dict,
             session_id=sid,
             skip_confirm=True,  # chat conversation IS the confirmation
+            skill_step_mode=skill_step_mode,
         ):
             payload = wrap_build_event_for_chat(evt, sid)
             if payload is None:
@@ -586,6 +591,11 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
             snap = state.get("pipeline_snapshot")
             if snap and not tool_input.get("base_pipeline_id"):
                 tool_input = {**tool_input, "_state_pipeline_snapshot": snap}
+            # Phase 11 v6 — when canvas snapshot says _kind="skill_step",
+            # forward skill_step_mode=True so graph_build's validate node
+            # enforces block_step_check terminator + plan_node hints toward it.
+            if isinstance(snap, dict) and snap.get("_kind") == "skill_step":
+                tool_input = {**tool_input, "_skill_step_mode": True}
             result = await _execute_build_pipeline_live(
                 db,
                 tool_input,

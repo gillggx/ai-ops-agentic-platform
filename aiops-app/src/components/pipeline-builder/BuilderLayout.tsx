@@ -1200,7 +1200,27 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
                 // auto_check / skill — drives confirm_pipeline_intent's
                 // input.source classification (auto_check inputs come from
                 // alarm payload, not user_input).
-                pipelineSnapshot={{ ...state.pipeline, _kind: state.meta.pipelineKind ?? null }}
+                //
+                // Phase 11 v6 — when launched from a Skill embed flow,
+                // override _kind to "skill_step". This signals to the
+                // orchestrator: (a) skip confirm_pipeline_intent gate
+                // (user already pressed Build on the Skill page), and
+                // (b) tell graph_build to enforce block_step_check as the
+                // terminator (NOT block_chart / block_alert).
+                pipelineSnapshot={(() => {
+                  const skillCtx = (typeof window !== "undefined")
+                    ? (() => {
+                        try {
+                          const raw = sessionStorage.getItem("pb:skill_embed_ctx");
+                          return raw ? JSON.parse(raw) as { skill_slug?: string } : null;
+                        } catch { return null; }
+                      })()
+                    : null;
+                  const kind = skillCtx?.skill_slug
+                    ? "skill_step"
+                    : (state.meta.pipelineKind ?? null);
+                  return { ...state.pipeline, _kind: kind };
+                })()}
                 onGlassOp={(ev) => applyGlassOpToCanvas(ev, actions, catalog)}
                 // Phase 10-D: graph_build's layout_node lays out positions
                 // server-side and ships them in the final pipeline_json. Apply

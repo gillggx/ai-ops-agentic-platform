@@ -399,6 +399,20 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
                     "  - 給 Agent / 使用者依需求呼叫的可重用 pipeline。\n"
                     "  - Inputs 通常是 `user_input` (Agent / 使用者每次呼叫時填)。\n"
                 ),
+                # Phase 11 v6 — skill_step is a CONFIRM or CHECKLIST step inside a
+                # Skill Document. The terminator MUST be block_step_check (not
+                # block_chart, not block_alert) so SkillRunner can read the
+                # pass/fail verdict. Inputs come from the parent skill's
+                # trigger payload (see seedInputsFromCtx in SkillEmbedBanner.tsx).
+                "skill_step": (
+                    "## 🩺 Pipeline kind: skill_step (CONFIRM / CHECKLIST)\n"
+                    "  - 這是一個 Skill Document 的 confirm / checklist step。\n"
+                    "  - **Terminator MUST be block_step_check** — 不可用 block_chart / block_alert。\n"
+                    "  - block_step_check 會 emit { pass: bool, value, note } 給 SkillRunner。\n"
+                    "  - Inputs 來自 Skill 的 trigger payload — 已 seeded 在 canvas inputs 裡，**禁** 自創 input。\n"
+                    "  - User 已經在 Skill 頁面按下 Build 才開到 Builder — **不要呼 confirm_pipeline_intent**\n"
+                    "    （他要的就是這個 NL 描述變成 pipeline，沒模糊空間）。直接 build_pipeline_live。\n"
+                ),
             }
             if kind in kind_hints:
                 system_text += "\n" + kind_hints[kind]
