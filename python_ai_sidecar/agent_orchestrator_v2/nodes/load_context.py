@@ -407,11 +407,15 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
                 "skill_step": (
                     "## 🩺 Pipeline kind: skill_step (CONFIRM / CHECKLIST)\n"
                     "  - 這是一個 Skill Document 的 confirm / checklist step。\n"
+                    "  - **🛠 MANDATORY ACTION**: 你的下一步是**呼叫 `build_pipeline_live` tool**。\n"
+                    "    不要只用文字描述 plan、不要列出 1./2./3. block 清單給 user 看；\n"
+                    "    user 不需要看 plan，他要的是 canvas 上長出 pipeline。立刻 invoke tool。\n"
+                    "  - **🛑 FORBIDDEN**: 不要呼 `confirm_pipeline_intent`（user 已從 Skill 頁面按 Build\n"
+                    "    才開到 Builder，意圖無模糊；再 confirm 一次是多餘 friction）。\n"
                     "  - **Terminator MUST be block_step_check** — 不可用 block_chart / block_alert。\n"
-                    "  - block_step_check 會 emit { pass: bool, value, note } 給 SkillRunner。\n"
-                    "  - Inputs 來自 Skill 的 trigger payload — 已 seeded 在 canvas inputs 裡，**禁** 自創 input。\n"
-                    "  - User 已經在 Skill 頁面按下 Build 才開到 Builder — **不要呼 confirm_pipeline_intent**\n"
-                    "    （他要的就是這個 NL 描述變成 pipeline，沒模糊空間）。直接 build_pipeline_live。\n"
+                    "    block_step_check 會 emit { pass: bool, value, note } 給 SkillRunner 讀。\n"
+                    "  - Inputs 來自 Skill 的 trigger payload — 已 seeded 在 canvas inputs 裡，\n"
+                    "    **禁** 自創 input；source / filter block 必用 $name 引用。\n"
                 ),
             }
             if kind in kind_hints:
