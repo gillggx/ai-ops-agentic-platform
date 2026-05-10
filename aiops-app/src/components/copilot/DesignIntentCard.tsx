@@ -27,12 +27,36 @@ export interface DesignIntentAlternative {
   summary: string;
 }
 
+// 2026-05-11 Plan-Mode-style multi-choice clarifications. When the chat
+// orchestrator calls confirm_pipeline_intent, the backend's deterministic
+// detectors fire on the user prompt + declared inputs and produce these
+// dimension cards. LLM only fills in question/label/hint (localization).
+// User picks → selections get spliced into the [intent_confirmed:<id> dim=val ...]
+// follow-up prefix, which the build_pipeline_live handler parses + augments
+// the goal text with deterministic guidance hints.
+export interface ClarificationOption {
+  value: string;
+  label: string;
+  hint?: string | null;
+}
+
+export interface ClarificationDimension {
+  dimension: string;
+  question: string;
+  options: ClarificationOption[];
+  default?: string | null;
+  multi?: boolean;
+}
+
 export interface DesignIntentData {
   card_id: string;
   inputs: DesignIntentInput[];
   logic: string;
   presentation: PresentationKind;
   alternatives?: DesignIntentAlternative[];
+  clarifications?: ClarificationDimension[];
+  /** picks per dimension; populated as user clicks radio buttons. */
+  selections?: Record<string, string>;
   resolved?: boolean;
 }
 
@@ -89,9 +113,23 @@ export function DesignIntentCard({ data, onPick }: Props) {
   // Local edit state — when user clicks 想修改 we copy data here and the
   // form mutates this. confirm dispatches with this state; cancel reverts.
   const [draft, setDraft] = useState<DesignIntentData>(data);
+  // 2026-05-11: per-dimension picks. Initialize from defaults; user clicks
+  // radios to override. Submitted via onPick(confirm, data-with-selections).
+  const initSel = (): Record<string, string> => {
+    const out: Record<string, string> = {};
+    for (const c of (data.clarifications ?? [])) {
+      if (c.default) out[c.dimension] = c.default;
+    }
+    return out;
+  };
+  const [selections, setSelections] = useState<Record<string, string>>(initSel);
+  const allRequiredPicked = (data.clarifications ?? [])
+    .every((c) => selections[c.dimension] !== undefined && selections[c.dimension] !== "");
 
   const present = PRESENT_OPTIONS.find((o) => o.kind === data.presentation)
     ?? PRESENT_OPTIONS.find((o) => o.kind === "mixed_chart_alert")!;
+
+  const submitWithSelections = () => onPick("confirm", { ...data, selections });
 
   return (
     <>
@@ -114,15 +152,26 @@ export function DesignIntentCard({ data, onPick }: Props) {
 
         <ReadView data={data} present={present} />
 
+        {/* 2026-05-11 Plan-Mode multi-choice clarifications */}
+        {(data.clarifications?.length ?? 0) > 0 && (
+          <ClarificationGroups
+            clarifications={data.clarifications ?? []}
+            selections={selections}
+            onChange={setSelections}
+            disabled={disabled}
+          />
+        )}
+
         {/* Buttons */}
         <div style={{
           display: "flex", gap: 8, marginTop: 12,
           opacity: disabled ? 0.5 : 1,
         }}>
           <button
-            disabled={disabled}
-            onClick={() => onPick("confirm", data)}
-            style={btnStyle(disabled ? "secondary-disabled" : "primary")}
+            disabled={disabled || !allRequiredPicked}
+            onClick={submitWithSelections}
+            title={!allRequiredPicked ? "請先選擇所有 ◯ 選項" : ""}
+            style={btnStyle((disabled || !allRequiredPicked) ? "secondary-disabled" : "primary")}
           >✅ 開始建</button>
           <button
             disabled={disabled}
@@ -275,6 +324,68 @@ function ReadView({
         </div>
       )}
     </>
+  );
+}
+
+
+// ── Clarification radio groups (Plan-Mode multi-choice) ──────────────
+
+function ClarificationGroups({
+  clarifications, selections, onChange, disabled,
+}: {
+  clarifications: ClarificationDimension[];
+  selections: Record<string, string>;
+  onChange: (next: Record<string, string>) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div style={{
+      marginTop: 4, marginBottom: 10,
+      padding: "10px 12px", borderRadius: 6,
+      background: "#fffbea", border: "1px solid #fde68a",
+    }}>
+      <div style={{
+        fontWeight: 600, fontSize: 12, color: "#92400e", marginBottom: 8,
+      }}>
+        ❓ 我有些地方不確定，請幫忙對焦：
+      </div>
+      {clarifications.map((c) => (
+        <div key={c.dimension} style={{ marginBottom: 10 }}>
+          <div style={{
+            fontSize: 12, fontWeight: 600, color: "#1a202c", marginBottom: 4,
+          }}>
+            {c.question}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingLeft: 4 }}>
+            {c.options.map((opt) => {
+              const checked = selections[c.dimension] === opt.value;
+              return (
+                <label key={opt.value} style={{
+                  display: "flex", alignItems: "flex-start", gap: 6,
+                  fontSize: 12, color: "#2d3748", cursor: disabled ? "default" : "pointer",
+                }}>
+                  <input
+                    type="radio"
+                    name={`dim-${c.dimension}`}
+                    value={opt.value}
+                    checked={checked}
+                    disabled={disabled}
+                    onChange={() => onChange({ ...selections, [c.dimension]: opt.value })}
+                    style={{ marginTop: 3, cursor: disabled ? "default" : "pointer" }}
+                  />
+                  <div>
+                    <div style={{ fontWeight: checked ? 600 : 400 }}>{opt.label}</div>
+                    {opt.hint && (
+                      <div style={{ fontSize: 11, color: "#718096" }}>{opt.hint}</div>
+                    )}
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 

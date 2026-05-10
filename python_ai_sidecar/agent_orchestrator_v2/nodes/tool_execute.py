@@ -282,6 +282,7 @@ async def _execute_build_pipeline_live(
     event_emit: Any = None,
     chat_session_id: Any = None,
     chat_user_id: Any = None,
+    chat_user_message: str = "",
 ) -> Dict[str, Any]:
     """Phase 10-B: unified build via graph_build (LangGraph 10-node state machine).
 
@@ -371,6 +372,20 @@ async def _execute_build_pipeline_live(
     if goal_changes:
         logger.info("goal_scrub raw=%r scrubbed=%r changes=%r",
                     goal, scrubbed_goal, goal_changes)
+
+    # 2026-05-11: parse [intent_confirmed:<id> dim=val ...] resolutions from
+    # the user's follow-up message and splice deterministic guidance into
+    # the goal. This is how Plan-Mode-style multi-choice picks reach the
+    # builder — without LLM having to remember to translate them.
+    from python_ai_sidecar.agent_orchestrator_v2.dimensional_clarifier import (
+        parse_resolutions_from_prefix, augment_goal_for_resolutions,
+    )
+    resolutions = parse_resolutions_from_prefix(chat_user_message)
+    if resolutions:
+        scrubbed_goal = augment_goal_for_resolutions(scrubbed_goal, resolutions)
+        logger.info("build_pipeline_live: applied %d resolution hints: %s",
+                    len(resolutions), resolutions)
+
     prompt = scrubbed_goal if not filtered_notes else f"{scrubbed_goal}\n\n補充 context:\n{filtered_notes}"
 
     # ── show_plan path: dry-run, no mutation, no SSE ──────────────────
@@ -743,12 +758,31 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
             # next message (which carries [intent_confirmed:<id>] prefix).
             import uuid as _uuid
             card_id = f"intent-{_uuid.uuid4().hex[:8]}"
+            # 2026-05-11: Plan-mode-style multi-choice clarifications.
+            # Detectors are deterministic Python (scope conflict / metric
+            # ambiguity / bar x-axis / time grain); LLM only fills in
+            # localized question + label/hint. Per CLAUDE.md "graph-heavy"
+            # preference: detection logic stays out of LLM.
+            from python_ai_sidecar.agent_orchestrator_v2.dimensional_clarifier import (
+                build_clarifications,
+            )
+            snap = state.get("pipeline_snapshot") or {}
+            try:
+                clarifications = await build_clarifications(
+                    user_msg=state.get("user_message") or "",
+                    declared_inputs=snap.get("inputs") if isinstance(snap, dict) else None,
+                    pipeline_snapshot=snap if isinstance(snap, dict) else None,
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("build_clarifications failed (%s) — card without dims", e)
+                clarifications = []
             spec_payload = {
                 "card_id": card_id,
                 "inputs": tool_input.get("inputs") or [],
                 "logic": tool_input.get("logic") or "",
                 "presentation": tool_input.get("presentation") or "mixed",
                 "alternatives": tool_input.get("alternatives") or [],
+                "clarifications": clarifications,
             }
             if event_emit is not None:
                 try:
@@ -761,6 +795,7 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
             result = {
                 "status": "awaiting_user_confirmation",
                 "card_id": card_id,
+                "clarifications_count": len(clarifications),
                 "message": (
                     "Design-intent card emitted to user. STOP this turn — do not "
                     "call build_pipeline_live yet. Wait for the user's next message; "
@@ -796,6 +831,7 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
                 event_emit=event_emit,
                 chat_session_id=state.get("session_id"),
                 chat_user_id=user_id,
+                chat_user_message=state.get("user_message") or "",
             )
         else:
             # Inject flat_data into execute_analysis so sandbox can read it directly

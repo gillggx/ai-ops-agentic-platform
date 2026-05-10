@@ -866,6 +866,7 @@ export function AIAgentPanel({
               logic: (ev.logic as string) ?? "",
               presentation: (ev.presentation as DesignIntentData["presentation"]) ?? "mixed",
               alternatives: (ev.alternatives as DesignIntentData["alternatives"]) ?? [],
+              clarifications: (ev.clarifications as DesignIntentData["clarifications"]) ?? [],
               resolved: false,
             };
             setChatHistory((prev) => [...prev, {
@@ -1751,7 +1752,20 @@ export function AIAgentPanel({
                       // travels via client_context.intent_spec instead of
                       // being inlined as JSON in the user_message text, so
                       // the chat history shows only human-readable content.
-                      const followUp = `[intent_confirmed:${design.card_id}] ${original}`;
+                      // 2026-05-11: also encode Plan-Mode multi-choice picks
+                      // (selections) into the prefix, e.g.
+                      // [intent_confirmed:abc scope=all_machines metric=apc] ...
+                      // The backend's parse_resolutions_from_prefix reads them
+                      // and augment_goal_for_resolutions splices deterministic
+                      // guidance hints into the build_pipeline_live goal text.
+                      const sel = design.selections ?? {};
+                      const selStr = Object.keys(sel)
+                        .map((k) => `${k}=${sel[k]}`)
+                        .join(" ");
+                      const prefixHead = selStr
+                        ? `[intent_confirmed:${design.card_id} ${selStr}]`
+                        : `[intent_confirmed:${design.card_id}]`;
+                      const followUp = `${prefixHead} ${original}`;
                       void sendMessage(followUp, {
                         intent_spec: {
                           card_id: design.card_id,
