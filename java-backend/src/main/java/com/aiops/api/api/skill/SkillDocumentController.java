@@ -108,16 +108,26 @@ public class SkillDocumentController {
     @Transactional
     public ApiResponse<Dtos.Detail> create(@Validated @RequestBody Dtos.CreateRequest req,
                                            @AuthenticationPrincipal AuthPrincipal caller) {
-        if (!VALID_STAGES.contains(req.stage())) {
+        // Phase 11 v11 — slug + stage are now optional. Auto-derive when caller
+        // (e.g. simplified New Skill form) doesn't supply them. Old callers
+        // passing both still validate the values.
+        String stage = req.stage();
+        if (stage == null || stage.isBlank()) {
+            stage = "diagnose";  // safe default; PUT auto-flips to patrol on schedule trigger
+        } else if (!VALID_STAGES.contains(stage)) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "validation_error", "stage must be patrol|diagnose");
         }
-        if (repository.existsBySlug(req.slug())) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "duplicate_slug", "slug already exists: " + req.slug());
+        String slug = req.slug();
+        if (slug == null || slug.isBlank()) {
+            slug = autoSlug(req.title());
+        }
+        if (repository.existsBySlug(slug)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "duplicate_slug", "slug already exists: " + slug);
         }
         SkillDocumentEntity e = new SkillDocumentEntity();
-        e.setSlug(req.slug());
+        e.setSlug(slug);
         e.setTitle(req.title());
-        e.setStage(req.stage());
+        e.setStage(stage);
         e.setDomain(Objects.requireNonNullElse(req.domain(), ""));
         e.setDescription(Objects.requireNonNullElse(req.description(), ""));
         e.setAuthorUserId(caller != null ? caller.userId() : null);
@@ -126,9 +136,41 @@ public class SkillDocumentController {
         e.setTriggerConfig(Objects.requireNonNullElse(req.triggerConfig(), "{}"));
         e.setSteps(Objects.requireNonNullElse(req.steps(), "[]"));
         SkillDocumentEntity saved = repository.save(e);
-        log.info("skill created: id={} slug={} author={}", saved.getId(), saved.getSlug(),
-                e.getAuthorUserId());
+        log.info("skill created: id={} slug={} stage={} author={}", saved.getId(), saved.getSlug(),
+                stage, e.getAuthorUserId());
         return ApiResponse.ok(Dtos.detailOf(saved));
+    }
+
+    /** Phase 11 v11 — slugify title for skills created without explicit slug.
+     *  ASCII letters/digits/dashes only (lowercased); CJK / other chars
+     *  collapse into a `skill-{epochSec}` fallback so we always produce a
+     *  valid URL fragment. */
+    private static String autoSlug(String title) {
+        String base = title == null ? "" : title.toLowerCase()
+                .replaceAll("[^a-z0-9\\-\\s]", "")
+                .trim()
+                .replaceAll("\\s+", "-");
+        if (base.length() < 2) base = "skill";
+        long ts = System.currentTimeMillis() / 1000L;
+        // Cap base to 40 chars so the final slug stays under 60.
+        return (base.length() > 40 ? base.substring(0, 40) : base) + "-" + Long.toString(ts, 36);
+    }
+
+    /** Phase 11 v11 — derive stage from trigger.type. schedule → patrol;
+     *  event → diagnose. Returns null if trigger is unparseable / absent. */
+    private String stageFromTrigger(String triggerConfigJson) {
+        if (triggerConfigJson == null || triggerConfigJson.isBlank()) return null;
+        try {
+            Map<String, Object> tc = mapper.readValue(triggerConfigJson, MAP_TYPE);
+            Object t = tc.get("type");
+            if (t == null) return null;
+            String s = String.valueOf(t).toLowerCase();
+            if ("schedule".equals(s)) return "patrol";
+            if ("event".equals(s) || "system".equals(s)) return "diagnose";
+            return null;
+        } catch (Exception ex) {
+            return null;
+        }
     }
 
     @PutMapping("/{slug}")
@@ -156,7 +198,21 @@ public class SkillDocumentController {
         if (req.description() != null) e.setDescription(req.description());
         if (req.certifiedBy() != null) e.setCertifiedBy(req.certifiedBy());
         if (req.version() != null) e.setVersion(req.version());
-        if (req.triggerConfig() != null) e.setTriggerConfig(req.triggerConfig());
+        if (req.triggerConfig() != null) {
+            e.setTriggerConfig(req.triggerConfig());
+            // Phase 11 v11 — auto-flip stage from trigger.type unless caller
+            // explicitly set stage in the same request. schedule → patrol,
+            // event → diagnose. Lets the simplified New Skill form skip stage
+            // entirely and have it land on the right value once trigger is set.
+            if (req.stage() == null) {
+                String derived = stageFromTrigger(req.triggerConfig());
+                if (derived != null && !derived.equals(e.getStage())) {
+                    log.info("skill {}: stage auto-flipped {} → {} (from trigger.type)",
+                            e.getSlug(), e.getStage(), derived);
+                    e.setStage(derived);
+                }
+            }
+        }
         if (req.steps() != null) e.setSteps(req.steps());
         // Phase 11 v2: confirmCheck is nullable — empty string clears the gate,
         // a JSON blob installs/replaces it. We can't distinguish "field absent"

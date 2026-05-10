@@ -37,9 +37,13 @@ final class Dtos {
     ) {}
 
     record CreateRequest(
-            @NotBlank String slug,
+            // Phase 11 v11 — slug + stage now optional. If absent, controller
+            // derives slug from title (slugify + ts) and stage defaults to
+            // "diagnose" (auto-flips to "patrol" on first schedule trigger PUT).
+            // Old callers passing slug/stage still work.
+            String slug,
             @NotBlank String title,
-            @NotBlank String stage,           // patrol | diagnose
+            String stage,
             String domain,
             String description,
             String version,

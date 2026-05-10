@@ -56,6 +56,26 @@ def _coerce_input(value: Any, declared_type: str) -> Any:
     return value  # unknown type → pass through
 
 
+_CANONICAL_INPUT_FALLBACKS: dict[str, Any] = {
+    # Phase 11 v11 — Auto-Run safety net. When the LLM declares one of these
+    # canonical names as required but forgets the example, fall back to a
+    # sensible literal so Auto-Run preview doesn't red-banner on every save.
+    # Production runtime callers (Auto-Patrol fan-out, scheduled fire,
+    # manual /trigger) always supply their own values and bypass this.
+    # Names mirror python_ai_sidecar.agent_orchestrator_v2.nodes.intent_completeness
+    # canonical input registry.
+    "tool_id":      "EQP-01",
+    "equipment_id": "EQP-01",
+    "lot_id":       "LOT-0001",
+    "step":         "STEP_001",
+    "chamber_id":   "CH-A",
+    "recipe_id":    "RECIPE-A",
+    "spc_chart":    "spc_xbar",
+    "fault_code":   "FC-001",
+    "severity":     "med",
+}
+
+
 def _resolve_inputs(pipeline: PipelineJSON, runtime_inputs: dict[str, Any]) -> dict[str, Any]:
     """Merge runtime values with pipeline.inputs defaults; enforce required; coerce types.
 
@@ -92,6 +112,23 @@ def _resolve_inputs(pipeline: PipelineJSON, runtime_inputs: dict[str, Any]) -> d
                 resolved[decl.name] = _coerce_input(decl.example, decl.type)
             except ValueError:
                 resolved[decl.name] = decl.example
+        elif decl.name in _CANONICAL_INPUT_FALLBACKS:
+            # Phase 11 v11 — canonical-name safety net for LLM-generated
+            # pipelines that declare common inputs (tool_id, lot_id, step…)
+            # as required without supplying an example. Without this, Auto-Run
+            # is intermittently broken (per regression report on 5-in-3-out
+            # case). Logged so we can spot LLMs that drop the example field.
+            fallback = _CANONICAL_INPUT_FALLBACKS[decl.name]
+            logger.warning(
+                "Auto-Run fallback: required input '%s' had no default/example, "
+                "using canonical value %r. Fix the pipeline by setting an example "
+                "on the input declaration.",
+                decl.name, fallback,
+            )
+            try:
+                resolved[decl.name] = _coerce_input(fallback, decl.type)
+            except ValueError:
+                resolved[decl.name] = fallback
         elif decl.required:
             raise BlockExecutionError(
                 code="MISSING_INPUT",

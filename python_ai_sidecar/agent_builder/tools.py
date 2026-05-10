@@ -900,6 +900,27 @@ class BuilderToolset:
                     "hint": "Did you forget to set_param(node, key, '$<name>')? Or remove the input if it's not needed.",
                 })
 
+        # Phase 11 v11 — warn when a required input lacks both default and
+        # example. Auto-Run preview will fall back to a canonical literal
+        # (executor _CANONICAL_INPUT_FALLBACKS) if name matches; otherwise
+        # it red-banners. Either way, the agent should set example so the
+        # intent is explicit.
+        for inp in (pipeline.inputs or []):
+            if not getattr(inp, "required", False):
+                continue
+            if getattr(inp, "default", None) is not None:
+                continue
+            if getattr(inp, "example", None) is not None:
+                continue
+            warnings.append({
+                "code": "INPUT_MISSING_EXAMPLE",
+                "message": f"Required input '{inp.name}' has no default or example.",
+                "hint": (
+                    f"Call declare_input('{inp.name}', example='<a real value e.g. EQP-01>') "
+                    "so Auto-Run preview has something to fill. Without this the canvas red-banners."
+                ),
+            })
+
         return {"valid": len(errs) == 0, "errors": errs, "warnings": warnings}
 
     # ======================================================================

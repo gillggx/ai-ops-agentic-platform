@@ -266,8 +266,9 @@ public class SkillRunnerService {
         // Phase 11 v10 — pass through sidecar's per-node dataframe previews so
         // the report can show what data the pipeline actually fetched (not
         // just the boolean check verdict). User feedback: 「我要看 pipeline
-        // 的資料本身，不只是 yes/no」.
-        sr.put("data_views", extractDataViews(nodeResults));
+        // 的資料本身，不只是 yes/no」. v11 — read result_summary.data_views
+        // (block_data_view nodes) so it matches Pipeline-Builder try-run.
+        sr.put("data_views", extractDataViews((Map<String, Object>) result, nodeResults));
         if (stepCheck == null) {
             // Pipeline ran but no step_check output — treat as fail with diagnostic note
             sr.put("status", "fail");
@@ -287,26 +288,63 @@ public class SkillRunnerService {
         return sr;
     }
 
-    /** Iterate node_results, collect every output port whose value is a
-     *  dataframe preview ({type:"dataframe", columns, rows, total}). Skips
-     *  the "check" port (already shown as the verdict). Caps total payload
-     *  at 3 views per step, 20 rows per view, 8 cols per view. */
+    /** Phase 11 v11 — align Skill report's data views with Pipeline-Builder's
+     *  try-run panel: both should show the **curated** views the pipeline
+     *  author marked with `block_data_view` nodes, NOT every intermediate
+     *  dataframe. Sidecar already does this work in
+     *  {@code _collect_data_view_summaries} → exposed at
+     *  {@code result.result_summary.data_views}. We just pass it through.
+     *  Caps cols/rows to keep SSE payload bounded. */
     @SuppressWarnings({"unchecked", "rawtypes"})
-    private List<Map<String, Object>> extractDataViews(Map<String, Object> nodeResults) {
-        final int MAX_VIEWS = 3;
-        final int MAX_ROWS  = 20;
-        final int MAX_COLS  = 8;
-        List<Map<String, Object>> views = new ArrayList<>();
+    private List<Map<String, Object>> extractDataViews(Map<String, Object> result, Map<String, Object> nodeResults) {
+        final int MAX_ROWS = 20;
+        final int MAX_COLS = 8;
+        Object rsObj = result.get("result_summary");
+        if (rsObj instanceof Map<?, ?> rs) {
+            Object dvsObj = ((Map<String, Object>) rs).get("data_views");
+            if (dvsObj instanceof List<?> dvs && !dvs.isEmpty()) {
+                List<Map<String, Object>> views = new ArrayList<>();
+                for (Object dvObj : dvs) {
+                    if (!(dvObj instanceof Map<?, ?> dv)) continue;
+                    Object cols = ((Map<String, Object>) dv).get("columns");
+                    Object rows = ((Map<String, Object>) dv).get("rows");
+                    Object total = ((Map<String, Object>) dv).get("total_rows");
+                    Map<String, Object> view = new HashMap<>();
+                    view.put("node_id", String.valueOf(((Map<String, Object>) dv).getOrDefault("node_id", "")));
+                    view.put("block", String.valueOf(((Map<String, Object>) dv).getOrDefault("title", "")));
+                    view.put("port", String.valueOf(((Map<String, Object>) dv).getOrDefault("description", "")));
+                    if (cols instanceof List<?> cl) {
+                        view.put("columns", ((List<Object>) cl).subList(0, Math.min(cl.size(), MAX_COLS)));
+                    } else {
+                        view.put("columns", List.of());
+                    }
+                    if (rows instanceof List<?> rl) {
+                        view.put("rows", ((List<Object>) rl).subList(0, Math.min(rl.size(), MAX_ROWS)));
+                    } else {
+                        view.put("rows", List.of());
+                    }
+                    view.put("total", total instanceof Number n ? n.intValue() : (rows instanceof List<?> rl2 ? rl2.size() : 0));
+                    views.add(view);
+                }
+                return views;
+            }
+        }
+        // Fallback for legacy pipelines that don't declare block_data_view:
+        // surface terminal-node dataframes only (skip "check" — already shown
+        // as the verdict), capped to 1 view to keep payload tiny.
+        Object terminalsObj = result.get("terminal_nodes");
+        java.util.Set<String> terminals = new java.util.HashSet<>();
+        if (terminalsObj instanceof List<?> tl) {
+            for (Object t : tl) terminals.add(String.valueOf(t));
+        }
         for (Map.Entry<String, Object> e : nodeResults.entrySet()) {
-            if (views.size() >= MAX_VIEWS) break;
-            String nodeId = e.getKey();
+            if (!terminals.isEmpty() && !terminals.contains(e.getKey())) continue;
             if (!(e.getValue() instanceof Map<?, ?> nr)) continue;
             String blockName = String.valueOf(((Map<String, Object>) nr).getOrDefault("block", ""));
             for (String key : new String[]{"outputs", "preview"}) {
                 Object portsObj = ((Map<String, Object>) nr).get(key);
                 if (!(portsObj instanceof Map<?, ?> ports)) continue;
                 for (Map.Entry<?, ?> pe : ports.entrySet()) {
-                    if (views.size() >= MAX_VIEWS) break;
                     String port = String.valueOf(pe.getKey());
                     if ("check".equals(port)) continue;
                     if (!(pe.getValue() instanceof Map<?, ?> portVal)) continue;
@@ -318,17 +356,17 @@ public class SkillRunnerService {
                     List<Object> cols = (List<Object>) colsObj;
                     List<Object> rows = rowsObj instanceof List<?> ? (List<Object>) rowsObj : List.of();
                     Map<String, Object> view = new HashMap<>();
-                    view.put("node_id", nodeId);
+                    view.put("node_id", e.getKey());
                     view.put("block", blockName);
                     view.put("port", port);
                     view.put("columns", cols.subList(0, Math.min(cols.size(), MAX_COLS)));
                     view.put("rows", rows.subList(0, Math.min(rows.size(), MAX_ROWS)));
                     view.put("total", totalObj instanceof Number n ? n.intValue() : rows.size());
-                    views.add(view);
+                    return List.of(view);   // only one fallback view
                 }
             }
         }
-        return views;
+        return List.of();
     }
 
     private List<Map<String, Object>> parseSteps(String json) {

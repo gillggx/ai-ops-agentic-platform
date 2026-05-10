@@ -225,83 +225,114 @@ export function TriggerConfigEditor({
   });
   const setTarget = (target: NonNullable<TC["target"]>) => setTrigger({ ...trigger, target });
 
-  // ── Author mode: pure prose, no inline edit ─────────────────────────
-  if (mode === "author") {
-    return (
-      <div style={{ marginTop: 24 }}>
-        <div style={{
-          fontSize: 16, lineHeight: 1.7, color: "var(--ink)",
-          padding: "16px 0 4px",
-        }}>
-          <span className="mono" style={{
-            fontSize: 10.5, color: "var(--ink-3)",
-            letterSpacing: "0.08em", marginRight: 10,
-          }}>TRIGGER</span>
-          {loading ? "…" : description}
-        </div>
-      </div>
-    );
-  }
+  // Phase 11 v11 — 3-row labeled layout. Replaces the previous inline-prose
+  // approach where the 對象 pill could disappear behind a wrapped line / be
+  // missed by users (per feedback「在 execute mode 選時間，一樣不能設定對象」).
+  // Author mode shows read-only with a pencil to flip into editable;
+  // Execute mode is always editable.
+  const [authorEditing, setAuthorEditing] = useState(false);
+  const editable = mode === "run" || authorEditing;
 
-  // ── Run / Execute mode: prose with inline pills + expandable editors ─
+  const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <div style={{
+      display: "grid", gridTemplateColumns: "78px 1fr",
+      alignItems: "center", gap: 14,
+      padding: "8px 0",
+    }}>
+      <span className="mono" style={{
+        fontSize: 10.5, color: "var(--ink-3)", letterSpacing: "0.08em",
+      }}>{label}</span>
+      <div>{children}</div>
+    </div>
+  );
+
+  const scheduleLabel = trigger.schedule?.mode === "daily"
+    ? `每日 ${trigger.schedule.time ?? "08:00"}`
+    : `每 ${trigger.schedule?.every ?? 4} 小時`;
+
   return (
     <div style={{ marginTop: 24 }}>
       <div style={{
-        fontSize: 16, lineHeight: 1.7, color: "var(--ink)",
-        padding: "16px 0 14px",
+        display: "flex", alignItems: "center", gap: 10,
+        padding: "12px 0 4px",
       }}>
         <span className="mono" style={{
-          fontSize: 10.5, color: "var(--ink-3)",
-          letterSpacing: "0.08em", marginRight: 10,
+          fontSize: 10.5, color: "var(--ink-3)", letterSpacing: "0.08em",
         }}>TRIGGER</span>
-        當{" "}
-        <InlinePill onClick={() => setEditing(editing === "type" ? null : "type")}>
-          {trigger.type === "event" ? "Event 發生" : "排程時間到"}
-          <Chev open={editing === "type"}/>
-        </InlinePill>
-        {trigger.type === "event" ? (
-          <>
-            {" — "}
-            <InlinePill mono accent onClick={() => setEditing(editing === "event" ? null : "event")}>
-              {ev?.label || trigger.event || "—"}
-              <Chev open={editing === "event"}/>
-            </InlinePill>
-          </>
-        ) : (
-          <>
-            {" — "}
-            <InlinePill mono accent onClick={() => setEditing(editing === "schedule" ? null : "schedule")}>
-              {trigger.schedule?.mode === "daily"
-                ? `每日 ${trigger.schedule.time ?? "08:00"}`
-                : `每 ${trigger.schedule?.every ?? 4} 小時`}
-              <Chev open={editing === "schedule"}/>
-            </InlinePill>
-          </>
-        )}
-        {trigger.type === "schedule" && (
-          <>
-            {" · 對象 "}
-            <InlinePill onClick={() => setEditing(editing === "target" ? null : "target")}>
-              {targetText}
-              <Chev open={editing === "target"}/>
-            </InlinePill>
-          </>
-        )}
-        {trigger.type === "event" && (
-          <span style={{ color: "var(--ink-3)", fontSize: 12.5, marginLeft: 8 }}>
-            · 對象來自 event payload
-          </span>
+        <span style={{ flex: 1, height: 1, background: "var(--line)" }}/>
+        {mode === "author" && (
+          <button
+            type="button"
+            onClick={() => setAuthorEditing((v) => !v)}
+            aria-label={authorEditing ? "完成編輯" : "編輯 trigger"}
+            style={{
+              all: "unset", cursor: "pointer",
+              padding: "3px 9px", borderRadius: 5,
+              fontSize: 11, color: authorEditing ? "var(--bg)" : "var(--ink-2)",
+              background: authorEditing ? "var(--ink)" : "var(--surface-2)",
+              border: `1px solid ${authorEditing ? "var(--ink)" : "var(--line-strong)"}`,
+              display: "inline-flex", alignItems: "center", gap: 5,
+            }}>
+            {authorEditing ? "Done" : <><Icon.Pencil/> Edit</>}
+          </button>
         )}
       </div>
 
-      <div style={{
-        fontSize: 12, color: "var(--ink-3)",
-        marginBottom: editing ? 14 : 0, fontStyle: "italic",
-      }}>
-        → {description}
-      </div>
+      {!editable ? (
+        // Author mode read-only: prose summary + meta
+        <div style={{
+          fontSize: 14.5, lineHeight: 1.6, color: "var(--ink)",
+          padding: "8px 0 16px",
+        }}>
+          {loading ? "…" : description}
+        </div>
+      ) : (
+        <div style={{ padding: "4px 0 12px" }}>
+          <Row label="類型">
+            <InlinePill onClick={() => setEditing(editing === "type" ? null : "type")}>
+              {trigger.type === "event" ? "Event 發生" : "排程時間到"}
+              <Chev open={editing === "type"}/>
+            </InlinePill>
+          </Row>
 
-      {editing === "type" && (
+          {trigger.type === "event" ? (
+            <Row label="事件">
+              <InlinePill mono accent onClick={() => setEditing(editing === "event" ? null : "event")}>
+                {ev?.label || trigger.event || "—"}
+                <Chev open={editing === "event"}/>
+              </InlinePill>
+            </Row>
+          ) : (
+            <Row label="排程">
+              <InlinePill mono accent onClick={() => setEditing(editing === "schedule" ? null : "schedule")}>
+                {scheduleLabel}
+                <Chev open={editing === "schedule"}/>
+              </InlinePill>
+            </Row>
+          )}
+
+          <Row label="對象">
+            {trigger.type === "event" ? (
+              <span style={{ color: "var(--ink-3)", fontSize: 12.5, fontStyle: "italic" }}>
+                對象來自 event payload（不可指定 — event 自己帶 tool_id / lot_id）
+              </span>
+            ) : (
+              <InlinePill onClick={() => setEditing(editing === "target" ? null : "target")}>
+                {targetText}
+                <Chev open={editing === "target"}/>
+              </InlinePill>
+            )}
+          </Row>
+
+          <div style={{
+            marginTop: 4, fontSize: 12, color: "var(--ink-3)", fontStyle: "italic",
+          }}>
+            → {description}
+          </div>
+        </div>
+      )}
+
+      {editable && editing === "type" && (
         <Editor onClose={() => setEditing(null)} title="Trigger 類型">
           <div style={{ display: "flex", gap: 8 }}>
             <Pill active={trigger.type === "event"} color="var(--fail)"
@@ -324,7 +355,7 @@ export function TriggerConfigEditor({
         </Editor>
       )}
 
-      {editing === "event" && (
+      {editable && editing === "event" && (
         <Editor onClose={() => setEditing(null)} title="選擇 system event">
           {loading ? (
             <div style={{ fontSize: 12, color: "var(--ink-3)" }}>loading event catalog…</div>
@@ -362,7 +393,7 @@ export function TriggerConfigEditor({
         </Editor>
       )}
 
-      {editing === "schedule" && (
+      {editable && editing === "schedule" && (
         <Editor onClose={() => setEditing(null)} title="排程設定">
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{ display: "flex", gap: 8 }}>
@@ -410,7 +441,7 @@ export function TriggerConfigEditor({
         </Editor>
       )}
 
-      {editing === "target" && (
+      {editable && editing === "target" && (
         <Editor onClose={() => setEditing(null)} title="檢查對象">
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ display: "flex", gap: 8 }}>

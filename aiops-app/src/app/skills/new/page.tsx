@@ -6,16 +6,15 @@ import Link from "next/link";
 import { Icon, Btn } from "@/components/skills/atoms";
 
 /**
- * /skills/new — minimal author kickoff. Asks for slug + title + stage,
- * creates the skill_document row, then navigates to /skills/[slug]/edit
- * where the user fills trigger + steps.
+ * /skills/new — minimal author kickoff. Phase 11 v11: only title +
+ * description; slug auto-derived server-side; stage defaults to
+ * "diagnose" and flips to "patrol" automatically when Author later
+ * sets a schedule trigger. Domain dropped (unused by current UI).
  */
 export default function NewSkillPage() {
   const router = useRouter();
-  const [slug, setSlug] = useState("");
   const [title, setTitle] = useState("");
-  const [stage, setStage] = useState<"patrol" | "diagnose">("diagnose");
-  const [domain, setDomain] = useState("");
+  const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -26,10 +25,12 @@ export default function NewSkillPage() {
       const res = await fetch("/api/skill-documents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slug, title, stage, domain }),
+        body: JSON.stringify({ title, description }),
       });
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.error?.message || `HTTP ${res.status}`);
+      const slug = json.data?.slug;
+      if (!slug) throw new Error("backend did not return a slug");
       router.push(`/skills/${encodeURIComponent(slug)}/edit`);
     } catch (e) {
       setError((e as Error).message);
@@ -51,40 +52,27 @@ export default function NewSkillPage() {
           New Skill Document
         </h1>
         <p style={{ marginTop: 10, fontSize: 13.5, color: "var(--ink-2)", lineHeight: 1.6 }}>
-          建立一份新的 skill 知識文件。建好後會跳到 Author 頁面填 trigger 與 step。
+          給這份 skill 一個名稱跟簡短描述就好。建好後跳到 Author 頁面填 trigger 與 step。
+          <br/>
+          <span style={{ color: "var(--ink-3)", fontSize: 12 }}>
+            slug、stage、domain 等技術欄位之後會自動依你的設定 derive，不用手填。
+          </span>
         </p>
 
         <div style={{ marginTop: 28, display: "flex", flexDirection: "column", gap: 14 }}>
-          <Field label="SLUG" hint="URL-friendly id，e.g. ocap-diag">
-            <input value={slug} onChange={(e) => setSlug(e.target.value.replace(/[^a-z0-9-]/gi, "-").toLowerCase())}
-              placeholder="ocap-diag"
-              className="mono"
-              style={{ padding: "8px 10px", border: "1px solid var(--line-strong)", borderRadius: 6,
-                       fontSize: 13, background: "var(--surface)", outline: "none", fontFamily: "JetBrains Mono, monospace" }}/>
-          </Field>
           <Field label="TITLE">
             <input value={title} onChange={(e) => setTitle(e.target.value)}
-              placeholder="OCAP Advanced Diagnostic Playbook"
+              placeholder="e.g. OCAP 進階診斷"
               style={{ padding: "8px 10px", border: "1px solid var(--line-strong)", borderRadius: 6,
                        fontSize: 14, background: "var(--surface)", outline: "none", fontFamily: "inherit" }}/>
           </Field>
-          <Field label="STAGE">
-            <div style={{ display: "inline-flex", padding: 2, borderRadius: 8, background: "var(--surface-2)", border: "1px solid var(--line)" }}>
-              {(["patrol", "diagnose"] as const).map((s) => (
-                <button key={s} onClick={() => setStage(s)} style={{
-                  padding: "6px 14px", borderRadius: 6, border: "none",
-                  background: stage === s ? "var(--surface)" : "transparent",
-                  color: stage === s ? "var(--ink)" : "var(--ink-3)",
-                  fontSize: 13, fontWeight: 500, cursor: "pointer",
-                }}>{s}</button>
-              ))}
-            </div>
-          </Field>
-          <Field label="DOMAIN" hint="optional, e.g. Photo · Etch">
-            <input value={domain} onChange={(e) => setDomain(e.target.value)}
-              placeholder="Photo · Etch"
+          <Field label="DESCRIPTION" hint="（選填）一兩句話讓 Library 列表上的人知道這 skill 在做什麼">
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+              placeholder="例：OCAP 觸發後依序檢查歷史 OOC 趨勢、SPC 違規、APC recipe 異動，並提示對應建議行動。"
               style={{ padding: "8px 10px", border: "1px solid var(--line-strong)", borderRadius: 6,
-                       fontSize: 13, background: "var(--surface)", outline: "none", fontFamily: "inherit" }}/>
+                       fontSize: 13, background: "var(--surface)", outline: "none",
+                       fontFamily: "inherit", resize: "vertical", lineHeight: 1.55 }}/>
           </Field>
 
           {error && (
@@ -97,7 +85,7 @@ export default function NewSkillPage() {
 
         <div style={{ marginTop: 24, display: "flex", gap: 8 }}>
           <Btn kind="primary" icon={<Icon.Plus/>} onClick={submit}
-            disabled={submitting || !slug.trim() || !title.trim()}>
+            disabled={submitting || !title.trim()}>
             {submitting ? "Creating…" : "Create skill"}
           </Btn>
           <Link href="/skills" style={{
