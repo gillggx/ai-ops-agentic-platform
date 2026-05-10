@@ -55,6 +55,11 @@ export default function Playbook({
   const [runActiveStep, setRunActiveStep] = useState<string | null>(null);
   const [runState, setRunState] = useState<"idle" | "running" | "done">("idle");
   const [runResults, setRunResults] = useState<Record<string, { status: "pass" | "fail"; value: string; note: string }>>({});
+  // Phase 11 v7 — Confirm step has its own status/result so the timeline can
+  // show「正在跑 C1…」instead of UI 看起來卡死（之前 SSE confirm_* 事件被丟掉）
+  const [confirmRunStatus, setConfirmRunStatus] = useState<"queued" | "running" | "done" | null>(null);
+  const [confirmRunResult, setConfirmRunResult] = useState<{ status: "pass" | "fail"; value: string; note: string } | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
   const [showCaseSelector, setShowCaseSelector] = useState(false);
   const [selectedCase, setSelectedCase] = useState<TestCase | null>(null);
   const [showSummary, setShowSummary] = useState(false);
@@ -122,7 +127,13 @@ export default function Playbook({
 
   const onPublish = async () => {
     if (!skill) return;
-    if (!confirm("Publish 後 trigger 會生效並開始持續執行。確認 publish？")) return;
+    // Phase 11 v7 — copy clarified: this is "啟用 trigger 自動執行", not
+    // marketplace-style sharing. DB status field still flips draft → stable.
+    const isAlreadyActive = skill.status === "stable";
+    const msg = isAlreadyActive
+      ? "這個 Skill 已經是 Active 狀態。重新儲存並重新登錄 trigger？"
+      : "啟用後系統會在 trigger 條件成立時自動執行此 Skill。\nDraft 狀態下只能手動 Run / Test。\n\n確認啟用？";
+    if (!confirm(msg)) return;
     await onSave();
     const res = await fetch(`/api/skill-documents/${encodeURIComponent(slug)}`, {
       method: "PUT",
@@ -163,6 +174,9 @@ export default function Playbook({
     setRunState("running");
     setRunStatuses(Object.fromEntries(steps.map((s) => [s.id, "queued"])));
     setRunResults({});
+    setConfirmRunStatus(confirmCheck ? "queued" : null);
+    setConfirmRunResult(null);
+    setRunError(null);
 
     try {
       const res = await fetch(`/api/skill-documents/${encodeURIComponent(slug)}/run`, {
@@ -174,11 +188,16 @@ export default function Playbook({
         }),
       });
       if (!res.ok || !res.body) {
-        // Fallback simulation: mark each step running → done sequentially
-        await simulateRun();
+        // Phase 11 v7 — drop the silent client-simulation fallback. Surface the
+        // real upstream error instead so user can see what's broken.
+        const txt = await res.text().catch(() => "");
+        setRunError(`執行失敗 (HTTP ${res.status})${txt ? ` · ${txt.slice(0, 240)}` : ""}`);
+        setRunState("idle");
         return;
       }
-      // SSE consumer
+      // SSE consumer — backend events: run_start / confirm_start / confirm_done
+      // / step_start / step_done / done / error. All seven now handled (v6
+      // only handled 3, which is why Re-run looked stuck during confirm phase).
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -199,7 +218,18 @@ export default function Playbook({
           }
           let data: Record<string, unknown> = {};
           try { data = JSON.parse(dataLines.join("\n")); } catch { /* ignore */ }
-          if (evt === "step_start") {
+          if (evt === "run_start") {
+            // Reserved — payload contains run_id + step_count, no UI need yet.
+          } else if (evt === "confirm_start") {
+            setConfirmRunStatus("running");
+            setRunActiveStep("__confirm__");
+          } else if (evt === "confirm_done") {
+            const status = (data.status as "pass" | "fail") || "pass";
+            const value = (data.value as string) || "";
+            const note = (data.note as string) || "";
+            setConfirmRunStatus("done");
+            setConfirmRunResult({ status, value, note });
+          } else if (evt === "step_start") {
             const sid = data.step_id as string;
             setRunActiveStep(sid);
             setRunStatuses((prev) => ({ ...prev, [sid]: "running" }));
@@ -214,35 +244,19 @@ export default function Playbook({
             setRunState("done");
             setRunActiveStep(null);
             setShowSummary(true);
+          } else if (evt === "error") {
+            setRunError(String(data.message ?? "unknown error"));
+            setRunState("idle");
+            setRunActiveStep(null);
           }
         }
       }
     } catch (e) {
-      console.warn("run failed, falling back to client simulation:", e);
-      await simulateRun();
+      console.error("run failed:", e);
+      setRunError(`執行中斷：${String(e)}`);
+      setRunState("idle");
+      setRunActiveStep(null);
     }
-  };
-
-  const simulateRun = async () => {
-    // Backend-less fallback so author can preview UX without SkillRunner
-    for (const s of steps) {
-      setRunActiveStep(s.id);
-      setRunStatuses((prev) => ({ ...prev, [s.id]: "running" }));
-      await new Promise((r) => setTimeout(r, 500));
-      const status = Math.random() > 0.5 ? "pass" : "fail";
-      setRunResults((prev) => ({
-        ...prev,
-        [s.id]: {
-          status,
-          value: status === "pass" ? "All checks ok" : "Threshold exceeded",
-          note: "(simulated)",
-        },
-      }));
-      setRunStatuses((prev) => ({ ...prev, [s.id]: "done" }));
-    }
-    setRunActiveStep(null);
-    setRunState("done");
-    setShowSummary(true);
   };
 
   const resetRun = () => {
@@ -250,6 +264,9 @@ export default function Playbook({
     setRunStatuses({});
     setRunActiveStep(null);
     setRunResults({});
+    setConfirmRunStatus(null);
+    setConfirmRunResult(null);
+    setRunError(null);
   };
 
   // Phase 11 v5 — sign-off removed. step.confirmed is now set automatically
@@ -295,6 +312,23 @@ export default function Playbook({
   const addStep = async (text: string) => {
     await openSlotInBuilder("step:NEW", text);
   };
+
+  /** Phase 11 v7 — read-only Inspect link to Pipeline Builder. Without this,
+   *  BuilderLayout's "← back" defaults to /admin/pipeline-builder which
+   *  redirects to /skills (Library) — user reported they "leave but end up
+   *  in skill list, not the skill". Writing this lightweight ctx makes
+   *  the back button return to the originating Skill page. */
+  const openInspect = useCallback((pipelineId: number) => {
+    if (typeof window !== "undefined") {
+      try {
+        sessionStorage.setItem("pb:back_to_skill", JSON.stringify({
+          skill_slug: slug,
+          mode,
+        }));
+      } catch { /* ignore */ }
+    }
+    window.open(`/admin/pipeline-builder/${pipelineId}`, "_blank", "noopener");
+  }, [slug, mode]);
 
   if (loading) {
     return (
@@ -358,6 +392,7 @@ export default function Playbook({
               confirmCheck={confirmCheck}
               onSet={(cc) => { setConfirmCheck(cc); markDirty(); }}
               onReload={reload}
+              onInspect={openInspect}
             />
           )}
 
@@ -387,6 +422,7 @@ export default function Playbook({
               onActionsChange={(a) => updateStepActions(s.id, a)}
               onRemove={() => removeStep(s.id)}
               onOpenInBuilder={(text) => void openSlotInBuilder(`step:${s.id}`, text)}
+              onInspect={openInspect}
               onActionsExpand={() => setExpandedId(expandedId === s.id ? null : s.id)}
               actionsExpanded={expandedId === s.id}
             />
@@ -412,9 +448,37 @@ export default function Playbook({
             activeStepId={runActiveStep}
             runStatuses={runStatuses}
             runResults={runResults}
+            confirmCheck={confirmCheck}
+            confirmRunStatus={confirmRunStatus}
+            confirmRunResult={confirmRunResult}
           />
         )}
       </div>
+
+      {runError && (
+        <div style={{
+          maxWidth: 1400, margin: "12px auto 0", padding: "10px 28px",
+        }}>
+          <div style={{
+            padding: "10px 14px", borderRadius: 8,
+            background: "var(--fail-bg)", border: "1px solid var(--fail)",
+            color: "var(--fail)", fontSize: 12.5, lineHeight: 1.5,
+            display: "flex", alignItems: "flex-start", gap: 10,
+          }}>
+            <span style={{ fontSize: 14, lineHeight: 1 }}>⚠</span>
+            <div style={{ flex: 1 }}>
+              <strong>Skill 執行失敗</strong>
+              <div style={{ marginTop: 4, color: "var(--ink-2)", fontFamily: "ui-monospace, monospace", fontSize: 11.5 }}>
+                {runError}
+              </div>
+            </div>
+            <button onClick={() => setRunError(null)} aria-label="dismiss"
+              style={{
+                all: "unset", cursor: "pointer", padding: 4, color: "var(--fail)",
+              }}>×</button>
+          </div>
+        </div>
+      )}
 
       <TestCaseSelector
         open={showCaseSelector}
@@ -492,7 +556,11 @@ function TopBar({
       {mode === "author" && (
         <>
           <Btn kind="ghost" onClick={onSave} disabled={!dirty}>{dirty ? "Save Draft" : "Saved"}</Btn>
-          <Btn kind="secondary" onClick={onPublish}>Publish</Btn>
+          {/* Phase 11 v7 — was「Publish」(misleading marketplace wording).
+              真實語意 = 啟用 trigger 自動執行；改名以避免歧義。 */}
+          <Btn kind="secondary" onClick={onPublish}>
+            Activate Trigger
+          </Btn>
         </>
       )}
       {runState === "idle" || runState === "done" ? (
@@ -529,7 +597,7 @@ function PlaybookHeader({
         <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)", letterSpacing: "0.06em" }}>
           SKILL · {(skill.stage || "").toUpperCase()} · ADVISORY
         </span>
-        <Badge kind="muted" dim>v{skill.version} · {skill.status}</Badge>
+        <Badge kind="muted" dim>v{skill.version} · {skill.status === "stable" ? "active" : skill.status}</Badge>
         {skill.domain && <Badge kind="muted" dim>Domain · {skill.domain}</Badge>}
       </div>
 
@@ -630,7 +698,7 @@ function StepActionMenu({ items }: {
 function StepBlock({
   step, index, mode, expanded, onToggle, runStatus, runResult,
   onTextChange, onActionsChange, onRemove,
-  onOpenInBuilder,
+  onOpenInBuilder, onInspect,
   onActionsExpand, actionsExpanded,
 }: {
   step: SkillStep;
@@ -644,6 +712,7 @@ function StepBlock({
   onActionsChange: (a: SuggestedAction[]) => void;
   onRemove: () => void;
   onOpenInBuilder: (instruction: string) => void;
+  onInspect: (pipelineId: number) => void;
   onActionsExpand: () => void;
   actionsExpanded: boolean;
 }) {
@@ -721,7 +790,7 @@ function StepBlock({
                   { label: "Refine in Pipeline Builder", icon: <Icon.Spark/>,
                     onClick: () => onOpenInBuilder(step.text) },
                   { label: "Inspect blocks ↗", icon: <Icon.Pencil/>,
-                    onClick: () => window.open(`/admin/pipeline-builder/${step.pipeline_id}`, "_blank", "noopener") },
+                    onClick: () => { if (step.pipeline_id != null) onInspect(step.pipeline_id); } },
                   { label: actionsExpanded ? "Hide suggested actions" : `Suggested actions (${actionsCount})`,
                     icon: <Icon.Spark/>, onClick: onActionsExpand },
                   { label: "Remove step", icon: <Icon.X/>, danger: true, onClick: onRemove },
@@ -809,7 +878,7 @@ function StepBlock({
                 { label: "Refine in Pipeline Builder", icon: <Icon.Spark/>,
                   onClick: () => onOpenInBuilder(step.text) },
                 { label: "Inspect blocks ↗", icon: <Icon.Pencil/>,
-                  onClick: () => window.open(`/admin/pipeline-builder/${step.pipeline_id}`, "_blank", "noopener") },
+                  onClick: () => { if (step.pipeline_id != null) onInspect(step.pipeline_id); } },
                 { label: actionsExpanded ? "Hide suggested actions" : `Suggested actions (${actionsCount})`,
                   icon: <Icon.Spark/>, onClick: onActionsExpand },
                 { label: "Remove step", icon: <Icon.X/>, danger: true, onClick: onRemove },
@@ -834,6 +903,7 @@ function StepBlock({
             <ExpandedPipeline
               step={step}
               isRunning={isRunning}
+              onInspect={onInspect}
             />
           )}
 
@@ -860,10 +930,11 @@ function StepBlock({
 /** Phase 11 v5 — Execute-only, read-only pipeline mini canvas. Author mode
  *  no longer renders this (use ⋯ → Inspect blocks instead). */
 function ExpandedPipeline({
-  step, isRunning,
+  step, isRunning, onInspect,
 }: {
   step: SkillStep;
   isRunning: boolean;
+  onInspect: (pipelineId: number) => void;
 }) {
   void isRunning;
   // Synthesize a simple block diagram from step.pipeline_id metadata.
@@ -897,12 +968,16 @@ function ExpandedPipeline({
         </span>
         <span style={{ flex: 1 }}/>
         {step.pipeline_id != null && (
-          <Link href={`/admin/pipeline-builder/${step.pipeline_id}`} target="_blank" style={{
-            fontSize: 11, color: "var(--ai)", textDecoration: "none",
-            display: "inline-flex", alignItems: "center", gap: 4,
-          }}>
+          <button
+            type="button"
+            onClick={() => { if (step.pipeline_id != null) onInspect(step.pipeline_id); }}
+            style={{
+              all: "unset", cursor: "pointer",
+              fontSize: 11, color: "var(--ai)", textDecoration: "none",
+              display: "inline-flex", alignItems: "center", gap: 4,
+            }}>
             Inspect ↗
-          </Link>
+          </button>
         )}
       </div>
 
@@ -1164,13 +1239,24 @@ function AddStep({ onAdd }: { onAdd: (text: string) => Promise<void> }) {
 
 function RunTimeline({
   steps, runState, activeStepId, runStatuses, runResults,
+  confirmCheck, confirmRunStatus, confirmRunResult,
 }: {
   steps: SkillStep[];
   runState: "idle" | "running" | "done";
   activeStepId: string | null;
   runStatuses: Record<string, "queued" | "running" | "done">;
   runResults: Record<string, { status: "pass" | "fail"; value: string; note: string }>;
+  confirmCheck: ConfirmCheck | null;
+  confirmRunStatus: "queued" | "running" | "done" | null;
+  confirmRunResult: { status: "pass" | "fail"; value: string; note: string } | null;
 }) {
+  void activeStepId;
+  // Phase 11 v7 — render the C1 confirm row first when a confirm step exists,
+  // so user 看得到 confirm 階段的進度（之前 confirm 期間 UI 完全沒變化）.
+  const confirmDot = confirmRunStatus === "done"
+    ? (confirmRunResult?.status === "fail" ? "var(--fail)" : "var(--pass)")
+    : confirmRunStatus === "running" ? "var(--ai)"
+    : "var(--line-strong)";
   return (
     <aside style={{
       position: "sticky", top: 56,
@@ -1191,6 +1277,36 @@ function RunTimeline({
           </span>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          {confirmCheck && (
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "8px 0" }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
+                <span style={{
+                  width: 9, height: 9, borderRadius: 999, background: confirmDot,
+                  boxShadow: confirmRunStatus === "running" ? "0 0 0 4px var(--ai-bg)" : "none",
+                  transition: "all 200ms",
+                }}/>
+                {steps.length > 0 && (
+                  <div style={{ width: 1, flex: 1, minHeight: 18, background: "var(--line)", marginTop: 2 }}/>
+                )}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, color: "var(--ai)", fontWeight: 600, lineHeight: 1.35 }}>
+                  C1 · Confirm
+                </div>
+                <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2, lineHeight: 1.4 }}>
+                  {confirmRunStatus == null && "Queued"}
+                  {confirmRunStatus === "queued" && "Queued"}
+                  {confirmRunStatus === "running" && "Running…"}
+                  {confirmRunStatus === "done" && confirmRunResult?.status === "pass" && (confirmRunResult.value || "Pass · 繼續 checklist")}
+                  {confirmRunStatus === "done" && confirmRunResult?.status === "fail" && (
+                    <span style={{ color: "var(--fail)" }}>
+                      {confirmRunResult.value || "Fail"} · checklist 已跳過
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
           {steps.map((s, i) => {
             const st = runStatuses[s.id] || "queued";
             const result = runResults[s.id];
@@ -1377,13 +1493,14 @@ function SummaryReport({
 /* ── Phase 11 v2: CONFIRM section (gating step) ────────────────────── */
 
 function ConfirmSection({
-  slug, mode, confirmCheck, onSet, onReload,
+  slug, mode, confirmCheck, onSet, onReload, onInspect,
 }: {
   slug: string;
   mode: "author" | "run";
   confirmCheck: ConfirmCheck | null;
   onSet: (cc: ConfirmCheck | null) => void;
   onReload: () => void;
+  onInspect: (pipelineId: number) => void;
 }) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1497,17 +1614,17 @@ function ConfirmSection({
             )}
             {mode === "run" && confirmCheck.pipeline_id != null && (
               <div style={{ marginTop: 8 }}>
-                <a
-                  href={`/admin/pipeline-builder/${confirmCheck.pipeline_id}`}
-                  target="_blank"
-                  rel="noopener"
+                <button
+                  type="button"
+                  onClick={() => { if (confirmCheck.pipeline_id != null) onInspect(confirmCheck.pipeline_id); }}
                   style={{
+                    all: "unset", cursor: "pointer",
                     fontSize: 11.5, color: "var(--ai)", textDecoration: "none",
                     display: "inline-flex", alignItems: "center", gap: 4,
                   }}
                 >
                   Inspect pipeline ↗
-                </a>
+                </button>
               </div>
             )}
             {error && <div style={{ marginTop: 6, fontSize: 11, color: "var(--fail)" }}>⚠ {error}</div>}
@@ -1533,7 +1650,7 @@ function ConfirmSection({
               { label: "Refine in Pipeline Builder", icon: <Icon.Spark/>,
                 onClick: () => void openInBuilder(confirmCheck.description, "confirm") },
               { label: "Inspect blocks ↗", icon: <Icon.Pencil/>,
-                onClick: () => window.open(`/admin/pipeline-builder/${confirmCheck.pipeline_id}`, "_blank", "noopener") },
+                onClick: () => { if (confirmCheck.pipeline_id != null) onInspect(confirmCheck.pipeline_id); } },
               { label: "Remove confirmation step", icon: <Icon.X/>, danger: true,
                 onClick: () => void removeStep() },
             ]}/>

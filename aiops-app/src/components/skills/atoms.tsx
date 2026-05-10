@@ -150,8 +150,10 @@ export function StagePill({ stage, dim }: { stage: "patrol" | "diagnose"; dim?: 
 }
 
 export function StatusDot({ status }: { status: string }) {
+  // Phase 11 v7 — UI label「active」beats DB label「stable」(後者是 marketplace
+  // 用語會誤導；真實意義是 trigger 已啟用 / 自動執行中).
   const map: Record<string, { color: string; label: string }> = {
-    stable: { color: "var(--pass)", label: "stable" },
+    stable: { color: "var(--pass)", label: "active" },
     draft:  { color: "var(--warn)", label: "draft" },
   };
   const m = map[status] || map.draft;

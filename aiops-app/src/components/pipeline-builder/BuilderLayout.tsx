@@ -559,6 +559,11 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
           // the back link should return to the parent Skill detail page,
           // not the (now-redirected) Pipeline Builder list. Read the ctx
           // here instead of importing SkillEmbedBanner to avoid a cycle.
+          //
+          // Phase 11 v7 — also honour `pb:back_to_skill`, written by
+          // Skill page's "Inspect blocks ↗" / "Inspect pipeline ↗" so
+          // those read-only opens also have a way back. Banner-bearing
+          // refine ctx wins; otherwise fall back to the lighter back ref.
           let backHref = "/admin/pipeline-builder";
           let backLabel = "← List";
           if (typeof window !== "undefined") {
@@ -569,6 +574,16 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
                 if (ctx?.skill_slug) {
                   backHref = `/skills/${encodeURIComponent(ctx.skill_slug)}/edit`;
                   backLabel = `← back to Skill`;
+                }
+              } else {
+                const lite = sessionStorage.getItem("pb:back_to_skill");
+                if (lite) {
+                  const liteCtx = JSON.parse(lite) as { skill_slug?: string; mode?: "edit" | "run" };
+                  if (liteCtx?.skill_slug) {
+                    const sub = liteCtx.mode === "run" ? "" : "/edit";
+                    backHref = `/skills/${encodeURIComponent(liteCtx.skill_slug)}${sub}`;
+                    backLabel = `← back to Skill`;
+                  }
                 }
               }
             } catch { /* ignore */ }
