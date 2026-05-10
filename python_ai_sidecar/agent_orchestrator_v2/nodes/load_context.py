@@ -451,6 +451,26 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
                     "    `$tool_id`，**不要**自己 declare `equipment_id` 然後寫 `$equipment_id`，\n"
                     "    那會跟既有 input 對不上、Auto-Patrol fan-out / Auto-Run 都會失敗）。"
                 )
+                # 2026-05-11: anti-scope-expansion rule. User reported chat
+                # orchestrator silently expanding generic 「機台」 into 「全廠
+                # 各機台」 when $tool_id was declared (a parametric per-tool
+                # skill). The skill is meant to RUN per tool with $tool_id
+                # supplied at runtime; expanding to "all machines" defeats
+                # the parameter and makes the skill non-portable.
+                declared_names = {
+                    (inp.get("name") if isinstance(inp, dict) else None)
+                    for inp in declared
+                }
+                if "tool_id" in declared_names or "equipment_id" in declared_names:
+                    lines.append(
+                        "\n  🛑 **scope rule (declared $tool_id 在 list 裡)**：\n"
+                        "    使用者寫「機台 X」「該機台」「機台 SPC」等 generic 語句時，**永遠**\n"
+                        "    視為「執行時帶入 $tool_id 的單一機台」，goal 必含 $tool_id reference。\n"
+                        "    **禁止**寫「全廠」「各機台」「所有機台」「跨機台」這類 implies-no-filter\n"
+                        "    措辭，**除非**使用者**明確**用了這些字眼。\n"
+                        "    — 這是因為 user 宣告 $tool_id 就是要 parametric per-tool 執行；\n"
+                        "      你自作主張展開成「全廠」會讓 skill 失去可重用性。"
+                    )
             if nodes:
                 node_count = len(nodes)
                 terminal_kinds = sorted({

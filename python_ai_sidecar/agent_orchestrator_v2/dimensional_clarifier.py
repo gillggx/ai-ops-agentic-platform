@@ -74,19 +74,34 @@ _MULTI_TOOL_TOKENS = (
 )
 # Words for "single tool" — when user says these, no scope ambiguity.
 _SINGLE_TOOL_TOKENS = ("這台", "該機台", "指定機台", "single tool")
+# Generic "machine" mentions that aren't deictic but still ambiguous.
+# When $tool_id is declared and any of these appear, we surface scope dim
+# (default=single_via_param so user can ✅ once to align).
+_GENERIC_TOOL_TOKENS = ("機台", "tool", "equipment", "EQP")
 
 
 def _detect_scope_conflict(
     msg: str, declared: set[str], snap: dict[str, Any],
 ) -> Dimension | None:
-    """User declared $tool_id (single-tool param) but message also mentions
-    multi-tool concepts ("各機台" / "all tools"). Resolve before building."""
+    """When $tool_id is declared, surface scope dim if the message mentions
+    machines in any way (multi-tool wording OR generic 「機台」 reference).
+
+    2026-05-11: was only firing on explicit multi-tool wording (各機台 / 全廠).
+    But chat orchestrator was silently expanding generic 「機台」 → 「全廠各機台」
+    even when $tool_id was declared (per user complaint「無視原本就有
+    機台$tool_id 這個 input」). Now we always confirm scope when $tool_id
+    is declared + 機台 is mentioned, with default=single_via_param so user
+    can ✅ in one click to keep the parametric path.
+    """
     if "tool_id" not in declared and "equipment_id" not in declared:
         return None
-    if not any(tok in msg for tok in _MULTI_TOOL_TOKENS):
-        return None
-    if any(tok in msg for tok in _SINGLE_TOOL_TOKENS):
+    has_multi = any(tok in msg for tok in _MULTI_TOOL_TOKENS)
+    has_single = any(tok in msg for tok in _SINGLE_TOOL_TOKENS)
+    has_generic = any(tok.lower() in msg.lower() for tok in _GENERIC_TOOL_TOKENS)
+    if has_single and not has_multi:
         # Explicit single-tool wording wins; no conflict.
+        return None
+    if not (has_multi or has_generic):
         return None
     return Dimension(
         dimension="scope",

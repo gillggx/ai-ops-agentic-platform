@@ -378,11 +378,21 @@ export default function Playbook({
       if (!r.ok) throw new Error(j?.error?.message ?? `HTTP ${r.status}`);
       const url = j.data?.builder_url ?? j.builder_url;
       if (!url) throw new Error("builder_url missing");
-      window.open(url, "_blank", "noopener");
+      // 2026-05-11: same-tab navigate (was window.open new tab). User wants
+      // builder to feel like part of the skill flow rather than spawning a
+      // fresh window. The builder already saves a "back to skill" hint via
+      // sessionStorage (see openInspect), so the back button returns here.
+      // For users who still want the new-tab behaviour, Cmd/Ctrl+click the
+      // step's "Build" button works because the underlying button is now
+      // wrapped in a Link in the step renderer.
+      sessionStorage.setItem("pb:back_to_skill", JSON.stringify({
+        skill_slug: slug, mode,
+      }));
+      router.push(url);
     } catch (e) {
       alert("Open Builder failed: " + String(e));
     }
-  }, [slug, steps, title, trigger]);
+  }, [slug, steps, title, trigger, mode, router]);
 
   const addStep = async (text: string) => {
     await openSlotInBuilder("step:NEW", text);
@@ -394,6 +404,8 @@ export default function Playbook({
    *  in skill list, not the skill". Writing this lightweight ctx makes
    *  the back button return to the originating Skill page. */
   const openInspect = useCallback((pipelineId: number) => {
+    // 2026-05-11: same-tab navigate (was window.open new tab) — see openSlotInBuilder
+    // for rationale + back-button mechanism.
     if (typeof window !== "undefined") {
       try {
         sessionStorage.setItem("pb:back_to_skill", JSON.stringify({
@@ -402,8 +414,8 @@ export default function Playbook({
         }));
       } catch { /* ignore */ }
     }
-    window.open(`/admin/pipeline-builder/${pipelineId}`, "_blank", "noopener");
-  }, [slug, mode]);
+    router.push(`/admin/pipeline-builder/${pipelineId}`);
+  }, [slug, mode, router]);
 
   if (loading) {
     return (

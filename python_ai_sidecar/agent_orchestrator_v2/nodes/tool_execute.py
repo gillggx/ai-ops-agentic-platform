@@ -273,6 +273,32 @@ def _scrub_chat_goal(goal: str, base_pipeline: dict | None) -> tuple[str, list[s
         if any(c in goal for c in ("和", "與", "、", ", ")):
             changes.append("collapsed conjunctions like「X 和 Y」 → single $ref")
 
+    # 2026-05-11: anti-scope-expansion safety net. When $tool_id (or
+    # equivalent) is declared and the chat orchestrator's expanded goal
+    # contains 全廠 / 各機台 / 所有機台 / 跨機台 phrasing, swap those out
+    # so the builder doesn't drop the parametric filter. Twin of the
+    # prompt-level rule in load_context.py — prompt teaches LLM, scrub
+    # cleans up if LLM ignored. No-op when user actually meant cross-machine
+    # (we only fire when the parametric input is declared).
+    if "tool_id" in declared_names or "equipment_id" in declared_names:
+        scope_swap_pre = out
+        for phrase in (
+            "全廠所有機台", "全廠各機台", "全廠機台",
+            "所有機台", "各機台", "跨機台", "全廠",
+        ):
+            out = out.replace(phrase, "$tool_id 機台")
+        if out != scope_swap_pre:
+            changes.append(
+                "scrubbed 全廠/各機台/跨機台-style wording → $tool_id (declared input)"
+            )
+            # Re-collapse in case we introduced "$tool_id 機台 ... $tool_id 機台" duplicates
+            for _ in range(3):
+                prev2 = out
+                for dedupe_pat, repl in _CONJUNCTION_DEDUPE_PATTERNS:
+                    out = dedupe_pat.sub(repl, out)
+                if out == prev2:
+                    break
+
     return out, changes
 
 
