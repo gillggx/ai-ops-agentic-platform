@@ -136,6 +136,13 @@ def _format_catalog(catalog: dict[tuple[str, str], dict[str, Any]]) -> str:
     """
     lines = []
     for (name, version), spec in sorted(catalog.items()):
+        # 2026-05-11: hide deprecated blocks from LLM. V15 retired
+        # block_chart in favour of block_line_chart but the row stayed in
+        # pb_blocks with status='deprecated' for legacy pipeline_runs.
+        # Surfacing it to plan_node let the LLM keep generating block_chart
+        # because that's what its training data remembered.
+        if spec.get("status") == "deprecated":
+            continue
         full_desc = (spec.get("description") or "").strip()
         first_line = full_desc.split("\n", 1)[0]
         if len(first_line) > 120:
@@ -155,13 +162,16 @@ def _format_catalog(catalog: dict[tuple[str, str], dict[str, Any]]) -> str:
         # long-form into one chart per chart_name" example was invisible and
         # LLM produced one big chart with series_field instead.
         is_chart_block = (spec.get("category") == "output")
-        # 2026-05-11: also surface full description when the author marked
-        # critical anti-pattern warnings (`== ⚠`) — those are the cases
-        # where LLM gets the block "wrong by default" without explicit
-        # guidance. apc_long_form's "APC 沒有 is_ooc, OOC 看 spc_status"
-        # warning was invisible without this. Just `== When to use ==` is
-        # too broad (every block has it; would 2× the catalog token cost).
-        has_critical_warning = "== ⚠" in full_desc
+        # 2026-05-11: surface full description when the author wrote
+        # non-trivial guidance. Triggers:
+        #   (a) explicit "== ⚠" warning section header
+        #   (b) "經典 pipeline" canonical-pipeline section (rich examples)
+        # Keep tight — token budget matters. Each full-desc block costs
+        # ~500-1500 tokens.
+        has_critical_warning = (
+            "== ⚠" in full_desc
+            or "經典 pipeline" in full_desc
+        )
         for k, v in param_props.items():
             if not isinstance(v, dict):
                 continue

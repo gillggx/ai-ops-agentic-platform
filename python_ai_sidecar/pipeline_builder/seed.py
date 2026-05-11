@@ -43,7 +43,8 @@ def _blocks() -> list[dict[str, Any]]:
                 "lot_id      (string, 選填) 例 'LOT-0234' — 同上，單一字串\n"
                 "step        (string, 選填) 例 'STEP_013' — 同上，單一字串\n"
                 "object_name (string, 選填) '' | SPC | APC | DC | RECIPE | FDC | EC；留空=所有維度寬表\n"
-                "time_range  (string, 預設 24h) 1h / 24h / 7d / 30d\n"
+                "time_range  (string, 預設 24h) **Nh / Nd 任意組合**，e.g. 1h / 24h / 48h / 72h / 7d / 30d。\n"
+                "              使用者說「過去 N 天」→ time_range='{N*24}h'（e.g. 2 天 → '48h'）。\n"
                 "event_time  (string, 選填) 精確時間點 (ISO8601)\n"
                 "limit       (integer, 預設 100, max 200)\n"
                 "**tool_id / lot_id / step 三擇一必填**。\n"
@@ -89,6 +90,12 @@ def _blocks() -> list[dict[str, Any]]:
                 "- NO_FILTER_GIVEN : 三擇一沒填\n"
                 "- EMPTY_RESULT    : 條件太嚴回 0 筆（擴大 time_range 或放寬 filter）\n"
                 "\n"
+                "== ⚠ Common mistakes ==\n"
+                "⚠ time_range 接受任意 Nh / Nd；使用者說「過去 N 天」要記得換算成 '{N*24}h'\n"
+                "  （e.g. 2 天 → '48h'，不是用 24h 取近似）。\n"
+                "⚠ tool_id / lot_id / step **三擇一**且都只接受單一字串，不可逗號 / list。\n"
+                "  多機台 / 多 lot 需要：source 留空 → 下游 block_filter operator='in' value=[...]。\n"
+                "\n"
                 "== Performance tips ==\n"
                 "- limit 調小可加速下游；只要做趨勢通常 50~100 就夠\n"
                 "- 已知分析維度時指定 object_name 可減少回傳 column 數\n"
@@ -118,7 +125,16 @@ def _blocks() -> list[dict[str, Any]]:
                         "title": "資料維度 (選填，留空=全部)",
                         "enum": ["", "SPC", "APC", "DC", "RECIPE", "FDC", "EC"],
                     },
-                    "time_range": {"type": "string", "enum": ["1h", "24h", "7d", "30d"], "default": "24h", "title": "時間窗"},
+                    # 2026-05-11: was enum-locked to [1h, 24h, 7d, 30d], which made
+                    # LLM round "過去 2 天" down to 24h. Simulator's _since_to_cutoff
+                    # accepts any Nh / Nd, so we open the schema via pattern. Common
+                    # values listed in description so LLM still has guidance.
+                    "time_range": {
+                        "type": "string",
+                        "pattern": r"^[0-9]+[hd]$",
+                        "default": "24h",
+                        "title": "時間窗 (Nh / Nd，e.g. 1h, 24h, 48h, 72h, 7d, 30d)",
+                    },
                     "event_time": {"type": "string", "title": "精確時間 (ISO8601，選填)"},
                     "limit":      {"type": "integer", "default": 100, "minimum": 1, "maximum": 200, "title": "筆數上限"},
                 },
@@ -541,6 +557,13 @@ def _blocks() -> list[dict[str, Any]]:
                 "== When to use ==\n"
                 "- ✅ 「SPC 寬表跟 APC context 合併」→ 兩個 df by (lotID, step) join\n"
                 "- ✅ 「Alert records 帶 tool metadata」→ alert df left-join tool df\n"
+                "- ✅ **「filter 到 top-N group」** → groupby_agg + sort limit=1 取出 top group 的 key value，\n"
+                "       再 inner-join 回原 df，自動只留該 group 的 rows。\n"
+                "       e.g. 「秀『最差 SPC chart』的 trend」：\n"
+                "         A = spc_long_form → filter is_ooc → groupby chart_name count → sort desc limit=1\n"
+                "         B = spc_long_form (full)\n"
+                "         block_join(left=B, right=A, key='chart_name', how='inner')\n"
+                "       → 只留最差那張 chart 的 rows，下游 line_chart 即可。\n"
                 "- ❌ 縱向疊加（rows concat）兩張結構相同的 df → 用 block_union\n"
                 "- ❌ enrichment: 每 row 呼叫 MCP 取額外欄位 → 用 block_mcp_foreach\n"
                 "\n"
@@ -555,7 +578,7 @@ def _blocks() -> list[dict[str, Any]]:
                 "== Output ==\n"
                 "port: data (dataframe) — 合併後的 df；右表非 key 同名欄自動加 '_r' 後綴\n"
                 "\n"
-                "== Common mistakes ==\n"
+                "== ⚠ Common mistakes ==\n"
                 "⚠ key 兩邊必須同名；不同名要先 rename\n"
                 "⚠ 多欄 key 用英文逗號分隔（無空白 or 有空白都可），不是 list\n"
                 "⚠ inner join 條件不符會得空 df — 檢查 key 值分佈\n"
@@ -644,7 +667,11 @@ def _blocks() -> list[dict[str, Any]]:
             "name": "block_chart",
             "version": "1.0.0",
             "category": "output",
-            "status": "production",
+            # 2026-05-11: marked deprecated in DB (V15) but seed.py still
+            # said production, causing the planner to keep recommending it
+            # over the dedicated chart blocks. Sync to deprecated here so
+            # _format_catalog hides it from the planner.
+            "status": "deprecated",
             "description": (
                 "⚠ **建議改用 dedicated chart blocks**（PR-G/H/I 後 18 個）。\n"
                 "本 block_chart 仍 production — 留作 multi-purpose fallback +\n"
@@ -1071,6 +1098,26 @@ def _blocks() -> list[dict[str, Any]]:
                 "    chart_name 欄位的值就是各 SPC chart 的種類（X̄/R/S/P/C 等），\n"
                 "    facet='chart_name' 會一次產出 N 張獨立的小圖。\n"
                 "    ⚠ 不要用 series_field='chart_name' — 那會把 5 張合併成 1 張多色線。\n"
+                "\n"
+                "(E) 找出「**最差**那張 SPC chart」並秀**只那張**的 trend:\n"
+                "    n1 process_history(...) → n2 spc_long_form\n"
+                "    Branch A（找最差 chart_name）：\n"
+                "      n2 → filter(is_ooc=true)\n"
+                "         → groupby_agg(group_by='chart_name', agg_column='is_ooc', agg_func='count')\n"
+                "         → sort(columns=[{column:'is_ooc_count', order:'desc'}], limit=1)\n"
+                "         → 輸出 1-row {chart_name='X', is_ooc_count=Y}\n"
+                "    Branch B（用 A 過濾原 long-form）：\n"
+                "      block_join(left=n2, right=A, key='chart_name', how='inner')\n"
+                "         → 只剩最差 chart 的所有 rows\n"
+                "      → line_chart(x='eventTime', y='value',\n"
+                "                   ucl_column='ucl', lcl_column='lcl',\n"
+                "                   highlight_column='is_ooc')\n"
+                "    ⚠ 不要在 chart 上 facet — 我們已經 join 只剩一張 chart 了。\n"
+                "    ⚠ Branch A 跟 B 都從 **同一個 n2** fan-out，**不要重做 spc_long_form**。\n"
+                "\n"
+                "== Fan-out 提醒 ==\n"
+                "下游分多 branch 時（A/B/...）都從**同個 spc_long_form node** fan-out edge，\n"
+                "**不要**每個 branch 各做一次 spc_long_form — 多此一舉 + 浪費 CPU。\n"
                 "\n"
                 "== Errors ==\n"
                 "- INVALID_INPUT  : data 不是 DataFrame\n"

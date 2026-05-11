@@ -1,26 +1,109 @@
-"""Embedding client — wraps Ollama's /api/embeddings for bge-m3.
+"""Embedding client — multi-provider abstraction returning 1024-dim vectors.
 
-Returns 1024-dim vectors for semantic search on agent experience memory.
-Provider-agnostic interface so we can swap in OpenAI text-embedding-3
-later without touching the memory service.
+Providers (selected via env EMBEDDING_PROVIDER, default 'ollama'):
+  - ollama  : self-hosted bge-m3 via Ollama HTTP /api/embeddings (1024-dim).
+              Needs Ollama running locally + bge-m3 pulled.
+  - cohere  : Cohere embed-multilingual-v3.0 (1024-dim, matches schema).
+              Needs COHERE_API_KEY env. ~$0.10/1M tokens; free tier 1000 RPM.
+
+Both return EMBEDDING_DIM (1024) so pgvector schema stays unchanged.
+
+2026-05-11: Added Cohere fallback because the production EC2 box (4GB RAM)
+can't host Ollama bge-m3 alongside Java + sidecar + Postgres + simulator
+without OOM. Cohere does the embedding remotely — zero RAM cost.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from typing import Optional
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
-# bge-m3 dimension (matches EMBEDDING_DIM in the ORM model)
+# Both ollama bge-m3 and cohere embed-multilingual-v3.0 emit 1024 dims.
 EMBEDDING_DIM = 1024
 
 
 class EmbeddingError(RuntimeError):
     """Raised when embedding generation fails."""
     pass
+
+
+# ── Cohere remote provider ─────────────────────────────────────────────
+
+
+class CohereEmbeddingClient:
+    """Cohere /v1/embed — model embed-multilingual-v3.0 returns 1024-dim.
+
+    Requires COHERE_API_KEY env. Picks input_type='search_document' for
+    backfill writes + 'search_query' for query-time retrieval — Cohere's
+    asymmetric model gives better recall when document/query are tagged
+    differently. We use search_document by default since both backfill
+    and chat-query callers go through the same .embed() interface;
+    asymmetry is a future optimization (small lift).
+    """
+
+    _ENDPOINT = "https://api.cohere.ai/v1/embed"
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "embed-multilingual-v3.0",
+        timeout: float = 30.0,
+    ) -> None:
+        if not api_key:
+            raise EmbeddingError("CohereEmbeddingClient requires non-empty api_key")
+        self._api_key = api_key
+        self._model = model
+        self._timeout = timeout
+
+    async def embed(self, text: str) -> list[float]:
+        if not isinstance(text, str) or not text.strip():
+            raise EmbeddingError("embed() requires non-empty text")
+        body = {
+            "texts": [text],
+            "model": self._model,
+            "input_type": "search_document",
+            "embedding_types": ["float"],
+        }
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                resp = await client.post(self._ENDPOINT, json=body, headers=headers)
+                if resp.status_code >= 400:
+                    raise EmbeddingError(
+                        f"Cohere HTTP {resp.status_code}: {resp.text[:200]}"
+                    )
+                data = resp.json()
+        except httpx.HTTPError as exc:
+            raise EmbeddingError(f"Cohere HTTP error: {exc}") from exc
+        # New API shape: {"embeddings":{"float":[[..1024..]]}, ...}
+        # Old API shape: {"embeddings":[[..1024..]]}
+        embs = data.get("embeddings")
+        vec = None
+        if isinstance(embs, dict):
+            float_list = embs.get("float") or []
+            vec = float_list[0] if float_list else None
+        elif isinstance(embs, list):
+            vec = embs[0] if embs else None
+        if not isinstance(vec, list) or len(vec) != EMBEDDING_DIM:
+            raise EmbeddingError(
+                f"Cohere returned unexpected shape: keys={list(data.keys())} "
+                f"first_item_len={len(vec) if isinstance(vec,list) else 'N/A'}"
+            )
+        return vec
+
+    async def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        results: list[list[float]] = []
+        for t in texts:
+            results.append(await self.embed(t))
+        return results
 
 
 class OllamaEmbeddingClient:
@@ -93,18 +176,41 @@ class OllamaEmbeddingClient:
         return results
 
 
-# ── Module-level singleton ─────────────────────────────────────────────
+# ── Module-level singleton + provider dispatch ─────────────────────────
 
-_client_instance: Optional[OllamaEmbeddingClient] = None
+_client_instance: Optional[object] = None
 
 
-def get_embedding_client() -> OllamaEmbeddingClient:
-    """Cached singleton configured from app settings."""
+def get_embedding_client():
+    """Cached singleton. Provider selected via EMBEDDING_PROVIDER env:
+       - 'ollama' (default) → self-hosted bge-m3, free, needs RAM
+       - 'cohere'           → remote, ~$0.10/1M tokens, zero local RAM
+    """
     global _client_instance
-    if _client_instance is None:
-        from python_ai_sidecar.pipeline_builder._sidecar_deps import get_settings
-        settings = get_settings()
-        base_url = getattr(settings, "OLLAMA_BASE_URL", None) or "http://localhost:11434"
-        model = getattr(settings, "OLLAMA_EMBEDDING_MODEL", "bge-m3")
-        _client_instance = OllamaEmbeddingClient(base_url=base_url, model=model)
+    if _client_instance is not None:
+        return _client_instance
+    provider = (os.getenv("EMBEDDING_PROVIDER") or "ollama").lower().strip()
+    if provider == "cohere":
+        api_key = os.getenv("COHERE_API_KEY") or ""
+        model = os.getenv("COHERE_EMBED_MODEL", "embed-multilingual-v3.0")
+        if not api_key:
+            raise EmbeddingError(
+                "EMBEDDING_PROVIDER=cohere but COHERE_API_KEY env not set"
+            )
+        _client_instance = CohereEmbeddingClient(api_key=api_key, model=model)
+        logger.info("Embedding provider: Cohere (model=%s)", model)
+        return _client_instance
+    # Default: Ollama
+    from python_ai_sidecar.pipeline_builder._sidecar_deps import get_settings
+    settings = get_settings()
+    base_url = getattr(settings, "OLLAMA_BASE_URL", None) or "http://localhost:11434"
+    model = getattr(settings, "OLLAMA_EMBEDDING_MODEL", "bge-m3")
+    _client_instance = OllamaEmbeddingClient(base_url=base_url, model=model)
+    logger.info("Embedding provider: Ollama (base=%s, model=%s)", base_url, model)
     return _client_instance
+
+
+def reset_embedding_client_for_test() -> None:
+    """Test hook: reset cached singleton so env changes pick up."""
+    global _client_instance
+    _client_instance = None
