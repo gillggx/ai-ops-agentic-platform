@@ -684,65 +684,66 @@ function FlowDiagram({
   alarmGateSteps: number;
   checklistSteps: number;
 }) {
-  const Chip = ({ kind, label, mono = false }: { kind: "trigger" | "gate" | "list" | "outcome"; label: React.ReactNode; mono?: boolean }) => {
-    const dot = {
-      trigger: "var(--fail)",
-      gate:    "var(--ai)",
-      list:    "var(--warn)",
-      outcome: "var(--ai)",
-    }[kind];
-    const small = {
-      trigger: "TRIGGER",
-      gate:    `ALARM GATE · ${alarmGateSteps} STEP${alarmGateSteps === 1 ? "" : "S"}`,
-      list:    "CHECKLIST",
-      outcome: "OUTCOME",
-    }[kind];
-    return (
-      <div style={{
-        display: "inline-flex", flexDirection: "column", gap: 4,
-        padding: "8px 14px", borderRadius: 8,
-        background: "var(--surface)", border: "1px solid var(--line)",
-        minWidth: 130,
-      }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <span style={{ width: 6, height: 6, borderRadius: 999, background: dot }}/>
-          <span className="mono" style={{ fontSize: 9.5, color: "var(--ink-3)", letterSpacing: "0.06em" }}>
-            {small}
-          </span>
-        </span>
-        <span className={mono ? "mono" : undefined} style={{
-          fontSize: mono ? 12 : 12.5, color: "var(--ink)", fontWeight: 500,
-        }}>{label}</span>
-      </div>
-    );
-  };
+  // 2026-05-12: compact single-row layout. Previous version had each chip
+  // as a 2-line card (label header + value) inside a 14px-padding band —
+  // took ~80px vertical. Now inline ⟨dot⟩ ⟨LABEL⟩ ⟨value⟩ in a single
+  // 28px-tall row, ~3× denser.
+  const DOT_COLOR = {
+    trigger: "var(--fail)",
+    gate:    "var(--ai)",
+    list:    "var(--warn)",
+    outcome: "var(--ai)",
+  } as const;
+  const Chip = ({ kind, head, value, mono = false }: {
+    kind: "trigger" | "gate" | "list" | "outcome";
+    head: string;
+    value: React.ReactNode;
+    mono?: boolean;
+  }) => (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 6,
+      padding: "4px 9px", borderRadius: 6,
+      background: "var(--surface)", border: "1px solid var(--line)",
+      lineHeight: 1.2, whiteSpace: "nowrap",
+    }}>
+      <span style={{ width: 5, height: 5, borderRadius: 999, background: DOT_COLOR[kind], flexShrink: 0 }}/>
+      <span className="mono" style={{ fontSize: 9, color: "var(--ink-3)", letterSpacing: "0.06em" }}>{head}</span>
+      <span className={mono ? "mono" : undefined} style={{
+        fontSize: mono ? 11.5 : 12, color: "var(--ink)", fontWeight: 500,
+      }}>{value}</span>
+    </span>
+  );
   const Arrow = ({ note }: { note?: string }) => (
     <span style={{
-      display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 2,
-      color: "var(--ink-3)", fontSize: 16, padding: "0 4px",
+      display: "inline-flex", alignItems: "center", gap: 4,
+      color: "var(--ink-4)", fontSize: 14, padding: "0 2px",
+      whiteSpace: "nowrap",
     }}>
-      {note && <span className="mono" style={{ fontSize: 9.5, lineHeight: 1.2 }}>{note}</span>}
-      <span style={{ fontSize: 18, lineHeight: 1 }}>→</span>
+      {note && <span className="mono" style={{ fontSize: 9 }}>{note}</span>}
+      <span>→</span>
     </span>
   );
   return (
     <div style={{
-      marginTop: 18, padding: "14px 16px",
+      marginTop: 10, padding: "6px 10px",
       background: "var(--surface-2)", border: "1px solid var(--line)",
-      borderRadius: 10,
-      display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap",
+      borderRadius: 7,
+      display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap",
     }}>
-      <Chip kind="trigger" label={triggerLabel || "—"} mono/>
+      <Chip kind="trigger" head="TRIGGER" value={triggerLabel || "—"} mono/>
       <Arrow/>
       {hasAlarmGate ? (
         <>
-          <Chip kind="gate" label="進一步確認 · 達標才告警"/>
+          <Chip kind="gate"
+            head={`ALARM GATE · ${alarmGateSteps} STEP${alarmGateSteps === 1 ? "" : "S"}`}
+            value="達標才告警"/>
           <Arrow note="if all pass → alarm"/>
         </>
       ) : null}
-      <Chip kind="list" label={`診斷 · ${checklistSteps} step${checklistSteps === 1 ? "" : "s"}`}/>
+      <Chip kind="list" head="CHECKLIST"
+        value={`診斷 · ${checklistSteps} step${checklistSteps === 1 ? "" : "s"}`}/>
       <Arrow/>
-      <Chip kind="outcome" label="advisory only"/>
+      <Chip kind="outcome" head="OUTCOME" value="advisory only"/>
     </div>
   );
 }
