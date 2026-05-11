@@ -46,15 +46,18 @@ node_modules/
 out/
 tsconfig.tsbuildinfo
 
-# ── Java / Gradle (java-backend/) ────────────────────────────────────────────
+# ── Java / Maven ─────────────────────────────────────────────────────────────
+# Maven output dirs (replaces Gradle build/ as of 2026-05-11).
+java-backend/target/
+java-scheduler/target/
+# Old Gradle leftovers — keep ignoring in case anyone pulls a stale branch.
 java-backend/.gradle/
 java-backend/build/
-java-backend/**/build/
-!java-backend/**/src/main/**/build/
-!java-backend/**/src/test/**/build/
+java-scheduler/build/
 java-backend/bin/
 java-backend/out/
 java-backend/.idea/
+java-scheduler/.idea/
 *.class
 
 # ── macOS ─────────────────────────────────────────────────────────────────────
