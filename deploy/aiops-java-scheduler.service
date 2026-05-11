@@ -15,7 +15,7 @@ ExecStart=/usr/bin/java -server \
   -XX:HeapDumpPath=/var/log/aiops/scheduler-heap-dump.hprof \
   -Duser.timezone=UTC \
   -Dfile.encoding=UTF-8 \
-  -jar /opt/aiops/java-scheduler/build/libs/aiops-scheduler.jar
+  -jar /opt/aiops/java-scheduler/target/aiops-scheduler.jar
 ExecStop=/bin/sh -c 'lsof -ti tcp:${AIOPS_SCHEDULER_PORT:-8003} | xargs kill -TERM 2>/dev/null || true'
 KillMode=mixed
 KillSignal=SIGTERM

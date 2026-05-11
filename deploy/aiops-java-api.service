@@ -15,7 +15,7 @@ ExecStart=/usr/bin/java -server \
   -XX:HeapDumpPath=/var/log/aiops/java-heap-dump.hprof \
   -Duser.timezone=UTC \
   -Dfile.encoding=UTF-8 \
-  -jar /opt/aiops/java-backend/build/libs/aiops-api.jar
+  -jar /opt/aiops/java-backend/target/aiops-api.jar
 ExecStop=/bin/sh -c 'lsof -ti tcp:${AIOPS_JAVA_PORT:-8002} | xargs kill -TERM 2>/dev/null || true'
 KillMode=mixed
 KillSignal=SIGTERM

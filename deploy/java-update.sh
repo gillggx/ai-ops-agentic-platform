@@ -39,15 +39,18 @@ echo "🔄  Pulling latest..."
 git -C "$APP_DIR" pull --ff-only
 
 # ── Java fat jars ────────────────────────────────────────────────────────
-# 2026-05-09 P2-A: gradle wrapper now lives at the repo root because the
-# build is multi-project (:java-backend + :java-scheduler). Build both
-# subprojects' bootJars in one gradle invocation.
-echo "☕  Building Java fat jars (api + scheduler)..."
+# 2026-05-11: migrated Gradle → Maven 3.8.1 (DevOps requirement).
+# `mvn package` produces:
+#   java-backend/target/aiops-api.jar              (executable boot)
+#   java-backend/target/aiops-api-library.jar      (plain library — used by scheduler)
+#   java-scheduler/target/aiops-scheduler.jar      (executable boot)
+# systemd unit files (deploy/aiops-java-*.service) point to target/.
+echo "☕  Building Java fat jars (api + scheduler) via Maven..."
 cd "$APP_DIR"
 export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/temurin-21-jdk-amd64}"
 export PATH="$JAVA_HOME/bin:$PATH"
-./gradlew :java-backend:bootJar :java-scheduler:bootJar --no-daemon -q
-ls -la "$JAVA_DIR/build/libs/aiops-api.jar" "$APP_DIR/java-scheduler/build/libs/aiops-scheduler.jar" 2>&1 | head -4
+mvn -B -ntp -DskipTests -pl java-backend,java-scheduler -am clean package
+ls -la "$JAVA_DIR/target/aiops-api.jar" "$APP_DIR/java-scheduler/target/aiops-scheduler.jar" 2>&1 | head -4
 
 # ── Python sidecar venv ──────────────────────────────────────────────────
 echo "🐍  Syncing sidecar venv..."
