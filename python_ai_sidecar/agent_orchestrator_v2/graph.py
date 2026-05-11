@@ -36,6 +36,7 @@ from python_ai_sidecar.agent_orchestrator_v2.nodes.intent_classifier import inte
 from python_ai_sidecar.agent_orchestrator_v2.nodes.intent_classifier_builder import intent_classifier_builder_node
 from python_ai_sidecar.agent_orchestrator_v2.nodes.intent_completeness import intent_completeness_node
 from python_ai_sidecar.agent_orchestrator_v2.nodes.advisor_dispatch import advisor_dispatch_node
+from python_ai_sidecar.agent_orchestrator_v2.nodes.pre_clarify_check import pre_clarify_check_node
 from python_ai_sidecar.agent_orchestrator_v2.nodes.llm_call import llm_call_node
 from python_ai_sidecar.agent_orchestrator_v2.nodes.tool_execute import tool_execute_node
 from python_ai_sidecar.agent_orchestrator_v2.nodes.synthesis import synthesis_node
@@ -104,6 +105,10 @@ class GraphState(TypedDict, total=False):
     chart_already_rendered: Annotated[bool, _replace]
     last_spc_result: Annotated[Optional[tuple], _replace]
     force_synthesis: Annotated[bool, _replace]
+    # Set by pre_clarify_check when it short-circuits the LLM; synthesis
+    # reads synthesis_text_override to render a canned message.
+    clarify_card_emitted: Annotated[bool, _replace]
+    synthesis_text_override: Annotated[Optional[str], _replace]
 
     # Outputs
     final_text: Annotated[str, _replace]
@@ -212,6 +217,7 @@ def build_graph() -> StateGraph:
     graph.add_node("intent_classifier", intent_classifier_node)
     graph.add_node("intent_completeness", intent_completeness_node)
     graph.add_node("advisor_dispatch", advisor_dispatch_node)
+    graph.add_node("pre_clarify_check", pre_clarify_check_node)
     graph.add_node("llm_call", llm_call_node)
     graph.add_node("tool_execute", tool_execute_node)
     graph.add_node("synthesis", synthesis_node)
@@ -234,13 +240,21 @@ def build_graph() -> StateGraph:
     graph.set_entry_point("load_context")
     graph.add_edge("load_context", "intent_classifier_builder")
 
-    def _route_after_builder(state: Dict[str, Any]) -> Literal["intent_classifier", "advisor_dispatch", "llm_call", "synthesis"]:
+    def _route_after_builder(state: Dict[str, Any]) -> Literal["intent_classifier", "advisor_dispatch", "pre_clarify_check", "llm_call", "synthesis"]:
         """If builder classifier set a builder_* intent, route directly.
-        Otherwise hand off to the chat-mode classifier."""
+        Otherwise hand off to the chat-mode classifier.
+
+        2026-05-11: builder_build_* buckets go through pre_clarify_check
+        first — that deterministic node decides whether to short-circuit
+        to synthesis (clarify card emitted) or fall through to llm_call.
+        Knowledge bucket still bypasses since it's pure Q&A, no build.
+        """
         intent = (state.get("intent") or "").lower()
         if intent in {"builder_explain", "builder_compare", "builder_recommend", "builder_ambiguous"}:
             return "advisor_dispatch"
-        if intent in {"builder_build_new", "builder_build_modify", "builder_knowledge"}:
+        if intent in {"builder_build_new", "builder_build_modify"}:
+            return "pre_clarify_check"
+        if intent == "builder_knowledge":
             return "llm_call"
         # Not a builder intent → chat classifier
         return "intent_classifier"
@@ -251,9 +265,22 @@ def build_graph() -> StateGraph:
         {
             "intent_classifier": "intent_classifier",
             "advisor_dispatch": "advisor_dispatch",
+            "pre_clarify_check": "pre_clarify_check",
             "llm_call": "llm_call",
             "synthesis": "synthesis",
         },
+    )
+
+    # pre_clarify_check → synthesis (if force_synthesis set) or llm_call (pass-through)
+    def _route_after_pre_clarify(state: Dict[str, Any]) -> Literal["synthesis", "llm_call"]:
+        if state.get("force_synthesis"):
+            return "synthesis"
+        return "llm_call"
+
+    graph.add_conditional_edges(
+        "pre_clarify_check",
+        _route_after_pre_clarify,
+        {"synthesis": "synthesis", "llm_call": "llm_call"},
     )
 
     graph.add_conditional_edges(

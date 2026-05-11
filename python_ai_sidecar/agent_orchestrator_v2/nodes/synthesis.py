@@ -27,6 +27,16 @@ async def synthesis_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[
     """Extract final answer + contract from the conversation state."""
     from python_ai_sidecar.agent_orchestrator_v2.helpers import _resolve_contract
 
+    # 2026-05-11: pre_clarify_check_node short-circuits to here when the
+    # builder-mode message has ambiguity dims — bypassing the LLM. In that
+    # case there's no AIMessage to extract from; emit the canned text.
+    override_text = state.get("synthesis_text_override")
+    if override_text:
+        return {
+            "final_text": override_text,
+            "contract": None,
+        }
+
     messages = state["messages"]
     last_msg = messages[-1] if messages else None
     text = ""
