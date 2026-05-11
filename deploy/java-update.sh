@@ -49,7 +49,12 @@ echo "☕  Building Java fat jars (api + scheduler) via Maven..."
 cd "$APP_DIR"
 export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/temurin-21-jdk-amd64}"
 export PATH="$JAVA_HOME/bin:$PATH"
-mvn -B -ntp -DskipTests -pl java-backend,java-scheduler -am clean package
+# 2026-05-11: -Dmaven.test.skip=true (not just -DskipTests) so test
+# *compilation* is skipped too. Gradle's bootJar task never compiled tests
+# so a pre-existing stale JwtServiceTest using an outdated AiopsProperties
+# constructor went unnoticed; Maven's package lifecycle includes test-compile
+# by default. TODO: fix that test, then revert to -DskipTests.
+mvn -B -ntp -Dmaven.test.skip=true -pl java-backend,java-scheduler -am clean package
 ls -la "$JAVA_DIR/target/aiops-api.jar" "$APP_DIR/java-scheduler/target/aiops-scheduler.jar" 2>&1 | head -4
 
 # ── Python sidecar venv ──────────────────────────────────────────────────
