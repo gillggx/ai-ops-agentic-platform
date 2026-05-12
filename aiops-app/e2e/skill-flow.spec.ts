@@ -126,7 +126,15 @@ test.describe("Skill flow — full GUI with real agent", () => {
         // Tour didn't dismiss — proceed anyway, may overlay canvas.
       }
       await expect(builderTab.locator("text=Building CONFIRM")).toBeVisible({ timeout: 15_000 });
-      console.log("    waiting for Glass Box agent to build canvas (up to 90s)…");
+      console.log("    plan generated; clicking 確認構建 to dispatch plan ops");
+      // 2026-05-13: builder now pauses at confirm_gate awaiting user click.
+      // Try both 確認構建 and 確認 variants in case label changed.
+      const confirmBuildBtn = builderTab.locator(
+        'button:has-text("確認構建"), button:has-text("確認 構建"), button:has-text("Confirm Build"), button:has-text("確認")'
+      ).first();
+      await expect(confirmBuildBtn).toBeVisible({ timeout: 10_000 });
+      await confirmBuildBtn.click();
+      console.log("    waiting for canvas to populate (up to 180s)…");
       try {
         await builderTab.waitForFunction(
           () => document.querySelectorAll(".react-flow__node").length >= 2,
