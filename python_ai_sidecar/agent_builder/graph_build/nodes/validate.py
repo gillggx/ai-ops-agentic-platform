@@ -179,7 +179,14 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
     # When the caller is creating a Skill step's pipeline, the plan must end
     # with an add_node for block_step_check. SkillRunner reads that node's
     # output to decide pass/fail; without it the step has no verdict.
-    if not errors and state.get("skill_step_mode"):
+    #
+    # 2026-05-12: these checks now fire UNCONDITIONALLY in skill_step_mode
+    # (not gated behind `if not errors`). Previously the severity enum
+    # violation from add_node(block_alert) won the first repair shot,
+    # masking the architectural problem and letting repair keep block_alert
+    # around. Now the LLM sees "remove block_alert" alongside whatever
+    # other errors there are, so repair removes alert in one shot.
+    if state.get("skill_step_mode"):
         terminal_ok = False
         for op in reversed(parsed):
             if op is None:
@@ -194,8 +201,7 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
                 "node operating on the upstream filter/aggregate result."
             )
 
-        # 2026-05-12: also reject block_alert in skill_step_mode. LLM kept
-        # trying to wire step_check → alert (with hallucinated 'triggered'
+        # LLM kept wiring step_check → alert (with hallucinated 'triggered'
         # port) when user instruction said "觸發告警". In skill architecture
         # SkillRunner handles alerts; pipeline only reports pass/fail via
         # step_check. Multiple plan_unfixable failures on skill 54 traced
