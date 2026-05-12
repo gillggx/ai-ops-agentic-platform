@@ -633,13 +633,16 @@ def _blocks() -> list[dict[str, Any]]:
                 "== When to use ==\n"
                 "- ✅ 「每台機台平均 xbar 值」→ group_by=toolID, agg_column=spc_xbar_chart_value, agg_func=mean\n"
                 "- ✅ 「每個 recipe 的 OOC 次數」→ filter(OOC) → groupby_agg(recipe, agg_column=spc_status, agg_func=count)\n"
-                "- ✅ 多維度：group_by='toolID,step' 逗號分隔\n"
+                "- ✅ 多維度：group_by=['toolID','step'] (list) 或 group_by='toolID' (single col)\n"
                 "- ❌ 只想算 row 數（不聚合其他欄）→ 用 block_count_rows，語意更清楚\n"
                 "- ❌ 多個 agg func 同時 → 目前只支援單一 agg_func；要多個就分多個 block 再 join\n"
                 "- ❌ Cpk / 統計檢定 → 用 block_cpk / block_hypothesis_test\n"
                 "\n"
                 "== Params ==\n"
-                "group_by   (string, required) 分組欄位；逗號分隔多欄 (e.g. 'toolID,step')\n"
+                "group_by   (string | list[string], required) 分組欄位\n"
+                "           ✅ 單欄 string:  'toolID'\n"
+                "           ✅ 多欄 list:    ['toolID','step','chart_name']  ← 推薦\n"
+                "           ⚠ 不要用逗號分隔字串 'toolID,step'（會被當成單一欄名 'toolID,step' 找不到）\n"
                 "agg_column (string, required) 要聚合的欄位\n"
                 "agg_func   (string, required) mean / sum / count / min / max / median / std\n"
                 "\n"
@@ -653,7 +656,7 @@ def _blocks() -> list[dict[str, Any]]:
                 "  agg_column='spc_status' + agg_func='count' → 下游 column='spc_status_count'\n"
                 "  （**寫 'count' 會被 set_param 拒絕**，COLUMN_NOT_IN_UPSTREAM）\n"
                 "⚠ agg_func='count' 會算非 null row 數（類似 pandas count），若 agg_column 全有值等同 row count\n"
-                "⚠ 多 group_by 要用逗號分隔 string，不是 list\n"
+                "⚠ 多 group_by 要用 list of strings (e.g. ['toolID','step'])；逗號分隔 string 會被 reject\n"
                 "⚠ std / median 需要至少 2 筆；組內單筆會是 NaN\n"
                 "\n"
                 "== Errors ==\n"
@@ -666,7 +669,7 @@ def _blocks() -> list[dict[str, Any]]:
                 "type": "object",
                 "required": ["group_by", "agg_column", "agg_func"],
                 "properties": {
-                    "group_by":   {"type": "string", "title": "Group by column (逗號分隔多欄)", "x-column-source": "input.data"},
+                    "group_by":   {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}], "title": "Group by column(s) — string for single, list for multi", "x-column-source": "input.data"},
                     "agg_column": {"type": "string", "x-column-source": "input.data"},
                     "agg_func": {
                         "type": "string",

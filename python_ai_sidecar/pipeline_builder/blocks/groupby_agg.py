@@ -39,7 +39,18 @@ class GroupByAggBlockExecutor(BlockExecutor):
                 code="INVALID_PARAM", message=f"agg_func must be one of {_AGG_FUNCS}"
             )
 
-        group_cols = group_by if isinstance(group_by, list) else [group_by]
+        if isinstance(group_by, list):
+            group_cols = [str(c).strip() for c in group_by if str(c).strip()]
+        elif isinstance(group_by, str):
+            if "," in group_by:
+                group_cols = [c.strip() for c in group_by.split(",") if c.strip()]
+            else:
+                group_cols = [group_by]
+        else:
+            raise BlockExecutionError(
+                code="INVALID_PARAM",
+                message=f"group_by must be string or list, got {type(group_by).__name__}",
+            )
         for c in group_cols + [agg_column]:
             if c not in df.columns:
                 raise BlockExecutionError(

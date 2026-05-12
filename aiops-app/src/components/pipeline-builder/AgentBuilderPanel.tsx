@@ -307,22 +307,38 @@ export default function AgentBuilderPanel({
           if (data.status === "advisor_done") {
             // no-op
           } else {
+            const status = (data.status as string) || "finished";
             const summary = (data.summary as string) || "(done)";
-            setLines((p) => [...p, { id: nextId(), role: "agent", text: `✓ ${summary}` }]);
-            // Phase 10-D: backend layout_node now ships canvas with positions
-            // already laid out, so the frontend dagre pass is gone. If the
-            // backend pipeline_json arrived in `done.data.pipeline_json` we
-            // can trust those coordinates; the live add_node ops have already
-            // applied raw positions which the layout_node-driven final pass
-            // overrides via state.pipeline.nodes (BuilderContext keeps the
-            // latest write).
             const finalPj = data.pipeline_json as { nodes?: Array<{ id: string; position?: { x: number; y: number } }> } | null;
-            if (finalPj && Array.isArray(finalPj.nodes) && finalPj.nodes.length > 0) {
-              const laidOut = currentNodesRef.current.map((n) => {
-                const pj = finalPj.nodes!.find((m) => m.id === n.id);
-                return pj?.position ? { ...n, position: { x: pj.position.x, y: pj.position.y } } : n;
-              });
-              actions.setNodesAndEdges(laidOut, stateRef.current.pipeline.edges);
+            const finalNodeCount = Array.isArray(finalPj?.nodes) ? finalPj!.nodes!.length : 0;
+
+            // 2026-05-12 — earlier the handler always rendered "✓ <summary>" even
+            // when build_finalized.ok was false (skill 48 plan_unfixable case →
+            // user thought build succeeded but canvas had 0 nodes). Branch on
+            // status + node count so failed/empty builds get an explicit ❌.
+            const isFailed = status !== "finished" || finalNodeCount === 0;
+            if (isFailed) {
+              setLines((p) => [...p, {
+                id: nextId(), role: "error",
+                text: `❌ Build 失敗（${status}）：${summary}．重試一次或調整 instruction。`,
+              }]);
+              // Don't touch canvas — leave whatever was there before this build.
+            } else {
+              setLines((p) => [...p, { id: nextId(), role: "agent", text: `✓ ${summary}` }]);
+              // Phase 10-D: backend layout_node now ships canvas with positions
+              // already laid out, so the frontend dagre pass is gone. If the
+              // backend pipeline_json arrived in `done.data.pipeline_json` we
+              // can trust those coordinates; the live add_node ops have already
+              // applied raw positions which the layout_node-driven final pass
+              // overrides via state.pipeline.nodes (BuilderContext keeps the
+              // latest write).
+              if (finalPj && Array.isArray(finalPj.nodes) && finalPj.nodes.length > 0) {
+                const laidOut = currentNodesRef.current.map((n) => {
+                  const pj = finalPj.nodes!.find((m) => m.id === n.id);
+                  return pj?.position ? { ...n, position: { x: pj.position.x, y: pj.position.y } } : n;
+                });
+                actions.setNodesAndEdges(laidOut, stateRef.current.pipeline.edges);
+              }
             }
           }
         }

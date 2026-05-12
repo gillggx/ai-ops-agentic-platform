@@ -392,13 +392,29 @@ def _final_column_ref_check(
                 continue
             preview = upstream_cols[:8]
             more = "" if len(upstream_cols) <= 8 else f"…+{len(upstream_cols)-8}"
+            # Comma-string hint: LLM regularly writes "a,b,c" instead of ["a","b","c"]
+            # for list-accepting params (group_by, columns). Without this hint the
+            # repair_plan loop never figures out the right form (see plan_unfixable
+            # case from skill 48 build at 2026-05-12 04:39 UTC).
+            comma_split_hint = ""
+            if (
+                len(bad) == 1
+                and isinstance(bad[0], str)
+                and "," in bad[0]
+                and all(c.strip() in upstream_cols for c in bad[0].split(",") if c.strip())
+            ):
+                parts = [c.strip() for c in bad[0].split(",") if c.strip()]
+                comma_split_hint = (
+                    f" (it looks like a comma-separated string — for multi-column "
+                    f"params use a list: {key}={parts!r})"
+                )
             # Producer hint — find a node in the pipeline whose declared
             # output_columns_hint contains the missing column. Lets the LLM
             # rewire instead of guessing.
-            hint = _find_producer_hint(pipeline, registry, bad)
+            hint = _find_producer_hint(pipeline, registry, bad) if not comma_split_hint else ""
             errors.append(
                 f"node '{node.id}' ({node.block_id}): {key}={bad!r} not in upstream "
-                f"columns. Available: {preview}{more}.{hint}"
+                f"columns. Available: {preview}{more}.{comma_split_hint}{hint}"
             )
     return errors
 

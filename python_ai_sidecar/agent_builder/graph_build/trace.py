@@ -131,9 +131,15 @@ class BuildTracer:
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
         try:
-            self._payload["status"] = self._payload.get("status") or (
-                "failed" if exc_type else "finished"
-            )
+            existing = self._payload.get("status")
+            if existing:
+                pass  # explicit set_status() wins
+            elif exc_type:
+                self._payload["status"] = "failed"
+            else:
+                fp = self._payload.get("final_pipeline") or {}
+                n_nodes = len(fp.get("nodes") or []) if isinstance(fp, dict) else 0
+                self._payload["status"] = "finished" if n_nodes > 0 else "plan_unfixable"
             self._payload["duration_ms"] = int((time.perf_counter() - self._t0) * 1000)
             self._payload["finished_at"] = datetime.now(tz=timezone.utc).isoformat()
             self._flush()
