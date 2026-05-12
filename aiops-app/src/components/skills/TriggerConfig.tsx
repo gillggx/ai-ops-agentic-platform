@@ -183,6 +183,22 @@ export function migrateTrigger(t: TC): TC {
       }
     }
   }
+  // 2026-05-12 — fresh skills land with trigger_config={} (NewSkill page
+  // only POSTs title+description). Without defaults here, the UI loads
+  // with trigger.type undefined; user clicks "Event-driven" pill which
+  // adds type=event but leaves event=undefined, and openInBuilder later
+  // serialises that as trigger_config without the event name. Builder
+  // URL therefore carries no trigger_event → seedInputsFromCtx falls
+  // back to [tool_id]. Defaulting here makes "create + click Build"
+  // produce a usable schema-driven pipeline; user can flip type or
+  // pick a different event in the picker.
+  if (!out.type) {
+    out.type = "event";
+  }
+  if (out.type === "event" && !out.event && !out.event_type) {
+    out.event = "OOC";  // most common trigger; user can change
+  }
+
   // strip legacy v2 header fields — UI doesn't show them anymore
   delete out.sla_seconds;
   delete out.evidence_window_lots;
