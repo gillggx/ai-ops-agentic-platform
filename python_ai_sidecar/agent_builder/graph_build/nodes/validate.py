@@ -288,18 +288,24 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
     # around. Now the LLM sees "remove block_alert" alongside whatever
     # other errors there are, so repair removes alert in one shot.
     if state.get("skill_step_mode"):
-        terminal_ok = False
-        for op in reversed(parsed):
-            if op is None:
-                continue
-            if op.type == OpType.ADD_NODE:
-                terminal_ok = (op.block_id == "block_step_check")
-                break
-        if not terminal_ok:
+        # 2026-05-13: relaxed from "last add_node must be step_check" to
+        # "plan must CONTAIN at least one step_check". SkillRunner reads the
+        # step_check node's output regardless of op-order position, and the
+        # old rule blocked legitimate side-branch visualizations (e.g.
+        # process_history → step_check + parallel branch:
+        # process_history → unnest → filter → line_chart). Op order ≠
+        # topology — only topology matters at runtime.
+        has_step_check = any(
+            op is not None and op.type == OpType.ADD_NODE
+            and op.block_id == "block_step_check"
+            for op in parsed
+        )
+        if not has_step_check:
             errors.append(
-                "skill_step_mode: pipeline must end with add_node block_step_check "
-                "(needed for SkillRunner to read pass/fail). Add a final step_check "
-                "node operating on the upstream filter/aggregate result."
+                "skill_step_mode: pipeline must include at least one "
+                "block_step_check node (needed for SkillRunner to read pass/fail). "
+                "Add a step_check node operating on the upstream filter/aggregate "
+                "result; side-branch chart / data_view nodes are still allowed."
             )
 
         # LLM kept wiring step_check → alert (with hallucinated 'triggered'
