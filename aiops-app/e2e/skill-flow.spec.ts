@@ -55,7 +55,10 @@ test.describe("Skill flow — full GUI with real agent", () => {
       console.log("[2/8] skill created", slug);
 
       // ── 3. Type C1 instruction + Build → opens popup ──────────
-      const instruction = "檢查最近 5 lot 是否有 ≥ 3 次 OOC";
+      // 2026-05-13: parametrize via INSTRUCTION env var so the same harness
+      // can be pointed at any failing prompt the user reports.
+      const instruction = process.env.INSTRUCTION ?? "檢查最近 5 lot 是否有 ≥ 3 次 OOC";
+      console.log(`[3/8] instruction: ${instruction.slice(0, 80)}…`);
       await page.locator('input[placeholder*="先確認一個條件"]').fill(instruction);
 
       const [builderTab] = await Promise.all([
@@ -94,8 +97,10 @@ test.describe("Skill flow — full GUI with real agent", () => {
       // substring compare. Pull out a sentinel chunk of the prose.
       expect(builderTab.url()).toContain("embed=skill");
       const decoded = decodeURIComponent(builderTab.url()).replace(/\+/g, " ");
-      expect(decoded).toContain("檢查最近");
-      expect(decoded).toContain("OOC");
+      // Sentinel: first 4 chars of instruction (after stripping leading
+      // emojis/whitespace) — survives URL encoding round-trip.
+      const sentinel = instruction.trim().slice(0, 4);
+      expect(decoded, "popup URL should carry the prompt").toContain(sentinel);
       console.log("[3/8] popup opened", builderTab.url().slice(0, 80));
 
       // ── 4. Wait for AIAgentPanel to auto-fire prompt + build canvas ──
@@ -272,11 +277,15 @@ test.describe("Skill flow — full GUI with real agent", () => {
       }
       console.log("[8/9] skill ran end-to-end with real verdict");
 
-      // ── 9. Cleanup ────────────────────────────────────────────
-      const del = await request.delete(`${BASE}/api/skill-documents/${slug}`, {
-        headers: { Cookie: cookieHeader },
-      });
-      expect(del.ok()).toBeTruthy();
-      console.log("[9/9] cleanup complete");
+      // ── 9. Cleanup (skip if SKIP_CLEANUP=1 for inspection) ────
+      if (!process.env.SKIP_CLEANUP) {
+        const del = await request.delete(`${BASE}/api/skill-documents/${slug}`, {
+          headers: { Cookie: cookieHeader },
+        });
+        expect(del.ok()).toBeTruthy();
+        console.log("[9/9] cleanup complete");
+      } else {
+        console.log("[9/9] cleanup SKIPPED — skill kept:", slug);
+      }
     });
 });
