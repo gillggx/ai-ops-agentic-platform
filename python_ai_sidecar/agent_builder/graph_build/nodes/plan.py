@@ -375,7 +375,39 @@ async def plan_node(state: BuildGraphState) -> dict[str, Any]:
         "— 圖表不影響觸發判定，但會附在告警 payload 給 user 看。"
         if skill_step_mode else ""
     )
-    user_msg = state["instruction"] + canvas_hint + inputs_hint + skill_hint
+
+    # 2026-05-12 — pull relevant domain knowledge (e.g. "SPC is station-
+    # level", "FDC is chamber-level") so the planner has cross-cutting
+    # semantic guidance without polluting block descriptions or system
+    # prompt. Best-effort: when embedding / Java fails the block is empty
+    # and plan proceeds as before. Per CLAUDE.md: knowledge lives in DB
+    # (agent_knowledge), retrieved via pgvector cosine — not hardcoded.
+    knowledge_hint = ""
+    try:
+        from python_ai_sidecar.agent_orchestrator_v2.nodes.load_context import (
+            _build_knowledge_block,
+        )
+        from python_ai_sidecar.clients.java_client import JavaAPIClient
+        from python_ai_sidecar.config import CONFIG
+
+        # Service-token client (no per-user caller). Same pattern as
+        # background/embedding_backfill.py — internal endpoints accept
+        # X-Internal-Token without a CallerContext.
+        java = JavaAPIClient(
+            CONFIG.java_api_url, CONFIG.java_internal_token,
+            timeout_sec=CONFIG.java_timeout_sec,
+        )
+        uid = state.get("user_id") or 1   # admin owns global-scope rows
+        kb = await _build_knowledge_block(
+            java, user_id=uid, query_text=state["instruction"],
+            skill_slug=None, tool_id=None, recipe_id=None,
+        )
+        if kb:
+            knowledge_hint = "\n\n" + kb
+    except Exception as ex:  # noqa: BLE001
+        logger.info("plan_node: knowledge retrieval skipped (%s)", ex)
+
+    user_msg = state["instruction"] + canvas_hint + inputs_hint + skill_hint + knowledge_hint
     client = get_llm_client()
     # Phase 11 v17 — opt-in BuildTracer captures full LLM exchange.
     from python_ai_sidecar.agent_builder.graph_build.trace import (

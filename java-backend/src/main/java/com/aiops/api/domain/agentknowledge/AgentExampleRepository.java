@@ -1,6 +1,7 @@
 package com.aiops.api.domain.agentknowledge;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -8,6 +9,13 @@ import java.util.List;
 
 public interface AgentExampleRepository extends JpaRepository<AgentExampleEntity, Long> {
     List<AgentExampleEntity> findByUserIdOrderByCreatedAtDesc(Long userId);
+
+    /** See AgentKnowledgeRepository.updateEmbedding — VARCHAR → vector
+     *  implicit cast fails; force ::vector here. */
+    @Modifying
+    @Query(value = "UPDATE agent_examples SET embedding = CAST(:vec AS vector), updated_at = now() WHERE id = :id",
+            nativeQuery = true)
+    int updateEmbedding(@Param("id") Long id, @Param("vec") String vec);
 
     /** Top-K examples whose input_text most resembles current user query. */
     @Query(value = """

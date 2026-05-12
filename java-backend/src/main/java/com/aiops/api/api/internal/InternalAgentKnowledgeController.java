@@ -95,16 +95,20 @@ public class InternalAgentKnowledgeController {
         return ApiResponse.ok(rows.stream().map(KnowledgeLite::of).toList());
     }
 
-    /** PUT embedding for a knowledge row (called by sidecar after async embed). */
+    /** PUT embedding for a knowledge row (called by sidecar after async embed).
+     *  2026-05-12: was JPA save() but Hibernate emits `embedding=?` as VARCHAR
+     *  and PostgreSQL refuses implicit VARCHAR → vector cast (SQLState 42804).
+     *  Use the repository's native `CAST(?vec AS vector)` UPDATE instead. */
     @PutMapping("/knowledge/{id}/embedding")
     @Transactional
     public ApiResponse<Map<String, Object>> setKnowledgeEmbedding(
             @PathVariable Long id, @RequestBody Map<String, String> body) {
-        AgentKnowledgeEntity e = knowledgeRepo.findById(id).orElse(null);
-        if (e == null) return ApiResponse.ok(Map.of("updated", false));
-        e.setEmbedding(body.get("embedding"));   // expected vector literal
-        e.setUpdatedAt(OffsetDateTime.now());
-        return ApiResponse.ok(Map.of("updated", true));
+        String vec = body.get("embedding");
+        if (vec == null || vec.isBlank()) {
+            return ApiResponse.ok(Map.of("updated", false, "reason", "empty embedding"));
+        }
+        int affected = knowledgeRepo.updateEmbedding(id, vec);
+        return ApiResponse.ok(Map.of("updated", affected > 0, "affected", affected));
     }
 
     @PostMapping("/knowledge/{id}/use")
@@ -148,11 +152,13 @@ public class InternalAgentKnowledgeController {
     @Transactional
     public ApiResponse<Map<String, Object>> setExampleEmbedding(
             @PathVariable Long id, @RequestBody Map<String, String> body) {
-        AgentExampleEntity e = exampleRepo.findById(id).orElse(null);
-        if (e == null) return ApiResponse.ok(Map.of("updated", false));
-        e.setEmbedding(body.get("embedding"));
-        e.setUpdatedAt(OffsetDateTime.now());
-        return ApiResponse.ok(Map.of("updated", true));
+        // Same pgvector caveat as setKnowledgeEmbedding — use native cast.
+        String vec = body.get("embedding");
+        if (vec == null || vec.isBlank()) {
+            return ApiResponse.ok(Map.of("updated", false, "reason", "empty embedding"));
+        }
+        int affected = exampleRepo.updateEmbedding(id, vec);
+        return ApiResponse.ok(Map.of("updated", affected > 0, "affected", affected));
     }
 
     @GetMapping("/examples/missing-embeddings")

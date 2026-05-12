@@ -1,6 +1,7 @@
 package com.aiops.api.domain.agentknowledge;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -8,6 +9,15 @@ import java.util.List;
 
 public interface AgentKnowledgeRepository extends JpaRepository<AgentKnowledgeEntity, Long> {
     List<AgentKnowledgeEntity> findByUserIdOrderByCreatedAtDesc(Long userId);
+
+    /** Native update for the embedding column. JPA's auto-generated UPDATE
+     *  sends the embedding as VARCHAR, which PostgreSQL refuses to implicitly
+     *  cast to `vector`. Use ?::vector here so the embedding string literal
+     *  (e.g. "[0.1,0.2,...]") gets parsed by pgvector. */
+    @Modifying
+    @Query(value = "UPDATE agent_knowledge SET embedding = CAST(:vec AS vector), updated_at = now() WHERE id = :id",
+            nativeQuery = true)
+    int updateEmbedding(@Param("id") Long id, @Param("vec") String vec);
 
     /** Cosine-similarity search via pgvector. Embedding string is rendered
      *  as PostgreSQL vector literal '[0.1,0.2,...]'. Returns top-K most

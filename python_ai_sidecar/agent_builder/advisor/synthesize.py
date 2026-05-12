@@ -43,6 +43,11 @@ def _trim_block(b: dict[str, Any]) -> dict[str, Any]:
 
 # ── EXPLAIN ───────────────────────────────────────────────────────────
 
+# 2026-05-12: the "**參數**" section is rendered deterministically from
+# param_schema below (not LLM-generated). LLM kept hallucinating params
+# (e.g. block_sort answered "sort_key: string + order: asc|desc" when the
+# real schema is `columns: list[{column, order}]`). Now the LLM writes
+# only prose; params come from schema verbatim.
 _EXPLAIN_SYSTEM = """You are a Pipeline Builder assistant explaining ONE block
 to a manufacturing engineer. Be concrete, opinionated, and brief.
 
@@ -50,32 +55,87 @@ Format the answer in markdown:
   ## {block_name}
   **用途**：1-2 句白話
   **何時用**：bullet list, 2-3 點
-  **參數**：每個重要 param 一行 (`name` — type — what it controls)
-  **輸入/輸出**：DataFrame schema 簡述
+  **輸入/輸出**：DataFrame schema 簡述 (use input_schema / output_schema verbatim)
   **範例**：1 行最常見呼叫場景
 
+DO NOT write a 「**參數**」 section — the platform renders that
+deterministically from param_schema after your text so we don't drift
+from the real shape. Just focus on prose.
+
 Rules:
-- Source-of-truth = the JSON I give you. Don't invent params or behaviour.
+- Source-of-truth = the JSON I give you. Don't invent behaviour.
 - If a field is empty in the JSON, omit that section silently.
 - Reply in the user's language (Chinese if user wrote Chinese, else English).
-- ≤ 250 words total.
+- ≤ 200 words total (was 250; params section is platform-rendered now).
 """
 
 
+def _flatten_type(prop: dict[str, Any]) -> str:
+    """Render a JSON-schema property's type spec into a one-line string.
+    Handles oneOf / array-of-string / enums so the params table is readable."""
+    if not isinstance(prop, dict):
+        return "?"
+    if "oneOf" in prop and isinstance(prop["oneOf"], list):
+        parts = [_flatten_type(p) for p in prop["oneOf"]]
+        return " | ".join(parts)
+    t = prop.get("type", "?")
+    if t == "array":
+        items = prop.get("items") or {}
+        item_t = items.get("type") if isinstance(items, dict) else None
+        if item_t:
+            return f"array<{item_t}>"
+        return "array"
+    return str(t)
+
+
+def render_params_section(param_schema: dict[str, Any] | None) -> str:
+    """Deterministic markdown for the 「**參數**」 section. Built straight
+    from param_schema.properties so the LLM can't drift. Returns "" when
+    the block has no params (e.g. block_spc_long_form)."""
+    props = (param_schema or {}).get("properties") or {}
+    required = set((param_schema or {}).get("required") or [])
+    if not props:
+        return ""
+    lines = ["**參數**："]
+    # Preserve insertion order (Python dicts since 3.7) — matches seed.py order
+    # which is the same order the block executor reads them.
+    for key, prop in props.items():
+        if not isinstance(prop, dict):
+            continue
+        type_str = _flatten_type(prop)
+        req_mark = " *(必填)*" if key in required else " *(選填)*"
+        enum = prop.get("enum")
+        enum_str = f" — 允許值: `{enum}`" if enum else ""
+        desc = prop.get("description") or prop.get("title") or ""
+        desc_str = f" — {desc}" if desc else ""
+        lines.append(f"- `{key}` ({type_str}){req_mark}{enum_str}{desc_str}")
+    return "\n".join(lines)
+
+
 async def synthesize_explain(user_question: str, block: dict[str, Any]) -> str:
-    """Produce the markdown explanation for one block."""
+    """Produce the markdown explanation for one block. The "參數" section is
+    rendered deterministically from param_schema (LLM kept hallucinating
+    params for blocks with array/oneOf shapes like block_sort). LLM only
+    writes prose."""
     client = get_llm_client()
     payload = {
         "user_question": user_question,
         "block_record": _trim_block(block),
     }
+    params_section = render_params_section(block.get("param_schema"))
     try:
         resp = await client.create(
             system=_EXPLAIN_SYSTEM,
             messages=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
             max_tokens=_MAX_OUTPUT_TOKENS,
         )
-        return (resp.text or "").strip() or _fallback_explain(block)
+        prose = (resp.text or "").strip()
+        if not prose:
+            return _fallback_explain(block)
+        # Append the deterministic params table right after the prose.
+        if params_section:
+            return prose + "\n\n" + params_section
+        return prose
     except Exception as e:  # noqa: BLE001
         logger.warning("advisor.synthesize_explain failed (%s) — fallback", e)
         return _fallback_explain(block)
