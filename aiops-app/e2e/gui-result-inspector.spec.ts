@@ -79,11 +79,18 @@ async function createFixturePipeline(token: string): Promise<number> {
   return data.data?.id ?? data.id;
 }
 
-async function getToken(page: Page): Promise<string> {
-  // After login, NextAuth stores session cookie; we extract token via /api/auth/session
-  const res = await page.request.get(`${BASE}/api/auth/session`);
+/** Login directly via Java API (bypass NextAuth) — returns Java JWT. */
+async function loginJava(): Promise<string> {
+  const res = await fetch(`${BASE}/api/v1/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: USER, password: PASS }),
+  });
+  if (!res.ok) throw new Error(`Java auth/login failed: ${res.status} ${await res.text()}`);
   const j = await res.json();
-  return j?.user?.accessToken ?? j?.accessToken ?? "";
+  const token = j?.data?.access_token;
+  if (!token) throw new Error(`auth/login no access_token: ${JSON.stringify(j).slice(0, 200)}`);
+  return token;
 }
 
 async function ensureArtifactDir() {
@@ -102,12 +109,11 @@ test.describe("GUI ResultInspector — dual-view + nested expansion", () => {
   });
 
   test("open fixture pipeline → click chart node → assert Table/JSON tabs + nested expand", async ({ page }) => {
-    // ── 1. Login + create fixture ─────────────────────────────────
-    await login(page);
-    token = await getToken(page);
-    expect(token, "expected NextAuth token after login").not.toBe("");
+    // ── 1. Create fixture via direct Java auth, then drive GUI via NextAuth ─
+    token = await loginJava();
     pipelineId = await createFixturePipeline(token);
     console.log(`[fixture] created pipeline ${pipelineId}`);
+    await login(page);
 
     // ── 2. Open in builder ────────────────────────────────────────
     await page.goto(`${BASE}/admin/pipeline-builder/${pipelineId}`);

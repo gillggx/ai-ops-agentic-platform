@@ -29,10 +29,19 @@ async function login(page: Page) {
   ]);
 }
 
-async function getToken(page: Page) {
-  const res = await page.request.get(`${BASE}/api/auth/session`);
+/** Login directly via Java API (bypass NextAuth proxy) — returns a JWT
+ *  we can attach to /api/v1/* requests. */
+async function loginJava(): Promise<string> {
+  const res = await fetch(`${BASE}/api/v1/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: USER, password: PASS }),
+  });
+  if (!res.ok) throw new Error(`Java auth/login failed: ${res.status} ${await res.text()}`);
   const j = await res.json();
-  return j?.user?.accessToken ?? j?.accessToken ?? "";
+  const token = j?.data?.access_token;
+  if (!token) throw new Error(`auth/login returned no access_token: ${JSON.stringify(j).slice(0, 200)}`);
+  return token;
 }
 
 async function createFixture(token: string): Promise<number> {
@@ -85,10 +94,10 @@ test.describe("GUI ChartRender — chart_spec → SVG pixels", () => {
   });
 
   test("line_chart terminal renders SVG with paths + title + axis", async ({ page }) => {
-    await login(page);
-    token = await getToken(page);
+    token = await loginJava();
     pipelineId = await createFixture(token);
     console.log(`[fixture] pipeline ${pipelineId}`);
+    await login(page);
 
     await page.goto(`${BASE}/admin/pipeline-builder/${pipelineId}`);
     await page.waitForLoadState("networkidle", { timeout: 30_000 });
