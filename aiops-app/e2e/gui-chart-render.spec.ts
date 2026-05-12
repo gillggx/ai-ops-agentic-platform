@@ -74,7 +74,8 @@ async function createFixture(token: string): Promise<number> {
     body: JSON.stringify({
       name: `chart-smoke-${Date.now()}`,
       description: "fixture for chart-render smoke",
-      pipeline_json: pipelineJson, status: "draft",
+      pipeline_json: JSON.stringify(pipelineJson),  // Java DTO expects String
+      version: "1.0.0",
     }),
   });
   if (!res.ok) throw new Error(`create pipeline failed: ${res.status} ${await res.text()}`);

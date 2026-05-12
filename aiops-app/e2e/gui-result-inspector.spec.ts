@@ -62,14 +62,15 @@ async function createFixturePipeline(token: string): Promise<number> {
       { id: "e3", from: { node: "n3", port: "data" }, to: { node: "n4", port: "data" } },
     ],
   };
+  // Java's CreateRequest expects pipeline_json as a JSON STRING, not object.
   const res = await fetch(`${BASE}/api/v1/pipelines`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       name: `gui-smoke-${Date.now()}`,
       description: "fixture for gui_smoke",
-      pipeline_json: pipelineJson,
-      status: "draft",
+      pipeline_json: JSON.stringify(pipelineJson),
+      version: "1.0.0",
     }),
   });
   if (!res.ok) {
