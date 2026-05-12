@@ -249,6 +249,41 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
                     f"don't substitute arbitrary defaults."
                 )
 
+        # (d2) "Visualize means chart, not list" rule.
+        # When the user's instruction has visualization keywords (顯示 / 畫 /
+        # show / chart / plot / trend / 趨勢 / 視覺化), the plan must contain
+        # at least one chart-emitting block. block_data_view (a table) does
+        # NOT count — user reported case 1 "顯示該SPC charts" produced a
+        # data_view-only plan that semantically missed the intent.
+        instruction = (state.get("instruction") or "")
+        instruction_lower = instruction.lower()
+        VISUAL_KEYWORDS_CN = ("顯示", "畫", "趨勢", "視覺化", "可視化", "圖表")
+        VISUAL_KEYWORDS_EN = ("show", "chart", "plot", "graph", "visualize", "trend")
+        wants_visual = (
+            any(kw in instruction for kw in VISUAL_KEYWORDS_CN)
+            or any(kw in instruction_lower for kw in VISUAL_KEYWORDS_EN)
+        )
+        if wants_visual:
+            has_chart_block = False
+            for op in parsed:
+                if op is None or op.type != OpType.ADD_NODE:
+                    continue
+                spec = registry.get_spec(op.block_id, op.block_version or "1.0.0") or {}
+                outs = spec.get("output_schema") or []
+                port_names = {p.get("port") for p in outs if isinstance(p, dict)}
+                if "chart_spec" in port_names:
+                    has_chart_block = True
+                    break
+            if not has_chart_block:
+                errors.append(
+                    "instruction contains visualization keywords "
+                    "(顯示 / show / chart / plot / 趨勢 / etc.) — plan must include "
+                    "at least one chart-emitting block (block_line_chart / "
+                    "block_bar_chart / block_xbar_r / block_ewma_cusum / etc.). "
+                    "block_data_view (a table) does NOT satisfy 「顯示 charts」; "
+                    "the user wants visual trends/plots, not a list of names."
+                )
+
         # (c) Chart-block terminal rule: any block whose ONLY output port is
         # chart_spec (dict) IS the visualization — adding a line_chart /
         # bar_chart downstream is redundant. LLM repeatedly produces this
