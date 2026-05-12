@@ -222,7 +222,7 @@ test.describe("Skill flow — full GUI with real agent", () => {
       const cookies = await context.cookies();
       const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
       const runRes = await request.post(
-        `${BASE}/api/skill-documents/${slug}/run`,
+        `${BASE}/api/skill-documents/${slugFromUrl}/run`,
         {
           headers: {
             Cookie: cookieHeader,
@@ -294,7 +294,7 @@ test.describe("Skill flow — full GUI with real agent", () => {
 
       // ── 9. Cleanup (skip if SKIP_CLEANUP=1 for inspection) ────
       if (!process.env.SKIP_CLEANUP) {
-        const del = await request.delete(`${BASE}/api/skill-documents/${slug}`, {
+        const del = await request.delete(`${BASE}/api/skill-documents/${slugFromUrl}`, {
           headers: { Cookie: cookieHeader },
         });
         expect(del.ok()).toBeTruthy();
