@@ -58,11 +58,32 @@ Op type 共 5 種:
   Op#2 connect n1.data → n2.data    ← 順序不限，validator 看 final state
 
 ✅ 正確範例（用 unnest 處理 array）:
-  n1 process_history → n2 unnest(column='spc_charts') → n3 filter(column='status', operator='=', value='OOC')
+  n1 process_history(nested=true) → n2 unnest(column='spc_charts')
+   → n3 filter(column='status', operator='=', value='OOC')
    → n4 step_check(aggregate='count', operator='>=', threshold=2)
 
-❌ 錯誤示範:
-  add_node n2 step_check 但沒 connect 任何 upstream — validator 會擋（dangling column-ref）
+✅ 正確範例（「最後一次 OOC 是否多張 SPC chart 也 OOC」+ 觸發告警）:
+  ❌ 不要用：process_history(flat) + spc_long_form + filter(is_ooc) + count_rows + step_check + alert
+     （6+ 個 node、step_check 接 alert 是 port 不匹配、count_rows 已 deprecated）
+  ✅ 要用：
+    n1 process_history(tool_id='EQP-01', limit=1, nested=true)   ← 拿到 spc_summary
+    n2 block_threshold(column='spc_summary.ooc_count',
+                       bound_type='lower', lower_bound=2)         ← 觸發 bool + evidence
+    n3 block_alert(severity='HIGH', ...)
+    connect n1.data → n2.data
+    connect n2.triggered → n3.triggered    ← 兩個都是 bool，型別匹配
+    connect n2.evidence → n3.evidence      ← 兩個都是 dataframe
+
+❌ 硬性禁忌（會被 validator 擋下）:
+  - **不要使用 block_count_rows** — 已 deprecated。要計數：
+      a) 已知 nested 資料 → 直接 path 引用 (e.g. 'spc_summary.ooc_count'，免計算)
+      b) 通用情況 → block_step_check(aggregate='count') 或
+                   block_compute({"op":"length", "operands":[...]}) 算 list 長度
+  - **block_step_check 是 TERMINAL block，下游不能接任何 block**
+      （特別不能接 block_alert — step_check 的 .check port 是 dataframe，
+        block_alert.triggered 需要 bool — 型別不匹配）
+  - **block_alert.triggered 必須來自 block_threshold.triggered**（兩者都是 bool）
+  - add_node n2 step_check 但沒 connect 任何 upstream — validator 會擋（dangling column-ref）
 
 ⚠ 結構性 anti-pattern（會被 validator 擋）:
   - **不要 self-join 同一個 source**：把 n1 接到 block_join 的 .left + 也轉一圈接 .right

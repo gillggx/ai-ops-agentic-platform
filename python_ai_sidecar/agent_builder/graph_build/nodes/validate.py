@@ -186,6 +186,50 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
         self_join_errors = _check_self_join(parsed)
         errors.extend(self_join_errors)
 
+    # Pass 4.7 — 2026-05-13 hard rules that apply REGARDLESS of skill_step_mode.
+    # Rationale: the LLM repeatedly produced these anti-patterns on chat-mode
+    # builds (skill_step_mode=False) too, and repair_plan never fixed them
+    # because the prompt didn't carry an unambiguous error. Codify as
+    # validator errors so repair_plan sees a clear signal.
+    if parsed:
+        # (a) block_count_rows hallucination: deprecated since V38. Even though
+        # the catalog hides it (status=deprecated), LLMs trained on prior
+        # versions still emit `add_node block_count_rows`. Hard reject with a
+        # concrete replacement.
+        for idx_op, op in enumerate(parsed):
+            if op is None or op.type != OpType.ADD_NODE:
+                continue
+            if op.block_id == "block_count_rows":
+                errors.append(
+                    f"Op#{idx_op}: block_count_rows is DEPRECATED. "
+                    f"Use block_step_check(aggregate='count') for verdict-emitting counters, "
+                    f"OR if upstream returns nested data with a precomputed counter "
+                    f"(e.g. block_process_history(nested=true) → spc_summary.ooc_count), "
+                    f"skip counting and reference the path directly."
+                )
+
+        # (b) block_step_check terminal violation in ANY mode: step_check has
+        # output port `check` (dataframe), NOT a bool. Wiring it to block_alert
+        # is a type mismatch — alert.triggered is bool. The right idiom is:
+        # block_threshold → block_alert (both bool/dataframe match), and
+        # block_step_check stands alone as a verdict.
+        step_check_node_ids = {
+            op.node_id for op in parsed
+            if op is not None and op.type == OpType.ADD_NODE
+            and op.block_id == "block_step_check" and op.node_id
+        }
+        for op in parsed:
+            if op is None or op.type != OpType.CONNECT:
+                continue
+            if op.src_id in step_check_node_ids:
+                errors.append(
+                    f"block_step_check '{op.src_id}' is a TERMINAL block — "
+                    f"don't connect it to any downstream (saw '{op.src_id}'→'{op.dst_id}'). "
+                    f"If you need an alert: replace block_step_check with block_threshold "
+                    f"(threshold has port `triggered` (bool) + `evidence` (dataframe) that "
+                    f"feed block_alert.triggered + block_alert.evidence cleanly)."
+                )
+
     # Pass 4 — Phase 11 skill-step terminal check.
     # When the caller is creating a Skill step's pipeline, the plan must end
     # with an add_node for block_step_check. SkillRunner reads that node's
