@@ -1345,10 +1345,23 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
         onClose={() => setInputsPanelOpen(false)}
       />
 
-      {/* Phase 4-B0: Run dialog — prompts for required inputs */}
+      {/* Phase 4-B0: Run dialog — prompts for required inputs.
+          2026-05-12: pass skill embed ctx so the dialog can fetch past events
+          and let user one-click replay (parity with Skills page Test flow). */}
       <PipelineRunDialog
         open={runDialogOpen}
         inputs={state.pipeline.inputs ?? []}
+        skillCtx={(() => {
+          if (typeof window === "undefined") return null;
+          try {
+            const raw = sessionStorage.getItem("pb:skill_embed_ctx");
+            if (!raw) return null;
+            const ctx = JSON.parse(raw) as { skill_slug?: string; trigger_event?: string };
+            return ctx?.skill_slug
+              ? { slug: ctx.skill_slug, eventType: ctx.trigger_event }
+              : null;
+          } catch { return null; }
+        })()}
         onCancel={() => setRunDialogOpen(false)}
         onSubmit={(values) => {
           setRunDialogOpen(false);
