@@ -727,6 +727,7 @@ async def _build_knowledge_block(
     """RAG: embed query, fetch top-3 most similar knowledge rows, render."""
     vec = await _embed_query(query_text)
     if vec is None:
+        logger.info("_build_knowledge_block: embed returned None — skip")
         return ""
     try:
         rows = await java.search_knowledge(
@@ -736,6 +737,8 @@ async def _build_knowledge_block(
     except Exception as e:  # noqa: BLE001
         logger.warning("knowledge search failed (%s)", e)
         return ""
+    logger.info("_build_knowledge_block: user_id=%s query=%r rows=%d",
+                user_id, query_text[:80], len(rows or []))
     if not rows:
         return ""
     lines = ["## Retrieved domain knowledge（top-3 by relevance）"]
