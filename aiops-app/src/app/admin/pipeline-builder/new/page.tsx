@@ -120,6 +120,12 @@ export default function NewPipelinePage() {
           const seeded = seeds.map((s) => ({
             name: s.name, type: s.type, required: s.required,
             description: s.description ?? "",
+            // Carry the canonical example so Pipeline Builder's Run Full
+            // dialog auto-fills each field — user only types when they want
+            // to override. Without this the dialog renders 7 empty inputs
+            // and the user has to retype EQP-01 / LOT-0001 / STEP_001 / etc.
+            // every time they want to dry-run.
+            ...(s.example !== undefined ? { example: s.example } : {}),
           })) as PipelineInput[];
           setPendingInputs(seeded);
         }).catch(() => {

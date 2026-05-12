@@ -275,6 +275,39 @@ export default function SkillEmbedBanner({ pipelineId }: { pipelineId?: number |
   );
 }
 
+// Canonical example values used to populate `inp.example` so Run Full's
+// PipelineRunDialog auto-fills without the user typing for every field.
+// Mirrors the Java buildEventPayload._defaultForAttr + Python executor
+// _CANONICAL_INPUT_FALLBACKS so dry-run / past-event replay / manual
+// payload shapes are identical.
+const _CANONICAL_EXAMPLES: Record<string, string> = {
+  tool_id: "EQP-01",
+  equipment_id: "EQP-01",
+  lot_id: "LOT-0001",
+  step: "STEP_001",
+  step_id: "STEP_001",
+  chamber_id: "CH-1",
+  recipe_id: "RECIPE-A",
+  parameter: "CD_Mean",
+  ooc_parameter: "CD_Mean",
+  spc_chart: "spc_xbar",
+  SPC_CHART: "spc_xbar",
+  fault_code: "FDC_RGA_H2O_HIGH",
+  severity: "warning",
+  event_time: "2026-05-01T00:00:00Z",
+  timestamp: "2026-05-01T00:00:00Z",
+  process_timestamp: "2026-05-01T00:00:00Z",
+  ooc_details: "{}",
+};
+
+type SeededInput = {
+  name: string;
+  type: string;
+  required: boolean;
+  description?: string;
+  example?: string | number | boolean;
+};
+
 /**
  * Seed pendingInputs when bypassing the wizard.
  *
@@ -283,9 +316,11 @@ export default function SkillEmbedBanner({ pipelineId }: { pipelineId?: number |
  * equipment_id but this returned tool_id, etc. — LLM then referenced
  * fields that never arrive in the runtime payload). Now reads the live
  * schema from Java (/api/v1/event-types/by-name/<n>), the same source
- * the IT_ADMIN edits in /admin/event-types.
+ * the IT_ADMIN edits in /admin/event-types. Also stamps canonical
+ * example values so the Pipeline Builder Run Full dialog auto-fills
+ * the form and the user only types when overriding a value.
  */
-export async function seedInputsFromCtx(ctx: SkillEmbedCtx): Promise<{ name: string; type: string; required: boolean; description?: string }[]> {
+export async function seedInputsFromCtx(ctx: SkillEmbedCtx): Promise<SeededInput[]> {
   if (ctx.trigger_type === "event") {
     const ev = ctx.trigger_event ?? "";
     if (ev) {
@@ -303,14 +338,18 @@ export async function seedInputsFromCtx(ctx: SkillEmbedCtx): Promise<{ name: str
             : (Array.isArray(rawAttrs) ? rawAttrs : []);
           if (Array.isArray(attrs) && attrs.length > 0) {
             return attrs
-              .map((a: Record<string, unknown>) => ({
-                name: String(a.name ?? ""),
-                type: ["string","integer","number","boolean"].includes(String(a.type ?? ""))
-                  ? String(a.type)
-                  : "string",
-                required: Boolean(a.required),
-                description: String(a.description ?? `From ${ev} payload`),
-              }))
+              .map((a: Record<string, unknown>): SeededInput => {
+                const name = String(a.name ?? "");
+                return {
+                  name,
+                  type: ["string","integer","number","boolean"].includes(String(a.type ?? ""))
+                    ? String(a.type)
+                    : "string",
+                  required: Boolean(a.required),
+                  description: String(a.description ?? `From ${ev} payload`),
+                  example: _CANONICAL_EXAMPLES[name],
+                };
+              })
               .filter(s => s.name);
           }
         }
@@ -319,21 +358,23 @@ export async function seedInputsFromCtx(ctx: SkillEmbedCtx): Promise<{ name: str
       }
     }
     // Generic event fallback — at least pass tool_id so the pipeline runs.
-    return [{ name: "tool_id", type: "string", required: true }];
+    return [{ name: "tool_id", type: "string", required: true, example: "EQP-01" }];
   }
   // schedule trigger — input is the target object the cron iterates over.
   if (ctx.target_kind === "tools" && ctx.target_ids?.length) {
     return [{
       name: "tool_id", type: "string", required: true,
       description: `Iterating over: ${ctx.target_ids.join(", ")}`,
+      example: ctx.target_ids[0],
     }];
   }
   if (ctx.target_kind === "stations" && ctx.target_ids?.length) {
     return [{
       name: "station_id", type: "string", required: true,
       description: `Iterating over: ${ctx.target_ids.join(", ")}`,
+      example: ctx.target_ids[0],
     }];
   }
   // all
-  return [{ name: "tool_id", type: "string", required: true, description: "Iterating over all 10 tools" }];
+  return [{ name: "tool_id", type: "string", required: true, description: "Iterating over all 10 tools", example: "EQP-01" }];
 }

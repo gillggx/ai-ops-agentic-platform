@@ -16,11 +16,44 @@ interface Props {
   onSubmit: (values: Record<string, unknown>) => void;
 }
 
+// Canonical example values used when the input declaration has no
+// default/example set. Mirrors Java buildEventPayload._defaultForAttr +
+// SkillEmbedBanner._CANONICAL_EXAMPLES so dry-run / past-event replay /
+// manual payload all use the same shape. User reported the dialog asked
+// them to fill 7 OOC fields by hand even after the build flow correctly
+// seeded declared_inputs from event_types.attributes — root cause was
+// that the seed path didn't carry `example`, and existing already-saved
+// pipelines (like skill 54's pipeline 85) wouldn't pick up new examples
+// without a rebuild. This fallback closes both gaps.
+const CANONICAL: Record<string, string> = {
+  tool_id: "EQP-01",
+  equipment_id: "EQP-01",
+  lot_id: "LOT-0001",
+  step: "STEP_001",
+  step_id: "STEP_001",
+  chamber_id: "CH-1",
+  recipe_id: "RECIPE-A",
+  parameter: "CD_Mean",
+  ooc_parameter: "CD_Mean",
+  spc_chart: "spc_xbar",
+  SPC_CHART: "spc_xbar",
+  fault_code: "FDC_RGA_H2O_HIGH",
+  severity: "warning",
+  event_time: "2026-05-01T00:00:00Z",
+  timestamp: "2026-05-01T00:00:00Z",
+  process_timestamp: "2026-05-01T00:00:00Z",
+  ooc_details: "{}",
+  time_range: "24h",
+  limit: "100",
+};
+
 export default function PipelineRunDialog({ open, inputs, onCancel, onSubmit }: Props) {
   const initial = useMemo(() => {
     const v: Record<string, string> = {};
     for (const inp of inputs) {
-      const seed = inp.default ?? inp.example ?? "";
+      // Priority: explicit default → explicit example → canonical for the
+      // attribute name → empty (user types).
+      const seed = inp.default ?? inp.example ?? CANONICAL[inp.name] ?? "";
       v[inp.name] = seed === null ? "" : String(seed);
     }
     return v;
