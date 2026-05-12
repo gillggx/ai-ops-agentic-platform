@@ -216,9 +216,22 @@ def _columns_for_block_port(
     if block_id in ("block_filter", "block_sort", "block_delta", "block_threshold"):
         return _expected_upstream_columns(pipeline, upstream, registry, depth=depth + 1)
 
-    # Static-hint blocks (sources): use output_columns_hint from registry
+    # Static-hint blocks (sources): use output_columns_hint from registry.
+    # 2026-05-13 (Phase 1 object-native): walk the hint as JSON-Schema-ish
+    # and return PATH list (top-level names for flat blocks, but a.b /
+    # a[].b for nested ones). Existing flat blocks still get flat path
+    # strings — they happen to coincide with top-level names — so callers
+    # see no shape change unless the block declared nested fields.
     hint = spec.get("output_columns_hint") or []
     if isinstance(hint, list) and hint:
+        try:
+            from python_ai_sidecar.pipeline_builder.path import walk_paths
+            paths = walk_paths(hint)
+            if paths:
+                return paths
+        except Exception:  # noqa: BLE001
+            pass
+        # Fallback: legacy shape (list of dict/str with name only) — flat keys.
         cols2 = []
         for c in hint:
             if isinstance(c, dict) and c.get("name"):

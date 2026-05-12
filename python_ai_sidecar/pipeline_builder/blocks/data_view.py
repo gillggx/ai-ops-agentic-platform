@@ -20,6 +20,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths
 
 
 class DataViewBlockExecutor(BlockExecutor):
@@ -51,6 +52,7 @@ class DataViewBlockExecutor(BlockExecutor):
         columns_param = params.get("columns")
         dropped_columns: list[str] = []
         if isinstance(columns_param, list) and columns_param:
+            df = _materialize_paths(df, [c for c in columns_param if isinstance(c, str) and c])
             # Graceful: drop missing cols rather than raising — migrated
             # pipelines often list cols the skill's Python constructed;
             # the user can refine in Inspector.

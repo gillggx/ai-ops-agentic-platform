@@ -22,7 +22,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
-from python_ai_sidecar.pipeline_builder.blocks.line_chart import _records
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths, _records
 
 
 class BoxPlotBlockExecutor(BlockExecutor):
@@ -59,6 +59,7 @@ class BoxPlotBlockExecutor(BlockExecutor):
                 }
             }
 
+        df = _materialize_paths(df, [x, y] + ([secondary] if secondary else []))
         for col in [x, y] + ([secondary] if secondary else []):
             if col not in df.columns:
                 raise BlockExecutionError(

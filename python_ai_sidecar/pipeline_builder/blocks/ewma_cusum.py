@@ -16,7 +16,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
-from python_ai_sidecar.pipeline_builder.blocks.line_chart import _records
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths, _records
 
 
 logger = logging.getLogger(__name__)
@@ -42,6 +42,12 @@ class EwmaCusumBlockExecutor(BlockExecutor):
 
         if df.empty:
             return {"chart_spec": {"__dsl": True, "type": "empty", "title": title or "No data", "message": "上游資料為空", "data": []}}
+
+        # Materialize nested paths up-front so downstream column check + _records pick them up.
+        if not isinstance(params.get("values"), list):
+            _value_col_pre = params.get("value_column") or None
+            if _value_col_pre:
+                df = _materialize_paths(df, [_value_col_pre])
 
         spec: dict[str, Any] = {
             "__dsl": True,

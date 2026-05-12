@@ -21,6 +21,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     ExecutionContext,
 )
 from python_ai_sidecar.pipeline_builder.blocks._chart_facet import maybe_facet
+from python_ai_sidecar.pipeline_builder.path import get_column_series
 
 
 def _normalize_y(raw: Any) -> list[str]:
@@ -31,6 +32,30 @@ def _normalize_y(raw: Any) -> list[str]:
     if isinstance(raw, list):
         return [str(v) for v in raw]
     return []
+
+
+def _materialize_paths(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    """For any col that's a nested path, add a top-level column whose key is
+    the path string itself and whose values are the resolved scalars. Charts
+    then reference the path verbatim and the frontend renderer reads it via
+    record[path].
+
+    No-op for flat columns. Returns the (possibly copied) DataFrame.
+    """
+    needs_copy = any(("." in c or "[]" in c) and c not in df.columns for c in cols)
+    if not needs_copy:
+        return df
+    out = df.copy()
+    for c in cols:
+        if not c or c in out.columns:
+            continue
+        if "." in c or "[]" in c:
+            try:
+                series = get_column_series(out, c)
+            except KeyError:
+                continue  # let _validate_columns produce the user-facing error
+            out[c] = series.values
+    return out
 
 
 def _validate_columns(df: pd.DataFrame, cols: list[str], label: str) -> None:
@@ -110,6 +135,7 @@ class LineChartBlockExecutor(BlockExecutor):
         cols = [x, *y, *y_secondary]
         if series_field:
             cols.append(series_field)
+        df = _materialize_paths(df, cols)
         _validate_columns(df, cols, label="line_chart")
 
         rules = list(params.get("rules") or [])

@@ -28,11 +28,10 @@ Op type 共 5 種:
 
 規則:
   1. 用邏輯 id n1, n2, n3, ... 編號（不要編真實 id）
-  2. **op 順序硬性規則**（違反就會被擋）:
-     a) add_node — 加入這個 block，可帶 initial params (純值，不要帶 column-ref)
-     b) connect  — 把上游接進來
-     c) set_param — 寫 column-ref 參數（value_column / x / y / column / agg_column 等）
-     ⚠ column-ref 的 set_param 必須在 connect 之後，否則沒有 upstream 可查
+  2. **Op 順序不強制**（2026-05-13 起 validator 改成 final-state 檢查）：
+     你可以把 column-ref 放在 add_node 的 initial params 裡一起送，也可以後面 set_param。
+     **唯一硬性需求**：plan 跑完後，任何引用 upstream 欄位的 node 都必須有 inbound edge。
+     建議仍然 add_node → connect → 其餘 set_param 一次寫完，這樣最直觀。
   3. connect 的 src_id / dst_id 都用邏輯 id
   4. 一次出完整 plan — 後面不能再補 op
   5. block 必須來自下面的目錄；不要編造 block_id
@@ -40,19 +39,30 @@ Op type 共 5 種:
   7. **block_id 不要帶 @version 後綴**。block_id 跟 block_version 是兩個分開的欄位：
      ✅ 對：{"block_id":"block_xbar_r", "block_version":"1.0.0"}
      ❌ 錯：{"block_id":"block_xbar_r@1.0.0", "block_version":"1.0.0"}（會找不到 block）
-  8. **column-ref 一定要用上游真實的 column 名**。每個 block 在 catalog 都標了 out_cols=[...]，
-     下游 set_param value_column / x / y 等就從 upstream 的 out_cols 挑。例如：
-        block_process_history out_cols=[eventTime, toolID, ..., spc_xbar_chart_value, ...]
-     → 接 block_ewma_cusum 時 value_column='spc_xbar_chart_value'（不是 'xbar' 不是 'value'）
+  8. **column-ref 用上游真實的 column path**。每個 block 的 catalog 標了 out_cols=[...]，
+     下游從中挑（單值 path 字串，例如 'spc_xbar_chart_value'）。
+     - **支援 path 語法**：`a.b` 取 nested scalar；`a[].b` 對 array 內每個 element 取 b
+     - **無 nested 結構時**，path == top-level column name（向後相容）
+     - 例：`spc_summary.ooc_count`（巢狀）/ `spc_charts[].name`（array pluck）
+        / `tool_id`（普通頂層欄）
+  9. **資料保持原本 hierarchical shape，必要時才 flatten/unnest**：
+     - ✅ nested scalar 想 filter / step_check → 直接 column='a.b' （path 寫法）
+     - ✅ 想 group by array element → 先 block_unnest 再 block_groupby_agg
+     - ✅ 想瘦身寬表 → block_select [{path:'x',as:'y'}, ...]
+     - ✅ 想抽單欄 → block_pluck path='a.b'
+     - ❌ 為了每次運算都先 flatten → 反模式，path 文法本身就能讀 nested
 
-✅ 正確 op 順序範例:
-  Op#0 add_node block_process_history → n1, params={tool_id:'EQP-01', step:'STEP_001'}
-  Op#1 add_node block_ewma_cusum → n2
-  Op#2 connect n1.data → n2.data
-  Op#3 set_param n2 value_column='spc_xbar_chart_value'   ← connect 之後才寫
+✅ 正確範例（add_node 直接帶 path-ref）:
+  Op#0 add_node block_process_history → n1, params={tool_id:'EQP-01'}
+  Op#1 add_node block_step_check → n2, params={column:'spc_summary.ooc_count', operator:'>=', threshold:2}
+  Op#2 connect n1.data → n2.data    ← 順序不限，validator 看 final state
 
-❌ 錯誤示範（會被擋下來）:
-  add_node n2 → set_param n2 value_column=...  ← 沒有 upstream 可參考
+✅ 正確範例（用 unnest 處理 array）:
+  n1 process_history → n2 unnest(column='spc_charts') → n3 filter(column='status', operator='=', value='OOC')
+   → n4 step_check(aggregate='count', operator='>=', threshold=2)
+
+❌ 錯誤示範:
+  add_node n2 step_check 但沒 connect 任何 upstream — validator 會擋（dangling column-ref）
 
 ⚠ 結構性 anti-pattern（會被 validator 擋）:
   - **不要 self-join 同一個 source**：把 n1 接到 block_join 的 .left + 也轉一圈接 .right

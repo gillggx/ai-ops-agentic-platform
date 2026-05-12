@@ -44,6 +44,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
+from python_ai_sidecar.pipeline_builder.path import get_column_series
 
 
 # --- expression evaluator (vectorised over a DataFrame) ---
@@ -54,13 +55,14 @@ def _eval(node: Any, df: pd.DataFrame) -> Any:
         return node  # plain literal: int / str / bool / list / None
     if "column" in node:
         col = node["column"]
-        if col not in df.columns:
+        try:
+            return get_column_series(df, col)
+        except KeyError:
             raise BlockExecutionError(
                 code="COLUMN_NOT_FOUND",
-                message=f"Column '{col}' not in input",
-                hint=f"Available: {list(df.columns)[:10]}",
-            )
-        return df[col]
+                message=f"Column path '{col}' not in input",
+                hint=f"Available top-level: {list(df.columns)[:10]}",
+            ) from None
     op = node.get("op")
     if not op:
         raise BlockExecutionError(

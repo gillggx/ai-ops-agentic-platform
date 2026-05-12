@@ -21,6 +21,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths
 
 
 class DeltaBlockExecutor(BlockExecutor):
@@ -43,6 +44,7 @@ class DeltaBlockExecutor(BlockExecutor):
         sort_by: str = self.require(params, "sort_by")
         group_by: Optional[str] = params.get("group_by") or None
 
+        df = _materialize_paths(df, [c for c in (value_column, sort_by, group_by) if c])
         for col in (value_column, sort_by):
             if col not in df.columns:
                 raise BlockExecutionError(

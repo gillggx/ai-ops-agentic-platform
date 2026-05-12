@@ -31,6 +31,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths
 
 
 def _compute_capability(
@@ -91,6 +92,8 @@ class CpkBlockExecutor(BlockExecutor):
             raise BlockExecutionError(code="INVALID_INPUT", message="'data' must be DataFrame")
 
         value_col: str = self.require(params, "value_column")
+        _group_by_pre = params.get("group_by") or None
+        df = _materialize_paths(df, [c for c in (value_col, _group_by_pre) if c])
         if value_col not in df.columns:
             raise BlockExecutionError(
                 code="COLUMN_NOT_FOUND", message=f"value_column '{value_col}' not in data"

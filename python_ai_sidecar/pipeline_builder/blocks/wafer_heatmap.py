@@ -11,7 +11,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
-from python_ai_sidecar.pipeline_builder.blocks.line_chart import _records
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths, _records
 
 
 def _validate_xyv(df: pd.DataFrame, x_col: str, y_col: str, v_col: str) -> None:
@@ -42,6 +42,7 @@ class WaferHeatmapBlockExecutor(BlockExecutor):
 
         if df.empty:
             return {"chart_spec": {"__dsl": True, "type": "empty", "title": title or "No data", "message": "上游資料為空", "data": []}}
+        df = _materialize_paths(df, [x_col, y_col, v_col])
         _validate_xyv(df, x_col, y_col, v_col)
 
         spec: dict[str, Any] = {

@@ -14,6 +14,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths
 
 
 class ShiftLagBlockExecutor(BlockExecutor):
@@ -38,6 +39,7 @@ class ShiftLagBlockExecutor(BlockExecutor):
         sort_by: Optional[str] = params.get("sort_by") or None
         compute_delta = bool(params.get("compute_delta", True))
 
+        df = _materialize_paths(df, [c for c in (column, group_by, sort_by) if c])
         if column not in df.columns:
             raise BlockExecutionError(
                 code="COLUMN_NOT_FOUND",

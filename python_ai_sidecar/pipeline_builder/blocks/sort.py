@@ -19,9 +19,13 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
+from python_ai_sidecar.pipeline_builder.path import get_column_series
 
 
 _ORDERS = {"asc", "desc"}
+
+
+_SORT_KEY_PREFIX = "__sort_key_"
 
 
 class SortBlockExecutor(BlockExecutor):
@@ -45,9 +49,15 @@ class SortBlockExecutor(BlockExecutor):
                 message="columns must be a non-empty list of {column, order}",
             )
 
+        # Path-aware sort: for nested columns we materialize a temporary
+        # __sort_key_<i> column via get_column_series, sort by it, then drop.
+        # Flat columns sort in place via pandas (faster, no extra copy).
         by: list[str] = []
         ascending: list[bool] = []
-        for entry in columns_spec:
+        materialized_keys: list[str] = []
+        df_work = df
+
+        for i, entry in enumerate(columns_spec):
             if not isinstance(entry, dict):
                 raise BlockExecutionError(
                     code="INVALID_PARAM",
@@ -55,16 +65,40 @@ class SortBlockExecutor(BlockExecutor):
                 )
             col = entry.get("column")
             order = entry.get("order", "asc")
-            if not isinstance(col, str) or col not in df.columns:
+            if not isinstance(col, str) or not col:
                 raise BlockExecutionError(
-                    code="COLUMN_NOT_FOUND", message=f"sort column '{col}' not in data"
+                    code="INVALID_PARAM", message=f"sort column must be non-empty string, got {col!r}"
                 )
             if order not in _ORDERS:
                 raise BlockExecutionError(
                     code="INVALID_PARAM",
                     message=f"order must be 'asc' or 'desc' (got '{order}')",
                 )
-            by.append(col)
+
+            if "." in col or "[]" in col:
+                try:
+                    series = get_column_series(df_work, col)
+                except KeyError:
+                    raise BlockExecutionError(
+                        code="COLUMN_NOT_FOUND",
+                        message=f"sort path '{col}' not in data",
+                        hint=f"Available top-level columns: {list(df_work.columns)[:10]}",
+                    ) from None
+                key = f"{_SORT_KEY_PREFIX}{i}"
+                # Use a fresh copy on first materialization so we don't mutate
+                # the upstream block's DataFrame in-place.
+                if df_work is df:
+                    df_work = df.copy()
+                df_work[key] = series.values
+                by.append(key)
+                materialized_keys.append(key)
+            else:
+                if col not in df_work.columns:
+                    raise BlockExecutionError(
+                        code="COLUMN_NOT_FOUND", message=f"sort column '{col}' not in data",
+                        hint=f"Available columns: {list(df_work.columns)[:10]}",
+                    )
+                by.append(col)
             ascending.append(order == "asc")
 
         limit = params.get("limit")
@@ -83,7 +117,10 @@ class SortBlockExecutor(BlockExecutor):
             limit_n = None
 
         # kind="mergesort" preserves original order on ties (stable).
-        out = df.sort_values(by=by, ascending=ascending, kind="mergesort").reset_index(drop=True)
+        out = df_work.sort_values(by=by, ascending=ascending, kind="mergesort").reset_index(drop=True)
         if limit_n is not None:
             out = out.head(limit_n)
+        # Drop scratch columns introduced for nested-path sorting.
+        if materialized_keys:
+            out = out.drop(columns=materialized_keys, errors="ignore")
         return {"data": out}

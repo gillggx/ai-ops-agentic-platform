@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { previewNode } from "@/lib/pipeline-builder/api";
 import { useBuilder } from "@/context/pipeline-builder/BuilderContext";
 import type { NodeResult, NodeResultPreview } from "@/lib/pipeline-builder/types";
@@ -135,7 +135,10 @@ export default function DataPreviewPanel({ collapsed, onToggle, onColumnClick }:
   const [rowLimit, setRowLimit] = useState<RowLimit>(DEFAULT_ROW_LIMIT);
   const [selectedPort, setSelectedPort] = useState<string | null>(null);
   // PR-F3: view mode tabs for dataframe preview (Rows / Schema / Stats)
-  const [viewMode, setViewMode] = useState<"rows" | "schema" | "stats">("rows");
+  // 2026-05-13: add `json` tab for object-native data (Gemini dual-view).
+  const [viewMode, setViewMode] = useState<"rows" | "schema" | "stats" | "json">("rows");
+  // Track which rows are expanded in the table view (for nested array/object expansion).
+  const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({});
 
   // v1.3 C: read selected node's cache; if absent, walk upstream for nearest cached ancestor
   const { cached: cachedResult, source: cacheSource } = useMemo(
@@ -571,67 +574,105 @@ export default function DataPreviewPanel({ collapsed, onToggle, onColumnClick }:
           <>
             {/* PR-F3: Rows / Schema / Stats tabs */}
             <PreviewTabs mode={viewMode} onChange={setViewMode} />
-            {viewMode === "rows" && (
-              <table
-                data-testid="preview-table"
-                style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}
-              >
-                <thead>
-                  <tr>
-                    {visibleColumns.map((col) => (
-                      <th
-                        key={col}
-                        data-testid={`preview-col-header-${col}`}
-                        onClick={() => onColumnClick?.(col)}
-                        style={{
-                          textAlign: "left",
-                          padding: "6px 10px",
-                          borderBottom: "1px solid var(--pb-panel-border)",
-                          position: "sticky",
-                          top: 0,
-                          background: "var(--pb-panel-bg)",
-                          color: "var(--pb-text-2)",
-                          fontWeight: 600,
-                          whiteSpace: "nowrap",
-                          cursor: onColumnClick ? "pointer" : "default",
-                        }}
-                        title={onColumnClick ? "click to fill inspector field" : undefined}
-                      >
-                        {col}
-                      </th>
-                    ))}
-                    {visibleColumns.length === 0 && (
-                      <th style={{ color: "var(--pb-text-4)", padding: "6px 10px", fontWeight: 400 }}>
-                        （無欄位符合搜尋 / 分組條件）
-                      </th>
-                    )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {(render.rows ?? []).slice(0, visibleRowCount).map((row, ri) => (
-                    <tr key={ri}>
+            {viewMode === "rows" && (() => {
+              const visibleRows = (render.rows ?? []).slice(0, visibleRowCount);
+              // Detect whether ANY cell in visible rows is nested (object/list).
+              // If so, render a leading [+] column for expansion.
+              const hasNested = visibleRows.some((row) =>
+                visibleColumns.some((col) => isNested(row[col]))
+              );
+              return (
+                <table
+                  data-testid="preview-table"
+                  style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}
+                >
+                  <thead>
+                    <tr>
+                      {hasNested && (
+                        <th style={{ width: 24, padding: "6px 6px", borderBottom: "1px solid var(--pb-panel-border)", position: "sticky", top: 0, background: "var(--pb-panel-bg)" }} />
+                      )}
                       {visibleColumns.map((col) => (
-                        <td
+                        <th
                           key={col}
+                          data-testid={`preview-col-header-${col}`}
+                          onClick={() => onColumnClick?.(col)}
                           style={{
-                            padding: "4px 10px",
-                            borderBottom: "1px solid var(--pb-node-border)",
-                            color: renderCellColor(row[col], col),
-                            background: renderCellBg(row[col], col),
-                            maxWidth: 240,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
+                            textAlign: "left",
+                            padding: "6px 10px",
+                            borderBottom: "1px solid var(--pb-panel-border)",
+                            position: "sticky",
+                            top: 0,
+                            background: "var(--pb-panel-bg)",
+                            color: "var(--pb-text-2)",
+                            fontWeight: 600,
                             whiteSpace: "nowrap",
-                            fontFamily: typeof row[col] === "number" ? "ui-monospace, monospace" : undefined,
+                            cursor: onColumnClick ? "pointer" : "default",
                           }}
+                          title={onColumnClick ? "click to fill inspector field" : undefined}
                         >
-                          {formatCell(row[col])}
-                        </td>
+                          {col}
+                        </th>
                       ))}
+                      {visibleColumns.length === 0 && (
+                        <th style={{ color: "var(--pb-text-4)", padding: "6px 10px", fontWeight: 400 }}>
+                          （無欄位符合搜尋 / 分組條件）
+                        </th>
+                      )}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {visibleRows.map((row, ri) => {
+                      const rowHasNested = visibleColumns.some((col) => isNested(row[col]));
+                      const isOpen = !!expandedRows[ri];
+                      return (
+                        <Fragment key={ri}>
+                          <tr>
+                            {hasNested && (
+                              <td style={{ padding: "4px 6px", borderBottom: "1px solid var(--pb-node-border)", color: "var(--pb-text-3)", cursor: rowHasNested ? "pointer" : "default" }}
+                                  onClick={() => rowHasNested && setExpandedRows((s) => ({ ...s, [ri]: !s[ri] }))}
+                                  title={rowHasNested ? "Expand nested fields" : ""}>
+                                {rowHasNested ? (isOpen ? "▾" : "▸") : ""}
+                              </td>
+                            )}
+                            {visibleColumns.map((col) => (
+                              <td
+                                key={col}
+                                style={{
+                                  padding: "4px 10px",
+                                  borderBottom: "1px solid var(--pb-node-border)",
+                                  color: renderCellColor(row[col], col),
+                                  background: renderCellBg(row[col], col),
+                                  maxWidth: 240,
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                  fontFamily: typeof row[col] === "number" ? "ui-monospace, monospace" : undefined,
+                                }}
+                              >
+                                {formatCellShort(row[col])}
+                              </td>
+                            ))}
+                          </tr>
+                          {isOpen && rowHasNested && (
+                            <tr>
+                              <td colSpan={visibleColumns.length + (hasNested ? 1 : 0)}
+                                  style={{ padding: "8px 16px", background: "var(--pb-node-bg-2)", borderBottom: "1px solid var(--pb-node-border)" }}>
+                                <NestedFieldsPanel row={row} columns={visibleColumns} />
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              );
+            })()}
+            {viewMode === "json" && (
+              <JsonTreeView
+                rows={(render.rows ?? []).slice(0, visibleRowCount)}
+                total={render.total ?? 0}
+              />
             )}
             {viewMode === "schema" && (
               <SchemaView
@@ -674,6 +715,167 @@ function formatCell(v: unknown): string {
   return String(v);
 }
 
+/** Like formatCell, but for nested values shows a short marker
+ *  (`{...3}` or `[...5]`) instead of inline JSON so the table stays
+ *  readable. Full content lives in the expanded sub-panel + JSON tab. */
+function formatCellShort(v: unknown): string {
+  if (v === null || v === undefined) return "—";
+  if (Array.isArray(v)) return `[…${v.length}]`;
+  if (typeof v === "object") {
+    const keys = Object.keys(v as Record<string, unknown>);
+    return `{…${keys.length}}`;
+  }
+  return String(v);
+}
+
+function isNested(v: unknown): boolean {
+  return v !== null && typeof v === "object";
+}
+
+/** Sub-panel rendered when user clicks [+] on a row.
+ *  Shows nested array/object fields with full content. Arrays of objects
+ *  are rendered as a mini-table; arrays of scalars as a list; plain
+ *  objects as a key/value grid. */
+function NestedFieldsPanel({
+  row,
+  columns,
+}: {
+  row: Record<string, unknown>;
+  columns: string[];
+}) {
+  const nestedFields = columns.filter((c) => isNested(row[c]));
+  if (nestedFields.length === 0) {
+    return <div style={{ color: "var(--pb-text-4)", fontSize: 11 }}>（無 nested 欄位）</div>;
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {nestedFields.map((field) => (
+        <div key={field}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--pb-text-2)", marginBottom: 4 }}>
+            {field}
+          </div>
+          <NestedValueView value={row[field]} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function NestedValueView({ value }: { value: unknown }) {
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return <div style={{ color: "var(--pb-text-4)", fontSize: 11 }}>[]</div>;
+    }
+    // Array of objects → mini table
+    const objectArray = value.every((e) => e !== null && typeof e === "object" && !Array.isArray(e));
+    if (objectArray) {
+      const subCols = Array.from(new Set(value.flatMap((e) => Object.keys(e as Record<string, unknown>))));
+      return (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, background: "var(--pb-panel-bg)" }}>
+          <thead>
+            <tr>
+              {subCols.map((c) => (
+                <th key={c} style={{ textAlign: "left", padding: "3px 8px", borderBottom: "1px solid var(--pb-node-border)", color: "var(--pb-text-3)", fontWeight: 600 }}>
+                  {c}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {value.map((elem, i) => (
+              <tr key={i}>
+                {subCols.map((c) => (
+                  <td key={c} style={{ padding: "3px 8px", borderBottom: "1px solid var(--pb-node-border)", color: renderCellColor((elem as Record<string, unknown>)[c], c), background: renderCellBg((elem as Record<string, unknown>)[c], c) }}>
+                    {formatCellShort((elem as Record<string, unknown>)[c])}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      );
+    }
+    // Array of scalars → comma-joined
+    return <div style={{ fontSize: 11, color: "var(--pb-text)", fontFamily: "ui-monospace, monospace" }}>{value.map((v) => formatCell(v)).join(", ")}</div>;
+  }
+  if (value !== null && typeof value === "object") {
+    return (
+      <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", columnGap: 12, rowGap: 3, fontSize: 11 }}>
+        {Object.entries(value as Record<string, unknown>).map(([k, v]) => (
+          <Fragment key={k}>
+            <div style={{ color: "var(--pb-text-3)", fontWeight: 600 }}>{k}</div>
+            <div style={{ color: "var(--pb-text)", fontFamily: typeof v === "number" ? "ui-monospace, monospace" : undefined }}>{formatCell(v)}</div>
+          </Fragment>
+        ))}
+      </div>
+    );
+  }
+  return <div style={{ fontSize: 11 }}>{formatCell(value)}</div>;
+}
+
+/** JSON tree view with collapsible nodes — drop-in for the JSON tab. */
+function JsonTreeView({ rows, total }: { rows: Array<Record<string, unknown>>; total: number }) {
+  return (
+    <div style={{ padding: 12, fontFamily: "ui-monospace, monospace", fontSize: 12 }}>
+      <div style={{ color: "var(--pb-text-3)", fontSize: 11, marginBottom: 8 }}>
+        Showing {rows.length} of {total} record(s) — click ▸ to expand.
+      </div>
+      {rows.map((r, i) => (
+        <JsonNode key={i} label={`[${i}]`} value={r} depth={0} initialOpen={i === 0} />
+      ))}
+    </div>
+  );
+}
+
+function JsonNode({
+  label,
+  value,
+  depth,
+  initialOpen = false,
+}: {
+  label: string;
+  value: unknown;
+  depth: number;
+  initialOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(initialOpen || depth < 2);
+  const isObj = value !== null && typeof value === "object";
+  const isArr = Array.isArray(value);
+  if (!isObj) {
+    return (
+      <div style={{ marginLeft: depth * 16, color: "var(--pb-text)", display: "flex", gap: 6 }}>
+        <span style={{ color: "var(--pb-text-3)" }}>{label}:</span>
+        <span style={{ color: typeof value === "string" ? "var(--pb-ok)" : "var(--pb-accent)" }}>
+          {typeof value === "string" ? `"${value}"` : String(value)}
+        </span>
+      </div>
+    );
+  }
+  const summary = isArr
+    ? `Array(${(value as unknown[]).length})`
+    : `Object(${Object.keys(value as Record<string, unknown>).length})`;
+  return (
+    <div style={{ marginLeft: depth * 16 }}>
+      <div onClick={() => setOpen((o) => !o)} style={{ cursor: "pointer", color: "var(--pb-text-3)" }}>
+        <span style={{ display: "inline-block", width: 12 }}>{open ? "▾" : "▸"}</span>
+        <span>{label}: </span>
+        <span style={{ color: "var(--pb-text-4)" }}>{summary}</span>
+      </div>
+      {open && (
+        <div>
+          {isArr
+            ? (value as unknown[]).map((v, i) => (
+                <JsonNode key={i} label={`[${i}]`} value={v} depth={depth + 1} />
+              ))
+            : Object.entries(value as Record<string, unknown>).map(([k, v]) => (
+                <JsonNode key={k} label={k} value={v} depth={depth + 1} />
+              ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** PR-F3: semantic cell coloring (null / OOC / PASS / WARN flags). */
 function renderCellColor(v: unknown, col: string): string {
   if (v === null || v === undefined) return "var(--pb-text-4)";
@@ -712,11 +914,12 @@ function PreviewTabs({
   mode,
   onChange,
 }: {
-  mode: "rows" | "schema" | "stats";
-  onChange: (m: "rows" | "schema" | "stats") => void;
+  mode: "rows" | "schema" | "stats" | "json";
+  onChange: (m: "rows" | "schema" | "stats" | "json") => void;
 }) {
-  const items: Array<{ key: "rows" | "schema" | "stats"; label: string }> = [
-    { key: "rows", label: "Rows" },
+  const items: Array<{ key: "rows" | "schema" | "stats" | "json"; label: string }> = [
+    { key: "rows", label: "📊 Table" },
+    { key: "json", label: "{} JSON" },
     { key: "schema", label: "Schema Diff" },
     { key: "stats", label: "Stats" },
   ];

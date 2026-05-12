@@ -22,6 +22,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths
 
 
 _CHART_TYPES = {"line", "bar", "scatter", "area", "boxplot", "heatmap", "distribution", "table"}
@@ -322,6 +323,33 @@ class ChartBlockExecutor(BlockExecutor):
         df = inputs.get("data")
         if not isinstance(df, pd.DataFrame):
             raise BlockExecutionError(code="INVALID_INPUT", message="'data' must be DataFrame")
+
+        # Path-awareness: materialize any nested path columns (e.g.
+        # spc_summary.value, spc_charts[].name) up-front so downstream
+        # `not in df.columns` checks Just Work for both flat names and paths.
+        _path_candidates: list[str] = []
+        for _k in (
+            "facet", "x", "ucl_column", "lcl_column", "center_column",
+            "highlight_column", "color", "value_column", "group_by",
+        ):
+            _v = params.get(_k)
+            if isinstance(_v, str) and _v:
+                _path_candidates.append(_v)
+        _y_raw = params.get("y")
+        if isinstance(_y_raw, str) and _y_raw:
+            _path_candidates.append(_y_raw)
+        elif isinstance(_y_raw, list):
+            _path_candidates.extend([c for c in _y_raw if isinstance(c, str) and c])
+        _ys_raw = params.get("y_secondary")
+        if isinstance(_ys_raw, str) and _ys_raw:
+            _path_candidates.append(_ys_raw)
+        elif isinstance(_ys_raw, list):
+            _path_candidates.extend([c for c in _ys_raw if isinstance(c, str) and c])
+        _cols_raw = params.get("columns")
+        if isinstance(_cols_raw, list):
+            _path_candidates.extend([c for c in _cols_raw if isinstance(c, str) and c])
+        if _path_candidates:
+            df = _materialize_paths(df, _path_candidates)
 
         # ── Facet (small multiples) ─────────────────────────────────
         # When `facet` is set, group input rows by that column and emit

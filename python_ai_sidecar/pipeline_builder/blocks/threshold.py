@@ -24,6 +24,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths
 
 
 _BOUNDS = {"upper", "lower", "both"}
@@ -47,6 +48,7 @@ class ThresholdBlockExecutor(BlockExecutor):
             )
 
         column = self.require(params, "column")
+        df = _materialize_paths(df, [column])
         if column not in df.columns:
             raise BlockExecutionError(
                 code="COLUMN_NOT_FOUND",

@@ -11,7 +11,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
-from python_ai_sidecar.pipeline_builder.blocks.line_chart import _records
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths, _records
 
 
 class ParallelCoordsBlockExecutor(BlockExecutor):
@@ -40,8 +40,9 @@ class ParallelCoordsBlockExecutor(BlockExecutor):
             return {"chart_spec": {"__dsl": True, "type": "empty", "title": title or "No data", "message": "上游資料為空", "data": []}}
 
         dims = [str(d) for d in dims]
-        missing = [d for d in dims if d not in df.columns]
         color_by = params.get("color_by") or None
+        df = _materialize_paths(df, dims + ([color_by] if color_by else []))
+        missing = [d for d in dims if d not in df.columns]
         if color_by and color_by not in df.columns:
             missing.append(color_by)
         if missing:

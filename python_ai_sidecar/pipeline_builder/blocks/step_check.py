@@ -35,6 +35,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
+from python_ai_sidecar.pipeline_builder.path import get_column_series
 
 
 _VALID_OPS = {">=", ">", "=", "==", "<", "<=", "changed", "drift"}
@@ -90,12 +91,13 @@ class StepCheckBlockExecutor(BlockExecutor):
                     code="MISSING_PARAM",
                     message=f"aggregate={aggregate!r} requires `column`",
                 )
-            if column not in df.columns:
+            try:
+                series = get_column_series(df, column)
+            except KeyError:
                 raise BlockExecutionError(
                     code="COLUMN_NOT_FOUND",
-                    message=f"column '{column}' not in data. Available: {list(df.columns)[:10]}",
-                )
-            series = df[column]
+                    message=f"column path '{column}' not in data. Available top-level: {list(df.columns)[:10]}",
+                ) from None
             if aggregate == "sum":
                 value = float(pd.to_numeric(series, errors="coerce").sum())
             elif aggregate == "mean":

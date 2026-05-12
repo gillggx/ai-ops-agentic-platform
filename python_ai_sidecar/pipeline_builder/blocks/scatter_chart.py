@@ -12,6 +12,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     ExecutionContext,
 )
 from python_ai_sidecar.pipeline_builder.blocks.line_chart import (
+    _materialize_paths,
     _normalize_y,
     _records,
     _validate_columns,
@@ -53,6 +54,7 @@ class ScatterChartBlockExecutor(BlockExecutor):
         cols = [x, *y]
         if series_field:
             cols.append(series_field)
+        df = _materialize_paths(df, cols)
         _validate_columns(df, cols, label="scatter_chart")
 
         rules = params.get("rules") or []

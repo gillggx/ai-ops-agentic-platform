@@ -29,6 +29,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths
 
 _AVAILABLE_RULES = ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"]
 _RULE_DESC = {
@@ -232,6 +233,14 @@ class WecoRulesBlockExecutor(BlockExecutor):
             raise BlockExecutionError(code="INVALID_INPUT", message="'data' must be DataFrame")
 
         value_column = self.require(params, "value_column")
+        _center_col_pre = params.get("center_column") or None
+        _ucl_col_pre = params.get("ucl_column") or None
+        _group_by_pre = params.get("group_by") or None
+        _sort_by_pre = params.get("sort_by") or None
+        df = _materialize_paths(
+            df,
+            [c for c in (value_column, _center_col_pre, _ucl_col_pre, _group_by_pre, _sort_by_pre) if c],
+        )
         if value_column not in df.columns:
             raise BlockExecutionError(
                 code="COLUMN_NOT_FOUND", message=f"value_column '{value_column}' not in data"

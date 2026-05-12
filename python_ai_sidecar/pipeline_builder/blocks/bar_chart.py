@@ -12,6 +12,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     ExecutionContext,
 )
 from python_ai_sidecar.pipeline_builder.blocks.line_chart import (
+    _materialize_paths,
     _normalize_y,
     _records,
     _validate_columns,
@@ -49,6 +50,7 @@ class BarChartBlockExecutor(BlockExecutor):
                 }
             }
 
+        df = _materialize_paths(df, [x, *y])
         _validate_columns(df, [x, *y], label="bar_chart")
 
         rules = params.get("rules") or []

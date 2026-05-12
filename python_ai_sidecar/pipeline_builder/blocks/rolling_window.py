@@ -14,6 +14,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths
 
 
 _FUNCS = {"mean", "std", "min", "max", "sum", "median"}
@@ -46,6 +47,7 @@ class RollingWindowBlockExecutor(BlockExecutor):
             )
         if window < 1:
             raise BlockExecutionError(code="INVALID_PARAM", message="window must be >= 1")
+        df = _materialize_paths(df, [c for c in (column, group_by, sort_by) if c])
         if column not in df.columns:
             raise BlockExecutionError(
                 code="COLUMN_NOT_FOUND", message=f"column '{column}' not in data"

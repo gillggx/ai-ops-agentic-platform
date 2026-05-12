@@ -26,6 +26,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths
 
 
 class UnpivotBlockExecutor(BlockExecutor):
@@ -53,6 +54,7 @@ class UnpivotBlockExecutor(BlockExecutor):
                 code="INVALID_PARAM", message="value_columns must be a non-empty list of strings"
             )
 
+        df = _materialize_paths(df, list(id_columns) + list(value_columns))
         missing = [c for c in (id_columns + value_columns) if c not in df.columns]
         if missing:
             raise BlockExecutionError(

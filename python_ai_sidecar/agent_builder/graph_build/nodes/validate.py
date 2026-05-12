@@ -250,17 +250,21 @@ def _check_op_order_and_column_refs(
     registry: SeedlessBlockRegistry,
     state: BuildGraphState,
 ) -> list[str]:
-    """Phase 10-C Fix 2 + Fix 3.
+    """2026-05-13 — REWRITTEN. Previously enforced "set_param with column-ref
+    must come AFTER the node's CONNECT op" (Phase 10-C Fix 2). That rule
+    fought LLM's natural mental model — LLMs trained on LangGraph / tool-use
+    paradigms expect to declare a fully-configured node in one atomic op,
+    not split params across add_node + set_param-after-connect ritual.
 
-    Walks the plan in order, maintaining a transient PipelineJSON. At each
-    set_param touching a COLUMN_REF_KEYS param:
-      - require target node has at least one inbound data edge (Fix 2)
-      - require value to be a column in upstream's expected output (Fix 3)
+    New approach: walk all ops to BUILD the transient pipeline (no per-op
+    validation). Validation runs once at the end via
+    _final_column_ref_check — it only cares about the FINAL state:
+      - every column-ref param's value exists in upstream output
+      - every node with column-ref params has at least one inbound edge
 
-    Reuses tools.py `_columns_for_block_port` so the logic matches what the
-    existing v1 BuilderToolset.set_param does at write time — the only
-    difference is we run it BEFORE call_tool so the LLM sees the error in
-    plan-time and repair_plan can fix it.
+    Whether the column-ref landed via add_node initial params or via a
+    later set_param doesn't matter. Whether set_param came before or after
+    connect doesn't matter. Only the final pipeline shape matters.
     """
     errors: list[str] = []
 
@@ -315,55 +319,9 @@ def _check_op_order_and_column_refs(
             params = op.params or {}
             key = params.get("key")
             value = params.get("value")
-            if key not in COLUMN_REF_KEYS:
-                # Apply param to transient (so downstream column derivations
-                # see updates like agg_column on groupby_agg).
-                _apply_set_param(transient, op.node_id, key, value)
-                continue
-
-            # Fix 2 — column-ref needs an inbound edge first.
-            target_node = next((n for n in transient.nodes if n.id == op.node_id), None)
-            inbound = [
-                e for e in transient.edges if e.to.node == op.node_id
-            ]
-            if target_node is None:
-                continue  # shouldn't happen
-            if not inbound:
-                errors.append(
-                    f"Op#{idx}: set_param '{key}' on node '{op.node_id}' BEFORE any "
-                    f"connect — column-ref params must come AFTER connecting upstream"
-                )
-                continue
-
-            # Fix 3 — value must be in upstream's expected output columns.
-            try:
-                upstream_cols = _resolve_upstream_cols(transient, op.node_id, registry)
-            except Exception as ex:  # noqa: BLE001
-                logger.warning("col-ref pre-check unavailable for %s: %s", op.node_id, ex)
-                _apply_set_param(transient, op.node_id, key, value)
-                continue
-            if upstream_cols is None:
-                # fail-open: can't compute (multi-port edge case etc.)
-                _apply_set_param(transient, op.node_id, key, value)
-                continue
-
-            # value can be string column name OR list of strings.
-            bad = []
-            if isinstance(value, list):
-                bad = [v for v in value if isinstance(v, str) and v not in upstream_cols]
-            elif isinstance(value, str):
-                # tolerate $placeholder refs (resolved at runtime)
-                if value and not value.startswith("$") and value not in upstream_cols:
-                    bad = [value]
-            if bad:
-                preview = upstream_cols[:8]
-                more = "" if len(upstream_cols) <= 8 else f"…+{len(upstream_cols)-8}"
-                errors.append(
-                    f"Op#{idx}: set_param '{key}'={bad!r} on node '{op.node_id}' — "
-                    f"value not in upstream columns. Available: {preview}{more}"
-                )
-                continue
-
+            # 2026-05-13: Apply ALL set_params unconditionally. Whether key
+            # is a column-ref or a literal, we mutate the transient; final
+            # validation runs once after the loop via _final_column_ref_check.
             _apply_set_param(transient, op.node_id, key, value)
 
     # Phase 11 v14 — FINAL-PASS column-ref recheck. Walks every node in
@@ -400,12 +358,51 @@ def _final_column_ref_check(
 ) -> list[str]:
     """Re-check every column-ref param against the final transient pipeline
     state. Catches refs left behind in add_node's initial params (Pass 3
-    only checks set_param ops) and refs invalidated by later rewiring."""
+    only checks set_param ops) and refs invalidated by later rewiring.
+
+    2026-05-13 (Q4): also flags dangling refs — when a non-source node has
+    column-ref params but no inbound edge, the LLM declared params expecting
+    upstream data that was never connected. Previously caught implicitly by
+    per-op order check (now removed); needs to be explicit at final-state."""
     errors: list[str] = []
+
+    # Precompute: which node ids have at least one inbound edge.
+    nodes_with_inbound = {edge.to.node for edge in pipeline.edges}
+
     for node in pipeline.nodes:
         if not node.params:
             continue
         skip_keys = _OUTPUT_COLUMN_KEYS_BY_BLOCK.get(node.block_id, set())
+
+        # Determine block's declared inputs — source blocks have no inputs.
+        spec = registry.get_spec(node.block_id, node.block_version) or {}
+        declared_inputs = spec.get("input_schema") or []
+        is_source_block = len(declared_inputs) == 0
+
+        # Detect any column-ref keys on this node that aren't output-name keys.
+        ref_keys_on_node = [
+            k for k in node.params
+            if k in COLUMN_REF_KEYS and k not in skip_keys
+        ]
+
+        # Q4 dangling-ref check: if node has refs but no inbound edge AND is
+        # not a source block, that's a definitive build error. Tell LLM which
+        # connect op to add (we can't pick src for them, but the error names
+        # the symptom precisely so repair_plan can fix it).
+        if (
+            ref_keys_on_node
+            and node.id not in nodes_with_inbound
+            and not is_source_block
+        ):
+            ref_values = {k: node.params[k] for k in ref_keys_on_node}
+            errors.append(
+                f"node '{node.id}' ({node.block_id}): has column-ref params "
+                f"{ref_values!r} but no inbound edge. Add a connect op feeding "
+                f"this node's input port before setting column refs (the params "
+                f"name columns from upstream data that isn't wired yet)."
+            )
+            continue  # don't pile on per-key errors when the whole node is dangling
+
         for key, value in node.params.items():
             if key not in COLUMN_REF_KEYS:
                 continue

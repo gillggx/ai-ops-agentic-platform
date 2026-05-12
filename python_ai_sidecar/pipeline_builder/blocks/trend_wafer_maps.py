@@ -11,7 +11,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
-from python_ai_sidecar.pipeline_builder.blocks.line_chart import _records
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths, _records
 
 
 class TrendWaferMapsBlockExecutor(BlockExecutor):
@@ -52,6 +52,8 @@ class TrendWaferMapsBlockExecutor(BlockExecutor):
                 )
             if df.empty:
                 return {"chart_spec": {"__dsl": True, "type": "empty", "title": title or "No data", "message": "上游資料為空", "data": []}}
+            pm_col = params.get("pm_column")
+            df = _materialize_paths(df, [x_col, y_col, v_col, time_col] + ([pm_col] if pm_col else []))
             missing = [c for c in (x_col, y_col, v_col, time_col) if c not in df.columns]
             if missing:
                 raise BlockExecutionError(code="COLUMN_NOT_FOUND", message=f"column(s) not in data: {missing}")
@@ -60,7 +62,6 @@ class TrendWaferMapsBlockExecutor(BlockExecutor):
             spec["y_column"] = y_col
             spec["value_column"] = v_col
             spec["time_column"] = time_col
-            pm_col = params.get("pm_column")
             if pm_col:
                 if pm_col not in df.columns:
                     raise BlockExecutionError(code="COLUMN_NOT_FOUND", message=f"pm_column '{pm_col}' not in data")

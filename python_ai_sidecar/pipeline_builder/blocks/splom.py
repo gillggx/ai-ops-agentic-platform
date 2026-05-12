@@ -18,7 +18,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
-from python_ai_sidecar.pipeline_builder.blocks.line_chart import _records
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths, _records
 
 
 class SplomBlockExecutor(BlockExecutor):
@@ -56,6 +56,7 @@ class SplomBlockExecutor(BlockExecutor):
                 }
             }
 
+        df = _materialize_paths(df, dims + ([outlier_field] if outlier_field else []))
         missing = [d for d in dims if d not in df.columns]
         if missing:
             raise BlockExecutionError(

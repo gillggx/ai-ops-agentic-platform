@@ -19,6 +19,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths
 
 
 class CountRowsBlockExecutor(BlockExecutor):
@@ -38,6 +39,8 @@ class CountRowsBlockExecutor(BlockExecutor):
             )
 
         group_by: Optional[str] = params.get("group_by") or None
+        if group_by:
+            df = _materialize_paths(df, [group_by])
         missing_group = group_by is not None and group_by not in df.columns
         if missing_group:
             # PR-F runtime-QA: fall back to total count if group column missing

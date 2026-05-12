@@ -26,7 +26,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
-from python_ai_sidecar.pipeline_builder.blocks.line_chart import _records
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths, _records
 
 
 class HistogramChartBlockExecutor(BlockExecutor):
@@ -68,6 +68,7 @@ class HistogramChartBlockExecutor(BlockExecutor):
                         " set 'value_column' to point at the raw value column"
                     ),
                 )
+            df = _materialize_paths(df, [value_col])
             if value_col not in df.columns:
                 raise BlockExecutionError(
                     code="COLUMN_NOT_FOUND",

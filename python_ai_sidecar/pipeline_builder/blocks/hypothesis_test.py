@@ -23,6 +23,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths
 
 
 _TESTS = {"t_test", "anova", "chi_square"}
@@ -136,6 +137,16 @@ class HypothesisTestBlockExecutor(BlockExecutor):
             raise BlockExecutionError(code="INVALID_PARAM", message="alpha must be in (0, 1)")
 
         group_col = self.require(params, "group_column")
+        _path_cols: list[str] = [group_col]
+        if test_type == "chi_square":
+            _tc = params.get("target_column")
+            if isinstance(_tc, str) and _tc:
+                _path_cols.append(_tc)
+        else:
+            _vc = params.get("value_column")
+            if isinstance(_vc, str) and _vc:
+                _path_cols.append(_vc)
+        df = _materialize_paths(df, _path_cols)
         if group_col not in df.columns:
             raise BlockExecutionError(
                 code="COLUMN_NOT_FOUND", message=f"group_column '{group_col}' not in data"

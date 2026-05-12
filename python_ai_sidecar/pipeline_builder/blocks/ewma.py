@@ -22,6 +22,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths
 
 
 class EwmaBlockExecutor(BlockExecutor):
@@ -50,6 +51,7 @@ class EwmaBlockExecutor(BlockExecutor):
             raise BlockExecutionError(code="INVALID_PARAM", message="alpha must be in (0, 1)")
         adjust = bool(params.get("adjust", False))
 
+        df = _materialize_paths(df, [c for c in (value_col, sort_by, group_by) if c])
         for col in (value_col, sort_by):
             if col not in df.columns:
                 raise BlockExecutionError(

@@ -11,7 +11,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
-from python_ai_sidecar.pipeline_builder.blocks.line_chart import _records
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths, _records
 
 
 class DefectStackBlockExecutor(BlockExecutor):
@@ -35,6 +35,7 @@ class DefectStackBlockExecutor(BlockExecutor):
         if df.empty:
             return {"chart_spec": {"__dsl": True, "type": "empty", "title": title or "No data", "message": "上游資料為空", "data": []}}
 
+        df = _materialize_paths(df, [x_col, y_col, code_col])
         missing = [c for c in (x_col, y_col, code_col) if c not in df.columns]
         if missing:
             raise BlockExecutionError(code="COLUMN_NOT_FOUND", message=f"column(s) not in data: {missing}")

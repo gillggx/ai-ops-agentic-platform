@@ -32,10 +32,12 @@ from python_ai_sidecar.pipeline_builder.blocks.mcp_call import McpCallBlockExecu
 from python_ai_sidecar.pipeline_builder.blocks.mcp_foreach import McpForeachBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.parallel_coords import ParallelCoordsBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.pareto import ParetoBlockExecutor
+from python_ai_sidecar.pipeline_builder.blocks.pluck import PluckBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.probability_plot import ProbabilityPlotBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.process_history import ProcessHistoryBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.rolling_window import RollingWindowBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.scatter_chart import ScatterChartBlockExecutor
+from python_ai_sidecar.pipeline_builder.blocks.select import SelectBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.shift_lag import ShiftLagBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.sort import SortBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.spatial_pareto import SpatialParetoBlockExecutor
@@ -45,6 +47,7 @@ from python_ai_sidecar.pipeline_builder.blocks.step_check import StepCheckBlockE
 from python_ai_sidecar.pipeline_builder.blocks.threshold import ThresholdBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.trend_wafer_maps import TrendWaferMapsBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.union import UnionBlockExecutor
+from python_ai_sidecar.pipeline_builder.blocks.unnest import UnnestBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.unpivot import UnpivotBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.variability_gauge import VariabilityGaugeBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.wafer_heatmap import WaferHeatmapBlockExecutor
@@ -105,6 +108,10 @@ BUILTIN_EXECUTORS: dict[str, type[BlockExecutor]] = {
     "block_trend_wafer_maps": TrendWaferMapsBlockExecutor,
     # Phase 11 — Skill terminal block (skill-step pipelines must end here)
     "block_step_check": StepCheckBlockExecutor,
+    # 2026-05-13 (Phase 1 object-native) — path navigation blocks
+    "block_pluck": PluckBlockExecutor,
+    "block_unnest": UnnestBlockExecutor,
+    "block_select": SelectBlockExecutor,
 }
 
 __all__ = [
@@ -154,7 +161,10 @@ __all__ = [
     "SplomBlockExecutor",
     "ThresholdBlockExecutor",
     "TrendWaferMapsBlockExecutor",
+    "PluckBlockExecutor",
+    "SelectBlockExecutor",
     "UnionBlockExecutor",
+    "UnnestBlockExecutor",
     "UnpivotBlockExecutor",
     "VariabilityGaugeBlockExecutor",
     "WaferHeatmapBlockExecutor",

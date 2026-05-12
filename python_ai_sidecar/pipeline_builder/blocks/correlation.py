@@ -24,6 +24,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths
 
 
 _METHODS = {"pearson", "spearman", "kendall"}
@@ -70,6 +71,7 @@ class CorrelationBlockExecutor(BlockExecutor):
             raise BlockExecutionError(
                 code="INVALID_PARAM", message="need at least 2 columns to correlate"
             )
+        df = _materialize_paths(df, list(columns))
         missing = [c for c in columns if c not in df.columns]
         if missing:
             raise BlockExecutionError(

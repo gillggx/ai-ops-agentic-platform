@@ -11,7 +11,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
-from python_ai_sidecar.pipeline_builder.blocks.line_chart import _records
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths, _records
 
 
 class XbarRBlockExecutor(BlockExecutor):
@@ -31,6 +31,13 @@ class XbarRBlockExecutor(BlockExecutor):
 
         if df.empty:
             return {"chart_spec": {"__dsl": True, "type": "empty", "title": title or "No data", "message": "上游資料為空", "data": []}}
+
+        # Materialize nested paths (e.g. spc_summary.value) up-front so the
+        # downstream `not in df.columns` checks + _records emit them.
+        if not isinstance(params.get("subgroups"), list):
+            _value_col = params.get("value_column") or None
+            _subgroup_col = params.get("subgroup_column") or None
+            df = _materialize_paths(df, [c for c in (_value_col, _subgroup_col) if c])
 
         spec: dict[str, Any] = {
             "__dsl": True,

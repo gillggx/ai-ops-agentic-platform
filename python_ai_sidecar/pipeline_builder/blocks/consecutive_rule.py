@@ -28,6 +28,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths
 
 
 def _make_trigger_id(group_value: Any, last_sort_value: Any) -> str:
@@ -58,6 +59,7 @@ class ConsecutiveRuleBlockExecutor(BlockExecutor):
         sort_by: str = self.require(params, "sort_by")
         group_by: Optional[str] = params.get("group_by") or None
 
+        df = _materialize_paths(df, [c for c in (flag_col, sort_by, group_by) if c])
         if flag_col not in df.columns:
             raise BlockExecutionError(
                 code="COLUMN_NOT_FOUND",

@@ -22,6 +22,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths
 
 
 def _histogram_group(
@@ -67,11 +68,12 @@ class HistogramBlockExecutor(BlockExecutor):
             raise BlockExecutionError(code="INVALID_INPUT", message="'data' must be DataFrame")
 
         value_col: str = self.require(params, "value_column")
+        group_by: Optional[str] = params.get("group_by") or None
+        df = _materialize_paths(df, [c for c in (value_col, group_by) if c])
         if value_col not in df.columns:
             raise BlockExecutionError(
                 code="COLUMN_NOT_FOUND", message=f"value_column '{value_col}' not in data"
             )
-        group_by: Optional[str] = params.get("group_by") or None
         if group_by is not None and group_by not in df.columns:
             raise BlockExecutionError(
                 code="COLUMN_NOT_FOUND", message=f"group_by '{group_by}' not in data"

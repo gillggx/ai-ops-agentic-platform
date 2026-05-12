@@ -1,4 +1,4 @@
-"""block_filter — 條件過濾 dataframe 的列。"""
+"""block_filter — 條件過濾 records（支援 nested path 欄位）。"""
 
 from __future__ import annotations
 
@@ -11,13 +11,16 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
+from python_ai_sidecar.pipeline_builder.path import get_column_series
 
 
-_OPERATORS = {"==", "!=", ">", "<", ">=", "<=", "contains", "in"}
+# 2026-05-13: accept `=` as an alias of `==`. LLMs trained on SQL use `=`;
+# trained on Python/JS use `==`. Same semantics either way.
+_OPERATORS = {"==", "=", "!=", ">", "<", ">=", "<=", "contains", "in"}
 
 
 def _apply_op(series: pd.Series, op: str, value: Any) -> pd.Series:
-    if op == "==":
+    if op in ("==", "="):
         return series == value
     if op == "!=":
         return series != value
@@ -68,13 +71,17 @@ class FilterBlockExecutor(BlockExecutor):
                 message=f"Unsupported operator: {op}",
                 hint=f"Allowed: {sorted(_OPERATORS)}",
             )
-        if column not in df.columns:
+        # Path-aware column lookup — `column` may be a dot/bracket path
+        # (e.g. "spc_summary.ooc_count" or "spc_charts[].name").
+        try:
+            series = get_column_series(df, column)
+        except KeyError:
             raise BlockExecutionError(
                 code="COLUMN_NOT_FOUND",
-                message=f"Column '{column}' not found",
-                hint=f"Available columns: {list(df.columns)[:10]}",
-            )
+                message=f"Column path '{column}' not found",
+                hint=f"Available top-level columns: {list(df.columns)[:10]}",
+            ) from None
 
-        mask = _apply_op(df[column], op, value)
+        mask = _apply_op(series, op, value)
         filtered = df[mask].reset_index(drop=True)
         return {"data": filtered}

@@ -11,7 +11,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
-from python_ai_sidecar.pipeline_builder.blocks.line_chart import _records
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths, _records
 
 
 class ProbabilityPlotBlockExecutor(BlockExecutor):
@@ -31,6 +31,17 @@ class ProbabilityPlotBlockExecutor(BlockExecutor):
 
         if df.empty:
             return {"chart_spec": {"__dsl": True, "type": "empty", "title": title or "No data", "message": "上游資料為空", "data": []}}
+
+        # Resolve value_col + materialize nested paths up-front so _records picks them up.
+        _value_col_pre = params.get("value_column") or None
+        if _value_col_pre is None:
+            _y_pre = params.get("y")
+            if isinstance(_y_pre, list) and _y_pre:
+                _value_col_pre = _y_pre[0]
+            elif isinstance(_y_pre, str):
+                _value_col_pre = _y_pre
+        if not isinstance(params.get("values"), list) and _value_col_pre:
+            df = _materialize_paths(df, [_value_col_pre])
 
         spec: dict[str, Any] = {
             "__dsl": True,

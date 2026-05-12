@@ -99,6 +99,15 @@ def _blocks() -> list[dict[str, Any]]:
                 "== Performance tips ==\n"
                 "- limit 調小可加速下游；只要做趨勢通常 50~100 就夠\n"
                 "- 已知分析維度時指定 object_name 可減少回傳 column 數\n"
+                "\n"
+                "== Nested mode (2026-05-13 新增) ==\n"
+                "**nested=true** 改回傳 hierarchical shape — 每筆 record 含：\n"
+                "  - spc_charts: list[{name, value, ucl, lcl, is_ooc, status}]\n"
+                "  - spc_summary: {ooc_count, total_charts, ooc_chart_names}\n"
+                "  - APC / DC / RECIPE / FDC / EC: 保留原 nested sub-object\n"
+                "下游用 path 文法直讀（e.g. block_step_check column='spc_summary.ooc_count'）。\n"
+                "適用：「機台最後一次 process 有幾張 chart OOC」、「該 lot 的所有 APC 補償清單」\n"
+                "這類自然 hierarchical 的問題。傳統扁平模式（default）保留 backwards-compat。\n"
             ),
             "input_schema": [],
             "output_schema": [
@@ -137,6 +146,24 @@ def _blocks() -> list[dict[str, Any]]:
                     },
                     "event_time": {"type": "string", "title": "精確時間 (ISO8601，選填)"},
                     "limit":      {"type": "integer", "default": 100, "minimum": 1, "maximum": 200, "title": "筆數上限"},
+                    # 2026-05-13 (Phase 1 object-native) — opt-in nested return.
+                    # Skip the flattening; emit one record per event with
+                    # spc_charts (array) + spc_summary (precomputed ooc_count
+                    # / ooc_chart_names / total_charts) + APC/DC/RECIPE/FDC/EC
+                    # as nested sub-objects. Use this when the question is
+                    # naturally hierarchical ("how many OOC charts for the
+                    # last process") — answers in 2 nodes instead of 6.
+                    "nested": {
+                        "type": "boolean",
+                        "default": False,
+                        "title": "回傳 hierarchical shape（保留 SPC/APC/DC/RECIPE/FDC/EC nested + 預算 spc_summary）",
+                        "description": (
+                            "true: 每筆 event 是 nested record，含 spc_charts[] + spc_summary "
+                            "{ooc_count, total_charts, ooc_chart_names}；下游用 path 文法直讀 "
+                            "（e.g. step_check column='spc_summary.ooc_count'）。"
+                            "false（預設）: 展平成扁平寬表，spc_<chart>_<field> / apc_<param> 等欄位。"
+                        ),
+                    },
                 },
             },
             "implementation": {
@@ -203,7 +230,7 @@ def _blocks() -> list[dict[str, Any]]:
                 "\n"
                 "== Params ==\n"
                 "column   (string, required) 要比較的欄位\n"
-                "operator (string, required) ==, !=, >, <, >=, <=, contains, in\n"
+                "operator (string, required) == (or =), !=, >, <, >=, <=, contains, in (`=` is alias for `==`)\n"
                 "value    (any, required) 比較值；operator='in' 時必須是 list；'contains' 作 substring 比對（string only）\n"
                 "\n"
                 "== Output ==\n"
@@ -238,7 +265,7 @@ def _blocks() -> list[dict[str, Any]]:
                     "column":   {"type": "string", "x-column-source": "input.data"},
                     "operator": {
                         "type": "string",
-                        "enum": ["==", "!=", ">", "<", ">=", "<=", "contains", "in"],
+                        "enum": ["==", "=", "!=", ">", "<", ">=", "<=", "contains", "in"],
                     },
                     "value":    {},
                 },
@@ -2971,6 +2998,143 @@ def _blocks() -> list[dict[str, Any]]:
                 {"name": "note", "type": "string", "description": "Human-readable summary"},
                 {"name": "evidence_rows", "type": "integer", "description": "Number of upstream rows feeding the check"},
             ],
+        },
+        # ── 2026-05-13 Phase 1 object-native: path navigation blocks ──
+        {
+            "name": "block_pluck",
+            "version": "1.0.0",
+            "category": "transform",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "Extract a (possibly nested) field from each record into a single-column DataFrame.\n"
+                "Path syntax supports dot + array brackets — works on object-native data.\n\n"
+                "== When to use ==\n"
+                "- ✅ 「我只要 spc_summary.ooc_count 這欄」→ path='spc_summary.ooc_count'\n"
+                "- ✅ 「每張 process 的所有 chart 名稱」→ path='spc_charts[].name' (column 變 list-of-strings)\n"
+                "- ✅ 想把寬表瘦身（只留一欄）給下游 chart / 計算用\n"
+                "- ❌ 想要多個欄位 → 用 block_select\n"
+                "- ❌ 想要把 array 展平成多筆 record → 用 block_unnest（pluck 保留 list 在 cell 內）\n\n"
+                "== Params ==\n"
+                "path        (string, required) 例 'tool_id' / 'spc_summary.ooc_count' / 'spc_charts[].name'\n"
+                "as_column   (string, opt) 輸出欄位名稱（預設 = path 最後一段，e.g. 'ooc_count'）\n"
+                "keep_other  (boolean, default=false) 是否保留原本所有欄位（false=只剩 pluck 出的這一欄）\n\n"
+                "== Output ==\n"
+                "port: data (dataframe) — 1 個欄位（如果 keep_other=false）或原欄位 + 新欄位\n\n"
+                "== Errors ==\n"
+                "- COLUMN_NOT_FOUND : path 第一段不在 input 欄位中\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "data", "type": "dataframe"}],
+            "param_schema": {
+                "type": "object",
+                "required": ["path"],
+                "properties": {
+                    "path": {"type": "string", "description": "Field path (dot syntax, [] for arrays)"},
+                    "as_column": {"type": "string"},
+                    "keep_other": {"type": "boolean", "default": False},
+                },
+            },
+            "examples": [
+                {"label": "Extract ooc_count from nested summary",
+                 "params": {"path": "spc_summary.ooc_count"}},
+                {"label": "Pluck all chart names per process",
+                 "params": {"path": "spc_charts[].name", "as_column": "chart_names"}},
+            ],
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.pluck:PluckBlockExecutor"},
+        },
+        {
+            "name": "block_unnest",
+            "version": "1.0.0",
+            "category": "transform",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "Explode an array-typed column into multiple rows (pandas `DataFrame.explode`-like).\n"
+                "Sibling columns broadcast. If array elements are dicts, their keys lift to "
+                "top-level columns automatically — so `[{tool: A, charts: [{name: X}, {name: Y}]}]` "
+                "→ `[{tool: A, name: X}, {tool: A, name: Y}]`.\n\n"
+                "== When to use ==\n"
+                "- ✅ 「想 group by spc_charts[].name 算 OOC 次數」→ 先 unnest spc_charts，再 groupby\n"
+                "- ✅ 「想 filter 哪些 chart 是 OOC」→ 先 unnest，再 filter status=='OOC'\n"
+                "- ✅ 任何 array field 想做 per-element analysis\n"
+                "- ❌ 只想拿 array 不展開 → 用 block_pluck\n"
+                "- ❌ 已經是扁平表 → 不用 unnest\n\n"
+                "== Params ==\n"
+                "column (string, required) array column 名稱（可以是 path：'spc_charts'、"
+                "'spc_charts[]'、或 'obj.list_field'）\n\n"
+                "== Output ==\n"
+                "port: data (dataframe) — 多筆 rows，每個 array element 一筆。array 元素若是 "
+                "object 則 keys 自動展為欄位。\n\n"
+                "== Errors ==\n"
+                "- COLUMN_NOT_FOUND : column 不在 input\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "data", "type": "dataframe"}],
+            "param_schema": {
+                "type": "object",
+                "required": ["column"],
+                "properties": {
+                    "column": {"type": "string", "description": "Array column or path to explode"},
+                },
+            },
+            "examples": [
+                {"label": "Explode SPC charts to one row per chart",
+                 "params": {"column": "spc_charts"}},
+            ],
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.unnest:UnnestBlockExecutor"},
+        },
+        {
+            "name": "block_select",
+            "version": "1.0.0",
+            "category": "transform",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "Project / rename fields — jq-lite for objects. Drops every column not listed.\n"
+                "Each field entry is {path, as?} — path supports dot + [] syntax.\n\n"
+                "== When to use ==\n"
+                "- ✅ 想瘦身一個寬表（35 欄變 3 欄）給下游 chart\n"
+                "- ✅ 想把 nested field 拉到 top-level + 改名 (e.g. spc_summary.ooc_count → ooc_count)\n"
+                "- ✅ 重組 shape 後丟給 block_mcp_call args\n"
+                "- ❌ 想保留所有欄位只新增一個 → 用 block_compute\n"
+                "- ❌ 只要一個欄位 → block_pluck 更輕\n\n"
+                "== Params ==\n"
+                "fields (array, required) [{path: 'x', as: 'y'}, ...] — 每個 entry 必填 path，as 預設 = path 最後一段\n\n"
+                "== Output ==\n"
+                "port: data (dataframe) — 只包含 selected fields，按 fields 順序排列\n\n"
+                "== Errors ==\n"
+                "- COLUMN_NOT_FOUND : 任一 path 不在 input\n"
+                "- INVALID_PARAM    : fields 不是 list 或 entry shape 錯\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "data", "type": "dataframe"}],
+            "param_schema": {
+                "type": "object",
+                "required": ["fields"],
+                "properties": {
+                    "fields": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["path"],
+                            "properties": {
+                                "path": {"type": "string"},
+                                "as":   {"type": "string"},
+                            },
+                        },
+                        "minItems": 1,
+                    },
+                },
+            },
+            "examples": [
+                {"label": "Flatten + rename nested fields",
+                 "params": {"fields": [
+                     {"path": "tool_id"},
+                     {"path": "spc_summary.ooc_count", "as": "ooc_count"},
+                 ]}},
+            ],
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.select:SelectBlockExecutor"},
         },
     ]
 

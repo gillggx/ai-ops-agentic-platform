@@ -25,6 +25,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
+from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths
 
 
 _CI_GRID_SIZE = 60  # number of x points in CI band output
@@ -149,6 +150,7 @@ class LinearRegressionBlockExecutor(BlockExecutor):
                 code="INVALID_PARAM", message="confidence must be in (0, 1)"
             )
 
+        df = _materialize_paths(df, [c for c in (x_col, y_col, group_by) if c])
         for col in (x_col, y_col):
             if col not in df.columns:
                 raise BlockExecutionError(
