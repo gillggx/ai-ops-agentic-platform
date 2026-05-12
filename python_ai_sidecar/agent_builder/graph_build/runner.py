@@ -57,7 +57,11 @@ async def stream_graph_build(
     """
     sid = session_id or str(uuid.uuid4())
     graph = build_graph()
-    config = {"configurable": {"thread_id": sid}, "recursion_limit": 50}
+    # 2026-05-12: bumped 50 → 150. Each plan op consumes ~2 graph node visits
+    # (dispatch_op + call_tool). A 30-op plan needs ~60 visits; 50 was below
+    # that and crashed mid-execution on user's skill 54 build. 150 gives
+    # headroom for repair_op + repair_plan loops too.
+    config = {"configurable": {"thread_id": sid}, "recursion_limit": 150}
 
     init = initial_state(
         session_id=sid,
