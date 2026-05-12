@@ -737,10 +737,12 @@ async def _build_knowledge_block(
     except Exception as e:  # noqa: BLE001
         logger.warning("knowledge search failed (%s)", e)
         return ""
-    logger.info("_build_knowledge_block: user_id=%s query=%r rows=%d",
-                user_id, query_text[:80], len(rows or []))
     if not rows:
+        logger.info("_build_knowledge_block: 0 rows for query=%r — Cohere "
+                    "multilingual recall on long CN queries is patchy; "
+                    "expected occasional miss", query_text[:80])
         return ""
+    logger.info("_build_knowledge_block: rendered %d knowledge rows", len(rows))
     lines = ["## Retrieved domain knowledge（top-3 by relevance）"]
     for r in rows:
         scope = r.get("scope_type", "global")
