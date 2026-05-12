@@ -2148,6 +2148,7 @@ function ConfirmSection({
   onReload: () => void;
   onInspect: (pipelineId: number) => void;
 }) {
+  const router = useRouter();
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2209,9 +2210,17 @@ function ConfirmSection({
       if (!r.ok) throw new Error(j?.error?.message ?? `HTTP ${r.status}`);
       const url = j.data?.builder_url ?? j.builder_url;
       if (!url) throw new Error("builder_url missing in response");
-      window.open(url, "_blank", "noopener");
-      // Drop draft text — banner in Builder will carry it.
+      // 2026-05-13: same-tab navigate, matching openSlotInBuilder (line 392).
+      // Builder banner reads pb:back_to_skill from sessionStorage to bring
+      // user back to this Skill page after bind. User reported new-tab as
+      // disruptive UX.
+      try {
+        sessionStorage.setItem("pb:back_to_skill", JSON.stringify({
+          skill_slug: slug, mode,
+        }));
+      } catch { /* SSR-safety, ignore */ }
       setDraft("");
+      router.push(url);
     } catch (e) { setError(String(e)); }
     finally { setBusy(false); }
   };
