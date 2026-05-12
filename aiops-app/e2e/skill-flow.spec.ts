@@ -46,13 +46,17 @@ test.describe("Skill flow — full GUI with real agent", () => {
       console.log("[1/8] logged in");
 
       // ── 2. New Skill ──────────────────────────────────────────
+      // 2026-05-13: UI simplified — slug now auto-generated from title;
+      // only TITLE (placeholder "e.g. OCAP 進階診斷") + DESCRIPTION fields.
       await page.goto(`${BASE}/skills/new`);
-      await page.waitForSelector('input[placeholder="ocap-diag"]', { timeout: 15_000 });
-      await page.locator('input[placeholder="ocap-diag"]').fill(slug);
-      await page.locator('input[placeholder*="Advanced Diagnostic"]').fill(`E2E ${slug}`);
+      await page.waitForSelector('input[placeholder*="OCAP"]', { timeout: 15_000 });
+      await page.locator('input[placeholder*="OCAP"]').fill(`E2E ${slug}`);
+      await page.locator('textarea').first().fill(`E2E smoke ${slug}`);
       await page.click('button:has-text("Create skill")');
       await page.waitForURL(/\/skills\/[^/]+\/edit/, { timeout: 15_000 });
-      console.log("[2/8] skill created", slug);
+      // Extract the auto-generated slug from URL for cleanup later
+      const slugFromUrl = page.url().match(/\/skills\/([^/?]+)/)?.[1] ?? slug;
+      console.log("[2/8] skill created — slug:", slugFromUrl);
 
       // ── 3. Type C1 instruction + Build → opens popup ──────────
       // 2026-05-13: parametrize via INSTRUCTION env var so the same harness
