@@ -22,6 +22,27 @@ export interface TestCase {
   payload: Record<string, unknown>;
 }
 
+// Canonical preview values for common event-payload fields. Mirrors the
+// Java _defaultForAttr() side of buildEventPayload — keep them in sync so
+// past-event replay and Manual tab show identical shape.
+function _canonicalForField(name: string): string {
+  switch (name) {
+    case "tool_id": case "equipment_id": return "EQP-01";
+    case "lot_id":                       return "LOT-0001";
+    case "step": case "step_id":         return "STEP_001";
+    case "chamber_id":                   return "CH-1";
+    case "recipe_id":                    return "RECIPE-A";
+    case "parameter": case "ooc_parameter": return "CD_Mean";
+    case "spc_chart": case "SPC_CHART":  return "spc_xbar";
+    case "fault_code":                   return "FDC_RGA_H2O_HIGH";
+    case "severity":                     return "warning";
+    case "event_time": case "timestamp": case "process_timestamp":
+                                         return "2026-05-01T00:00:00Z";
+    case "ooc_details":                  return "{}";
+    default:                             return "";
+  }
+}
+
 const SYNTHETIC_BASELINE: TestCase = {
   id: "syn",
   kind: "synthetic",
@@ -51,8 +72,9 @@ export default function TestCaseSelector({
     tool_id: "EQP-01", lot_id: "LOT-0001", severity: "med",
   });
 
+  void skillTriggerType;
+
   /* Load past events when modal opens — type is implicit from skill's trigger_config */
-  void skillTriggerType; void eventType;
   useEffect(() => {
     if (!open || !slug) return;
     setPastLoading(true);
@@ -62,6 +84,33 @@ export default function TestCaseSelector({
       .then((rows) => setPastCases(rows ?? []))
       .finally(() => setPastLoading(false));
   }, [open, slug]);
+
+  /* When skill has an event trigger, populate Manual tab from event_types
+     schema so the user doesn't have to "Add field" 6 times. Canonical
+     defaults match buildEventPayload on the Java side so dry-run + past-
+     event-replay shape matches. */
+  useEffect(() => {
+    if (!open || !eventType) return;
+    fetch(`/api/event-types/by-name/${encodeURIComponent(eventType)}`, { cache: "no-store" })
+      .then(async (res) => res.ok ? (await res.json()) : null)
+      .then((json) => {
+        if (!json) return;
+        const data = json?.data ?? json;
+        const rawAttrs = data?.attributes;
+        const attrs = typeof rawAttrs === "string"
+          ? (rawAttrs.trim() ? JSON.parse(rawAttrs) : [])
+          : (Array.isArray(rawAttrs) ? rawAttrs : []);
+        if (!Array.isArray(attrs) || attrs.length === 0) return;
+        const next: Record<string, string> = {};
+        for (const a of attrs as Array<Record<string, unknown>>) {
+          const n = String(a?.name ?? "");
+          if (!n) continue;
+          next[n] = _canonicalForField(n);
+        }
+        setManualPayload(next);
+      })
+      .catch(() => { /* keep legacy 3-field default on failure */ });
+  }, [open, eventType]);
 
   const allCases = useMemo<TestCase[]>(() => [...pastCases, SYNTHETIC_BASELINE], [pastCases]);
   const sel = allCases.find((c) => c.id === selected) ?? SYNTHETIC_BASELINE;
