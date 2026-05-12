@@ -230,6 +230,25 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
                     f"feed block_alert.triggered + block_alert.evidence cleanly)."
                 )
 
+        # (d) block_cpk requires at least one of usl/lsl. The description and
+        # runtime executor both say this, but the LLM repeatedly adds cpk to
+        # "completeness" plans (when user asked for `完整診斷`) without spec
+        # values, leading to runtime MISSING_PARAM. Reject at plan time so
+        # repair_plan either removes the cpk or fills in defaults.
+        for idx_op, op in enumerate(parsed):
+            if op is None or op.type != OpType.ADD_NODE:
+                continue
+            if op.block_id != "block_cpk":
+                continue
+            params = op.params or {}
+            if params.get("usl") is None and params.get("lsl") is None:
+                errors.append(
+                    f"Op#{idx_op}: block_cpk requires at least one of `usl` (Upper Spec Limit) "
+                    f"or `lsl` (Lower Spec Limit) — Cpk needs spec bounds to compute. "
+                    f"If user did not provide spec values, REMOVE this cpk node entirely; "
+                    f"don't substitute arbitrary defaults."
+                )
+
         # (c) Chart-block terminal rule: any block whose ONLY output port is
         # chart_spec (dict) IS the visualization — adding a line_chart /
         # bar_chart downstream is redundant. LLM repeatedly produces this

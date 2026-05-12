@@ -60,6 +60,43 @@ class SpcLongFormBlockExecutor(BlockExecutor):
                 is_ooc=pd.Series(dtype="bool"),
             )}
 
+        # 2026-05-13: nested-upstream support. block_process_history(nested=true)
+        # emits a `spc_charts` array column (list of {name, value, ucl, lcl,
+        # is_ooc, status}) instead of flat `spc_<chart>_<field>` columns.
+        # Detect that shape and pivot in-block so the two paths (flat / nested)
+        # converge here. Keeps backwards compat with flat upstream.
+        if "spc_charts" in df.columns and df["spc_charts"].apply(
+            lambda v: isinstance(v, list)
+        ).any():
+            # Explode + lift dict keys to top-level columns (same shape as flat path emits).
+            present_id_cols = [c for c in _ID_COLUMNS_DEFAULT if c in df.columns]
+            exploded = df.explode("spc_charts", ignore_index=True)
+            # Skip rows where spc_charts was an empty list (became NaN after explode).
+            exploded = exploded[exploded["spc_charts"].notna()].reset_index(drop=True)
+            if exploded.empty:
+                return {"data": df.iloc[0:0].assign(
+                    chart_name=pd.Series(dtype="object"),
+                    value=pd.Series(dtype="float64"),
+                    ucl=pd.Series(dtype="float64"),
+                    lcl=pd.Series(dtype="float64"),
+                    is_ooc=pd.Series(dtype="bool"),
+                )}
+            normalized = pd.json_normalize(exploded["spc_charts"])
+            base = exploded[present_id_cols].reset_index(drop=True)
+            normalized = normalized.reset_index(drop=True)
+            out = pd.concat([base, normalized], axis=1)
+            # Match canonical column names from the flat path
+            if "name" in out.columns:
+                out = out.rename(columns={"name": "chart_name"})
+            for needed in ("value", "ucl", "lcl", "is_ooc"):
+                if needed not in out.columns:
+                    out[needed] = pd.NA
+            if "eventTime" in out.columns:
+                out = out.sort_values(
+                    ["eventTime", "chart_name"], ascending=[False, True],
+                ).reset_index(drop=True)
+            return {"data": out}
+
         # Group spc_*_<field> columns by chart name
         chart_fields: dict[str, dict[str, str]] = {}
         for col in df.columns:
