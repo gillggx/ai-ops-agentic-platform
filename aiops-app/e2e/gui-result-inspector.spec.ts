@@ -18,8 +18,8 @@ import * as fs from "fs";
 import * as path from "path";
 
 const BASE = process.env.PW_BASE ?? "https://aiops-gill.com";
-const USER = process.env.PW_USER ?? "itadmin_test";
-const PASS = process.env.PW_PASS ?? "ITAdmin@2026";
+const USER = process.env.PW_USER ?? "admin";
+const PASS = process.env.PW_PASS ?? "admin";
 const ART_DIR = process.env.GUI_SMOKE_ARTIFACTS ?? "test-results/gui-smoke";
 
 async function login(page: Page) {
