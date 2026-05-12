@@ -81,7 +81,16 @@ export default function TestCaseSelector({
     fetch(`/api/skill-documents/${encodeURIComponent(slug)}/past-events`)
       .then(async (res) => res.ok ? (await res.json()).data as TestCase[] : [])
       .catch(() => [])
-      .then((rows) => setPastCases(rows ?? []))
+      .then((rows) => {
+        const arr = rows ?? [];
+        setPastCases(arr);
+        // 2026-05-12: pre-select the first REAL past event so the user can
+        // hit Start dry-run immediately. Was defaulted to "syn" (synthetic
+        // baseline = 2 fake fields), which made users think Test required
+        // them to switch to Manual tab and fill payload by hand. With this
+        // pre-selection the Past event tab is the one-click path.
+        if (arr.length > 0) setSelected(arr[0].id);
+      })
       .finally(() => setPastLoading(false));
   }, [open, slug]);
 
@@ -224,6 +233,28 @@ export default function TestCaseSelector({
             <p style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 0, lineHeight: 1.55 }}>
               依 trigger 類型填欄位；skill runner 用這個 payload 跑全部 step。
             </p>
+            {/* 2026-05-12 — point user back to Past event tab when there's
+                actually historical data available. User reported "test 還要
+                我填一堆 event 欄位" because they had switched to Manual without
+                noticing Past event already listed real OOC events ready to
+                replay with one click. */}
+            {pastCases.length > 0 && (
+              <div style={{
+                marginTop: 4, marginBottom: 12,
+                padding: "8px 12px", borderRadius: 6,
+                background: "var(--ai-bg)",
+                border: "1px solid color-mix(in oklch, var(--ai), transparent 70%)",
+                fontSize: 12, color: "var(--ink-2)", lineHeight: 1.5,
+              }}>
+                💡 旁邊 <button
+                  onClick={() => setTab("past")}
+                  style={{
+                    all: "unset", cursor: "pointer", fontWeight: 600,
+                    color: "var(--ai)", textDecoration: "underline",
+                  }}>📂 From past event</button> 已經列了 {pastCases.length} 筆歷史事件，
+                點一筆就能一鍵帶入真實 payload，不用手填。
+              </div>
+            )}
             <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: 8, alignItems: "center", marginTop: 14, maxWidth: 520 }}>
               {Object.entries(manualPayload).map(([k, v]) => (
                 <span key={k} style={{ display: "contents" }}>
