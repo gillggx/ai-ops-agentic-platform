@@ -22,7 +22,10 @@
 #   ARTIFACTS_DIR=/tmp/smk tooling/skill_builder_smoke.sh
 #   SIDECAR_BASE=http://localhost:8050 tooling/skill_builder_smoke.sh
 
-set -euo pipefail
+set -uo pipefail
+# Note: NOT set -e — we want to continue even if individual assertion
+# commands return non-zero (e.g. grep matches/no-match), so all cases
+# still run and report a summary.
 
 VERBOSE=0
 for arg in "$@"; do
@@ -263,8 +266,6 @@ print(json.dumps({'pipeline_json':{'version':'1.0','name':'smk','metadata':{},'i
   # ── Top-level assertions ──
   local target_id
   target_id=$(echo "$preview_resp" | jq -r '.target')
-  local target_block
-  target_block=$(echo "$preview_resp" | jq -r ".all_node_results[\"$target_id\"] as \$n | .all_node_results | keys[]" | head -1)
 
   # Chart assertion
   if [[ -n "$expect_chart_type" ]]; then
