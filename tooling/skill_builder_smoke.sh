@@ -237,16 +237,18 @@ print(json.dumps({'pipeline_json': pj, 'node_id': target, 'sample_size': 50}))
       if [[ "$ty" == "dataframe" ]] && (( rows > 0 )); then
         green "   ✓ terminal[$target_id].$port = dataframe($cols cols × $rows rows)"
         # For skill mode step_check.check: extra check that .pass is present
+        # (jq // treats false as null, so check key existence directly).
         if [[ "$port" == "check" ]]; then
-          local has_pass note
-          has_pass=$(echo "$preview_resp" | jq -r ".node_result.preview.check.rows[0].pass // \"missing\"")
-          note=$(echo "$preview_resp" | jq -r ".node_result.preview.check.rows[0].note // \"\"")
-          if [[ "$has_pass" == "missing" ]]; then
+          local has_pass_key pass_val note
+          has_pass_key=$(echo "$preview_resp" | jq '.node_result.preview.check.rows[0] | has("pass")')
+          pass_val=$(echo "$preview_resp" | jq '.node_result.preview.check.rows[0].pass')
+          note=$(echo "$preview_resp" | jq -r '.node_result.preview.check.rows[0].note // ""')
+          if [[ "$has_pass_key" != "true" ]]; then
             red "   ✗ step_check output missing .pass field"
             case_failed=1
           else
-            green "     ↳ step_check.pass=$has_pass note='$note'"
-            if [[ "$note" =~ "not numeric" ]]; then
+            green "     ↳ step_check.pass=$pass_val note='$note'"
+            if [[ "$note" == *"not numeric"* ]]; then
               red "   ✗ step_check rejected upstream value as 'not numeric' (likely numpy type bug)"
               case_failed=1
             fi
