@@ -72,6 +72,7 @@ public class PipelineController {
 	@PreAuthorize(Authorities.ADMIN_OR_PE)
 	public ApiResponse<PipelineDtos.Detail> create(@Validated @RequestBody PipelineDtos.CreateRequest req,
 	                                               @AuthenticationPrincipal AuthPrincipal caller) {
+		if (req.pipelineJson() != null) checkStructural(req.pipelineJson());
 		PipelineEntity e = new PipelineEntity();
 		e.setName(req.name());
 		if (req.description() != null) e.setDescription(req.description());
@@ -91,12 +92,80 @@ public class PipelineController {
 		if ("locked".equalsIgnoreCase(e.getStatus()) || "archived".equalsIgnoreCase(e.getStatus())) {
 			throw ApiException.conflict("pipeline is " + e.getStatus() + "; cannot mutate");
 		}
+		if (req.pipelineJson() != null) checkStructural(req.pipelineJson());
 		if (req.name() != null) e.setName(req.name());
 		if (req.description() != null) e.setDescription(req.description());
 		if (req.pipelineKind() != null) e.setPipelineKind(req.pipelineKind());
 		if (req.pipelineJson() != null) e.setPipelineJson(req.pipelineJson());
 		if (req.autoDoc() != null) e.setAutoDoc(req.autoDoc());
 		return ApiResponse.ok(PipelineDtos.detailOf(repository.save(e)));
+	}
+
+	/**
+	 * Minimal server-side structural sanity for pipeline_json. Defense-in-depth
+	 * — frontend's PipelineValidator + sidecar's graph_build validator cover
+	 * the same rules, but pipeline 84 (2026-05-12) was persisted with edges
+	 * pointing to a non-existent node id, which crashed the executor at run
+	 * time. We now reject the save outright so a broken canvas can't reach
+	 * production.
+	 *
+	 * <p>Checks (kept minimal to avoid duplicating the full Python validator):
+	 * <ul>
+	 *   <li>pipeline_json is parseable JSON</li>
+	 *   <li>nodes have unique ids</li>
+	 *   <li>every edge endpoint references a known node id</li>
+	 * </ul>
+	 * Deeper rules (port type compat, block schema, kind-specific structural)
+	 * still live in the Python validator that fires on the explicit
+	 * draft → validating → locked transition.
+	 */
+	@SuppressWarnings("unchecked")
+	private void checkStructural(String pipelineJson) {
+		if (pipelineJson == null || pipelineJson.isBlank()) return;
+		Map<String, Object> pj;
+		try {
+			pj = objectMapper.readValue(pipelineJson, new TypeReference<Map<String, Object>>() {});
+		} catch (JsonProcessingException ex) {
+			throw ApiException.badRequest("pipeline_json is not valid JSON: " + ex.getOriginalMessage());
+		}
+		Set<String> nodeIds = new java.util.HashSet<>();
+		Object nodesRaw = pj.get("nodes");
+		if (nodesRaw instanceof List<?> nodesList) {
+			for (Object n : nodesList) {
+				if (!(n instanceof Map<?, ?> nm)) continue;
+				Object id = nm.get("id");
+				if (id == null) {
+					throw ApiException.badRequest("pipeline node missing 'id'");
+				}
+				String sid = String.valueOf(id);
+				if (!nodeIds.add(sid)) {
+					throw ApiException.badRequest("duplicate node id in pipeline_json: " + sid);
+				}
+			}
+		}
+		Object edgesRaw = pj.get("edges");
+		if (edgesRaw instanceof List<?> edgesList) {
+			for (Object e : edgesList) {
+				if (!(e instanceof Map<?, ?> em)) continue;
+				Object from = em.containsKey("from_") ? em.get("from_") : em.get("from");
+				Object to = em.get("to");
+				String fromNode = (from instanceof Map<?, ?> fm) ? String.valueOf(fm.get("node")) : null;
+				String toNode = (to instanceof Map<?, ?> tm) ? String.valueOf(tm.get("node")) : null;
+				if (fromNode == null || toNode == null) {
+					throw ApiException.badRequest("pipeline edge missing from/to endpoint");
+				}
+				if (!nodeIds.contains(fromNode)) {
+					throw ApiException.badRequest(
+							"pipeline edge references unknown source node '" + fromNode + "'. "
+									+ "Available nodes: " + nodeIds);
+				}
+				if (!nodeIds.contains(toNode)) {
+					throw ApiException.badRequest(
+							"pipeline edge references unknown destination node '" + toNode + "'. "
+									+ "Available nodes: " + nodeIds);
+				}
+			}
+		}
 	}
 
 	// 5-stage lifecycle: draft → validating → locked → active → archived.
