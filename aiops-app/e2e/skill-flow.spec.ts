@@ -127,12 +127,15 @@ test.describe("Skill flow — full GUI with real agent", () => {
       }
       await expect(builderTab.locator("text=Building CONFIRM")).toBeVisible({ timeout: 15_000 });
       console.log("    plan generated; clicking 確認構建 to dispatch plan ops");
-      // 2026-05-13: builder now pauses at confirm_gate awaiting user click.
-      // Try both 確認構建 and 確認 variants in case label changed.
+      // 2026-05-13: builder pauses at confirm_gate. AIAgentPanel renders a
+      // primary blue button labeled "開始建" (start build) next to "不要" /
+      // "取消". Match by primary class OR by label variants. Wait up to 30s
+      // because the agent's first chat response can take 5-15s.
       const confirmBuildBtn = builderTab.locator(
-        'button:has-text("確認構建"), button:has-text("確認 構建"), button:has-text("Confirm Build"), button:has-text("確認")'
+        'button:has-text("開始建"), button:has-text("確認構建"), button:has-text("Confirm Build"), button:has-text("開始建構")'
       ).first();
-      await expect(confirmBuildBtn).toBeVisible({ timeout: 10_000 });
+      await expect(confirmBuildBtn).toBeVisible({ timeout: 30_000 });
+      console.log("    confirm button found:", await confirmBuildBtn.innerText());
       await confirmBuildBtn.click();
       console.log("    waiting for canvas to populate (up to 180s)…");
       try {
