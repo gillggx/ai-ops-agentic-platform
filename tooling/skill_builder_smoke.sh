@@ -67,8 +67,16 @@ run_case() {
         '{user_id: 1, session_id: $sid, instruction: $instr, skill_step_mode: $ssm, client_context: {}}')" \
     > "$resp_file" 2>&1
 
-  # Extract the final SSE message (last "data:" line that has status field)
-  local final_status=$(grep '^data: ' "$resp_file" | tail -1 | sed 's/^data: //' | jq -r '.status // "unknown"' 2>/dev/null || echo "parse_error")
+  # Success signal: any SSE event has session_id + n_ops (final summary).
+  # Failure signals: any SSE event has status=failed/plan_unfixable.
+  local final_status=""
+  if grep -qE '"status":\s*"(failed|plan_unfixable)"' "$resp_file"; then
+    final_status=$(grep -oE '"status":\s*"[a-z_]+"' "$resp_file" | tail -1 | sed 's/.*"\([a-z_]*\)"/\1/')
+  elif grep -qE '"plan_summary":' "$resp_file" && grep -qE '"n_ops":' "$resp_file"; then
+    final_status="ok"
+  else
+    final_status="parse_error"
+  fi
 
   # Extract the *last* plan attempt's ops list to inspect blocks used
   local last_plan_ops=$(grep '^data: ' "$resp_file" | grep -E '"plan":\s*\[' | tail -1 | sed 's/^data: //' || true)
@@ -85,24 +93,24 @@ run_case() {
   # 1. Plan didn't end as plan_unfixable / failed
   case "$final_status" in
     plan_unfixable|failed|parse_error)
-      red   "   ✗ final status=$final_status (expected finished or paused)"
+      red   "   ✗ final status=$final_status"
       case_failed=1
       ;;
-    finished|user_confirm_required|paused|""|unknown)
-      green "   ✓ final status=$final_status"
+    ok)
+      green "   ✓ build completed (plan summary emitted)"
       ;;
     *)
       yellow "   ? final status=$final_status"
       ;;
   esac
 
-  # 2. (skill mode only) last add_node must be block_step_check
+  # 2. (skill mode only) plan must contain block_step_check (topology rule).
+  # Op-order doesn't matter — SkillRunner reads step_check by id.
   if [[ "$skill_mode" == "true" && -n "$block_ids" ]]; then
-    local last_block=$(echo "$block_ids" | awk -F, '{print $NF}')
-    if [[ "$last_block" == "block_step_check" ]]; then
-      green "   ✓ last add_node = block_step_check (skill mode terminal OK)"
+    if echo ",$block_ids," | grep -q ",block_step_check,"; then
+      green "   ✓ plan contains block_step_check (skill verdict node OK)"
     else
-      red   "   ✗ last add_node = '$last_block' (skill mode requires block_step_check terminator)"
+      red   "   ✗ plan missing block_step_check (skill mode requires it)"
       case_failed=1
     fi
   fi
