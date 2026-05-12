@@ -45,6 +45,10 @@ interface Props {
   onPortError?: (message: string) => void;
   /** PR-D2: per-node agent pin callback (focuses copilot on the node) */
   onAgentPin?: (nodeId: string) => void;
+  /** Bumped by parent (BuilderLayout) after every successful agent build to
+   *  force a deterministic Dagre LR layout + fitView. Avoids depending on
+   *  server-side layout_node positions or LLM behaviour. */
+  autoLayoutNonce?: number;
 }
 
 /** PR-D1: short monospace summary of node params for node detail line. Heuristic. */
@@ -153,7 +157,7 @@ function portType(block: BlockSpec | null, port: string, kind: "input" | "output
   return list?.find((p) => p.port === port)?.type ?? null;
 }
 
-function DagCanvasInner({ blockCatalog, readOnly, runStatuses, onPortError, onAgentPin }: Props) {
+function DagCanvasInner({ blockCatalog, readOnly, runStatuses, onPortError, onAgentPin, autoLayoutNonce }: Props) {
   const { state, actions } = useBuilder();
   const rf = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -422,6 +426,20 @@ function DagCanvasInner({ blockCatalog, readOnly, runStatuses, onPortError, onAg
     actions.setNodesAndEdges(newNodes, state.pipeline.edges);
     setTimeout(() => rf.fitView({ padding: 0.2 }), 50);
   }, [state.pipeline.nodes, state.pipeline.edges, actions, rf]);
+
+  // 2026-05-12 — re-run Dagre LR layout when BuilderLayout bumps the nonce
+  // (after every successful agent build). Skip the initial 0 so a fresh
+  // pipeline_json load doesn't clobber the saved positions. Deferred 30ms
+  // so the final SSE add_node / connect ops have landed in state first.
+  useEffect(() => {
+    if (!autoLayoutNonce) return;
+    if (state.pipeline.nodes.length === 0) return;
+    const t = setTimeout(() => { autoLayout(); }, 30);
+    return () => clearTimeout(t);
+  // Intentionally exclude state.pipeline.* — we only react to explicit nonce
+  // bumps, not every canvas edit.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoLayoutNonce]);
 
   const isEmpty = state.pipeline.nodes.length === 0;
 

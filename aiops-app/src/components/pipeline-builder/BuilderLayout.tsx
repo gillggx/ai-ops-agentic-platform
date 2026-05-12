@@ -124,6 +124,14 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
   const [resultsPanelOpen, setResultsPanelOpen] = useState(false);
   const [inputsPanelOpen, setInputsPanelOpen] = useState(false);
   const [runDialogOpen, setRunDialogOpen] = useState(false);
+  // 2026-05-12 — bump after every successful agent build so DagCanvas re-runs
+  // Dagre LR layout + fitView. User reported "auto layout 沒跑" — root cause:
+  // onGlassDone only called actions.moveNode() per server-side position which
+  // (a) doesn't re-layout for nodes the server-side Kahn algorithm placed
+  // sub-optimally and (b) never adjusted the camera, so newly-laid-out nodes
+  // off-screen looked like nothing happened. Now deterministic regardless of
+  // LLM / server behaviour.
+  const [autoLayoutNonce, setAutoLayoutNonce] = useState(0);
   const [infoModalOpen, setInfoModalOpen] = useState(false);
   const [publishModalOpen, setPublishModalOpen] = useState(false);
   // Phase 5-UX-7: separate publish modal for auto_check (event binding)
@@ -1113,6 +1121,7 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
                     blockCatalog={catalog}
                     readOnly={readOnly}
                     runStatuses={runStatuses}
+                    autoLayoutNonce={autoLayoutNonce}
                     onPortError={(msg) => showToast("error", msg)}
                     onAgentPin={(nodeId) => {
                       actions.select(nodeId);
@@ -1145,6 +1154,7 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
                       blockCatalog={catalog}
                       readOnly={readOnly}
                       runStatuses={runStatuses}
+                      autoLayoutNonce={autoLayoutNonce}
                       onPortError={(msg) => showToast("error", msg)}
                     />
                   </CanvasErrorBoundary>
@@ -1251,12 +1261,20 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
                     | { nodes?: Array<{ id: string; position?: { x: number; y: number } }> }
                     | null
                     | undefined;
-                  if (!pj?.nodes) return;
-                  for (const n of pj.nodes) {
-                    if (n.position && typeof n.position.x === "number" && typeof n.position.y === "number") {
-                      actions.moveNode(n.id, { x: n.position.x, y: n.position.y });
+                  // Apply server-side positions first (graph_build's layout_node
+                  // already did a Kahn LR pass), then trigger DagCanvas's Dagre
+                  // auto-layout + fitView so the canvas always ends tidy and
+                  // centered. Auto-layout is now graph-deterministic, not LLM-
+                  // gated — user reported "auto layout 沒跑" and was right that
+                  // it shouldn't depend on agent state.
+                  if (pj?.nodes) {
+                    for (const n of pj.nodes) {
+                      if (n.position && typeof n.position.x === "number" && typeof n.position.y === "number") {
+                        actions.moveNode(n.id, { x: n.position.x, y: n.position.y });
+                      }
                     }
                   }
+                  setAutoLayoutNonce((v) => v + 1);
                 }}
                 contextEquipment={null}
                 focusedNodeId={focusedNodeId}
