@@ -88,12 +88,26 @@ def _flatten_type(prop: dict[str, Any]) -> str:
     return str(t)
 
 
-def render_params_section(param_schema: dict[str, Any] | None) -> str:
+def render_params_section(param_schema: Any) -> str:
     """Deterministic markdown for the 「**參數**」 section. Built straight
     from param_schema.properties so the LLM can't drift. Returns "" when
-    the block has no params (e.g. block_spc_long_form)."""
-    props = (param_schema or {}).get("properties") or {}
-    required = set((param_schema or {}).get("required") or [])
+    the block has no params (e.g. block_spc_long_form).
+
+    Accepts dict OR JSON-encoded string (Java returns it as a text column
+    so the wire form is "{...}" rather than a parsed object). Tolerates
+    None / empty / invalid JSON by returning "".
+    """
+    if param_schema is None:
+        return ""
+    if isinstance(param_schema, str):
+        try:
+            param_schema = json.loads(param_schema) if param_schema.strip() else {}
+        except Exception:  # noqa: BLE001
+            return ""
+    if not isinstance(param_schema, dict):
+        return ""
+    props = param_schema.get("properties") or {}
+    required = set(param_schema.get("required") or [])
     if not props:
         return ""
     lines = ["**參數**："]
