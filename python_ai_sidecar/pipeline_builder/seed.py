@@ -100,14 +100,21 @@ def _blocks() -> list[dict[str, Any]]:
                 "- limit 調小可加速下游；只要做趨勢通常 50~100 就夠\n"
                 "- 已知分析維度時指定 object_name 可減少回傳 column 數\n"
                 "\n"
-                "== Nested mode (2026-05-13 新增) ==\n"
-                "**nested=true** 改回傳 hierarchical shape — 每筆 record 含：\n"
+                "== Output shape — nested is DEFAULT (2026-05-13) ==\n"
+                "**預設 nested=true** — 每筆 record 是 hierarchical object：\n"
                 "  - spc_charts: list[{name, value, ucl, lcl, is_ooc, status}]\n"
                 "  - spc_summary: {ooc_count, total_charts, ooc_chart_names}\n"
                 "  - APC / DC / RECIPE / FDC / EC: 保留原 nested sub-object\n"
                 "下游用 path 文法直讀（e.g. block_step_check column='spc_summary.ooc_count'）。\n"
-                "適用：「機台最後一次 process 有幾張 chart OOC」、「該 lot 的所有 APC 補償清單」\n"
-                "這類自然 hierarchical 的問題。傳統扁平模式（default）保留 backwards-compat。\n"
+                "想對 SPC chart 做 long-form 分析就接 block_unnest(column='spc_charts')。\n"
+                "\n"
+                "**SPC chart blocks 自動相容**：block_xbar_r / block_imr / block_ewma_cusum / "
+                "block_weco_rules / block_consecutive_rule 在入口會 ensure_flat_spc 把 nested "
+                "spc_charts 還原為扁平 spc_<chart>_<field> 欄位，所以你**不用為了用這些 block "
+                "而設 nested=false**。\n"
+                "\n"
+                "**nested=false 只在這幾種情況使用**：legacy pipelines / 想看完整扁平寬表 / "
+                "下游 block 明確不支援 nested（極少數）。\n"
             ),
             "input_schema": [],
             "output_schema": [
@@ -155,13 +162,16 @@ def _blocks() -> list[dict[str, Any]]:
                     # last process") — answers in 2 nodes instead of 6.
                     "nested": {
                         "type": "boolean",
-                        "default": False,
+                        "default": True,
                         "title": "回傳 hierarchical shape（保留 SPC/APC/DC/RECIPE/FDC/EC nested + 預算 spc_summary）",
                         "description": (
-                            "true: 每筆 event 是 nested record，含 spc_charts[] + spc_summary "
+                            "true（預設）: 每筆 event 是 nested record，含 spc_charts[] + spc_summary "
                             "{ooc_count, total_charts, ooc_chart_names}；下游用 path 文法直讀 "
-                            "（e.g. step_check column='spc_summary.ooc_count'）。"
-                            "false（預設）: 展平成扁平寬表，spc_<chart>_<field> / apc_<param> 等欄位。"
+                            "（e.g. step_check column='spc_summary.ooc_count'）。SPC chart blocks "
+                            "（xbar_r / imr / ewma_cusum / weco_rules / consecutive_rule）會自動 "
+                            "ensure_flat_spc 把 nested 還原為扁平欄位，所以不用煩惱相容性。"
+                            "false: 展平成扁平寬表（legacy mode），spc_<chart>_<field> / apc_<param> 等欄位。"
+                            "舊 pipeline 想保留行為一致時設 false。"
                         ),
                     },
                 },
@@ -1109,8 +1119,12 @@ def _blocks() -> list[dict[str, Any]]:
             "name": "block_spc_long_form",
             "version": "1.0.0",
             "category": "transform",
-            "status": "production",
+            "status": "deprecated",
             "description": (
+                "⚠ DEPRECATED (2026-05-13)。block_process_history 預設改為 nested=true，下游 "
+                "想要 long-form 直接接 block_unnest(column='spc_charts') 就好，shape 完全一樣。"
+                "保留是為了舊 pipeline 仍可載入；新建議全部改用 unnest。\n"
+                "\n"
                 "== What ==\n"
                 "Process-History wide → SPC long format reshape (purpose-built).\n"
                 "把 process_history 直出的 spc_<chart>_value/_ucl/_lcl/_is_ooc 欄位攤平成長表，\n"

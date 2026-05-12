@@ -285,10 +285,15 @@ class ProcessHistoryBlockExecutor(BlockExecutor):
         payload = resp.json()
         events = payload.get("events", []) or []
 
-        # 2026-05-13 (Phase 1 object-native): `nested=true` returns the raw
-        # hierarchical shape with precomputed spc_summary. Default still flat
-        # for backwards compatibility with all 30 existing skill pipelines.
-        if params.get("nested"):
+        # 2026-05-13: nested is now DEFAULT. The 5 chart blocks that depend on
+        # flat spc_<chart>_<field> columns (xbar_r / imr / ewma_cusum /
+        # weco_rules / consecutive_rule) re-widen internally via
+        # ensure_flat_spc, so the default flip is transparent for them.
+        # Legacy callers can opt back to flat with nested=false.
+        nested = params.get("nested")
+        if nested is None:
+            nested = True
+        if nested:
             rows = [_nested_event(e) for e in events]
         else:
             rows = [_flatten_event(e, object_name) for e in events]

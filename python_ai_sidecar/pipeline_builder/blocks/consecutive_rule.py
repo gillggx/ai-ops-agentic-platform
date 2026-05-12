@@ -29,6 +29,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     ExecutionContext,
 )
 from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths
+from python_ai_sidecar.pipeline_builder.path import ensure_flat_spc
 
 
 def _make_trigger_id(group_value: Any, last_sort_value: Any) -> str:
@@ -53,6 +54,7 @@ class ConsecutiveRuleBlockExecutor(BlockExecutor):
             raise BlockExecutionError(
                 code="INVALID_INPUT", message="'data' input must be a DataFrame"
             )
+        df = ensure_flat_spc(df)  # accept nested upstream
 
         flag_col = self.require(params, "flag_column")
         count = int(self.require(params, "count"))

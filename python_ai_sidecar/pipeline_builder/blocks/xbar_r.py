@@ -12,6 +12,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     ExecutionContext,
 )
 from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths, _records
+from python_ai_sidecar.pipeline_builder.path import ensure_flat_spc
 
 
 class XbarRBlockExecutor(BlockExecutor):
@@ -27,6 +28,10 @@ class XbarRBlockExecutor(BlockExecutor):
         df = inputs.get("data")
         if not isinstance(df, pd.DataFrame):
             raise BlockExecutionError(code="INVALID_INPUT", message="'data' must be a DataFrame")
+        # Object-native compat: when upstream is process_history(nested=true),
+        # spc_charts is an array column. Re-widen back to flat spc_<chart>_<field>
+        # columns so this block's flat-only logic keeps working unchanged.
+        df = ensure_flat_spc(df)
         title = params.get("title") or None
 
         if df.empty:

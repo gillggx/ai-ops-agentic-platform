@@ -17,6 +17,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     ExecutionContext,
 )
 from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths, _records
+from python_ai_sidecar.pipeline_builder.path import ensure_flat_spc
 
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ class EwmaCusumBlockExecutor(BlockExecutor):
         df = inputs.get("data")
         if not isinstance(df, pd.DataFrame):
             raise BlockExecutionError(code="INVALID_INPUT", message="'data' must be a DataFrame")
+        df = ensure_flat_spc(df)  # accept nested upstream
         title = params.get("title") or None
         mode = params.get("mode", "ewma")
         if mode not in ("ewma", "cusum"):

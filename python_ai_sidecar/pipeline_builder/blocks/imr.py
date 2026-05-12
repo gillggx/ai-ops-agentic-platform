@@ -12,6 +12,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     ExecutionContext,
 )
 from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths, _records
+from python_ai_sidecar.pipeline_builder.path import ensure_flat_spc
 
 
 class IMRBlockExecutor(BlockExecutor):
@@ -27,6 +28,7 @@ class IMRBlockExecutor(BlockExecutor):
         df = inputs.get("data")
         if not isinstance(df, pd.DataFrame):
             raise BlockExecutionError(code="INVALID_INPUT", message="'data' must be a DataFrame")
+        df = ensure_flat_spc(df)  # accept nested upstream
         title = params.get("title") or None
 
         if df.empty:

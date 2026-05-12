@@ -30,6 +30,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     ExecutionContext,
 )
 from python_ai_sidecar.pipeline_builder.blocks.line_chart import _materialize_paths
+from python_ai_sidecar.pipeline_builder.path import ensure_flat_spc
 
 _AVAILABLE_RULES = ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"]
 _RULE_DESC = {
@@ -231,6 +232,7 @@ class WecoRulesBlockExecutor(BlockExecutor):
         df = inputs.get("data")
         if not isinstance(df, pd.DataFrame):
             raise BlockExecutionError(code="INVALID_INPUT", message="'data' must be DataFrame")
+        df = ensure_flat_spc(df)  # accept nested upstream
 
         value_column = self.require(params, "value_column")
         _center_col_pre = params.get("center_column") or None

@@ -445,6 +445,48 @@ def _path_could_exist(obj: Any, tail: str) -> bool:
     return True
 
 
+def ensure_flat_spc(df):
+    """Re-widen `spc_charts` array column back to `spc_<chart>_<field>` flat
+    columns. Used by SPC chart blocks (block_xbar_r / block_imr /
+    block_ewma_cusum / block_weco_rules / block_consecutive_rule) so they can
+    accept either upstream format transparently.
+
+    Input shape (nested):
+        record.spc_charts = [{name: 'xbar_chart', value, ucl, lcl, is_ooc}, ...]
+    Output shape (flat):
+        record.spc_xbar_chart_value = ...
+        record.spc_xbar_chart_ucl   = ...
+        ...
+    The original spc_charts column is dropped to avoid double-counting. Other
+    columns pass through unchanged. No-op if df has no `spc_charts` column.
+    """
+    import pandas as pd
+    if df is None or not isinstance(df, pd.DataFrame):
+        return df
+    if "spc_charts" not in df.columns:
+        return df
+    series = df["spc_charts"]
+    if not series.apply(lambda v: isinstance(v, list)).any():
+        return df  # column exists but empty/null — nothing to widen
+
+    rows: list[dict[str, Any]] = []
+    for _, row in df.iterrows():
+        rec = {k: v for k, v in row.items() if k != "spc_charts"}
+        charts = row.get("spc_charts") or []
+        if isinstance(charts, list):
+            for c in charts:
+                if not isinstance(c, dict):
+                    continue
+                name = c.get("name")
+                if not name:
+                    continue
+                for field in ("value", "ucl", "lcl", "is_ooc"):
+                    if field in c:
+                        rec[f"spc_{name}_{field}"] = c[field]
+        rows.append(rec)
+    return pd.DataFrame(rows)
+
+
 def expand_array_column(df, path: str):
     """Like `pandas.DataFrame.explode` but path-aware.
 
