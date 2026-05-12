@@ -230,6 +230,33 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
                     f"feed block_alert.triggered + block_alert.evidence cleanly)."
                 )
 
+        # (c) Chart-block terminal rule: any block whose ONLY output port is
+        # chart_spec (dict) IS the visualization — adding a line_chart /
+        # bar_chart downstream is redundant. LLM repeatedly produces this
+        # anti-pattern on instructions like "用 block_ewma_cusum 偵測 drift" —
+        # interprets ewma_cusum as a transform and wraps it in line_chart.
+        # Hard reject with a concrete "remove the wrapper" hint.
+        chart_only_node_ids: set[str] = set()
+        for op in parsed:
+            if op is None or op.type != OpType.ADD_NODE:
+                continue
+            spec = registry.get_spec(op.block_id, op.block_version or "1.0.0") or {}
+            outs = spec.get("output_schema") or []
+            port_names = {p.get("port") for p in outs if isinstance(p, dict)}
+            if port_names and port_names.issubset({"chart_spec"}) and op.node_id:
+                chart_only_node_ids.add(op.node_id)
+        for op in parsed:
+            if op is None or op.type != OpType.CONNECT:
+                continue
+            if op.src_id in chart_only_node_ids:
+                errors.append(
+                    f"chart block '{op.src_id}' has output port `chart_spec` (the chart "
+                    f"itself) and IS terminal — don't connect it to '{op.dst_id}'. "
+                    f"Likely fix: the downstream node ('{op.dst_id}') is redundant — "
+                    f"the chart block IS the visualization. Remove '{op.dst_id}' and any "
+                    f"connects feeding it from here."
+                )
+
     # Pass 4 — Phase 11 skill-step terminal check.
     # When the caller is creating a Skill step's pipeline, the plan must end
     # with an add_node for block_step_check. SkillRunner reads that node's

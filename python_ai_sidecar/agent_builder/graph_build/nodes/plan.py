@@ -75,6 +75,13 @@ Op type 共 5 種:
     connect n2.evidence → n3.evidence      ← 兩個都是 dataframe
 
 ❌ 硬性禁忌（會被 validator 擋下）:
+  - **chart blocks 是 TERMINAL — 不要再接 line_chart / bar_chart 包它**。
+    凡是 output 只有 `chart_spec` 的 block（block_xbar_r / block_imr /
+    block_ewma_cusum / block_box_plot / block_pareto / block_histogram_chart /
+    block_line_chart / block_bar_chart / block_scatter_chart / etc.）
+    本身就是視覺化。user 指定 ewma_cusum 偵測 drift = ewma_cusum 就是那張圖，
+    別再加 line_chart 包裹。
+
   - **不要使用 block_count_rows** — 已 deprecated。要計數：
       a) 已知 nested 資料 → 直接 path 引用 (e.g. 'spc_summary.ooc_count'，免計算)
       b) 通用情況 → block_step_check(aggregate='count') 或
