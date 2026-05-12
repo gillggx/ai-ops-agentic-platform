@@ -127,25 +127,21 @@ test.describe("GUI ResultInspector — dual-view + nested expansion", () => {
       await page.waitForTimeout(300);
     }
 
-    // Canvas uses human labels: "Process History", "Unnest", "Filter", "Line Chart"
-    await expect(page.locator('text=/^Process History$/').first()).toBeVisible({ timeout: 15_000 });
+    // Wait for canvas to render the n3 (filter) node
+    await expect(page.locator('.react-flow__node[data-id="n3"]').first()).toBeVisible({ timeout: 15_000 });
     await page.screenshot({ path: path.join(ART_DIR, "01-canvas-loaded.png"), fullPage: true });
 
-    // ── 3. Click Filter node — should show data preview ──────────
-    const filterNode = page.locator('text=/^Filter$/').first();
-    await filterNode.click();
-    await page.waitForTimeout(500);
+    // ── 3. Click n3 (Filter) — populates DataPreviewPanel ────────
+    await page.locator('.react-flow__node[data-id="n3"]').first().click();
+    await page.waitForTimeout(800);
 
-    // Run preview to populate the panel (click "Run Preview" button if present,
-    // otherwise the panel auto-populates from cache when node selected).
-    const runBtn = page.locator('button:has-text("Run Preview"), button:has-text("預覽")').first();
-    if (await runBtn.isVisible().catch(() => false)) {
-      await runBtn.click();
-      await page.waitForResponse(
-        (r) => r.url().includes("/preview") && r.status() === 200,
-        { timeout: 30_000 }
-      );
-    }
+    const runBtn = page.locator('button:has-text("RUN PREVIEW")').first();
+    await expect(runBtn).toBeVisible({ timeout: 5_000 });
+    await runBtn.click();
+    await page.waitForResponse(
+      (r) => r.url().includes("/preview") && r.status() === 200, { timeout: 60_000 }
+    );
+    await page.waitForTimeout(1500);
     await page.screenshot({ path: path.join(ART_DIR, "02-preview-loaded.png"), fullPage: true });
 
     // ── 4. Assert Table / JSON tabs exist ────────────────────────
@@ -170,10 +166,9 @@ test.describe("GUI ResultInspector — dual-view + nested expansion", () => {
     await expect(page.locator('[data-testid="preview-table"]')).toBeVisible({ timeout: 5_000 });
 
     // ── 5. Nested row expansion ──────────────────────────────────
-    // Click the Unnest node — its output still has nested siblings
+    // Click n2 (Unnest) — its output still has nested siblings
     // (spc_summary, APC etc.) so the row should have [+].
-    const unnestNode = page.locator('text=/^Unnest$/').first();
-    await unnestNode.click();
+    await page.locator('.react-flow__node[data-id="n2"]').first().click();
     await page.waitForTimeout(800);
     await page.screenshot({ path: path.join(ART_DIR, "04-unnest-node.png"), fullPage: true });
 

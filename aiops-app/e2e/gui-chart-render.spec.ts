@@ -110,19 +110,19 @@ test.describe("GUI ChartRender — chart_spec → SVG pixels", () => {
       await page.waitForTimeout(300);
     }
 
-    // Canvas renders the block_line_chart node with the human label "Line Chart".
-    const chartNode = page.locator('text=/^Line Chart$/').first();
-    await expect(chartNode, "Line Chart node not visible on canvas").toBeVisible({ timeout: 15_000 });
+    // Click the Line Chart node ON THE CANVAS (sidebar also has "Line Chart"
+    // in the block library — need to scope to react-flow node, not sidebar).
+    const chartNode = page.locator('.react-flow__node[data-id="n4"]').first();
+    await expect(chartNode, "n4 (Line Chart) node not on canvas").toBeVisible({ timeout: 15_000 });
     await chartNode.click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(800);
 
-    // Trigger preview if button present
-    const runBtn = page.locator('button:has-text("Run Preview"), button:has-text("預覽")').first();
-    if (await runBtn.isVisible().catch(() => false)) {
-      await runBtn.click();
-      await page.waitForResponse((r) => r.url().includes("/preview") && r.status() === 200,
-                                  { timeout: 30_000 });
-    }
+    // Trigger preview via the RUN PREVIEW button in the bottom panel.
+    const runBtn = page.locator('button:has-text("RUN PREVIEW")').first();
+    await expect(runBtn, "RUN PREVIEW button not found").toBeVisible({ timeout: 5_000 });
+    await runBtn.click();
+    await page.waitForResponse((r) => r.url().includes("/preview") && r.status() === 200,
+                                { timeout: 60_000 });
     await page.waitForTimeout(1500); // let SVG paint
 
     await page.screenshot({ path: path.join(ART_DIR, "chart-01-clicked.png"), fullPage: true });
