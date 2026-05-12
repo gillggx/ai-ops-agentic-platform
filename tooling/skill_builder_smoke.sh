@@ -232,11 +232,22 @@ print(json.dumps({'pipeline_json':{'version':'1.0','name':'smk','metadata':{},'i
   local n_nodes node_fail_count
   n_nodes=$(echo "$preview_resp" | jq '.all_node_results | length')
   node_fail_count=$(echo "$preview_resp" | jq '[.all_node_results[]? | select(.status != "success")] | length')
-  if [[ "$node_fail_count" == "0" ]]; then
-    green "   ✓ all $n_nodes nodes executed"
+  # Count REAL failures (status != success AND error != null). Nodes outside
+  # target's preview lineage have status=null/error=null — that's a skip, not a fail.
+  local real_fail_count
+  real_fail_count=$(echo "$preview_resp" | jq '[.all_node_results | to_entries[] | select(.value.status != "success" and .value.error != null)] | length')
+  local skipped_count
+  skipped_count=$(echo "$preview_resp" | jq '[.all_node_results | to_entries[] | select(.value.error == null and .value.status != "success")] | length')
+  local executed_count=$(( n_nodes - skipped_count ))
+  if [[ "$real_fail_count" == "0" ]]; then
+    if (( skipped_count > 0 )); then
+      green "   ✓ $executed_count/$n_nodes nodes executed (others are side-branches outside terminal lineage)"
+    else
+      green "   ✓ all $n_nodes nodes executed"
+    fi
   else
-    red "   ✗ $node_fail_count node(s) failed:"
-    echo "$preview_resp" | jq -r '.all_node_results | to_entries[] | select(.value.status != "success") | "       \(.key): \(.value.error)"' | while read line; do red "$line"; done
+    red "   ✗ $real_fail_count node(s) failed at runtime:"
+    echo "$preview_resp" | jq -r '.all_node_results | to_entries[] | select(.value.status != "success" and .value.error != null) | "       \(.key): \(.value.error)"' | while read line; do red "$line"; done
     case_failed=1
   fi
 
@@ -258,7 +269,13 @@ print(json.dumps({'pipeline_json':{'version':'1.0','name':'smk','metadata':{},'i
     else
       local err
       err=$(echo "$preview_resp" | jq -r ".all_node_results[\"$nid\"].error")
-      red "     ╭─ $nid ($block) FAILED: $err"
+      if [[ "$err" == "null" || -z "$err" ]]; then
+        # Status missing/null with no error = node is a side-branch not in
+        # target's lineage (preview only walks ancestors). Not a failure.
+        gray "     ╭─ $nid ($block) skipped (side-branch, not in lineage)"
+      else
+        red "     ╭─ $nid ($block) FAILED: $err"
+      fi
     fi
   done <<< "$pj_nodes"
   echo "     ╰────────────────"
