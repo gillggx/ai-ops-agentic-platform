@@ -39,6 +39,21 @@ from python_ai_sidecar.pipeline_builder.path import get_column_series
 
 
 _VALID_OPS = {">=", ">", "=", "==", "<", "<=", "changed", "drift"}
+
+
+def _coerce_numeric(value):
+    """Accept Python int/float, numpy scalar types, and numeric strings.
+    Pandas aggregations (sum/mean/max/min/last) on int columns produce
+    `numpy.int64` / `numpy.float64`, neither of which is isinstance(int|float).
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return float(value)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 _VALID_AGG = {"count", "sum", "mean", "max", "min", "last", "exists"}
 
 
@@ -127,7 +142,7 @@ class StepCheckBlockExecutor(BlockExecutor):
                         message=f"operator={operator!r} requires `threshold`",
                     )
                 t = float(threshold)
-                v = float(value) if isinstance(value, (int, float)) else None
+                v = _coerce_numeric(value)
                 if v is None:
                     passed = False
                     note = f"value not numeric: {value!r}"
@@ -154,7 +169,7 @@ class StepCheckBlockExecutor(BlockExecutor):
                     )
                 t = float(threshold)
                 b = float(baseline)
-                v = float(value) if isinstance(value, (int, float)) else None
+                v = _coerce_numeric(value)
                 if v is None:
                     passed = False
                     note = f"value not numeric: {value!r}"

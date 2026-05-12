@@ -55,6 +55,36 @@ class ThresholdBlockExecutor(BlockExecutor):
                 message=f"Column '{column}' not found",
             )
 
+        # 2026-05-13: reject mixed-mode params. block_threshold has two
+        # mutually-exclusive modes — pick ONE:
+        #   - Mode A (bound): bound_type ∈ {upper, lower, both} +
+        #     upper_bound / lower_bound. Traditional SPC UCL/LCL check.
+        #   - Mode B (operator): operator + target. General comparison.
+        # If LLM sets both, current path silently picks operator-mode and
+        # fails on missing target. Surface the conflict clearly so repair_plan
+        # can prune the redundant params.
+        has_bound = (
+            params.get("bound_type") is not None
+            or params.get("upper_bound") is not None
+            or params.get("lower_bound") is not None
+        )
+        has_operator = params.get("operator") is not None
+        if has_bound and has_operator:
+            raise BlockExecutionError(
+                code="INVALID_PARAM",
+                message=(
+                    "block_threshold has Mode-A (bound_type+upper/lower_bound) and "
+                    "Mode-B (operator+target) but ONLY ONE may be used per node. "
+                    "Pick one and remove the other."
+                ),
+                hint=(
+                    "Mode A example: bound_type='lower', lower_bound=2  "
+                    "(triggers when value < 2)\n"
+                    "Mode B example: operator='>=', target=2  "
+                    "(triggers when value >= 2)"
+                ),
+            )
+
         # Phase 4-A+: `operator + target` path (generalised comparison).
         operator = params.get("operator")
         if operator is not None:
