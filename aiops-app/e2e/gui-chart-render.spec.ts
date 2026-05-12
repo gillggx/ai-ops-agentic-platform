@@ -103,9 +103,16 @@ test.describe("GUI ChartRender — chart_spec → SVG pixels", () => {
     await page.goto(`${BASE}/admin/pipeline-builder/${pipelineId}`);
     await page.waitForLoadState("networkidle", { timeout: 30_000 });
 
-    // Click the chart node (last terminal)
-    const chartNode = page.locator('text=block_line_chart').first();
-    await expect(chartNode).toBeVisible({ timeout: 15_000 });
+    // Dismiss the onboarding tour if present
+    const skipBtn = page.locator('button:has-text("Skip")').first();
+    if (await skipBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await skipBtn.click();
+      await page.waitForTimeout(300);
+    }
+
+    // Canvas renders the block_line_chart node with the human label "Line Chart".
+    const chartNode = page.locator('text=/^Line Chart$/').first();
+    await expect(chartNode, "Line Chart node not visible on canvas").toBeVisible({ timeout: 15_000 });
     await chartNode.click();
     await page.waitForTimeout(500);
 

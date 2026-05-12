@@ -120,19 +120,19 @@ test.describe("GUI ResultInspector — dual-view + nested expansion", () => {
     await page.goto(`${BASE}/admin/pipeline-builder/${pipelineId}`);
     await page.waitForLoadState("networkidle", { timeout: 30_000 });
 
-    // Wait for canvas to have nodes rendered
-    await expect(page.locator('[data-testid="custom-node"], [data-id^="n"]')).toHaveCount(
-      4, { timeout: 30_000 }
-    ).catch(async () => {
-      // Fall back: any visible node block
-      const nodes = page.locator('text=block_process_history').first();
-      await expect(nodes).toBeVisible({ timeout: 15_000 });
-    });
+    // Dismiss onboarding tour
+    const skipBtn = page.locator('button:has-text("Skip")').first();
+    if (await skipBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await skipBtn.click();
+      await page.waitForTimeout(300);
+    }
+
+    // Canvas uses human labels: "Process History", "Unnest", "Filter", "Line Chart"
+    await expect(page.locator('text=/^Process History$/').first()).toBeVisible({ timeout: 15_000 });
     await page.screenshot({ path: path.join(ART_DIR, "01-canvas-loaded.png"), fullPage: true });
 
-    // ── 3. Click n3 (block_filter) — should show data preview ────
-    // We click via React Flow node — the filter node label
-    const filterNode = page.locator('text=block_filter').first();
+    // ── 3. Click Filter node — should show data preview ──────────
+    const filterNode = page.locator('text=/^Filter$/').first();
     await filterNode.click();
     await page.waitForTimeout(500);
 
@@ -170,10 +170,9 @@ test.describe("GUI ResultInspector — dual-view + nested expansion", () => {
     await expect(page.locator('[data-testid="preview-table"]')).toBeVisible({ timeout: 5_000 });
 
     // ── 5. Nested row expansion ──────────────────────────────────
-    // Filter is downstream of unnest, so its rows are flat (spc_charts unnested).
-    // To exercise [+], click the unnest node (n2) — its output still has nested
-    // siblings (spc_summary, APC etc.) so the row should have [+].
-    const unnestNode = page.locator('text=block_unnest').first();
+    // Click the Unnest node — its output still has nested siblings
+    // (spc_summary, APC etc.) so the row should have [+].
+    const unnestNode = page.locator('text=/^Unnest$/').first();
     await unnestNode.click();
     await page.waitForTimeout(800);
     await page.screenshot({ path: path.join(ART_DIR, "04-unnest-node.png"), fullPage: true });
