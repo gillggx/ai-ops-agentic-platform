@@ -362,6 +362,18 @@ class JavaAPIClient:
         }
         return await self._post_data("/internal/agent-knowledge/knowledge/search", body)
 
+    async def list_high_priority_knowledge(
+        self, *, user_id: int = 1, limit: int = 20,
+    ) -> list[dict]:
+        """Pull ALL global priority='high' knowledge entries — no embedding.
+        Used by plan_node so first-principle rules always reach the LLM
+        regardless of Cohere multilingual recall quality."""
+        result = await self._get_data(
+            "/internal/agent-knowledge/knowledge/high-priority",
+            params={"user_id": user_id, "limit": limit},
+        )
+        return result if isinstance(result, list) else []
+
     async def search_examples(
         self, *, user_id: int, query_vec_literal: str,
         skill_slug: Optional[str] = None,

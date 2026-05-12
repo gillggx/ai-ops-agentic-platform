@@ -175,6 +175,17 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
         deep_errors = await _check_freeform_object_params(parsed)
         errors.extend(deep_errors)
 
+    # Pass 4.6 — block_join self-join detection (2026-05-12).
+    # LLM repeatedly produces "n1 → n5.left + n1 (via wrapper) → n5.right"
+    # patterns that are structurally redundant — a join with the same source
+    # on both sides equals filtering, which a single block_filter + block_sort
+    # achieves more cheaply. Detect by walking the plan and checking if any
+    # block_join has both endpoints transitively rooted at the same upstream.
+    # Fires regardless of skill_step_mode.
+    if not errors:
+        self_join_errors = _check_self_join(parsed)
+        errors.extend(self_join_errors)
+
     # Pass 4 — Phase 11 skill-step terminal check.
     # When the caller is creating a Skill step's pipeline, the plan must end
     # with an add_node for block_step_check. SkillRunner reads that node's
@@ -480,6 +491,78 @@ def _find_producer_hint(
         return " (no node in this plan produces this column — add a block_compute or block_groupby_agg upstream)"
     nodes_list = ", ".join(f"{nid} ({why})" for nid, why in candidates[:3])
     return f" — try connecting from: {nodes_list}"
+
+
+def _check_self_join(parsed: list[Op]) -> list[str]:
+    """Reject block_join where both endpoints transitively root at the same
+    upstream source. This pattern (e.g. n1 → n2 → n3 → n5.left
+    AND n1 → n4 → n5.right) is structurally redundant — the join filters
+    n1 by n3's keys, which a block_filter + block_sort accomplishes more
+    cheaply and without the join overhead. LLM produced this on skill 54
+    rebuild (pipeline 84/85) because the instruction said "find OOC events
+    matching the latest one" — LLM defaulted to SQL-style self-join.
+
+    Algorithm:
+      1. Build adjacency from CONNECT ops: dst_id → set of src_ids
+      2. For each block_join node, find ancestors (BFS upstream)
+         of both .left input and .right input
+      3. If ancestor sets share a node → self-join → reject
+    """
+    if not parsed:
+        return []
+    # node_id → block_id
+    add_blocks: dict[str, str] = {}
+    for op in parsed:
+        if op is None or op.type != OpType.ADD_NODE:
+            continue
+        if op.node_id and op.block_id:
+            add_blocks[op.node_id] = op.block_id
+
+    # dst_node → list of (src_node, dst_port)
+    inbound: dict[str, list[tuple[str, str]]] = {}
+    for op in parsed:
+        if op is None or op.type != OpType.CONNECT:
+            continue
+        if op.src_id and op.dst_id and op.dst_port:
+            inbound.setdefault(op.dst_id, []).append((op.src_id, op.dst_port))
+
+    def ancestors(start: str) -> set[str]:
+        seen: set[str] = set()
+        stack = [start]
+        while stack:
+            cur = stack.pop()
+            for src, _ in inbound.get(cur, []):
+                if src and src not in seen:
+                    seen.add(src)
+                    stack.append(src)
+        return seen
+
+    errors: list[str] = []
+    for node_id, block_id in add_blocks.items():
+        if block_id != "block_join":
+            continue
+        # find left + right port sources
+        left_srcs = [s for s, p in inbound.get(node_id, []) if p == "left"]
+        right_srcs = [s for s, p in inbound.get(node_id, []) if p == "right"]
+        if not left_srcs or not right_srcs:
+            continue  # missing port wire — a different check handles that
+        left_anc = set(left_srcs)
+        for s in left_srcs:
+            left_anc |= ancestors(s)
+        right_anc = set(right_srcs)
+        for s in right_srcs:
+            right_anc |= ancestors(s)
+        shared = left_anc & right_anc
+        if shared:
+            errors.append(
+                f"node '{node_id}' (block_join): self-join detected — both .left "
+                f"and .right transitively originate from {sorted(shared)}. "
+                f"Self-join with same source on both sides is redundant. "
+                f"If you want to filter the source by a derived condition, use "
+                f"block_filter + block_sort instead — they accomplish the same "
+                f"filtering without the join overhead."
+            )
+    return errors
 
 
 def _empty_pipeline() -> PipelineJSON:

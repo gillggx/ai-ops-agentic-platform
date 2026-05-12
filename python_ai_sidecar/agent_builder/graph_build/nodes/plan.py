@@ -54,6 +54,17 @@ Op type 共 5 種:
 ❌ 錯誤示範（會被擋下來）:
   add_node n2 → set_param n2 value_column=...  ← 沒有 upstream 可參考
 
+⚠ 結構性 anti-pattern（會被 validator 擋）:
+  - **不要 self-join 同一個 source**：把 n1 接到 block_join 的 .left + 也轉一圈接 .right
+    來「過濾 n1」— 那是 SQL 老習慣。用 block_filter + block_sort 一條 chain 就好。
+    e.g. 想取「最新一筆 OOC event 對應的所有 SPC chart 量值」：
+      ❌ n1 → n5.left；  n1 → filter → sort_limit_1 → compute → n5.right (key=eventTime)
+      ✅ n1 → filter(OOC) → sort_limit_1 → spc_long_form → filter(is_ooc) → step_check
+  - **block_line_chart 的 x 軸是「連續變量」（通常 eventTime）**，不要把 categorical
+    欄位（chart_name / step / lot_id）放 x — 那不是「線」，是 bar/scatter 場景。
+    想看 chart_name 的對比 → block_bar_chart；想列出每張 chart 的 value/ucl/lcl
+    → block_data_view；想看時序 trend → x=eventTime，需要多筆 events（不要 limit=1）。
+
 Block 目錄:
 {BLOCK_CATALOG}
 
@@ -382,6 +393,13 @@ async def plan_node(state: BuildGraphState) -> dict[str, Any]:
     # prompt. Best-effort: when embedding / Java fails the block is empty
     # and plan proceeds as before. Per CLAUDE.md: knowledge lives in DB
     # (agent_knowledge), retrieved via pgvector cosine — not hardcoded.
+    # 2026-05-12 — Knowledge injection has TWO layers:
+    # (1) UNCONDITIONAL: all priority='high' global entries (first principles
+    #     like "SPC is station-level", "FDC is chamber-level", "Skill vs
+    #     Patrol architecture"). These must always reach the LLM regardless
+    #     of RAG cosine — Cohere multilingual recall on long Chinese queries
+    #     is patchy. SQL-only fetch by priority, ~5 rows × ~500 chars = small.
+    # (2) RAG bonus: cosine-similar entries by query, when available.
     knowledge_hint = ""
     try:
         from python_ai_sidecar.agent_orchestrator_v2.nodes.load_context import (
@@ -390,20 +408,39 @@ async def plan_node(state: BuildGraphState) -> dict[str, Any]:
         from python_ai_sidecar.clients.java_client import JavaAPIClient
         from python_ai_sidecar.config import CONFIG
 
-        # Service-token client (no per-user caller). Same pattern as
-        # background/embedding_backfill.py — internal endpoints accept
-        # X-Internal-Token without a CallerContext.
         java = JavaAPIClient(
             CONFIG.java_api_url, CONFIG.java_internal_token,
             timeout_sec=CONFIG.java_timeout_sec,
         )
         uid = state.get("user_id") or 1   # admin owns global-scope rows
-        kb = await _build_knowledge_block(
+
+        # Layer 1: always-on high-priority first-principle rules.
+        sections: list[str] = []
+        try:
+            hp_rows = await java.list_high_priority_knowledge(user_id=uid, limit=20)
+        except Exception as ex:  # noqa: BLE001
+            logger.info("plan_node: high-priority knowledge fetch failed (%s)", ex)
+            hp_rows = []
+        if hp_rows:
+            lines = ["## Domain first principles (always-on)"]
+            for r in hp_rows:
+                lines.append(f"  ### {r.get('title','')}")
+                body = (r.get("body") or "").strip()
+                if body:
+                    # Indent for readability — keeps prompt compact but visible
+                    lines.append("\n".join(f"    {ln}" for ln in body.split("\n")))
+            sections.append("\n".join(lines))
+
+        # Layer 2: RAG-retrieved (cosine-matched) additional knowledge.
+        rag_block = await _build_knowledge_block(
             java, user_id=uid, query_text=state["instruction"],
             skill_slug=None, tool_id=None, recipe_id=None,
         )
-        if kb:
-            knowledge_hint = "\n\n" + kb
+        if rag_block:
+            sections.append(rag_block)
+
+        if sections:
+            knowledge_hint = "\n\n" + "\n\n".join(sections)
     except Exception as ex:  # noqa: BLE001
         logger.info("plan_node: knowledge retrieval skipped (%s)", ex)
 

@@ -134,6 +134,27 @@ public class InternalAgentKnowledgeController {
                 .toList());
     }
 
+    /** 2026-05-12 — return all global high-priority knowledge regardless of
+     *  embedding similarity. Cohere multilingual recall on long Chinese
+     *  queries is patchy (verified empirically), so high-priority "first
+     *  principle" entries (SPC/APC/FDC/Recipe/Skill-vs-Patrol architecture)
+     *  must reach plan_node UNCONDITIONALLY, not gated on RAG cosine match.
+     *  Small dataset (<30 high-priority rows expected) — full scan OK. */
+    @GetMapping("/knowledge/high-priority")
+    public ApiResponse<List<KnowledgeLite>> highPriorityKnowledge(
+            @RequestParam(value = "user_id", defaultValue = "1") Long userId,
+            @RequestParam(value = "limit", defaultValue = "20") int limit) {
+        List<AgentKnowledgeEntity> all = knowledgeRepo.findAll();
+        return ApiResponse.ok(all.stream()
+                .filter(e -> e.getActive() != null && e.getActive())
+                .filter(e -> "high".equalsIgnoreCase(e.getPriority()))
+                .filter(e -> "global".equals(e.getScopeType())
+                          || (e.getUserId() != null && e.getUserId().equals(userId)))
+                .limit(limit)
+                .map(KnowledgeLite::of)
+                .toList());
+    }
+
     // ── Examples (few-shot) ───────────────────────────────────────────
 
     @PostMapping("/examples/search")
