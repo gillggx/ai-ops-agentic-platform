@@ -194,6 +194,24 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
                 "node operating on the upstream filter/aggregate result."
             )
 
+        # 2026-05-12: also reject block_alert in skill_step_mode. LLM kept
+        # trying to wire step_check → alert (with hallucinated 'triggered'
+        # port) when user instruction said "觸發告警". In skill architecture
+        # SkillRunner handles alerts; pipeline only reports pass/fail via
+        # step_check. Multiple plan_unfixable failures on skill 54 traced
+        # to this exact pattern.
+        has_alert = any(
+            op is not None and op.type == OpType.ADD_NODE and op.block_id == "block_alert"
+            for op in parsed
+        )
+        if has_alert:
+            errors.append(
+                "skill_step_mode: pipeline must NOT contain block_alert — "
+                "Skill 架構下 SkillRunner 從 block_step_check.check.pass 讀結果"
+                "後自動發 alarm，pipeline 本身不該再寫 block_alert。"
+                "移除所有 add_node(block_alert) 操作；終端只留 block_step_check。"
+            )
+
     logger.info("validate_plan_node: %d hard errors, %d soft warnings, plan_cleaned=%s",
                 len(errors), len(warnings), plan_was_cleaned)
 
