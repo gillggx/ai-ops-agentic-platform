@@ -56,6 +56,11 @@ class BuildRequest(BaseModel):
     instruction: str = Field(..., min_length=1)
     pipeline_id: int | None = Field(default=None, alias="pipelineId")
     pipeline_snapshot: dict | None = Field(default=None, alias="pipelineSnapshot")
+    # 2026-05-12: explicit flag so the skill-step terminal + anti-alert
+    # validators fire when caller is building a Skill step pipeline.
+    # Frontend embed=skill flow + chat orchestrator's build_pipeline_live
+    # both set this true; standalone Pipeline Builder builds keep default.
+    skill_step_mode: bool = Field(default=False, alias="skillStepMode")
 
 
 async def _chat_stream_native(req: ChatRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
@@ -139,6 +144,7 @@ async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenera
             instruction=req.instruction,
             base_pipeline=req.pipeline_snapshot,
             user_id=caller.user_id,
+            skill_step_mode=req.skill_step_mode,
             skip_confirm=False,  # Builder Mode shows the Apply/Cancel card
         ):
             yield {
