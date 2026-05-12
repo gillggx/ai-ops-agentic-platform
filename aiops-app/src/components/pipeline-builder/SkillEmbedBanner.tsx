@@ -275,58 +275,50 @@ export default function SkillEmbedBanner({ pipelineId }: { pipelineId?: number |
   );
 }
 
-/** Hardcoded event_type → input attribute list; mirrors V25 backfill.
- *  Used to seed pendingInputs when bypassing the wizard. */
-export function seedInputsFromCtx(ctx: SkillEmbedCtx): { name: string; type: string; required: boolean; description?: string }[] {
+/**
+ * Seed pendingInputs when bypassing the wizard.
+ *
+ * 2026-05-12: was a hardcoded event_type → attributes lookup that drifted
+ * from event_types.attributes in DB (OOC's real schema declares
+ * equipment_id but this returned tool_id, etc. — LLM then referenced
+ * fields that never arrive in the runtime payload). Now reads the live
+ * schema from Java (/api/v1/event-types/by-name/<n>), the same source
+ * the IT_ADMIN edits in /admin/event-types.
+ */
+export async function seedInputsFromCtx(ctx: SkillEmbedCtx): Promise<{ name: string; type: string; required: boolean; description?: string }[]> {
   if (ctx.trigger_type === "event") {
     const ev = ctx.trigger_event ?? "";
-    if (ev === "OOC") {
-      return [
-        { name: "tool_id", type: "string", required: true, description: "From OOC payload" },
-        { name: "lot_id", type: "string", required: true },
-        { name: "step", type: "string", required: false },
-        { name: "chamber_id", type: "string", required: false },
-        { name: "spc_chart", type: "string", required: false },
-        { name: "severity", type: "string", required: false },
-      ];
+    if (ev) {
+      try {
+        const res = await fetch(
+          `/api/event-types/by-name/${encodeURIComponent(ev)}`,
+          { cache: "no-store" },
+        );
+        if (res.ok) {
+          const json = await res.json();
+          const data = json?.data ?? json;
+          const rawAttrs = data?.attributes;
+          const attrs = typeof rawAttrs === "string"
+            ? (rawAttrs.trim() ? JSON.parse(rawAttrs) : [])
+            : (Array.isArray(rawAttrs) ? rawAttrs : []);
+          if (Array.isArray(attrs) && attrs.length > 0) {
+            return attrs
+              .map((a: Record<string, unknown>) => ({
+                name: String(a.name ?? ""),
+                type: ["string","integer","number","boolean"].includes(String(a.type ?? ""))
+                  ? String(a.type)
+                  : "string",
+                required: Boolean(a.required),
+                description: String(a.description ?? `From ${ev} payload`),
+              }))
+              .filter(s => s.name);
+          }
+        }
+      } catch {
+        // Fall through to generic fallback when DB is unreachable.
+      }
     }
-    if (ev === "FDC_FAULT" || ev === "FDC_WARNING") {
-      return [
-        { name: "tool_id", type: "string", required: true },
-        { name: "lot_id", type: "string", required: true },
-        { name: "step", type: "string", required: false },
-        { name: "chamber_id", type: "string", required: false },
-        { name: "fault_code", type: "string", required: false },
-      ];
-    }
-    if (ev === "PM_START" || ev === "PM_DONE") {
-      return [
-        { name: "tool_id", type: "string", required: true },
-        { name: "reason", type: "string", required: false },
-      ];
-    }
-    if (ev === "EQUIPMENT_HOLD") {
-      return [
-        { name: "tool_id", type: "string", required: true },
-        { name: "lot_id", type: "string", required: false },
-        { name: "step", type: "string", required: false },
-      ];
-    }
-    if (ev === "RECIPE_VERSION_BUMP") {
-      return [
-        { name: "recipe_id", type: "string", required: true },
-        { name: "new_version", type: "number", required: true },
-      ];
-    }
-    if (ev === "ENGINEER_OVERRIDE") {
-      return [
-        { name: "object_name", type: "string", required: true },
-        { name: "object_id", type: "string", required: true },
-        { name: "parameter", type: "string", required: true },
-        { name: "engineer", type: "string", required: true },
-      ];
-    }
-    // Generic event fallback — at least pass tool_id.
+    // Generic event fallback — at least pass tool_id so the pipeline runs.
     return [{ name: "tool_id", type: "string", required: true }];
   }
   // schedule trigger — input is the target object the cron iterates over.

@@ -36,6 +36,18 @@ public class EventTypeController {
 		return ApiResponse.ok(EventTypeDtos.of(e));
 	}
 
+	/** Lookup by name — used by Pipeline Builder wizard to read attributes
+	 *  (the event payload schema) and pre-populate pipeline.inputs when a
+	 *  skill is wired to event-driven trigger. Avoids a list+filter round
+	 *  trip from the frontend. */
+	@GetMapping("/by-name/{name}")
+	@PreAuthorize(Authorities.ANY_ROLE)
+	public ApiResponse<EventTypeDtos.Detail> getByName(@PathVariable String name) {
+		EventTypeEntity e = repository.findByName(name)
+				.orElseThrow(() -> ApiException.notFound("event type"));
+		return ApiResponse.ok(EventTypeDtos.of(e));
+	}
+
 	@PostMapping
 	@Transactional
 	@PreAuthorize(Authorities.ADMIN_OR_PE)

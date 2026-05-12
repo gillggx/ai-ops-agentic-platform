@@ -111,14 +111,21 @@ export default function NewPipelinePage() {
 
       if (skillCtx) {
         // Skill embed: kind="skill" (no alert; ends in step_check), seed inputs
-        // from the trigger event payload or schedule target.
+        // from the trigger event payload or schedule target. seedInputsFromCtx
+        // is async — when trigger.event is set it pulls event_types.attributes
+        // from Java so the LLM sees the same field names that arrive at runtime.
         setKind("skill");
-        const seeded = seedInputsFromCtx(skillCtx).map((s) => ({
-          name: s.name, type: s.type, required: s.required,
-          description: s.description ?? "",
-        })) as PipelineInput[];
-        setPendingInputs(seeded);
         setSkipWizard(true);
+        seedInputsFromCtx(skillCtx).then((seeds) => {
+          const seeded = seeds.map((s) => ({
+            name: s.name, type: s.type, required: s.required,
+            description: s.description ?? "",
+          })) as PipelineInput[];
+          setPendingInputs(seeded);
+        }).catch(() => {
+          // seedInputsFromCtx already swallows fetch errors and returns a
+          // safe fallback; this catch handles only Promise rejection edge.
+        });
       } else if (q === "auto_patrol" || q === "auto_check" || q === "skill") {
         setKind(q);
         setStep(q === "skill" ? 3 : 2);

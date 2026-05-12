@@ -55,6 +55,10 @@ export function getInputSuggestions(
 ): InputSuggestion[] {
   if (kind === "auto_patrol") {
     if (triggerMode === "event") {
+      // Generic fallback when caller doesn't know the event_type name yet
+      // (or DB lookup failed). For named events use getInputSuggestionsAsync
+      // — it pulls the actual event_types.attributes from Java so the wizard
+      // shows what the LLM will actually see, not a 4-field hand-rolled guess.
       return [
         {
           name: "equipment_id",
@@ -238,6 +242,89 @@ export function getInputSuggestions(
       description: "回傳筆數上限",
     },
   ];
+}
+
+// Sensible literal previews keyed by canonical attribute names. Used when
+// event_types.attributes carries no example — Auto-Run on the canvas needs
+// SOMETHING to substitute for $name or block_process_history will MISSING_PARAM.
+// Real values come from event payload at runtime.
+const _CANONICAL_EXAMPLES: Record<string, string | number> = {
+  tool_id: "EQP-01",
+  equipment_id: "EQP-01",
+  lot_id: "LOT-0001",
+  step: "STEP_001",
+  step_id: "STEP_001",
+  chamber_id: "CH-1",
+  recipe_id: "RECIPE-A",
+  apc_id: "APC-001",
+  parameter: "CD_Mean",
+  ooc_parameter: "CD_Mean",
+  spc_chart: "spc_xbar",
+  fault_code: "FDC_RGA_H2O_HIGH",
+  severity: "warning",
+  event_time: "2026-05-01T00:00:00Z",
+  process_timestamp: "2026-05-01T00:00:00Z",
+  timestamp: "2026-05-01T00:00:00Z",
+};
+
+/**
+ * Async sibling of getInputSuggestions: when the trigger event_type name
+ * is known, fetch event_types.attributes from Java and convert each
+ * attribute to an InputSuggestion. This is the description-driven path —
+ * the schema lives in DB, the wizard reads it dynamically. Falls back to
+ * the legacy hardcoded heuristics when the event isn't found / no name
+ * is provided / network fails.
+ */
+export async function getInputSuggestionsAsync(
+  kind: WizardKind,
+  triggerMode: WizardTriggerMode,
+  eventTypeName: string | null | undefined,
+  scopeType?: WizardScopeType,
+): Promise<InputSuggestion[]> {
+  if (triggerMode === "event" && eventTypeName) {
+    try {
+      const res = await fetch(
+        `/api/event-types/by-name/${encodeURIComponent(eventTypeName)}`,
+        { cache: "no-store" },
+      );
+      if (res.ok) {
+        const json = await res.json();
+        // Java envelope: { ok, data: { attributes: "<json string>" } }
+        const data = json?.data ?? json;
+        const rawAttrs = data?.attributes;
+        const attrs = typeof rawAttrs === "string"
+          ? (rawAttrs.trim() ? JSON.parse(rawAttrs) : [])
+          : (Array.isArray(rawAttrs) ? rawAttrs : []);
+        if (Array.isArray(attrs) && attrs.length > 0) {
+          return attrs.map((a: Record<string, unknown>): InputSuggestion => {
+            const name = String(a.name ?? "");
+            const required = Boolean(a.required);
+            const declaredType = String(a.type ?? "string");
+            // PipelineInput only knows string/integer/number/boolean; map the
+            // event-attribute "object" / "array" / unknown to "string" so the
+            // pipeline runtime treats them as opaque. The LLM will reference
+            // the field by name regardless.
+            const type: PipelineInputType =
+              declaredType === "integer" || declaredType === "number" || declaredType === "boolean"
+                ? (declaredType as PipelineInputType)
+                : "string";
+            return {
+              name,
+              type,
+              required,
+              preChecked: required,
+              critical: required,
+              description: String(a.description ?? `來自 event ${eventTypeName} 的 payload 欄位`),
+              example: _CANONICAL_EXAMPLES[name],
+            };
+          }).filter(s => s.name);
+        }
+      }
+    } catch {
+      // Network failure / parse failure — drop through to legacy heuristics.
+    }
+  }
+  return getInputSuggestions(kind, triggerMode, scopeType);
 }
 
 /**

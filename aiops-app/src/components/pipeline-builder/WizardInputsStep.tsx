@@ -10,13 +10,15 @@
  * every pipeline should have a parameter contract).
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { PipelineInput, PipelineInputType } from "@/lib/pipeline-builder/types";
 import {
   getInputSuggestions,
+  getInputSuggestionsAsync,
   kindInputRationale,
   kindLabel,
   suggestionToInput,
+  type InputSuggestion,
   type WizardKind,
   type WizardScopeType,
   type WizardTriggerMode,
@@ -28,15 +30,29 @@ interface Props {
   /** Scope picked in Step 2 (auto_patrol + non-event only). Affects which
    *  inputs are pre-checked and marked critical (e.g. by_step → step). */
   scopeType?: WizardScopeType;
+  /** Event type name for mode=event — drives the DB-backed schema lookup
+   *  so the wizard's checkable cards mirror event_types.attributes
+   *  exactly (the same source the runtime payload comes from). */
+  eventTypeName?: string | null;
   value: PipelineInput[];
   onChange: (next: PipelineInput[]) => void;
 }
 
-export default function WizardInputsStep({ kind, triggerMode, scopeType, value, onChange }: Props) {
-  const suggestions = useMemo(
+export default function WizardInputsStep({ kind, triggerMode, scopeType, eventTypeName, value, onChange }: Props) {
+  // Synchronous baseline — used as initial render so the user doesn't see a
+  // flash of an empty list while the async DB lookup resolves.
+  const baseline = useMemo(
     () => getInputSuggestions(kind, triggerMode, scopeType),
     [kind, triggerMode, scopeType],
   );
+  const [suggestions, setSuggestions] = useState<InputSuggestion[]>(baseline);
+  useEffect(() => {
+    let cancelled = false;
+    getInputSuggestionsAsync(kind, triggerMode, eventTypeName, scopeType)
+      .then((items) => { if (!cancelled) setSuggestions(items); })
+      .catch(() => { /* keep baseline on error */ });
+    return () => { cancelled = true; };
+  }, [kind, triggerMode, eventTypeName, scopeType]);
   const rationale = useMemo(() => kindInputRationale(kind, triggerMode), [kind, triggerMode]);
 
   // Custom-add row state

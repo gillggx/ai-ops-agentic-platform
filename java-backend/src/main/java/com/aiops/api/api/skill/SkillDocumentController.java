@@ -29,6 +29,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.Disposable;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -62,6 +63,7 @@ public class SkillDocumentController {
     private final PipelineRepository pipelineRepo;
     private final PythonSidecarClient sidecar;
     private final SkillMaterializeService materializer;
+    private final com.aiops.api.domain.event.EventTypeRepository eventTypeRepo;
 
     public SkillDocumentController(SkillDocumentRepository repository,
                                    SkillRunRepository runRepository,
@@ -71,7 +73,8 @@ public class SkillDocumentController {
                                    PersonalRuleFireRepository ruleFireRepo,
                                    PipelineRepository pipelineRepo,
                                    PythonSidecarClient sidecar,
-                                   SkillMaterializeService materializer) {
+                                   SkillMaterializeService materializer,
+                                   com.aiops.api.domain.event.EventTypeRepository eventTypeRepo) {
         this.repository = repository;
         this.runRepository = runRepository;
         this.runner = runner;
@@ -81,6 +84,7 @@ public class SkillDocumentController {
         this.pipelineRepo = pipelineRepo;
         this.sidecar = sidecar;
         this.materializer = materializer;
+        this.eventTypeRepo = eventTypeRepo;
     }
 
     /** Library listing — returns the full list, optionally filtered by stage. */
@@ -634,9 +638,18 @@ public class SkillDocumentController {
         String type = String.valueOf(trig.getOrDefault("type", "schedule"));
         List<Map<String, Object>> out = new java.util.ArrayList<>();
 
-        if ("system".equals(type)) {
-            String eventType = String.valueOf(trig.getOrDefault("event_type", ""));
+        if ("system".equals(type) || "event".equals(type)) {
+            // 2026-05-12: was only matching "system" + reading "event_type" key, but
+            // the canonical trigger_config schema is {"type":"event","event":"OOC"}
+            // (e.g. skill 42 demo-ocap-5in3out). The legacy "system" + "event_type"
+            // form is still produced by some imports — accept both.
+            String eventType = String.valueOf(trig.getOrDefault("event",
+                    trig.getOrDefault("event_type", "")));
             if (!eventType.isBlank()) {
+                // Look up event_types.attributes so the test payload mirrors what
+                // the runtime would actually deliver (alarm rows only carry 4-5
+                // canonical fields; the LLM declared inputs may reference more).
+                List<Map<String, Object>> attrSchema = lookupEventAttrSchema(eventType);
                 List<AlarmEntity> alarms = alarmRepo.findTop30ByTriggerEventOrderByCreatedAtDesc(eventType);
                 for (AlarmEntity a : alarms) {
                     Map<String, Object> tc = new java.util.HashMap<>();
@@ -650,13 +663,7 @@ public class SkillDocumentController {
                     meta.put("time", a.getEventTime() != null ? a.getEventTime().toString() : null);
                     meta.put("outcome", a.getStatus());
                     tc.put("meta", meta);
-                    Map<String, Object> payload = new java.util.HashMap<>();
-                    payload.put("event_type", eventType);
-                    payload.put("alarm_id", a.getId());
-                    payload.put("tool_id", a.getEquipmentId());
-                    payload.put("lot_id", a.getLotId());
-                    payload.put("severity", a.getSeverity());
-                    payload.put("event_time", a.getEventTime() != null ? a.getEventTime().toString() : null);
+                    Map<String, Object> payload = buildEventPayload(a, eventType, attrSchema);
                     tc.put("payload", payload);
                     out.add(tc);
                 }
@@ -696,6 +703,85 @@ public class SkillDocumentController {
         } catch (Exception e) {
             return Map.of();
         }
+    }
+
+    /** Pull the event_types.attributes JSON for an event name. Returns empty
+     *  list when the event isn't registered or the JSON fails to parse —
+     *  buildEventPayload then falls back to canonical alarm-derived fields. */
+    private List<Map<String, Object>> lookupEventAttrSchema(String eventName) {
+        try {
+            return eventTypeRepo.findByName(eventName)
+                    .map(et -> {
+                        String raw = et.getAttributes();
+                        if (raw == null || raw.isBlank()) return Collections.<Map<String, Object>>emptyList();
+                        try {
+                            return mapper.readValue(raw,
+                                    new TypeReference<List<Map<String, Object>>>() {});
+                        } catch (Exception ignore) { return Collections.<Map<String, Object>>emptyList(); }
+                    })
+                    .orElseGet(Collections::emptyList);
+        } catch (Exception e) {
+            return Collections.emptyList();
+        }
+    }
+
+    /** Build a test payload for a past alarm. Starts with the alarm-derived
+     *  canonical fields (tool / lot / severity / time / event_type), then
+     *  iterates event_types.attributes and fills any declared field that
+     *  doesn't already have a value with a sensible default. This way the
+     *  pipeline test gets EVERY field its declared inputs reference, even
+     *  for attributes the alarm row doesn't carry (parameter, ooc_details,
+     *  chamber_id, etc.). */
+    private Map<String, Object> buildEventPayload(AlarmEntity a, String eventName,
+                                                  List<Map<String, Object>> attrSchema) {
+        Map<String, Object> payload = new java.util.HashMap<>();
+        // Alarm-canonical fields under multiple names so pipelines wired with
+        // either tool_id or equipment_id (canonical OOC schema) both resolve.
+        payload.put("event_type", eventName);
+        payload.put("alarm_id", a.getId());
+        payload.put("tool_id", a.getEquipmentId());
+        payload.put("equipment_id", a.getEquipmentId());
+        payload.put("lot_id", a.getLotId());
+        payload.put("step", a.getStep());
+        payload.put("step_id", a.getStep());
+        payload.put("severity", a.getSeverity());
+        String t = a.getEventTime() != null ? a.getEventTime().toString() : null;
+        payload.put("event_time", t);
+        payload.put("timestamp", t);
+        payload.put("process_timestamp", t);
+
+        // Fill schema-declared attributes that are still null/missing with
+        // sensible defaults so the pipeline test never sees a null where the
+        // declared input has required=true.
+        for (Map<String, Object> attr : attrSchema) {
+            Object nameObj = attr.get("name");
+            if (!(nameObj instanceof String name) || name.isBlank()) continue;
+            if (payload.get(name) != null) continue;
+            String type = String.valueOf(attr.getOrDefault("type", "string"));
+            payload.put(name, _defaultForAttr(name, type));
+        }
+        return payload;
+    }
+
+    private static Object _defaultForAttr(String name, String type) {
+        return switch (name) {
+            case "tool_id", "equipment_id" -> "EQP-01";
+            case "lot_id" -> "LOT-0001";
+            case "step", "step_id" -> "STEP_001";
+            case "chamber_id" -> "CH-1";
+            case "recipe_id" -> "RECIPE-A";
+            case "parameter", "ooc_parameter" -> "CD_Mean";
+            case "spc_chart", "SPC_CHART" -> "spc_xbar";
+            case "fault_code" -> "FDC_RGA_H2O_HIGH";
+            case "severity" -> "warning";
+            default -> switch (type) {
+                case "integer", "number" -> 0;
+                case "boolean" -> Boolean.FALSE;
+                case "object" -> Map.of();
+                case "array" -> List.of();
+                default -> "";
+            };
+        };
     }
 
     /**
