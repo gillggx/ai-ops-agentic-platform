@@ -95,6 +95,11 @@ class StepCheckBlockExecutor(BlockExecutor):
         baseline = params.get("baseline")
 
         # ── Compute scalar value from the dataframe ──────────────────
+        # 2026-05-13: when upstream is empty AND aggregate isn't count/exists,
+        # value is genuinely None. Carry that through with an explicit
+        # `note` so the GUI shows "no rows matched" instead of the
+        # confusing "value not numeric: None" that misleads as a type bug.
+        upstream_empty = (df is None or len(df) == 0)
         value: Any
         if aggregate == "count":
             value = int(len(df))
@@ -145,7 +150,10 @@ class StepCheckBlockExecutor(BlockExecutor):
                 v = _coerce_numeric(value)
                 if v is None:
                     passed = False
-                    note = f"value not numeric: {value!r}"
+                    if upstream_empty:
+                        note = f"upstream returned 0 rows — aggregate={aggregate} on '{column}' has nothing to evaluate (likely filter wiped all rows)"
+                    else:
+                        note = f"value not numeric: {value!r}"
                 elif operator == ">=":
                     passed = v >= t; note = f"{v} {'≥' if passed else '<'} {t}"
                 elif operator == ">":
@@ -172,7 +180,10 @@ class StepCheckBlockExecutor(BlockExecutor):
                 v = _coerce_numeric(value)
                 if v is None:
                     passed = False
-                    note = f"value not numeric: {value!r}"
+                    if upstream_empty:
+                        note = f"upstream returned 0 rows — aggregate={aggregate} on '{column}' has nothing to evaluate (likely filter wiped all rows)"
+                    else:
+                        note = f"value not numeric: {value!r}"
                 else:
                     delta = abs(v - b)
                     passed = delta >= t
