@@ -2982,7 +2982,9 @@ def _blocks() -> list[dict[str, Any]]:
                     "column":    {"type": "string"},
                     "operator":  {
                         "type": "string",
-                        "enum": [">=", ">", "=", "<", "<=", "changed", "drift"],
+                        # `==` accepted as alias of `=` (executor normalizes;
+                        # SQL派 vs Python派 都該認)
+                        "enum": [">=", ">", "=", "==", "<", "<=", "changed", "drift"],
                         "default": ">=",
                     },
                     "threshold": {"type": "number"},

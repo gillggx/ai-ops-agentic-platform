@@ -189,6 +189,78 @@ def _columns_for_block_port(
         return ["slope", "intercept", "r_squared", "p_value", "n", "stderr", "group"]
 
     # ── Dynamic-output blocks: column names depend on params ─────────────
+    # block_process_history.nested controls the shape of its output. Static
+    # output_columns_hint only lists the FLAT mode columns; when the user
+    # opts into nested (default since 2026-05-13) we surface path entries the
+    # LLM can actually use (spc_summary.ooc_count / spc_charts[].name etc.).
+    if block_id == "block_process_history":
+        nested = params.get("nested")
+        if nested is None:
+            nested = True  # current default
+        if nested:
+            # Base scalar fields + spc_summary + spc_charts array + nested
+            # APC / DC / RECIPE / FDC / EC sub-objects. Use array-syntax for
+            # spc_charts items so LLM knows it's an array path.
+            return [
+                "eventTime", "toolID", "lotID", "step",
+                "spc_status", "fdc_classification",
+                # spc_summary precomputed
+                "spc_summary.ooc_count",
+                "spc_summary.total_charts",
+                "spc_summary.ooc_chart_names",
+                # spc_charts array path
+                "spc_charts",
+                "spc_charts[].name",
+                "spc_charts[].value",
+                "spc_charts[].ucl",
+                "spc_charts[].lcl",
+                "spc_charts[].is_ooc",
+                "spc_charts[].status",
+                # APC / DC / RECIPE / FDC / EC stay as nested object subtrees
+                "APC", "APC.objectID", "APC.parameters",
+                "DC", "DC.chamberID",
+                "RECIPE", "RECIPE.objectID", "RECIPE.recipe_version",
+                "FDC", "FDC.classification", "FDC.fault_code",
+                "EC", "EC.constants",
+            ]
+        # Fall through to flat-hint walk below for nested=False
+    if block_id == "block_unnest":
+        # Output columns = elements of the upstream array, lifted to top-level.
+        # We don't statically know what's inside an arbitrary array, but for the
+        # common `spc_charts` array (the SPC use case) we can hardcode the schema
+        # because it comes from block_process_history(nested=true).
+        column = (params.get("column") or "").strip()
+        if column in ("spc_charts", "spc_charts[]"):
+            up_cols = _expected_upstream_columns(pipeline, upstream, registry, depth=depth + 1) or []
+            # Keep sibling top-level cols + add per-element fields
+            keep = [c for c in up_cols if not c.startswith("spc_charts") and not c.startswith("spc_summary")]
+            return keep + ["name", "value", "ucl", "lcl", "is_ooc", "status"]
+        # Generic case — assume sibling columns + can't introspect inside array
+        return _expected_upstream_columns(pipeline, upstream, registry, depth=depth + 1)
+    if block_id == "block_pluck":
+        path = (params.get("path") or "").strip()
+        as_col = (params.get("as_column") or "").strip()
+        if not path:
+            return None
+        out_col = as_col or path.rsplit(".", 1)[-1].replace("[]", "")
+        if params.get("keep_other"):
+            up = _expected_upstream_columns(pipeline, upstream, registry, depth=depth + 1) or []
+            return list(up) + [out_col]
+        return [out_col]
+    if block_id == "block_select":
+        fields = params.get("fields") or []
+        if not isinstance(fields, list):
+            return None
+        out: list[str] = []
+        for f in fields:
+            if not isinstance(f, dict):
+                continue
+            p = f.get("path") or ""
+            name = f.get("as") or p.rsplit(".", 1)[-1].replace("[]", "")
+            if name:
+                out.append(name)
+        return out or None
+
     if block_id == "block_groupby_agg":
         cols: list[str] = []
         group_by = (params.get("group_by") or "").strip()
