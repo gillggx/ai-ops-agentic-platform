@@ -490,6 +490,8 @@ export default function Playbook({
             slug={slug}
             mode={mode}
             confirmCheck={confirmCheck}
+            triggerJson={JSON.stringify(trigger)}
+            titleForSave={title}
             onSet={(cc) => { setConfirmCheck(cc); markDirty(); }}
             onReload={reload}
             onInspect={openInspect}
@@ -2128,11 +2130,20 @@ function SummaryReport({
 /* ── Phase 11 v2: CONFIRM section (gating step) ────────────────────── */
 
 function ConfirmSection({
-  slug, mode, confirmCheck, onSet, onReload, onInspect,
+  slug, mode, confirmCheck, triggerJson, titleForSave,
+  onSet, onReload, onInspect,
 }: {
   slug: string;
   mode: "author" | "run";
   confirmCheck: ConfirmCheck | null;
+  /** Parent's current trigger (serialised) so Build → Pipeline Builder
+   *  pre-saves it alongside the c1 description. Without this, an unsaved
+   *  trigger change is dropped on Build navigation and the Builder URL
+   *  carries an empty trigger_config → seedInputsFromCtx falls back to
+   *  the generic [tool_id] suggestion instead of the event payload schema. */
+  triggerJson: string;
+  /** Parent's current title (saved alongside everything else for parity). */
+  titleForSave: string;
   onSet: (cc: ConfirmCheck | null) => void;
   onReload: () => void;
   onInspect: (pipelineId: number) => void;
@@ -2155,9 +2166,14 @@ function ConfirmSection({
     if (!text.trim() && slot === "confirm") return;
     setBusy(true); setError(null);
     try {
-      // Pre-save the c1 description so the prose survives if user never
-      // hits "Done — bind to Skill" in Builder. We keep pipeline_id from
-      // any existing confirmCheck (refine path) or set null (fresh build).
+      // Pre-save c1 description + trigger_config + title so the entire
+      // dirty state lands in DB before navigation. User reported they
+      // selected event=OOC in the trigger picker but didn't click Save
+      // Draft → builder-url endpoint read DB's still-empty trigger_config
+      // → seedInputsFromCtx fell back to [tool_id]. The trigger picker
+      // dirties the parent's local state; we serialise it here so a
+      // Build click is treated as "set + go" instead of "set, remember
+      // to save, then go".
       if (slot === "confirm") {
         const existingPid = confirmCheck?.pipeline_id ?? null;
         const cc = {
@@ -2169,7 +2185,11 @@ function ConfirmSection({
         const putRes = await fetch(`/api/skill-documents/${encodeURIComponent(slug)}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ confirm_check: JSON.stringify(cc) }),
+          body: JSON.stringify({
+            title: titleForSave,
+            trigger_config: triggerJson,
+            confirm_check: JSON.stringify(cc),
+          }),
         });
         if (!putRes.ok) {
           const ej = await putRes.json().catch(() => ({}));
