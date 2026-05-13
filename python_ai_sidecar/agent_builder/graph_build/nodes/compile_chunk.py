@@ -153,6 +153,117 @@ def _collect_upstream_cols(plan: list[dict], exec_trace: dict) -> set[str]:
     return cols
 
 
+def _block_output_types(block_id: str, catalog: dict) -> dict[str, str]:
+    """Return {port: type} for a block's output_schema."""
+    for (name, _v), spec in catalog.items():
+        if name == block_id:
+            out = {}
+            for port in (spec.get("output_schema") or []):
+                if isinstance(port, dict):
+                    out[port.get("port", "")] = port.get("type", "")
+            return out
+    return {}
+
+
+def _block_input_types(block_id: str, catalog: dict) -> dict[str, str]:
+    for (name, _v), spec in catalog.items():
+        if name == block_id:
+            out = {}
+            for port in (spec.get("input_schema") or []):
+                if isinstance(port, dict):
+                    out[port.get("port", "")] = port.get("type", "")
+            return out
+    return {}
+
+
+def _block_id_of_logical(lid: str, plan: list[dict], new_ops: list[dict]) -> str | None:
+    """Find block_id for a logical node id (n1, n2, ...) by scanning add_node ops."""
+    for op in list(new_ops) + list(plan):
+        if op.get("type") == "add_node" and op.get("node_id") == lid:
+            return op.get("block_id")
+    return None
+
+
+def _auto_rewire_chart_chains(
+    new_ops: list[dict[str, Any]],
+    plan: list[dict[str, Any]],
+    catalog: dict,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """When a new connect's src is a chart-output (chart_spec / dict / bool)
+    node but dst expects dataframe, rewire src to the latest dataframe-
+    outputting node in plan. Chart blocks are terminal — chaining one chart
+    into another's dataframe input is a structural error the LLM does
+    repeatedly when a macro plan lists multiple analyses sequentially.
+
+    Returns (rewritten_ops, notes).
+    """
+    if not new_ops:
+        return new_ops, []
+
+    # Build the list of dataframe-outputting nodes in execution order
+    # (plan first, then new_ops). The "latest dataframe" is the closest
+    # such node before any chart node we just added.
+    dataframe_lids: list[str] = []
+    for op in list(plan) + list(new_ops):
+        if op.get("type") != "add_node":
+            continue
+        lid = op.get("node_id")
+        block_id = op.get("block_id")
+        if not lid or not block_id:
+            continue
+        out_types = _block_output_types(block_id, catalog)
+        if "data" in out_types and out_types["data"] == "dataframe":
+            dataframe_lids.append(lid)
+
+    if not dataframe_lids:
+        return new_ops, []
+
+    notes: list[str] = []
+    rewritten: list[dict[str, Any]] = []
+    for op in new_ops:
+        if op.get("type") != "connect":
+            rewritten.append(op)
+            continue
+        src_lid = op.get("src_id") or ""
+        dst_lid = op.get("dst_id") or ""
+        src_block = _block_id_of_logical(src_lid, plan, new_ops)
+        dst_block = _block_id_of_logical(dst_lid, plan, new_ops)
+        if not src_block or not dst_block:
+            rewritten.append(op)
+            continue
+        src_out = _block_output_types(src_block, catalog)
+        dst_in = _block_input_types(dst_block, catalog)
+        src_port = op.get("src_port") or "data"
+        dst_port = op.get("dst_port") or "data"
+        src_type = src_out.get(src_port)
+        dst_type = dst_in.get(dst_port)
+        # Source can't supply a dataframe on the requested port when EITHER
+        # the named port doesn't exist on src OR exists but is non-dataframe
+        # (chart_spec/dict/bool). Both mean "this is a chart→data chaining
+        # mistake; rewire to the nearest upstream dataframe-emitting node".
+        src_has_dataframe = any(t == "dataframe" for t in src_out.values())
+        src_supplies_dataframe_on_port = src_type == "dataframe"
+        if dst_type == "dataframe" and not src_supplies_dataframe_on_port and not src_has_dataframe:
+            # Find latest dataframe lid that comes BEFORE the dst in plan order
+            # Simplest: use the latest dataframe lid that's not the dst itself
+            candidates = [lid for lid in dataframe_lids if lid != dst_lid]
+            if candidates:
+                new_src = candidates[-1]
+                rewritten.append({
+                    **op,
+                    "src_id": new_src,
+                    "src_port": "data",
+                })
+                notes.append(
+                    f"auto-rewired connect dst={dst_lid}({dst_block}): "
+                    f"src {src_lid}({src_block}, {src_type}) → {new_src} (dataframe)"
+                )
+                continue
+        rewritten.append(op)
+
+    return rewritten, notes
+
+
 def _find_unnest_block(catalog: dict) -> str | None:
     """Locate the catalog's list→rows explode block by capability, not by
     name. Heuristic: a block whose param_schema accepts a single `column`
@@ -662,7 +773,7 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
     upstream_cols = _collect_upstream_cols(
         state.get("plan") or [], state.get("exec_trace") or {},
     )
-    # Auto-fix: if any op references a leaf of a nested upstream col,
+    # Auto-fix #1: if any op references a leaf of a nested upstream col,
     # prepend an unnest of the parent + re-wire connects. Saves a
     # retry round-trip when the structural fix is unambiguous.
     new_ops, autofix_notes = _auto_insert_unnest(
@@ -670,8 +781,22 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
     )
     if autofix_notes:
         logger.info(
-            "compile_chunk_node: step %s autofix: %s",
+            "compile_chunk_node: step %s unnest autofix: %s",
             step_key, "; ".join(autofix_notes[:3]),
+        )
+
+    # Auto-fix #2: when LLM chains chart→dataframe by mistake (multi-
+    # analysis macro plans default to linear chaining), rewire each
+    # connect's src to the latest dataframe-outputting node so each
+    # chart branches from the shared upstream instead of consuming the
+    # previous chart's chart_spec.
+    new_ops, rewire_notes = _auto_rewire_chart_chains(
+        new_ops, state.get("plan") or [], registry.catalog,
+    )
+    if rewire_notes:
+        logger.info(
+            "compile_chunk_node: step %s chart-chain autofix: %s",
+            step_key, "; ".join(rewire_notes[:3]),
         )
     col_issues = _validate_column_refs(new_ops, upstream_cols)
     if col_issues:
