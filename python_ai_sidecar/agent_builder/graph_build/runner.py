@@ -28,11 +28,19 @@ from python_ai_sidecar.agent_builder.session import StreamEvent
 logger = logging.getLogger(__name__)
 
 
-def _flush_sse_events(state_after: dict) -> list[StreamEvent]:
-    """Pull and clear the sse_events buffer that nodes wrote into state."""
+def _flush_sse_events(state_after: dict, offset: int) -> tuple[list[StreamEvent], int]:
+    """Yield only events appended to sse_events since the last flush.
+
+    state.sse_events is extend-only (see _extend_sse in state.py). Without
+    an offset, every astream tick re-yields the full buffer — the same
+    "加入 node X" event surfaces twice as the graph passes through nodes
+    that don't return sse_events (e.g. advance_macro_step).
+    """
     events = state_after.get("sse_events") or []
-    out = [StreamEvent(type=ev.get("event", "operation"), data=ev.get("data") or {}) for ev in events]
-    return out
+    new_events = events[offset:]
+    out = [StreamEvent(type=ev.get("event", "operation"), data=ev.get("data") or {})
+           for ev in new_events]
+    return out, len(events)
 
 
 async def stream_graph_build(
@@ -97,9 +105,11 @@ async def stream_graph_build(
         # the full state after each node finishes, which lets us flush
         # sse_events incrementally. interrupt() shows up as a special
         # __interrupt__ entry.
+        sse_offset = 0
         async for chunk in graph.astream(init, config=config, stream_mode="values"):
             last_state = chunk if isinstance(chunk, dict) else {}
-            for ev in _flush_sse_events(last_state):
+            new_events, sse_offset = _flush_sse_events(last_state, sse_offset)
+            for ev in new_events:
                 yield ev
     finally:
         if tracer is not None:
@@ -271,13 +281,19 @@ async def resume_graph_build(
     logger.info("resume_graph_build: session=%s confirmed=%s", session_id, confirmed)
     last_state: dict = {}
 
+    # Seed offset with the pre-existing sse_events length so we don't
+    # re-yield events from before the resume.
+    pre_state = await graph.aget_state(config)
+    sse_offset = len((pre_state.values or {}).get("sse_events") or [])
+
     async for chunk in graph.astream(
         Command(resume={"confirmed": confirmed}),
         config=config,
         stream_mode="values",
     ):
         last_state = chunk if isinstance(chunk, dict) else {}
-        for ev in _flush_sse_events(last_state):
+        new_events, sse_offset = _flush_sse_events(last_state, sse_offset)
+        for ev in new_events:
             yield ev
 
     # Detect another interrupt mid-stream (e.g. confirm_gate after clarify
@@ -336,13 +352,17 @@ async def resume_graph_build_with_modify(
     )
     last_state: dict = {}
 
+    pre_state = await graph.aget_state(config)
+    sse_offset = len((pre_state.values or {}).get("sse_events") or [])
+
     async for chunk in graph.astream(
         Command(resume={"modify": True, "step_idx": step_idx, "request": request}),
         config=config,
         stream_mode="values",
     ):
         last_state = chunk if isinstance(chunk, dict) else {}
-        for ev in _flush_sse_events(last_state):
+        new_events, sse_offset = _flush_sse_events(last_state, sse_offset)
+        for ev in new_events:
             yield ev
 
     state_obj = await graph.aget_state(config)
@@ -405,13 +425,16 @@ async def resume_graph_build_with_clarify(
     if tracer is not None:
         await tracer.__aenter__()
     try:
+        pre_state = await graph.aget_state(config)
+        sse_offset = len((pre_state.values or {}).get("sse_events") or [])
         async for chunk in graph.astream(
             Command(resume={"answers": answers}),
             config=config,
             stream_mode="values",
         ):
             last_state = chunk if isinstance(chunk, dict) else {}
-            for ev in _flush_sse_events(last_state):
+            new_events, sse_offset = _flush_sse_events(last_state, sse_offset)
+            for ev in new_events:
                 yield ev
     finally:
         if tracer is not None:

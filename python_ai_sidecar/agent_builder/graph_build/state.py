@@ -6,7 +6,21 @@ is JSON-serializable for any future Redis-backed checkpointer.
 """
 from __future__ import annotations
 
-from typing import Any, Literal, Optional, TypedDict
+from typing import Annotated, Any, Literal, Optional, TypedDict
+
+
+def _extend_sse(left: list[dict] | None, right: list[dict] | None) -> list[dict]:
+    """Reducer for sse_events — append new events, never replace.
+
+    Without a reducer, LangGraph's default behaviour for `list[dict]` is
+    replace-on-update. Nodes that don't return `sse_events` then leave
+    the prior list intact in state — and runner's _flush_sse_events
+    re-yields it on every astream tick, producing duplicate frontend
+    events ("加入 node X" appearing twice in a row). With this reducer
+    the list accumulates; runner tracks an offset and only yields new
+    entries.
+    """
+    return (left or []) + (right or [])
 
 
 GraphStatus = Literal[
@@ -112,7 +126,7 @@ class BuildGraphState(TypedDict, total=False):
 
     # ── Output / streaming ────────────────────────────────────────────
     final_pipeline: Optional[dict]       # PipelineJSON dump after finalize
-    sse_events: list[dict]               # accumulated events for runner to flush
+    sse_events: Annotated[list[dict], _extend_sse]  # accumulated events for runner to flush (extend-only)
     status: GraphStatus
     summary: Optional[str]
 
