@@ -25,6 +25,15 @@ logger = logging.getLogger(__name__)
 async def call_tool_node(state: BuildGraphState) -> dict[str, Any]:
     cursor = state.get("cursor", 0)
     plan = state.get("plan") or []
+    # Defensive guard: reflect_op / repair_op may bail without rewinding
+    # the cursor, leaving cursor past plan length. Route_after_call then
+    # decides next_chunk vs finalize — we just must not crash here.
+    if cursor >= len(plan):
+        logger.warning(
+            "call_tool_node: cursor=%d >= len(plan)=%d — no-op",
+            cursor, len(plan),
+        )
+        return {}
     op = plan[cursor]
     logical_to_real = dict(state.get("logical_to_real", {}))
     base_pipeline_dict = state.get("base_pipeline") or None

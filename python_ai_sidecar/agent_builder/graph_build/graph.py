@@ -335,9 +335,22 @@ def build_graph():
     g.add_edge("repair_op", "call_tool")
     # v8: reflect_op patches the failing op + rewinds cursor; loop back
     # to dispatch so call_tool re-runs the patched op. If reflect_op
-    # bails (budget / parse fail), it clears last_op_issue and the next
-    # dispatch sees a clean state.
-    g.add_edge("reflect_op", "dispatch_op")
+    # bails (budget / parse fail / rollback distance exceeded), cursor
+    # may already be past plan length — route via _route_after_call so
+    # we cleanly hand off to next_chunk / finalize / dispatch_op instead
+    # of unconditionally dispatching into an out-of-bounds plan[cursor].
+    g.add_conditional_edges(
+        "reflect_op",
+        _route_after_call,
+        {
+            "dispatch_op": "dispatch_op",
+            "repair_op": "repair_op",
+            "reflect_op": "reflect_op",
+            "repair_plan": "repair_plan",
+            "finalize": "finalize",
+            "next_chunk": "advance_macro_step",
+        },
+    )
     # Self-correction loop (2026-05-13):
     #   finalize → inspect_execution
     #     ├─ no issues / budget exhausted → layout → END
