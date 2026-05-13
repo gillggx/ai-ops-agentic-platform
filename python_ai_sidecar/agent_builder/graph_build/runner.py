@@ -62,7 +62,7 @@ async def stream_graph_build(
     # (dispatch_op + call_tool). A 30-op plan needs ~60 visits; 50 was below
     # that and crashed mid-execution on user's skill 54 build. 150 gives
     # headroom for repair_op + repair_plan loops too.
-    config = {"configurable": {"thread_id": sid}, "recursion_limit": 150}
+    config = {"configurable": {"thread_id": sid}, "recursion_limit": 300}
 
     init = initial_state(
         session_id=sid,
@@ -266,7 +266,7 @@ async def resume_graph_build(
 ) -> AsyncGenerator[StreamEvent, None]:
     """Resume a paused graph (post-confirm_gate) with user's decision."""
     graph = build_graph()
-    config = {"configurable": {"thread_id": session_id}, "recursion_limit": 150}
+    config = {"configurable": {"thread_id": session_id}, "recursion_limit": 300}
 
     logger.info("resume_graph_build: session=%s confirmed=%s", session_id, confirmed)
     last_state: dict = {}
@@ -328,7 +328,7 @@ async def resume_graph_build_with_modify(
     a special marker that route_after_confirm interprets as "replan".
     """
     graph = build_graph()
-    config = {"configurable": {"thread_id": session_id}, "recursion_limit": 150}
+    config = {"configurable": {"thread_id": session_id}, "recursion_limit": 300}
 
     logger.info(
         "resume_graph_build_with_modify: session=%s step_idx=%s request=%r",
@@ -383,7 +383,7 @@ async def resume_graph_build_with_clarify(
     answers to the clarification questions. The graph continues into
     plan_node (or pauses again at confirm_gate as the normal flow)."""
     graph = build_graph()
-    config = {"configurable": {"thread_id": session_id}, "recursion_limit": 150}
+    config = {"configurable": {"thread_id": session_id}, "recursion_limit": 300}
 
     logger.info("resume_graph_build_with_clarify: session=%s answers=%s",
                 session_id, list(answers.keys()))
