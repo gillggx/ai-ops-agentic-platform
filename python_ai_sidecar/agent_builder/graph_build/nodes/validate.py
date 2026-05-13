@@ -249,6 +249,28 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
                     f"don't substitute arbitrary defaults."
                 )
 
+        # (d3) block_step_check with numeric operator MUST have threshold.
+        # User reported pipeline 103 (case 2 3-chart diagnostic): LLM emitted
+        # step_check(operator=">=", threshold=null) because the prompt had
+        # no obvious pass/fail bar. Runtime then raised MISSING_PARAM → run
+        # error. Catch at plan time so repair_plan picks a sensible default
+        # (e.g. aggregate=exists, or count>=1 for "did any data come through").
+        NUMERIC_OPS = {">=", ">", "=", "==", "<", "<="}
+        for idx_op, op in enumerate(parsed):
+            if op is None or op.type != OpType.ADD_NODE:
+                continue
+            if op.block_id != "block_step_check":
+                continue
+            params = op.params or {}
+            operator = params.get("operator")
+            if operator in NUMERIC_OPS and params.get("threshold") is None:
+                errors.append(
+                    f"Op#{idx_op}: block_step_check operator={operator!r} requires a numeric "
+                    f"`threshold` (got None). If the user instruction has no obvious bar, "
+                    f"use aggregate='exists' operator='==' threshold=true (pass if any data) "
+                    f"OR aggregate='count' operator='>=' threshold=1 (pass if any rows)."
+                )
+
         # (d2) "Visualize means chart, not list" rule.
         # When the user's instruction has visualization keywords (顯示 / 畫 /
         # show / chart / plot / trend / 趨勢 / 視覺化), the plan must contain
