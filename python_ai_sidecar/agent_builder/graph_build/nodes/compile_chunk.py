@@ -91,6 +91,95 @@ def _strip_fence(text: str) -> str:
     return _FENCE_RE.sub("", text.strip()).strip()
 
 
+# Param names that carry column references — per block. If the LLM emits
+# a value for any of these and it's a single string (or a list of strings
+# for the *_list variants), we check against upstream cols.
+_COLUMN_REF_PARAMS = {
+    "block_filter": ["column"],
+    "block_sort": ["columns"],            # list[str]
+    "block_select": ["fields"],           # list[str]
+    "block_groupby_agg": ["group_by", "agg_column"],
+    "block_line_chart": ["x", "y"],
+    "block_bar_chart": ["x", "y"],
+    "block_scatter": ["x", "y"],
+    "block_area_chart": ["x", "y"],
+    "block_pie_chart": ["category", "value"],
+    "block_data_view": ["columns"],
+    "block_threshold": ["column"],
+    "block_consecutive_rule": ["column"],
+    "block_linear_regression": ["x_column", "y_column"],
+    "block_unnest": ["column"],
+    "block_pluck": ["column"],
+    "block_step_check": ["column"],
+}
+
+
+def _collect_upstream_cols(plan: list[dict], exec_trace: dict) -> set[str]:
+    """Union of cols observed in exec_trace for any logical id in plan.
+
+    Used by _validate_column_refs as the "allowed columns" set. Each
+    block's preview adds a snapshot keyed by logical id; we union them
+    so a column emitted by ANY upstream node is considered valid.
+    """
+    cols: set[str] = set()
+    for op in plan:
+        if op.get("type") != "add_node":
+            continue
+        lid = op.get("node_id")
+        snap = exec_trace.get(lid) or {}
+        for c in snap.get("cols") or []:
+            cols.add(c)
+            # nested path syntax: 'spc_summary.ooc_count' — also accept
+            # the prefix 'spc_summary' so users can reference the parent.
+            if "." in c:
+                cols.add(c.split(".", 1)[0])
+            if "[]" in c:
+                cols.add(c.split("[]", 1)[0])
+    return cols
+
+
+def _validate_column_refs(
+    new_ops: list[dict[str, Any]],
+    upstream_cols: set[str],
+) -> list[str]:
+    """Check every new add_node's column-ref params against upstream_cols.
+    Returns list of human-readable issues; empty if all refs are valid.
+
+    Skips validation if upstream_cols is empty (first compile step has
+    no upstream snapshots yet — source block's params are user-given).
+    Also passes any string value starting with '$' (declared input ref)
+    and any value not in our column-ref param map (free-form params).
+    """
+    if not upstream_cols:
+        return []
+    issues: list[str] = []
+    for op in new_ops:
+        if op.get("type") != "add_node":
+            continue
+        block_id = op.get("block_id") or ""
+        ref_params = _COLUMN_REF_PARAMS.get(block_id)
+        if not ref_params:
+            continue
+        params = op.get("params") or {}
+        for pname in ref_params:
+            val = params.get(pname)
+            candidates = val if isinstance(val, list) else [val]
+            for cand in candidates:
+                if not isinstance(cand, str) or not cand:
+                    continue
+                if cand.startswith("$"):
+                    continue
+                # Allow dotted paths whose ROOT is a known col
+                root = cand.split(".", 1)[0].split("[", 1)[0]
+                if cand in upstream_cols or root in upstream_cols:
+                    continue
+                issues.append(
+                    f"{block_id}.{pname}='{cand}' not in upstream cols "
+                    f"({sorted(upstream_cols)[:8]}…)"
+                )
+    return issues
+
+
 def _dedup_against_plan(
     new_ops: list[dict[str, Any]],
     existing_plan: list[dict[str, Any]],
@@ -329,6 +418,34 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
             "compile_chunk_node: step %s dedup dropped %d op(s): %s",
             step_key, len(dropped), dropped[:4],
         )
+
+    # Deterministic column-ref check — if the LLM emitted a filter /
+    # sort / chart / select op referencing a column not in any upstream
+    # node's exec_trace snapshot, retry compile_chunk with the issue in
+    # plan_validation_errors instead of letting a doomed op enter the
+    # plan and cascade through reflect_op. This is the main brake on
+    # "filter column='chart_name'" / "sort by 'eventTime' after groupby"
+    # style hallucinations.
+    upstream_cols = _collect_upstream_cols(
+        state.get("plan") or [], state.get("exec_trace") or {},
+    )
+    col_issues = _validate_column_refs(new_ops, upstream_cols)
+    if col_issues:
+        logger.warning(
+            "compile_chunk_node: step %s attempt %d col-ref issues: %s — retry",
+            step_key, attempts, col_issues[:3],
+        )
+        return {
+            "compile_attempts": attempts_map,
+            "plan_validation_errors": [
+                f"step {step_key} column refs invalid: " + "; ".join(col_issues[:3])
+            ],
+            "sse_events": [_event("compile_chunk_error", {
+                "step_idx": step.get("step_idx"),
+                "error": "column_ref_invalid: " + "; ".join(col_issues[:2]),
+                "attempts": attempts,
+            })],
+        }
 
     if not new_ops:
         logger.warning("compile_chunk_node: step %s produced 0 ops", step_key)

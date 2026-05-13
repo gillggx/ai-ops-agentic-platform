@@ -53,20 +53,48 @@ logger = logging.getLogger(__name__)
 MAX_MACRO_STEPS = 12
 
 
-_SYSTEM = """你是 pipeline architect。User 給你需求，你把它**拆成 5-10 個高階步驟**，每步驟用一句中文描述要做什麼。
+_SYSTEM = """你是 pipeline architect。User 給你需求，你把它**拆成 3-6 個高階步驟**，每步驟用一句中文描述要做什麼。
 
 不要寫 JSON ops / 不要選 block 細項 / 不要寫 params — 那是下一個 worker 的工作。
 
 你只要決定:
-  1. 每個 step 做什麼資料動作 (撈/過濾/排序/聚合/篩選/列出/視覺化/判定)
+  1. 每個 step 做什麼資料動作 (撈/過濾/排序/解 nested/視覺化/判定)
   2. 每個 step 預期輸出的「形狀」(transform/table/chart/scalar)
   3. 終端 step (table/chart/scalar) 的預期欄位 (若 user 有明說)
-  4. 大概用哪個 block (e.g. process_history / filter / sort / unnest / step_check / data_view) — **只是建議候選**，最終 block 選擇交給下一階段
+  4. 大概用哪個 block — **只是建議候選**，最終 block 選擇交給下一階段
 
 整個 macro plan 必須:
   - 起點是 source block (block_process_history / block_mcp_call 之類)
-  - 終點包含 1 個 verdict (block_step_check) — skill_step_mode=true 時必須
-  - 必要時可以有 side branch (verdict 一條，視覺化另一條)
+  - **chat 模式 (預設) 終點是 chart / table / scalar**，**不要加 block_step_check verdict**
+  - skill_step_mode=true 才需要 block_step_check 收尾
+  - 必要時可以有 side branch
+
+⚠ 不要加多餘步驟：
+  - **不要 select 欄位**（chart block 自己會挑），除非 user 明說「列出某幾欄表格」
+  - **不要 aggregate / groupby**，除非 user 明說「按 X 分組 / 計數」
+  - **看趨勢就是 source → unnest(nested) → filter → sort → chart**，不要再多
+
+== 常見 pattern 範例 ==
+
+Q: 「看某機台 xbar 趨勢」
+A: 5 steps
+  1. 撈 process_history (tool_id=該機台, limit=100)
+  2. 解 spc_charts nested 結構（block_unnest column='spc_charts'）
+  3. 過濾 name='xbar'
+  4. 按 eventTime 排序
+  5. 畫 line_chart (x=eventTime, y=value)
+
+Q: 「最近 OOC 次數」
+A: 3-4 steps
+  1. 撈 process_history (time_range, 限定 spc_status='OOC')
+  2. 計算 OOC 數量（group by toolID or step）
+  3. 列出 table 或 bar_chart
+
+Q: 「OOC 超過 2 次警告」(skill_step_mode)
+A: 4-5 steps
+  1. 撈 process_history
+  2. 計算 OOC count
+  3. block_step_check 判斷 >= 2 → verdict
 
 如果 user 的需求過於模糊或不適合 build pipeline，回 {"too_vague": true, "reason": "..."}。
 
@@ -89,7 +117,7 @@ _SYSTEM = """你是 pipeline architect。User 給你需求，你把它**拆成 5
   - 每 step 1 句話即可，不要寫很長
   - 步驟順序是執行順序 (含 source → terminal)
   - candidate_block 用上面列出的 block 名稱命名格式 (block_xxx)
-  - **5-10 步**是合理範圍；超過 10 步代表你拆得太細，請合併
+  - **3-6 步**是合理範圍；超過 6 步代表你拆得太細，請合併
 """
 
 
@@ -247,15 +275,28 @@ async def macro_plan_node(state: BuildGraphState) -> dict[str, Any]:
             text_val = str(item.get("text") or "").strip()
             if not text_val:
                 continue
+            candidate_block = str(item.get("candidate_block") or "")
+            # Chat mode never wants a verdict gate — block_step_check has a
+            # bool output port and breaks any downstream chart connect. If
+            # the LLM added one despite the prompt, drop the step entirely.
+            if not skill_step_mode and candidate_block == "block_step_check":
+                logger.info(
+                    "macro_plan_node: dropped step_idx=%s (block_step_check forbidden in chat mode)",
+                    step_idx,
+                )
+                continue
             macro_plan.append({
                 "step_idx": int(step_idx),
                 "text": text_val,
                 "expected_kind": str(item.get("expected_kind") or "transform"),
                 "expected_cols": list(item.get("expected_cols") or []),
-                "candidate_block": str(item.get("candidate_block") or ""),
+                "candidate_block": candidate_block,
                 "completed": False,
                 "ops_appended": 0,
             })
+    # Renumber step_idx after any drops so compile_chunk doesn't see gaps.
+    for new_i, step in enumerate(macro_plan, 1):
+        step["step_idx"] = new_i
 
     if not macro_plan:
         return {
