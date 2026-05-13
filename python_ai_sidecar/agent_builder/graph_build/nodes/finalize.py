@@ -77,7 +77,17 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
     # graph.
     validator = PipelineValidator(registry.catalog)
     issues = validator.validate(pipeline)
-    _STRUCTURAL_RULES = {"C6_PARAM_SCHEMA", "C14_ORPHAN_NODE", "C15_SOURCE_LESS_NODE"}
+    # 2026-05-13: C4_PORT_COMPAT is now structural. Saw pipeline #135 ship
+    # with edge n6→n3 (data_view → process_history) — process_history has
+    # no `data` input port so the edge is meaningless, but the executor
+    # treats target as a downstream-dependent node and skips it, cascading
+    # the whole branch. Force the build to fail so reflect_plan repairs it.
+    _STRUCTURAL_RULES = {
+        "C6_PARAM_SCHEMA",
+        "C14_ORPHAN_NODE",
+        "C15_SOURCE_LESS_NODE",
+        "C4_PORT_COMPAT",
+    }
     structural_issues = [i for i in issues if i.get("rule") in _STRUCTURAL_RULES]
     advisory_issues = [i for i in issues if i.get("rule") not in _STRUCTURAL_RULES]
 

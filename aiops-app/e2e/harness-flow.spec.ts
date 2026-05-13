@@ -142,7 +142,7 @@ test.describe("Harness flow — stable skill, repeated builds", () => {
 
     // ── 6. Save → wait for /[id] URL → Done ──────────────────────
     await builder.locator('button:has-text("Save")').first().click();
-    await builder.waitForURL(/admin\/pipeline-builder\/\d+/, { timeout: 60_000 });
+    await builder.waitForURL(/admin\/pipeline-builder\/\d+/, { timeout: 120_000 });
     const pid = Number(builder.url().match(/pipeline-builder\/(\d+)/)?.[1]);
     expect(pid).toBeGreaterThan(0);
     console.log(`[6/7] saved pipeline #${pid}`);
