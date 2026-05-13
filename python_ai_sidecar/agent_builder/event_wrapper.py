@@ -139,12 +139,58 @@ def wrap_build_event_for_chat(
         msg = data.get("message") or "pipeline 跑通但沒回任何資料"
         payload["type"] = "pb_glass_chat"
         payload["content"] = f"ℹ {msg}"
+    # ── v16: macro+chunk events ───────────────────────────────────────
+    elif evt_type == "macro_plan_proposed":
+        summary = (data.get("summary") or "").strip()
+        steps = data.get("macro_plan") or []
+        n = data.get("n_steps") or len(steps)
+        lines = [f"📋 計畫：{summary}" if summary else f"📋 計畫（{n} 步）"]
+        for s in steps[:8]:
+            idx = s.get("step_idx", "?")
+            txt = s.get("text") or ""
+            kind = s.get("expected_kind") or ""
+            kind_tag = f" [{kind}]" if kind else ""
+            lines.append(f"  {idx}. {txt}{kind_tag}")
+        if len(steps) > 8:
+            lines.append(f"  …+{len(steps) - 8} more")
+        payload["type"] = "pb_glass_chat"
+        payload["content"] = "\n".join(lines)
+    elif evt_type == "chunk_compiled":
+        idx = data.get("step_idx") or "?"
+        text_val = data.get("step_text") or ""
+        n_ops = data.get("n_ops") or 0
+        attempts = data.get("attempts", 1)
+        attempt_tag = f"（第 {attempts} 次）" if attempts > 1 else ""
+        payload["type"] = "pb_glass_chat"
+        payload["content"] = f"⚙ Step {idx} 編譯 → {n_ops} ops{attempt_tag}：{text_val}"
+    elif evt_type in ("compile_chunk_error", "compile_chunk_failed"):
+        idx = data.get("step_idx") or "?"
+        err = (data.get("error") or "").strip()
+        if not err:
+            return None
+        payload["type"] = "pb_glass_chat"
+        payload["content"] = f"⚠ Step {idx} 編譯失敗：{err[:200]}"
+    elif evt_type == "macro_plan_too_vague":
+        reason = (data.get("reason") or "").strip()
+        payload["type"] = "pb_glass_chat"
+        payload["content"] = f"❓ 需求太模糊，無法產生計畫{f'：{reason}' if reason else ''}"
+    elif evt_type == "macro_plan_failed":
+        reason = (data.get("reason") or data.get("error") or "").strip()
+        payload["type"] = "pb_glass_chat"
+        payload["content"] = f"❌ Macro plan 產生失敗{f'：{reason}' if reason else ''}"
     elif evt_type in (
         "plan_validating",   # noisy — internal validation step
         "op_dispatched",     # paired with op_completed; redundant
         "op_repaired",       # retry will surface as op_completed/op_error
         "confirm_pending",   # MUST NOT happen in chat (skip_confirm=True)
         "confirm_received",  # builder-only ACK
+        "canvas_reset",      # internal flag, no user-facing meaning in chat
+        "clarify_skipped",   # internal — chat mode skips clarify gate
+        "clarify_received",  # builder-only
+        "inspection_clean",  # no-news-is-good-news, don't spam chat
+        "inspection_issues_found",  # logged sidecar-side; soft issues shouldn't alarm
+        "reflect_op_failed",       # internal retry mechanic
+        "plan_op_reflected",       # internal retry mechanic
     ):
         return None
     else:
