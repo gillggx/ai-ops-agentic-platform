@@ -208,6 +208,16 @@ def _route_after_call(state: BuildGraphState) -> str:
     return "dispatch_op"
 
 
+def _route_after_macro_plan(state: BuildGraphState) -> str:
+    """After macro_plan_node: if too_vague (status=failed) → finalize.
+    Otherwise → confirm_gate so user reviews the macro plan before any
+    compile work happens.
+    """
+    if state.get("status") == "failed" or not state.get("macro_plan"):
+        return "finalize"
+    return "confirm_gate"
+
+
 def _advance_macro_step(state: BuildGraphState) -> dict[str, Any]:
     """No-op routing node that increments current_macro_step. Sits between
     call_tool (when chunk fully executed) and compile_chunk_node so the
@@ -255,10 +265,15 @@ def build_graph():
     # v15 G1 + v16: clarify_intent first; then macro_plan (replaces 1-shot
     # plan_node). plan_node remains in the graph for v15 modify-request
     # replan path (route_after_confirm → "plan") but new builds enter via
-    # macro_plan.
+    # macro_plan. macro_plan skips validate (plan is empty at this point —
+    # compile_chunk will build it up; validate runs at chunk boundaries).
     g.add_edge(START, "clarify_intent")
     g.add_edge("clarify_intent", "macro_plan")
-    g.add_edge("macro_plan", "validate")
+    g.add_conditional_edges(
+        "macro_plan",
+        _route_after_macro_plan,
+        {"confirm_gate": "confirm_gate", "finalize": "finalize"},
+    )
     g.add_edge("plan", "validate")  # legacy replan path
     g.add_conditional_edges(
         "validate",
