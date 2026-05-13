@@ -402,6 +402,15 @@ def _resolve(logical_to_real: dict[str, str], lid: str | None) -> str | None:
     return logical_to_real.get(lid, lid)
 
 
+def _strip_none(params: dict[str, Any]) -> dict[str, Any]:
+    """Remove keys whose value is None. The LLM sometimes emits optional
+    params as `key: null` to be explicit, but JSON Schema's `type: number`
+    rejects null and our C6_PARAM_SCHEMA validator then fails the build.
+    Treat null as "absent" — schema defaults / runtime defaults kick in.
+    """
+    return {k: v for k, v in (params or {}).items() if v is not None}
+
+
 def _build_tool_args(op_type: str, op: dict[str, Any], logical_to_real: dict[str, str]) -> dict[str, Any] | str:
     """Build the kwargs dict for BuilderToolset.<tool>. Returns error string if
     a referenced logical id has no real-id binding yet."""
@@ -409,7 +418,7 @@ def _build_tool_args(op_type: str, op: dict[str, Any], logical_to_real: dict[str
         return {
             "block_name": op.get("block_id"),
             "block_version": op.get("block_version") or "1.0.0",
-            "params": op.get("params") or {},
+            "params": _strip_none(op.get("params") or {}),
         }
     if op_type == "set_param":
         nid = _resolve(logical_to_real, op.get("node_id"))
