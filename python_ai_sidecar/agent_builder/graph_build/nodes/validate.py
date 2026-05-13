@@ -271,6 +271,59 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
                     f"OR aggregate='count' operator='>=' threshold=1 (pass if any rows)."
                 )
 
+        # (d4) Single-point time-series anti-pattern: a chart block with
+        # x='eventTime' (time-series intent) whose ancestor chain includes
+        # a block_sort with limit=1 → all rows share same eventTime → chart
+        # shows only 1 point per series. User-reported case: "檢查最後一次
+        # OOC 並顯示該 charts" — LLM hung the chart off the limit=1 branch.
+        # Right pattern: branch the chart from process_history directly so
+        # it sees the full time range; only the verdict branch uses limit=1.
+        TIME_SERIES_CHART_BLOCKS = {
+            "block_line_chart", "block_xbar_r", "block_imr",
+            "block_ewma_cusum", "block_ewma", "block_weco_rules",
+        }
+        # Build inbound adjacency from CONNECT ops.
+        inbound: dict[str, list[str]] = {}
+        for op in parsed:
+            if op is None or op.type != OpType.CONNECT: continue
+            if op.src_id and op.dst_id:
+                inbound.setdefault(op.dst_id, []).append(op.src_id)
+        # Walk ancestors looking for a sort with limit=1.
+        def has_limit_one_ancestor(node_id: str, seen: set[str]) -> str | None:
+            if node_id in seen: return None
+            seen.add(node_id)
+            for parent in inbound.get(node_id, []):
+                # Find that parent's add_node op
+                for op in parsed:
+                    if op is None or op.type != OpType.ADD_NODE: continue
+                    if op.node_id != parent: continue
+                    if op.block_id == "block_sort":
+                        params = op.params or {}
+                        if params.get("limit") == 1:
+                            return parent
+                # recurse upward
+                hit = has_limit_one_ancestor(parent, seen)
+                if hit: return hit
+            return None
+        for op in parsed:
+            if op is None or op.type != OpType.ADD_NODE: continue
+            if op.block_id not in TIME_SERIES_CHART_BLOCKS: continue
+            params = op.params or {}
+            x_param = params.get("x") or params.get("x_column")
+            # x defaulting to eventTime / time-series intent
+            if x_param != "eventTime": continue
+            offender = has_limit_one_ancestor(op.node_id, set())
+            if offender:
+                errors.append(
+                    f"node '{op.node_id}' ({op.block_id}, x=eventTime): time-series "
+                    f"chart but its ancestor chain includes block_sort '{offender}' "
+                    f"with limit=1 → all rows share the same eventTime so the chart "
+                    f"will render as 1 point per series. Branch this chart node "
+                    f"directly from the upstream source (e.g. block_process_history) "
+                    f"so it gets the FULL time range; keep the limit=1 branch only "
+                    f"for the verdict (block_step_check) side."
+                )
+
         # (d2) "Visualize means chart, not list" rule.
         # When the user's instruction has visualization keywords (顯示 / 畫 /
         # show / chart / plot / trend / 趨勢 / 視覺化), the plan must contain
