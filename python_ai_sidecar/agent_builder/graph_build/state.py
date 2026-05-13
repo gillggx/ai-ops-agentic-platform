@@ -57,6 +57,17 @@ class BuildGraphState(TypedDict, total=False):
     status: GraphStatus
     summary: Optional[str]
 
+    # ── Self-correction loop (2026-05-13) ─────────────────────────────
+    # finalize_node persists executor.execute() return value here so
+    # inspect_execution can scan node_results for semantic issues (e.g.
+    # single-point charts) without re-running the executor.
+    dry_run_results: Optional[dict]
+    # inspect_execution writes issues; reflect_plan reads them; cleared
+    # when route_after_inspect decides to loop.
+    inspection_issues: list[dict]
+    # Bounded by MAX_REFLECT in reflect_plan_node — incremented each cycle.
+    reflect_attempts: int
+
 
 def initial_state(
     *,

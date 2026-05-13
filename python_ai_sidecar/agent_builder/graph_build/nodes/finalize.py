@@ -124,8 +124,9 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
         "summary": summary,
     })]
 
+    dry_run_results: dict[str, Any] | None = None
     if status == "finished":
-        dryrun_event = await _maybe_dry_run(pipeline)
+        dryrun_event, dry_run_results = await _maybe_dry_run(pipeline)
         if dryrun_event:
             sse_events.append(dryrun_event)
 
@@ -134,21 +135,30 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
         "summary": summary,
         "final_pipeline": pipeline.model_dump(by_alias=True),
         "sse_events": sse_events,
+        "dry_run_results": dry_run_results,
     }
 
 
-async def _maybe_dry_run(pipeline: PipelineJSON) -> dict[str, Any] | None:
-    """Run the pipeline once via PipelineExecutor, fire-and-forget the result
-    as a `runtime_check_*` SSE event. Build status NEVER changes based on
-    this — the canvas is already built; this is purely informational.
+async def _maybe_dry_run(
+    pipeline: PipelineJSON,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Run the pipeline once via PipelineExecutor.
 
-    Skipped when:
+    Returns (sse_event, raw_result). raw_result is the full executor return
+    value — preserved so the downstream `inspect_execution` graph node can
+    scan node_results for semantic issues (single-point charts, error
+    verdicts, etc.) without re-running the executor.
+
+    Build status NEVER changes based on this — the canvas is already built;
+    this is purely informational.
+
+    Skipped (raw_result=None) when:
       - GRAPH_BUILD_DRYRUN env var is set to "false"/"0"/"off"
       - pipeline contains a side-effect block (block_alert etc.)
     """
     flag = (os.environ.get("GRAPH_BUILD_DRYRUN") or "true").strip().lower()
     if flag in {"false", "0", "off", "no"}:
-        return None
+        return None, None
 
     side_effect_nodes = [
         n.id for n in pipeline.nodes if n.block_id in SIDE_EFFECT_BLOCKS
@@ -158,7 +168,7 @@ async def _maybe_dry_run(pipeline: PipelineJSON) -> dict[str, Any] | None:
         return _event("runtime_check_skipped", {
             "reason": "side_effect_blocks_present",
             "blocks": side_effect_nodes,
-        })
+        }), None
 
     try:
         block_registry = BlockRegistry()
@@ -168,7 +178,7 @@ async def _maybe_dry_run(pipeline: PipelineJSON) -> dict[str, Any] | None:
         return _event("runtime_check_skipped", {
             "reason": "registry_unavailable",
             "error": str(ex)[:200],
-        })
+        }), None
 
     executor = PipelineExecutor(block_registry)
     try:
@@ -180,13 +190,13 @@ async def _maybe_dry_run(pipeline: PipelineJSON) -> dict[str, Any] | None:
         logger.warning("dry-run: timed out after %.1fs", DRYRUN_TIMEOUT_SEC)
         return _event("runtime_check_timeout", {
             "timeout_sec": DRYRUN_TIMEOUT_SEC,
-        })
+        }), None
     except Exception as ex:  # noqa: BLE001
         logger.warning("dry-run: executor crashed: %s", ex)
         return _event("runtime_check_failed", {
             "reason": "executor_crashed",
             "error": f"{type(ex).__name__}: {str(ex)[:300]}",
-        })
+        }), None
 
     overall = (result or {}).get("status")
     node_results = (result or {}).get("node_results") or {}
@@ -202,18 +212,18 @@ async def _maybe_dry_run(pipeline: PipelineJSON) -> dict[str, Any] | None:
         logger.info("dry-run: pipeline executed cleanly (%d nodes)", len(node_results))
         return _event("runtime_check_ok", {
             "node_count": len(node_results),
-        })
+        }), result
     if not failed:
         # Status not 'success' but no per-node failure — empty data, no_data, etc.
         return _event("runtime_check_no_data", {
             "status": overall,
             "message": (result or {}).get("error_message") or "pipeline produced no data",
-        })
+        }), result
     return _event("runtime_check_failed", {
         "reason": "node_error",
         "failed_count": len(failed),
         "failures": failed[:5],
-    })
+    }), result
 
 
 def _event(name: str, data: dict[str, Any]) -> dict[str, Any]:

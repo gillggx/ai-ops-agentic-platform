@@ -42,6 +42,13 @@ from python_ai_sidecar.agent_builder.graph_build.nodes.repair_op import (
     repair_op_node,
 )
 from python_ai_sidecar.agent_builder.graph_build.nodes.finalize import finalize_node
+from python_ai_sidecar.agent_builder.graph_build.nodes.inspect_execution import (
+    inspect_execution_node,
+)
+from python_ai_sidecar.agent_builder.graph_build.nodes.reflect_plan import (
+    MAX_REFLECT,
+    reflect_plan_node,
+)
 from python_ai_sidecar.agent_builder.graph_build.nodes.layout import layout_node
 
 
@@ -81,6 +88,26 @@ def _route_after_confirm(state: BuildGraphState) -> str:
     if state.get("user_confirmed") is True:
         return "canvas_reset"
     return "finalize"
+
+
+def _route_after_inspect(state: BuildGraphState) -> str:
+    """After inspect_execution: issues found + budget left → reflect_plan loop.
+    Otherwise → layout (proceed to canvas).
+
+    Budget: reflect_attempts < MAX_REFLECT. Status must still be "finished"
+    (a failed build has nothing meaningful to inspect, even though the node
+    short-circuits in that case too).
+    """
+    issues = state.get("inspection_issues") or []
+    if not issues:
+        return "layout"
+    if state.get("status") != "finished":
+        return "layout"
+    attempts = state.get("reflect_attempts", 0)
+    if attempts >= MAX_REFLECT:
+        logger.warning("route_after_inspect: max reflect attempts (%d) — shipping partial fix", attempts)
+        return "layout"
+    return "reflect_plan"
 
 
 def _route_after_call(state: BuildGraphState) -> str:
@@ -133,6 +160,8 @@ def build_graph():
     g.add_node("call_tool", call_tool_node)
     g.add_node("repair_op", repair_op_node)
     g.add_node("finalize", finalize_node)
+    g.add_node("inspect_execution", inspect_execution_node)
+    g.add_node("reflect_plan", reflect_plan_node)
     g.add_node("layout", layout_node)
 
     g.add_edge(START, "plan")
@@ -168,7 +197,17 @@ def build_graph():
         },
     )
     g.add_edge("repair_op", "call_tool")
-    g.add_edge("finalize", "layout")
+    # Self-correction loop (2026-05-13):
+    #   finalize → inspect_execution
+    #     ├─ no issues / budget exhausted → layout → END
+    #     └─ semantic issue + budget left → reflect_plan → validate (loop)
+    g.add_edge("finalize", "inspect_execution")
+    g.add_conditional_edges(
+        "inspect_execution",
+        _route_after_inspect,
+        {"reflect_plan": "reflect_plan", "layout": "layout"},
+    )
+    g.add_edge("reflect_plan", "validate")
     g.add_edge("layout", END)
 
     checkpointer = MemorySaver()
