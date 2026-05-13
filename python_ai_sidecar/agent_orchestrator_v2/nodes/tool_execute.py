@@ -1053,15 +1053,55 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
                                 pass
                     else:
                         err = run_result.get("error_message") or "execution failed"
-                        result["auto_run"] = {"status": "error", "error_message": err}
-                        if event_emit is not None:
-                            try:
-                                event_emit({
-                                    "type": "pb_run_error",
-                                    "error_message": err,
-                                })
-                            except Exception:  # noqa: BLE001
-                                pass
+                        # Fallback: salvage partial results when some nodes
+                        # succeeded. Render card downstream picks up
+                        # node_results for the chart panels of working nodes,
+                        # so user at least sees what the build managed to
+                        # compute. Beats showing a blank panel on every run
+                        # with even one bad terminal.
+                        node_results = run_result.get("node_results") or {}
+                        n_ok = sum(
+                            1 for r in node_results.values()
+                            if isinstance(r, dict) and r.get("status") == "success"
+                        )
+                        n_failed = sum(
+                            1 for r in node_results.values()
+                            if isinstance(r, dict) and r.get("status") in ("failed", "error")
+                        )
+                        if n_ok > 0:
+                            result["auto_run"] = {
+                                "status": "partial",
+                                "node_results": node_results,
+                                "result_summary": run_result.get("result_summary"),
+                                "duration_ms": run_result.get("duration_ms"),
+                                "n_ok": n_ok,
+                                "n_failed": n_failed,
+                                "error_message": err,
+                            }
+                            if event_emit is not None:
+                                try:
+                                    event_emit({
+                                        "type": "pb_run_done",
+                                        "status": "partial",
+                                        "node_results": node_results,
+                                        "result_summary": run_result.get("result_summary"),
+                                        "duration_ms": run_result.get("duration_ms"),
+                                        "n_ok": n_ok,
+                                        "n_failed": n_failed,
+                                        "warning": err,
+                                    })
+                                except Exception:  # noqa: BLE001
+                                    pass
+                        else:
+                            result["auto_run"] = {"status": "error", "error_message": err}
+                            if event_emit is not None:
+                                try:
+                                    event_emit({
+                                        "type": "pb_run_error",
+                                        "error_message": err,
+                                    })
+                                except Exception:  # noqa: BLE001
+                                    pass
                 else:
                     # Hybrid pipeline (non-native blocks) — skip auto-run
                     # for now; user can hit Run Full manually.
