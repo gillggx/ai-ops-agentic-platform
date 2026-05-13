@@ -122,6 +122,13 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
         f"plan ops ok={n_ok_ops} failed={n_failed_ops}{issue_summary}"
     )
     logger.info("finalize_node: status=%s | %s", status, summary)
+    if structural_issues:
+        for si in structural_issues[:5]:
+            logger.warning(
+                "finalize_node: structural issue: rule=%s node=%s msg=%s",
+                si.get("rule"), si.get("node_id") or si.get("node"),
+                str(si.get("message"))[:200],
+            )
 
     # Phase 10-C Fix 4 — best-effort runtime dry-run.
     sse_events = [_event("build_finalized", {
