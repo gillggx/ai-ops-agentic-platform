@@ -129,12 +129,11 @@ test.describe("Harness flow — stable skill, repeated builds", () => {
       () => document.querySelectorAll(".react-flow__node").length >= 2,
       null, { timeout: 180_000, polling: 2000 },
     );
-    // 2026-05-13: wait for the agent's "🎉 <summary>" line. This is the
-    // FINAL build-complete marker fired only at the graph's done event,
-    // AFTER all reflect_plan loops + layout. Don't use ✓ — that fires at
-    // each intermediate build_finalized SSE during reflect cycles, and
-    // grabbing the first one drops us into mid-build canvas state.
-    await builder.locator('text=/^🎉 /').first().waitFor({ timeout: 300_000 });
+    // 2026-05-13: wait for "[BUILD COMPLETE]" — fired only at the SSE
+    // done event AFTER all reflect_plan loops + layout. ASCII marker so
+    // there's no encoding ambiguity in the bundle. ✓ alone won't work —
+    // build_finalized emits one ✓ per intermediate finalize cycle.
+    await builder.locator('text=/^\\[BUILD COMPLETE\\] /').first().waitFor({ timeout: 300_000 });
     // Extra 1s for React Flow to settle on the laid-out positions.
     await builder.waitForTimeout(1_000);
     const nodeCount = await builder.locator(".react-flow__node").count();

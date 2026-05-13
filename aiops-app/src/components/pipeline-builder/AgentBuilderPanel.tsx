@@ -369,13 +369,16 @@ export default function AgentBuilderPanel({
               }]);
               // Don't touch canvas — leave whatever was there before this build.
             } else {
-              // 2026-05-13: use 🎉 (not ✓) so this final "build complete"
-              // marker is distinguishable from intermediate ✓ lines that
+              // 2026-05-13: use a unique ASCII marker "[BUILD COMPLETE]"
+              // (not emoji, not ✓) so this final "build complete" line
+              // is distinguishable from intermediate ✓ lines that
               // build_finalized emits at each reflect_plan cycle. Harness
-              // / E2E tests wait specifically for 🎉 — they only proceed
-              // when the WHOLE graph (incl. all reflects + layout) is
-              // done, not just an interim finalize.
-              setLines((p) => [...p, { id: nextId(), role: "agent", text: `🎉 ${summary}` }]);
+              // / E2E tests wait specifically for "[BUILD COMPLETE]" —
+              // they only proceed when the WHOLE graph (incl. all reflects
+              // + layout) is done, not just an interim finalize. (Emoji
+              // markers tried earlier got mangled by the bundler chain in
+              // a way I couldn't trace.)
+              setLines((p) => [...p, { id: nextId(), role: "agent", text: `[BUILD COMPLETE] ${summary}` }]);
               // Phase 10-D: backend layout_node now ships canvas with positions
               // already laid out, so the frontend dagre pass is gone. If the
               // backend pipeline_json arrived in `done.data.pipeline_json` we
