@@ -74,6 +74,10 @@ test.describe("Skill flow — full GUI with real agent", () => {
         page.locator('button:has-text("Build →")').first().click(),
       ]);
       const builderTab = page;
+      // 2026-05-13: wait for popup network-idle so SkillEmbedBanner mounts.
+      // Without this, Building CONFIRM banner check races against initial
+      // Next.js hydration → intermittent fail on slow page renders.
+      await builderTab.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => {});
       // Phase 11 v6 — surface browser console logs + network from the popup
       // (now same tab) so [AIAgentPanel] diagnostic prints land in the Playwright run output.
       builderTab.on("console", (msg) => {
@@ -155,7 +159,21 @@ test.describe("Skill flow — full GUI with real agent", () => {
         }
       }
 
-      await expect(builderTab.locator("text=Building CONFIRM")).toBeVisible({ timeout: 30_000 });
+      // Bumped from 30s → 60s. SkillEmbedBanner mounts via async ctx fetch
+      // (event_types schema lookup adds ~500ms-2s). On slow runs the 30s
+      // budget races with banner render → flaky. Capture screenshot on fail
+      // so we can see what state the popup was in.
+      try {
+        await expect(builderTab.locator("text=Building CONFIRM")).toBeVisible({ timeout: 60_000 });
+      } catch (e) {
+        await builderTab.screenshot({
+          path: `playwright-report/embed-banner-missing-${Date.now()}.png`,
+          fullPage: true,
+        });
+        const visibleTexts = await builderTab.locator('body').innerText().catch(() => "?");
+        console.log("    [embed-banner-missing] page text head:", visibleTexts.slice(0, 600));
+        throw e;
+      }
       console.log("    plan generated; clicking 確認構建 to dispatch plan ops");
       // 2026-05-13: builder pauses at confirm_gate. AIAgentPanel renders a
       // primary blue button labeled "開始建" (start build) next to "不要" /
