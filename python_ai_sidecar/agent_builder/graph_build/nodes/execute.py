@@ -167,27 +167,17 @@ def _detect_op_issue(
             ),
         }
 
-    # Signal 2: ran clean but produced 0 rows mid-pipeline. Allow None
-    # (non-dataframe outputs, e.g. chart_spec or bool) — those aren't
-    # row-shaped, judge them elsewhere.
-    if isinstance(rows, int) and rows == 0:
-        return {
-            "code": "DATA_EMPTY",
-            "kind": "op_empty_output",
-            "node_id": touched_logical_id,
-            "block_id": block_id or snap.get("block_id"),
-            "message": (
-                f"node '{touched_logical_id}' ran successfully but produced "
-                f"0 rows. Filter / threshold / source params likely too tight."
-            ),
-            "given": {"rows": 0},
-            "expected": {"rows_min": 1},
-            "hint": (
-                "Loosen the filter / lower the threshold, or trace back to "
-                "the source block — wrong tool_id / step / time_range "
-                "combinations also produce empty results."
-            ),
-        }
+    # NOTE 2026-05-13: `rows == 0` mid-pipeline was originally a signal,
+    # but it caused cascading reflect_op cycles in real test runs — the
+    # data sometimes legitimately has zero OOC events / zero matches for
+    # a filter, and the LLM keeps "fixing" what's really a data sparsity
+    # condition. The cascade reset the canvas repeatedly and confused the
+    # harness Save flow. Empty-data signals are still caught at finalize-
+    # time by inspect_execution (which sees the WHOLE chain and can tell
+    # apart "wrong filter" from "sparse data"). reflect_op now focuses on
+    # the unambiguous case: the preview itself raised an error (column
+    # ref wrong, type mismatch, port shape clash) — those are real bugs
+    # in the op's params, not in the data.
 
     return None
 
