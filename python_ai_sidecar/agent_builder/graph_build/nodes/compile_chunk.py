@@ -292,17 +292,20 @@ def _auto_insert_unnest(
     plan: list[dict[str, Any]],
     upstream_cols: set[str],
     catalog: dict,
-) -> tuple[list[dict[str, Any]], list[str]]:
+    exec_trace: dict | None = None,
+) -> tuple[list[dict[str, Any]], list[str], set[str]]:
     """If any new add_node references a nested leaf, prepend an unnest
     add_node + connect to flatten the parent. Re-wire the offending op's
     inbound connect to come from the unnest node instead of the original
-    upstream. Returns (rewritten_ops, applied_notes).
+    upstream.
 
-    Deterministic structural fix — runs before col-ref validation, so
-    the post-rewrite ops should validate cleanly.
+    Returns (rewritten_ops, applied_notes, added_leaves) where added_leaves
+    are the column names that would become available after the inserted
+    unnest runs — caller merges these into upstream_cols so the col-ref
+    validator sees the new node's flat output cols.
     """
     if not upstream_cols:
-        return new_ops, []
+        return new_ops, [], set()
 
     # Collect existing logical IDs to compute next-free ones for the inserts
     existing_lids: set[str] = set()
@@ -325,9 +328,10 @@ def _auto_insert_unnest(
 
     unnest_block = _find_unnest_block(catalog)
     if not unnest_block:
-        return new_ops, []  # no unnest-capable block in catalog → can't autofix
+        return new_ops, [], set()  # no unnest-capable block in catalog → can't autofix
 
     notes: list[str] = []
+    added_leaves: set[str] = set()
     rewritten: list[dict[str, Any]] = []
     # Map from old logical_id (the offending node) → unnest_id we inserted
     rewire: dict[str, str] = {}
@@ -368,10 +372,33 @@ def _auto_insert_unnest(
                     f"auto-inserted {unnest_block}(column='{offending_parent}') "
                     f"as {unnest_lid} before {op_lid}"
                 )
+                # The inserted unnest will flatten `offending_parent`'s
+                # list-of-dict elements; leaf keys become top-level cols
+                # downstream. Mine the parent's actual leaves from
+                # exec_trace's sample row so the validator post-this
+                # auto-insert sees them as valid refs.
+                if exec_trace:
+                    for plan_op in plan:
+                        if plan_op.get("type") != "add_node":
+                            continue
+                        plid = plan_op.get("node_id")
+                        snap = exec_trace.get(plid) or {}
+                        sample = snap.get("sample")
+                        if not isinstance(sample, dict):
+                            continue
+                        v = sample.get(offending_parent)
+                        if isinstance(v, list) and v and isinstance(v[0], dict):
+                            for leaf in v[0].keys():
+                                added_leaves.add(str(leaf))
+                            break
+                        if isinstance(v, dict):
+                            for leaf in v.keys():
+                                added_leaves.add(str(leaf))
+                            break
         rewritten.append(op)
 
     if not rewire:
-        return new_ops, []
+        return new_ops, [], set()
 
     # Pass 2: re-wire connects whose dst_id is the offending op — insert
     # a connect from the original upstream src into the new unnest node,
@@ -403,7 +430,7 @@ def _auto_insert_unnest(
                 continue
         final_ops.append(op)
 
-    return final_ops, notes
+    return final_ops, notes, added_leaves
 
 
 def _find_leaf_in_nested(cand: str, upstream_cols: set[str]) -> str | None:
@@ -776,14 +803,19 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
     # Auto-fix #1: if any op references a leaf of a nested upstream col,
     # prepend an unnest of the parent + re-wire connects. Saves a
     # retry round-trip when the structural fix is unambiguous.
-    new_ops, autofix_notes = _auto_insert_unnest(
+    new_ops, autofix_notes, autofix_leaves = _auto_insert_unnest(
         new_ops, state.get("plan") or [], upstream_cols, registry.catalog,
+        exec_trace=state.get("exec_trace") or {},
     )
     if autofix_notes:
         logger.info(
-            "compile_chunk_node: step %s unnest autofix: %s",
-            step_key, "; ".join(autofix_notes[:3]),
+            "compile_chunk_node: step %s unnest autofix: %s (added leaves: %s)",
+            step_key, "; ".join(autofix_notes[:3]), sorted(autofix_leaves)[:8],
         )
+        # Merge newly-exposed cols into upstream_cols so the validator
+        # sees the unnest's flat output (otherwise the filter op that
+        # triggered the auto-insert is still rejected as "leaf of nested").
+        upstream_cols = upstream_cols | autofix_leaves
 
     # Auto-fix #2: when LLM chains chart→dataframe by mistake (multi-
     # analysis macro plans default to linear chaining), rewire each
