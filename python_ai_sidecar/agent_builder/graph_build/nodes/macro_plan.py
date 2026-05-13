@@ -58,43 +58,21 @@ _SYSTEM = """你是 pipeline architect。User 給你需求，你把它**拆成 3
 不要寫 JSON ops / 不要選 block 細項 / 不要寫 params — 那是下一個 worker 的工作。
 
 你只要決定:
-  1. 每個 step 做什麼資料動作 (撈/過濾/排序/解 nested/視覺化/判定)
+  1. 每個 step 做什麼資料動作 (依資料形狀決定：撈/解 nested/過濾/排序/聚合/視覺化/判定)
   2. 每個 step 預期輸出的「形狀」(transform/table/chart/scalar)
   3. 終端 step (table/chart/scalar) 的預期欄位 (若 user 有明說)
-  4. 大概用哪個 block — **只是建議候選**，最終 block 選擇交給下一階段
+  4. 大概用哪個 block — **只是建議候選**，從下方候選 blocks 清單挑
 
-整個 macro plan 必須:
-  - 起點是 source block (block_process_history / block_mcp_call 之類)
-  - **chat 模式 (預設) 終點是 chart / table / scalar**，**不要加 block_step_check verdict**
-  - skill_step_mode=true 才需要 block_step_check 收尾
-  - 必要時可以有 side branch
+==選 block 的根本原則==
+**你只能讀候選 blocks 清單裡每個 block 的「What」+「Output」brief 來判斷**。如果某 block 的
+Output 說它回的是 nested 結構（list / dict），下游就必須先有解 nested 的步驟才能接後續轉換。
+**不要憑想像 / 訓練資料中的常識**填寫 step text 或 candidate_block — 一切看下方 brief。
 
-⚠ 不要加多餘步驟：
-  - **不要 select 欄位**（chart block 自己會挑），除非 user 明說「列出某幾欄表格」
-  - **不要 aggregate / groupby**，除非 user 明說「按 X 分組 / 計數」
-  - **看趨勢就是 source → unnest(nested) → filter → sort → chart**，不要再多
-
-== 常見 pattern 範例 ==
-
-Q: 「看某機台 xbar 趨勢」
-A: 5 steps（nested 資料源固定 pattern）
-  1. 撈 process_history (tool_id, limit)
-  2. 解 spc_charts nested 結構（block_unnest）
-  3. 過濾出 user 指定的那個 chart（block_filter；filter 值的格式看 block 的 description）
-  4. 按時間排序
-  5. 畫 line_chart
-
-Q: 「最近 OOC 次數」
-A: 3-4 steps
-  1. 撈 process_history (time_range, 限定 spc_status='OOC')
-  2. 計算 OOC 數量（group by toolID or step）
-  3. 列出 table 或 bar_chart
-
-Q: 「OOC 超過 2 次警告」(skill_step_mode)
-A: 4-5 steps
-  1. 撈 process_history
-  2. 計算 OOC count
-  3. block_step_check 判斷 >= 2 → verdict
+== 規則 ==
+  - 起點是 source block (從清單裡 category=source 的挑)
+  - 終點必須是 user 要看的形狀（chart / table / scalar）— 看 user 需求字面要求什麼
+  - 中間 step 只放 user 真的需要的轉換；別加 user 沒提的聚合 / 排序 / 篩欄
+  - 3-6 步合理；超過 6 表示拆太細
 
 如果 user 的需求過於模糊或不適合 build pipeline，回 {"too_vague": true, "reason": "..."}。
 
@@ -108,16 +86,10 @@ A: 4-5 steps
       "text": "<這 step 做什麼，1 句中文>",
       "expected_kind": "transform" | "table" | "chart" | "scalar",
       "expected_cols": ["col1", "col2"] (terminal step 才寫；transform/中間 step 留空 []),
-      "candidate_block": "block_xxx" (建議候選 block_id)
+      "candidate_block": "block_xxx" (從候選 blocks 清單挑)
     }
   ]
 }
-
-注意:
-  - 每 step 1 句話即可，不要寫很長
-  - 步驟順序是執行順序 (含 source → terminal)
-  - candidate_block 用上面列出的 block 名稱命名格式 (block_xxx)
-  - **3-6 步**是合理範圍；超過 6 步代表你拆得太細，請合併
 """
 
 
@@ -216,8 +188,14 @@ async def macro_plan_node(state: BuildGraphState) -> dict[str, Any]:
                 f"\n\nPipeline 已宣告 inputs (用 $name 引用): {', '.join('$' + n for n in names if n)}"
             )
 
+    # In skill mode, the terminal must be a verdict-shaped block (output
+    # carries a pass/fail signal) so SkillRunner can read pass/fail. We
+    # don't name the specific block here — let the LLM pick from the
+    # candidate list using each block's Output brief. Deterministic
+    # post-checks below enforce the shape.
     skill_section = (
-        "\n\n⚠ SKILL STEP MODE — pipeline 必須以 block_step_check 收尾作為 verdict gate。"
+        "\n\n⚠ SKILL STEP MODE — 終點必須是 verdict 形狀的 block（看 brief 的 output 是 bool/verdict 那種，"
+        "讓 runner 讀 pass/fail）。"
         if skill_step_mode else ""
     )
 
@@ -266,6 +244,16 @@ async def macro_plan_node(state: BuildGraphState) -> dict[str, Any]:
         }
 
     raw_macro = (decision or {}).get("macro_plan") or []
+    # Catalog lookup: block_id → output port types. Used by the chat-mode
+    # filter below — drop any step whose candidate_block emits a non-data
+    # type (bool / verdict), since chat terminals must be chart/table/scalar.
+    # Looked up from registry instead of hard-coding block names.
+    bool_output_blocks: set[str] = set()
+    for (name, _v), spec in registry.catalog.items():
+        ports = spec.get("output_schema") or []
+        if any(isinstance(p, dict) and p.get("type") in {"bool", "verdict"} for p in ports):
+            bool_output_blocks.add(name)
+
     macro_plan: list[dict[str, Any]] = []
     if isinstance(raw_macro, list):
         for i, item in enumerate(raw_macro[:MAX_MACRO_STEPS], 1):
@@ -276,13 +264,12 @@ async def macro_plan_node(state: BuildGraphState) -> dict[str, Any]:
             if not text_val:
                 continue
             candidate_block = str(item.get("candidate_block") or "")
-            # Chat mode never wants a verdict gate — block_step_check has a
-            # bool output port and breaks any downstream chart connect. If
-            # the LLM added one despite the prompt, drop the step entirely.
-            if not skill_step_mode and candidate_block == "block_step_check":
+            # Chat mode terminals must carry data (chart/table/scalar); drop
+            # any LLM-suggested step whose candidate_block emits bool/verdict.
+            if not skill_step_mode and candidate_block in bool_output_blocks:
                 logger.info(
-                    "macro_plan_node: dropped step_idx=%s (block_step_check forbidden in chat mode)",
-                    step_idx,
+                    "macro_plan_node: dropped step_idx=%s candidate=%s (verdict-shaped block forbidden in chat mode)",
+                    step_idx, candidate_block,
                 )
                 continue
             macro_plan.append({
