@@ -77,12 +77,12 @@ _SYSTEM = """你是 pipeline architect。User 給你需求，你把它**拆成 3
 == 常見 pattern 範例 ==
 
 Q: 「看某機台 xbar 趨勢」
-A: 5 steps
-  1. 撈 process_history (tool_id=該機台, limit=100)
-  2. 解 spc_charts nested 結構（block_unnest column='spc_charts'）
-  3. 過濾 name='xbar_chart'（**完整 chart key**，不是裸 'xbar'；其他常見：r_chart/s_chart/p_chart）
-  4. 按 eventTime 排序
-  5. 畫 line_chart (x=eventTime, y=value)
+A: 5 steps（nested 資料源固定 pattern）
+  1. 撈 process_history (tool_id, limit)
+  2. 解 spc_charts nested 結構（block_unnest）
+  3. 過濾出 user 指定的那個 chart（block_filter；filter 值的格式看 block 的 description）
+  4. 按時間排序
+  5. 畫 line_chart
 
 Q: 「最近 OOC 次數」
 A: 3-4 steps
