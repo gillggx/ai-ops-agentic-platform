@@ -4,7 +4,7 @@
 # 例如：sudo bash setup.sh aiops.example.com admin@example.com
 #
 # 本腳本會（針對 4 個 active 服務）：
-#   1. 系統依賴（Python 3.11, Node.js 20, Java 21, MongoDB, PostgreSQL, Redis, Nginx, Certbot）
+#   1. 系統依賴（Python 3.11, Node.js 20, Java 17, MongoDB, PostgreSQL, Redis, Nginx, Certbot）
 #   2. 建立 /opt/aiops 目錄
 #   3. Python virtualenv (sidecar / ontology)
 #   4. 建置 ontology_simulator Next.js 前端
@@ -43,7 +43,7 @@ apt install -y python3.11 python3.11-venv python3.11-dev python3-pip
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 apt install -y nodejs
 
-# Java 21 (Temurin)
+# Java 17 (Temurin) — DevOps standard 2026-05-14
 apt install -y wget apt-transport-https
 mkdir -p /etc/apt/keyrings
 wget -O - https://packages.adoptium.net/artifactory/api/gpg/key/public \
@@ -51,7 +51,7 @@ wget -O - https://packages.adoptium.net/artifactory/api/gpg/key/public \
 echo "deb [signed-by=/etc/apt/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(awk -F= '/^VERSION_CODENAME/{print$2}' /etc/os-release) main" \
   > /etc/apt/sources.list.d/adoptium.list
 apt update -y
-apt install -y temurin-21-jdk
+apt install -y temurin-17-jdk
 
 # MongoDB 7.0
 apt install -y mongodb-org || {

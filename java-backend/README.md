@@ -7,8 +7,9 @@
 
 ## Stack
 
-- Java 21 (toolchain)
-- Spring Boot 3.5.0
+- Java 17 (toolchain) — DevOps standard 2026-05-14
+- Spring Boot 3.5.14
+- Maven (multi-module: parent + java-backend + java-scheduler)
 - Spring Data JPA + Hibernate + Envers (audit)
 - Flyway（接管現有 Python schema，baseline v0）
 - Spring Security 6 + OAuth2 Resource Server（Phase 2）
@@ -33,7 +34,7 @@ Java API (this app, :8001 prod / :8002 dev)
 
 ## Local Dev
 
-前置：JDK 21 + 本機 Postgres（port 5432）。
+前置：JDK 17 + 本機 Postgres（port 5432）。
 
 ```bash
 # 1. 確保 Postgres 有 aiops/aiops/aiops user/pass/db
@@ -80,7 +81,7 @@ Switch：`AIOPS_PROFILE=prod ./gradlew bootRun`
 - [x] Global error envelope + exception handler
 - [x] `/api/v1/health` endpoint
 - [x] WebClient bean for Python sidecar
-- [ ] JDK 21 + Postgres connectivity 本機 smoke test（需 reviewer 驗證）
+- [ ] JDK 17 + Postgres connectivity 本機 smoke test（需 reviewer 驗證）
 
 ## Next (Phase 1)
 
