@@ -1,0 +1,70 @@
+{
+  "version": "1.0",
+  "name": "fixture: last OOC + show SPC charts",
+  "metadata": {},
+  "inputs": [
+    {"name": "equipment_id", "type": "string", "example": "EQP-01"}
+  ],
+  "nodes": [
+    {
+      "id": "src",
+      "block_id": "block_process_history",
+      "block_version": "1.0.0",
+      "position": {"x": 0, "y": 0},
+      "params": {"tool_id": "EQP-01", "time_range": "7d", "limit": 200, "nested": true}
+    },
+    {
+      "id": "unnest_trend",
+      "block_id": "block_unnest",
+      "block_version": "1.0.0",
+      "position": {"x": 280, "y": -100},
+      "params": {"column": "spc_charts"}
+    },
+    {
+      "id": "filter_ooc",
+      "block_id": "block_filter",
+      "block_version": "1.0.0",
+      "position": {"x": 560, "y": -100},
+      "params": {"column": "is_ooc", "operator": "==", "value": true}
+    },
+    {
+      "id": "chart",
+      "block_id": "block_line_chart",
+      "block_version": "1.0.0",
+      "position": {"x": 840, "y": -100},
+      "params": {
+        "x": "eventTime",
+        "y": "value",
+        "facet": "name",
+        "ucl_column": "ucl",
+        "lcl_column": "lcl",
+        "title": "OOC SPC chart trends (7d)"
+      }
+    },
+    {
+      "id": "src_latest",
+      "block_id": "block_process_history",
+      "block_version": "1.0.0",
+      "position": {"x": 280, "y": 200},
+      "params": {"tool_id": "EQP-01", "limit": 1, "nested": true}
+    },
+    {
+      "id": "verdict",
+      "block_id": "block_step_check",
+      "block_version": "1.0.0",
+      "position": {"x": 560, "y": 200},
+      "params": {
+        "aggregate": "max",
+        "column": "spc_summary.ooc_count",
+        "operator": ">=",
+        "threshold": 2
+      }
+    }
+  ],
+  "edges": [
+    {"id": "e1", "from": {"node": "src", "port": "data"}, "to": {"node": "unnest_trend", "port": "data"}},
+    {"id": "e2", "from": {"node": "unnest_trend", "port": "data"}, "to": {"node": "filter_ooc", "port": "data"}},
+    {"id": "e3", "from": {"node": "filter_ooc", "port": "data"}, "to": {"node": "chart", "port": "data"}},
+    {"id": "e4", "from": {"node": "src_latest", "port": "data"}, "to": {"node": "verdict", "port": "data"}}
+  ]
+}

@@ -1,0 +1,67 @@
+{
+  "version": "1.0",
+  "name": "fixture: 3-chart diagnostic",
+  "metadata": {},
+  "inputs": [
+    {"name": "equipment_id", "type": "string", "example": "EQP-01"}
+  ],
+  "nodes": [
+    {
+      "id": "src",
+      "block_id": "block_process_history",
+      "block_version": "1.0.0",
+      "position": {"x": 0, "y": 0},
+      "params": {"tool_id": "EQP-01", "step": "STEP_001", "time_range": "7d", "limit": 200, "nested": true}
+    },
+    {
+      "id": "unnest",
+      "block_id": "block_unnest",
+      "block_version": "1.0.0",
+      "position": {"x": 280, "y": 0},
+      "params": {"column": "spc_charts"}
+    },
+    {
+      "id": "xbar_only",
+      "block_id": "block_filter",
+      "block_version": "1.0.0",
+      "position": {"x": 560, "y": 0},
+      "params": {"column": "name", "operator": "==", "value": "xbar_chart"}
+    },
+    {
+      "id": "cusum",
+      "block_id": "block_ewma_cusum",
+      "block_version": "1.0.0",
+      "position": {"x": 840, "y": -150},
+      "params": {"value_column": "value", "mode": "cusum", "k": 0.5, "h": 4, "title": "CUSUM small-shift detection"}
+    },
+    {
+      "id": "box",
+      "block_id": "block_box_plot",
+      "block_version": "1.0.0",
+      "position": {"x": 840, "y": 0},
+      "params": {"x": "lotID", "y": "value", "title": "xbar by lot"}
+    },
+    {
+      "id": "qq",
+      "block_id": "block_probability_plot",
+      "block_version": "1.0.0",
+      "position": {"x": 840, "y": 150},
+      "params": {"value_column": "value", "title": "Q-Q normality"}
+    },
+    {
+      "id": "verdict",
+      "block_id": "block_step_check",
+      "block_version": "1.0.0",
+      "position": {"x": 1120, "y": 300},
+      "params": {"aggregate": "count", "operator": ">=", "threshold": 1}
+    }
+  ],
+  "edges": [
+    {"id": "e1", "from": {"node": "src", "port": "data"}, "to": {"node": "unnest", "port": "data"}},
+    {"id": "e2", "from": {"node": "unnest", "port": "data"}, "to": {"node": "xbar_only", "port": "data"}},
+    {"id": "e3", "from": {"node": "xbar_only", "port": "data"}, "to": {"node": "cusum", "port": "data"}},
+    {"id": "e4", "from": {"node": "xbar_only", "port": "data"}, "to": {"node": "box", "port": "data"}},
+    {"id": "e5", "from": {"node": "xbar_only", "port": "data"}, "to": {"node": "qq", "port": "data"}},
+    {"id": "e6", "from": {"node": "xbar_only", "port": "data"}, "to": {"node": "verdict", "port": "data"}}
+  ]
+}
