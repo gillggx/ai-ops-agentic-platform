@@ -40,6 +40,19 @@ class BuildGraphState(TypedDict, total=False):
     # User-facing description of what artifacts will be produced — shown
     # in the confirm card so the user knows what to expect before approving.
     expected_outputs: list[str]
+    # v13 (2026-05-13): per-node contracts the agent declares while writing
+    # the plan. Runtime auto-preview compares each node's actual snapshot
+    # to its contract; mismatch fires a targeted reflect_op (changes only
+    # that node), not a full-plan rewrite. Shape:
+    #   {"<logical_id>": {
+    #       "rows_min"?: int, "rows_max"?: int,
+    #       "cols_must_have"?: list[str],
+    #       "output_type"?: "dataframe"|"chart_spec"|"scalar"|"bool",
+    #       "value_type"?: "number"|"string"|"boolean",
+    #       "distinct_x_min"?: int,
+    #       "reason"?: str,
+    #   }}
+    node_contracts: dict[str, dict]
 
     # ── Confirm stage ─────────────────────────────────────────────────
     is_from_scratch: bool
@@ -141,4 +154,5 @@ def initial_state(
         trigger_payload=trigger_payload,
         reflect_op_attempts={},
         last_op_issue=None,
+        node_contracts={},
     )

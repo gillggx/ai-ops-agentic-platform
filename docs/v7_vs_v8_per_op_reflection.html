@@ -135,8 +135,9 @@
 <body>
 <div class="wrap">
 
-  <h1>Pipeline Builder Self-Correction：v7 (current) vs v8 (per-op reflection)</h1>
-  <div class="lede">2026-05-13 — 詳細對照「整 plan 反思」與「per-op 反思」兩種架構，每一步逐項列出 <b>Agent</b>（graph node / deterministic state mutation）與 <b>Model</b>（LLM call）的工作。</div>
+  <h1>Pipeline Builder Self-Correction：v7 → v8 → v13 演進對照</h1>
+  <div class="lede">2026-05-13 — 從「整 plan 反思」(v7) → 「per-op 反思」(v8) → 「合約驅動反思」(v13)。詳細對照每一版的 Agent 與 Model 工作。<br>
+  <b>v13 新增：</b>LLM 寫 plan 時自己宣告每個 node 的 <code>node_contracts</code>（預期 rows / cols / output_type），runtime 拿真實 snapshot 跟 contract 比對 — 違反才 reflect，且 reflect 只動那一個 op。</div>
 
   <div class="legend">
     <span><span class="role-tag role-agent">AGENT</span> 確定性 graph node，state mutation，無 LLM</span>
@@ -599,11 +600,216 @@ edges: n1→n2, n2→n3, n3→n4, n1→n5</pre>
 
   <!-- ════════════════════════════════════════════════════════════ -->
   <h2>9. 授權</h2>
-  <p>請回「<b>開始開發</b>」確認進入實作，或指出要調整的設計決策。</p>
+  <p>v8 已 ship。v13 正在實作（見下節）。</p>
+
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <h2>10. v13：Expectation-First Plan + Per-Step Diff（最新）</h2>
+
+  <div class="card">
+    <p><b>動機</b>：v8 跑 3x harness 還是 1/3，根因不在 reflect 機制，而是<b>「LLM 跑完只能憑感覺判斷結果好壞」</b>。
+    沒有「預期」就沒有「不符預期」這件事 — LLM 自由心證會擺盪。</p>
+    <p>User 提醒：「人類寫 code 怎麼驗證？先寫測試說『跑完應該是什麼』，跑完看 actual vs expected，
+    失敗縮到那一行修，不是整個檔砍掉重寫」。v7 的 reflect_plan 完全就是「git reset --hard」反模式。</p>
+  </div>
+
+  <h3>10.1 v13 新增：<code>node_contracts</code></h3>
+  <p>plan_node 的 LLM 輸出多一個欄位：</p>
+  <pre>{
+  "plan_summary": "...",
+  "expected_outputs": [...],      // user-facing 文字 (v0)
+  "node_contracts": {              // v13 新增 — 機器可比對
+    "n1": {
+      "rows_min": 5,
+      "cols_must_have": ["eventTime", "spc_charts"],
+      "output_type": "dataframe",
+      "reason": "process_history 7d 過去資料至少 5 筆"
+    },
+    "n3": {
+      "rows_min": 1, "rows_max": 1,
+      "reason": "sort+limit=1 應該剛好留最後 1 筆"
+    },
+    "n_chart": {
+      "output_type": "chart_spec",
+      "distinct_x_min": 3,
+      "reason": "chart 至少 3 點才看得到趨勢"
+    },
+    "n_verdict": {
+      "output_type": "scalar", "value_type": "number",
+      "reason": "step_check 終端 verdict 必為數值"
+    }
+  },
+  "plan": [...]
+}</pre>
+
+  <h3>10.2 v13 跑完一個 op 的判定流程</h3>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:14%">Step / Node</th>
+        <th style="width:9%">角色</th>
+        <th style="width:39%">這一步做什麼</th>
+        <th style="width:38%">State 變化</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="agent new">
+        <td>★ ⑦.5 contract_diff</td>
+        <td><span class="role-tag role-agent">AGENT</span></td>
+        <td>純函數，無 LLM。call_tool 完成後讀 <code>state.node_contracts[lid]</code>，跟 <code>exec_trace[lid]</code> 比對：<br>
+          • rows &lt; rows_min → contract_rows_min violation<br>
+          • rows &gt; rows_max → contract_rows_max violation<br>
+          • cols 缺 cols_must_have → contract_cols_missing<br>
+          • chart distinct_x &lt; distinct_x_min → contract_distinct_x<br>
+          • preview 噴錯 → op_executor_error (這個跟 v8 一樣)<br>
+          沒違反任何 contract → fallthrough，next dispatch_op。
+        </td>
+        <td>set <code>last_op_issue</code> = envelope dict（含 given/expected/rationale）or None</td>
+      </tr>
+      <tr class="model new">
+        <td>★ ⑦.7 reflect_op (v13 prompt)</td>
+        <td><span class="role-tag role-model">MODEL</span></td>
+        <td>跟 v8 一樣，但 user message 多帶 <b>CONTRACT 區塊</b>：<br>
+          <code>USER PROMPT / FAILING OP / UPSTREAM TRACE / CONTRACT / VIOLATION / Block schema</code><br>
+          system prompt 結尾改寫：「先確認 CONTRACT 是否合理 — 如果是你寫錯了預期，
+          rollback 並 patch upstream / 這個 op 把資料弄對；如果 CONTRACT 對的，那是這個 op 的
+          params 寫錯」。
+          <br><br>
+          優勢：LLM 不用猜「rows=0 是 bug 還是資料就這樣」— 它自己寫的 contract 說過要 ≥5，
+          所以 0 就是 bug。<b>修正方向有明確 reference frame</b>。
+        </td>
+        <td>同 v8：patch_params 或 rollback</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>10.3 v13 修剛才 #137 那個 case 的流程</h3>
+
+  <table>
+    <thead><tr><th style="width:6%">t</th><th style="width:14%">node</th><th>發生什麼</th></tr></thead>
+    <tbody>
+      <tr class="model"><td>t=0</td><td>plan_node</td><td>LLM 產 plan + 順手宣告 <code>n9: {output_type: "dataframe", rows_min: 1, cols_must_have: ["is_ooc"]}</code>（因為它知道 n9 filter 要用 is_ooc column）</td></tr>
+      <tr class="agent"><td>t=…</td><td>逐 op 跑到 n9</td><td>auto-preview n9 → exec_trace[n9] = {error: "Column path 'is_ooc' not found"}</td></tr>
+      <tr class="agent new"><td>t=⑦.5</td><td>contract_diff</td><td>讀 contract.cols_must_have = ['is_ooc']; snapshot.error 非空 → 命中 op_executor_error<br>
+        <code>last_op_issue = {code: DATA_SHAPE_WRONG, given: {error: ...}, expected: {status: "success"}, rationale: "n9 contract said is_ooc required"}</code></td></tr>
+      <tr class="model new"><td>t=⑦.7</td><td>reflect_op</td><td>LLM 看到 CONTRACT 說 is_ooc 該存在 + 實際說 column not found。判斷：n9 上游沒先 unnest spc_charts，所以 is_ooc 還埋在 array 裡。回傳 <code>rollback_to_cursor=K (n8), new_params: insert block_unnest before n9</code> — 或 patch n9 自己用 path 'spc_charts[].is_ooc'</td></tr>
+      <tr class="agent"><td>t=⑧</td><td>re-dispatch</td><td>cursor 倒回 → 重跑那 1 個 op → 通過 → 繼續</td></tr>
+    </tbody>
+  </table>
+
+  <h3>10.4 跟之前版本的關係</h3>
+
+  <table>
+    <thead><tr><th>機制</th><th>v7</th><th>v8</th><th>v13</th></tr></thead>
+    <tbody>
+      <tr><td>plan 階段 declare 預期</td><td>只有 user-facing 文字</td><td>同左</td><td>✓ 每 node 結構化 contract</td></tr>
+      <tr><td>per-op trigger</td><td>無</td><td>preview 噴錯 / rows=0 (被禁用)</td><td>contract violation (準) + preview 噴錯 (兜底)</td></tr>
+      <tr><td>反思 scope</td><td>整 plan 重寫</td><td>1 op patch / rollback</td><td>1 op patch / rollback + 對照自己宣告的 contract</td></tr>
+      <tr><td>LLM 判斷依據</td><td>「結果看起來怪不怪」(自由心證)</td><td>同左 + trace</td><td><b>「我自己說該長 X，實際 Y，差 Z」</b></td></tr>
+      <tr><td>反思 LLM input tokens</td><td>~60k (整 catalog)</td><td>~1.5k</td><td>~1.5k + contract (~100 tokens)</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <h2>11. Lessons Learnt — v7 → v13 演進史</h2>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:6%">版本</th>
+        <th style="width:24%">改了什麼</th>
+        <th style="width:14%">harness 3x pass</th>
+        <th>學到的</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>v7</td>
+        <td>整 plan rewrite reflect_plan</td>
+        <td>1/3</td>
+        <td><b>integral rewrite = git reset --hard。</b>LLM 改 A 戳 B，issue 數 2 → 4 → 4。</td>
+      </tr>
+      <tr>
+        <td>v7.1</td>
+        <td>reflect_plan reuse plan_node 的 catalog system prompt</td>
+        <td>1/3</td>
+        <td>沒給 catalog，LLM 重寫整 plan 直接 17 個 hard error。<b>reflect 用的 prompt 不能比 plan 弱。</b></td>
+      </tr>
+      <tr>
+        <td>v7.2</td>
+        <td>structural error (orphan / source-less) 路由到 reflect_plan</td>
+        <td>1/3</td>
+        <td>structural 跟 semantic 都歸到 reflect_plan loop。<b>「沒 dry_run_results 不能 reflect」是錯的</b>，structural 在 final_pipeline 就能判。</td>
+      </tr>
+      <tr>
+        <td>v8</td>
+        <td>per-op reflect_op，rows=0 / preview-error trigger</td>
+        <td>0/3</td>
+        <td><b>rows=0 不是 bug 信號</b>，OOC filter 0 筆是合理數據。trigger 太敏感 → cascade 把 canvas 搞糊。</td>
+      </tr>
+      <tr>
+        <td>v8.1</td>
+        <td>trigger 收窄到只 preview-error</td>
+        <td>1/3</td>
+        <td>reflect_op 觸發 0 次。<b>太窄 = 沒事做。</b>真實 bug 用 column path 出現的，validator/repair_op 早就接走了。</td>
+      </tr>
+      <tr>
+        <td>v9</td>
+        <td>frontend done handler 用 finalPj.edges</td>
+        <td>0/3</td>
+        <td>只補 edges 不夠 — nodes 的 params 也是 reflect 後變的，但 done handler 沒同步。</td>
+      </tr>
+      <tr>
+        <td>v10</td>
+        <td>done handler 整片取代 (nodes + edges)</td>
+        <td>0/3</td>
+        <td><b>fix 對了但 race 沒解</b>：harness 看 canvas stable 就 Save，可能 Save 發生在 done 之前。</td>
+      </tr>
+      <tr>
+        <td>v11</td>
+        <td>harness 等 chat "✓ &lt;summary&gt;" 才 Save</td>
+        <td>1/3</td>
+        <td><b>done signal 對了，但 LLM 還是會輸出 structurally invalid pipeline</b>（n6 → n3 倒接 source）。validator 抓到 C4_PORT_COMPAT 但歸為 advisory，沒擋 save。</td>
+      </tr>
+      <tr>
+        <td>v12</td>
+        <td>C4_PORT_COMPAT 升格 structural blocker</td>
+        <td>1/3</td>
+        <td><b>連續 build 跑通了</b>，但 column-ref bug 還在（n9 用了不存在的 is_ooc）。<b>inspect_execution 在 dry_run_results 裡明明看到 n9.status=failed 卻說 clean</b> — inspect 的 detection 有 bug。</td>
+      </tr>
+      <tr>
+        <td>v13</td>
+        <td>node_contracts + contract_diff，<b>反思有了 reference frame</b></td>
+        <td>(實作中)</td>
+        <td>(待驗證) 預期：LLM 寫 plan 時自宣告預期，runtime diff 用 LLM 自己的話跟它對話。</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>11.1 通用 takeaway</h3>
+  <div class="card">
+    <ul>
+      <li><b>反思要有 reference frame</b>：LLM 沒「應該長什麼樣」就只能憑感覺，憑感覺就會擺盪。
+        v13 讓 LLM 寫 plan 時自己宣告，是它對自己的承諾。</li>
+      <li><b>delta 越小越穩</b>：v7 整 plan rewrite delta 太大，LLM 改 A 戳 B。v8 起改成 per-op patch，
+        最壞 case 是這 op 不收斂、其他 op 不受影響。</li>
+      <li><b>狀態同步比 LLM 還重要</b>：v9-v11 系列的失敗都在 GUI ↔ sidecar SSE race，
+        跟 builder LLM 沒關係。教訓：critical state mutation 後一定要再做一次 source-of-truth refresh。</li>
+      <li><b>validator 規則的「advisory vs blocking」是關鍵設計</b>：C4_PORT_COMPAT 預設 advisory
+        放過 invalid pipeline，等於 invalid 也能 ship。<b>能讓 pipeline render 不出來的 rule，預設應該是 blocking。</b></li>
+      <li><b>「inspect 看到卻說 clean」這種 bug 很容易隱藏在「自己寫的 helper」裡</b>。
+        v12 dry_run 真的捕到 n9 fail 但 inspect_execution 沒 catch — 把 detection 邏輯改成
+        diff against agent's own contract (而非自家 helper 解讀 node_results) 解掉這類 bug。</li>
+      <li><b>harness 本身的設計也要更新</b>：「等 canvas count stable 8s」這種啟發式不夠，
+        要等 SSE 「✓」line 出現才動下一步。</li>
+    </ul>
+  </div>
 
   <div class="small" style="margin-top: 32px; padding-top: 12px; border-top: 1px solid var(--c-border);">
     對應 spec markdown: <code>docs/SPEC_v8_per_op_reflection.md</code><br>
-    v7 已 ship 的相關 file: <code>python_ai_sidecar/agent_builder/graph_build/{state,graph}.py</code>, <code>nodes/{execute,finalize,inspect_execution,reflect_plan}.py</code>, <code>trace_serializer.py</code>, <code>pipeline_builder/error_envelope.py</code>
+    v8 file: <code>python_ai_sidecar/agent_builder/graph_build/nodes/{reflect_op.py, execute.py}</code>, <code>graph.py</code><br>
+    v13 file (新增/改): <code>contract_diff.py</code>, <code>nodes/plan.py</code>, <code>nodes/reflect_op.py</code>, <code>state.py</code><br>
+    Frontend 修法: <code>aiops-app/src/components/pipeline-builder/AgentBuilderPanel.tsx</code> (done handler 整片取代)
   </div>
 
 </div>

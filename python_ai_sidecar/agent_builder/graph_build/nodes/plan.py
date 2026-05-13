@@ -78,6 +78,18 @@ Block 目錄:
     "<跑完 user 會看到的 artifact，每行一個 — 用 user-facing 語言>",
     "..."
   ],
+  "node_contracts": {
+    "<logical_id>": {
+      "rows_min": <int|null>,         // 預期最少筆數；source 通常 >=5, filter/sort+limit=1 設 1
+      "rows_max": <int|null>,         // 預期最多筆數；sort+limit=1 設 1，沒上限填 null
+      "cols_must_have": ["...", "..."], // 跑完後該 node output 必須包含的 column / path
+      "output_type": "dataframe" | "chart_spec" | "scalar" | "bool",
+      "value_type": "number" | "string" | "boolean" | null,  // 給 step_check / scalar 輸出
+      "distinct_x_min": <int|null>,   // 給 chart node — 預期 x 軸至少 N 個 distinct 值
+      "reason": "<為什麼這個 contract — 給 LLM 自己後續修正用>"
+    },
+    ...
+  },
   "plan": [
     {"type":"add_node", "block_id":"...", "block_version":"1.0.0", "node_id":"n1", "params":{...}},
     {"type":"set_param", "node_id":"n1", "params":{"key":"...", "value":...}},
@@ -91,6 +103,26 @@ expected_outputs 範例（描述 user 會看到的東西，不是 ops 列表）:
   ✅ ["📋 OOC 機台清單表", "📊 各站點 OOC 比例 bar chart"]
   ❌ ["add block_xbar_r", "set_param value_column", ...]   ← 這是 ops 不是 outputs
   ❌ ["build pipeline"]                                     ← 太籠統
+
+node_contracts — 寫 plan 時順手宣告「每個 node 跑完應該長什麼樣」。runtime 會拿真實結果跟你
+宣告的 contract 比對，**只 reflect 不符合的那 1 個 op**，不會把整 plan 重做。
+
+寫 contract 的原則:
+  - 用 user prompt 推 expected (「最後一次 OOC」⇒ 該 filter+sort 之後 rows_min=1)
+  - chart node 一律 distinct_x_min >=3（趨勢圖至少 3 點才有意義）
+  - step_check terminal: output_type='scalar', value_type='number'（verdict 必數值）
+  - source block (process_history) 通常 rows_min=5（過去 7d 至少 5 筆，0 筆代表 trigger payload 不對）
+  - 只 declare 你有把握的；不確定就留 null，不要亂寫
+  - cols_must_have 用 upstream out_cols + path 文法（e.g. 'spc_summary.ooc_count'）
+
+contract 範例:
+  "n1": {"rows_min": 5, "output_type": "dataframe", "cols_must_have": ["eventTime", "spc_charts"],
+         "reason": "process_history 7d 過去資料至少 5 筆"}
+  "n3": {"rows_min": 1, "rows_max": 1, "reason": "sort+limit=1 應該剛好留最後 1 筆"}
+  "n_chart": {"output_type": "chart_spec", "distinct_x_min": 3,
+              "reason": "chart 至少 3 點才看得到趨勢"}
+  "n_verdict": {"output_type": "scalar", "value_type": "number",
+                "reason": "step_check 終端 verdict 必為數值"}
 """
 
 
@@ -492,13 +524,24 @@ async def plan_node(state: BuildGraphState) -> dict[str, Any]:
         s.strip() for s in expected_outputs_raw
         if isinstance(s, str) and s.strip()
     ][:8]
+    # v13: node_contracts — agent's self-declared per-node expectations
+    # used by contract_diff at runtime to fire targeted reflect_op when
+    # actual exec_trace diverges. Tolerate missing / malformed shapes;
+    # contract_diff only fires checks for fields present.
+    node_contracts_raw = decision.get("node_contracts") or {}
+    node_contracts: dict[str, dict[str, Any]] = {}
+    if isinstance(node_contracts_raw, dict):
+        for lid, contract in node_contracts_raw.items():
+            if isinstance(contract, dict) and isinstance(lid, str):
+                node_contracts[lid] = contract
 
     # Determine FROM_SCRATCH heuristic: empty canvas + plan ≥ 3 ops
     is_from_scratch = (not has_existing) and (len(plan_list) >= 3)
 
     logger.info(
-        "plan_node: produced %d ops, %d outputs, from_scratch=%s, summary=%r",
-        len(plan_list), len(expected_outputs), is_from_scratch, summary[:80],
+        "plan_node: produced %d ops, %d outputs, %d contracts, from_scratch=%s, summary=%r",
+        len(plan_list), len(expected_outputs), len(node_contracts),
+        is_from_scratch, summary[:80],
     )
     if tracer is not None:
         step_entry = tracer.record_step(
@@ -527,6 +570,7 @@ async def plan_node(state: BuildGraphState) -> dict[str, Any]:
         "plan_validation_errors": [],
         "summary": summary,
         "expected_outputs": expected_outputs,
+        "node_contracts": node_contracts,
         "sse_events": sse_events_list,
     }
 

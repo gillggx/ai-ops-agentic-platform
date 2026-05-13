@@ -111,13 +111,16 @@ async def reflect_op_node(state: BuildGraphState) -> dict[str, Any]:
         }
 
     # Build user message — keep it tight: failing op + small upstream slice
-    # of trace + the issue envelope + the block's param_schema.
+    # of trace + the issue envelope + the block's param_schema + the
+    # contract the agent itself declared (v13).
+    contract = (state.get("node_contracts") or {}).get(failing_logical_id)
     user_msg = _build_user_message(
         instruction=state.get("instruction") or "",
         plan=plan,
         failing_op_idx=failing_op_idx,
         exec_trace=exec_trace,
         issue=issue,
+        contract=contract,
     )
 
     client = get_llm_client()
@@ -278,6 +281,7 @@ def _build_user_message(
     failing_op_idx: int,
     exec_trace: dict[str, dict],
     issue: dict,
+    contract: dict | None = None,
 ) -> str:
     """Compose the user message with USER PROMPT + FAILING OP + upstream
     TRACE slice + ISSUE envelope + block schema for the failing op.
@@ -320,15 +324,28 @@ def _build_user_message(
             issue_lines.append(f"  {k}: {v}")
     issue_block = "\n".join(issue_lines)
 
+    # v13: include the contract the agent itself declared in plan_node.
+    # Diff message says "rows=0 but contract said rows_min=5" — LLM only
+    # has to fix to meet a constraint IT wrote, no guessing.
+    contract_block = "(no contract declared for this node)"
+    if isinstance(contract, dict) and contract:
+        try:
+            contract_block = json.dumps(contract, ensure_ascii=False, indent=2)[:1000]
+        except (TypeError, ValueError):
+            pass
+
     return (
         f"USER PROMPT (intent):\n  {instruction[:400]}\n\n"
         f"FAILING OP at cursor {failing_op_idx}:\n"
         f"{json.dumps(failing_op, ensure_ascii=False, indent=2)}\n\n"
         f"UPSTREAM TRACE (ops {start} to {failing_op_idx}):\n"
         f"{trace_block}\n\n"
-        f"ISSUE detected:\n{issue_block}\n\n"
+        f"CONTRACT (你寫 plan 時為這個 node 宣告的預期):\n{contract_block}\n\n"
+        f"VIOLATION detected:\n{issue_block}\n\n"
         f"Block schema for {block_id}:\n{schema_section}\n\n"
-        "請出修正方案 (JSON only)."
+        "修正方向：先確認 CONTRACT 是否合理（如果是你寫錯了預期，rollback 並 "
+        "patch upstream 或這個 op 把資料弄對；如果 CONTRACT 是對的，那就是這個 "
+        "op 的 params 寫錯）。輸出 JSON only."
     )
 
 
