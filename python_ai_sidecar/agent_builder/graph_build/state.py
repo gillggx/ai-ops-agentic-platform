@@ -61,6 +61,24 @@ class BuildGraphState(TypedDict, total=False):
     # additional context. Bounded by MAX_MODIFY_CYCLES=3.
     modify_requests: list[dict]
     modify_cycles: int
+
+    # ── v16: Macro-plan + chunked compile (2026-05-14) ───────────────
+    # Replaces single-shot plan_node. macro_plan_node first emits a
+    # natural-language "macro plan" with 5-10 high-level steps. Each step
+    # then gets compiled to 1-3 ops by compile_chunk_node in sequence.
+    # Per-step validation is purely structural (no data checks) — see
+    # validate_chunk in validate.py.
+    #
+    # Shape per item:
+    #   {"step_idx": int, "text": str,
+    #    "expected_kind": "table"|"chart"|"scalar"|"transform",
+    #    "expected_cols": list[str] (optional, terminal steps),
+    #    "completed": bool, "ops_appended": int}
+    macro_plan: list[dict]
+    # Cursor into macro_plan — which step compile_chunk_node will tackle next.
+    current_macro_step: int
+    # Per-step retry counter for compile_chunk_node failures.
+    compile_attempts: dict[str, int]
     # v13 (2026-05-13): per-node contracts the agent declares while writing
     # the plan. Runtime auto-preview compares each node's actual snapshot
     # to its contract; mismatch fires a targeted reflect_op (changes only
@@ -181,4 +199,7 @@ def initial_state(
         clarify_attempts=0,
         modify_requests=[],
         modify_cycles=0,
+        macro_plan=[],
+        current_macro_step=0,
+        compile_attempts={},
     )

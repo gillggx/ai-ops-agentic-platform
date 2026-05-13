@@ -31,6 +31,12 @@ from python_ai_sidecar.agent_builder.graph_build.nodes.clarify_intent import (
     clarify_intent_node,
 )
 from python_ai_sidecar.agent_builder.graph_build.nodes.plan import plan_node
+from python_ai_sidecar.agent_builder.graph_build.nodes.macro_plan import (
+    macro_plan_node,
+)
+from python_ai_sidecar.agent_builder.graph_build.nodes.compile_chunk import (
+    compile_chunk_node,
+)
 from python_ai_sidecar.agent_builder.graph_build.nodes.validate import validate_plan_node
 from python_ai_sidecar.agent_builder.graph_build.nodes.repair_plan import (
     MAX_PLAN_REPAIR,
@@ -74,6 +80,10 @@ def _route_after_validate(state: BuildGraphState) -> str:
     Phase 11 v13 — when is_from_scratch + skip_confirm, route through
     canvas_reset first so leftover nodes from earlier build_pipeline_live
     calls don't bleed into the new build (user reported orphan-node bug).
+
+    v16 (2026-05-14): if state.macro_plan is populated this is a chunked
+    build — validate is being called per-chunk during the build loop.
+    Route to compile_chunk (next step) or dispatch_op (run ops just compiled).
     """
     errors = state.get("plan_validation_errors") or []
     if errors:
@@ -82,6 +92,11 @@ def _route_after_validate(state: BuildGraphState) -> str:
             logger.warning("route_after_validate: plan_unfixable (attempts=%d)", attempts)
             return "finalize"  # finalize will mark status=failed since no pipeline produced
         return "repair_plan"
+    # v16 chunked path: macro_plan exists → after validate (post-macro_plan
+    # node), straight to confirm_gate to let user review macro before
+    # committing LLM tokens on compile.
+    if state.get("macro_plan") and not state.get("user_confirmed"):
+        return "confirm_gate"
     if state.get("is_from_scratch"):
         if state.get("skip_confirm"):
             return "canvas_reset"
@@ -144,8 +159,9 @@ def _route_after_call(state: BuildGraphState) -> str:
        - last op errored → repair_op (schema-level fix, existing)
        - last op ok BUT exec_trace shows data issue → reflect_op (NEW v8,
          per-op semantic patch; budgeted per logical id)
-       - last op ok and more ops → dispatch_op
-       - last op ok and no more → finalize
+       - last op ok and more ops in current plan → dispatch_op
+       - last op ok and plan done BUT more macro steps → compile_chunk
+       - all done → finalize
     """
     cursor = state.get("cursor", 0)
     plan = state.get("plan") or []
@@ -179,8 +195,27 @@ def _route_after_call(state: BuildGraphState) -> str:
 
     # All ops done?
     if cursor >= len(plan):
+        # v16: if we're in a chunked build and still have macro steps to
+        # compile, route back to compile_chunk_node. current_macro_step
+        # gets incremented by the route function below since compile_chunk
+        # always operates on macro_plan[current_macro_step] and we just
+        # finished that step's ops.
+        macro_plan = state.get("macro_plan") or []
+        idx = state.get("current_macro_step", 0)
+        if macro_plan and idx + 1 < len(macro_plan):
+            return "next_chunk"
         return "finalize"
     return "dispatch_op"
+
+
+def _advance_macro_step(state: BuildGraphState) -> dict[str, Any]:
+    """No-op routing node that increments current_macro_step. Sits between
+    call_tool (when chunk fully executed) and compile_chunk_node so the
+    next compile_chunk sees the next macro step.
+    """
+    idx = state.get("current_macro_step", 0)
+    logger.info("advance_macro_step: %d → %d", idx, idx + 1)
+    return {"current_macro_step": idx + 1}
 
 
 # ── Build the graph (cached) ───────────────────────────────────────────────
@@ -200,6 +235,10 @@ def build_graph():
     g: StateGraph = StateGraph(BuildGraphState)
     g.add_node("clarify_intent", clarify_intent_node)
     g.add_node("plan", plan_node)
+    # v16 (2026-05-14): macro-plan + chunked-compile architecture
+    g.add_node("macro_plan", macro_plan_node)
+    g.add_node("compile_chunk", compile_chunk_node)
+    g.add_node("advance_macro_step", _advance_macro_step)
     g.add_node("validate", validate_plan_node)
     g.add_node("repair_plan", repair_plan_node)
     g.add_node("confirm_gate", confirm_gate_node)
@@ -213,12 +252,14 @@ def build_graph():
     g.add_node("reflect_op", reflect_op_node)
     g.add_node("layout", layout_node)
 
-    # v15 G1: clarify_intent first. Node uses interrupt() to pause when
-    # user clarification is needed; resume comes via /agent/build/clarify-
-    # respond. When the prompt is unambiguous it just falls through.
+    # v15 G1 + v16: clarify_intent first; then macro_plan (replaces 1-shot
+    # plan_node). plan_node remains in the graph for v15 modify-request
+    # replan path (route_after_confirm → "plan") but new builds enter via
+    # macro_plan.
     g.add_edge(START, "clarify_intent")
-    g.add_edge("clarify_intent", "plan")
-    g.add_edge("plan", "validate")
+    g.add_edge("clarify_intent", "macro_plan")
+    g.add_edge("macro_plan", "validate")
+    g.add_edge("plan", "validate")  # legacy replan path
     g.add_conditional_edges(
         "validate",
         _route_after_validate,
@@ -240,8 +281,16 @@ def build_graph():
             "plan": "plan",  # v15 G2: modify requested → replan
         },
     )
-    # canvas_reset → dispatch_op (always — runs once for from_scratch builds)
-    g.add_edge("canvas_reset", "dispatch_op")
+    # canvas_reset → compile_chunk (v16) — start the chunked compile loop.
+    # First compile_chunk produces ops, dispatch_op walks them, eventually
+    # call_tool routes back to compile_chunk via advance_macro_step until
+    # all macro steps are done.
+    g.add_edge("canvas_reset", "compile_chunk")
+    # compile_chunk → dispatch_op (the new ops are now in state.plan)
+    g.add_edge("compile_chunk", "dispatch_op")
+    # advance_macro_step → compile_chunk (bumps current_macro_step then
+    # re-enters compile loop for next macro step's ops)
+    g.add_edge("advance_macro_step", "compile_chunk")
     g.add_edge("dispatch_op", "call_tool")
     g.add_conditional_edges(
         "call_tool",
@@ -252,6 +301,7 @@ def build_graph():
             "reflect_op": "reflect_op",
             "repair_plan": "repair_plan",
             "finalize": "finalize",
+            "next_chunk": "advance_macro_step",  # v16: bump idx + compile next
         },
     )
     g.add_edge("repair_op", "call_tool")
