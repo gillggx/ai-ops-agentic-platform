@@ -129,12 +129,12 @@ test.describe("Harness flow — stable skill, repeated builds", () => {
       () => document.querySelectorAll(".react-flow__node").length >= 2,
       null, { timeout: 180_000, polling: 2000 },
     );
-    // 2026-05-13: wait for the agent's "✓ <summary>" line in the chat
-    // panel — that's the signal that the SSE "done" event was processed,
-    // which means the done handler has replaced canvas with sidecar's
-    // final_pipeline. Without this we save mid-reflect, missing edges /
-    // post-reflect param changes that arrive later.
-    await builder.locator('text=/^✓ /').first().waitFor({ timeout: 300_000 });
+    // 2026-05-13: wait for the agent's "🎉 <summary>" line. This is the
+    // FINAL build-complete marker fired only at the graph's done event,
+    // AFTER all reflect_plan loops + layout. Don't use ✓ — that fires at
+    // each intermediate build_finalized SSE during reflect cycles, and
+    // grabbing the first one drops us into mid-build canvas state.
+    await builder.locator('text=/^🎉 /').first().waitFor({ timeout: 300_000 });
     // Extra 1s for React Flow to settle on the laid-out positions.
     await builder.waitForTimeout(1_000);
     const nodeCount = await builder.locator(".react-flow__node").count();
