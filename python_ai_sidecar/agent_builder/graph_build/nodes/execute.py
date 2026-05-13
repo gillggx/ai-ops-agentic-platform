@@ -65,6 +65,58 @@ async def call_tool_node(state: BuildGraphState) -> dict[str, Any]:
     if tool_name is None:
         return _error_update(cursor, plan, op, f"unknown op type '{op_type}'")
 
+    # ── Idempotency: re-execution after reflect_op rollback ───────────
+    # reflect_op rewinds cursor and clears result_status for plan[K..N],
+    # so call_tool_node runs each op again. Without dedup we'd:
+    #   - add_node: create a 2nd real node for the same logical id,
+    #     leaving the 1st as an orphan in the canvas
+    #   - connect: stack parallel edges between the same ports
+    # Detect re-execution and either remove the stale real node first
+    # (add_node, since the LLM may have changed params) or skip
+    # (connect, since the edge is idempotent).
+    if op_type == "add_node":
+        logical_id = op.get("node_id")
+        prior_real_id = logical_to_real.get(logical_id) if logical_id else None
+        if prior_real_id:
+            try:
+                await toolset.dispatch("remove_node", {"node_id": prior_real_id})
+                logger.info(
+                    "call_tool_node: cursor=%d re-exec %s — removed prior real %s",
+                    cursor, logical_id, prior_real_id,
+                )
+                logical_to_real.pop(logical_id, None)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "call_tool_node: prior remove for %s (real %s) failed: %s",
+                    logical_id, prior_real_id, e,
+                )
+    elif op_type == "connect":
+        src_real = args.get("from_node")
+        src_port = args.get("from_port")
+        dst_real = args.get("to_node")
+        dst_port = args.get("to_port")
+        existing = any(
+            e.from_.node == src_real and e.from_.port == src_port
+            and e.to.node == dst_real and e.to.port == dst_port
+            for e in transient.pipeline_json.edges
+        )
+        if existing:
+            logger.info(
+                "call_tool_node: cursor=%d connect %s.%s→%s.%s already exists — skip",
+                cursor, src_real, src_port, dst_real, dst_port,
+            )
+            op_updated = {**op, "result_status": "ok",
+                          "result_node_id": None, "_skipped_idempotent": True}
+            new_plan = list(plan)
+            new_plan[cursor] = op_updated
+            return {
+                "plan": new_plan,
+                "cursor": cursor + 1,
+                "sse_events": [_event("op_completed", {
+                    "cursor": cursor, "op": op_updated, "result": {"skipped": True},
+                })],
+            }
+
     try:
         result = await toolset.dispatch(tool_name, args)
     except ToolError as e:
