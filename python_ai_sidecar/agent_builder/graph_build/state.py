@@ -40,6 +40,27 @@ class BuildGraphState(TypedDict, total=False):
     # User-facing description of what artifacts will be produced — shown
     # in the confirm card so the user knows what to expect before approving.
     expected_outputs: list[str]
+    # v15 G2 (2026-05-13): structured version of expected_outputs. Each item
+    # carries {kind: "table"|"chart"|"scalar"|"alert", title, format,
+    # columns?, reason}. Renders in the confirm card as concrete artifact
+    # previews — user can spot mismatches (e.g. "I wanted a snapshot table,
+    # this says trend chart") before approving + clicking "改".
+    expected_outputs_structured: list[dict]
+
+    # ── v15 G1: Pre-plan clarification (2026-05-13) ───────────────────
+    # clarify_intent_node may pause the graph with 1-3 questions; user's
+    # answers come back via /agent/build/clarify-respond and are stored
+    # here so plan_node sees them. Shape: {"q1": "snapshot_table", "q2": "7d"}.
+    clarifications: dict[str, str]
+    # Bound to 1 — clarify only fires once per build.
+    clarify_attempts: int
+
+    # ── v15 G2: Post-plan modify request (2026-05-13) ─────────────────
+    # When user clicks "改 Step N" on the confirm card, the natural-language
+    # request lands here. plan_node weaves it into its next attempt as
+    # additional context. Bounded by MAX_MODIFY_CYCLES=3.
+    modify_requests: list[dict]
+    modify_cycles: int
     # v13 (2026-05-13): per-node contracts the agent declares while writing
     # the plan. Runtime auto-preview compares each node's actual snapshot
     # to its contract; mismatch fires a targeted reflect_op (changes only
@@ -155,4 +176,9 @@ def initial_state(
         reflect_op_attempts={},
         last_op_issue=None,
         node_contracts={},
+        expected_outputs_structured=[],
+        clarifications={},
+        clarify_attempts=0,
+        modify_requests=[],
+        modify_cycles=0,
     )

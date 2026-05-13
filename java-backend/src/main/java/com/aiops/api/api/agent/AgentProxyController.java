@@ -159,6 +159,52 @@ public class AgentProxyController {
 		return bridgeSse(sidecar.postSse("/internal/agent/build/confirm", req, caller), "build_confirm");
 	}
 
+	// v15 G1 (2026-05-13) — resume paused graph at clarify_intent_node.
+	// Body: { sessionId | session_id, answers: {qid: value} }
+	@PostMapping(path = "/build/clarify-respond", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public SseEmitter buildClarifyRespond(@RequestBody Map<String, Object> body,
+	                                      @AuthenticationPrincipal AuthPrincipal caller) {
+		String sessionId = asString(body.get("sessionId"));
+		if (sessionId == null || sessionId.isBlank()) sessionId = asString(body.get("session_id"));
+		if (sessionId == null || sessionId.isBlank()) {
+			throw new com.aiops.api.common.ApiException(
+					org.springframework.http.HttpStatus.BAD_REQUEST,
+					"validation_error", "session_id: must not be blank");
+		}
+		@SuppressWarnings("unchecked")
+		Map<String, Object> answers = body.get("answers") instanceof Map<?, ?> m
+				? (Map<String, Object>) m : new java.util.HashMap<>();
+		Map<String, Object> req = new java.util.HashMap<>();
+		req.put("session_id", sessionId);
+		req.put("answers", answers);
+		return bridgeSse(sidecar.postSse("/internal/agent/build/clarify-respond", req, caller), "build_clarify");
+	}
+
+	// v15 G2 — modify request after plan review.
+	// Body: { sessionId | session_id, stepIdx?: int, request: string }
+	@PostMapping(path = "/build/modify-request", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public SseEmitter buildModifyRequest(@RequestBody Map<String, Object> body,
+	                                     @AuthenticationPrincipal AuthPrincipal caller) {
+		String sessionId = asString(body.get("sessionId"));
+		if (sessionId == null || sessionId.isBlank()) sessionId = asString(body.get("session_id"));
+		String request = asString(body.get("request"));
+		if (sessionId == null || sessionId.isBlank() || request == null || request.isBlank()) {
+			throw new com.aiops.api.common.ApiException(
+					org.springframework.http.HttpStatus.BAD_REQUEST,
+					"validation_error", "session_id and request: must not be blank");
+		}
+		Object stepIdxRaw = body.get("stepIdx");
+		if (stepIdxRaw == null) stepIdxRaw = body.get("step_idx");
+		Long stepIdx = asLong(stepIdxRaw);
+		Map<String, Object> req = new java.util.HashMap<>();
+		req.put("session_id", sessionId);
+		req.put("step_idx", stepIdx);
+		req.put("request", request);
+		return bridgeSse(sidecar.postSse("/internal/agent/build/modify-request", req, caller), "build_modify");
+	}
+
 	private static Long asLong(Object v) {
 		if (v == null) return null;
 		if (v instanceof Number n) return n.longValue();

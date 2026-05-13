@@ -27,6 +27,9 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from python_ai_sidecar.agent_builder.graph_build.state import BuildGraphState
+from python_ai_sidecar.agent_builder.graph_build.nodes.clarify_intent import (
+    clarify_intent_node,
+)
 from python_ai_sidecar.agent_builder.graph_build.nodes.plan import plan_node
 from python_ai_sidecar.agent_builder.graph_build.nodes.validate import validate_plan_node
 from python_ai_sidecar.agent_builder.graph_build.nodes.repair_plan import (
@@ -86,11 +89,28 @@ def _route_after_validate(state: BuildGraphState) -> str:
     return "dispatch_op"
 
 
+MAX_MODIFY_CYCLES = 3
+
+
 def _route_after_confirm(state: BuildGraphState) -> str:
     """User confirmed? → canvas_reset (always — user said yes to a fresh
-    build) → dispatch. Rejected? → END (finalize w/ no-op)."""
+    build) → dispatch.
+    User asked to modify (user_confirmed=None + modify_requests appended)?
+      → loop back to plan_node (bounded by MAX_MODIFY_CYCLES).
+    Rejected? → END (finalize w/ no-op).
+    """
     if state.get("user_confirmed") is True:
         return "canvas_reset"
+    # v15 G2: modify path — user_confirmed=None and modify_requests appended
+    modify_cycles = state.get("modify_cycles", 0)
+    if state.get("user_confirmed") is None and modify_cycles > 0:
+        if modify_cycles >= MAX_MODIFY_CYCLES:
+            logger.warning(
+                "route_after_confirm: max modify cycles (%d) reached — finalize",
+                modify_cycles,
+            )
+            return "finalize"
+        return "plan"
     return "finalize"
 
 
@@ -178,6 +198,7 @@ def build_graph():
         return _compiled
 
     g: StateGraph = StateGraph(BuildGraphState)
+    g.add_node("clarify_intent", clarify_intent_node)
     g.add_node("plan", plan_node)
     g.add_node("validate", validate_plan_node)
     g.add_node("repair_plan", repair_plan_node)
@@ -192,7 +213,11 @@ def build_graph():
     g.add_node("reflect_op", reflect_op_node)
     g.add_node("layout", layout_node)
 
-    g.add_edge(START, "plan")
+    # v15 G1: clarify_intent first. Node uses interrupt() to pause when
+    # user clarification is needed; resume comes via /agent/build/clarify-
+    # respond. When the prompt is unambiguous it just falls through.
+    g.add_edge(START, "clarify_intent")
+    g.add_edge("clarify_intent", "plan")
     g.add_edge("plan", "validate")
     g.add_conditional_edges(
         "validate",
@@ -209,7 +234,11 @@ def build_graph():
     g.add_conditional_edges(
         "confirm_gate",
         _route_after_confirm,
-        {"canvas_reset": "canvas_reset", "finalize": "finalize"},
+        {
+            "canvas_reset": "canvas_reset",
+            "finalize": "finalize",
+            "plan": "plan",  # v15 G2: modify requested → replan
+        },
     )
     # canvas_reset → dispatch_op (always — runs once for from_scratch builds)
     g.add_edge("canvas_reset", "dispatch_op")

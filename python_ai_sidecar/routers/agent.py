@@ -221,6 +221,102 @@ async def agent_build_confirm(
     return EventSourceResponse(_build_confirm_stream(req, caller))
 
 
+# ── v15 G1: clarify-respond endpoint ──────────────────────────────────────
+
+
+class BuildClarifyRespondRequest(BaseModel):
+    """v15 — resume a paused graph from clarify_intent_node with user's
+    answers to the multiple-choice questions emitted earlier. Frontend
+    POSTs this when user picks options on the clarification dialog.
+    """
+    model_config = ConfigDict(populate_by_name=True)
+
+    session_id: str = Field(..., alias="sessionId")
+    # {question_id: chosen_value}; values can be option `value`s from the
+    # original questions or free-text the user typed.
+    answers: dict[str, str] = Field(default_factory=dict)
+
+
+async def _build_clarify_stream(
+    req: BuildClarifyRespondRequest, caller: CallerContext,
+) -> AsyncGenerator[dict, None]:
+    from python_ai_sidecar.agent_builder.graph_build.runner import (
+        resume_graph_build_with_clarify,
+    )
+
+    try:
+        async for stream_event in resume_graph_build_with_clarify(
+            session_id=req.session_id, answers=req.answers,
+        ):
+            yield {
+                "event": stream_event.type,
+                "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
+            }
+    except Exception as ex:  # noqa: BLE001
+        log.exception("build/clarify-respond failed for session=%s", req.session_id)
+        yield {"event": "error", "data": json.dumps({
+            "message": f"clarify-respond failed: {ex.__class__.__name__}: {str(ex)[:200]}",
+            "session_id": req.session_id,
+        }, ensure_ascii=False)}
+        yield {"event": "done", "data": json.dumps({"status": "failed"})}
+
+
+@router.post("/build/clarify-respond")
+async def agent_build_clarify_respond(
+    req: BuildClarifyRespondRequest, caller: CallerContext = ServiceAuth,
+) -> EventSourceResponse:
+    """Resume a paused graph at clarify_intent_node with user's answers."""
+    return EventSourceResponse(_build_clarify_stream(req, caller))
+
+
+# ── v15 G2: modify-request endpoint ──────────────────────────────────────
+
+
+class BuildModifyRequestRequest(BaseModel):
+    """v15 G2 — user reviewed the plan at confirm_gate and wants a change
+    (e.g. "改 Step 3 變成 trend chart"). plan_node re-runs with the
+    request appended to state.modify_requests. Bounded by MAX_MODIFY_CYCLES.
+    """
+    model_config = ConfigDict(populate_by_name=True)
+
+    session_id: str = Field(..., alias="sessionId")
+    step_idx: int | None = Field(default=None, alias="stepIdx")
+    request: str = Field(..., min_length=1, max_length=2000)
+
+
+async def _build_modify_stream(
+    req: BuildModifyRequestRequest, caller: CallerContext,
+) -> AsyncGenerator[dict, None]:
+    from python_ai_sidecar.agent_builder.graph_build.runner import (
+        resume_graph_build_with_modify,
+    )
+
+    try:
+        async for stream_event in resume_graph_build_with_modify(
+            session_id=req.session_id, step_idx=req.step_idx, request=req.request,
+        ):
+            yield {
+                "event": stream_event.type,
+                "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
+            }
+    except Exception as ex:  # noqa: BLE001
+        log.exception("build/modify-request failed for session=%s", req.session_id)
+        yield {"event": "error", "data": json.dumps({
+            "message": f"modify-request failed: {ex.__class__.__name__}: {str(ex)[:200]}",
+            "session_id": req.session_id,
+        }, ensure_ascii=False)}
+        yield {"event": "done", "data": json.dumps({"status": "failed"})}
+
+
+@router.post("/build/modify-request")
+async def agent_build_modify_request(
+    req: BuildModifyRequestRequest, caller: CallerContext = ServiceAuth,
+) -> EventSourceResponse:
+    """Resume a paused graph at confirm_gate with user's modify request,
+    routing back to plan_node for a re-plan."""
+    return EventSourceResponse(_build_modify_stream(req, caller))
+
+
 # ── Phase 11: Skill-step translation (sync) ──────────────────────────────
 
 

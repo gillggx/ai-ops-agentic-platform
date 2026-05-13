@@ -78,6 +78,16 @@ Block 目錄:
     "<跑完 user 會看到的 artifact，每行一個 — 用 user-facing 語言>",
     "..."
   ],
+  "expected_outputs_structured": [
+    {
+      "kind": "table" | "chart" | "scalar" | "alert",
+      "title": "<跟 expected_outputs 對應的標題>",
+      "format": "snapshot_table" | "line_trend" | "bar_compare" | "boolean" | "value",
+      "columns": ["..."],
+      "from_clarification": null | "qid=value",
+      "reason": "<這個 format 為什麼選>"
+    }
+  ],
   "node_contracts": {
     "<logical_id>": {
       "rows_min": <int|null>,         // 預期最少筆數；source 通常 >=5, filter/sort+limit=1 設 1
@@ -103,6 +113,30 @@ expected_outputs 範例（描述 user 會看到的東西，不是 ops 列表）:
   ✅ ["📋 OOC 機台清單表", "📊 各站點 OOC 比例 bar chart"]
   ❌ ["add block_xbar_r", "set_param value_column", ...]   ← 這是 ops 不是 outputs
   ❌ ["build pipeline"]                                     ← 太籠統
+
+額外輸出 expected_outputs_structured（v15 G2 — 跟 expected_outputs 對應，但機器可比對）:
+  每項格式:
+  {
+    "kind": "table" | "chart" | "scalar" | "alert",
+    "title": "<同 expected_outputs 的字串>",
+    "format": "snapshot_table" | "line_trend" | "bar_compare" | "boolean" | "value",
+    "columns": ["..."],     // table 才需要列名
+    "from_clarification": "qid=value",   // 若這個 output 由 clarification 答案決定
+    "reason": "<為什麼選這種 format — 給 user review 用>"
+  }
+
+  範例:
+  [
+    {"kind":"scalar","title":"OOC chart count >= 2","format":"boolean",
+     "reason":"step_check threshold >= 2 → 布林"},
+    {"kind":"table","title":"OOC charts snapshot at last OOC event",
+     "format":"snapshot_table","columns":["name","value","ucl","lcl"],
+     "from_clarification":"q1=snapshot_table",
+     "reason":"user 澄清要 snapshot 不是 trend"}
+  ]
+
+  如果 user 給了 clarification（instruction 末段「使用者澄清」），務必反映在
+  format 跟 from_clarification 欄位。沒 clarification 時 from_clarification 留 null。
 
 node_contracts — 寫 plan 時順手宣告「每個 node 跑完應該長什麼樣」。runtime 會拿真實結果跟你
 宣告的 contract 比對，**只 reflect 不符合的那 1 個 op**，不會把整 plan 重做。
@@ -479,7 +513,26 @@ async def plan_node(state: BuildGraphState) -> dict[str, Any]:
     except Exception as ex:  # noqa: BLE001
         logger.info("plan_node: knowledge retrieval skipped (%s)", ex)
 
-    user_msg = state["instruction"] + canvas_hint + inputs_hint + skill_hint + knowledge_hint
+    # v15 G2: weave previous modify requests (if user reviewed plan and
+    # asked for changes) so this replan attempt addresses them. Each
+    # request is a {step_idx, request, at_cycle} dict appended by
+    # confirm_gate_node.
+    modify_hint = ""
+    modify_requests = state.get("modify_requests") or []
+    if modify_requests:
+        lines = ["", "", "── 使用者對前一版 plan 的修改要求（按順序套用）──"]
+        for i, mr in enumerate(modify_requests[-5:], 1):
+            step_idx = mr.get("step_idx")
+            req = str(mr.get("request") or "")[:300]
+            anchor = f"Step {step_idx}" if step_idx is not None else "整個 plan"
+            lines.append(f"  {i}. 針對 {anchor}: {req}")
+        lines.append(
+            "請把這些要求都納入新 plan。如果跟你原本的設計衝突，以 user 為準。"
+            " 不要保留舊 broken nodes — 用 remove_node 砍掉，或直接 set_param 改正。"
+        )
+        modify_hint = "\n".join(lines)
+
+    user_msg = state["instruction"] + canvas_hint + inputs_hint + skill_hint + knowledge_hint + modify_hint
     client = get_llm_client()
     # Phase 11 v17 — opt-in BuildTracer captures full LLM exchange.
     from python_ai_sidecar.agent_builder.graph_build.trace import (
@@ -524,6 +577,15 @@ async def plan_node(state: BuildGraphState) -> dict[str, Any]:
         s.strip() for s in expected_outputs_raw
         if isinstance(s, str) and s.strip()
     ][:8]
+    # v15: structured version of expected_outputs — used by G2 confirm card
+    # so user sees concrete kind/format and can spot mismatches before
+    # approving. Tolerate missing / bad shapes (fall back to legacy strings).
+    structured_raw = decision.get("expected_outputs_structured") or []
+    expected_outputs_structured: list[dict[str, Any]] = []
+    if isinstance(structured_raw, list):
+        for item in structured_raw[:8]:
+            if isinstance(item, dict) and isinstance(item.get("kind"), str):
+                expected_outputs_structured.append(item)
     # v13: node_contracts — agent's self-declared per-node expectations
     # used by contract_diff at runtime to fire targeted reflect_op when
     # actual exec_trace diverges. Tolerate missing / malformed shapes;
@@ -570,6 +632,7 @@ async def plan_node(state: BuildGraphState) -> dict[str, Any]:
         "plan_validation_errors": [],
         "summary": summary,
         "expected_outputs": expected_outputs,
+        "expected_outputs_structured": expected_outputs_structured,
         "node_contracts": node_contracts,
         "sse_events": sse_events_list,
     }

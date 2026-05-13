@@ -111,9 +111,11 @@ async def stream_graph_build(
     # Check if graph paused on interrupt
     state_obj = await graph.aget_state(config)
     if state_obj.next:
-        # Graph is paused. Surface confirm_pending with session_id.
+        # Graph is paused. Could be clarify_intent_node (G1) OR
+        # confirm_gate (G2). The interrupt payload's "kind" field tells
+        # us which — clarify_intent emits kind="clarify_required",
+        # confirm_gate emits no kind (legacy payload shape).
         interrupted = True
-        # The interrupt payload from confirm_gate is the most recent task value.
         try:
             interrupt_payload = (
                 state_obj.tasks[0].interrupts[0].value if state_obj.tasks
@@ -121,8 +123,13 @@ async def stream_graph_build(
             )
         except Exception:  # noqa: BLE001
             interrupt_payload = {}
+        kind = (
+            interrupt_payload.get("kind")
+            if isinstance(interrupt_payload, dict) else None
+        )
+        event_type = "clarify_required" if kind == "clarify_required" else "confirm_pending"
         yield StreamEvent(
-            type="confirm_pending",
+            type=event_type,
             data={
                 "session_id": sid,
                 **(interrupt_payload if isinstance(interrupt_payload, dict) else {}),
@@ -273,10 +280,148 @@ async def resume_graph_build(
         for ev in _flush_sse_events(last_state):
             yield ev
 
+    # Detect another interrupt mid-stream (e.g. confirm_gate after clarify
+    # resume) and surface confirm_pending so frontend can keep going.
+    state_obj = await graph.aget_state(config)
+    if state_obj.next:
+        try:
+            interrupt_payload = (
+                state_obj.tasks[0].interrupts[0].value if state_obj.tasks else {}
+            )
+        except Exception:  # noqa: BLE001
+            interrupt_payload = {}
+        kind = (interrupt_payload or {}).get("kind") if isinstance(interrupt_payload, dict) else None
+        yield StreamEvent(
+            type="clarify_required" if kind == "clarify_required" else "confirm_pending",
+            data={
+                "session_id": session_id,
+                **(interrupt_payload if isinstance(interrupt_payload, dict) else {}),
+            },
+        )
+        return
+
     yield StreamEvent(
         type="done",
         data={
             "status": last_state.get("status") or ("finished" if confirmed else "cancelled"),
+            "pipeline_json": last_state.get("final_pipeline") or last_state.get("base_pipeline"),
+            "summary": last_state.get("summary"),
+            "session_id": session_id,
+        },
+    )
+
+
+async def resume_graph_build_with_modify(
+    *,
+    session_id: str,
+    step_idx: int | None,
+    request: str,
+) -> AsyncGenerator[StreamEvent, None]:
+    """v15 G2 — user reviewed the plan in confirm_gate and asked for a
+    change ("改 Step 3 變成 trend chart"). Append the request to
+    state.modify_requests, decline the confirm, force replan.
+
+    Implementation note: confirm_gate's interrupt resumes with whatever we
+    Command(resume=...) — if we resume with confirmed=False, the existing
+    route_after_confirm sends to finalize. We instead need a path back to
+    plan_node. The least invasive approach is to resume confirm_gate with
+    a special marker that route_after_confirm interprets as "replan".
+    """
+    graph = build_graph()
+    config = {"configurable": {"thread_id": session_id}, "recursion_limit": 150}
+
+    logger.info(
+        "resume_graph_build_with_modify: session=%s step_idx=%s request=%r",
+        session_id, step_idx, request[:120],
+    )
+    last_state: dict = {}
+
+    async for chunk in graph.astream(
+        Command(resume={"modify": True, "step_idx": step_idx, "request": request}),
+        config=config,
+        stream_mode="values",
+    ):
+        last_state = chunk if isinstance(chunk, dict) else {}
+        for ev in _flush_sse_events(last_state):
+            yield ev
+
+    state_obj = await graph.aget_state(config)
+    if state_obj.next:
+        try:
+            interrupt_payload = (
+                state_obj.tasks[0].interrupts[0].value if state_obj.tasks else {}
+            )
+        except Exception:  # noqa: BLE001
+            interrupt_payload = {}
+        kind = (interrupt_payload or {}).get("kind") if isinstance(interrupt_payload, dict) else None
+        yield StreamEvent(
+            type="clarify_required" if kind == "clarify_required" else "confirm_pending",
+            data={
+                "session_id": session_id,
+                **(interrupt_payload if isinstance(interrupt_payload, dict) else {}),
+            },
+        )
+        return
+
+    yield StreamEvent(
+        type="done",
+        data={
+            "status": last_state.get("status") or "finished",
+            "pipeline_json": last_state.get("final_pipeline") or last_state.get("base_pipeline"),
+            "summary": last_state.get("summary"),
+            "session_id": session_id,
+        },
+    )
+
+
+async def resume_graph_build_with_clarify(
+    *,
+    session_id: str,
+    answers: dict[str, str],
+) -> AsyncGenerator[StreamEvent, None]:
+    """Resume a graph paused at clarify_intent_node, providing the user's
+    answers to the clarification questions. The graph continues into
+    plan_node (or pauses again at confirm_gate as the normal flow)."""
+    graph = build_graph()
+    config = {"configurable": {"thread_id": session_id}, "recursion_limit": 150}
+
+    logger.info("resume_graph_build_with_clarify: session=%s answers=%s",
+                session_id, list(answers.keys()))
+    last_state: dict = {}
+
+    async for chunk in graph.astream(
+        Command(resume={"answers": answers}),
+        config=config,
+        stream_mode="values",
+    ):
+        last_state = chunk if isinstance(chunk, dict) else {}
+        for ev in _flush_sse_events(last_state):
+            yield ev
+
+    # After clarify resume the graph normally pauses again at confirm_gate;
+    # surface that to the frontend so it can show the confirm card.
+    state_obj = await graph.aget_state(config)
+    if state_obj.next:
+        try:
+            interrupt_payload = (
+                state_obj.tasks[0].interrupts[0].value if state_obj.tasks else {}
+            )
+        except Exception:  # noqa: BLE001
+            interrupt_payload = {}
+        kind = (interrupt_payload or {}).get("kind") if isinstance(interrupt_payload, dict) else None
+        yield StreamEvent(
+            type="clarify_required" if kind == "clarify_required" else "confirm_pending",
+            data={
+                "session_id": session_id,
+                **(interrupt_payload if isinstance(interrupt_payload, dict) else {}),
+            },
+        )
+        return
+
+    yield StreamEvent(
+        type="done",
+        data={
+            "status": last_state.get("status") or "finished",
             "pipeline_json": last_state.get("final_pipeline") or last_state.get("base_pipeline"),
             "summary": last_state.get("summary"),
             "session_id": session_id,
