@@ -150,6 +150,82 @@ def _get_column_ref_params(block_id: str, catalog: dict) -> list[str]:
     return _COLUMN_REF_PARAMS_FALLBACK.get(block_id, [])
 
 
+def _infer_cols_from_source_chain(
+    new_ops: list[dict[str, Any]],
+    catalog: dict,
+) -> set[str]:
+    """When upstream exec_trace is empty (typical step_1 of a fresh build),
+    walk new_ops to predict cols that earlier ops in the SAME batch would
+    produce, so later ops in the batch can be validated.
+
+    Currently handles:
+      - source block → take cols from output_columns_hint
+      - unnest → also peek at the source's example for the unnested col's
+        nested element keys
+
+    Conservative: only adds cols we can derive deterministically. Returns
+    empty set if can't infer anything useful.
+    """
+    cols: set[str] = set()
+    for op in new_ops:
+        if op.get("type") != "add_node":
+            continue
+        block_id = op.get("block_id") or ""
+        spec = next((s for (n, _v), s in catalog.items() if n == block_id), None)
+        if not spec:
+            continue
+        category = spec.get("category", "")
+        if category == "source":
+            for hint in (spec.get("output_columns_hint") or []):
+                if isinstance(hint, dict) and isinstance(hint.get("name"), str):
+                    cols.add(hint["name"])
+            # Examples may carry richer shape info (sample row showing
+            # nested structure); leverage them for unnest discovery.
+            for ex in (spec.get("examples") or []):
+                if not isinstance(ex, dict):
+                    continue
+                sample_out = (ex.get("sample_output") or {}).get("data")
+                if isinstance(sample_out, list) and sample_out:
+                    row = sample_out[0]
+                    if isinstance(row, dict):
+                        for k in row.keys():
+                            cols.add(str(k))
+        elif block_id == "block_unnest":
+            # If the unnest target is a known list-of-dict col, add its
+            # leaf names. We need an example row to see leaves — pull from
+            # source block's example if present in same batch.
+            target_col = (op.get("params") or {}).get("column")
+            if not isinstance(target_col, str):
+                continue
+            for prev_op in new_ops:
+                if prev_op is op:
+                    break
+                if prev_op.get("type") != "add_node":
+                    continue
+                prev_spec = next(
+                    (s for (n, _v), s in catalog.items()
+                     if n == prev_op.get("block_id")), None,
+                )
+                if not prev_spec:
+                    continue
+                for ex in (prev_spec.get("examples") or []):
+                    if not isinstance(ex, dict):
+                        continue
+                    sample_out = (ex.get("sample_output") or {}).get("data")
+                    if not isinstance(sample_out, list) or not sample_out:
+                        continue
+                    row = sample_out[0]
+                    if not isinstance(row, dict):
+                        continue
+                    nested_val = row.get(target_col)
+                    if isinstance(nested_val, list) and nested_val and isinstance(nested_val[0], dict):
+                        for leaf in nested_val[0].keys():
+                            cols.add(str(leaf))
+                            cols.add(f"{target_col}[].{leaf}")
+                        break
+    return cols
+
+
 def _collect_upstream_cols(plan: list[dict], exec_trace: dict) -> set[str]:
     """Union of cols observed in exec_trace for any logical id in plan.
 
@@ -1307,6 +1383,18 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
     upstream_cols = _collect_upstream_cols(
         state.get("plan") or [], state.get("exec_trace") or {},
     )
+    # When upstream is empty (typical step_1 of a fresh build that
+    # bundles source + transforms), infer cols from the new_ops chain
+    # so col-ref validation can fire on the bundled filter / sort etc.
+    if not upstream_cols:
+        inferred = _infer_cols_from_source_chain(new_ops, registry.catalog)
+        if inferred:
+            upstream_cols = inferred
+            logger.info(
+                "compile_chunk_node: step %s inferred %d upstream cols "
+                "from source-chain (no exec_trace yet): %s",
+                step_key, len(inferred), sorted(inferred)[:8],
+            )
     # Auto-fix #1: if any op references a leaf of a nested upstream col,
     # prepend an unnest of the parent + re-wire connects. Saves a
     # retry round-trip when the structural fix is unambiguous.
