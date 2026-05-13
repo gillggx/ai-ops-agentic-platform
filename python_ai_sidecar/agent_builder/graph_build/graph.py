@@ -212,9 +212,18 @@ def _route_after_macro_plan(state: BuildGraphState) -> str:
     """After macro_plan_node: if too_vague (status=failed) → finalize.
     Otherwise → confirm_gate so user reviews the macro plan before any
     compile work happens.
+
+    EXCEPTION: when skip_confirm=True (chat / skill-translate / any caller
+    without a confirm UI), skip confirm_gate entirely and go straight to
+    canvas_reset → compile_chunk. Without this guard the graph hits
+    confirm_gate's interrupt() with no way to resume, leaving the build
+    paused with 0 ops produced — but the caller thinks it succeeded
+    (saw macro_plan_proposed event and returned).
     """
     if state.get("status") == "failed" or not state.get("macro_plan"):
         return "finalize"
+    if state.get("skip_confirm"):
+        return "canvas_reset"
     return "confirm_gate"
 
 
@@ -272,7 +281,11 @@ def build_graph():
     g.add_conditional_edges(
         "macro_plan",
         _route_after_macro_plan,
-        {"confirm_gate": "confirm_gate", "finalize": "finalize"},
+        {
+            "confirm_gate": "confirm_gate",
+            "canvas_reset": "canvas_reset",
+            "finalize": "finalize",
+        },
     )
     g.add_edge("plan", "validate")  # legacy replan path
     g.add_conditional_edges(
