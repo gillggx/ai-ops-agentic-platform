@@ -288,20 +288,18 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
             if op is None or op.type != OpType.CONNECT: continue
             if op.src_id and op.dst_id:
                 inbound.setdefault(op.dst_id, []).append(op.src_id)
-        # Walk ancestors looking for a sort with limit=1.
-        def has_limit_one_ancestor(node_id: str, seen: set[str]) -> str | None:
+        # Walk ancestors looking for ANY block with limit=1 (sort, process_history,
+        # filter etc. all expose a `limit` param that narrows to N rows).
+        def has_limit_one_ancestor(node_id: str, seen: set[str]) -> tuple[str, str] | None:
             if node_id in seen: return None
             seen.add(node_id)
             for parent in inbound.get(node_id, []):
-                # Find that parent's add_node op
                 for op in parsed:
                     if op is None or op.type != OpType.ADD_NODE: continue
                     if op.node_id != parent: continue
-                    if op.block_id == "block_sort":
-                        params = op.params or {}
-                        if params.get("limit") == 1:
-                            return parent
-                # recurse upward
+                    params = op.params or {}
+                    if params.get("limit") == 1:
+                        return (parent, op.block_id or "?")
                 hit = has_limit_one_ancestor(parent, seen)
                 if hit: return hit
             return None
@@ -312,16 +310,17 @@ async def validate_plan_node(state: BuildGraphState) -> dict[str, Any]:
             x_param = params.get("x") or params.get("x_column")
             # x defaulting to eventTime / time-series intent
             if x_param != "eventTime": continue
-            offender = has_limit_one_ancestor(op.node_id, set())
-            if offender:
+            hit = has_limit_one_ancestor(op.node_id, set())
+            if hit:
+                offender_id, offender_block = hit
                 errors.append(
                     f"node '{op.node_id}' ({op.block_id}, x=eventTime): time-series "
-                    f"chart but its ancestor chain includes block_sort '{offender}' "
-                    f"with limit=1 → all rows share the same eventTime so the chart "
-                    f"will render as 1 point per series. Branch this chart node "
-                    f"directly from the upstream source (e.g. block_process_history) "
-                    f"so it gets the FULL time range; keep the limit=1 branch only "
-                    f"for the verdict (block_step_check) side."
+                    f"chart but its ancestor chain includes '{offender_id}' "
+                    f"({offender_block}) with limit=1 → all rows share the same "
+                    f"eventTime so the chart will render as 1 point per series. "
+                    f"Branch this chart node from a SOURCE (e.g. block_process_history) "
+                    f"WITHOUT limit=1 so it gets the full time range; keep limit=1 "
+                    f"only on the verdict branch (block_step_check)."
                 )
 
         # (d2) "Visualize means chart, not list" rule.
