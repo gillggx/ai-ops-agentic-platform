@@ -140,6 +140,14 @@ def _route_after_inspect(state: BuildGraphState) -> str:
     wrong plan), and reflect_plan with the structural_issues envelope can
     usually fix it on attempt #2. Only status=failed (zero nodes built) is
     unfixable from here.
+
+    2026-05-14: When status='finished' (dry-run executed cleanly end-to-
+    end), the pipeline is by definition workable. Any remaining
+    inspection_issues are data-shape signals (single-point chart, empty
+    upstream) that depend on the actual data window, NOT pipeline bugs.
+    reflect_plan rewriting a working pipeline based on these soft signals
+    has been observed to produce schema-invalid output — losing a good
+    build for a hypothetical improvement. Skip the loop in this case.
     """
     issues = state.get("inspection_issues") or []
     if not issues:
@@ -147,6 +155,18 @@ def _route_after_inspect(state: BuildGraphState) -> str:
     if state.get("status") == "failed":
         # No pipeline at all — reflection has nothing to repair
         return "layout"
+    if state.get("status") == "finished":
+        # Dry-run clean — don't risk breaking a working pipeline to chase
+        # soft semantic signals. Log them, ship the build.
+        soft_issues = [i for i in issues
+                       if i.get("kind") in {"single_point_chart", "node_empty_output"}]
+        hard_issues = [i for i in issues if i not in soft_issues]
+        if not hard_issues:
+            logger.info(
+                "route_after_inspect: status=finished, %d soft issue(s) — "
+                "shipping clean build (no reflect_plan)", len(soft_issues),
+            )
+            return "layout"
     attempts = state.get("reflect_attempts", 0)
     if attempts >= MAX_REFLECT:
         logger.warning("route_after_inspect: max reflect attempts (%d) — shipping partial fix", attempts)
