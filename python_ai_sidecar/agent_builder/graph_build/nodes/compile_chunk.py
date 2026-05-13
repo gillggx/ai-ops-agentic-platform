@@ -153,6 +153,148 @@ def _collect_upstream_cols(plan: list[dict], exec_trace: dict) -> set[str]:
     return cols
 
 
+def _find_unnest_block(catalog: dict) -> str | None:
+    """Locate the catalog's list→rows explode block by capability, not by
+    name. Heuristic: a block whose param_schema accepts a single `column`
+    parameter, outputs a dataframe, AND has 'unnest' / 'explode' /
+    'flatten' in its name or description.
+
+    Returns block_id (e.g. 'block_unnest') or None if no match.
+    """
+    for (name, _v), spec in catalog.items():
+        nlc = name.lower()
+        if any(kw in nlc for kw in ("unnest", "explode", "flatten")):
+            params = (spec.get("param_schema") or {}).get("properties") or {}
+            if "column" in params:
+                return name
+        # Fallback: scan description for the action verb
+        desc = (spec.get("description") or "").lower()
+        if "unnest" in desc.split("\n", 1)[0] or "explode" in desc.split("\n", 1)[0]:
+            params = (spec.get("param_schema") or {}).get("properties") or {}
+            if "column" in params:
+                return name
+    return None
+
+
+def _auto_insert_unnest(
+    new_ops: list[dict[str, Any]],
+    plan: list[dict[str, Any]],
+    upstream_cols: set[str],
+    catalog: dict,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """If any new add_node references a nested leaf, prepend an unnest
+    add_node + connect to flatten the parent. Re-wire the offending op's
+    inbound connect to come from the unnest node instead of the original
+    upstream. Returns (rewritten_ops, applied_notes).
+
+    Deterministic structural fix — runs before col-ref validation, so
+    the post-rewrite ops should validate cleanly.
+    """
+    if not upstream_cols:
+        return new_ops, []
+
+    # Collect existing logical IDs to compute next-free ones for the inserts
+    existing_lids: set[str] = set()
+    max_n = 0
+    for op in (plan + new_ops):
+        if op.get("type") != "add_node":
+            continue
+        lid = op.get("node_id") or ""
+        existing_lids.add(lid)
+        if lid.startswith("n") and lid[1:].isdigit():
+            max_n = max(max_n, int(lid[1:]))
+
+    def next_lid() -> str:
+        nonlocal max_n
+        max_n += 1
+        while f"n{max_n}" in existing_lids:
+            max_n += 1
+        existing_lids.add(f"n{max_n}")
+        return f"n{max_n}"
+
+    unnest_block = _find_unnest_block(catalog)
+    if not unnest_block:
+        return new_ops, []  # no unnest-capable block in catalog → can't autofix
+
+    notes: list[str] = []
+    rewritten: list[dict[str, Any]] = []
+    # Map from old logical_id (the offending node) → unnest_id we inserted
+    rewire: dict[str, str] = {}
+
+    for op in new_ops:
+        if op.get("type") == "add_node":
+            block_id = op.get("block_id") or ""
+            ref_params = _COLUMN_REF_PARAMS.get(block_id) or []
+            params = op.get("params") or {}
+            offending_parent: str | None = None
+            for pname in ref_params:
+                val = params.get(pname)
+                candidates = val if isinstance(val, list) else [val]
+                for cand in candidates:
+                    if not isinstance(cand, str) or not cand or cand.startswith("$"):
+                        continue
+                    root = cand.split(".", 1)[0].split("[", 1)[0]
+                    if cand in upstream_cols or root in upstream_cols:
+                        continue
+                    parent = _find_leaf_in_nested(cand, upstream_cols)
+                    if parent:
+                        offending_parent = parent
+                        break
+                if offending_parent:
+                    break
+            if offending_parent:
+                unnest_lid = next_lid()
+                op_lid = op.get("node_id") or ""
+                rewire[op_lid] = unnest_lid
+                rewritten.append({
+                    "type": "add_node",
+                    "block_id": unnest_block,
+                    "block_version": "1.0.0",
+                    "node_id": unnest_lid,
+                    "params": {"column": offending_parent},
+                })
+                notes.append(
+                    f"auto-inserted {unnest_block}(column='{offending_parent}') "
+                    f"as {unnest_lid} before {op_lid}"
+                )
+        rewritten.append(op)
+
+    if not rewire:
+        return new_ops, []
+
+    # Pass 2: re-wire connects whose dst_id is the offending op — insert
+    # a connect from the original upstream src into the new unnest node,
+    # then rewrite the original connect's src to the unnest's output.
+    final_ops: list[dict[str, Any]] = []
+    handled_dst: set[str] = set()
+    for op in rewritten:
+        if op.get("type") == "connect":
+            dst = op.get("dst_id")
+            if dst in rewire and dst not in handled_dst:
+                unnest_lid = rewire[dst]
+                # connect: original_src → unnest
+                final_ops.append({
+                    "type": "connect",
+                    "src_id": op.get("src_id"),
+                    "src_port": op.get("src_port") or "data",
+                    "dst_id": unnest_lid,
+                    "dst_port": "data",
+                })
+                # connect: unnest → original_dst
+                final_ops.append({
+                    "type": "connect",
+                    "src_id": unnest_lid,
+                    "src_port": "data",
+                    "dst_id": dst,
+                    "dst_port": op.get("dst_port") or "data",
+                })
+                handled_dst.add(dst)
+                continue
+        final_ops.append(op)
+
+    return final_ops, notes
+
+
 def _find_leaf_in_nested(cand: str, upstream_cols: set[str]) -> str | None:
     """If `cand` is a leaf of some nested upstream col (e.g. 'name' is a
     leaf of 'spc_charts[].name' or 'ooc_count' of 'spc_summary.ooc_count'),
@@ -520,6 +662,17 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
     upstream_cols = _collect_upstream_cols(
         state.get("plan") or [], state.get("exec_trace") or {},
     )
+    # Auto-fix: if any op references a leaf of a nested upstream col,
+    # prepend an unnest of the parent + re-wire connects. Saves a
+    # retry round-trip when the structural fix is unambiguous.
+    new_ops, autofix_notes = _auto_insert_unnest(
+        new_ops, state.get("plan") or [], upstream_cols, registry.catalog,
+    )
+    if autofix_notes:
+        logger.info(
+            "compile_chunk_node: step %s autofix: %s",
+            step_key, "; ".join(autofix_notes[:3]),
+        )
     col_issues = _validate_column_refs(new_ops, upstream_cols)
     if col_issues:
         logger.warning(
