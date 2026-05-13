@@ -80,7 +80,7 @@ Q: 「看某機台 xbar 趨勢」
 A: 5 steps
   1. 撈 process_history (tool_id=該機台, limit=100)
   2. 解 spc_charts nested 結構（block_unnest column='spc_charts'）
-  3. 過濾 name='xbar'
+  3. 過濾 name='xbar_chart'（**完整 chart key**，不是裸 'xbar'；其他常見：r_chart/s_chart/p_chart）
   4. 按 eventTime 排序
   5. 畫 line_chart (x=eventTime, y=value)
 
