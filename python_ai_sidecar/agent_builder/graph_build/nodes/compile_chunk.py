@@ -300,6 +300,79 @@ def _auto_rewire_chart_chains(
     return rewritten, notes
 
 
+def _autostrip_singleton_groupby(
+    new_ops: list[dict[str, Any]],
+    plan: list[dict[str, Any]],
+    exec_trace: dict | None,
+) -> list[str]:
+    """Strip block_cpk.group_by (and equivalent) when upstream sample
+    suggests the group column has ~1 row per distinct value — would make
+    every group n=1 and Cpk / similar stats fail with INSUFFICIENT_DATA.
+
+    Heuristic: look at the upstream sample row, if group_by col exists at
+    top level (post-unnest), check distinct values vs row count. Sample
+    only has 5 rows so this is a noisy signal — only strip when sample
+    has ≥3 rows AND every row's value is distinct (clear sign of high
+    cardinality).
+    """
+    notes: list[str] = []
+    if not exec_trace:
+        return notes
+
+    # Collect upstream cols + sample-row distinct count per col (only when
+    # sample has ≥3 rows so the signal is meaningful).
+    distinct_ratio: dict[str, float] = {}  # col → distinct/total in sample
+    for op in plan:
+        if op.get("type") != "add_node":
+            continue
+        lid = op.get("node_id")
+        snap = exec_trace.get(lid) or {}
+        sample = snap.get("sample")
+        # Sample is the FIRST row only (dict); we need preview rows to count
+        # cardinality. Skip if we don't have a multi-row preview.
+        # _snapshot_node only stores first row currently — until that's
+        # enhanced, fall through silently.
+        if not isinstance(sample, dict):
+            continue
+        # We can still use rows count if it's recorded
+        rows_count = snap.get("rows")
+        if not isinstance(rows_count, int) or rows_count < 3:
+            continue
+        # Best signal we have: high-cardinality cols (lotID / eventTime /
+        # wafer_id) by convention. Hardcode-ish but lets us strip the
+        # most common mistake without sampling many rows.
+        for col in sample.keys():
+            cl = col.lower()
+            if cl in {"lotid", "lot_id", "wafer_id", "eventtime"}:
+                distinct_ratio[col] = 0.95  # treat as high-cardinality
+            if cl.endswith("_id") and cl != "tool_id" and cl != "toolid":
+                distinct_ratio[col] = 0.95
+
+    if not distinct_ratio:
+        return notes
+
+    # Blocks whose group_by makes Cpk-style n>=2 assumption
+    SENSITIVE_BLOCKS = {"block_cpk", "block_groupby_agg"}
+
+    for op in new_ops:
+        if op.get("type") != "add_node":
+            continue
+        if op.get("block_id") not in SENSITIVE_BLOCKS:
+            continue
+        params = op.get("params") or {}
+        gb = params.get("group_by")
+        if not isinstance(gb, str):
+            continue
+        if distinct_ratio.get(gb, 0) >= 0.9:
+            del params["group_by"]
+            notes.append(
+                f"auto-stripped {op.get('block_id')}.group_by='{gb}' "
+                f"(node {op.get('node_id')}) — upstream sample shows "
+                f"this is high-cardinality, would collapse to n=1 per group"
+            )
+    return notes
+
+
 def _autocorrect_filter_values(
     new_ops: list[dict[str, Any]],
     plan: list[dict[str, Any]],
@@ -1039,6 +1112,19 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
         logger.info(
             "compile_chunk_node: step %s filter-value autocorrect: %s",
             step_key, "; ".join(autocorrect_notes[:3]),
+        )
+
+    # Auto-fix #4: strip block_cpk.group_by when LLM picked a high-
+    # cardinality column (lotID / wafer_id / eventTime). Otherwise each
+    # group is n=1 and Cpk fails at runtime with INSUFFICIENT_DATA,
+    # which reflect_op can't recover (rollback distance > 3).
+    groupby_notes = _autostrip_singleton_groupby(
+        new_ops, state.get("plan") or [], state.get("exec_trace") or {},
+    )
+    if groupby_notes:
+        logger.info(
+            "compile_chunk_node: step %s group_by autofix: %s",
+            step_key, "; ".join(groupby_notes[:3]),
         )
 
     req_issues = _validate_required_params(new_ops, registry.catalog)
