@@ -208,6 +208,25 @@ def _route_after_call(state: BuildGraphState) -> str:
     return "dispatch_op"
 
 
+def _route_after_compile_chunk(state: BuildGraphState) -> str:
+    """compile_chunk failed validation (col-ref / dedup) but hasn't hit
+    MAX_COMPILE_ATTEMPTS yet → loop back to compile_chunk to retry.
+
+    Without this, validator-rejected steps left the plan unchanged,
+    cursor stayed at len(plan), and _route_after_call advanced to the
+    NEXT macro step — silently skipping the filter / chart steps
+    needed to make the pipeline correct. canvas ends with 3 of 5
+    intended nodes and no terminal block.
+
+    Compile_chunk_node itself enforces MAX_COMPILE_ATTEMPTS (returns
+    status='failed' when exceeded), so this loop is bounded.
+    """
+    errors = state.get("plan_validation_errors") or []
+    if errors and state.get("status") != "failed":
+        return "compile_chunk"
+    return "dispatch_op"
+
+
 def _route_after_macro_plan(state: BuildGraphState) -> str:
     """After macro_plan_node: if too_vague (status=failed) → finalize.
     Otherwise → confirm_gate so user reviews the macro plan before any
@@ -314,8 +333,18 @@ def build_graph():
     # call_tool routes back to compile_chunk via advance_macro_step until
     # all macro steps are done.
     g.add_edge("canvas_reset", "compile_chunk")
-    # compile_chunk → dispatch_op (the new ops are now in state.plan)
-    g.add_edge("compile_chunk", "dispatch_op")
+    # compile_chunk → dispatch_op when ops compiled cleanly; otherwise
+    # loop back to compile_chunk to retry (deterministic col-ref /
+    # dedup validators rejected the ops). compile_chunk_node enforces
+    # MAX_COMPILE_ATTEMPTS internally, so this can't infinite-loop.
+    g.add_conditional_edges(
+        "compile_chunk",
+        _route_after_compile_chunk,
+        {
+            "compile_chunk": "compile_chunk",
+            "dispatch_op": "dispatch_op",
+        },
+    )
     # advance_macro_step → compile_chunk (bumps current_macro_step then
     # re-enters compile loop for next macro step's ops)
     g.add_edge("advance_macro_step", "compile_chunk")

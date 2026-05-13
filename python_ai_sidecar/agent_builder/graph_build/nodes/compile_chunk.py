@@ -357,10 +357,24 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
             "\nUser 澄清: " + ", ".join(f"{k}={v}" for k, v in clarifications.items())
         )
 
+    # On retry: surface the last attempt's validator errors so the LLM
+    # knows which col-ref / dedup rule it violated. Without this the
+    # retry has no signal that anything changed and the LLM emits the
+    # same broken ops.
+    prev_errors = state.get("plan_validation_errors") or []
+    retry_section = ""
+    if attempts > 1 and prev_errors:
+        retry_section = (
+            f"\n\n⚠ 你上次 compile 這 step 的 ops 被 validator 擋下，原因：\n"
+            + "\n".join(f"  - {e[:300]}" for e in prev_errors[:4])
+            + "\n這次請對照 UPSTREAM TRACE 的實際 cols 重寫，不要再用不在 cols 裡的欄位名。"
+        )
+
     user_msg = (
         f"USER NEED:\n{(state.get('instruction') or '')[:600]}"
         f"{inputs_section}"
         f"{clarify_section}"
+        f"{retry_section}"
         f"\n\nMACRO PLAN (context):\n" + "\n".join(context_lines) +
         f"\n\nCURRENT STEP:\n  step_idx={step.get('step_idx')}\n  text={step.get('text')}"
         f"\n  expected_kind={step.get('expected_kind')}"
