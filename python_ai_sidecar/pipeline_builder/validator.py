@@ -168,13 +168,27 @@ class PipelineValidator:
         schema = spec.get("param_schema") or {}
         required = schema.get("required") or []
         props = schema.get("properties") or {}
+        # Pull a short rationale snippet from the block description so the
+        # reflect LLM can connect "this param is required" to "because the
+        # block does X". Cap at 200 chars to keep the prompt lean.
+        block_desc = (spec.get("description") or "")[:200]
 
         for key_name in required:
             if key_name not in (node.params or {}):
+                prop = props.get(key_name) or {}
                 yield {
                     "rule": "C6_PARAM_SCHEMA",
-                    "message": f"Missing required parameter '{key_name}' for node {node.id}",
+                    "code": "PARAM_MISSING",
+                    "message": (
+                        f"node '{node.id}' ({node.block_id}): required "
+                        f"parameter '{key_name}' is missing"
+                    ),
                     "node_id": node.id,
+                    "block_id": node.block_id,
+                    "param": key_name,
+                    "given": None,
+                    "expected": _slim_prop(prop) or {"required": True},
+                    "rationale": block_desc or None,
                 }
 
         # Shallow type hint validation (no full JSON Schema to keep deps minimal).
@@ -186,19 +200,38 @@ class PipelineValidator:
                 continue
             if isinstance(value, str) and value.startswith("$"):
                 continue
-            expected = prop.get("type")
-            if expected and not _type_matches(expected, value):
+            expected_type = prop.get("type")
+            if expected_type and not _type_matches(expected_type, value):
                 yield {
                     "rule": "C6_PARAM_SCHEMA",
-                    "message": f"Parameter '{key_name}' expected type '{expected}', got {type(value).__name__}",
+                    "code": "PARAM_TYPE_WRONG",
+                    "message": (
+                        f"node '{node.id}' ({node.block_id}).{key_name}: "
+                        f"expected type '{expected_type}', got "
+                        f"{type(value).__name__} (value={value!r})"
+                    ),
                     "node_id": node.id,
+                    "block_id": node.block_id,
+                    "param": key_name,
+                    "given": value,
+                    "expected": _slim_prop(prop),
+                    "rationale": block_desc or None,
                 }
             enum = prop.get("enum")
             if enum is not None and value not in enum:
                 yield {
                     "rule": "C6_PARAM_SCHEMA",
-                    "message": f"Parameter '{key_name}' value '{value}' not in allowed enum {enum}",
+                    "code": "PARAM_VALUE_INVALID",
+                    "message": (
+                        f"node '{node.id}' ({node.block_id}).{key_name}: "
+                        f"value {value!r} not in allowed enum {enum}"
+                    ),
                     "node_id": node.id,
+                    "block_id": node.block_id,
+                    "param": key_name,
+                    "given": value,
+                    "expected": {"enum": enum, **_slim_prop(prop)},
+                    "rationale": block_desc or None,
                 }
 
     def _check_port_compat(self, pipeline: PipelineJSON) -> Iterable[dict[str, Any]]:
@@ -347,12 +380,16 @@ class PipelineValidator:
             if node_in[node.id] == 0 and node_out[node.id] == 0:
                 yield {
                     "rule": "C14_ORPHAN_NODE",
+                    "code": "STRUCTURE_ORPHAN",
                     "message": (
-                        f"Node '{node.id}' ({node.block_id}) is orphan — "
-                        f"no edges connect it. Either remove it or wire it "
-                        f"into the pipeline."
+                        f"node '{node.id}' ({node.block_id}) is an orphan — "
+                        f"no edges touch it. Either remove this node or "
+                        f"connect it via add an edge op."
                     ),
                     "node_id": node.id,
+                    "block_id": node.block_id,
+                    "expected": {"min_edges": 1},
+                    "given": {"incoming_edges": 0, "outgoing_edges": 0},
                 }
 
     def _check_source_less_nodes(self, pipeline: PipelineJSON) -> Iterable[dict[str, Any]]:
@@ -384,13 +421,17 @@ class PipelineValidator:
             if node_in[node.id] == 0 and node_out[node.id] > 0:
                 yield {
                     "rule": "C15_SOURCE_LESS_NODE",
+                    "code": "STRUCTURE_ORPHAN",
                     "message": (
-                        f"Node '{node.id}' ({node.block_id}) has outgoing "
+                        f"node '{node.id}' ({node.block_id}) has outgoing "
                         f"edges but no incoming feed — downstream nodes will "
-                        f"receive no data. Connect an upstream block to its "
-                        f"input port."
+                        f"get no data. Connect an upstream block to its input "
+                        f"port, OR drop this node and reconnect its downstream."
                     ),
                     "node_id": node.id,
+                    "block_id": node.block_id,
+                    "expected": {"min_incoming_edges": 1},
+                    "given": {"incoming_edges": 0, "outgoing_edges": node_out[node.id]},
                 }
 
     def _check_kind_constraints(self, pipeline: PipelineJSON) -> Iterable[dict[str, Any]]:
@@ -484,6 +525,22 @@ def _find_port(port_list: list[dict[str, Any]], name: str) -> Optional[dict[str,
         if p.get("port") == name:
             return p
     return None
+
+
+def _slim_prop(prop: dict[str, Any] | None) -> dict[str, Any]:
+    """Pick the constraint-bearing keys from a JSON-Schema-ish `prop` dict so
+    the reflect LLM doesn't get a wall of unrelated fields. We keep what's
+    actionable: type/enum/range/default/description (truncated)."""
+    if not prop:
+        return {}
+    out: dict[str, Any] = {}
+    for k in ("type", "enum", "minimum", "maximum", "minLength", "maxLength", "default"):
+        if k in prop:
+            out[k] = prop[k]
+    desc = prop.get("description")
+    if isinstance(desc, str) and desc:
+        out["description"] = desc[:120]
+    return out
 
 
 def _type_matches(expected: Any, value: Any) -> bool:

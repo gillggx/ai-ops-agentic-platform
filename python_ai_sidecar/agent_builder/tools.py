@@ -37,19 +37,53 @@ from python_ai_sidecar.pipeline_builder.validator import PipelineValidator
 
 
 class ToolError(Exception):
-    """Raised by a tool when execution fails; visible to the Agent LLM."""
+    """Raised by a tool when execution fails; visible to the Agent LLM.
 
-    def __init__(self, code: str, message: str, hint: Optional[str] = None) -> None:
+    Carries an ErrorEnvelope so reflect_op / reflect_plan can read structured
+    fields (param/given/expected/rationale) instead of parsing the message
+    string. Backward compatible: legacy (code, message, hint) callers still
+    work — envelope's structured fields stay None.
+    """
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        hint: Optional[str] = None,
+        *,
+        param: Optional[str] = None,
+        given: Any = None,
+        expected: Optional[dict[str, Any]] = None,
+        rationale: Optional[str] = None,
+        node_id: Optional[str] = None,
+        block_id: Optional[str] = None,
+    ) -> None:
         super().__init__(message)
-        self.code = code
-        self.message = message
-        self.hint = hint
+        # Late import to keep tools.py importable in isolation
+        from python_ai_sidecar.pipeline_builder.error_envelope import ErrorEnvelope
+        self.envelope = ErrorEnvelope(
+            code=code, message=message, hint=hint,
+            param=param, given=given, expected=expected,
+            rationale=rationale, node_id=node_id, block_id=block_id,
+        )
+
+    # Back-compat read-through properties
+    @property
+    def code(self) -> str:
+        return self.envelope.code
+
+    @property
+    def message(self) -> str:
+        return self.envelope.message
+
+    @property
+    def hint(self) -> Optional[str]:
+        return self.envelope.hint
 
     def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"error": True, "code": self.code, "message": self.message}
-        if self.hint:
-            d["hint"] = self.hint
-        return d
+        # `error: True` retained for legacy LLM tool_result shape; envelope
+        # adds the structured fields on top.
+        return {"error": True, **self.envelope.to_dict()}
 
 
 class ToolGateError(ToolError):
