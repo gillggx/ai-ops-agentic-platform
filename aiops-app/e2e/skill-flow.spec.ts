@@ -134,30 +134,18 @@ test.describe("Skill flow — full GUI with real agent", () => {
       } catch {
         // Tour didn't dismiss — proceed anyway, may overlay canvas.
       }
-      // 2026-05-13: chat orchestrator may insert a pre_clarify_check card
-      // (design_intent_confirm) BEFORE the build card. Detect + handle it
-      // first — pick first option, send, then continue to confirm-build.
-      const intentCard = builderTab.locator('text=/我需要先確認.*件事/').first();
-      if (await intentCard.isVisible({ timeout: 8_000 }).catch(() => false)) {
-        console.log("    intent-confirm card appeared — picking first option");
-        // The card has multiple options; pick the first highlighted/default.
-        // Then click the "送出" (submit) or any primary button at the end.
-        const firstOption = builderTab.locator('[role="button"], button')
-          .filter({ hasText: /single_via_param|by_machine|raw_events|spc/i })
-          .first();
-        if (await firstOption.isVisible({ timeout: 3_000 }).catch(() => false)) {
-          await firstOption.click();
-        }
-        // Submit the card — the agent panel has a submit/送出 button after
-        // picks. Wait briefly so a second chat request fires for build.
-        const submitBtn = builderTab.locator(
-          'button:has-text("送出"), button:has-text("Submit"), button:has-text("Confirm picks"), button:has-text("確認選擇")'
-        ).first();
-        if (await submitBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-          await submitBtn.click();
-          console.log("    picks submitted; waiting for follow-up build chat");
-        }
-      }
+      // 2026-05-13: chat orchestrator's pre_clarify_check fires when prompt
+      // mentions machines (declared has equipment_id + 機台/EQP). For test
+      // stability we don't drive the multi-pick card — instead the test's
+      // INSTRUCTION is sent verbatim through the chat panel, and we already
+      // handle the dispatched build via the 開始建 button. The clarify card
+      // flow itself works in production (real users click) — separately
+      // tested. Skip card detection here entirely to avoid flaky selectors.
+      //
+      // If you DO want to exercise the post-clarify build path, prepend the
+      // INSTRUCTION env var with `[intent_confirmed:no_pick]` which bypasses
+      // pre_clarify_check at the orchestrator level (see
+      // python_ai_sidecar/agent_orchestrator_v2/nodes/pre_clarify_check.py L45).
 
       // Bumped from 30s → 60s. SkillEmbedBanner mounts via async ctx fetch
       // (event_types schema lookup adds ~500ms-2s). On slow runs the 30s
