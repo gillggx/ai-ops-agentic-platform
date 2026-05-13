@@ -97,8 +97,20 @@ _BLOCK_BRIEF_CACHE: str | None = None
 
 
 def _format_block_briefs(catalog: dict) -> str:
-    """One-line briefs only — block_id + first sentence of description.
-    Caller is encouraged to cache (catalog is constant per process)."""
+    """Compact brief per block — block_id + What section + Output shape.
+
+    macro_plan needs to know output shape to plan unnest / flatten steps
+    correctly. Just the first line of description (`== What ==`) skips
+    over the critical Output section that says "this block returns
+    nested data — downstream needs unnest" for sources like
+    block_process_history. Without it, macro_plan plans
+    `groupby_agg → sort by eventTime` over data that has no eventTime
+    column post-groupby.
+
+    Strategy: pull `== What ==` section (1-3 lines) AND `== Output ==`
+    section (capped to ~200 chars) per block. Cache the result; the
+    catalog is constant per process.
+    """
     global _BLOCK_BRIEF_CACHE
     if _BLOCK_BRIEF_CACHE is not None:
         return _BLOCK_BRIEF_CACHE
@@ -109,12 +121,40 @@ def _format_block_briefs(catalog: dict) -> str:
             continue
         seen.add(name)
         desc = (spec.get("description") or "").strip()
-        first_line = desc.split("\n", 1)[0][:120]
         category = spec.get("category", "")
-        lines.append(f"- {name} ({category}): {first_line}")
+        what = _extract_section(desc, "What")
+        output = _extract_section(desc, "Output")
+        brief_parts: list[str] = []
+        if what:
+            brief_parts.append(what[:240])
+        if output:
+            brief_parts.append("output: " + output[:240])
+        if not brief_parts:
+            # Fallback: legacy desc without sections — take first 200 chars
+            brief_parts.append(desc.split("\n\n", 1)[0][:200])
+        brief = " | ".join(brief_parts)
+        lines.append(f"- {name} ({category}): {brief}")
     lines.sort()
     _BLOCK_BRIEF_CACHE = "\n".join(lines)
     return _BLOCK_BRIEF_CACHE
+
+
+def _extract_section(desc: str, header: str) -> str:
+    """Pull a `== Header ==` section from a description, return its body
+    (lines until the next `== Other ==` header), trimmed and joined as
+    one line.  Empty string if section not found.
+    """
+    marker = f"== {header} =="
+    idx = desc.find(marker)
+    if idx < 0:
+        return ""
+    body_start = idx + len(marker)
+    rest = desc[body_start:]
+    # Find next "== ... ==" header to stop at
+    next_marker = re.search(r"\n==\s+\S+\s+==", rest)
+    section = rest[:next_marker.start()] if next_marker else rest
+    # Collapse newlines + extra whitespace into single spaces
+    return " ".join(section.split())
 
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.DOTALL)
