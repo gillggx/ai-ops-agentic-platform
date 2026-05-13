@@ -300,6 +300,78 @@ def _auto_rewire_chart_chains(
     return rewritten, notes
 
 
+def _autocorrect_filter_values(
+    new_ops: list[dict[str, Any]],
+    plan: list[dict[str, Any]],
+    exec_trace: dict | None,
+) -> list[str]:
+    """When LLM emits block_filter with column='<leaf>' value='<shorthand>'
+    but the actual leaf values in upstream sample don't include the literal
+    (e.g. value='xbar' against ['xbar_chart','r_chart',...]), auto-correct
+    the value to the closest match.
+
+    Common pattern: user prompt says "xbar 趨勢" / "spc_xbar_chart_value",
+    LLM literally uses 'xbar' as filter value. Actual data has chart keys
+    with full names ('xbar_chart'). Filter returns 0 rows, downstream
+    Cpk/EWMA fail with n=0 samples.
+
+    Mutates new_ops in-place. Returns notes describing each correction.
+    """
+    notes: list[str] = []
+    if not exec_trace:
+        return notes
+
+    # Build a {col_name → set of observed values} index from upstream samples.
+    # We only look at list-of-dict columns (the nested arrays unnest will
+    # expand). Each dict's keys + values form the lookup set.
+    leaf_values: dict[str, set[str]] = {}
+    for op in plan:
+        if op.get("type") != "add_node":
+            continue
+        lid = op.get("node_id")
+        snap = exec_trace.get(lid) or {}
+        sample = snap.get("sample")
+        if not isinstance(sample, dict):
+            continue
+        for k, v in sample.items():
+            if isinstance(v, list) and v and isinstance(v[0], dict):
+                for entry in v:
+                    if not isinstance(entry, dict):
+                        continue
+                    for leaf_key, leaf_val in entry.items():
+                        if isinstance(leaf_val, str):
+                            leaf_values.setdefault(leaf_key, set()).add(leaf_val)
+
+    if not leaf_values:
+        return notes
+
+    for op in new_ops:
+        if op.get("type") != "add_node":
+            continue
+        if op.get("block_id") != "block_filter":
+            continue
+        params = op.get("params") or {}
+        col = params.get("column")
+        val = params.get("value")
+        if not isinstance(col, str) or not isinstance(val, str):
+            continue
+        observed = leaf_values.get(col)
+        if not observed or val in observed:
+            continue
+        # Find observed value that contains `val` as substring (or vice versa)
+        # — exactly the case 'xbar' vs 'xbar_chart'.
+        v_low = val.lower()
+        matches = [obs for obs in observed if v_low in obs.lower() or obs.lower() in v_low]
+        if len(matches) == 1:
+            params["value"] = matches[0]
+            notes.append(
+                f"auto-corrected block_filter (node {op.get('node_id')}): "
+                f"value '{val}' → '{matches[0]}' (matched from upstream sample's "
+                f"'{col}' values: {sorted(observed)[:5]})"
+            )
+    return notes
+
+
 def _validate_required_params(
     new_ops: list[dict[str, Any]],
     catalog: dict,
@@ -954,6 +1026,21 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
             "compile_chunk_node: step %s chart-chain autofix: %s",
             step_key, "; ".join(rewire_notes[:3]),
         )
+
+    # Auto-fix #3: fuzzy-correct block_filter.value when LLM used a
+    # shorthand from the user's prompt (e.g. 'xbar') that doesn't match
+    # any actual observed leaf value (data has 'xbar_chart'). Mines the
+    # exec_trace sample for the column's distinct observed values and
+    # picks the unique substring match.
+    autocorrect_notes = _autocorrect_filter_values(
+        new_ops, state.get("plan") or [], state.get("exec_trace") or {},
+    )
+    if autocorrect_notes:
+        logger.info(
+            "compile_chunk_node: step %s filter-value autocorrect: %s",
+            step_key, "; ".join(autocorrect_notes[:3]),
+        )
+
     req_issues = _validate_required_params(new_ops, registry.catalog)
     col_issues = _validate_column_refs(new_ops, upstream_cols, registry.catalog)
     combined_issues = req_issues + col_issues
