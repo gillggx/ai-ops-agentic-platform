@@ -87,36 +87,89 @@ def inspect_execution_node(state: BuildGraphState) -> dict[str, Any]:
     node_results = (dry or {}).get("node_results") or {}
     issues: list[dict[str, Any]] = []
 
+    # Build a quick {node_id → block_id} lookup from final_pipeline so error
+    # envelopes can carry block_id (the LLM uses it to find the right schema).
+    final = state.get("final_pipeline") or {}
+    block_lookup: dict[str, str] = {
+        n.get("id"): n.get("block_id", "")
+        for n in (final.get("nodes") or [])
+    }
+
     for nid, info in node_results.items():
         if not isinstance(info, dict):
             continue
+        bid = block_lookup.get(nid, "")
+
+        # Signal: per-node runtime failure (DATA_EMPTY / executor error)
+        if info.get("status") == "failed":
+            issues.append({
+                "code": "DATA_SHAPE_WRONG",
+                "kind": "node_execution_failed",
+                "node_id": nid,
+                "block_id": bid,
+                "message": (
+                    f"node '{nid}' ({bid}) failed at runtime: "
+                    f"{info.get('error') or 'unknown error'}"
+                ),
+                "given": {"rows": info.get("rows")},
+                "hint": (info.get("hint") if isinstance(info.get("hint"), str)
+                         else None),
+            })
+            continue
+
         if info.get("status") != "success":
             continue
+
+        # Signal: success but rows=0 → DATA_EMPTY at this node
+        # We skip when rows is None (non-dataframe output like chart_spec).
+        rows = info.get("rows")
+        if isinstance(rows, int) and rows == 0:
+            issues.append({
+                "code": "DATA_EMPTY",
+                "kind": "node_empty_output",
+                "node_id": nid,
+                "block_id": bid,
+                "message": (
+                    f"node '{nid}' ({bid}) ran successfully but produced 0 rows. "
+                    f"Upstream filter / params likely too restrictive."
+                ),
+                "given": {"rows": 0},
+            })
+            # Don't `continue` — keep checking for chart issue on same node
+            # (rare but possible if chart upstream is empty + chart still emits)
+
         preview = info.get("preview") or {}
         panels = _extract_chart_panels(preview)
         for p in panels:
             data = p.get("data") or []
             if not data:
+                # Already caught by DATA_EMPTY above if rows=0; but a chart node
+                # could have rows=None and still emit empty data.
                 continue
             chart_type = p.get("type") or "unknown"
-            # Probe for any time-series-like x_key — fall back to "eventTime"
             x_key = p.get("x_key") or "eventTime"
             distinct = _distinct_x(data, x_key)
             if distinct < MIN_DISTINCT_X:
                 issues.append({
+                    "code": "DATA_SHAPE_WRONG",
                     "kind": "single_point_chart",
                     "node_id": nid,
+                    "block_id": bid,
                     "chart_type": chart_type,
                     "panel_idx": p.get("panel_idx"),
                     "distinct_x": distinct,
                     "n_points": len(data),
+                    "message": (
+                        f"chart on node '{nid}' ({bid}) resolved to only {distinct} "
+                        f"distinct {x_key} value(s) ({len(data)} data points)"
+                    ),
+                    "given": {"distinct_x": distinct, "n_points": len(data), "x_key": x_key},
+                    "expected": {"distinct_x_min": MIN_DISTINCT_X},
                     "hint": (
-                        f"chart on node '{nid}' resolved to only {distinct} "
-                        f"distinct {x_key} value(s) ({len(data)} data points). "
-                        f"Likely an unintended upstream limit=1 or aggregate "
-                        f"that collapsed the time series. Use limit>=50 on "
-                        f"the source block, and don't put sort+limit=1 "
-                        f"between the source and a chart block."
+                        "follow the data trace upstream — find the node where "
+                        "row count collapsed; fix THAT node's params (limit / "
+                        "filter operator / aggregate function) rather than "
+                        "patching the chart itself."
                     ),
                 })
 

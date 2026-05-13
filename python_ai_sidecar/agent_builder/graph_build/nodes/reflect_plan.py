@@ -29,25 +29,28 @@ logger = logging.getLogger(__name__)
 MAX_REFLECT = 2
 
 
-_SYSTEM = """你之前出的 plan 通過 validator 也成功跑完，但 runtime 結果有問題。下面是 issues 列表，請給我修正版 plan。
+_SYSTEM = """你之前出的 plan 通過 validator 也跑完了，但 runtime 結果不符合 user 預期。
+你會拿到：
+  1. 原 plan
+  2. 每個 node 的真實執行 snapshot（rows / cols / sample / errors）
+  3. inspector 偵測到的 issues（結構化 error envelope）
 
-規則:
-  1. 只修錯，不要新增需求或刪減用戶要求的 output
-  2. 同樣的 schema：list[Op]，每個 Op 的 type 是 add_node/set_param/connect/run_preview/remove_node
+你的任務：根據資料軌跡找 ROOT CAUSE 並產出修正版 plan。
+
+判斷原則:
+  - **看 trace 找資料 collapse 點**：哪個 node 把預期多筆資料壓成少筆？通常那是 root cause。
+    舉例：n1 (process_history limit=1) → 1 row → 下游 chart 必然 single-point。
+         此時改 n1.limit 而不是改 n4 (chart)。
+  - **看 issue.expected 找約束來源**：error envelope 的 expected 欄位是 block 的 schema 約束
+    （min/max/enum/default），rationale 是 block description 的 snippet。不要憑空編值。
+  - **看 user prompt 找意圖**：「顯示 chart / 趨勢」= 多筆 time-series，不是單點。
+    「最後一次 X」= 用 sort + filter 鎖定 X，不是 limit=1 把全部 series 砍掉。
+
+輸出規則:
+  1. 只修錯，不要新增需求或刪減 user 要求的 output
+  2. 同 plan schema：list[Op]，type ∈ add_node/set_param/connect/run_preview/remove_node
   3. 邏輯 id 維持 n1, n2, ... 編號
-  4. 不要解釋，直接輸出 JSON
-
-常見問題類型 & 修法:
-  - single_point_chart: 圖表只有 1 個點。通常因為：
-      (a) source block 的 limit=1 太小 → 改成 limit>=50
-      (b) source → sort+limit=1 → chart 這種錯誤拓樸 → 把 sort+limit=1 拿掉，
-          或讓 chart 只連 source 的另一條支線
-      (c) 上游有 aggregate（count/max/etc.）把 time-series 壓縮成 scalar
-          → 不要把 aggregate 結果送進 chart
-    解法：確保 chart block 的上游路徑上沒有 limit=1 / aggregate-to-scalar。
-
-只輸出 JSON:
-{"plan": [...]}
+  4. 不要解釋，直接輸出 JSON：{"plan": [...]}
 """
 
 
@@ -70,16 +73,40 @@ async def reflect_plan_node(state: BuildGraphState) -> dict[str, Any]:
             })],
         }
 
+    from python_ai_sidecar.agent_builder.graph_build.trace_serializer import build_node_trace
+    instruction = state.get("instruction") or ""
+    exec_trace = state.get("exec_trace") or {}
+    final_pipeline = state.get("final_pipeline")
+    node_trace_block = build_node_trace(plan_raw, exec_trace, final_pipeline)
+
+    # Format issues as structured envelope dicts where available
+    issues_lines = []
+    for i in issues:
+        # New shape: full envelope keys; old shape: kind/distinct_x/n_points/hint
+        if i.get("code"):
+            parts = [f"code={i['code']}", f"node={i.get('node_id')}"]
+            for k in ("param", "given", "expected", "rationale"):
+                if i.get(k) is not None:
+                    parts.append(f"{k}={i[k]}")
+            issues_lines.append("  - " + ", ".join(parts))
+            if i.get("hint"):
+                issues_lines.append(f"      hint: {i['hint']}")
+        else:
+            issues_lines.append(
+                f"  - [{i.get('kind')}] node={i.get('node_id')} "
+                f"distinct_x={i.get('distinct_x')} n_points={i.get('n_points')}"
+            )
+            if i.get("hint"):
+                issues_lines.append(f"      hint: {i['hint']}")
+
     user_msg = (
-        "original plan:\n"
+        f"USER PROMPT (intent):\n  {instruction[:400]}\n\n"
+        + f"ORIGINAL PLAN ({len(plan_raw)} ops):\n"
         + json.dumps(plan_raw, ensure_ascii=False, indent=2)
-        + "\n\nruntime issues:\n"
-        + "\n".join(
-            f"  - [{i.get('kind')}] node={i.get('node_id')} "
-            f"distinct_x={i.get('distinct_x')} n_points={i.get('n_points')} "
-            f"hint={i.get('hint')}"
-            for i in issues
-        )
+        + "\n\n"
+        + node_trace_block
+        + "\n\nRUNTIME ISSUES:\n"
+        + "\n".join(issues_lines)
     )
 
     client = get_llm_client()

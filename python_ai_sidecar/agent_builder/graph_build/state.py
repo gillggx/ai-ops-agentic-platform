@@ -68,6 +68,18 @@ class BuildGraphState(TypedDict, total=False):
     # Bounded by MAX_REFLECT in reflect_plan_node — incremented each cycle.
     reflect_attempts: int
 
+    # ── Execution trace (Phase F, 2026-05-13) ─────────────────────────
+    # call_tool_node populates after every successful connect/add op:
+    #   exec_trace[logical_id] = {
+    #       "block_id": str, "rows": int|None, "cols": list[str],
+    #       "sample": dict|None, "error": str|None,
+    #       "after_cursor": int   # which op finished when this snapshot taken
+    #   }
+    # reflect_op + reflect_plan read this to build a "NODE TRACE" that
+    # shows the LLM real data shape at each step — not just symptoms.
+    # See trace.py serializer in this package.
+    exec_trace: dict[str, dict]
+
 
 def initial_state(
     *,
@@ -98,4 +110,5 @@ def initial_state(
         sse_events=[],
         status="running",
         summary=None,
+        exec_trace={},
     )

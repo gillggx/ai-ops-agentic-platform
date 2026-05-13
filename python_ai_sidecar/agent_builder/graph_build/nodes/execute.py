@@ -79,16 +79,165 @@ async def call_tool_node(state: BuildGraphState) -> dict[str, Any]:
     new_plan = list(plan)
     new_plan[cursor] = op_updated
 
+    # ── Phase F: auto-preview after add_node (source) / connect (target) ──
+    # Right moment to snapshot per-node data shape: source blocks have output
+    # the moment they're added; downstream blocks need ≥1 inbound edge before
+    # preview is meaningful. Snapshot is non-fatal — preview failure just
+    # records the error in trace, never blocks the build flow.
+    exec_trace = dict(state.get("exec_trace") or {})
+    preview_target = _pick_preview_target(op_type, op, result, logical_to_real, registry, transient)
+    if preview_target is not None:
+        snapshot = await _snapshot_node(toolset, preview_target, cursor)
+        if snapshot is not None:
+            # exec_trace keyed by logical id (what the LLM uses), value tagged
+            # with after_cursor so reflect knows when it was taken
+            exec_trace[snapshot["logical_id"]] = snapshot
+
     logger.info("call_tool_node: cursor=%d %s ok", cursor, tool_name)
     return {
         "plan": new_plan,
         "cursor": cursor + 1,
         "logical_to_real": logical_to_real,
         "final_pipeline": new_pipeline_dict,
+        "exec_trace": exec_trace,
         "sse_events": [_event("op_completed", {
             "cursor": cursor, "op": op_updated, "result": result,
         })],
     }
+
+
+def _pick_preview_target(
+    op_type: str,
+    op: dict[str, Any],
+    result: dict[str, Any],
+    logical_to_real: dict[str, str],
+    registry: "SeedlessBlockRegistry",
+    transient: "AgentBuilderSession",
+) -> dict[str, Any] | None:
+    """Decide which node (if any) to snapshot after this op.
+
+    - add_node + source-category block: preview the new node (no inputs needed)
+    - connect: preview the destination node (now has at least 1 inbound feed)
+    - set_param on a node that already has all its incoming edges wired:
+        preview that node so a wrong column name gets caught immediately
+    - other ops (run_preview is explicit, remove_node, etc.): no auto-snapshot
+    """
+    if op_type == "add_node":
+        real_id = result.get("node_id")
+        logical_id = op.get("node_id") or _reverse_lookup(logical_to_real, real_id)
+        block_id = op.get("block_id") or ""
+        spec = next(
+            (s for (n, _v), s in registry.catalog.items() if n == block_id),
+            None,
+        )
+        if spec and (spec.get("category") == "source"):
+            return {"real_id": real_id, "logical_id": logical_id, "block_id": block_id}
+        return None
+    if op_type == "connect":
+        dst_logical = op.get("dst_id")
+        dst_real = logical_to_real.get(dst_logical, dst_logical)
+        # Read block_id from the live pipeline (transient.pipeline_json)
+        block_id = ""
+        for n in transient.pipeline_json.nodes:
+            if n.id == dst_real:
+                block_id = n.block_id
+                break
+        return {"real_id": dst_real, "logical_id": dst_logical, "block_id": block_id}
+    if op_type == "set_param":
+        nid_logical = op.get("node_id")
+        nid_real = logical_to_real.get(nid_logical, nid_logical)
+        # Only preview if the node has at least 1 inbound edge already
+        has_in = any(
+            e.to.node == nid_real for e in transient.pipeline_json.edges
+        )
+        if not has_in:
+            return None
+        block_id = ""
+        for n in transient.pipeline_json.nodes:
+            if n.id == nid_real:
+                block_id = n.block_id
+                break
+        return {"real_id": nid_real, "logical_id": nid_logical, "block_id": block_id}
+    return None
+
+
+async def _snapshot_node(toolset, target: dict[str, Any], cursor: int) -> dict[str, Any] | None:
+    """Run a tightly-bounded preview on `target.real_id` and return a compact
+    trace snapshot. Returns None on hard failure (preview tool itself raised).
+
+    Snapshot keeps it small for prompt budget:
+      - rows: total row count (or None for non-df)
+      - cols: column names only (no values, no dtypes)
+      - sample: first row (dict) — gives LLM the actual shape
+      - error: if preview returned an error status, capture it
+    """
+    real_id = target["real_id"]
+    logical_id = target["logical_id"] or real_id
+    block_id = target["block_id"]
+    try:
+        pv = await toolset.preview(node_id=real_id, sample_size=5)
+    except Exception as ex:  # noqa: BLE001 — preview is best-effort
+        logger.info("trace: preview %s threw: %s", real_id, ex)
+        return {
+            "logical_id": logical_id, "real_id": real_id, "block_id": block_id,
+            "rows": None, "cols": [], "sample": None,
+            "error": f"{type(ex).__name__}: {str(ex)[:200]}",
+            "after_cursor": cursor,
+        }
+
+    status = pv.get("status")
+    err = pv.get("error")
+    preview_blob = pv.get("preview") or {}
+    cols: list[str] = []
+    sample: dict[str, Any] | None = None
+    # preview shape from _summarize_preview: {port: {type, columns?, rows_sample?, snapshot?, ...}}
+    for _port, blob in preview_blob.items():
+        if not isinstance(blob, dict):
+            continue
+        if blob.get("type") == "dataframe":
+            cols = list(blob.get("columns") or [])
+            rows_sample = blob.get("rows_sample") or blob.get("rows") or []
+            if rows_sample:
+                sample = rows_sample[0] if isinstance(rows_sample[0], dict) else None
+            break
+        if blob.get("type") == "dict":
+            snap = blob.get("snapshot")
+            if isinstance(snap, dict):
+                sample = {k: snap[k] for k in list(snap.keys())[:6]}
+            break
+
+    return {
+        "logical_id": logical_id, "real_id": real_id, "block_id": block_id,
+        "rows": pv.get("rows"),
+        "cols": cols[:20],   # cap to keep prompt small
+        "sample": _truncate_sample(sample),
+        "error": err if status != "success" else None,
+        "after_cursor": cursor,
+    }
+
+
+def _truncate_sample(sample: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Trim long string values; sample row should fit in ~500 chars total."""
+    if not isinstance(sample, dict):
+        return None
+    out: dict[str, Any] = {}
+    for k, v in list(sample.items())[:20]:
+        if isinstance(v, str) and len(v) > 80:
+            out[k] = v[:80] + "…"
+        elif isinstance(v, list) and len(v) > 5:
+            out[k] = v[:5] + ["…"]
+        else:
+            out[k] = v
+    return out
+
+
+def _reverse_lookup(logical_to_real: dict[str, str], real_id: str | None) -> str | None:
+    if not real_id:
+        return None
+    for lid, rid in logical_to_real.items():
+        if rid == real_id:
+            return lid
+    return real_id
 
 
 _OP_TO_TOOL = {
