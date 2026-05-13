@@ -65,12 +65,17 @@ test.describe("Skill flow — full GUI with real agent", () => {
       console.log(`[3/8] instruction: ${instruction.slice(0, 80)}…`);
       await page.locator('input[placeholder*="先確認一個條件"]').fill(instruction);
 
-      const [builderTab] = await Promise.all([
-        context.waitForEvent("page"),
+      // 2026-05-13: C1 Build button now uses router.push (same-tab navigation),
+      // not window.open (new tab). Earlier spec waited for context.waitForEvent("page")
+      // which never fires anymore — caused 360s timeout. Now wait for URL change
+      // on the same page; alias `builderTab = page` so downstream code is unchanged.
+      await Promise.all([
+        page.waitForURL(/\/admin\/pipeline-builder\//, { timeout: 30_000 }),
         page.locator('button:has-text("Build →")').first().click(),
       ]);
+      const builderTab = page;
       // Phase 11 v6 — surface browser console logs + network from the popup
-      // so [AIAgentPanel] diagnostic prints land in the Playwright run output.
+      // (now same tab) so [AIAgentPanel] diagnostic prints land in the Playwright run output.
       builderTab.on("console", (msg) => {
         const txt = msg.text();
         if (txt.includes("AIAgentPanel") || txt.includes("[skill") || txt.includes("auto-fire")) {
@@ -219,14 +224,14 @@ test.describe("Skill flow — full GUI with real agent", () => {
       console.log("[5/8] saved pipeline #" + pid);
 
       // ── 6. Click Done — bind to Skill ─────────────────────────
-      // Banner button label: "Done — bind to Skill ↵" (or "Done — update Skill 調整" on refine)
+      // Same-tab nav now: Done click triggers bind + router.push back to skill page.
       const doneBtn = builderTab.locator('button:has-text("Done")');
       await expect(doneBtn).toBeEnabled({ timeout: 10_000 });
       await Promise.all([
-        builderTab.waitForEvent("close").catch(() => {}), // tab may close
+        page.waitForURL(/\/skills\/[^/]+\/edit/, { timeout: 30_000 }),
         doneBtn.click(),
       ]);
-      console.log("[6/8] bind requested + tab closed");
+      console.log("[6/8] bind requested + back to skill page");
 
       // ── 7. Back on Skill page → reload → verify C1 card ──────
       await page.bringToFront();
