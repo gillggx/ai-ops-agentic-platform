@@ -387,16 +387,38 @@ async def resume_graph_build_with_clarify(
 
     logger.info("resume_graph_build_with_clarify: session=%s answers=%s",
                 session_id, list(answers.keys()))
-    last_state: dict = {}
 
-    async for chunk in graph.astream(
-        Command(resume={"answers": answers}),
-        config=config,
-        stream_mode="values",
-    ):
-        last_state = chunk if isinstance(chunk, dict) else {}
-        for ev in _flush_sse_events(last_state):
-            yield ev
+    # 2026-05-13: enable BuildTracer for the resume path too. Without
+    # this, plan_node + validate + repair + finalize all run during
+    # resume but no trace is written, leaving v15 builds opaque for
+    # debugging. Same opt-in flag (BUILDER_TRACE_DIR) as the entry
+    # stream_graph_build call.
+    tracer = make_tracer(
+        instruction=f"[resume:clarify session={session_id}]",
+        session_id=session_id,
+        skip_confirm=False,
+        skill_step_mode=True,
+        base_pipeline=None,
+    )
+
+    last_state: dict = {}
+    if tracer is not None:
+        await tracer.__aenter__()
+    try:
+        async for chunk in graph.astream(
+            Command(resume={"answers": answers}),
+            config=config,
+            stream_mode="values",
+        ):
+            last_state = chunk if isinstance(chunk, dict) else {}
+            for ev in _flush_sse_events(last_state):
+                yield ev
+    finally:
+        if tracer is not None:
+            tracer.set_final_pipeline(
+                last_state.get("final_pipeline") or last_state.get("base_pipeline")
+            )
+            await tracer.__aexit__(None, None, None)
 
     # After clarify resume the graph normally pauses again at confirm_gate;
     # surface that to the frontend so it can show the confirm card.
