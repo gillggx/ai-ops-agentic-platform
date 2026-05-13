@@ -300,6 +300,116 @@ def _auto_rewire_chart_chains(
     return rewritten, notes
 
 
+def _resolve_input_refs(
+    new_ops: list[dict[str, Any]],
+    declared_inputs: list[dict[str, Any]],
+    instruction: str,
+) -> list[str]:
+    """Replace `$X` placeholders in op params when X is NOT declared as
+    a pipeline input. Looks at the user instruction for square-bracket
+    literals (e.g. '[EQP-01]') and uses them — common chat-mode pattern.
+
+    If no literal can be inferred, leave the $X in place (executor will
+    surface a clear error).
+    """
+    declared_names: set[str] = set()
+    for inp in (declared_inputs or []):
+        if isinstance(inp, dict) and isinstance(inp.get("name"), str):
+            declared_names.add(inp["name"])
+
+    # Heuristic: extract [BRACKET] literals from the instruction; the
+    # first one tends to be the equipment id, the second the step name.
+    brackets = re.findall(r"\[([^\]]+)\]", instruction or "")
+    bracket_map: dict[str, str] = {}
+    # Common $name → bracketed-literal mapping by position-ish convention.
+    # The N-th `$<col>` refs map to the N-th [bracket]. Conservative — if we
+    # can't guess, skip.
+    seen_refs: list[str] = []
+
+    notes: list[str] = []
+
+    def _walk_params(params: dict[str, Any], refs_seen: list[str]):
+        for k, v in list(params.items()):
+            if isinstance(v, str) and v.startswith("$"):
+                ref = v[1:].split(".", 1)[0]
+                if ref in declared_names:
+                    continue
+                # Pick the next bracket literal
+                idx = len(refs_seen)
+                if idx < len(brackets):
+                    new_val = v.replace(f"${ref}", brackets[idx])
+                    params[k] = new_val
+                    notes.append(
+                        f"resolved $-ref: param '{k}' '{v}' → '{new_val}' "
+                        f"(declared_inputs={sorted(declared_names) or '[]'}; "
+                        f"matched bracket #{idx})"
+                    )
+                    refs_seen.append(ref)
+            elif isinstance(v, list):
+                for i, item in enumerate(v):
+                    if isinstance(item, str) and item.startswith("$"):
+                        ref = item[1:].split(".", 1)[0]
+                        if ref in declared_names:
+                            continue
+                        idx = len(refs_seen)
+                        if idx < len(brackets):
+                            v[i] = item.replace(f"${ref}", brackets[idx])
+                            notes.append(
+                                f"resolved $-ref in list[{i}]: '{item}' → '{v[i]}'"
+                            )
+                            refs_seen.append(ref)
+
+    for op in new_ops:
+        if op.get("type") == "add_node":
+            params = op.get("params") or {}
+            _walk_params(params, seen_refs)
+    return notes
+
+
+def _drop_malformed_ops(new_ops: list[dict[str, Any]]) -> list[str]:
+    """Drop ops with truly unrecoverable shape:
+      - connect with src_id or dst_id None / empty
+      - set_param with both `key` and `value` envelope keys absent (no
+        block params shape to fold either — pure garbage)
+      - add_node with no block_id
+
+    Returns notes describing dropped ops. Mutates new_ops in-place.
+    """
+    notes: list[str] = []
+    keep: list[dict[str, Any]] = []
+    for op in new_ops:
+        t = op.get("type")
+        if t == "connect":
+            src = op.get("src_id")
+            dst = op.get("dst_id")
+            if not isinstance(src, str) or not src or not isinstance(dst, str) or not dst:
+                notes.append(
+                    f"dropped connect with bad ids: src={src!r} dst={dst!r}"
+                )
+                continue
+        elif t == "add_node":
+            block = op.get("block_id")
+            if not isinstance(block, str) or not block:
+                notes.append(f"dropped add_node with no block_id (node={op.get('node_id')!r})")
+                continue
+        elif t == "set_param":
+            params = op.get("params") or {}
+            # If key is None / missing AND params has no recognisable block
+            # param shape, this op is unrecoverable.
+            key = params.get("key")
+            if (not isinstance(key, str) or not key) and not any(
+                k not in {"key", "value"} for k in params.keys()
+            ):
+                notes.append(
+                    f"dropped set_param (node={op.get('node_id')!r}) — no key + no block params to fold"
+                )
+                continue
+        keep.append(op)
+    if len(keep) != len(new_ops):
+        new_ops[:] = keep
+    return notes
+
+
 def _normalize_set_param_ops(new_ops: list[dict[str, Any]]) -> list[str]:
     """LLM sometimes emits set_param with block-param-shape instead of
     the correct {key, value} envelope, e.g.:
@@ -1234,6 +1344,30 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
         logger.info(
             "compile_chunk_node: step %s set_param autofix: %s",
             step_key, "; ".join(setparam_notes[:3]),
+        )
+
+    # Auto-fix #7: drop ops that are pure garbage (None ids on connects,
+    # set_params with no recoverable shape). Better to silently skip than
+    # let executor / repair_op chase phantom errors.
+    drop_notes = _drop_malformed_ops(new_ops)
+    if drop_notes:
+        logger.info(
+            "compile_chunk_node: step %s drop-malformed: %s",
+            step_key, "; ".join(drop_notes[:3]),
+        )
+
+    # Auto-fix #8: resolve $-references in params when the input isn't
+    # actually declared. Common in chat mode (no declared inputs) — LLM
+    # emits $equipment_id habitually. Substitute with [BRACKET] literals
+    # from the instruction.
+    declared_inputs = (state.get("base_pipeline") or {}).get("inputs") or []
+    resolve_notes = _resolve_input_refs(
+        new_ops, declared_inputs, state.get("instruction") or "",
+    )
+    if resolve_notes:
+        logger.info(
+            "compile_chunk_node: step %s ref-resolve: %s",
+            step_key, "; ".join(resolve_notes[:3]),
         )
 
     req_issues = _validate_required_params(new_ops, registry.catalog)
