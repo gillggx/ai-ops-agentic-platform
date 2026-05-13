@@ -178,7 +178,12 @@ def _infer_cols_from_source_chain(
         if category == "source":
             for hint in (spec.get("output_columns_hint") or []):
                 if isinstance(hint, dict) and isinstance(hint.get("name"), str):
-                    cols.add(hint["name"])
+                    name = hint["name"]
+                    # Skip template-y entries: 'apc_<param_name>' / etc.
+                    # These are placeholders not concrete column names.
+                    if "<" in name or ">" in name:
+                        continue
+                    cols.add(name)
             # Examples may carry richer shape info (sample row showing
             # nested structure); leverage them for unnest discovery.
             for ex in (spec.get("examples") or []):
@@ -1383,18 +1388,14 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
     upstream_cols = _collect_upstream_cols(
         state.get("plan") or [], state.get("exec_trace") or {},
     )
-    # When upstream is empty (typical step_1 of a fresh build that
-    # bundles source + transforms), infer cols from the new_ops chain
-    # so col-ref validation can fire on the bundled filter / sort etc.
-    if not upstream_cols:
-        inferred = _infer_cols_from_source_chain(new_ops, registry.catalog)
-        if inferred:
-            upstream_cols = inferred
-            logger.info(
-                "compile_chunk_node: step %s inferred %d upstream cols "
-                "from source-chain (no exec_trace yet): %s",
-                step_key, len(inferred), sorted(inferred)[:8],
-            )
+    # NOTE 2026-05-14: tried inferring upstream cols from source-block's
+    # output_columns_hint when exec_trace is empty (step_1 multi-op case),
+    # but the hint describes the LEGACY flat mode (spc_<chart>_value
+    # entries) and doesn't reflect nested-default reality. The infer
+    # path rejected legitimate ops (block_unnest column='spc_charts',
+    # filter column='name') because those cols aren't in the flat hint.
+    # Removed the infer call — step_1's bundled ops are unvalidated and
+    # will surface at runtime where reflect_op can patch them.
     # Auto-fix #1: if any op references a leaf of a nested upstream col,
     # prepend an unnest of the parent + re-wire connects. Saves a
     # retry round-trip when the structural fix is unambiguous.
