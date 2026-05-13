@@ -264,6 +264,40 @@ def _auto_rewire_chart_chains(
     return rewritten, notes
 
 
+def _validate_required_params(
+    new_ops: list[dict[str, Any]],
+    catalog: dict,
+) -> list[str]:
+    """Catch missing-required-param violations at compile_chunk time
+    so we retry with feedback instead of letting the build run all the
+    way to finalize's C6_PARAM_SCHEMA check.
+
+    For each add_node, look up the block's param_schema.required list
+    and verify every required key is present in params (None values
+    were already stripped by execute._build_tool_args, but compile_chunk
+    sees raw LLM output here, so check 'is not None' too).
+    """
+    issues: list[str] = []
+    for op in new_ops:
+        if op.get("type") != "add_node":
+            continue
+        block_id = op.get("block_id") or ""
+        spec = next((s for (n, _v), s in catalog.items() if n == block_id), None)
+        if not spec:
+            continue
+        schema = spec.get("param_schema") or {}
+        required = schema.get("required") or []
+        params = op.get("params") or {}
+        for req_key in required:
+            val = params.get(req_key)
+            if val is None or (isinstance(val, str) and not val.strip()):
+                issues.append(
+                    f"{block_id}.{req_key} is required but missing/null "
+                    f"(node {op.get('node_id')})"
+                )
+    return issues
+
+
 def _find_unnest_block(catalog: dict) -> str | None:
     """Locate the catalog's list→rows explode block by capability, not by
     name. Heuristic: a block whose param_schema accepts a single `column`
@@ -880,20 +914,23 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
             "compile_chunk_node: step %s chart-chain autofix: %s",
             step_key, "; ".join(rewire_notes[:3]),
         )
+    req_issues = _validate_required_params(new_ops, registry.catalog)
     col_issues = _validate_column_refs(new_ops, upstream_cols)
-    if col_issues:
+    combined_issues = req_issues + col_issues
+    if combined_issues:
         logger.warning(
-            "compile_chunk_node: step %s attempt %d col-ref issues: %s — retry",
-            step_key, attempts, col_issues[:3],
+            "compile_chunk_node: step %s attempt %d validation issues: req=%s col=%s — retry",
+            step_key, attempts, req_issues[:3], col_issues[:3],
         )
         return {
             "compile_attempts": attempts_map,
             "plan_validation_errors": [
-                f"step {step_key} column refs invalid: " + "; ".join(col_issues[:3])
+                f"step {step_key} validation failed: " + "; ".join(combined_issues[:4])
             ],
             "sse_events": [_event("compile_chunk_error", {
                 "step_idx": step.get("step_idx"),
-                "error": "column_ref_invalid: " + "; ".join(col_issues[:2]),
+                "error": ("required_param_missing: " if req_issues else "column_ref_invalid: ")
+                          + "; ".join(combined_issues[:2]),
                 "attempts": attempts,
             })],
         }
