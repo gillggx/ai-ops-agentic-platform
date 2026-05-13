@@ -510,6 +510,15 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
     upstream_cols = _collect_upstream_cols(
         state.get("plan") or [], state.get("exec_trace") or {},
     )
+    # Debug: dump trace shape to figure out why nested leaves aren't surfacing
+    trace_dbg = []
+    for op in (state.get("plan") or []):
+        if op.get("type") == "add_node":
+            lid = op.get("node_id")
+            snap = (state.get("exec_trace") or {}).get(lid) or {}
+            samp = snap.get("sample")
+            trace_dbg.append(f"{lid}:cols={len(snap.get('cols') or [])}, sample={'dict' if isinstance(samp, dict) else type(samp).__name__}, sample_keys={list(samp.keys())[:5] if isinstance(samp, dict) else None}")
+    logger.info("compile_chunk_node step %s upstream debug: traces=%s ; cols=%s", step_key, trace_dbg, sorted(upstream_cols)[:30])
     col_issues = _validate_column_refs(new_ops, upstream_cols)
     if col_issues:
         logger.warning(
