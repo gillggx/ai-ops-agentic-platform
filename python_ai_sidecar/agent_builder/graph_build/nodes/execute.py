@@ -329,13 +329,20 @@ async def _snapshot_node(toolset, target: dict[str, Any], cursor: int) -> dict[s
     preview_blob = pv.get("preview") or {}
     cols: list[str] = []
     sample: dict[str, Any] | None = None
-    # preview shape from _summarize_preview: {port: {type, columns?, rows_sample?, snapshot?, ...}}
+    # preview shape from _summarize_preview (tools.py): the dataframe blob
+    # uses key 'sample_rows', not 'rows_sample'. Older callers used 'rows'.
+    # Check all three so nothing silently drops the sample row.
     for _port, blob in preview_blob.items():
         if not isinstance(blob, dict):
             continue
         if blob.get("type") == "dataframe":
             cols = list(blob.get("columns") or [])
-            rows_sample = blob.get("rows_sample") or blob.get("rows") or []
+            rows_sample = (
+                blob.get("sample_rows")
+                or blob.get("rows_sample")
+                or blob.get("rows")
+                or []
+            )
             if rows_sample:
                 sample = rows_sample[0] if isinstance(rows_sample[0], dict) else None
             break
