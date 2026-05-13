@@ -76,16 +76,34 @@ def _distinct_x(panel_data: list[Any], x_key: str = "eventTime") -> int:
 
 
 def inspect_execution_node(state: BuildGraphState) -> dict[str, Any]:
+    status = state.get("status")
     dry = state.get("dry_run_results")
-    if not dry or state.get("status") != "finished":
-        # Nothing to inspect (skip case, side-effect blocks, or build failed
-        # earlier). Pass through cleanly.
-        logger.info("inspect_execution: skipped (no dry_run_results or status=%s)",
-                    state.get("status"))
+    structural_issues = state.get("structural_issues") or []
+    issues: list[dict[str, Any]] = []
+
+    # 1. Structural issues from finalize's post-build validator pass.
+    #    These fire even when dry-run was skipped (status=failed_structural),
+    #    which is the MOST common LLM failure mode in practice — orphan
+    #    nodes / source-less nodes that crash canvas render. Already in
+    #    envelope shape (from Phase D), pass through directly.
+    for si in structural_issues:
+        issues.append({**si, "kind": "structural"})
+
+    if not dry:
+        # No runtime info to inspect. If we have structural issues, the loop
+        # still has work to do; otherwise pass through.
+        if issues:
+            logger.warning("inspect_execution: %d structural issue(s) (status=%s)",
+                           len(issues), status)
+            return {"inspection_issues": issues, "sse_events": [{
+                "event": "inspection_issues_found", "data": {
+                    "count": len(issues), "issues": issues[:5],
+                }
+            }]}
+        logger.info("inspect_execution: skipped (no dry_run_results or status=%s)", status)
         return {"inspection_issues": []}
 
     node_results = (dry or {}).get("node_results") or {}
-    issues: list[dict[str, Any]] = []
 
     # Build a quick {node_id → block_id} lookup from final_pipeline so error
     # envelopes can carry block_id (the LLM uses it to find the right schema).

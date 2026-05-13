@@ -94,14 +94,19 @@ def _route_after_inspect(state: BuildGraphState) -> str:
     """After inspect_execution: issues found + budget left → reflect_plan loop.
     Otherwise → layout (proceed to canvas).
 
-    Budget: reflect_attempts < MAX_REFLECT. Status must still be "finished"
-    (a failed build has nothing meaningful to inspect, even though the node
-    short-circuits in that case too).
+    Budget: reflect_attempts < MAX_REFLECT.
+
+    2026-05-13: We DO route on status=failed_structural — that's the most
+    common LLM-build failure mode (orphan / source-less nodes from a slightly
+    wrong plan), and reflect_plan with the structural_issues envelope can
+    usually fix it on attempt #2. Only status=failed (zero nodes built) is
+    unfixable from here.
     """
     issues = state.get("inspection_issues") or []
     if not issues:
         return "layout"
-    if state.get("status") != "finished":
+    if state.get("status") == "failed":
+        # No pipeline at all — reflection has nothing to repair
         return "layout"
     attempts = state.get("reflect_attempts", 0)
     if attempts >= MAX_REFLECT:

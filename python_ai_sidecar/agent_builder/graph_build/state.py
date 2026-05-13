@@ -68,6 +68,12 @@ class BuildGraphState(TypedDict, total=False):
     # Bounded by MAX_REFLECT in reflect_plan_node — incremented each cycle.
     reflect_attempts: int
 
+    # finalize_node persists validator structural errors (orphan / source-less /
+    # missing-param) found AFTER all plan ops applied. inspect_execution merges
+    # these into inspection_issues so reflect_plan can self-correct structurally
+    # broken pipelines (the most common LLM failure mode in practice).
+    structural_issues: list[dict]
+
     # ── Execution trace (Phase F, 2026-05-13) ─────────────────────────
     # call_tool_node populates after every successful connect/add op:
     #   exec_trace[logical_id] = {
@@ -111,4 +117,5 @@ def initial_state(
         status="running",
         summary=None,
         exec_trace={},
+        structural_issues=[],
     )

@@ -130,12 +130,17 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
         if dryrun_event:
             sse_events.append(dryrun_event)
 
+    # 2026-05-13: structural_issues persisted to state so inspect_execution
+    # can also self-correct broken-pipeline cases (most common failure mode
+    # — orphan / source-less nodes), not just runtime semantic issues. The
+    # issues already carry ErrorEnvelope shape after Phase D.
     return {
         "status": status,
         "summary": summary,
         "final_pipeline": pipeline.model_dump(by_alias=True),
         "sse_events": sse_events,
         "dry_run_results": dry_run_results,
+        "structural_issues": structural_issues,
     }
 
 
