@@ -266,7 +266,7 @@ async def resume_graph_build(
 ) -> AsyncGenerator[StreamEvent, None]:
     """Resume a paused graph (post-confirm_gate) with user's decision."""
     graph = build_graph()
-    config = {"configurable": {"thread_id": session_id}, "recursion_limit": 50}
+    config = {"configurable": {"thread_id": session_id}, "recursion_limit": 150}
 
     logger.info("resume_graph_build: session=%s confirmed=%s", session_id, confirmed)
     last_state: dict = {}
