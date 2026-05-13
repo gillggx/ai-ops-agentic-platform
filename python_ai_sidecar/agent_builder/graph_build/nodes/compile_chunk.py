@@ -300,6 +300,31 @@ def _auto_rewire_chart_chains(
     return rewritten, notes
 
 
+def _normalize_select_fields(new_ops: list[dict[str, Any]]) -> list[str]:
+    """LLM frequently emits block_select.fields as a string array
+    (['col1', 'col2']) instead of the schema-required object array
+    ([{'path':'col1'}, {'path':'col2'}]). Normalise in-place so the
+    block executor doesn't crash with INVALID_PARAM.
+    """
+    notes: list[str] = []
+    for op in new_ops:
+        if op.get("type") != "add_node":
+            continue
+        if op.get("block_id") != "block_select":
+            continue
+        params = op.get("params") or {}
+        fields = params.get("fields")
+        if not isinstance(fields, list) or not fields:
+            continue
+        if all(isinstance(f, str) for f in fields):
+            params["fields"] = [{"path": f} for f in fields]
+            notes.append(
+                f"normalised block_select.fields (node {op.get('node_id')}): "
+                f"str array → object array with path key"
+            )
+    return notes
+
+
 def _autostrip_singleton_groupby(
     new_ops: list[dict[str, Any]],
     plan: list[dict[str, Any]],
@@ -983,7 +1008,10 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
         retry_section = (
             f"\n\n⚠ 你上次 compile 這 step 的 ops 被 validator 擋下，原因：\n"
             + "\n".join(f"  - {e[:300]}" for e in prev_errors[:4])
-            + "\n這次請對照 UPSTREAM TRACE 的實際 cols 重寫，不要再用不在 cols 裡的欄位名。"
+            + "\n\n**修正方式**：直接把那些「不在 cols 裡的欄位名」**改成 UPSTREAM TRACE 列表裡實際存在的欄位**。"
+            + "\n⚠ **不要為了「補上」缺少的欄位而加 block_select / block_compute / block_rename 等新 block** —"
+            + " UPSTREAM TRACE 已經有等價的欄位（例如 'value' 等於 'spc_xbar_chart_value'，'name' 是 chart 識別欄）。"
+            + "你只要把 column 名換掉就好，不要動 op 結構。"
         )
         if any("leaf of nested" in e for e in prev_errors):
             retry_section += (
@@ -1125,6 +1153,15 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
         logger.info(
             "compile_chunk_node: step %s group_by autofix: %s",
             step_key, "; ".join(groupby_notes[:3]),
+        )
+
+    # Auto-fix #5: normalise block_select.fields (LLM gives str array,
+    # schema requires object array with 'path' key).
+    select_notes = _normalize_select_fields(new_ops)
+    if select_notes:
+        logger.info(
+            "compile_chunk_node: step %s select-fields autofix: %s",
+            step_key, "; ".join(select_notes[:3]),
         )
 
     req_issues = _validate_required_params(new_ops, registry.catalog)
