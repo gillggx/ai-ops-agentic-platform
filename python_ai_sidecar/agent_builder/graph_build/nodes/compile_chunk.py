@@ -91,13 +91,14 @@ def _strip_fence(text: str) -> str:
     return _FENCE_RE.sub("", text.strip()).strip()
 
 
-# Param names that carry column references — per block. If the LLM emits
-# a value for any of these and it's a single string (or a list of strings
-# for the *_list variants), we check against upstream cols.
-_COLUMN_REF_PARAMS = {
+# Fallback map for column-ref params per block — used when the block's
+# param_schema doesn't carry `x-column-source` markers. Prefer the schema-
+# driven path in _get_column_ref_params; this is just a safety net for
+# older block specs.
+_COLUMN_REF_PARAMS_FALLBACK = {
     "block_filter": ["column"],
-    "block_sort": ["columns"],            # list[str]
-    "block_select": ["fields"],           # list[str]
+    "block_sort": ["columns"],
+    "block_select": ["fields"],
     "block_groupby_agg": ["group_by", "agg_column"],
     "block_line_chart": ["x", "y"],
     "block_bar_chart": ["x", "y"],
@@ -112,6 +113,29 @@ _COLUMN_REF_PARAMS = {
     "block_pluck": ["column"],
     "block_step_check": ["column"],
 }
+
+
+def _get_column_ref_params(block_id: str, catalog: dict) -> list[str]:
+    """Return the column-reference param names for a block.
+
+    Schema-driven: walk param_schema.properties and collect any prop whose
+    metadata has `x-column-source` (set by seed.py). Falls back to the
+    static map for blocks whose schema doesn't carry the marker yet.
+    """
+    spec = next((s for (n, _v), s in catalog.items() if n == block_id), None)
+    if not spec:
+        return _COLUMN_REF_PARAMS_FALLBACK.get(block_id, [])
+    schema = spec.get("param_schema") or {}
+    props = schema.get("properties") or {}
+    names: list[str] = []
+    for pname, p in props.items():
+        if not isinstance(p, dict):
+            continue
+        if p.get("x-column-source") or p.get("x-column-ref"):
+            names.append(pname)
+    if names:
+        return names
+    return _COLUMN_REF_PARAMS_FALLBACK.get(block_id, [])
 
 
 def _collect_upstream_cols(plan: list[dict], exec_trace: dict) -> set[str]:
@@ -386,7 +410,7 @@ def _auto_insert_unnest(
     for op in new_ops:
         if op.get("type") == "add_node":
             block_id = op.get("block_id") or ""
-            ref_params = _COLUMN_REF_PARAMS.get(block_id) or []
+            ref_params = _get_column_ref_params(block_id, catalog)
             params = op.get("params") or {}
             offending_parent: str | None = None
             for pname in ref_params:
@@ -541,6 +565,7 @@ def _find_leaf_in_nested(cand: str, upstream_cols: set[str]) -> str | None:
 def _validate_column_refs(
     new_ops: list[dict[str, Any]],
     upstream_cols: set[str],
+    catalog: dict | None = None,
 ) -> list[str]:
     """Check every new add_node's column-ref params against upstream_cols.
     Returns list of human-readable issues; empty if all refs are valid.
@@ -557,7 +582,10 @@ def _validate_column_refs(
         if op.get("type") != "add_node":
             continue
         block_id = op.get("block_id") or ""
-        ref_params = _COLUMN_REF_PARAMS.get(block_id)
+        ref_params = (
+            _get_column_ref_params(block_id, catalog) if catalog
+            else _COLUMN_REF_PARAMS_FALLBACK.get(block_id, [])
+        )
         if not ref_params:
             continue
         params = op.get("params") or {}
@@ -915,7 +943,7 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
             step_key, "; ".join(rewire_notes[:3]),
         )
     req_issues = _validate_required_params(new_ops, registry.catalog)
-    col_issues = _validate_column_refs(new_ops, upstream_cols)
+    col_issues = _validate_column_refs(new_ops, upstream_cols, registry.catalog)
     combined_issues = req_issues + col_issues
     if combined_issues:
         logger.warning(
