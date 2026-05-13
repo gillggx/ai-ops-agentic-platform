@@ -94,6 +94,21 @@ async def clarify_intent_node(state: BuildGraphState) -> dict[str, Any]:
         logger.info("clarify_intent: skipped (already done, attempts=%d)", attempts)
         return {}
 
+    # Chat mode (skip_confirm=True) has no UI to surface clarification
+    # questions — the chat orchestrator already asked the user before
+    # calling build_pipeline_live, and there is no /agent/build/clarify-
+    # respond path from the chat panel. If we interrupt() here the graph
+    # pauses forever and the user sees an empty canvas. Skip the gate;
+    # macro_plan will handle whatever residual ambiguity remains by
+    # picking sensible defaults from block descriptions.
+    if state.get("skip_confirm"):
+        logger.info("clarify_intent: skipped (skip_confirm=True, chat mode)")
+        return {
+            "clarify_attempts": 1,
+            "clarifications": {},
+            "sse_events": [_event("clarify_skipped", {"reason": "skip_confirm"})],
+        }
+
     instruction = state.get("instruction") or ""
     if not instruction.strip():
         return {"clarify_attempts": 1, "clarifications": {}}
