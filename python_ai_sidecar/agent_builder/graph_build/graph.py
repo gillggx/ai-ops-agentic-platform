@@ -156,17 +156,20 @@ def _route_after_inspect(state: BuildGraphState) -> str:
         # No pipeline at all — reflection has nothing to repair
         return "layout"
     if state.get("status") == "finished":
-        # Dry-run clean — don't risk breaking a working pipeline to chase
-        # soft semantic signals. Log them, ship the build.
-        soft_issues = [i for i in issues
-                       if i.get("kind") in {"single_point_chart", "node_empty_output"}]
-        hard_issues = [i for i in issues if i not in soft_issues]
-        if not hard_issues:
-            logger.info(
-                "route_after_inspect: status=finished, %d soft issue(s) — "
-                "shipping clean build (no reflect_plan)", len(soft_issues),
-            )
-            return "layout"
+        # Build engine succeeded end-to-end. ANY rewrite via reflect_plan
+        # has been observed to produce schema-invalid output (LLM JSON
+        # parse failures, partial mutation that drops nodes). Whether
+        # the post-build issues are soft signals (single-point chart,
+        # empty data) OR a single isolated runtime fail (e.g. cpk
+        # MISSING_PARAM), shipping the partial pipeline beats risking
+        # the whole build with a speculative rewrite.
+        kinds = {i.get("kind") for i in issues}
+        logger.info(
+            "route_after_inspect: status=finished, %d issue(s) of kinds=%s — "
+            "shipping build as-is (skipping reflect_plan)",
+            len(issues), sorted(kinds),
+        )
+        return "layout"
     attempts = state.get("reflect_attempts", 0)
     if attempts >= MAX_REFLECT:
         logger.warning("route_after_inspect: max reflect attempts (%d) — shipping partial fix", attempts)

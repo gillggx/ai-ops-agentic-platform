@@ -366,6 +366,45 @@ def _resolve_input_refs(
     return notes
 
 
+def _drop_unspecced_cpk(new_ops: list[dict[str, Any]]) -> list[str]:
+    """block_cpk requires at least one of usl/lsl at runtime (custom
+    enforcement, not in JSON Schema). LLM frequently omits both when
+    user prompt says "計算 Cpk" without spec limits — block fails with
+    MISSING_PARAM and reflect_plan can't recover.
+
+    If a block_cpk op has neither usl nor lsl set to a number, drop
+    the cpk add_node + any connect targeting it. Other analyses in
+    the same step still execute.
+    """
+    notes: list[str] = []
+    drop_lids: set[str] = set()
+    for op in new_ops:
+        if op.get("type") != "add_node" or op.get("block_id") != "block_cpk":
+            continue
+        params = op.get("params") or {}
+        usl = params.get("usl")
+        lsl = params.get("lsl")
+        if not isinstance(usl, (int, float)) and not isinstance(lsl, (int, float)):
+            lid = op.get("node_id")
+            if isinstance(lid, str):
+                drop_lids.add(lid)
+                notes.append(
+                    f"dropped block_cpk (node {lid}) — no usl/lsl provided "
+                    f"(runtime would fail MISSING_PARAM)"
+                )
+    if not drop_lids:
+        return notes
+    keep: list[dict[str, Any]] = []
+    for op in new_ops:
+        if op.get("type") == "add_node" and op.get("node_id") in drop_lids:
+            continue
+        if op.get("type") == "connect" and op.get("dst_id") in drop_lids:
+            continue
+        keep.append(op)
+    new_ops[:] = keep
+    return notes
+
+
 def _drop_malformed_ops(new_ops: list[dict[str, Any]]) -> list[str]:
     """Drop ops with truly unrecoverable shape:
       - connect with src_id or dst_id None / empty
@@ -1344,6 +1383,15 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
         logger.info(
             "compile_chunk_node: step %s set_param autofix: %s",
             step_key, "; ".join(setparam_notes[:3]),
+        )
+
+    # Auto-fix #6.5: drop block_cpk when LLM didn't supply usl/lsl —
+    # runtime requires at least one and would fail MISSING_PARAM.
+    cpk_drop_notes = _drop_unspecced_cpk(new_ops)
+    if cpk_drop_notes:
+        logger.info(
+            "compile_chunk_node: step %s cpk-spec autofix: %s",
+            step_key, "; ".join(cpk_drop_notes[:3]),
         )
 
     # Auto-fix #7: drop ops that are pure garbage (None ids on connects,
