@@ -338,8 +338,17 @@ export default function AgentBuilderPanel({
           } else {
             const status = (data.status as string) || "finished";
             const summary = (data.summary as string) || "(done)";
+            // Cast loosely — node shape is the canonical PipelineNode from
+            // sidecar (id/block_id/block_version/position/params); we accept
+            // it as-is for BuilderContext via setNodesAndEdges below.
             const finalPj = data.pipeline_json as {
-              nodes?: Array<{ id: string; position?: { x: number; y: number } }>;
+              nodes?: Array<{
+                id: string;
+                block_id?: string;
+                block_version?: string;
+                position?: { x: number; y: number };
+                params?: Record<string, unknown>;
+              }>;
               edges?: Array<{
                 id: string;
                 from: { node: string; port: string };
@@ -369,22 +378,30 @@ export default function AgentBuilderPanel({
               // overrides via state.pipeline.nodes (BuilderContext keeps the
               // latest write).
               if (finalPj && Array.isArray(finalPj.nodes) && finalPj.nodes.length > 0) {
-                const laidOut = currentNodesRef.current.map((n) => {
-                  const pj = finalPj.nodes!.find((m) => m.id === n.id);
-                  return pj?.position ? { ...n, position: { x: pj.position.x, y: pj.position.y } } : n;
-                });
-                // 2026-05-13: trust sidecar's final_pipeline.edges over the
-                // incrementally-applied SSE state. Per-op SSE can race during
-                // reflect_plan loops (canvas_reset clears → re-adds), leaving
-                // GUI edges out of sync with sidecar's authoritative state.
-                // Symptom: pipeline saved with orphan chart / data_view because
-                // their inbound edges never made it to BuilderContext. Replace
-                // with finalPj.edges when present so Save persists the same
-                // pipeline sidecar actually finalized.
-                const finalEdges = Array.isArray(finalPj.edges) && finalPj.edges.length > 0
-                  ? finalPj.edges
-                  : stateRef.current.pipeline.edges;
-                actions.setNodesAndEdges(laidOut, finalEdges);
+                // 2026-05-13: trust sidecar's final_pipeline 100% — replace
+                // nodes AND edges entirely instead of merging into the
+                // incrementally-built GUI state.
+                //
+                // Why full replacement instead of position-merge:
+                // During reflect_plan loops the sidecar may rewrite the plan
+                // (different block_ids, different params, different edges).
+                // SSE ops stream the new plan after canvas_reset, but
+                // incremental application can race / drop events, leaving
+                // GUI state divergent from sidecar's final pipeline.
+                //
+                // Concrete failure (pipeline #126 / #128 in v8.1 / v9):
+                //   sidecar final: 10 nodes / 9 edges  (or n4 block_pluck after reflect)
+                //   GUI accumulated: 10 nodes / 7 edges (or n4 still block_filter from initial plan)
+                //   Save persisted GUI state → /run fails with orphan or wrong column.
+                //
+                // Sidecar's final_pipeline carries the post-layout positions
+                // and the post-reflect block ids+params, so we can drop the
+                // GUI's interim state and use sidecar's as ground truth.
+                const finalEdges = Array.isArray(finalPj.edges) ? finalPj.edges : [];
+                actions.setNodesAndEdges(
+                  finalPj.nodes as unknown as Parameters<typeof actions.setNodesAndEdges>[0],
+                  finalEdges as unknown as Parameters<typeof actions.setNodesAndEdges>[1],
+                );
               }
             }
           }
