@@ -129,12 +129,30 @@ test.describe("Harness flow — stable skill, repeated builds", () => {
       () => document.querySelectorAll(".react-flow__node").length >= 2,
       null, { timeout: 180_000, polling: 2000 },
     );
+    // 2026-05-13: reflect_plan loop can reset/rebuild the canvas (failed_
+    // structural → reflect → re-execute = canvas count drops then climbs).
+    // Wait until count is stable for 8s before saving so we don't save a
+    // partial mid-reflect canvas.
+    await builder.waitForFunction(
+      async () => {
+        const w = window as unknown as { __lastNodeCount?: number; __stableSince?: number };
+        const c = document.querySelectorAll(".react-flow__node").length;
+        const now = Date.now();
+        if (w.__lastNodeCount !== c) {
+          w.__lastNodeCount = c;
+          w.__stableSince = now;
+          return false;
+        }
+        return c >= 2 && (now - (w.__stableSince ?? now)) >= 8_000;
+      },
+      null, { timeout: 240_000, polling: 1000 },
+    );
     const nodeCount = await builder.locator(".react-flow__node").count();
-    console.log(`[5/7] canvas has ${nodeCount} nodes`);
+    console.log(`[5/7] canvas has ${nodeCount} nodes (stable)`);
 
     // ── 6. Save → wait for /[id] URL → Done ──────────────────────
     await builder.locator('button:has-text("Save")').first().click();
-    await builder.waitForURL(/admin\/pipeline-builder\/\d+/, { timeout: 30_000 });
+    await builder.waitForURL(/admin\/pipeline-builder\/\d+/, { timeout: 60_000 });
     const pid = Number(builder.url().match(/pipeline-builder\/(\d+)/)?.[1]);
     expect(pid).toBeGreaterThan(0);
     console.log(`[6/7] saved pipeline #${pid}`);

@@ -151,9 +151,36 @@ async def execute_native(
     pipeline = _parse_pipeline(pipeline_json)
     if pipeline is None:
         raise ValueError("pipeline_json failed schema validation")
+    # 2026-05-13: harness/Java often sends trigger payloads with
+    # equipment_id / step_id, while LLM-generated pipelines tend to declare
+    # tool_id / step (catalog canonical names). Bridge the naming gap here
+    # so the executor's _resolve_inputs sees BOTH forms — whichever the
+    # pipeline declared resolves. Cheap & safe (extras are ignored).
+    expanded_inputs = _expand_trigger_aliases(inputs or {})
     executor = get_real_executor()
-    result = await executor.execute(pipeline, inputs=inputs, run_id=run_id)
+    result = await executor.execute(pipeline, inputs=expanded_inputs, run_id=run_id)
     return result
+
+
+# Trigger payload naming compatibility — same map as finalize._maybe_dry_run.
+# Production /run + build-time dry_run go through this so both see the same
+# resolved input set.
+_TRIGGER_ALIASES: dict[str, str] = {
+    "step_id": "step",
+    "equipment_id": "tool_id",
+}
+
+
+def _expand_trigger_aliases(payload: dict[str, Any]) -> dict[str, Any]:
+    if not payload:
+        return {}
+    out = dict(payload)
+    for src, dst in _TRIGGER_ALIASES.items():
+        if src in out and dst not in out:
+            out[dst] = out[src]
+        if dst in out and src not in out:
+            out[src] = out[dst]
+    return out
 
 
 def _json_safe(value: Any) -> Any:
