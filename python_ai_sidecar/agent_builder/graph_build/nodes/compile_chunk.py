@@ -300,6 +300,67 @@ def _auto_rewire_chart_chains(
     return rewritten, notes
 
 
+def _normalize_set_param_ops(new_ops: list[dict[str, Any]]) -> list[str]:
+    """LLM sometimes emits set_param with block-param-shape instead of
+    the correct {key, value} envelope, e.g.:
+      bad:  {type: set_param, node_id: n3, params: {column:'name',
+            operator:'==', value:'xbar_chart'}}
+      good: {type: set_param, node_id: n3, params: {key:'column',
+            value:'name'}}  (and two more for operator + value)
+
+    If the bad shape is detected, fold the keys into the matching
+    add_node's params (much simpler than splitting into N set_param
+    ops, and avoids re-execution).
+
+    Returns notes describing applied fixes. Mutates new_ops in-place.
+    """
+    notes: list[str] = []
+    # Index add_node ops by node_id for fast lookup
+    add_by_id: dict[str, dict[str, Any]] = {}
+    for op in new_ops:
+        if op.get("type") == "add_node":
+            nid = op.get("node_id")
+            if isinstance(nid, str):
+                add_by_id[nid] = op
+
+    keep: list[dict[str, Any]] = []
+    for op in new_ops:
+        if op.get("type") != "set_param":
+            keep.append(op)
+            continue
+        params = op.get("params") or {}
+        # Correct shape: key + value (and only these)
+        has_key = "key" in params and params.get("key") is not None
+        has_value = "value" in params
+        only_envelope = set(params.keys()).issubset({"key", "value"})
+        if has_key and has_value and only_envelope:
+            keep.append(op)
+            continue
+        # Malformed: try to fold into target add_node
+        nid = op.get("node_id")
+        target_add = add_by_id.get(nid) if isinstance(nid, str) else None
+        if target_add is None:
+            # Can't merge — keep the op, executor will fail/repair
+            keep.append(op)
+            continue
+        # Pick keys that look like block params (skip envelope keys we
+        # know are misnamed)
+        target_params = target_add.setdefault("params", {})
+        merged_keys: list[str] = []
+        for k, v in params.items():
+            if k == "key":
+                continue  # envelope key, drop
+            target_params[k] = v
+            merged_keys.append(k)
+        notes.append(
+            f"folded malformed set_param (node {nid}) into add_node: "
+            f"merged keys={merged_keys}"
+        )
+    if len(keep) != len(new_ops):
+        new_ops[:] = keep
+    return notes
+
+
 def _normalize_select_fields(new_ops: list[dict[str, Any]]) -> list[str]:
     """LLM frequently emits block_select.fields as a string array
     (['col1', 'col2']) instead of the schema-required object array
@@ -1162,6 +1223,17 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
         logger.info(
             "compile_chunk_node: step %s select-fields autofix: %s",
             step_key, "; ".join(select_notes[:3]),
+        )
+
+    # Auto-fix #6: fold malformed set_param ops (LLM emits the entire
+    # block-param shape inside params instead of {key,value} envelope)
+    # back into the matching add_node's params. Avoids the chain of
+    # "Block X has no parameter 'None'" failures we saw.
+    setparam_notes = _normalize_set_param_ops(new_ops)
+    if setparam_notes:
+        logger.info(
+            "compile_chunk_node: step %s set_param autofix: %s",
+            step_key, "; ".join(setparam_notes[:3]),
         )
 
     req_issues = _validate_required_params(new_ops, registry.catalog)
