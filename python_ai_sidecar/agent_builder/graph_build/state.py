@@ -25,6 +25,13 @@ class BuildGraphState(TypedDict, total=False):
     instruction: str
     base_pipeline: Optional[dict]   # PipelineJSON.model_dump(by_alias=True)
     user_id: Optional[int]
+    # Trigger payload that production /run will fire the pipeline with.
+    # When provided (e.g. from a skill's stored sample / harness test),
+    # finalize's dry-run passes it to PipelineExecutor.execute(inputs=...)
+    # so the dry-run mirrors production behaviour. Without it, the executor
+    # falls back to _CANONICAL_INPUT_FALLBACKS — which often differ from
+    # the actual trigger and let runtime-only failures slip past inspect.
+    trigger_payload: Optional[dict]
 
     # ── Plan stage ────────────────────────────────────────────────────
     plan: list[dict]                # list[Op] dumped
@@ -95,6 +102,7 @@ def initial_state(
     user_id: Optional[int] = None,
     skip_confirm: bool = False,
     skill_step_mode: bool = False,
+    trigger_payload: Optional[dict] = None,
 ) -> BuildGraphState:
     return BuildGraphState(
         session_id=session_id,
@@ -118,4 +126,5 @@ def initial_state(
         summary=None,
         exec_trace={},
         structural_issues=[],
+        trigger_payload=trigger_payload,
     )

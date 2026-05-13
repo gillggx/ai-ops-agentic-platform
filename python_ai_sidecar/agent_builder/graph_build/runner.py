@@ -43,6 +43,7 @@ async def stream_graph_build(
     session_id: Optional[str] = None,
     skip_confirm: bool = False,
     skill_step_mode: bool = False,
+    trigger_payload: Optional[dict] = None,
 ) -> AsyncGenerator[StreamEvent, None]:
     """Run the graph from the start. Yields StreamEvent as nodes complete.
 
@@ -70,6 +71,7 @@ async def stream_graph_build(
         user_id=user_id,
         skip_confirm=skip_confirm,
         skill_step_mode=skill_step_mode,
+        trigger_payload=trigger_payload,
     )
     logger.info("stream_graph_build: starting session=%s", sid)
 

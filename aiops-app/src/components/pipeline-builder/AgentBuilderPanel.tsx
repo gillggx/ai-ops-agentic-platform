@@ -78,6 +78,35 @@ export default function AgentBuilderPanel({
   // useState-based guard misses because state updates are async.
   const runningLockRef = useRef(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  // 2026-05-13: when embed=skill, read the skill's confirm_check.trigger_payload
+  // (if set) and forward it to /api/agent/build so the sidecar's dry-run uses
+  // the same inputs production /run will. Keeps dry-run consistent with the
+  // execution path inspect_execution / reflect_plan need to detect issues.
+  const triggerPayloadRef = useRef<Record<string, unknown> | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const slug = params.get("skill_slug");
+    if (!slug || params.get("embed") !== "skill") return;
+    (async () => {
+      try {
+        const r = await fetch(`/api/skill-documents/${encodeURIComponent(slug)}`, {
+          headers: { Accept: "application/json" },
+        });
+        if (!r.ok) return;
+        const j = await r.json();
+        const cc = j?.data?.confirm_check ?? j?.confirm_check;
+        const parsed = typeof cc === "string" ? JSON.parse(cc) : cc;
+        const tp = parsed?.trigger_payload;
+        if (tp && typeof tp === "object") {
+          triggerPayloadRef.current = tp as Record<string, unknown>;
+        }
+      } catch {
+        // best-effort — absence of trigger_payload just means dry-run falls
+        // back to canonical inputs (existing behavior).
+      }
+    })();
+  }, []);
   const abortRef = useRef<AbortController | null>(null);
   // Local canvas snapshot keyed to this panel, used to reconcile if agent
   // returns a final pipeline_json that diverges from our incremental state.
@@ -379,6 +408,7 @@ export default function AgentBuilderPanel({
           instruction: prompt,
           pipelineId: basePipelineId ?? null,
           pipelineSnapshot: sendSnapshot ? state.pipeline : null,
+          triggerPayload: triggerPayloadRef.current,
         }),
       });
       await consumeBuildStream(streamRes);

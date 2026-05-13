@@ -121,7 +121,18 @@ public class AgentProxyController {
 				: body.get("base_pipeline") instanceof Map<?, ?> m2
 						? (Map<String, Object>) m2
 						: null;
-		BuildRequest req = new BuildRequest(instruction, pipelineId, snapshot);
+		// 2026-05-13: pass triggerPayload through so sidecar's dry-run uses
+		// the same inputs that production /run will. Without this, dry-run
+		// uses canonical fallbacks (tool_id=EQP-01 etc.) which often differ
+		// from the actual trigger and let runtime-only failures slip past
+		// inspect/reflect.
+		@SuppressWarnings("unchecked")
+		Map<String, Object> triggerPayload = body.get("triggerPayload") instanceof Map<?, ?> tp1
+				? (Map<String, Object>) tp1
+				: body.get("trigger_payload") instanceof Map<?, ?> tp2
+						? (Map<String, Object>) tp2
+						: null;
+		BuildRequest req = new BuildRequest(instruction, pipelineId, snapshot, triggerPayload);
 		return bridgeSse(sidecar.postSse("/internal/agent/build", req, caller), "build");
 	}
 
@@ -225,5 +236,9 @@ public class AgentProxyController {
 	public record ChatRequest(@NotBlank String message, String sessionId, Map<String, Object> clientContext,
 	                          String mode, Map<String, Object> pipelineSnapshot) {}
 
-	public record BuildRequest(@NotBlank String instruction, Long pipelineId, Map<String, Object> pipelineSnapshot) {}
+	public record BuildRequest(
+			@NotBlank String instruction,
+			Long pipelineId,
+			Map<String, Object> pipelineSnapshot,
+			Map<String, Object> triggerPayload) {}
 }

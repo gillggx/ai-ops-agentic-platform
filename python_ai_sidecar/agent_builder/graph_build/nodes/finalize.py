@@ -126,7 +126,12 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
 
     dry_run_results: dict[str, Any] | None = None
     if status == "finished":
-        dryrun_event, dry_run_results = await _maybe_dry_run(pipeline)
+        # 2026-05-13: pass state.trigger_payload so dry-run uses the same
+        # inputs production /run will use. Without this, executor falls
+        # back to _CANONICAL_INPUT_FALLBACKS which often don't match the
+        # actual trigger — letting runtime-only failures slip past inspect.
+        trigger_payload = state.get("trigger_payload") or {}
+        dryrun_event, dry_run_results = await _maybe_dry_run(pipeline, trigger_payload)
         if dryrun_event:
             sse_events.append(dryrun_event)
 
@@ -146,6 +151,7 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
 
 async def _maybe_dry_run(
     pipeline: PipelineJSON,
+    trigger_payload: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """Run the pipeline once via PipelineExecutor.
 
@@ -186,9 +192,14 @@ async def _maybe_dry_run(
         }), None
 
     executor = PipelineExecutor(block_registry)
+    # Map common synonyms — harness/Java side often uses snake_case suffix
+    # variants (step_id vs step, equipment_id vs tool_id) that the agent's
+    # input declarations may or may not match. Pass BOTH forms so the
+    # executor's _resolve_inputs picks whichever the pipeline declared.
+    resolved_inputs = _expand_trigger_aliases(trigger_payload or {})
     try:
         result = await asyncio.wait_for(
-            executor.execute(pipeline, inputs={}),
+            executor.execute(pipeline, inputs=resolved_inputs),
             timeout=DRYRUN_TIMEOUT_SEC,
         )
     except asyncio.TimeoutError:
@@ -233,3 +244,24 @@ async def _maybe_dry_run(
 
 def _event(name: str, data: dict[str, Any]) -> dict[str, Any]:
     return {"event": name, "data": data}
+
+
+# Common naming variants between trigger payloads (production /run) and what
+# pipelines declare. Adding both forms is cheap; _resolve_inputs only consumes
+# names that match a declared input, ignoring extras.
+_TRIGGER_ALIASES: dict[str, str] = {
+    "step_id": "step",            # harness sends step_id; some pipelines declare step
+    "equipment_id": "tool_id",    # harness sends equipment_id; many declare tool_id
+}
+
+
+def _expand_trigger_aliases(payload: dict[str, Any]) -> dict[str, Any]:
+    if not payload:
+        return {}
+    out = dict(payload)
+    for src, dst in _TRIGGER_ALIASES.items():
+        if src in out and dst not in out:
+            out[dst] = out[src]
+        if dst in out and src not in out:
+            out[src] = out[dst]
+    return out

@@ -61,6 +61,11 @@ class BuildRequest(BaseModel):
     # Frontend embed=skill flow + chat orchestrator's build_pipeline_live
     # both set this true; standalone Pipeline Builder builds keep default.
     skill_step_mode: bool = Field(default=False, alias="skillStepMode")
+    # 2026-05-13: sample trigger payload (production /run input). When the
+    # caller is building a Skill, this should mirror what the alarm/event
+    # will actually fire — so finalize's dry-run exercises the same code
+    # path production will, and inspect/reflect catches mismatches.
+    trigger_payload: dict | None = Field(default=None, alias="triggerPayload")
 
 
 async def _chat_stream_native(req: ChatRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
@@ -146,6 +151,7 @@ async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenera
             user_id=caller.user_id,
             skill_step_mode=req.skill_step_mode,
             skip_confirm=False,  # Builder Mode shows the Apply/Cancel card
+            trigger_payload=req.trigger_payload,
         ):
             yield {
                 "event": stream_event.type,

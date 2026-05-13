@@ -42,11 +42,23 @@ async function loginJava(): Promise<string> {
 async function resetHarness(token: string) {
   // Reset confirm_check.pipeline_id=null + description to the user's prompt
   // so each test starts from "stale C1" state — same as the user's GUI complaint.
+  // 2026-05-13: include trigger_payload sample. AgentBuilderPanel reads this
+  // on embed=skill, forwards to /api/agent/build → sidecar dry-run uses
+  // production-shape inputs → inspect catches runtime-only issues at build
+  // time → reflect_plan has something to repair.
   const cc = {
     description: INSTRUCTION,
     ai_summary: "",
     pipeline_id: null,
     must_pass: true,
+    trigger_payload: {
+      equipment_id: "EQP-01",
+      lot_id: "LOT-0001",
+      step_id: "STEP_005",
+      chamber_id: "CH-1",
+      spc_chart: "xbar_chart",
+      severity: "high",
+    },
   };
   const res = await fetch(`${BASE}/api/v1/skill-documents/${SLUG}`, {
     method: "PUT",
