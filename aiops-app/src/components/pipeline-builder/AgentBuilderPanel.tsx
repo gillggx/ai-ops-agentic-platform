@@ -338,7 +338,14 @@ export default function AgentBuilderPanel({
           } else {
             const status = (data.status as string) || "finished";
             const summary = (data.summary as string) || "(done)";
-            const finalPj = data.pipeline_json as { nodes?: Array<{ id: string; position?: { x: number; y: number } }> } | null;
+            const finalPj = data.pipeline_json as {
+              nodes?: Array<{ id: string; position?: { x: number; y: number } }>;
+              edges?: Array<{
+                id: string;
+                from: { node: string; port: string };
+                to: { node: string; port: string };
+              }>;
+            } | null;
             const finalNodeCount = Array.isArray(finalPj?.nodes) ? finalPj!.nodes!.length : 0;
 
             // 2026-05-12 — earlier the handler always rendered "✓ <summary>" even
@@ -366,7 +373,18 @@ export default function AgentBuilderPanel({
                   const pj = finalPj.nodes!.find((m) => m.id === n.id);
                   return pj?.position ? { ...n, position: { x: pj.position.x, y: pj.position.y } } : n;
                 });
-                actions.setNodesAndEdges(laidOut, stateRef.current.pipeline.edges);
+                // 2026-05-13: trust sidecar's final_pipeline.edges over the
+                // incrementally-applied SSE state. Per-op SSE can race during
+                // reflect_plan loops (canvas_reset clears → re-adds), leaving
+                // GUI edges out of sync with sidecar's authoritative state.
+                // Symptom: pipeline saved with orphan chart / data_view because
+                // their inbound edges never made it to BuilderContext. Replace
+                // with finalPj.edges when present so Save persists the same
+                // pipeline sidecar actually finalized.
+                const finalEdges = Array.isArray(finalPj.edges) && finalPj.edges.length > 0
+                  ? finalPj.edges
+                  : stateRef.current.pipeline.edges;
+                actions.setNodesAndEdges(laidOut, finalEdges);
               }
             }
           }
