@@ -49,6 +49,10 @@ from python_ai_sidecar.agent_builder.graph_build.nodes.reflect_plan import (
     MAX_REFLECT,
     reflect_plan_node,
 )
+from python_ai_sidecar.agent_builder.graph_build.nodes.reflect_op import (
+    MAX_REFLECT_OP,
+    reflect_op_node,
+)
 from python_ai_sidecar.agent_builder.graph_build.nodes.layout import layout_node
 
 
@@ -117,7 +121,9 @@ def _route_after_inspect(state: BuildGraphState) -> str:
 
 def _route_after_call(state: BuildGraphState) -> str:
     """Per-op routing after call_tool ran:
-       - last op errored → repair_op
+       - last op errored → repair_op (schema-level fix, existing)
+       - last op ok BUT exec_trace shows data issue → reflect_op (NEW v8,
+         per-op semantic patch; budgeted per logical id)
        - last op ok and more ops → dispatch_op
        - last op ok and no more → finalize
     """
@@ -134,6 +140,22 @@ def _route_after_call(state: BuildGraphState) -> str:
                 logger.warning("route_after_call: cursor=%d escalating to repair_plan", cursor)
                 return "repair_plan"
             return "repair_op"
+
+    # ── v8 (2026-05-13): per-op semantic check ──────────────────────────
+    # call_tool's _detect_op_issue may have set last_op_issue. Route to
+    # reflect_op if there's budget left. Failed reflect_op clears the
+    # flag, so we fallthrough to dispatch on next pass.
+    issue = state.get("last_op_issue")
+    if isinstance(issue, dict) and issue.get("node_id"):
+        attempts_map = state.get("reflect_op_attempts") or {}
+        lid = issue["node_id"]
+        attempts = int(attempts_map.get(lid, 0))
+        if attempts < MAX_REFLECT_OP:
+            return "reflect_op"
+        # Budget exhausted — log and fallthrough to next op or finalize.
+        # Don't return now; let cursor logic decide between dispatch / finalize.
+        logger.info("route_after_call: %s exceeded reflect_op budget (%d); fallthrough",
+                    lid, attempts)
 
     # All ops done?
     if cursor >= len(plan):
@@ -167,6 +189,7 @@ def build_graph():
     g.add_node("finalize", finalize_node)
     g.add_node("inspect_execution", inspect_execution_node)
     g.add_node("reflect_plan", reflect_plan_node)
+    g.add_node("reflect_op", reflect_op_node)
     g.add_node("layout", layout_node)
 
     g.add_edge(START, "plan")
@@ -197,11 +220,17 @@ def build_graph():
         {
             "dispatch_op": "dispatch_op",
             "repair_op": "repair_op",
+            "reflect_op": "reflect_op",
             "repair_plan": "repair_plan",
             "finalize": "finalize",
         },
     )
     g.add_edge("repair_op", "call_tool")
+    # v8: reflect_op patches the failing op + rewinds cursor; loop back
+    # to dispatch so call_tool re-runs the patched op. If reflect_op
+    # bails (budget / parse fail), it clears last_op_issue and the next
+    # dispatch sees a clean state.
+    g.add_edge("reflect_op", "dispatch_op")
     # Self-correction loop (2026-05-13):
     #   finalize → inspect_execution
     #     ├─ no issues / budget exhausted → layout → END

@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Pipeline Builder Self-Correction — v7 (current) vs v8 (per-op reflection)</title>
+<style>
+  :root {
+    --c-agent: #1e6fbf;   /* blue — deterministic graph nodes */
+    --c-model: #d97706;   /* orange — LLM calls */
+    --c-new:   #16a34a;   /* green — v8 new */
+    --c-bg:    #fafafa;
+    --c-card:  #ffffff;
+    --c-border:#e2e2e2;
+    --c-soft:  #f5f5f5;
+    --c-mute:  #6b7280;
+    --c-strong:#111827;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    color: var(--c-strong);
+    background: var(--c-bg);
+    margin: 0; padding: 0;
+  }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 32px 24px 80px; }
+  h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: -.01em; }
+  h2 { font-size: 22px; margin: 40px 0 12px; padding-bottom: 6px; border-bottom: 2px solid var(--c-strong); }
+  h3 { font-size: 17px; margin: 24px 0 10px; color: var(--c-strong); }
+  h4 { font-size: 15px; margin: 16px 0 8px; color: var(--c-mute); text-transform: uppercase; letter-spacing: .06em; }
+  p { margin: 8px 0; }
+  code, pre, .mono { font-family: var(--mono); font-size: 13px; }
+  pre {
+    background: var(--c-soft);
+    padding: 10px 14px;
+    border-radius: 6px;
+    overflow-x: auto;
+    border: 1px solid var(--c-border);
+    line-height: 1.5;
+  }
+  .lede { color: var(--c-mute); font-size: 15px; margin: 6px 0 18px; }
+  .card {
+    background: var(--c-card);
+    border: 1px solid var(--c-border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 16px 0;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 12px 0 20px;
+    font-size: 14px;
+  }
+  th, td {
+    border: 1px solid var(--c-border);
+    padding: 8px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: var(--c-soft); font-weight: 600; }
+  tr.agent td:first-child { color: var(--c-agent); font-weight: 600; }
+  tr.model td:first-child { color: var(--c-model); font-weight: 600; }
+  tr.new td:first-child::after {
+    content: " NEW";
+    background: var(--c-new); color: #fff;
+    padding: 1px 6px; border-radius: 4px; font-size: 11px;
+    margin-left: 6px; letter-spacing: .03em;
+  }
+  .role-tag {
+    display: inline-block;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    margin-right: 6px;
+    font-weight: 600;
+    letter-spacing: .04em;
+  }
+  .role-agent { background: #dbeafe; color: var(--c-agent); }
+  .role-model { background: #fef3c7; color: var(--c-model); }
+  .role-new   { background: #dcfce7; color: var(--c-new); }
+  .topo {
+    background: var(--c-soft);
+    border: 1px solid var(--c-border);
+    border-radius: 6px;
+    padding: 14px 16px;
+    margin: 12px 0;
+    font-family: var(--mono);
+    font-size: 13px;
+    white-space: pre;
+    overflow-x: auto;
+    line-height: 1.55;
+  }
+  .badge-new {
+    background: var(--c-new); color: #fff;
+    padding: 1px 6px; border-radius: 4px; font-size: 11px;
+    letter-spacing: .03em; font-weight: 600;
+    margin-left: 4px;
+  }
+  .summary-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 16px 0 24px;
+  }
+  @media (max-width: 900px) { .summary-grid { grid-template-columns: 1fr; } }
+  .col-card { background: var(--c-card); border: 1px solid var(--c-border); border-radius: 8px; padding: 16px 18px; }
+  .col-card.v7 { border-left: 4px solid var(--c-mute); }
+  .col-card.v8 { border-left: 4px solid var(--c-new); }
+  .col-card h3 { margin: 0 0 8px; }
+  .kpi {
+    display: flex; flex-wrap: wrap; gap: 16px;
+    margin: 6px 0 0;
+  }
+  .kpi > div {
+    flex: 1 1 130px;
+    background: var(--c-soft); border-radius: 6px; padding: 8px 12px;
+  }
+  .kpi b { display: block; font-size: 18px; color: var(--c-strong); }
+  .kpi span { font-size: 12px; color: var(--c-mute); }
+  .small { font-size: 13px; color: var(--c-mute); }
+  .hl { background: #fff7e6; padding: 1px 4px; border-radius: 3px; }
+  .legend {
+    display: flex; gap: 16px; flex-wrap: wrap;
+    margin: 8px 0 24px; font-size: 13px;
+    padding: 12px 16px; background: var(--c-card);
+    border: 1px solid var(--c-border); border-radius: 8px;
+  }
+  details { margin: 8px 0; }
+  summary { cursor: pointer; font-weight: 600; padding: 4px 0; color: var(--c-strong); }
+  .anchor { color: var(--c-mute); margin-left: 6px; text-decoration: none; }
+  .anchor:hover { color: var(--c-strong); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Pipeline Builder Self-Correction：v7 (current) vs v8 (per-op reflection)</h1>
+  <div class="lede">2026-05-13 — 詳細對照「整 plan 反思」與「per-op 反思」兩種架構，每一步逐項列出 <b>Agent</b>（graph node / deterministic state mutation）與 <b>Model</b>（LLM call）的工作。</div>
+
+  <div class="legend">
+    <span><span class="role-tag role-agent">AGENT</span> 確定性 graph node，state mutation，無 LLM</span>
+    <span><span class="role-tag role-model">MODEL</span> LLM call（Anthropic API）</span>
+    <span><span class="role-tag role-new">NEW</span> v8 才有的步驟</span>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <h2>1. TL;DR — 兩版設計的核心差異</h2>
+
+  <div class="summary-grid">
+    <div class="col-card v7">
+      <h3>v7 (current, shipped)</h3>
+      <p><b>反思時機</b>：整 plan 跑完 → finalize → inspect → reflect</p>
+      <p><b>反思 scope</b>：LLM 看整 plan + 整 trace，產 <b>整份新 plan</b></p>
+      <p><b>失敗模式</b>：reflect 改 A 搖到 B，issue count 容易升（觀察：2 → 4 → 4 → 放棄）</p>
+      <div class="kpi">
+        <div><b>0–2</b><span>整 plan 反思次數/build</span></div>
+        <div><b>~60k</b><span>單次 reflect tokens (含 catalog)</span></div>
+        <div><b>1/3</b><span>3x harness 通過率</span></div>
+      </div>
+    </div>
+    <div class="col-card v8">
+      <h3>v8 (proposed)</h3>
+      <p><b>反思時機</b>：每跑完 1 個 op 就 check exec_trace（已就位的 auto-preview）</p>
+      <p><b>反思 scope</b>：LLM 只看 1 個 op + 前 2-3 個 upstream trace，產 <b>單一 op patch</b></p>
+      <p><b>保留</b>：finalize-time inspect + reflect_plan 當 safety net，處理 emergent issues</p>
+      <div class="kpi">
+        <div><b>0–N</b><span>per-op 反思次數/build（N≈ops 數）</span></div>
+        <div><b>~1.5k</b><span>單次 reflect tokens (局部 trace)</span></div>
+        <div><b>≥2/3 目標</b><span>3x harness 預期通過率</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <h2>2. v7 完整 flow — step-by-step</h2>
+
+  <h3>2.1 Topology</h3>
+  <div class="topo">START
+  │
+  ▼
+plan ─────────────────────────────────────► validate
+                                              │
+                            errors?  ─────────┤
+                            yes ↓ no ↓        │
+                       repair_plan  route_after_validate
+                            │            │
+                            └──────► validate
+                                              │
+                                  is_from_scratch + !skip_confirm?
+                                              │
+                                       yes ─► confirm_gate
+                                              │
+                                              ▼
+                                       canvas_reset
+                                              │
+                                              ▼
+                              ┌─────► dispatch_op ◄─────┐
+                              │             │           │
+                              │             ▼           │
+                              │         call_tool       │
+                              │             │           │
+                              │     status=error?       │
+                              │     yes ↓     no ↓      │
+                              │  repair_op   cursor < len?
+                              │     │      yes ↑   no ↓
+                              │     └────┘     finalize
+                              │                  │
+                              │                  ▼   ◄── 整 plan 跑完才看
+                              │             inspect_execution
+                              │                  │
+                              │     有 issues + budget?
+                              │     yes ↓     no ↓
+                              │  reflect_plan  layout
+                              │     │            │
+                              │     │            ▼
+                              │     └─►  validate (loop 整套)
+                              │                  │
+                              └─────────────────  ▼
+                                                 END</div>
+
+  <h3>2.2 Step-by-step</h3>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:14%">Step / Node</th>
+        <th style="width:9%">角色</th>
+        <th style="width:39%">這一步做什麼</th>
+        <th style="width:38%">State 變化 / 重要欄位</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="model">
+        <td>① plan_node</td>
+        <td><span class="role-tag role-model">MODEL</span></td>
+        <td>讀 instruction + block catalog (52 blocks)，產出 plan = list[Op] (add_node / connect / set_param / run_preview / remove_node)。輸出還含 <code>plan_summary</code> + <code>expected_outputs</code>。LLM 一次看整 catalog (~55k tokens system prompt)。</td>
+        <td>set <code>plan</code>, <code>is_from_scratch</code>, <code>expected_outputs</code>, <code>summary</code></td>
+      </tr>
+      <tr class="agent">
+        <td>② validate_plan_node</td>
+        <td><span class="role-tag role-agent">AGENT</span></td>
+        <td>對 plan run PipelineValidator (C1-C15 rules: schema、port、orphan、source-less)。沒 LLM，pure compute。errors 用 ErrorEnvelope 結構化（v7 已加 param / given / expected / rationale）。</td>
+        <td>set <code>plan_validation_errors</code>; 若有 errors → route 到 repair_plan</td>
+      </tr>
+      <tr class="model">
+        <td>③ repair_plan_node (if errors)</td>
+        <td><span class="role-tag role-model">MODEL</span></td>
+        <td>LLM 看「原 plan + errors」改一版新 plan。<b>不</b>看 catalog，只靠 errors message。bounded by MAX_PLAN_REPAIR=3。</td>
+        <td>set new <code>plan</code>, increment <code>plan_repair_attempts</code></td>
+      </tr>
+      <tr class="agent">
+        <td>④ confirm_gate (interrupt)</td>
+        <td><span class="role-tag role-agent">AGENT</span></td>
+        <td>FROM_SCRATCH + 非 skip_confirm 時，graph interrupt() 暫停，發 <code>confirm_pending</code> SSE，等 frontend 回 <code>POST /agent/build/confirm</code> 才繼續。</td>
+        <td>set <code>user_confirmed</code></td>
+      </tr>
+      <tr class="agent">
+        <td>⑤ canvas_reset</td>
+        <td><span class="role-tag role-agent">AGENT</span></td>
+        <td>FROM_SCRATCH 時清掉 base_pipeline 殘留節點，從乾淨 canvas 開始。</td>
+        <td>set <code>final_pipeline</code> = empty PipelineJSON</td>
+      </tr>
+      <tr class="agent">
+        <td>⑥ dispatch_op</td>
+        <td><span class="role-tag role-agent">AGENT</span></td>
+        <td>讀 <code>plan[cursor]</code>，包裝成 BuilderToolset 的 args。logical → real id 解析 (n1 → 真實 db id)。</td>
+        <td>不 mutate state，只 hand args off to call_tool</td>
+      </tr>
+      <tr class="agent">
+        <td>⑦ call_tool</td>
+        <td><span class="role-tag role-agent">AGENT</span></td>
+        <td>呼叫 BuilderToolset.{add_node, connect, set_param, …}。成功則更新 pipeline；失敗 raise ToolError。<b>v7 已加：auto-preview</b> 在 add_node (source-cat) / connect / set_param 後跑一次 <code>toolset.preview(node_id)</code>，寫入 <code>state.exec_trace[lid] = {rows, cols, sample, error}</code>。</td>
+        <td>append to <code>final_pipeline</code>, set <code>plan[cursor].result_status</code>, write <code>exec_trace[lid]</code>, advance <code>cursor</code></td>
+      </tr>
+      <tr class="model">
+        <td>⑧ repair_op_node (if ToolError)</td>
+        <td><span class="role-tag role-model">MODEL</span></td>
+        <td>LLM 看當前 op 的 ToolError envelope，產修正 params。<b>只處理 schema-level 錯誤</b>（required missing / type wrong / port mismatch），<b>不</b>處理 runtime 資料問題。bounded by MAX_OP_REPAIR=2。</td>
+        <td>set <code>plan[cursor].params</code>, increment <code>repair_attempts</code></td>
+      </tr>
+      <tr class="agent">
+        <td>↻ loop ⑥-⑦-(⑧)</td>
+        <td><span class="role-tag role-agent">AGENT</span></td>
+        <td>cursor 沒到 plan 結尾就回 dispatch_op。<b>關鍵</b>：v7 在這個 loop 內<b>不看 exec_trace 是否健康</b>。即使 op 跑完 rows=0，也照樣往下一個 op 走。</td>
+        <td>cursor 逐步前進到 len(plan)</td>
+      </tr>
+      <tr class="agent">
+        <td>⑨ finalize_node</td>
+        <td><span class="role-tag role-agent">AGENT</span></td>
+        <td>(a) Run PipelineValidator on final pipeline → 收 structural_issues (orphan / source-less / missing required)。(b) 若 status=finished，run dry_run via <code>executor.execute(pipeline, inputs=state.trigger_payload)</code> → <code>dry_run_results</code>。inputs 走 trigger_alias 展開（equipment_id↔tool_id, step_id↔step）。</td>
+        <td>set <code>status</code>, <code>structural_issues</code>, <code>dry_run_results</code></td>
+      </tr>
+      <tr class="agent">
+        <td>⑩ inspect_execution</td>
+        <td><span class="role-tag role-agent">AGENT</span></td>
+        <td>掃 dry_run_results.node_results 找 3 種 signal：(a) single_point_chart (chart 的 distinct eventTime &lt; 3)；(b) DATA_EMPTY (rows == 0)；(c) node_execution_failed (status != success)。也讀 state.structural_issues 一併彙整。</td>
+        <td>set <code>inspection_issues</code> (list of ErrorEnvelope dicts)</td>
+      </tr>
+      <tr class="model">
+        <td>⑪ reflect_plan_node (if issues + budget)</td>
+        <td><span class="role-tag role-model">MODEL</span></td>
+        <td><b>LLM 看整 plan + 完整 NODE TRACE + 所有 issues + 整 block catalog</b>，重出整份 plan。system prompt 是 plan_node 的 system + reflection prologue (~55k tokens)。bounded by MAX_REFLECT=2。</td>
+        <td>set new <code>plan</code>, reset <code>cursor=0, logical_to_real={}, final_pipeline=None, exec_trace={}</code>, set <code>skip_confirm=True</code> (避免重 confirm)，<code>status=running</code></td>
+      </tr>
+      <tr class="agent">
+        <td>↻ loop ②-⑦-⑨-⑩-⑪</td>
+        <td><span class="role-tag role-agent">AGENT</span></td>
+        <td>reflect_plan → validate → canvas_reset → dispatch_op 從頭再跑一遍 patched plan。每一輪整 plan 重來，舊 exec_trace 全丟。</td>
+        <td>—</td>
+      </tr>
+      <tr class="agent">
+        <td>⑫ layout_node → END</td>
+        <td><span class="role-tag role-agent">AGENT</span></td>
+        <td>對最終 pipeline 跑 dagre 自動佈版，set <code>position.x/y</code> 給 React Flow 渲染。發 SSE done。</td>
+        <td>set <code>final_pipeline.nodes[*].position</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>2.3 v7 的痛點</h3>
+  <div class="card">
+    <ul>
+      <li><b>反思太晚</b>：op 跑完一路推到 finalize，前面 op 的 rows=0 / column 錯沒人攔。當 inspect 在 finalize-time 才看，整 plan 已 corrupted。</li>
+      <li><b>delta 太大</b>：一次重寫整份 plan，LLM 修一處戳一處。觀察：<span class="hl">issue 數 2 → 4 → 4 → 放棄 partial fix ship</span>。</li>
+      <li><b>LLM 看得太多</b>：catalog 55k tokens 進 system，trace 還在 user msg，token budget 很容易爆，response 容易截斷。</li>
+      <li><b>無觀察性</b>：「LLM 一次重寫」是黑盒，看不到它修哪、為什麼選那個 node 改。</li>
+    </ul>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <h2>3. v8 完整 flow — step-by-step（per-op reflection）</h2>
+
+  <h3>3.1 Topology</h3>
+  <div class="topo">START
+  │
+  ▼
+plan ─────────────────────────────────► validate
+                                            │
+                                  (… repair_plan / confirm / canvas_reset 跟 v7 一樣)
+                                            │
+                                            ▼
+                            ┌─────► dispatch_op ◄────────────┐
+                            │             │                  │
+                            │             ▼                  │
+                            │         call_tool              │
+                            │             │                  │
+                            │         (op 跑完，exec_trace 已寫) │
+                            │             │                  │
+                            │     ToolError raise? ─yes─► repair_op
+                            │             │ no               │
+                            │             ▼                  │
+                            │     ★ NEW: check exec_trace    │
+                            │         [just_touched_node]    │
+                            │             │                  │
+                            │     rows=0 / error?            │
+                            │     yes ↓     no ↓             │
+                            │  ★ reflect_op  cursor < len?    │
+                            │     │       yes↑   no ↓        │
+                            │     │       │     finalize     │
+                            │   patch     │       │          │
+                            │   params    │       ▼          │
+                            │     │       │  inspect_execution│
+                            │   cursor--  │       │          │
+                            │     │       │  有 emergent issue?│
+                            │     └───────┘       │          │
+                            │                  yes↓ no↓      │
+                            │              reflect_plan layout │
+                            │                  │     │       │
+                            └──────────────────┘     ▼       │
+                                                    END      │
+                                                              │
+   ★ = 新節點 / 新判定                                          │</div>
+
+  <h3>3.2 Step-by-step（只列跟 v7 不同的部分；其他同 v7）</h3>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:14%">Step / Node</th>
+        <th style="width:9%">角色</th>
+        <th style="width:39%">這一步做什麼</th>
+        <th style="width:38%">State 變化</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="agent">
+        <td>① – ⑧ 同 v7</td>
+        <td><span class="role-tag role-agent">AGENT</span></td>
+        <td>plan / validate / repair_plan / confirm_gate / canvas_reset / dispatch_op / call_tool / repair_op 全部不變。call_tool 完成後 exec_trace[just_touched_node] 已被寫入（v7 已 ship 的 auto-preview）。</td>
+        <td>—</td>
+      </tr>
+
+      <tr class="agent new">
+        <td>★ ⑦.5 _detect_op_issue</td>
+        <td><span class="role-tag role-agent">AGENT</span></td>
+        <td>純函數，無 LLM。call_tool 成功後立刻 check：<br>
+          • exec_trace[lid].error 是不是 not None（executor 噴錯）<br>
+          • exec_trace[lid].rows == 0 而且 cursor &gt;= 3（避開前 1-2 個 source 還沒接 input 的正常 0 row）<br>
+          • (預留) chart_spec missing 必要 field
+          <br>有 issue → set state.last_op_issue (ErrorEnvelope dict)；無 → fallthrough 到 route_after_call。
+        </td>
+        <td>set <code>last_op_issue</code> (envelope dict) or None</td>
+      </tr>
+
+      <tr class="agent new">
+        <td>★ ⑦.6 route_after_call (改寫)</td>
+        <td><span class="role-tag role-agent">AGENT</span></td>
+        <td>新路由優先序：<br>
+          1. op error → repair_op (既有)<br>
+          2. <b>last_op_issue is not None</b> + <code>reflect_op_attempts[lid] &lt; MAX_REFLECT_OP=2</code> → <b>reflect_op</b><br>
+          3. cursor &lt; len → dispatch_op<br>
+          4. done → finalize
+        </td>
+        <td>—</td>
+      </tr>
+
+      <tr class="model new">
+        <td>★ ⑦.7 reflect_op_node</td>
+        <td><span class="role-tag role-model">MODEL</span></td>
+        <td><b>小 scope LLM call</b>。system prompt ~800 tokens（不含 catalog）。user message 只含：<br>
+          • USER PROMPT (instruction[:400])<br>
+          • FAILING OP (current op 的 dict)<br>
+          • UPSTREAM TRACE 前 2-3 個 op 的 NODE TRACE<br>
+          • ISSUE envelope (code/param/given/expected/rationale)<br>
+          • 這個 op 的 block param_schema<br>
+          LLM 輸出 JSON：<code>{action:"patch_params", new_params:{...}}</code> 或 <code>{action:"rollback", rollback_to_cursor:K, new_params_for_K:{...}}</code>。
+        </td>
+        <td>視 action 而定：
+          <br>• patch: 改 <code>plan[cursor-1].params</code>，<code>cursor--</code>
+          <br>• rollback: 改 <code>plan[K].params</code>，<code>cursor=K</code>，清 <code>exec_trace[K..]</code> 跟 <code>plan[K+1..].result_status</code>
+          <br>increment <code>reflect_op_attempts[lid]</code>
+        </td>
+      </tr>
+
+      <tr class="agent new">
+        <td>★ ⑦.8 re-dispatch</td>
+        <td><span class="role-tag role-agent">AGENT</span></td>
+        <td>cursor 已倒退 → graph edge <code>reflect_op → call_tool</code> 重跑剛才那個 op (帶新 params)。重新 preview 寫 exec_trace。再過一次 _detect_op_issue：<br>
+          • 好了 → 繼續下一個 op<br>
+          • 還壞 → 再 reflect_op (但 attempts 已 +1，2 次後 ban，帶傷繼續)
+        </td>
+        <td>—</td>
+      </tr>
+
+      <tr class="agent">
+        <td>⑨ – ⑪ 同 v7 (保留 safety net)</td>
+        <td><span class="role-tag role-agent">AGENT</span></td>
+        <td>finalize / inspect_execution / reflect_plan 全保留，<b>處理 emergent issue</b>：single_point_chart 這種「整 chain 串起來才看得出來」的問題，per-op 抓不到，留到 finalize-time 抓。多數 case 在 ⑦.7 已修掉，這層觸發機率降低。</td>
+        <td>—</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>3.3 v8 的設計賭注</h3>
+  <div class="card">
+    <ul>
+      <li><b>小 delta 風險低</b>：一次只改 1 個 op 的 params，LLM 不會「修 A 戳 B」。最壞 case 是該 op 永遠修不好，但不會 cascade。</li>
+      <li><b>反思時機正確</b>：問題發生當下就 reflect，不等到 plan 走完才回頭。前面 op 修好，後面 op 才有正確 input。</li>
+      <li><b>cost 整體可能更低</b>：1 次 reflect_plan ≈ 60k tokens (整 catalog)；1 次 reflect_op ≈ 1.5k tokens。即使 reflect_op fire 20 次也比 reflect_plan 1 次便宜。</li>
+      <li><b>觀察性好</b>：每次 reflect_op SSE 帶 op cursor + 修改 reason，frontend 可以顯示「正在修第 N 個 op...」。</li>
+    </ul>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <h2>4. 具體 scenario walkthrough</h2>
+
+  <p>User prompt：<span class="hl">「檢查機台 $equipment_id 最後一次 OOC 時，是否有 &gt;2 張 SPC chart 也 OOC，並顯示該 SPC charts」</span></p>
+  <p>假設 LLM 出的初版 plan：</p>
+  <pre>n1: block_process_history(tool_id=$equipment_id, limit=1, nested=true)   ← ⚠ limit=1 太小
+n2: block_unnest(column='spc_charts')
+n3: block_filter(column='is_ooc', operator='==', value=true)
+n4: block_line_chart(x='eventTime', y='value', facet='name')
+n5: block_step_check(column='spc_summary.ooc_count', operator='>=', threshold=2)
+edges: n1→n2, n2→n3, n3→n4, n1→n5</pre>
+  <p>真正的 bug：n1 設了 limit=1 → 下游 chart 一定 single-point。</p>
+
+  <h3>4.1 v7 怎麼處理這個 case</h3>
+
+  <table>
+    <thead><tr><th style="width:6%">時點</th><th style="width:14%">node</th><th>發生什麼</th></tr></thead>
+    <tbody>
+      <tr class="model"><td>t=0</td><td>plan_node</td><td>LLM 出上面那 5 個 op + 4 個 edge。</td></tr>
+      <tr class="agent"><td>t=1</td><td>validate</td><td>沒結構錯誤，schema 也 OK。pass。</td></tr>
+      <tr class="agent"><td>t=2</td><td>dispatch+call_tool ×</td><td>5 個 add_node + 4 個 connect 一路推。exec_trace 寫到 n1 rows=1 (因 limit=1)；n2 rows=3 (1 row × 3 spc_charts)；n3 rows=1 (filter is_ooc=true 留 1)；n4 chart 收到 1 row。但<b>沒人</b>看 exec_trace 是否健康。cursor 推到 9。</td></tr>
+      <tr class="agent"><td>t=3</td><td>finalize</td><td>validator 過。dry_run 跑完，dry_run_results 顯示：n4 chart 只有 1 distinct eventTime；n5 step_check value=0。</td></tr>
+      <tr class="agent"><td>t=4</td><td>inspect_execution</td><td>single_point_chart 命中 → set 1 issue：「node 'n4' resolved to only 1 distinct eventTime」。</td></tr>
+      <tr class="model"><td>t=5</td><td>reflect_plan #1</td><td>LLM 看整 plan + 整 trace + 整 catalog (~60k tokens)。出新 plan，<b>但</b>它可能把 n1 改成 limit=100，也可能改 n3 filter 條件，也可能完全換 block。output 16 ops。</td></tr>
+      <tr class="agent"><td>t=6</td><td>validate (new plan)</td><td>常見：新 plan 出現 orphan node 或 column 引用錯 → 17 hard errors。</td></tr>
+      <tr class="model"><td>t=7</td><td>repair_plan ×3</td><td>連續 3 次修，都還有 errors → plan_unfixable 路徑 → finalize fails 0 nodes built → END。</td></tr>
+      <tr class="agent"><td>t=8</td><td>結局</td><td>canvas 0 nodes 或 partial fix。harness 失敗。<b>原本只是 n1.limit=1 一個小問題</b>，因為整 plan 重寫被搞糟。</td></tr>
+    </tbody>
+  </table>
+
+  <h3>4.2 v8 怎麼處理同一個 case</h3>
+
+  <table>
+    <thead><tr><th style="width:6%">時點</th><th style="width:14%">node</th><th>發生什麼</th></tr></thead>
+    <tbody>
+      <tr class="model"><td>t=0</td><td>plan_node</td><td>同 v7：5 個 op。</td></tr>
+      <tr class="agent"><td>t=1</td><td>validate</td><td>同 v7：pass。</td></tr>
+      <tr class="agent"><td>t=2</td><td>op#1 add_node n1</td><td>call_tool ok。auto-preview n1 → exec_trace[n1] = {rows:1, cols:[eventTime, spc_charts(list[3]), spc_summary], sample:{...}}。</td></tr>
+      <tr class="agent new"><td>t=2.5</td><td>_detect_op_issue</td><td>cursor=1，還沒到 3 → skip check (前 1-2 個 source 還沒接 input，rows 少是正常)。fallthrough。</td></tr>
+      <tr class="agent"><td>t=3</td><td>op#2 add_node n2</td><td>add ok，但 n2 還沒 connect 進來 → 不 auto-preview transform 類 block。cursor=2。</td></tr>
+      <tr class="agent"><td>t=4</td><td>op#3 connect n1→n2</td><td>connect ok。auto-preview n2 → exec_trace[n2] = {rows:3, cols:[eventTime, name, value, is_ooc, ucl, lcl]}。</td></tr>
+      <tr class="agent new"><td>t=4.5</td><td>_detect_op_issue</td><td>cursor=3，開始 check。n2 rows=3，no error，<b>看似 OK</b>。<b>但</b>... 仔細看：unnest 之後 3 個 charts 才 3 row，這在「最近 1 筆 record × 3 個 chart」是合理的，先不擋。fallthrough。</td></tr>
+      <tr class="agent"><td>t=5</td><td>op#4 add_node n3</td><td>add ok，沒 input。</td></tr>
+      <tr class="agent"><td>t=6</td><td>op#5 connect n2→n3</td><td>connect ok。auto-preview n3 → exec_trace[n3] = {rows:1, cols:[..., is_ooc]}。</td></tr>
+      <tr class="agent new"><td>t=6.5</td><td>_detect_op_issue</td><td>cursor=5 >= 3。n3 rows=1，<b>但</b> n1 rows 也是 1，n3 是 filter，filter 後 rows ≤ input rows 是合理。沒明確 issue，fallthrough。<br><span class="small">（這裡可能是 false negative — n3 沒問題，問題在 n1。要靠後面 chart 階段 trigger。）</span></td></tr>
+      <tr class="agent"><td>t=7</td><td>op#6 add_node n4</td><td>chart block。</td></tr>
+      <tr class="agent"><td>t=8</td><td>op#7 connect n3→n4</td><td>connect ok。auto-preview n4 (chart block) → exec_trace[n4] = {snapshot: {type:line, data:[{eventTime:...}], distinct=1}}。</td></tr>
+      <tr class="agent new"><td>t=8.5</td><td>_detect_op_issue</td><td><b>命中 single_point pattern！</b> chart node 的 data 只有 1 個 distinct eventTime。set last_op_issue：<br><code>{code: DATA_SHAPE_WRONG, node_id: n4, kind: single_point_chart, hint: "follow trace upstream — find row count collapse"}</code></td></tr>
+      <tr class="model new"><td>t=9</td><td>reflect_op #1</td><td>LLM 看局部 input：<br>• failing op = op#7 connect n3→n4<br>• upstream trace n1(rows=1) → n2(rows=3) → n3(rows=1) → n4(distinct_x=1)<br>• issue = single_point_chart<br>LLM 判斷 root cause 在 n1 (limit=1)，回傳 <code>{action:"rollback", rollback_to_cursor:0, new_params_for_K:{tool_id:$equipment_id, limit:100, nested:true}}</code>。</td></tr>
+      <tr class="agent new"><td>t=10</td><td>rollback 處理</td><td>state mutation：<br>• plan[0].params.limit = 100<br>• cursor = 0 (從 op#1 重跑)<br>• 清掉 exec_trace 全部 (因為 rollback 到 0)<br>• plan[1..].result_status 清成 None<br>• reflect_op_attempts[n1] = 1</td></tr>
+      <tr class="agent"><td>t=11</td><td>重跑 op#1</td><td>n1 with limit=100 → exec_trace[n1] = {rows:100, cols:[...]} ✓</td></tr>
+      <tr class="agent"><td>t=12-17</td><td>重跑 op#2-7</td><td>n2: rows=300; n3: rows=20 (有 20 個 is_ooc=true 的 chart); n4 chart distinct_x=15。</td></tr>
+      <tr class="agent new"><td>t=17.5</td><td>_detect_op_issue at n4</td><td>distinct_x=15 ≥ 3 ✓ no issue. fallthrough.</td></tr>
+      <tr class="agent"><td>t=18</td><td>op#8-9 n5 + edge</td><td>step_check 加上 + edge n1→n5。</td></tr>
+      <tr class="agent"><td>t=19</td><td>finalize</td><td>validator OK，dry_run 跑完。verdict value=2 note="2.0 >= 2.0" ✓</td></tr>
+      <tr class="agent"><td>t=20</td><td>inspect_execution</td><td>clean. no issues.</td></tr>
+      <tr class="agent"><td>t=21</td><td>layout → END</td><td>送 SSE done。harness Save → /run → verdict 數值 ✓</td></tr>
+    </tbody>
+  </table>
+
+  <h3>4.3 兩個流程的關鍵差別</h3>
+  <table>
+    <thead><tr><th>面向</th><th>v7</th><th>v8</th></tr></thead>
+    <tbody>
+      <tr><td>偵測時間點</td><td>plan 全跑完 (t=4)</td><td>chart op 一接好 (t=8.5)</td></tr>
+      <tr><td>LLM 改動範圍</td><td>整 plan 16 ops 重寫</td><td>n1.limit: 1 → 100 (single param)</td></tr>
+      <tr><td>LLM input</td><td>整 catalog (~55k) + 整 plan + 整 trace</td><td>3 個 upstream + 1 個 failing op + 該 block schema (~1.5k tokens)</td></tr>
+      <tr><td>LLM output</td><td>16 個 op 整批</td><td><code>{action:"rollback", rollback_to_cursor:0, new_params:{limit:100}}</code></td></tr>
+      <tr><td>失敗 cascade 風險</td><td>新 plan 引入 17 個 validator error</td><td>單 op 修，最壞情況 attempts 用完帶傷下一個 op</td></tr>
+      <tr><td>觀察性</td><td>「reflect 整 plan ×2 完成」</td><td>「reflect_op#1: rollback to n1, limit 1→100, reason: …」</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <h2>5. 實作工作清單對照</h2>
+
+  <table>
+    <thead>
+      <tr><th>項目</th><th>v7 狀態</th><th>v8 改動</th><th>估時</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>state.exec_trace (per-op preview)</td><td>✓ shipped</td><td>不動，直接讀</td><td>0</td></tr>
+      <tr><td>state.reflect_op_attempts + state.last_op_issue</td><td>—</td><td>新欄位</td><td>10 min</td></tr>
+      <tr><td>_detect_op_issue(snap) helper</td><td>—</td><td>新函數 in execute.py</td><td>30 min</td></tr>
+      <tr><td>reflect_op_node 含 LLM call</td><td>—</td><td>新檔 nodes/reflect_op.py</td><td>60 min</td></tr>
+      <tr><td>rollback 邏輯 (cursor 倒退 + trace 清理)</td><td>—</td><td>合在 reflect_op_node 內</td><td>30 min</td></tr>
+      <tr><td>_route_after_call 改寫</td><td>有 (處理 repair_op)</td><td>加 reflect_op 分支</td><td>15 min</td></tr>
+      <tr><td>graph.py wiring: add_node("reflect_op") + add_edge → call_tool</td><td>—</td><td>新增 2 行</td><td>5 min</td></tr>
+      <tr><td>reflect_plan_node (v7 既有)</td><td>✓ shipped</td><td>保留當 safety net，不改</td><td>0</td></tr>
+      <tr><td>inspect_execution (v7 既有)</td><td>✓ shipped</td><td>保留當 emergent 偵測，不改</td><td>0</td></tr>
+      <tr><td>unit tests</td><td>—</td><td>_detect_op_issue 多 case + rollback 邏輯</td><td>30 min</td></tr>
+      <tr><td>deploy + harness 3x</td><td>—</td><td>同既有 deploy/java-update.sh</td><td>30 min</td></tr>
+    </tbody>
+  </table>
+
+  <p><b>總計：~3-3.5 hours</b></p>
+
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <h2>6. 失敗的可能 + 對策</h2>
+
+  <table>
+    <thead><tr><th>風險</th><th>偵測</th><th>對策</th></tr></thead>
+    <tbody>
+      <tr><td>reflect_op LLM 不接受結構化輸出（rollback / patch_params）</td><td>JSON parse fail rate &gt; 30%</td><td>強化 system prompt 範例 + 退回到只支援 patch_params (拿掉 rollback) 看穩定度</td></tr>
+      <tr><td>每個 op 都觸發 reflect_op，build 變超慢</td><td>build 時間 &gt;10 min</td><td>提高 _detect_op_issue 觸發條件嚴格度（e.g. rows=0 才算）</td></tr>
+      <tr><td>reflect_op 永遠卡 budget 用完</td><td>reflect_op_attempts 都到 2</td><td>review prompt + 提供 block description 是否 sufficient</td></tr>
+      <tr><td>rollback 把好的 op 也搞壞</td><td>rollback 後新的 _detect_op_issue 又 fire</td><td>限制 rollback distance &le; 3，超過用 patch_params only</td></tr>
+      <tr><td>跟 reflect_plan 衝突</td><td>finalize-time 還是有 single_point_chart</td><td>正常 — 那是 emergent issue，留給 reflect_plan 處理</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <h2>7. 觀察指標 (KPI)</h2>
+
+  <div class="card">
+    <ul>
+      <li><b>主要</b>：harness 3x 通過率從 1/3 升到 ≥ 2/3（理想 3/3）</li>
+      <li><b>次要</b>：finalize-time reflect_plan 觸發次數降低（per-op 先處理掉）</li>
+      <li><b>cost</b>：總 LLM tokens/build 不超過 v7 的 1.5×</li>
+      <li><b>觀察性</b>：每次 reflect_op SSE 帶 cursor + reason，sidecar log 可看到「reflect_op#1 cursor=3 action=patch_params reason=…」</li>
+    </ul>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <h2>8. Out of Scope</h2>
+
+  <div class="card">
+    <ul>
+      <li>chart_spec missing field 偵測（留 v8.1，先處理 rows=0 / executor error 兩個基礎 signal）</li>
+      <li>rollback distance &gt; 3（複雜場景，等 v8 stabilize 再放鬆）</li>
+      <li>streaming reflect_op SSE 給 frontend 顯示「fixing op#N…」UX（v9 改 UI）</li>
+      <li>reflect_op 跨 build 學習 / cache（規模太小，不值得）</li>
+    </ul>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════ -->
+  <h2>9. 授權</h2>
+  <p>請回「<b>開始開發</b>」確認進入實作，或指出要調整的設計決策。</p>
+
+  <div class="small" style="margin-top: 32px; padding-top: 12px; border-top: 1px solid var(--c-border);">
+    對應 spec markdown: <code>docs/SPEC_v8_per_op_reflection.md</code><br>
+    v7 已 ship 的相關 file: <code>python_ai_sidecar/agent_builder/graph_build/{state,graph}.py</code>, <code>nodes/{execute,finalize,inspect_execution,reflect_plan}.py</code>, <code>trace_serializer.py</code>, <code>pipeline_builder/error_envelope.py</code>
+  </div>
+
+</div>
+</body>
+</html>

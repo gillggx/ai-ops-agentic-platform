@@ -86,12 +86,26 @@ async def call_tool_node(state: BuildGraphState) -> dict[str, Any]:
     # records the error in trace, never blocks the build flow.
     exec_trace = dict(state.get("exec_trace") or {})
     preview_target = _pick_preview_target(op_type, op, result, logical_to_real, registry, transient)
+    touched_logical_id: str | None = None
     if preview_target is not None:
         snapshot = await _snapshot_node(toolset, preview_target, cursor)
         if snapshot is not None:
             # exec_trace keyed by logical id (what the LLM uses), value tagged
             # with after_cursor so reflect knows when it was taken
             exec_trace[snapshot["logical_id"]] = snapshot
+            touched_logical_id = snapshot["logical_id"]
+
+    # ── v8 (2026-05-13): per-op semantic check ──────────────────────────
+    # If the just-touched node's snapshot looks broken (rows=0 mid-pipeline,
+    # executor error), emit a structured envelope. _route_after_call reads
+    # state.last_op_issue and routes to reflect_op_node (LLM patches just
+    # this 1 op) instead of waiting for finalize-time reflect_plan.
+    # cursor+1 is what the *next* dispatch would see — i.e. count of ops
+    # already executed including this one.
+    last_op_issue = _detect_op_issue(
+        touched_logical_id, exec_trace, ops_executed=cursor + 1,
+        block_id=preview_target.get("block_id") if preview_target else None,
+    )
 
     logger.info("call_tool_node: cursor=%d %s ok", cursor, tool_name)
     return {
@@ -100,10 +114,82 @@ async def call_tool_node(state: BuildGraphState) -> dict[str, Any]:
         "logical_to_real": logical_to_real,
         "final_pipeline": new_pipeline_dict,
         "exec_trace": exec_trace,
+        "last_op_issue": last_op_issue,
         "sse_events": [_event("op_completed", {
             "cursor": cursor, "op": op_updated, "result": result,
         })],
     }
+
+
+# ── v8: per-op issue detector (no LLM, pure function) ────────────────────
+# Triggers reflect_op routing when the just-completed op's snapshot exposes
+# a data-level problem the validator can't catch ahead of time.
+#
+# Threshold: skip until at least MIN_OPS_BEFORE_CHECK ops have run. The
+# first 1-2 source ops legitimately have no inbound data and rows=0 may be
+# normal mid-state — only meaningful after the pipeline has some depth.
+MIN_OPS_BEFORE_CHECK = 3
+
+
+def _detect_op_issue(
+    touched_logical_id: str | None,
+    exec_trace: dict[str, dict],
+    *,
+    ops_executed: int,
+    block_id: str | None,
+) -> dict | None:
+    """Return an ErrorEnvelope-shaped dict if the just-completed op's
+    snapshot looks broken; None otherwise. Caller writes the result into
+    state.last_op_issue."""
+    if touched_logical_id is None:
+        return None
+    if ops_executed < MIN_OPS_BEFORE_CHECK:
+        return None
+    snap = exec_trace.get(touched_logical_id) or {}
+    err = snap.get("error")
+    rows = snap.get("rows")
+
+    # Signal 1: executor / preview raised — column ref wrong, port mismatch,
+    # block-internal failure, etc.
+    if err:
+        return {
+            "code": "DATA_SHAPE_WRONG",
+            "kind": "op_executor_error",
+            "node_id": touched_logical_id,
+            "block_id": block_id or snap.get("block_id"),
+            "message": f"node '{touched_logical_id}' preview raised: {str(err)[:200]}",
+            "given": {"error": str(err)[:300]},
+            "expected": {"status": "success"},
+            "hint": (
+                "Inspect the block's required input columns + upstream "
+                "output_columns. Most common: column name not in upstream "
+                "data, or wrong path syntax."
+            ),
+        }
+
+    # Signal 2: ran clean but produced 0 rows mid-pipeline. Allow None
+    # (non-dataframe outputs, e.g. chart_spec or bool) — those aren't
+    # row-shaped, judge them elsewhere.
+    if isinstance(rows, int) and rows == 0:
+        return {
+            "code": "DATA_EMPTY",
+            "kind": "op_empty_output",
+            "node_id": touched_logical_id,
+            "block_id": block_id or snap.get("block_id"),
+            "message": (
+                f"node '{touched_logical_id}' ran successfully but produced "
+                f"0 rows. Filter / threshold / source params likely too tight."
+            ),
+            "given": {"rows": 0},
+            "expected": {"rows_min": 1},
+            "hint": (
+                "Loosen the filter / lower the threshold, or trace back to "
+                "the source block — wrong tool_id / step / time_range "
+                "combinations also produce empty results."
+            ),
+        }
+
+    return None
 
 
 def _pick_preview_target(

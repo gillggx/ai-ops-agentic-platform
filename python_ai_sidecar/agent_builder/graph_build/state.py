@@ -81,6 +81,18 @@ class BuildGraphState(TypedDict, total=False):
     # broken pipelines (the most common LLM failure mode in practice).
     structural_issues: list[dict]
 
+    # ── Per-op reflection (v8, 2026-05-13) ────────────────────────────
+    # Each entry counts how many reflect_op cycles we've spent on a given
+    # logical id. Bounded by MAX_REFLECT_OP (see reflect_op.py) to avoid
+    # cascading. Persists across the whole build — if op@n3 took 1 attempt
+    # and we later need to reflect_op on n5, n3's counter is unaffected.
+    reflect_op_attempts: dict[str, int]
+    # Set by _detect_op_issue right after call_tool when the just-completed
+    # op's exec_trace snapshot looks broken (rows=0, executor error, etc).
+    # reflect_op_node reads this, then clears it; cleared also when normal
+    # dispatch continues. Shape = ErrorEnvelope dict.
+    last_op_issue: Optional[dict]
+
     # ── Execution trace (Phase F, 2026-05-13) ─────────────────────────
     # call_tool_node populates after every successful connect/add op:
     #   exec_trace[logical_id] = {
@@ -127,4 +139,6 @@ def initial_state(
         exec_trace={},
         structural_issues=[],
         trigger_payload=trigger_payload,
+        reflect_op_attempts={},
+        last_op_issue=None,
     )
