@@ -100,11 +100,23 @@ _COLUMN_REF_PARAMS_FALLBACK = {
     "block_sort": ["columns"],
     "block_select": ["fields"],
     "block_groupby_agg": ["group_by", "agg_column"],
+    # Standard chart blocks — x/y are column refs
     "block_line_chart": ["x", "y"],
     "block_bar_chart": ["x", "y"],
     "block_scatter": ["x", "y"],
     "block_area_chart": ["x", "y"],
     "block_pie_chart": ["category", "value"],
+    # SPC / statistical chart blocks — value_column is the col to analyse
+    "block_ewma_cusum": ["value_column"],
+    "block_box_plot": ["x", "y", "group_by"],
+    "block_probability_plot": ["value_column"],
+    "block_xbar_r": ["value_column", "subgroup_column"],
+    "block_imr": ["value_column"],
+    "block_pareto": ["category_column", "value_column"],
+    "block_cpk": ["value_column", "group_by"],
+    "block_distribution": ["value_column"],
+    "block_heatmap": ["x", "y", "value_column"],
+    # Transform / utility
     "block_data_view": ["columns"],
     "block_threshold": ["column"],
     "block_consecutive_rule": ["column"],
