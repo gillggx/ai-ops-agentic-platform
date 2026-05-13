@@ -330,6 +330,19 @@ def _auto_insert_unnest(
     if not unnest_block:
         return new_ops, [], set()  # no unnest-capable block in catalog → can't autofix
 
+    # Collect parents that are ALREADY being unnested in this step or
+    # earlier in the plan, so we don't double-insert. Look at any
+    # add_node whose block_id matches the unnest block AND whose
+    # params.column points to the same parent col.
+    already_unnested_parents: set[str] = set()
+    for op in (list(plan) + list(new_ops)):
+        if op.get("type") != "add_node":
+            continue
+        if op.get("block_id") == unnest_block:
+            col = (op.get("params") or {}).get("column")
+            if isinstance(col, str) and col:
+                already_unnested_parents.add(col)
+
     notes: list[str] = []
     added_leaves: set[str] = set()
     rewritten: list[dict[str, Any]] = []
@@ -358,6 +371,36 @@ def _auto_insert_unnest(
                 if offending_parent:
                     break
             if offending_parent:
+                # Skip if the parent is already being unnested elsewhere
+                # (LLM emitted it in this same step, or it's already in
+                # the plan). Just add the leaves to upstream_cols so the
+                # downstream validator passes without inserting a dup.
+                if offending_parent in already_unnested_parents:
+                    notes.append(
+                        f"skipped duplicate unnest of '{offending_parent}' for "
+                        f"{op.get('node_id')} — already unnested upstream"
+                    )
+                    # Still mine the leaves so validator sees them
+                    if exec_trace:
+                        for plan_op in plan:
+                            if plan_op.get("type") != "add_node":
+                                continue
+                            plid = plan_op.get("node_id")
+                            snap = exec_trace.get(plid) or {}
+                            sample = snap.get("sample")
+                            if not isinstance(sample, dict):
+                                continue
+                            v = sample.get(offending_parent)
+                            if isinstance(v, list) and v and isinstance(v[0], dict):
+                                for leaf in v[0].keys():
+                                    added_leaves.add(str(leaf))
+                                break
+                            if isinstance(v, dict):
+                                for leaf in v.keys():
+                                    added_leaves.add(str(leaf))
+                                break
+                    rewritten.append(op)
+                    continue
                 unnest_lid = next_lid()
                 op_lid = op.get("node_id") or ""
                 rewire[op_lid] = unnest_lid
@@ -372,6 +415,9 @@ def _auto_insert_unnest(
                     f"auto-inserted {unnest_block}(column='{offending_parent}') "
                     f"as {unnest_lid} before {op_lid}"
                 )
+                # Track that we've now unnested this parent so subsequent
+                # ops in the same new_ops loop don't double-insert.
+                already_unnested_parents.add(offending_parent)
                 # The inserted unnest will flatten `offending_parent`'s
                 # list-of-dict elements; leaf keys become top-level cols
                 # downstream. Mine the parent's actual leaves from
@@ -398,7 +444,11 @@ def _auto_insert_unnest(
         rewritten.append(op)
 
     if not rewire:
-        return new_ops, [], set()
+        # No new ops needed (e.g. all offending leaves were already
+        # handled by an existing upstream unnest). Still return notes
+        # + leaves so the caller knows the validator's upstream_cols
+        # should include the leaves the existing unnest will produce.
+        return new_ops, notes, added_leaves
 
     # Pass 2: re-wire connects whose dst_id is the offending op — insert
     # a connect from the original upstream src into the new unnest node,
