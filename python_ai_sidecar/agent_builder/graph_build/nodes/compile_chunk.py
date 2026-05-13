@@ -120,6 +120,13 @@ def _collect_upstream_cols(plan: list[dict], exec_trace: dict) -> set[str]:
     Used by _validate_column_refs as the "allowed columns" set. Each
     block's preview adds a snapshot keyed by logical id; we union them
     so a column emitted by ANY upstream node is considered valid.
+
+    Also derives leaves from the sample row when a top-level column
+    holds a nested dict / list-of-dicts (e.g. cols=['spc_charts'],
+    sample={spc_charts:[{name,value,...}]} → also add 'spc_charts[].name'
+    etc.). Without this, preview snapshots that only report top-level
+    df.columns miss the nested structure entirely and the validator's
+    leaf-detection has nothing to work with.
     """
     cols: set[str] = set()
     for op in plan:
@@ -129,13 +136,42 @@ def _collect_upstream_cols(plan: list[dict], exec_trace: dict) -> set[str]:
         snap = exec_trace.get(lid) or {}
         for c in snap.get("cols") or []:
             cols.add(c)
-            # nested path syntax: 'spc_summary.ooc_count' — also accept
-            # the prefix 'spc_summary' so users can reference the parent.
             if "." in c:
                 cols.add(c.split(".", 1)[0])
             if "[]" in c:
                 cols.add(c.split("[]", 1)[0])
+        # Mine sample for nested leaves
+        sample = snap.get("sample")
+        if isinstance(sample, dict):
+            for k, v in sample.items():
+                if isinstance(v, list) and v and isinstance(v[0], dict):
+                    for leaf in v[0].keys():
+                        cols.add(f"{k}[].{leaf}")
+                elif isinstance(v, dict):
+                    for leaf in v.keys():
+                        cols.add(f"{k}.{leaf}")
     return cols
+
+
+def _find_leaf_in_nested(cand: str, upstream_cols: set[str]) -> str | None:
+    """If `cand` is a leaf of some nested upstream col (e.g. 'name' is a
+    leaf of 'spc_charts[].name' or 'ooc_count' of 'spc_summary.ooc_count'),
+    return the parent column to unnest. None if no match.
+    """
+    for upcol in upstream_cols:
+        if upcol == cand:
+            continue
+        # 'spc_charts[].name' → leaf='name', parent='spc_charts'
+        if "[]." in upcol:
+            parent, leaf = upcol.split("[].", 1)
+            if leaf == cand:
+                return parent
+        # 'spc_summary.ooc_count' → leaf='ooc_count', parent='spc_summary'
+        if "." in upcol:
+            parent, leaf = upcol.rsplit(".", 1)
+            if leaf == cand:
+                return parent
+    return None
 
 
 def _validate_column_refs(
@@ -173,10 +209,19 @@ def _validate_column_refs(
                 root = cand.split(".", 1)[0].split("[", 1)[0]
                 if cand in upstream_cols or root in upstream_cols:
                     continue
-                issues.append(
-                    f"{block_id}.{pname}='{cand}' not in upstream cols "
-                    f"({sorted(upstream_cols)[:8]}…)"
-                )
+                # Actionable feedback: is this the leaf of a nested col?
+                parent = _find_leaf_in_nested(cand, upstream_cols)
+                if parent:
+                    issues.append(
+                        f"{block_id}.{pname}='{cand}' is a leaf of nested upstream col — "
+                        f"先用一個解 nested 的 step (例如 unnest / flatten) 把 '{parent}' "
+                        f"展開，下游才能直接引用 '{cand}'"
+                    )
+                else:
+                    issues.append(
+                        f"{block_id}.{pname}='{cand}' not in upstream cols "
+                        f"({sorted(upstream_cols)[:8]}…)"
+                    )
     return issues
 
 
@@ -229,7 +274,9 @@ def _dedup_against_plan(
 
 def _existing_nodes_summary(plan: list[dict], exec_trace: dict) -> str:
     """One-line per existing logical node with its block_id + observed cols
-    (from exec_trace if available)."""
+    + (when nested) a shape hint from the sample row so the compile LLM
+    knows whether a top-level col is a list/dict and needs unnest.
+    """
     lines: list[str] = []
     for op in plan:
         if op.get("type") != "add_node":
@@ -238,13 +285,33 @@ def _existing_nodes_summary(plan: list[dict], exec_trace: dict) -> str:
         block = op.get("block_id") or "?"
         snap = exec_trace.get(lid) or {}
         cols = snap.get("cols") or []
-        if cols:
-            cols_str = ", ".join(cols[:8])
-            if len(cols) > 8:
-                cols_str += f"...+{len(cols)-8}"
-            lines.append(f"  {lid} [{block}] cols=[{cols_str}]")
-        else:
+        sample = snap.get("sample") if isinstance(snap.get("sample"), dict) else None
+        if not cols:
             lines.append(f"  {lid} [{block}] (no preview yet)")
+            continue
+        cols_str = ", ".join(cols[:8])
+        if len(cols) > 8:
+            cols_str += f"...+{len(cols)-8}"
+        lines.append(f"  {lid} [{block}] cols=[{cols_str}]")
+        # Nested shape hints — surface list[dict] / dict cols so LLM
+        # plans an unnest step before referencing leaves.
+        if sample:
+            nested_hints: list[str] = []
+            for k, v in sample.items():
+                if isinstance(v, list) and v and isinstance(v[0], dict):
+                    leaf_keys = list(v[0].keys())[:6]
+                    nested_hints.append(
+                        f"'{k}' = list[{{ {', '.join(leaf_keys)} }}] "
+                        f"(要引用 leaf 先 unnest '{k}')"
+                    )
+                elif isinstance(v, dict):
+                    leaf_keys = list(v.keys())[:6]
+                    nested_hints.append(
+                        f"'{k}' = dict{{ {', '.join(leaf_keys)} }} "
+                        f"(用 path '{k}.<leaf>' 引用)"
+                    )
+            for hint in nested_hints[:4]:
+                lines.append(f"      ↳ {hint}")
     return "\n".join(lines) if lines else "  (no upstream nodes — this is the first step)"
 
 
