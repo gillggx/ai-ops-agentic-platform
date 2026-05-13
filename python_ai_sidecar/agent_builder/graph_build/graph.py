@@ -267,13 +267,26 @@ def _route_after_macro_plan(state: BuildGraphState) -> str:
 
 
 def _advance_macro_step(state: BuildGraphState) -> dict[str, Any]:
-    """No-op routing node that increments current_macro_step. Sits between
-    call_tool (when chunk fully executed) and compile_chunk_node so the
-    next compile_chunk sees the next macro step.
+    """Increment current_macro_step + reset per-step state.
+
+    Before this fix, when one step exhausted MAX_COMPILE_ATTEMPTS and
+    compile_chunk returned status='failed', that status stuck to ALL
+    subsequent steps. _route_after_compile_chunk's check
+    `status != 'failed'` then bypassed retry for every later step on
+    its first validation failure — those steps got only 1 attempt and
+    couldn't recover. Result: 5/6 macro steps stuck on first error.
+
+    Reset status and plan_validation_errors so the next step starts
+    clean. compile_attempts is keyed by step_key so it doesn't need
+    reset.
     """
     idx = state.get("current_macro_step", 0)
     logger.info("advance_macro_step: %d → %d", idx, idx + 1)
-    return {"current_macro_step": idx + 1}
+    return {
+        "current_macro_step": idx + 1,
+        "status": "running",
+        "plan_validation_errors": [],
+    }
 
 
 # ── Build the graph (cached) ───────────────────────────────────────────────
