@@ -95,37 +95,19 @@ async def call_tool_node(state: BuildGraphState) -> dict[str, Any]:
             exec_trace[snapshot["logical_id"]] = snapshot
             touched_logical_id = snapshot["logical_id"]
 
-    # ── v8/v13 (2026-05-13): per-op semantic check ──────────────────────
-    # Two layers, both feed state.last_op_issue:
-    #   v13 (preferred): contract_diff — compare snapshot to the agent's
-    #     self-declared per-node contract. Catches "this should have ≥5
-    #     rows but got 0", "missing required column", "chart has only 1
-    #     distinct x", etc. Unambiguous because the agent declared the
-    #     expectation; targeted because diff names the exact violation.
-    #   v8 (fallback): _detect_op_issue — generic preview-error trigger.
-    #     Only fires when the agent forgot to declare a contract.
-    contract = (state.get("node_contracts") or {}).get(touched_logical_id or "")
+    # ── v13.1 (2026-05-13): per-op trigger temporarily disabled ─────────
+    # Earlier v13 fired contract_diff after every op which cascaded:
+    # reflect_op patches → re-dispatched add_node ops → GUI canvas reset
+    # mid-build → harness saw transient ✓ → saved partial state.
+    #
+    # For now we only fire on preview-raised executor errors (v8 trigger).
+    # Contracts are still collected at plan time and surfaced to reflect_plan
+    # via inspect_execution at finalize — see node_contracts in plan_node.
     block_id_for_issue = preview_target.get("block_id") if preview_target else None
-    last_op_issue: dict[str, Any] | None = None
-    if contract and touched_logical_id:
-        snap = exec_trace.get(touched_logical_id)
-        from python_ai_sidecar.agent_builder.graph_build.contract_diff import (
-            diff_snapshot_against_contract,
-        )
-        last_op_issue = diff_snapshot_against_contract(
-            logical_id=touched_logical_id,
-            snapshot=snap,
-            contract=contract,
-            block_id=block_id_for_issue,
-        )
-    if last_op_issue is None:
-        # Fall back to v8 trigger — only fires on preview-raised executor
-        # error (rows=0 by itself is no longer a signal; contract handles
-        # row expectations when declared).
-        last_op_issue = _detect_op_issue(
-            touched_logical_id, exec_trace, ops_executed=cursor + 1,
-            block_id=block_id_for_issue,
-        )
+    last_op_issue = _detect_op_issue(
+        touched_logical_id, exec_trace, ops_executed=cursor + 1,
+        block_id=block_id_for_issue,
+    )
 
     logger.info("call_tool_node: cursor=%d %s ok", cursor, tool_name)
     return {
