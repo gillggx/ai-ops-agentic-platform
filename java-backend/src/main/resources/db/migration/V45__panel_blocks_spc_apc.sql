@@ -113,7 +113,7 @@ port: chart_spec (chart_spec) — 多 series line（trend mode）或 bar（singl
     {"label": "指定時間點所有 SPC",
      "params": {"event_filter": "custom_time", "event_time": "2026-05-14T10:00:00"}}
   ]$$,
-  NULL,
+  '[]',
   false
 );
 
@@ -187,6 +187,6 @@ port: chart_spec — 多 series line（trend）或 bar（single-event），**無
     {"label": "過去 24 小時 APC 趨勢",
      "params": {"event_filter": "all"}}
   ]$$,
-  NULL,
+  '[]',
   false
 );
