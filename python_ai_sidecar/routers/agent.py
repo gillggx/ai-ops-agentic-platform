@@ -415,6 +415,49 @@ async def get_trace(filename: str, caller: CallerContext = ServiceAuth):
     return json.loads(f.read_text())
 
 
+@router.delete("/build/traces")
+async def delete_traces(
+    older_than_hours: int | None = None,
+    caller: CallerContext = ServiceAuth,
+):
+    """Delete trace JSON files. When `older_than_hours` is set, only delete
+    files whose mtime is older than that. Without it, deletes ALL traces.
+
+    Used by admin /admin/build-traces page to clean up /tmp/builder-traces.
+    """
+    import time as _time
+    d = _trace_dir()
+    if not d:
+        return _JSONResponse({"error": "BUILDER_TRACE_DIR not set"}, status_code=503)
+    cutoff: float | None = None
+    if older_than_hours is not None:
+        if older_than_hours < 0 or older_than_hours > 24 * 365:
+            return _JSONResponse({"error": "older_than_hours must be 0..8760"}, status_code=400)
+        cutoff = _time.time() - older_than_hours * 3600.0
+    deleted = 0
+    skipped = 0
+    errors: list[str] = []
+    for f in d.glob("*.json"):
+        try:
+            if cutoff is not None and f.stat().st_mtime >= cutoff:
+                skipped += 1
+                continue
+            f.unlink()
+            deleted += 1
+        except Exception as ex:  # noqa: BLE001
+            errors.append(f"{f.name}: {ex}")
+    log.info(
+        "delete_traces: deleted=%d skipped=%d older_than_hours=%s",
+        deleted, skipped, older_than_hours,
+    )
+    return {
+        "deleted": deleted,
+        "skipped_newer": skipped,
+        "older_than_hours": older_than_hours,
+        "errors": errors[:5],
+    }
+
+
 _VIEWER_HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><title>Build Traces</title>
 <style>

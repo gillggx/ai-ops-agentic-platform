@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import ChartRenderer from "@/components/pipeline-builder/ChartRenderer";
 
 // ============================================================================
@@ -235,24 +235,56 @@ export default function BuildTracesPage() {
   const [tab, setTab] = useState<"journey" | "results" | "pipeline">("journey");
   const [reRun, setReRun] = useState<ExecuteResult | null>(null);
   const [reRunLoading, setReRunLoading] = useState(false);
+  const [clearLoading, setClearLoading] = useState<"" | "all" | "old">("");
 
-  useEffect(() => {
-    let mounted = true;
+  const refreshTraces = useCallback(() => {
     setLoading(true);
     fetch("/api/admin/build-traces")
       .then((r) => r.json())
       .then((data) => {
-        if (!mounted) return;
         if (data.error) setError(data.error);
         else {
           setTraces(data.traces || []);
           setTraceDir(data.dir || "");
+          setError("");
         }
       })
-      .catch((e) => mounted && setError(String(e)))
-      .finally(() => mounted && setLoading(false));
-    return () => { mounted = false; };
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    refreshTraces();
+  }, [refreshTraces]);
+
+  async function clearTraces(olderHours: number | null) {
+    const label = olderHours == null ? "all" : "old";
+    const msg = olderHours == null
+      ? `Delete ALL ${traces.length} traces? This is irreversible.`
+      : `Delete traces older than ${olderHours}h?`;
+    if (!confirm(msg)) return;
+    setClearLoading(label);
+    try {
+      const qs = olderHours == null ? "" : `?older_than_hours=${olderHours}`;
+      const r = await fetch(`/api/admin/build-traces${qs}`, { method: "DELETE" });
+      const data = await r.json();
+      if (data.error) {
+        alert(`Clear failed: ${data.error}`);
+      } else {
+        alert(`Deleted ${data.deleted} trace(s); kept ${data.skipped_newer || 0}.`);
+        // Reset detail if its file was likely deleted.
+        if (selectedFile) {
+          setSelectedFile(null);
+          setDetail(null);
+        }
+        refreshTraces();
+      }
+    } catch (e) {
+      alert(`Clear error: ${String(e)}`);
+    } finally {
+      setClearLoading("");
+    }
+  }
 
   function loadDetail(file: string) {
     setSelectedFile(file);
@@ -333,6 +365,48 @@ export default function BuildTracesPage() {
           </h1>
           <div style={{ fontSize: 12, color: T.textSubtle, marginTop: 4, fontFamily: T.fontMono }}>
             {traceDir} · {filtered.length}/{traces.length}
+          </div>
+
+          {/* v18: clear-trace toolbar */}
+          <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
+            <button
+              onClick={() => clearTraces(24)}
+              disabled={clearLoading !== "" || loading || traces.length === 0}
+              style={{
+                flex: 1,
+                padding: "6px 8px",
+                border: `1px solid ${T.warning}55`,
+                background: clearLoading === "old" ? T.warningSoft : "transparent",
+                color: T.warning,
+                borderRadius: T.radiusSm,
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: clearLoading || traces.length === 0 ? "not-allowed" : "pointer",
+                opacity: clearLoading || traces.length === 0 ? 0.5 : 1,
+              }}
+              title="Delete traces older than 24h"
+            >
+              {clearLoading === "old" ? "⟳ …" : "🕒 Clear 24h+"}
+            </button>
+            <button
+              onClick={() => clearTraces(null)}
+              disabled={clearLoading !== "" || loading || traces.length === 0}
+              style={{
+                flex: 1,
+                padding: "6px 8px",
+                border: `1px solid ${T.danger}55`,
+                background: clearLoading === "all" ? T.dangerSoft : "transparent",
+                color: T.danger,
+                borderRadius: T.radiusSm,
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: clearLoading || traces.length === 0 ? "not-allowed" : "pointer",
+                opacity: clearLoading || traces.length === 0 ? 0.5 : 1,
+              }}
+              title="Delete ALL traces"
+            >
+              {clearLoading === "all" ? "⟳ …" : "🗑️ Clear all"}
+            </button>
           </div>
 
           <input
