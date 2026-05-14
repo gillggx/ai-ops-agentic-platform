@@ -93,12 +93,48 @@ Output 說它回的是 nested 結構（list / dict），下游就必須先有解
   「自給自足」「1-block 全包」「source-mode」「不需上游」「one block, right semantics」
   —— 那它的設計就是**「1 個 block = 整條 pipeline」**。
   此時 macro_plan 應該只給 **1 個 step**，整條 pipeline 就是該 composite block 自己。
-  例：
-    User: 「看 EQP-01 STEP_001 xbar_chart 過去 7 天」
-    ✅ 1-step plan: step_1 candidate_block=block_spc_panel（給 tool_id+step+chart_name+time_range）
-    ❌ 4-step plan: process_history → unnest → filter → line_chart (composite 比這更精確)
-  判斷 composite 的方式：在 brief 找關鍵字「自給自足 / 1-block / 1 個 node 全包 / source mode」。
   composite 自己處理 fetch+unnest+filter+render，**你拆多步反而會踩它的雷**（已知 case 砍剩 1 row）。
+
+== Few-shot 範例 ==
+
+範例 1: User 說「看 EQP-01 STEP_001 xbar_chart 過去 7 天」
+✅ 正確（看到 block_spc_panel 自稱 "自給自足"/"source mode"，1 step 即可）:
+{
+  "plan_summary": "用 block_spc_panel 一個 node 撈 EQP-01 STEP_001 xbar_chart 過去 7 天並出圖",
+  "macro_plan": [
+    {"step_idx": 1, "text": "撈 + 篩 + 畫 xbar_chart 過去 7 天的 line chart (composite)",
+     "expected_kind": "chart", "expected_cols": ["eventTime", "value", "ucl", "lcl"],
+     "candidate_block": "block_spc_panel"}
+  ]
+}
+❌ 錯誤（4 step composition — 已知會把多 SPC 砍剩 1 點，看 panel 的雷區警告）:
+  process_history → unnest → filter → line_chart
+
+範例 2: User 說「看 EQP-01 過去 24 小時 APC temperature 趨勢」
+✅ 同樣 1 step（block_apc_panel）:
+{
+  "plan_summary": "用 block_apc_panel 一個 node 畫 EQP-01 24h temperature trend",
+  "macro_plan": [
+    {"step_idx": 1, "text": "撈+畫 APC temperature 過去 24h trend (composite)",
+     "expected_kind": "chart", "expected_cols": ["eventTime", "value"],
+     "candidate_block": "block_apc_panel"}
+  ]
+}
+
+範例 3: User 說「機台最後一次 OOC 時的 SPC 狀況 + 觸發 alarm (>= 2 OOC)」(skill mode)
+✅ 多步（verdict 分支需要 step_check）+ 同時 composite chart:
+{
+  "plan_summary": "verdict branch + spc_panel chart",
+  "macro_plan": [
+    {"step_idx": 1, "text": "撈 process_history nested", "candidate_block": "block_process_history", "expected_kind": "transform"},
+    {"step_idx": 2, "text": "展開 spc_charts", "candidate_block": "block_unnest", "expected_kind": "transform"},
+    {"step_idx": 3, "text": "篩 is_ooc==true", "candidate_block": "block_filter", "expected_kind": "transform"},
+    {"step_idx": 4, "text": "依 eventTime groupby + count OOC SPCs", "candidate_block": "block_groupby_agg", "expected_kind": "transform"},
+    {"step_idx": 5, "text": "verdict: ooc_count >= 2", "candidate_block": "block_step_check", "expected_kind": "scalar"},
+    {"step_idx": 6, "text": "OOC 時刻所有 SPC chart panel (composite)", "candidate_block": "block_spc_panel", "expected_kind": "chart"}
+  ]
+}
+（step 6 用 composite，不用拆 unnest+filter+sort+chart）
 
 如果 user 的需求過於模糊或不適合 build pipeline，回 {"too_vague": true, "reason": "..."}。
 
