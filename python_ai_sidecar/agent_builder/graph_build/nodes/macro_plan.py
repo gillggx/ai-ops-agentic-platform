@@ -428,6 +428,73 @@ async def macro_plan_node(state: BuildGraphState) -> dict[str, Any]:
         len(macro_plan), MAX_MACRO_STEPS, summary[:80],
     )
 
+    # v19 (2026-05-15): chart-required post-check.
+    # When the user instruction explicitly asks for visualization (顯示 / chart
+    # / 圖表 / plot / 趨勢 / show / visualize) but macro_plan produced no
+    # chart-output terminal, treat as too_vague and loop back to clarify_intent.
+    # User feedback: skill C1 "OOC 跨 chart 聯防" 5/5 runs — 2/5 had only
+    # verdict (step_check) and no chart at all, violating the explicit
+    # "顯示該 SPC charts" requirement.
+    _VIZ_KEYWORDS = ("顯示", "趨勢", "圖表", "趨勢圖", "畫", "看", "show", "chart", "plot", "visualize", "graph")
+    _CHART_OUTPUT_BLOCKS = {
+        "block_line_chart", "block_bar_chart", "block_scatter_chart",
+        "block_box_plot", "block_histogram_chart", "block_splom",
+        "block_xbar_r", "block_imr", "block_ewma_cusum", "block_pareto",
+        "block_variability_gauge", "block_parallel_coords",
+        "block_probability_plot", "block_heatmap_dendro",
+        "block_wafer_heatmap", "block_defect_stack", "block_spatial_pareto",
+        "block_trend_wafer_maps",
+        "block_spc_panel", "block_apc_panel",
+    }
+    instr_lower = (instruction or "").lower()
+    asks_for_viz = any(kw.lower() in instr_lower for kw in _VIZ_KEYWORDS)
+    has_chart_terminal = any(
+        s.get("candidate_block") in _CHART_OUTPUT_BLOCKS
+        or s.get("expected_kind") == "chart"
+        for s in macro_plan
+    )
+    if asks_for_viz and not has_chart_terminal:
+        attempts_v = int(state.get("too_vague_attempts") or 0) + 1
+        is_refused = attempts_v >= MAX_TOO_VAGUE_ATTEMPTS
+        next_status = "refused" if is_refused else "needs_clarify"
+        chart_reason = (
+            "User explicitly asked for visualization (keyword detected: "
+            f"{[k for k in _VIZ_KEYWORDS if k.lower() in instr_lower][:3]}) "
+            "but the produced macro_plan has no chart-output terminal "
+            "(no block_*_chart, block_*_panel, block_*_plot, etc.). "
+            "Skill_step_mode pipelines that need a chart must include both "
+            "a verdict terminal (block_step_check) AND a chart terminal in "
+            "parallel branches (fan-out from block_process_history)."
+        )
+        logger.warning(
+            "macro_plan_node: chart-required check FAIL — attempt=%d/%d → %s",
+            attempts_v, MAX_TOO_VAGUE_ATTEMPTS, next_status,
+        )
+        if tracer is not None:
+            tracer.record_step(
+                "macro_plan_node", status=next_status,
+                attempt=attempts_v, reason=chart_reason[:300],
+                rule="chart_required",
+            )
+        if is_refused:
+            return {
+                "macro_plan": [],
+                "plan_validation_errors": [chart_reason],
+                "summary": "建構失敗 — 你要看 chart 但 model 給不出 chart 終端",
+                "status": "refused",
+                "too_vague_attempts": attempts_v,
+                "too_vague_reason": chart_reason[:500],
+            }
+        return {
+            "macro_plan": [],
+            "summary": "Need clarification — visualization terminal missing",
+            "status": "needs_clarify",
+            "too_vague_attempts": attempts_v,
+            "too_vague_reason": chart_reason[:500],
+            "clarify_attempts": 0,  # let clarify_intent re-run
+            "sse_events": [_event("macro_plan_needs_clarify", {"reason": chart_reason[:300]})],
+        }
+
     if tracer is not None:
         step_entry = tracer.record_step(
             "macro_plan_node", status="ok",
