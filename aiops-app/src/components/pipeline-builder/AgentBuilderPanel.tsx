@@ -23,6 +23,7 @@ import { useBuilder } from "@/context/pipeline-builder/BuilderContext";
 import type { BlockSpec } from "@/lib/pipeline-builder/types";
 import { applyGlassOp, OP_LABELS, opDetail } from "@/lib/pipeline-builder/glass-ops";
 import { PlanRenderer, type PlanItem } from "@/components/copilot/PlanRenderer";
+import { BulletConfirmCard, type IntentBullet } from "@/components/chat/BulletConfirmCard";
 type ChatRole = "user" | "agent" | "op" | "error" | "advisor" | "confirm";
 interface ConfirmData {
   session_id: string;
@@ -33,6 +34,13 @@ interface ConfirmData {
   n_ops: number;
   resolved: boolean;
 }
+interface IntentConfirmData {
+  session_id: string;
+  bullets: IntentBullet[];
+  too_vague_reason?: string;
+  resolved?: "confirmed" | "refused" | "error";
+}
+
 interface ChatLine {
   id: number;
   role: ChatRole;
@@ -42,6 +50,8 @@ interface ChatLine {
   confirm?: ConfirmData;
   /** When role==='advisor' — markdown body + which advisor bucket fired. */
   advisor?: { kind: string; markdown: string; meta?: Record<string, unknown> };
+  /** v19 (2026-05-14) — intent_confirm_required card (BulletConfirmCard). */
+  intentConfirm?: IntentConfirmData;
 }
 
 interface Props {
@@ -203,6 +213,20 @@ export default function AgentBuilderPanel({
           };
           setLines((p) => [...p, { id: nextId(), role: "confirm", text: "", confirm: cd }]);
           // Stream pauses here — waiting on user POST to /confirm.
+        } else if (eventType === "intent_confirm_required") {
+          // v19 (2026-05-14): clarify_intent paused with bullets — user must
+          // confirm/edit each before macro_plan continues. Render BulletConfirmCard.
+          const icd: IntentConfirmData = {
+            session_id: (data.session_id as string) || "",
+            bullets: ((data.bullets as IntentBullet[]) ?? []),
+            too_vague_reason: data.too_vague_reason as string | undefined,
+          };
+          if (icd.bullets.length > 0) {
+            setLines((p) => [...p, {
+              id: nextId(), role: "confirm", text: "", intentConfirm: icd,
+            }]);
+          }
+          // Stream pauses here — waiting on user POST to /build/clarify-respond.
         } else if (eventType === "confirm_received") {
           // Just an ACK; UI already toggled card.resolved.
         } else if (eventType === "op_dispatched") {
@@ -522,6 +546,46 @@ export default function AgentBuilderPanel({
               data={l.confirm}
               onPick={(confirmed) => handleConfirmPick(l.id, confirmed)}
             />
+          ) : l.role === "confirm" && l.intentConfirm ? (
+            l.intentConfirm.resolved === undefined ? (
+              <BulletConfirmCard
+                key={l.id}
+                chatSessionId={l.intentConfirm.session_id}
+                bullets={l.intentConfirm.bullets}
+                tooVagueReason={l.intentConfirm.too_vague_reason}
+                resumeEndpoint="/api/agent/build/clarify-respond"
+                sessionIdKey="sessionId"
+                onResolved={(status) => {
+                  setLines((p) => p.map((x) =>
+                    x.id === l.id && x.intentConfirm
+                      ? { ...x, intentConfirm: { ...x.intentConfirm, resolved: status } }
+                      : x,
+                  ));
+                  if (status === "confirmed") {
+                    setLines((p) => [...p, {
+                      id: nextId(), role: "agent",
+                      text: "✓ intent 已確認，建構中…",
+                    }]);
+                  } else if (status === "refused") {
+                    setLines((p) => [...p, {
+                      id: nextId(), role: "agent",
+                      text: "✋ 已取消 — 請重新描述需求",
+                    }]);
+                  }
+                }}
+              />
+            ) : (
+              <div
+                key={l.id}
+                style={{
+                  fontSize: 11, color: "#64748b", padding: "6px 10px",
+                  background: "#f1f5f9", border: "1px solid #cbd5e1",
+                  borderRadius: 6, fontStyle: "italic",
+                }}
+              >
+                intent {l.intentConfirm.resolved === "confirmed" ? "✓ 已確認" : l.intentConfirm.resolved === "refused" ? "✗ 已拒絕" : "⚠ 出錯"}
+              </div>
+            )
           ) : (
             <MessageRow key={l.id} line={l} />
           )

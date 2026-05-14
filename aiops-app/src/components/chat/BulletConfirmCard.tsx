@@ -22,16 +22,27 @@ export interface IntentBullet {
 }
 
 interface Props {
+  /** Chat session id (when used in chat) OR build session id (Skill Builder). */
   chatSessionId: string;
   bullets: IntentBullet[];
   tooVagueReason?: string;
   onResolved: (status: "confirmed" | "refused" | "error", payload?: unknown) => void;
+  /** v19: which resume endpoint to POST. Default = chat path; Skill Builder
+   *  passes `/api/agent/build/clarify-respond`. */
+  resumeEndpoint?: string;
+  /** v19: payload session-id key. chat uses `chatSessionId`; build uses
+   *  `sessionId` (matches the BuildClarifyRespondRequest model). */
+  sessionIdKey?: "chatSessionId" | "sessionId";
 }
 
 type Action = "ok" | "reject" | "edit";
 
 export function BulletConfirmCard(props: Props) {
-  const { chatSessionId, bullets, tooVagueReason, onResolved } = props;
+  const {
+    chatSessionId, bullets, tooVagueReason, onResolved,
+    resumeEndpoint = "/api/agent/chat/intent-respond",
+    sessionIdKey = "chatSessionId",
+  } = props;
   const [actions, setActions] = React.useState<Record<string, Action>>(
     Object.fromEntries(bullets.map((b) => [b.id, "ok"]))
   );
@@ -51,10 +62,12 @@ export function BulletConfirmCard(props: Props) {
       }
     }
     try {
-      const res = await fetch("/api/agent/chat/intent-respond", {
+      const reqBody: Record<string, unknown> = { confirmations };
+      reqBody[sessionIdKey] = chatSessionId;
+      const res = await fetch(resumeEndpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chatSessionId, confirmations }),
+        body: JSON.stringify(reqBody),
       });
       if (!res.body) {
         setError("no stream body");
