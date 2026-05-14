@@ -203,6 +203,58 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
         "summary": summary,
     })]
 
+    # v18 Tier 1.3 + 1.4: get tracer once, used for exec_trace + validation
+    # snapshots in addition to dry_run.
+    from python_ai_sidecar.agent_builder.graph_build.trace import (
+        get_current_tracer,
+    )
+    tracer = get_current_tracer()
+
+    # Tier 1.3: snapshot state.exec_trace into trace JSON so admin viewer
+    # can audit "LLM picked col X but upstream actually had cols Y/Z" —
+    # this evidence already exists in state but never written to disk.
+    exec_trace = state.get("exec_trace") or {}
+    if tracer is not None and exec_trace:
+        # Cap each node's sample to keep trace JSON size manageable.
+        compact_exec = {
+            nid: {
+                "block_id": snap.get("block_id"),
+                "rows": snap.get("rows"),
+                "cols": (snap.get("cols") or [])[:30],
+                "sample": snap.get("sample") if isinstance(snap.get("sample"), dict) else None,
+                "error": snap.get("error"),
+                "after_cursor": snap.get("after_cursor"),
+            }
+            for nid, snap in exec_trace.items()
+            if isinstance(snap, dict)
+        }
+        tracer.record_step(
+            "exec_trace_snapshot",
+            n_nodes=len(compact_exec),
+            snapshots=compact_exec,
+        )
+
+    # Tier 1.4: surface validation issues as their own graph_step so the
+    # admin viewer can show them prominently (currently buried in the
+    # build_finalized SSE event).
+    if tracer is not None and (structural_issues or advisory_issues):
+        tracer.record_step(
+            "validation_summary",
+            status="failed_structural" if structural_issues else "warnings_only",
+            n_structural=len(structural_issues),
+            n_advisory=len(advisory_issues),
+            structural=[
+                {"rule": i.get("rule"), "node": i.get("node_id") or i.get("node"),
+                 "message": str(i.get("message"))[:300]}
+                for i in structural_issues[:10]
+            ],
+            advisory=[
+                {"rule": i.get("rule"), "node": i.get("node_id") or i.get("node"),
+                 "message": str(i.get("message"))[:300]}
+                for i in advisory_issues[:10]
+            ],
+        )
+
     dry_run_results: dict[str, Any] | None = None
     if status == "finished":
         # 2026-05-13: pass state.trigger_payload so dry-run uses the same
@@ -218,10 +270,6 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
         # the planning steps. Without this, the trace only had the
         # plan + LLM calls — user couldn't see what each node actually
         # produced.
-        from python_ai_sidecar.agent_builder.graph_build.trace import (
-            get_current_tracer,
-        )
-        tracer = get_current_tracer()
         if tracer is not None and dry_run_results is not None:
             node_results = (dry_run_results or {}).get("node_results") or {}
             compact = {

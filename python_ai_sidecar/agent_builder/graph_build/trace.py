@@ -187,6 +187,11 @@ class BuildTracer:
         raw_response: Optional[str] = None,
         parsed: Optional[Any] = None,
         attempt: Optional[int] = None,
+        # v18 Tier 1.2: LLM usage telemetry. Pass `resp` (an LLMResponse
+        # from llm_client) and we extract input/output/cache tokens
+        # automatically. Without this the trace can't tell which step
+        # burned the most Opus or where the cache hit/missed.
+        resp: Any = None,
         **extra: Any,
     ) -> dict[str, Any]:
         entry: dict[str, Any] = {
@@ -200,6 +205,16 @@ class BuildTracer:
             entry["attempt"] = attempt
         if parsed is not None:
             entry["parsed"] = _safe_jsonable(parsed)
+        # Extract usage fields from resp object (LLMResponse-shaped)
+        if resp is not None:
+            for f in ("input_tokens", "output_tokens",
+                      "cache_creation_input_tokens", "cache_read_input_tokens"):
+                v = getattr(resp, f, None)
+                if v is not None:
+                    entry[f] = int(v)
+            model = getattr(resp, "model", None) or getattr(resp, "model_id", None)
+            if model:
+                entry["model"] = str(model)
         for k, v in extra.items():
             entry[k] = _safe_jsonable(v)
         self._payload["llm_calls"].append(entry)

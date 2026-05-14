@@ -158,6 +158,7 @@ async def reflect_plan_node(state: BuildGraphState) -> dict[str, Any]:
                 user_msg=user_msg,
                 raw_response=resp.text or "",
                 parsed=decision,
+                resp=resp,
                 attempt=attempts,
                 input_issues=issues[:5],
             )

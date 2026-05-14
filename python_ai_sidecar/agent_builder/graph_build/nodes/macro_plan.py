@@ -273,6 +273,7 @@ async def macro_plan_node(state: BuildGraphState) -> dict[str, Any]:
             tracer.record_llm(
                 "macro_plan_node", system=_SYSTEM, user_msg=user_msg,
                 raw_response=raw_text, parsed=decision, verdict="too_vague",
+                resp=resp,
             )
             tracer.record_step(
                 "macro_plan_node", status=next_status,
@@ -351,6 +352,7 @@ async def macro_plan_node(state: BuildGraphState) -> dict[str, Any]:
             tracer.record_llm(
                 "macro_plan_node", system=_SYSTEM, user_msg=user_msg,
                 raw_response=raw_text, parsed=decision, verdict="empty_after_parse",
+                resp=resp,
             )
             tracer.record_step(
                 "macro_plan_node", status="failed",
@@ -384,6 +386,7 @@ async def macro_plan_node(state: BuildGraphState) -> dict[str, Any]:
             user_msg=user_msg[:1500],
             raw_response=resp.text or "",
             parsed=decision,
+            resp=resp,
         )
         sse2 = trace_event_to_sse(llm_entry, kind="llm_call")
         if sse2: extra_sse.append(sse2)

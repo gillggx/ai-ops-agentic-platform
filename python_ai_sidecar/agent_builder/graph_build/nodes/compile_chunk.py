@@ -1357,10 +1357,13 @@ def _format_relevant_blocks(catalog: dict, candidate_id: str) -> str:
 
 async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
     """Compile the current macro step into ops + append to state.plan."""
+    import time as _time
     from python_ai_sidecar.pipeline_builder.seedless_registry import SeedlessBlockRegistry
     from python_ai_sidecar.agent_builder.graph_build.nodes.plan import (
         _extract_first_json_object,
     )
+
+    _t0 = _time.perf_counter()  # v18 Tier 1.1: per-step duration
 
     macro_plan = state.get("macro_plan") or []
     idx = state.get("current_macro_step", 0)
@@ -1673,6 +1676,16 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
             "compile_chunk_node: step %s attempt %d validation issues: req=%s col=%s — retry",
             step_key, attempts, req_issues[:3], col_issues[:3],
         )
+        if tracer is not None:
+            tracer.record_step(
+                "compile_chunk_node", status="validation_failed",
+                duration_ms=int((_time.perf_counter() - _t0) * 1000),
+                step_idx=step.get("step_idx"),
+                attempts=attempts,
+                req_issues=req_issues[:5],
+                col_issues=col_issues[:5],
+                upstream_cols=sorted(upstream_cols)[:50] if upstream_cols else [],
+            )
         return {
             "compile_attempts": attempts_map,
             "plan_validation_errors": [
@@ -1688,6 +1701,14 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
 
     if not new_ops:
         logger.warning("compile_chunk_node: step %s produced 0 ops", step_key)
+        if tracer is not None:
+            tracer.record_step(
+                "compile_chunk_node", status="empty",
+                duration_ms=int((_time.perf_counter() - _t0) * 1000),
+                step_idx=step.get("step_idx"),
+                attempts=attempts,
+                reason="produced 0 valid ops",
+            )
         return {
             "compile_attempts": attempts_map,
             "plan_validation_errors": [f"step {step_key} produced no valid ops"],
@@ -1723,6 +1744,7 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
             user_msg=user_msg[:2000],
             raw_response=resp.text or "",
             parsed=decision,
+            resp=resp,  # v18 Tier 1.2: token usage
             step_idx=step.get("step_idx"),
             attempt=attempts,
         )
@@ -1743,10 +1765,14 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
         )
         step_entry = tracer.record_step(
             "compile_chunk_node", status="ok",
+            duration_ms=int((_time.perf_counter() - _t0) * 1000),
             step_idx=step.get("step_idx"),
             step_text=step.get("text"),
             n_ops=len(new_ops), attempts=attempts,
             autofixes=all_autofix,
+            # v18 Tier 1: snapshot upstream cols so col-ref autofix /
+            # validation failures are reproducible from trace alone.
+            upstream_cols=sorted(upstream_cols)[:50] if upstream_cols else [],
             ops_emitted=[
                 {"type": op.get("type"),
                  "block_id": op.get("block_id"),

@@ -144,6 +144,7 @@ async def reflect_op_node(state: BuildGraphState) -> dict[str, Any]:
                 user_msg=user_msg,
                 raw_response=resp.text or "",
                 parsed=decision,
+                resp=resp,
                 attempt=attempts,
                 target_node_id=failing_logical_id,
             )

@@ -554,6 +554,7 @@ async def plan_node(state: BuildGraphState) -> dict[str, Any]:
                 user_msg=user_msg,
                 raw_response=resp.text or "",
                 parsed=decision,
+                resp=resp,
             )
             sse = trace_event_to_sse(entry, kind="llm_call")
             if sse: extra_sse.append(sse)

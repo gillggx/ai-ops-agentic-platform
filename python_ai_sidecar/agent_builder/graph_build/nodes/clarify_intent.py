@@ -211,7 +211,7 @@ async def clarify_intent_node(state: BuildGraphState) -> dict[str, Any]:
     if tracer is not None:
         tracer.record_llm(
             "clarify_intent_node", system=_SYSTEM, user_msg=user_msg,
-            raw_response=raw_text, parsed=decision,
+            raw_response=raw_text, parsed=decision, resp=resp,
         )
 
     # Refuse path — model decided instruction has zero work-intent (e.g. "111").
