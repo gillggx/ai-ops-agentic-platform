@@ -42,7 +42,7 @@ createdb aiops
 
 # 2. 啟動
 cd java-backend
-./gradlew bootRun
+mvn spring-boot:run
 
 # 3. 確認
 curl http://localhost:8002/api/v1/health
@@ -54,7 +54,7 @@ curl http://localhost:8002/actuator/health
 - `local`（default）— BCrypt local auth, CORS 開到 `localhost:8000/3000`
 - `prod` — OIDC (Azure AD) auth, CORS 需指定 env var
 
-Switch：`AIOPS_PROFILE=prod ./gradlew bootRun`
+Switch：`AIOPS_PROFILE=prod mvn spring-boot:run`
 
 ## Env Vars
 

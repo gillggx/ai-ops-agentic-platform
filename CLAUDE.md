@@ -164,3 +164,37 @@ aiops-contract (Shared Types)
 ```
 
 **Phase 8-A-1d cutover (2026-04-25)**：fastapi_backend_service (:8001) decommissioned，所有路徑走 Java + sidecar。`fastapi_backend_service/` 目錄還在 repo 但 runtime 不啟動。
+
+---
+
+## Deployment Targets (EC2 today, K8s future)
+
+### Stack versions (must stay consistent across pom.xml / Dockerfile / README / deploy scripts)
+- Java: **Temurin 17**（不是 21，2026-05-14 修了 java-update.sh 殘留）
+- Spring Boot: **3.5.14** + Maven (不是 Gradle)
+- Python: **3.11**
+- Node.js: **20.18**
+
+DevOps spec source of truth: `docs/devOps_technique_guide_2.0.md`
+
+### Port convention — env-driven, no source hardcode
+
+**EC2 prod (current, single-host systemd)** — distinct ports per service：
+- aiops-app: 8000
+- aiops-java-api: 8002
+- python_ai_sidecar: 8050
+- ontology-simulator: 8012
+
+**K8s (future)** — 每 service 各自 Docker image，container `EXPOSE 8080`，service port → 80，service-name 互通。
+
+**Rule（兩 env 都適用）**：URLs/ports 從 `.env` / ConfigMap 讀，**禁止** source code hardcode `http://localhost:PORT`。可接受的 fallback pattern：
+```python
+url = os.environ.get("XXX_URL", "http://localhost:80NN").rstrip("/")
+```
+```typescript
+const BASE = process.env.XXX_BASE_URL ?? "http://localhost:80NN";
+```
+
+### Run wrappers
+- EC2: `deploy/aiops-*.service` (systemd units) + `deploy/update.sh` / `java-update.sh`
+- K8s（待做）: 每 service 一個 `deploy/<service>-run.sh` while-true loop 包裝。等 K8s target env (GKE/EKS/自建) 確定才寫。

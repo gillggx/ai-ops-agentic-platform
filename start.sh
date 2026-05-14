@@ -1,12 +1,27 @@
 #!/usr/bin/env bash
+# ⚠️ DEPRECATED (2026-05-14) — this script references the retired
+# fastapi_backend_service on :8001 which was decommissioned on
+# 2026-04-25 (Phase 8-A-1d cutover). It no longer reflects the current
+# architecture.
+#
+# Current local-dev quickstart should use:
+#   - aiops-app: `cd aiops-app && npm run dev`            (:3000)
+#   - java-backend: `cd java-backend && mvn spring-boot:run`  (:8002)
+#   - python_ai_sidecar: `cd python_ai_sidecar && uvicorn main:app --port 8050`
+#   - ontology_simulator: `cd ontology_simulator && bash start.sh`  (:8012)
+#
+# On EC2 / production, services are managed by systemd — see deploy/*.service.
+# This script is kept for reference only; do not run it.
+#
+# Original (legacy):
 # start.sh — 一鍵啟動所有服務
 #   1. NATS (brew service)
 #   2. OntologySimulator (port 8012)
-#   3. FastAPI Backend (port 8000)
+#   3. FastAPI Backend (port 8000)  ← decommissioned
 #   4. aiops-app Next.js frontend (port 3000)
-#
-# 用法：./start.sh [--logs]
-#   --logs     啟動後 tail -f 所有 log（Ctrl-C 停止 tail，服務繼續跑）
+echo "⚠️  start.sh is DEPRECATED — see header comment for current dev quickstart." >&2
+echo "    Refusing to launch the retired fastapi_backend_service on :8001." >&2
+exit 1
 
 set -euo pipefail
 

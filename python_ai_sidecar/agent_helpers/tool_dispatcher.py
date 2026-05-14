@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -1209,9 +1210,12 @@ class ToolDispatcher:
                 pipeline_payload = _json.loads(pipeline_payload)
             except Exception as exc:  # noqa: BLE001
                 return {"status": "error", "message": f"pipeline_json parse failed: {exc}"}
+        # Sidecar self-call URL — env-driven so K8s/EC2 can override.
+        # Default to localhost:8050 for the EC2 single-host deployment.
+        sidecar_base = os.environ.get("SIDECAR_SELF_URL", "http://127.0.0.1:8050").rstrip("/")
         async with httpx.AsyncClient(timeout=120.0) as client:
             r = await client.post(
-                "http://127.0.0.1:8050/internal/pipeline/execute",
+                f"{sidecar_base}/internal/pipeline/execute",
                 headers={"X-Service-Token": CONFIG.service_token},
                 json={
                     "pipeline_json": pipeline_payload,

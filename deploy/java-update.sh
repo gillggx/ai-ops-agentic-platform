@@ -47,7 +47,7 @@ git -C "$APP_DIR" pull --ff-only
 # systemd unit files (deploy/aiops-java-*.service) point to target/.
 echo "☕  Building Java fat jars (api + scheduler) via Maven..."
 cd "$APP_DIR"
-export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/temurin-21-jdk-amd64}"
+export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/temurin-17-jdk-amd64}"
 export PATH="$JAVA_HOME/bin:$PATH"
 # 2026-05-11: -Dmaven.test.skip=true (not just -DskipTests) so test
 # *compilation* is skipped too. Gradle's bootJar task never compiled tests

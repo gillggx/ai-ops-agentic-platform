@@ -4,58 +4,92 @@
 
 ---
 
-## Architecture
+## Architecture (current — 2026-05-14)
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│  aiops-app  (Next.js 15 · React 19)                    Port 3000 │
-│  Sidebar       │  Main Content                │ AI Copilot  │
-│  ┌───────────┐ │ ┌────────────┬──────────────┐│             │
-│  │ OPS CENTER│ │ │ Alarm List │ Equipment    ││  Agent Chat │
-│  │ Dashboard │ │ │ (展開詳情)  │ Overview     ││  SSE Stream │
-│  │           │ │ │ + Findings │ KPI + Grid   ││             │
-│  │ KNOWLEDGE │ │ └────────────┴──────────────┘│             │
-│  │ Auto-Patrol│ │ Quick Diagnostics            │             │
-│  │ Diag Rules│ │                               │             │
-│  │           │ │                               │             │
-│  │ ADMIN     │ │                               │             │
-│  │ Skills    │ │                               │             │
-│  │ Memory    │ │                               │             │
-│  │ DataSrc   │ │                               │             │
-│  │ Events    │ │                               │             │
-│  └───────────┘ │                               │             │
-│                  │ REST / SSE                                      │
-│                  │ AIOps Report Contract (共同語言)                │
-└──────────────────┬───────────────────────────────────────────────┘
-                   │
-         ┌─────────▼──────────────────────────────────────────────┐
-         │  fastapi_backend_service  (FastAPI)            Port 8000 │
-         │                                                          │
-         │  ┌─ Agent ──────────────────────────────────────────┐  │
-         │  │  LangGraph v2 Orchestrator                        │  │
-         │  │  Context Loader (Soul Prompt + MCP Catalog + RAG) │  │
-         │  │  Tool Dispatcher (22 tools)                       │  │
-         │  │  Session Manager (sliding window + summarization) │  │
-         │  └──────────────────────────────────────────────────┘  │
-         │                                                          │
-         │  ┌─ Platform ───────────────────────────────────────┐  │
-         │  │  Diagnostic Rule Service (AI 2-phase generation)  │  │
-         │  │  Auto-Patrol + Alarm + Cron Scheduler             │  │
-         │  │  Experience Memory (pgvector + reflective lifecycle)│  │
-         │  │  Sandbox Execution (numpy/pandas/scipy)           │  │
-         │  └──────────────────────────────────────────────────┘  │
-         │                                                          │
-         │  PostgreSQL + pgvector │ Anthropic Claude │ Ollama bge-m3│
-         └──────────┬───────────────────────────────────────────────┘
-                    │ HTTP (MCP calls)
-         ┌──────────▼──────────────────────────────────────────────┐
-         │  ontology_simulator  (FastAPI + MongoDB)       Port 8012 │
-         │  合成製程資料：LOT/TOOL/SPC/APC/DC/EC/FDC/OCAP/RECIPE   │
-         │  NATS event bus → Auto-Patrol trigger                    │
-         └─────────────────────────────────────────────────────────┘
+│  aiops-app  (Next.js 15 standalone · React 19)        Port 8000  │
+│  ─ UI rendering + /api/ proxy routes only                        │
+│  ─ Talks to java-backend :8002 and python_ai_sidecar :8050       │
+└────────────────────────────┬─────────────────────────────────────┘
+                             │ HTTPS (via nginx)
+        ┌────────────────────┴────────────────────┐
+        │                                         │
+        ▼                                         ▼
+┌──────────────────────────────┐    ┌─────────────────────────────┐
+│  java-backend (Spring Boot)  │    │  python_ai_sidecar          │
+│  Port 8002 — sole DB owner   │    │  Port 8050 — agents + exec  │
+│                              │    │                             │
+│  • Auth (JWT)                │    │  • Chat orchestrator (v2)   │
+│  • PostgreSQL + pgvector     │    │  • Glass Box builder        │
+│  • Pipeline / Skill registry │    │  • Block Advisor            │
+│  • Alarm + role audit        │    │  • 50+ block executors      │
+│  • /api/v1/* user-facing     │    │  • Pipeline executor        │
+│  • /internal/* service-only  │    │  • Calls Java via JavaClient│
+└────────┬─────────────────────┘    └────────┬────────────────────┘
+         │                                    │
+         │                                    │ HTTP (data fetch)
+         ▼                                    ▼
+   PostgreSQL                       ┌────────────────────────┐
+   (sole owner: java-backend)       │  ontology_simulator    │
+                                    │  Port 8012             │
+                                    │  Synthetic process data│
+                                    │  LOT/TOOL/SPC/APC/...  │
+                                    │  MongoDB + NATS bus    │
+                                    └────────────────────────┘
 ```
 
+**Service ports (EC2 single-host)**:
+| Service | Port | Manager |
+|---|---|---|
+| aiops-app | 8000 | systemd: aiops-app.service |
+| aiops-java-api | 8002 | systemd: aiops-java-api.service |
+| python_ai_sidecar | 8050 | systemd: aiops-python-sidecar.service |
+| ontology-simulator | 8012 | systemd: ontology-simulator.service |
+| (legacy) fastapi_backend_service | 8001 | decommissioned 2026-04-25 |
+
+For K8s future deployment, each service builds its own Docker image (8080→80, service-name routing). See `docs/devOps_technique_guide_2.0.md`.
+
 **aiops-contract**（獨立 package）定義 Agent ↔ Frontend 的共用型別（AIOpsReportContract）。
+
+---
+
+## Stack versions
+
+- Java: **Temurin 17** + Spring Boot 3.5.14 + Maven
+- Python: **3.11**
+- Node.js: **20.18** (Next.js 15, React 19)
+- PostgreSQL: **17** + pgvector
+- LLM: Anthropic Claude (Opus/Sonnet routed by graph)
+- Embedding: Ollama bge-m3
+
+## Local dev quickstart
+
+```bash
+# 1. Postgres + simulator (one-time)
+brew services start postgresql@17
+createdb aiops
+
+# 2. Each service in its own shell
+cd ontology_simulator && bash start.sh           # :8012
+cd java-backend && mvn spring-boot:run            # :8002
+cd python_ai_sidecar && uvicorn main:app --port 8050  # :8050
+cd aiops-app && npm run dev                       # :3000 (dev) or :8000 (prod build)
+```
+
+⚠️ The root `start.sh` is **DEPRECATED** — references the retired fastapi_backend_service.
+
+## Deploy (EC2)
+
+```bash
+# Frontend + simulator
+bash deploy/update.sh
+
+# Java + sidecar
+bash deploy/java-update.sh
+```
+
+systemd units in `deploy/aiops-*.service`. nginx config in `deploy/nginx.conf`.
 
 ---
 
