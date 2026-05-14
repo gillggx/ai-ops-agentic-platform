@@ -129,8 +129,9 @@ function render(svg: SVGSVGElement, spec: ChartSpec) {
       groups.get(key)!.push(row);
     }
     let idx = 0;
+    const specColors = (spec as { colors?: string[] }).colors;
     groups.forEach((rows, name) => {
-      const color = SERIES_COLORS[idx % SERIES_COLORS.length];
+      const color = specColors?.[idx] ?? SERIES_COLORS[idx % SERIES_COLORS.length];
       traces.push({
         name,
         color,
@@ -144,8 +145,9 @@ function render(svg: SVGSVGElement, spec: ChartSpec) {
       idx += 1;
     });
   } else {
+    const specColors = (spec as { colors?: string[] }).colors;
     primaryY.forEach((yk, idx) => {
-      const color = SERIES_COLORS[idx % SERIES_COLORS.length];
+      const color = specColors?.[idx] ?? SERIES_COLORS[idx % SERIES_COLORS.length];
       traces.push({
         name: yk,
         color,

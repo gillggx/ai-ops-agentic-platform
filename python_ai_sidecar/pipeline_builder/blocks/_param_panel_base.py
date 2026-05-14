@@ -40,6 +40,9 @@ class _ParamPanelBase(BlockExecutor):
     violation_field: Optional[str] = None  # "is_ooc" or None
     default_title: str = "Panel"
     latest_violation_label: str = "latest_violation"
+    # v18 source mode: object_name to pass to process_history when panel
+    # fetches data itself. "SPC" → only nest SPC fields; "APC" → APC only.
+    process_history_object_name: str = "SPC"
 
     async def execute(
         self,
@@ -48,14 +51,25 @@ class _ParamPanelBase(BlockExecutor):
         inputs: dict[str, Any],
         context: ExecutionContext,
     ) -> dict[str, Any]:
-        df = inputs.get("data")
+        title = str(params.get("title") or self.default_title)
+
+        # v18 (2026-05-14): hybrid source mode. If no upstream data is
+        # connected AND user gave fetch params (tool_id), call
+        # ProcessHistoryBlockExecutor internally so panel works as a
+        # self-contained "give me SPC chart for X" block.
+        df = inputs.get("data") if isinstance(inputs, dict) else None
+        if df is None and params.get("tool_id"):
+            df = await self._fetch_process_history(params, context)
         if not isinstance(df, pd.DataFrame):
             raise BlockExecutionError(
                 code="INVALID_INPUT",
-                message="'data' input must be a DataFrame",
+                message=(
+                    "'data' input missing — connect an upstream process_history, "
+                    "OR set source params (tool_id + optional step/time_range) on "
+                    f"{self.block_id} to fetch internally."
+                ),
             )
 
-        title = str(params.get("title") or self.default_title)
         if df.empty:
             return {"chart_spec": self._empty_chart(title, "上游資料為空")}
 
@@ -64,12 +78,21 @@ class _ParamPanelBase(BlockExecutor):
         if long.empty:
             return {"chart_spec": self._empty_chart(title, "No data after unnesting")}
 
-        # Step 2: apply event_filter.
+        # Step 2: filter by specific chart_name / param_name when given.
+        chart_name = params.get("chart_name")
+        if chart_name and self.name_field in long.columns:
+            long = long[long[self.name_field].astype(str) == str(chart_name)].reset_index(drop=True)
+            if long.empty:
+                return {"chart_spec": self._empty_chart(
+                    title, f"No data for {self.name_field}={chart_name!r}"
+                )}
+
+        # Step 3: apply event_filter.
         event_filter = str(params.get("event_filter") or self.latest_violation_label)
         event_time = params.get("event_time")
         long, filter_note = self._apply_event_filter(long, event_filter, event_time)
 
-        # Step 3: show_only_violations flag.
+        # Step 4: show_only_violations flag.
         if bool(params.get("show_only_violations")) and self.violation_field:
             if self.violation_field in long.columns:
                 long = long[long[self.violation_field] == True].reset_index(drop=True)  # noqa: E712
@@ -78,9 +101,33 @@ class _ParamPanelBase(BlockExecutor):
             note = filter_note or "No data after filter"
             return {"chart_spec": self._empty_chart(title, note)}
 
-        # Step 4: assemble chart_spec.
-        chart_spec = self._build_chart_spec(long, title, event_filter, filter_note)
+        # Step 5: assemble chart_spec with color customization.
+        chart_spec = self._build_chart_spec(long, title, event_filter, filter_note, params)
         return {"chart_spec": chart_spec}
+
+    async def _fetch_process_history(
+        self,
+        params: dict[str, Any],
+        context: ExecutionContext,
+    ) -> "pd.DataFrame":
+        """v18: source mode. Run ProcessHistoryBlockExecutor inline."""
+        from python_ai_sidecar.pipeline_builder.blocks.process_history import (
+            ProcessHistoryBlockExecutor,
+        )
+        ph = ProcessHistoryBlockExecutor()
+        ph_params = {
+            "tool_id": params.get("tool_id"),
+            "lot_id": params.get("lot_id"),
+            "step": params.get("step"),
+            "time_range": params.get("time_range") or "7d",
+            "limit": params.get("limit") or 200,
+            "nested": True,
+            "object_name": self.process_history_object_name,
+        }
+        # Drop None so process_history's tri-state required check works.
+        ph_params = {k: v for k, v in ph_params.items() if v is not None}
+        result = await ph.execute(params=ph_params, inputs={}, context=context)
+        return result.get("data")  # type: ignore[return-value]
 
     # ── Subclass-friendly helpers ──────────────────────────────────────
 
@@ -158,22 +205,39 @@ class _ParamPanelBase(BlockExecutor):
         title: str,
         event_filter: str,
         filter_note: str,
+        params: dict[str, Any],
     ) -> dict[str, Any]:
         """Multi-series line chart by name_field. SPC subclass adds UCL/LCL
         rules + OOC highlight via violation_field; APC just plots value.
+
+        v18: color customization via params:
+          - value_color (default green) — colors the value line(s)
+          - bound_color (default orange) — colors UCL/LCL rules
+          - color_by (string col name) — series colored by that column;
+            overrides series_field which defaults to name_field
         """
+        value_color = str(params.get("value_color") or "#16a34a")  # green-600
+        bound_color = str(params.get("bound_color") or "#f59e0b")  # amber-500
+        color_by = params.get("color_by")
+
         # x axis: eventTime if available + multi-row, else name_field (single-event mode).
         n_distinct_ts = (
             long["eventTime"].nunique() if "eventTime" in long.columns else 0
         )
+        # series_field priority: user color_by > name_field (when multi)
+        if color_by and isinstance(color_by, str) and color_by in long.columns:
+            series_field: Optional[str] = color_by
+        else:
+            series_field = self.name_field if self.name_field in long.columns else None
+
         if n_distinct_ts > 1:
             x_field = "eventTime"
-            series_field = self.name_field if self.name_field in long.columns else None
             chart_type = "line"
         else:
             # Single timestamp: switch to bar so each `name` is a category.
             x_field = self.name_field if self.name_field in long.columns else "name"
-            series_field = None
+            # Bar mode doesn't need series_field — each category is its own bar.
+            series_field = None if not color_by else series_field
             chart_type = "bar"
 
         # Coerce datetime to ISO string for JSON.
@@ -201,6 +265,7 @@ class _ParamPanelBase(BlockExecutor):
                                 "value": vf,
                                 "label": label.upper(),
                                 "style": "danger",
+                                "color": bound_color,
                             })
                     except (TypeError, ValueError):
                         pass
@@ -212,7 +277,14 @@ class _ParamPanelBase(BlockExecutor):
             "data": data,
             "x": x_field,
             "y": [self.value_field],
+            # v18: pass default color for value line — frontend renderer
+            # uses spec.colors[i] (if present) per y[] entry, otherwise
+            # falls back to its palette. We only set when single y series.
+            "colors": [value_color] if not series_field else None,
         }
+        # Drop None to keep JSON clean.
+        spec = {k: v for k, v in spec.items() if v is not None}
+
         if series_field:
             spec["series_field"] = series_field
         if rules:
@@ -223,7 +295,8 @@ class _ParamPanelBase(BlockExecutor):
         spec["meta"] = {
             "event_filter": event_filter,
             "n_rows": len(data),
-            "n_series": int(out[self.name_field].nunique()) if self.name_field in out.columns else 1,
+            "n_series": int(out[series_field].nunique()) if series_field and series_field in out.columns else 1,
+            "color_by": color_by or None,
         }
         return spec
 

@@ -26,3 +26,4 @@ class ApcPanelBlockExecutor(_ParamPanelBase):
     violation_field = "is_drift"   # consumed only when upstream provides it
     default_title = "APC Parameters"
     latest_violation_label = "latest_drift"
+    process_history_object_name = "APC"

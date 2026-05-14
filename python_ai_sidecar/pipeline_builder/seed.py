@@ -3197,15 +3197,16 @@ def _blocks() -> list[dict[str, Any]]:
             "status": "production",
             "description": (
                 "== What ==\n"
-                "**SPC chart panel — one block, right semantics.**\n"
+                "**SPC chart panel — 自給自足的 SPC chart 元件。**\n"
+                "🌟 **v18 升級**：給 `tool_id + step + chart_name` 我就自己撈資料畫圖，**完全不用上游**。\n"
                 "把 process_history 的 SPC 資料一次處理好：unnest spc_charts → "
-                "依 event_filter 模式挑時段 → 出多 series line chart + UCL/LCL bound + OOC highlight。\n"
+                "(opt) filter chart_name → 依 event_filter 模式挑時段 → 出 line/bar chart + 橘色 UCL/LCL + 綠色 value line + OOC highlight。\n"
                 "\n"
-                "🚨🚨🚨 **直接接 process_history(nested=true) → 我**。\n"
-                "🚨 **不要**在我之前接 unnest / filter(is_ooc) / sort+limit / groupby — **我內建這些邏輯**。\n"
-                "🚨 你想做的「找最後一次 OOC → 秀那時刻所有 SPCs」我用 event_filter=latest_ooc 一行解決，\n"
-                "🚨 你前面接 filter+sort+limit 只會把多 SPC 砍成 1 個 row，把我的多 series 變成 1 點。\n"
-                "🚨 標準 pipeline 是 **2 個 node**：process_history → spc_panel。沒了。\n"
+                "🚨🚨🚨 **最佳用法 — 1 個 node 全包**:\n"
+                "  `block_spc_panel(tool_id='EQP-01', step='STEP_001', chart_name='xbar_chart', time_range='7d')`\n"
+                "🚨 不需要上游 process_history、不需要 unnest、不需要 filter — 我內建。\n"
+                "🚨 如果你已有 process_history 在 upstream，也可以接過來 — 我兩種 mode 都支援。\n"
+                "🚨 **不要**在我之前接 unnest / filter(is_ooc) / sort+limit / groupby — 那會把多 SPC 砍成 1 點。\n"
                 "\n"
                 "== When to use ==\n"
                 "- ✅ user 說「看 SPC chart」「SPC 趨勢」「OOC SPC chart」→ 用我\n"
@@ -3223,10 +3224,25 @@ def _blocks() -> list[dict[str, Any]]:
                 "  custom_time   — 配 event_time 指定 ISO timestamp\n"
                 "\n"
                 "== Params ==\n"
+                "── source mode 用 (不接上游時) ──\n"
+                "tool_id              (string, opt) — 機台 ID e.g. 'EQP-01'。給了我就自己撈\n"
+                "lot_id               (string, opt)\n"
+                "step                 (string, opt) — process step e.g. 'STEP_001'\n"
+                "time_range           (string, default '7d') — 撈多久\n"
+                "limit                (int, default 200) — 撈幾筆\n"
+                "\n"
+                "── 篩選 ──\n"
+                "chart_name           (string, opt) — 只看單一 SPC，例 'xbar_chart' / 'r_chart'\n"
                 "event_filter         (string, default latest_ooc)\n"
                 "event_time           (string, opt) — event_filter=custom_time 時必填 ISO timestamp\n"
                 "show_only_violations (bool, default false) — true=只秀 is_ooc=true 的 charts\n"
-                "title                (string, opt) — chart 標題，預設 'SPC Charts'\n"
+                "\n"
+                "── 視覺化 ──\n"
+                "color_by             (string, opt) — 例 'toolID' / 'lotID' / 'fdc_classification'\n"
+                "                     — 多 series 依該欄分顏色（會 override chart_name 預設的分色）\n"
+                "value_color          (string, default '#16a34a' green) — value 線顏色\n"
+                "bound_color          (string, default '#f59e0b' orange) — UCL/LCL 線顏色\n"
+                "title                (string, opt) — 預設 'SPC Charts'\n"
                 "\n"
                 "== Input ==\n"
                 "port: data (dataframe) — process_history(nested=true) 的輸出，或已 unnest 的長表\n"
@@ -3238,19 +3254,28 @@ def _blocks() -> list[dict[str, Any]]:
                 "  meta 帶 {event_filter, n_rows, n_series} 給 admin trace 看\n"
                 "\n"
                 "== 典型 pipelines ==\n"
-                "(A) 機台最後一次 OOC SPC chart：\n"
-                "    block_process_history(tool_id=$tool_id, nested=true)\n"
-                "      → block_spc_panel(event_filter=latest_ooc)\n"
-                "(B) 過去 7 天 SPC 趨勢：\n"
-                "    block_process_history(tool_id=$tool_id, time_range=7d, nested=true)\n"
-                "      → block_spc_panel(event_filter=all)\n"
-                "(C) OOC count >= 2 才觸發 + 同時展示 chart（skill_step_mode）：\n"
-                "    n1 process_history → fan-out:\n"
+                "(A) **1-block 看單一 SPC 趨勢（最常用！）**：\n"
+                "    block_spc_panel(tool_id='EQP-01', step='STEP_001', chart_name='xbar_chart', time_range='7d', event_filter='all')\n"
+                "    → 直接出圖，無需任何 upstream\n"
+                "\n"
+                "(B) 1-block 看機台最後一次 OOC 那一刻全部 SPCs：\n"
+                "    block_spc_panel(tool_id='EQP-01', event_filter='latest_ooc')\n"
+                "\n"
+                "(C) 機台對照：多台機台同一 SPC 的趨勢:\n"
+                "    block_spc_panel(step='STEP_001', chart_name='xbar_chart', time_range='7d', color_by='toolID')\n"
+                "    → 不限 tool_id，依 toolID 分顏色\n"
+                "\n"
+                "(D) Lot 對照：xbar 各 lot 不同顏色：\n"
+                "    block_spc_panel(tool_id='EQP-01', chart_name='xbar_chart', time_range='7d', color_by='lotID')\n"
+                "\n"
+                "(E) OOC count >= 2 才觸發 + 同時展示 chart（skill_step_mode）：\n"
+                "    n1 = block_process_history(tool_id=$tool_id, nested=true)\n"
+                "    fan-out:\n"
                 "      Branch 1 (verdict): n1 → block_unnest(spc_charts) → block_filter(is_ooc==true)\n"
                 "                          → block_groupby_agg(group_by=eventTime, agg_column=name, agg_func=count)\n"
                 "                          → block_step_check(operator='>=', threshold=2)\n"
                 "      Branch 2 (chart):   n1 → block_spc_panel(event_filter=latest_ooc)\n"
-                "    兩 branch 共用 n1，**不要**重做 process_history\n"
+                "    兩 branch 共用 n1（這裡 panel transform mode 比 source mode 省一次 API call）\n"
                 "\n"
                 "== Common mistakes ==\n"
                 "⚠ 不要在我之前接 block_sort+limit=1 — 那會砍剩 1 row，我會接到只剩 1 個 SPC\n"
@@ -3265,35 +3290,39 @@ def _blocks() -> list[dict[str, Any]]:
             "param_schema": {
                 "type": "object",
                 "properties": {
+                    "tool_id": {"type": "string", "title": "機台 ID (source mode)"},
+                    "lot_id": {"type": "string", "title": "批次 ID (source mode)"},
+                    "step": {"type": "string", "title": "Process step (source mode)"},
+                    "time_range": {"type": "string", "default": "7d", "title": "撈多久 (source mode)"},
+                    "limit": {"type": "integer", "default": 200, "title": "撈幾筆 (source mode)"},
+                    "chart_name": {"type": "string", "title": "SPC chart 名稱 (filter)"},
                     "event_filter": {
                         "type": "string",
                         "enum": ["latest_ooc", "latest_event", "all", "custom_time"],
                         "default": "latest_ooc",
                         "title": "事件範圍",
                     },
-                    "event_time": {
-                        "type": "string",
-                        "title": "指定 timestamp (ISO)",
-                    },
+                    "event_time": {"type": "string", "title": "指定 timestamp (ISO)"},
                     "show_only_violations": {
-                        "type": "boolean",
-                        "default": False,
+                        "type": "boolean", "default": False,
                         "title": "只秀 OOC 的 charts",
                     },
-                    "title": {
-                        "type": "string",
-                        "default": "SPC Charts",
-                        "title": "圖表標題",
-                    },
+                    "color_by": {"type": "string", "title": "依此欄分色 (e.g. toolID / lotID)"},
+                    "value_color": {"type": "string", "default": "#16a34a", "title": "Value 線顏色"},
+                    "bound_color": {"type": "string", "default": "#f59e0b", "title": "UCL/LCL 線顏色"},
+                    "title": {"type": "string", "default": "SPC Charts", "title": "圖表標題"},
                 },
             },
             "examples": [
+                {"label": "1-block 看 EQP-01 STEP_001 xbar 過去 7 天",
+                 "params": {"tool_id": "EQP-01", "step": "STEP_001", "chart_name": "xbar_chart",
+                            "time_range": "7d", "event_filter": "all"}},
                 {"label": "機台最後一次 OOC 的所有 SPC charts",
-                 "params": {"event_filter": "latest_ooc", "title": "EQP-01 Last OOC Event"}},
-                {"label": "過去 7 天 SPC 趨勢",
-                 "params": {"event_filter": "all"}},
-                {"label": "指定時間點所有 SPC",
-                 "params": {"event_filter": "custom_time", "event_time": "2026-05-14T10:00:00"}},
+                 "params": {"tool_id": "EQP-01", "event_filter": "latest_ooc",
+                            "title": "EQP-01 Last OOC Event"}},
+                {"label": "多機台對照 xbar trend (依 toolID 分色)",
+                 "params": {"step": "STEP_001", "chart_name": "xbar_chart",
+                            "time_range": "7d", "color_by": "toolID", "event_filter": "all"}},
             ],
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.spc_panel:SpcPanelBlockExecutor"},
         },
@@ -3304,9 +3333,12 @@ def _blocks() -> list[dict[str, Any]]:
             "status": "production",
             "description": (
                 "== What ==\n"
-                "**APC parameter panel — one block, right semantics.**\n"
-                "把 process_history 的 APC 資料一次處理好：unnest apc_params → "
-                "依 event_filter 模式挑時段 → 出多 series line chart（無 bound，APC 原始資料沒帶上下界）。\n"
+                "**APC parameter panel — 自給自足的 APC 元件。**\n"
+                "🌟 **v18 升級**：給 `tool_id + step + param_name` 我就自己撈 APC 資料畫圖，**不用上游**。\n"
+                "把 process_history 的 APC 資料一次處理好：unnest apc_params → (opt) filter param_name → 依 event_filter 模式挑時段 → 出多 series line chart（無 bound，APC 原始資料沒帶上下界）。\n"
+                "\n"
+                "🚨 1-block 用法：`block_apc_panel(tool_id='EQP-01', step='STEP_001', chart_name='temperature', time_range='7d')`\n"
+                "   （chart_name 就是 APC 參數名，e.g. 'temperature' / 'pressure' / 'flow_rate'）\n"
                 "\n"
                 "== When to use ==\n"
                 "- ✅ user 說「看 APC 參數」「APC 趨勢」→ 用我\n"
@@ -3323,9 +3355,21 @@ def _blocks() -> list[dict[str, Any]]:
                 "  custom_time   — 配 event_time 指定 ISO timestamp\n"
                 "\n"
                 "== Params ==\n"
+                "── source mode (不接上游) ──\n"
+                "tool_id              (string, opt) — 機台 ID\n"
+                "lot_id               (string, opt)\n"
+                "step                 (string, opt)\n"
+                "time_range           (string, default '7d')\n"
+                "limit                (int, default 200)\n"
+                "── 篩選 ──\n"
+                "chart_name           (string, opt) — APC 參數名 e.g. 'temperature' (filter to 單一參數)\n"
                 "event_filter         (string, default latest_drift)\n"
                 "event_time           (string, opt) — custom_time 模式必填\n"
                 "show_only_violations (bool, default false) — true=只秀 is_drift=true\n"
+                "── 視覺化 ──\n"
+                "color_by             (string, opt) — e.g. 'toolID' 多機台分色\n"
+                "value_color          (string, default '#16a34a' green)\n"
+                "bound_color          (string, default '#f59e0b' orange) — 雖然 APC 沒 bound 但若上游加了 rules 會用這色\n"
                 "title                (string, opt) — 預設 'APC Parameters'\n"
                 "\n"
                 "== Input ==\n"
@@ -3346,33 +3390,37 @@ def _blocks() -> list[dict[str, Any]]:
             "param_schema": {
                 "type": "object",
                 "properties": {
+                    "tool_id": {"type": "string", "title": "機台 ID (source mode)"},
+                    "lot_id": {"type": "string", "title": "批次 ID (source mode)"},
+                    "step": {"type": "string", "title": "Process step (source mode)"},
+                    "time_range": {"type": "string", "default": "7d", "title": "撈多久"},
+                    "limit": {"type": "integer", "default": 200, "title": "撈幾筆"},
+                    "chart_name": {"type": "string", "title": "APC 參數名 (filter)"},
                     "event_filter": {
                         "type": "string",
                         "enum": ["latest_drift", "latest_event", "all", "custom_time"],
                         "default": "latest_drift",
                         "title": "事件範圍",
                     },
-                    "event_time": {
-                        "type": "string",
-                        "title": "指定 timestamp (ISO)",
-                    },
+                    "event_time": {"type": "string", "title": "指定 timestamp (ISO)"},
                     "show_only_violations": {
-                        "type": "boolean",
-                        "default": False,
+                        "type": "boolean", "default": False,
                         "title": "只秀 drift 的參數",
                     },
-                    "title": {
-                        "type": "string",
-                        "default": "APC Parameters",
-                        "title": "圖表標題",
-                    },
+                    "color_by": {"type": "string", "title": "依此欄分色"},
+                    "value_color": {"type": "string", "default": "#16a34a", "title": "Value 線顏色"},
+                    "bound_color": {"type": "string", "default": "#f59e0b", "title": "Bound 線顏色"},
+                    "title": {"type": "string", "default": "APC Parameters", "title": "圖表標題"},
                 },
             },
             "examples": [
+                {"label": "1-block 看 EQP-01 STEP_001 temperature 過去 7 天",
+                 "params": {"tool_id": "EQP-01", "step": "STEP_001", "chart_name": "temperature",
+                            "time_range": "7d", "event_filter": "all"}},
                 {"label": "最近一次 drift 的 APC 參數",
-                 "params": {"event_filter": "latest_drift"}},
+                 "params": {"tool_id": "EQP-01", "event_filter": "latest_drift"}},
                 {"label": "過去 24 小時 APC 趨勢",
-                 "params": {"event_filter": "all"}},
+                 "params": {"tool_id": "EQP-01", "event_filter": "all"}},
             ],
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.apc_panel:ApcPanelBlockExecutor"},
         },
