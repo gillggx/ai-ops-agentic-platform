@@ -1531,7 +1531,30 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
 
     req_issues = _validate_required_params(new_ops, registry.catalog)
     col_issues = _validate_column_refs(new_ops, upstream_cols, registry.catalog)
-    combined_issues = req_issues + col_issues
+    # Source-block check for the very first compile step. When plan is
+    # empty (no nodes built yet), the first add_node in this batch MUST
+    # be a source-category block. LLM occasionally picks a chart/output
+    # block as n1, which then can't connect to anything (only chart_spec
+    # output port). Reject + retry.
+    source_issues: list[str] = []
+    if not (state.get("plan") or []):
+        first_add = next(
+            (op for op in new_ops if op.get("type") == "add_node"), None,
+        )
+        if first_add is not None:
+            spec = next(
+                (s for (n, _v), s in registry.catalog.items()
+                 if n == first_add.get("block_id")), None,
+            )
+            if spec and spec.get("category") != "source":
+                source_issues.append(
+                    f"first add_node {first_add.get('node_id')} uses "
+                    f"block_id={first_add.get('block_id')!r} (category="
+                    f"{spec.get('category')!r}) — step_1 must start with a "
+                    f"source-category block (e.g. block_process_history / "
+                    f"block_mcp_call)"
+                )
+    combined_issues = req_issues + col_issues + source_issues
     if combined_issues:
         logger.warning(
             "compile_chunk_node: step %s attempt %d validation issues: req=%s col=%s — retry",
