@@ -501,8 +501,14 @@ async def resume_graph_build_with_clarify(
     try:
         pre_state = await graph.aget_state(config)
         sse_offset = len((pre_state.values or {}).get("sse_events") or [])
+        # v19 (2026-05-14): pass-through the answers dict directly so the
+        # caller can send EITHER `{answers: {qid: value}}` (legacy MCQ)
+        # OR `{confirmations: {bid: {action, edit_text}}}` (intent bullets).
+        # Previously we wrapped as `{"answers": answers}` which broke the
+        # bullets path because clarify_intent_node looks for top-level
+        # `confirmations` key, not nested under `answers`.
         async for chunk in graph.astream(
-            Command(resume={"answers": answers}),
+            Command(resume=answers),
             config=config,
             stream_mode="values",
         ):

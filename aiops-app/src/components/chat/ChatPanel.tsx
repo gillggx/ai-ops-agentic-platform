@@ -5,6 +5,7 @@ import type { AIOpsReportContract } from "aiops-contract";
 import { isValidContract } from "aiops-contract";
 import { consumeSSE } from "@/lib/sse";
 import { RuleProposalCard } from "@/components/copilot/RuleProposalCard";
+import { BulletConfirmCard, type IntentBullet } from "@/components/chat/BulletConfirmCard";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -30,12 +31,21 @@ interface ChatMessage {
   id: number;
   role: "user" | "agent";
   content: string;
-  /** Optional render card embedded in agent message (Phase 9 rule_proposal etc.). */
-  card?: {
-    type: "rule_proposal";
-    rule_draft: Parameters<typeof RuleProposalCard>[0]["ruleDraft"];
-    preview: Parameters<typeof RuleProposalCard>[0]["preview"];
-  };
+  /** Optional render card embedded in agent message. */
+  card?:
+    | {
+        type: "rule_proposal";
+        rule_draft: Parameters<typeof RuleProposalCard>[0]["ruleDraft"];
+        preview: Parameters<typeof RuleProposalCard>[0]["preview"];
+      }
+    | {
+        type: "intent_confirm";
+        chat_session_id: string;
+        bullets: IntentBullet[];
+        too_vague_reason?: string;
+        resolved?: "confirmed" | "refused" | "error";
+        resolved_summary?: string;
+      };
 }
 
 interface HitlRequest {
@@ -355,6 +365,30 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
             }]);
             break;
           }
+
+          // v19: chat clarify pause — model 要 user 先確認 intent bullets.
+          case "pb_intent_confirm": {
+            const bullets = (ev.bullets as IntentBullet[]) ?? [];
+            const reason = (ev.too_vague_reason as string | undefined) || undefined;
+            const chatSid = String(ev.session_id ?? ev.build_session_id ?? "");
+            if (bullets.length > 0) {
+              setChatHistory((prev) => [...prev, {
+                id: nextId(),
+                role: "agent",
+                content: "",
+                card: {
+                  type: "intent_confirm",
+                  chat_session_id: chatSid,
+                  bullets,
+                  too_vague_reason: reason,
+                },
+              }]);
+              addLog(makeLog("🧠",
+                `INTENT CONFIRM | ${bullets.length} bullet(s) waiting for user`,
+                "hitl"));
+            }
+            break;
+          }
         }
       }, (err) => {
         addLog(makeLog("❌", `連線失敗: ${err.message}`, "error"));
@@ -459,6 +493,39 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
                     ruleDraft={msg.card.rule_draft}
                     preview={msg.card.preview}
                   />
+                </div>
+              ) : msg.card?.type === "intent_confirm" ? (
+                <div style={{ maxWidth: "95%", width: "100%" }}>
+                  {msg.card.resolved === undefined ? (
+                    <BulletConfirmCard
+                      chatSessionId={msg.card.chat_session_id}
+                      bullets={msg.card.bullets}
+                      tooVagueReason={msg.card.too_vague_reason}
+                      onResolved={(status, payload) => {
+                        // Mark resolved + push a synthesized agent message.
+                        const p = payload as { status?: string; summary?: string } | undefined;
+                        const summary = p?.summary || "";
+                        const finalText = status === "confirmed"
+                          ? (summary ? `✓ 已建好：${summary}` : "✓ 已建好，請到 Pipeline Builder 查看")
+                          : status === "refused"
+                            ? "✋ 已取消 — 請重新描述你要的需求"
+                            : "⚠ 處理時出錯，請再試一次";
+                        setChatHistory((prev) => prev.map((m) =>
+                          m.id === msg.id && m.card?.type === "intent_confirm"
+                            ? { ...m, card: { ...m.card, resolved: status, resolved_summary: summary } }
+                            : m,
+                        ).concat([{ id: nextId(), role: "agent", content: finalText }]));
+                      }}
+                    />
+                  ) : (
+                    <div style={{
+                      fontSize: 11, color: "#4a5568", padding: "6px 10px",
+                      background: "#1a202c", border: "1px solid #2d3748",
+                      borderRadius: 6, fontStyle: "italic",
+                    }}>
+                      Intent {msg.card.resolved === "confirmed" ? "✓ confirmed" : msg.card.resolved === "refused" ? "✗ refused" : "⚠ error"}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div style={{

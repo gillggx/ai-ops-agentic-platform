@@ -170,6 +170,74 @@ async def agent_chat(req: ChatRequest, caller: CallerContext = ServiceAuth) -> E
     return EventSourceResponse(_chat_stream(req, caller))
 
 
+# ── v19 (2026-05-14): chat intent confirmation resume endpoint ──────
+
+
+class ChatIntentRespondRequest(BaseModel):
+    """v19: when chat user confirms intent bullets via BulletConfirmCard,
+    frontend POSTs this. We look up the pending build session, resume
+    via resume_graph_build_with_clarify, and stream the build progress
+    back. No LLM continuation in v1 — the chat agent's pre-pause text
+    reply ('我先確認...') stays; this resume just builds + returns the
+    pipeline result as an SSE stream that frontend renders into a new
+    synthesized assistant message.
+    """
+    model_config = ConfigDict(populate_by_name=True)
+
+    chat_session_id: str = Field(..., alias="chatSessionId")
+    confirmations: dict[str, dict] = Field(default_factory=dict)
+
+
+async def _chat_intent_respond_stream(
+    req: ChatIntentRespondRequest,
+    caller: CallerContext,
+) -> AsyncGenerator[dict, None]:
+    from python_ai_sidecar.agent_orchestrator_v2 import pending_clarify as _pc
+    from python_ai_sidecar.agent_builder.graph_build import (
+        resume_graph_build_with_clarify,
+    )
+
+    pending = _pc.consume(req.chat_session_id)
+    if pending is None:
+        yield {"event": "error", "data": json.dumps({
+            "message": "no pending intent clarification for this chat session",
+        })}
+        yield {"event": "done", "data": json.dumps({"status": "no_pending"})}
+        return
+
+    log.info(
+        "chat/intent-respond: chat_session=%s build_session=%s n_confirmations=%d",
+        req.chat_session_id, pending.build_session_id, len(req.confirmations),
+    )
+
+    # Convert confirmations to format clarify_intent_node expects
+    answers_payload = {"confirmations": req.confirmations}
+
+    try:
+        async for stream_event in resume_graph_build_with_clarify(
+            session_id=pending.build_session_id,
+            answers=answers_payload,
+        ):
+            yield {
+                "event": stream_event.type,
+                "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
+            }
+    except Exception as ex:  # noqa: BLE001
+        log.exception("chat/intent-respond resume failed")
+        yield {"event": "error", "data": json.dumps({
+            "message": f"resume failed: {ex.__class__.__name__}: {str(ex)[:200]}",
+        }, ensure_ascii=False)}
+        yield {"event": "done", "data": json.dumps({"status": "failed"})}
+
+
+@router.post("/chat/intent-respond")
+async def agent_chat_intent_respond(
+    req: ChatIntentRespondRequest, caller: CallerContext = ServiceAuth,
+) -> EventSourceResponse:
+    """v19 chat intent confirmation resume."""
+    return EventSourceResponse(_chat_intent_respond_stream(req, caller))
+
+
 @router.post("/build")
 async def agent_build(req: BuildRequest, caller: CallerContext = ServiceAuth) -> EventSourceResponse:
     return EventSourceResponse(_build_stream(req, caller))
@@ -226,15 +294,17 @@ async def agent_build_confirm(
 
 class BuildClarifyRespondRequest(BaseModel):
     """v15 — resume a paused graph from clarify_intent_node with user's
-    answers to the multiple-choice questions emitted earlier. Frontend
-    POSTs this when user picks options on the clarification dialog.
+    answers. v18: also accepts intent bullets confirmations.
+
+    Frontend POSTs ONE of these formats (or both for backwards-compat):
+      - `answers: {qid: value}` — legacy MCQ format
+      - `confirmations: {bid: {action, edit_text}}` — v18 intent bullets
     """
     model_config = ConfigDict(populate_by_name=True)
 
     session_id: str = Field(..., alias="sessionId")
-    # {question_id: chosen_value}; values can be option `value`s from the
-    # original questions or free-text the user typed.
     answers: dict[str, str] = Field(default_factory=dict)
+    confirmations: dict[str, dict] = Field(default_factory=dict)
 
 
 async def _build_clarify_stream(
@@ -244,9 +314,18 @@ async def _build_clarify_stream(
         resume_graph_build_with_clarify,
     )
 
+    # v19: runner now passes the dict directly to Command(resume=...),
+    # so build the right shape here. Support both legacy MCQ answers
+    # and intent confirmations in the same payload.
+    resume_payload: dict = {}
+    if req.answers:
+        resume_payload["answers"] = req.answers
+    if req.confirmations:
+        resume_payload["confirmations"] = req.confirmations
+
     try:
         async for stream_event in resume_graph_build_with_clarify(
-            session_id=req.session_id, answers=req.answers,
+            session_id=req.session_id, answers=resume_payload,
         ):
             yield {
                 "event": stream_event.type,

@@ -458,6 +458,13 @@ async def _execute_build_pipeline_live(
     op_count = 0
     last_status: str = "running"
     final_pipeline: Any = base_pipeline_dict
+    # v19 (2026-05-14): chat mode also runs clarify_intent now. When the
+    # graph pauses at intent_confirm_required, store pending state +
+    # return a clarify_pending tool_result so the chat LLM can craft a
+    # "let me confirm first" reply. Frontend renders BulletConfirmCard
+    # and POSTs /agent/chat/intent-respond → that endpoint resumes the
+    # build and continues the chat agent loop with the build result.
+    intent_pause: Dict[str, Any] | None = None
     try:
         async for evt in stream_graph_build(
             instruction=prompt,
@@ -466,6 +473,25 @@ async def _execute_build_pipeline_live(
             skip_confirm=True,  # chat conversation IS the confirmation
             skill_step_mode=skill_step_mode,
         ):
+            # v19: intercept intent_confirm_required pause
+            if evt.type == "intent_confirm_required":
+                intent_pause = evt.data or {}
+                # Emit a pb_glass-style event so chat panel can render the
+                # bullets card without needing a new SSE event type
+                # plumbed through Java.
+                if event_emit is not None:
+                    try:
+                        event_emit({
+                            "type": "pb_intent_confirm",
+                            "session_id": sid,
+                            "build_session_id": intent_pause.get("session_id") or sid,
+                            "bullets": intent_pause.get("bullets") or [],
+                            "too_vague_reason": intent_pause.get("too_vague_reason"),
+                        })
+                    except Exception:  # noqa: BLE001
+                        pass
+                break  # stop draining; resume will happen via /chat/intent-respond
+
             payload = wrap_build_event_for_chat(evt, sid)
             if payload is None:
                 continue
@@ -487,6 +513,33 @@ async def _execute_build_pipeline_live(
         logger.exception("build_pipeline_live graph crashed")
         return {"status": "failed",
                 "error_message": f"graph crashed: {type(e).__name__}: {e}"}
+
+    # v19: if we hit intent_confirm pause, return clarify_pending tool result
+    if intent_pause is not None:
+        try:
+            from python_ai_sidecar.agent_orchestrator_v2 import pending_clarify as _pc
+            _pc.register(_pc.PendingClarify(
+                chat_session_id=str(chat_session_id) if chat_session_id else "",
+                build_session_id=str(intent_pause.get("session_id") or sid),
+                bullets=intent_pause.get("bullets") or [],
+                instruction=prompt,
+                base_pipeline=base_pipeline_dict,
+                skill_step_mode=skill_step_mode,
+                user_id=chat_user_id,
+            ))
+        except Exception as ex:  # noqa: BLE001
+            logger.warning("pending_clarify register failed: %s", ex)
+        return {
+            "status": "clarify_pending",
+            "build_session_id": intent_pause.get("session_id") or sid,
+            "n_bullets": len(intent_pause.get("bullets") or []),
+            "note": (
+                "Build paused for intent confirmation — wait for user to confirm "
+                "the intent bullets via BulletConfirmCard. Generate a short reply "
+                "telling the user you'd like to verify their intent before building, "
+                "then stop."
+            ),
+        }
 
     if final_pipeline is None:
         # Graph never finalized — return what we have.

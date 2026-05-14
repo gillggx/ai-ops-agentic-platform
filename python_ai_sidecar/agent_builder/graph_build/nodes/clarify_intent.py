@@ -134,20 +134,18 @@ async def clarify_intent_node(state: BuildGraphState) -> dict[str, Any]:
         logger.info("clarify_intent: skipped (already done, attempts=%d)", attempts)
         return {}
 
-    # Chat mode (skip_confirm=True) has no UI to surface clarification
-    # questions — the chat orchestrator already asked the user before
-    # calling build_pipeline_live, and there is no /agent/build/clarify-
-    # respond path from the chat panel. If we interrupt() here the graph
-    # pauses forever and the user sees an empty canvas. Skip the gate;
-    # macro_plan will handle whatever residual ambiguity remains by
-    # picking sensible defaults from block descriptions.
-    if state.get("skip_confirm"):
-        logger.info("clarify_intent: skipped (skip_confirm=True, chat mode)")
-        return {
-            "clarify_attempts": 1,
-            "clarifications": {},
-            "sse_events": [_event("clarify_skipped", {"reason": "skip_confirm"})],
-        }
+    # v19 (2026-05-14): chat mode (skip_confirm=True) ALSO runs clarify
+    # so chat users see intent bullets like Skill Builder. Pause-handling
+    # for chat: see agent_orchestrator_v2/nodes/tool_execute.py which
+    # detects the intent_confirm_required SSE event, stores pending state
+    # in agent_orchestrator_v2.pending_clarify, returns clarify_pending
+    # tool_result, and a separate /agent/chat/intent-respond endpoint
+    # resumes the build when the user confirms via BulletConfirmCard.
+    #
+    # (was previously: short-circuit on skip_confirm to avoid pausing the
+    # chat agent's tool loop, but this hid the bullets entirely from
+    # chat users — per user feedback 2026-05-14 "新的skill 就是要出現，
+    # 不論是 skill builder or chat mode")
 
     instruction = state.get("instruction") or ""
     if not instruction.strip():

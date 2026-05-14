@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8" />
+<title>AIOps Agent Workflow (v18 · 2026-05-14)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #fafaf8;
+    --bg-card: #ffffff;
+    --border: #e5e7eb;
+    --text: #1f2937;
+    --text-muted: #6b7280;
+    --accent: #2563eb;
+    --success: #16a34a;
+    --warning: #f59e0b;
+    --danger: #dc2626;
+    --code-bg: #f4f4f4;
+    --mono: ui-monospace, Menlo, Monaco, "SF Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Inter Tight", system-ui, sans-serif;
+  }
+  body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.65;
+  }
+  .container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 32px 24px 80px;
+  }
+  h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.3px; font-weight: 700; }
+  h2 { font-size: 19px; margin: 32px 0 12px; letter-spacing: -0.2px; font-weight: 600;
+       padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 15px; margin: 20px 0 8px; font-weight: 600; color: var(--text); }
+  .lead { color: var(--text-muted); margin-bottom: 18px; font-size: 13px; }
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.3px;
+    background: var(--accent); color: #fff;
+  }
+  .card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 20px; margin: 16px 0;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .card.mermaid-host { padding: 12px; }
+  .mermaid { font-family: var(--sans); }
+  table {
+    width: 100%; border-collapse: collapse; font-size: 13px; margin: 8px 0;
+  }
+  th, td {
+    padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th { background: #f9fafb; font-weight: 600; font-size: 12px;
+       text-transform: uppercase; letter-spacing: 0.3px; color: var(--text-muted); }
+  tr:last-child td { border-bottom: none; }
+  code {
+    font-family: var(--mono); font-size: 12.5px;
+    background: var(--code-bg); padding: 1px 6px; border-radius: 4px;
+    color: var(--text);
+  }
+  ul, ol { padding-left: 22px; }
+  li { margin: 2px 0; }
+  .pill {
+    display: inline-block; padding: 2px 7px; border-radius: 4px;
+    font-size: 11px; font-weight: 600;
+    background: #f3f4f6; color: var(--text-muted); margin-right: 4px;
+  }
+  .pill.ok { background: #dcfce7; color: var(--success); }
+  .pill.warn { background: #fef3c7; color: var(--warning); }
+  .pill.danger { background: #fee2e2; color: var(--danger); }
+  .pill.info { background: #dbeafe; color: var(--accent); }
+  .toc {
+    background: var(--bg-card); border-left: 3px solid var(--accent);
+    padding: 12px 18px; margin: 18px 0;
+  }
+  .toc a { color: var(--accent); text-decoration: none; margin-right: 14px; font-size: 12.5px; }
+  .toc a:hover { text-decoration: underline; }
+  .meta {
+    font-size: 11.5px; color: var(--text-muted); font-family: var(--mono);
+    margin-top: 6px;
+  }
+  .note {
+    background: #fef9e7; border-left: 3px solid var(--warning);
+    padding: 10px 14px; font-size: 12.5px; margin: 12px 0;
+    border-radius: 4px;
+  }
+  .note .label { font-weight: 700; color: var(--warning); margin-right: 6px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <span class="badge">v18 · 2026-05-14</span>
+  <h1>AIOps Agent Workflow</h1>
+  <div class="lead">
+    三個 agent surface 共用 <code>python_ai_sidecar</code>，但進入不同 orchestrator。
+    本文聚焦 <strong>Builder graph</strong>（最複雜），Chat 跟 Advisor 在後段簡述。
+  </div>
+  <div class="meta">
+    sources: <code>graph_build/graph.py</code>, <code>graph_build/nodes/*</code>,
+    <code>agent_orchestrator_v2/*</code>, <code>agent_builder/advisor/*</code>
+  </div>
+
+  <div class="toc">
+    <strong style="font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">目錄</strong><br/>
+    <a href="#routing">1. Routing</a>
+    <a href="#builder">2. Builder Graph</a>
+    <a href="#nodes">3. Node 責任</a>
+    <a href="#autofixes">4. Compile autofixes</a>
+    <a href="#reject">5. Reject-and-ask loop</a>
+    <a href="#chat">6. Chat Orchestrator</a>
+    <a href="#advisor">7. Block Advisor</a>
+    <a href="#status">8. Status 語義</a>
+    <a href="#files">9. Code 位置</a>
+  </div>
+
+  <h2 id="routing">1. Routing entrypoint</h2>
+  <div class="card mermaid-host">
+  <pre class="mermaid">
+flowchart LR
+    User["User prompt"] --> Classify["classify_advisor_intent<br/>(LLM · 5 buckets)"]
+    Classify -->|BUILD| Builder["graph_build<br/>(LangGraph · 本文重點)"]
+    Classify -->|EXPLAIN<br/>COMPARE<br/>RECOMMEND<br/>AMBIGUOUS| Advisor["block_advisor stream<br/>(Q&amp;A)"]
+    Chat["Chat panel<br/>/internal/agent/chat"] --> ChatOrch["agent_orchestrator_v2<br/>(Anthropic tool-use loop)"]
+    ChatOrch -.calls tool.-> Builder
+  </pre>
+  </div>
+
+  <h2 id="builder">2. Builder Graph (LangGraph)</h2>
+  <p>所有從 Skill Builder 或 chat 的 <code>build_pipeline_live</code> tool 都走這條。</p>
+  <div class="card mermaid-host">
+  <pre class="mermaid">
+flowchart TD
+    START([START]) --> CL["clarify_intent_node<br/>(LLM · intent bullets<br/>+ block preview)"]
+
+    CL -->|skip_confirm=true<br/>chat (today)| MP["macro_plan_node<br/>(LLM · 1-6 step plan)"]
+    CL -.->|⏸ intent_confirm_required<br/>skill mode| PAUSE1{{"PAUSE<br/>frontend renders<br/>BulletCard<br/>user ✓✗"}}
+    PAUSE1 -.->|/clarify-respond resume| MP
+
+    MP -->|too_vague<br/>attempts &lt; 2| CL
+    MP -->|too_vague<br/>attempts ≥ 2| FIN["finalize_node<br/>status=refused"]
+    MP -->|skip_confirm=true| CR["canvas_reset_node"]
+    MP -->|skill / builder mode| CG{{"PAUSE<br/>confirm_gate<br/>user ✓ Apply"}}
+
+    CG -.->|user Apply| CR
+    CG -.->|user modify| PL["plan_node<br/>(legacy replan)"]
+    CG -.->|user cancel| FIN
+
+    PL --> VA["validate_plan_node<br/>(schema + col refs)"]
+    VA -->|errors| RP["repair_plan_node<br/>(LLM)"]
+    RP --> VA
+    VA -->|max retries| FIN
+    VA -->|ok + macro_plan| CG
+    VA -->|ok no macro| CR
+
+    CR --> CC["compile_chunk_node<br/>(LLM 1 step at a time)<br/>+ 12 autofixes"]
+    CC -->|retry on validate fail| CC
+    CC -->|ok| DO["dispatch_op_node"]
+    DO --> CT["call_tool_node<br/>(executor.execute)"]
+
+    CT -->|more ops in chunk| DO
+    CT -->|chunk done<br/>more macro steps| AMS["advance_macro_step"]
+    AMS --> CC
+    CT -->|all done| FIN
+    CT -->|op error| RO["reflect_op_node<br/>(LLM patches 1 op)"]
+    CT -->|repair_op suggested| ROP["repair_op_node<br/>(LLM retries op)"]
+    RO --> CT
+    ROP --> CT
+    CT -->|severe| RP
+
+    FIN --> IE["inspect_execution_node<br/>(dry_run + semantic)"]
+    IE -->|issues + budget left| RFP["reflect_plan_node<br/>(LLM rewrites plan)"]
+    RFP --> VA
+    IE -->|ok / no budget /<br/>status=finished| LO["layout_node<br/>(canvas xy)"]
+    LO --> END([END])
+  </pre>
+  </div>
+
+  <h2 id="nodes">3. Node 責任</h2>
+  <table>
+    <thead><tr><th>Node</th><th>LLM?</th><th>做什麼</th><th>輸出</th></tr></thead>
+    <tbody>
+      <tr><td><code>clarify_intent</code></td><td><span class="pill ok">✓</span></td><td>把 user 的話拆 2-6 個 intent bullets，每個 bullet 可帶 terminal_block 預覽。Skill mode 暫停等 user ✓✗</td><td>bullets[] + previews[]</td></tr>
+      <tr><td><code>macro_plan</code></td><td><span class="pill ok">✓</span></td><td>把任務拆 1-6 個 atomic step，每 step 選 candidate block</td><td>macro_plan[]</td></tr>
+      <tr><td><code>confirm_gate</code></td><td><span class="pill">✗</span></td><td>暫停等 Apply（skill / builder mode）</td><td>(interrupt)</td></tr>
+      <tr><td><code>canvas_reset</code></td><td><span class="pill">✗</span></td><td>清空舊 build 殘留 nodes</td><td>plan=[]</td></tr>
+      <tr><td><code>compile_chunk</code></td><td><span class="pill ok">✓</span></td><td>per macro step 產 add_node/connect/set_param ops + 12 種 autofix</td><td>ops[]</td></tr>
+      <tr><td><code>dispatch_op</code></td><td><span class="pill">✗</span></td><td>挑 plan 裡下個 op</td><td>1 op</td></tr>
+      <tr><td><code>call_tool</code></td><td><span class="pill">✗</span></td><td>實際執行 op（executor in-process）</td><td>exec_trace snapshot</td></tr>
+      <tr><td><code>reflect_op</code></td><td><span class="pill ok">✓</span></td><td>op fail 時，LLM patch 那一個 op</td><td>patched op</td></tr>
+      <tr><td><code>repair_op</code></td><td><span class="pill ok">✓</span></td><td>跟 reflect_op 類似但 scope 更小</td><td>retried op</td></tr>
+      <tr><td><code>repair_plan</code></td><td><span class="pill ok">✓</span></td><td>plan validator fail 時 LLM 重寫整 plan</td><td>new plan</td></tr>
+      <tr><td><code>finalize</code></td><td><span class="pill">✗</span></td><td>組 PipelineJSON + 跑 dry-run</td><td>final_pipeline + dry_run_results</td></tr>
+      <tr><td><code>inspect_execution</code></td><td><span class="pill">✗</span></td><td>掃 dry-run 結果找 semantic issue（單點 chart / 空 upstream）</td><td>issues[]</td></tr>
+      <tr><td><code>reflect_plan</code></td><td><span class="pill ok">✓</span></td><td>dry-run 有問題時 LLM 重寫 plan</td><td>new plan</td></tr>
+      <tr><td><code>layout</code></td><td><span class="pill">✗</span></td><td>算 canvas xy positions</td><td>positions</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="autofixes">4. compile_chunk 內的 12 種 deterministic autofix</h2>
+  <p>每次 LLM 產 ops 後、validate 前跑（按順序）：</p>
+  <ol>
+    <li><code>_auto_insert_unnest</code> — filter 引用 nested leaf 時自動補 block_unnest</li>
+    <li><code>_auto_rewire_chart_chains</code> — 接錯 chart_spec→data 改接 dataframe upstream</li>
+    <li><code>_autocorrect_filter_values</code> — fuzzy match (例 'xbar' → 'xbar_chart')</li>
+    <li><code>_autostrip_singleton_groupby</code> — 高 cardinality group_by 收成 n=1 時自動 strip</li>
+    <li><code>_normalize_select_fields</code> — string array → [{path:x}]</li>
+    <li><code>_normalize_set_param_ops</code> — malformed set_param 折回 add_node</li>
+    <li><code>_drop_unspecced_cpk</code> — block_cpk 沒給 usl/lsl 就 drop</li>
+    <li><strong><code>_force_skill_terminal</code> (v18)</strong> — skill_step_mode 最後一步用 block_threshold → 改 block_step_check</li>
+    <li><strong><code>_autocorrect_column_refs</code> (v18)</strong> — LLM 亂編 column 名時 fuzzy 配 upstream</li>
+    <li><code>_drop_malformed_ops</code> — None id 等垃圾 op 丟掉</li>
+    <li><code>_resolve_input_refs</code> — $X 沒宣告時用 instruction 裡的 [BRACKET] 補</li>
+    <li><code>_dedup_against_plan</code> — 跟既有 plan 重複的 add_node 丟掉</li>
+  </ol>
+
+  <h2 id="reject">5. v18 Reject-and-ask loop</h2>
+  <p>macro_plan 第一次 too_vague 不直接放棄，繞回 clarify_intent 帶著 reason 問更具體的問題：</p>
+  <div class="card mermaid-host">
+  <pre class="mermaid">
+flowchart LR
+    MP1["macro_plan #1<br/>too_vague"] -->|attempts=1<br/>status=needs_clarify| CL2["clarify_intent #2<br/>(看到 too_vague_reason<br/>出針對性 bullets)"]
+    CL2 --> MP2["macro_plan #2"]
+    MP2 -->|ok| OK["compile → ..."]
+    MP2 -->|還是 too_vague<br/>attempts=2| REF["finalize<br/>status=refused<br/>📩 '我搞不懂這個需求'"]
+  </pre>
+  </div>
+
+  <h2 id="chat">6. Chat Orchestrator</h2>
+  <p>跟 Builder graph 完全分開的 surface：Anthropic native tool-use loop，沒 LangGraph state machine。Builder graph 是它的 tool 之一。</p>
+  <div class="card mermaid-host">
+  <pre class="mermaid">
+flowchart LR
+    Msg["User chat message"] --> IC["intent_classifier<br/>(deterministic 5 buckets)"]
+    IC -->|TOOL| TLE["tool_loop"]
+    IC -->|SYNTHESIS| SYN["synthesis_node"]
+    IC -->|KNOWLEDGE| KN["knowledge"]
+    IC -->|CLARIFY| CLR["clarify gate<br/>(deterministic)"]
+    TLE --> Dispatch{Tool dispatch}
+    Dispatch -->|build_pipeline_live| Builder["graph_build<br/>(section 2)"]
+    Dispatch -->|other 20+ tools| Exec["tool execution"]
+    Exec --> TLE
+    Builder --> TLE
+  </pre>
+  </div>
+
+  <h2 id="advisor">7. Block Advisor</h2>
+  <p>非 BUILD intent 走的子流程 — 純 1 LLM call per bucket，無 state。</p>
+  <div class="card mermaid-host">
+  <pre class="mermaid">
+flowchart LR
+    Q["User question:<br/>'how does block_X work?'"] --> Class["classify intent"]
+    Class -->|EXPLAIN| EX["explain_block<br/>(讀 DB block description)"]
+    Class -->|COMPARE| CMP["compare_blocks<br/>(讀 2 個 block description)"]
+    Class -->|RECOMMEND| REC["recommend_block<br/>(讀整 catalog + prompt)"]
+  </pre>
+  </div>
+
+  <h2 id="status">8. Build status 語義</h2>
+  <table>
+    <thead><tr><th>Status</th><th>意義</th><th>UI 表現</th></tr></thead>
+    <tbody>
+      <tr><td><span class="pill info">running</span></td><td>初始 / 執行中</td><td>只在 server-side state，不會留在 trace</td></tr>
+      <tr><td><span class="pill warn">intent_confirm_required</span></td><td>paused at clarify_intent 等 user ✓✗</td><td>BulletConfirmCard 卡片</td></tr>
+      <tr><td><span class="pill info">needs_clarify</span></td><td>macro_plan too_vague 暫態，繞回 clarify</td><td>通常 user 看不到（馬上轉態）</td></tr>
+      <tr><td><span class="pill warn">confirm_pending</span></td><td>paused at confirm_gate 等 Apply</td><td>Builder canvas Apply 卡</td></tr>
+      <tr><td><span class="pill danger">refused</span></td><td>太模糊 2 次後放棄</td><td>banner: ✋ Refused — 請重新描述</td></tr>
+      <tr><td><span class="pill danger">failed</span></td><td>build 完全沒產出 node</td><td>banner: ✗ Failed</td></tr>
+      <tr><td><span class="pill danger">failed_structural</span></td><td>有 node 但 pipeline 結構壞</td><td>banner: ✗ Structural error</td></tr>
+      <tr><td><span class="pill ok">finished</span></td><td>build + dry-run 都 OK</td><td>green ✓</td></tr>
+      <tr><td><span class="pill">cancelled</span></td><td>user 在 confirm_gate 拒絕</td><td>neutral</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="files">9. Code 位置</h2>
+  <table>
+    <thead><tr><th>Surface</th><th>Path</th></tr></thead>
+    <tbody>
+      <tr><td>Graph definition</td><td><code>python_ai_sidecar/agent_builder/graph_build/graph.py</code></td></tr>
+      <tr><td>Nodes</td><td><code>python_ai_sidecar/agent_builder/graph_build/nodes/</code></td></tr>
+      <tr><td>Tracer (writes <code>/tmp/builder-traces/*.json</code>)</td><td><code>python_ai_sidecar/agent_builder/graph_build/trace.py</code></td></tr>
+      <tr><td>SSE streaming runner</td><td><code>python_ai_sidecar/agent_builder/graph_build/runner.py</code></td></tr>
+      <tr><td>Block executors (50+)</td><td><code>python_ai_sidecar/pipeline_builder/blocks/</code></td></tr>
+      <tr><td>Block catalog (LLM-visible)</td><td><code>python_ai_sidecar/pipeline_builder/seed.py</code></td></tr>
+      <tr><td>Chat orchestrator</td><td><code>python_ai_sidecar/agent_orchestrator_v2/</code></td></tr>
+      <tr><td>Block advisor</td><td><code>python_ai_sidecar/agent_builder/advisor/</code></td></tr>
+      <tr><td>Admin trace viewer</td><td><code>aiops-app/src/app/admin/build-traces/page.tsx</code></td></tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <span class="label">注意</span>
+    這份 HTML 跟 <code>docs/agent_workflow.md</code> 是同一份內容、互為對照。
+    任何 graph routing / node 名稱 / autofix 列表 / status 語義改動，<strong>兩份都要同步</strong>，
+    在 commit + push 之前確認過。詳見 memory 中的 「<code>feedback_readme_before_push.md</code>」。
+  </div>
+
+  <div class="meta" style="margin-top:32px;">
+    Generated 2026-05-14 · Maintained alongside <code>agent_workflow.md</code>
+  </div>
+
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'neutral',
+    flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'basis' },
+    securityLevel: 'loose',
+  });
+</script>
+</body>
+</html>
