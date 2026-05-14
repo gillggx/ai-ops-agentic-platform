@@ -25,6 +25,31 @@ import { applyGlassOp, OP_LABELS, opDetail } from "@/lib/pipeline-builder/glass-
 import { PlanRenderer, type PlanItem } from "@/components/copilot/PlanRenderer";
 import { BulletConfirmCard, type IntentBullet } from "@/components/chat/BulletConfirmCard";
 type ChatRole = "user" | "agent" | "op" | "error" | "advisor" | "confirm";
+interface DagNode {
+  logical_id: string;
+  block_id: string | null;
+  label?: string;
+  step_idx?: number;
+}
+interface DagEdge {
+  src: string;
+  dst: string;
+  label?: string;
+}
+interface DagMacroStep {
+  step_idx: number;
+  text: string;
+  depends_on: number[];
+  candidate_block: string | null;
+  expected_kind?: string;
+  produced: string[];
+}
+interface DagPayload {
+  nodes: DagNode[];
+  edges: DagEdge[];
+  mermaid: string;
+  macro_steps: DagMacroStep[];
+}
 interface ConfirmData {
   session_id: string;
   plan_summary: string;
@@ -33,6 +58,8 @@ interface ConfirmData {
   plan_ops: string[];
   n_ops: number;
   resolved: boolean;
+  /** v20 (2026-05-15) — DAG visualization payload. */
+  dag?: DagPayload;
 }
 interface IntentConfirmData {
   session_id: string;
@@ -210,6 +237,7 @@ export default function AgentBuilderPanel({
             plan_ops: (data.plan_ops as string[]) ?? [],
             n_ops: (data.n_ops as number) ?? 0,
             resolved: false,
+            dag: (data.dag as DagPayload | undefined),
           };
           setLines((p) => [...p, { id: nextId(), role: "confirm", text: "", confirm: cd }]);
           // Stream pauses here — waiting on user POST to /confirm.
@@ -803,6 +831,93 @@ function MessageRow({ line }: { line: ChatLine }) {
 
 
 /**
+ * v20 (2026-05-15) — DAG visualization. Shows macro steps as rows with
+ * depends_on arrows + the actual node graph. Parallel branches (chart +
+ * verdict) become visible: e.g. step 5 depends_on=[3], step 6 depends_on=[1]
+ * → user sees they fan out from different upstream nodes, not a linear chain.
+ *
+ * Mermaid string is also exposed for power users to paste into mermaid.live.
+ */
+function DagPanel({ dag }: { dag: DagPayload }) {
+  const macro = dag.macro_steps || [];
+  const nodes = dag.nodes || [];
+  const edges = dag.edges || [];
+  // Map logical_id → block label for edge readability
+  const labelOf = (lid: string) => {
+    const n = nodes.find((x) => x.logical_id === lid);
+    return n?.block_id || lid;
+  };
+  return (
+    <div style={{
+      marginBottom: 10, padding: "8px 10px",
+      background: "#ecfeff", borderRadius: 6, border: "1px solid #67e8f9",
+    }}>
+      <div style={{ fontSize: 11, fontWeight: 600, color: "#155e75", marginBottom: 6 }}>
+        🌳 Macro DAG（{macro.length} steps，{nodes.length} nodes，{edges.length} edges）
+      </div>
+      <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12, color: "#0c4a6e" }}>
+        {macro.map((s) => {
+          const isParallel = s.depends_on && s.depends_on.length > 0
+            && macro.some((o) => o.step_idx !== s.step_idx
+                && JSON.stringify(o.depends_on) === JSON.stringify(s.depends_on));
+          const depStr = s.depends_on && s.depends_on.length > 0
+            ? `← step ${s.depends_on.join(",")}`
+            : "(source)";
+          return (
+            <li key={s.step_idx} style={{ marginBottom: 3 }}>
+              <strong>Step {s.step_idx}</strong>
+              {": "}
+              <span>{s.text}</span>
+              {" "}
+              <span style={{ color: "#0891b2", fontSize: 11 }}>{depStr}</span>
+              {" "}
+              <code style={{ fontSize: 10, color: "#52525b" }}>
+                [{s.candidate_block || "?"}]
+              </code>
+              {isParallel && (
+                <span style={{
+                  marginLeft: 6, fontSize: 10, color: "#a16207",
+                  background: "#fef3c7", padding: "1px 5px", borderRadius: 3,
+                }}>parallel</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {edges.length > 0 && (
+        <details style={{ marginTop: 6 }}>
+          <summary style={{ fontSize: 11, color: "#155e75", cursor: "pointer" }}>
+            ▶ 實際 node graph（{nodes.length} nodes / {edges.length} edges）
+          </summary>
+          <ul style={{ margin: "4px 0 0", paddingLeft: 16, fontSize: 11, color: "#0c4a6e" }}>
+            {edges.map((e, i) => (
+              <li key={i}>
+                <code>{e.src}</code> ({labelOf(e.src)})
+                {" → "}
+                <code>{e.dst}</code> ({labelOf(e.dst)})
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {dag.mermaid && (
+        <details style={{ marginTop: 4 }}>
+          <summary style={{ fontSize: 11, color: "#155e75", cursor: "pointer" }}>
+            ▶ Mermaid (paste to mermaid.live)
+          </summary>
+          <pre style={{
+            margin: "4px 0 0", padding: 6, fontSize: 10,
+            background: "#f0fdfa", border: "1px solid #99f6e4", borderRadius: 4,
+            color: "#134e4a", overflow: "auto", maxHeight: 160,
+          }}>{dag.mermaid}</pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
+
+/**
  * Phase 10 (graph_build v2) — confirm card. Rendered when sidecar emits
  * confirm_pending after plan_node finishes for a FROM_SCRATCH build.
  *
@@ -843,6 +958,9 @@ function ConfirmCard({
               {data.expected_outputs.map((s, i) => <li key={i}>{s}</li>)}
             </ul>
           </div>
+        )}
+        {data.dag && data.dag.macro_steps && data.dag.macro_steps.length > 0 && (
+          <DagPanel dag={data.dag} />
         )}
         <details style={{ marginBottom: 10 }}>
           <summary style={{ fontSize: 11, fontWeight: 600, color: "#52525b", cursor: "pointer" }}>

@@ -113,6 +113,15 @@ class BuildGraphState(TypedDict, total=False):
     current_macro_step: int
     # Per-step retry counter for compile_chunk_node failures.
     compile_attempts: dict[str, int]
+    # v20 (2026-05-15): DAG schema. After each compile_chunk, record which
+    # logical_ids that step produced. Downstream steps with depends_on=[parent]
+    # use step_outputs[parent][-1] as the connect's src_id (instead of the
+    # implicit "latest dataframe-output node" heuristic). Shape:
+    #   {1: ["n1"], 2: ["n2"], 3: ["n3"], 6: ["n6"]}
+    # Multi-op steps (auto-inserted unnest etc.) get all logicals appended in
+    # emission order; downstream connects to the LAST element (the terminal
+    # of that step's local chain).
+    step_outputs: dict[int, list[str]]
     # v13 (2026-05-13): per-node contracts the agent declares while writing
     # the plan. Runtime auto-preview compares each node's actual snapshot
     # to its contract; mismatch fires a targeted reflect_op (changes only
@@ -240,4 +249,5 @@ def initial_state(
         macro_plan=[],
         current_macro_step=0,
         compile_attempts={},
+        step_outputs={},
     )

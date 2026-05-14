@@ -58,7 +58,7 @@ MAX_MACRO_STEPS = 12
 MAX_TOO_VAGUE_ATTEMPTS = 2
 
 
-_SYSTEM = """你是 pipeline architect。User 給你需求，你把它**拆成 3-6 個高階步驟**，每步驟用一句中文描述要做什麼。
+_SYSTEM = """你是 pipeline architect。User 給你需求，你把它**拆成 3-8 個高階步驟**，每步驟用一句中文描述要做什麼。
 
 不要寫 JSON ops / 不要選 block 細項 / 不要寫 params — 那是下一個 worker 的工作。
 
@@ -67,6 +67,7 @@ _SYSTEM = """你是 pipeline architect。User 給你需求，你把它**拆成 3
   2. 每個 step 預期輸出的「形狀」(transform/table/chart/scalar)
   3. 終端 step (table/chart/scalar) 的預期欄位 (若 user 有明說)
   4. 大概用哪個 block — **只是建議候選**，從下方候選 blocks 清單挑
+  5. **每個 step 的 depends_on** — 這個 step 接在哪些上游 step 之後（用 step_idx 列表）
 
 ==選 block 的根本原則==
 **你只能讀候選 blocks 清單裡每個 block 的「What」+「Output」brief 來判斷**。如果某 block 的
@@ -74,10 +75,29 @@ Output 說它回的是 nested 結構（list / dict），下游就必須先有解
 **不要憑想像 / 訓練資料中的常識**填寫 step text 或 candidate_block — 一切看下方 brief。
 
 == 規則 ==
-  - 起點是 source block (從清單裡 category=source 的挑)
+  - 起點是 source block (從清單裡 category=source 的挑)，source step 的 depends_on=[] (空 list)
   - 終點必須是 user 要看的形狀（chart / table / scalar）— 看 user 需求字面要求什麼
   - 中間 step 只放 user 真的需要的轉換；別加 user 沒提的聚合 / 排序 / 篩欄
-  - 1-6 步皆可：**優先用 composite block 走 1 step**；只在必要時拆多步
+  - 1-8 步皆可：**優先用 composite block 走 1 step**；只在必要時拆多步
+
+== 🌳 DAG / depends_on 規則 (v20，強制) ==
+  - **每個 step 必須帶 depends_on 欄位** (list[int])，列出這 step 直接依賴哪些上游 step 的輸出
+  - source step (撈資料) → depends_on=[]
+  - 線性 step (filter/sort/unnest 接前一 step) → depends_on=[前一 step_idx]
+  - **平行 branch (重要！)**: 當 user 同時要求多種輸出 (e.g. 「verdict + chart」、「table + alarm」、「兩種圖」)，
+    這幾個 terminal **不要串成一條**，要從同一個共用上游 fan-out:
+      step 1 process_history (depends_on=[])
+      step 2 unnest spc_charts (depends_on=[1])
+      step 3 filter is_ooc (depends_on=[2])
+      step 4 verdict step_check (depends_on=[3])    ← branch A
+      step 5 spc_panel chart    (depends_on=[1])    ← branch B 從 source 重新 fan-out
+  - **rules**:
+      a. depends_on 的元素**必須 < 自己的 step_idx** (不可前向引用)
+      b. depends_on 的元素**必須是已經出現過的 step_idx** (不可指向不存在 step)
+      c. **不可有 cycle** (因為 a 規則自然防止)
+      d. **多 terminal 同時要產出時 (chart + verdict / table + chart) — 各 terminal 自己 fan-out 自己的分支**，
+         不要把 chart 接在 verdict 後面 (verdict 是 bool/scalar，沒有 dataframe 給 chart 用)
+      e. **沒有 parallel branch 上限** — 你判斷 user 需要幾個 terminal 就開幾個 branch
 
 ⚠ 每個 step 必須是「**單一原子動作**」 — 不要把多動作塞同一 step：
   - ❌ 「撈 process_history 並解開 spc_charts 並篩 xbar」(三件事擠一句)
@@ -104,7 +124,7 @@ Output 說它回的是 nested 結構（list / dict），下游就必須先有解
   "macro_plan": [
     {"step_idx": 1, "text": "撈 + 篩 + 畫 xbar_chart 過去 7 天的 line chart (composite)",
      "expected_kind": "chart", "expected_cols": ["eventTime", "value", "ucl", "lcl"],
-     "candidate_block": "block_spc_panel"}
+     "candidate_block": "block_spc_panel", "depends_on": []}
   ]
 }
 ❌ 錯誤（4 step composition — 已知會把多 SPC 砍剩 1 點，看 panel 的雷區警告）:
@@ -117,24 +137,50 @@ Output 說它回的是 nested 結構（list / dict），下游就必須先有解
   "macro_plan": [
     {"step_idx": 1, "text": "撈+畫 APC temperature 過去 24h trend (composite)",
      "expected_kind": "chart", "expected_cols": ["eventTime", "value"],
-     "candidate_block": "block_apc_panel"}
+     "candidate_block": "block_apc_panel", "depends_on": []}
   ]
 }
 
 範例 3: User 說「機台最後一次 OOC 時的 SPC 狀況 + 觸發 alarm (>= 2 OOC)」(skill mode)
-✅ 多步（verdict 分支需要 step_check）+ 同時 composite chart:
+✅ DAG 寫法（verdict 分支 + chart 分支從共用上游 fan-out，不串成一條）:
 {
-  "plan_summary": "verdict branch + spc_panel chart",
+  "plan_summary": "verdict branch + spc_panel chart, both fan out from process_history",
   "macro_plan": [
-    {"step_idx": 1, "text": "撈 process_history nested", "candidate_block": "block_process_history", "expected_kind": "transform"},
-    {"step_idx": 2, "text": "展開 spc_charts", "candidate_block": "block_unnest", "expected_kind": "transform"},
-    {"step_idx": 3, "text": "篩 is_ooc==true", "candidate_block": "block_filter", "expected_kind": "transform"},
-    {"step_idx": 4, "text": "依 eventTime groupby + count OOC SPCs", "candidate_block": "block_groupby_agg", "expected_kind": "transform"},
-    {"step_idx": 5, "text": "verdict: ooc_count >= 2", "candidate_block": "block_step_check", "expected_kind": "scalar"},
-    {"step_idx": 6, "text": "OOC 時刻所有 SPC chart panel (composite)", "candidate_block": "block_spc_panel", "expected_kind": "chart"}
+    {"step_idx": 1, "text": "撈 process_history nested", "candidate_block": "block_process_history",
+     "expected_kind": "transform", "depends_on": []},
+    {"step_idx": 2, "text": "展開 spc_charts", "candidate_block": "block_unnest",
+     "expected_kind": "transform", "depends_on": [1]},
+    {"step_idx": 3, "text": "篩 is_ooc==true", "candidate_block": "block_filter",
+     "expected_kind": "transform", "depends_on": [2]},
+    {"step_idx": 4, "text": "依 eventTime groupby + count OOC SPCs", "candidate_block": "block_groupby_agg",
+     "expected_kind": "transform", "depends_on": [3]},
+    {"step_idx": 5, "text": "verdict: ooc_count >= 2", "candidate_block": "block_step_check",
+     "expected_kind": "scalar", "depends_on": [4]},
+    {"step_idx": 6, "text": "OOC 時刻所有 SPC chart panel (composite)", "candidate_block": "block_spc_panel",
+     "expected_kind": "chart", "depends_on": [1]}
   ]
 }
-（step 6 用 composite，不用拆 unnest+filter+sort+chart）
+（step 5 verdict / step 6 chart 是 **平行 terminals** — step 6 直接從 step 1 的 source fan-out，
+**不依賴 step 5**。chart 接在 verdict 後面是錯的：verdict 輸出 bool/scalar，給不出 dataframe）
+
+範例 4: User 說「列出 OOC table 並同時畫 trend + 觸發 alarm」(三 terminals)
+✅ 三 branch 從共用上游 fan-out:
+{
+  "plan_summary": "table + chart + verdict — 三 terminal 各自 fan-out",
+  "macro_plan": [
+    {"step_idx": 1, "text": "撈 process_history", "candidate_block": "block_process_history",
+     "expected_kind": "transform", "depends_on": []},
+    {"step_idx": 2, "text": "展開 + 篩 OOC", "candidate_block": "block_unnest",
+     "expected_kind": "transform", "depends_on": [1]},
+    {"step_idx": 3, "text": "OOC 列表 (table terminal)", "candidate_block": "block_data_view",
+     "expected_kind": "table", "depends_on": [2]},
+    {"step_idx": 4, "text": "OOC trend chart (chart terminal)", "candidate_block": "block_line_chart",
+     "expected_kind": "chart", "depends_on": [2]},
+    {"step_idx": 5, "text": "verdict count >= threshold (alarm)", "candidate_block": "block_step_check",
+     "expected_kind": "scalar", "depends_on": [2]}
+  ]
+}
+（step 3/4/5 都從 step 2 fan-out — 共用同一個 OOC dataframe，三個 terminals 各自接）
 
 如果 user 的需求過於模糊或不適合 build pipeline，回 {"too_vague": true, "reason": "..."}。
 
@@ -148,7 +194,8 @@ Output 說它回的是 nested 結構（list / dict），下游就必須先有解
       "text": "<這 step 做什麼，1 句中文>",
       "expected_kind": "transform" | "table" | "chart" | "scalar",
       "expected_cols": ["col1", "col2"] (terminal step 才寫；transform/中間 step 留空 []),
-      "candidate_block": "block_xxx" (從候選 blocks 清單挑)
+      "candidate_block": "block_xxx" (從候選 blocks 清單挑),
+      "depends_on": [<上游 step_idx>, ...] (source step 寫 []，必填)
     }
   ]
 }
@@ -389,18 +436,40 @@ async def macro_plan_node(state: BuildGraphState) -> dict[str, Any]:
                     step_idx, candidate_block,
                 )
                 continue
+            # v20: depends_on (DAG schema). Mandatory per CLAUDE.md;
+            # validation below rejects missing field. Coerce ints, drop
+            # any element that's not a positive int.
+            raw_dep = item.get("depends_on")
+            dep_list: list[int] = []
+            dep_present = raw_dep is not None
+            if isinstance(raw_dep, list):
+                for d in raw_dep:
+                    try:
+                        di = int(d)
+                        if di > 0:
+                            dep_list.append(di)
+                    except (TypeError, ValueError):
+                        pass
             macro_plan.append({
                 "step_idx": int(step_idx),
                 "text": text_val,
                 "expected_kind": str(item.get("expected_kind") or "transform"),
                 "expected_cols": list(item.get("expected_cols") or []),
                 "candidate_block": candidate_block,
+                "depends_on": dep_list,
+                "_dep_present": dep_present,  # internal — stripped before SSE
                 "completed": False,
                 "ops_appended": 0,
             })
     # Renumber step_idx after any drops so compile_chunk doesn't see gaps.
+    # CRITICAL: when we renumber, also remap depends_on so old indices stay
+    # valid. Build {old_idx: new_idx} map first, then walk depends_on.
+    old_to_new = {step["step_idx"]: new_i for new_i, step in enumerate(macro_plan, 1)}
     for new_i, step in enumerate(macro_plan, 1):
         step["step_idx"] = new_i
+        step["depends_on"] = [
+            old_to_new[d] for d in step.get("depends_on") or [] if d in old_to_new
+        ]
 
     if not macro_plan:
         if tracer is not None:
@@ -427,6 +496,80 @@ async def macro_plan_node(state: BuildGraphState) -> dict[str, Any]:
         "macro_plan_node: produced %d steps (max=%d), summary=%r",
         len(macro_plan), MAX_MACRO_STEPS, summary[:80],
     )
+
+    # v20 (2026-05-15): DAG schema validation.
+    # depends_on must be present on every step; a missing field counts as
+    # too_vague (loop back to clarify_intent so we don't silently auto-link).
+    # Forward refs / refs to non-existent step_idx also fail. No upper bound
+    # on parallel branch count — user explicitly asked for "no branch limit".
+    dag_errors: list[str] = []
+    valid_indices = {s["step_idx"] for s in macro_plan}
+    for s in macro_plan:
+        idx = s["step_idx"]
+        if not s.pop("_dep_present", False):
+            dag_errors.append(f"step {idx}: missing required `depends_on` field")
+            continue
+        deps = s.get("depends_on") or []
+        # Source steps (depends_on=[]) only allowed on step_idx==1, OR on a
+        # subsequent step that's a separate source (e.g. multiple parallel
+        # source fetches — rare but legitimate). LLM can do step_1 source +
+        # step_N=another source → both depends_on=[].
+        for d in deps:
+            if d >= idx:
+                dag_errors.append(
+                    f"step {idx}: depends_on={deps} contains forward/self ref {d} "
+                    f"(must be < {idx})"
+                )
+            elif d not in valid_indices:
+                dag_errors.append(
+                    f"step {idx}: depends_on={deps} references missing step {d}"
+                )
+
+    if dag_errors:
+        attempts_d = int(state.get("too_vague_attempts") or 0) + 1
+        is_refused_d = attempts_d >= MAX_TOO_VAGUE_ATTEMPTS
+        next_status_d = "refused" if is_refused_d else "needs_clarify"
+        dag_reason = (
+            "macro_plan DAG validation failed: " + "; ".join(dag_errors[:5])
+            + " — every step must declare `depends_on: [parent_step_idx,...]` "
+            "(use [] for source steps). Forward refs and dangling refs are "
+            "rejected. This is required so parallel branches (chart + verdict) "
+            "are explicit instead of silent linear chaining."
+        )
+        logger.warning(
+            "macro_plan_node: DAG validation FAIL — attempt=%d/%d → %s — %d errors",
+            attempts_d, MAX_TOO_VAGUE_ATTEMPTS, next_status_d, len(dag_errors),
+        )
+        if tracer is not None:
+            tracer.record_step(
+                "macro_plan_node", status=next_status_d,
+                attempt=attempts_d, reason=dag_reason[:300],
+                rule="dag_required", dag_errors=dag_errors[:10],
+            )
+        if is_refused_d:
+            return {
+                "macro_plan": [],
+                "plan_validation_errors": [dag_reason],
+                "summary": "建構失敗 — model 給的 macro_plan 無法描述 DAG (depends_on 缺漏或亂指)",
+                "status": "refused",
+                "too_vague_attempts": attempts_d,
+                "too_vague_reason": dag_reason[:500],
+            }
+        return {
+            "macro_plan": [],
+            "summary": "Need clarification — DAG depends_on missing/invalid",
+            "status": "needs_clarify",
+            "too_vague_attempts": attempts_d,
+            "too_vague_reason": dag_reason[:500],
+            "clarify_attempts": 0,
+            "sse_events": [_event("macro_plan_needs_clarify", {"reason": dag_reason[:300]})],
+        }
+
+    # Strip internal _dep_present flag from any step that didn't trigger error
+    # path above (defensive — should already be popped, but list comprehensions
+    # over edge cases may have left some).
+    for s in macro_plan:
+        s.pop("_dep_present", None)
 
     # v19 (2026-05-15): chart-required post-check.
     # When the user instruction explicitly asks for visualization (顯示 / chart

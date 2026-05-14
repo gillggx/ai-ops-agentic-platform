@@ -27,16 +27,22 @@ async def confirm_gate_node(state: BuildGraphState) -> dict[str, Any]:
     plan = state.get("plan") or []
     structured_outputs = state.get("expected_outputs_structured") or []
     numbered_steps = _numbered_steps(plan)
+    macro_plan = state.get("macro_plan") or []
+    step_outputs = state.get("step_outputs") or {}
+    dag_payload = _build_dag_payload(plan, macro_plan, step_outputs)
 
     logger.info(
-        "confirm_gate_node: pausing for user confirm (session=%s, %d ops, %d structured outputs)",
+        "confirm_gate_node: pausing for user confirm (session=%s, %d ops, %d structured outputs, dag.nodes=%d edges=%d)",
         state.get("session_id"), len(plan), len(structured_outputs),
+        len(dag_payload.get("nodes") or []), len(dag_payload.get("edges") or []),
     )
 
     # The interrupt payload is what the runner sees in the resulting
     # __interrupt__ marker — used to emit confirm_pending SSE.
     # v15 G2: add numbered_steps + expected_outputs_structured so the
     # frontend can render the upgraded review card with "改 step N" path.
+    # v20: add dag {nodes, edges, mermaid} so the frontend renders the DAG
+    # diagram (parallel branches visible) instead of an implied linear chain.
     user_response = interrupt({
         "session_id": state.get("session_id"),
         "plan_summary": plan_summary,
@@ -47,6 +53,7 @@ async def confirm_gate_node(state: BuildGraphState) -> dict[str, Any]:
         "n_ops": len(plan),
         # echo clarifications so frontend can show "agent answered: X"
         "clarifications_applied": state.get("clarifications") or {},
+        "dag": dag_payload,
     })
 
     # When resumed, user_response shape:
@@ -155,6 +162,94 @@ def _op_summary(op_dict: dict[str, Any]) -> str:
     if t == "remove_node":
         return f"remove {op_dict.get('node_id')}"
     return t
+
+
+def _build_dag_payload(
+    plan: list[dict[str, Any]],
+    macro_plan: list[dict[str, Any]],
+    step_outputs: dict[Any, list[str]],
+) -> dict[str, Any]:
+    """v20: shape DAG payload for the confirm card (Skill Builder + chat).
+
+    Returns:
+      {
+        "nodes": [{logical_id, block_id, label, step_idx?}],
+        "edges": [{src, dst, label?}],   # actual connect ops in the plan
+        "mermaid": "graph TD\\n  n1[block_process_history]\\n  n1 --> n2\\n  ...",
+        "macro_steps": [{step_idx, text, depends_on, candidate_block, produced}],
+      }
+
+    `nodes` + `edges` come from the actual plan (ground truth — what runtime
+    will execute). `macro_steps` echoes macro_plan so the card can show the
+    high-level intent alongside. `mermaid` is a pre-rendered diagram string
+    the frontend can pipe to mermaid.js.
+    """
+    nodes: list[dict[str, Any]] = []
+    seen_lid: set[str] = set()
+    for op in plan:
+        if op.get("type") == "add_node":
+            lid = str(op.get("node_id") or "")
+            if not lid or lid in seen_lid:
+                continue
+            seen_lid.add(lid)
+            nodes.append({
+                "logical_id": lid,
+                "block_id": op.get("block_id"),
+                "label": op.get("block_id") or lid,
+            })
+
+    edges: list[dict[str, Any]] = []
+    for op in plan:
+        if op.get("type") == "connect":
+            src = str(op.get("src_id") or "")
+            dst = str(op.get("dst_id") or "")
+            if src and dst:
+                edges.append({
+                    "src": src, "dst": dst,
+                    "label": (op.get("src_port") or "") + "→" + (op.get("dst_port") or ""),
+                })
+
+    # Annotate each node with which macro step produced it (best-effort).
+    lid_to_step: dict[str, int] = {}
+    for s in macro_plan:
+        sidx = s.get("step_idx")
+        outs = step_outputs.get(sidx) or step_outputs.get(str(sidx)) or []
+        for lid in outs:
+            lid_to_step[str(lid)] = int(sidx) if sidx is not None else 0
+    for n in nodes:
+        sidx = lid_to_step.get(n["logical_id"])
+        if sidx is not None:
+            n["step_idx"] = sidx
+
+    # Pre-render mermaid (graph TD). Logical id is mermaid-safe by convention
+    # (n1, n2, ...). Label = block_id (truncated). Edges as `n1 --> n2`.
+    mermaid_lines = ["graph TD"]
+    for n in nodes:
+        block = (n.get("block_id") or "?").replace("\"", "'")[:30]
+        mermaid_lines.append(f'  {n["logical_id"]}["{n["logical_id"]}: {block}"]')
+    for e in edges:
+        mermaid_lines.append(f'  {e["src"]} --> {e["dst"]}')
+    mermaid = "\n".join(mermaid_lines)
+
+    macro_steps_out = [
+        {
+            "step_idx": s.get("step_idx"),
+            "text": s.get("text"),
+            "depends_on": s.get("depends_on") or [],
+            "candidate_block": s.get("candidate_block"),
+            "expected_kind": s.get("expected_kind"),
+            "produced": step_outputs.get(s.get("step_idx"))
+                or step_outputs.get(str(s.get("step_idx"))) or [],
+        }
+        for s in macro_plan
+    ]
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "mermaid": mermaid,
+        "macro_steps": macro_steps_out,
+    }
 
 
 def _event(name: str, data: dict[str, Any]) -> dict[str, Any]:

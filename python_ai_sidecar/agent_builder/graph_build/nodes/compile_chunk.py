@@ -67,6 +67,12 @@ _SYSTEM = """你是 pipeline op-compiler。給你 1 個 macro step 的描述，�
 
 3. **不要 remove 上游 node** — 上游已穩，這 step 只負責接續
 
+3b. **遵守 DAG PARENTS** (v20)
+   - prompt 會在 USER message 顯示 `🔗 DAG PARENTS: depends_on=[...] → 上游 logical ids: [...]`
+   - 你 emit 的第一個 `add_node` 的 inbound `connect`，**src_id 必須**是上面列出的 logical id
+   - 如果 depends_on=[] → 這是 source step，**不要 emit connect**，純 `add_node`
+   - 不要憑 UPSTREAM TRACE 自己挑「最近 dataframe-output node」(那是舊行為，已被 DAG 取代)
+
 4. **大部分 step 是 1 add_node + 1 connect**；但如果 macro step text 描述 2 件事（例如「展開 nested 並過濾」）或上游需要先解 nested，**emit 多組 (add_node + connect) 鏈在一起**，最多 5 ops
 
 5. **block_id 必須在 RELEVANT BLOCKS 區段裡**，不要自己合成新名 (系統會 reject)
@@ -1405,7 +1411,38 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
     context_lines: list[str] = []
     for i, s in enumerate(macro_plan):
         marker = " ← (你現在要編這個)" if i == idx else ""
-        context_lines.append(f"  Step {s['step_idx']}: {s['text']}{marker}")
+        deps_str = f" depends_on={s.get('depends_on') or []}"
+        context_lines.append(f"  Step {s['step_idx']}: {s['text']}{deps_str}{marker}")
+
+    # v20: explicit parent-edge guidance from macro_plan's depends_on. Tell
+    # the LLM exactly which logical_id(s) to wire connect.src_id from. If
+    # depends_on is [] (source step), nothing to wire — pure add_node.
+    step_outputs = state.get("step_outputs") or {}
+    cur_deps = step.get("depends_on") or []
+    parent_logical_ids: list[str] = []
+    for d in cur_deps:
+        outs = step_outputs.get(int(d)) or step_outputs.get(str(d)) or []
+        if outs:
+            parent_logical_ids.append(outs[-1])  # terminal of parent's local chain
+    parent_section = ""
+    if cur_deps:
+        if parent_logical_ids:
+            parent_section = (
+                f"\n\n🔗 DAG PARENTS (這 step 必須從這些 logical id 接 connect):\n"
+                f"  depends_on={cur_deps} → 上游 logical ids: {parent_logical_ids}\n"
+                f"  → 你新加的第一個 add_node 必須 connect from {parent_logical_ids[-1]} "
+                f"(若多 parent，每個 parent 各 1 個 connect)"
+            )
+        else:
+            parent_section = (
+                f"\n\n🔗 DAG PARENTS: depends_on={cur_deps} 但上游 step_outputs 還沒記錄到 "
+                f"(上游 step 可能 0 ops)，照原 UPSTREAM TRACE 找最近 dataframe-output node"
+            )
+    else:
+        parent_section = (
+            "\n\n🔗 DAG PARENTS: 這是 source step (depends_on=[])，"
+            "**不要 emit connect**，純 add_node"
+        )
 
     declared_inputs = (state.get("base_pipeline") or {}).get("inputs") or []
     inputs_section = ""
@@ -1460,6 +1497,7 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
         f"\n  expected_cols={step.get('expected_cols')}"
         f"\n  candidate_block={candidate or '(none)'}"
         f"\n\nUPSTREAM nodes already on canvas:\n{existing_nodes}"
+        f"{parent_section}"
         f"\n\nRELEVANT BLOCKS:\n{relevant_blocks}"
     )
 
@@ -1719,6 +1757,48 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
             })],
         }
 
+    # v20: enforce DAG parent edge. If LLM ignored parent_section and wired
+    # connect to a different src than what depends_on dictates, rewrite the
+    # FIRST connect's src_id to the parent's last logical_id. This is the
+    # whole point of DAG schema — wiring is deterministic, not negotiable.
+    if cur_deps and parent_logical_ids and new_ops:
+        # Find the first add_node so we can identify its inbound connect.
+        first_add_lid: str | None = None
+        for op in new_ops:
+            if op.get("type") == "add_node" and op.get("node_id"):
+                first_add_lid = op.get("node_id")
+                break
+        if first_add_lid:
+            for op in new_ops:
+                if (
+                    op.get("type") == "connect"
+                    and op.get("dst_id") == first_add_lid
+                ):
+                    desired_src = parent_logical_ids[-1]
+                    if op.get("src_id") != desired_src:
+                        logger.info(
+                            "compile_chunk_node: step %s DAG-enforce — rewrote connect %s→%s to %s→%s "
+                            "(depends_on=%s)",
+                            step_key, op.get("src_id"), first_add_lid,
+                            desired_src, first_add_lid, cur_deps,
+                        )
+                        op["src_id"] = desired_src
+                    break
+
+    # v20: track step → produced logical_ids for downstream depends_on lookup.
+    # Multi-op steps (auto-inserted unnest etc.) get all add_node logicals
+    # appended in emission order; downstream connects use the LAST one.
+    new_step_outputs = dict(state.get("step_outputs") or {})
+    step_idx_int = int(step.get("step_idx") or (idx + 1))
+    produced_lids: list[str] = []
+    for op in new_ops:
+        if op.get("type") == "add_node" and op.get("node_id"):
+            produced_lids.append(str(op.get("node_id")))
+    if produced_lids:
+        existing = list(new_step_outputs.get(step_idx_int) or [])
+        # If retry: replace prior entries (LLM may have re-emitted different ids)
+        new_step_outputs[step_idx_int] = existing + produced_lids if attempts == 1 else produced_lids
+
     # Append to plan; mark this macro step as completed (advanced after
     # ops actually execute via cursor reaching plan end).
     plan = list(state.get("plan") or [])
@@ -1790,6 +1870,7 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
         "plan": plan,
         "macro_plan": updated_macro,
         "compile_attempts": attempts_map,
+        "step_outputs": new_step_outputs,
         "plan_validation_errors": [],
         "sse_events": [
             _event("chunk_compiled", {
