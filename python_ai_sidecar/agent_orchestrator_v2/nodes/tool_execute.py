@@ -476,14 +476,17 @@ async def _execute_build_pipeline_live(
             # v19: intercept intent_confirm_required pause
             if evt.type == "intent_confirm_required":
                 intent_pause = evt.data or {}
-                # Emit a pb_glass-style event so chat panel can render the
-                # bullets card without needing a new SSE event type
-                # plumbed through Java.
+                # Frontend sends `chatSessionId` to /chat/intent-respond
+                # which keys pending_clarify by the chat session. So emit
+                # the CHAT session id (not the build UUID) as session_id
+                # — that's what BulletConfirmCard passes back unchanged.
+                # build_session_id is the build UUID for trace correlation.
+                _chat_sid = str(chat_session_id) if chat_session_id else ""
                 if event_emit is not None:
                     try:
                         event_emit({
                             "type": "pb_intent_confirm",
-                            "session_id": sid,
+                            "session_id": _chat_sid,
                             "build_session_id": intent_pause.get("session_id") or sid,
                             "bullets": intent_pause.get("bullets") or [],
                             "too_vague_reason": intent_pause.get("too_vague_reason"),
