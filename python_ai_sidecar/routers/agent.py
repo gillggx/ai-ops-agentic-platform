@@ -193,10 +193,14 @@ class ChatIntentRespondRequest(BaseModel):
 async def _emit_pipeline_charts(
     pipeline_json: dict, session_id: str,
 ) -> AsyncGenerator[dict, None]:
-    """v19 (2026-05-14): run the built pipeline once and emit chart_spec
-    snapshots as `pb_glass_chart` events so chat renders the actual
-    output inline. Without this, chat builds appear to 'finish silently'
-    — user sees a 1-node count but no chart.
+    """v19 (2026-05-14): run the built pipeline once and emit:
+      1. pb_run_start  — so chat LiteCanvasOverlay flips to running phase
+      2. pb_run_done   — so LiteCanvasOverlay's 「結果」tab populates
+                         (carries node_results + result_summary)
+      3. pb_glass_chart — per chart_spec snapshot, for chat-history inline rendering
+
+    Without (1)(2), chat mode's left-side Lite Canvas 結果 tab stays empty;
+    user sees the build node but no chart on the canvas side.
     """
     try:
         from python_ai_sidecar.executor.real_executor import get_real_executor
@@ -204,17 +208,44 @@ async def _emit_pipeline_charts(
 
         executor = get_real_executor()
         pj_model = PipelineJSON.model_validate(pipeline_json)
-        result = await asyncio.wait_for(
-            executor.execute(pj_model, inputs={}),
-            timeout=30.0,
-        )
+        n_nodes = len((pipeline_json.get("nodes") or [])) if isinstance(pipeline_json, dict) else 0
+
+        # Phase 1: pb_run_start
+        start_payload = {
+            "type": "pb_run_start",
+            "session_id": session_id,
+            "node_count": n_nodes,
+        }
+        yield {
+            "event": "pb_run_start",
+            "data": json.dumps(start_payload, default=str, ensure_ascii=False),
+        }
+
+        import time as _time
+        t0 = _time.perf_counter()
+        try:
+            result = await asyncio.wait_for(
+                executor.execute(pj_model, inputs={}),
+                timeout=30.0,
+            )
+        except asyncio.TimeoutError:
+            err_payload = {
+                "type": "pb_run_error",
+                "session_id": session_id,
+                "error_message": "auto-run timed out after 30s",
+            }
+            yield {
+                "event": "pb_run_error",
+                "data": json.dumps(err_payload, default=str, ensure_ascii=False),
+            }
+            return
+        duration_ms = int((_time.perf_counter() - t0) * 1000)
+
         node_results = (result or {}).get("node_results") or {}
-        # Walk each node's preview; emit chart_spec snapshots.
-        # Preview shape (per inspect_execution._extract_chart_panels):
-        #   preview[port] = {type:"dict", snapshot: <chart_spec>}
-        #   chart_spec = {type:"line"|"bar"|..., data:[...], ...}
-        # NOT preview[port].type=="chart_spec" (my prior wrong assumption).
-        n_emitted = 0
+        result_summary = (result or {}).get("result_summary") or {}
+
+        # Phase 2: emit per-chart pb_glass_chart events first (chat history)
+        n_charts = 0
         for nid, info in node_results.items():
             if not isinstance(info, dict):
                 continue
@@ -223,7 +254,6 @@ async def _emit_pipeline_charts(
                 if not isinstance(blob, dict):
                     continue
                 snap = blob.get("snapshot")
-                # Chart-shaped snapshot: dict with 'data' list and a chart 'type'.
                 if (
                     isinstance(snap, dict)
                     and isinstance(snap.get("data"), list)
@@ -240,10 +270,25 @@ async def _emit_pipeline_charts(
                         "event": "pb_glass_chart",
                         "data": json.dumps(payload, default=str, ensure_ascii=False),
                     }
-                    n_emitted += 1
+                    n_charts += 1
+
+        # Phase 3: pb_run_done — Lite Canvas 結果 tab populates from this
+        done_payload = {
+            "type": "pb_run_done",
+            "session_id": session_id,
+            "duration_ms": duration_ms,
+            "node_results": node_results,
+            "result_summary": result_summary,
+        }
+        yield {
+            "event": "pb_run_done",
+            "data": json.dumps(done_payload, default=str, ensure_ascii=False),
+        }
+
         log.info(
-            "chat/intent-respond: emitted %d chart snapshot(s) for session=%s",
-            n_emitted, session_id,
+            "chat/intent-respond: emitted pb_run_start/done + %d chart(s) "
+            "(%dms, %d nodes) session=%s",
+            n_charts, duration_ms, n_nodes, session_id,
         )
     except asyncio.TimeoutError:
         log.warning("emit_pipeline_charts: executor timed out")
