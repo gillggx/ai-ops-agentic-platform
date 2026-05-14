@@ -210,6 +210,10 @@ async def _emit_pipeline_charts(
         )
         node_results = (result or {}).get("node_results") or {}
         # Walk each node's preview; emit chart_spec snapshots.
+        # Preview shape (per inspect_execution._extract_chart_panels):
+        #   preview[port] = {type:"dict", snapshot: <chart_spec>}
+        #   chart_spec = {type:"line"|"bar"|..., data:[...], ...}
+        # NOT preview[port].type=="chart_spec" (my prior wrong assumption).
         n_emitted = 0
         for nid, info in node_results.items():
             if not isinstance(info, dict):
@@ -218,23 +222,25 @@ async def _emit_pipeline_charts(
             for port_name, blob in ports.items():
                 if not isinstance(blob, dict):
                     continue
-                if blob.get("type") != "chart_spec":
-                    continue
-                snapshot = blob.get("snapshot")
-                if not isinstance(snapshot, dict):
-                    continue
-                payload = {
-                    "type": "pb_glass_chart",
-                    "session_id": session_id,
-                    "node_id": nid,
-                    "port": port_name,
-                    "chart_spec": snapshot,
-                }
-                yield {
-                    "event": "pb_glass_chart",
-                    "data": json.dumps(payload, default=str, ensure_ascii=False),
-                }
-                n_emitted += 1
+                snap = blob.get("snapshot")
+                # Chart-shaped snapshot: dict with 'data' list and a chart 'type'.
+                if (
+                    isinstance(snap, dict)
+                    and isinstance(snap.get("data"), list)
+                    and isinstance(snap.get("type"), str)
+                ):
+                    payload = {
+                        "type": "pb_glass_chart",
+                        "session_id": session_id,
+                        "node_id": nid,
+                        "port": port_name,
+                        "chart_spec": snap,
+                    }
+                    yield {
+                        "event": "pb_glass_chart",
+                        "data": json.dumps(payload, default=str, ensure_ascii=False),
+                    }
+                    n_emitted += 1
         log.info(
             "chat/intent-respond: emitted %d chart snapshot(s) for session=%s",
             n_emitted, session_id,
