@@ -215,16 +215,28 @@ function Inner({
   };
 
   const onOpenInBuilder = () => {
+    const pipeline_json = stateRef.current.pipeline;
+    const nNodes = pipeline_json?.nodes?.length ?? 0;
+    const nEdges = pipeline_json?.edges?.length ?? 0;
+    // Diagnostic: surface in console so user can paste back what they see.
+    console.log("[LiteCanvas] 開啟編輯 clicked", { nNodes, nEdges });
     try {
-      const pipeline_json = stateRef.current.pipeline;
       sessionStorage.setItem(
         "pb:ephemeral_pipeline",
         JSON.stringify({ pipeline_json, ts: Date.now() }),
       );
-    } catch {
-      /* ignore — fall through to navigation, builder will run wizard */
+      console.log("[LiteCanvas] sessionStorage saved");
+    } catch (e) {
+      console.warn("[LiteCanvas] sessionStorage failed", e);
+      /* fall through to navigation, builder will run wizard */
     }
-    router.push("/admin/pipeline-builder/new?from=agent");
+    console.log("[LiteCanvas] navigating to /admin/pipeline-builder/new?from=agent");
+    try {
+      router.push("/admin/pipeline-builder/new?from=agent");
+    } catch (e) {
+      console.error("[LiteCanvas] router.push failed, falling back to location.href", e);
+      window.location.href = "/admin/pipeline-builder/new?from=agent";
+    }
   };
 
   const pill = pillFor(runPhase, durationMs);
