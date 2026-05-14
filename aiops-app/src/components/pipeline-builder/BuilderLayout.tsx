@@ -1275,6 +1275,18 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
                     }
                   }
                   setAutoLayoutNonce((v) => v + 1);
+                  // v19 (2026-05-14): auto-trigger Run after build so the
+                  // canvas's 結果 tab + per-node previews populate without
+                  // requiring the user to manually click Run. Without this
+                  // the chart only renders in the AI panel; canvas stays
+                  // empty. Skip if build already failed.
+                  if (ev.status === "finished" || ev.status === "ok") {
+                    setTimeout(() => {
+                      void executeWithInputs({}).catch((e) => {
+                        console.warn("auto-run after build failed:", e);
+                      });
+                    }, 50);
+                  }
                 }}
                 contextEquipment={null}
                 focusedNodeId={focusedNodeId}
