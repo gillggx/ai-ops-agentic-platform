@@ -36,6 +36,12 @@ INSERT INTO pb_blocks (
 **SPC chart panel — one block, right semantics.**
 把 process_history 的 SPC 資料一次處理好：unnest spc_charts → 依 event_filter 模式挑時段 → 出多 series line chart + UCL/LCL bound + OOC highlight。
 
+🚨🚨🚨 **直接接 process_history(nested=true) → 我**。
+🚨 **不要**在我之前接 unnest / filter(is_ooc) / sort+limit / groupby — **我內建這些邏輯**。
+🚨 你想做的「找最後一次 OOC → 秀那時刻所有 SPCs」我用 event_filter=latest_ooc 一行解決，
+🚨 你前面接 filter+sort+limit 只會把多 SPC 砍成 1 個 row，把我的多 series 變成 1 點。
+🚨 標準 pipeline 是 **2 個 node**：process_history → spc_panel。沒了。
+
 == When to use ==
 - ✅ user 說「看 SPC chart」「SPC 趨勢」「OOC SPC chart」→ 用我
 - ✅ user 說「機台最後一次 OOC 時的 SPC 狀況」→ 用我 + event_filter=latest_ooc
