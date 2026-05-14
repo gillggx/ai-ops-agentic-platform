@@ -17,6 +17,7 @@ import type { UiRender } from "@/components/McpChartRenderer";
 import type { FlatDataMetadata, UIConfig } from "@/context/FlatDataContext";
 import { useAppContext } from "@/context/AppContext";
 import { DesignIntentCard, type DesignIntentData, type DesignIntentChoice } from "./DesignIntentCard";
+import { BulletConfirmCard } from "@/components/chat/BulletConfirmCard";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -72,12 +73,21 @@ interface ClarifyData {
   resolved?: boolean;  // flips to true once user picks; hides the buttons
 }
 
+interface IntentConfirmData {
+  session_id: string;
+  bullets: import("@/components/chat/BulletConfirmCard").IntentBullet[];
+  too_vague_reason?: string;
+  resolved?: "confirmed" | "refused" | "error";
+}
+
 interface ChatMessage {
   id: number;
-  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "ops" | "clarify" | "design_intent";
+  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "ops" | "clarify" | "design_intent" | "intent_confirm";
   content: string;
   clarify?: ClarifyData;
   designIntent?: DesignIntentData;
+  /** v19 (2026-05-14) — pb_intent_confirm card for chat-mode build clarify. */
+  intentConfirm?: IntentConfirmData;
   /** For role === "design_intent": the user prompt that produced this card,
    *  needed to compose the [intent_confirmed:<id>] follow-up message. */
   designIntentPrompt?: string;
@@ -1156,6 +1166,28 @@ export function AIAgentPanel({
             }
             break;
           }
+
+          // v19 (2026-05-14): chat-mode build hit intent_confirm_required.
+          // Render BulletConfirmCard inline. Same SSE event the chat tool_execute
+          // emits for both ChatPanel (standalone /chat/[id]) and AIAgentPanel
+          // (Skill Builder right side). User clicks ✓ → POST /api/agent/chat/
+          // intent-respond which resumes the paused build.
+          case "pb_intent_confirm": {
+            const sid = String(
+              (ev.session_id as string) || (ev.build_session_id as string) || "",
+            );
+            const bullets = (ev.bullets as IntentConfirmData["bullets"]) ?? [];
+            const reason = (ev.too_vague_reason as string | undefined) || undefined;
+            if (bullets.length > 0) {
+              setChatHistory((prev) => [...prev, {
+                id: nextId(),
+                role: "intent_confirm",
+                content: "",
+                intentConfirm: { session_id: sid, bullets, too_vague_reason: reason },
+              }]);
+            }
+            break;
+          }
           case "pb_glass_error": {
             const msg = (ev.message as string) ?? "";
             const opName = ev.op as string | undefined;
@@ -1776,6 +1808,44 @@ export function AIAgentPanel({
                       });
                     }}
                   />
+                </div>
+              ) : msg.role === "intent_confirm" && msg.intentConfirm ? (
+                <div style={{ width: "100%", maxWidth: "100%" }}>
+                  {msg.intentConfirm.resolved === undefined ? (
+                    <BulletConfirmCard
+                      chatSessionId={msg.intentConfirm.session_id}
+                      bullets={msg.intentConfirm.bullets}
+                      tooVagueReason={msg.intentConfirm.too_vague_reason}
+                      resumeEndpoint="/api/agent/chat/intent-respond"
+                      sessionIdKey="chatSessionId"
+                      onResolved={(status) => {
+                        setChatHistory((prev) => prev.map((m) =>
+                          m.id === msg.id && m.intentConfirm
+                            ? { ...m, intentConfirm: { ...m.intentConfirm, resolved: status } }
+                            : m,
+                        ));
+                        if (status === "confirmed") {
+                          setChatHistory((prev) => [...prev, {
+                            id: nextId(), role: "agent",
+                            content: "✓ intent 已確認，建構中…",
+                          }]);
+                        } else if (status === "refused") {
+                          setChatHistory((prev) => [...prev, {
+                            id: nextId(), role: "agent",
+                            content: "✋ 已取消 — 請重新描述需求",
+                          }]);
+                        }
+                      }}
+                    />
+                  ) : (
+                    <div style={{
+                      fontSize: 11, color: "#64748b", padding: "6px 10px",
+                      background: "#f1f5f9", border: "1px solid #cbd5e1",
+                      borderRadius: 6, fontStyle: "italic",
+                    }}>
+                      intent {msg.intentConfirm.resolved === "confirmed" ? "✓ 已確認" : msg.intentConfirm.resolved === "refused" ? "✗ 已拒絕" : "⚠ 出錯"}
+                    </div>
+                  )}
                 </div>
               ) : msg.role === "ops" && msg.glassOps ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
