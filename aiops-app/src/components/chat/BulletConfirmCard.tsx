@@ -26,23 +26,19 @@ interface Props {
   chatSessionId: string;
   bullets: IntentBullet[];
   tooVagueReason?: string;
-  onResolved: (status: "confirmed" | "refused" | "error", payload?: unknown) => void;
-  /** v19: which resume endpoint to POST. Default = chat path; Skill Builder
-   *  passes `/api/agent/build/clarify-respond`. */
-  resumeEndpoint?: string;
-  /** v19: payload session-id key. chat uses `chatSessionId`; build uses
-   *  `sessionId` (matches the BuildClarifyRespondRequest model). */
-  sessionIdKey?: "chatSessionId" | "sessionId";
+  /** v19 refactor (2026-05-14): parent drives the SSE so existing event
+   *  handlers (pb_glass_op → canvas apply, pb_glass_done → message, etc.)
+   *  run through the SAME consumeSSE path /chat uses. Card only collects
+   *  confirmations + delegates. Parent calls back with final status. */
+  onConfirm: (
+    confirmations: Record<string, { action: Action; edit_text?: string }>,
+  ) => Promise<"confirmed" | "refused" | "error">;
 }
 
 type Action = "ok" | "reject" | "edit";
 
 export function BulletConfirmCard(props: Props) {
-  const {
-    chatSessionId, bullets, tooVagueReason, onResolved,
-    resumeEndpoint = "/api/agent/chat/intent-respond",
-    sessionIdKey = "chatSessionId",
-  } = props;
+  const { bullets, tooVagueReason, onConfirm } = props;
   const [actions, setActions] = React.useState<Record<string, Action>>(
     Object.fromEntries(bullets.map((b) => [b.id, "ok"]))
   );
@@ -62,59 +58,11 @@ export function BulletConfirmCard(props: Props) {
       }
     }
     try {
-      const reqBody: Record<string, unknown> = { confirmations };
-      reqBody[sessionIdKey] = chatSessionId;
-      const res = await fetch(resumeEndpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(reqBody),
-      });
-      if (!res.body) {
-        setError("no stream body");
-        onResolved("error");
-        return;
-      }
-      // Drain SSE; pull final status + summary
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      let finalStatus: string | null = null;
-      let finalPipeline: unknown = null;
-      let finalSummary: string | null = null;
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        // Parse SSE event blocks (\r\n\r\n or \n\n)
-        const blocks = buf.split(/\r?\n\r?\n/);
-        buf = blocks.pop() ?? "";
-        for (const block of blocks) {
-          let eventName = "message";
-          const dataLines: string[] = [];
-          for (const line of block.replace(/\r/g, "").split("\n")) {
-            if (line.startsWith("event: ")) eventName = line.slice(7).trim();
-            else if (line.startsWith("data: ")) dataLines.push(line.slice(6));
-          }
-          if (!dataLines.length) continue;
-          try {
-            const data = JSON.parse(dataLines.join("\n")) as Record<string, unknown>;
-            if (eventName === "done") {
-              finalStatus = String(data.status ?? finalStatus ?? "finished");
-              finalPipeline = data.pipeline_json ?? finalPipeline;
-              finalSummary = (data.summary as string) ?? finalSummary;
-            } else if (data.status) {
-              finalStatus = String(data.status);
-            }
-          } catch { /* ignore parse errors */ }
-        }
-      }
-      onResolved(
-        finalStatus === "refused" ? "refused" : "confirmed",
-        { status: finalStatus, pipeline: finalPipeline, summary: finalSummary },
-      );
+      // Parent does the POST + SSE consumption so events flow through
+      // the existing /chat event-handler pipeline (canvas-apply etc.).
+      await onConfirm(confirmations);
     } catch (e) {
       setError(String(e));
-      onResolved("error");
     } finally {
       setBusy(false);
     }

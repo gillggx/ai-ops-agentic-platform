@@ -1816,25 +1816,40 @@ export function AIAgentPanel({
                       chatSessionId={msg.intentConfirm.session_id}
                       bullets={msg.intentConfirm.bullets}
                       tooVagueReason={msg.intentConfirm.too_vague_reason}
-                      resumeEndpoint="/api/agent/chat/intent-respond"
-                      sessionIdKey="chatSessionId"
-                      onResolved={(status) => {
+                      onConfirm={async (confirmations) => {
+                        // POST to chat resume; reuse the SAME stream handler
+                        // as /chat so pb_glass_* events still apply ops to
+                        // canvas + update chat history.
+                        const res = await fetch("/api/agent/chat/intent-respond", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            chatSessionId: msg.intentConfirm?.session_id,
+                            confirmations,
+                          }),
+                        });
+                        const handler = buildStreamHandlerRef.current;
+                        let finalStatus: "confirmed" | "refused" | "error" = "confirmed";
+                        if (handler) {
+                          await consumeSSE(res, (ev: Record<string, unknown>) => {
+                            handler(ev as Parameters<typeof handler>[0]);
+                            const evType = (ev.type as string) || "";
+                            if (evType === "pb_glass_done") {
+                              const st = ev.status as string;
+                              if (st === "refused") finalStatus = "refused";
+                              else if (st === "failed") finalStatus = "error";
+                            }
+                          }, () => {});
+                        } else {
+                          // No handler available — drain manually
+                          try { await res.body?.cancel(); } catch { /* ignore */ }
+                        }
                         setChatHistory((prev) => prev.map((m) =>
                           m.id === msg.id && m.intentConfirm
-                            ? { ...m, intentConfirm: { ...m.intentConfirm, resolved: status } }
+                            ? { ...m, intentConfirm: { ...m.intentConfirm, resolved: finalStatus } }
                             : m,
                         ));
-                        if (status === "confirmed") {
-                          setChatHistory((prev) => [...prev, {
-                            id: nextId(), role: "agent",
-                            content: "✓ intent 已確認，建構中…",
-                          }]);
-                        } else if (status === "refused") {
-                          setChatHistory((prev) => [...prev, {
-                            id: nextId(), role: "agent",
-                            content: "✋ 已取消 — 請重新描述需求",
-                          }]);
-                        }
+                        return finalStatus;
                       }}
                     />
                   ) : (

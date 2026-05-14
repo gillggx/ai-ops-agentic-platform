@@ -501,20 +501,64 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
                       chatSessionId={msg.card.chat_session_id}
                       bullets={msg.card.bullets}
                       tooVagueReason={msg.card.too_vague_reason}
-                      onResolved={(status, payload) => {
-                        // Mark resolved + push a synthesized agent message.
-                        const p = payload as { status?: string; summary?: string } | undefined;
-                        const summary = p?.summary || "";
-                        const finalText = status === "confirmed"
+                      onConfirm={async (confirmations) => {
+                        // Use consumeSSE pattern manually (ChatPanel doesn't
+                        // export its stream handler). Drain events to find
+                        // final status, then synthesize follow-up message.
+                        const res = await fetch("/api/agent/chat/intent-respond", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            chatSessionId: msg.card && msg.card.type === "intent_confirm" ? msg.card.chat_session_id : "",
+                            confirmations,
+                          }),
+                        });
+                        let finalStatus: "confirmed" | "refused" | "error" = "confirmed";
+                        let summary = "";
+                        try {
+                          const reader = res.body?.getReader();
+                          const decoder = new TextDecoder();
+                          let buf = "";
+                          while (reader) {
+                            const { value, done } = await reader.read();
+                            if (done) break;
+                            buf += decoder.decode(value, { stream: true });
+                            const blocks = buf.split(/\r?\n\r?\n/);
+                            buf = blocks.pop() ?? "";
+                            for (const block of blocks) {
+                              let evName = "message";
+                              const dl: string[] = [];
+                              for (const line of block.replace(/\r/g, "").split("\n")) {
+                                if (line.startsWith("event: ")) evName = line.slice(7).trim();
+                                else if (line.startsWith("data: ")) dl.push(line.slice(6));
+                              }
+                              if (!dl.length) continue;
+                              try {
+                                const d = JSON.parse(dl.join("\n")) as Record<string, unknown>;
+                                if (evName === "done" || d.type === "pb_glass_done") {
+                                  const st = String(d.status ?? "");
+                                  if (st === "refused") finalStatus = "refused";
+                                  else if (st === "failed") finalStatus = "error";
+                                  summary = String(d.summary ?? summary);
+                                }
+                              } catch { /* skip */ }
+                            }
+                          }
+                        } catch (e) {
+                          console.error(e);
+                          finalStatus = "error";
+                        }
+                        const finalText = finalStatus === "confirmed"
                           ? (summary ? `✓ 已建好：${summary}` : "✓ 已建好，請到 Pipeline Builder 查看")
-                          : status === "refused"
+                          : finalStatus === "refused"
                             ? "✋ 已取消 — 請重新描述你要的需求"
                             : "⚠ 處理時出錯，請再試一次";
                         setChatHistory((prev) => prev.map((m) =>
                           m.id === msg.id && m.card?.type === "intent_confirm"
-                            ? { ...m, card: { ...m.card, resolved: status, resolved_summary: summary } }
+                            ? { ...m, card: { ...m.card, resolved: finalStatus, resolved_summary: summary } }
                             : m,
                         ).concat([{ id: nextId(), role: "agent", content: finalText }]));
+                        return finalStatus;
                       }}
                     />
                   ) : (

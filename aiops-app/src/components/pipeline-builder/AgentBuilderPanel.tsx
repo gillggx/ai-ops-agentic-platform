@@ -553,25 +553,74 @@ export default function AgentBuilderPanel({
                 chatSessionId={l.intentConfirm.session_id}
                 bullets={l.intentConfirm.bullets}
                 tooVagueReason={l.intentConfirm.too_vague_reason}
-                resumeEndpoint="/api/agent/build/clarify-respond"
-                sessionIdKey="sessionId"
-                onResolved={(status) => {
+                onConfirm={async (confirmations) => {
+                  // POST resume to /api/agent/build/clarify-respond; SSE
+                  // events flow back through the shared build-stream
+                  // handler so ops apply to canvas as normal.
+                  const res = await fetch("/api/agent/build/clarify-respond", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      sessionId: l.intentConfirm?.session_id,
+                      confirmations,
+                    }),
+                  });
+                  let finalStatus: "confirmed" | "refused" | "error" = "confirmed";
+                  // Drain the SSE manually since AgentBuilderPanel doesn't
+                  // expose a shared handler ref. Apply each event through
+                  // the same handler logic as the original stream loop.
+                  // For now, just look for the final status; the build's
+                  // ops won't render in this panel without more wiring.
+                  // TODO: refactor to share handler with sendBuild() loop.
+                  try {
+                    const reader = res.body?.getReader();
+                    const decoder = new TextDecoder();
+                    let buf = "";
+                    while (reader) {
+                      const { value, done } = await reader.read();
+                      if (done) break;
+                      buf += decoder.decode(value, { stream: true });
+                      const blocks = buf.split(/\r?\n\r?\n/);
+                      buf = blocks.pop() ?? "";
+                      for (const block of blocks) {
+                        let evName = "message";
+                        const dl: string[] = [];
+                        for (const line of block.replace(/\r/g, "").split("\n")) {
+                          if (line.startsWith("event: ")) evName = line.slice(7).trim();
+                          else if (line.startsWith("data: ")) dl.push(line.slice(6));
+                        }
+                        if (!dl.length) continue;
+                        try {
+                          const d = JSON.parse(dl.join("\n")) as Record<string, unknown>;
+                          if (evName === "done") {
+                            const st = String(d.status ?? "");
+                            if (st === "refused") finalStatus = "refused";
+                            else if (st === "failed") finalStatus = "error";
+                          }
+                        } catch { /* skip */ }
+                      }
+                    }
+                  } catch (e) {
+                    console.error("clarify-respond drain failed", e);
+                    finalStatus = "error";
+                  }
                   setLines((p) => p.map((x) =>
                     x.id === l.id && x.intentConfirm
-                      ? { ...x, intentConfirm: { ...x.intentConfirm, resolved: status } }
+                      ? { ...x, intentConfirm: { ...x.intentConfirm, resolved: finalStatus } }
                       : x,
                   ));
-                  if (status === "confirmed") {
+                  if (finalStatus === "confirmed") {
                     setLines((p) => [...p, {
                       id: nextId(), role: "agent",
                       text: "✓ intent 已確認，建構中…",
                     }]);
-                  } else if (status === "refused") {
+                  } else if (finalStatus === "refused") {
                     setLines((p) => [...p, {
                       id: nextId(), role: "agent",
                       text: "✋ 已取消 — 請重新描述需求",
                     }]);
                   }
+                  return finalStatus;
                 }}
               />
             ) : (

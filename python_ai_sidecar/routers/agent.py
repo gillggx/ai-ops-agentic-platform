@@ -196,6 +196,7 @@ async def _chat_intent_respond_stream(
     from python_ai_sidecar.agent_builder.graph_build import (
         resume_graph_build_with_clarify,
     )
+    from python_ai_sidecar.agent_builder.event_wrapper import wrap_build_event_for_chat
 
     pending = _pc.consume(req.chat_session_id)
     if pending is None:
@@ -218,6 +219,19 @@ async def _chat_intent_respond_stream(
             session_id=pending.build_session_id,
             answers=answers_payload,
         ):
+            # v19: translate raw build StreamEvent → pb_glass_* shape so the
+            # AIAgentPanel SSE handler (same one /chat uses) renders ops +
+            # applies them to the canvas. Without this, the resumed build
+            # runs invisibly — chat panel sees no ops, canvas stays empty.
+            wrapped = wrap_build_event_for_chat(stream_event, pending.build_session_id)
+            if wrapped is not None:
+                ev_type = wrapped.get("type") or "message"
+                yield {
+                    "event": ev_type,
+                    "data": json.dumps(wrapped, default=str, ensure_ascii=False),
+                }
+            # Also forward the raw event so BulletConfirmCard can detect
+            # the final 'done' status to flip its UI to confirmed.
             yield {
                 "event": stream_event.type,
                 "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
