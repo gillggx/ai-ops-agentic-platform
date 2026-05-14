@@ -376,8 +376,26 @@ class PipelineValidator:
                 node_out[edge.from_.node] += 1
             if edge.to.node in node_in:
                 node_in[edge.to.node] += 1
+        # v19 (2026-05-15): source-capable composite blocks (block_spc_panel,
+        # block_apc_panel) can run standalone via params (tool_id/step/
+        # chart_name/time_range) — they fetch their own data + emit chart_spec.
+        # No upstream edge needed when params declare a source. Without this
+        # exemption, LLM-built skill_step_mode pipelines with a parallel
+        # verdict branch + spc_panel chart branch get rejected because the
+        # chart branch (single panel node) has no edges.
+        _SOURCE_CAPABLE_TERMINALS = {"block_spc_panel", "block_apc_panel"}
+
         for node in pipeline.nodes:
             if node_in[node.id] == 0 and node_out[node.id] == 0:
+                # Exempt source-capable composite blocks when they carry source
+                # params (tool_id / lot_id / step). They're terminal outputs
+                # with built-in source mode.
+                if node.block_id in _SOURCE_CAPABLE_TERMINALS:
+                    params = getattr(node, "params", None) or {}
+                    if any(
+                        params.get(k) for k in ("tool_id", "lot_id", "step")
+                    ):
+                        continue
                 yield {
                     "rule": "C14_ORPHAN_NODE",
                     "code": "STRUCTURE_ORPHAN",
