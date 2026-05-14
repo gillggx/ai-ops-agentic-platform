@@ -224,11 +224,19 @@ class _ParamPanelBase(BlockExecutor):
         n_distinct_ts = (
             long["eventTime"].nunique() if "eventTime" in long.columns else 0
         )
-        # series_field priority: user color_by > name_field (when multi)
+
+        # series_field priority:
+        #   1) user color_by overrides everything (e.g. color by toolID)
+        #   2) name_field BUT only when there are >= 2 distinct names —
+        #      otherwise it's a single trace and seriesing adds nothing,
+        #      drops user's value_color override since renderer falls back
+        #      to SERIES_COLORS palette
         if color_by and isinstance(color_by, str) and color_by in long.columns:
             series_field: Optional[str] = color_by
+        elif self.name_field in long.columns and long[self.name_field].nunique() >= 2:
+            series_field = self.name_field
         else:
-            series_field = self.name_field if self.name_field in long.columns else None
+            series_field = None
 
         if n_distinct_ts > 1:
             x_field = "eventTime"
