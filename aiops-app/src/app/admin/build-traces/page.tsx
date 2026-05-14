@@ -856,7 +856,7 @@ function ModelDecision({ call }: { call: LlmCall }) {
                 {(s.expected_kind as string) || "?"}
               </span>
               {String(s.text || "(no text)")}
-              {s.candidate_block && (
+              {Boolean(s.candidate_block) && (
                 <span style={{ color: T.textMuted, fontSize: 11, marginLeft: 6, fontFamily: T.fontMono }}>
                   → {String(s.candidate_block)}
                 </span>
@@ -968,10 +968,15 @@ function OpRow({ op }: { op: Record<string, unknown> }) {
       color: T.text,
     }}>
       <span style={{ color, fontWeight: 600 }}>{type}</span>
-      {op.node_id && <span> · <span style={{ color: T.textMuted }}>{String(op.node_id)}</span></span>}
-      {op.block_id && <span> · {String(op.block_id)}</span>}
+      {Boolean(op.node_id) && <span> · <span style={{ color: T.textMuted }}>{String(op.node_id)}</span></span>}
+      {Boolean(op.block_id) && <span> · {String(op.block_id)}</span>}
       {type === "connect" && (
-        <span> · <span style={{ color: T.accent }}>{String(op.src_id)}</span>.{String(op.src_port || "data")} → <span style={{ color: T.accent }}>{String(op.dst_id)}</span>.{String(op.dst_port || "data")}</span>
+        <span>
+          {" · "}
+          <span style={{ color: T.accent }}>{String(op.src_id ?? "")}</span>.{String(op.src_port ?? "data")}
+          {" → "}
+          <span style={{ color: T.accent }}>{String(op.dst_id ?? "")}</span>.{String(op.dst_port ?? "data")}
+        </span>
       )}
       {op.params != null && Object.keys(op.params as Record<string, unknown>).length > 0 && (
         <details style={{ marginTop: 4 }}>
