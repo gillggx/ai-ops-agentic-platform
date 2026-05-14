@@ -30,6 +30,9 @@ GraphStatus = Literal[
     "cancelled",
     "finished",
     "failed",
+    # v18 (2026-05-14): reject-and-ask loop
+    "needs_clarify",  # macro_plan said too_vague; route back to clarify_intent
+    "refused",        # too_vague_attempts exhausted; tell user we don't understand
 ]
 
 
@@ -68,6 +71,23 @@ class BuildGraphState(TypedDict, total=False):
     clarifications: dict[str, str]
     # Bound to 1 — clarify only fires once per build.
     clarify_attempts: int
+
+    # ── v18 (2026-05-14): reject-and-ask loop ─────────────────────────
+    # When macro_plan returns too_vague, we route back to clarify_intent
+    # (instead of silent failure). too_vague_reason carries the model's
+    # "why I gave up" explanation so clarify_intent can ask targeted
+    # questions instead of generic ones. Cap at MAX_TOO_VAGUE_ATTEMPTS=2;
+    # past that we set status="refused" + a friendly message.
+    too_vague_attempts: int
+    too_vague_reason: Optional[str]
+    # Intent bullets the model produces so user can confirm/reject each
+    # — replaces the original MCQ-only clarify behavior. Each bullet:
+    #   {id: "b1", text: "...", terminal_block?: "block_line_chart",
+    #    preview_chart_spec?: {...}, options?: [...] (when MCQ disambiguation)}
+    intent_bullets: list[dict]
+    # User's per-bullet decisions echoed back from /clarify-respond.
+    # Shape: {b1: {action: "ok"|"reject"|"edit", edit_text?: "..."}}
+    intent_confirmations: dict[str, dict]
 
     # ── v15 G2: Post-plan modify request (2026-05-13) ─────────────────
     # When user clicks "改 Step N" on the confirm card, the natural-language
@@ -211,6 +231,10 @@ def initial_state(
         expected_outputs_structured=[],
         clarifications={},
         clarify_attempts=0,
+        too_vague_attempts=0,
+        too_vague_reason=None,
+        intent_bullets=[],
+        intent_confirmations={},
         modify_requests=[],
         modify_cycles=0,
         macro_plan=[],

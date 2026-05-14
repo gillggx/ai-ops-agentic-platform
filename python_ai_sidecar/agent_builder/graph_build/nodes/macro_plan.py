@@ -52,6 +52,11 @@ logger = logging.getLogger(__name__)
 # smaller skills.
 MAX_MACRO_STEPS = 12
 
+# v18: reject-and-ask loop — how many times macro_plan can return
+# too_vague before we hard-refuse the build with a friendly message.
+# 1 = "ask once"; 2 = "ask once, retry, then refuse" (current).
+MAX_TOO_VAGUE_ATTEMPTS = 2
+
 
 _SYSTEM = """你是 pipeline architect。User 給你需求，你把它**拆成 3-6 個高階步驟**，每步驟用一句中文描述要做什麼。
 
@@ -253,21 +258,50 @@ async def macro_plan_node(state: BuildGraphState) -> dict[str, Any]:
 
     if isinstance(decision, dict) and decision.get("too_vague"):
         reason = str(decision.get("reason") or "instruction too vague to build a pipeline")
-        logger.info("macro_plan_node: too_vague — %s", reason[:120])
+        # v18 (2026-05-14): reject-and-ask loop. Don't silent-fail. Route
+        # back to clarify_intent up to MAX_TOO_VAGUE_ATTEMPTS=2 with the
+        # reason as context for asking targeted questions; after that,
+        # explicitly refuse with a friendly message.
+        attempts = int(state.get("too_vague_attempts") or 0) + 1
+        is_refused = attempts >= MAX_TOO_VAGUE_ATTEMPTS
+        next_status = "refused" if is_refused else "needs_clarify"
+        logger.info(
+            "macro_plan_node: too_vague — attempt=%d/%d → %s — %s",
+            attempts, MAX_TOO_VAGUE_ATTEMPTS, next_status, reason[:120],
+        )
         if tracer is not None:
             tracer.record_llm(
                 "macro_plan_node", system=_SYSTEM, user_msg=user_msg,
                 raw_response=raw_text, parsed=decision, verdict="too_vague",
             )
             tracer.record_step(
-                "macro_plan_node", status="too_vague", reason=reason[:300],
+                "macro_plan_node", status=next_status,
+                attempt=attempts, reason=reason[:300],
             )
+        if is_refused:
+            return {
+                "macro_plan": [],
+                "plan_validation_errors": [f"refused: {reason}"],
+                "summary": (
+                    "我搞不懂這個需求 — 試了 2 次都覺得太模糊。請更具體描述：你要看什麼資料？"
+                    "預期輸出是什麼？要看哪台機台 / 哪段時間？"
+                ),
+                "status": "refused",
+                "too_vague_attempts": attempts,
+                "too_vague_reason": reason[:500],
+                "sse_events": [_event("macro_plan_refused", {"reason": reason[:300]})],
+            }
+        # Route back to clarify_intent for another pass.
         return {
             "macro_plan": [],
-            "plan_validation_errors": [f"too vague: {reason}"],
-            "summary": f"Instruction too vague — {reason[:200]}",
-            "status": "failed",
-            "sse_events": [_event("macro_plan_too_vague", {"reason": reason[:300]})],
+            "summary": f"Need clarification — {reason[:200]}",
+            "status": "needs_clarify",
+            "too_vague_attempts": attempts,
+            "too_vague_reason": reason[:500],
+            # Reset clarify_attempts so clarify_intent re-runs (it short-
+            # circuits when clarify_attempts >= 1).
+            "clarify_attempts": 0,
+            "sse_events": [_event("macro_plan_needs_clarify", {"reason": reason[:300]})],
         }
 
     raw_macro = (decision or {}).get("macro_plan") or []

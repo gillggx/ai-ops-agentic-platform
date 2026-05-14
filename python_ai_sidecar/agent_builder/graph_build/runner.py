@@ -135,7 +135,7 @@ async def stream_graph_build(
                     if isinstance(paused_payload, dict) else None
                 )
                 if tracer is not None:
-                    pause_status = "clarify_required" if paused_kind == "clarify_required" else "confirm_pending"
+                    pause_status = paused_kind if paused_kind in ("clarify_required", "intent_confirm_required") else "confirm_pending"
                     tracer.set_status(pause_status)
                     tracer.record_step(
                         "graph_paused",
@@ -150,6 +150,11 @@ async def stream_graph_build(
             tracer.set_final_pipeline(
                 last_state.get("final_pipeline") or last_state.get("base_pipeline")
             )
+            # v18: push state.status into trace so refused/failed/finished
+            # is recorded explicitly (don't let __aexit__ default it).
+            terminal_status = last_state.get("status")
+            if terminal_status and not interrupted:
+                tracer.set_status(terminal_status)
             await tracer.__aexit__(None, None, None)
 
     # Re-emit pause as SSE event (reuse already-detected payload)
@@ -324,7 +329,7 @@ async def resume_graph_build(
             interrupt_payload = {}
         kind = (interrupt_payload or {}).get("kind") if isinstance(interrupt_payload, dict) else None
         yield StreamEvent(
-            type="clarify_required" if kind == "clarify_required" else "confirm_pending",
+            type=(kind if kind in ("clarify_required", "intent_confirm_required") else "confirm_pending"),
             data={
                 "session_id": session_id,
                 **(interrupt_payload if isinstance(interrupt_payload, dict) else {}),
@@ -391,7 +396,7 @@ async def resume_graph_build_with_modify(
             interrupt_payload = {}
         kind = (interrupt_payload or {}).get("kind") if isinstance(interrupt_payload, dict) else None
         yield StreamEvent(
-            type="clarify_required" if kind == "clarify_required" else "confirm_pending",
+            type=(kind if kind in ("clarify_required", "intent_confirm_required") else "confirm_pending"),
             data={
                 "session_id": session_id,
                 **(interrupt_payload if isinstance(interrupt_payload, dict) else {}),
@@ -476,7 +481,7 @@ async def resume_graph_build_with_clarify(
                     if isinstance(paused_payload, dict) else None
                 )
                 if tracer is not None:
-                    pause_status = "clarify_required" if paused_kind == "clarify_required" else "confirm_pending"
+                    pause_status = paused_kind if paused_kind in ("clarify_required", "intent_confirm_required") else "confirm_pending"
                     tracer.set_status(pause_status)
                     tracer.record_step(
                         "graph_paused",
@@ -490,11 +495,14 @@ async def resume_graph_build_with_clarify(
             tracer.set_final_pipeline(
                 last_state.get("final_pipeline") or last_state.get("base_pipeline")
             )
+            terminal_status = last_state.get("status")
+            if terminal_status and not interrupted:
+                tracer.set_status(terminal_status)
             await tracer.__aexit__(None, None, None)
 
     if interrupted:
         yield StreamEvent(
-            type="clarify_required" if paused_kind == "clarify_required" else "confirm_pending",
+            type=(paused_kind if paused_kind in ("clarify_required", "intent_confirm_required") else "confirm_pending"),
             data={
                 "session_id": session_id,
                 **(paused_payload if isinstance(paused_payload, dict) else {}),

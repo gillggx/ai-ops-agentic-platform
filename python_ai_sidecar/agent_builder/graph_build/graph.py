@@ -251,9 +251,13 @@ def _route_after_compile_chunk(state: BuildGraphState) -> str:
 
 
 def _route_after_macro_plan(state: BuildGraphState) -> str:
-    """After macro_plan_node: if too_vague (status=failed) → finalize.
-    Otherwise → confirm_gate so user reviews the macro plan before any
-    compile work happens.
+    """After macro_plan_node: route by status.
+
+    v18 (2026-05-14): added needs_clarify path. When macro_plan returns
+    too_vague but attempts < cap, status=needs_clarify and we loop back
+    to clarify_intent (which now sees too_vague_reason and asks targeted
+    follow-up bullets). status=refused or status=failed both go to
+    finalize for trace consistency.
 
     EXCEPTION: when skip_confirm=True (chat / skill-translate / any caller
     without a confirm UI), skip confirm_gate entirely and go straight to
@@ -262,7 +266,10 @@ def _route_after_macro_plan(state: BuildGraphState) -> str:
     paused with 0 ops produced — but the caller thinks it succeeded
     (saw macro_plan_proposed event and returned).
     """
-    if state.get("status") == "failed" or not state.get("macro_plan"):
+    status = state.get("status")
+    if status == "needs_clarify":
+        return "clarify_intent"
+    if status in ("failed", "refused") or not state.get("macro_plan"):
         return "finalize"
     if state.get("skip_confirm"):
         return "canvas_reset"
@@ -340,6 +347,7 @@ def build_graph():
             "confirm_gate": "confirm_gate",
             "canvas_reset": "canvas_reset",
             "finalize": "finalize",
+            "clarify_intent": "clarify_intent",  # v18 reject-and-ask loop
         },
     )
     g.add_edge("plan", "validate")  # legacy replan path

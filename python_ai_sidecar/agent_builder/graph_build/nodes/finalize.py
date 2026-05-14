@@ -152,10 +152,14 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
     n_ok_ops = sum(1 for op in plan if op.get("result_status") == "ok")
     n_failed_ops = sum(1 for op in plan if op.get("result_status") == "error")
 
-    # Status reflects the BUILD ENGINE's success, not pipeline validity —
-    # but structural errors are loud enough to fail the build (see comment
-    # above).
-    if len(pipeline.nodes) == 0 or n_ok_ops == 0:
+    # v18: preserve "refused" status set by macro_plan/clarify_intent when
+    # they hard-rejected. Without this, refused → finalize → "failed"
+    # (because pipeline is empty), losing the distinction between "agent
+    # tried + couldn't" and "agent refused to guess".
+    incoming_status = state.get("status")
+    if incoming_status == "refused":
+        status = "refused"
+    elif len(pipeline.nodes) == 0 or n_ok_ops == 0:
         status = "failed"
     elif structural_issues:
         status = "failed_structural"

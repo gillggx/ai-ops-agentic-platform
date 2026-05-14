@@ -63,6 +63,8 @@ const STATUS_META: Record<string, { color: string; bg: string; label: string }> 
   clarify_required:   { color: T.accent,  bg: T.accentSoft,  label: "⏸ Awaiting clarify" },
   awaiting_user:      { color: T.warning, bg: T.warningSoft, label: "⏸ Awaiting user" },
   too_vague:          { color: T.warning, bg: T.warningSoft, label: "Too vague" },
+  needs_clarify:      { color: T.accent,  bg: T.accentSoft,  label: "↻ Looping back to clarify" },
+  refused:            { color: T.danger,  bg: T.dangerSoft,  label: "✋ Refused" },
   cancelled:          { color: T.neutral, bg: T.neutralSoft, label: "Cancelled" },
   ok:                 { color: T.success, bg: T.successSoft, label: "OK" },
   success:            { color: T.success, bg: T.successSoft, label: "Success" },
@@ -633,15 +635,30 @@ function BuildOutcomeBanner({ detail }: { detail: TraceDetail }) {
     title = "⏸ Awaiting user confirmation";
     desc = "model 已產出 macro plan，等使用者在 Builder canvas 按 Apply 才會繼續編譯成 pipeline。";
     actions = ["看下方 Journey tab 的 macro_plan_node LLM call → 該決策的步驟列表", "按 Apply 後會生新的 trace 接著編譯"];
+  } else if (status === "intent_confirm_required") {
+    kind = "paused";
+    title = "⏸ Awaiting intent confirmation";
+    desc = "model 把你的 instruction 拆成 intent bullets 等你逐項確認 ✓✗。下方 Journey 看 model 怎麼理解你的話。";
+    actions = ["Journey tab 的 clarify_intent_node → 看 bullets + preview chart", "Skill GUI 的 confirm modal 按完後 resume"];
   } else if (status === "clarify_required" || status === "awaiting_user") {
     kind = "paused";
     title = "⏸ Awaiting clarify answers";
-    desc = "model 認為 instruction 有歧義，丟出 clarification questions 給使用者選。";
+    desc = "model 認為 instruction 有歧義，丟出 clarification 給使用者。";
     const q = reasonStep?.questions as unknown[] | undefined;
     if (Array.isArray(q) && q.length > 0) {
       desc += ` 共 ${q.length} 題。`;
     }
     actions = ["Journey tab 的 clarify_intent_node LLM call → 看問了什麼", "等使用者回答後會 resume，開新 trace"];
+  } else if (status === "needs_clarify") {
+    kind = "paused";
+    title = "↻ Looping back to clarify";
+    desc = "macro_plan 上次太模糊；正繞回 clarify_intent 帶著 too_vague_reason 重問 user。";
+    actions = ["Journey tab 看 macro_plan_node 的 too_vague reason", "下一個 clarify_intent 會出針對性 bullets"];
+  } else if (status === "refused") {
+    kind = "failed";
+    title = "✋ Refused — model 看不懂這個需求";
+    desc = detail.summary || lastLlmReason || "model 試了 2 次都覺得太模糊，拒絕亂猜。請更具體描述 → 重新 build。";
+    actions = ["Journey tab 看 macro_plan 的 too_vague reason 或 clarify_intent 的 refuse_low_signal", "user 該重新描述：要看什麼資料 / 預期輸出 / 哪台機台"];
   } else if (status === "too_vague" || status === "failed" || status === "plan_unfixable" || status === "error" || status === "failed_structural") {
     kind = "failed";
     title = `✗ ${STATUS_META[status]?.label ?? status}`;
@@ -999,27 +1016,70 @@ function ModelDecision({ call }: { call: LlmCall }) {
     );
   }
 
-  // clarify_intent — show the questions
-  if (node === "clarify_intent_node" && Array.isArray((parsed as Record<string, unknown>).clarifications)) {
-    const qs = (parsed as { clarifications: Array<Record<string, unknown>> }).clarifications;
-    return (
-      <div style={{
-        marginTop: 6,
-        padding: 10,
-        background: T.llmSoft,
-        border: `1px solid ${T.llm}33`,
-        borderRadius: T.radiusSm,
-      }}>
-        <div style={{ fontSize: 11, color: T.llm, fontWeight: 600, marginBottom: 6, letterSpacing: 0.3 }}>
-          🧠 MODEL DECISION · clarification needed
-        </div>
-        {qs.map((q, i) => (
-          <div key={i} style={{ fontSize: 12, color: T.text, marginBottom: 4 }}>
-            <b>Q{i + 1}:</b> {String(q.question || "")}
+  // clarify_intent — v18 bullets format (preferred) or legacy MCQ
+  if (node === "clarify_intent_node" && parsed && typeof parsed === "object") {
+    const p = parsed as Record<string, unknown>;
+    const bullets = Array.isArray(p.bullets) ? (p.bullets as Array<Record<string, unknown>>) : null;
+    const qs = Array.isArray(p.clarifications) ? (p.clarifications as Array<Record<string, unknown>>) : null;
+    const refusedLow = Boolean(p.refuse_low_signal);
+
+    if (refusedLow) {
+      return (
+        <div style={{
+          marginTop: 6, padding: 10,
+          background: T.dangerSoft, border: `1px solid ${T.danger}55`,
+          borderRadius: T.radiusSm,
+        }}>
+          <div style={{ fontSize: 11, color: T.danger, fontWeight: 600, marginBottom: 4, letterSpacing: 0.3 }}>
+            ✋ MODEL DECISION · refused (low signal)
           </div>
-        ))}
-      </div>
-    );
+          <div style={{ fontSize: 12, color: T.text, fontStyle: "italic" }}>
+            {String(p.reason || "instruction lacks actionable intent")}
+          </div>
+        </div>
+      );
+    }
+
+    if (bullets && bullets.length > 0) {
+      return (
+        <div style={{
+          marginTop: 6, padding: 10,
+          background: T.llmSoft, border: `1px solid ${T.llm}33`,
+          borderRadius: T.radiusSm,
+        }}>
+          <div style={{ fontSize: 11, color: T.llm, fontWeight: 600, marginBottom: 6, letterSpacing: 0.3 }}>
+            🧠 MODEL DECISION · intent restatement ({bullets.length} bullet{bullets.length === 1 ? "" : "s"})
+          </div>
+          {Boolean(p.plan_summary) && (
+            <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 6, fontStyle: "italic" }}>
+              「{String(p.plan_summary)}」
+            </div>
+          )}
+          {bullets.map((b, i) => (
+            <BulletRow key={i} bullet={b} />
+          ))}
+        </div>
+      );
+    }
+
+    if (qs) {
+      return (
+        <div style={{
+          marginTop: 6, padding: 10,
+          background: T.llmSoft, border: `1px solid ${T.llm}33`,
+          borderRadius: T.radiusSm,
+        }}>
+          <div style={{ fontSize: 11, color: T.llm, fontWeight: 600, marginBottom: 6, letterSpacing: 0.3 }}>
+            🧠 MODEL DECISION · clarification needed (legacy MCQ)
+          </div>
+          {qs.map((q, i) => (
+            <div key={i} style={{ fontSize: 12, color: T.text, marginBottom: 4 }}>
+              <b>Q{i + 1}:</b> {String(q.question || "")}
+            </div>
+          ))}
+        </div>
+      );
+    }
   }
 
   // reflect_op / repair_op — show the patch action
@@ -1047,6 +1107,58 @@ function ModelDecision({ call }: { call: LlmCall }) {
   }
 
   return null;
+}
+
+function BulletRow({ bullet }: { bullet: Record<string, unknown> }) {
+  const text = String(bullet.text ?? "");
+  const id = String(bullet.id ?? "");
+  const tb = bullet.terminal_block ? String(bullet.terminal_block) : "";
+  const preview = bullet.preview_chart_spec as Record<string, unknown> | undefined;
+  const opts = Array.isArray(bullet.options) ? (bullet.options as Array<Record<string, unknown>>) : null;
+
+  return (
+    <div style={{
+      padding: "6px 8px",
+      marginTop: 4,
+      background: "#fff",
+      border: `1px solid ${T.llm}33`,
+      borderLeft: `3px solid ${T.llm}`,
+      borderRadius: T.radiusSm,
+      fontSize: 12,
+      color: T.text,
+    }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+        <span style={{ color: T.llm, fontWeight: 600, fontFamily: T.fontMono, fontSize: 11 }}>
+          {id}
+        </span>
+        <span style={{ flex: 1 }}>{text}</span>
+        {tb && (
+          <span style={{
+            fontSize: 10, padding: "1px 6px",
+            background: T.accentSoft, color: T.accent,
+            borderRadius: 4, fontFamily: T.fontMono,
+          }}>
+            → {tb}
+          </span>
+        )}
+      </div>
+      {opts && opts.length > 0 && (
+        <div style={{ marginTop: 4, paddingLeft: 12, fontSize: 11, color: T.textMuted }}>
+          options: {opts.map((o) => String(o.label || o.value || "")).join(" · ")}
+        </div>
+      )}
+      {preview && (
+        <details style={{ marginTop: 6 }}>
+          <summary style={{ cursor: "pointer", fontSize: 11, color: T.textMuted, listStyle: "none" }}>
+            ▸ preview chart (from block.examples)
+          </summary>
+          <div style={{ marginTop: 4, padding: 6, background: T.bgSubtle, borderRadius: 4 }}>
+            <ChartRenderer spec={preview as Parameters<typeof ChartRenderer>[0]["spec"]} />
+          </div>
+        </details>
+      )}
+    </div>
+  );
 }
 
 function OpRow({ op }: { op: Record<string, unknown> }) {
