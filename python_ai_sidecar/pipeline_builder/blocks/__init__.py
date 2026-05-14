@@ -4,6 +4,7 @@ from python_ai_sidecar.pipeline_builder.blocks.base import BlockExecutor, BlockE
 from python_ai_sidecar.pipeline_builder.blocks.alert import AlertBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.any_trigger import AnyTriggerBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.apc_long_form import ApcLongFormBlockExecutor
+from python_ai_sidecar.pipeline_builder.blocks.apc_panel import ApcPanelBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.bar_chart import BarChartBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.box_plot import BoxPlotBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.chart import ChartBlockExecutor
@@ -42,6 +43,7 @@ from python_ai_sidecar.pipeline_builder.blocks.shift_lag import ShiftLagBlockExe
 from python_ai_sidecar.pipeline_builder.blocks.sort import SortBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.spatial_pareto import SpatialParetoBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.spc_long_form import SpcLongFormBlockExecutor
+from python_ai_sidecar.pipeline_builder.blocks.spc_panel import SpcPanelBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.splom import SplomBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.step_check import StepCheckBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.threshold import ThresholdBlockExecutor
@@ -112,6 +114,9 @@ BUILTIN_EXECUTORS: dict[str, type[BlockExecutor]] = {
     "block_pluck": PluckBlockExecutor,
     "block_unnest": UnnestBlockExecutor,
     "block_select": SelectBlockExecutor,
+    # 2026-05-14 (v18) — domain-composite panel blocks
+    "block_spc_panel": SpcPanelBlockExecutor,
+    "block_apc_panel": ApcPanelBlockExecutor,
 }
 
 __all__ = [

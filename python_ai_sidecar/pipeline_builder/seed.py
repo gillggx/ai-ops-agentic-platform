@@ -3186,6 +3186,190 @@ def _blocks() -> list[dict[str, Any]]:
             ],
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.select:SelectBlockExecutor"},
         },
+        # ── 2026-05-14 (v18) — domain-composite panel blocks ──────────────
+        # Replace the 4-step composition (unnest → filter → sort/keep-latest
+        # → chart) with a single deterministic block so LLM picks it instead
+        # of routinely making "sort+limit=1 kills multi-SPC" mistakes.
+        {
+            "name": "block_spc_panel",
+            "version": "1.0.0",
+            "category": "output",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "**SPC chart panel — one block, right semantics.**\n"
+                "把 process_history 的 SPC 資料一次處理好：unnest spc_charts → "
+                "依 event_filter 模式挑時段 → 出多 series line chart + UCL/LCL bound + OOC highlight。\n"
+                "\n"
+                "== When to use ==\n"
+                "- ✅ user 說「看 SPC chart」「SPC 趨勢」「OOC SPC chart」→ 用我\n"
+                "- ✅ user 說「機台最後一次 OOC 時的 SPC 狀況」→ 用我 + event_filter=latest_ooc\n"
+                "- ✅ user 說「過去 N 天 SPC 趨勢」→ 用我 + event_filter=all\n"
+                "- ✅ 取代繁瑣的 unnest+filter+sort+line_chart 4 步組合 — **這 4 步 LLM 常拼錯**\n"
+                "- ❌ user 要看「單一 SPC 的長期趨勢」(僅 r_chart) → 用 block_filter + block_line_chart 較彈性\n"
+                "- ❌ user 要計算 Cpk/EWMA 等統計 → 我只畫圖，不算統計\n"
+                "- ❌ APC 參數 → 用 block_apc_panel\n"
+                "\n"
+                "== event_filter 模式 ==\n"
+                "  latest_ooc    (default) — 找最後一個有 OOC 的 process event，秀那時刻 **所有** SPCs\n"
+                "  latest_event  — 最後一個 process event（不論 OOC），秀全部 SPCs\n"
+                "  all           — 全部時間範圍，多 series trend mode\n"
+                "  custom_time   — 配 event_time 指定 ISO timestamp\n"
+                "\n"
+                "== Params ==\n"
+                "event_filter         (string, default latest_ooc)\n"
+                "event_time           (string, opt) — event_filter=custom_time 時必填 ISO timestamp\n"
+                "show_only_violations (bool, default false) — true=只秀 is_ooc=true 的 charts\n"
+                "title                (string, opt) — chart 標題，預設 'SPC Charts'\n"
+                "\n"
+                "== Input ==\n"
+                "port: data (dataframe) — process_history(nested=true) 的輸出，或已 unnest 的長表\n"
+                "**自動偵測**輸入 shape：有 spc_charts 欄就 explode；已長表就直接用\n"
+                "\n"
+                "== Output ==\n"
+                "port: chart_spec (chart_spec) — 多 series line（trend mode）或 bar（single-event mode）\n"
+                "  自動帶 UCL/LCL bound rules + is_ooc highlight 紅圈\n"
+                "  meta 帶 {event_filter, n_rows, n_series} 給 admin trace 看\n"
+                "\n"
+                "== 典型 pipelines ==\n"
+                "(A) 機台最後一次 OOC SPC chart：\n"
+                "    block_process_history(tool_id=$tool_id, nested=true)\n"
+                "      → block_spc_panel(event_filter=latest_ooc)\n"
+                "(B) 過去 7 天 SPC 趨勢：\n"
+                "    block_process_history(tool_id=$tool_id, time_range=7d, nested=true)\n"
+                "      → block_spc_panel(event_filter=all)\n"
+                "(C) OOC count >= 2 才觸發 + 同時展示 chart（skill_step_mode）：\n"
+                "    n1 process_history → fan-out:\n"
+                "      Branch 1 (verdict): n1 → block_unnest(spc_charts) → block_filter(is_ooc==true)\n"
+                "                          → block_groupby_agg(group_by=eventTime, agg_column=name, agg_func=count)\n"
+                "                          → block_step_check(operator='>=', threshold=2)\n"
+                "      Branch 2 (chart):   n1 → block_spc_panel(event_filter=latest_ooc)\n"
+                "    兩 branch 共用 n1，**不要**重做 process_history\n"
+                "\n"
+                "== Common mistakes ==\n"
+                "⚠ 不要在我之前接 block_sort+limit=1 — 那會砍剩 1 row，我會接到只剩 1 個 SPC\n"
+                "⚠ event_filter=custom_time 但忘了給 event_time → 退回 all 模式 + 警告 note\n"
+                "⚠ 上游沒 spc_charts 欄又沒 SPC 長表 → empty chart + message\n"
+                "\n"
+                "== Errors ==\n"
+                "- INVALID_INPUT: data 不是 DataFrame\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "chart_spec", "type": "chart_spec"}],
+            "param_schema": {
+                "type": "object",
+                "properties": {
+                    "event_filter": {
+                        "type": "string",
+                        "enum": ["latest_ooc", "latest_event", "all", "custom_time"],
+                        "default": "latest_ooc",
+                        "title": "事件範圍",
+                    },
+                    "event_time": {
+                        "type": "string",
+                        "title": "指定 timestamp (ISO)",
+                    },
+                    "show_only_violations": {
+                        "type": "boolean",
+                        "default": False,
+                        "title": "只秀 OOC 的 charts",
+                    },
+                    "title": {
+                        "type": "string",
+                        "default": "SPC Charts",
+                        "title": "圖表標題",
+                    },
+                },
+            },
+            "examples": [
+                {"label": "機台最後一次 OOC 的所有 SPC charts",
+                 "params": {"event_filter": "latest_ooc", "title": "EQP-01 Last OOC Event"}},
+                {"label": "過去 7 天 SPC 趨勢",
+                 "params": {"event_filter": "all"}},
+                {"label": "指定時間點所有 SPC",
+                 "params": {"event_filter": "custom_time", "event_time": "2026-05-14T10:00:00"}},
+            ],
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.spc_panel:SpcPanelBlockExecutor"},
+        },
+        {
+            "name": "block_apc_panel",
+            "version": "1.0.0",
+            "category": "output",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "**APC parameter panel — one block, right semantics.**\n"
+                "把 process_history 的 APC 資料一次處理好：unnest apc_params → "
+                "依 event_filter 模式挑時段 → 出多 series line chart（無 bound，APC 原始資料沒帶上下界）。\n"
+                "\n"
+                "== When to use ==\n"
+                "- ✅ user 說「看 APC 參數」「APC 趨勢」→ 用我\n"
+                "- ✅ user 說「最近 N 天 APC 各參數變化」→ 用我 + event_filter=all\n"
+                "- ✅ 取代 unnest+groupby+line_chart 組合\n"
+                "- ❌ SPC chart → 用 block_spc_panel\n"
+                "- ❌ APC drift 偵測（連 N 次超過 X）→ block_apc_long_form + block_threshold + block_consecutive_rule\n"
+                "- ❌ 比較單一 APC 參數的 box plot → block_apc_long_form + block_box_plot\n"
+                "\n"
+                "== event_filter 模式 ==\n"
+                "  latest_drift  (default) — 找最後一個 drift event；上游沒提供 is_drift 欄則退回 latest_event\n"
+                "  latest_event  — 最後一個 process event\n"
+                "  all           — 全部時間範圍（trend）\n"
+                "  custom_time   — 配 event_time 指定 ISO timestamp\n"
+                "\n"
+                "== Params ==\n"
+                "event_filter         (string, default latest_drift)\n"
+                "event_time           (string, opt) — custom_time 模式必填\n"
+                "show_only_violations (bool, default false) — true=只秀 is_drift=true\n"
+                "title                (string, opt) — 預設 'APC Parameters'\n"
+                "\n"
+                "== Input ==\n"
+                "port: data (dataframe) — process_history(nested=true) 含 apc_params 陣列；或已 long-form 的 param_name/value 表\n"
+                "\n"
+                "== Output ==\n"
+                "port: chart_spec — 多 series line（trend）或 bar（single-event），**無 UCL/LCL rules**（APC 原始資料沒帶）\n"
+                "\n"
+                "== Common mistakes ==\n"
+                "⚠ 想要 drift 上下界 → 用 block_apc_long_form + block_threshold 算後再串其他 chart block\n"
+                "⚠ latest_drift 但上游沒 is_drift 欄 → 退 latest_event + note\n"
+                "\n"
+                "== Errors ==\n"
+                "- INVALID_INPUT: data 不是 DataFrame\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "chart_spec", "type": "chart_spec"}],
+            "param_schema": {
+                "type": "object",
+                "properties": {
+                    "event_filter": {
+                        "type": "string",
+                        "enum": ["latest_drift", "latest_event", "all", "custom_time"],
+                        "default": "latest_drift",
+                        "title": "事件範圍",
+                    },
+                    "event_time": {
+                        "type": "string",
+                        "title": "指定 timestamp (ISO)",
+                    },
+                    "show_only_violations": {
+                        "type": "boolean",
+                        "default": False,
+                        "title": "只秀 drift 的參數",
+                    },
+                    "title": {
+                        "type": "string",
+                        "default": "APC Parameters",
+                        "title": "圖表標題",
+                    },
+                },
+            },
+            "examples": [
+                {"label": "最近一次 drift 的 APC 參數",
+                 "params": {"event_filter": "latest_drift"}},
+                {"label": "過去 24 小時 APC 趨勢",
+                 "params": {"event_filter": "all"}},
+            ],
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.apc_panel:ApcPanelBlockExecutor"},
+        },
     ]
 
 

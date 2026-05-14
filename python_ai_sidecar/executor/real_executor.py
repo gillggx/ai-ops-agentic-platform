@@ -90,6 +90,9 @@ SIDECAR_NATIVE_BLOCKS: frozenset[str] = frozenset({
     "block_pluck",
     "block_unnest",
     "block_select",
+    # 2026-05-14 (v18) — domain-composite panel blocks
+    "block_spc_panel",
+    "block_apc_panel",
 })
 
 
