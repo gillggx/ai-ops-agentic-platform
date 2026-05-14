@@ -113,10 +113,14 @@ async def clarify_intent_node(state: BuildGraphState) -> dict[str, Any]:
     if not instruction.strip():
         return {"clarify_attempts": 1, "clarifications": {}}
 
+    from python_ai_sidecar.agent_builder.graph_build.trace import get_current_tracer
+    tracer = get_current_tracer()
+
     client = get_llm_client()
     user_msg = f"USER INSTRUCTION:\n{instruction[:1000]}"
 
     decision: dict[str, Any] = {"proceed_directly": True, "clarifications": []}
+    raw_text = ""
     try:
         # Spec said "use Haiku" but BaseLLMClient.create doesn't accept a
         # per-call model override. Using default model — this is a small
@@ -127,7 +131,8 @@ async def clarify_intent_node(state: BuildGraphState) -> dict[str, Any]:
             messages=[{"role": "user", "content": user_msg}],
             max_tokens=2048,
         )
-        text = _strip_fence(resp.text or "")
+        raw_text = resp.text or ""
+        text = _strip_fence(raw_text)
         try:
             decision = json.loads(text)
         except json.JSONDecodeError:
@@ -137,17 +142,35 @@ async def clarify_intent_node(state: BuildGraphState) -> dict[str, Any]:
             decision = _extract_first_json_object(text or "")
     except Exception as ex:  # noqa: BLE001
         logger.warning("clarify_intent: LLM/parse failed (%s) — proceeding without clarification", ex)
+        if tracer is not None:
+            tracer.record_llm(
+                "clarify_intent_node", system=_SYSTEM, user_msg=user_msg,
+                raw_response=raw_text, parsed=None, error=str(ex)[:300],
+            )
+            tracer.record_step("clarify_intent_node", status="failed", error=str(ex)[:300])
         return {
             "clarify_attempts": 1,
             "clarifications": {},
             "sse_events": [_event("clarify_skipped", {"reason": str(ex)[:200]})],
         }
 
+    # Record the successful LLM call regardless of decision branch below.
+    if tracer is not None:
+        tracer.record_llm(
+            "clarify_intent_node", system=_SYSTEM, user_msg=user_msg,
+            raw_response=raw_text, parsed=decision,
+        )
+
     questions = decision.get("clarifications") if isinstance(decision, dict) else None
     proceed = bool(decision.get("proceed_directly")) if isinstance(decision, dict) else True
 
     if proceed or not questions:
         logger.info("clarify_intent: prompt clear, proceeding without gate")
+        if tracer is not None:
+            tracer.record_step(
+                "clarify_intent_node", status="ok",
+                verdict="proceed_directly", n_questions=0,
+            )
         return {
             "clarify_attempts": 1,
             "clarifications": {},
@@ -157,6 +180,11 @@ async def clarify_intent_node(state: BuildGraphState) -> dict[str, Any]:
     # Sanitize: cap to 3 questions, ensure each has id/question/options
     questions = [q for q in questions if _valid_question(q)][:3]
     if not questions:
+        if tracer is not None:
+            tracer.record_step(
+                "clarify_intent_node", status="ok",
+                verdict="no_valid_questions", n_questions=0,
+            )
         return {
             "clarify_attempts": 1,
             "clarifications": {},
@@ -164,6 +192,13 @@ async def clarify_intent_node(state: BuildGraphState) -> dict[str, Any]:
         }
 
     logger.info("clarify_intent: emitting %d clarification question(s)", len(questions))
+
+    if tracer is not None:
+        tracer.record_step(
+            "clarify_intent_node", status="awaiting_user",
+            verdict="clarify_required", n_questions=len(questions),
+            questions=questions,
+        )
 
     # Pause graph and wait for user response via /agent/build/clarify-respond.
     user_response = interrupt({
@@ -183,6 +218,13 @@ async def clarify_intent_node(state: BuildGraphState) -> dict[str, Any]:
     # Augment the instruction so plan_node sees the disambiguated prompt.
     aug_instruction = _augment_instruction(instruction, questions, answers)
     logger.info("clarify_intent: applied %d answer(s); instruction extended", len(answers))
+
+    if tracer is not None:
+        tracer.record_step(
+            "clarify_intent_node", status="resumed",
+            verdict="answers_applied", n_answers=len(answers),
+            answers=answers,
+        )
 
     return {
         "instruction": aug_instruction,

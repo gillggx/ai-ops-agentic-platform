@@ -97,6 +97,8 @@ async def stream_graph_build(
 
     last_state: dict = {}
     interrupted = False
+    paused_kind: Optional[str] = None
+    paused_payload: dict = {}
 
     if tracer is not None:
         await tracer.__aenter__()
@@ -111,6 +113,38 @@ async def stream_graph_build(
             new_events, sse_offset = _flush_sse_events(last_state, sse_offset)
             for ev in new_events:
                 yield ev
+
+        # Detect pause-state INSIDE the try so tracer can record the
+        # actual reason ("confirm_pending" / "clarify_required") before
+        # __aexit__ defaults the status. Without this the trace shows
+        # status:null for paused builds — admin viewer can't tell paused
+        # from unknown-failure.
+        try:
+            _state_obj_pre = await graph.aget_state(config)
+            if _state_obj_pre.next:
+                interrupted = True
+                try:
+                    paused_payload = (
+                        _state_obj_pre.tasks[0].interrupts[0].value
+                        if _state_obj_pre.tasks else {}
+                    )
+                except Exception:  # noqa: BLE001
+                    paused_payload = {}
+                paused_kind = (
+                    paused_payload.get("kind")
+                    if isinstance(paused_payload, dict) else None
+                )
+                if tracer is not None:
+                    pause_status = "clarify_required" if paused_kind == "clarify_required" else "confirm_pending"
+                    tracer.set_status(pause_status)
+                    tracer.record_step(
+                        "graph_paused",
+                        status=pause_status,
+                        kind=paused_kind or "confirm_pending",
+                        questions=paused_payload.get("clarifications") if isinstance(paused_payload, dict) else None,
+                    )
+        except Exception as _ex:  # noqa: BLE001
+            logger.warning("stream_graph_build: pause detection failed: %s", _ex)
     finally:
         if tracer is not None:
             tracer.set_final_pipeline(
@@ -118,34 +152,16 @@ async def stream_graph_build(
             )
             await tracer.__aexit__(None, None, None)
 
-    # Check if graph paused on interrupt
-    state_obj = await graph.aget_state(config)
-    if state_obj.next:
-        # Graph is paused. Could be clarify_intent_node (G1) OR
-        # confirm_gate (G2). The interrupt payload's "kind" field tells
-        # us which — clarify_intent emits kind="clarify_required",
-        # confirm_gate emits no kind (legacy payload shape).
-        interrupted = True
-        try:
-            interrupt_payload = (
-                state_obj.tasks[0].interrupts[0].value if state_obj.tasks
-                else {}
-            )
-        except Exception:  # noqa: BLE001
-            interrupt_payload = {}
-        kind = (
-            interrupt_payload.get("kind")
-            if isinstance(interrupt_payload, dict) else None
-        )
-        event_type = "clarify_required" if kind == "clarify_required" else "confirm_pending"
+    # Re-emit pause as SSE event (reuse already-detected payload)
+    if interrupted:
+        event_type = "clarify_required" if paused_kind == "clarify_required" else "confirm_pending"
         yield StreamEvent(
             type=event_type,
             data={
                 "session_id": sid,
-                **(interrupt_payload if isinstance(interrupt_payload, dict) else {}),
+                **(paused_payload if isinstance(paused_payload, dict) else {}),
             },
         )
-        # Don't emit done — frontend keeps connection logic decoupled.
         return
 
     # Reached END — emit a done event
@@ -422,6 +438,10 @@ async def resume_graph_build_with_clarify(
     )
 
     last_state: dict = {}
+    paused_kind: Optional[str] = None
+    paused_payload: dict = {}
+    interrupted = False
+
     if tracer is not None:
         await tracer.__aenter__()
     try:
@@ -436,6 +456,35 @@ async def resume_graph_build_with_clarify(
             new_events, sse_offset = _flush_sse_events(last_state, sse_offset)
             for ev in new_events:
                 yield ev
+
+        # Same pause-detection pattern as stream_graph_build — record the
+        # confirm_pending state into the tracer so the admin viewer shows
+        # the actual reason instead of status:null.
+        try:
+            _state_obj_pre = await graph.aget_state(config)
+            if _state_obj_pre.next:
+                interrupted = True
+                try:
+                    paused_payload = (
+                        _state_obj_pre.tasks[0].interrupts[0].value
+                        if _state_obj_pre.tasks else {}
+                    )
+                except Exception:  # noqa: BLE001
+                    paused_payload = {}
+                paused_kind = (
+                    paused_payload.get("kind")
+                    if isinstance(paused_payload, dict) else None
+                )
+                if tracer is not None:
+                    pause_status = "clarify_required" if paused_kind == "clarify_required" else "confirm_pending"
+                    tracer.set_status(pause_status)
+                    tracer.record_step(
+                        "graph_paused",
+                        status=pause_status,
+                        kind=paused_kind or "confirm_pending",
+                    )
+        except Exception as _ex:  # noqa: BLE001
+            logger.warning("resume_graph_build_with_clarify: pause detection failed: %s", _ex)
     finally:
         if tracer is not None:
             tracer.set_final_pipeline(
@@ -443,22 +492,12 @@ async def resume_graph_build_with_clarify(
             )
             await tracer.__aexit__(None, None, None)
 
-    # After clarify resume the graph normally pauses again at confirm_gate;
-    # surface that to the frontend so it can show the confirm card.
-    state_obj = await graph.aget_state(config)
-    if state_obj.next:
-        try:
-            interrupt_payload = (
-                state_obj.tasks[0].interrupts[0].value if state_obj.tasks else {}
-            )
-        except Exception:  # noqa: BLE001
-            interrupt_payload = {}
-        kind = (interrupt_payload or {}).get("kind") if isinstance(interrupt_payload, dict) else None
+    if interrupted:
         yield StreamEvent(
-            type="clarify_required" if kind == "clarify_required" else "confirm_pending",
+            type="clarify_required" if paused_kind == "clarify_required" else "confirm_pending",
             data={
                 "session_id": session_id,
-                **(interrupt_payload if isinstance(interrupt_payload, dict) else {}),
+                **(paused_payload if isinstance(paused_payload, dict) else {}),
             },
         )
         return

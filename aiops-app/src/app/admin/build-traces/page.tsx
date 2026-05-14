@@ -59,12 +59,17 @@ const STATUS_META: Record<string, { color: string; bg: string; label: string }> 
   failed:             { color: T.danger,  bg: T.dangerSoft,  label: "Failed" },
   failed_structural:  { color: T.danger,  bg: T.dangerSoft,  label: "Structural error" },
   needs_confirm:      { color: T.warning, bg: T.warningSoft, label: "Awaiting confirm" },
+  confirm_pending:    { color: T.warning, bg: T.warningSoft, label: "⏸ Awaiting Apply" },
+  clarify_required:   { color: T.accent,  bg: T.accentSoft,  label: "⏸ Awaiting clarify" },
+  awaiting_user:      { color: T.warning, bg: T.warningSoft, label: "⏸ Awaiting user" },
+  too_vague:          { color: T.warning, bg: T.warningSoft, label: "Too vague" },
   cancelled:          { color: T.neutral, bg: T.neutralSoft, label: "Cancelled" },
   ok:                 { color: T.success, bg: T.successSoft, label: "OK" },
   success:            { color: T.success, bg: T.successSoft, label: "Success" },
   partial:            { color: T.warning, bg: T.warningSoft, label: "Partial" },
   error:              { color: T.danger,  bg: T.dangerSoft,  label: "Error" },
   skipped:            { color: T.neutral, bg: T.neutralSoft, label: "Skipped" },
+  resumed:            { color: T.accent,  bg: T.accentSoft,  label: "Resumed" },
 };
 
 // ============================================================================
@@ -145,6 +150,7 @@ interface TraceDetail {
   started_at?: string;
   finished_at?: string;
   instruction?: string;
+  summary?: string;
   graph_steps?: GraphStep[];
   llm_calls?: LlmCall[];
   final_pipeline?: { nodes?: PipelineNode[]; edges?: PipelineEdge[] };
@@ -501,6 +507,7 @@ function DetailHeader({
       <div style={{ fontSize: 13, color: T.textMuted, lineHeight: 1.5, marginBottom: 12, paddingBottom: 12, borderBottom: `1px solid ${T.border}` }}>
         {detail.instruction}
       </div>
+      <BuildOutcomeBanner detail={detail} />
       <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
         {([
           { id: "journey", label: "Journey", icon: "📜", count: (detail.graph_steps?.length || 0) + (detail.llm_calls?.length || 0) },
@@ -580,6 +587,103 @@ function DetailHeader({
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Build outcome banner — surface WHY a trace ended (paused vs failed vs ok)
+// ============================================================================
+
+function BuildOutcomeBanner({ detail }: { detail: TraceDetail }) {
+  const status = detail.status || "";
+  if (status === "finished" || status === "ok" || status === "success") {
+    return null;
+  }
+
+  // Extract the most informative reason text from the trace.
+  const steps = detail.graph_steps || [];
+  const llms = detail.llm_calls || [];
+
+  // Find the last failed/too_vague/awaiting step
+  const reasonStep = [...steps].reverse().find((s) => {
+    const st = String(s.status || "");
+    return ["failed", "too_vague", "awaiting_user", "error"].includes(st);
+  });
+  // Find the last LLM call's parsed verdict (often holds the "why")
+  const lastLlm = llms.length > 0 ? llms[llms.length - 1] : null;
+  const lastLlmReason: string | null = (() => {
+    if (!lastLlm) return null;
+    const p = lastLlm.parsed as Record<string, unknown> | undefined;
+    if (!p) return null;
+    if (typeof p.reason === "string") return p.reason;
+    if (p.too_vague === true) return "model judged the instruction too vague";
+    return null;
+  })();
+
+  // Pick the right kind of banner
+  type BannerKind = "paused" | "failed" | "unknown";
+  let kind: BannerKind = "unknown";
+  let title = status || "Unknown state";
+  let desc: string = "";
+  let actions: string[] = [];
+
+  if (status === "confirm_pending" || status === "needs_confirm") {
+    kind = "paused";
+    title = "⏸ Awaiting user confirmation";
+    desc = "model 已產出 macro plan，等使用者在 Builder canvas 按 Apply 才會繼續編譯成 pipeline。";
+    actions = ["看下方 Journey tab 的 macro_plan_node LLM call → 該決策的步驟列表", "按 Apply 後會生新的 trace 接著編譯"];
+  } else if (status === "clarify_required" || status === "awaiting_user") {
+    kind = "paused";
+    title = "⏸ Awaiting clarify answers";
+    desc = "model 認為 instruction 有歧義，丟出 clarification questions 給使用者選。";
+    const q = reasonStep?.questions as unknown[] | undefined;
+    if (Array.isArray(q) && q.length > 0) {
+      desc += ` 共 ${q.length} 題。`;
+    }
+    actions = ["Journey tab 的 clarify_intent_node LLM call → 看問了什麼", "等使用者回答後會 resume，開新 trace"];
+  } else if (status === "too_vague" || status === "failed" || status === "plan_unfixable" || status === "error" || status === "failed_structural") {
+    kind = "failed";
+    title = `✗ ${STATUS_META[status]?.label ?? status}`;
+    const stepReason = reasonStep ? String(reasonStep.reason ?? reasonStep.error ?? "") : "";
+    desc = detail.summary || lastLlmReason || stepReason || "(no reason recorded)";
+    actions = ["Journey tab → 展開最後一筆 LLM call 看 input/output", "可能原因：prompt 太模糊 / catalog 缺對應 block / model 解析錯"];
+  } else {
+    desc = detail.summary || "";
+  }
+
+  const palette = {
+    paused: { bg: T.warningSoft, border: T.warning, fg: T.warning, accent: T.warning },
+    failed: { bg: T.dangerSoft, border: T.danger, fg: T.danger, accent: T.danger },
+    unknown: { bg: T.neutralSoft, border: T.neutral, fg: T.text, accent: T.neutral },
+  }[kind];
+
+  return (
+    <div style={{
+      marginBottom: 12,
+      padding: "12px 14px",
+      background: palette.bg,
+      borderLeft: `3px solid ${palette.border}`,
+      borderRadius: T.radiusSm,
+      fontSize: 12,
+      color: T.text,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: palette.fg }}>{title}</span>
+        <span style={{ fontSize: 11, color: T.textMuted, fontFamily: T.fontMono }}>
+          status={status || "(none)"}
+        </span>
+      </div>
+      {desc && (
+        <div style={{ color: T.text, marginBottom: actions.length > 0 ? 6 : 0, lineHeight: 1.5 }}>
+          {desc}
+        </div>
+      )}
+      {actions.length > 0 && (
+        <ul style={{ margin: "4px 0 0 0", paddingLeft: 18, fontSize: 11, color: T.textMuted, lineHeight: 1.6 }}>
+          {actions.map((a, i) => <li key={i}>{a}</li>)}
+        </ul>
+      )}
     </div>
   );
 }

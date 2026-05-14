@@ -222,32 +222,50 @@ async def macro_plan_node(state: BuildGraphState) -> dict[str, Any]:
     tracer = get_current_tracer()
     extra_sse: list[dict[str, Any]] = []
 
+    raw_text = ""
     try:
         resp = await client.create(
             system=_SYSTEM,
             messages=[{"role": "user", "content": user_msg}],
             max_tokens=2048,
         )
-        text = _strip_fence(resp.text or "")
+        raw_text = resp.text or ""
+        text = _strip_fence(raw_text)
         try:
             decision = json.loads(text)
         except json.JSONDecodeError:
             decision = _extract_first_json_object(text or "")
     except Exception as ex:  # noqa: BLE001
         logger.warning("macro_plan_node: LLM/parse failed (%s)", ex)
+        if tracer is not None:
+            tracer.record_llm(
+                "macro_plan_node", system=_SYSTEM, user_msg=user_msg,
+                raw_response=raw_text, parsed=None, error=str(ex)[:300],
+            )
+            tracer.record_step("macro_plan_node", status="failed", error=str(ex)[:300])
         return {
             "macro_plan": [],
             "plan_validation_errors": [f"macro_plan failed: {ex}"],
+            "status": "failed",
+            "summary": f"macro_plan failed: {ex}",
             "sse_events": [_event("macro_plan_failed", {"error": str(ex)[:200]})],
         }
 
     if isinstance(decision, dict) and decision.get("too_vague"):
         reason = str(decision.get("reason") or "instruction too vague to build a pipeline")
         logger.info("macro_plan_node: too_vague — %s", reason[:120])
+        if tracer is not None:
+            tracer.record_llm(
+                "macro_plan_node", system=_SYSTEM, user_msg=user_msg,
+                raw_response=raw_text, parsed=decision, verdict="too_vague",
+            )
+            tracer.record_step(
+                "macro_plan_node", status="too_vague", reason=reason[:300],
+            )
         return {
             "macro_plan": [],
             "plan_validation_errors": [f"too vague: {reason}"],
-            "summary": "Instruction too vague.",
+            "summary": f"Instruction too vague — {reason[:200]}",
             "status": "failed",
             "sse_events": [_event("macro_plan_too_vague", {"reason": reason[:300]})],
         }
@@ -295,10 +313,20 @@ async def macro_plan_node(state: BuildGraphState) -> dict[str, Any]:
         step["step_idx"] = new_i
 
     if not macro_plan:
+        if tracer is not None:
+            tracer.record_llm(
+                "macro_plan_node", system=_SYSTEM, user_msg=user_msg,
+                raw_response=raw_text, parsed=decision, verdict="empty_after_parse",
+            )
+            tracer.record_step(
+                "macro_plan_node", status="failed",
+                reason="macro_plan empty after parsing (no valid steps)",
+            )
         return {
             "macro_plan": [],
             "plan_validation_errors": ["macro_plan empty after parsing"],
-            "summary": "(macro plan generation failed)",
+            "summary": "(macro plan generation failed — model returned no valid steps)",
+            "status": "failed",
             "sse_events": [_event("macro_plan_failed", {"reason": "no valid steps"})],
         }
 
