@@ -1388,36 +1388,13 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
     upstream_cols = _collect_upstream_cols(
         state.get("plan") or [], state.get("exec_trace") or {},
     )
-    # When upstream is empty (typical step_1 of a fresh build that
-    # bundles source + transforms), use each new add_node block's
-    # `output_schema.columns` to seed validator's allowed cols. Less
-    # comprehensive than runtime exec_trace but covers the documented
-    # base cols (e.g. process_history → eventTime, toolID, lotID,
-    # step, spc_status). Catches blatant hallucinations like filter
-    # column='chart_type' before they hit dispatch.
-    if not upstream_cols:
-        for op in new_ops:
-            if op.get("type") != "add_node":
-                continue
-            block_id = op.get("block_id") or ""
-            spec = next(
-                (s for (n, _v), s in registry.catalog.items() if n == block_id),
-                None,
-            )
-            if not spec:
-                continue
-            for port in (spec.get("output_schema") or []):
-                if not isinstance(port, dict):
-                    continue
-                for c in (port.get("columns") or []):
-                    if isinstance(c, str) and c:
-                        upstream_cols.add(c)
-        if upstream_cols:
-            logger.info(
-                "compile_chunk_node: step %s seeded %d upstream cols from "
-                "new_ops' output_schema (no exec_trace yet): %s",
-                step_key, len(upstream_cols), sorted(upstream_cols)[:8],
-            )
+    # NOTE 2026-05-14: tried seeding upstream_cols from add_node's
+    # output_schema.columns when exec_trace is empty (step_1 multi-op
+    # case). Output_schema only declares the 5 base cols for
+    # process_history (no spc_charts/spc_summary), so the validator
+    # rejected legitimate unnest column='spc_charts' as missing.
+    # Reverted — step_1 multi-op stays unvalidated; runtime / reflect_op
+    # picks up bad refs.
     # Auto-fix #1: if any op references a leaf of a nested upstream col,
     # prepend an unnest of the parent + re-wire connects. Saves a
     # retry round-trip when the structural fix is unambiguous.
@@ -1531,50 +1508,11 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
 
     req_issues = _validate_required_params(new_ops, registry.catalog)
     col_issues = _validate_column_refs(new_ops, upstream_cols, registry.catalog)
-    # 3-stage discipline: source → transform → logic/output. Each compile
-    # step is one stage. step_1 (empty plan) MUST emit a source-category
-    # block first. Subsequent steps must connect upstream only — no
-    # introducing a second source mid-pipeline. Reject + retry violations.
-    plan_so_far = state.get("plan") or []
-    stage_issues: list[str] = []
-    plan_has_source = any(
-        op.get("type") == "add_node" and (
-            (next((s for (n, _v), s in registry.catalog.items()
-                   if n == op.get("block_id")), {}) or {}).get("category") == "source"
-        )
-        for op in plan_so_far
-    )
-    for i, op in enumerate(new_ops):
-        if op.get("type") != "add_node":
-            continue
-        spec = next(
-            (s for (n, _v), s in registry.catalog.items()
-             if n == op.get("block_id")), None,
-        )
-        if not spec:
-            continue
-        cat = spec.get("category")
-        # Rule A: step_1 (no plan yet) must start with source-category block
-        if not plan_has_source and not stage_issues:
-            if cat != "source":
-                stage_issues.append(
-                    f"first add_node {op.get('node_id')!r} block_id="
-                    f"{op.get('block_id')!r} category={cat!r} — "
-                    f"step_1 must START with a source-category block "
-                    f"(撈資料先；source blocks: block_process_history / "
-                    f"block_list_objects / block_mcp_call)"
-                )
-            else:
-                plan_has_source = True
-        # Rule B: don't introduce a second source mid-pipeline
-        elif plan_has_source and cat == "source":
-            stage_issues.append(
-                f"add_node {op.get('node_id')!r} ({op.get('block_id')!r}) "
-                f"is another source block — pipeline already has a source. "
-                f"Each pipeline has 1 source upstream; subsequent steps "
-                f"transform / chart / check that source's data."
-            )
-    combined_issues = req_issues + col_issues + stage_issues
+    # NOTE: 3-stage check (source-first / no-second-source) was tried but
+    # combined with the col-ref validator's strictness it rejected too
+    # many legitimate compositions. Removed for now — needs rework that
+    # treats unnest's 'column' param differently (input not output ref).
+    combined_issues = req_issues + col_issues
     if combined_issues:
         logger.warning(
             "compile_chunk_node: step %s attempt %d validation issues: req=%s col=%s — retry",
