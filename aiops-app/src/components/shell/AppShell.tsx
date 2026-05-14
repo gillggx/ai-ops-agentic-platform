@@ -73,6 +73,7 @@ const ADMIN_ITEMS = [
   // new Skill Library at /skills replaces it.
   { href: "/admin/triggers",          label: "Triggers Overview", icon: "🔔" },
   { href: "/admin/memories",          label: "Agent Memory",      icon: "🧠" },
+  { href: "/admin/build-traces",      label: "Build Traces",      icon: "📜" },
   { href: "/system/data-sources",     label: "Data Sources",      icon: "🗄️" },
   { href: "/system/event-registry",   label: "Event Registry",    icon: "📋" },
   { href: "/system/monitor",          label: "System Monitor",    icon: "🖥️" },
