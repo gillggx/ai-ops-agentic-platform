@@ -1573,10 +1573,32 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
         )
         sse = trace_event_to_sse(llm_entry, kind="llm_call")
         if sse: extra_sse.append(sse)
+        all_autofix = (
+            (autofix_notes or [])
+            + (rewire_notes or [])
+            + (autocorrect_notes or [])
+            + (groupby_notes or [])
+            + (select_notes or [])
+            + (setparam_notes or [])
+            + (cpk_drop_notes or [])
+            + (drop_notes or [])
+            + (resolve_notes or [])
+        )
         step_entry = tracer.record_step(
             "compile_chunk_node", status="ok",
             step_idx=step.get("step_idx"),
+            step_text=step.get("text"),
             n_ops=len(new_ops), attempts=attempts,
+            autofixes=all_autofix,
+            ops_emitted=[
+                {"type": op.get("type"),
+                 "block_id": op.get("block_id"),
+                 "node_id": op.get("node_id"),
+                 "src_id": op.get("src_id"),
+                 "dst_id": op.get("dst_id"),
+                 "params": op.get("params") or {}}
+                for op in new_ops
+            ],
         )
         sse2 = trace_event_to_sse(step_entry, kind="step")
         if sse2: extra_sse.append(sse2)

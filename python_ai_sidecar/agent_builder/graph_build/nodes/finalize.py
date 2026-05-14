@@ -46,6 +46,56 @@ SIDE_EFFECT_BLOCKS: frozenset[str] = frozenset({
 DRYRUN_TIMEOUT_SEC = 10.0
 
 
+def _compact_node_result(info: dict[str, Any]) -> dict[str, Any]:
+    """Trim a node_result for trace storage — drop full preview rows
+    (can be huge), keep cols list + first row + per-port chart-type +
+    n_data_points. Mirrors what the admin viewer needs.
+    """
+    if not isinstance(info, dict):
+        return {"raw": str(info)[:200]}
+    out: dict[str, Any] = {
+        "status": info.get("status"),
+        "rows": info.get("rows"),
+        "duration_ms": info.get("duration_ms"),
+    }
+    err = info.get("error") or info.get("error_message")
+    if err:
+        out["error"] = str(err)[:200]
+    preview = info.get("preview") or {}
+    ports: dict[str, Any] = {}
+    for port, blob in preview.items():
+        if not isinstance(blob, dict):
+            continue
+        t = blob.get("type")
+        if t == "dataframe":
+            rows = blob.get("rows") or blob.get("sample_rows") or []
+            ports[port] = {
+                "kind": "dataframe",
+                "columns": (blob.get("columns") or [])[:20],
+                "total": blob.get("total"),
+                "first_row": rows[0] if rows else None,
+            }
+        elif t == "dict":
+            snap = blob.get("snapshot") or {}
+            if isinstance(snap, dict) and "data" in snap:
+                data = snap.get("data")
+                ports[port] = {
+                    "kind": "chart_spec",
+                    "chart_type": snap.get("type"),
+                    "title": snap.get("title"),
+                    "n_data_points": len(data) if isinstance(data, list) else None,
+                }
+            else:
+                ports[port] = {"kind": "dict", "keys": list(snap.keys())[:10]}
+        elif t == "bool":
+            ports[port] = {"kind": "bool", "value": blob.get("value")}
+        else:
+            ports[port] = {"kind": t}
+    if ports:
+        out["ports"] = ports
+    return out
+
+
 async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
     final_dict = state.get("final_pipeline") or state.get("base_pipeline")
     plan = state.get("plan") or []
@@ -151,6 +201,27 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
         dryrun_event, dry_run_results = await _maybe_dry_run(pipeline, trigger_payload)
         if dryrun_event:
             sse_events.append(dryrun_event)
+        # Persist dry-run summary into the BuildTracer trace so the admin
+        # /admin/build-traces viewer shows actual runtime data alongside
+        # the planning steps. Without this, the trace only had the
+        # plan + LLM calls — user couldn't see what each node actually
+        # produced.
+        from python_ai_sidecar.agent_builder.graph_build.trace import (
+            get_current_tracer,
+        )
+        tracer = get_current_tracer()
+        if tracer is not None and dry_run_results is not None:
+            node_results = (dry_run_results or {}).get("node_results") or {}
+            compact = {
+                nid: _compact_node_result(info)
+                for nid, info in node_results.items()
+            }
+            tracer.record_step(
+                "dry_run",
+                status=dry_run_results.get("status"),
+                duration_ms=dry_run_results.get("duration_ms"),
+                node_results=compact,
+            )
 
     # 2026-05-13: structural_issues persisted to state so inspect_execution
     # can also self-correct broken-pipeline cases (most common failure mode
