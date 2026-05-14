@@ -9,7 +9,7 @@ User=ubuntu
 Group=ubuntu
 WorkingDirectory=/opt/aiops/java-backend
 EnvironmentFile=/opt/aiops/java-backend/.env
-ExecStart=/usr/bin/java -server \
+ExecStart=/usr/lib/jvm/temurin-17-jdk-amd64/bin/java -server \
   -Xms512m -Xmx1536m \
   -XX:+HeapDumpOnOutOfMemoryError \
   -XX:HeapDumpPath=/var/log/aiops/java-heap-dump.hprof \

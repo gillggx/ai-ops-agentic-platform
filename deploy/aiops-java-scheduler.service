@@ -9,7 +9,7 @@ User=ubuntu
 Group=ubuntu
 WorkingDirectory=/opt/aiops/java-scheduler
 EnvironmentFile=/opt/aiops/java-scheduler/.env
-ExecStart=/usr/bin/java -server \
+ExecStart=/usr/lib/jvm/temurin-17-jdk-amd64/bin/java -server \
   -Xms256m -Xmx768m \
   -XX:+HeapDumpOnOutOfMemoryError \
   -XX:HeapDumpPath=/var/log/aiops/scheduler-heap-dump.hprof \
