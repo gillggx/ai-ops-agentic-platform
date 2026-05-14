@@ -74,6 +74,15 @@ Output 說它回的是 nested 結構（list / dict），下游就必須先有解
   - 中間 step 只放 user 真的需要的轉換；別加 user 沒提的聚合 / 排序 / 篩欄
   - 3-6 步合理；超過 6 表示拆太細
 
+⚠ 每個 step 必須是「**單一原子動作**」 — 不要把多動作塞同一 step：
+  - ❌ 「撈 process_history 並解開 spc_charts 並篩 xbar」(三件事擠一句)
+  - ✅ step_1: 撈 process_history → step_2: 解開 spc_charts → step_3: 篩 xbar
+  - ❌ 「撈資料 + 計算 mean + 畫線」 → 三個 steps
+  - ✅ 看到「並 / 加上 / 同時 / + / 然後」這種連接詞，**拆**
+
+理由：每 step 編譯成 1 add_node，下一個 step 編譯時才看得到上一個 step 的實際輸出欄位
+驗證 column ref。同 step 塞多動作 → 後面動作的 col 沒人驗 → runtime 才爆。
+
 如果 user 的需求過於模糊或不適合 build pipeline，回 {"too_vague": true, "reason": "..."}。
 
 只輸出 JSON，無 markdown fence:
