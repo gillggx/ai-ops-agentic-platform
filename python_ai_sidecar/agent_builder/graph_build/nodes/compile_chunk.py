@@ -447,6 +447,137 @@ def _resolve_input_refs(
     return notes
 
 
+def _force_skill_terminal(
+    new_ops: list[dict[str, Any]],
+    state: dict[str, Any],
+    is_terminal_step: bool,
+) -> list[str]:
+    """v18 (2026-05-14): when skill_step_mode=true and we're compiling
+    the LAST macro step, the terminal block MUST be block_step_check
+    (SkillRunner reads its pass/fail). LLM occasionally picks
+    block_threshold (which outputs triggered+evidence) thinking it
+    qualifies — it doesn't, runtime SkillRunner can't read it.
+
+    This autofix rewrites a terminal block_threshold add_node into
+    block_step_check, mapping equivalent params (column / threshold /
+    operator). Other non-verdict terminals stay as-is so chart blocks
+    can still produce evidence alongside the verdict.
+
+    Returns notes describing each rewrite. Mutates new_ops in-place.
+    """
+    if not state.get("skill_step_mode") or not is_terminal_step:
+        return []
+    notes: list[str] = []
+    # Only rewrite block_threshold (most common mistake). block_alert /
+    # block_data_view as terminals are caught by other validators or are
+    # legitimate diagnostic outputs in non-skill paths.
+    REWRITE_FROM = {"block_threshold"}
+    for op in new_ops:
+        if op.get("type") != "add_node":
+            continue
+        bid = op.get("block_id")
+        if bid not in REWRITE_FROM:
+            continue
+        params = op.get("params") or {}
+        # block_threshold params: column, target/upper_bound/lower_bound, operator, bound_type
+        # block_step_check params: column, aggregate, operator, threshold
+        col = params.get("column")
+        op_sym = params.get("operator")
+        target = (
+            params.get("target")
+            if params.get("target") is not None
+            else params.get("upper_bound")
+            if params.get("upper_bound") is not None
+            else params.get("lower_bound")
+        )
+        new_params: dict[str, Any] = {}
+        if col:
+            new_params["column"] = col
+        new_params["aggregate"] = "max"  # safest default
+        if op_sym:
+            new_params["operator"] = op_sym
+        else:
+            # bound_type='upper' implies '>'; 'lower' implies '<'; else '>='
+            bt = params.get("bound_type")
+            if bt == "upper":
+                new_params["operator"] = ">"
+            elif bt == "lower":
+                new_params["operator"] = "<"
+            else:
+                new_params["operator"] = ">="
+        if target is not None:
+            new_params["threshold"] = target
+        op["block_id"] = "block_step_check"
+        op["params"] = new_params
+        notes.append(
+            f"rewrote block_threshold (node {op.get('node_id')}) → block_step_check "
+            f"(skill_step_mode terminal must be verdict; preserved column={col} threshold={target})"
+        )
+    return notes
+
+
+def _autocorrect_column_refs(
+    new_ops: list[dict[str, Any]],
+    upstream_cols: set[str],
+) -> list[str]:
+    """v18 (2026-05-14): when LLM picks a column name that doesn't exist
+    in upstream output (typically because it invented a name like
+    'ooc_spc_count' from the prompt), find the closest match in
+    upstream_cols via difflib and substitute. Skip when no close match
+    (ratio >= 0.7) — let validator fail loudly instead of silent wrong fix.
+
+    Targets blocks where column/columns is the data ref:
+      block_filter, block_threshold, block_step_check, block_data_view,
+      block_groupby_agg, block_sort, block_select.
+
+    Returns notes describing each correction. Mutates new_ops in-place.
+    """
+    if not upstream_cols:
+        return []
+    import difflib
+
+    notes: list[str] = []
+    upstream_list = sorted(upstream_cols)
+    # blocks where these param names hold a single column ref
+    SINGLE_COL_PARAMS = {"column"}
+    # blocks where these hold a list of column refs
+    LIST_COL_PARAMS = {"columns", "group_by"}
+
+    for op in new_ops:
+        if op.get("type") != "add_node":
+            continue
+        params = op.get("params") or {}
+        for pname, pval in list(params.items()):
+            if pname in SINGLE_COL_PARAMS and isinstance(pval, str):
+                if pval in upstream_cols:
+                    continue
+                match = difflib.get_close_matches(pval, upstream_list, n=1, cutoff=0.7)
+                if match:
+                    params[pname] = match[0]
+                    notes.append(
+                        f"col-ref autofix: {op.get('block_id')}.{pname}='{pval}' → '{match[0]}' (closest in upstream)"
+                    )
+            elif pname in LIST_COL_PARAMS and isinstance(pval, list):
+                changed = False
+                fixed_list = []
+                for v in pval:
+                    if not isinstance(v, str) or v in upstream_cols:
+                        fixed_list.append(v)
+                        continue
+                    match = difflib.get_close_matches(v, upstream_list, n=1, cutoff=0.7)
+                    if match:
+                        fixed_list.append(match[0])
+                        changed = True
+                        notes.append(
+                            f"col-ref autofix: {op.get('block_id')}.{pname} item '{v}' → '{match[0]}'"
+                        )
+                    else:
+                        fixed_list.append(v)
+                if changed:
+                    params[pname] = fixed_list
+    return notes
+
+
 def _drop_unspecced_cpk(new_ops: list[dict[str, Any]]) -> list[str]:
     """block_cpk requires at least one of usl/lsl at runtime (custom
     enforcement, not in JSON Schema). LLM frequently omits both when
@@ -1482,6 +1613,30 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
             step_key, "; ".join(cpk_drop_notes[:3]),
         )
 
+    # Auto-fix #6.6 (v18): force terminal block to block_step_check when
+    # skill_step_mode + we're on the LAST macro step. Catches the
+    # block_threshold-as-terminal mistake the LLM keeps making despite
+    # description warnings.
+    macro_plan_list = state.get("macro_plan") or []
+    cur_step = int(state.get("current_macro_step") or 0)
+    is_terminal_step = bool(macro_plan_list) and cur_step >= len(macro_plan_list) - 1
+    skill_terminal_notes = _force_skill_terminal(new_ops, state, is_terminal_step)
+    if skill_terminal_notes:
+        logger.info(
+            "compile_chunk_node: step %s skill-terminal autofix: %s",
+            step_key, "; ".join(skill_terminal_notes[:3]),
+        )
+
+    # Auto-fix #6.7 (v18): fuzzy-match column refs when LLM invents column
+    # names. difflib ratio >= 0.7 substitutes; otherwise validator fails
+    # loudly so user sees a real error.
+    col_autofix_notes = _autocorrect_column_refs(new_ops, upstream_cols)
+    if col_autofix_notes:
+        logger.info(
+            "compile_chunk_node: step %s col-ref autofix: %s",
+            step_key, "; ".join(col_autofix_notes[:3]),
+        )
+
     # Auto-fix #7: drop ops that are pure garbage (None ids on connects,
     # set_params with no recoverable shape). Better to silently skip than
     # let executor / repair_op chase phantom errors.
@@ -1581,6 +1736,8 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
             + (select_notes or [])
             + (setparam_notes or [])
             + (cpk_drop_notes or [])
+            + (skill_terminal_notes or [])
+            + (col_autofix_notes or [])
             + (drop_notes or [])
             + (resolve_notes or [])
         )

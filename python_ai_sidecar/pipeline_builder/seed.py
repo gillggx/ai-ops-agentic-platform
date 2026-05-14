@@ -367,6 +367,7 @@ def _blocks() -> list[dict[str, Any]]:
                 "⚠ 別以為 evidence 只含違規列 — 它是 **全部 rows**，triggered_row 欄位才是違規旗標\n"
                 "⚠ Mode A / Mode B 擇一：同時給 bound_type + operator 時 Mode A 優先\n"
                 "⚠ column 要是數值型（除非用 ==/!=）；string 欄 + > / < 會出錯\n"
+                "⚠ **skill_step_mode pipeline 不能用 block_threshold 當終點** — Skill 架構下結尾**只接 block_step_check**（SkillRunner 讀它的 pass/fail）。如果你想做 skill verdict，把這個 block 換成 block_step_check（params: aggregate, column, operator, threshold）。compile_chunk 的 _force_skill_terminal autofix 會自動換，但 prompt 階段就選對才不會繞遠路\n"
                 "\n"
                 "== Errors ==\n"
                 "- COLUMN_NOT_FOUND : column 不在上游 df\n"

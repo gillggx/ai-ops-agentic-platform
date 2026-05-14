@@ -295,44 +295,93 @@ async def resume_graph_build(
     session_id: str,
     confirmed: bool,
 ) -> AsyncGenerator[StreamEvent, None]:
-    """Resume a paused graph (post-confirm_gate) with user's decision."""
+    """Resume a paused graph (post-confirm_gate) with user's decision.
+
+    v18 (2026-05-14): attaches BuildTracer so the post-Apply compile
+    journey (compile_chunk × N → dispatch_op → call_tool × N → finalize
+    → dry_run) lands in /tmp/builder-traces. Without this the admin
+    /admin/build-traces viewer only sees the paused trace (intent confirm
+    + macro_plan) and can't see what was actually built.
+    """
     graph = build_graph()
     config = {"configurable": {"thread_id": session_id}, "recursion_limit": 300}
 
     logger.info("resume_graph_build: session=%s confirmed=%s", session_id, confirmed)
     last_state: dict = {}
+    paused_kind: Optional[str] = None
+    paused_payload: dict = {}
+    interrupted = False
+
+    tracer = make_tracer(
+        instruction=f"[resume:confirm session={session_id} confirmed={confirmed}]",
+        session_id=session_id,
+        skip_confirm=False,
+        skill_step_mode=True,
+        base_pipeline=None,
+    )
 
     # Seed offset with the pre-existing sse_events length so we don't
     # re-yield events from before the resume.
     pre_state = await graph.aget_state(config)
     sse_offset = len((pre_state.values or {}).get("sse_events") or [])
 
-    async for chunk in graph.astream(
-        Command(resume={"confirmed": confirmed}),
-        config=config,
-        stream_mode="values",
-    ):
-        last_state = chunk if isinstance(chunk, dict) else {}
-        new_events, sse_offset = _flush_sse_events(last_state, sse_offset)
-        for ev in new_events:
-            yield ev
+    if tracer is not None:
+        await tracer.__aenter__()
+    try:
+        async for chunk in graph.astream(
+            Command(resume={"confirmed": confirmed}),
+            config=config,
+            stream_mode="values",
+        ):
+            last_state = chunk if isinstance(chunk, dict) else {}
+            new_events, sse_offset = _flush_sse_events(last_state, sse_offset)
+            for ev in new_events:
+                yield ev
 
-    # Detect another interrupt mid-stream (e.g. confirm_gate after clarify
-    # resume) and surface confirm_pending so frontend can keep going.
-    state_obj = await graph.aget_state(config)
-    if state_obj.next:
+        # Pause-detection same pattern as the other resume function so the
+        # admin viewer shows confirm_pending status in the trace instead of
+        # a stale default.
         try:
-            interrupt_payload = (
-                state_obj.tasks[0].interrupts[0].value if state_obj.tasks else {}
+            _state_obj_pre = await graph.aget_state(config)
+            if _state_obj_pre.next:
+                interrupted = True
+                try:
+                    paused_payload = (
+                        _state_obj_pre.tasks[0].interrupts[0].value
+                        if _state_obj_pre.tasks else {}
+                    )
+                except Exception:  # noqa: BLE001
+                    paused_payload = {}
+                paused_kind = (
+                    paused_payload.get("kind")
+                    if isinstance(paused_payload, dict) else None
+                )
+                if tracer is not None:
+                    pause_status = paused_kind if paused_kind in ("clarify_required", "intent_confirm_required") else "confirm_pending"
+                    tracer.set_status(pause_status)
+                    tracer.record_step(
+                        "graph_paused",
+                        status=pause_status,
+                        kind=paused_kind or "confirm_pending",
+                    )
+        except Exception as _ex:  # noqa: BLE001
+            logger.warning("resume_graph_build: pause detection failed: %s", _ex)
+    finally:
+        if tracer is not None:
+            tracer.set_final_pipeline(
+                last_state.get("final_pipeline") or last_state.get("base_pipeline")
             )
-        except Exception:  # noqa: BLE001
-            interrupt_payload = {}
-        kind = (interrupt_payload or {}).get("kind") if isinstance(interrupt_payload, dict) else None
+            terminal_status = last_state.get("status")
+            if terminal_status and not interrupted:
+                tracer.set_status(terminal_status)
+            await tracer.__aexit__(None, None, None)
+
+    if interrupted:
         yield StreamEvent(
-            type=(kind if kind in ("clarify_required", "intent_confirm_required") else "confirm_pending"),
+            type=(paused_kind if paused_kind in ("clarify_required", "intent_confirm_required") else "confirm_pending"),
             data={
                 "session_id": session_id,
-                **(interrupt_payload if isinstance(interrupt_payload, dict) else {}),
+                **(paused_payload if isinstance(paused_payload, dict) else {}),
             },
         )
         return
