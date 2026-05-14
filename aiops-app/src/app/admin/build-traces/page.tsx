@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import ChartRenderer from "@/components/pipeline-builder/ChartRenderer";
 
 // ============================================================================
 // Design tokens
@@ -115,14 +116,21 @@ type NodeRunResult = {
   error?: string;
   ports?: Record<string, {
     kind?: string;
+    // dataframe
     columns?: string[];
     total?: number;
-    first_row?: Record<string, unknown> | null;
+    rows?: Array<Record<string, unknown>>;
+    first_row?: Record<string, unknown> | null;  // legacy compact shape
+    // chart_spec — full snapshot so renderer can draw
+    snapshot?: Record<string, unknown>;
     chart_type?: string;
     title?: string;
     n_data_points?: number | null;
-    keys?: string[];
+    // bool / dict / list
     value?: unknown;
+    keys?: string[];
+    length?: number;
+    sample?: unknown;
   }>;
 };
 
@@ -783,6 +791,7 @@ function TimelineCard({ item }: { item: { ts?: string; kind: "step" | "llm"; dat
         )}
         {isLlm && (
           <div style={{ marginTop: 6 }}>
+            <ModelDecision call={data as LlmCall} />
             <Collapsible label={`📥 user_msg (${((data as LlmCall).user_msg || "").length} chars)`} color={T.llm}>
               <CodeBlock text={(data as LlmCall).user_msg || ""} />
             </Collapsible>
@@ -790,7 +799,7 @@ function TimelineCard({ item }: { item: { ts?: string; kind: "step" | "llm"; dat
               <CodeBlock text={(data as LlmCall).raw_response || ""} />
             </Collapsible>
             {(data as LlmCall).parsed != null && (
-              <Collapsible label="🔍 parsed" color={T.llm}>
+              <Collapsible label="🔍 parsed (raw)" color={T.llm}>
                 <CodeBlock json={(data as LlmCall).parsed} />
               </Collapsible>
             )}
@@ -804,6 +813,177 @@ function TimelineCard({ item }: { item: { ts?: string; kind: "step" | "llm"; dat
 // ============================================================================
 // Results tab
 // ============================================================================
+
+// ── Model decision: surface the LLM's structured output prominently ──
+function ModelDecision({ call }: { call: LlmCall }) {
+  const node = call.node || "";
+  const parsed = call.parsed as Record<string, unknown> | null | undefined;
+  if (!parsed || typeof parsed !== "object") return null;
+
+  // macro_plan_node — show the planned steps as a numbered list
+  if (node === "macro_plan_node" && Array.isArray((parsed as Record<string, unknown>).macro_plan)) {
+    const steps = (parsed as { macro_plan: Array<Record<string, unknown>> }).macro_plan;
+    const summary = (parsed as Record<string, unknown>).plan_summary as string | undefined;
+    return (
+      <div style={{
+        marginTop: 6,
+        padding: 10,
+        background: T.llmSoft,
+        border: `1px solid ${T.llm}33`,
+        borderRadius: T.radiusSm,
+      }}>
+        <div style={{ fontSize: 11, color: T.llm, fontWeight: 600, marginBottom: 6, letterSpacing: 0.3 }}>
+          🧠 MODEL DECISION · macro plan
+        </div>
+        {summary && (
+          <div style={{ fontSize: 12, color: T.text, marginBottom: 8, fontStyle: "italic" }}>
+            {summary}
+          </div>
+        )}
+        <ol style={{ margin: 0, paddingLeft: 22, fontSize: 12, color: T.text }}>
+          {steps.map((s, i) => (
+            <li key={i} style={{ marginBottom: 6 }}>
+              <span style={{
+                padding: "1px 6px",
+                background: "#fff",
+                border: `1px solid ${T.llm}55`,
+                color: T.llm,
+                borderRadius: 4,
+                fontSize: 10,
+                fontFamily: T.fontMono,
+                marginRight: 6,
+              }}>
+                {(s.expected_kind as string) || "?"}
+              </span>
+              {String(s.text || "(no text)")}
+              {s.candidate_block && (
+                <span style={{ color: T.textMuted, fontSize: 11, marginLeft: 6, fontFamily: T.fontMono }}>
+                  → {String(s.candidate_block)}
+                </span>
+              )}
+            </li>
+          ))}
+        </ol>
+      </div>
+    );
+  }
+
+  // compile_chunk_node — show the ops the model proposed
+  if (node === "compile_chunk_node" && Array.isArray((parsed as Record<string, unknown>).ops)) {
+    const ops = (parsed as { ops: Array<Record<string, unknown>> }).ops;
+    const reason = (parsed as Record<string, unknown>).reason as string | undefined;
+    return (
+      <div style={{
+        marginTop: 6,
+        padding: 10,
+        background: T.llmSoft,
+        border: `1px solid ${T.llm}33`,
+        borderRadius: T.radiusSm,
+      }}>
+        <div style={{ fontSize: 11, color: T.llm, fontWeight: 600, marginBottom: 6, letterSpacing: 0.3 }}>
+          🧠 MODEL DECISION · ops to dispatch
+        </div>
+        {reason && (
+          <div style={{ fontSize: 12, color: T.text, marginBottom: 8, fontStyle: "italic" }}>
+            {reason}
+          </div>
+        )}
+        {ops.map((op, i) => (
+          <OpRow key={i} op={op} />
+        ))}
+      </div>
+    );
+  }
+
+  // clarify_intent — show the questions
+  if (node === "clarify_intent_node" && Array.isArray((parsed as Record<string, unknown>).clarifications)) {
+    const qs = (parsed as { clarifications: Array<Record<string, unknown>> }).clarifications;
+    return (
+      <div style={{
+        marginTop: 6,
+        padding: 10,
+        background: T.llmSoft,
+        border: `1px solid ${T.llm}33`,
+        borderRadius: T.radiusSm,
+      }}>
+        <div style={{ fontSize: 11, color: T.llm, fontWeight: 600, marginBottom: 6, letterSpacing: 0.3 }}>
+          🧠 MODEL DECISION · clarification needed
+        </div>
+        {qs.map((q, i) => (
+          <div key={i} style={{ fontSize: 12, color: T.text, marginBottom: 4 }}>
+            <b>Q{i + 1}:</b> {String(q.question || "")}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // reflect_op / repair_op — show the patch action
+  if ((node === "reflect_op_node" || node === "repair_op_node") && parsed) {
+    const action = (parsed as Record<string, unknown>).action as string | undefined;
+    const reason = (parsed as Record<string, unknown>).reason as string | undefined;
+    return (
+      <div style={{
+        marginTop: 6,
+        padding: 10,
+        background: T.warningSoft,
+        border: `1px solid ${T.warning}55`,
+        borderRadius: T.radiusSm,
+      }}>
+        <div style={{ fontSize: 11, color: T.warning, fontWeight: 600, marginBottom: 6, letterSpacing: 0.3 }}>
+          🔧 MODEL DECISION · {action || "patch"}
+        </div>
+        {reason && (
+          <div style={{ fontSize: 12, color: T.text, fontStyle: "italic" }}>
+            {reason}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return null;
+}
+
+function OpRow({ op }: { op: Record<string, unknown> }) {
+  const type = String(op.type || "?");
+  const colorByType: Record<string, string> = {
+    add_node: T.success,
+    connect: T.accent,
+    set_param: T.warning,
+    remove_node: T.danger,
+    run_preview: T.neutral,
+  };
+  const color = colorByType[type] ?? T.neutral;
+  return (
+    <div style={{
+      padding: "6px 8px",
+      marginTop: 4,
+      background: "#fff",
+      border: `1px solid ${color}33`,
+      borderLeft: `3px solid ${color}`,
+      borderRadius: T.radiusSm,
+      fontSize: 12,
+      fontFamily: T.fontMono,
+      color: T.text,
+    }}>
+      <span style={{ color, fontWeight: 600 }}>{type}</span>
+      {op.node_id && <span> · <span style={{ color: T.textMuted }}>{String(op.node_id)}</span></span>}
+      {op.block_id && <span> · {String(op.block_id)}</span>}
+      {type === "connect" && (
+        <span> · <span style={{ color: T.accent }}>{String(op.src_id)}</span>.{String(op.src_port || "data")} → <span style={{ color: T.accent }}>{String(op.dst_id)}</span>.{String(op.dst_port || "data")}</span>
+      )}
+      {op.params != null && Object.keys(op.params as Record<string, unknown>).length > 0 && (
+        <details style={{ marginTop: 4 }}>
+          <summary style={{ cursor: "pointer", fontSize: 11, color: T.textMuted, listStyle: "none" }}>
+            ▸ params
+          </summary>
+          <CodeBlock json={op.params} />
+        </details>
+      )}
+    </div>
+  );
+}
 
 function ResultsTab({ detail, reRun }: { detail: TraceDetail; reRun: ExecuteResult | null }) {
   const dryRunStep = (detail.graph_steps || []).find((s) => s.node === "dry_run");
@@ -854,14 +1034,25 @@ function rawToCompact(raw?: RawNodeResult): NodeRunResult | undefined {
     const t = blob.type;
     if (t === "dataframe") {
       const rows = blob.rows || blob.sample_rows || [];
-      ports[port] = { kind: "dataframe", columns: (blob.columns || []).slice(0, 20), total: blob.total, first_row: rows[0] || null };
+      ports[port] = {
+        kind: "dataframe",
+        columns: (blob.columns || []).slice(0, 30),
+        total: blob.total,
+        rows: rows.slice(0, 20),
+      };
     } else if (t === "dict") {
-      const snap = blob.snapshot || {};
-      const data = snap.data;
-      if (Array.isArray(data)) {
-        ports[port] = { kind: "chart_spec", chart_type: snap.type, title: snap.title, n_data_points: data.length };
+      const snap = (blob.snapshot || {}) as Record<string, unknown>;
+      const data = snap?.data as unknown;
+      if (snap && Object.keys(snap).length > 0) {
+        ports[port] = {
+          kind: "chart_spec",
+          snapshot: snap,
+          chart_type: typeof snap.type === "string" ? snap.type : undefined,
+          title: typeof snap.title === "string" ? snap.title : undefined,
+          n_data_points: Array.isArray(data) ? data.length : null,
+        };
       } else {
-        ports[port] = { kind: "dict", keys: Object.keys(snap || {}).slice(0, 10) };
+        ports[port] = { kind: "dict", value: snap };
       }
     } else if (t === "bool") {
       ports[port] = { kind: "bool", value: blob.value };
@@ -943,57 +1134,9 @@ function PortCard({ port, data }: { port: string; data: NonNullable<NodeRunResul
           fontFamily: T.fontMono,
         }}>{data.kind}</span>
       </div>
-      {data.kind === "dataframe" && (
-        <div style={{ marginTop: 6 }}>
-          <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 4 }}>
-            {data.total ?? 0} rows · {(data.columns || []).length} cols
-          </div>
-          {(data.columns || []).length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
-              {(data.columns || []).map((c) => (
-                <span key={c} style={{
-                  padding: "1px 6px",
-                  background: "#fff",
-                  border: `1px solid ${T.border}`,
-                  color: T.text,
-                  fontSize: 10,
-                  borderRadius: 4,
-                  fontFamily: T.fontMono,
-                }}>{c}</span>
-              ))}
-            </div>
-          )}
-          {data.first_row && (
-            <Collapsible label="first row sample" small>
-              <CodeBlock json={data.first_row} />
-            </Collapsible>
-          )}
-        </div>
-      )}
-      {data.kind === "chart_spec" && (
-        <div style={{ marginTop: 6, fontSize: 12, color: T.text }}>
-          <div style={{
-            display: "inline-block",
-            padding: "2px 8px",
-            background: T.warningSoft,
-            color: T.warning,
-            borderRadius: 8,
-            fontSize: 11,
-            fontFamily: T.fontMono,
-            marginRight: 8,
-          }}>
-            {data.chart_type ?? "chart"}
-          </div>
-          <span style={{ color: T.textMuted, fontSize: 12 }}>
-            {data.n_data_points ?? 0} data points
-          </span>
-          {data.title && (
-            <div style={{ marginTop: 4, color: T.textMuted, fontSize: 12, fontStyle: "italic" }}>
-              "{data.title}"
-            </div>
-          )}
-        </div>
-      )}
+
+      {data.kind === "dataframe" && <DataframePreview data={data} />}
+      {data.kind === "chart_spec" && <ChartSpecPreview data={data} />}
       {data.kind === "bool" && (
         <div style={{ marginTop: 6, fontSize: 13, fontFamily: T.fontMono }}>
           <span style={{ color: T.textMuted }}>value:</span>{" "}
@@ -1004,6 +1147,148 @@ function PortCard({ port, data }: { port: string; data: NonNullable<NodeRunResul
         <div style={{ marginTop: 6, fontSize: 11, color: T.textMuted, fontFamily: T.fontMono }}>
           keys: {data.keys.join(", ")}
         </div>
+      )}
+    </div>
+  );
+}
+
+function DataframePreview({ data }: { data: NonNullable<NodeRunResult["ports"]>[string] }) {
+  const rows = data.rows || (data.first_row ? [data.first_row] : []);
+  const cols = data.columns || (rows[0] ? Object.keys(rows[0]) : []);
+  const showAllCols = cols.slice(0, 8);
+  const moreColCount = cols.length - showAllCols.length;
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 6 }}>
+        {(data.total ?? rows.length).toLocaleString()} rows · {cols.length} cols
+        {rows.length > 0 && rows.length < (data.total ?? 0) && (
+          <span> · showing first {rows.length}</span>
+        )}
+      </div>
+      {rows.length > 0 ? (
+        <div style={{
+          background: "#fff",
+          border: `1px solid ${T.border}`,
+          borderRadius: T.radiusSm,
+          overflow: "auto",
+          maxHeight: 320,
+        }}>
+          <table style={{ borderCollapse: "collapse", fontSize: 11, width: "100%" }}>
+            <thead style={{ position: "sticky", top: 0, background: T.bgSubtle, zIndex: 1 }}>
+              <tr>
+                {showAllCols.map((c) => (
+                  <th key={c} style={{
+                    padding: "6px 8px",
+                    textAlign: "left",
+                    borderBottom: `1px solid ${T.border}`,
+                    fontFamily: T.fontMono,
+                    color: T.textMuted,
+                    fontWeight: 600,
+                    whiteSpace: "nowrap",
+                  }}>{c}</th>
+                ))}
+                {moreColCount > 0 && (
+                  <th style={{
+                    padding: "6px 8px",
+                    color: T.textSubtle,
+                    fontStyle: "italic",
+                    fontWeight: 400,
+                  }}>+{moreColCount} more</th>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, i) => (
+                <tr key={i} style={{
+                  background: i % 2 === 0 ? "#fff" : T.bgSubtle,
+                }}>
+                  {showAllCols.map((c) => (
+                    <td key={c} style={{
+                      padding: "5px 8px",
+                      borderBottom: `1px solid ${T.border}`,
+                      fontFamily: T.fontMono,
+                      color: T.text,
+                      whiteSpace: "nowrap",
+                      maxWidth: 220,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}>{fmtCell(row[c])}</td>
+                  ))}
+                  {moreColCount > 0 && <td style={{ borderBottom: `1px solid ${T.border}` }}></td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div style={{ color: T.textSubtle, fontSize: 12, fontStyle: "italic" }}>(no rows)</div>
+      )}
+    </div>
+  );
+}
+
+function fmtCell(v: unknown): string {
+  if (v == null) return "—";
+  if (typeof v === "number") {
+    if (Number.isInteger(v)) return String(v);
+    return Math.abs(v) < 0.001 || Math.abs(v) >= 10000 ? v.toExponential(3) : v.toFixed(3);
+  }
+  if (typeof v === "string") {
+    // ISO datetime → trim
+    if (/^\d{4}-\d{2}-\d{2}T/.test(v)) return v.slice(0, 19).replace("T", " ");
+    return v.length > 60 ? v.slice(0, 60) + "…" : v;
+  }
+  if (Array.isArray(v) || typeof v === "object") {
+    const s = JSON.stringify(v);
+    return s.length > 60 ? s.slice(0, 60) + "…" : s;
+  }
+  return String(v);
+}
+
+function ChartSpecPreview({ data }: { data: NonNullable<NodeRunResult["ports"]>[string] }) {
+  const snapshot = data.snapshot;
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+        <span style={{
+          padding: "2px 8px",
+          background: T.warningSoft,
+          color: T.warning,
+          borderRadius: 8,
+          fontSize: 11,
+          fontFamily: T.fontMono,
+          fontWeight: 600,
+        }}>
+          {data.chart_type ?? (snapshot?.type as string) ?? "chart"}
+        </span>
+        <span style={{ color: T.textMuted, fontSize: 11 }}>
+          {data.n_data_points ?? 0} data points
+        </span>
+        {data.title && (
+          <span style={{ color: T.text, fontSize: 12, fontStyle: "italic" }}>
+            &ldquo;{data.title}&rdquo;
+          </span>
+        )}
+      </div>
+      {snapshot ? (
+        <div style={{
+          background: "#fff",
+          border: `1px solid ${T.border}`,
+          borderRadius: T.radiusSm,
+          padding: 8,
+          minHeight: 120,
+        }}>
+          <ChartRenderer spec={snapshot} />
+        </div>
+      ) : (
+        <div style={{ color: T.textSubtle, fontSize: 11, fontStyle: "italic" }}>
+          (no chart spec — older trace; click Re-run to generate)
+        </div>
+      )}
+      {snapshot && (
+        <Collapsible label="raw chart_spec" small>
+          <CodeBlock json={snapshot} />
+        </Collapsible>
       )}
     </div>
   );

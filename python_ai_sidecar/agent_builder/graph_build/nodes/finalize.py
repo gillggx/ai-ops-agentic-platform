@@ -47,9 +47,11 @@ DRYRUN_TIMEOUT_SEC = 10.0
 
 
 def _compact_node_result(info: dict[str, Any]) -> dict[str, Any]:
-    """Trim a node_result for trace storage — drop full preview rows
-    (can be huge), keep cols list + first row + per-port chart-type +
-    n_data_points. Mirrors what the admin viewer needs.
+    """Trim a node_result for trace storage. Keeps enough to render
+    actual charts in the admin viewer:
+      - dataframe: cols + first 20 rows (cap to keep trace size sane)
+      - chart_spec (dict): full snapshot (the renderable spec)
+      - bool/dict: small payload
     """
     if not isinstance(info, dict):
         return {"raw": str(info)[:200]}
@@ -71,26 +73,32 @@ def _compact_node_result(info: dict[str, Any]) -> dict[str, Any]:
             rows = blob.get("rows") or blob.get("sample_rows") or []
             ports[port] = {
                 "kind": "dataframe",
-                "columns": (blob.get("columns") or [])[:20],
+                "columns": (blob.get("columns") or [])[:30],
                 "total": blob.get("total"),
-                "first_row": rows[0] if rows else None,
+                "rows": rows[:20],  # keep first 20 sample rows for table preview
             }
         elif t == "dict":
-            snap = blob.get("snapshot") or {}
-            if isinstance(snap, dict) and "data" in snap:
-                data = snap.get("data")
+            snap = blob.get("snapshot")
+            if isinstance(snap, dict):
+                # Keep the full snapshot so the admin viewer can render
+                # the actual chart. Snapshots are usually <50KB and the
+                # trace storage is on local disk — no need to summarise.
                 ports[port] = {
                     "kind": "chart_spec",
-                    "chart_type": snap.get("type"),
-                    "title": snap.get("title"),
-                    "n_data_points": len(data) if isinstance(data, list) else None,
+                    "snapshot": snap,
                 }
             else:
-                ports[port] = {"kind": "dict", "keys": list(snap.keys())[:10]}
+                ports[port] = {"kind": "dict", "value": snap}
         elif t == "bool":
             ports[port] = {"kind": "bool", "value": blob.get("value")}
+        elif t == "list":
+            ports[port] = {
+                "kind": "list",
+                "length": blob.get("length"),
+                "sample": blob.get("sample"),
+            }
         else:
-            ports[port] = {"kind": t}
+            ports[port] = {"kind": t, "value": blob.get("value")}
     if ports:
         out["ports"] = ports
     return out
