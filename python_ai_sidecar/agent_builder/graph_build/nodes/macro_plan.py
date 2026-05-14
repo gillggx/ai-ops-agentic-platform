@@ -133,6 +133,13 @@ def _format_block_briefs(catalog: dict) -> str:
     for (name, _version), spec in catalog.items():
         if name in seen:
             continue
+        # v18: hide deprecated blocks from the planner. They're kept in
+        # the registry for backwards-compat of saved pipelines but should
+        # not be suggested to the LLM (e.g. legacy block_chart competes
+        # with dedicated chart blocks and the LLM often picks it because
+        # the description sounds general-purpose).
+        if str(spec.get("status") or "").lower() == "deprecated":
+            continue
         seen.add(name)
         desc = (spec.get("description") or "").strip()
         category = spec.get("category", "")
