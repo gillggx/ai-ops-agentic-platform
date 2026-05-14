@@ -221,8 +221,9 @@ async def _chat_intent_respond_stream(
         ):
             # v19: translate raw build StreamEvent → pb_glass_* shape so the
             # AIAgentPanel SSE handler (same one /chat uses) renders ops +
-            # applies them to the canvas. Without this, the resumed build
-            # runs invisibly — chat panel sees no ops, canvas stays empty.
+            # applies them to the canvas. Caller drains via the SAME chat
+            # handleStreamEvent — no need to also yield raw events (that
+            # would cause duplicate processing).
             wrapped = wrap_build_event_for_chat(stream_event, pending.build_session_id)
             if wrapped is not None:
                 ev_type = wrapped.get("type") or "message"
@@ -230,12 +231,14 @@ async def _chat_intent_respond_stream(
                     "event": ev_type,
                     "data": json.dumps(wrapped, default=str, ensure_ascii=False),
                 }
-            # Also forward the raw event so BulletConfirmCard can detect
-            # the final 'done' status to flip its UI to confirmed.
-            yield {
-                "event": stream_event.type,
-                "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
-            }
+            elif stream_event.type == "done":
+                # wrap_build_event_for_chat returns None for the final 'done'
+                # in some shapes — emit it directly so frontend knows stream
+                # is complete and can flip card to resolved.
+                yield {
+                    "event": "done",
+                    "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
+                }
     except Exception as ex:  # noqa: BLE001
         log.exception("chat/intent-respond resume failed")
         yield {"event": "error", "data": json.dumps({

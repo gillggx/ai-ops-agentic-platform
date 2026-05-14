@@ -231,11 +231,32 @@ export function BulletConfirmCard(props: Props) {
           ✗ 重新描述
         </button>
       </div>
+      {busy && (
+        <div style={{
+          marginTop: 8, fontSize: 11, color: "#90cdf4",
+          padding: "6px 10px", background: "#1a365d",
+          border: "1px solid #2c5282", borderRadius: 4,
+          display: "flex", alignItems: "center", gap: 8,
+        }}>
+          <span style={{
+            display: "inline-block", width: 10, height: 10,
+            border: "2px solid #90cdf4", borderTopColor: "transparent",
+            borderRadius: "50%", animation: "spin 0.8s linear infinite",
+          }} />
+          <span>Sub-agent 正在 build pipeline，請稍候 (約 15-45s)…</span>
+        </div>
+      )}
       {error && (
         <div style={{ marginTop: 8, fontSize: 11, color: "#f56565" }}>
           {error}
         </div>
       )}
+      <style jsx>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }
