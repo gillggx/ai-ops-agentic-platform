@@ -11,8 +11,10 @@ Phase 8-D drops the fallback proxy outright + decommissions :8001.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from typing import Optional
 from typing import AsyncGenerator
 
 from fastapi import APIRouter
@@ -188,6 +190,61 @@ class ChatIntentRespondRequest(BaseModel):
     confirmations: dict[str, dict] = Field(default_factory=dict)
 
 
+async def _emit_pipeline_charts(
+    pipeline_json: dict, session_id: str,
+) -> AsyncGenerator[dict, None]:
+    """v19 (2026-05-14): run the built pipeline once and emit chart_spec
+    snapshots as `pb_glass_chart` events so chat renders the actual
+    output inline. Without this, chat builds appear to 'finish silently'
+    — user sees a 1-node count but no chart.
+    """
+    try:
+        from python_ai_sidecar.executor.real_executor import get_real_executor
+        from python_ai_sidecar.pipeline_builder.pipeline_schema import PipelineJSON
+
+        executor = get_real_executor()
+        pj_model = PipelineJSON.model_validate(pipeline_json)
+        result = await asyncio.wait_for(
+            executor.execute(pj_model, inputs={}),
+            timeout=30.0,
+        )
+        node_results = (result or {}).get("node_results") or {}
+        # Walk each node's preview; emit chart_spec snapshots.
+        n_emitted = 0
+        for nid, info in node_results.items():
+            if not isinstance(info, dict):
+                continue
+            ports = info.get("preview") or {}
+            for port_name, blob in ports.items():
+                if not isinstance(blob, dict):
+                    continue
+                if blob.get("type") != "chart_spec":
+                    continue
+                snapshot = blob.get("snapshot")
+                if not isinstance(snapshot, dict):
+                    continue
+                payload = {
+                    "type": "pb_glass_chart",
+                    "session_id": session_id,
+                    "node_id": nid,
+                    "port": port_name,
+                    "chart_spec": snapshot,
+                }
+                yield {
+                    "event": "pb_glass_chart",
+                    "data": json.dumps(payload, default=str, ensure_ascii=False),
+                }
+                n_emitted += 1
+        log.info(
+            "chat/intent-respond: emitted %d chart snapshot(s) for session=%s",
+            n_emitted, session_id,
+        )
+    except asyncio.TimeoutError:
+        log.warning("emit_pipeline_charts: executor timed out")
+    except Exception as ex:  # noqa: BLE001
+        log.warning("emit_pipeline_charts failed: %s", ex)
+
+
 async def _chat_intent_respond_stream(
     req: ChatIntentRespondRequest,
     caller: CallerContext,
@@ -214,6 +271,7 @@ async def _chat_intent_respond_stream(
     # Convert confirmations to format clarify_intent_node expects
     answers_payload = {"confirmations": req.confirmations}
 
+    final_pipeline_for_exec: Optional[dict] = None
     try:
         async for stream_event in resume_graph_build_with_clarify(
             session_id=pending.build_session_id,
@@ -232,13 +290,25 @@ async def _chat_intent_respond_stream(
                     "data": json.dumps(wrapped, default=str, ensure_ascii=False),
                 }
             elif stream_event.type == "done":
-                # wrap_build_event_for_chat returns None for the final 'done'
-                # in some shapes — emit it directly so frontend knows stream
-                # is complete and can flip card to resolved.
                 yield {
                     "event": "done",
                     "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
                 }
+            # Capture final_pipeline for post-build chart rendering.
+            if stream_event.type == "done" and stream_event.data:
+                pj = stream_event.data.get("pipeline_json")
+                if isinstance(pj, dict):
+                    final_pipeline_for_exec = pj
+
+        # v19 post-build chart emit: after build done, run the pipeline
+        # once and emit chart_spec snapshots so chat shows the actual
+        # output inline (not just '✓ done' text). User feedback: chat
+        # mode build appeared to "fail" because no chart was rendered.
+        if final_pipeline_for_exec is not None:
+            async for chart_ev in _emit_pipeline_charts(
+                final_pipeline_for_exec, pending.build_session_id,
+            ):
+                yield chart_ev
     except Exception as ex:  # noqa: BLE001
         log.exception("chat/intent-respond resume failed")
         yield {"event": "error", "data": json.dumps({

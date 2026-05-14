@@ -14,6 +14,7 @@ import { PipelineConsole, type PipelineCard } from "./PipelineConsole";
 import PbPipelineCard, { type PbPipelineCardData } from "./PbPipelineCard";
 import PbPatchProposalCard, { type PbPatchProposalData, type PipelinePatch } from "./PbPatchProposalCard";
 import type { UiRender } from "@/components/McpChartRenderer";
+import ChartRenderer from "@/components/pipeline-builder/ChartRenderer";
 import type { FlatDataMetadata, UIConfig } from "@/context/FlatDataContext";
 import { useAppContext } from "@/context/AppContext";
 import { DesignIntentCard, type DesignIntentData, type DesignIntentChoice } from "./DesignIntentCard";
@@ -82,12 +83,15 @@ interface IntentConfirmData {
 
 interface ChatMessage {
   id: number;
-  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "ops" | "clarify" | "design_intent" | "intent_confirm";
+  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "ops" | "clarify" | "design_intent" | "intent_confirm" | "chart_inline";
   content: string;
   clarify?: ClarifyData;
   designIntent?: DesignIntentData;
   /** v19 (2026-05-14) — pb_intent_confirm card for chat-mode build clarify. */
   intentConfirm?: IntentConfirmData;
+  /** v19 (2026-05-14) — pb_glass_chart inline chart_spec snapshot. */
+  chartSpec?: Record<string, unknown>;
+  chartNodeId?: string;
   /** For role === "design_intent": the user prompt that produced this card,
    *  needed to compose the [intent_confirmed:<id>] follow-up message. */
   designIntentPrompt?: string;
@@ -1167,6 +1171,24 @@ export function AIAgentPanel({
             break;
           }
 
+          // v19 (2026-05-14): pb_glass_chart — actual chart_spec from dry_run.
+          // After build done, /chat/intent-respond runs the pipeline and emits
+          // one of these per chart_spec terminal so chat shows the chart inline.
+          case "pb_glass_chart": {
+            const chartSpec = ev.chart_spec as Record<string, unknown> | undefined;
+            const nodeId = String(ev.node_id ?? "");
+            if (chartSpec && typeof chartSpec === "object") {
+              setChatHistory((prev) => [...prev, {
+                id: nextId(),
+                role: "chart_inline",
+                content: "",
+                chartSpec,
+                chartNodeId: nodeId,
+              }]);
+            }
+            break;
+          }
+
           // v19 (2026-05-14): chat-mode build hit intent_confirm_required.
           // Render BulletConfirmCard inline. Same SSE event the chat tool_execute
           // emits for both ChatPanel (standalone /chat/[id]) and AIAgentPanel
@@ -1808,6 +1830,25 @@ export function AIAgentPanel({
                       });
                     }}
                   />
+                </div>
+              ) : msg.role === "chart_inline" && msg.chartSpec ? (
+                <div style={{ width: "100%", maxWidth: "100%" }}>
+                  <div style={{
+                    background: "#fff",
+                    border: "1px solid #2d3748",
+                    borderRadius: 8,
+                    padding: 8,
+                  }}>
+                    {msg.chartNodeId && (
+                      <div style={{
+                        fontSize: 10, color: "#718096",
+                        fontFamily: "monospace", marginBottom: 4,
+                      }}>
+                        node: {msg.chartNodeId}
+                      </div>
+                    )}
+                    <ChartRenderer spec={msg.chartSpec as Parameters<typeof ChartRenderer>[0]["spec"]} />
+                  </div>
                 </div>
               ) : msg.role === "intent_confirm" && msg.intentConfirm ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
