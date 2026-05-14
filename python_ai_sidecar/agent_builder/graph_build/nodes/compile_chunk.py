@@ -1531,7 +1531,50 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
 
     req_issues = _validate_required_params(new_ops, registry.catalog)
     col_issues = _validate_column_refs(new_ops, upstream_cols, registry.catalog)
-    combined_issues = req_issues + col_issues
+    # 3-stage discipline: source → transform → logic/output. Each compile
+    # step is one stage. step_1 (empty plan) MUST emit a source-category
+    # block first. Subsequent steps must connect upstream only — no
+    # introducing a second source mid-pipeline. Reject + retry violations.
+    plan_so_far = state.get("plan") or []
+    stage_issues: list[str] = []
+    plan_has_source = any(
+        op.get("type") == "add_node" and (
+            (next((s for (n, _v), s in registry.catalog.items()
+                   if n == op.get("block_id")), {}) or {}).get("category") == "source"
+        )
+        for op in plan_so_far
+    )
+    for i, op in enumerate(new_ops):
+        if op.get("type") != "add_node":
+            continue
+        spec = next(
+            (s for (n, _v), s in registry.catalog.items()
+             if n == op.get("block_id")), None,
+        )
+        if not spec:
+            continue
+        cat = spec.get("category")
+        # Rule A: step_1 (no plan yet) must start with source-category block
+        if not plan_has_source and not stage_issues:
+            if cat != "source":
+                stage_issues.append(
+                    f"first add_node {op.get('node_id')!r} block_id="
+                    f"{op.get('block_id')!r} category={cat!r} — "
+                    f"step_1 must START with a source-category block "
+                    f"(撈資料先；source blocks: block_process_history / "
+                    f"block_list_objects / block_mcp_call)"
+                )
+            else:
+                plan_has_source = True
+        # Rule B: don't introduce a second source mid-pipeline
+        elif plan_has_source and cat == "source":
+            stage_issues.append(
+                f"add_node {op.get('node_id')!r} ({op.get('block_id')!r}) "
+                f"is another source block — pipeline already has a source. "
+                f"Each pipeline has 1 source upstream; subsequent steps "
+                f"transform / chart / check that source's data."
+            )
+    combined_issues = req_issues + col_issues + stage_issues
     if combined_issues:
         logger.warning(
             "compile_chunk_node: step %s attempt %d validation issues: req=%s col=%s — retry",

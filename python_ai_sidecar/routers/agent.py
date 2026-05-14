@@ -344,3 +344,157 @@ async def skill_translate_step(
         base_pipeline=req.base_pipeline,
     )
     return result
+
+
+# ── Build trace viewer (read-only, for debugging build behavior) ──────
+# Reads JSON traces written by BuildTracer when BUILDER_TRACE_DIR env
+# is set. Lists most-recent-first; detail page renders graph steps +
+# LLM calls + final pipeline. Not meant for production traffic; internal
+# debugging only — same X-Service-Token guard as the rest of /internal.
+
+import os as _os
+from pathlib import Path as _Path
+from fastapi.responses import HTMLResponse as _HTMLResponse, JSONResponse as _JSONResponse
+
+
+def _trace_dir() -> _Path | None:
+    raw = _os.getenv("BUILDER_TRACE_DIR", "").strip()
+    if not raw:
+        return None
+    p = _Path(raw)
+    return p if p.exists() else None
+
+
+@router.get("/build/traces")
+async def list_traces(caller: CallerContext = ServiceAuth):
+    """Return list of recent build traces (newest first)."""
+    d = _trace_dir()
+    if not d:
+        return _JSONResponse({"error": "BUILDER_TRACE_DIR not set or missing"}, status_code=503)
+    files = sorted(d.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:200]
+    out = []
+    for f in files:
+        try:
+            data = json.loads(f.read_text())
+            out.append({
+                "file": f.name,
+                "build_id": data.get("build_id"),
+                "session_id": data.get("session_id"),
+                "started_at": data.get("started_at"),
+                "duration_ms": data.get("duration_ms"),
+                "status": data.get("status"),
+                "instruction": (data.get("instruction") or "")[:140],
+                "n_steps": len(data.get("graph_steps") or []),
+                "n_llm": len(data.get("llm_calls") or []),
+                "n_nodes": len(((data.get("final_pipeline") or {}).get("nodes")) or []),
+                "n_edges": len(((data.get("final_pipeline") or {}).get("edges")) or []),
+            })
+        except Exception:
+            continue
+    return {"traces": out, "dir": str(d)}
+
+
+@router.get("/build/traces/view", response_class=_HTMLResponse)
+async def traces_view_inline(caller: CallerContext = ServiceAuth):
+    """Single-page HTML viewer. Defined BEFORE the {filename} route so
+    /view doesn't get caught by the dynamic path matcher."""
+    return _HTMLResponse(_VIEWER_HTML)
+
+
+@router.get("/build/traces/{filename}")
+async def get_trace(filename: str, caller: CallerContext = ServiceAuth):
+    d = _trace_dir()
+    if not d:
+        return _JSONResponse({"error": "BUILDER_TRACE_DIR not set"}, status_code=503)
+    # safety: filename must end in .json + no path separators
+    if "/" in filename or ".." in filename or not filename.endswith(".json"):
+        return _JSONResponse({"error": "bad filename"}, status_code=400)
+    f = d / filename
+    if not f.exists():
+        return _JSONResponse({"error": "not found"}, status_code=404)
+    return json.loads(f.read_text())
+
+
+_VIEWER_HTML = """<!doctype html>
+<html><head><meta charset="utf-8"><title>Build Traces</title>
+<style>
+body{font-family:-apple-system,monospace;margin:0;padding:16px;background:#0d1117;color:#c9d1d9}
+h1{font-size:18px;margin:0 0 12px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{padding:6px 10px;text-align:left;border-bottom:1px solid #30363d}
+tr:hover{background:#161b22;cursor:pointer}
+.ok{color:#3fb950}
+.fail{color:#f85149}
+.partial{color:#d29922}
+#detail{position:fixed;top:0;right:0;bottom:0;width:55%;background:#0d1117;border-left:1px solid #30363d;overflow:auto;padding:16px;display:none;font-size:12px}
+#detail.open{display:block}
+#close{position:absolute;top:8px;right:12px;cursor:pointer;font-size:20px}
+.section{margin:16px 0;border:1px solid #30363d;border-radius:6px;padding:10px}
+.section h3{font-size:13px;margin:0 0 8px;color:#58a6ff}
+.step{padding:6px 8px;background:#161b22;margin:4px 0;border-radius:4px;border-left:3px solid #30363d}
+.step.ok{border-left-color:#3fb950}
+.step.fail{border-left-color:#f85149}
+pre{white-space:pre-wrap;word-wrap:break-word;font-size:11px;background:#161b22;padding:8px;border-radius:4px;max-height:300px;overflow:auto}
+.muted{color:#8b949e}
+.token{padding:1px 6px;border-radius:3px;background:#161b22;font-size:11px}
+</style></head><body>
+<h1>Build Traces <span class="muted" id="dir"></span></h1>
+<table><thead><tr><th>Time</th><th>Status</th><th>Dur</th><th>Steps/LLM</th><th>Nodes</th><th>Instruction</th></tr></thead><tbody id="rows"></tbody></table>
+<div id="detail"><span id="close" onclick="document.getElementById('detail').classList.remove('open')">×</span><div id="content"></div></div>
+<script>
+const TOKEN = new URLSearchParams(window.location.search).get('token') || '';
+async function api(path) {
+  const r = await fetch(path, {headers: {'X-Service-Token': TOKEN}});
+  return r.json();
+}
+function fmtTime(iso) { return iso ? iso.replace('T', ' ').slice(0, 19) : ''; }
+function statusClass(s) { return s === 'finished' ? 'ok' : (s === 'plan_unfixable' || s === 'failed' ? 'fail' : 'partial'); }
+async function loadList() {
+  const data = await api('/internal/agent/build/traces');
+  document.getElementById('dir').textContent = data.dir || '';
+  const rows = document.getElementById('rows');
+  rows.innerHTML = (data.traces || []).map(t => `
+    <tr onclick="loadDetail('${t.file}')">
+      <td>${fmtTime(t.started_at)}</td>
+      <td class="${statusClass(t.status)}">${t.status || '-'}</td>
+      <td>${t.duration_ms ? (t.duration_ms / 1000).toFixed(1) + 's' : '-'}</td>
+      <td>${t.n_steps}/${t.n_llm}</td>
+      <td>${t.n_nodes}/${t.n_edges}</td>
+      <td>${t.instruction}</td>
+    </tr>
+  `).join('');
+}
+async function loadDetail(file) {
+  const t = await api('/internal/agent/build/traces/' + file);
+  const steps = (t.graph_steps || []).map(s => `
+    <div class="step ${s.status === 'ok' ? 'ok' : (s.status === 'failed' ? 'fail' : '')}">
+      <b>${s.node || '?'}</b> <span class="muted">${s.ts || ''}</span>
+      ${s.duration_ms ? `<span class="muted">${s.duration_ms}ms</span>` : ''}
+      <pre>${JSON.stringify(s, null, 2)}</pre>
+    </div>
+  `).join('');
+  const llm = (t.llm_calls || []).map(c => `
+    <div class="step">
+      <b>${c.node || '?'}</b> ${c.attempt ? `<span class="token">attempt ${c.attempt}</span>` : ''} <span class="muted">${c.ts}</span>
+      <details><summary>user_msg (${(c.user_msg || '').length} chars)</summary><pre>${(c.user_msg || '').replace(/[<>]/g, c => ({'<':'&lt;','>':'&gt;'}[c]))}</pre></details>
+      <details><summary>raw_response</summary><pre>${(c.raw_response || '').replace(/[<>]/g, c => ({'<':'&lt;','>':'&gt;'}[c]))}</pre></details>
+      ${c.parsed ? `<details><summary>parsed</summary><pre>${JSON.stringify(c.parsed, null, 2)}</pre></details>` : ''}
+    </div>
+  `).join('');
+  const fp = t.final_pipeline || {};
+  const nodes = (fp.nodes || []).map(n => `<div class="step"><b>${n.id}</b> [${n.block_id}] <pre>${JSON.stringify(n.params, null, 2)}</pre></div>`).join('');
+  document.getElementById('content').innerHTML = `
+    <h2>${t.build_id}</h2>
+    <div class="muted">Status: ${t.status} · ${t.duration_ms}ms · ${t.session_id}</div>
+    <div class="section"><h3>Instruction</h3><pre>${t.instruction || ''}</pre></div>
+    <div class="section"><h3>Final Pipeline (${(fp.nodes || []).length} nodes)</h3>${nodes || '(empty)'}</div>
+    <div class="section"><h3>Graph Steps (${(t.graph_steps || []).length})</h3>${steps}</div>
+    <div class="section"><h3>LLM Calls (${(t.llm_calls || []).length})</h3>${llm}</div>
+  `;
+  document.getElementById('detail').classList.add('open');
+}
+loadList();
+</script></body></html>"""
+
+
+# (the /view route is registered above, before /{filename})
