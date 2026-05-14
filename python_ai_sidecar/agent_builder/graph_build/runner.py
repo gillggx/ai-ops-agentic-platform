@@ -159,7 +159,7 @@ async def stream_graph_build(
 
     # Re-emit pause as SSE event (reuse already-detected payload)
     if interrupted:
-        event_type = "clarify_required" if paused_kind == "clarify_required" else "confirm_pending"
+        event_type = paused_kind if paused_kind in ("clarify_required", "intent_confirm_required") else "confirm_pending"
         yield StreamEvent(
             type=event_type,
             data={
