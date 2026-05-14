@@ -77,7 +77,7 @@ Output 說它回的是 nested 結構（list / dict），下游就必須先有解
   - 起點是 source block (從清單裡 category=source 的挑)
   - 終點必須是 user 要看的形狀（chart / table / scalar）— 看 user 需求字面要求什麼
   - 中間 step 只放 user 真的需要的轉換；別加 user 沒提的聚合 / 排序 / 篩欄
-  - 3-6 步合理；超過 6 表示拆太細
+  - 1-6 步皆可：**優先用 composite block 走 1 step**；只在必要時拆多步
 
 ⚠ 每個 step 必須是「**單一原子動作**」 — 不要把多動作塞同一 step：
   - ❌ 「撈 process_history 並解開 spc_charts 並篩 xbar」(三件事擠一句)
@@ -87,6 +87,18 @@ Output 說它回的是 nested 結構（list / dict），下游就必須先有解
 
 理由：每 step 編譯成 1 add_node，下一個 step 編譯時才看得到上一個 step 的實際輸出欄位
 驗證 column ref。同 step 塞多動作 → 後面動作的 col 沒人驗 → runtime 才爆。
+
+⭐ **composite block 例外（重要！）**:
+  如果候選 blocks 裡有 **composite / panel block** —— 該 block 的 What/Output brief 自稱
+  「自給自足」「1-block 全包」「source-mode」「不需上游」「one block, right semantics」
+  —— 那它的設計就是**「1 個 block = 整條 pipeline」**。
+  此時 macro_plan 應該只給 **1 個 step**，整條 pipeline 就是該 composite block 自己。
+  例：
+    User: 「看 EQP-01 STEP_001 xbar_chart 過去 7 天」
+    ✅ 1-step plan: step_1 candidate_block=block_spc_panel（給 tool_id+step+chart_name+time_range）
+    ❌ 4-step plan: process_history → unnest → filter → line_chart (composite 比這更精確)
+  判斷 composite 的方式：在 brief 找關鍵字「自給自足 / 1-block / 1 個 node 全包 / source mode」。
+  composite 自己處理 fetch+unnest+filter+render，**你拆多步反而會踩它的雷**（已知 case 砍剩 1 row）。
 
 如果 user 的需求過於模糊或不適合 build pipeline，回 {"too_vague": true, "reason": "..."}。
 
