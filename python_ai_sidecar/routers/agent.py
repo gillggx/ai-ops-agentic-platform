@@ -193,7 +193,7 @@ async def _chat_intent_respond_stream(
     caller: CallerContext,
 ) -> AsyncGenerator[dict, None]:
     from python_ai_sidecar.agent_orchestrator_v2 import pending_clarify as _pc
-    from python_ai_sidecar.agent_builder.graph_build import (
+    from python_ai_sidecar.agent_builder.graph_build.runner import (
         resume_graph_build_with_clarify,
     )
     from python_ai_sidecar.agent_builder.event_wrapper import wrap_build_event_for_chat
