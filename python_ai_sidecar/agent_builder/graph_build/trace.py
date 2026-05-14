@@ -205,16 +205,15 @@ class BuildTracer:
             entry["attempt"] = attempt
         if parsed is not None:
             entry["parsed"] = _safe_jsonable(parsed)
-        # Extract usage fields from resp object (LLMResponse-shaped)
+        # Extract usage fields from resp object (LLMResponse-shaped).
+        # LLMResponse doesn't expose model — that lives on the client, not
+        # the response, so we don't try to capture it here.
         if resp is not None:
             for f in ("input_tokens", "output_tokens",
                       "cache_creation_input_tokens", "cache_read_input_tokens"):
                 v = getattr(resp, f, None)
                 if v is not None:
                     entry[f] = int(v)
-            model = getattr(resp, "model", None) or getattr(resp, "model_id", None)
-            if model:
-                entry["model"] = str(model)
         for k, v in extra.items():
             entry[k] = _safe_jsonable(v)
         self._payload["llm_calls"].append(entry)
