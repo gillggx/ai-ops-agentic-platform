@@ -774,6 +774,13 @@ async def macro_plan_node(state: BuildGraphState) -> dict[str, Any]:
         "summary": summary,
         "is_from_scratch": True,  # v16 always treats macro+chunk as from-scratch
         "plan_validation_errors": [],
+        # v27.2 (2026-05-15): CRITICAL — must reset status on success. If a
+        # prior attempt set status=needs_clarify (DAG / chart-required check)
+        # and this attempt succeeds, leaving status unchanged causes
+        # _route_after_macro_plan to loop back to clarify_intent forever
+        # (43-iteration loop seen in EQP-08 trace). Explicitly clear.
+        "status": "running",
+        "too_vague_reason": None,
         "sse_events": [
             _event("macro_plan_proposed", {
                 "summary": summary,
