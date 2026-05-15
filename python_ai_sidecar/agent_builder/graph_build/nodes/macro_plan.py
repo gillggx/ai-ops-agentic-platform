@@ -131,28 +131,33 @@ Output 說它回的是 nested 結構（list / dict），下游就必須先有解
 == Few-shot 範例 ==
 
 範例 1: User 說「看 EQP-01 STEP_001 xbar_chart 過去 7 天」
-✅ 正確（看到 block_spc_panel 自稱 "自給自足"/"source mode"，1 step 即可）:
+✅ 正確（block_spc_panel 是 parameterized composite — step + chart_name 必填，內部 fetch，1 step 即可）:
 {
   "plan_summary": "用 block_spc_panel 一個 node 撈 EQP-01 STEP_001 xbar_chart 過去 7 天並出圖",
   "macro_plan": [
-    {"step_idx": 1, "text": "撈 + 篩 + 畫 xbar_chart 過去 7 天的 line chart (composite)",
+    {"step_idx": 1, "text": "畫 EQP-01 STEP_001 xbar_chart 過去 7 天 line chart (composite)",
      "expected_kind": "chart", "expected_cols": ["eventTime", "value", "ucl", "lcl"],
      "candidate_block": "block_spc_panel", "depends_on": []}
   ]
 }
-❌ 錯誤（4 step composition — 已知會把多 SPC 砍剩 1 點，看 panel 的雷區警告）:
+（compile_chunk 會填 params: step='STEP_001', chart_name='xbar_chart', tool_id='EQP-01', time_range='7d'）
+❌ 錯誤（4 step composition — 已知會把多 SPC 砍剩 1 點）:
   process_history → unnest → filter → line_chart
+❌ 錯誤（把 spc_panel 串在 process_history 後面）:
+  process_history → spc_panel — composite 已含 fetch，再串 upstream 就是浪費 + 高機率搞砸 step+chart_name
 
 範例 2: User 說「看 EQP-01 過去 24 小時 APC temperature 趨勢」
-✅ 同樣 1 step（block_apc_panel）:
+✅ 同樣 1 step（block_apc_panel — step + chart_name 必填）:
 {
   "plan_summary": "用 block_apc_panel 一個 node 畫 EQP-01 24h temperature trend",
   "macro_plan": [
-    {"step_idx": 1, "text": "撈+畫 APC temperature 過去 24h trend (composite)",
+    {"step_idx": 1, "text": "畫 EQP-01 APC temperature 過去 24h trend (composite)",
      "expected_kind": "chart", "expected_cols": ["eventTime", "value"],
      "candidate_block": "block_apc_panel", "depends_on": []}
   ]
 }
+（compile_chunk 會填 params: step='STEP_001' (或 user 提到的 step), chart_name='temperature',
+  tool_id='EQP-01', time_range='24h'。⚠ user 沒提 step 時，**問 user 確認 step**，不要瞎猜）
 
 範例 3: User 說「機台最後一次 OOC 時的 SPC 狀況 + 觸發 alarm (>= 2 OOC)」(skill mode)
 ✅ DAG 寫法（verdict 分支 + chart 分支從共用上游 fan-out，不串成一條）:

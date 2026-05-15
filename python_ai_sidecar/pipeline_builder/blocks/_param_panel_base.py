@@ -53,19 +53,44 @@ class _ParamPanelBase(BlockExecutor):
     ) -> dict[str, Any]:
         title = str(params.get("title") or self.default_title)
 
-        # v18 (2026-05-14): hybrid source mode. If no upstream data is
-        # connected AND user gave fetch params (tool_id), call
-        # ProcessHistoryBlockExecutor internally so panel works as a
-        # self-contained "give me SPC chart for X" block.
+        # v26 (2026-05-15): step + chart_name are required for both source
+        # and transform modes. Was previously implicit (optional in schema,
+        # silently no-op'd when missing). Raise early with explicit message
+        # so the agent / user fix it instead of getting an empty chart.
+        step = params.get("step")
+        chart_name = params.get("chart_name")
+        if not step or not chart_name:
+            missing = []
+            if not step: missing.append("step")
+            if not chart_name: missing.append("chart_name")
+            raise BlockExecutionError(
+                code="MISSING_PARAM",
+                message=(
+                    f"{self.block_id} requires {missing} (parameterized composite — "
+                    f"step is the process step e.g. 'STEP_001', chart_name is the "
+                    f"SPC/APC chart name e.g. 'xbar_chart' / 'temperature'). "
+                    f"Source mode: also supply optional tool_id + time_range. "
+                    f"Transform mode: connect upstream process_history → still need step + chart_name to filter."
+                ),
+            )
+
+        # v18 (2026-05-14): hybrid source mode. If no upstream data connected,
+        # self-fetch via ProcessHistoryBlockExecutor.
+        # v26: trigger source-fetch on ANY identifying param (tool_id /
+        # lot_id / step), not just tool_id — cross-machine compare needs
+        # tool_id=None but step+chart_name to be sufficient.
         df = inputs.get("data") if isinstance(inputs, dict) else None
-        if df is None and params.get("tool_id"):
+        source_fetch_hint = (
+            params.get("tool_id") or params.get("lot_id") or step
+        )
+        if df is None and source_fetch_hint:
             df = await self._fetch_process_history(params, context)
         if not isinstance(df, pd.DataFrame):
             raise BlockExecutionError(
                 code="INVALID_INPUT",
                 message=(
                     "'data' input missing — connect an upstream process_history, "
-                    "OR set source params (tool_id + optional step/time_range) on "
+                    "OR set source params (step + chart_name + optional tool_id/time_range) on "
                     f"{self.block_id} to fetch internally."
                 ),
             )
