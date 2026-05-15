@@ -33,6 +33,12 @@ GraphStatus = Literal[
     # v18 (2026-05-14): reject-and-ask loop
     "needs_clarify",  # macro_plan said too_vague; route back to clarify_intent
     "refused",        # too_vague_attempts exhausted; tell user we don't understand
+    # v30 (2026-05-16): ReAct pipeline builder
+    "goal_plan_confirm_required",  # waiting on user to confirm/edit phases
+    "phase_in_progress",            # currently in a ReAct round inside a phase
+    "phase_revise_pending",         # max round hit; LLM self-reflect in progress
+    "handover_pending",             # phase failed even after revise; user must choose
+    "build_partial",                # finished some phases, user took over / aborted
 ]
 
 
@@ -122,6 +128,38 @@ class BuildGraphState(TypedDict, total=False):
     # emission order; downstream connects to the LAST element (the terminal
     # of that step's local chain).
     step_outputs: dict[int, list[str]]
+
+    # ── v30 (2026-05-16): ReAct Pipeline Builder fields ──────────────
+    # Replaces macro_plan + compile_chunk × N. See docs/spec_v30_react_pipeline_builder.md.
+    #
+    # phases: goal-oriented phase definitions (user-confirmed before execution).
+    # Each entry: {id, goal, expected, why?, user_edited?}
+    #   id        — phase identifier "p1"/"p2"/...
+    #   goal      — natural-language outcome description ("撈 EQP-08 ...")
+    #   expected  — completion category: raw_data | transform | verdict
+    #               | chart | table | scalar | alarm
+    #   why       — optional rationale for the phase
+    #   user_edited — true when user changed the LLM-emitted goal
+    v30_phases: list[dict]
+    # Cursor into v30_phases — which phase react_round is operating on.
+    v30_current_phase_idx: int
+    # Current round counter inside the active phase. Resets per phase.
+    # Bounded by MAX_REACT_ROUNDS (=8 default).
+    v30_phase_round: int
+    # Per-phase outcome ledger (final state when phase exits). Shape:
+    #   {phase_id: {status, completed_at, rationale, verifier_check,
+    #               fail_reason?, missing_capabilities?, rounds_used}}
+    v30_phase_outcomes: dict[str, dict]
+    # Handover state when a phase ultimately fails. None when no halt.
+    # Shape: {failed_phase_id, options_offered, user_choice?, user_choice_at?,
+    #         reason, tried_summary[], missing_capabilities[]}
+    v30_handover: Optional[dict]
+    # Track per-phase user edits for trace audit.
+    # Shape: {phase_id: [{from, to, ts}]}
+    v30_phase_edit_history: dict[str, list[dict]]
+    # Stuck detector: last 2 actions per phase (for deterministic loop check).
+    # Shape: {phase_id: [{tool, args_hash}]}
+    v30_phase_recent_actions: dict[str, list[dict]]
     # v13 (2026-05-13): per-node contracts the agent declares while writing
     # the plan. Runtime auto-preview compares each node's actual snapshot
     # to its contract; mismatch fires a targeted reflect_op (changes only
@@ -250,4 +288,12 @@ def initial_state(
         current_macro_step=0,
         compile_attempts={},
         step_outputs={},
+        # v30
+        v30_phases=[],
+        v30_current_phase_idx=0,
+        v30_phase_round=0,
+        v30_phase_outcomes={},
+        v30_handover=None,
+        v30_phase_edit_history={},
+        v30_phase_recent_actions={},
     )

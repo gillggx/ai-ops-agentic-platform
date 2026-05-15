@@ -352,14 +352,91 @@ async def _snapshot_node(toolset, target: dict[str, Any], cursor: int) -> dict[s
                 sample = {k: snap[k] for k in list(snap.keys())[:6]}
             break
 
+    # v30 A3: build runtime_schema_md from preview sample for v30 prompt
+    # builders (goal_plan, react_round). v27 prompt code still uses cols+sample
+    # directly, so this is additive — no regression risk.
+    runtime_schema_md = _build_runtime_schema_md(
+        block_id=block_id,
+        logical_id=logical_id,
+        cols=cols,
+        rows_sample=preview_blob,  # full blob so we can extract more rows
+        toolset=toolset,
+        total_rows=pv.get("rows"),
+    )
+
     return {
         "logical_id": logical_id, "real_id": real_id, "block_id": block_id,
         "rows": pv.get("rows"),
         "cols": cols[:20],   # cap to keep prompt small
         "sample": _truncate_sample(sample),
+        "runtime_schema_md": runtime_schema_md,  # v30
         "error": err if status != "success" else None,
         "after_cursor": cursor,
     }
+
+
+def _build_runtime_schema_md(
+    block_id: str,
+    logical_id: str,
+    cols: list[str],
+    rows_sample: dict,
+    toolset,
+    total_rows: int | None,
+) -> str:
+    """v30 A3: reconstruct a small pandas DF from preview blob + run
+    infer_runtime_schema(). Returns markdown string for v30 prompts.
+
+    Best-effort — empty string on any error so v27 path stays unaffected.
+    """
+    try:
+        import pandas as pd
+        from python_ai_sidecar.pipeline_builder.schema_doc import infer_runtime_schema
+    except Exception:
+        return ""
+
+    # Extract sample rows from preview blob (any dataframe port)
+    sample_rows: list[dict] = []
+    for _port, blob in (rows_sample or {}).items():
+        if not isinstance(blob, dict):
+            continue
+        if blob.get("type") == "dataframe":
+            sample_rows = (
+                blob.get("sample_rows")
+                or blob.get("rows_sample")
+                or blob.get("rows")
+                or []
+            )
+            break
+
+    if not sample_rows or not cols:
+        return ""
+
+    try:
+        df = pd.DataFrame(sample_rows)
+        # Force col order to match preview blob (some samples drop cols if null)
+        existing = [c for c in cols if c in df.columns]
+        if existing:
+            df = df[existing]
+    except Exception:
+        return ""
+
+    # Look up block_spec for column_docs hints
+    block_spec = None
+    try:
+        if toolset and hasattr(toolset, "registry"):
+            block_spec = toolset.registry.get_spec(block_id, "1.0.0")
+    except Exception:
+        block_spec = None
+
+    md = infer_runtime_schema(df, block_spec, node_id=logical_id)
+    if md and total_rows is not None:
+        # Patch first line to reflect TRUE total rows (not just sample size)
+        md = md.replace(
+            f"-> {len(df)} rows x",
+            f"-> {total_rows} rows (sample showing {len(df)}) x",
+            1,
+        )
+    return md
 
 
 def _truncate_sample(sample: dict[str, Any] | None) -> dict[str, Any] | None:

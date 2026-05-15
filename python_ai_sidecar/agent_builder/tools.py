@@ -997,6 +997,85 @@ class BuilderToolset:
             "preview": _summarize_preview(node_result.get("preview"), sample_size),
         }
 
+    # v30: agentic ReAct tools — used by agentic_phase_loop
+    # ----------------------------------------------------------------------
+
+    async def inspect_node_output(
+        self, node_id: str, n_rows: int = 2,
+    ) -> dict[str, Any]:
+        """v30: read an existing node's actual output (cols + ≤3 sample rows).
+
+        Wraps `preview` but caps n_rows hard at 3 for token economy. Use when
+        LLM is in a ReAct round and wants to confirm data shape before
+        deciding next action. Returns same shape as preview minus heavy
+        chart-spec snapshots (only cols + rows + total).
+        """
+        n_rows = max(1, min(int(n_rows or 2), 3))  # hard cap 3
+        pv = await self.preview(node_id=node_id, sample_size=n_rows)
+        out: dict[str, Any] = {
+            "node_id": node_id,
+            "status": pv.get("status"),
+            "rows": pv.get("rows"),
+            "error": pv.get("error"),
+        }
+        preview_blob = pv.get("preview") or {}
+        for port, blob in preview_blob.items():
+            if not isinstance(blob, dict):
+                continue
+            if blob.get("type") == "dataframe":
+                sample = (
+                    blob.get("sample_rows")
+                    or blob.get("rows_sample")
+                    or blob.get("rows")
+                    or []
+                )[:n_rows]
+                out[port] = {
+                    "type": "dataframe",
+                    "columns": blob.get("columns", []),
+                    "total": blob.get("total"),
+                    "sample_rows": sample,
+                }
+            elif blob.get("type") in ("dict", "bool", "scalar"):
+                out[port] = {"type": blob.get("type"), "value": blob.get("snapshot") or blob.get("value")}
+        return out
+
+    async def inspect_block_doc(self, block_id: str) -> dict[str, Any]:
+        """v30: return the full doc for a block (description + param_schema
+        + column_docs + examples). LLM calls when it needs the exact usage
+        rules of a block it's about to add_node.
+
+        Cached lookup; reading the catalog is in-memory so no IO cost.
+        """
+        spec = self.registry.get_spec(block_id, "1.0.0")
+        if not spec:
+            raise ToolError(
+                code="BLOCK_NOT_FOUND",
+                message=f"Block '{block_id}' not in catalog",
+                hint="Call list_blocks() to see available blocks.",
+            )
+        return {
+            "block_id": spec.get("name"),
+            "category": spec.get("category"),
+            "description": spec.get("description") or "",
+            "input_schema": spec.get("input_schema") or [],
+            "output_schema": spec.get("output_schema") or [],
+            "param_schema": spec.get("param_schema") or {},
+            "column_docs": spec.get("column_docs") or [],
+            "examples": spec.get("examples") or [],
+        }
+
+    async def phase_complete(self, rationale: str) -> dict[str, Any]:
+        """v30: sentinel tool. LLM calls this to declare a phase done.
+
+        Doesn't modify pipeline state — agentic_phase_loop picks up the
+        rationale via dispatcher and runs deterministic phase verifier.
+        If verifier disagrees, phase continues; if agrees, advance to next phase.
+        """
+        return {
+            "phase_complete_signal": True,
+            "rationale": str(rationale or "")[:500],
+        }
+
     async def validate(self) -> dict[str, Any]:
         validator = PipelineValidator(self.registry.catalog)
         errs = validator.validate(self.session.pipeline_json)

@@ -55,6 +55,10 @@ class SeedlessBlockRegistry:
                 "implementation": spec.get("implementation", {}),
                 "is_custom": spec.get("is_custom", False),
                 "output_columns_hint": spec.get("output_columns_hint", []),
+                # v30: structured per-column doc consumed by goal_plan +
+                # agentic_phase_loop prompt builders, and merged into
+                # infer_runtime_schema's usage hint column.
+                "column_docs": spec.get("column_docs", []),
             }
             catalog[key] = full_spec
 
