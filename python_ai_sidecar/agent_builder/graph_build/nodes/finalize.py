@@ -157,6 +157,7 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
                                 if isinstance(x, str): _observed.add(x)
     placeholder_issues = check_final_pipeline_placeholders(
         final_dict, state.get("instruction") or "", _observed,
+        catalog=registry.catalog,
     )
     if placeholder_issues:
         logger.warning(

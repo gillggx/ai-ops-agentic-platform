@@ -1420,11 +1420,27 @@ def _looks_like_placeholder(value: str) -> bool:
     return any(frag in v_low for frag in _RUNTIME_CONCEPT_FRAGMENTS)
 
 
+def _enum_values_for(block_id: str, param_key: str, catalog: dict | None) -> set[str]:
+    """Look up the valid enum values for a block's param from catalog.
+    Returns empty set when catalog/block/param/enum missing.
+    """
+    if not catalog or not block_id:
+        return set()
+    for (name, _v), spec in catalog.items():
+        if name != block_id:
+            continue
+        props = ((spec.get("param_schema") or {}).get("properties") or {})
+        enum = (props.get(param_key) or {}).get("enum") or []
+        return {str(x) for x in enum if isinstance(x, (str, int, float))}
+    return set()
+
+
 def _check_placeholder_or_unknown_literal(
     new_ops: list[dict],
     declared_inputs: list[dict],
     instruction: str,
     upstream_observed_values: set[str] | None = None,
+    catalog: dict | None = None,
 ) -> list[str]:
     """v24: deterministic check — string values that look like placeholders
     OR runtime-only concept names get rejected at build time.
@@ -1453,6 +1469,7 @@ def _check_placeholder_or_unknown_literal(
             continue
         params = op.get("params") or {}
         node_id = op.get("node_id") or "?"
+        block_id = op.get("block_id") or ""
         for k, v in params.items():
             if not isinstance(v, str):
                 continue
@@ -1478,12 +1495,17 @@ def _check_placeholder_or_unknown_literal(
             # Whitelist 2: appears in upstream observed values
             if v in observed:
                 continue
+            # Whitelist 3 (v25.1): valid enum value for this block's param
+            # e.g. block_spc_panel.event_filter='latest_ooc' is a valid enum
+            # default; my v24 R2 regex falsely flagged it as "latest_X" runtime concept
+            if v in _enum_values_for(block_id, k, catalog):
+                continue
             issues.append(
                 f"node {node_id} param '{k}'={v!r} looks like a placeholder/runtime "
                 f"concept but is NOT declared, NOT in user instruction, NOT in upstream "
-                f"sample. If it's a cross-branch runtime ref → use **block_join** with "
-                f"deps_on=[other_branch_terminal]. If it should be a literal, write the "
-                f"exact value from user's instruction or upstream sample."
+                f"sample, NOT in block's enum. If it's a cross-branch runtime ref → use "
+                f"**block_join** with deps_on=[other_branch_terminal]. If it should be a "
+                f"literal, write the exact value from user's instruction or upstream sample."
             )
     return issues
 
@@ -1497,11 +1519,16 @@ def check_final_pipeline_placeholders(
     pipeline_dict: dict,
     instruction: str,
     upstream_observed_values: set[str] | None = None,
+    catalog: dict | None = None,
 ) -> list[dict]:
     """v24 D2: full-pipeline placeholder gate. Used in finalize_node BEFORE
     structural validator. Catches placeholder leaks from ANY rewrite path
     (compile_chunk, reflect_plan, repair_op) — not just compile_chunk's
     own retry loop.
+
+    v25.1: catalog param added so enum values for the block's params
+    (e.g. block_spc_panel.event_filter='latest_ooc') are whitelisted —
+    previously v24 R2 regex falsely flagged them as runtime-concept names.
 
     Returns list of issue dicts in the same shape as PipelineValidator
     yields, so they can be merged into structural_issues and trigger
@@ -1519,6 +1546,7 @@ def check_final_pipeline_placeholders(
     ]
     issues = _check_placeholder_or_unknown_literal(
         pseudo_ops, declared_inputs, instruction or "", upstream_observed_values,
+        catalog=catalog,
     )
     return [
         {"rule": "C16_PLACEHOLDER_LEAK", "message": msg,
@@ -2076,6 +2104,7 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
                                 if isinstance(x, str): _observed.add(x)
     dollar_issues = _check_placeholder_or_unknown_literal(
         new_ops, declared_inputs, state.get("instruction") or "", _observed,
+        catalog=registry.catalog,
     )
     if dollar_issues:
         logger.warning(
