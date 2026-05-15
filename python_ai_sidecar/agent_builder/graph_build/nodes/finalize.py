@@ -135,6 +135,37 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
     # graph.
     validator = PipelineValidator(registry.catalog)
     issues = validator.validate(pipeline)
+
+    # v24 D2: full-pipeline placeholder gate — catches `{xxx}` / `<xxx>` /
+    # `:xxx` / runtime-concept literals that any LLM rewrite path (compile_chunk,
+    # reflect_plan, repair_op) leaked into final_pipeline params. Caught here
+    # so it routes through reflect_plan again with the v24-upgraded prompt.
+    from python_ai_sidecar.agent_builder.graph_build.nodes.compile_chunk import (
+        check_final_pipeline_placeholders,
+    )
+    _observed: set[str] = set()
+    for snap in (state.get("exec_trace") or {}).values():
+        if not isinstance(snap, dict): continue
+        sample = snap.get("sample")
+        if isinstance(sample, dict):
+            for sv in sample.values():
+                if isinstance(sv, str): _observed.add(sv)
+                elif isinstance(sv, list):
+                    for item in sv:
+                        if isinstance(item, dict):
+                            for x in item.values():
+                                if isinstance(x, str): _observed.add(x)
+    placeholder_issues = check_final_pipeline_placeholders(
+        final_dict, state.get("instruction") or "", _observed,
+    )
+    if placeholder_issues:
+        logger.warning(
+            "finalize_node: D2 placeholder gate caught %d leak(s): %s",
+            len(placeholder_issues),
+            "; ".join(p.get("message", "")[:120] for p in placeholder_issues[:3]),
+        )
+        issues = list(issues) + placeholder_issues
+
     # 2026-05-13: C4_PORT_COMPAT is now structural. Saw pipeline #135 ship
     # with edge n6→n3 (data_view → process_history) — process_history has
     # no `data` input port so the edge is meaningless, but the executor
@@ -145,6 +176,7 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
         "C14_ORPHAN_NODE",
         "C15_SOURCE_LESS_NODE",
         "C4_PORT_COMPAT",
+        "C16_PLACEHOLDER_LEAK",  # v24 D2 — must trigger reflect_plan repair
     }
     structural_issues = [i for i in issues if i.get("rule") in _STRUCTURAL_RULES]
     advisory_issues = [i for i in issues if i.get("rule") not in _STRUCTURAL_RULES]

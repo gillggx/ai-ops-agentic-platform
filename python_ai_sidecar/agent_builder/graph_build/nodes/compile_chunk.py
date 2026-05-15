@@ -1390,28 +1390,63 @@ def _resolve_alive_parents(
     return resolved, notes
 
 
-def _check_undeclared_dollar_refs(
+# v24: placeholder / unknown-literal patterns LLM uses to fake cross-branch refs.
+_PLACEHOLDER_PATTERNS = [
+    re.compile(r"^\$\w+"),                # $name, $name.path
+    re.compile(r"^\{[a-z_][a-z0-9_]*\}$", re.IGNORECASE),  # {name}, {last_ooc_time}
+    re.compile(r"^<[a-z_][a-z0-9_]*>$", re.IGNORECASE),    # <name>
+    re.compile(r"^:[a-z_][a-z0-9_]*$", re.IGNORECASE),     # :name (SQL-style)
+]
+# Regex catching runtime-only concept names the LLM can't know at build time.
+# Matches both snake_case (last_ooc_time) and camelCase (LastEventTime).
+# Anchored to start-of-word so we don't accidentally hit "blastoff".
+_RUNTIME_CONCEPT_RE = re.compile(
+    r"\b(last|latest|selected|current|runtime|previous)([_a-z0-9]|[A-Z])",
+    re.IGNORECASE,
+)
+# Composite-key fragments (always require underscore — too short standalone)
+_RUNTIME_CONCEPT_FRAGMENTS = ("max_of_", "min_of_", "previous_step_")
+
+
+def _looks_like_placeholder(value: str) -> bool:
+    if not value:
+        return False
+    for pat in _PLACEHOLDER_PATTERNS:
+        if pat.match(value):
+            return True
+    if _RUNTIME_CONCEPT_RE.search(value):
+        return True
+    v_low = value.lower()
+    return any(frag in v_low for frag in _RUNTIME_CONCEPT_FRAGMENTS)
+
+
+def _check_placeholder_or_unknown_literal(
     new_ops: list[dict],
     declared_inputs: list[dict],
+    instruction: str,
+    upstream_observed_values: set[str] | None = None,
 ) -> list[str]:
-    """v23: deterministic check — any `$ref` in op params where `ref` is
-    NOT declared as a pipeline input is a build-time impossible value
-    (LLM tried to ref another branch's runtime output via a placeholder).
+    """v24: deterministic check — string values that look like placeholders
+    OR runtime-only concept names get rejected at build time.
 
-    Returns list of violation messages. Each message points the LLM at
-    block_join as the proper cross-branch ref mechanism. compile_chunk
-    treats any non-empty return as validation_failed → retry.
+    Whitelist (value is OK if):
+      - It's `$X` where X is a declared pipeline input
+      - It appears verbatim in user instruction text
+      - It appears verbatim in upstream sample observed values
 
-    Caught here BEFORE call_tool's _check_placeholder_declared so the
-    fail-fast path lands in compile_chunk's retry loop (LLM sees the
-    issue + has macro_plan / parent context to fix). At call_tool the
-    LLM is downstream and reflect_op tends to substitute a literal —
-    causing the EQP-01 literal-leak bug.
+    Otherwise: reject with hint to use block_join (cross-branch case) or
+    pick the right literal from instruction/upstream.
+
+    Returns list of violation messages. Caller treats non-empty as
+    validation_failed → retry compile_chunk.
     """
     declared_names = {
         inp.get("name") for inp in (declared_inputs or [])
         if isinstance(inp, dict) and inp.get("name")
     }
+    instr_lower = (instruction or "").lower()
+    observed = upstream_observed_values or set()
+
     issues: list[str] = []
     for op in new_ops:
         if op.get("type") != "add_node":
@@ -1419,7 +1454,10 @@ def _check_undeclared_dollar_refs(
         params = op.get("params") or {}
         node_id = op.get("node_id") or "?"
         for k, v in params.items():
-            if isinstance(v, str) and v.startswith("$"):
+            if not isinstance(v, str):
+                continue
+            # $-ref handling: declared → ok, undeclared → reject
+            if v.startswith("$"):
                 ref = v[1:].split(".", 1)[0]
                 if ref not in declared_names:
                     issues.append(
@@ -1430,7 +1468,69 @@ def _check_undeclared_dollar_refs(
                         f"literal here. If it should be parameterized, restructure "
                         f"macro_plan to declare an input first."
                     )
+                continue
+            # Non-$ literal — check placeholder syntax + runtime concept fragments
+            if not _looks_like_placeholder(v):
+                continue
+            # Whitelist 1: matches user instruction text verbatim
+            if v.lower() in instr_lower:
+                continue
+            # Whitelist 2: appears in upstream observed values
+            if v in observed:
+                continue
+            issues.append(
+                f"node {node_id} param '{k}'={v!r} looks like a placeholder/runtime "
+                f"concept but is NOT declared, NOT in user instruction, NOT in upstream "
+                f"sample. If it's a cross-branch runtime ref → use **block_join** with "
+                f"deps_on=[other_branch_terminal]. If it should be a literal, write the "
+                f"exact value from user's instruction or upstream sample."
+            )
     return issues
+
+
+# Backwards compat: keep old name as alias so existing call sites work
+# while the codebase migrates. Will retire after one release.
+_check_undeclared_dollar_refs = _check_placeholder_or_unknown_literal
+
+
+def check_final_pipeline_placeholders(
+    pipeline_dict: dict,
+    instruction: str,
+    upstream_observed_values: set[str] | None = None,
+) -> list[dict]:
+    """v24 D2: full-pipeline placeholder gate. Used in finalize_node BEFORE
+    structural validator. Catches placeholder leaks from ANY rewrite path
+    (compile_chunk, reflect_plan, repair_op) — not just compile_chunk's
+    own retry loop.
+
+    Returns list of issue dicts in the same shape as PipelineValidator
+    yields, so they can be merged into structural_issues and trigger
+    reflect_plan with deterministic feedback.
+    """
+    if not isinstance(pipeline_dict, dict):
+        return []
+    declared_inputs = pipeline_dict.get("inputs") or []
+    nodes = pipeline_dict.get("nodes") or []
+    # Re-shape nodes into ops format so we can reuse the same checker.
+    pseudo_ops = [
+        {"type": "add_node", "node_id": n.get("id"),
+         "block_id": n.get("block_id"), "params": n.get("params") or {}}
+        for n in nodes if isinstance(n, dict)
+    ]
+    issues = _check_placeholder_or_unknown_literal(
+        pseudo_ops, declared_inputs, instruction or "", upstream_observed_values,
+    )
+    return [
+        {"rule": "C16_PLACEHOLDER_LEAK", "message": msg,
+         "node_id": _extract_node_id_from_msg(msg)}
+        for msg in issues
+    ]
+
+
+def _extract_node_id_from_msg(msg: str) -> str | None:
+    """Pull `node nN` from violation message for issue.node_id field."""
+    m = re.search(r"^node (\S+)", msg)
+    return m.group(1) if m else None
 
 
 def _drop_phantom_connects(
@@ -1959,7 +2059,24 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
     # ToolError hint includes "(e.g. 'EQP-01')" which reflect_op then
     # literally substitutes — silently producing 0-row pipelines. Catch
     # at compile_chunk so retry happens with a proper "use block_join" hint.
-    dollar_issues = _check_undeclared_dollar_refs(new_ops, declared_inputs)
+    # v24: collect upstream observed string values from exec_trace samples for
+    # the whitelist (chart names, status enums, ID literals — anything LLM
+    # could legitimately reference from sample data).
+    _observed: set[str] = set()
+    for snap in (state.get("exec_trace") or {}).values():
+        if not isinstance(snap, dict): continue
+        sample = snap.get("sample")
+        if isinstance(sample, dict):
+            for sv in sample.values():
+                if isinstance(sv, str): _observed.add(sv)
+                elif isinstance(sv, list):
+                    for item in sv:
+                        if isinstance(item, dict):
+                            for x in item.values():
+                                if isinstance(x, str): _observed.add(x)
+    dollar_issues = _check_placeholder_or_unknown_literal(
+        new_ops, declared_inputs, state.get("instruction") or "", _observed,
+    )
     if dollar_issues:
         logger.warning(
             "compile_chunk_node: step %s undeclared-$-ref reject: %s",
