@@ -521,13 +521,14 @@ def _augment_with_bullets(
             continue  # rejected bullets shouldn't bleed into instruction
         if action == "edit" and conf.get("edit_text"):
             text = f"{text}  (user 改寫: {conf['edit_text']})"
-        # v25 B: do NOT pass clarify_intent's terminal_block guess down to
-        # macro_plan. clarify_intent doesn't have the block catalog and often
-        # hallucinates non-existent block_ids (e.g. "block_table" — real name
-        # is block_data_view) or translates user's literal "SPC Panel" into
-        # "block_table". macro_plan reads the bullet text + has the full
-        # catalog and decides the right block (composite vs primitive) itself.
-        lines.append(f"  - {text}")
+        # v25 B reverted in v27.1: stripping `→ 預期用 X` dropped from 3/3 to
+        # 1/3 spc_panel adoption — macro_plan needed the explicit signal to
+        # override its default block choice. Safe to restore because v25 C
+        # (_coerce_terminal_block_by_keyword) guarantees terminal_block is
+        # a real catalog block_id (no more block_table hallucination).
+        tb = b.get("terminal_block")
+        suffix = f"  → 預期用 {tb}" if tb else ""
+        lines.append(f"  - {text}{suffix}")
     if answers_legacy:
         lines.append("")
         lines.append("── Legacy MCQ answers ──")
