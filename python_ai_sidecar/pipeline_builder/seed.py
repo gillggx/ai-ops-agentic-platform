@@ -2239,10 +2239,15 @@ def _blocks() -> list[dict[str, Any]]:
                 "- ❌ 純值分佈 → 用 block_histogram_chart\n"
                 "\n"
                 "== Params ==\n"
-                "x:                 string, required — x 軸欄位（time / index / category）\n"
-                "y:                 string | string[], required — y series 欄位\n"
+                "x:                 string, required — x 軸欄位（time / index / category）。**必須是 input dataframe 真實欄位名**\n"
+                "y:                 string | string[], required — y series 欄位。**必須是 input dataframe 真實欄位名**\n"
                 "y_secondary:       string[], opt — 右側 y 軸 series\n"
-                "series_field:      string, opt — group rows 出多條 color trace\n"
+                "series_field:      string, opt — group rows 出多條 color trace。**必須是 input dataframe 真實欄位名**\n"
+                "                  常用範例：\n"
+                "                    - SPC unnest('spc_charts') 後想分顏色 → series_field='name' (chart 名稱 leaf)\n"
+                "                    - 多機台同圖比較 → series_field='toolID'\n"
+                "                    - 多 lot → series_field='lotID'\n"
+                "                  ⚠ 不要寫 'spc_name'/'chart_name'/'spc_id' — unnest spc_charts 的 leaf 叫 `name`\n"
                 "rules:             array, opt — [{value, label, style?, color?}] 水平參考線\n"
                 "highlight_field:   string, opt — bool 欄位（matched rows 紅圈 overlay）\n"
                 "highlight_eq:      any, opt — match 條件值，預設 true\n"
@@ -2300,11 +2305,12 @@ def _blocks() -> list[dict[str, Any]]:
                 "- ❌ 連續時間軸 → 用 block_line_chart\n"
                 "\n"
                 "== Params ==\n"
-                "x:               string, required — 類別欄位\n"
-                "y:               string | string[], required — bar 高度欄位\n"
+                "x:               string, required — 類別欄位。**必須是 input dataframe 真實欄位名**\n"
+                "y:               string | string[], required — bar 高度欄位。**必須是 input dataframe 真實欄位名**\n"
                 "rules:           array, opt — 水平 threshold 線\n"
                 "highlight_field/highlight_eq: 同 line_chart\n"
                 "title:           string, opt\n"
+                "\n⚠ column ref 一律從 UPSTREAM TRACE 取真實欄位名，不要從 macro_plan.expected_cols 取\n"
                 "\n== Keywords ==\n"
                 "bar chart 长条图 長條圖 柱状图 柱狀圖, comparison 比较 比較, "
                 "count 计数 計數, ranking 排名, categorical 类别 類別\n"
@@ -2342,6 +2348,8 @@ def _blocks() -> list[dict[str, Any]]:
                 "\n"
                 "== Params ==\n"
                 "同 block_line_chart 但無 y_secondary。\n"
+                "x / y / series_field 都**必須是 input dataframe 真實欄位名**（看 UPSTREAM TRACE）。\n"
+                "SPC unnest 後常用 series_field='name' (chart 名稱)。⚠ 不是 'spc_name'/'chart_name'。\n"
                 "\n== Keywords ==\n"
                 "scatter plot 散点图 散點圖 散布图 散布圖, correlation 相关 相關, "
                 "x-vs-y, dispersion 分散\n"
@@ -3116,6 +3124,13 @@ def _blocks() -> list[dict[str, Any]]:
                 "== Output ==\n"
                 "port: data (dataframe) — 多筆 rows，每個 array element 一筆。array 元素若是 "
                 "object 則 keys 自動展為欄位。\n\n"
+                "**具體範例 — 對 process_history 常見 nested column 解開後的 leaf 欄位**：\n"
+                "  • column='spc_charts'  →  新增 leaves: `name`, `value`, `ucl`, `lcl`, `is_ooc`, `status`\n"
+                "    （原 `spc_charts` column 從 output 移除，每張 chart 變一筆 row）\n"
+                "  • column='APC.parameters' → 新增 APC 各參數的 key/value/setpoint 欄位\n"
+                "  • column='spc_summary.ooc_chart_names' → 把 list[str] explode 成多筆，各筆是 single str\n"
+                "⚠ leaf 欄位名是上面那 6 個（`name` 不是 `spc_name` / `chart_name` / `spc_id`，"
+                "`value` 不是 `spc_value`）。下游 chart / filter 要用這些精確名字 ref。\n\n"
                 "== Errors ==\n"
                 "- COLUMN_NOT_FOUND : column 不在 input\n"
             ),
@@ -3129,7 +3144,7 @@ def _blocks() -> list[dict[str, Any]]:
                 },
             },
             "examples": [
-                {"label": "Explode SPC charts to one row per chart",
+                {"label": "Explode SPC charts to one row per chart (leaves: name, value, ucl, lcl, is_ooc, status)",
                  "params": {"column": "spc_charts"}},
             ],
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.unnest:UnnestBlockExecutor"},
@@ -3152,7 +3167,11 @@ def _blocks() -> list[dict[str, Any]]:
                 "== Params ==\n"
                 "fields (array, required) [{path: 'x', as: 'y'}, ...] — 每個 entry 必填 path，as 預設 = path 最後一段\n\n"
                 "== Output ==\n"
-                "port: data (dataframe) — 只包含 selected fields，按 fields 順序排列\n\n"
+                "port: data (dataframe) — 只包含 selected fields，按 fields 順序排列\n"
+                "⚠ **被丟掉的欄位下游就拿不到了**。如果下游 chart 需要 'value' / 'ucl' / 'lcl' 之類欄位，"
+                "select 的 fields 一定要把這些欄位都列進來，否則 chart 會 'COLUMN_NOT_FOUND'。\n"
+                "👉 多數情況**不需要 block_select**（block_chart 自己會挑欄位）；只在你**真的**要刪欄位 "
+                "（瘦身 / 重組 shape 給 mcp_call）才用。\n\n"
                 "== Errors ==\n"
                 "- COLUMN_NOT_FOUND : 任一 path 不在 input\n"
                 "- INVALID_PARAM    : fields 不是 list 或 entry shape 錯\n"

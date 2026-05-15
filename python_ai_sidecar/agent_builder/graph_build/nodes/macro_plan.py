@@ -42,6 +42,8 @@ from typing import Any
 
 from python_ai_sidecar.agent_builder.graph_build.state import BuildGraphState
 from python_ai_sidecar.agent_helpers_native.llm_client import get_llm_client
+from python_ai_sidecar.pipeline_builder.canonical_inputs import lookup as _canonical_lookup
+from python_ai_sidecar.pipeline_builder.trigger_schemas import format_for_prompt as _format_trigger
 
 
 logger = logging.getLogger(__name__)
@@ -193,7 +195,7 @@ Output 說它回的是 nested 結構（list / dict），下游就必須先有解
       "step_idx": 1,
       "text": "<這 step 做什麼，1 句中文>",
       "expected_kind": "transform" | "table" | "chart" | "scalar",
-      "expected_cols": ["col1", "col2"] (terminal step 才寫；transform/中間 step 留空 []),
+      "expected_cols": ["col1", "col2"] (僅給 user 看 confirm card 用的 hint — 寫 user 自然語言提到想看的欄位；不確定就 []。⚠ 這**不是** column ref 來源，compile_chunk 一律從 UPSTREAM TRACE 取真實欄位名),
       "candidate_block": "block_xxx" (從候選 blocks 清單挑),
       "depends_on": [<上游 step_idx>, ...] (source step 寫 []，必填)
     }
@@ -298,11 +300,32 @@ async def macro_plan_node(state: BuildGraphState) -> dict[str, Any]:
     declared_inputs = base_pipeline.get("inputs") or []
     inputs_section = ""
     if declared_inputs:
-        names = [inp.get("name") for inp in declared_inputs if isinstance(inp, dict)]
-        if names:
-            inputs_section = (
-                f"\n\nPipeline 已宣告 inputs (用 $name 引用): {', '.join('$' + n for n in names if n)}"
+        bullets: list[str] = []
+        for inp in declared_inputs:
+            if not isinstance(inp, dict):
+                continue
+            name = inp.get("name")
+            if not name:
+                continue
+            canon = _canonical_lookup(name) or {}
+            itype = inp.get("type") or canon.get("type") or "string"
+            req = " required" if inp.get("required") else ""
+            sample = (
+                inp.get("example")
+                if inp.get("example") is not None
+                else (inp.get("default") if inp.get("default") is not None else canon.get("sample"))
             )
+            desc = inp.get("description") or canon.get("description") or ""
+            sample_str = f", e.g. {sample!r}" if sample is not None else ""
+            bullets.append(
+                f"  - ${name} ({itype}{req}){sample_str}"
+                + (f" — {desc}" if desc else "")
+            )
+        if bullets:
+            inputs_section = "\n\nPipeline INPUTS（用 $name 引用）:\n" + "\n".join(bullets)
+    # v21: surface trigger payload shape (process_event / alarm / patrol / manual)
+    meta = base_pipeline.get("metadata") or {}
+    trigger_section = _format_trigger(meta.get("trigger_kind") or meta.get("trigger"))
 
     # In skill mode, the terminal must be a verdict-shaped block (output
     # carries a pass/fail signal) so SkillRunner can read pass/fail. We
@@ -318,6 +341,7 @@ async def macro_plan_node(state: BuildGraphState) -> dict[str, Any]:
     user_msg = (
         f"USER NEED:\n{instruction[:2000]}"
         f"{inputs_section}"
+        f"{trigger_section}"
         f"{skill_section}"
         f"\n\n候選 blocks (你可以選):\n{briefs}"
     )

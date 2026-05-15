@@ -27,9 +27,59 @@ from typing import Any
 
 from python_ai_sidecar.agent_builder.graph_build.state import BuildGraphState
 from python_ai_sidecar.agent_helpers_native.llm_client import get_llm_client
+from python_ai_sidecar.pipeline_builder.canonical_inputs import lookup as _canonical_lookup
+from python_ai_sidecar.pipeline_builder.trigger_schemas import format_for_prompt as _format_trigger
 
 
 logger = logging.getLogger(__name__)
+
+
+def _format_inputs_section(declared_inputs: list[dict]) -> str:
+    """v21 (2026-05-15): rich inputs section. Was just `$tool_id, $step` —
+    LLM had no idea what type or sample value to expect. Now each input
+    gets a markdown bullet with type + sample + description, sourced from
+    the input's own fields and falling back to canonical input docs.
+    """
+    if not declared_inputs:
+        return ""
+    bullets: list[str] = []
+    for inp in declared_inputs:
+        if not isinstance(inp, dict):
+            continue
+        name = inp.get("name")
+        if not name:
+            continue
+        canon = _canonical_lookup(name) or {}
+        itype = inp.get("type") or canon.get("type") or "string"
+        required = " required" if inp.get("required") else ""
+        sample = (
+            inp.get("example")
+            if inp.get("example") is not None
+            else (inp.get("default") if inp.get("default") is not None else canon.get("sample"))
+        )
+        desc = inp.get("description") or canon.get("description") or ""
+        sample_str = f", e.g. {sample!r}" if sample is not None else ""
+        bullets.append(
+            f"  - ${name} ({itype}{required}){sample_str}"
+            + (f" — {desc}" if desc else "")
+        )
+    if not bullets:
+        return ""
+    return (
+        "\nPipeline INPUTS（用 $name 引用）:\n" + "\n".join(bullets)
+    )
+
+
+def _format_trigger_section(base_pipeline: dict | None) -> str:
+    """Surface the trigger payload shape (process_event / alarm /
+    auto_patrol / manual) so the LLM knows what runtime fields exist on
+    the input event, not just the declared $vars.
+    """
+    if not isinstance(base_pipeline, dict):
+        return ""
+    meta = base_pipeline.get("metadata") or {}
+    kind = meta.get("trigger_kind") or meta.get("trigger") or None
+    return _format_trigger(kind)
 
 
 MAX_COMPILE_ATTEMPTS = 2
@@ -61,9 +111,10 @@ _SYSTEM = """你是 pipeline op-compiler。給你 1 個 macro step 的描述，�
    - 新加 node 的 logical id 必須是接續編號 (canvas 最大 + 1)
 
 2. **column ref 嚴格從 UPSTREAM TRACE 取**
-   - 如果 op 的 param 是 column 名 (filter.column, sort.columns, select.fields, chart.x/y...)，**這個名字必須出現在 UPSTREAM TRACE 任一個 upstream node 的 cols 裡**
+   - 如果 op 的 param 是 column 名 (filter.column, sort.columns, select.fields, chart.x/y/series_field...)，**這個名字必須出現在 UPSTREAM TRACE 任一個 upstream node 的 cols 裡**（看 `cols=[...]` 列表 + 📋 sample row 的 key）
    - 如果你想用的 column 是某 nested col 的 leaf（UPSTREAM TRACE 有秀「list[{...}]」或「dict{...}」shape hint），**這個 step 要先補一個解 nested 的 block (例如 unnest)**，再做 filter / sort / chart
    - 不確定欄位該叫什麼 → 看 RELEVANT BLOCKS 區段該 block 的 description；不要憑想像
+   - ⚠ **完全忽略 CURRENT STEP 的 `expected_cols`**：那只是 macro_plan 給 user 看的 hint，**不是欄位名 ref source**。column ref 永遠從 UPSTREAM TRACE 取（macro_plan 寫 'spc_name'，UPSTREAM TRACE 卻只有 'name'，你就用 'name'）
 
 3. **不要 remove 上游 node** — 上游已穩，這 step 只負責接續
 
@@ -1274,10 +1325,19 @@ def _dedup_against_plan(
     return kept, dropped
 
 
+_COLS_CAP = 30  # v21: was 8 — too aggressive, hid unnest leaves
+_NESTED_LEAVES_CAP = 12  # was 6 — spc_charts has 6 already, leave headroom
+_SAMPLE_VALUE_TRUNC = 60  # cap each sample value to N chars to keep prompt slim
+
+
 def _existing_nodes_summary(plan: list[dict], exec_trace: dict) -> str:
     """One-line per existing logical node with its block_id + observed cols
-    + (when nested) a shape hint from the sample row so the compile LLM
-    knows whether a top-level col is a list/dict and needs unnest.
+    + (when nested) shape hint + a sample row so the compile LLM knows the
+    flat cols, the nested-leaf cols, AND the actual values it can ref.
+
+    v21 (2026-05-15): cols cap raised 8 → 30 (was hiding unnest leaves
+    behind +N). Per-node sample row added (1 row, top cols only, values
+    truncated). Nested leaf list raised 6 → 12.
     """
     lines: list[str] = []
     for op in plan:
@@ -1291,29 +1351,47 @@ def _existing_nodes_summary(plan: list[dict], exec_trace: dict) -> str:
         if not cols:
             lines.append(f"  {lid} [{block}] (no preview yet)")
             continue
-        cols_str = ", ".join(cols[:8])
-        if len(cols) > 8:
-            cols_str += f"...+{len(cols)-8}"
-        lines.append(f"  {lid} [{block}] cols=[{cols_str}]")
+        cols_str = ", ".join(cols[:_COLS_CAP])
+        if len(cols) > _COLS_CAP:
+            cols_str += f"...+{len(cols)-_COLS_CAP}"
+        lines.append(f"  {lid} [{block}] cols=[{cols_str}] ({len(cols)} total)")
         # Nested shape hints — surface list[dict] / dict cols so LLM
         # plans an unnest step before referencing leaves.
         if sample:
             nested_hints: list[str] = []
             for k, v in sample.items():
                 if isinstance(v, list) and v and isinstance(v[0], dict):
-                    leaf_keys = list(v[0].keys())[:6]
+                    leaf_keys = list(v[0].keys())[:_NESTED_LEAVES_CAP]
                     nested_hints.append(
                         f"'{k}' = list[{{ {', '.join(leaf_keys)} }}] "
                         f"(要引用 leaf 先 unnest '{k}')"
                     )
                 elif isinstance(v, dict):
-                    leaf_keys = list(v.keys())[:6]
+                    leaf_keys = list(v.keys())[:_NESTED_LEAVES_CAP]
                     nested_hints.append(
                         f"'{k}' = dict{{ {', '.join(leaf_keys)} }} "
                         f"(用 path '{k}.<leaf>' 引用)"
                     )
-            for hint in nested_hints[:4]:
+            for hint in nested_hints[:6]:
                 lines.append(f"      ↳ {hint}")
+            # 📋 sample row — show actual values for the first ~6 scalar/short
+            # cols. Skips nested cols (shape already covered above) so the
+            # row stays readable.
+            sample_parts: list[str] = []
+            for k in cols[:_COLS_CAP]:
+                if k not in sample:
+                    continue
+                v = sample[k]
+                if isinstance(v, (list, dict)):
+                    continue  # nested already surfaced above
+                sv = repr(v) if not isinstance(v, str) else f"'{v}'"
+                if len(sv) > _SAMPLE_VALUE_TRUNC:
+                    sv = sv[:_SAMPLE_VALUE_TRUNC] + "…"
+                sample_parts.append(f"{k}={sv}")
+                if len(sample_parts) >= 8:
+                    break
+            if sample_parts:
+                lines.append(f"      📋 sample: {', '.join(sample_parts)}")
     return "\n".join(lines) if lines else "  (no upstream nodes — this is the first step)"
 
 
@@ -1444,15 +1522,10 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
             "**不要 emit connect**，純 add_node"
         )
 
-    declared_inputs = (state.get("base_pipeline") or {}).get("inputs") or []
-    inputs_section = ""
-    if declared_inputs:
-        names = [inp.get("name") for inp in declared_inputs if isinstance(inp, dict)]
-        if names:
-            inputs_section = (
-                f"\nPipeline 已宣告 inputs (用 $name 引用): "
-                f"{', '.join('$' + n for n in names if n)}"
-            )
+    base_pipeline = state.get("base_pipeline") or {}
+    declared_inputs = base_pipeline.get("inputs") or []
+    inputs_section = _format_inputs_section(declared_inputs)
+    trigger_section = _format_trigger_section(base_pipeline)
     clarifications = state.get("clarifications") or {}
     clarify_section = ""
     if clarifications:
@@ -1489,6 +1562,7 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
     user_msg = (
         f"USER NEED:\n{(state.get('instruction') or '')[:600]}"
         f"{inputs_section}"
+        f"{trigger_section}"
         f"{clarify_section}"
         f"{retry_section}"
         f"\n\nMACRO PLAN (context):\n" + "\n".join(context_lines) +
