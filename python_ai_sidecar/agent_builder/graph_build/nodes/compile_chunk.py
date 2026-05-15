@@ -1330,6 +1330,115 @@ _NESTED_LEAVES_CAP = 12  # was 6 — spc_charts has 6 already, leave headroom
 _SAMPLE_VALUE_TRUNC = 60  # cap each sample value to N chars to keep prompt slim
 
 
+def _resolve_alive_parents(
+    deps: list[int],
+    macro_plan: list[dict],
+    step_outputs: dict,
+) -> tuple[list[str], list[str]]:
+    """v22 Option A: when a step's depends_on parent has no step_outputs
+    (compile failed), walk up the macro DAG ancestry to find the nearest
+    live ancestor. Returns (resolved_logical_ids, fallback_notes).
+
+    BFS, dedup-aware. If full ancestry is dead (all the way to source),
+    returns ([], notes); caller decides whether to emit connect at all.
+    """
+    if not deps:
+        return [], []
+    by_idx: dict[int, dict] = {
+        s.get("step_idx"): s for s in macro_plan
+        if isinstance(s.get("step_idx"), int)
+    }
+    resolved: list[str] = []
+    resolved_set: set[str] = set()
+    notes: list[str] = []
+    # Iterate original deps in order so multi-parent fan-out is preserved
+    for orig_d in deps:
+        queue: list[int] = [int(orig_d)]
+        local_seen: set[int] = set()
+        landed: str | None = None
+        chain: list[int] = []
+        while queue:
+            d = queue.pop(0)
+            if d in local_seen:
+                continue
+            local_seen.add(d)
+            chain.append(d)
+            outs = step_outputs.get(d) or step_outputs.get(str(d)) or []
+            if outs:
+                landed = outs[-1]
+                break
+            # Walk up to this dead step's own depends_on (ancestors)
+            step_def = by_idx.get(d)
+            if step_def:
+                for up in (step_def.get("depends_on") or []):
+                    try:
+                        queue.append(int(up))
+                    except (TypeError, ValueError):
+                        continue
+        if landed is not None:
+            if landed not in resolved_set:
+                resolved.append(landed)
+                resolved_set.add(landed)
+            if len(chain) > 1:
+                notes.append(
+                    f"step {orig_d} dead → ancestry {'/'.join(str(x) for x in chain)} → {landed}"
+                )
+        else:
+            notes.append(
+                f"step {orig_d} dead, no live ancestor (chain: {'/'.join(str(x) for x in chain)})"
+            )
+    return resolved, notes
+
+
+def _drop_phantom_connects(
+    new_ops: list[dict],
+    existing_plan: list[dict],
+) -> tuple[list[dict], list[str]]:
+    """v22 Option B: defense-in-depth — drop any connect whose src_id or
+    dst_id references a logical that doesn't exist in (existing plan +
+    this chunk's add_nodes). Also drops self-loops (src==dst).
+
+    Returns (filtered_ops, drop_notes). Connects are dropped silently;
+    caller decides whether the resulting plan is still coherent.
+    """
+    existing_lids: set[str] = set()
+    for op in existing_plan:
+        if op.get("type") == "add_node" and op.get("node_id"):
+            existing_lids.add(str(op["node_id"]))
+    chunk_lids: set[str] = set()
+    for op in new_ops:
+        if op.get("type") == "add_node" and op.get("node_id"):
+            chunk_lids.add(str(op["node_id"]))
+    valid = existing_lids | chunk_lids
+
+    kept: list[dict] = []
+    notes: list[str] = []
+    for op in new_ops:
+        if op.get("type") != "connect":
+            kept.append(op)
+            continue
+        src = str(op.get("src_id") or "")
+        dst = str(op.get("dst_id") or "")
+        if not src or not dst:
+            notes.append(f"connect dropped: missing src/dst ({src!r}→{dst!r})")
+            continue
+        if src == dst:
+            notes.append(f"connect dropped: self-loop {src}→{dst}")
+            continue
+        if src not in valid:
+            notes.append(
+                f"connect dropped: phantom src {src!r} (not in plan logicals); dst={dst}"
+            )
+            continue
+        if dst not in valid:
+            notes.append(
+                f"connect dropped: phantom dst {dst!r} (not in plan logicals); src={src}"
+            )
+            continue
+        kept.append(op)
+    return kept, notes
+
+
 def _existing_nodes_summary(plan: list[dict], exec_trace: dict) -> str:
     """One-line per existing logical node with its block_id + observed cols
     + (when nested) shape hint + a sample row so the compile LLM knows the
@@ -1495,26 +1604,39 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
     # v20: explicit parent-edge guidance from macro_plan's depends_on. Tell
     # the LLM exactly which logical_id(s) to wire connect.src_id from. If
     # depends_on is [] (source step), nothing to wire — pure add_node.
+    # v22 (Option A): when a parent step has no step_outputs (failed compile),
+    # walk up macro_plan ancestry to find a live ancestor. Prevents downstream
+    # chain breakage when one intermediate step dies on a missing param.
     step_outputs = state.get("step_outputs") or {}
     cur_deps = step.get("depends_on") or []
-    parent_logical_ids: list[str] = []
-    for d in cur_deps:
-        outs = step_outputs.get(int(d)) or step_outputs.get(str(d)) or []
-        if outs:
-            parent_logical_ids.append(outs[-1])  # terminal of parent's local chain
+    parent_logical_ids, fallback_notes = _resolve_alive_parents(
+        cur_deps, macro_plan, step_outputs,
+    )
+    if fallback_notes:
+        logger.info(
+            "compile_chunk_node: step %s DAG fallback: %s",
+            step_key, "; ".join(fallback_notes[:3]),
+        )
     parent_section = ""
     if cur_deps:
         if parent_logical_ids:
+            fallback_line = ""
+            if fallback_notes:
+                fallback_line = (
+                    "\n  ⚠ depends_on graft: "
+                    + "; ".join(fallback_notes[:3])
+                )
             parent_section = (
                 f"\n\n🔗 DAG PARENTS (這 step 必須從這些 logical id 接 connect):\n"
-                f"  depends_on={cur_deps} → 上游 logical ids: {parent_logical_ids}\n"
+                f"  depends_on={cur_deps} → 上游 logical ids: {parent_logical_ids}"
+                f"{fallback_line}\n"
                 f"  → 你新加的第一個 add_node 必須 connect from {parent_logical_ids[-1]} "
                 f"(若多 parent，每個 parent 各 1 個 connect)"
             )
         else:
             parent_section = (
-                f"\n\n🔗 DAG PARENTS: depends_on={cur_deps} 但上游 step_outputs 還沒記錄到 "
-                f"(上游 step 可能 0 ops)，照原 UPSTREAM TRACE 找最近 dataframe-output node"
+                f"\n\n🔗 DAG PARENTS: depends_on={cur_deps} 但所有上游 step 都沒成功 compile "
+                f"(整條 ancestry 都死)，這 step 應該也跳過 — 不要 emit connect 引用幻覺 logical"
             )
     else:
         parent_section = (
@@ -1776,6 +1898,18 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
             step_key, "; ".join(resolve_notes[:3]),
         )
 
+    # v22 Option B: phantom-edge safety net. After ALL autofixes have had
+    # their chance to rewrite refs, drop any connect that still points at
+    # a logical id which doesn't exist in (plan + this chunk's add_nodes).
+    # Also kills self-loops (src==dst). Runs BEFORE validator so col-ref
+    # / req-param checks don't see corrupt edges.
+    new_ops, phantom_notes = _drop_phantom_connects(new_ops, state.get("plan") or [])
+    if phantom_notes:
+        logger.warning(
+            "compile_chunk_node: step %s phantom-edge drop: %s",
+            step_key, "; ".join(phantom_notes[:3]),
+        )
+
     req_issues = _validate_required_params(new_ops, registry.catalog)
     col_issues = _validate_column_refs(new_ops, upstream_cols, registry.catalog)
     # NOTE: 3-stage check (source-first / no-second-source) was tried but
@@ -1916,6 +2050,8 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
             + (col_autofix_notes or [])
             + (drop_notes or [])
             + (resolve_notes or [])
+            + ([f"dag-fallback: {n}" for n in (fallback_notes or [])])
+            + ([f"phantom-drop: {n}" for n in (phantom_notes or [])])
         )
         step_entry = tracer.record_step(
             "compile_chunk_node", status="ok",
