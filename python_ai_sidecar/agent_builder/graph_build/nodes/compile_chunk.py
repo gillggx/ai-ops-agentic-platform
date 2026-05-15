@@ -1390,6 +1390,49 @@ def _resolve_alive_parents(
     return resolved, notes
 
 
+def _check_undeclared_dollar_refs(
+    new_ops: list[dict],
+    declared_inputs: list[dict],
+) -> list[str]:
+    """v23: deterministic check — any `$ref` in op params where `ref` is
+    NOT declared as a pipeline input is a build-time impossible value
+    (LLM tried to ref another branch's runtime output via a placeholder).
+
+    Returns list of violation messages. Each message points the LLM at
+    block_join as the proper cross-branch ref mechanism. compile_chunk
+    treats any non-empty return as validation_failed → retry.
+
+    Caught here BEFORE call_tool's _check_placeholder_declared so the
+    fail-fast path lands in compile_chunk's retry loop (LLM sees the
+    issue + has macro_plan / parent context to fix). At call_tool the
+    LLM is downstream and reflect_op tends to substitute a literal —
+    causing the EQP-01 literal-leak bug.
+    """
+    declared_names = {
+        inp.get("name") for inp in (declared_inputs or [])
+        if isinstance(inp, dict) and inp.get("name")
+    }
+    issues: list[str] = []
+    for op in new_ops:
+        if op.get("type") != "add_node":
+            continue
+        params = op.get("params") or {}
+        node_id = op.get("node_id") or "?"
+        for k, v in params.items():
+            if isinstance(v, str) and v.startswith("$"):
+                ref = v[1:].split(".", 1)[0]
+                if ref not in declared_names:
+                    issues.append(
+                        f"node {node_id} param '{k}'={v!r} references undeclared "
+                        f"$-input '{ref}'. If '{ref}' is another branch's runtime "
+                        f"output (e.g. 'last X time', max of group), use **block_join** "
+                        f"with deps_on=[other_branch_terminal] — DO NOT placeholder a "
+                        f"literal here. If it should be parameterized, restructure "
+                        f"macro_plan to declare an input first."
+                    )
+    return issues
+
+
 def _drop_phantom_connects(
     new_ops: list[dict],
     existing_plan: list[dict],
@@ -1909,6 +1952,37 @@ async def compile_chunk_node(state: BuildGraphState) -> dict[str, Any]:
             "compile_chunk_node: step %s phantom-edge drop: %s",
             step_key, "; ".join(phantom_notes[:3]),
         )
+
+    # v23: deterministic undeclared-$-ref check. LLM emits placeholders
+    # like "$latest_ooc_time" when macro_plan asks it to filter by another
+    # branch's runtime value. Without this guard, downstream call_tool's
+    # ToolError hint includes "(e.g. 'EQP-01')" which reflect_op then
+    # literally substitutes — silently producing 0-row pipelines. Catch
+    # at compile_chunk so retry happens with a proper "use block_join" hint.
+    dollar_issues = _check_undeclared_dollar_refs(new_ops, declared_inputs)
+    if dollar_issues:
+        logger.warning(
+            "compile_chunk_node: step %s undeclared-$-ref reject: %s",
+            step_key, "; ".join(dollar_issues[:3]),
+        )
+        if tracer is not None:
+            tracer.record_step(
+                "compile_chunk_node", status="validation_failed",
+                duration_ms=int((_time.perf_counter() - _t0) * 1000),
+                step_idx=step.get("step_idx"),
+                attempts=attempts,
+                rule="undeclared_dollar_ref",
+                issues=dollar_issues[:5],
+            )
+        return {
+            "compile_attempts": attempts_map,
+            "plan_validation_errors": dollar_issues,
+            "sse_events": [_event("compile_chunk_error", {
+                "step_idx": step.get("step_idx"),
+                "error": "undeclared_dollar_ref: " + dollar_issues[0][:200],
+                "attempts": attempts,
+            })],
+        }
 
     req_issues = _validate_required_params(new_ops, registry.catalog)
     col_issues = _validate_column_refs(new_ops, upstream_cols, registry.catalog)

@@ -525,12 +525,20 @@ def _check_placeholder_declared(
             f"Currently declared inputs: {declared_list}."
         ),
         hint=(
-            "Fix one of these ways: "
-            f"(a) write a literal value (e.g. \"EQP-01\") instead of {value}; "
-            f"(b) call declare_input(name='{ref}', example=...) first, then "
-            f"reference {value}; "
-            "(c) reuse the canonical name $tool_id (already declared in most "
-            "patrol-ready pipelines) instead of inventing a new one."
+            f"You wrote {value} but '{ref}' is not a declared pipeline input. "
+            "Pick one of:\n"
+            f"  (a) **If the value comes from another branch's runtime output** "
+            f"(e.g. 'last X 的時間', max value of group, etc.) — DO NOT use a "
+            f"literal here, it's mathematically impossible to know at build time. "
+            f"Use **block_join** instead: deps_on=[that_other_branch_terminal], "
+            f"merge by key. Or restructure macro_plan so the chart/filter consumes "
+            f"the runtime branch directly.\n"
+            f"  (b) **If it's a static value the user actually mentioned** "
+            f"(e.g. tool_id from instruction text like 'EQP-07') — write that exact "
+            f"literal from the user's instruction.\n"
+            f"  (c) **If it should be a pipeline input** (parameterized for "
+            f"reuse) — call declare_input(name='{ref}', example=...) first.\n"
+            f"  ⚠ Do NOT invent a literal value — that produces 0-row pipelines."
         ),
     )
 

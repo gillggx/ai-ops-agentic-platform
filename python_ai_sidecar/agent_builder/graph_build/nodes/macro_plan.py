@@ -101,6 +101,17 @@ Output 說它回的是 nested 結構（list / dict），下游就必須先有解
          不要把 chart 接在 verdict 後面 (verdict 是 bool/scalar，沒有 dataframe 給 chart 用)
       e. **沒有 parallel branch 上限** — 你判斷 user 需要幾個 terminal 就開幾個 branch
 
+== 🔗 跨 branch 取值 → 一律用 block_join (v23, 重要！) ==
+  當 step N 需要「另一 branch 的 runtime 輸出值」時 (e.g.「篩到 last X 的時間」、「過濾到 max value 的記錄」、
+  「比對某 group 的 count 結果」)，**禁止**用 block_filter+literal value，**必須**用 block_join：
+    - block_join 的 depends_on=[左表, 右表] (兩個 branch 各自的 terminal)
+    - inner join 預設只保留 join key 相符的 rows，自動達到「篩到 last X」的效果
+  ❌ 錯誤：step 7 [block_filter] deps=[3], text="篩到 last OOC time"
+       → LLM 找不到 last OOC time 的 literal，會幻覺出垃圾 value (例如 "EQP-01")
+       → 0 row → 下游 chart/table 全空
+  ✅ 正確：step 7 [block_join] deps=[3, 5], text="把 step 3 的 OOC 全表 join step 5 的 last OOC time"
+       → join by eventTime → 自動只剩 last OOC time 的 rows
+
 ⚠ 每個 step 必須是「**單一原子動作**」 — 不要把多動作塞同一 step：
   - ❌ 「撈 process_history 並解開 spc_charts 並篩 xbar」(三件事擠一句)
   - ✅ step_1: 撈 process_history → step_2: 解開 spc_charts → step_3: 篩 xbar
@@ -164,6 +175,34 @@ Output 說它回的是 nested 結構（list / dict），下游就必須先有解
 }
 （step 5 verdict / step 6 chart 是 **平行 terminals** — step 6 直接從 step 1 的 source fan-out，
 **不依賴 step 5**。chart 接在 verdict 後面是錯的：verdict 輸出 bool/scalar，給不出 dataframe）
+
+範例 4-X (重要 — cross-branch join): User 說「找 EQP-07 最後一次 OOC 的時刻，列出該時刻所有 OOC SPC 的數值表 + 畫該時刻過去 7 天 trend」
+✅ 正確（用 block_join 把 last OOC time 連回 OOC 全表）:
+{
+  "plan_summary": "verdict 分支找 last OOC time + table/chart 分支用 join 拉回該時刻 detail",
+  "macro_plan": [
+    {"step_idx": 1, "text": "撈 process_history nested", "candidate_block": "block_process_history",
+     "expected_kind": "transform", "depends_on": []},
+    {"step_idx": 2, "text": "展開 spc_charts", "candidate_block": "block_unnest",
+     "expected_kind": "transform", "depends_on": [1]},
+    {"step_idx": 3, "text": "篩 is_ooc==true", "candidate_block": "block_filter",
+     "expected_kind": "transform", "depends_on": [2]},
+    {"step_idx": 4, "text": "依 eventTime groupby + count", "candidate_block": "block_groupby_agg",
+     "expected_kind": "transform", "depends_on": [3]},
+    {"step_idx": 5, "text": "排序取 last OOC eventTime (desc, limit=1)", "candidate_block": "block_sort",
+     "expected_kind": "transform", "depends_on": [4]},
+    {"step_idx": 6, "text": "verdict ≥ threshold", "candidate_block": "block_step_check",
+     "expected_kind": "scalar", "depends_on": [5]},
+    {"step_idx": 7, "text": "JOIN step 3 OOC 全表 ⨯ step 5 last OOC time → 只剩該時刻 OOC rows",
+     "candidate_block": "block_join", "expected_kind": "transform", "depends_on": [3, 5]},
+    {"step_idx": 8, "text": "table 列出該時刻各 SPC 的 value/ucl/lcl",
+     "candidate_block": "block_data_view", "expected_kind": "table", "depends_on": [7]},
+    {"step_idx": 9, "text": "畫該時刻所有 SPC 過去 7 天 trend", "candidate_block": "block_line_chart",
+     "expected_kind": "chart", "depends_on": [7]}
+  ]
+}
+（step 7 用 **block_join** 把 last_OOC_time 跟 OOC 全表 join。**不要**用 block_filter literal，
+那會強迫 LLM 幻覺出垃圾 value）
 
 範例 4: User 說「列出 OOC table 並同時畫 trend + 觸發 alarm」(三 terminals)
 ✅ 三 branch 從共用上游 fan-out:
