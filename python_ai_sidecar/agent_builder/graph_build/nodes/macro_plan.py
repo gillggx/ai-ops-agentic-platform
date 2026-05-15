@@ -59,6 +59,17 @@ MAX_MACRO_STEPS = 12
 # 1 = "ask once"; 2 = "ask once, retry, then refuse" (current).
 MAX_TOO_VAGUE_ATTEMPTS = 2
 
+# v27 (2026-05-15): composite blocks that self-fetch via source-mode
+# params. macro_plan MUST emit these with depends_on=[] (no upstream chain)
+# — they ARE the source for their own branch. Auto-stripped if LLM emits
+# non-empty depends_on by habit.
+_COMPOSITE_BLOCKS = {
+    "block_spc_panel",
+    "block_apc_panel",
+    "block_spc_long_form",
+    "block_apc_long_form",
+}
+
 
 _SYSTEM = """你是 pipeline architect。User 給你需求，你把它**拆成 3-8 個高階步驟**，每步驟用一句中文描述要做什麼。
 
@@ -127,6 +138,16 @@ Output 說它回的是 nested 結構（list / dict），下游就必須先有解
   —— 那它的設計就是**「1 個 block = 整條 pipeline」**。
   此時 macro_plan 應該只給 **1 個 step**，整條 pipeline 就是該 composite block 自己。
   composite 自己處理 fetch+unnest+filter+render，**你拆多步反而會踩它的雷**（已知 case 砍剩 1 row）。
+
+  🔒 **composite block 強制規則 (v27)** — block_spc_panel / block_apc_panel /
+  block_spc_long_form / block_apc_long_form 這 4 個 composite block，
+  **它們的 `depends_on` 必須是 `[]`**（source-level，不接 upstream）。
+    ❌ `{"candidate_block": "block_spc_panel", "depends_on": [3]}` — 錯！不要 chain
+    ✅ `{"candidate_block": "block_spc_panel", "depends_on": []}` — 對，自己 fetch
+  即使 macro_plan 有其他 branch (e.g. verdict 用 process_history+unnest+filter+step_check)，
+  composite chart branch 仍然要獨立 `depends_on=[]`，跟 verdict branch **完全平行**，
+  不共用 source。系統會 deterministic 強制 strip 你寫的非空 depends_on，但你直接
+  寫對省一回 trace 雜訊。
 
 == Few-shot 範例 ==
 
@@ -538,6 +559,28 @@ async def macro_plan_node(state: BuildGraphState) -> dict[str, Any]:
         step["depends_on"] = [
             old_to_new[d] for d in step.get("depends_on") or [] if d in old_to_new
         ]
+
+    # v27 (2026-05-15): COMPOSITE_BLOCKS are source-level self-fetching
+    # 1-step composites. LLM keeps chaining process_history+unnest+filter
+    # before them out of habit, wasting nodes and triggering the broken
+    # cross-branch pattern. Force depends_on=[] for these — they ARE the
+    # source for their own branch. The verdict branch keeps its chain
+    # because it uses different blocks (step_check etc).
+    composite_strip_notes: list[str] = []
+    for step in macro_plan:
+        if step.get("candidate_block") in _COMPOSITE_BLOCKS and step.get("depends_on"):
+            old_deps = step["depends_on"]
+            step["depends_on"] = []
+            composite_strip_notes.append(
+                f"step {step.get('step_idx')} [{step.get('candidate_block')}]: "
+                f"depends_on={old_deps} stripped to [] (composite is source-level, "
+                f"don't chain upstream)"
+            )
+    if composite_strip_notes:
+        logger.info(
+            "macro_plan_node: composite source-strip (%d): %s",
+            len(composite_strip_notes), "; ".join(composite_strip_notes[:3]),
+        )
 
     if not macro_plan:
         if tracer is not None:
