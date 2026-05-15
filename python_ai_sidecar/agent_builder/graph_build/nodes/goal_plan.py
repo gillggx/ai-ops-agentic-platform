@@ -1,0 +1,352 @@
+"""v30 goal_plan_node — emit goal-oriented phases (no block selection yet).
+
+Replaces macro_plan_node. Output is 3-7 phases each describing an outcome
+the build must achieve, with `expected` category for downstream verifier.
+
+LLM is NOT allowed to pick specific blocks here — that's the job of
+agentic_phase_loop which can see real data. goal_plan_node operates on:
+  - user instruction
+  - bullets (legacy bridge — still emits but not strictly required)
+  - canvas snapshot if base_pipeline non-empty
+  - high-level block category briefs (NOT individual block params)
+
+After emission, graph routes to goal_plan_confirm_gate which interrupt()s
+and waits for user confirm/edit via /agent/build/plan-confirm endpoint.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import re
+from typing import Any
+
+from langgraph.types import interrupt
+
+from python_ai_sidecar.agent_builder.graph_build.state import BuildGraphState
+from python_ai_sidecar.agent_helpers_native.llm_client import get_llm_client
+
+
+logger = logging.getLogger(__name__)
+
+
+MAX_PHASES = 7
+MIN_PHASES = 1
+VALID_EXPECTED = {
+    "raw_data", "transform", "verdict", "chart", "table", "scalar", "alarm",
+}
+
+
+_SYSTEM = """你是 pipeline architect。User 給你需求，你產出 3-7 個 **goal-oriented phases**
+描述「要達到什麼狀態」，**不挑具體 block**。
+
+每個 phase:
+  - `id`: "p1" / "p2" / ...
+  - `goal`: 一句中文，描述這 phase 完成後 canvas 該有什麼資料 / 結果
+  - `expected`: 完成類別，從以下 7 選 1:
+      raw_data   — 取得原始 dataset
+      transform  — 中繼 dataframe (filter/sort/agg 結果)
+      verdict    — pass/fail 判定 (block_step_check 系列)
+      chart      — chart_spec 輸出
+      table      — block_data_view 表格
+      scalar     — 單一數值
+      alarm      — 觸發告警
+  - `why`: (選填) 為什麼需要這 phase
+
+**輸出 schema (JSON 純 — 無 markdown fence):**
+{
+  "plan_summary": "...一句話...",
+  "phases": [
+    {"id":"p1","goal":"撈 EQP-08 過去 7 天 process_history 資料","expected":"raw_data",
+     "why":"先 7d 試，沒資料退到 30d"},
+    {"id":"p2","goal":"判斷該機台最後 OOC 時是否 >=2 charts OOC","expected":"verdict"},
+    {"id":"p3","goal":"展示該時刻所有 OOC 的 SPC charts","expected":"chart"}
+  ],
+  "alarm": null
+}
+
+**重要規則**:
+1. **不要寫 block_xxx**，phase goal 只描述結果，e.g. "撈 process_history" 而非
+   "用 block_process_history(tool_id=...)"
+2. phases 是線性順序，但**不寫 depends_on** — 後續 react_round 自己 wire
+3. 一個 chart + 一個 verdict 都各 1 phase，**不要塞同 phase**
+4. 若 user instruction 過模糊：回 {"too_vague": true, "reason": "..."}
+"""
+
+
+_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.DOTALL)
+
+
+def _strip_fence(text: str) -> str:
+    return _FENCE_RE.sub("", text.strip()).strip()
+
+
+async def goal_plan_node(state: BuildGraphState) -> dict[str, Any]:
+    """Emit 3-7 goal-oriented phases."""
+    from python_ai_sidecar.agent_builder.graph_build.nodes.plan import (
+        _extract_first_json_object,
+    )
+    from python_ai_sidecar.agent_builder.graph_build.trace import (
+        get_current_tracer, trace_event_to_sse,
+    )
+
+    instruction = state.get("instruction") or ""
+    base_pipeline = state.get("base_pipeline") or {}
+    skill_step_mode = bool(state.get("skill_step_mode"))
+
+    # Existing canvas snapshot — if user has manual nodes, list them so LLM
+    # can plan incrementally instead of from-scratch overwriting.
+    existing_nodes_section = ""
+    if base_pipeline.get("nodes"):
+        node_summaries = [
+            f"  {n.get('id')} [{n.get('block_id')}] params={n.get('params')}"
+            for n in base_pipeline["nodes"][:10]
+        ]
+        existing_nodes_section = (
+            "\n\nCANVAS 已有 nodes (incremental mode):\n"
+            + "\n".join(node_summaries)
+            + ("\n... + more" if len(base_pipeline["nodes"]) > 10 else "")
+        )
+
+    # Declared inputs (compact)
+    declared_inputs = base_pipeline.get("inputs") or []
+    inputs_section = ""
+    if declared_inputs:
+        names = [inp.get("name") for inp in declared_inputs if isinstance(inp, dict)]
+        inputs_section = (
+            f"\n\nPipeline declared inputs (referenceable as $name): "
+            f"{', '.join('$' + n for n in names if n)}"
+        )
+
+    skill_section = (
+        "\n\nSKILL STEP MODE: final phase must produce a verdict (pass/fail)."
+        if skill_step_mode else ""
+    )
+
+    user_msg = (
+        f"USER NEED:\n{instruction[:2000]}"
+        f"{inputs_section}"
+        f"{skill_section}"
+        f"{existing_nodes_section}"
+    )
+
+    client = get_llm_client()
+    tracer = get_current_tracer()
+    extra_sse: list[dict[str, Any]] = []
+
+    raw_text = ""
+    try:
+        resp = await client.create(
+            system=_SYSTEM,
+            messages=[{"role": "user", "content": user_msg}],
+            max_tokens=2048,
+        )
+        raw_text = resp.text or ""
+        text = _strip_fence(raw_text)
+        try:
+            decision = json.loads(text)
+        except json.JSONDecodeError:
+            decision = _extract_first_json_object(text or "")
+    except Exception as ex:  # noqa: BLE001
+        logger.warning("goal_plan_node: LLM/parse failed (%s)", ex)
+        if tracer is not None:
+            tracer.record_llm(
+                "goal_plan_node", system=_SYSTEM, user_msg=user_msg,
+                raw_response=raw_text, parsed=None, error=str(ex)[:300],
+            )
+            tracer.record_step("goal_plan_node", status="failed", error=str(ex)[:300])
+        return {
+            "v30_phases": [],
+            "status": "failed",
+            "summary": f"goal_plan failed: {ex}",
+            "sse_events": [_event("goal_plan_failed", {"error": str(ex)[:200]})],
+        }
+
+    # too_vague path
+    if isinstance(decision, dict) and decision.get("too_vague"):
+        reason = str(decision.get("reason") or "instruction too vague")
+        logger.info("goal_plan_node: too_vague — %s", reason[:120])
+        if tracer is not None:
+            tracer.record_step(
+                "goal_plan_node", status="refused", verdict="too_vague",
+                reason=reason[:300],
+            )
+        return {
+            "v30_phases": [],
+            "status": "refused",
+            "summary": f"我搞不懂這個需求 — {reason[:200]}。請更具體描述：要看什麼資料/預期輸出/哪台機台。",
+            "sse_events": [_event("goal_plan_refused", {"reason": reason[:300]})],
+        }
+
+    # Parse + validate phases
+    raw_phases = (decision or {}).get("phases") or []
+    phases: list[dict[str, Any]] = []
+    for i, item in enumerate(raw_phases[:MAX_PHASES], 1):
+        if not isinstance(item, dict):
+            continue
+        goal = str(item.get("goal") or "").strip()
+        if not goal:
+            continue
+        expected = str(item.get("expected") or "transform").strip().lower()
+        if expected not in VALID_EXPECTED:
+            logger.warning(
+                "goal_plan_node: phase %s invalid expected=%r, falling back to 'transform'",
+                item.get("id") or f"p{i}", expected,
+            )
+            expected = "transform"
+        phases.append({
+            "id": str(item.get("id") or f"p{i}").strip(),
+            "goal": goal,
+            "expected": expected,
+            "why": str(item.get("why") or "").strip() or None,
+            "user_edited": False,
+        })
+
+    if len(phases) < MIN_PHASES:
+        logger.info("goal_plan_node: empty phases after parse")
+        if tracer is not None:
+            tracer.record_step(
+                "goal_plan_node", status="failed",
+                reason="no valid phases after parse",
+            )
+        return {
+            "v30_phases": [],
+            "status": "failed",
+            "summary": "(goal_plan produced no valid phases)",
+            "sse_events": [_event("goal_plan_failed", {"reason": "no valid phases"})],
+        }
+
+    plan_summary = str(decision.get("plan_summary") or "").strip() or "(no summary)"
+    alarm = decision.get("alarm")  # optional, can be None
+
+    logger.info(
+        "goal_plan_node: emitted %d phases, summary=%r",
+        len(phases), plan_summary[:80],
+    )
+
+    if tracer is not None:
+        llm_entry = tracer.record_llm(
+            node="goal_plan_node",
+            system=_SYSTEM[:300] + "...",
+            user_msg=user_msg[:1500],
+            raw_response=raw_text,
+            parsed=decision,
+            resp=resp,
+        )
+        sse = trace_event_to_sse(llm_entry, kind="llm_call")
+        if sse: extra_sse.append(sse)
+        step_entry = tracer.record_step(
+            "goal_plan_node", status="ok",
+            n_phases=len(phases), summary=plan_summary[:200],
+            phases=phases,
+        )
+        sse2 = trace_event_to_sse(step_entry, kind="step")
+        if sse2: extra_sse.append(sse2)
+
+    return {
+        "v30_phases": phases,
+        "v30_current_phase_idx": 0,
+        "v30_phase_round": 0,
+        "v30_phase_outcomes": {},
+        "v30_handover": None,
+        "v30_phase_edit_history": {},
+        "v30_phase_recent_actions": {},
+        "summary": plan_summary,
+        "status": "goal_plan_confirm_required",
+        "is_from_scratch": not bool(base_pipeline.get("nodes")),
+        "sse_events": [
+            _event("goal_plan_proposed", {
+                "plan_summary": plan_summary,
+                "phases": phases,
+                "alarm": alarm,
+                "n_phases": len(phases),
+            }),
+            *extra_sse,
+        ],
+    }
+
+
+async def goal_plan_confirm_gate_node(state: BuildGraphState) -> dict[str, Any]:
+    """Interrupt the graph; wait for user to confirm/edit phases.
+
+    User can send back: {confirmed: true, phases: [...edited...]}
+    OR              : {confirmed: false}  (abort)
+    """
+    phases = state.get("v30_phases") or []
+    plan_summary = state.get("summary") or "(no summary)"
+
+    logger.info(
+        "goal_plan_confirm_gate: pausing for user — %d phases",
+        len(phases),
+    )
+
+    user_response = interrupt({
+        "kind": "goal_plan_confirm_required",
+        "session_id": state.get("session_id"),
+        "plan_summary": plan_summary,
+        "phases": phases,
+    })
+
+    # User confirmed — possibly with edits
+    if not isinstance(user_response, dict):
+        user_response = {"confirmed": bool(user_response)}
+
+    if not user_response.get("confirmed"):
+        logger.info("goal_plan_confirm_gate: user rejected build")
+        return {
+            "status": "refused",
+            "summary": "User rejected the proposed phases.",
+            "sse_events": [_event("goal_plan_rejected", {})],
+        }
+
+    # If user sent edited phases, use them verbatim. Track edit history.
+    edited_phases_raw = user_response.get("phases")
+    if isinstance(edited_phases_raw, list) and edited_phases_raw:
+        original = {p["id"]: p for p in phases}
+        edit_history: dict[str, list[dict]] = {}
+        new_phases: list[dict[str, Any]] = []
+        for i, item in enumerate(edited_phases_raw[:MAX_PHASES], 1):
+            if not isinstance(item, dict):
+                continue
+            pid = str(item.get("id") or f"p{i}")
+            goal = str(item.get("goal") or "").strip()
+            if not goal:
+                continue
+            expected = str(item.get("expected") or "transform").lower()
+            if expected not in VALID_EXPECTED:
+                expected = "transform"
+            orig = original.get(pid)
+            edited = orig is None or orig.get("goal") != goal
+            new_phases.append({
+                "id": pid, "goal": goal, "expected": expected,
+                "why": str(item.get("why") or "").strip() or None,
+                "user_edited": edited,
+            })
+            if edited and orig:
+                edit_history.setdefault(pid, []).append({
+                    "from": orig.get("goal"), "to": goal,
+                })
+        phases = new_phases
+        logger.info(
+            "goal_plan_confirm_gate: user edited %d phase(s)",
+            sum(1 for p in phases if p.get("user_edited")),
+        )
+        return {
+            "v30_phases": phases,
+            "v30_phase_edit_history": edit_history,
+            "status": "phase_in_progress",
+            "sse_events": [_event("goal_plan_confirmed", {
+                "phases": phases, "n_edits": len(edit_history),
+            })],
+        }
+
+    # User confirmed without edits
+    return {
+        "status": "phase_in_progress",
+        "sse_events": [_event("goal_plan_confirmed", {
+            "phases": phases, "n_edits": 0,
+        })],
+    }
+
+
+def _event(name: str, data: dict[str, Any]) -> dict[str, Any]:
+    return {"event": name, "data": data}

@@ -63,6 +63,19 @@ from python_ai_sidecar.agent_builder.graph_build.nodes.reflect_op import (
     reflect_op_node,
 )
 from python_ai_sidecar.agent_builder.graph_build.nodes.layout import layout_node
+# v30 ReAct nodes
+from python_ai_sidecar.agent_builder.graph_build.nodes.goal_plan import (
+    goal_plan_node, goal_plan_confirm_gate_node,
+)
+from python_ai_sidecar.agent_builder.graph_build.nodes.agentic_phase_loop import (
+    agentic_phase_loop_node,
+)
+from python_ai_sidecar.agent_builder.graph_build.nodes.phase_revise import (
+    phase_revise_node,
+)
+from python_ai_sidecar.agent_builder.graph_build.nodes.halt_handover import (
+    halt_handover_node,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -299,6 +312,80 @@ def _advance_macro_step(state: BuildGraphState) -> dict[str, Any]:
     }
 
 
+# ── v30 routing functions ─────────────────────────────────────────────────
+
+def _route_entry(state: BuildGraphState) -> str:
+    """Choose v30 ReAct path vs v27 macro-plan path at graph entry.
+
+    POC opt-in: set state.v30_mode=True (request flag) to use v30. Default
+    stays on v27 to avoid breaking skill mode + existing chat builder.
+    """
+    if state.get("v30_mode"):
+        logger.info("graph entry: v30_mode=True -> goal_plan")
+        return "goal_plan"
+    return "clarify_intent"
+
+
+def _route_after_goal_plan(state: BuildGraphState) -> str:
+    """After goal_plan_node emits phases:
+      - status=goal_plan_confirm_required -> goal_plan_confirm_gate (interrupt)
+      - status=refused / failed -> finalize (records refusal in trace)
+    """
+    status = state.get("status")
+    if status in ("refused", "failed"):
+        return "finalize"
+    return "goal_plan_confirm_gate"
+
+
+def _route_after_goal_plan_confirm(state: BuildGraphState) -> str:
+    """After user confirms/edits phases:
+      - status=phase_in_progress -> agentic_phase_loop (first phase)
+      - status=refused -> finalize (user cancelled)
+    """
+    status = state.get("status")
+    if status == "refused":
+        return "finalize"
+    return "agentic_phase_loop"
+
+
+def _route_after_phase_loop(state: BuildGraphState) -> str:
+    """After one ReAct round in agentic_phase_loop:
+      - status=phase_revise_pending -> phase_revise
+      - all phases done -> finalize
+      - else -> back to agentic_phase_loop for next round
+    """
+    status = state.get("status")
+    if status == "phase_revise_pending":
+        return "phase_revise"
+    phases = state.get("v30_phases") or []
+    idx = state.get("v30_current_phase_idx", 0)
+    if idx >= len(phases):
+        return "finalize"
+    return "agentic_phase_loop"
+
+
+def _route_after_phase_revise(state: BuildGraphState) -> str:
+    """After phase_revise_node:
+      - status=handover_pending -> halt_handover
+      - status=phase_in_progress -> back to agentic_phase_loop
+    """
+    status = state.get("status")
+    if status == "handover_pending":
+        return "halt_handover"
+    return "agentic_phase_loop"
+
+
+def _route_after_handover(state: BuildGraphState) -> str:
+    """After user picks handover option:
+      - status=phase_in_progress -> agentic_phase_loop (retry with new goal)
+      - status=build_partial / failed -> finalize
+    """
+    status = state.get("status")
+    if status == "phase_in_progress":
+        return "agentic_phase_loop"
+    return "finalize"
+
+
 # ── Build the graph (cached) ───────────────────────────────────────────────
 
 _compiled = None
@@ -333,12 +420,62 @@ def build_graph():
     g.add_node("reflect_op", reflect_op_node)
     g.add_node("layout", layout_node)
 
+    # v30 ReAct nodes (opt-in via state.v30_mode=True at request time)
+    g.add_node("goal_plan", goal_plan_node)
+    g.add_node("goal_plan_confirm_gate", goal_plan_confirm_gate_node)
+    g.add_node("agentic_phase_loop", agentic_phase_loop_node)
+    g.add_node("phase_revise", phase_revise_node)
+    g.add_node("halt_handover", halt_handover_node)
+
+    # v30 routing — entry conditional sends v30_mode=True builds through
+    # goal_plan + ReAct loop; defaults stay on v27 clarify_intent.
+    g.add_conditional_edges(
+        START,
+        _route_entry,
+        {"goal_plan": "goal_plan", "clarify_intent": "clarify_intent"},
+    )
+    # v30: goal_plan -> confirm_gate (or finalize on refuse)
+    g.add_conditional_edges(
+        "goal_plan",
+        _route_after_goal_plan,
+        {"goal_plan_confirm_gate": "goal_plan_confirm_gate", "finalize": "finalize"},
+    )
+    # v30: after user confirm phases -> start ReAct loop on phase 0
+    g.add_conditional_edges(
+        "goal_plan_confirm_gate",
+        _route_after_goal_plan_confirm,
+        {"agentic_phase_loop": "agentic_phase_loop", "finalize": "finalize"},
+    )
+    # v30: ReAct round -> next round / phase_revise / finalize when all done
+    g.add_conditional_edges(
+        "agentic_phase_loop",
+        _route_after_phase_loop,
+        {
+            "agentic_phase_loop": "agentic_phase_loop",
+            "phase_revise": "phase_revise",
+            "finalize": "finalize",
+        },
+    )
+    # v30: phase_revise -> back to loop with reset, or halt_handover
+    g.add_conditional_edges(
+        "phase_revise",
+        _route_after_phase_revise,
+        {"agentic_phase_loop": "agentic_phase_loop", "halt_handover": "halt_handover"},
+    )
+    # v30: handover -> finalize (build_partial / failed / take_over) or
+    # back to ReAct loop (edit_goal chosen + new goal supplied)
+    g.add_conditional_edges(
+        "halt_handover",
+        _route_after_handover,
+        {"agentic_phase_loop": "agentic_phase_loop", "finalize": "finalize"},
+    )
+
     # v15 G1 + v16: clarify_intent first; then macro_plan (replaces 1-shot
     # plan_node). plan_node remains in the graph for v15 modify-request
     # replan path (route_after_confirm → "plan") but new builds enter via
     # macro_plan. macro_plan skips validate (plan is empty at this point —
     # compile_chunk will build it up; validate runs at chunk boundaries).
-    g.add_edge(START, "clarify_intent")
+    # v27: clarify_intent kept for v27 path; v30 enters via goal_plan above.
     g.add_edge("clarify_intent", "macro_plan")
     g.add_conditional_edges(
         "macro_plan",
