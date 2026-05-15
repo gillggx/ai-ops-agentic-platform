@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>EQP-08 OOC 案例 — Block 圖鑑</title>
+  <style>
+    * { box-sizing: border-box }
+    body { font-family: -apple-system, "Helvetica Neue", "PingFang TC", sans-serif;
+           line-height: 1.55; max-width: 1280px; margin: 0 auto; padding: 18px;
+           color: #1a202c; background: #f5f6f8 }
+    h1 { margin: 0 0 4px; font-size: 26px; color: #0f172a }
+    h2 { margin-top: 32px; font-size: 20px; color: #0f172a; border-bottom: 2px solid #e2e8f0; padding-bottom: 6px }
+    .meta { color: #64748b; margin-bottom: 18px; font-size: 14px }
+    .nav { position: sticky; top: 0; background: #f5f6f8; padding: 10px 0;
+           border-bottom: 1px solid #e2e8f0; margin-bottom: 18px; z-index: 100 }
+    .nav a { display: inline-block; margin: 2px 6px 2px 0; padding: 4px 10px;
+             background: #fff; border: 1px solid #cbd5e1; border-radius: 4px;
+             text-decoration: none; color: #1e40af; font-size: 12px }
+    .nav a:hover { background: #eff6ff }
+
+    .card { background: #fff; border-radius: 10px; padding: 18px 20px; margin: 16px 0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08); border-left: 6px solid #94a3b8 }
+    .card-source { border-left-color: #3b82f6 }
+    .card-transform { border-left-color: #94a3b8 }
+    .card-check { border-left-color: #f97316 }
+    .card-output { border-left-color: #22c55e }
+    .card-composite { border-left-color: #a855f7 }
+
+    .card h3 { margin: 0 0 4px; font-size: 18px; font-family: "SF Mono", Monaco, monospace; color: #0f172a }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px;
+             font-weight: 700; margin-left: 10px; vertical-align: middle; letter-spacing: 0.5px }
+    .badge-source { background: #dbeafe; color: #1e40af }
+    .badge-transform { background: #e2e8f0; color: #475569 }
+    .badge-check { background: #fed7aa; color: #9a3412 }
+    .badge-output { background: #d1fae5; color: #065f46 }
+    .badge-composite { background: #ede9fe; color: #6b21a8 }
+
+    .one-liner { color: #475569; margin: 4px 0 12px; font-size: 14px }
+    .section { margin: 14px 0 8px; font-size: 12px; font-weight: 700;
+               color: #475569; text-transform: uppercase; letter-spacing: 0.6px }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1.1fr 1.4fr; gap: 14px; margin: 10px 0 }
+    .grid-col { background: #f8fafc; padding: 12px; border-radius: 6px; border: 1px solid #e2e8f0 }
+    .grid-col h4 { margin: 0 0 8px; font-size: 11px; color: #64748b;
+                   text-transform: uppercase; letter-spacing: 0.6px; font-weight: 700 }
+
+    pre { background: #1e293b; color: #e2e8f0; padding: 11px 13px; border-radius: 6px;
+          overflow-x: auto; font-size: 11.5px; line-height: 1.5;
+          font-family: "SF Mono", Monaco, "Courier New", monospace; margin: 6px 0 }
+    code.inline { background: #f1f5f9; padding: 1px 6px; border-radius: 3px;
+                  font-family: "SF Mono", Monaco, monospace; font-size: 12.5px; color: #b91c1c }
+
+    table.params { border-collapse: collapse; width: 100%; font-size: 12.5px; margin: 4px 0 }
+    table.params th, table.params td { text-align: left; padding: 5px 8px;
+                                        border-bottom: 1px solid #e2e8f0; vertical-align: top }
+    table.params th { background: #f1f5f9; font-weight: 600; color: #334155; font-size: 11px }
+    table.params td.name { font-family: "SF Mono", Monaco, monospace; font-weight: 600 }
+    .req { color: #dc2626 }
+    .opt { color: #94a3b8 }
+
+    .mistake { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 8px 12px;
+               margin: 8px 0; font-size: 13px; border-radius: 4px }
+    .hint { background: #dbeafe; border-left: 4px solid #2563eb; padding: 8px 12px;
+            margin: 8px 0; font-size: 13px; border-radius: 4px }
+
+    .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0 }
+    .compare-bad { background: #fef2f2; border: 1.5px solid #fca5a5; padding: 16px; border-radius: 8px }
+    .compare-good { background: #f0fdf4; border: 1.5px solid #86efac; padding: 16px; border-radius: 8px }
+    .compare-bad h4, .compare-good h4 { margin: 0 0 10px; font-size: 14px }
+    .compare-bad h4 { color: #991b1b }
+    .compare-good h4 { color: #15803d }
+    .step-flow { font-family: "SF Mono", Monaco, monospace; font-size: 12px; line-height: 2 }
+    .step-flow .num { display: inline-block; width: 20px; color: #94a3b8; text-align: right; margin-right: 6px }
+    .arrow { color: #64748b }
+
+    .key-insight { background: #fffbeb; border: 2px solid #fbbf24; padding: 14px 18px;
+                   border-radius: 10px; margin: 16px 0; font-size: 14px }
+    .key-insight strong { color: #92400e }
+
+    @media (max-width: 900px) { .grid-3 { grid-template-columns: 1fr } .compare-grid { grid-template-columns: 1fr } }
+  </style>
+</head>
+<body>
+
+<h1>EQP-08 OOC 案例 — 用到的 7 個 Block</h1>
+<p class="meta">
+  以 user prompt：<em>「EQP-08 機台最後一次 OOC 事件時刻，統計並顯示有多少張 SPC charts 也同時 OOC，篩選 OOC 數量 &gt; 2 的情況，以 SPC Panel 分別列出各 chart 的數值、UCL/LCL 及 OOC 狀態」</em>為例。
+  Output sample 用 EQP-01 STEP_001 真實資料 (12 SPC charts, r_chart is_ooc=true)。
+</p>
+
+<div class="nav">
+  <a href="#process_history">1. process_history</a>
+  <a href="#unnest">2. unnest</a>
+  <a href="#filter">3. filter</a>
+  <a href="#groupby_agg">4. groupby_agg</a>
+  <a href="#sort">5. sort</a>
+  <a href="#step_check">6. step_check</a>
+  <a href="#spc_panel">7. spc_panel</a>
+  <a href="#compare">📊 兩種解法對照</a>
+</div>
+
+<!-- ═══════════════════════════════════════ -->
+<div class="card card-source" id="process_history">
+  <h3>block_process_history<span class="badge badge-source">SOURCE</span></h3>
+  <p class="one-liner">從 ontology 拉指定條件 (tool_id / lot_id / step) 的 process events。每筆 = 一次 process，預設帶 nested SPC/APC/DC/RECIPE/FDC/EC sub-objects + 預算 <code class="inline">spc_summary</code>。</p>
+
+  <div class="section">何時用</div>
+  <ul style="margin:4px 0; padding-left: 22px; font-size: 13.5px">
+    <li>已知 tool_id / lot_id / step，要查 process 歷史做分析</li>
+    <li>例：「EQP-01 最近 50 次 SPC trend」「LOT-123 在 STEP_004 的 APC 參數」</li>
+    <li>❌ 「現在哪些機台在跑」→ 用 <code class="inline">block_list_objects</code></li>
+  </ul>
+
+  <div class="grid-3">
+    <div class="grid-col">
+      <h4>INPUT</h4>
+      無 input port (source block)
+    </div>
+    <div class="grid-col">
+      <h4>PARAMS</h4>
+      <table class="params">
+        <tr><th>name</th><th>type</th><th>default</th></tr>
+        <tr><td class="name">tool_id</td><td>string</td><td class="opt">三擇一</td></tr>
+        <tr><td class="name">lot_id</td><td>string</td><td class="opt">三擇一</td></tr>
+        <tr><td class="name">step</td><td>string</td><td class="opt">三擇一</td></tr>
+        <tr><td class="name">object_name</td><td>enum</td><td>"" (全部)</td></tr>
+        <tr><td class="name">time_range</td><td>string</td><td>"24h"</td></tr>
+        <tr><td class="name">limit</td><td>int</td><td>100</td></tr>
+        <tr><td class="name">nested</td><td>bool</td><td>true</td></tr>
+      </table>
+    </div>
+    <div class="grid-col">
+      <h4>OUTPUT (real sample, EQP-01 STEP_001)</h4>
+      port: <code class="inline">data</code> (dataframe, nested)
+<pre>{
+  "eventTime": "2026-05-15T08:36:31.166000",
+  "toolID": "EQP-01",
+  "lotID": "LOT-0541",
+  "step": "STEP_001",
+  "spc_status": "OOC",          ← rollup
+  "fdc_classification": null,
+  "spc_charts": [               ← list[12]
+    {"name":"xbar_chart","value":16.6,"ucl":17.5,"lcl":12.5,"is_ooc":false,"status":"PASS"},
+    {"name":"r_chart",   "value":905.7,"ucl":880,"lcl":820,"is_ooc":true,"status":"OOC"},
+    {"name":"s_chart",...}, ...12 charts
+  ],
+  "spc_summary": {              ← precomputed!
+    "ooc_count": 1,
+    "total_charts": 12,
+    "ooc_chart_names": ["r_chart"]
+  }
+}</pre>
+    </div>
+  </div>
+
+  <div class="hint">
+    <strong>🟢 OOC 4 個欄位（同件事不同粒度，<u>選一個就夠</u>）：</strong><br>
+    <code class="inline">spc_status == "OOC"</code> — 整 event 有沒有任一 chart OOC (rollup)<br>
+    <code class="inline">spc_summary.ooc_count</code> — 這 event 有幾張 chart OOC (int)<br>
+    <code class="inline">spc_summary.ooc_chart_names</code> — 哪幾張 OOC (list[str])<br>
+    <code class="inline">spc_charts[i].is_ooc</code> — 第 i 張 chart OOC 與否 (要先 unnest)
+  </div>
+
+  <div class="mistake">
+    ⚠ 三擇一 (tool_id/lot_id/step) 都不填 → <code class="inline">NO_FILTER_GIVEN</code><br>
+    ⚠ time_range "過去 2 天" 要寫 "48h" 不是 "1d"
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════ -->
+<div class="card card-transform" id="unnest">
+  <h3>block_unnest<span class="badge badge-transform">TRANSFORM</span></h3>
+  <p class="one-liner">把 list 欄位 explode 成多筆 rows，object element 的 keys 自動 lift 成 top-level columns（pandas explode）。</p>
+
+  <div class="section">何時用</div>
+  <ul style="margin:4px 0; padding-left: 22px; font-size: 13.5px">
+    <li>「想對單一 SPC chart 做趨勢」→ unnest <code class="inline">spc_charts</code>，再 filter <code class="inline">name='xbar_chart'</code></li>
+    <li>「想看 APC 各參數獨立 series」→ unnest <code class="inline">APC.parameters</code></li>
+    <li>❌ 「想算 OOC 數量」→ <strong>不要</strong> unnest，用 <code class="inline">spc_summary.ooc_count</code> 即可</li>
+  </ul>
+
+  <div class="grid-3">
+    <div class="grid-col">
+      <h4>INPUT</h4>
+      port: <code class="inline">data</code> (dataframe，含至少 1 個 list 欄位)
+    </div>
+    <div class="grid-col">
+      <h4>PARAMS</h4>
+      <table class="params">
+        <tr><th>name</th><th>type</th></tr>
+        <tr><td class="name"><span class="req">★ column</span></td><td>string</td></tr>
+      </table>
+      <p style="font-size:12px;color:#64748b;margin:4px 0">
+        e.g. <code class="inline">'spc_charts'</code> / <code class="inline">'APC.parameters'</code>
+      </p>
+    </div>
+    <div class="grid-col">
+      <h4>OUTPUT (unnest 'spc_charts' on above sample)</h4>
+      port: <code class="inline">data</code> — 12 rows (原 1 row × 12 charts)
+<pre>row 0: {eventTime, toolID, lotID, step, spc_status,
+        name:"xbar_chart", value:16.6, ucl:17.5,
+        lcl:12.5, is_ooc:false, status:"PASS"}
+row 1: {..., name:"r_chart", value:905.7,
+        is_ooc:true, status:"OOC"}
+row 2: {..., name:"s_chart", ...}
+...
+row 11: {..., name:"match_tune_chart", ...}
+
+cols: [eventTime, toolID, lotID, step, spc_status,
+       fdc_classification, spc_summary,
+       name, value, ucl, lcl, is_ooc, status]
+(原 spc_charts 欄消失，6 leaves 變 top-level)</pre>
+    </div>
+  </div>
+
+  <div class="mistake">
+    ⚠ leaf 欄位實名是 <code class="inline">name</code> / <code class="inline">value</code>，<strong>不是</strong> <code class="inline">spc_name</code> / <code class="inline">chart_name</code>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════ -->
+<div class="card card-transform" id="filter">
+  <h3>block_filter<span class="badge badge-transform">TRANSFORM</span></h3>
+  <p class="one-liner">單條件過濾：保留 <code class="inline">column &lt;operator&gt; value</code> 為 true 的 rows。</p>
+
+  <div class="grid-3">
+    <div class="grid-col">
+      <h4>INPUT</h4>
+      port: <code class="inline">data</code> (dataframe)
+    </div>
+    <div class="grid-col">
+      <h4>PARAMS</h4>
+      <table class="params">
+        <tr><th>name</th><th>type</th></tr>
+        <tr><td class="name"><span class="req">★ column</span></td><td>string</td></tr>
+        <tr><td class="name"><span class="req">★ operator</span></td><td>enum</td></tr>
+        <tr><td class="name">value</td><td>any</td></tr>
+      </table>
+      <p style="font-size:12px;color:#64748b;margin:4px 0">
+        operator: <code class="inline">==, !=, &gt;, &lt;, &gt;=, &lt;=, in, contains</code>
+      </p>
+    </div>
+    <div class="grid-col">
+      <h4>OUTPUT (filter is_ooc==true on n2 output)</h4>
+      port: <code class="inline">data</code> — 12 rows → 1 row
+<pre>row 0: {
+  eventTime: "2026-05-15T08:36:31.166000",
+  toolID: "EQP-01",
+  name: "r_chart",
+  value: 905.75,
+  ucl: 880.0,
+  lcl: 820.0,
+  is_ooc: true,
+  status: "OOC"
+}
+
+cols 不變 (沒新增/刪除)</pre>
+    </div>
+  </div>
+
+  <div class="mistake">
+    ⚠ column 必須是上游真實欄位 (case-sensitive)<br>
+    ⚠ <code class="inline">in</code> 的 value 必須是 list；<code class="inline">contains</code> 只對 string 欄位<br>
+    ⚠ value 是 literal — <strong>不是</strong> placeholder 像 <code class="inline">$X</code> 或 <code class="inline">{last_time}</code>。要跨 branch 取值請用 <code class="inline">block_join</code>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════ -->
+<div class="card card-transform" id="groupby_agg">
+  <h3>block_groupby_agg<span class="badge badge-transform">TRANSFORM</span></h3>
+  <p class="one-liner">分組 + 單一聚合函數 (pandas groupby + agg)。Output column 名是 <code class="inline">&lt;agg_column&gt;_&lt;agg_func&gt;</code>。</p>
+
+  <div class="grid-3">
+    <div class="grid-col">
+      <h4>INPUT</h4>
+      port: <code class="inline">data</code>
+    </div>
+    <div class="grid-col">
+      <h4>PARAMS</h4>
+      <table class="params">
+        <tr><th>name</th><th>type</th></tr>
+        <tr><td class="name"><span class="req">★ group_by</span></td><td>string<br>or list</td></tr>
+        <tr><td class="name"><span class="req">★ agg_column</span></td><td>string</td></tr>
+        <tr><td class="name"><span class="req">★ agg_func</span></td><td>enum</td></tr>
+      </table>
+      <p style="font-size:12px;color:#64748b;margin:4px 0">
+        agg_func: <code class="inline">mean, sum, count, min, max, median, std</code>
+      </p>
+    </div>
+    <div class="grid-col">
+      <h4>OUTPUT (groupby eventTime + count(name))</h4>
+      port: <code class="inline">data</code>
+<pre>row 0: {
+  eventTime: "2026-05-15T08:36:31.166000",
+  name_count: 1   ← 1 張 chart 在這時刻 OOC
+}
+
+cols: [eventTime, name_count]
+(輸出 column 是 <strong>name_count</strong>，不是 'count'!)</pre>
+    </div>
+  </div>
+
+  <div class="mistake">
+    ⚠ 下游 sort/chart 引用要寫 <code class="inline">name_count</code> 不是 <code class="inline">count</code><br>
+    ⚠ 多欄 group_by 用 list <code class="inline">['toolID','step']</code> 不是逗號分隔字串
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════ -->
+<div class="card card-transform" id="sort">
+  <h3>block_sort<span class="badge badge-transform">TRANSFORM</span></h3>
+  <p class="one-liner">多欄排序 + optional top-N (head(N))。常用於 ranking / 取最後 N 筆。</p>
+
+  <div class="grid-3">
+    <div class="grid-col">
+      <h4>INPUT</h4>
+      port: <code class="inline">data</code>
+    </div>
+    <div class="grid-col">
+      <h4>PARAMS</h4>
+      <table class="params">
+        <tr><th>name</th><th>type</th></tr>
+        <tr><td class="name"><span class="req">★ columns</span></td><td>array</td></tr>
+        <tr><td class="name">limit</td><td>int</td></tr>
+      </table>
+      <p style="font-size:12px;color:#64748b;margin:4px 0">
+        columns = [{column:'X', order:'asc'|'desc'}]
+      </p>
+    </div>
+    <div class="grid-col">
+      <h4>OUTPUT (sort eventTime desc, limit=1)</h4>
+      port: <code class="inline">data</code>
+<pre>row 0: {
+  eventTime: "2026-05-15T08:36:31.166000",
+  name_count: 1
+}
+
+cols 不變，只保留最新 1 筆 (last OOC time)</pre>
+    </div>
+  </div>
+
+  <div class="mistake">
+    ⚠ columns 是 list of <strong>objects</strong>，不是 list of strings<br>
+    ⚠ limit 是 head(N)，要取最大值請先 desc 再 limit
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════ -->
+<div class="card card-check" id="step_check">
+  <h3>block_step_check<span class="badge badge-check">CHECK / TERMINAL</span></h3>
+  <p class="one-liner">Skill terminal — 聚合上游 + 與 threshold 比對，輸出 {pass, value, ...}。SkillRunner 從這讀 pass/fail。</p>
+
+  <div class="section">何時用</div>
+  <ul style="margin:4px 0; padding-left: 22px; font-size: 13.5px">
+    <li>✅ Skill step 結尾的 pass/fail check</li>
+    <li>✅ 量化比較：count / sum / mean / max / min / last / exists</li>
+    <li>❌ 終端 block — <strong>不要</strong>接下游 (especially 不要接 block_alert)</li>
+  </ul>
+
+  <div class="grid-3">
+    <div class="grid-col">
+      <h4>INPUT</h4>
+      port: <code class="inline">data</code> (dataframe，行數可變)
+    </div>
+    <div class="grid-col">
+      <h4>PARAMS</h4>
+      <table class="params">
+        <tr><th>name</th><th>type</th><th>default</th></tr>
+        <tr><td class="name">aggregate</td><td>enum</td><td>"count"</td></tr>
+        <tr><td class="name">column</td><td>string</td><td class="opt">非 count/exists 必填</td></tr>
+        <tr><td class="name"><span class="req">★ operator</span></td><td>enum</td><td>"&gt;="</td></tr>
+        <tr><td class="name">threshold</td><td>number</td><td class="opt">數值比較必填</td></tr>
+      </table>
+    </div>
+    <div class="grid-col">
+      <h4>OUTPUT (count, &gt;=, threshold=2 on n5)</h4>
+      port: <code class="inline">check</code> (dataframe，1 row)
+<pre>row 0: {
+  pass: false,           ← 1 不 &gt;= 2
+  value: 1,
+  threshold: 2,
+  operator: "&gt;=",
+  aggregate: "count",
+  column: null,
+  note: "count=1 not &gt;= 2",
+  evidence_rows: 0
+}</pre>
+    </div>
+  </div>
+
+  <div class="hint">
+    <strong>💡 OOC count 捷徑（推薦）</strong> — 跳過 unnest+filter+groupby_agg+sort，直接：<br>
+    <code class="inline">step_check(column='spc_summary.ooc_count', operator='&gt;=', threshold=2)</code><br>
+    接在 <code class="inline">block_process_history</code> 後面即可，<strong>2 個 node 完成</strong>。
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════ -->
+<div class="card card-composite" id="spc_panel">
+  <h3>block_spc_panel<span class="badge badge-composite">COMPOSITE</span></h3>
+  <p class="one-liner">Parameterized SPC chart composite — 給 <code class="inline">step + chart_name</code> 兩必填，內部撈 process_history → unnest → 出 line/bar chart + UCL/LCL + OOC highlight。1 個 node 全包。</p>
+
+  <div class="section">何時用</div>
+  <ul style="margin:4px 0; padding-left: 22px; font-size: 13.5px">
+    <li>✅ user 說「看 SPC chart」「SPC Panel」「機台最後 OOC 時的 SPC 狀況」</li>
+    <li>✅ 取代 4 步 unnest+filter+sort+line_chart 組合</li>
+    <li>❌ 計算 Cpk/EWMA → 用統計類 block</li>
+  </ul>
+
+  <div class="grid-3">
+    <div class="grid-col">
+      <h4>INPUT (transform mode 才用，否則自己 fetch)</h4>
+      port: <code class="inline">data</code> (opt) — process_history nested
+    </div>
+    <div class="grid-col">
+      <h4>PARAMS</h4>
+      <table class="params">
+        <tr><th>name</th><th>type</th><th>default</th></tr>
+        <tr><td class="name"><span class="req">★ step</span></td><td>string</td><td></td></tr>
+        <tr><td class="name"><span class="req">★ chart_name</span></td><td>string</td><td></td></tr>
+        <tr><td class="name">tool_id</td><td>string</td><td>(留空=跨機台)</td></tr>
+        <tr><td class="name">time_range</td><td>string</td><td>"7d"</td></tr>
+        <tr><td class="name">event_filter</td><td>enum</td><td>"latest_ooc"</td></tr>
+        <tr><td class="name">color_by</td><td>string</td><td class="opt">e.g. toolID</td></tr>
+      </table>
+      <p style="font-size:12px;color:#64748b;margin:4px 0">
+        event_filter: latest_ooc / latest_event / all / custom_time
+      </p>
+    </div>
+    <div class="grid-col">
+      <h4>OUTPUT (xbar_chart, event_filter=all)</h4>
+      port: <code class="inline">chart_spec</code> (dict)
+<pre>{
+  "type": "line",
+  "title": "SPC Charts",
+  "x": "eventTime",
+  "y": "value",
+  "data": [
+    {"eventTime":"05-15T08:36","value":16.6,"name":"xbar_chart"},
+    {"eventTime":"05-15T07:22","value":15.8,"name":"xbar_chart"},
+    ... N 個時間點
+  ],
+  "rules": [
+    {"value":17.5,"label":"UCL","color":"#f59e0b"},
+    {"value":12.5,"label":"LCL","color":"#f59e0b"}
+  ],
+  "highlight": {"field":"is_ooc","color":"red"},
+  "meta": {"event_filter":"all","n_rows":50,"n_series":1}
+}</pre>
+    </div>
+  </div>
+
+  <div class="mistake">
+    ⚠ step + chart_name 都必填（即使 transform mode 也是）<br>
+    ⚠ 不要在 spc_panel 前接 unnest/filter/sort — composite 自己處理，pre-filter 會砍剩 1 row<br>
+    ⚠ chart_name 是完整 key (<code class="inline">xbar_chart</code>) 不是裸 <code class="inline">xbar</code>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════ -->
+<h2 id="compare">📊 同一個 user prompt — 兩種解法對照</h2>
+
+<div class="key-insight">
+  <strong>關鍵差異：</strong>verdict branch 用 <code class="inline">spc_summary.ooc_count</code> 直讀，還是 unnest+filter+count 自己算。<br>
+  Description 已有提示但被埋深 → LLM 90% 選錯走長路 → chain 越長越多失敗點。
+</div>
+
+<div class="compare-grid">
+  <div class="compare-bad">
+    <h4>❌ 長路徑 (現在 macro_plan 常選的)</h4>
+    <p style="font-size:13px;margin:4px 0">7 nodes, verdict branch 5 步</p>
+    <div class="step-flow">
+      <span class="num">1.</span> <code>block_process_history</code> (tool_id=EQP-08)<br>
+      <span class="num">2.</span> <span class="arrow">↓</span> <code>block_unnest</code> (spc_charts) → 12N rows<br>
+      <span class="num">3.</span> <span class="arrow">↓</span> <code>block_filter</code> (is_ooc==true) → ~N rows<br>
+      <span class="num">4.</span> <span class="arrow">↓</span> <code>block_groupby_agg</code> (eventTime, count) → eventTime+count<br>
+      <span class="num">5.</span> <span class="arrow">↓</span> <code>block_sort</code> (eventTime desc, limit=1) → 1 row<br>
+      <span class="num">6.</span> <span class="arrow">↓</span> <code>block_step_check</code> (count_>=, 2)<br>
+      <br>
+      <span class="num">+ parallel</span><br>
+      <span class="num">7.</span> <code>block_spc_panel</code> (step, chart_name, latest_ooc) ← 自己撈
+    </div>
+    <p style="font-size:12px;color:#7c2d12;margin-top:10px">
+      <strong>失敗點</strong>：n4 column 名 (name_count vs count)、n5 限制太嚴、cross-branch ref 誘惑、phantom edges
+    </p>
+  </div>
+
+  <div class="compare-good">
+    <h4>✅ 短路徑 (用 spc_summary 捷徑)</h4>
+    <p style="font-size:13px;margin:4px 0">3 nodes, verdict branch 1 步</p>
+    <div class="step-flow">
+      <span class="num">1.</span> <code>block_process_history</code> (tool_id=EQP-08, nested=true)<br>
+      <span class="num">2.</span> <span class="arrow">↓</span> <code>block_step_check</code> (column=<strong>'spc_summary.ooc_count'</strong>, op=&gt;=, threshold=2)<br>
+      <br>
+      <span class="num">+ parallel</span><br>
+      <span class="num">3.</span> <code>block_spc_panel</code> (step, chart_name, latest_ooc) ← 自己撈
+    </div>
+    <p style="font-size:12px;color:#14532d;margin-top:10px">
+      <strong>好處</strong>：spc_summary.ooc_count 由 process_history 預算好；step_check 用 path 文法直讀；無 cross-branch 風險
+    </p>
+  </div>
+</div>
+
+<div class="key-insight">
+  <strong>結論：</strong>description 已有 <code class="inline">spc_summary.ooc_count</code> 提示但深埋。需要把
+  <strong>「OOC 判定 4 欄位對照表」</strong>提升到 <code class="inline">block_process_history</code> description 開頭最 prominent 處，
+  並補一個 <strong>「process_history → step_check spc_summary.ooc_count」</strong>shortcut example 在 <code class="inline">block_step_check</code>。
+  spc_panel 「典型 pipeline (E)」也要從 5 步 verdict 改成 1 步。
+</div>
+
+</body>
+</html>
