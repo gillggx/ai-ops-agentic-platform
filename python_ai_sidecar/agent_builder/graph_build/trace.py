@@ -24,6 +24,34 @@ File schema (one .json per build):
   "declared_inputs": [...],         # base_pipeline.inputs at build start
   "graph_steps":   [{node, status, duration_ms, **fields}, ...],
   "llm_calls":     [{node, system_chars, user_msg, raw_response, parsed?}, ...],
+  # v30.1.1 (2026-05-16): structured decision records for empathetic debug
+  "decision_records": [
+    {
+      "node": "agentic_phase_loop" | "goal_plan" | "phase_revise",
+      "phase_id": str | None,
+      "round": int | None,
+      "user_msg_sections": dict[str, Any],   # parsed observation parts
+      "llm_response": {"text_blocks": [str], "tool_use": dict | None},
+      "decision_metadata": {
+        "candidates_could_have_picked": [{block, covers, matches_phase_expected,
+                                          matches_remaining_phases}],
+        "actual_pick": str | None,
+        "actual_pick_in_candidates": bool,
+        "potential_fast_forward_missed": [phase_id]
+      }
+    }, ...
+  ],
+  "verifier_decisions": [
+    {
+      "phase_id": str,
+      "phase_expected": str,
+      "candidate_block": str,
+      "candidate_block_covers": [str],
+      "comparison": {expected_in_covers, rows_quality_gate, result},
+      "verdict": "advanced" | "no_match",
+      "would_have_passed_with": [block_name, ...]   # only on no_match
+    }, ...
+  ],
   "final_pipeline":{...},           # the final state.final_pipeline
   "status":        "success | failed | interrupted",
   "duration_ms":   int,
@@ -112,6 +140,9 @@ class BuildTracer:
             "declared_inputs": _safe_jsonable(declared_inputs),
             "graph_steps": [],
             "llm_calls": [],
+            # v30.1.1 (2026-05-16): empathetic-debug records
+            "decision_records": [],
+            "verifier_decisions": [],
             "final_pipeline": None,
             "status": None,
             "duration_ms": None,
@@ -219,6 +250,81 @@ class BuildTracer:
         self._payload["llm_calls"].append(entry)
         return entry
 
+    # ── v30.1.1 (2026-05-16): empathetic-debug records ─────────────────
+
+    def record_decision(
+        self,
+        node: str,
+        *,
+        phase_id: Optional[str] = None,
+        round: Optional[int] = None,
+        user_msg_sections: Optional[dict[str, Any]] = None,
+        llm_response: Optional[dict[str, Any]] = None,
+        decision_metadata: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """Append a structured decision record. Use for any LLM-driven node
+        where empathetic debugging matters (agentic_phase_loop, goal_plan).
+
+        - user_msg_sections: dict, NOT a string. Each key is a logical
+          section ("current_phase", "all_phases_context", "available_inputs",
+          "actions_this_phase", "available_blocks_catalog"). Trace viewer
+          can render selectively.
+        - llm_response: {"text_blocks": [...], "tool_use": {name,input}|None}
+        - decision_metadata: server-computed assessment of what LLM picked vs
+          what it could have picked. Key field: actual_pick_in_candidates.
+        """
+        entry: dict[str, Any] = {
+            "node": node,
+            "ts": _iso_now(),
+        }
+        if phase_id is not None:
+            entry["phase_id"] = phase_id
+        if round is not None:
+            entry["round"] = round
+        if user_msg_sections is not None:
+            entry["user_msg_sections"] = _safe_jsonable(user_msg_sections)
+        if llm_response is not None:
+            entry["llm_response"] = _safe_jsonable(llm_response)
+        if decision_metadata is not None:
+            entry["decision_metadata"] = _safe_jsonable(decision_metadata)
+        self._payload["decision_records"].append(entry)
+        return entry
+
+    def record_verifier_decision(
+        self,
+        *,
+        phase_id: str,
+        phase_expected: str,
+        candidate_block: str,
+        candidate_block_covers: list[str],
+        comparison: dict[str, Any],
+        verdict: str,                         # "advanced" | "no_match"
+        would_have_passed_with: Optional[list[str]] = None,
+        advanced_phases: Optional[list[str]] = None,
+        outcome_extracted: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """Capture verifier's explicit decision + the reverse-query candidates
+        that WOULD have passed (when verdict='no_match'). Lets debug answer
+        'why didn't this advance' without manually grepping covers map.
+        """
+        entry: dict[str, Any] = {
+            "ts": _iso_now(),
+            "phase_id": phase_id,
+            "phase_expected": phase_expected,
+            "candidate_block": candidate_block,
+            "candidate_block_covers": list(candidate_block_covers or []),
+            "comparison": _safe_jsonable(comparison or {}),
+            "verdict": verdict,
+        }
+        if would_have_passed_with is not None:
+            entry["would_have_passed_with"] = list(would_have_passed_with)
+        if advanced_phases:
+            entry["advanced_phases"] = list(advanced_phases)
+        if outcome_extracted is not None:
+            entry["outcome_extracted"] = _safe_jsonable(outcome_extracted)
+        self._payload["verifier_decisions"].append(entry)
+        return entry
+
     def set_final_pipeline(self, pipeline: Any) -> None:
         self._payload["final_pipeline"] = _safe_jsonable(pipeline)
 
@@ -234,10 +340,13 @@ class BuildTracer:
                 encoding="utf-8",
             )
             logger.info(
-                "BuildTracer: wrote trace %s (%d steps, %d llm calls, %dB)",
+                "BuildTracer: wrote trace %s (%d steps, %d llm calls, "
+                "%d decisions, %d verifier decisions, %dB)",
                 self._path.name,
                 len(self._payload["graph_steps"]),
                 len(self._payload["llm_calls"]),
+                len(self._payload["decision_records"]),
+                len(self._payload["verifier_decisions"]),
                 self._path.stat().st_size,
             )
         except Exception as ex:  # noqa: BLE001

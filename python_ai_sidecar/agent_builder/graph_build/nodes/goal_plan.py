@@ -294,6 +294,55 @@ async def goal_plan_node(state: BuildGraphState) -> dict[str, Any]:
         )
         sse2 = trace_event_to_sse(step_entry, kind="step")
         if sse2: extra_sse.append(sse2)
+        # v30.1.1: per-emitted-phase candidate analysis. Even though
+        # goal_plan is block-agnostic by design, recording what blocks
+        # WOULD have satisfied each phase tells us at debug-time whether
+        # the plan is implementable by 1-block solutions (and which ones).
+        try:
+            from python_ai_sidecar.agent_builder.graph_build.trace_helpers import (
+                build_decision_metadata,
+            )
+            from python_ai_sidecar.pipeline_builder.seedless_registry import (
+                SeedlessBlockRegistry,
+            )
+            registry = SeedlessBlockRegistry(); registry.load()
+            phase_analyses = []
+            for i, ph in enumerate(phases):
+                meta = build_decision_metadata(
+                    phase=ph,
+                    remaining_phases=phases[i + 1:],
+                    registry=registry,
+                    actual_pick_block=None,  # plan layer doesn't pick
+                )
+                phase_analyses.append(meta)
+            tracer.record_decision(
+                node="goal_plan_node",
+                user_msg_sections={
+                    "instruction_preview": (instruction or "")[:600],
+                    "declared_inputs": [
+                        i.get("name") for i in (declared_inputs or [])
+                        if isinstance(i, dict)
+                    ],
+                    "skill_step_mode": skill_step_mode,
+                    "existing_canvas_node_count": len(base_pipeline.get("nodes") or []),
+                },
+                llm_response={
+                    "text_blocks": [],  # JSON output — no narrative text
+                    "tool_use": None,
+                    "emitted_phases": [
+                        {"id": p["id"], "expected": p["expected"], "goal": p["goal"][:80]}
+                        for p in phases
+                    ],
+                },
+                decision_metadata={
+                    "per_phase_analysis": phase_analyses,
+                    "n_phases_with_fast_forward_solution": sum(
+                        1 for a in phase_analyses if a.get("fast_forward_capable_blocks")
+                    ),
+                },
+            )
+        except Exception as ex:  # noqa: BLE001
+            logger.info("trace.record_decision (goal_plan) failed (non-fatal): %s", ex)
 
     return {
         "v30_phases": phases,

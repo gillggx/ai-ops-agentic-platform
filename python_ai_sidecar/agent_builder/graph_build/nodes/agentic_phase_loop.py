@@ -205,6 +205,93 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     tool_call = _extract_tool_call(resp)
     assistant_content = _extract_assistant_content(resp)
 
+    # ── v30.1.1 (2026-05-16): record raw LLM call too (token usage +
+    # ground-truth raw_response for cross-checking decision_records). ─
+    if tracer is not None:
+        try:
+            # Use the user message we sent THIS round — for round 1 it's
+            # the full observation; for subsequent rounds it's the diff.
+            last_user_content = ""
+            if phase_messages:
+                last_user = next(
+                    (m for m in reversed(phase_messages) if m.get("role") == "user"),
+                    None,
+                )
+                if last_user is not None:
+                    c = last_user.get("content")
+                    if isinstance(c, str):
+                        last_user_content = c
+                    elif isinstance(c, list):
+                        # round>=2: list of content parts (tool_result + text)
+                        parts = []
+                        for p in c:
+                            if isinstance(p, dict):
+                                if p.get("type") == "text":
+                                    parts.append(p.get("text") or "")
+                                elif p.get("type") == "tool_result":
+                                    parts.append(f"[tool_result: {str(p.get('content',''))[:300]}]")
+                        last_user_content = "\n".join(parts)
+            raw_resp_text = ""
+            if assistant_content:
+                # serialize for debug — small
+                raw_resp_text = str(assistant_content)[:8000]
+            tracer.record_llm(
+                "agentic_phase_loop",
+                system=_SYSTEM,
+                user_msg=last_user_content,
+                raw_response=raw_resp_text,
+                parsed=tool_call,
+                resp=resp,
+                phase_id=pid, round=round_n + 1,
+            )
+        except Exception as ex:  # noqa: BLE001
+            logger.info("trace.record_llm failed (non-fatal): %s", ex)
+
+    # ── v30.1.1 (2026-05-16): empathetic-debug decision record ───────
+    # Capture: structured user_msg sections, LLM text reasoning, and
+    # server-computed candidate analysis. This is what lets us answer
+    # "why did LLM pick X?" without grepping the prompt string.
+    if tracer is not None:
+        try:
+            from python_ai_sidecar.agent_builder.graph_build.trace_helpers import (
+                build_decision_metadata, extract_llm_text_blocks,
+                structure_user_msg_sections,
+            )
+            picked_block_name = None
+            if tool_call and tool_call.get("name") == "add_node":
+                picked_block_name = (tool_call.get("args") or {}).get("block_name")
+            phases_all = state.get("v30_phases") or []
+            remaining = phases_all[idx + 1:]
+            sections = structure_user_msg_sections(
+                current_phase=phase,
+                all_phases=phases_all,
+                current_idx=idx,
+                declared_inputs=(state.get("base_pipeline") or {}).get("inputs") or [],
+                exec_trace=state.get("exec_trace") or {},
+                recent_actions=recent_actions,
+                catalog_brief_text=_build_catalog_brief(),
+                instruction=state.get("instruction") or "",
+            )
+            decision_meta = build_decision_metadata(
+                phase=phase, remaining_phases=remaining,
+                registry=registry, actual_pick_block=picked_block_name,
+            )
+            tracer.record_decision(
+                node="agentic_phase_loop",
+                phase_id=pid, round=round_n + 1,
+                user_msg_sections=sections,
+                llm_response={
+                    "text_blocks": extract_llm_text_blocks(resp),
+                    "tool_use": (
+                        {"name": tool_call.get("name"), "input": tool_call.get("args")}
+                        if tool_call else None
+                    ),
+                },
+                decision_metadata=decision_meta,
+            )
+        except Exception as ex:  # noqa: BLE001 — tracing must never break flow
+            logger.info("trace.record_decision failed (non-fatal): %s", ex)
+
     if tool_call is None:
         logger.info("agentic_phase_loop: phase %s round %d — no tool call", pid, round_n + 1)
         # Append assistant turn even if no tool — preserves dialogue.

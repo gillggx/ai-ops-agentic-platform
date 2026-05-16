@@ -108,13 +108,49 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
     if not advanced:
         # Block didn't satisfy current phase — let the loop continue rounds.
         # Don't emit phase_completed; stay on same idx, increment nothing.
+        cur_phase = phases[idx]
+        cur_expected = cur_phase.get("expected") or ""
         if tracer is not None:
             tracer.record_step(
                 "phase_verifier", status="no_match",
-                phase_id=phases[idx].get("id"),
-                expected=phases[idx].get("expected"),
+                phase_id=cur_phase.get("id"),
+                expected=cur_expected,
                 block_id=block_id, covers=covers, rows=rows,
             )
+            # v30.1.1: empathetic-debug — what blocks WOULD have passed?
+            try:
+                would_pass: list[str] = []
+                from python_ai_sidecar.agent_builder.graph_build.nodes.phase_verifier import (
+                    _infer_covers_from_block_spec,
+                )
+                for (n, _v), s in (registry.catalog or {}).items():
+                    if str(s.get("status") or "").lower() == "deprecated":
+                        continue
+                    s_covers = list((s.get("produces") or {}).get("covers") or [])
+                    if not s_covers:
+                        s_covers = _infer_covers_from_block_spec(s)
+                    if cur_expected in s_covers:
+                        would_pass.append(n)
+                tracer.record_verifier_decision(
+                    phase_id=cur_phase.get("id"),
+                    phase_expected=cur_expected,
+                    candidate_block=block_id or "(unknown)",
+                    candidate_block_covers=covers,
+                    comparison={
+                        "expected_in_covers": cur_expected in covers,
+                        "rows_quality_gate": (
+                            "applicable" if cur_expected in {"raw_data","transform","table"}
+                            else "n/a"
+                        ),
+                        "rows": rows,
+                        "result": "covers mismatch" if cur_expected not in covers
+                                  else "rows quality gate failed",
+                    },
+                    verdict="no_match",
+                    would_have_passed_with=would_pass,
+                )
+            except Exception as ex:  # noqa: BLE001
+                logger.info("trace.record_verifier_decision failed (non-fatal): %s", ex)
         return {
             # Clear handoff fields so next round can fill them again
             "v30_last_mutated_logical_id": None,
@@ -190,6 +226,25 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
             block_id=block_id, advanced_by_node=real_id,
             fast_forward=(len(advanced) >= 2),
         )
+        # v30.1.1: structured verifier decision per advanced phase
+        try:
+            for adv in advanced:
+                tracer.record_verifier_decision(
+                    phase_id=adv["id"],
+                    phase_expected=adv["expected"],
+                    candidate_block=block_id or "(unknown)",
+                    candidate_block_covers=covers,
+                    comparison={
+                        "expected_in_covers": True,
+                        "rows": rows,
+                        "result": "advanced",
+                    },
+                    verdict="advanced",
+                    advanced_phases=[a["id"] for a in advanced],
+                    outcome_extracted=adv.get("evidence", {}).get("extracted") or {},
+                )
+        except Exception as ex:  # noqa: BLE001
+            logger.info("trace.record_verifier_decision failed (non-fatal): %s", ex)
 
     update["sse_events"] = sse_events
     return update
