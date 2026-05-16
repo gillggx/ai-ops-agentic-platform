@@ -163,13 +163,23 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     toolset = BuilderToolset(transient, registry)
 
     # ── LLM call with tools ───────────────────────────────────────────
+    # v30 C-A2: maintain Anthropic tool-use loop properly across rounds.
+    # Round 1: messages=[user(full observation)]
+    # Round 2+: messages already end with user(tool_result_from_previous_round
+    #          + fresh observation diff). Call LLM directly.
     client = get_llm_client()
     tool_specs = _build_tool_specs()
+    phase_messages = list(
+        (state.get("v30_phase_messages") or {}).get(pid, [])
+    )
+    if not phase_messages:
+        # First round of this phase — seed with full observation
+        phase_messages.append({"role": "user", "content": full_user_msg})
 
     try:
         resp = await client.create(
             system=_SYSTEM,
-            messages=[{"role": "user", "content": full_user_msg}],
+            messages=phase_messages,
             tools=tool_specs,
             max_tokens=2048,
         )
@@ -189,12 +199,21 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
             })],
         }
 
-    # Extract tool_use from response
+    # Extract tool_use from response + capture full assistant content
+    # for conversation continuity.
     tool_call = _extract_tool_call(resp)
+    assistant_content = _extract_assistant_content(resp)
+
     if tool_call is None:
         logger.info("agentic_phase_loop: phase %s round %d — no tool call", pid, round_n + 1)
+        # Append assistant turn even if no tool — preserves dialogue.
+        if assistant_content:
+            phase_messages.append({"role": "assistant", "content": assistant_content})
+        new_msgs = dict(state.get("v30_phase_messages") or {})
+        new_msgs[pid] = phase_messages
         return {
             "v30_phase_round": round_n + 1,
+            "v30_phase_messages": new_msgs,
             "sse_events": [_event("phase_round", {
                 "phase_id": pid, "round": round_n + 1, "max": MAX_REACT_ROUNDS,
                 "no_action": True,
@@ -203,6 +222,7 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
 
     tool_name = tool_call["name"]
     tool_args = tool_call.get("args") or {}
+    tool_use_id = tool_call.get("id")
 
     # ── Stuck detector ────────────────────────────────────────────────
     recent_actions = (state.get("v30_phase_recent_actions") or {}).get(pid, [])
@@ -258,6 +278,7 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     # ── Phase complete signal? Run verifier ──────────────────────────
     phase_done = False
     verifier_result = None
+    auto_completed = False
     if tool_name == "phase_complete":
         verifier_result = _check_phase_done(transient.pipeline_json, phase, registry)
         phase_done = verifier_result.get("match", False)
@@ -271,6 +292,30 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
                 **action_result,
                 "verifier_says": verifier_result,
                 "_note": "phase NOT done per verifier — try more rounds",
+            }
+    # v30 C-B2: auto phase_complete after canvas-mutating tools when
+    # verifier would already pass. LLM often forgets to call phase_complete
+    # explicitly; this server-side shortcut prevents wasted rounds.
+    elif tool_name in mutating and "error" not in action_result:
+        auto_check = _check_phase_done(transient.pipeline_json, phase, registry)
+        if auto_check.get("match"):
+            logger.info(
+                "agentic_phase_loop: phase %s auto-completed after %s "
+                "(verifier passed without LLM phase_complete call)",
+                pid, tool_name,
+            )
+            verifier_result = {**auto_check, "auto_completed": True}
+            phase_done = True
+            auto_completed = True
+            # Synthesize a phase_complete-shaped action_result so downstream
+            # outcome ledger has rationale.
+            action_result = {
+                **action_result,
+                "auto_phase_complete": True,
+                "rationale": (
+                    f"Auto-completed: after {tool_name}, verifier check passed "
+                    f"(expected={phase.get('expected')}, got={auto_check.get('got')})"
+                ),
             }
 
     # ── Build state update + SSE ──────────────────────────────────────
@@ -291,8 +336,32 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     state_update: dict[str, Any] = {
         "v30_phase_round": round_n + 1,
         "v30_phase_recent_actions": new_recent,
+        "v30_phase_messages": new_msgs,
         "final_pipeline": new_pipeline_dict,
     }
+
+    # v30 C-A2: append assistant(tool_use) + user(tool_result + fresh obs diff)
+    # to preserve conversation continuity and refresh observation each round.
+    if assistant_content:
+        phase_messages.append({"role": "assistant", "content": assistant_content})
+    if tool_use_id:
+        # Tool result + a brief refresh of canvas state (so LLM sees changes
+        # without losing turn ordering — Anthropic forbids 2 user msgs in a row).
+        result_digest_text = _make_result_digest(tool_name, action_result)
+        canvas_diff_text = _build_canvas_diff_md(transient.pipeline_json, phase)
+        phase_messages.append({
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": tool_use_id,
+                 "content": result_digest_text},
+                {"type": "text", "text": canvas_diff_text},
+            ],
+        })
+    # Cap message stack length to avoid runaway token use (max ~16 turns).
+    if len(phase_messages) > 32:
+        phase_messages = phase_messages[-32:]
+    new_msgs = dict(state.get("v30_phase_messages") or {})
+    new_msgs[pid] = phase_messages
 
     # Pipeline snapshot for frontend canvas re-render after canvas-mutating
     # actions. Cheap (just dump model). Skip for inspect_* / phase_complete.
@@ -326,12 +395,20 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
             "completed_round": round_n + 1,
             "rationale": action_result.get("rationale") or "",
             "verifier_check": verifier_result,
+            "auto_completed": auto_completed,
         }
         state_update["v30_phase_outcomes"] = outcomes
         state_update["v30_current_phase_idx"] = idx + 1
         state_update["v30_phase_round"] = 0  # reset for next phase
+        # v30 C-A2: clear this phase's message stack — next phase starts
+        # fresh conversation; canvas snapshot in observation_md replaces it.
+        cleared_msgs = dict(new_msgs)
+        cleared_msgs[pid] = []
+        state_update["v30_phase_messages"] = cleared_msgs
         sse_events.append(_event("phase_completed", {
-            "phase_id": pid, "rationale": action_result.get("rationale") or "",
+            "phase_id": pid,
+            "rationale": action_result.get("rationale") or "",
+            "auto_completed": auto_completed,
         }))
         if tracer is not None:
             tracer.record_step(
@@ -398,6 +475,27 @@ def _build_catalog_brief() -> str:
 
 
 _CATALOG_BRIEF_CACHE: str | None = None
+
+
+def _build_canvas_diff_md(pipeline: PipelineJSON, phase: dict) -> str:
+    """Compact canvas snapshot for the post-action user message.
+
+    Only shows current node IDs + block_ids + edges, plus a reminder of
+    the phase goal. The full observation_md is only sent on round 1; on
+    subsequent rounds this lighter diff keeps token use down.
+    """
+    lines = [
+        f"== CANVAS NOW ({len(pipeline.nodes)} nodes, {len(pipeline.edges)} edges) ==",
+    ]
+    for n in pipeline.nodes[:20]:
+        params_short = ", ".join(f"{k}={v!r}"[:40] for k, v in (n.params or {}).items())[:120]
+        lines.append(f"  {n.id} [{n.block_id}]  params={{{params_short}}}")
+    for e in pipeline.edges[:20]:
+        lines.append(f"  edge {e.from_.node}->{e.to.node}")
+    lines.append("")
+    lines.append(f"PHASE GOAL: {phase.get('goal')} (expected: {phase.get('expected')})")
+    lines.append("Pick your next single tool call.")
+    return "\n".join(lines)
 
 
 def _build_observation_md(state: BuildGraphState, phase: dict) -> str:
@@ -579,9 +677,10 @@ def _build_tool_specs() -> list[dict[str, Any]]:
 
 
 def _extract_tool_call(resp: Any) -> dict[str, Any] | None:
-    """Extract first tool_use block from LLM response. Returns None if none."""
-    # Anthropic SDK shape: resp.content is list of blocks; tool_use blocks
-    # have .name, .input. Newer wrapper may shape it differently.
+    """Extract first tool_use block from LLM response. Returns None if none.
+    Returns {name, args, id} where id is the tool_use_id needed for the
+    matching tool_result in the next user message.
+    """
     content = getattr(resp, "content", None) or []
     if not isinstance(content, list):
         return None
@@ -590,9 +689,43 @@ def _extract_tool_call(resp: Any) -> dict[str, Any] | None:
         if btype == "tool_use":
             name = getattr(blk, "name", None) or (blk.get("name") if isinstance(blk, dict) else None)
             args = getattr(blk, "input", None) or (blk.get("input") if isinstance(blk, dict) else None) or {}
+            tu_id = getattr(blk, "id", None) or (blk.get("id") if isinstance(blk, dict) else None)
             if name:
-                return {"name": name, "args": dict(args) if isinstance(args, dict) else {}}
+                return {
+                    "name": name,
+                    "args": dict(args) if isinstance(args, dict) else {},
+                    "id": tu_id,
+                }
     return None
+
+
+def _extract_assistant_content(resp: Any) -> list[dict] | None:
+    """Convert Anthropic response.content (list of TextBlock | ToolUseBlock)
+    into the dict shape needed for `messages` history when sending it back
+    in the next request.
+    """
+    content = getattr(resp, "content", None) or []
+    if not isinstance(content, list):
+        return None
+    out: list[dict] = []
+    for blk in content:
+        btype = getattr(blk, "type", None) or (blk.get("type") if isinstance(blk, dict) else None)
+        if btype == "text":
+            text = getattr(blk, "text", None) or (blk.get("text") if isinstance(blk, dict) else None)
+            if text:
+                out.append({"type": "text", "text": str(text)})
+        elif btype == "tool_use":
+            name = getattr(blk, "name", None) or (blk.get("name") if isinstance(blk, dict) else None)
+            args = getattr(blk, "input", None) or (blk.get("input") if isinstance(blk, dict) else None) or {}
+            tu_id = getattr(blk, "id", None) or (blk.get("id") if isinstance(blk, dict) else None)
+            if name and tu_id:
+                out.append({
+                    "type": "tool_use",
+                    "id": tu_id,
+                    "name": name,
+                    "input": args if isinstance(args, dict) else {},
+                })
+    return out or None
 
 
 def _hash_action(tool: str, args: dict) -> str:

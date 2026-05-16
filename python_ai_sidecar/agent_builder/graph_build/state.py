@@ -164,6 +164,12 @@ class BuildGraphState(TypedDict, total=False):
     # the build through goal_plan_node + agentic_phase_loop instead of v27
     # macro_plan + compile_chunk path.
     v30_mode: bool
+    # v30 C-A1: per-phase Anthropic message stack for conversation memory
+    # across ReAct rounds. Without this each round is a fresh LLM call and
+    # the LLM forgets what it just learned (re-inspects same blocks etc).
+    # Shape: {phase_id: [{"role":"user"|"assistant", "content": [...]}]}
+    # Reset to [] when current_phase_idx advances.
+    v30_phase_messages: dict[str, list[dict]]
     # v13 (2026-05-13): per-node contracts the agent declares while writing
     # the plan. Runtime auto-preview compares each node's actual snapshot
     # to its contract; mismatch fires a targeted reflect_op (changes only
@@ -300,4 +306,5 @@ def initial_state(
         v30_handover=None,
         v30_phase_edit_history={},
         v30_phase_recent_actions={},
+        v30_phase_messages={},
     )
