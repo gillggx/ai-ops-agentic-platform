@@ -677,6 +677,7 @@ async def resume_graph_v30(
             type=(paused_kind if paused_kind in (
                 "clarify_required", "intent_confirm_required",
                 "goal_plan_confirm_required", "handover_pending",
+                "phase_round_paused",
             ) else "confirm_pending"),
             data={
                 "session_id": session_id,
