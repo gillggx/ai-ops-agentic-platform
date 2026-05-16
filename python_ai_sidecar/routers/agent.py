@@ -68,6 +68,11 @@ class BuildRequest(BaseModel):
     # will actually fire — so finalize's dry-run exercises the same code
     # path production will, and inspect/reflect catches mismatches.
     trigger_payload: dict | None = Field(default=None, alias="triggerPayload")
+    # v30 (2026-05-16): opt-in to ReAct goal-oriented pipeline builder.
+    # When true, graph entry routes through goal_plan_node + agentic_phase_loop
+    # instead of v27 macro_plan + compile_chunk. Default false keeps v27 path
+    # for skill mode + existing chat builder until v30 is GA.
+    v30_mode: bool = Field(default=False, alias="v30Mode")
 
 
 async def _chat_stream_native(req: ChatRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
@@ -154,6 +159,7 @@ async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenera
             skill_step_mode=req.skill_step_mode,
             skip_confirm=False,  # Builder Mode shows the Apply/Cancel card
             trigger_payload=req.trigger_payload,
+            v30_mode=req.v30_mode,  # v30 opt-in
         ):
             yield {
                 "event": stream_event.type,
@@ -484,6 +490,101 @@ async def agent_build_clarify_respond(
 ) -> EventSourceResponse:
     """Resume a paused graph at clarify_intent_node with user's answers."""
     return EventSourceResponse(_build_clarify_stream(req, caller))
+
+
+# ── v30 ReAct: plan-confirm + handover endpoints ────────────────────────
+
+
+class BuildPlanConfirmRequest(BaseModel):
+    """v30 — resume after goal_plan_confirm_gate.
+
+    Frontend POSTs:
+      {sessionId, confirmed: true, phases?: [...]}   (optionally edited)
+      {sessionId, confirmed: false}                  (cancel build)
+    """
+    model_config = ConfigDict(populate_by_name=True)
+
+    session_id: str = Field(..., alias="sessionId")
+    confirmed: bool = Field(...)
+    phases: list[dict] = Field(default_factory=list)
+
+
+async def _build_plan_confirm_stream(
+    req: BuildPlanConfirmRequest, caller: CallerContext,
+) -> AsyncGenerator[dict, None]:
+    from python_ai_sidecar.agent_builder.graph_build.runner import resume_graph_v30
+    payload: dict = {"confirmed": req.confirmed}
+    if req.phases:
+        payload["phases"] = req.phases
+    try:
+        async for stream_event in resume_graph_v30(
+            session_id=req.session_id, resume_payload=payload,
+            trace_label="plan-confirm",
+        ):
+            yield {
+                "event": stream_event.type,
+                "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
+            }
+    except Exception as ex:  # noqa: BLE001
+        log.exception("build/plan-confirm failed for session=%s", req.session_id)
+        yield {"event": "error", "data": json.dumps({
+            "message": f"plan-confirm failed: {ex.__class__.__name__}: {str(ex)[:200]}",
+            "session_id": req.session_id,
+        }, ensure_ascii=False)}
+        yield {"event": "done", "data": json.dumps({"status": "failed"})}
+
+
+@router.post("/build/plan-confirm")
+async def agent_build_plan_confirm(
+    req: BuildPlanConfirmRequest, caller: CallerContext = ServiceAuth,
+) -> EventSourceResponse:
+    """v30 — resume after user confirms / edits the goal plan phases."""
+    return EventSourceResponse(_build_plan_confirm_stream(req, caller))
+
+
+class BuildHandoverRequest(BaseModel):
+    """v30 — resume after halt_handover. User picks one of 4 choices:
+      edit_goal | take_over | backlog | abort
+    edit_goal also supplies a new_goal string for the failed phase.
+    """
+    model_config = ConfigDict(populate_by_name=True)
+
+    session_id: str = Field(..., alias="sessionId")
+    choice: str = Field(...)
+    new_goal: str = Field(default="", alias="newGoal")
+
+
+async def _build_handover_stream(
+    req: BuildHandoverRequest, caller: CallerContext,
+) -> AsyncGenerator[dict, None]:
+    from python_ai_sidecar.agent_builder.graph_build.runner import resume_graph_v30
+    payload: dict = {"choice": req.choice}
+    if req.new_goal:
+        payload["new_goal"] = req.new_goal
+    try:
+        async for stream_event in resume_graph_v30(
+            session_id=req.session_id, resume_payload=payload,
+            trace_label="handover",
+        ):
+            yield {
+                "event": stream_event.type,
+                "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
+            }
+    except Exception as ex:  # noqa: BLE001
+        log.exception("build/handover failed for session=%s", req.session_id)
+        yield {"event": "error", "data": json.dumps({
+            "message": f"handover failed: {ex.__class__.__name__}: {str(ex)[:200]}",
+            "session_id": req.session_id,
+        }, ensure_ascii=False)}
+        yield {"event": "done", "data": json.dumps({"status": "failed"})}
+
+
+@router.post("/build/handover")
+async def agent_build_handover(
+    req: BuildHandoverRequest, caller: CallerContext = ServiceAuth,
+) -> EventSourceResponse:
+    """v30 — resume after user picks handover option."""
+    return EventSourceResponse(_build_handover_stream(req, caller))
 
 
 # ── v15 G2: modify-request endpoint ──────────────────────────────────────

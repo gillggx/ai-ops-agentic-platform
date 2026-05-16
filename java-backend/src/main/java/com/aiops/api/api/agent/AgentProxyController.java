@@ -181,6 +181,54 @@ public class AgentProxyController {
 		return bridgeSse(sidecar.postSse("/internal/agent/build/clarify-respond", req, caller), "build_clarify");
 	}
 
+	// v30 (2026-05-16) — resume paused graph at goal_plan_confirm_gate.
+	// Body: { sessionId | session_id, confirmed: bool, phases?: [...] }
+	@PostMapping(path = "/build/plan-confirm", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public SseEmitter buildPlanConfirm(@RequestBody Map<String, Object> body,
+	                                   @AuthenticationPrincipal AuthPrincipal caller) {
+		String sessionId = asString(body.get("sessionId"));
+		if (sessionId == null || sessionId.isBlank()) sessionId = asString(body.get("session_id"));
+		if (sessionId == null || sessionId.isBlank()) {
+			throw new com.aiops.api.common.ApiException(
+					org.springframework.http.HttpStatus.BAD_REQUEST,
+					"validation_error", "session_id: must not be blank");
+		}
+		Object confirmedRaw = body.get("confirmed");
+		boolean confirmed = confirmedRaw instanceof Boolean b
+				? b
+				: confirmedRaw != null && Boolean.parseBoolean(confirmedRaw.toString());
+		Map<String, Object> req = new java.util.HashMap<>();
+		req.put("session_id", sessionId);
+		req.put("confirmed", confirmed);
+		Object phases = body.get("phases");
+		if (phases instanceof java.util.List<?>) req.put("phases", phases);
+		return bridgeSse(sidecar.postSse("/internal/agent/build/plan-confirm", req, caller), "build_plan_confirm");
+	}
+
+	// v30 — resume paused graph at halt_handover.
+	// Body: { sessionId, choice: 'edit_goal'|'take_over'|'backlog'|'abort', newGoal?: string }
+	@PostMapping(path = "/build/handover", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public SseEmitter buildHandover(@RequestBody Map<String, Object> body,
+	                                @AuthenticationPrincipal AuthPrincipal caller) {
+		String sessionId = asString(body.get("sessionId"));
+		if (sessionId == null || sessionId.isBlank()) sessionId = asString(body.get("session_id"));
+		String choice = asString(body.get("choice"));
+		if (sessionId == null || sessionId.isBlank() || choice == null || choice.isBlank()) {
+			throw new com.aiops.api.common.ApiException(
+					org.springframework.http.HttpStatus.BAD_REQUEST,
+					"validation_error", "session_id and choice: must not be blank");
+		}
+		Map<String, Object> req = new java.util.HashMap<>();
+		req.put("session_id", sessionId);
+		req.put("choice", choice);
+		String newGoal = asString(body.get("newGoal"));
+		if (newGoal == null || newGoal.isBlank()) newGoal = asString(body.get("new_goal"));
+		if (newGoal != null && !newGoal.isBlank()) req.put("new_goal", newGoal);
+		return bridgeSse(sidecar.postSse("/internal/agent/build/handover", req, caller), "build_handover");
+	}
+
 	// v15 G2 — modify request after plan review.
 	// Body: { sessionId | session_id, stepIdx?: int, request: string }
 	@PostMapping(path = "/build/modify-request", produces = MediaType.TEXT_EVENT_STREAM_VALUE)

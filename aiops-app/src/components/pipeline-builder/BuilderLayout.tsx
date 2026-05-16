@@ -50,6 +50,7 @@ import RightTabbedPanel from "./RightTabbedPanel";
 // The unified AIAgentPanel was one-shot (build_pipeline in a single tool call);
 // user wants to watch the agent pull nodes onto the canvas step by step.
 import AgentBuilderPanel from "./AgentBuilderPanel";
+import AgentBuilderPanelV30 from "./AgentBuilderPanelV30";
 // Phase E3: AIAgentPanel now used in BuilderLayout too (single agent UX).
 // AgentBuilderPanel kept only as a fallback in case the new wiring regresses;
 // will be deleted once mode="builder" + onGlassOp path is verified in prod.
@@ -1208,94 +1209,13 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
           }}
           agentPanel={
             agentTabContent ?? (
-              // Phase E3: Builder context now uses the SAME AIAgentPanel as
-              // /chat/[id] — one agent panel everywhere. mode="session" hides
-              // the inline pb_pipeline result card (BuilderLayout's canvas IS
-              // the result); agentMode="builder" tells the orchestrator to
-              // skip "要建嗎?" confirmations because the user is already on
-              // a canvas. Glass Box ops stream live via onGlassOp which calls
-              // applyGlassOpToCanvas (shared with LiveCanvasOverlay).
-              <AIAgentPanel
-                mode="session"
-                agentMode="builder"
-                sessionId={sessionId ?? `pb-${state.meta.pipelineId ?? "new"}`}
-                // Phase 11 v6 — when launched from a Skill embed flow, the
-                // user's NL instruction comes in via the URL/sessionStorage
-                // ctx. AIAgentPanel auto-sends `initialPrompt` once on mount
-                // (see initialPromptFiredRef at L640) so the user doesn't
-                // re-type it inside the agent panel.
-                initialPrompt={initialPrompt ?? undefined}
-                // Inject `_kind` into the snapshot so the orchestrator's
-                // builder section knows whether this is auto_patrol /
-                // auto_check / skill — drives confirm_pipeline_intent's
-                // input.source classification (auto_check inputs come from
-                // alarm payload, not user_input).
-                //
-                // Phase 11 v6 — when launched from a Skill embed flow,
-                // override _kind to "skill_step". This signals to the
-                // orchestrator: (a) skip confirm_pipeline_intent gate
-                // (user already pressed Build on the Skill page), and
-                // (b) tell graph_build to enforce block_step_check as the
-                // terminator (NOT block_chart / block_alert).
-                pipelineSnapshot={(() => {
-                  const skillCtx = (typeof window !== "undefined")
-                    ? (() => {
-                        try {
-                          const raw = sessionStorage.getItem("pb:skill_embed_ctx");
-                          return raw ? JSON.parse(raw) as { skill_slug?: string } : null;
-                        } catch { return null; }
-                      })()
-                    : null;
-                  const kind = skillCtx?.skill_slug
-                    ? "skill_step"
-                    : (state.meta.pipelineKind ?? null);
-                  return { ...state.pipeline, _kind: kind };
-                })()}
-                onGlassOp={(ev) => applyGlassOpToCanvas(ev, actions, catalog)}
-                // Phase 10-D: graph_build's layout_node lays out positions
-                // server-side and ships them in the final pipeline_json. Apply
-                // those over the live add_node positions so the canvas ends
-                // tidy (source on left, charts fanned out on right).
-                onGlassDone={(ev) => {
-                  const pj = ev.pipeline_json as
-                    | { nodes?: Array<{ id: string; position?: { x: number; y: number } }> }
-                    | null
-                    | undefined;
-                  // Apply server-side positions first (graph_build's layout_node
-                  // already did a Kahn LR pass), then trigger DagCanvas's Dagre
-                  // auto-layout + fitView so the canvas always ends tidy and
-                  // centered. Auto-layout is now graph-deterministic, not LLM-
-                  // gated — user reported "auto layout 沒跑" and was right that
-                  // it shouldn't depend on agent state.
-                  if (pj?.nodes) {
-                    for (const n of pj.nodes) {
-                      if (n.position && typeof n.position.x === "number" && typeof n.position.y === "number") {
-                        actions.moveNode(n.id, { x: n.position.x, y: n.position.y });
-                      }
-                    }
-                  }
-                  setAutoLayoutNonce((v) => v + 1);
-                  // v19 (2026-05-14): auto-trigger Run after build so the
-                  // canvas's 結果 tab + per-node previews populate without
-                  // requiring the user to manually click Run. Without this
-                  // the chart only renders in the AI panel; canvas stays
-                  // empty. Skip if build already failed.
-                  if (ev.status === "finished" || ev.status === "ok") {
-                    setTimeout(() => {
-                      void executeWithInputs({}).catch((e) => {
-                        console.warn("auto-run after build failed:", e);
-                      });
-                    }, 50);
-                  }
-                }}
-                contextEquipment={null}
-                focusedNodeId={focusedNodeId}
-                focusedNodeLabel={(() => {
-                  if (!focusedNodeId) return null;
-                  const node = state.pipeline.nodes.find((n) => n.id === focusedNodeId);
-                  return node?.display_label ?? node?.block_id ?? focusedNodeId;
-                })()}
-                onClearFocus={() => setFocusedNodeId(null)}
+              // v30 (2026-05-16): Goal-Oriented ReAct Pipeline Builder is
+              // now the default. AIAgentPanel + AgentBuilderPanel kept in
+              // imports for emergency rollback only. v30 sends v30Mode=true
+              // and shows GoalPlanCard + PhaseTimeline + HandoverModal.
+              <AgentBuilderPanelV30
+                blockCatalog={catalog}
+                basePipelineId={state.meta.pipelineId ?? null}
               />
             )
           }

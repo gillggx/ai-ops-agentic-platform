@@ -160,6 +160,10 @@ class BuildGraphState(TypedDict, total=False):
     # Stuck detector: last 2 actions per phase (for deterministic loop check).
     # Shape: {phase_id: [{tool, args_hash}]}
     v30_phase_recent_actions: dict[str, list[dict]]
+    # v30 opt-in flag (set at request time). When True, _route_entry sends
+    # the build through goal_plan_node + agentic_phase_loop instead of v27
+    # macro_plan + compile_chunk path.
+    v30_mode: bool
     # v13 (2026-05-13): per-node contracts the agent declares while writing
     # the plan. Runtime auto-preview compares each node's actual snapshot
     # to its contract; mismatch fires a targeted reflect_op (changes only

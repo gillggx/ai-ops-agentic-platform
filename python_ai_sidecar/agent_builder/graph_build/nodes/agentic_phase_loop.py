@@ -271,6 +271,12 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
         "final_pipeline": new_pipeline_dict,
     }
 
+    # Pipeline snapshot for frontend canvas re-render after canvas-mutating
+    # actions. Cheap (just dump model). Skip for inspect_* / phase_complete.
+    pipeline_snapshot = None
+    if tool_name in mutating:
+        pipeline_snapshot = new_pipeline_dict
+
     sse_events = [
         _event("phase_round", {
             "phase_id": pid, "round": round_n + 1, "max": MAX_REACT_ROUNDS,
@@ -280,6 +286,7 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
             "tool": tool_name,
             "args_summary": _summarize_args(tool_args),
             "result_summary": _summarize_result(action_result),
+            "pipeline_snapshot": pipeline_snapshot,
         }),
     ]
     if auto_preview_result:

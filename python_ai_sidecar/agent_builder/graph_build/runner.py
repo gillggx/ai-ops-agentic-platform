@@ -52,6 +52,7 @@ async def stream_graph_build(
     skip_confirm: bool = False,
     skill_step_mode: bool = False,
     trigger_payload: Optional[dict] = None,
+    v30_mode: bool = False,
 ) -> AsyncGenerator[StreamEvent, None]:
     """Run the graph from the start. Yields StreamEvent as nodes complete.
 
@@ -81,6 +82,9 @@ async def stream_graph_build(
         skill_step_mode=skill_step_mode,
         trigger_payload=trigger_payload,
     )
+    if v30_mode:
+        init["v30_mode"] = True
+        logger.info("stream_graph_build: v30_mode enabled — using ReAct path")
     logger.info("stream_graph_build: starting session=%s", sid)
 
     # Phase 11 v17 — opt-in BuildTracer (BUILDER_TRACE_DIR env). When the
@@ -558,6 +562,117 @@ async def resume_graph_build_with_clarify(
     if interrupted:
         yield StreamEvent(
             type=(paused_kind if paused_kind in ("clarify_required", "intent_confirm_required", "goal_plan_confirm_required", "handover_pending") else "confirm_pending"),
+            data={
+                "session_id": session_id,
+                **(paused_payload if isinstance(paused_payload, dict) else {}),
+            },
+        )
+        return
+
+    yield StreamEvent(
+        type="done",
+        data={
+            "status": last_state.get("status") or "finished",
+            "pipeline_json": last_state.get("final_pipeline") or last_state.get("base_pipeline"),
+            "summary": last_state.get("summary"),
+            "session_id": session_id,
+        },
+    )
+
+
+# ── v30 generic resume helper ─────────────────────────────────────────────
+
+async def resume_graph_v30(
+    *,
+    session_id: str,
+    resume_payload: dict,
+    trace_label: str,
+) -> AsyncGenerator[StreamEvent, None]:
+    """Resume a v30 graph paused at goal_plan_confirm_gate or halt_handover.
+
+    Generic Command(resume=payload) wrapper — caller (endpoint) builds the
+    right shape:
+      - plan-confirm: {confirmed: bool, phases?: [...]}
+      - handover:    {choice: str, new_goal?: str}
+    """
+    graph = build_graph()
+    config = {"configurable": {"thread_id": session_id}, "recursion_limit": 300}
+
+    logger.info("resume_graph_v30: session=%s label=%s payload_keys=%s",
+                session_id, trace_label, list(resume_payload.keys()))
+
+    tracer = make_tracer(
+        instruction=f"[resume:{trace_label} session={session_id}]",
+        session_id=session_id,
+        skip_confirm=False,
+        skill_step_mode=False,
+        base_pipeline=None,
+    )
+
+    last_state: dict = {}
+    paused_kind: Optional[str] = None
+    paused_payload: dict = {}
+    interrupted = False
+
+    if tracer is not None:
+        await tracer.__aenter__()
+    try:
+        pre_state = await graph.aget_state(config)
+        sse_offset = len((pre_state.values or {}).get("sse_events") or [])
+        async for chunk in graph.astream(
+            Command(resume=resume_payload),
+            config=config,
+            stream_mode="values",
+        ):
+            last_state = chunk if isinstance(chunk, dict) else {}
+            new_events, sse_offset = _flush_sse_events(last_state, sse_offset)
+            for ev in new_events:
+                yield ev
+
+        try:
+            _state_obj_pre = await graph.aget_state(config)
+            if _state_obj_pre.next:
+                interrupted = True
+                try:
+                    paused_payload = (
+                        _state_obj_pre.tasks[0].interrupts[0].value
+                        if _state_obj_pre.tasks else {}
+                    )
+                except Exception:  # noqa: BLE001
+                    paused_payload = {}
+                paused_kind = (
+                    paused_payload.get("kind")
+                    if isinstance(paused_payload, dict) else None
+                )
+                if tracer is not None:
+                    pause_status = paused_kind if paused_kind in (
+                        "clarify_required", "intent_confirm_required",
+                        "goal_plan_confirm_required", "handover_pending",
+                    ) else "confirm_pending"
+                    tracer.set_status(pause_status)
+                    tracer.record_step(
+                        "graph_paused",
+                        status=pause_status,
+                        kind=paused_kind or "confirm_pending",
+                    )
+        except Exception as _ex:  # noqa: BLE001
+            logger.warning("resume_graph_v30: pause detection failed: %s", _ex)
+    finally:
+        if tracer is not None:
+            tracer.set_final_pipeline(
+                last_state.get("final_pipeline") or last_state.get("base_pipeline")
+            )
+            terminal_status = last_state.get("status")
+            if terminal_status and not interrupted:
+                tracer.set_status(terminal_status)
+            await tracer.__aexit__(None, None, None)
+
+    if interrupted:
+        yield StreamEvent(
+            type=(paused_kind if paused_kind in (
+                "clarify_required", "intent_confirm_required",
+                "goal_plan_confirm_required", "handover_pending",
+            ) else "confirm_pending"),
             data={
                 "session_id": session_id,
                 **(paused_payload if isinstance(paused_payload, dict) else {}),
