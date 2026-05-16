@@ -847,9 +847,9 @@ def _check_phase_done(
     if not nodes:
         return {"match": False, "reason": "no nodes on canvas"}
 
-    # Find terminal nodes (no outgoing edges in this phase's contribution)
-    incoming = {n.id for e in pipeline.edges for n in [e.to]}
-    outgoing = {n.id for e in pipeline.edges for n in [e.from_]}
+    # Find terminal nodes (no outgoing edges).
+    # EdgeEndpoint has `.node` (the referenced node id) and `.port`, NOT `.id`.
+    outgoing = {e.from_.node for e in pipeline.edges}
     terminal_ids = [n.id for n in nodes if n.id not in outgoing]
 
     if not terminal_ids:
