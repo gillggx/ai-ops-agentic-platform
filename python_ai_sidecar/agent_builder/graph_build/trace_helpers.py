@@ -46,7 +46,7 @@ def compute_phase_candidates(
     multi-phase advancement.
     """
     from python_ai_sidecar.agent_builder.graph_build.nodes.phase_verifier import (
-        _infer_covers_from_block_spec,
+        _resolve_covers,
     )
 
     expected = (phase.get("expected") or "").strip()
@@ -61,10 +61,8 @@ def compute_phase_candidates(
     for (name, _version), spec in catalog.items():
         if str(spec.get("status") or "").lower() == "deprecated":
             continue
-        produces = spec.get("produces") or {}
-        covers = list(produces.get("covers") or [])
-        if not covers:
-            covers = _infer_covers_from_block_spec(spec)
+        # v30.5: use covers_output (aligned with verifier + section)
+        covers = _resolve_covers(spec, kind="output")
         if expected not in covers:
             continue
 

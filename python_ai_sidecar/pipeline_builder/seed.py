@@ -3506,11 +3506,14 @@ def _blocks() -> list[dict[str, Any]]:
                             "time_range": "7d", "color_by": "toolID", "event_filter": "all"}},
             ],
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.spc_panel:SpcPanelBlockExecutor"},
-            # v30.1 (2026-05-16): one-block-multi-phase coverage.
-            # spc_panel internally fetches + filters + draws — single add covers
-            # raw_data (process_history) + verdict (ooc_count via meta) + chart.
+            # v30.5 (2026-05-16): split covers into output vs internal.
+            # output port is chart_spec ONLY (rows quality gate kills any
+            # claim that it satisfies raw_data/transform). Internal capability
+            # covers the whole fetch+unnest+chart pipeline, still surfaced
+            # via 1-BLOCK SOLUTIONS section as multi-phase opportunity.
             "produces": {
-                "covers": ["raw_data", "transform", "verdict", "chart"],
+                "covers_output": ["chart"],
+                "covers_internal": ["raw_data", "transform", "verdict", "chart"],
                 "outcome_extractors": [
                     {"key": "ooc_count", "from_port": "chart_spec", "json_path": "meta.ooc_count", "type": "int"},
                     {"key": "n_series", "from_port": "chart_spec", "json_path": "meta.n_series", "type": "int"},
@@ -3644,9 +3647,10 @@ def _blocks() -> list[dict[str, Any]]:
                  "params": {"tool_id": "EQP-01", "event_filter": "all"}},
             ],
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.apc_panel:ApcPanelBlockExecutor"},
-            # v30.1 (2026-05-16): one-block-multi-phase coverage.
+            # v30.5 (2026-05-16): same split as spc_panel — see comment there.
             "produces": {
-                "covers": ["raw_data", "transform", "chart"],
+                "covers_output": ["chart"],
+                "covers_internal": ["raw_data", "transform", "chart"],
                 "outcome_extractors": [
                     {"key": "n_series", "from_port": "chart_spec", "json_path": "meta.n_series", "type": "int"},
                     {"key": "n_rows", "from_port": "chart_spec", "json_path": "meta.n_rows", "type": "int"},

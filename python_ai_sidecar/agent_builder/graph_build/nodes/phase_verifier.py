@@ -70,11 +70,10 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
     registry = SeedlessBlockRegistry()
     registry.load()
     block_spec = registry.get_spec(block_id, "1.0.0") or {}
-    produces = block_spec.get("produces") or {}
-    covers = list(produces.get("covers") or [])
-    if not covers:
-        covers = _infer_covers_from_block_spec(block_spec)
-    extractors = produces.get("outcome_extractors") or []
+    # v30.5 (2026-05-16): use covers_output (strict — what the block's
+    # output port can actually satisfy). See _resolve_covers docstring.
+    covers = _resolve_covers(block_spec, kind="output")
+    extractors = (block_spec.get("produces") or {}).get("outcome_extractors") or []
 
     # Walk phases starting at current; advance while block covers
     advanced: list[dict[str, Any]] = []
@@ -118,17 +117,13 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                 block_id=block_id, covers=covers, rows=rows,
             )
             # v30.1.1: empathetic-debug — what blocks WOULD have passed?
+            # v30.5: use covers_output (consistent with verifier's actual check)
             try:
                 would_pass: list[str] = []
-                from python_ai_sidecar.agent_builder.graph_build.nodes.phase_verifier import (
-                    _infer_covers_from_block_spec,
-                )
                 for (n, _v), s in (registry.catalog or {}).items():
                     if str(s.get("status") or "").lower() == "deprecated":
                         continue
-                    s_covers = list((s.get("produces") or {}).get("covers") or [])
-                    if not s_covers:
-                        s_covers = _infer_covers_from_block_spec(s)
+                    s_covers = _resolve_covers(s, kind="output")
                     if cur_expected in s_covers:
                         would_pass.append(n)
                 tracer.record_verifier_decision(
@@ -248,6 +243,47 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
 
     update["sse_events"] = sse_events
     return update
+
+
+def _resolve_covers(spec: dict, kind: str = "output") -> list[str]:
+    """v30.5 (2026-05-16): resolve produces.covers per intent kind.
+
+    Two semantically distinct concepts merged in the produces map:
+      - `covers_output`: what the block's OUTPUT PORT can satisfy. Used by
+        verifier (rows quality gate is on output, not internal capability).
+        For spc_panel this is ['chart'] — output port is chart_spec only.
+      - `covers_internal`: what work the block does INTERNALLY. Used by
+        section / promotion (LLM-facing hint). For spc_panel this is
+        ['raw_data', 'transform', 'verdict', 'chart'] — it internally
+        fetches + filters + draws.
+
+    Backward compat: if produces only has `covers` (old single field),
+    treat it as both. If only one of the two new fields is set:
+      - kind='output' missing → fall back to inferred from category+output_schema
+        (do NOT mirror from internal; internal may overstate output)
+      - kind='internal' missing → fall back to covers_output (output is a
+        valid subset of internal capability)
+    """
+    produces = spec.get("produces") or {}
+    if kind == "output":
+        v = produces.get("covers_output")
+        if v is not None:
+            return list(v)
+        # Old single field treated as output
+        v = produces.get("covers")
+        if v is not None:
+            return list(v)
+        return _infer_covers_from_block_spec(spec)
+    if kind == "internal":
+        v = produces.get("covers_internal")
+        if v is not None:
+            return list(v)
+        v = produces.get("covers")
+        if v is not None:
+            return list(v)
+        # Last resort: same as output
+        return _infer_covers_from_block_spec(spec)
+    raise ValueError(f"unknown kind={kind!r} (expected 'output' or 'internal')")
 
 
 def _infer_covers_from_block_spec(spec: dict) -> list[str]:

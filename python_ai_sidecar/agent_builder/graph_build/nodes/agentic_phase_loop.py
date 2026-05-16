@@ -607,7 +607,7 @@ def _build_oneblock_solutions_section(
         SeedlessBlockRegistry,
     )
     from python_ai_sidecar.agent_builder.graph_build.nodes.phase_verifier import (
-        _infer_covers_from_block_spec,
+        _resolve_covers,
     )
 
     cur_expected = (current_phase.get("expected") or "").strip()
@@ -618,13 +618,15 @@ def _build_oneblock_solutions_section(
     registry.load()
 
     # solutions: (block_name, contiguous_ff_ids, all_covered_future_ids, covers)
+    # v30.5: use covers_output (output port semantics — same as verifier).
+    # Section MUST align with verifier or LLM gets promoted-then-rejected
+    # thrash. covers_internal stays as documentation (block doc / future
+    # use) but does NOT drive section promotion.
     solutions: list[tuple[str, list[str], list[str], list[str]]] = []
     for (name, _v), spec in registry.catalog.items():
         if str(spec.get("status") or "").lower() == "deprecated":
             continue
-        covers = list((spec.get("produces") or {}).get("covers") or [])
-        if not covers:
-            covers = _infer_covers_from_block_spec(spec)
+        covers = _resolve_covers(spec, kind="output")
         if cur_expected not in covers:
             continue
 
