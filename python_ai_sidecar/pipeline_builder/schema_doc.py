@@ -132,6 +132,11 @@ def infer_runtime_schema(
 
     block_id = (block_spec or {}).get("name") or ""
     col_usage_hints = _extract_col_usage_hints(block_spec)
+    # v30.8 (2026-05-16): prefer explicit column_docs `type` over sample-inferred.
+    # Sample-inferred enum can mislead LLM when sample only shows partial values
+    # (e.g. spc_status enum['PASS'=5] hides the 'OOC' option a real OOC event
+    # would have). column_docs declares the full enum honestly.
+    col_doc_types = _extract_col_doc_types(block_spec)
 
     header_lines: list[str] = []
     nid = node_id or "?"
@@ -144,7 +149,8 @@ def infer_runtime_schema(
     table_lines = ["| col | inferred type | usage hint |"]
     table_lines.append("|---|---|---|")
     for c in cols[:_MAX_COLS_LISTED]:
-        typ = _infer_col_type(df, c)
+        # Prefer explicit doc type when present; fall back to sample inference.
+        typ = col_doc_types.get(c) or _infer_col_type(df, c)
         hint = col_usage_hints.get(c, "")
         # Escape pipes inside content
         c_esc = str(c).replace("|", "\\|")
@@ -167,6 +173,26 @@ def infer_runtime_schema(
         sample_lines.append(f"(sample render failed: {ex})")
 
     return "\n".join(header_lines + table_lines + sample_lines)
+
+
+def _extract_col_doc_types(block_spec: Mapping[str, Any] | None) -> dict[str, str]:
+    """v30.8: extract explicit `type` from block_spec.column_docs[].
+
+    Returned types override sample-inferred types in runtime_schema_md.
+    Use case: spc_status's true type is `enum["PASS"|"OOC"]` but a sample
+    where every row is PASS would infer `enum['PASS'=5]` — misleading LLM.
+    """
+    if not block_spec:
+        return {}
+    out: dict[str, str] = {}
+    for entry in (block_spec.get("column_docs") or []):
+        if not isinstance(entry, dict):
+            continue
+        col = entry.get("col")
+        typ = entry.get("type")
+        if col and typ and isinstance(typ, str):
+            out[col] = typ.strip()
+    return out
 
 
 def _extract_col_usage_hints(block_spec: Mapping[str, Any] | None) -> dict[str, str]:
@@ -272,16 +298,32 @@ def _infer_col_type(df: Any, col: str) -> str:
     return type(sample_val).__name__
 
 
-def _truncate_value(v: Any) -> Any:
-    """Trim long string repr; recurse into list/dict shallowly."""
+def _truncate_value(v: Any, depth: int = 0) -> Any:
+    """Trim long string repr; recurse into list/dict shallowly.
+
+    v30.8 (2026-05-16): for nested dicts at depth 0 (top-level row values)
+    with > _DICT_COLLAPSE_KEYS keys, collapse to a key-list summary instead
+    of expanding all values. Stops the sample dump from blowing up with
+    APC/DC/RECIPE/FDC/EC sub-dicts (each containing 20-80 sensor parameters
+    irrelevant to most phase tasks). LLM can still see the keys and use
+    block_pluck / inspect_node_output to drill in if needed.
+    """
     if isinstance(v, str) and len(v) > _MAX_VAL_REPR:
         return v[:_MAX_VAL_REPR] + "..."
     if isinstance(v, list):
-        # Take first 2 + count tail
         if len(v) <= 3:
-            return [_truncate_value(x) for x in v]
-        return [_truncate_value(x) for x in v[:2]] + [f"...+{len(v)-2} more"]
+            return [_truncate_value(x, depth + 1) for x in v]
+        return [_truncate_value(x, depth + 1) for x in v[:2]] + [f"...+{len(v)-2} more"]
     if isinstance(v, dict):
-        # Keep keys, trim values
-        return {k: _truncate_value(vv) for k, vv in v.items()}
+        # Top-level large dicts (like APC/DC/RECIPE/FDC/EC blocks in
+        # process_history rows) collapse to key summary. depth>0 keeps
+        # values for shallow nesting (e.g. spc_summary stays expanded).
+        if depth == 0 and len(v) > _DICT_COLLAPSE_KEYS:
+            keys = list(v.keys())[:6]
+            tail = f"...+{len(v) - 6} more keys" if len(v) > 6 else ""
+            return f"<dict {len(v)} keys: {keys}{tail}>"
+        return {k: _truncate_value(vv, depth + 1) for k, vv in v.items()}
     return v
+
+
+_DICT_COLLAPSE_KEYS = 5

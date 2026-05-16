@@ -756,10 +756,14 @@ def _build_oneblock_solutions_section(
             if (nxt.get("expected") or "").strip() in output_covers
         ]
 
-        # Include if: FF benefit, non-contig coverage, OR composite (does
-        # extra internal work — block is worth highlighting even at its
-        # natural output phase).
-        if ff_ids or len(future_covered) >= 1 or is_composite:
+        # v30.7 (2026-05-16): tightened promotion. Only include if:
+        #   (a) has contiguous FF chain (real verifier benefit), OR
+        #   (b) is composite with internal_extras (covers_internal > output)
+        # Non-contig future_covered alone is too noisy — promoted generic
+        # transform blocks (any_trigger / apc_long_form / compute) just
+        # because some future phase also = transform, with no actual help
+        # for the current task. EQP-08 p2 trace confirmed this noise.
+        if ff_ids or is_composite:
             solutions.append((name, ff_ids, future_covered, output_covers, internal_extras))
 
     if not solutions:
