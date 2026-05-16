@@ -629,8 +629,12 @@ def _make_result_digest(tool: str, result: Any) -> str:
     in next round so it doesn't forget what it already learned."""
     if not isinstance(result, dict):
         return str(result)[:100]
-    if "error" in result:
-        return f"ERROR: {str(result.get('error'))[:120]}"
+    # Only treat as error when the error field is non-None.
+    # Previously `"error" in result` matched even when value was None,
+    # making LLM think "ERROR: None" everywhere.
+    err_val = result.get("error")
+    if err_val is not None and err_val != "":
+        return f"ERROR: {str(err_val)[:120]}"
     if tool == "inspect_block_doc":
         # Show enough to add_node correctly: REQUIRED params (verbatim names!),
         # param-schema enum hints, and examples count. Without this LLM keeps
@@ -663,11 +667,23 @@ def _make_result_digest(tool: str, result: Any) -> str:
             + "\n  -- you now know enough to add_node. DO NOT re-inspect this block."
         )
     if tool == "inspect_node_output":
-        # show key shape info
         nid = result.get("node_id")
         rows = result.get("rows")
         ports = [k for k in result if k not in {"node_id", "status", "rows", "error"}]
-        return f"got output for {nid}: rows={rows} ports={ports}"
+        # Surface sample row keys + value preview for LLM ergonomics
+        sample_hint = ""
+        for port in ports:
+            blob = result.get(port) or {}
+            if isinstance(blob, dict):
+                sr = blob.get("sample_rows") or []
+                cols = blob.get("columns") or []
+                if sr and isinstance(sr[0], dict):
+                    sample_hint = f" cols={cols[:8]}{'…' if len(cols) > 8 else ''}"
+                    break
+        positive = ""
+        if isinstance(rows, int) and rows >= 1:
+            positive = " -- has data; if this satisfies the phase goal, call phase_complete next round"
+        return f"got output for {nid}: rows={rows} ports={ports}{sample_hint}{positive}"
     if tool == "add_node":
         nid = result.get("node_id")
         return f"added node id={nid}"
