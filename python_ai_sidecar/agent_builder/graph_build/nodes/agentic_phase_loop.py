@@ -268,7 +268,7 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
                 current_idx=idx,
                 declared_inputs=(state.get("base_pipeline") or {}).get("inputs") or [],
                 exec_trace=state.get("exec_trace") or {},
-                recent_actions=recent_actions,
+                recent_actions=(state.get("v30_phase_recent_actions") or {}).get(pid, []),
                 catalog_brief_text=_build_catalog_brief(),
                 instruction=state.get("instruction") or "",
             )
