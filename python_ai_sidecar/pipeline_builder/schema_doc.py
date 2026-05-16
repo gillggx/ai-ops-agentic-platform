@@ -217,13 +217,28 @@ def _extract_col_usage_hints(block_spec: Mapping[str, Any] | None) -> dict[str, 
         col = entry.get("col")
         if not col:
             continue
-        # Prefer the first "best" usage marker as the 1-line hint, fall back
-        # to "what" if no best marker. Keeps the runtime table compact.
+        # v30.9 (2026-05-16): show ALL [best]/[ok] hints (joined with " ; ")
+        # instead of just the first [best]. Single-[best] was hiding
+        # alternative paths (e.g. spc_charts had a direct unnest-count path
+        # added as [ok] that LLM never saw because only first [best] shown).
         usage = entry.get("usage") or []
-        best = next((u for u in usage if isinstance(u, dict)
-                     and str(u.get("marker") or "").lower() == "best"), None)
-        if best and best.get("text"):
-            hint = "[best] " + str(best["text"])
+        hint_parts: list[str] = []
+        for u in usage:
+            if not isinstance(u, dict):
+                continue
+            marker = str(u.get("marker") or "").lower()
+            text = u.get("text") or ""
+            if not text:
+                continue
+            if marker == "best":
+                hint_parts.append(f"[best] {text}")
+            elif marker == "ok":
+                hint_parts.append(f"[ok] {text}")
+            elif marker == "warn":
+                hint_parts.append(f"[warn] {text}")
+            # [no] omitted from runtime schema — keep prompt clean
+        if hint_parts:
+            hint = " ; ".join(hint_parts)
         else:
             hint = str(entry.get("what") or "")
         out[col] = hint
