@@ -401,6 +401,27 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
                         if isinstance(snap, dict):
                             sample = {k: snap[k] for k in list(snap.keys())[:6]}
                         break
+                # v30.4 (2026-05-16): populate runtime_schema_md the same
+                # way execute._snapshot_node does. Without it, observation_md
+                # falls back to bare `cols=[...]` and LLM loses column_docs
+                # usage hints (e.g. "use spc_summary.ooc_count to skip
+                # unnest+filter+count 4 steps"). That regression caused
+                # Run 1 to walk the long path instead of the shortcut.
+                runtime_schema_md = ""
+                try:
+                    from python_ai_sidecar.agent_builder.graph_build.nodes.execute import (
+                        _build_runtime_schema_md,
+                    )
+                    runtime_schema_md = _build_runtime_schema_md(
+                        block_id=blk_id or "",
+                        logical_id=target_nid,
+                        cols=cols,
+                        rows_sample=auto_preview_blob,
+                        toolset=toolset,
+                        total_rows=pv.get("rows"),
+                    )
+                except Exception as ex:  # noqa: BLE001
+                    logger.info("runtime_schema_md build failed (non-fatal): %s", ex)
                 snapshot_dict = {
                     "logical_id": target_nid,
                     "real_id": target_nid,
@@ -408,6 +429,7 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
                     "rows": pv.get("rows"),
                     "cols": cols[:20],
                     "sample": sample,
+                    "runtime_schema_md": runtime_schema_md,
                     "error": pv.get("error"),
                     "after_cursor": round_n,
                 }
