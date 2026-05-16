@@ -2182,8 +2182,9 @@ def _blocks() -> list[dict[str, Any]]:
             "status": "production",
             "description": (
                 "== What ==\n"
-                "把上游 DataFrame **釘在 Pipeline Results 的資料視圖區**，讓人類可以在執行結果面板\n"
-                "看到任何中間步驟的資料，不需要配置 chart_type/x/y 等圖表參數。\n"
+                "**DataFrame 釘到 Results 視圖區** — 給人類審視中間步驟資料，比 chart 輕量；不需 chart_type/x/y 設定。\n"
+                "詳細介紹：把上游 DataFrame **釘在 Pipeline Results 的資料視圖區**，"
+                "讓人類可以在執行結果面板看到任何中間步驟的資料，不需要配置 chart_type/x/y 等圖表參數。\n"
                 "\n"
                 "== When to use ==\n"
                 "- ✅ Diagnostic Rule 要把「最近 N 筆 process 資料」當輸出秀給工程師\n"
@@ -3106,7 +3107,8 @@ def _blocks() -> list[dict[str, Any]]:
             "status": "production",
             "description": (
                 "== What ==\n"
-                "Phase 11 Skill terminal block. Aggregates upstream rows to a scalar, "
+                "**Aggregate→scalar→threshold compare in 1 block** — count/sum/mean/max/last + ≥/≤/== verdict. Skill 終點 block.\n"
+                "詳細介紹：Phase 11 Skill terminal block. Aggregates upstream rows to a scalar, "
                 "compares against a threshold/baseline, emits {pass:bool, value, note} "
                 "the SkillRunner reads. **Every Skill step's pipeline MUST end with this block.**\n\n"
                 "⚠ **TERMINAL block — 不要接任何下游 block (especially block_alert)**\n"
@@ -3350,7 +3352,8 @@ def _blocks() -> list[dict[str, Any]]:
             "status": "production",
             "description": (
                 "== What ==\n"
-                "**Parameterized SPC chart composite** — 給我 `step + chart_name` 兩個**必填**參數，"
+                "**1-block SPC composite (取代 unnest+filter+sort+chart 4 步)** — 必填 step+chart_name，內部撈/篩/畫 SPC panel。\n"
+                "詳細介紹：給我 `step + chart_name` 兩個**必填**參數，"
                 "我內部撈 process_history → unnest spc_charts → 依 event_filter 模式挑時段 → "
                 "出 line/bar chart + 橘色 UCL/LCL + 綠色 value line + OOC highlight，"
                 "全部一個 block 包好。\n"
@@ -3529,7 +3532,8 @@ def _blocks() -> list[dict[str, Any]]:
             "status": "production",
             "description": (
                 "== What ==\n"
-                "**Parameterized APC parameter composite** — 給我 `step + chart_name` 兩個**必填**參數，"
+                "**1-block APC composite (取代 unnest+groupby+chart 3 步)** — 必填 step+chart_name，內部撈/篩/畫 APC 多 series。\n"
+                "詳細介紹：給我 `step + chart_name` 兩個**必填**參數，"
                 "我內部撈 process_history → unnest apc_params → 依 event_filter 模式挑時段 → "
                 "出多 series line chart，一個 block 包好。（APC 原始資料無 UCL/LCL bound）\n"
                 "**step 跟 chart_name 都可給單值或 list (多組支援)**：\n"
