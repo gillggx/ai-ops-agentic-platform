@@ -261,8 +261,16 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     # ── Build state update + SSE ──────────────────────────────────────
     new_pipeline_dict = transient.pipeline_json.model_dump(by_alias=True)
     new_recent = dict(state.get("v30_phase_recent_actions") or {})
+    # v30 hotfix: store result digest too so next round's prompt can show
+    # LLM what it already learned (LLM has no memory across rounds — each
+    # round is a fresh call). Without this LLM keeps re-inspecting same
+    # block because it forgot the doc it already pulled.
+    result_digest = _make_result_digest(tool_name, action_result)
     new_recent[pid] = recent_actions[-(STUCK_DETECTOR_WINDOW * 2):] + [{
-        "tool": tool_name, "args_hash": args_hash,
+        "tool": tool_name,
+        "args_hash": args_hash,
+        "args_summary": _summarize_args(tool_args),
+        "result_digest": result_digest,
     }]
 
     state_update: dict[str, Any] = {
@@ -430,13 +438,23 @@ def _build_observation_md(state: BuildGraphState, phase: dict) -> str:
                 lines.append(f"  {lid} [{snap.get('block_id')}] rows={snap.get('rows')} cols={snap.get('cols', [])[:10]}")
     lines.append("")
 
-    # Action history this phase
+    # Action history this phase — INCLUDE result digest so LLM has memory
+    # of what it learned. Without this each round is amnesic and LLM
+    # re-inspects same blocks endlessly.
     pid = phase.get("id")
     recent = (state.get("v30_phase_recent_actions") or {}).get(pid, [])
     if recent:
-        lines.append("== ACTIONS THIS PHASE (last 4) ==")
-        for a in recent[-4:]:
-            lines.append(f"  - {a.get('tool')}")
+        lines.append("== ACTIONS THIS PHASE — what you did + what you got back ==")
+        for a in recent[-6:]:
+            tool = a.get("tool")
+            args = a.get("args_summary", "")
+            digest = a.get("result_digest", "")
+            lines.append(f"  - {tool}({args})")
+            lines.append(f"    -> {digest}")
+        lines.append(
+            "IMPORTANT: do NOT repeat the same tool with same args. "
+            "If you already inspected a block_doc, USE the info to add_node — do not inspect again."
+        )
         lines.append("")
 
     # Instruction
@@ -589,6 +607,47 @@ def _summarize_result(result: dict) -> str:
 def _short_repr(v: Any) -> str:
     s = repr(v) if not isinstance(v, str) else v
     return s[:60] + ("..." if len(s) > 60 else "")
+
+
+def _make_result_digest(tool: str, result: Any) -> str:
+    """Compact summary of what a tool returned, for showing back to LLM
+    in next round so it doesn't forget what it already learned."""
+    if not isinstance(result, dict):
+        return str(result)[:100]
+    if "error" in result:
+        return f"ERROR: {str(result.get('error'))[:120]}"
+    if tool == "inspect_block_doc":
+        # Don't dump full doc again — just signal "you have this doc; use it"
+        cat = result.get("category")
+        n_cols = len(result.get("column_docs") or [])
+        n_params = len((result.get("param_schema") or {}).get("properties") or {})
+        n_examples = len(result.get("examples") or [])
+        return (
+            f"got block_doc for {result.get('block_id')} "
+            f"(cat={cat}, {n_params} params, {n_cols} column_docs, {n_examples} examples) "
+            f"-- you now know enough to add_node, do NOT re-inspect"
+        )
+    if tool == "inspect_node_output":
+        # show key shape info
+        nid = result.get("node_id")
+        rows = result.get("rows")
+        ports = [k for k in result if k not in {"node_id", "status", "rows", "error"}]
+        return f"got output for {nid}: rows={rows} ports={ports}"
+    if tool == "add_node":
+        nid = result.get("node_id")
+        return f"added node id={nid}"
+    if tool == "connect":
+        return f"edge_id={result.get('edge_id')}"
+    if tool == "set_param":
+        return "param updated"
+    if tool == "remove_node":
+        return f"removed node + {len(result.get('removed_edges') or [])} edges"
+    if tool == "phase_complete":
+        v_says = result.get("verifier_says")
+        if v_says is None:
+            return "phase_complete signal sent (verifier accepted)"
+        return f"phase_complete REJECTED by verifier: {v_says.get('reason')}"
+    return str(result)[:120]
 
 
 def _check_phase_done(
