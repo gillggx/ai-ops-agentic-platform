@@ -617,76 +617,84 @@ def _build_oneblock_solutions_section(
     registry = SeedlessBlockRegistry()
     registry.load()
 
-    # solutions: (block_name, contiguous_ff_ids, all_covered_future_ids, covers)
+    # solutions: (block_name, contiguous_ff_ids, all_covered_future_ids,
+    #             output_covers, internal_extras)
     # v30.5: use covers_output (output port semantics — same as verifier).
-    # Section MUST align with verifier or LLM gets promoted-then-rejected
-    # thrash. covers_internal stays as documentation (block doc / future
-    # use) but does NOT drive section promotion.
-    solutions: list[tuple[str, list[str], list[str], list[str]]] = []
+    # v30.6: also list COMPOSITE blocks (covers_internal > covers_output)
+    # even without FF benefit, so LLM at the right output phase still sees
+    # the composite annotation (e.g. spc_panel at chart phase: "this also
+    # internally does raw_data + transform + verdict").
+    solutions: list[tuple[str, list[str], list[str], list[str], list[str]]] = []
     for (name, _v), spec in registry.catalog.items():
         if str(spec.get("status") or "").lower() == "deprecated":
             continue
-        covers = _resolve_covers(spec, kind="output")
-        if cur_expected not in covers:
+        output_covers = _resolve_covers(spec, kind="output")
+        if cur_expected not in output_covers:
             continue
+
+        internal_covers = _resolve_covers(spec, kind="internal")
+        internal_extras = sorted(set(internal_covers) - set(output_covers))
+        is_composite = bool(internal_extras)
 
         # Contiguous chain — what verifier will actually fast-forward
         ff_ids: list[str] = []
         for nxt in remaining_phases:
             nxt_exp = (nxt.get("expected") or "").strip()
-            if nxt_exp and nxt_exp in covers:
+            if nxt_exp and nxt_exp in output_covers:
                 ff_ids.append(nxt.get("id"))
             else:
                 break  # contiguous-only chain (matches verifier semantics)
 
         # Non-contiguous coverage — what this block COULD eventually satisfy
-        # in later phases, even if a non-covered phase intervenes. Shows LLM
-        # the block's full reach so a 2-phase FF chain isn't dismissed when
-        # the block also covers p5/p7 etc.
+        # in later phases, even if a non-covered phase intervenes.
         future_covered = [
             nxt.get("id") for nxt in remaining_phases
-            if (nxt.get("expected") or "").strip() in covers
+            if (nxt.get("expected") or "").strip() in output_covers
         ]
 
-        # Surface even FF=0 candidates if the block covers >=2 future phases.
-        # Without this, a 1-block solution that only catches the CURRENT
-        # phase + later (non-adjacent) ones never shows up — exactly the
-        # v30.2 5-run failure mode (scalar phase splits FF chain).
-        if ff_ids or len(future_covered) >= 1:
-            solutions.append((name, ff_ids, future_covered, covers))
+        # Include if: FF benefit, non-contig coverage, OR composite (does
+        # extra internal work — block is worth highlighting even at its
+        # natural output phase).
+        if ff_ids or len(future_covered) >= 1 or is_composite:
+            solutions.append((name, ff_ids, future_covered, output_covers, internal_extras))
 
     if not solutions:
         return ""
 
-    # Sort: bigger contiguous FF first, then more future-covered, then name
-    solutions.sort(key=lambda t: (-len(t[1]), -len(t[2]), t[0]))
+    # Sort: bigger contiguous FF first, then more future-covered, then
+    # composite (more internal_extras), then name.
+    solutions.sort(key=lambda t: (-len(t[1]), -len(t[2]), -len(t[4]), t[0]))
     cur_id = current_phase.get("id") or "current"
     out_lines = [
         "== 1-BLOCK SOLUTIONS (server-detected; verifier-confirmed) ==",
-        "下列 block 一次 add_node 即可同時完成當前 phase + 後續多 phase，",
-        "由 server 比對 phase.expected 與 block.produces.covers 算出（事實，非建議）。",
-        "**優先評估這些 candidate**；選了之後 verifier 會自動 fast-forward 通過後續 phase。",
+        "Server 比對 phase.expected 與 block.produces.covers_output 算出（事實，非建議）。",
+        "**優先評估這些 candidate**：composite block 即使只滿足當前 phase，也常常一個 block 取代多步拼湊。",
     ]
-    for name, ff_ids, future_covered, covers in solutions[:_ONEBLOCK_MAX_CANDIDATES]:
+    for name, ff_ids, future_covered, output_covers, internal_extras in solutions[:_ONEBLOCK_MAX_CANDIDATES]:
         chain = f"{cur_id}" + ("".join(f"+{i}" for i in ff_ids) if ff_ids else "")
         n_chain = len(ff_ids) + 1
-        # Show non-contiguous future-covered phases too — they may not auto
-        # fast-forward (intervening non-covered phase blocks the chain) but
-        # picking this block also gets you those phases "for free" when you
-        # revisit them later.
-        also_covers_note = ""
+
+        # Compose annotations: FF, non-contig coverage, composite internal work
+        annotations: list[str] = []
+        if ff_ids:
+            annotations.append(f"fast-forward {chain} ({n_chain} phases auto-advance)")
         beyond = [pid for pid in future_covered if pid not in ff_ids]
         if beyond:
-            also_covers_note = (
-                f"   (block also covers later {'+'.join(beyond)} — "
-                f"reusable when those phases arrive)"
+            annotations.append(f"also covers later {'+'.join(beyond)} (reusable then)")
+        if internal_extras:
+            annotations.append(
+                f"composite — internally also does work of "
+                f"[{'+'.join(internal_extras)}] (取代上游多步拼湊)"
             )
+        if not annotations:
+            annotations.append(f"satisfies {cur_id} ({cur_expected})")
+
         out_lines.append(
-            f"  {name}  → 同時 fast-forward {chain} ({n_chain} phases auto-advance)  "
-            f"[block.produces.covers = {'+'.join(covers)}]{also_covers_note}"
+            f"  {name}  → " + "; ".join(annotations)
+            + f"  [output={'+'.join(output_covers)}]"
         )
     out_lines.append(
-        "若這些都不適用（e.g. user 要求的細節超過 composite 的能力），"
+        "若這些都不適用（user 要求的細節超過 composite 的能力），"
         "再走逐 phase 拼 transform/filter/chart 的傳統路徑。"
     )
     return "\n".join(out_lines)
