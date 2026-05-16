@@ -53,6 +53,7 @@ async def stream_graph_build(
     skill_step_mode: bool = False,
     trigger_payload: Optional[dict] = None,
     v30_mode: bool = False,
+    debug_step_mode: bool = False,
 ) -> AsyncGenerator[StreamEvent, None]:
     """Run the graph from the start. Yields StreamEvent as nodes complete.
 
@@ -81,10 +82,13 @@ async def stream_graph_build(
         skip_confirm=skip_confirm,
         skill_step_mode=skill_step_mode,
         trigger_payload=trigger_payload,
+        debug_step_mode=debug_step_mode,
     )
     if v30_mode:
         init["v30_mode"] = True
         logger.info("stream_graph_build: v30_mode enabled — using ReAct path")
+    if debug_step_mode:
+        logger.info("stream_graph_build: debug_step_mode enabled — agent will pause after each round")
     logger.info("stream_graph_build: starting session=%s", sid)
 
     # Phase 11 v17 — opt-in BuildTracer (BUILDER_TRACE_DIR env). When the
@@ -139,7 +143,7 @@ async def stream_graph_build(
                     if isinstance(paused_payload, dict) else None
                 )
                 if tracer is not None:
-                    pause_status = paused_kind if paused_kind in ("clarify_required", "intent_confirm_required", "goal_plan_confirm_required", "handover_pending") else "confirm_pending"
+                    pause_status = paused_kind if paused_kind in ("clarify_required", "intent_confirm_required", "goal_plan_confirm_required", "handover_pending", "phase_round_paused") else "confirm_pending"
                     tracer.set_status(pause_status)
                     tracer.record_step(
                         "graph_paused",
@@ -163,7 +167,7 @@ async def stream_graph_build(
 
     # Re-emit pause as SSE event (reuse already-detected payload)
     if interrupted:
-        event_type = paused_kind if paused_kind in ("clarify_required", "intent_confirm_required", "goal_plan_confirm_required", "handover_pending") else "confirm_pending"
+        event_type = paused_kind if paused_kind in ("clarify_required", "intent_confirm_required", "goal_plan_confirm_required", "handover_pending", "phase_round_paused") else "confirm_pending"
         yield StreamEvent(
             type=event_type,
             data={
@@ -361,7 +365,7 @@ async def resume_graph_build(
                     if isinstance(paused_payload, dict) else None
                 )
                 if tracer is not None:
-                    pause_status = paused_kind if paused_kind in ("clarify_required", "intent_confirm_required", "goal_plan_confirm_required", "handover_pending") else "confirm_pending"
+                    pause_status = paused_kind if paused_kind in ("clarify_required", "intent_confirm_required", "goal_plan_confirm_required", "handover_pending", "phase_round_paused") else "confirm_pending"
                     tracer.set_status(pause_status)
                     tracer.record_step(
                         "graph_paused",
@@ -382,7 +386,7 @@ async def resume_graph_build(
 
     if interrupted:
         yield StreamEvent(
-            type=(paused_kind if paused_kind in ("clarify_required", "intent_confirm_required", "goal_plan_confirm_required", "handover_pending") else "confirm_pending"),
+            type=(paused_kind if paused_kind in ("clarify_required", "intent_confirm_required", "goal_plan_confirm_required", "handover_pending", "phase_round_paused") else "confirm_pending"),
             data={
                 "session_id": session_id,
                 **(paused_payload if isinstance(paused_payload, dict) else {}),
@@ -540,7 +544,7 @@ async def resume_graph_build_with_clarify(
                     if isinstance(paused_payload, dict) else None
                 )
                 if tracer is not None:
-                    pause_status = paused_kind if paused_kind in ("clarify_required", "intent_confirm_required", "goal_plan_confirm_required", "handover_pending") else "confirm_pending"
+                    pause_status = paused_kind if paused_kind in ("clarify_required", "intent_confirm_required", "goal_plan_confirm_required", "handover_pending", "phase_round_paused") else "confirm_pending"
                     tracer.set_status(pause_status)
                     tracer.record_step(
                         "graph_paused",
@@ -561,7 +565,7 @@ async def resume_graph_build_with_clarify(
 
     if interrupted:
         yield StreamEvent(
-            type=(paused_kind if paused_kind in ("clarify_required", "intent_confirm_required", "goal_plan_confirm_required", "handover_pending") else "confirm_pending"),
+            type=(paused_kind if paused_kind in ("clarify_required", "intent_confirm_required", "goal_plan_confirm_required", "handover_pending", "phase_round_paused") else "confirm_pending"),
             data={
                 "session_id": session_id,
                 **(paused_payload if isinstance(paused_payload, dict) else {}),
@@ -648,6 +652,7 @@ async def resume_graph_v30(
                     pause_status = paused_kind if paused_kind in (
                         "clarify_required", "intent_confirm_required",
                         "goal_plan_confirm_required", "handover_pending",
+                        "phase_round_paused",
                     ) else "confirm_pending"
                     tracer.set_status(pause_status)
                     tracer.record_step(

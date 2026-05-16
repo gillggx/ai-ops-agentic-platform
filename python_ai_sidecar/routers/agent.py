@@ -73,6 +73,10 @@ class BuildRequest(BaseModel):
     # instead of v27 macro_plan + compile_chunk. Default false keeps v27 path
     # for skill mode + existing chat builder until v30 is GA.
     v30_mode: bool = Field(default=False, alias="v30Mode")
+    # v30.7 (2026-05-16): debug step-mode. When true, agentic_phase_loop
+    # pauses after each round (via step_pause_gate), emitting full prompt +
+    # response + state for debugging. Resume with /build/step-continue.
+    debug_step_mode: bool = Field(default=False, alias="debugStepMode")
 
 
 async def _chat_stream_native(req: ChatRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
@@ -160,6 +164,7 @@ async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenera
             skip_confirm=False,  # Builder Mode shows the Apply/Cancel card
             trigger_payload=req.trigger_payload,
             v30_mode=req.v30_mode,  # v30 opt-in
+            debug_step_mode=req.debug_step_mode,  # v30.7 step-mode pause
         ):
             yield {
                 "event": stream_event.type,
@@ -585,6 +590,50 @@ async def agent_build_handover(
 ) -> EventSourceResponse:
     """v30 — resume after user picks handover option."""
     return EventSourceResponse(_build_handover_stream(req, caller))
+
+
+class BuildStepContinueRequest(BaseModel):
+    """v30.7 — resume after step_pause_gate (debug step-mode pause).
+
+    Frontend / driver POSTs:
+      {sessionId, action: "continue"}  → resume to next round
+      {sessionId, action: "abort"}     → cancel build, route to finalize
+    """
+    model_config = ConfigDict(populate_by_name=True)
+
+    session_id: str = Field(..., alias="sessionId")
+    action: str = Field(default="continue")
+
+
+async def _build_step_continue_stream(
+    req: BuildStepContinueRequest, caller: CallerContext,
+) -> AsyncGenerator[dict, None]:
+    from python_ai_sidecar.agent_builder.graph_build.runner import resume_graph_v30
+    payload: dict = {"action": req.action}
+    try:
+        async for stream_event in resume_graph_v30(
+            session_id=req.session_id, resume_payload=payload,
+            trace_label="step-continue",
+        ):
+            yield {
+                "event": stream_event.type,
+                "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
+            }
+    except Exception as ex:  # noqa: BLE001
+        log.exception("build/step-continue failed for session=%s", req.session_id)
+        yield {"event": "error", "data": json.dumps({
+            "message": f"step-continue failed: {ex.__class__.__name__}: {str(ex)[:200]}",
+            "session_id": req.session_id,
+        }, ensure_ascii=False)}
+        yield {"event": "done", "data": json.dumps({"status": "failed"})}
+
+
+@router.post("/build/step-continue")
+async def agent_build_step_continue(
+    req: BuildStepContinueRequest, caller: CallerContext = ServiceAuth,
+) -> EventSourceResponse:
+    """v30.7 — resume after step_pause_gate (debug step-mode)."""
+    return EventSourceResponse(_build_step_continue_stream(req, caller))
 
 
 # ── v15 G2: modify-request endpoint ──────────────────────────────────────

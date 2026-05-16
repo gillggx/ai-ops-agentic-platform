@@ -174,6 +174,16 @@ class BuildGraphState(TypedDict, total=False):
     # the build through goal_plan_node + agentic_phase_loop instead of v27
     # macro_plan + compile_chunk path.
     v30_mode: bool
+    # v30.7 (2026-05-16): debug step-mode. When True, agentic_phase_loop
+    # interrupts after every ReAct round, emitting a `phase_round_paused`
+    # SSE event with the full prompt + LLM response + verifier outcome +
+    # canvas snapshot. Resume via POST /internal/agent/build/step-continue
+    # with body {sessionId, action: "continue"|"abort"}. Lets debug step
+    # through builds round-by-round without re-running the full graph.
+    debug_step_mode: bool
+    # Counter for emitted pauses (so resume payload can echo the round
+    # being unblocked).
+    v30_step_paused_at_round: Optional[int]
     # v30 C-A1: per-phase Anthropic message stack for conversation memory
     # across ReAct rounds. Without this each round is a fresh LLM call and
     # the LLM forgets what it just learned (re-inspects same blocks etc).
@@ -284,6 +294,7 @@ def initial_state(
     skip_confirm: bool = False,
     skill_step_mode: bool = False,
     trigger_payload: Optional[dict] = None,
+    debug_step_mode: bool = False,
 ) -> BuildGraphState:
     return BuildGraphState(
         session_id=session_id,
@@ -334,4 +345,6 @@ def initial_state(
         v30_phase_recent_actions={},
         v30_phase_messages={},
         v30_fast_forward_log=[],
+        debug_step_mode=debug_step_mode,
+        v30_step_paused_at_round=None,
     )

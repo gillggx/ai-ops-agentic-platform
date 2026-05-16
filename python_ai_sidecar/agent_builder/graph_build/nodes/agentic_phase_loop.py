@@ -24,6 +24,8 @@ import logging
 import re
 from typing import Any
 
+from langgraph.types import interrupt
+
 from python_ai_sidecar.agent_builder.graph_build.state import BuildGraphState
 from python_ai_sidecar.agent_builder.session import AgentBuilderSession
 from python_ai_sidecar.agent_builder.tools import BuilderToolset, ToolError
@@ -530,6 +532,108 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
 
     state_update["sse_events"] = sse_events
     return state_update
+
+
+async def step_pause_gate_node(state: BuildGraphState) -> dict[str, Any]:
+    """v30.7 (2026-05-16): debug step-mode pause point.
+
+    Runs between phase_verifier and next agentic_phase_loop round when
+    state.debug_step_mode is True. Emits a `phase_round_paused` SSE event
+    with the full diagnostic payload (system prompt, user_msg sent to LLM
+    this round, LLM response, tool result, verifier outcome, canvas state),
+    then interrupt()s the graph. Resume via POST /agent/build/step-continue
+    with body {sessionId, action: "continue" | "abort"}.
+
+    Falls through (no-op) when debug_step_mode is False so the gate is
+    cheap to leave permanently in the graph.
+    """
+    if not state.get("debug_step_mode"):
+        return {}
+
+    phases = state.get("v30_phases") or []
+    idx = state.get("v30_current_phase_idx", 0)
+    round_n = state.get("v30_phase_round", 0)
+    phase = phases[idx] if 0 <= idx < len(phases) else None
+    pid = (phase or {}).get("id") if phase else None
+
+    # Reconstruct what LLM saw + said this round, from state.
+    phase_messages = (state.get("v30_phase_messages") or {}).get(pid or "", [])
+    last_user_msg = ""
+    last_assistant_content: list[dict] = []
+    for m in phase_messages:
+        if m.get("role") == "user":
+            c = m.get("content")
+            if isinstance(c, str):
+                last_user_msg = c
+            elif isinstance(c, list):
+                parts = []
+                for p in c:
+                    if isinstance(p, dict):
+                        if p.get("type") == "text":
+                            parts.append(p.get("text") or "")
+                        elif p.get("type") == "tool_result":
+                            parts.append(
+                                f"[tool_result: {str(p.get('content',''))[:300]}]"
+                            )
+                last_user_msg = "\n".join(parts)
+        elif m.get("role") == "assistant":
+            c = m.get("content")
+            if isinstance(c, list):
+                last_assistant_content = c
+
+    # Recent actions (this phase) for context
+    recent = (state.get("v30_phase_recent_actions") or {}).get(pid or "", [])
+
+    pause_payload = {
+        "kind": "phase_round_paused",
+        "session_id": state.get("session_id"),
+        "phase_id": pid,
+        "phase_goal": (phase or {}).get("goal"),
+        "phase_expected": (phase or {}).get("expected"),
+        "round": round_n,                    # round that just completed
+        "max_rounds": MAX_REACT_ROUNDS,
+        "current_phase_idx": idx,
+        "n_phases": len(phases),
+        "system_prompt": _SYSTEM,
+        "user_msg_last_round": last_user_msg,
+        "assistant_content_last_round": last_assistant_content,
+        "recent_actions": recent[-6:] if recent else [],
+        "canvas_snapshot": state.get("final_pipeline"),
+        "exec_trace_keys": list((state.get("exec_trace") or {}).keys()),
+        "last_mutated_logical_id": state.get("v30_last_mutated_logical_id"),
+    }
+
+    logger.info(
+        "step_pause_gate: pausing at phase=%s round=%d (debug_step_mode)",
+        pid, round_n,
+    )
+
+    user_response = interrupt(pause_payload)
+
+    if not isinstance(user_response, dict):
+        user_response = {"action": "continue"}
+    action = str(user_response.get("action") or "continue")
+
+    if action == "abort":
+        logger.info("step_pause_gate: user aborted at phase=%s round=%d", pid, round_n)
+        return {
+            "status": "cancelled",
+            "summary": "User aborted via debug step mode",
+            "v30_step_paused_at_round": None,
+            "sse_events": [{
+                "event": "step_aborted",
+                "data": {"phase_id": pid, "round": round_n},
+            }],
+        }
+
+    # action == "continue" (default) — just clear paused marker, fall through
+    return {
+        "v30_step_paused_at_round": None,
+        "sse_events": [{
+            "event": "step_resumed",
+            "data": {"phase_id": pid, "round": round_n},
+        }],
+    }
 
 
 def _build_catalog_brief() -> str:

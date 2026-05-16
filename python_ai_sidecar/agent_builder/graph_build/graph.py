@@ -68,7 +68,7 @@ from python_ai_sidecar.agent_builder.graph_build.nodes.goal_plan import (
     goal_plan_node, goal_plan_confirm_gate_node,
 )
 from python_ai_sidecar.agent_builder.graph_build.nodes.agentic_phase_loop import (
-    agentic_phase_loop_node,
+    agentic_phase_loop_node, step_pause_gate_node,
 )
 from python_ai_sidecar.agent_builder.graph_build.nodes.phase_verifier import (
     phase_spanning_verifier_node,
@@ -365,8 +365,26 @@ def _route_after_phase_loop(state: BuildGraphState) -> str:
 def _route_after_phase_verifier(state: BuildGraphState) -> str:
     """After phase_spanning_verifier_node ran:
       - all phases done -> finalize
+      - debug_step_mode -> step_pause_gate (pause for inspection)
       - else -> back to agentic_phase_loop for next round
     """
+    phases = state.get("v30_phases") or []
+    idx = state.get("v30_current_phase_idx", 0)
+    if idx >= len(phases):
+        return "finalize"
+    if state.get("debug_step_mode"):
+        return "step_pause_gate"
+    return "agentic_phase_loop"
+
+
+def _route_after_step_pause(state: BuildGraphState) -> str:
+    """After step_pause_gate resumed:
+      - status=cancelled (user aborted) -> finalize
+      - phases done -> finalize
+      - else -> agentic_phase_loop (next round)
+    """
+    if state.get("status") == "cancelled":
+        return "finalize"
     phases = state.get("v30_phases") or []
     idx = state.get("v30_current_phase_idx", 0)
     if idx >= len(phases):
@@ -435,6 +453,7 @@ def build_graph():
     g.add_node("goal_plan_confirm_gate", goal_plan_confirm_gate_node)
     g.add_node("agentic_phase_loop", agentic_phase_loop_node)
     g.add_node("phase_verifier", phase_spanning_verifier_node)
+    g.add_node("step_pause_gate", step_pause_gate_node)
     g.add_node("phase_revise", phase_revise_node)
     g.add_node("halt_handover", halt_handover_node)
 
@@ -468,9 +487,19 @@ def build_graph():
         },
     )
     # v30.1: phase_verifier -> next round / finalize
+    # v30.7: optionally route through step_pause_gate when debug_step_mode
     g.add_conditional_edges(
         "phase_verifier",
         _route_after_phase_verifier,
+        {
+            "agentic_phase_loop": "agentic_phase_loop",
+            "step_pause_gate": "step_pause_gate",
+            "finalize": "finalize",
+        },
+    )
+    g.add_conditional_edges(
+        "step_pause_gate",
+        _route_after_step_pause,
         {
             "agentic_phase_loop": "agentic_phase_loop",
             "finalize": "finalize",
