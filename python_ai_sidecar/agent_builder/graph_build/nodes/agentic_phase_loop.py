@@ -78,6 +78,21 @@ phase.expected 決定 verifier 看什麼:
 - 不要在沒讀過 upstream runtime schema 時憑空寫 column 名 (用 inspect 先看)
 - 不要重複加同一 block 同一 params (stuck detector 會擋)
 - 不要忽視 column_docs 的 [no] 警告 (e.g. 「OOC 數量?」不要用 spc_status，用 spc_summary.ooc_count)
+
+== Param naming 嚴格規則 ==
+add_node 的 `params` key 必須**100% 一字不差**從 inspect_block_doc 的 param_schema 抄過來。
+**不要用同義詞替換**：
+  X equipment_id  ->  block_process_history 用的是 tool_id，**不是** equipment_id
+  X column_name   ->  block_filter 用的是 column，**不是** column_name
+  X chart_type    ->  block_line_chart 用的是 type，**不是** chart_type
+若不確定 -> 先 inspect_block_doc(block_id)，看 param_schema 列出的 EXACT param names。
+
+== 何時 phase_complete ==
+看到 add_node + auto_preview 成功 + 結果符合 phase 的 expected kind ->
+**立即** call phase_complete(rationale="...")，**不要拖**。系統會跑 verifier，
+若不符 expected 它會擋並告訴你下一步該做什麼。
+
+別把所有 8 round 都拿來 inspect — 通常 inspect → add_node → preview → phase_complete 4 round 就該結束。
 """
 
 
@@ -617,15 +632,35 @@ def _make_result_digest(tool: str, result: Any) -> str:
     if "error" in result:
         return f"ERROR: {str(result.get('error'))[:120]}"
     if tool == "inspect_block_doc":
-        # Don't dump full doc again — just signal "you have this doc; use it"
+        # Show enough to add_node correctly: REQUIRED params (verbatim names!),
+        # param-schema enum hints, and examples count. Without this LLM keeps
+        # using synonyms (equipment_id instead of tool_id, etc.).
+        bid = result.get("block_id")
         cat = result.get("category")
-        n_cols = len(result.get("column_docs") or [])
-        n_params = len((result.get("param_schema") or {}).get("properties") or {})
-        n_examples = len(result.get("examples") or [])
+        ps = result.get("param_schema") or {}
+        required = ps.get("required") or []
+        props = ps.get("properties") or {}
+        param_lines = []
+        for pname, pspec in list(props.items())[:12]:
+            ptype = pspec.get("type", "?")
+            req = "REQUIRED" if pname in required else "opt"
+            default = pspec.get("default")
+            enum = pspec.get("enum")
+            extra = ""
+            if default is not None: extra += f" default={default!r}"
+            if enum: extra += f" enum={enum}"
+            param_lines.append(f"    {pname} ({ptype}, {req}){extra}")
+        ex = result.get("examples") or []
+        ex_lines = []
+        for e in ex[:2]:
+            label = e.get("label", "")
+            params = e.get("params", {})
+            ex_lines.append(f"    {label}: params={params}")
         return (
-            f"got block_doc for {result.get('block_id')} "
-            f"(cat={cat}, {n_params} params, {n_cols} column_docs, {n_examples} examples) "
-            f"-- you now know enough to add_node, do NOT re-inspect"
+            f"got block_doc for {bid} (cat={cat}). USE THESE EXACT param names:\n"
+            + "\n".join(param_lines)
+            + (f"\n  EXAMPLES:\n" + "\n".join(ex_lines) if ex_lines else "")
+            + "\n  -- you now know enough to add_node. DO NOT re-inspect this block."
         )
     if tool == "inspect_node_output":
         # show key shape info
