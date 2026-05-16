@@ -415,10 +415,16 @@ async def _llm_judge_phase_outcome(
                    if sample_row else "(no sample available)")
 
     system_prompt = (
-        "你是 pipeline phase outcome 判定者。輸出純 JSON 物件 (no markdown fence)，"
+        "你是 pipeline phase outcome 嚴格判定者。輸出純 JSON 物件 (no markdown fence)，"
         "schema: {\"match\": bool, \"reason\": \"<100 字以內為何 match/not\", "
-        "\"extracted\": {<outcome_key>: <value_or_null>}}。"
-        "判斷時特別注意 value_desc 裡的「最後一次/last/first/all/N 張」這類量詞。"
+        "\"extracted\": {<outcome_key>: <value_or_null>}}。\n\n"
+        "**嚴格量詞規則（違反一律 match=false）**：\n"
+        "- value_desc 含「最後一次 / latest / last / first / 第一筆」→ 必須 total rows == 1\n"
+        "- value_desc 含「N 張 / N 個 / N 筆」→ 必須 rows >= N (應為 scalar/精確數字)\n"
+        "- value_desc 含「所有 / all / list / 清單」→ 必須 rows >= 2 (集合語意)\n"
+        "- value_desc 寫「一個數值 / 數量 / count」→ 必須是 scalar (1 row + 對應欄位)\n\n"
+        "**rationale**：rule-based gate 已查 covers+rows>=1, 你的職責是**抓 plan 語意 vs 實際結果**的精確 mismatch。\n"
+        "「最後一次」絕對不是「最新時刻的一批 N rows」，是「**只有 1 row** (the single latest)」。"
     )
     user_prompt = (
         f"Phase: {phase.get('id')}\n"
@@ -429,9 +435,10 @@ async def _llm_judge_phase_outcome(
         + (f"  criterion: {criterion}\n" if criterion else "")
         + f"\nTerminal node:\n"
         f"  block_id: {block_id}\n"
-        f"  total rows: {rows}\n"
+        f"  **total rows: {rows}**  ← 嚴格對照 value_desc 的量詞\n"
         f"  sample row: {sample_json}\n\n"
-        f"問: 這 output 是否真的滿足 expected_output.value_desc?\n"
+        f"問: 這 output (含 total rows 數量) 是否**嚴格**滿足 expected_output.value_desc?\n"
+        f"若 value_desc 暗示單一結果 (最後/first/latest) 而 rows != 1，必為 false。\n"
     )
 
     client = get_llm_client()
