@@ -595,7 +595,8 @@ def _build_oneblock_solutions_section(
     registry = SeedlessBlockRegistry()
     registry.load()
 
-    solutions: list[tuple[str, list[str], list[str]]] = []
+    # solutions: (block_name, contiguous_ff_ids, all_covered_future_ids, covers)
+    solutions: list[tuple[str, list[str], list[str], list[str]]] = []
     for (name, _v), spec in registry.catalog.items():
         if str(spec.get("status") or "").lower() == "deprecated":
             continue
@@ -604,6 +605,8 @@ def _build_oneblock_solutions_section(
             covers = _infer_covers_from_block_spec(spec)
         if cur_expected not in covers:
             continue
+
+        # Contiguous chain — what verifier will actually fast-forward
         ff_ids: list[str] = []
         for nxt in remaining_phases:
             nxt_exp = (nxt.get("expected") or "").strip()
@@ -611,13 +614,28 @@ def _build_oneblock_solutions_section(
                 ff_ids.append(nxt.get("id"))
             else:
                 break  # contiguous-only chain (matches verifier semantics)
-        if ff_ids:
-            solutions.append((name, ff_ids, covers))
+
+        # Non-contiguous coverage — what this block COULD eventually satisfy
+        # in later phases, even if a non-covered phase intervenes. Shows LLM
+        # the block's full reach so a 2-phase FF chain isn't dismissed when
+        # the block also covers p5/p7 etc.
+        future_covered = [
+            nxt.get("id") for nxt in remaining_phases
+            if (nxt.get("expected") or "").strip() in covers
+        ]
+
+        # Surface even FF=0 candidates if the block covers >=2 future phases.
+        # Without this, a 1-block solution that only catches the CURRENT
+        # phase + later (non-adjacent) ones never shows up — exactly the
+        # v30.2 5-run failure mode (scalar phase splits FF chain).
+        if ff_ids or len(future_covered) >= 1:
+            solutions.append((name, ff_ids, future_covered, covers))
 
     if not solutions:
         return ""
 
-    solutions.sort(key=lambda t: (-len(t[1]), t[0]))
+    # Sort: bigger contiguous FF first, then more future-covered, then name
+    solutions.sort(key=lambda t: (-len(t[1]), -len(t[2]), t[0]))
     cur_id = current_phase.get("id") or "current"
     out_lines = [
         "== 1-BLOCK SOLUTIONS (server-detected; verifier-confirmed) ==",
@@ -625,12 +643,23 @@ def _build_oneblock_solutions_section(
         "由 server 比對 phase.expected 與 block.produces.covers 算出（事實，非建議）。",
         "**優先評估這些 candidate**；選了之後 verifier 會自動 fast-forward 通過後續 phase。",
     ]
-    for name, ff_ids, covers in solutions[:_ONEBLOCK_MAX_CANDIDATES]:
-        chain = f"{cur_id}+{'+'.join(ff_ids)}"
+    for name, ff_ids, future_covered, covers in solutions[:_ONEBLOCK_MAX_CANDIDATES]:
+        chain = f"{cur_id}" + ("".join(f"+{i}" for i in ff_ids) if ff_ids else "")
         n_chain = len(ff_ids) + 1
+        # Show non-contiguous future-covered phases too — they may not auto
+        # fast-forward (intervening non-covered phase blocks the chain) but
+        # picking this block also gets you those phases "for free" when you
+        # revisit them later.
+        also_covers_note = ""
+        beyond = [pid for pid in future_covered if pid not in ff_ids]
+        if beyond:
+            also_covers_note = (
+                f"   (block also covers later {'+'.join(beyond)} — "
+                f"reusable when those phases arrive)"
+            )
         out_lines.append(
-            f"  {name}  → 同時涵蓋 {chain} ({n_chain} phases)  "
-            f"[block.produces.covers = {'+'.join(covers)}]"
+            f"  {name}  → 同時 fast-forward {chain} ({n_chain} phases auto-advance)  "
+            f"[block.produces.covers = {'+'.join(covers)}]{also_covers_note}"
         )
     out_lines.append(
         "若這些都不適用（e.g. user 要求的細節超過 composite 的能力），"
