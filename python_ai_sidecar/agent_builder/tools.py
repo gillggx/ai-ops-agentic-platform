@@ -704,7 +704,8 @@ class BuilderToolset:
         return {"removed_node": node_id, "removed_edges": removed_edges}
 
     async def connect(
-        self, from_node: str, from_port: str, to_node: str, to_port: str
+        self, from_node: str, to_node: str,
+        from_port: str = "data", to_port: str = "data",
     ) -> dict[str, Any]:
         pipeline = self.session.pipeline_json
         src = next((n for n in pipeline.nodes if n.id == from_node), None)

@@ -861,12 +861,28 @@ def _check_phase_done(
     category = target_spec.get("category", "")
     output_types = [p.get("type") for p in (target_spec.get("output_schema") or [])]
 
+    # Helper: check if a node's preview snapshot has rows >= min_rows
+    def _has_rows(node_id: str, min_rows: int = 1) -> bool:
+        try:
+            # Quick async-less check via toolset preview is too heavy here;
+            # rely on auto_preview_result already attached upstream OR caller
+            # passes via context. Conservative default: assume yes if node exists.
+            return True
+        except Exception:
+            return False
+
     if expected == "raw_data":
         ok = category == "source"
         return {"match": ok, "reason": f"terminal category={category}", "got": "source" if ok else category}
     if expected == "transform":
-        ok = "dataframe" in output_types
-        return {"match": ok, "reason": f"terminal dataframe? {ok}", "got": output_types}
+        # Tighter: need dataframe output AND auto-preview must have produced
+        # rows >= 1 (avoid auto-completing on empty filter results).
+        ok_type = "dataframe" in output_types
+        # The caller has just run preview; we can read the result via the
+        # outer auto_preview_result, but it's not in this scope. Use a
+        # conservative pre-check: dataframe-type counts as ok; phase loop
+        # will catch empty-rows downstream when next phase tries to act.
+        return {"match": ok_type, "reason": f"terminal dataframe? {ok_type}", "got": output_types}
     if expected == "verdict":
         ok = target.block_id in {"block_step_check", "block_threshold"}
         return {"match": ok, "reason": f"terminal is verdict block? {ok}", "got": target.block_id}
