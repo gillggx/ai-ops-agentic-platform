@@ -33,6 +33,7 @@ log = logging.getLogger("python_ai_sidecar.executor.real")
 SIDECAR_NATIVE_BLOCKS: frozenset[str] = frozenset({
     "block_process_history",   # httpx → OntologySim only
     "block_filter",
+    "block_find",
     "block_threshold",
     "block_count_rows",
     "block_consecutive_rule",

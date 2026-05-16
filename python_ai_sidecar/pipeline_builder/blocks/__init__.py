@@ -19,6 +19,7 @@ from python_ai_sidecar.pipeline_builder.blocks.delta import DeltaBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.ewma import EwmaBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.ewma_cusum import EwmaCusumBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.filter import FilterBlockExecutor
+from python_ai_sidecar.pipeline_builder.blocks.find import FindBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.groupby_agg import GroupByAggBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.heatmap_dendro import HeatmapDendroBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.histogram import HistogramBlockExecutor
@@ -60,6 +61,7 @@ from python_ai_sidecar.pipeline_builder.blocks.xbar_r import XbarRBlockExecutor
 BUILTIN_EXECUTORS: dict[str, type[BlockExecutor]] = {
     "block_process_history": ProcessHistoryBlockExecutor,
     "block_filter": FilterBlockExecutor,
+    "block_find": FindBlockExecutor,
     "block_join": JoinBlockExecutor,
     "block_groupby_agg": GroupByAggBlockExecutor,
     "block_shift_lag": ShiftLagBlockExecutor,
@@ -141,6 +143,7 @@ __all__ = [
     "EwmaCusumBlockExecutor",
     "StepCheckBlockExecutor",
     "FilterBlockExecutor",
+    "FindBlockExecutor",
     "GroupByAggBlockExecutor",
     "HeatmapDendroBlockExecutor",
     "HistogramBlockExecutor",

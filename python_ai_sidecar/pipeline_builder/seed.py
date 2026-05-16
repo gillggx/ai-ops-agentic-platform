@@ -321,6 +321,7 @@ def _blocks() -> list[dict[str, Any]]:
                 "- ✅ 「xbar 值超過 100」→ column='spc_xbar_chart_value', operator='>', value=100\n"
                 "- ❌ 多條件 AND/OR → 串多個 block_filter（目前不支援單一 block 內複合條件）\n"
                 "- ❌ 需要判斷 triggered (bool) + 輸出 evidence → 用 block_threshold，不是這個\n"
+                "- ❌ 「找最後一次 / 最早一筆 / top N by X」(filter + sort + 取 1 row) → 用 block_find 一步搞定\n"
                 "\n"
                 "== Params ==\n"
                 "column   (string, required) 要比較的欄位\n"
@@ -365,6 +366,89 @@ def _blocks() -> list[dict[str, Any]]:
                 },
             },
             "implementation": {"type": "python", "ref": "app.services.pipeline_builder.blocks.filter:FilterBlockExecutor"},
+            # v30.11 (2026-05-16): inline examples — LLM learns the per-operator
+            # value shape from data instead of guessing 'in'=string vs list etc.
+            "examples": [
+                {
+                    "title": "等於 string (最常見)",
+                    "params": {"column": "spc_status", "operator": "==", "value": "OOC"},
+                },
+                {
+                    "title": "in: value 必須是 list",
+                    "params": {"column": "toolID", "operator": "in",
+                               "value": ["EQP-01", "EQP-02", "EQP-03"]},
+                },
+                {
+                    "title": "數值比較",
+                    "params": {"column": "score", "operator": ">", "value": 100},
+                },
+                {
+                    "title": "boolean 欄位 (給 True/False，不是 'True')",
+                    "params": {"column": "is_ooc", "operator": "==", "value": True},
+                },
+                {
+                    "title": "contains substring (僅 string 欄)",
+                    "params": {"column": "recipe", "operator": "contains", "value": "ETCH"},
+                },
+            ],
+        },
+        {
+            "name": "block_find",
+            "version": "1.0.0",
+            "category": "transform",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "**1-block find specific rows** — filter by condition + optional sort + take first/last/all/N，"
+                "取代 filter+sort+limit 3 步常見組合。\n"
+                "\n"
+                "== Params ==\n"
+                "column     (string, required) 要比較的欄位 (支援 nested path e.g. 'spc_summary.ooc_count')\n"
+                "operator   (string, required) ==, =, !=, >, <, >=, <=, contains, in\n"
+                "value      (any, required) 比較值；operator='in' 時是 list；boolean 欄位請給 True/False\n"
+                "order_by   (string, optional) 排序欄位；省略 = 不排序 (input 順序)\n"
+                "order_dir  (enum 'asc'|'desc', default 'desc') 排序方向；常見 'desc' 取最新\n"
+                "take       (enum 'first'|'last'|'all' | int N, default 'all')\n"
+                "             - 'all' = 等價於 block_filter\n"
+                "             - 'first' = 取 1 row (sort 後的第一筆)\n"
+                "             - 'last'  = 取 1 row (sort 後的最後一筆)\n"
+                "             - int N   = 取 top N rows\n"
+                "\n"
+                "== Output ==\n"
+                "port: data (dataframe) — 過濾後 (可選排序、可選取 N) 的 rows\n"
+                "\n"
+                "== Errors ==\n"
+                "- COLUMN_NOT_FOUND  : column / order_by 名稱錯\n"
+                "- INVALID_PARAM     : take 不是 'first'/'last'/'all'/int N，或 order_dir 不是 'asc'/'desc'\n"
+            ),
+            "input_schema": [{"port": "data", "type": "dataframe"}],
+            "output_schema": [{"port": "data", "type": "dataframe"}],
+            "param_schema": {
+                "type": "object",
+                "required": ["column", "operator"],
+                "properties": {
+                    "column":    {"type": "string", "x-column-source": "input.data"},
+                    "operator":  {
+                        "type": "string",
+                        "enum": ["==", "=", "!=", ">", "<", ">=", "<=", "contains", "in"],
+                    },
+                    "value":     {},
+                    "order_by":  {"type": "string"},
+                    "order_dir": {
+                        "type": "string",
+                        "enum": ["asc", "desc"],
+                        "default": "desc",
+                    },
+                    "take": {
+                        "anyOf": [
+                            {"type": "string", "enum": ["first", "last", "all"]},
+                            {"type": "integer", "minimum": 1},
+                        ],
+                        "default": "all",
+                    },
+                },
+            },
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.find:FindBlockExecutor"},
         },
         {
             "name": "block_threshold",
@@ -502,6 +586,14 @@ def _blocks() -> list[dict[str, Any]]:
                 },
             },
             "implementation": {"type": "python", "ref": "app.services.pipeline_builder.blocks.count_rows:CountRowsBlockExecutor"},
+            # v30.11 (2026-05-16): no group_by → 1-row df with `count` 欄 = 語意上 scalar；
+            # 有 group_by → N-row table = transform。兩個 expected 都讓 verifier 接受，
+            # 否則 plan 寫「OOC 數量」(scalar phase) 走 count_rows 會被 rule-based gate
+            # 擋下，根本到不了 B2 LLM-judge。
+            "produces": {
+                "covers": ["scalar", "transform"],
+                "outcome_extractors": [],
+            },
         },
         {
             "name": "block_mcp_foreach",
@@ -1974,9 +2066,10 @@ def _blocks() -> list[dict[str, Any]]:
                 "多欄排序 + optional top-N cap。用於 ranking / leaderboard 場景。\n"
                 "\n"
                 "== When to use ==\n"
-                "- ✅ 「OOC 最多的 3 台機台」→ groupby_agg count → sort(desc) + limit=3\n"
-                "- ✅ 「按 eventTime asc 重排」→ columns=[{column:'eventTime', order:'asc'}]\n"
-                "- ✅ 多欄排序：先按 toolID asc 再按 eventTime desc\n"
+                "- ✅ 多欄排序：先按 toolID asc 再按 eventTime desc → 必須用我（block_find 只支援單欄）\n"
+                "- ✅ 「按 eventTime asc 重排整張表」(不過濾、不取 N) → 用我\n"
+                "- ✅ 「OOC 最多的 3 台機台」→ groupby_agg count → 我 sort(desc) + limit=3\n"
+                "- ❌ 「找最後一次 OOC / 最早一筆違規 / top N by X」(filter+sort+取 1 row) → 用 block_find，一步搞定\n"
                 "- ❌ 需要 is_rising / lag / delta → 用 block_delta / block_shift_lag（那些內含 sort）\n"
                 "- ❌ 過濾 rows（非排序取 top） → 用 block_filter\n"
                 "\n"
@@ -2001,9 +2094,11 @@ def _blocks() -> list[dict[str, Any]]:
                 "set_param 會在你寫錯時丟 COLUMN_NOT_IN_UPSTREAM；hint 列出真實 columns。\n"
                 "\n"
                 "== Common mistakes ==\n"
+                "⚠ **必填 param 叫 `columns` (複數，list of objects)，不是 `column`**。寫 `column='eventTime'` 會 INVALID_SORT_SPEC\n"
                 "⚠ columns 是 list of objects，不是 list of strings\n"
                 "⚠ order 拼錯（'descending' / 'DESC'）會被預設成 'asc'\n"
                 "⚠ limit 不是 top；是 head(N) — 要 top 請先 desc 排序再 limit\n"
+                "⚠ 「找最後一次 X」這種 1-row 需求**不要用我**，請改 block_find（避免 LLM 漏寫 limit=1 拿到全表）\n"
                 "⚠ NaN 預設排到最後（pandas 行為）\n"
                 "\n"
                 "== Errors ==\n"
