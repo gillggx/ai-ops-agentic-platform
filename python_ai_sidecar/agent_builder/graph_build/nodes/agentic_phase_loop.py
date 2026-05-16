@@ -557,6 +557,88 @@ def _build_catalog_brief() -> str:
 _CATALOG_BRIEF_CACHE: str | None = None
 
 
+# v30.2 (2026-05-16): cap how many composite candidates to list. More than
+# 3 dilutes the signal; 1 alone risks looking like a recommendation rather
+# than an enumeration.
+_ONEBLOCK_MAX_CANDIDATES = 3
+
+
+def _build_oneblock_solutions_section(
+    current_phase: dict, remaining_phases: list[dict],
+) -> str:
+    """Compute server-detected 1-block solutions for current + remaining
+    phases. Returns the rendered SOLUTIONS section, or empty string when
+    no composite block has fast-forward potential.
+
+    A "solution" is a block whose `produces.covers` includes
+    current_phase.expected AND at least one remaining phase's expected
+    (so the LLM actually saves rounds by picking it).
+
+    Validated via tools/trace_replay (2026-05-16, EQP-08 p1 r1):
+      identity / enrich_catalog_brief / rewrite_phase_goal_generic:
+        3/3 picks = block_process_history (no shift)
+      THIS section prepended: 3/3 picks = block_spc_panel
+
+    LLM literally cites the section text in its reasoning.
+    """
+    from python_ai_sidecar.pipeline_builder.seedless_registry import (
+        SeedlessBlockRegistry,
+    )
+    from python_ai_sidecar.agent_builder.graph_build.nodes.phase_verifier import (
+        _infer_covers_from_block_spec,
+    )
+
+    cur_expected = (current_phase.get("expected") or "").strip()
+    if not cur_expected:
+        return ""
+
+    registry = SeedlessBlockRegistry()
+    registry.load()
+
+    solutions: list[tuple[str, list[str], list[str]]] = []
+    for (name, _v), spec in registry.catalog.items():
+        if str(spec.get("status") or "").lower() == "deprecated":
+            continue
+        covers = list((spec.get("produces") or {}).get("covers") or [])
+        if not covers:
+            covers = _infer_covers_from_block_spec(spec)
+        if cur_expected not in covers:
+            continue
+        ff_ids: list[str] = []
+        for nxt in remaining_phases:
+            nxt_exp = (nxt.get("expected") or "").strip()
+            if nxt_exp and nxt_exp in covers:
+                ff_ids.append(nxt.get("id"))
+            else:
+                break  # contiguous-only chain (matches verifier semantics)
+        if ff_ids:
+            solutions.append((name, ff_ids, covers))
+
+    if not solutions:
+        return ""
+
+    solutions.sort(key=lambda t: (-len(t[1]), t[0]))
+    cur_id = current_phase.get("id") or "current"
+    out_lines = [
+        "== 1-BLOCK SOLUTIONS (server-detected; verifier-confirmed) ==",
+        "下列 block 一次 add_node 即可同時完成當前 phase + 後續多 phase，",
+        "由 server 比對 phase.expected 與 block.produces.covers 算出（事實，非建議）。",
+        "**優先評估這些 candidate**；選了之後 verifier 會自動 fast-forward 通過後續 phase。",
+    ]
+    for name, ff_ids, covers in solutions[:_ONEBLOCK_MAX_CANDIDATES]:
+        chain = f"{cur_id}+{'+'.join(ff_ids)}"
+        n_chain = len(ff_ids) + 1
+        out_lines.append(
+            f"  {name}  → 同時涵蓋 {chain} ({n_chain} phases)  "
+            f"[block.produces.covers = {'+'.join(covers)}]"
+        )
+    out_lines.append(
+        "若這些都不適用（e.g. user 要求的細節超過 composite 的能力），"
+        "再走逐 phase 拼 transform/filter/chart 的傳統路徑。"
+    )
+    return "\n".join(out_lines)
+
+
 def _build_canvas_diff_md(pipeline: PipelineJSON, phase: dict) -> str:
     """Compact canvas snapshot for the post-action user message.
 
@@ -582,6 +664,19 @@ def _build_observation_md(state: BuildGraphState, phase: dict) -> str:
     """Assemble the prompt user content for current round."""
     lines: list[str] = []
 
+    # v30.2 (2026-05-16): TOP-of-prompt 1-block solutions section.
+    # When a composite block (covers >= 2 phase kinds, with at least one
+    # remaining phase also covered) can satisfy current + next N phases,
+    # surface it here BEFORE the phase goal text. Validated via
+    # tools/trace_replay 3-rep A/B: only this placement (vs catalog-brief
+    # enrichment or goal-text rewrite) actually shifts LLM picks.
+    phases = state.get("v30_phases") or []
+    idx = state.get("v30_current_phase_idx", 0)
+    one_block_section = _build_oneblock_solutions_section(phase, phases[idx + 1:])
+    if one_block_section:
+        lines.append(one_block_section)
+        lines.append("")
+
     # Phase goal (user-confirmed — must follow)
     lines.append("== CURRENT PHASE (user-confirmed; do not deviate) ==")
     lines.append(f"id: {phase.get('id')}")
@@ -592,8 +687,6 @@ def _build_observation_md(state: BuildGraphState, phase: dict) -> str:
     lines.append("")
 
     # All phases context
-    phases = state.get("v30_phases") or []
-    idx = state.get("v30_current_phase_idx", 0)
     lines.append("== ALL PHASES CONTEXT ==")
     for i, p in enumerate(phases):
         marker = " <-- you are here" if i == idx else ""
