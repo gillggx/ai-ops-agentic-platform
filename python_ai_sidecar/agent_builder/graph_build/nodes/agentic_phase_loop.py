@@ -333,20 +333,12 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
         "result_digest": result_digest,
     }]
 
-    state_update: dict[str, Any] = {
-        "v30_phase_round": round_n + 1,
-        "v30_phase_recent_actions": new_recent,
-        "v30_phase_messages": new_msgs,
-        "final_pipeline": new_pipeline_dict,
-    }
-
     # v30 C-A2: append assistant(tool_use) + user(tool_result + fresh obs diff)
-    # to preserve conversation continuity and refresh observation each round.
+    # to preserve conversation continuity. MUST run before state_update
+    # since state_update references new_msgs.
     if assistant_content:
         phase_messages.append({"role": "assistant", "content": assistant_content})
     if tool_use_id:
-        # Tool result + a brief refresh of canvas state (so LLM sees changes
-        # without losing turn ordering — Anthropic forbids 2 user msgs in a row).
         result_digest_text = _make_result_digest(tool_name, action_result)
         canvas_diff_text = _build_canvas_diff_md(transient.pipeline_json, phase)
         phase_messages.append({
@@ -357,11 +349,18 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
                 {"type": "text", "text": canvas_diff_text},
             ],
         })
-    # Cap message stack length to avoid runaway token use (max ~16 turns).
+    # Cap message stack to avoid runaway token use (~16 round-trips).
     if len(phase_messages) > 32:
         phase_messages = phase_messages[-32:]
     new_msgs = dict(state.get("v30_phase_messages") or {})
     new_msgs[pid] = phase_messages
+
+    state_update: dict[str, Any] = {
+        "v30_phase_round": round_n + 1,
+        "v30_phase_recent_actions": new_recent,
+        "v30_phase_messages": new_msgs,
+        "final_pipeline": new_pipeline_dict,
+    }
 
     # Pipeline snapshot for frontend canvas re-render after canvas-mutating
     # actions. Cheap (just dump model). Skip for inspect_* / phase_complete.
