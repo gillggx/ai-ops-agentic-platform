@@ -543,3 +543,77 @@ POC 驗證 5 case，每 case 跑 5 次：
 - Phase outcome 的 `expected` 7 種類別夠不夠
 - Handover 的 4 options 要不要增減
 - Trace 的 `observation_md` 要 inline 還是 by-reference
+
+---
+
+## Post-ship incremental updates (2026-05-16 ~)
+
+### v30.10 — B2 LLM-judge verifier (2026-05-16)
+
+**Problem**: Rule-based verifier accepted any block whose `produces.covers` ⊇ `phase.expected` with `rows ≥ 1`. EQP-08 p2 (「找最後一次 OOC」) advanced with 87 rows because rule-based check has no semantic notion of "最後".
+
+**Fix**: `phase_verifier_node._llm_judge_phase_outcome()` — cheap LLM call after rule-based check passes, evaluates `expected_output.value_desc` semantics with strict quantifier rules:
+
+- value_desc 含「最後一次/latest/last/first/第一筆」→ 必須 `total rows == 1`
+- value_desc 含「N 張/N 個/N 筆」→ 必須 `rows >= N`
+- value_desc 含「所有/all/list/清單」→ 必須 `rows >= 2`
+- value_desc 寫「一個數值/數量/count」→ 必須是 scalar
+
+State: writes `v30_last_judge_reject_reason` on judge reject; surfaced in next round's observation so LLM can adjust. Verified in EQP-08 trace: rejected 13-row "last OOC" → LLM added sort+limit=1 → judge passed.
+
+### v30.11 — block_find + count_rows.covers + filter examples (2026-05-16)
+
+**block_find** (new) — `python_ai_sidecar/pipeline_builder/blocks/find.py`:
+- Params: `column, operator, value, order_by?, order_dir? (asc|desc, default desc), take? ('first'|'last'|'all'|<int N>, default 'all')`
+- Collapses common "filter + sort + take 1" pattern that LLM frequently splits into 3 nodes (often dropping the sort, causing 假性 advance)
+- Boot invariant: 55 builtin / 55 native / 55 in seed / 55 in DB
+- Flyway V47
+
+**block_count_rows.produces.covers = ["scalar", "transform"]** — was inferred-only as `["transform"]`, rule-based gate blocked scalar phases. Sidecar-only (no DB col).
+
+**block_filter.examples[]** — 5 inline examples (==/in list/numeric/bool True/contains). Pattern matches `block_sort`'s earlier fix (Phase 11 v15). Plus cross-ref to `block_find` in `When to use`. Flyway V48.
+
+**block_sort description tightening** — explicit "use `columns` (plural list of {column, order}) NOT `column`" warning + cross-ref to `block_find` for 1-row needs. Flyway V48.
+
+### v30.12 — Matched-only CONNECT OPTIONS view (2026-05-17)
+
+**Problem**: At EQP-08 p5 (alarm), LLM tried `connect(from_node=n6, to_node=n7)` repeatedly with default ports `data→data`, then hallucinated `from_port=verdict`. `block_step_check` outputs port `check` (not `data`), `block_alert` inputs are `triggered:bool` + `evidence:dataframe` (not `data`). Plain CANVAS NOW snapshot showed nodes + params + edges but not port schemas → LLM had no reference when picking ports.
+
+**Fix**: `agentic_phase_loop._build_connect_options_md(pipeline)` — for each node with unfilled input ports, emit a section listing **type-compatible source ports only** (scanned across all pipeline nodes; allows fan-out). When no compatible source exists, mark `[NO COMPATIBLE SOURCE]` + list blocks producing the needed type.
+
+Wired into:
+- `_build_canvas_diff_md` (post-action message, rounds 2+)
+- `_build_observation_md` (round 1 of each phase — pipeline may already carry prior phases' nodes)
+
+Example output:
+```
+== CONNECT OPTIONS for n7 (block_alert) ==
+n7.triggered (bool):
+  [NO COMPATIBLE SOURCE in current pipeline]
+  Need to add an intermediate block first. Blocks that output type=bool:
+    block_any_trigger, block_consecutive_rule, block_threshold, block_weco_rules
+n7.evidence (dataframe):
+  Compatible sources (pick semantically; fan-out OK):
+    n1.data   [block_process_history]  (dataframe)
+    n3.data   [block_unnest]            (dataframe)
+    n4.data   [block_filter]            (dataframe)
+    ...
+```
+
+**Validation** (`tools/trace_replay` 3-rep A/B at EQP-08 p5 r3):
+- baseline (identity): 0/3 architecturally correct picks
+- inject_pipeline_lineage (raw port info): 0/3 — knew port names but still tried type-mismatched connects
+- inject_matched_connect_options: **3/3** — added `block_threshold` as Logic Node OR inspected first
+
+**E2e EQP-08 confirmed**: p5 LLM now correctly:
+1. Adds `block_threshold` first (recognizes "NO COMPATIBLE SOURCE for triggered:bool")
+2. `connect from_port=check, to_port=data` (n6→n7) on first try
+3. `connect from_port=triggered, to_port=triggered` (n7→n8) on first try
+4. `connect from_port=evidence, to_port=evidence` (n7→n8) on first try — fan-out evidence port
+
+Token cost: +211 in tokens / round, but output tokens shrink (258 vs 460 baseline) because LLM stops trial-and-erroring.
+
+### Open follow-ups (project memory)
+
+- **`project_alarm_vs_display_decouple.md`** — alarm phase and "show evidence to user" are distinct concerns; goal_plan currently mixes them, causing alert.evidence wiring confusion. May need: separate alarm_emit vs alarm_display kinds, or rewrite block_alert description to split responsibility clearly.
+- **`project_rag_for_llm_lookups.md`** — push-everything (catalog brief, runtime schema, connect options) approaches context limits + cache miss. Next architectural step: RAG tools `query_blocks(nl_query)` / `query_columns(node, nl_query)` / `query_connectable_sources(dest_node, dest_port, semantic)` so LLM pulls what it needs instead of receiving dumps. Matched-only view is the stepping stone proving "graph-side compute + LLM picks semantically" is the right axis.

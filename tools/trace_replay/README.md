@@ -33,6 +33,10 @@ python -m tools.trace_replay \
 | `enrich_catalog_brief` | Adds `[1-BLOCK covers N: ...]` prefix to composite blocks (covers ≥ 2). |
 | `rewrite_phase_goal_generic` | Strips `process_history` / `spc_summary` / `block_xxx` tokens from CURRENT PHASE goal text. Tests whether goal-text leakage anchors LLM. |
 | `prepend_oneblock_solutions` | Prepends a server-detected "== 1-BLOCK SOLUTIONS ==" section listing composite blocks that fast-forward through current + upcoming phases. |
+| `clarify_spc_status_enum` | Overrides the spc_status column hint to make the enum {PASS, OOC, ALERT} explicit (instead of LLM inferring 'PASS' = 5 from sample). |
+| `remove_spc_summary_expand_spc_charts` | Strips `spc_summary` references; expands `spc_charts` description so LLM uses unnest path instead of precomputed cache. |
+| `inject_pipeline_lineage` | Appends raw per-node `in_ports / out_ports` schema to each CANVAS NOW line. Diagnostic for "does LLM know port names exist?" (Phase A1 ancestor — superseded by `inject_matched_connect_options`). |
+| `inject_matched_connect_options` | Emits `== CONNECT OPTIONS for nX ==` showing only TYPE-COMPATIBLE source ports per un-connected input. Shipped as v30.12 in `agentic_phase_loop` (2026-05-17). Hypothesis: graph-side type check + LLM picks semantically. Validated 3/3 vs 0/3 baseline on EQP-08 p5 r3. |
 
 ## Writing a new variant
 

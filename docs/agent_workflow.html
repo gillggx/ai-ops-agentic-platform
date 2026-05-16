@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
 <meta charset="utf-8" />
-<title>AIOps Agent Workflow (v18 · 2026-05-14)</title>
+<title>AIOps Agent Workflow (v30.12 · 2026-05-17)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <style>
@@ -98,11 +98,14 @@
 <body>
 <div class="container">
 
-  <span class="badge">v18 · 2026-05-14</span>
+  <span class="badge">v30.12 · 2026-05-17</span>
   <h1>AIOps Agent Workflow</h1>
   <div class="lead">
     三個 agent surface 共用 <code>python_ai_sidecar</code>，但進入不同 orchestrator。
     本文聚焦 <strong>Builder graph</strong>（最複雜），Chat 跟 Advisor 在後段簡述。
+    <br/>
+    <strong>v30 (2026-05-16~)</strong> 引入 Goal-Oriented ReAct Builder（goal_plan + agentic_phase_loop + B2 LLM-judge verifier）。
+    詳細 SPEC 見 <code>docs/spec_v30_react_pipeline_builder.md</code>；下方 §10 摘要 v30 路徑。
   </div>
   <div class="meta">
     sources: <code>graph_build/graph.py</code>, <code>graph_build/nodes/*</code>,
@@ -120,6 +123,7 @@
     <a href="#advisor">7. Block Advisor</a>
     <a href="#status">8. Status 語義</a>
     <a href="#files">9. Code 位置</a>
+    <a href="#v30">10. v30 ReAct Builder (current)</a>
   </div>
 
   <h2 id="routing">1. Routing entrypoint</h2>
@@ -296,6 +300,53 @@ flowchart LR
     </tbody>
   </table>
 
+  <h2 id="v30">10. v30 ReAct Builder (current, 2026-05-16~)</h2>
+  <div class="card mermaid-host">
+  <pre class="mermaid">
+flowchart LR
+    Build["/internal/agent/build<br/>(v30_mode=true)"] --> Classify["classify_advisor_intent"]
+    Classify --> GP["goal_plan_node<br/>(LLM 1 — intent-only phases)"]
+    GP --> GPCG["goal_plan_confirm_gate<br/>(interrupt → /plan-confirm)"]
+    GPCG --> APL["agentic_phase_loop_node<br/>(ReAct, max 8 rounds/phase)"]
+    APL --> Verifier["phase_verifier_node<br/>(rule + B2 LLM-judge)"]
+    Verifier -->|pass| APL_next["Advance phase"]
+    Verifier -->|fail| Revise["phase_revise_node<br/>(LLM diag + alt plan)"]
+    Revise --> APL
+    APL_next --> Done{All phases done?}
+    Done -->|no| APL
+    Done -->|yes| Finalize["finalize_node (dry-run)"]
+    Revise -->|budget exhausted| Handover["halt_handover_node<br/>(interrupt → /handover)"]
+  </pre>
+  </div>
+
+  <table>
+    <thead><tr><th>Sub-update</th><th>When</th><th>What</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>v30 base</td><td>2026-05-16</td>
+        <td>goal_plan (5-7 phases, block-agnostic) + agentic_phase_loop ReAct (inspect_doc/add_node/connect/set_param/phase_complete tools) + phase_verifier + halt/handover</td>
+      </tr>
+      <tr>
+        <td>v30.10 B2 LLM-judge</td><td>2026-05-16</td>
+        <td>Verifier no longer accepts rule-based (<code>covers+rows≥1</code>) alone. LLM judge checks <code>expected_output.value_desc</code> with strict quantifier rules (「最後/last」→ rows==1, 「N 張/筆」→ rows≥N, 「所有/all」→ rows≥2). Catches 假性 advance.</td>
+      </tr>
+      <tr>
+        <td>v30.11 block_find + covers fixes</td><td>2026-05-16</td>
+        <td>New <code>block_find</code> (filter + sort + take first/last/all/N) collapses "find latest matching" 3-step pattern. <code>block_count_rows.covers=[scalar, transform]</code>. <code>block_filter</code> gains 5 inline examples; sort/filter descriptions cross-ref find. Flyway V47/V48.</td>
+      </tr>
+      <tr>
+        <td>v30.12 matched-only CONNECT OPTIONS</td><td>2026-05-17</td>
+        <td><code>agentic_phase_loop._build_connect_options_md()</code> appends per-node <code>== CONNECT OPTIONS for nX ==</code> listing only TYPE-COMPATIBLE source ports. When no source matches: <code>[NO COMPATIBLE SOURCE]</code> + producer block hints. Validated via <code>tools/trace_replay</code> 3-rep A/B at EQP-08 p5 r3: baseline 0/3 correct → matched-only 3/3. Eliminates port-name hallucinations.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <span class="label">Known follow-ups</span>
+    <strong>Alarm vs display decoupling</strong>: goal_plan currently mixes "trigger alarm" and "show evidence to user" in one phase, causing block_alert wiring confusion. See memory <code>project_alarm_vs_display_decouple.md</code>.<br/>
+    <strong>RAG-tools migration</strong>: push-everything (catalog brief + lineage + connect options) approaches context cap; next step is LLM-pulled <code>query_blocks</code> / <code>query_columns</code> / <code>query_connectable_sources</code>. See memory <code>project_rag_for_llm_lookups.md</code>.
+  </div>
+
   <div class="note">
     <span class="label">注意</span>
     這份 HTML 跟 <code>docs/agent_workflow.md</code> 是同一份內容、互為對照。
@@ -304,7 +355,7 @@ flowchart LR
   </div>
 
   <div class="meta" style="margin-top:32px;">
-    Generated 2026-05-14 · Maintained alongside <code>agent_workflow.md</code>
+    Generated 2026-05-14 · v30 section appended 2026-05-17 · Maintained alongside <code>agent_workflow.md</code>
   </div>
 
 </div>

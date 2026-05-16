@@ -81,6 +81,26 @@ v18 bullets extended to chat mode. See section 5 below.
 ### Phase 8-A-2 — Block panels SPC/APC (2026-05-14)
 Composite blocks `block_spc_panel` + `block_apc_panel` — give `tool_id + step + chart_name + time_range` and they self-fetch + render. Replaces error-prone 4-block compositions that routinely collapsed to 1-point charts. Multi-machine comparison via `color_by='toolID'`. Green value / orange UCL/LCL defaults.
 
+### v30 — Goal-Oriented ReAct Pipeline Builder (2026-05-16/17)
+
+Replaces v27 `macro_plan + compile_chunk × N` with two-stage:
+- `goal_plan_node` emits 5-7 intent-only phases (block-agnostic; `expected` ∈ raw_data/transform/scalar/verdict/chart/table/alarm)
+- `agentic_phase_loop` runs a ReAct loop per phase (inspect_doc / add_node / connect / set_param / phase_complete) with `phase_verifier_node` + B2 LLM-judge gating advance
+
+Canonical SPEC: [docs/spec_v30_react_pipeline_builder.md](./spec_v30_react_pipeline_builder.md).
+
+Incremental updates this week:
+
+- **v30.10 (2026-05-16) B2 LLM-judge** — verifier no longer accepts `covers+rows≥1` alone; an LLM judge checks `expected_output.value_desc` semantics with strict quantifier rules (「最後/last/first」→ must be rows==1; 「N 張/筆」→ rows≥N). Catches 假性 advance (e.g. 87 OOC rows passing a "last 1" phase).
+- **v30.11 (2026-05-16) block_find + count_rows.covers + filter examples** — new `block_find` (filter + optional sort + take first/last/all/N) collapses the 3-step "find latest matching" pattern; `block_count_rows.covers=[scalar, transform]` so rule-based gate no longer blocks scalar phases; `block_filter` got an `examples[]` array (LLM learns shape from data); `block_sort` description tightened to cross-ref `block_find` for single-column 1-row cases. Flyway V47/V48 (manual psql on EC2 — Flyway disabled in prod).
+- **v30.12 (2026-05-17) matched-only CONNECT OPTIONS view** — `agentic_phase_loop._build_canvas_diff_md` + `_build_observation_md` now surface a `== CONNECT OPTIONS for nX ==` section per node with un-connected input ports: lists ONLY type-compatible source ports across the pipeline; emits `[NO COMPATIBLE SOURCE]` + producer-block hints when none. Hypothesis-tested via `tools/trace_replay` (3 reps each at EQP-08 p5 r3): baseline 0/3 → matched-only 3/3 architecturally correct. E2e EQP-08 confirms LLM now picks Logic Node + port names 100% on first try; previous "from_port=verdict / to_port=data" hallucinations eliminated.
+
+Trace tool: [tools/trace_replay/](../tools/trace_replay/) — controlled-variant LLM replay harness, new variants `inject_pipeline_lineage` + `inject_matched_connect_options`.
+
+Open follow-ups (memory):
+- `project_alarm_vs_display_decouple.md` — goal_plan should not mix alarm trigger + user presentation in one phase
+- `project_rag_for_llm_lookups.md` — RAG tools (`query_blocks` / `query_columns` / `query_connectable_sources`) to replace push-everything catalog over time
+
 ---
 
 ## 4. v18 — Reject-and-ask loop + Intent bullets
@@ -226,6 +246,8 @@ v19 bullets DO fire here. Skill Builder is fully working; chat is the open item.
 | V44 | 2026-05-13 | `show_means_visualize` agent_knowledge rule |
 | V45 | 2026-05-14 | `block_spc_panel` + `block_apc_panel` catalog entries |
 | V46 | 2026-05-14 | Panel blocks source-mode + color params update |
+| V47 | 2026-05-16 | `block_find` — filter + (optional) sort + take first/last/all/N |
+| V48 | 2026-05-16 | block_filter examples + block_sort description tightening (cross-ref block_find) |
 
 **Important**: Flyway auto-run disabled in EC2 prod. Apply manually:
 ```bash
