@@ -99,10 +99,19 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
         # current phase being advanced); FF claim is enough for follow-ups
         # because their value_desc may not be matchable from same sample row.
         if cur == idx:
+            logger.info(
+                "phase_verifier: invoking LLM-judge for phase %s (block=%s rows=%s)",
+                phase.get("id"), block_id, rows,
+            )
             try:
                 judge = await _llm_judge_phase_outcome(
                     phase=phase, snapshot=snapshot,
                     preview_blob=preview_blob, block_id=block_id, rows=rows,
+                )
+                logger.info(
+                    "phase_verifier: LLM-judge for phase %s -> match=%s reason=%s",
+                    phase.get("id"), judge.get("match"),
+                    str(judge.get("reason") or "")[:80],
                 )
             except Exception as ex:  # noqa: BLE001 — fail-safe: advance on judge error
                 logger.info("phase_verifier: LLM-judge errored, defaulting to advance: %s", ex)
