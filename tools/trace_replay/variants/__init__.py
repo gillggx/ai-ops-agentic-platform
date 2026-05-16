@@ -18,6 +18,7 @@ from .catalog_brief import enrich_catalog_brief
 from .phase_goal import rewrite_phase_goal_generic
 from .prepend import prepend_oneblock_solutions
 from .spc_status_enum import clarify_spc_status_enum
+from .remove_spc_summary import remove_spc_summary_expand_spc_charts
 
 
 VARIANT_REGISTRY = {
@@ -26,6 +27,7 @@ VARIANT_REGISTRY = {
     "rewrite_phase_goal_generic": rewrite_phase_goal_generic,
     "prepend_oneblock_solutions": prepend_oneblock_solutions,
     "clarify_spc_status_enum": clarify_spc_status_enum,
+    "remove_spc_summary_expand_spc_charts": remove_spc_summary_expand_spc_charts,
 }
 
 
