@@ -75,23 +75,49 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
     covers = _resolve_covers(block_spec, kind="output")
     extractors = (block_spec.get("produces") or {}).get("outcome_extractors") or []
 
-    # Walk phases starting at current; advance while block covers
+    # Walk phases starting at current; advance while block covers AND
+    # LLM-judge confirms the output really satisfies phase.expected_output
+    # (v30.10 B2: semantic check on top of rule-based).
     advanced: list[dict[str, Any]] = []
+    judge_reject_reason: str | None = None
     cur = idx
     while cur < len(phases) and len(advanced) < MAX_FAST_FORWARD_CHAIN:
         phase = phases[cur]
         ph_expected = (phase.get("expected") or "").strip()
         if ph_expected not in covers:
             break
-        # Quality gate: data-bearing phases must have rows>=1.
-        # (raw_data/transform/table) Without this, an empty filter would
-        # pass verifier and fast-forward through downstream phases.
+        # Rule-based quality gate: data-bearing phases must have rows>=1.
         if ph_expected in {"raw_data", "transform", "table"} and (rows is None or rows < 1):
             logger.info(
                 "phase_verifier: phase %s expected=%s but rows=%s — block %s NOT counted",
                 phase.get("id"), ph_expected, rows, block_id,
             )
             break
+
+        # v30.10 B2: LLM-judge semantic check (covers expected_output.value_desc)
+        # Skip judge for the FAST-FORWARD downstream phases (only judge the
+        # current phase being advanced); FF claim is enough for follow-ups
+        # because their value_desc may not be matchable from same sample row.
+        if cur == idx:
+            try:
+                judge = await _llm_judge_phase_outcome(
+                    phase=phase, snapshot=snapshot,
+                    preview_blob=preview_blob, block_id=block_id, rows=rows,
+                )
+            except Exception as ex:  # noqa: BLE001 — fail-safe: advance on judge error
+                logger.info("phase_verifier: LLM-judge errored, defaulting to advance: %s", ex)
+                judge = {"match": True, "reason": "(judge errored, defaulted advance)",
+                         "extracted": {}}
+            if not judge.get("match"):
+                judge_reject_reason = str(judge.get("reason") or "no reason given")
+                logger.info(
+                    "phase_verifier: LLM-judge REJECTED phase %s — %s",
+                    phase.get("id"), judge_reject_reason[:120],
+                )
+                break
+        else:
+            judge = {"match": True, "reason": "(FF downstream — judge skipped)", "extracted": {}}
+
         outcome = _extract_outcome(phase, snapshot, preview_blob, extractors, block_id)
         advanced.append({
             "id": phase["id"],
@@ -99,6 +125,9 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
             "goal": phase.get("goal"),
             "outcome": outcome["text"],
             "evidence": outcome["evidence"],
+            "llm_summary": judge.get("reason"),
+            "llm_extracted": judge.get("extracted") or {},
+            "plan_target": phase.get("expected_output") or {},
         })
         cur += 1
 
@@ -150,12 +179,15 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
             # Clear handoff fields so next round can fill them again
             "v30_last_mutated_logical_id": None,
             "v30_last_preview": None,
+            # v30.10 B2: surface LLM-judge reject reason for next round prompt
+            "v30_last_judge_reject_reason": judge_reject_reason,
             "sse_events": [_event("phase_verifier_no_match", {
                 "current_phase_id": phases[idx].get("id"),
                 "expected": phases[idx].get("expected"),
                 "block_id": block_id,
                 "covers": covers,
                 "rows": rows,
+                "judge_reject_reason": judge_reject_reason,
             })],
         }
 
@@ -169,6 +201,10 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
             "advanced_by_block": block_id,
             "advanced_by_node": real_id,
             "auto_completed": True,
+            # v30.10 B2: LLM-judge enriched outcome (propagates to next phase)
+            "llm_summary": adv.get("llm_summary"),
+            "llm_extracted": adv.get("llm_extracted") or {},
+            "plan_target": adv.get("plan_target") or {},
         }
 
     new_idx = idx + len(advanced)
@@ -194,6 +230,8 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
         "v30_phase_messages": cleared_msgs,
         "v30_last_mutated_logical_id": None,
         "v30_last_preview": None,
+        # Clear judge reject reason now that phase advanced cleanly
+        "v30_last_judge_reject_reason": None,
     }
 
     # Fast-forward report when >= 2 phases at once — user-visible card
@@ -311,6 +349,105 @@ def _infer_covers_from_block_spec(spec: dict) -> list[str]:
     if any(t == "dataframe" for t in out_types):
         return ["transform"]
     return []
+
+
+async def _llm_judge_phase_outcome(
+    phase: dict,
+    snapshot: dict,
+    preview_blob: dict,
+    block_id: str | None,
+    rows: int | None,
+) -> dict[str, Any]:
+    """v30.10 B2: ask LLM whether the terminal node's output actually
+    satisfies phase.expected_output.value_desc (semantic check on top of
+    rule-based covers/rows check).
+
+    Returns: {"match": bool, "reason": str, "extracted": dict<outcome_key, value>}.
+    On error, defaults to match=True (don't block phase on judge failure).
+    """
+    from python_ai_sidecar.agent_helpers_native.llm_client import get_llm_client
+    import re
+
+    eo = phase.get("expected_output") or {}
+    value_desc = eo.get("value_desc") or "(unspecified)"
+    outcome_keys = eo.get("outcome_keys") or []
+    criterion = eo.get("criterion") or ""
+
+    # Extract one sample row from preview for the judge to inspect
+    sample_row: Any = None
+    for _port, blob in (preview_blob or {}).items():
+        if not isinstance(blob, dict):
+            continue
+        if blob.get("type") == "dataframe":
+            rs = (
+                blob.get("sample_rows") or blob.get("rows_sample")
+                or blob.get("rows") or []
+            )
+            if rs and isinstance(rs[0], dict):
+                # Trim heavy nested dicts to keep judge prompt compact
+                first = rs[0]
+                sample_row = {}
+                for k, v in list(first.items())[:20]:
+                    if isinstance(v, dict) and len(v) > 5:
+                        sample_row[k] = f"<dict {len(v)} keys: {list(v.keys())[:4]}...>"
+                    elif isinstance(v, list) and len(v) > 3:
+                        sample_row[k] = f"<list[{len(v)}] first: {v[0] if v else None}>"
+                    else:
+                        sample_row[k] = v
+                break
+        if blob.get("type") in ("dict", "chart_spec"):
+            snap = blob.get("snapshot") or blob
+            if isinstance(snap, dict):
+                sample_row = {k: snap.get(k) for k in list(snap.keys())[:8]}
+                break
+
+    import json as _json
+    sample_json = (_json.dumps(sample_row, ensure_ascii=False, default=str)[:600]
+                   if sample_row else "(no sample available)")
+
+    system_prompt = (
+        "你是 pipeline phase outcome 判定者。輸出純 JSON 物件 (no markdown fence)，"
+        "schema: {\"match\": bool, \"reason\": \"<100 字以內為何 match/not\", "
+        "\"extracted\": {<outcome_key>: <value_or_null>}}。"
+        "判斷時特別注意 value_desc 裡的「最後一次/last/first/all/N 張」這類量詞。"
+    )
+    user_prompt = (
+        f"Phase: {phase.get('id')}\n"
+        f"Goal: {phase.get('goal')}\n"
+        f"Expected output spec:\n"
+        f"  value_desc: {value_desc}\n"
+        f"  outcome_keys: {outcome_keys}\n"
+        + (f"  criterion: {criterion}\n" if criterion else "")
+        + f"\nTerminal node:\n"
+        f"  block_id: {block_id}\n"
+        f"  total rows: {rows}\n"
+        f"  sample row: {sample_json}\n\n"
+        f"問: 這 output 是否真的滿足 expected_output.value_desc?\n"
+    )
+
+    client = get_llm_client()
+    resp = await client.create(
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_prompt}],
+        max_tokens=512,
+    )
+    raw = (resp.text or "").strip()
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.DOTALL).strip()
+    try:
+        parsed = _json.loads(text)
+    except Exception:
+        # Last resort: extract first json object
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        parsed = _json.loads(m.group(0)) if m else {}
+
+    if not isinstance(parsed, dict):
+        return {"match": True, "reason": "(judge returned non-dict, default advance)",
+                "extracted": {}}
+    return {
+        "match": bool(parsed.get("match", True)),
+        "reason": str(parsed.get("reason") or "")[:200],
+        "extracted": parsed.get("extracted") or {},
+    }
 
 
 def _extract_outcome(

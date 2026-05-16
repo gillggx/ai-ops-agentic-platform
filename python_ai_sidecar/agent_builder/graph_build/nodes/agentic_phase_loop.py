@@ -850,6 +850,35 @@ def _build_observation_md(state: BuildGraphState, phase: dict) -> str:
         lines.append(one_block_section)
         lines.append("")
 
+    # v30.10 B2: previous phases' actual outcomes (LLM-judge confirmed).
+    # Shows LLM what each completed phase REALLY produced + which node is
+    # the official upstream, avoiding re-derivation from canvas state.
+    outcomes = state.get("v30_phase_outcomes") or {}
+    completed = [
+        (p, outcomes[p["id"]]) for p in phases[:idx]
+        if outcomes.get(p["id"], {}).get("status") == "completed"
+    ]
+    if completed:
+        lines.append("== COMPLETED PHASES (per plan + actual, LLM-judge confirmed) ==")
+        for p, oc in completed:
+            target = (p.get("expected_output") or {}).get("value_desc") or "(no target spec)"
+            block = oc.get("advanced_by_block") or "?"
+            node = oc.get("advanced_by_node") or "?"
+            summary = oc.get("llm_summary") or oc.get("rationale") or ""
+            extracted = oc.get("llm_extracted") or {}
+            ex_str = ""
+            if extracted:
+                ex_parts = [f"{k}={v}" for k, v in list(extracted.items())[:4] if v is not None]
+                if ex_parts:
+                    ex_str = "  " + ", ".join(ex_parts)
+            lines.append(
+                f"  {p['id']}: target={target[:80]}"
+            )
+            lines.append(
+                f"      → {node} [{block}]  {summary[:120]}{ex_str}"
+            )
+        lines.append("")
+
     # Phase goal (user-confirmed — must follow)
     lines.append("== CURRENT PHASE (user-confirmed; do not deviate) ==")
     lines.append(f"id: {phase.get('id')}")
@@ -858,6 +887,15 @@ def _build_observation_md(state: BuildGraphState, phase: dict) -> str:
     if phase.get("why"):
         lines.append(f"why: {phase.get('why')}")
     lines.append("")
+
+    # v30.10 B2: surface last LLM-judge reject reason so LLM knows what's
+    # missing to actually complete the phase (rather than re-trying same path)
+    judge_reject = state.get("v30_last_judge_reject_reason")
+    if judge_reject:
+        lines.append("⚠ VERIFIER LLM-JUDGE rejected previous attempt:")
+        lines.append(f"   {judge_reject}")
+        lines.append("   → 修正 pipeline 補完 phase goal 才能 advance")
+        lines.append("")
 
     # All phases context
     lines.append("== ALL PHASES CONTEXT ==")

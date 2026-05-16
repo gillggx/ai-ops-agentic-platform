@@ -206,6 +206,13 @@ class BuildGraphState(TypedDict, total=False):
     #     this; richer than exec_trace[lid].sample which is dataframe-only.
     v30_last_mutated_logical_id: Optional[str]
     v30_last_preview: Optional[dict]
+    # v30.10 (2026-05-16): B2 verifier LLM-judge rejection reason. When
+    # rule-based check passes but LLM-judge says "this output doesn't satisfy
+    # phase.expected_output.value_desc", the reason is stored here so the
+    # CURRENT phase's next round prompt can surface it ("⚠ Verifier rejected:
+    # expected '最後一次' but got 87 rows; need sort+limit") guiding LLM
+    # toward completion. Cleared once phase actually advances.
+    v30_last_judge_reject_reason: Optional[str]
     # v13 (2026-05-13): per-node contracts the agent declares while writing
     # the plan. Runtime auto-preview compares each node's actual snapshot
     # to its contract; mismatch fires a targeted reflect_op (changes only
@@ -347,4 +354,5 @@ def initial_state(
         v30_fast_forward_log=[],
         debug_step_mode=debug_step_mode,
         v30_step_paused_at_round=None,
+        v30_last_judge_reject_reason=None,
     )
