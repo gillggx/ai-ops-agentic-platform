@@ -146,7 +146,7 @@ def infer_runtime_schema(
     header_lines.append("Schema (this run):")
 
     # Build col rows
-    table_lines = ["| col | inferred type | usage hint |"]
+    table_lines = ["| col | type | description |"]
     table_lines.append("|---|---|---|")
     for c in cols[:_MAX_COLS_LISTED]:
         # Prefer explicit doc type when present; fall back to sample inference.

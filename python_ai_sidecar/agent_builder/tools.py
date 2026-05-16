@@ -226,23 +226,19 @@ def _columns_for_block_port(
     # block_process_history.nested controls the shape of its output. Static
     # output_columns_hint only lists the FLAT mode columns; when the user
     # opts into nested (default since 2026-05-13) we surface path entries the
-    # LLM can actually use (spc_summary.ooc_count / spc_charts[].name etc.).
+    # LLM can actually use (spc_charts[].name etc.).
     if block_id == "block_process_history":
         nested = params.get("nested")
         if nested is None:
             nested = True  # current default
         if nested:
-            # Base scalar fields + spc_summary + spc_charts array + nested
+            # Base scalar fields + spc_charts array + nested
             # APC / DC / RECIPE / FDC / EC sub-objects. Use array-syntax for
             # spc_charts items so LLM knows it's an array path.
             return [
                 "eventTime", "toolID", "lotID", "step",
                 "spc_status", "fdc_classification",
-                # spc_summary precomputed
-                "spc_summary.ooc_count",
-                "spc_summary.total_charts",
-                "spc_summary.ooc_chart_names",
-                # spc_charts array path
+                # spc_charts array path (source of truth for per-chart data)
                 "spc_charts",
                 "spc_charts[].name",
                 "spc_charts[].value",
@@ -267,7 +263,7 @@ def _columns_for_block_port(
         if column in ("spc_charts", "spc_charts[]"):
             up_cols = _expected_upstream_columns(pipeline, upstream, registry, depth=depth + 1) or []
             # Keep sibling top-level cols + add per-element fields
-            keep = [c for c in up_cols if not c.startswith("spc_charts") and not c.startswith("spc_summary")]
+            keep = [c for c in up_cols if not c.startswith("spc_charts")]
             return keep + ["name", "value", "ucl", "lcl", "is_ooc", "status"]
         # Generic case — assume sibling columns + can't introspect inside array
         return _expected_upstream_columns(pipeline, upstream, registry, depth=depth + 1)

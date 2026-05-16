@@ -153,90 +153,45 @@ def _blocks() -> list[dict[str, Any]]:
             "column_docs": [
                 {
                     "col": "eventTime",
-                    "type": "string (ISO 8601, camelCase)",
-                    "what": "process 完成的精確時刻",
-                    "usage": [
-                        {"marker": "best", "text": "排序找 last X / first X -> block_sort"},
-                        {"marker": "best", "text": "時間範圍 filter -> block_filter operator='>=' value=ISO"},
-                        {"marker": "best", "text": "chart x-axis -> 99% chart blocks 預設用這欄"},
-                        {"marker": "warn", "text": "camelCase 不是 'event_time' (snake_case 是 fdc_classification 那種)"},
-                    ],
+                    "type": "string (ISO 8601, camelCase — 注意是 'eventTime' 不是 snake_case 的 'event_time')",
+                    "what": "此 process event 完成的精確時刻",
                 },
                 {
                     "col": "toolID",
                     "type": "string",
                     "what": "機台 ID e.g. 'EQP-01'",
-                    "usage": [
-                        {"marker": "best", "text": "跨機台對照 chart -> series_field='toolID' / color_by='toolID'"},
-                        {"marker": "best", "text": "依機台 groupby -> block_groupby_agg(group_by='toolID')"},
-                        {"marker": "ok", "text": "filter 多台 -> operator='in' value=['EQP-01','EQP-02']"},
-                    ],
                 },
                 {
                     "col": "lotID",
                     "type": "string",
                     "what": "批次 ID e.g. 'LOT-0541'",
-                    "usage": [
-                        {"marker": "best", "text": "追蹤同 lot 多 step 的軌跡 -> groupby='lotID'"},
-                        {"marker": "ok", "text": "依 lot 分色 chart -> series_field='lotID'"},
-                    ],
                 },
                 {
                     "col": "step",
                     "type": "string",
                     "what": "process step 名稱 e.g. 'STEP_001'",
-                    "usage": [
-                        {"marker": "best", "text": "同機台不同 step 比較 -> groupby=['toolID','step']"},
-                        {"marker": "ok", "text": "filter 特定 step -> column='step' operator='=='"},
-                    ],
                 },
                 {
                     "col": "spc_status",
-                    "type": "enum[\"PASS\"|\"OOC\"]",
-                    "what": "此 event 整體 SPC 是否有任一 chart OOC (event-level rollup flag)",
-                    "usage": [
-                        {"marker": "best", "text": "「這 event 有沒有 OOC?」-> 直接讀此欄是最快路徑"},
-                        {"marker": "best", "text": "「過去 N 天有 OOC 的 events」-> filter(spc_status=='OOC')"},
-                        {"marker": "ok", "text": "「OOC 比例」-> groupby + count + 算比例"},
-                        {"marker": "warn", "text": "「具體哪張 chart OOC / 數量」-> 此欄只是 event-level rollup, 細節在 spc_charts (unnest) 或 spc_summary (precomputed)"},
-                        {"marker": "warn", "text": "string 'OOC' 不是 boolean，filter value 加引號"},
-                    ],
+                    "type": "enum<'PASS' | 'OOC'> — string, 不是 boolean",
+                    "what": "此 event 整體 SPC 旗標：任一 chart 超管制 = 'OOC'；全部正常 = 'PASS'。event-level rollup, chart-level 細節見 spc_charts",
                 },
                 {
                     "col": "fdc_classification",
                     "type": "string | null",
-                    "what": "FDC (Fault Detection & Classification) 對此 event 的分類；null 表無 FDC 警示，常見值 'FAULT' / 'WARNING'",
-                    "usage": [
-                        {"marker": "best", "text": "「FDC 抓到 fault 的 events」-> filter(fdc_classification != null)"},
-                        {"marker": "ok", "text": "「按 FDC 分類統計」-> groupby_agg(fdc_classification, count)"},
-                        {"marker": "no", "text": "「具體哪個 sensor 故障」-> 不在此欄，要 query block_mcp_call"},
-                    ],
+                    "what": "FDC (Fault Detection & Classification) 對此 event 的分類；null = 無 FDC 警示，常見值 'FAULT' / 'WARNING'",
                 },
                 {
                     "col": "spc_charts",
-                    "type": "list[6-field dict] x ~12 (nested)",
-                    "what": "此 event 每張 SPC chart 的明細測量（source of truth）；leaf cols: name/value/ucl/lcl/is_ooc/status",
-                    "usage": [
-                        {"marker": "best", "text": "「畫單一 chart trend」-> unnest -> filter name='xbar_chart' -> line_chart"},
-                        {"marker": "best", "text": "「跨 chart value 分佈」-> unnest -> box_plot"},
-                        {"marker": "best", "text": "「直接出 SPC panel」-> block_spc_panel composite (1-block, 內部自己 unnest)"},
-                        {"marker": "ok", "text": "「OOC 數量」(direct path) -> unnest -> filter(is_ooc==true) -> count_rows (從 source-of-truth 算)"},
-                        {"marker": "ok", "text": "「OOC 數量」(shortcut) -> 看 spc_summary.ooc_count (precomputed cache, 更快)"},
-                        {"marker": "ok", "text": "「OOC 名單」(direct) -> unnest -> filter(is_ooc==true) -> pluck name"},
-                        {"marker": "ok", "text": "「OOC 名單」(shortcut) -> 看 spc_summary.ooc_chart_names (precomputed)"},
-                        {"marker": "warn", "text": "unnest 後 leaf 名是 'name'/'value'，不是 'spc_name'/'spc_value'"},
-                    ],
-                },
-                {
-                    "col": "spc_summary",
-                    "type": "dict {ooc_count: int, total_charts: int, ooc_chart_names: list[str]}",
-                    "what": "此 event SPC 的預算統計欄 (precomputed cache，與 spc_charts source-of-truth 等價可換)",
-                    "usage": [
-                        {"marker": "ok", "text": "「OOC 數量」(shortcut) -> 讀 spc_summary.ooc_count；亦可 unnest spc_charts → filter(is_ooc) → count (direct from source-of-truth)"},
-                        {"marker": "ok", "text": "「OOC chart 名單」(shortcut) -> 讀 spc_summary.ooc_chart_names；亦可 unnest spc_charts → filter(is_ooc) → pluck(name)"},
-                        {"marker": "ok", "text": "「OOC 比例」-> block_compute expression: ooc_count / total_charts"},
-                        {"marker": "warn", "text": "用 path 文法引用 nested field：'spc_summary.ooc_count' 中間用 dot"},
-                    ],
+                    "type": (
+                        "list[dict] x ~12 charts per event. **每張 chart dict** 包含: "
+                        "`name`: str (chart 名稱 e.g. 'xbar_chart', 'r_chart', 's_chart'); "
+                        "`value`: float (此 chart 該 event 的測量值); "
+                        "`ucl`: float (上管制限); `lcl`: float (下管制限); "
+                        "`is_ooc`: bool (此 chart 該 event 是否超出管制限); "
+                        "`status`: enum<'PASS' | 'OOC'> (per-chart 結果, 等價於 is_ooc 的字串形式)"
+                    ),
+                    "what": "此 event 每張 SPC chart 的完整明細測量 (source of truth — event-level 的 spc_status 由此衍生)",
                 },
             ],
             "param_schema": {

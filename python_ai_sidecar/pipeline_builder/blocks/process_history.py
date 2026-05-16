@@ -132,14 +132,13 @@ def _flatten_event(ev: dict[str, Any], object_name: Optional[str]) -> dict[str, 
 
 def _nested_event(ev: dict[str, Any]) -> dict[str, Any]:
     """Object-native shape: keep SPC / APC / DC / RECIPE / FDC / EC as nested
-    sub-objects, plus add a precomputed `spc_summary` to make "how many SPC
-    charts are OOC" answerable in one step (no JOIN/GROUP BY).
+    sub-objects. spc_charts is the SPC source-of-truth — LLM derives OOC
+    count / OOC chart list via unnest + filter + count_rows / pluck.
 
     Returned record shape:
         {
           eventTime, lotID, toolID, step, spc_status, fdc_classification,
-          spc_summary: { ooc_count, total_charts, ooc_chart_names: [...] },
-          spc_charts: [{name, value, ucl, lcl, is_ooc}, ...],
+          spc_charts: [{name, value, ucl, lcl, is_ooc, status}, ...],
           APC: {...} or null,  # entire sub-object preserved as-is
           DC: {...},
           RECIPE: {...},
@@ -151,9 +150,7 @@ def _nested_event(ev: dict[str, Any]) -> dict[str, Any]:
     for f in _BASE_FIELDS:
         out[f] = ev.get(f)
 
-    # SPC: lift to spc_charts array + compute summary so the LLM doesn't
-    # have to JOIN/GROUP BY for a question naturally asked as
-    # "count of charts that went OOC for this process".
+    # SPC: lift to spc_charts array (source of truth — per-chart is_ooc flag).
     spc = ev.get("SPC") or {}
     charts_obj = spc.get("charts") if isinstance(spc, dict) else None
     spc_charts: list[dict[str, Any]] = []
@@ -168,11 +165,6 @@ def _nested_event(ev: dict[str, Any]) -> dict[str, Any]:
             entry["status"] = "OOC" if entry.get("is_ooc") else "PASS"
             spc_charts.append(entry)
     out["spc_charts"] = spc_charts
-    out["spc_summary"] = {
-        "ooc_count": sum(1 for c in spc_charts if c.get("is_ooc")),
-        "total_charts": len(spc_charts),
-        "ooc_chart_names": [c["name"] for c in spc_charts if c.get("is_ooc")],
-    }
 
     # Other object families preserved as-is — LLM uses path syntax to read.
     for key in ("APC", "DC", "RECIPE", "FDC", "EC"):
