@@ -53,22 +53,27 @@ class _ParamPanelBase(BlockExecutor):
     ) -> dict[str, Any]:
         title = str(params.get("title") or self.default_title)
 
-        # v30.3 (2026-05-16): chart_name now OPTIONAL — omit to keep ALL
-        # charts at the chosen event window (multi-series mode). Validated
-        # via trace_replay + EQP-08 case: user need "show how many SPC
-        # charts are OOC at the moment" requires multi-chart, not single.
-        # step remains required (acts as the process-step filter).
+        # v30.3 (2026-05-16): step + chart_name both REQUIRED. Both accept
+        # str OR list[str] for multi-set panels:
+        #   single step / single chart:    step='STEP_001', chart_name='xbar_chart'
+        #   single step / multi chart:     step='STEP_001', chart_name=['xbar_chart','r_chart']
+        #   multi step / multi chart:      step=['STEP_001','STEP_002'], chart_name=['xbar_chart','r_chart']
+        # No magic "all" — LLM/user must enumerate, discovering via
+        # block_list_objects first if names are unknown.
         step = params.get("step")
         chart_name = params.get("chart_name")
-        if not step:
+        if not step or not chart_name:
+            missing = []
+            if not step: missing.append("step")
+            if not chart_name: missing.append("chart_name")
             raise BlockExecutionError(
                 code="MISSING_PARAM",
                 message=(
-                    f"{self.block_id} requires step (parameterized composite — "
-                    f"step is the process step e.g. 'STEP_001'). "
-                    f"chart_name is OPTIONAL: omit to plot ALL charts in this step "
-                    f"as multi-series (typical for 'show OOC charts at moment X'); "
-                    f"set to a single value e.g. 'xbar_chart' to focus on one chart."
+                    f"{self.block_id} requires {missing}. "
+                    f"step: single 'STEP_001' OR list ['STEP_001','STEP_002']. "
+                    f"chart_name: single 'xbar_chart' OR list ['xbar_chart','r_chart','s_chart']. "
+                    f"Multi-set lists give cartesian coverage (each step × each chart). "
+                    f"If you don't know what charts exist, call block_list_objects first."
                 ),
             )
 
@@ -101,13 +106,32 @@ class _ParamPanelBase(BlockExecutor):
         if long.empty:
             return {"chart_spec": self._empty_chart(title, "No data after unnesting")}
 
-        # Step 2: filter by specific chart_name / param_name when given.
-        chart_name = params.get("chart_name")
-        if chart_name and self.name_field in long.columns:
-            long = long[long[self.name_field].astype(str) == str(chart_name)].reset_index(drop=True)
+        # Step 1.5 (v30.3): apply step filter post-fetch (str OR list[str]).
+        # We always filter here regardless of source/transform mode — when
+        # source-fetch and step is a single str, process_history already
+        # narrowed it; this is then a no-op. When step is list, ph fetched
+        # by tool_id only and this filter narrows to the listed steps.
+        if step and "step" in long.columns:
+            if isinstance(step, list):
+                step_filter = [str(s) for s in step]
+            else:
+                step_filter = [str(step)]
+            long = long[long["step"].astype(str).isin(step_filter)].reset_index(drop=True)
             if long.empty:
                 return {"chart_spec": self._empty_chart(
-                    title, f"No data for {self.name_field}={chart_name!r}"
+                    title, f"No data for step={step_filter!r}"
+                )}
+
+        # Step 2: filter by chart_name (str OR list[str] for multi-chart mode).
+        if chart_name and self.name_field in long.columns:
+            if isinstance(chart_name, list):
+                chart_filter = [str(c) for c in chart_name]
+            else:
+                chart_filter = [str(chart_name)]
+            long = long[long[self.name_field].astype(str).isin(chart_filter)].reset_index(drop=True)
+            if long.empty:
+                return {"chart_spec": self._empty_chart(
+                    title, f"No data for {self.name_field}={chart_filter!r}"
                 )}
 
         # Step 3: apply event_filter.
@@ -138,10 +162,16 @@ class _ParamPanelBase(BlockExecutor):
             ProcessHistoryBlockExecutor,
         )
         ph = ProcessHistoryBlockExecutor()
+        # v30.3: process_history only accepts single-value step.
+        # When step is a list (multi-step panel), skip the step filter at
+        # fetch time and let _ParamPanelBase.execute step-filter post-fetch.
+        # process_history's tri-state check still passes via tool_id / lot_id.
+        step_param = params.get("step")
+        pass_step = step_param if isinstance(step_param, str) else None
         ph_params = {
             "tool_id": params.get("tool_id"),
             "lot_id": params.get("lot_id"),
-            "step": params.get("step"),
+            "step": pass_step,
             "time_range": params.get("time_range") or "7d",
             "limit": params.get("limit") or 200,
             "nested": True,
