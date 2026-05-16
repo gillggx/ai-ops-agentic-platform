@@ -19,6 +19,8 @@ from .phase_goal import rewrite_phase_goal_generic
 from .prepend import prepend_oneblock_solutions
 from .spc_status_enum import clarify_spc_status_enum
 from .remove_spc_summary import remove_spc_summary_expand_spc_charts
+from .inject_lineage import inject_pipeline_lineage
+from .matched_connect_options import inject_matched_connect_options
 
 
 VARIANT_REGISTRY = {
@@ -28,6 +30,8 @@ VARIANT_REGISTRY = {
     "prepend_oneblock_solutions": prepend_oneblock_solutions,
     "clarify_spc_status_enum": clarify_spc_status_enum,
     "remove_spc_summary_expand_spc_charts": remove_spc_summary_expand_spc_charts,
+    "inject_pipeline_lineage": inject_pipeline_lineage,
+    "inject_matched_connect_options": inject_matched_connect_options,
 }
 
 

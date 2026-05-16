@@ -828,9 +828,119 @@ def _build_canvas_diff_md(pipeline: PipelineJSON, phase: dict) -> str:
     for e in pipeline.edges[:20]:
         lines.append(f"  edge {e.from_.node}->{e.to.node}")
     lines.append("")
+
+    # v30.12 (2026-05-17) — matched-only CONNECT OPTIONS view.
+    # For each node with un-connected input ports, list type-compatible
+    # source ports (or [NO COMPATIBLE SOURCE] + producer block hints).
+    # Validated via trace_replay: 3/3 picks correct architecture vs 0/3
+    # baseline. See docs/RAG migration roadmap for the future on-demand
+    # replacement (project_rag_for_llm_lookups.md).
+    co_section = _build_connect_options_md(pipeline)
+    if co_section:
+        lines.append(co_section)
+        lines.append("")
+
     lines.append(f"PHASE GOAL: {phase.get('goal')} (expected: {phase.get('expected')})")
     lines.append("Pick your next single tool call.")
     return "\n".join(lines)
+
+
+def _types_compatible(src_type: str | None, dst_type: str | None) -> bool:
+    if not src_type or not dst_type:
+        return True  # unknown — permissive
+    if src_type == dst_type:
+        return True
+    if "any" in (src_type, dst_type):
+        return True
+    return False
+
+
+def _build_connect_options_md(pipeline: PipelineJSON) -> str:
+    """Emit `== CONNECT OPTIONS for nX ==` sections for nodes with un-filled
+    input ports. For each unfilled input, list type-compatible source ports
+    across ALL existing nodes (allows fan-out). If no compatible source,
+    list blocks that DO produce the needed type.
+    """
+    if not pipeline.nodes:
+        return ""
+
+    registry = SeedlessBlockRegistry()
+    registry.load()
+
+    def _spec(block_id: str) -> dict:
+        return registry.get_spec(block_id, "1.0.0") or {}
+
+    # Build per-node port info
+    node_info: dict[str, dict] = {}
+    for n in pipeline.nodes:
+        spec = _spec(n.block_id)
+        node_info[n.id] = {
+            "id": n.id,
+            "block_id": n.block_id,
+            "in_ports": list(spec.get("input_schema") or []),
+            "out_ports": list(spec.get("output_schema") or []),
+        }
+
+    # Track which (node, in_port) pairs already have incoming edges
+    filled: set[tuple[str, str]] = set()
+    for e in pipeline.edges:
+        filled.add((e.to.node, e.to.port))
+
+    sections: list[str] = []
+    for n_id, n in node_info.items():
+        in_ports = n["in_ports"]
+        if not in_ports:
+            continue
+        unfilled = [p for p in in_ports if (n_id, p.get("port")) not in filled]
+        if not unfilled:
+            continue
+
+        sec = [f"== CONNECT OPTIONS for {n_id} ({n['block_id']}) =="]
+        for in_port in unfilled:
+            iname, itype = in_port.get("port"), in_port.get("type")
+            sec.append(f"{n_id}.{iname} ({itype}):")
+
+            compats: list[tuple[str, str, str, str]] = []
+            for src_id, src in node_info.items():
+                if src_id == n_id:
+                    continue
+                for op in src["out_ports"]:
+                    if _types_compatible(op.get("type"), itype):
+                        compats.append((src_id, src["block_id"], op.get("port") or "?", op.get("type") or "?"))
+
+            if compats:
+                sec.append("  Compatible sources (pick semantically; fan-out OK):")
+                for sid, sblock, sport, stype in compats:
+                    sec.append(f"    {sid}.{sport}   [{sblock}]  ({stype})")
+            else:
+                producers = _find_blocks_producing_type(registry, itype)
+                sec.append("  [NO COMPATIBLE SOURCE in current pipeline]")
+                if producers:
+                    ps = ", ".join(producers[:8])
+                    sec.append(
+                        f"  Need to add an intermediate block first. "
+                        f"Blocks that output type={itype}: {ps}"
+                    )
+                else:
+                    sec.append(f"  No registered block outputs type={itype}.")
+
+        sections.append("\n".join(sec))
+
+    return "\n\n".join(sections)
+
+
+def _find_blocks_producing_type(registry: SeedlessBlockRegistry, target_type: str | None) -> list[str]:
+    if not target_type:
+        return []
+    out: list[str] = []
+    for (name, _v), spec in registry.catalog.items():
+        if str(spec.get("status") or "").lower() == "deprecated":
+            continue
+        for op in spec.get("output_schema") or []:
+            if _types_compatible(op.get("type"), target_type):
+                out.append(name)
+                break
+    return sorted(out)
 
 
 def _build_observation_md(state: BuildGraphState, phase: dict) -> str:
@@ -934,6 +1044,21 @@ def _build_observation_md(state: BuildGraphState, phase: dict) -> str:
                 # fallback for v27 snapshots without schema md
                 lines.append(f"  {lid} [{snap.get('block_id')}] rows={snap.get('rows')} cols={snap.get('cols', [])[:10]}")
     lines.append("")
+
+    # v30.12 (2026-05-17) — same matched-only CONNECT OPTIONS view as
+    # _build_canvas_diff_md uses post-action. Surfaces here on round 1 of
+    # later phases (canvas may already have prior phases' nodes with
+    # un-connected input ports — e.g. p5 alarm node with no Logic Node yet).
+    pj_dict = state.get("final_pipeline") or state.get("base_pipeline")
+    if pj_dict:
+        try:
+            pj = PipelineJSON.model_validate(pj_dict)
+            co_md = _build_connect_options_md(pj)
+            if co_md:
+                lines.append(co_md)
+                lines.append("")
+        except Exception:  # noqa: BLE001 — schema variations across v27/v30 paths
+            pass
 
     # Action history this phase — INCLUDE result digest so LLM has memory
     # of what it learned. Without this each round is amnesic and LLM
