@@ -330,6 +330,53 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     return state_update
 
 
+def _build_catalog_brief() -> str:
+    """v30 hotfix: LLM has no idea which blocks exist unless we list them.
+    Dump all block names + category + 1-line `what` so the LLM can pick
+    a real block_id to add_node OR inspect_block_doc.
+
+    Cached after first build per-process (catalog is constant).
+    """
+    global _CATALOG_BRIEF_CACHE
+    if _CATALOG_BRIEF_CACHE is not None:
+        return _CATALOG_BRIEF_CACHE
+
+    from python_ai_sidecar.pipeline_builder.seedless_registry import SeedlessBlockRegistry
+    import re
+    registry = SeedlessBlockRegistry()
+    registry.load()
+
+    by_category: dict[str, list[str]] = {}
+    for (name, _v), spec in registry.catalog.items():
+        if str(spec.get("status") or "").lower() == "deprecated":
+            continue
+        cat = spec.get("category") or "transform"
+        desc = (spec.get("description") or "").strip()
+        # Extract first non-empty line of `== What ==` section as 1-line summary
+        what_line = ""
+        m = re.search(r"== What ==\s*\n+(.+?)(?:\n\n|\n==)", desc, re.DOTALL)
+        if m:
+            first = m.group(1).strip().split("\n")[0]
+            what_line = first[:90]
+        else:
+            # fallback: first line of desc
+            what_line = desc.split("\n", 1)[0][:90]
+        by_category.setdefault(cat, []).append(f"  {name}  -- {what_line}")
+
+    lines: list[str] = []
+    for cat in sorted(by_category.keys()):
+        lines.append(f"[{cat}]")
+        for entry in sorted(by_category[cat]):
+            lines.append(entry)
+        lines.append("")
+
+    _CATALOG_BRIEF_CACHE = "\n".join(lines)
+    return _CATALOG_BRIEF_CACHE
+
+
+_CATALOG_BRIEF_CACHE: str | None = None
+
+
 def _build_observation_md(state: BuildGraphState, phase: dict) -> str:
     """Assemble the prompt user content for current round."""
     lines: list[str] = []
@@ -398,6 +445,15 @@ def _build_observation_md(state: BuildGraphState, phase: dict) -> str:
         lines.append("== USER INSTRUCTION (for context) ==")
         lines.append(instr[:600])
         lines.append("")
+
+    # AVAILABLE BLOCKS catalog (must be present so LLM picks real block_id)
+    lines.append("== AVAILABLE BLOCKS (you MUST pick a block_id from this list) ==")
+    lines.append(_build_catalog_brief())
+    lines.append(
+        "When you call add_node, block_name MUST exactly match a name above. "
+        "If unsure how to use a block, call inspect_block_doc(block_id) first."
+    )
+    lines.append("")
 
     lines.append("== YOUR NEXT ACTION (single tool call) ==")
     lines.append("Pick ONE tool to advance toward the phase goal.")
