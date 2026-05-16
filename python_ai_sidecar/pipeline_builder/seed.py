@@ -230,10 +230,10 @@ def _blocks() -> list[dict[str, Any]]:
                 {
                     "col": "spc_summary",
                     "type": "dict {ooc_count: int, total_charts: int, ooc_chart_names: list[str]}",
-                    "what": "此 event SPC 的預算統計欄 — 已經幫你算好的捷徑欄位 (避免重做 unnest+count)",
+                    "what": "此 event SPC 的預算統計欄 (precomputed cache，與 spc_charts source-of-truth 等價可換)",
                     "usage": [
-                        {"marker": "best", "text": "「event OOC 數判定 (>=N)」-> block_step_check column='spc_summary.ooc_count' operator='>=' threshold=N (1 步取代 unnest+filter+groupby+count 4 步)"},
-                        {"marker": "best", "text": "「列出 OOC 的 chart 名」-> 直接讀 spc_summary.ooc_chart_names (list[str])"},
+                        {"marker": "ok", "text": "「OOC 數量」(shortcut) -> 讀 spc_summary.ooc_count；亦可 unnest spc_charts → filter(is_ooc) → count (direct from source-of-truth)"},
+                        {"marker": "ok", "text": "「OOC chart 名單」(shortcut) -> 讀 spc_summary.ooc_chart_names；亦可 unnest spc_charts → filter(is_ooc) → pluck(name)"},
                         {"marker": "ok", "text": "「OOC 比例」-> block_compute expression: ooc_count / total_charts"},
                         {"marker": "warn", "text": "用 path 文法引用 nested field：'spc_summary.ooc_count' 中間用 dot"},
                     ],
