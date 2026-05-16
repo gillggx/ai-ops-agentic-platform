@@ -3350,25 +3350,27 @@ def _blocks() -> list[dict[str, Any]]:
             "status": "production",
             "description": (
                 "== What ==\n"
-                "**Parameterized SPC chart composite** — 給我 `step + chart_name` 兩個**必填**參數，"
+                "**Parameterized SPC chart composite** — 給我 `step` 一個必填參數，"
                 "我內部撈 process_history → unnest spc_charts → 依 event_filter 模式挑時段 → "
                 "出 line/bar chart + 橘色 UCL/LCL + 綠色 value line + OOC highlight，"
-                "全部一個 block 包好。\n"
+                "全部一個 block 包好。**chart_name 選填**：不給就秀該 step 全部 SPC charts（多 series），"
+                "給單值才只秀那一張 chart。\n"
                 "\n"
-                "🔑 **必填 params**: `step` (process step e.g. 'STEP_001') + `chart_name` (SPC chart e.g. 'xbar_chart' / 'r_chart')\n"
-                "🟢 **可選 params**: `tool_id` (留空 = 跨機台對照) / `time_range` (default '7d') / `event_filter` / 顏色\n"
+                "🔑 **必填**: `step` (process step e.g. 'STEP_001')\n"
+                "🟢 **選填**: `chart_name` (省略 = 全部 charts) / `tool_id` (省略 = 跨機台) / `time_range` (default '7d') / `event_filter` / 顏色\n"
                 "\n"
                 "🚨🚨🚨 **典型用法 — 1 個 node 完成**:\n"
-                "  `block_spc_panel(step='STEP_001', chart_name='xbar_chart', tool_id='EQP-01', time_range='7d')`\n"
-                "🚨 已有 process_history 在 upstream 也可接入（transform mode，少 1 次 API call）— 但 step + chart_name **還是必填**用來篩選。\n"
+                "  `block_spc_panel(step='STEP_001', tool_id='EQP-01', event_filter='latest_ooc')`\n"
+                "  → 該機台最後一次 OOC 時刻**所有** OOC SPC charts 一次秀出（多 series）\n"
+                "🚨 已有 process_history 在 upstream 也可接入（transform mode，少 1 次 API call）— 但 step 還是必填。\n"
                 "🚨 **不要**在我之前接 unnest / filter(is_ooc) / sort+limit / groupby — 那會把多 SPC 砍成 1 點，我會接到只剩 1 個 SPC。\n"
                 "\n"
                 "== When to use ==\n"
                 "- ✅ user 說「看 SPC chart」「SPC 趨勢」「OOC SPC chart」「SPC Panel」→ 用我\n"
-                "- ✅ user 說「機台最後一次 OOC 時的 SPC 狀況」→ 用我 + event_filter=latest_ooc\n"
+                "- ✅ user 說「最後一次 OOC 時**多少張 / 哪些 SPC charts** 同時 OOC」→ 用我（不指定 chart_name，event_filter=latest_ooc）\n"
+                "- ✅ user 說「機台最後一次 OOC 時的某張 SPC chart」→ 用我 + event_filter=latest_ooc + chart_name=xxx\n"
                 "- ✅ user 說「過去 N 天 SPC 趨勢」→ 用我 + event_filter=all\n"
                 "- ✅ 取代繁瑣的 unnest+filter+sort+line_chart 4 步組合 — **這 4 步 LLM 常拼錯**\n"
-                "- ❌ user 不知道 chart_name 是什麼 (要先 list available SPCs) → 用 block_list_objects\n"
                 "- ❌ user 要計算 Cpk/EWMA 等統計 → 我只畫圖，不算統計\n"
                 "- ❌ APC 參數 → 用 block_apc_panel\n"
                 "\n"
@@ -3379,9 +3381,11 @@ def _blocks() -> list[dict[str, Any]]:
                 "  custom_time   — 配 event_time 指定 ISO timestamp\n"
                 "\n"
                 "== Params ==\n"
-                "── 必填 (參數化 composite 契約) ──\n"
+                "── 必填 ──\n"
                 "step                 (string, **required**) — process step e.g. 'STEP_001'\n"
-                "chart_name           (string, **required**) — SPC chart 名稱 e.g. 'xbar_chart' / 'r_chart' / 's_chart'\n"
+                "\n"
+                "── 選填 (chart 範圍) ──\n"
+                "chart_name           (string, opt) — SPC chart 名稱 e.g. 'xbar_chart'。**省略 = 該 step 全部 SPC charts，多 series 模式**。\n"
                 "\n"
                 "── 選填 (撈資料範圍) ──\n"
                 "tool_id              (string, opt) — 單一機台 e.g. 'EQP-01'。**留空 = 跨機台對照** (配合 color_by='toolID')\n"
@@ -3404,7 +3408,7 @@ def _blocks() -> list[dict[str, Any]]:
                 "== Input port (optional, transform mode) ==\n"
                 "port: data (dataframe) — process_history(nested=true) 的輸出，或已 unnest 的長表。\n"
                 "  接了就走 transform mode (不重新撈)；沒接就走 source mode (內部 fetch)。\n"
-                "  ⚠ 不管走哪 mode，**step + chart_name 仍是必填參數**（用來篩選）。\n"
+                "  ⚠ 不管走哪 mode，**step 仍是必填參數**（用來篩選）。\n"
                 "\n"
                 "== Output ==\n"
                 "port: chart_spec (chart_spec) — 多 series line（trend mode）或 bar（single-event mode）\n"
@@ -3412,12 +3416,13 @@ def _blocks() -> list[dict[str, Any]]:
                 "  meta 帶 {event_filter, n_rows, n_series} 給 admin trace 看\n"
                 "\n"
                 "== 典型 pipelines ==\n"
-                "(A) **1-block 看單一機台單一 SPC 趨勢（最常用！）**：\n"
+                "(A) **1-block 看單一機台單一 SPC 趨勢**：\n"
                 "    block_spc_panel(step='STEP_001', chart_name='xbar_chart', tool_id='EQP-01', time_range='7d', event_filter='all')\n"
                 "    → 直接出圖，1 個 node 完成\n"
                 "\n"
-                "(B) 1-block 看機台最後一次 OOC 那一刻指定 chart：\n"
-                "    block_spc_panel(step='STEP_001', chart_name='xbar_chart', tool_id='EQP-01', event_filter='latest_ooc')\n"
+                "(B) **1-block 看最後一次 OOC 時刻全部同時 OOC 的 SPC charts (省略 chart_name = 多 chart)**：\n"
+                "    block_spc_panel(step='STEP_001', tool_id='EQP-01', event_filter='latest_ooc', show_only_violations=True)\n"
+                "    → 多 series chart，每張 OOC chart 一條\n"
                 "\n"
                 "(C) 跨機台對照：所有機台同一 SPC 趨勢（tool_id 留空）：\n"
                 "    block_spc_panel(step='STEP_001', chart_name='xbar_chart', time_range='7d', color_by='toolID')\n"
@@ -3431,9 +3436,9 @@ def _blocks() -> list[dict[str, Any]]:
                 "      Branch 1 (verdict): n1 → block_unnest(spc_charts) → block_filter(is_ooc==true)\n"
                 "                          → block_groupby_agg(group_by=eventTime, agg_column=name, agg_func=count)\n"
                 "                          → block_step_check(operator='>=', threshold=2)\n"
-                "      Branch 2 (chart):   n1 → block_spc_panel(step='STEP_001', chart_name='xbar_chart',\n"
-                "                                                event_filter='latest_ooc')\n"
-                "    (transform mode — n1 已撈過資料，panel 不再 fetch；但 step + chart_name 仍必填)\n"
+                "      Branch 2 (chart):   n1 → block_spc_panel(step='STEP_001', event_filter='latest_ooc')\n"
+                "                              (省略 chart_name = 該 OOC 時刻全部 SPC charts 一次秀)\n"
+                "    (transform mode — n1 已撈過資料，panel 不再 fetch；step 仍必填)\n"
                 "\n"
                 "== Common mistakes ==\n"
                 "⚠ 不要在我之前接 block_sort+limit=1 — 那會砍剩 1 row，我會接到只剩 1 個 SPC\n"
@@ -3447,10 +3452,10 @@ def _blocks() -> list[dict[str, Any]]:
             "output_schema": [{"port": "chart_spec", "type": "chart_spec"}],
             "param_schema": {
                 "type": "object",
-                "required": ["step", "chart_name"],
+                "required": ["step"],
                 "properties": {
                     "step": {"type": "string", "title": "Process step (必填)"},
-                    "chart_name": {"type": "string", "title": "SPC chart 名稱 (必填，e.g. xbar_chart / r_chart)"},
+                    "chart_name": {"type": "string", "title": "SPC chart 名稱 (選填，省略=全部 charts，e.g. xbar_chart)"},
                     "tool_id": {"type": "string", "title": "機台 ID (留空=跨機台)"},
                     "lot_id": {"type": "string", "title": "批次 ID"},
                     "time_range": {"type": "string", "default": "7d", "title": "撈多久"},
@@ -3505,16 +3510,18 @@ def _blocks() -> list[dict[str, Any]]:
             "status": "production",
             "description": (
                 "== What ==\n"
-                "**Parameterized APC parameter composite** — 給我 `step + chart_name` 兩個**必填**參數，"
+                "**Parameterized APC parameter composite** — 給我 `step` 一個必填參數，"
                 "我內部撈 process_history → unnest apc_params → 依 event_filter 模式挑時段 → "
                 "出多 series line chart，一個 block 包好。（APC 原始資料無 UCL/LCL bound）\n"
+                "**chart_name 選填**：不給就秀該 step 全部 APC 參數（多 series），給單值才只秀那一個參數。\n"
                 "\n"
-                "🔑 **必填 params**: `step` (process step) + `chart_name` (APC 參數名，e.g. 'temperature' / 'pressure' / 'flow_rate' / 'etch_time_offset')\n"
-                "🟢 **可選 params**: `tool_id` (留空 = 跨機台對照) / `time_range` (default '7d') / `event_filter` / 顏色\n"
+                "🔑 **必填**: `step` (process step)\n"
+                "🟢 **選填**: `chart_name` (省略 = 全部 APC 參數) / `tool_id` (留空 = 跨機台) / `time_range` / `event_filter` / 顏色\n"
                 "\n"
                 "🚨🚨🚨 **典型用法 — 1 個 node 完成**:\n"
-                "  `block_apc_panel(step='STEP_001', chart_name='temperature', tool_id='EQP-01', time_range='7d')`\n"
-                "🚨 已有 process_history 在 upstream 也可接入（transform mode）— step + chart_name **還是必填**用來篩選。\n"
+                "  `block_apc_panel(step='STEP_001', tool_id='EQP-01', event_filter='latest_drift')`\n"
+                "  → 該機台最後 drift 時刻**所有** APC 參數一次秀（多 series）\n"
+                "🚨 已有 process_history 在 upstream 也可接入（transform mode）— step 還是必填用來篩選。\n"
                 "\n"
                 "== When to use ==\n"
                 "- ✅ user 說「看 APC 參數」「APC 趨勢」「APC Panel」→ 用我\n"
@@ -3531,9 +3538,11 @@ def _blocks() -> list[dict[str, Any]]:
                 "  custom_time   — 配 event_time 指定 ISO timestamp\n"
                 "\n"
                 "== Params ==\n"
-                "── 必填 (參數化 composite 契約) ──\n"
+                "── 必填 ──\n"
                 "step                 (string, **required**) — process step e.g. 'STEP_001'\n"
-                "chart_name           (string, **required**) — APC 參數名 e.g. 'temperature' / 'pressure' / 'etch_time_offset'\n"
+                "\n"
+                "── 選填 (參數範圍) ──\n"
+                "chart_name           (string, opt) — APC 參數名 e.g. 'temperature'。**省略 = 該 step 全部 APC 參數，多 series 模式**。\n"
                 "\n"
                 "── 選填 (撈資料範圍) ──\n"
                 "tool_id              (string, opt) — 留空 = 跨機台對照\n"
@@ -3554,7 +3563,7 @@ def _blocks() -> list[dict[str, Any]]:
                 "\n"
                 "== Input port (optional, transform mode) ==\n"
                 "port: data (dataframe) — process_history(nested=true) 含 apc_params；或已 long-form 的 param_name/value 表。\n"
-                "  接了就走 transform mode；沒接就 source mode。⚠ step + chart_name 仍必填。\n"
+                "  接了就走 transform mode；沒接就 source mode。⚠ step 仍必填。\n"
                 "\n"
                 "== Output ==\n"
                 "port: chart_spec — 多 series line（trend）或 bar（single-event），**無 UCL/LCL rules**（APC 原始資料沒帶）\n"
@@ -3565,13 +3574,13 @@ def _blocks() -> list[dict[str, Any]]:
                 "\n"
                 "== Errors ==\n"
                 "- INVALID_INPUT: data 不是 DataFrame\n"
-                "- MISSING_PARAM: step / chart_name 沒給\n"
+                "- MISSING_PARAM: step 沒給\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "chart_spec", "type": "chart_spec"}],
             "param_schema": {
                 "type": "object",
-                "required": ["step", "chart_name"],
+                "required": ["step"],
                 "properties": {
                     "step": {"type": "string", "title": "Process step (必填)"},
                     "chart_name": {"type": "string", "title": "APC 參數名 (必填，e.g. temperature / pressure)"},

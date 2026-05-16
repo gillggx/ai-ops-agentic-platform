@@ -53,24 +53,22 @@ class _ParamPanelBase(BlockExecutor):
     ) -> dict[str, Any]:
         title = str(params.get("title") or self.default_title)
 
-        # v26 (2026-05-15): step + chart_name are required for both source
-        # and transform modes. Was previously implicit (optional in schema,
-        # silently no-op'd when missing). Raise early with explicit message
-        # so the agent / user fix it instead of getting an empty chart.
+        # v30.3 (2026-05-16): chart_name now OPTIONAL — omit to keep ALL
+        # charts at the chosen event window (multi-series mode). Validated
+        # via trace_replay + EQP-08 case: user need "show how many SPC
+        # charts are OOC at the moment" requires multi-chart, not single.
+        # step remains required (acts as the process-step filter).
         step = params.get("step")
         chart_name = params.get("chart_name")
-        if not step or not chart_name:
-            missing = []
-            if not step: missing.append("step")
-            if not chart_name: missing.append("chart_name")
+        if not step:
             raise BlockExecutionError(
                 code="MISSING_PARAM",
                 message=(
-                    f"{self.block_id} requires {missing} (parameterized composite — "
-                    f"step is the process step e.g. 'STEP_001', chart_name is the "
-                    f"SPC/APC chart name e.g. 'xbar_chart' / 'temperature'). "
-                    f"Source mode: also supply optional tool_id + time_range. "
-                    f"Transform mode: connect upstream process_history → still need step + chart_name to filter."
+                    f"{self.block_id} requires step (parameterized composite — "
+                    f"step is the process step e.g. 'STEP_001'). "
+                    f"chart_name is OPTIONAL: omit to plot ALL charts in this step "
+                    f"as multi-series (typical for 'show OOC charts at moment X'); "
+                    f"set to a single value e.g. 'xbar_chart' to focus on one chart."
                 ),
             )
 
