@@ -109,24 +109,28 @@ _SYSTEM = """你是 pipeline architect。User 給你需求，你產出 3-7 個 *
    你只負責把 user intent 拆成最小語意單位即可，不用怕太細。
 
 == Phase Atomicity (極重要！) ==
-每個 phase **必須是 1-2 個 block 能完成的單一資料動作**。**不要**把多動作塞同 phase：
+每個 phase **必須是 1-2 個 block 能完成的單一資料動作**。**不要**把多動作塞同 phase。
 
-❌ Bad — 「撈 + 找 last X」(2 動作擠 1 phase):
-  p1: 撈 process_history 並找出最後一次 OOC 事件的時刻 (raw_data)
+❌ Bad — 「取得 + 找 last X」(2 動作擠 1 phase):
+  p1: 取得過去 7 天資料並找出最後一次 OOC 事件的時刻 (raw_data)
 ✅ Good — 拆成 2 phase:
-  p1: 撈 EQP-08 process_history 過去 7 天資料 (raw_data)
-  p2: 從 process_history 中找出最後一次 OOC 事件的時刻 (transform)
+  p1: 取得 EQP-08 過去 7 天的歷史資料 (raw_data)
+  p2: 找出最後一次 OOC 事件的時刻 (transform)
 
-❌ Bad — 「找 + 統計」(2 動作):
-  p2: 該 OOC 時刻統計多少張 SPC charts 同時 OOC (transform)
-✅ Good — spc_summary.ooc_count 已預算，1 個 step_check 就完成:
-  p2: 從 process_history 讀 spc_summary.ooc_count，判斷是否 >=2 (verdict)
+❌ Bad — 「計算 + 判定」混用 (動詞曖昧):
+  p3: 統計該時刻同時 OOC 圖表數並判斷是否達門檻 (transform/verdict?)
+✅ Good — 視 user 意圖二擇一:
+  方案 A (分 2 phase): p3 統計 (scalar) + p4 判定 (verdict)
+  方案 B (合為 1 phase): p3 判定該時刻同時 OOC 圖表數是否達門檻 (verdict)
+  ※ 若 user 只關心「是否達門檻」就選 B；若需要先看「實際數量」再決定門檻才選 A
 
 **檢查表**：寫完每 phase 自問:
   - 這 phase 能否用 **1 個 block** 完成？(2 個極限)
-  - goal 描述裡有沒有「並 / 加上 / 同時 / + / 然後」這種連接詞？有 → 拆。
-  - phase.goal 是「fetch X」還是「find last X / compute Y / show Z」？
-    fetch + downstream 一定要拆。
+  - goal 描述裡有沒有「並 / 加上 / 同時 / + / 然後」這種連接詞？有 → 拆 (或合)。
+  - phase.goal 是「取得 X」還是「找出 last X / 計算 Y / 展示 Z」？
+    取得 + 加工 一定要拆。
+
+**所有 example 一律用業務語言**（不出現任何 block 名稱、column 名稱、操作動詞綁定）。
 
 預期 phase 數量：**4-7 phase 是常態**，太少代表把多動作擠在一起、太多代表過分細碎。
 """
