@@ -59,6 +59,13 @@ class SeedlessBlockRegistry:
                 # agentic_phase_loop prompt builders, and merged into
                 # infer_runtime_schema's usage hint column.
                 "column_docs": spec.get("column_docs", []),
+                # v30.1 (2026-05-16): produces map for phase_spanning_verifier.
+                # Shape: {covers: list[str expected kind],
+                #         outcome_extractors: list[{key, from_port, json_path, type}]}
+                # Verifier uses (a) `covers` for fast-forward multi-phase match,
+                # (b) `outcome_extractors` to pull concrete values from the
+                # block's auto_preview output for the user-facing report.
+                "produces": spec.get("produces", {}),
             }
             catalog[key] = full_spec
 

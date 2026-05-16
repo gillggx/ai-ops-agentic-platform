@@ -61,17 +61,20 @@ prompt 會給你:
 4. 要 connect -> `connect(from_node, from_port, to_node, to_port)`
 5. 改 param -> `set_param(node_id, key, value)`
 6. 加錯了 -> `remove_node(node_id)`
-7. phase 達成 -> `phase_complete(rationale)`  (系統會做 deterministic verifier 確認)
 
-== Phase 達成判定 ==
-phase.expected 決定 verifier 看什麼:
-  raw_data   -> 必須有 source-category node + rows >= 1
-  transform  -> 必須有 dataframe 輸出的 terminal node + rows >= 1
-  verdict    -> 必須有 verdict-output block (step_check / threshold)
-  chart      -> 必須有 chart-category terminal node
-  table      -> 必須有 block_data_view terminal node
-  scalar     -> 必須有 single-value 輸出 terminal
-  alarm      -> 必須有 alert block
+== Phase 達成 — server 自動判定 (v30.1, 2026-05-16) ==
+你**不需要**主動 call phase_complete。每次 mutating action (add_node/connect/...)
+完成後，server 端的 phase_spanning_verifier 會：
+  (a) 對照當前 phase.expected_output 看 block 的輸出有沒有達成
+  (b) **bonus**: 同一 block 若同時涵蓋下個 phase 也會 fast-forward 自動跳過
+      (e.g. block_spc_panel 一個 add_node 可同時完成 raw_data + verdict + chart 三個 phase)
+  (c) 把實際算出的數值 (ooc_count=3 之類) 填進 outcome 報告給 user 看
+
+所以你 **只需要做對的 add_node**，phase 推進是自動的。看到下 round prompt 顯示
+你已在 phase[k+N] (跳了好幾個) 是正常的 — composite block 的好處。
+
+phase_complete 工具仍保留作為「我認為這 phase 已達成」的 hint，但不會強制觸發
+驗證 — 真正的判定永遠以 server verifier 為準。
 
 == 禁忌 ==
 - 不要 emit JSON ops list — 用 single tool call
@@ -87,12 +90,10 @@ add_node 的 `params` key 必須**100% 一字不差**從 inspect_block_doc 的 p
   X chart_type    ->  block_line_chart 用的是 type，**不是** chart_type
 若不確定 -> 先 inspect_block_doc(block_id)，看 param_schema 列出的 EXACT param names。
 
-== 何時 phase_complete ==
-看到 add_node + auto_preview 成功 + 結果符合 phase 的 expected kind ->
-**立即** call phase_complete(rationale="...")，**不要拖**。系統會跑 verifier，
-若不符 expected 它會擋並告訴你下一步該做什麼。
-
-別把所有 8 round 都拿來 inspect — 通常 inspect → add_node → preview → phase_complete 4 round 就該結束。
+== Round 預算 ==
+別把所有 8 round 都拿來 inspect — 通常 inspect → add_node → (auto verifier) 2-3 round
+就該推進到下個 phase。看到下 round 還在同一 phase 就表示上一動作 verifier 沒接受，
+看 prompt 裡的 `phase_verifier_no_match` event 知道哪裡不對。
 """
 
 
@@ -260,63 +261,71 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
         action_result = {"error": f"{type(e).__name__}: {e}"}
 
     # ── Auto-preview after canvas-mutating tools ─────────────────────
+    # v30.1 (2026-05-16): preview output is now handed off to
+    # phase_spanning_verifier_node (next graph node) via state.v30_last_preview
+    # so it can extract concrete outcome values (ooc_count, n_series, etc.)
+    # for the fast-forward report. exec_trace mirror is also written so the
+    # verifier — and the next round's observation prompt — see the runtime
+    # schema for the new node.
     auto_preview_result = None
+    auto_preview_blob = None
+    last_mutated_logical_id: str | None = None
+    snapshot_dict = None
     mutating = {"add_node", "set_param", "connect", "remove_node"}
     if tool_name in mutating and "error" not in action_result:
         target_nid = action_result.get("node_id") or tool_args.get("node_id") or tool_args.get("to_node")
         if target_nid:
             try:
-                pv = await toolset.preview(node_id=target_nid, sample_size=2)
+                pv = await toolset.preview(node_id=target_nid, sample_size=5)
                 auto_preview_result = {
                     "node_id": target_nid,
                     "rows": pv.get("rows"),
                     "status": pv.get("status"),
                 }
+                auto_preview_blob = pv.get("preview") or {}
+                # Build exec_trace snapshot for verifier + next round prompt.
+                # logical_id == real_id in v30 (toolset returns real id from
+                # add_node; we don't maintain a separate logical map here).
+                last_mutated_logical_id = target_nid
+                # Find block_id for this real id from current pipeline
+                blk_id = None
+                for n in transient.pipeline_json.nodes:
+                    if n.id == target_nid:
+                        blk_id = n.block_id
+                        break
+                # Extract simple sample row + columns from preview (mirrors
+                # execute._snapshot_node behaviour for v27 compat).
+                cols: list[str] = []
+                sample = None
+                for _port, blob in (auto_preview_blob or {}).items():
+                    if not isinstance(blob, dict):
+                        continue
+                    if blob.get("type") == "dataframe":
+                        cols = list(blob.get("columns") or [])
+                        rs = (
+                            blob.get("sample_rows") or blob.get("rows_sample")
+                            or blob.get("rows") or []
+                        )
+                        if rs and isinstance(rs[0], dict):
+                            sample = rs[0]
+                        break
+                    if blob.get("type") in ("dict", "chart_spec"):
+                        snap = blob.get("snapshot") or blob
+                        if isinstance(snap, dict):
+                            sample = {k: snap[k] for k in list(snap.keys())[:6]}
+                        break
+                snapshot_dict = {
+                    "logical_id": target_nid,
+                    "real_id": target_nid,
+                    "block_id": blk_id,
+                    "rows": pv.get("rows"),
+                    "cols": cols[:20],
+                    "sample": sample,
+                    "error": pv.get("error"),
+                    "after_cursor": round_n,
+                }
             except Exception as ex:  # noqa: BLE001
                 logger.info("auto-preview %s failed: %s", target_nid, ex)
-
-    # ── Phase complete signal? Run verifier ──────────────────────────
-    phase_done = False
-    verifier_result = None
-    auto_completed = False
-    if tool_name == "phase_complete":
-        verifier_result = _check_phase_done(transient.pipeline_json, phase, registry)
-        phase_done = verifier_result.get("match", False)
-        if not phase_done:
-            logger.info(
-                "agentic_phase_loop: phase %s verifier rejected complete signal: %s",
-                pid, verifier_result.get("reason"),
-            )
-            # LLM gets feedback next round — keep round counter going
-            action_result = {
-                **action_result,
-                "verifier_says": verifier_result,
-                "_note": "phase NOT done per verifier — try more rounds",
-            }
-    # v30 C-B2: auto phase_complete after canvas-mutating tools when
-    # verifier would already pass. LLM often forgets to call phase_complete
-    # explicitly; this server-side shortcut prevents wasted rounds.
-    elif tool_name in mutating and "error" not in action_result:
-        auto_check = _check_phase_done(transient.pipeline_json, phase, registry)
-        if auto_check.get("match"):
-            logger.info(
-                "agentic_phase_loop: phase %s auto-completed after %s "
-                "(verifier passed without LLM phase_complete call)",
-                pid, tool_name,
-            )
-            verifier_result = {**auto_check, "auto_completed": True}
-            phase_done = True
-            auto_completed = True
-            # Synthesize a phase_complete-shaped action_result so downstream
-            # outcome ledger has rationale.
-            action_result = {
-                **action_result,
-                "auto_phase_complete": True,
-                "rationale": (
-                    f"Auto-completed: after {tool_name}, verifier check passed "
-                    f"(expected={phase.get('expected')}, got={auto_check.get('got')})"
-                ),
-            }
 
     # ── Build state update + SSE ──────────────────────────────────────
     new_pipeline_dict = transient.pipeline_json.model_dump(by_alias=True)
@@ -362,6 +371,20 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
         "final_pipeline": new_pipeline_dict,
     }
 
+    # v30.1 (2026-05-16): hand off mutation snapshot to phase_verifier_node.
+    # Verifier reads these to decide phase advancement + extract outcome
+    # values for the fast-forward report. None for inspect-only rounds.
+    if last_mutated_logical_id and snapshot_dict:
+        new_exec_trace = dict(state.get("exec_trace") or {})
+        new_exec_trace[last_mutated_logical_id] = snapshot_dict
+        state_update["exec_trace"] = new_exec_trace
+        state_update["v30_last_mutated_logical_id"] = last_mutated_logical_id
+        state_update["v30_last_preview"] = auto_preview_blob
+    else:
+        # Explicit clear so verifier no-ops on inspect-only / errored rounds.
+        state_update["v30_last_mutated_logical_id"] = None
+        state_update["v30_last_preview"] = None
+
     # Pipeline snapshot for frontend canvas re-render after canvas-mutating
     # actions. Cheap (just dump model). Skip for inspect_* / phase_complete.
     pipeline_snapshot = None
@@ -386,36 +409,6 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
             "preview": auto_preview_result,
         }))
 
-    if phase_done:
-        # Advance to next phase
-        outcomes = dict(state.get("v30_phase_outcomes") or {})
-        outcomes[pid] = {
-            "status": "completed",
-            "completed_round": round_n + 1,
-            "rationale": action_result.get("rationale") or "",
-            "verifier_check": verifier_result,
-            "auto_completed": auto_completed,
-        }
-        state_update["v30_phase_outcomes"] = outcomes
-        state_update["v30_current_phase_idx"] = idx + 1
-        state_update["v30_phase_round"] = 0  # reset for next phase
-        # v30 C-A2: clear this phase's message stack — next phase starts
-        # fresh conversation; canvas snapshot in observation_md replaces it.
-        cleared_msgs = dict(new_msgs)
-        cleared_msgs[pid] = []
-        state_update["v30_phase_messages"] = cleared_msgs
-        sse_events.append(_event("phase_completed", {
-            "phase_id": pid,
-            "rationale": action_result.get("rationale") or "",
-            "auto_completed": auto_completed,
-        }))
-        if tracer is not None:
-            tracer.record_step(
-                "agentic_phase_loop", status="phase_completed",
-                phase_id=pid, rounds_used=round_n + 1,
-                verifier=verifier_result,
-            )
-
     if tracer is not None:
         tracer.record_step(
             "agentic_phase_loop", status="round_done",
@@ -423,6 +416,7 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
             tool=tool_name,
             action_ok="error" not in action_result,
             auto_preview=auto_preview_result,
+            mutated_node=last_mutated_logical_id,
         )
 
     state_update["sse_events"] = sse_events

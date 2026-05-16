@@ -208,14 +208,42 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
       } else if (evType === "phase_completed") {
         const pid = data.phase_id as string;
         const rationale = (data.rationale as string) || "";
+        const autoCompleted = Boolean(data.auto_completed);
+        const ffByBlock = (data.advanced_by_block as string) || undefined;
+        const ffByNode = (data.advanced_by_node as string) || undefined;
         setBuild((b) => ({
           ...b,
           phaseRuntime: {
             ...b.phaseRuntime,
-            [pid]: { ...b.phaseRuntime[pid], status: "completed", rationale },
+            [pid]: {
+              ...b.phaseRuntime[pid],
+              status: "completed",
+              rationale,
+              autoCompleted,
+              fastForwardedByBlock: ffByBlock,
+              fastForwardedBy: ffByNode,
+            },
           },
         }));
-        log("agent", `Phase ${pid} 完成 — ${rationale.slice(0, 80)}`);
+        log("agent", `Phase ${pid} 完成 — ${rationale.slice(0, 100)}`);
+      } else if (evType === "phase_fast_forward_report") {
+        // v30.1: one block covered >=2 phases at once. Show user the
+        // concrete outcome per phase so they can sanity-check the cascade.
+        const advancedBy = (data.advanced_by_block as string) || "(unknown)";
+        const advancedByNode = (data.advanced_by_node as string) || "?";
+        const completed =
+          (data.phases_completed as Array<{ id: string; outcome?: string; expected?: string }>) || [];
+        const ids = completed.map((c) => c.id).join(", ");
+        const summary = completed
+          .map((c) => `  ${c.id} (${c.expected ?? "?"}): ${c.outcome ?? ""}`)
+          .join("\n");
+        log(
+          "agent",
+          `[fast-forward] ${completed.length} phases (${ids}) 由 ${advancedByNode} [${advancedBy}] 一個 block 同時涵蓋:\n${summary}`,
+        );
+      } else if (evType === "phase_verifier_no_match") {
+        // verifier didn't accept the mutation; LLM continues. Surface in
+        // admin trace only — too noisy for chat log.
       } else if (evType === "phase_revise_started") {
         const pid = data.phase_id as string;
         const reason = (data.reason as string) || "";

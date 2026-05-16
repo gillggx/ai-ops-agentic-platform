@@ -338,6 +338,16 @@ def _blocks() -> list[dict[str, Any]]:
                 {"name": "ec_<const>_value", "type": "number", "when_present": "object_name=EC"},
                 {"name": "ec_<const>_deviation_pct", "type": "number", "when_present": "object_name=EC"},
             ],
+            # v30.1 (2026-05-16): raw_data + (with nested=true) verdict-capable
+            # via spc_summary.ooc_count. Verifier matches phase.expected=raw_data
+            # without further work; verdict still needs an explicit step_check
+            # chain unless spc_summary path is read directly.
+            "produces": {
+                "covers": ["raw_data"],
+                "outcome_extractors": [
+                    {"key": "row_count", "from_port": "data", "json_path": "rows.length", "type": "int"},
+                ],
+            },
         },
         {
             "name": "block_filter",
@@ -486,6 +496,13 @@ def _blocks() -> list[dict[str, Any]]:
                 },
             },
             "implementation": {"type": "python", "ref": "app.services.pipeline_builder.blocks.threshold:ThresholdBlockExecutor"},
+            # v30.1 (2026-05-16): verdict + scalar
+            "produces": {
+                "covers": ["verdict", "scalar"],
+                "outcome_extractors": [
+                    {"key": "triggered", "from_port": "triggered", "json_path": "$.", "type": "bool"},
+                ],
+            },
         },
         {
             "name": "block_count_rows",
@@ -2149,6 +2166,14 @@ def _blocks() -> list[dict[str, Any]]:
                 },
             },
             "implementation": {"type": "python", "ref": "app.services.pipeline_builder.blocks.alert:AlertBlockExecutor"},
+            # v30.1 (2026-05-16): alarm phase
+            "produces": {
+                "covers": ["alarm"],
+                "outcome_extractors": [
+                    {"key": "title", "from_port": "alert", "json_path": "title", "type": "string"},
+                    {"key": "severity", "from_port": "alert", "json_path": "severity", "type": "string"},
+                ],
+            },
         },
         {
             "name": "block_data_view",
@@ -2209,6 +2234,14 @@ def _blocks() -> list[dict[str, Any]]:
                 },
             },
             "implementation": {"type": "python", "ref": "app.services.pipeline_builder.blocks.data_view:DataViewBlockExecutor"},
+            # v30.1 (2026-05-16): table phase
+            "produces": {
+                "covers": ["table"],
+                "outcome_extractors": [
+                    {"key": "n_rows", "from_port": "data_view", "json_path": "rows.length", "type": "int"},
+                    {"key": "title", "from_port": "data_view", "json_path": "title", "type": "string"},
+                ],
+            },
         },
         {
             "name": "block_compute",
@@ -3147,6 +3180,16 @@ def _blocks() -> list[dict[str, Any]]:
                 {"name": "note", "type": "string", "description": "Human-readable summary"},
                 {"name": "evidence_rows", "type": "integer", "description": "Number of upstream rows feeding the check"},
             ],
+            # v30.1 (2026-05-16): verdict + scalar phase
+            "produces": {
+                "covers": ["verdict", "scalar"],
+                "outcome_extractors": [
+                    {"key": "pass", "from_port": "data", "json_path": "rows[0].pass", "type": "bool"},
+                    {"key": "value", "from_port": "data", "json_path": "rows[0].value", "type": "any"},
+                    {"key": "threshold", "from_port": "data", "json_path": "rows[0].threshold", "type": "any"},
+                    {"key": "ooc_count", "from_port": "data", "json_path": "rows[0].value", "type": "any"},
+                ],
+            },
         },
         # ── 2026-05-13 Phase 1 object-native: path navigation blocks ──
         {
@@ -3442,6 +3485,18 @@ def _blocks() -> list[dict[str, Any]]:
                             "time_range": "7d", "color_by": "toolID", "event_filter": "all"}},
             ],
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.spc_panel:SpcPanelBlockExecutor"},
+            # v30.1 (2026-05-16): one-block-multi-phase coverage.
+            # spc_panel internally fetches + filters + draws — single add covers
+            # raw_data (process_history) + verdict (ooc_count via meta) + chart.
+            "produces": {
+                "covers": ["raw_data", "transform", "verdict", "chart"],
+                "outcome_extractors": [
+                    {"key": "ooc_count", "from_port": "chart_spec", "json_path": "meta.ooc_count", "type": "int"},
+                    {"key": "n_series", "from_port": "chart_spec", "json_path": "meta.n_series", "type": "int"},
+                    {"key": "n_rows", "from_port": "chart_spec", "json_path": "meta.n_rows", "type": "int"},
+                    {"key": "spc_charts", "from_port": "chart_spec", "json_path": "$.", "type": "chart_spec"},
+                ],
+            },
         },
         {
             "name": "block_apc_panel",
@@ -3551,6 +3606,14 @@ def _blocks() -> list[dict[str, Any]]:
                  "params": {"tool_id": "EQP-01", "event_filter": "all"}},
             ],
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.apc_panel:ApcPanelBlockExecutor"},
+            # v30.1 (2026-05-16): one-block-multi-phase coverage.
+            "produces": {
+                "covers": ["raw_data", "transform", "chart"],
+                "outcome_extractors": [
+                    {"key": "n_series", "from_port": "chart_spec", "json_path": "meta.n_series", "type": "int"},
+                    {"key": "n_rows", "from_port": "chart_spec", "json_path": "meta.n_rows", "type": "int"},
+                ],
+            },
         },
     ]
 

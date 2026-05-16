@@ -2,10 +2,18 @@
 
 import { useState } from "react";
 
+export interface ExpectedOutput {
+  kind?: string | null;
+  value_desc?: string | null;
+  criterion?: string | null;
+  outcome_keys?: string[];
+}
+
 export interface GoalPhase {
   id: string;
   goal: string;
   expected: "raw_data" | "transform" | "verdict" | "chart" | "table" | "scalar" | "alarm";
+  expected_output?: ExpectedOutput | null;
   why?: string | null;
   user_edited?: boolean;
 }

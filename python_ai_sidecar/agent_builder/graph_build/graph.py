@@ -70,6 +70,9 @@ from python_ai_sidecar.agent_builder.graph_build.nodes.goal_plan import (
 from python_ai_sidecar.agent_builder.graph_build.nodes.agentic_phase_loop import (
     agentic_phase_loop_node,
 )
+from python_ai_sidecar.agent_builder.graph_build.nodes.phase_verifier import (
+    phase_spanning_verifier_node,
+)
 from python_ai_sidecar.agent_builder.graph_build.nodes.phase_revise import (
     phase_revise_node,
 )
@@ -350,13 +353,20 @@ def _route_after_goal_plan_confirm(state: BuildGraphState) -> str:
 
 def _route_after_phase_loop(state: BuildGraphState) -> str:
     """After one ReAct round in agentic_phase_loop:
-      - status=phase_revise_pending -> phase_revise
-      - all phases done -> finalize
-      - else -> back to agentic_phase_loop for next round
+      - status=phase_revise_pending -> phase_revise (round_max / stuck escalation)
+      - else -> phase_verifier (always — verifier no-ops if no mutation happened)
     """
     status = state.get("status")
     if status == "phase_revise_pending":
         return "phase_revise"
+    return "phase_verifier"
+
+
+def _route_after_phase_verifier(state: BuildGraphState) -> str:
+    """After phase_spanning_verifier_node ran:
+      - all phases done -> finalize
+      - else -> back to agentic_phase_loop for next round
+    """
     phases = state.get("v30_phases") or []
     idx = state.get("v30_current_phase_idx", 0)
     if idx >= len(phases):
@@ -424,6 +434,7 @@ def build_graph():
     g.add_node("goal_plan", goal_plan_node)
     g.add_node("goal_plan_confirm_gate", goal_plan_confirm_gate_node)
     g.add_node("agentic_phase_loop", agentic_phase_loop_node)
+    g.add_node("phase_verifier", phase_spanning_verifier_node)
     g.add_node("phase_revise", phase_revise_node)
     g.add_node("halt_handover", halt_handover_node)
 
@@ -446,13 +457,22 @@ def build_graph():
         _route_after_goal_plan_confirm,
         {"agentic_phase_loop": "agentic_phase_loop", "finalize": "finalize"},
     )
-    # v30: ReAct round -> next round / phase_revise / finalize when all done
+    # v30: ReAct round -> phase_verifier (always, unless escalation). Verifier
+    # decides phase advancement + fast-forward; routes back to loop or finalize.
     g.add_conditional_edges(
         "agentic_phase_loop",
         _route_after_phase_loop,
         {
-            "agentic_phase_loop": "agentic_phase_loop",
+            "phase_verifier": "phase_verifier",
             "phase_revise": "phase_revise",
+        },
+    )
+    # v30.1: phase_verifier -> next round / finalize
+    g.add_conditional_edges(
+        "phase_verifier",
+        _route_after_phase_verifier,
+        {
+            "agentic_phase_loop": "agentic_phase_loop",
             "finalize": "finalize",
         },
     )

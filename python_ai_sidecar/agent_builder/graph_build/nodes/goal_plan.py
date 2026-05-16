@@ -50,6 +50,13 @@ _SYSTEM = """你是 pipeline architect。User 給你需求，你產出 3-7 個 *
       table      — block_data_view 表格
       scalar     — 單一數值
       alarm      — 觸發告警
+  - `expected_output`: **必填** — 描述「實際算出什麼」的具體 outcome：
+      {
+        "kind": "scalar_with_context" | "chart_list" | "table" | "raw_rows" | "alarm" | "transform_rows",
+        "value_desc": "OOC chart 實際張數 (int) + 該時刻 lot/tool/step",   # 真實算出的「東西」，不是 true/false
+        "criterion": "ooc_count >= 2 視為通過判定",                          # 判定條件 (verdict 才填)
+        "outcome_keys": ["ooc_count"]                                        # 給 verifier 抽值用的 key 提示 (1-3 個)
+      }
   - `why`: (選填) 為什麼需要這 phase
 
 **輸出 schema (JSON 純 — 無 markdown fence):**
@@ -57,19 +64,28 @@ _SYSTEM = """你是 pipeline architect。User 給你需求，你產出 3-7 個 *
   "plan_summary": "...一句話...",
   "phases": [
     {"id":"p1","goal":"撈 EQP-08 過去 7 天 process_history 資料","expected":"raw_data",
+     "expected_output":{"kind":"raw_rows","value_desc":"process_history rows (含 spc_summary nested)","outcome_keys":["row_count"]},
      "why":"先 7d 試，沒資料退到 30d"},
-    {"id":"p2","goal":"判斷該機台最後 OOC 時是否 >=2 charts OOC","expected":"verdict"},
-    {"id":"p3","goal":"展示該時刻所有 OOC 的 SPC charts","expected":"chart"}
+    {"id":"p2","goal":"判斷該機台最後 OOC 時是否 >=2 charts OOC","expected":"verdict",
+     "expected_output":{"kind":"scalar_with_context","value_desc":"OOC chart 實際張數 + 該時刻 lot/tool/step","criterion":"ooc_count >= 2","outcome_keys":["ooc_count"]}},
+    {"id":"p3","goal":"展示該時刻所有 OOC 的 SPC charts","expected":"chart",
+     "expected_output":{"kind":"chart_list","value_desc":"N 張 SPC line chart 對應 OOC charts","outcome_keys":["spc_charts"]}}
   ],
   "alarm": null
 }
 
 **重要規則**:
 1. **不要寫 block_xxx**，phase goal 只描述結果，e.g. "撈 process_history" 而非
-   "用 block_process_history(tool_id=...)"
+   "用 block_process_history(tool_id=...)"。**Plan 層完全不知道 catalog**，
+   選 block 是執行層的事。
 2. phases 是線性順序，但**不寫 depends_on** — 後續 react_round 自己 wire
 3. 一個 chart + 一個 verdict 都各 1 phase，**不要塞同 phase**
 4. 若 user instruction 過模糊：回 {"too_vague": true, "reason": "..."}
+5. **expected_output.value_desc 寫實際算出的「東西」**（一個數字、一張圖、一個列表），
+   **不要**寫 "true/false" 這種抽象判定。執行層會把實際值（e.g. ooc_count = 3）
+   填進 outcome 報告給 user 看。
+6. **phase 切細沒關係** — 執行層會自動偵測「一個 block 涵蓋多 phase」並 fast-forward。
+   你只負責把 user intent 拆成最小語意單位即可，不用怕太細。
 
 == Phase Atomicity (極重要！) ==
 每個 phase **必須是 1-2 個 block 能完成的單一資料動作**。**不要**把多動作塞同 phase：
@@ -215,10 +231,25 @@ async def goal_plan_node(state: BuildGraphState) -> dict[str, Any]:
                 item.get("id") or f"p{i}", expected,
             )
             expected = "transform"
+        # expected_output (v30.1) — sanitize but pass through. Verifier
+        # tolerates missing fields (falls back to kind-only match).
+        eo_raw = item.get("expected_output") or {}
+        expected_output = None
+        if isinstance(eo_raw, dict):
+            outcome_keys = eo_raw.get("outcome_keys") or []
+            if not isinstance(outcome_keys, list):
+                outcome_keys = []
+            expected_output = {
+                "kind": str(eo_raw.get("kind") or "").strip() or None,
+                "value_desc": str(eo_raw.get("value_desc") or "").strip() or None,
+                "criterion": str(eo_raw.get("criterion") or "").strip() or None,
+                "outcome_keys": [str(k).strip() for k in outcome_keys[:5] if k],
+            }
         phases.append({
             "id": str(item.get("id") or f"p{i}").strip(),
             "goal": goal,
             "expected": expected,
+            "expected_output": expected_output,
             "why": str(item.get("why") or "").strip() or None,
             "user_edited": False,
         })
@@ -338,8 +369,14 @@ async def goal_plan_confirm_gate_node(state: BuildGraphState) -> dict[str, Any]:
                 expected = "transform"
             orig = original.get(pid)
             edited = orig is None or orig.get("goal") != goal
+            # Keep expected_output from original if user didn't supply one
+            # (UI may not surface it for editing yet; preserve LLM's emit).
+            eo_raw = item.get("expected_output")
+            if not isinstance(eo_raw, dict):
+                eo_raw = (orig or {}).get("expected_output")
             new_phases.append({
                 "id": pid, "goal": goal, "expected": expected,
+                "expected_output": eo_raw,
                 "why": str(item.get("why") or "").strip() or None,
                 "user_edited": edited,
             })

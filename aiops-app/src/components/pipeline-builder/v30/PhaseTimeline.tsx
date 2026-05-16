@@ -12,6 +12,15 @@ export interface PhaseRuntime {
   lastActionResult?: string;
   failReason?: string;
   rationale?: string;   // when completed
+  // v30.1 (2026-05-16): set by phase_completed event when verifier
+  // auto-completed (vs LLM phase_complete signal). Triggers the
+  // "auto" badge so user knows it wasn't an LLM declaration.
+  autoCompleted?: boolean;
+  // When this phase was completed as part of a fast-forward (one block
+  // covering >=2 phases), the trigger phase id is recorded so we can
+  // group them visually.
+  fastForwardedBy?: string;  // node id that covered this phase
+  fastForwardedByBlock?: string;  // block_id for human readability
 }
 
 interface Props {
@@ -62,11 +71,11 @@ export default function PhaseTimeline({ phases, runtime }: Props) {
 }
 
 const STATUS_STYLE: Record<PhaseStatus, { bg: string; fg: string; icon: string; label: string }> = {
-  pending:     { bg: "#f1f5f9", fg: "#64748b", icon: "·", label: "等待" },
-  in_progress: { bg: "#dbeafe", fg: "#1e40af", icon: "▶", label: "進行中" },
-  completed:   { bg: "#d1fae5", fg: "#065f46", icon: "✓", label: "完成" },
-  failed:      { bg: "#fee2e2", fg: "#991b1b", icon: "✗", label: "失敗" },
-  paused:      { bg: "#fef3c7", fg: "#92400e", icon: "⏸", label: "暫停" },
+  pending:     { bg: "#f1f5f9", fg: "#64748b", icon: ".",  label: "等待" },
+  in_progress: { bg: "#dbeafe", fg: "#1e40af", icon: ">",  label: "進行中" },
+  completed:   { bg: "#d1fae5", fg: "#065f46", icon: "[OK]", label: "完成" },
+  failed:      { bg: "#fee2e2", fg: "#991b1b", icon: "[X]",  label: "失敗" },
+  paused:      { bg: "#fef3c7", fg: "#92400e", icon: "[..]", label: "暫停" },
 };
 
 function PhaseRow({
@@ -155,9 +164,39 @@ function PhaseRow({
               )}
             </span>
           )}
+          {runtime.autoCompleted && runtime.status === "completed" && (
+            <span
+              style={{
+                padding: "1px 6px",
+                borderRadius: 3,
+                background: "#fef3c7",
+                color: "#92400e",
+                fontWeight: 600,
+                fontSize: 10.5,
+              }}
+              title="由 server verifier 自動偵測完成（非 LLM 主動 declare）"
+            >
+              auto
+            </span>
+          )}
+          {runtime.fastForwardedByBlock && runtime.status === "completed" && (
+            <span
+              style={{
+                padding: "1px 6px",
+                borderRadius: 3,
+                background: "#ede9fe",
+                color: "#5b21b6",
+                fontWeight: 600,
+                fontSize: 10.5,
+              }}
+              title={`由 ${runtime.fastForwardedBy ?? "?"} [${runtime.fastForwardedByBlock}] 一個 block 涵蓋多 phase`}
+            >
+              ff: {runtime.fastForwardedByBlock}
+            </span>
+          )}
           {runtime.rationale && runtime.status === "completed" && (
             <span style={{ color: "#15803d" }}>
-              {runtime.rationale.slice(0, 80)}
+              {runtime.rationale.slice(0, 100)}
             </span>
           )}
           {runtime.failReason && runtime.status === "failed" && (

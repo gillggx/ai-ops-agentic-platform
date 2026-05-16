@@ -39,6 +39,8 @@ GraphStatus = Literal[
     "phase_revise_pending",         # max round hit; LLM self-reflect in progress
     "handover_pending",             # phase failed even after revise; user must choose
     "build_partial",                # finished some phases, user took over / aborted
+    # v30.1 (2026-05-16): phase-spanning verifier + fast-forward
+    "phase_verifying",              # verifier running between rounds
 ]
 
 
@@ -133,11 +135,19 @@ class BuildGraphState(TypedDict, total=False):
     # Replaces macro_plan + compile_chunk × N. See docs/spec_v30_react_pipeline_builder.md.
     #
     # phases: goal-oriented phase definitions (user-confirmed before execution).
-    # Each entry: {id, goal, expected, why?, user_edited?}
+    # Each entry: {id, goal, expected, expected_output?, why?, user_edited?}
     #   id        — phase identifier "p1"/"p2"/...
     #   goal      — natural-language outcome description ("撈 EQP-08 ...")
     #   expected  — completion category: raw_data | transform | verdict
     #               | chart | table | scalar | alarm
+    #   expected_output — concrete outcome shape (v30.1, 2026-05-16):
+    #       {kind: "scalar_with_context"|"chart_list"|"table"|"alarm",
+    #        value_desc: str (e.g. "OOC chart 實際張數 (int)"),
+    #        criterion: str (e.g. "ooc_count >= 2 視為通過"),
+    #        outcome_keys: list[str] (hint for verifier extractor — keys it
+    #          should try to pull from block output, e.g. ["ooc_count"])}
+    #     Used by phase_spanning_verifier_node to (a) detect 1-block-multi-phase
+    #     coverage and (b) populate fast-forward report with concrete values.
     #   why       — optional rationale for the phase
     #   user_edited — true when user changed the LLM-emitted goal
     v30_phases: list[dict]
@@ -170,6 +180,22 @@ class BuildGraphState(TypedDict, total=False):
     # Shape: {phase_id: [{"role":"user"|"assistant", "content": [...]}]}
     # Reset to [] when current_phase_idx advances.
     v30_phase_messages: dict[str, list[dict]]
+    # v30.1 (2026-05-16): fast-forward audit log. phase_spanning_verifier_node
+    # appends one entry every time it auto-completes >=2 phases at once.
+    # Shape: [{trigger_phase_id, advanced_by_node, advanced_by_block,
+    #          phases_completed: [{id, expected, outcome, evidence: {...}}]}]
+    # Read by frontend to render the fast-forward report card.
+    v30_fast_forward_log: list[dict]
+    # v30.1 (2026-05-16): handoff fields between agentic_phase_loop and the
+    # downstream phase_spanning_verifier_node. Loop sets these after a
+    # mutating action; verifier reads + clears them.
+    #   v30_last_mutated_logical_id — node id touched by the just-finished
+    #     tool call. None when the round did inspect_*/no-op only.
+    #   v30_last_preview — full pv dict from toolset.preview() (per-port
+    #     blob with chart meta etc.). Verifier extracts outcome values from
+    #     this; richer than exec_trace[lid].sample which is dataframe-only.
+    v30_last_mutated_logical_id: Optional[str]
+    v30_last_preview: Optional[dict]
     # v13 (2026-05-13): per-node contracts the agent declares while writing
     # the plan. Runtime auto-preview compares each node's actual snapshot
     # to its contract; mismatch fires a targeted reflect_op (changes only
@@ -307,4 +333,5 @@ def initial_state(
         v30_phase_edit_history={},
         v30_phase_recent_actions={},
         v30_phase_messages={},
+        v30_fast_forward_log=[],
     )
