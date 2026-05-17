@@ -1,4 +1,5 @@
 """v30.17a — goal_plan_confirm_gate_node skip_confirm bypass.
+v30.17b — halt_handover_node skip_confirm bypass (added below).
 
 Bug: chat orchestrator's build_pipeline_live tool passes skip_confirm=True
 ("chat conversation IS the confirmation"), but v30 goal_plan_confirm_gate
@@ -107,3 +108,64 @@ def test_skip_confirm_with_empty_phases_still_auto_confirms(goal_plan_module):
     assert result["status"] == "phase_in_progress"
     assert result["sse_events"][0]["event"] == "goal_plan_confirmed"
     assert result["sse_events"][0]["data"]["phases"] == []
+
+
+# ───────────────────────── v30.17b halt_handover ─────────────────────────
+
+@pytest.fixture
+def halt_module():
+    from python_ai_sidecar.agent_builder.graph_build.nodes import halt_handover
+    return halt_handover
+
+
+def test_halt_handover_skip_confirm_auto_take_over(halt_module):
+    """skip_confirm=True → auto-pick 'take_over', no interrupt()."""
+    state = {
+        "skip_confirm": True,
+        "v30_handover": {
+            "failed_phase_id": "p5",
+            "reason": "revise budget exhausted",
+            "tried_summary": "tried 3 alternatives",
+        },
+        "session_id": "test",
+    }
+    with patch.object(halt_module, "interrupt",
+                       side_effect=AssertionError("interrupt should not be called")):
+        result = asyncio.run(halt_module.halt_handover_node(state))
+
+    assert result["status"] == "build_partial"
+    assert result["v30_handover"]["user_choice"] == "take_over"
+    assert result["v30_handover"]["auto_chosen"] is True
+    ev = result["sse_events"][0]
+    assert ev["event"] == "handover_chosen"
+    assert ev["data"]["choice"] == "take_over"
+    assert ev["data"]["auto_chosen"] is True
+    assert ev["data"]["failed_phase_id"] == "p5"
+    assert ev["data"]["reason"] == "revise budget exhausted"
+
+
+def test_halt_handover_no_skip_confirm_still_interrupts(halt_module):
+    """skip_confirm=False (Builder GUI) → interrupt() IS called (unchanged)."""
+    state = {
+        "skip_confirm": False,
+        "v30_handover": {"failed_phase_id": "p3", "reason": "blocked"},
+        "session_id": "s",
+    }
+
+    class _InterruptCalled(Exception):
+        pass
+
+    with patch.object(halt_module, "interrupt",
+                       side_effect=_InterruptCalled("interrupt fired")):
+        with pytest.raises(_InterruptCalled):
+            asyncio.run(halt_module.halt_handover_node(state))
+
+
+def test_halt_handover_skip_confirm_handles_empty_handover(halt_module):
+    """Edge: v30_handover missing → still auto-take_over (no NPE)."""
+    state = {"skip_confirm": True, "session_id": "s"}
+    with patch.object(halt_module, "interrupt",
+                       side_effect=AssertionError("should not interrupt")):
+        result = asyncio.run(halt_module.halt_handover_node(state))
+    assert result["status"] == "build_partial"
+    assert result["v30_handover"]["user_choice"] == "take_over"

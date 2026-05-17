@@ -29,6 +29,30 @@ VALID_CHOICES = {"edit_goal", "take_over", "backlog", "abort"}
 async def halt_handover_node(state: BuildGraphState) -> dict[str, Any]:
     handover = state.get("v30_handover") or {}
     pid = handover.get("failed_phase_id")
+
+    # v30.17b (2026-05-17) — skip_confirm bypass. Chat / non-interactive
+    # callers cannot present the 4-option dialog. Default to take_over so
+    # the partial pipeline is returned + finalize emits done; user sees
+    # what was built before the failed phase, with reason annotation.
+    # Without this, chat hangs forever on this interrupt (same pattern as
+    # v30.17a goal_plan_confirm_gate fix).
+    if state.get("skip_confirm"):
+        logger.info(
+            "halt_handover_node: skip_confirm=True — auto-take_over on failed phase %s "
+            "(reason=%s)", pid, handover.get("reason"),
+        )
+        new_handover = {**handover, "user_choice": "take_over", "auto_chosen": True}
+        return {
+            "v30_handover": new_handover,
+            "status": "build_partial",
+            "sse_events": [_event("handover_chosen", {
+                "failed_phase_id": pid,
+                "choice": "take_over",
+                "auto_chosen": True,
+                "reason": handover.get("reason"),
+            })],
+        }
+
     logger.info("halt_handover_node: pausing for user choice on phase %s", pid)
 
     user_response = interrupt({
