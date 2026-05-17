@@ -32,4 +32,17 @@ public interface AlarmRepository extends JpaRepository<AlarmEntity, Long> {
 	/** Phase 11 — past-event replay: find recent alarms triggered by a given
 	 *  event_type. Used by Skill Test modal's Past event tab. */
 	List<AlarmEntity> findTop30ByTriggerEventOrderByCreatedAtDesc(String triggerEvent);
+
+	/** v30.13 (2026-05-17) — SkillRunner alarm-emit dedup: return true if
+	 *  there's already an active alarm for the same (skill, equipment) within
+	 *  the given window. Used to avoid hourly-patrol spamming when condition
+	 *  persists across multiple ticks. */
+	@Query("SELECT COUNT(a) > 0 FROM AlarmEntity a "
+			+ "WHERE a.status = 'active' "
+			+ "  AND a.skillId = :skillId "
+			+ "  AND a.equipmentId = :equipmentId "
+			+ "  AND a.createdAt >= :since")
+	boolean existsActiveBySkillAndEquipmentSince(@Param("skillId") Long skillId,
+	                                              @Param("equipmentId") String equipmentId,
+	                                              @Param("since") OffsetDateTime since);
 }

@@ -1,6 +1,8 @@
 package com.aiops.api.api.skill;
 
 import com.aiops.api.auth.AuthPrincipal;
+import com.aiops.api.domain.alarm.AlarmEntity;
+import com.aiops.api.domain.alarm.AlarmRepository;
 import com.aiops.api.domain.pipeline.PipelineEntity;
 import com.aiops.api.domain.pipeline.PipelineRepository;
 import com.aiops.api.domain.skill.SkillDocumentEntity;
@@ -52,18 +54,25 @@ public class SkillRunnerService {
     private final PipelineRepository pipelineRepo;
     private final PythonSidecarClient sidecar;
     private final ObjectMapper mapper;
+    private final AlarmRepository alarmRepo;
 
     public SkillRunnerService(SkillDocumentRepository skillRepo,
                               SkillRunRepository runRepo,
                               PipelineRepository pipelineRepo,
                               PythonSidecarClient sidecar,
-                              ObjectMapper mapper) {
+                              ObjectMapper mapper,
+                              AlarmRepository alarmRepo) {
         this.skillRepo = skillRepo;
         this.runRepo = runRepo;
         this.pipelineRepo = pipelineRepo;
         this.sidecar = sidecar;
         this.mapper = mapper;
+        this.alarmRepo = alarmRepo;
     }
+
+    /** v30.13 — emit-alarm guard: skip non-patrol stages + 1-hour dedup window. */
+    private static final Duration ALARM_DEDUP_WINDOW = Duration.ofHours(1);
+    private static final String ALARM_TRIGGER_EVENT_PATROL = "patrol_check";
 
     /** Reactive stream of SSE-shaped events; controller bridges into SseEmitter. */
     public Flux<RunEvent> run(String slug,
@@ -164,8 +173,148 @@ public class SkillRunnerService {
             updateSkillStats(skill, run);
         }
 
+        // v30.13 (2026-05-17) — alarm-emit chain. SkillRunner is the only
+        // place that knows "step_check.pass=true + skill stage=patrol" → an
+        // alarm row should exist. Without this, Alarm Center is permanently
+        // empty even when patrol skills run and detect anomalies.
+        try {
+            AlarmEntity alarm = emitAlarmIfTriggered(
+                    skill, run, triggerPayload, confirmResult, stepResults, skipChecklist);
+            if (alarm != null) {
+                sink.tryEmitNext(RunEvent.alarmCreated(alarm));
+            }
+        } catch (Exception ex) {  // never let alarm-emit fail the main run
+            log.warn("skill {} run {} alarm-emit failed: {}",
+                    skill.getSlug(), run.getId(), ex.toString());
+        }
+
         sink.tryEmitNext(RunEvent.done(run.getId(), stepResults));
         sink.tryEmitComplete();
+    }
+
+    /** v30.13 (2026-05-17) — write an alarms row when this run represents a
+     *  triggered patrol condition. Returns the saved entity (for SSE), or
+     *  null when guard rules block emission (test / non-patrol / dedup / no
+     *  triggered step). All exceptions caught by caller — alarm-emit must
+     *  not poison the main skill-run path.
+     */
+    private AlarmEntity emitAlarmIfTriggered(SkillDocumentEntity skill,
+                                              SkillRunEntity run,
+                                              Map<String, Object> triggerPayload,
+                                              Map<String, Object> confirmResult,
+                                              List<Map<String, Object>> stepResults,
+                                              boolean skipChecklist) {
+        // Guard 1: tests never alarm
+        if (Boolean.TRUE.equals(run.getIsTest())) return null;
+        // Guard 2: only patrol stage emits (diagnose is exploratory)
+        if (!"patrol".equalsIgnoreCase(skill.getStage())) return null;
+        // Guard 3: confirm gate failed → no alarm
+        if (skipChecklist) return null;
+        // Guard 4: at least one step must have triggered (status == "pass")
+        boolean anyTriggered = stepResults.stream()
+                .anyMatch(s -> "pass".equalsIgnoreCase(String.valueOf(s.get("status"))));
+        if (!anyTriggered) return null;
+
+        // Equipment id from trigger_payload (patrol may not have one — use sentinel)
+        String equipmentId = triggerPayload == null ? null
+                : String.valueOf(triggerPayload.getOrDefault("tool_id",
+                                  triggerPayload.getOrDefault("equipment_id", "")));
+        if (equipmentId == null || equipmentId.isBlank() || "null".equals(equipmentId)) {
+            equipmentId = "(any)";
+        }
+
+        // Dedup: skip if active alarm exists for (skill, equipment) in last 1h
+        OffsetDateTime since = OffsetDateTime.now().minus(ALARM_DEDUP_WINDOW);
+        if (alarmRepo.existsActiveBySkillAndEquipmentSince(skill.getId(), equipmentId, since)) {
+            log.debug("skill {} run {}: alarm suppressed by dedup (active alarm "
+                    + "exists for skill={}+equipment={} within {})",
+                    skill.getSlug(), run.getId(), skill.getId(), equipmentId, ALARM_DEDUP_WINDOW);
+            return null;
+        }
+
+        // Try to extract evidence context (lot/step/event_time) from confirm
+        // result's first data_view row. Best-effort — fall back to null.
+        String lotId = "";
+        String step = null;
+        OffsetDateTime eventTime = null;
+        Map<String, Object> evidenceRow = pickFirstEvidenceRow(confirmResult);
+        if (evidenceRow != null) {
+            Object lot = evidenceRow.getOrDefault("lotID", evidenceRow.get("lot_id"));
+            if (lot != null) lotId = String.valueOf(lot);
+            Object stp = evidenceRow.get("step");
+            if (stp != null) step = String.valueOf(stp);
+            Object et = evidenceRow.getOrDefault("eventTime", evidenceRow.get("event_time"));
+            if (et != null) {
+                try { eventTime = OffsetDateTime.parse(String.valueOf(et)); }
+                catch (Exception ignored) { /* leave null */ }
+            }
+        }
+
+        // Severity from trigger_config.severity if present; default MEDIUM
+        String severity = "MEDIUM";
+        Map<String, Object> trig = parseJsonObject(skill.getTriggerConfig());
+        Object sev = trig.get("severity");
+        if (sev != null && !String.valueOf(sev).isBlank()) {
+            severity = String.valueOf(sev).toUpperCase();
+        }
+
+        // Title: skill.title + equipment
+        String title = (skill.getTitle() != null ? skill.getTitle() : skill.getSlug())
+                + " — " + equipmentId;
+        if (title.length() > 290) title = title.substring(0, 290);
+
+        // Summary: consolidate confirm.note + passing step notes
+        StringBuilder summary = new StringBuilder();
+        if (confirmResult != null && confirmResult.get("note") != null) {
+            summary.append("Confirm: ").append(confirmResult.get("note")).append('\n');
+        }
+        for (Map<String, Object> s : stepResults) {
+            if ("pass".equalsIgnoreCase(String.valueOf(s.get("status")))) {
+                summary.append("Step ").append(s.get("step_id"))
+                       .append(": ").append(s.getOrDefault("note", "")).append('\n');
+            }
+        }
+        summary.append("(SkillRun #").append(run.getId()).append(")");
+
+        AlarmEntity a = new AlarmEntity();
+        a.setSkillId(skill.getId());
+        a.setTriggerEvent(deriveTriggerEvent(trig));
+        a.setEquipmentId(equipmentId);
+        a.setLotId(lotId);
+        a.setStep(step);
+        a.setEventTime(eventTime);
+        a.setSeverity(severity);
+        a.setTitle(title);
+        a.setSummary(summary.toString());
+        a.setStatus("active");
+        a = alarmRepo.save(a);
+        log.info("skill {} run {}: emitted alarm id={} severity={} equipment={}",
+                skill.getSlug(), run.getId(), a.getId(), severity, equipmentId);
+        return a;
+    }
+
+    /** Read confirm result's first data_view row, if any. Tolerant of shape. */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> pickFirstEvidenceRow(Map<String, Object> confirmResult) {
+        if (confirmResult == null) return null;
+        Object dvs = confirmResult.get("data_views");
+        if (!(dvs instanceof List<?> dvList) || dvList.isEmpty()) return null;
+        Object first = dvList.get(0);
+        if (!(first instanceof Map<?, ?> dv)) return null;
+        Object rows = ((Map<String, Object>) dv).get("rows");
+        if (!(rows instanceof List<?> rowList) || rowList.isEmpty()) return null;
+        Object row0 = rowList.get(0);
+        return row0 instanceof Map ? (Map<String, Object>) row0 : null;
+    }
+
+    private String deriveTriggerEvent(Map<String, Object> triggerConfig) {
+        if (triggerConfig == null || triggerConfig.isEmpty()) return ALARM_TRIGGER_EVENT_PATROL;
+        Object type = triggerConfig.get("type");
+        if ("event".equals(type)) {
+            Object ev = triggerConfig.get("event");
+            if (ev != null && !String.valueOf(ev).isBlank()) return String.valueOf(ev);
+        }
+        return ALARM_TRIGGER_EVENT_PATROL;
     }
 
     private Map<String, Object> parseJsonObject(String json) {
@@ -431,6 +580,18 @@ public class SkillRunnerService {
         }
         static RunEvent error(String message) {
             return new RunEvent("error", Map.of("message", message));
+        }
+        /** v30.13 (2026-05-17) — alarm-emit notification so UI can refresh
+         *  Alarm Center without polling. Carries the new alarm id + summary
+         *  fields, not the full entity (avoid JPA-Jackson cycles). */
+        static RunEvent alarmCreated(AlarmEntity a) {
+            Map<String, Object> data = new HashMap<>();
+            data.put("alarm_id", a.getId());
+            data.put("severity", a.getSeverity());
+            data.put("title", a.getTitle());
+            data.put("equipment_id", a.getEquipmentId());
+            data.put("skill_id", a.getSkillId());
+            return new RunEvent("alarm_created", data);
         }
     }
 }
