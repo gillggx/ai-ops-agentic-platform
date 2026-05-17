@@ -158,20 +158,25 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
         deficit = _detect_deficit(eo_value_desc, rows) if cur == idx else None
         if deficit:
             phase_id_str = phase.get("id") or ""
-            prior_decision = (state.get("v30_judge_decisions") or {}).get(phase_id_str)
-            if prior_decision == "continue":
-                # v30.17j hotfix: pause node now handles 'continue' directly
-                # (manual phase advance). If we hit deficit AGAIN on the same
-                # phase after continue, just accept silently — don't re-pause.
+            prior_decisions = state.get("v30_judge_decisions") or {}
+            prior_decision = prior_decisions.get(phase_id_str)
+            # v30.17j hotfix #2: if user already chose 'continue' for ANY
+            # earlier phase in this build, auto-accept all subsequent
+            # deficits silently. The data ceiling is the source's, not the
+            # phase's — asking again per phase is redundant noise.
+            any_prior_continue = any(v == "continue" for v in prior_decisions.values())
+            if prior_decision == "continue" or any_prior_continue:
                 logger.info(
-                    "phase_verifier: phase %s deficit re-detected after user=continue, "
-                    "silently accepting (no re-pause)", phase_id_str,
+                    "phase_verifier: phase %s deficit silently accepted "
+                    "(prior=%s, any_continue=%s)",
+                    phase_id_str, prior_decision, any_prior_continue,
                 )
                 judge = {
                     "match": True,
                     "reason": (
                         f"資料源僅 {deficit['actual_rows']} 筆 (要求 "
-                        f"{deficit['requested_n']} 筆)，user 選擇用現有資料繼續 (cached)"
+                        f"{deficit['requested_n']} 筆)；前一階段 user 已選"
+                        f"繼續，自動接受"
                     ),
                     "extracted": {},
                 }

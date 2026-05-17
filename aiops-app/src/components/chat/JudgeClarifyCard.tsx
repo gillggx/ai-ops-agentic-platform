@@ -28,9 +28,9 @@ interface Props {
 }
 
 const ACTION_LABEL: Record<JudgeAction, { label: string; color: string }> = {
-  continue: { label: "用現有資料繼續", color: "#38a169" },
-  replan:   { label: "重新規劃放寬",   color: "#2b6cb0" },
-  cancel:   { label: "取消",          color: "#e53e3e" },
+  continue: { label: "繼續", color: "#38a169" },
+  replan:   { label: "重來", color: "#2b6cb0" },
+  cancel:   { label: "放棄", color: "#e53e3e" },
 };
 
 export function JudgeClarifyCard({ data, onPick }: Props) {
