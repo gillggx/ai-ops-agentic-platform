@@ -252,24 +252,34 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                     })],
                 }
 
-        # v30.17j hotfix: chart phases produce chart_spec, not row-based
-        # output — rows=None is by design. Judge prompt's row-count rules
-        # ("1 張 / N 筆") incorrectly reject these. Skip judge entirely
-        # for chart-phase + chart_spec output; trust the covers gate.
+        # v30.17j: chart phases produce chart_spec (no rows).
+        # v30.17l hotfix: verdict / alarm phases similarly produce
+        # non-row-bearing output (Logic Node = {triggered: bool, evidence}).
+        # Judge's row-count semantic rules don't fit either case; skip
+        # entirely and trust the covers gate.
         is_chart_phase_chart_output = (
             ph_expected == "chart"
             and "chart" in covers
             and _has_chart_spec_output(preview_blob)
         )
-        if is_chart_phase_chart_output and cur == idx:
+        is_verdict_or_alarm_phase = (
+            ph_expected in {"verdict", "alarm"}
+            and ph_expected in covers
+        )
+        if (is_chart_phase_chart_output or is_verdict_or_alarm_phase) and cur == idx:
+            skip_reason = (
+                "chart_spec output" if is_chart_phase_chart_output
+                else "verdict/alarm phase (Logic Node output)"
+            )
             logger.info(
-                "phase_verifier: chart phase %s with chart_spec output — "
-                "skipping LLM-judge (rows=%s by design)",
-                phase.get("id"), rows,
+                "phase_verifier: phase %s (expected=%s) — skipping LLM-judge "
+                "(%s, rows=%s)",
+                phase.get("id"), ph_expected, skip_reason, rows,
             )
             judge = {
                 "match": True,
-                "reason": f"chart phase satisfied by chart_spec from {block_id}",
+                "reason": f"{ph_expected} phase satisfied by {block_id} "
+                          f"({skip_reason})",
                 "extracted": {},
             }
         # v30.10 B2: LLM-judge semantic check (covers expected_output.value_desc)
