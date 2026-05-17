@@ -229,7 +229,7 @@ class BuildTracer:
             "node": node,
             "ts": _iso_now(),
             "system_chars": len(system) if system else 0,
-            "user_msg": _truncate(user_msg, 8000),
+            "user_msg": _truncate(user_msg, 60000),
             "raw_response": _truncate(raw_response, 8000),
         }
         if attempt is not None:

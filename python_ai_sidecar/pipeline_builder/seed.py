@@ -1046,6 +1046,7 @@ def _blocks() -> list[dict[str, Any]]:
                     },
                 },
             },
+            "produces": {"covers": ["chart"], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "app.services.pipeline_builder.blocks.chart:ChartBlockExecutor"},
         },
         {
@@ -2463,6 +2464,7 @@ def _blocks() -> list[dict[str, Any]]:
                     "title": {"type": "string"},
                 },
             },
+            "produces": {"covers": ["chart"], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.line_chart:LineChartBlockExecutor"},
         },
         {
@@ -2505,6 +2507,7 @@ def _blocks() -> list[dict[str, Any]]:
                     "title": {"type": "string"},
                 },
             },
+            "produces": {"covers": ["chart"], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.bar_chart:BarChartBlockExecutor"},
         },
         {
@@ -2545,6 +2548,7 @@ def _blocks() -> list[dict[str, Any]]:
                     "title": {"type": "string"},
                 },
             },
+            "produces": {"covers": ["chart"], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.scatter_chart:ScatterChartBlockExecutor"},
         },
         {
@@ -2591,6 +2595,7 @@ def _blocks() -> list[dict[str, Any]]:
                     "title": {"type": "string"},
                 },
             },
+            "produces": {"covers": ["chart"], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.box_plot:BoxPlotBlockExecutor"},
         },
         {
@@ -2629,6 +2634,7 @@ def _blocks() -> list[dict[str, Any]]:
                     "title": {"type": "string"},
                 },
             },
+            "produces": {"covers": ["chart"], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.splom:SplomBlockExecutor"},
         },
         {
@@ -2678,6 +2684,7 @@ def _blocks() -> list[dict[str, Any]]:
                     "title": {"type": "string"},
                 },
             },
+            "produces": {"covers": ["chart"], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.histogram_chart:HistogramChartBlockExecutor"},
         },
         # ── PR-H — SPC + Diagnostic chart blocks (Stage 2 part 2/3) ────────
@@ -2719,6 +2726,7 @@ def _blocks() -> list[dict[str, Any]]:
                     "title": {"type": "string"},
                 },
             },
+            "produces": {"covers": ["chart"], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.xbar_r:XbarRBlockExecutor"},
         },
         {
@@ -2752,6 +2760,7 @@ def _blocks() -> list[dict[str, Any]]:
                     "title": {"type": "string"},
                 },
             },
+            "produces": {"covers": ["chart"], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.imr:IMRBlockExecutor"},
         },
         {
@@ -2797,6 +2806,7 @@ def _blocks() -> list[dict[str, Any]]:
                     "title": {"type": "string"},
                 },
             },
+            "produces": {"covers": ["chart"], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.ewma_cusum:EwmaCusumBlockExecutor"},
         },
         {
@@ -2831,6 +2841,7 @@ def _blocks() -> list[dict[str, Any]]:
                     "title": {"type": "string"},
                 },
             },
+            "produces": {"covers": ["chart"], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.pareto:ParetoBlockExecutor"},
         },
         {
@@ -2865,6 +2876,7 @@ def _blocks() -> list[dict[str, Any]]:
                     "title": {"type": "string"},
                 },
             },
+            "produces": {"covers": ["chart"], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.variability_gauge:VariabilityGaugeBlockExecutor"},
         },
         {
@@ -2901,6 +2913,7 @@ def _blocks() -> list[dict[str, Any]]:
                     "title": {"type": "string"},
                 },
             },
+            "produces": {"covers": ["chart"], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.parallel_coords:ParallelCoordsBlockExecutor"},
         },
         {
@@ -2934,6 +2947,7 @@ def _blocks() -> list[dict[str, Any]]:
                     "title": {"type": "string"},
                 },
             },
+            "produces": {"covers": ["chart"], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.probability_plot:ProbabilityPlotBlockExecutor"},
         },
         {
@@ -2974,6 +2988,7 @@ def _blocks() -> list[dict[str, Any]]:
                     "title": {"type": "string"},
                 },
             },
+            "produces": {"covers": ["chart"], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.heatmap_dendro:HeatmapDendroBlockExecutor"},
         },
         # ── PR-I — Wafer chart blocks (Stage 2 part 3/3) ───────────────────
@@ -3023,6 +3038,7 @@ def _blocks() -> list[dict[str, Any]]:
                     "title": {"type": "string"},
                 },
             },
+            "produces": {"covers": ["chart"], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.wafer_heatmap:WaferHeatmapBlockExecutor"},
         },
         {
@@ -3061,6 +3077,7 @@ def _blocks() -> list[dict[str, Any]]:
                     "title": {"type": "string"},
                 },
             },
+            "produces": {"covers": ["chart"], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.defect_stack:DefectStackBlockExecutor"},
         },
         {
@@ -3103,6 +3120,7 @@ def _blocks() -> list[dict[str, Any]]:
                     "title": {"type": "string"},
                 },
             },
+            "produces": {"covers": ["chart"], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.spatial_pareto:SpatialParetoBlockExecutor"},
         },
         {
@@ -3149,6 +3167,7 @@ def _blocks() -> list[dict[str, Any]]:
                     "title": {"type": "string"},
                 },
             },
+            "produces": {"covers": ["chart"], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.trend_wafer_maps:TrendWaferMapsBlockExecutor"},
         },
         {

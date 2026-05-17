@@ -99,8 +99,13 @@ def main():
         "mode": args.mode,
         "client_context": {},
     }
+    # Mimic Java's user-context headers so caller_roles is populated and
+    # role-gated tools (build_pipeline_live, draft_skill) are visible.
+    # Java forwards these from JWT; we set explicitly for harness use.
     hdr = {"X-Service-Token": svc, "Content-Type": "application/json",
-           "Accept": "text/event-stream"}
+           "Accept": "text/event-stream",
+           "X-User-Id": os.environ.get("VERIFY_USER_ID", "2"),
+           "X-User-Roles": os.environ.get("VERIFY_USER_ROLES", "IT_ADMIN,PE")}
 
     t0 = time.time()
     print(f"[META] POST {args.sidecar}/internal/agent/chat  msg={_short(args.message, 80)}")
@@ -117,34 +122,63 @@ def main():
     last_synthesis_text = None
     pb_glass_ops = 0
     pb_glass_chats = 0
+    pending_intent_card = None  # captured design_intent_confirm card_id
+    session_id_captured = None
 
-    for ev, data in _sse_lines(r):
-        by_type[ev] = by_type.get(ev, 0) + 1
-        d = data or {}
-        if ev in CHAT_UI_HANDLED_EVENTS:
-            ui_count += 1
-            extra = ""
-            if ev == "synthesis":
-                last_synthesis_text = d.get("text") or ""
-                extra = f"  text={_short(last_synthesis_text, 80)}"
-            elif ev == "pb_glass_chat":
-                pb_glass_chats += 1
-                extra = f"  content={_short(d.get('content') or '', 80)}"
-            elif ev == "pb_glass_op":
-                pb_glass_ops += 1
-                extra = f"  op={d.get('op')} desc={_short(d.get('description') or '', 60)}"
-            elif ev == "pb_glass_done":
-                extra = f"  status={d.get('status')} nodes={len((d.get('pipeline_json') or {}).get('nodes', []))}"
-            elif ev == "tool_start":
-                extra = f"  tool={d.get('tool')}"
-            elif ev == "pb_intent_confirm":
-                extra = f"  bullets={len(d.get('bullets') or [])}"
-            print(f"[UI]   ev={ev}{extra}")
-            if ev == "done":
-                break
-        else:
-            drop_count += 1
-            print(f"[DROP] ev={ev}  data_keys={list(d.keys())[:5]}")
+    def drain(resp_iter):
+        nonlocal ui_count, drop_count, last_synthesis_text, pb_glass_ops
+        nonlocal pb_glass_chats, pending_intent_card, session_id_captured
+        for ev, data in resp_iter:
+            by_type[ev] = by_type.get(ev, 0) + 1
+            d = data or {}
+            if d.get("session_id") and not session_id_captured:
+                session_id_captured = d.get("session_id")
+            if ev == "design_intent_confirm":
+                # NOT in ChatPanel.tsx switch (drops there). But we capture
+                # for the 2nd-round POST /chat/intent-respond auto-confirm.
+                pending_intent_card = d.get("card_id")
+                drop_count += 1
+                print(f"[DROP] ev={ev}  card_id={pending_intent_card} (harness will auto-confirm)")
+                continue
+            if ev in CHAT_UI_HANDLED_EVENTS:
+                ui_count += 1
+                extra = ""
+                if ev == "synthesis":
+                    last_synthesis_text = d.get("text") or ""
+                    extra = f"  text={_short(last_synthesis_text, 80)}"
+                elif ev == "pb_glass_chat":
+                    pb_glass_chats += 1
+                    extra = f"  content={_short(d.get('content') or '', 80)}"
+                elif ev == "pb_glass_op":
+                    pb_glass_ops += 1
+                    extra = f"  op={d.get('op')} args_summary={_short(str((d.get('args') or {}).get('args_summary') or ''), 60)}"
+                elif ev == "pb_glass_done":
+                    extra = f"  status={d.get('status')} nodes={len((d.get('pipeline_json') or {}).get('nodes', []))}"
+                elif ev == "tool_start":
+                    extra = f"  tool={d.get('tool')}"
+                elif ev == "pb_intent_confirm":
+                    extra = f"  bullets={len(d.get('bullets') or [])}"
+                print(f"[UI]   ev={ev}{extra}")
+                if ev == "done":
+                    return True
+            else:
+                drop_count += 1
+                print(f"[DROP] ev={ev}  data_keys={list(d.keys())[:5]}")
+        return False
+
+    drain(_sse_lines(r))
+
+    # 2nd round: if got design_intent_confirm, POST /chat/intent-respond
+    # to register confirmation, which makes chat re-enter and call
+    # build_pipeline_live with [intent_confirmed:card_id] prefix.
+    if pending_intent_card and session_id_captured:
+        print(f"\n[META] STEP 2: POST /chat/intent-respond auto-confirming card {pending_intent_card}")
+        body2 = {"chatSessionId": session_id_captured,
+                 "confirmations": {pending_intent_card: {"action": "ok"}}}
+        r2 = requests.post(f"{args.sidecar}/internal/agent/chat/intent-respond",
+                           json=body2, headers=hdr, stream=True, timeout=900)
+        print(f"[META] HTTP {r2.status_code}")
+        drain(_sse_lines(r2))
 
     elapsed = time.time() - t0
     print()
