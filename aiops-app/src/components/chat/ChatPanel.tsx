@@ -376,8 +376,26 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
 
           case "pb_glass_op": {
             const op = (ev.op as string) ?? "?";
+            const args = (ev.args as Record<string, unknown>) ?? {};
+            // v30.17h — args carries underscore-prefixed phase metadata
+            // (_phase_id / _round / _args_summary) alongside the raw tool
+            // args. Show phase context inline so the chat console tracks
+            // which phase each op belongs to.
+            const phaseId = args._phase_id as string | undefined;
+            const roundNum = args._round as number | undefined;
+            const summary = args._args_summary as string | undefined;
+            const phasePrefix = phaseId && roundNum ? `[${phaseId} r${roundNum}] ` : "";
+            // Pick a compact body: prefer the human summary when present,
+            // otherwise stringify the args minus underscore metadata.
+            let body = summary ?? "";
+            if (!body) {
+              const cleanArgs = Object.fromEntries(
+                Object.entries(args).filter(([k]) => !k.startsWith("_")),
+              );
+              body = JSON.stringify(cleanArgs).slice(0, 80);
+            }
             addLog(makeLog("⚙️",
-              `PIPELINE OP | ${op}${ev.args ? " " + JSON.stringify(ev.args).slice(0, 80) : ""}`,
+              `PIPELINE OP | ${phasePrefix}${op} ${body}`,
               "tool"));
             break;
           }

@@ -1126,18 +1126,45 @@ export function AIAgentPanel({
             const result = (ev.result as Record<string, unknown>) ?? {};
             onGlassOp?.({ op, args, result });
             const OP_LABEL_MAP: Record<string, string> = {
+              // v1 builder ops
               add_node: "加入 node", remove_node: "刪除 node",
               connect: "連邊", set_param: "設定參數",
               rename_node: "重新命名", finish: "完成",
               list_blocks: "查看 block 清單", preview: "預覽", validate: "驗證",
+              // v30.17h — phase-loop / RAG tools (chat mode build via
+              // build_pipeline_live). Underscored phase metadata
+              // (_phase_id / _round) is set on args by event_wrapper.
+              inspect_block_doc: "查 block 說明",
+              inspect_node_output: "看節點輸出",
+              phase_complete: "標記 phase 完成",
+              query_blocks: "查 block",
+              query_columns: "查 column",
+              query_connectable_sources: "查可連接來源",
             };
             const label = OP_LABEL_MAP[op] ?? op;
+            // v30 ops include _phase_id / _round metadata; prefix label
+            // with [p# r#] so the chat trail keeps phase context.
+            const phaseId = args._phase_id as string | undefined;
+            const roundNum = args._round as number | undefined;
+            const phasePrefix = phaseId && roundNum
+              ? `[${phaseId} r${roundNum}] `
+              : "";
             let detail = "";
             if (op === "add_node") detail = `\`${args.block_name ?? ""}\``;
-            else if (op === "connect") detail = `\`${args.from_node}.${args.from_port}\` → \`${args.to_node}.${args.to_port}\``;
+            else if (op === "connect") detail = `\`${args.from_node}.${args.from_port ?? "out"}\` → \`${args.to_node}.${args.to_port ?? "in"}\``;
             else if (op === "remove_node") detail = `\`${args.node_id}\``;
             else if (op === "set_param") detail = `\`${args.node_id}.${args.key}\``;
             else if (op === "rename_node") detail = `\`${args.node_id}\` → \`${args.label ?? args.display_label ?? "?"}\``;
+            else if (op === "inspect_block_doc") detail = `\`${args.block_id ?? ""}\``;
+            else if (op === "inspect_node_output") detail = `\`${args.node_id ?? ""}\` (${args.n_rows ?? "?"} rows)`;
+            else if (op === "phase_complete") detail = `${String(args.rationale ?? "").slice(0, 60)}`;
+            else if (op === "query_blocks") detail = `keyword=\`${args.keyword ?? args.query ?? ""}\``;
+            else if (op === "query_columns") detail = `node=\`${args.node_id ?? ""}\``;
+            else if (op === "query_connectable_sources") detail = `to=\`${args.target_node_id ?? args.node_id ?? ""}\``;
+            // Prepend phase prefix once we've built the detail
+            if (phasePrefix && !detail.startsWith(phasePrefix)) {
+              detail = phasePrefix + detail;
+            }
             const newEntry: GlassOpEntry = {
               id: nextId(), op, label, detail, ts: Date.now(),
             };
