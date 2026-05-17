@@ -474,12 +474,28 @@ async def _execute_build_pipeline_live(
             skip_confirm=True,  # chat conversation IS the confirmation
             skill_step_mode=skill_step_mode,
         ):
-            # v30.17j: intercept judge_clarify_pending pause (deficit case)
-            # Do NOT emit pb_judge_clarify here — phase_verifier_node already
-            # emits via its sse_events return + wrap_build_event_for_chat
-            # passes through. A second emit creates a duplicate card.
+            # v30.17j: intercept judge_clarify_pending pause (deficit case).
+            # Emit pb_judge_clarify with CHAT session id (pending_judge is
+            # keyed by that). phase_verifier's sse_events emit is silenced
+            # by wrap_build_event_for_chat to avoid a duplicate card.
             if evt.type == "judge_clarify_pending":
                 judge_pause = evt.data or {}
+                _chat_sid = str(chat_session_id) if chat_session_id else ""
+                if event_emit is not None:
+                    try:
+                        event_emit({
+                            "type": "pb_judge_clarify",
+                            "session_id": _chat_sid,
+                            "build_session_id": judge_pause.get("session_id") or sid,
+                            "phase_id": judge_pause.get("phase_id"),
+                            "requested_n": judge_pause.get("requested_n"),
+                            "actual_rows": judge_pause.get("actual_rows"),
+                            "ratio": judge_pause.get("ratio"),
+                            "value_desc": judge_pause.get("value_desc"),
+                            "block_id": judge_pause.get("block_id"),
+                        })
+                    except Exception:  # noqa: BLE001
+                        pass
                 break  # stop draining; resume via /chat/intent-respond (judge_decision body)
 
             # v19: intercept intent_confirm_required pause

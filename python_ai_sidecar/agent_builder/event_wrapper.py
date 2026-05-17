@@ -323,12 +323,12 @@ def wrap_build_event_for_chat(
         payload["type"] = "pb_glass_chat"
         payload["content"] = "⚠ Build 部分完成（有 phase 失敗，已採納部分結果）"
     elif evt_type == "pb_judge_clarify":
-        # v30.17j — judge_clarify card emitted by phase_verifier when deficit
-        # detected. Pass through unchanged for ChatPanel to render JudgeClarifyCard.
-        payload["type"] = "pb_judge_clarify"
-        for k, v in data.items():
-            if k != "session_id":
-                payload[k] = v
+        # v30.17j — phase_verifier writes this to sse_events as a redundant
+        # signal so non-chat surfaces (builder mode) can also see it. For
+        # chat mode the canonical emit is from tool_execute (with chat
+        # session id, needed by pending_judge.consume). Drop here to avoid
+        # frontend duplicate card.
+        return None
     elif evt_type == "judge_clarify_resolved":
         # v30.17j — after user picks action, log to chat for visibility.
         action = data.get("action") or "?"

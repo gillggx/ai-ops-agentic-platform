@@ -1261,9 +1261,14 @@ export function AIAgentPanel({
               value_desc: (ev.value_desc as string) ?? "",
               block_id: (ev.block_id as string) ?? "",
             };
-            const chatSid = String(
-              (ev.session_id as string) || (ev.build_session_id as string) || "",
-            );
+            // v30.17j hotfix: phase_verifier emits this event with
+            // build_session_id in `session_id` field, but pending_judge is
+            // keyed by CHAT session id. Always use sessionIdRef (the chat
+            // session) for the POST. Falls back to ev fields only if we
+            // somehow lost the ref.
+            const chatSid =
+              sessionIdRef.current
+              || String((ev.session_id as string) || (ev.build_session_id as string) || "");
             setChatHistory((prev) => [...prev, {
               id: nextId(),
               role: "judge_clarify",
