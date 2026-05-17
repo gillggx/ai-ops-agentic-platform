@@ -561,6 +561,138 @@ class SkillRunnerServiceTest {
         }
 
         @Test
+        void blankToolIdYieldsAnySentinel() {
+            when(alarmRepo.existsActiveBySkillAndEquipmentSince(
+                    anyLong(), anyString(), any())).thenReturn(false);
+            ArgumentCaptor<AlarmEntity> cap = ArgumentCaptor.forClass(AlarmEntity.class);
+            when(alarmRepo.save(cap.capture())).thenAnswer(inv -> {
+                AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
+            });
+            service.emitAlarmIfTriggered(
+                    patrolSkill(), run(false),
+                    Map.of("tool_id", "   "),  // blank
+                    confirmWithRow("L", "S", "2026-05-17T00:00:00"),
+                    List.of(stepPass("s1")), false);
+            assertThat(cap.getValue().getEquipmentId()).isEqualTo("(any)");
+        }
+
+        @Test
+        void literalNullToolIdYieldsAnySentinel() {
+            when(alarmRepo.existsActiveBySkillAndEquipmentSince(
+                    anyLong(), anyString(), any())).thenReturn(false);
+            ArgumentCaptor<AlarmEntity> cap = ArgumentCaptor.forClass(AlarmEntity.class);
+            when(alarmRepo.save(cap.capture())).thenAnswer(inv -> {
+                AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
+            });
+            // HashMap allows null value (Map.of does not), test "null" literal string
+            Map<String, Object> payload = new HashMap<>();
+            payload.put("tool_id", null);
+            service.emitAlarmIfTriggered(
+                    patrolSkill(), run(false), payload,
+                    confirmWithRow("L", "S", "2026-05-17T00:00:00"),
+                    List.of(stepPass("s1")), false);
+            assertThat(cap.getValue().getEquipmentId()).isEqualTo("(any)");
+        }
+
+        @Test
+        void nullTriggerPayloadYieldsAnySentinel() {
+            when(alarmRepo.existsActiveBySkillAndEquipmentSince(
+                    anyLong(), anyString(), any())).thenReturn(false);
+            ArgumentCaptor<AlarmEntity> cap = ArgumentCaptor.forClass(AlarmEntity.class);
+            when(alarmRepo.save(cap.capture())).thenAnswer(inv -> {
+                AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
+            });
+            service.emitAlarmIfTriggered(
+                    patrolSkill(), run(false), null,
+                    confirmWithRow("L", "S", "2026-05-17T00:00:00"),
+                    List.of(stepPass("s1")), false);
+            assertThat(cap.getValue().getEquipmentId()).isEqualTo("(any)");
+        }
+
+        @Test
+        void evidenceRowWithSnakeCaseKeysAccepted() {
+            when(alarmRepo.existsActiveBySkillAndEquipmentSince(
+                    anyLong(), anyString(), any())).thenReturn(false);
+            ArgumentCaptor<AlarmEntity> cap = ArgumentCaptor.forClass(AlarmEntity.class);
+            when(alarmRepo.save(cap.capture())).thenAnswer(inv -> {
+                AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
+            });
+            // Evidence row using snake_case keys (lot_id / event_time) instead
+            // of camelCase (lotID / eventTime).
+            Map<String, Object> row = Map.of("lot_id", "LOT-snake",
+                    "step", "STEP_snake", "event_time", "2026-05-17T00:00:00");
+            Map<String, Object> confirm = Map.of("data_views",
+                    List.of(Map.of("rows", List.of(row))), "note", "n");
+            service.emitAlarmIfTriggered(
+                    patrolSkill(), run(false),
+                    Map.of("tool_id", "EQP-02"),
+                    confirm, List.of(stepPass("s1")), false);
+            assertThat(cap.getValue().getLotId()).isEqualTo("LOT-snake");
+            assertThat(cap.getValue().getStep()).isEqualTo("STEP_snake");
+            assertThat(cap.getValue().getEventTime()).isNotNull();
+        }
+
+        @Test
+        void unparseableEventTimeFallsBackToNow() {
+            when(alarmRepo.existsActiveBySkillAndEquipmentSince(
+                    anyLong(), anyString(), any())).thenReturn(false);
+            ArgumentCaptor<AlarmEntity> cap = ArgumentCaptor.forClass(AlarmEntity.class);
+            when(alarmRepo.save(cap.capture())).thenAnswer(inv -> {
+                AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
+            });
+            Map<String, Object> row = Map.of("eventTime", "garbage-not-a-date",
+                    "lotID", "L", "step", "S");
+            Map<String, Object> confirm = Map.of("data_views",
+                    List.of(Map.of("rows", List.of(row))), "note", "n");
+            OffsetDateTime before = OffsetDateTime.now().minusSeconds(2);
+            service.emitAlarmIfTriggered(
+                    patrolSkill(), run(false),
+                    Map.of("tool_id", "EQP-02"),
+                    confirm, List.of(stepPass("s1")), false);
+            OffsetDateTime after = OffsetDateTime.now().plusSeconds(2);
+            // Even though eventTime string was garbage, emit still fell back to now
+            assertThat(cap.getValue().getEventTime()).isAfterOrEqualTo(before);
+            assertThat(cap.getValue().getEventTime()).isBeforeOrEqualTo(after);
+        }
+
+        @Test
+        void blankSeverityInTriggerConfigDefaultsToMedium() {
+            when(alarmRepo.existsActiveBySkillAndEquipmentSince(
+                    anyLong(), anyString(), any())).thenReturn(false);
+            ArgumentCaptor<AlarmEntity> cap = ArgumentCaptor.forClass(AlarmEntity.class);
+            when(alarmRepo.save(cap.capture())).thenAnswer(inv -> {
+                AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
+            });
+            SkillDocumentEntity skill = patrolSkill();
+            skill.setTriggerConfig("{\"type\":\"schedule\",\"severity\":\"  \"}");
+            service.emitAlarmIfTriggered(
+                    skill, run(false),
+                    Map.of("tool_id", "EQP-02"),
+                    confirmWithRow("L", "S", "2026-05-17T00:00:00"),
+                    List.of(stepPass("s1")), false);
+            assertThat(cap.getValue().getSeverity()).isEqualTo("MEDIUM");
+        }
+
+        @Test
+        void emptyTriggerConfigGivesDefaultSeverityAndPatrol() {
+            when(alarmRepo.existsActiveBySkillAndEquipmentSince(
+                    anyLong(), anyString(), any())).thenReturn(false);
+            ArgumentCaptor<AlarmEntity> cap = ArgumentCaptor.forClass(AlarmEntity.class);
+            when(alarmRepo.save(cap.capture())).thenAnswer(inv -> {
+                AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
+            });
+            SkillDocumentEntity skill = patrolSkill();
+            skill.setTriggerConfig("");  // empty string
+            service.emitAlarmIfTriggered(
+                    skill, run(false),
+                    Map.of("tool_id", "EQP-02"),
+                    confirmWithRow("L", "S", "2026-05-17T00:00:00"),
+                    List.of(stepPass("s1")), false);
+            assertThat(cap.getValue().getSeverity()).isEqualTo("MEDIUM");
+            assertThat(cap.getValue().getTriggerEvent()).isEqualTo("patrol_check");
+        }
+
+        @Test
         void summaryConsolidatesConfirmAndPassingStepsOnly() {
             when(alarmRepo.existsActiveBySkillAndEquipmentSince(
                     anyLong(), anyString(), any())).thenReturn(false);
