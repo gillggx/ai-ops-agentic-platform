@@ -464,7 +464,9 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
         phase_messages.append({"role": "assistant", "content": assistant_content})
     if tool_use_id:
         result_digest_text = _make_result_digest(tool_name, action_result)
-        canvas_diff_text = _build_canvas_diff_md(transient.pipeline_json, phase)
+        # v30.17l hotfix: pass state so canvas_diff_md can include
+        # VERIFIER FEEDBACK on follow-up rounds (was only in initial obs_md).
+        canvas_diff_text = _build_canvas_diff_md(transient.pipeline_json, phase, state)
         phase_messages.append({
             "role": "user",
             "content": [
@@ -819,16 +821,50 @@ def _build_oneblock_solutions_section(
     return "\n".join(out_lines)
 
 
-def _build_canvas_diff_md(pipeline: PipelineJSON, phase: dict) -> str:
+def _build_canvas_diff_md(pipeline: PipelineJSON, phase: dict, state: dict | None = None) -> str:
     """Compact canvas snapshot for the post-action user message.
 
     Only shows current node IDs + block_ids + edges, plus a reminder of
     the phase goal. The full observation_md is only sent on round 1; on
     subsequent rounds this lighter diff keeps token use down.
+
+    v30.17l hotfix: also include VERIFIER FEEDBACK if the previous round's
+    block was rejected. Without this the LLM only sees the feedback on
+    round 1 of a phase, then forgets — and reject events happen on round
+    2+ when blocks first get verifier-checked.
     """
-    lines = [
-        f"== CANVAS NOW ({len(pipeline.nodes)} nodes, {len(pipeline.edges)} edges) ==",
-    ]
+    lines: list[str] = []
+
+    # v30.17l: VERIFIER FEEDBACK first (before canvas) so LLM sees rejection
+    # before re-reading canvas state.
+    if state:
+        vr = state.get("v30_last_verifier_reject")
+        if vr and isinstance(vr, dict):
+            block = vr.get("block_id") or "(unknown)"
+            cov = vr.get("covers") or []
+            exp = vr.get("expected") or ""
+            result = vr.get("result") or "no_match"
+            wp = vr.get("would_have_passed_with") or []
+            lines.append("== VERIFIER FEEDBACK (your last block was rejected) ==")
+            lines.append(f"  rejected: {block} (covers={cov})")
+            lines.append(f"  this phase expects: {exp}")
+            lines.append(f"  reason: {result}")
+            if result == "covers mismatch":
+                lines.append(
+                    f"  → '{exp}' is not in the rejected block's covers. "
+                    f"You MUST pick a different block."
+                )
+            elif result == "llm_judge_rejected":
+                jrr = (vr.get("judge_reject_reason") or "")[:140]
+                lines.append(f"  → semantic check failed: {jrr}")
+            if wp:
+                lines.append(f"  blocks that WOULD pass: {wp[:8]}")
+                lines.append("  → switch to one of these; don't retry the rejected block.")
+            lines.append("")
+
+    lines.append(
+        f"== CANVAS NOW ({len(pipeline.nodes)} nodes, {len(pipeline.edges)} edges) =="
+    )
     for n in pipeline.nodes[:20]:
         params_short = ", ".join(f"{k}={v!r}"[:40] for k, v in (n.params or {}).items())[:120]
         lines.append(f"  {n.id} [{n.block_id}]  params={{{params_short}}}")
