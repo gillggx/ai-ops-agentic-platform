@@ -17,7 +17,7 @@ function TopBar({ active }) {
 
       <div className="tabs">
         <a className={active === 'copilot' ? 'active' : ''} href="Alarm Autopilot.html">Copilot</a>
-        <a className={active === 'machines' ? 'active' : ''} href="Machine Center.html">Machines</a>
+        <a className={active === 'machines' ? 'active' : ''} href="index.html">Machines</a>
         <a className={active === 'alarms' ? 'active' : ''} href="Alarm Center v2.html">Alarms</a>
       </div>
 
