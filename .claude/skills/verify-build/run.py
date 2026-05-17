@@ -175,8 +175,86 @@ def _verifier_verdicts_for(trace: dict, phase_id: str) -> list[dict]:
     return out
 
 
+def _build_timeline(trace: dict, phase_id: str) -> list[dict]:
+    """v30.17i — interleave agentic_phase_loop rounds with phase_verifier
+    no_match verdicts in chrono order, so the report reads as a story:
+      r2 add_node spc_panel → success
+        → verdict: COVERS MISMATCH ('chart' not in ['raw_data'])
+      r4 inspect_block_doc
+      r5 remove_node spc_panel
+      r6 add_node process_history → 7 rows
+        → verdict: LLM-JUDGE REJECTED ('100 筆' not met)
+      ...
+
+    Reads from both graph_steps (round_done / no_match) and the richer
+    verifier_decisions records (comparison.result + judge_reject_reason).
+    """
+    # Pre-index verifier_decisions by (phase_id, block_id) keeping insertion
+    # order so multiple rejections for the same block consume one each.
+    decisions_by_block: dict[str, list[dict]] = {}
+    for d in trace.get("verifier_decisions") or []:
+        if d.get("phase_id") != phase_id:
+            continue
+        decisions_by_block.setdefault(d.get("candidate_block") or "", []).append(d)
+
+    items: list[dict] = []
+    for step in trace.get("graph_steps") or []:
+        if step.get("phase_id") != phase_id:
+            continue
+        node = step.get("node", "")
+        ts = step.get("ts") or ""
+        if node == "agentic_phase_loop":
+            kind = step.get("status")
+            if kind == "round_done":
+                items.append({
+                    "ts": ts, "type": "round",
+                    "round": step.get("round"),
+                    "tool": step.get("tool"),
+                    "action_ok": step.get("action_ok"),
+                    "auto_preview": step.get("auto_preview"),
+                    "mutated_node": step.get("mutated_node"),
+                })
+            else:
+                items.append({
+                    "ts": ts, "type": "phase_end",
+                    "status": kind, "rounds": step.get("rounds"),
+                })
+        elif node == "phase_verifier" and step.get("status") == "no_match":
+            block_id = step.get("block_id") or ""
+            decision = None
+            queue = decisions_by_block.get(block_id) or []
+            if queue:
+                decision = queue.pop(0)
+            comp = (decision or {}).get("comparison") or {}
+            items.append({
+                "ts": ts, "type": "verdict",
+                "block_id": block_id,
+                "expected": step.get("expected"),
+                "covers": step.get("covers"),
+                "rows": step.get("rows"),
+                "comparison_result": comp.get("result"),
+                "judge_reject_reason": (
+                    comp.get("judge_reject_reason")
+                    or step.get("judge_reject_reason")
+                ),
+                "would_have_passed_with": (decision or {}).get("would_have_passed_with"),
+            })
+        elif node == "phase_revise_node":
+            parsed = step.get("parsed") or {}
+            items.append({
+                "ts": ts, "type": "revise",
+                "attempt": step.get("attempt"),
+                "summary": parsed.get("summary") or step.get("summary"),
+                "strategy": parsed.get("strategy") or step.get("strategy"),
+            })
+    items.sort(key=lambda x: x.get("ts") or "")
+    return items
+
+
 def _round_history_for(trace: dict, phase_id: str) -> list[dict]:
-    """All agentic_phase_loop entries for the phase (in chrono order)."""
+    """All agentic_phase_loop entries for the phase (in chrono order).
+    Kept for backward compat (older JSON output consumers); the new
+    rendering uses _build_timeline."""
     out = []
     for step in trace.get("graph_steps") or []:
         if step.get("node") != "agentic_phase_loop":
@@ -249,69 +327,58 @@ def _render_text(report: dict) -> str:
         out.append("")
         return "\n".join(out)
 
-    out.append(f"─── Stuck phase: {stuck} ─────────────────────────────────────────────────")
-    verdicts = report["stuck_verdicts"]
-    if not verdicts:
-        out.append("(no phase_verifier entries for this phase — verifier never ran)")
+    out.append(f"─── Stuck phase: {stuck} — chronological timeline ────────────────────────")
+    timeline = report.get("stuck_timeline") or []
+    if not timeline:
+        out.append("(no rounds or verdicts recorded — phase loop never ran?)")
     else:
-        out.append(f"{len(verdicts)} verifier verdict(s):")
-        for v in verdicts:
-            cov = v.get("covers")
-            exp = v.get("expected")
-            cmp_result = v.get("comparison_result")
-            judge_reason = v.get("judge_reject_reason")
-            rows = v.get("rows")
-            tag = ""
-            # Prefer the v30.17g `comparison_result` field — it's already
-            # disambiguated. Fall back to inference for older traces.
-            if cmp_result == "covers mismatch":
-                tag = f"  → COVERS MISMATCH: '{exp}' not in {cov}"
-            elif cmp_result == "rows quality gate failed":
-                tag = f"  → ROWS GATE: need rows>=1, got {rows}"
-            elif cmp_result == "llm_judge_rejected":
-                reason_short = (judge_reason or "(no reason)")[:80]
-                tag = f"  → LLM-JUDGE REJECTED: {reason_short}"
-            elif cmp_result:
-                tag = f"  → {cmp_result}"
-            else:
-                # Old trace fallback — infer from covers + rows
-                if isinstance(cov, list) and exp and exp not in cov:
-                    tag = f"  → COVERS MISMATCH: '{exp}' not in {cov}"
-                elif rows is None or (isinstance(rows, int) and rows < 1):
-                    tag = f"  → ROWS GATE (inferred): rows={rows}"
-                elif judge_reason:
-                    tag = f"  → LLM-JUDGE REJECTED: {judge_reason[:80]}"
-            out.append(
-                f"  block={(v.get('block_id') or '?'):<28} covers={cov} "
-                f"rows={rows} status={v.get('status')}{tag}"
-            )
-            wp = v.get("would_have_passed_with")
-            if wp:
-                out.append(f"      would_have_passed_with: {wp[:5]}{'…' if len(wp)>5 else ''}")
-    out.append("")
-
-    out.append(f"─── {stuck} round-by-round ────────────────────────────────────────────────")
-    for h in report["stuck_rounds"]:
-        if h["kind"] == "round":
-            preview = h.get("auto_preview") or {}
-            row_str = ""
-            if isinstance(preview, dict):
-                rs = preview.get("rows")
-                st = preview.get("status")
-                if rs is not None or st:
-                    row_str = f" → {st} ({rs} rows)"
-            ok = "ok" if h.get("action_ok") else "no"
-            out.append(f"  r{h['round']:<2} [{ok}] {h['tool']:<22}{row_str}")
-        else:
-            out.append(f"  ⤵  {h['kind']} (rounds={h.get('rounds')})")
-
-    revises = report["stuck_revises"]
-    if revises:
-        out.append("")
-        out.append(f"─── {stuck} revise attempts ─────────────────────────────────────────────")
-        for r in revises:
-            sumtxt = (r.get("summary") or r.get("strategy") or "")[:120]
-            out.append(f"  attempt {r.get('attempt')}: {sumtxt}")
+        for item in timeline:
+            t = item["type"]
+            if t == "round":
+                preview = item.get("auto_preview") or {}
+                row_str = ""
+                if isinstance(preview, dict):
+                    rs = preview.get("rows")
+                    st = preview.get("status")
+                    if rs is not None or st:
+                        row_str = f" → {st} ({rs} rows)"
+                ok = "ok" if item.get("action_ok") else "no"
+                out.append(f"  r{item['round']:<2} [{ok}] {item['tool']:<22}{row_str}")
+            elif t == "verdict":
+                cov = item.get("covers")
+                exp = item.get("expected")
+                rows = item.get("rows")
+                cmp_result = item.get("comparison_result")
+                judge_reason = item.get("judge_reject_reason")
+                # Decide tag (same logic as before, just inline with round)
+                if cmp_result == "covers mismatch":
+                    tag = f"COVERS MISMATCH: '{exp}' not in {cov}"
+                elif cmp_result == "rows quality gate failed":
+                    tag = f"ROWS GATE: need rows>=1, got {rows}"
+                elif cmp_result == "llm_judge_rejected":
+                    tag = f"LLM-JUDGE REJECTED: {(judge_reason or '(no reason)')[:90]}"
+                elif cmp_result:
+                    tag = cmp_result
+                else:
+                    if isinstance(cov, list) and exp and exp not in cov:
+                        tag = f"COVERS MISMATCH: '{exp}' not in {cov}"
+                    elif rows is None or (isinstance(rows, int) and rows < 1):
+                        tag = f"ROWS GATE (inferred): rows={rows}"
+                    elif judge_reason:
+                        tag = f"LLM-JUDGE REJECTED: {judge_reason[:90]}"
+                    else:
+                        tag = "(no comparison data)"
+                out.append(f"     ↳ verdict on {item.get('block_id') or '?'}: {tag}")
+                wp = item.get("would_have_passed_with")
+                if wp:
+                    out.append(f"        would_have_passed_with: {wp[:5]}{'…' if len(wp)>5 else ''}")
+            elif t == "revise":
+                out.append("")
+                strat = (item.get("summary") or item.get("strategy") or "")[:140]
+                out.append(f"  ⤺  revise attempt {item.get('attempt')}: {strat}")
+                out.append("")
+            elif t == "phase_end":
+                out.append(f"  ⤵  phase ended: {item.get('status')} (rounds={item.get('rounds')})")
     out.append("")
     return "\n".join(out)
 
@@ -328,6 +395,9 @@ def build_report(mode: str, message: str, *, harness_out: str, trace_path: str |
         "plan": plan,
         "phase_status": status,
         "stuck_phase": stuck,
+        # v30.17i — unified chrono timeline interleaving rounds + verdicts +
+        # revises. Legacy fields retained so older JSON consumers still work.
+        "stuck_timeline": _build_timeline(trace, stuck) if stuck else [],
         "stuck_verdicts": _verifier_verdicts_for(trace, stuck) if stuck else [],
         "stuck_rounds": _round_history_for(trace, stuck) if stuck else [],
         "stuck_revises": _revise_history_for(trace, stuck) if stuck else [],

@@ -201,12 +201,28 @@ def wrap_build_event_for_chat(
             return None
         payload["type"] = "pb_glass_chat"
         payload["content"] = "\n".join(lines)
+        # v30.17i — structured plan data alongside text so a frontend
+        # (ChatPanel.PlanCard) can render a proper card with per-phase
+        # status badges. AIAgentPanel ignores the extra field and keeps
+        # showing the text bubble; no regression.
+        payload["plan"] = {
+            "summary": summary,
+            "phases": [{
+                "id": p.get("id"),
+                "goal": p.get("goal"),
+                "expected": p.get("expected"),
+                "auto_injected": bool(p.get("auto_injected")),
+            } for p in phases],
+        }
     elif evt_type == "goal_plan_confirmed":
         auto = data.get("auto_confirmed")
         n = len(data.get("phases") or [])
         suffix = "（自動確認）" if auto else ""
         payload["type"] = "pb_glass_chat"
         payload["content"] = f"✓ Plan 已確認，開始建構 {n} 個 phase{suffix}"
+        # v30.17i — signal plan confirmation so the card can flip from
+        # "proposed" to "running" state.
+        payload["plan_confirmed"] = {"auto": bool(auto), "n_phases": n}
     elif evt_type in ("goal_plan_rejected", "goal_plan_refused"):
         payload["type"] = "pb_glass_chat"
         payload["content"] = "✗ Plan 被拒絕，建構中止"
@@ -248,16 +264,28 @@ def wrap_build_event_for_chat(
         extra = f"（{node} [{block}]）" if (block and node) else ""
         payload["type"] = "pb_glass_chat"
         payload["content"] = f"✓ Phase {pid} 完成{extra}：{rationale[:120]}"
+        # v30.17i — structured phase status for PlanCard
+        payload["phase_update"] = {
+            "phase_id": pid, "status": "completed",
+            "rationale": rationale[:200],
+            "block_id": block, "node_id": node,
+        }
     elif evt_type == "phase_revise_started":
         pid = data.get("phase_id") or "?"
         reason = (data.get("reason") or "").strip()
         payload["type"] = "pb_glass_chat"
         payload["content"] = f"⏸ Phase {pid} 卡住，反思中（{reason[:80]}）"
+        payload["phase_update"] = {
+            "phase_id": pid, "status": "revising", "reason": reason[:200],
+        }
     elif evt_type == "phase_revise_retry":
         pid = data.get("phase_id") or "?"
         alt = (data.get("alternative") or "").strip()
         payload["type"] = "pb_glass_chat"
         payload["content"] = f"↻ Phase {pid} 換策略再試：{alt[:120]}"
+        payload["phase_update"] = {
+            "phase_id": pid, "status": "revising_retry", "alternative": alt[:200],
+        }
     elif evt_type == "phase_fast_forward_report":
         # One block satisfied multiple phases at once
         block = data.get("advanced_by_block") or "?"
@@ -277,6 +305,9 @@ def wrap_build_event_for_chat(
         reason = (data.get("reason") or "").strip()
         payload["type"] = "pb_glass_chat"
         payload["content"] = f"⚠ Phase {pid} 失敗：{reason[:200]}"
+        payload["phase_update"] = {
+            "phase_id": pid, "status": "failed", "reason": reason[:200],
+        }
     elif evt_type == "handover_chosen":
         choice = data.get("choice") or "?"
         auto = data.get("auto_chosen")
@@ -284,6 +315,9 @@ def wrap_build_event_for_chat(
         pid = data.get("failed_phase_id") or "?"
         payload["type"] = "pb_glass_chat"
         payload["content"] = f"↳ Phase {pid} 處置：{choice}{suffix}"
+        payload["phase_update"] = {
+            "phase_id": pid, "status": f"handover_{choice}", "auto": bool(auto),
+        }
     elif evt_type == "build_partial":
         # status update for partial build (some phases failed, take_over chosen)
         payload["type"] = "pb_glass_chat"

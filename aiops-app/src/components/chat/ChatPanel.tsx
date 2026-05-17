@@ -11,6 +11,7 @@ import {
   type DesignIntentChoice,
   type DesignIntentData,
 } from "@/components/copilot/DesignIntentCard";
+import { PlanCard, type PlanData, type PhaseStatus, type PhaseEntry } from "@/components/chat/PlanCard";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,13 +35,15 @@ interface LogEntry {
 
 interface ChatMessage {
   id: number;
-  role: "user" | "agent" | "design_intent";
+  role: "user" | "agent" | "design_intent" | "plan";
   content: string;
   /** For role === "design_intent" — the structured intent card to render. */
   designIntent?: DesignIntentData;
   /** For role === "design_intent" — the user prompt that triggered this card,
    *  needed to compose the [intent_confirmed:<id>] follow-up message. */
   designIntentPrompt?: string;
+  /** For role === "plan" — v30 builder goal plan with live phase status. */
+  plan?: PlanData;
   /** Optional render card embedded in agent message. */
   card?:
     | {
@@ -115,6 +118,11 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
   // Track the most recent user-typed prompt so design_intent_confirm cards
   // can compose the [intent_confirmed:<card_id>] follow-up message.
   const lastUserPromptRef = useRef<string>("");
+  // v30.17i — id of the active plan message in chatHistory so subsequent
+  // phase_update events can mutate the same card instead of stacking
+  // duplicate plan renders. Reset to null on each new user message so a
+  // new build run gets its own plan card.
+  const activePlanMsgIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -171,6 +179,8 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
     // overwrite the original prompt that the card relates to.
     if (!message.startsWith("[intent_confirmed:")) {
       lastUserPromptRef.current = message;
+      // v30.17i — fresh build run gets a fresh plan card
+      activePlanMsgIdRef.current = null;
     }
 
     // Add user message to chat history
@@ -365,6 +375,86 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
 
           case "pb_glass_chat": {
             const content = (ev.content as string) ?? "";
+
+            // v30.17i — goal_plan_proposed carries structured `plan` data
+            // alongside text. Render as a PlanCard once, then later
+            // phase_completed / phase_revise_started events arrive (also
+            // pb_glass_chat) with `phase_update` payload that mutates the
+            // same card's phase status. AIAgentPanel ignores these extra
+            // fields and renders the text bubble — no regression.
+            const planPayload = ev.plan as PlanData | undefined;
+            const planConfirmed = ev.plan_confirmed as { auto: boolean; n_phases: number } | undefined;
+            const phaseUpdate = ev.phase_update as {
+              phase_id: string;
+              status: PhaseStatus;
+              rationale?: string;
+              reason?: string;
+            } | undefined;
+
+            if (planPayload && Array.isArray(planPayload.phases)) {
+              const phases: PhaseEntry[] = planPayload.phases.map((p) => ({
+                id: p.id,
+                goal: p.goal ?? "",
+                expected: p.expected ?? "?",
+                status: "pending",
+                auto_injected: !!p.auto_injected,
+              }));
+              const planData: PlanData = {
+                summary: planPayload.summary ?? "",
+                phases,
+                confirmed: false,
+              };
+              const newId = nextId();
+              activePlanMsgIdRef.current = newId;
+              setChatHistory((prev) => [...prev, {
+                id: newId, role: "plan", content: "",
+                plan: planData,
+              }]);
+              break;
+            }
+
+            if (planConfirmed && activePlanMsgIdRef.current != null) {
+              const targetId = activePlanMsgIdRef.current;
+              setChatHistory((prev) => prev.map((m) => {
+                if (m.id !== targetId || !m.plan) return m;
+                // Flip confirmed flag + mark first phase as running
+                const phases = m.plan.phases.map((p, idx) => ({
+                  ...p,
+                  status: idx === 0 ? ("running" as PhaseStatus) : p.status,
+                }));
+                return { ...m, plan: { ...m.plan, phases, confirmed: true } };
+              }));
+              break;  // suppress the text bubble for confirmation
+            }
+
+            if (phaseUpdate && activePlanMsgIdRef.current != null) {
+              const targetId = activePlanMsgIdRef.current;
+              setChatHistory((prev) => prev.map((m) => {
+                if (m.id !== targetId || !m.plan) return m;
+                let advanceNext = false;
+                const phases = m.plan.phases.map((p) => {
+                  if (p.id !== phaseUpdate.phase_id) return p;
+                  if (phaseUpdate.status === "completed") advanceNext = true;
+                  return {
+                    ...p,
+                    status: phaseUpdate.status,
+                    rationale: phaseUpdate.rationale,
+                    reason: phaseUpdate.reason,
+                  };
+                });
+                // When a phase completes, mark the next pending phase as running
+                if (advanceNext) {
+                  const nextIdx = phases.findIndex((p) => p.status === "pending");
+                  if (nextIdx >= 0) {
+                    phases[nextIdx] = { ...phases[nextIdx], status: "running" };
+                  }
+                }
+                return { ...m, plan: { ...m.plan, phases } };
+              }));
+              break;  // suppress the per-phase text bubble too
+            }
+
+            // Fallback — generic chat content (no structured payload)
             if (content) {
               setChatHistory((prev) => [...prev, {
                 id: nextId(), role: "agent",
@@ -642,6 +732,10 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
                       Intent {msg.card.resolved === "confirmed" ? "✓ confirmed" : msg.card.resolved === "refused" ? "✗ refused" : "⚠ error"}
                     </div>
                   )}
+                </div>
+              ) : msg.role === "plan" && msg.plan ? (
+                <div style={{ width: "100%", maxWidth: "95%" }}>
+                  <PlanCard plan={msg.plan} />
                 </div>
               ) : msg.role === "design_intent" && msg.designIntent ? (
                 <div style={{ width: "100%", maxWidth: "95%" }}>

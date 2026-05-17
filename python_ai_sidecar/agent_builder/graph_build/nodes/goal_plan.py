@@ -46,6 +46,30 @@ _CHART_INTENT_KEYWORDS = (
     "圖", "圖表", "趨勢", "視覺化", "繪製", "畫圖", "顯示圖",
 )
 
+# v30.17i (2026-05-17) — keywords that indicate user wants a SINGLE
+# named SPC chart / APC param / nested field. These need a transform
+# phase between raw_data and the output phase, because the data source
+# returns nested records and singling out a specific field needs
+# unnest+filter (which only covers='transform').
+# Conservative: lower-cased English + Chinese substrings.
+_NESTED_FOCUS_KEYWORDS = (
+    # SPC chart names — almost always nested under spc_charts list
+    "xbar", "xbar_chart", "x-bar",
+    "r_chart", "r chart", "r-chart",
+    "s_chart", "s chart", "s-chart",
+    "cpk", "cpk_chart",
+    "imr", "imr_chart",
+    "p_chart", "p chart", "p-chart",
+    "c_chart", "c chart", "c-chart",
+    "ewma", "cusum",
+    "match_tune", "rga_h2o",
+    # APC / DC / RECIPE / FDC parameter focus
+    "apc", "dc", "recipe", "fdc", "ec",
+    "etch_time", "etch_rate", "endpoint", "throttle",
+    # Chinese
+    "圖表名", "單一圖表",
+)
+
 
 def _maybe_inject_chart_phase(phases: list[dict[str, Any]], instruction: str) -> bool:
     """If instruction contains chart keywords but no phase has expected=chart,
@@ -83,6 +107,80 @@ def _maybe_inject_chart_phase(phases: list[dict[str, Any]], instruction: str) ->
     })
     logger.info(
         "goal_plan: auto-injected chart phase %s (chart intent detected in instruction)",
+        new_id,
+    )
+    return True
+
+
+def _maybe_inject_transform_phase(
+    phases: list[dict[str, Any]], instruction: str,
+) -> bool:
+    """v30.17i — deterministic guard for «nested-focus» build failures.
+
+    If instruction mentions a specific SPC chart / APC param / nested
+    field, AND plan has raw_data → (chart|scalar|verdict|table|alarm)
+    with NO transform phase between, inject a transform phase right
+    after raw_data so the downstream block phase is reachable.
+
+    Without this, the LLM-generated plan often jumps straight from
+    raw_data to chart/scalar — but unnest/filter blocks (covers=transform)
+    have nowhere to land, and verifier rejects them.
+
+    Mutates phases in-place. Returns True if injected.
+    """
+    if not instruction:
+        return False
+    text = instruction.lower()
+    if not any(kw.lower() in text for kw in _NESTED_FOCUS_KEYWORDS):
+        return False
+    # already has transform? leave as-is
+    if any((p.get("expected") or "").strip() == "transform" for p in phases):
+        return False
+    # need a raw_data phase to anchor the insertion point
+    raw_idx = next(
+        (i for i, p in enumerate(phases)
+         if (p.get("expected") or "").strip() == "raw_data"),
+        None,
+    )
+    if raw_idx is None:
+        return False
+    # need at least one downstream phase that would benefit
+    downstream_kinds = {"chart", "scalar", "verdict", "table", "alarm"}
+    has_downstream = any(
+        (p.get("expected") or "").strip() in downstream_kinds
+        for p in phases[raw_idx + 1:]
+    )
+    if not has_downstream:
+        return False
+    # Allocate next id (max numeric suffix + 1) — id ordering is
+    # cosmetic since react path doesn't depend on string order.
+    max_num = 0
+    for p in phases:
+        pid = (p.get("id") or "").lstrip("pP")
+        if pid.isdigit():
+            max_num = max(max_num, int(pid))
+    new_id = f"p{max_num + 1}"
+    new_phase = {
+        "id": new_id,
+        "goal": "從 nested 資料結構中聚焦出 user 點名的單一項目 (中繼 dataframe)",
+        "expected": "transform",
+        "expected_output": {
+            "kind": "transform_rows",
+            "value_desc": "聚焦後的時序資料 (只剩 user 點名的那個 SPC chart / APC 參數)",
+            "criterion": None,
+            "outcome_keys": ["row_count"],
+        },
+        "why": (
+            "user 點名單一 SPC chart / APC 參數，nested 資料需中介轉換步驟才能"
+            "對該項目做下游 chart/verdict/scalar 動作"
+        ),
+        "user_edited": False,
+        "auto_injected": True,
+    }
+    # Insert right after raw_data so chronological order is preserved.
+    phases.insert(raw_idx + 1, new_phase)
+    logger.info(
+        "goal_plan: auto-injected transform phase %s after raw_data (nested-focus intent)",
         new_id,
     )
     return True
@@ -185,6 +283,46 @@ _SYSTEM = """你是 pipeline architect。User 給你需求，你產出 3-7 個 *
 **所有 example 一律用業務語言**（不出現任何 block 名稱、column 名稱、操作動詞綁定）。
 
 預期 phase 數量：**4-7 phase 是常態**，太少代表把多動作擠在一起、太多代表過分細碎。
+
+== Transform phase 何時必要 (極重要 — v30.17i, 2026-05-17) ==
+
+若 user 需求是對 **單一 SPC chart 名稱**（xbar/r/s/cpk/imr/...）、
+**單一 APC/DC/RECIPE/FDC 參數**、或 **single field of nested structure** 做：
+  - 趨勢圖 (chart)
+  - 統計 (scalar)
+  - 判定 (verdict)
+  - 表格 (table)
+
+→ Plan **必須**包含至少一個 `transform` phase（介於 raw_data 與下游 phase 之間），用來「從 nested 結構單獨抽出 user 點名的那個項目」。
+
+理由：raw_data phase 拿到的是 nested record（含 spc_charts list / APC nested dict / etc）；
+chart/scalar/verdict 等下游 phase 不能直接吃 nested，**一定**要先經過結構轉換
+（unnest list / filter by name / pluck nested path）才能聚焦到 user 想要的那個欄位。
+plan 漏了 transform phase → 執行層被迫把 transform 動作塞進 raw_data 或 chart phase →
+verifier (covers gate) 一定拒（transform 不覆蓋 raw_data，也不覆蓋 chart）→ 卡死 take_over。
+
+**範例對照**：
+  User: "查 EQP-01 STEP_001 最近 100 筆 xbar chart 趨勢"
+  ❌ Bad (2 phase, 缺 transform):
+     p1: 取得 EQP-01 STEP_001 的歷史資料 (raw_data)
+     p2: 繪製 xbar 圖表的趨勢 (chart)        ← 卡死，因為 nested 沒先抽 xbar
+  ✅ Good (3 phase, transform 在中間):
+     p1: 取得 EQP-01 STEP_001 的歷史資料 (raw_data)
+     p2: 從中聚焦出 xbar 圖表的時序測量值 (transform)   ← 抽單一 chart 用
+     p3: 繪製 xbar 圖表的趨勢 (chart)
+
+  User: "看 EQP-08 的 etch_time APC 參數有幾次超標"
+  ❌ Bad:
+     p1: 取得 EQP-08 歷史資料 (raw_data)
+     p2: 統計 etch_time 超標次數 (scalar)    ← 卡，etch_time 在 APC nested 內
+  ✅ Good:
+     p1: 取得 EQP-08 歷史資料 (raw_data)
+     p2: 從 APC 資料中聚焦出 etch_time 參數的測量序列 (transform)
+     p3: 統計 etch_time 超標次數 (scalar)
+
+例外（不需 transform phase）：
+  - User 只要「事件層」資料（不挑單一 chart/param）：直接 raw_data → table/chart 即可
+  - User 要 event-level rollup（spc_status 是 PASS/OOC，已扁平）：raw_data → verdict 直接
 """
 
 
@@ -337,6 +475,14 @@ async def goal_plan_node(state: BuildGraphState) -> dict[str, Any]:
     # `feedback_flow_in_graph_not_prompt.md` we don't trust prompt rules;
     # deterministic graph-level enforcement instead.
     auto_injected_chart_phase = _maybe_inject_chart_phase(phases, instruction)
+
+    # v30.17i (2026-05-17) — same idea, transform phase. If user points at a
+    # single SPC chart name / APC param (anything that lives nested), insert
+    # transform between raw_data and the output phase so unnest/filter has
+    # somewhere to land. Without this, p=raw_data → p=chart skips the only
+    # step that could un-nest the data, and verifier rejects every
+    # transform block as covers mismatch.
+    auto_injected_transform_phase = _maybe_inject_transform_phase(phases, instruction)
 
     if len(phases) < MIN_PHASES:
         logger.info("goal_plan_node: empty phases after parse")
