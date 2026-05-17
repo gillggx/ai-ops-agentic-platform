@@ -178,6 +178,110 @@ def wrap_build_event_for_chat(
         reason = (data.get("reason") or data.get("error") or "").strip()
         payload["type"] = "pb_glass_chat"
         payload["content"] = f"❌ Macro plan 產生失敗{f'：{reason}' if reason else ''}"
+    # ── v30.17c (2026-05-17): v30 ReAct events → chat pb_glass_* ───────
+    # Before v30.17c these events fell through to the silent-drop block at
+    # the bottom → chat UI saw NOTHING during a v30 build → LLM wrote
+    # apology summaries (「抱歉，系統限制」). After v30.14 flipped chat
+    # to v30 default, this was the missing user-facing fix.
+    # Verify any future change via tools/ui_consistent_verify/chat_verify.py.
+    elif evt_type == "goal_plan_proposed":
+        phases = data.get("phases") or []
+        summary = (data.get("plan_summary") or "").strip()
+        lines = []
+        if summary:
+            lines.append(f"📋 Plan：{summary}")
+        if phases:
+            lines.append(f"📊 {len(phases)} 個 phase：")
+            for p in phases[:8]:
+                pid = p.get("id", "?")
+                goal = (p.get("goal") or "").strip()
+                exp = (p.get("expected") or "").strip()
+                lines.append(f"  • {pid} [{exp}] {goal[:60]}")
+        if not lines:
+            return None
+        payload["type"] = "pb_glass_chat"
+        payload["content"] = "\n".join(lines)
+    elif evt_type == "goal_plan_confirmed":
+        auto = data.get("auto_confirmed")
+        n = len(data.get("phases") or [])
+        suffix = "（自動確認）" if auto else ""
+        payload["type"] = "pb_glass_chat"
+        payload["content"] = f"✓ Plan 已確認，開始建構 {n} 個 phase{suffix}"
+    elif evt_type in ("goal_plan_rejected", "goal_plan_refused"):
+        payload["type"] = "pb_glass_chat"
+        payload["content"] = "✗ Plan 被拒絕，建構中止"
+    elif evt_type == "phase_action":
+        # Surface as pb_glass_op so chat UI puts it in the op timeline.
+        pid = data.get("phase_id") or "?"
+        rnd = data.get("round") or "?"
+        tool = data.get("tool") or "?"
+        args_summary = data.get("args_summary") or ""
+        result_summary = data.get("result_summary") or ""
+        payload["type"] = "pb_glass_op"
+        payload["op"] = f"v30:{tool}"
+        payload["args"] = {
+            "phase_id": pid, "round": rnd,
+            "args_summary": str(args_summary)[:200],
+        }
+        payload["result"] = {"summary": str(result_summary)[:300]}
+    elif evt_type == "phase_completed":
+        pid = data.get("phase_id") or "?"
+        rationale = (data.get("rationale") or "").strip()
+        block = data.get("advanced_by_block")
+        node = data.get("advanced_by_node")
+        extra = f"（{node} [{block}]）" if (block and node) else ""
+        payload["type"] = "pb_glass_chat"
+        payload["content"] = f"✓ Phase {pid} 完成{extra}：{rationale[:120]}"
+    elif evt_type == "phase_revise_started":
+        pid = data.get("phase_id") or "?"
+        reason = (data.get("reason") or "").strip()
+        payload["type"] = "pb_glass_chat"
+        payload["content"] = f"⏸ Phase {pid} 卡住，反思中（{reason[:80]}）"
+    elif evt_type == "phase_revise_retry":
+        pid = data.get("phase_id") or "?"
+        alt = (data.get("alternative") or "").strip()
+        payload["type"] = "pb_glass_chat"
+        payload["content"] = f"↻ Phase {pid} 換策略再試：{alt[:120]}"
+    elif evt_type == "phase_fast_forward_report":
+        # One block satisfied multiple phases at once
+        block = data.get("advanced_by_block") or "?"
+        node = data.get("advanced_by_node") or "?"
+        completed = data.get("phases_completed") or []
+        ids = ", ".join(c.get("id", "?") for c in completed)
+        payload["type"] = "pb_glass_chat"
+        payload["content"] = (
+            f"⚡ Fast-forward：{len(completed)} 個 phase ({ids}) 由 "
+            f"{node} [{block}] 一次涵蓋"
+        )
+    elif evt_type == "handover_pending":
+        # In chat (skip_confirm=True) v30.17b auto-takes-over so this
+        # shouldn't normally fire, but if it does (skip_confirm flag flaked
+        # OR caller forgot), still surface so user knows something halted.
+        pid = data.get("failed_phase_id") or "?"
+        reason = (data.get("reason") or "").strip()
+        payload["type"] = "pb_glass_chat"
+        payload["content"] = f"⚠ Phase {pid} 失敗：{reason[:200]}"
+    elif evt_type == "handover_chosen":
+        choice = data.get("choice") or "?"
+        auto = data.get("auto_chosen")
+        suffix = "（自動）" if auto else ""
+        pid = data.get("failed_phase_id") or "?"
+        payload["type"] = "pb_glass_chat"
+        payload["content"] = f"↳ Phase {pid} 處置：{choice}{suffix}"
+    elif evt_type == "build_partial":
+        # status update for partial build (some phases failed, take_over chosen)
+        payload["type"] = "pb_glass_chat"
+        payload["content"] = "⚠ Build 部分完成（有 phase 失敗，已採納部分結果）"
+    # Silent v30 events that would spam chat without adding signal
+    elif evt_type in (
+        "phase_round",                 # each ReAct round; phase_action covers it
+        "phase_observation",           # tool_result preview, internal
+        "phase_verifier_no_match",     # verifier internal, retry will surface
+        "phase_round_paused",          # debug step-mode only
+        "goal_plan_confirm_required",  # interrupt — v30.17a auto-skips in chat
+    ):
+        return None
+
     elif evt_type in (
         "plan_validating",   # noisy — internal validation step
         "op_dispatched",     # paired with op_completed; redundant
