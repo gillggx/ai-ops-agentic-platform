@@ -70,9 +70,12 @@ class BuildRequest(BaseModel):
     trigger_payload: dict | None = Field(default=None, alias="triggerPayload")
     # v30 (2026-05-16): opt-in to ReAct goal-oriented pipeline builder.
     # When true, graph entry routes through goal_plan_node + agentic_phase_loop
-    # instead of v27 macro_plan + compile_chunk. Default false keeps v27 path
-    # for skill mode + existing chat builder until v30 is GA.
-    v30_mode: bool = Field(default=False, alias="v30Mode")
+    # instead of v27 macro_plan + compile_chunk.
+    # v30.14 (2026-05-17): default flipped True. All 3 surfaces (chat,
+    # builder, skill GUI) now share the v30 path. Emergency revert via env
+    # AGENT_BUILD_V30=0 on sidecar. Explicit `false` here still opts out
+    # per-request if a client needs to compare paths.
+    v30_mode: bool = Field(default=True, alias="v30Mode")
     # v30.7 (2026-05-16): debug step-mode. When true, agentic_phase_loop
     # pauses after each round (via step_pause_gate), emitting full prompt +
     # response + state for debugging. Resume with /build/step-continue.

@@ -52,7 +52,7 @@ async def stream_graph_build(
     skip_confirm: bool = False,
     skill_step_mode: bool = False,
     trigger_payload: Optional[dict] = None,
-    v30_mode: bool = False,
+    v30_mode: bool = True,
     debug_step_mode: bool = False,
 ) -> AsyncGenerator[StreamEvent, None]:
     """Run the graph from the start. Yields StreamEvent as nodes complete.
@@ -84,9 +84,18 @@ async def stream_graph_build(
         trigger_payload=trigger_payload,
         debug_step_mode=debug_step_mode,
     )
+    # v30.14 (2026-05-17): v30 is now the default. Emergency revert: set env
+    # AGENT_BUILD_V30=0 to fall back to v27 macro_plan path globally without
+    # a code change. Remove this env override once v30 has stable e2e cover
+    # for chat + builder + skill GUI surfaces.
+    import os as _os
+    if _os.environ.get("AGENT_BUILD_V30", "1") == "0":
+        v30_mode = False
     if v30_mode:
         init["v30_mode"] = True
         logger.info("stream_graph_build: v30_mode enabled — using ReAct path")
+    else:
+        logger.info("stream_graph_build: v30_mode DISABLED (env opt-out) — using v27 macro_plan")
     if debug_step_mode:
         logger.info("stream_graph_build: debug_step_mode enabled — agent will pause after each round")
     logger.info("stream_graph_build: starting session=%s", sid)
