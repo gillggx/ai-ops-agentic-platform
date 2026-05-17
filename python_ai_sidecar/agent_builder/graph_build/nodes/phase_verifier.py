@@ -59,6 +59,27 @@ _COUNT_QUANTIFIER_PATTERN = re.compile(
 )
 
 
+def _has_chart_spec_output(preview_blob: dict | None) -> bool:
+    """v30.17j — true if any port in the preview blob holds a chart_spec
+    snapshot. Chart blocks output chart_spec (not rows); using this avoids
+    the LLM-judge rejecting them on count quantifier rules that don't apply.
+    """
+    if not isinstance(preview_blob, dict):
+        return False
+    for blob in preview_blob.values():
+        if not isinstance(blob, dict):
+            continue
+        if blob.get("type") == "chart_spec":
+            return True
+        snap = blob.get("snapshot")
+        if isinstance(snap, dict) and snap.get("type") == "chart_spec":
+            return True
+        # block executors sometimes set type via __dsl marker
+        if isinstance(snap, dict) and snap.get("__dsl") is True:
+            return True
+    return False
+
+
 def _detect_deficit(value_desc: str | None, rows: int | None) -> Optional[dict]:
     """v30.17j — return deficit info dict when actual rows are significantly
     below the requested count quantifier in value_desc; else None.
@@ -231,11 +252,31 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                     })],
                 }
 
+        # v30.17j hotfix: chart phases produce chart_spec, not row-based
+        # output — rows=None is by design. Judge prompt's row-count rules
+        # ("1 張 / N 筆") incorrectly reject these. Skip judge entirely
+        # for chart-phase + chart_spec output; trust the covers gate.
+        is_chart_phase_chart_output = (
+            ph_expected == "chart"
+            and "chart" in covers
+            and _has_chart_spec_output(preview_blob)
+        )
+        if is_chart_phase_chart_output and cur == idx:
+            logger.info(
+                "phase_verifier: chart phase %s with chart_spec output — "
+                "skipping LLM-judge (rows=%s by design)",
+                phase.get("id"), rows,
+            )
+            judge = {
+                "match": True,
+                "reason": f"chart phase satisfied by chart_spec from {block_id}",
+                "extracted": {},
+            }
         # v30.10 B2: LLM-judge semantic check (covers expected_output.value_desc)
         # Skip judge for the FAST-FORWARD downstream phases (only judge the
         # current phase being advanced); FF claim is enough for follow-ups
         # because their value_desc may not be matchable from same sample row.
-        if cur == idx and not deficit:
+        elif cur == idx and not deficit:
             logger.info(
                 "phase_verifier: invoking LLM-judge for phase %s (block=%s rows=%s)",
                 phase.get("id"), block_id, rows,
