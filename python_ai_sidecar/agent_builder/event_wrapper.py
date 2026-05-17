@@ -211,19 +211,35 @@ def wrap_build_event_for_chat(
         payload["type"] = "pb_glass_chat"
         payload["content"] = "✗ Plan 被拒絕，建構中止"
     elif evt_type == "phase_action":
-        # Surface as pb_glass_op so chat UI puts it in the op timeline.
+        # v30.17h (2026-05-17) — emit pb_glass_op in the v27-compatible
+        # shape so applyGlassOp can paint the Lite Canvas. Previously this
+        # branch flattened args into a text summary, which made the canvas
+        # invisible (LiteCanvasOverlay rendered nothing). Now we pass the
+        # raw structured args + result through as the top-level args/result,
+        # and stash v30-specific phase context under underscore-prefixed
+        # keys (`_phase_id` / `_round` / `_args_summary`) so chat log can
+        # still show the phase/round prefix without breaking applyGlassOp.
         pid = data.get("phase_id") or "?"
         rnd = data.get("round") or "?"
         tool = data.get("tool") or "?"
         args_summary = data.get("args_summary") or ""
         result_summary = data.get("result_summary") or ""
+        raw_args = data.get("tool_args_raw")
+        raw_result = data.get("action_result_raw")
+
         payload["type"] = "pb_glass_op"
-        payload["op"] = f"v30:{tool}"
-        payload["args"] = {
-            "phase_id": pid, "round": rnd,
-            "args_summary": str(args_summary)[:200],
-        }
-        payload["result"] = {"summary": str(result_summary)[:300]}
+        payload["op"] = tool  # no "v30:" prefix — matches OP_LABEL_MAP keys
+        # args: structured raw + phase metadata. dict.copy() so caller
+        # can't accidentally mutate the trace.
+        args_out: dict[str, Any] = dict(raw_args) if isinstance(raw_args, dict) else {}
+        args_out["_phase_id"] = pid
+        args_out["_round"] = rnd
+        args_out["_args_summary"] = str(args_summary)[:200]
+        payload["args"] = args_out
+        # result: structured raw + summary text
+        result_out: dict[str, Any] = dict(raw_result) if isinstance(raw_result, dict) else {}
+        result_out["_summary"] = str(result_summary)[:300]
+        payload["result"] = result_out
     elif evt_type == "phase_completed":
         pid = data.get("phase_id") or "?"
         rationale = (data.get("rationale") or "").strip()

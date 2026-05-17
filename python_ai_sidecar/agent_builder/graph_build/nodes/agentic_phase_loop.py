@@ -516,6 +516,13 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
             "args_summary": _summarize_args(tool_args),
             "result_summary": _summarize_result(action_result),
             "pipeline_snapshot": pipeline_snapshot,
+            # v30.17h (2026-05-17) — raw structured args/result needed by
+            # the frontend Lite Canvas. Without these wrap_build_event_for_chat
+            # only had text summaries → applyGlassOp couldn't extract
+            # block_name / node_id → canvas stayed empty. Keep the *_summary
+            # text fields too (chat log still uses them).
+            "tool_args_raw": tool_args,
+            "action_result_raw": action_result,
         }),
     ]
     if auto_preview_result:
