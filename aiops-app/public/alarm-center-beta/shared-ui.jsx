@@ -18,7 +18,8 @@ function TopBar({ active }) {
       <div className="tabs">
         <a className={active === 'copilot' ? 'active' : ''} href="Alarm Autopilot.html">Copilot</a>
         <a className={active === 'machines' ? 'active' : ''} href="index.html">Machines</a>
-        <a className={active === 'alarms' ? 'active' : ''} href="Alarm Center v2.html">Alarms</a>
+        {/* Alarms tab removed 2026-05-18: same view as Machines, just
+            VIEW_MODE='alarms' flag → duplicate UI. */}
       </div>
 
       <span className="auto-pill">
