@@ -5,6 +5,8 @@ import com.aiops.api.domain.alarm.AlarmEntity;
 import com.aiops.api.domain.alarm.AlarmRepository;
 import com.aiops.api.domain.pipeline.PipelineEntity;
 import com.aiops.api.domain.pipeline.PipelineRepository;
+import com.aiops.api.domain.skill.ExecutionLogEntity;
+import com.aiops.api.domain.skill.ExecutionLogRepository;
 import com.aiops.api.domain.skill.SkillDocumentEntity;
 import com.aiops.api.domain.skill.SkillDocumentRepository;
 import com.aiops.api.domain.skill.SkillRunEntity;
@@ -59,19 +61,22 @@ public class SkillRunnerService {
     private final PythonSidecarClient sidecar;
     private final ObjectMapper mapper;
     private final AlarmRepository alarmRepo;
+    private final ExecutionLogRepository execLogRepo;
 
     public SkillRunnerService(SkillDocumentRepository skillRepo,
                               SkillRunRepository runRepo,
                               PipelineRepository pipelineRepo,
                               PythonSidecarClient sidecar,
                               ObjectMapper mapper,
-                              AlarmRepository alarmRepo) {
+                              AlarmRepository alarmRepo,
+                              ExecutionLogRepository execLogRepo) {
         this.skillRepo = skillRepo;
         this.runRepo = runRepo;
         this.pipelineRepo = pipelineRepo;
         this.sidecar = sidecar;
         this.mapper = mapper;
         this.alarmRepo = alarmRepo;
+        this.execLogRepo = execLogRepo;
     }
 
     /** v30.13 — emit-alarm guard: skip non-patrol stages + 1-hour dedup window. */
@@ -305,6 +310,27 @@ public class SkillRunnerService {
         }
         summary.append("(SkillRun #").append(run.getId()).append(")");
 
+        // v30.15 (2026-05-17) — write an execution_log row alongside the
+        // alarm so AlarmDetail page renders findings (trigger reason +
+        // evidence data_views). Without execution_log_id the detail page
+        // shows the bare title/summary only — no 觸發原因 / 深度診斷.
+        Long execLogId = null;
+        try {
+            ExecutionLogEntity log = new ExecutionLogEntity();
+            log.setSkillId(skill.getId());
+            log.setTriggeredBy(Boolean.TRUE.equals(run.getIsTest()) ? "manual" : "agent");
+            log.setStatus("success");
+            log.setEventContext(safeJson(triggerPayload));
+            log.setLlmReadableData(buildLlmReadableData(confirmResult, stepResults, summary.toString()));
+            log.setFinishedAt(OffsetDateTime.now());
+            if (run.getDurationMs() != null) log.setDurationMs((long) run.getDurationMs());
+            log = execLogRepo.save(log);
+            execLogId = log.getId();
+        } catch (Exception ex) {
+            log.warn("skill {} run {} execution_log create failed: {}",
+                    skill.getSlug(), run.getId(), ex.toString());
+        }
+
         AlarmEntity a = new AlarmEntity();
         a.setSkillId(skill.getId());
         a.setTriggerEvent(deriveTriggerEvent(trig));
@@ -316,6 +342,7 @@ public class SkillRunnerService {
         a.setTitle(title);
         a.setSummary(summary.toString());
         a.setStatus("active");
+        a.setExecutionLogId(execLogId);  // v30.15: link for AlarmDetail enrichment
         a = alarmRepo.save(a);
         alarmsEmitted.incrementAndGet();
         lastEmitAtIso = OffsetDateTime.now().toString();
@@ -324,6 +351,135 @@ public class SkillRunnerService {
         log.info("skill {} run {}: emitted alarm id={} severity={} equipment={}",
                 skill.getSlug(), run.getId(), a.getId(), severity, equipmentId);
         return a;
+    }
+
+    /** v30.15 — JSON shape AlarmEnrichmentService + AlarmDetail page expect:
+     *    findings = {
+     *      summary: "...",
+     *      condition_met: bool,
+     *      result_summary: {triggered: bool, summary: ...},
+     *      outputs: {
+     *        evidence_rows: [...rows from confirm/step data_views...],
+     *        triggered_count: N,
+     *        per_step: {sN: {status, note, data_views}}
+     *      },
+     *      _alarm_output_schema: [...]   // tells page how to render outputs
+     *    }
+     *  package-private for unit tests.
+     */
+    String buildLlmReadableData(Map<String, Object> confirmResult,
+                                 List<Map<String, Object>> stepResults,
+                                 String summaryText) {
+        Map<String, Object> findings = new HashMap<>();
+        findings.put("summary", summaryText);
+        boolean triggered = stepResults.stream()
+                .anyMatch(s -> "pass".equalsIgnoreCase(String.valueOf(s.get("status"))));
+        findings.put("condition_met", triggered);
+        findings.put("result_summary", Map.of(
+                "triggered", triggered,
+                "summary", summaryText
+        ));
+
+        // Collect evidence rows from confirm + each step's data_views.
+        // Evidence = list of rows from the FIRST data_view in confirm (the
+        // canonical "what triggered" snapshot). If confirm has none, fall
+        // back to step results' data_views in order.
+        List<Map<String, Object>> evidenceRows = new ArrayList<>();
+        List<String> evidenceColumns = new ArrayList<>();
+        Map<String, Object> firstDv = pickFirstDataView(confirmResult);
+        if (firstDv != null) {
+            extractRowsAndCols(firstDv, evidenceRows, evidenceColumns);
+        }
+        if (evidenceRows.isEmpty()) {
+            for (Map<String, Object> s : stepResults) {
+                Map<String, Object> dv = pickFirstDataView(s);
+                if (dv != null) {
+                    extractRowsAndCols(dv, evidenceRows, evidenceColumns);
+                    if (!evidenceRows.isEmpty()) break;
+                }
+            }
+        }
+
+        Map<String, Object> perStep = new HashMap<>();
+        for (Map<String, Object> s : stepResults) {
+            Map<String, Object> entry = new HashMap<>();
+            entry.put("status", s.get("status"));
+            entry.put("note", s.get("note"));
+            entry.put("value", s.get("value"));
+            entry.put("data_views", s.get("data_views"));
+            perStep.put(String.valueOf(s.get("step_id")), entry);
+        }
+
+        Map<String, Object> outputs = new HashMap<>();
+        outputs.put("evidence_rows", evidenceRows);
+        outputs.put("triggered_count", evidenceRows.size());
+        outputs.put("per_step", perStep);
+        if (confirmResult != null) outputs.put("confirm", confirmResult);
+        findings.put("outputs", outputs);
+
+        // Output schema override — tells AlarmDetail page how to render
+        // outputs.evidence_rows (as a table with these columns) and
+        // outputs.triggered_count (as a scalar).
+        List<Map<String, Object>> schema = new ArrayList<>();
+        Map<String, Object> evSchema = new HashMap<>();
+        evSchema.put("key", "evidence_rows");
+        evSchema.put("type", "table");
+        evSchema.put("label", "觸發證據 (data rows that matched the condition)");
+        List<Map<String, String>> cols = new ArrayList<>();
+        int added = 0;
+        for (String col : evidenceColumns) {
+            if (added >= 8) break;
+            Map<String, String> c = new HashMap<>();
+            c.put("key", col); c.put("label", col);
+            cols.add(c);
+            added++;
+        }
+        evSchema.put("columns", cols);
+        schema.add(evSchema);
+        Map<String, Object> tcSchema = new HashMap<>();
+        tcSchema.put("key", "triggered_count");
+        tcSchema.put("type", "scalar");
+        tcSchema.put("label", "觸發筆數");
+        tcSchema.put("unit", "rows");
+        schema.add(tcSchema);
+        findings.put("_alarm_output_schema", schema);
+
+        return safeJson(findings);
+    }
+
+    /** Extract rows + columns from a data_view dict. Idempotent on empty/missing. */
+    @SuppressWarnings("unchecked")
+    private void extractRowsAndCols(Map<String, Object> dv,
+                                     List<Map<String, Object>> rowsOut,
+                                     List<String> colsOut) {
+        Object rows = dv.get("rows");
+        if (rows instanceof List<?> rowList) {
+            for (Object r : rowList) {
+                if (r instanceof Map) rowsOut.add((Map<String, Object>) r);
+            }
+        }
+        Object cols = dv.get("columns");
+        if (cols instanceof List<?> colList) {
+            for (Object c : colList) {
+                if (c != null) colsOut.add(String.valueOf(c));
+            }
+        }
+    }
+
+    /** Pick first data_view from a confirm/step result map. */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> pickFirstDataView(Map<String, Object> result) {
+        if (result == null) return null;
+        Object dvs = result.get("data_views");
+        if (!(dvs instanceof List<?> list) || list.isEmpty()) return null;
+        Object first = list.get(0);
+        return first instanceof Map ? (Map<String, Object>) first : null;
+    }
+
+    private String safeJson(Object o) {
+        if (o == null) return null;
+        try { return mapper.writeValueAsString(o); }
+        catch (Exception ex) { return null; }
     }
 
     /** Parse evidence timestamp tolerantly. Accepts:

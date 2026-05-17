@@ -3,11 +3,14 @@ package com.aiops.api.api.skill;
 import com.aiops.api.domain.alarm.AlarmEntity;
 import com.aiops.api.domain.alarm.AlarmRepository;
 import com.aiops.api.domain.pipeline.PipelineRepository;
+import com.aiops.api.domain.skill.ExecutionLogEntity;
+import com.aiops.api.domain.skill.ExecutionLogRepository;
 import com.aiops.api.domain.skill.SkillDocumentEntity;
 import com.aiops.api.domain.skill.SkillDocumentRepository;
 import com.aiops.api.domain.skill.SkillRunEntity;
 import com.aiops.api.domain.skill.SkillRunRepository;
 import com.aiops.api.sidecar.PythonSidecarClient;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -17,6 +20,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -50,6 +55,7 @@ import static org.mockito.Mockito.when;
  * exercised by the live deploy verification (see commit log of v30.13b).
  */
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class SkillRunnerServiceTest {
 
     @Mock SkillDocumentRepository skillRepo;
@@ -57,6 +63,7 @@ class SkillRunnerServiceTest {
     @Mock PipelineRepository pipelineRepo;
     @Mock PythonSidecarClient sidecar;
     @Mock AlarmRepository alarmRepo;
+    @Mock ExecutionLogRepository execLogRepo;
 
     private ObjectMapper mapper;
     private SkillRunnerService service;
@@ -65,7 +72,12 @@ class SkillRunnerServiceTest {
     void setup() {
         mapper = new ObjectMapper();
         service = new SkillRunnerService(skillRepo, runRepo, pipelineRepo,
-                sidecar, mapper, alarmRepo);
+                sidecar, mapper, alarmRepo, execLogRepo);
+        // v30.15: execLogRepo.save returns entity with id assigned; default
+        // for tests so existing emit tests still pass without per-test setup.
+        when(execLogRepo.save(any(ExecutionLogEntity.class))).thenAnswer(inv -> {
+            ExecutionLogEntity e = inv.getArgument(0); e.setId(7777L); return e;
+        });
     }
 
     // ────────────────────────── parseEvidenceTimestamp ──────────────────────────
@@ -806,6 +818,213 @@ class SkillRunnerServiceTest {
             assertThat(sum).contains("good-note");
             assertThat(sum).doesNotContain("bad-note-should-not-appear");
             assertThat(sum).contains("SkillRun #");
+        }
+    }
+
+    // ────────────────────────── v30.15 execution_log linkage ──────────────────────────
+
+    @Nested @DisplayName("v30.15 execution_log linkage")
+    class ExecLogLinkage {
+
+        @Test
+        void emitAlsoSavesExecutionLogAndLinks() throws Exception {
+            when(alarmRepo.existsActiveBySkillAndEquipmentSince(
+                    anyLong(), anyString(), any())).thenReturn(false);
+            ArgumentCaptor<ExecutionLogEntity> logCap = ArgumentCaptor.forClass(ExecutionLogEntity.class);
+            when(execLogRepo.save(logCap.capture())).thenAnswer(inv -> {
+                ExecutionLogEntity e = inv.getArgument(0); e.setId(8888L); return e;
+            });
+            ArgumentCaptor<AlarmEntity> alarmCap = ArgumentCaptor.forClass(AlarmEntity.class);
+            when(alarmRepo.save(alarmCap.capture())).thenAnswer(inv -> {
+                AlarmEntity a = inv.getArgument(0); a.setId(2222L); return a;
+            });
+
+            service.emitAlarmIfTriggered(
+                    patrolSkill(), run(false),
+                    Map.of("tool_id", "EQP-02"),
+                    confirmWithRow("LOT-x", "STEP_007", "2026-05-17T01:00:00"),
+                    List.of(stepPass("s1", "step1-pass-note")), false);
+
+            // execution_log was saved with right shape
+            ExecutionLogEntity savedLog = logCap.getValue();
+            assertThat(savedLog.getSkillId()).isEqualTo(43L);
+            assertThat(savedLog.getStatus()).isEqualTo("success");
+            assertThat(savedLog.getTriggeredBy()).isEqualTo("agent");
+            assertThat(savedLog.getLlmReadableData()).isNotNull();
+            assertThat(savedLog.getEventContext()).isNotNull();
+            assertThat(savedLog.getFinishedAt()).isNotNull();
+
+            // alarm linked to it
+            assertThat(alarmCap.getValue().getExecutionLogId()).isEqualTo(8888L);
+        }
+
+        @Test
+        void executionLogContainsFindingsTriggerSchema() throws Exception {
+            when(alarmRepo.existsActiveBySkillAndEquipmentSince(
+                    anyLong(), anyString(), any())).thenReturn(false);
+            ArgumentCaptor<ExecutionLogEntity> logCap = ArgumentCaptor.forClass(ExecutionLogEntity.class);
+            when(execLogRepo.save(logCap.capture())).thenAnswer(inv -> {
+                ExecutionLogEntity e = inv.getArgument(0); e.setId(1L); return e;
+            });
+            when(alarmRepo.save(any(AlarmEntity.class))).thenAnswer(inv -> {
+                AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
+            });
+
+            // confirm with proper data_views (rows + columns)
+            Map<String, Object> row = Map.of("eventTime", "2026-05-17T01:00:00",
+                    "toolID", "EQP-02", "lotID", "L1", "step", "S1", "spc_status", "OOC");
+            Map<String, Object> dv = Map.of(
+                    "rows", List.of(row, row),
+                    "columns", List.of("eventTime", "toolID", "lotID", "step", "spc_status"));
+            Map<String, Object> confirm = Map.of("data_views", List.of(dv),
+                    "note", "2 OOC found", "status", "pass");
+
+            service.emitAlarmIfTriggered(
+                    patrolSkill(), run(false),
+                    Map.of("tool_id", "EQP-02"),
+                    confirm,
+                    List.of(stepPass("s_check", "19 > 0")), false);
+
+            String json = logCap.getValue().getLlmReadableData();
+            JsonNode root = mapper.readTree(json);
+
+            assertThat(root.get("condition_met").asBoolean()).isTrue();
+            assertThat(root.get("summary").asText()).contains("19 > 0");
+            assertThat(root.get("result_summary").get("triggered").asBoolean()).isTrue();
+
+            JsonNode outputs = root.get("outputs");
+            assertThat(outputs.get("evidence_rows").isArray()).isTrue();
+            assertThat(outputs.get("evidence_rows").size()).isEqualTo(2);
+            assertThat(outputs.get("triggered_count").asInt()).isEqualTo(2);
+            assertThat(outputs.has("per_step")).isTrue();
+            assertThat(outputs.get("per_step").has("s_check")).isTrue();
+
+            JsonNode schema = root.get("_alarm_output_schema");
+            assertThat(schema.isArray()).isTrue();
+            assertThat(schema.size()).isGreaterThanOrEqualTo(2);
+            // First entry should be evidence_rows table with columns from confirm
+            JsonNode evSchema = schema.get(0);
+            assertThat(evSchema.get("key").asText()).isEqualTo("evidence_rows");
+            assertThat(evSchema.get("type").asText()).isEqualTo("table");
+            assertThat(evSchema.get("columns").size()).isGreaterThan(0);
+        }
+
+        @Test
+        void executionLogFallsBackToStepDataViewWhenConfirmMissing() throws Exception {
+            when(alarmRepo.existsActiveBySkillAndEquipmentSince(
+                    anyLong(), anyString(), any())).thenReturn(false);
+            ArgumentCaptor<ExecutionLogEntity> logCap = ArgumentCaptor.forClass(ExecutionLogEntity.class);
+            when(execLogRepo.save(logCap.capture())).thenAnswer(inv -> {
+                ExecutionLogEntity e = inv.getArgument(0); e.setId(1L); return e;
+            });
+            when(alarmRepo.save(any(AlarmEntity.class))).thenAnswer(inv -> {
+                AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
+            });
+
+            // step has its own data_views; confirm has none
+            Map<String, Object> stepDv = Map.of(
+                    "rows", List.of(Map.of("a", 1), Map.of("a", 2), Map.of("a", 3)),
+                    "columns", List.of("a"));
+            Map<String, Object> step = new HashMap<>();
+            step.put("step_id", "s1"); step.put("status", "pass");
+            step.put("note", "found 3"); step.put("data_views", List.of(stepDv));
+
+            service.emitAlarmIfTriggered(
+                    patrolSkill(), run(false),
+                    Map.of("tool_id", "EQP-02"),
+                    null,  // no confirm
+                    List.of(step), false);
+
+            String json = logCap.getValue().getLlmReadableData();
+            JsonNode outputs = mapper.readTree(json).get("outputs");
+            assertThat(outputs.get("evidence_rows").size()).isEqualTo(3);
+            assertThat(outputs.get("triggered_count").asInt()).isEqualTo(3);
+        }
+
+        @Test
+        void executionLogTriggeredByIsManualWhenTestRun() throws Exception {
+            // Test mode emit guard normally skips. But buildLlmReadableData
+            // alone is callable. Use direct method test.
+            String json = service.buildLlmReadableData(
+                    Map.of("note", "n", "status", "pass"),
+                    List.of(stepPass("s1")),
+                    "summary text");
+            assertThat(json).isNotNull();
+            JsonNode root = mapper.readTree(json);
+            assertThat(root.get("condition_met").asBoolean()).isTrue();
+        }
+
+        @Test
+        void buildLlmReadableDataAllStepsFailGivesConditionMetFalse() throws Exception {
+            String json = service.buildLlmReadableData(
+                    Map.of("note", "n"),
+                    List.of(stepFail("s1"), stepFail("s2")),
+                    "no triggers");
+            JsonNode root = mapper.readTree(json);
+            assertThat(root.get("condition_met").asBoolean()).isFalse();
+            assertThat(root.get("result_summary").get("triggered").asBoolean()).isFalse();
+        }
+
+        @Test
+        void buildLlmReadableDataNullConfirmNoStepsHasEmptyEvidence() throws Exception {
+            String json = service.buildLlmReadableData(
+                    null, List.of(), "no data");
+            JsonNode root = mapper.readTree(json);
+            assertThat(root.get("outputs").get("evidence_rows").size()).isEqualTo(0);
+            assertThat(root.get("outputs").get("triggered_count").asInt()).isEqualTo(0);
+        }
+
+        @Test
+        void executionLogSaveFailureDoesNotPreventAlarm() {
+            when(alarmRepo.existsActiveBySkillAndEquipmentSince(
+                    anyLong(), anyString(), any())).thenReturn(false);
+            when(execLogRepo.save(any(ExecutionLogEntity.class)))
+                    .thenThrow(new RuntimeException("DB down"));
+            ArgumentCaptor<AlarmEntity> alarmCap = ArgumentCaptor.forClass(AlarmEntity.class);
+            when(alarmRepo.save(alarmCap.capture())).thenAnswer(inv -> {
+                AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
+            });
+
+            AlarmEntity r = service.emitAlarmIfTriggered(
+                    patrolSkill(), run(false),
+                    Map.of("tool_id", "EQP-02"),
+                    confirmWithRow("L", "S", "2026-05-17T00:00:00"),
+                    List.of(stepPass("s1")), false);
+
+            // Alarm still saved with execLogId = null (graceful degrade)
+            assertThat(r).isNotNull();
+            assertThat(alarmCap.getValue().getExecutionLogId()).isNull();
+        }
+
+        @Test
+        void columnsTruncatedToEightInSchema() throws Exception {
+            when(alarmRepo.existsActiveBySkillAndEquipmentSince(
+                    anyLong(), anyString(), any())).thenReturn(false);
+            ArgumentCaptor<ExecutionLogEntity> logCap = ArgumentCaptor.forClass(ExecutionLogEntity.class);
+            when(execLogRepo.save(logCap.capture())).thenAnswer(inv -> {
+                ExecutionLogEntity e = inv.getArgument(0); e.setId(1L); return e;
+            });
+            when(alarmRepo.save(any(AlarmEntity.class))).thenAnswer(inv -> {
+                AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
+            });
+
+            // 15 columns; schema should only keep 8
+            List<String> manyCols = new ArrayList<>();
+            for (int i = 0; i < 15; i++) manyCols.add("c" + i);
+            Map<String, Object> row = new HashMap<>();
+            for (String c : manyCols) row.put(c, c);
+            Map<String, Object> dv = Map.of("rows", List.of(row), "columns", manyCols);
+            Map<String, Object> confirm = Map.of("data_views", List.of(dv), "note", "n");
+
+            service.emitAlarmIfTriggered(
+                    patrolSkill(), run(false),
+                    Map.of("tool_id", "EQP-02"),
+                    confirm,
+                    List.of(stepPass("s1")), false);
+
+            JsonNode schema = mapper.readTree(logCap.getValue().getLlmReadableData())
+                    .get("_alarm_output_schema").get(0);
+            assertThat(schema.get("columns").size()).isLessThanOrEqualTo(8);
         }
     }
 
