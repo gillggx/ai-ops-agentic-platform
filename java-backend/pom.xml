@@ -175,6 +175,31 @@
                     </execution>
                 </executions>
             </plugin>
+            <!-- v30.13b (2026-05-17): JaCoCo for coverage tracking. DevOps
+                 flagged Java code had no unit tests; this lets us measure
+                 what gets covered as tests are added. Run with:
+                   mvn test          (produces target/site/jacoco/)
+                 Reports: target/site/jacoco/index.html -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.12</version>
+                <executions>
+                    <execution>
+                        <id>jacoco-prepare</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>jacoco-report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 </project>
