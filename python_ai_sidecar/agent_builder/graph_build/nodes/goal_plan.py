@@ -253,9 +253,13 @@ _SYSTEM = """你是 pipeline architect。User 給你需求，你產出 **goal-or
 1. phases 是線性順序，但**不寫 depends_on** — 後續 react_round 自己 wire
 2. 一個 chart + 一個 verdict 都各 1 phase，**不要塞同 phase**
 3. 若 user instruction 過模糊：回 {"too_vague": true, "reason": "..."}
-4. **expected_output.value_desc 寫實際算出的「東西」**（一個數字、一張圖、一個列表），
-   **不要**寫 "true/false" 這種抽象判定。執行層會把實際值（e.g. ooc 圖表數 = 3）
-   填進 outcome 報告給 user 看。**value_desc 也禁止洩漏 column 名**。
+4. **expected_output.value_desc 用語意描述，禁止寫成 schema 規格**（v30.17l, 2026-05-18 E1）:
+   - ✅ 寫「實際算出什麼」的**語意**：「OOC 圖表實際張數」「各 lot 的分佈圖」「常態性檢定結果」
+   - ❌ **禁止列具體欄位、統計量、column 名稱**：mean / std / Q1 / median / Q3 / min / max / n /
+     row_count / count / ucl / lcl / value / cpk / Cp / Cpu 等，**全部不准出現在 value_desc**
+   - ❌ 不要寫 "true/false" 這種抽象判定（用「達門檻」「超限」「異常」等業務語言）
+   - 理由：value_desc 寫越具體 → LLM-judge 把它當 schema 嚴格比對 → block 輸出對不上就拒
+     → build 卡死。語意描述讓 judge 用 fuzzy match，build 通得過。
 5. **忠於 user 的需求 — 不要加 user 沒明確要求的 phase**（v30.17k, 2026-05-17）:
    - user 列了 N 件「要做的事」→ plan phase 數 ≈ N + 必要的 fetch/transform 前置，**就 stop**
    - **嚴禁**自己加 user 沒提的 phase，像：
@@ -267,6 +271,29 @@ _SYSTEM = """你是 pipeline architect。User 給你需求，你產出 **goal-or
 
 == Phase Atomicity (極重要！) ==
 每個 phase **必須是 1-2 個 block 能完成的單一資料動作**。**不要**把多動作塞同 phase。
+
+**E2 (v30.17l, 2026-05-18) — 例外：chart block 自帶 stats 計算**:
+下列 chart block 內部已經自己算統計量，**不該為它前置 transform stats phase**：
+  - block_box_plot           內建算 IQR / median / Q1 / Q3 / outliers per group
+  - block_histogram_chart    內建算 bin counts / normal fit
+  - block_probability_plot   內建算 Q-Q / Anderson-Darling p-value
+  - block_xbar_r / block_imr 內建算 UCL / LCL / mean
+  - block_spc_panel / block_apc_panel 內建撈 + filter + 算 + 畫
+  - block_pareto             內建排序 + 累計 %
+  - block_variability_gauge  內建分組變異分解
+
+❌ Bad — 為 box plot 多開 transform phase 算統計:
+  p_N   transform: 統計各 lot 的 mean/std/quantile
+  p_N+1 chart:     繪製各 lot Box Plot
+✅ Good — 直接 1 個 chart phase（內建 stats）:
+  p_N   chart: 各 lot xbar 分佈比較 (Box Plot)
+
+❌ Bad — 為 Probability Plot 多開 transform 算 Q-Q:
+  p_N   transform: 計算 xbar 排序與理論分位數
+  p_N+1 chart:     繪製 Probability Plot
+✅ Good:
+  p_N   chart: xbar 常態性檢定圖
+
 
 ❌ Bad — 「取得 + 找 last X」(2 動作擠 1 phase):
   p1: 取得過去 7 天資料並找出最後一次 OOC 事件的時刻 (raw_data)
