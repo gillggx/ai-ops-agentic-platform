@@ -21,7 +21,9 @@ interface Props {
 }
 
 export default function ResultsBody({ summary, nodeResults }: Props) {
-  const chartCount = summary.charts.length;
+  const chartCount = (summary.charts ?? []).length;
+  // v30.17j defensive: in chat-mode build (Lite Canvas), summary may
+  // arrive from pb_run_done without a charts field — guard all reads.
   const [userChartView, setUserChartView] = useState<ChartView | null>(null);
   const [activeTabIdx, setActiveTabIdx] = useState(0);
 
@@ -213,13 +215,13 @@ export default function ResultsBody({ summary, nodeResults }: Props) {
         </div>
       )}
 
-      {summary.charts.length > 0 && (
+      {(summary.charts ?? []).length > 0 && (
         <div style={{ marginTop: 14 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
             <div style={{ ...sectionHeader, marginBottom: 0, flex: 1 }}>
-              Charts ({summary.charts.length})
+              Charts ({(summary.charts ?? []).length})
             </div>
-            {summary.charts.length >= 2 && (
+            {(summary.charts ?? []).length >= 2 && (
               <ViewToggle
                 mode={effectiveView}
                 onChange={(v) => { setUserChartView(v); setActiveTabIdx(0); }}
@@ -229,7 +231,7 @@ export default function ResultsBody({ summary, nodeResults }: Props) {
 
           {effectiveView === "stacked" && (
             <div>
-              {summary.charts.map((c, i) => (
+              {(summary.charts ?? []).map((c, i) => (
                 <ChartCard key={c.node_id} chart={c} indexFallback={i} />
               ))}
             </div>
@@ -243,7 +245,7 @@ export default function ResultsBody({ summary, nodeResults }: Props) {
                 gap: 12,
               }}
             >
-              {summary.charts.map((c, i) => (
+              {(summary.charts ?? []).map((c, i) => (
                 <ChartCard key={c.node_id} chart={c} indexFallback={i} />
               ))}
             </div>
@@ -260,7 +262,7 @@ export default function ResultsBody({ summary, nodeResults }: Props) {
                   flexWrap: "wrap",
                 }}
               >
-                {summary.charts.map((c, i) => {
+                {(summary.charts ?? []).map((c, i) => {
                   const active = i === activeTabIdx;
                   return (
                     <button
@@ -289,9 +291,9 @@ export default function ResultsBody({ summary, nodeResults }: Props) {
                   );
                 })}
               </div>
-              {summary.charts[activeTabIdx] && (
+              {(summary.charts ?? [])[activeTabIdx] && (
                 <ChartCard
-                  chart={summary.charts[activeTabIdx]}
+                  chart={(summary.charts ?? [])[activeTabIdx]}
                   indexFallback={activeTabIdx}
                 />
               )}
@@ -301,7 +303,7 @@ export default function ResultsBody({ summary, nodeResults }: Props) {
       )}
 
       {!summary.triggered
-        && summary.charts.length === 0
+        && (summary.charts ?? []).length === 0
         && (summary.data_views ?? []).length === 0 && (
         <div
           style={{
