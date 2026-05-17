@@ -9,6 +9,7 @@ import com.aiops.api.domain.skill.SkillDocumentEntity;
 import com.aiops.api.domain.skill.SkillDocumentRepository;
 import com.aiops.api.domain.skill.SkillRunEntity;
 import com.aiops.api.domain.skill.SkillRunRepository;
+import com.aiops.api.scheduler.SchedulerHttpClient;
 import com.aiops.api.sidecar.PythonSidecarClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -65,6 +66,7 @@ class SkillRunnerServiceTest {
     @Mock PythonSidecarClient sidecar;
     @Mock AlarmRepository alarmRepo;
     @Mock ExecutionLogRepository execLogRepo;
+    @Mock SchedulerHttpClient scheduler;
 
     private ObjectMapper mapper;
     private SkillRunnerService service;
@@ -73,12 +75,15 @@ class SkillRunnerServiceTest {
     void setup() {
         mapper = new ObjectMapper();
         service = new SkillRunnerService(skillRepo, runRepo, pipelineRepo,
-                sidecar, mapper, alarmRepo, execLogRepo);
+                sidecar, mapper, alarmRepo, execLogRepo, scheduler);
         // v30.15: execLogRepo.save returns entity with id assigned; default
         // for tests so existing emit tests still pass without per-test setup.
         when(execLogRepo.save(any(ExecutionLogEntity.class))).thenAnswer(inv -> {
             ExecutionLogEntity e = inv.getArgument(0); e.setId(7777L); return e;
         });
+        // v30.16: scheduler.dispatchAlarm is fire-and-forget (void) — Mockito
+        // default no-op return is fine; @LENIENT strictness avoids unused-stub
+        // failures when guard paths skip the dispatch.
     }
 
     // ────────────────────────── parseEvidenceTimestamp ──────────────────────────
@@ -1026,6 +1031,72 @@ class SkillRunnerServiceTest {
             JsonNode schema = mapper.readTree(logCap.getValue().getLlmReadableData())
                     .get("_alarm_output_schema").get(0);
             assertThat(schema.get("columns").size()).isLessThanOrEqualTo(8);
+        }
+    }
+
+    // ────────────────────────── v30.16 auto_check dispatch ──────────────────────────
+
+    @Nested @DisplayName("v30.16 auto_check dispatch")
+    class AutoCheckDispatch {
+
+        @Test
+        void emitTriggersDispatchAlarm() {
+            when(alarmRepo.existsActiveBySkillAndEquipmentSince(
+                    anyLong(), anyString(), any())).thenReturn(false);
+            when(alarmRepo.save(any(AlarmEntity.class))).thenAnswer(inv -> {
+                AlarmEntity a = inv.getArgument(0); a.setId(5555L); return a;
+            });
+
+            service.emitAlarmIfTriggered(
+                    patrolSkill(), run(false),
+                    Map.of("tool_id", "EQP-02"),
+                    confirmWithRow("L", "S", "2026-05-17T00:00:00"),
+                    List.of(stepPass("s1")), false);
+
+            verify(scheduler, times(1)).dispatchAlarm(5555L);
+        }
+
+        @Test
+        void dispatchFailureDoesNotPreventAlarmReturn() {
+            when(alarmRepo.existsActiveBySkillAndEquipmentSince(
+                    anyLong(), anyString(), any())).thenReturn(false);
+            when(alarmRepo.save(any(AlarmEntity.class))).thenAnswer(inv -> {
+                AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
+            });
+            org.mockito.Mockito.doThrow(new RuntimeException("scheduler down"))
+                    .when(scheduler).dispatchAlarm(any());
+
+            AlarmEntity r = service.emitAlarmIfTriggered(
+                    patrolSkill(), run(false),
+                    Map.of("tool_id", "EQP-02"),
+                    confirmWithRow("L", "S", "2026-05-17T00:00:00"),
+                    List.of(stepPass("s1")), false);
+
+            // emit still returns the alarm, only dispatch swallowed the throw
+            assertThat(r).isNotNull();
+            assertThat(r.getId()).isEqualTo(1L);
+        }
+
+        @Test
+        void noDispatchWhenGuardRejects_isTest() {
+            service.emitAlarmIfTriggered(
+                    patrolSkill(), run(true),  // is_test
+                    Map.of("tool_id", "EQP-02"),
+                    confirmWithRow("L", "S", "2026-05-17T00:00:00"),
+                    List.of(stepPass("s1")), false);
+            verify(scheduler, never()).dispatchAlarm(any());
+        }
+
+        @Test
+        void noDispatchWhenGuardRejects_dedup() {
+            when(alarmRepo.existsActiveBySkillAndEquipmentSince(
+                    anyLong(), anyString(), any())).thenReturn(true);
+            service.emitAlarmIfTriggered(
+                    patrolSkill(), run(false),
+                    Map.of("tool_id", "EQP-02"),
+                    confirmWithRow("L", "S", "2026-05-17T00:00:00"),
+                    List.of(stepPass("s1")), false);
+            verify(scheduler, never()).dispatchAlarm(any());
         }
     }
 

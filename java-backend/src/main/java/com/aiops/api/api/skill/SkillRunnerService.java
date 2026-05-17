@@ -11,6 +11,7 @@ import com.aiops.api.domain.skill.SkillDocumentEntity;
 import com.aiops.api.domain.skill.SkillDocumentRepository;
 import com.aiops.api.domain.skill.SkillRunEntity;
 import com.aiops.api.domain.skill.SkillRunRepository;
+import com.aiops.api.scheduler.SchedulerHttpClient;
 import com.aiops.api.sidecar.PythonSidecarClient;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -62,6 +63,7 @@ public class SkillRunnerService {
     private final ObjectMapper mapper;
     private final AlarmRepository alarmRepo;
     private final ExecutionLogRepository execLogRepo;
+    private final SchedulerHttpClient scheduler;
 
     public SkillRunnerService(SkillDocumentRepository skillRepo,
                               SkillRunRepository runRepo,
@@ -69,7 +71,8 @@ public class SkillRunnerService {
                               PythonSidecarClient sidecar,
                               ObjectMapper mapper,
                               AlarmRepository alarmRepo,
-                              ExecutionLogRepository execLogRepo) {
+                              ExecutionLogRepository execLogRepo,
+                              SchedulerHttpClient scheduler) {
         this.skillRepo = skillRepo;
         this.runRepo = runRepo;
         this.pipelineRepo = pipelineRepo;
@@ -77,6 +80,7 @@ public class SkillRunnerService {
         this.mapper = mapper;
         this.alarmRepo = alarmRepo;
         this.execLogRepo = execLogRepo;
+        this.scheduler = scheduler;
     }
 
     /** v30.13 — emit-alarm guard: skip non-patrol stages + 1-hour dedup window. */
@@ -350,6 +354,21 @@ public class SkillRunnerService {
         lastEmitAlarmId = a.getId();
         log.info("skill {} run {}: emitted alarm id={} severity={} equipment={}",
                 skill.getSlug(), run.getId(), a.getId(), severity, equipmentId);
+
+        // v30.16 (2026-05-17) — fan out to auto_check pipelines (same path
+        // as InternalAlarmController.create). Scheduler walks
+        // pipeline_auto_check_triggers by trigger_event, runs each matched
+        // auto_check pipeline, writes pb_pipeline_runs with source_alarm_id.
+        // AlarmEnrichmentService picks those runs up automatically and
+        // surfaces them as autoCheckRuns + diagnostic data_views in the
+        // Alarm Detail page. Fail-open: dispatch failure logs but doesn't
+        // break alarm emit.
+        try {
+            scheduler.dispatchAlarm(a.getId());
+        } catch (Exception ex) {
+            log.warn("skill {} run {}: dispatchAlarm(alarm={}) failed: {}",
+                    skill.getSlug(), run.getId(), a.getId(), ex.toString());
+        }
         return a;
     }
 
