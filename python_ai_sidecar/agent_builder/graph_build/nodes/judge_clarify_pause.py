@@ -170,6 +170,7 @@ async def judge_clarify_pause_node(state: BuildGraphState) -> dict[str, Any]:
     base_update["v30_last_mutated_logical_id"] = None
     base_update["v30_last_preview"] = None
     base_update["v30_last_judge_reject_reason"] = None
+    base_update["v30_last_verifier_reject"] = None
     base_update["status"] = (
         "phase_in_progress" if new_idx < len(phases) else "finished"
     )

@@ -713,6 +713,8 @@ def _blocks() -> list[dict[str, Any]]:
                     "group_by":    {"type": "string", "x-column-source": "input.data", "title": "Group by (選填)"},
                 },
             },
+            # v30.17l: declare covers=['verdict'] — output is triggered:bool (Logic Node verdict)
+            "produces": {"covers": ['verdict'], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "app.services.pipeline_builder.blocks.consecutive_rule:ConsecutiveRuleBlockExecutor"},
         },
         {
@@ -1248,6 +1250,8 @@ def _blocks() -> list[dict[str, Any]]:
                     "sort_by":  {"type": "string", "title": "Sort by（選填，預設 eventTime）", "x-column-source": "input.data"},
                 },
             },
+            # v30.17l: declare covers=['verdict'] — output is triggered:bool (Logic Node verdict)
+            "produces": {"covers": ['verdict'], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "app.services.pipeline_builder.blocks.weco_rules:WecoRulesBlockExecutor"},
         },
         {
@@ -1577,6 +1581,12 @@ def _blocks() -> list[dict[str, Any]]:
                     "group_by":     {"type": "string", "title": "Group by (選填)", "x-column-source": "input.data"},
                 },
             },
+            # v30.17l (2026-05-18) — declare covers explicitly. block_cpk
+            # produces 1-row-per-group stats (n/mu/sigma/cpk/cp/cpu/cpl/etc);
+            # semantically this is scalar (Cpk single number) AND verdict-capable
+            # (Cpk >= 1.33 = pass). Without this, _infer fallback labels it
+            # 'transform' → scalar/verdict phases reject it.
+            "produces": {"covers": ["scalar", "verdict"], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "app.services.pipeline_builder.blocks.cpk:CpkBlockExecutor"},
         },
         {
@@ -1633,6 +1643,8 @@ def _blocks() -> list[dict[str, Any]]:
                 {"port": "evidence", "type": "dataframe"},
             ],
             "param_schema": {"type": "object", "properties": {}},
+            # v30.17l: declare covers=['verdict'] — output is triggered:bool (Logic Node verdict)
+            "produces": {"covers": ['verdict'], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "app.services.pipeline_builder.blocks.any_trigger:AnyTriggerBlockExecutor"},
         },
         {
@@ -1737,6 +1749,8 @@ def _blocks() -> list[dict[str, Any]]:
                     "alpha":         {"type": "number", "minimum": 0.001, "maximum": 0.5, "default": 0.05},
                 },
             },
+            # v30.17l: declare covers=['verdict', 'scalar'] — output is triggered:bool (Logic Node verdict)
+            "produces": {"covers": ['verdict', 'scalar'], "outcome_extractors": []},
             "implementation": {"type": "python", "ref": "app.services.pipeline_builder.blocks.hypothesis_test:HypothesisTestBlockExecutor"},
         },
         {

@@ -453,6 +453,10 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
         "v30_last_preview": None,
         # Clear judge reject reason now that phase advanced cleanly
         "v30_last_judge_reject_reason": None,
+        # v30.17l hotfix: also clear verifier reject info so next phase
+        # doesn't see stale reject from a previous phase (was causing
+        # p6 prompt to show p3's reject info → LLM confused).
+        "v30_last_verifier_reject": None,
     }
 
     # Fast-forward report when >= 2 phases at once — user-visible card
