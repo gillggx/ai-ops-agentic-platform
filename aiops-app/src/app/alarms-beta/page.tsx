@@ -5,7 +5,8 @@
  * Downloads/alarm center via static iframe.
  *
  * Source: public/alarm-center-beta/  (entire prototype copied as-is,
- * Alarm Center.html renamed to index.html for clean URL).
+ * Machine Center.html renamed to index.html for clean URL — this is
+ * the "Alarm Autopilot · Machines" view the user wants for demo).
  *
  * The prototype is self-contained:
  *  - CDN React 18 + Babel standalone (runtime JSX transpile)

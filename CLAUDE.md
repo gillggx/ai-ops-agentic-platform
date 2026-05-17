@@ -2,6 +2,22 @@
 
 ## Core Principles
 
+### 0. 禁止把 case-specific rule 塞進 LLM prompt（最高優先）
+
+**症狀**：trace 顯示某 case 失敗 → 直接在 prompt 加「禁列 mean/std/Q1」「box_plot 內建 stats」「『偵測』+ chart 不該拆 scalar」這種規則。
+
+**問題**：
+- 每個 fix 只蓋一個 case；換語言（中文 → 英文）、換 keyword（「中位數」「median」）、換組合（「偵測」→「找出」）就 bypass
+- prompt 變一份不斷膨脹的 case 清單，無人維護、互相打架
+- 違反 [feedback_flow_in_graph_not_prompt.md](memory)：flow control 寫 graph node，不寫 prompt
+
+**正確做法**：trace 失敗 → 問**根因原則**是什麼，不是「再加一條 rule」。可選擇：
+1. 把 case 抽象成**一句原則**寫進 prompt（例：「value_desc 用業務語意，不寫結構規格」），不列舉具體案例
+2. 移到 graph node 做 deterministic 檢查 / 後處理（例 `_maybe_inject_chart_phase`）
+3. 改 schema / state design（例 block.meta 加 `self_contained` flag）
+
+**簽收檢核**：每次想在 prompt 加規則前，自問「我這條規則會不會 6 個月後又被一個新 case 變形繞過？」如果是，請改架構。
+
 ### 1. MCP / Skill 的 Description 是唯一的文件來源
 
 **LLM prompt 禁止 hardcode MCP 的使用說明、參數範例、回傳格式。**
