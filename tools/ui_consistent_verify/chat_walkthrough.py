@@ -174,17 +174,21 @@ def main():
     # Run 1
     consume(_sse_lines(r), "round1")
 
-    # Auto-confirm if intent card requested
+    # Auto-confirm if intent card requested.
+    # `design_intent_confirm` (from confirm_pipeline_intent tool) expects a
+    # NEW /agent/chat with [intent_confirmed:CARD] prefix — NOT
+    # /chat/intent-respond (that's for build_pipeline_live clarifier).
     if pending_card and chat_session_id:
-        print(f"\n=== STEP 2: POST /chat/intent-respond (auto-confirm card {pending_card}) ===")
-        body2 = {"chatSessionId": chat_session_id,
-                  "confirmations": {pending_card: {"action": "ok"}}}
-        r2 = requests.post(f"{args.sidecar}/internal/agent/chat/intent-respond",
-                           json=body2, headers=hdr, stream=True, timeout=900)
+        confirm_msg = f"[intent_confirmed:{pending_card}] {args.message}"
+        print(f"\n=== STEP 2: POST /agent/chat with [intent_confirmed:{pending_card}] prefix ===")
+        body2 = {"message": confirm_msg, "session_id": chat_session_id,
+                  "mode": args.mode, "client_context": {}}
+        r2 = requests.post(f"{args.sidecar}/internal/agent/chat", json=body2,
+                           headers=hdr, stream=True, timeout=900)
         if r2.status_code == 200:
             consume(_sse_lines(r2), "round2")
         else:
-            print(f"    HTTP {r2.status_code}")
+            print(f"    HTTP {r2.status_code} {r2.text[:200]}")
 
     print(f"\n=== SUMMARY ===")
     print(f"    final build status: {last_status or '(no done event)'}")
