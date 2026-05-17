@@ -223,7 +223,8 @@ public class SkillRunnerService {
      *  triggered step). All exceptions caught by caller — alarm-emit must
      *  not poison the main skill-run path.
      */
-    private AlarmEntity emitAlarmIfTriggered(SkillDocumentEntity skill,
+    // package-private for unit-test reach (v30.13b)
+    AlarmEntity emitAlarmIfTriggered(SkillDocumentEntity skill,
                                               SkillRunEntity run,
                                               Map<String, Object> triggerPayload,
                                               Map<String, Object> confirmResult,
@@ -329,8 +330,8 @@ public class SkillRunnerService {
      *   2026-05-17T00:21:13.505000+00:00  (ISO with offset)
      *   2026-05-17T00:21:13.505000        (ISO no offset → assume UTC)
      *   2026-05-17T00:21:13               (ISO no fraction)
-     *  Returns null if unparseable. */
-    private static OffsetDateTime parseEvidenceTimestamp(String raw) {
+     *  Returns null if unparseable. package-private for unit tests. */
+    static OffsetDateTime parseEvidenceTimestamp(String raw) {
         if (raw == null || raw.isBlank() || "null".equals(raw)) return null;
         try { return OffsetDateTime.parse(raw); } catch (Exception ignored) {}
         try {
@@ -340,9 +341,10 @@ public class SkillRunnerService {
         return null;
     }
 
-    /** Read confirm result's first data_view row, if any. Tolerant of shape. */
+    /** Read confirm result's first data_view row, if any. Tolerant of shape.
+     *  package-private for unit tests. */
     @SuppressWarnings("unchecked")
-    private Map<String, Object> pickFirstEvidenceRow(Map<String, Object> confirmResult) {
+    Map<String, Object> pickFirstEvidenceRow(Map<String, Object> confirmResult) {
         if (confirmResult == null) return null;
         Object dvs = confirmResult.get("data_views");
         if (!(dvs instanceof List<?> dvList) || dvList.isEmpty()) return null;
@@ -354,7 +356,8 @@ public class SkillRunnerService {
         return row0 instanceof Map ? (Map<String, Object>) row0 : null;
     }
 
-    private String deriveTriggerEvent(Map<String, Object> triggerConfig) {
+    // package-private for unit tests
+    String deriveTriggerEvent(Map<String, Object> triggerConfig) {
         if (triggerConfig == null || triggerConfig.isEmpty()) return ALARM_TRIGGER_EVENT_PATROL;
         Object type = triggerConfig.get("type");
         if ("event".equals(type)) {
