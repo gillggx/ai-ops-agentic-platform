@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<title>AIOps Agent — Module Relationships (v30.14 · 2026-05-17)</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #f7fafc;
+    --card: #ffffff;
+    --border: #e2e8f0;
+    --text: #1a202c;
+    --muted: #718096;
+    --accent: #5a67d8;
+    --warning: #d69e2e;
+    --good: #38a169;
+    --bad: #e53e3e;
+  }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Inter Tight", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+  }
+  .container { max-width: 1280px; margin: 0 auto; padding: 32px 24px 80px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  .badge {
+    display: inline-block; padding: 2px 10px; border-radius: 4px;
+    background: #ebf8ff; color: #2c5282; font-size: 11px; font-weight: 600;
+    letter-spacing: 0.3px; margin-bottom: 12px;
+  }
+  .lead { color: var(--muted); margin-bottom: 24px; font-size: 14px; }
+  .toc {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 16px; margin-bottom: 24px; font-size: 13px;
+  }
+  .toc a { color: var(--accent); text-decoration: none; margin-right: 16px; }
+  h2 {
+    font-size: 17px; margin: 32px 0 12px; padding-bottom: 6px;
+    border-bottom: 2px solid var(--border);
+  }
+  h3 { font-size: 14px; margin: 18px 0 8px; color: var(--text); }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 20px; margin-bottom: 16px;
+  }
+  .mermaid-host { padding: 8px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { font-weight: 600; color: var(--muted); background: #fafafa; }
+  code { background: #edf2f7; padding: 2px 5px; border-radius: 3px; font-size: 12px; font-family: "JetBrains Mono", monospace; }
+  pre { background: #2d3748; color: #e2e8f0; padding: 12px 16px; border-radius: 6px; font-size: 12px; overflow-x: auto; }
+  .note {
+    background: #fffaf0; border-left: 4px solid var(--warning); padding: 10px 14px;
+    margin: 12px 0; border-radius: 4px; font-size: 13px;
+  }
+  .note .label { font-weight: 700; color: var(--warning); margin-right: 6px; }
+  .good { color: var(--good); font-weight: 600; }
+  .bad { color: var(--bad); font-weight: 600; }
+  .legend {
+    font-size: 12px; color: var(--muted); margin-top: 6px;
+    display: flex; gap: 16px; flex-wrap: wrap;
+  }
+  .legend span {
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: middle; }
+  .meta { color: var(--muted); font-size: 12px; margin-top: 24px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <span class="badge">v30.14 · 2026-05-17</span>
+  <h1>AIOps Agent — Module Relationships</h1>
+  <div class="lead">
+    三個 user-facing surface 怎麼進入後端，pipeline 從哪裡產生、從哪裡執行，
+    跟過去幾天 v30.10 ~ v30.14 改動分別碰到哪些 module。
+    這份是給未來 onboarding / debugging 的速查圖。
+  </div>
+
+  <div class="toc">
+    <strong style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;">目錄</strong><br/>
+    <a href="#surfaces">1. 三個 UI surfaces</a>
+    <a href="#packages">2. Package diagram</a>
+    <a href="#sequences">3. 三條 sequence flow</a>
+    <a href="#v30v27">4. v30 vs v27 fork</a>
+    <a href="#recent">5. 近期改動落點</a>
+    <a href="#runtime">6. Runtime shared layer</a>
+  </div>
+
+  <h2 id="surfaces">1. 三個 UI surfaces — 進到後端的 3 個入口</h2>
+  <table>
+    <thead><tr><th>Surface</th><th>頁面 / 路徑</th><th>後端 endpoint</th><th>主要 use case</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>① Chat panel</strong></td>
+        <td>左下角 chat (任何頁都有)</td>
+        <td><code>POST /api/agent/chat</code></td>
+        <td>聊天問問題 / 順便建 pipeline</td>
+      </tr>
+      <tr>
+        <td><strong>② Skill Library</strong></td>
+        <td><code>/skills</code> + <code>/skills/[slug]/edit</code></td>
+        <td>
+          Run: <code>POST /api/v1/skill-documents/{slug}/run</code><br/>
+          Edit: <code>POST /api/v1/agent/build</code> (inside edit page)
+        </td>
+        <td>跑保存的 skill / 用 Glass Box 編 skill 的 pipeline</td>
+      </tr>
+      <tr>
+        <td><strong>③ Builder Glass Box</strong></td>
+        <td>edit page 內右側 AI Agent panel</td>
+        <td><code>POST /api/v1/agent/build</code></td>
+        <td>用自然語言指示生成 / 修改 pipeline</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2 id="packages">2. Package diagram</h2>
+  <div class="card mermaid-host">
+  <pre class="mermaid">
+graph TB
+    subgraph FE["Frontend · aiops-app :8000 (Next.js)"]
+      ChatUI["Chat panel"]
+      SkillUI["Skill Library /skills"]
+      EditUI["Skill Edit /skills/[slug]/edit<br/>(canvas + AI Agent panel)"]
+    end
+
+    subgraph JAVA["Java :8002 (Spring Boot)"]
+      JC1["/api/agent/chat<br/>(proxy → sidecar)"]
+      JC2["/api/v1/skill-documents/{slug}/run"]
+      JC3["/api/v1/agent/build<br/>(proxy → sidecar)"]
+      SRS["SkillRunnerService.java<br/>(per-step pipeline_execute<br/>+ v30.13 emit alarm)"]
+      ALR["AlarmRepository<br/>(alarms table)"]
+    end
+
+    subgraph SIDECAR["Python sidecar :8050 (FastAPI + LangGraph)"]
+      AOV2["agent_orchestrator_v2/<br/>(chat LangGraph)"]
+      AB["agent_builder/graph_build/<br/>(builder LangGraph)"]
+      BPL["build_pipeline_live tool<br/>(inside chat tool_execute)"]
+      SGB["stream_graph_build()<br/><b>共用 entry</b>"]
+      V30["v30 ReAct path<br/>(goal_plan + agentic_phase_loop)"]
+      V27["v27 macro_plan path<br/>(macro_plan + compile_chunk × N)"]
+      EXEC["/internal/pipeline/execute<br/>(pure runtime, no LLM)"]
+      BLOCKS["55 BUILTIN_EXECUTORS<br/>(block_process_history, block_find,<br/>block_filter, block_step_check, ...)"]
+    end
+
+    subgraph SIM["Ontology Simulator :8012"]
+      SIMI["/api/v1/process/info"]
+    end
+
+    ChatUI --> JC1 --> AOV2
+    AOV2 --> BPL
+    BPL --> SGB
+
+    SkillUI --> JC2 --> SRS
+    SRS --> EXEC
+    SRS --> ALR
+
+    EditUI --> JC3 --> AB
+    AB --> SGB
+
+    SGB -- "v30_mode=true<br/>(default since v30.14)" --> V30
+    SGB -- "v30_mode=false<br/>(env opt-out only)" --> V27
+    V30 --> EXEC
+    V27 --> EXEC
+    EXEC --> BLOCKS --> SIMI
+
+    classDef fe fill:#fff5f5,stroke:#fc8181;
+    classDef java fill:#fffaf0,stroke:#dd6b20;
+    classDef py fill:#ebf8ff,stroke:#3182ce;
+    classDef sim fill:#f0fff4,stroke:#38a169;
+    classDef hot fill:#fefcbf,stroke:#d69e2e,stroke-width:2px;
+    class ChatUI,SkillUI,EditUI fe;
+    class JC1,JC2,JC3,SRS,ALR java;
+    class AOV2,AB,BPL,SGB,V30,V27,EXEC,BLOCKS py;
+    class SIMI sim;
+    class V30 hot;
+  </pre>
+  </div>
+  <div class="legend">
+    <span><span class="swatch" style="background:#fff5f5;border:1px solid #fc8181;"></span>Frontend</span>
+    <span><span class="swatch" style="background:#fffaf0;border:1px solid #dd6b20;"></span>Java :8002</span>
+    <span><span class="swatch" style="background:#ebf8ff;border:1px solid #3182ce;"></span>Python sidecar :8050</span>
+    <span><span class="swatch" style="background:#f0fff4;border:1px solid #38a169;"></span>OntologySim :8012</span>
+    <span><span class="swatch" style="background:#fefcbf;border:1px solid #d69e2e;"></span>v30 路徑 (default)</span>
+  </div>
+
+  <h2 id="sequences">3. 三條 sequence flow</h2>
+
+  <h3>① Chat — 「請幫我建一個 pipeline」</h3>
+  <div class="card mermaid-host">
+  <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant U as User (Chat panel)
+    participant J as Java /agent/chat
+    participant O as agent_orchestrator_v2
+    participant B as build_pipeline_live tool
+    participant G as stream_graph_build (v30)
+    U->>J: POST {message}
+    J->>O: forward
+    O->>O: intent_classifier + intent_completeness
+    Note right of O: 若 incomplete<br/>→ emit bullets,<br/>等 /intent-respond
+    O->>O: llm_call (pick tool)
+    O->>B: build_pipeline_live(prompt)
+    B->>G: stream_graph_build(v30_mode=True default)
+    G-->>O: goal_plan_proposed / phase_action / done
+    O-->>J: SSE events
+    J-->>U: render in chat
+  </pre>
+  </div>
+
+  <h3>② Skill Library — 「跑這個 skill」</h3>
+  <div class="card mermaid-host">
+  <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant U as User (Skill Library)
+    participant J as Java SkillRunnerService
+    participant S as sidecar /pipeline/execute
+    participant DB as alarms table
+    U->>J: POST /skill-documents/{slug}/run
+    J->>J: parse skill.steps
+    J->>S: confirm step (pipeline_execute)
+    S-->>J: {status: pass/fail, note}
+    alt confirm pass
+        loop each step
+            J->>S: step pipeline_execute
+            S-->>J: {status, data_views}
+        end
+        Note over J: v30.13 NEW<br/>emitAlarmIfTriggered()<br/>guards: !is_test,<br/>stage=patrol,<br/>any step pass,<br/>1h dedup
+        J->>DB: insert alarm row
+        J-->>U: SSE alarm_created + done
+    else confirm fail
+        J-->>U: SSE done (skipped_by_confirm)
+    end
+  </pre>
+  </div>
+
+  <h3>③ Builder Glass Box — 「建一個 skill 的 pipeline」</h3>
+  <div class="card mermaid-host">
+  <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant U as User (Skill edit page)
+    participant J as Java /agent/build (proxy)
+    participant R as routers/agent.py
+    participant G as stream_graph_build (v30 default since v30.14)
+    participant N as goal_plan / agentic_phase_loop
+    participant V as phase_verifier (B2 LLM-judge)
+    U->>J: POST {instruction, skill_step_mode=true}
+    J->>R: forward
+    R->>G: stream_graph_build(v30_mode=True default)
+    G->>N: goal_plan_node
+    N-->>U: goal_plan_proposed (interrupt)
+    U->>R: POST /agent/build/plan-confirm
+    loop each phase
+        N->>N: ReAct round<br/>(inspect_doc / add_node / connect / set_param)
+        Note right of N: v30.12<br/>matched-only CONNECT OPTIONS<br/>shows compatible source ports only
+        N->>V: phase_verifier check
+        V->>V: rule (covers+rows) + B2 LLM-judge (semantic)
+        V-->>N: pass → advance | fail → revise
+    end
+    N->>R: finalize_node (dry-run)
+    R-->>U: done
+  </pre>
+  </div>
+
+  <h2 id="v30v27">4. v30 vs v27 fork (2026-05-17 起 v30 為預設)</h2>
+  <table>
+    <thead>
+      <tr><th>方面</th><th>v27 (legacy macro_plan)</th><th>v30 (current default ReAct)</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Planning</td>
+        <td>macro_plan_node 一次性決定 ops list (LLM 沒看到資料就要列 block)</td>
+        <td>goal_plan_node 列 phases (intent-only)，每 phase 邊看資料邊決定 block</td>
+      </tr>
+      <tr>
+        <td>Build loop</td>
+        <td>compile_chunk × N (per-op dispatch + autofix)</td>
+        <td>agentic_phase_loop (per-phase ReAct, max 8 rounds)</td>
+      </tr>
+      <tr>
+        <td>Verify</td>
+        <td>finalize dry-run + inspect_execution + reflect_plan</td>
+        <td>phase_verifier (rule + B2 LLM-judge semantic)</td>
+      </tr>
+      <tr>
+        <td>Connect 智慧</td>
+        <td>無，LLM 自己猜 port (常錯)</td>
+        <td>v30.12 matched-only CONNECT OPTIONS view (type-compatible only)</td>
+      </tr>
+      <tr>
+        <td>Catalog</td>
+        <td colspan="2">兩邊共用 <code>seed.py</code> + 55 blocks，v30.11 加的 block_find 兩邊都看得到</td>
+      </tr>
+      <tr>
+        <td>觸發方式</td>
+        <td>之前 default</td>
+        <td>v30.14 (2026-05-17) <strong>已切為 default</strong>，emergency revert: <code>AGENT_BUILD_V30=0</code> env</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2 id="recent">5. 近期改動落在哪 (2026-05-16 ~ 17)</h2>
+  <table>
+    <thead><tr><th>版本</th><th>動的 module</th><th>影響 surface</th><th>性質</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>v30.10</strong></td>
+        <td><code>graph_build/nodes/phase_verifier.py</code><br/>(B2 LLM-judge)</td>
+        <td>v30 path only → 自 v30.14 起，所有 3 surface</td>
+        <td>verifier 增強</td>
+      </tr>
+      <tr>
+        <td><strong>v30.11</strong></td>
+        <td><code>pipeline_builder/seed.py</code> + <code>blocks/find.py</code><br/>+ Flyway V47/V48</td>
+        <td>catalog 共用 → 3 個 surface 都看得到 block_find / filter examples</td>
+        <td>新 block + tightening</td>
+      </tr>
+      <tr>
+        <td><strong>v30.12</strong></td>
+        <td><code>graph_build/nodes/agentic_phase_loop.py</code><br/>matched-only CONNECT OPTIONS</td>
+        <td>v30 path only → 自 v30.14 起，所有 3 surface</td>
+        <td>LLM context 注入</td>
+      </tr>
+      <tr>
+        <td><strong>v30.13 / 13b</strong></td>
+        <td><code>SkillRunnerService.java</code><br/>emitAlarmIfTriggered + counters</td>
+        <td><strong>只在 ② Skill Library Run path</strong> (RUN，不是 generate)</td>
+        <td>新功能 + System Monitor 顯示</td>
+      </tr>
+      <tr>
+        <td><strong>v30.14</strong></td>
+        <td><code>runner.py</code> + <code>routers/agent.py</code><br/>v30_mode default → True</td>
+        <td>3 surface 統一走 v30</td>
+        <td>default 切換</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <span class="label">舊測試 vs 新行為</span>
+    v30.10 / 11 / 12 之前 (2026-05-16) 在 v30 path 用 curl 腳本驗 (<code>/tmp/eqp08_run.py</code> 直接打
+    <code>/agent/build</code> 帶 <code>v30_mode=true</code>)，所以那段成功只證 v30 path。
+    Chat 跟 Builder GUI 預設都還在 v27，所以 user 透過 GUI 看到的還是舊 v27 行為。
+    v30.14 之後三個 surface 統一切到 v30。
+  </div>
+
+  <h2 id="runtime">6. Runtime shared layer (pipeline 真的跑的時候)</h2>
+  <div class="card mermaid-host">
+  <pre class="mermaid">
+graph LR
+    A["③ generated pipeline<br/>(builder / chat)"] --> E["/internal/pipeline/execute<br/>(sidecar)"]
+    B["② skill run<br/>(SkillRunnerService per step)"] --> E
+    C["agent v30 inspect/preview<br/>(during build)"] --> E
+    E --> R["PipelineExecutor<br/>(SeedlessBlockRegistry)"]
+    R --> BX["55 BUILTIN_EXECUTORS"]
+    BX --> SIM["OntologySim<br/>/api/v1/process/info"]
+    BX --> J["Java internal endpoints<br/>(mcp_call / mcp_foreach)"]
+    classDef sidecar fill:#ebf8ff,stroke:#3182ce;
+    classDef src fill:#f0fff4,stroke:#38a169;
+    class E,R,BX sidecar;
+    class SIM,J src;
+  </pre>
+  </div>
+  <p style="font-size:13px;color:var(--muted);margin-top:8px;">
+    一旦 pipeline_json 完成（不管是 chat 還是 builder 產的，還是 skill 保存的），
+    跑的時候三條路最終都會 hit <code>PipelineExecutor + BUILTIN_EXECUTORS</code>。
+    所以 block 行為 / runtime schema / 資料源都是共用一套。
+  </p>
+
+  <div class="note">
+    <span class="label">Boot invariant</span>
+    Sidecar 啟動時 <code>_boot_invariants.check_block_consistency</code> 驗 4 個數字:
+    BUILTIN_EXECUTORS / SIDECAR_NATIVE_BLOCKS / seed.py / DB pb_blocks 必須一致。
+    目前: <code>55 / 55 / 55 / 55</code>。
+  </div>
+
+  <div class="meta">
+    Generated 2026-05-17 by v30.14 commit. Sources:
+    <code>python_ai_sidecar/agent_orchestrator_v2/</code>,
+    <code>python_ai_sidecar/agent_builder/graph_build/</code>,
+    <code>python_ai_sidecar/routers/agent.py</code>,
+    <code>java-backend/src/main/java/com/aiops/api/api/skill/SkillRunnerService.java</code>.
+    Update alongside <code>docs/agent_workflow.html</code> when graph routing changes.
+  </div>
+
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'neutral',
+    flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'basis' },
+    sequence: { useMaxWidth: true },
+    securityLevel: 'loose',
+  });
+</script>
+</body>
+</html>
