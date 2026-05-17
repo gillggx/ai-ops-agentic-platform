@@ -157,10 +157,28 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
     advanced: list[dict[str, Any]] = []
     judge_reject_reason: str | None = None
     cur = idx
+    # v30.17l (2026-05-18) — track already-seen expected kinds in this FF
+    # chain. Fast-forward is designed for COMPOSITE blocks that legitimately
+    # cover multiple DIFFERENT kinds (e.g. block_spc_panel covers
+    # raw_data+transform+chart). It must NOT be allowed to merge multiple
+    # SAME-kind phases (e.g. 3 chart phases for EWMA/Box/Probability —
+    # those are 3 distinct visual outputs and need 3 separate chart blocks).
+    seen_kinds_in_chain: set[str] = set()
     while cur < len(phases) and len(advanced) < MAX_FAST_FORWARD_CHAIN:
         phase = phases[cur]
         ph_expected = (phase.get("expected") or "").strip()
         if ph_expected not in covers:
+            break
+        # FF guard: if we've already advanced a phase of the SAME kind by
+        # this block in the current chain, stop. The block can only
+        # legitimately satisfy distinct kinds (composite multi-kind), not
+        # multiple same-kind phases.
+        if ph_expected in seen_kinds_in_chain:
+            logger.info(
+                "phase_verifier: FF chain stop — already advanced a %s "
+                "phase by block %s; same-kind stacking not allowed",
+                ph_expected, block_id,
+            )
             break
         # Rule-based quality gate: data-bearing phases must have rows>=1.
         if ph_expected in {"raw_data", "transform", "table"} and (rows is None or rows < 1):
@@ -329,6 +347,9 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
             "llm_extracted": judge.get("extracted") or {},
             "plan_target": phase.get("expected_output") or {},
         })
+        # v30.17l: record this kind so the same block can't merge another
+        # same-kind phase later in the chain.
+        seen_kinds_in_chain.add(ph_expected)
         cur += 1
 
     tracer = get_current_tracer()
