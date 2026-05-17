@@ -131,19 +131,47 @@ def _find_stuck_phase(status: dict[str, str]) -> str | None:
 
 
 def _verifier_verdicts_for(trace: dict, phase_id: str) -> list[dict]:
+    """Join phase_verifier graph_steps with the richer verifier_decisions
+    records (added by record_verifier_decision). The latter has the real
+    comparison.result + would_have_passed_with — graph_steps only has
+    covers/rows/status which can mislead (says 'rows quality gate failed'
+    even when the actual cause was the LLM-judge semantic check)."""
     out = []
+    # Build lookup of verifier_decisions by phase + block (closest match by ts)
+    decisions = [d for d in (trace.get("verifier_decisions") or [])
+                 if d.get("phase_id") == phase_id]
+    used = set()
+
     for step in trace.get("graph_steps") or []:
         if step.get("node") != "phase_verifier":
             continue
         if step.get("phase_id") != phase_id:
             continue
-        out.append({
+        # Find the matching verifier_decision (same block, unused, earliest ts after step)
+        match = None
+        for i, dec in enumerate(decisions):
+            if i in used:
+                continue
+            if dec.get("candidate_block") == step.get("block_id"):
+                match = dec
+                used.add(i)
+                break
+        entry = {
             "expected": step.get("expected"),
             "block_id": step.get("block_id"),
             "covers": step.get("covers"),
             "rows": step.get("rows"),
             "status": step.get("status"),
-        })
+        }
+        if match:
+            comp = match.get("comparison") or {}
+            entry["comparison_result"] = comp.get("result")
+            entry["judge_reject_reason"] = comp.get("judge_reject_reason")
+            entry["would_have_passed_with"] = match.get("would_have_passed_with")
+        # graph_step also carries judge_reject_reason since v30.17g
+        if step.get("judge_reject_reason") and not entry.get("judge_reject_reason"):
+            entry["judge_reject_reason"] = step.get("judge_reject_reason")
+        out.append(entry)
     return out
 
 
@@ -230,13 +258,36 @@ def _render_text(report: dict) -> str:
         for v in verdicts:
             cov = v.get("covers")
             exp = v.get("expected")
-            mismatch = ""
-            if isinstance(cov, list) and exp and exp not in cov:
-                mismatch = f"  → COVERS MISMATCH: '{exp}' not in {cov}"
+            cmp_result = v.get("comparison_result")
+            judge_reason = v.get("judge_reject_reason")
+            rows = v.get("rows")
+            tag = ""
+            # Prefer the v30.17g `comparison_result` field — it's already
+            # disambiguated. Fall back to inference for older traces.
+            if cmp_result == "covers mismatch":
+                tag = f"  → COVERS MISMATCH: '{exp}' not in {cov}"
+            elif cmp_result == "rows quality gate failed":
+                tag = f"  → ROWS GATE: need rows>=1, got {rows}"
+            elif cmp_result == "llm_judge_rejected":
+                reason_short = (judge_reason or "(no reason)")[:80]
+                tag = f"  → LLM-JUDGE REJECTED: {reason_short}"
+            elif cmp_result:
+                tag = f"  → {cmp_result}"
+            else:
+                # Old trace fallback — infer from covers + rows
+                if isinstance(cov, list) and exp and exp not in cov:
+                    tag = f"  → COVERS MISMATCH: '{exp}' not in {cov}"
+                elif rows is None or (isinstance(rows, int) and rows < 1):
+                    tag = f"  → ROWS GATE (inferred): rows={rows}"
+                elif judge_reason:
+                    tag = f"  → LLM-JUDGE REJECTED: {judge_reason[:80]}"
             out.append(
-                f"  block={v.get('block_id'):<28} covers={cov} "
-                f"rows={v.get('rows')} status={v.get('status')}{mismatch}"
+                f"  block={(v.get('block_id') or '?'):<28} covers={cov} "
+                f"rows={rows} status={v.get('status')}{tag}"
             )
+            wp = v.get("would_have_passed_with")
+            if wp:
+                out.append(f"      would_have_passed_with: {wp[:5]}{'…' if len(wp)>5 else ''}")
     out.append("")
 
     out.append(f"─── {stuck} round-by-round ────────────────────────────────────────────────")
@@ -311,7 +362,12 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="verify-build skill runner")
     ap.add_argument("--mode", choices=("chat", "builder", "test"), default="chat")
     ap.add_argument("--message", help="user message (chat/builder mode)")
-    ap.add_argument("--trace", help="trace path (test mode)")
+    ap.add_argument("--trace", help=(
+        "EC2 trace path. In chat/builder mode: skip running the harness "
+        "and re-parse this existing trace (faster + lets us examine a "
+        "specific past run, e.g. the user's own UI session). In test "
+        "mode: trace_replay's --trace argument."
+    ))
     ap.add_argument("--target", help="trace_replay target (test mode)")
     ap.add_argument("--variants", nargs="*", default=["identity"],
                     help="trace_replay variants (test mode)")
@@ -330,25 +386,40 @@ def main() -> int:
                 json.dump({"mode": "test", "trace": args.trace, "stdout": out}, f, indent=2)
         return 0
 
-    if not args.message:
-        print("ERROR: --message required in chat/builder mode", file=sys.stderr)
-        return 2
+    # chat/builder mode — two sub-paths:
+    #   (a) --trace PATH given → fetch + parse existing trace, NO harness run
+    #   (b) --message MSG given → run harness, then fetch newest trace
+    if args.trace:
+        print(f"[verify-build] replaying existing trace {args.trace} …", file=sys.stderr)
+        trace = _fetch_trace(args.trace)
+        # Use the trace's recorded instruction as the message label
+        message = args.message or trace.get("instruction", "")[:200]
+        report = build_report(args.mode, message,
+                              harness_out="", trace_path=args.trace)
+        # Replace fetched trace data into the standard pipeline shape
+        # (build_report already re-reads the trace from --trace path).
+    else:
+        if not args.message:
+            print("ERROR: --message or --trace required in chat/builder mode",
+                  file=sys.stderr)
+            return 2
 
-    print(f"[verify-build] running {args.mode} mode on EC2 …", file=sys.stderr)
-    try:
-        harness_out = _run_harness(args.mode, args.message)
-    except subprocess.TimeoutExpired:
-        print("ERROR: harness timed out (>15min)", file=sys.stderr)
-        return 1
+        print(f"[verify-build] running {args.mode} mode on EC2 …", file=sys.stderr)
+        try:
+            harness_out = _run_harness(args.mode, args.message)
+        except subprocess.TimeoutExpired:
+            print("ERROR: harness timed out (>15min)", file=sys.stderr)
+            return 1
 
-    trace_path = _newest_trace_path()
-    if not trace_path:
-        print("WARN: no trace file found — printing harness stdout only", file=sys.stderr)
-        print(harness_out)
-        return 0
+        trace_path = _newest_trace_path()
+        if not trace_path:
+            print("WARN: no trace file found — printing harness stdout only",
+                  file=sys.stderr)
+            print(harness_out)
+            return 0
+        report = build_report(args.mode, args.message,
+                              harness_out=harness_out, trace_path=trace_path)
 
-    report = build_report(args.mode, args.message,
-                          harness_out=harness_out, trace_path=trace_path)
     print(_render_text(report))
 
     if args.json_out:

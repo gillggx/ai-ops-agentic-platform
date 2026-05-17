@@ -153,6 +153,7 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                 phase_id=cur_phase.get("id"),
                 expected=cur_expected,
                 block_id=block_id, covers=covers, rows=rows,
+                judge_reject_reason=judge_reject_reason,
             )
             # v30.1.1: empathetic-debug — what blocks WOULD have passed?
             # v30.5: use covers_output (consistent with verifier's actual check)
@@ -164,6 +165,23 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                     s_covers = _resolve_covers(s, kind="output")
                     if cur_expected in s_covers:
                         would_pass.append(n)
+                # v30.17g (2026-05-17) — distinguish the three failure modes
+                # so debugging tools (.claude/skills/verify-build) can show
+                # the actual reason instead of always saying "rows gate":
+                #   covers mismatch — block can't produce this kind
+                #   rows quality gate — covers OK but data-bearing phase had 0 rows
+                #   llm_judge_rejected — both rule gates OK but semantic check failed
+                rows_gate_applicable = cur_expected in {"raw_data", "transform", "table"}
+                rows_gate_failed = rows_gate_applicable and (rows is None or rows < 1)
+                if cur_expected not in covers:
+                    result = "covers mismatch"
+                elif rows_gate_failed:
+                    result = "rows quality gate failed"
+                elif judge_reject_reason is not None:
+                    result = "llm_judge_rejected"
+                else:
+                    # Shouldn't reach here — would_pass should be empty, log so we know
+                    result = "unknown (no rule gate hit but verifier rejected)"
                 tracer.record_verifier_decision(
                     phase_id=cur_phase.get("id"),
                     phase_expected=cur_expected,
@@ -172,12 +190,11 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                     comparison={
                         "expected_in_covers": cur_expected in covers,
                         "rows_quality_gate": (
-                            "applicable" if cur_expected in {"raw_data","transform","table"}
-                            else "n/a"
+                            "applicable" if rows_gate_applicable else "n/a"
                         ),
                         "rows": rows,
-                        "result": "covers mismatch" if cur_expected not in covers
-                                  else "rows quality gate failed",
+                        "result": result,
+                        "judge_reject_reason": judge_reject_reason,
                     },
                     verdict="no_match",
                     would_have_passed_with=would_pass,

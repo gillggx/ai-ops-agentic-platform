@@ -52,6 +52,11 @@ CHAT_UI_HANDLED_EVENTS = frozenset({
 
     # v18 intent confirmation
     "pb_intent_confirm",   # 370
+
+    # intent_completeness gate (chat orchestrator_v2) — design_intent_confirm
+    # case added 2026-05-17 (v30.17g) so chat mode no longer silently drops
+    # the structured intent card.
+    "design_intent_confirm",
 })
 
 

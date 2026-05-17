@@ -6,6 +6,11 @@ import { isValidContract } from "aiops-contract";
 import { consumeSSE } from "@/lib/sse";
 import { RuleProposalCard } from "@/components/copilot/RuleProposalCard";
 import { BulletConfirmCard, type IntentBullet } from "@/components/chat/BulletConfirmCard";
+import {
+  DesignIntentCard,
+  type DesignIntentChoice,
+  type DesignIntentData,
+} from "@/components/copilot/DesignIntentCard";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -29,8 +34,13 @@ interface LogEntry {
 
 interface ChatMessage {
   id: number;
-  role: "user" | "agent";
+  role: "user" | "agent" | "design_intent";
   content: string;
+  /** For role === "design_intent" — the structured intent card to render. */
+  designIntent?: DesignIntentData;
+  /** For role === "design_intent" — the user prompt that triggered this card,
+   *  needed to compose the [intent_confirmed:<id>] follow-up message. */
+  designIntentPrompt?: string;
   /** Optional render card embedded in agent message. */
   card?:
     | {
@@ -102,6 +112,9 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
   const sessionIdRef = useRef<string | null>(null);
   const logsEndRef   = useRef<HTMLDivElement>(null);
   const chatEndRef   = useRef<HTMLDivElement>(null);
+  // Track the most recent user-typed prompt so design_intent_confirm cards
+  // can compose the [intent_confirmed:<card_id>] follow-up message.
+  const lastUserPromptRef = useRef<string>("");
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -138,7 +151,10 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
     }
   }, [addLog]);
 
-  const sendMessage = useCallback(async (message: string) => {
+  const sendMessage = useCallback(async (
+    message: string,
+    clientContext?: Record<string, unknown>,
+  ) => {
     if (!message.trim() || loading) return;
 
     setLoading(true);
@@ -150,6 +166,13 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
     setInput("");
     setActiveTab("chat");
 
+    // Capture user prompt for design_intent_confirm follow-up composition.
+    // Don't capture the [intent_confirmed:...] follow-up itself or we'd
+    // overwrite the original prompt that the card relates to.
+    if (!message.startsWith("[intent_confirmed:")) {
+      lastUserPromptRef.current = message;
+    }
+
     // Add user message to chat history
     setChatHistory((prev) => [...prev, { id: nextId(), role: "user", content: message }]);
 
@@ -157,7 +180,11 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
       const res = await fetch("/api/agent/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, session_id: sessionIdRef.current }),
+        body: JSON.stringify({
+          message,
+          session_id: sessionIdRef.current,
+          ...(clientContext ? { client_context: clientContext } : {}),
+        }),
       });
 
       if (!res.ok) {
@@ -366,6 +393,33 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
             break;
           }
 
+          // intent_completeness gate (chat orchestrator_v2) — emits a
+          // structured design intent card when the user prompt is too
+          // ambiguous to build directly. UX matches AIAgentPanel's case
+          // so chat mode and builder mode behave identically.
+          case "design_intent_confirm": {
+            const design: DesignIntentData = {
+              card_id: (ev.card_id as string) ?? `intent-${Date.now()}`,
+              inputs: (ev.inputs as DesignIntentData["inputs"]) ?? [],
+              logic: (ev.logic as string) ?? "",
+              presentation: (ev.presentation as DesignIntentData["presentation"]) ?? "mixed",
+              alternatives: (ev.alternatives as DesignIntentData["alternatives"]) ?? [],
+              clarifications: (ev.clarifications as DesignIntentData["clarifications"]) ?? [],
+              resolved: false,
+            };
+            setChatHistory((prev) => [...prev, {
+              id: nextId(),
+              role: "design_intent",
+              content: "",
+              designIntent: design,
+              designIntentPrompt: lastUserPromptRef.current,
+            }]);
+            addLog(makeLog("🧠",
+              `DESIGN INTENT | card=${design.card_id} (${(design.clarifications ?? []).length} clarifications)`,
+              "hitl"));
+            break;
+          }
+
           // v19: chat clarify pause — model 要 user 先確認 intent bullets.
           case "pb_intent_confirm": {
             const bullets = (ev.bullets as IntentBullet[]) ?? [];
@@ -570,6 +624,47 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
                       Intent {msg.card.resolved === "confirmed" ? "✓ confirmed" : msg.card.resolved === "refused" ? "✗ refused" : "⚠ error"}
                     </div>
                   )}
+                </div>
+              ) : msg.role === "design_intent" && msg.designIntent ? (
+                <div style={{ width: "100%", maxWidth: "95%" }}>
+                  <DesignIntentCard
+                    data={msg.designIntent}
+                    originalPrompt={msg.designIntentPrompt ?? ""}
+                    onPick={(choice: DesignIntentChoice, design: DesignIntentData) => {
+                      setChatHistory((prev) => prev.map((m) =>
+                        m.id === msg.id && m.designIntent
+                          ? { ...m, designIntent: { ...m.designIntent, resolved: true } }
+                          : m,
+                      ));
+                      const original = msg.designIntentPrompt ?? "";
+                      if (choice === "cancel") {
+                        setChatHistory((prev) => [...prev, {
+                          id: nextId(), role: "agent",
+                          content: "已取消這次設計。需要的話請重新描述。",
+                        }]);
+                        return;
+                      }
+                      // confirm — compose [intent_confirmed:<id> sel=...] prefix
+                      // + send via sendMessage with client_context.intent_spec
+                      // (matches AIAgentPanel flow so backend behaviour is identical).
+                      const sel = design.selections ?? {};
+                      const selStr = Object.keys(sel)
+                        .map((k) => `${k}=${sel[k]}`)
+                        .join(" ");
+                      const prefixHead = selStr
+                        ? `[intent_confirmed:${design.card_id} ${selStr}]`
+                        : `[intent_confirmed:${design.card_id}]`;
+                      const followUp = `${prefixHead} ${original}`;
+                      void sendMessage(followUp, {
+                        intent_spec: {
+                          card_id: design.card_id,
+                          inputs: design.inputs,
+                          logic: design.logic,
+                          presentation: design.presentation,
+                        },
+                      });
+                    }}
+                  />
                 </div>
               ) : (
                 <div style={{
