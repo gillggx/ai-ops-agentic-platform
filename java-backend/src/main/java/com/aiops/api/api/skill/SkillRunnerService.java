@@ -20,11 +20,15 @@ import reactor.core.publisher.Sinks;
 import reactor.core.scheduler.Schedulers;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Phase 11-C — SkillRunner.
@@ -73,6 +77,27 @@ public class SkillRunnerService {
     /** v30.13 — emit-alarm guard: skip non-patrol stages + 1-hour dedup window. */
     private static final Duration ALARM_DEDUP_WINDOW = Duration.ofHours(1);
     private static final String ALARM_TRIGGER_EVENT_PATROL = "patrol_check";
+
+    /** v30.13b (2026-05-17) — in-memory counters surfaced via System Monitor.
+     *  Reset on JVM restart (acceptable — service runs as long-lived systemd
+     *  unit; restart cadence is human-driven). For persistent metrics, query
+     *  alarms / skill_runs tables directly. */
+    private final AtomicLong alarmsEmitted = new AtomicLong(0);
+    private final AtomicLong alarmsDedupSuppressed = new AtomicLong(0);
+    private volatile String lastEmitAtIso = null;
+    private volatile String lastEmitSkillSlug = null;
+    private volatile Long lastEmitAlarmId = null;
+
+    /** Snapshot of alarm-emit activity. Consumed by SystemMonitorAliasController. */
+    public Map<String, Object> alarmEmitStats() {
+        Map<String, Object> m = new HashMap<>();
+        m.put("alarms_emitted", alarmsEmitted.get());
+        m.put("alarms_dedup_suppressed", alarmsDedupSuppressed.get());
+        m.put("last_emit_at", lastEmitAtIso);
+        m.put("last_skill", lastEmitSkillSlug);
+        m.put("last_alarm_id", lastEmitAlarmId);
+        return m;
+    }
 
     /** Reactive stream of SSE-shaped events; controller bridges into SseEmitter. */
     public Flux<RunEvent> run(String slug,
@@ -226,6 +251,7 @@ public class SkillRunnerService {
         // Dedup: skip if active alarm exists for (skill, equipment) in last 1h
         OffsetDateTime since = OffsetDateTime.now().minus(ALARM_DEDUP_WINDOW);
         if (alarmRepo.existsActiveBySkillAndEquipmentSince(skill.getId(), equipmentId, since)) {
+            alarmsDedupSuppressed.incrementAndGet();
             log.debug("skill {} run {}: alarm suppressed by dedup (active alarm "
                     + "exists for skill={}+equipment={} within {})",
                     skill.getSlug(), run.getId(), skill.getId(), equipmentId, ALARM_DEDUP_WINDOW);
@@ -233,7 +259,9 @@ public class SkillRunnerService {
         }
 
         // Try to extract evidence context (lot/step/event_time) from confirm
-        // result's first data_view row. Best-effort — fall back to null.
+        // result's first data_view row. Best-effort — fall back to created_at
+        // for event_time so AlarmClusterService (filters by event_time_after)
+        // doesn't silently drop the row.
         String lotId = "";
         String step = null;
         OffsetDateTime eventTime = null;
@@ -244,11 +272,11 @@ public class SkillRunnerService {
             Object stp = evidenceRow.get("step");
             if (stp != null) step = String.valueOf(stp);
             Object et = evidenceRow.getOrDefault("eventTime", evidenceRow.get("event_time"));
-            if (et != null) {
-                try { eventTime = OffsetDateTime.parse(String.valueOf(et)); }
-                catch (Exception ignored) { /* leave null */ }
-            }
+            if (et != null) eventTime = parseEvidenceTimestamp(String.valueOf(et));
         }
+        // FINAL fallback: if no evidence timestamp, use now so AlarmClusterService
+        // (which queries event_time, not created_at) can still find the row.
+        if (eventTime == null) eventTime = OffsetDateTime.now();
 
         // Severity from trigger_config.severity if present; default MEDIUM
         String severity = "MEDIUM";
@@ -288,9 +316,28 @@ public class SkillRunnerService {
         a.setSummary(summary.toString());
         a.setStatus("active");
         a = alarmRepo.save(a);
+        alarmsEmitted.incrementAndGet();
+        lastEmitAtIso = OffsetDateTime.now().toString();
+        lastEmitSkillSlug = skill.getSlug();
+        lastEmitAlarmId = a.getId();
         log.info("skill {} run {}: emitted alarm id={} severity={} equipment={}",
                 skill.getSlug(), run.getId(), a.getId(), severity, equipmentId);
         return a;
+    }
+
+    /** Parse evidence timestamp tolerantly. Accepts:
+     *   2026-05-17T00:21:13.505000+00:00  (ISO with offset)
+     *   2026-05-17T00:21:13.505000        (ISO no offset → assume UTC)
+     *   2026-05-17T00:21:13               (ISO no fraction)
+     *  Returns null if unparseable. */
+    private static OffsetDateTime parseEvidenceTimestamp(String raw) {
+        if (raw == null || raw.isBlank() || "null".equals(raw)) return null;
+        try { return OffsetDateTime.parse(raw); } catch (Exception ignored) {}
+        try {
+            LocalDateTime ldt = LocalDateTime.parse(raw, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+            return ldt.atOffset(ZoneOffset.UTC);
+        } catch (Exception ignored) {}
+        return null;
     }
 
     /** Read confirm result's first data_view row, if any. Tolerant of shape. */

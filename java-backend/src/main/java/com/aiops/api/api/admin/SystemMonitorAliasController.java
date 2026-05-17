@@ -1,5 +1,6 @@
 package com.aiops.api.api.admin;
 
+import com.aiops.api.api.skill.SkillRunnerService;
 import com.aiops.api.auth.Authorities;
 import com.aiops.api.config.AiopsProperties;
 import com.aiops.api.domain.agent.AgentMemoryRepository;
@@ -47,6 +48,7 @@ public class SystemMonitorAliasController {
 	private final AuditLogRepository auditRepo;
 	private final AiopsProperties props;
 	private final WebClient legacyClient;
+	private final SkillRunnerService skillRunner;
 
 	public SystemMonitorAliasController(UserRepository userRepo, AlarmRepository alarmRepo,
 	                                    SkillDefinitionRepository skillRepo, PipelineRepository pipelineRepo,
@@ -56,6 +58,7 @@ public class SystemMonitorAliasController {
 	                                    AgentMemoryRepository agentMemoryRepo,
 	                                    AuditLogRepository auditRepo,
 	                                    AiopsProperties props,
+	                                    SkillRunnerService skillRunner,
 	                                    @Value("${aiops.legacy-backend-url:http://127.0.0.1:8001}") String legacyBackendUrl) {
 		this.userRepo = userRepo;
 		this.alarmRepo = alarmRepo;
@@ -68,6 +71,7 @@ public class SystemMonitorAliasController {
 		this.agentMemoryRepo = agentMemoryRepo;
 		this.auditRepo = auditRepo;
 		this.props = props;
+		this.skillRunner = skillRunner;
 		this.legacyClient = WebClient.builder().baseUrl(legacyBackendUrl).build();
 	}
 
@@ -101,12 +105,19 @@ public class SystemMonitorAliasController {
 		dbStats.put("agent_memories", agentMemoryRepo.count());
 		dbStats.put("audit_logs", auditRepo.count());
 
+		// v30.13b (2026-05-17) — surface SkillRunner alarm-emit activity so
+		// operators can see WHY Alarm Center has / hasn't been populating.
+		// Counters are in-memory; reset on JVM restart.
+		Map<String, Object> skillRunnerStats = skillRunner.alarmEmitStats();
+
 		Map<String, Object> out = new HashMap<>();
 		out.put("timestamp", Instant.now().toString());
 		out.put("services", services);
-		out.put("background_tasks", Map.of(
-				"event_poller", poller,
-				"cron_scheduler", scheduler));
+		Map<String, Object> bg = new HashMap<>();
+		bg.put("event_poller", poller);
+		bg.put("cron_scheduler", scheduler);
+		bg.put("skill_runner", skillRunnerStats);
+		out.put("background_tasks", bg);
 		out.put("db_stats", dbStats);
 		out.put("build_info", Map.of("backend", "java-spring-boot-3.5",
 				"service", "aiops-java-api"));
