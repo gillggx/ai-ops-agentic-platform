@@ -1988,19 +1988,38 @@ export function AIAgentPanel({
                             judge_decision: { phase_id: phaseId, action },
                           }),
                         });
-                        // Reuse build stream handler so resumed pb_glass_* events
-                        // flow through canvas + chat as if they came from the
-                        // original chat call.
+                        if (!res.ok) {
+                          // Common case: pending_judge already consumed (e.g.
+                          // user double-clicked, or another card was acted on
+                          // first). Show a small inline note rather than
+                          // crashing on the error SSE shape.
+                          setChatHistory((prev) => [...prev, {
+                            id: nextId(), role: "agent",
+                            content: `⚠ 判決送出失敗 (HTTP ${res.status}) — 可能已被其他卡片消費或 session 過期`,
+                          }]);
+                          try { await res.body?.cancel(); } catch { /* ignore */ }
+                          return;
+                        }
                         const handler = buildStreamHandlerRef.current;
                         if (handler) {
                           await consumeSSE(res, (ev: Record<string, unknown>) => {
-                            handler(ev as Parameters<typeof handler>[0]);
-                          }, () => {});
+                            try {
+                              handler(ev as Parameters<typeof handler>[0]);
+                            } catch (innerErr) {
+                              console.error("judge resume event handler crashed", innerErr, ev);
+                            }
+                          }, (err: Error) => {
+                            console.error("judge resume SSE stream error", err);
+                          });
                         } else {
                           try { await res.body?.cancel(); } catch { /* ignore */ }
                         }
                       } catch (e) {
                         console.error("judge_clarify resume failed", e);
+                        setChatHistory((prev) => [...prev, {
+                          id: nextId(), role: "agent",
+                          content: `⚠ 判決執行錯誤：${e instanceof Error ? e.message : String(e)}`,
+                        }]);
                       }
                     }}
                   />

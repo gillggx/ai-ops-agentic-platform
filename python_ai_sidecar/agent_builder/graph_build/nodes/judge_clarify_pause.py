@@ -32,6 +32,11 @@ logger = logging.getLogger(__name__)
 
 VALID_JUDGE_ACTIONS = {"continue", "replan", "cancel"}
 
+# Cap replans so a stubborn LLM can't loop forever (same plan → same
+# deficit → ask again → replan → same plan → ...). After this many
+# replans, force-treat next action as 'continue'.
+MAX_JUDGE_REPLAN = 1
+
 
 def _event(name: str, data: dict[str, Any]) -> dict[str, Any]:
     return {"type": name, **data}
@@ -90,18 +95,36 @@ async def judge_clarify_pause_node(state: BuildGraphState) -> dict[str, Any]:
         return base_update
 
     if action == "replan":
+        # Cap replan retries — if LLM keeps emitting the same plan after
+        # replan_hint, fall back to 'continue' so we don't loop forever
+        # (each iteration costs a Haiku call + user click).
+        prior_count = int(state.get("v30_judge_replan_count") or 0)
+        if prior_count >= MAX_JUDGE_REPLAN:
+            logger.warning(
+                "judge_clarify_pause: replan budget exhausted (count=%d >= max=%d), "
+                "falling back to 'continue' for phase %s",
+                prior_count, MAX_JUDGE_REPLAN, pid,
+            )
+            decisions[pid] = "continue"
+            base_update["v30_judge_decisions"] = decisions
+            base_update["status"] = "phase_in_progress"
+            base_update["sse_events"] = [_event("judge_clarify_resolved", {
+                "phase_id": pid, "action": "continue",
+                "auto_resolved": True,
+                "reason": "replan budget exhausted — proceeding with available data",
+            })]
+            return base_update
         # Wipe phases + bump replan counter + add modifier hint for goal_plan
-        # The router (_route_after_judge_clarify) sees status="replan_pending"
-        # and routes to goal_plan_node.
         relax_hint = (
             f"前次規劃要求 '{pause.get('value_desc', '')}' 但資料源僅 "
             f"{pause.get('actual_rows')} 筆 (要求 {pause.get('requested_n')} 筆)。"
             f"請改寫 phase {pid} 的 value_desc 移除『N 筆』量詞，改成「可取得的最大量」"
-            f"或類似不限定數量的描述。"
+            f"或類似不限定數量的描述。**重要**：不可再寫『{pause.get('requested_n')} 筆』。"
         )
         base_update["v30_phases"] = []
         base_update["v30_current_phase_idx"] = 0
         base_update["v30_replan_hint"] = relax_hint
+        base_update["v30_judge_replan_count"] = prior_count + 1
         base_update["status"] = "replan_pending"
         return base_update
 

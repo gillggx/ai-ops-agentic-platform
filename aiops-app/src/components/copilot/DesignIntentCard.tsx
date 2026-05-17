@@ -274,11 +274,11 @@ function ReadView({
   return (
     <>
       {/* Inputs */}
-      {data.inputs.length > 0 && (
+      {(data.inputs?.length ?? 0) > 0 && (
         <div style={{ marginBottom: 10 }}>
           <div style={sectionTitleStyle}>📥 輸入</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {data.inputs.map((inp, i) => (
+            {(data.inputs ?? []).map((inp, i) => (
               <div key={i} style={{ fontSize: 12, color: "#2d3748" }}>
                 <span style={{ fontFamily: "monospace", fontWeight: 600 }}>${inp.name}</span>
                 <span style={{ color: "#718096", marginLeft: 6 }}>
@@ -423,12 +423,12 @@ function EditForm({
       {/* Inputs editor */}
       <div>
         <div style={sectionTitleStyle}>📥 輸入（每個 input 一行）</div>
-        {draft.inputs.length === 0 && (
+        {(draft.inputs?.length ?? 0) === 0 && (
           <div style={{ fontSize: 12, color: "#a0aec0", marginBottom: 4 }}>
             尚未宣告任何 input — 按下方「+ 加 input」新增
           </div>
         )}
-        {draft.inputs.map((inp, i) => (
+        {(draft.inputs ?? []).map((inp, i) => (
           <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
             <select
               value={inp.name}

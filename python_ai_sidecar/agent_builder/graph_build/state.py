@@ -229,6 +229,11 @@ class BuildGraphState(TypedDict, total=False):
     # prepended to the next goal_plan call so the LLM knows to relax the
     # count quantifier. Cleared after goal_plan reads it.
     v30_replan_hint: Optional[str]
+    # v30.17j — how many times user has picked 'replan' on judge clarify.
+    # Cap at MAX_JUDGE_REPLAN (currently 1) — past that, force-treat as
+    # 'continue' so the build doesn't loop forever when LLM keeps emitting
+    # the same plan that triggers deficit again.
+    v30_judge_replan_count: int
     # v13 (2026-05-13): per-node contracts the agent declares while writing
     # the plan. Runtime auto-preview compares each node's actual snapshot
     # to its contract; mismatch fires a targeted reflect_op (changes only
@@ -374,4 +379,5 @@ def initial_state(
         v30_judge_pause=None,
         v30_judge_decisions={},
         v30_replan_hint=None,
+        v30_judge_replan_count=0,
     )
