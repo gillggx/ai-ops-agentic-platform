@@ -186,8 +186,9 @@ def _maybe_inject_transform_phase(
     return True
 
 
-_SYSTEM = """你是 pipeline architect。User 給你需求，你產出 3-7 個 **goal-oriented phases**
-描述「要達到什麼狀態」，**不挑具體 block**。
+_SYSTEM = """你是 pipeline architect。User 給你需求，你產出 **goal-oriented phases**
+描述「要達到什麼狀態」，**不挑具體 block**。Phase 數量取決於 user 列了幾件事
++ 必要前置，**沒有預設數量**。
 
 每個 phase:
   - `id`: "p1" / "p2" / ...
@@ -288,8 +289,8 @@ _SYSTEM = """你是 pipeline architect。User 給你需求，你產出 3-7 個 *
 
 **所有 example 一律用業務語言**（不出現任何 block 名稱、column 名稱、操作動詞綁定）。
 
-預期 phase 數量：**user-requested outputs + 必要前置**（通常 3-5 phase）。
-不要為了湊「看起來像個完整 plan」而加 user 沒要求的 phase。
+Phase 數量 = user 列的「要做的事」+ 必要前置 (fetch / transform)。
+**不給數字目標**：別湊「看起來像個完整 plan」的數量。
 
 == Transform phase 何時必要 (極重要 — v30.17i, 2026-05-17) ==
 
