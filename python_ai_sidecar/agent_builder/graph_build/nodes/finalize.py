@@ -190,9 +190,32 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
     # (because pipeline is empty), losing the distinction between "agent
     # tried + couldn't" and "agent refused to guess".
     incoming_status = state.get("status")
+    # v30.17l hotfix: detect v30 ReAct path. v30 uses agentic_phase_loop
+    # tool calls (add_node/connect/etc.) which update the pipeline directly
+    # and DON'T populate `plan[i].result_status`. So n_ok_ops==0 always
+    # for v30, but build succeeded if all phases advanced.
+    v30_phases = state.get("v30_phases") or []
+    v30_idx = state.get("v30_current_phase_idx", 0)
+    is_v30_path = bool(v30_phases)
+    v30_all_phases_done = is_v30_path and v30_idx >= len(v30_phases)
+
     if incoming_status == "refused":
         status = "refused"
+    elif is_v30_path:
+        # v30 path: phase completion is source of truth
+        if len(pipeline.nodes) == 0:
+            status = "failed"
+        elif structural_issues:
+            status = "failed_structural"
+        elif v30_all_phases_done:
+            status = "finished"
+        elif v30_idx > 0:
+            # some phases done but not all — partial success
+            status = "build_partial"
+        else:
+            status = "failed"
     elif len(pipeline.nodes) == 0 or n_ok_ops == 0:
+        # v27 path: count plan ops (legacy macro_plan / dispatch_op flow)
         status = "failed"
     elif structural_issues:
         status = "failed_structural"
