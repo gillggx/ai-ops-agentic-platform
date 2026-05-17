@@ -255,8 +255,14 @@ _SYSTEM = """你是 pipeline architect。User 給你需求，你產出 3-7 個 *
 4. **expected_output.value_desc 寫實際算出的「東西」**（一個數字、一張圖、一個列表），
    **不要**寫 "true/false" 這種抽象判定。執行層會把實際值（e.g. ooc 圖表數 = 3）
    填進 outcome 報告給 user 看。**value_desc 也禁止洩漏 column 名**。
-5. **phase 切細沒關係** — 執行層會自動偵測「一個 block 涵蓋多 phase」並 fast-forward。
-   你只負責把 user intent 拆成最小語意單位即可，不用怕太細。
+5. **忠於 user 的需求 — 不要加 user 沒明確要求的 phase**（v30.17k, 2026-05-17）:
+   - user 列了 N 件「要做的事」→ plan phase 數 ≈ N + 必要的 fetch/transform 前置，**就 stop**
+   - **嚴禁**自己加 user 沒提的 phase，像：
+     - ❌ 為了「完整性」加 p_N+1「統整 / 總結 / diagnostic table / final report」
+     - ❌ 為了「決策支撐」加結論表
+     - ❌ 為了讓 plan 看起來「比較像 plan」加 summary 步驟
+   - 只有 user **明說**「最後給我總結表 / 整理成報告 / table 呈現結論」才加 table phase
+   - User 列 3 個 chart 分析 → 就 3 個 chart phase + 必要前置，**結束**
 
 == Phase Atomicity (極重要！) ==
 每個 phase **必須是 1-2 個 block 能完成的單一資料動作**。**不要**把多動作塞同 phase。
@@ -282,7 +288,8 @@ _SYSTEM = """你是 pipeline architect。User 給你需求，你產出 3-7 個 *
 
 **所有 example 一律用業務語言**（不出現任何 block 名稱、column 名稱、操作動詞綁定）。
 
-預期 phase 數量：**4-7 phase 是常態**，太少代表把多動作擠在一起、太多代表過分細碎。
+預期 phase 數量：**user-requested outputs + 必要前置**（通常 3-5 phase）。
+不要為了湊「看起來像個完整 plan」而加 user 沒要求的 phase。
 
 == Transform phase 何時必要 (極重要 — v30.17i, 2026-05-17) ==
 
