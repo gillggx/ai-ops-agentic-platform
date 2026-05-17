@@ -35,6 +35,58 @@ VALID_EXPECTED = {
     "raw_data", "transform", "verdict", "chart", "table", "scalar", "alarm",
 }
 
+# v30.17d (2026-05-17) — chart-intent keywords for auto-inject.
+# Triggers a deterministic chart phase append when user explicitly asked
+# for visualization but LLM forgot to plan one. Conservative list — only
+# high-confidence terms; words like "view"/"看" excluded to avoid false
+# positives. Chinese + English mixed; substring match (case-insensitive
+# for English).
+_CHART_INTENT_KEYWORDS = (
+    "chart", "charts", "plot", "graph", "trend", "visualize", "visualization",
+    "圖", "圖表", "趨勢", "視覺化", "繪製", "畫圖", "顯示圖",
+)
+
+
+def _maybe_inject_chart_phase(phases: list[dict[str, Any]], instruction: str) -> bool:
+    """If instruction contains chart keywords but no phase has expected=chart,
+    append a chart phase. Mutates phases in-place. Returns True if injected.
+
+    package-private for unit tests.
+    """
+    if not instruction:
+        return False
+    text = instruction.lower()
+    if not any(kw.lower() in text for kw in _CHART_INTENT_KEYWORDS):
+        return False
+    if any((p.get("expected") or "").strip() == "chart" for p in phases):
+        return False
+    # Allocate next id: max existing numeric suffix + 1 (handles renamed/edited ids)
+    max_num = 0
+    for p in phases:
+        pid = (p.get("id") or "").lstrip("pP")
+        if pid.isdigit():
+            max_num = max(max_num, int(pid))
+    new_id = f"p{max_num + 1}"
+    phases.append({
+        "id": new_id,
+        "goal": "視覺化展示前述結果 (chart 形式呈現)",
+        "expected": "chart",
+        "expected_output": {
+            "kind": "chart_spec",
+            "value_desc": "圖表呈現前述分析結果 (line/bar/heatmap 等視資料形態決定)",
+            "criterion": None,
+            "outcome_keys": [],
+        },
+        "why": "user 指示含視覺化關鍵詞 (chart/圖/趨勢 等)，自動補上",
+        "user_edited": False,
+        "auto_injected": True,  # trace flag
+    })
+    logger.info(
+        "goal_plan: auto-injected chart phase %s (chart intent detected in instruction)",
+        new_id,
+    )
+    return True
+
 
 _SYSTEM = """你是 pipeline architect。User 給你需求，你產出 3-7 個 **goal-oriented phases**
 描述「要達到什麼狀態」，**不挑具體 block**。
@@ -279,6 +331,13 @@ async def goal_plan_node(state: BuildGraphState) -> dict[str, Any]:
             "user_edited": False,
         })
 
+    # v30.17d (2026-05-17) — auto-inject chart phase when intent contains
+    # chart keywords but LLM forgot. Per OI-1 in
+    # docs/spec_unified_skill_model.md §10. Per
+    # `feedback_flow_in_graph_not_prompt.md` we don't trust prompt rules;
+    # deterministic graph-level enforcement instead.
+    auto_injected_chart_phase = _maybe_inject_chart_phase(phases, instruction)
+
     if len(phases) < MIN_PHASES:
         logger.info("goal_plan_node: empty phases after parse")
         if tracer is not None:
@@ -364,6 +423,8 @@ async def goal_plan_node(state: BuildGraphState) -> dict[str, Any]:
                     "n_phases_with_fast_forward_solution": sum(
                         1 for a in phase_analyses if a.get("fast_forward_capable_blocks")
                     ),
+                    # v30.17d — track auto-inject for admin trace view
+                    "auto_injected_chart_phase": bool(auto_injected_chart_phase),
                 },
             )
         except Exception as ex:  # noqa: BLE001
