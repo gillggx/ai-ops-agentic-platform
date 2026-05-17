@@ -397,9 +397,34 @@ async def goal_plan_confirm_gate_node(state: BuildGraphState) -> dict[str, Any]:
 
     User can send back: {confirmed: true, phases: [...edited...]}
     OR              : {confirmed: false}  (abort)
+
+    v30.17a (2026-05-17) — skip_confirm bypass. When the caller passed
+    skip_confirm=True (chat orchestrator's build_pipeline_live tool,
+    skill_translate flow, etc.), the conversation itself is the
+    confirmation — no explicit gate needed. Auto-confirm + emit a
+    goal_plan_confirmed SSE event so the graph proceeds straight to
+    agentic_phase_loop without interrupt. Without this, chat callers
+    silently stall here: tool_execute returns an empty stream, chat LLM
+    writes a generic reply, user UI never sees the build progress.
     """
     phases = state.get("v30_phases") or []
     plan_summary = state.get("summary") or "(no summary)"
+
+    if state.get("skip_confirm"):
+        logger.info(
+            "goal_plan_confirm_gate: skip_confirm=True — auto-confirming %d phases",
+            len(phases),
+        )
+        return {
+            "status": "phase_in_progress",
+            "v30_current_phase_idx": 0,
+            "v30_phase_round": 0,
+            "sse_events": [_event("goal_plan_confirmed", {
+                "phases": phases,
+                "n_edits": 0,
+                "auto_confirmed": True,
+            })],
+        }
 
     logger.info(
         "goal_plan_confirm_gate: pausing for user — %d phases",

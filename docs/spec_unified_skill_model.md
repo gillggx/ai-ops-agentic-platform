@@ -270,7 +270,50 @@ for each matched skill:
 | skill_documents 數量大 (掃描成本) | 目前只有 3 個 skills；Phase 4 cron 掃描 < 10ms。Index 待 > 100 個 skill 時加 |
 | Mode A trigger.type='schedule' 但 trigger.schedule missing | scheduler skip + log warn |
 
-## 10. 確認事項
+## 10. Open Issues (待討論，排進 Phase 對應位置)
+
+### OI-1 — macro plan 沒含 chart phase 即使 user 要 chart
+**症狀**: prompt `"檢查機台EQP-01 最後一次OOC 時，是否有多張SPC 也OOC (>2)，並且顯示該SPC charts"`
+v30 goal_plan 生出來的 phases 沒有 `expected=chart` 的 phase，只有 step_check / data_view。
+
+**3 個候選方案 (待 user 決定)**:
+- (a) `nodes/goal_plan.py` system prompt 加 hard rule:
+  「user 提及 chart/趨勢/圖/visualize/show → plan 必含至少 1 個 expected=chart 的 phase」
+  → 簡單，但 LLM 可能還是漏（per `feedback_flow_in_graph_not_prompt.md`）
+- (b) goal_plan 後加 deterministic check:
+  掃 instruction 含 chart 關鍵字 set，但 phases 沒 chart kind → 自動 inject 一個 chart phase
+  → graph-level enforcement，per 慣用模式
+- (c) 拋 user goal_plan_confirmed SSE 時順便加 hint:
+  `{requires_chart: true}` 給 UI 提示「要 chart 嗎？edit 加一個」
+  → 把判斷推給 user
+
+**建議**: (b) — 跟 `intent_completeness` graph gate 同樣的 deterministic 強制。
+Plus (a) prompt 改 cosmetic 不算數，做也行（雙保險）。
+
+### OI-2 — chat `intent_classifier` 每次 JSON parse fail
+**症狀**: 從 user 多次 chat trace 看到:
+```
+WARNING intent_classifier failed (Extra data: line 5 column 1 (char 52))
+        — defaulting to clear_chart pass-through
+```
+影響: classifier 沒分到正確 bucket，但 fallback path (clear_chart pass-through) 仍能跑，**不會 break 用戶體驗**，純效能/精度損失。
+
+**檢驗**: LLM 回了 valid JSON 但後面又跟了多餘的字，json.loads 在第 5 行炸了。可能是:
+- prompt 沒明確要求「ONLY JSON, no prose」
+- LLM model 行為改變
+- 或 LLM 連回兩段 JSON
+
+**建議**: 改 classifier 用 `json.JSONDecoder().raw_decode(raw)` 取第一個 valid JSON object，不管後面的文字。簡單 robust。1-line patch。
+
+### OI-3 (剛 ship) — chat 卡在 macro plan 確認
+**Root cause**: `goal_plan_confirm_gate_node` 無條件 `interrupt()`，沒看 `skip_confirm`。chat caller 設 `skip_confirm=True` 但 v30 gate 不認 → graph 停在那 → chat tool_execute 收到空 SSE → chat LLM 自編 reply → user 沒看到 build 進度。
+
+**已修 (v30.17a)**: `goal_plan_confirm_gate_node` 看 `state.skip_confirm`，True → 自動 confirm + emit `goal_plan_confirmed` event + skip interrupt。
+4 unit tests pass。Deploy 2026-05-17。
+
+---
+
+## 11. 確認事項
 
 請回覆「開始開發」啟動 Phase 1-7 全做。
 
