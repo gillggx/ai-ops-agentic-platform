@@ -674,6 +674,92 @@ class SkillRunnerServiceTest {
         }
 
         @Test
+        void evidenceRowAllFieldsNullKeepsEmptyDefaults() {
+            when(alarmRepo.existsActiveBySkillAndEquipmentSince(
+                    anyLong(), anyString(), any())).thenReturn(false);
+            ArgumentCaptor<AlarmEntity> cap = ArgumentCaptor.forClass(AlarmEntity.class);
+            when(alarmRepo.save(cap.capture())).thenAnswer(inv -> {
+                AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
+            });
+            // Evidence row exists but every nullable field is null
+            Map<String, Object> row = new HashMap<>();
+            row.put("lotID", null);
+            row.put("lot_id", null);
+            row.put("step", null);
+            row.put("eventTime", null);
+            row.put("event_time", null);
+            Map<String, Object> confirm = Map.of("data_views",
+                    List.of(Map.of("rows", List.of(row))), "note", "x");
+            service.emitAlarmIfTriggered(
+                    patrolSkill(), run(false),
+                    Map.of("tool_id", "EQP-02"),
+                    confirm, List.of(stepPass("s1")), false);
+            assertThat(cap.getValue().getLotId()).isEqualTo("");
+            assertThat(cap.getValue().getStep()).isNull();
+            assertThat(cap.getValue().getEventTime()).isNotNull();  // fallback to now
+        }
+
+        @Test
+        void nullTitleFallsBackToSlug() {
+            when(alarmRepo.existsActiveBySkillAndEquipmentSince(
+                    anyLong(), anyString(), any())).thenReturn(false);
+            ArgumentCaptor<AlarmEntity> cap = ArgumentCaptor.forClass(AlarmEntity.class);
+            when(alarmRepo.save(cap.capture())).thenAnswer(inv -> {
+                AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
+            });
+            SkillDocumentEntity skill = patrolSkill();
+            skill.setTitle(null);  // force fallback to slug
+            service.emitAlarmIfTriggered(
+                    skill, run(false),
+                    Map.of("tool_id", "EQP-02"),
+                    confirmWithRow("L", "S", "2026-05-17T00:00:00"),
+                    List.of(stepPass("s1")), false);
+            assertThat(cap.getValue().getTitle()).contains("test-skill");
+            assertThat(cap.getValue().getTitle()).contains("EQP-02");
+        }
+
+        @Test
+        void confirmWithoutNoteFieldStillEmits() {
+            when(alarmRepo.existsActiveBySkillAndEquipmentSince(
+                    anyLong(), anyString(), any())).thenReturn(false);
+            ArgumentCaptor<AlarmEntity> cap = ArgumentCaptor.forClass(AlarmEntity.class);
+            when(alarmRepo.save(cap.capture())).thenAnswer(inv -> {
+                AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
+            });
+            // Confirm result has data_views but no "note" field
+            Map<String, Object> row = Map.of("eventTime", "2026-05-17T00:00:00",
+                    "lotID", "L", "step", "S");
+            Map<String, Object> confirm = Map.of("data_views",
+                    List.of(Map.of("rows", List.of(row))));  // no "note"
+            service.emitAlarmIfTriggered(
+                    patrolSkill(), run(false),
+                    Map.of("tool_id", "EQP-02"),
+                    confirm, List.of(stepPass("s1")), false);
+            String sum = cap.getValue().getSummary();
+            assertThat(sum).doesNotContain("Confirm:");  // no note prefix added
+            assertThat(sum).contains("SkillRun #");
+        }
+
+        @Test
+        void nullConfirmResultStillEmitsSummary() {
+            when(alarmRepo.existsActiveBySkillAndEquipmentSince(
+                    anyLong(), anyString(), any())).thenReturn(false);
+            ArgumentCaptor<AlarmEntity> cap = ArgumentCaptor.forClass(AlarmEntity.class);
+            when(alarmRepo.save(cap.capture())).thenAnswer(inv -> {
+                AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
+            });
+            service.emitAlarmIfTriggered(
+                    patrolSkill(), run(false),
+                    Map.of("tool_id", "EQP-02"),
+                    null,  // no confirm result at all
+                    List.of(stepPass("s1")), false);
+            String sum = cap.getValue().getSummary();
+            assertThat(sum).doesNotContain("Confirm:");
+            assertThat(sum).contains("Step s1");
+            assertThat(sum).contains("SkillRun #");
+        }
+
+        @Test
         void emptyTriggerConfigGivesDefaultSeverityAndPatrol() {
             when(alarmRepo.existsActiveBySkillAndEquipmentSince(
                     anyLong(), anyString(), any())).thenReturn(false);
