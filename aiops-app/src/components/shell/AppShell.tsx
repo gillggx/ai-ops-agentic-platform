@@ -48,6 +48,9 @@ interface GlassEvent {
 // implicitly has PE + ON_DUTY authority server-side.
 
 const OPS_ITEMS = [
+  // 2026-05-18: beta redesign mounted ahead of legacy /alarms for demo
+  // comparison. Static iframe of public/alarm-center-beta/ prototype.
+  { href: "/alarms-beta",        label: "Alarm Center (beta)", icon: "🔔" },
   { href: "/alarms",             label: "Alarm Center",     icon: "🔔" },
   { href: "/dashboard",          label: "Dashboard",        icon: "📊" },
 ];

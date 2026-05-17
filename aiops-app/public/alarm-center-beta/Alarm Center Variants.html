@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<title>AIOps Alarm Center · 3 Variants</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+<style>
+  body { margin: 0; font-family: 'Inter Tight', sans-serif; }
+  .artboard-frame { width: 100%; height: 100%; border: 0; display: block; }
+</style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script type="text/babel" src="design-canvas.jsx"></script>
+  <script type="text/babel">
+    const { useEffect } = React;
+
+    function VariantFrame({ variant }) {
+      return (
+        <iframe
+          src={`Alarm Center.html?v=${variant}`}
+          className="artboard-frame"
+          title={`Variant ${variant}`}
+        />
+      );
+    }
+
+    function Notes({ title, bullets, when }) {
+      return (
+        <div style={{ background: '#fff', border: '1px solid #e6e2db', borderRadius: 12, padding: 18, fontSize: 13, color: '#333', maxWidth: 360, fontFamily: "'Inter Tight', sans-serif" }}>
+          <div style={{ fontSize: 11, color: '#999', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600, marginBottom: 6 }}>方向</div>
+          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, letterSpacing: '-0.01em' }}>{title}</div>
+          <ul style={{ paddingLeft: 18, margin: '8px 0', lineHeight: 1.6 }}>
+            {bullets.map((b, i) => <li key={i}>{b}</li>)}
+          </ul>
+          <div style={{ fontSize: 11, color: '#888', marginTop: 10, paddingTop: 10, borderTop: '1px dashed #e6e2db' }}>
+            <strong style={{ color: '#555' }}>適合時機：</strong> {when}
+          </div>
+        </div>
+      );
+    }
+
+    function CanvasApp() {
+      return (
+        <DesignCanvas title="Alarm Center · 3 個方向比較" subtitle="夜班監控工程師視角 · 半導體 fab · 淺色現代 SaaS">
+          <DCSection id="overview" title="設計總覽">
+            <DCArtboard id="overview-text" label="改造重點" width={760} height={420}>
+              <div style={{ padding: 32, fontSize: 13, color: '#222', lineHeight: 1.7, fontFamily: "'Inter Tight', sans-serif", height: '100%', boxSizing: 'border-box', overflow: 'auto' }}>
+                <div style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.02em', marginBottom: 6 }}>從刺眼告警牆 → 副駕式戰情中心</div>
+                <div style={{ color: '#777', fontSize: 13, marginBottom: 18 }}>痛點對應 · 三個主要方向</div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '8px 18px', fontSize: 12.5 }}>
+                  <div style={{ color: '#888' }}>視覺刺眼</div>
+                  <div>紅色從滿版底色 → <strong>細邊條 + tag</strong>，狀態色用 oklch 降飽和；可在 Tweaks 調整飽和度 0.3–1.4。</div>
+                  <div style={{ color: '#888' }}>重複資訊</div>
+                  <div>50 條重複告警 → 自動 cluster 為 <strong>8 個事件卡</strong>（依 tool + rule + 時間窗）。每張卡顯示原始告警數量、迷你趨勢條、指派人。</div>
+                  <div style={{ color: '#888' }}>缺乏優先序</div>
+                  <div>頂部 AI 戰況條主動指出「優先處理 EQP-03 + EQP-07」；每個事件卡有 root cause confidence 與 affected lots。</div>
+                  <div style={{ color: '#888' }}>無聊只能看</div>
+                  <div><strong>下一步建議行動</strong>區塊把 AI 結論翻成可點擊按鈕：派工 / Hold 機台 / 合併 incident / 跑深度診斷。</div>
+                  <div style={{ color: '#888' }}>整合資訊</div>
+                  <div>Floor map · KPI 趨勢線 · 跨機台關聯（EQP-03 ↔ EQP-07 同 chamber 群組）。</div>
+                  <div style={{ color: '#888' }}>AI Agent</div>
+                  <div>從聊天框 → <strong>副駕模式</strong>：當前焦點 / 診斷計畫 / 快速命令按鈕 / 自動腳本一鍵執行。</div>
+                </div>
+              </div>
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection id="A" title="方向 A · Cluster-First (推薦)">
+            <DCArtboard id="A-frame" label="A · 群集列表 + 副駕 Agent" width={1440} height={900}>
+              <VariantFrame variant="A" />
+            </DCArtboard>
+            <DCArtboard id="A-notes" label="設計筆記" width={400} height={500}>
+              <Notes
+                title="Cluster-First"
+                bullets={[
+                  '左側=群集視圖，每張卡 = 一個事件，不再有重複的 50 行告警',
+                  '中間=AI 診斷報告 + 下一步行動梯（4 個可點擊按鈕）',
+                  '右側=副駕 AI Agent，主動建議合併 EQP-03 + EQP-07',
+                  '可在 Tweaks 切換為時間軸 / 清單模式',
+                  '保留 KPI 卡顯示 High / Med / MTTR / 健康度',
+                ]}
+                when="日常監控、快速 triage、夜班一人盯多機台"
+              />
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection id="B" title="方向 B · Floor-Map Hero">
+            <DCArtboard id="B-frame" label="B · 廠房地圖為主" width={1440} height={900}>
+              <iframe src="Alarm Center.html?v=B" className="artboard-frame" />
+            </DCArtboard>
+            <DCArtboard id="B-notes" label="設計筆記" width={400} height={500}>
+              <Notes
+                title="Floor-Map Hero"
+                bullets={[
+                  '頂部=30 機台 fab 地圖，依 bay 分組',
+                  '一眼看出哪個 bay 出問題（BAY-A 三台連紅）',
+                  '點機台 = 跳到該事件詳細',
+                  '保留 cluster 列表在左側',
+                  'AI Agent 移到底部抽屜，騰出垂直空間',
+                ]}
+                when="shift leader、跨 bay 全廠視角、早會用"
+              />
+            </DCArtboard>
+          </DCSection>
+
+          <DCSection id="C" title="方向 C · Triage Lanes">
+            <DCArtboard id="C-frame" label="C · 看板式分流" width={1440} height={900}>
+              <iframe src="Alarm Center.html?v=C" className="artboard-frame" />
+            </DCArtboard>
+            <DCArtboard id="C-notes" label="設計筆記" width={400} height={500}>
+              <Notes
+                title="Triage Lanes"
+                bullets={[
+                  '左側列表 = 看板式：New / Investigating / Resolved',
+                  '一眼看出誰在處理什麼、哪些還沒人接',
+                  '同類 cluster 自動合併不變',
+                  '適合多人協作的環境',
+                  '其他結構與 A 相同',
+                ]}
+                when="多人輪班、團隊協作、需要看誰負責什麼"
+              />
+            </DCArtboard>
+          </DCSection>
+        </DesignCanvas>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<CanvasApp />);
+  </script>
+</body>
+</html>
