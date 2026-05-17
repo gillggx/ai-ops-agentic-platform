@@ -213,6 +213,12 @@ class BuildGraphState(TypedDict, total=False):
     # expected '最後一次' but got 87 rows; need sort+limit") guiding LLM
     # toward completion. Cleared once phase actually advances.
     v30_last_judge_reject_reason: Optional[str]
+    # v30.17l (2026-05-18) — full verifier reject info for next round prompt:
+    # {block_id, expected, covers, rows, result, judge_reject_reason,
+    #  would_have_passed_with}. Surfaced in agentic_phase_loop prompt so LLM
+    # sees which block was rejected + what to try instead. Cleared on phase
+    # advance.
+    v30_last_verifier_reject: Optional[dict]
     # v30.17j (2026-05-17): Judge deficit pause — set by phase_verifier_node
     # when actual rows are significantly below the requested count
     # quantifier in value_desc (e.g. user asked '最近 100 筆' but data source
@@ -376,6 +382,7 @@ def initial_state(
         debug_step_mode=debug_step_mode,
         v30_step_paused_at_round=None,
         v30_last_judge_reject_reason=None,
+        v30_last_verifier_reject=None,
         v30_judge_pause=None,
         v30_judge_decisions={},
         v30_replan_hint=None,

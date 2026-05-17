@@ -1014,6 +1014,40 @@ def _build_observation_md(state: BuildGraphState, phase: dict) -> str:
         lines.append("   → 修正 pipeline 補完 phase goal 才能 advance")
         lines.append("")
 
+    # v30.17l (2026-05-18) — surface full verifier reject info so LLM doesn't
+    # keep retrying the same wrong block. Includes the rejected block_id,
+    # specific failure mode (covers mismatch / rows gate / judge), and the
+    # actual blocks that WOULD satisfy this phase.
+    vr = state.get("v30_last_verifier_reject")
+    if vr and isinstance(vr, dict):
+        result = vr.get("result") or "no_match"
+        block = vr.get("block_id") or "(unknown)"
+        cov = vr.get("covers") or []
+        exp = vr.get("expected") or ""
+        wp = vr.get("would_have_passed_with") or []
+        lines.append("== VERIFIER FEEDBACK (last attempt rejected) ==")
+        lines.append(f"  rejected block: {block}  (covers={cov})")
+        lines.append(f"  phase expects: {exp}")
+        lines.append(f"  reason: {result}")
+        if result == "covers mismatch":
+            lines.append(
+                f"  → '{exp}' is not in the rejected block's covers. "
+                f"You MUST pick a different block."
+            )
+        elif result == "rows quality gate failed":
+            lines.append(
+                f"  → block ran but produced rows={vr.get('rows')}. "
+                f"Fix upstream params or pick a block that yields data."
+            )
+        elif result == "llm_judge_rejected":
+            lines.append(
+                f"  → semantic check failed: {vr.get('judge_reject_reason','')[:120]}"
+            )
+        if wp:
+            lines.append(f"  blocks that WOULD pass for expected={exp}: {wp[:8]}")
+            lines.append("  → switch to one of these. Don't retry the rejected block.")
+        lines.append("")
+
     # All phases context
     lines.append("== ALL PHASES CONTEXT ==")
     for i, p in enumerate(phases):

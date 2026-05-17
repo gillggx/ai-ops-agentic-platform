@@ -328,6 +328,30 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
         # Don't emit phase_completed; stay on same idx, increment nothing.
         cur_phase = phases[idx]
         cur_expected = cur_phase.get("expected") or ""
+        # v30.17l: compute would_pass + result up here (outside tracer block)
+        # so they're available for state.v30_last_verifier_reject below.
+        would_pass: list[str] = []
+        result = "unknown"
+        try:
+            for (n, _v), s in (registry.catalog or {}).items():
+                if str(s.get("status") or "").lower() == "deprecated":
+                    continue
+                s_covers = _resolve_covers(s, kind="output")
+                if cur_expected in s_covers:
+                    would_pass.append(n)
+            rows_gate_applicable = cur_expected in {"raw_data", "transform", "table"}
+            rows_gate_failed = rows_gate_applicable and (rows is None or rows < 1)
+            if cur_expected not in covers:
+                result = "covers mismatch"
+            elif rows_gate_failed:
+                result = "rows quality gate failed"
+            elif judge_reject_reason is not None:
+                result = "llm_judge_rejected"
+            else:
+                result = "unknown (no rule gate hit but verifier rejected)"
+        except Exception as ex:  # noqa: BLE001
+            logger.info("phase_verifier: would_pass computation failed: %s", ex)
+
         if tracer is not None:
             tracer.record_step(
                 "phase_verifier", status="no_match",
@@ -336,33 +360,8 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                 block_id=block_id, covers=covers, rows=rows,
                 judge_reject_reason=judge_reject_reason,
             )
-            # v30.1.1: empathetic-debug — what blocks WOULD have passed?
-            # v30.5: use covers_output (consistent with verifier's actual check)
             try:
-                would_pass: list[str] = []
-                for (n, _v), s in (registry.catalog or {}).items():
-                    if str(s.get("status") or "").lower() == "deprecated":
-                        continue
-                    s_covers = _resolve_covers(s, kind="output")
-                    if cur_expected in s_covers:
-                        would_pass.append(n)
-                # v30.17g (2026-05-17) — distinguish the three failure modes
-                # so debugging tools (.claude/skills/verify-build) can show
-                # the actual reason instead of always saying "rows gate":
-                #   covers mismatch — block can't produce this kind
-                #   rows quality gate — covers OK but data-bearing phase had 0 rows
-                #   llm_judge_rejected — both rule gates OK but semantic check failed
                 rows_gate_applicable = cur_expected in {"raw_data", "transform", "table"}
-                rows_gate_failed = rows_gate_applicable and (rows is None or rows < 1)
-                if cur_expected not in covers:
-                    result = "covers mismatch"
-                elif rows_gate_failed:
-                    result = "rows quality gate failed"
-                elif judge_reject_reason is not None:
-                    result = "llm_judge_rejected"
-                else:
-                    # Shouldn't reach here — would_pass should be empty, log so we know
-                    result = "unknown (no rule gate hit but verifier rejected)"
                 tracer.record_verifier_decision(
                     phase_id=cur_phase.get("id"),
                     phase_expected=cur_expected,
@@ -382,12 +381,27 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                 )
             except Exception as ex:  # noqa: BLE001
                 logger.info("trace.record_verifier_decision failed (non-fatal): %s", ex)
+        # v30.17l (2026-05-18) — surface verifier reject info for next
+        # round prompt: which block was rejected, why, and which blocks
+        # would have passed. Without this LLM kept retrying the same
+        # rejected block (e.g. block_ewma_cusum for a verdict phase).
+        verifier_reject_info = {
+            "block_id": block_id or "(unknown)",
+            "expected": cur_expected,
+            "covers": list(covers),
+            "rows": rows,
+            "result": result if 'result' in dir() else "no_match",
+            "judge_reject_reason": judge_reject_reason,
+            "would_have_passed_with": would_pass[:10] if 'would_pass' in dir() else [],
+        }
         return {
             # Clear handoff fields so next round can fill them again
             "v30_last_mutated_logical_id": None,
             "v30_last_preview": None,
             # v30.10 B2: surface LLM-judge reject reason for next round prompt
             "v30_last_judge_reject_reason": judge_reject_reason,
+            # v30.17l: full verifier reject info for next round prompt
+            "v30_last_verifier_reject": verifier_reject_info,
             "sse_events": [_event("phase_verifier_no_match", {
                 "current_phase_id": phases[idx].get("id"),
                 "expected": phases[idx].get("expected"),
