@@ -409,16 +409,21 @@ def _route_after_phase_revise(state: BuildGraphState) -> str:
 def _route_after_judge_clarify(state: BuildGraphState) -> str:
     """v30.17j — after judge_clarify_pause resumed with user action:
       - status == "replan_pending" → goal_plan (LLM gets v30_replan_hint)
-      - status == "cancelled" (and v30_handover set) → halt_handover
-      - else (continue) → phase_verifier re-runs and accepts the deficit
+      - status == "cancelled" → halt_handover
+      - status == "finished" → finalize (last phase was advanced + no more phases)
+      - else (continue path, more phases left) → agentic_phase_loop for next phase
+        (pause node already advanced the index + wrote outcomes manually;
+        we skip phase_verifier because it has no block context to evaluate)
     """
     status = state.get("status")
     if status == "replan_pending":
         return "goal_plan"
     if status == "cancelled":
         return "halt_handover"
-    # continue path — re-verify; deficit gate sees v30_judge_decisions[pid]=continue
-    return "phase_verifier"
+    if status == "finished":
+        return "finalize"
+    # continue path with more phases — straight into next phase's react loop
+    return "agentic_phase_loop"
 
 
 def _route_after_handover(state: BuildGraphState) -> str:
@@ -522,16 +527,19 @@ def build_graph():
         },
     )
     # v30.17j: after user picks action on judge clarify card:
-    #   continue → back to phase_verifier (re-runs, deficit gate sees prior decision)
+    #   continue → straight into agentic_phase_loop for next phase
+    #              (pause node already advanced idx + wrote outcomes manually)
     #   replan   → back to goal_plan (replan_hint guides LLM)
     #   cancel   → halt_handover (sets v30_handover for abort)
+    #   finished → finalize (was last phase, nothing more to do)
     g.add_conditional_edges(
         "judge_clarify_pause",
         _route_after_judge_clarify,
         {
-            "phase_verifier": "phase_verifier",
+            "agentic_phase_loop": "agentic_phase_loop",
             "goal_plan": "goal_plan",
             "halt_handover": "halt_handover",
+            "finalize": "finalize",
         },
     )
     g.add_conditional_edges(

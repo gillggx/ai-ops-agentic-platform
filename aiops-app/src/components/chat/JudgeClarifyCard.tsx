@@ -2,19 +2,13 @@
 
 /**
  * v30.17j JudgeClarifyCard — pause/ask card when phase_verifier detects
- * a data-source deficit (rows >= 1 but significantly below user's count
- * quantifier in value_desc).
+ * a data-source deficit (rows >= 1 but < user's count quantifier).
  *
- * Example: user asks "最近 100 筆 xbar 趨勢", simulator returns 7 rows
- * (data ceiling). Without this card the build either rejects (waste 16
- * rounds of LLM retry) or silently passes (user surprised). The card
- * gives 3 explicit choices.
- *
- * On click → caller posts /chat/intent-respond with judge_decision body
- * → sidecar resumes the graph.
+ * Styled to match PlanRenderer (light theme, #f7f8fc bg, compact 12px)
+ * so it sits naturally next to plan / macro plan cards in chat.
  */
 
-import { useState, type CSSProperties } from "react";
+import { useState } from "react";
 
 export type JudgeAction = "continue" | "replan" | "cancel";
 
@@ -33,48 +27,28 @@ interface Props {
   onPick: (action: JudgeAction) => void | Promise<void>;
 }
 
-const ACTION_LABEL: Record<JudgeAction, { label: string; hint: string; color: string }> = {
-  continue: {
-    label: "用現有資料繼續",
-    hint: "讓 build 走完看結果",
-    color: "#38a169",
-  },
-  replan: {
-    label: "重新規劃放寬條件",
-    hint: "改成「可取得的最大量」",
-    color: "#3182ce",
-  },
-  cancel: {
-    label: "取消",
-    hint: "停止本次 build",
-    color: "#e53e3e",
-  },
+const ACTION_LABEL: Record<JudgeAction, { label: string; color: string }> = {
+  continue: { label: "用現有資料繼續", color: "#38a169" },
+  replan:   { label: "重新規劃放寬",   color: "#2b6cb0" },
+  cancel:   { label: "取消",          color: "#e53e3e" },
 };
 
 export function JudgeClarifyCard({ data, onPick }: Props) {
   const [picking, setPicking] = useState<JudgeAction | null>(null);
-
   const pct = Math.round((data.ratio ?? 0) * 100);
-  const containerStyle: CSSProperties = {
-    width: "100%",
-    background: "#0d1117",
-    border: "1px solid #f6ad55",
-    borderRadius: 8,
-    padding: 14,
-    fontSize: 12,
-    color: "#e2e8f0",
-  };
 
+  // Resolved state — compact single-line summary, matches PlanRenderer "done" style
   if (data.resolved) {
     const meta = ACTION_LABEL[data.resolved];
     return (
       <div style={{
-        ...containerStyle,
-        border: "1px solid #2d3748",
+        marginBottom: 4, padding: "6px 12px",
+        borderRadius: 8, border: "1px solid #e2e8f0",
+        background: "#f7f8fc", fontSize: 12,
         color: "#718096",
-        fontStyle: "italic",
       }}>
-        判決：{meta.label} ({data.phase_id})
+        <span style={{ marginRight: 6 }}>⚠</span>
+        資料源不足 {data.phase_id} → <span style={{ color: meta.color, fontWeight: 600 }}>{meta.label}</span>
       </div>
     );
   }
@@ -90,28 +64,39 @@ export function JudgeClarifyCard({ data, onPick }: Props) {
   };
 
   return (
-    <div style={containerStyle}>
+    <div style={{
+      marginBottom: 4, padding: "8px 12px",
+      borderRadius: 8, border: "1px solid #e2e8f0",
+      background: "#f7f8fc", fontSize: 12,
+    }}>
+      {/* Header: matches PlanRenderer */}
       <div style={{
-        fontSize: 11, color: "#f6ad55", fontWeight: 600, marginBottom: 8,
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        marginBottom: 6,
       }}>
-        ⚠ 資料源不足 — 需要你的判斷 ({data.phase_id})
+        <span style={{ fontWeight: 600, color: "#1a202c" }}>
+          ⚠ 資料源不足
+        </span>
+        <span style={{ fontSize: 10, color: "#718096" }}>
+          {data.phase_id} · {data.actual_rows}/{data.requested_n} ({pct}%)
+        </span>
       </div>
-      <div style={{ marginBottom: 10, lineHeight: 1.6 }}>
-        要求：<span style={{ color: "#fbb98a" }}>{data.value_desc}</span><br />
-        實際取得：<span style={{ color: "#fc8181", fontWeight: 600 }}>
-          {data.actual_rows} 筆
-        </span>{" "}
-        ／ 預期 {data.requested_n} 筆 ({pct}%)
-      </div>
+
+      {/* Compact info — one line */}
       <div style={{
-        fontSize: 11, color: "#a0aec0", marginBottom: 10,
-        padding: "6px 8px", background: "rgba(255,255,255,0.03)",
-        borderRadius: 4,
+        marginBottom: 8, color: "#4a5568", lineHeight: 1.5,
       }}>
-        資料源 (block <code style={{ color: "#fbb98a" }}>{data.block_id}</code>) 已盡力取，
-        是它的上限。pipeline 無法生出更多資料。
+        <span style={{ color: "#a0aec0" }}>{data.block_id}</span>
+        <span style={{ marginLeft: 6 }}>
+          只回 <span style={{ color: "#e53e3e", fontWeight: 600 }}>{data.actual_rows}</span> 筆
+        </span>
+        <span style={{ marginLeft: 6, color: "#a0aec0" }}>
+          ({data.value_desc.length > 40 ? data.value_desc.slice(0, 40) + "…" : data.value_desc})
+        </span>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+
+      {/* Buttons row — compact, matches existing chat buttons */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {(Object.keys(ACTION_LABEL) as JudgeAction[]).map((act) => {
           const meta = ACTION_LABEL[act];
           const isPicking = picking === act;
@@ -123,25 +108,17 @@ export function JudgeClarifyCard({ data, onPick }: Props) {
               disabled={isDisabled}
               onClick={() => handlePick(act)}
               style={{
-                display: "flex", alignItems: "center", gap: 8,
-                padding: "8px 12px",
-                background: isDisabled ? "#1a202c" : "#1a365d",
+                padding: "4px 10px",
+                background: isDisabled ? "#edf2f7" : "#fff",
                 border: `1px solid ${meta.color}`,
                 borderRadius: 4,
-                color: isDisabled ? "#4a5568" : "#e2e8f0",
-                fontSize: 12,
+                color: isDisabled ? "#a0aec0" : meta.color,
+                fontSize: 11,
+                fontWeight: 600,
                 cursor: isDisabled ? "not-allowed" : "pointer",
-                textAlign: "left",
               }}
             >
-              <span style={{
-                color: meta.color, fontWeight: 700, minWidth: 90,
-              }}>
-                {isPicking ? "處理中…" : meta.label}
-              </span>
-              <span style={{ color: "#718096", fontSize: 11 }}>
-                {meta.hint}
-              </span>
+              {isPicking ? "…" : meta.label}
             </button>
           );
         })}

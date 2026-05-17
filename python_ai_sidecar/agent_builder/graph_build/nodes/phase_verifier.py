@@ -160,17 +160,18 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
             phase_id_str = phase.get("id") or ""
             prior_decision = (state.get("v30_judge_decisions") or {}).get(phase_id_str)
             if prior_decision == "continue":
-                # User already chose to accept the deficit — skip judge,
-                # treat as match=true, advance the phase.
+                # v30.17j hotfix: pause node now handles 'continue' directly
+                # (manual phase advance). If we hit deficit AGAIN on the same
+                # phase after continue, just accept silently — don't re-pause.
                 logger.info(
-                    "phase_verifier: phase %s deficit pre-resolved (user=continue), "
-                    "treating as match", phase_id_str,
+                    "phase_verifier: phase %s deficit re-detected after user=continue, "
+                    "silently accepting (no re-pause)", phase_id_str,
                 )
                 judge = {
                     "match": True,
                     "reason": (
                         f"資料源僅 {deficit['actual_rows']} 筆 (要求 "
-                        f"{deficit['requested_n']} 筆)，user 選擇用現有資料繼續"
+                        f"{deficit['requested_n']} 筆)，user 選擇用現有資料繼續 (cached)"
                     ),
                     "extracted": {},
                 }

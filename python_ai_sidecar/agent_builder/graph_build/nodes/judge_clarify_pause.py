@@ -106,14 +106,8 @@ async def judge_clarify_pause_node(state: BuildGraphState) -> dict[str, Any]:
                 prior_count, MAX_JUDGE_REPLAN, pid,
             )
             decisions[pid] = "continue"
-            base_update["v30_judge_decisions"] = decisions
-            base_update["status"] = "phase_in_progress"
-            base_update["sse_events"] = [_event("judge_clarify_resolved", {
-                "phase_id": pid, "action": "continue",
-                "auto_resolved": True,
-                "reason": "replan budget exhausted — proceeding with available data",
-            })]
-            return base_update
+            # Fall through to continue advancement below by overwriting action
+            action = "continue"
         # Wipe phases + bump replan counter + add modifier hint for goal_plan
         relax_hint = (
             f"前次規劃要求 '{pause.get('value_desc', '')}' 但資料源僅 "
@@ -128,7 +122,72 @@ async def judge_clarify_pause_node(state: BuildGraphState) -> dict[str, Any]:
         base_update["status"] = "replan_pending"
         return base_update
 
-    # action == "continue" — verifier will re-run, detect prior decision,
-    # treat deficit as accepted, advance the phase.
-    base_update["status"] = "phase_in_progress"
+    # action == "continue" — manually advance the phase here. Don't rely on
+    # phase_verifier re-running because the verifier clears
+    # v30_last_mutated_logical_id when it pauses, so on resume it has no
+    # block context to evaluate (early-returns, phase never advances, LLM
+    # loops in p1 trying other blocks → freeze).
+    phases = list(state.get("v30_phases") or [])
+    idx = int(state.get("v30_current_phase_idx") or 0)
+    target_idx = next(
+        (i for i, p in enumerate(phases) if p.get("id") == pid),
+        idx,
+    )
+
+    outcomes = dict(state.get("v30_phase_outcomes") or {})
+    if target_idx < len(phases):
+        cur_phase = phases[target_idx]
+        outcomes[pid] = {
+            "status": "completed",
+            "rationale": (
+                f"資料源僅 {pause.get('actual_rows')} 筆 (要求 "
+                f"{pause.get('requested_n')} 筆)，user 選擇用現有資料繼續"
+            ),
+            "evidence": {
+                "row_count": pause.get("actual_rows"),
+                "deficit_ratio": pause.get("ratio"),
+                "block_id": pause.get("block_id"),
+            },
+            "advanced_by_block": pause.get("block_id"),
+            "advanced_by_node": None,
+            "auto_completed": False,
+            "user_judge_continue": True,
+            "llm_summary": (
+                f"User accepted deficit: {pause.get('actual_rows')}/{pause.get('requested_n')} rows"
+            ),
+            "llm_extracted": {},
+            "plan_target": cur_phase.get("expected_output") or {},
+        }
+
+    new_idx = target_idx + 1
+    cleared_msgs = dict(state.get("v30_phase_messages") or {})
+    cleared_msgs[pid] = []
+
+    base_update["v30_phase_outcomes"] = outcomes
+    base_update["v30_current_phase_idx"] = new_idx
+    base_update["v30_phase_round"] = 0
+    base_update["v30_phase_messages"] = cleared_msgs
+    base_update["v30_last_mutated_logical_id"] = None
+    base_update["v30_last_preview"] = None
+    base_update["v30_last_judge_reject_reason"] = None
+    base_update["status"] = (
+        "phase_in_progress" if new_idx < len(phases) else "finished"
+    )
+    # Emit phase_completed so chat shows '✓ Phase p1 完成' the same way
+    # other phase completions do.
+    base_update["sse_events"] = (base_update.get("sse_events") or []) + [
+        _event("phase_completed", {
+            "phase_id": pid,
+            "rationale": outcomes.get(pid, {}).get("rationale", ""),
+            "evidence": outcomes.get(pid, {}).get("evidence", {}),
+            "auto_completed": False,
+            "advanced_by_block": pause.get("block_id"),
+            "advanced_by_node": None,
+        }),
+    ]
+    logger.info(
+        "judge_clarify_pause: continue → advanced phase %s (idx %d → %d, "
+        "status=%s)",
+        pid, target_idx, new_idx, base_update["status"],
+    )
     return base_update
