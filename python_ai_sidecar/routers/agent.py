@@ -351,6 +351,55 @@ async def _chat_intent_respond_stream(
                 phase_id=judge_pending.phase_id,
                 action=action,
             ):
+                # v30.17j (2026-05-17 hotfix): if the resume hits ANOTHER
+                # judge pause (e.g. user picked replan and the new plan
+                # ALSO triggers deficit), re-register pending_judge so the
+                # next /chat/intent-respond click can find it. Without
+                # this the 2nd card freezes silently.
+                if stream_event.type == "judge_clarify_pending":
+                    sd = stream_event.data or {}
+                    try:
+                        _pj.register(_pj.PendingJudge(
+                            chat_session_id=req.chat_session_id,
+                            build_session_id=str(sd.get("session_id")
+                                                 or judge_pending.build_session_id),
+                            phase_id=str(sd.get("phase_id") or "?"),
+                            requested_n=int(sd.get("requested_n") or 0),
+                            actual_rows=int(sd.get("actual_rows") or 0),
+                            value_desc=str(sd.get("value_desc") or ""),
+                            block_id=str(sd.get("block_id") or ""),
+                            instruction=judge_pending.instruction,
+                            base_pipeline=judge_pending.base_pipeline,
+                            skill_step_mode=judge_pending.skill_step_mode,
+                            user_id=judge_pending.user_id,
+                        ))
+                        log.info(
+                            "chat/intent-respond: re-registered pending_judge "
+                            "(2nd pause) for chat_session=%s phase=%s",
+                            req.chat_session_id, sd.get("phase_id"),
+                        )
+                    except Exception as ex:  # noqa: BLE001
+                        log.warning("re-register pending_judge failed: %s", ex)
+                    # Also explicitly emit pb_judge_clarify so the frontend
+                    # receives the card prompt (the sse_events path in
+                    # phase_verifier already emits via _flush_sse_events, but
+                    # the pause envelope itself doesn't carry the prompt).
+                    yield {
+                        "event": "pb_judge_clarify",
+                        "data": json.dumps({
+                            "type": "pb_judge_clarify",
+                            "session_id": req.chat_session_id,
+                            "build_session_id": sd.get("session_id"),
+                            "phase_id": sd.get("phase_id"),
+                            "requested_n": sd.get("requested_n"),
+                            "actual_rows": sd.get("actual_rows"),
+                            "ratio": sd.get("ratio"),
+                            "value_desc": sd.get("value_desc"),
+                            "block_id": sd.get("block_id"),
+                        }, default=str, ensure_ascii=False),
+                    }
+                    continue
+
                 wrapped = wrap_build_event_for_chat(
                     stream_event, judge_pending.build_session_id,
                 )
