@@ -140,9 +140,13 @@ def main():
             elif ev == "pb_glass_op":
                 op = d.get("op", "")
                 args_obj = d.get("args") or {}
-                pid = args_obj.get("phase_id", "?")
-                rnd = args_obj.get("round", "?")
-                summary = (args_obj.get("args_summary") or "")[:60]
+                # v30.17h moved phase context under underscore-prefixed keys
+                # (_phase_id, _round, _args_summary) so the top-level args
+                # stay clean for applyGlassOp. Try both legacy + new keys.
+                pid = args_obj.get("_phase_id") or args_obj.get("phase_id", "?")
+                rnd = args_obj.get("_round") or args_obj.get("round", "?")
+                summary = (args_obj.get("_args_summary")
+                           or args_obj.get("args_summary") or "")[:60]
                 print(f"    [{pid} r{rnd}] {op:18s} {summary}")
 
             elif ev == "pb_glass_done":
