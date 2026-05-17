@@ -199,8 +199,11 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                     "value_desc": eo_value_desc,
                     "block_id": block_id or "(unknown)",
                 }
-                if tracer is not None:
-                    tracer.record_step(
+                # Get tracer inline — the outer `tracer` var is assigned later
+                # in this function (line ~248) and isn't available here.
+                _tracer_inline = get_current_tracer()
+                if _tracer_inline is not None:
+                    _tracer_inline.record_step(
                         "phase_verifier", status="judge_deficit_pause",
                         **pause_state,
                     )
