@@ -465,6 +465,7 @@ async def _execute_build_pipeline_live(
     # and POSTs /agent/chat/intent-respond → that endpoint resumes the
     # build and continues the chat agent loop with the build result.
     intent_pause: Dict[str, Any] | None = None
+    judge_pause: Dict[str, Any] | None = None
     try:
         async for evt in stream_graph_build(
             instruction=prompt,
@@ -473,6 +474,27 @@ async def _execute_build_pipeline_live(
             skip_confirm=True,  # chat conversation IS the confirmation
             skill_step_mode=skill_step_mode,
         ):
+            # v30.17j: intercept judge_clarify_pending pause (deficit case)
+            if evt.type == "judge_clarify_pending":
+                judge_pause = evt.data or {}
+                _chat_sid = str(chat_session_id) if chat_session_id else ""
+                if event_emit is not None:
+                    try:
+                        event_emit({
+                            "type": "pb_judge_clarify",
+                            "session_id": _chat_sid,
+                            "build_session_id": judge_pause.get("session_id") or sid,
+                            "phase_id": judge_pause.get("phase_id"),
+                            "requested_n": judge_pause.get("requested_n"),
+                            "actual_rows": judge_pause.get("actual_rows"),
+                            "ratio": judge_pause.get("ratio"),
+                            "value_desc": judge_pause.get("value_desc"),
+                            "block_id": judge_pause.get("block_id"),
+                        })
+                    except Exception:  # noqa: BLE001
+                        pass
+                break  # stop draining; resume via /chat/intent-respond (judge_decision body)
+
             # v19: intercept intent_confirm_required pause
             if evt.type == "intent_confirm_required":
                 intent_pause = evt.data or {}
@@ -516,6 +538,42 @@ async def _execute_build_pipeline_live(
         logger.exception("build_pipeline_live graph crashed")
         return {"status": "failed",
                 "error_message": f"graph crashed: {type(e).__name__}: {e}"}
+
+    # v30.17j: if we hit judge clarify pause (data-source deficit),
+    # register pending_judge + return clarify_pending tool result so the
+    # chat LLM crafts a "資料源不足，等你決定" reply and stops.
+    if judge_pause is not None:
+        try:
+            from python_ai_sidecar.agent_orchestrator_v2 import pending_judge as _pj
+            _pj.register(_pj.PendingJudge(
+                chat_session_id=str(chat_session_id) if chat_session_id else "",
+                build_session_id=str(judge_pause.get("session_id") or sid),
+                phase_id=str(judge_pause.get("phase_id") or "?"),
+                requested_n=int(judge_pause.get("requested_n") or 0),
+                actual_rows=int(judge_pause.get("actual_rows") or 0),
+                value_desc=str(judge_pause.get("value_desc") or ""),
+                block_id=str(judge_pause.get("block_id") or ""),
+                instruction=prompt,
+                base_pipeline=base_pipeline_dict,
+                skill_step_mode=skill_step_mode,
+                user_id=chat_user_id,
+            ))
+        except Exception as ex:  # noqa: BLE001
+            logger.warning("pending_judge register failed: %s", ex)
+        return {
+            "status": "judge_clarify_pending",
+            "build_session_id": judge_pause.get("session_id") or sid,
+            "phase_id": judge_pause.get("phase_id"),
+            "requested_n": judge_pause.get("requested_n"),
+            "actual_rows": judge_pause.get("actual_rows"),
+            "note": (
+                "Build paused — data source returned fewer rows than the user's "
+                "count quantifier (e.g. 7 vs 100). User must pick: continue / "
+                "replan / cancel via the pb_judge_clarify card. Generate a SHORT "
+                "reply telling the user the data source only has X rows and ask "
+                "them to pick an option, then stop."
+            ),
+        }
 
     # v19: if we hit intent_confirm pause, return clarify_pending tool result
     if intent_pause is not None:

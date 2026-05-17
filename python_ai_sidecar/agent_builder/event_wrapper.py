@@ -322,6 +322,20 @@ def wrap_build_event_for_chat(
         # status update for partial build (some phases failed, take_over chosen)
         payload["type"] = "pb_glass_chat"
         payload["content"] = "⚠ Build 部分完成（有 phase 失敗，已採納部分結果）"
+    elif evt_type == "pb_judge_clarify":
+        # v30.17j — judge_clarify card emitted by phase_verifier when deficit
+        # detected. Pass through unchanged for ChatPanel to render JudgeClarifyCard.
+        payload["type"] = "pb_judge_clarify"
+        for k, v in data.items():
+            if k != "session_id":
+                payload[k] = v
+    elif evt_type == "judge_clarify_resolved":
+        # v30.17j — after user picks action, log to chat for visibility.
+        action = data.get("action") or "?"
+        pid = data.get("phase_id") or "?"
+        label = {"continue": "繼續用現有資料", "replan": "重新規劃", "cancel": "取消"}.get(action, action)
+        payload["type"] = "pb_glass_chat"
+        payload["content"] = f"✓ Phase {pid} 判決：{label}"
     # Silent v30 events that would spam chat without adding signal
     elif evt_type in (
         "phase_round",                 # each ReAct round; phase_action covers it

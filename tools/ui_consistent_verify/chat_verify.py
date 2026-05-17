@@ -57,6 +57,12 @@ CHAT_UI_HANDLED_EVENTS = frozenset({
     # case added 2026-05-17 (v30.17g) so chat mode no longer silently drops
     # the structured intent card.
     "design_intent_confirm",
+
+    # v30.17j (2026-05-17) — judge_clarify deficit pause card. Emitted by
+    # phase_verifier_node when data source returns rows significantly
+    # below user's count quantifier (e.g. user asked 100, data has 7).
+    # ChatPanel renders JudgeClarifyCard so user picks continue/replan/cancel.
+    "pb_judge_clarify",
 })
 
 

@@ -22,7 +22,8 @@ fast-forward testable in isolation and SSE granularity cleaner.
 from __future__ import annotations
 
 import logging
-from typing import Any
+import re
+from typing import Any, Optional
 
 from python_ai_sidecar.agent_builder.graph_build.state import BuildGraphState
 from python_ai_sidecar.pipeline_builder.seedless_registry import SeedlessBlockRegistry
@@ -35,6 +36,60 @@ logger = logging.getLogger(__name__)
 # whole build. If user has 8 phases and one composite covers them all,
 # we still pause to let LLM/user inspect at most every 4 phases.
 MAX_FAST_FORWARD_CHAIN = 4
+
+
+# v30.17j (2026-05-17) — deficit detection thresholds for user-interactive
+# "資料源不足，要繼續嗎?" gate. Triggers when value_desc has a count quantifier
+# AND actual rows >= 1 (zero is excluded; that's a separate case) AND
+# rows / requested_N is below DEFICIT_ASK_BELOW. Above DEFICIT_AUTO_ABOVE
+# we silently accept (close enough; no point bugging user).
+DEFICIT_AUTO_ABOVE = 0.8   # rows >= 80% of requested → silent accept
+DEFICIT_ASK_BELOW = 0.8    # rows <  80% of requested → ask user (if > 0)
+
+# Quantifier pattern: "100 筆" / "50 張" / "20 個" / "10 records" / "30 rows".
+# Captures the integer; demands a min of 2 digits so small numbers in
+# unrelated text ("第 1 個") don't trigger. Chinese 筆/張/個 + English
+# variants.
+# NB: \b doesn't work after CJK chars because 筆/張/個 are \w in Python 3
+# regex (Unicode word). Split alternation: CJK units need no boundary;
+# English units keep \b to avoid matching "recorded" / "rowdy" etc.
+_COUNT_QUANTIFIER_PATTERN = re.compile(
+    r'(?P<n>\d{2,})\s*(?:筆|張|個|records?\b|rows?\b|samples?\b)',
+    re.IGNORECASE,
+)
+
+
+def _detect_deficit(value_desc: str | None, rows: int | None) -> Optional[dict]:
+    """v30.17j — return deficit info dict when actual rows are significantly
+    below the requested count quantifier in value_desc; else None.
+
+    Returns: {"requested_n": int, "actual_rows": int, "ratio": float} or None.
+
+    Triggers ONLY when ALL of:
+      - value_desc parseable for an explicit count (≥ 2 digits + unit)
+      - rows > 0 (zero handled separately — likely filter bug, not data ceiling)
+      - rows < requested
+      - ratio = rows / requested < DEFICIT_AUTO_ABOVE (i.e. < 80% — not close enough)
+
+    Used by phase_verifier_node to decide whether to pause + ask user vs
+    continue the existing rule-based + LLM-judge gate.
+    """
+    if not value_desc or not isinstance(rows, int) or rows <= 0:
+        return None
+    m = _COUNT_QUANTIFIER_PATTERN.search(value_desc)
+    if not m:
+        return None
+    requested = int(m.group("n"))
+    if rows >= requested:
+        return None  # not a deficit; either meets target or excess
+    ratio = rows / requested
+    if ratio >= DEFICIT_AUTO_ABOVE:
+        return None  # close enough — auto-accept, don't pester user
+    return {
+        "requested_n": requested,
+        "actual_rows": rows,
+        "ratio": round(ratio, 3),
+    }
 
 
 async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]:
@@ -94,11 +149,84 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
             )
             break
 
+        # v30.17j (2026-05-17) — deficit gate BEFORE LLM-judge. If user
+        # asked for "100 筆" but actual is 7 (and not zero), check whether
+        # we've already collected a user decision for this phase. If yes
+        # (continue), skip the rest of judge logic and advance. If not,
+        # pause + ask user.
+        eo_value_desc = (phase.get("expected_output") or {}).get("value_desc") or ""
+        deficit = _detect_deficit(eo_value_desc, rows) if cur == idx else None
+        if deficit:
+            phase_id_str = phase.get("id") or ""
+            prior_decision = (state.get("v30_judge_decisions") or {}).get(phase_id_str)
+            if prior_decision == "continue":
+                # User already chose to accept the deficit — skip judge,
+                # treat as match=true, advance the phase.
+                logger.info(
+                    "phase_verifier: phase %s deficit pre-resolved (user=continue), "
+                    "treating as match", phase_id_str,
+                )
+                judge = {
+                    "match": True,
+                    "reason": (
+                        f"資料源僅 {deficit['actual_rows']} 筆 (要求 "
+                        f"{deficit['requested_n']} 筆)，user 選擇用現有資料繼續"
+                    ),
+                    "extracted": {},
+                }
+            elif prior_decision in ("replan", "cancel"):
+                # Shouldn't normally reach here because graph routing in
+                # replan/cancel paths bypasses re-verifying. Defensive:
+                # don't advance, let graph router handle.
+                logger.info(
+                    "phase_verifier: phase %s has prior decision=%s — break",
+                    phase_id_str, prior_decision,
+                )
+                break
+            else:
+                # First time seeing deficit — pause + ask user.
+                logger.info(
+                    "phase_verifier: phase %s DEFICIT detected (%d/%d=%.0f%%), "
+                    "pausing for user decision",
+                    phase_id_str, deficit["actual_rows"],
+                    deficit["requested_n"], deficit["ratio"] * 100,
+                )
+                pause_state = {
+                    "phase_id": phase_id_str,
+                    "requested_n": deficit["requested_n"],
+                    "actual_rows": deficit["actual_rows"],
+                    "ratio": deficit["ratio"],
+                    "value_desc": eo_value_desc,
+                    "block_id": block_id or "(unknown)",
+                }
+                if tracer is not None:
+                    tracer.record_step(
+                        "phase_verifier", status="judge_deficit_pause",
+                        **pause_state,
+                    )
+                return {
+                    "v30_judge_pause": pause_state,
+                    # don't change current_phase_idx — verifier rerun after
+                    # resume will pick up here
+                    "v30_last_mutated_logical_id": None,
+                    "v30_last_preview": None,
+                    "sse_events": [_event("pb_judge_clarify", {
+                        **pause_state,
+                        "options": [
+                            {"action": "continue", "label": "用現有資料繼續",
+                             "hint": f"用 {deficit['actual_rows']} 筆繼續 build，看結果"},
+                            {"action": "replan", "label": "重新規劃放寬條件",
+                             "hint": "改成「可取得的最大量」"},
+                            {"action": "cancel", "label": "取消"},
+                        ],
+                    })],
+                }
+
         # v30.10 B2: LLM-judge semantic check (covers expected_output.value_desc)
         # Skip judge for the FAST-FORWARD downstream phases (only judge the
         # current phase being advanced); FF claim is enough for follow-ups
         # because their value_desc may not be matchable from same sample row.
-        if cur == idx:
+        if cur == idx and not deficit:
             logger.info(
                 "phase_verifier: invoking LLM-judge for phase %s (block=%s rows=%s)",
                 phase.get("id"), block_id, rows,
@@ -124,8 +252,11 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                     phase.get("id"), judge_reject_reason[:120],
                 )
                 break
-        else:
+        elif cur != idx:
+            # FF downstream phase — accept the FF claim, skip judge.
             judge = {"match": True, "reason": "(FF downstream — judge skipped)", "extracted": {}}
+        # else: cur == idx and deficit — `judge` was set inline by the
+        # deficit-prior-decision branch above; keep it.
 
         outcome = _extract_outcome(phase, snapshot, preview_blob, extractors, block_id)
         advanced.append({

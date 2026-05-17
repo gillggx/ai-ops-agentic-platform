@@ -213,6 +213,22 @@ class BuildGraphState(TypedDict, total=False):
     # expected '最後一次' but got 87 rows; need sort+limit") guiding LLM
     # toward completion. Cleared once phase actually advances.
     v30_last_judge_reject_reason: Optional[str]
+    # v30.17j (2026-05-17): Judge deficit pause — set by phase_verifier_node
+    # when actual rows are significantly below the requested count
+    # quantifier in value_desc (e.g. user asked '最近 100 筆' but data source
+    # only has 7). Pauses the graph via judge_clarify_pause_node + emits
+    # pb_judge_clarify SSE so user can pick: continue / replan / cancel.
+    # Shape: {"phase_id", "requested_n", "actual_rows", "ratio",
+    #         "value_desc", "block_id"} or None.
+    v30_judge_pause: Optional[dict]
+    # v30.17j — record user decisions per phase so the same phase doesn't
+    # ask twice if LLM tries another block that also hits deficit.
+    # Shape: {"<phase_id>": "continue" | "replan" | "cancel"}.
+    v30_judge_decisions: dict[str, str]
+    # v30.17j — when user picks 'replan' on judge clarify, this hint is
+    # prepended to the next goal_plan call so the LLM knows to relax the
+    # count quantifier. Cleared after goal_plan reads it.
+    v30_replan_hint: Optional[str]
     # v13 (2026-05-13): per-node contracts the agent declares while writing
     # the plan. Runtime auto-preview compares each node's actual snapshot
     # to its contract; mismatch fires a targeted reflect_op (changes only
@@ -355,4 +371,7 @@ def initial_state(
         debug_step_mode=debug_step_mode,
         v30_step_paused_at_round=None,
         v30_last_judge_reject_reason=None,
+        v30_judge_pause=None,
+        v30_judge_decisions={},
+        v30_replan_hint=None,
     )

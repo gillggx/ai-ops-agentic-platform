@@ -12,6 +12,11 @@ import {
   type DesignIntentData,
 } from "@/components/copilot/DesignIntentCard";
 import { PlanCard, type PlanData, type PhaseStatus, type PhaseEntry } from "@/components/chat/PlanCard";
+import {
+  JudgeClarifyCard,
+  type JudgeAction,
+  type JudgeClarifyData,
+} from "@/components/chat/JudgeClarifyCard";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -35,7 +40,7 @@ interface LogEntry {
 
 interface ChatMessage {
   id: number;
-  role: "user" | "agent" | "design_intent" | "plan";
+  role: "user" | "agent" | "design_intent" | "plan" | "judge_clarify";
   content: string;
   /** For role === "design_intent" — the structured intent card to render. */
   designIntent?: DesignIntentData;
@@ -44,6 +49,10 @@ interface ChatMessage {
   designIntentPrompt?: string;
   /** For role === "plan" — v30 builder goal plan with live phase status. */
   plan?: PlanData;
+  /** For role === "judge_clarify" — v30.17j deficit pause card. */
+  judgeClarify?: JudgeClarifyData;
+  /** For role === "judge_clarify" — chat_session_id needed by intent-respond. */
+  judgeChatSessionId?: string;
   /** Optional render card embedded in agent message. */
   card?:
     | {
@@ -501,6 +510,34 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
             break;
           }
 
+          // v30.17j — judge_clarify deficit pause card. Sidecar pauses the
+          // graph when data source returns << user's count quantifier
+          // (e.g. user asked '100 筆' but data only has 7). User picks
+          // continue/replan/cancel; we POST to /chat/intent-respond with a
+          // judge_decision body that resumes the build.
+          case "pb_judge_clarify": {
+            const jcData: JudgeClarifyData = {
+              phase_id: (ev.phase_id as string) ?? "?",
+              requested_n: (ev.requested_n as number) ?? 0,
+              actual_rows: (ev.actual_rows as number) ?? 0,
+              ratio: (ev.ratio as number) ?? 0,
+              value_desc: (ev.value_desc as string) ?? "",
+              block_id: (ev.block_id as string) ?? "",
+            };
+            const chatSid = String(ev.session_id ?? ev.build_session_id ?? "");
+            setChatHistory((prev) => [...prev, {
+              id: nextId(),
+              role: "judge_clarify",
+              content: "",
+              judgeClarify: jcData,
+              judgeChatSessionId: chatSid,
+            }]);
+            addLog(makeLog("⚠️",
+              `JUDGE CLARIFY | phase=${jcData.phase_id} got ${jcData.actual_rows}/${jcData.requested_n}`,
+              "hitl"));
+            break;
+          }
+
           // intent_completeness gate (chat orchestrator_v2) — emits a
           // structured design intent card when the user prompt is too
           // ambiguous to build directly. UX matches AIAgentPanel's case
@@ -736,6 +773,83 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
               ) : msg.role === "plan" && msg.plan ? (
                 <div style={{ width: "100%", maxWidth: "95%" }}>
                   <PlanCard plan={msg.plan} />
+                </div>
+              ) : msg.role === "judge_clarify" && msg.judgeClarify ? (
+                <div style={{ width: "100%", maxWidth: "95%" }}>
+                  <JudgeClarifyCard
+                    data={msg.judgeClarify}
+                    onPick={async (action: JudgeAction) => {
+                      const phaseId = msg.judgeClarify?.phase_id;
+                      const chatSid = msg.judgeChatSessionId;
+                      // Mark card resolved (disables buttons + shows summary)
+                      setChatHistory((prev) => prev.map((m) =>
+                        m.id === msg.id && m.judgeClarify
+                          ? { ...m, judgeClarify: { ...m.judgeClarify, resolved: action } }
+                          : m,
+                      ));
+                      try {
+                        const res = await fetch("/api/agent/chat/intent-respond", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            chatSessionId: chatSid,
+                            judge_decision: { phase_id: phaseId, action },
+                          }),
+                        });
+                        if (!res.ok) {
+                          addLog(makeLog("❌",
+                            `JUDGE RESOLVE | HTTP ${res.status}`, "error"));
+                          return;
+                        }
+                        // Drain SSE so the resumed build's events render
+                        // through the same handler. Reuse minimal inline
+                        // reader (no consumeSSE because we're outside the
+                        // main switch — keep it explicit).
+                        const reader = res.body?.getReader();
+                        const decoder = new TextDecoder();
+                        let buf = "";
+                        while (reader) {
+                          const { value, done } = await reader.read();
+                          if (done) break;
+                          buf += decoder.decode(value, { stream: true });
+                          const blocks = buf.split(/\r?\n\r?\n/);
+                          buf = blocks.pop() ?? "";
+                          for (const block of blocks) {
+                            let evName = "message";
+                            const dl: string[] = [];
+                            for (const line of block.replace(/\r/g, "").split("\n")) {
+                              if (line.startsWith("event: ")) evName = line.slice(7).trim();
+                              else if (line.startsWith("data: ")) dl.push(line.slice(6));
+                            }
+                            if (!dl.length) continue;
+                            try {
+                              const d = JSON.parse(dl.join("\n")) as Record<string, unknown>;
+                              // Surface phase_completed / pb_glass_done as
+                              // chat messages so user sees the resumed build
+                              // progress. Full event-routing would need
+                              // recursion into the main switch — out of scope.
+                              if (evName === "pb_glass_chat") {
+                                const content = (d.content as string) ?? "";
+                                if (content) {
+                                  setChatHistory((prev) => [...prev, {
+                                    id: nextId(), role: "agent", content,
+                                  }]);
+                                }
+                              } else if (evName === "done" || d.type === "pb_glass_done") {
+                                const st = String(d.status ?? "");
+                                addLog(makeLog("✓",
+                                  `JUDGE RESUME DONE | status=${st}`, "info"));
+                              }
+                            } catch { /* skip */ }
+                          }
+                        }
+                      } catch (e) {
+                        addLog(makeLog("❌",
+                          `JUDGE RESOLVE FAILED | ${e instanceof Error ? e.message : e}`,
+                          "error"));
+                      }
+                    }}
+                  />
                 </div>
               ) : msg.role === "design_intent" && msg.designIntent ? (
                 <div style={{ width: "100%", maxWidth: "95%" }}>

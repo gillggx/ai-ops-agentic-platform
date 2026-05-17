@@ -345,6 +345,13 @@ async def goal_plan_node(state: BuildGraphState) -> dict[str, Any]:
     instruction = state.get("instruction") or ""
     base_pipeline = state.get("base_pipeline") or {}
     skill_step_mode = bool(state.get("skill_step_mode"))
+    # v30.17j — if user picked 'replan' on a previous judge clarify, the
+    # pause node set this hint. Prepend to instruction so the LLM relaxes
+    # the count quantifier in this re-plan.
+    replan_hint = state.get("v30_replan_hint")
+    if replan_hint:
+        instruction = f"[REPLAN HINT — relax constraints]\n{replan_hint}\n\n{instruction}"
+        logger.info("goal_plan_node: applying replan_hint (%d chars)", len(replan_hint))
 
     # Existing canvas snapshot — if user has manual nodes, list them so LLM
     # can plan incrementally instead of from-scratch overwriting.
@@ -584,6 +591,11 @@ async def goal_plan_node(state: BuildGraphState) -> dict[str, Any]:
         "v30_handover": None,
         "v30_phase_edit_history": {},
         "v30_phase_recent_actions": {},
+        # v30.17j — clear judge state on every re-plan so the new plan
+        # gets a fresh shot at the verifier without stale decisions.
+        "v30_judge_pause": None,
+        "v30_judge_decisions": {},
+        "v30_replan_hint": None,
         "summary": plan_summary,
         "status": "goal_plan_confirm_required",
         "is_from_scratch": not bool(base_pipeline.get("nodes")),

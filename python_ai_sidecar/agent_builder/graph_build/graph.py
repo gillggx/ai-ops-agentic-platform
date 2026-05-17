@@ -364,10 +364,13 @@ def _route_after_phase_loop(state: BuildGraphState) -> str:
 
 def _route_after_phase_verifier(state: BuildGraphState) -> str:
     """After phase_spanning_verifier_node ran:
+      - judge_pause set (v30.17j deficit) -> judge_clarify_pause (interrupt)
       - all phases done -> finalize
       - debug_step_mode -> step_pause_gate (pause for inspection)
       - else -> back to agentic_phase_loop for next round
     """
+    if state.get("v30_judge_pause"):
+        return "judge_clarify_pause"
     phases = state.get("v30_phases") or []
     idx = state.get("v30_current_phase_idx", 0)
     if idx >= len(phases):
@@ -401,6 +404,21 @@ def _route_after_phase_revise(state: BuildGraphState) -> str:
     if status == "handover_pending":
         return "halt_handover"
     return "agentic_phase_loop"
+
+
+def _route_after_judge_clarify(state: BuildGraphState) -> str:
+    """v30.17j — after judge_clarify_pause resumed with user action:
+      - status == "replan_pending" → goal_plan (LLM gets v30_replan_hint)
+      - status == "cancelled" (and v30_handover set) → halt_handover
+      - else (continue) → phase_verifier re-runs and accepts the deficit
+    """
+    status = state.get("status")
+    if status == "replan_pending":
+        return "goal_plan"
+    if status == "cancelled":
+        return "halt_handover"
+    # continue path — re-verify; deficit gate sees v30_judge_decisions[pid]=continue
+    return "phase_verifier"
 
 
 def _route_after_handover(state: BuildGraphState) -> str:
@@ -456,6 +474,11 @@ def build_graph():
     g.add_node("step_pause_gate", step_pause_gate_node)
     g.add_node("phase_revise", phase_revise_node)
     g.add_node("halt_handover", halt_handover_node)
+    # v30.17j: deficit pause node — interrupt() + wait for user action
+    from python_ai_sidecar.agent_builder.graph_build.nodes.judge_clarify_pause import (
+        judge_clarify_pause_node,
+    )
+    g.add_node("judge_clarify_pause", judge_clarify_pause_node)
 
     # v30 routing — entry conditional sends v30_mode=True builds through
     # goal_plan + ReAct loop; defaults stay on v27 clarify_intent.
@@ -494,7 +517,21 @@ def build_graph():
         {
             "agentic_phase_loop": "agentic_phase_loop",
             "step_pause_gate": "step_pause_gate",
+            "judge_clarify_pause": "judge_clarify_pause",
             "finalize": "finalize",
+        },
+    )
+    # v30.17j: after user picks action on judge clarify card:
+    #   continue → back to phase_verifier (re-runs, deficit gate sees prior decision)
+    #   replan   → back to goal_plan (replan_hint guides LLM)
+    #   cancel   → halt_handover (sets v30_handover for abort)
+    g.add_conditional_edges(
+        "judge_clarify_pause",
+        _route_after_judge_clarify,
+        {
+            "phase_verifier": "phase_verifier",
+            "goal_plan": "goal_plan",
+            "halt_handover": "halt_handover",
         },
     )
     g.add_conditional_edges(
