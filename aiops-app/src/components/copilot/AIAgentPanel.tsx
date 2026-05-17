@@ -19,6 +19,11 @@ import type { FlatDataMetadata, UIConfig } from "@/context/FlatDataContext";
 import { useAppContext } from "@/context/AppContext";
 import { DesignIntentCard, type DesignIntentData, type DesignIntentChoice } from "./DesignIntentCard";
 import { BulletConfirmCard } from "@/components/chat/BulletConfirmCard";
+import {
+  JudgeClarifyCard,
+  type JudgeClarifyData,
+  type JudgeAction,
+} from "@/components/chat/JudgeClarifyCard";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -83,12 +88,17 @@ interface IntentConfirmData {
 
 interface ChatMessage {
   id: number;
-  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "ops" | "clarify" | "design_intent" | "intent_confirm" | "chart_inline";
+  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "ops" | "clarify" | "design_intent" | "intent_confirm" | "chart_inline" | "judge_clarify";
   content: string;
   clarify?: ClarifyData;
   designIntent?: DesignIntentData;
   /** v19 (2026-05-14) — pb_intent_confirm card for chat-mode build clarify. */
   intentConfirm?: IntentConfirmData;
+  /** v30.17j — pb_judge_clarify deficit pause card. */
+  judgeClarify?: JudgeClarifyData;
+  /** v30.17j — chat session id captured at card-emit time, needed when
+   *  POSTing /chat/intent-respond with judge_decision body. */
+  judgeChatSessionId?: string;
   /** v19 (2026-05-14) — pb_glass_chart inline chart_spec snapshot. */
   chartSpec?: Record<string, unknown>;
   chartNodeId?: string;
@@ -1237,6 +1247,32 @@ export function AIAgentPanel({
             }
             break;
           }
+          // v30.17j — judge_clarify deficit pause card. Sidecar pauses graph
+          // when data source returns < 80% of user's count quantifier
+          // (e.g. user asked '100 筆' but data has 7). User picks 3-way:
+          // continue / replan / cancel; we POST /chat/intent-respond with
+          // judge_decision body to resume.
+          case "pb_judge_clarify": {
+            const jcData: JudgeClarifyData = {
+              phase_id: (ev.phase_id as string) ?? "?",
+              requested_n: (ev.requested_n as number) ?? 0,
+              actual_rows: (ev.actual_rows as number) ?? 0,
+              ratio: (ev.ratio as number) ?? 0,
+              value_desc: (ev.value_desc as string) ?? "",
+              block_id: (ev.block_id as string) ?? "",
+            };
+            const chatSid = String(
+              (ev.session_id as string) || (ev.build_session_id as string) || "",
+            );
+            setChatHistory((prev) => [...prev, {
+              id: nextId(),
+              role: "judge_clarify",
+              content: "",
+              judgeClarify: jcData,
+              judgeChatSessionId: chatSid,
+            }]);
+            break;
+          }
           case "pb_glass_error": {
             const msg = (ev.message as string) ?? "";
             const opName = ev.op as string | undefined;
@@ -1929,6 +1965,45 @@ export function AIAgentPanel({
                       intent {msg.intentConfirm.resolved === "confirmed" ? "✓ 已確認" : msg.intentConfirm.resolved === "refused" ? "✗ 已拒絕" : "⚠ 出錯"}
                     </div>
                   )}
+                </div>
+              ) : msg.role === "judge_clarify" && msg.judgeClarify ? (
+                <div style={{ width: "100%", maxWidth: "100%" }}>
+                  <JudgeClarifyCard
+                    data={msg.judgeClarify}
+                    onPick={async (action: JudgeAction) => {
+                      const phaseId = msg.judgeClarify?.phase_id;
+                      const chatSid = msg.judgeChatSessionId;
+                      // Disable buttons + show summary in card
+                      setChatHistory((prev) => prev.map((m) =>
+                        m.id === msg.id && m.judgeClarify
+                          ? { ...m, judgeClarify: { ...m.judgeClarify, resolved: action } }
+                          : m,
+                      ));
+                      try {
+                        const res = await fetch("/api/agent/chat/intent-respond", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            chatSessionId: chatSid,
+                            judge_decision: { phase_id: phaseId, action },
+                          }),
+                        });
+                        // Reuse build stream handler so resumed pb_glass_* events
+                        // flow through canvas + chat as if they came from the
+                        // original chat call.
+                        const handler = buildStreamHandlerRef.current;
+                        if (handler) {
+                          await consumeSSE(res, (ev: Record<string, unknown>) => {
+                            handler(ev as Parameters<typeof handler>[0]);
+                          }, () => {});
+                        } else {
+                          try { await res.body?.cancel(); } catch { /* ignore */ }
+                        }
+                      } catch (e) {
+                        console.error("judge_clarify resume failed", e);
+                      }
+                    }}
+                  />
                 </div>
               ) : msg.role === "ops" && msg.glassOps ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
