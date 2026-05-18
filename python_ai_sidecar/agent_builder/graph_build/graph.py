@@ -165,6 +165,19 @@ def _route_after_inspect(state: BuildGraphState) -> str:
     has been observed to produce schema-invalid output — losing a good
     build for a hypothetical improvement. Skip the loop in this case.
     """
+    # v30 (ReAct phase loop) has its own correction layer (phase_revise
+    # in-loop). reflect_plan was designed for v27 macro_plan and treats
+    # v30 builds as ORIGINAL PLAN: [] — it reinvents the pipeline from
+    # scratch via LLM, mutating canvas behind v30's back. Always skip on
+    # v30 path, even when validation_summary reports failed_structural —
+    # an orphan in a v30 build is a v30 bug, not a v27 repair target.
+    if state.get("v30_phases"):
+        issues = state.get("inspection_issues") or []
+        logger.info(
+            "route_after_inspect: v30 path detected, %d issue(s) — shipping v30 build as-is (skip reflect_plan)",
+            len(issues),
+        )
+        return "layout"
     issues = state.get("inspection_issues") or []
     if not issues:
         return "layout"
