@@ -873,6 +873,13 @@ def _build_canvas_diff_md(pipeline: PipelineJSON, phase: dict, state: dict | Non
             elif result == "llm_judge_rejected":
                 jrr = (vr.get("judge_reject_reason") or "")[:140]
                 lines.append(f"  → semantic check failed: {jrr}")
+            # v30.18: actionable steps from new task-progress judge
+            missing = vr.get("missing_for_phase") or []
+            if missing:
+                lines.append("  ** REQUIRED NEXT STEPS (from task-progress judge) **:")
+                for i, m in enumerate(missing[:3], 1):
+                    lines.append(f"    {i}. {m}")
+                lines.append("  → Your next action MUST satisfy at least step 1.")
             if wp:
                 lines.append(f"  blocks that WOULD pass: {wp[:8]}")
                 lines.append("  → switch to one of these; don't retry the rejected block.")
@@ -1095,6 +1102,13 @@ def _build_observation_md(state: BuildGraphState, phase: dict) -> str:
             lines.append(
                 f"  → semantic check failed: {vr.get('judge_reject_reason','')[:120]}"
             )
+        # v30.18: actionable steps from new task-progress judge
+        missing = vr.get("missing_for_phase") or []
+        if missing:
+            lines.append("  ** REQUIRED NEXT STEPS (from task-progress judge) **:")
+            for i, m in enumerate(missing[:3], 1):
+                lines.append(f"    {i}. {m}")
+            lines.append("  → Your next action MUST satisfy at least step 1.")
         if wp:
             lines.append(f"  blocks that WOULD pass for expected={exp}: {wp[:8]}")
             lines.append("  → switch to one of these. Don't retry the rejected block.")
