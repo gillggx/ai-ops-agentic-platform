@@ -61,25 +61,43 @@ def compute_phase_candidates(
     for (name, _version), spec in catalog.items():
         if str(spec.get("status") or "").lower() == "deprecated":
             continue
-        # v30.5: use covers_output (aligned with verifier + section)
-        covers = _resolve_covers(spec, kind="output")
-        if expected not in covers:
+        # Composite-aware: covers_internal = what the block CAN do (raw_data
+        # → transform → chart all inside one block); covers_output = what
+        # the OUTPUT port produces (chart_spec). Candidate eligibility uses
+        # internal capability; verifier still rows-gates on output.
+        covers_internal = _resolve_covers(spec, kind="internal")
+        covers_output = _resolve_covers(spec, kind="output")
+        if expected not in covers_internal:
             continue
 
-        # Walk remaining phases; record which can ALSO be covered
+        # Walk remaining phases; an intermediate is covered if its expected
+        # is in covers_internal; the chain's TERMINAL must be in
+        # covers_output (so rows-gate has a real port to check against).
         ff_through: list[str] = []
+        terminal_phase: str | None = None
+        if expected in covers_output:
+            terminal_phase = phase.get("id")
         for nxt in remaining_phases:
             nxt_exp = (nxt.get("expected") or "").strip()
-            if nxt_exp and nxt_exp in covers:
-                ff_through.append(nxt.get("id"))
-            else:
-                break  # contiguous-only fast-forward (matches verifier logic)
+            if not nxt_exp or nxt_exp not in covers_internal:
+                break  # contiguous-only fast-forward
+            ff_through.append(nxt.get("id"))
+            if nxt_exp in covers_output:
+                terminal_phase = nxt.get("id")
+
+        # If no phase in the chain (current + remaining) hits covers_output,
+        # the block can't legitimately complete the chain (no output port
+        # to satisfy any of the involved phases). Skip.
+        if terminal_phase is None:
+            continue
 
         candidates.append({
             "block": name,
-            "covers": covers,
+            "covers": covers_internal,
+            "covers_output": covers_output,
             "matches_phase_expected": True,
             "would_fast_forward_through": ff_through,
+            "terminal_phase": terminal_phase,
         })
         if ff_through:
             fast_fwd_blocks.append(name)

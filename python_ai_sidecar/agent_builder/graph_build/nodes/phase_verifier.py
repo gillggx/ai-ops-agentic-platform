@@ -146,9 +146,15 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
     registry = SeedlessBlockRegistry()
     registry.load()
     block_spec = registry.get_spec(block_id, "1.0.0") or {}
-    # v30.5 (2026-05-16): use covers_output (strict — what the block's
-    # output port can actually satisfy). See _resolve_covers docstring.
-    covers = _resolve_covers(block_spec, kind="output")
+    # Composite-aware (extends v30.5 split):
+    #   covers_output: what the block's OUTPUT PORT yields (rows-gate +
+    #                  LLM-judge target — strict).
+    #   covers_internal: full capability (block claims to do raw_data →
+    #                    transform → chart internally — used to walk FF
+    #                    chain through intermediate phases).
+    # For non-composite blocks the two are identical (resolver falls back).
+    covers_output = _resolve_covers(block_spec, kind="output")
+    covers_internal = _resolve_covers(block_spec, kind="internal")
     extractors = (block_spec.get("produces") or {}).get("outcome_extractors") or []
 
     # Walk phases starting at current; advance while block covers AND
@@ -167,8 +173,16 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
     while cur < len(phases) and len(advanced) < MAX_FAST_FORWARD_CHAIN:
         phase = phases[cur]
         ph_expected = (phase.get("expected") or "").strip()
-        if ph_expected not in covers:
+        # FF chain membership uses covers_internal so composite blocks
+        # (spc_panel: internal=[raw_data, transform, verdict, chart]) can
+        # walk through intermediate phases their output port doesn't expose.
+        if ph_expected not in covers_internal:
             break
+        # `internal_only` = this phase is covered by the block's internal
+        # capability but its output port doesn't produce this kind. Rows-
+        # gate + LLM-judge are skipped on intermediates (no port to check);
+        # they fire on the chain's terminal (ph_expected in covers_output).
+        internal_only = ph_expected not in covers_output
         # FF guard: if we've already advanced a phase of the SAME kind by
         # this block in the current chain, stop. The block can only
         # legitimately satisfy distinct kinds (composite multi-kind), not
@@ -181,7 +195,12 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
             )
             break
         # Rule-based quality gate: data-bearing phases must have rows>=1.
-        if ph_expected in {"raw_data", "transform", "table"} and (rows is None or rows < 1):
+        # Skip on internal-only phases (no output port to count).
+        if (
+            not internal_only
+            and ph_expected in {"raw_data", "transform", "table"}
+            and (rows is None or rows < 1)
+        ):
             logger.info(
                 "phase_verifier: phase %s expected=%s but rows=%s — block %s NOT counted",
                 phase.get("id"), ph_expected, rows, block_id,
@@ -270,6 +289,20 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                     })],
                 }
 
+        # Composite intermediate phase (block claims internal coverage but
+        # its output port doesn't expose this kind) — no port to judge or
+        # gate against. Trust the FF claim, advance without LLM-judge.
+        if internal_only:
+            logger.info(
+                "phase_verifier: phase %s (expected=%s) — composite internal-only "
+                "by block %s; skipping rows-gate + judge",
+                phase.get("id"), ph_expected, block_id,
+            )
+            judge = {
+                "match": True,
+                "reason": f"{ph_expected} phase covered internally by composite block {block_id}",
+                "extracted": {},
+            }
         # v30.17j: chart phases produce chart_spec (no rows).
         # v30.17l hotfix: verdict / alarm phases similarly produce
         # non-row-bearing output (Logic Node = {triggered: bool, evidence}).
@@ -277,14 +310,16 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
         # entirely and trust the covers gate.
         is_chart_phase_chart_output = (
             ph_expected == "chart"
-            and "chart" in covers
+            and "chart" in covers_output
             and _has_chart_spec_output(preview_blob)
         )
         is_verdict_or_alarm_phase = (
             ph_expected in {"verdict", "alarm"}
-            and ph_expected in covers
+            and ph_expected in covers_output
         )
-        if (is_chart_phase_chart_output or is_verdict_or_alarm_phase) and cur == idx:
+        if internal_only:
+            pass  # judge already set by composite-intermediate branch above
+        elif (is_chart_phase_chart_output or is_verdict_or_alarm_phase) and cur == idx:
             skip_reason = (
                 "chart_spec output" if is_chart_phase_chart_output
                 else "verdict/alarm phase (Logic Node output)"
