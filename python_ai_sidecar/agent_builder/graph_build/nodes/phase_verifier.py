@@ -407,7 +407,7 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                     would_pass.append(n)
             rows_gate_applicable = cur_expected in {"raw_data", "transform", "table"}
             rows_gate_failed = rows_gate_applicable and (rows is None or rows < 1)
-            if cur_expected not in covers:
+            if cur_expected not in covers_internal:
                 result = "covers mismatch"
             elif rows_gate_failed:
                 result = "rows quality gate failed"
@@ -423,7 +423,7 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                 "phase_verifier", status="no_match",
                 phase_id=cur_phase.get("id"),
                 expected=cur_expected,
-                block_id=block_id, covers=covers, rows=rows,
+                block_id=block_id, covers=covers_output, rows=rows,
                 judge_reject_reason=judge_reject_reason,
             )
             try:
@@ -432,9 +432,9 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                     phase_id=cur_phase.get("id"),
                     phase_expected=cur_expected,
                     candidate_block=block_id or "(unknown)",
-                    candidate_block_covers=covers,
+                    candidate_block_covers=covers_output,
                     comparison={
-                        "expected_in_covers": cur_expected in covers,
+                        "expected_in_covers": cur_expected in covers_internal,
                         "rows_quality_gate": (
                             "applicable" if rows_gate_applicable else "n/a"
                         ),
@@ -454,7 +454,7 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
         verifier_reject_info = {
             "block_id": block_id or "(unknown)",
             "expected": cur_expected,
-            "covers": list(covers),
+            "covers": list(covers_output),
             "rows": rows,
             "result": result if 'result' in dir() else "no_match",
             "judge_reject_reason": judge_reject_reason,
@@ -472,7 +472,7 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                 "current_phase_id": phases[idx].get("id"),
                 "expected": phases[idx].get("expected"),
                 "block_id": block_id,
-                "covers": covers,
+                "covers": covers_output,
                 "rows": rows,
                 "judge_reject_reason": judge_reject_reason,
             })],
@@ -557,7 +557,7 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                     phase_id=adv["id"],
                     phase_expected=adv["expected"],
                     candidate_block=block_id or "(unknown)",
-                    candidate_block_covers=covers,
+                    candidate_block_covers=covers_output,
                     comparison={
                         "expected_in_covers": True,
                         "rows": rows,
