@@ -746,18 +746,24 @@ def _build_oneblock_solutions_section(
         if str(spec.get("status") or "").lower() == "deprecated":
             continue
         output_covers = _resolve_covers(spec, kind="output")
-        if cur_expected not in output_covers:
+        internal_covers = _resolve_covers(spec, kind="internal")
+        # Eligibility uses covers_internal so composite blocks (spc_panel:
+        # internal=[raw_data, transform, verdict, chart]) surface in raw_data
+        # / transform phases too. Verifier's FF walk on covers_internal will
+        # accept them; rows-gate fires only at the chain's terminal (where
+        # ph_expected ∈ covers_output).
+        if cur_expected not in internal_covers:
             continue
 
-        internal_covers = _resolve_covers(spec, kind="internal")
         internal_extras = sorted(set(internal_covers) - set(output_covers))
         is_composite = bool(internal_extras)
 
-        # Contiguous chain — what verifier will actually fast-forward
+        # Contiguous chain — what verifier will actually fast-forward (uses
+        # covers_internal to match the verifier's chain-membership rule).
         ff_ids: list[str] = []
         for nxt in remaining_phases:
             nxt_exp = (nxt.get("expected") or "").strip()
-            if nxt_exp and nxt_exp in output_covers:
+            if nxt_exp and nxt_exp in internal_covers:
                 ff_ids.append(nxt.get("id"))
             else:
                 break  # contiguous-only chain (matches verifier semantics)
@@ -766,8 +772,18 @@ def _build_oneblock_solutions_section(
         # in later phases, even if a non-covered phase intervenes.
         future_covered = [
             nxt.get("id") for nxt in remaining_phases
-            if (nxt.get("expected") or "").strip() in output_covers
+            if (nxt.get("expected") or "").strip() in internal_covers
         ]
+
+        # Composite block must have at least one terminal in the chain
+        # where covers_output matches — else there's no port to rows-gate.
+        chain_kinds = {cur_expected} | {
+            (remaining_phases[i].get("expected") or "").strip()
+            for i in range(len(ff_ids))
+        }
+        has_output_terminal = bool(chain_kinds & set(output_covers))
+        if not has_output_terminal:
+            continue
 
         # v30.7 (2026-05-16): tightened promotion. Only include if:
         #   (a) has contiguous FF chain (real verifier benefit), OR
@@ -788,7 +804,7 @@ def _build_oneblock_solutions_section(
     cur_id = current_phase.get("id") or "current"
     out_lines = [
         "== 1-BLOCK SOLUTIONS (server-detected; verifier-confirmed) ==",
-        "Server 比對 phase.expected 與 block.produces.covers_output 算出（事實，非建議）。",
+        "Server 比對 phase.expected 與 block.produces.covers_internal 算出（事實，非建議）。",
         "**優先評估這些 candidate**：composite block 即使只滿足當前 phase，也常常一個 block 取代多步拼湊。",
     ]
     for name, ff_ids, future_covered, output_covers, internal_extras in solutions[:_ONEBLOCK_MAX_CANDIDATES]:
