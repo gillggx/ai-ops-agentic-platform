@@ -204,7 +204,7 @@ _SYSTEM = """你是 pipeline architect。User 給你需求，你產出 **goal-or
   - `expected_output`: **必填** — 描述「實際算出什麼」的具體 outcome：
       {
         "kind": "scalar_with_context" | "chart_list" | "table" | "raw_rows" | "alarm" | "transform_rows",
-        "value_desc": "OOC chart 實際張數 (int) + 該時刻 lot/tool/step",   # 真實算出的「東西」，不是 true/false
+        "value_desc": "OOC 圖表達門檻的判定結果",                          # 一句業務語意，不列欄位 / 不列數量
         "criterion": "ooc_count >= 2 視為通過判定",                          # 判定條件 (verdict 才填)
         "outcome_keys": ["ooc_count"]                                        # 給 verifier 抽值用的 key 提示 (1-3 個)
       }
@@ -215,12 +215,12 @@ _SYSTEM = """你是 pipeline architect。User 給你需求，你產出 **goal-or
   "plan_summary": "...一句話...",
   "phases": [
     {"id":"p1","goal":"取得 EQP-08 過去 7 天的歷史資料","expected":"raw_data",
-     "expected_output":{"kind":"raw_rows","value_desc":"該機台過去 7 天每筆事件記錄","outcome_keys":["row_count"]},
+     "expected_output":{"kind":"raw_rows","value_desc":"該機台的歷史事件記錄","outcome_keys":["row_count"]},
      "why":"先 7d 試，沒資料退到 30d"},
     {"id":"p2","goal":"判斷該機台最後一次 OOC 時刻同時 OOC 的圖表數量是否達門檻 (≥2)","expected":"verdict",
-     "expected_output":{"kind":"scalar_with_context","value_desc":"OOC 圖表實際張數 + 該時刻的批次/機台/站點","criterion":"圖表數 >= 2","outcome_keys":["ooc_chart_count"]}},
+     "expected_output":{"kind":"scalar_with_context","value_desc":"OOC 圖表是否達門檻","criterion":"圖表數 >= 2","outcome_keys":["ooc_chart_count"]}},
     {"id":"p3","goal":"展示該時刻所有 OOC 圖表的走勢與管制狀態","expected":"chart",
-     "expected_output":{"kind":"chart_list","value_desc":"N 張 OOC 圖表的歷史走勢圖","outcome_keys":["chart_list"]}}
+     "expected_output":{"kind":"chart_list","value_desc":"OOC 圖表的歷史走勢","outcome_keys":["chart_list"]}}
   ],
   "alarm": null
 }
@@ -267,6 +267,10 @@ _SYSTEM = """你是 pipeline architect。User 給你需求，你產出 **goal-or
      - ✅ Good: 「漂移偵測結果」
      - ✅ Good: 「各 lot 的描述性統計」
    - ❌ 不要寫 "true/false" 抽象判定，用「達門檻 / 超限 / 異常」業務語言
+   - ❌ **即使 user 自己寫「包含 X、Y、Z」也不要 mirror 回 value_desc** — 拿一個概括的業務名詞蓋過：
+       user: 「顯示 process 記錄包含每筆的 SPC/OOC 狀態」
+       ❌ value_desc: 「process 記錄含時刻、SPC 狀態、OOC 標記」
+       ✅ value_desc: 「process 的完整記錄表」
    - 理由：value_desc 寫越具體 → LLM-judge 拿來當 schema 嚴格比對 → 一定對不上 → build 卡死。
      一句語意描述讓 judge 用 fuzzy match，build 才走得通。
 5. **忠於 user 的需求 — 不要加 user 沒明確要求的 phase**（v30.17k, 2026-05-17）:
