@@ -100,6 +100,21 @@ add_node 的 `params` key 必須**100% 一字不差**從 inspect_block_doc 的 p
 別把所有 8 round 都拿來 inspect — 通常 inspect → add_node → (auto verifier) 2-3 round
 就該推進到下個 phase。看到下 round 還在同一 phase 就表示上一動作 verifier 沒接受，
 看 prompt 裡的 `phase_verifier_no_match` event 知道哪裡不對。
+
+== Block 選擇原則 (v30.18, 2026-05-18) ==
+不要直覺挑 block。選 block 前要走過評估流程:
+
+  1. 看 AVAILABLE BLOCKS 該 category 下所有 candidate 的 1-line desc
+  2. 對 top 2-3 候選 `inspect_block_doc(block_id)` 拿完整 doc + 限制 + 適用場景
+  3. 評估每個候選是否真的滿足 **當前 phase + 該 phase 後的 chart 需求**
+     (e.g. EWMA / Box Plot / Probability Plot 是不同 chart sub-type, 需用對
+     應的專用 block, 不是任何 chart block 都能替代)
+  4. 確認後再 add_node
+
+寧可多 1 round inspect, 也不要選錯 block 後反覆 remove + re-add。
+"composite block 一個解多 phase" 這種 shortcut 只在 user 明確要該 composite
+產出的東西時才適用 (e.g. 標準 SPC 管制圖 → spc_panel; EWMA chart →
+block_ewma_cusum，不是 spc_panel)。
 """
 
 
@@ -1038,10 +1053,13 @@ def _build_observation_md(state: BuildGraphState, phase: dict) -> str:
     # enrichment or goal-text rewrite) actually shifts LLM picks.
     phases = state.get("v30_phases") or []
     idx = state.get("v30_current_phase_idx", 0)
-    one_block_section = _build_oneblock_solutions_section(phase, phases[idx + 1:])
-    if one_block_section:
-        lines.append(one_block_section)
-        lines.append("")
+    # v30.18 (2026-05-18): SOLUTIONS section removed — its "fast-forward N
+    # phases" advertisement was misleading (didn't apply same-kind guard,
+    # promoted spc_panel for multi-chart cases where it can only produce 1
+    # SPC chart). Agent now evaluates candidates from AVAILABLE BLOCKS +
+    # inspect_block_doc per system prompt principle (see _SYSTEM).
+    # _build_oneblock_solutions_section is kept as dead code for future
+    # A/B testing.
 
     # v30.10 B2: previous phases' actual outcomes (LLM-judge confirmed).
     # Shows LLM what each completed phase REALLY produced + which node is

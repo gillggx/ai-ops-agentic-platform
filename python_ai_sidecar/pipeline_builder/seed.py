@@ -3436,7 +3436,11 @@ def _blocks() -> list[dict[str, Any]]:
             "status": "production",
             "description": (
                 "== What ==\n"
-                "**1-block SPC composite (取代 unnest+filter+sort+chart 4 步)** — 必填 step+chart_name，內部撈/篩/畫 SPC panel。\n"
+                "用 step + chart_name (+ optional tool_id) 一行查詢 SPC 歷史資料，"
+                "直接畫**標準 SPC 管制圖** (line + UCL/LCL/center + OOC highlight)。"
+                "**只出單一種 SPC chart 視覺化**——若 user 要 EWMA / CUSUM / Box Plot / "
+                "Probability Plot 等統計分析 chart，請用對應 block (block_ewma_cusum / "
+                "block_box_plot / block_probability_plot)，**不能**用 spc_panel 替代。\n"
                 "詳細介紹：給我 `step + chart_name` 兩個**必填**參數，"
                 "我內部撈 process_history → unnest spc_charts → 依 event_filter 模式挑時段 → "
                 "出 line/bar chart + 橘色 UCL/LCL + 綠色 value line + OOC highlight，"
@@ -3616,7 +3620,11 @@ def _blocks() -> list[dict[str, Any]]:
             "status": "production",
             "description": (
                 "== What ==\n"
-                "**1-block APC composite (取代 unnest+groupby+chart 3 步)** — 必填 step+chart_name，內部撈/篩/畫 APC 多 series。\n"
+                "用 step + chart_name (+ optional tool_id) 一行查詢 APC 歷史資料，"
+                "直接畫**標準 APC 多參數時序圖** (multi-series line, 無 UCL/LCL bound)。"
+                "**只出標準 APC chart**——若 user 要 EWMA / CUSUM / Box Plot / Probability "
+                "Plot 等統計分析 chart，請用對應 block 加 block_apc_long_form 餵料，"
+                "**不能**用 apc_panel 替代。\n"
                 "詳細介紹：給我 `step + chart_name` 兩個**必填**參數，"
                 "我內部撈 process_history → unnest apc_params → 依 event_filter 模式挑時段 → "
                 "出多 series line chart，一個 block 包好。（APC 原始資料無 UCL/LCL bound）\n"
