@@ -154,8 +154,43 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
 
     phases = state.get("v30_phases") or []
     idx = state.get("v30_current_phase_idx", 0)
-    if idx >= len(phases) or not block_id:
+    if idx >= len(phases):
         return {}
+    if not block_id:
+        # v30.18 (2026-05-19) — validation_error / failed path. Snapshot has
+        # no block_id (executor short-circuited before block ran). Without
+        # this branch, the early return left v30_last_verifier_reject
+        # pointing at the PREVIOUS round's reject — agent then saw stale
+        # info (e.g. "rejected block_unnest" after just adding a typoed
+        # block_filter) and walked away from the real issue.
+        cur_phase = phases[idx]
+        snapshot_status = snapshot.get("status") or "unknown"
+        error_msg = (snapshot.get("error") or "")[:300]
+        last_block_id = snapshot.get("block_id") or "(last action errored)"
+        verifier_reject_info = {
+            "block_id": last_block_id,
+            "expected": cur_phase.get("expected") or "",
+            "covers": [],
+            "rows": None,
+            "result": snapshot_status,  # "validation_error" / "failed" / "unknown"
+            "error_message": error_msg or "(no error message captured)",
+            "judge_reject_reason": None,
+            "missing_for_phase": [],
+            "would_have_passed_with": [],
+        }
+        return {
+            "v30_last_mutated_logical_id": None,
+            "v30_last_preview": None,
+            "v30_last_judge_reject_reason": None,
+            "v30_last_verifier_reject": verifier_reject_info,
+            "sse_events": [_event("phase_verifier_no_match", {
+                "current_phase_id": cur_phase.get("id"),
+                "expected": cur_phase.get("expected"),
+                "block_id": None,
+                "result": snapshot_status,
+                "error_message": error_msg,
+            })],
+        }
 
     registry = SeedlessBlockRegistry()
     registry.load()

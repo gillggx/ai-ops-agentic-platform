@@ -905,6 +905,19 @@ def _build_canvas_diff_md(pipeline: PipelineJSON, phase: dict, state: dict | Non
             elif result == "llm_judge_rejected":
                 jrr = (vr.get("judge_reject_reason") or "")[:140]
                 lines.append(f"  → semantic check failed: {jrr}")
+                lines.append(
+                    f"  → **保留**這個 block (不要 remove_node); judge 認可 block 操作"
+                    f"本身, 只是 pipeline 還沒到 phase 目標。**追加** missing 指定的 block。"
+                )
+            elif result in {"validation_error", "failed"}:
+                em = (vr.get("error_message") or "")[:200]
+                lines.append(
+                    f"  → BLOCK PARAMS / EXECUTION ERROR: {em}"
+                )
+                lines.append(
+                    f"  → 修 params (常見：param name 寫錯, e.g. 'op' 應為 'operator') "
+                    f"或先 inspect_block_doc 看正確 param schema。"
+                )
             # v30.18: actionable steps from new task-progress judge
             missing = vr.get("missing_for_phase") or []
             if missing:
