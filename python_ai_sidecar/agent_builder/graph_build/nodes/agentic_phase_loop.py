@@ -103,6 +103,23 @@ add_node 的 `params` key 必須**100% 一字不差**從 inspect_block_doc 的 p
 """
 
 
+def _load_glossary_safe() -> str:
+    """v30.18: load SPC/APC domain glossary into agent's system prompt.
+    Same content judge sees, so agent and judge share the canonical pipeline
+    pattern (raw → unnest → filter → chart, nested spc_charts structure, etc).
+    Returns empty string on import failure (defensive)."""
+    try:
+        from python_ai_sidecar.agent_builder.graph_build.prompts import (
+            load_spc_apc_glossary,
+        )
+        return "\n\n" + load_spc_apc_glossary()
+    except Exception:
+        return ""
+
+
+_SYSTEM = _SYSTEM + _load_glossary_safe()
+
+
 async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     """Single ReAct round for the active phase.
 
@@ -1102,13 +1119,19 @@ def _build_observation_md(state: BuildGraphState, phase: dict) -> str:
             lines.append(
                 f"  → semantic check failed: {vr.get('judge_reject_reason','')[:120]}"
             )
-        # v30.18: actionable steps from new task-progress judge
+        # v30.18: actionable steps from task-progress judge (上帝視角 hint).
+        # Judge sees task_contract + sample row + glossary; agent doesn't.
+        # Treat as directive, not suggestion.
         missing = vr.get("missing_for_phase") or []
         if missing:
-            lines.append("  ** REQUIRED NEXT STEPS (from task-progress judge) **:")
-            for i, m in enumerate(missing[:3], 1):
+            lines.append("  ** 上帝視角 NEXT STEP — judge 看了 task_contract + 實際資料告訴你: **")
+            for i, m in enumerate(missing[:2], 1):
                 lines.append(f"    {i}. {m}")
-            lines.append("  → Your next action MUST satisfy at least step 1.")
+            lines.append(
+                "  → 你下個 add_node/connect **直接照** step 1 做。"
+                "不要 inspect 其它 block (judge 已替你算過); "
+                "若你決定 override, 下一輪 reasoning 必須說明為何 judge 錯。"
+            )
         if wp:
             lines.append(f"  blocks that WOULD pass for expected={exp}: {wp[:8]}")
             lines.append("  → switch to one of these. Don't retry the rejected block.")

@@ -357,11 +357,21 @@ async def get_process_events(
     eventTime: Optional[str]      = Query(None),
     start_time: Optional[str]     = Query(None),
     limit:     int                = Query(100, ge=1, le=500),
+    # snake_case aliases — pipeline_builder blocks use snake convention
+    # (block_process_history translates internally, but generic block_mcp_call
+    # passes args verbatim). Accepting both shapes avoids silent-filter-skip
+    # when LLM constructs args dict with snake keys.
+    tool_id:   Optional[str]      = Query(None),
+    lot_id:    Optional[str]      = Query(None),
 ):
     """Query process events. Input determines single or multi:
     - lotID + step → single event (or few if multiple cycles)
     - toolID or lotID alone → multiple events across steps
     """
+    if toolID is None and tool_id is not None:
+        toolID = tool_id
+    if lotID is None and lot_id is not None:
+        lotID = lot_id
     if not toolID and not lotID and not step:
         raise HTTPException(400, "Must provide toolID, lotID, or step (at least one)")
 
@@ -497,11 +507,21 @@ async def get_process_info(
     eventTime:  Optional[str] = Query(None),
     since:      Optional[str] = Query(None, description="Time window: 24h/7d/30d"),
     limit:      int           = Query(50, ge=1, le=500),
+    # snake_case aliases — see /process/events note
+    tool_id:    Optional[str] = Query(None),
+    lot_id:     Optional[str] = Query(None),
+    object_name: Optional[str] = Query(None),
 ):
     """Query process events + object data, flattened.
 
     Returns [{eventTime, lotID, toolID, step, spc_status, SPC?: {...}, DC?: {...}, ...}]
     """
+    if toolID is None and tool_id is not None:
+        toolID = tool_id
+    if lotID is None and lot_id is not None:
+        lotID = lot_id
+    if objectName is None and object_name is not None:
+        objectName = object_name
     if not toolID and not lotID and not step:
         raise HTTPException(400, "Must provide toolID, lotID, or step (at least one)")
 

@@ -80,14 +80,23 @@ def _has_chart_spec_output(preview_blob: dict | None) -> bool:
     return False
 
 
-def _detect_deficit(value_desc: str | None, rows: int | None) -> Optional[dict]:
-    """v30.17j — return deficit info dict when actual rows are significantly
-    below the requested count quantifier in value_desc; else None.
+def _detect_deficit(
+    value_desc: str | None,
+    rows: int | None,
+    count_target_override: int | None = None,
+) -> Optional[dict]:
+    """v30.17j (extended v30.18) — return deficit info dict when actual rows
+    are significantly below the requested count; else None.
 
     Returns: {"requested_n": int, "actual_rows": int, "ratio": float} or None.
 
+    Source of `requested_n` (in order):
+      1. count_target_override (from task_contract.count_target) — preferred,
+         set once per build, more reliable than value_desc regex
+      2. value_desc regex match (legacy path)
+
     Triggers ONLY when ALL of:
-      - value_desc parseable for an explicit count (≥ 2 digits + unit)
+      - we have a requested_n via either source
       - rows > 0 (zero handled separately — likely filter bug, not data ceiling)
       - rows < requested
       - ratio = rows / requested < DEFICIT_AUTO_ABOVE (i.e. < 80% — not close enough)
@@ -95,12 +104,17 @@ def _detect_deficit(value_desc: str | None, rows: int | None) -> Optional[dict]:
     Used by phase_verifier_node to decide whether to pause + ask user vs
     continue the existing rule-based + LLM-judge gate.
     """
-    if not value_desc or not isinstance(rows, int) or rows <= 0:
+    if not isinstance(rows, int) or rows <= 0:
         return None
-    m = _COUNT_QUANTIFIER_PATTERN.search(value_desc)
-    if not m:
+    requested: int | None = None
+    if isinstance(count_target_override, int) and count_target_override > 0:
+        requested = count_target_override
+    elif value_desc:
+        m = _COUNT_QUANTIFIER_PATTERN.search(value_desc)
+        if m:
+            requested = int(m.group("n"))
+    if requested is None:
         return None
-    requested = int(m.group("n"))
     if rows >= requested:
         return None  # not a deficit; either meets target or excess
     ratio = rows / requested
@@ -213,7 +227,15 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
         # (continue), skip the rest of judge logic and advance. If not,
         # pause + ask user.
         eo_value_desc = (phase.get("expected_output") or {}).get("value_desc") or ""
-        deficit = _detect_deficit(eo_value_desc, rows) if cur == idx else None
+        # v30.18: pass task_contract.count_target so deficit pause fires
+        # even when value_desc lacks a count quantifier (the planner's
+        # value_desc is often abstract; task_contract holds the user's
+        # actual ask).
+        _tc = state.get("v30_task_contract") or {}
+        _count_target = _tc.get("count_target") if isinstance(_tc, dict) else None
+        deficit = _detect_deficit(
+            eo_value_desc, rows, count_target_override=_count_target,
+        ) if cur == idx else None
         if deficit:
             phase_id_str = phase.get("id") or ""
             prior_decisions = state.get("v30_judge_decisions") or {}
@@ -1106,10 +1128,16 @@ async def _judge_task_progress(
         "{\n"
         '  "advance_phase": bool,           # 這個 block 是否完成當前 phase\n'
         '  "task_progress_delta": str,      # 一句話：這 block 對任務的貢獻\n'
-        '  "missing_for_phase": [str],      # 若沒過，缺什麼具體步驟 (最多 2 條，給 agent actionable)\n'
+        '  "missing_for_phase": [str],      # **必填且非空** — 給 agent actionable 的下一步\n'
         '  "reason": str,                   # 100 字內判定原因\n'
         '  "extracted_outcomes": {}         # phase outcome key/value (給 ledger)\n'
         "}\n\n"
+        "**missing_for_phase 規則（極重要）**:\n"
+        "- 你有 task_contract + sample row + glossary 的『上帝視角』；agent 沒有。\n"
+        "- 每次都必須給 1-2 條 **具體**指令，格式如 'add_node block_filter params={column=name,op==,value=xbar_chart}' 或 'connect n2.data -> n3.data'。\n"
+        "- advance_phase=true 時，missing_for_phase 寫該 phase 的 follow-up confirmation（如 ['phase complete, proceed to next']）。\n"
+        "- advance_phase=false 時，missing_for_phase 寫**最 blocking 的單一動作**（不要列 3 條，列最該做的 1 條）。\n"
+        "- **禁止寫空 []** — 寫不出來就回顧 task_contract 找 gap。\n\n"
         "**硬性決策樹 (照這個順序判，不要自己加條件)**:\n\n"
         "STEP 1 — 結構檢查 (sample row 欄位值):\n"
         "  query: sample row 的 toolID / step / lotID 等欄位值\n"
