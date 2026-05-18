@@ -245,11 +245,17 @@ def _rows_count(outputs: dict[str, Any]) -> Optional[int]:
     for v in outputs.values():
         if isinstance(v, pd.DataFrame):
             return int(len(v))
-        if isinstance(v, dict) and "count" in v:
-            try:
-                return int(v["count"])
-            except (TypeError, ValueError):
-                return None
+        if isinstance(v, dict):
+            if "count" in v:
+                try:
+                    return int(v["count"])
+                except (TypeError, ValueError):
+                    return None
+            if "total_rows" in v:
+                try:
+                    return int(v["total_rows"])
+                except (TypeError, ValueError):
+                    return None
     return None
 
 
