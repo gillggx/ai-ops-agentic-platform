@@ -1111,12 +1111,19 @@ async def _judge_task_progress(
         '  "extracted_outcomes": {}         # phase outcome key/value (給 ledger)\n'
         "}\n\n"
         "判定原則:\n"
-        "1. 對照 task_contract 跟新 block 的實際輸出，看是否有 GAP\n"
+        "1. 對照 task_contract 跟新 block 的實際輸出，看是否有 **結構性** GAP\n"
         "2. user 點名單一 chart_kind / step / param，而資料還沒篩到 → 缺 filter，不過\n"
-        "3. user 要 N 筆而資料源只有 K 筆 (K >= 20% N): note 一下但放行；< 20% 才拒\n"
-        "4. user 要 chart 而當前 block 只是 transform: 該 phase 是 transform 就放，是 chart 就拒\n"
-        "5. 不要憑空臆測 user 意圖：以 user_instruction 原話為準\n"
-        "6. missing_for_phase 只列**最 blocking 的 1-2 條**，每條一句、actionable\n\n"
+        "3. **count_target 寬鬆規則 — 區分『block 對 vs 資料源量』**:\n"
+        "   - count_strictness='flexible' AND rows > 0: 一律 advance (加 note『資料源僅 K 筆』)；\n"
+        "     資料源天生有限不是 block 的錯\n"
+        "   - count_strictness='strict' AND rows < count_target: 拒\n"
+        "   - count_strictness='none' / count_target=null: 完全不看 count\n"
+        "4. **欄位值對不上 (block 拉錯資料) 一律拒**：\n"
+        "   - sample row 的 toolID/step/lotID 跟 source_filters 不符 → 拒，missing 寫『改用對的 source filter』\n"
+        "   - 跟 count rule 無關，這是 block 行為錯誤\n"
+        "5. user 要 chart 而當前 block 只是 transform: 該 phase 是 transform 就放，是 chart 就拒\n"
+        "6. 不要憑空臆測 user 意圖：以 user_instruction 原話為準\n"
+        "7. missing_for_phase 只列**最 blocking 的 1-2 條**，每條一句、actionable\n\n"
         + glossary
     )
 
