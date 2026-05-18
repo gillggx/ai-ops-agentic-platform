@@ -187,17 +187,18 @@ def wrap_build_event_for_chat(
     elif evt_type == "goal_plan_proposed":
         phases = data.get("phases") or []
         summary = (data.get("plan_summary") or "").strip()
-        lines = []
-        if summary:
-            lines.append(f"📋 Plan：{summary}")
+        # v30.18 (2026-05-19) — user-facing checklist style:
+        # title + progress + ◐/○ per item, no pid/no [expected] tag,
+        # no summary preamble. Static at goal_plan_proposed; live
+        # phase status update via structured payload["plan"] below.
+        lines: list[str] = ["📋 計畫"]
         if phases:
-            lines.append(f"📊 {len(phases)} 個 phase：")
-            for p in phases[:8]:
-                pid = p.get("id", "?")
+            lines.append(f"0/{len(phases)}")
+            for i, p in enumerate(phases[:8]):
+                marker = "◐" if i == 0 else "○"
                 goal = (p.get("goal") or "").strip()
-                exp = (p.get("expected") or "").strip()
-                lines.append(f"  • {pid} [{exp}] {goal[:60]}")
-        if not lines:
+                lines.append(f"{marker} {goal[:80]}")
+        if not phases:
             return None
         payload["type"] = "pb_glass_chat"
         payload["content"] = "\n".join(lines)
