@@ -497,6 +497,12 @@ def build_graph():
         judge_clarify_pause_node,
     )
     g.add_node("judge_clarify_pause", judge_clarify_pause_node)
+    # v30.18 (2026-05-18): task_contract_extractor — 1 LLM call after plan
+    # confirmed, before the build loop starts. Feeds _judge_task_progress.
+    from python_ai_sidecar.agent_builder.graph_build.nodes.task_contract_extractor import (
+        task_contract_extractor_node,
+    )
+    g.add_node("task_contract_extractor", task_contract_extractor_node)
 
     # v30 routing — entry conditional sends v30_mode=True builds through
     # goal_plan + ReAct loop; defaults stay on v27 clarify_intent.
@@ -511,12 +517,16 @@ def build_graph():
         _route_after_goal_plan,
         {"goal_plan_confirm_gate": "goal_plan_confirm_gate", "finalize": "finalize"},
     )
-    # v30: after user confirm phases -> start ReAct loop on phase 0
+    # v30: after user confirm phases -> task_contract_extractor (1 LLM call)
+    # -> agentic_phase_loop. v30.18: extractor populates v30_task_contract for
+    # the new _judge_task_progress verifier; if extractor fails, contract is
+    # None and verifier falls back to legacy LLM-judge.
     g.add_conditional_edges(
         "goal_plan_confirm_gate",
         _route_after_goal_plan_confirm,
-        {"agentic_phase_loop": "agentic_phase_loop", "finalize": "finalize"},
+        {"agentic_phase_loop": "task_contract_extractor", "finalize": "finalize"},
     )
+    g.add_edge("task_contract_extractor", "agentic_phase_loop")
     # v30: ReAct round -> phase_verifier (always, unless escalation). Verifier
     # decides phase advancement + fast-forward; routes back to loop or finalize.
     g.add_conditional_edges(

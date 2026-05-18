@@ -253,6 +253,21 @@ class BuildGraphState(TypedDict, total=False):
     #       "reason"?: str,
     #   }}
     node_contracts: dict[str, dict]
+    # v30.18 (2026-05-18): Task contract extracted from user instruction
+    # right after plan is confirmed. Shape:
+    #   {"user_instruction": str, "primary_action": str,
+    #    "source_filters": dict, "data_filters": dict,
+    #    "output_kind": str, "markers": [str],
+    #    "count_target": int|None, "count_strictness": str}
+    # None when extractor failed or v30 path not active (verifier falls back
+    # to old _llm_judge_phase_outcome).
+    v30_task_contract: Optional[dict]
+    # v30.18: One-shot ontology hint built by phase_verifier the first time
+    # a raw_data block advances. ~1-2 sentences describing the shape of the
+    # source data (e.g. "process_history 6 rows, each with nested
+    # spc_charts list of 12 chart kinds"). Carried into every subsequent
+    # _judge_task_progress call.
+    v30_ontology_context: Optional[str]
 
     # ── Confirm stage ─────────────────────────────────────────────────
     is_from_scratch: bool

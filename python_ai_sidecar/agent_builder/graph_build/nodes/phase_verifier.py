@@ -344,11 +344,35 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                 "phase_verifier: invoking LLM-judge for phase %s (block=%s rows=%s)",
                 phase.get("id"), block_id, rows,
             )
+            task_contract = state.get("v30_task_contract")
             try:
-                judge = await _llm_judge_phase_outcome(
-                    phase=phase, snapshot=snapshot,
-                    preview_blob=preview_blob, block_id=block_id, rows=rows,
-                )
+                if task_contract:
+                    # v30.18: task-accomplishment judge — has full input pack
+                    # (user instruction + contract + plan + upstream + ontology
+                    # + glossary). Returns advance_phase + missing_for_phase.
+                    upstream_brief = _build_upstream_brief(
+                        last_lid=last_lid, state=state, registry=registry,
+                    )
+                    judge_raw = await _judge_task_progress(
+                        phase=phase, all_phases=phases, current_idx=cur,
+                        snapshot=snapshot, preview_blob=preview_blob,
+                        block_id=block_id, rows=rows,
+                        task_contract=task_contract,
+                        ontology_context=state.get("v30_ontology_context") or "",
+                        upstream_brief=upstream_brief,
+                    )
+                    # Normalize to {match, reason, extracted, missing_for_phase}
+                    judge = {
+                        "match": bool(judge_raw.get("advance_phase", True)),
+                        "reason": str(judge_raw.get("reason") or "")[:300],
+                        "extracted": judge_raw.get("extracted_outcomes") or {},
+                        "missing_for_phase": judge_raw.get("missing_for_phase") or [],
+                    }
+                else:
+                    judge = await _llm_judge_phase_outcome(
+                        phase=phase, snapshot=snapshot,
+                        preview_blob=preview_blob, block_id=block_id, rows=rows,
+                    )
                 logger.info(
                     "phase_verifier: LLM-judge for phase %s -> match=%s reason=%s",
                     phase.get("id"), judge.get("match"),
@@ -451,6 +475,13 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
         # round prompt: which block was rejected, why, and which blocks
         # would have passed. Without this LLM kept retrying the same
         # rejected block (e.g. block_ewma_cusum for a verdict phase).
+        # v30.18: actionable hint from new judge — list of concrete steps the
+        # agent should take to satisfy this phase. Empty for legacy judge.
+        missing_for_phase: list[str] = []
+        try:
+            missing_for_phase = list(judge.get("missing_for_phase") or [])  # type: ignore[name-defined]
+        except (NameError, AttributeError):
+            pass
         verifier_reject_info = {
             "block_id": block_id or "(unknown)",
             "expected": cur_expected,
@@ -459,6 +490,7 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
             "result": result if 'result' in dir() else "no_match",
             "judge_reject_reason": judge_reject_reason,
             "would_have_passed_with": would_pass[:10] if 'would_pass' in dir() else [],
+            "missing_for_phase": missing_for_phase,
         }
         return {
             # Clear handoff fields so next round can fill them again
@@ -475,6 +507,7 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                 "covers": covers_output,
                 "rows": rows,
                 "judge_reject_reason": judge_reject_reason,
+                "missing_for_phase": missing_for_phase,
             })],
         }
 
@@ -524,6 +557,24 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
         # p6 prompt to show p3's reject info → LLM confused).
         "v30_last_verifier_reject": None,
     }
+
+    # v30.18: build ontology context the first time a raw_data phase
+    # advances. ~1-2 sentences describing the source data shape, carried
+    # into every subsequent _judge_task_progress call.
+    if not state.get("v30_ontology_context"):
+        first_raw = next(
+            (a for a in advanced if a.get("expected") == "raw_data"), None
+        )
+        if first_raw:
+            ontology_hint = _collect_ontology_context(
+                preview_blob=preview_blob, block_id=block_id, rows=rows,
+            )
+            if ontology_hint:
+                update["v30_ontology_context"] = ontology_hint
+                logger.info(
+                    "phase_verifier: collected ontology_context = %s",
+                    ontology_hint[:200],
+                )
 
     # Fast-forward report when >= 2 phases at once — user-visible card
     if len(advanced) >= 2:
@@ -869,3 +920,247 @@ def _short(v: Any) -> str:
 
 def _event(name: str, data: dict[str, Any]) -> dict[str, Any]:
     return {"event": name, "data": data}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# v30.18 — task-accomplishment verifier helpers
+# ─────────────────────────────────────────────────────────────────────
+
+
+def _collect_ontology_context(
+    preview_blob: dict, block_id: str | None, rows: int | None,
+) -> str:
+    """One-shot hint about source data shape, captured from first raw_data
+    block's preview. Examples:
+      "process_history 6 rows; each event has nested spc_charts list (12 chart kinds)"
+      "mcp_call returned 100 rows with columns [eventTime, toolID, lotID, step, spc_status]"
+    """
+    if not preview_blob or not block_id:
+        return ""
+    for _port, blob in (preview_blob or {}).items():
+        if not isinstance(blob, dict) or blob.get("type") != "dataframe":
+            continue
+        cols = blob.get("columns") or []
+        sample_rows = (
+            blob.get("sample_rows") or blob.get("rows_sample")
+            or blob.get("rows") or []
+        )
+        sample = sample_rows[0] if sample_rows else {}
+        nested_hints: list[str] = []
+        if isinstance(sample, dict):
+            for k, v in sample.items():
+                if isinstance(v, list) and v:
+                    first = v[0]
+                    if isinstance(first, dict):
+                        keys = list(first.keys())[:6]
+                        nested_hints.append(f"{k} is list[dict] keys={keys}")
+                    else:
+                        nested_hints.append(f"{k} is list len={len(v)}")
+                elif isinstance(v, dict):
+                    keys = list(v.keys())[:6]
+                    nested_hints.append(f"{k} is dict keys={keys}")
+        parts = [f"{block_id} returned {rows} rows"]
+        if cols:
+            parts.append(f"columns={cols[:12]}")
+        if nested_hints:
+            parts.append("nested: " + "; ".join(nested_hints[:3]))
+        return ". ".join(parts)
+    return ""
+
+
+def _build_upstream_brief(
+    last_lid: str, state: BuildGraphState, registry: Any,
+) -> list[dict]:
+    """Compact upstream chain for judge prompt — for each ancestor:
+        {node, block_id, output_rows, key_columns}
+    Skips sample row contents (already verified upstream); judge only
+    needs to know structure not data values."""
+    pipeline = (state.get("pipeline_json") or {})
+    nodes = pipeline.get("nodes") or []
+    edges = pipeline.get("edges") or []
+    exec_trace = state.get("exec_trace") or {}
+    logical_to_real = state.get("logical_to_real") or {}
+    real_to_logical = {v: k for k, v in logical_to_real.items()}
+
+    # last_lid is logical; map to real for canvas traversal
+    target_real = logical_to_real.get(last_lid, last_lid)
+    by_id = {n.get("id"): n for n in nodes if n.get("id")}
+    target_node = by_id.get(target_real)
+    if not target_node:
+        return []
+    ancestors: set[str] = set()
+    frontier = {target_real}
+    while frontier:
+        nxt: set[str] = set()
+        for e in edges:
+            to_id = (e.get("to") or {}).get("node")
+            from_id = (e.get("from") or {}).get("node")
+            if to_id in frontier and from_id and from_id not in ancestors and from_id != target_real:
+                ancestors.add(from_id)
+                nxt.add(from_id)
+        frontier = nxt
+
+    brief: list[dict] = []
+    for real_id in ancestors:
+        logical_id = real_to_logical.get(real_id, real_id)
+        snap = exec_trace.get(logical_id) or {}
+        node = by_id.get(real_id, {})
+        brief.append({
+            "node": logical_id,
+            "block_id": node.get("block_id", "?"),
+            "output_rows": snap.get("rows"),
+            "key_columns": (snap.get("cols") or [])[:8],
+        })
+    return brief
+
+
+async def _judge_task_progress(
+    *,
+    phase: dict,
+    all_phases: list[dict],
+    current_idx: int,
+    snapshot: dict,
+    preview_blob: dict,
+    block_id: str | None,
+    rows: int | None,
+    task_contract: dict,
+    ontology_context: str,
+    upstream_brief: list[dict],
+) -> dict[str, Any]:
+    """v30.18: task-accomplishment judge.
+
+    Compares CURRENT block + upstream + canvas state against the extracted
+    task contract (user-instruction-derived) to decide whether this phase
+    is genuinely satisfied. Returns missing_for_phase hints so the agent's
+    next round prompt can guide the right block pick.
+
+    Returns: {advance_phase, task_progress_delta, missing_for_phase[],
+              reason, extracted_outcomes}.
+    On error/parse fail, defaults to advance_phase=True (don't block build).
+    """
+    from python_ai_sidecar.agent_helpers_native.llm_client import get_llm_client
+    from python_ai_sidecar.agent_builder.graph_build.prompts import (
+        load_spc_apc_glossary,
+    )
+    import json as _json
+    import re
+
+    glossary = load_spc_apc_glossary()
+
+    # Build plan snapshot with [DONE]/[CURRENT]/[PENDING] markers
+    plan_lines: list[str] = []
+    for i, ph in enumerate(all_phases):
+        if i < current_idx:
+            status = "DONE"
+        elif i == current_idx:
+            status = "CURRENT"
+        else:
+            status = "PENDING"
+        plan_lines.append(
+            f"  {ph.get('id')} [{status}] {ph.get('expected')}: {(ph.get('goal') or '')[:80]}"
+        )
+
+    # Extract sample rows (3-5 full rows when possible, not aggressively
+    # truncated — judge needs to see actual values to detect mixed kinds)
+    sample_rows: list[dict] = []
+    cols: list[str] = []
+    for _port, blob in (preview_blob or {}).items():
+        if not isinstance(blob, dict):
+            continue
+        if blob.get("type") == "dataframe":
+            cols = blob.get("columns") or []
+            rs = (
+                blob.get("sample_rows") or blob.get("rows_sample")
+                or blob.get("rows") or []
+            )
+            for r in rs[:5]:
+                if isinstance(r, dict):
+                    trimmed: dict[str, Any] = {}
+                    for k, v in list(r.items())[:14]:
+                        if isinstance(v, dict) and len(v) > 4:
+                            trimmed[k] = f"<dict {len(v)}k>"
+                        elif isinstance(v, list) and len(v) > 4:
+                            trimmed[k] = f"<list[{len(v)}]>"
+                        else:
+                            trimmed[k] = v
+                    sample_rows.append(trimmed)
+            break
+        if blob.get("type") in ("dict", "chart_spec"):
+            snap = blob.get("snapshot") or blob
+            if isinstance(snap, dict):
+                sample_rows.append({k: snap.get(k) for k in list(snap.keys())[:10]})
+                break
+
+    upstream_block = ""
+    if upstream_brief:
+        upstream_block = "\n".join(
+            f"  {b['node']} [{b['block_id']}] rows={b['output_rows']} keys={b['key_columns']}"
+            for b in upstream_brief
+        )
+    else:
+        upstream_block = "  (none — this is the first block on this path)"
+
+    system_prompt = (
+        "你是 pipeline build verifier。判斷剛加的 block 是否讓 user 的任務更接近達成。\n\n"
+        "輸出 JSON (no markdown fence):\n"
+        "{\n"
+        '  "advance_phase": bool,           # 這個 block 是否完成當前 phase\n'
+        '  "task_progress_delta": str,      # 一句話：這 block 對任務的貢獻\n'
+        '  "missing_for_phase": [str],      # 若沒過，缺什麼具體步驟 (最多 2 條，給 agent actionable)\n'
+        '  "reason": str,                   # 100 字內判定原因\n'
+        '  "extracted_outcomes": {}         # phase outcome key/value (給 ledger)\n'
+        "}\n\n"
+        "判定原則:\n"
+        "1. 對照 task_contract 跟新 block 的實際輸出，看是否有 GAP\n"
+        "2. user 點名單一 chart_kind / step / param，而資料還沒篩到 → 缺 filter，不過\n"
+        "3. user 要 N 筆而資料源只有 K 筆 (K >= 20% N): note 一下但放行；< 20% 才拒\n"
+        "4. user 要 chart 而當前 block 只是 transform: 該 phase 是 transform 就放，是 chart 就拒\n"
+        "5. 不要憑空臆測 user 意圖：以 user_instruction 原話為準\n"
+        "6. missing_for_phase 只列**最 blocking 的 1-2 條**，每條一句、actionable\n\n"
+        + glossary
+    )
+
+    user_prompt = (
+        f"USER INSTRUCTION:\n{task_contract.get('user_instruction','')}\n\n"
+        f"TASK CONTRACT:\n{_json.dumps(task_contract, ensure_ascii=False, indent=2)[:1200]}\n\n"
+        f"PLAN SNAPSHOT:\n" + "\n".join(plan_lines) + "\n\n"
+        f"CURRENT PHASE: {phase.get('id')} {phase.get('expected')}\n"
+        f"PHASE GOAL: {phase.get('goal')}\n"
+        f"PHASE expected_output: {_json.dumps(phase.get('expected_output') or {}, ensure_ascii=False)[:300]}\n\n"
+        f"UPSTREAM CHAIN (already accepted):\n{upstream_block}\n\n"
+        f"JUST-ADDED BLOCK:\n"
+        f"  block_id: {block_id}\n"
+        f"  total_rows: {rows}\n"
+        f"  columns: {cols[:15]}\n"
+        f"  sample rows (up to 5):\n{_json.dumps(sample_rows, ensure_ascii=False, indent=2)[:1500]}\n\n"
+        f"ONTOLOGY CONTEXT (build-cached):\n  {ontology_context or '(none yet)'}\n"
+    )
+
+    client = get_llm_client()
+    resp = await client.create(
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_prompt}],
+        max_tokens=600,
+    )
+    raw = (resp.text or "").strip()
+    text = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.DOTALL).strip()
+    try:
+        parsed = _json.loads(text)
+    except Exception:
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        parsed = _json.loads(m.group(0)) if m else {}
+    if not isinstance(parsed, dict):
+        return {
+            "advance_phase": True,
+            "task_progress_delta": "(judge returned non-dict, default advance)",
+            "missing_for_phase": [],
+            "reason": "judge non-dict",
+            "extracted_outcomes": {},
+        }
+    return {
+        "advance_phase": bool(parsed.get("advance_phase", True)),
+        "task_progress_delta": str(parsed.get("task_progress_delta") or "")[:200],
+        "missing_for_phase": [str(m)[:200] for m in (parsed.get("missing_for_phase") or [])][:3],
+        "reason": str(parsed.get("reason") or "")[:300],
+        "extracted_outcomes": parsed.get("extracted_outcomes") or {},
+    }
