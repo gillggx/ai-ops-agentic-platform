@@ -681,37 +681,98 @@ async def step_pause_gate_node(state: BuildGraphState) -> dict[str, Any]:
     }
 
 
+_BLOCK_HEADLINE_CACHE: dict[str, str] | None = None
+_BLOCK_HEADLINE_CACHE_TS: float = 0.0
+_BLOCK_HEADLINE_TTL_SEC: float = 300.0
+
+
+async def _load_block_headlines_from_db() -> dict[str, str]:
+    """V49 (2026-05-19): bulk fetch frontmatter `description` from block_docs.
+    Used as the catalog brief 1-line summary (preferred over baked seed)."""
+    import time as _t
+    global _BLOCK_HEADLINE_CACHE, _BLOCK_HEADLINE_CACHE_TS
+    now = _t.time()
+    if _BLOCK_HEADLINE_CACHE is not None and (now - _BLOCK_HEADLINE_CACHE_TS) < _BLOCK_HEADLINE_TTL_SEC:
+        return _BLOCK_HEADLINE_CACHE
+    from python_ai_sidecar.clients.java_client import JavaAPIClient
+    from python_ai_sidecar.config import CONFIG
+    import re as _re
+    result: dict[str, str] = {}
+    try:
+        java = JavaAPIClient(
+            base_url=CONFIG.java_api_url,
+            token=CONFIG.java_internal_token,
+            timeout_sec=CONFIG.java_timeout_sec,
+        )
+        docs = await java.list_block_docs()
+        for d in (docs or []):
+            block_id = d.get("blockId") or d.get("block_id")
+            md = d.get("markdown") or ""
+            if not block_id or not md:
+                continue
+            # Parse frontmatter description
+            m = _re.match(r"^---\s*\n(.+?)\n---\s*\n", md, _re.DOTALL)
+            if not m:
+                continue
+            for line in m.group(1).splitlines():
+                if line.startswith("description:"):
+                    desc = line.split(":", 1)[1].strip()
+                    if desc:
+                        result[block_id] = desc[:200]
+                    break
+    except Exception:  # noqa: BLE001 — fall back to baked
+        pass
+    _BLOCK_HEADLINE_CACHE = result
+    _BLOCK_HEADLINE_CACHE_TS = now
+    return result
+
+
 def _build_catalog_brief() -> str:
     """v30 hotfix: LLM has no idea which blocks exist unless we list them.
     Dump all block names + category + 1-line `what` so the LLM can pick
     a real block_id to add_node OR inspect_block_doc.
 
     Cached after first build per-process (catalog is constant).
+
+    v49 (2026-05-19): prefer DB block_docs.frontmatter.description over
+    baked seed.py `== What ==` parsing. Falls back gracefully.
     """
     global _CATALOG_BRIEF_CACHE
     if _CATALOG_BRIEF_CACHE is not None:
         return _CATALOG_BRIEF_CACHE
 
     from python_ai_sidecar.pipeline_builder.seedless_registry import SeedlessBlockRegistry
+    import asyncio
     import re
     registry = SeedlessBlockRegistry()
     registry.load()
+
+    # Best-effort DB fetch — non-blocking via run_until_complete on a new
+    # loop when none active; tolerate failure silently.
+    headlines_db: dict[str, str] = {}
+    try:
+        loop = asyncio.new_event_loop()
+        try:
+            headlines_db = loop.run_until_complete(_load_block_headlines_from_db())
+        finally:
+            loop.close()
+    except Exception:  # noqa: BLE001
+        headlines_db = {}
 
     by_category: dict[str, list[str]] = {}
     for (name, _v), spec in registry.catalog.items():
         if str(spec.get("status") or "").lower() == "deprecated":
             continue
         cat = spec.get("category") or "transform"
-        desc = (spec.get("description") or "").strip()
-        # Extract first non-empty line of `== What ==` section as 1-line summary
-        what_line = ""
-        m = re.search(r"== What ==\s*\n+(.+?)(?:\n\n|\n==)", desc, re.DOTALL)
-        if m:
-            first = m.group(1).strip().split("\n")[0]
-            what_line = first[:90]
-        else:
-            # fallback: first line of desc
-            what_line = desc.split("\n", 1)[0][:90]
+        # Prefer DB headline; fall back to baked seed description first line.
+        what_line = headlines_db.get(name) or ""
+        if not what_line:
+            desc = (spec.get("description") or "").strip()
+            m = re.search(r"== What ==\s*\n+(.+?)(?:\n\n|\n==)", desc, re.DOTALL)
+            if m:
+                what_line = m.group(1).strip().split("\n")[0][:90]
+            else:
+                what_line = desc.split("\n", 1)[0][:90]
         by_category.setdefault(cat, []).append(f"  {name}  -- {what_line}")
 
     lines: list[str] = []

@@ -1041,7 +1041,9 @@ class BuilderToolset:
         + column_docs + examples). LLM calls when it needs the exact usage
         rules of a block it's about to add_node.
 
-        Cached lookup; reading the catalog is in-memory so no IO cost.
+        v49 (2026-05-19): description prefers DB block_docs.markdown (rich
+        Markdown maintained via admin UI) over baked seed.py description.
+        Falls back to seed when DB has no entry yet.
         """
         spec = self.registry.get_spec(block_id, "1.0.0")
         if not spec:
@@ -1050,10 +1052,13 @@ class BuilderToolset:
                 message=f"Block '{block_id}' not in catalog",
                 hint="Call list_blocks() to see available blocks.",
             )
+        description = await _resolve_block_description(
+            block_id, spec.get("description") or "",
+        )
         return {
             "block_id": spec.get("name"),
             "category": spec.get("category"),
-            "description": spec.get("description") or "",
+            "description": description,
             "input_schema": spec.get("input_schema") or [],
             "output_schema": spec.get("output_schema") or [],
             "param_schema": spec.get("param_schema") or {},
@@ -1290,3 +1295,40 @@ def _attach_chart_warnings(summary_out: dict[str, Any], spec: dict[str, Any]) ->
 
     if warnings:
         summary_out["warnings"] = warnings
+
+
+# ─────────────────────────────────────────────────────────────────────
+# V49 (2026-05-19) — block_docs DB-backed description resolver.
+# Sidecar prefers Markdown stored in `block_docs` table over the baked
+# seed.py description. Cache 60s per-process to avoid hammering Java on
+# every inspect_block_doc call.
+# ─────────────────────────────────────────────────────────────────────
+
+import time as _time
+
+_BLOCK_DOCS_CACHE: dict[str, tuple[float, str]] = {}
+_BLOCK_DOCS_TTL_SEC = 60.0
+
+
+async def _resolve_block_description(block_id: str, fallback: str) -> str:
+    """Return Markdown description for a block. Prefers DB block_docs;
+    falls back to baked seed.py description when DB has no entry yet."""
+    now = _time.time()
+    cached = _BLOCK_DOCS_CACHE.get(block_id)
+    if cached is not None and (now - cached[0]) < _BLOCK_DOCS_TTL_SEC:
+        return cached[1] or fallback
+    from python_ai_sidecar.clients.java_client import JavaAPIClient
+    from python_ai_sidecar.config import CONFIG
+    try:
+        java = JavaAPIClient(
+            base_url=CONFIG.java_api_url,
+            token=CONFIG.java_internal_token,
+            timeout_sec=CONFIG.java_timeout_sec,
+        )
+        doc = await java.get_block_doc(block_id, "1.0.0")
+        markdown = (doc or {}).get("markdown") if isinstance(doc, dict) else ""
+        _BLOCK_DOCS_CACHE[block_id] = (now, markdown or "")
+        return markdown or fallback
+    except Exception:  # noqa: BLE001 — fall back to seed silently
+        _BLOCK_DOCS_CACHE[block_id] = (now, "")
+        return fallback

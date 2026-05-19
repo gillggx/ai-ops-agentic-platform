@@ -189,6 +189,19 @@ class JavaAPIClient:
         params = {"mcpType": mcp_type} if mcp_type else None
         return await self._get_data("/internal/mcp-definitions", params=params)
 
+    async def list_block_docs(self) -> list[dict]:
+        """V49 (2026-05-19) — fetch all block docs. Sidecar caches per-process."""
+        return await self._get_data("/internal/block-docs")
+
+    async def get_block_doc(self, block_id: str, block_version: str = "1.0.0") -> Optional[dict]:
+        """Fetch one block doc. Returns None on 404."""
+        try:
+            return await self._get_data(f"/internal/block-docs/{block_id}/{block_version}")
+        except JavaAPIError as e:
+            if e.status == 404:
+                return None
+            raise
+
     async def get_mcp_by_name(self, name: str) -> Optional[dict]:
         """Fetch one MCP definition by name. Returns None if not found.
 
