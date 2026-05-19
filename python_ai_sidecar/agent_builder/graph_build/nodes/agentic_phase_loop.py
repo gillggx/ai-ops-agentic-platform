@@ -487,6 +487,7 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
                     "cols": cols[:20],
                     "sample": sample,
                     "runtime_schema_md": runtime_schema_md,
+                    "status": pv.get("status"),
                     "error": pv.get("error"),
                     "after_cursor": round_n,
                 }
@@ -1002,29 +1003,23 @@ def _build_canvas_diff_md(pipeline: PipelineJSON, phase: dict, state: dict | Non
                     f"  → '{exp}' is not in the rejected block's covers. "
                     f"You MUST pick a different block."
                 )
-            elif result == "llm_judge_rejected":
-                jrr = (vr.get("judge_reject_reason") or "")[:140]
-                lines.append(f"  → semantic check failed: {jrr}")
-                lines.append(
-                    f"  → **保留**這個 block (不要 remove_node); judge 認可 block 操作"
-                    f"本身, 只是 pipeline 還沒到 phase 目標。**追加** missing 指定的 block。"
-                )
-            elif result in {"validation_error", "failed"}:
+            elif result in {"validation_error", "failed", "error"}:
                 em = (vr.get("error_message") or "")[:200]
-                lines.append(
-                    f"  → BLOCK PARAMS / EXECUTION ERROR: {em}"
-                )
+                lines.append(f"  → executor error: {em}")
                 lines.append(
                     f"  → 修 params (常見：param name 寫錯, e.g. 'op' 應為 'operator') "
                     f"或先 inspect_block_doc 看正確 param schema。"
                 )
-            # v30.18: actionable steps from new task-progress judge
+            elif "orphan" in result:
+                lines.append(
+                    f"  → block 在 canvas 上但沒 connect 上游。"
+                    f"用 connect() 接到 source node 的 output port。"
+                )
             missing = vr.get("missing_for_phase") or []
             if missing:
-                lines.append("  ** REQUIRED NEXT STEPS (from task-progress judge) **:")
+                lines.append("  ** NEXT STEP (deterministic hint) **:")
                 for i, m in enumerate(missing[:3], 1):
                     lines.append(f"    {i}. {m}")
-                lines.append("  → Your next action MUST satisfy at least step 1.")
             if wp:
                 lines.append(f"  blocks that WOULD pass: {wp[:8]}")
                 lines.append("  → switch to one of these; don't retry the rejected block.")
@@ -1218,19 +1213,9 @@ def _build_observation_md(state: BuildGraphState, phase: dict) -> str:
         lines.append(f"why: {phase.get('why')}")
     lines.append("")
 
-    # v30.10 B2: surface last LLM-judge reject reason so LLM knows what's
-    # missing to actually complete the phase (rather than re-trying same path)
-    judge_reject = state.get("v30_last_judge_reject_reason")
-    if judge_reject:
-        lines.append("⚠ VERIFIER LLM-JUDGE rejected previous attempt:")
-        lines.append(f"   {judge_reject}")
-        lines.append("   → 修正 pipeline 補完 phase goal 才能 advance")
-        lines.append("")
-
-    # v30.17l (2026-05-18) — surface full verifier reject info so LLM doesn't
-    # keep retrying the same wrong block. Includes the rejected block_id,
-    # specific failure mode (covers mismatch / rows gate / judge), and the
-    # actual blocks that WOULD satisfy this phase.
+    # v30.20 (2026-05-19) — verifier reject feedback. Build-time verifier
+    # now only emits 3 result kinds: covers mismatch / validation_error /
+    # orphan. No more LLM-judge reject (moved to runtime).
     vr = state.get("v30_last_verifier_reject")
     if vr and isinstance(vr, dict):
         result = vr.get("result") or "no_match"
@@ -1247,28 +1232,23 @@ def _build_observation_md(state: BuildGraphState, phase: dict) -> str:
                 f"  → '{exp}' is not in the rejected block's covers. "
                 f"You MUST pick a different block."
             )
-        elif result == "rows quality gate failed":
+        elif result in {"validation_error", "failed", "error"}:
+            em = (vr.get("error_message") or "")[:200]
+            lines.append(f"  → executor error: {em}")
             lines.append(
-                f"  → block ran but produced rows={vr.get('rows')}. "
-                f"Fix upstream params or pick a block that yields data."
+                f"  → fix params (常見：param name 寫錯，e.g. 'op' 應為 'operator')，"
+                f"或先 inspect_block_doc 看正確 param schema。"
             )
-        elif result == "llm_judge_rejected":
+        elif "orphan" in result:
             lines.append(
-                f"  → semantic check failed: {vr.get('judge_reject_reason','')[:120]}"
+                f"  → block 已加入 canvas 但沒 connect 上游。"
+                f"用 connect(from_node, from_port, to_node, to_port) 接上。"
             )
-        # v30.18: actionable steps from task-progress judge (上帝視角 hint).
-        # Judge sees task_contract + sample row + glossary; agent doesn't.
-        # Treat as directive, not suggestion.
         missing = vr.get("missing_for_phase") or []
         if missing:
-            lines.append("  ** 上帝視角 NEXT STEP — judge 看了 task_contract + 實際資料告訴你: **")
+            lines.append("  ** NEXT STEP (deterministic hint) **:")
             for i, m in enumerate(missing[:2], 1):
                 lines.append(f"    {i}. {m}")
-            lines.append(
-                "  → 你下個 add_node/connect **直接照** step 1 做。"
-                "不要 inspect 其它 block (judge 已替你算過); "
-                "若你決定 override, 下一輪 reasoning 必須說明為何 judge 錯。"
-            )
         if wp:
             lines.append(f"  blocks that WOULD pass for expected={exp}: {wp[:8]}")
             lines.append("  → switch to one of these. Don't retry the rejected block.")
