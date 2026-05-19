@@ -1575,36 +1575,40 @@ def _make_result_digest(tool: str, result: Any) -> str:
     if err_val is not None and err_val != "":
         return f"ERROR: {str(err_val)[:120]}"
     if tool == "inspect_block_doc":
-        # Show enough to add_node correctly: REQUIRED params (verbatim names!),
-        # param-schema enum hints, and examples count. Without this LLM keeps
-        # using synonyms (equipment_id instead of tool_id, etc.).
-        bid = result.get("block_id")
-        cat = result.get("category")
-        ps = result.get("param_schema") or {}
-        required = ps.get("required") or []
-        props = ps.get("properties") or {}
-        param_lines = []
-        for pname, pspec in list(props.items())[:12]:
-            ptype = pspec.get("type", "?")
-            req = "REQUIRED" if pname in required else "opt"
-            default = pspec.get("default")
-            enum = pspec.get("enum")
-            extra = ""
-            if default is not None: extra += f" default={default!r}"
-            if enum: extra += f" enum={enum}"
-            param_lines.append(f"    {pname} ({ptype}, {req}){extra}")
-        ex = result.get("examples") or []
-        ex_lines = []
-        for e in ex[:2]:
-            label = e.get("label", "")
-            params = e.get("params", {})
-            ex_lines.append(f"    {label}: params={params}")
-        return (
-            f"got block_doc for {bid} (cat={cat}). USE THESE EXACT param names:\n"
-            + "\n".join(param_lines)
-            + (f"\n  EXAMPLES:\n" + "\n".join(ex_lines) if ex_lines else "")
-            + "\n  -- you now know enough to add_node. DO NOT re-inspect this block."
+        # v30.21 (2026-05-19) — surface the FULL DB-backed Markdown doc
+        # body (When-to-use / Inputs / Outputs / Examples / 前置依賴),
+        # not just param names. Prior digest threw away ~95% of the doc
+        # before the LLM saw it, leaving agent guessing params + missing
+        # critical upstream dependency hints. See feedback_no_case_rule_in_prompt.md
+        # — the right place for usage principles is the per-block doc,
+        # not the system prompt.
+        bid = result.get("block_id") or "(?)"
+        cat = result.get("category") or "?"
+        desc = (result.get("description") or "").strip()
+        param_lines = _fmt_param_schema_lines(result.get("param_schema") or {})
+        io_lines = _fmt_io_ports(
+            result.get("input_schema") or [], result.get("output_schema") or [],
         )
+        col_lines = _fmt_column_docs(result.get("column_docs") or [])
+
+        out = f"got block_doc for {bid} (cat={cat}):\n\n=== DOC ===\n{desc}\n"
+        if io_lines:
+            out += f"\n=== INPUT / OUTPUT PORTS ===\n{io_lines}\n"
+        out += (
+            f"\n=== STRICT PARAM SCHEMA (params key 必須一字不差) ===\n"
+            f"{param_lines}\n"
+        )
+        if col_lines:
+            out += f"\n=== UPSTREAM COLUMN HINTS ===\n{col_lines}\n"
+        out += (
+            "\n(已 inspect 過; 除非 params 改動，不要重複 inspect。"
+            "重點看「不適用情境 / 必要欄位 / 前置依賴」section 避免常見錯誤。)"
+        )
+        # Cap at 6K chars — leaves headroom in the LLM prompt window while
+        # preserving the full body for typical blocks (~2-5K each).
+        if len(out) > 6000:
+            out = out[:5900] + "\n... [truncated to 6K chars]"
+        return out
     if tool == "inspect_node_output":
         nid = result.get("node_id")
         rows = result.get("rows")
@@ -1638,6 +1642,68 @@ def _make_result_digest(tool: str, result: Any) -> str:
             return "phase_complete signal sent (verifier accepted)"
         return f"phase_complete REJECTED by verifier: {v_says.get('reason')}"
     return str(result)[:120]
+
+
+# ─────────────────────────────────────────────────────────────────────
+# v30.21 (2026-05-19) — inspect_block_doc digest helpers.
+# Used by _make_result_digest to render full Markdown + ports + params
+# instead of a bare param-name list. Was: agent saw 429 chars of param
+# schema only; now sees ~2.5K chars covering When-to-use / 前置依賴 /
+# Examples — the actual usage guidance the user wrote in block_docs DB.
+# ─────────────────────────────────────────────────────────────────────
+
+
+def _fmt_io_ports(input_schema: list[dict], output_schema: list[dict]) -> str:
+    """Format input + output ports concisely. Empty schemas → empty string
+    (caller skips the section)."""
+    lines: list[str] = []
+    if input_schema:
+        lines.append("inputs:")
+        for p in input_schema:
+            port = p.get("port", "?")
+            ptype = p.get("type", "?")
+            req = "required" if p.get("required", True) else "optional"
+            lines.append(f"  {port:<10} ({ptype}, {req})")
+    if output_schema:
+        lines.append("outputs:")
+        for p in output_schema:
+            port = p.get("port", "?")
+            ptype = p.get("type", "?")
+            lines.append(f"  {port:<10} ({ptype})")
+    return "\n".join(lines)
+
+
+def _fmt_param_schema_lines(ps: dict) -> str:
+    """Format param schema as one-line-per-param: name (type, REQ/opt) default+enum."""
+    required = ps.get("required") or []
+    props = ps.get("properties") or {}
+    lines: list[str] = []
+    for pname, pspec in list(props.items())[:20]:
+        ptype = pspec.get("type", "?")
+        req = "REQUIRED" if pname in required else "opt"
+        default = pspec.get("default")
+        enum = pspec.get("enum")
+        extra = ""
+        if default is not None:
+            extra += f" default={default!r}"
+        if enum:
+            extra += f" enum={enum}"
+        lines.append(f"  {pname} ({ptype}, {req}){extra}")
+    return "\n".join(lines) or "  (no params)"
+
+
+def _fmt_column_docs(column_docs: list[dict]) -> str:
+    """Format column_docs hints (best/ok/warn tags). Empty → empty string."""
+    if not column_docs:
+        return ""
+    lines: list[str] = ["(when picking the column param, prefer [best] tags; check [warn] for gotchas)"]
+    for c in column_docs[:12]:
+        name = c.get("name", "?")
+        tag = c.get("tag", "")
+        desc = (c.get("desc") or "")[:90]
+        tag_str = f"[{tag}] " if tag else ""
+        lines.append(f"  {tag_str}{name:<22} {desc}")
+    return "\n".join(lines)
 
 
 def _check_phase_done(
