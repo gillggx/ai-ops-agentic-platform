@@ -1,25 +1,28 @@
 """phase_verifier — deterministic build-time structural check.
 
-v30.20 (2026-05-19) — runtime concerns cut out. Verifier now does only
-build-time structural validation:
+v30.23 (2026-05-20) — covers gate moved behind feature flag (default OFF).
+Verifier now does:
 
-  (A) covers gate    — block output port type matches phase.expected
+  (A) covers gate    — OFF by default. Block output port covers must
+                        include phase.expected. Set
+                        BUILDER_VERIFIER_COVERS_GATE=1 to re-enable.
+                        When off, FF chain also disabled — one phase
+                        advance per verify call.
   (B) validation_error / failed — block executor short-circuited
   (C) orphan check   — non-source block has 0 inbound edges
 
-Removed (moved to future runtime verifier phase, not build-time):
+Why covers off by default: empirically covers mismatch caused most of
+the agent build failures (cpk added as side-branch rejected whole
+chart phase, filter→step_check rejected because filter is transform
+mid-chain). The phase.expected kind stays in plan + agent prompt as a
+HINT, but doesn't gate advance. Whether canvas actually produces the
+right output is a runtime concern (already deferred in v30.20).
+
+v30.20 (2026-05-19) — earlier cut moved these to runtime:
   - LLM-judge (_judge_task_progress / _llm_judge_phase_outcome)
   - rows quality gate (rows < 1 reject for raw_data/transform/table)
   - deficit detection (rows < requested_n * 0.8 pause)
   - empty_data routing (source_empty / filter_empty)
-  - chart_spec / verdict / alarm skip-judge optimization (no judge now)
-  - ontology_context collection (judge input)
-
-Why: build is a design phase. Auto-preview runs sample data only to
-verify pipeline structure works (schema + executor + connection); the
-actual rows count and semantic alignment to user intent belong to
-runtime — when user clicks Test Run / Deploy with real data, they
-inspect the result panel and decide whether to rebuild.
 
 Verifier output remains:
   - advance phase + emit phase_completed when structural checks pass
@@ -29,6 +32,7 @@ Verifier output remains:
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from python_ai_sidecar.agent_builder.graph_build.state import BuildGraphState
@@ -39,8 +43,16 @@ logger = logging.getLogger(__name__)
 
 
 # Cap fast-forward chain so a single composite block can't accidentally
-# close the whole build silently.
+# close the whole build silently. Only used when covers gate is ON.
 MAX_FAST_FORWARD_CHAIN = 4
+
+
+def _covers_gate_enabled() -> bool:
+    """Feature flag: covers gate gates phase advance + enables FF chain.
+    Default OFF (env var unset or "0"). Set BUILDER_VERIFIER_COVERS_GATE=1
+    to enable.
+    """
+    return os.environ.get("BUILDER_VERIFIER_COVERS_GATE", "0").strip() == "1"
 
 
 async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]:
@@ -102,7 +114,7 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
             ],
         )
 
-    # ── (A) Cover-gate walk ──────────────────────────────────────────
+    # ── Block + covers metadata ──────────────────────────────────────
     registry = SeedlessBlockRegistry()
     registry.load()
     block_spec = registry.get_spec(block_id, "1.0.0") or {}
@@ -111,36 +123,54 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
     extractors = (block_spec.get("produces") or {}).get("outcome_extractors") or []
     preview_blob = state.get("v30_last_preview") or {}
 
+    # ── (C) Orphan check — always runs (covers gate or not). ────────
+    # Non-source block with 0 inbound edges = structurally broken.
+    orphan_reject = _check_orphan(
+        state=state, block_spec=block_spec,
+        last_lid=last_lid, block_id=block_id,
+    )
+    if orphan_reject is not None:
+        return orphan_reject
+
+    # ── (A) Cover-gate walk — gated by feature flag ──────────────────
     advanced: list[dict[str, Any]] = []
     cur = idx
-    # FF chain must not merge multiple same-kind phases (composite blocks
-    # legitimately cover DISTINCT kinds, not multiple of the same kind).
-    seen_kinds_in_chain: set[str] = set()
-    while cur < len(phases) and len(advanced) < MAX_FAST_FORWARD_CHAIN:
-        phase = phases[cur]
+    covers_gate_on = _covers_gate_enabled()
+
+    if covers_gate_on:
+        # Original v30.20 covers walk + FF chain.
+        seen_kinds_in_chain: set[str] = set()
+        while cur < len(phases) and len(advanced) < MAX_FAST_FORWARD_CHAIN:
+            phase = phases[cur]
+            ph_expected = (phase.get("expected") or "").strip()
+            if ph_expected not in covers_internal:
+                break
+            if ph_expected in seen_kinds_in_chain:
+                logger.info(
+                    "phase_verifier: FF chain stop — already advanced a %s "
+                    "phase by block %s; same-kind stacking not allowed",
+                    ph_expected, block_id,
+                )
+                break
+            outcome = _extract_outcome(phase, snapshot, preview_blob, extractors, block_id)
+            advanced.append({
+                "id": phase["id"],
+                "expected": ph_expected,
+                "goal": phase.get("goal"),
+                "outcome": outcome["text"],
+                "evidence": outcome["evidence"],
+                "plan_target": phase.get("expected_output") or {},
+            })
+            seen_kinds_in_chain.add(ph_expected)
+            cur += 1
+    else:
+        # v30.23: covers gate OFF — advance ONE phase (current). No FF.
+        # phase.expected stays in plan/prompt as a hint but doesn't gate.
+        # If validation_error + orphan both passed, agent's canvas is
+        # structurally OK; whether it semantically matches expected is
+        # a runtime concern.
+        phase = phases[idx]
         ph_expected = (phase.get("expected") or "").strip()
-        if ph_expected not in covers_internal:
-            break
-        if ph_expected in seen_kinds_in_chain:
-            logger.info(
-                "phase_verifier: FF chain stop — already advanced a %s "
-                "phase by block %s; same-kind stacking not allowed",
-                ph_expected, block_id,
-            )
-            break
-        internal_only = ph_expected not in covers_output
-
-        # ── (C) Orphan check (only on current phase, non-source, not
-        # standalone, 0 inbound edges). Skip for internal-only phases —
-        # those are composite intermediates, no port to gate.
-        if cur == idx and not internal_only:
-            orphan_reject = _check_orphan(
-                state=state, block_spec=block_spec,
-                last_lid=last_lid, block_id=block_id,
-            )
-            if orphan_reject is not None:
-                return orphan_reject
-
         outcome = _extract_outcome(phase, snapshot, preview_blob, extractors, block_id)
         advanced.append({
             "id": phase["id"],
@@ -150,13 +180,11 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
             "evidence": outcome["evidence"],
             "plan_target": phase.get("expected_output") or {},
         })
-        seen_kinds_in_chain.add(ph_expected)
-        cur += 1
 
     tracer = get_current_tracer()
 
     if not advanced:
-        # covers mismatch — emit no_match with would-pass blocks list.
+        # Only reachable when covers gate ON. Emit covers mismatch reject.
         would_pass = _would_pass_blocks(registry, cur_expected)
         return _emit_reject(
             state=state,

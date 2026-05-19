@@ -71,9 +71,11 @@ set_param **多個 block** 建一條 chain（如 OOC 計數要 `filter → step_
 `run_verifier()`** 觸發 verifier 檢查。
 
 verifier 跑時會做 deterministic 結構檢查 (不是 LLM judge):
-  (a) covers gate: 你 chain 的 terminal block 的 covers 是否含 phase.expected
-  (b) validation_error: 鏈上任何 block executor 短路 / params 錯
-  (c) orphan: 非 source block 沒接上游
+  (a) validation_error: 鏈上任何 block executor 短路 / params 錯
+  (b) orphan: 非 source block 沒接上游
+  (c) covers gate: terminal block 的 covers 是否含 phase.expected
+      — **預設關閉** (BUILDER_VERIFIER_COVERS_GATE=1 才開)。
+      phase.expected 仍是 plan / prompt 內的「目標 hint」, 但不擋你 advance。
 
 verifier ADVANCED → 推進下一 phase (composite block 還可 fast-forward 多 phase)。
 verifier REJECTED → 留在當前 phase；prompt 會 surface reject 理由
