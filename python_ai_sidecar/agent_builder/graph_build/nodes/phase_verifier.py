@@ -499,8 +499,80 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
             ph_expected in {"verdict", "alarm"}
             and ph_expected in covers_output
         )
+        # v30.18 (2026-05-19) — skip-path STRUCTURAL guards BEFORE judge skip.
+        # The skip path previously trusted covers tag alone, which let
+        # validation_error / orphan nodes "advance" silently (alarm phase
+        # then validator C14 catches orphan at finalize → failed_structural).
+        # Guards (cheap, no LLM):
+        #   (i)  snapshot.status indicates failure (validation_error / failed)
+        #        → don't skip; treat as real reject so agent sees error_message
+        #   (ii) non-source block has 0 inbound edges AND block isn't
+        #        standalone_capable → reject with missing="connect upstream"
+        skip_block_failed = False
+        skip_block_orphan = False
+        if (is_chart_phase_chart_output or is_verdict_or_alarm_phase) and cur == idx:
+            snap_status = (snapshot or {}).get("status") or ""
+            if snap_status in {"validation_error", "failed", "error"}:
+                skip_block_failed = True
+            else:
+                # check 0 inbound edges + not standalone_capable
+                _cat = (block_spec.get("category") or "").lower()
+                _meta = (block_spec.get("meta") or {})
+                if (
+                    _cat != "source"
+                    and not _meta.get("standalone_capable")
+                ):
+                    pipeline_now = state.get("pipeline_json") or {}
+                    logical_to_real = state.get("logical_to_real") or {}
+                    target_real = logical_to_real.get(last_lid, last_lid)
+                    in_count = sum(
+                        1 for e in (pipeline_now.get("edges") or [])
+                        if (e.get("to") or {}).get("node") == target_real
+                    )
+                    if in_count == 0:
+                        skip_block_orphan = True
         if data_empty_flag or internal_only:
             pass  # judge already set by data_empty / composite-intermediate branch above
+        elif skip_block_failed:
+            err_msg = ((snapshot or {}).get("error") or "")[:200]
+            logger.info(
+                "phase_verifier: phase %s (%s) skip-path BLOCKED — "
+                "snapshot.status=%s (%s)",
+                phase.get("id"), ph_expected, snap_status, err_msg[:80],
+            )
+            judge = {
+                "match": False,
+                "reason": (
+                    f"block {block_id} execution failed ({snap_status}); "
+                    f"error: {err_msg[:120]}"
+                ),
+                "extracted": {},
+                "missing_for_phase": [
+                    f"fix {block_id} params or replace block — {snap_status}: {err_msg[:80]}"
+                ],
+            }
+            judge_reject_reason = judge["reason"]
+            break
+        elif skip_block_orphan:
+            logger.info(
+                "phase_verifier: phase %s (%s) skip-path BLOCKED — "
+                "%s has 0 inbound edges (non-source, not standalone)",
+                phase.get("id"), ph_expected, block_id,
+            )
+            judge = {
+                "match": False,
+                "reason": (
+                    f"{block_id} added but has no upstream edge; "
+                    f"non-source blocks need a connect() before advancing."
+                ),
+                "extracted": {},
+                "missing_for_phase": [
+                    f"connect upstream → {last_lid}.<input port> "
+                    f"(block {block_id} needs data from upstream)"
+                ],
+            }
+            judge_reject_reason = judge["reason"]
+            break
         elif (is_chart_phase_chart_output or is_verdict_or_alarm_phase) and cur == idx:
             skip_reason = (
                 "chart_spec output" if is_chart_phase_chart_output
@@ -1304,13 +1376,19 @@ async def _judge_task_progress(
         "         == contract.source_filters 的對應值?\n"
         "    NO  → advance_phase=FALSE, missing=['block 拉錯資料（toolID/step 不符），改 params 或換 block']\n"
         "    YES → 進 STEP 2\n\n"
-        "STEP 2 — 資料聚焦檢查 (對 transform / chart 階段才檢查):\n"
-        "  query: 當前 phase 是 transform 或 chart 嗎？且 contract.data_filters 有指定值?\n"
-        "    NO  → 跳過此 step，進 STEP 3\n"
-        "    YES → sample rows 的對應欄位 unique 值集合 == data_filters 的值?\n"
-        "          NO  → advance_phase=FALSE,\n"
-        "                missing=['filter(<col>=<value>) 把資料聚焦到單一目標']\n"
-        "          YES → 進 STEP 3\n\n"
+        "STEP 2 — 資料聚焦檢查 (**只對 transform / chart / table** 階段套用):\n"
+        "  query: 當前 phase 是 {transform, chart, table} 其中之一?\n"
+        "    NO  → 跳過此 step (raw_data / scalar / verdict / alarm 不檢查 data_filters),\n"
+        "          直接進 STEP 3\n"
+        "    YES → contract.data_filters 有指定值?\n"
+        "          NO  → 跳過, 進 STEP 3\n"
+        "          YES → sample rows 的對應欄位 unique 值集合 == data_filters 的值?\n"
+        "                NO  → advance_phase=FALSE,\n"
+        "                      missing=['filter(<col>=<value>) 把資料聚焦到單一目標']\n"
+        "                YES → 進 STEP 3\n\n"
+        "  **raw_data phase 的任務是『拿原始資料』, sample 是否含 mixed status\n"
+        "    不是 raw_data 的責任**; 套 STEP 2 會把 raw_data block 誤拒, 卡死\n"
+        "    後續 phase。\n\n"
         "STEP 3 — 數量檢查 (只在 STEP 1+2 都過後)：\n"
         "  query: rows > 0?\n"
         "    NO  → advance_phase=FALSE\n"
