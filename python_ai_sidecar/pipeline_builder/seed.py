@@ -3608,6 +3608,11 @@ def _blocks() -> list[dict[str, Any]]:
                             "time_range": "7d", "color_by": "toolID", "event_filter": "all"}},
             ],
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.spc_panel:SpcPanelBlockExecutor"},
+            # v30.18 (2026-05-19): standalone_capable — validator C14
+            # exempts this block from orphan check when its source params
+            # (tool_id / lot_id / step) are populated. spc_panel is a
+            # composite source+output (fetches own data + emits chart_spec).
+            "meta": {"standalone_capable": True},
             # v30.5 (2026-05-16): split covers into output vs internal.
             # output port is chart_spec ONLY (rows quality gate kills any
             # claim that it satisfies raw_data/transform). Internal capability
@@ -3754,6 +3759,9 @@ def _blocks() -> list[dict[str, Any]]:
                  "params": {"tool_id": "EQP-01", "event_filter": "all"}},
             ],
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.apc_panel:ApcPanelBlockExecutor"},
+            # v30.18 (2026-05-19): composite source+output (see spc_panel
+            # for explanation). Validator C14 orphan exemption.
+            "meta": {"standalone_capable": True},
             # v30.5 (2026-05-16): same split as spc_panel — see comment there.
             "produces": {
                 "covers_output": ["chart"],

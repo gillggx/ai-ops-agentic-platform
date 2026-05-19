@@ -127,6 +127,35 @@ def _detect_deficit(
     }
 
 
+def _detect_empty_data(
+    rows: int | None, upstream_brief: list[dict],
+) -> Optional[dict]:
+    """v30.18 (2026-05-19) — distinguish two flavors of rows=0:
+
+      - **source_empty**: this block's upstream max is also 0 (or no upstream
+        at all and this is a raw_data block returning 0). Data source genuinely
+        empty — pause + ask user how to proceed.
+      - **filter_empty**: upstream had rows > 0 but this block (filter / etc)
+        narrowed to 0. Legitimate filter result (e.g. "no events match
+        condition"). Advance with a data_empty badge in outcome; downstream
+        scalar/verdict can still produce a meaningful answer (count=0,
+        verdict=fail-threshold-not-met).
+
+    Returns None if rows != 0.
+    """
+    if not isinstance(rows, int) or rows != 0:
+        return None
+    upstream_rows: list[int] = []
+    for b in (upstream_brief or []):
+        r = b.get("output_rows")
+        if isinstance(r, int):
+            upstream_rows.append(r)
+    upstream_max = max(upstream_rows, default=0)
+    if upstream_max == 0:
+        return {"kind": "source_empty", "upstream_rows": upstream_max}
+    return {"kind": "filter_empty", "upstream_rows": upstream_max}
+
+
 async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]:
     """Decide whether the just-touched node satisfies one or more phases.
 
@@ -243,10 +272,90 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                 ph_expected, block_id,
             )
             break
+        # v30.18 (2026-05-19) — empty-data routing BEFORE rows-gate.
+        # rows=0 can mean two different things:
+        #  (a) filter narrowed legitimate upstream to 0 rows ("no matches") →
+        #      advance + mark data_empty so downstream count/verdict can
+        #      still produce a meaningful answer (count=0, verdict=fail).
+        #  (b) data source itself empty → pause + ask user (data unavailable).
+        empty_info = None
+        if cur == idx and not internal_only:
+            # Use upstream brief (computed once below for judge; do it here
+            # too — cheap walk over canvas edges).
+            _upstream = _build_upstream_brief(
+                last_lid=last_lid, state=state, registry=registry,
+            )
+            empty_info = _detect_empty_data(rows, _upstream)
+        data_empty_flag = False
+        if empty_info:
+            if empty_info["kind"] == "filter_empty":
+                # Legitimate empty filter result — skip rows-gate, advance
+                # with data_empty flag.
+                data_empty_flag = True
+                logger.info(
+                    "phase_verifier: phase %s filter_empty (upstream had "
+                    "%s rows, this block 0) — advancing with data_empty badge",
+                    phase.get("id"), empty_info["upstream_rows"],
+                )
+            else:
+                # source_empty — pause + ask user (reuse pb_judge_clarify channel)
+                phase_id_str = phase.get("id") or ""
+                prior_decisions = state.get("v30_judge_decisions") or {}
+                prior_decision = prior_decisions.get(phase_id_str)
+                any_prior_continue = any(
+                    v == "continue" for v in prior_decisions.values()
+                )
+                if prior_decision == "continue" or any_prior_continue:
+                    # user already said continue earlier; silently accept
+                    data_empty_flag = True
+                    logger.info(
+                        "phase_verifier: phase %s source_empty silently "
+                        "accepted (prior continue)", phase_id_str,
+                    )
+                elif prior_decision in ("replan", "cancel"):
+                    break
+                else:
+                    logger.info(
+                        "phase_verifier: phase %s source_empty (block %s "
+                        "rows=0, no upstream rows) — pausing user clarify",
+                        phase_id_str, block_id,
+                    )
+                    pause_state = {
+                        "phase_id": phase_id_str,
+                        "kind": "source_empty",
+                        "block_id": block_id or "(unknown)",
+                    }
+                    _tracer_inline = get_current_tracer()
+                    if _tracer_inline is not None:
+                        _tracer_inline.record_step(
+                            "phase_verifier", status="source_empty_pause",
+                            **pause_state,
+                        )
+                    return {
+                        "v30_judge_pause": pause_state,
+                        "v30_last_mutated_logical_id": None,
+                        "v30_last_preview": None,
+                        "sse_events": [_event("pb_judge_clarify", {
+                            **pause_state,
+                            "reason": (
+                                f"資料來源回 0 筆。block {block_id} 的上游也沒有資料 — "
+                                f"data source 可能空 / 條件太嚴。"
+                            ),
+                            "options": [
+                                {"action": "continue", "label": "用 0 筆繼續",
+                                 "hint": "下游 count=0 / verdict 不觸發"},
+                                {"action": "replan", "label": "改條件",
+                                 "hint": "agent 重新規劃放寬"},
+                                {"action": "cancel", "label": "取消"},
+                            ],
+                        })],
+                    }
         # Rule-based quality gate: data-bearing phases must have rows>=1.
-        # Skip on internal-only phases (no output port to count).
+        # Skip on internal-only phases (no output port to count) and on the
+        # filter_empty branch above (rows=0 is a legitimate result).
         if (
             not internal_only
+            and not data_empty_flag
             and ph_expected in {"raw_data", "transform", "table"}
             and (rows is None or rows < 1)
         ):
@@ -346,10 +455,26 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                     })],
                 }
 
+        # v30.18: filter_empty short-circuit — rows=0 but legitimate,
+        # advance without LLM-judge, tag extracted with data_empty=True
+        # so downstream + UI know.
+        if data_empty_flag:
+            logger.info(
+                "phase_verifier: phase %s data_empty advance (block %s)",
+                phase.get("id"), block_id,
+            )
+            judge = {
+                "match": True,
+                "reason": (
+                    f"{ph_expected} phase: filter 拿到 0 rows (upstream 有資料), "
+                    f"data_empty 是合法結果。下游 count/verdict 可基於 0 計算。"
+                ),
+                "extracted": {"data_empty": True},
+            }
         # Composite intermediate phase (block claims internal coverage but
         # its output port doesn't expose this kind) — no port to judge or
         # gate against. Trust the FF claim, advance without LLM-judge.
-        if internal_only:
+        elif internal_only:
             logger.info(
                 "phase_verifier: phase %s (expected=%s) — composite internal-only "
                 "by block %s; skipping rows-gate + judge",
@@ -374,8 +499,8 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
             ph_expected in {"verdict", "alarm"}
             and ph_expected in covers_output
         )
-        if internal_only:
-            pass  # judge already set by composite-intermediate branch above
+        if data_empty_flag or internal_only:
+            pass  # judge already set by data_empty / composite-intermediate branch above
         elif (is_chart_phase_chart_output or is_verdict_or_alarm_phase) and cur == idx:
             skip_reason = (
                 "chart_spec output" if is_chart_phase_chart_output

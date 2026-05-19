@@ -1098,8 +1098,14 @@ def _build_observation_md(state: BuildGraphState, phase: dict) -> str:
             lines.append(
                 f"  {p['id']}: target={target[:80]}"
             )
+            # v30.18: data_empty badge — filter produced 0 rows from a
+            # non-empty upstream. Downstream count=0 / verdict=fail is
+            # legitimate; agent should NOT redo upstream.
+            badge = ""
+            if extracted.get("data_empty"):
+                badge = "  [data_empty: filter 拿到 0 rows (上游非空); 視為合法空結果]"
             lines.append(
-                f"      → {node} [{block}]  {summary[:120]}{ex_str}"
+                f"      → {node} [{block}]  {summary[:120]}{ex_str}{badge}"
             )
         lines.append("")
 
