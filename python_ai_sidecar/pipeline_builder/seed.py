@@ -2174,8 +2174,14 @@ def _blocks() -> list[dict[str, Any]]:
             "status": "production",
             "description": (
                 "== What ==\n"
-                "當上游 Logic Node 觸發時，包裝成一筆告警 record。**不負責呈現 evidence**；\n"
+                "**alarm phase 的唯一適用 block**（覆蓋 covers=['alarm']）。當上游 Logic\n"
+                "Node 觸發時，包裝成一筆告警 record。**不負責呈現 evidence**；\n"
                 "Evidence 呈現由 Canvas 從 Logic Node 的 evidence port 直接展示。\n"
+                "\n"
+                "⚠ **不要在 alarm phase 選 block_threshold / block_step_check / block_cpk**\n"
+                "  — 這些是 verdict 系列 block (covers=['verdict','scalar'])，不滿足 alarm phase。\n"
+                "  正確 chain: <verdict block>.triggered → block_alert.triggered\n"
+                "             <verdict block>.evidence  → block_alert.evidence\n"
                 "\n"
                 "⚠ **不適用於 skill_step_mode pipelines**（即 Skill 的 step pipeline）：\n"
                 "  - Skill 架構下，pipeline 結尾**只放 `block_step_check`**，由 SkillRunner\n"

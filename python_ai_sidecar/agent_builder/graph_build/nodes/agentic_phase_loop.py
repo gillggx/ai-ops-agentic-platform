@@ -162,11 +162,18 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     phase = phases[idx]
     pid = phase["id"]
 
+    # v30.19 (Q2 follow-up A): per-phase round budget. alarm phases tend
+    # to involve multi-step alert+connect sequences (often after the agent
+    # confuses verdict vs alarm blocks); give them more headroom. chart
+    # phases sometimes need filter+chart_block iteration too.
+    phase_round_cap = MAX_REACT_ROUNDS
+    if (phase.get("expected") or "") in {"alarm", "chart"}:
+        phase_round_cap = 12
     # Round cap check
-    if round_n >= MAX_REACT_ROUNDS:
+    if round_n >= phase_round_cap:
         logger.warning(
-            "agentic_phase_loop: phase %s exhausted %d rounds — escalate to revise",
-            pid, MAX_REACT_ROUNDS,
+            "agentic_phase_loop: phase %s exhausted %d rounds (cap=%d, expected=%s) — escalate to revise",
+            pid, round_n, phase_round_cap, phase.get("expected"),
         )
         if tracer is not None:
             tracer.record_step(
@@ -1346,7 +1353,16 @@ def _build_observation_md(state: BuildGraphState, phase: dict) -> str:
         lines.append(instr[:600])
         lines.append("")
 
-    # AVAILABLE BLOCKS catalog (must be present so LLM picks real block_id)
+    # v30.19 (Q2 follow-up C): MATCHING BLOCKS section — narrows the
+    # AVAILABLE BLOCKS to those whose covers includes phase.expected, so
+    # agent at pick sub-phase doesn't try verdict blocks for alarm phase
+    # (e.g. block_threshold in p4 alarm).
+    matching = _build_matching_blocks_section(phase.get("expected"))
+    if matching:
+        lines.append(matching)
+        lines.append("")
+    # AVAILABLE BLOCKS catalog (full list — fallback if matching is empty
+    # or agent wants the broader picture).
     lines.append("== AVAILABLE BLOCKS (you MUST pick a block_id from this list) ==")
     lines.append(_build_catalog_brief())
     lines.append(
@@ -1831,3 +1847,42 @@ def _handle_signal_tool(tool_name: str, args: dict) -> dict:
     if tool_name == "run_verifier":
         return {"ok": True, "running_verifier": True}
     return {"ok": True}
+
+
+# v30.19 (Q2 follow-up C): MATCHING BLOCKS section — filter catalog by
+# phase.expected via produces.covers_internal. Surfaces ONLY blocks
+# whose covers includes phase.expected, so agent at pick sub-phase
+# doesn't pull verdict blocks for alarm phase etc.
+def _build_matching_blocks_section(expected: str | None) -> str:
+    if not expected:
+        return ""
+    from python_ai_sidecar.pipeline_builder.seedless_registry import SeedlessBlockRegistry
+    from python_ai_sidecar.agent_builder.graph_build.nodes.phase_verifier import (
+        _resolve_covers,
+    )
+    registry = SeedlessBlockRegistry()
+    registry.load()
+    matches: list[tuple[str, list[str], str]] = []
+    for (name, _v), spec in registry.catalog.items():
+        if str(spec.get("status") or "").lower() == "deprecated":
+            continue
+        cov_int = _resolve_covers(spec, kind="internal")
+        if expected not in cov_int:
+            continue
+        cov_out = _resolve_covers(spec, kind="output")
+        # 1-line description from baked seed (fallback when DB doc not loaded)
+        desc = (spec.get("description") or "").strip()
+        import re as _re
+        m = _re.search(r"== What ==\s*\n+(.+?)(?:\n\n|\n==)", desc, _re.DOTALL)
+        first = (m.group(1).strip().split("\n")[0] if m else desc.split("\n", 1)[0])[:90]
+        matches.append((name, cov_out, first))
+    if not matches:
+        return ""
+    matches.sort(key=lambda t: t[0])
+    lines: list[str] = [
+        f"== MATCHING BLOCKS for phase.expected={expected} (covers match) ==",
+        "(Only these block types cover this phase's expected output kind.)",
+    ]
+    for name, cov_out, first in matches[:15]:
+        lines.append(f"  {name}  covers_output={cov_out}  -- {first}")
+    return "\n".join(lines)
