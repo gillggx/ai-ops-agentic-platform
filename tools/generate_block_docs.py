@@ -121,8 +121,8 @@ status: {status}
 async def _list_blocks_from_seed() -> list[dict]:
     """Import seed catalog directly (script runs on sidecar host)."""
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from python_ai_sidecar.pipeline_builder.seed import BLOCK_DEFINITIONS
-    return [dict(b) for b in BLOCK_DEFINITIONS]
+    from python_ai_sidecar.pipeline_builder.seed import _blocks
+    return [dict(b) for b in _blocks()]
 
 
 async def _generate_doc(block: dict, reference_doc: str) -> str:

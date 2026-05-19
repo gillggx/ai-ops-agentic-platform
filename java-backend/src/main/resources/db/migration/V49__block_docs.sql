@@ -33,7 +33,9 @@ CREATE TABLE block_docs (
     -- Shape: {"description": "...", "when_to_invoke": "...",
     --         "inputs": "...", "outputs": "...",
     --         "parameters": "...", "examples": "..."}
-    sections        JSONB,
+    -- Stored as TEXT (JSON-as-text) per repo convention; entities use TEXT
+    -- not JSONB so Hibernate doesn't fight Postgres type system.
+    sections        TEXT,
 
     -- Provenance:
     --   true  = LLM-generated first version, has NOT been admin-reviewed
@@ -43,6 +45,7 @@ CREATE TABLE block_docs (
     last_edited_by  VARCHAR(120),                         -- user email/login
     last_edited_at  TIMESTAMPTZ,
     created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),  -- Auditable mapped superclass
 
     CONSTRAINT block_docs_uniq UNIQUE (block_id, block_version)
 );
