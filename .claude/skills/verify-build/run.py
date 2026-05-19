@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """verify-build runner — run a builder test and produce a structured
-3-section report (plan / stuck phase / round-by-round history).
+phase / attempt / action report.
 
 Modes:
   chat     — POST /internal/agent/chat (auto-confirm design_intent_confirm)
@@ -15,7 +15,10 @@ Designed to run from the user's laptop. Test runs against EC2 prod
   (a) sidecar isn't publicly exposed,
   (b) BuildTracer writes traces to EC2's /tmp/builder-traces/.
 
-SSH wrapper picks up SERVICE_TOKEN from /opt/aiops/python_ai_sidecar/.env.
+The canonical trace → model parser lives at
+  python_ai_sidecar.agent_builder.graph_build.trace_summary
+on EC2. This script SSH-invokes it for a single source of truth (the
+same model powers the web BuildTraceDrawer).
 """
 from __future__ import annotations
 
@@ -34,7 +37,6 @@ TRACE_DIR = "/tmp/builder-traces"
 
 
 def _ssh(cmd: str, *, timeout: int = 600) -> str:
-    """Run a remote command via SSH and return stdout."""
     full = ["ssh", "-i", SSH_KEY, "-o", "StrictHostKeyChecking=no", SSH_HOST, cmd]
     res = subprocess.run(full, capture_output=True, text=True, timeout=timeout)
     if res.returncode != 0:
@@ -43,14 +45,12 @@ def _ssh(cmd: str, *, timeout: int = 600) -> str:
 
 
 def _run_harness(mode: str, message: str) -> str:
-    """Invoke the right harness script on EC2 and return its stdout."""
     if mode == "chat":
         script = "tools/ui_consistent_verify/chat_walkthrough.py"
     elif mode == "builder":
         script = "tools/ui_consistent_verify/builder_verify.py"
     else:
         raise ValueError(f"unsupported mode={mode!r}")
-
     quoted_msg = message.replace('"', '\\"')
     bash = (
         f'cd {REMOTE_REPO} && sudo bash -c "source python_ai_sidecar/.env && '
@@ -61,359 +61,229 @@ def _run_harness(mode: str, message: str) -> str:
 
 
 def _newest_trace_path() -> str | None:
-    """Find the most recently modified trace file on EC2."""
     out = _ssh(f"sudo ls -t {TRACE_DIR}/*.json 2>/dev/null | head -1", timeout=30)
-    out = out.strip()
-    return out or None
+    return out.strip() or None
 
 
-def _fetch_trace(path: str) -> dict[str, Any]:
-    raw = _ssh(f"sudo cat {path}", timeout=60)
-    return json.loads(raw)
-
-
-# ── Trace parsing ──────────────────────────────────────────────────────
-
-
-def _extract_plan(trace: dict) -> dict:
-    """Pull the goal_plan_node entry (the first one — re-plans yield more)."""
-    steps = trace.get("graph_steps") or []
-    plan_step = next((s for s in steps if s.get("node") == "goal_plan_node"), None)
-    if not plan_step:
-        return {"summary": None, "phases": []}
-    phases = []
-    for p in plan_step.get("phases") or []:
-        phases.append({
-            "id": p.get("id"),
-            "goal": p.get("goal"),
-            "expected": p.get("expected"),
-            "expected_kind": (p.get("expected_output") or {}).get("kind"),
-            "auto_injected": bool(p.get("auto_injected")),
-        })
-    return {"summary": plan_step.get("summary"), "phases": phases}
-
-
-def _classify_phase_status(trace: dict) -> dict[str, str]:
-    """Per phase id: completed / stuck / not_reached.
-
-    A phase is `completed` if any phase_verifier with status='advanced'
-    lists it in phases_advanced. `stuck` if it appears in agentic_phase_loop
-    with status in {round_max_hit, revise_failed} or in halt_handover_node
-    record. Otherwise `not_reached`.
-    """
-    plan = _extract_plan(trace)
-    status = {p["id"]: "not_reached" for p in plan["phases"]}
-
-    for step in trace.get("graph_steps") or []:
-        node = step.get("node", "")
-        if node == "phase_verifier" and step.get("status") == "advanced":
-            for pid in step.get("phases_advanced") or []:
-                if pid in status:
-                    status[pid] = "completed"
-        elif node == "agentic_phase_loop" and step.get("status") in (
-            "round_max_hit", "revise_failed", "revise_budget_exhausted"
-        ):
-            pid = step.get("phase_id")
-            if pid in status and status[pid] != "completed":
-                status[pid] = "stuck"
-        elif node in ("halt_handover_node", "phase_revise_failed"):
-            pid = step.get("phase_id")
-            if pid in status and status[pid] != "completed":
-                status[pid] = "stuck"
-    return status
-
-
-def _find_stuck_phase(status: dict[str, str]) -> str | None:
-    for pid, s in status.items():
-        if s == "stuck":
-            return pid
-    return None
-
-
-def _verifier_verdicts_for(trace: dict, phase_id: str) -> list[dict]:
-    """Join phase_verifier graph_steps with the richer verifier_decisions
-    records (added by record_verifier_decision). The latter has the real
-    comparison.result + would_have_passed_with — graph_steps only has
-    covers/rows/status which can mislead (says 'rows quality gate failed'
-    even when the actual cause was the LLM-judge semantic check)."""
-    out = []
-    # Build lookup of verifier_decisions by phase + block (closest match by ts)
-    decisions = [d for d in (trace.get("verifier_decisions") or [])
-                 if d.get("phase_id") == phase_id]
-    used = set()
-
-    for step in trace.get("graph_steps") or []:
-        if step.get("node") != "phase_verifier":
-            continue
-        if step.get("phase_id") != phase_id:
-            continue
-        # Find the matching verifier_decision (same block, unused, earliest ts after step)
-        match = None
-        for i, dec in enumerate(decisions):
-            if i in used:
-                continue
-            if dec.get("candidate_block") == step.get("block_id"):
-                match = dec
-                used.add(i)
-                break
-        entry = {
-            "expected": step.get("expected"),
-            "block_id": step.get("block_id"),
-            "covers": step.get("covers"),
-            "rows": step.get("rows"),
-            "status": step.get("status"),
-        }
-        if match:
-            comp = match.get("comparison") or {}
-            entry["comparison_result"] = comp.get("result")
-            entry["judge_reject_reason"] = comp.get("judge_reject_reason")
-            entry["would_have_passed_with"] = match.get("would_have_passed_with")
-        # graph_step also carries judge_reject_reason since v30.17g
-        if step.get("judge_reject_reason") and not entry.get("judge_reject_reason"):
-            entry["judge_reject_reason"] = step.get("judge_reject_reason")
-        out.append(entry)
-    return out
-
-
-def _build_timeline(trace: dict, phase_id: str) -> list[dict]:
-    """v30.17i — interleave agentic_phase_loop rounds with phase_verifier
-    no_match verdicts in chrono order, so the report reads as a story:
-      r2 add_node spc_panel → success
-        → verdict: COVERS MISMATCH ('chart' not in ['raw_data'])
-      r4 inspect_block_doc
-      r5 remove_node spc_panel
-      r6 add_node process_history → 7 rows
-        → verdict: LLM-JUDGE REJECTED ('100 筆' not met)
-      ...
-
-    Reads from both graph_steps (round_done / no_match) and the richer
-    verifier_decisions records (comparison.result + judge_reject_reason).
-    """
-    # Pre-index verifier_decisions by (phase_id, block_id) keeping insertion
-    # order so multiple rejections for the same block consume one each.
-    decisions_by_block: dict[str, list[dict]] = {}
-    for d in trace.get("verifier_decisions") or []:
-        if d.get("phase_id") != phase_id:
-            continue
-        decisions_by_block.setdefault(d.get("candidate_block") or "", []).append(d)
-
-    items: list[dict] = []
-    for step in trace.get("graph_steps") or []:
-        if step.get("phase_id") != phase_id:
-            continue
-        node = step.get("node", "")
-        ts = step.get("ts") or ""
-        if node == "agentic_phase_loop":
-            kind = step.get("status")
-            if kind == "round_done":
-                items.append({
-                    "ts": ts, "type": "round",
-                    "round": step.get("round"),
-                    "tool": step.get("tool"),
-                    "action_ok": step.get("action_ok"),
-                    "auto_preview": step.get("auto_preview"),
-                    "mutated_node": step.get("mutated_node"),
-                })
-            else:
-                items.append({
-                    "ts": ts, "type": "phase_end",
-                    "status": kind, "rounds": step.get("rounds"),
-                })
-        elif node == "phase_verifier" and step.get("status") == "no_match":
-            block_id = step.get("block_id") or ""
-            decision = None
-            queue = decisions_by_block.get(block_id) or []
-            if queue:
-                decision = queue.pop(0)
-            comp = (decision or {}).get("comparison") or {}
-            items.append({
-                "ts": ts, "type": "verdict",
-                "block_id": block_id,
-                "expected": step.get("expected"),
-                "covers": step.get("covers"),
-                "rows": step.get("rows"),
-                "comparison_result": comp.get("result"),
-                "judge_reject_reason": (
-                    comp.get("judge_reject_reason")
-                    or step.get("judge_reject_reason")
-                ),
-                "would_have_passed_with": (decision or {}).get("would_have_passed_with"),
-            })
-        elif node == "phase_revise_node":
-            parsed = step.get("parsed") or {}
-            items.append({
-                "ts": ts, "type": "revise",
-                "attempt": step.get("attempt"),
-                "summary": parsed.get("summary") or step.get("summary"),
-                "strategy": parsed.get("strategy") or step.get("strategy"),
-            })
-    items.sort(key=lambda x: x.get("ts") or "")
-    return items
-
-
-def _round_history_for(trace: dict, phase_id: str) -> list[dict]:
-    """All agentic_phase_loop entries for the phase (in chrono order).
-    Kept for backward compat (older JSON output consumers); the new
-    rendering uses _build_timeline."""
-    out = []
-    for step in trace.get("graph_steps") or []:
-        if step.get("node") != "agentic_phase_loop":
-            continue
-        if step.get("phase_id") != phase_id:
-            continue
-        kind = step.get("status")
-        if kind == "round_done":
-            out.append({
-                "kind": "round",
-                "round": step.get("round"),
-                "tool": step.get("tool"),
-                "action_ok": step.get("action_ok"),
-                "auto_preview": step.get("auto_preview"),
-                "mutated_node": step.get("mutated_node"),
-            })
-        else:
-            out.append({
-                "kind": kind,
-                "rounds": step.get("rounds"),
-            })
-    return out
-
-
-def _revise_history_for(trace: dict, phase_id: str) -> list[dict]:
-    out = []
-    for step in trace.get("graph_steps") or []:
-        if step.get("node") != "phase_revise_node":
-            continue
-        if step.get("phase_id") != phase_id:
-            continue
-        out.append({
-            "attempt": step.get("attempt"),
-            "strategy": (step.get("parsed") or {}).get("strategy") if step.get("parsed") else step.get("strategy"),
-            "summary": (step.get("parsed") or {}).get("summary") if step.get("parsed") else None,
-        })
-    return out
+def _fetch_model(trace_path: str) -> dict[str, Any]:
+    """Run the sidecar's trace_summary parser on EC2, return its JSON model."""
+    bash = (
+        f'cd {REMOTE_REPO} && sudo bash -c "'
+        f'source python_ai_sidecar/.env && '
+        f'python3 -m python_ai_sidecar.agent_builder.graph_build.trace_summary '
+        f'{trace_path}"'
+    )
+    raw = _ssh(bash, timeout=60)
+    # Module emits one JSON object on stdout; tolerate stderr noise above.
+    raw = raw.strip()
+    # Take last non-empty line as JSON (sidecar may emit warnings)
+    for line in reversed(raw.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            return json.loads(line)
+    raise RuntimeError(f"trace_summary returned no JSON: {raw[:300]}")
 
 
 # ── Rendering ──────────────────────────────────────────────────────────
 
 
-def _render_text(report: dict) -> str:
-    out = []
+def _fmt_params(params: Any) -> str:
+    """Compact params dict — {k=v, k=v}; truncate long values."""
+    if not params:
+        return "{}"
+    if isinstance(params, str):
+        return params[:120]
+    parts = []
+    for k, v in (params or {}).items():
+        vs = json.dumps(v, ensure_ascii=False) if not isinstance(v, str) else repr(v)
+        if len(vs) > 30:
+            vs = vs[:30] + "…"
+        parts.append(f"{k}={vs}")
+    return "{" + ", ".join(parts) + "}"
+
+
+def _fmt_verify(v: dict | None) -> tuple[str, list[str]]:
+    """Return (one-line summary, list of extra detail lines)."""
+    if not v:
+        return ("(no verdict — phase ended mid-attempt)", [])
+    verdict = v.get("verdict")
+    result = v.get("result")
+    if verdict == "ADVANCED":
+        ff = v.get("fast_forward")
+        phs = v.get("phases_advanced") or []
+        if ff and len(phs) >= 2:
+            return (f"[ADVANCED] (FF: {', '.join(phs)})", [])
+        return ("[ADVANCED]", [])
+    # REJECTED
+    extras: list[str] = []
+    rows = v.get("rows")
+    covers = v.get("covers") or []
+    em = (v.get("error_message") or "")[:200]
+    jr = (v.get("judge_reject_reason") or "")[:140]
+    wp = v.get("would_pass") or []
+    missing = v.get("missing_for_phase") or []
+
+    if result == "covers mismatch":
+        head = f"[REJECTED] covers mismatch — block covers={covers}"
+    elif result in {"validation_error", "failed", "error"}:
+        head = f"[REJECTED] {result}"
+        if em:
+            extras.append(f"   error: {em}")
+    elif "orphan" in (result or ""):
+        head = "[REJECTED] orphan (block added but no upstream connected)"
+    elif result == "llm_judge_rejected":  # legacy traces
+        head = "[REJECTED] llm_judge (legacy)"
+        if jr:
+            extras.append(f"   judge: {jr}")
+    else:
+        head = f"[REJECTED] {result or '(unknown)'}"
+        if rows is not None:
+            head += f", rows={rows}"
+
+    if wp:
+        extras.append(f"   would_pass: {wp[:5]}{'…' if len(wp) > 5 else ''}")
+    for m in missing[:2]:
+        extras.append(f"   missing: {m}")
+    return (head, extras)
+
+
+def _render_text(model: dict, *, mode: str, message: str, trace_path: str) -> str:
+    out: list[str] = []
+    end = model.get("end") or {}
+    status = end.get("status") or "(unknown)"
+    sym = {"finished": "[OK]", "handover_pending": "[STUCK]",
+           "build_partial": "[PARTIAL]", "failed": "[FAIL]"}.get(status, "[?]")
+
     out.append("=" * 78)
     out.append("BUILD VERIFICATION REPORT")
     out.append("=" * 78)
-    out.append(f"mode:      {report['mode']}")
-    out.append(f"message:   {report['message'][:120]}")
-    if report.get("trace_path"):
-        out.append(f"trace:     {report['trace_path']}")
+    out.append(f"mode:     {mode}")
+    out.append(f"status:   {sym} {status}")
+    out.append(f"message:  {message[:120]}")
+    out.append(f"trace:    {trace_path}")
+    dur = model.get("duration_ms")
+    if dur:
+        out.append(f"duration: {dur/1000:.1f}s")
     out.append("")
 
-    plan = report["plan"]
-    out.append("─── Plan ─────────────────────────────────────────────────────────────────")
-    out.append(f"summary: {plan.get('summary') or '(no plan captured)'}")
-    out.append("phases:")
-    for p in plan.get("phases") or []:
-        mark = {"completed": "[ok]", "stuck": "[NO]", "not_reached": "[ -- ]"}.get(
-            report["phase_status"].get(p["id"], "not_reached"), "[?]"
-        )
-        kind = p.get("expected") or "?"
-        out.append(f"  {mark}  {p['id']:<4} [{kind}]  {(p.get('goal') or '')[:60]}")
-    out.append("")
-
-    stuck = report["stuck_phase"]
-    if not stuck:
-        out.append("─── Result ───────────────────────────────────────────────────────────────")
-        out.append("ALL PHASES PASSED — no stuck phase.")
-        out.append("")
-        return "\n".join(out)
-
-    out.append(f"─── Stuck phase: {stuck} — chronological timeline ────────────────────────")
-    timeline = report.get("stuck_timeline") or []
-    if not timeline:
-        out.append("(no rounds or verdicts recorded — phase loop never ran?)")
+    # Plan section
+    out.append("── Plan ──")
+    plan = model.get("plan") or []
+    if not plan:
+        out.append("  (no plan captured)")
     else:
-        for item in timeline:
-            t = item["type"]
-            if t == "round":
-                preview = item.get("auto_preview") or {}
-                row_str = ""
-                if isinstance(preview, dict):
+        phase_status = {p["id"]: p["outcome"] for p in (model.get("phases") or [])}
+        for p in plan:
+            mark = {"completed": "[ok]", "stuck": "[NO]", "not_reached": "[--]"}.get(
+                phase_status.get(p["id"], "not_reached"), "[?]"
+            )
+            kind = p.get("expected") or "?"
+            out.append(f"  {mark}  {p['id']:<4} [{kind:<9}]  {(p.get('goal') or '')[:60]}")
+    out.append("")
+
+    # Per-phase detail
+    for ph in model.get("phases") or []:
+        head_sym = {"completed": "[ok]", "stuck": "[NO]",
+                    "not_reached": "[--]"}.get(ph["outcome"], "[?]")
+        out.append(f"── Phase {ph['id']} [{ph['expected'] or '?'}] {head_sym} ──")
+        out.append(f"  Goal: {(ph.get('goal') or '(no goal)')[:80]}")
+        if ph["outcome"] == "not_reached":
+            out.append("  (never reached — earlier phase blocked the build)")
+            out.append("")
+            continue
+
+        for a in ph.get("attempts") or []:
+            if a.get("kind") == "revise":
+                out.append("")
+                rc = a.get("root_cause") or "(no root cause recorded)"
+                out.append(f"  -- REVISE (refine cycle {a['refine_cycle']}) --")
+                # Wrap long root cause into 100-char chunks
+                for line in _wrap(rc, 100):
+                    out.append(f"     {line}")
+                alt = a.get("alternative_strategy")
+                if alt:
+                    out.append(f"     strategy: {str(alt)[:160]}")
+                out.append("")
+                continue
+
+            block_label = a.get("block_id") or "(unknown block)"
+            extra = "" if a.get("from_commit_pick") else " [no-commit-pick]"
+            out.append(f"  Attempt {a['n']} — {block_label}{extra}")
+            ic = a.get("inspect_count", 0)
+            if ic:
+                out.append(f"     inspect_block_doc × {ic}")
+            for ac in a.get("actions") or []:
+                tool = ac.get("tool", "?")
+                ok = ac.get("ok")
+                tag = "ok" if ok else "no"
+                preview = ac.get("preview") or {}
+                args = ac.get("args") or {}
+                line = f"     [{tag}] {tool:<14}"
+                if tool == "add_node":
+                    line += f"  {args.get('block_name','?')}"
+                    params = args.get("params") or {}
+                    if params:
+                        line += f"  {_fmt_params(params)}"
+                elif tool == "connect":
+                    line += (
+                        f"  {args.get('from_node','?')}.{args.get('from_port','data')}"
+                        f" → {args.get('to_node','?')}.{args.get('to_port','data')}"
+                    )
+                elif tool == "set_param":
+                    line += f"  {args.get('node_id','?')}.{args.get('key','?')}={args.get('value','?')}"
+                elif tool == "remove_node":
+                    line += f"  {args.get('node_id','?')}"
+                else:
+                    if args:
+                        line += f"  {_fmt_params(args)}"
+                if preview:
                     rs = preview.get("rows")
                     st = preview.get("status")
-                    if rs is not None or st:
-                        row_str = f" → {st} ({rs} rows)"
-                ok = "ok" if item.get("action_ok") else "no"
-                out.append(f"  r{item['round']:<2} [{ok}] {item['tool']:<22}{row_str}")
-            elif t == "verdict":
-                cov = item.get("covers")
-                exp = item.get("expected")
-                rows = item.get("rows")
-                cmp_result = item.get("comparison_result")
-                judge_reason = item.get("judge_reject_reason")
-                # Decide tag (same logic as before, just inline with round)
-                if cmp_result == "covers mismatch":
-                    tag = f"COVERS MISMATCH: '{exp}' not in {cov}"
-                elif cmp_result == "rows quality gate failed":
-                    tag = f"ROWS GATE: need rows>=1, got {rows}"
-                elif cmp_result == "llm_judge_rejected":
-                    tag = f"LLM-JUDGE REJECTED: {(judge_reason or '(no reason)')[:90]}"
-                elif cmp_result:
-                    tag = cmp_result
-                else:
-                    if isinstance(cov, list) and exp and exp not in cov:
-                        tag = f"COVERS MISMATCH: '{exp}' not in {cov}"
-                    elif rows is None or (isinstance(rows, int) and rows < 1):
-                        tag = f"ROWS GATE (inferred): rows={rows}"
-                    elif judge_reason:
-                        tag = f"LLM-JUDGE REJECTED: {judge_reason[:90]}"
-                    else:
-                        tag = "(no comparison data)"
-                out.append(f"     ↳ verdict on {item.get('block_id') or '?'}: {tag}")
-                wp = item.get("would_have_passed_with")
-                if wp:
-                    out.append(f"        would_have_passed_with: {wp[:5]}{'…' if len(wp)>5 else ''}")
-            elif t == "revise":
-                out.append("")
-                strat = (item.get("summary") or item.get("strategy") or "")[:140]
-                out.append(f"  ⤺  revise attempt {item.get('attempt')}: {strat}")
-                out.append("")
-            elif t == "phase_end":
-                out.append(f"  ⤵  phase ended: {item.get('status')} (rounds={item.get('rounds')})")
+                    line += f"   → {st}"
+                    if rs is not None:
+                        line += f" ({rs} rows)"
+                out.append(line)
+            head, extras = _fmt_verify(a.get("verify"))
+            out.append(f"     ↳ verify: {head}")
+            for ex in extras:
+                out.append(f"  {ex}")
+
+        # Phase outcome line
+        out.append("")
+        if ph["outcome"] == "completed":
+            out.append(f"  [ok] Phase goal achieved ({ph['rounds_used']} rounds used)")
+        elif ph["outcome"] == "stuck":
+            out.append(
+                f"  [NO] Phase NOT achieved — "
+                f"{ph['rounds_used']} rounds, {ph['max_round_hits']} max-round hit(s)"
+            )
+        out.append("")
+
+    # End section
+    out.append("══════════ END ══════════")
+    out.append(f"status: {sym} {status}")
+    nodes = end.get("nodes") or []
+    edges = end.get("edges") or []
+    out.append(f"final canvas: {len(nodes)} nodes, {len(edges)} edges")
+    for n in nodes:
+        out.append(f"  {n['id']:<4} {n['block_id']:<28} {_fmt_params(n.get('params'))}")
+    for e in edges:
+        out.append(f"  edge  {e['from']} → {e['to']}")
     out.append("")
     return "\n".join(out)
 
 
-def build_report(mode: str, message: str, *, harness_out: str, trace_path: str | None) -> dict:
-    trace = _fetch_trace(trace_path) if trace_path else {}
-    plan = _extract_plan(trace) if trace else {"summary": None, "phases": []}
-    status = _classify_phase_status(trace) if trace else {}
-    stuck = _find_stuck_phase(status)
-    return {
-        "mode": mode,
-        "message": message,
-        "trace_path": trace_path,
-        "plan": plan,
-        "phase_status": status,
-        "stuck_phase": stuck,
-        # v30.17i — unified chrono timeline interleaving rounds + verdicts +
-        # revises. Legacy fields retained so older JSON consumers still work.
-        "stuck_timeline": _build_timeline(trace, stuck) if stuck else [],
-        "stuck_verdicts": _verifier_verdicts_for(trace, stuck) if stuck else [],
-        "stuck_rounds": _round_history_for(trace, stuck) if stuck else [],
-        "stuck_revises": _revise_history_for(trace, stuck) if stuck else [],
-        "harness_stdout_tail": (harness_out or "")[-2000:],
-    }
+def _wrap(text: str, width: int) -> list[str]:
+    """Naive word-wrap for CJK text (no break-on-space; chunk by char count)."""
+    if not text:
+        return [""]
+    return [text[i:i + width] for i in range(0, len(text), width)]
 
 
 # ── Test mode (trace_replay) ───────────────────────────────────────────
 
 
 def _run_test_mode(trace: str, target: str | None, variants: list[str], reps: int) -> str:
-    """Run a controlled-variant replay over a saved trace's LLM calls.
-
-    Wraps `python -m tools.trace_replay` on EC2 — that's where the trace
-    lives. Returns the replay tool's stdout for the caller to surface.
-    """
     cmd_parts = [f"python3 -m tools.trace_replay --trace {trace}"]
     if target:
         cmd_parts.append(f"--target '{target}'")
@@ -433,16 +303,17 @@ def main() -> int:
     ap.add_argument("--mode", choices=("chat", "builder", "test"), default="chat")
     ap.add_argument("--message", help="user message (chat/builder mode)")
     ap.add_argument("--trace", help=(
-        "EC2 trace path. In chat/builder mode: skip running the harness "
-        "and re-parse this existing trace (faster + lets us examine a "
-        "specific past run, e.g. the user's own UI session). In test "
-        "mode: trace_replay's --trace argument."
+        "EC2 trace path. In chat/builder mode: skip harness, re-parse "
+        "this trace (faster). In test mode: trace_replay --trace arg."
     ))
     ap.add_argument("--target", help="trace_replay target (test mode)")
-    ap.add_argument("--variants", nargs="*", default=["identity"],
-                    help="trace_replay variants (test mode)")
+    ap.add_argument("--variants", nargs="*", default=["identity"])
     ap.add_argument("--reps", type=int, default=1)
-    ap.add_argument("--json-out", help="path to write structured JSON")
+    ap.add_argument("--json-out", help="path to write structured JSON model")
+    ap.add_argument("--local-trace", help=(
+        "Path to a LOCAL trace JSON (skips SSH). For dev when you already "
+        "scp'd a trace to /tmp."
+    ))
     args = ap.parse_args()
 
     if args.mode == "test":
@@ -456,45 +327,50 @@ def main() -> int:
                 json.dump({"mode": "test", "trace": args.trace, "stdout": out}, f, indent=2)
         return 0
 
-    # chat/builder mode — two sub-paths:
-    #   (a) --trace PATH given → fetch + parse existing trace, NO harness run
-    #   (b) --message MSG given → run harness, then fetch newest trace
-    if args.trace:
+    # Decide trace source + harness run
+    if args.local_trace:
+        # Local fixture — parse via local sidecar module (requires repo on $PYTHONPATH)
+        sys.path.insert(0, os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        ))
+        from python_ai_sidecar.agent_builder.graph_build.trace_summary import parse
+        with open(args.local_trace) as f:
+            model = parse(json.load(f))
+        trace_path = args.local_trace
+        message = args.message or model.get("instruction", "")[:200]
+    elif args.trace:
         print(f"[verify-build] replaying existing trace {args.trace} …", file=sys.stderr)
-        trace = _fetch_trace(args.trace)
-        # Use the trace's recorded instruction as the message label
-        message = args.message or trace.get("instruction", "")[:200]
-        report = build_report(args.mode, message,
-                              harness_out="", trace_path=args.trace)
-        # Replace fetched trace data into the standard pipeline shape
-        # (build_report already re-reads the trace from --trace path).
+        model = _fetch_model(args.trace)
+        trace_path = args.trace
+        message = args.message or model.get("instruction", "")[:200]
     else:
         if not args.message:
             print("ERROR: --message or --trace required in chat/builder mode",
                   file=sys.stderr)
             return 2
-
         print(f"[verify-build] running {args.mode} mode on EC2 …", file=sys.stderr)
         try:
-            harness_out = _run_harness(args.mode, args.message)
+            _ = _run_harness(args.mode, args.message)
         except subprocess.TimeoutExpired:
             print("ERROR: harness timed out (>15min)", file=sys.stderr)
             return 1
-
         trace_path = _newest_trace_path()
         if not trace_path:
-            print("WARN: no trace file found — printing harness stdout only",
-                  file=sys.stderr)
-            print(harness_out)
+            print("WARN: no trace file found", file=sys.stderr)
             return 0
-        report = build_report(args.mode, args.message,
-                              harness_out=harness_out, trace_path=trace_path)
+        model = _fetch_model(trace_path)
+        message = args.message
 
-    print(_render_text(report))
+    print(_render_text(model, mode=args.mode, message=message, trace_path=trace_path))
 
     if args.json_out:
         with open(args.json_out, "w") as f:
-            json.dump(report, f, indent=2, ensure_ascii=False, default=str)
+            json.dump({
+                "mode": args.mode,
+                "message": message,
+                "trace_path": trace_path,
+                "model": model,
+            }, f, indent=2, ensure_ascii=False, default=str)
         print(f"\n[verify-build] JSON written to {args.json_out}", file=sys.stderr)
     return 0
 
