@@ -622,6 +622,21 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     if tool_name in mutating:
         pipeline_snapshot = new_pipeline_dict
 
+    # v30.23 (2026-05-20) — coerce tool_args.params if the agent emitted
+    # stringified JSON. Server-side tools._coerce_params_dict already
+    # parsed it before storing on the canvas, but tool_args (local var)
+    # still holds the raw string. Without re-coercion here, the SSE
+    # phase_action.tool_args_raw ships the string to frontend Lite
+    # Canvas, which iterates it as a dict → renders char-indexed garbage
+    # like {0:'{', 1:'"', 2:'c'}. Try Run then errors on the broken
+    # params blob.
+    if tool_name == "add_node" and isinstance(tool_args.get("params"), str):
+        try:
+            tool_args = dict(tool_args)
+            tool_args["params"] = json.loads(tool_args["params"])
+        except (json.JSONDecodeError, TypeError):
+            pass  # leave as-is; frontend will surface whatever's there
+
     sse_events = [
         _event("phase_round", {
             "phase_id": pid, "round": round_n + 1, "max": MAX_REACT_ROUNDS,
