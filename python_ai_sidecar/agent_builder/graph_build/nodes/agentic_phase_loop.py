@@ -281,7 +281,7 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
                                 if p.get("type") == "text":
                                     parts.append(p.get("text") or "")
                                 elif p.get("type") == "tool_result":
-                                    parts.append(f"[tool_result: {str(p.get('content',''))[:300]}]")
+                                    parts.append(f"[tool_result: {str(p.get('content',''))[:6000]}]")
                         last_user_content = "\n".join(parts)
             raw_resp_text = ""
             if assistant_content:
@@ -658,7 +658,7 @@ async def step_pause_gate_node(state: BuildGraphState) -> dict[str, Any]:
                             parts.append(p.get("text") or "")
                         elif p.get("type") == "tool_result":
                             parts.append(
-                                f"[tool_result: {str(p.get('content',''))[:300]}]"
+                                f"[tool_result: {str(p.get('content',''))[:6000]}]"
                             )
                 last_user_msg = "\n".join(parts)
         elif m.get("role") == "assistant":
