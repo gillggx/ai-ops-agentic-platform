@@ -367,13 +367,24 @@ def _check_orphan(
     meta = block_spec.get("meta") or {}
     if cat == "source" or meta.get("standalone_capable"):
         return None
-    pipeline_now = state.get("pipeline_json") or {}
+    # Canvas state lives in final_pipeline during the build loop;
+    # pipeline_json is only set by the executor path. Falling back to
+    # base_pipeline handles the first-ever-block case.
+    pipeline_now = (
+        state.get("final_pipeline")
+        or state.get("pipeline_json")
+        or state.get("base_pipeline")
+        or {}
+    )
     logical_to_real = state.get("logical_to_real") or {}
     target_real = logical_to_real.get(last_lid, last_lid)
-    in_count = sum(
-        1 for e in (pipeline_now.get("edges") or [])
-        if (e.get("to") or {}).get("node") == target_real
-    )
+    in_count = 0
+    for e in (pipeline_now.get("edges") or []):
+        # Edges are dumped via model_dump(by_alias=True) → {"from": {...}, "to": {...}}.
+        to_field = e.get("to") or {}
+        to_node = to_field.get("node") if isinstance(to_field, dict) else None
+        if to_node == target_real:
+            in_count += 1
     if in_count > 0:
         return None
     # Find current phase for the reject context
