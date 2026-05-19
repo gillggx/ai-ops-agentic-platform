@@ -367,12 +367,17 @@ def _route_after_goal_plan_confirm(state: BuildGraphState) -> str:
 def _route_after_phase_loop(state: BuildGraphState) -> str:
     """After one ReAct round in agentic_phase_loop:
       - status=phase_revise_pending -> phase_revise (round_max / stuck escalation)
-      - else -> phase_verifier (always — verifier no-ops if no mutation happened)
+      - status=phase_revise_pending -> phase_revise (round-max + revise pending)
+      - v30_verify_now=True -> phase_verifier (agent emitted run_verifier
+        OR round-max hit fallback OR phase_complete legacy signal)
+      - else -> back to agentic_phase_loop (let agent keep building chain)
     """
     status = state.get("status")
     if status == "phase_revise_pending":
         return "phase_revise"
-    return "phase_verifier"
+    if state.get("v30_verify_now"):
+        return "phase_verifier"
+    return "agentic_phase_loop"
 
 
 def _route_after_phase_verifier(state: BuildGraphState) -> str:
@@ -535,6 +540,10 @@ def build_graph():
         {
             "phase_verifier": "phase_verifier",
             "phase_revise": "phase_revise",
+            # v30.22: self-loop so agent can build multi-block chains
+            # (filter → step_check) within one phase without verifier
+            # interrupting after every action.
+            "agentic_phase_loop": "agentic_phase_loop",
         },
     )
     # v30.1: phase_verifier -> next round / finalize

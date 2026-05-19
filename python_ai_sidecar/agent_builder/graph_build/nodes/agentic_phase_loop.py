@@ -64,19 +64,26 @@ prompt 會給你:
 5. 改 param -> `set_param(node_id, key, value)`
 6. 加錯了 -> `remove_node(node_id)`
 
-== Phase 達成 — server 自動判定 (v30.1, 2026-05-16) ==
-你**不需要**主動 call phase_complete。每次 mutating action (add_node/connect/...)
-完成後，server 端的 phase_spanning_verifier 會：
-  (a) 對照當前 phase.expected_output 看 block 的輸出有沒有達成
-  (b) **bonus**: 同一 block 若同時涵蓋下個 phase 也會 fast-forward 自動跳過
-      (e.g. block_spc_panel 一個 add_node 可同時完成 raw_data + verdict + chart 三個 phase)
-  (c) 把實際算出的數值 (ooc_count=3 之類) 填進 outcome 報告給 user 看
+== Phase 達成 — 你決定何時 verify (v30.22, 2026-05-19) ==
+verifier **不再** 每個 action 後自動跑。你可以自由 add_node / connect /
+set_param **多個 block** 建一條 chain（如 OOC 計數要 `filter → step_check`
+兩 block）。當你覺得這個 phase 的 chain 建完整了，**主動呼叫
+`run_verifier()`** 觸發 verifier 檢查。
 
-所以你 **只需要做對的 add_node**，phase 推進是自動的。看到下 round prompt 顯示
-你已在 phase[k+N] (跳了好幾個) 是正常的 — composite block 的好處。
+verifier 跑時會做 deterministic 結構檢查 (不是 LLM judge):
+  (a) covers gate: 你 chain 的 terminal block 的 covers 是否含 phase.expected
+  (b) validation_error: 鏈上任何 block executor 短路 / params 錯
+  (c) orphan: 非 source block 沒接上游
 
-phase_complete 工具仍保留作為「我認為這 phase 已達成」的 hint，但不會強制觸發
-驗證 — 真正的判定永遠以 server verifier 為準。
+verifier ADVANCED → 推進下一 phase (composite block 還可 fast-forward 多 phase)。
+verifier REJECTED → 留在當前 phase；prompt 會 surface reject 理由
+(covers mismatch / validation_error / orphan + would_pass 候選 list)，
+你看完可以 set_param 調 / add_node 加更多 / remove_node 重來。
+
+**round 預算**：每 phase 最多 8 round (chart/alarm 12)。沒在預算內叫
+run_verifier 也會自動 fallback 觸發一次 — 但通常會 reject。所以該叫就叫。
+
+phase_complete 為 legacy alias，效果跟 run_verifier 相同。
 
 == 禁忌 ==
 - 不要 emit JSON ops list — 用 single tool call
@@ -542,11 +549,22 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     elif tool_name == "add_node" and "error" not in action_result:
         pending_node_id_update = action_result.get("node_id") or last_mutated_logical_id
 
+    # v30.22 (2026-05-19) — agent-driven verify trigger.
+    # Verifier runs only when:
+    #   (a) agent explicitly emitted run_verifier / phase_complete (legacy)
+    #   (b) round budget exhausted — fallback so build doesn't silently spin
+    # Otherwise loop back so agent can keep adding nodes / connecting /
+    # tuning. Lets agent build multi-block chains (e.g. filter→step_check
+    # for "count OOC then compare ≥2") without verifier rejecting after
+    # the first add_node.
+    verify_now = tool_name in {"run_verifier", "phase_complete"}
+
     state_update: dict[str, Any] = {
         "v30_phase_round": round_n + 1,
         "v30_phase_recent_actions": new_recent,
         "v30_phase_messages": new_msgs,
         "final_pipeline": new_pipeline_dict,
+        "v30_verify_now": verify_now,
     }
     if next_sub is not None and next_sub != cur_subphase:
         state_update["v30_subphase"] = next_sub
@@ -1795,9 +1813,18 @@ _TOOLS_BY_SUBPHASE: dict[str, set[str]] = {
     },
     "construct": {
         "add_node", "connect", "abort_node", "abort_phase",
+        # v30.22: allow inspect during construct so agent can sanity-check
+        # upstream output shape before connecting (avoids hallucination of
+        # column names — see R3 alarm phase root cause analysis).
+        "inspect_node_output", "inspect_block_doc",
     },
     "tune": {
         "set_param", "run_verifier", "abort_node", "abort_phase",
+        # v30.22: allow agent to chain another block from tune (e.g. after
+        # adding filter and tuning, commit_pick step_check to continue
+        # building the count+compare chain).
+        "commit_pick",
+        "inspect_node_output", "inspect_block_doc",
     },
     # refine isn't an LLM sub-state — deterministic transition only.
 }
@@ -1834,13 +1861,23 @@ def _build_subphase_hint(subphase: str | None, state: BuildGraphState) -> str:
             f"== SUB-PHASE: construct_node ==\n"
             f"You committed to {pending!r}. Now add_node + connect upstream.\n"
             f"After add_node, you MUST connect() before exit. If you change your\n"
-            f"mind, abort_node() to go back to pick_block."
+            f"mind, abort_node() to go back to pick_block.\n"
+            f"You can also inspect_node_output(upstream_id) here to sanity-check\n"
+            f"the upstream shape before guessing column names."
         )
     if subphase == "tune":
         return (
-            "== SUB-PHASE: tune_or_verify ==\n"
-            "Optionally set_param to adjust. When done, call **run_verifier()**\n"
-            "to commit to the phase verifier."
+            "== SUB-PHASE: tune_or_chain_or_verify ==\n"
+            "Options now:\n"
+            "  - set_param(node_id, key, value) — adjust params on current block\n"
+            "  - commit_pick(block_id) — chain ANOTHER block (e.g. you added\n"
+            "    filter, now want step_check downstream). Goes back to construct.\n"
+            "  - inspect_node_output(node_id) — sanity-check current terminal\n"
+            "    output before declaring done\n"
+            "  - **run_verifier()** — phase is done, trigger verifier check\n"
+            "  - abort_node / abort_phase — bail out\n\n"
+            "**重要**: 多 block phase (如 OOC count = filter→step_check) 要在\n"
+            "chain 完整後再 run_verifier，不要過早 verify。"
         )
     return ""
 
@@ -1858,6 +1895,10 @@ _TRANSITIONS: dict[tuple[str, str], str] = {
     ("tune", "run_verifier"):      "tune",       # stay; verifier will route out
     ("tune", "abort_node"):        "pick",
     ("tune", "abort_phase"):       "refine",
+    # v30.22: chain another block from tune. agent commits to a new
+    # block_id while previous one is still on canvas; goes back to
+    # construct to add + connect it. Enables multi-block phases.
+    ("tune", "commit_pick"):       "construct",
 }
 
 

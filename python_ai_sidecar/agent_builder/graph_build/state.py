@@ -290,6 +290,14 @@ class BuildGraphState(TypedDict, total=False):
     # Refine cycle counter (per phase). Bounded — past N, escalate to
     # phase_revise rather than loop forever.
     v30_refine_cycle: int
+    # v30.22 (2026-05-19) — agent-driven verify trigger. When the loop
+    # round emits run_verifier (or phase_complete legacy, or hits round
+    # budget), this is set True and router sends graph to phase_verifier.
+    # Otherwise router loops back to agentic_phase_loop so agent can keep
+    # building (multi-block chains within one phase, like filter→step_check).
+    # Replaces v30.1's "verifier after every mutation" model that prevented
+    # any chain longer than one block.
+    v30_verify_now: bool
 
     # ── Confirm stage ─────────────────────────────────────────────────
     is_from_scratch: bool
@@ -424,4 +432,5 @@ def initial_state(
         v30_judge_decisions={},
         v30_replan_hint=None,
         v30_judge_replan_count=0,
+        v30_verify_now=False,
     )
