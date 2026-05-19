@@ -490,6 +490,61 @@ def _check_column_in_upstream(
     )
 
 
+def _coerce_params_dict(
+    params: Any, *, tool_name: str,
+) -> dict[str, Any]:
+    """Tolerate LLM passing params as JSON-encoded string instead of dict.
+
+    Anthropic's tool_use validates schema (we declare `params: object`) but
+    the model still occasionally emits `'{"k": "v"}'` as a string —
+    especially after a confusing turn or when imitating a doc example
+    that quoted a JSON snippet. Without coercion the downstream
+    `params.items()` call crashes with a raw Python AttributeError that
+    teaches the agent nothing.
+
+    Returns: parsed dict, or {} if input was None.
+    Raises: ToolError with a clear hint if coercion fails.
+    """
+    if params is None:
+        return {}
+    if isinstance(params, dict):
+        return params
+    if isinstance(params, str):
+        import json as _json
+        try:
+            parsed = _json.loads(params)
+        except _json.JSONDecodeError as ex:
+            raise ToolError(
+                code="PARAMS_NOT_DICT",
+                message=(
+                    f"{tool_name}: `params` must be a JSON object (dict), "
+                    f"not a string. Got a string that isn't valid JSON either: {ex}"
+                ),
+                hint=(
+                    "Pass params as a structured object, e.g. "
+                    "`params={\"column\": \"spc_status\", \"operator\": \"==\"}` — "
+                    "do NOT wrap in quotes."
+                ),
+            ) from None
+        if not isinstance(parsed, dict):
+            raise ToolError(
+                code="PARAMS_NOT_DICT",
+                message=(
+                    f"{tool_name}: `params` parsed as {type(parsed).__name__}, "
+                    f"not a dict."
+                ),
+                hint="Pass params as a structured object (dict) with key/value pairs.",
+            )
+        return parsed
+    raise ToolError(
+        code="PARAMS_NOT_DICT",
+        message=(
+            f"{tool_name}: `params` must be a dict, got {type(params).__name__}."
+        ),
+        hint="Pass params as a structured object with key/value pairs.",
+    )
+
+
 def _check_placeholder_declared(
     pipeline: PipelineJSON,
     value: Any,
@@ -658,6 +713,14 @@ class BuilderToolset:
         params: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """Add a node to the canvas. Auto-offsets if position collides."""
+        # v30.21 (2026-05-19) — LLM sometimes emits `params` as a JSON-encoded
+        # STRING (`'{"severity": "HIGH"}'`) instead of a dict, despite the tool
+        # schema declaring object type. The downstream `.items()` call then
+        # crashes with `AttributeError: 'str' object has no attribute 'items'`
+        # — an unhelpful Python leak the agent can't learn from (saw this
+        # 4×in one OOC trace). Coerce here and surface a clear hint if even
+        # the JSON parse fails.
+        params = _coerce_params_dict(params, tool_name="add_node")
         spec = self.registry.get_spec(block_name, block_version)
         if spec is None:
             raise ToolError(
