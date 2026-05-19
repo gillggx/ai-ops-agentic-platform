@@ -587,6 +587,26 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
         state_update["exec_trace"] = new_exec_trace
         state_update["v30_last_mutated_logical_id"] = last_mutated_logical_id
         state_update["v30_last_preview"] = auto_preview_blob
+    elif verify_now:
+        # v30.22: agent emitted run_verifier / phase_complete (signal tool,
+        # not a mutation). Point verifier at the canvas terminal (latest
+        # added node with no outgoing edges) so verifier knows what to
+        # check. Without this verifier would early-return because last_lid
+        # is None — agent's "I'm done" signal would be silently ignored.
+        terminal_lid, terminal_preview = _find_canvas_terminal(
+            transient.pipeline_json, state.get("exec_trace") or {},
+        )
+        if terminal_lid:
+            state_update["v30_last_mutated_logical_id"] = terminal_lid
+            state_update["v30_last_preview"] = terminal_preview
+            logger.info(
+                "agentic_phase_loop: %s pointing verifier at canvas terminal "
+                "%s (no recent mutation)", tool_name, terminal_lid,
+            )
+        else:
+            # Empty canvas — verifier will reject phase as not built
+            state_update["v30_last_mutated_logical_id"] = None
+            state_update["v30_last_preview"] = None
     else:
         # Explicit clear so verifier no-ops on inspect-only / errored rounds.
         state_update["v30_last_mutated_logical_id"] = None
@@ -1669,6 +1689,35 @@ def _make_result_digest(tool: str, result: Any) -> str:
 # schema only; now sees ~2.5K chars covering When-to-use / 前置依賴 /
 # Examples — the actual usage guidance the user wrote in block_docs DB.
 # ─────────────────────────────────────────────────────────────────────
+
+
+def _find_canvas_terminal(
+    pipeline: PipelineJSON, exec_trace: dict[str, dict],
+) -> tuple[str | None, dict | None]:
+    """Find canvas terminal — latest-added node with no outgoing edges.
+    Used when agent calls run_verifier / phase_complete to point verifier
+    at the right node (signal tools aren't mutations).
+
+    Returns (logical_id, preview_blob) or (None, None) for empty canvas.
+    """
+    if not pipeline.nodes:
+        return None, None
+    outgoing = {e.from_.node for e in pipeline.edges}
+    # Walk in REVERSE node order so most-recently-added terminal wins
+    for n in reversed(pipeline.nodes):
+        if n.id not in outgoing:
+            snap = exec_trace.get(n.id) or {}
+            # Re-build a preview-blob-like dict from snapshot.sample if
+            # the auto_preview wasn't cached (rare). Verifier only needs
+            # block_id + rows really.
+            preview = None
+            sample = snap.get("sample")
+            if sample is not None:
+                preview = {"data": {"type": "dataframe", "rows": [sample]}}
+            return n.id, preview
+    # All nodes have outgoing edges — cycle? Just return last
+    last = pipeline.nodes[-1]
+    return last.id, None
 
 
 def _fmt_io_ports(input_schema: list[dict], output_schema: list[dict]) -> str:
