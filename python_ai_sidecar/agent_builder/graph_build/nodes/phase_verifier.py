@@ -746,6 +746,19 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
             "would_have_passed_with": would_pass[:10] if 'would_pass' in dir() else [],
             "missing_for_phase": missing_for_phase,
         }
+        # v30.19 (Q2): deterministic refine_decide — route back to the
+        # right sub-phase based on missing_for_phase keywords. Pure code,
+        # no LLM.
+        miss_str = " ".join(str(m) for m in missing_for_phase).lower()
+        if "connect" in miss_str:
+            next_sub = "construct"
+        elif any(k in miss_str for k in ("set_param", "param", "operator")):
+            next_sub = "tune"
+        elif any(k in miss_str for k in ("filter", "unnest", "aggregate", "sort", "add_node")):
+            next_sub = "pick"
+        else:
+            next_sub = "pick"
+        refine_cycle = (state.get("v30_refine_cycle") or 0) + 1
         return {
             # Clear handoff fields so next round can fill them again
             "v30_last_mutated_logical_id": None,
@@ -754,6 +767,10 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
             "v30_last_judge_reject_reason": judge_reject_reason,
             # v30.17l: full verifier reject info for next round prompt
             "v30_last_verifier_reject": verifier_reject_info,
+            # v30.19: refine_decide route + cycle counter
+            "v30_subphase": next_sub,
+            "v30_subphase_round": 0,
+            "v30_refine_cycle": refine_cycle,
             "sse_events": [_event("phase_verifier_no_match", {
                 "current_phase_id": phases[idx].get("id"),
                 "expected": phases[idx].get("expected"),
@@ -762,6 +779,8 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
                 "rows": rows,
                 "judge_reject_reason": judge_reject_reason,
                 "missing_for_phase": missing_for_phase,
+                "refine_next_subphase": next_sub,
+                "refine_cycle": refine_cycle,
             })],
         }
 
@@ -810,6 +829,12 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
         # doesn't see stale reject from a previous phase (was causing
         # p6 prompt to show p3's reject info → LLM confused).
         "v30_last_verifier_reject": None,
+        # v30.19 (Q2): reset sub-phase machine for new phase entry.
+        "v30_subphase": "pick",
+        "v30_subphase_round": 0,
+        "v30_pending_block": None,
+        "v30_pending_node_id": None,
+        "v30_refine_cycle": 0,
     }
 
     # v30.18: build ontology context the first time a raw_data phase

@@ -268,6 +268,28 @@ class BuildGraphState(TypedDict, total=False):
     # spc_charts list of 12 chart kinds"). Carried into every subsequent
     # _judge_task_progress call.
     v30_ontology_context: Optional[str]
+    # v30.19 (2026-05-19) — per-node lifecycle sub-state (Q2). Splits the
+    # agentic_phase_loop free-for-all into 4 graph nodes:
+    #   "pick"      — agent inspects + commits to a block
+    #   "construct" — agent adds + connects the committed block
+    #   "tune"      — agent optionally tunes params, then triggers verifier
+    #   "refine"    — deterministic dispatcher after verifier reject;
+    #                  routes back to pick/construct/tune based on
+    #                  v30_last_verifier_reject.missing_for_phase
+    # The verifier itself is unchanged. None at phase start; pick_block
+    # sets to "pick" on entry; commit_pick → "construct"; etc.
+    v30_subphase: Optional[str]
+    # Block_id the agent committed via commit_pick(). Read by construct
+    # node to know what to add; cleared after add_node.
+    v30_pending_block: Optional[str]
+    # Logical node id assigned by the most recent add_node. construct
+    # node uses to gate connect (must connect to upstream before exiting).
+    v30_pending_node_id: Optional[str]
+    # Per-sub-state round counter; reset on sub-state transition.
+    v30_subphase_round: int
+    # Refine cycle counter (per phase). Bounded — past N, escalate to
+    # phase_revise rather than loop forever.
+    v30_refine_cycle: int
 
     # ── Confirm stage ─────────────────────────────────────────────────
     is_from_scratch: bool

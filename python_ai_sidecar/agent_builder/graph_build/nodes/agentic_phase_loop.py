@@ -207,13 +207,20 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     # Round 2+: messages already end with user(tool_result_from_previous_round
     #          + fresh observation diff). Call LLM directly.
     client = get_llm_client()
-    tool_specs = _build_tool_specs()
+    # v30.19 (2026-05-19) — per-node lifecycle sub-phase. Tool subset per
+    # sub-state forces the lifecycle to happen in graph (filter), not in
+    # prompt suggestion. Default sub_phase=None at phase entry → seeded
+    # to "pick".
+    cur_subphase = state.get("v30_subphase") or "pick"
+    tool_specs = _filter_tool_specs_for_subphase(_build_tool_specs(), cur_subphase)
     phase_messages = list(
         (state.get("v30_phase_messages") or {}).get(pid, [])
     )
     if not phase_messages:
         # First round of this phase — seed with full observation
-        phase_messages.append({"role": "user", "content": full_user_msg})
+        sub_hint = _build_subphase_hint(cur_subphase, state)
+        seeded = sub_hint + "\n\n" + full_user_msg if sub_hint else full_user_msg
+        phase_messages.append({"role": "user", "content": seeded})
 
     try:
         resp = await client.create(
@@ -373,17 +380,22 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
 
     # ── Dispatch tool ─────────────────────────────────────────────────
     action_result: dict[str, Any]
-    try:
-        method = getattr(toolset, tool_name, None)
-        if method is None or not callable(method):
-            raise ToolError(code="UNKNOWN_TOOL", message=f"No tool {tool_name}")
-        action_result = await method(**tool_args)
-    except ToolError as e:
-        logger.info("agentic_phase_loop: tool %s failed: %s", tool_name, e.message)
-        action_result = {"error": e.message, "code": e.code, "hint": e.hint}
-    except Exception as e:  # noqa: BLE001
-        logger.warning("agentic_phase_loop: tool %s threw: %s", tool_name, e)
-        action_result = {"error": f"{type(e).__name__}: {e}"}
+    # v30.19: signal tools (commit_pick / abort_*/run_verifier) don't go
+    # through toolset — they only drive sub-phase transitions.
+    if tool_name in _SIGNAL_TOOLS:
+        action_result = _handle_signal_tool(tool_name, tool_args)
+    else:
+        try:
+            method = getattr(toolset, tool_name, None)
+            if method is None or not callable(method):
+                raise ToolError(code="UNKNOWN_TOOL", message=f"No tool {tool_name}")
+            action_result = await method(**tool_args)
+        except ToolError as e:
+            logger.info("agentic_phase_loop: tool %s failed: %s", tool_name, e.message)
+            action_result = {"error": e.message, "code": e.code, "hint": e.hint}
+        except Exception as e:  # noqa: BLE001
+            logger.warning("agentic_phase_loop: tool %s threw: %s", tool_name, e)
+            action_result = {"error": f"{type(e).__name__}: {e}"}
 
     # ── Auto-preview after canvas-mutating tools ─────────────────────
     # v30.1 (2026-05-16): preview output is now handed off to
@@ -513,12 +525,32 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     new_msgs = dict(state.get("v30_phase_messages") or {})
     new_msgs[pid] = phase_messages
 
+    # v30.19: compute sub-phase transition
+    next_sub = _next_subphase(cur_subphase, tool_name)
+    pending_block_update = None
+    pending_node_id_update = None
+    if tool_name == "commit_pick":
+        pending_block_update = (tool_args or {}).get("block_id")
+    elif tool_name == "add_node" and "error" not in action_result:
+        pending_node_id_update = action_result.get("node_id") or last_mutated_logical_id
+
     state_update: dict[str, Any] = {
         "v30_phase_round": round_n + 1,
         "v30_phase_recent_actions": new_recent,
         "v30_phase_messages": new_msgs,
         "final_pipeline": new_pipeline_dict,
     }
+    if next_sub is not None and next_sub != cur_subphase:
+        state_update["v30_subphase"] = next_sub
+        state_update["v30_subphase_round"] = 0
+        logger.info("agentic_phase_loop: sub-phase %s → %s (tool=%s)",
+                    cur_subphase, next_sub, tool_name)
+    else:
+        state_update["v30_subphase_round"] = (state.get("v30_subphase_round") or 0) + 1
+    if pending_block_update:
+        state_update["v30_pending_block"] = pending_block_update
+    if pending_node_id_update:
+        state_update["v30_pending_node_id"] = pending_node_id_update
 
     # v30.1 (2026-05-16): hand off mutation snapshot to phase_verifier_node.
     # Verifier reads these to decide phase advancement + extract outcome
@@ -1401,6 +1433,47 @@ def _build_tool_specs() -> list[dict[str, Any]]:
                 "required": ["node_id"],
             },
         },
+        # v30.19 (2026-05-19) — signal tools for per-node lifecycle (Q2).
+        # No-op tools; dispatcher reads name to transition v30_subphase.
+        {
+            "name": "commit_pick",
+            "description": "v30.19 — leaves pick sub-phase. Use after you've decided which block to add. Pass `block_id` you'll add next + 1-line reasoning.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "block_id": {"type": "string"},
+                    "reasoning": {"type": "string"},
+                },
+                "required": ["block_id"],
+            },
+        },
+        {
+            "name": "abort_node",
+            "description": "v30.19 — back to pick_block. Use if mid-construct you realize wrong block was picked.",
+            "input_schema": {
+                "type": "object",
+                "properties": {"reason": {"type": "string"}},
+                "required": [],
+            },
+        },
+        {
+            "name": "abort_phase",
+            "description": "v30.19 — give up on current phase. Use only after multiple sub-state retries failed. Escalates to phase_revise.",
+            "input_schema": {
+                "type": "object",
+                "properties": {"reason": {"type": "string"}},
+                "required": ["reason"],
+            },
+        },
+        {
+            "name": "run_verifier",
+            "description": "v30.19 — leaves tune sub-phase to phase verifier. Use when you're done tuning params.",
+            "input_schema": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
         {
             "name": "phase_complete",
             "description": "Declare current phase done — verifier checks; if mismatch, you must continue rounds.",
@@ -1641,3 +1714,120 @@ def _check_phase_done(
 
 def _event(name: str, data: dict[str, Any]) -> dict[str, Any]:
     return {"event": name, "data": data}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# v30.19 (2026-05-19) — Q2: per-node lifecycle sub-state machine.
+#
+# Sub-state transitions enforce the "pick → construct → tune → verify"
+# lifecycle per added block. Tools available per sub-state are filtered
+# so agent structurally can't skip steps (e.g. add_node without commit_pick
+# first, or connect-after-add without exiting pick first).
+# ─────────────────────────────────────────────────────────────────────
+
+# Tool subset per sub-phase. Names match _build_tool_specs entries.
+_TOOLS_BY_SUBPHASE: dict[str, set[str]] = {
+    "pick": {
+        "inspect_node_output", "inspect_block_doc",
+        "commit_pick", "abort_phase",
+    },
+    "construct": {
+        "add_node", "connect", "abort_node", "abort_phase",
+    },
+    "tune": {
+        "set_param", "run_verifier", "abort_node", "abort_phase",
+    },
+    # refine isn't an LLM sub-state — deterministic transition only.
+}
+
+
+def _filter_tool_specs_for_subphase(
+    all_specs: list[dict], subphase: str | None,
+) -> list[dict]:
+    """Return only tool specs allowed in current sub-phase.
+    Unknown sub-phase or None → return all (backward compat for v30.18
+    builds that don't set sub_phase)."""
+    if not subphase or subphase not in _TOOLS_BY_SUBPHASE:
+        return all_specs
+    allowed = _TOOLS_BY_SUBPHASE[subphase]
+    return [s for s in all_specs if s.get("name") in allowed]
+
+
+def _build_subphase_hint(subphase: str | None, state: BuildGraphState) -> str:
+    """Prepend a short line telling the agent which sub-phase it's in.
+    Helps the LLM understand why some tools are missing."""
+    if not subphase:
+        return ""
+    if subphase == "pick":
+        return (
+            "== SUB-PHASE: pick_block ==\n"
+            "Decide which block to add next. Inspect candidates (inspect_block_doc),\n"
+            "look at upstream output (inspect_node_output). When ready, call\n"
+            "**commit_pick(block_id, reasoning)** — you cannot add_node from this\n"
+            "sub-phase, only commit your choice."
+        )
+    if subphase == "construct":
+        pending = state.get("v30_pending_block")
+        return (
+            f"== SUB-PHASE: construct_node ==\n"
+            f"You committed to {pending!r}. Now add_node + connect upstream.\n"
+            f"After add_node, you MUST connect() before exit. If you change your\n"
+            f"mind, abort_node() to go back to pick_block."
+        )
+    if subphase == "tune":
+        return (
+            "== SUB-PHASE: tune_or_verify ==\n"
+            "Optionally set_param to adjust. When done, call **run_verifier()**\n"
+            "to commit to the phase verifier."
+        )
+    return ""
+
+
+# Sub-phase transition rules — pure function of (current sub-phase, tool name).
+# Returns next sub-phase or None (no change).
+_TRANSITIONS: dict[tuple[str, str], str] = {
+    ("pick", "commit_pick"):       "construct",
+    ("pick", "abort_phase"):       "refine",
+    ("construct", "add_node"):     "construct",  # stay; expect connect next
+    ("construct", "connect"):      "tune",
+    ("construct", "abort_node"):   "pick",
+    ("construct", "abort_phase"):  "refine",
+    ("tune", "set_param"):         "tune",       # stay; allow more set_param
+    ("tune", "run_verifier"):      "tune",       # stay; verifier will route out
+    ("tune", "abort_node"):        "pick",
+    ("tune", "abort_phase"):       "refine",
+}
+
+
+def _next_subphase(current: str | None, tool_name: str) -> str | None:
+    """Pure: compute next sub-phase or None if no transition."""
+    if not current:
+        return None
+    return _TRANSITIONS.get((current, tool_name))
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Sentinel-tool execution shims. These tools are no-ops at the BuilderToolset
+# layer — they exist purely to drive the sub-state machine. The dispatcher
+# checks tool_name and updates state without going through toolset.
+# ─────────────────────────────────────────────────────────────────────
+
+_SIGNAL_TOOLS = {"commit_pick", "abort_node", "abort_phase", "run_verifier"}
+
+
+def _handle_signal_tool(tool_name: str, args: dict) -> dict:
+    """Return a benign ack result for signal tools so they appear successful
+    in the conversation. Real effect is via sub-phase transition."""
+    if tool_name == "commit_pick":
+        return {
+            "ok": True,
+            "committed_block_id": args.get("block_id"),
+            "next_subphase": "construct",
+        }
+    if tool_name == "abort_node":
+        return {"ok": True, "back_to": "pick"}
+    if tool_name == "abort_phase":
+        return {"ok": True, "escalating_to": "refine"}
+    if tool_name == "run_verifier":
+        return {"ok": True, "running_verifier": True}
+    return {"ok": True}
