@@ -37,7 +37,9 @@ from python_ai_sidecar.pipeline_builder.seedless_registry import SeedlessBlockRe
 logger = logging.getLogger(__name__)
 
 
-MAX_REACT_ROUNDS = 8
+MAX_REACT_ROUNDS = 16  # v30.23 (was 8) — multi-block phases (unnest+filter+
+                       # step_check) need 4 rounds per block × 3 blocks = 12
+                       # minimum, with margin for re-inspects.
 MAX_INSPECT_CALLS_PER_ROUND = 5
 STUCK_DETECTOR_WINDOW = 2  # last N actions checked for duplicate
 
@@ -383,6 +385,27 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     # ── Stuck detector ────────────────────────────────────────────────
     recent_actions = (state.get("v30_phase_recent_actions") or {}).get(pid, [])
     args_hash = _hash_action(tool_name, tool_args)
+
+    # v30.23 — doc-reread signal. Agent re-inspecting the same block doc
+    # within one phase suggests the doc didn't deliver what the agent
+    # needed first time. Log a structured WARN so we can surface "blocks
+    # most often re-inspected" as a doc-quality backlog. Not an error —
+    # agent is free to re-read; we just want the signal.
+    if tool_name == "inspect_block_doc":
+        target_block = (tool_args or {}).get("block_id")
+        # args_hash is deterministic per (tool, args) — same block_id call
+        # → same hash. Count exact-match priors for this block within phase.
+        prior_reads = sum(
+            1 for a in recent_actions
+            if a.get("tool") == "inspect_block_doc"
+            and a.get("args_hash") == args_hash
+        )
+        if prior_reads >= 1:
+            logger.warning(
+                "doc_reread_signal: phase=%s block=%s read_count=%d "
+                "(agent re-inspecting — doc may be unclear)",
+                pid, target_block, prior_reads + 1,
+            )
     is_stuck = sum(
         1 for a in recent_actions[-STUCK_DETECTOR_WINDOW:]
         if a.get("tool") == tool_name and a.get("args_hash") == args_hash
