@@ -355,7 +355,14 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
 
     if tool_call is None:
         logger.info("agentic_phase_loop: phase %s round %d — no tool call", pid, round_n + 1)
-        # Append assistant turn even if no tool — preserves dialogue.
+        # v30.23: strip ANY tool_use blocks from assistant_content before
+        # appending — we have no tool_result to pair them with (no dispatch
+        # happened). Without this Anthropic API rejects next call with
+        # "tool_use without tool_result".
+        if assistant_content:
+            assistant_content = [
+                b for b in assistant_content if b.get("type") != "tool_use"
+            ]
         if assistant_content:
             phase_messages.append({"role": "assistant", "content": assistant_content})
         new_msgs = dict(state.get("v30_phase_messages") or {})
@@ -521,6 +528,26 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     # v30 C-A2: append assistant(tool_use) + user(tool_result + fresh obs diff)
     # to preserve conversation continuity. MUST run before state_update
     # since state_update references new_msgs.
+    #
+    # v30.23 (2026-05-20): LLM sometimes emits MULTIPLE tool_use blocks in
+    # one response (multi-call). We dispatch only the first (tool_call from
+    # _extract_tool_call). If we append the full assistant_content with N
+    # tool_uses but only emit 1 tool_result, Anthropic API rejects next
+    # call with "messages.K: tool_use ids were found without tool_result
+    # blocks immediately after". Drop the extra tool_use blocks here so
+    # msg[i] has exactly 1 tool_use matching msg[i+1]'s 1 tool_result.
+    if assistant_content and tool_use_id:
+        filtered_content = []
+        kept_tool_use = False
+        for blk in assistant_content:
+            if blk.get("type") == "tool_use":
+                if not kept_tool_use and blk.get("id") == tool_use_id:
+                    filtered_content.append(blk)
+                    kept_tool_use = True
+                # drop extras
+            else:
+                filtered_content.append(blk)
+        assistant_content = filtered_content
     if assistant_content:
         phase_messages.append({"role": "assistant", "content": assistant_content})
     if tool_use_id:
