@@ -1473,6 +1473,18 @@ def _check_placeholder_or_unknown_literal(
         for k, v in params.items():
             if not isinstance(v, str):
                 continue
+            # v30.22 (2026-05-20): skip *_template params. block_alert /
+            # block_any_trigger define `message_template` + `title_template`
+            # that legitimately contain `{evidence_count}` `{first_event_time}`
+            # `{last_event_time}` `{column}` etc — the block executor does
+            # template substitution at runtime from upstream evidence rows.
+            # The block's own DB doc + seed.py teach this syntax to the
+            # agent; without skipping here, C16 fires on legitimate templates
+            # because the RUNTIME_CONCEPT regex matches `last_event_time`
+            # etc inside the template string. _template suffix is a stable
+            # naming convention used wherever template substitution applies.
+            if k.endswith("_template"):
+                continue
             # $-ref handling: declared → ok, undeclared → reject
             if v.startswith("$"):
                 ref = v[1:].split(".", 1)[0]
