@@ -26,11 +26,68 @@ into one report that's ready for diagnosis discussion.
 
 ## Output
 
-- **stdout (text)**: 3-section report
-  1. Plan (summary + phase list with completed/stuck/not_reached marks)
-  2. Stuck phase (verifier verdicts — block, covers, rows, mismatch flag)
-  3. Round-by-round history (every `agentic_phase_loop` tool call + revise attempts)
-- **--json-out PATH**: same data as structured JSON for follow-up analysis.
+- **stdout (text)**: structured Plan / Phase / Attempt report rendered by
+  `python_ai_sidecar.agent_builder.graph_build.trace_summary`. Same model
+  powers the `/admin/build-traces` Summary tab.
+- **--json-out PATH**: full trace_summary JSON for follow-up analysis.
+
+## When user asks "為什麼 phase X 失敗 / 卡在哪 / 為何選 Y block?"
+
+Don't just dump the round table. Do a **narrative reconstruction** in this
+fixed format so we discuss the failure with the same shape every time:
+
+```
+## Phase pN reconstruction — call <start>→<end>
+
+### Entry canvas
+  <list nodes + edges agent saw when entering this phase>
+
+### Agent actions
+
+call N  <tool>(<args summary>)
+        ↳ what agent saw in the tool_result: <one-line>
+        ↳ what agent did next: <one-line>
+        ↳ verdict (if verifier ran): <ADVANCED|REJECTED — reason>
+
+(repeat for each call)
+
+### Where it went wrong (layered)
+
+| # | Layer | Detail |
+|---|---|---|
+| 1 | <agent hallucination / wrong block pick / loop> | <what + why> |
+
+### What agent saw at the decision point
+
+Pull the FULL user_msg for the round where the bad decision happened
+(usually a commit_pick or add_node). Show:
+- which sections were present (canvas / MATCHING BLOCKS / verifier feedback / doc)
+- which sections were MISSING that should have been there
+- the LLM's own reasoning text (raw_response) — what was its mental model?
+
+### Fix options
+
+Numbered + cross-referenced to which layer they attack:
+
+| # | fix | attacks |
+|---|---|---|
+| a | <change> | Layer 1 |
+| b | <change> | Layer 2 |
+```
+
+This format makes failure root causes legible across runs and lets us
+decide which layer to attack first. The flat round table can't show
+"agent never inspected upstream so it hallucinated output shape" — only
+narrative does.
+
+### When to use narrative vs flat report
+
+- **Flat Summary** (default skill output) → "how far did the build get? which phases passed?"
+- **Narrative reconstruction** (this section) → "why did agent pick wrong / loop / give up?"
+
+For investigation questions, always do narrative. Pull the actual prompts +
+LLM raw_response text via the trace JSON (`llm_calls[i].user_msg` and
+`llm_calls[i].raw_response`).
 
 ## Invocation
 
