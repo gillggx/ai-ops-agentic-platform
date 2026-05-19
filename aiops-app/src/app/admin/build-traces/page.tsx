@@ -232,7 +232,7 @@ export default function BuildTracesPage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [search, setSearch] = useState<string>("");
-  const [tab, setTab] = useState<"journey" | "results" | "pipeline">("journey");
+  const [tab, setTab] = useState<"summary" | "journey" | "results" | "pipeline">("summary");
   const [reRun, setReRun] = useState<ExecuteResult | null>(null);
   const [reRunLoading, setReRunLoading] = useState(false);
   const [clearLoading, setClearLoading] = useState<"" | "all" | "old">("");
@@ -291,7 +291,7 @@ export default function BuildTracesPage() {
     setDetailLoading(true);
     setDetail(null);
     setReRun(null);
-    setTab("journey");
+    setTab("summary");
     fetch(`/api/admin/build-traces/${encodeURIComponent(file)}`)
       .then((r) => r.json())
       .then((data) => setDetail(data))
@@ -481,6 +481,7 @@ export default function BuildTracesPage() {
           <>
             <DetailHeader detail={detail} tab={tab} setTab={setTab} onReRun={reRunPipeline} reRunLoading={reRunLoading} reRun={reRun} />
             <div style={{ flex: 1, padding: 24 }}>
+              {tab === "summary" && selectedFile && <SummaryTab file={selectedFile} />}
               {tab === "journey" && <JourneyTab detail={detail} />}
               {tab === "results" && <ResultsTab detail={detail} reRun={reRun} />}
               {tab === "pipeline" && <PipelineTab detail={detail} />}
@@ -552,7 +553,7 @@ function TraceListRow({ trace, selected, onClick }: { trace: TraceListItem; sele
 function DetailHeader({
   detail, tab, setTab, onReRun, reRunLoading, reRun,
 }: {
-  detail: TraceDetail; tab: string; setTab: (t: "journey" | "results" | "pipeline") => void;
+  detail: TraceDetail; tab: string; setTab: (t: "summary" | "journey" | "results" | "pipeline") => void;
   onReRun: () => void; reRunLoading: boolean; reRun: ExecuteResult | null;
 }) {
   return (
@@ -586,13 +587,14 @@ function DetailHeader({
       <BuildOutcomeBanner detail={detail} />
       <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
         {([
+          { id: "summary", label: "Summary", icon: "▸", count: undefined },
           { id: "journey", label: "Journey", icon: "📜", count: (detail.graph_steps?.length || 0) + (detail.llm_calls?.length || 0) },
           { id: "results", label: "Results", icon: "📊", count: detail.final_pipeline?.nodes?.length || 0 },
           { id: "pipeline", label: "Pipeline", icon: "🧩", count: detail.final_pipeline?.nodes?.length || 0 },
         ] as const).map((t) => (
           <button
             key={t.id}
-            onClick={() => setTab(t.id as "journey" | "results" | "pipeline")}
+            onClick={() => setTab(t.id as "summary" | "journey" | "results" | "pipeline")}
             style={{
               padding: "10px 16px",
               border: "none",
@@ -611,16 +613,18 @@ function DetailHeader({
           >
             <span>{t.icon}</span>
             {t.label}
-            <span style={{
-              fontSize: 11,
-              padding: "1px 6px",
-              background: tab === t.id ? T.accentSoft : T.neutralSoft,
-              color: tab === t.id ? T.accent : T.textMuted,
-              borderRadius: 10,
-              fontFamily: T.fontMono,
-            }}>
-              {t.count}
-            </span>
+            {t.count !== undefined && (
+              <span style={{
+                fontSize: 11,
+                padding: "1px 6px",
+                background: tab === t.id ? T.accentSoft : T.neutralSoft,
+                color: tab === t.id ? T.accent : T.textMuted,
+                borderRadius: 10,
+                fontFamily: T.fontMono,
+              }}>
+                {t.count}
+              </span>
+            )}
           </button>
         ))}
 
@@ -834,6 +838,404 @@ function Pill({ label, count, active, color, bg, onClick }: {
         }}>{count}</span>
       )}
     </button>
+  );
+}
+
+// ============================================================================
+// Summary tab — phase / attempt / action structured view
+// (Backed by python_ai_sidecar/agent_builder/graph_build/trace_summary.py —
+//  same JSON powers the verify-build skill renderer, so web + CLI stay in sync.)
+// ============================================================================
+
+type SummaryAction = {
+  tool: string;
+  ok?: boolean;
+  args?: Record<string, unknown> | string;
+  preview?: { rows?: number | null; status?: string };
+  mutated_node?: string | null;
+};
+
+type SummaryVerify = {
+  verdict?: "ADVANCED" | "REJECTED";
+  result?: string;
+  block_id?: string;
+  covers?: string[];
+  rows?: number | null;
+  error_message?: string | null;
+  judge_reject_reason?: string | null;
+  would_pass?: string[];
+  missing_for_phase?: string[];
+  fast_forward?: boolean;
+  phases_advanced?: string[];
+};
+
+type SummaryAttempt = {
+  n?: number | null;
+  kind?: "revise";
+  refine_cycle?: number;
+  block_id?: string | null;
+  inspect_count?: number;
+  from_commit_pick?: boolean;
+  actions?: SummaryAction[];
+  verify?: SummaryVerify | null;
+  root_cause?: string | null;
+  alternative_strategy?: string | null;
+};
+
+type SummaryPhase = {
+  id: string;
+  expected?: string | null;
+  goal?: string | null;
+  attempts: SummaryAttempt[];
+  outcome: "completed" | "stuck" | "not_reached";
+  rounds_used: number;
+  max_round_hits: number;
+};
+
+type TraceSummary = {
+  schema_version?: number;
+  build_id?: string;
+  instruction?: string;
+  duration_ms?: number;
+  plan: Array<{ id: string; expected?: string | null; goal?: string | null }>;
+  phases: SummaryPhase[];
+  end: {
+    status?: string;
+    nodes: Array<{ id: string; block_id: string; params?: Record<string, unknown> }>;
+    edges: Array<{ from: string; to: string }>;
+  };
+};
+
+const OUTCOME_SYM: Record<string, { label: string; color: string; bg: string }> = {
+  completed:   { label: "ok",       color: T.success, bg: T.successSoft },
+  stuck:       { label: "stuck",    color: T.danger,  bg: T.dangerSoft },
+  not_reached: { label: "skipped",  color: T.neutral, bg: T.neutralSoft },
+};
+
+function SummaryTab({ file }: { file: string }) {
+  const [summary, setSummary] = useState<TraceSummary | null>(null);
+  const [error, setError] = useState<string>("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    setSummary(null);
+    setError("");
+    fetch(`/api/admin/build-traces/${encodeURIComponent(file)}/summary`)
+      .then(async (r) => {
+        const data = await r.json();
+        if (!r.ok || data.error) setError(data.error || `HTTP ${r.status}`);
+        else setSummary(data);
+      })
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoading(false));
+  }, [file]);
+
+  if (loading) return <div style={{ padding: 32, color: T.textMuted }}>Loading summary…</div>;
+  if (error) return (
+    <div style={{ padding: 16, background: T.dangerSoft, color: T.danger, borderRadius: T.radius, fontSize: 13 }}>
+      Failed to load summary: {error}
+    </div>
+  );
+  if (!summary) return null;
+
+  const phasesById = Object.fromEntries(summary.phases.map((p) => [p.id, p]));
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <SummaryPlanCard plan={summary.plan} phasesById={phasesById} />
+      {summary.phases.map((ph) => <SummaryPhaseCard key={ph.id} phase={ph} />)}
+      <SummaryEndCard end={summary.end} />
+    </div>
+  );
+}
+
+function SummaryPlanCard({
+  plan, phasesById,
+}: {
+  plan: TraceSummary["plan"];
+  phasesById: Record<string, SummaryPhase>;
+}) {
+  return (
+    <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 16, boxShadow: T.shadowSm }}>
+      <h3 style={{ margin: "0 0 12px", fontSize: 13, fontWeight: 600, color: T.textMuted, textTransform: "uppercase", letterSpacing: 0.5 }}>
+        Plan
+      </h3>
+      {plan.length === 0 ? (
+        <div style={{ color: T.textSubtle, fontSize: 13 }}>(no plan captured)</div>
+      ) : (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <tbody>
+            {plan.map((p) => {
+              const outcome = phasesById[p.id]?.outcome || "not_reached";
+              const sym = OUTCOME_SYM[outcome];
+              return (
+                <tr key={p.id} style={{ borderTop: `1px solid ${T.border}` }}>
+                  <td style={{ padding: "8px 12px 8px 0", width: 60 }}>
+                    <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4, background: sym.bg, color: sym.color, fontWeight: 600 }}>
+                      {sym.label}
+                    </span>
+                  </td>
+                  <td style={{ padding: 8, fontFamily: T.fontMono, color: T.text, width: 50 }}>{p.id}</td>
+                  <td style={{ padding: 8, fontFamily: T.fontMono, color: T.textMuted, width: 100 }}>{p.expected || "?"}</td>
+                  <td style={{ padding: 8, color: T.text }}>{p.goal || ""}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function SummaryPhaseCard({ phase }: { phase: SummaryPhase }) {
+  const sym = OUTCOME_SYM[phase.outcome];
+  return (
+    <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 16, boxShadow: T.shadowSm }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <span style={{ fontFamily: T.fontMono, fontWeight: 700, color: T.text, fontSize: 15 }}>
+          Phase {phase.id}
+        </span>
+        <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4, background: T.neutralSoft, color: T.textMuted, fontFamily: T.fontMono }}>
+          {phase.expected || "?"}
+        </span>
+        <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4, background: sym.bg, color: sym.color, fontWeight: 600 }}>
+          {sym.label}
+        </span>
+        <span style={{ fontSize: 11, color: T.textSubtle, marginLeft: "auto", fontFamily: T.fontMono }}>
+          {phase.rounds_used} rounds
+          {phase.max_round_hits > 0 && ` · ${phase.max_round_hits} max-round hit${phase.max_round_hits > 1 ? "s" : ""}`}
+        </span>
+      </div>
+      <div style={{ fontSize: 13, color: T.textMuted, marginBottom: 12, padding: "8px 12px", background: T.bgSubtle, borderRadius: 4 }}>
+        <span style={{ fontWeight: 600, color: T.textMuted, fontSize: 11, textTransform: "uppercase", marginRight: 8 }}>Goal</span>
+        {phase.goal || "(no goal)"}
+      </div>
+      {phase.outcome === "not_reached" ? (
+        <div style={{ fontSize: 13, color: T.textSubtle, fontStyle: "italic", padding: 12 }}>
+          Phase never reached — earlier phase blocked the build.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {phase.attempts.map((a, i) => (
+            a.kind === "revise"
+              ? <SummaryReviseMarker key={`rev-${i}`} attempt={a} />
+              : <SummaryAttemptCard key={`a-${i}`} attempt={a} />
+          ))}
+          {phase.outcome === "completed" && (
+            <div style={{ fontSize: 12, color: T.success, fontWeight: 600, padding: "4px 0" }}>
+              [ok] Phase goal achieved
+            </div>
+          )}
+          {phase.outcome === "stuck" && (
+            <div style={{ fontSize: 12, color: T.danger, fontWeight: 600, padding: "4px 0" }}>
+              [NO] Phase NOT achieved
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SummaryReviseMarker({ attempt }: { attempt: SummaryAttempt }) {
+  return (
+    <div style={{
+      padding: 12,
+      background: T.warningSoft,
+      borderLeft: `3px solid ${T.warning}`,
+      borderRadius: 4,
+      fontSize: 12,
+    }}>
+      <div style={{ color: T.warning, fontWeight: 600, marginBottom: 4 }}>
+        ↻ REVISE (refine cycle {attempt.refine_cycle ?? "?"})
+      </div>
+      {attempt.root_cause && (
+        <div style={{ color: T.text, lineHeight: 1.5 }}>{attempt.root_cause}</div>
+      )}
+      {attempt.alternative_strategy && (
+        <div style={{ color: T.textMuted, marginTop: 6, lineHeight: 1.5 }}>
+          <strong>strategy:</strong> {attempt.alternative_strategy}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SummaryAttemptCard({ attempt }: { attempt: SummaryAttempt }) {
+  const headerBorder = attempt.verify?.verdict === "ADVANCED" ? T.success
+    : attempt.verify?.verdict === "REJECTED" ? T.danger : T.borderStrong;
+  return (
+    <div style={{
+      borderLeft: `3px solid ${headerBorder}`,
+      paddingLeft: 12,
+      paddingTop: 4,
+      paddingBottom: 4,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, marginBottom: 6 }}>
+        <span style={{ fontWeight: 600, color: T.text }}>Attempt {attempt.n ?? "?"}</span>
+        <span style={{ color: T.textSubtle }}>—</span>
+        <span style={{ fontFamily: T.fontMono, color: T.text }}>{attempt.block_id || "(unknown block)"}</span>
+        {!attempt.from_commit_pick && (
+          <span style={{ fontSize: 10, color: T.warning, fontStyle: "italic", marginLeft: 4 }}>
+            (no commit_pick)
+          </span>
+        )}
+      </div>
+      {(attempt.inspect_count || 0) > 0 && (
+        <div style={{ fontSize: 12, color: T.textMuted, fontFamily: T.fontMono, marginBottom: 4 }}>
+          inspect_block_doc × {attempt.inspect_count}
+        </div>
+      )}
+      {(attempt.actions || []).map((ac, j) => (
+        <SummaryActionRow key={j} action={ac} />
+      ))}
+      {attempt.verify && <SummaryVerifyRow verify={attempt.verify} />}
+    </div>
+  );
+}
+
+function SummaryActionRow({ action }: { action: SummaryAction }) {
+  const okBg = action.ok ? T.successSoft : T.dangerSoft;
+  const okFg = action.ok ? T.success : T.danger;
+  const okTag = action.ok ? "ok" : "no";
+  const args = action.args;
+  let argsLine = "";
+  if (args && typeof args === "object") {
+    if (action.tool === "add_node") {
+      const blk = (args as Record<string, unknown>).block_name;
+      const params = (args as Record<string, unknown>).params;
+      argsLine = String(blk || "?");
+      if (params && typeof params === "object") {
+        const parts = Object.entries(params as Record<string, unknown>).map(([k, v]) => {
+          const vs = typeof v === "string" ? `'${v}'` : JSON.stringify(v);
+          return `${k}=${vs.length > 30 ? vs.slice(0, 30) + "…" : vs}`;
+        });
+        argsLine += `  {${parts.join(", ")}}`;
+      }
+    } else if (action.tool === "connect") {
+      const a = args as Record<string, string>;
+      argsLine = `${a.from_node}.${a.from_port || "data"} → ${a.to_node}.${a.to_port || "data"}`;
+    } else if (action.tool === "set_param") {
+      const a = args as Record<string, unknown>;
+      argsLine = `${a.node_id}.${a.key}=${JSON.stringify(a.value)}`;
+    } else if (action.tool === "remove_node") {
+      argsLine = String((args as Record<string, unknown>).node_id || "?");
+    } else {
+      argsLine = JSON.stringify(args).slice(0, 120);
+    }
+  } else if (typeof args === "string") {
+    argsLine = args.slice(0, 120);
+  }
+  const preview = action.preview;
+  return (
+    <div style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 12, padding: "2px 0", fontFamily: T.fontMono }}>
+      <span style={{ display: "inline-block", width: 22, textAlign: "center", padding: "1px 0", borderRadius: 3, background: okBg, color: okFg, fontWeight: 700, fontSize: 10 }}>
+        {okTag}
+      </span>
+      <span style={{ minWidth: 100, color: T.accent, fontWeight: 600 }}>{action.tool}</span>
+      <span style={{ flex: 1, color: T.text, overflowWrap: "anywhere" }}>{argsLine}</span>
+      {preview && (
+        <span style={{ color: preview.status === "success" ? T.success : T.danger, fontSize: 11, whiteSpace: "nowrap" }}>
+          → {preview.status}{preview.rows != null ? ` (${preview.rows} rows)` : ""}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function SummaryVerifyRow({ verify }: { verify: SummaryVerify }) {
+  const advanced = verify.verdict === "ADVANCED";
+  const bg = advanced ? T.successSoft : T.dangerSoft;
+  const fg = advanced ? T.success : T.danger;
+  let summary = "";
+  if (advanced) {
+    summary = verify.fast_forward && (verify.phases_advanced?.length ?? 0) >= 2
+      ? `ADVANCED — FF: ${verify.phases_advanced!.join(", ")}`
+      : "ADVANCED";
+  } else {
+    if (verify.result === "covers mismatch") {
+      summary = `REJECTED — covers mismatch (block covers=${JSON.stringify(verify.covers || [])})`;
+    } else if (verify.result && ["validation_error", "failed", "error"].includes(verify.result)) {
+      summary = `REJECTED — ${verify.result}`;
+    } else if (verify.result && verify.result.includes("orphan")) {
+      summary = "REJECTED — orphan (block has no upstream edge)";
+    } else if (verify.result === "llm_judge_rejected") {
+      summary = "REJECTED — llm_judge (legacy)";
+    } else {
+      summary = `REJECTED — ${verify.result || "unknown"}`;
+    }
+  }
+  return (
+    <div style={{ marginTop: 8, padding: "6px 10px", background: bg, color: fg, borderRadius: 4, fontSize: 12 }}>
+      <div style={{ fontWeight: 600 }}>↳ verify: {summary}</div>
+      {verify.error_message && (
+        <div style={{ marginTop: 4, fontFamily: T.fontMono, fontSize: 11, color: T.text, opacity: 0.9 }}>
+          error: {verify.error_message}
+        </div>
+      )}
+      {verify.judge_reject_reason && (
+        <div style={{ marginTop: 4, fontSize: 11, color: T.text, opacity: 0.9 }}>
+          judge: {verify.judge_reject_reason}
+        </div>
+      )}
+      {(verify.missing_for_phase || []).slice(0, 2).map((m, i) => (
+        <div key={i} style={{ marginTop: 4, fontSize: 11, color: T.text, opacity: 0.9 }}>
+          missing: {m}
+        </div>
+      ))}
+      {(verify.would_pass?.length ?? 0) > 0 && (
+        <div style={{ marginTop: 4, fontSize: 11, color: T.text, opacity: 0.85 }}>
+          would_pass: {verify.would_pass!.slice(0, 5).join(", ")}{verify.would_pass!.length > 5 ? "…" : ""}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SummaryEndCard({ end }: { end: TraceSummary["end"] }) {
+  const meta = STATUS_META[end.status || ""] ?? { color: T.neutral, bg: T.neutralSoft, label: end.status || "—" };
+  return (
+    <div style={{ background: T.bgCard, border: `1px solid ${T.border}`, borderRadius: T.radius, padding: 16, boxShadow: T.shadowSm }}>
+      <h3 style={{ margin: "0 0 12px", fontSize: 13, fontWeight: 600, color: T.textMuted, textTransform: "uppercase", letterSpacing: 0.5 }}>
+        Final
+      </h3>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+        <span style={{ fontSize: 12, padding: "3px 10px", borderRadius: 4, background: meta.bg, color: meta.color, fontWeight: 600 }}>
+          {meta.label}
+        </span>
+        <span style={{ fontSize: 12, color: T.textMuted, fontFamily: T.fontMono }}>
+          {end.nodes.length} nodes · {end.edges.length} edges
+        </span>
+      </div>
+      {end.nodes.length === 0 ? (
+        <div style={{ color: T.textSubtle, fontSize: 13, fontStyle: "italic" }}>(no nodes — build produced empty pipeline)</div>
+      ) : (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <tbody>
+            {end.nodes.map((n) => (
+              <tr key={n.id} style={{ borderTop: `1px solid ${T.border}` }}>
+                <td style={{ padding: 8, fontFamily: T.fontMono, color: T.text, width: 50 }}>{n.id}</td>
+                <td style={{ padding: 8, fontFamily: T.fontMono, color: T.accent, width: 200 }}>{n.block_id}</td>
+                <td style={{ padding: 8, fontFamily: T.fontMono, color: T.textMuted, fontSize: 11, overflowWrap: "anywhere" }}>
+                  {n.params ? JSON.stringify(n.params) : "{}"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {end.edges.length > 0 && (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.border}` }}>
+          {end.edges.map((e, i) => (
+            <div key={i} style={{ fontSize: 11, fontFamily: T.fontMono, color: T.textMuted, padding: "2px 0" }}>
+              {e.from} → {e.to}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -897,6 +897,32 @@ async def get_trace(filename: str, caller: CallerContext = ServiceAuth):
     return json.loads(f.read_text())
 
 
+@router.get("/build/traces/{filename}/summary")
+async def get_trace_summary(filename: str, caller: CallerContext = ServiceAuth):
+    """Structured summary: plan / phases / attempts / actions / verify.
+
+    Single source of truth shared by the verify-build skill and the
+    /admin/build-traces frontend — both render the same hierarchy so
+    the user gets one consistent format whichever surface they use.
+    """
+    from python_ai_sidecar.agent_builder.graph_build.trace_summary import parse
+    d = _trace_dir()
+    if not d:
+        return _JSONResponse({"error": "BUILDER_TRACE_DIR not set"}, status_code=503)
+    if "/" in filename or ".." in filename or not filename.endswith(".json"):
+        return _JSONResponse({"error": "bad filename"}, status_code=400)
+    f = d / filename
+    if not f.exists():
+        return _JSONResponse({"error": "not found"}, status_code=404)
+    try:
+        trace = json.loads(f.read_text())
+        return parse(trace)
+    except Exception as ex:  # noqa: BLE001
+        return _JSONResponse(
+            {"error": f"summary parse failed: {ex}"}, status_code=500,
+        )
+
+
 @router.delete("/build/traces")
 async def delete_traces(
     older_than_hours: int | None = None,
