@@ -66,17 +66,21 @@ def _newest_trace_path() -> str | None:
 
 
 def _fetch_model(trace_path: str) -> dict[str, Any]:
-    """Run the sidecar's trace_summary parser on EC2, return its JSON model."""
+    """Run the sidecar's trace_summary parser on EC2, return its JSON model.
+
+    Uses the sidecar venv python since the module sits inside the
+    python_ai_sidecar package whose __init__ chain imports langgraph
+    (not available in system python3).
+    """
     bash = (
         f'cd {REMOTE_REPO} && sudo bash -c "'
-        f'source python_ai_sidecar/.env && '
-        f'python3 -m python_ai_sidecar.agent_builder.graph_build.trace_summary '
+        f'/opt/aiops/venv_sidecar/bin/python3 '
+        f'-m python_ai_sidecar.agent_builder.graph_build.trace_summary '
         f'{trace_path}"'
     )
     raw = _ssh(bash, timeout=60)
-    # Module emits one JSON object on stdout; tolerate stderr noise above.
     raw = raw.strip()
-    # Take last non-empty line as JSON (sidecar may emit warnings)
+    # Module emits one JSON object on stdout; tolerate stderr noise above.
     for line in reversed(raw.splitlines()):
         line = line.strip()
         if line.startswith("{"):
