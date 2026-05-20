@@ -717,7 +717,10 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
             "agentic_phase_loop", status="round_done",
             phase_id=pid, round=round_n + 1,
             tool=tool_name,
-            action_ok="error" not in action_result,
+            # v30.23: check VALUE not key presence. inspect_node_output
+            # always includes "error": None even on success; old check
+            # flagged every successful inspect as action_ok=False.
+            action_ok=not bool(action_result.get("error") if isinstance(action_result, dict) else None),
             auto_preview=auto_preview_result,
             mutated_node=last_mutated_logical_id,
         )
