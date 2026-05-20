@@ -58,6 +58,13 @@ aiops:
       service-token: ${PYTHON_SIDECAR_TOKEN:dev-only-do-not-use-in-prod}
   simulator:
     base-url: ${ONTOLOGY_SIM_URL:http://localhost:8012}
+  # v6.1 (2026-05-20) — java-api callback for skill trigger fires.
+  # SkillApiClient POSTs /internal/skills/by-slug/{slug}/run-system with
+  # X-Internal-Token. Token must match what java-api's
+  # InternalServiceTokenFilter accepts (same as the sidecar uses).
+  java-api:
+    base-url: ${AIOPS_JAVA_API_URL:http://localhost:8002}
+    internal-token: ${AIOPS_INTERNAL_TOKEN:${PYTHON_SIDECAR_TOKEN:dev-only-do-not-use-in-prod}}
 
 logging:
   level:

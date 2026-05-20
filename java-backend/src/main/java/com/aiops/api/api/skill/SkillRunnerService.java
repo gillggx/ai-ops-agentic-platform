@@ -113,6 +113,21 @@ public class SkillRunnerService {
                               Map<String, Object> triggerPayload,
                               boolean isTest,
                               AuthPrincipal caller) {
+        return run(slug, triggerPayload, isTest, caller, null);
+    }
+
+    /**
+     * v6.1 (2026-05-20): triggeredBy override for system / scheduler paths.
+     * When null, falls back to the legacy "user_test" / "manual" derivation
+     * based on isTest. Pass "system" / "system_schedule" / "system_event"
+     * from the new java-scheduler skill trigger pathways so manual vs
+     * automated runs are distinguishable in skill_runs.
+     */
+    public Flux<RunEvent> run(String slug,
+                              Map<String, Object> triggerPayload,
+                              boolean isTest,
+                              AuthPrincipal caller,
+                              String triggeredByOverride) {
         SkillDocumentEntity skill = skillRepo.findBySlug(slug).orElse(null);
         if (skill == null) {
             return Flux.just(RunEvent.error("skill not found: " + slug));
@@ -126,7 +141,7 @@ public class SkillRunnerService {
         Flux.fromIterable(parseSteps(skill.getSteps()))
                 .publishOn(Schedulers.boundedElastic())
                 .doOnSubscribe(s -> {
-                    SkillRunEntity run = createRunRow(skill.getId(), triggerPayload, isTest);
+                    SkillRunEntity run = createRunRow(skill.getId(), triggerPayload, isTest, triggeredByOverride);
                     sink.tryEmitNext(RunEvent.start(skill.getSlug(), run.getId(), parseSteps(skill.getSteps()).size()));
                     runWithSink(skill, run, triggerPayload, sink, caller);
                 })
@@ -753,10 +768,19 @@ public class SkillRunnerService {
 
     @Transactional
     SkillRunEntity createRunRow(Long skillId, Map<String, Object> payload, boolean isTest) {
+        return createRunRow(skillId, payload, isTest, null);
+    }
+
+    SkillRunEntity createRunRow(Long skillId, Map<String, Object> payload, boolean isTest,
+                                String triggeredByOverride) {
         SkillRunEntity r = new SkillRunEntity();
         r.setSkillId(skillId);
         r.setIsTest(isTest);
-        r.setTriggeredBy(isTest ? "user_test" : "manual");
+        // v6.1: explicit override for system / scheduler triggered runs.
+        String tb = (triggeredByOverride != null && !triggeredByOverride.isBlank())
+                ? triggeredByOverride
+                : (isTest ? "user_test" : "manual");
+        r.setTriggeredBy(tb);
         try {
             r.setTriggerPayload(mapper.writeValueAsString(payload != null ? payload : Map.of()));
         } catch (Exception e) {

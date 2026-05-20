@@ -1,10 +1,14 @@
 package com.aiops.scheduler.patrol;
 
 import com.aiops.api.domain.alarm.AlarmEntity;
+import com.aiops.api.domain.event.EventTypeEntity;
+import com.aiops.api.domain.event.EventTypeRepository;
 import com.aiops.api.domain.patrol.AutoPatrolEntity;
 import com.aiops.api.domain.patrol.AutoPatrolRepository;
 import com.aiops.api.domain.pipeline.PipelineAutoCheckTriggerEntity;
 import com.aiops.api.domain.pipeline.PipelineAutoCheckTriggerRepository;
+import com.aiops.api.domain.skill.SkillDocumentEntity;
+import com.aiops.api.domain.skill.SkillDocumentRepository;
 import com.aiops.scheduler.lock.DistributedLockService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -48,22 +52,32 @@ public class EventDispatchService {
 	private final AutoCheckExecutor autoCheckExecutor;
 	private final ObjectMapper objectMapper;
 	private final DistributedLockService lockService;
+	// v6.1 (2026-05-20) — skill trigger pathway (skill_documents.trigger_config)
+	private final SkillDocumentRepository skillRepo;
+	private final EventTypeRepository eventTypeRepo;
+	private final SkillApiClient skillApiClient;
 
 	public EventDispatchService(AutoPatrolRepository patrolRepo,
 	                            PipelineAutoCheckTriggerRepository autoCheckRepo,
 	                            AutoPatrolExecutor patrolExecutor,
 	                            AutoCheckExecutor autoCheckExecutor,
 	                            ObjectMapper objectMapper,
-	                            DistributedLockService lockService) {
+	                            DistributedLockService lockService,
+	                            SkillDocumentRepository skillRepo,
+	                            EventTypeRepository eventTypeRepo,
+	                            SkillApiClient skillApiClient) {
 		this.patrolRepo = patrolRepo;
 		this.autoCheckRepo = autoCheckRepo;
 		this.patrolExecutor = patrolExecutor;
 		this.autoCheckExecutor = autoCheckExecutor;
 		this.objectMapper = objectMapper;
 		this.lockService = lockService;
+		this.skillRepo = skillRepo;
+		this.eventTypeRepo = eventTypeRepo;
+		this.skillApiClient = skillApiClient;
 	}
 
-	/** Generated events → event-mode auto_patrols. */
+	/** Generated events → event-mode auto_patrols + skill_documents triggers. */
 	@Async
 	public void dispatchGeneratedEvent(Long eventTypeId, String mappedParametersJson) {
 		if (eventTypeId == null || eventTypeId == 0L) {
@@ -71,29 +85,77 @@ public class EventDispatchService {
 			return;
 		}
 		Map<String, Object> payload = parseJson(mappedParametersJson);
+
+		// ── Legacy path: auto_patrols (Phase 3) ─────────────────────────
 		List<AutoPatrolEntity> matched =
 				patrolRepo.findByTriggerModeAndEventTypeIdAndIsActiveTrue("event", eventTypeId);
-		if (matched.isEmpty()) {
-			log.debug("dispatchGeneratedEvent: event_type_id={} no matching event-mode patrols", eventTypeId);
+		if (!matched.isEmpty()) {
+			log.info("dispatchGeneratedEvent: event_type_id={} → {} patrol(s)", eventTypeId, matched.size());
+			for (AutoPatrolEntity patrol : matched) {
+				String key = "patrol:" + patrol.getId();
+				boolean ran = lockService.runWithLock(key, Duration.ofMinutes(5), () -> {
+					try {
+						patrolExecutor.executePatrol(patrol.getId(), payload);
+					} catch (Exception ex) {
+						log.warn("dispatchGeneratedEvent: patrol id={} threw: {}",
+								patrol.getId(), ex.getMessage(), ex);
+					}
+				});
+				if (!ran) {
+					log.debug("dispatchGeneratedEvent: patrol id={} skipped — another fire holds the lock",
+							patrol.getId());
+				}
+			}
+		}
+
+		// ── v6.1 path: skill_documents.trigger_config (event) ───────────
+		dispatchToSkillsByEvent(eventTypeId, payload);
+	}
+
+	/**
+	 * v6.1 (2026-05-20): event-mode skills migration path. Looks up active
+	 * skills whose trigger_config = {"type":"event", "event":"<name>"} and
+	 * fires each via java-api /internal/skills/by-slug/{slug}/run-system.
+	 *
+	 * <p>Filters in memory because trigger_config is stored as TEXT; with
+	 * typical N < 50 skills this is negligible. Same per-skill lock pattern
+	 * as auto_patrols to dedupe with the cron path (SkillScheduleService).
+	 */
+	private void dispatchToSkillsByEvent(Long eventTypeId, Map<String, Object> payload) {
+		EventTypeEntity type = eventTypeRepo.findById(eventTypeId).orElse(null);
+		if (type == null) {
+			log.debug("dispatchToSkillsByEvent: event_type_id={} not found in event_types", eventTypeId);
 			return;
 		}
-		log.info("dispatchGeneratedEvent: event_type_id={} → {} patrol(s)", eventTypeId, matched.size());
-		for (AutoPatrolEntity patrol : matched) {
-			// Phase 3 — same patrol-level lock as the cron path
-			// (AutoPatrolSchedulerService.safeExecute) so a patrol fired
-			// from BOTH cron AND event at the same instant only runs once.
-			String key = "patrol:" + patrol.getId();
+		String eventName = type.getName();
+		if (eventName == null || eventName.isBlank()) return;
+
+		List<SkillDocumentEntity> stable = skillRepo.findByStatus("stable");
+		List<SkillDocumentEntity> matchedSkills = stable.stream().filter(s -> {
+			Map<String, Object> cfg = parseJson(s.getTriggerConfig());
+			if (cfg.isEmpty()) return false;
+			String t = String.valueOf(cfg.get("type"));
+			String ev = String.valueOf(cfg.get("event"));
+			return "event".equals(t) && eventName.equals(ev);
+		}).toList();
+		if (matchedSkills.isEmpty()) {
+			log.debug("dispatchToSkillsByEvent: event={} no matching event-mode skills", eventName);
+			return;
+		}
+		log.info("dispatchToSkillsByEvent: event={} → {} skill(s)", eventName, matchedSkills.size());
+		for (SkillDocumentEntity skill : matchedSkills) {
+			String key = "skill:" + skill.getId();
 			boolean ran = lockService.runWithLock(key, Duration.ofMinutes(5), () -> {
 				try {
-					patrolExecutor.executePatrol(patrol.getId(), payload);
+					skillApiClient.dispatchSkill(skill.getSlug(), "system_event", payload);
 				} catch (Exception ex) {
-					log.warn("dispatchGeneratedEvent: patrol id={} threw: {}",
-							patrol.getId(), ex.getMessage(), ex);
+					log.warn("dispatchToSkillsByEvent: skill {} threw: {}",
+							skill.getSlug(), ex.getMessage(), ex);
 				}
 			});
 			if (!ran) {
-				log.debug("dispatchGeneratedEvent: patrol id={} skipped — another fire holds the lock",
-						patrol.getId());
+				log.debug("dispatchToSkillsByEvent: skill {} skipped — another fire holds the lock",
+						skill.getSlug());
 			}
 		}
 	}

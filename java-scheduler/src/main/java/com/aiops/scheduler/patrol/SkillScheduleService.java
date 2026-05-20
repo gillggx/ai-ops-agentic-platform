@@ -1,0 +1,152 @@
+package com.aiops.scheduler.patrol;
+
+import com.aiops.api.domain.skill.SkillDocumentEntity;
+import com.aiops.api.domain.skill.SkillDocumentRepository;
+import com.aiops.api.domain.skill.SkillRunRepository;
+import com.aiops.scheduler.lock.DistributedLockService;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+
+import java.time.Duration;
+import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+/**
+ * v6.1 (2026-05-20): Phase 11 v6 migration — fire schedule-mode skills.
+ *
+ * <p>Phase 11 v6 moved trigger config from {@code auto_patrols.cron_expr}
+ * to {@code skill_documents.trigger_config} (JSON). java-scheduler's
+ * existing {@link AutoPatrolSchedulerService} only watches the legacy
+ * patrol table, so {@code status='stable'} skills with schedule triggers
+ * never fired automatically. This service closes that gap.
+ *
+ * <p>Approach: minute-granular poll instead of dynamic Spring TaskScheduler
+ * registration. With typical N &lt; 10 stable skills, scanning is cheap;
+ * the 60s tick is sufficient for hourly/daily modes. Sub-minute precision
+ * is not required for SPC patrols.
+ *
+ * <p>Supported {@code trigger_config.schedule.mode}:
+ * <ul>
+ *   <li>{@code hourly} — fire every {@code every} hours (default 1)</li>
+ *   <li>{@code daily} — fire every {@code every} days (default 1)</li>
+ *   <li>{@code cron} — TODO (parse {@code schedule.cron} via CronExpression)</li>
+ * </ul>
+ *
+ * <p>Dedupe: per-skill 5-min Redis lock, same as the patrol/event paths,
+ * so a skill that overlaps cron + event triggers only runs once.
+ */
+@Slf4j
+@Service
+public class SkillScheduleService {
+
+	private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
+
+	private final SkillDocumentRepository skillRepo;
+	private final SkillRunRepository runRepo;
+	private final SkillApiClient skillApiClient;
+	private final DistributedLockService lockService;
+	private final ObjectMapper objectMapper;
+
+	public SkillScheduleService(SkillDocumentRepository skillRepo,
+	                            SkillRunRepository runRepo,
+	                            SkillApiClient skillApiClient,
+	                            DistributedLockService lockService,
+	                            ObjectMapper objectMapper) {
+		this.skillRepo = skillRepo;
+		this.runRepo = runRepo;
+		this.skillApiClient = skillApiClient;
+		this.lockService = lockService;
+		this.objectMapper = objectMapper;
+	}
+
+	/**
+	 * Poll once per minute. Cheap when no schedule-mode skills exist; the
+	 * lock service blocks duplicate fires across pods.
+	 */
+	@Scheduled(fixedDelay = 60_000, initialDelay = 30_000)
+	public void tick() {
+		List<SkillDocumentEntity> stable = skillRepo.findByStatus("stable");
+		int eligible = 0;
+		int fired = 0;
+		for (SkillDocumentEntity s : stable) {
+			Map<String, Object> cfg = parseJson(s.getTriggerConfig());
+			if (!"schedule".equals(String.valueOf(cfg.get("type")))) continue;
+			eligible++;
+			if (!isDue(s, cfg)) continue;
+			boolean ok = tryFire(s);
+			if (ok) fired++;
+		}
+		if (eligible > 0) {
+			log.debug("SkillScheduleService.tick: scanned={} eligible={} fired={}", stable.size(), eligible, fired);
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	private boolean isDue(SkillDocumentEntity skill, Map<String, Object> cfg) {
+		Object schedule = cfg.get("schedule");
+		if (!(schedule instanceof Map)) return false;
+		Map<String, Object> sm = (Map<String, Object>) schedule;
+		String mode = String.valueOf(sm.getOrDefault("mode", "hourly"));
+		int every = parseInt(sm.get("every"), 1);
+		Duration interval = switch (mode) {
+			case "hourly" -> Duration.ofHours(Math.max(1, every));
+			case "daily"  -> Duration.ofDays(Math.max(1, every));
+			default -> {
+				// Unsupported (cron etc) — first-iteration cap; log once-ish then skip
+				log.debug("SkillScheduleService: skill {} mode={} not yet supported, skipping",
+						skill.getSlug(), mode);
+				yield Duration.ZERO;
+			}
+		};
+		if (interval.isZero()) return false;
+		Optional<OffsetDateTime> last = runRepo.findLastSystemTriggeredAt(skill.getId());
+		if (last.isEmpty()) {
+			// Never fired by scheduler — fire now to start the clock
+			return true;
+		}
+		OffsetDateTime due = last.get().plus(interval);
+		return !OffsetDateTime.now().isBefore(due);
+	}
+
+	private boolean tryFire(SkillDocumentEntity skill) {
+		String key = "skill:" + skill.getId();
+		final boolean[] result = {false};
+		boolean acquired = lockService.runWithLock(key, Duration.ofMinutes(5), () -> {
+			try {
+				result[0] = skillApiClient.dispatchSkill(
+						skill.getSlug(), "system_schedule", Map.of());
+				if (result[0]) {
+					log.info("SkillScheduleService: fired skill={} (schedule)", skill.getSlug());
+				}
+			} catch (Exception ex) {
+				log.warn("SkillScheduleService: skill {} dispatch threw: {}",
+						skill.getSlug(), ex.getMessage(), ex);
+			}
+		});
+		if (!acquired) {
+			log.debug("SkillScheduleService: skill {} skipped — another fire holds the lock",
+					skill.getSlug());
+		}
+		return result[0];
+	}
+
+	private Map<String, Object> parseJson(String raw) {
+		if (raw == null || raw.isBlank()) return Map.of();
+		try {
+			return objectMapper.readValue(raw, MAP_TYPE);
+		} catch (Exception ex) {
+			return Map.of();
+		}
+	}
+
+	private int parseInt(Object v, int def) {
+		if (v instanceof Number n) return n.intValue();
+		try { return Integer.parseInt(String.valueOf(v)); }
+		catch (Exception e) { return def; }
+	}
+}
