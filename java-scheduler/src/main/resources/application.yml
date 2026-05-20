@@ -64,7 +64,10 @@ aiops:
   # InternalServiceTokenFilter accepts (same as the sidecar uses).
   java-api:
     base-url: ${AIOPS_JAVA_API_URL:http://localhost:8002}
-    internal-token: ${AIOPS_INTERNAL_TOKEN:${PYTHON_SIDECAR_TOKEN:dev-only-do-not-use-in-prod}}
+    # Must match java-backend's aiops.internal.token (env JAVA_INTERNAL_TOKEN).
+    # That's the token InternalServiceTokenFilter compares X-Internal-Token
+    # against — NOT the sidecar service token. Two distinct secrets.
+    internal-token: ${JAVA_INTERNAL_TOKEN:dev-internal-token}
 
 logging:
   level:
