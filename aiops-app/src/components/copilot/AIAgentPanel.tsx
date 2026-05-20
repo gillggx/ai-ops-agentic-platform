@@ -578,6 +578,13 @@ export function AIAgentPanel({
   // v1.7 — id of the inline ops chat-card so each new pb_glass_op appends to
   // the right build session's trail. Reset at every pb_glass_start.
   const currentOpsMsgIdRef = useRef<number | null>(null);
+  // 2026-05-20 — id of the inline macro-plan card driven by structured
+  // `ev.plan` / `ev.plan_confirmed` / `ev.phase_update` payloads on
+  // pb_glass_chat (goal_plan_proposed). Previously these payloads were
+  // ignored and only the text fallback rendered, which collapsed into a
+  // run-on bubble. Now we render PlanRenderer aligned with the v1.7 todo
+  // card and mutate phases live as the build progresses.
+  const currentMacroPlanMsgIdRef = useRef<number | null>(null);
   // v1.5 — Glass Box build ops accumulate here, surfaced via OpsConsole (default
   // collapsed). Cleared at the start of every new build session.
   // v1.7: glassOps standalone state retired — ops now live as a "ops"
@@ -720,6 +727,7 @@ export function AIAgentPanel({
     setReflection({ status: null, amendment: "" });
     setPlanItems([]);
     currentPlanMsgIdRef.current = null;
+    currentMacroPlanMsgIdRef.current = null;
     setAutoRun({ status: "idle" });
     setInput("");
     setActiveTab("chat");
@@ -1123,6 +1131,7 @@ export function AIAgentPanel({
             // of mutating the previous build's cards.
             currentPlanMsgIdRef.current = null;
             currentOpsMsgIdRef.current = null;
+            currentMacroPlanMsgIdRef.current = null;
             setAutoRun({ status: "idle" });
             setChatHistory((prev) => [...prev, {
               id: nextId(), role: "agent",
@@ -1200,6 +1209,114 @@ export function AIAgentPanel({
           case "pb_glass_chat": {
             const content = (ev.content as string) ?? "";
             onGlassChat?.({ content });
+
+            // 2026-05-20 — goal_plan_proposed (v30 ReAct) carries a
+            // structured `plan` payload alongside the text. Render as a
+            // PlanRenderer card (same look as the v1.7 todo card) and
+            // mutate phases live via `plan_confirmed` / `phase_update`
+            // payloads on subsequent pb_glass_chat events. If any of these
+            // structured fields are present we suppress the text bubble to
+            // avoid showing the same plan twice (text + card).
+            const planPayload = ev.plan as {
+              summary?: string;
+              phases?: Array<{
+                id?: string; goal?: string; expected?: string; auto_injected?: boolean;
+              }>;
+            } | undefined;
+            const planConfirmed = ev.plan_confirmed as { auto?: boolean; n_phases?: number } | undefined;
+            const phaseUpdate = ev.phase_update as {
+              phase_id?: string;
+              status?: string;
+              rationale?: string;
+              reason?: string;
+              alternative?: string;
+            } | undefined;
+
+            if (planPayload && Array.isArray(planPayload.phases) && planPayload.phases.length > 0) {
+              const items: PlanItem[] = planPayload.phases.map((p) => ({
+                id: String(p.id ?? ""),
+                title: String(p.goal ?? ""),
+                status: "pending",
+              }));
+              const newId = nextId();
+              currentMacroPlanMsgIdRef.current = newId;
+              setChatHistory((prev) => [...prev, {
+                id: newId, role: "plan", content: "", planItems: items,
+              }]);
+              break;
+            }
+
+            if (planConfirmed && currentMacroPlanMsgIdRef.current != null) {
+              const targetId = currentMacroPlanMsgIdRef.current;
+              setChatHistory((prev) => prev.map((m) => {
+                if (m.id !== targetId || m.role !== "plan" || !m.planItems) return m;
+                // Mark the first pending phase as in_progress so the user
+                // immediately sees forward motion.
+                let flipped = false;
+                const items = m.planItems.map((it) => {
+                  if (!flipped && it.status === "pending") {
+                    flipped = true;
+                    return { ...it, status: "in_progress" as PlanItem["status"] };
+                  }
+                  return it;
+                });
+                return { ...m, planItems: items };
+              }));
+              break;
+            }
+
+            if (phaseUpdate && phaseUpdate.phase_id && currentMacroPlanMsgIdRef.current != null) {
+              const targetId = currentMacroPlanMsgIdRef.current;
+              const pid = phaseUpdate.phase_id;
+              const rawStatus = phaseUpdate.status ?? "";
+              // PlanRenderer only knows 4 states; map richer phase states.
+              let mappedStatus: PlanItem["status"] = "in_progress";
+              let note: string | undefined;
+              switch (rawStatus) {
+                case "completed":
+                case "handover_take_over":
+                  mappedStatus = "done";
+                  note = phaseUpdate.rationale || undefined;
+                  break;
+                case "failed":
+                case "handover_drop":
+                  mappedStatus = "failed";
+                  note = phaseUpdate.reason || undefined;
+                  break;
+                case "revising":
+                  mappedStatus = "in_progress";
+                  note = phaseUpdate.reason ? `反思中：${phaseUpdate.reason}` : "反思中";
+                  break;
+                case "revising_retry":
+                  mappedStatus = "in_progress";
+                  note = phaseUpdate.alternative ? `換策略：${phaseUpdate.alternative}` : "換策略再試";
+                  break;
+                case "running":
+                  mappedStatus = "in_progress";
+                  break;
+                default:
+                  mappedStatus = "in_progress";
+              }
+              setChatHistory((prev) => prev.map((m) => {
+                if (m.id !== targetId || m.role !== "plan" || !m.planItems) return m;
+                let advanceNext = false;
+                const items = m.planItems.map((it) => {
+                  if (it.id !== pid) return it;
+                  if (mappedStatus === "done") advanceNext = true;
+                  return { ...it, status: mappedStatus, note };
+                });
+                if (advanceNext) {
+                  const nextIdx = items.findIndex((it) => it.status === "pending");
+                  if (nextIdx >= 0) {
+                    items[nextIdx] = { ...items[nextIdx], status: "in_progress" };
+                  }
+                }
+                return { ...m, planItems: items };
+              }));
+              break;
+            }
+
+            // Fallback — generic chat content (no structured plan payload)
             if (content.trim()) {
               setChatHistory((prev) => [...prev, {
                 id: nextId(), role: "agent", content: `💬 ${content}`,
