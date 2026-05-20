@@ -857,11 +857,12 @@ def _blocks() -> list[dict[str, Any]]:
                 "Group by + 聚合（pandas groupby + single agg func）。\n"
                 "\n"
                 "== When to use ==\n"
-                "- ✅ 「每台機台平均 xbar 值」→ group_by=toolID, agg_column=spc_xbar_chart_value, agg_func=mean\n"
-                "- ✅ 「每個 recipe 的 OOC 次數」→ filter(OOC) → groupby_agg(recipe, agg_column=spc_status, agg_func=count)\n"
+                "- ✅ 「每台機台平均 xbar 值」→ group_by=toolID, column=spc_xbar_chart_value, aggregate=mean\n"
+                "- ✅ 「每個 recipe 的 OOC 次數」→ filter(OOC) → groupby_agg(recipe, column=spc_status, aggregate=count)\n"
+                "- ✅ 「每個 event 同時 OOC 圖表數」→ filter(is_ooc) → groupby_agg(eventTime, column=is_ooc, aggregate=count)\n"
                 "- ✅ 多維度：group_by=['toolID','step'] (list) 或 group_by='toolID' (single col)\n"
                 "- ❌ 只想算 row 數（不聚合其他欄）→ 用 block_count_rows，語意更清楚\n"
-                "- ❌ 多個 agg func 同時 → 目前只支援單一 agg_func；要多個就分多個 block 再 join\n"
+                "- ❌ 多個 agg func 同時 → 目前只支援單一 aggregate；要多個就分多個 block 再 join\n"
                 "- ❌ Cpk / 統計檢定 → 用 block_cpk / block_hypothesis_test\n"
                 "\n"
                 "== Params ==\n"
@@ -869,38 +870,49 @@ def _blocks() -> list[dict[str, Any]]:
                 "           ✅ 單欄 string:  'toolID'\n"
                 "           ✅ 多欄 list:    ['toolID','step','chart_name']  ← 推薦\n"
                 "           ⚠ 不要用逗號分隔字串 'toolID,step'（會被當成單一欄名 'toolID,step' 找不到）\n"
-                "agg_column (string, required) 要聚合的欄位\n"
-                "agg_func   (string, required) mean / sum / count / min / max / median / std\n"
+                "column     (string, required) 要聚合的欄位 — 跟 block_step_check 一致命名\n"
+                "           ⚠ legacy alias `agg_column` 仍接受 (back-compat)，新 pipeline 請用 `column`\n"
+                "aggregate  (string, required) mean / sum / count / min / max / median / std\n"
+                "           ⚠ legacy alias `agg_func` 仍接受 (back-compat)，新 pipeline 請用 `aggregate`\n"
                 "\n"
                 "== Output ==\n"
-                "port: data (dataframe) — columns = [<group_by 各欄>, <agg_column>_<agg_func>]\n"
-                "例：group_by=toolID, agg_column=value, agg_func=mean → columns [toolID, value_mean]\n"
+                "port: data (dataframe) — columns = [<group_by 各欄>, <column>_<aggregate>]\n"
+                "例：group_by=toolID, column=value, aggregate=mean → columns [toolID, value_mean]\n"
                 "\n"
                 "== Common mistakes ==\n"
-                "⚠ 輸出欄位名是 <agg_column>_<agg_func>（e.g. value_mean），不是 'agg' 或 <agg_column>\n"
+                "⚠ 輸出欄位名是 <column>_<aggregate>（e.g. value_mean），不是 'agg' 或 <column>\n"
                 "  下游 sort/filter/threshold/chart 引用這個欄位時，記得**完整名**：\n"
-                "  agg_column='spc_status' + agg_func='count' → 下游 column='spc_status_count'\n"
+                "  column='spc_status' + aggregate='count' → 下游 column='spc_status_count'\n"
                 "  （**寫 'count' 會被 set_param 拒絕**，COLUMN_NOT_IN_UPSTREAM）\n"
-                "⚠ agg_func='count' 會算非 null row 數（類似 pandas count），若 agg_column 全有值等同 row count\n"
+                "⚠ aggregate='count' 會算非 null row 數（類似 pandas count），若 column 全有值等同 row count\n"
                 "⚠ 多 group_by 要用 list of strings (e.g. ['toolID','step'])；逗號分隔 string 會被 reject\n"
                 "⚠ std / median 需要至少 2 筆；組內單筆會是 NaN\n"
                 "\n"
                 "== Errors ==\n"
-                "- COLUMN_NOT_FOUND     : group_by / agg_column 不存在\n"
+                "- COLUMN_NOT_FOUND     : group_by / column 不存在\n"
                 "- INVALID_AGG_FOR_TYPE : 對字串欄跑 mean / sum\n"
             ),
             "input_schema": [{"port": "data", "type": "dataframe"}],
             "output_schema": [{"port": "data", "type": "dataframe"}],
             "param_schema": {
                 "type": "object",
-                "required": ["group_by", "agg_column", "agg_func"],
+                # v6.3 (2026-05-20): renamed agg_column → column, agg_func → aggregate
+                # for naming consistency with block_step_check + pandas/SQL convention.
+                # Executor accepts both names (legacy alias). Schema declares
+                # the new canonical names; old names omitted from required so
+                # back-compat pipelines don't C6_PARAM_MISSING.
+                "required": ["group_by"],
                 "properties": {
-                    "group_by":   {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}], "title": "Group by column(s) — string for single, list for multi", "x-column-source": "input.data"},
-                    "agg_column": {"type": "string", "x-column-source": "input.data"},
-                    "agg_func": {
+                    "group_by":  {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}], "title": "Group by column(s) — string for single, list for multi", "x-column-source": "input.data"},
+                    "column":    {"type": "string", "title": "Aggregation target column", "x-column-source": "input.data"},
+                    "aggregate": {
                         "type": "string",
                         "enum": ["mean", "sum", "count", "min", "max", "median", "std"],
+                        "title": "Aggregation function",
                     },
+                    # Legacy aliases (accepted by executor; do not advertise as primary)
+                    "agg_column": {"type": "string", "x-column-source": "input.data", "title": "[legacy alias] use `column` instead"},
+                    "agg_func": {"type": "string", "enum": ["mean", "sum", "count", "min", "max", "median", "std"], "title": "[legacy alias] use `aggregate` instead"},
                 },
             },
             "implementation": {"type": "python", "ref": "app.services.pipeline_builder.blocks.groupby_agg:GroupByAggBlockExecutor"},

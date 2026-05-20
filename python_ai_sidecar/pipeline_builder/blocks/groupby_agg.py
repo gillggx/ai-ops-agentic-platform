@@ -36,8 +36,30 @@ class GroupByAggBlockExecutor(BlockExecutor):
             raise BlockExecutionError(code="INVALID_INPUT", message="'data' must be DataFrame")
 
         group_by = self.require(params, "group_by")
-        agg_column = self.require(params, "agg_column")
-        agg_func = self.require(params, "agg_func")
+        # v6.3 (2026-05-20): accept both new (aggregate/column) and legacy
+        # (agg_func/agg_column) param names. New names align with step_check
+        # + pandas convention; old names kept for back-compat with existing
+        # pipelines. Prefer new names when both given.
+        agg_column = (
+            params.get("column")
+            if params.get("column") is not None
+            else params.get("agg_column")
+        )
+        agg_func = (
+            params.get("aggregate")
+            if params.get("aggregate") is not None
+            else params.get("agg_func")
+        )
+        if agg_column is None:
+            raise BlockExecutionError(
+                code="PARAM_MISSING",
+                message="missing required param 'column' (or legacy 'agg_column')",
+            )
+        if agg_func is None:
+            raise BlockExecutionError(
+                code="PARAM_MISSING",
+                message="missing required param 'aggregate' (or legacy 'agg_func')",
+            )
 
         if agg_func not in _AGG_FUNCS:
             raise BlockExecutionError(
