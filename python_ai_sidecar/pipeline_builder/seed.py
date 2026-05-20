@@ -2809,7 +2809,9 @@ def _blocks() -> list[dict[str, Any]]:
                 "lambda:        number, default 0.2 — EWMA smoothing\n"
                 "k:             number, default 0.5 — CUSUM reference (σ units)\n"
                 "h:             number, default 4 — CUSUM decision interval (σ units)\n"
-                "target:        number, opt — 中心目標值 μ。**留空 (null) 系統會自動用資料 mean**。\n"
+                "target:        number | null, opt — 中心目標值 μ。\n"
+                "               ✅ **預設留空 (null)**：executor 自動用 `mean(value_column)` 當 target，符合 CUSUM 統計慣例。\n"
+                "               ✅ 若 user 明確指定（例如 process spec 中心值 850°C）→ 寫具體 number。\n"
                 "               ⚠ 不要設 0 — 量測值不為 0 的資料（如 SPC xbar=14）會讓 CUSUM 變成\n"
                 "               單純累加序列（單調遞增直線），不是真正的 CUSUM 偏離偵測。\n"
                 "title:         string, opt\n"
@@ -2829,7 +2831,12 @@ def _blocks() -> list[dict[str, Any]]:
                     "lambda": {"type": "number", "minimum": 0.05, "maximum": 1, "default": 0.2},
                     "k": {"type": "number", "minimum": 0.1, "maximum": 2.0, "default": 0.5, "title": "CUSUM k (reference value, typical 0.3-0.7σ)"},
                     "h": {"type": "number", "minimum": 1, "maximum": 10, "default": 4, "title": "CUSUM h (decision interval, typical 3-5σ)"},
-                    "target": {"type": "number"},
+                    # v6.3 (2026-05-20): accept null — executor falls back to
+                    # mean(value_column) when target is null/missing/0. Doc
+                    # AND examples teach `target=null` for CUSUM; schema must
+                    # not reject what the doc promises. _type_matches handles
+                    # ["number","null"] via list-any recursion.
+                    "target": {"type": ["number", "null"]},
                     "title": {"type": "string"},
                 },
             },
