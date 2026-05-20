@@ -136,6 +136,7 @@ async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenera
     from python_ai_sidecar.agent_builder.advisor import (
         classify_advisor_intent, stream_block_advisor,
     )
+    from python_ai_sidecar.agent_builder.advisor_v2 import stream_doc_qa_agent
     from python_ai_sidecar.agent_builder.graph_build import stream_graph_build
     from python_ai_sidecar.clients.java_client import JavaAPIClient
 
@@ -152,6 +153,20 @@ async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenera
 
         if intent != "BUILD":
             java = JavaAPIClient.for_caller(caller)
+            # v6.2 (2026-05-20) — EXPLAIN/COMPARE/RECOMMEND use the new
+            # tool-using doc Q&A agent (advisor_v2) so admin-edited
+            # block_docs.markdown surfaces in answers. AMBIGUOUS +
+            # KNOWLEDGE stay on the legacy fast path (clarify message /
+            # pure-LLM concept answer — no doc fetch needed).
+            if intent in {"EXPLAIN", "COMPARE", "RECOMMEND"}:
+                async for stream_event in stream_doc_qa_agent(
+                    req.instruction, java=java,
+                ):
+                    yield {
+                        "event": stream_event.type,
+                        "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
+                    }
+                return
             async for stream_event in stream_block_advisor(req.instruction, intent, java=java):
                 yield {
                     "event": stream_event.type,
