@@ -1524,10 +1524,24 @@ def _build_tool_specs() -> list[dict[str, Any]]:
         },
         {
             "name": "inspect_block_doc",
-            "description": "Get full doc for a block (description + param_schema + column_docs + examples).",
+            "description": (
+                "Get doc for a block. Default section='summary' returns the "
+                "lean doc (description + Inputs/Outputs/Parameters/When-to-invoke, "
+                "drops Examples) — ~22-25% smaller, usually enough. Pass "
+                "section='full' when picking a tricky block or you need a "
+                "concrete example to copy from."
+            ),
             "input_schema": {
                 "type": "object",
-                "properties": {"block_id": {"type": "string"}},
+                "properties": {
+                    "block_id": {"type": "string"},
+                    "section": {
+                        "type": "string",
+                        "enum": ["summary", "full"],
+                        "default": "summary",
+                        "description": "'summary' lean (default) | 'full' includes Examples + full markdown",
+                    },
+                },
                 "required": ["block_id"],
             },
         },

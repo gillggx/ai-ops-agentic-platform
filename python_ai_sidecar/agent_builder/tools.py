@@ -1099,10 +1099,20 @@ class BuilderToolset:
                 out[port] = {"type": blob.get("type"), "value": blob.get("snapshot") or blob.get("value")}
         return out
 
-    async def inspect_block_doc(self, block_id: str) -> dict[str, Any]:
-        """v30: return the full doc for a block (description + param_schema
-        + column_docs + examples). LLM calls when it needs the exact usage
-        rules of a block it's about to add_node.
+    async def inspect_block_doc(
+        self, block_id: str, section: str = "summary",
+    ) -> dict[str, Any]:
+        """v30: return doc for a block.
+
+        section='summary' (default, 2026-05-22): description trimmed to
+          everything before `## Examples`, examples array stripped. ~22-25%
+          smaller payload. Use for first-pass exploration when picking a block.
+        section='full': complete markdown + examples array. Use when summary
+          isn't enough (param-rich blocks, edge cases).
+
+        Rollback: set env BLOCK_DOC_FORCE_FULL=true on sidecar to override
+        LLM choice and always return full (restores pre-2026-05-22 behaviour
+        without code change).
 
         v49 (2026-05-19): description prefers DB block_docs.markdown (rich
         Markdown maintained via admin UI) over baked seed.py description.
@@ -1118,6 +1128,21 @@ class BuilderToolset:
         description = await _resolve_block_description(
             block_id, spec.get("description") or "",
         )
+        examples = spec.get("examples") or []
+
+        # Rollback hatch — env override forces full payload regardless of
+        # what the LLM asked for. Used to revert without redeploying code.
+        import os as _os
+        force_full = _os.environ.get("BLOCK_DOC_FORCE_FULL", "").lower() in (
+            "true", "1", "yes",
+        )
+        if force_full:
+            section = "full"
+
+        if section == "summary":
+            description = _trim_doc_to_summary(description)
+            examples = []  # client should call again with section='full' if needed
+
         return {
             "block_id": spec.get("name"),
             "category": spec.get("category"),
@@ -1126,7 +1151,8 @@ class BuilderToolset:
             "output_schema": spec.get("output_schema") or [],
             "param_schema": spec.get("param_schema") or {},
             "column_docs": spec.get("column_docs") or [],
-            "examples": spec.get("examples") or [],
+            "examples": examples,
+            "_section": section,
         }
 
     async def phase_complete(self, rationale: str) -> dict[str, Any]:
@@ -1371,6 +1397,25 @@ import time as _time
 
 _BLOCK_DOCS_CACHE: dict[str, tuple[float, str]] = {}
 _BLOCK_DOCS_TTL_SEC = 60.0
+
+
+def _trim_doc_to_summary(markdown: str) -> str:
+    """Cut a block-doc markdown at the first `## Examples` header.
+
+    `## Examples` reliably appears at the end of each canonical block-doc
+    template and contains the largest chunk (~22-25% of total chars), with
+    multi-row JSON samples that the LLM rarely needs for picking blocks.
+    Everything before is kept (frontmatter + intro + Inputs / Outputs /
+    Parameters / When to invoke / 不適用情境).
+
+    No-op if marker not found (returns input unchanged).
+    """
+    if not markdown:
+        return markdown
+    marker_idx = markdown.find("## Examples")
+    if marker_idx <= 0:
+        return markdown
+    return markdown[:marker_idx].rstrip() + "\n\n(examples 已省略；改用 inspect_block_doc(block_id, section='full') 取完整 doc)"
 
 
 async def _resolve_block_description(block_id: str, fallback: str) -> str:
