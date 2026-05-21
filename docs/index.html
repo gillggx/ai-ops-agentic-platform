@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>AIOps Platform — Documentation</title>
+<link rel="stylesheet" href="_assets/style.css">
+</head>
+<body>
+<nav class="top">
+  <a href="index.html" class="active">Overview</a>
+  <a href="architecture.html">Architecture</a>
+  <a href="projects/python-sidecar.html">Sidecar</a>
+  <a href="projects/java-backend.html">Java API</a>
+  <a href="projects/java-scheduler.html">Scheduler</a>
+  <a href="projects/aiops-app.html">Frontend</a>
+  <a href="projects/ontology-simulator.html">Simulator</a>
+  <a href="deep-dives/langgraph-pipeline-builder.html">LangGraph</a>
+  <a href="deep-dives/tool-using-advisor.html">Advisor</a>
+  <a href="deep-dives/trace-example.html">Trace Example</a>
+</nav>
+
+<div class="wrap">
+
+<h1>AIOps Platform</h1>
+<p class="lede">半導體製造廠的 AI Agent 平台。製程工程師透過自然語言對話完成異常根因分析、設備診斷、自動化巡檢。</p>
+
+<p class="subtle">Docs build: 2026-05-21 · v6.3 (LangGraph + tool-using architecture)</p>
+
+<h2>What's in this site</h2>
+
+<div class="grid-2">
+  <div class="card">
+    <h3>Architecture</h3>
+    <p class="meta">High-level service map + data flow.</p>
+    <p>5 services across 4 ports. Service boundaries, who owns what data, and how they talk.</p>
+    <p><a href="architecture.html">→ Architecture map</a></p>
+  </div>
+  <div class="card">
+    <h3>Per-Project Docs</h3>
+    <p class="meta">One page per microservice.</p>
+    <p>Each service's responsibilities, entry points, key modules, and deploy lifecycle.</p>
+    <p><a href="projects/python-sidecar.html">Sidecar</a> · <a href="projects/java-backend.html">Java API</a> · <a href="projects/java-scheduler.html">Scheduler</a> · <a href="projects/aiops-app.html">Frontend</a> · <a href="projects/ontology-simulator.html">Simulator</a></p>
+  </div>
+  <div class="card">
+    <h3>LangGraph Pipeline Builder</h3>
+    <p class="meta">v30.x ReAct + sub-phase machine</p>
+    <p>How the build agent works: goal_plan → agentic_phase_loop → phase_verifier. Sub-phase state machine, feature flags, trace anatomy.</p>
+    <p><a href="deep-dives/langgraph-pipeline-builder.html">→ Deep dive</a></p>
+  </div>
+  <div class="card">
+    <h3>Tool-Using Advisor</h3>
+    <p class="meta">v6.2 doc Q&amp;A agent</p>
+    <p>Replaces graph-based advisor for EXPLAIN/COMPARE/RECOMMEND. 3 tools + 5-round Anthropic loop. LLM decides what doc to fetch.</p>
+    <p><a href="deep-dives/tool-using-advisor.html">→ Deep dive</a></p>
+  </div>
+  <div class="card">
+    <h3>Trace Walkthrough</h3>
+    <p class="meta">EQP-08 boss case</p>
+    <p>One real build trace, end-to-end. 5 phases, 7 nodes, 16 LLM calls — exactly what each round did + why it works now.</p>
+    <p><a href="deep-dives/trace-example.html">→ Walkthrough</a></p>
+  </div>
+  <div class="card">
+    <h3>History</h3>
+    <p class="meta">Previous docs (md format)</p>
+    <p>Old project handoffs, phase reports, deprecated specs. Kept for archaeology, not maintained.</p>
+    <p><a href="history/">→ history/</a></p>
+  </div>
+</div>
+
+<h2>Stack at a glance</h2>
+
+<table>
+<thead><tr><th>Service</th><th>Tech</th><th>Port</th><th>Role</th></tr></thead>
+<tbody>
+<tr><td><strong>aiops-app</strong></td><td>Next.js 15 standalone · React 19</td><td>8000</td><td>UI + /api/ proxy routes</td></tr>
+<tr><td><strong>java-backend</strong></td><td>Spring Boot 3.5 · Java 17 · PostgreSQL 16 + pgvector</td><td>8002</td><td>Sole DB owner · Auth (JWT) · CRUD</td></tr>
+<tr><td><strong>java-scheduler</strong></td><td>Spring Boot 3.5 · Java 17 · Redis 7</td><td>8003</td><td>@Scheduled jobs · event polling · skill auto-fire</td></tr>
+<tr><td><strong>python_ai_sidecar</strong></td><td>Python 3.11 · LangGraph · Anthropic SDK</td><td>8050</td><td>Agents (build/chat/advisor) · 55 block executors</td></tr>
+<tr><td><strong>ontology_simulator</strong></td><td>FastAPI · MongoDB · NATS</td><td>8012</td><td>Synthetic process data (LOT/TOOL/SPC/APC/...)</td></tr>
+</tbody>
+</table>
+
+<h2>What's new in v6.3 (2026-05-21)</h2>
+
+<ul>
+  <li><strong>Verifier 改 deterministic structural-only check</strong> — judge / rows-gate / deficit / empty_data 全砍, 移到 runtime concern (v30.20)</li>
+  <li><strong>Agent-driven verify trigger</strong> — verifier 不再每個 mutation 自動跑, agent 主動 call run_verifier (v30.22)</li>
+  <li><strong>Covers gate 變 feature flag default OFF</strong> — phase.expected 退為 hint, 不擋 advance (v30.23)</li>
+  <li><strong>Block doc digest 灌全文 (~2.5K chars)</strong> — agent 看到 admin 編的完整 Markdown, 不再只看 param schema (v30.21)</li>
+  <li><strong>Multi-tool-use strip</strong> — LLM 一次 emit 多個 tool_use 不會再 400 error</li>
+  <li><strong>Stringified params coercer</strong> — agent 寫 <code>params="{...}"</code> 自動 json.loads</li>
+  <li><strong>Skill auto-trigger 完工 (v6.1)</strong> — java-scheduler 認 skill_documents.trigger_config, alarm 流恢復</li>
+  <li><strong>Tool-using doc Q&amp;A agent (v6.2)</strong> — Advisor 換成 Anthropic tool-loop, admin-edited Markdown 直接進答案</li>
+  <li><strong>block_groupby_agg param rename</strong> — agg_func/agg_column → aggregate/column (對齊 step_check)</li>
+  <li><strong>block_ewma_cusum target=null 支援</strong> — schema 允許 null, executor 自動 mean(value_column)</li>
+</ul>
+
+<h2>Repo layout</h2>
+
+<pre><code>fastapi_backend_refactored/
+├── aiops-app/              Next.js frontend
+├── java-backend/           Spring Boot API (port 8002)
+├── java-scheduler/         Spring Boot scheduler (port 8003)
+├── python_ai_sidecar/      LangGraph + Pipeline Executor (port 8050)
+│   ├── agent_builder/       Build agent + advisor_v2
+│   ├── agent_orchestrator_v2/ Chat orchestrator
+│   ├── pipeline_builder/   55 block executors + validator
+│   ├── routers/             FastAPI routes
+│   └── clients/             JavaAPIClient (talks to :8002)
+├── ontology_simulator/     Synthetic data source (port 8012)
+├── aiops-contract/         Shared types (TS + Python)
+├── deploy/                  EC2 systemd units + update scripts
+├── docs/                    ← you are here
+└── tools/                   verify-build skill, trace_replay, etc.
+</code></pre>
+
+<footer class="foot">
+  AIOps Platform · <a href="https://github.com/gillggx/ai-ops-agentic-platform">GitHub</a>
+</footer>
+
+</div>
+</body>
+</html>

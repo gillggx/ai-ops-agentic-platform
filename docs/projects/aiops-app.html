@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>aiops-app — AIOps Platform</title>
+<link rel="stylesheet" href="../_assets/style.css">
+</head>
+<body>
+<nav class="top">
+  <a href="../index.html">Overview</a>
+  <a href="../architecture.html">Architecture</a>
+  <a href="python-sidecar.html">Sidecar</a>
+  <a href="java-backend.html">Java API</a>
+  <a href="java-scheduler.html">Scheduler</a>
+  <a href="aiops-app.html" class="active">Frontend</a>
+  <a href="ontology-simulator.html">Simulator</a>
+  <a href="../deep-dives/langgraph-pipeline-builder.html">LangGraph</a>
+  <a href="../deep-dives/tool-using-advisor.html">Advisor</a>
+  <a href="../deep-dives/trace-example.html">Trace Example</a>
+</nav>
+
+<div class="wrap">
+
+<h1>aiops-app</h1>
+<p class="lede">Next.js 15 standalone 前端。只做 UI 渲染 + 走 <code>/api/*</code> proxy 把請求轉到 Java / Sidecar。沒業務邏輯、不直連 DB / simulator。</p>
+
+<table>
+<tr><td><strong>Port</strong></td><td><code>8000</code></td></tr>
+<tr><td><strong>Tech</strong></td><td>Next.js 15 (App Router) · React 19 · Node 20.18 · NextAuth v5</td></tr>
+<tr><td><strong>Service unit</strong></td><td><code>aiops-app.service</code></td></tr>
+<tr><td><strong>Deploy</strong></td><td><code>deploy/update.sh</code> (npm build + standalone copy + restart)</td></tr>
+</table>
+
+<h2>主要頁面</h2>
+
+<div class="grid-2">
+  <div class="card">
+    <h3>/admin/pipeline-builder/*</h3>
+    <p>Glass Box 建 pipeline 主介面。Plan card → confirm → agent 動 canvas → save。</p>
+  </div>
+  <div class="card">
+    <h3>/admin/skill-library</h3>
+    <p>Skill 編輯 + 綁定 pipeline + 設 trigger_config (schedule / event / user)。</p>
+  </div>
+  <div class="card">
+    <h3>/admin/build-traces</h3>
+    <p>看歷史 build trace。Summary tab 走 trace_summary 模組合成 plan/phase/attempt 結構化視圖。Journey / Results / Pipeline tabs 看 raw。</p>
+  </div>
+  <div class="card">
+    <h3>/admin/block-docs</h3>
+    <p>編 block 文檔的 Markdown body。寫入 block_docs DB。sidecar inspect_block_doc + advisor_v2 都從這拿內容。</p>
+  </div>
+  <div class="card">
+    <h3>/admin/users</h3>
+    <p>使用者 + 角色管理 (IT_ADMIN / PE / ON_DUTY)。role_change_logs 全紀錄。</p>
+  </div>
+  <div class="card">
+    <h3>/alarms</h3>
+    <p>Alarm panel: 列表、ack、dispose。Severity filter + 時間排序。</p>
+  </div>
+  <div class="card">
+    <h3>/chat</h3>
+    <p>Chat panel — 走 sidecar agent_orchestrator_v2。intent_classifier 5-bucket 路由。</p>
+  </div>
+</div>
+
+<h2>主要 /api proxy routes</h2>
+
+<table>
+<thead><tr><th>Route</th><th>Target</th><th>Auth</th></tr></thead>
+<tbody>
+<tr><td><code>/api/chat</code></td><td>sidecar <code>/internal/agent/chat</code></td><td>NextAuth session + X-Service-Token forward</td></tr>
+<tr><td><code>/api/agent/build</code></td><td>sidecar <code>/internal/agent/build</code> (SSE)</td><td>同上</td></tr>
+<tr><td><code>/api/admin/build-traces</code></td><td>sidecar <code>/internal/agent/build/traces</code></td><td>session + IT_ADMIN role</td></tr>
+<tr><td><code>/api/admin/build-traces/[file]/summary</code></td><td>sidecar <code>/internal/agent/build/traces/{file}/summary</code></td><td>(new v6.2) — trace_summary JSON</td></tr>
+<tr><td><code>/api/block-docs</code></td><td>java-backend <code>/api/v1/block-docs</code></td><td>JWT (admin)</td></tr>
+<tr><td><code>/api/skill-documents/*</code></td><td>java-backend <code>/api/v1/skill-documents/*</code></td><td>JWT</td></tr>
+<tr><td><code>/api/auth/[...nextauth]</code></td><td>NextAuth handler + java <code>/auth/login</code></td><td>—</td></tr>
+</tbody>
+</table>
+
+<h2>關鍵 UI components</h2>
+
+<div class="grid-2">
+  <div class="card">
+    <h3>AgentBuilderPanelV30</h3>
+    <p class="meta">Glass Box main panel</p>
+    <p>處理 SSE event stream: goal_plan_proposed / phase_round / phase_action / phase_completed / build_finalized. handleEvent dispatcher 約 144-302 行。</p>
+  </div>
+  <div class="card">
+    <h3>BuildTraceDrawer / Summary tab</h3>
+    <p class="meta">/admin/build-traces page</p>
+    <p>Summary tab (v6.2 新加) call <code>/summary</code> endpoint 拿結構化 JSON, 渲染 plan card + per-phase attempt 詳情。Journey/Results/Pipeline 仍 raw view。</p>
+  </div>
+  <div class="card">
+    <h3>BlockAdvisorPanel</h3>
+    <p class="meta">右側問答區</p>
+    <p>顯示 advisor_progress chips (LLM 的 tool calls) + advisor_answer markdown. UX 跟 legacy 一致, 後端換成 tool-loop。</p>
+  </div>
+  <div class="card">
+    <h3>ChartRenderer (charts/*)</h3>
+    <p class="meta">18 個 SVG chart components</p>
+    <p>line_chart / bar_chart / box_plot / probability_plot / ewma_cusum / xbar_r / imr / pareto / splom / ... 每個是獨立 React component, 從 chart_spec.snapshot 渲染。</p>
+  </div>
+</div>
+
+<h2>Standalone build gotcha</h2>
+
+<div class="callout warn">
+<strong>Next.js standalone mode</strong>: <code>npm run build</code> 單獨跑會留下 broken <code>.next/static</code> 路徑。必須 <code>cp -r .next/static .next/standalone/.next/</code> + <code>cp -r public .next/standalone/</code>。<code>deploy/update.sh</code> 已處理好。
+</div>
+
+<h2>關鍵環境變數</h2>
+
+<table>
+<tr><td><code>NEXTAUTH_URL</code></td><td>https://aiops-gill.com (prod) / http://localhost:8000 (dev)</td></tr>
+<tr><td><code>NEXTAUTH_SECRET</code></td><td>NextAuth signing</td></tr>
+<tr><td><code>FASTAPI_BASE_URL</code></td><td>http://localhost:8002 (java-backend; legacy name)</td></tr>
+<tr><td><code>SIDECAR_BASE_URL</code></td><td>http://localhost:8050</td></tr>
+<tr><td><code>SIDECAR_SERVICE_TOKEN</code></td><td>X-Service-Token forwarded to sidecar /internal/*</td></tr>
+<tr><td><code>OIDC_*</code></td><td>OIDC provider config (env-gated)</td></tr>
+</table>
+
+<footer class="foot">
+  <a href="../index.html">← Back to overview</a>
+  · <a href="java-backend.html">java-backend</a>
+  · <a href="ontology-simulator.html">simulator →</a>
+</footer>
+
+</div>
+</body>
+</html>

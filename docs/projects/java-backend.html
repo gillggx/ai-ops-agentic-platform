@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>java-backend — AIOps Platform</title>
+<link rel="stylesheet" href="../_assets/style.css">
+</head>
+<body>
+<nav class="top">
+  <a href="../index.html">Overview</a>
+  <a href="../architecture.html">Architecture</a>
+  <a href="python-sidecar.html">Sidecar</a>
+  <a href="java-backend.html" class="active">Java API</a>
+  <a href="java-scheduler.html">Scheduler</a>
+  <a href="aiops-app.html">Frontend</a>
+  <a href="ontology-simulator.html">Simulator</a>
+  <a href="../deep-dives/langgraph-pipeline-builder.html">LangGraph</a>
+  <a href="../deep-dives/tool-using-advisor.html">Advisor</a>
+  <a href="../deep-dives/trace-example.html">Trace Example</a>
+</nav>
+
+<div class="wrap">
+
+<h1>java-backend</h1>
+<p class="lede">唯一 DB owner。所有 CRUD、Auth、Skill / Pipeline / Alarm registry 都住這。一個 Spring Boot 程序 (port 8002)，所有 user-facing API + 給 sidecar 跟 scheduler 用的 internal API 都在這。</p>
+
+<table>
+<tr><td><strong>Port</strong></td><td><code>8002</code></td></tr>
+<tr><td><strong>Tech</strong></td><td>Java 17 Temurin · Spring Boot 3.5.14 · Maven · PostgreSQL 16 + pgvector</td></tr>
+<tr><td><strong>Service unit</strong></td><td><code>aiops-java-api.service</code></td></tr>
+<tr><td><strong>Deploy</strong></td><td><code>deploy/java-update.sh</code> (mvn package + restart)</td></tr>
+</table>
+
+<h2>API surface</h2>
+
+<table>
+<thead><tr><th>Prefix</th><th>Auth</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td><code>/api/v1/*</code></td><td>JWT (user / admin / PE / IT_ADMIN)</td><td>frontend user-facing CRUD: skills, pipelines, alarms, users</td></tr>
+<tr><td><code>/internal/*</code></td><td>X-Internal-Token (<code>JAVA_INTERNAL_TOKEN</code> env)</td><td>service-to-service: blocks, mcps, agent-knowledge, skills/by-slug/{slug}/run-system, alarms, generated-events</td></tr>
+<tr><td><code>/auth/*</code></td><td>open (login) + JWT (refresh)</td><td>NextAuth-style local credentials + OIDC (multi-provider)</td></tr>
+<tr><td><code>/actuator/*</code></td><td>open</td><td>health probes</td></tr>
+</tbody>
+</table>
+
+<h2>主要模組</h2>
+
+<div class="grid-2">
+  <div class="card">
+    <h3>domain/</h3>
+    <p class="meta">JPA entities + repos · shared with java-scheduler</p>
+    <ul>
+      <li><code>pipeline/</code> — BlockEntity, PipelineEntity, PipelineAutoCheckTriggerEntity</li>
+      <li><code>skill/</code> — SkillDocumentEntity, SkillDefinitionEntity, SkillRunEntity, PublishedSkillEntity</li>
+      <li><code>alarm/</code> — AlarmEntity (trigger_event, severity, status, ack/dispose)</li>
+      <li><code>blockdoc/</code> — BlockDocEntity (admin-editable Markdown)</li>
+      <li><code>event/</code> — EventTypeEntity, GeneratedEventEntity</li>
+      <li><code>patrol/</code> — AutoPatrolEntity (legacy, kept for back-compat)</li>
+      <li><code>user/</code> — UserEntity + RoleChangeLogEntity</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>api/v1/ + api/internal/</h3>
+    <p class="meta">REST controllers</p>
+    <ul>
+      <li><code>SkillDocumentController</code> — POST <code>/{slug}/run</code> (SSE, user-triggered)</li>
+      <li><code>InternalSkillController</code> — POST <code>/by-slug/{slug}/run-system</code> (service-triggered, v6.1)</li>
+      <li><code>InternalBlockController</code> — GET <code>/internal/blocks</code> (sidecar reads catalog)</li>
+      <li><code>InternalBlockDocController</code> — GET/PUT block_docs Markdown</li>
+      <li><code>AlarmController</code> — CRUD + ack/dispose</li>
+      <li><code>UserController</code> — admin user management</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>api/skill/SkillRunnerService</h3>
+    <p class="meta">Skill 執行引擎</p>
+    <ul>
+      <li>讀 skill_documents.steps → 對每個 step pipeline_id 呼叫 sidecar <code>/internal/pipeline/execute</code></li>
+      <li>寫 skill_runs (triggered_by: user / user_test / manual / system_schedule / system_event)</li>
+      <li>block_alert 觸發時呼叫 InternalAlarmController.create → 寫 alarms table</li>
+      <li>SSE stream events 給 controller bridge 到 frontend</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>auth/</h3>
+    <p class="meta">JWT + Internal Token filter</p>
+    <ul>
+      <li>JwtAuthFilter — 解析 Bearer JWT → AuthPrincipal</li>
+      <li>InternalServiceTokenFilter — X-Internal-Token 比對 <code>aiops.internal.token</code></li>
+      <li>Role hierarchy: IT_ADMIN &gt; PE &gt; ON_DUTY</li>
+      <li>OIDC plug-in (Google / Microsoft / custom) — env-gated</li>
+    </ul>
+  </div>
+</div>
+
+<h2>Flyway migrations</h2>
+
+<p>在 <code>src/main/resources/db/migration/</code>。生產 Flyway <strong>停用</strong> (<code>spring.flyway.enabled=false</code>) — 新 V** SQL 不自動跑，要 SSH EC2 手動 <code>psql -f</code>。Dev / CI Flyway 開啟。</p>
+
+<div class="callout warn">
+<strong>Prod migration gotcha</strong>: 加新 Flyway file 後不會自動 apply。要 <code>sudo -u postgres psql aiops_db -f V49__xxx.sql</code> 手動跑。DB pwd 在 <code>/opt/aiops/java-backend/.env</code>。
+</div>
+
+<h2>關鍵環境變數</h2>
+
+<table>
+<tr><td><code>DB_URL</code></td><td>jdbc:postgresql://localhost:5432/aiops_db</td></tr>
+<tr><td><code>DB_USER</code> / <code>DB_PASSWORD</code></td><td>PostgreSQL credentials</td></tr>
+<tr><td><code>JAVA_INTERNAL_TOKEN</code></td><td>X-Internal-Token 比對值 (sidecar + scheduler 用這個 call /internal/*)</td></tr>
+<tr><td><code>JWT_SECRET</code></td><td>JWT signing</td></tr>
+<tr><td><code>OIDC_*</code></td><td>OIDC provider config (optional, env-gated)</td></tr>
+<tr><td><code>PYTHON_SIDECAR_URL</code></td><td>http://127.0.0.1:8050</td></tr>
+<tr><td><code>PYTHON_SIDECAR_TOKEN</code></td><td>X-Service-Token sidecar 比對值</td></tr>
+</table>
+
+<h2>Build / deploy</h2>
+
+<pre><code>cd java-backend
+mvn -DskipTests package
+# → target/aiops-api.jar (~76MB fat jar)
+
+# On EC2:
+sudo systemctl restart aiops-java-api
+sudo systemctl status aiops-java-api    # active (running) since ...
+curl -s http://localhost:8002/actuator/health
+</code></pre>
+
+<footer class="foot">
+  <a href="../index.html">← Back to overview</a>
+  · <a href="../architecture.html">Architecture</a>
+  · <a href="java-scheduler.html">java-scheduler →</a>
+</footer>
+
+</div>
+</body>
+</html>

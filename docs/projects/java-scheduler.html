@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>java-scheduler — AIOps Platform</title>
+<link rel="stylesheet" href="../_assets/style.css">
+</head>
+<body>
+<nav class="top">
+  <a href="../index.html">Overview</a>
+  <a href="../architecture.html">Architecture</a>
+  <a href="python-sidecar.html">Sidecar</a>
+  <a href="java-backend.html">Java API</a>
+  <a href="java-scheduler.html" class="active">Scheduler</a>
+  <a href="aiops-app.html">Frontend</a>
+  <a href="ontology-simulator.html">Simulator</a>
+  <a href="../deep-dives/langgraph-pipeline-builder.html">LangGraph</a>
+  <a href="../deep-dives/tool-using-advisor.html">Advisor</a>
+  <a href="../deep-dives/trace-example.html">Trace Example</a>
+</nav>
+
+<div class="wrap">
+
+<h1>java-scheduler</h1>
+<p class="lede">Phase 2 拆出來的獨立 Spring Boot 程序。所有 @Scheduled 跑這 — event polling、skill auto-fire、cron jobs，跟 user-facing API 分家避免 GC 干擾。</p>
+
+<table>
+<tr><td><strong>Port</strong></td><td><code>8003</code></td></tr>
+<tr><td><strong>Tech</strong></td><td>Java 17 · Spring Boot 3.5.14 · Redis 7 (distributed lock)</td></tr>
+<tr><td><strong>DB</strong></td><td>shares aiops_db with java-backend (read-only for skill / patrol; writes own audit + alarm)</td></tr>
+<tr><td><strong>Service unit</strong></td><td><code>aiops-java-scheduler.service</code></td></tr>
+</table>
+
+<h2>主要服務 (@Scheduled jobs)</h2>
+
+<div class="grid-2">
+  <div class="card">
+    <h3>EventPollerService</h3>
+    <p class="meta">simulator → generated_events → dispatch</p>
+    <ul>
+      <li>每 30s 拉 simulator <code>/events</code> watermark</li>
+      <li>OOC / patrol_check events 寫 generated_events table</li>
+      <li>呼叫 <code>EventDispatchService.dispatchGeneratedEvent</code></li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>EventDispatchService</h3>
+    <p class="meta">event → fan-out</p>
+    <ul>
+      <li><strong>Legacy</strong>: auto_patrols (空表)</li>
+      <li><strong>v6.1 new</strong>: <code>dispatchToSkillsByEvent</code> — 查 skill_documents WHERE trigger_config.type=event AND event=&lt;name&gt;</li>
+      <li>呼叫 <code>SkillApiClient.dispatchSkill(slug, "system_event")</code></li>
+      <li>per-skill 5min Redis lock 防 schedule+event 同時 fire</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>SkillScheduleService <span class="badge accent">v6.1</span></h3>
+    <p class="meta">cron skills 自動跑</p>
+    <ul>
+      <li>@Scheduled fixedDelay=60s, initialDelay=30s</li>
+      <li>scan stable skills with trigger_config.type=schedule</li>
+      <li><code>isDue</code> = last_system_triggered_at + interval (hourly/daily) &le; now</li>
+      <li>fire via <code>SkillApiClient.dispatchSkill(slug, "system_schedule")</code></li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>AutoPatrolSchedulerService</h3>
+    <p class="meta">legacy patrol scheduler</p>
+    <ul>
+      <li>dynamic CronTrigger registration per auto_patrol</li>
+      <li>schedule mode + once mode</li>
+      <li>auto_patrols table 目前空 — Phase 11 v6 migration 把模型搬到 skill_documents 了</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>SkillApiClient <span class="badge accent">v6.1</span></h3>
+    <p class="meta">HTTP client</p>
+    <ul>
+      <li>POST java-backend <code>/internal/skills/by-slug/{slug}/run-system</code></li>
+      <li>X-Internal-Token (env <code>JAVA_INTERNAL_TOKEN</code>)</li>
+      <li>fire-and-forget — java-backend 同步回 202 ack 再 async 跑 skill</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>DistributedLockService</h3>
+    <p class="meta">Redis-based mutual exclusion</p>
+    <ul>
+      <li>Phase 3 — multi-pod scheduler safety</li>
+      <li><code>runWithLock(key, ttl, runnable)</code> — Redis SETNX</li>
+      <li>fail-open: Redis down → run anyway + warn (env <code>AIOPS_LOCK_FAIL_OPEN=true</code>)</li>
+    </ul>
+  </div>
+</div>
+
+<h2>關鍵環境變數</h2>
+
+<table>
+<tr><td><code>DB_URL</code> / <code>DB_USER</code> / <code>DB_PASSWORD</code></td><td>same as java-backend (share aiops_db)</td></tr>
+<tr><td><code>JAVA_INTERNAL_TOKEN</code></td><td>X-Internal-Token to call java-backend (must match java-backend's <code>aiops.internal.token</code>)</td></tr>
+<tr><td><code>REDIS_HOST</code> / <code>REDIS_PORT</code></td><td>distributed lock backend</td></tr>
+<tr><td><code>AIOPS_JAVA_API_URL</code></td><td>http://localhost:8002</td></tr>
+<tr><td><code>ONTOLOGY_SIM_URL</code></td><td>http://localhost:8012</td></tr>
+<tr><td><code>PYTHON_SIDECAR_URL</code></td><td>http://localhost:8050 (referenced but mostly via Java)</td></tr>
+</table>
+
+<h2>v6.1 migration: skill trigger 補洞</h2>
+
+<p>Phase 11 v6 把 trigger model 從 <code>auto_patrols</code> 搬到 <code>skill_documents.trigger_config</code>。但 java-scheduler 當時沒同步改 — 永遠不知道 skill 有 trigger，alarm 3 天斷流。v6.1 ship 兩個新 service (<code>SkillScheduleService</code> + <code>EventDispatchService.dispatchToSkillsByEvent</code>) 補上。</p>
+
+<div class="diagram">java-scheduler ── @Scheduled ──┬── SkillScheduleService.tick() 每 60s
+                                  │     ↓
+                                  │     scan skill_documents (stable + schedule mode)
+                                  │     ↓
+                                  │     isDue? → SkillApiClient.dispatchSkill(slug, "system_schedule")
+                                  │
+                                  └── EventPollerService 每 30s
+                                        ↓
+                                        new OOC events → EventDispatchService
+                                        ├── auto_patrols (legacy, empty)
+                                        └── skill_documents (v6.1 new)
+                                              ↓
+                                              SkillApiClient.dispatchSkill(slug, "system_event")</div>
+
+<h2>Trigger config schema</h2>
+
+<table>
+<thead><tr><th>type</th><th>shape</th><th>例子</th></tr></thead>
+<tbody>
+<tr><td>schedule</td><td><code>{type:"schedule", schedule:{mode:"hourly"|"daily", every:1}}</code></td><td>每小時自動跑</td></tr>
+<tr><td>event</td><td><code>{type:"event", event:"OOC", target:{kind:"all"}}</code></td><td>每收到 OOC event 跑一次</td></tr>
+<tr><td>user</td><td><code>{type:"user"}</code></td><td>不自動跑，user UI 按按鈕觸發</td></tr>
+</tbody>
+</table>
+
+<h2>Deploy</h2>
+
+<pre><code>cd java-scheduler && mvn -DskipTests package
+# → target/aiops-scheduler.jar (~80MB)
+
+# On EC2 (via deploy/java-update.sh):
+sudo systemctl restart aiops-java-scheduler
+sudo journalctl -u aiops-java-scheduler -f
+# → "EventPoller: scanned=N OOC=M dispatched=K watermark=..."
+# → "SkillScheduleService: fired skill=hourly-eqp-5in3out-check (schedule)"
+</code></pre>
+
+<footer class="foot">
+  <a href="../index.html">← Back to overview</a>
+  · <a href="java-backend.html">java-backend</a>
+  · <a href="aiops-app.html">aiops-app →</a>
+</footer>
+
+</div>
+</body>
+</html>

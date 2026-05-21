@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>LangGraph Pipeline Builder — Deep Dive</title>
+<link rel="stylesheet" href="../_assets/style.css">
+</head>
+<body>
+<nav class="top">
+  <a href="../index.html">Overview</a>
+  <a href="../architecture.html">Architecture</a>
+  <a href="../projects/python-sidecar.html">Sidecar</a>
+  <a href="../projects/java-backend.html">Java API</a>
+  <a href="../projects/java-scheduler.html">Scheduler</a>
+  <a href="../projects/aiops-app.html">Frontend</a>
+  <a href="../projects/ontology-simulator.html">Simulator</a>
+  <a href="langgraph-pipeline-builder.html" class="active">LangGraph</a>
+  <a href="tool-using-advisor.html">Advisor</a>
+  <a href="trace-example.html">Trace Example</a>
+</nav>
+
+<div class="wrap">
+
+<h1>LangGraph Pipeline Builder</h1>
+<p class="lede">v30.23 — graph-controlled ReAct loop with sub-phase state machine + agent-driven verify trigger + deterministic verifier (covers gate off by default).</p>
+
+<h2>核心哲學</h2>
+
+<div class="callout">
+<strong>Flow control 寫在 graph，不寫在 prompt</strong>。LLM 在每個 node 只做窄任務 (classify / extract / write_params)。Phase transition / sub-phase routing / verify trigger 全 deterministic code，可單測、不會因 prompt drift 行為改變。
+</div>
+
+<p>對應 memory <code>feedback_flow_in_graph_not_prompt.md</code> + <code>feedback_graph_heavy_preference.md</code>。</p>
+
+<h2>整體流程</h2>
+
+<div class="diagram">user instruction
+       │
+       ▼
+classify_advisor_intent (LLM, 5-bucket)
+       │
+       ├─ BUILD ──────┐
+       ├─ EXPLAIN ────┤
+       ├─ COMPARE ────┤── advisor_v2 (tool-loop, separate doc)
+       ├─ RECOMMEND ──┘
+       ├─ KNOWLEDGE ────── legacy advisor (pure LLM)
+       └─ AMBIGUOUS ────── legacy advisor (clarify message)
+
+(BUILD path continues:)
+       │
+       ▼
+stream_graph_build (LangGraph StateGraph)
+       │
+       ▼
+goal_plan_node (LLM)
+   ─ instruction → 3-5 phases with {id, goal, expected, value_desc}
+   ─ emit goal_plan_proposed SSE
+       │
+       ▼
+goal_plan_confirm_gate (interrupt!)
+   ─ frontend shows confirm card, user clicks Apply / Cancel / 改 plan
+   ─ resume via POST /agent/build/plan-confirm
+       │
+       ▼
+task_contract_extractor (LLM, 1 call)
+   ─ extract structured contract from instruction
+   ─ source_filters / data_filters / count_target / output_kind
+       │
+       ▼
+┌──── agentic_phase_loop (sub-phase state machine) ←──┐
+│                                                      │
+│  Per round: 1 LLM call → 1 tool call → execute       │
+│                                                      │
+│  Sub-phases: pick → construct → tune ← (loop)        │
+│                                                      │
+│  Tool sets per sub-phase:                             │
+│    pick:      inspect_*, commit_pick, run_verifier   │
+│    construct: add_node, connect, abort_node          │
+│    tune:      set_param, commit_pick (chain another), │
+│               run_verifier, abort_node                │
+│                                                      │
+└────┬─────────────────────────────────────────────────┘
+     │
+     ▼  (router: state.v30_verify_now ?)
+     │
+     ├── True ──→ phase_verifier ──┬── advanced → next phase or finalize
+     │                              │
+     │                              └── no_match  → back to loop (with reject info)
+     │
+     ├── False ──→ back to agentic_phase_loop (keep building)
+     │
+     └── status=phase_revise_pending ──→ phase_revise → loop or halt
+</div>
+
+<h2>State schema (TypedDict)</h2>
+
+<p>定義在 <code>graph_build/state.py</code>。重點欄位:</p>
+
+<table>
+<thead><tr><th>Field</th><th>Type</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td><code>v30_phases</code></td><td>list[dict]</td><td>plan 3-5 phases (user-confirmed)</td></tr>
+<tr><td><code>v30_current_phase_idx</code></td><td>int</td><td>which phase currently building</td></tr>
+<tr><td><code>v30_phase_round</code></td><td>int</td><td>round counter, max 16 per phase</td></tr>
+<tr><td><code>v30_subphase</code></td><td>str</td><td>pick / construct / tune (sub-phase machine)</td></tr>
+<tr><td><code>v30_phase_messages</code></td><td>dict[pid, list]</td><td>Anthropic message history per phase</td></tr>
+<tr><td><code>v30_last_mutated_logical_id</code></td><td>str?</td><td>handoff to phase_verifier — which node just changed</td></tr>
+<tr><td><code>v30_verify_now</code></td><td>bool</td><td><strong>v30.22 new</strong>: True 才路由到 phase_verifier</td></tr>
+<tr><td><code>v30_last_verifier_reject</code></td><td>dict?</td><td>verifier reject info for next round prompt</td></tr>
+<tr><td><code>v30_refine_cycle</code></td><td>int</td><td>refine cycle counter (per phase)</td></tr>
+<tr><td><code>final_pipeline</code></td><td>dict</td><td>current canvas snapshot (PipelineJSON dump)</td></tr>
+</tbody>
+</table>
+
+<h2>Sub-phase machine (v30.19+)</h2>
+
+<p>定義在 <code>agentic_phase_loop.py</code>。 <code>_TOOLS_BY_SUBPHASE</code> + <code>_TRANSITIONS</code> 兩個 dict 控制行為:</p>
+
+<div class="grid-2">
+  <div class="card">
+    <h3>_TOOLS_BY_SUBPHASE</h3>
+    <pre><code>pick:
+  inspect_node_output
+  inspect_block_doc
+  commit_pick
+  set_param  (v30.22 加)
+  run_verifier (v30.22 加)
+  abort_phase
+
+construct:
+  add_node
+  connect
+  abort_node
+  abort_phase
+  inspect_*  (v30.22 加)
+
+tune:
+  set_param
+  run_verifier
+  abort_node
+  abort_phase
+  commit_pick  (v30.22 加)
+  inspect_*  (v30.22 加)</code></pre>
+  </div>
+  <div class="card">
+    <h3>_TRANSITIONS</h3>
+    <pre><code>("pick", "commit_pick"):       "construct"
+("pick", "abort_phase"):       "refine"
+("construct", "add_node"):     "construct"  # stay
+("construct", "connect"):      "tune"
+("construct", "abort_node"):   "pick"
+("tune", "set_param"):         "tune"  # stay
+("tune", "run_verifier"):      "tune"  # verifier 接手
+("tune", "abort_node"):        "pick"
+("tune", "commit_pick"):       "construct"  # 鏈下個 block</code></pre>
+  </div>
+</div>
+
+<h2>Verifier (v30.20 + v30.23)</h2>
+
+<p>定義在 <code>phase_verifier.py</code>。Deterministic structural-only checks:</p>
+
+<table>
+<thead><tr><th>Check</th><th>狀態</th><th>說明</th></tr></thead>
+<tbody>
+<tr><td><strong>(A) covers gate</strong></td><td><span class="badge no">OFF default</span></td><td>block 的 covers_output 包含 phase.expected。 <code>BUILDER_VERIFIER_COVERS_GATE=1</code> 才開。預設關閉因為實務上更多 case 是 false-positive reject</td></tr>
+<tr><td><strong>(B) validation_error</strong></td><td><span class="badge ok">ON</span></td><td>block executor 短路 / params 寫錯 → reject with error_message</td></tr>
+<tr><td><strong>(C) orphan check</strong></td><td><span class="badge ok">ON</span></td><td>non-source block 沒接 upstream edge → reject with "connect X"</td></tr>
+</tbody>
+</table>
+
+<p>之前 v30.x 有的全部砍掉, 移到 runtime concern:</p>
+<ul>
+  <li>LLM judge — 太常 over-reject 結構正確的 canvas</li>
+  <li>rows quality gate — 0 rows 是合法 filter 結果</li>
+  <li>deficit detection — 資料源天生少不該擋 build</li>
+  <li>empty_data routing — 同上</li>
+  <li>FF chain — 跟 covers 一起綁，default off 時自然停用</li>
+</ul>
+
+<h2>Agent-driven verify (v30.22)</h2>
+
+<p>之前 verifier 每個 mutating action 後自動跑 — 結果 agent 加 filter (transform) 到 verdict phase 立刻被擋, 沒機會接 step_check 完成 chain。</p>
+
+<p>改成 router 看 <code>state.v30_verify_now</code> 決定:</p>
+
+<pre><code>def _route_after_phase_loop(state):
+    if state.get("status") == "phase_revise_pending":
+        return "phase_revise"
+    if state.get("v30_verify_now"):
+        return "phase_verifier"
+    return "agentic_phase_loop"   # 回 loop, agent 繼續建</code></pre>
+
+<p>agentic_phase_loop 設 <code>v30_verify_now = (tool_name in {"run_verifier", "phase_complete"})</code>. Agent 自己宣告完成才驗。</p>
+
+<h2>關鍵 fix (今天 ship)</h2>
+
+<table>
+<thead><tr><th>Bug</th><th>Symptom</th><th>Fix</th></tr></thead>
+<tbody>
+<tr><td>Multi-tool-use 400</td><td>LLM 一次 emit 2 個 tool_use, 我們 dispatch 第一個, 但 assistant_content 留 2 個 tool_use → 下個 round Anthropic API 拒「tool_use without tool_result」</td><td>append 前 strip 沒 dispatched 的 tool_use blocks</td></tr>
+<tr><td>Stringified params</td><td>agent 偶爾寫 <code>params="{...}"</code> 字串而非 dict, 下游 <code>.items()</code> 噴 AttributeError</td><td><code>_coerce_params_dict</code> 自動 json.loads + SSE event 也 coerce 避免 frontend 看到字元陣列</td></tr>
+<tr><td>Verifier 點錯 terminal</td><td>multi-terminal phase (chart + scalar bonus) verifier 走 reverse-add 選最新 = 錯的 side branch</td><td><code>_find_canvas_terminal</code> 加 expected 過濾, 優先選 covers match 的 terminal</td></tr>
+<tr><td>Doc digest 太短</td><td>inspect_block_doc 只回 param names (~400 chars), 砍掉所有 When-to-invoke / 不適用情境 / Examples</td><td>v30.21 灌全文 (~2.5K chars), 包含 DB-edited Markdown body</td></tr>
+<tr><td>action_ok trace bug</td><td>inspect_node_output 永遠回 <code>{"error": None, ...}</code>, trace 把 None 當成 "有 error" 標 action_ok=False, 誤導分析</td><td>檢查 value 真實性 (<code>not bool(result.get("error"))</code>) 不檢查 key 存在</td></tr>
+</tbody>
+</table>
+
+<h2>Trace anatomy</h2>
+
+<p>每個 build 寫一個 JSON 到 <code>BUILDER_TRACE_DIR</code> (預設 <code>/tmp/builder-traces</code>)。Shape:</p>
+
+<pre><code>{
+  "build_id": "8303668a8471",
+  "session_id": "...",
+  "started_at": "2026-05-20T...",
+  "instruction": "查機台 EQP-08 ...",
+  "status": "finished | handover_pending | failed_structural | ...",
+  "duration_ms": 81234,
+  "graph_steps": [             // 每個 node execution
+    {"node": "goal_plan_node", "status": "done", ...},
+    {"node": "agentic_phase_loop", "status": "round_done",
+     "phase_id": "p1", "round": 3,
+     "tool": "add_node", "action_ok": true,
+     "auto_preview": {"node_id": "n1", "rows": 60, "status": "success"},
+     ...},
+    {"node": "phase_verifier", "status": "advanced",
+     "phases_advanced": ["p1"], ...},
+    ...
+  ],
+  "llm_calls": [               // 每個 LLM round-trip
+    {"node": "agentic_phase_loop",
+     "user_msg": "...",
+     "raw_response": "...",
+     "parsed": {"name": "add_node", "args": {...}, "id": "toolu_..."},
+     "input_tokens": ..., "output_tokens": ...},
+    ...
+  ],
+  "decision_records": [        // node 內 LLM 決策結構化記錄
+    {"phase_id": "p1", "round": 1,
+     "user_msg_sections": {"current_phase": ..., "available_blocks": ...},
+     "llm_response": {...}},
+    ...
+  ],
+  "verifier_decisions": [      // phase_verifier 詳細
+    {"phase_id": "p1", "verdict": "advanced",
+     "candidate_block": "block_process_history",
+     "comparison": {"expected_in_covers": true, ...}},
+    ...
+  ],
+  "final_pipeline": {...},
+  "structural_issues": [...]
+}
+</code></pre>
+
+<p>看 trace 的入口:</p>
+<ul>
+  <li><strong>verify-build skill</strong> (<code>.claude/skills/verify-build/run.py</code>) → 命令列 3-section narrative report</li>
+  <li><strong>Web</strong> <code>/admin/build-traces</code> Summary tab → 同樣 model 的 HTML view</li>
+  <li>兩邊都讀 <code>python_ai_sidecar/agent_builder/graph_build/trace_summary.py</code> 同一份 parser</li>
+</ul>
+
+<h2>System prompt 摘錄</h2>
+
+<p>住在 <code>agentic_phase_loop.py</code> 的 <code>_SYSTEM</code> constant。重點段落:</p>
+
+<pre><code>== 每 round 1 動作原則 ==
+你每 round **只發一個 tool call**, 等系統執行完拿到結果 (auto-preview snapshot),
+再進入下個 round 觀察新狀態決定下個動作。**不要連 emit 多個 add_node**。
+
+== Phase 達成 — 你決定何時 verify (v30.22) ==
+verifier **不再** 每個 action 後自動跑。你可以自由 add_node / connect /
+set_param **多個 block** 建一條 chain (如 OOC 計數要 filter → step_check
+兩 block)。當你覺得這個 phase 的 chain 建完整了, **主動呼叫
+run_verifier()** 觸發 verifier 檢查。
+
+verifier 跑時會做 deterministic 結構檢查 (不是 LLM judge):
+  (a) validation_error: 鏈上任何 block executor 短路 / params 錯
+  (b) orphan: 非 source block 沒接上游
+  (c) covers gate: terminal 的 covers 是否含 phase.expected
+      — **預設關閉**, phase.expected 退為 plan / prompt 內的「目標 hint」
+
+== Param naming 嚴格規則 ==
+add_node 的 params key 必須 **100% 一字不差** 從 inspect_block_doc
+的 param_schema 抄過來。不要用同義詞替換。</code></pre>
+
+<h2>Reference</h2>
+
+<ul>
+  <li><a href="../projects/python-sidecar.html">python_ai_sidecar project doc</a></li>
+  <li><a href="tool-using-advisor.html">tool-using doc Q&amp;A agent (advisor_v2)</a></li>
+  <li><a href="trace-example.html">EQP-08 trace walkthrough</a></li>
+  <li><a href="../history/spec_v30_react_pipeline_builder.md">history/spec_v30_react_pipeline_builder.md</a> — 原始 spec (now superseded)</li>
+</ul>
+
+<footer class="foot">
+  <a href="../index.html">← Back to overview</a>
+  · <a href="tool-using-advisor.html">advisor →</a>
+</footer>
+
+</div>
+</body>
+</html>

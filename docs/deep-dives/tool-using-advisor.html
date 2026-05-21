@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>Tool-Using Doc Q&amp;A Agent — Deep Dive</title>
+<link rel="stylesheet" href="../_assets/style.css">
+</head>
+<body>
+<nav class="top">
+  <a href="../index.html">Overview</a>
+  <a href="../architecture.html">Architecture</a>
+  <a href="../projects/python-sidecar.html">Sidecar</a>
+  <a href="../projects/java-backend.html">Java API</a>
+  <a href="../projects/java-scheduler.html">Scheduler</a>
+  <a href="../projects/aiops-app.html">Frontend</a>
+  <a href="../projects/ontology-simulator.html">Simulator</a>
+  <a href="langgraph-pipeline-builder.html">LangGraph</a>
+  <a href="tool-using-advisor.html" class="active">Advisor</a>
+  <a href="trace-example.html">Trace Example</a>
+</nav>
+
+<div class="wrap">
+
+<h1>Tool-Using Doc Q&amp;A Agent (advisor_v2)</h1>
+<p class="lede">v6.2 — Anthropic 標準 tool-use loop。EXPLAIN / COMPARE / RECOMMEND 三 intent 走這。LLM 自己決定要 query 哪個 block doc, 不再 pre-fetch 整 catalog。</p>
+
+<h2>動機</h2>
+
+<p>舊 Advisor 是 graph-based: classifier → extractor → fetcher (pre-fetch <code>java.list_blocks()</code> 全部 55 block) → synthesize. 兩個問題:</p>
+
+<ul>
+  <li><strong>看不到 admin-edited Markdown</strong>: fetcher 走 <code>/internal/blocks</code> 拿 block_definitions, 跟 <code>block_docs</code> table 是分開的。Admin 在 <code>/admin/block-docs</code> 編的 rich Markdown body 永遠進不了 advisor 答案。</li>
+  <li><strong>Scale 不好</strong>: pre-fetch 全部, 換新 question 換新 fetcher node, 不靈活。</li>
+</ul>
+
+<p>新做法跟 memory <code>project_rag_for_llm_lookups.md</code> 方向一致: 「棄死板 push 全清單, 改 LLM 主動 query」.</p>
+
+<h2>架構</h2>
+
+<div class="diagram">/internal/agent/build  (user_message)
+       │
+       ▼
+classify_advisor_intent (LLM, 5-bucket)
+       │
+       ├─ BUILD ────── stream_graph_build (separate doc)
+       ├─ EXPLAIN ────┐
+       ├─ COMPARE ────┤
+       ├─ RECOMMEND ──┘── stream_doc_qa_agent (THIS DOC)
+       │
+       ├─ KNOWLEDGE ────── legacy advisor (pure LLM, no fetch)
+       └─ AMBIGUOUS ────── legacy advisor (clarify message)
+
+(EXPLAIN/COMPARE/RECOMMEND path:)
+       │
+       ▼
+stream_doc_qa_agent (Anthropic tool-use loop)
+       │
+       ├── round 1: LLM emit tool_use(s)
+       │       │
+       │       ▼
+       │  dispatch each: list_blocks / search_blocks_by_keyword / inspect_block_doc
+       │       │
+       │       ▼
+       │  append tool_result to messages
+       │       │
+       │       ▼ (next round)
+       │
+       └── round N: LLM emit text only (no tool_use)
+              │
+              ▼
+        final markdown answer
+              │
+              ▼
+        emit advisor_answer SSE event
+              │
+              ▼
+        emit done SSE event
+
+Round cap: 5
+Max tokens per round: 2048</div>
+
+<h2>The 3 tools</h2>
+
+<table>
+<thead><tr><th>Tool</th><th>Input</th><th>Returns</th><th>When to use</th></tr></thead>
+<tbody>
+<tr>
+  <td><code>list_blocks</code></td>
+  <td>category? (string)</td>
+  <td>1-line per block: name + category + headline</td>
+  <td>User asks about category ("chart blocks 有哪些"). Returns ~55 blocks if no filter.</td>
+</tr>
+<tr>
+  <td><code>search_blocks_by_keyword</code></td>
+  <td>keyword (string)</td>
+  <td>top-6 substring matches across name+description+tags</td>
+  <td>User describes intent ("count OOC", "detect drift"). Get candidates without inspecting full doc.</td>
+</tr>
+<tr>
+  <td><code>inspect_block_doc</code></td>
+  <td>block_id (string)</td>
+  <td>Full Markdown body (from <code>block_docs</code> DB; falls back to seed description)</td>
+  <td>Once candidate identified. Returns When-to-invoke / 不適用情境 / Inputs / Outputs / Parameters / Examples.</td>
+</tr>
+</tbody>
+</table>
+
+<h2>Implementation</h2>
+
+<p>住在 <code>python_ai_sidecar/agent_builder/advisor_v2/</code>:</p>
+
+<pre><code>advisor_v2/
+├── __init__.py         exports stream_doc_qa_agent
+└── loop.py             implementation
+    ├── _SYSTEM         system prompt (focused on doc Q&A)
+    ├── _TOOL_SPECS     3 tool definitions (Anthropic format)
+    ├── _exec_*         dispatchers (call java_client)
+    ├── _DISPATCH       name → dispatcher map
+    └── stream_doc_qa_agent
+                        main loop (~5 round Anthropic tool-use)</code></pre>
+
+<h2>System prompt</h2>
+
+<pre><code>你是 pipeline-builder 的 block 使用 Q&A 助手。User 問 block 怎麼用 /
+哪個 block 適合 / 兩個 block 差在哪。你**主動 query** 工具拿 docs 再回答,
+不要憑記憶。
+
+決策原則:
+  1. user 提到 specific block name → 直接 inspect_block_doc 該 block
+  2. user 講意圖 / keyword → search_blocks_by_keyword 找候選 → 再 inspect 1-2 個
+  3. 比較問題 → inspect_block_doc 各別拿 doc, 並列回答
+  4. 推薦問題 → search → inspect top 2-3 → 比較後給推薦
+  5. 拿到 doc 後**直接回答**, 不要再無謂 inspect
+
+回答格式 (Markdown):
+  - 簡明 2-5 段
+  - 若涉及 params 用 table
+  - 若有 example chain 用 code block
+  - 結尾不要客套, user 是 engineer</code></pre>
+
+<h2>Stream events</h2>
+
+<table>
+<thead><tr><th>Event</th><th>data</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td><code>advisor_progress</code></td><td><code>{round, tool, args}</code></td><td>每 tool call 一個, frontend 顯示「looking up block_X」chip</td></tr>
+<tr><td><code>advisor_answer</code></td><td><code>{kind, markdown}</code></td><td>最終答案 (一個)</td></tr>
+<tr><td><code>done</code></td><td><code>{status: "advisor_done"}</code></td><td>結束</td></tr>
+</tbody>
+</table>
+
+<h2>實際 sample (剛剛驗過的 case)</h2>
+
+<p>問題: 「block_step_check 怎麼用? 跟 block_threshold 有什麼差別?」</p>
+
+<p>SSE event 流:</p>
+
+<pre><code>event: advisor_progress
+data: {"round": 1, "tool": "inspect_block_doc", "args": {"block_id": "block_step_check"}}
+
+event: advisor_progress
+data: {"round": 1, "tool": "inspect_block_doc", "args": {"block_id": "block_threshold"}}
+                                    ↑
+            LLM round 1 同時 emit 2 tool_use (compare 自然作法)
+
+event: advisor_answer
+data: {"kind": "explain", "markdown": "## 核心差異\n\n| 特性 | block_step_check | block_threshold |\n|...| ...\n## 何時用哪個 ...\n## 範例對比 ..."}
+
+event: done
+data: {"status": "advisor_done"}</code></pre>
+
+<p>LLM round 1 emit 2 tool_use → round 2 LLM 用兩個 tool_result 合答案 → 結束。**2 round 解決一個比較問題**, 沒打到 5 round cap。</p>
+
+<h2>Graph-heavy 偏好的調和</h2>
+
+<p>CLAUDE.md memory 講「flow control 寫 graph 不寫 prompt」。Build agent 走 LangGraph 是這原則。但 doc Q&amp;A 反而用 tool-loop, 怎麼協調?</p>
+
+<div class="callout">
+<strong>Graph-heavy 規則的 context 是 BUILD task</strong> — flow control 重要、有 state mutation、出錯成本高。Doc Q&amp;A 不一樣:<br>
+• 純 read, 沒 mutation<br>
+• 每個 question 該查什麼差很多 — graph 寫死 fetcher 反而不好<br>
+• 工具受控 (3 個 read-only) + round cap (5)<br>
+所以 Q&amp;A 走 tool-loop 是對的, 跟 build 走 graph 不衝突。
+</div>
+
+<h2>跟 build agent 用同套 tools 嗎?</h2>
+
+<p>Build agent (BuilderToolset in <code>tools.py</code>) 有 ~25 個 tools, 大部分是 canvas mutation (add_node, connect, set_param, ...)。Q&amp;A 不需要這些, 只需 read-only doc tools。所以 advisor_v2 自定義 3 個 minimal tools, 不繼承 BuilderToolset。</p>
+
+<p>不過 <code>inspect_block_doc</code> 的實作走 <code>java_client.get_block_doc(block_id, version)</code>, 跟 build agent 走的 <code>_resolve_block_description</code> 是同一個 DB 來源, 所以兩邊看到的 doc 一致。</p>
+
+<h2>Feature flags / 環境變數</h2>
+
+<p>無 — advisor_v2 沒額外 feature flag。直接 ship。</p>
+
+<h2>未來方向</h2>
+
+<ul>
+  <li>多語言 detection: 目前 system prompt 中文。LLM 自動跟 user language 但可加 explicit hint</li>
+  <li>SQL / pipeline example search: 加 4th tool <code>find_example_pipelines(intent)</code> 從歷史 trace 找類似案例</li>
+  <li>Streaming 答案: 目前 markdown 一次給. 可改成 chunk streaming (Anthropic SDK 支援 stream=True)</li>
+</ul>
+
+<footer class="foot">
+  <a href="../index.html">← Back to overview</a>
+  · <a href="langgraph-pipeline-builder.html">← LangGraph</a>
+  · <a href="trace-example.html">Trace Example →</a>
+</footer>
+
+</div>
+</body>
+</html>

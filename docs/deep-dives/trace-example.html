@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>Trace Example — EQP-08 boss case</title>
+<link rel="stylesheet" href="../_assets/style.css">
+</head>
+<body>
+<nav class="top">
+  <a href="../index.html">Overview</a>
+  <a href="../architecture.html">Architecture</a>
+  <a href="../projects/python-sidecar.html">Sidecar</a>
+  <a href="../projects/java-backend.html">Java API</a>
+  <a href="../projects/java-scheduler.html">Scheduler</a>
+  <a href="../projects/aiops-app.html">Frontend</a>
+  <a href="../projects/ontology-simulator.html">Simulator</a>
+  <a href="langgraph-pipeline-builder.html">LangGraph</a>
+  <a href="tool-using-advisor.html">Advisor</a>
+  <a href="trace-example.html" class="active">Trace Example</a>
+</nav>
+
+<div class="wrap">
+
+<h1>Trace Example — EQP-08 boss case</h1>
+<p class="lede">真實 build trace 走過一輪 LangGraph + agent-driven verify + multi-block phase chains。一次 finished, 5 phases, 7 nodes, 16 LLM calls。</p>
+
+<h2>The prompt</h2>
+
+<blockquote style="border-left: 3px solid #3b82f6; background: #eff6ff; padding: 12px 16px; margin: 14px 0; border-radius: 0 6px 6px 0;">
+查詢 EQP-08 最近 7 天內最後一次 OOC 事件，確認該次是否有超過 2 張 SPC 同時 OOC，並顯示該次 OOC 時所有 SPC charts 的狀況
+</blockquote>
+
+<p>需求拆解 (planner 抽出 5 phase):</p>
+
+<table>
+<thead><tr><th>Phase</th><th>expected</th><th>意圖</th></tr></thead>
+<tbody>
+<tr><td>p1</td><td>raw_data</td><td>取得 EQP-08 過去 7 天的歷史資料</td></tr>
+<tr><td>p2</td><td>transform</td><td>找出最後一次 OOC 事件的時刻 (sort desc + take first)</td></tr>
+<tr><td>p3</td><td>verdict</td><td>判定該次同時 OOC 的圖表數是否 ≥ 2 (unnest + filter + groupby + threshold)</td></tr>
+<tr><td>p4</td><td>table</td><td>展示該時刻所有 OOC 圖表 (data_view)</td></tr>
+<tr><td>p5</td><td>chart</td><td>視覺化 (bar_chart)</td></tr>
+</tbody>
+</table>
+
+<h2>Final canvas</h2>
+
+<div class="diagram">n1 process_history (EQP-08, 7d, limit=200, nested=true)
+   │  200 events × 12 spc_charts each = 2400 unnested rows
+   ▼
+n2 block_find (spc_status=OOC, order_by=eventTime desc, take=first)
+   │  → 1 row (最後一次 OOC 事件, 包含完整 nested spc_charts)
+   ▼
+n3 block_unnest (column=spc_charts)
+   │  → 12 rows (該事件的 12 個 chart 各自展開成 row)
+   ▼
+n4 block_filter (column=status, operator===, value=OOC)
+   │  → N rows (該事件中 status=OOC 的圖表, 答 user "有幾張 OOC")
+   ├──────────────────────────┐──────────────────────────┐
+   │                          │                          │
+   ▼                          ▼                          ▼
+n5 block_step_check    n6 block_data_view     n7 block_bar_chart
+  (count >= 2)              (table view)          (x=name, y=value/ucl/lcl
+   verdict                   table                 highlight=OOC)
+                                                   chart</div>
+
+<h2>Phase-by-phase 解讀</h2>
+
+<h3>p1 raw_data — 5 rounds</h3>
+<pre><code>r1   inspect_block_doc block_process_history
+r2   commit_pick block_process_history
+r3   add_node process_history (tool_id='EQP-08', time_range='7d', limit=200, nested=true)
+                              → preview success, 200 rows
+r4   inspect_node_output n1   → 確認 columns
+r5   run_verifier             → ADVANCED</code></pre>
+<p class="muted">Agent 主動 inspect 確認資料 shape 再 run_verifier。標準 fast path。</p>
+
+<h3>p2 transform — 6 rounds</h3>
+<pre><code>r1   inspect_node_output n1 (再確認)
+r2   inspect_block_doc block_find  ← 認識「找最後一次」用哪個 block
+r3   commit_pick block_find
+r4   add_node block_find (column='spc_status', operator='==', value='OOC',
+                          order_by='eventTime', order_dir='desc', take='first')
+                                   → preview success, 1 row
+r5   connect n1.data → n2.data
+r6   run_verifier                  → ADVANCED</code></pre>
+<p class="muted">User 「最後一次」→ agent 翻譯成 sort desc + take first。一個 block 完成。</p>
+
+<h3>p3 verdict — 14 rounds <span class="badge accent">multi-block chain</span></h3>
+<pre><code>r1-2  inspect_block_doc block_unnest, block_filter
+r3    commit_pick block_unnest
+r4    add_node block_unnest (column='spc_charts')  → n3, 12 rows
+r5    connect n2.data → n3.data
+r6    inspect_node_output n3  → 確認展開後 columns
+r7    commit_pick block_filter  ← 鏈第 2 個 block (in tune subphase)
+r8    add_node block_filter (column='status', operator='==', value='OOC')  → n4
+r9    connect n3.data → n4.data
+r10   inspect_node_output n4
+r11   commit_pick block_step_check  ← 鏈第 3 個 block
+r12   add_node block_step_check (aggregate='count', operator='>=', threshold=2)  → n5
+r13   connect n4.data → n5.data
+r14   run_verifier                  → ADVANCED</code></pre>
+
+<div class="callout">
+<strong>重點觀察</strong>: p3 一個 phase 內鏈了 3 個 block (unnest → filter → step_check)。這要靠 <strong>v30.22 agent-driven verify</strong> — agent 自己決定何時 run_verifier, 不會在第一個 add_node 後就被擋住。Sub-phase machine 的 <code>("tune", "commit_pick"): "construct"</code> transition 讓 agent 從 tune 直接接下個 block (v30.22 新加)。
+</div>
+
+<h3>p4 table — 4 rounds</h3>
+<pre><code>r1   commit_pick block_data_view  ← agent 已從 p3 知道 data shape, 直接 pick
+r2   add_node block_data_view (params={})
+r3   connect n4.data → n6.data    ← fan-out 從 n4 (filter result) 另開一條
+r4   run_verifier                 → ADVANCED</code></pre>
+<p class="muted">沒 inspect (agent 已熟悉 data_view), 直接 add + connect + verify。最快 path。</p>
+
+<h3>p5 chart — 8 rounds</h3>
+<pre><code>r1-4  inspect_block_doc × 4 (找適合的 chart type)
+r5    commit_pick block_bar_chart
+r6    add_node block_bar_chart (x='name', y=['value','ucl','lcl'],
+                                 highlight_field='status', highlight_eq='OOC')  → n7
+r7    connect n4.data → n7.data   ← 第 3 個 fan-out from n4
+r8    run_verifier                → ADVANCED</code></pre>
+<p class="muted">Chart phase agent 花較多 inspect 挑 block (4 round) — 18 種 chart block 選擇豐富。</p>
+
+<h2>Verifier 為何全過</h2>
+
+<table>
+<thead><tr><th>Phase</th><th>Terminal block</th><th>Checks (covers gate OFF)</th><th>結果</th></tr></thead>
+<tbody>
+<tr><td>p1</td><td>n1 process_history</td><td>validation_error: no, orphan: source so skip</td><td>ADVANCED</td></tr>
+<tr><td>p2</td><td>n2 block_find</td><td>validation_error: no, orphan: has n1 upstream</td><td>ADVANCED</td></tr>
+<tr><td>p3</td><td>n5 step_check (canvas latest after run_verifier)</td><td>validation_error: no, orphan: has n4 upstream</td><td>ADVANCED</td></tr>
+<tr><td>p4</td><td>n6 data_view</td><td>validation_error: no, orphan: has n4 upstream</td><td>ADVANCED</td></tr>
+<tr><td>p5</td><td>n7 bar_chart</td><td>validation_error: no, orphan: has n4 upstream</td><td>ADVANCED</td></tr>
+</tbody>
+</table>
+
+<p>Covers gate OFF (v30.23 default), 所以 step_check covers=[scalar,verdict] 不需要嚴格對齊 p3.expected=verdict — 只看結構正不正常。</p>
+
+<h2>跟之前失敗版的對比</h2>
+
+<table>
+<thead><tr><th></th><th>Before (5/20 14:18)</th><th>After (今天)</th></tr></thead>
+<tbody>
+<tr><td>status</td><td><span class="badge no">build_partial</span></td><td><span class="badge ok">finished</span></td></tr>
+<tr><td>duration</td><td>148s</td><td>122s</td></tr>
+<tr><td>p2 stuck point</td><td>24 round, 4-5 round 燒在 groupby_agg 試 param 名 (用 group_by/aggregate/column 不 match seed schema agg_func/agg_column)</td><td>—</td></tr>
+<tr><td>final canvas</td><td>5 nodes (chain 沒接完)</td><td>7 nodes 6 edges (完整)</td></tr>
+<tr><td>phases done</td><td>1/5 (p2 拖太久後面 not_reached)</td><td>5/5 ✓</td></tr>
+</tbody>
+</table>
+
+<p>修法 (按貢獻排序):</p>
+<ol>
+  <li><strong>block_groupby_agg 命名對齊</strong>: agg_func/agg_column → aggregate/column (跟 step_check + pandas convention 一致)。Executor 雙接受 backward compat。</li>
+  <li><strong>v30.22 agent-driven verify</strong>: p3 multi-block chain 之前 verifier 加一個 block 立刻擋, 現在 agent 主動觸發才驗</li>
+  <li><strong>v30.23 covers gate off default</strong>: step_check covers=[scalar,verdict] 對 verdict phase OK, 不會 false-reject</li>
+  <li><strong>MAX_REACT_ROUNDS 8→16</strong>: multi-block phase 預算夠</li>
+</ol>
+
+<h2>如何自己跑這個 case</h2>
+
+<h3>Via verify-build skill (CLI)</h3>
+<pre><code>python3 .claude/skills/verify-build/run.py \
+  --mode builder \
+  --message "查詢 EQP-08 最近 7 天內最後一次 OOC 事件，確認該次是否有超過 2 張 SPC 同時 OOC，並顯示該次 OOC 時所有 SPC charts 的狀況" \
+  --json-out /tmp/eqp08.json</code></pre>
+
+<h3>Via Web UI</h3>
+<ol>
+  <li>到 <code>/admin/pipeline-builder/new</code></li>
+  <li>chat 區輸入上面那段 prompt</li>
+  <li>plan card 出現 → 按 Apply</li>
+  <li>watch canvas 一個 block 一個 block 出現</li>
+  <li>結束後 → 到 <code>/admin/build-traces</code> 找最新 trace → 看 Summary tab</li>
+</ol>
+
+<h2>Trace 完整結構</h2>
+
+<p>Trace 檔案位置 (EC2): <code>/tmp/builder-traces/&lt;timestamp&gt;-&lt;build_id&gt;.json</code></p>
+
+<pre><code>{
+  "build_id": "ef9f2131ccd6",
+  "status": "finished",
+  "duration_ms": 122244,
+  "instruction": "查詢 EQP-08 ...",
+  "graph_steps": [
+    {"node": "goal_plan_node", ...},
+    {"node": "task_contract_extractor", ...},
+    {"node": "agentic_phase_loop", "phase_id": "p1", "round": 1,
+     "tool": "inspect_block_doc", "action_ok": true, ...},
+    ...
+    {"node": "phase_verifier", "phases_advanced": ["p1"], ...},
+    ...
+    {"node": "finalize", ...},
+    {"node": "exec_trace_snapshot", "n_nodes": 7, ...},
+    {"node": "validation_summary", "status": "passed", ...}
+  ],
+  "llm_calls": [...],        // 16 LLM rounds total
+  "verifier_decisions": [...],
+  "final_pipeline": {
+    "nodes": [
+      {"id":"n1","block_id":"block_process_history","params":{...}},
+      {"id":"n2","block_id":"block_find","params":{...}},
+      {"id":"n3","block_id":"block_unnest","params":{...}},
+      {"id":"n4","block_id":"block_filter","params":{...}},
+      {"id":"n5","block_id":"block_step_check","params":{...}},
+      {"id":"n6","block_id":"block_data_view","params":{...}},
+      {"id":"n7","block_id":"block_bar_chart","params":{...}}
+    ],
+    "edges": [...]
+  }
+}</code></pre>
+
+<footer class="foot">
+  <a href="../index.html">← Back to overview</a>
+  · <a href="langgraph-pipeline-builder.html">LangGraph deep dive</a>
+  · <a href="tool-using-advisor.html">Advisor deep dive</a>
+</footer>
+
+</div>
+</body>
+</html>

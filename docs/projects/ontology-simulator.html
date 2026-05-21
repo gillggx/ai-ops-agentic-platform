@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>ontology_simulator — AIOps Platform</title>
+<link rel="stylesheet" href="../_assets/style.css">
+</head>
+<body>
+<nav class="top">
+  <a href="../index.html">Overview</a>
+  <a href="../architecture.html">Architecture</a>
+  <a href="python-sidecar.html">Sidecar</a>
+  <a href="java-backend.html">Java API</a>
+  <a href="java-scheduler.html">Scheduler</a>
+  <a href="aiops-app.html">Frontend</a>
+  <a href="ontology-simulator.html" class="active">Simulator</a>
+  <a href="../deep-dives/langgraph-pipeline-builder.html">LangGraph</a>
+  <a href="../deep-dives/tool-using-advisor.html">Advisor</a>
+  <a href="../deep-dives/trace-example.html">Trace Example</a>
+</nav>
+
+<div class="wrap">
+
+<h1>ontology_simulator</h1>
+<p class="lede">合成製程資料源。模擬半導體製程的 lot / tool / step / SPC / APC / FDC / EC events，提供跟 production ontology 完全相同的 API 介面。Agent 跑 process_history 拉的就是這。</p>
+
+<table>
+<tr><td><strong>Port</strong></td><td><code>8012</code></td></tr>
+<tr><td><strong>Tech</strong></td><td>Python 3.11 · FastAPI · MongoDB · NATS (event bus, optional)</td></tr>
+<tr><td><strong>Run</strong></td><td>via <code>venv_ontology</code> on EC2 (no systemd unit, started via script)</td></tr>
+</table>
+
+<h2>API surface</h2>
+
+<table>
+<thead><tr><th>Endpoint</th><th>用途</th></tr></thead>
+<tbody>
+<tr><td><code>GET /api/v1/tools</code></td><td>列出所有設備 (EQP-01 .. EQP-10)</td></tr>
+<tr><td><code>GET /api/v1/events</code></td><td>process events stream — 支援 since_id / limit / start_time</td></tr>
+<tr><td><code>GET /api/v1/process/info</code></td><td>process events by tool_id / lot_id / step (snake_case + camelCase aliases)</td></tr>
+<tr><td><code>GET /api/v1/process/events</code></td><td>同上 alternative shape</td></tr>
+<tr><td><code>GET /api/v1/process/history</code></td><td>歷史記錄 (sidecar block_process_history 走這)</td></tr>
+<tr><td><code>POST /api/v1/inject-anomaly</code></td><td>注入 OOC / drift 異常 (測試用)</td></tr>
+</tbody>
+</table>
+
+<h2>資料 shape</h2>
+
+<p>每個 process event 約這樣（nested=true 時拉完整版）:</p>
+
+<pre><code>{
+  "eventTime": "2026-05-20T10:00:00",
+  "toolID": "EQP-01",
+  "lotID": "LOT-0935",
+  "step": "STEP_009",
+  "spc_status": "PASS" | "OOC",
+  "fdc_classification": null | "...",
+  "spc_charts": [           // 12 chart types per event
+    {"name": "xbar_chart", "value": 14.95, "ucl": 17.5, "lcl": 12.4, "is_ooc": false, "status": "PASS"},
+    {"name": "r_chart", ...},
+    {"name": "cusum_chart", ...},
+    ...
+  ],
+  "APC": { ... 20+ APC parameters ... },
+  "DC": { ... 15+ chamber sensors ... },
+  "RECIPE": { ... recipe metadata ... },
+  "FDC": { ... fault detection ... },
+  "EC": { ... event chain ... }
+}
+</code></pre>
+
+<h2>EventPoller 對接</h2>
+
+<p>java-scheduler 的 <code>EventPollerService</code> 每 30s 拉 <code>/api/v1/events?since_id=X</code> 拿新 events，寫 generated_events table，再 dispatch 到 skills (event mode)。</p>
+
+<h2>角色定位</h2>
+
+<div class="callout">
+<strong>純資料服務</strong>: simulator 不知道 Agent 的存在，跟它對話的 API 介面跟 production ontology 完全相同。換到 real factory 只是改 base URL，business code 不動。
+</div>
+
+<h2>啟動 (EC2)</h2>
+
+<pre><code>cd /opt/aiops/ontology_simulator
+source venv_ontology/bin/activate
+uvicorn app.main:app --host 127.0.0.1 --port 8012 &amp;
+
+# Health
+curl http://localhost:8012/health
+# → {"status": "ok"}
+</code></pre>
+
+<h2>Repo path</h2>
+
+<p>程式碼在 <code>ontology_simulator/</code>（跟 fastapi_backend_refactored 同 root）。EC2 path <code>/opt/aiops/ontology_simulator</code>。</p>
+
+<footer class="foot">
+  <a href="../index.html">← Back to overview</a>
+  · <a href="aiops-app.html">aiops-app</a>
+  · <a href="../deep-dives/langgraph-pipeline-builder.html">LangGraph deep dive →</a>
+</footer>
+
+</div>
+</body>
+</html>

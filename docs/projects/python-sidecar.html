@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>python_ai_sidecar — AIOps Platform</title>
+<link rel="stylesheet" href="../_assets/style.css">
+</head>
+<body>
+<nav class="top">
+  <a href="../index.html">Overview</a>
+  <a href="../architecture.html">Architecture</a>
+  <a href="python-sidecar.html" class="active">Sidecar</a>
+  <a href="java-backend.html">Java API</a>
+  <a href="java-scheduler.html">Scheduler</a>
+  <a href="aiops-app.html">Frontend</a>
+  <a href="ontology-simulator.html">Simulator</a>
+  <a href="../deep-dives/langgraph-pipeline-builder.html">LangGraph</a>
+  <a href="../deep-dives/tool-using-advisor.html">Advisor</a>
+  <a href="../deep-dives/trace-example.html">Trace Example</a>
+</nav>
+
+<div class="wrap">
+
+<h1>python_ai_sidecar</h1>
+<p class="lede">所有 AI agent + 55 個 block executor + pipeline runner 都住這。LangGraph 跑 build / chat / advisor; Pipeline Executor 跑使用者 Save 後的 pipeline。</p>
+
+<table>
+<tr><td><strong>Port</strong></td><td><code>8050</code></td></tr>
+<tr><td><strong>Tech</strong></td><td>Python 3.11 · FastAPI · LangGraph · Anthropic SDK</td></tr>
+<tr><td><strong>DB</strong></td><td><span class="badge no">none</span> 不直接連 PostgreSQL — 全走 JavaAPIClient → java-backend</td></tr>
+<tr><td><strong>Service unit</strong></td><td><code>aiops-python-sidecar.service</code></td></tr>
+<tr><td><strong>Deploy</strong></td><td><code>deploy/java-update.sh</code> (rebuild venv + restart)</td></tr>
+</table>
+
+<h2>主要模組</h2>
+
+<div class="grid-2">
+  <div class="card">
+    <h3>agent_builder/</h3>
+    <p class="meta">build agent · advisor</p>
+    <ul>
+      <li><code>graph_build/</code> — LangGraph state machine (goal_plan + agentic_phase_loop + phase_verifier)</li>
+      <li><code>advisor_v2/</code> — tool-using doc Q&amp;A loop (v6.2)</li>
+      <li><code>advisor/</code> — legacy graph-based advisor (KNOWLEDGE / AMBIGUOUS fast path)</li>
+      <li><code>tools.py</code> — BuilderToolset (~25 tools for ReAct agent)</li>
+      <li><code>session.py</code> — AgentBuilderSession + StreamEvent</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>agent_orchestrator_v2/</h3>
+    <p class="meta">chat panel orchestrator</p>
+    <ul>
+      <li>5-bucket intent classifier</li>
+      <li>tool_call / quick_fact / knowledge / pb_build / clarify routing</li>
+      <li>Calls Java skill endpoints when LLM picks a skill</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>pipeline_builder/</h3>
+    <p class="meta">55 block executors + validator</p>
+    <ul>
+      <li><code>blocks/</code> — 1 file per block (filter, unnest, sort, step_check, ewma_cusum, alert, ...)</li>
+      <li><code>seed.py</code> — block_definitions catalog (synced to Java DB at boot)</li>
+      <li><code>validator.py</code> — C1-C16 structural rules (covers gate, param schema, orphan, placeholder leak, ...)</li>
+      <li><code>seedless_registry.py</code> — pulls block catalog from java-backend on startup</li>
+      <li><code>pipeline_schema.py</code> — Pydantic models for PipelineJSON / Node / Edge</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>clients/</h3>
+    <p class="meta">talks to Java</p>
+    <ul>
+      <li><code>java_client.py</code> — async HTTP client for all <code>/internal/*</code> endpoints on java-backend</li>
+      <li>X-Internal-Token auth (env <code>PYTHON_SIDECAR_TOKEN</code>)</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>routers/</h3>
+    <p class="meta">FastAPI surfaces</p>
+    <ul>
+      <li><code>/internal/agent/build</code> — Glass Box builder (SSE stream)</li>
+      <li><code>/internal/agent/chat</code> — chat panel</li>
+      <li><code>/internal/pipeline/execute</code> — pipeline runner (Java calls this for skill runs)</li>
+      <li><code>/internal/agent/build/traces/*</code> — trace inspection + summary</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>background/</h3>
+    <p class="meta">lifespan tasks</p>
+    <ul>
+      <li><code>event_poller.py</code> — disabled by default; java-scheduler took over polling</li>
+      <li><code>embedding_backfill.py</code> — backfill missing embeddings for RAG</li>
+      <li><code>nats.py</code> — optional NATS subscriber (disabled by default)</li>
+    </ul>
+  </div>
+</div>
+
+<h2>Agent stack 對照</h2>
+
+<table>
+<thead><tr><th>Surface</th><th>Endpoint</th><th>Orchestrator</th><th>路由方式</th></tr></thead>
+<tbody>
+<tr><td>Chat panel</td><td><code>/internal/agent/chat</code></td><td>agent_orchestrator_v2 (LangGraph)</td><td><code>intent_classifier</code> + <code>intent_completeness</code> gates</td></tr>
+<tr><td>Builder Glass Box (build)</td><td><code>/internal/agent/build</code></td><td>graph_build.stream_graph_build (LangGraph)</td><td>goal_plan_node + agentic_phase_loop + phase_verifier</td></tr>
+<tr><td>Builder Glass Box (Q&amp;A)</td><td><code>/internal/agent/build</code> (same)</td><td>advisor_v2.stream_doc_qa_agent (tool-loop)</td><td><code>classify_advisor_intent</code> 5-bucket → EXPLAIN/COMPARE/RECOMMEND → tool-loop</td></tr>
+</tbody>
+</table>
+
+<h2>啟動行為</h2>
+
+<ol>
+<li>Boot — load env, init httpx clients</li>
+<li>SeedlessBlockRegistry: GET java-backend <code>/internal/blocks</code> → cache 55 block specs in memory</li>
+<li>Block invariant check: <code>55 builtin = 55 native executor = 55 in seed = 55 in DB</code></li>
+<li>Background tasks: embedding_backfill (always), event_poller (env-gated, default off), NATS subscriber (env-gated)</li>
+<li>FastAPI ready on :8050</li>
+</ol>
+
+<h2>關鍵環境變數</h2>
+
+<table>
+<tr><td><code>SERVICE_TOKEN</code></td><td>Token for inbound <code>X-Service-Token</code></td></tr>
+<tr><td><code>JAVA_API_URL</code></td><td>default <code>http://127.0.0.1:8002</code></td></tr>
+<tr><td><code>PYTHON_SIDECAR_TOKEN</code></td><td>(not used inbound — java-backend's <code>aiops.internal.token</code> is what we send out)</td></tr>
+<tr><td><code>ANTHROPIC_API_KEY</code></td><td>required for all LLM calls</td></tr>
+<tr><td><code>COHERE_API_KEY</code></td><td>required for embeddings</td></tr>
+<tr><td><code>BUILDER_TRACE_DIR</code></td><td>opt-in trace dir (typically <code>/tmp/builder-traces</code>)</td></tr>
+<tr><td><code>BUILDER_VERIFIER_COVERS_GATE</code></td><td>default <code>0</code>; set <code>1</code> to re-enable covers gate (v30.23 cut)</td></tr>
+<tr><td><code>EVENT_POLLER_ENABLED</code></td><td>default <code>0</code>; java-scheduler now owns polling</td></tr>
+</table>
+
+<h2>Deploy lifecycle</h2>
+
+<pre><code>local commit → push origin main
+  ↓
+ssh ec2 'cd /opt/aiops && sudo git pull'
+  ↓
+sudo ./deploy/java-update.sh
+  ↓  (rebuilds venv + Java jars + restarts both services)
+sidecar restart at boot:
+  - re-loads seed.py
+  - re-syncs block catalog to java-backend DB
+  - block invariant check
+  - ready
+</code></pre>
+
+<div class="callout warn">
+<strong>Common gotcha</strong>: <code>deploy/update.sh</code> only restarts <code>aiops-app</code> + simulator. Sidecar changes need <code>deploy/java-update.sh</code> OR explicit <code>sudo systemctl restart aiops-python-sidecar</code>.
+</div>
+
+<footer class="foot">
+  <a href="../index.html">← Back to overview</a>
+  · <a href="../architecture.html">Architecture</a>
+  · <a href="../deep-dives/langgraph-pipeline-builder.html">LangGraph deep dive</a>
+</footer>
+
+</div>
+</body>
+</html>

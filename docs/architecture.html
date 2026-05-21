@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>Architecture — AIOps Platform</title>
+<link rel="stylesheet" href="_assets/style.css">
+</head>
+<body>
+<nav class="top">
+  <a href="index.html">Overview</a>
+  <a href="architecture.html" class="active">Architecture</a>
+  <a href="projects/python-sidecar.html">Sidecar</a>
+  <a href="projects/java-backend.html">Java API</a>
+  <a href="projects/java-scheduler.html">Scheduler</a>
+  <a href="projects/aiops-app.html">Frontend</a>
+  <a href="projects/ontology-simulator.html">Simulator</a>
+  <a href="deep-dives/langgraph-pipeline-builder.html">LangGraph</a>
+  <a href="deep-dives/tool-using-advisor.html">Advisor</a>
+  <a href="deep-dives/trace-example.html">Trace Example</a>
+</nav>
+
+<div class="wrap">
+
+<h1>Architecture</h1>
+<p class="lede">5 services across 4 ports. Each owns a narrow slice; cross-service calls are explicit HTTP with auth tokens.</p>
+
+<h2>Service map</h2>
+
+<div class="diagram">┌────────────────────────────────────────────────────────────────────┐
+│  aiops-app  (Next.js 15 standalone)                  Port 8000     │
+│  • UI render + /api/ proxy to Java + Sidecar                       │
+│  • No business logic, no DB access                                 │
+└──────────────┬──────────────────────────────────┬──────────────────┘
+               │                                  │
+       (via nginx :443)                  (via nginx :443)
+               │                                  │
+               ▼                                  ▼
+┌──────────────────────────────┐   ┌─────────────────────────────────┐
+│  java-backend (Spring Boot)  │   │  python_ai_sidecar (FastAPI)    │
+│  Port 8002 — sole DB owner   │   │  Port 8050 — agents + executors │
+│                              │   │                                 │
+│  • PostgreSQL + pgvector     │   │  • Chat orchestrator (v2)       │
+│  • Auth (JWT)                │   │  • Glass Box builder (v30.23)   │
+│  • Pipeline / Skill / Alarm  │   │  • Block Advisor (v6.2)         │
+│    CRUD + role audit         │   │  • 55 block executors           │
+│  • /api/v1/* (user JWT)      │   │  • Pipeline executor            │
+│  • /internal/* (X-Internal-  │◄──┤  • JavaAPIClient → :8002        │
+│    Token, service-to-service)│   │                                 │
+└──────────┬───────────────────┘   └──────────┬──────────────────────┘
+           │                                  │
+           │                                  │ HTTP (data fetch)
+           ▼                                  ▼
+     PostgreSQL                  ┌──────────────────────────────┐
+     (single owner)              │  ontology_simulator          │
+                                 │  Port 8012                   │
+           ▲                     │  Synthetic process data      │
+           │                     │  (LOT / TOOL / SPC / APC ...)│
+           │                     └────────┬─────────────────────┘
+           │                              │
+           │                       (polls every 30s)
+           │                              │
+┌──────────┴───────────────────┐          │
+│  java-scheduler (Spring Boot)│◄─────────┘
+│  Port 8003 — @Scheduled jobs │
+│                              │
+│  • Skill auto-fire (v6.1)    │
+│    - schedule mode → 60s tick│
+│    - event mode → on dispatch│
+│  • EventPoller (sim → events)│
+│  • Calls java-backend :8002  │
+│    via /internal/skills/...  │
+└──────────────────────────────┘</div>
+
+<h2>Ownership rules</h2>
+
+<table>
+<thead><tr><th>Resource</th><th>Owner</th><th>Read access</th></tr></thead>
+<tbody>
+<tr><td>PostgreSQL (aiops_db)</td><td>java-backend</td><td>only java-backend writes; java-scheduler READs subset of tables (via shared JPA entities)</td></tr>
+<tr><td>MongoDB (ontology)</td><td>ontology_simulator</td><td>only simulator; HTTP API to outside</td></tr>
+<tr><td>Pipeline execution</td><td>python_ai_sidecar</td><td>in-process 55 block executors; no shared DB</td></tr>
+<tr><td>Agent state (build sessions)</td><td>python_ai_sidecar</td><td>in-memory MemorySaver checkpointer; sidecar restart drops paused sessions</td></tr>
+<tr><td>Skill / Pipeline / Alarm CRUD</td><td>java-backend</td><td>via /api/v1/* JWT</td></tr>
+<tr><td>Auth (users, roles)</td><td>java-backend</td><td>NextAuth proxy → java-backend /auth/login</td></tr>
+</tbody>
+</table>
+
+<h2>Auth boundary</h2>
+
+<table>
+<thead><tr><th>Path prefix</th><th>Auth</th><th>Caller</th></tr></thead>
+<tbody>
+<tr><td><code>/api/v1/*</code> on java-backend</td><td>JWT (user / admin / PE / IT_ADMIN role hierarchy)</td><td>frontend via NextAuth session</td></tr>
+<tr><td><code>/internal/*</code> on java-backend</td><td>X-Internal-Token (JAVA_INTERNAL_TOKEN env)</td><td>python_ai_sidecar, java-scheduler</td></tr>
+<tr><td><code>/internal/*</code> on python_ai_sidecar</td><td>X-Service-Token (PYTHON_SIDECAR_TOKEN env)</td><td>java-backend, aiops-app (proxy)</td></tr>
+<tr><td>aiops-app <code>/api/*</code></td><td>NextAuth session</td><td>browser only</td></tr>
+</tbody>
+</table>
+
+<h2>Data flow examples</h2>
+
+<h3>1. User chats "查 EQP-08 OOC"</h3>
+
+<div class="diagram">browser → aiops-app /api/chat → sidecar /internal/agent/chat
+       (NextAuth session)        (X-Service-Token)
+                                  │
+                                  ▼
+                          chat orchestrator_v2 (LangGraph)
+                                  │
+                                  ▼
+                          intent_classifier → tool_call bucket
+                                  │
+                                  ▼
+                          LLM picks skill → call java /api/v1/skill-documents/{slug}/run
+                                  │  (forwarded JWT from session)
+                                  ▼
+                          java SkillRunnerService → POST sidecar /internal/pipeline/execute
+                                                          │
+                                                          ▼
+                                                  block executors run in-process
+                                                  (process_history → ontology_simulator
+                                                  via HTTP for raw data)</div>
+
+<h3>2. Build agent constructs a pipeline</h3>
+
+<div class="diagram">browser → aiops-app /admin/pipeline-builder
+       → aiops-app /api/agent/build → sidecar /internal/agent/build
+                                            │
+                                            ▼
+                              classify_advisor_intent → BUILD bucket
+                                            │
+                                            ▼
+                              stream_graph_build (LangGraph state machine)
+                                  ┌─────────┴─────────────┐
+                                  │                       │
+                                  ▼                       ▼
+                              goal_plan_node          agentic_phase_loop ⇄ phase_verifier
+                              (LLM: 3-5 phases)       (LLM-driven ReAct, sub-phase machine)
+                                                            │
+                                                            ▼
+                                                    final_pipeline → save via Java</div>
+
+<h3>3. Automated skill fires by schedule</h3>
+
+<div class="diagram">java-scheduler @Scheduled (every 60s) → SkillScheduleService.tick()
+                                              │
+                                              ▼
+                                        scan skill_documents WHERE status=stable AND
+                                          trigger_config.type=schedule AND due
+                                              │
+                                              ▼
+                                        SkillApiClient.dispatchSkill(slug, "system_schedule")
+                                              │  (X-Internal-Token to java-backend)
+                                              ▼
+                                        java-backend /internal/skills/by-slug/{slug}/run-system
+                                              │
+                                              ▼
+                                        SkillRunnerService.run() → triggered_by="system_schedule"
+                                              │
+                                              ▼
+                                        executes pipeline → block_alert writes to alarms table</div>
+
+<h2>Deploy</h2>
+
+<table>
+<thead><tr><th>Target</th><th>Path</th><th>Script</th></tr></thead>
+<tbody>
+<tr><td>EC2 prod</td><td><code>/opt/aiops</code></td><td><code>deploy/update.sh</code> (frontend + sim) · <code>deploy/java-update.sh</code> (java + sidecar)</td></tr>
+<tr><td>Sidecar-only restart</td><td>—</td><td><code>sudo systemctl restart aiops-python-sidecar</code></td></tr>
+<tr><td>K8s (planned)</td><td>—</td><td>per-service Dockerfile + while-true run.sh wrapper</td></tr>
+</tbody>
+</table>
+
+<div class="callout warn">
+<strong>Port convention</strong>: env-driven, never hardcoded. EC2 uses distinct ports per service (8000 / 8002 / 8003 / 8050 / 8012). K8s future: per-container <code>EXPOSE 8080</code>, service-name resolution.
+</div>
+
+<footer class="foot">
+  <a href="index.html">← Back to overview</a>
+  · <a href="https://github.com/gillggx/ai-ops-agentic-platform">GitHub</a>
+</footer>
+
+</div>
+</body>
+</html>
