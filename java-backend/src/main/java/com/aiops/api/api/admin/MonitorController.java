@@ -2,7 +2,6 @@ package com.aiops.api.api.admin;
 
 import com.aiops.api.auth.Authorities;
 import com.aiops.api.common.ApiResponse;
-import com.aiops.api.domain.agent.AgentMemoryRepository;
 import com.aiops.api.domain.alarm.AlarmRepository;
 import com.aiops.api.domain.audit.AuditLogRepository;
 import com.aiops.api.domain.event.GeneratedEventRepository;
@@ -31,7 +30,6 @@ public class MonitorController {
 	private final ExecutionLogRepository execLogRepo;
 	private final GeneratedEventRepository generatedEventRepo;
 	private final NatsEventLogRepository natsLogRepo;
-	private final AgentMemoryRepository agentMemoryRepo;
 	private final AuditLogRepository auditRepo;
 
 	public MonitorController(UserRepository userRepo,
@@ -42,7 +40,6 @@ public class MonitorController {
 	                         ExecutionLogRepository execLogRepo,
 	                         GeneratedEventRepository generatedEventRepo,
 	                         NatsEventLogRepository natsLogRepo,
-	                         AgentMemoryRepository agentMemoryRepo,
 	                         AuditLogRepository auditRepo) {
 		this.userRepo = userRepo;
 		this.alarmRepo = alarmRepo;
@@ -52,7 +49,6 @@ public class MonitorController {
 		this.execLogRepo = execLogRepo;
 		this.generatedEventRepo = generatedEventRepo;
 		this.natsLogRepo = natsLogRepo;
-		this.agentMemoryRepo = agentMemoryRepo;
 		this.auditRepo = auditRepo;
 	}
 
@@ -67,7 +63,6 @@ public class MonitorController {
 				"execution_logs", execLogRepo.count(),
 				"generated_events", generatedEventRepo.count(),
 				"nats_event_logs", natsLogRepo.count(),
-				"agent_memories", agentMemoryRepo.count(),
 				"audit_logs", auditRepo.count()
 		));
 	}

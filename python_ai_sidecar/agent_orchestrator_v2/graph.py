@@ -41,7 +41,6 @@ from python_ai_sidecar.agent_orchestrator_v2.nodes.llm_call import llm_call_node
 from python_ai_sidecar.agent_orchestrator_v2.nodes.tool_execute import tool_execute_node
 from python_ai_sidecar.agent_orchestrator_v2.nodes.synthesis import synthesis_node
 from python_ai_sidecar.agent_orchestrator_v2.nodes.self_critique import self_critique_node
-from python_ai_sidecar.agent_orchestrator_v2.nodes.memory_lifecycle import memory_lifecycle_node
 
 
 # ── Reducer helpers ──────────────────────────────────────────────────
@@ -222,7 +221,6 @@ def build_graph() -> StateGraph:
     graph.add_node("tool_execute", tool_execute_node)
     graph.add_node("synthesis", synthesis_node)
     graph.add_node("self_critique", self_critique_node)
-    graph.add_node("memory_lifecycle", memory_lifecycle_node)
 
     # ── Edges ────────────────────────────────────────────────────────
     # load_context → intent_classifier_builder (gate; only acts when mode='builder')
@@ -317,9 +315,10 @@ def build_graph() -> StateGraph:
         {"llm_call": "llm_call", "synthesis": "synthesis"},
     )
 
-    # synthesis → self_critique → memory_lifecycle → END
+    # synthesis → self_critique → END
+    # (memory_lifecycle removed — auto-extracted experience memory feature
+    # is superseded by curated Rules & Knowledge at /agent-knowledge.)
     graph.add_edge("synthesis", "self_critique")
-    graph.add_edge("self_critique", "memory_lifecycle")
-    graph.add_edge("memory_lifecycle", END)
+    graph.add_edge("self_critique", END)
 
     return graph

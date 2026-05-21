@@ -3,7 +3,6 @@ package com.aiops.api.api.admin;
 import com.aiops.api.api.skill.SkillRunnerService;
 import com.aiops.api.auth.Authorities;
 import com.aiops.api.config.AiopsProperties;
-import com.aiops.api.domain.agent.AgentMemoryRepository;
 import com.aiops.api.domain.alarm.AlarmRepository;
 import com.aiops.api.domain.audit.AuditLogRepository;
 import com.aiops.api.domain.event.GeneratedEventRepository;
@@ -44,7 +43,6 @@ public class SystemMonitorAliasController {
 	private final ExecutionLogRepository execLogRepo;
 	private final GeneratedEventRepository generatedEventRepo;
 	private final NatsEventLogRepository natsLogRepo;
-	private final AgentMemoryRepository agentMemoryRepo;
 	private final AuditLogRepository auditRepo;
 	private final AiopsProperties props;
 	private final WebClient legacyClient;
@@ -55,7 +53,6 @@ public class SystemMonitorAliasController {
 	                                    AutoPatrolRepository patrolRepo, ExecutionLogRepository execLogRepo,
 	                                    GeneratedEventRepository generatedEventRepo,
 	                                    NatsEventLogRepository natsLogRepo,
-	                                    AgentMemoryRepository agentMemoryRepo,
 	                                    AuditLogRepository auditRepo,
 	                                    AiopsProperties props,
 	                                    SkillRunnerService skillRunner,
@@ -68,7 +65,6 @@ public class SystemMonitorAliasController {
 		this.execLogRepo = execLogRepo;
 		this.generatedEventRepo = generatedEventRepo;
 		this.natsLogRepo = natsLogRepo;
-		this.agentMemoryRepo = agentMemoryRepo;
 		this.auditRepo = auditRepo;
 		this.props = props;
 		this.skillRunner = skillRunner;
@@ -102,7 +98,6 @@ public class SystemMonitorAliasController {
 		dbStats.put("execution_logs", execLogRepo.count());
 		dbStats.put("generated_events", generatedEventRepo.count());
 		dbStats.put("nats_event_logs", natsLogRepo.count());
-		dbStats.put("agent_memories", agentMemoryRepo.count());
 		dbStats.put("audit_logs", auditRepo.count());
 
 		// v30.13b (2026-05-17) — surface SkillRunner alarm-emit activity so

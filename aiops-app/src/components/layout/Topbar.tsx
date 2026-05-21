@@ -123,7 +123,6 @@ function UserMenu() {
 
             <DropdownLink href="/me/profile" icon="⚙️" label="帳號設定" onClick={() => setOpen(false)} />
             <DropdownLink href="/me/change-password" icon="🔑" label="變更密碼" onClick={() => setOpen(false)} />
-            <DropdownLink href="/me/memories" icon="🧠" label="我的記憶" onClick={() => setOpen(false)} />
 
             <div style={{ borderTop: "1px solid #f1f5f9" }} />
 

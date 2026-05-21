@@ -24,15 +24,24 @@ export interface SlashCommand {
   tpl: string;
 }
 
+// "diag" category dropped 2026-05-22 — all 3 diag commands removed (alarm
+// MCP unavailable / time-window-around-anchor unsupported). Keep type alias
+// for back-compat but UI no longer renders that group.
 export const SLASH_CATEGORIES: Array<{ key: SlashCommand["cat"]; label: string }> = [
   { key: "spc",    label: "📊 SPC" },
   { key: "apc",    label: "🔧 APC" },
   { key: "patrol", label: "📋 巡檢" },
-  { key: "diag",   label: "🩺 診斷" },
 ];
 
+// 2026-05-22 — Audit-validated list. Each command was smoke-tested against
+// /internal/agent/build + plan-confirm and produced a non-error build with
+// at least one chart block. See docs/slash-command-audit-2026-05-21-after-v50.md.
+//
+// Failing commands removed: apc-corr / apc-recipe / patrol-alarms /
+// patrol-recipe-consist / diag-alarm / diag-ooc-point / diag-walkback.
+// (Alarm-related fails won't be re-introduced until get_alarms MCP exists.)
 export const SLASH_COMMANDS: SlashCommand[] = [
-  // SPC
+  // ── SPC (retained from previous audit — all OK) ─────────────────────
   { cat: "spc", ico: "📈", key: "spc-trend",
     title: "看某機台某站的 xbar 趨勢",
     desc: "拉最近 N 筆 SPC 資料畫 xbar 控制圖（含 UCL/LCL）",
@@ -54,47 +63,66 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     desc: "EWMA-CUSUM 抓小幅漂移 + Box plot 看 lot 變異 + Q-Q 檢定常態性",
     tpl: "過去 7 天 [EQP-01] [STEP_001] 的 spc_xbar_chart_value：(1) block_ewma_cusum (mode='cusum', k=0.5, h=4) 偵測 < 1σ 小幅 drift；(2) block_box_plot 比較各 lot 之間的分佈差異；(3) block_probability_plot 檢定是否符合常態（給 Cpk 計算打底）" },
 
-  // APC
+  // ── SPC (new, audit 2026-05-22 — all built OK) ──────────────────────
+  { cat: "spc", ico: "📊", key: "spc-xbar-r-pair",
+    title: "X̄/R 對偶管制圖",
+    desc: "X̄ + R 兩張圖並列，WECO 規則 highlight",
+    tpl: "EQP-01 STEP_001 最近 7 天的 X-bar/R 對偶管制圖（含 WECO highlight）" },
+  { cat: "spc", ico: "🪜", key: "spc-multi-step",
+    title: "多站 xbar 趨勢分頁",
+    desc: "同一台機台跨多個 STEP 的 xbar 趨勢，按 step 分頁顯示",
+    tpl: "EQP-01 過去 7 天 STEP_001、STEP_002、STEP_003 三站 xbar 趨勢分頁顯示" },
+  { cat: "spc", ico: "📦", key: "spc-tool-box",
+    title: "各 lot xbar 分佈 box plot",
+    desc: "看每個 lot 的 xbar 分佈差異",
+    tpl: "EQP-01 STEP_001 過去 7 天各 lot 的 xbar 分佈 box plot" },
+  { cat: "spc", ico: "🔬", key: "spc-normality",
+    title: "xbar 常態性檢定",
+    desc: "Q-Q plot 看數據是否符合常態分佈（給 Cpk 鋪底）",
+    tpl: "EQP-01 STEP_001 過去 7 天 xbar 常態性檢定 Q-Q plot" },
+  { cat: "spc", ico: "📉", key: "spc-cusum",
+    title: "EWMA-CUSUM 漂移偵測",
+    desc: "抓 <1σ 的小幅製程漂移",
+    tpl: "EQP-01 STEP_001 過去 14 天 EWMA-CUSUM 漂移偵測（k=0.5, h=4）" },
+
+  // ── APC (retained — apc-drift OK; corr/recipe removed) ──────────────
   { cat: "apc", ico: "📐", key: "apc-drift",
     title: "APC 參數漂移檢查",
     desc: "看 etch_time_offset 等 APC 參數最近是否有 drift",
     tpl: "看 [EQP-01] APC etch_time_offset 最近 24 小時是否有漂移" },
-  { cat: "apc", ico: "🔗", key: "apc-corr",
-    title: "APC ↔ SPC 相關性",
-    desc: "找 APC 參數變動跟 SPC OOC 之間的相關性",
-    tpl: "找 [EQP-01] APC etch_time_offset 跟 SPC xbar OOC 的相關性" },
-  { cat: "apc", ico: "🧪", key: "apc-recipe",
-    title: "Recipe 切換前後 APC 比較",
-    desc: "看 recipe 變更後 APC 參數是否跑掉",
-    tpl: "[EQP-01] 在 [recipe X→Y] 切換後 APC 參數有沒有變化？" },
 
-  // 巡檢
-  { cat: "patrol", ico: "🔔", key: "patrol-alarms",
-    title: "今日 alarm 列表",
-    desc: "全廠今日 OPEN 的 HIGH 級告警 + 證據",
-    tpl: "列出今天所有 HIGH 級 alarm（OPEN 狀態），含觸發證據" },
+  // ── APC (new, audit 2026-05-22 — all built OK) ──────────────────────
+  { cat: "apc", ico: "📈", key: "apc-trend",
+    title: "APC 參數 24h 趨勢",
+    desc: "單一 APC 參數時序 line chart",
+    tpl: "EQP-01 過去 24 小時 APC etch_time_offset 趨勢 line chart" },
+  { cat: "apc", ico: "🧪", key: "apc-recipe-compare",
+    title: "Recipe 別 APC 分佈對比",
+    desc: "每個 recipe 跑出的 APC 參數分佈 box plot 對比",
+    tpl: "EQP-01 過去 14 天每個 recipe 的 APC etch_time_offset 分佈 box plot 對比" },
+
+  // ── 巡檢 — patrol-status retained; alarm-related all removed ────────
   { cat: "patrol", ico: "🩹", key: "patrol-status",
     title: "機台狀態快照",
     desc: "列各機台目前 idle / processing / down 狀態",
     tpl: "現在所有機台的狀態快照，標示異常的機台" },
-  { cat: "patrol", ico: "📋", key: "patrol-recipe-consist",
-    title: "Recipe 一致性檢查",
-    desc: "找出全廠跑同一 recipe 但結果有差異的機台",
-    tpl: "全廠跑 recipe [R001] 的機台，xbar 平均值差異 > 1.5σ 的列出來" },
 
-  // 診斷
-  { cat: "diag", ico: "🩺", key: "diag-alarm",
-    title: "Alarm 根因分析",
-    desc: "針對特定 alarm，找出觸發證據 + 可能根因",
-    tpl: "Alarm #[id] 根因分析：列觸發條件、證據資料、相關 APC/SPC" },
-  { cat: "diag", ico: "🔬", key: "diag-ooc-point",
-    title: "OOC 單點深度診斷",
-    desc: "選一個 OOC 點，把附近 process 跟 APC 變化都調出來",
-    tpl: "[LOT-0234] 在 [EQP-01] [STEP_001] 的 OOC 點，前後 30 分鐘的 APC 變化" },
-  { cat: "diag", ico: "🧭", key: "diag-walkback",
-    title: "從 alarm 倒推到製程",
-    desc: "從 alarm → SPC 點 → APC 紀錄 → recipe，一路追回去",
-    tpl: "從 alarm #[id] 倒推：SPC 證據 → APC 紀錄 → 當下 recipe，全部列出" },
+  // ── 巡檢 (new, audit 2026-05-22 — all built OK with chart) ──────────
+  // Prompts intentionally hint "用 block_groupby_agg 依 X 分組計數" to keep
+  // the agent on the groupby-then-chart path instead of falling into
+  // block_mcp_foreach over the tool catalog.
+  { cat: "patrol", ico: "🏆", key: "ooc-ranking",
+    title: "OOC 機台排名 bar chart",
+    desc: "依 toolID 分組計數 OOC 事件，畫由多到少",
+    tpl: "EQP-01 EQP-02 EQP-03 過去 7 天 SPC 事件，用 block_groupby_agg 依 toolID 分組計數 OOC 事件，畫 bar chart 由多到少" },
+  { cat: "patrol", ico: "📊", key: "ooc-pareto",
+    title: "OOC chart 別 Pareto",
+    desc: "依 SPC chart_name 分組計數，看哪幾種 chart 出 OOC 最多",
+    tpl: "EQP-01 過去 7 天 SPC OOC 事件，用 block_groupby_agg 依 chart_name 分組計數，畫 bar chart 由多到少" },
+  { cat: "patrol", ico: "🪜", key: "step-yield",
+    title: "各 STEP OOC 數 bar chart",
+    desc: "看哪個 STEP 是異常熱點",
+    tpl: "EQP-01 過去 7 天各 STEP 的 OOC 事件數，依 step 分組計數，畫 bar chart" },
 ];
 
 interface Props {

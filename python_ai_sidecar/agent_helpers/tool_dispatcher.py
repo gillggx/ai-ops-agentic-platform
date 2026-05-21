@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from python_ai_sidecar.agent_helpers._model_stubs import MCPDefinitionModel
-from python_ai_sidecar.agent_helpers.agent_memory_service import AgentMemoryService
+# AgentMemoryService removed 2026-05-22 — memory feature dropped.
 
 logger = logging.getLogger(__name__)
 
@@ -636,34 +636,9 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
             "required": [],
         },
     },
-    {
-        "name": "search_memory",
-        "description": "搜尋 Agent 的長期記憶。用於查詢歷史診斷結果或使用者曾說的話。支援 Metadata 過濾以精準提取同類型經驗。",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "搜尋關鍵字"},
-                "top_k": {"type": "integer", "description": "回傳筆數 (預設 5)", "default": 5},
-                "task_type": {"type": "string", "description": "限定記憶類型 (可選)，例如 draw_chart / troubleshooting"},
-                "data_subject": {"type": "string", "description": "限定資料對象/機台 (可選)，例如 TETCH01"},
-            },
-            "required": ["query"],
-        },
-    },
-    {
-        "name": "save_memory",
-        "description": "明確儲存一條長期記憶，例如「使用者確認 TETCH01 已維修完畢」。支援 Metadata 標籤以利日後精準提取。",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "content": {"type": "string", "description": "記憶內容 (純文字)"},
-                "task_type": {"type": "string", "description": "任務類型標籤 (可選)，例如 draw_chart / troubleshooting"},
-                "data_subject": {"type": "string", "description": "資料對象/機台標籤 (可選)，例如 TETCH01"},
-                "tool_name": {"type": "string", "description": "關聯工具名稱標籤 (可選)，例如 execute_mcp"},
-            },
-            "required": ["content"],
-        },
-    },
+    # search_memory / save_memory removed 2026-05-22 — superseded by curated
+    # Rules & Knowledge (agent_knowledge / /agent-knowledge UI). Agent no longer
+    # has read/write access to the auto-extracted memory store.
     {
         "name": "update_user_preference",
         "description": (
@@ -822,14 +797,13 @@ class ToolDispatcher:
         self._base_url = base_url.rstrip("/")
         self._headers = {"Authorization": f"Bearer {auth_token}", "Content-Type": "application/json"}
         self._user_id = user_id
-        # Phase 8-A-1d: when java client is provided, mcp_id resolution +
-        # memory operations route via Java instead of local SQLAlchemy.
+        # Phase 8-A-1d: when java client is provided, mcp_id resolution
+        # routes via Java instead of local SQLAlchemy.
         self._java = java
-        self._memory_svc = AgentMemoryService(db) if db is not None else None
 
     # Tools that return conversational/structural data — skip DataProfile for these
     _NON_DATA_TOOLS = frozenset({
-        "navigate", "save_memory", "search_memory", "update_user_preference",
+        "navigate", "update_user_preference",
         "list_skills", "list_mcps", "list_system_mcps",
         "list_routine_checks", "list_event_types",
         "draft_skill", "draft_mcp", "draft_routine_check", "draft_event_skill_link",
@@ -1049,67 +1023,8 @@ class ToolDispatcher:
                         "code": "BAD_PLAN_ACTION",
                         "message": "update_plan.action must be 'create' or 'update'",
                     }
-                case "search_memory":
-                    # Phase 8-A-1d: route via Java when available (chat native)
-                    top_k = tool_input.get("top_k", 5)
-                    if self._java is not None:
-                        rows = await self._java.list_agent_memories(
-                            user_id=self._user_id,
-                            task_type=tool_input.get("task_type"),
-                        )
-                        # Naive client-side keyword filter (no vector search on
-                        # this legacy endpoint; sidecar's experience_memory is
-                        # the proper RAG path).
-                        q = (tool_input.get("query") or "").lower()
-                        if q:
-                            rows = [r for r in rows if q in (r.get("content") or "").lower()]
-                        rows = rows[:top_k]
-                        return {
-                            "memories": rows,
-                            "count": len(rows),
-                            "filter_applied": {"strategy": "java_keyword"},
-                        }
-                    if self._memory_svc is None:
-                        return {"memories": [], "count": 0, "filter_applied": {"strategy": "unavailable"}}
-                    memories, filter_applied = await self._memory_svc.search_with_metadata(
-                        user_id=self._user_id,
-                        query=tool_input["query"],
-                        top_k=top_k,
-                        task_type=tool_input.get("task_type"),
-                        data_subject=tool_input.get("data_subject"),
-                    )
-                    return {
-                        "memories": [AgentMemoryService.to_dict(m) for m in memories],
-                        "count": len(memories),
-                        "filter_applied": filter_applied,
-                    }
-                case "save_memory":
-                    if self._java is not None:
-                        body = {
-                            "userId": self._user_id,
-                            "content": tool_input["content"],
-                            "source": "agent_request",
-                            "taskType": tool_input.get("task_type"),
-                            "dataSubject": tool_input.get("data_subject"),
-                            "toolName": tool_input.get("tool_name"),
-                        }
-                        saved = await self._java.save_agent_memory(body)
-                        return {
-                            "saved": True,
-                            "memory_id": saved.get("id"),
-                            "content": saved.get("content"),
-                        }
-                    if self._memory_svc is None:
-                        return {"saved": False, "error": "memory service unavailable"}
-                    m = await self._memory_svc.write(
-                        user_id=self._user_id,
-                        content=tool_input["content"],
-                        source="agent_request",
-                        task_type=tool_input.get("task_type"),
-                        data_subject=tool_input.get("data_subject"),
-                        tool_name=tool_input.get("tool_name"),
-                    )
-                    return {"saved": True, "memory_id": m.id, "content": m.content}
+                # search_memory / save_memory dispatchers removed 2026-05-22
+                # (tools removed from registry; case branches deleted).
                 case "update_user_preference":
                     return await self._call_api(
                         "POST",
@@ -1489,7 +1404,6 @@ TOOL_RESULT_TOKEN_CAP = 4000
 # already capped upstream). Skip truncation for these to avoid surprises.
 _NEVER_TRUNCATE = {
     "update_plan", "explain", "finish",  # control-plane tools
-    "save_memory",  # memory writes return small ack
     # Phase 9-B: rule_draft + preview must reach the frontend confirmation
     # card intact — truncation would corrupt pipeline_json mid-tree.
     "propose_personal_rule",

@@ -38,7 +38,6 @@ _STAGE_MAP = {
     "tool_execute": 2,     # pipeline stages 3-6 are emitted separately
     "synthesis": 7,
     "self_critique": 8,
-    "memory_lifecycle": 9,
 }
 
 
@@ -58,7 +57,6 @@ async def adapt_events(
     _seen_context_load = False
     _seen_synthesis = False
     _seen_self_critique = False
-    _seen_memory = False
     _tool_start_count = 0
     _current_state = dict(initial_state)
     _analysis_contract = None  # stashed when any tool produces charts for analysis panel
@@ -367,19 +365,6 @@ async def adapt_events(
                 yield _stage_event(5, "complete")
                 _seen_self_critique = True
 
-            elif ev_name == "memory_lifecycle":
-                output = ev_data.get("output") or {}
-                yield _stage_event(6, "running")
-                yield {
-                    "type": "memory_write",
-                    "source": "experience_lifecycle_scheduled",
-                    "cited_memory_ids": output.get("cited_memory_ids", []),
-                    "memory_write_scheduled": output.get("memory_write_scheduled", False),
-                    "tool_count": len(_current_state.get("tools_used", [])),
-                }
-                yield _stage_event(6, "complete")
-                _seen_memory = True
-
             elif stage:
                 yield _stage_event(stage, "complete")
 
@@ -394,15 +379,6 @@ async def adapt_events(
         yield _stage_event(5, "running")
         yield {"type": "reflection_pass"}
         yield _stage_event(5, "complete")
-
-    if not _seen_memory:
-        yield _stage_event(6, "running")
-        yield {
-            "type": "memory_write",
-            "source": "skipped",
-            "tool_count": len(_current_state.get("tools_used", [])),
-        }
-        yield _stage_event(6, "complete")
 
     yield {
         "type": "done",

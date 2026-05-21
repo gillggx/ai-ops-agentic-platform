@@ -36,7 +36,6 @@ _PIPELINE_ONLY_EXTRA_HIDDEN = {"execute_skill"}
 _ON_DUTY_HIDDEN_TOOLS = {
     "build_pipeline_live",
     "propose_pipeline_patch",
-    "save_memory",
     "update_user_preference",
     "draft_skill",
     "build_skill",
@@ -194,7 +193,7 @@ async def llm_call_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[s
         "llm_call: caller_roles=%s visible_tool_count=%d hidden_role_tools=%s",
         caller_roles,
         len(visible_tools),
-        [t for t in ("build_pipeline_live", "draft_skill", "save_memory")
+        [t for t in ("build_pipeline_live", "draft_skill")
          if t not in {x["name"] for x in visible_tools}],
     )
 

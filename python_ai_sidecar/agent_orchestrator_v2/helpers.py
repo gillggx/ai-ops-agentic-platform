@@ -63,7 +63,6 @@ def set_approval(token: str, approved: bool) -> bool:
 _ON_DUTY_FORBIDDEN_TOOLS = frozenset({
     "build_pipeline_live",
     "propose_pipeline_patch",
-    "save_memory",
     "update_user_preference",
     "draft_skill",
     "build_skill",

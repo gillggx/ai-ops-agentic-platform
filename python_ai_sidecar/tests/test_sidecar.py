@@ -136,7 +136,7 @@ def _install_java_stub(monkeypatch):
     from python_ai_sidecar.clients import java_client as jc
 
     class StubClient:
-        def __init__(self): self._memories: list[dict] = []
+        def __init__(self): pass
 
         async def list_mcps(self, *, mcp_type=None):
             return [{"name": "m_hist", "description": "stub", "mcpType": "system", "inputSchema": "[]"}]
@@ -147,15 +147,6 @@ def _install_java_stub(monkeypatch):
 
         async def list_blocks(self, *, category=None, status=None):
             return [{"name": "load_process_history", "category": "loader", "status": "active"}]
-
-        async def list_agent_memories(self, *, user_id, task_type=None):
-            return list(self._memories)
-
-        async def save_agent_memory(self, body):
-            body = dict(body)
-            body["id"] = len(self._memories) + 1
-            self._memories.append(body)
-            return body
 
         async def get_agent_session(self, session_id):
             from python_ai_sidecar.clients.java_client import JavaAPIError
