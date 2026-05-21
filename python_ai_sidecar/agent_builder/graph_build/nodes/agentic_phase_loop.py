@@ -146,6 +146,33 @@ def _load_glossary_safe() -> str:
 _SYSTEM = _SYSTEM + _load_glossary_safe()
 
 
+def _stamp_last_message_cache(messages: list[dict]) -> list[dict]:
+    """Return a shallow copy of `messages` with cache_control on the last
+    content block. Anthropic caches the prefix up to and including that
+    breakpoint, so each subsequent round only pays for the appended delta.
+
+    Handles both string-content messages (round 1 user obs) and
+    list-content messages (round 2+ tool_result lists)."""
+    if not messages:
+        return messages
+    out = [dict(m) for m in messages]
+    last = out[-1]
+    content = last.get("content")
+    if isinstance(content, str):
+        last["content"] = [{
+            "type": "text", "text": content,
+            "cache_control": {"type": "ephemeral"},
+        }]
+    elif isinstance(content, list) and content:
+        new_content = [dict(c) for c in content]
+        # Don't mutate tool_use/tool_result shape — just add cache_control
+        # on the LAST part. Anthropic accepts cache_control on any block.
+        new_content[-1] = {**new_content[-1],
+                           "cache_control": {"type": "ephemeral"}}
+        last["content"] = new_content
+    return out
+
+
 async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     """Single ReAct round for the active phase.
 
@@ -240,11 +267,25 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
         seeded = sub_hint + "\n\n" + full_user_msg if sub_hint else full_user_msg
         phase_messages.append({"role": "user", "content": seeded})
 
+    # 2026-05-22: Prompt cache (Anthropic ephemeral).
+    # cache_control on the LAST tool caches system + tools across all rounds
+    # of this phase (and same phase across subsequent builds within 5 min).
+    # cache_control on the LAST message caches the full prior conversation
+    # so each round only pays for the newly-appended user/tool_result delta.
+    # This collapses the 556K-token spc-trend baseline by reading the bulk
+    # of input from cache instead of re-tokenising every round.
+    system_blocks = [{"type": "text", "text": _SYSTEM,
+                      "cache_control": {"type": "ephemeral"}}]
+    cached_tools = [dict(t) for t in tool_specs]
+    if cached_tools:
+        cached_tools[-1] = {**cached_tools[-1],
+                            "cache_control": {"type": "ephemeral"}}
+    cached_messages = _stamp_last_message_cache(phase_messages)
     try:
         resp = await client.create(
-            system=_SYSTEM,
-            messages=phase_messages,
-            tools=tool_specs,
+            system=system_blocks,
+            messages=cached_messages,
+            tools=cached_tools,
             max_tokens=2048,
         )
     except Exception as ex:  # noqa: BLE001
