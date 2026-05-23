@@ -6,9 +6,8 @@ import com.aiops.api.domain.skill.ExecutionLogEntity;
 import com.aiops.api.domain.skill.ExecutionLogRepository;
 import com.aiops.api.domain.skill.SkillDocumentEntity;
 import com.aiops.api.domain.skill.SkillRunEntity;
+import com.aiops.api.common.JsonUtils;
 import com.aiops.api.scheduler.SchedulerHttpClient;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -47,7 +46,6 @@ import java.util.concurrent.atomic.AtomicLong;
 @Service
 public class SkillAlarmEmitter {
 
-	private static final TypeReference<Map<String, Object>> JSON_MAP_TYPE = new TypeReference<>() {};
 	private static final Duration ALARM_DEDUP_WINDOW = Duration.ofHours(1);
 	private static final String ALARM_TRIGGER_EVENT_PATROL = "patrol_check";
 
@@ -170,7 +168,7 @@ public class SkillAlarmEmitter {
 
 		// Severity from trigger_config.severity if present; default MEDIUM
 		String severity = "MEDIUM";
-		Map<String, Object> trig = parseJsonObject(skill.getTriggerConfig());
+		Map<String, Object> trig = JsonUtils.parseObject(mapper, skill.getTriggerConfig());
 		Object sev = trig.get("severity");
 		if (sev != null && !String.valueOf(sev).isBlank()) {
 			severity = String.valueOf(sev).toUpperCase();
@@ -191,7 +189,7 @@ public class SkillAlarmEmitter {
 		// intent in confirm_check.description (e.g. "5次中超過3次OOC")
 		// — surface that as the headline so the trigger banner is
 		// human-readable.
-		Map<String, Object> confirmCheckCfg = parseJsonObject(skill.getConfirmCheck());
+		Map<String, Object> confirmCheckCfg = JsonUtils.parseObject(mapper, skill.getConfirmCheck());
 		Object confirmDesc = confirmCheckCfg.get("description");
 		StringBuilder summary = new StringBuilder();
 		if (confirmDesc != null && !String.valueOf(confirmDesc).isBlank()) {
@@ -218,7 +216,7 @@ public class SkillAlarmEmitter {
 			exec.setSkillId(skill.getId());
 			exec.setTriggeredBy(Boolean.TRUE.equals(run.getIsTest()) ? "manual" : "agent");
 			exec.setStatus("success");
-			exec.setEventContext(safeJson(triggerPayload));
+			exec.setEventContext(JsonUtils.safeWrite(mapper, triggerPayload));
 			exec.setLlmReadableData(buildLlmReadableData(confirmResult, stepResults, summary.toString()));
 			exec.setFinishedAt(OffsetDateTime.now());
 			if (run.getDurationMs() != null) exec.setDurationMs((long) run.getDurationMs());
@@ -376,7 +374,7 @@ public class SkillAlarmEmitter {
 		schema.add(tcSchema);
 		findings.put("_alarm_output_schema", schema);
 
-		return safeJson(findings);
+		return JsonUtils.safeWrite(mapper, findings);
 	}
 
 	// ── Helpers (package-private where tests reach) ────────────────────────
@@ -451,18 +449,4 @@ public class SkillAlarmEmitter {
 		return ALARM_TRIGGER_EVENT_PATROL;
 	}
 
-	private Map<String, Object> parseJsonObject(String json) {
-		if (json == null || json.isBlank()) return Map.of();
-		try {
-			return mapper.readValue(json, JSON_MAP_TYPE);
-		} catch (JsonProcessingException e) {
-			return Map.of();
-		}
-	}
-
-	private String safeJson(Object o) {
-		if (o == null) return null;
-		try { return mapper.writeValueAsString(o); }
-		catch (JsonProcessingException ex) { return null; }
-	}
 }

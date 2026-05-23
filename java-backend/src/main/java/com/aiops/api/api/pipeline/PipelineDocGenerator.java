@@ -1,5 +1,6 @@
 package com.aiops.api.api.pipeline;
 
+import com.aiops.api.common.JsonUtils;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -45,7 +46,7 @@ public class PipelineDocGenerator {
 		List<String> whenToUse = new ArrayList<>();
 		for (Map<String, Object> n : nodes) {
 			String bid = String.valueOf(n.getOrDefault("block_id", ""));
-			Map<String, Object> params = asMap(n.get("params"));
+			Map<String, Object> params = JsonUtils.asMap(n.get("params"));
 			switch (bid) {
 				case "block_threshold" -> {
 					String col = String.valueOf(params.getOrDefault("column", "?"));
@@ -175,8 +176,4 @@ public class PipelineDocGenerator {
 		return out;
 	}
 
-	@SuppressWarnings("unchecked")
-	private static Map<String, Object> asMap(Object o) {
-		return (o instanceof Map<?, ?> m) ? (Map<String, Object>) m : Map.of();
-	}
 }

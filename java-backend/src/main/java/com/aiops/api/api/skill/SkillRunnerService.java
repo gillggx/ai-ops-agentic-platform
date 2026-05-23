@@ -1,6 +1,7 @@
 package com.aiops.api.api.skill;
 
 import com.aiops.api.auth.AuthPrincipal;
+import com.aiops.api.common.JsonUtils;
 import com.aiops.api.domain.alarm.AlarmEntity;
 import com.aiops.api.domain.skill.SkillDocumentEntity;
 import com.aiops.api.domain.skill.SkillDocumentRepository;
@@ -48,7 +49,6 @@ import java.util.Map;
 @Service
 public class SkillRunnerService {
 
-	private static final TypeReference<List<Map<String, Object>>> JSON_LIST_TYPE = new TypeReference<>() {};
 	private static final TypeReference<Map<String, Object>> JSON_MAP_TYPE = new TypeReference<>() {};
 
 	private final SkillDocumentRepository skillRepo;
@@ -106,11 +106,11 @@ public class SkillRunnerService {
 		// Fire-and-forget the actual execution on the elastic scheduler so we
 		// can return the Flux immediately. Each step's sidecar call is sync
 		// (block on the Mono) — keeps the per-step ordering explicit.
-		Flux.fromIterable(parseSteps(skill.getSteps()))
+		Flux.fromIterable(JsonUtils.parseListOfObjects(mapper, skill.getSteps()))
 				.publishOn(Schedulers.boundedElastic())
 				.doOnSubscribe(s -> {
 					SkillRunEntity run = createRunRow(skill.getId(), triggerPayload, isTest, triggeredByOverride);
-					sink.tryEmitNext(RunEvent.start(skill.getSlug(), run.getId(), parseSteps(skill.getSteps()).size()));
+					sink.tryEmitNext(RunEvent.start(skill.getSlug(), run.getId(), JsonUtils.parseListOfObjects(mapper, skill.getSteps()).size()));
 					runWithSink(skill, run, triggerPayload, sink, caller);
 				})
 				.subscribe();
@@ -124,13 +124,13 @@ public class SkillRunnerService {
 	                         Sinks.Many<RunEvent> sink,
 	                         AuthPrincipal caller) {
 		long started = System.currentTimeMillis();
-		List<Map<String, Object>> steps = parseSteps(skill.getSteps());
+		List<Map<String, Object>> steps = JsonUtils.parseListOfObjects(mapper, skill.getSteps());
 		List<Map<String, Object>> stepResults = new ArrayList<>();
 
 		// Phase 11 v2 — CONFIRM step (optional gate). If present and fails,
 		// skip the entire CHECKLIST and mark run "skipped_by_confirm" so
 		// downstream materializers don't write an alarm.
-		Map<String, Object> confirmConfig = parseJsonObject(skill.getConfirmCheck());
+		Map<String, Object> confirmConfig = JsonUtils.parseObject(mapper, skill.getConfirmCheck());
 		boolean skipChecklist = false;
 		Map<String, Object> confirmResult = null;
 		if (!confirmConfig.isEmpty()) {
@@ -269,22 +269,6 @@ public class SkillRunnerService {
 
 	// ── Small parsing helpers ──────────────────────────────────────────────
 
-	private List<Map<String, Object>> parseSteps(String json) {
-		try {
-			return mapper.readValue(json == null || json.isBlank() ? "[]" : json, JSON_LIST_TYPE);
-		} catch (JsonProcessingException e) {
-			return List.of();
-		}
-	}
-
-	private Map<String, Object> parseJsonObject(String json) {
-		if (json == null || json.isBlank()) return Map.of();
-		try {
-			return mapper.readValue(json, JSON_MAP_TYPE);
-		} catch (JsonProcessingException e) {
-			return Map.of();
-		}
-	}
 
 	// ── Wire format ────────────────────────────────────────────────────────
 

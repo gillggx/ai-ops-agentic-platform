@@ -2,6 +2,7 @@ package com.aiops.api.api.skill;
 
 import com.aiops.api.auth.AuthPrincipal;
 import com.aiops.api.common.ApiException;
+import com.aiops.api.common.JsonUtils;
 import com.aiops.api.domain.alarm.AlarmEntity;
 import com.aiops.api.domain.alarm.AlarmRepository;
 import com.aiops.api.domain.event.EventTypeRepository;
@@ -306,7 +307,7 @@ public class SkillDocumentService {
         }
         SkillDocumentEntity skill = getBySlug(slug);
 
-        Map<String, Object> trig = parseJson(skill.getTriggerConfig());
+        Map<String, Object> trig = JsonUtils.parseObject(mapper, skill.getTriggerConfig());
         StringBuilder qs = new StringBuilder();
         qs.append("?embed=skill")
           .append("&skill_slug=").append(URLEncoder.encode(slug, StandardCharsets.UTF_8))
@@ -410,7 +411,7 @@ public class SkillDocumentService {
      *  event" tab. system|event → alarms, schedule → past skill_runs. */
     public List<Map<String, Object>> pastEvents(String slug) {
         SkillDocumentEntity skill = getBySlug(slug);
-        Map<String, Object> trig = parseJson(skill.getTriggerConfig());
+        Map<String, Object> trig = JsonUtils.parseObject(mapper, skill.getTriggerConfig());
         String type = String.valueOf(trig.getOrDefault("type", "schedule"));
         List<Map<String, Object>> out = new ArrayList<>();
 
@@ -461,7 +462,7 @@ public class SkillDocumentService {
                 meta.put("time", r.getTriggeredAt() != null ? r.getTriggeredAt().toString() : null);
                 meta.put("outcome", r.getStatus());
                 tc.put("meta", meta);
-                tc.put("payload", parseJson(r.getTriggerPayload()));
+                tc.put("payload", JsonUtils.parseObject(mapper, r.getTriggerPayload()));
                 out.add(tc);
             }
         }
@@ -502,15 +503,6 @@ public class SkillDocumentService {
             // Bad JSON in trigger_config → can't derive; let caller fall back.
             log.debug("stageFromTrigger: parse failed for trigger_config — {}", ex.toString());
             return null;
-        }
-    }
-
-    Map<String, Object> parseJson(String json) {
-        if (json == null || json.isBlank()) return Map.of();
-        try {
-            return mapper.readValue(json, MAP_TYPE);
-        } catch (JsonProcessingException e) {
-            return Map.of();
         }
     }
 
@@ -648,7 +640,7 @@ public class SkillDocumentService {
     private Long lookupSlotPipelineId(SkillDocumentEntity skill, String slot) {
         Long candidate = null;
         if ("confirm".equals(slot)) {
-            Map<String, Object> cc = parseJson(skill.getConfirmCheck());
+            Map<String, Object> cc = JsonUtils.parseObject(mapper, skill.getConfirmCheck());
             Object pid = cc.get("pipeline_id");
             candidate = (pid instanceof Number n) ? n.longValue() : null;
         } else if (slot.startsWith("step:") && !"step:NEW".equalsIgnoreCase(slot)) {

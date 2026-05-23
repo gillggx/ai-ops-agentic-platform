@@ -7,8 +7,8 @@ import com.aiops.api.domain.patrol.AutoPatrolRepository;
 import com.aiops.api.domain.pipeline.PipelineAutoCheckTriggerEntity;
 import com.aiops.api.domain.pipeline.PipelineAutoCheckTriggerRepository;
 import com.aiops.api.domain.skill.SkillDocumentEntity;
+import com.aiops.api.common.JsonUtils;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -34,8 +34,6 @@ import java.util.Map;
 @Service
 public class SkillMaterializeService {
 
-    private static final TypeReference<List<Map<String, Object>>> JSON_LIST_TYPE = new TypeReference<>() {};
-    private static final TypeReference<Map<String, Object>> JSON_MAP_TYPE = new TypeReference<>() {};
 
     private final ObjectMapper mapper;
     private final AutoPatrolRepository patrolRepo;
@@ -58,7 +56,7 @@ public class SkillMaterializeService {
         // Always wipe prior materialization first to keep state idempotent.
         clear(skill);
 
-        Map<String, Object> trig = parseMap(skill.getTriggerConfig());
+        Map<String, Object> trig = JsonUtils.parseObject(mapper, skill.getTriggerConfig());
         String type = String.valueOf(trig.getOrDefault("type", ""));
         if (type.isBlank()) {
             log.warn("skill {} publish: trigger.type missing — nothing to materialize", skill.getSlug());
@@ -76,7 +74,7 @@ public class SkillMaterializeService {
                     skill.getSlug());
         }
 
-        List<Map<String, Object>> steps = parseList(skill.getSteps());
+        List<Map<String, Object>> steps = JsonUtils.parseListOfObjects(mapper, skill.getSteps());
         int materialized = 0;
         for (Map<String, Object> step : steps) {
             Number pidNum = (Number) step.get("pipeline_id");
@@ -180,21 +178,6 @@ public class SkillMaterializeService {
 
     // ── Helpers ────────────────────────────────────────────────────────────
 
-    private Map<String, Object> parseMap(String json) {
-        try {
-            return json == null || json.isBlank() ? Map.of() : mapper.readValue(json, JSON_MAP_TYPE);
-        } catch (JsonProcessingException e) {
-            return Map.of();
-        }
-    }
-
-    private List<Map<String, Object>> parseList(String json) {
-        try {
-            return json == null || json.isBlank() ? List.of() : mapper.readValue(json, JSON_LIST_TYPE);
-        } catch (JsonProcessingException e) {
-            return List.of();
-        }
-    }
 
     private String computeCron(Map<String, Object> trig) {
         Object cron = trig.get("cron");

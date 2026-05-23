@@ -2,6 +2,7 @@ package com.aiops.api.api.pipeline;
 
 import com.aiops.api.auth.AuthPrincipal;
 import com.aiops.api.common.ApiException;
+import com.aiops.api.common.JsonUtils;
 import com.aiops.api.domain.pipeline.PipelineAutoCheckTriggerEntity;
 import com.aiops.api.domain.pipeline.PipelineAutoCheckTriggerRepository;
 import com.aiops.api.domain.pipeline.PipelineEntity;
@@ -143,7 +144,7 @@ public class PipelineService {
 		Map<String, Object> payload = parsePipelineJson(src.getPipelineJson());
 		Object metaRaw = payload.get("metadata");
 		Map<String, Object> meta = (metaRaw instanceof Map<?, ?>)
-				? new LinkedHashMap<>(asMap(metaRaw))
+				? new LinkedHashMap<>(JsonUtils.asMap(metaRaw))
 				: new LinkedHashMap<>();
 		meta.put("fork_of", src.getId());
 		meta.put("forked_at", OffsetDateTime.now().toString());
@@ -513,11 +514,6 @@ public class PipelineService {
 			}
 		}
 		return missing;
-	}
-
-	@SuppressWarnings("unchecked")
-	private Map<String, Object> asMap(Object o) {
-		return (o instanceof Map<?, ?>) ? (Map<String, Object>) o : Map.of();
 	}
 
 	private Map<String, Object> parsePipelineJson(String raw) {
