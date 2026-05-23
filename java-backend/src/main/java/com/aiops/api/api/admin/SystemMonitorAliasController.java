@@ -2,17 +2,21 @@ package com.aiops.api.api.admin;
 
 import com.aiops.api.api.skill.SkillRunnerService;
 import com.aiops.api.auth.Authorities;
-import com.aiops.api.config.AiopsProperties;
+import com.aiops.api.domain.agentknowledge.AgentKnowledgeRepository;
 import com.aiops.api.domain.alarm.AlarmRepository;
 import com.aiops.api.domain.audit.AuditLogRepository;
+import com.aiops.api.domain.blockdoc.BlockDocRepository;
 import com.aiops.api.domain.event.GeneratedEventRepository;
 import com.aiops.api.domain.event.NatsEventLogRepository;
+import com.aiops.api.domain.mcp.McpDefinitionRepository;
 import com.aiops.api.domain.patrol.AutoPatrolRepository;
+import com.aiops.api.domain.pipeline.BlockRepository;
 import com.aiops.api.domain.pipeline.PipelineRepository;
+import com.aiops.api.domain.pipeline.PipelineRunRepository;
 import com.aiops.api.domain.skill.ExecutionLogRepository;
 import com.aiops.api.domain.skill.SkillDefinitionRepository;
+import com.aiops.api.domain.skill.SkillRunRepository;
 import com.aiops.api.domain.user.UserRepository;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -20,15 +24,23 @@ import org.springframework.web.reactive.function.client.WebClient;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Path-parity alias for Frontend's {@code /system/monitor} page. The page
- * consumes the JSON directly (no envelope unwrap), so we return a bare
- * object with the exact shape the Next.js page expects:
- *   { timestamp, services, background_tasks: {event_poller, cron_scheduler},
- *     db_stats }
+ * Path-parity alias for Frontend's {@code /system/monitor} page. Returns
+ * the bare JSON shape the Next.js page consumes (no envelope wrap):
+ *   {timestamp, services, background_tasks, db_stats, build_info}
+ *
+ * 2026-05-23: complete audit + rewrite.
+ *  - dropped legacy fastapi-backend:8001 entry (decommissioned 2026-04-25)
+ *  - added aiops-app:8000 + aiops-java-scheduler:8003 (real running units)
+ *  - replaced hardcoded "UP" with per-service /health ping (real status)
+ *  - dropped fetchPollerStats() — the Python event poller is gone; Java
+ *    scheduler now owns event dispatch (see aiops-java-scheduler)
+ *  - extended db_stats: agent_knowledge, pb_blocks, block_docs,
+ *    mcp_definitions, skill_runs, pb_pipeline_runs
  */
 @RestController
 @RequestMapping("/api/v1/system/monitor")
@@ -38,80 +50,106 @@ public class SystemMonitorAliasController {
 	private final UserRepository userRepo;
 	private final AlarmRepository alarmRepo;
 	private final SkillDefinitionRepository skillRepo;
+	private final SkillRunRepository skillRunRepo;
 	private final PipelineRepository pipelineRepo;
+	private final PipelineRunRepository pipelineRunRepo;
 	private final AutoPatrolRepository patrolRepo;
 	private final ExecutionLogRepository execLogRepo;
 	private final GeneratedEventRepository generatedEventRepo;
 	private final NatsEventLogRepository natsLogRepo;
 	private final AuditLogRepository auditRepo;
-	private final AiopsProperties props;
-	private final WebClient legacyClient;
+	private final AgentKnowledgeRepository knowledgeRepo;
+	private final BlockRepository blockRepo;
+	private final BlockDocRepository blockDocRepo;
+	private final McpDefinitionRepository mcpRepo;
 	private final SkillRunnerService skillRunner;
 
-	public SystemMonitorAliasController(UserRepository userRepo, AlarmRepository alarmRepo,
-	                                    SkillDefinitionRepository skillRepo, PipelineRepository pipelineRepo,
-	                                    AutoPatrolRepository patrolRepo, ExecutionLogRepository execLogRepo,
+	/** Cached WebClient — health pings reuse it across requests instead of
+	 *  re-instantiating per call (per-call clients leak connection pools). */
+	private static final WebClient HEALTH_CLIENT = WebClient.builder().build();
+	private static final Duration HEALTH_TIMEOUT = Duration.ofSeconds(2);
+
+	public SystemMonitorAliasController(UserRepository userRepo,
+	                                    AlarmRepository alarmRepo,
+	                                    SkillDefinitionRepository skillRepo,
+	                                    SkillRunRepository skillRunRepo,
+	                                    PipelineRepository pipelineRepo,
+	                                    PipelineRunRepository pipelineRunRepo,
+	                                    AutoPatrolRepository patrolRepo,
+	                                    ExecutionLogRepository execLogRepo,
 	                                    GeneratedEventRepository generatedEventRepo,
 	                                    NatsEventLogRepository natsLogRepo,
 	                                    AuditLogRepository auditRepo,
-	                                    AiopsProperties props,
-	                                    SkillRunnerService skillRunner,
-	                                    @Value("${aiops.legacy-backend-url:http://127.0.0.1:8001}") String legacyBackendUrl) {
+	                                    AgentKnowledgeRepository knowledgeRepo,
+	                                    BlockRepository blockRepo,
+	                                    BlockDocRepository blockDocRepo,
+	                                    McpDefinitionRepository mcpRepo,
+	                                    SkillRunnerService skillRunner) {
 		this.userRepo = userRepo;
 		this.alarmRepo = alarmRepo;
 		this.skillRepo = skillRepo;
+		this.skillRunRepo = skillRunRepo;
 		this.pipelineRepo = pipelineRepo;
+		this.pipelineRunRepo = pipelineRunRepo;
 		this.patrolRepo = patrolRepo;
 		this.execLogRepo = execLogRepo;
 		this.generatedEventRepo = generatedEventRepo;
 		this.natsLogRepo = natsLogRepo;
 		this.auditRepo = auditRepo;
-		this.props = props;
+		this.knowledgeRepo = knowledgeRepo;
+		this.blockRepo = blockRepo;
+		this.blockDocRepo = blockDocRepo;
+		this.mcpRepo = mcpRepo;
 		this.skillRunner = skillRunner;
-		this.legacyClient = WebClient.builder().baseUrl(legacyBackendUrl).build();
 	}
 
 	@GetMapping
 	public Map<String, Object> monitor() {
-		// Frontend compares status to "UP" (uppercase) — keep consistent.
-		Map<String, Object> services = new HashMap<>();
-		services.put("aiops-java-api", Map.of("status", "UP", "port", 8002));
-		services.put("aiops-python-sidecar", Map.of("status", "UP", "port", 8050));
-		services.put("fastapi-backend", Map.of("status", "UP", "port", 8001,
-				"note", "legacy Python; runs event poller + DR engine"));
-		services.put("ontology-simulator", Map.of("status", "UP", "port", 8012));
+		// ── Service health (real ping, not hardcoded) ────────────────────
+		// LinkedHashMap so frontend renders in a predictable order.
+		Map<String, Object> services = new LinkedHashMap<>();
+		services.put("aiops-app",             probe(8000, "/api/health"));
+		services.put("aiops-java-api",        probe(8002, "/actuator/health"));
+		services.put("aiops-java-scheduler",  probe(8003, "/actuator/health"));
+		services.put("aiops-python-sidecar",  probe(8050, "/health"));
+		services.put("ontology-simulator",    probe(8012, "/api/v1/tools"));
 
-		// Poller stats — fetch from Python :8001 where the poller actually
-		// runs. Fall back to a grey-EXTERNAL stub if Python is unreachable.
-		Map<String, Object> poller = fetchPollerStats();
-
+		// ── Background tasks ─────────────────────────────────────────────
+		// event_poller was Python-side and is gone (Java scheduler owns
+		// dispatch now); cron_scheduler is also Java now. SkillRunner
+		// in-memory counters surface alarm-emit activity.
+		Map<String, Object> bg = new HashMap<>();
 		Map<String, Object> scheduler = new HashMap<>();
 		scheduler.put("status", "JAVA");
-		scheduler.put("jobs", List.of());
+		scheduler.put("note", "aiops-java-scheduler unit handles cron + event dispatch");
+		bg.put("cron_scheduler", scheduler);
+		bg.put("skill_runner", skillRunner.alarmEmitStats());
 
-		Map<String, Object> dbStats = new HashMap<>();
+		// ── DB stats ─────────────────────────────────────────────────────
+		Map<String, Object> dbStats = new LinkedHashMap<>();
+		// Core domain
 		dbStats.put("users", userRepo.count());
 		dbStats.put("alarms", alarmRepo.count());
+		dbStats.put("audit_logs", auditRepo.count());
+		// Skill / pipeline domain
 		dbStats.put("skills", skillRepo.count());
+		dbStats.put("skill_runs", skillRunRepo.count());
 		dbStats.put("pipelines", pipelineRepo.count());
-		dbStats.put("auto_patrols", patrolRepo.count());
+		dbStats.put("pb_pipeline_runs", pipelineRunRepo.count());
 		dbStats.put("execution_logs", execLogRepo.count());
+		// Block / MCP / Knowledge — the libraries agent reads from
+		dbStats.put("pb_blocks", blockRepo.count());
+		dbStats.put("block_docs", blockDocRepo.count());
+		dbStats.put("mcp_definitions", mcpRepo.count());
+		dbStats.put("agent_knowledge", knowledgeRepo.count());
+		// Patrol / event infrastructure
+		dbStats.put("auto_patrols", patrolRepo.count());
 		dbStats.put("generated_events", generatedEventRepo.count());
 		dbStats.put("nats_event_logs", natsLogRepo.count());
-		dbStats.put("audit_logs", auditRepo.count());
 
-		// v30.13b (2026-05-17) — surface SkillRunner alarm-emit activity so
-		// operators can see WHY Alarm Center has / hasn't been populating.
-		// Counters are in-memory; reset on JVM restart.
-		Map<String, Object> skillRunnerStats = skillRunner.alarmEmitStats();
-
-		Map<String, Object> out = new HashMap<>();
+		Map<String, Object> out = new LinkedHashMap<>();
 		out.put("timestamp", Instant.now().toString());
 		out.put("services", services);
-		Map<String, Object> bg = new HashMap<>();
-		bg.put("event_poller", poller);
-		bg.put("cron_scheduler", scheduler);
-		bg.put("skill_runner", skillRunnerStats);
 		out.put("background_tasks", bg);
 		out.put("db_stats", dbStats);
 		out.put("build_info", Map.of("backend", "java-spring-boot-3.5",
@@ -119,55 +157,26 @@ public class SystemMonitorAliasController {
 		return out;
 	}
 
-	private static final org.slf4j.Logger log =
-			org.slf4j.LoggerFactory.getLogger(SystemMonitorAliasController.class);
-
-	/** Fetch poller runtime stats from the legacy Python backend. */
-	@SuppressWarnings("unchecked")
-	private Map<String, Object> fetchPollerStats() {
-		String secret = props.auth() != null ? props.auth().sharedSecretToken() : null;
-		Map<String, Object> stub = new HashMap<>();
-		stub.put("status", "UNREACHABLE");
-		stub.put("started_at", null);
-		stub.put("last_poll_at", null);
-		stub.put("last_seen_event", null);
-		stub.put("total_polls", 0);
-		stub.put("total_events_processed", 0);
-		stub.put("ooc_detected", 0);
-		stub.put("skills_triggered", 0);
-		stub.put("errors", 0);
-
-		if (secret == null || secret.isBlank()) {
-			log.warn("poller-stats: no shared-secret configured");
-			return stub;
-		}
+	/** Probe a service's health endpoint on localhost. Returns
+	 *  {status: "UP"|"DOWN", port, ...} consumed by frontend status badge.
+	 *  Any non-2xx, timeout, or connection error → DOWN. */
+	private static Map<String, Object> probe(int port, String path) {
+		Map<String, Object> out = new HashMap<>();
+		out.put("port", port);
 		try {
-			Map<String, Object> pyResp = legacyClient.get()
-					.uri("/api/v1/system/monitor")
-					.header("Authorization", "Bearer " + secret)
+			HEALTH_CLIENT.get()
+					.uri("http://127.0.0.1:" + port + path)
 					.retrieve()
-					.bodyToMono(Map.class)
-					.timeout(Duration.ofSeconds(3))
+					.toBodilessEntity()
+					.timeout(HEALTH_TIMEOUT)
 					.block();
-			if (pyResp == null) {
-				log.warn("poller-stats: Python returned null");
-				return stub;
-			}
-			log.debug("poller-stats: pyResp keys={}", pyResp.keySet());
-			// Python returns a bare {timestamp, services, background_tasks, db_stats};
-			// no {ok, data} envelope here.
-			Object tasks = pyResp.get("background_tasks");
-			if (!(tasks instanceof Map)) {
-				log.warn("poller-stats: no background_tasks in Python response (keys={})", pyResp.keySet());
-				return stub;
-			}
-			Object p = ((Map<String, Object>) tasks).get("event_poller");
-			if (p instanceof Map) return (Map<String, Object>) p;
-			log.warn("poller-stats: no event_poller in background_tasks");
-			return stub;
-		} catch (Exception e) {
-			log.warn("poller-stats fetch failed: {}", e.toString());
-			return stub;
+			out.put("status", "UP");
+		} catch (Exception ex) {
+			out.put("status", "DOWN");
+			// Truncate to keep payload small; full trace lives in journalctl
+			out.put("error", ex.getClass().getSimpleName() + ": "
+					+ String.valueOf(ex.getMessage()).split("\n")[0]);
 		}
+		return out;
 	}
 }
