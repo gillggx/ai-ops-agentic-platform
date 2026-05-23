@@ -3,9 +3,7 @@ package com.aiops.api.api;
 import com.aiops.api.auth.Role;
 import com.aiops.api.auth.UserAccountService;
 import com.aiops.api.domain.agent.AgentToolRepository;
-import com.aiops.api.domain.mcp.DataSubjectRepository;
 import com.aiops.api.domain.mcp.McpDefinitionRepository;
-import com.aiops.api.domain.mcp.MockDataSourceRepository;
 import com.aiops.api.domain.user.UserRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -31,9 +29,7 @@ class Phase3cIntegrationTest {
 	@Autowired MockMvc mvc;
 	@Autowired UserRepository userRepo;
 	@Autowired UserAccountService userAccountService;
-	@Autowired DataSubjectRepository dsRepo;
 	@Autowired McpDefinitionRepository mcpRepo;
-	@Autowired MockDataSourceRepository mockRepo;
 	@Autowired AgentToolRepository toolRepo;
 	@Autowired ObjectMapper om;
 
@@ -56,26 +52,6 @@ class Phase3cIntegrationTest {
 				.andExpect(status().isOk())
 				.andReturn().getResponse().getContentAsString();
 		return om.readTree(body).at("/data/access_token").asText();
-	}
-
-	@Test
-	void dataSubjectPeCrud() throws Exception {
-		String name = "phase3c_ds_" + System.nanoTime();
-		String body = "{\"name\":\"" + name + "\",\"description\":\"ds\"}";
-		String res = mvc.perform(post("/api/v1/data-subjects")
-						.header("Authorization", "Bearer " + peToken)
-						.contentType(MediaType.APPLICATION_JSON).content(body))
-				.andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
-		Long id = om.readTree(res).at("/data/id").asLong();
-
-		try {
-			// PE cannot delete (admin only)
-			mvc.perform(delete("/api/v1/data-subjects/" + id)
-							.header("Authorization", "Bearer " + peToken))
-					.andExpect(status().isForbidden());
-		} finally {
-			dsRepo.findById(id).ifPresent(dsRepo::delete);
-		}
 	}
 
 	@Test
@@ -119,12 +95,5 @@ class Phase3cIntegrationTest {
 		} finally {
 			toolRepo.findById(peToolId).ifPresent(toolRepo::delete);
 		}
-	}
-
-	@Test
-	void mockDataSourceListReadable() throws Exception {
-		mvc.perform(get("/api/v1/mock-data-sources")
-						.header("Authorization", "Bearer " + peToken))
-				.andExpect(status().isOk());
 	}
 }

@@ -21,9 +21,13 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Phase 1 Smoke Test — exercises every repository with a basic count() query
+ * Smoke Test — exercises every live repository with a basic count() query
  * to prove the full JPA stack (entity mapping → Hibernate → Postgres) works
- * end-to-end for all 29 domain entities.
+ * end-to-end for all domain entities.
+ *
+ * <p>2026-05-23: trimmed from 29 → 23 repos after dead-code purge removed
+ * DataSubject / MockDataSource / ScriptVersion / CronJob / AgentMemory /
+ * AgentExperienceMemory entities.
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -38,22 +42,16 @@ class RepositorySmokeTest {
 	@Autowired GeneratedEventRepository generatedEventRepo;
 	@Autowired NatsEventLogRepository natsEventLogRepo;
 	// --- mcp/ ---
-	@Autowired DataSubjectRepository dataSubjectRepo;
 	@Autowired McpDefinitionRepository mcpDefinitionRepo;
-	@Autowired MockDataSourceRepository mockDataSourceRepo;
 	// --- alarm/ ---
 	@Autowired AlarmRepository alarmRepo;
 	// --- skill/ ---
 	@Autowired SkillDefinitionRepository skillRepo;
-	@Autowired ScriptVersionRepository scriptVersionRepo;
 	@Autowired RoutineCheckRepository routineCheckRepo;
-	@Autowired CronJobRepository cronJobRepo;
 	@Autowired ExecutionLogRepository executionLogRepo;
 	@Autowired FeedbackLogRepository feedbackLogRepo;
 	// --- agent/ ---
 	@Autowired AgentDraftRepository agentDraftRepo;
-	@Autowired AgentMemoryRepository agentMemoryRepo;
-	@Autowired AgentExperienceMemoryRepository agentExperienceMemoryRepo;
 	@Autowired AgentSessionRepository agentSessionRepo;
 	@Autowired AgentToolRepository agentToolRepo;
 	// --- pipeline/ ---
@@ -69,20 +67,20 @@ class RepositorySmokeTest {
 	@Autowired SystemParameterRepository systemParameterRepo;
 
 	@Test
-	@DisplayName("All 29 repositories are wired and can query their table")
-	void all29RepositoriesCanCount() {
+	@DisplayName("All live repositories are wired and can query their table")
+	void allLiveRepositoriesCanCount() {
 		List<JpaRepository<?, ?>> all = List.of(
 				userRepo, userPreferenceRepo, itemRepo,
 				eventTypeRepo, generatedEventRepo, natsEventLogRepo,
-				dataSubjectRepo, mcpDefinitionRepo, mockDataSourceRepo,
+				mcpDefinitionRepo,
 				alarmRepo,
-				skillRepo, scriptVersionRepo, routineCheckRepo, cronJobRepo, executionLogRepo, feedbackLogRepo,
-				agentDraftRepo, agentMemoryRepo, agentExperienceMemoryRepo, agentSessionRepo, agentToolRepo,
+				skillRepo, routineCheckRepo, executionLogRepo, feedbackLogRepo,
+				agentDraftRepo, agentSessionRepo, agentToolRepo,
 				blockRepo, pipelineRepo, pipelineRunRepo, canvasOperationRepo, publishedSkillRepo, pipelineAutoCheckRepo,
 				autoPatrolRepo,
 				systemParameterRepo);
 
-		assertThat(all).hasSize(29);
+		assertThat(all).hasSize(23);
 		for (JpaRepository<?, ?> r : all) {
 			long count = r.count();
 			assertThat(count).isGreaterThanOrEqualTo(0L);
