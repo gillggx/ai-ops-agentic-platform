@@ -2,15 +2,11 @@ package com.aiops.api.api.skill;
 
 import com.aiops.api.domain.alarm.AlarmEntity;
 import com.aiops.api.domain.alarm.AlarmRepository;
-import com.aiops.api.domain.pipeline.PipelineRepository;
 import com.aiops.api.domain.skill.ExecutionLogEntity;
 import com.aiops.api.domain.skill.ExecutionLogRepository;
 import com.aiops.api.domain.skill.SkillDocumentEntity;
-import com.aiops.api.domain.skill.SkillDocumentRepository;
 import com.aiops.api.domain.skill.SkillRunEntity;
-import com.aiops.api.domain.skill.SkillRunRepository;
 import com.aiops.api.scheduler.SchedulerHttpClient;
-import com.aiops.api.sidecar.PythonSidecarClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,40 +38,36 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * v30.13b — comprehensive coverage of SkillRunnerService alarm-emit path.
+ * v30.13b — comprehensive coverage of SkillAlarmEmitter (formerly part of
+ * SkillRunnerService, extracted 2026-05-23 in Phase 12 OOP refactor).
  *
  * Targets:
- *   - emitAlarmIfTriggered: every guard branch + happy path + dedup
+ *   - emitIfTriggered: every guard branch + happy path + dedup
  *   - parseEvidenceTimestamp: 4 input shapes
  *   - pickFirstEvidenceRow: tolerant parsing
  *   - deriveTriggerEvent: schedule vs event
- *   - alarmEmitStats: snapshot fidelity
+ *   - stats: snapshot fidelity
  *
  * Strategy: pure Mockito (no Spring context) — fast, deterministic. The
- * runWithSink() integration path is not unit-tested here; emit logic is
- * isolated in emitAlarmIfTriggered which IS unit-tested. End-to-end is
- * exercised by the live deploy verification (see commit log of v30.13b).
+ * orchestrator's runWithSink() integration path is not unit-tested here;
+ * emit logic is isolated in emitIfTriggered which IS unit-tested.
+ * End-to-end is exercised by the live deploy verification.
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
-class SkillRunnerServiceTest {
+class SkillAlarmEmitterTest {
 
-    @Mock SkillDocumentRepository skillRepo;
-    @Mock SkillRunRepository runRepo;
-    @Mock PipelineRepository pipelineRepo;
-    @Mock PythonSidecarClient sidecar;
     @Mock AlarmRepository alarmRepo;
     @Mock ExecutionLogRepository execLogRepo;
     @Mock SchedulerHttpClient scheduler;
 
     private ObjectMapper mapper;
-    private SkillRunnerService service;
+    private SkillAlarmEmitter service;
 
     @BeforeEach
     void setup() {
         mapper = new ObjectMapper();
-        service = new SkillRunnerService(skillRepo, runRepo, pipelineRepo,
-                sidecar, mapper, alarmRepo, execLogRepo, scheduler);
+        service = new SkillAlarmEmitter(alarmRepo, execLogRepo, scheduler, mapper);
         // v30.15: execLogRepo.save returns entity with id assigned; default
         // for tests so existing emit tests still pass without per-test setup.
         when(execLogRepo.save(any(ExecutionLogEntity.class))).thenAnswer(inv -> {
@@ -93,7 +85,7 @@ class SkillRunnerServiceTest {
 
         @Test
         void isoWithOffset() {
-            OffsetDateTime t = SkillRunnerService.parseEvidenceTimestamp(
+            OffsetDateTime t = SkillAlarmEmitter.parseEvidenceTimestamp(
                     "2026-05-17T00:21:13.505000+00:00");
             assertThat(t).isNotNull();
             assertThat(t.getYear()).isEqualTo(2026);
@@ -102,7 +94,7 @@ class SkillRunnerServiceTest {
 
         @Test
         void isoNoOffsetAssumedUtc() {
-            OffsetDateTime t = SkillRunnerService.parseEvidenceTimestamp(
+            OffsetDateTime t = SkillAlarmEmitter.parseEvidenceTimestamp(
                     "2026-05-17T00:21:13.505000");
             assertThat(t).isNotNull();
             assertThat(t.getOffset()).isEqualTo(ZoneOffset.UTC);
@@ -112,7 +104,7 @@ class SkillRunnerServiceTest {
 
         @Test
         void isoNoFractionNoOffset() {
-            OffsetDateTime t = SkillRunnerService.parseEvidenceTimestamp(
+            OffsetDateTime t = SkillAlarmEmitter.parseEvidenceTimestamp(
                     "2026-05-17T00:21:13");
             assertThat(t).isNotNull();
             assertThat(t.getOffset()).isEqualTo(ZoneOffset.UTC);
@@ -121,27 +113,27 @@ class SkillRunnerServiceTest {
 
         @Test
         void nullStringReturnsNull() {
-            assertThat(SkillRunnerService.parseEvidenceTimestamp(null)).isNull();
+            assertThat(SkillAlarmEmitter.parseEvidenceTimestamp(null)).isNull();
         }
 
         @Test
         void emptyStringReturnsNull() {
-            assertThat(SkillRunnerService.parseEvidenceTimestamp("")).isNull();
+            assertThat(SkillAlarmEmitter.parseEvidenceTimestamp("")).isNull();
         }
 
         @Test
         void blankStringReturnsNull() {
-            assertThat(SkillRunnerService.parseEvidenceTimestamp("   ")).isNull();
+            assertThat(SkillAlarmEmitter.parseEvidenceTimestamp("   ")).isNull();
         }
 
         @Test
         void literalNullStringReturnsNull() {
-            assertThat(SkillRunnerService.parseEvidenceTimestamp("null")).isNull();
+            assertThat(SkillAlarmEmitter.parseEvidenceTimestamp("null")).isNull();
         }
 
         @Test
         void unparseableGarbageReturnsNull() {
-            assertThat(SkillRunnerService.parseEvidenceTimestamp("not-a-date")).isNull();
+            assertThat(SkillAlarmEmitter.parseEvidenceTimestamp("not-a-date")).isNull();
         }
     }
 
@@ -267,7 +259,7 @@ class SkillRunnerServiceTest {
 
         @Test
         void initialStateAllZeroAndNull() {
-            Map<String, Object> s = service.alarmEmitStats();
+            Map<String, Object> s = service.stats();
             assertThat(s).containsEntry("alarms_emitted", 0L);
             assertThat(s).containsEntry("alarms_dedup_suppressed", 0L);
             assertThat(s).containsEntry("last_emit_at", null);
@@ -291,13 +283,13 @@ class SkillRunnerServiceTest {
                 return a;
             });
 
-            AlarmEntity result = service.emitAlarmIfTriggered(skill, run,
+            AlarmEntity result = service.emitIfTriggered(skill, run,
                     Map.of("tool_id", "EQP-02"), confirm, steps, false);
 
             assertThat(result).isNotNull();
             assertThat(result.getId()).isEqualTo(999L);
 
-            Map<String, Object> stats = service.alarmEmitStats();
+            Map<String, Object> stats = service.stats();
             assertThat(stats).containsEntry("alarms_emitted", 1L);
             assertThat(stats).containsEntry("last_alarm_id", 999L);
             assertThat(stats).containsEntry("last_skill", skill.getSlug());
@@ -315,13 +307,13 @@ class SkillRunnerServiceTest {
             when(alarmRepo.existsActiveBySkillAndEquipmentSince(
                     anyLong(), anyString(), any())).thenReturn(true);
 
-            AlarmEntity result = service.emitAlarmIfTriggered(skill, run,
+            AlarmEntity result = service.emitIfTriggered(skill, run,
                     Map.of("tool_id", "EQP-02"), confirm, steps, false);
 
             assertThat(result).isNull();
             verify(alarmRepo, never()).save(any(AlarmEntity.class));
 
-            Map<String, Object> stats = service.alarmEmitStats();
+            Map<String, Object> stats = service.stats();
             assertThat(stats).containsEntry("alarms_emitted", 0L);
             assertThat(stats).containsEntry("alarms_dedup_suppressed", 1L);
         }
@@ -334,7 +326,7 @@ class SkillRunnerServiceTest {
 
         @Test
         void isTestSkipsEmit() {
-            AlarmEntity r = service.emitAlarmIfTriggered(
+            AlarmEntity r = service.emitIfTriggered(
                     patrolSkill(), run(true),
                     Map.of("tool_id", "EQP-02"),
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
@@ -349,7 +341,7 @@ class SkillRunnerServiceTest {
         void diagnoseStageSkipsEmit() {
             SkillDocumentEntity diagnose = patrolSkill();
             diagnose.setStage("diagnose");
-            AlarmEntity r = service.emitAlarmIfTriggered(
+            AlarmEntity r = service.emitIfTriggered(
                     diagnose, run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
@@ -367,7 +359,7 @@ class SkillRunnerServiceTest {
             when(alarmRepo.save(any(AlarmEntity.class))).thenAnswer(inv -> {
                 AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
             });
-            AlarmEntity r = service.emitAlarmIfTriggered(
+            AlarmEntity r = service.emitIfTriggered(
                     skill, run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
@@ -377,7 +369,7 @@ class SkillRunnerServiceTest {
 
         @Test
         void skipChecklistTrueSkipsEmit() {
-            AlarmEntity r = service.emitAlarmIfTriggered(
+            AlarmEntity r = service.emitIfTriggered(
                     patrolSkill(), run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
@@ -388,7 +380,7 @@ class SkillRunnerServiceTest {
 
         @Test
         void noTriggeredStepSkipsEmit() {
-            AlarmEntity r = service.emitAlarmIfTriggered(
+            AlarmEntity r = service.emitIfTriggered(
                     patrolSkill(), run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
@@ -404,7 +396,7 @@ class SkillRunnerServiceTest {
             when(alarmRepo.save(any(AlarmEntity.class))).thenAnswer(inv -> {
                 AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
             });
-            AlarmEntity r = service.emitAlarmIfTriggered(
+            AlarmEntity r = service.emitIfTriggered(
                     patrolSkill(), run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
@@ -429,7 +421,7 @@ class SkillRunnerServiceTest {
 
             SkillDocumentEntity skill = patrolSkill();
             skill.setTriggerConfig("{\"type\":\"schedule\",\"severity\":\"high\"}");
-            AlarmEntity r = service.emitAlarmIfTriggered(
+            AlarmEntity r = service.emitIfTriggered(
                     skill, run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirmWithRow("LOT-001", "STEP_009", "2026-05-17T00:21:13.505000"),
@@ -461,7 +453,7 @@ class SkillRunnerServiceTest {
                 AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
             });
 
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     patrolSkill(), run(false),
                     Map.of(),  // no tool_id
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
@@ -480,7 +472,7 @@ class SkillRunnerServiceTest {
             });
 
             // Trigger payload uses "equipment_id" key instead of "tool_id"
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     patrolSkill(), run(false),
                     Map.of("equipment_id", "EQP-XX"),
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
@@ -501,7 +493,7 @@ class SkillRunnerServiceTest {
             // Confirm without data_views
             Map<String, Object> confirm = Map.of("status", "pass", "note", "n");
             OffsetDateTime before = OffsetDateTime.now().minusSeconds(2);
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     patrolSkill(), run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirm,
@@ -527,7 +519,7 @@ class SkillRunnerServiceTest {
             SkillDocumentEntity skill = patrolSkill();
             skill.setTriggerConfig("{\"type\":\"schedule\"}");  // no severity
 
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     skill, run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
@@ -548,7 +540,7 @@ class SkillRunnerServiceTest {
             SkillDocumentEntity skill = patrolSkill();
             skill.setTriggerConfig("{\"type\":\"event\",\"event\":\"OOC\"}");
 
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     skill, run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
@@ -569,7 +561,7 @@ class SkillRunnerServiceTest {
             SkillDocumentEntity skill = patrolSkill();
             skill.setTitle("x".repeat(500));
 
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     skill, run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
@@ -586,7 +578,7 @@ class SkillRunnerServiceTest {
             when(alarmRepo.save(cap.capture())).thenAnswer(inv -> {
                 AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
             });
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     patrolSkill(), run(false),
                     Map.of("tool_id", "   "),  // blank
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
@@ -605,7 +597,7 @@ class SkillRunnerServiceTest {
             // HashMap allows null value (Map.of does not), test "null" literal string
             Map<String, Object> payload = new HashMap<>();
             payload.put("tool_id", null);
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     patrolSkill(), run(false), payload,
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
                     List.of(stepPass("s1")), false);
@@ -620,7 +612,7 @@ class SkillRunnerServiceTest {
             when(alarmRepo.save(cap.capture())).thenAnswer(inv -> {
                 AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
             });
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     patrolSkill(), run(false), null,
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
                     List.of(stepPass("s1")), false);
@@ -641,7 +633,7 @@ class SkillRunnerServiceTest {
                     "step", "STEP_snake", "event_time", "2026-05-17T00:00:00");
             Map<String, Object> confirm = Map.of("data_views",
                     List.of(Map.of("rows", List.of(row))), "note", "n");
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     patrolSkill(), run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirm, List.of(stepPass("s1")), false);
@@ -663,7 +655,7 @@ class SkillRunnerServiceTest {
             Map<String, Object> confirm = Map.of("data_views",
                     List.of(Map.of("rows", List.of(row))), "note", "n");
             OffsetDateTime before = OffsetDateTime.now().minusSeconds(2);
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     patrolSkill(), run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirm, List.of(stepPass("s1")), false);
@@ -683,7 +675,7 @@ class SkillRunnerServiceTest {
             });
             SkillDocumentEntity skill = patrolSkill();
             skill.setTriggerConfig("{\"type\":\"schedule\",\"severity\":\"  \"}");
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     skill, run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
@@ -708,7 +700,7 @@ class SkillRunnerServiceTest {
             row.put("event_time", null);
             Map<String, Object> confirm = Map.of("data_views",
                     List.of(Map.of("rows", List.of(row))), "note", "x");
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     patrolSkill(), run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirm, List.of(stepPass("s1")), false);
@@ -727,7 +719,7 @@ class SkillRunnerServiceTest {
             });
             SkillDocumentEntity skill = patrolSkill();
             skill.setTitle(null);  // force fallback to slug
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     skill, run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
@@ -749,7 +741,7 @@ class SkillRunnerServiceTest {
                     "lotID", "L", "step", "S");
             Map<String, Object> confirm = Map.of("data_views",
                     List.of(Map.of("rows", List.of(row))));  // no "note"
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     patrolSkill(), run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirm, List.of(stepPass("s1")), false);
@@ -766,7 +758,7 @@ class SkillRunnerServiceTest {
             when(alarmRepo.save(cap.capture())).thenAnswer(inv -> {
                 AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
             });
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     patrolSkill(), run(false),
                     Map.of("tool_id", "EQP-02"),
                     null,  // no confirm result at all
@@ -787,7 +779,7 @@ class SkillRunnerServiceTest {
             });
             SkillDocumentEntity skill = patrolSkill();
             skill.setTriggerConfig("");  // empty string
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     skill, run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
@@ -811,7 +803,7 @@ class SkillRunnerServiceTest {
                     List.of(Map.of("eventTime", "2026-05-17T00:00:00",
                                   "lotID", "L", "step", "S")))));
 
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     patrolSkill(), run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirm,
@@ -845,7 +837,7 @@ class SkillRunnerServiceTest {
                 AlarmEntity a = inv.getArgument(0); a.setId(2222L); return a;
             });
 
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     patrolSkill(), run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirmWithRow("LOT-x", "STEP_007", "2026-05-17T01:00:00"),
@@ -885,7 +877,7 @@ class SkillRunnerServiceTest {
             Map<String, Object> confirm = Map.of("data_views", List.of(dv),
                     "note", "2 OOC found", "status", "pass");
 
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     patrolSkill(), run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirm,
@@ -935,7 +927,7 @@ class SkillRunnerServiceTest {
             step.put("step_id", "s1"); step.put("status", "pass");
             step.put("note", "found 3"); step.put("data_views", List.of(stepDv));
 
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     patrolSkill(), run(false),
                     Map.of("tool_id", "EQP-02"),
                     null,  // no confirm
@@ -991,7 +983,7 @@ class SkillRunnerServiceTest {
                 AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
             });
 
-            AlarmEntity r = service.emitAlarmIfTriggered(
+            AlarmEntity r = service.emitIfTriggered(
                     patrolSkill(), run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
@@ -1022,7 +1014,7 @@ class SkillRunnerServiceTest {
             Map<String, Object> dv = Map.of("rows", List.of(row), "columns", manyCols);
             Map<String, Object> confirm = Map.of("data_views", List.of(dv), "note", "n");
 
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     patrolSkill(), run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirm,
@@ -1047,7 +1039,7 @@ class SkillRunnerServiceTest {
                 AlarmEntity a = inv.getArgument(0); a.setId(5555L); return a;
             });
 
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     patrolSkill(), run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
@@ -1066,7 +1058,7 @@ class SkillRunnerServiceTest {
             org.mockito.Mockito.doThrow(new RuntimeException("scheduler down"))
                     .when(scheduler).dispatchAlarm(any());
 
-            AlarmEntity r = service.emitAlarmIfTriggered(
+            AlarmEntity r = service.emitIfTriggered(
                     patrolSkill(), run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
@@ -1079,7 +1071,7 @@ class SkillRunnerServiceTest {
 
         @Test
         void noDispatchWhenGuardRejects_isTest() {
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     patrolSkill(), run(true),  // is_test
                     Map.of("tool_id", "EQP-02"),
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
@@ -1091,7 +1083,7 @@ class SkillRunnerServiceTest {
         void noDispatchWhenGuardRejects_dedup() {
             when(alarmRepo.existsActiveBySkillAndEquipmentSince(
                     anyLong(), anyString(), any())).thenReturn(true);
-            service.emitAlarmIfTriggered(
+            service.emitIfTriggered(
                     patrolSkill(), run(false),
                     Map.of("tool_id", "EQP-02"),
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
