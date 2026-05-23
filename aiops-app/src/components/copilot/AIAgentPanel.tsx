@@ -1019,14 +1019,10 @@ export function AIAgentPanel({
             if (renderHint) parts.push(`[${renderHint}]`);
             addLog(makeLog("✅", parts.join(" "), "tool"));
             const card = ev.render_card as Record<string, unknown> | undefined;
-            if (card?.type === "draft" && card.draft_type === "mcp") {
-              const autoFill = (card.auto_fill ?? {}) as Record<string, unknown>;
-              // Stash for cross-page navigation (admin/mcps reads sessionStorage on mount)
-              try { sessionStorage.setItem("admin:fill_mcp_draft", JSON.stringify(autoFill)); } catch { /* ignore */ }
-              // Fire immediately if listener is already mounted (same-page copilot)
-              window.dispatchEvent(new CustomEvent("admin:fill_mcp", { detail: autoFill }));
-              addLog(makeLog("📋", `MCP 草稿已備妥 — 前往 MCP Builder 自動填表`, "info"));
-            } else if (card?.type === "navigate") {
+            // 2026-05-23: dropped "draft mcp" handling — /admin/mcps page
+            // removed in dead-code cleanup; no listener for the
+            // admin:fill_mcp event / sessionStorage stash remains.
+            if (card?.type === "navigate") {
               const target = card.target as string | undefined;
               if (target) window.location.href = target;
             } else if (card?.type === "mcp") {

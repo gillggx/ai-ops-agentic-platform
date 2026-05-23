@@ -71,10 +71,6 @@ const KNOWLEDGE_ITEMS = [
 ];
 
 const ADMIN_ITEMS = [
-  // Phase 11 v6: Triggers Overview retained as read-only audit; "Skills"
-  // (Phase 9 chat-skill admin page at /system/skills) is hidden — the
-  // new Skill Library at /skills replaces it.
-  { href: "/admin/triggers",          label: "Triggers Overview", icon: "🔔" },
   { href: "/admin/build-traces",      label: "Build Traces",      icon: "📜" },
   { href: "/admin/block-docs",        label: "Block Docs",        icon: "📖" },
   { href: "/system/data-sources",     label: "Data Sources",      icon: "🗄️" },

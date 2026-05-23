@@ -309,21 +309,6 @@ export default function AutoPatrolsPage() {
     }).catch(() => {});
   }, []);
 
-  // Deep-link from /admin/triggers: ?new=1 → auto-open create modal once.
-  // Next.js 15: useSearchParams() forces a Suspense boundary at prerender
-  // time. Since this whole page is "use client" we don't get one for free,
-  // so read from window.location directly — runs post-mount, CSR-safe.
-  const autoOpenedRef = useRef(false);
-  useEffect(() => {
-    if (autoOpenedRef.current) return;
-    if (typeof window === "undefined") return;
-    const qs = new URLSearchParams(window.location.search);
-    if (qs.get("new") === "1") {
-      autoOpenedRef.current = true;
-      openCreate();
-    }
-  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
-
   // ── Modal helpers ─────────────────────────────────────────────────────────
 
   function openCreate() {
