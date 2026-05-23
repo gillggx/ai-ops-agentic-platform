@@ -296,8 +296,14 @@ def _columns_for_block_port(
         group_by = (params.get("group_by") or "").strip()
         if group_by:
             cols.extend([g.strip() for g in group_by.split(",") if g.strip()])
-        agg_col = params.get("agg_column")
-        agg_fn = params.get("agg_func")
+        # 2026-05-23: dual-accept new (column/aggregate) + legacy
+        # (agg_column/agg_func) param names — mirrors executor's
+        # accept-both logic from commit 9843bf0 (2026-05-20). Without this
+        # the validator wrongly reports `[toolID]` as the only upstream
+        # column, blocking any downstream block_sort / block_filter that
+        # tries to use the derived `<col>_<agg>` column.
+        agg_col = params.get("column") or params.get("agg_column")
+        agg_fn = params.get("aggregate") or params.get("agg_func")
         if agg_col and agg_fn:
             cols.append(f"{agg_col}_{agg_fn}")
         return cols or None
