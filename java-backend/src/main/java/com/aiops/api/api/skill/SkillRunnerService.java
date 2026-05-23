@@ -335,8 +335,22 @@ public class SkillRunnerService {
                 + " — " + equipmentId;
         if (title.length() > 290) title = title.substring(0, 290);
 
-        // Summary: consolidate confirm.note + passing step notes
+        // Summary: lead with the human-authored description (what the gate
+        // is supposed to mean), then the machine-evaluated math as
+        // supporting evidence.
+        //
+        // 2026-05-23: alarm UX previously showed only "Confirm: 1.0 ≥ 0.0"
+        // (the literal step_check math), which doesn't tell oncall what
+        // the rule is for. The skill author writes a natural-language
+        // intent in confirm_check.description (e.g. "5次中超過3次OOC")
+        // — surface that as the headline so the trigger banner is
+        // human-readable.
+        Map<String, Object> confirmCheckCfg = parseJsonObject(skill.getConfirmCheck());
+        Object confirmDesc = confirmCheckCfg.get("description");
         StringBuilder summary = new StringBuilder();
+        if (confirmDesc != null && !String.valueOf(confirmDesc).isBlank()) {
+            summary.append("條件: ").append(String.valueOf(confirmDesc).trim()).append("\n\n");
+        }
         if (confirmResult != null && confirmResult.get("note") != null) {
             summary.append("Confirm: ").append(confirmResult.get("note")).append('\n');
         }

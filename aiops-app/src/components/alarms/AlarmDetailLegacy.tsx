@@ -401,7 +401,7 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
               {triggered ? "🔴 條件達成 — 已觸發警報" : "🟢 條件未達成"}
             </div>
             {triggerSummaryText && (
-              <div style={{ color: "#4a5568" }}>{triggerSummaryText}</div>
+              <div style={{ color: "#4a5568", whiteSpace: "pre-line" }}>{triggerSummaryText}</div>
             )}
           </div>
 
