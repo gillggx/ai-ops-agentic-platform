@@ -3,20 +3,25 @@ package com.aiops.api.api.agent;
 import com.aiops.api.auth.AuthPrincipal;
 import com.aiops.api.auth.Authorities;
 import com.aiops.api.common.ApiResponse;
+import com.aiops.api.common.RequestBodyAccess;
+import com.aiops.api.common.SseEmitterBridge;
 import com.aiops.api.sidecar.PythonSidecarClient;
-import jakarta.validation.constraints.NotBlank;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
-import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-import reactor.core.Disposable;
 
-import java.io.IOException;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+
+import static com.aiops.api.common.RequestBodyAccess.asBool;
+import static com.aiops.api.common.RequestBodyAccess.asLong;
+import static com.aiops.api.common.RequestBodyAccess.pickAlias;
+import static com.aiops.api.common.RequestBodyAccess.pickMapAlias;
+import static com.aiops.api.common.RequestBodyAccess.requireAlias;
 
 /**
  * SSE + JSON proxy for everything that still runs in Python:
@@ -25,270 +30,163 @@ import java.util.Map;
  * <p>Design: we live in Spring MVC (servlet stack). Returning {@code Mono}/{@code Flux}
  * triggers async dispatch which confuses the stateless JWT filter. So JSON paths
  * {@code .block()} the {@code Mono} on the calling thread, and SSE paths bridge
- * the reactive {@code Flux} into an {@link SseEmitter} — which is the MVC-native
- * SSE primitive and plays nicely with the security filter chain.
+ * the reactive {@code Flux} into an {@link SseEmitter} via {@link SseEmitterBridge}
+ * — which is the MVC-native SSE primitive and plays nicely with the security
+ * filter chain.
  *
  * <p>Auth: chat is open to ANY_ROLE (ON_DUTY can ask the agent questions —
  * the sidecar's tool filter denies them build/write tools at the LLM layer);
  * build / pipeline.execute / sandbox.run stay PE+ since those are write paths.
+ *
+ * <p>2026-05-23 (Phase 12): Each SSE-relay endpoint historically accepted
+ * both legacy camelCase (pre-cutover Frontend clients) and canonical
+ * snake_case keys. The alias-pick boilerplate is now in
+ * {@link RequestBodyAccess} — endpoints stay readable.
  */
-@Slf4j
 @RestController
 @RequestMapping("/api/v1/agent")
 public class AgentProxyController {
 
-	private static final long SSE_TIMEOUT_MS = 10L * 60_000L;
-
 	private final PythonSidecarClient sidecar;
+	private final SseEmitterBridge sseBridge;
 
-	public AgentProxyController(PythonSidecarClient sidecar) {
+	public AgentProxyController(PythonSidecarClient sidecar, SseEmitterBridge sseBridge) {
 		this.sidecar = sidecar;
+		this.sseBridge = sseBridge;
 	}
 
-	// --- SSE paths: chat + build ---
+	// ── SSE: chat + chat-stream compat ──────────────────────────────────────
 
 	@PostMapping(path = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 	@PreAuthorize(Authorities.ANY_ROLE)
-	public SseEmitter chat(@Validated @RequestBody ChatRequest req,
+	public SseEmitter chat(@Validated @RequestBody AgentProxyDtos.ChatRequest req,
 	                       @AuthenticationPrincipal AuthPrincipal caller) {
-		return bridgeSse(sidecar.postSse("/internal/agent/chat", req, caller), "chat");
+		return sseBridge.bridge(sidecar.postSse("/internal/agent/chat", req, caller), "chat");
 	}
 
-	// Frontend historically posted to `/chat/stream` with a `prompt` field
-	// (old Python FastAPI shape). Accept both paths and both field names so the
-	// Next.js proxy keeps working post-cutover without a redeploy.
+	/** Legacy alias: Frontend historically posted to {@code /chat/stream}
+	 *  with a {@code prompt} field (old Python FastAPI shape). Accept both
+	 *  paths and both field names so the Next.js proxy keeps working
+	 *  post-cutover without a redeploy. */
 	@PostMapping(path = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 	@PreAuthorize(Authorities.ANY_ROLE)
 	public SseEmitter chatStreamCompat(@RequestBody Map<String, Object> body,
 	                                   @AuthenticationPrincipal AuthPrincipal caller) {
-		String message = asString(body.get("message"));
-		if (message == null || message.isBlank()) message = asString(body.get("prompt"));
-		if (message == null || message.isBlank()) {
-			throw new com.aiops.api.common.ApiException(
-					org.springframework.http.HttpStatus.BAD_REQUEST,
-					"validation_error", "message: must not be blank");
-		}
-		String sessionId = asString(body.get("sessionId"));
-		if (sessionId == null || sessionId.isBlank()) sessionId = asString(body.get("session_id"));
+		String message = requireAlias(body, "message", "message", "prompt");
+		String sessionId = pickAlias(body, "sessionId", "session_id");
 		// Part B: forward client_context (selected_equipment_id etc.) if present.
-		// Accept both camelCase and snake_case from the frontend.
-		@SuppressWarnings("unchecked")
-		Map<String, Object> clientContext = body.get("clientContext") instanceof Map<?, ?> m1
-				? (Map<String, Object>) m1
-				: body.get("client_context") instanceof Map<?, ?> m2
-						? (Map<String, Object>) m2
-						: null;
+		Map<String, Object> clientContext = pickMapAlias(body, "clientContext", "client_context");
 		// Phase E2/E3: when AIAgentPanel runs inside BuilderLayout it ships
-		// `mode="builder"` plus `pipeline_snapshot` (the current canvas
-		// pipeline_json with its declared inputs). Without this passthrough
-		// the sidecar's mode-aware prompt never activates and Glass Box
-		// sub-agent rebuilds without honoring declared $name inputs.
-		String mode = asString(body.get("mode"));
-		@SuppressWarnings("unchecked")
-		Map<String, Object> pipelineSnapshot = body.get("pipelineSnapshot") instanceof Map<?, ?> ps1
-				? (Map<String, Object>) ps1
-				: body.get("pipeline_snapshot") instanceof Map<?, ?> ps2
-						? (Map<String, Object>) ps2
-						: null;
-		ChatRequest req = new ChatRequest(message, sessionId, clientContext, mode, pipelineSnapshot);
-		return bridgeSse(sidecar.postSse("/internal/agent/chat", req, caller), "chat");
+		// mode="builder" + pipeline_snapshot. Without this passthrough the
+		// sidecar's mode-aware prompt never activates.
+		String mode = pickAlias(body, "mode");
+		Map<String, Object> pipelineSnapshot = pickMapAlias(body, "pipelineSnapshot", "pipeline_snapshot");
+		AgentProxyDtos.ChatRequest req = new AgentProxyDtos.ChatRequest(
+				message, sessionId, clientContext, mode, pipelineSnapshot);
+		return sseBridge.bridge(sidecar.postSse("/internal/agent/chat", req, caller), "chat");
 	}
 
-	private static String asString(Object v) {
-		return v == null ? null : v.toString();
-	}
+	// ── SSE: build + resume ─────────────────────────────────────────────────
 
-	// Accepts both the new contract ({instruction, pipelineId, pipelineSnapshot})
-	// and the legacy Python-era contract ({prompt, base_pipeline_id, base_pipeline})
-	// so Frontend clients that were not redeployed with the Java cutover keep working.
-	// Mirrors the chatStreamCompat pattern above.
+	/** Accepts both the new contract ({instruction, pipelineId, pipelineSnapshot})
+	 *  and the legacy Python-era contract ({prompt, base_pipeline_id, base_pipeline})
+	 *  so Frontend clients that were not redeployed with the Java cutover keep working. */
 	@PostMapping(path = "/build", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 	@PreAuthorize(Authorities.ADMIN_OR_PE)
 	public SseEmitter build(@RequestBody Map<String, Object> body,
 	                        @AuthenticationPrincipal AuthPrincipal caller) {
-		String instruction = asString(body.get("instruction"));
-		if (instruction == null || instruction.isBlank()) instruction = asString(body.get("prompt"));
-		if (instruction == null || instruction.isBlank()) {
-			throw new com.aiops.api.common.ApiException(
-					org.springframework.http.HttpStatus.BAD_REQUEST,
-					"validation_error", "instruction: must not be blank");
-		}
+		String instruction = requireAlias(body, "instruction", "instruction", "prompt");
 		Long pipelineId = asLong(body.get("pipelineId"));
 		if (pipelineId == null) pipelineId = asLong(body.get("base_pipeline_id"));
-		@SuppressWarnings("unchecked")
-		Map<String, Object> snapshot = body.get("pipelineSnapshot") instanceof Map<?, ?> m1
-				? (Map<String, Object>) m1
-				: body.get("base_pipeline") instanceof Map<?, ?> m2
-						? (Map<String, Object>) m2
-						: null;
+		Map<String, Object> snapshot = pickMapAlias(body, "pipelineSnapshot", "base_pipeline");
 		// 2026-05-13: pass triggerPayload through so sidecar's dry-run uses
 		// the same inputs that production /run will. Without this, dry-run
 		// uses canonical fallbacks (tool_id=EQP-01 etc.) which often differ
 		// from the actual trigger and let runtime-only failures slip past
 		// inspect/reflect.
-		@SuppressWarnings("unchecked")
-		Map<String, Object> triggerPayload = body.get("triggerPayload") instanceof Map<?, ?> tp1
-				? (Map<String, Object>) tp1
-				: body.get("trigger_payload") instanceof Map<?, ?> tp2
-						? (Map<String, Object>) tp2
-						: null;
-		BuildRequest req = new BuildRequest(instruction, pipelineId, snapshot, triggerPayload);
-		return bridgeSse(sidecar.postSse("/internal/agent/build", req, caller), "build");
+		Map<String, Object> triggerPayload = pickMapAlias(body, "triggerPayload", "trigger_payload");
+		AgentProxyDtos.BuildRequest req = new AgentProxyDtos.BuildRequest(
+				instruction, pipelineId, snapshot, triggerPayload);
+		return sseBridge.bridge(sidecar.postSse("/internal/agent/build", req, caller), "build");
 	}
 
-	// Phase 10 (graph_build v2) — resume a paused build at confirm_gate.
-	// Body: { sessionId | session_id, confirmed: bool }
+	/** Phase 10 (graph_build v2) — resume a paused build at confirm_gate.
+	 *  Body: { sessionId | session_id, confirmed: bool } */
 	@PostMapping(path = "/build/confirm", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 	@PreAuthorize(Authorities.ADMIN_OR_PE)
 	public SseEmitter buildConfirm(@RequestBody Map<String, Object> body,
 	                               @AuthenticationPrincipal AuthPrincipal caller) {
-		String sessionId = asString(body.get("sessionId"));
-		if (sessionId == null || sessionId.isBlank()) sessionId = asString(body.get("session_id"));
-		if (sessionId == null || sessionId.isBlank()) {
-			throw new com.aiops.api.common.ApiException(
-					org.springframework.http.HttpStatus.BAD_REQUEST,
-					"validation_error", "session_id: must not be blank");
-		}
-		Object confirmedRaw = body.get("confirmed");
-		boolean confirmed = confirmedRaw instanceof Boolean b
-				? b
-				: confirmedRaw != null && Boolean.parseBoolean(confirmedRaw.toString());
-		Map<String, Object> req = new java.util.HashMap<>();
+		String sessionId = requireAlias(body, "session_id", "sessionId", "session_id");
+		Map<String, Object> req = new HashMap<>();
 		req.put("session_id", sessionId);
-		req.put("confirmed", confirmed);
-		return bridgeSse(sidecar.postSse("/internal/agent/build/confirm", req, caller), "build_confirm");
+		req.put("confirmed", asBool(body.get("confirmed")));
+		return sseBridge.bridge(sidecar.postSse("/internal/agent/build/confirm", req, caller), "build_confirm");
 	}
 
-	// v15 G1 (2026-05-13) — resume paused graph at clarify_intent_node.
-	// Body: { sessionId | session_id, answers: {qid: value} }
+	/** v15 G1 (2026-05-13) — resume paused graph at clarify_intent_node.
+	 *  Body: { sessionId | session_id, answers: {qid: value} } */
 	@PostMapping(path = "/build/clarify-respond", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 	@PreAuthorize(Authorities.ADMIN_OR_PE)
 	public SseEmitter buildClarifyRespond(@RequestBody Map<String, Object> body,
 	                                      @AuthenticationPrincipal AuthPrincipal caller) {
-		String sessionId = asString(body.get("sessionId"));
-		if (sessionId == null || sessionId.isBlank()) sessionId = asString(body.get("session_id"));
-		if (sessionId == null || sessionId.isBlank()) {
-			throw new com.aiops.api.common.ApiException(
-					org.springframework.http.HttpStatus.BAD_REQUEST,
-					"validation_error", "session_id: must not be blank");
-		}
-		@SuppressWarnings("unchecked")
-		Map<String, Object> answers = body.get("answers") instanceof Map<?, ?> m
-				? (Map<String, Object>) m : new java.util.HashMap<>();
-		Map<String, Object> req = new java.util.HashMap<>();
+		String sessionId = requireAlias(body, "session_id", "sessionId", "session_id");
+		Map<String, Object> answers = pickMapAlias(body, "answers");
+		if (answers == null) answers = new HashMap<>();
+		Map<String, Object> req = new HashMap<>();
 		req.put("session_id", sessionId);
 		req.put("answers", answers);
-		return bridgeSse(sidecar.postSse("/internal/agent/build/clarify-respond", req, caller), "build_clarify");
+		return sseBridge.bridge(sidecar.postSse("/internal/agent/build/clarify-respond", req, caller), "build_clarify");
 	}
 
-	// v30 (2026-05-16) — resume paused graph at goal_plan_confirm_gate.
-	// Body: { sessionId | session_id, confirmed: bool, phases?: [...] }
+	/** v30 (2026-05-16) — resume paused graph at goal_plan_confirm_gate.
+	 *  Body: { sessionId | session_id, confirmed: bool, phases?: [...] } */
 	@PostMapping(path = "/build/plan-confirm", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 	@PreAuthorize(Authorities.ADMIN_OR_PE)
 	public SseEmitter buildPlanConfirm(@RequestBody Map<String, Object> body,
 	                                   @AuthenticationPrincipal AuthPrincipal caller) {
-		String sessionId = asString(body.get("sessionId"));
-		if (sessionId == null || sessionId.isBlank()) sessionId = asString(body.get("session_id"));
-		if (sessionId == null || sessionId.isBlank()) {
-			throw new com.aiops.api.common.ApiException(
-					org.springframework.http.HttpStatus.BAD_REQUEST,
-					"validation_error", "session_id: must not be blank");
-		}
-		Object confirmedRaw = body.get("confirmed");
-		boolean confirmed = confirmedRaw instanceof Boolean b
-				? b
-				: confirmedRaw != null && Boolean.parseBoolean(confirmedRaw.toString());
-		Map<String, Object> req = new java.util.HashMap<>();
+		String sessionId = requireAlias(body, "session_id", "sessionId", "session_id");
+		Map<String, Object> req = new HashMap<>();
 		req.put("session_id", sessionId);
-		req.put("confirmed", confirmed);
+		req.put("confirmed", asBool(body.get("confirmed")));
 		Object phases = body.get("phases");
-		if (phases instanceof java.util.List<?>) req.put("phases", phases);
-		return bridgeSse(sidecar.postSse("/internal/agent/build/plan-confirm", req, caller), "build_plan_confirm");
+		if (phases instanceof List<?>) req.put("phases", phases);
+		return sseBridge.bridge(sidecar.postSse("/internal/agent/build/plan-confirm", req, caller), "build_plan_confirm");
 	}
 
-	// v30 — resume paused graph at halt_handover.
-	// Body: { sessionId, choice: 'edit_goal'|'take_over'|'backlog'|'abort', newGoal?: string }
+	/** v30 — resume paused graph at halt_handover.
+	 *  Body: { sessionId, choice: 'edit_goal'|'take_over'|'backlog'|'abort', newGoal?: string } */
 	@PostMapping(path = "/build/handover", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 	@PreAuthorize(Authorities.ADMIN_OR_PE)
 	public SseEmitter buildHandover(@RequestBody Map<String, Object> body,
 	                                @AuthenticationPrincipal AuthPrincipal caller) {
-		String sessionId = asString(body.get("sessionId"));
-		if (sessionId == null || sessionId.isBlank()) sessionId = asString(body.get("session_id"));
-		String choice = asString(body.get("choice"));
-		if (sessionId == null || sessionId.isBlank() || choice == null || choice.isBlank()) {
-			throw new com.aiops.api.common.ApiException(
-					org.springframework.http.HttpStatus.BAD_REQUEST,
-					"validation_error", "session_id and choice: must not be blank");
-		}
-		Map<String, Object> req = new java.util.HashMap<>();
+		String sessionId = requireAlias(body, "session_id", "sessionId", "session_id");
+		String choice = requireAlias(body, "choice", "choice");
+		Map<String, Object> req = new HashMap<>();
 		req.put("session_id", sessionId);
 		req.put("choice", choice);
-		String newGoal = asString(body.get("newGoal"));
-		if (newGoal == null || newGoal.isBlank()) newGoal = asString(body.get("new_goal"));
-		if (newGoal != null && !newGoal.isBlank()) req.put("new_goal", newGoal);
-		return bridgeSse(sidecar.postSse("/internal/agent/build/handover", req, caller), "build_handover");
+		String newGoal = pickAlias(body, "newGoal", "new_goal");
+		if (newGoal != null) req.put("new_goal", newGoal);
+		return sseBridge.bridge(sidecar.postSse("/internal/agent/build/handover", req, caller), "build_handover");
 	}
 
-	// v15 G2 — modify request after plan review.
-	// Body: { sessionId | session_id, stepIdx?: int, request: string }
+	/** v15 G2 — modify request after plan review.
+	 *  Body: { sessionId | session_id, stepIdx?: int, request: string } */
 	@PostMapping(path = "/build/modify-request", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
 	@PreAuthorize(Authorities.ADMIN_OR_PE)
 	public SseEmitter buildModifyRequest(@RequestBody Map<String, Object> body,
 	                                     @AuthenticationPrincipal AuthPrincipal caller) {
-		String sessionId = asString(body.get("sessionId"));
-		if (sessionId == null || sessionId.isBlank()) sessionId = asString(body.get("session_id"));
-		String request = asString(body.get("request"));
-		if (sessionId == null || sessionId.isBlank() || request == null || request.isBlank()) {
-			throw new com.aiops.api.common.ApiException(
-					org.springframework.http.HttpStatus.BAD_REQUEST,
-					"validation_error", "session_id and request: must not be blank");
-		}
-		Object stepIdxRaw = body.get("stepIdx");
-		if (stepIdxRaw == null) stepIdxRaw = body.get("step_idx");
-		Long stepIdx = asLong(stepIdxRaw);
-		Map<String, Object> req = new java.util.HashMap<>();
+		String sessionId = requireAlias(body, "session_id", "sessionId", "session_id");
+		String request = requireAlias(body, "request", "request");
+		Long stepIdx = asLong(body.get("stepIdx"));
+		if (stepIdx == null) stepIdx = asLong(body.get("step_idx"));
+		Map<String, Object> req = new HashMap<>();
 		req.put("session_id", sessionId);
 		req.put("step_idx", stepIdx);
 		req.put("request", request);
-		return bridgeSse(sidecar.postSse("/internal/agent/build/modify-request", req, caller), "build_modify");
+		return sseBridge.bridge(sidecar.postSse("/internal/agent/build/modify-request", req, caller), "build_modify");
 	}
 
-	private static Long asLong(Object v) {
-		if (v == null) return null;
-		if (v instanceof Number n) return n.longValue();
-		String s = v.toString();
-		if (s.isBlank()) return null;
-		try { return Long.parseLong(s.trim()); } catch (NumberFormatException e) { return null; }
-	}
-
-	private SseEmitter bridgeSse(reactor.core.publisher.Flux<ServerSentEvent<String>> upstream, String tag) {
-		SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
-		Disposable subscription = upstream.subscribe(
-				ev -> {
-					try {
-						var builder = SseEmitter.event();
-						if (ev.event() != null) builder.name(ev.event());
-						if (ev.id() != null) builder.id(ev.id());
-						if (ev.data() != null) builder.data(ev.data());
-						emitter.send(builder);
-					} catch (IOException ex) {
-						log.debug("SSE client gone on {}: {}", tag, ex.getMessage());
-						emitter.completeWithError(ex);
-					}
-				},
-				err -> {
-					log.warn("SSE upstream error on {}: {}", tag, err.toString());
-					emitter.completeWithError(err);
-				},
-				emitter::complete
-		);
-		emitter.onTimeout(subscription::dispose);
-		emitter.onError(err -> subscription.dispose());
-		emitter.onCompletion(subscription::dispose);
-		return emitter;
-	}
-
-	// --- JSON paths: pipeline + sandbox (block() is intentional) ---
+	// ── JSON paths: pipeline + sandbox (block() is intentional) ─────────────
 
 	@PostMapping("/pipeline/execute")
 	@PreAuthorize(Authorities.ADMIN_OR_PE)
@@ -324,15 +222,4 @@ public class AgentProxyController {
 		Map result = sidecar.getJson("/internal/health", Map.class, caller).block();
 		return ApiResponse.ok(result);
 	}
-
-	// --- DTOs ---
-
-	public record ChatRequest(@NotBlank String message, String sessionId, Map<String, Object> clientContext,
-	                          String mode, Map<String, Object> pipelineSnapshot) {}
-
-	public record BuildRequest(
-			@NotBlank String instruction,
-			Long pipelineId,
-			Map<String, Object> pipelineSnapshot,
-			Map<String, Object> triggerPayload) {}
 }
