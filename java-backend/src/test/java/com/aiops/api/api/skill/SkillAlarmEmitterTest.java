@@ -570,8 +570,14 @@ class SkillAlarmEmitterTest {
             assertThat(cap.getValue().getTitle().length()).isLessThanOrEqualTo(290);
         }
 
+        // 2026-05-23 (commit 405edd3): equipmentId falls back to evidence row's
+        // toolID before sinking to "(any)" so cron / patrol skills (which don't
+        // carry tool_id in their triggerPayload) get per-machine alarm grouping
+        // instead of dumping everything under "(any)". confirmWithRow seeds
+        // toolID="EQP-02" so the fallback wins.
+
         @Test
-        void blankToolIdYieldsAnySentinel() {
+        void blankToolIdFallsBackToEvidenceRowToolId() {
             when(alarmRepo.existsActiveBySkillAndEquipmentSince(
                     anyLong(), anyString(), any())).thenReturn(false);
             ArgumentCaptor<AlarmEntity> cap = ArgumentCaptor.forClass(AlarmEntity.class);
@@ -583,29 +589,29 @@ class SkillAlarmEmitterTest {
                     Map.of("tool_id", "   "),  // blank
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
                     List.of(stepPass("s1")), false);
-            assertThat(cap.getValue().getEquipmentId()).isEqualTo("(any)");
+            assertThat(cap.getValue().getEquipmentId()).isEqualTo("EQP-02");
         }
 
         @Test
-        void literalNullToolIdYieldsAnySentinel() {
+        void literalNullToolIdFallsBackToEvidenceRowToolId() {
             when(alarmRepo.existsActiveBySkillAndEquipmentSince(
                     anyLong(), anyString(), any())).thenReturn(false);
             ArgumentCaptor<AlarmEntity> cap = ArgumentCaptor.forClass(AlarmEntity.class);
             when(alarmRepo.save(cap.capture())).thenAnswer(inv -> {
                 AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
             });
-            // HashMap allows null value (Map.of does not), test "null" literal string
+            // HashMap allows null value (Map.of does not).
             Map<String, Object> payload = new HashMap<>();
             payload.put("tool_id", null);
             service.emitIfTriggered(
                     patrolSkill(), run(false), payload,
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
                     List.of(stepPass("s1")), false);
-            assertThat(cap.getValue().getEquipmentId()).isEqualTo("(any)");
+            assertThat(cap.getValue().getEquipmentId()).isEqualTo("EQP-02");
         }
 
         @Test
-        void nullTriggerPayloadYieldsAnySentinel() {
+        void nullTriggerPayloadFallsBackToEvidenceRowToolId() {
             when(alarmRepo.existsActiveBySkillAndEquipmentSince(
                     anyLong(), anyString(), any())).thenReturn(false);
             ArgumentCaptor<AlarmEntity> cap = ArgumentCaptor.forClass(AlarmEntity.class);
@@ -615,6 +621,25 @@ class SkillAlarmEmitterTest {
             service.emitIfTriggered(
                     patrolSkill(), run(false), null,
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
+                    List.of(stepPass("s1")), false);
+            assertThat(cap.getValue().getEquipmentId()).isEqualTo("EQP-02");
+        }
+
+        @Test
+        void anySentinelOnlyWhenNeitherPayloadNorEvidenceCarriesToolId() {
+            when(alarmRepo.existsActiveBySkillAndEquipmentSince(
+                    anyLong(), anyString(), any())).thenReturn(false);
+            ArgumentCaptor<AlarmEntity> cap = ArgumentCaptor.forClass(AlarmEntity.class);
+            when(alarmRepo.save(cap.capture())).thenAnswer(inv -> {
+                AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
+            });
+            // Evidence row with NO toolID/tool_id field — final fallback to "(any)".
+            Map<String, Object> row = Map.of("lotID", "L", "step", "S",
+                    "eventTime", "2026-05-17T00:00:00");
+            Map<String, Object> confirm = Map.of("data_views",
+                    List.of(Map.of("rows", List.of(row))), "note", "n");
+            service.emitIfTriggered(
+                    patrolSkill(), run(false), null, confirm,
                     List.of(stepPass("s1")), false);
             assertThat(cap.getValue().getEquipmentId()).isEqualTo("(any)");
         }
@@ -894,8 +919,16 @@ class SkillAlarmEmitterTest {
             assertThat(outputs.get("evidence_rows").isArray()).isTrue();
             assertThat(outputs.get("evidence_rows").size()).isEqualTo(2);
             assertThat(outputs.get("triggered_count").asInt()).isEqualTo(2);
-            assertThat(outputs.has("per_step")).isTrue();
-            assertThat(outputs.get("per_step").has("s_check")).isTrue();
+            // 2026-05-23 (commit ba26b6d): per_step + confirm moved out of
+            // outputs into step_details — frontend RenderMiddleware would
+            // JSON.stringify nested objects under outputs (no schema entry
+            // tells it how to render), causing raw JSON dumps in the alarm
+            // detail page. step_details is a non-rendered sibling that
+            // AlarmEnrichmentService walks separately.
+            JsonNode stepDetails = root.get("step_details");
+            assertThat(stepDetails).isNotNull();
+            assertThat(stepDetails.has("per_step")).isTrue();
+            assertThat(stepDetails.get("per_step").has("s_check")).isTrue();
 
             JsonNode schema = root.get("_alarm_output_schema");
             assertThat(schema.isArray()).isTrue();
