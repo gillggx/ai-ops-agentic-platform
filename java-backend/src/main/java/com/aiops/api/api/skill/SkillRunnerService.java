@@ -265,10 +265,30 @@ public class SkillRunnerService {
                 .anyMatch(s -> "pass".equalsIgnoreCase(String.valueOf(s.get("status"))));
         if (!anyTriggered) return null;
 
-        // Equipment id from trigger_payload (patrol may not have one — use sentinel)
+        // Pull the first evidence row up-front — we need it for BOTH the
+        // equipmentId fallback (below) and the lot/step/eventTime extraction
+        // further down. Cron-scheduled patrol skills don't carry a tool_id
+        // in their triggerPayload, but the confirm-step's first data_view
+        // typically has a `toolID` column — that's the actual machine the
+        // pipeline matched against.
+        Map<String, Object> evidenceRow = pickFirstEvidenceRow(confirmResult);
+
+        // Equipment id resolution: triggerPayload first (event-driven path),
+        // then evidence row's toolID (cron / patrol path), then sentinel.
         String equipmentId = triggerPayload == null ? null
                 : String.valueOf(triggerPayload.getOrDefault("tool_id",
                                   triggerPayload.getOrDefault("equipment_id", "")));
+        if (equipmentId == null || equipmentId.isBlank() || "null".equals(equipmentId)) {
+            // 2026-05-23: try evidence row before sinking to "(any)" — keeps
+            // alarms grouped per machine instead of dumping everything under
+            // a single (any) cluster.
+            if (evidenceRow != null) {
+                Object t = evidenceRow.getOrDefault("toolID", evidenceRow.get("tool_id"));
+                if (t != null && !String.valueOf(t).isBlank() && !"null".equals(String.valueOf(t))) {
+                    equipmentId = String.valueOf(t);
+                }
+            }
+        }
         if (equipmentId == null || equipmentId.isBlank() || "null".equals(equipmentId)) {
             equipmentId = "(any)";
         }
@@ -290,7 +310,6 @@ public class SkillRunnerService {
         String lotId = "";
         String step = null;
         OffsetDateTime eventTime = null;
-        Map<String, Object> evidenceRow = pickFirstEvidenceRow(confirmResult);
         if (evidenceRow != null) {
             Object lot = evidenceRow.getOrDefault("lotID", evidenceRow.get("lot_id"));
             if (lot != null) lotId = String.valueOf(lot);
