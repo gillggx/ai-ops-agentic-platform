@@ -60,7 +60,7 @@ public class FleetSimulatorClient {
 			JsonNode items = root.has("items") ? root.get("items") : root;
 			if (items == null || !items.isArray()) return List.of();
 			return mapper.convertValue(items, LIST_MAP_TYPE);
-		} catch (Exception ex) {
+		} catch (RuntimeException ex) {
 			log.warn("simulator tools fetch failed: {}", ex.toString());
 			return List.of();
 		}
@@ -86,7 +86,7 @@ public class FleetSimulatorClient {
 				out.put(id, mapper.convertValue(row, Map.class));
 			}
 			return out;
-		} catch (Exception ex) {
+		} catch (RuntimeException ex) {
 			log.warn("simulator summary fetch failed: {}", ex.toString());
 			return Map.of();
 		}
@@ -103,7 +103,7 @@ public class FleetSimulatorClient {
 					.block(Duration.ofSeconds(5));
 			if (root == null) return 0;
 			return root.path("total_events").asInt(0);
-		} catch (Exception ex) {
+		} catch (RuntimeException ex) {
 			log.warn("simulator total_events fetch failed: {}", ex.toString());
 			return 0;
 		}
@@ -125,7 +125,7 @@ public class FleetSimulatorClient {
 			JsonNode events = root.get("events");
 			if (events == null || !events.isArray()) return List.of();
 			return mapper.convertValue(events, LIST_MAP_TYPE);
-		} catch (Exception ex) {
+		} catch (RuntimeException ex) {
 			log.warn("simulator process_info fetch failed for {}: {}", toolId, ex.toString());
 			return List.of();
 		}

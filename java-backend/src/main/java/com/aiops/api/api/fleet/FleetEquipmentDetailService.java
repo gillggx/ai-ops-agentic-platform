@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -543,12 +544,12 @@ public class FleetEquipmentDetailService {
 		if (v == null) return null;
 		String s = String.valueOf(v);
 		// 1. Full ISO with offset: "2026-05-01T02:55:38.065Z" / "+08:00"
-		try { return OffsetDateTime.parse(s); } catch (Exception ignored) {}
+		try { return OffsetDateTime.parse(s); } catch (DateTimeParseException ignored) {}
 		// 2. Bare instant ending in Z
-		try { return Instant.parse(s).atOffset(ZoneOffset.UTC); } catch (Exception ignored) {}
+		try { return Instant.parse(s).atOffset(ZoneOffset.UTC); } catch (DateTimeParseException ignored) {}
 		// 3. Naive ISO local-datetime ("2026-05-01T02:55:38.065000") — the
 		//    simulator emits this. Treat as UTC.
-		try { return LocalDateTime.parse(s).atOffset(ZoneOffset.UTC); } catch (Exception ignored) {}
+		try { return LocalDateTime.parse(s).atOffset(ZoneOffset.UTC); } catch (DateTimeParseException ignored) {}
 		return null;
 	}
 
@@ -577,6 +578,6 @@ public class FleetEquipmentDetailService {
 	private static Double toDouble(Object v) {
 		if (v == null) return null;
 		if (v instanceof Number n) return n.doubleValue();
-		try { return Double.parseDouble(String.valueOf(v)); } catch (Exception ignored) { return null; }
+		try { return Double.parseDouble(String.valueOf(v)); } catch (NumberFormatException ignored) { return null; }
 	}
 }

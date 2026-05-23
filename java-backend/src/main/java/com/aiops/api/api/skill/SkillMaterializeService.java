@@ -7,6 +7,7 @@ import com.aiops.api.domain.patrol.AutoPatrolRepository;
 import com.aiops.api.domain.pipeline.PipelineAutoCheckTriggerEntity;
 import com.aiops.api.domain.pipeline.PipelineAutoCheckTriggerRepository;
 import com.aiops.api.domain.skill.SkillDocumentEntity;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -119,7 +120,7 @@ public class SkillMaterializeService {
         Object filter = trig.get("match_filter");
         if (filter != null) {
             try { row.setMatchFilter(mapper.writeValueAsString(filter)); }
-            catch (Exception ignored) {}
+            catch (JsonProcessingException ignored) {}
         }
         autoCheckRepo.save(row);
         return 1;
@@ -172,7 +173,7 @@ public class SkillMaterializeService {
                     "window", trig.getOrDefault("window", ""),
                     "debounce", trig.getOrDefault("debounce", "")
             )));
-        } catch (Exception ignored) {}
+        } catch (JsonProcessingException ignored) {}
         patrolRepo.save(p);
         return 1;
     }
@@ -182,7 +183,7 @@ public class SkillMaterializeService {
     private Map<String, Object> parseMap(String json) {
         try {
             return json == null || json.isBlank() ? Map.of() : mapper.readValue(json, JSON_MAP_TYPE);
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             return Map.of();
         }
     }
@@ -190,7 +191,7 @@ public class SkillMaterializeService {
     private List<Map<String, Object>> parseList(String json) {
         try {
             return json == null || json.isBlank() ? List.of() : mapper.readValue(json, JSON_LIST_TYPE);
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             return List.of();
         }
     }

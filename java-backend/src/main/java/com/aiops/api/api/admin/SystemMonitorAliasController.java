@@ -171,7 +171,9 @@ public class SystemMonitorAliasController {
 					.timeout(HEALTH_TIMEOUT)
 					.block();
 			out.put("status", "UP");
-		} catch (Exception ex) {
+		} catch (RuntimeException ex) {
+			// WebClient + reactor timeout wrap as unchecked; any unreachable
+			// service → DOWN status badge.
 			out.put("status", "DOWN");
 			// Truncate to keep payload small; full trace lives in journalctl
 			out.put("error", ex.getClass().getSimpleName() + ": "

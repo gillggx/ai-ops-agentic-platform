@@ -109,7 +109,8 @@ public class AlarmClusterService {
 		List<PipelineRunEntity> runs;
 		try {
 			runs = runRepo.findAutoCheckRunsSince(hourAgo);
-		} catch (Exception ex) {
+		} catch (RuntimeException ex) {
+			// JPA exceptions wrapped as unchecked; strip degrades gracefully.
 			runs = List.of();
 		}
 		int runCount = runs.size();

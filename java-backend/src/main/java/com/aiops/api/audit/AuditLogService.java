@@ -52,7 +52,9 @@ public class AuditLogService {
 
 		try {
 			repository.save(entry);
-		} catch (Exception ex) {
+		} catch (RuntimeException ex) {
+			// JPA exceptions wrapped as unchecked; audit log is non-critical
+			// so never break the calling request.
 			log.warn("Failed to persist audit log entry: {}", ex.getMessage());
 		}
 	}

@@ -363,7 +363,7 @@ public class PipelineService {
 			String mf = t.getMatchFilter();
 			if (mf != null && !mf.isBlank()) {
 				try { filter = mapper.readValue(mf, Map.class); }
-				catch (Exception ignored) { filter = null; }
+				catch (JsonProcessingException ignored) { filter = null; }
 			}
 			out.add(new PipelineDtos.AutoCheckTriggerView(
 					t.getId(), t.getPipelineId(), t.getEventType(), filter, t.getCreatedAt()));

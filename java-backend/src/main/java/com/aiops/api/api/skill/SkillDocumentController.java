@@ -170,7 +170,10 @@ public class SkillDocumentController {
                     } catch (IOException ioe) {
                         log.debug("SSE client gone on skill {}: {}", slug, ioe.getMessage());
                         emitter.completeWithError(ioe);
-                    } catch (Exception ex) {
+                    } catch (RuntimeException ex) {
+                        // Belt-and-suspenders for unexpected runtime errors in
+                        // the SSE callback chain; IOException is already caught
+                        // above (JsonProcessingException extends it).
                         log.warn("SSE serialization failed: {}", ex.toString());
                     }
                 },

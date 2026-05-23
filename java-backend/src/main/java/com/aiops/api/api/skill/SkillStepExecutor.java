@@ -4,6 +4,7 @@ import com.aiops.api.auth.AuthPrincipal;
 import com.aiops.api.domain.pipeline.PipelineEntity;
 import com.aiops.api.domain.pipeline.PipelineRepository;
 import com.aiops.api.sidecar.PythonSidecarClient;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -81,7 +82,11 @@ public class SkillStepExecutor {
 			Map result = sidecar.postJson("/internal/pipeline/execute", body, Map.class, caller)
 					.block(SIDECAR_TIMEOUT);
 			return parseRunResult(stepId, result, System.currentTimeMillis() - t0);
-		} catch (Exception ex) {
+		} catch (RuntimeException | JsonProcessingException ex) {
+			// JsonProcessingException for mapper.readValue(pipelineJson) above;
+			// RuntimeException for reactor block() (timeout / WebClient error).
+			// Both surface as step fail with diagnostic note — orchestrator
+			// keeps going to the next step.
 			log.warn("step {} pipeline {} crashed: {}", stepId, pipelineId, ex.toString());
 			return stepResultError(stepId, ex.getClass().getSimpleName() + ": " + ex.getMessage());
 		}

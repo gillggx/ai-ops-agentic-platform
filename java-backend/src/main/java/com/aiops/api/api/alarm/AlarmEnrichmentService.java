@@ -114,7 +114,7 @@ public class AlarmEnrichmentService {
 			List<PipelineRunEntity> runs;
 			try {
 				runs = pipelineRunRepo.findAllByAlarmIds(alarmIdTexts);
-			} catch (Exception ex) {
+			} catch (RuntimeException ex) {
 				log.warn("alarm enrichment: batch run lookup failed: {}", ex.toString());
 				runs = List.of();
 			}
@@ -290,7 +290,7 @@ public class AlarmEnrichmentService {
 					List<Object> drCharts = List.of();
 					if (drFindings instanceof JsonNode fJson && drOutputSchema instanceof JsonNode osJson) {
 						try { drCharts = chartMiddleware.buildCharts(fJson, osJson); }
-						catch (Exception ex) { log.warn("chart-middleware failed for DR log {}: {}", dl.getId(), ex.toString()); }
+						catch (RuntimeException ex) { log.warn("chart-middleware failed for DR log {}: {}", dl.getId(), ex.toString()); }
 					}
 					return new AlarmDtos.DiagnosticResult(
 							dl.getId(), dl.getSkillId(), s != null ? s.getName() : null,
@@ -379,7 +379,7 @@ public class AlarmEnrichmentService {
 	private Optional<PipelineRunEntity> safeFindRun(Long id) {
 		try {
 			return pipelineRunRepo.findById(id);
-		} catch (Exception ex) {
+		} catch (RuntimeException ex) {
 			log.debug("alarm enrichment: pipeline_run lookup failed for id={}: {}", id, ex.getMessage());
 			return Optional.empty();
 		}
