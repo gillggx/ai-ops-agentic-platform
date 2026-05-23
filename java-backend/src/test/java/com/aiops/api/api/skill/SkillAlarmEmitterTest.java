@@ -445,7 +445,7 @@ class SkillAlarmEmitterTest {
         }
 
         @Test
-        void noToolIdYieldsAnySentinel() {
+        void noToolIdInPayloadFallsBackToEvidenceRowToolId() {
             when(alarmRepo.existsActiveBySkillAndEquipmentSince(
                     anyLong(), anyString(), any())).thenReturn(false);
             ArgumentCaptor<AlarmEntity> cap = ArgumentCaptor.forClass(AlarmEntity.class);
@@ -453,13 +453,16 @@ class SkillAlarmEmitterTest {
                 AlarmEntity a = inv.getArgument(0); a.setId(1L); return a;
             });
 
+            // Empty payload — evidence-row fallback (commit 405edd3) seeds
+            // equipmentId from confirmWithRow's baked-in toolID="EQP-02"
+            // instead of dropping to "(any)" sentinel.
             service.emitIfTriggered(
                     patrolSkill(), run(false),
                     Map.of(),  // no tool_id
                     confirmWithRow("L", "S", "2026-05-17T00:00:00"),
                     List.of(stepPass("s1")), false);
 
-            assertThat(cap.getValue().getEquipmentId()).isEqualTo("(any)");
+            assertThat(cap.getValue().getEquipmentId()).isEqualTo("EQP-02");
         }
 
         @Test
