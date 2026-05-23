@@ -1,9 +1,6 @@
 /**
  * Chart Catalog — grid index. Each card → /help/charts/{id} detail.
- *
- * Replaces the dev-only /dev/charts (still works as redirect; see
- * src/app/dev/charts/page.tsx). Auth-gated for any logged-in user;
- * available to PE / IT_ADMIN / ON_DUTY alike.
+ * Auth-gated for any logged-in user; available to PE / IT_ADMIN / ON_DUTY.
  */
 
 "use client";

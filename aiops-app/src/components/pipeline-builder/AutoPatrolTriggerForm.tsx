@@ -6,7 +6,6 @@
  * Shared between:
  *   - AutoPatrolSetupModal (post-build 🔔 button)
  *   - /admin/pipeline-builder/new step 2 (wizard)
- *   - /admin/auto-patrols legacy form (future cleanup — still inline there)
  *
  * This is a *pure form* — no modal chrome, no submit button, no API calls.
  * Parent owns state via value/onChange and decides when to POST.
