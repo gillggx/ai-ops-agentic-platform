@@ -525,6 +525,12 @@ async def get_process_info(
     if not toolID and not lotID and not step:
         raise HTTPException(400, "Must provide toolID, lotID, or step (at least one)")
 
+    # 2026-05-23: tool_id='ALL' sentinel = 全機台（不過濾 toolID）。
+    # Validation 通過後再 normalize — agent 仍須提供三個之一（'ALL' 算 toolID
+    # 提供），但 filter 跳過。lot_id / step 沒有 sentinel 設計，僅 tool_id。
+    if toolID and toolID.upper() == "ALL":
+        toolID = None
+
     db = get_db()
     filt: dict = {}
     if toolID:
