@@ -559,6 +559,27 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
                     )
                 except Exception as ex:  # noqa: BLE001
                     logger.info("runtime_schema_md build failed (non-fatal): %s", ex)
+                # 2026-05-23: toolset.preview() returns `errors` (plural,
+                # list) when PipelineValidator rejects subgraph, and `error`
+                # (singular, string) when executor crashes at runtime. The
+                # snapshot here previously read only `error`, so validator
+                # rejections were silently dropped → phase_verifier reported
+                # "(no error message captured)" and the agent looped trying
+                # to fix something it couldn't see. Coalesce both shapes
+                # into a single error string for downstream consumers.
+                _err = pv.get("error")
+                if not _err:
+                    _errs = pv.get("errors")
+                    if isinstance(_errs, list) and _errs:
+                        _parts = []
+                        for e in _errs[:3]:
+                            if isinstance(e, dict):
+                                msg = e.get("message") or e.get("hint") or ""
+                                code = e.get("code") or e.get("rule") or ""
+                                _parts.append(f"[{code}] {msg}" if code else msg)
+                            else:
+                                _parts.append(str(e))
+                        _err = " | ".join(p for p in _parts if p) or None
                 snapshot_dict = {
                     "logical_id": target_nid,
                     "real_id": target_nid,
@@ -568,7 +589,7 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
                     "sample": sample,
                     "runtime_schema_md": runtime_schema_md,
                     "status": pv.get("status"),
-                    "error": pv.get("error"),
+                    "error": _err,
                     "after_cursor": round_n,
                 }
             except Exception as ex:  # noqa: BLE001
