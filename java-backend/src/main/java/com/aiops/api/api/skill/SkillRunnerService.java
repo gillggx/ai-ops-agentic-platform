@@ -434,6 +434,17 @@ public class SkillRunnerService {
             }
         }
 
+        // 2026-05-23: confirm + per_step were previously placed under
+        // `findings.outputs.{confirm,per_step}` where frontend RenderMiddleware
+        // would iterate and JSON.stringify the nested objects (no schema entry
+        // tells it how to render). UX result: alarm detail page showed raw
+        // JSON dumps for "CONFIRM" and "PER STEP" sections.
+        //
+        // New shape: stash the same content under `findings.step_details`
+        // (NOT inside `outputs`). RenderMiddleware never walks step_details so
+        // no inline dump fires. AlarmEnrichmentService walks step_details to
+        // harvest data_views into trigger_data_views which renders as proper
+        // table via DataViewTable component.
         Map<String, Object> perStep = new HashMap<>();
         for (Map<String, Object> s : stepResults) {
             Map<String, Object> entry = new HashMap<>();
@@ -447,9 +458,12 @@ public class SkillRunnerService {
         Map<String, Object> outputs = new HashMap<>();
         outputs.put("evidence_rows", evidenceRows);
         outputs.put("triggered_count", evidenceRows.size());
-        outputs.put("per_step", perStep);
-        if (confirmResult != null) outputs.put("confirm", confirmResult);
         findings.put("outputs", outputs);
+
+        Map<String, Object> stepDetails = new HashMap<>();
+        stepDetails.put("per_step", perStep);
+        if (confirmResult != null) stepDetails.put("confirm", confirmResult);
+        findings.put("step_details", stepDetails);
 
         // Output schema override — tells AlarmDetail page how to render
         // outputs.evidence_rows (as a table with these columns) and
