@@ -57,7 +57,8 @@ public class SchedulerHttpClient {
 			return data instanceof Map ? (Map<String, Object>) data : Map.of();
 		} catch (WebClientResponseException e) {
 			throw ApiException.serviceUnavailable("scheduler trigger HTTP " + e.getStatusCode().value());
-		} catch (Exception e) {
+		} catch (RuntimeException e) {
+			// Connection / timeout / DNS wrapped as unchecked by reactor.
 			throw ApiException.serviceUnavailable("scheduler unreachable: " + e.getMessage());
 		}
 	}
@@ -71,7 +72,7 @@ public class SchedulerHttpClient {
 					.retrieve()
 					.toBodilessEntity()
 					.block(Duration.ofSeconds(5));
-		} catch (Exception e) {
+		} catch (RuntimeException e) {
 			log.warn("scheduler sync failed for patrol {} (fail-open): {}", patrolId, e.getMessage());
 		}
 	}
@@ -90,7 +91,7 @@ public class SchedulerHttpClient {
 					.retrieve()
 					.toBodilessEntity()
 					.block(Duration.ofSeconds(10));
-		} catch (Exception e) {
+		} catch (RuntimeException e) {
 			log.warn("scheduler dispatchEvent failed (fail-open): {}", e.getMessage());
 		}
 	}
@@ -104,7 +105,7 @@ public class SchedulerHttpClient {
 					.retrieve()
 					.toBodilessEntity()
 					.block(Duration.ofSeconds(10));
-		} catch (Exception e) {
+		} catch (RuntimeException e) {
 			log.warn("scheduler dispatchAlarm failed (fail-open): {}", e.getMessage());
 		}
 	}

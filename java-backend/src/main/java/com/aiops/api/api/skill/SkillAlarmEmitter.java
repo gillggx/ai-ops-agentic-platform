@@ -7,6 +7,7 @@ import com.aiops.api.domain.skill.ExecutionLogRepository;
 import com.aiops.api.domain.skill.SkillDocumentEntity;
 import com.aiops.api.domain.skill.SkillRunEntity;
 import com.aiops.api.scheduler.SchedulerHttpClient;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -17,6 +18,7 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -222,7 +224,9 @@ public class SkillAlarmEmitter {
 			if (run.getDurationMs() != null) exec.setDurationMs((long) run.getDurationMs());
 			exec = execLogRepo.save(exec);
 			execLogId = exec.getId();
-		} catch (Exception ex) {
+		} catch (RuntimeException ex) {
+			// execLogRepo.save can throw JPA exceptions; alarm-detail page
+			// degrades to plain title/summary without findings — acceptable.
 			log.warn("skill {} run {} execution_log create failed: {}",
 					skill.getSlug(), run.getId(), ex.toString());
 		}
@@ -257,7 +261,10 @@ public class SkillAlarmEmitter {
 		// break alarm emit.
 		try {
 			scheduler.dispatchAlarm(a.getId());
-		} catch (Exception ex) {
+		} catch (RuntimeException ex) {
+			// dispatchAlarm wraps WebClient errors in unchecked. Fail-open is
+			// deliberate per the comment above — alarm emit succeeded; the
+			// auto_check fan-out is best-effort.
 			log.warn("skill {} run {}: dispatchAlarm(alarm={}) failed: {}",
 					skill.getSlug(), run.getId(), a.getId(), ex.toString());
 		}
@@ -425,11 +432,11 @@ public class SkillAlarmEmitter {
 	 *  Returns null if unparseable. Package-private for unit tests. */
 	static OffsetDateTime parseEvidenceTimestamp(String raw) {
 		if (raw == null || raw.isBlank() || "null".equals(raw)) return null;
-		try { return OffsetDateTime.parse(raw); } catch (Exception ignored) {}
+		try { return OffsetDateTime.parse(raw); } catch (DateTimeParseException ignored) {}
 		try {
 			LocalDateTime ldt = LocalDateTime.parse(raw, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
 			return ldt.atOffset(ZoneOffset.UTC);
-		} catch (Exception ignored) {}
+		} catch (DateTimeParseException ignored) {}
 		return null;
 	}
 
@@ -448,7 +455,7 @@ public class SkillAlarmEmitter {
 		if (json == null || json.isBlank()) return Map.of();
 		try {
 			return mapper.readValue(json, JSON_MAP_TYPE);
-		} catch (Exception e) {
+		} catch (JsonProcessingException e) {
 			return Map.of();
 		}
 	}
@@ -456,6 +463,6 @@ public class SkillAlarmEmitter {
 	private String safeJson(Object o) {
 		if (o == null) return null;
 		try { return mapper.writeValueAsString(o); }
-		catch (Exception ex) { return null; }
+		catch (JsonProcessingException ex) { return null; }
 	}
 }

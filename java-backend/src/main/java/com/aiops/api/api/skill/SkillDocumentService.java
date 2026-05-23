@@ -12,6 +12,7 @@ import com.aiops.api.domain.skill.SkillDocumentRepository;
 import com.aiops.api.domain.skill.SkillRunEntity;
 import com.aiops.api.domain.skill.SkillRunRepository;
 import com.aiops.api.sidecar.PythonSidecarClient;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -257,7 +258,7 @@ public class SkillDocumentService {
         confirm.put("must_pass", true);          // default; UI can flip later
         try {
             skill.setConfirmCheck(mapper.writeValueAsString(confirm));
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "confirm_serialization", e.getMessage());
         }
         return skill;
@@ -390,7 +391,7 @@ public class SkillDocumentService {
             confirm.put("must_pass", true);
             try {
                 skill.setConfirmCheck(mapper.writeValueAsString(confirm));
-            } catch (Exception e) {
+            } catch (JsonProcessingException e) {
                 throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "confirm_serialization", e.getMessage());
             }
         } else if (slot.startsWith("step:")) {
@@ -497,7 +498,7 @@ public class SkillDocumentService {
             if ("schedule".equals(s)) return "patrol";
             if ("event".equals(s) || "system".equals(s)) return "diagnose";
             return null;
-        } catch (Exception ex) {
+        } catch (JsonProcessingException ex) {
             // Bad JSON in trigger_config → can't derive; let caller fall back.
             log.debug("stageFromTrigger: parse failed for trigger_config — {}", ex.toString());
             return null;
@@ -508,7 +509,7 @@ public class SkillDocumentService {
         if (json == null || json.isBlank()) return Map.of();
         try {
             return mapper.readValue(json, MAP_TYPE);
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             return Map.of();
         }
     }
@@ -523,7 +524,10 @@ public class SkillDocumentService {
         try {
             result = sidecar.postJson("/internal/agent/skill/translate-step", req, Map.class, caller)
                     .block(SIDECAR_TIMEOUT);
-        } catch (Exception ex) {
+        } catch (RuntimeException ex) {
+            // Block() wraps WebClient errors + timeouts in unchecked exceptions
+            // (WebClientResponseException / IllegalStateException for timeout).
+            // Catch RuntimeException, not Exception — bubble checked errors.
             log.warn("{} translate failed: {}", tag, ex.toString());
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "translate_failed",
                     "sidecar unavailable: " + ex.getMessage());
@@ -547,7 +551,7 @@ public class SkillDocumentService {
         pe.setPipelineKind("diagnostic");
         try {
             pe.setPipelineJson(mapper.writeValueAsString(pipelineJson));
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "pipeline_save_failed", e.getMessage());
         }
         pe.setCreatedBy(caller != null ? caller.userId() : null);
@@ -565,10 +569,14 @@ public class SkillDocumentService {
                         if (raw == null || raw.isBlank()) return Collections.<Map<String, Object>>emptyList();
                         try {
                             return mapper.readValue(raw, LIST_MAP_TYPE);
-                        } catch (Exception ignore) { return Collections.<Map<String, Object>>emptyList(); }
+                        } catch (JsonProcessingException ignore) { return Collections.<Map<String, Object>>emptyList(); }
                     })
                     .orElseGet(Collections::emptyList);
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
+            // findByName + lambda chain can throw JPA exceptions (DataAccess /
+            // JpaSystem) wrapped as RuntimeException; never break the alarm
+            // payload build chain — return empty schema (canonical fields used).
+            log.debug("lookupEventAttrSchema for '{}' failed — {}", eventName, e.toString());
             return Collections.emptyList();
         }
     }
@@ -656,7 +664,7 @@ public class SkillDocumentService {
                         break;
                     }
                 }
-            } catch (Exception ignored) {}
+            } catch (JsonProcessingException ignored) {}
         }
         if (candidate != null && !pipelineRepo.existsById(candidate)) {
             log.info("skill {} slot {} ref pipeline {} no longer exists — treating as unbound",
@@ -690,7 +698,7 @@ public class SkillDocumentService {
             stepsList.add(step);
             skill.setSteps(mapper.writeValueAsString(stepsList));
             return skill;
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "steps_serialization", e.getMessage());
         }
     }
@@ -731,7 +739,7 @@ public class SkillDocumentService {
                 }
             }
             skill.setSteps(mapper.writeValueAsString(stepsList));
-        } catch (Exception e) {
+        } catch (JsonProcessingException e) {
             throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "steps_serialization", e.getMessage());
         }
     }

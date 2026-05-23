@@ -6,6 +6,7 @@ import com.aiops.api.domain.skill.SkillDocumentEntity;
 import com.aiops.api.domain.skill.SkillDocumentRepository;
 import com.aiops.api.domain.skill.SkillRunEntity;
 import com.aiops.api.domain.skill.SkillRunRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -177,7 +178,7 @@ public class SkillRunnerService {
 			persisted.put("steps", stepResults);
 			if (confirmResult != null) persisted.put("confirm", confirmResult);
 			run.setStepResults(mapper.writeValueAsString(persisted));
-		} catch (Exception e) {
+		} catch (JsonProcessingException e) {
 			run.setStepResults("[]");
 		}
 		runRepo.save(run);
@@ -199,7 +200,9 @@ public class SkillRunnerService {
 			if (alarm != null) {
 				sink.tryEmitNext(RunEvent.alarmCreated(alarm));
 			}
-		} catch (Exception ex) {  // never let alarm-emit fail the main run
+		} catch (RuntimeException ex) {  // never let alarm-emit fail the main run
+			// RuntimeException catches WebClient errors + JPA + NPE bugs in
+			// the emit chain. Checked exceptions (none expected here) bubble.
 			log.warn("skill {} run {} alarm-emit failed: {}",
 					skill.getSlug(), run.getId(), ex.toString());
 		}
@@ -227,7 +230,7 @@ public class SkillRunnerService {
 		r.setTriggeredBy(tb);
 		try {
 			r.setTriggerPayload(mapper.writeValueAsString(payload != null ? payload : Map.of()));
-		} catch (Exception e) {
+		} catch (JsonProcessingException e) {
 			r.setTriggerPayload("{}");
 		}
 		return runRepo.save(r);
@@ -241,7 +244,7 @@ public class SkillRunnerService {
 				stats = new HashMap<>(skill.getStats() == null || skill.getStats().isBlank()
 						? Map.of()
 						: mapper.readValue(skill.getStats(), JSON_MAP_TYPE));
-			} catch (Exception e) {
+			} catch (JsonProcessingException e) {
 				stats = new HashMap<>();
 			}
 			int prevTotal = stats.get("runs_total") instanceof Number n ? n.intValue() : 0;
@@ -256,7 +259,10 @@ public class SkillRunnerService {
 
 			skill.setStats(mapper.writeValueAsString(stats));
 			skillRepo.save(skill);
-		} catch (Exception e) {
+		} catch (RuntimeException | JsonProcessingException e) {
+			// JsonProcessingException for writeValueAsString failure, plus
+			// RuntimeException for skillRepo.save (JPA exceptions); stats are
+			// non-critical so never break the main run path.
 			log.warn("skill {} stats update failed: {}", skill.getSlug(), e.toString());
 		}
 	}
@@ -266,7 +272,7 @@ public class SkillRunnerService {
 	private List<Map<String, Object>> parseSteps(String json) {
 		try {
 			return mapper.readValue(json == null || json.isBlank() ? "[]" : json, JSON_LIST_TYPE);
-		} catch (Exception e) {
+		} catch (JsonProcessingException e) {
 			return List.of();
 		}
 	}
@@ -275,7 +281,7 @@ public class SkillRunnerService {
 		if (json == null || json.isBlank()) return Map.of();
 		try {
 			return mapper.readValue(json, JSON_MAP_TYPE);
-		} catch (Exception e) {
+		} catch (JsonProcessingException e) {
 			return Map.of();
 		}
 	}
