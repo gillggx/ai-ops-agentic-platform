@@ -32,7 +32,6 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -54,6 +53,7 @@ public class SkillDocumentController {
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
     private static final long SSE_TIMEOUT_MS = 5L * 60_000L;
 
+    private final SkillDocumentService service;
     private final SkillDocumentRepository repository;
     private final SkillRunRepository runRepository;
     private final SkillRunnerService runner;
@@ -65,7 +65,8 @@ public class SkillDocumentController {
     private final SkillMaterializeService materializer;
     private final com.aiops.api.domain.event.EventTypeRepository eventTypeRepo;
 
-    public SkillDocumentController(SkillDocumentRepository repository,
+    public SkillDocumentController(SkillDocumentService service,
+                                   SkillDocumentRepository repository,
                                    SkillRunRepository runRepository,
                                    SkillRunnerService runner,
                                    ObjectMapper mapper,
@@ -75,6 +76,7 @@ public class SkillDocumentController {
                                    PythonSidecarClient sidecar,
                                    SkillMaterializeService materializer,
                                    com.aiops.api.domain.event.EventTypeRepository eventTypeRepo) {
+        this.service = service;
         this.repository = repository;
         this.runRepository = runRepository;
         this.runner = runner;
@@ -91,77 +93,28 @@ public class SkillDocumentController {
     @GetMapping
     @PreAuthorize(Authorities.ANY_ROLE)
     public ApiResponse<List<Dtos.Summary>> list(@RequestParam(required = false) String stage) {
-        List<SkillDocumentEntity> all = (stage == null || stage.isBlank())
-                ? repository.findAll()
-                : repository.findByStage(stage);
-        List<Dtos.Summary> out = all.stream().map(Dtos::summaryOf).toList();
-        return ApiResponse.ok(out);
+        return ApiResponse.ok(service.list(stage).stream().map(Dtos::summaryOf).toList());
     }
 
     /** Get a single skill by slug (Playbook page). */
     @GetMapping("/{slug}")
     @PreAuthorize(Authorities.ANY_ROLE)
     public ApiResponse<Dtos.Detail> getBySlug(@PathVariable String slug) {
-        SkillDocumentEntity e = repository.findBySlug(slug)
-                .orElseThrow(() -> ApiException.notFound("skill"));
-        return ApiResponse.ok(Dtos.detailOf(e));
+        return ApiResponse.ok(Dtos.detailOf(service.getBySlug(slug)));
     }
 
     @PostMapping
     @PreAuthorize(Authorities.ADMIN_OR_PE)
-    @Transactional
     public ApiResponse<Dtos.Detail> create(@Validated @RequestBody Dtos.CreateRequest req,
                                            @AuthenticationPrincipal AuthPrincipal caller) {
-        // Phase 11 v11 — slug + stage are now optional. Auto-derive when caller
-        // (e.g. simplified New Skill form) doesn't supply them. Old callers
-        // passing both still validate the values.
-        String stage = req.stage();
-        if (stage == null || stage.isBlank()) {
-            stage = "diagnose";  // safe default; PUT auto-flips to patrol on schedule trigger
-        } else if (!VALID_STAGES.contains(stage)) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "validation_error", "stage must be patrol|diagnose");
-        }
-        String slug = req.slug();
-        if (slug == null || slug.isBlank()) {
-            slug = autoSlug(req.title());
-        }
-        if (repository.existsBySlug(slug)) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "duplicate_slug", "slug already exists: " + slug);
-        }
-        SkillDocumentEntity e = new SkillDocumentEntity();
-        e.setSlug(slug);
-        e.setTitle(req.title());
-        e.setStage(stage);
-        e.setDomain(Objects.requireNonNullElse(req.domain(), ""));
-        e.setDescription(Objects.requireNonNullElse(req.description(), ""));
-        e.setAuthorUserId(caller != null ? caller.userId() : null);
-        e.setVersion(Objects.requireNonNullElse(req.version(), "0.1"));
-        e.setStatus("draft");
-        e.setTriggerConfig(Objects.requireNonNullElse(req.triggerConfig(), "{}"));
-        e.setSteps(Objects.requireNonNullElse(req.steps(), "[]"));
-        SkillDocumentEntity saved = repository.save(e);
-        log.info("skill created: id={} slug={} stage={} author={}", saved.getId(), saved.getSlug(),
-                stage, e.getAuthorUserId());
-        return ApiResponse.ok(Dtos.detailOf(saved));
-    }
-
-    /** Phase 11 v11 — slugify title for skills created without explicit slug.
-     *  ASCII letters/digits/dashes only (lowercased); CJK / other chars
-     *  collapse into a `skill-{epochSec}` fallback so we always produce a
-     *  valid URL fragment. */
-    private static String autoSlug(String title) {
-        String base = title == null ? "" : title.toLowerCase()
-                .replaceAll("[^a-z0-9\\-\\s]", "")
-                .trim()
-                .replaceAll("\\s+", "-");
-        if (base.length() < 2) base = "skill";
-        long ts = System.currentTimeMillis() / 1000L;
-        // Cap base to 40 chars so the final slug stays under 60.
-        return (base.length() > 40 ? base.substring(0, 40) : base) + "-" + Long.toString(ts, 36);
+        return ApiResponse.ok(Dtos.detailOf(service.create(req, caller)));
     }
 
     /** Phase 11 v11 — derive stage from trigger.type. schedule → patrol;
-     *  event → diagnose. Returns null if trigger is unparseable / absent. */
+     *  event → diagnose. Returns null if trigger is unparseable / absent.
+     *  <p>Still in controller because the remaining (not-yet-refactored)
+     *  PUT/bind-pipeline handlers below use it; will move to service when
+     *  those handlers are extracted in next iteration. */
     private String stageFromTrigger(String triggerConfigJson) {
         if (triggerConfigJson == null || triggerConfigJson.isBlank()) return null;
         try {
