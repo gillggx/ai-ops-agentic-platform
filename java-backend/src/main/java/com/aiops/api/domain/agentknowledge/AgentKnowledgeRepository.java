@@ -19,6 +19,14 @@ public interface AgentKnowledgeRepository extends JpaRepository<AgentKnowledgeEn
             nativeQuery = true)
     int updateEmbedding(@Param("id") Long id, @Param("vec") String vec);
 
+    /** Invalidate the embedding (used by the patch path when body text
+     *  changes — sidecar's _backfill_embeddings will re-embed on next pass).
+     *  Plain UPDATE works for NULL because we're not crossing a type cast. */
+    @Modifying
+    @Query(value = "UPDATE agent_knowledge SET embedding = NULL, updated_at = now() WHERE id = :id",
+            nativeQuery = true)
+    int clearEmbedding(@Param("id") Long id);
+
     /** Cosine-similarity search via pgvector. Embedding string is rendered
      *  as PostgreSQL vector literal '[0.1,0.2,...]'. Returns top-K most
      *  similar active rows matching scope. */

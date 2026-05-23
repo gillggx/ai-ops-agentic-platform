@@ -182,8 +182,12 @@ public class AgentKnowledgeService {
 		if (req.body() != null)     { e.setBody(req.body()); bodyChanged = true; }
 		if (req.priority() != null) { validatePriority(req.priority()); e.setPriority(req.priority()); }
 		if (req.active() != null)   e.setActive(req.active());
-		if (bodyChanged) e.setEmbedding(null);  // invalidate; sidecar re-embeds
 		e.setUpdatedAt(OffsetDateTime.now());
+		// Invalidation goes through native SQL — the `embedding` column is
+		// JPA-readonly (insertable/updatable=false) because Hibernate binds
+		// String as VARCHAR and pgvector refuses the implicit cast. Sidecar's
+		// _backfill_embeddings will re-embed on next pass.
+		if (bodyChanged) knowledgeRepo.clearEmbedding(id);
 		return Dtos.KnowledgeDto.of(e);
 	}
 
@@ -234,8 +238,9 @@ public class AgentKnowledgeService {
 		if (req.title() != null)      e.setTitle(req.title());
 		if (req.inputText() != null)  { e.setInputText(req.inputText()); inputChanged = true; }
 		if (req.outputText() != null) e.setOutputText(req.outputText());
-		if (inputChanged) e.setEmbedding(null);
 		e.setUpdatedAt(OffsetDateTime.now());
+		// See patchKnowledge — same pgvector ↔ JPA write-path workaround.
+		if (inputChanged) exampleRepo.clearEmbedding(id);
 		return Dtos.ExampleDto.of(e);
 	}
 
