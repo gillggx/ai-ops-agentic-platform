@@ -2,106 +2,91 @@ package com.aiops.api.api.skill;
 
 import com.aiops.api.auth.AuthPrincipal;
 import com.aiops.api.auth.Authorities;
-import com.aiops.api.common.ApiException;
 import com.aiops.api.common.ApiResponse;
-import com.aiops.api.domain.alarm.AlarmEntity;
-import com.aiops.api.domain.alarm.AlarmRepository;
-import com.aiops.api.domain.pipeline.PipelineEntity;
-import com.aiops.api.domain.pipeline.PipelineRepository;
-import com.aiops.api.domain.skill.PersonalRuleFireRepository;
 import com.aiops.api.domain.skill.SkillDocumentEntity;
-import com.aiops.api.domain.skill.SkillDocumentRepository;
 import com.aiops.api.domain.skill.SkillRunEntity;
-import com.aiops.api.domain.skill.SkillRunRepository;
-import com.aiops.api.sidecar.PythonSidecarClient;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.validation.constraints.NotBlank;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.Disposable;
 
 import java.io.IOException;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Phase 11-A — Skill Document CRUD.
  *
- * <p>Read-only listing for now (Library page). Write paths (POST/PUT/DELETE)
- * exist as scaffolds; trigger materialization to {@code auto_patrols} /
- * {@code pipeline_auto_check_triggers} is a TODO for 11-A.5 — until then,
- * saved skills exist as documents but don't yet fire on trigger.
+ * <p>After Phase 12 OOP refactor (2026-05-23) this is a thin HTTP layer:
+ * binds parameters, calls {@link SkillDocumentService}, wraps responses in
+ * {@link ApiResponse} or maps entities through {@link Dtos}. All business
+ * logic, validation, sidecar coordination, and entity mutation lives in
+ * the service.
+ *
+ * <p>The SSE {@code /run} endpoint stays here because its body is HTTP-
+ * transport plumbing around the reactive {@code Flux<RunnerEvent>} that
+ * {@link SkillRunnerService#run} already produces.
  */
 @Slf4j
 @RestController
 @RequestMapping("/api/v1/skill-documents")
 public class SkillDocumentController {
 
-    private static final Set<String> VALID_STAGES = Set.of("patrol", "diagnose");
-    private static final Set<String> VALID_STATUS = Set.of("draft", "stable");
-
-    private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
     private static final long SSE_TIMEOUT_MS = 5L * 60_000L;
 
     private final SkillDocumentService service;
-    private final SkillDocumentRepository repository;
-    private final SkillRunRepository runRepository;
     private final SkillRunnerService runner;
     private final ObjectMapper mapper;
-    private final AlarmRepository alarmRepo;
-    private final PersonalRuleFireRepository ruleFireRepo;
-    private final PipelineRepository pipelineRepo;
-    private final PythonSidecarClient sidecar;
-    private final SkillMaterializeService materializer;
-    private final com.aiops.api.domain.event.EventTypeRepository eventTypeRepo;
 
     public SkillDocumentController(SkillDocumentService service,
-                                   SkillDocumentRepository repository,
-                                   SkillRunRepository runRepository,
                                    SkillRunnerService runner,
-                                   ObjectMapper mapper,
-                                   AlarmRepository alarmRepo,
-                                   PersonalRuleFireRepository ruleFireRepo,
-                                   PipelineRepository pipelineRepo,
-                                   PythonSidecarClient sidecar,
-                                   SkillMaterializeService materializer,
-                                   com.aiops.api.domain.event.EventTypeRepository eventTypeRepo) {
+                                   ObjectMapper mapper) {
         this.service = service;
-        this.repository = repository;
-        this.runRepository = runRepository;
         this.runner = runner;
         this.mapper = mapper;
-        this.alarmRepo = alarmRepo;
-        this.ruleFireRepo = ruleFireRepo;
-        this.pipelineRepo = pipelineRepo;
-        this.sidecar = sidecar;
-        this.materializer = materializer;
-        this.eventTypeRepo = eventTypeRepo;
     }
 
-    /** Library listing — returns the full list, optionally filtered by stage. */
+    // ── Reads ────────────────────────────────────────────────────────────────
+
     @GetMapping
     @PreAuthorize(Authorities.ANY_ROLE)
     public ApiResponse<List<Dtos.Summary>> list(@RequestParam(required = false) String stage) {
         return ApiResponse.ok(service.list(stage).stream().map(Dtos::summaryOf).toList());
     }
 
-    /** Get a single skill by slug (Playbook page). */
     @GetMapping("/{slug}")
     @PreAuthorize(Authorities.ANY_ROLE)
     public ApiResponse<Dtos.Detail> getBySlug(@PathVariable String slug) {
         return ApiResponse.ok(Dtos.detailOf(service.getBySlug(slug)));
     }
+
+    @GetMapping("/{slug}/runs")
+    @PreAuthorize(Authorities.ANY_ROLE)
+    public ApiResponse<List<SkillRunEntity>> listRuns(@PathVariable String slug,
+                                                       @RequestParam(required = false) Boolean test) {
+        return ApiResponse.ok(service.listRuns(slug, test));
+    }
+
+    @GetMapping("/{slug}/past-events")
+    @PreAuthorize(Authorities.ANY_ROLE)
+    public ApiResponse<List<Map<String, Object>>> pastEvents(@PathVariable String slug) {
+        return ApiResponse.ok(service.pastEvents(slug));
+    }
+
+    @GetMapping("/{slug}/builder-url")
+    @PreAuthorize(Authorities.ADMIN_OR_PE)
+    public ApiResponse<Map<String, Object>> builderUrl(@PathVariable String slug,
+                                                        @RequestParam String slot,
+                                                        @RequestParam(required = false, defaultValue = "") String instruction) {
+        return ApiResponse.ok(service.builderUrl(slug, slot, instruction));
+    }
+
+    // ── Writes ───────────────────────────────────────────────────────────────
 
     @PostMapping
     @PreAuthorize(Authorities.ADMIN_OR_PE)
@@ -110,673 +95,52 @@ public class SkillDocumentController {
         return ApiResponse.ok(Dtos.detailOf(service.create(req, caller)));
     }
 
-    /** Phase 11 v11 — derive stage from trigger.type. schedule → patrol;
-     *  event → diagnose. Returns null if trigger is unparseable / absent.
-     *  <p>Still in controller because the remaining (not-yet-refactored)
-     *  PUT/bind-pipeline handlers below use it; will move to service when
-     *  those handlers are extracted in next iteration. */
-    private String stageFromTrigger(String triggerConfigJson) {
-        if (triggerConfigJson == null || triggerConfigJson.isBlank()) return null;
-        try {
-            Map<String, Object> tc = mapper.readValue(triggerConfigJson, MAP_TYPE);
-            Object t = tc.get("type");
-            if (t == null) return null;
-            String s = String.valueOf(t).toLowerCase();
-            if ("schedule".equals(s)) return "patrol";
-            if ("event".equals(s) || "system".equals(s)) return "diagnose";
-            return null;
-        } catch (Exception ex) {
-            return null;
-        }
-    }
-
     @PutMapping("/{slug}")
     @PreAuthorize(Authorities.ADMIN_OR_PE)
-    @Transactional
     public ApiResponse<Dtos.Detail> update(@PathVariable String slug,
                                            @RequestBody Dtos.UpdateRequest req) {
-        SkillDocumentEntity e = repository.findBySlug(slug)
-                .orElseThrow(() -> ApiException.notFound("skill"));
-        if (req.title() != null) e.setTitle(req.title());
-        if (req.stage() != null) {
-            if (!VALID_STAGES.contains(req.stage())) {
-                throw new ApiException(HttpStatus.BAD_REQUEST, "validation_error", "stage must be patrol|diagnose");
-            }
-            e.setStage(req.stage());
-        }
-        String oldStatus = e.getStatus();
-        if (req.status() != null) {
-            if (!VALID_STATUS.contains(req.status())) {
-                throw new ApiException(HttpStatus.BAD_REQUEST, "validation_error", "status must be draft|stable");
-            }
-            e.setStatus(req.status());
-        }
-        if (req.domain() != null) e.setDomain(req.domain());
-        if (req.description() != null) e.setDescription(req.description());
-        if (req.certifiedBy() != null) e.setCertifiedBy(req.certifiedBy());
-        if (req.version() != null) e.setVersion(req.version());
-        if (req.triggerConfig() != null) {
-            e.setTriggerConfig(req.triggerConfig());
-            // Phase 11 v11 — auto-flip stage from trigger.type unless caller
-            // explicitly set stage in the same request. schedule → patrol,
-            // event → diagnose. Lets the simplified New Skill form skip stage
-            // entirely and have it land on the right value once trigger is set.
-            if (req.stage() == null) {
-                String derived = stageFromTrigger(req.triggerConfig());
-                if (derived != null && !derived.equals(e.getStage())) {
-                    log.info("skill {}: stage auto-flipped {} → {} (from trigger.type)",
-                            e.getSlug(), e.getStage(), derived);
-                    e.setStage(derived);
-                }
-            }
-        }
-        if (req.steps() != null) e.setSteps(req.steps());
-        // Phase 11 v2: confirmCheck is nullable — empty string clears the gate,
-        // a JSON blob installs/replaces it. We can't distinguish "field absent"
-        // from "null" in record DTOs cleanly, so the convention is: caller MUST
-        // send confirmCheck="" to clear, or omit the entire field to leave it.
-        if (req.confirmCheck() != null) {
-            e.setConfirmCheck(req.confirmCheck().isBlank() ? null : req.confirmCheck());
-        }
-
-        // Phase 11 — materialize / clear trigger rows on status transitions.
-        String newStatus = e.getStatus();
-        if (!java.util.Objects.equals(oldStatus, newStatus)) {
-            if ("stable".equals(newStatus)) {
-                int n = materializer.materialize(e);
-                log.info("skill {} published (stable) — materialized {} rows", e.getSlug(), n);
-            } else if ("draft".equals(newStatus) && "stable".equals(oldStatus)) {
-                int n = materializer.clear(e);
-                log.info("skill {} unpublished (draft) — cleared {} rows", e.getSlug(), n);
-            }
-        } else if ("stable".equals(newStatus)
-                && (req.triggerConfig() != null || req.steps() != null || req.confirmCheck() != null)) {
-            // Already published and trigger/steps/confirm changed → re-materialize.
-            int n = materializer.materialize(e);
-            log.info("skill {} re-materialized {} rows after stable-edit", e.getSlug(), n);
-        }
-        return ApiResponse.ok(Dtos.detailOf(e));
-    }
-
-    /**
-     * Phase 11 v2 — set or replace the CONFIRM (gating) step. Mirrors
-     * /steps POST: takes natural-language text, calls sidecar to translate
-     * into a pipeline ending in block_step_check, persists the pipeline as a
-     * pb_pipelines row, and stores a JSON blob into skill.confirm_check.
-     *
-     * <p>Body: {"text": "近 1h OOC 次數 ≥ 3 才繼續"}
-     * <p>To remove the confirm step entirely, call DELETE /confirm-check.
-     */
-    @PostMapping("/{slug}/confirm-check")
-    @PreAuthorize(Authorities.ADMIN_OR_PE)
-    @Transactional
-    public ApiResponse<Dtos.Detail> setConfirmCheck(@PathVariable String slug,
-                                                    @RequestBody Map<String, Object> body,
-                                                    @AuthenticationPrincipal AuthPrincipal caller) {
-        String text = String.valueOf(body.getOrDefault("text", "")).trim();
-        if (text.isBlank()) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "validation_error", "text required");
-        }
-        SkillDocumentEntity skill = repository.findBySlug(slug)
-                .orElseThrow(() -> ApiException.notFound("skill"));
-
-        Map<String, Object> req = Map.of("text", text);
-        @SuppressWarnings({"unchecked", "rawtypes"})
-        Map result;
-        try {
-            result = sidecar.postJson("/internal/agent/skill/translate-step", req, Map.class, caller)
-                    .block(java.time.Duration.ofMinutes(2));
-        } catch (Exception ex) {
-            log.warn("confirm-check translate failed: {}", ex.toString());
-            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "translate_failed",
-                    "sidecar unavailable: " + ex.getMessage());
-        }
-        if (result == null) {
-            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "translate_failed",
-                    "sidecar returned null");
-        }
-        String resStatus = String.valueOf(result.getOrDefault("status", ""));
-        Object pj = result.get("pipeline_json");
-        String summary = String.valueOf(result.getOrDefault("summary", ""));
-
-        Long pipelineId = null;
-        String aiSummary = summary;
-        if ("finished".equals(resStatus) && pj instanceof Map) {
-            // Persist the new pipeline as a pb_pipelines row (same as steps).
-            PipelineEntity pe = new PipelineEntity();
-            pe.setName("[Skill] " + skill.getTitle() + " · confirm");
-            pe.setDescription(text);
-            pe.setStatus("draft");
-            pe.setPipelineKind("diagnostic");
-            try {
-                pe.setPipelineJson(mapper.writeValueAsString(pj));
-            } catch (Exception e) {
-                throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "pipeline_save_failed", e.getMessage());
-            }
-            pe.setCreatedBy(caller != null ? caller.userId() : null);
-            pipelineId = pipelineRepo.save(pe).getId();
-        } else {
-            aiSummary = "(translation 失敗) "
-                    + result.getOrDefault("error_message", "translation incomplete");
-        }
-
-        Map<String, Object> confirm = new java.util.HashMap<>();
-        confirm.put("description", text);
-        confirm.put("ai_summary", aiSummary);
-        confirm.put("pipeline_id", pipelineId);
-        confirm.put("must_pass", true);          // default; UI can flip later
-        try {
-            skill.setConfirmCheck(mapper.writeValueAsString(confirm));
-        } catch (Exception e) {
-            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "confirm_serialization", e.getMessage());
-        }
-        return ApiResponse.ok(Dtos.detailOf(skill));
-    }
-
-    /** Phase 11 v2 — drop the CONFIRM step. */
-    @DeleteMapping("/{slug}/confirm-check")
-    @PreAuthorize(Authorities.ADMIN_OR_PE)
-    @Transactional
-    public ApiResponse<Dtos.Detail> clearConfirmCheck(@PathVariable String slug) {
-        SkillDocumentEntity skill = repository.findBySlug(slug)
-                .orElseThrow(() -> ApiException.notFound("skill"));
-        skill.setConfirmCheck(null);
-        return ApiResponse.ok(Dtos.detailOf(skill));
-    }
-
-    /**
-     * Phase 11 v4 — return the Pipeline Builder URL the frontend should
-     * open (in a new tab) when user wants to author a pipeline for one
-     * of this skill's slots. The URL carries:
-     *   - skill_doc_id      : binds back when Builder hits Confirm
-     *   - slot              : confirm | step:NEW | step:&lt;existing-step-id&gt;
-     *   - instruction       : NL prompt to seed Glass Box
-     *   - trigger_type      : event | schedule
-     *   - trigger_event     : event name when type=event
-     *   - target_*          : target.kind / target.ids when type=schedule
-     *
-     * Builder embed mode reads these and pre-binds inputs, then on Confirm
-     * POSTs to {@code /bind-pipeline} below to wire the resulting
-     * pipeline_id back into the skill.
-     */
-    @GetMapping("/{slug}/builder-url")
-    @PreAuthorize(Authorities.ADMIN_OR_PE)
-    public ApiResponse<Map<String, Object>> builderUrl(@PathVariable String slug,
-                                                        @RequestParam String slot,
-                                                        @RequestParam(required = false, defaultValue = "") String instruction) {
-        if (!slot.equals("confirm") && !slot.startsWith("step:")) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "validation_error",
-                    "slot must be 'confirm' or 'step:<id>'");
-        }
-        SkillDocumentEntity skill = repository.findBySlug(slug)
-                .orElseThrow(() -> ApiException.notFound("skill"));
-
-        Map<String, Object> trig = parseJson(skill.getTriggerConfig());
-        StringBuilder qs = new StringBuilder();
-        qs.append("?embed=skill")
-          .append("&skill_slug=").append(java.net.URLEncoder.encode(slug, java.nio.charset.StandardCharsets.UTF_8))
-          .append("&skill_doc_id=").append(skill.getId())
-          .append("&slot=").append(java.net.URLEncoder.encode(slot, java.nio.charset.StandardCharsets.UTF_8));
-        if (!instruction.isBlank()) {
-            qs.append("&instruction=").append(java.net.URLEncoder.encode(instruction, java.nio.charset.StandardCharsets.UTF_8));
-        }
-        // Phase 11 v6 — if the slot already has a bound pipeline, carry its
-        // id so the Builder embed mode loads the existing JSON instead of
-        // dropping the user onto a blank canvas. Refine = update same row.
-        Long existingPipelineId = lookupSlotPipelineId(skill, slot);
-        if (existingPipelineId != null) {
-            qs.append("&existing_pipeline_id=").append(existingPipelineId);
-        }
-        String type = String.valueOf(trig.getOrDefault("type", "event"));
-        // legacy "system" → "event"
-        if ("system".equals(type)) type = "event";
-        qs.append("&trigger_type=").append(java.net.URLEncoder.encode(type, java.nio.charset.StandardCharsets.UTF_8));
-        if ("event".equals(type)) {
-            String ev = String.valueOf(trig.getOrDefault("event",
-                    trig.getOrDefault("event_type", "")));
-            if (!ev.isBlank()) qs.append("&trigger_event=").append(java.net.URLEncoder.encode(ev, java.nio.charset.StandardCharsets.UTF_8));
-        } else if ("schedule".equals(type)) {
-            Object targetObj = trig.get("target");
-            if (targetObj instanceof Map<?, ?> tm) {
-                Object kind = tm.get("kind");
-                if (kind != null) qs.append("&target_kind=").append(java.net.URLEncoder.encode(String.valueOf(kind), java.nio.charset.StandardCharsets.UTF_8));
-                Object ids = tm.get("ids");
-                if (ids instanceof java.util.List<?> idList && !idList.isEmpty()) {
-                    String joined = String.join(",", idList.stream().map(String::valueOf).toList());
-                    qs.append("&target_ids=").append(java.net.URLEncoder.encode(joined, java.nio.charset.StandardCharsets.UTF_8));
-                }
-            }
-        }
-
-        // Phase 11 v6 — refine path: existing pipeline → /[id] edit route
-        // already loads the pipeline_json + supports Glass Box / inputs
-        // editing. The Skill embed query params still flow through so the
-        // banner + bind callback work the same way.
-        String basePath = (existingPipelineId != null)
-                ? ("/admin/pipeline-builder/" + existingPipelineId)
-                : "/admin/pipeline-builder/new";
-        String url = basePath + qs;
-        return ApiResponse.ok(Map.of(
-                "builder_url", url,
-                "skill_id",    skill.getId(),
-                "slot",        slot
-        ));
-    }
-
-    /**
-     * Phase 11 v4 — Pipeline Builder calls this on Confirm to bind the
-     * just-built pipeline back into the requesting skill's slot.
-     *
-     * <p>Body: {"slot": "confirm" | "step:s1", "pipeline_id": 42, "summary": "..."}
-     */
-    @PostMapping("/{slug}/bind-pipeline")
-    @PreAuthorize(Authorities.ADMIN_OR_PE)
-    @Transactional
-    public ApiResponse<Dtos.Detail> bindPipeline(@PathVariable String slug,
-                                                  @RequestBody Map<String, Object> body) {
-        SkillDocumentEntity skill = repository.findBySlug(slug)
-                .orElseThrow(() -> ApiException.notFound("skill"));
-        String slot = String.valueOf(body.getOrDefault("slot", "")).trim();
-        Object pid = body.get("pipeline_id");
-        if (!(pid instanceof Number pn)) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "validation_error", "pipeline_id required");
-        }
-        Long pipelineId = pn.longValue();
-        String summary = String.valueOf(body.getOrDefault("summary", ""));
-        String description = String.valueOf(body.getOrDefault("description", summary));
-
-        // Stamp ownership on the pipeline row so future cleanup / lifecycle
-        // logic can find skill-bound pipelines.
-        PipelineEntity pe = pipelineRepo.findById(pipelineId)
-                .orElseThrow(() -> ApiException.notFound("pipeline"));
-        pe.setParentSkillDocId(skill.getId());
-        pe.setParentSlot(slot);
-        // Phase 11 v4: under Skill ownership, lifecycle is driven by Skill.
-        // We park the pipeline at status="linked" so it doesn't show up in
-        // the free-standing pipeline list as draft / orphan.
-        pe.setStatus("linked");
-        pipelineRepo.save(pe);
-
-        if ("confirm".equals(slot)) {
-            Map<String, Object> confirm = new java.util.HashMap<>();
-            confirm.put("description", description);
-            confirm.put("ai_summary", summary);
-            confirm.put("pipeline_id", pipelineId);
-            confirm.put("must_pass", true);
-            try {
-                skill.setConfirmCheck(mapper.writeValueAsString(confirm));
-            } catch (Exception e) {
-                throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "confirm_serialization", e.getMessage());
-            }
-        } else if (slot.startsWith("step:")) {
-            String stepId = slot.substring("step:".length());
-            // step:NEW → append; step:<existing-id> → update.
-            updateStepPipelineId(skill, stepId, pipelineId, description, summary);
-        } else {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "validation_error",
-                    "slot must be 'confirm' or 'step:<id|NEW>'");
-        }
-
-        return ApiResponse.ok(Dtos.detailOf(skill));
-    }
-
-    @SuppressWarnings("unchecked")
-    private void updateStepPipelineId(SkillDocumentEntity skill, String stepId,
-                                       Long pipelineId, String description, String summary) {
-        try {
-            List<Map<String, Object>> stepsList = mapper.readValue(
-                    skill.getSteps() == null || skill.getSteps().isBlank() ? "[]" : skill.getSteps(),
-                    new TypeReference<List<Map<String, Object>>>() {});
-            if ("NEW".equalsIgnoreCase(stepId) || stepsList.stream().noneMatch(
-                    s -> stepId.equals(String.valueOf(s.get("id"))))) {
-                String newId = "s" + (stepsList.size() + 1) + "_" + Long.toHexString(System.currentTimeMillis());
-                Map<String, Object> step = new java.util.HashMap<>();
-                step.put("id", newId);
-                step.put("order", stepsList.size() + 1);
-                step.put("text", description);
-                step.put("ai_summary", summary);
-                step.put("pipeline_id", pipelineId);
-                step.put("confirmed", true);
-                step.put("pending", false);
-                step.put("suggested_actions", List.of());
-                step.put("badge", Map.of("kind", "ai", "label", "Pipeline Builder"));
-                stepsList.add(step);
-            } else {
-                for (Map<String, Object> s : stepsList) {
-                    if (stepId.equals(String.valueOf(s.get("id")))) {
-                        s.put("pipeline_id", pipelineId);
-                        if (!description.isBlank()) s.put("text", description);
-                        if (!summary.isBlank()) s.put("ai_summary", summary);
-                        s.put("pending", false);
-                        s.put("confirmed", true);
-                        break;
-                    }
-                }
-            }
-            skill.setSteps(mapper.writeValueAsString(stepsList));
-        } catch (Exception e) {
-            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "steps_serialization", e.getMessage());
-        }
+        return ApiResponse.ok(Dtos.detailOf(service.update(slug, req)));
     }
 
     @DeleteMapping("/{slug}")
     @PreAuthorize(Authorities.ADMIN_OR_PE)
-    @Transactional
     public ApiResponse<Void> delete(@PathVariable String slug) {
-        SkillDocumentEntity e = repository.findBySlug(slug)
-                .orElseThrow(() -> ApiException.notFound("skill"));
-        // Clear materialized trigger rows first so we don't leave dangling
-        // auto_patrols / auto_check rows pointing at a deleted skill.
-        materializer.clear(e);
-        repository.delete(e);
+        service.delete(slug);
         return ApiResponse.ok(null);
     }
 
-    @GetMapping("/{slug}/runs")
-    @PreAuthorize(Authorities.ANY_ROLE)
-    public ApiResponse<List<SkillRunEntity>> listRuns(@PathVariable String slug,
-                                                       @RequestParam(required = false) Boolean test) {
-        SkillDocumentEntity e = repository.findBySlug(slug)
-                .orElseThrow(() -> ApiException.notFound("skill"));
-        List<SkillRunEntity> runs = (test == null)
-                ? runRepository.findBySkillIdOrderByTriggeredAtDesc(e.getId())
-                : runRepository.findBySkillIdAndIsTestOrderByTriggeredAtDesc(e.getId(), test);
-        return ApiResponse.ok(runs);
+    @PostMapping("/{slug}/confirm-check")
+    @PreAuthorize(Authorities.ADMIN_OR_PE)
+    public ApiResponse<Dtos.Detail> setConfirmCheck(@PathVariable String slug,
+                                                    @RequestBody Map<String, Object> body,
+                                                    @AuthenticationPrincipal AuthPrincipal caller) {
+        String text = String.valueOf(body.getOrDefault("text", "")).trim();
+        return ApiResponse.ok(Dtos.detailOf(service.setConfirmCheck(slug, text, caller)));
     }
 
-    /**
-     * Phase 11 — translate a NL step description into a pipeline (ending in
-     * block_step_check), persist it as a new pb_pipelines row, and append
-     * the step into skill.steps[].
-     *
-     * <p>Body: {"text": "..."}
-     * <p>Response: updated SkillDetail with the new step appended.
-     */
+    @DeleteMapping("/{slug}/confirm-check")
+    @PreAuthorize(Authorities.ADMIN_OR_PE)
+    public ApiResponse<Dtos.Detail> clearConfirmCheck(@PathVariable String slug) {
+        return ApiResponse.ok(Dtos.detailOf(service.clearConfirmCheck(slug)));
+    }
+
+    @PostMapping("/{slug}/bind-pipeline")
+    @PreAuthorize(Authorities.ADMIN_OR_PE)
+    public ApiResponse<Dtos.Detail> bindPipeline(@PathVariable String slug,
+                                                  @RequestBody Map<String, Object> body) {
+        return ApiResponse.ok(Dtos.detailOf(service.bindPipeline(slug, body)));
+    }
+
     @PostMapping("/{slug}/steps")
     @PreAuthorize(Authorities.ADMIN_OR_PE)
-    @Transactional
     public ApiResponse<Dtos.Detail> addStep(@PathVariable String slug,
                                             @RequestBody Map<String, Object> body,
                                             @AuthenticationPrincipal AuthPrincipal caller) {
         String text = String.valueOf(body.getOrDefault("text", "")).trim();
-        if (text.isBlank()) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "validation_error", "text required");
-        }
-        SkillDocumentEntity skill = repository.findBySlug(slug)
-                .orElseThrow(() -> ApiException.notFound("skill"));
-
-        // Call sidecar /internal/agent/skill/translate-step (block on Mono).
-        Map<String, Object> req = Map.of("text", text);
-        @SuppressWarnings({"unchecked", "rawtypes"})
-        Map result;
-        try {
-            result = sidecar.postJson("/internal/agent/skill/translate-step", req, Map.class, caller)
-                    .block(java.time.Duration.ofMinutes(2));
-        } catch (Exception ex) {
-            log.warn("skill translate-step failed: {}", ex.toString());
-            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "translate_failed",
-                    "sidecar unavailable: " + ex.getMessage());
-        }
-        if (result == null) {
-            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "translate_failed",
-                    "sidecar returned null");
-        }
-        String resStatus = String.valueOf(result.getOrDefault("status", ""));
-        Object pj = result.get("pipeline_json");
-        String summary = String.valueOf(result.getOrDefault("summary", ""));
-        if (!"finished".equals(resStatus) || !(pj instanceof Map)) {
-            // Save step with null pipeline_id so user can iterate; surface error in ai_summary.
-            String err = String.valueOf(result.getOrDefault("error_message", "translation incomplete"));
-            return appendStep(skill, text, null, "(translation 失敗) " + err);
-        }
-
-        // Persist the new pipeline as a pb_pipelines row.
-        PipelineEntity pe = new PipelineEntity();
-        pe.setName("[Skill] " + skill.getTitle() + " · step");
-        pe.setDescription(text);
-        pe.setStatus("draft");
-        pe.setPipelineKind("diagnostic");
-        try {
-            pe.setPipelineJson(mapper.writeValueAsString(pj));
-        } catch (Exception e) {
-            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "pipeline_save_failed", e.getMessage());
-        }
-        pe.setCreatedBy(caller != null ? caller.userId() : null);
-        PipelineEntity saved = pipelineRepo.save(pe);
-
-        return appendStep(skill, text, saved.getId(), summary);
+        return ApiResponse.ok(Dtos.detailOf(service.addStep(slug, text, caller)));
     }
 
-    @SuppressWarnings("unchecked")
-    private ApiResponse<Dtos.Detail> appendStep(SkillDocumentEntity skill, String text,
-                                                 Long pipelineId, String aiSummary) {
-        try {
-            List<Map<String, Object>> stepsList = mapper.readValue(
-                    skill.getSteps() == null || skill.getSteps().isBlank() ? "[]" : skill.getSteps(),
-                    new TypeReference<List<Map<String, Object>>>() {});
-            String newId = "s" + (stepsList.size() + 1) + "_" + Long.toHexString(System.currentTimeMillis());
-            Map<String, Object> step = new java.util.HashMap<>();
-            step.put("id", newId);
-            step.put("order", stepsList.size() + 1);
-            step.put("text", text);
-            step.put("ai_summary", aiSummary);
-            step.put("pipeline_id", pipelineId);
-            step.put("confirmed", false);
-            step.put("pending", true);
-            step.put("suggested_actions", List.of());
-            step.put("badge", Map.of("kind", "ai", "label", pipelineId != null ? "AI Generated" : "Pending"));
-            stepsList.add(step);
-            skill.setSteps(mapper.writeValueAsString(stepsList));
-            return ApiResponse.ok(Dtos.detailOf(skill));
-        } catch (Exception e) {
-            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "steps_serialization", e.getMessage());
-        }
-    }
-
-    /**
-     * Phase 11 — Past-event replay sources for the Test modal's "From past
-     * event" tab. Returns up to 30 historical trigger payloads matching the
-     * skill's trigger_config.
-     *
-     * - trigger.type=system   → alarms WHERE trigger_event = event_type
-     * - trigger.type=user     → personal_rule_fires for the materialized rule
-     * - trigger.type=schedule → past skill_runs for this skill (excluding tests)
-     */
-    @GetMapping("/{slug}/past-events")
-    @PreAuthorize(Authorities.ANY_ROLE)
-    public ApiResponse<List<Map<String, Object>>> pastEvents(@PathVariable String slug) {
-        SkillDocumentEntity skill = repository.findBySlug(slug)
-                .orElseThrow(() -> ApiException.notFound("skill"));
-        Map<String, Object> trig = parseJson(skill.getTriggerConfig());
-        String type = String.valueOf(trig.getOrDefault("type", "schedule"));
-        List<Map<String, Object>> out = new java.util.ArrayList<>();
-
-        if ("system".equals(type) || "event".equals(type)) {
-            // 2026-05-12: was only matching "system" + reading "event_type" key, but
-            // the canonical trigger_config schema is {"type":"event","event":"OOC"}
-            // (e.g. skill 42 demo-ocap-5in3out). The legacy "system" + "event_type"
-            // form is still produced by some imports — accept both.
-            String eventType = String.valueOf(trig.getOrDefault("event",
-                    trig.getOrDefault("event_type", "")));
-            if (!eventType.isBlank()) {
-                // Look up event_types.attributes so the test payload mirrors what
-                // the runtime would actually deliver (alarm rows only carry 4-5
-                // canonical fields; the LLM declared inputs may reference more).
-                List<Map<String, Object>> attrSchema = lookupEventAttrSchema(eventType);
-                List<AlarmEntity> alarms = alarmRepo.findTop30ByTriggerEventOrderByCreatedAtDesc(eventType);
-                for (AlarmEntity a : alarms) {
-                    Map<String, Object> tc = new java.util.HashMap<>();
-                    tc.put("id", "hc-" + a.getId());
-                    tc.put("kind", "historical");
-                    tc.put("title", a.getTitle() != null && !a.getTitle().isBlank() ? a.getTitle() : eventType);
-                    tc.put("desc", "Past " + eventType + " on " + a.getEquipmentId());
-                    Map<String, Object> meta = new java.util.HashMap<>();
-                    meta.put("tool", a.getEquipmentId());
-                    meta.put("lot", a.getLotId());
-                    meta.put("time", a.getEventTime() != null ? a.getEventTime().toString() : null);
-                    meta.put("outcome", a.getStatus());
-                    tc.put("meta", meta);
-                    Map<String, Object> payload = buildEventPayload(a, eventType, attrSchema);
-                    tc.put("payload", payload);
-                    out.add(tc);
-                }
-            }
-        } else if ("user".equals(type)) {
-            // user-defined rule fires are tied to a materialized auto_patrol row.
-            // Materialization is in this same commit; if not yet materialized, list is empty.
-            // We look up the auto_patrol that has skill_doc_id = skill.id and trigger_mode='event'/'schedule'.
-            // For now, return empty + a synthetic "fill manually" hint.
-        } else {
-            // schedule: surface past skill_runs (excluding tests) as replay sources
-            List<SkillRunEntity> runs = runRepository.findBySkillIdAndIsTestOrderByTriggeredAtDesc(skill.getId(), false);
-            int n = Math.min(runs.size(), 30);
-            for (int i = 0; i < n; i++) {
-                SkillRunEntity r = runs.get(i);
-                Map<String, Object> tc = new java.util.HashMap<>();
-                tc.put("id", "sr-" + r.getId());
-                tc.put("kind", "historical");
-                tc.put("title", "Past run #" + r.getId());
-                tc.put("desc", "Run at " + r.getTriggeredAt());
-                Map<String, Object> meta = new java.util.HashMap<>();
-                meta.put("time", r.getTriggeredAt() != null ? r.getTriggeredAt().toString() : null);
-                meta.put("outcome", r.getStatus());
-                tc.put("meta", meta);
-                tc.put("payload", parseJson(r.getTriggerPayload()));
-                out.add(tc);
-            }
-        }
-
-        return ApiResponse.ok(out);
-    }
-
-    private Map<String, Object> parseJson(String json) {
-        if (json == null || json.isBlank()) return Map.of();
-        try {
-            return mapper.readValue(json, MAP_TYPE);
-        } catch (Exception e) {
-            return Map.of();
-        }
-    }
-
-    /** Pull the event_types.attributes JSON for an event name. Returns empty
-     *  list when the event isn't registered or the JSON fails to parse —
-     *  buildEventPayload then falls back to canonical alarm-derived fields. */
-    private List<Map<String, Object>> lookupEventAttrSchema(String eventName) {
-        try {
-            return eventTypeRepo.findByName(eventName)
-                    .map(et -> {
-                        String raw = et.getAttributes();
-                        if (raw == null || raw.isBlank()) return Collections.<Map<String, Object>>emptyList();
-                        try {
-                            return mapper.readValue(raw,
-                                    new TypeReference<List<Map<String, Object>>>() {});
-                        } catch (Exception ignore) { return Collections.<Map<String, Object>>emptyList(); }
-                    })
-                    .orElseGet(Collections::emptyList);
-        } catch (Exception e) {
-            return Collections.emptyList();
-        }
-    }
-
-    /** Build a test payload for a past alarm. Starts with the alarm-derived
-     *  canonical fields (tool / lot / severity / time / event_type), then
-     *  iterates event_types.attributes and fills any declared field that
-     *  doesn't already have a value with a sensible default. This way the
-     *  pipeline test gets EVERY field its declared inputs reference, even
-     *  for attributes the alarm row doesn't carry (parameter, ooc_details,
-     *  chamber_id, etc.). */
-    private Map<String, Object> buildEventPayload(AlarmEntity a, String eventName,
-                                                  List<Map<String, Object>> attrSchema) {
-        Map<String, Object> payload = new java.util.HashMap<>();
-        // Alarm-canonical fields under multiple names so pipelines wired with
-        // either tool_id or equipment_id (canonical OOC schema) both resolve.
-        payload.put("event_type", eventName);
-        payload.put("alarm_id", a.getId());
-        payload.put("tool_id", a.getEquipmentId());
-        payload.put("equipment_id", a.getEquipmentId());
-        payload.put("lot_id", a.getLotId());
-        payload.put("step", a.getStep());
-        payload.put("step_id", a.getStep());
-        payload.put("severity", a.getSeverity());
-        String t = a.getEventTime() != null ? a.getEventTime().toString() : null;
-        payload.put("event_time", t);
-        payload.put("timestamp", t);
-        payload.put("process_timestamp", t);
-
-        // Fill schema-declared attributes that are still null/missing with
-        // sensible defaults so the pipeline test never sees a null where the
-        // declared input has required=true.
-        for (Map<String, Object> attr : attrSchema) {
-            Object nameObj = attr.get("name");
-            if (!(nameObj instanceof String name) || name.isBlank()) continue;
-            if (payload.get(name) != null) continue;
-            String type = String.valueOf(attr.getOrDefault("type", "string"));
-            payload.put(name, _defaultForAttr(name, type));
-        }
-        return payload;
-    }
-
-    private static Object _defaultForAttr(String name, String type) {
-        return switch (name) {
-            case "tool_id", "equipment_id" -> "EQP-01";
-            case "lot_id" -> "LOT-0001";
-            case "step", "step_id" -> "STEP_001";
-            case "chamber_id" -> "CH-1";
-            case "recipe_id" -> "RECIPE-A";
-            case "parameter", "ooc_parameter" -> "CD_Mean";
-            case "spc_chart", "SPC_CHART" -> "spc_xbar";
-            case "fault_code" -> "FDC_RGA_H2O_HIGH";
-            case "severity" -> "warning";
-            default -> switch (type) {
-                case "integer", "number" -> 0;
-                case "boolean" -> Boolean.FALSE;
-                case "object" -> Map.of();
-                case "array" -> List.of();
-                default -> "";
-            };
-        };
-    }
-
-    /**
-     * Phase 11 v6 — find the pipeline_id currently bound to {@code slot} on
-     * this skill (or {@code null} if the slot has no pipeline yet). Used by
-     * builder-url to seed the Builder embed mode with the existing
-     * pipeline so "Refine" doesn't drop the user onto a blank canvas.
-     */
-    @SuppressWarnings("unchecked")
-    private Long lookupSlotPipelineId(SkillDocumentEntity skill, String slot) {
-        Long candidate = null;
-        if ("confirm".equals(slot)) {
-            Map<String, Object> cc = parseJson(skill.getConfirmCheck());
-            Object pid = cc.get("pipeline_id");
-            candidate = (pid instanceof Number n) ? n.longValue() : null;
-        } else if (slot.startsWith("step:") && !"step:NEW".equalsIgnoreCase(slot)) {
-            String stepId = slot.substring("step:".length());
-            try {
-                List<Map<String, Object>> stepsList = mapper.readValue(
-                        skill.getSteps() == null || skill.getSteps().isBlank() ? "[]" : skill.getSteps(),
-                        new TypeReference<List<Map<String, Object>>>() {});
-                for (Map<String, Object> s : stepsList) {
-                    if (stepId.equals(String.valueOf(s.get("id")))) {
-                        Object pid = s.get("pipeline_id");
-                        candidate = (pid instanceof Number n) ? n.longValue() : null;
-                        break;
-                    }
-                }
-            } catch (Exception ignored) {}
-        }
-        // Phase 11 v6 — verify the pipeline still exists. JSON refs on
-        // skill_documents don't have a pg-managed FK, so out-of-band deletes
-        // (V26 cleanup, manual psql, race) can leave dangling ids. Returning
-        // null here lets builder-url fall back to /new + lets the UI show the
-        // C1 / step card as "needs rebuild" rather than chasing a 404.
-        if (candidate != null && !pipelineRepo.existsById(candidate)) {
-            log.info("skill {} slot {} ref pipeline {} no longer exists — treating as unbound",
-                    skill.getSlug(), slot, candidate);
-            return null;
-        }
-        return candidate;
-    }
+    // ── SSE run (HTTP-transport, stays in controller) ───────────────────────
 
     /**
      * Run the skill end-to-end (all steps in order). SSE stream emits
