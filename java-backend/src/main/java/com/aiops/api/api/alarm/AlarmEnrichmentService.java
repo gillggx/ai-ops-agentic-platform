@@ -455,40 +455,48 @@ public class AlarmEnrichmentService {
 
 		Map<String, StepMeta> stepMeta = loadStepMeta(skillId);
 
-		List<AlarmDtos.DataView> all = new java.util.ArrayList<>();
+		// Collect per_step entries into a list first so we can sort by display
+		// order (skill_documents.steps[].order) — JSON object iteration order
+		// isn't guaranteed to match the user's declared sequence.
+		record StepEntry(int order, AlarmDtos.DataView view) {}
+		List<StepEntry> entries = new java.util.ArrayList<>();
 		perStep.fields().forEachRemaining(entry -> {
 			String stepId = entry.getKey();
 			JsonNode step = entry.getValue();
 			if (step == null) return;
 			JsonNode statusNode = step.get("status");
 			String status = statusNode == null ? "" : statusNode.asText("");
-			// Skip steps with no data and non-pass status — pure noise.
 			JsonNode dvNode = step.get("data_views");
 			boolean hasData = dvNode != null && dvNode.isArray() && dvNode.size() > 0;
-			if (!hasData && !"pass".equalsIgnoreCase(status)) return;
 
 			StepMeta meta = stepMeta.get(stepId);
 			String desc = (meta != null && meta.text != null && !meta.text.isBlank())
 					? meta.text : stepId;
-			int displayOrder = meta != null ? meta.order : 0;
+			int displayOrder = meta != null ? meta.order : 9999;  // unknown order → end
 			String note = step.has("note") ? step.get("note").asText("") : "";
 			String value = step.has("value") ? step.get("value").asText("") : "";
 			String resultLine = buildResultLine(status, value, note);
 
+			// Surface every step the user defined in skill_documents.steps[],
+			// regardless of pass/fail/empty-data — the user explicitly asked
+			// for all 3 checks to be visible. Fail-with-no-data becomes a
+			// result-only card so the user can see "[檢查 1] ... ✗ fail —
+			// pipeline failed: null" instead of silently hiding it.
 			if (hasData) {
 				for (JsonNode dv : dvNode) {
-					all.add(decorateDataView(dv, displayOrder, desc, resultLine));
+					entries.add(new StepEntry(displayOrder,
+							decorateDataView(dv, displayOrder, desc, resultLine)));
 				}
 			} else {
-				// Pass + no data_views → still surface as a result-only card so
-				// the user knows the check ran.
-				all.add(new AlarmDtos.DataView(
+				entries.add(new StepEntry(displayOrder, new AlarmDtos.DataView(
 						formatStepTitle(displayOrder, desc),
 						resultLine,
-						List.of(), List.of(), 0));
+						List.of(), List.of(), 0)));
 			}
 		});
-		return all;
+
+		entries.sort(java.util.Comparator.comparingInt(StepEntry::order));
+		return entries.stream().map(StepEntry::view).toList();
 	}
 
 	/** Metadata for a single step parsed from {@code skill_documents.steps}. */
