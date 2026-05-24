@@ -122,12 +122,55 @@ LLM 看心情選哪個，且 prompt 改一個字行為就漂移。
 
 ## Coding Standards
 
-### Backend (Python / FastAPI)
+### Backend (Python / FastAPI sidecar)
 
 - 遵循 Repository → Service → Router 分層
 - Async first（所有 DB 和 HTTP 操作用 async）
 - Error handling：不靜默吞 exception，log + 回傳有意義的錯誤
 - Event Poller 跑在 `asyncio.ensure_future`（lifespan 內），不用 APScheduler 或 thread
+
+### Backend (Java / Spring Boot — canonical backend post-Phase-8 cutover)
+
+After the Phase 12 OOP refactor (PR #5, 2026-05-24) the Java tier follows
+**thin controller + focused service** consistently. New endpoints / services
+should adopt the same pattern:
+
+- **Controller**: HTTP only — `@PreAuthorize` + parameter binding + DTO map
+  + delegate to service in 1-2 lines. No entity manipulation, no validation
+  logic, no `try/catch` of business exceptions. SSE wiring stays via
+  {@link com.aiops.api.common.SseEmitterBridge}.
+- **Service**: `@Service` bean — owns validation, entity ops, JSON serdes,
+  cross-entity transactions, sidecar calls. Throw `ApiException` for
+  client-facing errors; let `@ControllerAdvice` map to HTTP status.
+- **Repository**: only the service tier touches it. Controllers never
+  inject repositories directly (exception: legacy aliases where the
+  passthrough is genuinely 1 line and a service indirection would be
+  ceremony — judge per case).
+
+**Use the shared common helpers — never re-implement**:
+- `JsonUtils.parseObject(mapper, json)` / `parseListOfObjects` /
+  `safeWrite` / `asMap` — null/blank/parse-fail-fallback Jackson.
+- `SseEmitterBridge.bridge(flux, tag)` — reactive `Flux<ServerSentEvent>`
+  → MVC `SseEmitter`. Used by AgentProxy + Briefing + SkillDocument.
+- `RequestBodyAccess.pickAlias(body, "snake_case", "camelCase")` /
+  `requireAlias` — for endpoints accepting both alias families.
+
+**Exception handling**: never `catch (Exception)` — narrow to the actual
+type. Convention (per P1, 52 → 0):
+- `JsonProcessingException` for `mapper.read/write`
+- `DateTimeParseException` for ISO parse fallback chains
+- `NumberFormatException` for `Long/Double.parseLong/parseDouble`
+- `RuntimeException` for reactor `block()` / JPA `save()` / fail-open guards
+  (catches unchecked but lets checked exceptions bubble — signals intent)
+
+**Wire format**: JSON properties are **snake_case** on the wire (Jackson
+config). camelCase keys are silent-ignored — call sites that send camelCase
+look fine (HTTP 200) but produce nulls. See memory
+`feedback_jackson_snake_case_wire`.
+
+**Tests**: pure Mockito (no Spring context, fast). Pattern:
+`SkillAlarmEmitterTest`. Run subset via
+`mvn -Dtest=ClassA,ClassB test` (comma-separated, not `+`).
 
 ### Frontend (TypeScript / Next.js)
 
@@ -148,8 +191,25 @@ LLM 看心情選哪個，且 prompt 改一個字行為就漂移。
 
 - PostgreSQL + pgvector（backend）
 - MongoDB（simulator）
-- Schema changes 用 Alembic migration（但目前用 create_all + seed）
+- Schema changes 用 Flyway migration (`java-backend/src/main/resources/db/migration/V*.sql`)
+  ⚠️ **Flyway is disabled in prod** — new V**.sql must be applied via manual
+  `psql -f` on EC2. See memory `feedback_flyway_disabled_in_prod`.
 - System MCPs 每次啟動自動 sync（canonical list in main.py）
+
+#### pgvector columns (`embedding vector(N)`)
+
+JPA binds `String` parameters as VARCHAR; PostgreSQL refuses the implicit
+varchar → vector cast. **Never write the embedding via JPA `save()` or
+`entity.setEmbedding(...)`** — both fail with SQL 42804.
+
+Use the established pattern (per fix `e03020d`):
+- Entity field: `@Column(insertable=false, updatable=false, columnDefinition="vector(N)")`
+  so JPA INSERT/UPDATE omits the column entirely.
+- Writes: native `@Query` with `CAST(:vec AS vector)`. See
+  `AgentKnowledgeRepository.updateEmbedding` + `clearEmbedding` as the
+  reference shape.
+- Reads: JPA SELECTs the column via field reflection — `getEmbedding()`
+  still works for retrieval.
 
 ---
 
