@@ -9,6 +9,8 @@ import com.aiops.api.domain.skill.ExecutionLogEntity;
 import com.aiops.api.domain.skill.ExecutionLogRepository;
 import com.aiops.api.domain.skill.SkillDefinitionEntity;
 import com.aiops.api.domain.skill.SkillDefinitionRepository;
+import com.aiops.api.domain.skill.SkillDocumentEntity;
+import com.aiops.api.domain.skill.SkillDocumentRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -36,6 +38,7 @@ public class AlarmEnrichmentService {
 
 	private final ExecutionLogRepository execLogRepo;
 	private final SkillDefinitionRepository skillRepo;
+	private final SkillDocumentRepository skillDocRepo;
 	private final PipelineRunRepository pipelineRunRepo;
 	private final PipelineRepository pipelineRepo;
 	private final ObjectMapper mapper;
@@ -43,12 +46,14 @@ public class AlarmEnrichmentService {
 
 	public AlarmEnrichmentService(ExecutionLogRepository execLogRepo,
 	                              SkillDefinitionRepository skillRepo,
+	                              SkillDocumentRepository skillDocRepo,
 	                              PipelineRunRepository pipelineRunRepo,
 	                              PipelineRepository pipelineRepo,
 	                              ObjectMapper mapper,
 	                              ChartMiddleware chartMiddleware) {
 		this.execLogRepo = execLogRepo;
 		this.skillRepo = skillRepo;
+		this.skillDocRepo = skillDocRepo;
 		this.pipelineRunRepo = pipelineRunRepo;
 		this.pipelineRepo = pipelineRepo;
 		this.mapper = mapper;
@@ -311,7 +316,7 @@ public class AlarmEnrichmentService {
 		// layer. Without this fallback, skills with N internal checks but no
 		// configured auto_check pipeline showed an empty 深度診斷 tab even
 		// though each check returned a data_view.
-		List<AlarmDtos.DataView> diagnosticDvs = extractPerStepDataViewsFromExecLog(execLog);
+		List<AlarmDtos.DataView> diagnosticDvs = extractPerStepDataViewsFromExecLog(execLog, a.getSkillId());
 		List<Object> diagnosticCharts = List.of();
 		Object diagnosticAlert = null;
 		// auto_check writes to pb_pipeline_runs, not execution_logs — so when
@@ -424,16 +429,22 @@ public class AlarmEnrichmentService {
 	}
 
 	/** Per-step data_views = "what each diagnostic check returned" → 深度診斷 tab
-	 *  (when no auto_check pipeline ran). Each step's data is a separate
-	 *  diagnostic surface. Only PASS steps contribute — failed steps with
-	 *  empty data_views would just produce noise.
+	 *  (when no auto_check pipeline ran). Each step's data_view is annotated
+	 *  with the step's human-authored description (from skill_documents.steps[].text)
+	 *  + the pass/fail result line, so the user sees both the "what" (check
+	 *  description) and the "result" (status + note) per check, not just a
+	 *  raw table.
 	 *
-	 *  <p>2026-05-24 split: was previously lumped into trigger_data_views;
-	 *  user feedback was that per-step results belong under 深度診斷 since
-	 *  each step is conceptually a "deep check", not part of the trigger
-	 *  evidence. confirm stays in trigger_data_views (it's the actual
-	 *  triggering condition). */
-	private List<AlarmDtos.DataView> extractPerStepDataViewsFromExecLog(ExecutionLogEntity log) {
+	 *  <p>2026-05-24 splits + 2026-05-24 enrichment: was previously a flat
+	 *  list of data_views without context — user feedback was that each
+	 *  check should be presented "以檢查的項目裡的說明，結果來呈現"
+	 *  (using the check item's description + result). confirm stays in
+	 *  trigger_data_views; per_step here gets title/description overlays.
+	 *
+	 *  <p>{@code skillId} is the alarm's skill_id → maps to
+	 *  {@code skill_documents.id} (NOT skill_definitions). steps JSON column
+	 *  carries the per-step description text. */
+	private List<AlarmDtos.DataView> extractPerStepDataViewsFromExecLog(ExecutionLogEntity log, Long skillId) {
 		if (log == null) return List.of();
 		JsonNode root = parseJsonNode(log.getLlmReadableData());
 		if (root == null) return List.of();
@@ -442,17 +453,107 @@ public class AlarmEnrichmentService {
 		JsonNode perStep = stepDetails.get("per_step");
 		if (perStep == null || !perStep.isObject()) return List.of();
 
+		Map<String, StepMeta> stepMeta = loadStepMeta(skillId);
+
 		List<AlarmDtos.DataView> all = new java.util.ArrayList<>();
 		perStep.fields().forEachRemaining(entry -> {
+			String stepId = entry.getKey();
 			JsonNode step = entry.getValue();
 			if (step == null) return;
-			JsonNode status = step.get("status");
-			if (status == null || !"pass".equalsIgnoreCase(status.asText(""))) {
-				return;  // skip failed / non-pass step data_views
+			JsonNode statusNode = step.get("status");
+			String status = statusNode == null ? "" : statusNode.asText("");
+			// Skip steps with no data and non-pass status — pure noise.
+			JsonNode dvNode = step.get("data_views");
+			boolean hasData = dvNode != null && dvNode.isArray() && dvNode.size() > 0;
+			if (!hasData && !"pass".equalsIgnoreCase(status)) return;
+
+			StepMeta meta = stepMeta.get(stepId);
+			String desc = (meta != null && meta.text != null && !meta.text.isBlank())
+					? meta.text : stepId;
+			int displayOrder = meta != null ? meta.order : 0;
+			String note = step.has("note") ? step.get("note").asText("") : "";
+			String value = step.has("value") ? step.get("value").asText("") : "";
+			String resultLine = buildResultLine(status, value, note);
+
+			if (hasData) {
+				for (JsonNode dv : dvNode) {
+					all.add(decorateDataView(dv, displayOrder, desc, resultLine));
+				}
+			} else {
+				// Pass + no data_views → still surface as a result-only card so
+				// the user knows the check ran.
+				all.add(new AlarmDtos.DataView(
+						formatStepTitle(displayOrder, desc),
+						resultLine,
+						List.of(), List.of(), 0));
 			}
-			all.addAll(extractDataViews(step.get("data_views")));
 		});
 		return all;
+	}
+
+	/** Metadata for a single step parsed from {@code skill_documents.steps}. */
+	private record StepMeta(int order, String text) {}
+
+	private Map<String, StepMeta> loadStepMeta(Long skillId) {
+		if (skillId == null) return Map.of();
+		try {
+			Optional<SkillDocumentEntity> opt = skillDocRepo.findById(skillId);
+			if (opt.isEmpty()) return Map.of();
+			String stepsJson = opt.get().getSteps();
+			if (stepsJson == null || stepsJson.isBlank()) return Map.of();
+			JsonNode arr = parseJsonNode(stepsJson);
+			if (arr == null || !arr.isArray()) return Map.of();
+			Map<String, StepMeta> out = new HashMap<>();
+			for (int i = 0; i < arr.size(); i++) {
+				JsonNode node = arr.get(i);
+				if (node == null) continue;
+				String id = node.has("id") ? node.get("id").asText("") : "";
+				if (id.isBlank()) continue;
+				String text = node.has("text") ? node.get("text").asText("") : "";
+				int order = node.has("order") && node.get("order").isNumber()
+						? node.get("order").asInt() : i + 1;
+				out.put(id, new StepMeta(order, text));
+			}
+			return out;
+		} catch (RuntimeException ex) {
+			log.debug("loadStepMeta({}) failed: {}", skillId, ex.toString());
+			return Map.of();
+		}
+	}
+
+	private static String formatStepTitle(int order, String desc) {
+		return order > 0
+				? String.format("[檢查 %d] %s", order, desc)
+				: String.format("[檢查] %s", desc);
+	}
+
+	private static String buildResultLine(String status, String value, String note) {
+		String icon = "pass".equalsIgnoreCase(status) ? "✓"
+				: "fail".equalsIgnoreCase(status) ? "✗"
+				: "•";
+		StringBuilder sb = new StringBuilder();
+		sb.append(icon).append(' ').append(status.isBlank() ? "ran" : status);
+		if (note != null && !note.isBlank()) sb.append(" — ").append(note);
+		else if (value != null && !value.isBlank()) sb.append(" — value: ").append(value);
+		return sb.toString();
+	}
+
+	/** Build a DataView from the raw JSON node, overriding title with the
+	 *  step description and description with the result line. Columns/rows/
+	 *  total taken from the original node. */
+	private AlarmDtos.DataView decorateDataView(JsonNode dv, int order, String desc, String resultLine) {
+		List<String> cols = new java.util.ArrayList<>();
+		JsonNode colsNode = dv.get("columns");
+		if (colsNode != null && colsNode.isArray()) colsNode.forEach(c -> cols.add(c.asText()));
+		List<Object> rows = new java.util.ArrayList<>();
+		JsonNode rowsNode = dv.get("rows");
+		if (rowsNode != null && rowsNode.isArray()) rowsNode.forEach(rows::add);
+		Integer total = dv.has("total_rows") && dv.get("total_rows").isNumber()
+				? dv.get("total_rows").asInt()
+				: dv.has("total") && dv.get("total").isNumber()
+						? dv.get("total").asInt()
+						: rows.size();
+		return new AlarmDtos.DataView(formatStepTitle(order, desc), resultLine, cols, rows, total);
 	}
 
 	private List<AlarmDtos.DataView> extractDataViews(JsonNode dvNode) {
