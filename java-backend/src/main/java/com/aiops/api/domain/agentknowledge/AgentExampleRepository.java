@@ -17,6 +17,12 @@ public interface AgentExampleRepository extends JpaRepository<AgentExampleEntity
             nativeQuery = true)
     int updateEmbedding(@Param("id") Long id, @Param("vec") String vec);
 
+    /** Invalidate the embedding when input_text changes; sidecar re-embeds. */
+    @Modifying
+    @Query(value = "UPDATE agent_examples SET embedding = NULL, updated_at = now() WHERE id = :id",
+            nativeQuery = true)
+    int clearEmbedding(@Param("id") Long id);
+
     /** Top-K examples whose input_text most resembles current user query. */
     @Query(value = """
             SELECT * FROM agent_examples

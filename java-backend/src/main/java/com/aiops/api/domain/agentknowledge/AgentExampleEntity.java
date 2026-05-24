@@ -41,7 +41,14 @@ public class AgentExampleEntity {
     @Column(name = "output_text", nullable = false, columnDefinition = "text")
     private String outputText;
 
-    @Column(name = "embedding", columnDefinition = "vector(1024)")
+    /** pgvector(1024). insertable/updatable=false because JPA binds String
+     *  as VARCHAR, which PostgreSQL refuses to implicitly cast to vector
+     *  (see AgentExampleRepository.updateEmbedding). All writes go through
+     *  native SQL (sidecar's _backfill_embeddings + repo.updateEmbedding /
+     *  clearEmbedding). JPA still SELECTs this column for reads via the
+     *  field reflection, so {@code getEmbedding()} returns the current value. */
+    @Column(name = "embedding", columnDefinition = "vector(1024)",
+            insertable = false, updatable = false)
     private String embedding;
 
     @Column(name = "uses", nullable = false)

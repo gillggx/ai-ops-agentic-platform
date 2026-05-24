@@ -1,8 +1,8 @@
 # AIOps Platform — Project Handoff
 
-**Last updated: 2026-05-14** · **Current phase: v19 (Chat Intent Confirmation)**
+**Last updated: 2026-05-24** · **Current phase: Java OOP refactor merged (post v30)**
 
-> 上次大改版是 2026-04-27 的 Phase 8 (Java cutover)。本次 handoff 重寫覆蓋 Phase 8 之後的所有重大進展（v9–v19）。
+> 上次大改版是 2026-04-27 的 Phase 8 (Java cutover)。本次 handoff 重寫覆蓋 Phase 8 之後的所有重大進展（v9–v19 + v30 + Java OOP refactor 2026-05-23/24）.
 
 ---
 
@@ -71,6 +71,56 @@ Pipeline ending with `block_step_check` for SkillRunner pass/fail reads. Status:
 
 ### Phase 12 — Skill catalog (2026-05-10)
 Skill definitions + UX for browsing/creating Skills. See `docs/SKILL_CATALOG_PHASE12.md`.
+
+### Java OOP refactor (2026-05-23/24) — controller/service split + exception cleanup
+
+Followed a DevOps audit flagging that the Java cutover left several god classes
+mixing HTTP concerns with business logic. PR #5 (16 commits on `feat/java-oop-refactor`).
+
+**Eight controller→service splits (P0)**:
+| Phase | Target | LoC delta |
+|---|---|---|
+| P0-1 | SkillDocumentController | 826 → 188 (service 738) |
+| P0-2 | PipelineController | 658 → 125 (service 543 + Dtos 91) |
+| P0-3 | SkillRunnerService → 3 services | 893 → 270 (orchestrator) + 240 (`SkillStepExecutor`) + 460 (`SkillAlarmEmitter`) |
+| P0-4 | FleetService → 3 services + façade | 959 → 70 façade + 354 (Roster) + 582 (EquipmentDetail) + 133 (`FleetSimulatorClient`) |
+| P0-5 | AgentProxyController + shared utilities | 338 → 226 + new `SseEmitterBridge` + `RequestBodyAccess` (used by AgentProxy + Briefing + SkillDocument) |
+| P0-6 | AgentKnowledgeController | 315 → 152 (service 280, 4 resource sections) |
+| P0-7 | PipelineBuilderController | 252 → 137 (service 167) |
+| P0-8 | InternalAgentKnowledgeController | 235 → 158 (service 167) |
+
+**Bug surfaced + fixed by P0-6 smoke** (commit `e03020d`): pgvector ↔ Hibernate
+write-path was rejecting INSERT/UPDATE on `agent_knowledge` + `agent_examples`
+(`column embedding is of type vector but expression is of type character varying`).
+Latent since the feature shipped — Frontend never created rows via Java, sidecar's
+backfill used raw SQL. Fix: `@Column(insertable=false, updatable=false)` on the
+embedding field + native `clearEmbedding(id)` for invalidation.
+
+**P1 exception regime**: 52 `catch(Exception)` → 0 across 16 files.
+- `JsonProcessingException` for mapper.read/write (~30 sites)
+- `DateTimeParseException` for timestamp parse fallback chains (5)
+- `NumberFormatException` for `Long.parseLong` / `Double.parseDouble` (1)
+- `RuntimeException` for reactor block + JPA + fail-open guards (~17) — keeps the
+  fail-open semantic but signals checked exceptions still bubble.
+
+**P2 `JsonUtils` centralisation**: 6 duplicated JSON helpers (`parseJsonObject` /
+`parseList` / `safeJson` / `asMap` patterns) across 4 services → 1 utility class
+(4 static methods, ObjectMapper passed as first arg). Dropped 3 unused
+`TypeReference` static fields after migration.
+
+**P3 test coverage**: 4 new pure-Mockito test files, 145 tests pass (up from 65):
+`JsonUtilsTest` (18) + `SkillDocumentServiceTest` (22) + `PipelineServiceTest`
+(23) + `PipelineBuilderServiceTest` (11). Also patched 5 stale assertions in
+`SkillAlarmEmitterTest` left over from earlier prod fixes (commits 405edd3 + ba26b6d).
+
+**P4 layering docs**: 7 `package-info.java` files (skill / pipeline / fleet /
+agentknowledge / agent / internal / common) document the controller↔service↔repo
+boundary at each refactored package. Considered + rejected the full
+`api → service` package move (high blast radius, no functional benefit — YAGNI).
+
+Verification: every commit deployed to EC2; `mvn compile + test-compile` exit 0;
+3 standard pipeline build cases (spc-trend / spc-multi-tool / spc-cusum) still
+`finished` with 5-6 nodes in 60-130s — refactor 0-impact on build flow.
 
 ### v18 — Reject-and-ask loop + Intent bullets (2026-05-14)
 Major build accuracy + UX upgrade. See section 4 below.

@@ -2,6 +2,7 @@ package com.aiops.api.domain.notification;
 
 import com.aiops.api.domain.patrol.AutoPatrolEntity;
 import com.aiops.api.domain.patrol.AutoPatrolRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -65,7 +66,7 @@ public class NotificationDispatchService {
 		String payloadJson;
 		try {
 			payloadJson = objectMapper.writeValueAsString(payload);
-		} catch (Exception e) {
+		} catch (JsonProcessingException e) {
 			log.error("dispatch: failed to serialise payload for rule {}: {}", rule.getId(), e.getMessage());
 			payloadJson = "{\"title\":\"" + title + "\",\"body\":\"<render error>\"}";
 		}

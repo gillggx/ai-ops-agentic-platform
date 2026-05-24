@@ -1,5 +1,6 @@
 package com.aiops.api.auth;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
@@ -27,7 +28,7 @@ public class RoleCodec {
 				Role.fromString(s).ifPresent(roles::add);
 			}
 			return roles;
-		} catch (Exception e) {
+		} catch (JsonProcessingException e) {
 			return Collections.emptySet();
 		}
 	}
@@ -36,7 +37,7 @@ public class RoleCodec {
 		List<String> list = roles.stream().map(Role::name).sorted().toList();
 		try {
 			return MAPPER.writeValueAsString(list);
-		} catch (Exception e) {
+		} catch (JsonProcessingException e) {
 			return "[]";
 		}
 	}

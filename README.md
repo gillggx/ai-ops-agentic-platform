@@ -4,7 +4,13 @@
 
 ---
 
-## Architecture (current — 2026-05-14)
+## Architecture (current — 2026-05-24)
+
+**Latest milestone**: Java OOP refactor (PR #5, merged 2026-05-24). 8 god-class
+controller/service splits, 52 → 0 `catch(Exception)` narrowing, JsonUtils
+centralisation, 145 unit tests (up from 65), and a latent pgvector ↔ Hibernate
+write-path bug fix. See [docs/history/PROJECT_HANDOFF.md §3](docs/history/PROJECT_HANDOFF.md#3-phases-since-phase-8-chronological)
+for the per-phase breakdown.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐

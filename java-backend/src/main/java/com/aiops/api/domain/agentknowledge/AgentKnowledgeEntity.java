@@ -47,9 +47,14 @@ public class AgentKnowledgeEntity {
     @Column(name = "source", nullable = false, length = 20)
     private String source = "manual";
 
-    /** pgvector(1024). Stored as text in JPA — direct vector ops happen
-     *  in native queries (see AgentKnowledgeRepository#searchByEmbedding). */
-    @Column(name = "embedding", columnDefinition = "vector(1024)")
+    /** pgvector(1024). insertable/updatable=false because JPA binds String
+     *  as VARCHAR, which PostgreSQL refuses to implicitly cast to vector
+     *  (see AgentKnowledgeRepository.updateEmbedding). All writes go through
+     *  native SQL (sidecar's _backfill_embeddings + repo.updateEmbedding /
+     *  clearEmbedding). JPA still SELECTs this column for reads via the
+     *  field reflection, so {@code getEmbedding()} returns the current value. */
+    @Column(name = "embedding", columnDefinition = "vector(1024)",
+            insertable = false, updatable = false)
     private String embedding;
 
     @Column(name = "uses", nullable = false)

@@ -2,6 +2,7 @@ package com.aiops.api.api.aiops;
 
 import com.aiops.api.auth.Authorities;
 import com.aiops.api.common.ApiResponse;
+import com.aiops.api.common.SseEmitterBridge;
 import com.aiops.api.domain.alarm.AlarmEntity;
 import com.aiops.api.domain.alarm.AlarmRepository;
 import com.aiops.api.domain.event.GeneratedEventEntity;
@@ -14,10 +15,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 
-import java.io.IOException;
 import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.List;
@@ -43,12 +42,14 @@ public class BriefingController {
 	private final AlarmRepository alarmRepo;
 	private final GeneratedEventRepository eventRepo;
 	private final WebClient sidecarClient;
+	private final SseEmitterBridge sseBridge;
 
 	public BriefingController(AlarmRepository alarmRepo, GeneratedEventRepository eventRepo,
-	                          WebClient pythonSidecarWebClient) {
+	                          WebClient pythonSidecarWebClient, SseEmitterBridge sseBridge) {
 		this.alarmRepo = alarmRepo;
 		this.eventRepo = eventRepo;
 		this.sidecarClient = pythonSidecarWebClient;
+		this.sseBridge = sseBridge;
 	}
 
 	// ── GET with scope → forward to sidecar SSE ──────────────────────────
@@ -113,34 +114,17 @@ public class BriefingController {
 
 	// ── helpers ──────────────────────────────────────────────────────────
 
+	/** Forward POST body to sidecar /internal/briefing/sse and bridge the
+	 *  reactive {@code Flux<ServerSentEvent>} into MVC's {@link SseEmitter}.
+	 *  Bridging behaviour (timeout, completion, error semantics) lives in
+	 *  {@link SseEmitterBridge}. */
 	private SseEmitter forwardToSidecar(Map<String, Object> body) {
-		SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MS);
-
 		Flux<ServerSentEvent<String>> upstream = sidecarClient.post()
 				.uri("/internal/briefing/sse")
 				.header("Content-Type", "application/json")
 				.bodyValue(body)
 				.retrieve()
 				.bodyToFlux(new org.springframework.core.ParameterizedTypeReference<ServerSentEvent<String>>() {});
-
-		Disposable sub = upstream.subscribe(
-				ev -> {
-					try {
-						var builder = SseEmitter.event();
-						if (ev.event() != null) builder.name(ev.event());
-						if (ev.id() != null) builder.id(ev.id());
-						if (ev.data() != null) builder.data(ev.data());
-						emitter.send(builder);
-					} catch (IOException ex) {
-						emitter.completeWithError(ex);
-					}
-				},
-				err -> emitter.completeWithError(err),
-				emitter::complete
-		);
-		emitter.onCompletion(sub::dispose);
-		emitter.onTimeout(sub::dispose);
-		emitter.onError(e -> sub.dispose());
-		return emitter;
+		return sseBridge.bridge(upstream, "briefing", SSE_TIMEOUT_MS);
 	}
 }
