@@ -498,7 +498,9 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
                   fontSize: 11, fontWeight: 700, color: "#595959",
                   textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8,
                 }}>
-                  Auto-Check 診斷 (pipeline run #{alarm.diagnostic_log_id})
+                  {alarm.diagnostic_log_id
+                    ? `Auto-Check 診斷 (pipeline run #${alarm.diagnostic_log_id})`
+                    : "Skill 內建深度檢查 (per-step pipeline 回傳)"}
                 </div>
                 {diagnosticAlert?.title && (
                   <div style={{

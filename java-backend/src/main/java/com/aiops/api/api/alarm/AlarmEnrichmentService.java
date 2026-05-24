@@ -305,7 +305,13 @@ public class AlarmEnrichmentService {
 		// pipeline-mode patrol (block_alert + block_data_view), not the
 		// legacy diagnostic_rules format.
 		List<AlarmDtos.DataView> triggerDvs = extractDataViewsFromExecLog(execLog);
-		List<AlarmDtos.DataView> diagnosticDvs = List.of();
+		// 2026-05-24: per-step data_views feed 深度診斷 tab when no auto_check
+		// pipeline runs exist. Each step in the skill is conceptually a deep
+		// diagnostic check; the auto_check fan-out is an OPTIONAL additional
+		// layer. Without this fallback, skills with N internal checks but no
+		// configured auto_check pipeline showed an empty 深度診斷 tab even
+		// though each check returned a data_view.
+		List<AlarmDtos.DataView> diagnosticDvs = extractPerStepDataViewsFromExecLog(execLog);
 		List<Object> diagnosticCharts = List.of();
 		Object diagnosticAlert = null;
 		// auto_check writes to pb_pipeline_runs, not execution_logs — so when
@@ -385,6 +391,7 @@ public class AlarmEnrichmentService {
 		}
 	}
 
+	/** Confirm-step data_views = "what triggered the alarm" → 觸發原因 tab. */
 	private List<AlarmDtos.DataView> extractDataViewsFromExecLog(ExecutionLogEntity log) {
 		if (log == null) return List.of();
 		JsonNode root = parseJsonNode(log.getLlmReadableData());
@@ -395,27 +402,12 @@ public class AlarmEnrichmentService {
 		// wrapper). The previous `root.get("findings").get("step_details")`
 		// path always returned null → trigger_data_views was always empty
 		// for every alarm since the step_details restructure shipped.
-		// Per-step only takes data_views from steps that PASSED
-		// (status='pass'); failed steps' empty/null data_views would just
-		// produce noise.
 		List<AlarmDtos.DataView> all = new java.util.ArrayList<>();
 		JsonNode stepDetails = root.get("step_details");
 		if (stepDetails != null) {
 			JsonNode confirm = stepDetails.get("confirm");
 			if (confirm != null) {
 				all.addAll(extractDataViews(confirm.get("data_views")));
-			}
-			JsonNode perStep = stepDetails.get("per_step");
-			if (perStep != null && perStep.isObject()) {
-				perStep.fields().forEachRemaining(entry -> {
-					JsonNode step = entry.getValue();
-					if (step == null) return;
-					JsonNode status = step.get("status");
-					if (status == null || !"pass".equalsIgnoreCase(status.asText(""))) {
-						return;  // skip failed / non-pass step data_views
-					}
-					all.addAll(extractDataViews(step.get("data_views")));
-				});
 			}
 		}
 
@@ -428,6 +420,38 @@ public class AlarmEnrichmentService {
 				all.addAll(extractDataViews(rs.get("data_views")));
 			}
 		}
+		return all;
+	}
+
+	/** Per-step data_views = "what each diagnostic check returned" → 深度診斷 tab
+	 *  (when no auto_check pipeline ran). Each step's data is a separate
+	 *  diagnostic surface. Only PASS steps contribute — failed steps with
+	 *  empty data_views would just produce noise.
+	 *
+	 *  <p>2026-05-24 split: was previously lumped into trigger_data_views;
+	 *  user feedback was that per-step results belong under 深度診斷 since
+	 *  each step is conceptually a "deep check", not part of the trigger
+	 *  evidence. confirm stays in trigger_data_views (it's the actual
+	 *  triggering condition). */
+	private List<AlarmDtos.DataView> extractPerStepDataViewsFromExecLog(ExecutionLogEntity log) {
+		if (log == null) return List.of();
+		JsonNode root = parseJsonNode(log.getLlmReadableData());
+		if (root == null) return List.of();
+		JsonNode stepDetails = root.get("step_details");
+		if (stepDetails == null) return List.of();
+		JsonNode perStep = stepDetails.get("per_step");
+		if (perStep == null || !perStep.isObject()) return List.of();
+
+		List<AlarmDtos.DataView> all = new java.util.ArrayList<>();
+		perStep.fields().forEachRemaining(entry -> {
+			JsonNode step = entry.getValue();
+			if (step == null) return;
+			JsonNode status = step.get("status");
+			if (status == null || !"pass".equalsIgnoreCase(status.asText(""))) {
+				return;  // skip failed / non-pass step data_views
+			}
+			all.addAll(extractDataViews(step.get("data_views")));
+		});
 		return all;
 	}
 

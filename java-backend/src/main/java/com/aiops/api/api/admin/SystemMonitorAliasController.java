@@ -2,6 +2,7 @@ package com.aiops.api.api.admin;
 
 import com.aiops.api.api.skill.SkillRunnerService;
 import com.aiops.api.auth.Authorities;
+import com.aiops.api.config.AiopsProperties;
 import com.aiops.api.domain.agentknowledge.AgentKnowledgeRepository;
 import com.aiops.api.domain.alarm.AlarmRepository;
 import com.aiops.api.domain.audit.AuditLogRepository;
@@ -63,6 +64,7 @@ public class SystemMonitorAliasController {
 	private final BlockDocRepository blockDocRepo;
 	private final McpDefinitionRepository mcpRepo;
 	private final SkillRunnerService skillRunner;
+	private final String sidecarServiceToken;
 
 	/** Cached WebClient — health pings reuse it across requests instead of
 	 *  re-instantiating per call (per-call clients leak connection pools). */
@@ -84,7 +86,10 @@ public class SystemMonitorAliasController {
 	                                    BlockRepository blockRepo,
 	                                    BlockDocRepository blockDocRepo,
 	                                    McpDefinitionRepository mcpRepo,
-	                                    SkillRunnerService skillRunner) {
+	                                    SkillRunnerService skillRunner,
+	                                    AiopsProperties props) {
+		this.sidecarServiceToken = props.sidecar() != null && props.sidecar().python() != null
+				? props.sidecar().python().serviceToken() : "";
 		this.userRepo = userRepo;
 		this.alarmRepo = alarmRepo;
 		this.skillRepo = skillRepo;
@@ -108,11 +113,14 @@ public class SystemMonitorAliasController {
 		// ── Service health (real ping, not hardcoded) ────────────────────
 		// LinkedHashMap so frontend renders in a predictable order.
 		Map<String, Object> services = new LinkedHashMap<>();
-		services.put("aiops-app",             probe(8000, "/api/health"));
-		services.put("aiops-java-api",        probe(8002, "/actuator/health"));
-		services.put("aiops-java-scheduler",  probe(8003, "/actuator/health"));
-		services.put("aiops-python-sidecar",  probe(8050, "/health"));
-		services.put("ontology-simulator",    probe(8012, "/api/v1/tools"));
+		services.put("aiops-app",             probe(8000, "/api/health", null));
+		services.put("aiops-java-api",        probe(8002, "/actuator/health", null));
+		services.put("aiops-java-scheduler",  probe(8003, "/actuator/health", null));
+		// Sidecar exposes only token-gated /internal/health (no anonymous
+		// liveness endpoint by design — auth boundary). Send the same service
+		// token PythonSidecarConfig injects for every other Java→sidecar call.
+		services.put("aiops-python-sidecar",  probe(8050, "/internal/health", sidecarServiceToken));
+		services.put("ontology-simulator",    probe(8012, "/api/v1/tools", null));
 
 		// ── Background tasks ─────────────────────────────────────────────
 		// event_poller was Python-side and is gone (Java scheduler owns
@@ -157,16 +165,22 @@ public class SystemMonitorAliasController {
 		return out;
 	}
 
-	/** Probe a service's health endpoint on localhost. Returns
+	/** Probe a service's health endpoint on localhost. When
+	 *  {@code serviceToken} is non-null, sends it as {@code X-Service-Token}
+	 *  (required by the sidecar's {@code /internal/health}; other services
+	 *  expose anonymous health endpoints). Returns
 	 *  {status: "UP"|"DOWN", port, ...} consumed by frontend status badge.
 	 *  Any non-2xx, timeout, or connection error → DOWN. */
-	private static Map<String, Object> probe(int port, String path) {
+	private static Map<String, Object> probe(int port, String path, String serviceToken) {
 		Map<String, Object> out = new HashMap<>();
 		out.put("port", port);
 		try {
-			HEALTH_CLIENT.get()
-					.uri("http://127.0.0.1:" + port + path)
-					.retrieve()
+			WebClient.RequestHeadersSpec<?> req = HEALTH_CLIENT.get()
+					.uri("http://127.0.0.1:" + port + path);
+			if (serviceToken != null && !serviceToken.isBlank()) {
+				req = req.header("X-Service-Token", serviceToken);
+			}
+			req.retrieve()
 					.toBodilessEntity()
 					.timeout(HEALTH_TIMEOUT)
 					.block();
