@@ -1,8 +1,12 @@
 # AIOps Platform — Project Handoff
 
-**Last updated: 2026-05-24** · **Current phase: Java OOP refactor merged (post v30)**
+**Last updated: 2026-05-24** · **Current phase: Java OOP refactor merged (PR #5) · post v30.23**
 
-> 上次大改版是 2026-04-27 的 Phase 8 (Java cutover)。本次 handoff 重寫覆蓋 Phase 8 之後的所有重大進展（v9–v19 + v30 + Java OOP refactor 2026-05-23/24）.
+> 上次大改版是 2026-04-27 的 Phase 8 (Java cutover)。本次 handoff 覆蓋 Phase 8
+> 之後的所有重大進展（v9–v19 + v30.x + Skill Catalog + Builder Block Advisor +
+> Chart Engine overhaul + Object-native Pipeline + Self-correction loop + Tracer
+> + Admin viewer + Build Traces UX + Dead-code purge + Java OOP refactor + JsonUtils
+> 共用化 + pgvector write-path fix + 145 unit tests on backend).
 
 ---
 
@@ -151,9 +155,91 @@ Open follow-ups (memory):
 - `project_alarm_vs_display_decouple.md` — goal_plan should not mix alarm trigger + user presentation in one phase
 - `project_rag_for_llm_lookups.md` — RAG tools (`query_blocks` / `query_columns` / `query_connectable_sources`) to replace push-everything catalog over time
 
+### v30.10–v30.23 incremental ships (2026-05-16 → 2026-05-22)
+
+12 increments since the first v30 ship. Most are LLM-prompt / verifier rule fixes
+delivered as block-doc patches + Flyway migrations rather than graph rewrites
+(per the "flow in graph, not prompt" principle the architectural shape stayed
+stable).
+
+- **v30.16+ block-doc patches** (`block_xbar_r` pre-aggregated value_column mode,
+  `block_groupby_agg` param alignment with step_check + pandas, `block_ewma_cusum`
+  schema accepts `target=null`, `block_spc_panel` 🚨 warns LLM not to pre-filter
+  upstream + composite chart blocks). Each was a `V**.sql` migration applied
+  manually on EC2 (Flyway disabled in prod).
+- **v30.22 agent-driven verify** — LLM can emit `run_verifier` tool to verify a
+  multi-block chain mid-phase, lets builder ship `> 2-node` phases without
+  hitting the inspect/reflect loop on every step.
+- **v30.23 covers gate behind feature flag** (default OFF) — verifier no longer
+  auto-rejects on missing `produces.covers` declarations; logged-only until a
+  real rule replaces it.
+- **Tracer / Admin viewer iteration** — `inspect_block_doc` adds
+  `section='summary'|'full'` (default lean) to cut tokens; trace truncation cap
+  bumped 300→6000 chars; SSE param coercion fix so `phase_action.tool_args_raw`
+  carries the actual values not the JSON-string; tool_use blocks stripped from
+  assistant history when no dispatch happened (recovery from invalid LLM output);
+  round budget 8 → 16 + doc-reread signal logged; Anthropic prompt cache on
+  `agentic_phase_loop` cuts catalog tokens ~90%.
+- **Verifier multi-terminal awareness** — when canvas has multiple terminal
+  nodes, verifier picks the terminal matching `phase.expected` instead of the
+  first one (was silently rejecting valid pipelines).
+- **Builder Block Advisor v6.2/v6.3** — tool-using doc Q&A agent (advisor_v2)
+  for EXPLAIN / COMPARE / RECOMMEND buckets so admin-edited
+  `block_docs.markdown` surfaces in answers. KNOWLEDGE bucket added to
+  classifier, deprecated blocks deprioritized. Eval baseline 26/30.
+
+### Agent Knowledge V49/V50 + Slash-command audit V51/V52 (2026-05-21/23)
+
+- **V49 `block_docs` table** — admin-editable markdown for block docs (Block
+  Advisor's source). Read by `inspect_block_doc` + `/admin/block-docs` page.
+- **V50 `agent_knowledge` seeds** — alarm scope + intent classification
+  heuristics surfaced to plan_node as high-priority RAG bypass entries.
+- **V51 `xbar_r` doc patch** — clarifies pre-aggregated `value_column` mode after
+  the WECO X-bar/R agent picked the wrong shape repeatedly.
+- **V52 `block_process_history` tool_id='ALL' sentinel** — fleet-wide queries
+  no longer need to fan out across multiple `process_history` calls; sidecar
+  expands ALL on the executor side.
+- **Slash-command audit (2 reports)** — `docs/slash-command-audit-2026-05-21*.md`
+  catalogue every slash command + its current routing; surfaced 4 stale commands
+  removed in the dead-code purge.
+
+### /system/monitor rewrite + Alarm UX 3-fix bundle (2026-05-22/23)
+
+- **`/system/monitor` controller rewrite** (`046f85e`) — dropped stale
+  `fastapi-backend:8001` entry (decommissioned 2026-04-25), added
+  `aiops-java-scheduler:8003` + `aiops-app:8000`, replaced hardcoded "UP" with
+  per-service `/health` probe (real status), dropped `fetchPollerStats()`
+  (Python event poller is gone — Java scheduler owns event dispatch), extended
+  `db_stats` to 15 tables (added `agent_knowledge`, `pb_blocks`, `block_docs`,
+  `mcp_definitions`, `skill_runs`, `pb_pipeline_runs`).
+- **Alarm UX 3-fix** (`ba26b6d` + `405edd3` + `79acbbe`):
+  - data_views in `findings.outputs` were JSON-stringified in the UI as raw
+    dumps; moved to `findings.step_details` (not iterated by RenderMiddleware)
+    and AlarmEnrichmentService walks step_details to harvest into
+    `trigger_data_views` → renders as proper DataViewTable.
+  - `equipmentId` now falls back to evidence row's `toolID` when
+    triggerPayload doesn't carry tool_id (cron/patrol skills); keeps alarms
+    grouped per machine instead of dumping into a single "(any)" cluster.
+  - Alarm summary leads with `confirm_check.description` (human-authored
+    intent) before the machine-evaluated math, so oncall sees
+    "條件: 5次中超過3次OOC" instead of just "Confirm: 1.0 ≥ 0.0".
+
+### Dead-code purge (Tiers A/B/C + Round 1+2, 2026-05-23)
+
+User feedback: post-cutover, multiple frontend pages + Java controllers were
+still in the tree but unreachable. Purge removed:
+- **Tier A** (4 pages) — triggers / published-skills / mcps / system-skills
+- **Tier B** (7 pages + 31 alarm-center-beta assets) — auto-patrols /
+  auto-check-rules / system aliases / dev / prototype / alarms-beta
+- **Tier C** (5 orphan pages) — events / lots / event-types / automation /
+  orphan mcps API proxy
+- **Round 1+2 backend** — 8 Java controllers + 4 entity/repo chains
+  (CronJob / DataSubject / MockDataSource / ScriptVersion) + 5 sidecar modules
+  + 2 frontend proxies. ~14K LoC removed across frontend + backend.
+
 ---
 
-## 4. v18 — Reject-and-ask loop + Intent bullets
+## 4. v18 — Reject-and-ask loop + Intent bullets (shipped 2026-05-14 · historical)
 
 ### What changed
 Builder graph used to silently fail when `macro_plan_node` LLM judged the prompt too_vague. v18:
@@ -178,12 +264,13 @@ Skill builder smoke 5/5 OK. Driver: `tooling/skill_builder_smoke.sh`, also `/tmp
 - `python_ai_sidecar/agent_builder/graph_build/nodes/compile_chunk.py` — 12 autofix layers
 - `aiops-app/src/app/admin/build-traces/page.tsx` — admin page renders bullets + previews
 
-### Open items
-- Skill Builder GUI modal still shows v15 MCQ format; not yet migrated to bullets UI (admin trace viewer already shows the new format)
+### Open items (resolved 2026-05-14 by `f535d78` + `87d5ad2`)
+- ~~Skill Builder GUI modal v15 MCQ → v18 bullets~~ — `BulletConfirmCard` wired
+  into `AIAgentPanel` (the actual Skill Builder panel).
 
 ---
 
-## 5. v19 — Chat intent confirmation (CURRENT)
+## 5. v19 — Chat intent confirmation (shipped 2026-05-14 · historical)
 
 ### Goal
 User feedback: "新的 skill 就是要出現，不論是 skill builder or chat mode". Chat mode previously short-circuited clarify_intent.
@@ -207,18 +294,14 @@ User feedback: "新的 skill 就是要出現，不論是 skill builder or chat m
 - `components/chat/ChatPanel.tsx` — handles `pb_intent_confirm` SSE event, renders card-only message; resolution synthesizes "✓ 已建好" follow-up.
 - `app/api/agent/chat/intent-respond/route.ts` (new) — Next.js proxy bypassing Java directly to sidecar (Java doesn't need to know about v19).
 
-### ⚠ Smoke test partial — known issue
+### ⚠ Smoke test partial — RESOLVED 2026-05-19
 
-**Full chat path NOT verified end-to-end**:
-- New v19 endpoint reachable (HTTP 200).
-- BulletConfirmCard renders when `pb_intent_confirm` arrives.
-- BUT in actual chat flow, an existing mechanism (`pre_clarify_check_node` + `tool_execute` build_pipeline_live intercept using `dimensional_clarifier`) fires the older `design_intent_confirm` card BEFORE `build_pipeline_live` runs. So v19's `clarify_intent` inside the build never gets reached for build prompts that have ambiguity.
-
-**Decision deferred (next session)**: should v19 bullets **replace** existing `design_intent_confirm`, or coexist? Both target chat-mode clarification:
-- `design_intent_confirm` (existing) — `dimensional_clarifier` asks specific dims (time / target / metric) — pre-build intercept
-- `v19 intent bullets` — `clarify_intent_node` restates the whole intent — inside-build pause
-
-Recommend: replace dimensional_clarifier with v19 bullets (cleaner, single mechanism). But need to verify dimensional_clarifier's dim-detection rules can be folded into clarify_intent's LLM prompt.
+The original ship hit `pre_clarify_check_node` / `dimensional_clarifier`
+interception so v19's `clarify_intent` never reached the chat-build path.
+Resolved by `1d4a35b fix(v19): resume SSE flows through chat handler so
+canvas updates` — v19 bullets path is now the canonical chat clarification
+mechanism; `design_intent_confirm` was removed from the build-pipeline-live
+intercept.
 
 ### Skill Builder Glass Box mode
 v19 bullets DO fire here. Skill Builder is fully working; chat is the open item.
@@ -252,17 +335,35 @@ v19 bullets DO fire here. Skill Builder is fully working; chat is the open item.
 
 ---
 
-## 7. Open Items
+## 7. Open Items (as of 2026-05-24)
 
-| Priority | Item | Owner / Next |
+### Resolved since 2026-05-14
+| Item | Resolution |
+|---|---|
+| Skill Builder GUI v15 MCQ → v18 bullets | ✓ shipped `f535d78` + `87d5ad2` 2026-05-14 |
+| LLM prompt cache for catalog (cache_read=0) | ✓ shipped `bcf5195` (Anthropic prompt cache on `agentic_phase_loop` ~90% token cut) 2026-05-19 |
+| v19 vs `design_intent_confirm` chat coexistence | ✓ shipped `1d4a35b` (resume SSE flows through chat handler — v19 path stable) |
+| Java backend god-class architectural debt (DevOps audit flag) | ✓ shipped Phase 12 OOP refactor PR #5 2026-05-24 |
+| Test coverage gap (2 active files for 15K LoC) | ✓ partial — 6 active files / 145 tests post-Phase-12. Coverage is now meaningful for JsonUtils + SkillDocument + Pipeline + PipelineBuilder + SkillAlarmEmitter (the alarm-emit critical path). Other services still uncovered — see deferred. |
+
+### Pending
+| Priority | Item | Status / Next |
 |---|---|---|
-| **HIGH** | Decide v19 vs `design_intent_confirm` — replace or coexist in chat | Product decision; recommend: replace |
-| HIGH | Skill Builder GUI modal: migrate from v15 MCQ to v18 bullets | Frontend, ~3-4 hours |
-| MED | K8s deployment (Dockerfile + run.sh × 4 + manifests) | Waiting on target env decision |
-| MED | `pending_clarify` Redis backend for K8s (currently in-memory) | Tied to K8s migration |
-| MED | Token usage analytics from new trace `input_tokens`/`output_tokens` fields | Could add cost panel to admin viewer |
-| LOW | Phase 2 panel blocks: `block_cpk_summary`, `block_fdc_anomaly` | Per spec discussion; defer until 1-2 real prompts to design against |
-| LOW | Improve LLM accuracy: prompt cache for catalog (currently cache_read=0) | Could reduce token cost 90%; needs Anthropic prompt caching wiring |
+| **HIGH** | **Token usage analytics panel** in admin trace viewer | Trace `input_tokens`/`output_tokens` fields populated since Tier 1 observability; admin viewer doesn't render them yet. ~3-4 hrs to add a cost summary card + per-call breakdown. |
+| **HIGH** | **agent_workflow.html refresh** | Source-of-truth markdown was updated for v30 + Block Advisor + intent_completeness; HTML mermaid render lagging. Re-render via the doc page or rewrite — per `feedback_readme_before_push.md` they must match. |
+| **HIGH** | **RAG tools for LLM lookups** — `query_blocks` / `query_columns` / `query_connectable_sources` | Replaces push-everything catalog. Memory `project_rag_for_llm_lookups.md`. Substantial — would cut prompt tokens further but needs new graph nodes. |
+| MED | **K8s deployment** — Dockerfile × 4 + `<service>-run.sh` while-true wrappers + manifests | Waiting on K8s target env decision (GKE/EKS/self-hosted). Memory `reference_k8s_run_sh_pattern.md`. |
+| MED | **`pending_clarify` Redis backend** for K8s pod horizontal scale | Tied to K8s migration. Currently in-memory map in sidecar. |
+| MED | **Alarm-trigger vs user-presentation decouple** in goal_plan | Memory `project_alarm_vs_display_decouple.md` — goal_plan currently mixes the two phases; should separate alarm rule (verdict) from display (chart/table). |
+| MED | **Chart-phase LLM-judge quantifier reject** | Memory `project_chart_phase_judge_quantifier.md` — chart blocks with rows=None + value_desc containing "所有" quantifier always get rejected. Pick fix path (a/b/c per memory). |
+| MED | **v30.17j follow-up items A1–A5 + B1–B7** | Memory `project_v30_17j_followups.md` — collection of v30 stability tweaks (1-block spc_panel, agent success-mismatch, zero case, ChatPanel dead code, plan over-segmentation, etc.) |
+| MED | **Judge-deficit user interaction** — JudgeClarifyCard for rows < 80% target | Memory `project_judge_deficit_interaction.md` — verifier should pause + open clarify card (continue / replan / cancel) instead of hard-failing. |
+| MED | **Test coverage for FleetService / AgentKnowledgeService / SkillRunnerService orchestrator** | Phase 12 P3 covered the helpers + business rules but not the orchestration flows. Mockito pattern established; ~1-2 hrs per service. |
+| LOW | **Phase 2 panel blocks** — `block_cpk_summary`, `block_fdc_anomaly` | Defer until 1-2 real prompts to design against. |
+| LOW | **Pending self-test checks** — loop MCP detection + chart x_key format validation | Memory `pending_selftest_checks.md` — pre-existing improvements to the self-smoke harness. |
+| LOW | **LLM repair pattern: doesn't remove old nodes** | Memory `feedback_llm_doesnt_remove_old_nodes.md` — repair/reflect creates `n1b` parallel to broken `n1` instead of using `remove_node`. Affects retry quality. |
+| DEFERRED | **`com.aiops.api.api.* → com.aiops.api.service.*` package move** | Phase 12 P4 deliberately chose lighter-weight `package-info.java` documentation over mechanical package shuffle (YAGNI). Revisit if multi-team boundary becomes a problem. |
+| DEFERRED | **fastapi_backend_service final removal** | Already decommissioned + directory deleted in dead-code purge; CI workflows referencing it dropped in `ae053bd`. Nothing left to remove. |
 
 ---
 
@@ -270,22 +371,49 @@ v19 bullets DO fire here. Skill Builder is fully working; chat is the open item.
 
 | What | Where |
 |---|---|
+**Python sidecar (agents + executors)**
+| What | Where |
+|---|---|
 | Builder graph | `python_ai_sidecar/agent_builder/graph_build/graph.py` |
 | Builder nodes | `python_ai_sidecar/agent_builder/graph_build/nodes/` |
-| Block executors | `python_ai_sidecar/pipeline_builder/blocks/` (56 blocks) |
+| Block executors | `python_ai_sidecar/pipeline_builder/blocks/` (56+ blocks) |
 | Block catalog (LLM-visible) | `python_ai_sidecar/pipeline_builder/seed.py` |
 | Trace recorder | `python_ai_sidecar/agent_builder/graph_build/trace.py` |
 | Chat orchestrator | `python_ai_sidecar/agent_orchestrator_v2/` |
-| Block advisor | `python_ai_sidecar/agent_builder/advisor/` |
+| Block advisor (tool-using doc Q&A) | `python_ai_sidecar/agent_builder/advisor/` |
+
+**Java backend (post-Phase-12 layering — controller↔service↔repo per package)**
+| What | Where |
+|---|---|
+| Skill domain (1 controller + 5 services) | `java-backend/.../api/skill/` — see `package-info.java` |
+| Pipeline domain (controllers + services + Dtos + DocGenerator) | `java-backend/.../api/pipeline/` — see `package-info.java` |
+| Fleet domain (controller + 3-split services + façade + simulator client) | `java-backend/.../api/fleet/` — see `package-info.java` |
+| Agent proxy (SSE/JSON to sidecar) + DTOs | `java-backend/.../api/agent/` — see `package-info.java` |
+| Agent knowledge (user-scoped CRUD) | `java-backend/.../api/agentknowledge/` — see `package-info.java` |
+| Internal (sidecar-only) RAG + embedding lifecycle | `java-backend/.../api/internal/` — see `package-info.java` |
+| Shared infrastructure | `java-backend/.../common/` — `ApiResponse` / `ApiException` / `SseEmitterBridge` / `RequestBodyAccess` / `JsonUtils` |
+| Mockito unit tests (145 tests / 6 files) | `java-backend/src/test/java/com/aiops/api/` |
+| Flyway migrations | `java-backend/src/main/resources/db/migration/V*.sql` (latest V52) |
+
+**Frontend**
+| What | Where |
+|---|---|
 | Chat panel UI | `aiops-app/src/components/chat/ChatPanel.tsx` |
-| BulletConfirmCard | `aiops-app/src/components/chat/BulletConfirmCard.tsx` (v19 new) |
+| BulletConfirmCard (v19) | `aiops-app/src/components/chat/BulletConfirmCard.tsx` |
+| Agent Builder Panel (Skill Builder) | `aiops-app/src/components/pipeline-builder/AgentBuilderPanelV30.tsx` |
 | Admin trace viewer | `aiops-app/src/app/admin/build-traces/page.tsx` |
+| Admin block-docs editor | `aiops-app/src/app/admin/block-docs/` |
+
+**Docs / DevOps**
+| What | Where |
+|---|---|
 | Agent workflow doc | `docs/agent_workflow.md` + `docs/agent_workflow.html` |
-| Spec docs | `docs/SPEC_*.md` (active 4 files; 17 archived to history/) |
+| Spec docs (active) | `docs/SPEC_*.md` (17 archived to `docs/history/`) |
 | DevOps spec | `docs/devOps_technique_guide_2.0.md` |
-| Deploy scripts | `deploy/update.sh`, `deploy/java-update.sh` |
-| Service files | `deploy/aiops-*.service` |
-| Flyway migrations | `java-backend/src/main/resources/db/migration/V*.sql` (latest V46) |
+| Slash-command audit | `docs/slash-command-audit-2026-05-21*.md` |
+| Deploy scripts | `deploy/update.sh` (FE+sim), `deploy/java-update.sh` (Java+sidecar) |
+| systemd units | `deploy/aiops-*.service` |
+| Project guidelines | `CLAUDE.md` (root — backend Java patterns added 2026-05-24 in `070d5b1`) |
 
 ---
 
@@ -298,6 +426,10 @@ v19 bullets DO fire here. Skill Builder is fully working; chat is the open item.
 | V46 | 2026-05-14 | Panel blocks source-mode + color params update |
 | V47 | 2026-05-16 | `block_find` — filter + (optional) sort + take first/last/all/N |
 | V48 | 2026-05-16 | block_filter examples + block_sort description tightening (cross-ref block_find) |
+| V49 | 2026-05-19 | `block_docs` table — admin-editable markdown for Block Advisor source |
+| V50 | 2026-05-20 | `agent_knowledge` seeds — alarm scope + intent classification heuristics for plan_node bypass |
+| V51 | 2026-05-22 | `xbar_r` block doc clarifies pre-aggregated `value_column` mode (WECO X-bar/R fix) |
+| V52 | 2026-05-22 | `block_process_history` `tool_id='ALL'` sentinel for fleet-wide queries |
 
 **Important**: Flyway auto-run disabled in EC2 prod. Apply manually:
 ```bash
@@ -332,14 +464,61 @@ curl -X DELETE 'http://localhost:8050/internal/agent/build/traces?older_than_hou
 
 Location: `/Users/gill/.claude/projects/-Users-gill-metagpt-pure-workspace-fastapi-backend-refactored/memory/`
 
-Notable:
+The `MEMORY.md` index is loaded into every session's context. Below is a
+curated selection of the most-referenced entries; the index has ~60 total.
+
+**Architectural principles (referenced often)**:
+- `feedback_no_case_rule_in_prompt.md` — Core Principle 0: never add case-specific rules to LLM prompts; fix via graph node / schema / structured meta
+- `feedback_flow_in_graph_not_prompt.md` — flow control rules belong in graph nodes (testable / deterministic), not LLM prompts
+- `feedback_graph_heavy_preference.md` — reject "30 tools + 80-turn free LLM"; push logic into graph nodes
+- `feedback_plan_intent_execute_blocks.md` — plan layer = intent / execute = blocks; goal_plan is block-agnostic
+- `feedback_jackson_snake_case_wire.md` — Java DTO wire is snake_case; camelCase silent-ignored
+- `feedback_flyway_disabled_in_prod.md` — Flyway prod-disabled; new V**.sql via manual psql on EC2
+
+**DevOps / infra**:
 - `reference_devops_target_stack.md` — Java 17 / Spring 3.5.14 / Python 3.11 / Node 20.18
-- `reference_port_convention.md` — EC2 vs K8s port rules
-- `reference_k8s_run_sh_pattern.md` — future K8s run.sh template
-- `feedback_readme_before_push.md` — README/SPEC/HANDOFF must update before push
-- `feedback_flow_in_graph_not_prompt.md` — flow rules belong in graph not LLM prompt
+- `reference_port_convention.md` — EC2 distinct ports (8000/8002/8050/8012); K8s future 8080→80
+- `reference_k8s_run_sh_pattern.md` — future K8s while-true wrapper template
+- `reference_ec2_prod_repo_path.md` — `/opt/aiops` is the canonical prod path
+- `reference_github_repo.md` — `gillggx/ai-ops-agentic-platform`
+- `project_ec2_service_map.md` — port/service mapping
+- `feedback_sidecar_restart_gotcha.md` — `deploy/update.sh` skips sidecar; must `systemctl restart aiops-python-sidecar` after sidecar code change
+- `feedback_nextjs_standalone_deploy.md` — npm build alone breaks `/_next/static`; use deploy/update.sh
+- `feedback_deploy_via_git_not_direct_edit.md` — never SSH-edit prod; always git push → EC2 pull
+
+**Process discipline**:
+- `feedback_readme_before_push.md` — README/SPEC/HANDOFF must update before push (this doc lives by that rule)
+- `feedback_verify_like_user.md` — declare-done prerequisites: grep / curl / SELECT row / mtime check before saying fixed
+- `feedback_self_smoke_before_user.md` — 4 smoke tools (CRUD + Builder LLM + GUI Playwright + full real-LLM e2e); LLM tests must pass 3× consecutively
+- `feedback_check_traces_first.md` — when user reports failure, SSH `/tmp/builder-traces/*.json` for their case first, don't re-run smoke with different randomness
+- `feedback_foreground_test_runs.md` — driver / smoke runs use foreground Bash so user sees real-time progress
+- `feedback_no_emoji.md` — no emoji or emoji-like chars anywhere (chat / code / docs / UI strings)
+- `feedback_plan_phase_format.md` — phase format = id + [expected] + text; no goal/value_desc/outcome_keys/why
+
+**Open follow-up projects (referenced in §7 above)**:
+- `project_alarm_vs_display_decouple.md` — separate alarm trigger phase from user-presentation phase in goal_plan
+- `project_rag_for_llm_lookups.md` — query_blocks / query_columns / query_connectable_sources tools
+- `project_chart_phase_judge_quantifier.md` — chart-phase LLM-judge over-rejects on quantifier mismatch
+- `project_v30_17j_followups.md` — A1-A5 + B1-B7 v30 stability items
+- `project_judge_deficit_interaction.md` — JudgeClarifyCard for rows < target situations
+- `feedback_llm_doesnt_remove_old_nodes.md` — LLM repair adds `n1b` parallel instead of `remove_node`
+- `pending_selftest_checks.md` — loop MCP detection + chart x_key format validation
+
+**Refactor / cleanup history**:
 - `project_pipeline_builder_progress.md` — pipeline builder phase history
+- `project_p1_pipeline_migration.md` — Phase ε pipeline migration progress
+- `project_object_native_phase1.md` — object-native pipeline (nested=true)
+- `project_self_correction_loop.md` — inspect_execution + reflect_plan
+- `project_chart_engine_overhaul.md` — 18-block charting overhaul
+- `project_builder_block_advisor.md` — 5-bucket classifier + advisor graph
 
 ---
 
-**Maintainer note**: When next session starts, the most actionable thing is the v19/design_intent_confirm decision (section 7 first row). Everything else is shipped and operational on EC2.
+**Maintainer note for next session**: §7 above is the canonical "what's left"
+list. Highest priority pending items:
+1. Token usage analytics panel in admin trace viewer (HIGH, ~3-4 hrs)
+2. agent_workflow.html refresh (HIGH, depends on graph diff since last render)
+3. RAG tools for LLM lookups (HIGH, substantial — needs new graph nodes)
+
+Everything else is shipped + operational on EC2 (PR #5 merged 2026-05-24, all
+3 services UP, 5 refactored surfaces verified post-merge).
