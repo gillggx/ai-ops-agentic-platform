@@ -390,31 +390,32 @@ public class AlarmEnrichmentService {
 		JsonNode root = parseJsonNode(log.getLlmReadableData());
 		if (root == null) return List.of();
 
-		// 2026-05-23: harvest data_views from new SkillRunner shape
-		// (findings.step_details.{confirm,per_step}.data_views). Per-step
-		// only takes data_views from steps that PASSED (status='pass'); failed
-		// steps' empty/null data_views would just produce noise.
+		// 2026-05-24 fix: SkillAlarmEmitter.buildLlmReadableData writes the
+		// findings map DIRECTLY as the JSON root (no top-level `findings`
+		// wrapper). The previous `root.get("findings").get("step_details")`
+		// path always returned null → trigger_data_views was always empty
+		// for every alarm since the step_details restructure shipped.
+		// Per-step only takes data_views from steps that PASSED
+		// (status='pass'); failed steps' empty/null data_views would just
+		// produce noise.
 		List<AlarmDtos.DataView> all = new java.util.ArrayList<>();
-		JsonNode findings = root.get("findings");
-		if (findings != null) {
-			JsonNode stepDetails = findings.get("step_details");
-			if (stepDetails != null) {
-				JsonNode confirm = stepDetails.get("confirm");
-				if (confirm != null) {
-					all.addAll(extractDataViews(confirm.get("data_views")));
-				}
-				JsonNode perStep = stepDetails.get("per_step");
-				if (perStep != null && perStep.isObject()) {
-					perStep.fields().forEachRemaining(entry -> {
-						JsonNode step = entry.getValue();
-						if (step == null) return;
-						JsonNode status = step.get("status");
-						if (status == null || !"pass".equalsIgnoreCase(status.asText(""))) {
-							return;  // skip failed / non-pass step data_views
-						}
-						all.addAll(extractDataViews(step.get("data_views")));
-					});
-				}
+		JsonNode stepDetails = root.get("step_details");
+		if (stepDetails != null) {
+			JsonNode confirm = stepDetails.get("confirm");
+			if (confirm != null) {
+				all.addAll(extractDataViews(confirm.get("data_views")));
+			}
+			JsonNode perStep = stepDetails.get("per_step");
+			if (perStep != null && perStep.isObject()) {
+				perStep.fields().forEachRemaining(entry -> {
+					JsonNode step = entry.getValue();
+					if (step == null) return;
+					JsonNode status = step.get("status");
+					if (status == null || !"pass".equalsIgnoreCase(status.asText(""))) {
+						return;  // skip failed / non-pass step data_views
+					}
+					all.addAll(extractDataViews(step.get("data_views")));
+				});
 			}
 		}
 

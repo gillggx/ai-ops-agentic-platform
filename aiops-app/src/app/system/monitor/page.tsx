@@ -2,27 +2,27 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+// 2026-05-24: shape updated to match Java backend rewrite (commit 046f85e).
+// Python event_poller is gone — Java scheduler unit owns cron + event dispatch.
+// SkillRunner in-memory alarm counters surface here instead.
 interface MonitorData {
   timestamp: string;
   services: Record<string, { status: string; port?: number; data?: Record<string, unknown>; error?: string }>;
   background_tasks: {
-    event_poller: {
-      status: string;
-      started_at: string | null;
-      last_poll_at: string | null;
-      last_seen_event: string | null;
-      total_polls: number;
-      total_events_processed: number;
-      ooc_detected: number;
-      skills_triggered: number;
-      errors: number;
+    skill_runner: {
+      alarms_emitted: number;
+      alarms_dedup_suppressed: number;
+      last_emit_at: string | null;
+      last_skill: string | null;
+      last_alarm_id: number | null;
     };
     cron_scheduler: {
-      status: string;
-      jobs: { id: string; name: string; next_run: string | null }[];
+      status: string;     // "JAVA" — handled by aiops-java-scheduler unit
+      note?: string;
     };
   };
   db_stats: Record<string, number>;
+  build_info?: { service?: string; backend?: string };
 }
 
 function StatusDot({ up }: { up: boolean }) {
@@ -71,7 +71,7 @@ export default function SystemMonitorPage() {
   if (error) return <div style={{ padding: 48, color: "#e53e3e" }}>Error: {error}</div>;
   if (!data) return null;
 
-  const poller = data.background_tasks.event_poller;
+  const skillRunner = data.background_tasks.skill_runner;
   const scheduler = data.background_tasks.cron_scheduler;
 
   const cardStyle: React.CSSProperties = {
@@ -115,32 +115,15 @@ export default function SystemMonitorPage() {
         </div>
       </div>
 
-      {/* Event Poller */}
+      {/* Skill Runner (alarm-emit activity) */}
       <div style={cardStyle}>
-        <div style={titleStyle}>Event Poller</div>
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8, marginBottom: 12,
-          padding: "8px 12px", borderRadius: 6,
-          background: poller.status === "RUNNING" ? "#f0fff4" : "#fff5f5",
-          border: `1px solid ${poller.status === "RUNNING" ? "#c6f6d5" : "#fed7d7"}`,
-        }}>
-          <StatusDot up={poller.status === "RUNNING"} />
-          <span style={{ fontWeight: 600, fontSize: 13 }}>{poller.status}</span>
-          {poller.started_at && (
-            <span style={{ fontSize: 11, color: "#718096", marginLeft: 8 }}>
-              started {timeAgo(poller.started_at)}
-            </span>
-          )}
-        </div>
+        <div style={titleStyle}>Skill Runner — Alarm Emit</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
           {[
-            { label: "Total Polls", value: poller.total_polls },
-            { label: "Last Poll", value: timeAgo(poller.last_poll_at) },
-            { label: "OOC Detected", value: poller.ooc_detected },
-            { label: "Skills Triggered", value: poller.skills_triggered },
-            { label: "Events Processed", value: poller.total_events_processed },
-            { label: "Last Event", value: timeAgo(poller.last_seen_event) },
-            { label: "Errors", value: poller.errors },
+            { label: "Alarms Emitted", value: skillRunner.alarms_emitted ?? 0 },
+            { label: "Dedup Suppressed", value: skillRunner.alarms_dedup_suppressed ?? 0 },
+            { label: "Last Emit", value: timeAgo(skillRunner.last_emit_at) },
+            { label: "Last Alarm #", value: skillRunner.last_alarm_id ?? "—" },
           ].map(({ label, value }) => (
             <div key={label} style={{ padding: "8px 10px", background: "#f7fafc", borderRadius: 6 }}>
               <div style={{ fontSize: 10, color: "#a0aec0", fontWeight: 600, textTransform: "uppercase" }}>{label}</div>
@@ -148,33 +131,25 @@ export default function SystemMonitorPage() {
             </div>
           ))}
         </div>
+        {skillRunner.last_skill && (
+          <div style={{ marginTop: 10, padding: "8px 10px", background: "#edf2f7", borderRadius: 6, fontSize: 12, color: "#4a5568" }}>
+            Last skill: <span style={{ fontFamily: "monospace" }}>{skillRunner.last_skill}</span>
+          </div>
+        )}
+        <div style={{ marginTop: 10, fontSize: 11, color: "#a0aec0" }}>
+          In-memory counters; reset on JVM restart. Persistent metrics: query <code>alarms</code> / <code>skill_runs</code> tables directly.
+        </div>
       </div>
 
       {/* Cron Scheduler */}
       <div style={cardStyle}>
         <div style={titleStyle}>Cron Scheduler</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-          <StatusDot up={scheduler.status === "RUNNING"} />
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+          <StatusDot up={scheduler.status === "JAVA" || scheduler.status === "RUNNING"} />
           <span style={{ fontWeight: 600, fontSize: 13 }}>{scheduler.status}</span>
-          <span style={{ fontSize: 11, color: "#718096" }}>{scheduler.jobs.length} jobs</span>
         </div>
-        {scheduler.jobs.length > 0 && (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-            <thead>
-              <tr style={{ borderBottom: "1px solid #e2e8f0" }}>
-                <th style={{ padding: "4px 8px", textAlign: "left", color: "#a0aec0", fontSize: 10 }}>JOB ID</th>
-                <th style={{ padding: "4px 8px", textAlign: "left", color: "#a0aec0", fontSize: 10 }}>NEXT RUN</th>
-              </tr>
-            </thead>
-            <tbody>
-              {scheduler.jobs.map(j => (
-                <tr key={j.id} style={{ borderBottom: "1px solid #f7f8fc" }}>
-                  <td style={{ padding: "4px 8px", fontFamily: "monospace", color: "#4a5568" }}>{j.id}</td>
-                  <td style={{ padding: "4px 8px", color: "#718096" }}>{j.next_run ? timeAgo(j.next_run) : "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {scheduler.note && (
+          <div style={{ fontSize: 11, color: "#718096", marginLeft: 18 }}>{scheduler.note}</div>
         )}
       </div>
 
