@@ -55,6 +55,21 @@ class _Settings:
         self.OLLAMA_EMBEDDING_MODEL: str = os.environ.get(
             "OLLAMA_EMBEDDING_MODEL", "bge-m3"
         )
+        # OpenAI-compatible internal proxy (LLM_PROVIDER=internal-proxy).
+        # Same wire format as Ollama, but injects a custom auth header
+        # (e.g. X-API-Key) for enterprise gateways. See InternalProxyLLMClient.
+        self.INTERNAL_PROXY_BASE_URL: str = os.environ.get(
+            "INTERNAL_PROXY_BASE_URL", ""
+        )
+        self.INTERNAL_PROXY_API_KEY: str = os.environ.get(
+            "INTERNAL_PROXY_API_KEY", ""
+        )
+        self.INTERNAL_PROXY_HEADER_NAME: str = os.environ.get(
+            "INTERNAL_PROXY_HEADER_NAME", ""
+        )
+        self.INTERNAL_PROXY_HEADER_VALUE: str = os.environ.get(
+            "INTERNAL_PROXY_HEADER_VALUE", ""
+        )
         # mem0 (long-term semantic memory) — only used when key set
         self.MEM0_API_KEY: str = os.environ.get("MEM0_API_KEY", "")
         # Phase 5 (PIPELINE_ONLY_MODE): forces the chat orchestrator to route

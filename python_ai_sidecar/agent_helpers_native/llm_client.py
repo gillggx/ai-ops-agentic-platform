@@ -521,6 +521,43 @@ class OllamaLLMClient(BaseLLMClient):
                 yield chunk.choices[0].delta.content
 
 
+# ── Internal proxy backend (OpenAI-compat + custom auth header) ──────────────
+
+class InternalProxyLLMClient(OllamaLLMClient):
+    """OpenAI-compat client that injects a custom auth header on every request.
+
+    Useful for enterprise internal LLM gateways that require ``X-API-Key`` (or
+    similar) instead of the standard ``Authorization: Bearer``. All message
+    conversion / tool calling / streaming logic is inherited from
+    :class:`OllamaLLMClient` unchanged; only the OpenAI SDK constructor differs.
+
+    If both ``api_key`` and ``header_name``/``header_value`` are set, the proxy
+    will receive both — the SDK still puts ``api_key`` into the standard
+    Authorization header. If the proxy only uses the custom header, pass
+    ``api_key=""`` and the SDK's required-non-empty constraint is satisfied
+    by an internal ``"unused"`` placeholder.
+    """
+
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        model: str,
+        header_name: str = "",
+        header_value: str = "",
+    ) -> None:
+        import openai as _openai
+        headers: Dict[str, str] = {}
+        if header_name and header_value:
+            headers[header_name] = header_value
+        self._client = _openai.AsyncOpenAI(
+            base_url=base_url,
+            api_key=api_key or "unused",
+            default_headers=headers,
+        )
+        self._model = model
+
+
 # ── Factory ───────────────────────────────────────────────────────────────────
 
 _cached_client: Optional[BaseLLMClient] = None
@@ -531,7 +568,7 @@ def get_llm_client(force_provider: Optional[str] = None) -> BaseLLMClient:
 
     Args:
         force_provider: Override the config provider for this call only
-                        ("anthropic" | "ollama"). Used in tests.
+                        ("anthropic" | "ollama" | "internal-proxy"). Used in tests.
     """
     global _cached_client
     if _cached_client is not None and force_provider is None:
@@ -541,7 +578,25 @@ def get_llm_client(force_provider: Optional[str] = None) -> BaseLLMClient:
     settings = get_settings()
     provider = force_provider or settings.LLM_PROVIDER
 
-    if provider == "ollama":
+    if provider == "internal-proxy":
+        if not settings.INTERNAL_PROXY_BASE_URL:
+            raise RuntimeError(
+                "LLM_PROVIDER=internal-proxy requires INTERNAL_PROXY_BASE_URL"
+            )
+        client = InternalProxyLLMClient(
+            base_url=settings.INTERNAL_PROXY_BASE_URL,
+            api_key=settings.INTERNAL_PROXY_API_KEY,
+            model=settings.LLM_MODEL,
+            header_name=settings.INTERNAL_PROXY_HEADER_NAME,
+            header_value=settings.INTERNAL_PROXY_HEADER_VALUE,
+        )
+        logger.info(
+            "LLM client: InternalProxy @ %s  model=%s  header=%s",
+            settings.INTERNAL_PROXY_BASE_URL,
+            settings.LLM_MODEL,
+            settings.INTERNAL_PROXY_HEADER_NAME or "(none)",
+        )
+    elif provider == "ollama":
         client = OllamaLLMClient(
             base_url=settings.OLLAMA_BASE_URL,
             api_key=settings.OLLAMA_API_KEY,
