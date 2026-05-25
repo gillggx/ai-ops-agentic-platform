@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
 import { authHeaders } from "@/lib/auth-proxy";
+import { INTERNAL_API_TOKEN as INTERNAL_TOKEN } from "@/lib/internal-token";
 
 const AGENT_BASE_URL = process.env.AGENT_BASE_URL ?? process.env.FASTAPI_BASE_URL ?? "http://localhost:8000";
-const INTERNAL_TOKEN = process.env.INTERNAL_API_TOKEN ?? "dev-token";
 
 /**
  * POST /api/agent/session — create a new agent session.

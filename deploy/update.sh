@@ -60,7 +60,9 @@ if $REBUILD_APP; then
   echo "🔨  Building aiops-app..."
   cd "$APP_DIR/aiops-app"
   npm ci --silent
-  npm run build
+  # build:prod fails fast when INTERNAL_API_TOKEN / NEXTAUTH_SECRET / FASTAPI_BASE_URL
+  # are missing or placeholder. EC2 prod env must export them before this runs.
+  npm run build:prod
   cp -r .next/static .next/standalone/.next/static 2>/dev/null || true
   cp -r public .next/standalone/public 2>/dev/null || true
   echo "    ✅  aiops-app build 完成"

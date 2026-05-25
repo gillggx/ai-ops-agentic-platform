@@ -10,8 +10,7 @@
  */
 
 import { auth } from "@/auth";
-
-const INTERNAL_API_TOKEN = process.env.INTERNAL_API_TOKEN ?? "";
+import { INTERNAL_API_TOKEN } from "@/lib/internal-token";
 
 export interface AuthContext {
   token: string;          // Bearer value

@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:prod": "node scripts/check-prod-env.mjs && next build",
     "start": "next start",
     "type-check": "tsc --noEmit",
     "e2e": "playwright test --config e2e/playwright.config.ts",

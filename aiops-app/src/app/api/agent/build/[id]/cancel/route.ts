@@ -4,7 +4,7 @@ import { authHeaders } from "@/lib/auth-proxy";
 const FASTAPI_BASE = process.env.AGENT_BUILD_BASE_URL
   ?? process.env.FASTAPI_BASE_URL
   ?? "http://localhost:8000";
-const TOKEN = process.env.INTERNAL_API_TOKEN ?? "";
+import { INTERNAL_API_TOKEN as TOKEN } from "@/lib/internal-token";
 
 export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;

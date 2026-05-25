@@ -4,7 +4,7 @@ import { authHeaders } from "@/lib/auth-proxy";
 const FASTAPI_BASE = process.env.AGENT_BUILD_BASE_URL
   ?? process.env.FASTAPI_BASE_URL
   ?? "http://localhost:8000";
-const TOKEN = process.env.INTERNAL_API_TOKEN ?? "";
+import { INTERNAL_API_TOKEN as TOKEN } from "@/lib/internal-token";
 
 /**
  * SSE proxy — pipes the backend's text/event-stream straight to the client.

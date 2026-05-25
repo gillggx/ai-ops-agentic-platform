@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authHeaders } from "@/lib/auth-proxy";
 
 const FASTAPI_BASE = process.env.FASTAPI_BASE_URL ?? "http://localhost:8000";
-const TOKEN = process.env.INTERNAL_API_TOKEN ?? "";
+import { INTERNAL_API_TOKEN as TOKEN } from "@/lib/internal-token";
 
 export async function POST(
   req: NextRequest,
