@@ -1,10 +1,14 @@
 package com.aiops.api.scheduler;
 
 import com.aiops.api.common.ApiException;
+import com.aiops.api.common.TraceIdFilter;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.web.reactive.function.client.ClientRequest;
+import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
@@ -38,8 +42,18 @@ public class SchedulerHttpClient {
 		this.client = WebClient.builder()
 				.baseUrl(baseUrl)
 				.codecs(c -> c.defaultCodecs().maxInMemorySize(4 * 1024 * 1024))
+				.filter(traceIdPropagationFilter())
 				.build();
 		this.token = token;
+	}
+
+	private static ExchangeFilterFunction traceIdPropagationFilter() {
+		return (request, next) -> {
+			String tid = MDC.get(TraceIdFilter.MDC_KEY);
+			if (tid == null || tid.isBlank()) return next.exchange(request);
+			return next.exchange(ClientRequest.from(request)
+					.header(TraceIdFilter.HEADER, tid).build());
+		};
 	}
 
 	/** Sync trigger — returns scheduler's PatrolRunResult dto-ish map. */

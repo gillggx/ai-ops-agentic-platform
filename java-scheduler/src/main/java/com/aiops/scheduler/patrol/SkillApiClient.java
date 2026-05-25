@@ -1,9 +1,13 @@
 package com.aiops.scheduler.patrol;
 
+import com.aiops.scheduler.common.TraceIdFilter;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import org.springframework.web.reactive.function.client.ClientRequest;
+import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
@@ -35,11 +39,23 @@ public class SkillApiClient {
 
 	public SkillApiClient(@Value("${aiops.java-api.base-url:http://localhost:8002}") String baseUrl,
 	                      @Value("${aiops.java-api.internal-token:}") String internalToken) {
-		this.webClient = WebClient.builder().baseUrl(baseUrl).build();
+		this.webClient = WebClient.builder()
+				.baseUrl(baseUrl)
+				.filter(traceIdPropagationFilter())
+				.build();
 		this.internalToken = internalToken == null ? "" : internalToken;
 		if (this.internalToken.isBlank()) {
 			log.warn("SkillApiClient: aiops.java-api.internal-token is empty — system-triggered skills will 401");
 		}
+	}
+
+	private static ExchangeFilterFunction traceIdPropagationFilter() {
+		return (request, next) -> {
+			String tid = MDC.get(TraceIdFilter.MDC_KEY);
+			if (tid == null || tid.isBlank()) return next.exchange(request);
+			return next.exchange(ClientRequest.from(request)
+					.header(TraceIdFilter.HEADER, tid).build());
+		};
 	}
 
 	/**

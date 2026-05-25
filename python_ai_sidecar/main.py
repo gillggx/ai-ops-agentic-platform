@@ -12,6 +12,8 @@ enable each one independently without a code change.
 from __future__ import annotations
 
 import logging
+import re
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -19,13 +21,14 @@ from fastapi.responses import JSONResponse
 
 from .background import event_poller, nats_subscriber, embedding_backfill
 from .config import CONFIG
+from .logging_config import configure_logging, trace_id_ctx
 from .routers import agent, briefing, health, pipeline, sandbox
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-)
+configure_logging("python_ai_sidecar")
 log = logging.getLogger("python_ai_sidecar")
+
+# Reject malformed X-Trace-ID values from untrusted callers (length cap + charset).
+_TRACE_ID_VALID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 
 @asynccontextmanager
@@ -68,21 +71,44 @@ app = FastAPI(
 
 
 @app.middleware("http")
-async def log_requests(request: Request, call_next):
+async def trace_and_log_requests(request: Request, call_next):
+    inbound = request.headers.get("X-Trace-ID", "")
+    tid = inbound if _TRACE_ID_VALID.match(inbound) else str(uuid.uuid4())
+    token = trace_id_ctx.set(tid)
     path = request.url.path
-    if path.startswith("/internal/health"):
-        return await call_next(request)
-    log.info("→ %s %s caller_ip=%s", request.method, path, request.client.host if request.client else "")
+    is_health = path.startswith("/internal/health")
     try:
-        response = await call_next(request)
-    except Exception as exc:  # noqa: BLE001 — outermost barrier
-        log.exception("internal error handling %s %s", request.method, path)
-        return JSONResponse(
-            status_code=500,
-            content={"ok": False, "error": {"code": "internal_error", "message": str(exc)}},
-        )
-    log.info("← %s %s status=%s", request.method, path, response.status_code)
-    return response
+        if not is_health:
+            log.info(
+                "request.start",
+                extra={"context": {
+                    "method": request.method,
+                    "path": path,
+                    "caller_ip": request.client.host if request.client else "",
+                }},
+            )
+        try:
+            response = await call_next(request)
+        except Exception as exc:  # noqa: BLE001 — outermost barrier
+            log.exception(
+                "request.error",
+                extra={"context": {"method": request.method, "path": path}},
+            )
+            response = JSONResponse(
+                status_code=500,
+                content={"ok": False, "error": {"code": "internal_error", "message": str(exc)}},
+            )
+        if not is_health:
+            log.info(
+                "request.end",
+                extra={"context": {
+                    "method": request.method, "path": path, "status": response.status_code,
+                }},
+            )
+        response.headers["X-Trace-ID"] = tid
+        return response
+    finally:
+        trace_id_ctx.reset(token)
 
 
 app.include_router(health.router)

@@ -102,6 +102,13 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- Structured JSON logging to stdout (K8s + ELK) -->
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>7.4</version>
+        </dependency>
+
         <!-- Test scope -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

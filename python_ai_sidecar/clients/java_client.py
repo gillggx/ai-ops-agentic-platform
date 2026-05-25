@@ -18,6 +18,7 @@ import httpx
 
 from ..auth import CallerContext
 from ..config import CONFIG
+from ..logging_config import trace_id_ctx
 
 log = logging.getLogger("python_ai_sidecar.java_client")
 
@@ -95,6 +96,10 @@ class JavaAPIClient:
             "Accept": "application/json",
             "Content-Type": "application/json",
         }
+        # Forward the inbound trace id so Java logs the same correlation key.
+        tid = trace_id_ctx.get()
+        if tid and tid != "-":
+            h["X-Trace-ID"] = tid
         if self.caller:
             if self.caller.user_id is not None:
                 h["X-User-Id"] = str(self.caller.user_id)

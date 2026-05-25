@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Structured JSON logging to stdout. Schema defined in docs/logging-schema.md.
+  Field mapping: timestamp / level / logger / message at top level;
+  service="aiops-java-api" injected as customField; trace_id from MDC
+  (set by TraceIdFilter on every inbound HTTP request).
+-->
+<configuration>
+
+    <springProperty name="LOG_LEVEL" source="logging.level.root" defaultValue="INFO"/>
+
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <fieldNames>
+                <timestamp>timestamp</timestamp>
+                <level>level</level>
+                <logger>logger</logger>
+                <message>message</message>
+                <thread>[ignore]</thread>
+                <levelValue>[ignore]</levelValue>
+                <version>[ignore]</version>
+            </fieldNames>
+            <timestampPattern>yyyy-MM-dd'T'HH:mm:ss.SSS'Z'</timestampPattern>
+            <timeZone>UTC</timeZone>
+            <includeMdcKeyName>trace_id</includeMdcKeyName>
+            <customFields>{"service":"aiops-java-api"}</customFields>
+        </encoder>
+    </appender>
+
+    <root level="${LOG_LEVEL}">
+        <appender-ref ref="STDOUT"/>
+    </root>
+
+    <logger name="org.hibernate.SQL" level="WARN"/>
+    <logger name="org.springframework.web" level="INFO"/>
+
+</configuration>

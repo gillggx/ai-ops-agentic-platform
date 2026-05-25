@@ -1,15 +1,24 @@
 """Entry point – FastAPI app with MES simulator running as background task."""
 import asyncio
+import logging
 import os
+import re
+import uuid
 from contextlib import asynccontextmanager
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import connect_and_init, disconnect
 from app.mes.simulator import run as run_mes, stop as stop_mes
 from app.api.routes import router
 from app.api.v2.routes import router as router_v2
 from app.ws.manager import manager as ws_manager
+from logging_config import configure_logging, trace_id_ctx
+
+configure_logging("ontology_simulator")
+log = logging.getLogger("ontology_simulator")
+
+_TRACE_ID_VALID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
 
 @asynccontextmanager
@@ -43,6 +52,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def trace_id_middleware(request: Request, call_next):
+    inbound = request.headers.get("X-Trace-ID", "")
+    tid = inbound if _TRACE_ID_VALID.match(inbound) else str(uuid.uuid4())
+    token = trace_id_ctx.set(tid)
+    try:
+        response = await call_next(request)
+        response.headers["X-Trace-ID"] = tid
+        return response
+    finally:
+        trace_id_ctx.reset(token)
+
 
 app.include_router(router)
 app.include_router(router_v2)
