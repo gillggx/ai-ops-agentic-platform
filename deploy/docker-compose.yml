@@ -1,0 +1,181 @@
+# AIOps full-stack — single-host dev / smoke-test setup.
+#
+#   docker compose -f deploy/docker-compose.yml --env-file deploy/docker/.env up -d --build
+#
+# Service map (host port → container port):
+#   aiops-app             8000 → 8080  (Next.js standalone)
+#   aiops-java-api        8002 → 8080
+#   aiops-java-scheduler  8003 → 8080
+#   aiops-python-sidecar  8050 → 8080
+#   ontology-simulator    8012 → 8080
+#   postgres              5432 → 5432  (pgvector)
+#   mongodb              27017 → 27017
+#   redis                 6379 → 6379
+#
+# Required env (see deploy/docker/.env.example):
+#   INTERNAL_API_TOKEN, NEXTAUTH_SECRET, POSTGRES_PASSWORD,
+#   ANTHROPIC_API_KEY (or other LLM provider creds)
+#
+# Service-to-service URLs use Compose-default bridge DNS, e.g.
+# http://aiops-java-api:8080. No localhost references inside containers.
+
+services:
+
+  # ── Databases ────────────────────────────────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: aiops_db
+      POSTGRES_USER: aiops
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aiops -d aiops_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mongodb:
+    image: mongo:7
+    volumes:
+      - mongodata:/data/db
+    ports: ["27017:27017"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Application services ─────────────────────────────────────────────────
+  aiops-java-api:
+    build:
+      context: .
+      dockerfile: java-backend/Dockerfile
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    environment:
+      PORT: 8080
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/aiops_db
+      SPRING_DATASOURCE_USERNAME: aiops
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      AIOPS_SIDECAR_PYTHON_BASE_URL: http://aiops-python-sidecar:8080
+      AIOPS_SIDECAR_PYTHON_SERVICE_TOKEN: ${INTERNAL_API_TOKEN}
+      AIOPS_SCHEDULER_BASE_URL: http://aiops-java-scheduler:8080
+      AIOPS_SCHEDULER_INTERNAL_TOKEN: ${INTERNAL_API_TOKEN}
+    ports: ["8002:8080"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  aiops-java-scheduler:
+    build:
+      context: .
+      dockerfile: java-scheduler/Dockerfile
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    environment:
+      PORT: 8080
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/aiops_db
+      SPRING_DATASOURCE_USERNAME: aiops
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_DATA_REDIS_HOST: redis
+      AIOPS_JAVA_API_BASE_URL: http://aiops-java-api:8080
+      AIOPS_JAVA_API_INTERNAL_TOKEN: ${INTERNAL_API_TOKEN}
+      AIOPS_SIMULATOR_BASE_URL: http://ontology-simulator:8080
+    ports: ["8003:8080"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  aiops-python-sidecar:
+    build:
+      context: .
+      dockerfile: python_ai_sidecar/Dockerfile
+    depends_on:
+      aiops-java-api: {condition: service_healthy}
+    environment:
+      PORT: 8080
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      JAVA_API_URL: http://aiops-java-api:8080
+      JAVA_INTERNAL_TOKEN: ${INTERNAL_API_TOKEN}
+      SERVICE_TOKEN: ${INTERNAL_API_TOKEN}
+      ALLOWED_CALLERS: "*"
+      ONTOLOGY_SIM_URL: http://ontology-simulator:8080
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      LLM_MODEL: ${LLM_MODEL:-claude-haiku-4-5-20251001}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    ports: ["8050:8080"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/internal/health', timeout=2).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  ontology-simulator:
+    build:
+      context: .
+      dockerfile: ontology_simulator/Dockerfile
+    depends_on:
+      mongodb: {condition: service_healthy}
+    environment:
+      PORT: 8080
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      MONGODB_URL: mongodb://mongodb:27017
+    ports: ["8012:8080"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/api/v1/tools', timeout=2).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  aiops-app:
+    build:
+      context: .
+      dockerfile: aiops-app/Dockerfile
+      args:
+        INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+        NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+        FASTAPI_BASE_URL: http://aiops-java-api:8080
+    depends_on:
+      aiops-java-api: {condition: service_healthy}
+    environment:
+      PORT: 8080
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      FASTAPI_BASE_URL: http://aiops-java-api:8080
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:8000}
+    ports: ["8000:8080"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  pgdata:
+  mongodata:

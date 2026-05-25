@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aiops-config
+  namespace: aiops
+data:
+  # All values here are non-secret. See docs/distributed-config.md for the
+  # full env-var-per-service matrix.
+  LOG_LEVEL: "INFO"
+
+  # Service discovery (K8s in-cluster DNS).
+  AIOPS_SIDECAR_PYTHON_BASE_URL: "http://aiops-python-sidecar.aiops.svc.cluster.local:80"
+  AIOPS_SCHEDULER_BASE_URL: "http://aiops-java-scheduler.aiops.svc.cluster.local:80"
+  AIOPS_JAVA_API_BASE_URL: "http://aiops-java-api.aiops.svc.cluster.local:80"
+  AIOPS_SIMULATOR_BASE_URL: "http://ontology-simulator.aiops.svc.cluster.local:80"
+  ONTOLOGY_SIM_URL: "http://ontology-simulator.aiops.svc.cluster.local:80"
+  FASTAPI_BASE_URL: "http://aiops-java-api.aiops.svc.cluster.local:80"
+  JAVA_API_URL: "http://aiops-java-api.aiops.svc.cluster.local:80"
+
+  # Databases (point at the StatefulSet headless services).
+  SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres.aiops.svc.cluster.local:5432/aiops_db"
+  SPRING_DATASOURCE_USERNAME: "aiops"
+  SPRING_DATA_REDIS_HOST: "redis.aiops.svc.cluster.local"
+  MONGODB_URL: "mongodb://mongodb.aiops.svc.cluster.local:27017"
+
+  # LLM provider — flip via aiops-secrets-llm when switching providers.
+  LLM_PROVIDER: "anthropic"
+  LLM_MODEL: "claude-haiku-4-5-20251001"
+
+  # Sidecar misc
+  ALLOWED_CALLERS: "*"

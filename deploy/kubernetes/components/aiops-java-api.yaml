@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: aiops-java-api
+  namespace: aiops
+spec:
+  ports:
+    - port: 80
+      targetPort: 8080
+  selector:
+    app: aiops-java-api
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aiops-java-api
+  namespace: aiops
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: aiops-java-api}
+  template:
+    metadata:
+      labels: {app: aiops-java-api}
+    spec:
+      containers:
+        - name: aiops-java-api
+          image: ghcr.io/gillggx/aiops-java-api:latest
+          imagePullPolicy: IfNotPresent
+          ports: [{containerPort: 8080}]
+          envFrom:
+            - configMapRef: {name: aiops-config}
+            - secretRef: {name: aiops-secrets}
+          env:
+            - {name: PORT, value: "8080"}
+          readinessProbe:
+            httpGet: {path: /actuator/health, port: 8080}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /actuator/health, port: 8080}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          resources:
+            requests: {cpu: "200m", memory: "512Mi"}
+            limits:   {cpu: "1000m", memory: "1Gi"}

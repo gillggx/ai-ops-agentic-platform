@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: aiops-python-sidecar
+  namespace: aiops
+spec:
+  ports:
+    - port: 80
+      targetPort: 8080
+  selector:
+    app: aiops-python-sidecar
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aiops-python-sidecar
+  namespace: aiops
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: aiops-python-sidecar}
+  template:
+    metadata:
+      labels: {app: aiops-python-sidecar}
+    spec:
+      containers:
+        - name: aiops-python-sidecar
+          image: ghcr.io/gillggx/aiops-python-sidecar:latest
+          imagePullPolicy: IfNotPresent
+          ports: [{containerPort: 8080}]
+          envFrom:
+            - configMapRef: {name: aiops-config}
+            - secretRef: {name: aiops-secrets-llm}
+          env:
+            - {name: PORT, value: "8080"}
+            - {name: JAVA_INTERNAL_TOKEN, valueFrom: {secretKeyRef: {name: aiops-secrets, key: INTERNAL_API_TOKEN}}}
+            - {name: SERVICE_TOKEN, valueFrom: {secretKeyRef: {name: aiops-secrets, key: INTERNAL_API_TOKEN}}}
+          readinessProbe:
+            httpGet: {path: /internal/health, port: 8080}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /internal/health, port: 8080}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests: {cpu: "250m", memory: "512Mi"}
+            limits:   {cpu: "2000m", memory: "2Gi"}

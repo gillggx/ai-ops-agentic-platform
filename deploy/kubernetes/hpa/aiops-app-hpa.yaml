@@ -1,0 +1,28 @@
+# Example HPA for aiops-app. The same shape applies to other stateless
+# components (java-api, sidecar, simulator). DO NOT apply HPA to
+# aiops-java-scheduler — it must stay at 1 replica unless leader election
+# is added (see docs/scheduler-job-coordination.md).
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: aiops-app
+  namespace: aiops
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: aiops-app
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300       # avoid flap
+    scaleUp:
+      stabilizationWindowSeconds: 60
