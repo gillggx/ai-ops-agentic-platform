@@ -37,6 +37,7 @@ from python_ai_sidecar.pipeline_builder.blocks.pareto import ParetoBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.pluck import PluckBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.probability_plot import ProbabilityPlotBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.process_history import ProcessHistoryBlockExecutor
+from python_ai_sidecar.pipeline_builder.blocks.rework_request import ReworkRequestBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.rolling_window import RollingWindowBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.scatter_chart import ScatterChartBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.select import SelectBlockExecutor
@@ -60,6 +61,7 @@ from python_ai_sidecar.pipeline_builder.blocks.xbar_r import XbarRBlockExecutor
 
 BUILTIN_EXECUTORS: dict[str, type[BlockExecutor]] = {
     "block_process_history": ProcessHistoryBlockExecutor,
+    "block_rework_request": ReworkRequestBlockExecutor,
     "block_filter": FilterBlockExecutor,
     "block_find": FindBlockExecutor,
     "block_join": JoinBlockExecutor,
@@ -160,6 +162,7 @@ __all__ = [
     "ParetoBlockExecutor",
     "ProbabilityPlotBlockExecutor",
     "ProcessHistoryBlockExecutor",
+    "ReworkRequestBlockExecutor",
     "RollingWindowBlockExecutor",
     "ScatterChartBlockExecutor",
     "ShiftLagBlockExecutor",

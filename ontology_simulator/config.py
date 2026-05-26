@@ -61,3 +61,9 @@ OOC_PROBABILITY  = float(os.getenv("OOC_PROBABILITY",  "0.07"))   # 7% baseline 
 # Lowered from 0.30 (saturated dashboard with 9/10 crit). Drift-driven OOC
 # (chamber/heater wear) still kicks in via dc_service._DRIFT_RATES so the
 # tail of the distribution still trips alarms — just less often per step.
+
+# Photo stations are step numbers that are multiples of 5 (STEP_005, _010,
+# _015, _020). They have a higher OOC rate because every OOC triggers a
+# rework record (see station_agent rework logic). Keeping the two rates
+# pinned together — bumping one without the other breaks the rework demo.
+PHOTO_OOC_PROBABILITY = float(os.getenv("PHOTO_OOC_PROBABILITY", "0.30"))

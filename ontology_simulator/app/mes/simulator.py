@@ -28,6 +28,20 @@ from config import (
 
 _running = False
 
+# Static MES profile catalogues — every new lot picks one of each.
+# Keeping the lists short and deterministic so the data set has a small
+# enough cardinality for charts/joins to look meaningful in a demo.
+_FLOW_IDS    = ["FLOW-LOGIC-28-V2", "FLOW-LOGIC-7N5-V1", "FLOW-RF-180-V3"]
+_PRODUCT_IDS = ["PROD-A100-V3", "PROD-B220-V1", "PROD-C310-V2", "PROD-D405-V1"]
+_TECHNOLOGY  = {"FLOW-LOGIC-28-V2": "28HPC+", "FLOW-LOGIC-7N5-V1": "7N5", "FLOW-RF-180-V3": "180RF"}
+_MAIN_PD     = {"FLOW-LOGIC-28-V2": "MPD-LOGIC-28-A", "FLOW-LOGIC-7N5-V1": "MPD-LOGIC-7N5-A", "FLOW-RF-180-V3": "MPD-RF-180-A"}
+_ROUTE_IDS   = ["RT-FAB14-LINE3", "RT-FAB12-LINE1"]
+_RECIPE_GROUPS = ["RG-PHOTO-M1", "RG-PHOTO-POLY", "RG-ETCH-METAL", "RG-IMP-WELL"]
+_CUSTOMERS   = ["CUST-X-VIETNAM", "CUST-Y-USA", "CUST-Z-JAPAN"]
+_REGIONS     = ["TW-HSINCHU", "TW-TAINAN", "US-PHOENIX"]
+_LOT_PRIORITIES = ["HOT", "NORMAL", "NORMAL", "NORMAL", "LOW"]   # 1/5 HOT, 1/5 LOW, 3/5 NORMAL
+_HOLD_STATES = ["RELEASED"] * 9 + ["HOLD-Q"]                      # 10% lots start on hold-Q
+
 # ── Phase 12 step lists ──────────────────────────────────────
 # Production lots run all 20 steps. Monitor lots are check vehicles —
 # they only run a sparse subset (every 5th step) so an entire monitor
@@ -128,12 +142,32 @@ async def _create_lot_batch(db, n: int) -> str:
         # interleave is deterministic and observable in the data.
         is_monitor = (lot_num % MONITOR_LOT_EVERY == 0)
         lot_type   = "monitor" if is_monitor else "production"
+        # Static MES profile chosen once per lot — these don't change as
+        # the lot flows through steps. station_agent reads them off the
+        # lots row when building MESInfo on each event.
+        flow_id = random.choice(_FLOW_IDS)
         docs.append({
             "lot_id":       f"LOT-{lot_num:04d}",
             "current_step": _initial_step(lot_type),
             "status":       "Waiting",
             "cycle":        0,
             "lot_type":     lot_type,
+            "mes_profile": {
+                "flowID":            flow_id,
+                "productID":         random.choice(_PRODUCT_IDS),
+                "technology":        _TECHNOLOGY[flow_id],
+                "mainPD":            _MAIN_PD[flow_id],
+                "routeID":           random.choice(_ROUTE_IDS),
+                "recipeGroup":       random.choice(_RECIPE_GROUPS),
+                "foupID":            f"FOUP-{lot_num:06d}",
+                "waferCount":        25,
+                "lotPriority":       random.choice(_LOT_PRIORITIES),
+                "customer":          random.choice(_CUSTOMERS),
+                "mfgRegion":         random.choice(_REGIONS),
+                "eqpRecipeRevision": f"R-{random.randint(1, 9):03d}.{random.randint(0, 5)}",
+                "dispatchPriority":  random.randint(1, 10),
+                "holdState":         random.choice(_HOLD_STATES),
+            },
         })
     await db.lots.insert_many(docs)
     n_monitor = sum(1 for d in docs if d["lot_type"] == "monitor")

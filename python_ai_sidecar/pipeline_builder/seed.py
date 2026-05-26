@@ -306,6 +306,93 @@ def _blocks() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "block_rework_request",
+            "version": "1.0.0",
+            "category": "source",
+            "status": "production",
+            "description": (
+                "== What ==\n"
+                "查指定 lot 在 photo 站（STEP 編號 5 倍數）的 rework 紀錄。\n"
+                "Rework 由 simulator 自動觸發：photo 站每次 OOC = 一筆 rework_record。\n"
+                "\n"
+                "== When to use ==\n"
+                "- 「LOT-0123 有沒有 rework 過？」→ lot_id='LOT-0123'\n"
+                "- 「LOT-0123 在 STEP_010 的 rework 紀錄」→ lot_id + step\n"
+                "- 「flowID=FLOW-LOGIC-28-V2 的 LOT-0123 rework」→ lot_id + flow_id\n"
+                "\n"
+                "== Params ==\n"
+                "lot_id  (string, 必填) e.g. 'LOT-0123'\n"
+                "step    (string, 選填) e.g. 'STEP_010' — 必須是 photo step（5 倍數）\n"
+                "flow_id (string, 選填) e.g. 'FLOW-LOGIC-28-V2' — 過濾 reworkInfo.mainPD_ID\n"
+                "\n"
+                "== ⚠ Field-name mapping (deliberate, important!) ==\n"
+                "reworkInfo 的欄位名跟 MESInfo / get_process_info **故意不同**。block 把 reworkInfo\n"
+                "鋪平到 column 時加 `rwi_` 前綴。對照表：\n"
+                "  MESInfo                  reworkInfo (column = rwi_<key>)\n"
+                "  ─────────────────────    ──────────────────────────────\n"
+                "  flowID                   mainPD_ID         → rwi_mainPD_ID\n"
+                "  stageID                  PDID              → rwi_PDID\n"
+                "  processJobID             rwJobID           → rwi_rwJobID\n"
+                "  slotList                 slotMap           → rwi_slotMap\n"
+                "  productID                prodCode          → rwi_prodCode\n"
+                "  photoLayerID             layerName         → rwi_layerName\n"
+                "  technology               techNode          → rwi_techNode\n"
+                "  mainPD                   rootPD            → rwi_rootPD\n"
+                "  subPDID                  subPDCode         → rwi_subPDCode\n"
+                "  routeID                  routeName         → rwi_routeName\n"
+                "  recipeGroup              recipeFamily      → rwi_recipeFamily\n"
+                "  foupID                   carrierID         → rwi_carrierID\n"
+                "  waferCount               slotCount         → rwi_slotCount\n"
+                "  lotType                  lotKind           → rwi_lotKind\n"
+                "  lotPriority              priorityClass     → rwi_priorityClass\n"
+                "  customer                 customerCode      → rwi_customerCode\n"
+                "  mfgRegion                region            → rwi_region\n"
+                "  processOrder             stepSeq           → rwi_stepSeq\n"
+                "  eqpRecipeRevision        toolRecipeRev     → rwi_toolRecipeRev\n"
+                "  holdState                holdStatus        → rwi_holdStatus\n"
+                "\n"
+                "User 用 MESInfo 詞彙提問時 (e.g. 「flowID 是什麼」)，要對應到 rwi_mainPD_ID。\n"
+                "\n"
+                "== Output ==\n"
+                "port: data (dataframe). Top-level columns:\n"
+                "  reworkTime, reworkCount, lotID, step,\n"
+                "  rwi_mainPD_ID, rwi_PDID, rwi_rwJobID, rwi_slotMap, rwi_prodCode,\n"
+                "  rwi_layerName, rwi_techNode, rwi_rootPD, rwi_subPDCode, rwi_routeName,\n"
+                "  rwi_recipeFamily, rwi_carrierID, rwi_slotCount, rwi_lotKind, rwi_priorityClass,\n"
+                "  rwi_customerCode, rwi_region, rwi_stepSeq, rwi_toolRecipeRev,\n"
+                "  rwi_dispatchPriority, rwi_holdStatus\n"
+                "Empty DataFrame when the lot has never been reworked.\n"
+                "\n"
+                "== Errors ==\n"
+                "- MISSING_PARAM   : lot_id absent\n"
+                "- HTTP_ERROR      : simulator unreachable\n"
+                "- UPSTREAM_ERROR  : simulator returned non-2xx\n"
+            ),
+            "input_schema": [],
+            "output_schema": [
+                {"port": "data", "type": "dataframe", "columns": ["reworkTime", "reworkCount", "lotID", "step", "rwi_mainPD_ID", "rwi_PDID"]},
+            ],
+            "param_schema": {
+                "type": "object",
+                "required": ["lot_id"],
+                "properties": {
+                    "lot_id":  {"type": "string", "title": "Lot ID (必填)", "description": "e.g. LOT-0123"},
+                    "step":    {"type": "string", "title": "Step (選填)", "description": "Photo step only: STEP_005 / _010 / _015 / _020"},
+                    "flow_id": {"type": "string", "title": "Flow ID (選填)", "description": "Matches reworkInfo.mainPD_ID — pass the MESInfo flowID, not the renamed key"},
+                },
+            },
+            "examples": [
+                {"params": {"lot_id": "LOT-0123"}, "desc": "查 LOT-0123 所有 rework"},
+                {"params": {"lot_id": "LOT-0123", "step": "STEP_010"}, "desc": "只看 STEP_010 的 rework"},
+            ],
+            "produces": {
+                "covers": ["raw_data"],
+                "outcome_extractors": [
+                    {"key": "rework_count", "from_port": "data", "json_path": "rows.length", "type": "int"},
+                ],
+            },
+        },
+        {
             "name": "block_filter",
             "version": "1.0.0",
             "category": "transform",

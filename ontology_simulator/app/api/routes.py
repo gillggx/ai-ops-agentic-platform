@@ -1384,3 +1384,40 @@ async def force_event(req: ForceEventRequest):
         "inserted":   inserted,
         "eventTime":  now.isoformat() + "Z",
     }
+
+
+# ── Rework Request ────────────────────────────────────────────────────
+# Photo stations (step number multiples of 5) trigger a rework record on
+# every OOC. The fields below intentionally use renamed keys (mainPD_ID
+# vs flowID etc) — see station_agent._REWORK_FIELD_RENAME and the matching
+# System MCP description, which is the single source of truth for the
+# correspondence (per CLAUDE.md "MCP description is the only documentation
+# source" rule).
+
+class ReworkRequestBody(BaseModel):
+    lotID: str
+    flowID: Optional[str] = None     # filters reworkInfo.mainPD_ID when given
+    step:   Optional[str] = None
+
+
+@router.post("/rework_request")
+async def rework_request(req: ReworkRequestBody):
+    """Return rework records for one lot. Optional flowID / step filters.
+
+    Returns ``{total, rework_records: [{reworkTime, reworkCount, lotID,
+    step, reworkInfo}]}``. ``reworkInfo`` mirrors MESInfo with renamed
+    keys (e.g. mainPD_ID instead of flowID). Empty list when no rework
+    has happened for the lot yet — not a 404."""
+    db = get_db()
+    query: dict = {"lotID": req.lotID}
+    if req.step:
+        query["step"] = req.step
+    if req.flowID:
+        # Filter on the renamed key inside reworkInfo
+        query["reworkInfo.mainPD_ID"] = req.flowID
+    cursor = db.rework_records.find(query).sort("reworkTime", 1)
+    records = [_clean(d) async for d in cursor]
+    return {
+        "total":          len(records),
+        "rework_records": records,
+    }

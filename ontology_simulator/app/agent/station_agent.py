@@ -13,15 +13,94 @@ Enhanced data model:
 """
 import asyncio
 import random
+import uuid
 from datetime import datetime
 from app.database import get_db
 from app.services import recipe_service, apc_service, dc_service, spc_service
 from app.services import fdc_service, ec_service
 from app.ws.manager import manager as ws_manager
-from config import PROCESSING_MIN_SEC, PROCESSING_MAX_SEC, HOLD_PROBABILITY, HOLD_TIMEOUT_SEC
+from config import (
+    PROCESSING_MIN_SEC, PROCESSING_MAX_SEC, HOLD_PROBABILITY, HOLD_TIMEOUT_SEC,
+    PHOTO_OOC_PROBABILITY,
+)
 
 _RECIPE_IDS = [f"RCP-{i:03d}" for i in range(1, 21)]
 _BIAS_ALERT_THRESHOLD = 0.05
+
+
+def _is_photo_step(step_num: int) -> bool:
+    """Photo lithography stations live at every 5th step (STEP_005, _010,
+    _015, _020). Re-used by the rework trigger logic below."""
+    return step_num > 0 and step_num % 5 == 0
+
+
+# ── Rework field-name mapping ──────────────────────────────────────────
+# ReworkInfo intentionally uses different field names than MESInfo so the
+# system MCP description has to teach the LLM the correspondence (the
+# canonical example for "MCP description is the only documentation source"
+# per CLAUDE.md). Keep this dict in sync with the MCP output_schema.
+_REWORK_FIELD_RENAME = {
+    "flowID":            "mainPD_ID",
+    "stageID":           "PDID",
+    "processJobID":      "rwJobID",
+    "slotList":          "slotMap",
+    "productID":         "prodCode",
+    "photoLayerID":      "layerName",
+    "technology":        "techNode",
+    "mainPD":            "rootPD",
+    "subPDID":           "subPDCode",
+    "routeID":           "routeName",
+    "recipeGroup":       "recipeFamily",
+    "foupID":            "carrierID",
+    "waferCount":        "slotCount",
+    "lotType":           "lotKind",
+    "lotPriority":       "priorityClass",
+    "customer":          "customerCode",
+    "mfgRegion":         "region",
+    "processOrder":      "stepSeq",
+    "eqpRecipeRevision": "toolRecipeRev",
+    "holdState":         "holdStatus",
+}
+
+
+def _build_mes_info(
+    *, lot_doc: dict, step_num: int, step_id: str, lot_type: str,
+) -> dict:
+    """Combine the lot's static mes_profile with this step's dynamic fields
+    into the MESInfo sub-object that goes onto every event row."""
+    profile = lot_doc.get("mes_profile", {}) if lot_doc else {}
+    flow_id = profile.get("flowID", "")
+    is_photo = _is_photo_step(step_num)
+    return {
+        "flowID":            flow_id,
+        "step":              step_id,
+        "stageID":           f"STG-{'PHOTO' if is_photo else 'GEN'}-{step_id}",
+        "processJobID":      f"PJ-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8]}",
+        "slotList":          list(range(1, int(profile.get("waferCount", 25)) + 1)),
+        "productID":         profile.get("productID", ""),
+        "photoLayerID":      f"M{step_num // 5}" if is_photo else None,
+        "technology":        profile.get("technology", ""),
+        "mainPD":             profile.get("mainPD", ""),
+        "subPDID":           f"SPD-{step_id}-V1",
+        "routeID":            profile.get("routeID", ""),
+        "recipeGroup":        profile.get("recipeGroup", ""),
+        "foupID":             profile.get("foupID", ""),
+        "waferCount":         profile.get("waferCount", 25),
+        "lotType":            lot_type,
+        "lotPriority":        profile.get("lotPriority", "NORMAL"),
+        "customer":           profile.get("customer", ""),
+        "mfgRegion":          profile.get("mfgRegion", ""),
+        "processOrder":       step_num,
+        "eqpRecipeRevision":  profile.get("eqpRecipeRevision", ""),
+        "dispatchPriority":   profile.get("dispatchPriority", 5),
+        "holdState":          profile.get("holdState", "RELEASED"),
+    }
+
+
+def _to_rework_info(mes_info: dict) -> dict:
+    """Apply the field-name rename so rework records have the deliberately
+    different schema the MCP description documents."""
+    return {_REWORK_FIELD_RENAME.get(k, k): v for k, v in mes_info.items()}
 
 # Track previous SPC status per (tool, step) for APC feedback
 _prev_spc_status: dict[str, str] = {}
@@ -128,6 +207,14 @@ async def process_step(
     dc_readings = dc_service.generate_readings(tool_id, chamber_id)
     spc_status, spc_charts = spc_service.evaluate(dc_readings, lot_type=lot_type)
 
+    # Photo stations have a tightened OOC rate (PHOTO_OOC_PROBABILITY,
+    # default 0.30) because every photo-station OOC triggers a rework
+    # record below. We override here rather than threading the prob into
+    # spc_service so the chart math stays unchanged for non-photo steps.
+    if _is_photo_step(step_num) and spc_status != "OOC":
+        if random.random() < PHOTO_OOC_PROBABILITY:
+            spc_status = "OOC"
+
     # ── Stage 4: FDC classification ───────────────────────────
     fdc_result = fdc_service.classify(dc_readings, spc_status, apc_params)
 
@@ -144,6 +231,12 @@ async def process_step(
         "lot_type":  lot_type,             # Phase 12
         "step":      step_id,
     }
+
+    # MESInfo enrichment — fetch the lot's static mes_profile once.
+    lot_doc = await db.lots.find_one({"lot_id": lot_id}, projection={"_id": 0, "mes_profile": 1})
+    mes_info = _build_mes_info(
+        lot_doc=lot_doc or {}, step_num=step_num, step_id=step_id, lot_type=lot_type,
+    )
 
     # Write 6 object snapshots + 1 event in parallel
     await asyncio.gather(
@@ -170,8 +263,22 @@ async def process_step(
             "apcID":              apc_id,
             "spc_status":         spc_status,
             "fdc_classification": fdc_result.classification,
+            "MESInfo":            mes_info,          # Phase Rework — 20 MES fields
         }),
     )
+
+    # Rework trigger — photo station OOC. 1:1 mapping with OOC events at
+    # photo steps. reworkCount is the running per-lot count; race-safe
+    # because each step runs serially per lot.
+    if _is_photo_step(step_num) and spc_status == "OOC":
+        prior = await db.rework_records.count_documents({"lotID": lot_id})
+        await db.rework_records.insert_one({
+            "reworkTime":  event_time,
+            "reworkCount": prior + 1,
+            "lotID":       lot_id,
+            "step":        step_id,
+            "reworkInfo":  _to_rework_info(mes_info),
+        })
 
     # Remember SPC status for APC feedback next time
     _prev_spc_status[prev_status_key] = spc_status
