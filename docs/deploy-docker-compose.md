@@ -109,6 +109,9 @@ are for your `curl` / browser only.
 | Sidecar 401s from java-api calls | `INTERNAL_API_TOKEN` mismatch | All 4 services must read the same value — compose already wires this from `.env` |
 | Browser login redirects loop | `NEXTAUTH_URL` wrong | Set in `.env` to match your access URL (e.g. `http://localhost:8000`) |
 | `aiops-app` build fails at `npm run build:prod` | Missing `INTERNAL_API_TOKEN` build arg | Confirm `.env` has all 3 required values; rebuild with `--no-cache` |
+| `agent_examples` / `agent_knowledge` table missing on fresh postgres | pgvector extension not installed before Spring ddl-auto | `deploy/docker/postgres-init/01-vector.sql` runs on first init; if upgrading an existing volume, manually `CREATE EXTENSION IF NOT EXISTS vector` once |
+| `/system/monitor` page shows other services DOWN with `Connection refused: 127.0.0.1` | Old build before issue #6.1 fix | Pull main, rebuild aiops-java-api — controller now uses per-service host env (compose pre-wires `AIOPS_MONITOR_HOST_*`) |
+| Sidecar / java-api rejects every internal call with `caller ip not allowed` | Allow-list set to literal `0.0.0.0/0` (didn't match anything pre-#6.2/3) | Pull main + rebuild. CIDR is now real. Compose sets `172.16.0.0/12,127.0.0.1,::1` to cover the Docker bridge |
 
 ## What's not covered
 

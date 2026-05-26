@@ -18,6 +18,7 @@ import com.aiops.api.domain.skill.ExecutionLogRepository;
 import com.aiops.api.domain.skill.SkillDefinitionRepository;
 import com.aiops.api.domain.skill.SkillRunRepository;
 import com.aiops.api.domain.user.UserRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -66,6 +67,21 @@ public class SystemMonitorAliasController {
 	private final SkillRunnerService skillRunner;
 	private final String sidecarServiceToken;
 
+	/** Per-service host for monitor probes. Defaults to {@code 127.0.0.1}
+	 *  so the EC2 single-host deployment is unchanged. In Docker Compose /
+	 *  K8s, set each one to the service DNS name (e.g. {@code aiops-app},
+	 *  {@code aiops-python-sidecar.aiops.svc.cluster.local}). */
+	@Value("${aiops.monitor.host.aiops-app:127.0.0.1}")
+	private String aiopsAppHost;
+	@Value("${aiops.monitor.host.aiops-java-api:127.0.0.1}")
+	private String javaApiHost;
+	@Value("${aiops.monitor.host.aiops-java-scheduler:127.0.0.1}")
+	private String javaSchedulerHost;
+	@Value("${aiops.monitor.host.aiops-python-sidecar:127.0.0.1}")
+	private String pythonSidecarHost;
+	@Value("${aiops.monitor.host.ontology-simulator:127.0.0.1}")
+	private String ontologySimulatorHost;
+
 	/** Cached WebClient — health pings reuse it across requests instead of
 	 *  re-instantiating per call (per-call clients leak connection pools). */
 	private static final WebClient HEALTH_CLIENT = WebClient.builder().build();
@@ -113,14 +129,14 @@ public class SystemMonitorAliasController {
 		// ── Service health (real ping, not hardcoded) ────────────────────
 		// LinkedHashMap so frontend renders in a predictable order.
 		Map<String, Object> services = new LinkedHashMap<>();
-		services.put("aiops-app",             probe(8000, "/api/health", null));
-		services.put("aiops-java-api",        probe(8002, "/actuator/health", null));
-		services.put("aiops-java-scheduler",  probe(8003, "/actuator/health", null));
+		services.put("aiops-app",             probe(aiopsAppHost,         8000, "/api/health", null));
+		services.put("aiops-java-api",        probe(javaApiHost,          8002, "/actuator/health", null));
+		services.put("aiops-java-scheduler",  probe(javaSchedulerHost,    8003, "/actuator/health", null));
 		// Sidecar exposes only token-gated /internal/health (no anonymous
 		// liveness endpoint by design — auth boundary). Send the same service
 		// token PythonSidecarConfig injects for every other Java→sidecar call.
-		services.put("aiops-python-sidecar",  probe(8050, "/internal/health", sidecarServiceToken));
-		services.put("ontology-simulator",    probe(8012, "/api/v1/tools", null));
+		services.put("aiops-python-sidecar",  probe(pythonSidecarHost,    8050, "/internal/health", sidecarServiceToken));
+		services.put("ontology-simulator",    probe(ontologySimulatorHost, 8012, "/api/v1/tools", null));
 
 		// ── Background tasks ─────────────────────────────────────────────
 		// event_poller was Python-side and is gone (Java scheduler owns
@@ -165,18 +181,21 @@ public class SystemMonitorAliasController {
 		return out;
 	}
 
-	/** Probe a service's health endpoint on localhost. When
-	 *  {@code serviceToken} is non-null, sends it as {@code X-Service-Token}
-	 *  (required by the sidecar's {@code /internal/health}; other services
-	 *  expose anonymous health endpoints). Returns
-	 *  {status: "UP"|"DOWN", port, ...} consumed by frontend status badge.
-	 *  Any non-2xx, timeout, or connection error → DOWN. */
-	private static Map<String, Object> probe(int port, String path, String serviceToken) {
+	/** Probe a service's health endpoint. {@code host} is per-service so the
+	 *  same controller works on EC2 ({@code 127.0.0.1}) and in containerized
+	 *  topologies (DNS name). When {@code serviceToken} is non-null, sends it
+	 *  as {@code X-Service-Token} (required by the sidecar's
+	 *  {@code /internal/health}; other services expose anonymous health
+	 *  endpoints). Returns {host, port, status: "UP"|"DOWN", ...} consumed
+	 *  by frontend status badge. Any non-2xx, timeout, or connection error
+	 *  → DOWN. */
+	private static Map<String, Object> probe(String host, int port, String path, String serviceToken) {
 		Map<String, Object> out = new HashMap<>();
+		out.put("host", host);
 		out.put("port", port);
 		try {
 			WebClient.RequestHeadersSpec<?> req = HEALTH_CLIENT.get()
-					.uri("http://127.0.0.1:" + port + path);
+					.uri("http://" + host + ":" + port + path);
 			if (serviceToken != null && !serviceToken.isBlank()) {
 				req = req.header("X-Service-Token", serviceToken);
 			}

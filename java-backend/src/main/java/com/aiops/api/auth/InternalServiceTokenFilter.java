@@ -9,13 +9,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.util.matcher.IpAddressMatcher;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -36,11 +37,15 @@ import java.util.Set;
 public class InternalServiceTokenFilter extends OncePerRequestFilter {
 
 	private final AiopsProperties props;
-	private final Set<String> allowedIps;
+	/** Compiled allow-list. Each entry handles both single IPs and CIDR
+	 *  ranges via Spring's {@link IpAddressMatcher} (a plain IP becomes a
+	 *  /32 or /128 match internally). Empty list = allow-all (token still
+	 *  gates the call). */
+	private final List<IpAddressMatcher> allowedIpMatchers;
 
 	public InternalServiceTokenFilter(AiopsProperties props) {
 		this.props = props;
-		this.allowedIps = parseAllowedIps(props.internal().allowedCallerIps());
+		this.allowedIpMatchers = parseAllowedIpMatchers(props.internal().allowedCallerIps());
 	}
 
 	@Override
@@ -57,8 +62,9 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
 			reject(res, "invalid or missing X-Internal-Token");
 			return;
 		}
-		if (!allowedIps.isEmpty() && !allowedIps.contains(req.getRemoteAddr())) {
-			log.warn("internal call from disallowed ip {}", req.getRemoteAddr());
+		String remoteIp = req.getRemoteAddr();
+		if (!allowedIpMatchers.isEmpty() && !ipAllowed(remoteIp)) {
+			log.warn("internal call from disallowed ip {}", remoteIp);
 			reject(res, "caller ip not allowed");
 			return;
 		}
@@ -101,13 +107,33 @@ public class InternalServiceTokenFilter extends OncePerRequestFilter {
 		res.getWriter().write("{\"ok\":false,\"error\":{\"code\":\"unauthorized\",\"message\":\"" + msg + "\"}}");
 	}
 
-	private Set<String> parseAllowedIps(String csv) {
-		if (csv == null || csv.isBlank()) return Set.of();
-		Set<String> out = new HashSet<>();
+	private boolean ipAllowed(String remoteIp) {
+		if (remoteIp == null) return false;
+		for (IpAddressMatcher m : allowedIpMatchers) {
+			try {
+				if (m.matches(remoteIp)) return true;
+			} catch (IllegalArgumentException ignored) {
+				// remoteIp not parseable — treat as no-match
+			}
+		}
+		return false;
+	}
+
+	private static List<IpAddressMatcher> parseAllowedIpMatchers(String csv) {
+		if (csv == null || csv.isBlank()) return List.of();
+		List<IpAddressMatcher> out = new ArrayList<>();
 		for (String s : csv.split(",")) {
 			String t = s.trim();
-			if (!t.isEmpty()) out.add(t);
+			if (t.isEmpty()) continue;
+			try {
+				// IpAddressMatcher accepts both "10.0.0.1" (single IP, treated
+				// as /32 or /128) and "172.16.0.0/12" CIDR. Malformed entries
+				// are skipped with a warn so a typo doesn't lock everyone out.
+				out.add(new IpAddressMatcher(t));
+			} catch (IllegalArgumentException ex) {
+				log.warn("ignoring malformed allowed-ip entry '{}': {}", t, ex.getMessage());
+			}
 		}
-		return Set.copyOf(out);
+		return List.copyOf(out);
 	}
 }
