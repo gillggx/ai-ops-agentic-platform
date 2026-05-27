@@ -62,6 +62,13 @@ async def _seed_lots() -> None:
     # drops below ACTIVE_LOT_TARGET. Seed just the initial batch (20) so
     # machines have something to claim on first boot.
     from config import ACTIVE_LOT_TARGET
+    # Reuse the pacer's batch helper so the initial seed picks up the same
+    # mes_profile (flowID / productID / technology / ...) the pacer assigns
+    # to runtime-created lots. Without this, the first 20 lots have no
+    # mes_profile and downstream MESInfo enrichment writes empty strings
+    # for every static field until pacer-created lots take over.
+    from app.mes.simulator import _create_lot_batch
+
     existing = await _db.lots.count_documents({})
     if existing > 0:
         # Phase 12 retro-fit — fill lot_type='production' on legacy rows.
@@ -72,17 +79,7 @@ async def _seed_lots() -> None:
         if n.modified_count:
             print(f"[DB] Retro-fitted lot_type='production' on {n.modified_count} existing lot(s).")
         return
-    docs = [
-        {
-            "lot_id": f"LOT-{i:04d}",
-            "current_step": 1,
-            "status": "Waiting",
-            "cycle": 0,
-            "lot_type": "production",
-        }
-        for i in range(1, ACTIVE_LOT_TARGET + 1)
-    ]
-    await _db.lots.insert_many(docs)
+    await _create_lot_batch(_db, ACTIVE_LOT_TARGET)
     print(f"[DB] Seeded {ACTIVE_LOT_TARGET} initial lots (pacer takes over from here).")
 
 
