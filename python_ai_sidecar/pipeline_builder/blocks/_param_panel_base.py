@@ -20,6 +20,7 @@ The executor handles the four event_filter modes uniformly.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 import pandas as pd
@@ -29,6 +30,22 @@ from python_ai_sidecar.pipeline_builder.blocks.base import (
     BlockExecutor,
     ExecutionContext,
 )
+
+
+_RANGE_RE = re.compile(r"^\s*(\d+)\s*([hd])\s*$", re.IGNORECASE)
+
+
+def _time_range_hours(value: Any) -> float:
+    """Parse a time_range string like '24h' / '7d' into hours. Unknown /
+    missing / unparseable values fall back to 0 so the heuristic above
+    treats them as 'short window — keep latest_violation default'."""
+    if not value or not isinstance(value, str):
+        return 0.0
+    m = _RANGE_RE.match(value)
+    if not m:
+        return 0.0
+    n, unit = int(m.group(1)), m.group(2).lower()
+    return float(n) if unit == "h" else float(n) * 24.0
 
 
 class _ParamPanelBase(BlockExecutor):
@@ -135,7 +152,19 @@ class _ParamPanelBase(BlockExecutor):
                 )}
 
         # Step 3: apply event_filter.
-        event_filter = str(params.get("event_filter") or self.latest_violation_label)
+        # Heuristic: if the caller didn't specify event_filter AND time_range
+        # spans 24h or more, assume they want a trend (mode='all') instead of
+        # the latest-violation snapshot. Without this LLMs frequently picked
+        # the block for "過去 7 天 xbar 趨勢" queries without an explicit
+        # event_filter — the default 'latest_ooc' would collapse to a single
+        # timestamp and the chart fell back to bar (see _build_chart_spec).
+        # Short windows (< 24h) keep the latest-violation default — that's
+        # the inspection use case.
+        explicit_filter = params.get("event_filter")
+        if not explicit_filter and _time_range_hours(params.get("time_range")) >= 24:
+            event_filter = "all"
+        else:
+            event_filter = str(explicit_filter or self.latest_violation_label)
         event_time = params.get("event_time")
         long, filter_note = self._apply_event_filter(long, event_filter, event_time)
 
