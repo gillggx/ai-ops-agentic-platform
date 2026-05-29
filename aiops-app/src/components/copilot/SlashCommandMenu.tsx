@@ -71,11 +71,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { cat: "spc", ico: "🪜", key: "spc-multi-step",
     title: "多站 xbar 趨勢分頁",
     desc: "同一台機台跨多個 STEP 的 xbar 趨勢，按 step 分頁顯示",
-    tpl: "EQP-01 過去 7 天 STEP_001、STEP_002、STEP_003 三站 xbar 趨勢分頁顯示" },
+    tpl: "EQP-01 過去 7 天三站 xbar 趨勢（用 1 個 block_spc_panel + step=['STEP_001','STEP_002','STEP_003'] + chart_name='xbar_chart' + event_filter='all'）" },
   { cat: "spc", ico: "📦", key: "spc-tool-box",
     title: "各 lot xbar 分佈 box plot",
     desc: "看每個 lot 的 xbar 分佈差異",
-    tpl: "EQP-01 STEP_001 過去 7 天各 lot 的 xbar 分佈 box plot" },
+    tpl: "EQP-01 STEP_001 過去 7 天各 lot 的 xbar 分佈（用 block_box_plot，x=lotID, y=xbar value）" },
   { cat: "spc", ico: "🔬", key: "spc-normality",
     title: "xbar 常態性檢定",
     desc: "Q-Q plot 看數據是否符合常態分佈（給 Cpk 鋪底）",
@@ -88,8 +88,8 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   // ── APC (retained — apc-drift OK; corr/recipe removed) ──────────────
   { cat: "apc", ico: "📐", key: "apc-drift",
     title: "APC 參數漂移檢查",
-    desc: "看 etch_time_offset 等 APC 參數最近是否有 drift",
-    tpl: "看 [EQP-01] APC etch_time_offset 最近 24 小時是否有漂移" },
+    desc: "看 etch_time_offset 等 APC 參數最近是否有 drift + 趨勢圖",
+    tpl: "[EQP-01] APC etch_time_offset 最近 24 小時 趨勢 line chart + drift 判定（用 block_weco_rules）" },
 
   // ── APC (new, audit 2026-05-22 — all built OK) ──────────────────────
   { cat: "apc", ico: "📈", key: "apc-trend",
