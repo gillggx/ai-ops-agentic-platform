@@ -99,7 +99,6 @@ def _maybe_inject_chart_phase(phases: list[dict[str, Any]], instruction: str) ->
             "kind": "chart_spec",
             "value_desc": "圖表呈現前述分析結果 (line/bar/heatmap 等視資料形態決定)",
             "criterion": None,
-            "outcome_keys": [],
         },
         "why": "user 指示含視覺化關鍵詞 (chart/圖/趨勢 等)，自動補上",
         "user_edited": False,
@@ -168,7 +167,6 @@ def _maybe_inject_transform_phase(
             "kind": "transform_rows",
             "value_desc": "聚焦後的時序資料 (只剩 user 點名的那個 SPC chart / APC 參數)",
             "criterion": None,
-            "outcome_keys": ["row_count"],
         },
         "why": (
             "user 點名單一 SPC chart / APC 參數，nested 資料需中介轉換步驟才能"
@@ -205,8 +203,7 @@ _SYSTEM = """你是 pipeline architect。User 給你需求，你產出 **goal-or
       {
         "kind": "scalar_with_context" | "chart_list" | "table" | "raw_rows" | "alarm" | "transform_rows",
         "value_desc": "OOC 圖表達門檻的判定結果",                          # 一句業務語意，不列欄位 / 不列數量
-        "criterion": "ooc_count >= 2 視為通過判定",                          # 判定條件 (verdict 才填)
-        "outcome_keys": ["ooc_count"]                                        # 給 verifier 抽值用的 key 提示 (1-3 個)
+        "criterion": "ooc_count >= 2 視為通過判定"                           # 判定條件 (verdict 才填)
       }
   - `why`: (選填) 為什麼需要這 phase
 
@@ -215,12 +212,12 @@ _SYSTEM = """你是 pipeline architect。User 給你需求，你產出 **goal-or
   "plan_summary": "...一句話...",
   "phases": [
     {"id":"p1","goal":"取得 EQP-08 過去 7 天的歷史資料","expected":"raw_data",
-     "expected_output":{"kind":"raw_rows","value_desc":"該機台的歷史事件記錄","outcome_keys":["row_count"]},
+     "expected_output":{"kind":"raw_rows","value_desc":"該機台的歷史事件記錄"},
      "why":"先 7d 試，沒資料退到 30d"},
     {"id":"p2","goal":"判斷該機台最後一次 OOC 時刻同時 OOC 的圖表數量是否達門檻 (≥2)","expected":"verdict",
-     "expected_output":{"kind":"scalar_with_context","value_desc":"OOC 圖表是否達門檻","criterion":"圖表數 >= 2","outcome_keys":["ooc_chart_count"]}},
+     "expected_output":{"kind":"scalar_with_context","value_desc":"OOC 圖表是否達門檻","criterion":"圖表數 >= 2"}},
     {"id":"p3","goal":"展示該時刻所有 OOC 圖表的走勢與管制狀態","expected":"chart",
-     "expected_output":{"kind":"chart_list","value_desc":"OOC 圖表的歷史走勢","outcome_keys":["chart_list"]}}
+     "expected_output":{"kind":"chart_list","value_desc":"OOC 圖表的歷史走勢"}}
   ],
   "alarm": null
 }
@@ -519,17 +516,19 @@ async def goal_plan_node(state: BuildGraphState) -> dict[str, Any]:
             expected = "transform"
         # expected_output (v30.1) — sanitize but pass through. Verifier
         # tolerates missing fields (falls back to kind-only match).
+        # 2026-05-31: outcome_keys dropped per feedback_plan_phase_format —
+        # plan kept inventing semantic keys (e.g. "equipment_ranking") that
+        # no block produces, so phase_verifier's _build_outcome would find
+        # nothing extractable and the LLM would then second-guess + remove
+        # otherwise-working nodes. Drop the field entirely; verifier already
+        # iterates ALL extractors when requested_keys is empty.
         eo_raw = item.get("expected_output") or {}
         expected_output = None
         if isinstance(eo_raw, dict):
-            outcome_keys = eo_raw.get("outcome_keys") or []
-            if not isinstance(outcome_keys, list):
-                outcome_keys = []
             expected_output = {
                 "kind": str(eo_raw.get("kind") or "").strip() or None,
                 "value_desc": str(eo_raw.get("value_desc") or "").strip() or None,
                 "criterion": str(eo_raw.get("criterion") or "").strip() or None,
-                "outcome_keys": [str(k).strip() for k in outcome_keys[:5] if k],
             }
         phases.append({
             "id": str(item.get("id") or f"p{i}").strip(),
