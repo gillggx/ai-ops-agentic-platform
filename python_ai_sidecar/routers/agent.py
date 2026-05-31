@@ -132,48 +132,25 @@ async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenera
     was retired in this commit. No more feature flag — graph is the only
     path.
     """
-    import os
-    from python_ai_sidecar.agent_builder.advisor import (
-        classify_advisor_intent, stream_block_advisor,
-    )
-    from python_ai_sidecar.agent_builder.advisor_v2 import stream_doc_qa_agent
     from python_ai_sidecar.agent_builder.graph_build import stream_graph_build
-    from python_ai_sidecar.clients.java_client import JavaAPIClient
 
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        yield {"event": "error", "data": json.dumps({
-            "message": "ANTHROPIC_API_KEY not set on sidecar — /agent/build unavailable",
-        })}
-        yield {"event": "done", "data": json.dumps({"status": "failed"})}
-        return
+    # 2026-05-31: /agent/build is the *explicit* build endpoint — called by
+    # the canvas Build button, slash commands, and skill-step builds. It
+    # MUST go straight to graph_build with no intent classification in
+    # between. The advisor / doc-Q&A routing previously gated by
+    # classify_advisor_intent here belongs on /agent/chat (which already
+    # runs its own LangGraph orchestrator with intent buckets).
+    #
+    # Why removed: with LLM_PROVIDER=ollama + gpt-oss-120b, the classifier
+    # mis-routed plain build instructions ("EQP-01 STEP_001 過去 7 天 Q-Q
+    # plot") to KNOWLEDGE because the model read them as concept questions.
+    # Anthropic Claude was tolerant enough to keep most builds on the
+    # BUILD path; weaker models aren't. Per CLAUDE.md "flow control in
+    # graph not prompt" — endpoint identity is the deterministic signal,
+    # don't re-derive it from an LLM call. See memory project_builder_block
+    # _advisor for the original advisor wiring on /agent/chat.
 
     try:
-        intent, conf, reason = await classify_advisor_intent(req.instruction)
-        log.info("build: intent=%s conf=%.2f reason=%r", intent, conf, reason)
-
-        if intent != "BUILD":
-            java = JavaAPIClient.for_caller(caller)
-            # v6.2 (2026-05-20) — EXPLAIN/COMPARE/RECOMMEND use the new
-            # tool-using doc Q&A agent (advisor_v2) so admin-edited
-            # block_docs.markdown surfaces in answers. AMBIGUOUS +
-            # KNOWLEDGE stay on the legacy fast path (clarify message /
-            # pure-LLM concept answer — no doc fetch needed).
-            if intent in {"EXPLAIN", "COMPARE", "RECOMMEND"}:
-                async for stream_event in stream_doc_qa_agent(
-                    req.instruction, java=java,
-                ):
-                    yield {
-                        "event": stream_event.type,
-                        "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
-                    }
-                return
-            async for stream_event in stream_block_advisor(req.instruction, intent, java=java):
-                yield {
-                    "event": stream_event.type,
-                    "data": json.dumps(stream_event.data, default=str, ensure_ascii=False),
-                }
-            return
-
         async for stream_event in stream_graph_build(
             instruction=req.instruction,
             base_pipeline=req.pipeline_snapshot,
