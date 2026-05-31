@@ -401,10 +401,31 @@ class OllamaLLMClient(BaseLLMClient):
 
         full_messages = self._to_openai_messages(effective_system, messages)
 
+        # Reasoning-model handling: gpt-oss / Qwen3 / DeepSeek style models
+        # spend the visible token budget on chain-of-thought reasoning
+        # BEFORE producing the actual answer. If the caller passes the usual
+        # max_tokens=4096, the reasoning fills it and the answer gets cut
+        # off — see 2026-05-31 OpenRouter gpt-oss-120b smoke: goal_plan
+        # returned `'{"intent":"AMBIGUOUS","confidence":'` (35 chars,
+        # finish=length). Two-pronged fix:
+        #   (a) Always set extra_body to disable extended-thinking when the
+        #       provider supports the flag (was only set on tool calls).
+        #   (b) Bump effective max_tokens so reasoning has room AND the
+        #       answer has room. Cap at 8192 so we don't blow OpenRouter
+        #       budget on every call.
+        effective_max = max(max_tokens, 8192)
         kwargs: Dict[str, Any] = dict(
             model=self._model,
-            max_tokens=max_tokens,
+            max_tokens=effective_max,
             messages=full_messages,
+            # OpenRouter recognizes reasoning.effort=low to keep CoT minimal;
+            # Anthropic-style extra_body.thinking.disabled is the legacy flag
+            # for Qwen3 / DeepSeek. Send both — providers that don't recognize
+            # the irrelevant field silently ignore it.
+            extra_body={
+                "reasoning": {"effort": "low"},
+                "thinking": {"type": "disabled"},
+            },
         )
         # OpenAI-compatible tool calling (function calling format)
         if tools:
@@ -420,9 +441,6 @@ class OllamaLLMClient(BaseLLMClient):
                 for t in tools
             ]
             kwargs["tool_choice"] = "auto"
-            # Disable extended thinking for Qwen3 / reasoning models so they use
-            # the function calling API instead of generating JSON inside <think> blocks.
-            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
 
         resp = await self._client.chat.completions.create(**kwargs)
         choice = resp.choices[0]

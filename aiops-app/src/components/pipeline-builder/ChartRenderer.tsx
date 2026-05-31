@@ -64,7 +64,7 @@ export default function ChartRenderer({ spec, height }: Props) {
     );
   }
   if (looksLikeTable(spec)) {
-    return <TableRenderer spec={spec as TableSpec} />;
+    return <TableRenderer spec={normalizeTableSpec(spec)} />;
   }
   if (looksLikeChartDSL(spec)) {
     return (
@@ -82,7 +82,7 @@ function looksLikeEmpty(s: unknown): boolean {
 }
 
 interface TableSpec {
-  type: "table";
+  type: "table" | "data_view";
   title?: string;
   columns: string[];
   data: Array<Record<string, unknown>>;
@@ -92,7 +92,27 @@ interface TableSpec {
 function looksLikeTable(s: unknown): boolean {
   if (!s || typeof s !== "object") return false;
   const obj = s as Record<string, unknown>;
-  return obj.type === "table" && Array.isArray(obj.columns) && Array.isArray(obj.data);
+  // block_data_view emits {type:"data_view", rows, columns}; block_chart's
+  // table branch emits {type:"table", data, columns}. Accept both — rows
+  // is aliased to data in the renderer below so TableRenderer is uniform.
+  const isTableType = obj.type === "table" || obj.type === "data_view";
+  if (!isTableType) return false;
+  const cols = obj.columns;
+  const rowsOrData = obj.data ?? obj.rows;
+  return Array.isArray(cols) && Array.isArray(rowsOrData);
+}
+
+function normalizeTableSpec(s: unknown): TableSpec {
+  const obj = s as Record<string, unknown>;
+  // data_view uses `rows`; table uses `data`. Normalize so TableRenderer
+  // can read `.data` regardless of source block.
+  return {
+    type: (obj.type === "data_view" ? "data_view" : "table") as TableSpec["type"],
+    title: obj.title as string | undefined,
+    columns: obj.columns as string[],
+    data: (obj.data ?? obj.rows ?? []) as Array<Record<string, unknown>>,
+    total_rows: obj.total_rows as number | undefined,
+  };
 }
 
 function TableRenderer({ spec }: { spec: TableSpec }) {
