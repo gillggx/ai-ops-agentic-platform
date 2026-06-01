@@ -403,27 +403,31 @@ class OllamaLLMClient(BaseLLMClient):
 
         # Reasoning-model handling: gpt-oss / Qwen3 / DeepSeek style models
         # spend the visible token budget on chain-of-thought reasoning
-        # BEFORE producing the actual answer. If the caller passes the usual
-        # max_tokens=4096, the reasoning fills it and the answer gets cut
-        # off — see 2026-05-31 OpenRouter gpt-oss-120b smoke: goal_plan
-        # returned `'{"intent":"AMBIGUOUS","confidence":'` (35 chars,
-        # finish=length). Two-pronged fix:
-        #   (a) Always set extra_body to disable extended-thinking when the
-        #       provider supports the flag (was only set on tool calls).
-        #   (b) Bump effective max_tokens so reasoning has room AND the
-        #       answer has room. Cap at 8192 so we don't blow OpenRouter
-        #       budget on every call.
-        effective_max = max(max_tokens, 8192)
+        # BEFORE producing the actual answer.
+        #
+        # 2026-06-01: bumped reasoning.effort low → high after observing
+        # gpt-oss-120b fail free-form user queries (production trace
+        # 16:20 today: 6 nodes including 3 orphan block_select, no chart
+        # block at all). With effort=low the model burned rounds in
+        # "remove + re-add" loops on validation errors instead of just
+        # set_param-ing the existing node. High effort gives it the CoT
+        # budget to actually reason about the canvas state per round.
+        #
+        # max_tokens bumped to 16384 because high reasoning fills the
+        # budget faster — empirically low at 8192 was fine for tool calls
+        # but the goal_plan_node free-form 3-phase JSON needs more room.
+        effective_max = max(max_tokens, 16384)
         kwargs: Dict[str, Any] = dict(
             model=self._model,
             max_tokens=effective_max,
             messages=full_messages,
-            # OpenRouter recognizes reasoning.effort=low to keep CoT minimal;
-            # Anthropic-style extra_body.thinking.disabled is the legacy flag
-            # for Qwen3 / DeepSeek. Send both — providers that don't recognize
-            # the irrelevant field silently ignore it.
+            # OpenRouter reads reasoning.effort for OpenAI-compat reasoning
+            # models (gpt-oss, o1, etc). The legacy thinking.type.disabled
+            # is for Qwen3 / DeepSeek where the chain-of-thought is a
+            # separate output channel rather than a routed effort knob.
+            # Sending both — providers ignore the field they don't know.
             extra_body={
-                "reasoning": {"effort": "low"},
+                "reasoning": {"effort": "high"},
                 "thinking": {"type": "disabled"},
             },
         )
