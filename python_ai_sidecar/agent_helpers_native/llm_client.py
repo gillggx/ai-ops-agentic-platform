@@ -427,7 +427,11 @@ class OllamaLLMClient(BaseLLMClient):
             # separate output channel rather than a routed effort knob.
             # Sending both — providers ignore the field they don't know.
             extra_body={
-                "reasoning": {"effort": "high"},
+                # 2026-06-01: effort=high finished but took ~12 min (30 LLM
+                # calls × 25-40s each on a free-form xbar trend query).
+                # Trying medium to see if it still emits a chart in 3-5 min
+                # — closer to Claude's 1-3 min but at OpenRouter cost.
+                "reasoning": {"effort": "medium"},
                 "thinking": {"type": "disabled"},
             },
         )
