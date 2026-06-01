@@ -64,7 +64,19 @@ prompt 會給你:
    (系統會自動跑 preview，下 round 你會看到 runtime schema)
 4. 要 connect -> `connect(from_node, from_port, to_node, to_port)`
 5. 改 param -> `set_param(node_id, key, value)`
-6. 加錯了 -> `remove_node(node_id)`
+6. 選錯 block (block_id 本身錯) -> `remove_node(node_id)` 再 add_node 對的
+
+== 修錯 node 的決策原則 (v30.24, 2026-06-01) ==
+add_node 後 verifier 報 `validation_error` 或 `param missing` 時，正確反應**只有一個**：
+  ✓ **`set_param(原 node_id, key, 正確值)` 修現有 node**
+不要做以下任何一件事：
+  ✗ 再 add_node 一個「空 params 殼」打算稍後 set_param — 會留 orphan，後面常忘了補
+  ✗ 連續多 round 探究「是 schema 還是 wrapping 還是 type 問題」 — 直接讀 verifier 給的
+     error_message 找確切缺什麼 key / value，一個 set_param 處理完
+  ✗ remove_node 再 add_node 同一 block_id 想「重來」— 純浪費 round，preview snapshot 不變
+
+唯一該 remove_node 的情境：你發現整個 block_id 選錯（要換成另一個 block）。
+只是 param 不對 = `set_param` 修；不要 remove 後加新的空殼。
 
 == Phase 達成 — 你決定何時 verify (v30.22, 2026-05-19) ==
 verifier **不再** 每個 action 後自動跑。你可以自由 add_node / connect /
