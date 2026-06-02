@@ -67,6 +67,11 @@ async def stream_graph_build(
     `confirm_pending` and returns; caller resumes via resume_graph_build().
     """
     sid = session_id or str(uuid.uuid4())
+    # 2026-06-03: set OpenRouter session_id for sticky routing. Propagates
+    # through async context to every LLM call in this build (≈21 sites)
+    # without per-call plumbing. See llm_client.current_session_id.
+    from python_ai_sidecar.agent_helpers_native.llm_client import current_session_id
+    current_session_id.set(sid)
     graph = build_graph()
     # 2026-05-12: bumped 50 → 150. Each plan op consumes ~2 graph node visits
     # (dispatch_op + call_tool). A 30-op plan needs ~60 visits; 50 was below
@@ -320,6 +325,10 @@ async def resume_graph_build(
     /admin/build-traces viewer only sees the paused trace (intent confirm
     + macro_plan) and can't see what was actually built.
     """
+    # 2026-06-03: same OpenRouter sticky session as the originating build —
+    # confirm path runs the heavy phase loop, must share routing key.
+    from python_ai_sidecar.agent_helpers_native.llm_client import current_session_id
+    current_session_id.set(session_id)
     graph = build_graph()
     config = {"configurable": {"thread_id": session_id}, "recursion_limit": 300}
 
@@ -430,6 +439,8 @@ async def resume_graph_build_with_modify(
     plan_node. The least invasive approach is to resume confirm_gate with
     a special marker that route_after_confirm interprets as "replan".
     """
+    from python_ai_sidecar.agent_helpers_native.llm_client import current_session_id
+    current_session_id.set(session_id)
     graph = build_graph()
     config = {"configurable": {"thread_id": session_id}, "recursion_limit": 300}
 
@@ -489,6 +500,8 @@ async def resume_graph_build_with_clarify(
     """Resume a graph paused at clarify_intent_node, providing the user's
     answers to the clarification questions. The graph continues into
     plan_node (or pauses again at confirm_gate as the normal flow)."""
+    from python_ai_sidecar.agent_helpers_native.llm_client import current_session_id
+    current_session_id.set(session_id)
     graph = build_graph()
     config = {"configurable": {"thread_id": session_id}, "recursion_limit": 300}
 
@@ -608,6 +621,8 @@ async def resume_graph_v30(
       - plan-confirm: {confirmed: bool, phases?: [...]}
       - handover:    {choice: str, new_goal?: str}
     """
+    from python_ai_sidecar.agent_helpers_native.llm_client import current_session_id
+    current_session_id.set(session_id)
     graph = build_graph()
     config = {"configurable": {"thread_id": session_id}, "recursion_limit": 300}
 
