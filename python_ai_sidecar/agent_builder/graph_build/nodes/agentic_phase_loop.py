@@ -139,14 +139,15 @@ add_node 的 `params` key 必須**100% 一字不差**從 inspect_block_doc 的 p
 產出的東西時才適用 (e.g. 標準 SPC 管制圖 → spc_panel; EWMA chart →
 block_ewma_cusum，不是 spc_panel)。
 
-== Catalog 分兩層 (v50, 2026-06-02) ==
+== Catalog 分兩層 (v51, 2026-06-02) ==
 AVAILABLE BLOCKS 列表分兩段：
 
-**TIER 1 — essential blocks**：完整 description + param_schema 已內聯在
-prompt。你可以直接 `add_node(block_id, params)`，不必先 inspect_block_doc。
-這 10 個 block 覆蓋 80% pipeline 場景。
+**TIER 1 — essential blocks**：完整 description + ports + param_schema +
+column_docs 已內聯在 prompt（等同 inspect_block_doc 的回傳）。**直接
+`add_node(block_id, params)`，禁止對 Tier 1 block 呼叫 inspect_block_doc**
+— 內聯的內容已經完整，inspect 純浪費一個 round。
 
-**TIER 2 — other blocks**：只列名稱 + 一句描述。如果要用 Tier 2 block，
+**TIER 2 — other blocks**：只列名稱 + 一句描述。要用 Tier 2 block，
 **強制流程**：
   1. 看到 Tier 2 block 名稱覺得合適 (e.g. user 要 normality → block_probability_plot)
   2. **先 `inspect_block_doc(block_id)`** 拿完整 doc + param_schema
@@ -154,6 +155,10 @@ prompt。你可以直接 `add_node(block_id, params)`，不必先 inspect_block_
 
 直接 `add_node` 一個 Tier 2 block 而沒 inspect 過，params 一定會猜錯，
 verifier 直接 reject — 浪費 round。不要省這步。
+
+**多候選比較用 plural tool**：
+要對比 2-5 個 Tier 2 候選 block 時用 `inspect_block_docs(block_ids=[...])`
+一次拿，不要連續 3 個 inspect_block_doc 浪費 3 個 round。
 """
 
 
@@ -172,6 +177,59 @@ def _load_glossary_safe() -> str:
 
 
 _SYSTEM = _SYSTEM + _load_glossary_safe()
+
+
+def _compress_old_history(
+    phase_messages: list[dict],
+    threshold_rounds: int = 8,
+    keep_tail_rounds: int = 6,
+) -> list[dict]:
+    """v51 (2026-06-02): sliding history window.
+
+    Each round appends 2 messages (assistant tool_use + user tool_result).
+    Phase message stream is `[seed_user] + (assistant, user) × N`.
+    When N > threshold_rounds, drop the middle (round 1 .. N-keep_tail) and
+    inject a tiny placeholder user message so the LLM sees that history was
+    elided. Canvas state + verifier feedback on the latest user message
+    already carry forward the load-bearing context, so dropping older
+    rounds is safe — the canvas snapshot is the source of truth, not the
+    transcript.
+
+    Why not just rely on the existing `phase_messages[-32:]` cap? That cap
+    fires at ~16 rounds, past every realistic round budget; sliding kicks
+    in at 8 so OpenRouter (no prompt cache by default) stops carrying 12k+
+    tokens of stale tool_result text per call.
+
+    Anthropic with cache_control is unaffected — cache breakpoint moves
+    with the tail anyway, and dropped middle wasn't being re-billed.
+    """
+    if not phase_messages:
+        return phase_messages
+    # Round count: messages after the seed user are paired assistant+user.
+    n_rounds = max(0, (len(phase_messages) - 1) // 2)
+    if n_rounds <= threshold_rounds:
+        return phase_messages
+    keep_tail_msgs = keep_tail_rounds * 2  # paired
+    head = phase_messages[:1]
+    tail = phase_messages[-keep_tail_msgs:]
+    # tail must start with assistant for tool_use/tool_result alternation;
+    # the slice is even-aligned so this holds by construction. Defensive
+    # check:
+    if tail and tail[0].get("role") != "assistant":
+        # Off by one — drop one more from the front of tail so the first
+        # surviving message is the next assistant.
+        tail = phase_messages[-(keep_tail_msgs - 1):]
+    n_dropped = n_rounds - keep_tail_rounds
+    summary = {
+        "role": "user",
+        "content": (
+            f"[history compressed: {n_dropped} earlier rounds elided. "
+            f"Canvas state + verifier feedback in the tail are authoritative. "
+            f"Earlier inspect_block_doc calls were summarised away — if you "
+            f"need a block doc again, call inspect_block_doc(s) anew.]"
+        ),
+    }
+    return head + [summary] + tail
 
 
 def _stamp_last_message_cache(messages: list[dict]) -> list[dict]:
@@ -676,7 +734,13 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
                 {"type": "text", "text": canvas_diff_text},
             ],
         })
-    # Cap message stack to avoid runaway token use (~16 round-trips).
+    # v51 (2026-06-02): sliding history window kicks in earlier than the
+    # raw 32-message hard cap. Drops middle rounds when phase passes 8
+    # rounds — current canvas state in the latest user message is the
+    # authoritative truth, transcript is just for the agent to recall
+    # what it tried.
+    phase_messages = _compress_old_history(phase_messages)
+    # Hard cap (safety net) — should rarely fire after compression above.
     if len(phase_messages) > 32:
         phase_messages = phase_messages[-32:]
     new_msgs = dict(state.get("v30_phase_messages") or {})
@@ -1031,22 +1095,39 @@ def _build_catalog_brief() -> str:
 
     lines: list[str] = []
     lines.append("=== TIER 1 — essential blocks (full spec inline) ===")
-    lines.append("These cover the common 80% of pipelines. You may add_node directly.")
+    lines.append(
+        "These cover the common 80% of pipelines. Full docs are inlined "
+        "below — **you may add_node directly without calling "
+        "inspect_block_doc on these blocks**. The inline content here is "
+        "what inspect_block_doc would return."
+    )
     lines.append("")
     for cat in sorted(tier1_by_cat.keys()):
         lines.append(f"[{cat}]")
         for name, spec in sorted(tier1_by_cat[cat], key=lambda x: x[0]):
             lines.append(f"--- {name} ---")
             desc = (spec.get("description") or "").strip()
-            # Truncate description to ~1500 chars to bound prompt size.
-            # Keeps the first 1500 chars which always include "== What ==",
-            # usually "== When to use ==", and parts of "== Params ==".
-            if len(desc) > 1500:
-                desc = desc[:1500] + "\n... [doc truncated; call inspect_block_doc for full]"
+            # v51 (2026-06-02): Tier 1 = full doc inline (was truncated to
+            # 1500 chars in v50). Eats more system prompt bytes but saves
+            # one round trip per pipeline against the 10 most-used blocks.
+            # Cap at 4500 chars per block as a hard safety so a runaway
+            # block doc doesn't bloat the catalog past ~50KB.
+            if len(desc) > 4500:
+                desc = desc[:4400] + "\n... [doc truncated at 4500 chars]"
             lines.append(desc)
+            io_lines = _fmt_io_ports(
+                spec.get("input_schema") or [], spec.get("output_schema") or [],
+            )
+            if io_lines:
+                lines.append("[ports]")
+                lines.append(io_lines)
             param_lines = _fmt_param_schema_lines(spec.get("param_schema") or {})
             lines.append("[param_schema]")
             lines.append(param_lines)
+            col_lines = _fmt_column_docs(spec.get("column_docs") or [])
+            if col_lines:
+                lines.append("[column_docs]")
+                lines.append(col_lines)
             lines.append("")
         lines.append("")
 
@@ -1639,6 +1720,30 @@ def _build_tool_specs() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "inspect_block_docs",
+            "description": (
+                "Batch version of inspect_block_doc. Pass up to 5 block_ids "
+                "to fetch all docs in one round-trip. Prefer this over 3 "
+                "separate inspect_block_doc calls when comparing candidates."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "block_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": 5,
+                    },
+                    "section": {
+                        "type": "string",
+                        "enum": ["summary", "full"],
+                        "default": "summary",
+                    },
+                },
+                "required": ["block_ids"],
+            },
+        },
+        {
             "name": "add_node",
             "description": "Add a node to the pipeline canvas.",
             "input_schema": {
@@ -1866,6 +1971,40 @@ def _make_result_digest(tool: str, result: Any) -> str:
         # preserving the full body for typical blocks (~2-5K each).
         if len(out) > 6000:
             out = out[:5900] + "\n... [truncated to 6K chars]"
+        return out
+    if tool == "inspect_block_docs":
+        # v51 (2026-06-02) — batch sibling. Result shape: {docs: {bid: doc_dict_or_error}}.
+        # Render each block's doc using the same per-block format as the
+        # singular tool's digest, separated by a heading. Cap each block to
+        # 3K chars (5 blocks × 3K = 15K, safely under prompt budget).
+        docs = result.get("docs") or {}
+        if not docs:
+            return "inspect_block_docs returned no docs"
+        parts: list[str] = [f"got {len(docs)} block docs in batch:"]
+        for bid, d in docs.items():
+            if not isinstance(d, dict):
+                parts.append(f"\n--- {bid}: invalid response ---")
+                continue
+            if d.get("error"):
+                parts.append(f"\n--- {bid}: ERROR {d.get('code','?')} {d['error']} ---")
+                continue
+            desc = (d.get("description") or "").strip()
+            param_lines = _fmt_param_schema_lines(d.get("param_schema") or {})
+            io_lines = _fmt_io_ports(
+                d.get("input_schema") or [], d.get("output_schema") or [],
+            )
+            block_body = (
+                f"\n--- {bid} (cat={d.get('category','?')}) ---\n{desc}\n"
+            )
+            if io_lines:
+                block_body += f"\n[ports]\n{io_lines}\n"
+            block_body += f"\n[params]\n{param_lines}\n"
+            if len(block_body) > 3000:
+                block_body = block_body[:2900] + "\n... [block doc truncated]"
+            parts.append(block_body)
+        out = "\n".join(parts)
+        if len(out) > 16000:
+            out = out[:15900] + "\n... [batch truncated]"
         return out
     if tool == "inspect_node_output":
         nid = result.get("node_id")
@@ -2108,7 +2247,7 @@ def _event(name: str, data: dict[str, Any]) -> dict[str, Any]:
 # Tool subset per sub-phase. Names match _build_tool_specs entries.
 _TOOLS_BY_SUBPHASE: dict[str, set[str]] = {
     "pick": {
-        "inspect_node_output", "inspect_block_doc",
+        "inspect_node_output", "inspect_block_doc", "inspect_block_docs",
         "commit_pick", "abort_phase",
     },
     "construct": {
@@ -2116,7 +2255,7 @@ _TOOLS_BY_SUBPHASE: dict[str, set[str]] = {
         # v30.22: allow inspect during construct so agent can sanity-check
         # upstream output shape before connecting (avoids hallucination of
         # column names — see R3 alarm phase root cause analysis).
-        "inspect_node_output", "inspect_block_doc",
+        "inspect_node_output", "inspect_block_doc", "inspect_block_docs",
     },
     "tune": {
         "set_param", "run_verifier", "abort_node", "abort_phase",
@@ -2124,7 +2263,7 @@ _TOOLS_BY_SUBPHASE: dict[str, set[str]] = {
         # adding filter and tuning, commit_pick step_check to continue
         # building the count+compare chain).
         "commit_pick",
-        "inspect_node_output", "inspect_block_doc",
+        "inspect_node_output", "inspect_block_doc", "inspect_block_docs",
     },
     # refine isn't an LLM sub-state — deterministic transition only.
 }
