@@ -25,6 +25,7 @@ def _blocks() -> list[dict[str, Any]]:
             "version": "1.0.0",
             "category": "source",
             "status": "production",
+            "essential": True,
             "description": (
                 "== What ==\n"
                 "從 ontology MCP `get_process_info` 拉指定條件（機台 / 批次 / 站點）的 process events。\n"
@@ -397,6 +398,7 @@ def _blocks() -> list[dict[str, Any]]:
             "version": "1.0.0",
             "category": "transform",
             "status": "production",
+            "essential": True,
             "description": (
                 "== What ==\n"
                 "根據 column/operator/value 過濾 DataFrame 列（單條件），保留符合條件的 rows。\n"
@@ -939,6 +941,7 @@ def _blocks() -> list[dict[str, Any]]:
             "version": "1.0.0",
             "category": "transform",
             "status": "production",
+            "essential": True,
             "description": (
                 "== What ==\n"
                 "Group by + 聚合（pandas groupby + single agg func）。\n"
@@ -2522,6 +2525,7 @@ def _blocks() -> list[dict[str, Any]]:
             "version": "1.0.0",
             "category": "output",
             "status": "production",
+            "essential": True,
             "description": (
                 "== What ==\n"
                 "Line / multi-line chart with optional control rules + highlight overlay.\n"
@@ -2598,6 +2602,7 @@ def _blocks() -> list[dict[str, Any]]:
             "version": "1.0.0",
             "category": "output",
             "status": "production",
+            "essential": True,
             "description": (
                 "== What ==\n"
                 "Categorical bar / grouped-bar chart. Multiple `y` columns produce side-by-\n"
@@ -2682,6 +2687,7 @@ def _blocks() -> list[dict[str, Any]]:
             "version": "1.0.0",
             "category": "output",
             "status": "production",
+            "essential": True,
             "description": (
                 "== What ==\n"
                 "Box plot — IQR + whiskers + outlier dots, with optional nested grouping\n"
@@ -2819,6 +2825,7 @@ def _blocks() -> list[dict[str, Any]]:
             "version": "1.0.0",
             "category": "output",
             "status": "production",
+            "essential": True,
             "description": (
                 "== What ==\nProper X̄/R control chart with full WECO R1-R8 highlighting.\n\n"
                 "== When to use ==\n"
@@ -2947,6 +2954,7 @@ def _blocks() -> list[dict[str, Any]]:
             "version": "1.0.0",
             "category": "output",
             "status": "production",
+            "essential": True,
             "description": (
                 "== What ==\nPareto chart — 遞減排序 bars + 累計 % line + 80% 參考線。「找最大貢獻者」場景必備。\n\n"
                 "== When to use ==\n"
@@ -3449,6 +3457,7 @@ def _blocks() -> list[dict[str, Any]]:
             "version": "1.0.0",
             "category": "transform",
             "status": "production",
+            "essential": True,
             "description": (
                 "== What ==\n"
                 "Explode an array-typed column into multiple rows (pandas `DataFrame.explode`-like).\n"
@@ -3497,6 +3506,7 @@ def _blocks() -> list[dict[str, Any]]:
             "version": "1.0.0",
             "category": "transform",
             "status": "production",
+            "essential": True,
             "description": (
                 "== What ==\n"
                 "Project / rename fields — jq-lite for objects. Drops every column not listed.\n"

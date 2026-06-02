@@ -138,6 +138,22 @@ add_node 的 `params` key 必須**100% 一字不差**從 inspect_block_doc 的 p
 "composite block 一個解多 phase" 這種 shortcut 只在 user 明確要該 composite
 產出的東西時才適用 (e.g. 標準 SPC 管制圖 → spc_panel; EWMA chart →
 block_ewma_cusum，不是 spc_panel)。
+
+== Catalog 分兩層 (v50, 2026-06-02) ==
+AVAILABLE BLOCKS 列表分兩段：
+
+**TIER 1 — essential blocks**：完整 description + param_schema 已內聯在
+prompt。你可以直接 `add_node(block_id, params)`，不必先 inspect_block_doc。
+這 10 個 block 覆蓋 80% pipeline 場景。
+
+**TIER 2 — other blocks**：只列名稱 + 一句描述。如果要用 Tier 2 block，
+**強制流程**：
+  1. 看到 Tier 2 block 名稱覺得合適 (e.g. user 要 normality → block_probability_plot)
+  2. **先 `inspect_block_doc(block_id)`** 拿完整 doc + param_schema
+  3. **再 `add_node`** 帶正確 params
+
+直接 `add_node` 一個 Tier 2 block 而沒 inspect 過，params 一定會猜錯，
+verifier 直接 reject — 浪費 round。不要省這步。
 """
 
 
@@ -952,14 +968,21 @@ async def _load_block_headlines_from_db() -> dict[str, str]:
 
 
 def _build_catalog_brief() -> str:
-    """v30 hotfix: LLM has no idea which blocks exist unless we list them.
-    Dump all block names + category + 1-line `what` so the LLM can pick
-    a real block_id to add_node OR inspect_block_doc.
+    """Render the block catalog for the agent system prompt.
 
-    Cached after first build per-process (catalog is constant).
+    Two-tier layout:
+      - Tier 1 (essential=True in seed.py): full description (truncated to
+        ~1.5KB / block) + param schema. Agent picks them without an extra
+        inspect_block_doc round.
+      - Tier 2 (everything else): single index line `name -- one-liner`.
+        Agent MUST call `inspect_block_doc(block_id)` before `add_node` to
+        get full params — index line is not enough.
+
+    Process-cached (catalog content is constant per deploy).
 
     v49 (2026-05-19): prefer DB block_docs.frontmatter.description over
-    baked seed.py `== What ==` parsing. Falls back gracefully.
+    baked seed.py `== What ==` parsing for one-liners. Falls back gracefully.
+    v50 (2026-06-02): tiered catalog. See docs/llm-provider-audit-2026-06-01.md
     """
     global _CATALOG_BRIEF_CACHE
     if _CATALOG_BRIEF_CACHE is not None:
@@ -983,12 +1006,19 @@ def _build_catalog_brief() -> str:
     except Exception:  # noqa: BLE001
         headlines_db = {}
 
-    by_category: dict[str, list[str]] = {}
+    # Tier1 = essential; Tier2 = everything else. Group both by category
+    # for readability so LLM sees `[transform]` once with essentials first.
+    tier1_by_cat: dict[str, list[tuple[str, dict]]] = {}
+    tier2_by_cat: dict[str, list[str]] = {}
     for (name, _v), spec in registry.catalog.items():
         if str(spec.get("status") or "").lower() == "deprecated":
             continue
         cat = spec.get("category") or "transform"
-        # Prefer DB headline; fall back to baked seed description first line.
+        essential = bool(spec.get("essential"))
+        if essential:
+            tier1_by_cat.setdefault(cat, []).append((name, spec))
+            continue
+        # Tier 2 — single index line
         what_line = headlines_db.get(name) or ""
         if not what_line:
             desc = (spec.get("description") or "").strip()
@@ -997,12 +1027,42 @@ def _build_catalog_brief() -> str:
                 what_line = m.group(1).strip().split("\n")[0][:90]
             else:
                 what_line = desc.split("\n", 1)[0][:90]
-        by_category.setdefault(cat, []).append(f"  {name}  -- {what_line}")
+        tier2_by_cat.setdefault(cat, []).append(f"  {name}  -- {what_line}")
 
     lines: list[str] = []
-    for cat in sorted(by_category.keys()):
+    lines.append("=== TIER 1 — essential blocks (full spec inline) ===")
+    lines.append("These cover the common 80% of pipelines. You may add_node directly.")
+    lines.append("")
+    for cat in sorted(tier1_by_cat.keys()):
         lines.append(f"[{cat}]")
-        for entry in sorted(by_category[cat]):
+        for name, spec in sorted(tier1_by_cat[cat], key=lambda x: x[0]):
+            lines.append(f"--- {name} ---")
+            desc = (spec.get("description") or "").strip()
+            # Truncate description to ~1500 chars to bound prompt size.
+            # Keeps the first 1500 chars which always include "== What ==",
+            # usually "== When to use ==", and parts of "== Params ==".
+            if len(desc) > 1500:
+                desc = desc[:1500] + "\n... [doc truncated; call inspect_block_doc for full]"
+            lines.append(desc)
+            param_lines = _fmt_param_schema_lines(spec.get("param_schema") or {})
+            lines.append("[param_schema]")
+            lines.append(param_lines)
+            lines.append("")
+        lines.append("")
+
+    lines.append("=== TIER 2 — other blocks (index only) ===")
+    lines.append(
+        "Name + one-liner only. **You MUST call `inspect_block_doc(block_id)` "
+        "before `add_node`** — the one-liner is not enough to pick correct "
+        "params, and add_node with guessed params will be rejected by the "
+        "verifier. If a Tier 2 block's one-liner sounds like what the phase "
+        "needs (e.g. user asked for normality plot → block_probability_plot), "
+        "inspect it before adding."
+    )
+    lines.append("")
+    for cat in sorted(tier2_by_cat.keys()):
+        lines.append(f"[{cat}]")
+        for entry in sorted(tier2_by_cat[cat]):
             lines.append(entry)
         lines.append("")
 

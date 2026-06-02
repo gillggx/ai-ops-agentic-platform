@@ -66,6 +66,11 @@ class SeedlessBlockRegistry:
                 # (b) `outcome_extractors` to pull concrete values from the
                 # block's auto_preview output for the user-facing report.
                 "produces": spec.get("produces", {}),
+                # v50 (2026-06-02): tiered prompt catalog. essential=True →
+                # builder renders full description+param_schema inline in
+                # system prompt; otherwise renders one-line index and agent
+                # must inspect_block_doc before add_node.
+                "essential": bool(spec.get("essential", False)),
             }
             catalog[key] = full_spec
 
