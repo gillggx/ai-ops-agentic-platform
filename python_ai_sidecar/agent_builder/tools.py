@@ -1161,34 +1161,6 @@ class BuilderToolset:
             "_section": section,
         }
 
-    async def inspect_block_docs(
-        self, block_ids: list[str], section: str = "summary",
-    ) -> dict[str, Any]:
-        """v51 (2026-06-02): batch sibling of inspect_block_doc.
-
-        Fetches docs for up to 5 block_ids in one round-trip so the LLM
-        does not pay 3 separate LLM calls when comparing candidates.
-        Same `section` semantics as the singular tool. Unknown ids appear
-        in the result with an `error` field instead of raising — caller
-        can still use whichever ids resolved.
-        """
-        if not isinstance(block_ids, list):
-            raise ToolError(
-                code="BAD_INPUT",
-                message="block_ids must be a list of strings",
-            )
-        # Cap at 5 to keep response under control. LLM rarely needs more —
-        # picking from 5 is already against the design intent of having a
-        # narrow shortlist after consulting the catalog brief.
-        ids = [str(b) for b in block_ids][:5]
-        results: dict[str, Any] = {}
-        for bid in ids:
-            try:
-                results[bid] = await self.inspect_block_doc(bid, section=section)
-            except ToolError as e:
-                results[bid] = {"error": e.message, "code": e.code}
-        return {"docs": results, "_section": section, "_count": len(results)}
-
     async def phase_complete(self, rationale: str) -> dict[str, Any]:
         """v30: sentinel tool. LLM calls this to declare a phase done.
 
