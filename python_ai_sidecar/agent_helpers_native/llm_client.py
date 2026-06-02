@@ -417,6 +417,26 @@ class OllamaLLMClient(BaseLLMClient):
         # budget faster — empirically low at 8192 was fine for tool calls
         # but the goal_plan_node free-form 3-phase JSON needs more room.
         effective_max = max(max_tokens, 16384)
+        # 2026-06-02: pin Fireworks for Kimi K2.5 so we get OpenRouter's
+        # automatic prompt cache passthrough ($0.10/M cached vs $0.45/M
+        # uncached). Default OpenRouter routing is provider-agnostic and
+        # the 2026-06-01 audit showed cache_read=0 across all calls — most
+        # providers don't surface cache hits. Fireworks is GPU-hosted (not
+        # Groq LPU, which the user excluded). allow_fallbacks=True keeps
+        # the call resilient if Fireworks is briefly down.
+        extra_body: Dict[str, Any] = {
+            # 2026-06-01: effort=high finished but took ~12 min (30 LLM
+            # calls × 25-40s each on a free-form xbar trend query).
+            # Trying medium to see if it still emits a chart in 3-5 min
+            # — closer to Claude's 1-3 min but at OpenRouter cost.
+            "reasoning": {"effort": "medium"},
+            "thinking": {"type": "disabled"},
+        }
+        if "kimi" in self._model.lower():
+            extra_body["provider"] = {
+                "order": ["Fireworks"],
+                "allow_fallbacks": True,
+            }
         kwargs: Dict[str, Any] = dict(
             model=self._model,
             max_tokens=effective_max,
@@ -426,14 +446,7 @@ class OllamaLLMClient(BaseLLMClient):
             # is for Qwen3 / DeepSeek where the chain-of-thought is a
             # separate output channel rather than a routed effort knob.
             # Sending both — providers ignore the field they don't know.
-            extra_body={
-                # 2026-06-01: effort=high finished but took ~12 min (30 LLM
-                # calls × 25-40s each on a free-form xbar trend query).
-                # Trying medium to see if it still emits a chart in 3-5 min
-                # — closer to Claude's 1-3 min but at OpenRouter cost.
-                "reasoning": {"effort": "medium"},
-                "thinking": {"type": "disabled"},
-            },
+            extra_body=extra_body,
         )
         # OpenAI-compatible tool calling (function calling format)
         if tools:
@@ -519,12 +532,29 @@ class OllamaLLMClient(BaseLLMClient):
                     content.append({"type": "text", "text": text})
 
         usage = getattr(resp, "usage", None)
+        # 2026-06-02: capture OpenAI-style cache fields. OpenRouter / Fireworks
+        # /  most modern OpenAI-compat APIs surface cache hits via
+        # `usage.prompt_tokens_details.cached_tokens` (OpenAI spec, distinct
+        # from Anthropic's `cache_read_input_tokens` on the usage root).
+        # Normalise into the same LLMResponse field the Anthropic path uses
+        # so trace + cost accounting are provider-agnostic.
+        prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0) if usage else 0
+        completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0) if usage else 0
+        cached_tokens = 0
+        if usage is not None:
+            ptd = getattr(usage, "prompt_tokens_details", None)
+            if ptd is not None:
+                cached_tokens = int(getattr(ptd, "cached_tokens", 0) or 0)
+        # Mirror Anthropic semantics: input_tokens excludes cached portion so
+        # downstream cost math (input × $/M + cache_read × cached_$/M) holds.
+        uncached_input = max(0, prompt_tokens - cached_tokens)
         return LLMResponse(
             text=text,
             stop_reason=stop_reason,
             content=content,
-            input_tokens=getattr(usage, "prompt_tokens", 0) if usage else 0,
-            output_tokens=getattr(usage, "completion_tokens", 0) if usage else 0,
+            input_tokens=uncached_input,
+            output_tokens=completion_tokens,
+            cache_read_input_tokens=cached_tokens,
         )
 
     async def stream(
