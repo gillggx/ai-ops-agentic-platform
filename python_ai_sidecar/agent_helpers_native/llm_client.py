@@ -417,6 +417,21 @@ class OllamaLLMClient(BaseLLMClient):
         # budget faster — empirically low at 8192 was fine for tool calls
         # but the goal_plan_node free-form 3-phase JSON needs more room.
         effective_max = max(max_tokens, 16384)
+        # 2026-06-02: prefer Groq provider for Kimi K2 so OpenRouter routes
+        # to the only provider with **automatic prompt caching** for that
+        # model family (per OpenRouter docs / 2026-06-01 audit showed 0
+        # cache_read tokens on default routing). Falls back transparently
+        # when Groq doesn't host the requested model.
+        extra_body: Dict[str, Any] = {
+            # 2026-06-01: effort=high finished but took ~12 min (30 LLM
+            # calls × 25-40s each on a free-form xbar trend query).
+            # Trying medium to see if it still emits a chart in 3-5 min
+            # — closer to Claude's 1-3 min but at OpenRouter cost.
+            "reasoning": {"effort": "medium"},
+            "thinking": {"type": "disabled"},
+        }
+        if "kimi" in self._model.lower():
+            extra_body["provider"] = {"order": ["Groq"], "allow_fallbacks": True}
         kwargs: Dict[str, Any] = dict(
             model=self._model,
             max_tokens=effective_max,
@@ -426,14 +441,7 @@ class OllamaLLMClient(BaseLLMClient):
             # is for Qwen3 / DeepSeek where the chain-of-thought is a
             # separate output channel rather than a routed effort knob.
             # Sending both — providers ignore the field they don't know.
-            extra_body={
-                # 2026-06-01: effort=high finished but took ~12 min (30 LLM
-                # calls × 25-40s each on a free-form xbar trend query).
-                # Trying medium to see if it still emits a chart in 3-5 min
-                # — closer to Claude's 1-3 min but at OpenRouter cost.
-                "reasoning": {"effort": "medium"},
-                "thinking": {"type": "disabled"},
-            },
+            extra_body=extra_body,
         )
         # OpenAI-compatible tool calling (function calling format)
         if tools:
