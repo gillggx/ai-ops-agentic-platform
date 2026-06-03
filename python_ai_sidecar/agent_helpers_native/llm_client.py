@@ -18,22 +18,12 @@ Provider selection is controlled by the LLM_PROVIDER config:
 
 from __future__ import annotations
 
-import contextvars
 import json
 import logging
 import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, List, Optional
-
-
-# 2026-06-03: ContextVar for OpenRouter session_id sticky routing.
-# Set once at the build entry (so all 21 LLM callers naturally inherit it
-# through async context propagation) and read inside OllamaLLMClient.create()
-# when no explicit session_id was passed. Anthropic backend ignores.
-current_session_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
-    "llm_session_id", default=None,
-)
 
 # Phase 2-A: LangSmith tracing — @traceable is a no-op when LANGSMITH_API_KEY
 # is unset, so this is safe to apply unconditionally.
@@ -136,7 +126,6 @@ class BaseLLMClient:
         messages: List[Dict[str, Any]],
         max_tokens: int = 4096,
         tools: Optional[List[Dict[str, Any]]] = None,
-        session_id: Optional[str] = None,
     ) -> LLMResponse:
         """Create an LLM completion.
 
@@ -144,11 +133,6 @@ class BaseLLMClient:
         list (e.g. `[{"type":"text","text":"...","cache_control":{...}}]`).
         Subclasses for non-Anthropic providers MUST flatten the list back to
         string and drop unsupported fields like `cache_control`.
-
-        `session_id` (2026-06-03) lets OpenRouter's load balancer route all
-        calls in the same agent run to the same backend provider so prompt
-        caches accumulate. Ignored by the Anthropic backend (which has its
-        own native cache_control). Max 256 chars at OpenRouter's side.
 
         `tools[-1]["cache_control"]` (Anthropic prompt caching) is similarly
         consumed by AnthropicLLMClient and ignored by OpenAI-compat clients.
@@ -184,11 +168,7 @@ class AnthropicLLMClient(BaseLLMClient):
         messages: List[Dict[str, Any]],
         max_tokens: int = 4096,
         tools: Optional[List[Dict[str, Any]]] = None,
-        session_id: Optional[str] = None,
     ) -> LLMResponse:
-        # session_id is OpenRouter-specific sticky-routing hint; Anthropic
-        # has native cache_control breakpoints so we ignore here.
-        del session_id  # noqa: F841 — signature only; not used by Anthropic SDK
         # Anthropic accepts both string and content-block list for `system`.
         # Caller is responsible for placing cache_control breakpoints; we just
         # pass through. Same for `tools[i]["cache_control"]`.
@@ -404,7 +384,6 @@ class OllamaLLMClient(BaseLLMClient):
         messages: List[Dict[str, Any]],
         max_tokens: int = 4096,
         tools: Optional[List[Dict[str, Any]]] = None,
-        session_id: Optional[str] = None,
     ) -> LLMResponse:
         # Prepend a concise function-calling mandate when tools are provided.
         # Qwen3 / local models tend to output JSON tool calls as plain text
@@ -438,14 +417,13 @@ class OllamaLLMClient(BaseLLMClient):
         # budget faster — empirically low at 8192 was fine for tool calls
         # but the goal_plan_node free-form 3-phase JSON needs more room.
         effective_max = max(max_tokens, 16384)
-        # 2026-06-03: OpenRouter session_id sticky routing. When passed, the
-        # OR load balancer routes all requests sharing the same session_id
-        # to the same backend provider, so prompt caches accumulate across
-        # the multi-call agent loop. Without session_id sticky only kicks
-        # in AFTER a cache hit is observed — chicken-and-egg that left us
-        # with cache_read=0 in the 2026-06-01 audit. Per OpenRouter docs:
-        # "activates sticky routing on any successful request — even
-        # before cache usage is observed".
+        # 2026-06-02: pin Fireworks for Kimi K2.5 so we get OpenRouter's
+        # automatic prompt cache passthrough ($0.10/M cached vs $0.45/M
+        # uncached). Default OpenRouter routing is provider-agnostic and
+        # the 2026-06-01 audit showed cache_read=0 across all calls — most
+        # providers don't surface cache hits. Fireworks is GPU-hosted (not
+        # Groq LPU, which the user excluded). allow_fallbacks=True keeps
+        # the call resilient if Fireworks is briefly down.
         extra_body: Dict[str, Any] = {
             # 2026-06-01: effort=high finished but took ~12 min (30 LLM
             # calls × 25-40s each on a free-form xbar trend query).
@@ -454,14 +432,11 @@ class OllamaLLMClient(BaseLLMClient):
             "reasoning": {"effort": "medium"},
             "thinking": {"type": "disabled"},
         }
-        # Fall back to the ambient build session_id (set by the runner at
-        # /agent/build entry) so existing call sites work without signature
-        # plumbing.
-        effective_session = session_id or current_session_id.get()
-        if effective_session:
-            # Trim to OR's 256-char cap. Build session_ids are UUIDs (36
-            # chars) so this is defensive only.
-            extra_body["session_id"] = str(effective_session)[:256]
+        if "kimi" in self._model.lower():
+            extra_body["provider"] = {
+                "order": ["Fireworks"],
+                "allow_fallbacks": True,
+            }
         kwargs: Dict[str, Any] = dict(
             model=self._model,
             max_tokens=effective_max,
