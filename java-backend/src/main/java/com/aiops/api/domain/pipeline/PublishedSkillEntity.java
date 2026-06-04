@@ -69,4 +69,12 @@ public class PublishedSkillEntity {
 
 	@Column(name = "retired_at", columnDefinition = "timestamp with time zone")
 	private OffsetDateTime retiredAt;
+
+	/** V54: manual | mcp_auto. */
+	@Column(name = "source", nullable = false)
+	private String source = "manual";
+
+	/** V54: FK to mcp_definitions when source=mcp_auto. */
+	@Column(name = "source_mcp_id")
+	private Long sourceMcpId;
 }

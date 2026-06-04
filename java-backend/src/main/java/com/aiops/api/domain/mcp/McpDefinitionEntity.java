@@ -70,4 +70,16 @@ public class McpDefinitionEntity extends Auditable {
 	/** private | public */
 	@Column(name = "visibility", nullable = false, length = 10)
 	private String visibility = "private";
+
+	/** V54: 此 MCP 是否在 Pipeline Builder 有一個自動生成的 data block (source=mcp_auto)。 */
+	@Column(name = "produces_block", nullable = false)
+	private Boolean producesBlock = Boolean.FALSE;
+
+	/** V54: 此 MCP 是否同時生成一個 1-block pipeline + published skill。 */
+	@Column(name = "produces_skill", nullable = false)
+	private Boolean producesSkill = Boolean.FALSE;
+
+	/** V54: audit — JSON {llm_model, prompt_version, generated_at, last_regenerated_at} */
+	@Column(name = "block_generation_meta", columnDefinition = "text")
+	private String blockGenerationMeta;
 }

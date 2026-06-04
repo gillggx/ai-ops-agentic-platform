@@ -71,4 +71,12 @@ public class BlockEntity extends Auditable {
 
 	@Column(name = "review_note", columnDefinition = "text")
 	private String reviewNote;
+
+	/** V54: manual (hand-crafted / seeded) | mcp_auto (LLM-generated from MCP description). */
+	@Column(name = "source", nullable = false)
+	private String source = "manual";
+
+	/** V54: FK to mcp_definitions when source=mcp_auto. */
+	@Column(name = "source_mcp_id")
+	private Long sourceMcpId;
 }
