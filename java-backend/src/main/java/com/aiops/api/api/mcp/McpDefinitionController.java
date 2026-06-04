@@ -43,8 +43,9 @@ public class McpDefinitionController {
 	@GetMapping("/{id}")
 	@PreAuthorize(Authorities.ANY_ROLE)
 	public ApiResponse<Dtos.Detail> get(@PathVariable Long id) {
-		return ApiResponse.ok(Dtos.detailOf(repository.findById(id)
-				.orElseThrow(() -> ApiException.notFound("mcp definition"))));
+		McpDefinitionEntity mcp = repository.findById(id)
+				.orElseThrow(() -> ApiException.notFound("mcp definition"));
+		return ApiResponse.ok(Dtos.detailOf(mcp, derivativeService.derivativeStatusOf(mcp)));
 	}
 
 	@PostMapping
@@ -64,7 +65,8 @@ public class McpDefinitionController {
 							req.producesBlock(), req.producesSkill(),
 							req.generationMeta(),
 							req.blockDraft(), req.skillDraft());
-			return ApiResponse.ok(Dtos.detailOf(derivativeService.createWithDerivatives(dreq, caller)));
+			McpDefinitionEntity created = derivativeService.createWithDerivatives(dreq, caller);
+			return ApiResponse.ok(Dtos.detailOf(created, derivativeService.derivativeStatusOf(created)));
 		}
 
 		if (repository.findByName(req.name()).isPresent()) {
@@ -81,7 +83,8 @@ public class McpDefinitionController {
 		if (req.processingIntent() != null) e.setProcessingIntent(req.processingIntent());
 		if (req.processingScript() != null) e.setProcessingScript(req.processingScript());
 		if (req.visibility() != null) e.setVisibility(req.visibility());
-		return ApiResponse.ok(Dtos.detailOf(repository.save(e)));
+		McpDefinitionEntity saved = repository.save(e);
+		return ApiResponse.ok(Dtos.detailOf(saved, derivativeService.derivativeStatusOf(saved)));
 	}
 
 	/**
@@ -111,6 +114,24 @@ public class McpDefinitionController {
 		return ApiResponse.ok(generationProxy.generate(req, caller));
 	}
 
+	/**
+	 * P1-6 (2026-06-04) — commit a user-reviewed regenerate draft. The
+	 * frontend first calls {@code POST /generate-derivatives?mcpId=...} to
+	 * obtain a fresh LLM draft, lets the user edit, then POSTs here. In-place
+	 * update keeps the existing block / skill ids (and any pipelines that
+	 * reference them keep working).
+	 */
+	@PostMapping("/{id}/regenerate-derivatives")
+	@PreAuthorize(Authorities.ADMIN)
+	public ApiResponse<Dtos.Detail> regenerateDerivatives(
+			@PathVariable Long id,
+			@Validated @RequestBody Dtos.RegenerateRequest req,
+			@AuthenticationPrincipal AuthPrincipal caller) {
+		McpDefinitionEntity updated = derivativeService.regenerateDerivatives(
+				id, req.blockDraft(), req.skillDraft(), req.generationMeta(), caller);
+		return ApiResponse.ok(Dtos.detailOf(updated, derivativeService.derivativeStatusOf(updated)));
+	}
+
 	@PutMapping("/{id}")
 	@Transactional
 	@PreAuthorize(Authorities.ADMIN)
@@ -125,7 +146,8 @@ public class McpDefinitionController {
 		if (req.processingScript() != null) e.setProcessingScript(req.processingScript());
 		if (req.preferOverSystem() != null) e.setPreferOverSystem(req.preferOverSystem());
 		if (req.visibility() != null) e.setVisibility(req.visibility());
-		return ApiResponse.ok(Dtos.detailOf(repository.save(e)));
+		McpDefinitionEntity saved = repository.save(e);
+		return ApiResponse.ok(Dtos.detailOf(saved, derivativeService.derivativeStatusOf(saved)));
 	}
 
 	@DeleteMapping("/{id}")
@@ -140,7 +162,11 @@ public class McpDefinitionController {
 	@GetMapping("/catalog")
 	@PreAuthorize(Authorities.ANY_ROLE)
 	public ApiResponse<java.util.List<Dtos.Detail>> catalog() {
-		return ApiResponse.ok(repository.findAll().stream().map(Dtos::detailOf).toList());
+		// Catalog is a read-light listing — skip the per-row derivative
+		// repository lookups here to keep the response cheap. Detail screens
+		// hit GET /{id} which carries the full status.
+		return ApiResponse.ok(repository.findAll().stream()
+				.map(e -> Dtos.detailOf(e, null)).toList());
 	}
 
 	public static final class Dtos {
@@ -154,6 +180,14 @@ public class McpDefinitionController {
 		                     Long systemMcpId, String processingIntent, String processingScript,
 		                     String uiRenderConfig, String inputDefinition, String sampleOutput,
 		                     Boolean preferOverSystem, String visibility,
+		                     // V54: derivative flags + audit JSON so the admin form can
+		                     // restore toggle state on edit; null when the MCP has no
+		                     // derivatives configured.
+		                     Boolean producesBlock, Boolean producesSkill,
+		                     String blockGenerationMeta,
+		                     // P1-5/P1-6 (2026-06-04): live derivative status — null when
+		                     // produces_block AND produces_skill are both false.
+		                     MCPDerivativeService.DerivativeStatus derivativeStatus,
 		                     java.time.OffsetDateTime createdAt, java.time.OffsetDateTime updatedAt) {}
 
 		public record CreateRequest(@NotBlank String name, String description, String mcpType,
@@ -174,6 +208,12 @@ public class McpDefinitionController {
 		                            String processingScript, Boolean preferOverSystem,
 		                            String visibility) {}
 
+		/** P1-6 (2026-06-04): payload for commit-regenerate. */
+		public record RegenerateRequest(
+				String generationMeta,
+				MCPDerivativeService.BlockDraft blockDraft,
+				MCPDerivativeService.SkillDraft skillDraft) {}
+
 		/** V54: payload for LLM derivative generation. */
 		public record GenerateRequest(
 				/** Existing MCP id to regenerate against. Null = generate for a draft (unsaved) MCP. */
@@ -193,12 +233,15 @@ public class McpDefinitionController {
 					e.getVisibility(), e.getPreferOverSystem(), e.getUpdatedAt());
 		}
 
-		static Detail detailOf(McpDefinitionEntity e) {
+		static Detail detailOf(McpDefinitionEntity e, MCPDerivativeService.DerivativeStatus status) {
 			return new Detail(e.getId(), e.getName(), e.getDescription(), e.getMcpType(),
 					e.getApiConfig(), e.getInputSchema(), e.getOutputSchema(), e.getSystemMcpId(),
 					e.getProcessingIntent(), e.getProcessingScript(), e.getUiRenderConfig(),
 					e.getInputDefinition(), e.getSampleOutput(), e.getPreferOverSystem(),
-					e.getVisibility(), e.getCreatedAt(), e.getUpdatedAt());
+					e.getVisibility(),
+					e.getProducesBlock(), e.getProducesSkill(), e.getBlockGenerationMeta(),
+					status,
+					e.getCreatedAt(), e.getUpdatedAt());
 		}
 	}
 }

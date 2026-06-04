@@ -11,4 +11,5 @@ public interface PublishedSkillRepository extends JpaRepository<PublishedSkillEn
 	Optional<PublishedSkillEntity> findBySlug(String slug);
 	Optional<PublishedSkillEntity> findByPipelineIdAndPipelineVersion(Long pipelineId, String pipelineVersion);
 	List<PublishedSkillEntity> findByStatus(String status);
+	Optional<PublishedSkillEntity> findFirstBySourceMcpIdAndSource(Long sourceMcpId, String source);
 }

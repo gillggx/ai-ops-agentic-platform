@@ -19,9 +19,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * MCPDerivativeService — orchestrates the creation of derivative artefacts
@@ -106,6 +108,197 @@ public class MCPDerivativeService {
 
 		return mcp;
 	}
+
+	/**
+	 * P1-6 (2026-06-04) — atomically replace an existing MCP's derivative
+	 * Block (+ Skill if present) using freshly LLM-regenerated drafts.
+	 *
+	 * <p>In-place: same {@code pb_blocks.id} and {@code pb_published_skills.id}
+	 * are kept so any pipeline that already references them keeps working.
+	 * Only the schema/spec columns are overwritten. Old generation meta
+	 * (model + prompt_version + timestamps) is pushed onto a
+	 * {@code history[]} array inside {@code block_generation_meta} for audit.
+	 *
+	 * @throws ApiException NOT_FOUND if MCP missing or no derivative row to
+	 *         update (sanity guard — caller should only invoke this when
+	 *         {@code produces_block=true}).
+	 */
+	@Transactional
+	public McpDefinitionEntity regenerateDerivatives(Long mcpId,
+	                                                 BlockDraft blockDraft,
+	                                                 SkillDraft skillDraft,
+	                                                 String newGenerationMeta,
+	                                                 AuthPrincipal caller) {
+		McpDefinitionEntity mcp = mcpRepo.findById(mcpId)
+				.orElseThrow(() -> ApiException.notFound("mcp definition"));
+		if (!Boolean.TRUE.equals(mcp.getProducesBlock())) {
+			throw ApiException.badRequest(
+					"MCP " + mcp.getName() + " does not produce derivatives — nothing to regenerate");
+		}
+		if (blockDraft == null) {
+			throw ApiException.badRequest("blockDraft is required for regenerate");
+		}
+
+		BlockEntity block = blockRepo
+				.findFirstBySourceMcpIdAndSource(mcpId, SOURCE_MCP_AUTO)
+				.orElseThrow(() -> ApiException.notFound(
+						"derivative block for mcp " + mcp.getName() + " missing — re-create instead"));
+		applyBlockDraft(block, blockDraft);
+		blockRepo.save(block);
+		log.info("MCP {} (id={}) regenerated block {} in-place (block_id={})",
+				mcp.getName(), mcpId, block.getName(), block.getId());
+
+		if (Boolean.TRUE.equals(mcp.getProducesSkill())) {
+			if (skillDraft == null) {
+				throw ApiException.badRequest("skillDraft is required when produces_skill=true");
+			}
+			PublishedSkillEntity skill = skillRepo
+					.findFirstBySourceMcpIdAndSource(mcpId, SOURCE_MCP_AUTO)
+					.orElseThrow(() -> ApiException.notFound(
+							"derivative skill for mcp " + mcp.getName() + " missing — re-create instead"));
+			applySkillDraft(skill, skillDraft);
+			skillRepo.save(skill);
+			log.info("MCP {} (id={}) regenerated skill slug={} in-place (skill_id={})",
+					mcp.getName(), mcpId, skill.getSlug(), skill.getId());
+		}
+
+		// Push old meta onto history[] before overwriting (audit trail).
+		mcp.setBlockGenerationMeta(mergeMetaWithHistory(mcp.getBlockGenerationMeta(), newGenerationMeta));
+		mcpRepo.save(mcp);
+		return mcp;
+	}
+
+	/**
+	 * Compute derivative status for a single MCP. Used by GET DTO mapping so
+	 * the admin UI knows whether to show the stale warning + regenerate CTA.
+	 *
+	 * <p>{@code is_stale} fires when the MCP row's updated_at is meaningfully
+	 * (+2s tolerance) ahead of the last_regenerated_at recorded in
+	 * block_generation_meta. The tolerance absorbs Hibernate
+	 * {@code @UpdateTimestamp} vs DB clock jitter so newly-created MCPs
+	 * don't immediately look stale.
+	 */
+	public DerivativeStatus derivativeStatusOf(McpDefinitionEntity mcp) {
+		boolean producesBlock = Boolean.TRUE.equals(mcp.getProducesBlock());
+		boolean producesSkill = Boolean.TRUE.equals(mcp.getProducesSkill());
+		if (!producesBlock && !producesSkill) {
+			return null;
+		}
+
+		Optional<BlockEntity> blk = blockRepo
+				.findFirstBySourceMcpIdAndSource(mcp.getId(), SOURCE_MCP_AUTO);
+		Optional<PublishedSkillEntity> skl = producesSkill
+				? skillRepo.findFirstBySourceMcpIdAndSource(mcp.getId(), SOURCE_MCP_AUTO)
+				: Optional.empty();
+
+		String lastRegen = readLastRegeneratedAt(mcp.getBlockGenerationMeta());
+		boolean isStale = computeIsStale(mcp.getUpdatedAt(), lastRegen);
+
+		return new DerivativeStatus(
+				isStale,
+				lastRegen,
+				blk.isPresent(),
+				producesSkill ? skl.isPresent() : null,
+				blk.map(BlockEntity::getId).orElse(null),
+				blk.map(BlockEntity::getName).orElse(null),
+				skl.map(PublishedSkillEntity::getId).orElse(null),
+				skl.map(PublishedSkillEntity::getSlug).orElse(null)
+		);
+	}
+
+	private boolean computeIsStale(OffsetDateTime updatedAt, String lastRegenIso) {
+		if (lastRegenIso == null || lastRegenIso.isBlank()) return true;
+		if (updatedAt == null) return false;
+		try {
+			OffsetDateTime lastRegen = OffsetDateTime.parse(lastRegenIso);
+			return updatedAt.isAfter(lastRegen.plusSeconds(2));
+		} catch (RuntimeException e) {
+			log.warn("malformed last_regenerated_at '{}' — treating as stale", lastRegenIso);
+			return true;
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	private String readLastRegeneratedAt(String metaJson) {
+		if (metaJson == null || metaJson.isBlank()) return null;
+		try {
+			Map<String, Object> meta = mapper.readValue(metaJson, Map.class);
+			Object v = meta.get("last_regenerated_at");
+			return v == null ? null : v.toString();
+		} catch (RuntimeException | java.io.IOException e) {
+			return null;
+		}
+	}
+
+	/**
+	 * Pop the old top-level entry into history[] and replace top-level with
+	 * the new generation meta. New meta is expected to be a JSON object with
+	 * {llm_model, prompt_version, generated_at, last_regenerated_at}.
+	 */
+	@SuppressWarnings("unchecked")
+	private String mergeMetaWithHistory(String oldMetaJson, String newMetaJson) {
+		Map<String, Object> newMeta;
+		try {
+			newMeta = newMetaJson == null || newMetaJson.isBlank()
+					? new LinkedHashMap<>()
+					: mapper.readValue(newMetaJson, Map.class);
+		} catch (RuntimeException | java.io.IOException e) {
+			newMeta = new LinkedHashMap<>();
+		}
+
+		List<Object> history = new ArrayList<>();
+		if (oldMetaJson != null && !oldMetaJson.isBlank()) {
+			try {
+				Map<String, Object> oldMeta = mapper.readValue(oldMetaJson, Map.class);
+				Object existing = oldMeta.remove("history");
+				if (existing instanceof List<?> el) history.addAll((List<Object>) el);
+				if (!oldMeta.isEmpty()) history.add(oldMeta);
+			} catch (RuntimeException | java.io.IOException e) {
+				log.warn("ignoring malformed old block_generation_meta: {}", e.getMessage());
+			}
+		}
+		// Cap history to last 10 entries so the column doesn't bloat unbounded.
+		if (history.size() > 10) {
+			history = history.subList(history.size() - 10, history.size());
+		}
+		newMeta.put("history", history);
+		return safeJson(newMeta);
+	}
+
+	private void applyBlockDraft(BlockEntity block, BlockDraft draft) {
+		if (draft.blockName() != null && !draft.blockName().isBlank()) {
+			// Block name is a stable id used by pipelines — only rewrite when
+			// the user explicitly typed a new one in the form. Most regenerates
+			// keep the original.
+			block.setName(draft.blockName());
+		}
+		block.setDescription(nullToEmpty(draft.description()));
+		block.setParamSchema(nullToBraces(draft.paramSchema()));
+		block.setExamples(nullToBrackets(draft.examples()));
+		block.setOutputColumnsHint(nullToBrackets(draft.outputColumnsHint()));
+	}
+
+	private void applySkillDraft(PublishedSkillEntity skill, SkillDraft draft) {
+		if (draft.name() != null) skill.setName(draft.name());
+		skill.setUseCase(nullToEmpty(draft.useCase()));
+		skill.setWhenToUse(nullToBrackets(draft.whenToUse()));
+		skill.setInputsSchema(nullToBrackets(draft.inputsSchema()));
+		skill.setOutputsSchema(nullToBraces(draft.outputsSchema()));
+		skill.setTags(nullToBrackets(draft.tags()));
+		// slug is identity — keep stable across regenerates.
+	}
+
+	/** Snapshot of an MCP's derivative artefacts for the GET DTO. */
+	public record DerivativeStatus(
+			Boolean isStale,
+			String lastRegeneratedAt,
+			Boolean hasBlock,
+			Boolean hasSkill,
+			Long blockId,
+			String blockName,
+			Long skillId,
+			String skillSlug
+	) {}
 
 	// ─── Validation ─────────────────────────────────────────────────────
 

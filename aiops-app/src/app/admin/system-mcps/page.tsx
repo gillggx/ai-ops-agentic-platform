@@ -24,6 +24,22 @@ interface SystemMcp {
   produces_block?: boolean;
   produces_skill?: boolean;
   block_generation_meta?: string | null;
+  // P1-5/P1-6 (2026-06-04) — live derivative status; only present on
+  // GET /{id} (list endpoint omits it for cost). Null when neither
+  // produces_block nor produces_skill is set.
+  derivative_status?: DerivativeStatus | null;
+}
+
+// Mirrors Java MCPDerivativeService.DerivativeStatus (Jackson snake_case).
+interface DerivativeStatus {
+  is_stale: boolean;
+  last_regenerated_at: string | null;
+  has_block: boolean;
+  has_skill: boolean | null;
+  block_id: number | null;
+  block_name: string | null;
+  skill_id: number | null;
+  skill_slug: string | null;
 }
 
 // V54 — LLM-generated draft shapes (mirrors Java MCPDerivativeService DTOs)
@@ -339,6 +355,170 @@ function DraftJsonField({ label, value, onChange }: {
   );
 }
 
+// ── P1-5 / P1-6 (2026-06-04) — DerivativeBanner sub-component ────────────────
+
+interface DerivativeBannerProps {
+  status: DerivativeStatus | null;
+  producesBlock: boolean;
+  producesSkill: boolean;
+  regenerateStage: "idle" | "review";
+  generating: boolean;
+  committingRegen: boolean;
+  onStartRegenerate: () => void;
+  onCancelRegenerate: () => void;
+  onCommitRegenerate: () => void;
+  lintIssues: LintIssue[];
+  genMeta: { model?: string; promptVersion?: string; inputTokens?: number; outputTokens?: number } | null;
+  form: EditForm;
+  setForm: React.Dispatch<React.SetStateAction<EditForm>>;
+}
+
+function formatRelativeTime(iso: string | null): string {
+  if (!iso) return "—";
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return iso;
+  const diff = Date.now() - t;
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return `${sec} 秒前`;
+  if (sec < 3600) return `${Math.floor(sec / 60)} 分鐘前`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)} 小時前`;
+  return `${Math.floor(sec / 86400)} 天前`;
+}
+
+function DerivativeBanner({
+  status, producesBlock, producesSkill, regenerateStage,
+  generating, committingRegen,
+  onStartRegenerate, onCancelRegenerate, onCommitRegenerate,
+  lintIssues, genMeta, form, setForm,
+}: DerivativeBannerProps) {
+  const setBlockDraft = (patch: Partial<BlockDraft>) =>
+    setForm(f => ({ ...f, blockDraft: { ...(f.blockDraft ?? {}), ...patch } }));
+  const setSkillDraft = (patch: Partial<SkillDraft>) =>
+    setForm(f => ({ ...f, skillDraft: { ...(f.skillDraft ?? {}), ...patch } }));
+
+  const isStale = Boolean(status?.is_stale);
+  const hasError = lintIssues.some(i => i.severity === "error");
+
+  // Banner palette
+  const palette = isStale
+    ? { bg: "#fffaf0", border: "#feebc8", fg: "#9c4221", icon: "⚠" }
+    : { bg: "#f0fff4", border: "#c6f6d5", fg: "#22543d", icon: "✓" };
+
+  const labels: string[] = [];
+  if (producesBlock) labels.push("block");
+  if (producesSkill) labels.push("skill");
+
+  return (
+    <div style={{
+      marginBottom: 14, padding: "10px 12px",
+      background: palette.bg, border: `1px solid ${palette.border}`, borderRadius: 6,
+      fontSize: 12, color: palette.fg,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 600, marginBottom: 2 }}>
+            {palette.icon} Pipeline Builder 衍生 ({labels.join(" + ")})
+          </div>
+          {isStale ? (
+            <div>描述已變動，衍生內容可能過期。建議重新生成。</div>
+          ) : (
+            <div>上次生成：{formatRelativeTime(status?.last_regenerated_at ?? null)}</div>
+          )}
+          {status && (
+            <div style={{ fontSize: 10, color: "#718096", marginTop: 3, fontFamily: "ui-monospace, monospace" }}>
+              {status.block_name && `block=${status.block_name}`}
+              {status.block_name && status.skill_slug && " · "}
+              {status.skill_slug && `skill=${status.skill_slug}`}
+            </div>
+          )}
+        </div>
+        {regenerateStage === "idle" && (
+          <button
+            style={{ ...btn(isStale ? "primary" : "ghost"), padding: "6px 12px", fontSize: 12 }}
+            onClick={onStartRegenerate}
+            disabled={generating}
+          >
+            🔄 重新生成
+          </button>
+        )}
+      </div>
+
+      {regenerateStage === "review" && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px dashed ${palette.border}` }}>
+          {generating ? (
+            <div style={{ color: "#718096", fontSize: 12 }}>
+              生成中... (Haiku 4.5)
+            </div>
+          ) : (
+            <>
+              {/* Lint feedback */}
+              {lintIssues.length > 0 && (
+                <div style={{ marginBottom: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+                  {lintIssues.map((iss, idx) => (
+                    <div key={idx} style={{
+                      fontSize: 11, padding: "5px 8px", borderRadius: 4,
+                      background: iss.severity === "error" ? "#fff5f5" : "#fffaf0",
+                      color:      iss.severity === "error" ? "#c53030" : "#9c4221",
+                      border: `1px solid ${iss.severity === "error" ? "#fed7d7" : "#feebc8"}`,
+                    }}>
+                      [{iss.severity}] {iss.field}: {iss.message}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {genMeta?.model && (
+                <div style={{ fontSize: 10, color: "#a0aec0", marginBottom: 10, fontFamily: "ui-monospace, monospace" }}>
+                  model={genMeta.model} prompt={genMeta.promptVersion} tokens={genMeta.inputTokens}/{genMeta.outputTokens}
+                </div>
+              )}
+
+              {producesBlock && form.blockDraft && (
+                <DraftCard title="Block 草稿（覆寫現有 block，可編輯）">
+                  <DraftField label="block_name" value={form.blockDraft.block_name ?? ""} onChange={v => setBlockDraft({ block_name: v })} />
+                  <DraftField label="description" multiline value={form.blockDraft.description ?? ""} onChange={v => setBlockDraft({ description: v })} />
+                  <DraftJsonField label="param_schema (object)" value={form.blockDraft.param_schema ?? {}} onChange={v => setBlockDraft({ param_schema: v as Record<string, unknown> })} />
+                  <DraftJsonField label="examples (list)" value={form.blockDraft.examples ?? []} onChange={v => setBlockDraft({ examples: v as Array<Record<string, unknown>> })} />
+                  <DraftJsonField label="output_columns_hint (list)" value={form.blockDraft.output_columns_hint ?? []} onChange={v => setBlockDraft({ output_columns_hint: v as Array<Record<string, unknown>> })} />
+                </DraftCard>
+              )}
+
+              {producesSkill && form.skillDraft && (
+                <DraftCard title="Skill 草稿（覆寫現有 skill，可編輯）">
+                  <DraftField label="name" value={form.skillDraft.name ?? ""} onChange={v => setSkillDraft({ name: v })} />
+                  <DraftField label="use_case (≤ 25 words)" multiline value={form.skillDraft.use_case ?? ""} onChange={v => setSkillDraft({ use_case: v })} />
+                  <DraftJsonField label="when_to_use (list)" value={form.skillDraft.when_to_use ?? []} onChange={v => setSkillDraft({ when_to_use: (v as string[]) })} />
+                  <DraftJsonField label="inputs_schema (list)" value={form.skillDraft.inputs_schema ?? []} onChange={v => setSkillDraft({ inputs_schema: v as Array<Record<string, unknown>> })} />
+                  <DraftJsonField label="outputs_schema (object)" value={form.skillDraft.outputs_schema ?? {}} onChange={v => setSkillDraft({ outputs_schema: v as Record<string, unknown> })} />
+                  <DraftJsonField label="tags (list)" value={form.skillDraft.tags ?? []} onChange={v => setSkillDraft({ tags: v as string[] })} />
+                  <DraftJsonField label="default_params (object)" value={form.skillDraft.default_params ?? {}} onChange={v => setSkillDraft({ default_params: v as Record<string, unknown> })} />
+                </DraftCard>
+              )}
+
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button
+                  style={{ ...btn("primary"), padding: "6px 14px", fontSize: 12 }}
+                  onClick={onCommitRegenerate}
+                  disabled={committingRegen || hasError || !form.blockDraft}
+                >
+                  {committingRegen ? "更新中..." : "✓ 確認覆寫"}
+                </button>
+                <button
+                  style={{ ...btn("ghost"), padding: "6px 14px", fontSize: 12 }}
+                  onClick={onCancelRegenerate}
+                  disabled={committingRegen}
+                >
+                  取消
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function SystemMcpAdminPage() {
@@ -357,6 +537,12 @@ export default function SystemMcpAdminPage() {
   const [generating, setGenerating] = useState(false);
   const [lintIssues, setLintIssues] = useState<LintIssue[]>([]);
   const [genMeta, setGenMeta] = useState<{ model?: string; promptVersion?: string; inputTokens?: number; outputTokens?: number } | null>(null);
+
+  // P1-6 (2026-06-04) — regenerate flow for existing MCPs.
+  // idle:    banner only, no draft panel
+  // review:  LLM returned a draft (or generation is in flight); user edits + confirms
+  const [regenerateStage, setRegenerateStage] = useState<"idle" | "review">("idle");
+  const [committingRegen, setCommittingRegen] = useState(false);
 
   // Test params: auto-populated from schemaFields
   const [testParams, setTestParams] = useState<Record<string, string>>({});
@@ -388,12 +574,13 @@ export default function SystemMcpAdminPage() {
 
   // ── Select row ───────────────────────────────────────────────────────────
 
-  function selectMcp(mcp: SystemMcp) {
+  async function selectMcp(mcp: SystemMcp) {
     setSelected(mcp);
     setIsNew(false);
     setTestResult(null);
     setLintIssues([]);
     setGenMeta(null);
+    setRegenerateStage("idle");
     const cfg = (mcp.api_config ?? {}) as Record<string, string>;
     const fields = parseSchemaFields(mcp.input_schema);
     setForm({
@@ -407,6 +594,15 @@ export default function SystemMcpAdminPage() {
       blockDraft:     null,  // edit-mode regeneration starts from blank draft
       skillDraft:     null,
     });
+    // P1-5 — list endpoint omits derivative_status (cost); hit detail GET so
+    // the banner knows is_stale / last_regenerated_at.
+    try {
+      const res = await apiFetch("GET", `mcp-definitions/${mcp.id}`);
+      const detail = (res.data ?? res) as SystemMcp | undefined;
+      if (detail) setSelected(s => (s && s.id === mcp.id ? { ...s, ...detail } : s));
+    } catch {
+      /* non-fatal — banner just falls back to neutral state */
+    }
   }
 
   function openNew() {
@@ -527,6 +723,103 @@ export default function SystemMcpAdminPage() {
       skillDraft: form.producesSkill ? (resp.skill_draft ?? f.skillDraft) : null,
     }));
     setGenerating(false);
+  }
+
+  // ── P1-6 (2026-06-04): Regenerate for existing MCP ─────────────────────
+
+  async function handleStartRegenerate() {
+    if (!selected) return;
+    setGenerating(true);
+    setLintIssues([]);
+    setRegenerateStage("review");
+    // Reuse the same proxy endpoint — sidecar treats mcp_id != null as a
+    // regenerate. Returned drafts replace whatever was in form.
+    const payload = {
+      mcp_id:        selected.id,
+      want_block:    Boolean(selected.produces_block),
+      want_skill:    Boolean(selected.produces_skill),
+    };
+    try {
+      const res = (await apiFetch("POST", "mcp-definitions/generate-derivatives", payload)) as
+        { data?: GenerateResponse; error?: { message?: string } };
+      const resp = res.data ?? (res as unknown as GenerateResponse);
+      const issues = resp.lint_issues ?? [];
+      setLintIssues(issues);
+      setGenMeta({
+        model:         resp.llm_model,
+        promptVersion: resp.prompt_version,
+        inputTokens:   resp.input_tokens,
+        outputTokens:  resp.output_tokens,
+      });
+      setForm(f => ({
+        ...f,
+        blockDraft: selected.produces_block ? (resp.block_draft ?? null) : null,
+        skillDraft: selected.produces_skill ? (resp.skill_draft ?? null) : null,
+      }));
+    } catch (e) {
+      setLintIssues([{ severity: "error", field: "regenerate", message: String(e) }]);
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  function cancelRegenerate() {
+    setRegenerateStage("idle");
+    setLintIssues([]);
+    setGenMeta(null);
+    setForm(f => ({ ...f, blockDraft: null, skillDraft: null }));
+  }
+
+  async function handleCommitRegenerate() {
+    if (!selected || !form.blockDraft) return;
+    setCommittingRegen(true);
+    const payload: Record<string, unknown> = {
+      block_draft: {
+        block_name:          form.blockDraft.block_name,
+        description:         form.blockDraft.description,
+        param_schema:        JSON.stringify(form.blockDraft.param_schema ?? {}),
+        examples:            JSON.stringify(form.blockDraft.examples ?? []),
+        output_columns_hint: JSON.stringify(form.blockDraft.output_columns_hint ?? []),
+      },
+    };
+    if (selected.produces_skill && form.skillDraft) {
+      payload.skill_draft = {
+        slug:           form.skillDraft.slug,
+        name:           form.skillDraft.name,
+        use_case:       form.skillDraft.use_case,
+        when_to_use:    JSON.stringify(form.skillDraft.when_to_use ?? []),
+        inputs_schema:  JSON.stringify(form.skillDraft.inputs_schema ?? []),
+        outputs_schema: JSON.stringify(form.skillDraft.outputs_schema ?? {}),
+        tags:           JSON.stringify(form.skillDraft.tags ?? []),
+        default_params: JSON.stringify(form.skillDraft.default_params ?? {}),
+      };
+    }
+    if (genMeta?.model) {
+      payload.generation_meta = JSON.stringify({
+        llm_model:           genMeta.model,
+        prompt_version:      genMeta.promptVersion,
+        generated_at:        new Date().toISOString(),
+        last_regenerated_at: new Date().toISOString(),
+      });
+    }
+    try {
+      const res = (await apiFetch("POST",
+        `mcp-definitions/${selected.id}/regenerate-derivatives`, payload)) as
+        { data?: SystemMcp; error?: { message?: string } };
+      const updated = res.data ?? (res as unknown as SystemMcp | undefined);
+      if (updated && typeof updated.id === "number") {
+        setSelected(s => (s ? { ...s, ...updated } : s));
+      }
+      setRegenerateStage("idle");
+      setForm(f => ({ ...f, blockDraft: null, skillDraft: null }));
+      setLintIssues([]);
+      setGenMeta(null);
+      loadList();
+    } catch (e) {
+      setLintIssues([{ severity: "error", field: "commit", message: String(e) }]);
+    } finally {
+      setCommittingRegen(false);
+    }
   }
 
   // ── Save ─────────────────────────────────────────────────────────────────
@@ -846,19 +1139,23 @@ export default function SystemMcpAdminPage() {
               />
             )}
 
-            {/* For edit mode, show a read-only summary of derivative flags + regenerate CTA */}
+            {/* P1-5 / P1-6 (2026-06-04) — derivative banner: stale-aware + regenerate CTA */}
             {!isNew && selected && (selected.produces_block || selected.produces_skill) && (
-              <div style={{
-                marginBottom: 14, padding: "10px 12px",
-                background: "#f0fff4", border: "1px solid #c6f6d5", borderRadius: 6,
-                fontSize: 12, color: "#22543d",
-              }}>
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>Pipeline Builder 衍生</div>
-                此 MCP 已連動產生:
-                {selected.produces_block && " [block]"}
-                {selected.produces_skill && " [skill]"}
-                。修改說明後需手動於 Pipeline Builder 重新生成衍生內容。
-              </div>
+              <DerivativeBanner
+                status={selected.derivative_status ?? null}
+                producesBlock={Boolean(selected.produces_block)}
+                producesSkill={Boolean(selected.produces_skill)}
+                regenerateStage={regenerateStage}
+                generating={generating}
+                committingRegen={committingRegen}
+                onStartRegenerate={handleStartRegenerate}
+                onCancelRegenerate={cancelRegenerate}
+                onCommitRegenerate={handleCommitRegenerate}
+                lintIssues={lintIssues}
+                genMeta={genMeta}
+                form={form}
+                setForm={setForm}
+              />
             )}
 
             {/* ── Section: Test Sample Fetch (existing MCP only) ── */}

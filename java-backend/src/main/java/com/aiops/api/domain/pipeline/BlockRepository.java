@@ -11,4 +11,5 @@ public interface BlockRepository extends JpaRepository<BlockEntity, Long> {
 	Optional<BlockEntity> findByNameAndVersion(String name, String version);
 	List<BlockEntity> findByCategory(String category);
 	List<BlockEntity> findByStatus(String status);
+	Optional<BlockEntity> findFirstBySourceMcpIdAndSource(Long sourceMcpId, String source);
 }
