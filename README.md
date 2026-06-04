@@ -175,7 +175,7 @@ bash start.sh
 | **AI Agent (Copilot)** | 自然語言對話，LangGraph v2 orchestrator，6-stage pipeline |
 | **Diagnostic Rules** | AI 兩階段生成診斷規則（step plan → per-step code），sandbox 試跑 |
 | **Auto-Patrol** | 排程 / 事件驅動巡檢，condition_met → 自動建立 Alarm |
-| **MCP System** | Agent 的工具集 — System MCP（資料源）+ Custom MCP + Automation MCP |
+| **MCP System** | Agent 的工具集 — System MCP（資料源）+ Custom MCP + Automation MCP。V54 (2026-06-03) 起 admin form 可勾選「連動產生 Block / Skill」由 Haiku 4.5 LLM 從 description 衍生 |
 | **Experience Memory** | pgvector 向量搜尋 + 反思式生命週期（Write → Retrieve → Feedback → Decay） |
 | **Analysis → Promote** | Agent ad-hoc 分析可一鍵提升為永久 Diagnostic Rule |
 | **Contract Rendering** | AIOpsReportContract — Vega-Lite 圖表 + evidence chain + suggested actions |

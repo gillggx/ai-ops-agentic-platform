@@ -77,6 +77,29 @@ Pipeline Builder block 的 `description` / `param_schema` / `examples` 欄位是
 
 如果三邊不一致 = description 過時 = LLM 跟 user 都拿到錯的資訊。改 block 行為 → 一定要同時改 description / param_schema / examples。
 
+### 5. V54 衍生 Block / Skill（mcp_auto，2026-06-03 上線）
+
+當 System MCP 在 admin form 勾選「連動產生 Data Block / Skill」時，Java 會原子寫入：
+- `mcp_definitions.produces_block = true` / `produces_skill = true`
+- `pb_blocks` row：`source='mcp_auto'`，`source_mcp_id=<mcp.id>`，
+  `implementation = {"type": "mcp_proxy", "mcp_name": "<name>", "delegate_block": "block_mcp_call"}`
+- `pb_pipelines` row：單 block DAG
+- `pb_published_skills` row：`source='mcp_auto'`，`source_mcp_id=<mcp.id>`
+
+執行端：sidecar 的 `BlockRegistry` 看到 `implementation.type == "mcp_proxy"` 時，
+自動 bind `McpProxyBlockExecutor`（吃 block spec 裡的 `mcp_name`，內部走跟
+`block_mcp_call` 一樣的 dispatch path）。
+
+**Critical rules:**
+- LLM 生成的 block / skill **永遠當草稿** — user 必須在 form 內 review + 編輯後才 commit。
+- MCP description 改了之後 **不會** 自動 regenerate；UI 顯示 stale warning，user 手動觸發。
+- LLM 用 `claude-haiku-4-5-20251001`（hardcoded for cost）；可由 env
+  `MCP_DERIVATIVE_LLM_MODEL` override 但 production 不該。
+- 生成 prompt 必須是 **principles**（不列 case rules）。修改 `mcp_derivative/generator.py:_build_system_prompt` 時 bump `PROMPT_VERSION`，audit metadata 才正確。
+- Frontend lint 與 sidecar lint 兩邊都跑 — sidecar 是 source of truth（前端可繞）。
+- 刪 MCP 時 FK ON DELETE SET NULL — 衍生 block / skill 不會被刪（避免誤刪 user 已調整的內容），
+  UI 顯示 detached 提示。
+
 ---
 
 ## Agent Behaviour Principles

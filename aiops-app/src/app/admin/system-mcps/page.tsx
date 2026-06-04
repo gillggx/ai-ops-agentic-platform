@@ -20,6 +20,46 @@ interface SystemMcp {
   output_schema: Record<string, unknown> | null;
   visibility: string;
   updated_at: string;
+  // V54 — derivative flags carried by mcp_definitions
+  produces_block?: boolean;
+  produces_skill?: boolean;
+  block_generation_meta?: string | null;
+}
+
+// V54 — LLM-generated draft shapes (mirrors Java MCPDerivativeService DTOs)
+interface BlockDraft {
+  block_name?: string;
+  description?: string;
+  param_schema?: Record<string, unknown>;
+  examples?: Array<Record<string, unknown>>;
+  output_columns_hint?: Array<Record<string, unknown>>;
+}
+
+interface SkillDraft {
+  slug?: string;
+  name?: string;
+  use_case?: string;
+  when_to_use?: string[];
+  inputs_schema?: Array<Record<string, unknown>>;
+  outputs_schema?: Record<string, unknown>;
+  tags?: string[];
+  default_params?: Record<string, unknown>;
+}
+
+interface LintIssue {
+  severity: "error" | "warn";
+  field: string;
+  message: string;
+}
+
+interface GenerateResponse {
+  block_draft?: BlockDraft | null;
+  skill_draft?: SkillDraft | null;
+  lint_issues?: LintIssue[];
+  llm_model?: string;
+  prompt_version?: string;
+  input_tokens?: number;
+  output_tokens?: number;
 }
 
 interface EditForm {
@@ -28,6 +68,11 @@ interface EditForm {
   endpoint_url: string;
   method: string;
   schemaFields: SchemaField[];
+  // V54 — derivative toggles + drafts
+  producesBlock: boolean;
+  producesSkill: boolean;
+  blockDraft: BlockDraft | null;
+  skillDraft: SkillDraft | null;
 }
 
 // ── API helper ─────────────────────────────────────────────────────────────────
@@ -97,6 +142,203 @@ const sectionLabel: React.CSSProperties = {
   borderBottom: "1px solid #f0f4f8",
 };
 
+// ── V54 Derivative Section sub-component ─────────────────────────────────────
+
+interface DerivativeSectionProps {
+  form: EditForm;
+  setForm: React.Dispatch<React.SetStateAction<EditForm>>;
+  generating: boolean;
+  hasLintError: boolean;
+  onGenerate: () => void;
+  lintIssues: LintIssue[];
+  genMeta: { model?: string; promptVersion?: string; inputTokens?: number; outputTokens?: number } | null;
+}
+
+function DerivativeSection({
+  form, setForm, generating, hasLintError, onGenerate, lintIssues, genMeta,
+}: DerivativeSectionProps) {
+  const setBlockDraft = (patch: Partial<BlockDraft>) =>
+    setForm(f => ({ ...f, blockDraft: { ...(f.blockDraft ?? {}), ...patch } }));
+  const setSkillDraft = (patch: Partial<SkillDraft>) =>
+    setForm(f => ({ ...f, skillDraft: { ...(f.skillDraft ?? {}), ...patch } }));
+
+  const canGenerate = (form.producesBlock || form.producesSkill) && !hasLintError && form.name.trim();
+
+  return (
+    <>
+      <div style={sectionLabel}>Pipeline Builder 衍生 (V54)</div>
+
+      {/* Toggles */}
+      <div style={{ ...fieldWrap, display: "flex", flexDirection: "column", gap: 6 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer", fontSize: 12, color: "#2d3748" }}>
+          <input
+            type="checkbox"
+            checked={form.producesBlock}
+            onChange={e => setForm(f => ({ ...f, producesBlock: e.target.checked, producesSkill: e.target.checked ? f.producesSkill : false }))}
+            style={{ cursor: "pointer", width: 14, height: 14 }}
+          />
+          連動產生一個 <b>Data Block</b>（Pipeline Builder 可用）
+        </label>
+        <label style={{
+          display: "flex", alignItems: "center", gap: 7, fontSize: 12,
+          color: form.producesBlock ? "#2d3748" : "#cbd5e0",
+          cursor: form.producesBlock ? "pointer" : "not-allowed",
+        }}>
+          <input
+            type="checkbox"
+            disabled={!form.producesBlock}
+            checked={form.producesSkill}
+            onChange={e => setForm(f => ({ ...f, producesSkill: e.target.checked }))}
+            style={{ cursor: form.producesBlock ? "pointer" : "not-allowed", width: 14, height: 14 }}
+          />
+          同時建立一個 <b>Published Skill</b>（含 1-block pipeline，需先勾 block）
+        </label>
+      </div>
+
+      {(form.producesBlock || form.producesSkill) && (
+        <>
+          {/* Generate button */}
+          <button
+            style={{ ...btn("primary"), width: "100%", marginBottom: 10 }}
+            onClick={onGenerate}
+            disabled={!canGenerate || generating}
+            title={hasLintError ? "Description 不足以生成 — 請先補充" : ""}
+          >
+            {generating ? "生成中... (Haiku 4.5)" : "從 Description 生成 Block + Skill 草稿"}
+          </button>
+
+          {/* LLM lint feedback (server-side) */}
+          {lintIssues.length > 0 && (
+            <div style={{ marginBottom: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+              {lintIssues.map((iss, idx) => (
+                <div key={idx} style={{
+                  fontSize: 11, padding: "5px 8px", borderRadius: 4,
+                  background: iss.severity === "error" ? "#fff5f5" : "#fffaf0",
+                  color:      iss.severity === "error" ? "#c53030" : "#9c4221",
+                  border: `1px solid ${iss.severity === "error" ? "#fed7d7" : "#feebc8"}`,
+                }}>
+                  [{iss.severity}] {iss.field}: {iss.message}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Audit meta */}
+          {genMeta?.model && (
+            <div style={{ fontSize: 10, color: "#a0aec0", marginBottom: 10, fontFamily: "ui-monospace, monospace" }}>
+              model={genMeta.model} prompt={genMeta.promptVersion} tokens={genMeta.inputTokens}/{genMeta.outputTokens}
+            </div>
+          )}
+
+          {/* Block Draft editor */}
+          {form.producesBlock && form.blockDraft && (
+            <DraftCard title="Block 草稿（可編輯）">
+              <DraftField label="block_name" value={form.blockDraft.block_name ?? ""} onChange={v => setBlockDraft({ block_name: v })} />
+              <DraftField label="description" multiline value={form.blockDraft.description ?? ""} onChange={v => setBlockDraft({ description: v })} />
+              <DraftJsonField label="param_schema (object)" value={form.blockDraft.param_schema ?? {}} onChange={v => setBlockDraft({ param_schema: v as Record<string, unknown> })} />
+              <DraftJsonField label="examples (list)" value={form.blockDraft.examples ?? []} onChange={v => setBlockDraft({ examples: v as Array<Record<string, unknown>> })} />
+              <DraftJsonField label="output_columns_hint (list)" value={form.blockDraft.output_columns_hint ?? []} onChange={v => setBlockDraft({ output_columns_hint: v as Array<Record<string, unknown>> })} />
+            </DraftCard>
+          )}
+
+          {/* Skill Draft editor */}
+          {form.producesSkill && form.skillDraft && (
+            <DraftCard title="Skill 草稿（可編輯）">
+              <DraftField label="slug" value={form.skillDraft.slug ?? ""} onChange={v => setSkillDraft({ slug: v })} />
+              <DraftField label="name" value={form.skillDraft.name ?? ""} onChange={v => setSkillDraft({ name: v })} />
+              <DraftField label="use_case (≤ 25 words)" multiline value={form.skillDraft.use_case ?? ""} onChange={v => setSkillDraft({ use_case: v })} />
+              <DraftJsonField label="when_to_use (list)" value={form.skillDraft.when_to_use ?? []} onChange={v => setSkillDraft({ when_to_use: (v as string[]) })} />
+              <DraftJsonField label="inputs_schema (list)" value={form.skillDraft.inputs_schema ?? []} onChange={v => setSkillDraft({ inputs_schema: v as Array<Record<string, unknown>> })} />
+              <DraftJsonField label="outputs_schema (object)" value={form.skillDraft.outputs_schema ?? {}} onChange={v => setSkillDraft({ outputs_schema: v as Record<string, unknown> })} />
+              <DraftJsonField label="tags (list)" value={form.skillDraft.tags ?? []} onChange={v => setSkillDraft({ tags: v as string[] })} />
+              <DraftJsonField label="default_params (object)" value={form.skillDraft.default_params ?? {}} onChange={v => setSkillDraft({ default_params: v as Record<string, unknown> })} />
+            </DraftCard>
+          )}
+
+          {/* Reminder if drafts missing */}
+          {((form.producesBlock && !form.blockDraft) || (form.producesSkill && !form.skillDraft)) && (
+            <div style={{
+              fontSize: 11, color: "#718096", padding: "8px 10px",
+              background: "#f7fafc", border: "1px dashed #cbd5e0", borderRadius: 6,
+              marginBottom: 14,
+            }}>
+              點擊上方按鈕讓 LLM 生成草稿，或勾選後留空 — 儲存時會被擋下。
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+function DraftCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{
+      background: "#f7fafc", border: "1px solid #e2e8f0", borderRadius: 6,
+      padding: "10px 12px", marginBottom: 10,
+    }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: "#4a5568", marginBottom: 8 }}>{title}</div>
+      {children}
+    </div>
+  );
+}
+
+function DraftField({ label, value, onChange, multiline }: {
+  label: string; value: string; onChange: (v: string) => void; multiline?: boolean;
+}) {
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ fontSize: 10, color: "#a0aec0", marginBottom: 2, fontFamily: "ui-monospace, monospace" }}>{label}</div>
+      {multiline ? (
+        <textarea
+          style={{ ...inp, minHeight: 56, fontSize: 11, fontFamily: "ui-monospace, monospace", lineHeight: 1.4 }}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+        />
+      ) : (
+        <input style={{ ...inp, fontSize: 11, fontFamily: "ui-monospace, monospace" }} value={value} onChange={e => onChange(e.target.value)} />
+      )}
+    </div>
+  );
+}
+
+function DraftJsonField({ label, value, onChange }: {
+  label: string; value: unknown; onChange: (v: unknown) => void;
+}) {
+  const [text, setText] = useState(JSON.stringify(value, null, 2));
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    setText(JSON.stringify(value, null, 2));
+    setErr(null);
+  }, [value]);
+
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ fontSize: 10, color: "#a0aec0", marginBottom: 2, fontFamily: "ui-monospace, monospace" }}>{label}</div>
+      <textarea
+        style={{
+          ...inp, minHeight: 70, fontSize: 11, fontFamily: "ui-monospace, monospace",
+          lineHeight: 1.4, background: err ? "#fff5f5" : "#fff",
+        }}
+        value={text}
+        onChange={e => {
+          const v = e.target.value;
+          setText(v);
+          try {
+            const parsed = JSON.parse(v);
+            setErr(null);
+            onChange(parsed);
+          } catch (parseErr) {
+            setErr(String(parseErr));
+          }
+        }}
+      />
+      {err && <div style={{ fontSize: 10, color: "#c53030", marginTop: 2 }}>{err}</div>}
+    </div>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function SystemMcpAdminPage() {
@@ -108,7 +350,13 @@ export default function SystemMcpAdminPage() {
 
   const [form, setForm] = useState<EditForm>({
     name: "", description: "", endpoint_url: "", method: "GET", schemaFields: [],
+    producesBlock: false, producesSkill: false, blockDraft: null, skillDraft: null,
   });
+
+  // V54 — derivative generation state
+  const [generating, setGenerating] = useState(false);
+  const [lintIssues, setLintIssues] = useState<LintIssue[]>([]);
+  const [genMeta, setGenMeta] = useState<{ model?: string; promptVersion?: string; inputTokens?: number; outputTokens?: number } | null>(null);
 
   // Test params: auto-populated from schemaFields
   const [testParams, setTestParams] = useState<Record<string, string>>({});
@@ -144,14 +392,20 @@ export default function SystemMcpAdminPage() {
     setSelected(mcp);
     setIsNew(false);
     setTestResult(null);
+    setLintIssues([]);
+    setGenMeta(null);
     const cfg = (mcp.api_config ?? {}) as Record<string, string>;
     const fields = parseSchemaFields(mcp.input_schema);
     setForm({
-      name:         mcp.name,
-      description:  mcp.description ?? "",
-      endpoint_url: cfg.endpoint_url ?? "",
-      method:       cfg.method ?? "GET",
-      schemaFields: fields,
+      name:           mcp.name,
+      description:    mcp.description ?? "",
+      endpoint_url:   cfg.endpoint_url ?? "",
+      method:         cfg.method ?? "GET",
+      schemaFields:   fields,
+      producesBlock:  Boolean(mcp.produces_block),
+      producesSkill:  Boolean(mcp.produces_skill),
+      blockDraft:     null,  // edit-mode regeneration starts from blank draft
+      skillDraft:     null,
     });
   }
 
@@ -159,7 +413,12 @@ export default function SystemMcpAdminPage() {
     setSelected(null);
     setIsNew(true);
     setTestResult(null);
-    setForm({ name: "", description: "", endpoint_url: "", method: "GET", schemaFields: [] });
+    setLintIssues([]);
+    setGenMeta(null);
+    setForm({
+      name: "", description: "", endpoint_url: "", method: "GET", schemaFields: [],
+      producesBlock: false, producesSkill: false, blockDraft: null, skillDraft: null,
+    });
     setTestParams({});
   }
 
@@ -167,6 +426,8 @@ export default function SystemMcpAdminPage() {
     setSelected(null);
     setIsNew(false);
     setTestResult(null);
+    setLintIssues([]);
+    setGenMeta(null);
   }
 
   // ── Schema field helpers ─────────────────────────────────────────────────
@@ -189,20 +450,140 @@ export default function SystemMcpAdminPage() {
     }));
   }
 
+  // ── V54: Description lint (client-side mirror of sidecar's lint) ─────────
+
+  const clientLint = useCallback((desc: string): LintIssue[] => {
+    const issues: LintIssue[] = [];
+    const text = (desc ?? "").trim();
+    if (!text) {
+      issues.push({ severity: "error", field: "description", message: "Description is empty." });
+      return issues;
+    }
+    if (text.length < 200) {
+      issues.push({ severity: "error", field: "description",
+        message: `Description too short (${text.length} chars, need ≥ 200). LLM cannot generate usable drafts.` });
+    } else if (text.length < 400) {
+      issues.push({ severity: "warn", field: "description",
+        message: `Description is short (${text.length} chars). LLM quality improves past 400.` });
+    }
+    const lower = text.toLowerCase();
+    const hasReturns = /returns|return|回傳|回應|response|output/.test(lower);
+    const hasUseWhen = /use when|use case|when to|when |用於|使用場景|情境/.test(lower);
+    if (!hasReturns) {
+      issues.push({ severity: "warn", field: "description",
+        message: "Description doesn't appear to document what the MCP returns." });
+    }
+    if (!hasUseWhen) {
+      issues.push({ severity: "warn", field: "description",
+        message: "Description doesn't say WHEN to use this MCP." });
+    }
+    return issues;
+  }, []);
+
+  const inlineLint = clientLint(form.description);
+  const hasLintError = inlineLint.some(i => i.severity === "error");
+  const showDerivativeUI = form.producesBlock || form.producesSkill;
+
+  // ── V54: Generate block + skill drafts via Java→sidecar ─────────────────
+
+  async function handleGenerate() {
+    if (hasLintError) {
+      setLintIssues(inlineLint);
+      return;
+    }
+    setGenerating(true);
+    setLintIssues([]);
+    const payload = {
+      mcp_id:       selected?.id ?? null,
+      name:         form.name,
+      description:  form.description,
+      input_schema: schemaFieldsToJson(form.schemaFields),
+      output_schema: null,
+      api_config:   { endpoint_url: form.endpoint_url, method: form.method },
+      want_block:   form.producesBlock,
+      want_skill:   form.producesSkill,
+    };
+    const res = (await apiFetch("POST", "mcp-definitions/generate-derivatives", payload)) as
+      { data?: GenerateResponse; error?: { message?: string } };
+
+    const resp = res.data ?? (res as unknown as GenerateResponse);
+    const issues = resp.lint_issues ?? [];
+    setLintIssues(issues);
+    setGenMeta({
+      model:         resp.llm_model,
+      promptVersion: resp.prompt_version,
+      inputTokens:   resp.input_tokens,
+      outputTokens:  resp.output_tokens,
+    });
+
+    const blockingError = issues.some(i => i.severity === "error");
+    if (blockingError) {
+      setGenerating(false);
+      return;
+    }
+    setForm(f => ({
+      ...f,
+      blockDraft: form.producesBlock ? (resp.block_draft ?? f.blockDraft) : null,
+      skillDraft: form.producesSkill ? (resp.skill_draft ?? f.skillDraft) : null,
+    }));
+    setGenerating(false);
+  }
+
   // ── Save ─────────────────────────────────────────────────────────────────
 
   async function handleSave() {
     setSaving(true);
-    const payload = {
+    const baseInput = {
       name:         form.name,
       description:  form.description,
       api_config:   { endpoint_url: form.endpoint_url, method: form.method },
       input_schema: schemaFieldsToJson(form.schemaFields),
     };
     if (isNew) {
-      await apiFetch("POST", "mcp-definitions", { ...payload, mcp_type: "system" });
+      // V54: when produces_block / produces_skill is true, include the
+      // reviewed drafts so Java commits MCP + block + (pipeline + skill)
+      // in one transaction. Drafts go in as snake_case JSON-stringified
+      // sub-fields per the Java DTO contract.
+      const payload: Record<string, unknown> = {
+        ...baseInput,
+        mcp_type:        "system",
+        produces_block:  form.producesBlock,
+        produces_skill:  form.producesSkill,
+      };
+      if (form.producesBlock && form.blockDraft) {
+        payload.block_draft = {
+          block_name:          form.blockDraft.block_name,
+          description:         form.blockDraft.description,
+          param_schema:        JSON.stringify(form.blockDraft.param_schema ?? {}),
+          examples:            JSON.stringify(form.blockDraft.examples ?? []),
+          output_columns_hint: JSON.stringify(form.blockDraft.output_columns_hint ?? []),
+        };
+      }
+      if (form.producesSkill && form.skillDraft) {
+        payload.skill_draft = {
+          slug:           form.skillDraft.slug,
+          name:           form.skillDraft.name,
+          use_case:       form.skillDraft.use_case,
+          when_to_use:    JSON.stringify(form.skillDraft.when_to_use ?? []),
+          inputs_schema:  JSON.stringify(form.skillDraft.inputs_schema ?? []),
+          outputs_schema: JSON.stringify(form.skillDraft.outputs_schema ?? {}),
+          tags:           JSON.stringify(form.skillDraft.tags ?? []),
+          default_params: JSON.stringify(form.skillDraft.default_params ?? {}),
+        };
+      }
+      if (genMeta?.model) {
+        payload.generation_meta = JSON.stringify({
+          llm_model:      genMeta.model,
+          prompt_version: genMeta.promptVersion,
+          generated_at:   new Date().toISOString(),
+        });
+      }
+      await apiFetch("POST", "mcp-definitions", payload);
     } else if (selected) {
-      await apiFetch("PATCH", `mcp-definitions/${selected.id}`, payload);
+      // Edit mode: PATCH the base fields only. Derivative regeneration
+      // for existing MCPs is a separate flow (V54 spec §5 decision 2 —
+      // manual regenerate only, no auto-sync).
+      await apiFetch("PATCH", `mcp-definitions/${selected.id}`, baseInput);
     }
     setSaving(false);
     closePanel();
@@ -327,8 +708,33 @@ export default function SystemMcpAdminPage() {
             </div>
 
             <div style={fieldWrap}>
-              <label style={label}>說明</label>
-              <input style={inp} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="簡短說明此資料源的用途" />
+              <label style={label}>
+                說明
+                <span style={{ marginLeft: 8, color: inlineLint.some(i => i.severity === "error") ? "#e53e3e" : "#a0aec0", fontWeight: 500 }}>
+                  ({form.description.trim().length} chars)
+                </span>
+              </label>
+              <textarea
+                style={{ ...inp, minHeight: 110, fontFamily: "ui-monospace, monospace", lineHeight: 1.5, resize: "vertical" }}
+                value={form.description}
+                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                placeholder={"完整描述此 MCP 的用途、回傳欄位與使用情境（建議 400 字以上）。\n用詞越具體，LLM 生成的 block / skill 草稿越準。"}
+              />
+              {/* V54: inline lint feedback — only show when derivative UI is on or there's an error */}
+              {(showDerivativeUI || inlineLint.some(i => i.severity === "error")) && inlineLint.length > 0 && (
+                <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+                  {inlineLint.map((iss, idx) => (
+                    <div key={idx} style={{
+                      fontSize: 11, padding: "5px 8px", borderRadius: 4,
+                      background: iss.severity === "error" ? "#fff5f5" : "#fffaf0",
+                      color:      iss.severity === "error" ? "#c53030" : "#9c4221",
+                      border: `1px solid ${iss.severity === "error" ? "#fed7d7" : "#feebc8"}`,
+                    }}>
+                      [{iss.severity}] {iss.message}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "80px 1fr", gap: 10, marginBottom: 14 }}>
@@ -427,6 +833,34 @@ export default function SystemMcpAdminPage() {
               </div>
             )}
 
+            {/* ── V54 Section: Pipeline Builder 衍生 ── */}
+            {isNew && (
+              <DerivativeSection
+                form={form}
+                setForm={setForm}
+                generating={generating}
+                hasLintError={hasLintError}
+                onGenerate={handleGenerate}
+                lintIssues={lintIssues}
+                genMeta={genMeta}
+              />
+            )}
+
+            {/* For edit mode, show a read-only summary of derivative flags + regenerate CTA */}
+            {!isNew && selected && (selected.produces_block || selected.produces_skill) && (
+              <div style={{
+                marginBottom: 14, padding: "10px 12px",
+                background: "#f0fff4", border: "1px solid #c6f6d5", borderRadius: 6,
+                fontSize: 12, color: "#22543d",
+              }}>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>Pipeline Builder 衍生</div>
+                此 MCP 已連動產生:
+                {selected.produces_block && " [block]"}
+                {selected.produces_skill && " [skill]"}
+                。修改說明後需手動於 Pipeline Builder 重新生成衍生內容。
+              </div>
+            )}
+
             {/* ── Section: Test Sample Fetch (existing MCP only) ── */}
             {!isNew && (
               <>
@@ -487,7 +921,25 @@ export default function SystemMcpAdminPage() {
 
             {/* ── Action buttons ── */}
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", borderTop: "1px solid #f0f4f8", paddingTop: 14 }}>
-              <button style={btn("primary")} onClick={handleSave} disabled={saving || !form.name || !form.endpoint_url}>
+              <button
+                style={btn("primary")}
+                onClick={handleSave}
+                disabled={
+                  saving
+                  || !form.name
+                  || !form.endpoint_url
+                  // V54: if a derivative is requested, the draft must exist
+                  || (isNew && form.producesBlock && !form.blockDraft)
+                  || (isNew && form.producesSkill && !form.skillDraft)
+                }
+                title={
+                  isNew && form.producesBlock && !form.blockDraft
+                    ? "請先生成 Block 草稿"
+                    : isNew && form.producesSkill && !form.skillDraft
+                    ? "請先生成 Skill 草稿"
+                    : ""
+                }
+              >
                 {saving ? "儲存中..." : isNew ? "建立" : "儲存"}
               </button>
               {!isNew && (
