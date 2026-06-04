@@ -12,6 +12,7 @@ from app.database import connect_and_init, disconnect
 from app.mes.simulator import run as run_mes, stop as stop_mes
 from app.api.routes import router
 from app.api.v2.routes import router as router_v2
+from app.api.masks import router as router_masks
 from app.ws.manager import manager as ws_manager
 from logging_config import configure_logging, trace_id_ctx
 
@@ -69,6 +70,7 @@ async def trace_id_middleware(request: Request, call_next):
 
 app.include_router(router)
 app.include_router(router_v2)
+app.include_router(router_masks)
 
 
 @app.websocket("/ws")
