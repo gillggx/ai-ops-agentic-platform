@@ -22,7 +22,7 @@ from fastapi.responses import JSONResponse
 from .background import event_poller, nats_subscriber, embedding_backfill
 from .config import CONFIG
 from .logging_config import configure_logging, trace_id_ctx
-from .routers import agent, briefing, health, pipeline, sandbox
+from .routers import agent, briefing, health, mcp_derivative, pipeline, sandbox
 
 configure_logging("python_ai_sidecar")
 log = logging.getLogger("python_ai_sidecar")
@@ -116,3 +116,4 @@ app.include_router(agent.router)
 app.include_router(pipeline.router)
 app.include_router(sandbox.router)
 app.include_router(briefing.router)
+app.include_router(mcp_derivative.router)

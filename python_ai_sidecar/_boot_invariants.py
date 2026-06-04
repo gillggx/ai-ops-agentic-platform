@@ -56,9 +56,21 @@ async def check_block_consistency(java_client: Any) -> None:
     seed_names = {b["name"] for b in _seed_blocks() if b.get("name")}
 
     db_names: set[str] = set()
+    mcp_auto_names: set[str] = set()
     try:
         rows = await java_client.list_blocks()
-        db_names = {r.get("name") for r in (rows or []) if r.get("name")}
+        for r in rows or []:
+            n = r.get("name")
+            if not n:
+                continue
+            # V54: blocks auto-generated from a System MCP carry source='mcp_auto'
+            # and are wired via implementation.type='mcp_proxy' rather than
+            # BUILTIN_EXECUTORS — exclude from the drift check so they don't
+            # trigger the informational "missing executor" warning.
+            if r.get("source") == "mcp_auto":
+                mcp_auto_names.add(n)
+                continue
+            db_names.add(n)
     except Exception as exc:  # noqa: BLE001
         logger.warning("block consistency check: java list_blocks failed (%s) — DB diff skipped", exc)
 
@@ -113,8 +125,8 @@ async def check_block_consistency(java_client: Any) -> None:
              or native_not_builtin or seed_not_builtin)
     if not drift:
         logger.info(
-            "block consistency OK: %d builtin, %d native, %d in seed, %d in DB",
-            len(builtin), len(native), len(seed_names), len(db_names),
+            "block consistency OK: %d builtin, %d native, %d in seed, %d in DB (+%d mcp_auto)",
+            len(builtin), len(native), len(seed_names), len(db_names), len(mcp_auto_names),
         )
 
 

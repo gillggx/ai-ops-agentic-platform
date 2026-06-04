@@ -63,6 +63,25 @@ class BlockRegistry:
 
             catalog[key] = spec
 
+            # V54: blocks auto-generated from a System MCP have
+            # implementation.type == "mcp_proxy" and no BUILTIN_EXECUTORS
+            # entry under their dynamic name. Bind McpProxyBlockExecutor
+            # with the embedded mcp_name so runtime dispatches correctly.
+            impl = spec.get("implementation") or {}
+            if isinstance(impl, dict) and impl.get("type") == "mcp_proxy":
+                from python_ai_sidecar.pipeline_builder.blocks.mcp_proxy import (
+                    McpProxyBlockExecutor,
+                )
+                mcp_name_ref = impl.get("mcp_name")
+                if not mcp_name_ref:
+                    logger.warning(
+                        "Block %s@%s has implementation.type=mcp_proxy but no mcp_name — skipping",
+                        name, version,
+                    )
+                    continue
+                executors[key] = McpProxyBlockExecutor(mcp_name=mcp_name_ref)
+                continue
+
             exec_cls = BUILTIN_EXECUTORS.get(name)
             if exec_cls is None:
                 logger.warning(
