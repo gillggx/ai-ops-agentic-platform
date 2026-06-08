@@ -73,7 +73,6 @@ const ADMIN_ITEMS = [
   { href: "/system/data-sources",     label: "Data Sources",      icon: "🗄️" },
   { href: "/system/event-registry",   label: "Event Registry",    icon: "📋" },
   { href: "/system/monitor",          label: "System Monitor",    icon: "🖥️" },
-  { href: "/admin/simulator-health",  label: "Simulator Health",  icon: "💓" },
   { href: "/admin/users",             label: "Users",             icon: "👥" },
 ];
 
