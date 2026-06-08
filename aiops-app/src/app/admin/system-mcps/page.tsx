@@ -84,11 +84,20 @@ interface EditForm {
   endpoint_url: string;
   method: string;
   schemaFields: SchemaField[];
+  // POC skill-library — custom HTTP headers for auth (Bearer / API key).
+  // Each row is one header. `value` supports ${ENV_VAR} placeholders that
+  // the sidecar resolves at runtime — secrets live in sidecar env, not DB.
+  headers: HeaderField[];
   // V54 — derivative toggles + drafts
   producesBlock: boolean;
   producesSkill: boolean;
   blockDraft: BlockDraft | null;
   skillDraft: SkillDraft | null;
+}
+
+interface HeaderField {
+  name: string;
+  value: string;
 }
 
 // ── API helper ─────────────────────────────────────────────────────────────────
@@ -123,6 +132,24 @@ function parseSchemaFields(input_schema: SystemMcp["input_schema"]): SchemaField
 
 function schemaFieldsToJson(fields: SchemaField[]): Record<string, unknown> {
   return { fields: fields.map(f => ({ ...f, required: f.required })) };
+}
+
+// POC skill-library — pack endpoint + method + auth headers into api_config.
+// `headers` is sent only when at least one row has a name; empty rows are
+// dropped so the DB stays clean.
+function buildApiConfig(form: { endpoint_url: string; method: string; headers: HeaderField[] }): Record<string, unknown> {
+  const cfg: Record<string, unknown> = {
+    endpoint_url: form.endpoint_url,
+    method:       form.method,
+  };
+  const hdr: Record<string, string> = {};
+  for (const h of form.headers) {
+    const k = h.name.trim();
+    if (!k) continue;
+    hdr[k] = h.value;  // value may carry ${ENV_VAR} placeholders
+  }
+  if (Object.keys(hdr).length > 0) cfg.headers = hdr;
+  return cfg;
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
@@ -529,7 +556,7 @@ export default function SystemMcpAdminPage() {
   const [saving, setSaving] = useState(false);
 
   const [form, setForm] = useState<EditForm>({
-    name: "", description: "", endpoint_url: "", method: "GET", schemaFields: [],
+    name: "", description: "", endpoint_url: "", method: "GET", schemaFields: [], headers: [],
     producesBlock: false, producesSkill: false, blockDraft: null, skillDraft: null,
   });
 
@@ -581,14 +608,19 @@ export default function SystemMcpAdminPage() {
     setLintIssues([]);
     setGenMeta(null);
     setRegenerateStage("idle");
-    const cfg = (mcp.api_config ?? {}) as Record<string, string>;
+    const cfg = (mcp.api_config ?? {}) as Record<string, unknown>;
     const fields = parseSchemaFields(mcp.input_schema);
+    const hdrObj = (cfg.headers ?? {}) as Record<string, string>;
+    const headers: HeaderField[] = Object.entries(hdrObj).map(([k, v]) => ({
+      name: k, value: String(v),
+    }));
     setForm({
       name:           mcp.name,
       description:    mcp.description ?? "",
-      endpoint_url:   cfg.endpoint_url ?? "",
-      method:         cfg.method ?? "GET",
+      endpoint_url:   String(cfg.endpoint_url ?? ""),
+      method:         String(cfg.method ?? "GET"),
       schemaFields:   fields,
+      headers,
       producesBlock:  Boolean(mcp.produces_block),
       producesSkill:  Boolean(mcp.produces_skill),
       blockDraft:     null,  // edit-mode regeneration starts from blank draft
@@ -612,7 +644,7 @@ export default function SystemMcpAdminPage() {
     setLintIssues([]);
     setGenMeta(null);
     setForm({
-      name: "", description: "", endpoint_url: "", method: "GET", schemaFields: [],
+      name: "", description: "", endpoint_url: "", method: "GET", schemaFields: [], headers: [],
       producesBlock: false, producesSkill: false, blockDraft: null, skillDraft: null,
     });
     setTestParams({});
@@ -695,7 +727,7 @@ export default function SystemMcpAdminPage() {
       description:  form.description,
       input_schema: schemaFieldsToJson(form.schemaFields),
       output_schema: null,
-      api_config:   { endpoint_url: form.endpoint_url, method: form.method },
+      api_config:   buildApiConfig(form),
       want_block:   form.producesBlock,
       want_skill:   form.producesSkill,
     };
@@ -829,7 +861,7 @@ export default function SystemMcpAdminPage() {
     const baseInput = {
       name:         form.name,
       description:  form.description,
-      api_config:   { endpoint_url: form.endpoint_url, method: form.method },
+      api_config:   buildApiConfig(form),
       input_schema: schemaFieldsToJson(form.schemaFields),
     };
     if (isNew) {
@@ -1043,6 +1075,70 @@ export default function SystemMcpAdminPage() {
                 <input style={inp} value={form.endpoint_url} onChange={e => setForm(f => ({ ...f, endpoint_url: e.target.value }))} placeholder="https://api.example.com/v1/..." />
               </div>
             </div>
+
+            {/* ── Section: Auth headers (POC) ───────────────────────────
+                 Header values support ${ENV_VAR} placeholders. The sidecar
+                 substitutes them at request time from python_ai_sidecar/.env
+                 so secrets never sit in the DB. */}
+            <div style={{ ...sectionLabel, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span>HTTP Headers (optional)</span>
+              <button style={btn("dim")} onClick={() => setForm(f => ({
+                ...f, headers: [...f.headers, { name: "", value: "" }],
+              }))}>+ 新增 header</button>
+            </div>
+
+            {form.headers.length === 0 ? (
+              <div style={{
+                background: "#f7f8fc", border: "1px dashed #cbd5e0",
+                borderRadius: 6, padding: "10px 12px",
+                color: "#a0aec0", fontSize: 11, marginBottom: 14,
+                lineHeight: 1.5,
+              }}>
+                若 endpoint 需要 auth（Bearer / API key），點「+ 新增 header」。
+                Value 可寫成 <code style={{ background: "#edf2f7", padding: "1px 4px", borderRadius: 3 }}>Bearer ${"{EXTERNAL_API_TOKEN}"}</code>
+                — sidecar 會在發送時把 <code>${"{NAME}"}</code> 替換成 .env 中的環境變數。
+              </div>
+            ) : (
+              <div style={{ marginBottom: 14 }}>
+                {form.headers.map((h, idx) => (
+                  <div key={idx} style={{
+                    display: "grid", gridTemplateColumns: "180px 1fr 28px",
+                    gap: 6, marginBottom: 6, alignItems: "center",
+                  }}>
+                    <input
+                      style={{ ...inp, padding: "5px 8px", fontSize: 12, fontFamily: "ui-monospace, monospace" }}
+                      placeholder="Authorization"
+                      value={h.name}
+                      onChange={e => setForm(f => {
+                        const headers = [...f.headers];
+                        headers[idx] = { ...headers[idx], name: e.target.value };
+                        return { ...f, headers };
+                      })}
+                    />
+                    <input
+                      style={{ ...inp, padding: "5px 8px", fontSize: 12, fontFamily: "ui-monospace, monospace" }}
+                      placeholder="Bearer ${EXTERNAL_API_TOKEN}"
+                      value={h.value}
+                      onChange={e => setForm(f => {
+                        const headers = [...f.headers];
+                        headers[idx] = { ...headers[idx], value: e.target.value };
+                        return { ...f, headers };
+                      })}
+                    />
+                    <button
+                      style={{ ...btn("ghost"), padding: "4px 6px", fontSize: 11 }}
+                      onClick={() => setForm(f => ({
+                        ...f, headers: f.headers.filter((_, i) => i !== idx),
+                      }))}
+                      title="移除"
+                    >×</button>
+                  </div>
+                ))}
+                <div style={{ fontSize: 10, color: "#a0aec0", marginTop: 4 }}>
+                  ${"{ENV_VAR}"} 會在 sidecar 端被替換成環境變數值。找不到變數 → 預先擋下，不會送出 request。
+                </div>
+              </div>
+            )}
 
             {/* ── Section: Input Schema ── */}
             <div style={{ ...sectionLabel, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
