@@ -1223,7 +1223,7 @@ export default function SystemMcpAdminPage() {
                     </select>
                   </Field>
                   <Field label="Endpoint URL" required style={{ flex: 1, minWidth: 0, marginBottom: 0 }}>
-                    <input style={tinp} value={form.endpoint_url} onChange={e => setForm(f => ({ ...f, endpoint_url: e.target.value }))} placeholder="http://localhost:8012/api/v1/..." />
+                    <input style={tinp} value={form.endpoint_url} onChange={e => setForm(f => ({ ...f, endpoint_url: e.target.value }))} placeholder="https://api.example.com/api/v1/..." />
                   </Field>
                 </div>
               </FormBlock>

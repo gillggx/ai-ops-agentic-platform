@@ -77,8 +77,6 @@ public class SystemMonitorAliasController {
 	private String javaSchedulerHost;
 	@Value("${aiops.monitor.host.aiops-python-sidecar:127.0.0.1}")
 	private String pythonSidecarHost;
-	@Value("${aiops.monitor.host.ontology-simulator:127.0.0.1}")
-	private String ontologySimulatorHost;
 
 	/** Cached WebClient — health pings reuse it across requests instead of
 	 *  re-instantiating per call (per-call clients leak connection pools). */
@@ -132,7 +130,6 @@ public class SystemMonitorAliasController {
 		// liveness endpoint by design — auth boundary). Send the same service
 		// token PythonSidecarConfig injects for every other Java→sidecar call.
 		services.put("aiops-python-sidecar",  probe(pythonSidecarHost,    8050, "/internal/health", sidecarServiceToken));
-		services.put("ontology-simulator",    probe(ontologySimulatorHost, 8012, "/api/v1/tools", null));
 
 		// ── Background tasks ─────────────────────────────────────────────
 		// event_poller was Python-side and is gone (Java scheduler owns

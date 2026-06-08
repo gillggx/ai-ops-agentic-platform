@@ -2,8 +2,8 @@
 # deploy/java-update.sh — build + restart the Java API + Python sidecar.
 #
 # Runs against :8002 (Java API) and :8050 (Python sidecar). The frontend
-# (aiops-app on :8000) and ontology-simulator (:8012) live in update.sh —
-# run them separately. Java uses Flyway migrations checked into
+# (aiops-app on :8000) lives in update.sh — run it separately. Java uses
+# Flyway migrations checked into
 # java-backend/src/main/resources/db/migration/ (note: prod sets
 # flyway.enabled=false, so V*.sql additions need a manual psql -f after
 # `git pull`).
@@ -151,4 +151,4 @@ echo "✅  Java API + Scheduler + Sidecar deploy complete."
 echo "    - Java API       : $(systemctl is-active aiops-java-api) on port ${AIOPS_JAVA_PORT:-8002}"
 echo "    - Java Scheduler : $(systemctl is-active aiops-java-scheduler) on port ${AIOPS_SCHEDULER_PORT:-8003}"
 echo "    - Sidecar        : $(systemctl is-active aiops-python-sidecar) on port 8050"
-echo "    - Frontend (:8000) + ontology (:8012) untouched — run deploy/update.sh for those"
+echo "    - Frontend (:8000) untouched — run deploy/update.sh for that"

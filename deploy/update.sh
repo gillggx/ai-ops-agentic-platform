@@ -1,18 +1,12 @@
 #!/usr/bin/env bash
-# deploy/update.sh — 滾動更新（三服務 + health check）
-# 用法：cd /opt/aiops && bash deploy/update.sh [--rebuild-simulator-frontend]
+# deploy/update.sh — POC rolling update for skill library (aiops-app only).
+# 用法：cd /opt/aiops && bash deploy/update.sh
+#
+# POC scope: simulator removed. Java + sidecar redeploy lives in
+# deploy/java-update.sh.
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-REBUILD_SIM=false
-[[ "${1:-}" == "--rebuild-simulator-frontend" ]] && REBUILD_SIM=true
-
-# Auto-enable simulator frontend rebuild if out/ is missing
-SIM_FRONTEND="$APP_DIR/ontology_simulator/frontend"
-if [[ ! -d "$SIM_FRONTEND/out" ]]; then
-  echo "⚡  Simulator out/ not found — auto-enabling rebuild"
-  REBUILD_SIM=true
-fi
 
 # ── Helper: wait until an HTTP endpoint returns 2xx (timeout 60s) ─────────
 wait_for_http() {
@@ -34,14 +28,6 @@ wait_for_http() {
 
 echo "🔄  拉取最新程式碼..."
 git -C "$APP_DIR" pull --ff-only
-
-# ── Python dependencies ───────────────────────────────────────────────────
-# update.sh only re-syncs ontology venv. Java + sidecar live in
-# java-update.sh because they require gradle build / sidecar venv refresh
-# that this lighter script doesn't carry.
-echo "🐍  更新 ontology pip 依賴..."
-/opt/aiops/venv_ontology/bin/pip install -q \
-  -r "$APP_DIR/ontology_simulator/requirements.txt"
 
 # ── aiops-app build (Next.js standalone) ──────────────────────────────────
 REBUILD_APP=false
@@ -82,29 +68,18 @@ else
   echo "⏭  aiops-app unchanged — skip build"
 fi
 
-# ── Simulator frontend (optional) ─────────────────────────────────────────
-if $REBUILD_SIM; then
-  echo "🔨  Building Simulator frontend..."
-  cd "$SIM_FRONTEND"
-  npm ci --silent && npm run build
-  echo "    ✅  Simulator frontend build 完成 → out/ $(du -sh out | cut -f1)"
-fi
-
 # ── Restart services ──────────────────────────────────────────────────────
 echo "🔁  重啟服務..."
-# update.sh covers aiops-app + ontology-simulator. Java + sidecar redeploy
-# lives in deploy/java-update.sh — run that separately when those change.
-# Kill stale processes on target ports.
+# update.sh only covers aiops-app. Java + sidecar redeploy lives in
+# deploy/java-update.sh — run that separately when those change.
 sudo -n fuser -k 8000/tcp 2>/dev/null || true
-sudo -n fuser -k 8012/tcp 2>/dev/null || true
 sleep 1
 
-if sudo -n systemctl restart aiops-app ontology-simulator 2>/dev/null; then
+if sudo -n systemctl restart aiops-app 2>/dev/null; then
   echo "    systemctl restart OK"
 else
   echo "    ⚠️  sudo systemctl unavailable — pkill fallback"
   pkill -9 -f "node.*standalone/server.js" 2>/dev/null || true
-  pkill -9 -f "venv_ontology/bin/uvicorn"  2>/dev/null || true
   echo "    Waiting 20s for systemd to respawn..."
   sleep 20
 fi
@@ -131,12 +106,10 @@ echo ""
 echo "🔍  Health checks..."
 
 FRONTEND_OK=false
-ONTOLOGY_OK=false
 JAVA_OK=false
 SIDECAR_OK=false
 
 wait_for_http "http://127.0.0.1:8000" "AIOps app (8000)" && FRONTEND_OK=true
-wait_for_http "http://127.0.0.1:8012/api/v1/status" "Ontology simulator (8012)" && ONTOLOGY_OK=true
 wait_for_http "http://127.0.0.1:8002/api/v1/health" "Java API (8002)" && JAVA_OK=true
 # Sidecar replies 401 without service token — that still means it's UP.
 if curl -sf --max-time 3 http://127.0.0.1:8050/internal/health -o /dev/null 2>/dev/null \
@@ -154,11 +127,9 @@ $JAVA_OK     && echo "  ✅  Java API              (8002)  HEALTHY" \
              || echo "  ❌  Java API              (8002)  FAILED"
 $SIDECAR_OK  && echo "  ✅  Python sidecar        (8050)  HEALTHY" \
              || echo "  ❌  Python sidecar        (8050)  FAILED"
-$ONTOLOGY_OK && echo "  ✅  Ontology simulator    (8012)  HEALTHY" \
-             || echo "  ❌  Ontology simulator    (8012)  FAILED"
 echo "════════════════════════════════════════"
 
-if ! $FRONTEND_OK || ! $JAVA_OK || ! $SIDECAR_OK || ! $ONTOLOGY_OK; then
+if ! $FRONTEND_OK || ! $JAVA_OK || ! $SIDECAR_OK; then
   echo ""
   echo "❌  Deploy FAILED — check: journalctl -u <service-name> -n 50"
   exit 1
