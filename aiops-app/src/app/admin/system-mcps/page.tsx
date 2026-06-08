@@ -1040,7 +1040,7 @@ export default function SystemMcpAdminPage() {
               </div>
               <div>
                 <label style={label}>Endpoint URL *</label>
-                <input style={inp} value={form.endpoint_url} onChange={e => setForm(f => ({ ...f, endpoint_url: e.target.value }))} placeholder="http://localhost:8012/api/v1/..." />
+                <input style={inp} value={form.endpoint_url} onChange={e => setForm(f => ({ ...f, endpoint_url: e.target.value }))} placeholder="https://api.example.com/v1/..." />
               </div>
             </div>
 
