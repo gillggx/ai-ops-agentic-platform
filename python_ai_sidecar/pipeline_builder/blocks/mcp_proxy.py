@@ -94,7 +94,10 @@ class McpProxyBlockExecutor(BlockExecutor):
         api_config = _read_api_config(mcp, mcp_name)
         url = api_config.get("endpoint_url")
         method = (api_config.get("method") or "GET").upper()
-        headers = api_config.get("headers") or {}
+        from python_ai_sidecar.pipeline_builder.blocks._http_helpers import (
+            resolve_headers,
+        )
+        headers = resolve_headers(api_config.get("headers"), mcp_name=mcp_name)
         if not url:
             raise BlockExecutionError(
                 code="INVALID_MCP_CONFIG",
