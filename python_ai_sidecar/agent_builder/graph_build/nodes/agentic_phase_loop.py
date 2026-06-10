@@ -1740,14 +1740,37 @@ def _build_tool_specs() -> list[dict[str, Any]]:
     ]
 
 
+# 2026-06-10 (KIMI K2.5 on OpenRouter fix) — when the model wants to end the
+# current phase but replies in plain text ("Phase p1 complete. ...") instead
+# of calling phase_complete, _extract_tool_call returned None and graph just
+# replayed the same prompt next round. KIMI then guessed and re-added the
+# same node (verified via trace 20260610-142738). Anthropic's tool-use
+# guarantees this never fires; for tool-following-lax providers we
+# synthesize the missing tool call. Conservative regex — must match the
+# observed "phase ... complete/done/finished/goal achieved" intent shape
+# exactly. Generic text like "I think we're done" won't trigger.
+_PHASE_DONE_INTENT_RE = re.compile(
+    r"phase\s*(?:p\d+\s*)?(?:complete|completed|done|finished)\b"
+    r"|phase\s+goal\s+(?:is\s+)?(?:achieved|met|reached|satisfied)\b",
+    re.IGNORECASE,
+)
+
+
 def _extract_tool_call(resp: Any) -> dict[str, Any] | None:
     """Extract first tool_use block from LLM response. Returns None if none.
     Returns {name, args, id} where id is the tool_use_id needed for the
     matching tool_result in the next user message.
+
+    Fallback (2026-06-10): if response has NO tool_use but text clearly
+    signals phase completion intent, synthesize a phase_complete tool_use
+    so the verifier can advance instead of the graph replaying the prompt
+    (which sends KIMI into a duplicate-add_node spiral). Text is captured
+    as the rationale, truncated to 500 chars.
     """
     content = getattr(resp, "content", None) or []
     if not isinstance(content, list):
         return None
+    text_parts: list[str] = []
     for blk in content:
         btype = getattr(blk, "type", None) or (blk.get("type") if isinstance(blk, dict) else None)
         if btype == "tool_use":
@@ -1760,6 +1783,22 @@ def _extract_tool_call(resp: Any) -> dict[str, Any] | None:
                     "args": dict(args) if isinstance(args, dict) else {},
                     "id": tu_id,
                 }
+        elif btype == "text":
+            text = getattr(blk, "text", None) or (blk.get("text") if isinstance(blk, dict) else None)
+            if text:
+                text_parts.append(str(text))
+    if text_parts:
+        full_text = " ".join(text_parts).strip()
+        if _PHASE_DONE_INTENT_RE.search(full_text):
+            logger.info(
+                "_extract_tool_call: synthesized phase_complete from "
+                "tool-less text response (likely KIMI/non-Anthropic provider)"
+            )
+            return {
+                "name": "phase_complete",
+                "args": {"rationale": full_text[:500]},
+                "id": "synth_phase_complete",
+            }
     return None
 
 
