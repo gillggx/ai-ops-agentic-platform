@@ -16,6 +16,7 @@ CLAUDE.md compliance:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -655,19 +656,43 @@ class BuilderToolset:
     # ======================================================================
 
     async def list_blocks(self, category: Optional[str] = None) -> dict[str, Any]:
-        """Return block catalog from DB (filtered by category if given)."""
+        """Return block catalog. Each item gets a one-line summary head.
+
+        2026-05-04: 1-line summary per block instead of full description —
+            saved ~15K tokens per tool result. explain_block() returns the
+            full spec.
+        2026-06-10 (POC skill-library): summary head now prefers the
+            block_docs.markdown frontmatter `description:` field over
+            pb_blocks.description. Admin/block-docs UI becomes the single
+            source of truth for what the LLM sees in the catalog. Blocks
+            without a docs row (or with no usable frontmatter desc) fall
+            back to pb_blocks.description so V54 auto-generated blocks +
+            unmigrated rows keep working.
+        """
         catalog = self.registry.catalog
+        # Filter first so we don't fetch docs for unrelated categories.
+        filtered = [
+            (name, version, spec)
+            for (name, version), spec in catalog.items()
+            if not category or spec.get("category") == category
+        ]
+        # Parallel fetch (cache hits resolve instantly; first cold call
+        # spawns N concurrent HTTP requests to Java instead of serializing
+        # 50+ awaits).
+        names = [name for name, _v, _s in filtered]
+        payloads = await asyncio.gather(
+            *(_get_block_doc_payload(n) for n in names),
+            return_exceptions=False,
+        )
+        payload_by_name = dict(zip(names, payloads))
+
         items = []
-        # 2026-05-04 cost cut: list_blocks now returns 1-line summary per
-        # block instead of the full description / param_schema / examples
-        # blob. Saved ~15K tokens per tool result. Caller must use
-        # explain_block() to fetch the full spec for blocks they want to
-        # add to the canvas.
-        for (name, version), spec in catalog.items():
-            if category and spec.get("category") != category:
-                continue
-            desc = (spec.get("description") or "").strip()
-            head = desc.split("\n", 1)[0].strip() if desc else ""
+        for name, version, spec in filtered:
+            fm_desc, _body, _has_doc = payload_by_name.get(name, (None, None, False))
+            source = fm_desc if (fm_desc and len(fm_desc) >= 50) else None
+            if source is None:
+                source = (spec.get("description") or "").strip()
+            head = source.split("\n", 1)[0].strip() if source else ""
             if len(head) > 100:
                 head = head[:100].rsplit(" ", 1)[0] + "…"
             items.append({
@@ -691,6 +716,13 @@ class BuilderToolset:
         """Return full spec for one block: description, ports, param_schema,
         examples. Companion to the slim list_blocks index — use before
         add_node so the LLM picks correct params on the first try.
+
+        2026-06-10 (POC skill-library): description prefers block_docs.markdown
+            body (frontmatter stripped + `## Examples` trimmed) — same content
+            admin sees in admin/block-docs. Falls back to pb_blocks.description
+            when no docs row exists (e.g. fresh V54 auto-generated blocks).
+            input_schema / output_schema / param_schema / examples still come
+            from the registry spec because they're runtime contracts, not docs.
         """
         spec = self.registry.get_spec(block_name, block_version)
         if spec is None:
@@ -699,12 +731,17 @@ class BuilderToolset:
                 message=f"Block '{block_name}@{block_version}' not in catalog",
                 hint="Browse list_blocks() for available names.",
             )
+        _fm_desc, body, has_doc = await _get_block_doc_payload(block_name)
+        if has_doc and body:
+            description = _trim_doc_to_summary(body)
+        else:
+            description = spec.get("description")
         return {
             "name": block_name,
             "version": block_version,
             "category": spec.get("category"),
             "status": spec.get("status"),
-            "description": spec.get("description"),
+            "description": description,
             "input_schema": spec.get("input_schema") or [],
             "output_schema": spec.get("output_schema") or [],
             "param_schema": spec.get("param_schema") or {},
@@ -1399,10 +1436,51 @@ def _attach_chart_warnings(summary_out: dict[str, Any], spec: dict[str, Any]) ->
 # every inspect_block_doc call.
 # ─────────────────────────────────────────────────────────────────────
 
+import re as _re
 import time as _time
 
 _BLOCK_DOCS_CACHE: dict[str, tuple[float, str]] = {}
 _BLOCK_DOCS_TTL_SEC = 60.0
+
+# 2026-06-10 (POC skill-library) — admin/block-docs becomes the LLM single
+# source of truth for catalog + explain flows. These patterns parse the
+# YAML frontmatter at the top of every block_docs.markdown row. They are
+# intentionally regex (not pyyaml) because the markdown body that follows
+# the frontmatter can contain `---` separators which would confuse a real
+# YAML loader.
+_FRONTMATTER_RE = _re.compile(r"^---\s*\n(.*?)\n---\s*\n", _re.DOTALL)
+_FM_DESC_RE = _re.compile(
+    r"^description:\s*(.+?)(?=\n[a-zA-Z_]+:|\Z)",
+    _re.DOTALL | _re.MULTILINE,
+)
+
+
+def _parse_block_doc_markdown(markdown: str) -> tuple[str | None, str | None]:
+    """Split a block_docs markdown into (frontmatter_description, body).
+
+    Returns:
+        (None, None)         — markdown is empty / falsy
+        (None, markdown)     — no YAML frontmatter, body is the whole input
+        (desc, body)         — frontmatter present; `desc` is None if the
+                               frontmatter has no `description:` field
+
+    The returned `desc` is whitespace-collapsed to a single logical line —
+    YAML allows multi-line `description: ...` (continuation indented), but
+    catalog UI wants one line. Body has the frontmatter stripped + leading
+    blank lines trimmed.
+    """
+    if not markdown:
+        return None, None
+    m = _FRONTMATTER_RE.match(markdown)
+    if not m:
+        return None, markdown
+    fm_body = m.group(1)
+    body = markdown[m.end():].lstrip("\n")
+    desc_m = _FM_DESC_RE.search(fm_body)
+    if not desc_m:
+        return None, body
+    desc = _re.sub(r"\s+", " ", desc_m.group(1)).strip()
+    return (desc or None), body
 
 
 def _trim_doc_to_summary(markdown: str) -> str:
@@ -1424,13 +1502,17 @@ def _trim_doc_to_summary(markdown: str) -> str:
     return markdown[:marker_idx].rstrip() + "\n\n(examples 已省略；改用 inspect_block_doc(block_id, section='full') 取完整 doc)"
 
 
-async def _resolve_block_description(block_id: str, fallback: str) -> str:
-    """Return Markdown description for a block. Prefers DB block_docs;
-    falls back to baked seed.py description when DB has no entry yet."""
+async def _fetch_block_doc_markdown(block_id: str) -> str:
+    """Return cached block_docs.markdown for a block, or empty string.
+
+    Shared backing store for `_resolve_block_description` and
+    `_get_block_doc_payload`. Cache TTL is 60s so admin/block-docs edits
+    surface within a minute; sidecar restart also clears it.
+    """
     now = _time.time()
     cached = _BLOCK_DOCS_CACHE.get(block_id)
     if cached is not None and (now - cached[0]) < _BLOCK_DOCS_TTL_SEC:
-        return cached[1] or fallback
+        return cached[1]
     from python_ai_sidecar.clients.java_client import JavaAPIClient
     from python_ai_sidecar.config import CONFIG
     try:
@@ -1441,8 +1523,35 @@ async def _resolve_block_description(block_id: str, fallback: str) -> str:
         )
         doc = await java.get_block_doc(block_id, "1.0.0")
         markdown = (doc or {}).get("markdown") if isinstance(doc, dict) else ""
-        _BLOCK_DOCS_CACHE[block_id] = (now, markdown or "")
-        return markdown or fallback
-    except Exception:  # noqa: BLE001 — fall back to seed silently
-        _BLOCK_DOCS_CACHE[block_id] = (now, "")
-        return fallback
+        markdown = markdown or ""
+    except Exception:  # noqa: BLE001 — fall back silently
+        markdown = ""
+    _BLOCK_DOCS_CACHE[block_id] = (now, markdown)
+    return markdown
+
+
+async def _resolve_block_description(block_id: str, fallback: str) -> str:
+    """Return Markdown description for a block. Prefers DB block_docs;
+    falls back to baked seed.py description when DB has no entry yet."""
+    markdown = await _fetch_block_doc_markdown(block_id)
+    return markdown or fallback
+
+
+async def _get_block_doc_payload(
+    block_id: str,
+) -> tuple[str | None, str | None, bool]:
+    """Return (frontmatter_description, body, has_doc) for a block.
+
+    POC skill-library (2026-06-10) — block_docs is now the single source of
+    truth for what the LLM sees in `list_blocks` (frontmatter description →
+    catalog head) and `explain_block` (body → block detail). Callers that
+    get `has_doc=False` should fall back to spec.description from pb_blocks
+    (manual / mcp_auto blocks without docs go through that path).
+
+    Cache shared with `_resolve_block_description`, 60s TTL.
+    """
+    markdown = await _fetch_block_doc_markdown(block_id)
+    if not markdown:
+        return None, None, False
+    desc, body = _parse_block_doc_markdown(markdown)
+    return desc, body, True
