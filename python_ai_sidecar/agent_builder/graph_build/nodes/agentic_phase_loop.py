@@ -30,7 +30,10 @@ from python_ai_sidecar.agent_builder.graph_build.state import BuildGraphState
 from python_ai_sidecar.agent_builder.session import AgentBuilderSession
 from python_ai_sidecar.agent_builder.tools import BuilderToolset, ToolError
 from python_ai_sidecar.agent_helpers_native.llm_client import get_llm_client
-from python_ai_sidecar.feature_flags import is_prompt_cache_enabled
+from python_ai_sidecar.feature_flags import (
+    is_auto_verifier_enabled,
+    is_prompt_cache_enabled,
+)
 from python_ai_sidecar.pipeline_builder.pipeline_schema import PipelineJSON
 from python_ai_sidecar.pipeline_builder.seedless_registry import SeedlessBlockRegistry
 
@@ -688,8 +691,9 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     new_msgs = dict(state.get("v30_phase_messages") or {})
     new_msgs[pid] = phase_messages
 
-    # v30.19: compute sub-phase transition
-    next_sub = _next_subphase(cur_subphase, tool_name)
+    # v30.19: compute sub-phase transition (atomic add_node shortcut
+    # routes pick/construct/tune → tune in one round when `upstream` set).
+    next_sub = _next_subphase(cur_subphase, tool_name, tool_args)
     pending_block_update = None
     pending_node_id_update = None
     if tool_name == "commit_pick":
@@ -709,11 +713,26 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     # Verifier runs only when:
     #   (a) agent explicitly emitted run_verifier / phase_complete (legacy)
     #   (b) round budget exhausted — fallback so build doesn't silently spin
+    #   (c) ENABLE_AUTO_VERIFIER (2026-06-12) — phase-terminal block landed
+    #       AND agent looks decisive (no recent inspect_*)
     # Otherwise loop back so agent can keep adding nodes / connecting /
     # tuning. Lets agent build multi-block chains (e.g. filter→step_check
     # for "count OOC then compare ≥2") without verifier rejecting after
     # the first add_node.
-    verify_now = tool_name in {"run_verifier", "phase_complete"}
+    explicit_verify = tool_name in {"run_verifier", "phase_complete"}
+    auto_verify = _should_auto_verify(
+        state, phase, tool_name, action_result,
+        recent_actions_history=recent_actions,
+        transient_pipeline=transient.pipeline_json,
+        registry=registry,
+    )
+    if auto_verify and not explicit_verify:
+        logger.info(
+            "agentic_phase_loop: auto-verifier triggered for phase=%s after %s "
+            "(terminal block matches expected=%s, agent looks decisive)",
+            pid, tool_name, phase.get("expected"),
+        )
+    verify_now = explicit_verify or auto_verify
 
     state_update: dict[str, Any] = {
         "v30_phase_round": round_n + 1,
@@ -1622,7 +1641,55 @@ def _build_observation_md(state: BuildGraphState, phase: dict) -> str:
 
 
 def _build_tool_specs() -> list[dict[str, Any]]:
-    """Anthropic tool-use schema for v30 tools."""
+    """Anthropic tool-use schema for v30 tools.
+
+    ENABLE_ATOMIC_ADD_CONNECT (2026-06-12) adds an optional ``upstream`` field
+    to ``add_node`` so the agent can atomically add + connect in one tool call
+    (saves ~1 LLM round per node). Flag off ⇒ field omitted from schema and
+    description so legacy two-step flow stays the only path.
+    """
+    try:
+        from python_ai_sidecar.feature_flags import is_atomic_add_connect_enabled
+        atomic_on = is_atomic_add_connect_enabled()
+    except ImportError:
+        atomic_on = False
+
+    add_node_props: dict[str, Any] = {
+        "block_name": {"type": "string"},
+        "block_version": {"type": "string", "default": "1.0.0"},
+        "params": {"type": "object"},
+    }
+    add_node_desc = (
+        "Add a node to the pipeline canvas. `block_name` MUST exactly match "
+        "one of the block names from the catalog (list_blocks). "
+        "Control-flow tools (commit_pick, abort_node, abort_phase, "
+        "remove_node, run_verifier, phase_complete) are NOT blocks — call "
+        "them as their own tool_use, NEVER as add_node(block_name='<tool>')."
+    )
+    if atomic_on:
+        add_node_props["upstream"] = {
+            "type": "array",
+            "description": (
+                "Optional. List of upstream connections to atomically create "
+                "with this node. Each item: {src_node: str, src_port?: str "
+                "(default 'data'), dst_port?: str (auto-detected from block's "
+                "first input port if omitted)}."
+            ),
+            "items": {
+                "type": "object",
+                "properties": {
+                    "src_node": {"type": "string"},
+                    "src_port": {"type": "string", "default": "data"},
+                    "dst_port": {"type": "string"},
+                },
+                "required": ["src_node"],
+            },
+        }
+        add_node_desc += (
+            " For non-source blocks (filter, chart, etc.), prefer passing "
+            "`upstream=[{src_node: 'nK'}]` in the same call — saves a round vs "
+            "calling add_node then connect separately."
+        )
     return [
         {
             "name": "inspect_node_output",
@@ -1661,20 +1728,10 @@ def _build_tool_specs() -> list[dict[str, Any]]:
         },
         {
             "name": "add_node",
-            "description": (
-                "Add a node to the pipeline canvas. `block_name` MUST exactly match "
-                "one of the block names from the catalog (list_blocks). "
-                "Control-flow tools (commit_pick, abort_node, abort_phase, "
-                "remove_node, run_verifier, phase_complete) are NOT blocks — call "
-                "them as their own tool_use, NEVER as add_node(block_name='<tool>')."
-            ),
+            "description": add_node_desc,
             "input_schema": {
                 "type": "object",
-                "properties": {
-                    "block_name": {"type": "string"},
-                    "block_version": {"type": "string", "default": "1.0.0"},
-                    "params": {"type": "object"},
-                },
+                "properties": add_node_props,
                 "required": ["block_name"],
             },
         },
@@ -2018,6 +2075,83 @@ def _make_result_digest(tool: str, result: Any) -> str:
 # ─────────────────────────────────────────────────────────────────────
 
 
+def _terminal_block_matches_expected(
+    pipeline: PipelineJSON,
+    expected: str,
+    registry: Any,
+) -> bool:
+    """True iff the canvas has at least one terminal node whose block's
+    `covers_output` includes `expected`.
+
+    Used by ENABLE_AUTO_VERIFIER to decide if the phase looks "done" — a
+    chart phase with a terminal chart block, a raw_data phase with a
+    terminal MCP/find block, etc. Returns False conservatively if any
+    metadata lookup fails.
+    """
+    if not pipeline.nodes or not expected or registry is None:
+        return False
+    try:
+        outgoing = {e.from_.node for e in pipeline.edges}
+        terminals = [n for n in pipeline.nodes if n.id not in outgoing]
+        if not terminals:
+            return False
+        from python_ai_sidecar.agent_builder.graph_build.nodes.phase_verifier import (
+            _resolve_covers,
+        )
+        for n in terminals:
+            spec = registry.get_spec(n.block_id, n.block_version) or {}
+            covers = _resolve_covers(spec, kind="output")
+            if expected in covers:
+                return True
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("_terminal_block_matches_expected failed: %s", exc)
+        return False
+    return False
+
+
+def _should_auto_verify(
+    state: BuildGraphState,
+    phase: dict,
+    tool_name: str,
+    action_result: dict | None,
+    recent_actions_history: list[dict],
+    transient_pipeline: PipelineJSON,
+    registry: Any,
+) -> bool:
+    """ENABLE_AUTO_VERIFIER gate — decide if the round should auto-trigger
+    the verifier without waiting for agent's explicit run_verifier.
+
+    Trigger conditions (all must hold):
+      1. Flag on
+      2. Tool that just ran was a canvas mutation (add_node / connect)
+      3. Mutation succeeded (no error in action_result)
+      4. Phase's expected block kind is satisfied by some terminal block
+         on the canvas (chart phase ⇒ terminal chart block, etc.)
+      5. Agent looks "decisive": no inspect_* tool calls in the most
+         recent 2 actions (still-exploring builds should not auto-verify)
+
+    Returns False conservatively on any error.
+    """
+    if not is_auto_verifier_enabled():
+        return False
+    if tool_name not in {"add_node", "connect"}:
+        return False
+    if action_result and "error" in action_result:
+        return False
+    expected = (phase.get("expected") or "").strip()
+    if not _terminal_block_matches_expected(transient_pipeline, expected, registry):
+        return False
+    # "Decisive" check: the last 2 actions in history (BEFORE this round's
+    # append) should not include inspect_* — that signals the agent was
+    # still gathering info and shouldn't be force-verified.
+    last_2 = recent_actions_history[-2:] if recent_actions_history else []
+    for a in last_2:
+        tool = (a.get("tool") if isinstance(a, dict) else "") or ""
+        if tool.startswith("inspect_"):
+            return False
+    return True
+
+
 def _find_canvas_terminal(
     pipeline: PipelineJSON, exec_trace: dict[str, dict],
     expected: str = "",
@@ -2341,10 +2475,27 @@ _TRANSITIONS: dict[tuple[str, str], str] = {
 }
 
 
-def _next_subphase(current: str | None, tool_name: str) -> str | None:
-    """Pure: compute next sub-phase or None if no transition."""
+def _next_subphase(
+    current: str | None,
+    tool_name: str,
+    tool_args: dict | None = None,
+) -> str | None:
+    """Pure: compute next sub-phase or None if no transition.
+
+    ENABLE_ATOMIC_ADD_CONNECT (2026-06-12): when add_node carries an
+    `upstream` arg (and lands successfully), the connect step is already
+    done in the same tool call, so we skip ``construct`` and land in
+    ``tune`` directly. Saves one LLM round per node.
+    """
     if not current:
         return None
+    if (
+        tool_name == "add_node"
+        and tool_args
+        and tool_args.get("upstream")
+        and current in ("pick", "construct", "tune")
+    ):
+        return "tune"
     return _TRANSITIONS.get((current, tool_name))
 
 

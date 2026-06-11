@@ -754,8 +754,16 @@ class BuilderToolset:
         block_version: str = "1.0.0",
         position: Optional[dict[str, float]] = None,
         params: Optional[dict[str, Any]] = None,
+        upstream: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, Any]:
-        """Add a node to the canvas. Auto-offsets if position collides."""
+        """Add a node to the canvas. Auto-offsets if position collides.
+
+        ``upstream`` (2026-06-12, gated by ENABLE_ATOMIC_ADD_CONNECT in the
+        tool schema): list of ``{src_node, src_port?, dst_port?}`` dicts. If
+        provided, atomically adds the node + creates each connection. Any
+        connect failure rolls back the just-added node so the canvas is never
+        left half-mutated. dst_port defaults to the block's first input port.
+        """
         # v30.21 (2026-05-19) — LLM sometimes emits `params` as a JSON-encoded
         # STRING (`'{"severity": "HIGH"}'`) instead of a dict, despite the tool
         # schema declaring object type. The downstream `.items()` call then
@@ -791,7 +799,66 @@ class BuilderToolset:
             params=params or {},
         )
         pipeline.nodes.append(new_node)
-        return {"node_id": node_id, "position": {"x": final_pos.x, "y": final_pos.y}}
+
+        # ── Atomic add + connect (ENABLE_ATOMIC_ADD_CONNECT) ────────────
+        upstream_results: list[dict[str, Any]] = []
+        if upstream:
+            # Default dst_port = first declared input port on this block.
+            input_ports = _ports(spec, "input_schema")
+            default_dst_port = (
+                input_ports[0].get("port") if input_ports else "data"
+            )
+            try:
+                for idx, item in enumerate(upstream):
+                    if not isinstance(item, dict) or "src_node" not in item:
+                        raise ToolError(
+                            code="INVALID_PARAM",
+                            message=(
+                                f"upstream[{idx}] must be a dict with at least "
+                                "`src_node` set."
+                            ),
+                            hint=(
+                                "Example: upstream=[{src_node: 'n1', "
+                                "src_port: 'data'}] (src_port + dst_port both "
+                                "default to 'data')."
+                            ),
+                        )
+                    src_port = item.get("src_port") or "data"
+                    dst_port = item.get("dst_port") or default_dst_port
+                    edge_result = await self.connect(
+                        from_node=item["src_node"], to_node=node_id,
+                        from_port=src_port, to_port=dst_port,
+                    )
+                    upstream_results.append({
+                        "src_node": item["src_node"],
+                        "src_port": src_port,
+                        "dst_port": dst_port,
+                        **edge_result,
+                    })
+            except ToolError as connect_err:
+                # Rollback: remove the just-added node so canvas stays clean.
+                pipeline.nodes = [n for n in pipeline.nodes if n.id != node_id]
+                # Also drop any edges we successfully created in this call.
+                done_edge_ids = {r.get("edge_id") for r in upstream_results}
+                pipeline.edges = [
+                    e for e in pipeline.edges if e.id not in done_edge_ids
+                ]
+                raise ToolError(
+                    code=connect_err.code,
+                    message=(
+                        f"add_node rolled back: connect failed "
+                        f"({connect_err.message})"
+                    ),
+                    hint=connect_err.hint,
+                )
+
+        result: dict[str, Any] = {
+            "node_id": node_id,
+            "position": {"x": final_pos.x, "y": final_pos.y},
+        }
+        if upstream_results:
+            result["upstream_connected"] = upstream_results
+        return result
 
     async def remove_node(self, node_id: str) -> dict[str, Any]:
         pipeline = self.session.pipeline_json
