@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 
 from .background import event_poller, nats_subscriber, embedding_backfill
 from .config import CONFIG
+from .feature_flags import parse_feature_flags_header, set_request_overrides, reset_request_overrides
 from .logging_config import configure_logging, trace_id_ctx
 from .routers import agent, briefing, health, mcp_derivative, pipeline, sandbox
 
@@ -36,6 +37,11 @@ async def lifespan(app: FastAPI):
     log.info(
         "python_ai_sidecar starting on port %s | allowed_callers=%s | java_api_url=%s",
         CONFIG.port, CONFIG.allowed_caller_ips, CONFIG.java_api_url,
+    )
+    log.info(
+        "[startup] features: prompt_cache=%s auto_signal=%s",
+        "on" if CONFIG.enable_prompt_cache else "off",
+        "on" if CONFIG.enable_auto_signal else "off",
     )
     # Boot-time drift check: BUILTIN_EXECUTORS vs SIDECAR_NATIVE_BLOCKS vs
     # pb_blocks DB. Logs at ERROR level if any registry is out of sync —
@@ -75,6 +81,8 @@ async def trace_and_log_requests(request: Request, call_next):
     inbound = request.headers.get("X-Trace-ID", "")
     tid = inbound if _TRACE_ID_VALID.match(inbound) else str(uuid.uuid4())
     token = trace_id_ctx.set(tid)
+    flag_overrides = parse_feature_flags_header(request.headers.get("X-Feature-Flags", ""))
+    flag_token = set_request_overrides(flag_overrides)
     path = request.url.path
     is_health = path.startswith("/internal/health")
     try:
@@ -108,6 +116,7 @@ async def trace_and_log_requests(request: Request, call_next):
         response.headers["X-Trace-ID"] = tid
         return response
     finally:
+        reset_request_overrides(flag_token)
         trace_id_ctx.reset(token)
 
 

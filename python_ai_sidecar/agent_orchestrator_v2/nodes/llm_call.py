@@ -174,9 +174,15 @@ async def llm_call_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[s
     # iteration in a chat turn, subsequent iterations hit the cache and the
     # 25k token static prefix costs ~10× less. OpenAI-compat clients flatten
     # this back to string and ignore cache_control (see OllamaLLMClient).
-    cacheable_system = [
-        {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}},
-    ]
+    # Gated behind ENABLE_PROMPT_CACHE (2026-06-11).
+    from python_ai_sidecar.feature_flags import is_prompt_cache_enabled
+    _cache_on = is_prompt_cache_enabled()
+    if _cache_on:
+        cacheable_system = [
+            {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}},
+        ]
+    else:
+        cacheable_system = system
     # Same idea for tool defs — Anthropic lets you mark cache_control on the
     # *last* tool to cache the whole list. See:
     # https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching#caching-tool-definitions
@@ -201,12 +207,15 @@ async def llm_call_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[s
     # last tool so Anthropic caches the entire tool block alongside system.
     # Mutating in-place would persist into the shared TOOL_SCHEMAS registry
     # across iterations (already happens naturally but explicit is safer).
-    cacheable_tools = [dict(t) for t in visible_tools]
-    if cacheable_tools:
-        cacheable_tools[-1] = {
-            **cacheable_tools[-1],
-            "cache_control": {"type": "ephemeral"},
-        }
+    if _cache_on:
+        cacheable_tools = [dict(t) for t in visible_tools]
+        if cacheable_tools:
+            cacheable_tools[-1] = {
+                **cacheable_tools[-1],
+                "cache_control": {"type": "ephemeral"},
+            }
+    else:
+        cacheable_tools = visible_tools
 
     try:
         response = await llm.create(

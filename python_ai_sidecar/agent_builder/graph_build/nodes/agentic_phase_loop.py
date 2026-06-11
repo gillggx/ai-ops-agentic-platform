@@ -30,6 +30,7 @@ from python_ai_sidecar.agent_builder.graph_build.state import BuildGraphState
 from python_ai_sidecar.agent_builder.session import AgentBuilderSession
 from python_ai_sidecar.agent_builder.tools import BuilderToolset, ToolError
 from python_ai_sidecar.agent_helpers_native.llm_client import get_llm_client
+from python_ai_sidecar.feature_flags import is_prompt_cache_enabled
 from python_ai_sidecar.pipeline_builder.pipeline_schema import PipelineJSON
 from python_ai_sidecar.pipeline_builder.seedless_registry import SeedlessBlockRegistry
 
@@ -300,15 +301,20 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     # of this phase (and same phase across subsequent builds within 5 min).
     # cache_control on the LAST message caches the full prior conversation
     # so each round only pays for the newly-appended user/tool_result delta.
-    # This collapses the 556K-token spc-trend baseline by reading the bulk
-    # of input from cache instead of re-tokenising every round.
-    system_blocks = [{"type": "text", "text": _SYSTEM,
-                      "cache_control": {"type": "ephemeral"}}]
-    cached_tools = [dict(t) for t in tool_specs]
-    if cached_tools:
-        cached_tools[-1] = {**cached_tools[-1],
-                            "cache_control": {"type": "ephemeral"}}
-    cached_messages = _stamp_last_message_cache(phase_messages)
+    # Gated behind ENABLE_PROMPT_CACHE feature flag (2026-06-11) so we can A/B.
+    cache_on = is_prompt_cache_enabled()
+    if cache_on:
+        system_blocks = [{"type": "text", "text": _SYSTEM,
+                          "cache_control": {"type": "ephemeral"}}]
+        cached_tools = [dict(t) for t in tool_specs]
+        if cached_tools:
+            cached_tools[-1] = {**cached_tools[-1],
+                                "cache_control": {"type": "ephemeral"}}
+        cached_messages = _stamp_last_message_cache(phase_messages)
+    else:
+        system_blocks = _SYSTEM
+        cached_tools = tool_specs
+        cached_messages = phase_messages
     try:
         resp = await client.create(
             system=system_blocks,

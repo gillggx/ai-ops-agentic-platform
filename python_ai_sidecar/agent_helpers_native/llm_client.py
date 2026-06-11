@@ -424,6 +424,8 @@ class OllamaLLMClient(BaseLLMClient):
         # providers don't surface cache hits. Fireworks is GPU-hosted (not
         # Groq LPU, which the user excluded). allow_fallbacks=True keeps
         # the call resilient if Fireworks is briefly down.
+        # 2026-06-11: gated behind ENABLE_PROMPT_CACHE so the A/B can isolate
+        # cache impact on cost/latency.
         extra_body: Dict[str, Any] = {
             # 2026-06-01: effort=high finished but took ~12 min (30 LLM
             # calls × 25-40s each on a free-form xbar trend query).
@@ -432,7 +434,8 @@ class OllamaLLMClient(BaseLLMClient):
             "reasoning": {"effort": "medium"},
             "thinking": {"type": "disabled"},
         }
-        if "kimi" in self._model.lower():
+        from python_ai_sidecar.feature_flags import is_prompt_cache_enabled
+        if "kimi" in self._model.lower() and is_prompt_cache_enabled():
             extra_body["provider"] = {
                 "order": ["Fireworks"],
                 "allow_fallbacks": True,

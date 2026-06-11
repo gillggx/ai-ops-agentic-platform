@@ -6,6 +6,13 @@ import os
 from dataclasses import dataclass
 
 
+def _read_bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 @dataclass(frozen=True)
 class SidecarConfig:
     service_token: str
@@ -16,6 +23,12 @@ class SidecarConfig:
     java_api_url: str
     java_internal_token: str
     java_timeout_sec: float
+
+    # Performance feature flags (2026-06-11).
+    # Read once at startup; per-request override via `X-Feature-Flags` HTTP header
+    # (see python_ai_sidecar/feature_flags.py).
+    enable_prompt_cache: bool
+    enable_auto_signal: bool
 
     @classmethod
     def from_env(cls) -> "SidecarConfig":
@@ -34,6 +47,8 @@ class SidecarConfig:
             java_api_url=os.getenv("JAVA_API_URL", "http://localhost:8002").rstrip("/"),
             java_internal_token=java_token,
             java_timeout_sec=float(os.getenv("JAVA_TIMEOUT_SEC", "30")),
+            enable_prompt_cache=_read_bool_env("ENABLE_PROMPT_CACHE", default=True),
+            enable_auto_signal=_read_bool_env("ENABLE_AUTO_SIGNAL", default=False),
         )
 
 
