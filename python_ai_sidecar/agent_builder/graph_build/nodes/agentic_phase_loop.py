@@ -1718,7 +1718,17 @@ def _build_tool_specs() -> list[dict[str, Any]]:
             "name": "abort_node",
             "description": (
                 "Control-flow tool (NOT a block — call directly, do not pass to add_node). "
-                "v30.19 — back to pick_block. Use if mid-construct you realize wrong block was picked."
+                "v30.19 — back to pick_block sub-phase. Use ONLY if you picked the wrong "
+                "BLOCK and need to choose a different block_name.\n"
+                "⚠ DOES NOT remove the node from canvas. Only resets the sub-phase pointer "
+                "so you can commit_pick a different block.\n"
+                "Wrong tool for these cases (use these instead):\n"
+                "  - wrong block: abort_node here is OK, but call remove_node first to drop the dead node.\n"
+                "  - just want to fix params on the same block: use set_param(node_id, key, value) — "
+                "do NOT abort_node + add_node again, that creates a duplicate ghost node.\n"
+                "  - block returned error and you want to retry with new params: use set_param to fix, "
+                "then run_verifier or phase_complete; only abort_node if you decide a different block "
+                "is needed entirely."
             ),
             "input_schema": {
                 "type": "object",
