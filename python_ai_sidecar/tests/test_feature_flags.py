@@ -39,6 +39,64 @@ def test_parse_header_ignores_unknown_flags_and_malformed_parts():
     assert got == {"prompt_cache": True}
 
 
+def test_parse_header_accepts_round1_flags():
+    """Round 1 (2026-06-12): atomic_add_connect, auto_verifier, strict_tool_id."""
+    from python_ai_sidecar.feature_flags import parse_feature_flags_header
+
+    got = parse_feature_flags_header(
+        "atomic_add_connect:on,auto_verifier:on,strict_tool_id:off"
+    )
+    assert got == {
+        "atomic_add_connect": True,
+        "auto_verifier": True,
+        "strict_tool_id": False,
+    }
+
+
+def test_round1_flag_helpers_respect_overrides(monkeypatch):
+    monkeypatch.setenv("ENABLE_ATOMIC_ADD_CONNECT", "0")
+    monkeypatch.setenv("ENABLE_AUTO_VERIFIER", "0")
+    monkeypatch.setenv("ENABLE_STRICT_TOOL_ID", "0")
+    import python_ai_sidecar.config as cfg
+
+    importlib.reload(cfg)
+    import python_ai_sidecar.feature_flags as ff
+
+    importlib.reload(ff)
+
+    assert ff.is_atomic_add_connect_enabled() is False
+    assert ff.is_auto_verifier_enabled() is False
+    assert ff.is_strict_tool_id_enabled() is False
+
+    tok = ff.set_request_overrides({
+        "atomic_add_connect": True,
+        "auto_verifier": True,
+        "strict_tool_id": True,
+    })
+    try:
+        assert ff.is_atomic_add_connect_enabled() is True
+        assert ff.is_auto_verifier_enabled() is True
+        assert ff.is_strict_tool_id_enabled() is True
+    finally:
+        ff.reset_request_overrides(tok)
+
+
+def test_round1_env_defaults(monkeypatch):
+    monkeypatch.setenv("ENABLE_ATOMIC_ADD_CONNECT", "1")
+    monkeypatch.setenv("ENABLE_AUTO_VERIFIER", "yes")
+    monkeypatch.setenv("ENABLE_STRICT_TOOL_ID", "true")
+    import python_ai_sidecar.config as cfg
+
+    importlib.reload(cfg)
+    import python_ai_sidecar.feature_flags as ff
+
+    importlib.reload(ff)
+
+    assert ff.is_atomic_add_connect_enabled() is True
+    assert ff.is_auto_verifier_enabled() is True
+    assert ff.is_strict_tool_id_enabled() is True
+
+
 def test_overrides_take_precedence_over_env(monkeypatch):
     # Force default-off envs, then verify override flips both.
     monkeypatch.setenv("ENABLE_PROMPT_CACHE", "0")

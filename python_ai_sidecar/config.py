@@ -24,11 +24,15 @@ class SidecarConfig:
     java_internal_token: str
     java_timeout_sec: float
 
-    # Performance feature flags (2026-06-11).
+    # Performance feature flags (2026-06-11 / 2026-06-12).
     # Read once at startup; per-request override via `X-Feature-Flags` HTTP header
     # (see python_ai_sidecar/feature_flags.py).
     enable_prompt_cache: bool
     enable_auto_signal: bool
+    # Round 1 (2026-06-12): three flags for speed/accuracy improvements.
+    enable_atomic_add_connect: bool
+    enable_auto_verifier: bool
+    enable_strict_tool_id: bool
 
     @classmethod
     def from_env(cls) -> "SidecarConfig":
@@ -49,6 +53,9 @@ class SidecarConfig:
             java_timeout_sec=float(os.getenv("JAVA_TIMEOUT_SEC", "30")),
             enable_prompt_cache=_read_bool_env("ENABLE_PROMPT_CACHE", default=True),
             enable_auto_signal=_read_bool_env("ENABLE_AUTO_SIGNAL", default=False),
+            enable_atomic_add_connect=_read_bool_env("ENABLE_ATOMIC_ADD_CONNECT", default=False),
+            enable_auto_verifier=_read_bool_env("ENABLE_AUTO_VERIFIER", default=False),
+            enable_strict_tool_id=_read_bool_env("ENABLE_STRICT_TOOL_ID", default=False),
         )
 
 

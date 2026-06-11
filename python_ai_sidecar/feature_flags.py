@@ -1,20 +1,24 @@
 """Per-request feature flag overrides.
 
-Two performance flags are read at startup from env (see ``config.py``):
+Performance flags are read at startup from env (see ``config.py``):
 
   - ``ENABLE_PROMPT_CACHE`` — Anthropic / OpenRouter prompt cache markers
-  - ``ENABLE_AUTO_SIGNAL`` — auto commit_pick after add_node, auto phase_complete
-    after verifier ADVANCED
+  - ``ENABLE_AUTO_SIGNAL`` — auto commit_pick after add_node (sub-phase shortcut)
+  - ``ENABLE_ATOMIC_ADD_CONNECT`` — accept upstream=[...] in add_node and atomically
+    add + connect in one tool call (saves 1 LLM round per node)
+  - ``ENABLE_AUTO_VERIFIER`` — auto-trigger run_verifier when phase-terminal block
+    lands on canvas (saves 1 LLM round per phase)
+  - ``ENABLE_STRICT_TOOL_ID`` — block_process_history rejects tool_id='ALL'/'*'
+    sentinel values at build-time, forcing agent into fan-out or mcp_call pattern
 
-Callers (LLM client, agentic_phase_loop) read the *effective* flag via
-``is_prompt_cache_enabled()`` / ``is_auto_signal_enabled()`` so a single
+Callers read the *effective* flag via the ``is_*_enabled()`` helpers so a single
 request can be steered without restarting the sidecar — useful for A/B
 verification and per-skill rollout.
 
 Override protocol: HTTP header ``X-Feature-Flags`` carrying comma-separated
 ``name:value`` pairs, e.g.
 
-    X-Feature-Flags: prompt_cache:on,auto_signal:off
+    X-Feature-Flags: prompt_cache:on,auto_signal:off,atomic_add_connect:on
 
 Recognised values: ``on/off``, ``1/0``, ``true/false``, ``yes/no``. Unknown
 flags are silently ignored (forward-compat). Parsing failures fall back to
@@ -30,7 +34,13 @@ from .config import CONFIG
 _TRUE = frozenset({"1", "true", "yes", "on"})
 _FALSE = frozenset({"0", "false", "no", "off"})
 
-_KNOWN_FLAGS = ("prompt_cache", "auto_signal")
+_KNOWN_FLAGS = (
+    "prompt_cache",
+    "auto_signal",
+    "atomic_add_connect",
+    "auto_verifier",
+    "strict_tool_id",
+)
 
 # Per-request override map. Empty dict ⇒ no override, fall back to CONFIG.
 _override_ctx: ContextVar[dict[str, bool]] = ContextVar(
@@ -87,3 +97,15 @@ def is_prompt_cache_enabled() -> bool:
 
 def is_auto_signal_enabled() -> bool:
     return _effective("auto_signal", CONFIG.enable_auto_signal)
+
+
+def is_atomic_add_connect_enabled() -> bool:
+    return _effective("atomic_add_connect", CONFIG.enable_atomic_add_connect)
+
+
+def is_auto_verifier_enabled() -> bool:
+    return _effective("auto_verifier", CONFIG.enable_auto_verifier)
+
+
+def is_strict_tool_id_enabled() -> bool:
+    return _effective("strict_tool_id", CONFIG.enable_strict_tool_id)
