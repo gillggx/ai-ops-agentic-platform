@@ -188,6 +188,35 @@ class ProcessHistoryBlockExecutor(BlockExecutor):
         lot_id = params.get("lot_id")
         step = params.get("step")
 
+        # ENABLE_STRICT_TOOL_ID (2026-06-12): reject the 'ALL' / '*' sentinel.
+        # Simulator route accepts these as wildcards (see V52 migration), but
+        # using them collapses single-tool vs all-equipment semantics into one
+        # call — agent_knowledge id=37 warns this leads to wrong pipelines.
+        # Forcing rejection at build time pushes agent toward the correct
+        # pattern: get_process_summary for aggregates, fan-out for N specific
+        # tools. Default off; flip on once block_docs + plan-time RAG have
+        # propagated and existing pipelines are migrated.
+        try:
+            from python_ai_sidecar.feature_flags import is_strict_tool_id_enabled
+            if is_strict_tool_id_enabled() and isinstance(tool_id, str):
+                norm = tool_id.strip().lower()
+                if norm in {"all", "*"}:
+                    raise BlockExecutionError(
+                        code="INVALID_PARAM",
+                        message=(
+                            f"tool_id={tool_id!r} 不是合法值（strict mode）。"
+                            "「全機台」與「特定多機台」語意不同，請走正確 path。"
+                        ),
+                        hint=(
+                            "全廠彙總 → block_mcp_call(mcp_name='get_process_summary', "
+                            "args={'time_range': '...', 'aggregate_by': 'tool'})；"
+                            "N 台具名機台 → fan-out N × block_process_history (一台一個) "
+                            "+ block_union 合併"
+                        ),
+                    )
+        except ImportError:
+            pass  # tests / standalone runs without sidecar package — skip flag check
+
         # three-of-three optional but at least ONE required (matches get_process_info)
         if not any([tool_id, lot_id, step]):
             raise BlockExecutionError(
