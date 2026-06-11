@@ -1948,7 +1948,12 @@ def _make_result_digest(tool: str, result: Any) -> str:
                     break
         positive = ""
         if isinstance(rows, int) and rows >= 1:
-            positive = " -- has data; if this satisfies the phase goal, call phase_complete next round"
+            positive = (
+                " -- has data; if this satisfies the phase goal, call the "
+                "phase_complete TOOL directly next round (do NOT do "
+                "add_node(block_name='phase_complete') — phase_complete is "
+                "a control-flow tool, not a block)"
+            )
         return f"got output for {nid}: rows={rows} ports={ports}{sample_hint}{positive}"
     if tool == "add_node":
         nid = result.get("node_id")
