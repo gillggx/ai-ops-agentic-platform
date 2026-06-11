@@ -90,6 +90,36 @@ def test_text_phase_pN_finished_synthesizes_phase_complete():
     assert out["name"] == "phase_complete"
 
 
+# 2026-06-11 — SLASH-02 trace showed KIMI on OpenRouter writing these
+# Chinese / phrasing variants. The narrower English-only regex missed
+# them, so the graph kept re-prompting until the wrapper timed out.
+
+def test_chinese_phase_complete_synthesizes():
+    resp = _resp_with_blocks([_text("Phase p1 已完成。等待進入 Phase p2。")])
+    out = _extract_tool_call(resp)
+    assert out is not None
+    assert out["name"] == "phase_complete"
+
+
+def test_chinese_phase_done_short_synthesizes():
+    resp = _resp_with_blocks([_text("phase 完成")])
+    out = _extract_tool_call(resp)
+    assert out is not None
+    assert out["name"] == "phase_complete"
+
+
+def test_english_has_been_completed_with_intervening_words_synthesizes():
+    # KIMI: "The phase has been completed successfully." — intervening
+    # "has been" between phase and completed; old regex required them
+    # adjacent.
+    resp = _resp_with_blocks([_text(
+        "The phase has been completed successfully. I've added n1."
+    )])
+    out = _extract_tool_call(resp)
+    assert out is not None
+    assert out["name"] == "phase_complete"
+
+
 # ── Fallback DOES NOT trigger on generic chatter ──────────────────────────
 
 def test_generic_text_does_not_synthesize():

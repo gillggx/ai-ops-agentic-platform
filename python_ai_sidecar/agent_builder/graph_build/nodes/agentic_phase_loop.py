@@ -1291,7 +1291,14 @@ def _build_canvas_diff_md(pipeline: PipelineJSON, phase: dict, state: dict | Non
         lines.append("")
 
     lines.append(f"PHASE GOAL: {phase.get('goal')} (expected: {phase.get('expected')})")
-    lines.append("Pick your next single tool call.")
+    lines.append(
+        "Respond with EXACTLY ONE tool_use block (no plain text). "
+        "If the phase goal is achieved → call **phase_complete** (with a "
+        "short rationale). If you need verifier structural check first → "
+        "call **run_verifier**. Plain text responses ('Phase done', "
+        "'已完成', etc.) are dropped by the graph and the prompt will "
+        "repeat — wasting your round budget."
+    )
     return "\n".join(lines)
 
 
@@ -1786,8 +1793,14 @@ def _build_tool_specs() -> list[dict[str, Any]]:
 # observed "phase ... complete/done/finished/goal achieved" intent shape
 # exactly. Generic text like "I think we're done" won't trigger.
 _PHASE_DONE_INTENT_RE = re.compile(
-    r"phase\s*(?:p\d+\s*)?(?:complete|completed|done|finished)\b"
-    r"|phase\s+goal\s+(?:is\s+)?(?:achieved|met|reached|satisfied)\b",
+    # English: "phase complete/done/finished" with up to ~6 words between
+    # (covers "phase has been completed", "phase was finished successfully").
+    r"phase\s*(?:p\d+\s*)?(?:\w+\s+){0,6}?(?:complete|completed|done|finished)\b"
+    r"|phase\s+goal\s+(?:is\s+)?(?:achieved|met|reached|satisfied)\b"
+    # Chinese: "Phase pN 已完成" / "phase 完成" / "已建立...節點" type signals
+    # for completion. KIMI on OpenRouter loves "已完成" + "等待進入下一 phase".
+    r"|phase\s*p?\d*\s*已?完成"
+    r"|已完成.*下[一個]?\s*phase",
     re.IGNORECASE,
 )
 
