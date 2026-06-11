@@ -1640,7 +1640,13 @@ def _build_tool_specs() -> list[dict[str, Any]]:
         },
         {
             "name": "add_node",
-            "description": "Add a node to the pipeline canvas.",
+            "description": (
+                "Add a node to the pipeline canvas. `block_name` MUST exactly match "
+                "one of the block names from the catalog (list_blocks). "
+                "Control-flow tools (commit_pick, abort_node, abort_phase, "
+                "remove_node, run_verifier, phase_complete) are NOT blocks — call "
+                "them as their own tool_use, NEVER as add_node(block_name='<tool>')."
+            ),
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -1680,7 +1686,10 @@ def _build_tool_specs() -> list[dict[str, Any]]:
         },
         {
             "name": "remove_node",
-            "description": "Remove a node + its edges.",
+            "description": (
+                "Control-flow tool (NOT a block — call directly, do not pass to add_node). "
+                "Remove a node + its edges."
+            ),
             "input_schema": {
                 "type": "object",
                 "properties": {"node_id": {"type": "string"}},
@@ -1691,7 +1700,11 @@ def _build_tool_specs() -> list[dict[str, Any]]:
         # No-op tools; dispatcher reads name to transition v30_subphase.
         {
             "name": "commit_pick",
-            "description": "v30.19 — leaves pick sub-phase. Use after you've decided which block to add. Pass `block_id` you'll add next + 1-line reasoning.",
+            "description": (
+                "Control-flow tool (NOT a block — call directly, do not pass to add_node). "
+                "v30.19 — leaves pick sub-phase. Use after you've decided which block to add. "
+                "Pass `block_id` you'll add next + 1-line reasoning."
+            ),
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -1703,7 +1716,10 @@ def _build_tool_specs() -> list[dict[str, Any]]:
         },
         {
             "name": "abort_node",
-            "description": "v30.19 — back to pick_block. Use if mid-construct you realize wrong block was picked.",
+            "description": (
+                "Control-flow tool (NOT a block — call directly, do not pass to add_node). "
+                "v30.19 — back to pick_block. Use if mid-construct you realize wrong block was picked."
+            ),
             "input_schema": {
                 "type": "object",
                 "properties": {"reason": {"type": "string"}},
@@ -1712,7 +1728,11 @@ def _build_tool_specs() -> list[dict[str, Any]]:
         },
         {
             "name": "abort_phase",
-            "description": "v30.19 — give up on current phase. Use only after multiple sub-state retries failed. Escalates to phase_revise.",
+            "description": (
+                "Control-flow tool (NOT a block — call directly, do not pass to add_node). "
+                "v30.19 — give up on current phase. Use only after multiple sub-state retries failed. "
+                "Escalates to phase_revise."
+            ),
             "input_schema": {
                 "type": "object",
                 "properties": {"reason": {"type": "string"}},
@@ -1721,7 +1741,10 @@ def _build_tool_specs() -> list[dict[str, Any]]:
         },
         {
             "name": "run_verifier",
-            "description": "v30.19 — leaves tune sub-phase to phase verifier. Use when you're done tuning params.",
+            "description": (
+                "Control-flow tool (NOT a block — call directly, do not pass to add_node). "
+                "v30.19 — leaves tune sub-phase to phase verifier. Use when you're done tuning params."
+            ),
             "input_schema": {
                 "type": "object",
                 "properties": {},
@@ -1730,7 +1753,10 @@ def _build_tool_specs() -> list[dict[str, Any]]:
         },
         {
             "name": "phase_complete",
-            "description": "Declare current phase done — verifier checks; if mismatch, you must continue rounds.",
+            "description": (
+                "Control-flow tool (NOT a block — call directly, do not pass to add_node). "
+                "Declare current phase done — verifier checks; if mismatch, you must continue rounds."
+            ),
             "input_schema": {
                 "type": "object",
                 "properties": {"rationale": {"type": "string"}},
