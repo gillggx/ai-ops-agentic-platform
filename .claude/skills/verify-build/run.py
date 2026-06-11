@@ -44,7 +44,7 @@ def _ssh(cmd: str, *, timeout: int = 600) -> str:
     return res.stdout
 
 
-def _run_harness(mode: str, message: str) -> str:
+def _run_harness(mode: str, message: str, x_feature_flags: str = "") -> str:
     if mode == "chat":
         script = "tools/ui_consistent_verify/chat_walkthrough.py"
     elif mode == "builder":
@@ -52,10 +52,15 @@ def _run_harness(mode: str, message: str) -> str:
     else:
         raise ValueError(f"unsupported mode={mode!r}")
     quoted_msg = message.replace('"', '\\"')
+    flag_arg = ""
+    if x_feature_flags:
+        # Pass as a CLI arg to builder_verify; safe to quote-wrap.
+        safe = x_feature_flags.replace('"', '\\"')
+        flag_arg = f' --x-feature-flags \\"{safe}\\"'
     bash = (
         f'cd {REMOTE_REPO} && sudo bash -c "source python_ai_sidecar/.env && '
         f'SVC_TOKEN=\\$SERVICE_TOKEN SIDECAR_BASE=http://localhost:8050 '
-        f'python3 {script} \\"{quoted_msg}\\""'
+        f'python3 {script} \\"{quoted_msg}\\"{flag_arg}"'
     )
     return _ssh(bash, timeout=900)
 
@@ -318,6 +323,10 @@ def main() -> int:
         "Path to a LOCAL trace JSON (skips SSH). For dev when you already "
         "scp'd a trace to /tmp."
     ))
+    ap.add_argument("--x-feature-flags", default="",
+                    help=("Forwarded as X-Feature-Flags HTTP header to sidecar, "
+                          "e.g. 'atomic_add_connect:on,auto_verifier:on'. Lets "
+                          "you A/B without restarting the sidecar."))
     args = ap.parse_args()
 
     if args.mode == "test":
@@ -354,7 +363,7 @@ def main() -> int:
             return 2
         print(f"[verify-build] running {args.mode} mode on EC2 …", file=sys.stderr)
         try:
-            _ = _run_harness(args.mode, args.message)
+            _ = _run_harness(args.mode, args.message, x_feature_flags=args.x_feature_flags)
         except subprocess.TimeoutExpired:
             print("ERROR: harness timed out (>15min)", file=sys.stderr)
             return 1

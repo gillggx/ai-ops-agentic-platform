@@ -76,6 +76,9 @@ def main():
     ap.add_argument("--no-v30-mode", dest="v30_mode", action="store_false")
     ap.add_argument("--auto-confirm-plan", action="store_true", default=True,
                     help="If goal_plan_confirm_required fires, auto-POST /plan-confirm")
+    ap.add_argument("--x-feature-flags", default="",
+                    help="Value passed as X-Feature-Flags header (e.g. "
+                         "'atomic_add_connect:on,auto_verifier:on'). Empty = use env defaults.")
     args = ap.parse_args()
 
     svc = os.environ.get("SVC_TOKEN")
@@ -90,6 +93,9 @@ def main():
     }
     hdr = {"X-Service-Token": svc, "Content-Type": "application/json",
            "Accept": "text/event-stream"}
+    if args.x_feature_flags:
+        hdr["X-Feature-Flags"] = args.x_feature_flags
+        print(f"[META] X-Feature-Flags: {args.x_feature_flags}")
 
     def run_stream(label, url, body):
         nonlocal ui_count, drop_count, by_type, plan_required_sid, build_status
