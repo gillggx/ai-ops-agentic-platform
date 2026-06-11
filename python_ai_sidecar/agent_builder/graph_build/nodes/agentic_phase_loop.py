@@ -696,6 +696,14 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
         pending_block_update = (tool_args or {}).get("block_id")
     elif tool_name == "add_node" and "error" not in action_result:
         pending_node_id_update = action_result.get("node_id") or last_mutated_logical_id
+        # ENABLE_AUTO_SIGNAL: if add_node arrived from pick/tune sub-phase
+        # without a prior commit_pick, capture block_name as the implicit
+        # pick so v30_pending_block stays in sync for downstream consumers
+        # (subphase hint, verifier outcome tracking).
+        if cur_subphase in ("pick", "tune") and not state.get("v30_pending_block"):
+            implicit_block = (tool_args or {}).get("block_name")
+            if implicit_block:
+                pending_block_update = implicit_block
 
     # v30.22 (2026-05-19) — agent-driven verify trigger.
     # Verifier runs only when:
@@ -2234,10 +2242,21 @@ def _filter_tool_specs_for_subphase(
 ) -> list[dict]:
     """Return only tool specs allowed in current sub-phase.
     Unknown sub-phase or None → return all (backward compat for v30.18
-    builds that don't set sub_phase)."""
+    builds that don't set sub_phase).
+
+    When ENABLE_AUTO_SIGNAL is on, the pick sub-phase additionally allows
+    `add_node` (auto-commit shortcut — saves one LLM round per block pick).
+    """
     if not subphase or subphase not in _TOOLS_BY_SUBPHASE:
         return all_specs
-    allowed = _TOOLS_BY_SUBPHASE[subphase]
+    allowed = set(_TOOLS_BY_SUBPHASE[subphase])
+    if subphase == "pick":
+        try:
+            from python_ai_sidecar.feature_flags import is_auto_signal_enabled
+            if is_auto_signal_enabled():
+                allowed = allowed | {"add_node"}
+        except Exception:
+            pass
     return [s for s in all_specs if s.get("name") in allowed]
 
 
@@ -2247,6 +2266,20 @@ def _build_subphase_hint(subphase: str | None, state: BuildGraphState) -> str:
     if not subphase:
         return ""
     if subphase == "pick":
+        try:
+            from python_ai_sidecar.feature_flags import is_auto_signal_enabled
+            auto = is_auto_signal_enabled()
+        except Exception:
+            auto = False
+        if auto:
+            return (
+                "== SUB-PHASE: pick_block ==\n"
+                "Decide which block to add next. Inspect candidates (inspect_block_doc),\n"
+                "look at upstream output (inspect_node_output). When ready, either:\n"
+                "  - call **commit_pick(block_id, reasoning)** to commit your choice, OR\n"
+                "  - go straight to **add_node(block_name, params)** — auto-commits "
+                "the pick and adds the block in one step."
+            )
         return (
             "== SUB-PHASE: pick_block ==\n"
             "Decide which block to add next. Inspect candidates (inspect_block_doc),\n"
@@ -2286,6 +2319,10 @@ def _build_subphase_hint(subphase: str | None, state: BuildGraphState) -> str:
 _TRANSITIONS: dict[tuple[str, str], str] = {
     ("pick", "commit_pick"):       "construct",
     ("pick", "abort_phase"):       "refine",
+    # ENABLE_AUTO_SIGNAL (2026-06-11): allow add_node from pick to skip the
+    # explicit commit_pick round. add_node lands the block in construct just
+    # like commit_pick → add_node would, saving one LLM call per block pick.
+    ("pick", "add_node"):          "construct",
     ("construct", "add_node"):     "construct",  # stay; expect connect next
     ("construct", "connect"):      "tune",
     ("construct", "abort_node"):   "pick",
@@ -2298,6 +2335,9 @@ _TRANSITIONS: dict[tuple[str, str], str] = {
     # block_id while previous one is still on canvas; goes back to
     # construct to add + connect it. Enables multi-block phases.
     ("tune", "commit_pick"):       "construct",
+    # Auto-signal shortcut for chain-from-tune too: add_node directly from
+    # tune means "commit a new block_id and add it" in one round.
+    ("tune", "add_node"):          "construct",
 }
 
 
