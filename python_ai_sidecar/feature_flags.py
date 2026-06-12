@@ -13,6 +13,9 @@ Performance flags are read at startup from env (see ``config.py``):
   - ``ENABLE_NO_DUPLICATE_NODE`` — add_node rejects when canvas already has an
     orphan (no downstream edges) node with identical (block_id, params). Catches
     KIMI's "echo" behaviour without false-positives on parallel-chain DAGs.
+  - ``ENABLE_RICH_CANVAS_SNAPSHOT`` — mid-phase prompt becomes context-aware per
+    sub-phase (pick/construct/tune); construct+tune rounds show upstream output
+    columns + sample so params are filled from real data, not guessed.
 
 Callers read the *effective* flag via the ``is_*_enabled()`` helpers so a single
 request can be steered without restarting the sidecar — useful for A/B
@@ -44,6 +47,7 @@ _KNOWN_FLAGS = (
     "auto_verifier",
     "strict_tool_id",
     "no_duplicate_node",
+    "rich_canvas_snapshot",
 )
 
 # Per-request override map. Empty dict ⇒ no override, fall back to CONFIG.
@@ -117,3 +121,7 @@ def is_strict_tool_id_enabled() -> bool:
 
 def is_no_duplicate_node_enabled() -> bool:
     return _effective("no_duplicate_node", CONFIG.enable_no_duplicate_node)
+
+
+def is_rich_canvas_snapshot_enabled() -> bool:
+    return _effective("rich_canvas_snapshot", CONFIG.enable_rich_canvas_snapshot)

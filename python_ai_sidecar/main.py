@@ -41,13 +41,14 @@ async def lifespan(app: FastAPI):
     log.info(
         "[startup] features: prompt_cache=%s auto_signal=%s "
         "atomic_add_connect=%s auto_verifier=%s strict_tool_id=%s "
-        "no_duplicate_node=%s",
+        "no_duplicate_node=%s rich_canvas_snapshot=%s",
         "on" if CONFIG.enable_prompt_cache else "off",
         "on" if CONFIG.enable_auto_signal else "off",
         "on" if CONFIG.enable_atomic_add_connect else "off",
         "on" if CONFIG.enable_auto_verifier else "off",
         "on" if CONFIG.enable_strict_tool_id else "off",
         "on" if CONFIG.enable_no_duplicate_node else "off",
+        "on" if CONFIG.enable_rich_canvas_snapshot else "off",
     )
     # Boot-time drift check: BUILTIN_EXECUTORS vs SIDECAR_NATIVE_BLOCKS vs
     # pb_blocks DB. Logs at ERROR level if any registry is out of sync —

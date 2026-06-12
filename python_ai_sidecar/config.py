@@ -37,6 +37,11 @@ class SidecarConfig:
     # already has a node with the same (block_id, params) AND no downstream
     # edges — KIMI's "echo" behaviour signature. See SLASH-13 R2 trace analysis.
     enable_no_duplicate_node: bool
+    # Round 3 (2026-06-12): context-aware per-sub-phase prompt assembly. Mid-phase
+    # canvas snapshot gains upstream output columns + sample so construct/tune
+    # rounds can fill params without blind-guessing. See
+    # docs/agent-subphase-prompt-design.html.
+    enable_rich_canvas_snapshot: bool
 
     @classmethod
     def from_env(cls) -> "SidecarConfig":
@@ -61,6 +66,7 @@ class SidecarConfig:
             enable_auto_verifier=_read_bool_env("ENABLE_AUTO_VERIFIER", default=False),
             enable_strict_tool_id=_read_bool_env("ENABLE_STRICT_TOOL_ID", default=False),
             enable_no_duplicate_node=_read_bool_env("ENABLE_NO_DUPLICATE_NODE", default=False),
+            enable_rich_canvas_snapshot=_read_bool_env("ENABLE_RICH_CANVAS_SNAPSHOT", default=False),
         )
 
 

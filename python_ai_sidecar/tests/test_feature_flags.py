@@ -117,6 +117,26 @@ def test_no_duplicate_node_flag_round_trip(monkeypatch):
     assert ff.is_no_duplicate_node_enabled() is False
 
 
+def test_rich_canvas_snapshot_flag_round_trip(monkeypatch):
+    """Round 3 (2026-06-12): context-aware per-sub-phase prompt flag."""
+    from python_ai_sidecar.feature_flags import parse_feature_flags_header
+    assert parse_feature_flags_header("rich_canvas_snapshot:on") == {"rich_canvas_snapshot": True}
+
+    monkeypatch.setenv("ENABLE_RICH_CANVAS_SNAPSHOT", "0")
+    import python_ai_sidecar.config as cfg
+    importlib.reload(cfg)
+    import python_ai_sidecar.feature_flags as ff
+    importlib.reload(ff)
+    assert ff.is_rich_canvas_snapshot_enabled() is False
+
+    tok = ff.set_request_overrides({"rich_canvas_snapshot": True})
+    try:
+        assert ff.is_rich_canvas_snapshot_enabled() is True
+    finally:
+        ff.reset_request_overrides(tok)
+    assert ff.is_rich_canvas_snapshot_enabled() is False
+
+
 def test_overrides_take_precedence_over_env(monkeypatch):
     # Force default-off envs, then verify override flips both.
     monkeypatch.setenv("ENABLE_PROMPT_CACHE", "0")

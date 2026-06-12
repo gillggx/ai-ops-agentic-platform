@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Sub-Phase Prompt Design — Glass Box Builder</title>
+<style>
+  :root {
+    --bg: #0f1419; --panel: #1a2027; --panel2: #232b34;
+    --ink: #d8dee6; --muted: #8a94a0; --line: #2e3a45;
+    --pick: #4aa3df; --construct: #58c878; --tune: #e0a33e;
+    --verify: #b07cd6; --danger: #e06c6c; --ok: #58c878;
+    --code: #11161b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.65 -apple-system, "Segoe UI", "Noto Sans TC", sans-serif;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 40px 28px 120px; }
+  h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -.3px; }
+  .sub { color: var(--muted); margin: 0 0 28px; font-size: 14px; }
+  h2 {
+    font-size: 20px; margin: 44px 0 14px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  h3 { font-size: 16px; margin: 26px 0 10px; }
+  p { margin: 10px 0; }
+  code, .mono {
+    font-family: "SF Mono", "JetBrains Mono", Consolas, monospace;
+    font-size: 13px;
+  }
+  code { background: var(--code); padding: 1px 6px; border-radius: 4px; color: #c8d6e0; }
+  pre {
+    background: var(--code); border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 16px; overflow-x: auto; font-size: 12.5px; line-height: 1.55;
+    color: #c8d6e0;
+  }
+  .tag {
+    display: inline-block; padding: 1px 9px; border-radius: 20px;
+    font-size: 12px; font-weight: 600; letter-spacing: .3px;
+    vertical-align: middle;
+  }
+  .t-pick { background: rgba(74,163,223,.18); color: var(--pick); border: 1px solid var(--pick); }
+  .t-construct { background: rgba(88,200,120,.16); color: var(--construct); border: 1px solid var(--construct); }
+  .t-tune { background: rgba(224,163,62,.16); color: var(--tune); border: 1px solid var(--tune); }
+  .t-verify { background: rgba(176,124,214,.16); color: var(--verify); border: 1px solid var(--verify); }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 13.5px; }
+  th, td { border: 1px solid var(--line); padding: 9px 11px; text-align: left; vertical-align: top; }
+  th { background: var(--panel2); font-weight: 600; }
+  td.center { text-align: center; }
+  .yes { color: var(--ok); font-weight: 600; }
+  .no { color: var(--danger); font-weight: 600; }
+  .partial { color: var(--tune); font-weight: 600; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 20px; margin: 16px 0;
+  }
+  .card.pick { border-left: 4px solid var(--pick); }
+  .card.construct { border-left: 4px solid var(--construct); }
+  .card.tune { border-left: 4px solid var(--tune); }
+  .flow {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin: 14px 0; font-size: 13px;
+  }
+  .node {
+    background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 7px; padding: 7px 12px; font-family: "SF Mono", monospace;
+  }
+  .arrow { color: var(--muted); font-size: 18px; }
+  .warn {
+    background: rgba(224,108,108,.10); border: 1px solid rgba(224,108,108,.4);
+    border-radius: 8px; padding: 12px 16px; margin: 14px 0;
+  }
+  .warn b { color: var(--danger); }
+  .ok-box {
+    background: rgba(88,200,120,.08); border: 1px solid rgba(88,200,120,.35);
+    border-radius: 8px; padding: 12px 16px; margin: 14px 0;
+  }
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; margin: 8px 0 20px; font-size: 13px; }
+  .small { font-size: 12.5px; color: var(--muted); }
+  ul { margin: 8px 0; padding-left: 22px; }
+  li { margin: 4px 0; }
+  .meta { color: var(--muted); font-size: 12px; }
+  hr { border: none; border-top: 1px solid var(--line); margin: 30px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Agent Sub-Phase Prompt Design</h1>
+  <p class="sub">Glass Box Builder — context-aware prompt assembly per agent action &middot; 2026-06-12 &middot;
+     gated behind <code>ENABLE_RICH_CANVAS_SNAPSHOT</code></p>
+
+  <div class="card">
+    <b>TL;DR.</b> Glass Box agent 跑在一個 sub-phase 狀態機 (pick &rarr; construct &rarr; tune)。
+    現在 prompt 只分「phase 第 1 round 給 rich context / 第 2+ round 給 light diff」，
+    跟 agent 當下在做什麼<strong>無關</strong>。結果：填 param 的 round 看不到 upstream node
+    的 output columns，agent 只能盲猜欄位名 &mdash; SLASH-13 的 box_plot 把 <code>recipe</code>
+    猜成 <code>step</code> 就是這樣來的。本文件定義「每個 sub-phase 該給什麼 context」的 matrix，
+    作為重構依據。
+  </div>
+
+  <h2>1. Agent 行為狀態機</h2>
+
+  <div class="flow">
+    <span class="node">phase entry</span>
+    <span class="arrow">&rarr;</span>
+    <span class="tag t-pick">pick</span>
+    <span class="arrow">&rarr;</span>
+    <span class="tag t-construct">construct</span>
+    <span class="arrow">&rarr;</span>
+    <span class="tag t-tune">tune</span>
+    <span class="arrow">&rarr;</span>
+    <span class="tag t-verify">verify</span>
+    <span class="arrow">&rarr;</span>
+    <span class="small">phase advance / chain next block</span>
+  </div>
+
+  <p>每個 sub-phase 只開放特定 tool（graph 層 deterministic filter，不靠 prompt 自律）。
+     轉移由 <code>_TRANSITIONS</code> 純函數決定。</p>
+
+  <table>
+    <tr><th>Sub-phase</th><th>開放的 tools</th><th>Agent 做的決定</th><th>轉出條件</th></tr>
+    <tr>
+      <td><span class="tag t-pick">pick</span></td>
+      <td><code>commit_pick</code>, <code>inspect_node_output</code>,
+          <code>inspect_block_doc</code>, <code>abort_phase</code>
+          <span class="small">(+<code>add_node</code> 若 auto_signal)</span></td>
+      <td>下一個要加哪個 block</td>
+      <td>commit_pick &rarr; construct</td>
+    </tr>
+    <tr>
+      <td><span class="tag t-construct">construct</span></td>
+      <td><code>add_node</code>, <code>connect</code>, <code>abort_node</code>,
+          <code>inspect_node_output</code>, <code>inspect_block_doc</code></td>
+      <td>add_node 填 params + connect 到正確 upstream</td>
+      <td>connect &rarr; tune</td>
+    </tr>
+    <tr>
+      <td><span class="tag t-tune">tune</span></td>
+      <td><code>set_param</code>, <code>run_verifier</code>, <code>commit_pick</code>,
+          <code>abort_node</code>, <code>inspect_node_output</code></td>
+      <td>修 param / 接下一個 block / 觸發驗證</td>
+      <td>run_verifier &rarr; verify &middot; commit_pick &rarr; construct</td>
+    </tr>
+    <tr>
+      <td><span class="tag t-verify">verify</span></td>
+      <td><span class="small">deterministic node — 非 LLM</span></td>
+      <td>結構檢查 terminal 是否符合 phase.expected</td>
+      <td>ADVANCED &rarr; 下一 phase / REJECTED &rarr; tune</td>
+    </tr>
+  </table>
+
+  <h2>2. 現況 — prompt 是「兩段式」不是「按行為」</h2>
+
+  <table>
+    <tr><th>時機</th><th>Builder</th><th>內容</th><th>含 columns?</th></tr>
+    <tr>
+      <td>phase 第 1 round</td>
+      <td><code>_build_observation_md</code></td>
+      <td>pipeline inputs + exec_trace runtime schema + connect options + action history</td>
+      <td class="center yes">YES</td>
+    </tr>
+    <tr>
+      <td>phase 第 2+ round<br><span class="small">(絕大多數決策點)</span></td>
+      <td><code>_build_canvas_diff_md</code></td>
+      <td>verifier feedback + 裸 canvas <code>(id / block_id / params)</code> + connect options + goal</td>
+      <td class="center no">NO</td>
+    </tr>
+  </table>
+
+  <div class="warn">
+    <b>三個結構性問題：</b>
+    <ul>
+      <li><b>column-blindness</b> — 第 2+ round 的 canvas 完全沒有 node output columns / sample。
+          填 param 時無從得知 upstream 有哪些欄位。</li>
+      <li><b>sub-phase hint 只出現一次</b> — 黏在第 1 round 的 seed，之後不再重印；
+          agent 過幾 round 就忘了自己在 pick / construct / tune 哪個模式。</li>
+      <li><b>同一份 diff 給所有 sub-phase</b> — pick 跟 tune 需要的 context 天差地遠，
+          卻拿到一模一樣的 canvas snapshot。</li>
+    </ul>
+  </div>
+
+  <h2>3. 設計核心 — 行為 &rarr; 需要的 context</h2>
+
+  <p>column-blindness 害到的是 <span class="tag t-construct">construct</span> +
+     <span class="tag t-tune">tune</span>（真正填 param 的兩個）。
+     <span class="tag t-pick">pick</span> 需要的是 flow 形狀 + 終端資料預覽，不是完整 schema。</p>
+
+  <table>
+    <tr>
+      <th>Sub-phase</th><th>Agent 決定</th><th>真正需要看到的</th><th>現在有給?</th>
+    </tr>
+    <tr>
+      <td><span class="tag t-pick">pick</span></td>
+      <td>下一個加哪個 block</td>
+      <td>flow 全貌 (node+edge 樹狀)、phase goal、<b>canvas 終端 output 有什麼 cols</b>、
+          此 expected kind 的候選 block</td>
+      <td class="center"><span class="partial">flow 半套</span><br><span class="no">終端 cols 無</span></td>
+    </tr>
+    <tr>
+      <td><span class="tag t-construct">construct</span></td>
+      <td>add_node 填 params + 接 upstream</td>
+      <td><b>upstream node output columns + 1 筆 sample</b>、connect port 對應、block param schema</td>
+      <td class="center"><span class="no">cols 無</span><br><span class="yes">connect ok</span></td>
+    </tr>
+    <tr>
+      <td><span class="tag t-tune">tune</span></td>
+      <td>修哪個 param</td>
+      <td>該 node 現有 params、<b>upstream cols（才知合法值）</b>、verifier 具體抱怨</td>
+      <td class="center"><span class="yes">verifier ok</span><br><span class="no">upstream cols 無</span></td>
+    </tr>
+  </table>
+
+  <h2>4. 目標 context 設計（三張卡）</h2>
+
+  <div class="card pick">
+    <h3 style="margin-top:0"><span class="tag t-pick">pick</span> — 看 flow，決定下一步</h3>
+    <pre>== SUB-PHASE: pick_block ==   (每 round 重印)
+
+== FLOW SO FAR ==
+  [source] n1 block_process_history(EQP-01, APC, 14d)
+      └─&gt; n2 block_unnest(APC.parameters)        &lt;- canvas terminal
+  terminal n2 cols: [eventTime, toolID, lotID, step, etch_time_offset,
+                     chamber_temp, gas_flow, …(+4 more)]
+
+PHASE GOAL: 展示各 Recipe etch_time_offset 分佈 (expected: chart)
+You're choosing the NEXT block. Terminal n2 exposes the cols above —
+pick a block whose inputs those cols satisfy.
+-&gt; commit_pick(block_id) when decided, or inspect_node_output(n2) for full sample.</pre>
+    <p class="small">flow 用樹狀畫（source &rarr; ... &rarr; terminal），比平鋪 edge 好讀。
+       終端 node 的 cols 摘要就地給，agent 不用再花 round inspect。</p>
+  </div>
+
+  <div class="card construct">
+    <h3 style="margin-top:0"><span class="tag t-construct">construct</span> — 填 params + 接線</h3>
+    <pre>== SUB-PHASE: construct_node ==
+You committed to block_box_plot. Now add_node + connect upstream n2.
+
+== UPSTREAM n2 OUTPUT (what you're connecting FROM) ==
+  cols: [eventTime, toolID, lotID, step, etch_time_offset, chamber_temp, …]
+  sample: {eventTime:'2026-05-29...', toolID:'EQP-01', step:'STEP_004',
+           etch_time_offset:3.2, chamber_temp:200, …}
+  [note] no `recipe_id` / `recipe` column present — if you need recipe
+         grouping, transform first (this is a flat APC table).
+
+== CONNECT OPTIONS ==
+  n2.data (dataframe) -&gt; block_box_plot.data  ok
+
+Fill add_node params using ONLY cols listed above.</pre>
+    <p class="small">治本：upstream cols + sample 直接塞到 agent 填 param 的當下。
+       加「你要用的 column 不在 upstream」的 deterministic 警告（能精確 parse 時才報）。</p>
+  </div>
+
+  <div class="card tune">
+    <h3 style="margin-top:0"><span class="tag t-tune">tune</span> — 修哪裡</h3>
+    <pre>== SUB-PHASE: tune ==
+== VERIFIER FEEDBACK == (if rejected)
+  rejected: block_box_plot — x='step' but goal wants Recipe-level grouping
+== NODE n3 block_box_plot CURRENT params ==
+  x='step'   y='etch_time_offset'   title='各 Step…'
+== UPSTREAM n2 cols (valid values for x / y) ==
+  [eventTime, toolID, step, etch_time_offset, …]   (no recipe_id!)
+-&gt; set_param to fix, or commit_pick to chain a transform that produces recipe_id.</pre>
+  </div>
+
+  <h2>5. 案例 — SLASH-13 為何失敗（column-blindness 實證）</h2>
+
+  <p>User prompt：「EQP-01 過去 14 天<b>每個 recipe</b> 的 APC etch_time_offset 分佈 box plot 對比」</p>
+
+  <p>Agent 在 chart phase round 10 (call 23) 看到的<strong>完整</strong> prompt：</p>
+  <pre>== CANVAS NOW (2 nodes, 1 edges) ==
+  n1 [block_process_history]  params={tool_id='EQP-01', object_name='APC', time_range='14d'}
+  n2 [block_unnest]  params={column='APC.parameters'}
+  edge n1->n2
+PHASE GOAL: 展示各 Recipe 蝕刻時間偏移量的分佈對比 (expected: chart)</pre>
+
+  <div class="warn">
+    <b>沒有 n2 的 output columns。</b> Agent 只能猜，於是 emit：
+    <pre>add_node block_box_plot(x='step', y='etch_time_offset', title='各 Step 蝕刻時間偏移量分佈對比')</pre>
+    把 <code>recipe</code> 猜成 <code>step</code>（連 title 都寫錯）。它自己 commit_pick 的 reasoning 寫：
+    <span class="small">"the most relevant categorical field is 'step' (which represents different
+    process steps/recipes)"</span> — 純 guess，且把 step 跟 recipe 混為一談。
+    verifier 連 reject 2 次後 round budget 耗盡 &rarr; handover。
+  </div>
+
+  <div class="ok-box">
+    <b>修法後（construct context 給 cols）：</b> agent 會在 prompt 直接看到
+    <code>n2 cols: [..., step, etch_time_offset, ...]</code> 且 <b>沒有 recipe_id</b> —
+    於是 realize 需要先 transform 拿到 recipe 維度，主動補 block_select / 改用 flat-mode source，
+    而不是盲填 <code>x='step'</code>。
+  </div>
+
+  <h2>6. 實作計畫</h2>
+  <ol>
+    <li>flag <code>ENABLE_RICH_CANVAS_SNAPSHOT</code> &rarr; config / feature_flags / main / tests</li>
+    <li><code>_flatten_sample_one_level(d, max_chars)</code> helper + unit test</li>
+    <li><code>_build_flow_tree_md(pipeline, exec_trace)</code>（pick 用的樹狀 flow）+ test</li>
+    <li><code>_build_subphase_context_md</code> router + 3 個 block builder + tests
+        （mock exec_trace 驗證每 sub-phase 印對東西）</li>
+    <li>接線：<code>canvas_diff_text</code> 改成 flag-gated 走新 router；sub-phase hint 每 round 重印</li>
+    <li>commit + deploy + flag ON</li>
+    <li>驗證：SLASH-13 3x（目標 3/3 + box_plot 用對 col）、SLASH-11 1x、全 17 case 對照</li>
+  </ol>
+
+  <h2>7. 風險控制</h2>
+  <table>
+    <tr><th>風險</th><th>處理</th></tr>
+    <tr><td>node 未 preview（exec_trace 無 key）</td><td>只印 id/block/params + 標 <code>(not yet previewed)</code></td></tr>
+    <tr><td>寬表 50+ cols</td><td>cap 30 + <code>…(+N more)</code>；完整清單要 inspect_node_output</td></tr>
+    <tr><td>sample 深 nested</td><td>第 1 層展平，深層 value 縮 <code>{...}</code> / <code>[...]</code></td></tr>
+    <tr><td>token 暴增</td><td>flag 控 + 每 node cols&le;30 / sample&le;600 char。預估 +0.5–1.5 KB/round，遠少於省下的 5–10 round</td></tr>
+    <tr><td>「column 不存在」誤報</td><td>只在能精確 parse agent 上一個 tool_args column refs 時才警告；parse 不出就不報</td></tr>
+    <tr><td>破壞既有過關 case</td><td>flag off 完全等同現狀；on 才改。全 17 case 重跑驗證</td></tr>
+  </table>
+
+  <hr>
+  <p class="meta">
+    Source of truth: <code>python_ai_sidecar/agent_builder/graph_build/nodes/agentic_phase_loop.py</code><br>
+    Related: <code>_TOOLS_BY_SUBPHASE</code> / <code>_TRANSITIONS</code> /
+    <code>_build_observation_md</code> / <code>_build_canvas_diff_md</code> / <code>exec_trace</code><br>
+    Memory: project_slash17_baseline &middot; feedback_flow_in_graph_not_prompt &middot;
+    feedback_verbose_catalog_over_build
+  </p>
+
+</div>
+</body>
+</html>

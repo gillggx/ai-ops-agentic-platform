@@ -1247,6 +1247,240 @@ def _build_oneblock_solutions_section(
     return "\n".join(out_lines)
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Round 3 (2026-06-12) — context-aware per-sub-phase prompt assembly.
+# See docs/agent-subphase-prompt-design.html. Gated by
+# ENABLE_RICH_CANVAS_SNAPSHOT. Data source: exec_trace[node_id] (already
+# populated after every mutating action with cols + sample).
+# ─────────────────────────────────────────────────────────────────────
+
+_MAX_COLS_INLINE = 30        # cols listed before "(+N more)"
+_SAMPLE_CAP_CONSTRUCT = 600  # sample chars in construct context
+_SAMPLE_CAP_PICK = 200       # terminal sample chars in pick flow tree
+
+
+def _flatten_sample_one_level(sample: Any, max_chars: int) -> str:
+    """Render a sample row dict as a compact one-level-flat string.
+
+    Nested dict / list values are collapsed to ``{...}`` / ``[...]`` so the
+    output stays readable and bounded. Returns ``""`` for non-dict input.
+    Total length is capped at ``max_chars`` (truncated with a trailing ``…``).
+    """
+    if not isinstance(sample, dict) or not sample:
+        return ""
+    parts: list[str] = []
+    for k, v in sample.items():
+        if isinstance(v, dict):
+            rendered = "{...}"
+        elif isinstance(v, (list, tuple)):
+            rendered = "[...]"
+        elif isinstance(v, str):
+            rendered = repr(v if len(v) <= 30 else v[:27] + "…")
+        else:
+            rendered = repr(v)
+        parts.append(f"{k}: {rendered}")
+    out = "{" + ", ".join(parts) + "}"
+    if len(out) > max_chars:
+        out = out[: max_chars - 1] + "…"
+    return out
+
+
+def _node_cols(exec_trace: dict, node_id: str) -> list[str]:
+    snap = exec_trace.get(node_id)
+    if isinstance(snap, dict):
+        cols = snap.get("cols")
+        if isinstance(cols, list):
+            return [str(c) for c in cols]
+    return []
+
+
+def _fmt_cols_inline(cols: list[str]) -> str:
+    if not cols:
+        return ""
+    shown = cols[:_MAX_COLS_INLINE]
+    suffix = f" …(+{len(cols) - _MAX_COLS_INLINE} more)" if len(cols) > _MAX_COLS_INLINE else ""
+    return "[" + ", ".join(shown) + "]" + suffix
+
+
+def _build_node_data_md(
+    exec_trace: dict, node_id: str, block_id: str, *,
+    sample_cap: int, label: str = "",
+) -> list[str]:
+    """Return prompt lines describing a node's runtime output (cols + sample).
+
+    Falls back to a "(not yet previewed)" marker when exec_trace has no
+    snapshot for the node — never raises.
+    """
+    snap = exec_trace.get(node_id)
+    head = f"{label}{node_id} [{block_id}]" if label else f"{node_id} [{block_id}]"
+    if not isinstance(snap, dict):
+        return [f"  {head}  (not yet previewed — inspect_node_output to see cols)"]
+    lines = [f"  {head}"]
+    cols = _node_cols(exec_trace, node_id)
+    if cols:
+        lines.append(f"     output cols: {_fmt_cols_inline(cols)}")
+    sample = snap.get("sample")
+    flat = _flatten_sample_one_level(sample, sample_cap)
+    if flat:
+        lines.append(f"     sample: {flat}")
+    return lines
+
+
+def _build_flow_tree_md(pipeline: PipelineJSON, exec_trace: dict) -> str:
+    """Render the pipeline as a source→…→terminal tree for the pick sub-phase.
+
+    Marks canvas terminal(s) (nodes with no outgoing edge) and surfaces the
+    terminal node's output cols inline so the agent can pick the next block
+    against real available columns instead of guessing.
+    """
+    if not pipeline.nodes:
+        return "== FLOW SO FAR ==\n  (empty canvas — pick the first source block)"
+    outgoing = {e.from_.node for e in pipeline.edges}
+    incoming = {e.to.node for e in pipeline.edges}
+    # Build adjacency: node -> [downstream nodes]
+    children: dict[str, list[str]] = {}
+    for e in pipeline.edges:
+        children.setdefault(e.from_.node, []).append(e.to.node)
+    by_id = {n.id: n for n in pipeline.nodes}
+    roots = [n.id for n in pipeline.nodes if n.id not in incoming]
+    if not roots:  # cyclic / all-connected fallback — list flat
+        roots = [pipeline.nodes[0].id]
+
+    lines = ["== FLOW SO FAR =="]
+    seen: set[str] = set()
+
+    def _emit(nid: str, depth: int) -> None:
+        if nid in seen:
+            return
+        seen.add(nid)
+        node = by_id.get(nid)
+        if node is None:
+            return
+        is_terminal = nid not in outgoing
+        is_source = nid not in incoming
+        prefix = "  " + ("    " * depth)
+        connector = "[source] " if is_source else "└─> "
+        params_short = ", ".join(
+            f"{k}={v!r}"[:28] for k, v in (node.params or {}).items()
+        )[:90]
+        marker = "   <- canvas terminal" if is_terminal else ""
+        lines.append(f"{prefix}{connector}{nid} {node.block_id}({params_short}){marker}")
+        if is_terminal:
+            cols = _node_cols(exec_trace, nid)
+            if cols:
+                lines.append(f"{prefix}     terminal cols: {_fmt_cols_inline(cols)}")
+        for child in children.get(nid, []):
+            _emit(child, depth + 1)
+
+    for r in roots:
+        _emit(r, 0)
+    # Catch any nodes not reached (disconnected) so they're not hidden.
+    for n in pipeline.nodes:
+        if n.id not in seen:
+            _emit(n.id, 0)
+    return "\n".join(lines)
+
+
+def _find_committed_block(state: dict | None) -> str | None:
+    """The block_id the agent just committed to (construct sub-phase target)."""
+    if not state:
+        return None
+    return state.get("v30_pending_block")
+
+
+def _terminal_node_ids(pipeline: PipelineJSON) -> list[str]:
+    outgoing = {e.from_.node for e in pipeline.edges}
+    return [n.id for n in pipeline.nodes if n.id not in outgoing]
+
+
+def _build_subphase_context_md(
+    subphase: str | None,
+    pipeline: PipelineJSON,
+    phase: dict,
+    state: dict | None,
+) -> str:
+    """Router — emit the context block tailored to the current sub-phase.
+
+    pick      → flow tree + terminal cols (decide next block)
+    construct → upstream output cols + sample (fill params from real data)
+    tune      → node current params + upstream cols (fix the right thing)
+
+    Returns "" for unknown sub-phase so callers fall back to the legacy
+    compact snapshot.
+    """
+    exec_trace = (state or {}).get("exec_trace") or {}
+    by_id = {n.id: n for n in pipeline.nodes}
+
+    if subphase == "pick":
+        lines = ["== SUB-PHASE: pick_block =="]
+        lines.append(_build_flow_tree_md(pipeline, exec_trace))
+        lines.append("")
+        lines.append(
+            "You're choosing the NEXT block. Pick one whose inputs the "
+            "terminal cols above can satisfy. Don't guess columns you can't "
+            "see — inspect_node_output(<terminal>) if you need the full sample."
+        )
+        return "\n".join(lines)
+
+    if subphase == "construct":
+        committed = _find_committed_block(state)
+        lines = ["== SUB-PHASE: construct_node =="]
+        if committed:
+            lines.append(
+                f"You committed to {committed}. add_node it, then connect upstream."
+            )
+        # Show every terminal node's output (these are the connect-FROM
+        # candidates the new node will read).
+        terminals = _terminal_node_ids(pipeline)
+        if terminals:
+            lines.append("")
+            lines.append("== UPSTREAM OUTPUT (what you can connect FROM) ==")
+            for nid in terminals:
+                node = by_id.get(nid)
+                bid = node.block_id if node else "?"
+                lines.extend(_build_node_data_md(
+                    exec_trace, nid, bid, sample_cap=_SAMPLE_CAP_CONSTRUCT,
+                ))
+            lines.append(
+                "Fill add_node params using ONLY columns listed above. If the "
+                "column you need is not present, you must transform first."
+            )
+        return "\n".join(lines)
+
+    if subphase == "tune":
+        lines = ["== SUB-PHASE: tune =="]
+        # Current node = the most recently mutated logical id, else last node.
+        cur_nid = (state or {}).get("v30_pending_node_id") or (
+            pipeline.nodes[-1].id if pipeline.nodes else None
+        )
+        cur_node = by_id.get(cur_nid) if cur_nid else None
+        if cur_node is not None:
+            params_str = ", ".join(
+                f"{k}={v!r}" for k, v in (cur_node.params or {}).items()
+            )[:200]
+            lines.append(
+                f"== NODE {cur_node.id} [{cur_node.block_id}] CURRENT params =="
+            )
+            lines.append(f"  {params_str or '(no params set)'}")
+            # Upstream of cur_node (the source for its column values).
+            ups = [e.from_.node for e in pipeline.edges if e.to.node == cur_nid]
+            if ups:
+                lines.append("== UPSTREAM cols (valid values for your params) ==")
+                for up in ups:
+                    upnode = by_id.get(up)
+                    bid = upnode.block_id if upnode else "?"
+                    lines.extend(_build_node_data_md(
+                        exec_trace, up, bid, sample_cap=_SAMPLE_CAP_CONSTRUCT,
+                    ))
+        lines.append(
+            "set_param to fix, run_verifier when ready, or commit_pick to "
+            "chain a transform that produces a column you're missing."
+        )
+        return "\n".join(lines)
+
+    return ""
+
+
 def _build_canvas_diff_md(pipeline: PipelineJSON, phase: dict, state: dict | None = None) -> str:
     """Compact canvas snapshot for the post-action user message.
 
@@ -1302,15 +1536,34 @@ def _build_canvas_diff_md(pipeline: PipelineJSON, phase: dict, state: dict | Non
                 lines.append("  → switch to one of these; don't retry the rejected block.")
             lines.append("")
 
-    lines.append(
-        f"== CANVAS NOW ({len(pipeline.nodes)} nodes, {len(pipeline.edges)} edges) =="
+    # Round 3 (2026-06-12): ENABLE_RICH_CANVAS_SNAPSHOT — replace the bare
+    # canvas with a sub-phase-tailored context block that surfaces upstream
+    # output columns + sample, so construct/tune rounds fill params from real
+    # data instead of guessing. See docs/agent-subphase-prompt-design.html.
+    rich_on = False
+    try:
+        from python_ai_sidecar.feature_flags import is_rich_canvas_snapshot_enabled
+        rich_on = is_rich_canvas_snapshot_enabled()
+    except ImportError:
+        rich_on = False
+    subphase = (state or {}).get("v30_subphase") if state else None
+    rich_md = (
+        _build_subphase_context_md(subphase, pipeline, phase, state)
+        if rich_on else ""
     )
-    for n in pipeline.nodes[:20]:
-        params_short = ", ".join(f"{k}={v!r}"[:40] for k, v in (n.params or {}).items())[:120]
-        lines.append(f"  {n.id} [{n.block_id}]  params={{{params_short}}}")
-    for e in pipeline.edges[:20]:
-        lines.append(f"  edge {e.from_.node}->{e.to.node}")
-    lines.append("")
+    if rich_md:
+        lines.append(rich_md)
+        lines.append("")
+    else:
+        lines.append(
+            f"== CANVAS NOW ({len(pipeline.nodes)} nodes, {len(pipeline.edges)} edges) =="
+        )
+        for n in pipeline.nodes[:20]:
+            params_short = ", ".join(f"{k}={v!r}"[:40] for k, v in (n.params or {}).items())[:120]
+            lines.append(f"  {n.id} [{n.block_id}]  params={{{params_short}}}")
+        for e in pipeline.edges[:20]:
+            lines.append(f"  edge {e.from_.node}->{e.to.node}")
+        lines.append("")
 
     # v30.12 (2026-05-17) — matched-only CONNECT OPTIONS view.
     # For each node with un-connected input ports, list type-compatible
