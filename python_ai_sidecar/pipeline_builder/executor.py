@@ -222,11 +222,19 @@ def _preview_output(outputs: dict[str, Any], sample_size: int = _PREVIEW_ROWS_DE
     preview: dict[str, Any] = {}
     for port, value in outputs.items():
         if isinstance(value, pd.DataFrame):
-            cols = list(value.columns)[:_PREVIEW_MAX_COLS]
+            all_cols = list(value.columns)
+            cols = all_cols[:_PREVIEW_MAX_COLS]
             head = value.head(sample_size)[cols]
             preview[port] = {
                 "type": "dataframe",
+                # `columns` + `rows` stay capped (sample economy — sample data
+                # for 300-col flat tables would bloat the agent auto-preview +
+                # trace). `all_columns` carries the FULL name list (cheap,
+                # names only) so the UI column picker can offer every column —
+                # flat-mode (nested=false) tables have 200-300 cols and the 30
+                # cap made e.g. apc_etch_time_offset unreachable in the picker.
                 "columns": cols,
+                "all_columns": all_cols,
                 "rows": head.astype(object).where(head.notna(), None).to_dict(orient="records"),
                 "total": int(len(value)),
             }

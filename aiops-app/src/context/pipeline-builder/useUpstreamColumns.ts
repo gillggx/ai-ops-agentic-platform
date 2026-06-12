@@ -52,13 +52,22 @@ async function fetchPortColumns(pipeline: PipelineJSON, upstreamNodeId: string):
   });
   if (res.status === "validation_error") return [];
   const nr = res.node_result as
-    | { status: string; preview: Record<string, { type?: string; columns?: string[] }> | null }
+    | {
+        status: string;
+        preview: Record<
+          string,
+          { type?: string; columns?: string[]; all_columns?: string[] }
+        > | null;
+      }
     | null;
   if (!nr || nr.status !== "success" || !nr.preview) return [];
-  // Take the first dataframe-typed port
+  // Take the first dataframe-typed port. Prefer `all_columns` (full name list,
+  // uncapped) over `columns` (capped at 30 for sample-row economy) so the
+  // picker can offer every column — flat-mode tables have 200-300 cols.
   for (const [, block] of Object.entries(nr.preview)) {
-    if (block?.type === "dataframe" && Array.isArray(block.columns)) {
-      return block.columns;
+    if (block?.type === "dataframe") {
+      if (Array.isArray(block.all_columns)) return block.all_columns;
+      if (Array.isArray(block.columns)) return block.columns;
     }
   }
   return [];

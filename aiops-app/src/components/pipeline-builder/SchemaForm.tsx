@@ -511,7 +511,8 @@ function ColumnPicker({
     .join("; ");
 
   const currentValue = value === undefined || value === null ? "" : String(value);
-  const currentValueInList = columns.includes(currentValue);
+  const listId = `col-list-${name}`;
+  const hasCols = columns.length > 0;
 
   // Note: we do NOT clear the focus target on blur — if we did, clicking a
   // preview header (which blurs the picker) would clear the target before the
@@ -521,48 +522,39 @@ function ColumnPicker({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      {/* primary widget: select if we have columns, otherwise text */}
-      {columns.length > 0 ? (
-        <select
-          data-testid={`column-picker-${name}`}
-          style={commonStyle}
-          value={currentValue}
-          onChange={(e) => onChange(e.target.value || undefined)}
-          onFocus={registerFocus}
-          disabled={disabled}
-        >
-          <option value="" disabled={false}>
-            — 請選擇欄位 —
-          </option>
-          {!currentValueInList && currentValue && (
-            <option value={currentValue}>{currentValue} (custom)</option>
-          )}
+      {/* Searchable combobox: type-to-filter over upstream columns via a native
+          <datalist>, but still accepts a custom column name (free text). Native
+          datalist gives the filter dropdown with zero extra state — needed
+          because flat-mode (nested=false) tables expose 200-300 columns and a
+          plain <select> (a) was capped at 30 upstream and (b) is unusable
+          without search even when uncapped. */}
+      <input
+        data-testid={`column-picker-${name}`}
+        type="text"
+        list={hasCols ? listId : undefined}
+        value={currentValue}
+        onChange={(e) => onChange(e.target.value || undefined)}
+        onFocus={registerFocus}
+        disabled={disabled}
+        style={{ ...commonStyle, borderColor }}
+        placeholder={hasCols ? "輸入以搜尋欄位，或手動輸入" : "手動輸入欄位名"}
+        autoComplete="off"
+      />
+      {hasCols && (
+        <datalist id={listId}>
           {columns.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
+            <option key={c} value={c} />
           ))}
-        </select>
-      ) : (
-        <input
-          data-testid={`column-picker-${name}`}
-          type="text"
-          value={currentValue}
-          onChange={(e) => onChange(e.target.value || undefined)}
-          onFocus={registerFocus}
-          disabled={disabled}
-          style={{ ...commonStyle, borderColor }}
-          placeholder="手動輸入欄位名"
-        />
+        </datalist>
       )}
 
       {/* hint line */}
       <div style={{ fontSize: 10, color: "#94A3B8", lineHeight: 1.3 }}>
         {upstreamLoading && <>⏳ 載入上游欄位中…</>}
-        {!upstreamLoading && columns.length > 0 && (
-          <>✓ 從上游 <code style={codeStyle}>{portsSpec}</code> 推論出 {columns.length} 個欄位；focus 後可點 Preview 欄位名自動填入</>
+        {!upstreamLoading && hasCols && (
+          <>✓ 從上游 <code style={codeStyle}>{portsSpec}</code> 推論出 {columns.length} 個欄位；輸入即時搜尋，或點 Preview 欄位名自動填入</>
         )}
-        {!upstreamLoading && columns.length === 0 && !portErr && (
+        {!upstreamLoading && !hasCols && !portErr && (
           <>⚠️ 上游尚無資料。請先連線或手動輸入欄位名</>
         )}
         {!upstreamLoading && portErr && (
