@@ -1424,18 +1424,25 @@ def _build_subphase_context_md(
 
     if subphase == "construct":
         committed = _find_committed_block(state)
+        pending_nid = (state or {}).get("v30_pending_node_id")
         lines = ["== SUB-PHASE: construct_node =="]
         if committed:
             lines.append(
                 f"You committed to {committed}. add_node it, then connect upstream."
             )
-        # Show every terminal node's output (these are the connect-FROM
-        # candidates the new node will read).
-        terminals = _terminal_node_ids(pipeline)
-        if terminals:
+        # DATA AVAILABLE = every node already PREVIEWED (has cols in exec_trace),
+        # excluding the node currently being built (pending_nid). This is the
+        # set of columns the new node can read FROM. Listing all previewed
+        # nodes (not just canvas "terminals") avoids the earlier bug where a
+        # freshly add_node'd, unconnected node showed up as its own upstream.
+        previewed = [
+            n.id for n in pipeline.nodes
+            if n.id != pending_nid and _node_cols(exec_trace, n.id)
+        ]
+        if previewed:
             lines.append("")
-            lines.append("== UPSTREAM OUTPUT (what you can connect FROM) ==")
-            for nid in terminals:
+            lines.append("== DATA AVAILABLE ON CANVAS (connect FROM one of these) ==")
+            for nid in previewed:
                 node = by_id.get(nid)
                 bid = node.block_id if node else "?"
                 lines.extend(_build_node_data_md(
@@ -1443,7 +1450,13 @@ def _build_subphase_context_md(
                 ))
             lines.append(
                 "Fill add_node params using ONLY columns listed above. If the "
-                "column you need is not present, you must transform first."
+                "column you need is NOT present, add a transform (block_select / "
+                "block_pluck) to produce it first — don't guess a column name."
+            )
+        else:
+            lines.append(
+                "(no previewed upstream yet — inspect_node_output on a source "
+                "node to see its columns before filling params)"
             )
         return "\n".join(lines)
 

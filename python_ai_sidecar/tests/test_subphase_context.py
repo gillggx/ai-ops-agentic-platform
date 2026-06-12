@@ -159,10 +159,36 @@ def test_router_construct_surfaces_upstream_cols():
     out = _build_subphase_context_md("construct", pipe, {"expected": "chart"}, state)
     assert "SUB-PHASE: construct_node" in out
     assert "committed to block_box_plot" in out
-    assert "UPSTREAM OUTPUT" in out
+    assert "DATA AVAILABLE ON CANVAS" in out
     assert "etch_time_offset" in out
     assert "recipe_id" not in out  # the column the agent wrongly guessed
     assert "ONLY columns listed above" in out
+
+
+def test_router_construct_excludes_just_added_node():
+    """Labeling-bug fix: a freshly add_node'd node (== v30_pending_node_id)
+    must NOT show up as its own upstream. Only previously-previewed nodes
+    appear under DATA AVAILABLE."""
+    pipe = _pipe(
+        [_node("n1", "block_process_history"), _node("n2", "block_box_plot")],
+        [],  # n2 just added, not yet connected
+    )
+    state = {
+        "v30_pending_block": "block_box_plot",
+        "v30_pending_node_id": "n2",   # n2 is the node being built
+        "exec_trace": {
+            "n1": {"cols": ["eventTime", "recipe_id", "etch_time_offset"],
+                   "sample": {"recipe_id": "RCP-A"}},
+            # n2 not previewed
+        },
+    }
+    out = _build_subphase_context_md("construct", pipe, {"expected": "chart"}, state)
+    # n1 (previewed source) shows; n2 (the pending node) must not be listed as upstream
+    assert "n1 [block_process_history]" in out
+    assert "recipe_id" in out
+    # n2 should NOT appear in the DATA AVAILABLE section as its own upstream
+    data_section = out.split("DATA AVAILABLE ON CANVAS")[-1]
+    assert "n2 [block_box_plot]" not in data_section
 
 
 def test_router_tune_shows_current_params_and_upstream():
@@ -188,8 +214,11 @@ def test_router_unknown_subphase_returns_empty():
     assert _build_subphase_context_md(None, pipe, {}, {}) == ""
 
 
-def test_router_construct_marks_unpreviewed_terminal():
+def test_router_construct_no_previewed_upstream():
+    """When no upstream node has been previewed yet, construct context tells
+    the agent to inspect a source first (rather than listing noise)."""
     pipe = _pipe([_node("n1", "block_process_history")], [])
     state = {"v30_pending_block": "block_filter", "exec_trace": {}}
     out = _build_subphase_context_md("construct", pipe, {"expected": "transform"}, state)
-    assert "not yet previewed" in out
+    assert "no previewed upstream yet" in out
+    assert "inspect_node_output" in out
