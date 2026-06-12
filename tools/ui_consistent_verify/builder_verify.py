@@ -99,6 +99,7 @@ def main():
 
     def run_stream(label, url, body):
         nonlocal ui_count, drop_count, by_type, plan_required_sid, build_status
+        nonlocal build_finalized_ok, missing_output_reason
         print(f"[META] {label}: POST {url}  body_keys={list(body.keys())}")
         r = requests.post(url, json=body, headers=hdr, stream=True, timeout=900)
         print(f"[META] HTTP {r.status_code}")
@@ -134,6 +135,12 @@ def main():
                     extra = f"  failed_at={d.get('failed_phase_id')} reason={_short(d.get('reason') or '', 60)}"
                 elif ev == "handover_chosen":
                     extra = f"  choice={d.get('choice')} auto={d.get('auto_chosen')}"
+                elif ev == "build_finalized":
+                    build_finalized_ok = bool(d.get("ok"))
+                    missing_output_reason = d.get("missing_output_reason")
+                    extra = f"  ok={build_finalized_ok}"
+                    if missing_output_reason:
+                        extra += f"  missing_output={_short(missing_output_reason, 80)}"
                 elif ev == "done":
                     nodes = len((d.get('pipeline_json') or {}).get('nodes') or [])
                     extra = f"  status={d.get('status')} nodes={nodes}"
@@ -147,6 +154,8 @@ def main():
 
     ui_count = 0; drop_count = 0; by_type = {}; plan_required_sid = None
     build_status = None
+    build_finalized_ok = None
+    missing_output_reason = None
     t0 = time.time()
 
     cont = run_stream("initial /agent/build",
@@ -167,7 +176,21 @@ def main():
     for t, c in sorted(by_type.items(), key=lambda x: -x[1]):
         flag = "" if t in BUILDER_UI_HANDLED_EVENTS else " [DROP]"
         print(f"  {c:4d}  {t}{flag}")
-    return 0
+
+    # A build is OK *only* if it finished AND finalize said ok=True. Anything
+    # else — handover_pending, failed*, build_partial, failed_missing_output —
+    # is NOT a success. Exit code reflects this so a wrapper can't read rc=0 as
+    # "passed" while the build silently produced no deliverable (the C2 problem).
+    finished = build_status == "finished"
+    ok = finished and (build_finalized_ok is not False)
+    if ok:
+        print("[VERDICT] OK — build finished with a deliverable")
+        return 0
+    if missing_output_reason:
+        print(f"[VERDICT] FAIL — missing deliverable: {missing_output_reason}")
+    else:
+        print(f"[VERDICT] FAIL — build status={build_status!r} ok={build_finalized_ok!r}")
+    return 1
 
 
 if __name__ == "__main__":

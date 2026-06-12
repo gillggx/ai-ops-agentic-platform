@@ -18,6 +18,10 @@ Performance flags are read at startup from env (see ``config.py``):
     columns + sample so params are filled from real data, not guessed.
   - ``ENABLE_PLAN_KNOWLEDGE`` — inject agent_knowledge (high-priority + RAG) into
     the v30 builder goal_plan_node (was dead for v30 — only legacy plan_node read it).
+  - ``ENABLE_STRICT_PHASE_OUTPUT`` — finalize_node fails the build with
+    ``failed_missing_output`` when the plan's final phase wants a presentation
+    kind (chart/table/scalar/alarm) but no terminal block covers it. Plan-level
+    deliverable fact check, not a prompt rule.
 
 Callers read the *effective* flag via the ``is_*_enabled()`` helpers so a single
 request can be steered without restarting the sidecar — useful for A/B
@@ -51,6 +55,7 @@ _KNOWN_FLAGS = (
     "no_duplicate_node",
     "rich_canvas_snapshot",
     "plan_knowledge",
+    "strict_phase_output",
 )
 
 # Per-request override map. Empty dict ⇒ no override, fall back to CONFIG.
@@ -132,3 +137,7 @@ def is_rich_canvas_snapshot_enabled() -> bool:
 
 def is_plan_knowledge_enabled() -> bool:
     return _effective("plan_knowledge", CONFIG.enable_plan_knowledge)
+
+
+def is_strict_phase_output_enabled() -> bool:
+    return _effective("strict_phase_output", CONFIG.enable_strict_phase_output)

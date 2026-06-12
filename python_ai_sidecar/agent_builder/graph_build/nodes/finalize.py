@@ -21,6 +21,7 @@ import os
 from typing import Any
 
 from python_ai_sidecar.agent_builder.graph_build.state import BuildGraphState
+from python_ai_sidecar.feature_flags import is_strict_phase_output_enabled
 from python_ai_sidecar.pipeline_builder.block_registry import BlockRegistry
 from python_ai_sidecar.pipeline_builder.executor import PipelineExecutor
 from python_ai_sidecar.pipeline_builder.pipeline_schema import PipelineJSON
@@ -44,6 +45,56 @@ SIDE_EFFECT_BLOCKS: frozenset[str] = frozenset({
 # Default dry-run timeout. 7-node SPC pipelines run ~1-2s; 10s leaves
 # headroom without making finalize feel blocking.
 DRYRUN_TIMEOUT_SEC = 10.0
+
+# C2: user-visible deliverable kinds. If the plan's FINAL phase wants one of
+# these but the built canvas has no terminal block covering it, the build lost
+# its deliverable — surfaced as failed_missing_output (ENABLE_STRICT_PHASE_OUTPUT).
+# Intermediate kinds (raw_data / transform / verdict) are excluded: they are
+# legitimately consumed by a downstream presentation block, so they are often
+# NOT terminal even on a correct build.
+_PRESENTATION_KINDS: frozenset[str] = frozenset({"chart", "table", "scalar", "alarm"})
+
+
+def _missing_deliverable_reason(
+    pipeline: PipelineJSON,
+    v30_phases: list[dict[str, Any]],
+    registry: Any,
+) -> str:
+    """C2 — pure deliverable fact-check.
+
+    Returns a human-readable reason iff the plan's FINAL phase declares a
+    presentation kind (chart/table/scalar/alarm) that NO terminal block on the
+    built canvas covers. Returns "" when the deliverable is satisfied, the final
+    phase isn't a presentation kind, or the check can't run (fail-open — an infra
+    hiccup must never mask a real build).
+
+    Caller is responsible for gating on ENABLE_STRICT_PHASE_OUTPUT + v30 path.
+    Only the plan's last phase is checked, not every presentation phase: a
+    table->chart plan keeps the table NON-terminal on a correct build, so a
+    per-phase check would false-positive.
+    """
+    if not v30_phases:
+        return ""
+    final_expected = (v30_phases[-1].get("expected") or "").strip()
+    if final_expected not in _PRESENTATION_KINDS:
+        return ""
+    from python_ai_sidecar.agent_builder.graph_build.nodes.agentic_phase_loop import (
+        _terminal_block_matches_expected,
+    )
+    try:
+        if _terminal_block_matches_expected(pipeline, final_expected, registry):
+            return ""
+    except Exception as exc:  # noqa: BLE001 — infra hiccup must not mask a build
+        logger.warning(
+            "finalize_node: strict_phase_output check crashed, fail-open: %s", exc
+        )
+        return ""
+    outgoing = {e.from_.node for e in pipeline.edges}
+    terminal_ids = [n.block_id for n in pipeline.nodes if n.id not in outgoing]
+    return (
+        f"plan's final deliverable is '{final_expected}' but no terminal block "
+        f"on the canvas covers it (terminals: {terminal_ids or 'none'})"
+    )
 
 
 def _compact_node_result(info: dict[str, Any]) -> dict[str, Any]:
@@ -222,7 +273,28 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
     else:
         status = "finished"
 
-    if structural_issues:
+    # C2: strict plan-deliverable check (ENABLE_STRICT_PHASE_OUTPUT, default OFF).
+    # The phase loop's covers gate is advisory — a phase can advance WITHOUT its
+    # expected terminal block on canvas — so v30 can mark all phases done yet ship
+    # a pipeline missing the actual deliverable (user asked for a chart, pipeline
+    # ends in block_filter). That silently became `finished` (ok=True) and the
+    # false-success was invisible. Here we fact-check the plan's FINAL phase
+    # deliverable kind against the built canvas's terminal blocks. This is a
+    # plan-level deterministic fact check, NOT a prompt rule.
+    missing_output_reason = ""
+    if status == "finished" and is_v30_path and is_strict_phase_output_enabled():
+        missing_output_reason = _missing_deliverable_reason(
+            pipeline, v30_phases, registry
+        )
+        if missing_output_reason:
+            status = "failed_missing_output"
+            logger.warning(
+                "finalize_node: strict_phase_output FAIL — %s", missing_output_reason
+            )
+
+    if status == "failed_missing_output":
+        issue_summary = f" [no] missing deliverable — {missing_output_reason}"
+    elif structural_issues:
         issue_summary = (
             f" ❌ {len(structural_issues)} structural error(s) — "
             f"pipeline cannot be safely rendered. Try the build again "
@@ -256,6 +328,7 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
         "validator_warnings": len(advisory_issues),
         "validator_issues": advisory_issues[:5],  # cap to keep SSE small
         "structural_errors": structural_issues[:5],
+        "missing_output_reason": missing_output_reason or None,
         "summary": summary,
     })]
 

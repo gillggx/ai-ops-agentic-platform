@@ -46,6 +46,12 @@ class SidecarConfig:
     # v30 builder goal_plan_node. Was dead for v30 — goal_plan never read it,
     # only the legacy plan_node did. See SLASH-13 analysis.
     enable_plan_knowledge: bool
+    # C2 (2026-06-12): strict plan-deliverable check in finalize_node. When the
+    # plan's final phase declares a presentation kind (chart/table/scalar/alarm)
+    # but the built pipeline has NO terminal block covering it, force a surfaced
+    # `failed_missing_output` instead of a silent `finished`. Catches "asked for
+    # chart, got no chart" false-success. Plan-level fact check, NOT a prompt rule.
+    enable_strict_phase_output: bool
 
     @classmethod
     def from_env(cls) -> "SidecarConfig":
@@ -72,6 +78,7 @@ class SidecarConfig:
             enable_no_duplicate_node=_read_bool_env("ENABLE_NO_DUPLICATE_NODE", default=False),
             enable_rich_canvas_snapshot=_read_bool_env("ENABLE_RICH_CANVAS_SNAPSHOT", default=False),
             enable_plan_knowledge=_read_bool_env("ENABLE_PLAN_KNOWLEDGE", default=False),
+            enable_strict_phase_output=_read_bool_env("ENABLE_STRICT_PHASE_OUTPUT", default=False),
         )
 
 
