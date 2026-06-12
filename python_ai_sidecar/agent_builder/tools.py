@@ -780,6 +780,55 @@ class BuilderToolset:
                 hint="Call list_blocks() to see available blocks.",
             )
         pipeline = self.session.pipeline_json
+
+        # ── Orphan duplicate guard (ENABLE_NO_DUPLICATE_NODE, 2026-06-12) ──
+        # KIMI K2.5 occasionally exhibits "echo" behaviour: emits the same
+        # add_node a second time despite the canvas state clearly showing the
+        # first one landed (e.g. SLASH-13 R2 trace, calls 2 + 3). Catch the
+        # signature — same block_id + same params on canvas AND the existing
+        # node has no downstream edges (orphan) — and surface a redirecting
+        # error so the agent picks one of {phase_complete, inspect, fan-out
+        # with different params}.
+        # Scoped to ORPHANS so parallel-chain DAGs (rare but legitimate, e.g.
+        # two filter chains with identical filter params downstream of two
+        # different sources) are not affected.
+        try:
+            from python_ai_sidecar.feature_flags import is_no_duplicate_node_enabled
+            if is_no_duplicate_node_enabled():
+                existing_orphan = None
+                outgoing_nodes = {e.from_.node for e in pipeline.edges}
+                for n in pipeline.nodes:
+                    if (n.block_id == block_name
+                        and (n.params or {}) == (params or {})
+                        and n.id not in outgoing_nodes):
+                        existing_orphan = n
+                        break
+                if existing_orphan is not None:
+                    raise ToolError(
+                        code="DUPLICATE_NODE",
+                        message=(
+                            f"Identical orphan node already exists: "
+                            f"{existing_orphan.id} ({block_name} with the same "
+                            "params and no downstream connection)."
+                        ),
+                        hint=(
+                            "Canvas already has this exact block + params with "
+                            "nothing connected downstream — looks like a retry "
+                            "rather than a deliberate action. Choose ONE:\n"
+                            f"  (a) call phase_complete if {existing_orphan.id} "
+                            "is the data source you wanted\n"
+                            f"  (b) call inspect_node_output(node_id='{existing_orphan.id}') "
+                            "to verify its output first\n"
+                            "  (c) call add_node with DIFFERENT params (e.g. a "
+                            "different tool_id) if you intended a fan-out\n"
+                            f"  (d) call abort_node + remove_node "
+                            f"node_id='{existing_orphan.id}' if the existing one "
+                            "is wrong"
+                        ),
+                    )
+        except ImportError:
+            pass  # standalone runs without sidecar package — skip guard
+
         # Reject `$xxx` placeholders that don't match a declared input before
         # the node hits canvas via SSE — see _check_placeholder_declared.
         for k, v in (params or {}).items():

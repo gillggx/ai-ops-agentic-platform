@@ -10,6 +10,9 @@ Performance flags are read at startup from env (see ``config.py``):
     lands on canvas (saves 1 LLM round per phase)
   - ``ENABLE_STRICT_TOOL_ID`` — block_process_history rejects tool_id='ALL'/'*'
     sentinel values at build-time, forcing agent into fan-out or mcp_call pattern
+  - ``ENABLE_NO_DUPLICATE_NODE`` — add_node rejects when canvas already has an
+    orphan (no downstream edges) node with identical (block_id, params). Catches
+    KIMI's "echo" behaviour without false-positives on parallel-chain DAGs.
 
 Callers read the *effective* flag via the ``is_*_enabled()`` helpers so a single
 request can be steered without restarting the sidecar — useful for A/B
@@ -40,6 +43,7 @@ _KNOWN_FLAGS = (
     "atomic_add_connect",
     "auto_verifier",
     "strict_tool_id",
+    "no_duplicate_node",
 )
 
 # Per-request override map. Empty dict ⇒ no override, fall back to CONFIG.
@@ -109,3 +113,7 @@ def is_auto_verifier_enabled() -> bool:
 
 def is_strict_tool_id_enabled() -> bool:
     return _effective("strict_tool_id", CONFIG.enable_strict_tool_id)
+
+
+def is_no_duplicate_node_enabled() -> bool:
+    return _effective("no_duplicate_node", CONFIG.enable_no_duplicate_node)

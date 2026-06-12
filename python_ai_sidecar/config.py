@@ -33,6 +33,10 @@ class SidecarConfig:
     enable_atomic_add_connect: bool
     enable_auto_verifier: bool
     enable_strict_tool_id: bool
+    # Round 2 (2026-06-12): orphan-duplicate add_node guard. Rejects when canvas
+    # already has a node with the same (block_id, params) AND no downstream
+    # edges — KIMI's "echo" behaviour signature. See SLASH-13 R2 trace analysis.
+    enable_no_duplicate_node: bool
 
     @classmethod
     def from_env(cls) -> "SidecarConfig":
@@ -56,6 +60,7 @@ class SidecarConfig:
             enable_atomic_add_connect=_read_bool_env("ENABLE_ATOMIC_ADD_CONNECT", default=False),
             enable_auto_verifier=_read_bool_env("ENABLE_AUTO_VERIFIER", default=False),
             enable_strict_tool_id=_read_bool_env("ENABLE_STRICT_TOOL_ID", default=False),
+            enable_no_duplicate_node=_read_bool_env("ENABLE_NO_DUPLICATE_NODE", default=False),
         )
 
 

@@ -97,6 +97,26 @@ def test_round1_env_defaults(monkeypatch):
     assert ff.is_strict_tool_id_enabled() is True
 
 
+def test_no_duplicate_node_flag_round_trip(monkeypatch):
+    """Round 2 (2026-06-12): orphan-duplicate guard flag."""
+    from python_ai_sidecar.feature_flags import parse_feature_flags_header
+    assert parse_feature_flags_header("no_duplicate_node:on") == {"no_duplicate_node": True}
+
+    monkeypatch.setenv("ENABLE_NO_DUPLICATE_NODE", "0")
+    import python_ai_sidecar.config as cfg
+    importlib.reload(cfg)
+    import python_ai_sidecar.feature_flags as ff
+    importlib.reload(ff)
+    assert ff.is_no_duplicate_node_enabled() is False
+
+    tok = ff.set_request_overrides({"no_duplicate_node": True})
+    try:
+        assert ff.is_no_duplicate_node_enabled() is True
+    finally:
+        ff.reset_request_overrides(tok)
+    assert ff.is_no_duplicate_node_enabled() is False
+
+
 def test_overrides_take_precedence_over_env(monkeypatch):
     # Force default-off envs, then verify override flips both.
     monkeypatch.setenv("ENABLE_PROMPT_CACHE", "0")
