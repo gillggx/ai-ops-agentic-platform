@@ -42,6 +42,10 @@ class SidecarConfig:
     # rounds can fill params without blind-guessing. See
     # docs/agent-subphase-prompt-design.html.
     enable_rich_canvas_snapshot: bool
+    # Round 4 (2026-06-12): inject agent_knowledge (high-priority + RAG) into the
+    # v30 builder goal_plan_node. Was dead for v30 — goal_plan never read it,
+    # only the legacy plan_node did. See SLASH-13 analysis.
+    enable_plan_knowledge: bool
 
     @classmethod
     def from_env(cls) -> "SidecarConfig":
@@ -67,6 +71,7 @@ class SidecarConfig:
             enable_strict_tool_id=_read_bool_env("ENABLE_STRICT_TOOL_ID", default=False),
             enable_no_duplicate_node=_read_bool_env("ENABLE_NO_DUPLICATE_NODE", default=False),
             enable_rich_canvas_snapshot=_read_bool_env("ENABLE_RICH_CANVAS_SNAPSHOT", default=False),
+            enable_plan_knowledge=_read_bool_env("ENABLE_PLAN_KNOWLEDGE", default=False),
         )
 
 

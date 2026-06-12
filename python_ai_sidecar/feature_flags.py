@@ -16,6 +16,8 @@ Performance flags are read at startup from env (see ``config.py``):
   - ``ENABLE_RICH_CANVAS_SNAPSHOT`` — mid-phase prompt becomes context-aware per
     sub-phase (pick/construct/tune); construct+tune rounds show upstream output
     columns + sample so params are filled from real data, not guessed.
+  - ``ENABLE_PLAN_KNOWLEDGE`` — inject agent_knowledge (high-priority + RAG) into
+    the v30 builder goal_plan_node (was dead for v30 — only legacy plan_node read it).
 
 Callers read the *effective* flag via the ``is_*_enabled()`` helpers so a single
 request can be steered without restarting the sidecar — useful for A/B
@@ -48,6 +50,7 @@ _KNOWN_FLAGS = (
     "strict_tool_id",
     "no_duplicate_node",
     "rich_canvas_snapshot",
+    "plan_knowledge",
 )
 
 # Per-request override map. Empty dict ⇒ no override, fall back to CONFIG.
@@ -125,3 +128,7 @@ def is_no_duplicate_node_enabled() -> bool:
 
 def is_rich_canvas_snapshot_enabled() -> bool:
     return _effective("rich_canvas_snapshot", CONFIG.enable_rich_canvas_snapshot)
+
+
+def is_plan_knowledge_enabled() -> bool:
+    return _effective("plan_knowledge", CONFIG.enable_plan_knowledge)

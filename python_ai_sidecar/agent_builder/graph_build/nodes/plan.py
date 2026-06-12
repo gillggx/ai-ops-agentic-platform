@@ -469,49 +469,15 @@ async def plan_node(state: BuildGraphState) -> dict[str, Any]:
     #     of RAG cosine — Cohere multilingual recall on long Chinese queries
     #     is patchy. SQL-only fetch by priority, ~5 rows × ~500 chars = small.
     # (2) RAG bonus: cosine-similar entries by query, when available.
-    knowledge_hint = ""
-    try:
-        from python_ai_sidecar.agent_orchestrator_v2.nodes.load_context import (
-            _build_knowledge_block,
-        )
-        from python_ai_sidecar.clients.java_client import JavaAPIClient
-        from python_ai_sidecar.config import CONFIG
-
-        java = JavaAPIClient(
-            CONFIG.java_api_url, CONFIG.java_internal_token,
-            timeout_sec=CONFIG.java_timeout_sec,
-        )
-        uid = state.get("user_id") or 1   # admin owns global-scope rows
-
-        # Layer 1: always-on high-priority first-principle rules.
-        sections: list[str] = []
-        try:
-            hp_rows = await java.list_high_priority_knowledge(user_id=uid, limit=20)
-        except Exception as ex:  # noqa: BLE001
-            logger.info("plan_node: high-priority knowledge fetch failed (%s)", ex)
-            hp_rows = []
-        if hp_rows:
-            lines = ["## Domain first principles (always-on)"]
-            for r in hp_rows:
-                lines.append(f"  ### {r.get('title','')}")
-                body = (r.get("body") or "").strip()
-                if body:
-                    # Indent for readability — keeps prompt compact but visible
-                    lines.append("\n".join(f"    {ln}" for ln in body.split("\n")))
-            sections.append("\n".join(lines))
-
-        # Layer 2: RAG-retrieved (cosine-matched) additional knowledge.
-        rag_block = await _build_knowledge_block(
-            java, user_id=uid, query_text=state["instruction"],
-            skill_slug=None, tool_id=None, recipe_id=None,
-        )
-        if rag_block:
-            sections.append(rag_block)
-
-        if sections:
-            knowledge_hint = "\n\n" + "\n\n".join(sections)
-    except Exception as ex:  # noqa: BLE001
-        logger.info("plan_node: knowledge retrieval skipped (%s)", ex)
+    # Knowledge injection extracted to a shared helper (2026-06-12) so the v30
+    # goal_plan_node can reuse the same two-layer logic. plan_node always
+    # injects (legacy v27 behaviour preserved — no flag gate here).
+    from python_ai_sidecar.agent_builder.graph_build.nodes._knowledge_inject import (
+        build_knowledge_hint,
+    )
+    knowledge_hint = await build_knowledge_hint(
+        state["instruction"], user_id=state.get("user_id") or 1, source="plan",
+    )
 
     # v15 G2: weave previous modify requests (if user reviewed plan and
     # asked for changes) so this replan attempt addresses them. Each

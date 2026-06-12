@@ -137,6 +137,26 @@ def test_rich_canvas_snapshot_flag_round_trip(monkeypatch):
     assert ff.is_rich_canvas_snapshot_enabled() is False
 
 
+def test_plan_knowledge_flag_round_trip(monkeypatch):
+    """Round 4 (2026-06-12): goal_plan agent_knowledge injection flag."""
+    from python_ai_sidecar.feature_flags import parse_feature_flags_header
+    assert parse_feature_flags_header("plan_knowledge:on") == {"plan_knowledge": True}
+
+    monkeypatch.setenv("ENABLE_PLAN_KNOWLEDGE", "0")
+    import python_ai_sidecar.config as cfg
+    importlib.reload(cfg)
+    import python_ai_sidecar.feature_flags as ff
+    importlib.reload(ff)
+    assert ff.is_plan_knowledge_enabled() is False
+
+    tok = ff.set_request_overrides({"plan_knowledge": True})
+    try:
+        assert ff.is_plan_knowledge_enabled() is True
+    finally:
+        ff.reset_request_overrides(tok)
+    assert ff.is_plan_knowledge_enabled() is False
+
+
 def test_overrides_take_precedence_over_env(monkeypatch):
     # Force default-off envs, then verify override flips both.
     monkeypatch.setenv("ENABLE_PROMPT_CACHE", "0")

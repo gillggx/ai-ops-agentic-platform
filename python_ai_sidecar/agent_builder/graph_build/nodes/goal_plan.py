@@ -443,11 +443,30 @@ async def goal_plan_node(state: BuildGraphState) -> dict[str, Any]:
         if skill_step_mode else ""
     )
 
+    # Round 4 (2026-06-12): inject agent_knowledge (high-priority + RAG) so the
+    # planner gets cross-cutting domain steering (e.g. "參數分佈 chart 用
+    # flat-mode 別 unnest"). Previously dead for v30 — only legacy plan_node
+    # injected knowledge. Gated by ENABLE_PLAN_KNOWLEDGE; best-effort (empty on
+    # any failure). See SLASH-13 analysis + docs/agent-subphase-prompt-design.html.
+    knowledge_section = ""
+    try:
+        from python_ai_sidecar.feature_flags import is_plan_knowledge_enabled
+        if is_plan_knowledge_enabled():
+            from python_ai_sidecar.agent_builder.graph_build.nodes._knowledge_inject import (
+                build_knowledge_hint,
+            )
+            knowledge_section = await build_knowledge_hint(
+                instruction, user_id=state.get("user_id") or 1, source="goal_plan",
+            )
+    except Exception as ex:  # noqa: BLE001
+        logger.info("goal_plan_node: knowledge injection skipped (%s)", ex)
+
     user_msg = (
         f"USER NEED:\n{instruction[:2000]}"
         f"{inputs_section}"
         f"{skill_section}"
         f"{existing_nodes_section}"
+        f"{knowledge_section}"
     )
 
     client = get_llm_client()
