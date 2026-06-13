@@ -23,13 +23,16 @@ File schema (one .json per build):
   "skill_step_mode": bool,
   "declared_inputs": [...],         # base_pipeline.inputs at build start
   "graph_steps":   [{node, status, duration_ms, **fields}, ...],
-  "llm_calls":     [{node, system_chars, user_msg, raw_response, parsed?}, ...],
+  "llm_calls":     [{node, system_chars, user_msg, raw_response, parsed?,
+                     reasoning_content?}, ...],   # reasoning_content: CoT (2026-06-14)
   # v30.1.1 (2026-05-16): structured decision records for empathetic debug
   "decision_records": [
     {
       "node": "agentic_phase_loop" | "goal_plan" | "phase_revise",
       "phase_id": str | None,
       "round": int | None,
+      "sub_phase": str | None,               # pick/construct/tune (2026-06-14)
+      "tool_result": dict | None,            # what the action returned (2026-06-14)
       "user_msg_sections": dict[str, Any],   # parsed observation parts
       "llm_response": {"text_blocks": [str], "tool_use": dict | None},
       "decision_metadata": {
@@ -245,6 +248,12 @@ class BuildTracer:
                 v = getattr(resp, f, None)
                 if v is not None:
                     entry[f] = int(v)
+            # Trace gap #2 (2026-06-14): the model's chain-of-thought. Until now
+            # this lived only in stderr ([LLM-DBG2]); recording it here means a
+            # single trace file answers "why did the agent do that".
+            rc = getattr(resp, "reasoning_content", None)
+            if rc:
+                entry["reasoning_content"] = _truncate(str(rc), 12000)
         for k, v in extra.items():
             entry[k] = _safe_jsonable(v)
         self._payload["llm_calls"].append(entry)
@@ -258,6 +267,7 @@ class BuildTracer:
         *,
         phase_id: Optional[str] = None,
         round: Optional[int] = None,
+        sub_phase: Optional[str] = None,
         user_msg_sections: Optional[dict[str, Any]] = None,
         llm_response: Optional[dict[str, Any]] = None,
         decision_metadata: Optional[dict[str, Any]] = None,
@@ -281,6 +291,10 @@ class BuildTracer:
             entry["phase_id"] = phase_id
         if round is not None:
             entry["round"] = round
+        # Trace gap #1 (2026-06-14): which sub-phase (pick/construct/tune) the
+        # agent was in. Previously only inferrable by unreliable user_msg regex.
+        if sub_phase is not None:
+            entry["sub_phase"] = sub_phase
         if user_msg_sections is not None:
             entry["user_msg_sections"] = _safe_jsonable(user_msg_sections)
         if llm_response is not None:

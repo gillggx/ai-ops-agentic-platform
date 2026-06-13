@@ -115,6 +115,10 @@ class LLMResponse:
     # are 0 on OpenAI-compat providers that don't support caching.
     cache_creation_input_tokens: int = 0
     cache_read_input_tokens: int = 0
+    # 2026-06-14: the model's chain-of-thought (reasoning.effort output). Until
+    # now this was logged to stderr only ([LLM-DBG2]) — surfacing it on the
+    # response lets BuildTracer record WHY the agent acted (trace gap #2).
+    reasoning_content: str = ""
 
 
 # ── Base interface ─────────────────────────────────────────────────────────────
@@ -481,9 +485,10 @@ class OllamaLLMClient(BaseLLMClient):
         _tc_count = len(choice.message.tool_calls) if choice.message.tool_calls else 0
         print(f"[LLM-DBG] finish={_finish!r} tool_calls={_tc_count} content_len={len(_orig_content)} content_preview={_orig_content[:300]!r}", file=_sys.stderr, flush=True)
         # Show full message fields to detect reasoning_content or other hidden fields
+        _reasoning = ""
         try:
             _msg_dict = choice.message.model_dump()
-            _reasoning = _msg_dict.get("reasoning_content") or _msg_dict.get("reasoning")
+            _reasoning = _msg_dict.get("reasoning_content") or _msg_dict.get("reasoning") or ""
             print(f"[LLM-DBG2] reasoning_raw={_reasoning!r}", file=_sys.stderr, flush=True)
         except Exception as _e:
             print(f"[LLM-DBG2] model_dump failed: {_e}", file=_sys.stderr, flush=True)
@@ -561,6 +566,7 @@ class OllamaLLMClient(BaseLLMClient):
             input_tokens=uncached_input,
             output_tokens=completion_tokens,
             cache_read_input_tokens=cached_tokens,
+            reasoning_content=str(_reasoning or "")[:12000],
         )
 
     async def stream(

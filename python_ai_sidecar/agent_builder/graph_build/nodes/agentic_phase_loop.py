@@ -397,6 +397,9 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     # Capture: structured user_msg sections, LLM text reasoning, and
     # server-computed candidate analysis. This is what lets us answer
     # "why did LLM pick X?" without grepping the prompt string.
+    # _decision_entry is captured here and gets its `tool_result` attached
+    # AFTER dispatch (the action hasn't run yet at this point).
+    _decision_entry: dict[str, Any] | None = None
     if tracer is not None:
         try:
             from python_ai_sidecar.agent_builder.graph_build.trace_helpers import (
@@ -422,9 +425,10 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
                 phase=phase, remaining_phases=remaining,
                 registry=registry, actual_pick_block=picked_block_name,
             )
-            tracer.record_decision(
+            _decision_entry = tracer.record_decision(
                 node="agentic_phase_loop",
                 phase_id=pid, round=round_n + 1,
+                sub_phase=cur_subphase,
                 user_msg_sections=sections,
                 llm_response={
                     "text_blocks": extract_llm_text_blocks(resp),
@@ -533,6 +537,14 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
         except Exception as e:  # noqa: BLE001
             logger.warning("agentic_phase_loop: tool %s threw: %s", tool_name, e)
             action_result = {"error": f"{type(e).__name__}: {e}"}
+
+    # Trace gap #3 (2026-06-14): attach the action's result to THIS round's
+    # decision record so one trace shows what the agent saw (inspect cols/sample,
+    # errors) — previously only reconstructable from the next round's user_msg.
+    if _decision_entry is not None and isinstance(action_result, dict):
+        _decision_entry["tool_result"] = {
+            k: str(v)[:800] for k, v in action_result.items()
+        }
 
     # ── Auto-preview after canvas-mutating tools ─────────────────────
     # v30.1 (2026-05-16): preview output is now handed off to
