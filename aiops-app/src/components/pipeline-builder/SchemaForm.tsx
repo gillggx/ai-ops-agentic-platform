@@ -15,6 +15,7 @@ import { fetchSuggestions } from "@/lib/pipeline-builder/api";
 import type { JsonSchemaProperty, ParamSchema } from "@/lib/pipeline-builder/types";
 import { useBuilder } from "@/context/pipeline-builder/BuilderContext";
 import type { ColumnsByPort } from "@/context/pipeline-builder/useUpstreamColumns";
+import { FieldsEditor } from "@/components/pipeline-builder/FieldsEditor";
 
 
 /** Module-level cache so we don't re-fetch suggestions for every keystroke */
@@ -401,6 +402,29 @@ function renderWidget({
         upstreamColumns={upstreamColumns}
         upstreamLoading={upstreamLoading}
         upstreamErrors={upstreamErrors}
+      />
+    );
+  }
+
+  // 2b. fields editor → guided repeating-row editor for array<{path, as}>
+  //     (Fix 5: block_select.fields was unfillable via the generic array widget).
+  //     Trigger on the explicit marker OR the shape (array of objects with a
+  //     `path` property) — the latter works without the pb_blocks DB carrying
+  //     the marker (frontend param_schema comes from the DB, not seed.py).
+  const isPathFieldsArray =
+    prop.type === "array" &&
+    prop.items?.type === "object" &&
+    !!prop.items?.properties?.path;
+  if (prop["x-fields-editor"] || isPathFieldsArray) {
+    return (
+      <FieldsEditor
+        name={name}
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+        borderColor={borderColor}
+        commonStyle={commonStyle}
+        upstreamColumns={upstreamColumns}
       />
     );
   }

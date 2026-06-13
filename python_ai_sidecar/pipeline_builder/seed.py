@@ -3544,6 +3544,12 @@ def _blocks() -> list[dict[str, Any]]:
                 "properties": {
                     "fields": {
                         "type": "array",
+                        # Fix 5 (2026-06-14): SchemaForm renders a guided
+                        # repeating-row editor (path picker + `as`) for this
+                        # field instead of the generic comma-scalar array widget
+                        # (which can't express {path, as} objects → block_select
+                        # was unfillable by hand in the UI).
+                        "x-fields-editor": True,
                         "items": {
                             "type": "object",
                             "required": ["path"],

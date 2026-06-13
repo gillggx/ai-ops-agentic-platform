@@ -30,6 +30,16 @@ export interface JsonSchemaProperty {
   /** Extension: column-picker source. e.g. "input.data" / "input.left" / "input.left+right".
    *  Value is the columns of the named input port(s) of the current node (from upstream preview). */
   "x-column-source"?: string;
+  /** Extension (Fix 5): render a guided repeating-row editor for an
+   *  array<{path, as}> param (block_select.fields) instead of the generic
+   *  comma-scalar array widget, which can't express object entries. Optional —
+   *  SchemaForm also detects the shape (array of objects with a `path` prop). */
+  "x-fields-editor"?: boolean;
+  /** JSON Schema: object item properties (used for shape detection + the
+   *  fields editor). Present on `items` of array<object> params. */
+  properties?: Record<string, JsonSchemaProperty>;
+  /** JSON Schema: required keys for object items. */
+  required?: string[];
 }
 
 export interface ParamSchema {
