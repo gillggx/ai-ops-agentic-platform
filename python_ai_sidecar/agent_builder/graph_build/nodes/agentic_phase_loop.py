@@ -506,16 +506,24 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
 
     # ── Dispatch tool ─────────────────────────────────────────────────
     action_result: dict[str, Any]
+    # Item 1 (ENABLE_NEXT_MEMO): `next` is a planning memo carried in the tool
+    # args for the agent's benefit — NOT an executor argument. Strip it before
+    # dispatch so it never reaches BuilderToolset.add_node(**args) (which would
+    # TypeError and silently fail the whole mutation). tool_args stays intact for
+    # the memo capture + trace below.
+    exec_args = tool_args
+    if isinstance(tool_args, dict) and "next" in tool_args:
+        exec_args = {k: v for k, v in tool_args.items() if k != "next"}
     # v30.19: signal tools (commit_pick / abort_*/run_verifier) don't go
     # through toolset — they only drive sub-phase transitions.
     if tool_name in _SIGNAL_TOOLS:
-        action_result = _handle_signal_tool(tool_name, tool_args)
+        action_result = _handle_signal_tool(tool_name, exec_args)
     else:
         try:
             method = getattr(toolset, tool_name, None)
             if method is None or not callable(method):
                 raise ToolError(code="UNKNOWN_TOOL", message=f"No tool {tool_name}")
-            action_result = await method(**tool_args)
+            action_result = await method(**exec_args)
         except ToolError as e:
             logger.info("agentic_phase_loop: tool %s failed: %s", tool_name, e.message)
             action_result = {"error": e.message, "code": e.code, "hint": e.hint}
@@ -748,7 +756,11 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     if is_next_memo_enabled():
         if tool_name in {"add_node", "set_param", "connect", "remove_node"}:
             _memo = (tool_args or {}).get("next")
-            state_update["v30_next_memo"] = str(_memo)[:300] if _memo else None
+            # Only carry the memo forward if the mutation SUCCEEDED — a failed
+            # add_node didn't create the node the memo likely references, so a
+            # stale memo would point the agent at a phantom node next round.
+            _ok = "error" not in (action_result or {})
+            state_update["v30_next_memo"] = str(_memo)[:300] if (_memo and _ok) else None
         elif tool_name in {"phase_complete", "run_verifier", "abort_phase"}:
             state_update["v30_next_memo"] = None  # done/abort signal clears the plan
     if next_sub is not None and next_sub != cur_subphase:
