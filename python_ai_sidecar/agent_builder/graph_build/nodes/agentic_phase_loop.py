@@ -43,7 +43,7 @@ from python_ai_sidecar.pipeline_builder.seedless_registry import SeedlessBlockRe
 logger = logging.getLogger(__name__)
 
 
-MAX_REACT_ROUNDS = 16  # v30.23 (was 8) — multi-block phases (unnest+filter+
+MAX_REACT_ROUNDS = 32  # 2026-06-13 (was 16) — multi-block phases (unnest+filter+
                        # step_check) need 4 rounds per block × 3 blocks = 12
                        # minimum, with margin for re-inspects.
 MAX_INSPECT_CALLS_PER_ROUND = 5
@@ -240,7 +240,10 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     # phases sometimes need filter+chart_block iteration too.
     phase_round_cap = MAX_REACT_ROUNDS
     if (phase.get("expected") or "") in {"alarm", "chart"}:
-        phase_round_cap = 12
+        # 2026-06-13: was 12 (< MAX_REACT_ROUNDS) — a stale special-case from
+        # when the default was 8. alarm/chart phases often chain filter+chart,
+        # so they need AT LEAST the default, not less. Keep them at the default.
+        phase_round_cap = MAX_REACT_ROUNDS
     # Round cap check
     if round_n >= phase_round_cap:
         logger.warning(
@@ -2430,15 +2433,28 @@ def _make_result_digest(tool: str, result: Any) -> str:
         nid = result.get("node_id")
         rows = result.get("rows")
         ports = [k for k in result if k not in {"node_id", "status", "rows", "error"}]
-        # Surface sample row keys + value preview for LLM ergonomics
+        # Surface ALL column names + one real sample row. The old code showed
+        # only cols[:8] (truncated) and never rendered the sample values at all
+        # — so the agent inspected to find e.g. is_ooc/status, never saw them
+        # (hidden past col #8), and re-inspected in a loop burning the phase's
+        # round budget (ooc-pareto handover root cause, 2026-06-13). Values are
+        # per-field length-capped so nested APC/DC dicts don't blow up the prompt.
         sample_hint = ""
         for port in ports:
             blob = result.get(port) or {}
             if isinstance(blob, dict):
                 sr = blob.get("sample_rows") or []
-                cols = blob.get("columns") or []
-                if sr and isinstance(sr[0], dict):
-                    sample_hint = f" cols={cols[:8]}{'…' if len(cols) > 8 else ''}"
+                cols = blob.get("all_columns") or blob.get("columns") or []
+                if cols:
+                    sample_hint = f" cols={list(cols)}"
+                    if sr and isinstance(sr[0], dict):
+                        preview = {
+                            k: str(v)[:40] for k, v in list(sr[0].items())[:40]
+                        }
+                        sample_hint += (
+                            " sample="
+                            + json.dumps(preview, ensure_ascii=False)[:800]
+                        )
                     break
         positive = ""
         if isinstance(rows, int) and rows >= 1:
