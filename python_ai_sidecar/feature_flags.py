@@ -56,6 +56,9 @@ _KNOWN_FLAGS = (
     "rich_canvas_snapshot",
     "plan_knowledge",
     "strict_phase_output",
+    "construct_param_doc",
+    "strict_phase_verify",
+    "next_memo",
 )
 
 # Per-request override map. Empty dict ⇒ no override, fall back to CONFIG.
@@ -141,3 +144,15 @@ def is_plan_knowledge_enabled() -> bool:
 
 def is_strict_phase_output_enabled() -> bool:
     return _effective("strict_phase_output", CONFIG.enable_strict_phase_output)
+
+
+def is_construct_param_doc_enabled() -> bool:
+    return _effective("construct_param_doc", CONFIG.enable_construct_param_doc)
+
+
+def is_strict_phase_verify_enabled() -> bool:
+    return _effective("strict_phase_verify", CONFIG.enable_strict_phase_verify)
+
+
+def is_next_memo_enabled() -> bool:
+    return _effective("next_memo", CONFIG.enable_next_memo)

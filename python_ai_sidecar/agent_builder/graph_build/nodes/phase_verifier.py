@@ -46,6 +46,13 @@ logger = logging.getLogger(__name__)
 # close the whole build silently. Only used when covers gate is ON.
 MAX_FAST_FORWARD_CHAIN = 4
 
+# Item 2 (2026-06-13, ENABLE_STRICT_PHASE_VERIFY): the "specific deliverable"
+# kinds. When a phase declares one of these but the canvas terminal doesn't
+# cover it, REJECT (don't advance). Intermediate kinds (raw_data / transform /
+# verdict) stay loose — a transform phase legitimately ends on many block types.
+# Mirrors finalize._PRESENTATION_KINDS (C2) but applied per-phase, earlier.
+_STRICT_VERIFY_KINDS: frozenset[str] = frozenset({"chart", "table", "scalar", "alarm"})
+
 
 def _covers_gate_enabled() -> bool:
     """Feature flag: covers gate gates phase advance + enables FF chain.
@@ -171,6 +178,41 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
         # a runtime concern.
         phase = phases[idx]
         ph_expected = (phase.get("expected") or "").strip()
+        # Item 2 (ENABLE_STRICT_PHASE_VERIFY): the candidate terminal (block_id /
+        # covers_output) is the BEST match _find_canvas_terminal could find — it
+        # prefers a terminal whose covers include phase.expected. So if even this
+        # best terminal doesn't cover a *specific deliverable* kind, then NO
+        # terminal does → the deliverable isn't built → REJECT instead of the
+        # default unconditional advance. This is what catches spc-cpk: a chart
+        # phase whose only terminal is block_filter (covers=transform) is bounced
+        # back so the agent adds the chart, instead of silently advancing.
+        from python_ai_sidecar.feature_flags import is_strict_phase_verify_enabled
+        if (
+            is_strict_phase_verify_enabled()
+            and ph_expected in _STRICT_VERIFY_KINDS
+            and ph_expected not in covers_output
+        ):
+            would_pass = _would_pass_blocks(registry, ph_expected)
+            logger.info(
+                "phase_verifier: STRICT reject — phase %s wants '%s' but terminal "
+                "%s covers=%s",
+                phase.get("id"), ph_expected, block_id, list(covers_output),
+            )
+            return _emit_reject(
+                state=state,
+                cur_phase=cur_phase,
+                block_id=block_id or "(unknown)",
+                covers=list(covers_output),
+                rows=rows,
+                result="missing expected output kind",
+                missing_for_phase=[
+                    f"phase needs a '{ph_expected}' block but the canvas terminal "
+                    f"is '{block_id}' (covers={list(covers_output)}). Add a block "
+                    f"whose output covers '{ph_expected}'"
+                    + (f" (e.g. {', '.join(would_pass[:3])})" if would_pass else "")
+                ],
+                would_have_passed_with=would_pass,
+            )
         outcome = _extract_outcome(phase, snapshot, preview_blob, extractors, block_id)
         advanced.append({
             "id": phase["id"],

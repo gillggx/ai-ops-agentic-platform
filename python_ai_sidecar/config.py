@@ -52,6 +52,17 @@ class SidecarConfig:
     # `failed_missing_output` instead of a silent `finished`. Catches "asked for
     # chart, got no chart" false-success. Plan-level fact check, NOT a prompt rule.
     enable_strict_phase_output: bool
+    # Phase-loop refine bundle (2026-06-13). Address the spc-cpk failure class
+    # (intent lost across rounds, verify advancing on wrong-kind terminal, params
+    # filled blind). See Todos.md "Phase Loop Refine".
+    #  - construct_param_doc: inject the pending block's param doc at construct/tune.
+    #  - strict_phase_verify: verifier REJECTs when no terminal covers phase.expected
+    #    (fixes the "filter satisfies chart phase" bug) instead of advancing.
+    #  - next_memo: mutation tools carry a required `next` plan; surfaced to the
+    #    next round so multi-block intent (filter THEN chart) survives.
+    enable_construct_param_doc: bool
+    enable_strict_phase_verify: bool
+    enable_next_memo: bool
 
     @classmethod
     def from_env(cls) -> "SidecarConfig":
@@ -79,6 +90,9 @@ class SidecarConfig:
             enable_rich_canvas_snapshot=_read_bool_env("ENABLE_RICH_CANVAS_SNAPSHOT", default=False),
             enable_plan_knowledge=_read_bool_env("ENABLE_PLAN_KNOWLEDGE", default=False),
             enable_strict_phase_output=_read_bool_env("ENABLE_STRICT_PHASE_OUTPUT", default=False),
+            enable_construct_param_doc=_read_bool_env("ENABLE_CONSTRUCT_PARAM_DOC", default=False),
+            enable_strict_phase_verify=_read_bool_env("ENABLE_STRICT_PHASE_VERIFY", default=False),
+            enable_next_memo=_read_bool_env("ENABLE_NEXT_MEMO", default=False),
         )
 
 

@@ -298,6 +298,10 @@ class BuildGraphState(TypedDict, total=False):
     # Replaces v30.1's "verifier after every mutation" model that prevented
     # any chain longer than one block.
     v30_verify_now: bool
+    # Item 1 (ENABLE_NEXT_MEMO, 2026-06-13): the agent's one-line plan for its
+    # next step, captured from a mutation tool's `next` arg and surfaced at the
+    # top of the following round so multi-block intent survives across rounds.
+    v30_next_memo: Optional[str]
 
     # ── Confirm stage ─────────────────────────────────────────────────
     is_from_scratch: bool

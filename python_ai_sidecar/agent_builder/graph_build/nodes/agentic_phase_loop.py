@@ -32,6 +32,8 @@ from python_ai_sidecar.agent_builder.tools import BuilderToolset, ToolError
 from python_ai_sidecar.agent_helpers_native.llm_client import get_llm_client
 from python_ai_sidecar.feature_flags import (
     is_auto_verifier_enabled,
+    is_construct_param_doc_enabled,
+    is_next_memo_enabled,
     is_prompt_cache_enabled,
 )
 from python_ai_sidecar.pipeline_builder.pipeline_schema import PipelineJSON
@@ -741,6 +743,14 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
         "final_pipeline": new_pipeline_dict,
         "v30_verify_now": verify_now,
     }
+    # Item 1 (ENABLE_NEXT_MEMO): carry the agent's planned next step forward so
+    # the next round's prompt can surface it (multi-block intent survives).
+    if is_next_memo_enabled():
+        if tool_name in {"add_node", "set_param", "connect", "remove_node"}:
+            _memo = (tool_args or {}).get("next")
+            state_update["v30_next_memo"] = str(_memo)[:300] if _memo else None
+        elif tool_name in {"phase_complete", "run_verifier", "abort_phase"}:
+            state_update["v30_next_memo"] = None  # done/abort signal clears the plan
     if next_sub is not None and next_sub != cur_subphase:
         state_update["v30_subphase"] = next_sub
         state_update["v30_subphase_round"] = 0
@@ -1393,6 +1403,75 @@ def _terminal_node_ids(pipeline: PipelineJSON) -> list[str]:
     return [n.id for n in pipeline.nodes if n.id not in outgoing]
 
 
+# Item 3 (2026-06-13): cached seed.py registry for param-doc lookup. seed.py is
+# parsed in-process (no DB), so one load is cheap; cache avoids re-parsing every
+# prompt build.
+_PARAM_DOC_REGISTRY: SeedlessBlockRegistry | None = None
+
+
+def _get_block_spec(block_id: str) -> dict | None:
+    global _PARAM_DOC_REGISTRY
+    if _PARAM_DOC_REGISTRY is None:
+        reg = SeedlessBlockRegistry()
+        reg.load()
+        _PARAM_DOC_REGISTRY = reg
+    for (name, _v), spec in _PARAM_DOC_REGISTRY.catalog.items():
+        if name == block_id:
+            return spec
+    return None
+
+
+def _extract_params_section(description: str) -> str:
+    """Pull the '== Params ==' block out of a block description (where rich
+    human-written param semantics live, e.g. process_history's object_name).
+    Returns "" if no such section."""
+    if not description:
+        return ""
+    lines = description.split("\n")
+    out: list[str] = []
+    capturing = False
+    for ln in lines:
+        if ln.strip().startswith("== ") and "Params" in ln:
+            capturing = True
+            continue
+        if capturing and ln.strip().startswith("== "):
+            break  # next section
+        if capturing:
+            out.append(ln)
+    return "\n".join(out).strip()
+
+
+def _build_pending_param_doc_md(block_id: str) -> str:
+    """Item 3 (ENABLE_CONSTRUCT_PARAM_DOC): render the param doc for the block
+    the agent is about to construct, so it fills params from the spec — not from
+    memory of the pick round (the SLASH-13 object_name blind-fill root cause).
+
+    Prefer the description's '== Params ==' section (rich semantics); fall back
+    to structured param_schema. Bounded length (lean-catalog discipline)."""
+    spec = _get_block_spec(block_id)
+    if not spec:
+        return ""
+    lines = [f"== PARAM DOC: {block_id} (fill its params from THIS, not memory) =="]
+    section = _extract_params_section(spec.get("description") or "")
+    if section:
+        lines.append(section[:1400])
+        return "\n".join(lines)
+    # fallback: structured param_schema
+    ps = spec.get("param_schema") or {}
+    props = ps.get("properties") or {}
+    if not props:
+        return ""
+    required = set(ps.get("required") or [])
+    for name, p in list(props.items())[:25]:
+        t = p.get("type") or "?"
+        req = ", required" if name in required else ""
+        enum = p.get("enum")
+        desc = p.get("description") or ""
+        extra = (f" enum={enum}" if enum else "") + (f" — {desc}" if desc else "")
+        lines.append(f"  {name} ({t}{req}){extra[:140]}")
+    return "\n".join(lines)
+
+
 def _build_subphase_context_md(
     subphase: str | None,
     pipeline: PipelineJSON,
@@ -1430,6 +1509,11 @@ def _build_subphase_context_md(
             lines.append(
                 f"You committed to {committed}. add_node it, then connect upstream."
             )
+            if is_construct_param_doc_enabled():
+                pdoc = _build_pending_param_doc_md(committed)
+                if pdoc:
+                    lines.append("")
+                    lines.append(pdoc)
         # DATA AVAILABLE = every node already PREVIEWED (has cols in exec_trace),
         # excluding the node currently being built (pending_nid). This is the
         # set of columns the new node can read FROM. Listing all previewed
@@ -1475,6 +1559,11 @@ def _build_subphase_context_md(
                 f"== NODE {cur_node.id} [{cur_node.block_id}] CURRENT params =="
             )
             lines.append(f"  {params_str or '(no params set)'}")
+            if is_construct_param_doc_enabled():
+                pdoc = _build_pending_param_doc_md(cur_node.block_id)
+                if pdoc:
+                    lines.append("")
+                    lines.append(pdoc)
             # Upstream of cur_node (the source for its column values).
             ups = [e.from_.node for e in pipeline.edges if e.to.node == cur_nid]
             if ups:
@@ -1507,6 +1596,15 @@ def _build_canvas_diff_md(pipeline: PipelineJSON, phase: dict, state: dict | Non
     2+ when blocks first get verifier-checked.
     """
     lines: list[str] = []
+
+    # Item 1 (ENABLE_NEXT_MEMO): surface the agent's own plan from last round at
+    # the very top, so multi-block intent (filter THEN chart) survives across the
+    # otherwise-stateless rounds — the spc-cpk "forgot to add the chart" fix.
+    if state and is_next_memo_enabled():
+        memo = state.get("v30_next_memo")
+        if memo:
+            lines.append(f"▶ YOUR PLAN (what you said you'd do next): {memo}")
+            lines.append("")
 
     # v30.17l: VERIFIER FEEDBACK first (before canvas) so LLM sees rejection
     # before re-reading canvas state.
@@ -1956,7 +2054,7 @@ def _build_tool_specs() -> list[dict[str, Any]]:
             "`upstream=[{src_node: 'nK'}]` in the same call — saves a round vs "
             "calling add_node then connect separately."
         )
-    return [
+    _specs: list[dict[str, Any]] = [
         {
             "name": "inspect_node_output",
             "description": "Read an existing node's actual output (cols + up to 3 sample rows).",
@@ -2118,6 +2216,30 @@ def _build_tool_specs() -> list[dict[str, Any]]:
             },
         },
     ]
+
+    # Item 1 (ENABLE_NEXT_MEMO, 2026-06-13): every canvas mutation must declare
+    # `next` — a one-line plan for the NEXT step toward the phase deliverable.
+    # Surfaced at the top of the following round so multi-block intent (filter
+    # THEN chart) survives across rounds (the spc-cpk "forgot to add chart"
+    # root cause). Marked required so the function-calling model fills it; if
+    # the phase is actually done, the agent calls phase_complete (no mutation).
+    if is_next_memo_enabled():
+        _MUTATION_TOOLS = {"add_node", "set_param", "connect", "remove_node"}
+        for _spec in _specs:
+            if _spec["name"] in _MUTATION_TOOLS:
+                _sch = _spec["input_schema"]
+                _sch["properties"]["next"] = {
+                    "type": "string",
+                    "description": (
+                        "REQUIRED. One line: your planned NEXT step toward this "
+                        "phase's deliverable (e.g. \"add block_line_chart from n3, "
+                        "x=eventTime y=value series=name\"). If the deliverable is "
+                        "ALREADY complete, do NOT mutate — call phase_complete instead."
+                    ),
+                }
+                if "next" not in _sch["required"]:
+                    _sch["required"] = list(_sch["required"]) + ["next"]
+    return _specs
 
 
 # 2026-06-10 (KIMI K2.5 on OpenRouter fix) — when the model wants to end the
