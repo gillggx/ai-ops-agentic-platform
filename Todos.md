@@ -65,24 +65,19 @@ x 軸綁到 recipe 維度（修正前：object_name=APC + x=step）。
 
 ## B. Proposed — spec 待定/待開做
 
-- [ ] **Fix 5 — block_select 引導式 fields 編輯器**（觸發：user「誰會填這個」）
-  - 現況 bug：`fields` 是 `array<{path, as}>`，但 SchemaForm 的 `case "array"`
-    只當逗號分隔純量處理，且無 raw-JSON 逃生口 → **手動建根本填不出來**，只有
-    agent 會用。
-  - 修法：repeating rows `[路徑 picker][as 別名][刪除]` + 「+ 新增」；路徑 picker
-    沿用 Fix 2 combobox，但清單**從上游 sample 自動展開巢狀路徑**
-    (`APC.parameters.etch_time_offset`、`RECIPE.objectID` ...)。
-  - 順帶：同一套巢狀路徑探索也修 block_filter 的 column picker（nested 模式下
-    現在只列得出頂層 `APC`/`RECIPE`，選不到 `APC.parameters.xxx`）。
-  - 中型前端工，spec 未寫。
+- [x] **Fix 5 — block_select 引導式 fields 編輯器**（觸發：user「誰會填這個」）
+  - **Phase 1 DONE**（`2c60bfb`）：`FieldsEditor.tsx` repeating rows
+    `[path picker][as][刪除]` + 「+ 新增」；path 用 datalist 上游頂層欄位 + 自由打字
+    巢狀路徑。SchemaForm 用**形狀偵測**（array of object-with-`path`）觸發 —
+    因 frontend param_schema 來自 pb_blocks DB（非 seed.py），shape 偵測不需動 DB。
+    DB 已驗證 shape 會觸發。**待真實瀏覽器點過**（FU2-style）。
+  - [ ] **Phase 2（待做）**：路徑 picker 從上游 **sample 自動展開巢狀路徑**
+    (`APC.parameters.etch_time_offset`、`RECIPE.objectID` ...)；順帶用同一套修
+    block_filter 的 nested column picker（現在只列得出頂層 `APC`/`RECIPE`）。
 
-- [ ] **ENABLE_CONSTRUCT_PARAM_DOC — construct 階段注入「正在填的 block 參數文件」**
-  - 根因比 Fix 1 更通用：agent 在 construct sub-phase 填 `object_name` / `nested`
-    時，眼前是「空白考卷」(p1 r2 trace 實證)，參數語意只在 pick round 在場、填值
-    round 缺席。Fix 1 用 block-doc 把 SLASH-13 救起來了，但這個資訊落差是跨 block
-    的通用病灶。
-  - 設計：construct/tune 分支多注入 pending node 的 block param doc（DB 來源，
-    非 case rule）。flag default off，per-flag isolation 驗證。完整 proposal 已討論。
+- [x] **ENABLE_CONSTRUCT_PARAM_DOC — construct 階段注入「正在填的 block 參數文件」**
+  — **DONE**（`231fe56`，phase-loop bundle 三 flag 之一）。construct/tune 分支注入
+  pending node 的 block param doc（含 process_history object_name 留空指引）。
 
 - [ ] **Chart-axis-vs-intent 語意 verifier**
   - C2 只擋「缺交付物」，擋不住「chart 畫了但 x 軸/分組選錯」(x='step' 那類)。
