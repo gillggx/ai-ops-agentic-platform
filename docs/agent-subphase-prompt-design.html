@@ -315,6 +315,52 @@ PHASE GOAL: 展示各 Recipe 蝕刻時間偏移量的分佈對比 (expected: cha
     <tr><td>破壞既有過關 case</td><td>flag off 完全等同現狀；on 才改。全 17 case 重跑驗證</td></tr>
   </table>
 
+  <h2>8. 2026-06-13 — 實作驗證 + 後續修正（SLASH-17 17/17）</h2>
+  <p class="small">第 1–7 節是<strong>設計階段</strong>的提案。以下記錄實際做出來、跑過全 17 個 slash command 後驗證/修正的結果。</p>
+
+  <h3>8.1 實際做出來的（都 flag 控、default OFF、可 per-request override）</h3>
+  <table>
+    <tr><th>機制</th><th>flag</th><th>做什麼</th></tr>
+    <tr><td>rich canvas snapshot</td><td><code>ENABLE_RICH_CANVAS_SNAPSHOT</code></td><td>construct/tune 顯示上游 output cols + sample（第 4 節三張卡）</td></tr>
+    <tr><td>construct param doc</td><td><code>ENABLE_CONSTRUCT_PARAM_DOC</code></td><td>construct/tune 注入「正在填的 block 自己的 param doc」（含 process_history 的 object_name 留空指引）</td></tr>
+    <tr><td>next 備忘</td><td><code>ENABLE_NEXT_MEMO</code></td><td>每個 mutation 帶 <code>next</code>（下一步計畫），渲染在下個 round prompt 最上面，讓跨 round 意圖不遺失</td></tr>
+    <tr><td>strict phase verify</td><td><code>ENABLE_STRICT_PHASE_VERIFY</code></td><td>chart/table/scalar/alarm phase 若 terminal 不 cover 該 kind → REJECT（不再無條件 advance）</td></tr>
+    <tr><td>plan deliverable 兜底</td><td><code>ENABLE_STRICT_PHASE_OUTPUT</code></td><td>finalize 最後檢查 plan 終點 kind vs 實際 terminal，缺則 <code>failed_missing_output</code></td></tr>
+  </table>
+
+  <div class="warn">
+    <b>關鍵 bug（next-memo TypeError）— 最大教訓：</b> <code>next</code> 加進 mutation tool schema 後，LLM 會把它放進 tool args，
+    但 dispatcher splat 進 <code>BuilderToolset.add_node(**args)</code> — 它沒有 <code>next</code> 參數 → <code>TypeError</code>
+    → <b>每個帶 next 的 mutation 整個失敗</b>。agent 以為加好了卻沒加成 → 鬼打牆（premature verify / commit flip-flop）。
+    修法：dispatch 前把 <code>next</code> 剝成 <code>exec_args</code>，只當備忘存 state，不傳給 executor。
+    <span class="small">這 bug 一度污染全部失敗判讀（spc-cpk 的「24 round handover」其實是這個 flail）。修掉後 spc-trend chart phase 9→3 round。</span>
+  </div>
+
+  <div class="ok-box">
+    <b>sub-phase machine 確認正常（journal ground truth）：</b> 我一度從 prompt regex 解析得到矛盾結論，以為「atomic add_node 沒跳 tune」。
+    後來查 code 直接印的 log <code>sub-phase construct → tune (tool=add_node)</code> 證實 atomic 跳轉是對的，<code>_next_subphase</code> 正確。
+    <span class="small">教訓：debug 用 ground-truth log，別信對 prompt 的 regex 解析。</span>
+  </div>
+
+  <h3>8.2 全 17 跑出來才發現的兩個額外根因</h3>
+  <table>
+    <tr><th>case</th><th>根因</th><th>修法</th></tr>
+    <tr><td>spc-multi-tool</td><td>planner 把枚舉的 EQP-01..05 拆成 5 個 source + union（union 只吃 2 input → 3 orphan → failed_structural）</td><td><b>V57 agent_knowledge</b>（priority=high）：多 entity 比較 = 單一 source + filter('in')，別 fan-out</td></tr>
+    <tr><td>ooc-pareto</td><td><code>inspect_node_output</code> 結果只印 <code>cols[:8]…</code> 且<b>完全沒印 sample 值</b> → 藏住 <code>is_ooc</code> → re-inspect 同 node 找不到 → 燒光 round → handover</td><td>formatter 改印<b>全部欄位名 + 一筆 sample</b>；<code>MAX_REACT_ROUNDS</code> 16→32；修 chart/alarm 誤設 12 的 stale bug</td></tr>
+  </table>
+
+  <div class="warn">
+    <b>「concrete-column plan」實測不可行：</b> 想讓 plan 宣告具體輸出欄位（<code>[chart_name, ooc_count]</code>）給 verifier 比對 —
+    但 planner 在<b>抓資料前</b> plan，欄位只能猜，而 ontology 欄位名（<code>eventTime / toolID / name</code>）跟常識（<code>timestamp / equipment_id / chart_name</code>）剛好都不同。
+    實測 6 個猜錯 5 個，連分組鍵都錯 → <b>verifier 拿 plan 欄位檢查會誤殺正確 build</b>。現有「plan 只寫 intent、不列欄位」是有實證依據的對的設計。
+  </div>
+
+  <h3>8.3 結果 + 殘留</h3>
+  <div class="ok-box"><b>SLASH-17 17/17 finished+ok</b>（effort=medium）。深驗過語意正確：spc-cpk / spc-multi-tool / SLASH-13 / ooc-pareto。</div>
+  <p class="small"><b>核心約束（誠實）：</b> per-call latency ~15–22s 是地板，effort=low 實測是 wash（省 per-call 但多 round）。
+  「準又快」剩的方向：別在快撞 cap 時被砍頭（cap↑）、別浪費 round（inspect 去重 / 截斷修正）。</p>
+  <p class="small"><b>殘留小語意 nit（非失敗）：</b> spc-trend 沒只濾 xbar / spc-multi-tool 沒縮到指定 5 台 / spc-xbar-r-pair 用 line_chart+facet 代 block_xbar_r。strict_phase_verify 只擋種類，擋不到這層。</p>
+
   <hr>
   <p class="meta">
     Source of truth: <code>python_ai_sidecar/agent_builder/graph_build/nodes/agentic_phase_loop.py</code><br>
