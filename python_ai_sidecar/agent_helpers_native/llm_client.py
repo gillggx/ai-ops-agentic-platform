@@ -426,12 +426,14 @@ class OllamaLLMClient(BaseLLMClient):
         # the call resilient if Fireworks is briefly down.
         # 2026-06-11: gated behind ENABLE_PROMPT_CACHE so the A/B can isolate
         # cache impact on cost/latency.
+        # 2026-06-13: reasoning effort is env-controlled. medium burns 500-985
+        # CoT tokens even for trivial tool calls (~22s/call). `low` cuts that —
+        # set LLM_REASONING_EFFORT=low to test speed/accuracy. Default stays
+        # medium until low is validated on the SLASH suite.
+        _effort = (os.environ.get("LLM_REASONING_EFFORT", "medium").strip().lower()
+                   or "medium")
         extra_body: Dict[str, Any] = {
-            # 2026-06-01: effort=high finished but took ~12 min (30 LLM
-            # calls × 25-40s each on a free-form xbar trend query).
-            # Trying medium to see if it still emits a chart in 3-5 min
-            # — closer to Claude's 1-3 min but at OpenRouter cost.
-            "reasoning": {"effort": "medium"},
+            "reasoning": {"effort": _effort},
             "thinking": {"type": "disabled"},
         }
         from python_ai_sidecar.feature_flags import is_prompt_cache_enabled
