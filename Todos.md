@@ -5,6 +5,40 @@
 
 ---
 
+## 0a. Knowledge 分層 + RAG (V58/V59, 2026-06-14 session) — **prod ON**
+
+起點：研究 spc-ooc 為何 38 步。根因不是缺知識 —— id 36「全廠聚合 →
+list_objects + foreach」早就寫好，但它是 **block-choice 知識卻只在 goal_plan
+（block-agnostic，壓平它）被讀，phase_loop（真正選 block 的層）一條都沒注入**。
+知識送錯樓層。
+
+### 做了什麼
+
+| Phase | 內容 | commit |
+|---|---|---|
+| V58 P1 | `agent_knowledge` 加 `applies_to`('plan'/'execute'/'both') + `always_on`；26 條重分類（4 core / 11 execute-relevant，過去 0 條到得了 execute） | `a47a192` |
+| V58 P3 | layer-filtered retrieval：Java `searchByEmbedding(:layer)` + `highPriority(layer,alwaysOnly)`；sidecar `build_knowledge_hint` 加 layer/always_only/include_always_on/rag_limit | `a47a192` |
+| V58 P2 | phase_loop 在 pick sub-phase 注入 execute-layer RAG（依 phase goal，top-3，不灌 always-on dump） | `a47a192`,`17b4126` |
+| V58 P4 | `tools/knowledge_recall/measure.py` recall harness（gate：execute ON / layered OFF） | `a47a192` |
+| V59 | id 36/37 改 **raw fan-out 優先**（list_objects+foreach get_process_info），移除 Pattern B（get_process_summary）。user 決策：不依賴預聚合 summary MCP | `21749d6` |
+
+### 結果（spc-ooc，execute_knowledge:on）
+- **p1：19 → 4/4/4**（確定性，3/3）。知識直接指 Route A，不再撞 process_history 死路。
+- 走 raw `get_process_info` fan-out（user 要的可稽核路徑），無 get_process_summary。
+- **SLASH-17 全套 17/17 finished+ok，無 regression**；spc-xbar-r-pair 還升級到專用 `block_xbar_r`。總 wall −28%。
+
+### Flag 狀態（prod EC2 .env）
+- `ENABLE_EXECUTE_KNOWLEDGE=1` **已開**（spc-ooc p1 19→4 + SLASH-17 17/17 驗證後）。
+- `ENABLE_LAYERED_PLAN_KNOWLEDGE` **維持 OFF** —— recall harness 顯示 id 36 在
+  plan 層 RAG miss，always-on dump 留著當安全網。要開先把 plan recall 做起來。
+
+### 殘留 follow-up
+- `get_process_summary` 的 `by_tool` 有 description↔runtime 欄位不一致（doc 說
+  `ooc_count`，runtime 給 `count`）。現已非熱路徑（知識不再導向它），但要嘛修
+  simulator 補欄位、要嘛改 description 講實話。MCP 仍 active。
+
+---
+
 ## 0. SLASH-17 全綠 milestone (2026-06-13 session) — **17/17 OK**
 
 一個個跑 SLASH-17，失敗就深挖根因 → 模擬確認 → 修 → 驗。最終 17/17 finished+ok
@@ -120,10 +154,12 @@ x 軸綁到 recipe 維度（修正前：object_name=APC + x=step）。
 
 ---
 
-## 參考 — EC2 deploy state (2026-06-13)
+## 參考 — EC2 deploy state (2026-06-14)
 
-- HEAD: `8f057c7`
-- perf flags ON（9 個）：`prompt_cache` `atomic_add_connect` `auto_verifier`
+- HEAD: `21749d6`
+- perf flags ON：`prompt_cache` `atomic_add_connect` `auto_verifier`
   `no_duplicate_node` `rich_canvas_snapshot` `plan_knowledge` `strict_phase_output`
-  （`strict_tool_id` + `auto_signal` 仍 OFF）
+  `construct_param_doc` `strict_phase_verify` `next_memo`
+  **`execute_knowledge`（V58，2026-06-14 開）**
+  （`strict_tool_id` + `auto_signal` + `layered_plan_knowledge` 仍 OFF）
 - 服務：aiops-app:8000 / aiops-java-api:8002 / python-sidecar:8050 / ontology-sim:8012（全 HEALTHY）
