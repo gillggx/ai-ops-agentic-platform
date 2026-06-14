@@ -314,10 +314,14 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
                 from python_ai_sidecar.agent_builder.graph_build.nodes._knowledge_inject import (
                     build_knowledge_hint,
                 )
+                # rag_limit=3: the recall harness (tools/knowledge_recall)
+                # showed the spc-ooc fan-out entry (id 36) lands at rank 3 for
+                # its phase goal, so top-2 would miss it. 3 short bodies once
+                # per phase is still lean.
                 exec_know = await build_knowledge_hint(
                     phase.get("goal") or state.get("instruction", ""),
                     user_id=state.get("user_id") or 1, source="phase_exec",
-                    layer="execute", include_always_on=False, rag_limit=2,
+                    layer="execute", include_always_on=False, rag_limit=3,
                 )
                 if exec_know:
                     seeded = seeded + exec_know

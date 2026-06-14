@@ -28,8 +28,9 @@ import sys
 PROBES: list[tuple[str, str, int, int, bool]] = [
     # ── execute layer: phase goals must surface block-choice knowledge ──
     # spc-ooc p1 — the case that started this. Must surface id 36
-    # (全廠聚合 → list_objects + foreach).
-    ("取得過去 24 小時各機台的 SPC OOC 統計資料", "execute", 36, 2, True),
+    # (全廠聚合 → list_objects + foreach). k=3 matches the phase_loop execute
+    # injection budget (rag_limit=3); id 36 lands at rank 3 for this goal.
+    ("取得過去 24 小時各機台的 SPC OOC 統計資料", "execute", 36, 3, True),
     ("全廠所有機台過去七天的 OOC 次數", "execute", 36, 3, True),
     # apc-recipe-compare — must surface id 38 (參數分佈用 flat-mode 別 unnest).
     ("EQP-01 過去 14 天每個 recipe 的 APC etch_time_offset 分佈 box plot", "execute", 38, 3, True),
@@ -38,6 +39,11 @@ PROBES: list[tuple[str, str, int, int, bool]] = [
     # multi-tool named — id 37.
     ("比較 EQP-01 EQP-02 EQP-03 三台機台的 xbar chart", "execute", 37, 3, False),
     # ── plan layer: instruction must surface plan-shaping knowledge ──
+    # NOTE: these gate the layered-plan shrink, NOT the execute win. id 36 is
+    # applies_to='both' but RAG-misses at plan layer here -> evidence to keep
+    # ENABLE_LAYERED_PLAN_KNOWLEDGE OFF (always-on dump stays as safety net).
+    # id 31 is always_on=true so it ALWAYS reaches plan regardless of this rank
+    # (the probe can't see that) — informational only.
     ("過去 24 小時哪些機台 SPC OOC 最多 列前 5 名", "plan", 36, 3, False),
     ("顯示 EQP-08 過去 7 天的 SPC 趨勢", "plan", 31, 3, False),
 ]
