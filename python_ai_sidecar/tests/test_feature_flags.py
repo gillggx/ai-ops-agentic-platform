@@ -157,6 +157,34 @@ def test_plan_knowledge_flag_round_trip(monkeypatch):
     assert ff.is_plan_knowledge_enabled() is False
 
 
+def test_v58_knowledge_layer_flags_round_trip(monkeypatch):
+    """V58 (2026-06-14): execute_knowledge + layered_plan_knowledge flags."""
+    from python_ai_sidecar.feature_flags import parse_feature_flags_header
+    assert parse_feature_flags_header(
+        "execute_knowledge:on,layered_plan_knowledge:on"
+    ) == {"execute_knowledge": True, "layered_plan_knowledge": True}
+
+    monkeypatch.setenv("ENABLE_EXECUTE_KNOWLEDGE", "0")
+    monkeypatch.setenv("ENABLE_LAYERED_PLAN_KNOWLEDGE", "0")
+    import python_ai_sidecar.config as cfg
+    importlib.reload(cfg)
+    import python_ai_sidecar.feature_flags as ff
+    importlib.reload(ff)
+    assert ff.is_execute_knowledge_enabled() is False
+    assert ff.is_layered_plan_knowledge_enabled() is False
+
+    tok = ff.set_request_overrides({
+        "execute_knowledge": True, "layered_plan_knowledge": True,
+    })
+    try:
+        assert ff.is_execute_knowledge_enabled() is True
+        assert ff.is_layered_plan_knowledge_enabled() is True
+    finally:
+        ff.reset_request_overrides(tok)
+    assert ff.is_execute_knowledge_enabled() is False
+    assert ff.is_layered_plan_knowledge_enabled() is False
+
+
 def test_overrides_take_precedence_over_env(monkeypatch):
     # Force default-off envs, then verify override flips both.
     monkeypatch.setenv("ENABLE_PROMPT_CACHE", "0")

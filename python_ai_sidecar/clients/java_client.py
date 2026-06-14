@@ -300,27 +300,41 @@ class JavaAPIClient:
         skill_slug: Optional[str] = None,
         tool_id: Optional[str] = None,
         recipe_id: Optional[str] = None,
+        layer: Optional[str] = None,
         limit: int = 3,
     ) -> list[dict]:
+        # V58: layer ('plan'|'execute'|None) filters by applies_to so plan and
+        # execute agent layers retrieve different slices (None = legacy, no filter).
         body = {
             "user_id": user_id,
             "query_vec": query_vec_literal,   # "[0.1,0.2,...]" pgvector literal
             "skill_slug": skill_slug,
             "tool_id": tool_id,
             "recipe_id": recipe_id,
+            "layer": layer,
             "limit": limit,
         }
         return await self._post_data("/internal/agent-knowledge/knowledge/search", body)
 
     async def list_high_priority_knowledge(
         self, *, user_id: int = 1, limit: int = 20,
+        layer: Optional[str] = None, always_only: bool = False,
     ) -> list[dict]:
-        """Pull ALL global priority='high' knowledge entries — no embedding.
-        Used by plan_node so first-principle rules always reach the LLM
-        regardless of Cohere multilingual recall quality."""
+        """Pull global priority='high' knowledge entries — no embedding.
+        Used by the planner so first-principle rules always reach the LLM
+        regardless of multilingual recall quality.
+
+        V58: layer ('plan'|'execute'|None) filters by applies_to; always_only
+        narrows to always_on=true (the irreducible core) so the plan prompt can
+        shrink from "all high bodies" to "core + RAG"."""
+        params: dict[str, object] = {"user_id": user_id, "limit": limit}
+        if layer:
+            params["layer"] = layer
+        if always_only:
+            params["always_only"] = "true"
         result = await self._get_data(
             "/internal/agent-knowledge/knowledge/high-priority",
-            params={"user_id": user_id, "limit": limit},
+            params=params,
         )
         return result if isinstance(result, list) else []
 

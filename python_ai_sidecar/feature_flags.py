@@ -22,6 +22,12 @@ Performance flags are read at startup from env (see ``config.py``):
     ``failed_missing_output`` when the plan's final phase wants a presentation
     kind (chart/table/scalar/alarm) but no terminal block covers it. Plan-level
     deliverable fact check, not a prompt rule.
+  - ``ENABLE_EXECUTE_KNOWLEDGE`` (V58) — phase_loop injects execute-layer RAG
+    knowledge (agent_knowledge applies_to ∈ {execute,both}) at the pick
+    sub-phase, so block-choice rules reach the layer that picks the block.
+  - ``ENABLE_LAYERED_PLAN_KNOWLEDGE`` (V58) — goal_plan retrieves only the plan
+    slice and shrinks the always-on dump to always_on=true core + RAG. OFF →
+    legacy (all high, no layer filter) preserved exactly.
 
 Callers read the *effective* flag via the ``is_*_enabled()`` helpers so a single
 request can be steered without restarting the sidecar — useful for A/B
@@ -59,6 +65,8 @@ _KNOWN_FLAGS = (
     "construct_param_doc",
     "strict_phase_verify",
     "next_memo",
+    "execute_knowledge",
+    "layered_plan_knowledge",
 )
 
 # Per-request override map. Empty dict ⇒ no override, fall back to CONFIG.
@@ -156,3 +164,11 @@ def is_strict_phase_verify_enabled() -> bool:
 
 def is_next_memo_enabled() -> bool:
     return _effective("next_memo", CONFIG.enable_next_memo)
+
+
+def is_execute_knowledge_enabled() -> bool:
+    return _effective("execute_knowledge", CONFIG.enable_execute_knowledge)
+
+
+def is_layered_plan_knowledge_enabled() -> bool:
+    return _effective("layered_plan_knowledge", CONFIG.enable_layered_plan_knowledge)

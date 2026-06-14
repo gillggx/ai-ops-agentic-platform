@@ -450,13 +450,23 @@ async def goal_plan_node(state: BuildGraphState) -> dict[str, Any]:
     # any failure). See SLASH-13 analysis + docs/agent-subphase-prompt-design.html.
     knowledge_section = ""
     try:
-        from python_ai_sidecar.feature_flags import is_plan_knowledge_enabled
+        from python_ai_sidecar.feature_flags import (
+            is_layered_plan_knowledge_enabled,
+            is_plan_knowledge_enabled,
+        )
         if is_plan_knowledge_enabled():
             from python_ai_sidecar.agent_builder.graph_build.nodes._knowledge_inject import (
                 build_knowledge_hint,
             )
+            # V58: when ENABLE_LAYERED_PLAN_KNOWLEDGE is on, retrieve only the
+            # plan-relevant slice (applies_to ∈ {plan, both}) and shrink the
+            # always-on dump to always_on=true core + RAG. Flag OFF → legacy
+            # behaviour (all high bodies, no layer filter) exactly preserved.
+            layered = is_layered_plan_knowledge_enabled()
             knowledge_section = await build_knowledge_hint(
                 instruction, user_id=state.get("user_id") or 1, source="goal_plan",
+                layer="plan" if layered else None,
+                always_only=layered,
             )
     except Exception as ex:  # noqa: BLE001
         logger.info("goal_plan_node: knowledge injection skipped (%s)", ex)

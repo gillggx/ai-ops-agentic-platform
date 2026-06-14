@@ -29,11 +29,18 @@ public interface AgentKnowledgeRepository extends JpaRepository<AgentKnowledgeEn
 
     /** Cosine-similarity search via pgvector. Embedding string is rendered
      *  as PostgreSQL vector literal '[0.1,0.2,...]'. Returns top-K most
-     *  similar active rows matching scope. */
+     *  similar active rows matching scope.
+     *
+     *  <p>V58: optional {@code layer} filter ('plan'|'execute') keeps only
+     *  entries whose applies_to matches the requesting layer (or 'both'). The
+     *  filter runs BEFORE the cosine ORDER BY so ranking isn't polluted by
+     *  wrong-layer rows. Pass {@code null} to disable (legacy behaviour). */
     @Query(value = """
             SELECT * FROM agent_knowledge
             WHERE user_id = :userId AND active = true
               AND embedding IS NOT NULL
+              AND (CAST(:layer AS text) IS NULL
+                   OR applies_to = :layer OR applies_to = 'both')
               AND (scope_type = 'global'
                    OR (scope_type = 'skill'  AND scope_value = :skillSlug)
                    OR (scope_type = 'tool'   AND scope_value = :toolId)
@@ -47,5 +54,6 @@ public interface AgentKnowledgeRepository extends JpaRepository<AgentKnowledgeEn
             @Param("skillSlug") String skillSlug,
             @Param("toolId") String toolId,
             @Param("recipeId") String recipeId,
+            @Param("layer") String layer,
             @Param("limit") int limit);
 }

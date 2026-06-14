@@ -41,6 +41,19 @@ public class AgentKnowledgeEntity {
     @Column(name = "priority", nullable = false, length = 10)
     private String priority = "med";
 
+    /** V58: which agent layer consumes this entry — 'plan' (shapes intent /
+     *  phase decomposition), 'execute' (guides block / param choice at
+     *  commit_pick / construct), or 'both'. Drives layer-filtered retrieval
+     *  so block-choice knowledge reaches the layer that actually picks blocks. */
+    @Column(name = "applies_to", nullable = false, length = 10)
+    private String appliesTo = "both";
+
+    /** V58: bypass RAG — inject unconditionally. Reserved for the few
+     *  first-principle rules that MUST land regardless of multilingual recall
+     *  (SPC/APC/FDC level, "視覺化必含 chart block"). Everything else is RAG-only. */
+    @Column(name = "always_on", nullable = false)
+    private Boolean alwaysOn = false;
+
     @Column(name = "active", nullable = false)
     private Boolean active = true;
 

@@ -63,6 +63,18 @@ class SidecarConfig:
     enable_construct_param_doc: bool
     enable_strict_phase_verify: bool
     enable_next_memo: bool
+    # V58 knowledge-layer routing (2026-06-14). agent_knowledge gained
+    # applies_to ('plan'|'execute'|'both') + always_on. See spc-ooc analysis +
+    # docs/agent-subphase-prompt-design.html.
+    #  - execute_knowledge: phase_loop injects execute-layer RAG knowledge
+    #    (applies_to ∈ {execute,both}) at the pick sub-phase, so block-choice
+    #    rules (e.g. "全廠 → list_objects + foreach") reach the layer that
+    #    actually picks the source block — not just the (block-agnostic) plan.
+    #  - layered_plan_knowledge: goal_plan retrieves only the plan slice and
+    #    shrinks the always-on dump from "all high bodies" to always_on=true
+    #    core + RAG. OFF → legacy (all high, no layer filter) preserved exactly.
+    enable_execute_knowledge: bool
+    enable_layered_plan_knowledge: bool
 
     @classmethod
     def from_env(cls) -> "SidecarConfig":
@@ -93,6 +105,8 @@ class SidecarConfig:
             enable_construct_param_doc=_read_bool_env("ENABLE_CONSTRUCT_PARAM_DOC", default=False),
             enable_strict_phase_verify=_read_bool_env("ENABLE_STRICT_PHASE_VERIFY", default=False),
             enable_next_memo=_read_bool_env("ENABLE_NEXT_MEMO", default=False),
+            enable_execute_knowledge=_read_bool_env("ENABLE_EXECUTE_KNOWLEDGE", default=False),
+            enable_layered_plan_knowledge=_read_bool_env("ENABLE_LAYERED_PLAN_KNOWLEDGE", default=False),
         )
 
 

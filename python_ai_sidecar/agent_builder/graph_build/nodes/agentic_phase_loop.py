@@ -33,6 +33,7 @@ from python_ai_sidecar.agent_helpers_native.llm_client import get_llm_client
 from python_ai_sidecar.feature_flags import (
     is_auto_verifier_enabled,
     is_construct_param_doc_enabled,
+    is_execute_knowledge_enabled,
     is_next_memo_enabled,
     is_prompt_cache_enabled,
 )
@@ -302,6 +303,26 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
         # First round of this phase — seed with full observation
         sub_hint = _build_subphase_hint(cur_subphase, state)
         seeded = sub_hint + "\n\n" + full_user_msg if sub_hint else full_user_msg
+        # V58: execute-layer knowledge — block-choice rules (agent_knowledge
+        # applies_to ∈ {execute,both}) RAG'd by THIS phase's goal, injected once
+        # at phase entry (the pick sub-phase). goal_plan is block-agnostic and
+        # can't carry "全廠 → list_objects + foreach"; this puts it in front of
+        # the agent exactly when it picks the source block. Top-2 RAG only, no
+        # always-on dump — keep the pick prompt lean (feedback_verbose_catalog).
+        if is_execute_knowledge_enabled():
+            try:
+                from python_ai_sidecar.agent_builder.graph_build.nodes._knowledge_inject import (
+                    build_knowledge_hint,
+                )
+                exec_know = await build_knowledge_hint(
+                    phase.get("goal") or state.get("instruction", ""),
+                    user_id=state.get("user_id") or 1, source="phase_exec",
+                    layer="execute", include_always_on=False, rag_limit=2,
+                )
+                if exec_know:
+                    seeded = seeded + exec_know
+            except Exception as ex:  # noqa: BLE001
+                logger.info("phase_loop: execute knowledge inject skipped (%s)", ex)
         phase_messages.append({"role": "user", "content": seeded})
 
     # 2026-05-22: Prompt cache (Anthropic ephemeral).

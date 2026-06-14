@@ -723,8 +723,12 @@ async def _embed_query(text: str) -> Optional[list[float]]:
 async def _build_knowledge_block(
     java, *, user_id: int, query_text: str,
     skill_slug: Optional[str], tool_id: Optional[str], recipe_id: Optional[str],
+    layer: Optional[str] = None, limit: int = 3,
 ) -> str:
-    """RAG: embed query, fetch top-3 most similar knowledge rows, render."""
+    """RAG: embed query, fetch top-K most similar knowledge rows, render.
+
+    V58: layer ('plan'|'execute'|None) filters by applies_to so the plan and
+    execute agent layers retrieve different slices."""
     vec = await _embed_query(query_text)
     if vec is None:
         logger.info("_build_knowledge_block: embed returned None — skip")
@@ -732,7 +736,8 @@ async def _build_knowledge_block(
     try:
         rows = await java.search_knowledge(
             user_id=user_id, query_vec_literal=_vec_to_pg_literal(vec),
-            skill_slug=skill_slug, tool_id=tool_id, recipe_id=recipe_id, limit=3,
+            skill_slug=skill_slug, tool_id=tool_id, recipe_id=recipe_id,
+            layer=layer, limit=limit,
         )
     except Exception as e:  # noqa: BLE001
         logger.warning("knowledge search failed (%s)", e)

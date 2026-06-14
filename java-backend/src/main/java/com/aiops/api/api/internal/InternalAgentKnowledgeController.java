@@ -71,7 +71,7 @@ public class InternalAgentKnowledgeController {
 	@PostMapping("/knowledge/search")
 	public ApiResponse<List<KnowledgeLite>> searchKnowledge(@RequestBody KnowledgeSearchRequest req) {
 		return ApiResponse.ok(service.searchKnowledge(req.userId(), req.queryVec(),
-				req.skillSlug(), req.toolId(), req.recipeId(), req.limit())
+				req.skillSlug(), req.toolId(), req.recipeId(), req.layer(), req.limit())
 				.stream().map(KnowledgeLite::of).toList());
 	}
 
@@ -96,8 +96,10 @@ public class InternalAgentKnowledgeController {
 	@GetMapping("/knowledge/high-priority")
 	public ApiResponse<List<KnowledgeLite>> highPriorityKnowledge(
 			@RequestParam(value = "user_id", defaultValue = "1") Long userId,
-			@RequestParam(value = "limit", defaultValue = "20") int limit) {
-		return ApiResponse.ok(service.highPriorityKnowledge(userId, limit)
+			@RequestParam(value = "limit", defaultValue = "20") int limit,
+			@RequestParam(value = "layer", required = false) String layer,
+			@RequestParam(value = "always_only", defaultValue = "false") boolean alwaysOnly) {
+		return ApiResponse.ok(service.highPriorityKnowledge(userId, limit, layer, alwaysOnly)
 				.stream().map(KnowledgeLite::of).toList());
 	}
 
@@ -140,10 +142,12 @@ public class InternalAgentKnowledgeController {
 	}
 
 	public record KnowledgeLite(Long id, String scopeType, String scopeValue,
-	                             String title, String body, String priority) {
+	                             String title, String body, String priority,
+	                             String appliesTo, Boolean alwaysOn) {
 		static KnowledgeLite of(AgentKnowledgeEntity e) {
 			return new KnowledgeLite(e.getId(), e.getScopeType(), e.getScopeValue(),
-					e.getTitle(), e.getBody(), e.getPriority());
+					e.getTitle(), e.getBody(), e.getPriority(),
+					e.getAppliesTo(), e.getAlwaysOn());
 		}
 	}
 
@@ -157,7 +161,8 @@ public class InternalAgentKnowledgeController {
 
 	public record KnowledgeSearchRequest(
 			Long userId, String queryVec,
-			String skillSlug, String toolId, String recipeId, Integer limit) {}
+			String skillSlug, String toolId, String recipeId,
+			String layer, Integer limit) {}
 
 	public record ExampleSearchRequest(
 			Long userId, String queryVec,

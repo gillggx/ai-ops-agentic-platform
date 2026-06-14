@@ -35,6 +35,50 @@ async def test_build_knowledge_hint_layer1_high_priority():
 
 
 @pytest.mark.asyncio
+async def test_build_knowledge_hint_execute_path_skips_layer1():
+    """V58: include_always_on=False (the execute path) must NOT call the
+    high-priority dump — execute injection is RAG-only to stay lean."""
+    fake_java = AsyncMock()
+    fake_java.list_high_priority_knowledge.return_value = [
+        {"title": "should-not-appear", "body": "x"},
+    ]
+    with patch(
+        "python_ai_sidecar.clients.java_client.JavaAPIClient",
+        return_value=fake_java,
+    ), patch(
+        "python_ai_sidecar.agent_orchestrator_v2.nodes.load_context._build_knowledge_block",
+        new=AsyncMock(return_value="## RAG\n  全廠 → list_objects + foreach"),
+    ):
+        out = await build_knowledge_hint(
+            "取得全廠各機台 OOC", user_id=1, source="phase_exec",
+            layer="execute", include_always_on=False, rag_limit=2,
+        )
+    fake_java.list_high_priority_knowledge.assert_not_called()
+    assert "should-not-appear" not in out
+    assert "list_objects" in out
+
+
+@pytest.mark.asyncio
+async def test_build_knowledge_hint_passes_layer_and_always_only():
+    """V58: layer + always_only thread through to the Java high-priority call."""
+    fake_java = AsyncMock()
+    fake_java.list_high_priority_knowledge.return_value = []
+    with patch(
+        "python_ai_sidecar.clients.java_client.JavaAPIClient",
+        return_value=fake_java,
+    ), patch(
+        "python_ai_sidecar.agent_orchestrator_v2.nodes.load_context._build_knowledge_block",
+        new=AsyncMock(return_value=""),
+    ):
+        await build_knowledge_hint(
+            "anything", user_id=1, layer="plan", always_only=True,
+        )
+    _, kwargs = fake_java.list_high_priority_knowledge.call_args
+    assert kwargs.get("layer") == "plan"
+    assert kwargs.get("always_only") is True
+
+
+@pytest.mark.asyncio
 async def test_build_knowledge_hint_layer2_rag():
     """RAG block is appended after the high-priority section."""
     fake_java = AsyncMock()

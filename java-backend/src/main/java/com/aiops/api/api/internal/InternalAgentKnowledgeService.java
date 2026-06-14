@@ -87,16 +87,19 @@ public class InternalAgentKnowledgeService {
 	// Knowledge (RAG)
 	// ══════════════════════════════════════════════════════════════════════
 
-	/** Sidecar passes a vector literal "[v1,v2,...]" computed from query. */
+	/** Sidecar passes a vector literal "[v1,v2,...]" computed from query.
+	 *  V58: {@code layer} ('plan'|'execute'|null) filters by applies_to so the
+	 *  plan and execute agent layers retrieve different slices. */
 	public List<AgentKnowledgeEntity> searchKnowledge(Long userId, String queryVec,
 	                                                   String skillSlug, String toolId, String recipeId,
-	                                                   Integer limit) {
+	                                                   String layer, Integer limit) {
 		if (queryVec == null || queryVec.isBlank()) {
 			return List.of();
 		}
+		String layerFilter = (layer == null || layer.isBlank()) ? null : layer;
 		return knowledgeRepo.searchByEmbedding(
 				userId, queryVec, skillSlug, toolId, recipeId,
-				limit != null ? limit : 3);
+				layerFilter, limit != null ? limit : 3);
 	}
 
 	/** PUT embedding for a knowledge row (called by sidecar after async embed).
@@ -129,18 +132,27 @@ public class InternalAgentKnowledgeService {
 				.toList();
 	}
 
-	/** Return all global high-priority knowledge regardless of embedding
-	 *  similarity. Cohere multilingual recall on long Chinese queries is
-	 *  patchy (verified empirically), so high-priority "first principle"
-	 *  entries (SPC/APC/FDC/Recipe/Skill-vs-Patrol architecture) must reach
-	 *  plan_node UNCONDITIONALLY, not gated on RAG cosine match.
-	 *  Small dataset (&lt;30 high-priority rows expected) — full scan OK. */
-	public List<AgentKnowledgeEntity> highPriorityKnowledge(Long userId, int limit) {
+	/** Return global high-priority knowledge regardless of embedding
+	 *  similarity. Multilingual recall on long Chinese queries is patchy
+	 *  (verified empirically), so high-priority "first principle" entries must
+	 *  reach the planner UNCONDITIONALLY, not gated on RAG cosine match.
+	 *  Small dataset (&lt;30 high-priority rows expected) — full scan OK.
+	 *
+	 *  <p>V58: {@code layer} ('plan'|'execute'|null) filters by applies_to;
+	 *  {@code alwaysOnly} narrows to always_on=true (the irreducible core) so
+	 *  the plan prompt can shrink from "all 19 high bodies" to "core + RAG". */
+	public List<AgentKnowledgeEntity> highPriorityKnowledge(Long userId, int limit,
+	                                                        String layer, boolean alwaysOnly) {
+		final String layerFilter = (layer == null || layer.isBlank()) ? null : layer;
 		return knowledgeRepo.findAll().stream()
 				.filter(e -> e.getActive() != null && e.getActive())
 				.filter(e -> "high".equalsIgnoreCase(e.getPriority()))
 				.filter(e -> "global".equals(e.getScopeType())
 				          || (e.getUserId() != null && e.getUserId().equals(userId)))
+				.filter(e -> layerFilter == null
+				          || layerFilter.equals(e.getAppliesTo())
+				          || "both".equals(e.getAppliesTo()))
+				.filter(e -> !alwaysOnly || Boolean.TRUE.equals(e.getAlwaysOn()))
 				.limit(limit)
 				.toList();
 	}
