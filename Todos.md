@@ -36,8 +36,22 @@
   **連 3 次全綠(A/B/C)**;backend 5 個 resume 全 bypass、零 re-emit。
   `tooling/gui_smoke.sh --suite brief`。
 - commits `82b179f`→`f9e5933`。flag prod **ON**。
-- **下一步**:option (a) plan-structured brief(agent 寫 step plan + 每步 LLM 生問題,
-  已批准 spec)—— 待做。
+### (3) Plan-structured brief (option a) — **完成 + 驗 (prod ON)**
+扁平 brief 只「秀要建什麼 + 問要不要改」,user 要 Claude-cowork 式:**agent 寫
+step-by-step plan,有真實選擇的步掛一個問題 + 選項**(例:Step1 抓幾天 / Step3
+5 台各一張 vs 疊同一張 series=toolID),逐步選完才建。
+- `brief_planner.build_plan_brief()`:一通 LLM → `{is_pipeline_request, summary,
+  plan_steps[{id,title,decision?}]}`;backend 每 decision 補其它、上限 3 個、有
+  fallback。**界線**:brief plan 是「對齊用、收集選擇」,**不是執行的 plan**——
+  builder 的 goal_plan 照跑;選擇的 `as_goal` 引導 splice 進 build goal。
+- `intent_completeness` brief 模式 → `_emit_plan_brief`(取代 completeness+detectors)。
+- `DesignIntentCard`:`PlanView` 渲染 steps + 每步 decision 內嵌;選中 option 的
+  `as_goal` 當 resolution;testid `brief-step-*`。重用迴圈已修的 auto-submit/其它 基建。
+- 驗:backend 24 green;Playwright **連 3 次全綠**(plan steps 渲染 + 每步 decision
+  解析 + auto-build + loop guard);backend planner 產 `steps=3 decisions=1`、6 resume
+  全 bypass 零迴圈。commits → `d5c68c5`。
+- **驗法教訓已內化**:Playwright 不只驗「POST 送出」,要驗「送出後 build 真的繼續、
+  不再跳第二張 brief」(loop guard)。
 
 ---
 
