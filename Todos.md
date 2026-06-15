@@ -26,10 +26,18 @@
   不能走 prefix)。
 - frontend:`DesignIntentCard` 加「其它」輸入 + auto-submit + data-testid;
   `AIAgentPanel`/`ChatPanel` 傳 `interactive_brief` + `intent_resolutions`。
-- 驗:backend unit 20 green;API e2e 確認 brief 一律出(連 complete=True 也出);
-  **Playwright `brief_flow.spec.ts` 連跑 3 次全綠**(degenerate + 多 decision 含
-  其它 → auto-build,網路層斷言 build POST)。`tooling/gui_smoke.sh --suite brief`。
-- commits `82b179f`→`668ed21`。
+- **無窮迴圈 bug + 修正(`37acfec`)**:brief 卡每次送 `[intent_confirmed:<id> dim=val]`
+  (帶選擇),但 `intent_completeness` bypass regex 是 `[\w-]+\]`(要求 id 後立刻接
+  `]`),選擇前的**空格**讓它不 match → 不 bypass → 每輪重發 brief → 無窮問。
+  修:regex 改 `[^\]]*\]`。**教訓**:先前「3x 綠」只驗「build POST 有送」沒驗
+  「送出後不再跳第二張 brief」,所以漏掉迴圈。
+- 驗(修正後,正確驗法):backend unit;Playwright `brief_flow.spec.ts` 加
+  **loop guard**(resolve 後等 90s 斷言**沒有新 brief 卡**)+ 同步 submitted 標記,
+  **連 3 次全綠(A/B/C)**;backend 5 個 resume 全 bypass、零 re-emit。
+  `tooling/gui_smoke.sh --suite brief`。
+- commits `82b179f`→`f9e5933`。flag prod **ON**。
+- **下一步**:option (a) plan-structured brief(agent 寫 step plan + 每步 LLM 生問題,
+  已批准 spec)—— 待做。
 
 ---
 
