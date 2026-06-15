@@ -120,6 +120,56 @@ async def _chat_stream(req: ChatRequest, caller: CallerContext) -> AsyncGenerato
         yield ev
 
 
+# Keepalive interval (s). Must stay well under the smallest intermediary idle
+# timeout on the browser → nginx → Next.js → Java → sidecar path (nginx
+# proxy_read_timeout is 120s).
+_KEEPALIVE_INTERVAL_SEC = 10.0
+
+
+async def _with_keepalive(
+    gen: AsyncGenerator[dict, None], *, interval: float = _KEEPALIVE_INTERVAL_SEC
+) -> AsyncGenerator[dict, None]:
+    """Inject a lightweight ``ping`` SSE event whenever the upstream generator
+    is idle for ``interval`` seconds.
+
+    Why (2026-06-15 spc-cpk incident): chat-inline pipeline builds spend ~50s
+    per LLM round emitting nothing. A silent SSE stream gets torn down by an
+    intermediary (nginx proxy_read_timeout 120s / browser) → ``Broken pipe`` →
+    the build keeps running blind while the user's screen freezes on the last
+    event. We emit a real ``ping`` EVENT (not an SSE ``:`` comment — Spring's
+    WebClient SSE codec on the Java proxy swallows comment lines) so bytes keep
+    flowing and no layer times out. The frontend has no ``ping`` case, so it is
+    silently ignored. Never raises; cancels the drain task on teardown.
+    """
+    queue: asyncio.Queue = asyncio.Queue()
+    _DONE = object()
+
+    async def _drain() -> None:
+        try:
+            async for ev in gen:
+                await queue.put(ev)
+        finally:
+            await queue.put(_DONE)
+
+    task = asyncio.ensure_future(_drain())
+    try:
+        while True:
+            try:
+                ev = await asyncio.wait_for(queue.get(), timeout=interval)
+            except asyncio.TimeoutError:
+                yield {"event": "ping", "data": "{}"}
+                continue
+            if ev is _DONE:
+                break
+            yield ev
+    finally:
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+
+
 async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenerator[dict, None]:
     """Phase 10-B: unified Glass Box build via graph_build (LangGraph).
 
@@ -175,7 +225,7 @@ async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenera
 
 @router.post("/chat")
 async def agent_chat(req: ChatRequest, caller: CallerContext = ServiceAuth) -> EventSourceResponse:
-    return EventSourceResponse(_chat_stream(req, caller))
+    return EventSourceResponse(_with_keepalive(_chat_stream(req, caller)))
 
 
 # ── v19 (2026-05-14): chat intent confirmation resume endpoint ──────
@@ -496,7 +546,7 @@ async def agent_chat_intent_respond(
 
 @router.post("/build")
 async def agent_build(req: BuildRequest, caller: CallerContext = ServiceAuth) -> EventSourceResponse:
-    return EventSourceResponse(_build_stream(req, caller))
+    return EventSourceResponse(_with_keepalive(_build_stream(req, caller)))
 
 
 # ── Phase 10: graph_build confirm endpoint (resume after confirm_gate) ────
