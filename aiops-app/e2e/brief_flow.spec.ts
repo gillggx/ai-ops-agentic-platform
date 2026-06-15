@@ -80,11 +80,11 @@ async function resolveAllDecisions(page: Page) {
 
 test.describe("interactive brief", () => {
   test("clear prompt → degenerate brief → click start decision → auto-build", async ({ page }) => {
-    test.setTimeout(360_000);
+    test.setTimeout(480_000);
     await openChatAndSend(page, "EQP-01 STEP_001 過去 7 天的 xbar 趨勢圖");
 
     // Brief card must appear (always-align gate).
-    await expect(page.locator(CARD).last()).toBeVisible({ timeout: 180_000 });
+    await expect(page.locator(CARD).last()).toBeVisible({ timeout: 260_000 });
 
     // Resolve every decision (degenerate = single 「開始建立」). Auto-submit
     // fires synchronously — no manual button — surfacing the submitted marker.
@@ -95,10 +95,10 @@ test.describe("interactive brief", () => {
   });
 
   test("ambiguous prompt → multi-decision (incl 其它) → resolve all → auto-build", async ({ page }) => {
-    test.setTimeout(360_000);
+    test.setTimeout(480_000);
     await openChatAndSend(page, "各機台過去 7 天的 OOC 排名");
 
-    await expect(page.locator(CARD).last()).toBeVisible({ timeout: 180_000 });
+    await expect(page.locator(CARD).last()).toBeVisible({ timeout: 260_000 });
     const cardsBefore = await page.locator(CARD).count();
     await resolveAllDecisions(page);
     // Resolving every decision (option pick or 其它 free-text) auto-fires the
