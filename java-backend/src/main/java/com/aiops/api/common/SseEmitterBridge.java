@@ -50,6 +50,13 @@ public class SseEmitterBridge {
 		Disposable subscription = upstream.subscribe(
 				ev -> {
 					try {
+						// TEMP DEBUG (2026-06-15): trace every event the Spring
+						// WebClient SSE codec produced + that we forward, to
+						// isolate whether design_intent_confirm/pb_glass_op are
+						// dropped by the codec (absent here) vs the frontend
+						// (present here). Remove after diagnosis.
+						log.info("SSE-DBG[{}] forward event={} data_len={}", tag,
+								ev.event(), ev.data() != null ? ev.data().length() : 0);
 						SseEmitter.SseEventBuilder builder = SseEmitter.event();
 						if (ev.event() != null) builder.name(ev.event());
 						if (ev.id() != null) builder.id(ev.id());
