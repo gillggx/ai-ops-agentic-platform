@@ -22,21 +22,9 @@ const BASE = process.env.PW_BASE ?? "https://aiops-gill.com";
 const USER = process.env.PW_USER ?? "admin";
 const PASS = process.env.PW_PASS ?? "admin";
 const CARD = '[data-testid="design-intent-card"]';
+const SUBMITTED = '[data-testid="brief-submitted"]';
 
-/** Wait for the auto-fired build POST (carries [intent_confirmed:]) — the
- *  definitive, view-transition-proof signal that resolving every decision
- *  auto-started the build (no manual button). */
-function waitForAutoBuild(page: Page) {
-  return page.waitForRequest(
-    (req) =>
-      req.method() === "POST" &&
-      req.url().includes("/api/agent/chat") &&
-      (req.postData() || "").includes("intent_confirmed"),
-    { timeout: 30_000 },
-  );
-}
-
-/** LOOP GUARD (2026-06-15): after the resume POST, a correct bypass proceeds to
+/** LOOP GUARD (2026-06-15): after the resume fires, a correct bypass proceeds to
  *  build; a broken bypass re-emits the brief → infinite ask. Wait past a full
  *  re-classify + completeness cycle and assert NO new brief card appeared. */
 async function assertNoReAsk(page: Page, cardsBefore: number) {
@@ -98,13 +86,11 @@ test.describe("interactive brief", () => {
     // Brief card must appear (always-align gate).
     await expect(page.locator(CARD).last()).toBeVisible({ timeout: 180_000 });
 
-    // Arm the network listener BEFORE resolving, then resolve every decision
-    // (degenerate = single 「開始建立」). Auto-submit must fire the build POST
-    // with no manual button click.
+    // Resolve every decision (degenerate = single 「開始建立」). Auto-submit
+    // fires synchronously — no manual button — surfacing the submitted marker.
     const cardsBefore = await page.locator(CARD).count();
-    const autoBuild = waitForAutoBuild(page);
     await resolveAllDecisions(page);
-    await autoBuild;
+    await expect(page.locator(SUBMITTED).last()).toBeVisible({ timeout: 15_000 });
     await assertNoReAsk(page, cardsBefore);  // no infinite re-ask loop
   });
 
@@ -114,11 +100,10 @@ test.describe("interactive brief", () => {
 
     await expect(page.locator(CARD).last()).toBeVisible({ timeout: 180_000 });
     const cardsBefore = await page.locator(CARD).count();
-    const autoBuild = waitForAutoBuild(page);
     await resolveAllDecisions(page);
     // Resolving every decision (option pick or 其它 free-text) auto-fires the
-    // build with no manual button.
-    await autoBuild;
+    // build with no manual button — synchronous submitted marker.
+    await expect(page.locator(SUBMITTED).last()).toBeVisible({ timeout: 15_000 });
     await assertNoReAsk(page, cardsBefore);  // no infinite re-ask loop
   });
 });
