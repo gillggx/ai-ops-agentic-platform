@@ -42,6 +42,10 @@ export interface ClarificationOption {
    *  free-text input; the typed text becomes this decision's resolution
    *  value (Claude-cowork "其它 / 自己描述" escape hatch). */
   free_text?: boolean;
+  /** Plan brief (option a): one-line builder guidance for this choice. When
+   *  the user picks this option, `as_goal` (not the raw value id) becomes the
+   *  resolution that splices into the build goal. */
+  as_goal?: string;
 }
 
 /** Sentinel option value for the 其它 free-text choice (matches backend
@@ -56,6 +60,14 @@ export interface ClarificationDimension {
   multi?: boolean;
 }
 
+/** Plan brief (option a): one step of the agent's proposed plan, optionally
+ *  carrying a decision to resolve. decision.dimension === this step's id. */
+export interface PlanStep {
+  id: string;
+  title: string;
+  decision?: ClarificationDimension | null;
+}
+
 export interface DesignIntentData {
   card_id: string;
   inputs: DesignIntentInput[];
@@ -63,6 +75,9 @@ export interface DesignIntentData {
   presentation: PresentationKind;
   alternatives?: DesignIntentAlternative[];
   clarifications?: ClarificationDimension[];
+  /** Plan brief (option a): the agent's step-by-step plan, decisions inline.
+   *  When present, the card renders the plan instead of the flat read-view. */
+  plan_steps?: PlanStep[];
   /** picks per dimension; populated as user clicks radio buttons. */
   selections?: Record<string, string>;
   resolved?: boolean;
@@ -146,14 +161,20 @@ export function DesignIntentCard({ data, onPick }: Props) {
   // resolved round-trip and any build-view takeover.
   const [submitted, setSubmitted] = useState(false);
 
-  // Effective resolution value per dimension: free-text when 其它 is picked,
-  // else the chosen option value.
+  // Effective resolution value per dimension: free-text when 其它 is picked;
+  // otherwise the chosen option's `as_goal` builder-guidance (plan brief) or
+  // the raw value (legacy).
   const effectiveSelections = (): Record<string, string> => {
     const out: Record<string, string> = {};
     for (const c of (data.clarifications ?? [])) {
       const p = picks[c.dimension];
       if (p === undefined || p === "") continue;
-      out[c.dimension] = p === OTHER_VALUE ? (otherText[c.dimension] ?? "") : p;
+      if (p === OTHER_VALUE) {
+        out[c.dimension] = otherText[c.dimension] ?? "";
+      } else {
+        const opt = c.options.find((o) => o.value === p);
+        out[c.dimension] = opt?.as_goal || p;
+      }
     }
     return out;
   };
@@ -199,18 +220,31 @@ export function DesignIntentCard({ data, onPick }: Props) {
           <span>我想為你建這條 pipeline — 你看對嗎？</span>
         </div>
 
-        <ReadView data={data} present={present} />
-
-        {/* Decisions: options + 其它 free-text (interactive brief) */}
-        {(data.clarifications?.length ?? 0) > 0 && (
-          <ClarificationGroups
-            clarifications={data.clarifications ?? []}
+        {(data.plan_steps?.length ?? 0) > 0 ? (
+          /* Plan brief (option a): step-by-step plan, decisions inline. */
+          <PlanView
+            summary={data.logic}
+            planSteps={data.plan_steps ?? []}
             picks={picks}
             otherText={otherText}
             onPickOption={(dim, val) => setPicks((p) => ({ ...p, [dim]: val }))}
             onOtherText={(dim, txt) => setOtherText((t) => ({ ...t, [dim]: txt }))}
             disabled={disabled}
           />
+        ) : (
+          <>
+            <ReadView data={data} present={present} />
+            {(data.clarifications?.length ?? 0) > 0 && (
+              <ClarificationGroups
+                clarifications={data.clarifications ?? []}
+                picks={picks}
+                otherText={otherText}
+                onPickOption={(dim, val) => setPicks((p) => ({ ...p, [dim]: val }))}
+                onOtherText={(dim, txt) => setOtherText((t) => ({ ...t, [dim]: txt }))}
+                disabled={disabled}
+              />
+            )}
+          </>
         )}
 
         {/* Buttons. Brief mode auto-starts on full resolution → no 開始建. */}
@@ -392,82 +426,131 @@ function ReadView({
 
 // ── Clarification radio groups (Plan-Mode multi-choice) ──────────────
 
-function ClarificationGroups({
-  clarifications, picks, otherText, onPickOption, onOtherText, disabled,
-}: {
-  clarifications: ClarificationDimension[];
+interface DecisionProps {
   picks: Record<string, string>;
   otherText: Record<string, string>;
   onPickOption: (dim: string, value: string) => void;
   onOtherText: (dim: string, text: string) => void;
   disabled: boolean;
-}) {
+}
+
+/** One decision: question + radio options + 其它 free-text. Shared by the flat
+ *  clarifications view and the plan-step inline view. */
+function DecisionBlock({
+  decision, picks, otherText, onPickOption, onOtherText, disabled, showQuestion = true,
+}: DecisionProps & { decision: ClarificationDimension; showQuestion?: boolean }) {
+  const c = decision;
+  return (
+    <div data-testid={`decision-${c.dimension}`} style={{ marginBottom: 4 }}>
+      {showQuestion && (
+        <div style={{ fontSize: 12, fontWeight: 600, color: "#1a202c", marginBottom: 4 }}>
+          ❓ {c.question}
+        </div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingLeft: 4 }}>
+        {c.options.map((opt) => {
+          const checked = picks[c.dimension] === opt.value;
+          const isOther = !!opt.free_text || opt.value === OTHER_VALUE;
+          return (
+            <div key={opt.value}>
+              <label style={{
+                display: "flex", alignItems: "flex-start", gap: 6,
+                fontSize: 12, color: "#2d3748", cursor: disabled ? "default" : "pointer",
+              }}>
+                <input
+                  type="radio"
+                  data-testid={`decision-${c.dimension}-opt-${opt.value}`}
+                  name={`dim-${c.dimension}`}
+                  value={opt.value}
+                  checked={checked}
+                  disabled={disabled}
+                  onChange={() => onPickOption(c.dimension, opt.value)}
+                  style={{ marginTop: 3, cursor: disabled ? "default" : "pointer" }}
+                />
+                <div>
+                  <div style={{ fontWeight: checked ? 600 : 400 }}>{opt.label}</div>
+                  {opt.hint && (
+                    <div style={{ fontSize: 11, color: "#718096" }}>{opt.hint}</div>
+                  )}
+                </div>
+              </label>
+              {isOther && checked && (
+                <input
+                  type="text"
+                  data-testid={`decision-${c.dimension}-other-input`}
+                  value={otherText[c.dimension] ?? ""}
+                  disabled={disabled}
+                  autoFocus
+                  onChange={(e) => onOtherText(c.dimension, e.target.value)}
+                  placeholder="用自己的話描述這一點的需求…"
+                  style={{
+                    ...inputStyle({ width: "100%", marginTop: 4, marginLeft: 22 }),
+                    maxWidth: "calc(100% - 22px)",
+                  }}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ClarificationGroups({
+  clarifications, ...rest
+}: DecisionProps & { clarifications: ClarificationDimension[] }) {
   return (
     <div style={{
       marginTop: 4, marginBottom: 10,
       padding: "10px 12px", borderRadius: 6,
       background: "#fffbea", border: "1px solid #fde68a",
     }}>
-      <div style={{
-        fontWeight: 600, fontSize: 12, color: "#92400e", marginBottom: 8,
-      }}>
-        ❓ 我有些地方想跟你對焦（選一個，或用「其它」自己描述）：
+      <div style={{ fontWeight: 600, fontSize: 12, color: "#92400e", marginBottom: 8 }}>
+        我有些地方想跟你對焦（選一個，或用「其它」自己描述）：
       </div>
       {clarifications.map((c) => (
-        <div key={c.dimension} data-testid={`decision-${c.dimension}`} style={{ marginBottom: 10 }}>
-          <div style={{
-            fontSize: 12, fontWeight: 600, color: "#1a202c", marginBottom: 4,
-          }}>
-            {c.question}
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingLeft: 4 }}>
-            {c.options.map((opt) => {
-              const checked = picks[c.dimension] === opt.value;
-              const isOther = !!opt.free_text || opt.value === OTHER_VALUE;
-              return (
-                <div key={opt.value}>
-                  <label style={{
-                    display: "flex", alignItems: "flex-start", gap: 6,
-                    fontSize: 12, color: "#2d3748", cursor: disabled ? "default" : "pointer",
-                  }}>
-                    <input
-                      type="radio"
-                      data-testid={`decision-${c.dimension}-opt-${opt.value}`}
-                      name={`dim-${c.dimension}`}
-                      value={opt.value}
-                      checked={checked}
-                      disabled={disabled}
-                      onChange={() => onPickOption(c.dimension, opt.value)}
-                      style={{ marginTop: 3, cursor: disabled ? "default" : "pointer" }}
-                    />
-                    <div>
-                      <div style={{ fontWeight: checked ? 600 : 400 }}>{opt.label}</div>
-                      {opt.hint && (
-                        <div style={{ fontSize: 11, color: "#718096" }}>{opt.hint}</div>
-                      )}
-                    </div>
-                  </label>
-                  {isOther && checked && (
-                    <input
-                      type="text"
-                      data-testid={`decision-${c.dimension}-other-input`}
-                      value={otherText[c.dimension] ?? ""}
-                      disabled={disabled}
-                      autoFocus
-                      onChange={(e) => onOtherText(c.dimension, e.target.value)}
-                      placeholder="用自己的話描述這一點的需求…"
-                      style={{
-                        ...inputStyle({ width: "100%", marginTop: 4, marginLeft: 22 }),
-                        maxWidth: "calc(100% - 22px)",
-                      }}
-                    />
-                  )}
-                </div>
-              );
-            })}
-          </div>
+        <div key={c.dimension} style={{ marginBottom: 10 }}>
+          <DecisionBlock decision={c} {...rest} />
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Plan brief (option a): the agent's step-by-step plan, each step's decision
+ *  (if any) rendered inline under the step. */
+function PlanView({
+  summary, planSteps, ...rest
+}: DecisionProps & { summary?: string; planSteps: PlanStep[] }) {
+  return (
+    <div style={{ marginBottom: 8 }}>
+      {summary && (
+        <div style={{ fontSize: 12, color: "#2d3748", marginBottom: 8, lineHeight: 1.5 }}>
+          {summary}
+        </div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        {planSteps.map((s, i) => (
+          <div key={s.id} data-testid={`brief-step-${s.id}`} style={{
+            padding: "8px 10px", borderRadius: 6,
+            background: s.decision ? "#fffbea" : "#f1f5f9",
+            border: s.decision ? "1px solid #fde68a" : "1px solid #e2e8f0",
+          }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "#1a202c" }}>
+              {`Step ${i + 1}`}　{s.title}
+            </div>
+            {s.decision && (
+              <div style={{ marginTop: 6 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#92400e", marginBottom: 4 }}>
+                  ❓ {s.decision.question}
+                </div>
+                <DecisionBlock decision={s.decision} showQuestion={false} {...rest} />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

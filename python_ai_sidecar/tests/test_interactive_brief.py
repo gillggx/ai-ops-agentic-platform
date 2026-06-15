@@ -8,6 +8,8 @@ Covers the pure pieces of dimensional_clarifier that the brief relies on:
 
 from __future__ import annotations
 
+import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -93,3 +95,70 @@ def test_augment_goal_ignores_confirm_and_other_sentinel():
     """The degenerate CONFIRM pick and a bare OTHER_VALUE carry no semantics."""
     assert augment_goal_for_resolutions("base", {CONFIRM_DIMENSION: "go"}) == "base"
     assert augment_goal_for_resolutions("base", {"scope": OTHER_VALUE}) == "base"
+
+
+# ── Plan brief (option a) ───────────────────────────────────────────────────
+
+
+def _fake_llm(text: str):
+    client = AsyncMock()
+    client.create = AsyncMock(return_value=SimpleNamespace(text=text))
+    return client
+
+
+@pytest.mark.asyncio
+async def test_build_plan_brief_shape_and_other_appended():
+    from python_ai_sidecar.agent_orchestrator_v2 import brief_planner as bp
+    payload = {
+        "is_pipeline_request": True,
+        "summary": "EQP-01~05 xbar 趨勢",
+        "plan_steps": [
+            {"id": "s1", "title": "抓 process history",
+             "decision": {"question": "幾天?", "options": [
+                 {"value": "7d", "label": "7 天", "as_goal": "time_range=7d"},
+                 {"value": "14d", "label": "14 天", "as_goal": "time_range=14d"}]}},
+            {"id": "s2", "title": "整理時序", "decision": None},
+        ],
+    }
+    with patch.object(bp, "get_llm_client", return_value=_fake_llm(json.dumps(payload))):
+        out = await bp.build_plan_brief("EQP-01~05 STEP_001 xbar 趨勢")
+    assert out["is_pipeline_request"] is True
+    steps = out["plan_steps"]
+    assert [s["id"] for s in steps] == ["s1", "s2"]
+    assert steps[1]["decision"] is None
+    opts = steps[0]["decision"]["options"]
+    assert opts[-1]["value"] == bp.OTHER_VALUE and opts[-1].get("free_text") is True
+    assert steps[0]["decision"]["dimension"] == "s1"   # keyed on step id
+
+
+@pytest.mark.asyncio
+async def test_build_plan_brief_knowledge_question_passthrough():
+    from python_ai_sidecar.agent_orchestrator_v2 import brief_planner as bp
+    with patch.object(bp, "get_llm_client",
+                      return_value=_fake_llm('{"is_pipeline_request": false}')):
+        out = await bp.build_plan_brief("Cpk 是什麼")
+    assert out == {"is_pipeline_request": False}
+
+
+@pytest.mark.asyncio
+async def test_build_plan_brief_fallback_on_bad_json():
+    from python_ai_sidecar.agent_orchestrator_v2 import brief_planner as bp
+    with patch.object(bp, "get_llm_client", return_value=_fake_llm("not json")):
+        out = await bp.build_plan_brief("anything")
+    assert out["is_pipeline_request"] is True
+    assert len(out["plan_steps"]) == 1   # degenerate fallback
+
+
+def test_clarifications_and_goal_mapping():
+    from python_ai_sidecar.agent_orchestrator_v2 import brief_planner as bp
+    plan = [
+        {"id": "s1", "title": "f", "decision": {"dimension": "s1", "question": "幾天?",
+         "options": [{"value": "7d", "label": "7 天", "as_goal": "time_range=7d"},
+                     {"value": bp.OTHER_VALUE, "label": "其它", "as_goal": "", "free_text": True}]}},
+        {"id": "s2", "title": "g", "decision": None},
+    ]
+    clars = bp.clarifications_from_plan(plan)
+    assert len(clars) == 1 and clars[0]["dimension"] == "s1"
+    # id → as_goal mapping (safety net); free-text passes through
+    assert bp.goal_resolutions_from_selections(plan, {"s1": "7d"}) == {"s1": "time_range=7d"}
+    assert bp.goal_resolutions_from_selections(plan, {"s1": "只要 14 天"}) == {"s1": "只要 14 天"}

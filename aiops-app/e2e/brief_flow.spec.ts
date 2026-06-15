@@ -85,6 +85,8 @@ test.describe("interactive brief", () => {
 
     // Brief card must appear (always-align gate).
     await expect(page.locator(CARD).last()).toBeVisible({ timeout: 260_000 });
+    // Plan-structured brief (option a): the agent's step-by-step plan renders.
+    await expect(page.locator('[data-testid^="brief-step-"]').first()).toBeVisible({ timeout: 10_000 });
 
     // Resolve every decision (degenerate = single 「開始建立」). Auto-submit
     // fires synchronously — no manual button — surfacing the submitted marker.
@@ -99,6 +101,7 @@ test.describe("interactive brief", () => {
     await openChatAndSend(page, "各機台過去 7 天的 OOC 排名");
 
     await expect(page.locator(CARD).last()).toBeVisible({ timeout: 260_000 });
+    await expect(page.locator('[data-testid^="brief-step-"]').first()).toBeVisible({ timeout: 10_000 });
     const cardsBefore = await page.locator(CARD).count();
     await resolveAllDecisions(page);
     // Resolving every decision (option pick or 其它 free-text) auto-fires the

@@ -292,7 +292,15 @@ async def intent_completeness_node(
         logger.info("intent_completeness: bypass via [intent_*] prefix")
         return {}
 
-    # ── Completeness classification (one haiku-class call) ────────
+    # ── Interactive brief (plan-structured, option (a)) ───────────
+    # When ON, ALWAYS emit a step-by-step plan brief with per-step decisions
+    # (LLM-proposed). Deterministic always-align gate — not a haiku judging
+    # whether to ask. Knowledge questions still bypass (planner says so).
+    from python_ai_sidecar.feature_flags import is_interactive_brief_enabled
+    if is_interactive_brief_enabled():
+        return await _emit_plan_brief(user_message, config)
+
+    # ── Completeness classification (legacy, one haiku-class call) ─
     client = get_llm_client()
     try:
         resp = await client.create(
@@ -312,24 +320,17 @@ async def intent_completeness_node(
         logger.warning("intent_completeness: unparseable decision — pass-through")
         return {}
 
-    from python_ai_sidecar.feature_flags import is_interactive_brief_enabled
-    brief_mode = is_interactive_brief_enabled()
-
     # Knowledge / definition questions are never a build — answer in plain text.
-    # (is_pipeline_request absent → fall back to the legacy `complete` meaning.)
     if decision.get("is_pipeline_request") is False:
         logger.info("intent_completeness: bypass (knowledge question, not a build)")
         return {}
 
-    if decision.get("complete") is True and not brief_mode:
-        # Legacy: a fully-specified build proceeds straight to the builder.
+    if decision.get("complete") is True:
+        # A fully-specified build proceeds straight to the builder.
         logger.info("intent_completeness.decision complete=True intent=%s", intent)
         return {}
-    # brief_mode: ALWAYS emit the brief (even when complete) so the user
-    # aligns before any build starts — a deterministic gate, not a haiku call
-    # deciding whether to ask.
 
-    # ── Emit design_intent_confirm brief + force synthesis ──
+    # ── Incomplete: emit design_intent_confirm + force synthesis ──
     guess = decision.get("guess") or {}
     missing = decision.get("missing") or []
 
@@ -337,8 +338,7 @@ async def intent_completeness_node(
     # Normalize input names to canonical keys before sending the card to
     # the user. Even with the prompt rule, LLMs occasionally invent names
     # like $equipment or $timeframe_1 — Glass Box's HOT blocks can't bind
-    # those, so the build gets stuck. This deterministic post-process
-    # ensures whatever lands in the spec is something the builder can use.
+    # those, so the build gets stuck.
     normalized_inputs = [_normalize_input(i) for i in (guess.get("inputs") or [])]
     spec_payload = {
         "card_id": card_id,
@@ -348,33 +348,9 @@ async def intent_completeness_node(
         "alternatives": guess.get("alternatives") or [],
     }
 
-    # brief_mode: attach the interactive decisions (deterministic dimension
-    # detectors + 其它 free-text + a degenerate "start" decision when nothing is
-    # ambiguous). The frontend auto-submits once every decision is resolved.
-    if brief_mode:
-        try:
-            from python_ai_sidecar.agent_orchestrator_v2.dimensional_clarifier import (
-                build_clarifications,
-            )
-            snap = state.get("pipeline_snapshot")
-            snap_dict = snap if isinstance(snap, dict) else {}
-            spec_payload["clarifications"] = await build_clarifications(
-                user_msg=user_message,
-                declared_inputs=snap_dict.get("inputs"),
-                pipeline_snapshot=snap_dict,
-                include_other=True,
-                always=True,
-            )
-            spec_payload["interactive_brief"] = True
-        except Exception as ce:  # noqa: BLE001
-            logger.warning("intent_completeness: build_clarifications failed: %s", ce)
-            spec_payload["clarifications"] = []
-
     logger.info(
-        "intent_completeness.decision complete=%s brief_mode=%s missing=%s card_id=%s "
-        "decisions=%d",
-        decision.get("complete"), brief_mode, missing, card_id,
-        len(spec_payload.get("clarifications") or []),
+        "intent_completeness.decision complete=False missing=%s card_id=%s",
+        missing, card_id,
     )
 
     pb_emit = (config.get("configurable", {}) or {}).get("pb_event_emit") if config else None
@@ -384,7 +360,50 @@ async def intent_completeness_node(
         except Exception as ee:  # noqa: BLE001
             logger.warning("intent_completeness: pb_emit failed: %s", ee)
 
-    # Synthetic AIMessage so synthesis just renders this without another LLM call.
+    return {
+        "force_synthesis": True,
+        "messages": [AIMessage(content=_FORCE_SYNTH_REPLY)],
+    }
+
+
+async def _emit_plan_brief(
+    user_message: str, config: RunnableConfig,
+) -> Dict[str, Any]:
+    """Interactive-brief path: emit a step-by-step plan brief with per-step
+    decisions (LLM-proposed). Build proceeds only after the user resolves every
+    decision (frontend auto-submits → `[intent_confirmed:]` → bypass above)."""
+    from python_ai_sidecar.agent_orchestrator_v2.brief_planner import (
+        build_plan_brief, clarifications_from_plan,
+    )
+    brief = await build_plan_brief(user_message)
+    if brief.get("is_pipeline_request") is False:
+        logger.info("intent_completeness: bypass (planner: not a build request)")
+        return {}
+
+    plan_steps = brief.get("plan_steps") or []
+    spec_payload = {
+        "card_id": f"intent-{uuid.uuid4().hex[:8]}",
+        "inputs": [],
+        "logic": brief.get("summary") or "",
+        "presentation": "mixed",
+        "alternatives": [],
+        "plan_steps": plan_steps,
+        "clarifications": clarifications_from_plan(plan_steps),
+        "interactive_brief": True,
+    }
+    logger.info(
+        "intent_completeness: plan brief card=%s steps=%d decisions=%d",
+        spec_payload["card_id"], len(plan_steps),
+        len(spec_payload["clarifications"]),
+    )
+
+    pb_emit = (config.get("configurable", {}) or {}).get("pb_event_emit") if config else None
+    if pb_emit is not None:
+        try:
+            pb_emit({"type": "design_intent_confirm", **spec_payload})
+        except Exception as ee:  # noqa: BLE001
+            logger.warning("_emit_plan_brief: pb_emit failed: %s", ee)
+
     return {
         "force_synthesis": True,
         "messages": [AIMessage(content=_FORCE_SYNTH_REPLY)],
