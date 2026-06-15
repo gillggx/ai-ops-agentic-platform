@@ -5,6 +5,34 @@
 
 ---
 
+## 0b. Chat 體感修正 + 協作式 Brief (2026-06-15 session)
+
+### (1) Chat-inline build 斷線/凍屏 — **修了 (prod, 已驗)**
+根因(spc-cpk 事件):chat 內跑 build 每 LLM round ~50s 不發 event → SSE 靜默
+→ 撞 nginx `proxy_read_timeout 120s` → `Broken pipe`(Java log)→ 後端瞎建、
+前端永遠凍在最後畫面。修法:`/chat`+`/build` 串流包 `_with_keepalive`,閒置每
+10s 發**真 `ping` event**(不是 SSE comment — Java Spring codec 會吞 comment)。
+驗:重跑 spc-cpk `Broken pipe=0`,4m36s 跑完。commit `62e3790`。
+
+### (2) 協作式 Brief「build 前一律對齊」— **flag ON (prod, 已驗)**
+把「要不要對齊」從 haiku 判斷改成 graph 確定性 gate:chat **一律**在 build 前出
+一張 brief 卡,每個待決點 = 選項 + **「其它」自由描述**(Claude-cowork 風),
+**全部選完自動開始建**(無手動「開始建」鈕)。
+- flag `ENABLE_INTERACTIVE_BRIEF`(prod **ON**,2026-06-15)。
+- backend:`intent_completeness` 一律出 brief(prompt 加 `is_pipeline_request`
+  讓 knowledge-Q 仍 bypass);`dimensional_clarifier` 加 `OTHER_VALUE` free-text
+  + 無歧義退化成 `__confirm__` 單一「開始」decision;`augment_goal` 支援自由
+  文字;`tool_execute` 併 `client_context.intent_resolutions`(free-text 有空白
+  不能走 prefix)。
+- frontend:`DesignIntentCard` 加「其它」輸入 + auto-submit + data-testid;
+  `AIAgentPanel`/`ChatPanel` 傳 `interactive_brief` + `intent_resolutions`。
+- 驗:backend unit 20 green;API e2e 確認 brief 一律出(連 complete=True 也出);
+  **Playwright `brief_flow.spec.ts` 連跑 3 次全綠**(degenerate + 多 decision 含
+  其它 → auto-build,網路層斷言 build POST)。`tooling/gui_smoke.sh --suite brief`。
+- commits `82b179f`→`668ed21`。
+
+---
+
 ## 0a. Knowledge 分層 + RAG (V58/V59, 2026-06-14 session) — **prod ON**
 
 起點：研究 spc-ooc 為何 38 步。根因不是缺知識 —— id 36「全廠聚合 →
