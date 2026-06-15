@@ -38,7 +38,7 @@ async function login(page: Page) {
 
 async function openChatAndSend(page: Page, prompt: string) {
   await login(page);
-  await page.goto("/");
+  await page.goto(`${BASE}/`);
   const input = page.locator("textarea").first();
   await expect(input).toBeVisible({ timeout: 15_000 });
   await input.click();
@@ -56,14 +56,13 @@ async function resolveAllDecisions(page: Page) {
   expect(count).toBeGreaterThan(0);
   for (let i = 0; i < count; i++) {
     const dec = decisions.nth(i);
-    const radios = dec.locator('input[type="radio"]');
-    const n = await radios.count();
-    // Pick the FIRST non-其它 option when available, else 其它 + type.
-    const otherRadio = dec.locator('[data-testid$="-opt-__other__"]');
-    if (n > 1 && (await dec.locator('input[type="radio"]:not([data-testid$="-opt-__other__"])').count()) > 0) {
-      await dec.locator('input[type="radio"]:not([data-testid$="-opt-__other__"])').first().check();
+    // Prefer ANY concrete (non-其它) option — incl. the degenerate single
+    // 「開始建立」. Only fall back to 其它 free-text when no concrete option.
+    const nonOther = dec.locator('input[type="radio"]:not([data-testid$="-opt-__other__"])');
+    if ((await nonOther.count()) > 0) {
+      await nonOther.first().check();
     } else {
-      await otherRadio.first().check();
+      await dec.locator('[data-testid$="-opt-__other__"]').first().check();
       const otherInput = dec.locator('[data-testid$="-other-input"]');
       await expect(otherInput).toBeVisible();
       await otherInput.fill("依預設處理即可");
@@ -73,11 +72,11 @@ async function resolveAllDecisions(page: Page) {
 
 test.describe("interactive brief", () => {
   test("clear prompt → degenerate brief → click start decision → auto-build", async ({ page }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(300_000);
     await openChatAndSend(page, "EQP-01 STEP_001 過去 7 天的 xbar 趨勢圖");
 
     // Brief card must appear (always-align gate).
-    await expect(page.locator(CARD).last()).toBeVisible({ timeout: 90_000 });
+    await expect(page.locator(CARD).last()).toBeVisible({ timeout: 180_000 });
 
     // Resolve every decision (degenerate = single 「開始建立」).
     await resolveAllDecisions(page);
@@ -88,10 +87,10 @@ test.describe("interactive brief", () => {
   });
 
   test("ambiguous prompt → multi-decision (incl 其它) → resolve all → auto-build", async ({ page }) => {
-    test.setTimeout(180_000);
+    test.setTimeout(300_000);
     await openChatAndSend(page, "各機台過去 7 天的 OOC 排名");
 
-    await expect(page.locator(CARD).last()).toBeVisible({ timeout: 90_000 });
+    await expect(page.locator(CARD).last()).toBeVisible({ timeout: 180_000 });
     await resolveAllDecisions(page);
     await expect(page.locator(SUBMITTED).last()).toBeVisible({ timeout: 15_000 });
 

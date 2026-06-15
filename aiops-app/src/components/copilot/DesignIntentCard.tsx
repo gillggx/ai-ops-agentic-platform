@@ -141,6 +141,10 @@ export function DesignIntentCard({ data, onPick }: Props) {
   const [picks, setPicks] = useState<Record<string, string>>(initPicks);
   const [otherText, setOtherText] = useState<Record<string, string>>({});
   const submittedRef = React.useRef(false);
+  // Synchronous "submitted" marker so the UI (and GUI tests) get an immediate,
+  // persistent signal the moment auto-submit fires — independent of the async
+  // resolved round-trip and any build-view takeover.
+  const [submitted, setSubmitted] = useState(false);
 
   // Effective resolution value per dimension: free-text when 其它 is picked,
   // else the chosen option value.
@@ -163,6 +167,7 @@ export function DesignIntentCard({ data, onPick }: Props) {
   const submitWithSelections = () => {
     if (submittedRef.current || disabled) return;
     submittedRef.current = true;
+    setSubmitted(true);
     onPick("confirm", { ...data, selections });
   };
 
@@ -235,13 +240,15 @@ export function DesignIntentCard({ data, onPick }: Props) {
           >❌ 取消</button>
         </div>
 
-        {brief && !disabled && (
+        {brief && !disabled && !submitted && (
           <div style={{ marginTop: 8, fontSize: 11, color: "#a0aec0" }}>
             選完所有項目就會自動開始建立
           </div>
         )}
-        {disabled && (
-          <div data-testid="brief-submitted" style={{ marginTop: 8, fontSize: 11, color: "#a0aec0" }}>已選擇</div>
+        {(disabled || submitted) && (
+          <div data-testid="brief-submitted" style={{ marginTop: 8, fontSize: 11, color: "#a0aec0" }}>
+            已送出，開始建立 ✓
+          </div>
         )}
       </div>
 
