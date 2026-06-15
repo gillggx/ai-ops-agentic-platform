@@ -18,10 +18,26 @@ import { test, expect, Page } from "@playwright/test";
  * the FLOW reaches each milestone, not exact node contents).
  */
 
+const BASE = process.env.PW_BASE ?? "https://aiops-gill.com";
+const USER = process.env.PW_USER ?? "admin";
+const PASS = process.env.PW_PASS ?? "admin";
 const CARD = '[data-testid="design-intent-card"]';
 const SUBMITTED = '[data-testid="brief-submitted"]';
 
+async function login(page: Page) {
+  await page.goto(`${BASE}/login`);
+  // Already-authenticated sessions skip straight past /login.
+  if (!page.url().includes("/login")) return;
+  await page.locator('input[type="text"]').first().fill(USER);
+  await page.locator('input[type="password"]').first().fill(PASS);
+  await Promise.all([
+    page.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 30_000 }),
+    page.locator('button[type="submit"]').first().click(),
+  ]);
+}
+
 async function openChatAndSend(page: Page, prompt: string) {
+  await login(page);
   await page.goto("/");
   const input = page.locator("textarea").first();
   await expect(input).toBeVisible({ timeout: 15_000 });
