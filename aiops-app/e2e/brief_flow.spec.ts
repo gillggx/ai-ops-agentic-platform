@@ -36,6 +36,14 @@ function waitForAutoBuild(page: Page) {
   );
 }
 
+/** LOOP GUARD (2026-06-15): after the resume POST, a correct bypass proceeds to
+ *  build; a broken bypass re-emits the brief → infinite ask. Wait past a full
+ *  re-classify + completeness cycle and assert NO new brief card appeared. */
+async function assertNoReAsk(page: Page, cardsBefore: number) {
+  await page.waitForTimeout(90_000);
+  expect(await page.locator(CARD).count()).toBe(cardsBefore);
+}
+
 async function login(page: Page) {
   await page.goto(`${BASE}/login`);
   // Already-authenticated sessions skip straight past /login.
@@ -84,7 +92,7 @@ async function resolveAllDecisions(page: Page) {
 
 test.describe("interactive brief", () => {
   test("clear prompt → degenerate brief → click start decision → auto-build", async ({ page }) => {
-    test.setTimeout(300_000);
+    test.setTimeout(360_000);
     await openChatAndSend(page, "EQP-01 STEP_001 過去 7 天的 xbar 趨勢圖");
 
     // Brief card must appear (always-align gate).
@@ -93,20 +101,24 @@ test.describe("interactive brief", () => {
     // Arm the network listener BEFORE resolving, then resolve every decision
     // (degenerate = single 「開始建立」). Auto-submit must fire the build POST
     // with no manual button click.
+    const cardsBefore = await page.locator(CARD).count();
     const autoBuild = waitForAutoBuild(page);
     await resolveAllDecisions(page);
     await autoBuild;
+    await assertNoReAsk(page, cardsBefore);  // no infinite re-ask loop
   });
 
   test("ambiguous prompt → multi-decision (incl 其它) → resolve all → auto-build", async ({ page }) => {
-    test.setTimeout(300_000);
+    test.setTimeout(360_000);
     await openChatAndSend(page, "各機台過去 7 天的 OOC 排名");
 
     await expect(page.locator(CARD).last()).toBeVisible({ timeout: 180_000 });
+    const cardsBefore = await page.locator(CARD).count();
     const autoBuild = waitForAutoBuild(page);
     await resolveAllDecisions(page);
     // Resolving every decision (option pick or 其它 free-text) auto-fires the
     // build with no manual button.
     await autoBuild;
+    await assertNoReAsk(page, cardsBefore);  // no infinite re-ask loop
   });
 });

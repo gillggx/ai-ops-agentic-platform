@@ -47,8 +47,13 @@ logger = logging.getLogger(__name__)
 
 # Match either prefix anywhere near the start (e.g. after a "[Focused on ...]"
 # header the panel may inject); same tolerance as intent_classifier.
-_CONFIRMED_PREFIX_RE = re.compile(r"\[intent_confirmed:[a-zA-Z0-9_\-]+\]")
-_INTENT_PREFIX_RE = re.compile(r"\[intent=[a-zA-Z0-9_\-]+\]")
+# NOTE: tolerate per-decision selections inside the brackets, e.g.
+# `[intent_confirmed:intent-abc metric=apc scope=all]`. The old `[\w-]+\]`
+# pattern required `]` right after the card_id, so any resume carrying
+# selections (which the brief card ALWAYS sends) failed to match → the gate
+# never bypassed → the brief re-emitted forever (2026-06-15 infinite-loop bug).
+_CONFIRMED_PREFIX_RE = re.compile(r"\[intent_confirmed:[^\]]*\]")
+_INTENT_PREFIX_RE = re.compile(r"\[intent=[^\]]*\]")
 
 
 _COMPLETENESS_SYSTEM = """You judge whether a manufacturing-engineer chat
