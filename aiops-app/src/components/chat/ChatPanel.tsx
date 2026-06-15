@@ -550,6 +550,7 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
               presentation: (ev.presentation as DesignIntentData["presentation"]) ?? "mixed",
               alternatives: (ev.alternatives as DesignIntentData["alternatives"]) ?? [],
               clarifications: (ev.clarifications as DesignIntentData["clarifications"]) ?? [],
+              interactive_brief: (ev.interactive_brief as boolean) ?? false,
               resolved: false,
             };
             setChatHistory((prev) => [...prev, {

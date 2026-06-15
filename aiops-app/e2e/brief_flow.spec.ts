@@ -22,7 +22,19 @@ const BASE = process.env.PW_BASE ?? "https://aiops-gill.com";
 const USER = process.env.PW_USER ?? "admin";
 const PASS = process.env.PW_PASS ?? "admin";
 const CARD = '[data-testid="design-intent-card"]';
-const SUBMITTED = '[data-testid="brief-submitted"]';
+
+/** Wait for the auto-fired build POST (carries [intent_confirmed:]) — the
+ *  definitive, view-transition-proof signal that resolving every decision
+ *  auto-started the build (no manual button). */
+function waitForAutoBuild(page: Page) {
+  return page.waitForRequest(
+    (req) =>
+      req.method() === "POST" &&
+      req.url().includes("/api/agent/chat") &&
+      (req.postData() || "").includes("intent_confirmed"),
+    { timeout: 30_000 },
+  );
+}
 
 async function login(page: Page) {
   await page.goto(`${BASE}/login`);
@@ -78,12 +90,12 @@ test.describe("interactive brief", () => {
     // Brief card must appear (always-align gate).
     await expect(page.locator(CARD).last()).toBeVisible({ timeout: 180_000 });
 
-    // Resolve every decision (degenerate = single 「開始建立」).
+    // Arm the network listener BEFORE resolving, then resolve every decision
+    // (degenerate = single 「開始建立」). Auto-submit must fire the build POST
+    // with no manual button click.
+    const autoBuild = waitForAutoBuild(page);
     await resolveAllDecisions(page);
-
-    // Auto-submit fires once all decisions resolved — the card flips to
-    // resolved/submitted, no manual button click.
-    await expect(page.locator(SUBMITTED).last()).toBeVisible({ timeout: 15_000 });
+    await autoBuild;
   });
 
   test("ambiguous prompt → multi-decision (incl 其它) → resolve all → auto-build", async ({ page }) => {
@@ -91,12 +103,10 @@ test.describe("interactive brief", () => {
     await openChatAndSend(page, "各機台過去 7 天的 OOC 排名");
 
     await expect(page.locator(CARD).last()).toBeVisible({ timeout: 180_000 });
+    const autoBuild = waitForAutoBuild(page);
     await resolveAllDecisions(page);
-    await expect(page.locator(SUBMITTED).last()).toBeVisible({ timeout: 15_000 });
-
-    // After auto-submit, the build turn starts streaming — the chat should
-    // show activity (a plan / canvas / ops). Tolerate variability: just assert
-    // the input is re-enabled or some new agent content appears.
-    await expect(page.locator("textarea").first()).toBeVisible();
+    // Resolving every decision (option pick or 其它 free-text) auto-fires the
+    // build with no manual button.
+    await autoBuild;
   });
 });
