@@ -185,6 +185,26 @@ def test_v58_knowledge_layer_flags_round_trip(monkeypatch):
     assert ff.is_layered_plan_knowledge_enabled() is False
 
 
+def test_interactive_brief_flag_round_trip(monkeypatch):
+    """Interactive brief (2026-06-15) — always-align collaborative brief gate."""
+    from python_ai_sidecar.feature_flags import parse_feature_flags_header
+    assert parse_feature_flags_header("interactive_brief:on") == {"interactive_brief": True}
+
+    monkeypatch.setenv("ENABLE_INTERACTIVE_BRIEF", "0")
+    import python_ai_sidecar.config as cfg
+    importlib.reload(cfg)
+    import python_ai_sidecar.feature_flags as ff
+    importlib.reload(ff)
+    assert ff.is_interactive_brief_enabled() is False
+
+    tok = ff.set_request_overrides({"interactive_brief": True})
+    try:
+        assert ff.is_interactive_brief_enabled() is True
+    finally:
+        ff.reset_request_overrides(tok)
+    assert ff.is_interactive_brief_enabled() is False
+
+
 def test_overrides_take_precedence_over_env(monkeypatch):
     # Force default-off envs, then verify override flips both.
     monkeypatch.setenv("ENABLE_PROMPT_CACHE", "0")

@@ -38,7 +38,15 @@ export interface ClarificationOption {
   value: string;
   label: string;
   hint?: string | null;
+  /** Interactive brief (2026-06-15): when true the frontend renders a
+   *  free-text input; the typed text becomes this decision's resolution
+   *  value (Claude-cowork "其它 / 自己描述" escape hatch). */
+  free_text?: boolean;
 }
+
+/** Sentinel option value for the 其它 free-text choice (matches backend
+ *  dimensional_clarifier.OTHER_VALUE). */
+export const OTHER_VALUE = "__other__";
 
 export interface ClarificationDimension {
   dimension: string;
@@ -58,6 +66,10 @@ export interface DesignIntentData {
   /** picks per dimension; populated as user clicks radio buttons. */
   selections?: Record<string, string>;
   resolved?: boolean;
+  /** Interactive brief (2026-06-15): collaborative brief mode — every decision
+   *  must be actively resolved (no default pre-fill), and the build auto-starts
+   *  once all decisions are resolved (no manual "開始建" button). */
+  interactive_brief?: boolean;
 }
 
 export type DesignIntentChoice = "confirm" | "cancel";
@@ -109,31 +121,63 @@ const CANONICAL_INPUT_NAMES: Array<{ value: string; label: string }> = [
 
 export function DesignIntentCard({ data, onPick }: Props) {
   const disabled = !!data.resolved;
+  const brief = !!data.interactive_brief;
   const [editing, setEditing] = useState(false);
-  // Local edit state — when user clicks 想修改 we copy data here and the
-  // form mutates this. confirm dispatches with this state; cancel reverts.
   const [draft, setDraft] = useState<DesignIntentData>(data);
-  // 2026-05-11: per-dimension picks. Initialize from defaults; user clicks
-  // radios to override. Submitted via onPick(confirm, data-with-selections).
-  const initSel = (): Record<string, string> => {
+
+  // picks: which option is selected per dimension (may be OTHER_VALUE).
+  // otherText: the free-text typed when OTHER_VALUE is picked.
+  // Legacy (non-brief) pre-fills option defaults; brief mode requires every
+  // decision to be actively resolved (co-create), so no pre-fill.
+  const initPicks = (): Record<string, string> => {
     const out: Record<string, string> = {};
-    for (const c of (data.clarifications ?? [])) {
-      if (c.default) out[c.dimension] = c.default;
+    if (!brief) {
+      for (const c of (data.clarifications ?? [])) {
+        if (c.default) out[c.dimension] = c.default;
+      }
     }
     return out;
   };
-  const [selections, setSelections] = useState<Record<string, string>>(initSel);
+  const [picks, setPicks] = useState<Record<string, string>>(initPicks);
+  const [otherText, setOtherText] = useState<Record<string, string>>({});
+  const submittedRef = React.useRef(false);
+
+  // Effective resolution value per dimension: free-text when 其它 is picked,
+  // else the chosen option value.
+  const effectiveSelections = (): Record<string, string> => {
+    const out: Record<string, string> = {};
+    for (const c of (data.clarifications ?? [])) {
+      const p = picks[c.dimension];
+      if (p === undefined || p === "") continue;
+      out[c.dimension] = p === OTHER_VALUE ? (otherText[c.dimension] ?? "") : p;
+    }
+    return out;
+  };
+  const selections = effectiveSelections();
   const allRequiredPicked = (data.clarifications ?? [])
-    .every((c) => selections[c.dimension] !== undefined && selections[c.dimension] !== "");
+    .every((c) => (selections[c.dimension] ?? "") !== "");
 
   const present = PRESENT_OPTIONS.find((o) => o.kind === data.presentation)
     ?? PRESENT_OPTIONS.find((o) => o.kind === "mixed_chart_alert")!;
 
-  const submitWithSelections = () => onPick("confirm", { ...data, selections });
+  const submitWithSelections = () => {
+    if (submittedRef.current || disabled) return;
+    submittedRef.current = true;
+    onPick("confirm", { ...data, selections });
+  };
+
+  // Interactive brief: auto-start once every decision is resolved — no manual
+  // "開始建" button. Guarded so it fires exactly once.
+  React.useEffect(() => {
+    if (brief && allRequiredPicked && !disabled && !submittedRef.current && !editing) {
+      submitWithSelections();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brief, allRequiredPicked, disabled, editing]);
 
   return (
     <>
-      <div style={{
+      <div data-testid="design-intent-card" data-brief={brief ? "1" : "0"} style={{
         width: "100%",
         border: "1px solid #cbd5e0",
         borderRadius: 8,
@@ -152,41 +196,52 @@ export function DesignIntentCard({ data, onPick }: Props) {
 
         <ReadView data={data} present={present} />
 
-        {/* 2026-05-11 Plan-Mode multi-choice clarifications */}
+        {/* Decisions: options + 其它 free-text (interactive brief) */}
         {(data.clarifications?.length ?? 0) > 0 && (
           <ClarificationGroups
             clarifications={data.clarifications ?? []}
-            selections={selections}
-            onChange={setSelections}
+            picks={picks}
+            otherText={otherText}
+            onPickOption={(dim, val) => setPicks((p) => ({ ...p, [dim]: val }))}
+            onOtherText={(dim, txt) => setOtherText((t) => ({ ...t, [dim]: txt }))}
             disabled={disabled}
           />
         )}
 
-        {/* Buttons */}
+        {/* Buttons. Brief mode auto-starts on full resolution → no 開始建. */}
         <div style={{
           display: "flex", gap: 8, marginTop: 12,
           opacity: disabled ? 0.5 : 1,
         }}>
-          <button
-            disabled={disabled || !allRequiredPicked}
-            onClick={submitWithSelections}
-            title={!allRequiredPicked ? "請先選擇所有 ◯ 選項" : ""}
-            style={btnStyle((disabled || !allRequiredPicked) ? "secondary-disabled" : "primary")}
-          >✅ 開始建</button>
+          {!brief && (
+            <button
+              data-testid="brief-start"
+              disabled={disabled || !allRequiredPicked}
+              onClick={submitWithSelections}
+              title={!allRequiredPicked ? "請先選擇所有 ◯ 選項" : ""}
+              style={btnStyle((disabled || !allRequiredPicked) ? "secondary-disabled" : "primary")}
+            >✅ 開始建</button>
+          )}
           <button
             disabled={disabled}
             onClick={() => { setDraft(data); setEditing(true); }}
             style={btnStyle(disabled ? "secondary-disabled" : "secondary")}
           >✏️ 想修改</button>
           <button
+            data-testid="brief-cancel"
             disabled={disabled}
             onClick={() => onPick("cancel", data)}
             style={btnStyle(disabled ? "secondary-disabled" : "secondary")}
           >❌ 取消</button>
         </div>
 
+        {brief && !disabled && (
+          <div style={{ marginTop: 8, fontSize: 11, color: "#a0aec0" }}>
+            選完所有項目就會自動開始建立
+          </div>
+        )}
         {disabled && (
-          <div style={{ marginTop: 8, fontSize: 11, color: "#a0aec0" }}>已選擇</div>
+          <div data-testid="brief-submitted" style={{ marginTop: 8, fontSize: 11, color: "#a0aec0" }}>已選擇</div>
         )}
       </div>
 
@@ -331,11 +386,13 @@ function ReadView({
 // ── Clarification radio groups (Plan-Mode multi-choice) ──────────────
 
 function ClarificationGroups({
-  clarifications, selections, onChange, disabled,
+  clarifications, picks, otherText, onPickOption, onOtherText, disabled,
 }: {
   clarifications: ClarificationDimension[];
-  selections: Record<string, string>;
-  onChange: (next: Record<string, string>) => void;
+  picks: Record<string, string>;
+  otherText: Record<string, string>;
+  onPickOption: (dim: string, value: string) => void;
+  onOtherText: (dim: string, text: string) => void;
   disabled: boolean;
 }) {
   return (
@@ -347,10 +404,10 @@ function ClarificationGroups({
       <div style={{
         fontWeight: 600, fontSize: 12, color: "#92400e", marginBottom: 8,
       }}>
-        ❓ 我有些地方不確定，請幫忙對焦：
+        ❓ 我有些地方想跟你對焦（選一個，或用「其它」自己描述）：
       </div>
       {clarifications.map((c) => (
-        <div key={c.dimension} style={{ marginBottom: 10 }}>
+        <div key={c.dimension} data-testid={`decision-${c.dimension}`} style={{ marginBottom: 10 }}>
           <div style={{
             fontSize: 12, fontWeight: 600, color: "#1a202c", marginBottom: 4,
           }}>
@@ -358,28 +415,47 @@ function ClarificationGroups({
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingLeft: 4 }}>
             {c.options.map((opt) => {
-              const checked = selections[c.dimension] === opt.value;
+              const checked = picks[c.dimension] === opt.value;
+              const isOther = !!opt.free_text || opt.value === OTHER_VALUE;
               return (
-                <label key={opt.value} style={{
-                  display: "flex", alignItems: "flex-start", gap: 6,
-                  fontSize: 12, color: "#2d3748", cursor: disabled ? "default" : "pointer",
-                }}>
-                  <input
-                    type="radio"
-                    name={`dim-${c.dimension}`}
-                    value={opt.value}
-                    checked={checked}
-                    disabled={disabled}
-                    onChange={() => onChange({ ...selections, [c.dimension]: opt.value })}
-                    style={{ marginTop: 3, cursor: disabled ? "default" : "pointer" }}
-                  />
-                  <div>
-                    <div style={{ fontWeight: checked ? 600 : 400 }}>{opt.label}</div>
-                    {opt.hint && (
-                      <div style={{ fontSize: 11, color: "#718096" }}>{opt.hint}</div>
-                    )}
-                  </div>
-                </label>
+                <div key={opt.value}>
+                  <label style={{
+                    display: "flex", alignItems: "flex-start", gap: 6,
+                    fontSize: 12, color: "#2d3748", cursor: disabled ? "default" : "pointer",
+                  }}>
+                    <input
+                      type="radio"
+                      data-testid={`decision-${c.dimension}-opt-${opt.value}`}
+                      name={`dim-${c.dimension}`}
+                      value={opt.value}
+                      checked={checked}
+                      disabled={disabled}
+                      onChange={() => onPickOption(c.dimension, opt.value)}
+                      style={{ marginTop: 3, cursor: disabled ? "default" : "pointer" }}
+                    />
+                    <div>
+                      <div style={{ fontWeight: checked ? 600 : 400 }}>{opt.label}</div>
+                      {opt.hint && (
+                        <div style={{ fontSize: 11, color: "#718096" }}>{opt.hint}</div>
+                      )}
+                    </div>
+                  </label>
+                  {isOther && checked && (
+                    <input
+                      type="text"
+                      data-testid={`decision-${c.dimension}-other-input`}
+                      value={otherText[c.dimension] ?? ""}
+                      disabled={disabled}
+                      autoFocus
+                      onChange={(e) => onOtherText(c.dimension, e.target.value)}
+                      placeholder="用自己的話描述這一點的需求…"
+                      style={{
+                        ...inputStyle({ width: "100%", marginTop: 4, marginLeft: 22 }),
+                        maxWidth: "calc(100% - 22px)",
+                      }}
+                    />
+                  )}
+                </div>
               );
             })}
           </div>

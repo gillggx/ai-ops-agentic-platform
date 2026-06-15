@@ -110,15 +110,16 @@ If it IS a pipeline-building request, check three dimensions:
 
 Output JSON only (no markdown fences). Keep keys/values lowercase ASCII.
 
-If complete (or knowledge-only):
-  {"complete": true}
+For a knowledge / definition question (STEP 0 — NOT building a pipeline):
+  {"complete": true, "is_pipeline_request": false}
 
-If incomplete (at least one of inputs/logic/presentation is missing or ambiguous):
+For a pipeline-building request — ALWAYS include `guess` (even when complete),
+so the UI can show the user "here's what I'll build" before it runs:
   {
-    "complete": false,
-    "missing": ["presentation", ...],     // 1-3 items
-    "guess": {                              // your best guess so the user
-                                            // can ✅ accept without typing
+    "complete": <true if inputs+logic+presentation all specified, else false>,
+    "is_pipeline_request": true,
+    "missing": ["presentation", ...],     // [] when complete
+    "guess": {                              // your best understanding — always
       "inputs": [
         {"name": "<short_name>", "source": "user_input|event_payload|literal",
          "rationale": "<one short sentence>"}
@@ -306,11 +307,24 @@ async def intent_completeness_node(
         logger.warning("intent_completeness: unparseable decision — pass-through")
         return {}
 
-    if decision.get("complete") is True:
-        logger.info("intent_completeness.decision complete=True intent=%s", intent)
+    from python_ai_sidecar.feature_flags import is_interactive_brief_enabled
+    brief_mode = is_interactive_brief_enabled()
+
+    # Knowledge / definition questions are never a build — answer in plain text.
+    # (is_pipeline_request absent → fall back to the legacy `complete` meaning.)
+    if decision.get("is_pipeline_request") is False:
+        logger.info("intent_completeness: bypass (knowledge question, not a build)")
         return {}
 
-    # ── Incomplete: emit design_intent_confirm + force synthesis ──
+    if decision.get("complete") is True and not brief_mode:
+        # Legacy: a fully-specified build proceeds straight to the builder.
+        logger.info("intent_completeness.decision complete=True intent=%s", intent)
+        return {}
+    # brief_mode: ALWAYS emit the brief (even when complete) so the user
+    # aligns before any build starts — a deterministic gate, not a haiku call
+    # deciding whether to ask.
+
+    # ── Emit design_intent_confirm brief + force synthesis ──
     guess = decision.get("guess") or {}
     missing = decision.get("missing") or []
 
@@ -329,10 +343,33 @@ async def intent_completeness_node(
         "alternatives": guess.get("alternatives") or [],
     }
 
+    # brief_mode: attach the interactive decisions (deterministic dimension
+    # detectors + 其它 free-text + a degenerate "start" decision when nothing is
+    # ambiguous). The frontend auto-submits once every decision is resolved.
+    if brief_mode:
+        try:
+            from python_ai_sidecar.agent_orchestrator_v2.dimensional_clarifier import (
+                build_clarifications,
+            )
+            snap = state.get("pipeline_snapshot")
+            snap_dict = snap if isinstance(snap, dict) else {}
+            spec_payload["clarifications"] = await build_clarifications(
+                user_msg=user_message,
+                declared_inputs=snap_dict.get("inputs"),
+                pipeline_snapshot=snap_dict,
+                include_other=True,
+                always=True,
+            )
+            spec_payload["interactive_brief"] = True
+        except Exception as ce:  # noqa: BLE001
+            logger.warning("intent_completeness: build_clarifications failed: %s", ce)
+            spec_payload["clarifications"] = []
+
     logger.info(
-        "intent_completeness.decision complete=False missing=%s card_id=%s "
-        "guess_presentation=%s",
-        missing, card_id, spec_payload["presentation"],
+        "intent_completeness.decision complete=%s brief_mode=%s missing=%s card_id=%s "
+        "decisions=%d",
+        decision.get("complete"), brief_mode, missing, card_id,
+        len(spec_payload.get("clarifications") or []),
     )
 
     pb_emit = (config.get("configurable", {}) or {}).get("pb_event_emit") if config else None

@@ -874,7 +874,10 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
                       // + send via sendMessage with client_context.intent_spec
                       // (matches AIAgentPanel flow so backend behaviour is identical).
                       const sel = design.selections ?? {};
+                      // space-free canonical picks → prefix; ALL picks (incl
+                      // 其它 free-text) → client_context.intent_resolutions.
                       const selStr = Object.keys(sel)
+                        .filter((k) => sel[k] !== "" && !/\s/.test(sel[k]))
                         .map((k) => `${k}=${sel[k]}`)
                         .join(" ");
                       const prefixHead = selStr
@@ -888,6 +891,7 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
                           logic: design.logic,
                           presentation: design.presentation,
                         },
+                        intent_resolutions: sel,
                       });
                     }}
                   />

@@ -67,6 +67,7 @@ _KNOWN_FLAGS = (
     "next_memo",
     "execute_knowledge",
     "layered_plan_knowledge",
+    "interactive_brief",
 )
 
 # Per-request override map. Empty dict ⇒ no override, fall back to CONFIG.
@@ -172,3 +173,7 @@ def is_execute_knowledge_enabled() -> bool:
 
 def is_layered_plan_knowledge_enabled() -> bool:
     return _effective("layered_plan_knowledge", CONFIG.enable_layered_plan_knowledge)
+
+
+def is_interactive_brief_enabled() -> bool:
+    return _effective("interactive_brief", CONFIG.enable_interactive_brief)

@@ -470,9 +470,15 @@ def augment_goal_for_resolutions(
         return base_goal
     hints: list[str] = []
     for dim, val in resolutions.items():
+        if dim == CONFIRM_DIMENSION:
+            continue  # degenerate "start" — no semantic content
         hint = _RESOLUTION_GOAL_HINTS.get((dim, val))
         if hint:
             hints.append(f"  - {hint}")
+        elif val and val != OTHER_VALUE:
+            # 其它(free-text) or an unmapped value — splice the user's own
+            # words straight into the goal as explicit guidance.
+            hints.append(f"  - （user 對「{dim}」的補充說明）{val}")
     if not hints:
         return base_goal
     return base_goal + "\n\n# user 已透過 confirmation card 明確的選擇\n" + "\n".join(hints)
@@ -481,33 +487,65 @@ def augment_goal_for_resolutions(
 # ── Public façade ──────────────────────────────────────────────────────────
 
 
+# Interactive-brief sentinels. OTHER → frontend renders a free-text input;
+# the resolution value the user types replaces the sentinel. CONFIRM → the
+# degenerate "no open decision" case so the brief always has one thing to
+# resolve (= the "start" action), keeping "always align" uniform.
+OTHER_VALUE = "__other__"
+CONFIRM_DIMENSION = "__confirm__"
+
+
 async def build_clarifications(
     user_msg: str,
     declared_inputs: list[dict[str, Any]] | None,
     pipeline_snapshot: dict[str, Any] | None,
+    *,
+    include_other: bool = False,
+    always: bool = False,
 ) -> list[dict[str, Any]]:
-    """Called by tool_execute confirm_pipeline_intent handler.
+    """Called by tool_execute confirm_pipeline_intent handler (legacy: defaults)
+    and by intent_completeness for the interactive brief (include_other=always=True).
 
-    Returns the SSE-ready clarifications list (already enriched). Empty list
-    means "no ambiguity dimensions found" — card renders without multi-choice.
+    Returns the SSE-ready clarifications list (already enriched).
+
+    - include_other: append an 「其它（自己描述）」 free-text option to each
+      decision (Claude-cowork style escape hatch).
+    - always: when no ambiguity dimensions fire, return a single degenerate
+      CONFIRM decision so the brief still renders one resolvable point (the
+      "start" action). Legacy callers (always=False) get [] = no card.
     """
     dims = detect_dimensions(user_msg, declared_inputs, pipeline_snapshot)
     if not dims:
-        return []
+        if not always:
+            return []
+        # Degenerate brief: nothing ambiguous — one "looks right → start" point.
+        return [{
+            "dimension": CONFIRM_DIMENSION,
+            "question": "這樣建立可以嗎？",
+            "options": [{"value": "go", "label": "開始建立", "hint": None}],
+            "default": "go",
+            "multi": False,
+        }]
     enriched = await enrich_dimensions(dims, user_msg)
-    return [
-        {
+    out: list[dict[str, Any]] = []
+    for d in enriched:
+        options = [
+            {"value": o.value, "label": o.label, "hint": o.hint}
+            for o in d.options
+        ]
+        if include_other:
+            options.append({
+                "value": OTHER_VALUE, "label": "其它（自己描述）",
+                "hint": "用自己的話描述需求", "free_text": True,
+            })
+        out.append({
             "dimension": d.dimension,
             "question": d.question,
-            "options": [
-                {"value": o.value, "label": o.label, "hint": o.hint}
-                for o in d.options
-            ],
+            "options": options,
             "default": d.default,
             "multi": d.multi,
-        }
-        for d in enriched
-    ]
+        })
+    return out
 
 
 def parse_resolutions_from_prefix(user_msg: str) -> dict[str, str]:

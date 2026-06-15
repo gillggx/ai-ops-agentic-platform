@@ -43,7 +43,8 @@ async def lifespan(app: FastAPI):
         "atomic_add_connect=%s auto_verifier=%s strict_tool_id=%s "
         "no_duplicate_node=%s rich_canvas_snapshot=%s plan_knowledge=%s "
         "strict_phase_output=%s construct_param_doc=%s strict_phase_verify=%s "
-        "next_memo=%s execute_knowledge=%s layered_plan_knowledge=%s",
+        "next_memo=%s execute_knowledge=%s layered_plan_knowledge=%s "
+        "interactive_brief=%s",
         "on" if CONFIG.enable_prompt_cache else "off",
         "on" if CONFIG.enable_auto_signal else "off",
         "on" if CONFIG.enable_atomic_add_connect else "off",
@@ -58,6 +59,7 @@ async def lifespan(app: FastAPI):
         "on" if CONFIG.enable_next_memo else "off",
         "on" if CONFIG.enable_execute_knowledge else "off",
         "on" if CONFIG.enable_layered_plan_knowledge else "off",
+        "on" if CONFIG.enable_interactive_brief else "off",
     )
     # Boot-time drift check: BUILTIN_EXECUTORS vs SIDECAR_NATIVE_BLOCKS vs
     # pb_blocks DB. Logs at ERROR level if any registry is out of sync —

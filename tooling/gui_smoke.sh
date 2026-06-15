@@ -51,8 +51,9 @@ case "$SUITE" in
     ;;
   inspector)  SPECS=(gui-result-inspector.spec.ts) ;;
   chart)      SPECS=(gui-chart-render.spec.ts) ;;
+  brief)      SPECS=(brief_flow.spec.ts) ;;
   *)
-    red "✗ unknown suite '$SUITE' (use: all|inspector|chart)"
+    red "✗ unknown suite '$SUITE' (use: all|inspector|chart|brief)"
     exit 2 ;;
 esac
 

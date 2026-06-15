@@ -309,6 +309,7 @@ async def _execute_build_pipeline_live(
     chat_session_id: Any = None,
     chat_user_id: Any = None,
     chat_user_message: str = "",
+    chat_resolutions: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Phase 10-B: unified build via graph_build (LangGraph 10-node state machine).
 
@@ -406,7 +407,13 @@ async def _execute_build_pipeline_live(
     from python_ai_sidecar.agent_orchestrator_v2.dimensional_clarifier import (
         parse_resolutions_from_prefix, augment_goal_for_resolutions,
     )
+    # Canonical picks ride the [intent_confirmed:<id> dim=val] prefix; 其它
+    # free-text picks (which contain spaces) can't, so they arrive structured
+    # via client_context.intent_resolutions and are merged here (taking
+    # precedence — the user's explicit free text wins over a stale prefix pick).
     resolutions = parse_resolutions_from_prefix(chat_user_message)
+    if chat_resolutions:
+        resolutions = {**resolutions, **{k: v for k, v in chat_resolutions.items() if v}}
     logger.info(
         "build_pipeline_live: chat_user_message_prefix=%r resolutions=%s",
         (chat_user_message or "")[:120], resolutions,
@@ -1029,6 +1036,8 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
                             list(snap.keys())[:10] if isinstance(snap, dict) else None)
                 if snap_kind == "skill_step":
                     tool_input = {**tool_input, "_skill_step_mode": True}
+                _cc = state.get("client_context") or {}
+                _chat_res = _cc.get("intent_resolutions") if isinstance(_cc, dict) else None
                 result = await _execute_build_pipeline_live(
                     db,
                     tool_input,
@@ -1036,6 +1045,7 @@ async def tool_execute_node(state: Dict[str, Any], config: RunnableConfig) -> Di
                     chat_session_id=state.get("session_id"),
                     chat_user_id=user_id,
                     chat_user_message=state.get("user_message") or "",
+                    chat_resolutions=_chat_res if isinstance(_chat_res, dict) else None,
                 )
         else:
             # Inject flat_data into execute_analysis so sandbox can read it directly

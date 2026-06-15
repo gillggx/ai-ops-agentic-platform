@@ -1994,7 +1994,13 @@ export function AIAgentPanel({
                       // and augment_goal_for_resolutions splices deterministic
                       // guidance hints into the build_pipeline_live goal text.
                       const sel = design.selections ?? {};
+                      // Only space-free canonical picks can ride the prefix
+                      // (parse_resolutions_from_prefix splits on spaces). 其它
+                      // free-text picks contain spaces, so ALL resolutions also
+                      // travel structured via client_context.intent_resolutions
+                      // (backend merges, client_context wins).
                       const selStr = Object.keys(sel)
+                        .filter((k) => sel[k] !== "" && !/\s/.test(sel[k]))
                         .map((k) => `${k}=${sel[k]}`)
                         .join(" ");
                       const prefixHead = selStr
@@ -2008,6 +2014,7 @@ export function AIAgentPanel({
                           logic: design.logic,
                           presentation: design.presentation,
                         },
+                        intent_resolutions: sel,
                       });
                     }}
                   />

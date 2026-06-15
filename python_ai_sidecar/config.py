@@ -75,6 +75,12 @@ class SidecarConfig:
     #    core + RAG. OFF → legacy (all high, no layer filter) preserved exactly.
     enable_execute_knowledge: bool
     enable_layered_plan_knowledge: bool
+    # Interactive brief (2026-06-15). Chat ALWAYS emits a collaborative design
+    # brief before building: each open decision is options + 其它(free-text);
+    # when the user resolves all decisions the build auto-starts. Replaces the
+    # haiku "complete → skip confirm" judgment with a deterministic always-align
+    # gate. See docs + the spc-cpk freeze incident discussion.
+    enable_interactive_brief: bool
 
     @classmethod
     def from_env(cls) -> "SidecarConfig":
@@ -107,6 +113,7 @@ class SidecarConfig:
             enable_next_memo=_read_bool_env("ENABLE_NEXT_MEMO", default=False),
             enable_execute_knowledge=_read_bool_env("ENABLE_EXECUTE_KNOWLEDGE", default=False),
             enable_layered_plan_knowledge=_read_bool_env("ENABLE_LAYERED_PLAN_KNOWLEDGE", default=False),
+            enable_interactive_brief=_read_bool_env("ENABLE_INTERACTIVE_BRIEF", default=False),
         )
 
 
