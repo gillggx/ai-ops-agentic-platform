@@ -62,6 +62,28 @@ export function applyGlassOp(
       const nodeId = result.node_id as string;
       if (!nodeId) return { ok: false, error: "add_node result missing node_id" };
       actions.addNodeAgent(spec, pos, params, nodeId);
+      // v30 atomic add+connect (2026-06-16): the builder may add a node AND
+      // wire its upstream in ONE `add_node` op (`atomic_add_connect` flag),
+      // emitting NO separate `connect` event. The edge is created server-side
+      // (final pipeline_json has it) but the Lite Canvas + builder handoff are
+      // rebuilt from the glass-op stream, so without wiring it here the canvas
+      // shows nodes with NO connections. Mirror the server: connect each
+      // upstream {src_node[, src_port], [dst_port]} → this node's input port.
+      const upstream = args.upstream as
+        | Array<{ src_node?: string; src_port?: string; dst_port?: string }>
+        | undefined;
+      if (Array.isArray(upstream)) {
+        const defaultInPort = spec.input_schema?.[0]?.port ?? "data";
+        for (const up of upstream) {
+          if (!up?.src_node) continue;
+          const edgeId = `e_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`;
+          actions.connectAgent({
+            id: edgeId,
+            from: { node: up.src_node, port: up.src_port ?? "data" },
+            to: { node: nodeId, port: up.dst_port ?? defaultInPort },
+          });
+        }
+      }
       return { ok: true };
     }
     if (op === "connect") {
