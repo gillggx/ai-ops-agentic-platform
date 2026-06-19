@@ -204,7 +204,28 @@ async def _seed_apc_models() -> None:
     if first:
         keys = list((first.get("parameters") or {}).keys())
         if keys and not keys[0].startswith("param_"):
-            return  # Already semantic — skip
+            # Already semantic — but DON'T blindly skip: TOTAL_STEPS may have
+            # grown since the last seed (10 → 20). The old skip-return left
+            # APC-011..020 uncreated, so STEP_011..020 events joined empty
+            # APC.parameters and APC-case builds thrashed (no etch_time_offset
+            # visible). Back-fill any missing apc_id. (2026-06-18 APC seed gap.)
+            existing = set(await _db.apc_state.distinct("apc_id"))
+            missing = [
+                i for i in range(1, TOTAL_STEPS + 1)
+                if f"APC-{i:03d}" not in existing
+            ]
+            if missing:
+                await _db.apc_state.insert_many([
+                    {
+                        "apc_id": f"APC-{i:03d}",
+                        "bound_step": f"STEP_{i:03d}",
+                        "parameters": _make_apc_params(),
+                    }
+                    for i in missing
+                ])
+                print(f"[DB] Back-filled {len(missing)} missing APC models: "
+                      f"{[f'APC-{i:03d}' for i in missing]}")
+            return
         print("[DB] Detected legacy param_N keys in apc_state — dropping for re-seed.")
         await _db.apc_state.drop()
 
