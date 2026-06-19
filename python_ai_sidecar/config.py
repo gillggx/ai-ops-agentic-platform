@@ -81,6 +81,20 @@ class SidecarConfig:
     # haiku "complete → skip confirm" judgment with a deterministic always-align
     # gate. See docs + the spc-cpk freeze incident discussion.
     enable_interactive_brief: bool
+    # 2026-06-17: resolve each presentation phase's input contract up front and
+    # inject it as the upstream handling phase's target (downstream-driven
+    # handling). Cuts "vague transform → spin" detours.
+    enable_presentation_lookahead: bool
+    # 2026-06-17: list TRUE distinct values of low-card string columns (full
+    # output, not sample) + fold just-added node schema into the post-add
+    # tool_result. Removes inspect_node_output detours before filter/groupby.
+    enable_rich_schema_values: bool
+    # 2026-06-18: isolated-node (no in+out edge) → agent connect-or-remove round
+    # before finalize, instead of silent failed_structural.
+    enable_orphan_resolve: bool
+    # 2026-06-18: re-rank MATCHING BLOCKS by phase-goal relevance (not kind only)
+    # so adjacent same-kind phases don't show identical luring candidate lists.
+    enable_goal_aware_matching: bool
 
     @classmethod
     def from_env(cls) -> "SidecarConfig":
@@ -114,6 +128,10 @@ class SidecarConfig:
             enable_execute_knowledge=_read_bool_env("ENABLE_EXECUTE_KNOWLEDGE", default=False),
             enable_layered_plan_knowledge=_read_bool_env("ENABLE_LAYERED_PLAN_KNOWLEDGE", default=False),
             enable_interactive_brief=_read_bool_env("ENABLE_INTERACTIVE_BRIEF", default=False),
+            enable_presentation_lookahead=_read_bool_env("ENABLE_PRESENTATION_LOOKAHEAD", default=False),
+            enable_rich_schema_values=_read_bool_env("ENABLE_RICH_SCHEMA_VALUES", default=False),
+            enable_orphan_resolve=_read_bool_env("ENABLE_ORPHAN_RESOLVE", default=False),
+            enable_goal_aware_matching=_read_bool_env("ENABLE_GOAL_AWARE_MATCHING", default=False),
         )
 
 

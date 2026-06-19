@@ -28,6 +28,27 @@ Performance flags are read at startup from env (see ``config.py``):
   - ``ENABLE_LAYERED_PLAN_KNOWLEDGE`` (V58) — goal_plan retrieves only the plan
     slice and shrinks the always-on dump to always_on=true core + RAG. OFF →
     legacy (all high, no layer filter) preserved exactly.
+  - ``ENABLE_PRESENTATION_LOOKAHEAD`` (2026-06-17) — after plan-confirm, resolve
+    each presentation phase's likely block + its `## Inputs` contract and inject
+    that contract as the target for the upstream handling (transform) phase, so
+    the handling agent aims at a concrete output shape (downstream-driven) instead
+    of a vague "transform". OFF → no resolver node, behaviour unchanged.
+  - ``ENABLE_RICH_SCHEMA_VALUES`` (2026-06-17) — runtime schema lists the TRUE
+    distinct values of low-cardinality string columns (computed over the full
+    node output, not the 5-row sample), so the agent can write filter/groupby
+    params without an extra inspect_node_output. Also folds the just-added
+    node's runtime schema into the post-add tool_result so the agent sees what
+    it produced without re-inspecting. OFF → sample-only inference (current).
+  - ``ENABLE_ORPHAN_RESOLVE`` (2026-06-18) — before finalize, if any node is
+    fully disconnected (no inbound AND no outbound edge), route back to the
+    agent to decide connect-or-remove instead of silently failing the build
+    with failed_structural. Fixes spc-ooc's stray-orphan failure. OFF →
+    orphan fails at finalize (current).
+  - ``ENABLE_GOAL_AWARE_MATCHING`` (2026-06-18) — the MATCHING BLOCKS section is
+    re-ranked by relevance to the phase GOAL (not just expected kind), top
+    candidate marked [best fit]. Stops adjacent same-kind phases (two raw_data:
+    list-machines vs fetch-data) showing identical candidate lists that lure the
+    agent into the wrong-phase block. Re-ranked, never removed. OFF → kind-only.
 
 Callers read the *effective* flag via the ``is_*_enabled()`` helpers so a single
 request can be steered without restarting the sidecar — useful for A/B
@@ -68,6 +89,10 @@ _KNOWN_FLAGS = (
     "execute_knowledge",
     "layered_plan_knowledge",
     "interactive_brief",
+    "presentation_lookahead",
+    "rich_schema_values",
+    "orphan_resolve",
+    "goal_aware_matching",
 )
 
 # Per-request override map. Empty dict ⇒ no override, fall back to CONFIG.
@@ -177,3 +202,19 @@ def is_layered_plan_knowledge_enabled() -> bool:
 
 def is_interactive_brief_enabled() -> bool:
     return _effective("interactive_brief", CONFIG.enable_interactive_brief)
+
+
+def is_presentation_lookahead_enabled() -> bool:
+    return _effective("presentation_lookahead", CONFIG.enable_presentation_lookahead)
+
+
+def is_rich_schema_values_enabled() -> bool:
+    return _effective("rich_schema_values", CONFIG.enable_rich_schema_values)
+
+
+def is_orphan_resolve_enabled() -> bool:
+    return _effective("orphan_resolve", CONFIG.enable_orphan_resolve)
+
+
+def is_goal_aware_matching_enabled() -> bool:
+    return _effective("goal_aware_matching", CONFIG.enable_goal_aware_matching)

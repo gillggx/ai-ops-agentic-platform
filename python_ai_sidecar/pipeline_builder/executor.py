@@ -213,19 +213,64 @@ def _build_input_map(pipeline: PipelineJSON) -> dict[str, list[tuple[str, str, s
     return mapping
 
 
+_DISTINCT_LIST_CAP = 16  # list a string col's values only if true distinct <= this
+_DISTINCT_MAX_ROWS = 50_000  # skip the value_counts pass on very large outputs
+
+
+def _compute_distinct_values(
+    value: "pd.DataFrame", cols: list[str],
+    cap: int = _DISTINCT_LIST_CAP, max_rows: int = _DISTINCT_MAX_ROWS,
+) -> dict[str, list[str]]:
+    """TRUE distinct values per low-cardinality string column, over the FULL
+    df (not a sample). Lets the agent write filter/groupby params (e.g.
+    name=='xbar_chart') without an extra inspect — the sample-based inference
+    can't see the real value set. Only string columns with distinct count in
+    (0, cap] are listed; everything else is omitted (caller falls back to the
+    sample-based `[unique:N]`)."""
+    out: dict[str, list[str]] = {}
+    try:
+        if len(value) > max_rows:
+            return out
+    except Exception:  # noqa: BLE001
+        return out
+    for c in cols:
+        try:
+            s = value[c].dropna()
+            if s.empty:
+                continue
+            if not s.map(lambda v: isinstance(v, str)).all():
+                continue  # string-only cols (skip numeric/nested)
+            n_unique = int(s.nunique())
+            if 0 < n_unique <= cap:
+                # preserve first-seen order, stringify defensively
+                seen: list[str] = []
+                for v in s.tolist():
+                    sv = str(v)
+                    if sv not in seen:
+                        seen.append(sv)
+                    if len(seen) >= cap:
+                        break
+                out[c] = seen
+        except Exception:  # noqa: BLE001 — never break preview
+            continue
+    return out
+
+
 def _preview_output(outputs: dict[str, Any], sample_size: int = _PREVIEW_ROWS_DEFAULT) -> dict[str, Any]:
     """Build a preview payload for the UI.
 
     sample_size controls how many rows are returned for dataframe ports.
     Set high (e.g. 1000) to effectively 'return all' for small datasets.
     """
+    from python_ai_sidecar.feature_flags import is_rich_schema_values_enabled
+    rich = is_rich_schema_values_enabled()
     preview: dict[str, Any] = {}
     for port, value in outputs.items():
         if isinstance(value, pd.DataFrame):
             all_cols = list(value.columns)
             cols = all_cols[:_PREVIEW_MAX_COLS]
             head = value.head(sample_size)[cols]
-            preview[port] = {
+            blob: dict[str, Any] = {
                 "type": "dataframe",
                 # `columns` + `rows` stay capped (sample economy — sample data
                 # for 300-col flat tables would bloat the agent auto-preview +
@@ -238,6 +283,11 @@ def _preview_output(outputs: dict[str, Any], sample_size: int = _PREVIEW_ROWS_DE
                 "rows": head.astype(object).where(head.notna(), None).to_dict(orient="records"),
                 "total": int(len(value)),
             }
+            if rich:
+                dv = _compute_distinct_values(value, cols)
+                if dv:
+                    blob["distinct_values"] = dv
+            preview[port] = blob
         elif isinstance(value, bool):  # must precede int check (bool is subclass of int)
             preview[port] = {"type": "bool", "value": value}
         elif isinstance(value, dict):

@@ -1254,6 +1254,8 @@ class BuilderToolset:
                     "total": blob.get("total"),
                     "sample_rows": sample,
                 }
+                if blob.get("distinct_values"):
+                    out[port]["distinct_values"] = blob["distinct_values"]
             elif blob.get("type") in ("dict", "bool", "scalar"):
                 out[port] = {"type": blob.get("type"), "value": blob.get("snapshot") or blob.get("value")}
         return out
@@ -1462,6 +1464,11 @@ def _summarize_preview(preview: Optional[dict[str, Any]], sample_size: int) -> d
                 "total_rows": block.get("total"),
                 "sample_rows": rows[: min(sample_size, 5)],  # keep LLM input small
             }
+            # 2026-06-17 (rich_schema_values): carry true full-output distinct
+            # values for low-card string cols so schema rendering can list them.
+            dv = block.get("distinct_values")
+            if dv:
+                summary[port]["distinct_values"] = dv
         elif t == "dict":
             snap = block.get("snapshot")
             # chart_spec can be huge; summarize

@@ -508,6 +508,13 @@ def build_graph():
         task_contract_extractor_node,
     )
     g.add_node("task_contract_extractor", task_contract_extractor_node)
+    # 2026-06-17: presentation-contract look-ahead — resolves each present
+    # phase's input contract and stamps it on the upstream handling phase.
+    # Self-gates on ENABLE_PRESENTATION_LOOKAHEAD (no-op pass-through when off).
+    from python_ai_sidecar.agent_builder.graph_build.nodes.presentation_contract import (
+        resolve_presentation_contracts_node,
+    )
+    g.add_node("resolve_presentation_contracts", resolve_presentation_contracts_node)
 
     # v30 routing — entry conditional sends v30_mode=True builds through
     # goal_plan + ReAct loop; defaults stay on v27 clarify_intent.
@@ -531,7 +538,8 @@ def build_graph():
         _route_after_goal_plan_confirm,
         {"agentic_phase_loop": "task_contract_extractor", "finalize": "finalize"},
     )
-    g.add_edge("task_contract_extractor", "agentic_phase_loop")
+    g.add_edge("task_contract_extractor", "resolve_presentation_contracts")
+    g.add_edge("resolve_presentation_contracts", "agentic_phase_loop")
     # v30: ReAct round -> phase_verifier (always, unless escalation). Verifier
     # decides phase advancement + fast-forward; routes back to loop or finalize.
     g.add_conditional_edges(

@@ -34,8 +34,10 @@ from python_ai_sidecar.feature_flags import (
     is_auto_verifier_enabled,
     is_construct_param_doc_enabled,
     is_execute_knowledge_enabled,
+    is_goal_aware_matching_enabled,
     is_next_memo_enabled,
     is_prompt_cache_enabled,
+    is_rich_schema_values_enabled,
 )
 from python_ai_sidecar.pipeline_builder.pipeline_schema import PipelineJSON
 from python_ai_sidecar.pipeline_builder.seedless_registry import SeedlessBlockRegistry
@@ -727,14 +729,24 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
         # v30.17l hotfix: pass state so canvas_diff_md can include
         # VERIFIER FEEDBACK on follow-up rounds (was only in initial obs_md).
         canvas_diff_text = _build_canvas_diff_md(transient.pipeline_json, phase, state)
-        phase_messages.append({
-            "role": "user",
-            "content": [
-                {"type": "tool_result", "tool_use_id": tool_use_id,
-                 "content": result_digest_text},
-                {"type": "text", "text": canvas_diff_text},
-            ],
-        })
+        _content = [
+            {"type": "tool_result", "tool_use_id": tool_use_id,
+             "content": result_digest_text},
+            {"type": "text", "text": canvas_diff_text},
+        ]
+        # 2026-06-17 (rich_schema_values, #2): fold the just-added node's runtime
+        # schema (with the true distinct values) into the tool_result so the
+        # SAME-phase next round sees what it just produced — without spending an
+        # inspect_node_output round to re-learn it.
+        if is_rich_schema_values_enabled() and snapshot_dict:
+            _new_schema_md = snapshot_dict.get("runtime_schema_md") or ""
+            if _new_schema_md:
+                _content.append({
+                    "type": "text",
+                    "text": ("== JUST-PRODUCED OUTPUT (no need to inspect) ==\n"
+                             + _new_schema_md),
+                })
+        phase_messages.append({"role": "user", "content": _content})
     # Cap message stack to avoid runaway token use (~16 round-trips).
     if len(phase_messages) > 32:
         phase_messages = phase_messages[-32:]
@@ -1913,6 +1925,15 @@ def _build_observation_md(state: BuildGraphState, phase: dict) -> str:
         lines.append(f"why: {phase.get('why')}")
     lines.append("")
 
+    # 2026-06-17 (ENABLE_PRESENTATION_LOOKAHEAD): downstream input-contract hint
+    # resolved up front by resolve_presentation_contracts_node. Surfaced right
+    # after the phase goal so the handling agent aims at a concrete output shape
+    # (what the present block needs) instead of a vague "transform".
+    contract = (state.get("v30_phase_contracts") or {}).get(phase.get("id"))
+    if contract:
+        lines.append(contract)
+        lines.append("")
+
     # v30.20 (2026-05-19) — verifier reject feedback. Build-time verifier
     # now only emits 3 result kinds: covers mismatch / validation_error /
     # orphan. No more LLM-judge reject (moved to runtime).
@@ -2037,7 +2058,7 @@ def _build_observation_md(state: BuildGraphState, phase: dict) -> str:
     # AVAILABLE BLOCKS to those whose covers includes phase.expected, so
     # agent at pick sub-phase doesn't try verdict blocks for alarm phase
     # (e.g. block_threshold in p4 alarm).
-    matching = _build_matching_blocks_section(phase.get("expected"))
+    matching = _build_matching_blocks_section(phase.get("expected"), phase.get("goal"))
     if matching:
         lines.append(matching)
         lines.append("")
@@ -2983,7 +3004,23 @@ def _handle_signal_tool(tool_name: str, args: dict) -> dict:
 # phase.expected via produces.covers_internal. Surfaces ONLY blocks
 # whose covers includes phase.expected, so agent at pick sub-phase
 # doesn't pull verdict blocks for alarm phase etc.
-def _build_matching_blocks_section(expected: str | None) -> str:
+def _char_bigrams(text: str) -> set[str]:
+    """Whitespace-stripped char bigrams — a cheap CJK-friendly relevance signal
+    (no tokenizer needed). '機台清單' → {機台, 台清, 清單}."""
+    import re as _re
+    t = _re.sub(r"\s+", "", text or "")
+    return {t[i:i + 2] for i in range(len(t) - 1)}
+
+
+def _goal_relevance(goal_bg: set[str], name: str, oneliner: str) -> int:
+    """Overlap of the phase goal's bigrams with a block's name+oneliner. Higher
+    = more relevant to THIS phase's goal (not just its expected kind)."""
+    if not goal_bg:
+        return 0
+    return len(goal_bg & _char_bigrams((name or "") + (oneliner or "")))
+
+
+def _build_matching_blocks_section(expected: str | None, goal: str | None = None) -> str:
     if not expected:
         return ""
     from python_ai_sidecar.pipeline_builder.seedless_registry import SeedlessBlockRegistry
@@ -3008,11 +3045,32 @@ def _build_matching_blocks_section(expected: str | None) -> str:
         matches.append((name, cov_out, first))
     if not matches:
         return ""
-    matches.sort(key=lambda t: t[0])
+
+    # 2026-06-18 (ENABLE_GOAL_AWARE_MATCHING): re-rank by relevance to the phase
+    # GOAL (not just kind) and mark the top candidate [best fit]. Adjacent
+    # same-kind phases (e.g. two raw_data: "list machines" vs "fetch per machine")
+    # otherwise show identical lists and lure the agent into the wrong-phase
+    # block (spc-ooc root cause). Re-ranked, never removed.
+    best_fit: str | None = None
+    if is_goal_aware_matching_enabled() and goal:
+        goal_bg = _char_bigrams(goal)
+        scored = [(_goal_relevance(goal_bg, n, f), n, c, f) for (n, c, f) in matches]
+        scored.sort(key=lambda t: (-t[0], t[1]))
+        matches = [(n, c, f) for (_s, n, c, f) in scored]
+        if scored and scored[0][0] > 0:
+            best_fit = scored[0][1]
+    else:
+        matches.sort(key=lambda t: t[0])
+
     lines: list[str] = [
         f"== MATCHING BLOCKS for phase.expected={expected} (covers match) ==",
         "(Only these block types cover this phase's expected output kind.)",
     ]
+    if best_fit:
+        lines.append(f"(Ranked by relevance to THIS phase's goal; **{best_fit}** "
+                     f"is the best fit for this phase — others may belong to a "
+                     f"different phase.)")
     for name, cov_out, first in matches[:15]:
-        lines.append(f"  {name}  covers_output={cov_out}  -- {first}")
+        tag = "  [best fit for this phase]" if name == best_fit else ""
+        lines.append(f"  {name}  covers_output={cov_out}  -- {first}{tag}")
     return "\n".join(lines)

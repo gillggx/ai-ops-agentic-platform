@@ -396,6 +396,7 @@ def _build_runtime_schema_md(
 
     # Extract sample rows from preview blob (any dataframe port)
     sample_rows: list[dict] = []
+    col_distincts: dict[str, list] | None = None
     for _port, blob in (rows_sample or {}).items():
         if not isinstance(blob, dict):
             continue
@@ -406,6 +407,9 @@ def _build_runtime_schema_md(
                 or blob.get("rows")
                 or []
             )
+            # rich_schema_values: true full-output distinct values per low-card
+            # string col, so the schema lists them instead of `[unique:N]`.
+            col_distincts = blob.get("distinct_values") or None
             break
 
     if not sample_rows or not cols:
@@ -428,7 +432,7 @@ def _build_runtime_schema_md(
     except Exception:
         block_spec = None
 
-    md = infer_runtime_schema(df, block_spec, node_id=logical_id)
+    md = infer_runtime_schema(df, block_spec, node_id=logical_id, col_distincts=col_distincts)
     if md and total_rows is not None:
         # Patch first line to reflect TRUE total rows (not just sample size)
         md = md.replace(

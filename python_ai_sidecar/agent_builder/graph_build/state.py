@@ -190,6 +190,13 @@ class BuildGraphState(TypedDict, total=False):
     # Shape: {phase_id: [{"role":"user"|"assistant", "content": [...]}]}
     # Reset to [] when current_phase_idx advances.
     v30_phase_messages: dict[str, list[dict]]
+    # 2026-06-17 (ENABLE_PRESENTATION_LOOKAHEAD): downstream input-contract hint
+    # per phase, resolved once by resolve_presentation_contracts_node after
+    # plan-confirm. Maps a handling/present phase_id → a rendered "this is the
+    # shape the downstream presentation block needs" string, surfaced in that
+    # phase's observation so the agent aims at a concrete target.
+    # Shape: {phase_id: contract_md}
+    v30_phase_contracts: dict[str, str]
     # v30.1 (2026-05-16): fast-forward audit log. phase_spanning_verifier_node
     # appends one entry every time it auto-completes >=2 phases at once.
     # Shape: [{trigger_phase_id, advanced_by_node, advanced_by_block,
@@ -423,6 +430,7 @@ def initial_state(
         v30_current_phase_idx=0,
         v30_phase_round=0,
         v30_phase_outcomes={},
+        v30_phase_contracts={},
         v30_handover=None,
         v30_phase_edit_history={},
         v30_phase_recent_actions={},

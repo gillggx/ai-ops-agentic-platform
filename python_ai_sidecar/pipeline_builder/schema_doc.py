@@ -99,10 +99,22 @@ _MAX_VAL_REPR = 80       # truncate each cell value in sample
 _ENUM_DISTINCT_CAP = 8   # report enum if distinct values <= this
 
 
+def _format_true_enum(vals: Any) -> str:
+    """Render a column's TRUE full-output distinct values (from the executor's
+    full-df value_counts, not the sample) as `enum['a', 'b', ...]`. Returns ''
+    when there's nothing to render. No counts — this is the complete value set
+    for the run, so the agent can write filter/groupby params directly."""
+    if not vals or not isinstance(vals, (list, tuple)):
+        return ""
+    items = ", ".join(repr(str(v)) for v in vals)
+    return f"enum[{items}]"
+
+
 def infer_runtime_schema(
     df: Any,                       # pandas.DataFrame (typed at call-site)
     block_spec: Mapping[str, Any] | None = None,
     node_id: str | None = None,
+    col_distincts: Mapping[str, list] | None = None,
 ) -> str:
     """Generate the runtime schema markdown for a node's actual output.
 
@@ -148,9 +160,13 @@ def infer_runtime_schema(
     # Build col rows
     table_lines = ["| col | type | description |"]
     table_lines.append("|---|---|---|")
+    cd = col_distincts or {}
     for c in cols[:_MAX_COLS_LISTED]:
-        # Prefer explicit doc type when present; fall back to sample inference.
-        typ = col_doc_types.get(c) or _infer_col_type(df, c)
+        # Precedence: declared column_docs enum (complete + honest, may include
+        # values absent this run) > TRUE full-output distinct (rich_schema_values:
+        # accurate value set for THIS run, lets agent filter without inspect) >
+        # sample-based inference (`[unique:N]`, last resort).
+        typ = col_doc_types.get(c) or _format_true_enum(cd.get(c)) or _infer_col_type(df, c)
         hint = col_usage_hints.get(c, "")
         # Escape pipes inside content
         c_esc = str(c).replace("|", "\\|")
@@ -318,10 +334,21 @@ def _truncate_value(v: Any, depth: int = 0) -> Any:
 
     v30.8 (2026-05-16): for nested dicts at depth 0 (top-level row values)
     with > _DICT_COLLAPSE_KEYS keys, collapse to a key-list summary instead
-    of expanding all values. Stops the sample dump from blowing up with
-    APC/DC/RECIPE/FDC/EC sub-dicts (each containing 20-80 sensor parameters
-    irrelevant to most phase tasks). LLM can still see the keys and use
-    block_pluck / inspect_node_output to drill in if needed.
+    of expanding all values.
+
+    2026-06-16 (cost): collapse large dicts at ANY depth, not just depth 0.
+    The depth-0-only guard missed the real bloat — e.g. a process_history
+    row's `DC` value has only 3 keys (chamberID/objectID/parameters), so it
+    didn't trigger, then recursed and dumped `DC.parameters`'s ~30 sensor
+    readings in full at depth 1. That single un-collapsed sub-dict (× APC/
+    DC/RECIPE/FDC/EC × N rows) was ~80% of the observation prompt. Collapsing
+    by key-count regardless of depth cuts the sample ~50-60% with NO loss of
+    decision-relevant info: the Schema table above documents every column +
+    nested structure, and the collapsed summary still shows the first 6 key
+    names so the agent can block_pluck / inspect_node_output to drill in.
+    Validated via tools/trace_replay trim_sample_rows (5/5 cases: same block
+    pick as the untrimmed prompt). Small dicts (<= _DICT_COLLAPSE_KEYS keys,
+    e.g. spc_summary) stay fully expanded.
     """
     if isinstance(v, str) and len(v) > _MAX_VAL_REPR:
         return v[:_MAX_VAL_REPR] + "..."
@@ -330,10 +357,9 @@ def _truncate_value(v: Any, depth: int = 0) -> Any:
             return [_truncate_value(x, depth + 1) for x in v]
         return [_truncate_value(x, depth + 1) for x in v[:2]] + [f"...+{len(v)-2} more"]
     if isinstance(v, dict):
-        # Top-level large dicts (like APC/DC/RECIPE/FDC/EC blocks in
-        # process_history rows) collapse to key summary. depth>0 keeps
-        # values for shallow nesting (e.g. spc_summary stays expanded).
-        if depth == 0 and len(v) > _DICT_COLLAPSE_KEYS:
+        # Large dicts (APC/DC/RECIPE/FDC/EC blocks + their nested `parameters`
+        # / `constants` sub-dicts) collapse to a key summary at any depth.
+        if len(v) > _DICT_COLLAPSE_KEYS:
             keys = list(v.keys())[:6]
             tail = f"...+{len(v) - 6} more keys" if len(v) > 6 else ""
             return f"<dict {len(v)} keys: {keys}{tail}>"

@@ -169,6 +169,17 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
             })],
         }
 
+    # 2026-06-18 (ENABLE_ORPHAN_RESOLVE): before the structural check, give the
+    # agent one round to connect-or-remove any fully-disconnected orphan node,
+    # instead of failing the whole build on a stray leftover (spc-ooc). No-op
+    # unless the flag is on and an isolated node exists.
+    from python_ai_sidecar.agent_builder.graph_build.nodes.orphan_resolve import (
+        maybe_resolve_orphans,
+    )
+    _orphan_upd = await maybe_resolve_orphans(state)
+    if _orphan_upd.get("final_pipeline"):
+        final_dict = _orphan_upd["final_pipeline"]
+
     pipeline = PipelineJSON.model_validate(final_dict)
     registry = SeedlessBlockRegistry()
     registry.load()

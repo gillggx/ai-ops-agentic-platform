@@ -21,10 +21,12 @@ from .spc_status_enum import clarify_spc_status_enum
 from .remove_spc_summary import remove_spc_summary_expand_spc_charts
 from .inject_lineage import inject_pipeline_lineage
 from .matched_connect_options import inject_matched_connect_options
+from .trim_sample_rows import trim_sample_rows
 
 
 VARIANT_REGISTRY = {
     "identity": identity,
+    "trim_sample_rows": trim_sample_rows,
     "enrich_catalog_brief": enrich_catalog_brief,
     "rewrite_phase_goal_generic": rewrite_phase_goal_generic,
     "prepend_oneblock_solutions": prepend_oneblock_solutions,

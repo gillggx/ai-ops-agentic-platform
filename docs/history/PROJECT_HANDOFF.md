@@ -1,6 +1,51 @@
 # AIOps Platform — Project Handoff
 
-**Last updated: 2026-05-24** · **Current phase: Java OOP refactor merged (PR #5) · post v30.23**
+**Last updated: 2026-06-18** · **Current phase: Phase-loop efficiency (trim + rich_schema + auto_signal + orphan_resolve) · post Java OOP refactor**
+
+---
+
+## 0. 2026-06-18 — Phase-loop efficiency pass (KIMI build cost/round reduction)
+
+Cut the v30 builder's wasted LLM rounds. Gated behind feature flags
+(`python_ai_sidecar/feature_flags.py` is the canonical doc). Validated on
+SLASH-17 (KIMI) graded against hand-authored golden pipelines.
+
+**Shipped ON in prod** (`.env`): `ENABLE_RICH_SCHEMA_VALUES`,
+`ENABLE_AUTO_SIGNAL`, `ENABLE_ORPHAN_RESOLVE`. Plus unconditional sample-row trim.
+
+- **trim** (`schema_doc._truncate_value`, unconditional): collapse nested sample
+  dicts at ANY depth → observation −40–64%/obs (offline over 613 obs).
+- **rich_schema_values**: runtime schema lists TRUE distinct values of low-card
+  string cols (full output, not the 5-row sample) + folds just-added node schema
+  into the post-add tool_result → removes inspect-before-filter / inspect-after-add.
+  spc-trend `inspect_node_output` 4 → 0 (stable across 3 runs).
+- **auto_signal** (pre-existing flag, now enabled): add_node auto-commits the pick
+  → drops the commit_pick ceremony round per block.
+- Combined: spc-trend rounds **16 → 4–6**; SLASH-17 SPC core all MATCH golden.
+- **orphan_resolve**: before finalize, a fully-disconnected node (no in+out edge)
+  → one agent round to connect-or-remove (judge, not silent prune/fail). Fixes
+  spc-ooc's stray-orphan `failed_structural`.
+
+**Kept OFF in prod (flag present, default off):**
+- **goal_aware_matching**: re-ranks MATCHING BLOCKS by phase-goal relevance.
+  Helped spc-ooc but A/B isolation showed its harm on composite/APC cases is
+  within KIMI's high run-to-run variance — not enabled pending a 3×-median test.
+- **presentation_lookahead**: parked (no measured benefit). Flag-off dead code,
+  cleanup follow-up.
+
+**Known follow-ups (NOT agent bugs):**
+- **APC simulator data gap** — `config.py TOTAL_STEPS` bumped 10→20 but APC params
+  only seeded for APC-001..010 (STEP_001..010). STEP_011..020 have empty
+  `APC.parameters`. This (not any flag) is the root of APC-case instability:
+  the agent's random sample lands on empty-APC rows → can't see `etch_time_offset`
+  → thrashes. Fix = extend APC seed to all 20 steps / reseed.
+- **composite-in-multi-phase over-build** — when the plan splits a composite
+  (spc_panel/apc_panel) task into raw/transform/chart phases, the agent builds a
+  redundant manual transform branch alongside the composite (dead branch).
+  Plan-layer issue, separate from the above.
+
+verify_after_add was tried and reverted (no round reduction; the re-pick "loop"
+was legitimate wrong-block correction, not redundant verification).
 
 > 上次大改版是 2026-04-27 的 Phase 8 (Java cutover)。本次 handoff 覆蓋 Phase 8
 > 之後的所有重大進展（v9–v19 + v30.x + Skill Catalog + Builder Block Advisor +
