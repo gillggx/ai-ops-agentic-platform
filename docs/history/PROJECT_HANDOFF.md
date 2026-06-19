@@ -33,12 +33,19 @@ SLASH-17 (KIMI) graded against hand-authored golden pipelines.
 - **presentation_lookahead**: parked (no measured benefit). Flag-off dead code,
   cleanup follow-up.
 
+**APC simulator data gap — FIXED 2026-06-18.** `config.py TOTAL_STEPS` was bumped
+10→20 but `database._seed_apc_models` skip-returned when apc_state already had
+semantic params, so APC-011..020 were never created → STEP_011..020 events had
+empty `APC.parameters` (no `etch_time_offset`). This (NOT goal_aware or any flag)
+was the root of APC-case instability + the noisy A/B-isolation matrix: the agent's
+random 5-row sample landed on empty-APC rows → couldn't see `etch_time_offset` →
+thrashed (apc-recipe looped to the 64-round cap). Fix: (A) `_seed_apc_models`
+back-fills missing apc_id instead of skipping; (B) one-time migration filled the
+19,925 existing empty APC `object_snapshots` from apc_state + per-snapshot jitter
+(no reset / no history loss). Post-fix re-run: apc-drift 4n/14r, apc-trend 3n/6r,
+apc-recipe 3n/14r (was 64r FAIL) — all clean, match golden.
+
 **Known follow-ups (NOT agent bugs):**
-- **APC simulator data gap** — `config.py TOTAL_STEPS` bumped 10→20 but APC params
-  only seeded for APC-001..010 (STEP_001..010). STEP_011..020 have empty
-  `APC.parameters`. This (not any flag) is the root of APC-case instability:
-  the agent's random sample lands on empty-APC rows → can't see `etch_time_offset`
-  → thrashes. Fix = extend APC seed to all 20 steps / reseed.
 - **composite-in-multi-phase over-build** — when the plan splits a composite
   (spc_panel/apc_panel) task into raw/transform/chart phases, the agent builds a
   redundant manual transform branch alongside the composite (dead branch).
