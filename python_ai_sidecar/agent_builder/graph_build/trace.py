@@ -248,6 +248,13 @@ class BuildTracer:
                 v = getattr(resp, f, None)
                 if v is not None:
                     entry[f] = int(v)
+            # 2026-06-20: RAW provider finish_reason. On the failure path this is
+            # what distinguishes a transient provider 'error' (retryable) from
+            # genuinely bad JSON — without it the trace mislabels both as a
+            # generic parse error. See SLASH-17 2026-06-20 diagnosis.
+            fr = getattr(resp, "finish_reason", None)
+            if fr:
+                entry["finish_reason"] = str(fr)
             # Trace gap #2 (2026-06-14): the model's chain-of-thought. Until now
             # this lived only in stderr ([LLM-DBG2]); recording it here means a
             # single trace file answers "why did the agent do that".

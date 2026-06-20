@@ -394,6 +394,42 @@ def _strip_fence(text: str) -> str:
     return _FENCE_RE.sub("", text.strip()).strip()
 
 
+# 2026-06-20: goal_plan occasionally dies on a SINGLE transient upstream blip —
+# OpenRouter surfaces provider failures as finish_reason='error' (mapped to
+# stop_reason='error'), returning empty or truncated JSON. With no retry, that
+# one blip killed the whole build (0 nodes). SLASH-17 2026-06-20: exactly 2
+# such errors in a 17-case run, both unluckily on goal_plan → 2 false FAILs.
+# One retry recovers them; the instruction itself is fine. Keep bounded so a
+# genuinely-unparseable plan still fails fast.
+_MAX_PLAN_ATTEMPTS = 2
+
+
+def _attempt_plan_parse(resp: Any, extract_first_json_object) -> "tuple[Any, str | None]":
+    """Return (decision, fail_kind). fail_kind is None on success.
+
+    Parse success ALWAYS wins (we never discard a usable plan just because the
+    provider flagged an error). Only when parsing fails do we classify WHY, so
+    the caller can retry transient failures and the tracer can record the true
+    cause (provider error vs genuinely bad JSON) instead of a generic message.
+    """
+    raw_text = resp.text or ""
+    text = _strip_fence(raw_text)
+    if text:
+        try:
+            return json.loads(text), None
+        except json.JSONDecodeError:
+            try:
+                return extract_first_json_object(text), None
+            except Exception:  # noqa: BLE001 — raises ValueError on no/unbalanced JSON
+                pass
+    # Unusable output — classify cause for retry + observability.
+    if str(getattr(resp, "stop_reason", "")) == "error":
+        return None, "provider_error"
+    if not raw_text.strip():
+        return None, "empty_output"
+    return None, "unparseable"
+
+
 async def goal_plan_node(state: BuildGraphState) -> dict[str, Any]:
     """Emit 3-7 goal-oriented phases."""
     from python_ai_sidecar.agent_builder.graph_build.nodes.plan import (
@@ -484,31 +520,52 @@ async def goal_plan_node(state: BuildGraphState) -> dict[str, Any]:
     extra_sse: list[dict[str, Any]] = []
 
     raw_text = ""
-    try:
-        resp = await client.create(
-            system=_SYSTEM,
-            messages=[{"role": "user", "content": user_msg}],
-            max_tokens=2048,
-        )
-        raw_text = resp.text or ""
-        text = _strip_fence(raw_text)
+    resp = None
+    decision = None
+    fail_kind: "str | None" = None
+    # Bounded retry: a single transient provider blip (finish_reason='error',
+    # empty/truncated JSON) should not kill the whole build. Parse success
+    # breaks immediately; only transient/unparseable output triggers a retry.
+    for attempt in range(_MAX_PLAN_ATTEMPTS):
         try:
-            decision = json.loads(text)
-        except json.JSONDecodeError:
-            decision = _extract_first_json_object(text or "")
-    except Exception as ex:  # noqa: BLE001
-        logger.warning("goal_plan_node: LLM/parse failed (%s)", ex)
+            resp = await client.create(
+                system=_SYSTEM,
+                messages=[{"role": "user", "content": user_msg}],
+                max_tokens=2048,
+            )
+        except Exception as ex:  # noqa: BLE001 — network/SDK error reaching provider
+            logger.warning("goal_plan_node: LLM call raised (%s) [attempt %d/%d]",
+                           ex, attempt + 1, _MAX_PLAN_ATTEMPTS)
+            resp, raw_text, fail_kind = None, "", "provider_error"
+        else:
+            raw_text = resp.text or ""
+            decision, fail_kind = _attempt_plan_parse(resp, _extract_first_json_object)
+        if fail_kind is None:
+            break
+        if attempt < _MAX_PLAN_ATTEMPTS - 1:
+            logger.warning("goal_plan_node: plan unusable (%s) — retrying [attempt %d/%d]",
+                           fail_kind, attempt + 1, _MAX_PLAN_ATTEMPTS)
+
+    if fail_kind is not None:
+        err_msg = f"goal_plan unusable after {_MAX_PLAN_ATTEMPTS} attempt(s): {fail_kind}"
+        logger.warning("goal_plan_node: %s", err_msg)
         if tracer is not None:
+            # resp=resp auto-records the RAW finish_reason + output_tokens, so
+            # the trace shows 'provider_error' vs 'unparseable' (not a generic
+            # parse message). resp may be None if create() itself raised.
             tracer.record_llm(
                 "goal_plan_node", system=_SYSTEM, user_msg=user_msg,
-                raw_response=raw_text, parsed=None, error=str(ex)[:300],
+                raw_response=raw_text, parsed=None, error=err_msg,
+                resp=resp, error_kind=fail_kind,
             )
-            tracer.record_step("goal_plan_node", status="failed", error=str(ex)[:300])
+            tracer.record_step("goal_plan_node", status="failed",
+                               error=err_msg, error_kind=fail_kind)
         return {
             "v30_phases": [],
             "status": "failed",
-            "summary": f"goal_plan failed: {ex}",
-            "sse_events": [_event("goal_plan_failed", {"error": str(ex)[:200]})],
+            "summary": f"goal_plan failed: {fail_kind}",
+            "sse_events": [_event("goal_plan_failed",
+                                  {"error": err_msg, "kind": fail_kind})],
         }
 
     # too_vague path

@@ -119,6 +119,12 @@ class LLMResponse:
     # now this was logged to stderr only ([LLM-DBG2]) — surfacing it on the
     # response lets BuildTracer record WHY the agent acted (trace gap #2).
     reasoning_content: str = ""
+    # 2026-06-20: RAW provider finish_reason (OpenAI-compat) / stop_reason
+    # (Anthropic), BEFORE the end_turn normalisation. `stop_reason` collapses
+    # length/eos/content_filter → "end_turn", which HIDES truncation and (for
+    # goal_plan) made a provider 'error' look like a JSON-parse bug. Keep the
+    # true value so the failure-path trace can record the real cause.
+    finish_reason: str = "stop"
 
 
 # ── Base interface ─────────────────────────────────────────────────────────────
@@ -230,6 +236,7 @@ class AnthropicLLMClient(BaseLLMClient):
         return LLMResponse(
             text=text,
             stop_reason=str(getattr(resp, "stop_reason", "end_turn")),
+            finish_reason=str(getattr(resp, "stop_reason", "end_turn")),
             content=content,
             input_tokens=getattr(usage, "input_tokens", 0) if usage else 0,
             output_tokens=getattr(usage, "output_tokens", 0) if usage else 0,
@@ -562,6 +569,7 @@ class OllamaLLMClient(BaseLLMClient):
         return LLMResponse(
             text=text,
             stop_reason=stop_reason,
+            finish_reason=str(_finish or "stop"),
             content=content,
             input_tokens=uncached_input,
             output_tokens=completion_tokens,
