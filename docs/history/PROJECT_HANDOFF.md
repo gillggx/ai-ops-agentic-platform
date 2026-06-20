@@ -1,6 +1,37 @@
 # AIOps Platform — Project Handoff
 
-**Last updated: 2026-06-18** · **Current phase: Phase-loop efficiency (trim + rich_schema + auto_signal + orphan_resolve) · post Java OOP refactor**
+**Last updated: 2026-06-20** · **Current phase: goal_plan provider-error robustness · post Phase-loop efficiency**
+
+---
+
+## 0. 2026-06-20 — goal_plan bounded retry + finish_reason observability (Fix A+B)
+
+Commit `0075178`. Root cause from a clean SLASH-17 run (shipped config:
+rich/autosig/orphan ON, goal_aware OFF, APC data fixed): of 3 "FAIL" cases, 2
+(spc-multi-step, apc-drift) were **not agent failures** — a single transient
+OpenRouter blip (`finish_reason='error'` → empty/truncated JSON) hit
+`goal_plan_node`, which had **no retry**, so one blip killed the whole build
+(0 nodes). Exactly 2 `finish=error` in the 17-case run, both on goal_plan. The
+failure-path trace also **mislabelled** it (recorded only `raw_response` + a
+generic "no JSON"/"unbalanced JSON"); the true cause was visible only in stderr
+`[LLM-DBG] finish=...`, and `llm_client` masked `finish in {length,eos,...}` →
+`end_turn`.
+
+- **Fix A (retry)** `goal_plan.py`: bounded retry `_MAX_PLAN_ATTEMPTS=2` on
+  `provider_error`/`empty_output`/`unparseable` (`_attempt_plan_parse`; parse
+  success always wins). Deterministic graph logic, prompt untouched (no
+  PROMPT_VERSION bump).
+- **Fix B (observability)** `llm_client.py` + `trace.py`: `LLMResponse` carries
+  RAW `finish_reason`; `record_llm(resp=...)` auto-records it; goal_plan failure
+  path tags `error_kind`. A single trace now distinguishes a retryable provider
+  blip from genuinely bad JSON.
+- **Verified on EC2**: spc-multi-step + apc-drift now `finished` (5 / 6 nodes,
+  were provider-error FAILs); goal_plan traces now carry `finish_reason` +
+  `output_tokens`. 9 new unit tests + existing 38 green.
+- **NOT in scope** (→ Fix C, separate spec): ooc-ranking `failed_structural` —
+  goal_plan over-decomposes N machines into N fetch phases → 3× process_history
+  → union joins 2 → 1 dangling source; `orphan_resolve` only catches fully
+  isolated nodes, not dangling sources.
 
 ---
 
