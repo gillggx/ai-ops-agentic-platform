@@ -139,6 +139,17 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
     if orphan_reject is not None:
         return orphan_reject
 
+    # ── (C2) Leaf check — symmetric to (C): a non-output node that is a
+    # LEAF (0 outbound) is structurally broken. Catches the abandoned-fetch
+    # case (ooc-ranking: a 3rd process_history left dangling when the agent
+    # unioned only 2). The just-added frontier node is legitimately a leaf
+    # until wired, so this only fires once an OUTPUT node exists in the
+    # pipeline (deliverable chain complete) — at which point any leftover
+    # non-output leaf is a confirmed dead branch, not an in-progress frontier.
+    leaf_reject = _check_leaf(state=state, registry=registry)
+    if leaf_reject is not None:
+        return leaf_reject
+
     # ── (A) Cover-gate walk — gated by feature flag ──────────────────
     advanced: list[dict[str, Any]] = []
     cur = idx
@@ -467,6 +478,75 @@ def _check_orphan(
         missing_for_phase=[
             f"connect upstream → {last_lid}.<input port> "
             f"(block {block_id} needs data from upstream)"
+        ],
+    )
+
+
+def _check_leaf(
+    *, state: BuildGraphState, registry: Any,
+) -> dict[str, Any] | None:
+    """Reject if a non-output node is a LEAF (0 outbound edges) — a
+    data/transform/source block with no downstream consumer can never
+    contribute to the deliverable. Symmetric to _check_orphan's inbound rule.
+
+    Scoped to fire ONLY once an output-category node exists in the pipeline:
+    before the deliverable chain reaches an output, the just-added frontier
+    node is legitimately a pending leaf, so flagging it would be a false
+    positive. Once an output exists, any leftover non-output leaf is a
+    confirmed dead branch. Returns reject dict (routes to 'construct' so the
+    agent connects-or-removes it next round) or None.
+    """
+    pipeline_now = (
+        state.get("final_pipeline")
+        or state.get("pipeline_json")
+        or state.get("base_pipeline")
+        or {}
+    )
+    nodes = pipeline_now.get("nodes") or []
+    if len(nodes) <= 1:
+        return None
+    edges = pipeline_now.get("edges") or []
+
+    out_count: dict[str, int] = {}
+    for e in edges:
+        from_field = e.get("from") or {}
+        from_node = from_field.get("node") if isinstance(from_field, dict) else None
+        if from_node:
+            out_count[from_node] = out_count.get(from_node, 0) + 1
+
+    def _cat_meta(block_id: str) -> tuple[str, dict]:
+        spec = registry.get_spec(block_id, "1.0.0") or {}
+        return (spec.get("category") or "").lower(), (spec.get("meta") or {})
+
+    # Gate: only fire once the deliverable chain has reached an output node.
+    if not any(_cat_meta(n.get("block_id"))[0] == "output" for n in nodes):
+        return None
+
+    abandoned: list[tuple[str, str]] = []
+    for n in nodes:
+        nid = n.get("id")
+        bid = n.get("block_id") or ""
+        cat, meta = _cat_meta(bid)
+        # Output blocks are legitimate leaves; standalone composites opt out
+        # the same way C14 exempts them.
+        if cat == "output" or meta.get("standalone_capable"):
+            continue
+        if out_count.get(nid, 0) == 0:
+            abandoned.append((nid, bid))
+
+    if not abandoned:
+        return None
+
+    phases = state.get("v30_phases") or []
+    idx = state.get("v30_current_phase_idx", 0)
+    cur_phase = phases[idx] if idx < len(phases) else {}
+    return _emit_reject(
+        state=state, cur_phase=cur_phase, block_id=abandoned[0][1], covers=[],
+        rows=None, result="orphan: data node is a leaf (no downstream)",
+        missing_for_phase=[
+            f"node {nid} ({bid}) produces data but has no downstream consumer — "
+            f"connect its output into the chain, or remove it"
+            for nid, bid in abandoned
         ],
     )
 
