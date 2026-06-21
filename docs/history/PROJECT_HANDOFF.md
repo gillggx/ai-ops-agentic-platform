@@ -1,10 +1,43 @@
 # AIOps Platform — Project Handoff
 
-**Last updated: 2026-06-20** · **Current phase: goal_plan provider-error robustness · post Phase-loop efficiency**
+**Last updated: 2026-06-21** · **Current phase: SLASH-17 FAIL triage closed (Fix A/B/C) · post Phase-loop efficiency**
 
 ---
 
-## 0. 2026-06-20 — goal_plan bounded retry + finish_reason observability (Fix A+B)
+## 0. 2026-06-21 — SLASH-17 FAIL triage closed + WRONG-case analysis
+
+After Fix A/B/C (below) the 3 SLASH-17 hard FAILs are resolved (re-run verified):
+
+| case | was | fix | re-run |
+|---|---|---|---|
+| spc-multi-step | FAIL (provider blip) | A retry | finished |
+| apc-drift | FAIL (provider blip) | A retry | finished |
+| ooc-ranking | FAIL (structural) | C leaf-check | 3/3 finished |
+
+**Note on ooc-ranking**: the 3 verify runs PASSED because KIMI built a single
+process_history (no over-decomposition) so no dangling node arose — the leaf
+check (Fix C) was not exercised live (it fired 0×). Its logic is unit-covered
+on the exact failing topology; a live reproduction needs KIMI to over-decompose
+again (intermittent). End-to-end reject→repair not yet observed in the wild.
+
+**The 3 remaining WRONG cases (vs golden) — triaged, NOT crashes:**
+- `ooc-pareto` — agent picked `block_pareto` (auto desc-sorted bars + cumulative
+  line), golden wants `sort + bar_chart`. **Agent is RIGHT; golden is stale** →
+  re-bless golden, don't touch the agent.
+- `patrol-status` — agent used `block_list_objects` (fleet current snapshot) vs
+  golden `process_history` (single-tool history). **Agent arguably more correct**
+  for "current snapshot of all machines"; minor over-build (a redundant
+  `mcp_foreach` since list_objects already carries status). Golden questionable.
+- `spc-xbar-r-pair` — **the only real (minor) miss**: agent IDENTIFIED the
+  dedicated `block_xbar_r` and read its doc, then fell back to generic
+  `block_line_chart` (no reject/error — a free choice). Cost of goal_aware OFF +
+  xbar_r's stricter upstream requirement. Builds a chart, just not the dedicated
+  one. Fix options: enable goal_aware_matching (needs 3×-median re-eval) or
+  clarify/loosen xbar_r's upstream contract in its block description. Deferred.
+
+---
+
+## 0b. 2026-06-20 — goal_plan bounded retry + finish_reason observability (Fix A+B)
 
 Commit `0075178`. Root cause from a clean SLASH-17 run (shipped config:
 rich/autosig/orphan ON, goal_aware OFF, APC data fixed): of 3 "FAIL" cases, 2
