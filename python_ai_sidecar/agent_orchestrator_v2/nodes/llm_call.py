@@ -85,6 +85,13 @@ LLM_TOOL_SCHEMAS = [t for t in TOOL_SCHEMAS if t["name"] not in _LLM_HIDDEN_TOOL
 
 logger = logging.getLogger(__name__)
 
+# 2026-06-23: a single transient provider blip (OpenRouter finish_reason='error'
+# → empty/truncated completion, or a network raise) should not collapse the whole
+# chat turn. Bounded retry mirrors goal_plan's Fix A (commit 0075178); chat's
+# "usable" bar is laxer — text OR tool_calls is fine, only an exception /
+# provider_error / fully-empty output triggers a retry.
+MAX_LLM_ATTEMPTS = 2
+
 
 def _langchain_messages_to_v1(messages: list, system_text: str) -> tuple[str, list]:
     """Convert LangChain message list → v1 (system, messages) format.
@@ -217,24 +224,48 @@ async def llm_call_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[s
     else:
         cacheable_tools = visible_tools
 
-    try:
-        response = await llm.create(
-            system=cacheable_system,
-            messages=v1_messages,
-            max_tokens=8192,
-            tools=cacheable_tools,
+    # Bounded retry: parse success (text OR tool_calls) breaks immediately; only
+    # a provider exception / stop_reason=='error' / fully-empty output retries.
+    response = None
+    tool_calls: List[Dict[str, Any]] = []
+    fail_reason: "str | None" = None
+    for attempt in range(MAX_LLM_ATTEMPTS):
+        try:
+            response = await llm.create(
+                system=cacheable_system,
+                messages=v1_messages,
+                max_tokens=8192,
+                tools=cacheable_tools,
+            )
+        except Exception as exc:  # noqa: BLE001 — network/SDK error reaching provider
+            response, fail_reason = None, f"provider_exception: {exc}"
+        else:
+            tool_calls = _v1_response_to_tool_calls(response)
+            if str(getattr(response, "stop_reason", "")) == "error":
+                fail_reason = "provider_error"
+            elif not (response.text or "").strip() and not tool_calls:
+                fail_reason = "empty_output"
+            else:
+                fail_reason = None
+        if fail_reason is None:
+            break
+        if attempt < MAX_LLM_ATTEMPTS - 1:
+            logger.warning(
+                "llm_call: unusable response (%s) — retrying [attempt %d/%d] iter %d",
+                fail_reason, attempt + 1, MAX_LLM_ATTEMPTS, iteration,
+            )
+
+    if fail_reason is not None:
+        logger.error(
+            "llm_call: giving up after %d attempt(s) (%s) at iteration %d",
+            MAX_LLM_ATTEMPTS, fail_reason, iteration,
         )
-    except Exception as exc:
-        logger.exception("LLM call failed at iteration %d", iteration)
-        # Return a synthetic error message so the graph can route to synthesis
+        # Synthetic error message so the graph routes to synthesis gracefully.
         return {
-            "messages": [AIMessage(content=f"LLM 呼叫失敗: {exc}")],
+            "messages": [AIMessage(content=f"LLM 呼叫失敗（{fail_reason}），請再試一次。")],
             "current_iteration": iteration,
             "force_synthesis": True,
         }
-
-    # Build AIMessage from v1 response
-    tool_calls = _v1_response_to_tool_calls(response)
 
     # Extract text content (strip thinking blocks same as v1)
     text = response.text or ""
@@ -246,6 +277,9 @@ async def llm_call_node(state: Dict[str, Any], config: RunnableConfig) -> Dict[s
             "input_tokens": response.input_tokens,
             "output_tokens": response.output_tokens,
             "stop_reason": response.stop_reason,
+            # 2026-06-23: RAW provider finish_reason (before end_turn masking) so
+            # a provider blip is diagnosable from the turn metadata, not just logs.
+            "finish_reason": getattr(response, "finish_reason", response.stop_reason),
             # Phase 2-A: surface cache stats so the SSE adapter can stream
             # them to the UI; cache_read is what makes the discount visible.
             "cache_creation_input_tokens": response.cache_creation_input_tokens,
