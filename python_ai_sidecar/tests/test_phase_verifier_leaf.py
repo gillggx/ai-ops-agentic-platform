@@ -1,17 +1,22 @@
-"""2026-06-20 — phase_verifier non-output leaf check (Fix C).
+"""2026-06-20/23 — phase_verifier non-output leaf check (Fix C + bounded prune).
 
 A non-output node (source/transform/...) left as a LEAF (0 outbound) can never
 feed the deliverable. ooc-ranking: a 3rd process_history was left dangling when
-the agent unioned only 2 → finalize failed_structural. This deterministic
-build-time check catches it DURING the build (REJECT → agent connects/removes
-next round) instead of failing the whole build at finalize.
+the agent unioned only 2 → finalize failed_structural. The check catches it
+DURING the build (REJECT → agent connects/removes next round).
 
-Scoped: fires ONLY once an output node exists (so an in-progress frontier node,
-legitimately a pending leaf, is not a false positive).
+2026-06-23: bounded-reject. The agent sometimes can't fix it (re-adds leaves
+instead of wiring — apc-recipe-compare looped 20 rounds → handover). So after
+LEAF_PRUNE_AFTER consecutive rejects the verifier DETERMINISTICALLY prunes the
+dead leaf (`_prune_nodes`) so the build converges. Detection (`_nonoutput_leaves`)
+is split from the reject/prune decision (in the verifier node).
 """
 from __future__ import annotations
 
-from python_ai_sidecar.agent_builder.graph_build.nodes.phase_verifier import _check_leaf
+from python_ai_sidecar.agent_builder.graph_build.nodes.phase_verifier import (
+    _nonoutput_leaves,
+    _prune_nodes,
+)
 
 
 class FakeRegistry:
@@ -42,7 +47,9 @@ _CATS = {
     "block_union": "transform",
     "block_filter": "transform",
     "block_groupby_agg": "transform",
+    "block_pluck": "transform",
     "block_bar_chart": "output",
+    "block_box_plot": "output",
     "block_spc_panel": "output",
 }
 
@@ -53,7 +60,15 @@ def _state(nodes, edges):
             "v30_current_phase_idx": 0}
 
 
-def test_abandoned_non_output_leaf_rejected():
+def _leaves(nodes, edges, standalone=None):
+    _, ab = _nonoutput_leaves(_state(nodes, edges),
+                              FakeRegistry(_CATS, standalone=standalone))
+    return ab
+
+
+# ── detection (_nonoutput_leaves) ───────────────────────────────────
+
+def test_abandoned_non_output_leaf_detected():
     # ooc-ranking shape: n3 process_history dangling; n7 bar_chart is the output.
     nodes = [_node("n1", "block_process_history"), _node("n2", "block_process_history"),
              _node("n3", "block_process_history"), _node("n4", "block_union"),
@@ -61,53 +76,62 @@ def test_abandoned_non_output_leaf_rejected():
              _node("n7", "block_bar_chart")]
     edges = [_edge("n1", "n4"), _edge("n2", "n4"), _edge("n4", "n5"),
              _edge("n5", "n6"), _edge("n6", "n7")]
-    out = _check_leaf(state=_state(nodes, edges), registry=FakeRegistry(_CATS))
-    assert out is not None
-    # routes to 'construct' (connect) and names n3
-    assert out["v30_subphase"] == "construct"
-    miss = out["sse_events"][0]["data"]["missing_for_phase"]
-    assert any("n3" in m and "block_process_history" in m for m in miss)
+    ab = _leaves(nodes, edges)
+    assert [nid for nid, _ in ab] == ["n3"]
 
 
 def test_output_leaf_is_fine():
-    # bar_chart leaf is legitimate; nothing else dangling.
     nodes = [_node("n1", "block_process_history"), _node("n2", "block_bar_chart")]
-    edges = [_edge("n1", "n2")]
-    out = _check_leaf(state=_state(nodes, edges), registry=FakeRegistry(_CATS))
-    assert out is None
+    assert _leaves(nodes, [_edge("n1", "n2")]) == []
 
 
 def test_in_progress_no_output_yet_not_flagged():
-    # Build still in progress: fetch → filter, NO output block yet. The filter
-    # is a pending frontier leaf — must NOT be flagged (false-positive guard).
+    # fetch → filter, NO output yet: filter is a pending frontier leaf, not flagged.
     nodes = [_node("n1", "block_process_history"), _node("n2", "block_filter")]
-    edges = [_edge("n1", "n2")]
-    out = _check_leaf(state=_state(nodes, edges), registry=FakeRegistry(_CATS))
-    assert out is None
+    assert _leaves(nodes, [_edge("n1", "n2")]) == []
 
 
 def test_standalone_capable_leaf_exempt():
-    # A standalone source+output composite as a leaf is allowed (same exemption
-    # C14 uses). Pair it with a real output so the gate is open.
     nodes = [_node("n1", "block_process_history"), _node("n2", "block_bar_chart"),
              _node("n3", "block_spc_panel")]
-    edges = [_edge("n1", "n2")]
-    out = _check_leaf(
-        state=_state(nodes, edges),
-        registry=FakeRegistry(_CATS, standalone={"block_spc_panel"}),
-    )
-    assert out is None
+    assert _leaves(nodes, [_edge("n1", "n2")], standalone={"block_spc_panel"}) == []
 
 
-def test_clean_linear_pipeline_passes():
+def test_clean_linear_pipeline_no_leaves():
     nodes = [_node("n1", "block_process_history"), _node("n2", "block_filter"),
              _node("n3", "block_bar_chart")]
-    edges = [_edge("n1", "n2"), _edge("n2", "n3")]
-    out = _check_leaf(state=_state(nodes, edges), registry=FakeRegistry(_CATS))
-    assert out is None
+    assert _leaves(nodes, [_edge("n1", "n2"), _edge("n2", "n3")]) == []
 
 
-def test_single_node_pipeline_skipped():
-    nodes = [_node("n1", "block_spc_panel")]
-    out = _check_leaf(state=_state(nodes, []), registry=FakeRegistry(_CATS))
-    assert out is None
+def test_single_node_skipped():
+    assert _leaves([_node("n1", "block_spc_panel")], []) == []
+
+
+def test_apc_recipe_shape_pluck_dangling_detected():
+    # apc-recipe-compare loop shape: pluck (n3) dangling off the box_plot chain.
+    nodes = [_node("n1", "block_process_history"), _node("n2", "block_union"),
+             _node("n3", "block_pluck"), _node("n5", "block_box_plot")]
+    edges = [_edge("n1", "n2"), _edge("n2", "n5")]  # n3 pluck has no out edge
+    ab = _leaves(nodes, edges)
+    assert [nid for nid, _ in ab] == ["n3"]
+
+
+# ── prune (_prune_nodes) ────────────────────────────────────────────
+
+def test_prune_removes_node_and_touching_edges():
+    nodes = [_node("n1", "block_process_history"), _node("n2", "block_union"),
+             _node("n3", "block_pluck"), _node("n5", "block_box_plot")]
+    edges = [_edge("n1", "n2"), _edge("n2", "n5"), _edge("n1", "n3")]
+    cleaned = _prune_nodes({"nodes": nodes, "edges": edges}, ["n3"])
+    assert [n["id"] for n in cleaned["nodes"]] == ["n1", "n2", "n5"]
+    # the n1→n3 edge is gone; the box_plot chain stays intact
+    pairs = [(e["from"]["node"], e["to"]["node"]) for e in cleaned["edges"]]
+    assert ("n1", "n3") not in pairs
+    assert ("n1", "n2") in pairs and ("n2", "n5") in pairs
+
+
+def test_prune_multiple():
+    nodes = [_node("n1", "block_bar_chart"), _node("n2", "block_pluck"),
+             _node("n3", "block_filter")]
+    cleaned = _prune_nodes({"nodes": nodes, "edges": []}, ["n2", "n3"])
+    assert [n["id"] for n in cleaned["nodes"]] == ["n1"]

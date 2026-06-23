@@ -46,6 +46,14 @@ logger = logging.getLogger(__name__)
 # close the whole build silently. Only used when covers gate is ON.
 MAX_FAST_FORWARD_CHAIN = 4
 
+# 2026-06-23: bounded-reject for the non-output-leaf check. After the agent has
+# been bounced this many times on the SAME dangling leaf without fixing it
+# (re-adds leaves instead of connecting/removing — apc-recipe-compare looped 20
+# rounds → handover), stop rejecting and DETERMINISTICALLY prune the dead leaf
+# so the build converges. First (K-1) rejections still feed the agent back so it
+# gets a chance to self-correct (ooc-ranking fixes within 1).
+LEAF_PRUNE_AFTER = 3
+
 # Item 2 (2026-06-13, ENABLE_STRICT_PHASE_VERIFY): the "specific deliverable"
 # kinds. When a phase declares one of these but the canvas terminal doesn't
 # cover it, REJECT (don't advance). Intermediate kinds (raw_data / transform /
@@ -142,13 +150,36 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
     # ── (C2) Leaf check — symmetric to (C): a non-output node that is a
     # LEAF (0 outbound) is structurally broken. Catches the abandoned-fetch
     # case (ooc-ranking: a 3rd process_history left dangling when the agent
-    # unioned only 2). The just-added frontier node is legitimately a leaf
-    # until wired, so this only fires once an OUTPUT node exists in the
-    # pipeline (deliverable chain complete) — at which point any leftover
-    # non-output leaf is a confirmed dead branch, not an in-progress frontier.
-    leaf_reject = _check_leaf(state=state, registry=registry)
-    if leaf_reject is not None:
-        return leaf_reject
+    # unioned only 2). Fires only once an OUTPUT node exists (else the just-
+    # added frontier node is a legitimate pending leaf). Bounded: the first
+    # (K-1) detections REJECT + feed the agent back to self-correct; on the
+    # K-th (agent keeps re-adding leaves — apc-recipe-compare looped to
+    # handover) we DETERMINISTICALLY prune the dead leaf so the build converges.
+    pipeline_now, leaves = _nonoutput_leaves(state, registry)
+    pruned_pipeline: dict | None = None
+    if leaves:
+        leaf_cnt = (state.get("v30_leaf_reject_count") or 0) + 1
+        if leaf_cnt < LEAF_PRUNE_AFTER:
+            phases_l = state.get("v30_phases") or []
+            cur_phase_l = phases_l[idx] if idx < len(phases_l) else {}
+            rej = _emit_reject(
+                state=state, cur_phase=cur_phase_l, block_id=leaves[0][1], covers=[],
+                rows=None, result="orphan: data node is a leaf (no downstream)",
+                missing_for_phase=[
+                    f"node {nid} ({bid}) produces data but has no downstream "
+                    f"consumer — connect its output into the chain, or remove it"
+                    for nid, bid in leaves
+                ],
+            )
+            rej["v30_leaf_reject_count"] = leaf_cnt
+            return rej
+        # K-th time — prune the dead leaves and fall through to advance.
+        pruned_pipeline = _prune_nodes(pipeline_now, [nid for nid, _ in leaves])
+        logger.info(
+            "phase_verifier: leaf-prune after %d rejects — removed %s (agent "
+            "could not wire them; pruning so the build converges)",
+            leaf_cnt, [nid for nid, _ in leaves],
+        )
 
     # ── (A) Cover-gate walk — gated by feature flag ──────────────────
     advanced: list[dict[str, Any]] = []
@@ -295,7 +326,14 @@ async def phase_spanning_verifier_node(state: BuildGraphState) -> dict[str, Any]
         "v30_pending_block": None,
         "v30_pending_node_id": None,
         "v30_refine_cycle": 0,
+        # reset the leaf-reject counter on any clean advance (it counts
+        # CONSECUTIVE leaf rejections, not lifetime).
+        "v30_leaf_reject_count": 0,
     }
+    # If the leaf-check pruned dead leaves this round (K-th failure), the cleaned
+    # pipeline must reach state so downstream nodes + finalize see it.
+    if pruned_pipeline is not None:
+        update["final_pipeline"] = pruned_pipeline
 
     if len(advanced) >= 2:
         ff_log = list(state.get("v30_fast_forward_log") or [])
@@ -482,19 +520,18 @@ def _check_orphan(
     )
 
 
-def _check_leaf(
-    *, state: BuildGraphState, registry: Any,
-) -> dict[str, Any] | None:
-    """Reject if a non-output node is a LEAF (0 outbound edges) — a
-    data/transform/source block with no downstream consumer can never
+def _nonoutput_leaves(
+    state: BuildGraphState, registry: Any,
+) -> "tuple[dict, list[tuple[str, str]]]":
+    """Detection only — return (pipeline, abandoned) where abandoned is the list
+    of (node_id, block_id) for NON-output nodes that are LEAVES (0 outbound) and
+    a data/transform/source block with no downstream consumer can never
     contribute to the deliverable. Symmetric to _check_orphan's inbound rule.
 
     Scoped to fire ONLY once an output-category node exists in the pipeline:
-    before the deliverable chain reaches an output, the just-added frontier
-    node is legitimately a pending leaf, so flagging it would be a false
-    positive. Once an output exists, any leftover non-output leaf is a
-    confirmed dead branch. Returns reject dict (routes to 'construct' so the
-    agent connects-or-removes it next round) or None.
+    before the deliverable chain reaches an output, the just-added frontier node
+    is legitimately a pending leaf, so flagging it would be a false positive.
+    The caller decides reject (feed back to the agent) vs prune (after K).
     """
     pipeline_now = (
         state.get("final_pipeline")
@@ -504,7 +541,7 @@ def _check_leaf(
     )
     nodes = pipeline_now.get("nodes") or []
     if len(nodes) <= 1:
-        return None
+        return pipeline_now, []
     edges = pipeline_now.get("edges") or []
 
     out_count: dict[str, int] = {}
@@ -520,7 +557,7 @@ def _check_leaf(
 
     # Gate: only fire once the deliverable chain has reached an output node.
     if not any(_cat_meta(n.get("block_id"))[0] == "output" for n in nodes):
-        return None
+        return pipeline_now, []
 
     abandoned: list[tuple[str, str]] = []
     for n in nodes:
@@ -533,22 +570,26 @@ def _check_leaf(
             continue
         if out_count.get(nid, 0) == 0:
             abandoned.append((nid, bid))
+    return pipeline_now, abandoned
 
-    if not abandoned:
-        return None
 
-    phases = state.get("v30_phases") or []
-    idx = state.get("v30_current_phase_idx", 0)
-    cur_phase = phases[idx] if idx < len(phases) else {}
-    return _emit_reject(
-        state=state, cur_phase=cur_phase, block_id=abandoned[0][1], covers=[],
-        rows=None, result="orphan: data node is a leaf (no downstream)",
-        missing_for_phase=[
-            f"node {nid} ({bid}) produces data but has no downstream consumer — "
-            f"connect its output into the chain, or remove it"
-            for nid, bid in abandoned
-        ],
-    )
+def _prune_nodes(pipeline: dict, ids: "set[str] | list[str]") -> dict:
+    """Return a shallow copy of pipeline with the given node ids + every edge
+    touching them removed. Deterministically clears dead leaves the agent could
+    not wire after LEAF_PRUNE_AFTER rejections, so the build can converge."""
+    drop = set(ids)
+    nodes = [n for n in (pipeline.get("nodes") or []) if n.get("id") not in drop]
+
+    def _touches(e: dict) -> bool:
+        f = (e.get("from") or {}).get("node") if isinstance(e.get("from"), dict) else None
+        t = (e.get("to") or {}).get("node") if isinstance(e.get("to"), dict) else None
+        return f in drop or t in drop
+
+    edges = [e for e in (pipeline.get("edges") or []) if not _touches(e)]
+    cleaned = dict(pipeline)
+    cleaned["nodes"] = nodes
+    cleaned["edges"] = edges
+    return cleaned
 
 
 def _would_pass_blocks(registry: Any, expected: str) -> list[str]:

@@ -297,6 +297,9 @@ class BuildGraphState(TypedDict, total=False):
     # Refine cycle counter (per phase). Bounded — past N, escalate to
     # phase_revise rather than loop forever.
     v30_refine_cycle: int
+    # 2026-06-23: consecutive non-output-leaf rejections by phase_verifier.
+    # Past LEAF_PRUNE_AFTER the verifier prunes the dead leaf instead of looping.
+    v30_leaf_reject_count: int
     # v30.22 (2026-05-19) — agent-driven verify trigger. When the loop
     # round emits run_verifier (or phase_complete legacy, or hits round
     # budget), this is set True and router sends graph to phase_verifier.
