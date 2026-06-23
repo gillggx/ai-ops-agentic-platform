@@ -24,25 +24,34 @@ bash tools/chat_eval/run.sh baseline
 python3 tools/chat_eval/grade_chat.py baseline
 ```
 
-## ⚠ WANT is provisional — a product decision gates the goldens
+## Product decision (2026-06-23) — chat = pipeline entry (B)
 
-The grader's `WANT` map assumes an operations **data** question should be
-*answered* (directly, or by build+run+report — both count as `answer`). The
-2026-06-23 baseline showed chat instead often **pivots data questions into the
-pipeline-build confirm flow** (`confirm_pipeline_intent` → "我先跟你確認要建什麼"),
-after thrashing the skill/tool catalog for many iterations.
+A data question routing to a build-intent confirm card ("我先跟你確認要建什麼")
+is **correct by design** — chat is a pipeline entry point, consistent with the
+builder. So `WANT` is: data questions → `build_confirm`, concept questions →
+`answer`, vague → `clarify`. For `build_confirm` cases the bar is higher than "a
+card showed": after auto-confirm the pipeline must actually **build + run +
+return a result** (`MATCH` requires `confirmed_ran` + non-empty
+`confirmed_blocks`; `BUILD?` = card shown but the build didn't complete).
 
-Whether that pivot is **correct by design** (operations chat builds+runs a
-pipeline to answer) or a **regression** (it should answer directly) is a product
-call. Confirm with the owner before treating a `WRONG` as a real failure —
-otherwise this repeats the SLASH-17 stale-golden trap (blaming the agent for
-behaviour that was actually intended). Update `WANT` once the intended behaviour
-per case is settled.
+## The intervention — why this verifies, not just observes
 
-`behavior` classification (in `chat_driver._classify`):
-- `answer` — produced a synthesis answer, no build-confirm pivot
-- `build_confirm` — proposed a pipeline + asked to confirm
-- `clarify` — asked the user to disambiguate
-- `error` / `empty` — failed / produced nothing
+The confirm card PAUSES the graph waiting for the user to click "開始建", so a
+naive driver can only see "a card appeared". This harness auto-confirms it
+(leg 2: re-POST `[intent_confirmed:CARD]` + session_id, the same call the
+frontend makes) and drains the resulting Glass Box build — so we grade the
+**actual pipeline + run result**, not the card.
 
-`iterations` > 4 is flagged (`thrash?`) as an efficiency smell, not a failure.
+## Role matters — runs as PE
+
+`ON_DUTY` (empty roles, fail-closed) is BLOCKED from `build_pipeline_live`, so a
+data question dead-ends at "值班帳號無法建立 Pipeline". The eval sends
+`X-User-Roles: PE` (override via `EVAL_ROLES`) to exercise the full build path.
+(Open product question: an on-duty engineer asking a data question hits that
+dead-end — should chat route ON_DUTY to a direct answer / published skill
+instead of a build they can't run?)
+
+`behavior` (in `chat_driver._classify`): `answer` / `build_confirm` / `clarify`
+/ `error`. Each `build_confirm` case is followed by the auto-confirm leg whose
+deliverable (`confirmed_blocks` from `pb_glass_done.pipeline_json`,
+`confirmed_ran` from `pb_run_done`) is what the grader checks.

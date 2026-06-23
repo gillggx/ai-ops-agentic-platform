@@ -1,18 +1,25 @@
-"""Chat-mode regression driver (W1). Runs a batch of operations questions through
-the chat orchestrator (/internal/agent/chat) and captures behaviour-agnostic
-signals per case so we can SEE what chat does before fixing anything.
+"""Chat-mode regression driver (W1). Runs operations questions through the chat
+orchestrator (/internal/agent/chat) and verifies the REAL deliverable.
+
+Two-leg flow per case:
+  leg 1 (ask): POST the question. Chat routes a data question to a build-intent
+    card (design_intent_confirm). We capture card_id + session_id.
+  leg 2 (auto-confirm): re-POST [intent_confirmed:CARD] + the same session_id —
+    the same thing the frontend does when the user clicks "開始建". This drives
+    the Glass Box build to completion so we can grade what actually gets built.
 
 Captures per case:
-  - tools_called : ordered tool names from `tool_start` events
-  - iterations   : max llm_usage.iteration (efficiency proxy)
-  - synthesis    : final answer text from the `synthesis` event(s)
-  - behavior     : classified terminal behaviour — answer / build_confirm /
-                   clarify / error / empty
-  - status       : the `done` payload status (if any)
+  - behavior        : answer / build_confirm / clarify / error
+  - synthesis       : leg-1 answer / confirm-card text
+  - confirmed_*     : the post-confirm deliverable — blocks (from pb_glass_done
+                      .pipeline_json), ran (pb_run_done), answer, result_summary
+
+Role: ON_DUTY (empty roles, fail-closed) is BLOCKED from build_pipeline_live, so
+a data question dead-ends at "值班帳號無法建立 Pipeline". The eval runs as PE
+(X-User-Roles, override via EVAL_ROLES) to exercise + verify the full build path.
 
 Env: SVC_TOKEN (required), SIDECAR_BASE (default http://localhost:8050),
-     OUT_FILE (default /tmp/chat_eval_results.json).
-Run on the EC2 host (sidecar not publicly exposed).
+     OUT_FILE, EVAL_ROLES (default PE). Run on the EC2 host (sidecar not public).
 """
 from __future__ import annotations
 
@@ -25,8 +32,13 @@ import requests
 SIDECAR = os.environ.get("SIDECAR_BASE", "http://localhost:8050")
 SVC = os.environ["SVC_TOKEN"]
 OUT_FILE = os.environ.get("OUT_FILE", "/tmp/chat_eval_results.json")
+# Caller role gates the tool catalog: ON_DUTY (empty roles, fail-closed) is
+# BLOCKED from build_pipeline_live, so a data question that routes to "build a
+# pipeline" dead-ends with "你的帳號無法建立 Pipeline". To exercise + verify the
+# full build path the eval runs as PE by default (override via EVAL_ROLES).
+ROLES = os.environ.get("EVAL_ROLES", "PE")
 HDR = {"X-Service-Token": SVC, "Content-Type": "application/json",
-       "Accept": "text/event-stream"}
+       "Accept": "text/event-stream", "X-User-Roles": ROLES}
 
 # First batch — operations questions a duty engineer would actually ask. Kept
 # behaviour-agnostic: the driver records what chat DOES; expected behaviour is
@@ -91,55 +103,94 @@ def _classify(tools, synthesis, clarified, errored):
     return "empty"
 
 
+def _consume_leg(body, t0, max_wall):
+    """POST one chat leg + drain the SSE stream. Returns captured signals.
+    Breaks on done, on a confirm pause (2 pings after a synthesis), or the cap."""
+    leg = {"synthesis": "", "tools": [], "iters": 0, "card_id": None,
+           "session_id": None, "blocks": [], "ran": False, "result_summary": None,
+           "clarified": False, "errored": False, "status": None, "n_events": 0}
+    r = requests.post(f"{SIDECAR}/internal/agent/chat", json=body,
+                      headers=HDR, stream=True, timeout=400)
+    if r.status_code != 200:
+        leg["errored"] = True
+        leg["status"] = f"HTTP {r.status_code}"
+        return leg
+    synth_seen = False
+    pings_after_synth = 0
+    for ev, d in _sse(r):
+        if time.time() - t0 > max_wall:
+            leg["status"] = leg["status"] or "wall_clock_cap"
+            break
+        if ev == "ping":
+            if synth_seen:
+                pings_after_synth += 1
+                if pings_after_synth >= 2:
+                    break
+            continue
+        leg["n_events"] += 1
+        if d.get("session_id"):
+            leg["session_id"] = d["session_id"]
+        if ev == "tool_start":
+            leg["tools"].append(d.get("tool"))
+        elif ev == "llm_usage":
+            try:
+                leg["iters"] = max(leg["iters"], int(d.get("iteration") or 0))
+            except (TypeError, ValueError):
+                pass
+        elif ev == "synthesis":
+            leg["synthesis"] += (d.get("text") or "")
+            synth_seen = True
+            pings_after_synth = 0
+        elif ev == "design_intent_confirm":
+            leg["card_id"] = d.get("card_id")
+        elif ev == "pb_glass_done":
+            # chat-mode Glass Box build finished — pipeline_json carries the nodes.
+            nodes = (d.get("pipeline_json") or {}).get("nodes") or []
+            if nodes:
+                leg["blocks"] = [n.get("block_id") for n in nodes]
+        elif ev == "pb_run_done":
+            leg["ran"] = True
+            leg["result_summary"] = d.get("result_summary")
+        elif ev == "clarify":
+            leg["clarified"] = True
+        elif ev in ("error", "pb_run_error", "pb_glass_error"):
+            leg["errored"] = True
+        elif ev == "done":
+            leg["status"] = d.get("status")
+            break
+    return leg
+
+
 def run_one(key, message):
-    acc = {"key": key, "tools_called": [], "iterations": 0,
-           "synthesis": "", "behavior": None, "status": None, "n_events": 0}
-    clarified = errored = False
+    acc = {"key": key, "tools_called": [], "iterations": 0, "synthesis": "",
+           "behavior": None, "status": None, "n_events": 0,
+           # leg-2 (post-confirm) — the REAL deliverable the agent builds + runs
+           "confirmed": False, "confirmed_blocks": [], "confirmed_ran": False,
+           "confirmed_answer": "", "confirmed_result": None}
     t0 = time.time()
     try:
-        r = requests.post(f"{SIDECAR}/internal/agent/chat",
-                          json={"message": message, "mode": "chat"},
-                          headers=HDR, stream=True, timeout=400)
-        if r.status_code != 200:
-            acc["behavior"] = "error"
-            acc["status"] = f"HTTP {r.status_code}"
-            acc["sec"] = round(time.time() - t0, 1)
-            return acc
-        synth_seen = False
-        pings_after_synth = 0
-        for ev, d in _sse(r):
-            # Hard cap — covers any non-terminating stream.
-            if time.time() - t0 > MAX_WALL_SEC:
-                acc["status"] = acc["status"] or "wall_clock_cap"
-                break
-            if ev == "ping":
-                # A confirm pivot delivers its synthesis card then pauses (only
-                # pings flow). Two pings after a synthesis = terminal pause.
-                if synth_seen:
-                    pings_after_synth += 1
-                    if pings_after_synth >= 2:
-                        break
-                continue
-            acc["n_events"] += 1
-            if ev == "tool_start":
-                acc["tools_called"].append(d.get("tool"))
-            elif ev == "llm_usage":
-                try:
-                    acc["iterations"] = max(acc["iterations"], int(d.get("iteration") or 0))
-                except (TypeError, ValueError):
-                    pass
-            elif ev == "synthesis":
-                acc["synthesis"] += (d.get("text") or "")
-                synth_seen = True
-                pings_after_synth = 0
-            elif ev in ("clarify", "design_intent_confirm", "pb_intent_confirm"):
-                if ev == "clarify":
-                    clarified = True
-            elif ev in ("error", "pb_run_error", "pb_glass_error"):
-                errored = True
-            elif ev == "done":
-                acc["status"] = d.get("status")
-                break
+        leg1 = _consume_leg({"message": message, "mode": "chat"}, t0, MAX_WALL_SEC)
+        acc.update(tools_called=leg1["tools"], iterations=leg1["iters"],
+                   synthesis=leg1["synthesis"], status=leg1["status"],
+                   n_events=leg1["n_events"])
+        clarified, errored = leg1["clarified"], leg1["errored"]
+
+        # ── Intervention: auto-confirm the build-intent card so we can verify
+        # the REAL pipeline + result, not just "a card appeared". Mirrors the
+        # frontend confirm: re-POST /agent/chat with [intent_confirmed:CARD] +
+        # the same session_id (the design_intent_confirm path, per chat
+        # _walkthrough.py — NOT /chat/intent-respond).
+        if leg1["card_id"] and leg1["session_id"]:
+            confirm_msg = f"[intent_confirmed:{leg1['card_id']}] {message}"
+            leg2 = _consume_leg({"message": confirm_msg, "mode": "chat",
+                                 "session_id": leg1["session_id"]}, t0, MAX_WALL_SEC + 500)
+            acc["confirmed"] = True
+            acc["confirmed_blocks"] = leg2["blocks"]
+            acc["confirmed_ran"] = leg2["ran"]
+            acc["confirmed_answer"] = leg2["synthesis"]
+            acc["confirmed_result"] = leg2["result_summary"]
+            acc["status"] = leg2["status"] or acc["status"]
+            errored = errored or leg2["errored"]
     except Exception as e:
         acc["exc"] = f"{type(e).__name__}: {str(e)[:160]}"
         errored = True
@@ -149,13 +200,18 @@ def run_one(key, message):
 
 
 def main():
+    import sys
+    only = sys.argv[1] if len(sys.argv) > 1 else None
+    cases = [(k, m) for k, m in CASES if (only is None or k == only)]
     results = []
-    for i, (key, msg) in enumerate(CASES, 1):
+    for i, (key, msg) in enumerate(cases, 1):
         r = run_one(key, msg)
         results.append(r)
-        print(f"[{i:2d}/{len(CASES)}] {key:14s} behavior={r['behavior']:13s} "
+        cf = (f" | confirmed: blocks={len(r['confirmed_blocks'])} ran={r['confirmed_ran']} "
+              f"ans={(r['confirmed_answer'] or '').strip()[:40]!r}") if r["confirmed"] else ""
+        print(f"[{i:2d}/{len(cases)}] {key:14s} behavior={r['behavior']:13s} "
               f"iters={r['iterations']} tools={len(r['tools_called'])} "
-              f"{r['sec']}s :: {(r['synthesis'] or '').strip()[:60]!r}", flush=True)
+              f"{r['sec']}s :: {(r['synthesis'] or '').strip()[:50]!r}{cf}", flush=True)
     json.dump(results, open(OUT_FILE, "w"), ensure_ascii=False, indent=2)
     print(f"  results -> {OUT_FILE}", flush=True)
 

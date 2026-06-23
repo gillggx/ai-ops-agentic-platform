@@ -21,19 +21,22 @@ from collections import Counter
 
 RESULTS_DIR = os.environ.get("RESULTS_DIR", "/tmp")
 
-# key -> expected terminal behaviour (PROVISIONAL — see module docstring).
+# key -> expected terminal behaviour. Per the 2026-06-23 product decision:
+# operations DATA questions SHOULD route to a build-confirm card (chat = pipeline
+# entry, consistent with the builder); CONCEPT questions answer directly; VAGUE
+# prompts clarify. For build_confirm cases the bar is higher than "a card showed"
+# — after auto-confirm the pipeline must actually BUILD + RUN + return a result
+# (the eval runs as PE via X-User-Roles so build_pipeline_live is allowed).
 WANT = {
-    "status-one":   "answer",
-    "status-fleet": "answer",
-    "ooc-rank":     "answer",
-    "ooc-count":    "answer",
-    "spc-trend":    "answer",
-    "compare":      "answer",
+    "status-one":   "build_confirm",
+    "status-fleet": "build_confirm",
+    "ooc-rank":     "build_confirm",
+    "ooc-count":    "build_confirm",
+    "spc-trend":    "build_confirm",
+    "compare":      "build_confirm",
     "knowledge":    "answer",
     "vague":        "clarify",
 }
-# soft efficiency budget — flag, don't fail, when chat thrashes the tool catalog.
-ITER_BUDGET = 4
 
 
 def main():
@@ -42,29 +45,34 @@ def main():
             else f"{RESULTS_DIR}/chat_eval_results.json")
     R = {r["key"]: r for r in json.load(open(path))}
     gc = Counter()
-    print("%-14s %-7s %-13s %-13s %-5s %s" % (
-        "case", "grade", "want", "got", "iters", "note"))
+    print("%-14s %-7s %-13s %-13s %s" % ("case", "grade", "want", "got", "deliverable"))
     print("-" * 78)
     for key, want in WANT.items():
         r = R.get(key, {})
         got = r.get("behavior")
-        iters = r.get("iterations", 0)
+        # deliverable check (build_confirm only): confirmed → built nodes + ran
+        nblocks = len(r.get("confirmed_blocks") or [])
+        ran = r.get("confirmed_ran")
+        deliv = (f"blocks={nblocks} ran={ran}" if r.get("confirmed") else "-")
         if got is None:
             grade, note = "MISS", "(not run)"
-        elif got == want:
-            grade = "MATCH"
-            note = "thrash?" if iters > ITER_BUDGET else ""
         elif got == "error":
             grade, note = "FAIL", "errored"
+        elif got != want:
+            grade, note = "WRONG", deliv
+        elif want == "build_confirm":
+            # behaviour right — now verify the confirmed build actually delivered.
+            if ran and nblocks > 0:
+                grade, note = "MATCH", deliv
+            else:
+                grade, note = "BUILD?", deliv + " (confirm OK but build incomplete)"
         else:
-            grade, note = "WRONG", f"got {got}"
+            grade, note = "MATCH", ""
         gc[grade] += 1
-        print("%-14s %-7s %-13s %-13s %-5s %s" % (
-            key, grade, want, got or "-", iters, note))
+        print("%-14s %-7s %-13s %-13s %s" % (key, grade, want, got or "-", note))
     print("-" * 78)
-    print("behavior grades:", dict(gc))
-    print("note: WANT is provisional — confirm correct chat behaviour with the "
-          "product owner before acting on WRONG (see README).")
+    print("grades:", dict(gc))
+    print("MATCH(build_confirm) = card shown AND auto-confirm built+ran a pipeline.")
 
 
 if __name__ == "__main__":
