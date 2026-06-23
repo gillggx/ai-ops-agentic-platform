@@ -96,6 +96,36 @@ sudo systemctl enable aiops-java-api.service aiops-java-scheduler.service aiops-
 sudo systemctl restart aiops-java-api.service
 wait_for_http "http://127.0.0.1:${AIOPS_JAVA_PORT:-8002}/actuator/health" "Java API"
 
+# ── Canonical block seed (2026-06-23) ───────────────────────────────────────
+# pb_blocks has no boot/deploy sync from the canonical block list, so a fresh DB
+# (new EC2 / POC branch) only gets blocks whose Flyway migrations actually ran
+# (Flyway is disabled in prod) → fewer blocks than a hand-patched prod DB. Apply
+# the regenerable canonical seed every deploy: ON CONFLICT (name,version) DO
+# NOTHING — backfills a fresh DB, pure no-op on an established one (never
+# clobbers curated rows). Regenerate with: python tools/gen_block_seed_sql.py.
+CANON_SQL="$APP_DIR/java-backend/src/main/resources/db/canonical/pb_blocks_canonical.sql"
+if [ -f "$CANON_SQL" ]; then
+  echo "[seed] Applying canonical block seed (idempotent) ..."
+  DB_URL=$(grep -E '^DB_URL=' "$JAVA_ENV" | cut -d= -f2-)
+  DB_USER=$(grep -E '^DB_USER=' "$JAVA_ENV" | cut -d= -f2-)
+  DB_HOST=$(echo "$DB_URL" | sed -E 's#.*://([^:/]+).*#\1#')
+  DB_PORT=$(echo "$DB_URL" | sed -E 's#.*://[^:/]+:([0-9]+)/.*#\1#')
+  DB_NAME=$(echo "$DB_URL" | sed -E 's#.*/([^/?]+)(\?.*)?$#\1#')
+  if PGPASSWORD=$(grep -E '^DB_PASSWORD=' "$JAVA_ENV" | cut -d= -f2-) \
+       psql -h "${DB_HOST:-localhost}" -p "${DB_PORT:-5432}" -U "$DB_USER" -d "$DB_NAME" \
+       -v ON_ERROR_STOP=1 -f "$CANON_SQL" >/dev/null 2>/tmp/canon_seed.err; then
+    N=$(PGPASSWORD=$(grep -E '^DB_PASSWORD=' "$JAVA_ENV" | cut -d= -f2-) \
+        psql -h "${DB_HOST:-localhost}" -p "${DB_PORT:-5432}" -U "$DB_USER" -d "$DB_NAME" \
+        -tAc 'select count(*) from pb_blocks;' 2>/dev/null)
+    echo "    [ok] canonical block seed applied — pb_blocks now has $N block(s)."
+  else
+    echo "    [warn] canonical block seed FAILED (see /tmp/canon_seed.err) — continuing deploy."
+    cat /tmp/canon_seed.err >&2 || true
+  fi
+else
+  echo "    [warn] canonical block seed file not found ($CANON_SQL) — skipping."
+fi
+
 sudo systemctl restart aiops-java-scheduler.service
 wait_for_http "http://127.0.0.1:${AIOPS_SCHEDULER_PORT:-8003}/actuator/health" "Java Scheduler"
 
