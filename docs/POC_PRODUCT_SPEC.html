@@ -15,58 +15,46 @@
   *{box-sizing:border-box}
   body{font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;
        color:var(--ink); background:var(--bg); margin:0; line-height:1.62;}
-  .wrap{max-width:1060px; margin:0 auto; padding:32px 24px 64px;}
-  header.top{border-bottom:3px solid var(--ink); padding-bottom:14px; margin-bottom:22px;}
+  .wrap{max-width:1080px; margin:0 auto; padding:32px 24px 64px;}
+  header.top{border-bottom:3px solid var(--ink); padding-bottom:14px; margin-bottom:20px;}
   header.top h1{margin:0 0 4px; font-size:26px;}
   header.top .sub{color:var(--mut); font-size:13.5px;}
+  .toc{background:#fff; border:1px solid var(--line); border-radius:10px; padding:12px 16px; margin:14px 0 24px; font-size:13.5px;}
+  .toc b{display:block; margin-bottom:6px;} .toc a{color:var(--a); text-decoration:none; margin-right:14px; display:inline-block; margin-bottom:3px;}
   h2{font-size:20px; margin:34px 0 12px; padding-bottom:6px; border-bottom:2px solid var(--line);
-     display:flex; align-items:center; gap:9px;}
-  .nbox{display:inline-flex; width:26px; height:26px; border-radius:7px; background:var(--ink); color:#fff;
-        align-items:center; justify-content:center; font-size:14px; font-weight:700;}
-  h3{font-size:15px; margin:0 0 6px;}
+     display:flex; align-items:center; gap:9px; scroll-margin-top:12px;}
+  .nbox{display:inline-flex; min-width:26px; height:26px; padding:0 6px; border-radius:7px; background:var(--ink); color:#fff;
+        align-items:center; justify-content:center; font-size:13px; font-weight:700;}
+  .nbox.feat{background:var(--o);}
+  h3{font-size:15px; margin:14px 0 6px;}
   p{margin:7px 0;} small{color:var(--mut);}
   code{background:#f1f5f9; padding:1px 6px; border-radius:4px; font-size:12.5px;}
   .lead{font-size:15.5px; background:var(--a-bg); border:1px solid var(--a-bd); border-radius:10px; padding:15px 17px;}
-
+  ul{margin:6px 0; padding-left:18px;} li{margin:3px 0; font-size:14px;}
+  table{width:100%; border-collapse:collapse; margin:8px 0; font-size:13.5px;}
+  th,td{border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top;}
+  th{background:#f1f5f9;} td:first-child{white-space:nowrap; font-weight:600;}
+  .who{display:inline-block; font-size:11px; font-weight:700; padding:2px 9px; border-radius:999px; margin-left:8px;}
+  .who.pe{color:var(--o); background:var(--o-bg); border:1px solid var(--o-bd);}
+  .who.adm{color:var(--a); background:var(--a-bg); border:1px solid var(--a-bd);}
+  .who.duty{color:var(--g); background:var(--g-bg); border:1px solid var(--g-bd);}
+  .feat-card{border:1px solid var(--line); border-left:6px solid var(--o); border-radius:10px; background:#fff; padding:4px 18px 16px; margin:10px 0;}
   .cards{display:grid; grid-template-columns:repeat(2,1fr); gap:14px;}
   @media(max-width:680px){.cards{grid-template-columns:1fr;}}
-  .card{border:1px solid var(--line); border-radius:11px; background:var(--card); padding:15px 17px;}
+  .card{border:1px solid var(--line); border-radius:11px; background:#fff; padding:13px 16px;}
   .card .lbl{font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--mut);}
-  ul{margin:6px 0; padding-left:18px;} li{margin:3px 0; font-size:14px;}
-
-  /* feature blocks (L1/L2/L3) */
-  .feat{border:1px solid var(--line); border-left-width:6px; border-radius:10px; background:#fff; padding:15px 18px; margin:13px 0;}
-  .feat.l1{border-left-color:var(--g);} .feat.l2{border-left-color:var(--o);} .feat.l3{border-left-color:var(--a);}
-  .feat .hd{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;}
-  .feat .badge{font-size:12px; font-weight:700; color:#fff; background:var(--ink); border-radius:6px; padding:2px 9px;}
-  .feat h3{margin:0; font-size:17px;}
-  .two{display:grid; grid-template-columns:1fr 1fr; gap:6px 22px; margin-top:8px;}
-  @media(max-width:680px){.two{grid-template-columns:1fr;}}
-  .two .k{font-size:11.5px; font-weight:700; color:var(--mut); text-transform:uppercase; letter-spacing:.03em;}
-
-  /* agent flow */
+  .callout{border-radius:10px; padding:11px 15px; margin:10px 0; font-size:13.5px;}
+  .callout.note{background:var(--a-bg); border:1px solid var(--a-bd);}
+  .callout.warn{background:var(--amb-bg); border:1px solid var(--amb-bd);} .callout.warn b{color:var(--amb);}
   .flow{display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:10px 0; justify-content:center;}
   .fstep{background:#fff; border:1px solid var(--a-bd); border-radius:8px; padding:7px 11px; font-size:13px; font-weight:600; color:var(--a);}
   .fsep{color:var(--mut);}
-  table{width:100%; border-collapse:collapse; margin:8px 0; font-size:13.5px;}
-  th,td{border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top;}
-  th{background:#f1f5f9;}
-  .callout{border-radius:10px; padding:12px 16px; margin:10px 0; font-size:13.5px;}
-  .callout.note{background:var(--a-bg); border:1px solid var(--a-bd);}
-  .callout.warn{background:var(--amb-bg); border:1px solid var(--amb-bd);} .callout.warn b{color:var(--amb);}
-  .chips{display:flex; gap:7px; flex-wrap:wrap; margin-top:6px;}
-  .chip{font-size:12px; padding:3px 9px; border-radius:999px; background:#fff; border:1px solid var(--line);}
-
-  /* user journey */
   .journey{border:1px solid var(--line); border-radius:12px; background:#fff; padding:14px 16px; margin:8px 0;}
-  .lane{margin:10px 0;}
-  .lane-h{display:inline-block; font-size:12px; font-weight:700; color:#fff; border-radius:6px; padding:3px 11px; margin-bottom:8px;}
+  .lane{margin:10px 0;} .lane-h{display:inline-block; font-size:12px; font-weight:700; color:#fff; border-radius:6px; padding:3px 11px; margin-bottom:8px;}
   .lane-h.author{background:var(--o);} .lane-h.consumer{background:var(--a);}
-  .js{display:flex; align-items:stretch; gap:6px; flex-wrap:wrap;}
-  .jstep{flex:1; min-width:170px; border:1px solid var(--line); border-radius:9px; padding:9px 11px; background:#fcfcfd; font-size:13px;}
+  .js{display:flex; gap:6px; flex-wrap:wrap;} .jstep{flex:1; min-width:170px; border:1px solid var(--line); border-radius:9px; padding:9px 11px; background:#fcfcfd; font-size:13px;}
   .jstep b{font-size:13.5px;} .jstep div{color:var(--mut); font-size:12px; margin-top:3px;}
-  .jstep .jn{display:inline-flex; width:20px; height:20px; border-radius:50%; background:var(--ink); color:#fff;
-             align-items:center; justify-content:center; font-size:11px; font-weight:700; margin-right:6px;}
+  .jstep .jn{display:inline-flex; width:20px; height:20px; border-radius:50%; background:var(--ink); color:#fff; align-items:center; justify-content:center; font-size:11px; font-weight:700; margin-right:6px;}
   .jarr{display:flex; align-items:center; color:var(--mut); font-weight:700;}
   @media(max-width:680px){.jarr{display:none;} .jstep{min-width:100%;}}
   footer{margin-top:40px; padding-top:14px; border-top:1px solid var(--line); color:var(--mut); font-size:12px;}
@@ -77,161 +65,186 @@
 
 <header class="top">
   <h1>Skill Library POC — 功能規格</h1>
-  <div class="sub">產品功能說明（What it does）&nbsp;·&nbsp; 部署細節見 <code>POC_DEPLOYMENT_SPEC.html</code>
-  &nbsp;·&nbsp; 接手計畫見 <code>POC_HANDOVER_PLAN.html</code> &nbsp;·&nbsp; 2026-06-24</div>
+  <div class="sub">產品功能說明（What it does）&nbsp;·&nbsp; 部署見 <code>POC_DEPLOYMENT_SPEC.html</code>
+  &nbsp;·&nbsp; 接手見 <code>POC_HANDOVER_PLAN.html</code> &nbsp;·&nbsp; 2026-06-24</div>
 </header>
 
-<p class="lead"><b>產品定位：</b>給半導體運維工程師的「AI 分析技能庫」。工程師用<b>自然語言</b>提出運維問題
-（例：「列出最近 7 天 OOC 最多的 3 台機台」），平台的 <b>LLM Agent</b> 自動把它轉成一條<b>資料分析 pipeline</b>、
-對資料源執行、回傳圖表 / 表格 / 判定；好用的分析可<b>發布成 Skill</b> 給整個團隊重複使用。
-目標是把「會寫 SQL / 會接資料的少數人」的能力，變成<b>每個工程師都能用一句話取得</b>。</p>
+<p class="lead"><b>產品定位：</b>給半導體運維工程師的「AI 分析技能庫」。工程師用<b>自然語言</b>提出運維問題，
+平台的 <b>LLM Agent</b> 自動把它變成一條<b>資料分析 pipeline</b>、對資料源執行、回傳圖表 / 表格 / 判定；
+好用的分析可<b>發布成 Skill</b> 給整隊重複使用。把「會接資料的少數人」的能力，變成<b>每個工程師一句話就能取得</b>。</p>
 
-<!-- 1 概念 -->
-<h2><span class="nbox">1</span>核心概念（領域語彙）</h2>
+<div class="toc"><b>核心功能（六大功能，各一專章）</b>
+  <a href="#f1">① Library 技能庫</a><a href="#f2">② Authoring 編寫</a><a href="#f3">③ Try-Run 試跑</a>
+  <a href="#f4">④ Block Docs + Advisor</a><a href="#f5">⑤ Build Trace</a><a href="#f6">⑥ System MCP</a>
+</div>
+
+<!-- CONCEPTS -->
+<h2><span class="nbox">A</span>核心概念（領域語彙）</h2>
 <div class="cards">
-  <div class="card"><div class="lbl">Skill（技能）</div>
-    <p>一條可重複使用、已發布的分析 pipeline，回答某一類運維問題。使用者選 Skill + 填參數即可得到結果。</p></div>
-  <div class="card"><div class="lbl">Block（積木）</div>
-    <p>最小操作單元（取資料 / 轉換 / 畫圖 / 判定）。內建 <b>56 個</b>，每個<b>自帶完整文件</b>（用途、參數、範例）。</p></div>
-  <div class="card"><div class="lbl">Pipeline（管線）</div>
-    <p>多個 block 串成的有向圖 —— 一個 Skill 的實作。由 Agent 自動產生，或手動拼。</p></div>
-  <div class="card"><div class="lbl">System MCP（資料源）</div>
-    <p>admin 設定的外部 HTTP 資料來源。Skill 透過它取得真實資料；機密以 <code>${ENV}</code> 引用、不存 DB。</p></div>
-  <div class="card"><div class="lbl">Agent（代理）</div>
-    <p>把自然語言需求轉成 pipeline 的 LLM。會規劃、選 block、自我檢查與修正。</p></div>
-  <div class="card"><div class="lbl">Knowledge（知識層）</div>
-    <p>規劃提示 + 領域模型 + block 文件，<b>讓 Agent 接地</b>（知道資料長相、該用哪個 block）。</p></div>
+  <div class="card"><div class="lbl">Skill 技能</div><p>已發布、可重複用的分析 pipeline，回答一類運維問題。</p></div>
+  <div class="card"><div class="lbl">Block 積木</div><p>最小操作單元（取資料/轉換/畫圖/判定）。內建 56 個，各自帶完整文件。</p></div>
+  <div class="card"><div class="lbl">Pipeline 管線</div><p>多 block 串成的有向圖 —— 一個 Skill 的實作。</p></div>
+  <div class="card"><div class="lbl">System MCP 資料源</div><p>外部 HTTP 資料來源；機密以 <code>${ENV}</code> 引用。</p></div>
+  <div class="card"><div class="lbl">Agent 代理</div><p>把自然語言變 pipeline 的 LLM；會規劃、選 block、自我修正。</p></div>
+  <div class="card"><div class="lbl">Knowledge 知識層</div><p>規劃提示 + 領域模型 + block 文件，讓 Agent 接地。</p></div>
 </div>
 
-<!-- 2 主要功能 -->
-<h2><span class="nbox">2</span>主要功能</h2>
-
-<div class="feat l1">
-  <div class="hd"><span class="badge">L1</span><h3>Library — 技能庫與目錄</h3></div>
-  <p>瀏覽 / 搜尋<b>已發布的 Skill</b> 與 <b>Block 目錄</b>。每個 block 有「文件抽屜」秀用途 / 參數 / 範例。</p>
-  <div class="two">
-    <div><div class="k">使用者做什麼</div><ul><li>找現成 Skill 直接用</li><li>查某個 block 怎麼用、輸出什麼</li></ul></div>
-    <div><div class="k">得到什麼</div><ul><li>可立即套用的分析</li><li>清楚的 block 能力說明（人與 Agent 同一份）</li></ul></div>
-  </div>
-</div>
-
-<div class="feat l2">
-  <div class="hd"><span class="badge">L2</span><h3>Authoring — 兩種建立方式</h3></div>
-  <p>把需求變成一個 Skill 草稿。</p>
-  <div class="two">
-    <div><div class="k">A · Glass Box（自然語言）</div>
-      <ul>
-        <li>用一句話描述需求，<b>Agent 自動規劃→選 block→建構→自我修正</b></li>
-        <li><b>過程透明</b>：即時看到它的 plan 與每一步在做什麼</li>
-        <li>適合不熟 block 細節的工程師</li>
-      </ul></div>
-    <div><div class="k">B · Manual Builder（手動）</div>
-      <ul>
-        <li>在畫布上自己拖、接、設定 block</li>
-        <li>完全掌控；適合進階使用者微調</li>
-        <li>有 Block Docs 抽屜輔助設定</li>
-      </ul></div>
-  </div>
-  <div class="callout note">兩種方式產出的都是<b>草稿 Skill</b>；確認 + 試跑後可發布給團隊。</div>
-</div>
-
-<div class="feat l3">
-  <div class="hd"><span class="badge">L3</span><h3>Try-Run — 試跑與結果</h3></div>
-  <p>把草稿 Skill 對<b>真實資料</b>跑一遍，當場看結果，確認對了再發布。</p>
-  <div class="two">
-    <div><div class="k">輸出型態</div><ul><li>圖表（chart）</li><li>表格（table）</li><li>單一數值 / 判定（scalar / verdict 過或不過）</li></ul></div>
-    <div><div class="k">支援的圖</div>
-      <div class="chips">
-        <span class="chip">line / bar</span><span class="chip">box plot</span><span class="chip">pareto</span>
-        <span class="chip">X-bar/R 管制圖 + WECO</span><span class="chip">EWMA-CUSUM 漂移</span><span class="chip">Q-Q 常態</span>
-      </div></div>
-  </div>
-</div>
-
-<table style="margin-top:16px">
-  <tr><th>輔助功能</th><th>做什麼</th></tr>
-  <tr><td><b>Block Docs</b></td><td>自帶文件的 block 目錄。<b>同一份描述</b>同時給 Agent（選對 block）與 UI（給人看）—— 單一真相來源，不會人/機看到不同版本。</td></tr>
-  <tr><td><b>Build Trace</b></td><td>每次建構都記錄 Agent 的 plan + 每步推理 + 驗證判定，可在後台回看「它為什麼這樣建」，用於除錯與信任。</td></tr>
-  <tr><td><b>System MCP</b></td><td>admin 連接外部資料源（endpoint / method / headers / input schema）。Skill 即可從中取數；機密用 <code>${ENV}</code> 引用。</td></tr>
-</table>
-
-<!-- 3 USER JOURNEY -->
-<h2><span class="nbox">3</span>使用者旅程（端到端）</h2>
-<p>「一人建一次、全隊重複用」—— 從工程師提問，到值班同仁直接套用：</p>
+<!-- JOURNEY -->
+<h2><span class="nbox">B</span>使用者旅程（端到端）</h2>
 <div class="journey">
-  <div class="lane">
-    <div class="lane-h author">PE · 建立者</div>
+  <div class="lane"><div class="lane-h author">PE · 建立者</div>
     <div class="js">
-      <div class="jstep"><span class="jn">1</span><b>提問</b><div>「列出最近 7 天 OOC 最多的 3 台機台」</div></div>
-      <div class="jarr">→</div>
-      <div class="jstep"><span class="jn">2</span><b>Agent 建構（Glass Box）</b><div>取資料 → 分組計數 → 排序 → bar chart；過程透明、自我檢查</div></div>
-      <div class="jarr">→</div>
-      <div class="jstep"><span class="jn">3</span><b>Try-Run</b><div>當場看 bar chart，確認對了</div></div>
-      <div class="jarr">→</div>
-      <div class="jstep"><span class="jn">4</span><b>發布成 Skill</b><div>命名「OOC 排名」，進入技能庫</div></div>
-    </div>
-  </div>
-  <div class="lane">
-    <div class="lane-h consumer">ON_DUTY · 使用者</div>
+      <div class="jstep"><span class="jn">1</span><b>提問</b><div>「列出最近 7 天 OOC 最多的 3 台機台」</div></div><div class="jarr">→</div>
+      <div class="jstep"><span class="jn">2</span><b>Agent 建構</b><div>取資料→分組計數→排序→bar chart，過程透明</div></div><div class="jarr">→</div>
+      <div class="jstep"><span class="jn">3</span><b>Try-Run</b><div>當場看結果、確認</div></div><div class="jarr">→</div>
+      <div class="jstep"><span class="jn">4</span><b>發布 Skill</b><div>命名「OOC 排名」入庫</div></div>
+    </div></div>
+  <div class="lane"><div class="lane-h consumer">ON_DUTY · 使用者</div>
     <div class="js">
-      <div class="jstep"><span class="jn">5</span><b>在 Library 找 Skill</b><div>搜尋「OOC 排名」</div></div>
-      <div class="jarr">→</div>
-      <div class="jstep"><span class="jn">6</span><b>填參數、執行</b><div>選機台 / 時間範圍，一鍵得到結果 —— 不需懂建構</div></div>
-    </div>
-  </div>
+      <div class="jstep"><span class="jn">5</span><b>庫內找 Skill</b><div>搜尋「OOC 排名」</div></div><div class="jarr">→</div>
+      <div class="jstep"><span class="jn">6</span><b>填參數、執行</b><div>選機台/時間，一鍵得結果 —— 不需懂建構</div></div>
+    </div></div>
 </div>
-<div class="callout note">產品價值：把「會建分析的少數人」的成果，<b>變成全隊一句話 / 一鍵就能取得</b>的能力。</div>
+<div class="callout note">產品價值：把「會建分析的少數人」的成果，<b>變成全隊一句話 / 一鍵就能取得</b>。</div>
 
-<!-- 3 Agent 怎麼運作 -->
-<h2><span class="nbox">4</span>Agent 怎麼把「一句話」變成「跑得出結果的 pipeline」</h2>
+<!-- ============ 六大功能專章 ============ -->
+<h2 id="f1"><span class="nbox feat">①</span>功能一 · Library 技能庫<span class="who duty">ON_DUTY+</span></h2>
+<div class="feat-card">
+  <p><b>做什麼：</b>可瀏覽 / 搜尋的「已發布 Skill + Block 目錄」入口（<code>/skills</code>）。讓不會建構的人也能直接取用現成分析。</p>
+  <table>
+    <tr><th>子功能</th><th>說明</th></tr>
+    <tr><td>Skill 瀏覽 / 搜尋</td><td>列出所有已發布 Skill，依名稱 / 用途搜尋、依類別篩選</td></tr>
+    <tr><td>Skill 詳情頁</td><td><code>/skills/[slug]</code>：看用途、需填的輸入參數、輸出型態（圖/表/判定）</td></tr>
+    <tr><td>直接執行</td><td>選 Skill → 填參數 → 一鍵跑出結果（不進建構流程）</td></tr>
+    <tr><td>Block 目錄瀏覽</td><td>56 block 依類別（source / transform / output / logic / check）瀏覽</td></tr>
+    <tr><td>權限分級</td><td>ON_DUTY 可用已發布 Skill；PE / IT_ADMIN 另可進入編寫</td></tr>
+  </table>
+</div>
+
+<h2 id="f2"><span class="nbox feat">②</span>功能二 · Authoring 技能編寫（兩種模式）<span class="who pe">PE+</span></h2>
+<div class="feat-card">
+  <p><b>做什麼：</b>把需求變成一個 Skill 草稿。提供「自然語言（Glass Box）」與「手動畫布」兩條路（<code>/skills/new</code>、<code>/admin/pipeline-builder</code>）。</p>
+  <h3>A · Glass Box（自然語言建構）</h3>
+  <table>
+    <tr><th>子功能</th><th>說明</th></tr>
+    <tr><td>自然語言下指令</td><td>一句話描述需求，Agent 自動規劃 + 建構</td></tr>
+    <tr><td>意圖澄清</td><td>需求模糊時主動反問（選項卡），不亂猜</td></tr>
+    <tr><td>計畫確認</td><td>建構前先出「要達成的階段（phases）」確認卡，使用者按確認才開建</td></tr>
+    <tr><td>透明建構</td><td>即時顯示每步在加哪個 block、為什麼（Glass Box）</td></tr>
+    <tr><td>自我修正</td><td>結構或參數出錯當下自動偵測並修（懸空節點、型別錯誤、provider 抖動重試）</td></tr>
+  </table>
+  <h3>B · Manual Builder（手動畫布）</h3>
+  <table>
+    <tr><th>子功能</th><th>說明</th></tr>
+    <tr><td>畫布拼接</td><td>自己加 / 連 / 設定 block，完全掌控</td></tr>
+    <tr><td>Block Docs 輔助</td><td>設定時可開該 block 的文件抽屜看參數 / 範例</td></tr>
+    <tr><td>即時結構驗證</td><td>接線 / 參數錯誤即時提示（缺必填、欄位不存在、孤兒節點…）</td></tr>
+  </table>
+  <h3>C · 共通</h3>
+  <table>
+    <tr><th>子功能</th><th>說明</th></tr>
+    <tr><td>Skill 中繼資料</td><td>命名、用途、宣告輸入參數（讓使用者之後填）</td></tr>
+    <tr><td>觸發模式</td><td>once（單次）/ schedule（排程）/ patrol（巡檢）等綁定方式</td></tr>
+    <tr><td>草稿 → 發布</td><td>編輯 / 反覆迭代；確認後發布給團隊</td></tr>
+  </table>
+</div>
+
+<h2 id="f3"><span class="nbox feat">③</span>功能三 · Try-Run 試跑<span class="who pe">PE+</span></h2>
+<div class="feat-card">
+  <p><b>做什麼：</b>把草稿 Skill 對<b>真實資料</b>跑一遍、當場看結果，確認對了再發布。</p>
+  <table>
+    <tr><th>子功能</th><th>說明</th></tr>
+    <tr><td>live 執行</td><td>對 System MCP 連到的真實資料源執行 pipeline</td></tr>
+    <tr><td>結果渲染</td><td>依輸出型態呈現：圖表 / 表格 / 單一數值 / 判定（過或不過）</td></tr>
+    <tr><td>結果分頁（Lite Canvas）</td><td>建構畫面內直接看「結果」分頁，不必離開</td></tr>
+    <tr><td>錯誤明確化</td><td>跑失敗給具體碼與提示（<code>COLUMN_NOT_FOUND</code>、<code>MCP_UNREACHABLE</code>、參數型別…）</td></tr>
+    <tr><td>發布前把關</td><td>沒試跑成功就不建議發布</td></tr>
+  </table>
+</div>
+
+<h2 id="f4"><span class="nbox feat">④</span>功能四 · Block Docs + Block Advisor<span class="who pe">PE+</span></h2>
+<div class="feat-card">
+  <p><b>做什麼：</b>自帶文件的 block 目錄，加上一個會回答「這 block 怎麼用」的問答助手（<code>/admin/block-docs</code>）。</p>
+  <table>
+    <tr><th>子功能</th><th>說明</th></tr>
+    <tr><td>每 block 文件</td><td>用途 / 參數 schema / 範例 ——「唯一真相來源」，<b>Agent 與 UI 讀同一份</b>，不會人/機看到不同版本</td></tr>
+    <tr><td>Docs 抽屜</td><td>建構時隨手開，看某 block 怎麼填、輸出什麼</td></tr>
+    <tr><td>Block Advisor 問答</td><td>問「這 block 怎麼用 / A 跟 B 差在哪 / 我該用哪個」→ 自動分類意圖後回答（EXPLAIN / COMPARE / RECOMMEND）</td></tr>
+    <tr><td>目錄規模</td><td>56 block：source 4 · transform 20 · output 23 · logic 8 · check 1</td></tr>
+    <tr><td>18+ 圖表型態</td><td>line / bar / scatter / box / histogram / pareto / <b>X-bar/R 管制圖+WECO</b> / IMR / <b>EWMA-CUSUM 漂移</b> / Q-Q 常態 / parallel-coords / wafer heatmap / defect map …</td></tr>
+  </table>
+</div>
+
+<h2 id="f5"><span class="nbox feat">⑤</span>功能五 · Build Trace 建構軌跡<span class="who adm">ADMIN</span></h2>
+<div class="feat-card">
+  <p><b>做什麼：</b>把每次建構的「Agent 怎麼想、怎麼做」完整留存，供回看與除錯（<code>/admin/build-traces</code>）。是「信任 + 可維護」的關鍵。</p>
+  <table>
+    <tr><th>子功能</th><th>說明</th></tr>
+    <tr><td>完整軌跡</td><td>記錄 plan、每次 LLM 呼叫、每個 graph 步驟、驗證判定、finish_reason</td></tr>
+    <tr><td>軌跡列表</td><td>後台列出歷次建構，可點入單筆</td></tr>
+    <tr><td>Summary 視圖</td><td>結構化呈現 plan → 卡在哪個 phase → 該 phase 每輪歷程</td></tr>
+    <tr><td>除錯用途</td><td>回答「它為什麼這樣建 / 卡哪 / 選錯哪個 block」，不用瞎猜</td></tr>
+    <tr><td>可重現</td><td>配 trace replay 受控重跑某決策點（測「改 X 會不會改 LLM 的選擇」）</td></tr>
+  </table>
+</div>
+
+<h2 id="f6"><span class="nbox feat">⑥</span>功能六 · System MCP 外部資料源<span class="who adm">ADMIN</span></h2>
+<div class="feat-card">
+  <p><b>做什麼：</b>POC 的資料連接層 —— admin 把外部 HTTP 服務註冊成可被 Skill 取用的資料源（<code>/admin/system-mcps</code>）。</p>
+  <table>
+    <tr><th>子功能</th><th>說明</th></tr>
+    <tr><td>來源設定</td><td>endpoint URL、HTTP method、input schema（參數定義）</td></tr>
+    <tr><td>HTTP Headers + 機密</td><td>headers 支援 <code>${ENV_VAR}</code> 插值；機密<b>不存 DB</b>，runtime 從 sidecar 環境取代，缺值明確報錯</td></tr>
+    <tr><td>自帶文件</td><td>MCP description 必含用途 / 回傳欄位 / 語義 —— Agent 只看 description 就會用</td></tr>
+    <tr><td>連動衍生（V54）</td><td>勾選「連動產生」可自動生對應的 <b>Data Block + Skill 草稿</b>（LLM 生，<b>須 review 後才 commit</b>）</td></tr>
+    <tr><td>執行</td><td>Skill 跑到該資料源時走 MCP proxy dispatch 取數</td></tr>
+  </table>
+  <div class="callout warn"><b>維運重點：</b>MCP header 引用的每個 <code>${NAME}</code> 機密，都須存在於 <code>python_ai_sidecar/.env</code>。</div>
+</div>
+
+<!-- AGENT FLOW -->
+<h2><span class="nbox">C</span>Agent 怎麼把「一句話」變 pipeline（貫穿 ②③）</h2>
 <div class="flow">
-  <span class="fstep">理解意圖</span><span class="fsep">→</span>
-  <span class="fstep">（模糊則反問）</span><span class="fsep">→</span>
-  <span class="fstep">規劃 phases</span><span class="fsep">→</span>
-  <span class="fstep">確認</span><span class="fsep">→</span>
-  <span class="fstep">逐步建構＋自我檢查</span><span class="fsep">→</span>
-  <span class="fstep">執行</span><span class="fsep">→</span>
-  <span class="fstep">呈現結果</span>
+  <span class="fstep">理解意圖</span><span class="fsep">→</span><span class="fstep">（模糊則反問）</span><span class="fsep">→</span>
+  <span class="fstep">規劃 phases</span><span class="fsep">→</span><span class="fstep">確認</span><span class="fsep">→</span>
+  <span class="fstep">逐步建構＋自檢</span><span class="fsep">→</span><span class="fstep">執行</span><span class="fsep">→</span><span class="fstep">呈現</span>
 </div>
 <table>
-  <tr><th>環節</th><th>Agent 做的事（功能語意）</th></tr>
-  <tr><td>理解意圖</td><td>判斷使用者要「查資料 / 比較 / 排名 / 概念問答」哪一類；資訊不足會<b>主動反問澄清</b>，不亂猜。</td></tr>
-  <tr><td>規劃</td><td>把需求拆成「想達到的階段性結果」（取資料 → 轉換 → 圖表/判定），<b>先講意圖、不先綁工具</b>。</td></tr>
-  <tr><td>建構 + 自我檢查</td><td>逐 phase 挑 block、設參數；<b>每步做結構檢查</b>（例：沒接好的懸空節點會當下抓出來修），確保產出跑得動。</td></tr>
-  <tr><td>穩定性</td><td>外部模型偶發抖動會<b>自動重試</b>；參數型別偶發寫錯會<b>自動修正</b> —— 一次小失誤不會讓整個建構失敗。</td></tr>
-  <tr><td>呈現</td><td>依需求輸出圖 / 表 / 判定，並把建構軌跡留存供回看。</td></tr>
+  <tr><th>環節</th><th>功能語意</th></tr>
+  <tr><td>理解意圖</td><td>判斷是「查資料 / 比較 / 排名 / 概念問答」；不足則主動反問</td></tr>
+  <tr><td>規劃</td><td>拆成「想達到的階段性結果」，先講意圖、不先綁工具</td></tr>
+  <tr><td>建構＋自檢</td><td>逐 phase 選 block、設參數；每步結構檢查（懸空節點當下抓），確保跑得動</td></tr>
+  <tr><td>穩定性</td><td>provider 抖動自動重試、參數型別偶錯自動修正 —— 一次小失誤不毀掉整個建構</td></tr>
 </table>
-<p><small>兩個入口：<b>Chat 面板</b>（運維對話問答）與 <b>Builder Glass Box</b>（建構技能）。流程控制走確定性的 graph node，不依賴 prompt 自律 —— 行為可測、可回歸。</small></p>
+<p><small>兩入口：<b>Chat 面板</b>（運維對話問答）與 <b>Builder Glass Box</b>（建構技能）。流程控制走確定性 graph node，行為可測、可回歸。</small></p>
 
-<!-- 4 角色 -->
-<h2><span class="nbox">5</span>角色與權限</h2>
+<!-- ROLES -->
+<h2><span class="nbox">D</span>角色與權限</h2>
 <table>
   <tr><th>角色</th><th>能做什麼</th></tr>
-  <tr><td><b>IT_ADMIN</b></td><td>全部 + 使用者/角色管理、System MCP 設定</td></tr>
-  <tr><td><b>PE</b>（製程工程師）</td><td>編寫 / 建構 / 發布 Skill、設定、跑分析</td></tr>
-  <tr><td><b>ON_DUTY</b>（值班）</td><td>使用<b>已發布</b>的 Skill、讀資料；不可建構新 pipeline 或寫入全域記憶</td></tr>
+  <tr><td>IT_ADMIN</td><td>全部 + 使用者/角色管理、System MCP 設定、Build Trace 後台</td></tr>
+  <tr><td>PE（製程工程師）</td><td>編寫 / 建構 / 發布 Skill、設定、跑分析</td></tr>
+  <tr><td>ON_DUTY（值班）</td><td>使用<b>已發布</b> Skill、讀資料；不可建構新 pipeline / 寫全域記憶</td></tr>
 </table>
-<div class="callout warn"><b>已知產品待決策：</b>值班帳號問「臨時數據問題」時，chat 目前會導去「建 pipeline」確認流程，但值班無建構權 → 拿不到答案。
-是否讓值班改走「直接答 / 跑已發布 skill」是待 stakeholder 拍板的 UX 決策。</div>
+<div class="callout warn"><b>待決策（產品）：</b>值班問臨時數據問題時，chat 目前導去「建 pipeline」，但值班無建構權 → 拿不到答案。是否改走「直接答 / 跑已發布 skill」待 stakeholder 拍板。</div>
 
-<!-- 5 品質 -->
-<h2><span class="nbox">6</span>品質與成熟度（可量測）</h2>
-<p>平台準確度<b>有客觀基準、可回歸</b>，不是憑感覺：</p>
+<!-- QUALITY -->
+<h2><span class="nbox">E</span>品質與成熟度（可量測）</h2>
 <table>
   <tr><th>面向</th><th>現況</th></tr>
-  <tr><td>Builder 準確度</td><td><b>SLASH-17</b> 回歸套件：17 條代表性指令對「人工標準答案」評分（建出的 pipeline 對不對）。目前接近 17/17。</td></tr>
-  <tr><td>Chat 準確度</td><td>chat-mode eval harness：驗「確認後真的建出 pipeline + 跑出結果」。</td></tr>
-  <tr><td>穩定性</td><td>provider 抖動重試、結構自我檢查、參數自動修正 —— 已用多輪重跑驗證收斂。</td></tr>
-  <tr><td>除錯能力</td><td>Build Trace + trace replay：可重現、可解釋每個失敗在哪一步。</td></tr>
+  <tr><td>Builder 準確度</td><td><b>SLASH-17</b> 回歸套件對人工標準答案評分，目前接近 17/17</td></tr>
+  <tr><td>Chat 準確度</td><td>chat-mode eval：驗「確認後真的建出 pipeline + 跑出結果」</td></tr>
+  <tr><td>穩定性</td><td>provider 重試、結構自檢、參數自動修正，已多輪重跑驗收斂</td></tr>
+  <tr><td>除錯能力</td><td>Build Trace + trace replay，可重現、可解釋每個失敗</td></tr>
 </table>
 
-<!-- 6 範圍 -->
-<h2><span class="nbox">7</span>POC 範圍邊界</h2>
+<!-- SCOPE -->
+<h2><span class="nbox">F</span>POC 範圍邊界</h2>
 <div class="cards">
   <div class="card" style="border-color:var(--g-bd); background:var(--g-bg);"><div class="lbl">包含</div>
-    <ul><li>L1 庫 / L2 編寫（NL + 手動）/ L3 試跑</li><li>Block Docs · Build Trace</li><li>System MCP 外部資料</li><li>56 block 目錄 + 18+ 圖表型態</li><li>角色權限（IT_ADMIN / PE / ON_DUTY）</li></ul></div>
+    <ul><li>六大功能（①~⑥）</li><li>56 block / 18+ 圖表</li><li>角色權限 IT_ADMIN / PE / ON_DUTY</li></ul></div>
   <div class="card" style="border-color:#fecaca; background:#fef2f2;"><div class="lbl">不包含（POC 移除）</div>
-    <ul><li>內建 ontology simulator（資料改走 System MCP）</li><li>自動巡檢 / 告警 / 規則引擎（L4）</li><li>Topology / Fleet 儀表板</li></ul></div>
+    <ul><li>內建 ontology simulator（改走 System MCP）</li><li>自動巡檢 / 告警 / 規則引擎（L4）</li><li>Topology / Fleet 儀表板</li></ul></div>
 </div>
 
 <footer>
