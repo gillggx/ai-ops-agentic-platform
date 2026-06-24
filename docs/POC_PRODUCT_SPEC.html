@@ -56,6 +56,19 @@
   .callout.warn{background:var(--amb-bg); border:1px solid var(--amb-bd);} .callout.warn b{color:var(--amb);}
   .chips{display:flex; gap:7px; flex-wrap:wrap; margin-top:6px;}
   .chip{font-size:12px; padding:3px 9px; border-radius:999px; background:#fff; border:1px solid var(--line);}
+
+  /* user journey */
+  .journey{border:1px solid var(--line); border-radius:12px; background:#fff; padding:14px 16px; margin:8px 0;}
+  .lane{margin:10px 0;}
+  .lane-h{display:inline-block; font-size:12px; font-weight:700; color:#fff; border-radius:6px; padding:3px 11px; margin-bottom:8px;}
+  .lane-h.author{background:var(--o);} .lane-h.consumer{background:var(--a);}
+  .js{display:flex; align-items:stretch; gap:6px; flex-wrap:wrap;}
+  .jstep{flex:1; min-width:170px; border:1px solid var(--line); border-radius:9px; padding:9px 11px; background:#fcfcfd; font-size:13px;}
+  .jstep b{font-size:13.5px;} .jstep div{color:var(--mut); font-size:12px; margin-top:3px;}
+  .jstep .jn{display:inline-flex; width:20px; height:20px; border-radius:50%; background:var(--ink); color:#fff;
+             align-items:center; justify-content:center; font-size:11px; font-weight:700; margin-right:6px;}
+  .jarr{display:flex; align-items:center; color:var(--mut); font-weight:700;}
+  @media(max-width:680px){.jarr{display:none;} .jstep{min-width:100%;}}
   footer{margin-top:40px; padding-top:14px; border-top:1px solid var(--line); color:var(--mut); font-size:12px;}
 </style>
 </head>
@@ -142,8 +155,35 @@
   <tr><td><b>System MCP</b></td><td>admin 連接外部資料源（endpoint / method / headers / input schema）。Skill 即可從中取數；機密用 <code>${ENV}</code> 引用。</td></tr>
 </table>
 
+<!-- 3 USER JOURNEY -->
+<h2><span class="nbox">3</span>使用者旅程（端到端）</h2>
+<p>「一人建一次、全隊重複用」—— 從工程師提問，到值班同仁直接套用：</p>
+<div class="journey">
+  <div class="lane">
+    <div class="lane-h author">PE · 建立者</div>
+    <div class="js">
+      <div class="jstep"><span class="jn">1</span><b>提問</b><div>「列出最近 7 天 OOC 最多的 3 台機台」</div></div>
+      <div class="jarr">→</div>
+      <div class="jstep"><span class="jn">2</span><b>Agent 建構（Glass Box）</b><div>取資料 → 分組計數 → 排序 → bar chart；過程透明、自我檢查</div></div>
+      <div class="jarr">→</div>
+      <div class="jstep"><span class="jn">3</span><b>Try-Run</b><div>當場看 bar chart，確認對了</div></div>
+      <div class="jarr">→</div>
+      <div class="jstep"><span class="jn">4</span><b>發布成 Skill</b><div>命名「OOC 排名」，進入技能庫</div></div>
+    </div>
+  </div>
+  <div class="lane">
+    <div class="lane-h consumer">ON_DUTY · 使用者</div>
+    <div class="js">
+      <div class="jstep"><span class="jn">5</span><b>在 Library 找 Skill</b><div>搜尋「OOC 排名」</div></div>
+      <div class="jarr">→</div>
+      <div class="jstep"><span class="jn">6</span><b>填參數、執行</b><div>選機台 / 時間範圍，一鍵得到結果 —— 不需懂建構</div></div>
+    </div>
+  </div>
+</div>
+<div class="callout note">產品價值：把「會建分析的少數人」的成果，<b>變成全隊一句話 / 一鍵就能取得</b>的能力。</div>
+
 <!-- 3 Agent 怎麼運作 -->
-<h2><span class="nbox">3</span>Agent 怎麼把「一句話」變成「跑得出結果的 pipeline」</h2>
+<h2><span class="nbox">4</span>Agent 怎麼把「一句話」變成「跑得出結果的 pipeline」</h2>
 <div class="flow">
   <span class="fstep">理解意圖</span><span class="fsep">→</span>
   <span class="fstep">（模糊則反問）</span><span class="fsep">→</span>
@@ -164,7 +204,7 @@
 <p><small>兩個入口：<b>Chat 面板</b>（運維對話問答）與 <b>Builder Glass Box</b>（建構技能）。流程控制走確定性的 graph node，不依賴 prompt 自律 —— 行為可測、可回歸。</small></p>
 
 <!-- 4 角色 -->
-<h2><span class="nbox">4</span>角色與權限</h2>
+<h2><span class="nbox">5</span>角色與權限</h2>
 <table>
   <tr><th>角色</th><th>能做什麼</th></tr>
   <tr><td><b>IT_ADMIN</b></td><td>全部 + 使用者/角色管理、System MCP 設定</td></tr>
@@ -175,7 +215,7 @@
 是否讓值班改走「直接答 / 跑已發布 skill」是待 stakeholder 拍板的 UX 決策。</div>
 
 <!-- 5 品質 -->
-<h2><span class="nbox">5</span>品質與成熟度（可量測）</h2>
+<h2><span class="nbox">6</span>品質與成熟度（可量測）</h2>
 <p>平台準確度<b>有客觀基準、可回歸</b>，不是憑感覺：</p>
 <table>
   <tr><th>面向</th><th>現況</th></tr>
@@ -186,7 +226,7 @@
 </table>
 
 <!-- 6 範圍 -->
-<h2><span class="nbox">6</span>POC 範圍邊界</h2>
+<h2><span class="nbox">7</span>POC 範圍邊界</h2>
 <div class="cards">
   <div class="card" style="border-color:var(--g-bd); background:var(--g-bg);"><div class="lbl">包含</div>
     <ul><li>L1 庫 / L2 編寫（NL + 手動）/ L3 試跑</li><li>Block Docs · Build Trace</li><li>System MCP 外部資料</li><li>56 block 目錄 + 18+ 圖表型態</li><li>角色權限（IT_ADMIN / PE / ON_DUTY）</li></ul></div>
