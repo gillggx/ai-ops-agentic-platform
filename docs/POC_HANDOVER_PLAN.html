@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Skill Library POC — DevOps 接手計畫</title>
+<style>
+  :root{
+    --core:#c2410c; --core-bg:#fff7ed; --core-bd:#fdba74;
+    --ui:#1d4ed8;  --ui-bg:#eff6ff;  --ui-bd:#93c5fd;
+    --peri:#047857;--peri-bg:#ecfdf5;--peri-bd:#6ee7b7;
+    --ink:#1f2937; --mut:#6b7280; --line:#e5e7eb; --bg:#f8fafc;
+  }
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;
+       color:var(--ink); background:var(--bg); margin:0; line-height:1.6;}
+  .wrap{max-width:1080px; margin:0 auto; padding:32px 24px 64px;}
+  header.top{border-bottom:3px solid var(--ink); padding-bottom:14px; margin-bottom:28px;}
+  header.top h1{margin:0 0 4px; font-size:26px;}
+  header.top .sub{color:var(--mut); font-size:14px;}
+  h2{font-size:20px; margin:38px 0 14px; padding-bottom:6px; border-bottom:2px solid var(--line);}
+  h3{font-size:15px; margin:0 0 8px;}
+  p{margin:6px 0;} small{color:var(--mut);}
+  .legend{display:flex; gap:14px; flex-wrap:wrap; margin:10px 0 20px;}
+  .tag{display:inline-block; padding:2px 10px; border-radius:999px; font-size:12px; font-weight:600;}
+  .t-core{color:var(--core); background:var(--core-bg); border:1px solid var(--core-bd);}
+  .t-ui{color:var(--ui); background:var(--ui-bg); border:1px solid var(--ui-bd);}
+  .t-peri{color:var(--peri); background:var(--peri-bg); border:1px solid var(--peri-bd);}
+
+  /* architecture diagram */
+  .arch{border:1px solid var(--line); border-radius:12px; background:#fff; padding:18px; margin:8px 0 6px;}
+  .row{display:flex; align-items:stretch; gap:12px; margin:10px 0; justify-content:center; flex-wrap:wrap;}
+  .node{border-radius:10px; padding:12px 14px; min-width:200px; flex:1; max-width:340px;
+        border:1px solid var(--line); background:#fff;}
+  .node .nm{font-weight:700; font-size:14px;}
+  .node .port{float:right; font-size:11px; color:var(--mut); font-weight:600;}
+  .node .desc{font-size:12px; color:var(--mut); margin-top:4px;}
+  .node.core{background:var(--core-bg); border-color:var(--core-bd);}
+  .node.ui{background:var(--ui-bg); border-color:var(--ui-bd);}
+  .node.peri{background:var(--peri-bg); border-color:var(--peri-bd);}
+  .node.data{background:#f9fafb; border-style:dashed;}
+  .arrow{text-align:center; color:var(--mut); font-size:13px; margin:-4px 0;}
+  .chips{margin-top:8px; display:flex; gap:6px; flex-wrap:wrap;}
+  .chip{font-size:11px; padding:2px 7px; border-radius:6px; background:#fff; border:1px solid var(--line); color:var(--ink);}
+
+  /* phase cards */
+  .phase{border:1px solid var(--line); border-left-width:6px; border-radius:10px;
+         background:#fff; padding:16px 18px; margin:14px 0;}
+  .phase.core{border-left-color:var(--core);}
+  .phase.ui{border-left-color:var(--ui);}
+  .phase.peri{border-left-color:var(--peri);}
+  .phase .hd{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;}
+  .phase .num{font-size:13px; font-weight:700; color:#fff; background:var(--ink);
+              border-radius:6px; padding:2px 9px;}
+  .phase h3{margin:0; font-size:17px;}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:6px 24px; margin-top:8px;}
+  @media(max-width:680px){.grid2{grid-template-columns:1fr;}}
+  .grid2 .k{font-size:12px; font-weight:700; color:var(--mut); text-transform:uppercase; letter-spacing:.03em;}
+  ul{margin:4px 0 8px; padding-left:20px;} li{margin:3px 0; font-size:14px;}
+  code{background:#f1f5f9; padding:1px 5px; border-radius:4px; font-size:12.5px;}
+  .gate{background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:8px 12px; margin-top:8px; font-size:13px;}
+  .gate b{color:#92400e;}
+  table{width:100%; border-collapse:collapse; margin:8px 0; font-size:13.5px;}
+  th,td{border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top;}
+  th{background:#f1f5f9;}
+  .next li{margin:5px 0;}
+  footer{margin-top:40px; padding-top:14px; border-top:1px solid var(--line); color:var(--mut); font-size:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <h1>Skill Library POC — DevOps 接手計畫</h1>
+  <div class="sub">交付對象：DevOps / Platform 團隊 &nbsp;·&nbsp; Branch <code>poc/skill-library-20260624</code>
+  &nbsp;·&nbsp; 配套：<code>docs/POC_PRODUCT_SPEC.md</code> &nbsp;·&nbsp; 2026-06-24</div>
+</header>
+
+<p>本文件提供：<b>(1)</b> 系統架構圖（依接手優先級上色）、<b>(2)</b> 三階段接手順序與方式、
+<b>(3)</b> 每階段的「接手完成」判準、<b>(4)</b> 接下來的重點。原則：先接<b>核心</b>（LLM Agent /
+Knowledge，平台的大腦），再接<b>介面與設定面</b>（Pipeline Builder 等，使用者設定須保留），
+周邊依序接手。</p>
+
+<div class="legend">
+  <span class="tag t-core">階段 1 · 核心（先接）</span>
+  <span class="tag t-ui">階段 2 · 介面 / 設定面</span>
+  <span class="tag t-peri">階段 3 · 周邊（依序）</span>
+</div>
+
+<!-- ARCHITECTURE -->
+<h2>系統架構（依接手優先級上色）</h2>
+<div class="arch">
+  <div class="row">
+    <div class="node ui"><span class="port">:8000</span><div class="nm">aiops-app（Next.js）</div>
+      <div class="desc">只做 UI 渲染 + <code>/api</code> proxy；無業務邏輯</div></div>
+  </div>
+  <div class="arrow">▼ HTTPS / proxy</div>
+  <div class="row">
+    <div class="node peri"><span class="port">:8002</span><div class="nm">aiops-java-api（Spring Boot）</div>
+      <div class="desc">唯一 DB owner · Auth(JWT) · Skill/Block/MCP registry · role audit</div></div>
+  </div>
+  <div class="arrow">▲▼ <code>/internal/*</code>（X-Service-Token）</div>
+  <div class="row">
+    <div class="node core"><span class="port">:8050</span><div class="nm">python_ai_sidecar（FastAPI + LangGraph）</div>
+      <div class="desc"><b>平台大腦</b>：所有 Agent + Pipeline Executor（56 blocks in-process）</div>
+      <div class="chips">
+        <span class="chip">Chat orchestrator</span><span class="chip">Glass Box builder</span>
+        <span class="chip">Block advisor</span><span class="chip">LLM client（provider switch / retry）</span>
+        <span class="chip">Knowledge（agent_knowledge / block_docs / pgvector RAG）</span>
+      </div></div>
+  </div>
+  <div class="arrow">▼</div>
+  <div class="row">
+    <div class="node data"><div class="nm">PostgreSQL + pgvector</div>
+      <div class="desc">pb_blocks · skills · mcp_definitions · agent_knowledge embeddings</div></div>
+    <div class="node data"><div class="nm">External HTTP（System MCP）</div>
+      <div class="desc">外部資料來源；header <code>${ENV}</code> 機密插值</div></div>
+    <div class="node peri"><span class="port">:8003</span><div class="nm">aiops-java-scheduler</div>
+      <div class="desc">排程（POC 精簡；fleet/patrol 已 stub）</div></div>
+  </div>
+  <p style="margin-top:12px"><small><b>邊界鐵律：</b>前端只渲染+proxy；Java 獨佔 DB；sidecar 只透過 Java 碰 DB；
+  外部資料只走 System MCP；URL/port 一律讀 env，不寫死。POC 已移除 simulator / patrol / alarm / fleet。</small></p>
+</div>
+
+<!-- PHASES -->
+<h2>接手順序與方式（三階段）</h2>
+
+<div class="phase core">
+  <div class="hd"><span class="num">階段 1</span><span class="tag t-core">核心 · 先接</span>
+    <h3>LLM Agent + Knowledge（python_ai_sidecar）</h3></div>
+  <p>平台價值與最高複雜度都在這。其餘一切只是「怎麼驅動它」或「怎麼維運它」——
+  所以一定先接這層，其它層才有依託。</p>
+  <div class="grid2">
+    <div><div class="k">範圍</div>
+      <ul>
+        <li>Agent 三條 stack：Chat orchestrator_v2、Glass Box builder（<code>goal_plan → agentic_phase_loop → phase_verifier → finalize</code>）、Block advisor</li>
+        <li>LLM client：provider 切換（KIMI/OpenRouter）、bounded retry、finish_reason 觀測</li>
+        <li>Knowledge：agent_knowledge（plan/execute hints）、block_docs（描述＝唯一真相）、pgvector RAG</li>
+        <li>Block catalog ＋ 56 個 executors</li>
+      </ul></div>
+    <div><div class="k">接手方式</div>
+      <ul>
+        <li>讀 <code>CLAUDE.md</code> 的 Agent 原則：flow 寫 graph 不寫 prompt、禁 case-rule、description 是唯一真相</li>
+        <li>跑回歸套件當「會動」門檻：<code>tools/slash17/</code>（builder）、<code>tools/chat_eval/</code>（chat）</li>
+        <li>除錯：Build Trace（<code>/tmp/builder-traces</code>）＋ <code>tools/trace_replay/</code></li>
+        <li>掌握 env 開關：LLM provider（sidecar <code>.env</code> <code>OLLAMA_MODEL</code>）、feature_flags</li>
+      </ul></div>
+  </div>
+  <div class="k" style="margin-top:6px">入門資料</div>
+  <p><code>CLAUDE.md</code> · <code>docs/history/PROJECT_HANDOFF.md</code> · <code>tools/slash17/BASELINE.md</code></p>
+  <div class="gate"><b>接手完成判準：</b>能跑 SLASH-17 + chat_eval 全綠 · 能讀一份 build trace 並解釋失敗在哪 ·
+  能安全切換 LLM provider 與 feature flag。</div>
+</div>
+
+<div class="phase ui">
+  <div class="hd"><span class="num">階段 2</span><span class="tag t-ui">介面 / 設定面</span>
+    <h3>Pipeline Builder · System MCP · Skill 庫（須保留使用者設定）</h3></div>
+  <p>這層是使用者「產生價值 + 存設定」的地方。理解核心後接這層；重點是
+  <b>設定狀態必須完整保留</b>（skills、MCP、blocks 都在 DB）。</p>
+  <div class="grid2">
+    <div><div class="k">範圍</div>
+      <ul>
+        <li>Pipeline Builder（Glass Box 自動 + 手動）— 前端 UI ＋ 它驅動的 build graph</li>
+        <li>System MCP admin：外部資料設定 ＋ <code>${ENV}</code> 機密插值</li>
+        <li>Skill 庫 L1/L2/L3（瀏覽 / 編寫 / Try-Run）、Block Docs drawer</li>
+      </ul></div>
+    <div><div class="k">接手方式</div>
+      <ul>
+        <li><b>保留 DB 狀態</b>：<code>pb_blocks</code> / <code>skills</code> / <code>mcp_definitions</code> 不可遺失</li>
+        <li>改 block 一定走「描述唯一真相」：description + param_schema + examples 同步改 ＋ DB 同步（見 new-block checklist）</li>
+        <li>前端只 proxy，不放業務邏輯；設定都落 Java/DB</li>
+      </ul></div>
+  </div>
+  <div class="k" style="margin-top:6px">入門資料</div>
+  <p><code>docs/POC_PRODUCT_SPEC.md</code> §5（System MCP）· 各 block 的 description · new-block 5-點 checklist</p>
+  <div class="gate"><b>接手完成判準：</b>能新增/修改一個 block（5 點 + DB 同步）而不破壞開機 block-consistency（56/56/56/56）·
+  能端到端設定一個 System MCP 並 Try-Run 出結果。</div>
+</div>
+
+<div class="phase peri">
+  <div class="hd"><span class="num">階段 3</span><span class="tag t-peri">周邊 · 依序</span>
+    <h3>Auth / 觀測 / 部署 / 基礎設施</h3></div>
+  <p>重要但可先靠 runbook 操作、邊學邊接。建議內部順序：Auth → 觀測 → 部署/DB → K8s。</p>
+  <table>
+    <tr><th>子項</th><th>內容</th><th>方式</th></tr>
+    <tr><td>Auth / Roles</td><td>JWT、OIDC（選用）、role hierarchy IT_ADMIN &gt; PE &gt; ON_DUTY、role audit</td><td>讀 OIDC envs；測試帳號驗 role gating</td></tr>
+    <tr><td>觀測 / Trace</td><td>Build Trace、boot invariants、journal logs</td><td>把 SLASH-17/chat_eval 接進 CI 當 merge gate</td></tr>
+    <tr><td>部署 / DB</td><td>EC2 systemd（<code>deploy/*.sh</code>）、Flyway prod 關閉→手動 psql、canonical block seed</td><td>從零 setup.sh 一遍；手動套一支 V*.sql</td></tr>
+    <tr><td>基礎設施</td><td>EC2 → K8s（manifests 已備、run wrapper 待補）</td><td>等 K8s target env 決定後補 run.sh</td></tr>
+  </table>
+  <div class="gate"><b>接手完成判準：</b>能在乾淨環境從零部署（setup.sh）並手動套 migration · 完整擁有 auth/roles。</div>
+</div>
+
+<!-- NEXT -->
+<h2>接下來的重點（Roadmap）</h2>
+<table class="next">
+  <tr><th>主題</th><th>重點</th><th>狀態</th></tr>
+  <tr><td>準確度</td><td>守住 SLASH-17 ~17/17；完成 chat-mode eval（B 模式：確認後真的建+跑）；knowledge 層補 domain model（process-centric）</td><td>SLASH-17 baseline 已建；chat eval harness 已建</td></tr>
+  <tr><td>Robustness</td><td>補開機 block-consistency 觀測洞；regression driver 加 wall-clock cap（避免 server stall 卡死）</td><td>已知，待補</td></tr>
+  <tr><td>成本</td><td>KIMI K2.5 為 cost-right default；prompt cache；逐 stage 成本盯</td><td>單一 switch = sidecar .env</td></tr>
+  <tr><td>待決策（產品）</td><td>goal_aware on/off（需 3×median 重評）；ON_DUTY chat 數據問題 UX（目前會導去建 pipeline → 值班帳號建不了）</td><td>待 stakeholder 拍板</td></tr>
+  <tr><td>工程化</td><td>CI 串回歸套件當 merge gate；K8s manifests 落地；DB migration 流程文件化</td><td>下一階段</td></tr>
+</table>
+
+<!-- HOW TO START -->
+<h2>建議的起手式（第一週）</h2>
+<ol>
+  <li>讀 <code>CLAUDE.md</code> + <code>docs/POC_PRODUCT_SPEC.md</code>，建立心智模型（架構邊界 + 原則）。</li>
+  <li>本地/測試環境部署 POC branch，跑通 §10 acceptance smoke。</li>
+  <li>跑一次 <code>tools/slash17/run.sh</code> + <code>grade_strict.py</code> 與 <code>tools/chat_eval/run.sh</code>，
+      對齊 <code>BASELINE.md</code> —— 這是「平台健康」的客觀基準。</li>
+  <li>挑一個 SLASH-17 case，從 build trace 走一遍 plan → 每步，學會除錯語言。</li>
+  <li>做一次「無害改動」練習：改一個 block 的 description（走 5 點 + DB 同步），確認 boot invariant 不破。</li>
+</ol>
+
+<footer>
+  架構/邊界 source of truth：<code>CLAUDE.md</code> · POC scope/quirks：
+  <code>.claude/skills/poc-skill-library/SKILL.md</code> · 部署細節：<code>docs/POC_PRODUCT_SPEC.md</code>。
+  本接手計畫隨平台演進更新。
+</footer>
+
+</div>
+</body>
+</html>
