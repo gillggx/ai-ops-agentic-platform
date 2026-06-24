@@ -437,494 +437,435 @@ Excludes `source=mcp_auto` rows.
 
 ---
 
-## 6. The agent system (the hard part) — deep dive
+## 6. The agent system (the hard part)
 
-Two LangGraph stacks share one LLM client and reach state only through Java.
-**Builder Glass Box** (`agent_builder/graph_build/`) constructs pipelines;
-**Chat orchestrator** (`agent_orchestrator_v2/`) answers ops questions and, on a
-pipeline-build intent, drives the builder graph as a sub-agent. This section is
-implementation-grade: routers are reproduced as predicate logic, with the state
-keys each reads.
+This is the part that turns "一句話" into a runnable pipeline. Read this section
+the way you'd read a block doc: each component leads with **what it is and what
+it does** (plain language), and only then gives its **inputs / outputs /
+mechanics**. If you only read the bold "Purpose" line of each node, you still get
+a correct mental model.
 
-### 6.1 The two non-negotiable design rules
+### 6.0 The two non-negotiable design rules
 1. **Flow control lives in graph nodes; the LLM only does narrow reasoning.**
-   Every "what next / which tool" decision is a deterministic node or a
-   classifier node routing to a fixed downstream sequence — never a prompt rule.
-   LLMs disobey prompt-flow (proven repeatedly), prompt-flow isn't unit-testable,
-   and a node failure points at a specific node. Each LLM node does one narrow
-   job (classify / extract / write), never "decide the next step."
-2. **No case-specific rules in prompts.** A failing trace never earns a new
-   prompt rule ("ban mean/std for box_plot"); every such rule is bypassed by a
-   new phrasing in months. Abstract to a one-line principle, or move the check to
-   a graph node / schema / structured-meta field.
+   Every "what next / which tool" decision is a deterministic node, or a
+   classifier node that routes to a fixed downstream sequence — never a rule
+   buried in a prompt. (LLMs disobey prompt-flow; prompts aren't unit-testable; a
+   node failure points at one node.) Each LLM node does exactly one narrow job —
+   classify, extract, or write — never "decide the next step."
+2. **No case-specific rules in prompts.** A failing example never earns a new
+   prompt rule; it earns a one-line principle, or a check moved into a node /
+   schema / structured field. Otherwise the prompt becomes an unmaintainable list
+   of cases that a new phrasing bypasses.
 
-Both stacks: `GraphState`/`BuildGraphState` are `TypedDict`s; LangGraph merges
-returned keys (last-write-wins, except list-append reducers and the `add_messages`
-message reducer). A boot assert fails import if any `run()` kwarg isn't a declared
-state key (LangGraph silently drops undeclared keys).
+There are **two** agents. The **Builder** (§6A) builds pipelines. The **Chat**
+agent (§6B) answers ops questions and, when the user wants to build something,
+calls the Builder as a sub-agent. §6C covers how their events reach the screen.
+
+Both are LangGraph state machines: a shared `TypedDict` state, nodes that return
+only the keys they changed, and conditional edges (router functions) that read
+the state and pick the next node.
 
 ---
 
-## 6A. Builder Glass Box graph (v30 ReAct)
+## 6A. The Builder (Glass Box)
 
-Compiled once, cached in a module global; checkpointer is an in-process
-`MemorySaver` (restart drops paused sessions). v30 is the default path
-(`v30_mode=True`); a legacy v27 macro-plan path coexists behind `AGENT_BUILD_V30=0`.
+### What the Builder does, in one breath
+You give it an instruction ("show EQP-08's SPC trend for the last 7 days and
+count the OOC events"). It (1) writes a **plan** of intent-only phases, (2) asks
+you to confirm the plan, (3) works through the phases one at a time, picking and
+wiring blocks while checking its own work after every step, and (4) finalizes a
+validated pipeline. It is "Glass Box" because every decision streams to the UI as
+it happens.
 
-### 6A.1 Node wiring & routers
-Linear spine then a verify loop:
-```
-START ─_route_entry→ goal_plan ─_route_after_goal_plan→ goal_plan_confirm_gate[interrupt]
-  ─_route_after_goal_plan_confirm→ task_contract_extractor → resolve_presentation_contracts
-  → agentic_phase_loop ⇄ phase_verifier → finalize → inspect_execution → layout → END
-escape hatches: phase_revise, halt_handover[interrupt], judge_clarify_pause[interrupt], step_pause_gate[interrupt]
-```
-Every conditional edge, as predicate logic (the `status`/flag keys are the
-contract — reproduce exactly):
-
-| Router | Predicate | → node |
+### The 6 stages (the spine)
+| # | Stage (node) | What it does, plainly |
 |---|---|---|
-| `_route_entry` | `v30_mode` | goal_plan; else clarify_intent (v27) |
-| `_route_after_goal_plan` | `status ∈ {refused,failed}` → finalize | else goal_plan_confirm_gate |
-| `_route_after_goal_plan_confirm` | `status=="refused"` → finalize | else label `"agentic_phase_loop"` **remapped to `task_contract_extractor`** (easy to miss) |
-| `_route_after_phase_loop` | `status=="phase_revise_pending"` → phase_revise; `v30_verify_now` → phase_verifier | else **self-loop** agentic_phase_loop (keep building chain in same phase) |
-| `_route_after_phase_verifier` | `v30_judge_pause` → judge_clarify_pause; `idx>=len(phases)` → finalize; `debug_step_mode` → step_pause_gate | else agentic_phase_loop |
-| `_route_after_phase_revise` | `status=="handover_pending"` → halt_handover | else agentic_phase_loop |
-| `_route_after_handover` | `status=="phase_in_progress"` → agentic_phase_loop | else finalize |
-| `_route_after_judge_clarify` | `replan_pending`→goal_plan; `cancelled`→halt_handover; `finished`→finalize | else agentic_phase_loop |
-| `_route_after_inspect` | v30 (`v30_phases` set) → **always** layout→END | (v27 may go reflect_plan→validate) |
+| 1 | **goal_plan** | Turn the instruction into 3-7 *intention* phases. No blocks yet — just "what each step should achieve." |
+| 2 | **goal_plan_confirm_gate** | Show the plan to the user and wait for "confirm" (or edits). Skipped when chat launched the build. |
+| 3 | **task_contract_extractor** | Extract a structured summary of the request (the action, the filters, the output kind, any target count) used later to judge "are we done?". |
+| 4 | **agentic_phase_loop** | The ReAct worker. For the current phase, pick a block → add it → wire it → set params, one tool call per round, previewing real output after each change. |
+| 5 | **phase_verifier** | After the worker signals "phase done," deterministically check the result and either advance to the next phase or reject with a reason. |
+| 6 | **finalize** | Validate the whole pipeline and decide the final status (finished / partial / failed). |
 
-Two non-obvious facts: (a) the confirm router's label is remapped to the
-contract extractor, not the loop; (b) **phase index advancement is owned solely
-by `phase_verifier` (auto) and `judge_clarify_pause` (manual continue)** — the
-loop node never advances `v30_current_phase_idx`. `v30_judge_pause` is wired but
-**dormant** in the current build-time verifier (data-deficit detection moved to
-runtime), so the judge path is reachable only if another path sets the flag.
+Plus three **escape hatches** that only fire when something goes wrong:
+`phase_revise` (the worker is stuck → reflect and retry once), `halt_handover`
+(still stuck → ask the user what to do), `judge_clarify_pause` (the data came
+back thin → ask the user whether to continue/replan/cancel).
 
-### 6A.2 `goal_plan` node
-Emits 3–7 **intent-only** phases (`MAX_PHASES=7`, `MIN_PHASES=1`), no block
-selection. Phase output schema (each phase, post-parse):
+The flow:
+```
+goal_plan → confirm → task_contract → agentic_phase_loop ⇄ phase_verifier → finalize → END
+                                          │ stuck → phase_revise → (retry | halt_handover → ask user)
+```
+
+> **One rule that governs the whole loop:** the phase index only moves forward
+> inside `phase_verifier` (or a manual "continue" from the judge pause). The
+> worker loop never advances it. So "did we finish a phase?" is always a
+> deterministic decision, never the LLM's opinion.
+
+---
+
+### 6A.1 goal_plan
+**Purpose.** Translate a free-text instruction into a short, ordered list of
+*intentions* — "fetch the raw events," "reshape to the one SPC chart," "draw the
+trend," "count the OOC." Deliberately **no block names, no column names, no
+tool verbs.** Picking blocks is the worker's job (stage 4); mixing the two is
+what made earlier versions brittle.
+
+**Input.** the instruction (≤2000 chars) + declared `$inputs` + any existing
+canvas nodes + injected planning knowledge.
+
+**Output.** a list of phases + `status="goal_plan_confirm_required"`. Each phase:
 ```json
-{"id":"p1","goal":"<one-sentence business intent>",
+{"id":"p1","goal":"<one business sentence>",
  "expected":"raw_data|transform|verdict|chart|table|scalar|alarm",
- "expected_output":{"kind":str|null,"value_desc":str|null,"criterion":str|null},
- "why":str|null,"user_edited":false}
+ "expected_output":{"kind":null,"value_desc":null,"criterion":null},
+ "why":null,"user_edited":false}
 ```
-Invalid `expected` → coerced to `"transform"`. Top-level: `plan_summary`,
-`phases[]`, optional `alarm`.
+`expected` is the single most important field — it's the phase's "type," and the
+verifier later uses it. (3-7 phases; an invalid `expected` coerces to
+`transform`.)
 
-**System prompt skeleton** (hard rules, abbreviated — do NOT copy as case rules,
-these are principles):
-- Role = pipeline architect; output goal-oriented phases; MUST NOT name blocks.
-- Plan layer is **intention only** — forbidden to leak (a) block names, (b)
-  data-structure / column names, (c) tool-bound verbs (unnest/sort/groupby). Use
-  business language. `value_desc` = one business sentence, no columns/counts/
-  enumerations.
-- Linear order, no `depends_on`. One chart + one verdict = **separate** phases.
-- Phase atomicity: each phase ≈ 1–2 blocks; chart blocks self-compute their
-  stats (don't pre-add a stats-transform phase for them).
-- Transform-phase necessity: if the user names a single SPC chart / APC param /
-  nested field, the plan MUST include a `transform` phase between `raw_data` and
-  downstream.
-- Don't invent phases the user didn't ask for (no auto summary/scalar/verdict).
-- Escape hatch: `{"too_vague":true,"reason":"..."}`.
+**How it works.**
+- *Prompt* tells the model: output goal-oriented phases in business language;
+  never leak block names / column names / tool verbs; one chart and one verdict
+  are separate phases; if the user names a single SPC chart / APC param / nested
+  field, include a `transform` phase between raw_data and downstream; don't invent
+  phases the user didn't ask for; emit `{"too_vague":true,...}` if the request is
+  unworkable. These are *principles*, not a case list.
+- *Robustness:* up to 2 attempts. Parsing the JSON successfully always wins (even
+  if the provider flagged a transient error). A failure is classified
+  `provider_error | empty_output | unparseable` and retried once. All-fail →
+  `status="failed"`; `too_vague` → `status="refused"`.
+- *Deterministic safety nets (in the node, not the prompt):* if the instruction
+  clearly asks for a chart but no phase is `expected=chart`, append one; if it
+  focuses on a nested field but there's no transform phase between the source and
+  the output, insert one. This is the "principle in a node" pattern that replaces
+  prompt case-rules.
 
-**Bounded retry** (`_MAX_PLAN_ATTEMPTS=2`): `_attempt_plan_parse(resp)` returns
-`(decision, fail_kind)`. Parse success **always wins** (even if the provider
-flagged an error). Else `fail_kind ∈ {provider_error (stop_reason=='error'),
-empty_output, unparseable}` triggers one retry. Terminal: all-fail →
-`status="failed"`; `too_vague` → `status="refused"`; `<MIN_PHASES` →
-`status="failed"`; success → seeds v30 state (`v30_current_phase_idx=0`,
-`v30_phase_round=0`, empty outcomes) + `status="goal_plan_confirm_required"`.
+### 6A.2 goal_plan_confirm_gate
+**Purpose.** Put a human in the loop before any building happens — the user sees
+the plan and confirms or edits it. This is the "G" in Glass Box.
 
-**Knowledge injection** (gated `ENABLE_PLAN_KNOWLEDGE`): `build_knowledge_hint(...,
-layer="plan")` (V58 layered → `applies_to∈{plan,both}` + always-on core + RAG).
-Best-effort, never raises.
+**Input/Output.** Pauses the graph with an `interrupt({kind:
+"goal_plan_confirm_required", plan_summary, phases})`. The UI shows the plan; the
+user resumes with `{confirmed: true}` or `{confirmed:true, phases:[edited...]}` or
+`{confirmed:false}`. `false` → `status="refused"`. Edited phases are re-validated
+against the `expected` enum.
 
-**Deterministic post-processing** (graph node, not prompt): `_maybe_inject_chart_phase`
-(instruction matches chart keywords + no chart phase → append one) and
-`_maybe_inject_transform_phase` (nested-focus keywords + raw_data anchor +
-downstream output phase + no transform → insert transform after raw_data). These
-are the "principle in a node" pattern replacing prompt case-rules.
+**Special case.** When the **chat agent** launched this build, it passes
+`skip_confirm=true` — the gate auto-confirms (the chat conversation already *was*
+the confirmation) and never pauses.
 
-**`goal_plan_confirm_gate`**: `skip_confirm=True` (chat-launched) auto-confirms,
-emits `goal_plan_confirmed(auto)`, no interrupt. Else
-`interrupt({kind:"goal_plan_confirm_required", plan_summary, phases})`; resume
-`{confirmed:bool, phases?:[...]}`. `confirmed=False` → `status="refused"`; edited
-phases re-validated against the `expected` enum with edit-history tracking.
+### 6A.3 task_contract_extractor
+**Purpose.** Write down, in a structured form, *what success looks like*, so the
+verifier can later judge progress without re-reading the prose.
 
-### 6A.3 `task_contract_extractor`
-One LLM call after confirm → `v30_task_contract`:
+**Input.** the (scrubbed) instruction. **Output.** a `task_contract`:
 ```
-{user_instruction, primary_action, source_filters:{}, data_filters:{},
- output_kind, markers:[], count_target:int|null,
- count_strictness:"strict"|"flexible"|"none"}
+{primary_action, source_filters:{}, data_filters:{}, output_kind,
+ markers:[], count_target:int|null, count_strictness:"strict|flexible|none"}
 ```
-Every key `setdefault`-filled. Skips if already cached / not v30 / no instruction.
-Any failure → `v30_task_contract=None` (downstream verifier falls back to a
-legacy judge). `max_tokens=600`.
+(e.g. primary_action="show trend chart", markers=["UCL","LCL","OOC"],
+count_target=null). One LLM call; on any failure it returns `null` and the
+verifier falls back to a simpler judge. Harmless if it fails.
 
-### 6A.4 `agentic_phase_loop` — anatomy of one ReAct round
-Budgets: `MAX_REACT_ROUNDS=32` (per phase), `MAX_INSPECT_CALLS_PER_ROUND=5`,
-`STUCK_DETECTOR_WINDOW=2`. One tool call per round. Each round = one fresh LLM
-call (stateless across rounds except the per-phase message stack
-`v30_phase_messages[pid]`, capped to last 32).
+### 6A.4 agentic_phase_loop — the worker
+**Purpose.** This is where blocks actually get added. For the **current phase
+only**, the agent runs a ReAct loop: look at the canvas → take one action → see
+the result → repeat, until it has built what the phase needs and signals "done."
 
-**Observation message** the LLM sees each round (section order is the contract):
-1. COMPLETED PHASES (prior outcomes: target + advanced_by node/block + `data_empty` badge)
-2. CURRENT PHASE (id/goal/expected/why)
-3. presentation-contract hint (if resolved)
-4. **VERIFIER FEEDBACK** (`v30_last_verifier_reject`: rejected block, covers,
-   expected, reason, `missing_for_phase` hints, `would_have_passed_with`)
-5. ALL PHASES CONTEXT (`<-- you are here`)
-6. AVAILABLE INPUTS (declared `$name`)
-7. canvas nodes + runtime schema (from `exec_trace[*].runtime_schema_md`)
-8. CONNECT OPTIONS (type-compatible source ports per unfilled input)
-9. ACTIONS THIS PHASE (last-6 actions + result digests — memory across rounds)
-10. USER INSTRUCTION[:600]
-11. MATCHING BLOCKS (covers-filtered, goal-reranked, `[best fit]` tags)
-12. AVAILABLE BLOCKS (full two-tier catalog)
-13. YOUR NEXT ACTION (single tool call)
+**Why it's structured the way it is.** A free LLM building a whole DAG drifts and
+hallucinates output shapes. So three guardrails are baked in:
+1. **One phase at a time** — the agent never sees "build the whole thing," only
+   "achieve this one intention."
+2. **A sub-phase state machine** (next section) that only exposes the *right*
+   tools at the *right* moment, so the agent structurally can't skip steps.
+3. **Auto-preview** — after any change to the canvas, the loop runs the node on
+   real sample data and feeds the *actual* output columns back to the agent next
+   round. This kills "I assumed the output had column X" errors.
 
-Follow-up rounds append `assistant(tool_use)` (filtered to the exact dispatched
-tool_use_id — Anthropic requires one result per use) + `user([tool_result,
-canvas_diff_md])`, where the diff leads with `▶ YOUR PLAN` (next-memo), then
-verifier feedback, then rich sub-phase context, then connect options.
+**Input (what the agent sees each round).** A single "observation" message built
+fresh every round (the agent is stateless between rounds except for a per-phase
+message stack). Its sections, in order, are the agent's whole world:
+1. completed phases (+ a `data_empty` badge if a prior step returned nothing)
+2. the current phase (goal / expected / why)
+3. **verifier feedback** — if the last attempt was rejected, *why*, and hints
+4. all phases (with a "you are here" marker)
+5. available `$inputs`
+6. the current canvas nodes + their **real** runtime columns (from auto-preview)
+7. connect options (which upstream ports are type-compatible)
+8. the last ~6 actions taken this phase (its short-term memory)
+9. the user instruction
+10. MATCHING BLOCKS (filtered to this phase's `expected`, re-ranked, `[best fit]`)
+11. the full block catalog
+12. "your next action: one tool call"
 
-**Auto-preview**: after a mutating tool (`add_node/set_param/connect/remove_node`)
-with no error → `preview(node_id, sample_size=5)`; the snapshot (cols[:20],
-sample, `runtime_schema_md`, coalesced error) is written to `exec_trace[lid]` so
-the next round sees real output shape (defeats output-shape hallucination).
+**Output (what the agent does).** Exactly one tool call per round (add a node,
+connect, set a param, inspect, or signal). The loop dispatches it, auto-previews
+if it mutated the canvas, records the action, and loops.
 
-**Stuck detector**: `args_hash = md5(sorted_json(tool,args))[:12]`; the same
-`(tool,args_hash)` appearing `STUCK_DETECTOR_WINDOW(2)` rounds in a row →
-`status="phase_revise_pending"`, emit `phase_revise_started(reason=
-"stuck_repeat_action")`. Hitting `MAX_REACT_ROUNDS` → same with
-`reason="max_rounds_no_progress"`.
+**Budgets / safety.** 32 rounds per phase; a **stuck detector** trips if the
+agent repeats the identical action two rounds running (→ hand off to
+`phase_revise`). When the agent signals `run_verifier` / `phase_complete` (or a
+budget triggers), the loop sets a flag and the router sends control to the
+verifier.
 
-**`v30_verify_now`** is set when the tool is `run_verifier`/`phase_complete`
-(explicit) or `_should_auto_verify` passes (gated; only when a just-added terminal
-block's `covers_output` includes `phase.expected` and the agent was "decisive").
-For tool-lax providers (KIMI), text matching a "phase done" intent regex
-synthesizes a `phase_complete` call.
+### 6A.5 The sub-phase state machine
+**Purpose.** Force the agent through the natural order of building one node —
+**pick** a block, **construct** it (add + wire), **tune** its params — by only
+offering the tools that make sense at each step. This is flow-control-in-a-node:
+the agent can't "set a param" before a block exists, because `set_param` isn't on
+the menu until the `tune` sub-phase.
 
-### 6A.5 Sub-phase state machine
-`v30_subphase ∈ {pick, construct, tune, refine}` gates the available toolset per
-sub-phase, so the agent structurally cannot skip steps. `_TOOLS_BY_SUBPHASE`:
-
-| sub-phase | exposed tools |
-|---|---|
-| pick | inspect_node_output, inspect_block_doc, commit_pick, abort_phase (+add_node if auto_signal) |
-| construct | add_node, connect, abort_node, abort_phase, inspect_* |
-| tune | set_param, run_verifier, abort_node, abort_phase, commit_pick, inspect_* |
-| refine | (not an LLM state — deterministic router) |
-
-Transitions (`_next_subphase(current, tool)`):
-```
-pick:     commit_pick→construct   add_node→construct   abort_phase→refine
-construct:add_node→construct      connect→tune         abort_node→pick   abort_phase→refine
-tune:     set_param→tune(stay)    run_verifier→tune    abort_node→pick   commit_pick/add_node→construct   abort_phase→refine
-```
-Atomic `add_node(upstream=...)` from pick/construct/tune lands directly in `tune`
-(connect already done in the same call). On transition, `v30_subphase_round`
-resets to 0; else increments. **`refine` is a pseudo-state**: only `abort_phase`
-yields it (→ surfaces as `phase_revise_pending`); the verifier sets the concrete
-next sub-phase (pick/construct/tune) directly on each reject.
-
-### 6A.6 `phase_verifier` decision tree
-Constants: `MAX_FAST_FORWARD_CHAIN=4`, `LEAF_PRUNE_AFTER=3`,
-`_STRICT_VERIFY_KINDS={chart,table,scalar,alarm}`. Covers gate flag
-`BUILDER_VERIFIER_COVERS_GATE` default **OFF**. Branches in order:
-1. **no `v30_last_mutated_logical_id`** → `{}` (inspect/no-op round, nothing to verify).
-2. **(B) executor failure**: no block_id OR snapshot status ∈ {validation_error,
-   failed, error} → `_emit_reject(result=status, missing_for_phase=["fix params
-   or pick a different block"])`.
-3. **(C) orphan** `_check_orphan` (skip source / `meta.standalone_capable`): target
-   has 0 inbound edges → reject (`missing_for_phase=["connect upstream → …"]`).
-4. **(C2) non-output leaf** `_nonoutput_leaves` (fires only once an output-category
-   node exists): bounded reject up to `LEAF_PRUNE_AFTER(3)` times
-   (`v30_leaf_reject_count`), then **`_prune_nodes`** removes the dangling leaf +
-   touching edges and falls through to advance (writes `final_pipeline`).
-5. **(A) advance**: covers gate OFF → advance exactly ONE phase; if
-   `ENABLE_STRICT_PHASE_VERIFY` and `expected ∈ _STRICT_VERIFY_KINDS` and
-   `expected ∉ covers_output` → reject (`would_have_passed_with=...`, catches a
-   chart phase ending on `block_filter`). Covers gate ON → fast-forward up to 4
-   phases whose `expected ∈ covers_internal`.
-6. **advance bookkeeping**: per advanced phase write
-   `v30_phase_outcomes[id]={status:"completed",advanced_by_block/node,plan_target}`;
-   `new_idx=idx+len(advanced)`; reset `v30_phase_round=0`, `v30_subphase="pick"`,
-   `v30_pending_*=None`, `v30_leaf_reject_count=0`, clear verifier-reject; emit
-   `phase_completed`. The done→finalize decision is the router's (`idx>=len(phases)`).
-
-`_emit_reject` writes `v30_last_verifier_reject` (consumed by next observation),
-sets the deterministic next `v30_subphase` (orphan→construct, validation→tune/pick,
-else pick), does NOT advance the index → router returns to the loop. Covers
-resolved via `produces.covers_output`/`covers_internal`, falling back to legacy
-`covers` then an inference table (source→raw_data, chart→chart, data_view→table,
-alert→alarm, step_check/threshold→[verdict,scalar], dataframe→transform).
-
-### 6A.7 Interrupt nodes (payloads + resume + routing)
-- **`phase_revise`** (LLM self-reflect, not an interrupt; `MAX_REVISE_ATTEMPTS_PER_PHASE=1`):
-  asks `{root_cause, alternative_strategy, missing_capabilities[], can_retry}`.
-  `can_retry=True` → clear stuck history, halve the round budget
-  (`v30_phase_round=16`), `status="phase_in_progress"` → loop. Else / 2nd attempt
-  → `status="handover_pending"` with `v30_handover={failed_phase_id, reason,
-  missing_capabilities, options_offered:[edit_goal,take_over,backlog,abort]}`.
-- **`halt_handover`** (`interrupt`): `skip_confirm` auto-`take_over`→`build_partial`.
-  Resume `{choice, new_goal?}`. edit_goal+new_goal → rewrite the phase goal, reset
-  round, `phase_in_progress`→loop. take_over/backlog → `build_partial`. abort →
-  `failed`, `final_pipeline=None`.
-- **`judge_clarify_pause`** (`interrupt`; `MAX_JUDGE_REPLAN=1`): resume
-  `{action ∈ continue|replan|cancel}`. cancel → handover/abort. replan → wipe
-  phases, set `v30_replan_hint`, `status="replan_pending"`→goal_plan. continue →
-  manually advance the index (the verifier cleared its block context on pause).
-- **`step_pause_gate`** (`interrupt`, debug only): resume `{action:continue|abort}`.
-
-### 6A.8 `finalize` / `inspect_execution` — status values
-`finalize` runs `PipelineValidator`, splits issues into `_STRUCTURAL_RULES
-={C6_PARAM_SCHEMA, C14_ORPHAN_NODE, C15_SOURCE_LESS_NODE, C4_PORT_COMPAT,
-C16_PLACEHOLDER_LEAK}` vs advisory, then:
-```
-status = "refused"          if incoming refused
-       = "failed"           if v30 and 0 nodes
-       = "failed_structural" if structural issues
-       = "finished"         if all phases done (idx >= len(phases))
-       = "build_partial"    if some phases done (idx > 0)
-       = "failed"           otherwise
-```
-Optional strict deliverable gate (`ENABLE_STRICT_PHASE_OUTPUT`, default OFF):
-`finished` + final phase `expected ∈ {chart,table,scalar,alarm}` + no terminal
-covers it → `failed_missing_output`. Emits `build_finalized(ok=status=="finished",
-counts, warnings, structural_errors)`; an optional dry-run runs only when
-`finished` and never changes status. `inspect_execution` derives
-`inspection_issues` (DATA_EMPTY / DATA_SHAPE_WRONG / single_point_chart) but on
-the v30 path is informational only (router always goes layout→END).
-
-### 6A.9 Builder toolset (`agent_builder/tools.py`)
-`list_blocks(category?)`, `explain_block(name)`, `add_node(block_name, version,
-position?, params?, upstream?)` (auto-offset, schema-aware param coercion, rejects
-undeclared `$refs`, optional atomic add+connect), `remove_node`, `connect(from,
-to, from_port="data", to_port="data")` (port-type validated, dedup), `disconnect`,
-`set_param(node_id, key, value)` (validates key/enum/`$ref` + `_check_column_in_upstream`
-against the computed upstream schema), `declare_input`, `move_node`/`rename_node`,
-`update_plan`, `get_state`, `preview(node_id, sample_size)`,
-`inspect_node_output(node_id, n_rows≤3)`, `inspect_block_doc(block_id, section)`,
-`commit_pick`/`abort_node`/`abort_phase`/`run_verifier`/`phase_complete` (control
-signals, not blocks), `validate`, `finish(summary)` (**GATED: `validate()` must
-pass first** else `FINISH_BLOCKED`). Errors raise `ToolError` carrying a
-structured `ErrorEnvelope` for the repair LLM.
-
----
-
-## 6B. Chat orchestrator graph (`agent_orchestrator_v2/`)
-
-`GraphState` reducers: last-write-wins except `tools_used`/`render_cards`
-(append) and `messages` (`add_messages` dedup-by-id). `MAX_ITERATIONS=25`,
-`mode` default `"chat"`.
-
-### 6B.1 Node wiring & routers
-Entry `load_context → intent_classifier_builder`. Static edges:
-`advisor_dispatch→synthesis`, `synthesis→self_critique`, `self_critique→END`.
-Conditional routers (predicate → node):
-
-| Router | Predicate | → node |
+**The states and their menus.**
+| sub-phase | what the agent is doing | tools it's allowed |
 |---|---|---|
-| `_route_after_builder` (reads `intent`) | builder_{explain,compare,recommend,ambiguous}→advisor_dispatch; builder_{build_new,build_modify}→pre_clarify_check; builder_knowledge→llm_call | else (not builder) → intent_classifier |
-| `_route_after_pre_clarify` | `force_synthesis`→synthesis | else llm_call |
-| `_route_after_intent` | `force_synthesis or intent=="vague"`→synthesis; builder_*advisor→advisor_dispatch; builder_build_*/knowledge→llm_call; `intent.startswith("clear_")`→intent_completeness | else llm_call |
-| `_route_after_completeness` | `force_synthesis`→synthesis | else llm_call |
-| `_should_continue` (after llm_call) | `force_synthesis`→synthesis; `current_iteration>=25`→synthesis; last msg has tool_calls→tool_execute | else synthesis |
-| `_after_tools` | `force_synthesis`→synthesis; `>=25`→synthesis | else llm_call |
+| **pick** | choosing which block to use | inspect output, inspect block doc, commit_pick, abort_phase |
+| **construct** | adding + wiring the block | add_node, connect, abort_node, inspect_* |
+| **tune** | filling in params, then verifying | set_param, run_verifier, abort_node, commit_pick, inspect_* |
+| **refine** | (not an LLM step — see below) | — |
 
-`force_synthesis` is the universal "stop the turn, render the canned/advisor/
-error message" signal honored by all four post-classifier routers.
+**Transitions** are driven by which tool the agent just used:
+`pick --commit_pick--> construct`, `construct --connect--> tune`,
+`tune --set_param--> tune` (stays), `tune --run_verifier--> tune`, any
+`--abort_node--> pick`. An `add_node` that carries its upstream wiring jumps
+straight to `tune`. **`refine` is not a state the LLM acts in** — when the
+verifier rejects an attempt, *it* sets the next sub-phase directly (a missing
+connection → `construct`, a bad param → `tune`, a wrong block → `pick`), so the
+agent resumes at exactly the right step.
 
-### 6B.2 Intent classifiers
-**`intent_classifier_builder`** (runs first; abstains `{}` if `mode!="builder"`):
-7 buckets `BUILD_NEW, BUILD_MODIFY, EXPLAIN, COMPARE, RECOMMEND, KNOWLEDGE,
-AMBIGUOUS` (`MIN_CONFIDENCE=0.55`). Regex shortcuts skip the LLM
-(從零/新建/build a new → BUILD_NEW; 加一個/接到/改成/add a/remove → BUILD_MODIFY).
-LLM returns `{intent, confidence, reason}`; low-confidence non-build → AMBIGUOUS.
-Skill-step snapshots force BUILD_MODIFY/NEW. Sets `{intent:"builder_<bucket>",
-intent_hint:reason}`.
+### 6A.6 phase_verifier
+**Purpose.** Be the deterministic referee. After the worker says "phase done,"
+decide — by code, not by asking the LLM — whether the phase actually produced
+what it should, and either **advance** to the next phase or **reject** with a
+concrete reason the worker will see next round.
 
-**`intent_classifier`** (chat): buckets `clear_chart, clear_rca, clear_status,
-knowledge, vague`. **`[intent=<id>]` prefix bypasses the LLM** →
-`{intent:"clarified", user_message:cleaned}`. `vague` emits a `clarify` card +
-`force_synthesis` + a synthetic AIMessage (canned reply, no extra LLM). Rule of
-thumb encoded: a rule/algorithm name standing alone = knowledge; a target
-("why is EQP-07 OOC") = clear_rca.
+**Input.** the just-built node + its preview result + the current phase.
+**Output.** either advance (write the phase outcome, bump the index, reset the
+worker for the next phase) or reject (record the reason; the index does **not**
+move; control returns to the worker).
 
-### 6B.3 `intent_completeness` (deterministic gate)
-Bypasses (`{}`) for vague/clarified intents, non-`clear_` intents, and any
-`[intent_confirmed:...]` / `[intent=...]` prefix. Otherwise one LLM call checks
-three dimensions:
-- **inputs** — did the user name equipment/lot/step/date? Emits only canonical
-  names (`tool_id, step, lot_id, recipe_id, apc_id, time_range, threshold,
-  object_name`).
-- **logic** — what to compute (OOC rate / count / trend / cpk); flag only if
-  vague verbs alone.
-- **presentation** — 8-way enum (`line_chart, bar_chart, control_chart, heatmap,
-  table, alert, mixed_table_alert, mixed_chart_alert`); "users skip this most, be
-  strict."
+**The checks, in order (first failure rejects):**
+1. **Did the block run?** Executor error / validation error → reject "fix params
+   or pick a different block."
+2. **Is it connected?** A non-source node with no inbound edge is orphaned →
+   reject "connect upstream."
+3. **Is it a dead end?** A data node with no downstream (once an output node
+   exists) is a dangling leaf. This is rejected up to **3 times** (giving the
+   agent chances to wire it); on the 4th the verifier **prunes** the dead leaf
+   itself and moves on — so a confused agent can't loop forever.
+4. **Advance.** With the (default) covers-gate off, advance exactly one phase. (An
+   optional strict mode rejects a `chart`/`table`/`scalar`/`alarm` phase that
+   ends on a non-presentational block — e.g. a "chart" phase that stops at a
+   filter.)
 
-`is_pipeline_request==false` or `complete==true` → `{}` (proceed). Incomplete →
-emit `design_intent_confirm` card `{card_id:"intent-<8hex>", inputs:[normalized],
-logic, presentation:<normalized>, alternatives:[]}` (inputs normalized via an
-alias map equipment→tool_id, timeframe→time_range, etc.) + `force_synthesis`.
+When it rejects, it also picks the sub-phase the worker should resume in (see
+6A.5) and writes the rejection reason into the next observation.
 
-### 6B.4 `pre_clarify_check`, `advisor_dispatch`, dimensional clarifier
-- **`pre_clarify_check`** (builder BUILD_*, pre-LLM): runs the dimensional
-  clarifier; if dimensions fire, emit `design_intent_confirm` + `force_synthesis`
-  + `synthesis_text_override` (a deterministic "I need to confirm N things" reply,
-  rendered with no LLM).
-- **`advisor_dispatch`**: bridges to the Block Advisor graph (EXPLAIN/COMPARE/
-  RECOMMEND/AMBIGUOUS), streams `advisor_answer` events, returns the markdown as
-  the final text. The advisor graph itself classifies then runs pure-function
-  nodes that fetch every block fact from Java `/internal/blocks` at call time.
-- **`dimensional_clarifier`**: deterministic detectors + LLM localization only.
-  4 detectors (max 3 fire): scope-conflict (tool_id declared but msg says
-  各機台/全廠 → single_via_param|all_machines|multi_via_list), metric-type
-  (OOC but APC/SPC/FDC ambiguous), bar-x-axis (bar chart w/o x dim), time-grain
-  (trend w/o bucket). One LLM call fills only question/label/hint in the user's
-  language; canonical ids/values are immutable.
-  `parse_resolutions_from_prefix("[intent_confirmed:<card> d1=A d2=B]")` →
-  `{d1:A,d2:B}`; `augment_goal_for_resolutions` splices a deterministic
-  `(dim,value)→sentence` hint into the build goal.
+### 6A.7 The escape hatches
+**phase_revise — "you're stuck, think again."** When the stuck detector or the
+round budget trips, this node asks the LLM to diagnose the failure
+(`{root_cause, alternative_strategy, can_retry}`). If retryable, it clears the
+stuck history, gives the phase half a fresh round budget, and returns to the
+worker. Otherwise it escalates to handover. (Only one revise per phase.)
 
-### 6B.5 `llm_call`
-`MAX_LLM_ATTEMPTS=2`. Converts LangChain messages → v1 `(system, messages)`,
-appends an intent-hint block if present. Prompt cache (gated): system wrapped as
-a content block with `cache_control:{type:ephemeral}`, and the **last tool** also
-stamped. Role gating: `_visible_tools(caller_roles)` = `TOOL_SCHEMAS` minus
-`_LLM_HIDDEN_TOOLS` (always) minus `execute_skill` (PIPELINE_ONLY_MODE) minus
-`_ON_DUTY_HIDDEN_TOOLS` (when `_is_on_duty_only`, fail-closed: empty roles =
-ON_DUTY). `llm.create(..., max_tokens=8192, tools)`. **Usable = text OR
-tool_calls.** Retry when exception/`stop_reason=='error'`/empty; persistent
-failure → synthetic AIMessage + `force_synthesis` (graceful). `response_metadata`
-carries `finish_reason` (raw provider) + cache token counts.
+**halt_handover — "I can't; what do you want?"** Pauses and asks the user to pick:
+`edit_goal` (rewrite this phase's intent and retry), `take_over` (keep the partial
+build), `backlog` (save it for later), or `abort`. When chat launched the build
+(`skip_confirm`), it auto-takes-over with a partial result instead of pausing.
 
-### 6B.6 `tool_execute`
-Degenerate-loop self-test (`LOOP_THRESHOLD=3` over execute_mcp/execute_skill/
-search_published_skills/invoke_published_skill) injects a `_loop_warning` the LLM
-sees next iteration. Special cases:
-- **`confirm_pipeline_intent`**: emits `design_intent_confirm` + result
-  `{status:"awaiting_user_confirmation", _force_synthesis:true}` + a clean
-  trailing AIMessage so synthesis doesn't dump raw JSON.
-- **`build_pipeline_live`** (drives the builder graph):
-  1. **Dimensional clarifier gate** — if the message doesn't start
-     `[intent_confirmed:`, run `build_clarifications`; any fire → emit
-     `design_intent_confirm` + `_force_synthesis`, build NOT run.
-  2. **`_scrub_chat_notes`** — drop lines carrying (a) literal IDs (`EQP-\d+`,
-     `LOT-\d+`…) when that role is a declared `$input` (they conflict with the
-     parametric intent), (b) block prescriptions (`block_…`), (c) structural
-     directives (「需對各機台查詢」「分別查詢」). The chat LLM auto-fills notes from
-     active alarms that contradict the user's `$tool_id` intent; the builder must
-     own block choice.
-  3. **`_scrub_chat_goal`** — replace literal IDs with `$role` when declared,
-     collapse `$X 和 $X` conjunctions, swap 全廠/各機台/所有機台 → `$tool_id 機台`
-     (anti-scope-expansion).
-  4. merge `parse_resolutions_from_prefix` + free-text picks; `augment_goal_…`.
-  5. `show_plan` → `dry_run_plan` (no mutation). Else `stream_graph_build(
-     instruction=scrubbed_goal, base_pipeline, session_id=uuid, skip_confirm=True,
-     skill_step_mode)` — "the chat conversation IS the confirmation." Intercepts
-     `judge_clarify_pending`/`intent_confirm_required` (re-emits with the **chat**
-     session id, registers a pending record, breaks). Each event →
-     `wrap_build_event_for_chat` → `pb_glass_*`. Captures `done.pipeline_json`.
-  6. Post-build safety validator (`C10_UNDECLARED_INPUT_REF`) → `pb_glass_error`.
-- **Auto-run** (status ∈ {finished,success} + native blocks): emit `pb_run_start`,
-  `execute_native(pipeline_json)`, attach `auto_run` summary, emit `pb_run_done`
-  (or partial / `pb_run_error`).
+**judge_clarify_pause — "the data looks thin; continue?"** When a data source
+returns far fewer rows than the target implies, it pauses for
+`continue | replan | cancel`. (Wired but currently dormant — the deficit check
+moved to runtime.)
 
-`_trim_result_for_llm` prefers `llm_readable_data` (≤4000 chars), strips heavy
-keys (output_data, dataset, _data_profile) to protect the ReAct token budget.
+### 6A.8 finalize
+**Purpose.** Close out the build: run the full validator and decide one honest
+status.
 
-### 6B.7 `synthesis` + `self_critique`
-**`synthesis`**: `synthesis_text_override` short-circuits (no LLM). Else extract
-text from the last message, strip `<plan>…</plan>`, resolve a contract via
-`_resolve_contract` (**CHART 鐵律: always force `visualization=[]`** — discard
-LLM-embedded viz; chart-already-rendered mode strips `<contract>` from the
-visible text; else auto-build an SPC contract from `last_spc_result`).
+**Output status.**
+| status | meaning |
+|---|---|
+| `finished` | all phases done, no structural errors |
+| `build_partial` | some phases done (user took over, or ran out) |
+| `failed_structural` | the pipeline has structural validator errors |
+| `failed` | nothing usable was built |
+| `refused` | the request was declined upstream (too vague) |
 
-**`self_critique`** (cheap-then-LLM): (1) deterministic ID-hallucination scan —
-any `LOT-/STEP_/EQP-/APC-/RCP-` id in the final text but NOT in any tool result
-is replaced `id⚠️[捏造]` + warning footer; (2) one bounded LLM
-value-traceability check (timeout 12s, non-blocking) verifying every concrete
-value (readings/timestamps/UCL/LCL/%) is traceable to executed tools, returning
-`amended_text` that swaps unsourced numbers for `[查無資料]`. Result carried in
-`reflection_result` for the SSE adapter to substitute.
+It emits a `build_finalized` event with the node/edge counts and any warnings, and
+(only when `finished`) may do a throwaway dry-run that never changes the status.
+
+### 6A.9 The Builder's tools
+The agent drives the canvas through a fixed toolset (this is its entire API):
+- **build:** `add_node`, `connect`, `set_param`, `remove_node`, `disconnect`,
+  `declare_input`, `rename_node`/`move_node`.
+- **look:** `list_blocks`, `explain_block`, `inspect_node_output` (real rows),
+  `inspect_block_doc`, `preview`, `get_state`.
+- **signal (not blocks):** `commit_pick`, `abort_node`, `abort_phase`,
+  `run_verifier`, `phase_complete`.
+- **close:** `validate`, `finish` (**gated — `validate()` must pass first**).
+
+Every tool validates before it mutates (ports must match types, params must match
+the schema, a column reference must exist in the upstream's *real* output) and
+returns a **structured error** (code + hint + the offending field) so the agent
+can fix it without parsing English.
 
 ---
 
-## 6C. SSE events, confirm protocol, and the builder→chat bridge
+## 6B. The Chat agent
 
-### 6C.1 Event vocabulary
-Builder terminal/pause: `done{status,pipeline_json,summary,session_id}`,
-`goal_plan_confirm_required`, `confirm_pending`, `clarify_required`,
-`handover_pending`, `judge_clarify_pending`, `phase_round_paused`. Builder
-node-emitted: `goal_plan_proposed/confirmed`, `phase_round`, `phase_action`,
-`phase_observation`, `phase_completed`, `phase_revise_started`,
-`runtime_check_ok/failed`, `build_finalized`.
+### What Chat does, in one breath
+It answers operations questions in natural language ("why is EQP-07 OOC?", "show
+me the last SPC chart"). It figures out what kind of question you asked, fills any
+gaps by asking you, calls tools (query data, run a skill, or **build a pipeline**
+by handing off to the Builder), and writes a grounded answer — then double-checks
+that answer for made-up numbers before showing it.
 
-Chat surface (after the bridge): `pb_glass_start`, `pb_glass_op`, `pb_glass_chat`,
-`pb_glass_error`, `pb_glass_done{pipeline_json}`, `pb_run_start`,
-`pb_run_done{result_summary}`, `pb_run_error`, `design_intent_confirm`,
-`pb_intent_confirm`, `pb_judge_clarify`, `plan`/`plan_update`, `synthesis`,
-`done`.
+### The stages
+| Stage (node) | What it does, plainly |
+|---|---|
+| **load_context** | Assemble the system prompt + recent history + a snapshot of current alarms/focus. |
+| **intent_classifier(_builder)** | Decide what kind of request this is (a chart? an RCA? a definition? a build instruction?). |
+| **intent_completeness** | For a data request, check the user actually specified enough (which tool? what to compute? how to show it?). If not, ask. |
+| **llm_call ⇄ tool_execute** | The tool-use loop: the model calls a tool, sees the result, calls another, until it's ready to answer. |
+| **synthesis** | Extract the final answer + any chart contract from the model's last message. |
+| **self_critique** | Catch hallucinated IDs/numbers and mark or replace them before the user sees them. |
 
-### 6C.2 The two confirm protocols (don't conflate)
-- **`design_intent_confirm` → `[intent_confirmed:CARD]` re-POST** (intent
-  ambiguity, before/around a build): ambiguity → emit card with `card_id` +
-  deterministic `clarifications` + force-synthesis to end the turn. The user picks
-  → re-POSTs the message prefixed `[intent_confirmed:<id> dim=val ...]` with the
-  **same chat session_id**. Classifiers/completeness bypass on that prefix;
-  `parse_resolutions_from_prefix` + `augment_goal_for_resolutions` splice picks
-  into the goal deterministically.
-- **`/chat/intent-respond`** (resumes a *paused build*'s judge/clarify
-  `interrupt`): keyed by the chat session id via `pending_judge`/`pending_clarify`.
+The flow is a classify-then-gate-then-act pipeline: each classifier routes to a
+fixed next step, and a single flag (`force_synthesis`) means "stop here and just
+render the message" (used by the clarify cards and error paths).
 
-The chat↔build session distinction is load-bearing: pause cards carry
-`session_id = chat session` (what the card POSTs back) and `build_session_id =
-build uuid` (trace correlation).
+### 6B.1 The classifiers (what kind of question is this?)
+**Purpose.** Route deterministically. The model's only job here is to *label* the
+request; the graph decides what happens for each label.
 
-### 6C.3 The builder→chat event bridge (`event_wrapper.py`)
-`wrap_build_event_for_chat(evt, session_id)` is the **only** place builder events
-become `pb_glass_*` (the frontend chat panel + Lite Canvas know only `pb_glass_*`).
-**Critical invariant — raw structured args must be preserved, not flattened to
-text:** `phase_action` passes raw `tool_args_raw`/`action_result_raw` as the
-top-level `args`/`result` (v30 phase context stashed under underscore keys
-`_phase_id`/`_round`/`_summary`) so the frontend `applyGlassOp` can still mutate
-the canvas. Flattening to a text summary made the Lite Canvas invisible — this is
-the codified "event wrappers keep raw structured args" rule. `_v2_op_to_v1_args`
-translates typed ops → the `{block_name,params}` / `{from_node,to_node}` /
-`{node_id,key,value}` shapes the frontend applies. `pb_judge_clarify` returns
-None here (the canonical emit is from `tool_execute` with the chat session id) to
-avoid a duplicate card; internal events (phase_round, phase_observation,
-confirm_pending, inspection_*) → None.
+- **builder classifier** (runs first, only in builder mode): 7 labels —
+  BUILD_NEW, BUILD_MODIFY, EXPLAIN, COMPARE, RECOMMEND, KNOWLEDGE, AMBIGUOUS.
+  EXPLAIN/COMPARE/RECOMMEND go to the **Block Advisor**; BUILD_* go toward a build.
+- **chat classifier**: 5 labels — `clear_chart`, `clear_rca`, `clear_status`,
+  `knowledge`, `vague`. `vague` immediately asks a clarifying question instead of
+  guessing. A standalone rule/algorithm name = `knowledge`; the same thing with a
+  target ("why is EQP-07 OOC") = `clear_rca`.
 
-### 6C.4 LLM client (`agent_helpers_native/llm_client.py`)
-`get_llm_client(force_provider?)` reads `LLM_PROVIDER` (cached singleton):
-`anthropic` (native system/tools + prompt cache via `cache_control`), `ollama`
-(any OpenAI-compatible endpoint — **production**, KIMI K2.5 default, pins
-`provider.order=["Fireworks"]` for cache passthrough), `internal-proxy`.
-`create(system, messages, max_tokens, tools?)` → `LLMResponse{text, stop_reason
-(normalized: stop/length/eos→end_turn, tool calls→tool_use), finish_reason (RAW
-provider value — diagnoses truncation vs provider-error vs JSON-parse bug),
-content, input/output_tokens, cache_*_tokens}`. The client does **no** retry —
-bounded retry lives in callers (chat `llm_call`, builder `goal_plan`). The
-OpenAI-compat path converts Anthropic tool_use/tool_result ↔ function-calling,
-parses XML tool calls for Kimi-style models, strips `<think>` blocks. Single model
-switch: sidecar `.env` `OLLAMA_MODEL` + `LLM_PROVIDER`; KIMI via Fireworks is the
-cost-right default (only provider keeping prompt cache).
+**Bypass.** If the message carries an `[intent=...]` or `[intent_confirmed:...]`
+prefix (i.e. the user already answered a clarify card), the classifiers step
+aside — the decision was already made.
 
-### 6C.5 Build trace (`/admin/build-traces`)
-`BuildTracer` writes one JSON per build to `/tmp/builder-traces/*.json` (NOT a DB
-table): plan, every LLM call (`user_msg` + `raw_response` + `finish_reason`),
-every graph step, verifier verdicts. A `trace_summary` renderer produces Plan →
-stuck phase → per-round history (same model powers the admin Summary tab + the
-`/verify-build` tool). `trace_replay` re-runs a single saved LLM call under
-controlled variants ("would changing X have changed the pick?").
+### 6B.2 intent_completeness (don't build on a vague request)
+**Purpose.** Stop the agent from guessing. For a clear data request, deterministically
+check three dimensions are specified; if any is missing, ask the user with a card
+instead of building something wrong.
 
+**The three dimensions.**
+- **inputs** — did they name equipment / lot / step / date? (Normalized to canonical
+  names like `tool_id`, `time_range`.)
+- **logic** — what to compute (OOC rate, count, trend, cpk…)?
+- **presentation** — how to show it (line chart / control chart / table / alert…)?
+  Users skip this one most, so the check is strict.
+
+**Output.** Complete → proceed. Incomplete → emit a `design_intent_confirm` card
+(`{card_id, inputs, logic, presentation, alternatives}`) and stop the turn. The
+user picks options and re-sends with an `[intent_confirmed:CARD ...]` prefix.
+
+### 6B.3 The Block Advisor and the dimensional clarifier
+**Block Advisor** (for EXPLAIN/COMPARE/RECOMMEND): answers "how do I use this
+block / A vs B / which should I use" by **fetching the block's facts from the
+database at question time** (never from hardcoded prompt text) and writing a
+focused answer.
+
+**Dimensional clarifier** (used before a build): a set of deterministic detectors
+for the *specific* ambiguities that bite pipeline builds — e.g. "you named one
+tool but said '各機台'" (one machine or all?), "OOC but which family — APC/SPC/FDC?",
+"bar chart but along what axis?", "trend but at what time grain?". It detects the
+ambiguity by code and uses the LLM only to phrase the question in the user's
+language. The user's answer is spliced back into the build goal deterministically.
+
+### 6B.4 The tool-use loop (llm_call + tool_execute)
+**Purpose.** Let the model act: call a tool, read the result, decide the next
+call, up to 25 iterations, then answer.
+
+**llm_call** is the model turn. It sees only the tools its role is allowed
+(ON_DUTY users, for instance, can't see `build_pipeline_live` or any draft/build
+tool — the gate is fail-closed: unknown role = most restricted). It retries once
+on a transient provider blip and, if the provider keeps failing, returns a clean
+"the call failed" answer instead of crashing.
+
+**tool_execute** runs the tool. Most tools are a straight dispatch, but two are
+special:
+- **confirm_pipeline_intent** — "write down what I'm about to build and wait for
+  the user's OK" (emits a confirm card, stops the turn).
+- **build_pipeline_live** — hand off to the Builder. Before doing so it **cleans
+  the request** so the Builder gets a parametric intent, not stray specifics:
+  it strips literal IDs that conflict with declared `$inputs`, strips any block
+  names the chat model guessed, and rewrites "全廠/各機台" back to "the `$tool_id`
+  machine" so the build doesn't silently expand scope. Then it streams the
+  Builder's events to the chat surface and, if a pipeline came out, **auto-runs
+  it** and streams the result.
+
+### 6B.5 synthesis + self_critique (answer, then fact-check the answer)
+**synthesis** pulls the final text and any chart contract out of the model's last
+message. (House rule: a chart that was already rendered live is never re-embedded
+in the contract — the live render is the source of truth.)
+
+**self_critique** is the trust layer. First, a free deterministic scan: any ID in
+the answer (`LOT-…`, `EQP-…`, `APC-…`) that doesn't appear in any tool result is
+flagged as fabricated and marked `⚠️[捏造]`. Then one quick LLM pass checks that
+every concrete number (readings, timestamps, control limits, %) is traceable to a
+tool result, replacing unsourced numbers with `[查無資料]`. This is what stops the
+agent from confidently citing data it never fetched.
+
+---
+
+## 6C. How agent activity reaches the screen (events + protocols)
+
+### 6C.1 The two surfaces speak different event dialects
+The Builder emits rich internal events (`goal_plan_proposed`, `phase_action`,
+`phase_completed`, `build_finalized`, plus pause events). The **chat surface**
+only understands a small `pb_glass_*` vocabulary: `pb_glass_start`,
+`pb_glass_op` (one canvas operation), `pb_glass_chat` (a narration line),
+`pb_glass_done` (carries the finished `pipeline_json`), then `pb_run_start` /
+`pb_run_done` (carries the result) for the auto-run.
+
+A single bridge function translates Builder events → `pb_glass_*`. **Its one
+hard rule:** pass the **raw structured arguments** through (the block name, the
+params, the from/to ports), never a flattened text summary — because the frontend
+rebuilds the live canvas from those structured fields. Flattening them once made
+the live canvas go blank; the rule exists to prevent that regression.
+
+### 6C.2 Two different "confirm" handshakes (don't conflate them)
+- **Intent confirm** (the `design_intent_confirm` card → `[intent_confirmed:CARD]`
+  re-POST): used *before* a build, when the request is ambiguous. The card lists
+  the dimensions to pin down; the user picks and re-sends the same message with an
+  `[intent_confirmed:<id> dim=val ...]` prefix on the **same chat session**.
+- **Build-pause resume** (`/chat/intent-respond`): used to *un-pause* a build that
+  already started and hit a handover/judge interrupt. Keyed to the chat session
+  via a pending-record so the right paused build resumes.
+
+The chat-session-id vs build-session-id distinction is load-bearing: pause cards
+carry the **chat** session (what the card posts back to) and the **build** uuid
+(for trace correlation) separately.
+
+### 6C.3 The LLM client (one switch for the whole platform)
+A single client wraps every provider. `LLM_PROVIDER` selects Anthropic-native or
+any OpenAI-compatible endpoint (OpenRouter/vLLM — the production path, KIMI K2.5
+by default, pinned to Fireworks so prompt-cache survives). Every caller goes
+through one `create(system, messages, max_tokens, tools)` that returns a normalized
+response. Two fields matter for debugging: `stop_reason` (normalized) and
+`finish_reason` (the **raw** provider value — it's how you tell a real
+provider-error apart from a JSON-parse bug). The client itself never retries —
+retry policy lives in the callers that know what "a good answer" looks like.
+**To change the model, you change one `.env` line** (`OLLAMA_MODEL` +
+`LLM_PROVIDER`).
+
+### 6C.4 Build traces (how you debug the agent)
+Every build writes one JSON file (`/tmp/builder-traces/*.json`) recording the
+plan, every LLM call (the prompt it saw + its raw response + finish_reason), every
+graph step, and every verifier verdict. A summary renderer turns that into a
+readable "plan → which phase got stuck → round-by-round history" (the same view
+powers the admin Build-Traces tab). A replay tool can re-run a single saved LLM
+call under tweaks to answer "would changing X have changed the agent's choice?"
+without guessing.
 ---
 
 ## 7. System MCP (external data sources)
