@@ -552,6 +552,40 @@ def _coerce_params_dict(
     )
 
 
+def _coerce_param_value(key: str, value: Any, param_schema: dict) -> Any:
+    """Schema-aware safety net: if a param's declared type is array/object but
+    the LLM passed a JSON-stringified value (e.g. fields='[{"path": ...}]'),
+    parse it back. Only coerces on a clean type-match — anything else is left
+    untouched so C6_PARAM_SCHEMA still flags genuine mistakes (2026-06-24).
+    Complements the flat-string param simplification: this catches the residual
+    stringify of WHATEVER shape, not just the simplified ones.
+    """
+    if not isinstance(value, str) or value.startswith("$"):
+        return value
+    prop = (param_schema.get("properties") or {}).get(key) or {}
+    expected = prop.get("type")
+    if expected not in ("array", "object"):
+        return value
+    import json as _json
+    try:
+        parsed = _json.loads(value)
+    except (_json.JSONDecodeError, ValueError):
+        return value
+    if (expected == "array" and isinstance(parsed, list)) or (
+        expected == "object" and isinstance(parsed, dict)
+    ):
+        return parsed
+    return value
+
+
+def _coerce_param_values(params: dict, param_schema: dict) -> dict:
+    """Apply _coerce_param_value across a params dict. No-op when param_schema
+    is empty (unknown block)."""
+    if not params or not param_schema:
+        return params
+    return {k: _coerce_param_value(k, v, param_schema) for k, v in params.items()}
+
+
 def _check_placeholder_declared(
     pipeline: PipelineJSON,
     value: Any,
@@ -779,6 +813,8 @@ class BuilderToolset:
                 message=f"Block '{block_name}@{block_version}' not in catalog",
                 hint="Call list_blocks() to see available blocks.",
             )
+        # Safety net: parse any array/object param the LLM stringified.
+        params = _coerce_param_values(params, spec.get("param_schema") or {})
         pipeline = self.session.pipeline_json
 
         # ── Orphan duplicate guard (ENABLE_NO_DUPLICATE_NODE, 2026-06-12) ──
@@ -999,6 +1035,9 @@ class BuilderToolset:
                 hint=f"Allowed keys: {sorted(props.keys())}",
             )
         prop = props[key]
+        # Safety net: parse an array/object param the LLM stringified (skips
+        # $refs, leaves genuine mistakes for the validator). 2026-06-24.
+        value = _coerce_param_value(key, value, schema)
         # Reject `$xxx` placeholders that don't match a declared input before
         # the value lands on canvas via SSE — see _check_placeholder_declared.
         # Done before enum check because $xxx never matches an enum literally.

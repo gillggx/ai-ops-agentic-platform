@@ -58,10 +58,15 @@ class SortBlockExecutor(BlockExecutor):
         df_work = df
 
         for i, entry in enumerate(columns_spec):
+            # Flat-string form: "ooc_count" == {"column": "ooc_count", "order":
+            # "asc"}. The object form {column, order} stays supported for desc —
+            # a flat string list is far easier for an LLM (2026-06-24).
+            if isinstance(entry, str):
+                entry = {"column": entry, "order": "asc"}
             if not isinstance(entry, dict):
                 raise BlockExecutionError(
                     code="INVALID_PARAM",
-                    message="each columns entry must be an object with column + order",
+                    message="each columns entry must be a column-name string or an object with column + order",
                 )
             col = entry.get("column")
             order = entry.get("order", "asc")

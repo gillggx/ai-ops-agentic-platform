@@ -47,10 +47,16 @@ class SelectBlockExecutor(BlockExecutor):
 
         out_cols: dict[str, Any] = {}
         for i, f in enumerate(fields):
+            # Flat-string form: "RECIPE.objectID" == {"path": "RECIPE.objectID"}
+            # (`as` defaults to the leaf below). The object form {path, as} stays
+            # supported for renames — LLMs handle a flat string list far more
+            # reliably than an array of objects (2026-06-24).
+            if isinstance(f, str):
+                f = {"path": f}
             if not isinstance(f, dict):
                 raise BlockExecutionError(
                     code="INVALID_PARAM",
-                    message=f"fields[{i}] must be an object with 'path' (+ optional 'as')",
+                    message=f"fields[{i}] must be a path string or an object with 'path' (+ optional 'as')",
                 )
             path = f.get("path")
             if not isinstance(path, str) or not path:

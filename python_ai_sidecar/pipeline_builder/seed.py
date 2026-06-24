@@ -2201,9 +2201,10 @@ def _blocks() -> list[dict[str, Any]]:
                 "- ❌ 過濾 rows（非排序取 top） → 用 block_filter\n"
                 "\n"
                 "== Params ==\n"
-                "columns (array, required) list of {column, order='asc'|'desc'}\n"
-                "  e.g. [{'column':'ooc_count','order':'desc'}]\n"
-                "  e.g. [{'column':'toolID','order':'asc'}, {'column':'eventTime','order':'desc'}]\n"
+                "columns (array, required) — 預設 asc 時用扁平字串清單即可，例 ['ooc_count'] 或 ['toolID','eventTime']。\n"
+                "  要指定方向才用物件形 {column, order='asc'|'desc'}（可與字串混用）：\n"
+                "  e.g. ['ooc_count'] (asc) ；e.g. [{'column':'ooc_count','order':'desc'}] (desc)\n"
+                "  e.g. ['toolID', {'column':'eventTime','order':'desc'}]\n"
                 "limit   (integer, opt, >= 1) 保留前 N 列\n"
                 "\n"
                 "== Output ==\n"
@@ -2221,8 +2222,8 @@ def _blocks() -> list[dict[str, Any]]:
                 "set_param 會在你寫錯時丟 COLUMN_NOT_IN_UPSTREAM；hint 列出真實 columns。\n"
                 "\n"
                 "== Common mistakes ==\n"
-                "⚠ **必填 param 叫 `columns` (複數，list of objects)，不是 `column`**。寫 `column='eventTime'` 會 INVALID_SORT_SPEC\n"
-                "⚠ columns 是 list of objects，不是 list of strings\n"
+                "⚠ **必填 param 叫 `columns` (複數，list)，不是 `column`**。寫 `column='eventTime'` 會 INVALID_SORT_SPEC\n"
+                "⚠ columns 是 list（字串 ['x'] 預設 asc，或物件 [{'column':'x','order':'desc'}]）\n"
                 "⚠ order 拼錯（'descending' / 'DESC'）會被預設成 'asc'\n"
                 "⚠ limit 不是 top；是 head(N) — 要 top 請先 desc 排序再 limit\n"
                 "⚠ 「找最後一次 X」這種 1-row 需求**不要用我**，請改 block_find（避免 LLM 漏寫 limit=1 拿到全表）\n"
@@ -2240,13 +2241,21 @@ def _blocks() -> list[dict[str, Any]]:
                 "properties": {
                     "columns": {
                         "type": "array",
-                        "title": "排序欄位 (list of {column, order})",
+                        "title": "排序欄位 (字串清單，或 {column, order})",
+                        # 2026-06-24: accept a flat column-name string (asc) OR
+                        # the {column, order} object. Executor normalizes a
+                        # string to {column, order: 'asc'}.
                         "items": {
-                            "type": "object",
-                            "properties": {
-                                "column": {"type": "string"},
-                                "order":  {"type": "string", "enum": ["asc", "desc"], "default": "asc"},
-                            },
+                            "oneOf": [
+                                {"type": "string"},
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "column": {"type": "string"},
+                                        "order":  {"type": "string", "enum": ["asc", "desc"], "default": "asc"},
+                                    },
+                                },
+                            ],
                         },
                     },
                     "limit":   {"type": "integer", "minimum": 1, "title": "Top-N (選填)"},
@@ -2259,17 +2268,21 @@ def _blocks() -> list[dict[str, Any]]:
             # the shape from data, not prompt.
             "examples": [
                 {
-                    "title": "排序 by 單欄 desc + top-N",
+                    "title": "asc 排序 (扁平字串 — 最常見)",
+                    "params": {"columns": ["eventTime"]},
+                },
+                {
+                    "title": "排序 by 單欄 desc + top-N (要方向用物件形)",
                     "params": {
                         "columns": [{"column": "ooc_count", "order": "desc"}],
                         "limit": 3,
                     },
                 },
                 {
-                    "title": "多欄排序 (toolID asc, eventTime desc)",
+                    "title": "多欄混用 (toolID asc 字串, eventTime desc 物件)",
                     "params": {
                         "columns": [
-                            {"column": "toolID", "order": "asc"},
+                            "toolID",
                             {"column": "eventTime", "order": "desc"},
                         ],
                     },
@@ -3517,7 +3530,9 @@ def _blocks() -> list[dict[str, Any]]:
             "description": (
                 "== What ==\n"
                 "Project / rename fields — jq-lite for objects. Drops every column not listed.\n"
-                "Each field entry is {path, as?} — path supports dot + [] syntax.\n\n"
+                "fields is a flat list of path strings, e.g. [\"RECIPE.objectID\", \"etch_time_offset\"].\n"
+                "Path supports dot + [] syntax. To RENAME a field, use the object form\n"
+                "{path, as} for just that one (mix freely): [\"tool_id\", {\"path\": \"spc_summary.ooc_count\", \"as\": \"ooc_count\"}].\n\n"
                 "== When to use ==\n"
                 "- ✅ 想瘦身一個寬表（35 欄變 3 欄）給下游 chart\n"
                 "- ✅ 想把 nested field 拉到 top-level + 改名 (e.g. spc_summary.ooc_count → ooc_count)\n"
@@ -3525,7 +3540,8 @@ def _blocks() -> list[dict[str, Any]]:
                 "- ❌ 想保留所有欄位只新增一個 → 用 block_compute\n"
                 "- ❌ 只要一個欄位 → block_pluck 更輕\n\n"
                 "== Params ==\n"
-                "fields (array, required) [{path: 'x', as: 'y'}, ...] — 每個 entry 必填 path，as 預設 = path 最後一段\n\n"
+                "fields (array, required) — 扁平字串清單即可，例 [\"RECIPE.objectID\", \"etch_time_offset\"]。\n"
+                "  要改名才用物件形 {path, as}（可與字串混用）；as 預設 = path 最後一段。\n\n"
                 "== Output ==\n"
                 "port: data (dataframe) — 只包含 selected fields，按 fields 順序排列\n"
                 "⚠ **被丟掉的欄位下游就拿不到了**。如果下游 chart 需要 'value' / 'ucl' / 'lcl' 之類欄位，"
@@ -3550,22 +3566,33 @@ def _blocks() -> list[dict[str, Any]]:
                         # (which can't express {path, as} objects → block_select
                         # was unfillable by hand in the UI).
                         "x-fields-editor": True,
+                        # 2026-06-24: accept a flat path-string OR the {path, as}
+                        # object (rename). LLMs handle a flat string list far more
+                        # reliably than an array of objects; the executor
+                        # normalizes a string to {path: string}.
                         "items": {
-                            "type": "object",
-                            "required": ["path"],
-                            "properties": {
-                                "path": {"type": "string"},
-                                "as":   {"type": "string"},
-                            },
+                            "oneOf": [
+                                {"type": "string"},
+                                {
+                                    "type": "object",
+                                    "required": ["path"],
+                                    "properties": {
+                                        "path": {"type": "string"},
+                                        "as":   {"type": "string"},
+                                    },
+                                },
+                            ],
                         },
                         "minItems": 1,
                     },
                 },
             },
             "examples": [
-                {"label": "Flatten + rename nested fields",
+                {"label": "Pick fields (flat — the common case)",
+                 "params": {"fields": ["RECIPE.objectID", "etch_time_offset"]}},
+                {"label": "Rename a nested field (object form for `as`)",
                  "params": {"fields": [
-                     {"path": "tool_id"},
+                     "tool_id",
                      {"path": "spc_summary.ooc_count", "as": "ooc_count"},
                  ]}},
             ],
