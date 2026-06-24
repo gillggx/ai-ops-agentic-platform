@@ -449,7 +449,19 @@ class OllamaLLMClient(BaseLLMClient):
             "thinking": {"type": "disabled"},
         }
         from python_ai_sidecar.feature_flags import is_prompt_cache_enabled
-        if "kimi" in self._model.lower() and is_prompt_cache_enabled():
+        # 2026-06-24: generalized provider pin for the model bake-off. When
+        # OPENROUTER_PROVIDER_ORDER is set (comma-separated provider names), pin
+        # those so a non-Kimi model also lands on a cache-supporting provider
+        # (KIMI→Fireworks, Qwen→Parasail, GLM→DeepInfra). Unset = unchanged
+        # Kimi→Fireworks default, so production behaviour is fully backward
+        # compatible. Gated on the same prompt-cache flag.
+        _provider_order_env = os.environ.get("OPENROUTER_PROVIDER_ORDER", "").strip()
+        if _provider_order_env and is_prompt_cache_enabled():
+            extra_body["provider"] = {
+                "order": [p.strip() for p in _provider_order_env.split(",") if p.strip()],
+                "allow_fallbacks": True,
+            }
+        elif "kimi" in self._model.lower() and is_prompt_cache_enabled():
             extra_body["provider"] = {
                 "order": ["Fireworks"],
                 "allow_fallbacks": True,
