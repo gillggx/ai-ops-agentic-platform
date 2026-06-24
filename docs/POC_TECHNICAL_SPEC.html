@@ -1,0 +1,1855 @@
+<!DOCTYPE html>
+<html lang="zh-Hant"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Skill Library Platform — Technical Build Spec</title>
+<style>
+:root{--ink:#1f2933;--mut:#6b7280;--line:#e5e7eb;--bg:#f6f8fa;--card:#fff;
+ --a:#1d4ed8;--a-bg:#eff6ff;--code:#0f172a;--code-bg:#f1f5f9;--accent:#c2410c;}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;
+ color:var(--ink);background:var(--bg);line-height:1.62;font-size:14.5px;}
+.layout{display:grid;grid-template-columns:288px 1fr;max-width:1280px;margin:0 auto;}
+nav.toc{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;
+ border-right:1px solid var(--line);background:#fff;padding:18px 14px;}
+nav.toc .brand{font-weight:700;font-size:14px;border-bottom:2px solid var(--ink);
+ padding-bottom:8px;margin-bottom:10px;}
+nav.toc a{display:block;text-decoration:none;color:var(--mut);font-size:12.5px;
+ padding:3px 8px;border-radius:6px;border-left:2px solid transparent;}
+nav.toc a:hover{background:var(--a-bg);color:var(--a);}
+nav.toc a.t2{font-weight:600;color:var(--ink);margin-top:4px;}
+nav.toc a.t3{padding-left:20px;font-size:12px;}
+main{padding:30px 40px 80px;max-width:920px;}
+h1{font-size:25px;border-bottom:3px solid var(--ink);padding-bottom:10px;margin-top:6px;}
+h2{font-size:20px;margin-top:34px;padding:6px 0 6px 12px;border-left:5px solid var(--accent);
+ background:linear-gradient(90deg,#fff7ed,transparent);scroll-margin-top:14px;}
+h3{font-size:15.5px;margin-top:22px;color:#111827;scroll-margin-top:14px;
+ border-bottom:1px solid var(--line);padding-bottom:3px;}
+h4{font-size:14px;margin-top:16px;color:#374151;}
+p{margin:8px 0;}
+a{color:var(--a);}
+blockquote{margin:14px 0;padding:12px 16px;background:var(--a-bg);
+ border:1px solid #bfdbfe;border-radius:8px;color:#1e3a5f;font-size:13.5px;}
+blockquote p{margin:5px 0;}
+code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;
+ background:var(--code-bg);color:var(--code);padding:1px 5px;border-radius:4px;}
+pre{background:#0f172a;color:#e2e8f0;padding:14px 16px;border-radius:9px;overflow-x:auto;
+ font-size:12.5px;line-height:1.5;}
+pre code{background:none;color:inherit;padding:0;font-size:12.5px;}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:12.8px;display:block;overflow-x:auto;}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top;}
+th{background:#eef2f7;font-weight:600;white-space:nowrap;}
+td code{white-space:nowrap;}
+ul,ol{margin:8px 0;padding-left:22px;}li{margin:3px 0;}
+hr{border:none;border-top:1px solid var(--line);margin:26px 0;}
+strong{color:#111827;}
+@media(max-width:880px){.layout{grid-template-columns:1fr;}nav.toc{display:none;}main{padding:20px;}}
+</style></head>
+<body><div class="layout">
+<nav class="toc"><div class="brand">技術規格 · 目錄</div>
+<a class="t2" href="#0-what-you-are-building">0. What you are building</a>
+<a class="t3" href="#the-six-core-features-product-surface">The six core features
+(product surface)</a>
+<a class="t2" href="#1-system-architecture">1. System architecture</a>
+<a class="t3" href="#hard-architectural-boundaries-do-not-violate">Hard architectural
+boundaries (do not violate)</a>
+<a class="t2" href="#2-tech-stack--cross-cutting-conventions">2. Tech stack &amp;amp;
+cross-cutting conventions</a>
+<a class="t3" href="#wire-format--snake_case-everywhere">Wire format —
+snake_case everywhere</a>
+<a class="t3" href="#async-first">Async-first</a>
+<a class="t3" href="#pgvector-write-rule">pgvector write rule</a>
+<a class="t3" href="#ports-env-driven-never-hardcode">Ports (env-driven, never
+hardcode)</a>
+<a class="t2" href="#3-data-model-postgresql">3. Data model (PostgreSQL)</a>
+<a class="t3" href="#31-core-tables-build-these-first">3.1 Core tables (build these
+first)</a>
+<a class="t3" href="#33-auth--audit--ops-tables">3.3 Auth / audit / ops tables</a>
+<a class="t2" href="#4-backend-api-contract-java">4. Backend API contract (Java)</a>
+<a class="t3" href="#41-agent-proxy-sse-bridge-to-sidecar">4.1 Agent proxy (SSE
+bridge to sidecar)</a>
+<a class="t3" href="#42-catalog--registry-internal-read-by-sidecar">4.2 Catalog +
+registry (internal, read by sidecar)</a>
+<a class="t3" href="#43-user-facing-crud">4.3 User-facing CRUD</a>
+<a class="t3" href="#44-auth-model-security-filter-chains">4.4 Auth model (security
+filter chains)</a>
+<a class="t2" href="#5-the-block--pipeline-execution-system-the-substrate">5. The
+block + pipeline execution system (the substrate)</a>
+<a class="t3" href="#51-block-spec-schema">5.1 Block spec schema</a>
+<a class="t3" href="#52-executor-contract">5.2 Executor contract</a>
+<a class="t3" href="#53-the-56-block-catalog">5.3 The 56-block catalog</a>
+<a class="t3" href="#54-pipeline--dag-model">5.4 Pipeline / DAG model</a>
+<a class="t3" href="#55-validator-rules-pipeline_buildervalidatorpy">5.5 Validator
+rules (pipeline_builder/validator.py)</a>
+<a class="t3" href="#56-boot-consistency-invariant">5.6 Boot consistency
+invariant</a>
+<a class="t2" href="#6-the-agent-system-the-hard-part--deep-dive">6. The agent system
+(the hard part) — deep dive</a>
+<a class="t3" href="#61-the-two-non-negotiable-design-rules">6.1 The two
+non-negotiable design rules</a>
+<a class="t2" href="#6a-builder-glass-box-graph-v30-react">6A. Builder Glass Box
+graph (v30 ReAct)</a>
+<a class="t3" href="#6a1-node-wiring--routers">6A.1 Node wiring &amp;amp; routers</a>
+<a class="t3" href="#6a2-goal_plan-node">6A.2 goal_plan node</a>
+<a class="t3" href="#6a3-task_contract_extractor">6A.3
+task_contract_extractor</a>
+<a class="t3" href="#6a4-agentic_phase_loop--anatomy-of-one-react-round">6A.4
+agentic_phase_loop — anatomy of one ReAct round</a>
+<a class="t3" href="#6a5-sub-phase-state-machine">6A.5 Sub-phase state machine</a>
+<a class="t3" href="#6a6-phase_verifier-decision-tree">6A.6
+phase_verifier decision tree</a>
+<a class="t3" href="#6a7-interrupt-nodes-payloads--resume--routing">6A.7 Interrupt
+nodes (payloads + resume + routing)</a>
+<a class="t3" href="#6a8-finalize--inspect_execution--status-values">6A.8
+finalize / inspect_execution — status
+values</a>
+<a class="t3" href="#6a9-builder-toolset-agent_buildertoolspy">6A.9 Builder toolset
+(agent_builder/tools.py)</a>
+<a class="t2" href="#6b-chat-orchestrator-graph-agent_orchestrator_v2">6B. Chat
+orchestrator graph (agent_orchestrator_v2/)</a>
+<a class="t3" href="#6b1-node-wiring--routers">6B.1 Node wiring &amp;amp; routers</a>
+<a class="t3" href="#6b2-intent-classifiers">6B.2 Intent classifiers</a>
+<a class="t3" href="#6b3-intent_completeness-deterministic-gate">6B.3
+intent_completeness (deterministic gate)</a>
+<a class="t3" href="#6b5-llm_call">6B.5 llm_call</a>
+<a class="t3" href="#6b6-tool_execute">6B.6 tool_execute</a>
+<a class="t3" href="#6b7-synthesis--self_critique">6B.7 synthesis +
+self_critique</a>
+<a class="t2" href="#6c-sse-events-confirm-protocol-and-the-builderchat-bridge">6C.
+SSE events, confirm protocol, and the builder→chat bridge</a>
+<a class="t3" href="#6c1-event-vocabulary">6C.1 Event vocabulary</a>
+<a class="t3" href="#6c2-the-two-confirm-protocols-dont-conflate">6C.2 The two
+confirm protocols (don&#x27;t conflate)</a>
+<a class="t3" href="#6c3-the-builderchat-event-bridge-event_wrapperpy">6C.3 The
+builder→chat event bridge (event_wrapper.py)</a>
+<a class="t3" href="#6c4-llm-client-agent_helpers_nativellm_clientpy">6C.4 LLM client
+(agent_helpers_native/llm_client.py)</a>
+<a class="t3" href="#6c5-build-trace-adminbuild-traces">6C.5 Build trace
+(/admin/build-traces)</a>
+<a class="t2" href="#7-system-mcp-external-data-sources">7. System MCP (external data
+sources)</a>
+<a class="t3" href="#71-definition--execution">7.1 Definition + execution</a>
+<a class="t3" href="#72-env-header-interpolation-poc-feature">7.2 ${ENV} header
+interpolation (POC feature)</a>
+<a class="t3" href="#73-v54-derivative-blocksskills">7.3 V54 derivative
+blocks/skills</a>
+<a class="t3" href="#74-single-source-of-truth-rule">7.4 Single-source-of-truth
+rule</a>
+<a class="t2" href="#8-knowledge-layer">8. Knowledge layer</a>
+<a class="t2" href="#9-config--feature-flags">9. Config &amp;amp; feature flags</a>
+<a class="t2" href="#10-frontend">10. Frontend</a>
+<a class="t3" href="#101-pages-poc-relevant">10.1 Pages (POC-relevant)</a>
+<a class="t3" href="#102-api-proxy-contract-api">10.2 API proxy contract
+(/api/*)</a>
+<a class="t3" href="#103-pipeline-builder-ui">10.3 Pipeline Builder UI</a>
+<a class="t3" href="#104-auth--shell">10.4 Auth + shell</a>
+<a class="t3" href="#105-shared-output-contract-aiops-contract">10.5 Shared output
+contract (aiops-contract)</a>
+<a class="t2" href="#11-builddeploy--smoke">11. Build/deploy &amp;amp; smoke</a>
+<a class="t2" href="#12-suggested-rebuild-order-for-the-implementing-teamagent">12.
+Suggested rebuild order (for the implementing team/agent)</a>
+</nav>
+<main><h1 id="skill-library-platform--technical-build-specification">Skill
+Library Platform — Technical Build Specification</h1>
+<blockquote>
+<p><strong>Audience:</strong> an engineering team (or AI coding agent)
+rebuilding this platform from scratch. This spec is derived from the
+actual POC codebase, not from intent. It is dense on purpose — every
+section is a contract you can implement against.</p>
+<p><strong>Companion docs:</strong> <code>POC_PRODUCT_SPEC.html</code>
+(functional / stakeholder view), <code>POC_DEPLOYMENT_SPEC.html</code>
+(ops), <code>POC_HANDOVER_PLAN.html</code> (DevOps handover).
+Architecture/principles source of truth lives in
+<code>CLAUDE.md</code>.</p>
+<p>Generated 2026-06-24.</p>
+</blockquote>
+<hr />
+<h2 id="0-what-you-are-building">0. What you are building</h2>
+<p>An <strong>AI analysis skill library</strong> for semiconductor fab
+operations. A process engineer describes an ops question in natural
+language; an LLM agent turns it into a <strong>data-analysis
+pipeline</strong> (a DAG of typed blocks), executes it against external
+data sources, and returns charts / tables / verdicts. Good pipelines are
+<strong>published as Skills</strong> that the whole team re-runs with a
+form.</p>
+<p>The hard, novel part is the <strong>agent that builds pipelines
+reliably</strong>. Everything else (registry, execution, auth, UI) is
+conventional CRUD + a DAG executor. Build the agent last, after the
+substrate is solid.</p>
+<h3 id="the-six-core-features-product-surface">The six core features
+(product surface)</h3>
+<ol type="1">
+<li><strong>L1 Library</strong> — browse/search/run published Skills +
+browse the block catalog.</li>
+<li><strong>L2 Authoring</strong> — build a Skill two ways:
+natural-language (Glass Box agent) or manual canvas.</li>
+<li><strong>L3 Try-Run</strong> — execute a draft against live data,
+render result, confirm before publish.</li>
+<li><strong>Block Docs + Advisor</strong> — self-documenting block
+catalog + a Q&amp;A assistant about blocks.</li>
+<li><strong>Build Trace</strong> — full record of how the agent built
+each pipeline, for debug.</li>
+<li><strong>System MCP</strong> — register external HTTP services as
+data sources (+ auto-derive blocks/skills).</li>
+</ol>
+<hr />
+<h2 id="1-system-architecture">1. System architecture</h2>
+<p>Four services + one shared-types package. Single-host systemd today;
+each service is independently containerizable (K8s future).</p>
+<pre><code>┌──────────────────────────────────────────────────────────────────────┐
+│ aiops-app  :8000   Next.js (App Router, standalone, TypeScript)        │
+│   UI rendering + /api/* proxy ONLY. No business logic, no direct DB.   │
+└───────────────┬──────────────────────────────────────────────────────┘
+                │  every backend call goes through /api/* proxy routes
+                ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ java-backend :8002  Spring Boot 3.5.14 / Java 17                       │
+│   SOLE owner of PostgreSQL+pgvector. Auth (JWT). Business CRUD.        │
+│   /api/v1/*  user-facing (JWT)   ·   /internal/*  service (X-token)    │
+│   Bridges SSE to the sidecar (reactive Flux → MVC SseEmitter).         │
+└───────┬───────────────────────────────────────────┬──────────────────┘
+        │ JavaAPIClient (/internal/*, X-Internal-Token)                  │
+        ▼                                            │ PostgreSQL JDBC
+┌────────────────────────────────────────────┐      ▼
+│ python_ai_sidecar :8050  FastAPI+LangGraph  │   ┌──────────────────┐
+│   ALL agents live here (chat + builder).    │   │ PostgreSQL +     │
+│   56 block executors run in-process.        │   │ pgvector         │
+│   NEVER opens Postgres — only calls Java.   │   └──────────────────┘
+│   Calls external data via System MCP (HTTP).│
+└───────────────┬─────────────────────────────┘
+                │ HTTP (System MCP dispatch)
+                ▼
+        External data sources (registered as System MCPs)
+        (In the full product: ontology_simulator :8012. In the POC it
+         is stripped — data comes from real external HTTP APIs.)
+
+aiops-contract  — dual-language (TS + Python) shared output schema
+                  (AIOpsReportContract) for Agent ↔ Frontend.</code></pre>
+<h3 id="hard-architectural-boundaries-do-not-violate">Hard architectural
+boundaries (do not violate)</h3>
+<ul>
+<li>Frontend never touches Postgres / sidecar / data sources directly —
+only <code>/api/*</code> proxies.</li>
+<li>Java is the <strong>only</strong> DB owner. The sidecar reaches all
+state through <code>JavaAPIClient</code> →
+<code>/internal/*</code>.</li>
+<li>The sidecar is the <strong>only</strong> home for agents and block
+execution.</li>
+<li>Flow control lives in <strong>graph nodes</strong>, never in LLM
+prompts (see §6.4). This is the single most important design rule;
+violating it is why earlier iterations were unmaintainable.</li>
+</ul>
+<hr />
+<h2 id="2-tech-stack--cross-cutting-conventions">2. Tech stack &amp;
+cross-cutting conventions</h2>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Choice</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Frontend</td>
+<td>Next.js App Router, TypeScript, <code>output: "standalone"</code>,
+inline styles</td>
+<td>NextAuth v5. No Tailwind/CSS-modules.</td>
+</tr>
+<tr>
+<td>Backend</td>
+<td>Spring Boot 3.5.14, Java 17 (Temurin), Maven</td>
+<td>Thin controller + focused service.</td>
+</tr>
+<tr>
+<td>DB</td>
+<td>PostgreSQL + pgvector (1024-dim)</td>
+<td>Java-owned. Flyway present but <strong>disabled in prod</strong>
+(apply <code>V*.sql</code> via manual <code>psql</code>).</td>
+</tr>
+<tr>
+<td>Agent sidecar</td>
+<td>Python 3.11, FastAPI, LangGraph</td>
+<td>In-process block execution.</td>
+</tr>
+<tr>
+<td>LLM</td>
+<td>OpenAI-compatible via OpenRouter (KIMI K2.5 default); Anthropic
+native optional</td>
+<td>Single env switch (<code>LLM_PROVIDER</code> /
+<code>OLLAMA_MODEL</code>).</td>
+</tr>
+<tr>
+<td>Node</td>
+<td>20.18</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h3 id="wire-format--snake_case-everywhere">Wire format —
+<strong>snake_case everywhere</strong></h3>
+<p>Java Jackson is configured <code>SNAKE_CASE</code> on output +
+case-insensitive on input. TypeScript interfaces and POST bodies MUST
+use snake_case keys. camelCase keys that don't match are
+<strong>silently dropped</strong> → HTTP 200 + null fields (a real
+foot-gun; many "the button does nothing" bugs trace to this).</p>
+<h3 id="async-first">Async-first</h3>
+<p>All DB and HTTP operations are async. Never swallow exceptions — log
+with enough context to debug, return a meaningful error. Narrow catches
+to the actual exception type (never bare
+<code>catch(Exception)</code>).</p>
+<h3 id="pgvector-write-rule">pgvector write rule</h3>
+<p>JPA binds <code>String</code> as VARCHAR; Postgres refuses implicit
+varchar→vector cast. Embedding columns are
+<code>@Column(insertable=false, updatable=false, columnDefinition="vector(1024)")</code>
+so JPA INSERT/UPDATE omit them; writes go through a native
+<code>@Query</code> with <code>CAST(:vec AS vector)</code>. Reads work
+via normal JPA.</p>
+<h3 id="ports-env-driven-never-hardcode">Ports (env-driven, never
+hardcode)</h3>
+<p>EC2 prod: app 8000, java 8002, sidecar 8050, (simulator 8012 — full
+product only). Read all URLs/ports from <code>.env</code> / ConfigMap.
+Acceptable fallback pattern:
+<code>os.environ.get("XXX_URL", "http://localhost:80NN").rstrip("/")</code>.</p>
+<hr />
+<h2 id="3-data-model-postgresql">3. Data model (PostgreSQL)</h2>
+<p>Java JPA entities under <code>com.aiops.api.domain</code> are the
+canonical schema (the Flyway baseline <code>V0</code> is a no-op
+<code>SELECT 1;</code> — original tables were adopted from a
+decommissioned Python service). PKs are <code>BIGINT IDENTITY</code>
+unless noted. There are <strong>no Java enums</strong> — enumerated
+values are <code>String</code> columns with documented domains.
+<strong>JSON payloads are stored as <code>text</code></strong> (repo
+convention to stop JPA over-interpreting). An <code>Auditable</code>
+superclass adds <code>created_at</code> + <code>updated_at</code>.</p>
+<h3 id="31-core-tables-build-these-first">3.1 Core tables (build these
+first)</h3>
+<p><strong><code>pb_blocks</code></strong> — the block catalog (the
+LLM's entire knowledge of a block). <code>UNIQUE(name, version)</code>.
+| col | type | domain / note | |---|---|---| | name | varchar(128) |
+stable block id, e.g. <code>block_filter</code> | | category |
+varchar(32) | <code>source</code> | <code>transform</code> |
+<code>output</code> | <code>logic</code> | <code>check</code> | |
+version | varchar(32) | <code>"1.0.0"</code> | | status | varchar(16) |
+<code>draft</code> | <code>active</code> | <code>deprecated</code> (also
+<code>production</code> used by validator) | | description | text |
+<strong>single source of truth</strong> (structured prose, see §5.1) | |
+input_schema | text(JSON) | <code>[{port,type,columns?}]</code> | |
+output_schema | text(JSON) | <code>[{port,type}]</code> | | param_schema
+| text(JSON) | JSON-Schema-ish
+<code>{type:object, properties, required}</code> | | implementation |
+text(JSON) | <code>{type:"python", ref:"...:XxxExecutor"}</code> or
+<code>{type:"mcp_proxy", mcp_name, delegate_block}</code> | | examples |
+text(JSON) | <code>[{params, desc}]</code> | | output_columns_hint |
+text(JSON) | <code>[{name,type,description?,when_present?}]</code> | |
+is_custom | bool | | | source | varchar | <code>manual</code> |
+<code>mcp_auto</code> (V54) | | source_mcp_id | bigint → mcp_definitions
+| FK ON DELETE SET NULL | | created_by / approved_by | bigint | |</p>
+<p><strong><code>pb_pipelines</code></strong> — a pipeline (a Skill's
+implementation). | col | type | domain | |---|---|---| | name |
+varchar(128) | | | description | text | | | status | varchar(20) |
+<code>draft</code>→<code>validating</code>→<code>locked</code>→<code>active</code>→<code>archived</code>
+| | pipeline_kind | varchar(20) | <code>auto_patrol</code> |
+<code>auto_check</code> | <code>skill</code> |
+<code>diagnostic</code>(legacy) | | version | varchar(32) | | |
+pipeline_json | text(JSON) | the DAG (see §5.4) | | usage_stats /
+auto_doc | text(JSON) | | | created_by / approved_by / parent_id /
+parent_skill_doc_id | bigint | |</p>
+<p><strong><code>pb_published_skills</code></strong> — published Skill
+registry entry. <code>slug</code> unique;
+<code>UNIQUE(pipeline_id, version)</code>. | col | type | domain |
+|---|---|---| | pipeline_id / pipeline_version | bigint / varchar | | |
+slug | varchar(80) | unique | | name | varchar(128) | | | use_case /
+when_to_use / inputs_schema / outputs_schema / tags / example_invocation
+| text | | | status | varchar(16) | <code>active</code> |
+<code>retired</code> | | source / source_mcp_id | | <code>manual</code>
+| <code>mcp_auto</code> |</p>
+<p><strong><code>skill_definitions</code></strong> — higher-level skill
+metadata (triggers). <code>name</code> unique. trigger_mode
+<code>schedule|event|both</code>; source
+<code>legacy|rule|auto_patrol|skill</code>; columns: description,
+trigger_event_id, steps_mapping, input_schema, output_schema,
+pipeline_config, binding_type, auto_check_description, visibility,
+trigger_patrol_id, created_by, is_active.</p>
+<p><strong><code>skill_documents</code></strong> — Phase-11 skill
+authoring docs. <code>slug</code> unique. stage
+<code>patrol|diagnose</code>; status <code>draft|stable</code>; columns:
+title, version, domain, description, author_user_id, trigger_config,
+steps, test_cases, stats, confirm_check.</p>
+<p><strong><code>mcp_definitions</code></strong> — external data source
+registry. <code>name</code> unique. | col | type | domain |
+|---|---|---| | name | varchar(200) | unique, e.g.
+<code>get_process_info</code> | | description | text not null |
+<strong>SSOT</strong> for the LLM | | mcp_type | varchar(10) |
+<code>system</code> | <code>custom</code> | | api_config | text(JSON) |
+<code>{endpoint_url, method, headers}</code> | | input_schema |
+text(JSON) | <code>[{name,type,required,description}]</code> | |
+output_schema / sample_output / processing_script / processing_intent |
+text | custom-MCP fields | | system_mcp_id | bigint | custom → its
+source system MCP | | prefer_over_system / visibility | bool / varchar |
+| | produces_block / produces_skill | bool | V54 derivative flags | |
+block_generation_meta | text(JSON) | audit (prompt_version, model,
+tokens) |</p>
+<p><strong><code>block_docs</code></strong> — per-block markdown
+documentation. <code>UNIQUE(block_id, block_version)</code>. cols:
+markdown (YAML frontmatter + body), sections, auto_generated,
+last_edited_by, last_edited_at.</p>
+<h3
+id="32-agent-knowledge-tables-pgvector--created-together-in-one-migration">3.2
+Agent knowledge tables (pgvector) — created together in one
+migration</h3>
+<p><strong><code>agent_knowledge</code></strong> — RAG
+planning/execution hints. user_id, scope_type, scope_value, title, body,
+priority(<code>high</code>…),
+<code>applies_to</code>(<code>plan</code>|<code>execute</code>|<code>both</code>),
+<code>always_on</code>(bool), active, source,
+<strong><code>embedding vector(1024)</code> insertable=false
+updatable=false</strong>, uses, last_used_at. ivfflat cosine index on
+embedding.</p>
+<p><strong><code>agent_examples</code></strong> — few-shot. user_id,
+scope_*, title, input_text, output_text, <strong>embedding
+vector(1024)</strong>, uses.</p>
+<p><strong><code>agent_directives</code></strong> — prompt directives.
+user_id, scope_type (<code>global|skill|tool|recipe</code>),
+scope_value, title, body, priority, active,
+source(<code>manual|auto-promoted</code>).</p>
+<p><strong><code>agent_lexicon</code></strong> — term normalization.
+<code>UNIQUE(user_id, term)</code>; standard, note, uses.</p>
+<p><strong><code>agent_directive_fires</code></strong> — telemetry.</p>
+<h3 id="33-auth--audit--ops-tables">3.3 Auth / audit / ops tables</h3>
+<p><strong><code>users</code></strong> — username (uq), email (uq),
+display_name, hashed_password, is_active, is_superuser,
+<code>roles text</code> (JSON list), oidc_provider, oidc_sub,
+last_login_at. <strong><code>role_change_logs</code></strong> —
+target_user_id, actor_user_id, old_roles, new_roles, reason, changed_at.
+<strong><code>agent_sessions</code></strong> (string PK
+<code>session_id varchar(36)</code>, LangGraph checkpoint store),
+<strong><code>agent_drafts</code></strong> (string PK),
+<strong><code>agent_feedback_log</code></strong> (UQ session+msg+user),
+<strong><code>audit_logs</code></strong>,
+<strong><code>event_types</code></strong> (uq name),
+<strong><code>system_parameters</code></strong> (uq key),
+<strong><code>user_preferences</code></strong> (uq user_id),
+<strong><code>pb_canvas_operations</code></strong> (Glass-Box op log),
+<strong><code>pb_pipeline_runs</code></strong>,
+<strong><code>execution_logs</code></strong>.</p>
+<p>(L4 tables — out of POC scope: <code>alarms</code>,
+<code>auto_patrols</code>, <code>pipeline_auto_check_triggers</code>,
+<code>generated_events</code>, <code>notification_inbox</code>,
+<code>personal_rule_fires</code>, <code>routine_checks</code>.)</p>
+<p><strong>Note:</strong> Build traces are NOT a DB table — the sidecar
+writes them to <code>/tmp/builder-traces/*.json</code> (see §7.7).</p>
+<hr />
+<h2 id="4-backend-api-contract-java">4. Backend API contract (Java)</h2>
+<p>Two auth surfaces. <strong><code>/api/v1/*</code></strong> =
+user-facing, JWT, <code>@PreAuthorize</code> role gates.
+<strong><code>/internal/*</code></strong> = service-to-service,
+<code>X-Internal-Token</code> (+ optional caller-IP allow-list), called
+only by the sidecar's <code>JavaAPIClient</code>. All responses wrap in
+<code>ApiResponse&lt;T&gt;</code> → <code>{ "data": ... }</code>. DTOs
+are Java <code>record</code>s serialized to snake_case.</p>
+<p>Role authorities: <code>ADMIN = hasRole('IT_ADMIN')</code>,
+<code>ADMIN_OR_PE = hasAnyRole('IT_ADMIN','PE')</code>,
+<code>ANY_ROLE = all three</code>. Role hierarchy
+<code>IT_ADMIN &gt; PE &gt; ON_DUTY</code> (Spring
+<code>RoleHierarchyImpl</code>).</p>
+<h3 id="41-agent-proxy-sse-bridge-to-sidecar">4.1 Agent proxy (SSE
+bridge to sidecar)</h3>
+<p>Bridges reactive <code>Flux&lt;ServerSentEvent&gt;</code> from the
+sidecar → MVC <code>SseEmitter</code> via a
+<code>SseEmitterBridge.bridge(flux, tag, timeout)</code> helper. JSON
+(non-stream) endpoints <code>.block()</code> the Mono.</p>
+<table>
+<thead>
+<tr>
+<th>Method + path</th>
+<th>auth</th>
+<th>forwards to sidecar</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>POST <code>/api/v1/agent/chat</code> (SSE)</td>
+<td>ANY_ROLE</td>
+<td><code>/internal/agent/chat</code> —
+<code>{message, session_id, client_context, mode, pipeline_snapshot}</code></td>
+</tr>
+<tr>
+<td>POST <code>/api/v1/agent/build</code> (SSE)</td>
+<td>ADMIN_OR_PE</td>
+<td><code>/internal/agent/build</code> —
+<code>{instruction, pipeline_id, pipeline_snapshot, trigger_payload}</code></td>
+</tr>
+<tr>
+<td>POST
+<code>/api/v1/agent/build/{confirm,plan-confirm,clarify-respond,handover,modify-request}</code>
+(SSE)</td>
+<td>ADMIN_OR_PE</td>
+<td>builder resume endpoints</td>
+</tr>
+<tr>
+<td>POST <code>/api/v1/agent/chat/intent-respond</code> (SSE)</td>
+<td>ANY_ROLE</td>
+<td>chat clarify/judge resume</td>
+</tr>
+<tr>
+<td>POST
+<code>/api/v1/agent/{pipeline/execute, pipeline/validate, sandbox/run}</code></td>
+<td>ADMIN_OR_PE</td>
+<td>block the Mono</td>
+</tr>
+<tr>
+<td>GET/POST <code>/api/v1/agent/sessions[...]</code></td>
+<td>ANY_ROLE</td>
+<td>session list/get</td>
+</tr>
+<tr>
+<td>POST <code>/api/v1/agent/feedback</code></td>
+<td>ANY_ROLE</td>
+<td>thumbs ±1 (rating=-1 needs
+reason∈{data_wrong,logic_wrong,chart_unclear})</td>
+</tr>
+</tbody>
+</table>
+<h3 id="42-catalog--registry-internal-read-by-sidecar">4.2 Catalog +
+registry (internal, read by sidecar)</h3>
+<ul>
+<li>GET <code>/internal/blocks?category&amp;status</code>, GET
+<code>/internal/blocks/{id}</code> → block DTO (snake_case of §3.1
+pb_blocks).</li>
+<li>GET <code>/internal/mcp-definitions?mcp_type</code> (note:
+<strong>not</strong> <code>/internal/mcps</code>) → MCP DTO.</li>
+<li>GET <code>/internal/pipelines/{id}</code> + list. GET
+<code>/internal/skills</code> + POST
+<code>/internal/skills/by-slug/{slug}/run-system</code>.</li>
+<li>POST <code>/internal/published-skills/search</code>
+<code>{query, top_k}</code>.</li>
+<li>GET <code>/internal/block-docs</code> +
+<code>/internal/block-docs/{block_id}/{version}</code> (auto-gen
+docs).</li>
+<li>Agent-knowledge internal surface
+<code>/internal/agent-knowledge/*</code>:
+<code>directives/active</code>, <code>directives/{id}/fire</code>,
+<code>lexicon</code>, <code>knowledge/search</code>
+(<code>{user_id, query_vec, skill_slug, tool_id, recipe_id, layer, limit}</code>),
+PUT <code>knowledge/{id}/embedding</code> (native CAST write),
+<code>knowledge/use</code>,
+<code>knowledge/high-priority?layer&amp;always_only</code>,
+<code>examples/search</code>, <code>examples/{id}/embedding</code>,
+<code>*/missing-embeddings</code>.</li>
+<li>GET <code>/internal/agent-context</code> (≤10 active alarms
+snapshot), GET/PUT <code>/internal/agent-sessions/{id}</code> (LangGraph
+checkpointer store, partial upsert).</li>
+</ul>
+<h3 id="43-user-facing-crud">4.3 User-facing CRUD</h3>
+<ul>
+<li><code>/api/v1/skills</code> (list/get ANY_ROLE; create/update/delete
+ADMIN_OR_PE) — dup name → 409.</li>
+<li><code>/api/v1/skill-documents</code> (thin → SkillDocumentService):
+CRUD + confirm-check + bind-pipeline + steps + POST
+<code>/{slug}/run</code> (SSE, → SkillRunnerService, events
+step_start/step_done/done).</li>
+<li><code>/api/v1/pipelines</code> (thin → PipelineService): CRUD, fork,
+runs, transition, archive, publish/draft-doc, publish,
+publish-auto-check. DELETE = ADMIN.</li>
+<li><code>/api/v1/pipeline-builder/{blocks,validate,preview,execute}</code>
+— reads + forward-to-sidecar (16MB buffer).</li>
+<li><code>/api/v1/published-skills</code> (list/get/by-slug; POST
+<code>/{id}/retire</code> ADMIN_OR_PE).</li>
+<li><code>/api/v1/mcp-definitions</code> (CRUD; writes ADMIN). POST
+create: if <code>produces_block|produces_skill</code> →
+<code>MCPDerivativeService.createWithDerivatives</code> (atomic
+MCP+block+pipeline+skill); else plain insert. POST
+<code>/generate-derivatives</code> (proxy sidecar Haiku, no DB write),
+POST <code>/{id}/regenerate-derivatives</code>.</li>
+<li><code>/api/v1/agent-knowledge</code>,
+<code>/api/v1/agent-directives</code>,
+<code>/api/v1/agent-lexicon</code>, <code>/api/v1/agent-examples</code>
+(full CRUD, ANY_ROLE).</li>
+<li><code>/api/v1/block-docs</code> (GET/PUT).</li>
+<li><code>/api/v1/admin/users</code> (class-level ADMIN): create
+(+SegregationOfDuties), list, PUT <code>/{id}/roles</code>
+<code>{roles, reason}</code> (writes role_change_logs), PUT
+<code>/{id}/active</code>, GET <code>/{id}/role-history</code>.
+Self-lockout guards.</li>
+<li><code>/api/v1/auth/login</code> (permit-all, local JWT), GET/PUT
+<code>/me</code>, PUT <code>/me/password</code>. POST
+<code>/api/v1/auth/oidc-upsert</code> (shared-secret
+<code>X-Upsert-Secret</code>; match provider+sub→email→create with
+default ON_DUTY; issues local JWT).</li>
+</ul>
+<h3 id="44-auth-model-security-filter-chains">4.4 Auth model (security
+filter chains)</h3>
+<p>Two <code>SecurityFilterChain</code>s ordered by
+<code>@Order</code>:</p>
+<ol type="1">
+<li><code>securityMatcher("/internal/**")</code>, stateless.
+<code>X-Internal-Token</code> validated against config; grants
+<code>SERVICE_PYTHON_SIDECAR</code>. <strong>Rebuilds the originating
+user</strong> from forwarded <code>X-User-Id</code> /
+<code>X-User-Name</code> / <code>X-User-Roles</code> so audit logs
+capture the real user, not the sidecar.</li>
+<li>Everything else, stateless. Permit-all:
+<code>/actuator/health</code>, <code>/api/v1/auth/login</code>,
+<code>/api/v1/auth/oidc-upsert</code>, <code>/api/v1/health</code>;
+<code>anyRequest().authenticated()</code>.</li>
+</ol>
+<p>Mode-driven (<code>aiops.auth.mode</code>): <code>local</code> → JWT
+(HMAC256, ≥32-char secret, claims
+<code>roles</code>+<code>user_id</code>); <code>oidc</code> → OAuth2
+resource server (Azure AD JWKS). A <code>SharedSecretAuthFilter</code>
+accepts <code>Bearer &lt;shared-secret&gt;</code> as a synthetic
+IT_ADMIN (legacy frontend <code>INTERNAL_API_TOKEN</code> compat); it
+overrides <code>shouldNotFilterAsyncDispatch()=false</code> so the
+security context survives SSE async re-dispatch.
+<strong>SegregationOfDuties</strong>: IT_ADMIN+PE forbidden together;
+ON_DUTY exclusive; ≥1 role required.</p>
+<h3
+id="45-shared-helpers-build-these-dont-re-implement-per-call-site">4.5
+Shared helpers (build these, don't re-implement per call-site)</h3>
+<p><code>JsonUtils.{parseObject→{},parseListOfObjects→[],safeWrite→null,asMap}</code>
+(catch <code>JsonProcessingException</code> only).
+<code>SseEmitterBridge.bridge(flux, tag, timeoutMs)</code> (default
+10min; disposes the reactor subscription on timeout/error/complete).
+<code>RequestBodyAccess.{pickAlias, requireAlias→400, asLong, asBool}</code>
+for endpoints accepting both camel/snake. <code>ApiResponse</code>
+envelope, <code>ApiException</code> + <code>@ControllerAdvice</code> →
+HTTP status.</p>
+<hr />
+<h2 id="5-the-block--pipeline-execution-system-the-substrate">5. The
+block + pipeline execution system (the substrate)</h2>
+<p>This is the deterministic engine the agent drives. Build and test it
+<strong>before</strong> the agent — the agent is only as good as the
+blocks it has.</p>
+<h3 id="51-block-spec-schema">5.1 Block spec schema</h3>
+<p>Each block is a spec dict (canonical list lives in
+<code>pipeline_builder/seed.py:_blocks()</code>, seeded into
+<code>pb_blocks</code>, re-read at runtime via the registry). Fields and
+their roles:</p>
+<table>
+<thead>
+<tr>
+<th>field</th>
+<th>role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code>, <code>version</code></td>
+<td>natural key; <code>name</code> is referenced by pipeline nodes</td>
+</tr>
+<tr>
+<td><code>category</code></td>
+<td><code>source</code>/<code>transform</code>/<code>output</code>/<code>logic</code>/<code>check</code>
+— drives validator endpoint rules + UI grouping</td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td><code>production</code>/<code>deprecated</code></td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td><strong>the single source of truth the LLM reads.</strong>
+Structured prose: <code>== What ==</code>,
+<code>== When to use ==</code> (with ✅/❌ examples),
+<code>== Params ==</code>, <code>== Output ==</code>,
+<code>== Common mistakes ==</code>, <code>== Errors ==</code>. The agent
+picks blocks and writes params from this text alone — it never sees
+executor source.</td>
+</tr>
+<tr>
+<td><code>input_schema</code> / <code>output_schema</code></td>
+<td>declared ports <code>[{port,type,columns?}]</code>. Source blocks
+have <code>input_schema=[]</code>. Logic blocks emit
+<code>triggered</code>(bool)+<code>evidence</code>(df). Chart blocks
+emit <code>chart_spec</code>(dict).</td>
+</tr>
+<tr>
+<td><code>param_schema</code></td>
+<td><code>{type:object, properties:{...}, required:[...]}</code>.
+Properties carry
+<code>type</code>/<code>enum</code>/<code>default</code>/<code>description</code>
++ custom UI hints <code>x-column-source</code>,
+<code>x-suggestions</code>. Validator C6 + UI Inspector both read
+it.</td>
+</tr>
+<tr>
+<td><code>implementation</code></td>
+<td><code>{type:"python", ref:"...:Executor"}</code> or
+<code>{type:"mcp_proxy", mcp_name}</code> (V54)</td>
+</tr>
+<tr>
+<td><code>produces</code></td>
+<td><strong>phase-matching metadata.</strong> <code>covers</code>: list
+of phase kinds this block satisfies
+(<code>raw_data</code>/<code>transform</code>/<code>scalar</code>/<code>verdict</code>/<code>chart</code>/<code>table</code>/<code>alarm</code>).
+<code>outcome_extractors</code>:
+<code>[{key, from_port, json_path, type}]</code> declarative result
+extraction. Composite panels split into <code>covers_output</code> vs
+<code>covers_internal</code>.</td>
+</tr>
+<tr>
+<td><code>examples</code></td>
+<td><code>[{params, desc}]</code> — concrete fillings; read by LLM +
+shown in BlockDocsDrawer</td>
+</tr>
+<tr>
+<td><code>output_columns_hint</code></td>
+<td><code>[{name,type,description?,when_present?}]</code> — incl.
+conditional (<code>when_present:"object_name=APC"</code>) + dynamic
+(<code>apc_&lt;param&gt;</code>) columns</td>
+</tr>
+<tr>
+<td><code>column_docs</code></td>
+<td>richer v30 per-column doc <code>[{col,type,what}]</code> injected
+into agent prompts</td>
+</tr>
+<tr>
+<td><code>meta.standalone_capable</code></td>
+<td>opts a composite block out of the orphan validator</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Critical invariant:</strong> <code>description</code> /
+<code>param_schema</code> / <code>examples</code> must stay in sync
+because the Glass-Box builder, the Block Advisor, and the user-facing
+BlockDocsDrawer all read them. There is no other documentation. Changing
+block behavior means changing all three.</p>
+<h3 id="52-executor-contract">5.2 Executor contract</h3>
+<p><code>BlockExecutor(ABC)</code>
+(<code>pipeline_builder/blocks/base.py</code>):</p>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> BlockExecutor(ABC):</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>    block_id: <span class="bu">str</span>  <span class="co"># must be set; empty → RuntimeError</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>    <span class="at">@abstractmethod</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>    <span class="cf">async</span> <span class="kw">def</span> execute(<span class="va">self</span>, <span class="op">*</span>, params: <span class="bu">dict</span>, inputs: <span class="bu">dict</span>,</span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>                      context: ExecutionContext) <span class="op">-&gt;</span> <span class="bu">dict</span>[<span class="bu">str</span>, Any]: ...</span></code></pre></div>
+<ul>
+<li><code>params</code>: <code>$input</code>-resolved +
+param_schema-validated user params.</li>
+<li><code>inputs</code>: <code>{dest_port: upstream_value}</code>. The
+standard data port is <code>inputs["data"]</code>, a <strong>pandas
+DataFrame</strong> (records-as-rows; values may be nested dict/list
+under object-native mode).</li>
+<li>returns <code>{port_name: value}</code> — keys must match declared
+<code>output_schema</code>. Data ports return <code>pd.DataFrame</code>;
+chart blocks return <code>{"chart_spec": dict}</code>; logic blocks
+return <code>{"triggered": bool, "evidence": df}</code>.</li>
+<li><code>ExecutionContext</code> = <code>{run_id, extras: dict}</code>.
+Errors raise <code>BlockExecutionError(ErrorEnvelope)</code> with
+structured
+<code>{code, message, hint, param, given, expected, rationale, node_id, block_id}</code>
+— the structured fields feed the repair LLM so it disambiguates without
+parsing English.</li>
+<li>Helper <code>self.require(params, key, expected=, rationale=)</code>
+→ structured <code>PARAM_MISSING</code>.</li>
+</ul>
+<p>Two registries the executors live in:
+<code>BUILTIN_EXECUTORS: dict[str, type]</code>
+(<code>blocks/__init__.py</code>) and
+<code>SIDECAR_NATIVE_BLOCKS: frozenset[str]</code>
+(<code>executor/real_executor.py</code>, the in-process fast-path
+whitelist). Both = 56.</p>
+<h3 id="53-the-56-block-catalog">5.3 The 56-block catalog</h3>
+<p><strong>source (4):</strong> <code>block_process_history</code> (pull
+process events from a source MCP; nested DF by default),
+<code>block_rework_request</code>, <code>block_mcp_call</code> (generic
+single MCP call), <code>block_list_objects</code> (list master
+objects).</p>
+<p><strong>transform (20):</strong> <code>block_filter</code>
+(single-condition, path-aware column), <code>block_find</code>
+(filter+sort+take first/last/all), <code>block_count_rows</code>,
+<code>block_mcp_foreach</code> (call an MCP per upstream row),
+<code>block_delta</code> (adjacent diff + rising/falling),
+<code>block_join</code>, <code>block_groupby_agg</code>,
+<code>block_shift_lag</code>, <code>block_rolling_window</code>,
+<code>block_unpivot</code>, <code>block_apc_long_form</code>,
+<code>block_union</code>, <code>block_ewma</code>,
+<code>block_histogram</code> (bins + stats), <code>block_sort</code>
+(multi-col + top-N), <code>block_compute</code> (derived column
+expression), <code>block_pluck</code> (extract nested field),
+<code>block_unnest</code> (explode array), <code>block_select</code>
+(project/rename). (<code>block_spc_long_form</code> deprecated.)</p>
+<p><strong>logic (8):</strong> <code>block_threshold</code> (→
+triggered+evidence), <code>block_consecutive_rule</code>,
+<code>block_weco_rules</code> (Western Electric/Nelson SPC rules),
+<code>block_cpk</code> (Cp/Cpk/Pp/Ppk), <code>block_any_trigger</code>
+(OR + merge evidence), <code>block_correlation</code>,
+<code>block_hypothesis_test</code> (t-test/ANOVA/chi-square),
+<code>block_linear_regression</code> (OLS).</p>
+<p><strong>check (1):</strong> <code>block_step_check</code> (aggregate
+→ scalar → pass/fail; Skill-step terminal block).</p>
+<p><strong>output (23):</strong> <code>block_alert</code> (the
+<strong>only</strong> alarm-phase block), <code>block_data_view</code>
+(table), and <strong>18 dedicated SVG chart blocks</strong>:
+<code>block_line_chart</code> (+control rules/highlight),
+<code>block_bar_chart</code>, <code>block_scatter_chart</code>,
+<code>block_box_plot</code>, <code>block_splom</code> (scatter matrix),
+<code>block_histogram_chart</code> (+USL/LSL/normal fit),
+<code>block_xbar_r</code> (X̄/R + full WECO R1-R8),
+<code>block_imr</code> (individual+moving range),
+<code>block_ewma_cusum</code> (small-shift detector),
+<code>block_pareto</code> (+cumulative 80%),
+<code>block_variability_gauge</code>,
+<code>block_parallel_coords</code>, <code>block_probability_plot</code>
+(Q-Q + Anderson-Darling), <code>block_heatmap_dendro</code>,
+<code>block_wafer_heatmap</code> (IDW interpolation),
+<code>block_defect_stack</code>, <code>block_spatial_pareto</code>,
+<code>block_trend_wafer_maps</code> (small-multiples). Plus two
+composite one-line panels: <code>block_spc_panel</code>,
+<code>block_apc_panel</code> (source→chart in one block).
+(<code>block_chart</code> generic deprecated.)</p>
+<h3 id="54-pipeline--dag-model">5.4 Pipeline / DAG model</h3>
+<p><code>PipelineJSON = {version, name, metadata, inputs[], nodes[], edges[]}</code>.</p>
+<ul>
+<li><strong>Node</strong> =
+<code>{id, block_id, block_version:"1.0.0", position:{x,y}, params:{}, display_label?}</code>
+(<code>block_id</code> = block name).</li>
+<li><strong>Edge</strong> =
+<code>{id, from:{node,port}, to:{node,port}}</code> (<code>from</code> ↔︎
+<code>from_</code> in Python).</li>
+<li><strong>Input</strong> =
+<code>{name, type, required, default?, example?, description?}</code>;
+referenced in params as <code>"$name"</code> (full-string only, no
+interpolation).</li>
+</ul>
+<p><strong>DAG executor</strong>
+(<code>pipeline_builder/executor.py::PipelineExecutor.execute</code>):</p>
+<ol type="1">
+<li>resolve inputs (runtime values + declared defaults; canonical
+fallbacks like tool_id→EQP-01 so preview doesn't red-banner).</li>
+<li>Kahn topological sort (raise on cycle).</li>
+<li>per node in topo order: gather
+<code>inputs[dest_port]=cache[src_node][src_port]</code>; any upstream
+missing/failed → skip fail-fast (<code>overall_status="failed"</code>);
+substitute <code>$name</code>; <code>await executor.execute(...)</code>;
+cache by node id; emit
+<code>pb_run_start/pb_node_start/pb_node_done/pb_run_done</code>.</li>
+<li>build result summary: terminal logic node's
+<code>triggered</code>+evidence, all <code>chart_spec</code>s (sorted by
+<code>sequence</code> param then x), data_views, alerts.</li>
+</ol>
+<p><strong>Nested vs flat data:</strong> canonical row type is
+<code>list[dict]</code> with nested values.
+<code>block_process_history</code> defaults <code>nested=true</code>;
+chart blocks call <code>ensure_flat_spc</code> at entry to auto-flatten.
+<strong>Path syntax</strong> (<code>path.py</code>): <code>a.b.c</code>
+(dot), <code>arr[]</code> (whole array), <code>arr[].field</code> (pluck
+from each). Tokens must match <code>[a-zA-Z0-9_]+</code>;
+leading-dot/dunder forbidden (read-only).</p>
+<h3 id="55-validator-rules-pipeline_buildervalidatorpy">5.5 Validator
+rules (<code>pipeline_builder/validator.py</code>)</h3>
+<p>Each yields <code>{rule, message, node_id?, edge_id?}</code>. C1
+schema parse; C2 block exists in catalog; C3 block status (if enforcing
+production); C4 port compatibility (from/to ports declared + types
+match); C5 no cycle; <strong>C6 param schema</strong> (required present
++ shallow type/enum, skips <code>$</code>-refs, emits
+<code>PARAM_MISSING</code>/<code>PARAM_TYPE_WRONG</code>/<code>PARAM_VALUE_INVALID</code>
+with a description snippet as rationale); <strong>C7 endpoints</strong>
+(≥1 source AND ≥1 output block); C9 chart sequence collision (warn); C10
+undeclared <code>$input</code> ref; C11-C13 kind rules
+(<code>auto_patrol</code> needs <code>block_alert</code>;
+<code>auto_check</code>/<code>skill</code> need a chart and NO alert);
+<strong>C14 orphan</strong> (node with zero in+out edges, exempt if
+<code>meta.standalone_capable</code>); <strong>C15 source-less</strong>
+(non-source node with outgoing but no incoming → silent break).</p>
+<h3 id="56-boot-consistency-invariant">5.6 Boot consistency
+invariant</h3>
+<p>Adding a block touches <strong>5 places</strong> (executor file,
+<code>BUILTIN_EXECUTORS</code>, <code>SIDECAR_NATIVE_BLOCKS</code>,
+<code>seed.py:_blocks()</code>, <code>pb_blocks</code> DB row). At boot
+<code>check_block_consistency()</code> diffs all four registries and
+logs drift at ERROR (does not raise — boots for observability). On no
+drift it logs <code>N builtin, N native, N seed, N DB</code> — these
+four must be equal (currently 56). Excludes <code>source=mcp_auto</code>
+rows.</p>
+<hr />
+<h2 id="6-the-agent-system-the-hard-part--deep-dive">6. The agent system
+(the hard part) — deep dive</h2>
+<p>Two LangGraph stacks share one LLM client and reach state only
+through Java. <strong>Builder Glass Box</strong>
+(<code>agent_builder/graph_build/</code>) constructs pipelines;
+<strong>Chat orchestrator</strong> (<code>agent_orchestrator_v2/</code>)
+answers ops questions and, on a pipeline-build intent, drives the
+builder graph as a sub-agent. This section is implementation-grade:
+routers are reproduced as predicate logic, with the state keys each
+reads.</p>
+<h3 id="61-the-two-non-negotiable-design-rules">6.1 The two
+non-negotiable design rules</h3>
+<ol type="1">
+<li><strong>Flow control lives in graph nodes; the LLM only does narrow
+reasoning.</strong> Every "what next / which tool" decision is a
+deterministic node or a classifier node routing to a fixed downstream
+sequence — never a prompt rule. LLMs disobey prompt-flow (proven
+repeatedly), prompt-flow isn't unit-testable, and a node failure points
+at a specific node. Each LLM node does one narrow job (classify /
+extract / write), never "decide the next step."</li>
+<li><strong>No case-specific rules in prompts.</strong> A failing trace
+never earns a new prompt rule ("ban mean/std for box_plot"); every such
+rule is bypassed by a new phrasing in months. Abstract to a one-line
+principle, or move the check to a graph node / schema / structured-meta
+field.</li>
+</ol>
+<p>Both stacks: <code>GraphState</code>/<code>BuildGraphState</code> are
+<code>TypedDict</code>s; LangGraph merges returned keys
+(last-write-wins, except list-append reducers and the
+<code>add_messages</code> message reducer). A boot assert fails import
+if any <code>run()</code> kwarg isn't a declared state key (LangGraph
+silently drops undeclared keys).</p>
+<hr />
+<h2 id="6a-builder-glass-box-graph-v30-react">6A. Builder Glass Box
+graph (v30 ReAct)</h2>
+<p>Compiled once, cached in a module global; checkpointer is an
+in-process <code>MemorySaver</code> (restart drops paused sessions). v30
+is the default path (<code>v30_mode=True</code>); a legacy v27
+macro-plan path coexists behind <code>AGENT_BUILD_V30=0</code>.</p>
+<h3 id="6a1-node-wiring--routers">6A.1 Node wiring &amp; routers</h3>
+<p>Linear spine then a verify loop:</p>
+<pre><code>START ─_route_entry→ goal_plan ─_route_after_goal_plan→ goal_plan_confirm_gate[interrupt]
+  ─_route_after_goal_plan_confirm→ task_contract_extractor → resolve_presentation_contracts
+  → agentic_phase_loop ⇄ phase_verifier → finalize → inspect_execution → layout → END
+escape hatches: phase_revise, halt_handover[interrupt], judge_clarify_pause[interrupt], step_pause_gate[interrupt]</code></pre>
+<p>Every conditional edge, as predicate logic (the
+<code>status</code>/flag keys are the contract — reproduce exactly):</p>
+<table>
+<thead>
+<tr>
+<th>Router</th>
+<th>Predicate</th>
+<th>→ node</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>_route_entry</code></td>
+<td><code>v30_mode</code></td>
+<td>goal_plan; else clarify_intent (v27)</td>
+</tr>
+<tr>
+<td><code>_route_after_goal_plan</code></td>
+<td><code>status ∈ {refused,failed}</code> → finalize</td>
+<td>else goal_plan_confirm_gate</td>
+</tr>
+<tr>
+<td><code>_route_after_goal_plan_confirm</code></td>
+<td><code>status=="refused"</code> → finalize</td>
+<td>else label <code>"agentic_phase_loop"</code> <strong>remapped to
+<code>task_contract_extractor</code></strong> (easy to miss)</td>
+</tr>
+<tr>
+<td><code>_route_after_phase_loop</code></td>
+<td><code>status=="phase_revise_pending"</code> → phase_revise;
+<code>v30_verify_now</code> → phase_verifier</td>
+<td>else <strong>self-loop</strong> agentic_phase_loop (keep building
+chain in same phase)</td>
+</tr>
+<tr>
+<td><code>_route_after_phase_verifier</code></td>
+<td><code>v30_judge_pause</code> → judge_clarify_pause;
+<code>idx&gt;=len(phases)</code> → finalize;
+<code>debug_step_mode</code> → step_pause_gate</td>
+<td>else agentic_phase_loop</td>
+</tr>
+<tr>
+<td><code>_route_after_phase_revise</code></td>
+<td><code>status=="handover_pending"</code> → halt_handover</td>
+<td>else agentic_phase_loop</td>
+</tr>
+<tr>
+<td><code>_route_after_handover</code></td>
+<td><code>status=="phase_in_progress"</code> → agentic_phase_loop</td>
+<td>else finalize</td>
+</tr>
+<tr>
+<td><code>_route_after_judge_clarify</code></td>
+<td><code>replan_pending</code>→goal_plan;
+<code>cancelled</code>→halt_handover;
+<code>finished</code>→finalize</td>
+<td>else agentic_phase_loop</td>
+</tr>
+<tr>
+<td><code>_route_after_inspect</code></td>
+<td>v30 (<code>v30_phases</code> set) → <strong>always</strong>
+layout→END</td>
+<td>(v27 may go reflect_plan→validate)</td>
+</tr>
+</tbody>
+</table>
+<p>Two non-obvious facts: (a) the confirm router's label is remapped to
+the contract extractor, not the loop; (b) <strong>phase index
+advancement is owned solely by <code>phase_verifier</code> (auto) and
+<code>judge_clarify_pause</code> (manual continue)</strong> — the loop
+node never advances <code>v30_current_phase_idx</code>.
+<code>v30_judge_pause</code> is wired but <strong>dormant</strong> in
+the current build-time verifier (data-deficit detection moved to
+runtime), so the judge path is reachable only if another path sets the
+flag.</p>
+<h3 id="6a2-goal_plan-node">6A.2 <code>goal_plan</code> node</h3>
+<p>Emits 3–7 <strong>intent-only</strong> phases
+(<code>MAX_PHASES=7</code>, <code>MIN_PHASES=1</code>), no block
+selection. Phase output schema (each phase, post-parse):</p>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode json"><code class="sourceCode json"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;id&quot;</span><span class="fu">:</span><span class="st">&quot;p1&quot;</span><span class="fu">,</span><span class="dt">&quot;goal&quot;</span><span class="fu">:</span><span class="st">&quot;&lt;one-sentence business intent&gt;&quot;</span><span class="fu">,</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a> <span class="dt">&quot;expected&quot;</span><span class="fu">:</span><span class="st">&quot;raw_data|transform|verdict|chart|table|scalar|alarm&quot;</span><span class="fu">,</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a> <span class="dt">&quot;expected_output&quot;</span><span class="fu">:{</span><span class="dt">&quot;kind&quot;</span><span class="fu">:</span><span class="er">str|</span><span class="kw">null</span><span class="fu">,</span><span class="dt">&quot;value_desc&quot;</span><span class="fu">:</span><span class="er">str|</span><span class="kw">null</span><span class="fu">,</span><span class="dt">&quot;criterion&quot;</span><span class="fu">:</span><span class="er">str|</span><span class="kw">null</span><span class="fu">},</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a> <span class="dt">&quot;why&quot;</span><span class="fu">:</span><span class="er">str|</span><span class="kw">null</span><span class="fu">,</span><span class="dt">&quot;user_edited&quot;</span><span class="fu">:</span><span class="kw">false</span><span class="fu">}</span></span></code></pre></div>
+<p>Invalid <code>expected</code> → coerced to <code>"transform"</code>.
+Top-level: <code>plan_summary</code>, <code>phases[]</code>, optional
+<code>alarm</code>.</p>
+<p><strong>System prompt skeleton</strong> (hard rules, abbreviated — do
+NOT copy as case rules, these are principles):</p>
+<ul>
+<li>Role = pipeline architect; output goal-oriented phases; MUST NOT
+name blocks.</li>
+<li>Plan layer is <strong>intention only</strong> — forbidden to leak
+(a) block names, (b) data-structure / column names, (c) tool-bound verbs
+(unnest/sort/groupby). Use business language. <code>value_desc</code> =
+one business sentence, no columns/counts/ enumerations.</li>
+<li>Linear order, no <code>depends_on</code>. One chart + one verdict =
+<strong>separate</strong> phases.</li>
+<li>Phase atomicity: each phase ≈ 1–2 blocks; chart blocks self-compute
+their stats (don't pre-add a stats-transform phase for them).</li>
+<li>Transform-phase necessity: if the user names a single SPC chart /
+APC param / nested field, the plan MUST include a <code>transform</code>
+phase between <code>raw_data</code> and downstream.</li>
+<li>Don't invent phases the user didn't ask for (no auto
+summary/scalar/verdict).</li>
+<li>Escape hatch: <code>{"too_vague":true,"reason":"..."}</code>.</li>
+</ul>
+<p><strong>Bounded retry</strong> (<code>_MAX_PLAN_ATTEMPTS=2</code>):
+<code>_attempt_plan_parse(resp)</code> returns
+<code>(decision, fail_kind)</code>. Parse success <strong>always
+wins</strong> (even if the provider flagged an error). Else
+<code>fail_kind ∈ {provider_error (stop_reason=='error'), empty_output, unparseable}</code>
+triggers one retry. Terminal: all-fail → <code>status="failed"</code>;
+<code>too_vague</code> → <code>status="refused"</code>;
+<code>&lt;MIN_PHASES</code> → <code>status="failed"</code>; success →
+seeds v30 state (<code>v30_current_phase_idx=0</code>,
+<code>v30_phase_round=0</code>, empty outcomes) +
+<code>status="goal_plan_confirm_required"</code>.</p>
+<p><strong>Knowledge injection</strong> (gated
+<code>ENABLE_PLAN_KNOWLEDGE</code>):
+<code>build_knowledge_hint(..., layer="plan")</code> (V58 layered →
+<code>applies_to∈{plan,both}</code> + always-on core + RAG).
+Best-effort, never raises.</p>
+<p><strong>Deterministic post-processing</strong> (graph node, not
+prompt): <code>_maybe_inject_chart_phase</code> (instruction matches
+chart keywords + no chart phase → append one) and
+<code>_maybe_inject_transform_phase</code> (nested-focus keywords +
+raw_data anchor + downstream output phase + no transform → insert
+transform after raw_data). These are the "principle in a node" pattern
+replacing prompt case-rules.</p>
+<p><strong><code>goal_plan_confirm_gate</code></strong>:
+<code>skip_confirm=True</code> (chat-launched) auto-confirms, emits
+<code>goal_plan_confirmed(auto)</code>, no interrupt. Else
+<code>interrupt({kind:"goal_plan_confirm_required", plan_summary, phases})</code>;
+resume <code>{confirmed:bool, phases?:[...]}</code>.
+<code>confirmed=False</code> → <code>status="refused"</code>; edited
+phases re-validated against the <code>expected</code> enum with
+edit-history tracking.</p>
+<h3 id="6a3-task_contract_extractor">6A.3
+<code>task_contract_extractor</code></h3>
+<p>One LLM call after confirm → <code>v30_task_contract</code>:</p>
+<pre><code>{user_instruction, primary_action, source_filters:{}, data_filters:{},
+ output_kind, markers:[], count_target:int|null,
+ count_strictness:&quot;strict&quot;|&quot;flexible&quot;|&quot;none&quot;}</code></pre>
+<p>Every key <code>setdefault</code>-filled. Skips if already cached /
+not v30 / no instruction. Any failure →
+<code>v30_task_contract=None</code> (downstream verifier falls back to a
+legacy judge). <code>max_tokens=600</code>.</p>
+<h3 id="6a4-agentic_phase_loop--anatomy-of-one-react-round">6A.4
+<code>agentic_phase_loop</code> — anatomy of one ReAct round</h3>
+<p>Budgets: <code>MAX_REACT_ROUNDS=32</code> (per phase),
+<code>MAX_INSPECT_CALLS_PER_ROUND=5</code>,
+<code>STUCK_DETECTOR_WINDOW=2</code>. One tool call per round. Each
+round = one fresh LLM call (stateless across rounds except the per-phase
+message stack <code>v30_phase_messages[pid]</code>, capped to last
+32).</p>
+<p><strong>Observation message</strong> the LLM sees each round (section
+order is the contract):</p>
+<ol type="1">
+<li>COMPLETED PHASES (prior outcomes: target + advanced_by node/block +
+<code>data_empty</code> badge)</li>
+<li>CURRENT PHASE (id/goal/expected/why)</li>
+<li>presentation-contract hint (if resolved)</li>
+<li><strong>VERIFIER FEEDBACK</strong>
+(<code>v30_last_verifier_reject</code>: rejected block, covers,
+expected, reason, <code>missing_for_phase</code> hints,
+<code>would_have_passed_with</code>)</li>
+<li>ALL PHASES CONTEXT (<code>&lt;-- you are here</code>)</li>
+<li>AVAILABLE INPUTS (declared <code>$name</code>)</li>
+<li>canvas nodes + runtime schema (from
+<code>exec_trace[*].runtime_schema_md</code>)</li>
+<li>CONNECT OPTIONS (type-compatible source ports per unfilled
+input)</li>
+<li>ACTIONS THIS PHASE (last-6 actions + result digests — memory across
+rounds)</li>
+<li>USER INSTRUCTION[:600]</li>
+<li>MATCHING BLOCKS (covers-filtered, goal-reranked,
+<code>[best fit]</code> tags)</li>
+<li>AVAILABLE BLOCKS (full two-tier catalog)</li>
+<li>YOUR NEXT ACTION (single tool call)</li>
+</ol>
+<p>Follow-up rounds append <code>assistant(tool_use)</code> (filtered to
+the exact dispatched tool_use_id — Anthropic requires one result per
+use) + <code>user([tool_result, canvas_diff_md])</code>, where the diff
+leads with <code>▶ YOUR PLAN</code> (next-memo), then verifier feedback,
+then rich sub-phase context, then connect options.</p>
+<p><strong>Auto-preview</strong>: after a mutating tool
+(<code>add_node/set_param/connect/remove_node</code>) with no error →
+<code>preview(node_id, sample_size=5)</code>; the snapshot (cols[:20],
+sample, <code>runtime_schema_md</code>, coalesced error) is written to
+<code>exec_trace[lid]</code> so the next round sees real output shape
+(defeats output-shape hallucination).</p>
+<p><strong>Stuck detector</strong>:
+<code>args_hash = md5(sorted_json(tool,args))[:12]</code>; the same
+<code>(tool,args_hash)</code> appearing
+<code>STUCK_DETECTOR_WINDOW(2)</code> rounds in a row →
+<code>status="phase_revise_pending"</code>, emit
+<code>phase_revise_started(reason= "stuck_repeat_action")</code>.
+Hitting <code>MAX_REACT_ROUNDS</code> → same with
+<code>reason="max_rounds_no_progress"</code>.</p>
+<p><strong><code>v30_verify_now</code></strong> is set when the tool is
+<code>run_verifier</code>/<code>phase_complete</code> (explicit) or
+<code>_should_auto_verify</code> passes (gated; only when a just-added
+terminal block's <code>covers_output</code> includes
+<code>phase.expected</code> and the agent was "decisive"). For tool-lax
+providers (KIMI), text matching a "phase done" intent regex synthesizes
+a <code>phase_complete</code> call.</p>
+<h3 id="6a5-sub-phase-state-machine">6A.5 Sub-phase state machine</h3>
+<p><code>v30_subphase ∈ {pick, construct, tune, refine}</code> gates the
+available toolset per sub-phase, so the agent structurally cannot skip
+steps. <code>_TOOLS_BY_SUBPHASE</code>:</p>
+<table>
+<thead>
+<tr>
+<th>sub-phase</th>
+<th>exposed tools</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>pick</td>
+<td>inspect_node_output, inspect_block_doc, commit_pick, abort_phase
+(+add_node if auto_signal)</td>
+</tr>
+<tr>
+<td>construct</td>
+<td>add_node, connect, abort_node, abort_phase, inspect_*</td>
+</tr>
+<tr>
+<td>tune</td>
+<td>set_param, run_verifier, abort_node, abort_phase, commit_pick,
+inspect_*</td>
+</tr>
+<tr>
+<td>refine</td>
+<td>(not an LLM state — deterministic router)</td>
+</tr>
+</tbody>
+</table>
+<p>Transitions (<code>_next_subphase(current, tool)</code>):</p>
+<pre><code>pick:     commit_pick→construct   add_node→construct   abort_phase→refine
+construct:add_node→construct      connect→tune         abort_node→pick   abort_phase→refine
+tune:     set_param→tune(stay)    run_verifier→tune    abort_node→pick   commit_pick/add_node→construct   abort_phase→refine</code></pre>
+<p>Atomic <code>add_node(upstream=...)</code> from pick/construct/tune
+lands directly in <code>tune</code> (connect already done in the same
+call). On transition, <code>v30_subphase_round</code> resets to 0; else
+increments. <strong><code>refine</code> is a pseudo-state</strong>: only
+<code>abort_phase</code> yields it (→ surfaces as
+<code>phase_revise_pending</code>); the verifier sets the concrete next
+sub-phase (pick/construct/tune) directly on each reject.</p>
+<h3 id="6a6-phase_verifier-decision-tree">6A.6
+<code>phase_verifier</code> decision tree</h3>
+<p>Constants: <code>MAX_FAST_FORWARD_CHAIN=4</code>,
+<code>LEAF_PRUNE_AFTER=3</code>,
+<code>_STRICT_VERIFY_KINDS={chart,table,scalar,alarm}</code>. Covers
+gate flag <code>BUILDER_VERIFIER_COVERS_GATE</code> default
+<strong>OFF</strong>. Branches in order:</p>
+<ol type="1">
+<li><strong>no <code>v30_last_mutated_logical_id</code></strong> →
+<code>{}</code> (inspect/no-op round, nothing to verify).</li>
+<li><strong>(B) executor failure</strong>: no block_id OR snapshot
+status ∈ {validation_error, failed, error} →
+<code>_emit_reject(result=status, missing_for_phase=["fix params or pick a different block"])</code>.</li>
+<li><strong>(C) orphan</strong> <code>_check_orphan</code> (skip source
+/ <code>meta.standalone_capable</code>): target has 0 inbound edges →
+reject (<code>missing_for_phase=["connect upstream → …"]</code>).</li>
+<li><strong>(C2) non-output leaf</strong> <code>_nonoutput_leaves</code>
+(fires only once an output-category node exists): bounded reject up to
+<code>LEAF_PRUNE_AFTER(3)</code> times
+(<code>v30_leaf_reject_count</code>), then
+<strong><code>_prune_nodes</code></strong> removes the dangling leaf +
+touching edges and falls through to advance (writes
+<code>final_pipeline</code>).</li>
+<li><strong>(A) advance</strong>: covers gate OFF → advance exactly ONE
+phase; if <code>ENABLE_STRICT_PHASE_VERIFY</code> and
+<code>expected ∈ _STRICT_VERIFY_KINDS</code> and
+<code>expected ∉ covers_output</code> → reject
+(<code>would_have_passed_with=...</code>, catches a chart phase ending
+on <code>block_filter</code>). Covers gate ON → fast-forward up to 4
+phases whose <code>expected ∈ covers_internal</code>.</li>
+<li><strong>advance bookkeeping</strong>: per advanced phase write
+<code>v30_phase_outcomes[id]={status:"completed",advanced_by_block/node,plan_target}</code>;
+<code>new_idx=idx+len(advanced)</code>; reset
+<code>v30_phase_round=0</code>, <code>v30_subphase="pick"</code>,
+<code>v30_pending_*=None</code>, <code>v30_leaf_reject_count=0</code>,
+clear verifier-reject; emit <code>phase_completed</code>. The
+done→finalize decision is the router's
+(<code>idx&gt;=len(phases)</code>).</li>
+</ol>
+<p><code>_emit_reject</code> writes
+<code>v30_last_verifier_reject</code> (consumed by next observation),
+sets the deterministic next <code>v30_subphase</code> (orphan→construct,
+validation→tune/pick, else pick), does NOT advance the index → router
+returns to the loop. Covers resolved via
+<code>produces.covers_output</code>/<code>covers_internal</code>,
+falling back to legacy <code>covers</code> then an inference table
+(source→raw_data, chart→chart, data_view→table, alert→alarm,
+step_check/threshold→[verdict,scalar], dataframe→transform).</p>
+<h3 id="6a7-interrupt-nodes-payloads--resume--routing">6A.7 Interrupt
+nodes (payloads + resume + routing)</h3>
+<ul>
+<li><strong><code>phase_revise</code></strong> (LLM self-reflect, not an
+interrupt; <code>MAX_REVISE_ATTEMPTS_PER_PHASE=1</code>): asks
+<code>{root_cause, alternative_strategy, missing_capabilities[], can_retry}</code>.
+<code>can_retry=True</code> → clear stuck history, halve the round
+budget (<code>v30_phase_round=16</code>),
+<code>status="phase_in_progress"</code> → loop. Else / 2nd attempt →
+<code>status="handover_pending"</code> with
+<code>v30_handover={failed_phase_id, reason, missing_capabilities, options_offered:[edit_goal,take_over,backlog,abort]}</code>.</li>
+<li><strong><code>halt_handover</code></strong>
+(<code>interrupt</code>): <code>skip_confirm</code>
+auto-<code>take_over</code>→<code>build_partial</code>. Resume
+<code>{choice, new_goal?}</code>. edit_goal+new_goal → rewrite the phase
+goal, reset round, <code>phase_in_progress</code>→loop.
+take_over/backlog → <code>build_partial</code>. abort →
+<code>failed</code>, <code>final_pipeline=None</code>.</li>
+<li><strong><code>judge_clarify_pause</code></strong>
+(<code>interrupt</code>; <code>MAX_JUDGE_REPLAN=1</code>): resume
+<code>{action ∈ continue|replan|cancel}</code>. cancel → handover/abort.
+replan → wipe phases, set <code>v30_replan_hint</code>,
+<code>status="replan_pending"</code>→goal_plan. continue → manually
+advance the index (the verifier cleared its block context on
+pause).</li>
+<li><strong><code>step_pause_gate</code></strong>
+(<code>interrupt</code>, debug only): resume
+<code>{action:continue|abort}</code>.</li>
+</ul>
+<h3 id="6a8-finalize--inspect_execution--status-values">6A.8
+<code>finalize</code> / <code>inspect_execution</code> — status
+values</h3>
+<p><code>finalize</code> runs <code>PipelineValidator</code>, splits
+issues into
+<code>_STRUCTURAL_RULES ={C6_PARAM_SCHEMA, C14_ORPHAN_NODE, C15_SOURCE_LESS_NODE, C4_PORT_COMPAT, C16_PLACEHOLDER_LEAK}</code>
+vs advisory, then:</p>
+<pre><code>status = &quot;refused&quot;          if incoming refused
+       = &quot;failed&quot;           if v30 and 0 nodes
+       = &quot;failed_structural&quot; if structural issues
+       = &quot;finished&quot;         if all phases done (idx &gt;= len(phases))
+       = &quot;build_partial&quot;    if some phases done (idx &gt; 0)
+       = &quot;failed&quot;           otherwise</code></pre>
+<p>Optional strict deliverable gate
+(<code>ENABLE_STRICT_PHASE_OUTPUT</code>, default OFF):
+<code>finished</code> + final phase
+<code>expected ∈ {chart,table,scalar,alarm}</code> + no terminal covers
+it → <code>failed_missing_output</code>. Emits
+<code>build_finalized(ok=status=="finished", counts, warnings, structural_errors)</code>;
+an optional dry-run runs only when <code>finished</code> and never
+changes status. <code>inspect_execution</code> derives
+<code>inspection_issues</code> (DATA_EMPTY / DATA_SHAPE_WRONG /
+single_point_chart) but on the v30 path is informational only (router
+always goes layout→END).</p>
+<h3 id="6a9-builder-toolset-agent_buildertoolspy">6A.9 Builder toolset
+(<code>agent_builder/tools.py</code>)</h3>
+<p><code>list_blocks(category?)</code>,
+<code>explain_block(name)</code>,
+<code>add_node(block_name, version, position?, params?, upstream?)</code>
+(auto-offset, schema-aware param coercion, rejects undeclared
+<code>$refs</code>, optional atomic add+connect),
+<code>remove_node</code>,
+<code>connect(from, to, from_port="data", to_port="data")</code>
+(port-type validated, dedup), <code>disconnect</code>,
+<code>set_param(node_id, key, value)</code> (validates
+key/enum/<code>$ref</code> + <code>_check_column_in_upstream</code>
+against the computed upstream schema), <code>declare_input</code>,
+<code>move_node</code>/<code>rename_node</code>,
+<code>update_plan</code>, <code>get_state</code>,
+<code>preview(node_id, sample_size)</code>,
+<code>inspect_node_output(node_id, n_rows≤3)</code>,
+<code>inspect_block_doc(block_id, section)</code>,
+<code>commit_pick</code>/<code>abort_node</code>/<code>abort_phase</code>/<code>run_verifier</code>/<code>phase_complete</code>
+(control signals, not blocks), <code>validate</code>,
+<code>finish(summary)</code> (<strong>GATED: <code>validate()</code>
+must pass first</strong> else <code>FINISH_BLOCKED</code>). Errors raise
+<code>ToolError</code> carrying a structured <code>ErrorEnvelope</code>
+for the repair LLM.</p>
+<hr />
+<h2 id="6b-chat-orchestrator-graph-agent_orchestrator_v2">6B. Chat
+orchestrator graph (<code>agent_orchestrator_v2/</code>)</h2>
+<p><code>GraphState</code> reducers: last-write-wins except
+<code>tools_used</code>/<code>render_cards</code> (append) and
+<code>messages</code> (<code>add_messages</code> dedup-by-id).
+<code>MAX_ITERATIONS=25</code>, <code>mode</code> default
+<code>"chat"</code>.</p>
+<h3 id="6b1-node-wiring--routers">6B.1 Node wiring &amp; routers</h3>
+<p>Entry <code>load_context → intent_classifier_builder</code>. Static
+edges: <code>advisor_dispatch→synthesis</code>,
+<code>synthesis→self_critique</code>, <code>self_critique→END</code>.
+Conditional routers (predicate → node):</p>
+<table>
+<thead>
+<tr>
+<th>Router</th>
+<th>Predicate</th>
+<th>→ node</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>_route_after_builder</code> (reads <code>intent</code>)</td>
+<td>builder_{explain,compare,recommend,ambiguous}→advisor_dispatch;
+builder_{build_new,build_modify}→pre_clarify_check;
+builder_knowledge→llm_call</td>
+<td>else (not builder) → intent_classifier</td>
+</tr>
+<tr>
+<td><code>_route_after_pre_clarify</code></td>
+<td><code>force_synthesis</code>→synthesis</td>
+<td>else llm_call</td>
+</tr>
+<tr>
+<td><code>_route_after_intent</code></td>
+<td><code>force_synthesis or intent=="vague"</code>→synthesis;
+builder_<em>advisor→advisor_dispatch;
+builder_build_</em>/knowledge→llm_call;
+<code>intent.startswith("clear_")</code>→intent_completeness</td>
+<td>else llm_call</td>
+</tr>
+<tr>
+<td><code>_route_after_completeness</code></td>
+<td><code>force_synthesis</code>→synthesis</td>
+<td>else llm_call</td>
+</tr>
+<tr>
+<td><code>_should_continue</code> (after llm_call)</td>
+<td><code>force_synthesis</code>→synthesis;
+<code>current_iteration&gt;=25</code>→synthesis; last msg has
+tool_calls→tool_execute</td>
+<td>else synthesis</td>
+</tr>
+<tr>
+<td><code>_after_tools</code></td>
+<td><code>force_synthesis</code>→synthesis;
+<code>&gt;=25</code>→synthesis</td>
+<td>else llm_call</td>
+</tr>
+</tbody>
+</table>
+<p><code>force_synthesis</code> is the universal "stop the turn, render
+the canned/advisor/ error message" signal honored by all four
+post-classifier routers.</p>
+<h3 id="6b2-intent-classifiers">6B.2 Intent classifiers</h3>
+<p><strong><code>intent_classifier_builder</code></strong> (runs first;
+abstains <code>{}</code> if <code>mode!="builder"</code>): 7 buckets
+<code>BUILD_NEW, BUILD_MODIFY, EXPLAIN, COMPARE, RECOMMEND, KNOWLEDGE, AMBIGUOUS</code>
+(<code>MIN_CONFIDENCE=0.55</code>). Regex shortcuts skip the LLM
+(從零/新建/build a new → BUILD_NEW; 加一個/接到/改成/add a/remove →
+BUILD_MODIFY). LLM returns <code>{intent, confidence, reason}</code>;
+low-confidence non-build → AMBIGUOUS. Skill-step snapshots force
+BUILD_MODIFY/NEW. Sets
+<code>{intent:"builder_&lt;bucket&gt;", intent_hint:reason}</code>.</p>
+<p><strong><code>intent_classifier</code></strong> (chat): buckets
+<code>clear_chart, clear_rca, clear_status, knowledge, vague</code>.
+<strong><code>[intent=&lt;id&gt;]</code> prefix bypasses the
+LLM</strong> → <code>{intent:"clarified", user_message:cleaned}</code>.
+<code>vague</code> emits a <code>clarify</code> card +
+<code>force_synthesis</code> + a synthetic AIMessage (canned reply, no
+extra LLM). Rule of thumb encoded: a rule/algorithm name standing alone
+= knowledge; a target ("why is EQP-07 OOC") = clear_rca.</p>
+<h3 id="6b3-intent_completeness-deterministic-gate">6B.3
+<code>intent_completeness</code> (deterministic gate)</h3>
+<p>Bypasses (<code>{}</code>) for vague/clarified intents,
+non-<code>clear_</code> intents, and any
+<code>[intent_confirmed:...]</code> / <code>[intent=...]</code> prefix.
+Otherwise one LLM call checks three dimensions:</p>
+<ul>
+<li><strong>inputs</strong> — did the user name equipment/lot/step/date?
+Emits only canonical names
+(<code>tool_id, step, lot_id, recipe_id, apc_id, time_range, threshold, object_name</code>).</li>
+<li><strong>logic</strong> — what to compute (OOC rate / count / trend /
+cpk); flag only if vague verbs alone.</li>
+<li><strong>presentation</strong> — 8-way enum
+(<code>line_chart, bar_chart, control_chart, heatmap, table, alert, mixed_table_alert, mixed_chart_alert</code>);
+"users skip this most, be strict."</li>
+</ul>
+<p><code>is_pipeline_request==false</code> or
+<code>complete==true</code> → <code>{}</code> (proceed). Incomplete →
+emit <code>design_intent_confirm</code> card
+<code>{card_id:"intent-&lt;8hex&gt;", inputs:[normalized], logic, presentation:&lt;normalized&gt;, alternatives:[]}</code>
+(inputs normalized via an alias map equipment→tool_id,
+timeframe→time_range, etc.) + <code>force_synthesis</code>.</p>
+<h3
+id="6b4-pre_clarify_check-advisor_dispatch-dimensional-clarifier">6B.4
+<code>pre_clarify_check</code>, <code>advisor_dispatch</code>,
+dimensional clarifier</h3>
+<ul>
+<li><strong><code>pre_clarify_check</code></strong> (builder BUILD_*,
+pre-LLM): runs the dimensional clarifier; if dimensions fire, emit
+<code>design_intent_confirm</code> + <code>force_synthesis</code>
+<ul>
+<li><code>synthesis_text_override</code> (a deterministic "I need to
+confirm N things" reply, rendered with no LLM).</li>
+</ul></li>
+<li><strong><code>advisor_dispatch</code></strong>: bridges to the Block
+Advisor graph (EXPLAIN/COMPARE/ RECOMMEND/AMBIGUOUS), streams
+<code>advisor_answer</code> events, returns the markdown as the final
+text. The advisor graph itself classifies then runs pure-function nodes
+that fetch every block fact from Java <code>/internal/blocks</code> at
+call time.</li>
+<li><strong><code>dimensional_clarifier</code></strong>: deterministic
+detectors + LLM localization only. 4 detectors (max 3 fire):
+scope-conflict (tool_id declared but msg says 各機台/全廠 →
+single_via_param|all_machines|multi_via_list), metric-type (OOC but
+APC/SPC/FDC ambiguous), bar-x-axis (bar chart w/o x dim), time-grain
+(trend w/o bucket). One LLM call fills only question/label/hint in the
+user's language; canonical ids/values are immutable.
+<code>parse_resolutions_from_prefix("[intent_confirmed:&lt;card&gt; d1=A d2=B]")</code>
+→ <code>{d1:A,d2:B}</code>; <code>augment_goal_for_resolutions</code>
+splices a deterministic <code>(dim,value)→sentence</code> hint into the
+build goal.</li>
+</ul>
+<h3 id="6b5-llm_call">6B.5 <code>llm_call</code></h3>
+<p><code>MAX_LLM_ATTEMPTS=2</code>. Converts LangChain messages → v1
+<code>(system, messages)</code>, appends an intent-hint block if
+present. Prompt cache (gated): system wrapped as a content block with
+<code>cache_control:{type:ephemeral}</code>, and the <strong>last
+tool</strong> also stamped. Role gating:
+<code>_visible_tools(caller_roles)</code> = <code>TOOL_SCHEMAS</code>
+minus <code>_LLM_HIDDEN_TOOLS</code> (always) minus
+<code>execute_skill</code> (PIPELINE_ONLY_MODE) minus
+<code>_ON_DUTY_HIDDEN_TOOLS</code> (when <code>_is_on_duty_only</code>,
+fail-closed: empty roles = ON_DUTY).
+<code>llm.create(..., max_tokens=8192, tools)</code>. <strong>Usable =
+text OR tool_calls.</strong> Retry when
+exception/<code>stop_reason=='error'</code>/empty; persistent failure →
+synthetic AIMessage + <code>force_synthesis</code> (graceful).
+<code>response_metadata</code> carries <code>finish_reason</code> (raw
+provider) + cache token counts.</p>
+<h3 id="6b6-tool_execute">6B.6 <code>tool_execute</code></h3>
+<p>Degenerate-loop self-test (<code>LOOP_THRESHOLD=3</code> over
+execute_mcp/execute_skill/
+search_published_skills/invoke_published_skill) injects a
+<code>_loop_warning</code> the LLM sees next iteration. Special
+cases:</p>
+<ul>
+<li><strong><code>confirm_pipeline_intent</code></strong>: emits
+<code>design_intent_confirm</code> + result
+<code>{status:"awaiting_user_confirmation", _force_synthesis:true}</code>
++ a clean trailing AIMessage so synthesis doesn't dump raw JSON.</li>
+<li><strong><code>build_pipeline_live</code></strong> (drives the
+builder graph):
+<ol type="1">
+<li><strong>Dimensional clarifier gate</strong> — if the message doesn't
+start <code>[intent_confirmed:</code>, run
+<code>build_clarifications</code>; any fire → emit
+<code>design_intent_confirm</code> + <code>_force_synthesis</code>,
+build NOT run.</li>
+<li><strong><code>_scrub_chat_notes</code></strong> — drop lines
+carrying (a) literal IDs (<code>EQP-\d+</code>, <code>LOT-\d+</code>…)
+when that role is a declared <code>$input</code> (they conflict with the
+parametric intent), (b) block prescriptions (<code>block_…</code>), (c)
+structural directives (「需對各機台查詢」「分別查詢」). The chat LLM
+auto-fills notes from active alarms that contradict the user's
+<code>$tool_id</code> intent; the builder must own block choice.</li>
+<li><strong><code>_scrub_chat_goal</code></strong> — replace literal IDs
+with <code>$role</code> when declared, collapse <code>$X 和 $X</code>
+conjunctions, swap 全廠/各機台/所有機台 → <code>$tool_id 機台</code>
+(anti-scope-expansion).</li>
+<li>merge <code>parse_resolutions_from_prefix</code> + free-text picks;
+<code>augment_goal_…</code>.</li>
+<li><code>show_plan</code> → <code>dry_run_plan</code> (no mutation).
+Else
+<code>stream_graph_build( instruction=scrubbed_goal, base_pipeline, session_id=uuid, skip_confirm=True, skill_step_mode)</code>
+— "the chat conversation IS the confirmation." Intercepts
+<code>judge_clarify_pending</code>/<code>intent_confirm_required</code>
+(re-emits with the <strong>chat</strong> session id, registers a pending
+record, breaks). Each event → <code>wrap_build_event_for_chat</code> →
+<code>pb_glass_*</code>. Captures <code>done.pipeline_json</code>.</li>
+<li>Post-build safety validator (<code>C10_UNDECLARED_INPUT_REF</code>)
+→ <code>pb_glass_error</code>.</li>
+</ol></li>
+<li><strong>Auto-run</strong> (status ∈ {finished,success} + native
+blocks): emit <code>pb_run_start</code>,
+<code>execute_native(pipeline_json)</code>, attach <code>auto_run</code>
+summary, emit <code>pb_run_done</code> (or partial /
+<code>pb_run_error</code>).</li>
+</ul>
+<p><code>_trim_result_for_llm</code> prefers
+<code>llm_readable_data</code> (≤4000 chars), strips heavy keys
+(output_data, dataset, _data_profile) to protect the ReAct token
+budget.</p>
+<h3 id="6b7-synthesis--self_critique">6B.7 <code>synthesis</code> +
+<code>self_critique</code></h3>
+<p><strong><code>synthesis</code></strong>:
+<code>synthesis_text_override</code> short-circuits (no LLM). Else
+extract text from the last message, strip
+<code>&lt;plan&gt;…&lt;/plan&gt;</code>, resolve a contract via
+<code>_resolve_contract</code> (<strong>CHART 鐵律: always force
+<code>visualization=[]</code></strong> — discard LLM-embedded viz;
+chart-already-rendered mode strips <code>&lt;contract&gt;</code> from
+the visible text; else auto-build an SPC contract from
+<code>last_spc_result</code>).</p>
+<p><strong><code>self_critique</code></strong> (cheap-then-LLM): (1)
+deterministic ID-hallucination scan — any
+<code>LOT-/STEP_/EQP-/APC-/RCP-</code> id in the final text but NOT in
+any tool result is replaced <code>id⚠️[捏造]</code> + warning footer;
+(2) one bounded LLM value-traceability check (timeout 12s, non-blocking)
+verifying every concrete value (readings/timestamps/UCL/LCL/%) is
+traceable to executed tools, returning <code>amended_text</code> that
+swaps unsourced numbers for <code>[查無資料]</code>. Result carried in
+<code>reflection_result</code> for the SSE adapter to substitute.</p>
+<hr />
+<h2 id="6c-sse-events-confirm-protocol-and-the-builderchat-bridge">6C.
+SSE events, confirm protocol, and the builder→chat bridge</h2>
+<h3 id="6c1-event-vocabulary">6C.1 Event vocabulary</h3>
+<p>Builder terminal/pause:
+<code>done{status,pipeline_json,summary,session_id}</code>,
+<code>goal_plan_confirm_required</code>, <code>confirm_pending</code>,
+<code>clarify_required</code>, <code>handover_pending</code>,
+<code>judge_clarify_pending</code>, <code>phase_round_paused</code>.
+Builder node-emitted: <code>goal_plan_proposed/confirmed</code>,
+<code>phase_round</code>, <code>phase_action</code>,
+<code>phase_observation</code>, <code>phase_completed</code>,
+<code>phase_revise_started</code>, <code>runtime_check_ok/failed</code>,
+<code>build_finalized</code>.</p>
+<p>Chat surface (after the bridge): <code>pb_glass_start</code>,
+<code>pb_glass_op</code>, <code>pb_glass_chat</code>,
+<code>pb_glass_error</code>, <code>pb_glass_done{pipeline_json}</code>,
+<code>pb_run_start</code>, <code>pb_run_done{result_summary}</code>,
+<code>pb_run_error</code>, <code>design_intent_confirm</code>,
+<code>pb_intent_confirm</code>, <code>pb_judge_clarify</code>,
+<code>plan</code>/<code>plan_update</code>, <code>synthesis</code>,
+<code>done</code>.</p>
+<h3 id="6c2-the-two-confirm-protocols-dont-conflate">6C.2 The two
+confirm protocols (don't conflate)</h3>
+<ul>
+<li><strong><code>design_intent_confirm</code> →
+<code>[intent_confirmed:CARD]</code> re-POST</strong> (intent ambiguity,
+before/around a build): ambiguity → emit card with <code>card_id</code>
++ deterministic <code>clarifications</code> + force-synthesis to end the
+turn. The user picks → re-POSTs the message prefixed
+<code>[intent_confirmed:&lt;id&gt; dim=val ...]</code> with the
+<strong>same chat session_id</strong>. Classifiers/completeness bypass
+on that prefix; <code>parse_resolutions_from_prefix</code> +
+<code>augment_goal_for_resolutions</code> splice picks into the goal
+deterministically.</li>
+<li><strong><code>/chat/intent-respond</code></strong> (resumes a
+<em>paused build</em>'s judge/clarify <code>interrupt</code>): keyed by
+the chat session id via
+<code>pending_judge</code>/<code>pending_clarify</code>.</li>
+</ul>
+<p>The chat↔︎build session distinction is load-bearing: pause cards carry
+<code>session_id = chat session</code> (what the card POSTs back) and
+<code>build_session_id = build uuid</code> (trace correlation).</p>
+<h3 id="6c3-the-builderchat-event-bridge-event_wrapperpy">6C.3 The
+builder→chat event bridge (<code>event_wrapper.py</code>)</h3>
+<p><code>wrap_build_event_for_chat(evt, session_id)</code> is the
+<strong>only</strong> place builder events become
+<code>pb_glass_*</code> (the frontend chat panel + Lite Canvas know only
+<code>pb_glass_*</code>). <strong>Critical invariant — raw structured
+args must be preserved, not flattened to text:</strong>
+<code>phase_action</code> passes raw
+<code>tool_args_raw</code>/<code>action_result_raw</code> as the
+top-level <code>args</code>/<code>result</code> (v30 phase context
+stashed under underscore keys
+<code>_phase_id</code>/<code>_round</code>/<code>_summary</code>) so the
+frontend <code>applyGlassOp</code> can still mutate the canvas.
+Flattening to a text summary made the Lite Canvas invisible — this is
+the codified "event wrappers keep raw structured args" rule.
+<code>_v2_op_to_v1_args</code> translates typed ops → the
+<code>{block_name,params}</code> / <code>{from_node,to_node}</code> /
+<code>{node_id,key,value}</code> shapes the frontend applies.
+<code>pb_judge_clarify</code> returns None here (the canonical emit is
+from <code>tool_execute</code> with the chat session id) to avoid a
+duplicate card; internal events (phase_round, phase_observation,
+confirm_pending, inspection_*) → None.</p>
+<h3 id="6c4-llm-client-agent_helpers_nativellm_clientpy">6C.4 LLM client
+(<code>agent_helpers_native/llm_client.py</code>)</h3>
+<p><code>get_llm_client(force_provider?)</code> reads
+<code>LLM_PROVIDER</code> (cached singleton): <code>anthropic</code>
+(native system/tools + prompt cache via <code>cache_control</code>),
+<code>ollama</code> (any OpenAI-compatible endpoint —
+<strong>production</strong>, KIMI K2.5 default, pins
+<code>provider.order=["Fireworks"]</code> for cache passthrough),
+<code>internal-proxy</code>.
+<code>create(system, messages, max_tokens, tools?)</code> →
+<code>LLMResponse{text, stop_reason (normalized: stop/length/eos→end_turn, tool calls→tool_use), finish_reason (RAW provider value — diagnoses truncation vs provider-error vs JSON-parse bug), content, input/output_tokens, cache_*_tokens}</code>.
+The client does <strong>no</strong> retry — bounded retry lives in
+callers (chat <code>llm_call</code>, builder <code>goal_plan</code>).
+The OpenAI-compat path converts Anthropic tool_use/tool_result ↔︎
+function-calling, parses XML tool calls for Kimi-style models, strips
+<code>&lt;think&gt;</code> blocks. Single model switch: sidecar
+<code>.env</code> <code>OLLAMA_MODEL</code> + <code>LLM_PROVIDER</code>;
+KIMI via Fireworks is the cost-right default (only provider keeping
+prompt cache).</p>
+<h3 id="6c5-build-trace-adminbuild-traces">6C.5 Build trace
+(<code>/admin/build-traces</code>)</h3>
+<p><code>BuildTracer</code> writes one JSON per build to
+<code>/tmp/builder-traces/*.json</code> (NOT a DB table): plan, every
+LLM call (<code>user_msg</code> + <code>raw_response</code> +
+<code>finish_reason</code>), every graph step, verifier verdicts. A
+<code>trace_summary</code> renderer produces Plan → stuck phase →
+per-round history (same model powers the admin Summary tab + the
+<code>/verify-build</code> tool). <code>trace_replay</code> re-runs a
+single saved LLM call under controlled variants ("would changing X have
+changed the pick?").</p>
+<hr />
+<h2 id="7-system-mcp-external-data-sources">7. System MCP (external data
+sources)</h2>
+<h3 id="71-definition--execution">7.1 Definition + execution</h3>
+<p><code>mcp_definitions</code> row (§3.1) holds
+<code>api_config={endpoint_url, method, headers}</code> +
+<code>input_schema</code>. Sidecar block <code>block_mcp_call</code>
+(<code>McpCallBlockExecutor</code>): <code>require(mcp_name)</code> +
+<code>args</code> dict → <code>JavaAPIClient.get_mcp_by_name</code> →
+parse <code>api_config</code> (malformed/missing
+endpoint/method∉{GET,POST} → <code>INVALID_MCP_CONFIG</code>) → httpx
+dispatch (30s; GET args→query, POST args→JSON body) →
+<code>_flatten_response</code> normalizes (list | dict keys
+events/dataset/items/data/records/rows) → DataFrame on <code>data</code>
+port. Error codes
+<code>MCP_HTTP_ERROR</code>/<code>MCP_UNREACHABLE</code>/<code>MCP_LOOKUP_FAILED</code>/<code>MCP_NOT_FOUND</code>.</p>
+<h3 id="72-env-header-interpolation-poc-feature">7.2 ${ENV} header
+interpolation (POC feature)</h3>
+<p>The POC adds an admin <strong>headers form</strong> on
+<code>/admin/system-mcps</code> and a runtime helper
+<code>pipeline_builder/blocks/_http_helpers.py::resolve_headers(headers, *, mcp_name)</code>
+— <code>${NAME}</code> regex substitution from <code>os.environ</code>,
+raising <code>BlockExecutionError(INVALID_MCP_CONFIG)</code> naming any
+missing env vars. Secrets are <strong>never stored in DB</strong>; the
+header value is <code>${EXTERNAL_API_TOKEN}</code> and the real value
+lives in <code>python_ai_sidecar/.env</code>.
+<code>block_mcp_call</code> + <code>block_mcp_proxy</code> call
+<code>resolve_headers</code> instead of reading headers verbatim.
+<em>(On <code>main</code> this helper does not exist — headers pass
+through verbatim. It is a POC-branch addition. Implement the POC
+behavior.)</em></p>
+<h3 id="73-v54-derivative-blocksskills">7.3 V54 derivative
+blocks/skills</h3>
+<p>When an admin checks
+<code>produces_block</code>/<code>produces_skill</code>, Java atomically
+writes: <code>mcp_definitions.produces_*</code> = true; a
+<code>pb_blocks</code> row (<code>source='mcp_auto'</code>,
+<code>source_mcp_id</code>,
+<code>implementation={type:"mcp_proxy", mcp_name, delegate_block: "block_mcp_call"}</code>);
+a single-block <code>pb_pipelines</code> DAG; a
+<code>pb_published_skills</code> row (<code>source='mcp_auto'</code>).
+At runtime the registry sees
+<code>implementation.type=="mcp_proxy"</code> and binds
+<code>McpProxyBlockExecutor(mcp_name)</code> instead of a
+<code>BUILTIN_EXECUTORS</code> lookup; that executor exposes friendly
+per-MCP params and passes all non-underscore keys as
+<code>args</code>.</p>
+<p>The generator (<code>mcp_derivative/generator.py</code>) drafts the
+block + skill with <strong>Haiku</strong>
+(<code>MCP_DERIVATIVE_LLM_MODEL</code> default
+<code>claude-haiku-4-5-20251001</code>, hardcoded cheap;
+<code>PROMPT_VERSION</code> bumped on prompt change for audit). A
+deterministic pre-LLM lint gate (<code>MIN_DESCRIPTION_CHARS=200</code>
+error / <code>400</code> warn) blocks generation on too-thin
+descriptions before burning tokens. The system prompt is
+<strong>principles-only</strong> (no case rules). LLM output is
+<strong>always a draft</strong> — the admin reviews/edits in the form
+before commit; MCP description changes do NOT auto-regenerate (UI shows
+a stale warning).</p>
+<h3 id="74-single-source-of-truth-rule">7.4 Single-source-of-truth
+rule</h3>
+<p>LLM prompts never hardcode MCP usage. The
+<code>query_data</code>/<code>execute_mcp</code> tool descriptions tell
+the LLM to pick <code>data_source</code> from a
+<code>&lt;mcp_catalog&gt;</code> injected at runtime from
+<code>name + description + input_schema</code>. If an MCP changes
+behavior but a prompt's hardcoded usage doesn't, the LLM generates wrong
+code — so the DB description is the only allowed source.</p>
+<hr />
+<h2 id="8-knowledge-layer">8. Knowledge layer</h2>
+<p><code>agent_knowledge</code> (RAG) + <code>block_docs</code>
+(block-level). Two-layer injection
+(<code>agent_builder/graph_build/nodes/_knowledge_inject.py::build_knowledge_hint</code>):</p>
+<ul>
+<li><strong>Layer 1 (always-on):</strong>
+<code>list_high_priority_knowledge</code> (global
+<code>priority='high'</code>, <strong>no embedding</strong> so
+first-principle rules always reach the LLM regardless of multilingual
+recall) → "## Domain first principles".</li>
+<li><strong>Layer 2 (RAG):</strong> cosine search filtered by
+<code>applies_to</code> layer.</li>
+</ul>
+<p>Call sites: <strong>goal_plan</strong> injects
+<code>layer="plan"</code> (planning hints); <strong>the pick sub-phase
+of agentic_phase_loop</strong> injects <code>layer="execute"</code>
+(block-choice rules, e.g. "全廠 → list_objects + foreach" reaches the
+layer that actually picks the source block). Prod state: execute
+injection ON, layered-plan OFF.</p>
+<p><code>block_docs.markdown</code> (frontmatter + body) is the single
+source of truth for <code>list_blocks</code> (frontmatter
+<code>description:</code> → catalog head) and
+<code>explain_block</code>/<code>inspect_block_doc</code> (body).
+Sidecar caches 60s, falls back to <code>pb_blocks.description</code> for
+unmigrated blocks.</p>
+<hr />
+<h2 id="9-config--feature-flags">9. Config &amp; feature flags</h2>
+<p><code>config.py</code> (<code>SidecarConfig</code> frozen dataclass,
+<code>from_env()</code>): <code>service_token</code>,
+<code>port=8050</code>, <code>java_api_url</code>,
+<code>java_internal_token</code>, <code>java_timeout_sec=30</code>.
+<code>feature_flags.py</code>: env <code>ENABLE_*</code> flags with a
+per-request <code>X-Feature-Flags</code> header override (ContextVar).
+Key flags: <code>prompt_cache</code> (default ON),
+<code>auto_signal</code>, <code>atomic_add_connect</code>,
+<code>strict_tool_id</code>, <code>plan_knowledge</code>,
+<code>execute_knowledge</code>, <code>layered_plan_knowledge</code>,
+<code>goal_aware_matching</code>, <code>rich_schema_values</code>,
+<code>orphan_resolve</code>, <code>presentation_lookahead</code>,
+<code>next_memo</code>. <strong>Caveat:</strong> the header override is
+a no-op for SSE build/chat streaming (middleware resets before the
+stream) — use env + restart for A/B.</p>
+<hr />
+<h2 id="10-frontend">10. Frontend</h2>
+<p>Next.js App Router, standalone, inline styles, NextAuth v5.</p>
+<h3 id="101-pages-poc-relevant">10.1 Pages (POC-relevant)</h3>
+<p><code>/</code> → <code>/dashboard</code>; <code>/login</code>
+(enumerates registered OIDC providers + local form);
+<code>/skills</code> (Library landing — published-skill catalog,
+search/filter); <code>/skills/[slug]</code> (run);
+<code>/skills/[slug]/edit</code> (author — triggers/steps + launch
+builder embed); <code>/skills/new</code>; <code>/chat/new</code> +
+<code>/chat/[sessionId]</code> (persistent conversation unifying AI
+Agent + builder canvas + results); <code>/agent-knowledge</code>
+(directives/RAG/lexicon/examples authoring);
+<code>/admin/pipeline-builder/[id]</code> (canvas edit — Glass Box build
+target); <code>/admin/pipeline-builder/new</code> (3-step wizard
+kind→trigger→inputs); <code>/admin/block-docs</code> (+
+<code>/[block_id]/[version]</code> editor);
+<code>/admin/build-traces</code> (trace viewer);
+<code>/admin/system-mcps</code> (MCP admin form + headers + produces
+toggles); <code>/admin/users</code> (role mgmt);
+<code>/help/charts</code> (+ <code>/[type]</code> — 18 chart catalog +
+live editor); <code>/me/profile</code>,
+<code>/me/change-password</code>. (Peripheral/L4: <code>/alarms</code>,
+<code>/rules</code>, <code>/topology</code>, <code>/system/*</code> —
+out of POC scope.)</p>
+<h3 id="102-api-proxy-contract-api">10.2 API proxy contract
+(<code>/api/*</code>)</h3>
+<p>Every backend call is a proxy. Upstream env:
+<code>FASTAPI_BASE_URL</code> (Java :8002),
+<code>SIDECAR_BASE_URL</code> (:8050). Auth via
+<code>lib/auth-proxy.ts</code> (<code>authHeaders()</code> → user JWT,
+falls back to <code>INTERNAL_API_TOKEN</code>); sidecar routes use
+<code>X-Service-Token</code>. Map: <code>/api/agent/*</code> → Java
+<code>/api/v1/agent/*</code> (SSE bridged);
+<code>/api/pipeline-builder/*</code> → Java (reads
+<code>/pipeline-builder/*</code>, writes <code>/pipelines/*</code>);
+<code>/api/skill-documents/*</code>, <code>/api/block-docs/*</code>,
+<code>/api/agent-knowledge/*</code>, <code>/api/mcp-*</code> → Java;
+<code>/api/admin/build-traces*</code> → <strong>sidecar</strong>
+<code>/internal/agent/build/traces*</code>;
+<code>/api/auth/[...nextauth]</code> → NextAuth.</p>
+<h3 id="103-pipeline-builder-ui">10.3 Pipeline Builder UI</h3>
+<p>Composition root <code>BuilderLayout</code> wraps a
+<code>BuilderProvider</code> (reducer holding draft
+<code>pipeline_json</code>, selection, 50-deep undo/redo, status/kind
+meta). Canvas = React Flow (<code>DagCanvas</code> +
+<code>CustomNode</code> + <code>DeletableEdge</code>, Dagre LR
+auto-layout). Left palette <code>BlockLibrary</code> (by category, opens
+<code>BlockDocsDrawer</code>). Config via <code>NodeInspector</code> →
+<code>SchemaForm</code> (JSON-schema widgets: enum→select,
+<code>x-column-source</code>→column picker,
+<code>x-suggestions</code>→datalist). Right rail = Agent | Parameters |
+Runs. Glass Box live-build = <code>AgentBuilderPanelV30</code> (renders
+<code>GoalPlanCard</code> confirm, <code>PhaseTimeline</code>,
+<code>HandoverModal</code>); SSE op events translated to canvas
+mutations by <code>lib/pipeline-builder/glass-ops.ts</code>. Chat-driven
+read-only mirror = <code>LiteCanvasOverlay</code> (Canvas / 結果 tabs,
+auto-flips to Results on run done). Results =
+<code>PipelineResultsPanel</code> (alert banner + evidence table + chart
+list) + <code>ChartRenderer</code> (18 SVG chart components).</p>
+<h3 id="104-auth--shell">10.4 Auth + shell</h3>
+<p>NextAuth v5 multi-provider (Azure AD / Google / Keycloak / Okta, each
+registers only when its <code>OIDC_*</code> env present) + always-on
+Credentials. Credentials → Java <code>/auth/login</code>; OIDC →
+<code>signIn</code> callback → Java <code>/auth/oidc-upsert</code>
+(shared secret) → Java JWT stashed on the session. Middleware gates
+non-public paths when <code>AIOPS_AUTH_REQUIRED=1</code> and redirects
+on inner-JWT expiry. <code>AppShell</code> = Topbar + collapsible left
+<code>ContextualSidebar</code> (role-based nav: Operations all-roles /
+Knowledge Studio PE+IT_ADMIN / Admin IT_ADMIN-only) + right AI Agent
+rail + Lite Canvas overlay.</p>
+<h3 id="105-shared-output-contract-aiops-contract">10.5 Shared output
+contract (<code>aiops-contract</code>)</h3>
+<p>Dual-language (TS <code>report.ts</code> + Python pydantic
+<code>report.py</code>). <code>AIOpsReportContract</code> = canonical
+Agent/Skill output: <code>$schema</code> ("aiops-report/v1"),
+<code>summary</code>, <code>evidence_chain[]</code>,
+<code>visualization[]</code> (legacy), <code>suggested_actions[]</code>
+(AgentAction | HandoffAction discriminated union),
+<code>findings</code>, modern <code>charts[]</code> (ChartDSL:
+type/title/data/x/y/rules/highlight). Frontend
+<code>ContractRenderer</code> dispatches to a viz registry.</p>
+<hr />
+<h2 id="11-builddeploy--smoke">11. Build/deploy &amp; smoke</h2>
+<p>systemd units: aiops-app (8000), aiops-java-api (8002),
+aiops-python-sidecar (8050). <code>deploy/update.sh</code> = frontend;
+<code>deploy/java-update.sh</code> = Java + sidecar (rebuild jar + venv,
+apply canonical block seed, restart both). Frontend standalone needs
+static+public copied into <code>.next/standalone</code>. New
+<code>V*.sql</code> applied via manual <code>psql</code> (Flyway
+disabled in prod).</p>
+<p>Quality gates that must pass: <strong>SLASH-17</strong> (17 builder
+commands graded against golden plans, ~17/17), a chat-mode eval (confirm
+→ build → run yields a pipeline + result), the block-consistency boot
+invariant (4 registries = 56), and pure-Mockito Java unit tests.</p>
+<hr />
+<h2 id="12-suggested-rebuild-order-for-the-implementing-teamagent">12.
+Suggested rebuild order (for the implementing team/agent)</h2>
+<p>Build the substrate before the agent; the agent is only as reliable
+as the blocks and the executor beneath it.</p>
+<ol type="1">
+<li><strong>DB + Java skeleton</strong> — entities (§3), the two
+security chains + roles (§4.4),
+<code>ApiResponse</code>/<code>JsonUtils</code>/<code>SseEmitterBridge</code>
+helpers, block + pipeline + MCP CRUD (<code>/internal/*</code> +
+<code>/api/v1/*</code>).</li>
+<li><strong>Block executor engine</strong> (§5) — the
+<code>BlockExecutor</code> ABC, the DAG executor, the path syntax, the
+validator, the boot invariant. Implement 5-10 core blocks first
+(process_history/mcp_call, filter, groupby_agg, threshold, line_chart,
+data_view) and the test harness. Then fill out to 56.</li>
+<li><strong>System MCP</strong> (§7) — definition CRUD,
+<code>block_mcp_call</code> + <code>${ENV}</code> headers, then V54
+derivatives.</li>
+<li><strong>LLM client</strong> (§6.7) — provider switch, retry,
+finish_reason, prompt cache.</li>
+<li><strong>Builder graph</strong> (§6.3) — goal_plan → confirm →
+agentic_phase_loop (sub-phase machine) → phase_verifier → finalize, the
+builder toolset (§6.4), BuildTracer (§6.8). Stand up SLASH-17 as the
+regression gate from day one.</li>
+<li><strong>Chat orchestrator</strong> (§6.2) — load_context →
+classifiers → completeness gate → llm_call/tool_execute → synthesis;
+role-gated tools; the <code>build_pipeline_live</code> bridge into the
+builder graph.</li>
+<li><strong>Knowledge layer</strong> (§8) — agent_knowledge + block_docs
++ two-layer injection.</li>
+<li><strong>Frontend</strong> (§10) — auth/shell, Library, Builder
+canvas + Glass Box, Try-Run results, Block Docs, Build Traces, System
+MCP admin.</li>
+</ol>
+<p>Throughout, hold the two hard rules: flow control in graph nodes (not
+prompts), and block
+<code>description</code>/<code>param_schema</code>/<code>examples</code>
+as the single source of truth.</p>
+<hr />
+<p><em>End of technical build specification.</em></p>
+</main>
+</div></body></html>
