@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Skill Library POC — 部署規格</title>
+<style>
+  :root{
+    --ink:#1f2937; --mut:#6b7280; --line:#e5e7eb; --bg:#f8fafc; --card:#fff;
+    --blue:#1d4ed8; --blue-bg:#eff6ff; --blue-bd:#93c5fd;
+    --core:#c2410c; --core-bg:#fff7ed; --core-bd:#fdba74;
+    --grn:#047857; --grn-bg:#ecfdf5; --grn-bd:#6ee7b7;
+    --red:#b91c1c; --red-bg:#fef2f2; --red-bd:#fecaca;
+    --amb:#92400e; --amb-bg:#fffbeb; --amb-bd:#fde68a;
+  }
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;
+       color:var(--ink); background:var(--bg); margin:0; line-height:1.6;}
+  .wrap{max-width:1060px; margin:0 auto; padding:32px 24px 64px;}
+  header.top{border-bottom:3px solid var(--ink); padding-bottom:14px; margin-bottom:24px;}
+  header.top h1{margin:0 0 4px; font-size:26px;}
+  header.top .sub{color:var(--mut); font-size:13.5px;}
+  h2{font-size:20px; margin:36px 0 12px; padding-bottom:6px; border-bottom:2px solid var(--line);
+     display:flex; align-items:center; gap:9px;}
+  .nbox{display:inline-flex; width:26px; height:26px; border-radius:7px; background:var(--ink); color:#fff;
+        align-items:center; justify-content:center; font-size:14px; font-weight:700;}
+  h3{font-size:15px; margin:0 0 6px;}
+  p{margin:6px 0;} small{color:var(--mut);}
+  .lead{font-size:15px; background:var(--blue-bg); border:1px solid var(--blue-bd); border-radius:10px; padding:14px 16px;}
+  code{background:#f1f5f9; padding:1px 6px; border-radius:4px; font-size:12.5px;}
+  pre{background:#0f172a; color:#e2e8f0; border-radius:10px; padding:14px 16px; overflow-x:auto;
+      font-size:12.5px; line-height:1.55; margin:8px 0;}
+  pre .c{color:#94a3b8;} /* comments */
+
+  .two{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
+  @media(max-width:680px){.two{grid-template-columns:1fr;}}
+  .card{border:1px solid var(--line); border-radius:10px; background:var(--card); padding:14px 16px;}
+  .card.in{border-color:var(--grn-bd); background:var(--grn-bg);}
+  .card.out{border-color:var(--red-bd); background:var(--red-bg);}
+  .card h3 .pill{font-size:11px; font-weight:700; padding:2px 8px; border-radius:999px; margin-left:6px;}
+  .pill.g{color:var(--grn); background:#fff; border:1px solid var(--grn-bd);}
+  .pill.r{color:var(--red); background:#fff; border:1px solid var(--red-bd);}
+  ul{margin:6px 0; padding-left:18px;} li{margin:3px 0; font-size:13.5px;}
+
+  table{width:100%; border-collapse:collapse; margin:8px 0; font-size:13.5px;}
+  th,td{border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top;}
+  th{background:#f1f5f9;}
+  td code{white-space:nowrap;}
+
+  /* architecture */
+  .arch{border:1px solid var(--line); border-radius:12px; background:#fff; padding:18px; margin:6px 0;}
+  .row{display:flex; gap:12px; margin:9px 0; justify-content:center; flex-wrap:wrap;}
+  .node{border-radius:10px; padding:11px 14px; min-width:210px; flex:1; max-width:360px; border:1px solid var(--line); background:#fff;}
+  .node .nm{font-weight:700; font-size:14px;} .node .port{float:right; font-size:11px; color:var(--mut); font-weight:600;}
+  .node .desc{font-size:12px; color:var(--mut); margin-top:3px;}
+  .node.brain{background:var(--core-bg); border-color:var(--core-bd);}
+  .node.db{background:#f9fafb; border-style:dashed;}
+  .arrow{text-align:center; color:var(--mut); font-size:13px; margin:-3px 0;}
+  .chips{margin-top:7px; display:flex; gap:6px; flex-wrap:wrap;}
+  .chip{font-size:11px; padding:2px 7px; border-radius:6px; background:#fff; border:1px solid var(--line);}
+
+  .callout{border-radius:10px; padding:12px 16px; margin:10px 0; font-size:13.5px;}
+  .callout.warn{background:var(--amb-bg); border:1px solid var(--amb-bd);} .callout.warn b{color:var(--amb);}
+  .callout.note{background:var(--blue-bg); border:1px solid var(--blue-bd);}
+  .step{display:flex; gap:12px; margin:10px 0;}
+  .step .sn{flex:0 0 28px; height:28px; border-radius:50%; background:var(--blue); color:#fff;
+            font-weight:700; display:flex; align-items:center; justify-content:center; font-size:13px;}
+  .step .sb{flex:1;}
+  .check{list-style:none; padding-left:0;}
+  .check li{padding-left:26px; position:relative; margin:6px 0; font-size:14px;}
+  .check li:before{content:""; position:absolute; left:2px; top:6px; width:13px; height:13px;
+     border:2px solid var(--grn); border-radius:3px;}
+  footer{margin-top:40px; padding-top:14px; border-top:1px solid var(--line); color:var(--mut); font-size:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <h1>Skill Library POC — 部署規格</h1>
+  <div class="sub">對象：DevOps / Platform &nbsp;·&nbsp; Branch <code>poc/skill-library-20260624</code>
+  &nbsp;·&nbsp; Repo <code>gillggx/ai-ops-agentic-platform</code> &nbsp;·&nbsp; 配套：<code>POC_HANDOVER_PLAN.html</code>
+  &nbsp;·&nbsp; 2026-06-24</div>
+</header>
+
+<p class="lead"><b>一句話：</b>給半導體運維工程師用的 AI 技能庫 —— 工程師用自然語言或手動建「分析技能（資料 pipeline）」，
+LLM agent 把需求轉成 block pipeline、對外部資料源跑、回傳圖表 / 表格 / 判定。本 POC 只保留這條核心鏈，
+拿掉內建 simulator 與 patrol / alarm / fleet；外部資料一律走可設定的 <b>System MCP</b>。</p>
+
+<!-- 1 SCOPE -->
+<h2><span class="nbox">1</span>範圍</h2>
+<div class="two">
+  <div class="card in"><h3>In Scope<span class="pill g">保留</span></h3>
+    <ul>
+      <li><b>L1 Library</b>：瀏覽 / 搜尋已發布 skill + block 目錄</li>
+      <li><b>L2 Authoring</b>：自然語言（Glass Box agent）或手動建 skill</li>
+      <li><b>L3 Try-Run</b>：草稿 skill 對 live 資料試跑、看結果</li>
+      <li><b>Block Docs</b>：每個 block 的描述/參數/範例（LLM 與 UI 的唯一真相）</li>
+      <li><b>Build Trace</b>：每次建構的 agent 推理軌跡（除錯用）</li>
+      <li><b>System MCP</b>：admin 設定的外部 HTTP 資料源（含 <code>${ENV}</code> 機密插值）</li>
+    </ul></div>
+  <div class="card out"><h3>Out of Scope<span class="pill r">已移除</span></h3>
+    <ul>
+      <li><code>ontology_simulator</code> 服務（及其 MongoDB）</li>
+      <li>auto-patrol / alarm / rules engine / scheduler（L4）</li>
+      <li>Topology / Fleet 儀表板（<code>FleetSimulatorClient</code> stub 成空）</li>
+      <li><code>/admin/simulator-health</code> 及相關 simulator UI</li>
+    </ul></div>
+</div>
+
+<!-- 2 ARCH -->
+<h2><span class="nbox">2</span>系統架構</h2>
+<div class="arch">
+  <div class="row"><div class="node"><span class="port">:8000</span><div class="nm">aiops-app（Next.js standalone）</div>
+    <div class="desc">只做 UI 渲染 + <code>/api</code> proxy；無業務邏輯</div></div></div>
+  <div class="arrow">▼ HTTPS / proxy</div>
+  <div class="row"><div class="node"><span class="port">:8002</span><div class="nm">aiops-java-api（Spring Boot）</div>
+    <div class="desc"><b>唯一 DB owner</b> · Auth(JWT) · Skill/Block/MCP registry · role audit</div></div></div>
+  <div class="arrow">▲▼ <code>/internal/*</code>（X-Service-Token）</div>
+  <div class="row"><div class="node brain"><span class="port">:8050</span><div class="nm">python_ai_sidecar（FastAPI + LangGraph）</div>
+    <div class="desc"><b>平台大腦</b>：所有 Agent + Pipeline Executor（56 blocks）。經 JavaAPIClient 與 Java 對話，<b>不直連 DB</b></div>
+    <div class="chips"><span class="chip">Chat orchestrator</span><span class="chip">Glass Box builder</span>
+      <span class="chip">Block advisor</span><span class="chip">Knowledge / RAG</span></div></div></div>
+  <div class="arrow">▼</div>
+  <div class="row">
+    <div class="node db"><div class="nm">PostgreSQL + pgvector</div><div class="desc">資料庫 <code>aiops_db</code>；無 MongoDB</div></div>
+    <div class="node db"><div class="nm">External HTTP（System MCP）</div><div class="desc">外部資料；header <code>${ENV}</code> 機密</div></div>
+    <div class="node"><span class="port">:8003</span><div class="nm">aiops-java-scheduler</div><div class="desc">排程（POC 精簡）</div></div>
+  </div>
+</div>
+<div class="callout note"><b>邊界鐵律：</b>前端只渲染+proxy · Java 獨佔 DB · sidecar 只透過 Java 碰 DB ·
+外部資料只走 System MCP · URL/port 一律讀 env，不寫死。</div>
+
+<!-- 3 STACK -->
+<h2><span class="nbox">3</span>技術棧（pom.xml / Dockerfile / deploy 須一致）</h2>
+<table>
+  <tr><th>元件</th><th>版本</th><th>元件</th><th>版本</th></tr>
+  <tr><td>Java</td><td>Temurin <b>17</b></td><td>Python</td><td><b>3.11</b></td></tr>
+  <tr><td>Spring Boot</td><td><b>3.5.14</b>（Maven）</td><td>Node.js</td><td><b>20.18</b></td></tr>
+  <tr><td>PostgreSQL</td><td>+ pgvector</td><td>LLM（預設）</td><td>KIMI K2.5 via OpenRouter</td></tr>
+</table>
+<p><small>LLM 單一切換點 = sidecar <code>.env</code> 的 <code>OLLAMA_MODEL</code>。</small></p>
+
+<!-- 4 MCP -->
+<h2><span class="nbox">4</span>外部資料層 — System MCP</h2>
+<p>POC 的資料來源。admin 在 <code>/admin/system-mcps</code> 註冊：endpoint URL、HTTP method、<b>HTTP headers</b>、input schema。
+Header 值支援 <b><code>${ENV_VAR}</code> 插值</b> —— 機密不存 DB；runtime 由 <code>resolve_headers()</code> 從 sidecar 環境取代，
+缺哪個 env 就明確報錯（<code>INVALID_MCP_CONFIG</code>）。</p>
+<div class="callout warn"><b>維運重點：</b>MCP header 設定裡每個 <code>${NAME}</code> 機密，都必須存在於
+<b>sidecar</b> 的環境（<code>python_ai_sidecar/.env</code>），例如 <code>EXTERNAL_API_TOKEN=...</code>。</div>
+
+<!-- 5 DEPLOY -->
+<h2><span class="nbox">5</span>部署（EC2 systemd · 現行）</h2>
+<p>systemd units 在 <code>deploy/</code>：<code>aiops-app</code> / <code>aiops-java-api</code> /
+<code>aiops-java-scheduler</code> / <code>aiops-python-sidecar</code>。</p>
+
+<div class="step"><div class="sn">A</div><div class="sb"><b>全新主機</b>
+<pre><span class="c"># clone POC branch</span>
+git clone -b poc/skill-library-20260624 \
+  https://github.com/gillggx/ai-ops-agentic-platform.git /opt/aiops
+cd /opt/aiops
+<span class="c"># 填好各服務 .env 機密（見 §6），然後：</span>
+sudo bash deploy/setup.sh         <span class="c"># 一次性 bootstrap（3 服務，無 simulator/mongo）</span></pre></div></div>
+
+<div class="step"><div class="sn">B</div><div class="sb"><b>既有主機 / 重新部署</b>
+<pre>cd /opt/aiops && git fetch && git checkout poc/skill-library-20260624 && git pull
+<span class="c"># 若殘留 simulator unit，停掉：</span>
+sudo systemctl stop ontology-simulator 2>/dev/null; sudo systemctl disable ontology-simulator 2>/dev/null
+sudo bash deploy/java-update.sh   <span class="c"># 重建 Java jars + sidecar venv，重啟 Java + sidecar</span>
+sudo bash deploy/update.sh        <span class="c"># 前端（本 branch 已無 simulator）</span></pre></div></div>
+
+<div class="callout warn"><b>DB 初始化（重要）：</b>
+<ul style="margin:6px 0">
+  <li>Migration 在 <code>java-backend/.../db/migration/V*.sql</code>；<b>prod Flyway 關閉</b> → 新 V*.sql 要手動 <code>psql -f</code>（DB 機密在 <code>java-backend/.env</code>）。</li>
+  <li><b>Block 目錄</b>：<code>java-update.sh</code> 會套 <code>db/canonical/pb_blocks_canonical.sql</code>（<code>ON CONFLICT DO NOTHING</code>）—— 全新 DB 補齊完整 56 block，既有 DB 為 no-op。</li>
+</ul></div>
+<p><small><b>K8s（未來）</b>：每服務各自 image、<code>EXPOSE 8080</code>、service port → 80；manifests 在 <code>deploy/kubernetes/</code>（已移除 simulator component）。run wrapper 待 K8s target 決定後補。</small></p>
+
+<!-- 6 CONFIG -->
+<h2><span class="nbox">6</span>設定 / 機密</h2>
+<p>各服務讀自己的 <code>.env</code>（首次部署若缺，從 <code>deploy/*.env.example</code> 產生）。</p>
+<table>
+  <tr><th>服務 <code>.env</code></th><th>主要 key</th></tr>
+  <tr><td><code>java-backend/.env</code></td><td><code>DB_URL</code>(jdbc postgres) · <code>DB_USER</code> · <code>DB_PASSWORD</code> · JWT secret · <code>SERVICE_TOKEN</code></td></tr>
+  <tr><td><code>python_ai_sidecar/.env</code></td><td><code>SERVICE_TOKEN</code>(須與 Java 一致) · <code>JAVA_API_URL</code> · LLM key + <code>OLLAMA_MODEL</code> · <b>System MCP header 引用的 <code>${ENV}</code> 機密</b></td></tr>
+  <tr><td><code>aiops-app/.env.local</code></td><td>proxy base URLs · NextAuth/OIDC（OIDC 選用；credentials 永遠在）</td></tr>
+</table>
+
+<!-- 7 OPS -->
+<h2><span class="nbox">7</span>維運</h2>
+<table>
+  <tr><th>項目</th><th>方式</th></tr>
+  <tr><td>健康檢查</td><td>Java <code>:8002/actuator/health</code> · sidecar <code>:8050/internal/health</code>（無 token 回 401＝活著）· app <code>:8000</code></td></tr>
+  <tr><td>Logs</td><td><code>journalctl -u aiops-java-api | aiops-python-sidecar | aiops-app</code></td></tr>
+  <tr><td>重啟</td><td><code>systemctl restart aiops-&lt;service&gt;</code></td></tr>
+  <tr><td>Block 目錄健康</td><td>sidecar 開機 log：<code>block consistency OK: 56 / 56 / 56 / 56</code>（四數相等＝健康）</td></tr>
+</table>
+
+<!-- 8 QUIRKS -->
+<h2><span class="nbox">8</span>已知 Quirks（預期，非 bug）</h2>
+<ul>
+  <li><code>block_process_history</code> + <code>rework_request</code> 仍出現在目錄，但 Try-Run 會 <code>MCP_UNREACHABLE</code>（原 simulator-only）→ 提示作者改設定真正的 System MCP。</li>
+  <li><code>/topology</code> 與 Fleet 面板顯示空狀態（<code>FleetSimulatorClient</code> stub）。</li>
+  <li><code>/admin/simulator-health</code> 導覽已移除。</li>
+</ul>
+
+<!-- 9 ACCEPTANCE -->
+<h2><span class="nbox">9</span>驗收 Smoke</h2>
+<p>部署後確認：</p>
+<ul class="check">
+  <li>四個服務皆 <code>active</code>；health endpoint 有回應</li>
+  <li>sidecar 開機 log 顯示 <code>block consistency OK: 56 / 56 / 56 / 56</code></li>
+  <li>UI：登入、開 Skill Library、開某 block 的 docs drawer</li>
+  <li>註冊一個 System MCP（含 <code>${ENV}</code> header）→ Try-Run 一個單 block skill → 結果渲染</li>
+  <li>Glass Box：自然語言寫一個 skill → 成功建構並跑出結果</li>
+</ul>
+
+<footer>
+  架構/邊界 source of truth：<code>CLAUDE.md</code> · POC scope/quirks：<code>.claude/skills/poc-skill-library/SKILL.md</code>。
+  接手順序見 <code>POC_HANDOVER_PLAN.html</code>。Generated 2026-06-24.
+</footer>
+
+</div>
+</body>
+</html>
