@@ -73,7 +73,7 @@
 <header class="top">
   <h1>Skill Library POC — DevOps 接手計畫</h1>
   <div class="sub">交付對象：DevOps / Platform 團隊 &nbsp;·&nbsp; Branch <code>poc/skill-library-20260624</code>
-  &nbsp;·&nbsp; 配套：<code>docs/POC_PRODUCT_SPEC.md</code> &nbsp;·&nbsp; 2026-06-24</div>
+  &nbsp;·&nbsp; 配套：<code>POC_PRODUCT_SPEC.html</code>（功能）· <code>POC_DEPLOYMENT_SPEC.html</code>（部署） &nbsp;·&nbsp; 2026-06-24</div>
 </header>
 
 <p>本文件提供：<b>(1)</b> 系統架構圖（依接手優先級上色）、<b>(2)</b> 三階段接手順序與方式、
@@ -172,7 +172,7 @@ Knowledge，平台的大腦），再接<b>介面與設定面</b>（Pipeline Buil
       </ul></div>
   </div>
   <div class="k" style="margin-top:6px">入門資料</div>
-  <p><code>docs/POC_PRODUCT_SPEC.md</code> §5（System MCP）· 各 block 的 description · new-block 5-點 checklist</p>
+  <p><code>POC_DEPLOYMENT_SPEC.html</code> §4（System MCP）· <code>POC_PRODUCT_SPEC.html</code>（功能規格）· 各 block 的 description · new-block 5-點 checklist</p>
   <div class="gate"><b>接手完成判準：</b>能新增/修改一個 block（5 點 + DB 同步）而不破壞開機 block-consistency（56/56/56/56）·
   能端到端設定一個 System MCP 並 Try-Run 出結果。</div>
 </div>
@@ -205,7 +205,7 @@ Knowledge，平台的大腦），再接<b>介面與設定面</b>（Pipeline Buil
 <!-- HOW TO START -->
 <h2>建議的起手式（第一週）</h2>
 <ol>
-  <li>讀 <code>CLAUDE.md</code> + <code>docs/POC_PRODUCT_SPEC.md</code>，建立心智模型（架構邊界 + 原則）。</li>
+  <li>讀 <code>CLAUDE.md</code> + <code>POC_PRODUCT_SPEC.html</code>（功能規格），建立心智模型（架構邊界 + 原則）。</li>
   <li>本地/測試環境部署 POC branch，跑通 §10 acceptance smoke。</li>
   <li>跑一次 <code>tools/slash17/run.sh</code> + <code>grade_strict.py</code> 與 <code>tools/chat_eval/run.sh</code>，
       對齊 <code>BASELINE.md</code> —— 這是「平台健康」的客觀基準。</li>
@@ -215,7 +215,7 @@ Knowledge，平台的大腦），再接<b>介面與設定面</b>（Pipeline Buil
 
 <footer>
   架構/邊界 source of truth：<code>CLAUDE.md</code> · POC scope/quirks：
-  <code>.claude/skills/poc-skill-library/SKILL.md</code> · 部署細節：<code>docs/POC_PRODUCT_SPEC.md</code>。
+  <code>.claude/skills/poc-skill-library/SKILL.md</code> · 部署細節：<code>POC_DEPLOYMENT_SPEC.html</code>。
   本接手計畫隨平台演進更新。
 </footer>
 
