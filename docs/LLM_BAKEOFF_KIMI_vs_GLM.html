@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM 選型比較 — KIMI K2.5 vs GLM-5.2</title>
+<style>
+  :root{
+    --ink:#1f2933; --mut:#667085; --line:#e4e7ec; --bg:#f5f7fa; --card:#fff;
+    --blue:#1d4ed8; --blue-bg:#eff6ff; --blue-bd:#bfdbfe;
+    --green:#067647; --green-bg:#ecfdf3; --green-bd:#a6f4c5;
+    --red:#b42318; --red-bg:#fef3f2; --red-bd:#fecaca;
+    --amber:#b54708; --amber-bg:#fffaeb; --amber-bd:#fde68a;
+    --ink2:#101828;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;
+       color:var(--ink);background:var(--bg);line-height:1.6;font-size:14.5px;}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 22px 70px;}
+  header.hero{background:linear-gradient(135deg,#0b1f4d,#1d4ed8);color:#fff;
+       margin:0 -22px 26px;padding:34px 30px 28px;}
+  header.hero .kic{font-size:12px;letter-spacing:.12em;text-transform:uppercase;opacity:.8;}
+  header.hero h1{margin:6px 0 6px;font-size:26px;}
+  header.hero .sub{opacity:.9;font-size:13.5px;}
+  .verdict{display:inline-block;margin-top:14px;background:rgba(255,255,255,.14);
+       border:1px solid rgba(255,255,255,.3);border-radius:8px;padding:8px 14px;font-size:14px;}
+  .verdict b{color:#bbf7d0;}
+  /* metric cards */
+  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:0 0 30px;}
+  @media(max-width:760px){.cards{grid-template-columns:repeat(2,1fr);}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:15px 16px;
+       box-shadow:0 1px 2px rgba(16,24,40,.05);}
+  .card .lbl{font-size:11.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;}
+  .card .val{font-size:24px;font-weight:700;color:var(--ink2);margin-top:6px;line-height:1.1;}
+  .card .val small{font-size:13px;font-weight:600;color:var(--mut);}
+  .card .delta{font-size:12px;margin-top:5px;}
+  .card .delta.win{color:var(--green);} .card .delta.neutral{color:var(--mut);}
+  h2{font-size:19px;margin:34px 0 6px;color:var(--ink2);display:flex;align-items:center;gap:10px;}
+  h2 .n{display:inline-flex;width:27px;height:27px;border-radius:7px;background:var(--ink2);color:#fff;
+       align-items:center;justify-content:center;font-size:14px;font-weight:700;}
+  h2 + .desc{color:var(--mut);font-size:13px;margin:0 0 12px;}
+  table{width:100%;border-collapse:collapse;margin:10px 0 6px;font-size:13px;background:#fff;
+       border:1px solid var(--line);border-radius:10px;overflow:hidden;}
+  th,td{padding:9px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;}
+  thead th{background:#f8fafc;font-size:11.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--mut);font-weight:700;}
+  tbody tr:last-child td{border-bottom:none;}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;}
+  td.mid,th.mid{text-align:center;}
+  .grp-k{background:#fcfcfd;} .grp-g{background:#fafcff;}
+  .col-sep{border-left:2px solid var(--blue-bd);}
+  .badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;}
+  .ok{color:var(--green);background:var(--green-bg);border:1px solid var(--green-bd);}
+  .no{color:var(--red);background:var(--red-bg);border:1px solid var(--red-bd);}
+  .win{color:var(--blue);background:var(--blue-bg);border:1px solid var(--blue-bd);font-weight:700;}
+  .tie{color:var(--mut);background:#f2f4f7;border:1px solid var(--line);}
+  tr.total td{background:#f0f5ff;font-weight:700;color:var(--ink2);border-top:2px solid var(--blue-bd);}
+  .callout{border-radius:10px;padding:13px 16px;margin:14px 0;font-size:13.5px;}
+  .callout.key{background:var(--blue-bg);border:1px solid var(--blue-bd);}
+  .callout.warn{background:var(--amber-bg);border:1px solid var(--amber-bd);}
+  .callout b{color:var(--ink2);}
+  ul{margin:8px 0;padding-left:20px;} li{margin:4px 0;}
+  code{background:#f2f4f7;padding:1px 5px;border-radius:4px;font-size:12px;font-family:ui-monospace,Menlo,monospace;}
+  footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);color:var(--mut);font-size:12px;}
+  .legend{font-size:12px;color:var(--mut);margin:4px 0 0;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kic">LLM 選型評估 · Builder Agent</div>
+  <h1>KIMI K2.5 vs GLM-5.2</h1>
+  <div class="sub">以 SLASH-17（17 條 production builder 指令）端到端驗證 · 2026-06-25</div>
+  <div class="verdict">結論：功能標準下 <b>GLM-5.2 勝出（17/17 vs 15/17）</b>，且少 29% 呼叫、少 61% 耗時 — 已切換至 prod</div>
+</header>
+
+<!-- metric cards -->
+<div class="cards">
+  <div class="card"><div class="lbl">寬鬆通過（功能可用）</div>
+    <div class="val">17<small>/17</small> <span style="color:var(--mut);font-size:15px;">vs</span> 15<small>/17</small></div>
+    <div class="delta win">GLM 修掉 KIMI 兩個實質錯</div></div>
+  <div class="card"><div class="lbl">跑完全套耗時</div>
+    <div class="val">28<small>min</small> <span style="color:var(--mut);font-size:15px;">vs</span> 73<small>min</small></div>
+    <div class="delta win">GLM 快 61%（2.6×）</div></div>
+  <div class="card"><div class="lbl">總 LLM 呼叫</div>
+    <div class="val">163 <span style="color:var(--mut);font-size:15px;">vs</span> 229</div>
+    <div class="delta win">GLM 少 29%</div></div>
+  <div class="card"><div class="lbl">Prompt cache 命中</div>
+    <div class="val">40-58<small>%</small> <span style="color:var(--mut);font-size:15px;">vs</span> 0<small>%</small></div>
+    <div class="delta win">KIMI@Fireworks 實測 0</div></div>
+</div>
+
+<!-- A -->
+<h2><span class="n">A</span>我們 Agent 對 LLM 的特性需求</h2>
+<p class="desc">先講清楚 builder 是什麼樣的 agent —— 一個 graph-driven、逐 round 動作的 ReAct agent，它對 LLM 的要求和一般 chat 不同。</p>
+<table>
+  <thead><tr><th style="width:30px">#</th><th>特性需求</th><th>為什麼 critical</th></tr></thead>
+  <tbody>
+    <tr><td class="num">1</td><td>逐 round function calling</td><td>每 round 只發 1 個 tool call（add_node / set_param / connect…）；tool-call 不穩整條建構就崩</td></tr>
+    <tr><td class="num">2</td><td>結構化 JSON 輸出</td><td>goal_plan 出 3-7 phase JSON、task_contract 出結構欄位；parse 失敗就 retry / fail</td></tr>
+    <tr><td class="num">3</td><td>長多步推理（≤32 round/phase）</td><td>每 round 看一個 13 段的大 observation（含整個 block catalog），要跨 round 維持連貫</td></tr>
+    <tr><td class="num">4</td><td>中英混雜</td><td>prompt + 機台指令雙語（「中位數 / median」「偵測 / 找出」同義變形）</td></tr>
+    <tr><td class="num">5</td><td>composite / fleet block 接線</td><td><code>list_objects→mcp_foreach</code>（全廠 fan-out）、<code>spc_panel</code>（複合）— 最難的推理</td></tr>
+    <tr><td class="num">6</td><td>prompt-cache 友善（成本）</td><td>那個大 observation prefix 每 round 重複；cache 命中率 = 成本主槓桿</td></tr>
+    <tr><td class="num">7</td><td>果斷、不過度建構</td><td>該用 minimal pipeline，別亂加 node（verbose catalog 會誘發 over-build）</td></tr>
+    <tr><td class="num">8</td><td>自我修正</td><td>回應 verifier reject、改參數 / 重接線，不要繞圈</td></tr>
+  </tbody>
+</table>
+
+<!-- B -->
+<h2><span class="n">B</span>KIMI vs GLM 對這些特性的契合度</h2>
+<table>
+  <thead><tr><th>特性</th><th>KIMI K2.5</th><th>GLM-5.2 @ Fireworks</th><th class="mid">勝</th></tr></thead>
+  <tbody>
+    <tr><td>1 · tool calling</td><td>需 XML 解析補（native 較弱）</td><td>native function-calling 紮實</td><td class="mid"><span class="badge win">GLM</span></td></tr>
+    <tr><td>2 · JSON 輸出</td><td>OK</td><td>OK、更精簡（output token 少一半）</td><td class="mid"><span class="badge tie">平 / GLM</span></td></tr>
+    <tr><td>3 · 長多步推理</td><td>較囉嗦（229 phase-round / 17）</td><td>reasoning 模型，<b>少 29%（163）</b></td><td class="mid"><span class="badge win">GLM</span></td></tr>
+    <tr><td>4 · 中英混雜</td><td>強（中文母語級）</td><td>強（中文母語級）</td><td class="mid"><span class="badge tie">平</span></td></tr>
+    <tr><td>5 · composite / fleet 接線</td><td>會掙扎（系統弱點）</td><td>會掙扎、且 run-to-run 抖</td><td class="mid"><span class="badge tie">平（都弱）</span></td></tr>
+    <tr><td>6 · <b>prompt-cache（成本）</b></td><td><b>實測 cache = 0</b>（Fireworks 沒吐 KIMI cache）</td><td><b>cache 40-58%</b></td><td class="mid"><span class="badge win">GLM</span></td></tr>
+    <tr><td>7 · 果斷 / 不過度建構</td><td>慢、call 多</td><td>快、但偶 over-build</td><td class="mid"><span class="badge tie">平</span></td></tr>
+    <tr><td>8 · 自我修正</td><td>會做、慢</td><td>會做、turnaround 快</td><td class="mid"><span class="badge win">GLM</span></td></tr>
+    <tr style="background:#fafcff;"><td><b>速度（builder UX）</b></td><td>110-533s / 案</td><td><b>28-142s / 案（快 2-4×）</b></td><td class="mid"><span class="badge win">GLM</span></td></tr>
+  </tbody>
+</table>
+
+<!-- C -->
+<h2><span class="n">C</span>SLASH-17：每案 呼叫次數 / 耗時 / 寬鬆判定</h2>
+<p class="desc"><b>寬鬆 = 功能可用</b>：建成 + 輸出型態正確 + 抓到核心意圖；容許多建 node、輕微呈現缺失（如沒排序）。<b>不算成功</b> = 沒建成、輸出型態錯、結果實質錯。
+代表輪：KIMI 完整輪、GLM = GLM-med 輪。</p>
+<table>
+  <thead>
+    <tr>
+      <th style="width:26px">#</th><th>command</th>
+      <th class="num grp-k">KIMI 呼叫</th><th class="num grp-k">KIMI 耗時</th><th class="mid grp-k">KIMI 寬鬆</th>
+      <th class="num grp-g col-sep">GLM 呼叫</th><th class="num grp-g">GLM 耗時</th><th class="mid grp-g">GLM 寬鬆</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td class="num">1</td><td>spc-trend</td>          <td class="num grp-k">6</td><td class="num grp-k">247s</td><td class="mid grp-k"><span class="badge ok">success</span></td><td class="num grp-g col-sep">5</td><td class="num grp-g">47s</td><td class="mid grp-g"><span class="badge ok">success</span></td></tr>
+    <tr><td class="num">2</td><td>spc-ooc</td>            <td class="num grp-k">22</td><td class="num grp-k">263s</td><td class="mid grp-k"><span class="badge ok">success</span></td><td class="num grp-g col-sep">21</td><td class="num grp-g">288s</td><td class="mid grp-g"><span class="badge ok">success</span></td></tr>
+    <tr><td class="num">3</td><td>spc-cpk</td>            <td class="num grp-k">8</td><td class="num grp-k">200s</td><td class="mid grp-k"><span class="badge ok">success</span></td><td class="num grp-g col-sep">6</td><td class="num grp-g">218s</td><td class="mid grp-g"><span class="badge ok">success</span></td></tr>
+    <tr><td class="num">4</td><td>spc-multi-tool</td>     <td class="num grp-k">8</td><td class="num grp-k">216s</td><td class="mid grp-k"><span class="badge ok">success</span></td><td class="num grp-g col-sep">5</td><td class="num grp-g">86s</td><td class="mid grp-g"><span class="badge ok">success</span></td></tr>
+    <tr><td class="num">5</td><td>spc-drift</td>          <td class="num grp-k">13</td><td class="num grp-k">236s</td><td class="mid grp-k"><span class="badge ok">success</span></td><td class="num grp-g col-sep">10</td><td class="num grp-g">51s</td><td class="mid grp-g"><span class="badge ok">success</span></td></tr>
+    <tr><td class="num">6</td><td>spc-xbar-r-pair</td>    <td class="num grp-k">7</td><td class="num grp-k">119s</td><td class="mid grp-k"><span class="badge no">failed</span></td><td class="num grp-g col-sep">5</td><td class="num grp-g">58s</td><td class="mid grp-g"><span class="badge ok">success</span></td></tr>
+    <tr><td class="num">7</td><td>spc-multi-step</td>     <td class="num grp-k">11</td><td class="num grp-k">324s</td><td class="mid grp-k"><span class="badge ok">success</span></td><td class="num grp-g col-sep">16</td><td class="num grp-g">142s</td><td class="mid grp-g"><span class="badge ok">success</span></td></tr>
+    <tr><td class="num">8</td><td>spc-tool-box</td>       <td class="num grp-k">6</td><td class="num grp-k">138s</td><td class="mid grp-k"><span class="badge ok">success</span></td><td class="num grp-g col-sep">10</td><td class="num grp-g">28s</td><td class="mid grp-g"><span class="badge ok">success</span></td></tr>
+    <tr><td class="num">9</td><td>spc-normality</td>      <td class="num grp-k">6</td><td class="num grp-k">125s</td><td class="mid grp-k"><span class="badge ok">success</span></td><td class="num grp-g col-sep">6</td><td class="num grp-g">40s</td><td class="mid grp-g"><span class="badge ok">success</span></td></tr>
+    <tr><td class="num">10</td><td>spc-cusum</td>         <td class="num grp-k">6</td><td class="num grp-k">226s</td><td class="mid grp-k"><span class="badge ok">success</span></td><td class="num grp-g col-sep">6</td><td class="num grp-g">51s</td><td class="mid grp-g"><span class="badge ok">success</span></td></tr>
+    <tr><td class="num">11</td><td>apc-drift</td>         <td class="num grp-k">15</td><td class="num grp-k">403s</td><td class="mid grp-k"><span class="badge no">failed</span></td><td class="num grp-g col-sep">14</td><td class="num grp-g">127s</td><td class="mid grp-g"><span class="badge ok">success</span></td></tr>
+    <tr><td class="num">12</td><td>apc-trend</td>         <td class="num grp-k">40</td><td class="num grp-k">533s</td><td class="mid grp-k"><span class="badge ok">success</span></td><td class="num grp-g col-sep">5</td><td class="num grp-g">44s</td><td class="mid grp-g"><span class="badge ok">success</span></td></tr>
+    <tr><td class="num">13</td><td>apc-recipe-compare</td><td class="num grp-k">20</td><td class="num grp-k">217s</td><td class="mid grp-k"><span class="badge ok">success</span></td><td class="num grp-g col-sep">5</td><td class="num grp-g">55s</td><td class="mid grp-g"><span class="badge ok">success</span></td></tr>
+    <tr><td class="num">14</td><td>patrol-status</td>     <td class="num grp-k">29</td><td class="num grp-k">366s</td><td class="mid grp-k"><span class="badge ok">success</span></td><td class="num grp-g col-sep">24</td><td class="num grp-g">205s</td><td class="mid grp-g"><span class="badge ok">success</span></td></tr>
+    <tr><td class="num">15</td><td>ooc-ranking</td>       <td class="num grp-k">18</td><td class="num grp-k">448s</td><td class="mid grp-k"><span class="badge ok">success</span></td><td class="num grp-g col-sep">15</td><td class="num grp-g">120s</td><td class="mid grp-g"><span class="badge ok">success</span></td></tr>
+    <tr><td class="num">16</td><td>ooc-pareto</td>        <td class="num grp-k">8</td><td class="num grp-k">191s</td><td class="mid grp-k"><span class="badge ok">success</span></td><td class="num grp-g col-sep">5</td><td class="num grp-g">95s</td><td class="mid grp-g"><span class="badge ok">success</span></td></tr>
+    <tr><td class="num">17</td><td>step-yield</td>        <td class="num grp-k">6</td><td class="num grp-k">110s</td><td class="mid grp-k"><span class="badge ok">success</span></td><td class="num grp-g col-sep">5</td><td class="num grp-g">42s</td><td class="mid grp-g"><span class="badge ok">success</span></td></tr>
+    <tr class="total">
+      <td></td><td>總計</td>
+      <td class="num grp-k">229</td><td class="num grp-k">4362s<br><small>73 min</small></td><td class="mid grp-k">15 / 17</td>
+      <td class="num grp-g col-sep">163</td><td class="num grp-g">1697s<br><small>28 min</small></td><td class="mid grp-g">17 / 17</td>
+    </tr>
+  </tbody>
+</table>
+<p class="legend">平均/案 — KIMI：13.5 call · 257s ｜ GLM：9.6 call · 100s。</p>
+
+<div class="callout key">
+  <b>關鍵讀法：</b>KIMI 兩個 <span class="badge no">failed</span> 是型態 / 分析的實質錯 ——
+  <b>spc-xbar-r-pair</b> 畫了折線而非管制圖、<b>apc-drift</b> 漏了 drift 判定。GLM 這兩案都做對。
+  GLM 的「失分」（嚴格標準下的 ooc-pareto / ooc-ranking）在功能標準下其實可用（照指令建 bar、僅缺排序），故寬鬆判定 17/17。
+</div>
+
+<!-- D -->
+<h2><span class="n">D</span>結論</h2>
+<ul>
+  <li><b>嚴格標準（golden 全中）</b>：兩者通過數接近（~14/17），KIMI 穩定、GLM 12-15 有 run-to-run 變異。</li>
+  <li><b>寬鬆標準（功能可用）</b>：<b>GLM 17/17 略勝 KIMI 15/17</b> — GLM 修掉 KIMI 兩個實質錯，而 GLM 的失分多為 golden 過嚴或系統共通弱點（sort / fleet，KIMI 也中）。</li>
+  <li><b>效率</b>：GLM 少 29% 呼叫、跑完全套快 61%（28 min vs 73 min）；最極端 apc-trend 為 5 call/44s vs 40 call/533s。</li>
+  <li><b>成本</b>：KIMI@Fireworks 實測 cache=0，GLM 40-58% → GLM 成本不輸還更穩定。</li>
+  <li><b>決策</b>：已切換 prod 至 <code>GLM-5.2 @ Fireworks @ medium</code>。唯一要管理的是<b>變異</b>，將以 hardening（phase 拆原子 / fleet hint / spc_panel fallback）壓低 — 這些對 KIMI 同樣有益。</li>
+</ul>
+
+<footer>
+  資料來源：SLASH-17 端到端 builder 驗證（KIMI 完整輪 + GLM-med 代表輪，GLM 另有 ×3 穩定性輪）。
+  寬鬆判定為功能可用性人工標註。Generated 2026-06-25.
+</footer>
+
+</div>
+</body>
+</html>
