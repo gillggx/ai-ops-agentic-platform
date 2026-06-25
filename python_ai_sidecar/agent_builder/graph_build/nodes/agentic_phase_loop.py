@@ -656,19 +656,7 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
                 # "(no error message captured)" and the agent looped trying
                 # to fix something it couldn't see. Coalesce both shapes
                 # into a single error string for downstream consumers.
-                _err = pv.get("error")
-                if not _err:
-                    _errs = pv.get("errors")
-                    if isinstance(_errs, list) and _errs:
-                        _parts = []
-                        for e in _errs[:3]:
-                            if isinstance(e, dict):
-                                msg = e.get("message") or e.get("hint") or ""
-                                code = e.get("code") or e.get("rule") or ""
-                                _parts.append(f"[{code}] {msg}" if code else msg)
-                            else:
-                                _parts.append(str(e))
-                        _err = " | ".join(p for p in _parts if p) or None
+                _err = _coalesce_preview_error(pv)
                 snapshot_dict = {
                     "logical_id": target_nid,
                     "real_id": target_nid,
@@ -848,6 +836,21 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
             registry=registry,
         )
         if terminal_lid:
+            # hardening #3 (2026-06-25): re-preview the terminal NOW so the
+            # verifier reads its CURRENT status + error. run_verifier is a
+            # signal tool (no auto-preview this round), so exec_trace[terminal]
+            # may be stale or absent — a failing terminal then surfaces
+            # "(no error message captured)" and the agent loops blind.
+            try:
+                fresh = await _fresh_terminal_snapshot(
+                    toolset, transient.pipeline_json, terminal_lid, round_n,
+                )
+                if fresh is not None:
+                    new_exec_trace = dict(state.get("exec_trace") or {})
+                    new_exec_trace[terminal_lid] = fresh
+                    state_update["exec_trace"] = new_exec_trace
+            except Exception as ex:  # noqa: BLE001
+                logger.info("run_verifier fresh preview failed (non-fatal): %s", ex)
             state_update["v30_last_mutated_logical_id"] = terminal_lid
             state_update["v30_last_preview"] = terminal_preview
             logger.info(
@@ -2624,6 +2627,61 @@ def _should_auto_verify(
         if tool.startswith("inspect_"):
             return False
     return True
+
+
+def _coalesce_preview_error(pv: dict) -> str | None:
+    """Pull a single error string out of a toolset.preview() result.
+
+    preview() returns `error` (singular string) when a block's executor
+    raises BlockExecutionError, and `errors` (plural list) when the
+    PipelineValidator rejects the subgraph. Coalesce both so downstream
+    (snapshot -> phase_verifier -> agent feedback) always gets the real
+    reason instead of "(no error message captured)".
+    """
+    _err = pv.get("error")
+    if _err:
+        return _err
+    _errs = pv.get("errors")
+    if isinstance(_errs, list) and _errs:
+        parts = []
+        for e in _errs[:3]:
+            if isinstance(e, dict):
+                msg = e.get("message") or e.get("hint") or ""
+                code = e.get("code") or e.get("rule") or ""
+                parts.append(f"[{code}] {msg}" if code else msg)
+            else:
+                parts.append(str(e))
+        return " | ".join(p for p in parts if p) or None
+    return None
+
+
+async def _fresh_terminal_snapshot(
+    toolset: Any, pipeline: PipelineJSON, node_id: str, round_n: int,
+) -> dict | None:
+    """2026-06-25 (hardening #3): re-preview a node NOW and build a verifier
+    snapshot capturing the CURRENT status + error.
+
+    Used by the run_verifier / phase_complete path: those are signal tools
+    (no mutation), so no auto-preview ran this round. Without a fresh preview
+    the verifier reads a stale or absent exec_trace entry — a failing terminal
+    then surfaces "(no error message captured)" and the agent loops blind
+    (observed: block_sort flailed 44 rounds with error=null, 2026-06-25).
+    """
+    pv = await toolset.preview(node_id=node_id, sample_size=5)
+    blk_id = None
+    for n in pipeline.nodes:
+        if n.id == node_id:
+            blk_id = n.block_id
+            break
+    return {
+        "logical_id": node_id,
+        "real_id": node_id,
+        "block_id": blk_id,
+        "rows": pv.get("rows"),
+        "status": pv.get("status"),
+        "error": _coalesce_preview_error(pv),
+        "after_cursor": round_n,
+    }
 
 
 def _find_canvas_terminal(
