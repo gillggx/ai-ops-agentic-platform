@@ -638,3 +638,33 @@ list. Highest priority pending items:
 
 Everything else is shipped + operational on EC2 (PR #5 merged 2026-05-24, all
 3 services UP, 5 refactored surfaces verified post-merge).
+
+---
+
+## 2026-06-25 — LLM model switch (KIMI → GLM-5.2) + builder hardening #1/#2/#3
+
+**Prod builder/chat LLM switched to `z-ai/glm-5.2` @ Fireworks @ medium**
+(was KIMI K2.5). Driven by a SLASH-17 bake-off (KIMI vs GLM-5.2 vs
+Qwen3.6-35b-a3b): GLM 17/17 vs KIMI 15/17 functional, ~2-4x faster, 29% fewer
+LLM calls; KIMI@Fireworks cache measured 0; Qwen too slow + stuck-loops on hard
+multi-step. Full report `docs/LLM_BAKEOFF_KIMI_vs_GLM.html`. Switch =
+EC2 `python_ai_sidecar/.env` `OLLAMA_MODEL` + `OPENROUTER_PROVIDER_ORDER=Fireworks`
+(new env, commit 2af51ce generalizes the old hardcoded Kimi→Fireworks pin).
+
+**Three builder hardenings** (commits 3d99dde + fed187f; V61/V62 applied via psql):
+- **#1** `block_bar_chart` gained `order` param + `block_pareto` self-sorts →
+  "由多到少/ranking" no longer needs a dropped `block_sort` (fixed ooc-ranking/
+  ooc-pareto miss:sort, a system-level miss KIMI also had).
+- **#2** strengthened `block_list_objects` + `block_mcp_foreach` descriptions so
+  the fleet "all machines" fan-out (list_objects→mcp_foreach→unnest) + wiring is
+  explicit → agent stops falling back to single-machine (fixed spc-ooc/patrol).
+- **#3** `agentic_phase_loop` now re-previews the canvas terminal on
+  run_verifier/phase_complete and coalesces the real error into the snapshot →
+  the agent gets actionable failure feedback instead of "(no error message
+  captured)" + a 44-round blind loop → handover (fixed spc-multi-step FAIL).
+
+**Ops**: deployed a Cohere **production key** (trial was 1000/month, exhausted by
+testing → RAG 429/degraded). EC2 root disk chronically ~90% (29G); MongoDB
+crashed once when it hit 100% — freed space, restarted. See memories
+`project_glm_builder_model`, `project_builder_hardening_jun25`,
+`feedback_openrouter_provider_pin`, `reference_cohere_embedding_key`.
