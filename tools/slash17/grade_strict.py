@@ -26,7 +26,7 @@ G=[
  ("apc-trend","過去 24 小時 APC etch_time_offset 趨勢 line chart",{"process_history","line_chart"},3,True),
  ("apc-recipe-compare","每個 recipe 的 APC",{"process_history","box_plot"},3,True),
  ("patrol-status","現在所有機台的狀態快照",{"list_objects","data_view"},3,True),
- ("ooc-ranking","依 toolID 分組計數",{"process_history","filter","groupby_agg","sort","bar_chart"},5,False),
+ ("ooc-ranking","依 toolID 分組計數",{"process_history","filter","groupby_agg","bar_chart"},4,True),
  ("ooc-pareto","依 chart_name 分組計數",{"process_history","unnest","filter","groupby_agg","pareto"},5,True),  # alt form in ALT[]
  ("step-yield","各 STEP 的 OOC 事件數，依 step",{"process_history","filter","groupby_agg","bar_chart"},5,False),
 ]
@@ -54,8 +54,13 @@ print("%-18s %-6s %-7s %-5s %-5s %s"%("case","grade","nodes","ideal","rnds","det
 print("-"*78)
 
 # Alternative acceptable req-sets (a case can have >1 correct shape).
+# 2026-06-25 (hardening #1): "由多到少" ranking is now in-block (bar_chart order=
+# desc / pareto self-sorts), so a separate block_sort is no longer required.
 ALT = {
- "ooc-pareto": {"process_history","unnest","filter","groupby_agg","sort","bar_chart"},
+ "ooc-pareto": [
+  {"process_history","unnest","filter","groupby_agg","sort","bar_chart"},  # explicit sort + bar
+  {"process_history","unnest","filter","groupby_agg","bar_chart"},          # bar(order=desc), no sort
+ ],
 }
 from collections import Counter
 gc=Counter()
@@ -66,7 +71,7 @@ for key,sig,req,ideal,allow in G:
     actual=set(blocks); n=len(blocks)
     if st!="finished": grade="FAIL"; detail=str(st)
     else:
-        reqs=[req]+([ALT[key]] if key in ALT else [])
+        reqs=[req]+(ALT[key] if key in ALT else [])
         best=None
         for rq in reqs:
             miss=rq-actual; ext=actual-rq

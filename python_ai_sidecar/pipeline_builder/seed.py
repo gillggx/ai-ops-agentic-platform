@@ -2630,12 +2630,16 @@ def _blocks() -> list[dict[str, Any]]:
                 "\n"
                 "== When to use ==\n"
                 "- ✅ 「按 EQP 比較 OOC count」「每個 step 的 alarm 數」\n"
+                "- ✅ 「OOC 最多的機台 由多到少」「top-N 排名」「ranking」→ 設 order='desc'，\n"
+                "     **本 block 自己排序，不需要另接 block_sort**\n"
                 "- ❌ 排序 + 累計 % 的 80/20 分析 → 用 block_pareto（自動排序 + 累計線）\n"
                 "- ❌ 連續時間軸 → 用 block_line_chart\n"
                 "\n"
                 "== Params ==\n"
                 "x:               string, required — 類別欄位。**必須是 input dataframe 真實欄位名**\n"
                 "y:               string | string[], required — bar 高度欄位。**必須是 input dataframe 真實欄位名**\n"
+                "order:           'none'|'asc'|'desc', default 'none' — 依第一個 y 值排序 bars。\n"
+                "                 「由多到少 / 最多 / 排名 / top-N」→ desc；**設了就不必另接 block_sort**\n"
                 "rules:           array, opt — 水平 threshold 線\n"
                 "highlight_field/highlight_eq: 同 line_chart\n"
                 "title:           string, opt\n"
@@ -2652,6 +2656,7 @@ def _blocks() -> list[dict[str, Any]]:
                 "properties": {
                     "x": {"type": "string"},
                     "y": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]},
+                    "order": {"type": "string", "enum": ["none", "asc", "desc"], "default": "none"},
                     "rules": {"type": "array"},
                     "highlight_field": {"type": "string"},
                     "highlight_eq": {},
@@ -2976,7 +2981,8 @@ def _blocks() -> list[dict[str, Any]]:
             "status": "production",
             "essential": True,
             "description": (
-                "== What ==\nPareto chart — 遞減排序 bars + 累計 % line + 80% 參考線。「找最大貢獻者」場景必備。\n\n"
+                "== What ==\nPareto chart — 遞減排序 bars + 累計 % line + 80% 參考線。「找最大貢獻者」場景必備。\n"
+                "（本 block 自己依 value 由大到小排序，**上游不需要另接 block_sort**。）\n\n"
                 "== When to use ==\n"
                 "- ✅ 「最常見的缺陷類型」「哪幾台機台貢獻 80% OOC」「lot 失敗 root cause」\n"
                 "- ❌ 順序固定的類別（時間 / step) → 用 block_bar_chart\n\n"

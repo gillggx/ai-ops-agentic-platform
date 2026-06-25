@@ -53,6 +53,21 @@ class BarChartBlockExecutor(BlockExecutor):
         df = _materialize_paths(df, [x, *y])
         _validate_columns(df, [x, *y], label="bar_chart")
 
+        # 2026-06-25 (hardening #1): rank the bars in-block. "由多到少 / top-N /
+        # 最多 / ranking" no longer needs a separate block_sort upstream — set
+        # order='desc'. Sorts by the FIRST y measure (numeric). order='none'
+        # (default) preserves the upstream row order = fully backward compatible.
+        order = str(params.get("order") or "none").lower()
+        if order in ("asc", "desc"):
+            sort_col = y[0]
+            df = df.copy()
+            df["__bar_order"] = pd.to_numeric(df[sort_col], errors="coerce")
+            df = (
+                df.sort_values("__bar_order", ascending=(order == "asc"), kind="mergesort")
+                .drop(columns="__bar_order")
+                .reset_index(drop=True)
+            )
+
         rules = params.get("rules") or []
         highlight = None
         hf = params.get("highlight_field")

@@ -46,6 +46,17 @@ class ParetoBlockExecutor(BlockExecutor):
             if col not in df.columns:
                 raise BlockExecutionError(code="COLUMN_NOT_FOUND", message=f"column '{col}' not in data")
 
+        # 2026-06-25 (hardening #1): a Pareto is descending-by-value by definition.
+        # Sort the data here so the result is correct regardless of upstream order
+        # or renderer behaviour (groupby -> pareto needs no separate block_sort).
+        df = df.copy()
+        df["__pareto_v"] = pd.to_numeric(df[value_col], errors="coerce")
+        df = (
+            df.sort_values("__pareto_v", ascending=False, kind="mergesort")
+            .drop(columns="__pareto_v")
+            .reset_index(drop=True)
+        )
+
         spec: dict[str, Any] = {
             "__dsl": True,
             "type": "pareto",
