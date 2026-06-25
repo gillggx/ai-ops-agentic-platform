@@ -668,3 +668,11 @@ testing → RAG 429/degraded). EC2 root disk chronically ~90% (29G); MongoDB
 crashed once when it hit 100% — freed space, restarted. See memories
 `project_glm_builder_model`, `project_builder_hardening_jun25`,
 `feedback_openrouter_provider_pin`, `reference_cohere_embedding_key`.
+
+**Validation (SLASH-17 ×3 post-hardening, RAG online)**: glm_f1 16 MATCH/1 OVER,
+glm_f2 15 MATCH/2 OVER, glm_f3 **17 MATCH (perfect)** — **0 WRONG, 0 FAIL across
+all 3 runs** (pre-hardening GLM was 12-15 MATCH with recurring ooc-pareto WRONG ×4
++ spc-multi-step FAIL). ooc-pareto/ooc-ranking now MATCH every run (#1),
+spc-ooc/patrol use the fleet fan-out (#2), spc-multi-step finishes every run (#3).
+Only residual imperfection = occasional OVER (over-build, functionally correct).
+Strict MATCH mean rose 13.75 → 16. Cost ~$2.4-2.7/run, cache 50-65%.
