@@ -1,53 +1,27 @@
 """Auto-check Rule tool group for the AIOps MCP server.
 
 A "rule" is a Skill Document (`/api/v1/skill-documents`) — the platform's
-TRIGGER -> CONFIRM -> CHECKLIST object. These tools let an external Claude
-author + CRUD rules; the platform's L4 patrol/alarm engine runs them (runtime
-NOT in scope here).
+TRIGGER -> CONFIRM/CHECKLIST object. These tools let an external Claude author +
+CRUD rules; the platform's L4 patrol/alarm engine runs them (runtime NOT here).
 
-Every state-changing tool is TWO-PHASE: call once WITHOUT confirm_token to get a
-human-readable preview + a token; call again WITH the token to commit. The token
-binds to the exact payload (token == hash(action+args)), so the committed change
-equals the previewed one. Reads (list/get/validate/describe) need no confirm.
+Two kinds of write:
+ - DRAFT edits (create / update / bind checkpoint / NL gate+step) run directly —
+   they only produce a reversible draft. Nothing goes live from a tool.
+ - REVIEW + DANGEROUS actions hand off to the real product GUI: rule_request_*
+   create a UI-handoff and return a launch_url. The human opens our GUI (link, or
+   it auto-pops if the app is open) and reviews / confirms there; the actual
+   delete/disable/activate runs ONLY from that authenticated UI. The MCP layer
+   has no execute power over those.
 
-Activation (go-live / status=stable) is intentionally NOT exposed — that stays a
-human action in the UI. Tools only ever produce drafts or disable/delete.
+Typical build: build the whole rule (create + bind each checkpoint) then ONE
+rule_request_review -> the user sees the whole-rule try-run in our GUI and decides.
 """
 from __future__ import annotations
 
-import hashlib
 import json
-import os
 from typing import Any
 
 import httpx
-
-_SALT = os.environ.get("MCP_CONFIRM_SALT", "aiops-mcp-confirm-v1")
-_STAGES = ("patrol", "diagnose")
-
-
-def _canon(action: str, args: dict) -> str:
-    return json.dumps({"action": action, "args": args}, sort_keys=True, ensure_ascii=False, default=str)
-
-
-def _token(action: str, args: dict) -> str:
-    return hashlib.sha256((_SALT + _canon(action, args)).encode("utf-8")).hexdigest()[:20]
-
-
-def _need_confirm(action: str, args: dict, preview: str) -> dict:
-    return {
-        "requires_confirm": True,
-        "action": action,
-        "preview": preview,
-        "confirm_token": _token(action, args),
-        "next": "Show this preview to the user, get an explicit confirmation, then "
-                "call this tool again with the SAME arguments plus confirm_token.",
-    }
-
-
-def _bad_token() -> dict:
-    return {"error": "confirm_token mismatch or stale — re-run WITHOUT confirm_token "
-                     "to get a fresh preview, then confirm again."}
 
 
 def _parse(v: Any) -> Any:
@@ -59,9 +33,10 @@ def _parse(v: Any) -> Any:
     return v
 
 
-def register(mcp, *, java: str, shared: str, public: str) -> None:
+def register(mcp, *, java: str, shared: str, jit: str, public: str) -> None:
     base = f"{java}/api/v1/skill-documents"
     H = {"Authorization": f"Bearer {shared}", "Content-Type": "application/json"}
+    IH = {"X-Internal-Token": jit, "Content-Type": "application/json"}
 
     async def _get(path: str = "") -> Any:
         async with httpx.AsyncClient() as c:
@@ -79,6 +54,19 @@ def register(mcp, *, java: str, shared: str, public: str) -> None:
             d = r.json()
             return d.get("data", d) if isinstance(d, dict) else d
 
+    async def _handoff(kind: str, target_ref: str, action: str | None, payload: dict) -> dict:
+        async with httpx.AsyncClient() as c:
+            r = await c.post(f"{java}/internal/handoffs", headers=IH, timeout=30, json={
+                "kind": kind, "target_ref": target_ref, "action": action,
+                "payload": json.dumps(payload, ensure_ascii=False), "requested_by": "cowork"})
+            r.raise_for_status()
+            d = r.json()
+            d = d.get("data", d)
+        hid = d.get("id")
+        return {"launch_url": f"{public}/handoff/{hid}", "expires_at": d.get("expires_at"),
+                "next": "Give the user this launch_url (or it auto-opens if their app is open). "
+                        "They review/confirm in our GUI — that is where the action actually happens."}
+
     def _summ(rule: dict) -> str:
         tc = _parse(rule.get("trigger_config")) or {}
         cc = _parse(rule.get("confirm_check")) or {}
@@ -86,26 +74,24 @@ def register(mcp, *, java: str, shared: str, public: str) -> None:
         trig = (f"event={tc.get('event')}" if tc.get("type") == "event"
                 else f"schedule={(tc.get('schedule') or {}).get('mode')}" if tc.get("type") == "schedule"
                 else tc.get("type") or "—")
-        tgt = (tc.get("target") or {})
-        return (f"slug={rule.get('slug')} · {rule.get('title')} · stage={rule.get('stage')} · "
+        tgt = tc.get("target") or {}
+        return (f"{rule.get('title')} [{rule.get('slug')}] · stage={rule.get('stage')} · "
                 f"status={rule.get('status')} · trigger[{trig}, target={tgt.get('kind')}] · "
-                f"confirm_check={'yes' if cc.get('pipeline_id') else ('text-only' if cc else 'none')} · "
+                f"confirm={'pipeline' if cc.get('pipeline_id') else ('text' if cc else 'none')} · "
                 f"steps={len(steps)}")
 
-    # ── Reads ──────────────────────────────────────────────────────────────
+    # ── Reads (no confirm) ─────────────────────────────────────────────────
     @mcp.tool()
     async def rule_list(stage: str | None = None) -> list[dict]:
-        """List auto-check rules (skill documents). Optional stage filter:
-        patrol (continuous watch) | diagnose (root-cause when triggered).
-        Returns slug/title/stage/status + a one-line trigger summary."""
+        """List auto-check rules (skill documents). Optional stage: patrol | diagnose."""
         rows = await _get(f"?stage={stage}" if stage else "")
         return [{"slug": r.get("slug"), "title": r.get("title"), "stage": r.get("stage"),
                  "status": r.get("status"), "summary": _summ(r)} for r in (rows or [])]
 
     @mcp.tool()
     async def rule_get(slug: str) -> dict:
-        """Get one rule in full: trigger_config, confirm_check (the gate), and the
-        ordered steps[] (each = text + pipeline_id + suggested_actions)."""
+        """Get one rule in full: trigger_config, confirm_check (gate), steps[]. To
+        let the user SEE it rendered (whole-rule try-run), use rule_request_review."""
         r = await _get(f"/{slug}")
         return {"slug": r.get("slug"), "title": r.get("title"), "stage": r.get("stage"),
                 "status": r.get("status"), "description": r.get("description"),
@@ -115,36 +101,33 @@ def register(mcp, *, java: str, shared: str, public: str) -> None:
 
     @mcp.tool()
     async def rule_describe_options() -> dict:
-        """The authoring contract for a rule (single source of truth for shapes).
-        Use this before building trigger_config / binding checkpoints."""
+        """The authoring contract for a rule (single source of truth for shapes)."""
         return {
             "stage": {"patrol": "continuous watch", "diagnose": "root-cause when triggered"},
             "trigger_config": {
-                "event": {"type": "event", "event": "OOC (or other registry event)",
-                          "target": {"kind": "all|tools|site", "ids": ["EQP-01", "..."]}},
-                "schedule": {"type": "schedule",
-                             "schedule": {"mode": "hourly", "every": 4},
-                             "target": {"kind": "all|tools|site", "ids": []}},
+                "event": {"type": "event", "event": "OOC",
+                          "target": {"kind": "all|tools|site", "ids": ["EQP-01"]}},
+                "schedule_hourly": {"type": "schedule", "schedule": {"mode": "hourly", "every": 4},
+                                    "target": {"kind": "all", "ids": []}},
                 "schedule_daily": {"type": "schedule", "schedule": {"mode": "daily", "time": "08:00"},
                                    "target": {"kind": "all", "ids": []}},
             },
             "checkpoint": {
-                "best_path": "Build a check pipeline yourself with the pipeline tools "
-                             "(it MUST end in block_step_check, which outputs port `check` "
-                             "with a pass:bool row — do NOT add block_alert), save_pipeline, "
-                             "then rule_bind_checkpoint(slot='confirm' or 'step:NEW', pipeline_id=...).",
-                "nl_path": "Or pass plain text to rule_set_confirm_check_nl / rule_add_step_nl "
-                           "and the platform translates it (slower, lower quality — prefer best_path).",
+                "best_path": "Build a check pipeline yourself (it MUST end in block_step_check — "
+                             "outputs a pass:bool row; do NOT add block_alert), save_pipeline, then "
+                             "rule_bind_checkpoint(slot='confirm' or 'step:NEW', pipeline_id=...).",
+                "nl_path": "Or rule_set_confirm_check_nl / rule_add_step_nl with plain text (platform "
+                           "translates it — slower, prefer best_path).",
             },
-            "slot": {"confirm": "the CONFIRM gate", "step:NEW": "append a new checklist step",
-                     "step:<id>": "bind to an existing step"},
-            "activation": "Going live (status=stable) is a HUMAN action in the UI — not a tool.",
+            "slot": {"confirm": "the CONFIRM gate", "step:NEW": "append a new step", "step:<id>": "existing step"},
+            "lifecycle": "Draft edits run directly. To review the whole rule or go live / disable / "
+                         "delete, use rule_request_* — those hand off to our GUI for the human to decide.",
         }
 
     @mcp.tool()
     async def rule_validate(slug: str) -> dict:
-        """Deterministic completeness check on a rule. Returns {ok, issues:[...]}.
-        Run before telling the user a rule is ready (it still needs human go-live)."""
+        """Deterministic completeness check. Returns {ok, issues:[...]}. Run before
+        asking the user to review/activate."""
         r = await _get(f"/{slug}")
         tc = _parse(r.get("trigger_config")) or {}
         cc = _parse(r.get("confirm_check")) or {}
@@ -152,8 +135,8 @@ def register(mcp, *, java: str, shared: str, public: str) -> None:
         issues = []
         if not (r.get("title") or "").strip():
             issues.append({"part": "name", "msg": "title is empty"})
-        if r.get("stage") not in _STAGES:
-            issues.append({"part": "stage", "msg": f"stage must be one of {_STAGES}"})
+        if r.get("stage") not in ("patrol", "diagnose"):
+            issues.append({"part": "stage", "msg": "stage must be patrol|diagnose"})
         t = tc.get("type")
         if t not in ("event", "schedule"):
             issues.append({"part": "trigger", "msg": "trigger_config.type must be event|schedule"})
@@ -164,115 +147,85 @@ def register(mcp, *, java: str, shared: str, public: str) -> None:
         tgt = tc.get("target") or {}
         if tgt.get("kind") in ("tools", "site") and not (tgt.get("ids") or []):
             issues.append({"part": "trigger", "msg": f"target.kind={tgt.get('kind')} needs non-empty ids"})
-        has_check = bool(cc.get("pipeline_id")) or any((_parse(s) or s or {}).get("pipeline_id") for s in steps)
-        if not has_check:
-            issues.append({"part": "checkpoint", "msg": "no executable checkpoint — bind a check "
-                           "pipeline to the confirm slot or add a step with a pipeline"})
+        if not (bool(cc.get("pipeline_id")) or any((_parse(s) or s or {}).get("pipeline_id") for s in steps)):
+            issues.append({"part": "checkpoint", "msg": "no executable checkpoint — bind a check pipeline "
+                           "to the confirm slot or add a step with a pipeline"})
         return {"ok": not issues, "issues": issues, "summary": _summ(r)}
 
-    # ── Writes (two-phase confirm) ─────────────────────────────────────────
+    # ── Draft edits (run directly — reversible drafts, no go-live) ──────────
     @mcp.tool()
     async def rule_create(title: str, stage: str = "diagnose", trigger_config: dict | None = None,
-                          description: str = "", confirm_token: str | None = None) -> dict:
-        """Create a new rule (draft). trigger_config per rule_describe_options.
-        Two-phase: call without confirm_token for a preview + token, then confirm."""
-        args = {"title": title, "stage": stage, "trigger_config": trigger_config, "description": description}
-        if not confirm_token:
-            tc = trigger_config or {}
-            return _need_confirm("rule_create", args,
-                f"CREATE rule (draft): '{title}' · stage={stage} · "
-                f"trigger={tc.get('type')}/{tc.get('event') or (tc.get('schedule') or {}).get('mode')} · "
-                f"target={(tc.get('target') or {}).get('kind')}. No checkpoint yet — bind one after.")
-        if confirm_token != _token("rule_create", args):
-            return _bad_token()
+                          description: str = "") -> dict:
+        """Create a new rule (draft) + trigger. trigger_config per rule_describe_options.
+        Build the rest, then rule_request_review so the user sees the whole thing."""
         body = {"title": title, "stage": stage, "description": description,
                 "trigger_config": json.dumps(trigger_config) if trigger_config is not None else None}
         r = await _send("POST", "", body)
-        return {"slug": r.get("slug"), "status": r.get("status"),
-                "edit_url": f"{public}/skills/{r.get('slug')}", "summary": _summ(r)}
+        return {"slug": r.get("slug"), "status": r.get("status"), "summary": _summ(r)}
 
     @mcp.tool()
-    async def rule_update(slug: str, patch: dict, confirm_token: str | None = None) -> dict:
-        """Patch a rule (draft fields: title, description, stage, trigger_config).
-        Does NOT change live-status. Two-phase confirm."""
+    async def rule_update(slug: str, patch: dict) -> dict:
+        """Patch a rule's draft fields (title, description, stage, trigger_config). Does
+        NOT change live-status — going live is the user's GUI step via rule_request_activate."""
         allowed = {k: patch[k] for k in ("title", "description", "stage", "trigger_config") if k in patch}
-        args = {"slug": slug, "patch": allowed}
-        if not confirm_token:
-            return _need_confirm("rule_update", args, f"UPDATE rule {slug}: set {list(allowed.keys())}.")
-        if confirm_token != _token("rule_update", args):
-            return _bad_token()
-        body = dict(allowed)
-        if "trigger_config" in body and body["trigger_config"] is not None and not isinstance(body["trigger_config"], str):
-            body["trigger_config"] = json.dumps(body["trigger_config"])
-        r = await _send("PUT", f"/{slug}", body)
+        if "trigger_config" in allowed and allowed["trigger_config"] is not None \
+                and not isinstance(allowed["trigger_config"], str):
+            allowed["trigger_config"] = json.dumps(allowed["trigger_config"])
+        r = await _send("PUT", f"/{slug}", allowed)
         return {"slug": r.get("slug"), "summary": _summ(r)}
 
     @mcp.tool()
-    async def rule_bind_checkpoint(slug: str, slot: str, pipeline_id: int, summary: str = "",
-                                   confirm_token: str | None = None) -> dict:
-        """[Best path] Bind a check pipeline YOU built (must end in block_step_check)
-        to a slot: 'confirm' (the gate) | 'step:NEW' | 'step:<id>'. Two-phase confirm."""
-        args = {"slug": slug, "slot": slot, "pipeline_id": pipeline_id, "summary": summary}
-        if not confirm_token:
-            return _need_confirm("rule_bind_checkpoint", args,
-                f"BIND pipeline #{pipeline_id} to rule {slug} slot '{slot}'. ({summary or 'no summary'})")
-        if confirm_token != _token("rule_bind_checkpoint", args):
-            return _bad_token()
+    async def rule_bind_checkpoint(slug: str, slot: str, pipeline_id: int, summary: str = "") -> dict:
+        """[Best path] Bind a check pipeline YOU built (must end in block_step_check) to a
+        slot: 'confirm' | 'step:NEW' | 'step:<id>'."""
         r = await _send("POST", f"/{slug}/bind-pipeline",
                         {"slot": slot, "pipeline_id": pipeline_id, "summary": summary, "description": summary})
         return {"slug": r.get("slug"), "summary": _summ(r)}
 
     @mcp.tool()
-    async def rule_set_confirm_check_nl(slug: str, text: str, confirm_token: str | None = None) -> dict:
-        """[NL path — slower] Set the CONFIRM gate from plain text; the platform
-        translates it into a check pipeline. Prefer rule_bind_checkpoint. Two-phase."""
-        args = {"slug": slug, "text": text}
-        if not confirm_token:
-            return _need_confirm("rule_set_confirm_check_nl", args,
-                f"SET confirm-check on {slug} from text (platform will translate): \"{text[:80]}\"")
-        if confirm_token != _token("rule_set_confirm_check_nl", args):
-            return _bad_token()
+    async def rule_set_confirm_check_nl(slug: str, text: str) -> dict:
+        """[NL path — slower] Set the CONFIRM gate from plain text (platform translates to a
+        check pipeline). Prefer building + rule_bind_checkpoint."""
         r = await _send("POST", f"/{slug}/confirm-check", {"text": text})
         return {"slug": r.get("slug"), "summary": _summ(r)}
 
     @mcp.tool()
-    async def rule_add_step_nl(slug: str, text: str, confirm_token: str | None = None) -> dict:
-        """[NL path — slower] Append a checklist step from plain text; the platform
-        translates it into a check pipeline. Prefer building + rule_bind_checkpoint. Two-phase."""
-        args = {"slug": slug, "text": text}
-        if not confirm_token:
-            return _need_confirm("rule_add_step_nl", args,
-                f"ADD step to {slug} from text (platform will translate): \"{text[:80]}\"")
-        if confirm_token != _token("rule_add_step_nl", args):
-            return _bad_token()
+    async def rule_add_step_nl(slug: str, text: str) -> dict:
+        """[NL path — slower] Append a checklist step from plain text (platform translates).
+        Prefer building + rule_bind_checkpoint."""
         r = await _send("POST", f"/{slug}/steps", {"text": text})
         return {"slug": r.get("slug"), "summary": _summ(r)}
 
+    # ── Review + dangerous actions (hand off to the GUI; no execute here) ───
     @mcp.tool()
-    async def rule_disable(slug: str, confirm_token: str | None = None) -> dict:
-        """Disable a rule (revert status to draft so the patrol engine stops running it).
-        Safe + reversible, but still two-phase confirm for consistency."""
-        args = {"slug": slug}
-        if not confirm_token:
-            return _need_confirm("rule_disable", args, f"DISABLE rule {slug} (status -> draft; stops auto-running).")
-        if confirm_token != _token("rule_disable", args):
-            return _bad_token()
-        r = await _send("PUT", f"/{slug}", {"status": "draft"})
-        return {"slug": r.get("slug"), "status": r.get("status"), "summary": _summ(r)}
+    async def rule_request_review(slug: str) -> dict:
+        """Open the Rule Review GUI for the user: it try-runs the WHOLE rule and shows
+        every checkpoint's real result together, where the user can edit any one or
+        activate it. Call this ONCE after the rule is fully built (don't review per-step)."""
+        r = await _get(f"/{slug}")
+        return await _handoff("review_rule", slug, None, {"summary": _summ(r)})
 
     @mcp.tool()
-    async def rule_delete(slug: str, confirm_token: str | None = None) -> dict:
-        """Delete a rule. Two-phase; the preview surfaces what will be lost (trigger,
-        steps, status) so the user can make an informed call."""
-        args = {"slug": slug}
-        if not confirm_token:
-            try:
-                r = await _get(f"/{slug}")
-                impact = _summ(r)
-            except Exception:
-                impact = "(could not load rule detail)"
-            return _need_confirm("rule_delete", args, f"DELETE rule {slug}. Impact: {impact}")
-        if confirm_token != _token("rule_delete", args):
-            return _bad_token()
-        await _send("DELETE", f"/{slug}")
-        return {"deleted": slug}
+    async def rule_request_activate(slug: str) -> dict:
+        """Propose going live. Returns a launch_url; the user confirms in our GUI and the
+        platform activates (materializes the trigger). No tool activates a rule directly."""
+        r = await _get(f"/{slug}")
+        return await _handoff("confirm_activate", slug, "activate", {"impact": _summ(r)})
+
+    @mcp.tool()
+    async def rule_request_disable(slug: str) -> dict:
+        """Propose disabling (stop auto-running). Returns a launch_url; the user confirms
+        in our GUI and the platform reverts it to draft."""
+        r = await _get(f"/{slug}")
+        return await _handoff("confirm_disable", slug, "disable", {"impact": _summ(r)})
+
+    @mcp.tool()
+    async def rule_request_delete(slug: str) -> dict:
+        """Propose deletion. Returns a launch_url; the user sees the impact and confirms in
+        our GUI — the delete runs there, not here."""
+        try:
+            r = await _get(f"/{slug}")
+            impact = _summ(r)
+        except Exception:
+            impact = "(could not load rule detail)"
+        return await _handoff("confirm_delete", slug, "delete", {"impact": impact})

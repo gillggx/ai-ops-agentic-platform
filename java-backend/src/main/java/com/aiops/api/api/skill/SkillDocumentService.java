@@ -152,6 +152,16 @@ public class SkillDocumentService {
     }
 
     @Transactional
+    /**
+     * Set only the lifecycle status (draft|stable). Used by the UI-handoff
+     * resolve path (confirm_activate / confirm_disable) where Dtos is not
+     * visible. Goes through {@link #update} so trigger materialize/clear on
+     * status transitions still fires.
+     */
+    public SkillDocumentEntity setStatus(String slug, String status) {
+        return update(slug, new Dtos.UpdateRequest(null, null, status, null, null, null, null, null, null, null));
+    }
+
     public SkillDocumentEntity update(String slug, Dtos.UpdateRequest req) {
         SkillDocumentEntity e = getBySlug(slug);
         if (req.title() != null) e.setTitle(req.title());

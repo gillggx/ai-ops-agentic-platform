@@ -23,6 +23,40 @@ function parseJson(v: unknown): AnyObj {
   return {};
 }
 
+const NW = 184, NH = 56, GX = 244, GY = 92, PAD = 16;
+
+// Read-only layered DAG layout (longest-path depth → left-to-right layers).
+// API-built pipelines often carry no node positions, so we always lay out fresh.
+function layoutDag(nodes: AnyObj[], edges: AnyObj[]) {
+  const ids = nodes.map((n) => String(n.id));
+  const incoming: Record<string, string[]> = {};
+  ids.forEach((i) => { incoming[i] = []; });
+  edges.forEach((e) => {
+    const f = String((e.from as AnyObj)?.node ?? "");
+    const t = String((e.to as AnyObj)?.node ?? "");
+    if (incoming[t] != null && ids.includes(f)) incoming[t].push(f);
+  });
+  const depth: Record<string, number> = {};
+  const calc = (id: string, seen: Set<string>): number => {
+    if (depth[id] != null) return depth[id];
+    if (seen.has(id)) return 0;
+    seen.add(id);
+    const ins = incoming[id] ?? [];
+    const v = ins.length ? Math.max(...ins.map((p) => calc(p, seen) + 1)) : 0;
+    depth[id] = v; return v;
+  };
+  ids.forEach((i) => calc(i, new Set()));
+  const layers: Record<number, string[]> = {};
+  ids.forEach((i) => { (layers[depth[i]] ??= []).push(i); });
+  const pos: Record<string, { x: number; y: number }> = {};
+  Object.keys(layers).map(Number).sort((a, b) => a - b).forEach((L) => {
+    layers[L].forEach((id, idx) => { pos[id] = { x: PAD + L * GX, y: PAD + idx * GY }; });
+  });
+  const maxLayer = Math.max(0, ...Object.keys(layers).map(Number));
+  const maxRows = Math.max(1, ...Object.values(layers).map((a) => a.length));
+  return { pos, width: PAD * 2 + maxLayer * GX + NW, height: PAD * 2 + (maxRows - 1) * GY + NH };
+}
+
 export default function PipelineViewPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [meta, setMeta] = useState<AnyObj | null>(null);
@@ -99,24 +133,44 @@ export default function PipelineViewPage({ params }: { params: Promise<{ id: str
 
       <div style={card}>
         <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, color: "#101828" }}>結構（{nodes.length} blocks · {edges.length} edges）</div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-          {nodes.map((n, i) => {
-            const nid = String(n.id);
-            const nr = parseJson(nodeResults[nid]);
-            const st = nr?.status as string | undefined;
-            const dot = st === "success" ? "#067647" : st === "failed" ? "#b42318" : "#9ca3af";
-            return (
-              <span key={nid} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <span style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: "6px 10px", fontSize: 12.5, background: "#fcfcfd" }}>
-                  <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: 99, background: dot, marginRight: 6 }} />
-                  <b>{String(n.block_id).replace("block_", "")}</b>
-                  {typeof nr?.rows === "number" ? <span style={{ color: "#6b7280" }}> · {nr.rows as number} rows</span> : null}
-                </span>
-                {i < nodes.length - 1 ? <span style={{ color: "#9ca3af" }}>→</span> : null}
-              </span>
-            );
-          })}
-        </div>
+        {(() => {
+          const { pos, width, height } = layoutDag(nodes, edges);
+          return (
+            <div style={{ overflowX: "auto" }}>
+              <svg width={Math.max(width, 320)} height={Math.max(height, 80)} style={{ display: "block" }}>
+                <defs>
+                  <marker id="arr" markerWidth="9" markerHeight="9" refX="7.5" refY="4.5" orient="auto">
+                    <path d="M0,0 L9,4.5 L0,9 z" fill="#94a3b8" />
+                  </marker>
+                </defs>
+                {edges.map((e, i) => {
+                  const f = pos[String((e.from as AnyObj)?.node)];
+                  const t = pos[String((e.to as AnyObj)?.node)];
+                  if (!f || !t) return null;
+                  const x1 = f.x + NW, y1 = f.y + NH / 2, x2 = t.x - 4, y2 = t.y + NH / 2, mx = (x1 + x2) / 2;
+                  return <path key={i} d={`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`} fill="none" stroke="#cbd5e1" strokeWidth={1.6} markerEnd="url(#arr)" />;
+                })}
+                {nodes.map((n) => {
+                  const nid = String(n.id);
+                  const p = pos[nid];
+                  if (!p) return null;
+                  const nr = parseJson(nodeResults[nid]);
+                  const st = nr?.status as string | undefined;
+                  const dot = st === "success" ? "#067647" : st === "failed" ? "#b42318" : "#9ca3af";
+                  const isOut = /chart|view|alert|panel/.test(String(n.block_id));
+                  return (
+                    <g key={nid}>
+                      <rect x={p.x} y={p.y} width={NW} height={NH} rx={10} fill={isOut ? "#eff6ff" : "#fff"} stroke={isOut ? "#93c5fd" : "#e5e7eb"} strokeWidth={1.3} />
+                      <circle cx={p.x + 15} cy={p.y + 19} r={4} fill={dot} />
+                      <text x={p.x + 28} y={p.y + 23} fontSize={12.5} fontWeight={600} fill="#101828">{String(n.block_id).replace("block_", "")}</text>
+                      <text x={p.x + 15} y={p.y + 43} fontSize={11} fill="#6b7280">{nid}{typeof nr?.rows === "number" ? ` · ${nr.rows as number} rows` : ""}</text>
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+          );
+        })()}
       </div>
 
       <div style={card}>

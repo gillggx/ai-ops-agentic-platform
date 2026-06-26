@@ -174,6 +174,19 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
     state.meta.status === "active" ||
     state.meta.status === "archived";
 
+  // Pipelines built via the API / agent often carry no node positions; the
+  // canvas reducer reads node.position.x and crashes ("無法開啟" on a saved
+  // pipeline). Lay out any position-less node before init so it opens cleanly.
+  const ensureNodePositions = (pj: unknown) => {
+    const nodes = (pj as { nodes?: { position?: { x: number; y: number } }[] })?.nodes;
+    if (!Array.isArray(nodes)) return;
+    nodes.forEach((n, i) => {
+      if (!n.position || typeof n.position.x !== "number" || typeof n.position.y !== "number") {
+        n.position = { x: 80 + i * 240, y: 120 };
+      }
+    });
+  };
+
   // Load catalog + pipeline
   useEffect(() => {
     (async () => {
@@ -182,6 +195,7 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
         setCatalog(blocks);
         if (mode === "edit" && pipelineId) {
           const rec = await getPipeline(pipelineId);
+          ensureNodePositions((rec as { pipeline_json?: unknown }).pipeline_json);
           actions.init(rec);
           setNameDraft(rec.pipeline_json.name);
         } else if (initialPipelineJson) {

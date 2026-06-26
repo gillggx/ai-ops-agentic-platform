@@ -72,21 +72,24 @@ Be economical: a few inspect/preview calls, then build. Don't loop blindly.
 
 AUTO-CHECK RULES (rule_* tools) — build a "watch X, alarm, auto-diagnose" rule:
 A rule = TRIGGER (when) + CONFIRM/CHECKLIST (what to check, each a pipeline ending
-in block_step_check) + the platform fires the alarm. Guided flow, one part at a time:
+in block_step_check) + the platform fires the alarm. Build the WHOLE rule, then let
+the user review it once in our GUI — do NOT review per-checkpoint.
  1. rule_describe_options() for the shapes; ask the user WHAT to watch.
  2. rule_create(title, stage, trigger_config) — stage=patrol (watch) or diagnose.
-    Ask the user the trigger (event like OOC, or schedule) and target (all/tools).
- 3. For each checkpoint: BUILD a check pipeline with the pipeline tools (it MUST
-    end in block_step_check — outputs a pass:bool; do NOT add block_alert), preview
-    it, save_pipeline, then rule_bind_checkpoint(slot='confirm' or 'step:NEW', ...).
-    (rule_set_confirm_check_nl / rule_add_step_nl exist but are slower — prefer build+bind.)
- 4. rule_validate(slug); fix issues. Tell the user it is a DRAFT — going live is
-    their step in the UI (no tool activates a rule).
-CONFIRM: every rule_* write needs two calls — first WITHOUT confirm_token returns a
-preview + token; show the preview to the user, get a yes, then call again WITH the
-SAME args + confirm_token. Reads (rule_list/get/validate/describe) need no confirm.
-For edit, rule_get -> rule_update(patch only the named part) -> rule_validate.
-For delete/disable, the preview shows the impact — read it to the user first.
+ 3. For each checkpoint: BUILD a check pipeline with the pipeline tools (it MUST end
+    in block_step_check — outputs a pass:bool; do NOT add block_alert), save_pipeline,
+    then rule_bind_checkpoint(slot='confirm' or 'step:NEW', ...). Build them all; don't
+    stop to make the user review each one.
+ 4. rule_validate(slug); fix issues.
+ 5. rule_request_review(slug) -> returns a launch_url. Give it to the user: our GUI
+    try-runs the WHOLE rule and shows every checkpoint's result together, where they
+    edit any one or activate it. THIS is the review step.
+DRAFT edits (rule_create/update/bind/set_confirm_check_nl/add_step_nl) run directly —
+no confirm needed (they only make a reversible draft).
+GOING LIVE / DISABLE / DELETE never happen from a tool. Use rule_request_activate /
+rule_request_disable / rule_request_delete — each returns a launch_url; give it to the
+user, who confirms in our GUI where the action actually runs. For edits, rule_get ->
+rule_update(patch the named part) -> rule_request_review again.
 """
 
 # Server binds 127.0.0.1 only and sits behind nginx (TLS + secret path) — that is
@@ -235,7 +238,7 @@ async def save_pipeline(name: str, pipeline_json: dict, description: str = "") -
 
 # Auto-check Rule tool group (skill-document CRUD + two-phase confirm)
 import rules  # noqa: E402
-rules.register(mcp, java=JAVA, shared=SHARED, public=PUBLIC)
+rules.register(mcp, java=JAVA, shared=SHARED, jit=JIT, public=PUBLIC)
 
 # ASGI app for uvicorn (streamable-HTTP transport, remote MCP)
 app = mcp.streamable_http_app()

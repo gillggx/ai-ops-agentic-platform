@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 // Resizable panel via native CSS resize
 import { Topbar } from "@/components/layout/Topbar";
+import HandoffListener from "@/components/shell/HandoffListener";
 import { AIAgentPanel } from "@/components/copilot/AIAgentPanel";
 import { AnalysisPanel } from "@/components/layout/AnalysisPanel";
 import { DataExplorerPanel } from "@/components/layout/DataExplorerPanel";
@@ -285,6 +286,7 @@ function Shell({ children }: { children: React.ReactNode }) {
       height: "100vh", background: "#f7f8fc", overflow: "hidden",
     }}>
       <Topbar />
+      <HandoffListener />
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         {/* Sidebar + main + copilot toggle live in a relative container so
             LiveCanvasOverlay can position-absolute over them without also
