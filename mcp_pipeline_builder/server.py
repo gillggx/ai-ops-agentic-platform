@@ -192,11 +192,16 @@ async def preview(pipeline_json: dict, node_id: str) -> dict:
     data = (nr.get("preview") or {}).get("data") or {}
     sample = data.get("rows_sample") or data.get("rows") or []
     # all_columns is the FULL name list; `columns` is capped (~30) for sample
-    # economy, so newly-added columns at the tail (e.g. a time_bucket appended to
-    # a 30-col flat table) get cut off. Read all_columns so cowork sees them.
-    cols = data.get("all_columns") or data.get("columns") or []
+    # economy. Flat process_history has ~400 cols and a transform's new column is
+    # appended at the TAIL — so show head + tail (where added cols live) to keep
+    # it bounded yet let cowork see what a block just added.
+    allcols = data.get("all_columns") or data.get("columns") or []
+    if len(allcols) > 100:
+        cols = allcols[:80] + [f"...(+{len(allcols) - 100} more)..."] + allcols[-20:]
+    else:
+        cols = allcols
     return {"status": nr.get("status"), "rows": nr.get("rows"),
-            "columns": cols[:120],
+            "columns": cols, "column_count": len(allcols),
             "sample": sample[:3], "error": nr.get("error")}
 
 
