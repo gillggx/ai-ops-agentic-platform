@@ -1,0 +1,15 @@
+[Unit]
+Description=AIOps Pipeline-Builder MCP server (remote MCP for Claude Desktop)
+After=network.target aiops-java-api.service aiops-python-sidecar.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/aiops/mcp_pipeline_builder
+EnvironmentFile=/opt/aiops/mcp_pipeline_builder/.env
+ExecStart=/opt/aiops/venv_mcp/bin/python server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
