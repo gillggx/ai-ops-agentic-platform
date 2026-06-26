@@ -140,7 +140,12 @@ public class SkillRunnerService {
 			if (confirmPipelineId == null) {
 				confirmResult = stepExecutor.stepResultPending("confirm", "no confirm pipeline bound");
 			} else {
-				confirmResult = stepExecutor.runOneStep("confirm", confirmPipelineId, triggerPayload, caller);
+				// 2026-06-26: forward skill id + run.triggered_by so the
+				// per-step execution_logs row carries the same provenance
+				// as the parent skill_runs row (previously skill_id=-1 /
+				// triggered_by='user' on every system_event dispatch).
+				confirmResult = stepExecutor.runOneStep("confirm", confirmPipelineId, triggerPayload, caller,
+						skill.getId(), run.getTriggeredBy());
 			}
 			sink.tryEmitNext(RunEvent.confirmDone(confirmResult));
 			boolean mustPass = !Boolean.FALSE.equals(confirmConfig.get("must_pass"));
@@ -162,7 +167,8 @@ public class SkillRunnerService {
 				if (pipelineId == null) {
 					stepResult = stepExecutor.stepResultPending(stepId, "no pipeline bound");
 				} else {
-					stepResult = stepExecutor.runOneStep(stepId, pipelineId, triggerPayload, caller);
+					stepResult = stepExecutor.runOneStep(stepId, pipelineId, triggerPayload, caller,
+							skill.getId(), run.getTriggeredBy());
 				}
 				stepResults.add(stepResult);
 				sink.tryEmitNext(RunEvent.stepDone(stepResult));

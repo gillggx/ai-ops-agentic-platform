@@ -63,6 +63,22 @@ public class SkillStepExecutor {
 	                                       Long pipelineId,
 	                                       Map<String, Object> payload,
 	                                       AuthPrincipal caller) {
+		return runOneStep(stepId, pipelineId, payload, caller, null, null);
+	}
+
+	/**
+	 * 2026-06-26: overload that forwards skill_id + triggered_by + payload
+	 * snapshot to the sidecar so the row written into execution_logs reflects
+	 * the calling skill / scheduler path (no more skill_id=-1 + triggered_by=
+	 * 'user' on every system-event dispatch). Older callers can keep using the
+	 * 4-arg form and get the legacy behaviour.
+	 */
+	public Map<String, Object> runOneStep(String stepId,
+	                                       Long pipelineId,
+	                                       Map<String, Object> payload,
+	                                       AuthPrincipal caller,
+	                                       Long skillId,
+	                                       String triggeredBy) {
 		long t0 = System.currentTimeMillis();
 		try {
 			PipelineEntity pe = pipelineRepo.findById(pipelineId).orElse(null);
@@ -77,6 +93,16 @@ public class SkillStepExecutor {
 			// Sidecar /internal/pipeline/execute expects a parsed JSON, not a string.
 			body.put("pipeline_json", mapper.readValue(pipelineJson, JSON_MAP_TYPE));
 			body.put("inputs", payload != null ? payload : Map.of());
+			if (triggeredBy != null && !triggeredBy.isBlank()) {
+				body.put("triggered_by", triggeredBy);
+			}
+			if (skillId != null) {
+				body.put("skill_id", skillId);
+			}
+			// event_context: serialise the trigger payload + minimal routing
+			// hint so post-mortem can see which step + which skill caused
+			// this execution row. Trim long values to keep the column manageable.
+			body.put("event_context", buildEventContext(skillId, stepId, payload));
 
 			@SuppressWarnings("rawtypes")
 			Map result = sidecar.postJson("/internal/pipeline/execute", body, Map.class, caller)
@@ -89,6 +115,18 @@ public class SkillStepExecutor {
 			// keeps going to the next step.
 			log.warn("step {} pipeline {} crashed: {}", stepId, pipelineId, ex.toString());
 			return stepResultError(stepId, ex.getClass().getSimpleName() + ": " + ex.getMessage());
+		}
+	}
+
+	private String buildEventContext(Long skillId, String stepId, Map<String, Object> payload) {
+		Map<String, Object> ctx = new HashMap<>();
+		ctx.put("skill_id", skillId);
+		ctx.put("step_id", stepId);
+		ctx.put("payload", payload != null ? payload : Map.of());
+		try {
+			return mapper.writeValueAsString(ctx);
+		} catch (JsonProcessingException e) {
+			return "{}";
 		}
 	}
 

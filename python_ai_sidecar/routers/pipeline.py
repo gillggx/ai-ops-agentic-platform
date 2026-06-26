@@ -35,6 +35,12 @@ class ExecuteRequest(BaseModel):
     pipeline_json: dict | None = None
     inputs: dict[str, Any] | None = None
     triggered_by: str = "user"
+    # 2026-06-26: forwarded by SkillStepExecutor.runOneStep so the
+    # execution_logs row carries the same provenance as the parent
+    # skill_runs row (skill_id + JSON event_context). Optional — ad-hoc
+    # builder previews still send neither.
+    skill_id: int | None = None
+    event_context: str | None = None
 
 
 class ValidateRequest(BaseModel):
@@ -118,6 +124,8 @@ async def execute(req: ExecuteRequest, caller: CallerContext = ServiceAuth) -> d
             # Java Jackson uses SNAKE_CASE — send snake_case keys.
             persisted = await java.create_execution_log({
                 "triggered_by": req.triggered_by or "user",
+                "skill_id": req.skill_id,
+                "event_context": req.event_context,
                 "status": "success" if status == "success" else "error",
                 "llm_readable_data": json.dumps({
                     "source": "python_ai_sidecar_native",
@@ -163,6 +171,8 @@ async def execute(req: ExecuteRequest, caller: CallerContext = ServiceAuth) -> d
         status = "success" if walk.get("status") == "success" else "error"
         persisted = await java.create_execution_log({
             "triggered_by": req.triggered_by or "user",
+            "skill_id": req.skill_id,
+            "event_context": req.event_context,
             "status": status,
             "llm_readable_data": json.dumps({
                 "source": "python_ai_sidecar_demo",

@@ -34,11 +34,21 @@ public class InternalExecutionLogController {
 		e.setCronJobId(req.cronJobId());
 		e.setTriggeredBy(req.triggeredBy());
 		e.setEventContext(req.eventContext());
-		e.setStatus(req.status() == null ? "success" : req.status());
+		String status = req.status() == null ? "success" : req.status();
+		e.setStatus(status);
 		e.setLlmReadableData(req.llmReadableData());
 		e.setActionDispatched(req.actionDispatched());
 		e.setErrorMessage(req.errorMessage());
-		if (req.finishedAt() != null) e.setFinishedAt(req.finishedAt());
+		// 2026-06-26 fix: callers (sidecar) POST after the run is over and
+		// pass duration_ms but rarely set finished_at — leaving the field
+		// NULL while status / duration are present. If the row arrives in
+		// a terminal state, default finished_at to now() so SLA / latency
+		// reports work without callers having to remember the field.
+		if (req.finishedAt() != null) {
+			e.setFinishedAt(req.finishedAt());
+		} else if ("success".equals(status) || "error".equals(status) || "timeout".equals(status)) {
+			e.setFinishedAt(OffsetDateTime.now());
+		}
 		e.setDurationMs(req.durationMs());
 		return ApiResponse.ok(Dto.of(repository.save(e)));
 	}
