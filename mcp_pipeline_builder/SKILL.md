@@ -52,6 +52,29 @@ Node **positions are not needed** — the UI lays out the DAG.
   (`block_pareto` self-sorts) — no separate sort block.
 - Be economical: a few preview/inspect calls, then build. Don't loop blindly.
 
+## Auto-check Rules (`rule_*` tools)
+A **rule** = TRIGGER (when) + CONFIRM/CHECKLIST (what to check) + the platform fires
+the alarm. It is a Skill Document. Build it one part at a time, like a guided author:
+
+| tool | use | confirm |
+|---|---|---|
+| `rule_list` / `rule_get` / `rule_describe_options` / `rule_validate` | read | none |
+| `rule_create` | new rule (draft) + trigger | two-phase |
+| `rule_update` | patch title/desc/stage/trigger | two-phase |
+| `rule_bind_checkpoint` | bind a check pipeline YOU built to a slot | two-phase |
+| `rule_set_confirm_check_nl` / `rule_add_step_nl` | NL → check (slower; prefer build+bind) | two-phase |
+| `rule_disable` / `rule_delete` | turn off / remove | two-phase |
+
+Flow: `rule_describe_options` → `rule_create(title, stage, trigger_config)` →
+build a check pipeline that **ends in `block_step_check`** (no `block_alert`),
+`save_pipeline`, then `rule_bind_checkpoint(slot='confirm' or 'step:NEW', pipeline_id)`
+→ `rule_validate` → tell the user it is a **draft** (going live is their UI step).
+
+**Two-phase confirm** (all `rule_*` writes): first call WITHOUT `confirm_token`
+returns a `preview` + `confirm_token`; show the preview to the user, get a yes, then
+call again with the SAME args + `confirm_token`. For delete/disable the preview
+shows the impact — read it to the user first.
+
 ## Example request → what you do
 > "查 EQP-08 最近 7 天的 SPC 趨勢,畫成圖並存起來"
 
