@@ -21,6 +21,7 @@ from typing import Any
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 SIDECAR = os.environ.get("SIDECAR_URL", "http://localhost:8050").rstrip("/")
 JAVA = os.environ.get("JAVA_URL", "http://localhost:8002").rstrip("/")
@@ -70,7 +71,14 @@ GOTCHAS (learned the hard way — follow these):
 Be economical: a few inspect/preview calls, then build. Don't loop blindly.
 """
 
-mcp = FastMCP("aiops-pipeline-builder", instructions=INSTRUCTIONS)
+# Server binds 127.0.0.1 only and sits behind nginx (TLS + secret path) — that is
+# the trust boundary, so disable FastMCP's auto host-check (it would otherwise
+# reject nginx's proxied Host header with HTTP 421 "Invalid Host header").
+mcp = FastMCP(
+    "aiops-pipeline-builder",
+    instructions=INSTRUCTIONS,
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
 
 
 async def _get(client: httpx.AsyncClient, url: str, headers: dict) -> Any:
