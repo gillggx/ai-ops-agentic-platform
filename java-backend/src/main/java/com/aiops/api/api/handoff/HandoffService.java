@@ -36,7 +36,10 @@ public class HandoffService {
 
     static final Set<String> KINDS = Set.of(
             "review_rule", "confirm_delete", "confirm_disable", "confirm_activate", "view_detail");
-    private static final long TTL_MINUTES = 15;
+    // TTL for a pending handoff. Env-overridable so it can be tuned without a
+    // rebuild (HANDOFF_TTL_MINUTES); default 2 hours.
+    private static final long TTL_MINUTES =
+            Long.parseLong(System.getenv().getOrDefault("HANDOFF_TTL_MINUTES", "120"));
     private static final char[] HEX = "0123456789abcdef".toCharArray();
     private static final SecureRandom RNG = new SecureRandom();
 
