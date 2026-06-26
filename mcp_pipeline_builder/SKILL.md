@@ -59,21 +59,26 @@ the alarm. It is a Skill Document. Build it one part at a time, like a guided au
 | tool | use | confirm |
 |---|---|---|
 | `rule_list` / `rule_get` / `rule_describe_options` / `rule_validate` | read | none |
-| `rule_create` | new rule (draft) + trigger | two-phase |
-| `rule_update` | patch title/desc/stage/trigger | two-phase |
-| `rule_bind_checkpoint` | bind a check pipeline YOU built to a slot | two-phase |
-| `rule_set_confirm_check_nl` / `rule_add_step_nl` | NL → check (slower; prefer build+bind) | two-phase |
-| `rule_disable` / `rule_delete` | turn off / remove | two-phase |
+| `rule_create` | new rule (draft) + trigger | direct |
+| `rule_update` | patch title/desc/stage/trigger | direct |
+| `rule_bind_checkpoint` | bind a check pipeline YOU built to a slot | direct |
+| `rule_set_confirm_check_nl` / `rule_add_step_nl` | NL → check (slower; prefer build+bind) | direct |
+| `rule_request_review` | open the whole-rule review GUI for the user | hand-off |
+| `rule_request_activate` / `rule_request_disable` / `rule_request_delete` | go live / turn off / remove | hand-off |
 
-Flow: `rule_describe_options` → `rule_create(title, stage, trigger_config)` →
-build a check pipeline that **ends in `block_step_check`** (no `block_alert`),
-`save_pipeline`, then `rule_bind_checkpoint(slot='confirm' or 'step:NEW', pipeline_id)`
-→ `rule_validate` → tell the user it is a **draft** (going live is their UI step).
+Flow: `rule_describe_options` → `rule_create(title, stage, trigger_config)` → for each
+checkpoint build a pipeline that **ends in `block_step_check`** (no `block_alert`),
+`save_pipeline`, then `rule_bind_checkpoint(slot='confirm' or 'step:NEW', pipeline_id)`.
+Build the WHOLE rule (don't review per-checkpoint) → `rule_validate` →
+`rule_request_review(slug)` → give the user the returned `launch_url`: our GUI try-runs
+the whole rule and shows every checkpoint's result together, where they edit any one or
+activate it.
 
-**Two-phase confirm** (all `rule_*` writes): first call WITHOUT `confirm_token`
-returns a `preview` + `confirm_token`; show the preview to the user, get a yes, then
-call again with the SAME args + `confirm_token`. For delete/disable the preview
-shows the impact — read it to the user first.
+**Draft edits run directly** (create/update/bind/nl) — they only make a reversible draft.
+**Going live / disable / delete never run from a tool**: call `rule_request_*`, which
+returns a `launch_url`; give it to the user, who reviews/confirms in our GUI where the
+action actually runs (under their auth). If their app is open it auto-pops; otherwise
+the link is the way in.
 
 ## Example request → what you do
 > "查 EQP-08 最近 7 天的 SPC 趨勢,畫成圖並存起來"
