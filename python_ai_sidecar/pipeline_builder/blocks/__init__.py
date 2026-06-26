@@ -49,6 +49,7 @@ from python_ai_sidecar.pipeline_builder.blocks.spc_panel import SpcPanelBlockExe
 from python_ai_sidecar.pipeline_builder.blocks.splom import SplomBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.step_check import StepCheckBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.threshold import ThresholdBlockExecutor
+from python_ai_sidecar.pipeline_builder.blocks.time_bucket import TimeBucketBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.trend_wafer_maps import TrendWaferMapsBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.union import UnionBlockExecutor
 from python_ai_sidecar.pipeline_builder.blocks.unnest import UnnestBlockExecutor
@@ -117,6 +118,7 @@ BUILTIN_EXECUTORS: dict[str, type[BlockExecutor]] = {
     # 2026-05-13 (Phase 1 object-native) — path navigation blocks
     "block_pluck": PluckBlockExecutor,
     "block_unnest": UnnestBlockExecutor,
+    "block_time_bucket": TimeBucketBlockExecutor,
     "block_select": SelectBlockExecutor,
     # 2026-05-14 (v18) — domain-composite panel blocks
     "block_spc_panel": SpcPanelBlockExecutor,
@@ -171,6 +173,7 @@ __all__ = [
     "SpcLongFormBlockExecutor",
     "SplomBlockExecutor",
     "ThresholdBlockExecutor",
+    "TimeBucketBlockExecutor",
     "TrendWaferMapsBlockExecutor",
     "PluckBlockExecutor",
     "SelectBlockExecutor",

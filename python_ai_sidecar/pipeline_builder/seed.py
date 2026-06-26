@@ -3536,6 +3536,52 @@ def _blocks() -> list[dict[str, Any]]:
             "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.unnest:UnnestBlockExecutor"},
         },
         {
+            "name": "block_time_bucket",
+            "version": "1.0.0",
+            "category": "transform",
+            "status": "production",
+            "essential": True,
+            "description": (
+                "== What ==\n"
+                "把時間欄截斷成等距時間桶（15min/30min/1h/4h/1d），輸出一個可直接 groupby 的桶欄。\n"
+                "解決「eventTime 是毫秒級唯一 ISO 字串、直接 group 會每筆一桶」的問題。\n\n"
+                "== When to use ==\n"
+                "- [ok] 「過去 N 天 OOC 次數 by hour」→ time_bucket(eventTime,1h) → "
+                "groupby_agg(group_by=time_bucket, count) → bar_chart\n"
+                "- [ok] 任何「事件 / 良率隨時間」的逐時、逐日趨勢或統計\n"
+                "- [no] 已是離散分組鍵（tool / step / recipe）→ 直接 groupby，不用本 block\n"
+                "- [no] 想要連續時間軸補零 → 本 block 不補零（空桶不出現），補零另議\n\n"
+                "== Params ==\n"
+                "column (string, required) 時間欄，ISO 字串或 datetime，例 eventTime\n"
+                "interval (enum 15min|30min|1h|4h|1d, default 1h) 桶粒度\n"
+                "output_column (string, default time_bucket) 輸出欄名\n"
+                "tz (string, default UTC) 時區，影響小時對齊，例 Asia/Taipei\n"
+                "label (enum start|center, default start) 桶標籤取桶起點或中心\n\n"
+                "== Output ==\n"
+                "port: data (dataframe) — 原欄位 + output_column（截斷後時間字串，例 2026-06-26T05:00）。\n"
+                "下游接 block_groupby_agg(group_by=output_column, agg_func='count') → "
+                "block_bar_chart / block_line_chart。"
+            ),
+            "param_schema": {
+                "type": "object",
+                "required": ["column"],
+                "properties": {
+                    "column": {"type": "string", "description": "時間欄（ISO 字串或 datetime），例 eventTime"},
+                    "interval": {"type": "string", "enum": ["15min", "30min", "1h", "4h", "1d"],
+                                 "default": "1h", "description": "桶粒度"},
+                    "output_column": {"type": "string", "default": "time_bucket", "description": "輸出桶欄名"},
+                    "tz": {"type": "string", "default": "UTC", "description": "時區，影響小時對齊，例 Asia/Taipei"},
+                    "label": {"type": "string", "enum": ["start", "center"], "default": "start",
+                              "description": "桶標籤取桶起點或中心"},
+                },
+            },
+            "examples": [
+                {"label": "OOC 次數 by hour（截到小時桶後 groupby count → bar chart）",
+                 "params": {"column": "eventTime", "interval": "1h", "tz": "Asia/Taipei"}},
+            ],
+            "implementation": {"type": "python", "ref": "python_ai_sidecar.pipeline_builder.blocks.time_bucket:TimeBucketBlockExecutor"},
+        },
+        {
             "name": "block_select",
             "version": "1.0.0",
             "category": "transform",

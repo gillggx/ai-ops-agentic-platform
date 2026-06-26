@@ -91,6 +91,7 @@ SIDECAR_NATIVE_BLOCKS: frozenset[str] = frozenset({
     # 2026-05-13 (Phase 1 object-native) — path navigation blocks.
     "block_pluck",
     "block_unnest",
+    "block_time_bucket",
     "block_select",
     # 2026-05-14 (v18) — domain-composite panel blocks
     "block_spc_panel",
