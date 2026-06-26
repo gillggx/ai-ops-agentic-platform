@@ -191,8 +191,12 @@ async def preview(pipeline_json: dict, node_id: str) -> dict:
     nr = r.get("node_result") or {}
     data = (nr.get("preview") or {}).get("data") or {}
     sample = data.get("rows_sample") or data.get("rows") or []
+    # all_columns is the FULL name list; `columns` is capped (~30) for sample
+    # economy, so newly-added columns at the tail (e.g. a time_bucket appended to
+    # a 30-col flat table) get cut off. Read all_columns so cowork sees them.
+    cols = data.get("all_columns") or data.get("columns") or []
     return {"status": nr.get("status"), "rows": nr.get("rows"),
-            "columns": (data.get("columns") or [])[:40],
+            "columns": cols[:120],
             "sample": sample[:3], "error": nr.get("error")}
 
 
