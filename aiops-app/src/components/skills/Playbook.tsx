@@ -739,7 +739,7 @@ function FlowDiagram({
           <Chip kind="gate"
             head={`ALARM GATE · ${alarmGateSteps} STEP${alarmGateSteps === 1 ? "" : "S"}`}
             value="達標才告警"/>
-          <Arrow note="if all pass → alarm"/>
+          <Arrow note="全部觸發(符合)→ alarm"/>
         </>
       ) : null}
       <Chip kind="list" head="CHECKLIST"
@@ -1004,8 +1004,13 @@ function StepBlock({
     if (mode !== "run") return null;
     if (isRunning) return <Badge kind="muted" icon={<span className="skill-spinner"/>}>Running…</Badge>;
     if (!isDone) return <Badge kind="muted" dim>Pending</Badge>;
-    if (runResult?.status === "pass") return <Badge kind="pass" icon={<Icon.Check/>}>Pass</Badge>;
-    if (runResult?.status === "fail") return <Badge kind="fail" icon={<Icon.X/>}>Fail</Badge>;
+    // Checklist/alarm step: pass=true means the check CONDITION MATCHED → this is
+    // the alarm/abnormal signal (SkillRunner fires the alarm on pass=true; UI note
+    // "if all pass → alarm"). So show pass=true RED「觸發」and pass=false GREEN
+    // 「正常」— inverted from a unit test. The confirm gate keeps the normal
+    // pass=green meaning and is rendered separately (GateResultCard).
+    if (runResult?.status === "pass") return <Badge kind="fail" icon={<Icon.Bolt/>}>觸發</Badge>;
+    if (runResult?.status === "fail") return <Badge kind="pass" icon={<Icon.Check/>}>正常</Badge>;
     return null;
   })();
 
@@ -1633,8 +1638,10 @@ function RunTimeline({
           {steps.map((s, i) => {
             const st = runStatuses[s.id] || "queued";
             const result = runResults[s.id];
+            // Checklist step: pass=true = condition matched = TRIGGERED (alarm) →
+            // red; pass=false = normal → green (inverted from a unit test).
             const dotColor = st === "done"
-              ? (result?.status === "fail" ? "var(--fail)" : "var(--pass)")
+              ? (result?.status === "pass" ? "var(--fail)" : "var(--pass)")
               : st === "running" ? "var(--ai)"
               : "var(--line-strong)";
             return (
@@ -1656,8 +1663,8 @@ function RunTimeline({
                   <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2, lineHeight: 1.4 }}>
                     {st === "queued" && "Queued"}
                     {st === "running" && "Running…"}
-                    {st === "done" && result?.status === "pass" && (result.value || "Pass")}
-                    {st === "done" && result?.status === "fail" && <span style={{ color: "var(--fail)" }}>{result.value}</span>}
+                    {st === "done" && result?.status === "pass" && <span style={{ color: "var(--fail)" }}>觸發 · {result.value || ""}</span>}
+                    {st === "done" && result?.status === "fail" && <span style={{ color: "var(--pass)" }}>正常 · {result.value || ""}</span>}
                   </div>
                 </div>
               </div>
@@ -1870,7 +1877,8 @@ function SynthesisStrip({
     }
   }
   if (totalSteps > 0 && !gateBlocked) {
-    lines.push(<span key="c">⚙ Checklist · <strong style={{ color: "var(--pass)" }}>{passCount} pass</strong> / <strong style={{ color: failCount > 0 ? "var(--fail)" : "var(--ink-3)" }}>{failCount} fail</strong></span>);
+    // pass=true checklist steps are the TRIGGERED (alarm) ones → red; fails are normal → green.
+    lines.push(<span key="c">⚙ Checklist · <strong style={{ color: passCount > 0 ? "var(--fail)" : "var(--ink-3)" }}>{passCount} 觸發</strong> / <strong style={{ color: "var(--pass)" }}>{failCount} 正常</strong></span>);
   }
   if (lines.length === 0) return null;
   return (

@@ -85,7 +85,10 @@ the user review it once in our GUI — do NOT review per-checkpoint.
     try-runs the WHOLE rule and shows every checkpoint's result together, where they
     edit any one or activate it. THIS is the review step.
 DRAFT edits (rule_create/update/bind/set_confirm_check_nl/add_step_nl) run directly —
-no confirm needed (they only make a reversible draft).
+no confirm needed (they only make a reversible draft). HARD RULE: after ANY rule
+create OR modify, you MUST finish by calling rule_request_review(slug) and give the
+user the launch_url. NEVER tell the user a rule is built/changed without launching
+the review GUI — they decide there whether to try-run more or activate.
 GOING LIVE / DISABLE / DELETE never happen from a tool. Use rule_request_activate /
 rule_request_disable / rule_request_delete — each returns a launch_url; give it to the
 user, who confirms in our GUI where the action actually runs. For edits, rule_get ->

@@ -75,6 +75,9 @@ the whole rule and shows every checkpoint's result together, where they edit any
 activate it.
 
 **Draft edits run directly** (create/update/bind/nl) — they only make a reversible draft.
+**Hard rule:** after ANY create OR modify, finish by calling `rule_request_review(slug)`
+and give the user the launch_url — never say a rule is built/changed without launching
+the review GUI; they decide there whether to try-run more or activate.
 **Going live / disable / delete never run from a tool**: call `rule_request_*`, which
 returns a `launch_url`; give it to the user, who reviews/confirms in our GUI where the
 action actually runs (under their auth). If their app is open it auto-pops; otherwise
