@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Playbook from "@/components/skills/Playbook";
 
 /**
  * /handoff/[id] — the landing for a cowork-created UI handoff (V63).
@@ -49,11 +50,8 @@ export default function HandoffPage({ params }: { params: Promise<{ id: string }
           setErr(d?.error?.message || `載入失敗 (HTTP ${r.status})`);
           return;
         }
-        // review / view -> hand straight to the real product page
-        if (rec.kind === "review_rule" && rec.target_ref) {
-          router.replace(`/skills/${rec.target_ref}`);
-          return;
-        }
+        // review_rule -> render the rule review (Playbook) inline below, standalone
+        // (bare layout, no app shell). view_detail still redirects to its detail page.
         if (rec.kind === "view_detail" && rec.target_ref) {
           router.replace(/^\d+$/.test(rec.target_ref) ? `/pipeline-view/${rec.target_ref}` : `/skills/${rec.target_ref}`);
           return;
@@ -85,6 +83,12 @@ export default function HandoffPage({ params }: { params: Promise<{ id: string }
 
   if (err) return <div style={wrap}><div style={{ ...card, background: "#fef3f2", borderColor: "#fecaca", color: "#b42318" }}>{err}</div></div>;
   if (!h) return <div style={wrap}><div style={card}>載入中…</div></div>;
+
+  // review_rule — standalone, fit-window rule review (whole-rule try-run + per-step
+  // results + edit), rendered inline so there is no app shell / chat / sidebar.
+  if (h.kind === "review_rule" && h.target_ref) {
+    return <div style={{ minHeight: "100vh", background: "#f7f8fc" }}><Playbook slug={h.target_ref} mode="run" /></div>;
+  }
 
   const copy = ACTION_COPY[h.kind] ?? { verb: "執行", tone: "#1d4ed8" };
   let impact = "";

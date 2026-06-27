@@ -653,6 +653,14 @@ function TopBar({
           boxShadow: mode === "run" ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
           textDecoration: "none",
         }}>Execute</Link>
+        {/* 2026-06-27 Dry-run mode — sandboxed test runs that never alarm */}
+        <Link href={`/skills/${encodeURIComponent(slug)}/dry-run`} style={{
+          padding: "5px 12px", borderRadius: 6, border: "none",
+          background: "transparent",
+          color: "var(--ink-3)",
+          fontSize: 12, fontWeight: 500, cursor: "pointer",
+          textDecoration: "none",
+        }}>Dry-run</Link>
       </div>
 
       <div style={{ width: 1, height: 20, background: "var(--line)" }}/>
