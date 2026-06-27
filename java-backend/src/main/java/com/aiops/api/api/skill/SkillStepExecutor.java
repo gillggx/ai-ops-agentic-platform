@@ -185,6 +185,11 @@ public class SkillStepExecutor {
 		// 的資料本身，不只是 yes/no」. v11 — read result_summary.data_views
 		// (block_data_view nodes) so it matches Pipeline-Builder try-run.
 		sr.put("data_views", extractDataViews((Map<String, Object>) result, nodeResults));
+		// Forward the FULL pipeline result_summary (charts + data_views) so the
+		// skill try-run renders each step with the SAME ResultsBody component as a
+		// single-pipeline run / pipeline-view — not a tables-only side path. A
+		// step's chart (e.g. a by-hour OOC bar) was computed but previously dropped.
+		sr.put("result_summary", result.get("result_summary"));
 		if (stepCheck == null) {
 			// Pipeline ran but no step_check output — treat as fail with diagnostic note
 			sr.put("status", "fail");

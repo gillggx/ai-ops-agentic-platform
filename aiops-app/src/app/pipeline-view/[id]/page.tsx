@@ -2,7 +2,8 @@
 
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import ChartRenderer from "@/components/pipeline-builder/ChartRenderer";
+import ResultsBody from "@/components/pipeline-builder/ResultsBody";
+import type { PipelineResultSummary, NodeResult } from "@/lib/pipeline-builder/types";
 
 /**
  * /pipeline-view/[id] — read-only single-pipeline viewer.
@@ -178,27 +179,11 @@ export default function PipelineViewPage({ params }: { params: Promise<{ id: str
           結果 {status ? <span style={{ fontWeight: 400, color: "#6b7280" }}>· {status}</span> : null}
         </div>
         {running && charts.length === 0 ? <div style={{ color: "#6b7280", fontSize: 13 }}>執行中，請稍候…</div> : null}
-        {!running && charts.length === 0 && dataViews.length === 0 ? <div style={{ color: "#6b7280", fontSize: 13 }}>（無圖表 / 表格輸出）</div> : null}
-        {charts.map((c, i) => (
-          <div key={i} style={{ marginBottom: 18 }}>
-            <ChartRenderer spec={(c.chart_spec ?? c) as never} height={360} />
-          </div>
-        ))}
-        {dataViews.map((dv, i) => {
-          const rows = (dv.rows as AnyObj[]) ?? [];
-          const cols = rows[0] ? Object.keys(rows[0]).slice(0, 8) : [];
-          return (
-            <div key={`dv${i}`} style={{ marginTop: 12 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 6 }}>{String(dv.title ?? "Table")}</div>
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ borderCollapse: "collapse", fontSize: 12 }}>
-                  <thead><tr>{cols.map((k) => <th key={k} style={{ border: "1px solid #e5e7eb", padding: "5px 8px", background: "#f8fafc", textAlign: "left" }}>{k}</th>)}</tr></thead>
-                  <tbody>{rows.slice(0, 20).map((row, ri) => <tr key={ri}>{cols.map((k) => <td key={k} style={{ border: "1px solid #e5e7eb", padding: "5px 8px" }}>{String(row[k])}</td>)}</tr>)}</tbody>
-                </table>
-              </div>
-            </div>
-          );
-        })}
+        {/* Unified: same ResultsBody renderer as the builder try-run / skill steps. */}
+        <ResultsBody
+          summary={(summary ?? {}) as unknown as PipelineResultSummary}
+          nodeResults={(nodeResults ?? {}) as unknown as Record<string, NodeResult>}
+        />
       </div>
     </div>
   );

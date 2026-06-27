@@ -24,6 +24,8 @@ import {
 } from "./atoms";
 import { TriggerConfigEditor, migrateTrigger } from "./TriggerConfig";
 import PipelineCanvasMini, { type MiniBlock } from "./PipelineCanvasMini";
+import ResultsBody from "@/components/pipeline-builder/ResultsBody";
+import type { PipelineResultSummary } from "@/lib/pipeline-builder/types";
 import TestCaseSelector, { type TestCase } from "./TestCaseSelector";
 
 interface ApiDetail { ok: boolean; data: SkillDetail; error?: { message: string } | null }
@@ -52,6 +54,9 @@ type StepRunResult = {
   operator?: string | null;
   duration_ms?: number | null;
   data_views?: SkillDataView[];
+  // Full pipeline result_summary (charts + data_views) so a step renders with the
+  // SAME ResultsBody as a single-pipeline run / pipeline-view.
+  summary?: PipelineResultSummary | null;
 };
 
 function parseRunResult(data: Record<string, unknown>): StepRunResult {
@@ -76,6 +81,7 @@ function parseRunResult(data: Record<string, unknown>): StepRunResult {
     operator: (data.operator as string | null | undefined) ?? null,
     duration_ms: (data.duration_ms as number | null | undefined) ?? null,
     data_views,
+    summary: (data.result_summary as PipelineResultSummary | undefined) ?? null,
   };
 }
 
@@ -1418,24 +1424,26 @@ function RunResultInline({
   result: StepRunResult;
   step: SkillStep;
 }) {
-  const isFail = result.status === "fail";
+  // Alarm semantics (Q2): pass=true = matched = TRIGGERED (problem) → red; fail = normal → green.
+  const triggered = result.status === "pass";
   return (
     <div style={{
       marginTop: 12,
       padding: "12px 14px",
       borderRadius: 8,
-      background: isFail ? "var(--fail-bg)" : "var(--pass-bg)",
-      border: `1px solid ${isFail ? "var(--fail)" : "var(--pass)"}`,
+      background: triggered ? "var(--fail-bg)" : "var(--pass-bg)",
+      border: `1px solid ${triggered ? "var(--fail)" : "var(--pass)"}`,
       borderLeftWidth: 3,
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span style={{ color: isFail ? "var(--fail)" : "var(--pass)", display: "inline-flex" }}>
-          {isFail ? <Icon.X/> : <Icon.Check/>}
+        <span style={{ color: triggered ? "var(--fail)" : "var(--pass)", display: "inline-flex" }}>
+          {triggered ? <Icon.Bolt/> : <Icon.Check/>}
         </span>
-        <strong style={{ fontSize: 13, color: "var(--ink)" }}>{result.value}</strong>
+        <strong style={{ fontSize: 13, color: "var(--ink)" }}>{triggered ? "觸發" : "正常"} · {result.value}</strong>
         <span style={{ fontSize: 12, color: "var(--ink-2)" }}>· {result.note}</span>
       </div>
-      {isFail && step.suggested_actions && step.suggested_actions.length > 0 && (
+      {result.summary && <div style={{ marginTop: 10 }}><ResultsBody summary={result.summary} nodeResults={{}}/></div>}
+      {triggered && step.suggested_actions && step.suggested_actions.length > 0 && (
         <SuggestionPanel actions={step.suggested_actions}/>
       )}
     </div>
@@ -1945,7 +1953,9 @@ function GateResultCard({
           {confirmCheck.description}
         </div>
         {gateResult && <PipelineResultTable result={gateResult}/>}
-        <PipelineDataSection views={gateResult?.data_views}/>
+        {gateResult?.summary
+          ? <div style={{ marginTop: 10 }}><ResultsBody summary={gateResult.summary} nodeResults={{}}/></div>
+          : <PipelineDataSection views={gateResult?.data_views}/>}
       </div>
     </section>
   );
@@ -1960,11 +1970,13 @@ function StepResultCard({
   onInspect: (id: number) => void;
 }) {
   const status = result?.status;
-  const isFail = status === "fail";
-  const isPass = status === "pass";
-  const [open, setOpen] = useState(isFail);   // pass steps collapsed by default
-  const accent = isFail ? "var(--fail)" : isPass ? "var(--pass)" : "var(--line-strong)";
-  const accentBg = isFail ? "var(--fail-bg)" : isPass ? "var(--pass-bg)" : "var(--surface-2)";
+  // Alarm checklist semantics (Q2): pass=true = condition matched = TRIGGERED
+  // (problem → alarm) → red; fail = normal → green. Inverted from a unit test.
+  const triggered = status === "pass";
+  const isNormal = status === "fail";
+  const [open, setOpen] = useState(triggered);   // open the triggered (problem) steps
+  const accent = triggered ? "var(--fail)" : isNormal ? "var(--pass)" : "var(--line-strong)";
+  const accentBg = triggered ? "var(--fail-bg)" : isNormal ? "var(--pass-bg)" : "var(--surface-2)";
   const stepNum = String(index + 1).padStart(2, "0");
   const actions = step.suggested_actions ?? [];
 
@@ -1986,7 +1998,7 @@ function StepResultCard({
           color: accent, padding: "2px 8px", borderRadius: 4,
           background: accentBg, border: `1px solid ${accent}`,
         }}>
-          STEP {stepNum} · {status === "pass" ? "PASS" : status === "fail" ? "FAIL" : "—"}
+          STEP {stepNum} · {status === "pass" ? "觸發" : status === "fail" ? "正常" : "—"}
         </span>
         <span style={{ flex: 1, fontSize: 13.5, color: "var(--ink)", fontWeight: 500, lineHeight: 1.45 }}>
           {step.text}
@@ -2009,19 +2021,21 @@ function StepResultCard({
       {open && (
         <>
           {result && <PipelineResultTable result={result}/>}
-          {/* Phase 11 v10 — show the actual dataframes the pipeline produced
-              (not just the boolean check verdict). Operator needs the data
-              to understand WHY the check pass/failed. */}
-          <PipelineDataSection views={result?.data_views}/>
+          {/* Unified renderer — same ResultsBody as a single-pipeline run /
+              pipeline-view (charts + data views). Falls back to the old tables-only
+              section for step results that predate result_summary forwarding. */}
+          {result?.summary
+            ? <div style={{ marginTop: 10 }}><ResultsBody summary={result.summary} nodeResults={{}}/></div>
+            : <PipelineDataSection views={result?.data_views}/>}
           {/* Suggested actions: HALT callout for high, soft row for med/low */}
           <InlineActions actions={actions} mode="run"/>
-          {actions.length === 0 && isFail && (
+          {actions.length === 0 && triggered && (
             <div style={{
               marginTop: 10, padding: "8px 12px", borderRadius: 6,
               background: "var(--surface-2)", color: "var(--ink-3)",
               fontSize: 11.5, fontStyle: "italic",
             }}>
-              這個 step 沒設定 suggested action — 在 Author mode 加上「若 fail 該怎麼做」會更實用。
+              這個 step 沒設定 suggested action — 在 Author mode 加上「觸發時該怎麼做」會更實用。
             </div>
           )}
         </>
