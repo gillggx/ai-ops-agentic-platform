@@ -70,7 +70,7 @@ class PatrolActivityServiceTest {
 
 	@Test
 	void emptyRuns_returnsFunnelOnlyWithEmptyItems() {
-		when(runRepo.findActivity(any(), any(), any(), any(), any(), anyInt())).thenReturn(List.of());
+		when(runRepo.findActivity(any(), any(), any(), any(), anyInt())).thenReturn(List.of());
 
 		var resp = service.queryActivity(baseQuery());
 
@@ -94,7 +94,7 @@ class PatrolActivityServiceTest {
 		SkillDocumentEntity skill = makeSkill(115L, "ooc-diag", "OOC Diagnose", "diagnose",
 				"{\"type\":\"event\",\"event\":\"OOC\"}");
 
-		when(runRepo.findActivity(any(), any(), any(), any(), any(), anyInt()))
+		when(runRepo.findActivity(any(), any(), any(), any(), anyInt()))
 				.thenReturn(List.of(run));
 		when(skillRepo.findAllById(any())).thenReturn(List.of(skill));
 		when(alarmRepo.findBySkillRunIdIn(any())).thenReturn(List.of());
@@ -125,7 +125,7 @@ class PatrolActivityServiceTest {
 		alarm.setId(555L);
 		alarm.setSkillRunId(100L);
 
-		when(runRepo.findActivity(any(), any(), any(), any(), any(), anyInt()))
+		when(runRepo.findActivity(any(), any(), any(), any(), anyInt()))
 				.thenReturn(List.of(run));
 		when(skillRepo.findAllById(any())).thenReturn(List.of(skill));
 		when(alarmRepo.findBySkillRunIdIn(any())).thenReturn(List.of(alarm));
@@ -145,7 +145,7 @@ class PatrolActivityServiceTest {
 		SkillDocumentEntity hourlySkill = makeSkill(22L, "hourly", "Hourly", "patrol",
 				"{\"type\":\"schedule\",\"schedule\":{\"mode\":\"hourly\"}}");
 
-		when(runRepo.findActivity(any(), any(), any(), any(), any(), anyInt()))
+		when(runRepo.findActivity(any(), any(), any(), any(), anyInt()))
 				.thenReturn(List.of(oocRun, hourlyRun));
 		when(skillRepo.findAllById(any())).thenReturn(List.of(oocSkill, hourlySkill));
 		when(alarmRepo.findBySkillRunIdIn(any())).thenReturn(List.of());
@@ -167,7 +167,7 @@ class PatrolActivityServiceTest {
 		alarm.setId(777L);
 		alarm.setSkillRunId(1L);
 
-		when(runRepo.findActivity(any(), any(), any(), any(), any(), anyInt()))
+		when(runRepo.findActivity(any(), any(), any(), any(), anyInt()))
 				.thenReturn(List.of(r1, r2));
 		when(skillRepo.findAllById(any())).thenReturn(List.of(skill));
 		when(alarmRepo.findBySkillRunIdIn(any())).thenReturn(List.of(alarm));
@@ -188,7 +188,7 @@ class PatrolActivityServiceTest {
 		SkillDocumentEntity skill = makeSkill(1L, "s", "S", "patrol",
 				"{\"type\":\"event\",\"event\":\"OOC\"}");
 
-		when(runRepo.findActivity(any(), any(), any(), any(), any(), anyInt()))
+		when(runRepo.findActivity(any(), any(), any(), any(), anyInt()))
 				.thenReturn(List.of(r1, r2, r3));
 		when(skillRepo.findAllById(any())).thenReturn(List.of(skill));
 		when(alarmRepo.findBySkillRunIdIn(any())).thenReturn(List.of());
@@ -207,7 +207,7 @@ class PatrolActivityServiceTest {
 		// the page should still render rather than 500ing.
 		SkillRunEntity run = makeRun(1L, 999L, "{}", "{}", null);
 
-		when(runRepo.findActivity(any(), any(), any(), any(), any(), anyInt()))
+		when(runRepo.findActivity(any(), any(), any(), any(), anyInt()))
 				.thenReturn(List.of(run));
 		when(skillRepo.findAllById(any())).thenReturn(List.of());  // skill 999 not found
 		when(alarmRepo.findBySkillRunIdIn(any())).thenReturn(List.of());
@@ -231,7 +231,7 @@ class PatrolActivityServiceTest {
 		SkillDocumentEntity skill = makeSkill(1L, "s", "S", "patrol",
 				"{\"type\":\"event\",\"event\":\"OOC\"}");
 
-		when(runRepo.findActivity(any(), any(), any(), any(), any(), anyInt()))
+		when(runRepo.findActivity(any(), any(), any(), any(), anyInt()))
 				.thenReturn(List.of(run));
 		when(skillRepo.findAllById(any())).thenReturn(List.of(skill));
 		when(alarmRepo.findBySkillRunIdIn(any())).thenReturn(List.of());

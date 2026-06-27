@@ -40,13 +40,15 @@ public interface SkillRunRepository extends JpaRepository<SkillRunEntity, Long> 
 
     /**
      * Patrol Activity main page query — fetch a page of skill_runs that match
-     * the time window + optional filters. Cursor is the last seen run id;
-     * pass NULL for the first page. Caller asks for {@code limit + 1} rows to
-     * detect "has more". skillStage is joined from skill_documents via an
-     * EXISTS subquery so we don't need an entity-level FK.
+     * the time window + optional skillId / cursor filters. Caller asks for
+     * {@code limit + 1} rows to detect "has more".
      *
-     * <p>event_type filtering is done in service-layer code because it lives
-     * in trigger_config JSON and can't be queried efficiently in JPQL.
+     * <p>{@code skillStage} and {@code eventType} are NOT in this query —
+     * both live on/in {@link SkillDocumentEntity} (stage column / trigger_config
+     * JSON), and pushing them into JPQL costs us either a fragile LIKE
+     * (event_type) or runs into Hibernate's "bytea on null parameter to LOWER()"
+     * type-inference quirk (stage). The service applies both filters in Java
+     * after bulk-loading the per-page skills.
      */
     @Query("""
            SELECT r FROM SkillRunEntity r
@@ -54,24 +56,19 @@ public interface SkillRunRepository extends JpaRepository<SkillRunEntity, Long> 
              AND r.triggeredAt < :until
              AND (:skillId IS NULL OR r.skillId = :skillId)
              AND (:cursor IS NULL OR r.id < :cursor)
-             AND (:stage IS NULL OR EXISTS (
-                   SELECT 1 FROM SkillDocumentEntity s
-                   WHERE s.id = r.skillId AND LOWER(s.stage) = LOWER(:stage)))
            ORDER BY r.id DESC
            """)
     List<SkillRunEntity> findActivity(@Param("since") OffsetDateTime since,
                                        @Param("until") OffsetDateTime until,
                                        @Param("skillId") Long skillId,
-                                       @Param("stage") String stage,
                                        @Param("cursor") Long cursor,
                                        org.springframework.data.domain.Pageable pageable);
 
     /** Pageable-less overload — wraps the limit into a Pageable so service
      *  code doesn't import Spring Data types. */
     default List<SkillRunEntity> findActivity(OffsetDateTime since, OffsetDateTime until,
-                                              Long skillId, String stage,
-                                              Long cursor, int limit) {
-        return findActivity(since, until, skillId, stage, cursor,
+                                              Long skillId, Long cursor, int limit) {
+        return findActivity(since, until, skillId, cursor,
                 org.springframework.data.domain.PageRequest.of(0, limit));
     }
 

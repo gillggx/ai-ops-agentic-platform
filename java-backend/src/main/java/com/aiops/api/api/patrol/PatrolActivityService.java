@@ -63,7 +63,7 @@ public class PatrolActivityService {
 	@Transactional(readOnly = true)
 	public PatrolActivityResponse queryActivity(Query q) {
 		List<SkillRunEntity> runs = runRepo.findActivity(
-				q.since(), q.until(), q.skillId(), q.skillStage(), q.cursor(), q.limit() + 1);
+				q.since(), q.until(), q.skillId(), q.cursor(), q.limit() + 1);
 
 		boolean hasMore = runs.size() > q.limit();
 		if (hasMore) runs = runs.subList(0, q.limit());
@@ -76,18 +76,29 @@ public class PatrolActivityService {
 			runIds.add(r.getId());
 		}
 		Map<Long, SkillDocumentEntity> skillsById = new HashMap<>();
-		for (SkillDocumentEntity s : skillRepo.findAllById(skillIds)) {
-			skillsById.put(s.getId(), s);
+		if (!skillIds.isEmpty()) {
+			for (SkillDocumentEntity s : skillRepo.findAllById(skillIds)) {
+				skillsById.put(s.getId(), s);
+			}
 		}
 		Map<Long, AlarmEntity> alarmsByRunId = new HashMap<>();
-		for (AlarmEntity a : alarmRepo.findBySkillRunIdIn(runIds)) {
-			alarmsByRunId.put(a.getSkillRunId(), a);
+		if (!runIds.isEmpty()) {
+			for (AlarmEntity a : alarmRepo.findBySkillRunIdIn(runIds)) {
+				alarmsByRunId.put(a.getSkillRunId(), a);
+			}
 		}
 
-		// Build items with event-type filter applied AFTER skill enrichment.
+		// Build items with stage + event-type + outcome filters applied AFTER
+		// skill enrichment. Stage + event_type filtering can't go into the
+		// JPQL: stage triggers Hibernate's bytea-on-null type quirk in
+		// LOWER(:p), and event_type lives in trigger_config JSON.
 		List<Item> items = new ArrayList<>(runs.size());
 		for (SkillRunEntity r : runs) {
 			SkillDocumentEntity skill = skillsById.get(r.getSkillId());
+			if (q.skillStage() != null && !q.skillStage().isBlank()) {
+				String runStage = skill != null ? skill.getStage() : null;
+				if (runStage == null || !q.skillStage().equalsIgnoreCase(runStage)) continue;
+			}
 			String triggerEventName = extractTriggerEventName(skill);
 			if (q.eventType() != null && !q.eventType().isBlank()
 					&& !q.eventType().equalsIgnoreCase(triggerEventName)) {
