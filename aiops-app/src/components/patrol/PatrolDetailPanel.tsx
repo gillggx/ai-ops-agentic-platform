@@ -1,0 +1,146 @@
+"use client";
+
+import Link from "next/link";
+import { formatAlarmSkipped, type PatrolItem } from "./types";
+
+interface Props {
+  item: PatrolItem;
+  onClose: () => void;
+}
+
+/**
+ * Side panel showing every field on a skill_run plus drill links to:
+ *   - /alarms/[id]    when AlarmEmitter wrote a row
+ *   - /skills?slug=X  when the skill_documents row is reachable
+ *   - sidebar query for the skill's execution_logs (deferred — would show
+ *     per-step pipeline output; current ExecutionLogController list endpoint
+ *     already supports the skill_id filter we'd need.)
+ *
+ * We deliberately do NOT show the raw step_results JSON — that goes in the
+ * Skill Run replay view, which lives under /skills/<slug>/runs/<id>. Linking
+ * out keeps this panel focused on "did it trigger?" rather than "what data
+ * did it see?".
+ */
+export function PatrolDetailPanel({ item, onClose }: Props) {
+  return (
+    <div style={{
+      width: 360,
+      flexShrink: 0,
+      background: "#fff",
+      borderRadius: 8,
+      border: "1px solid #e2e8f0",
+      padding: 16,
+      maxHeight: "calc(100vh - 200px)",
+      overflowY: "auto",
+      position: "sticky",
+      top: 16,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <h3 style={{ margin: 0, fontSize: 13, fontWeight: 700 }}>
+          Skill Run #{item.skillRunId}
+        </h3>
+        <button
+          onClick={onClose}
+          style={{
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            color: "#a0aec0",
+            fontSize: 18,
+            padding: 0,
+            lineHeight: 1,
+          }}
+        >×</button>
+      </div>
+
+      <Field label="Skill">
+        <div style={{ fontWeight: 600 }}>{item.skillTitle ?? "—"}</div>
+        <div style={{ fontSize: 10, color: "#a0aec0", fontFamily: "ui-monospace, monospace" }}>
+          {item.skillSlug ?? `id=${item.skillId}`} · stage={item.skillStage ?? "—"}
+        </div>
+      </Field>
+
+      <Field label="Trigger">
+        <div>{item.triggeredBy ?? "—"}</div>
+        <div style={{ fontSize: 10, color: "#a0aec0" }}>{item.triggeredAt}</div>
+      </Field>
+
+      <Field label="Event">
+        <div>{item.eventType ?? "—"}</div>
+        {item.eventTime && (
+          <div style={{ fontSize: 10, color: "#a0aec0" }}>event_time={item.eventTime}</div>
+        )}
+      </Field>
+
+      <Field label="Payload">
+        <KV k="equipment_id" v={item.equipmentId} />
+        <KV k="lot_id" v={item.lotId} />
+        <KV k="step_id" v={item.stepId} />
+      </Field>
+
+      <Field label="Run">
+        <KV k="status" v={item.status} />
+        <KV k="duration_ms" v={item.durationMs?.toString() ?? null} />
+        <KV k="steps" v={`${item.stepsPassed} / ${item.stepsTotal}`} />
+      </Field>
+
+      <Field label="Alarm">
+        {item.alarmId ? (
+          <Link
+            href={`/alarms/${item.alarmId}`}
+            style={{ color: "#3182ce", textDecoration: "none", fontWeight: 600 }}
+          >
+            → 開啟 Alarm #{item.alarmId}
+          </Link>
+        ) : (
+          <div>
+            <span style={{ color: "#9c4221" }}>{formatAlarmSkipped(item.alarmSkippedReason)}</span>
+            {item.alarmSkippedReason && (
+              <div style={{ fontSize: 10, color: "#a0aec0", marginTop: 2 }}>
+                code = {item.alarmSkippedReason}
+              </div>
+            )}
+          </div>
+        )}
+      </Field>
+
+      {item.skillSlug && (
+        <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid #f0f4f8" }}>
+          <Link
+            href={`/skills?slug=${encodeURIComponent(item.skillSlug)}`}
+            style={{ fontSize: 12, color: "#3182ce", textDecoration: "none" }}
+          >
+            ↗ 在 Skill Library 開啟 {item.skillSlug}
+          </Link>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{
+        fontSize: 10,
+        fontWeight: 700,
+        color: "#718096",
+        textTransform: "uppercase",
+        letterSpacing: "0.4px",
+        marginBottom: 4,
+      }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 12, color: "#2d3748" }}>{children}</div>
+    </div>
+  );
+}
+
+function KV({ k, v }: { k: string; v: string | null }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "110px 1fr", gap: 6, fontSize: 11 }}>
+      <span style={{ color: "#a0aec0", fontFamily: "ui-monospace, monospace" }}>{k}</span>
+      <span style={{ fontFamily: "ui-monospace, monospace" }}>{v ?? "—"}</span>
+    </div>
+  );
+}

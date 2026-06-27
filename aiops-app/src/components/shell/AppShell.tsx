@@ -50,6 +50,10 @@ interface GlassEvent {
 
 const OPS_ITEMS = [
   { href: "/alarms",             label: "Alarm Center",     icon: "🔔" },
+  // 2026-06-27 — Patrol Activity: see "what happened between events and
+  // the alarms that landed". Non-emoji icon per feedback_no_emoji rule;
+  // legacy emojis above predate the rule and stay as-is.
+  { href: "/patrol-activity",    label: "Patrol Activity",  icon: "○" },
   { href: "/dashboard",          label: "Dashboard",        icon: "📊" },
 ];
 
@@ -467,8 +471,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 /** Render the full shell for authenticated pages; bypass for /login etc. */
 function ShellGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  // Bare pages — no sidebar, no topbar, no copilot. Login etc.
-  const isBare = pathname === "/login" || pathname.startsWith("/api/auth");
+  // Bare pages — no sidebar, no topbar, no copilot. Login + cowork handoff
+  // surfaces (review / confirm) which launch standalone and fit the window.
+  const isBare = pathname === "/login" || pathname.startsWith("/api/auth")
+    || pathname.startsWith("/handoff");
   if (isBare) {
     return <>{children}</>;
   }
