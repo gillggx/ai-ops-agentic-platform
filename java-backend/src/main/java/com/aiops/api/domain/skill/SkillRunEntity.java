@@ -60,4 +60,13 @@ public class SkillRunEntity {
 
     @Column(name = "finished_at")
     private OffsetDateTime finishedAt;
+
+    /**
+     * V60 (2026-06-27): when no alarms row was written, which AlarmEmitter
+     * guard rejected. NULL = alarm emitted normally OR row predates the
+     * column. Values: test | stage_not_patrol | confirm_failed |
+     * no_step_passed | dedup. See SkillAlarmEmitter.emitIfTriggered.
+     */
+    @Column(name = "alarm_skipped_reason", columnDefinition = "text")
+    private String alarmSkippedReason;
 }

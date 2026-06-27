@@ -6,6 +6,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
 
 @Repository
@@ -45,4 +46,16 @@ public interface AlarmRepository extends JpaRepository<AlarmEntity, Long> {
 	boolean existsActiveBySkillAndEquipmentSince(@Param("skillId") Long skillId,
 	                                              @Param("equipmentId") String equipmentId,
 	                                              @Param("since") OffsetDateTime since);
+
+	/** V60 (2026-06-27) — Patrol Activity bulk-fetch: load every alarm whose
+	 *  skill_run_id is in the page's run-id set. Empty collection short-circuits
+	 *  to empty list so callers can skip the existence check. */
+	@Query("SELECT a FROM AlarmEntity a WHERE a.skillRunId IN :runIds")
+	List<AlarmEntity> findBySkillRunIdIn(@Param("runIds") Collection<Long> runIds);
+
+	/** V60 — Patrol Activity funnel: alarms emitted in time window. */
+	@Query("SELECT COUNT(a) FROM AlarmEntity a "
+			+ "WHERE a.createdAt >= :since AND a.createdAt < :until")
+	long countByCreatedAtBetween(@Param("since") OffsetDateTime since,
+	                              @Param("until") OffsetDateTime until);
 }

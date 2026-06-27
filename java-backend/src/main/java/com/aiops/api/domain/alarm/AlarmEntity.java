@@ -101,4 +101,13 @@ public class AlarmEntity extends CreatedAtOnly {
 
 	@Column(name = "disposed_at", columnDefinition = "timestamp with time zone")
 	private OffsetDateTime disposedAt;
+
+	/**
+	 * V60 (2026-06-27) — provenance link to the {@code skill_runs} row that
+	 * produced this alarm. Set by SkillAlarmEmitter at emit time. NULL for
+	 * legacy auto-patrol alarms that bypass the skill runner, and for rows
+	 * inserted before V60.
+	 */
+	@Column(name = "skill_run_id")
+	private Long skillRunId;
 }

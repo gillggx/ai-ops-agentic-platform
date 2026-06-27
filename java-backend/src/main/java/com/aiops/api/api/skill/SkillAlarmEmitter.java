@@ -99,15 +99,27 @@ public class SkillAlarmEmitter {
 	                            List<Map<String, Object>> stepResults,
 	                            boolean skipChecklist) {
 		// Guard 1: tests never alarm
-		if (Boolean.TRUE.equals(run.getIsTest())) return null;
+		if (Boolean.TRUE.equals(run.getIsTest())) {
+			run.setAlarmSkippedReason("test");
+			return null;
+		}
 		// Guard 2: only patrol stage emits (diagnose is exploratory)
-		if (!"patrol".equalsIgnoreCase(skill.getStage())) return null;
+		if (!"patrol".equalsIgnoreCase(skill.getStage())) {
+			run.setAlarmSkippedReason("stage_not_patrol");
+			return null;
+		}
 		// Guard 3: confirm gate failed → no alarm
-		if (skipChecklist) return null;
+		if (skipChecklist) {
+			run.setAlarmSkippedReason("confirm_failed");
+			return null;
+		}
 		// Guard 4: at least one step must have triggered (status == "pass")
 		boolean anyTriggered = stepResults.stream()
 				.anyMatch(s -> "pass".equalsIgnoreCase(String.valueOf(s.get("status"))));
-		if (!anyTriggered) return null;
+		if (!anyTriggered) {
+			run.setAlarmSkippedReason("no_step_passed");
+			return null;
+		}
 
 		// Pull the first evidence row up-front — we need it for BOTH the
 		// equipmentId fallback (below) and the lot/step/eventTime extraction
@@ -141,11 +153,15 @@ public class SkillAlarmEmitter {
 		OffsetDateTime since = OffsetDateTime.now().minus(ALARM_DEDUP_WINDOW);
 		if (alarmRepo.existsActiveBySkillAndEquipmentSince(skill.getId(), equipmentId, since)) {
 			alarmsDedupSuppressed.incrementAndGet();
+			run.setAlarmSkippedReason("dedup");
 			log.debug("skill {} run {}: alarm suppressed by dedup (active alarm "
 					+ "exists for skill={}+equipment={} within {})",
 					skill.getSlug(), run.getId(), skill.getId(), equipmentId, ALARM_DEDUP_WINDOW);
 			return null;
 		}
+		// All guards passed → clear any previously-set reason (e.g. set by
+		// an earlier transient state) so the row reflects "alarm emitted".
+		run.setAlarmSkippedReason(null);
 
 		// Try to extract evidence context (lot/step/event_time) from confirm
 		// result's first data_view row. Best-effort — fall back to created_at
@@ -231,6 +247,7 @@ public class SkillAlarmEmitter {
 
 		AlarmEntity a = new AlarmEntity();
 		a.setSkillId(skill.getId());
+		a.setSkillRunId(run.getId());  // V60: Patrol Activity link
 		a.setTriggerEvent(deriveTriggerEvent(trig));
 		a.setEquipmentId(equipmentId);
 		a.setLotId(lotId);

@@ -206,6 +206,11 @@ public class SkillRunnerService {
 			if (alarm != null) {
 				sink.tryEmitNext(RunEvent.alarmCreated(alarm));
 			}
+			// 2026-06-27 (V60): emitIfTriggered sets run.alarmSkippedReason
+			// when guards reject — persist that so the Patrol Activity UI
+			// can explain "skill ran, no alarm — why?". The earlier save()
+			// above happened before guards ran.
+			runRepo.save(run);
 		} catch (RuntimeException ex) {  // never let alarm-emit fail the main run
 			// RuntimeException catches WebClient errors + JPA + NPE bugs in
 			// the emit chain. Checked exceptions (none expected here) bubble.
