@@ -215,7 +215,7 @@ class SkillDocumentServiceTest {
 		void unknownSlugThrows404() {
 			when(repository.findBySlug("nope")).thenReturn(Optional.empty());
 			Dtos.UpdateRequest req = new Dtos.UpdateRequest(
-					null, null, null, null, null, null, null, null, null, null);
+					null, null, null, null, null, null, null, null, null, null, null);
 			assertThatThrownBy(() -> service.update("nope", req))
 					.isInstanceOf(ApiException.class);
 		}
@@ -226,7 +226,7 @@ class SkillDocumentServiceTest {
 			when(repository.findBySlug("s")).thenReturn(Optional.of(e));
 			Dtos.UpdateRequest req = new Dtos.UpdateRequest(
 					null, null, null, null, null, null, null,
-					"{\"type\":\"schedule\",\"cron\":\"0 * * * *\"}", null, null);
+					"{\"type\":\"schedule\",\"cron\":\"0 * * * *\"}", null, null, null);
 			service.update("s", req);
 			assertThat(e.getStage()).isEqualTo("patrol");
 		}
@@ -237,7 +237,7 @@ class SkillDocumentServiceTest {
 			when(repository.findBySlug("s")).thenReturn(Optional.of(e));
 			Dtos.UpdateRequest req = new Dtos.UpdateRequest(
 					null, "diagnose", null, null, null, null, null,
-					"{\"type\":\"schedule\"}", null, null);
+					"{\"type\":\"schedule\"}", null, null, null);
 			service.update("s", req);
 			// Explicit stage wins
 			assertThat(e.getStage()).isEqualTo("diagnose");
@@ -247,7 +247,7 @@ class SkillDocumentServiceTest {
 		void invalidStatusRejected() {
 			when(repository.findBySlug("s")).thenReturn(Optional.of(existingDraftEvent()));
 			Dtos.UpdateRequest req = new Dtos.UpdateRequest(
-					null, null, "QUARANTINED", null, null, null, null, null, null, null);
+					null, null, "QUARANTINED", null, null, null, null, null, null, null, null);
 			assertThatThrownBy(() -> service.update("s", req))
 					.isInstanceOf(ApiException.class)
 					.hasMessageContaining("status must be draft|stable");
@@ -259,7 +259,7 @@ class SkillDocumentServiceTest {
 			when(repository.findBySlug("s")).thenReturn(Optional.of(e));
 			when(materializer.materialize(any())).thenReturn(3);
 			Dtos.UpdateRequest req = new Dtos.UpdateRequest(
-					null, null, "stable", null, null, null, null, null, null, null);
+					null, null, "stable", null, null, null, null, null, null, null, null);
 			service.update("s", req);
 			verify(materializer).materialize(e);
 			verify(materializer, never()).clear(any());

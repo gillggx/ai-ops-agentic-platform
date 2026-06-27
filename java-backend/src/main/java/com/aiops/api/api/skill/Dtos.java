@@ -61,7 +61,10 @@ final class Dtos {
             String version,
             String triggerConfig,
             String steps,
-            String confirmCheck               // Phase 11 v2 — JSON, null clears
+            String confirmCheck,              // Phase 11 v2 — JSON, null clears
+            // 2026-06-27: Dry-run feature's "Save as regression" path
+            // appends to the test_cases JSON array. Null = leave existing.
+            String testCases
     ) {}
 
     static Summary summaryOf(SkillDocumentEntity e) {

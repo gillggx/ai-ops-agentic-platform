@@ -159,7 +159,7 @@ public class SkillDocumentService {
      * status transitions still fires.
      */
     public SkillDocumentEntity setStatus(String slug, String status) {
-        return update(slug, new Dtos.UpdateRequest(null, null, status, null, null, null, null, null, null, null));
+        return update(slug, new Dtos.UpdateRequest(null, null, status, null, null, null, null, null, null, null, null));
     }
 
     public SkillDocumentEntity update(String slug, Dtos.UpdateRequest req) {
@@ -200,6 +200,10 @@ public class SkillDocumentService {
             }
         }
         if (req.steps() != null) e.setSteps(req.steps());
+        // 2026-06-27: Dry-run "Save as regression" path. Caller sends the
+        // full new JSON array (existing + new case); we don't merge here so
+        // ordering / dedup decisions stay with the client.
+        if (req.testCases() != null) e.setTestCases(req.testCases());
         // Phase 11 v2: confirmCheck is nullable — empty string clears the gate,
         // a JSON blob installs/replaces it. We can't distinguish "field absent"
         // from "null" in record DTOs cleanly, so the convention is: caller MUST
