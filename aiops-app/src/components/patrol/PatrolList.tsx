@@ -61,10 +61,10 @@ export function PatrolList({ items, selected, onSelect }: Props) {
         </thead>
         <tbody>
           {items.map((item) => {
-            const isActive = selected?.skillRunId === item.skillRunId;
+            const isActive = selected?.skill_run_id === item.skill_run_id;
             return (
               <tr
-                key={item.skillRunId}
+                key={item.skill_run_id}
                 onClick={() => onSelect(item)}
                 style={{
                   cursor: "pointer",
@@ -72,23 +72,23 @@ export function PatrolList({ items, selected, onSelect }: Props) {
                   borderBottom: "1px solid #f0f4f8",
                 }}
               >
-                <td style={tdStyle}>{formatTime(item.triggeredAt)}</td>
+                <td style={tdStyle}>{formatTime(item.triggered_at)}</td>
                 <td style={tdStyle}>
-                  <span style={eventChip(item.eventType)}>{item.eventType ?? "—"}</span>
+                  <span style={eventChip(item.event_type)}>{item.event_type ?? "—"}</span>
                 </td>
                 <td style={{ ...tdStyle, fontFamily: "ui-monospace, monospace", color: "#4a5568" }}>
-                  {item.equipmentId ?? "—"}
+                  {item.equipment_id ?? "—"}
                 </td>
                 <td style={tdStyle}>
                   <div style={{ fontWeight: 600, color: "#1a202c" }}>
-                    {item.skillTitle ?? item.skillSlug ?? `skill #${item.skillId}`}
+                    {item.skill_title ?? item.skill_slug ?? `skill #${item.skill_id}`}
                   </div>
                   <div style={{ fontSize: 10, color: "#a0aec0" }}>
-                    {item.skillSlug ?? ""} · stage={item.skillStage ?? "—"}
+                    {item.skill_slug ?? ""} · stage={item.skill_stage ?? "—"}
                   </div>
                 </td>
                 <td style={{ ...tdStyle, fontFamily: "ui-monospace, monospace" }}>
-                  {item.stepsPassed}/{item.stepsTotal}
+                  {item.steps_passed}/{item.steps_total}
                 </td>
                 <td style={tdStyle}>
                   <ResultBadge item={item} />
@@ -103,19 +103,19 @@ export function PatrolList({ items, selected, onSelect }: Props) {
 }
 
 function ResultBadge({ item }: { item: PatrolItem }) {
-  if (item.alarmId) {
-    return <span style={badge("#3182ce", "#ebf8ff")}>Alarm #{item.alarmId}</span>;
+  if (item.alarm_id) {
+    return <span style={badge("#3182ce", "#ebf8ff")}>Alarm #{item.alarm_id}</span>;
   }
-  if (item.alarmSkippedReason) {
-    return <span style={badge("#9c4221", "#fffaf0")}>{formatAlarmSkipped(item.alarmSkippedReason)}</span>;
+  if (item.alarm_skipped_reason) {
+    return <span style={badge("#9c4221", "#fffaf0")}>{formatAlarmSkipped(item.alarm_skipped_reason)}</span>;
   }
   if (item.status === "failed" || item.status === "error") {
     return <span style={badge("#c53030", "#fff5f5")}>{item.status}</span>;
   }
-  if (item.stepsTotal === 0) {
+  if (item.steps_total === 0) {
     return <span style={badge("#718096", "#f7f8fc")}>no-op</span>;
   }
-  if (item.stepsPassed > 0) {
+  if (item.steps_passed > 0) {
     return <span style={badge("#22543d", "#f0fff4")}>step pass</span>;
   }
   return <span style={badge("#718096", "#f7f8fc")}>{item.status}</span>;

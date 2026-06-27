@@ -2,39 +2,40 @@
  * Shared types for the Patrol Activity surface.
  *
  * Mirrors Java {@code PatrolActivityService.Funnel} and {@code .Item}.
- * Wire format is snake_case (Jackson default) — these interfaces match
- * the on-wire shape exactly; no client-side renaming.
+ * Wire format is snake_case (Jackson SNAKE_CASE naming strategy — see
+ * feedback_jackson_snake_case_wire) — these interfaces match the on-wire
+ * shape exactly; no client-side renaming.
  */
 
 export interface PatrolFunnel {
   events: number;
-  skillRuns: number;
-  stepPassed: number;
+  skill_runs: number;
+  step_passed: number;
   alarms: number;
-  dedupSuppressed: number;
+  dedup_suppressed: number;
 }
 
 export interface PatrolItem {
-  skillRunId: number;
-  skillId: number;
-  skillSlug: string | null;
-  skillTitle: string | null;
-  skillStage: string | null;
-  triggeredAt: string;          // ISO 8601
-  triggeredBy: string | null;
-  durationMs: number | null;
+  skill_run_id: number;
+  skill_id: number;
+  skill_slug: string | null;
+  skill_title: string | null;
+  skill_stage: string | null;
+  triggered_at: string;          // ISO 8601
+  triggered_by: string | null;
+  duration_ms: number | null;
   status: string;                // running | completed | failed | skipped_by_confirm
-  stepsTotal: number;
-  stepsPassed: number;
+  steps_total: number;
+  steps_passed: number;
 
-  eventType: string | null;
-  eventTime: string | null;
-  equipmentId: string | null;
-  lotId: string | null;
-  stepId: string | null;
+  event_type: string | null;
+  event_time: string | null;
+  equipment_id: string | null;
+  lot_id: string | null;
+  step_id: string | null;
 
-  alarmId: number | null;
-  alarmSkippedReason: string | null;  // test | stage_not_patrol | confirm_failed | no_step_passed | dedup | null
+  alarm_id: number | null;
+  alarm_skipped_reason: string | null;  // test | stage_not_patrol | confirm_failed | no_step_passed | dedup | null
 }
 
 /** Maps AlarmEmitter guard names to short user-facing labels. */

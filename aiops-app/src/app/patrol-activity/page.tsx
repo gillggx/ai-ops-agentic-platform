@@ -25,7 +25,7 @@ const DEFAULT_LIMIT = 100;
 interface PatrolActivityResponse {
   funnel: PatrolFunnel;
   items: PatrolItem[];
-  nextCursor: number | null;
+  next_cursor: number | null;
 }
 
 export default function PatrolActivityPage() {
@@ -93,7 +93,7 @@ export default function PatrolActivityPage() {
   // Keep the right-pane selection fresh when the underlying row updates.
   const selectedRefreshed = useMemo(() => {
     if (!selected) return null;
-    return items.find((i) => i.skillRunId === selected.skillRunId) ?? selected;
+    return items.find((i) => i.skill_run_id === selected.skill_run_id) ?? selected;
   }, [items, selected]);
 
   return (

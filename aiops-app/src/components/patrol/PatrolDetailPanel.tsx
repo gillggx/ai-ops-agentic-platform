@@ -37,7 +37,7 @@ export function PatrolDetailPanel({ item, onClose }: Props) {
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <h3 style={{ margin: 0, fontSize: 13, fontWeight: 700 }}>
-          Skill Run #{item.skillRunId}
+          Skill Run #{item.skill_run_id}
         </h3>
         <button
           onClick={onClose}
@@ -54,63 +54,63 @@ export function PatrolDetailPanel({ item, onClose }: Props) {
       </div>
 
       <Field label="Skill">
-        <div style={{ fontWeight: 600 }}>{item.skillTitle ?? "—"}</div>
+        <div style={{ fontWeight: 600 }}>{item.skill_title ?? "—"}</div>
         <div style={{ fontSize: 10, color: "#a0aec0", fontFamily: "ui-monospace, monospace" }}>
-          {item.skillSlug ?? `id=${item.skillId}`} · stage={item.skillStage ?? "—"}
+          {item.skill_slug ?? `id=${item.skill_id}`} · stage={item.skill_stage ?? "—"}
         </div>
       </Field>
 
       <Field label="Trigger">
-        <div>{item.triggeredBy ?? "—"}</div>
-        <div style={{ fontSize: 10, color: "#a0aec0" }}>{item.triggeredAt}</div>
+        <div>{item.triggered_by ?? "—"}</div>
+        <div style={{ fontSize: 10, color: "#a0aec0" }}>{item.triggered_at}</div>
       </Field>
 
       <Field label="Event">
-        <div>{item.eventType ?? "—"}</div>
-        {item.eventTime && (
-          <div style={{ fontSize: 10, color: "#a0aec0" }}>event_time={item.eventTime}</div>
+        <div>{item.event_type ?? "—"}</div>
+        {item.event_time && (
+          <div style={{ fontSize: 10, color: "#a0aec0" }}>event_time={item.event_time}</div>
         )}
       </Field>
 
       <Field label="Payload">
-        <KV k="equipment_id" v={item.equipmentId} />
-        <KV k="lot_id" v={item.lotId} />
-        <KV k="step_id" v={item.stepId} />
+        <KV k="equipment_id" v={item.equipment_id} />
+        <KV k="lot_id" v={item.lot_id} />
+        <KV k="step_id" v={item.step_id} />
       </Field>
 
       <Field label="Run">
         <KV k="status" v={item.status} />
-        <KV k="duration_ms" v={item.durationMs?.toString() ?? null} />
-        <KV k="steps" v={`${item.stepsPassed} / ${item.stepsTotal}`} />
+        <KV k="duration_ms" v={item.duration_ms?.toString() ?? null} />
+        <KV k="steps" v={`${item.steps_passed} / ${item.steps_total}`} />
       </Field>
 
       <Field label="Alarm">
-        {item.alarmId ? (
+        {item.alarm_id ? (
           <Link
-            href={`/alarms/${item.alarmId}`}
+            href={`/alarms/${item.alarm_id}`}
             style={{ color: "#3182ce", textDecoration: "none", fontWeight: 600 }}
           >
-            → 開啟 Alarm #{item.alarmId}
+            → 開啟 Alarm #{item.alarm_id}
           </Link>
         ) : (
           <div>
-            <span style={{ color: "#9c4221" }}>{formatAlarmSkipped(item.alarmSkippedReason)}</span>
-            {item.alarmSkippedReason && (
+            <span style={{ color: "#9c4221" }}>{formatAlarmSkipped(item.alarm_skipped_reason)}</span>
+            {item.alarm_skipped_reason && (
               <div style={{ fontSize: 10, color: "#a0aec0", marginTop: 2 }}>
-                code = {item.alarmSkippedReason}
+                code = {item.alarm_skipped_reason}
               </div>
             )}
           </div>
         )}
       </Field>
 
-      {item.skillSlug && (
+      {item.skill_slug && (
         <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid #f0f4f8" }}>
           <Link
-            href={`/skills?slug=${encodeURIComponent(item.skillSlug)}`}
+            href={`/skills?slug=${encodeURIComponent(item.skill_slug)}`}
             style={{ fontSize: 12, color: "#3182ce", textDecoration: "none" }}
           >
-            ↗ 在 Skill Library 開啟 {item.skillSlug}
+            ↗ 在 Skill Library 開啟 {item.skill_slug}
           </Link>
         </div>
       )}

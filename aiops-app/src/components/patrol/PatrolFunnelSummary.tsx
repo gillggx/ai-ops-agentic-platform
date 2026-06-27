@@ -27,16 +27,16 @@ export function PatrolFunnelSummary({ funnel }: Props) {
     <div style={containerStyle}>
       <Chip label="Events" value={funnel.events} hint="從 simulator 進來" />
       <Arrow />
-      <Chip label="Skill Runs" value={funnel.skillRuns} hint="auto-check 觸發數" />
+      <Chip label="Skill Runs" value={funnel.skill_runs} hint="auto-check 觸發數" />
       <Arrow />
-      <Chip label="Step Passed" value={funnel.stepPassed} hint="≥1 step pass" />
+      <Chip label="Step Passed" value={funnel.step_passed} hint="≥1 step pass" />
       <Arrow />
       <Chip
         label="Alarms"
         value={funnel.alarms}
         hint={
-          funnel.dedupSuppressed > 0
-            ? `+${funnel.dedupSuppressed} 被 dedup 擋`
+          funnel.dedup_suppressed > 0
+            ? `+${funnel.dedup_suppressed} 被 dedup 擋`
             : "AlarmEmitter 已寫入"
         }
         accent="primary"
