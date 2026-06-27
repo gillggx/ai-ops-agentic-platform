@@ -176,6 +176,7 @@ bash start.sh
 | **Diagnostic Rules** | AI 兩階段生成診斷規則（step plan → per-step code），sandbox 試跑 |
 | **Auto-Patrol** | 排程 / 事件驅動巡檢，condition_met → 自動建立 Alarm |
 | **Patrol Activity** | V60 (2026-06-27) 起 `/patrol-activity` 顯示 Event → Skill Run → Alarm 漏斗，每筆 skill_run 標示 alarm_skipped_reason（test / stage_not_patrol / confirm_failed / no_step_passed / dedup）讓 oncall 知道為何沒 alarm |
+| **Skill Dry-run** | 2026-06-27 `/skills/[slug]/dry-run` 編輯 / 測試完全分離（Variant A overlay 設計）：editor 永不被測試結果污染，dry-run 結果在 overlay 報告，FAIL 卡可 Edit this step 直接改門檻、Save as regression 寫進 test_cases |
 | **MCP System** | Agent 的工具集 — System MCP（資料源）+ Custom MCP + Automation MCP。V54 (2026-06-03) 起 admin form 可勾選「連動產生 Block / Skill」由 Haiku 4.5 LLM 從 description 衍生 |
 | **Experience Memory** | pgvector 向量搜尋 + 反思式生命週期（Write → Retrieve → Feedback → Decay） |
 | **Analysis → Promote** | Agent ad-hoc 分析可一鍵提升為永久 Diagnostic Rule |
