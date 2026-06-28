@@ -34,6 +34,10 @@ import SkillEmbedBanner, {
   readSkillCtx,
   seedInputsFromCtx,
 } from "@/components/pipeline-builder/SkillEmbedBanner";
+import SkillV2EmbedBanner, {
+  bootstrapSkillV2CtxFromUrl,
+  readSkillV2Ctx,
+} from "@/components/skills-v2/SkillV2EmbedBanner";
 
 // React Flow can't SSR
 const BuilderLayout = dynamic(() => import("@/components/pipeline-builder/BuilderLayout"), {
@@ -98,6 +102,7 @@ export default function NewPipelinePage() {
       // Phase 11 v4: ?embed=skill = launched from a Skill page. Bootstrap
       // sessionStorage ctx + seed inputs from event/target → skip wizard.
       const skillCtx = bootstrapSkillCtxFromUrl();
+      const skillV2Ctx = bootstrapSkillV2CtxFromUrl();
 
       // Heuristic: pipeline_json shape decides the kind. block_alert ⇒ auto_patrol;
       // block_chart-only ⇒ skill; mixed ⇒ default skill.
@@ -132,6 +137,12 @@ export default function NewPipelinePage() {
           // seedInputsFromCtx already swallows fetch errors and returns a
           // safe fallback; this catch handles only Promise rejection edge.
         });
+      } else if (skillV2Ctx) {
+        // Skills v2 embed: same shape as legacy skill embed (kind=skill,
+        // skip wizard) but bind target is skills_v2.pipeline_id (handled
+        // by SkillV2EmbedBanner).
+        setKind("skill");
+        setSkipWizard(true);
       } else if (q === "auto_patrol" || q === "auto_check" || q === "skill") {
         setKind(q);
         setStep(q === "skill" ? 3 : 2);
@@ -144,7 +155,7 @@ export default function NewPipelinePage() {
         // Old behavior (chat copy-paste from another flow) — default to skill
         // and run the wizard so the user can review.
         setKind("skill");
-      } else if (!fromAgent && !skillCtx && !q) {
+      } else if (!fromAgent && !skillCtx && !skillV2Ctx && !q) {
         // Phase 11 v6 — no embed=skill, no ?from=agent, no ?kind: bare
         // navigation to /admin/pipeline-builder/new is no longer a public
         // entry point. Redirect to the Skill Library.
@@ -249,9 +260,12 @@ function WizardOrBuilder({
     // for skill authors who're focused on building one step they don't need
     // the 8-step pipeline-builder walkthrough every time.
     const inSkillEmbed = readSkillCtx() != null;
+    const inSkillV2Embed = readSkillV2Ctx() != null;
     return (
       <>
-        <SkillEmbedBanner pipelineId={null}/>
+        {inSkillV2Embed
+          ? <SkillV2EmbedBanner pipelineId={null}/>
+          : <SkillEmbedBanner pipelineId={null}/>}
         <BuilderLayout
           mode="new"
           initialKind={kind}

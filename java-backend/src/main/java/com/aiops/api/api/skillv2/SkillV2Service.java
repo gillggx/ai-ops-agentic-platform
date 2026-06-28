@@ -2,6 +2,8 @@ package com.aiops.api.api.skillv2;
 
 import com.aiops.api.common.ApiException;
 import com.aiops.api.common.JsonUtils;
+import com.aiops.api.domain.pipeline.PipelineEntity;
+import com.aiops.api.domain.pipeline.PipelineRepository;
 import com.aiops.api.domain.skillv2.SkillV2Entity;
 import com.aiops.api.domain.skillv2.SkillV2Repository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -9,6 +11,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -35,10 +39,14 @@ public class SkillV2Service {
 	private static final Set<String> VALID_KINDS   = Set.of("schedule", "event");
 
 	private final SkillV2Repository repo;
+	private final PipelineRepository pipelineRepo;
 	private final ObjectMapper mapper;
 
-	public SkillV2Service(SkillV2Repository repo, ObjectMapper mapper) {
+	public SkillV2Service(SkillV2Repository repo,
+	                      PipelineRepository pipelineRepo,
+	                      ObjectMapper mapper) {
 		this.repo = repo;
+		this.pipelineRepo = pipelineRepo;
 		this.mapper = mapper;
 	}
 
@@ -192,6 +200,90 @@ public class SkillV2Service {
 		row.setAlarmGate(null);
 		row.setOutcome(null);
 		return SkillDto.of(repo.save(row));
+	}
+
+	// ─── Bind pipeline (PB embed + cowork MCP) ────────────────────────
+
+	/**
+	 * Bind an existing pb_pipeline to this skill and project its nodes
+	 * into the compact PipelineNode[] representation the v2 Editor renders.
+	 *
+	 * <p>Derivation rules:
+	 * <ul>
+	 *   <li>{@code k} — synthetic per-node label: IN for the first node,
+	 *       S1/S2/S3… for transforms, ⚑ for a {@code block_step_check}
+	 *       (the verdict).</li>
+	 *   <li>{@code t} — block_id + a few headline params squeezed into one
+	 *       line (good enough for v1; richer rendering can come later).</li>
+	 *   <li>{@code s} — block_id as the secondary label.</li>
+	 *   <li>{@code isVerdict} — true iff {@code block_step_check}.</li>
+	 *   <li>{@code has_alarm} — true iff at least one verdict node exists.</li>
+	 * </ul>
+	 */
+	@Transactional
+	public SkillDto bindPipeline(String slug, Long pipelineId) {
+		SkillV2Entity row = loadBySlug(slug);
+		PipelineEntity pipeline = pipelineRepo.findById(pipelineId)
+				.orElseThrow(() -> ApiException.notFound("pipeline " + pipelineId));
+
+		List<Map<String, Object>> dagNodes = extractDagNodes(pipeline.getPipelineJson());
+		List<Map<String, Object>> projected = new ArrayList<>(dagNodes.size());
+		boolean hasVerdict = false;
+		int transformIdx = 0;
+		for (int i = 0; i < dagNodes.size(); i++) {
+			Map<String, Object> node = dagNodes.get(i);
+			String blockId = String.valueOf(node.getOrDefault("block_id", node.getOrDefault("block", "")));
+			boolean verdict = "block_step_check".equalsIgnoreCase(blockId);
+			if (verdict) hasVerdict = true;
+			Map<String, Object> proj = new LinkedHashMap<>();
+			proj.put("k", verdict ? "⚑" : (i == 0 ? "IN" : ("S" + (++transformIdx))));
+			proj.put("t", summarizeNode(node, blockId));
+			proj.put("s", blockId);
+			if (verdict) proj.put("isVerdict", true);
+			projected.add(proj);
+		}
+
+		String nodesJson = JsonUtils.safeWrite(mapper, projected);
+		row.setPipelineId(pipelineId);
+		row.setPipelineNodes(nodesJson != null ? nodesJson : "[]");
+		row.setHasAlarm(hasVerdict);
+		return SkillDto.of(repo.save(row));
+	}
+
+	@SuppressWarnings("unchecked")
+	private List<Map<String, Object>> extractDagNodes(String pipelineJsonText) {
+		if (pipelineJsonText == null || pipelineJsonText.isBlank()) return List.of();
+		Map<String, Object> root = JsonUtils.parseObject(mapper, pipelineJsonText);
+		Object nodes = root.get("nodes");
+		if (nodes instanceof List<?> list) {
+			List<Map<String, Object>> out = new ArrayList<>(list.size());
+			for (Object n : list) {
+				if (n instanceof Map<?, ?>) out.add((Map<String, Object>) n);
+			}
+			return out;
+		}
+		return List.of();
+	}
+
+	@SuppressWarnings("unchecked")
+	private String summarizeNode(Map<String, Object> node, String blockId) {
+		Object paramsObj = node.get("params");
+		if (paramsObj instanceof Map<?, ?> params) {
+			StringBuilder sb = new StringBuilder(blockId);
+			int keys = 0;
+			for (Map.Entry<?, ?> e : ((Map<String, Object>) params).entrySet()) {
+				if (keys >= 2) break;  // keep one-line label tidy
+				Object v = e.getValue();
+				if (v == null) continue;
+				String val = String.valueOf(v);
+				if (val.length() > 24) val = val.substring(0, 24) + "…";
+				sb.append(keys == 0 ? " · " : ", ");
+				sb.append(e.getKey()).append("=").append(val);
+				keys++;
+			}
+			return sb.toString();
+		}
+		return blockId;
 	}
 
 	// ─── Helpers ───────────────────────────────────────────────────────

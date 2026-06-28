@@ -10,7 +10,7 @@
  * spec's intended flow.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { TK, FONT, ensurePlexFont } from "@/components/skills-v2/tokens";
@@ -18,8 +18,6 @@ import { TK, FONT, ensurePlexFont } from "@/components/skills-v2/tokens";
 export default function NewSkillPage() {
   const router = useRouter();
   const [name, setName] = useState("");
-  const [slug, setSlug] = useState("");
-  const [slugEdited, setSlugEdited] = useState(false);
   const [sub, setSub] = useState("");
   const [nl, setNl] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -27,33 +25,32 @@ export default function NewSkillPage() {
 
   useEffect(() => { ensurePlexFont(); }, []);
 
-  // Auto-slug from name unless user touched the slug field.
-  const autoSlug = useMemo(() => slugify(name), [name]);
-  useEffect(() => {
-    if (!slugEdited) setSlug(autoSlug);
-  }, [autoSlug, slugEdited]);
-
-  const canSubmit = name.trim().length > 0 && slug.trim().length > 0 && !submitting;
+  const canSubmit = name.trim().length > 0 && !submitting;
 
   const handleCreate = useCallback(async () => {
     setError(null);
     setSubmitting(true);
+    // Slug is an implementation detail (URL only). Auto-generate from
+    // name + short random suffix so the user never has to think about
+    // collisions or URL-safe encoding. Server still rejects duplicates
+    // with 409 so a vanishingly-rare collision retries with new slug.
+    const slug = autoSlug(name);
     try {
       const res = await fetch("/api/skills-v2", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slug: slug.trim(), name: name.trim(), sub: sub.trim(), nl: nl.trim() }),
+        body: JSON.stringify({ slug, name: name.trim(), sub: sub.trim(), nl: nl.trim() }),
       });
       if (!res.ok) {
         const t = await res.text();
         throw new Error(t || `HTTP ${res.status}`);
       }
-      router.push(`/skills/${encodeURIComponent(slug.trim())}`);
+      router.push(`/skills/${encodeURIComponent(slug)}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setSubmitting(false);
     }
-  }, [name, slug, sub, nl, router]);
+  }, [name, sub, nl, router]);
 
   return (
     <div style={{ background: TK.page, minHeight: "100vh", padding: "24px 24px 80px", fontFamily: FONT.sans, color: TK.ink }}>
@@ -91,14 +88,6 @@ export default function NewSkillPage() {
               placeholder="例：CD_Mean SPC 5取2 全廠巡檢"
               autoFocus
               style={inputStyle}
-            />
-          </Field>
-          <Field label="Slug（網址用）" required hint="會用在 /skills/[slug]。自動從名稱產生，可改。">
-            <input
-              value={slug}
-              onChange={(e) => { setSlug(e.target.value); setSlugEdited(true); }}
-              placeholder="cd-mean-spc-5in2"
-              style={{ ...inputStyle, fontFamily: FONT.mono, fontSize: 13 }}
             />
           </Field>
           <Field label="一句說明" hint="會出現在 Library 卡片的副標。">
@@ -188,12 +177,22 @@ const inputStyle: React.CSSProperties = {
   boxSizing: "border-box",
 };
 
-function slugify(s: string): string {
-  return s.toLowerCase()
+/**
+ * Auto-generate a URL slug from the human name. Strips diacritics/CJK to
+ * keep the slug ASCII-safe (browsers tolerate utf-8 but logs / oncall
+ * scripts often don't); collisions are extremely unlikely because we
+ * append a 4-char random tail. Server still 409s on collision so the
+ * rare paranoid case retries.
+ */
+function autoSlug(name: string): string {
+  const ascii = name.toLowerCase()
     .trim()
-    .replace(/[^a-z0-9一-龥\s-]/g, "")  // keep CJK
+    .replace(/[^a-z0-9\s-]/g, "")
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
+    .slice(0, 40);
+  const base = ascii || "skill";
+  const tail = Math.random().toString(36).slice(2, 6);
+  return `${base}-${tail}`;
 }

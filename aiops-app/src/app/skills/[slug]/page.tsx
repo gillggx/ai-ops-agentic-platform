@@ -8,13 +8,12 @@
  * the pipeline contains a verdict node (→ Auto Patrol eligible).
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { TK, FONT, ROLE_COLORS, ensurePlexFont } from "@/components/skills-v2/tokens";
 import { parsePipelineNodes, roleLabel, type Skill, type PipelineNode } from "@/components/skills-v2/types";
-
-const COMPILE_MIN_MS = 750;
+import { writeSkillV2Ctx } from "@/components/skills-v2/SkillV2EmbedBanner";
 
 export default function SkillEditorPage() {
   const params = useParams<{ slug: string }>();
@@ -25,10 +24,10 @@ export default function SkillEditorPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [nl, setNl] = useState("");
   const [nlDirty, setNlDirty] = useState(false);
-  const [compiling, setCompiling] = useState(false);
   const [pipeline, setPipeline] = useState<PipelineNode[]>([]);
   const [hasAlarm, setHasAlarm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [opening, setOpening] = useState(false);
   const [toast, setToast] = useState("");
 
   useEffect(() => { ensurePlexFont(); }, []);
@@ -53,40 +52,32 @@ export default function SkillEditorPage() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  const handleCompile = useCallback(async () => {
+  /**
+   * "重新編譯 ↻" no longer calls a synchronous mock — it opens Pipeline
+   * Builder in {@code embed=skill-v2} mode. PB's agent panel builds the
+   * pipeline; SkillV2EmbedBanner auto-binds the resulting pb_pipeline
+   * back to this skill_v2 row (pipeline_id + pipeline_nodes derived
+   * server-side). User returns to this Editor and sees the new pipeline.
+   */
+  const handleOpenBuilder = useCallback(async () => {
     if (!skill) return;
-    setCompiling(true);
-    const started = Date.now();
+    setOpening(true);
     try {
-      const res = await fetch(`/api/skills-v2/${encodeURIComponent(slug)}/compile`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nl }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const env = await res.json();
-      const data = (env?.data ?? env) as { pipelineNodes?: string; pipeline_nodes?: string; hasAlarm?: boolean; has_alarm?: boolean };
-      const raw = data.pipelineNodes ?? data.pipeline_nodes ?? "[]";
-      const ha = data.hasAlarm ?? data.has_alarm ?? false;
-      const elapsed = Date.now() - started;
-      if (elapsed < COMPILE_MIN_MS) await new Promise(r => setTimeout(r, COMPILE_MIN_MS - elapsed));
-      setPipeline(parsePipelineNodes(raw));
-      setHasAlarm(!!ha);
-      // Persist the compile output
-      await fetch(`/api/skills-v2/${encodeURIComponent(slug)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nl, pipeline_nodes: raw }),
-      });
-      setSkill(s => s ? { ...s, nl, pipeline_nodes: raw, has_alarm: !!ha } : s);
-      setNlDirty(false);
-      setToast("已重新編譯");
+      // Persist NL first so the round-trip doesn't lose unsaved edits.
+      if (nlDirty) {
+        await fetch(`/api/skills-v2/${encodeURIComponent(slug)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ nl }),
+        });
+      }
+      writeSkillV2Ctx({ skill_slug: slug, name: skill.name, nl });
+      router.push(`/admin/pipeline-builder/new?embed=skill-v2&slug=${encodeURIComponent(slug)}`);
     } catch (e) {
-      setToast(`Compile failed: ${e instanceof Error ? e.message : e}`);
-    } finally {
-      setCompiling(false);
+      setToast(`開啟 Builder 失敗：${e instanceof Error ? e.message : e}`);
+      setOpening(false);
     }
-  }, [nl, skill, slug]);
+  }, [nl, nlDirty, skill, slug, router]);
 
   const handleSaveNl = useCallback(async () => {
     if (!skill) return;
@@ -181,12 +172,12 @@ export default function SkillEditorPage() {
                 }}>
                   {saving ? "Saving..." : "Save Draft"}
                 </button>
-                <button onClick={handleCompile} disabled={compiling} style={{
+                <button onClick={handleOpenBuilder} disabled={opening} style={{
                   font: `600 12px ${FONT.sans}`,
                   color: "#fff", background: TK.indigo, border: `1px solid ${TK.indigo}`,
                   padding: "7px 12px", borderRadius: 8, cursor: "pointer",
                 }}>
-                  {compiling ? "Compiling…" : "重新編譯 ↻"}
+                  {opening ? "Opening…" : "用 Pipeline Builder 編譯 →"}
                 </button>
               </div>
             </ColumnFooter>
@@ -201,7 +192,7 @@ export default function SkillEditorPage() {
               flex: 1, padding: "14px 18px",
               overflowY: "auto", maxHeight: 460,
             }}>
-              {compiling ? <PipelineShimmer /> : <PipelineView nodes={pipeline} />}
+              <PipelineView nodes={pipeline} />
             </div>
           </Column>
         </div>
@@ -308,23 +299,6 @@ function PipelineView({ nodes }: { nodes: PipelineNode[] }) {
   );
 }
 
-function PipelineShimmer() {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      {[0, 1, 2, 3].map(i => (
-        <div key={i} style={{
-          height: 52,
-          background: "linear-gradient(90deg, #f3f4f6 0%, #e9eaf0 50%, #f3f4f6 100%)",
-          backgroundSize: "200% 100%",
-          animation: "shimmer 1.4s ease-in-out infinite",
-          borderRadius: 9,
-          border: `1px solid ${TK.divider}`,
-        }} />
-      ))}
-      <style>{`@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }`}</style>
-    </div>
-  );
-}
 
 function AlarmCheck({ hasAlarm }: { hasAlarm: boolean }) {
   if (hasAlarm) {

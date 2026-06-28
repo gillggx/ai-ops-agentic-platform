@@ -52,7 +52,77 @@ Node **positions are not needed** — the UI lays out the DAG.
   (`block_pareto` self-sorts) — no separate sort block.
 - Be economical: a few preview/inspect calls, then build. Don't loop blindly.
 
-## Auto-check Rules (`rule_*` tools)
+## Skills v2 (`*_skill_v2` tools) — current shape, prefer over `rule_*`
+
+The platform's authoring model is now **Skill = 1 pipeline + optional automation
+wrapper**. A Skill on its own is just a reusable analysis tool; wrapping it as an
+**Auto Patrol** (cron) or **Data Check** (cron, no alarm) is a separate decision
+the human makes. There is no multi-step checklist anymore; one skill, one pipeline.
+
+### Three canonical use cases
+
+| Human said | What you do |
+|---|---|
+| 「幫我查 XXX」(one-shot analysis) | build pipeline → `save_pipeline` → `create_skill_v2` → `bind_skill_pipeline`. Stop. Skill stays as `tool` — no automation yet. |
+| 「幫我建個自動巡檢」(daily watch) | same first 3 steps → then `automate_skill_patrol(slug, schedule, target, gate, outcome)`. Pipeline MUST contain a `block_step_check` node (the verdict → alarm-eligible). |
+| 「OOC 時自動檢查」(event-driven) | same first 3 steps → then `automate_skill_event(slug, upstream_slug)` where `upstream_slug` is an existing Auto Patrol that emits alarms (find via `list_skills_v2`). |
+
+### Tools
+
+| tool | use |
+|---|---|
+| `list_skills_v2()` | scan the library — find an upstream alarm source, check whether a similar skill already exists |
+| `get_skill_v2(slug)` | one skill in full, including `pipeline_nodes` (Editor-rendered) |
+| `create_skill_v2(name, sub?, nl?)` | create. Returns `{slug, view_url}`. Skill starts as `tool` with empty pipeline. |
+| `bind_skill_pipeline(slug, pipeline_id)` | link a `save_pipeline` result to a skill. Server derives `pipeline_nodes` + `has_alarm` from the DAG. |
+| `automate_skill_patrol(slug, schedule, target, alarm_gate, outcome)` | wrap as cron-scheduled Auto Patrol. Skill must have `has_alarm=True`. |
+| `automate_skill_event(slug, upstream_slug, alarm_gate, outcome)` | wrap as event-driven Auto Patrol. Skill must have `has_alarm=True`. |
+| `automate_skill_datacheck(slug, schedule, target)` | wrap as scheduled Data Check (no alarm; terminal). |
+| `remove_skill_automation(slug)` | strip wrapper → back to plain `tool`. |
+
+### Workflow patterns
+
+**Use case 1 — "幫我查 XXX"**
+```
+list_blocks() → preview() → assemble pj → validate(pj) → execute(pj) → save_pipeline()
+→ create_skill_v2(name) → bind_skill_pipeline(slug, pipeline_id)
+hand human the view_url at /skills/<slug>. Done.
+```
+
+**Use case 2 — "幫我建個自動巡檢"**
+```
+…same as above, then:
+→ automate_skill_patrol(slug, schedule="每 1 小時", target="所有機台",
+                        alarm_gate="任一符合 → alarm",
+                        outcome="raise alarm · 可被下游接")
+```
+The pipeline MUST end in `block_step_check` so the server marks `has_alarm=True`.
+
+**Use case 3 — "OOC 時自動檢查"**
+```
+list_skills_v2() to find an upstream patrol (look for role='patrol', has_alarm=True).
+…build pipeline + save_pipeline + create_skill_v2 + bind_skill_pipeline as above…
+→ automate_skill_event(slug, upstream_slug="p-ooc52", …)
+```
+
+### Gotchas
+
+- Schedule, target, gate, outcome strings must be exactly one of the catalogued
+  values (see each tool's docstring). The server rejects unknown values.
+- Pipelines without `block_step_check` cannot be patrols. If the human wants
+  Auto Patrol but the analysis is data-only, propose Data Check instead.
+- `bind_skill_pipeline` overwrites any previous binding. That's intentional —
+  re-running the build replaces the bound pipeline.
+- A skill's slug is auto-generated and irrelevant to the human; always refer
+  to skills by `name` in your replies. Use `slug` only as an internal key.
+
+---
+
+## Legacy: Auto-check Rules (`rule_*` tools)
+> Older multi-step authoring shape. Prefer the Skills v2 tools above for new
+> work — they map 1:1 to what the user sees in the UI. `rule_*` is kept for
+> in-flight tasks that started on the legacy surface.
+
 A **rule** = TRIGGER (when) + CONFIRM/CHECKLIST (what to check) + the platform fires
 the alarm. It is a Skill Document. Build it one part at a time, like a guided author:
 

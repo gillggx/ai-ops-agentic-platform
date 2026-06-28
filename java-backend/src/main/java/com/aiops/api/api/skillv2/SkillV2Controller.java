@@ -84,6 +84,27 @@ public class SkillV2Controller {
 		return ApiResponse.ok(service.removeAutomation(slug));
 	}
 
+	/**
+	 * Bind a pb_pipeline to this skill. Loads the pipeline_json, converts
+	 * its nodes into the PipelineNode[] representation the Editor renders,
+	 * derives has_alarm from any block_step_check node, and persists both
+	 * pipeline_id + pipeline_nodes on skills_v2.
+	 *
+	 * <p>Called from Pipeline Builder's auto-bind hook when the embed
+	 * context is {@code skill-v2}, and from the cowork MCP tool
+	 * {@code bind_skill_pipeline}.
+	 */
+	@PostMapping("/{slug}/bind-pipeline")
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public ApiResponse<SkillV2Service.SkillDto> bindPipeline(@PathVariable String slug,
+	                                                          @RequestBody Map<String, Object> body) {
+		Number pid = (Number) body.get("pipeline_id");
+		if (pid == null) {
+			return ApiResponse.ok(service.get(slug));  // no-op
+		}
+		return ApiResponse.ok(service.bindPipeline(slug, pid.longValue()));
+	}
+
 	/** Convenience: list peer "alarming" patrols an event-driven skill can subscribe to. */
 	@GetMapping("/alarm-sources")
 	@PreAuthorize(Authorities.ANY_ROLE)

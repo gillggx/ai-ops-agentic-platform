@@ -255,7 +255,170 @@ async def save_pipeline(name: str, pipeline_json: dict, description: str = "") -
             "edit_url": f"{PUBLIC}/admin/pipeline-builder/{pid}" if pid else None}
 
 
-# Auto-check Rule tool group (skill-document CRUD + two-phase confirm)
+# ── Skills v2 cowork tools ──────────────────────────────────────────
+#
+# Skill = 1 pipeline + optional automation wrapper. Three cowork use
+# cases the human is likely to ask:
+#   1. "幫我查 XXX"           — build a skill, leave as 'tool' (no automation)
+#   2. "幫我建個自動巡檢"     — build a skill, then automate_skill_patrol(...)
+#   3. "幫我在 OOC 時自動檢查" — build a skill, then automate_skill_event(...)
+#
+# Canonical flow per use case:
+#   - Use list_blocks / preview / validate / execute to build the pipeline (as
+#     before). save_pipeline() returns a pipeline_id.
+#   - create_skill_v2(name, sub, nl) creates the skill (initially 'tool').
+#   - bind_skill_pipeline(slug, pipeline_id) links the saved pipeline to the
+#     skill and derives pipeline_nodes + has_alarm.
+#   - If use case 2 or 3, follow up with automate_skill_patrol /
+#     automate_skill_event / automate_skill_datacheck.
+#
+# Skills-v2 endpoints sit under /api/v2/skills/* and accept the shared-secret
+# bearer (same auth as save_pipeline above).
+
+import random as _random
+import string as _string
+
+
+def _slug_from_name(name: str) -> str:
+    base = "".join(c if c.isalnum() or c in "- " else "" for c in name.lower()).strip()
+    base = "-".join(base.split())[:40] or "skill"
+    tail = "".join(_random.choices(_string.ascii_lowercase + _string.digits, k=4))
+    return f"{base}-{tail}"
+
+
+async def _v2(c: httpx.AsyncClient, method: str, path: str, body: dict | None = None) -> dict:
+    headers = {"Authorization": f"Bearer {SHARED}", "Content-Type": "application/json"}
+    url = f"{JAVA}/api/v2/skills{path}"
+    if method == "GET":
+        r = await c.get(url, headers=headers, timeout=30)
+    elif method == "POST":
+        r = await c.post(url, headers=headers, json=body or {}, timeout=30)
+    elif method == "PUT":
+        r = await c.put(url, headers=headers, json=body or {}, timeout=30)
+    elif method == "DELETE":
+        r = await c.delete(url, headers=headers, timeout=30)
+    else:
+        raise ValueError(f"unsupported method {method}")
+    r.raise_for_status()
+    return _unwrap(r)
+
+
+@mcp.tool()
+async def list_skills_v2() -> list[dict]:
+    """List every Skill in the v2 library (id, slug, name, sub, role, has_alarm).
+    Use this to check whether a skill the human asked about already exists, or
+    to find an upstream Auto Patrol you can subscribe to (role='patrol' +
+    has_alarm=True)."""
+    async with httpx.AsyncClient() as c:
+        return await _v2(c, "GET", "")
+
+
+@mcp.tool()
+async def get_skill_v2(slug: str) -> dict:
+    """Return one Skill in full, including its pipeline_nodes (compiled
+    representation rendered in the v2 Editor). Useful before suggesting an
+    edit so you cite real values."""
+    async with httpx.AsyncClient() as c:
+        return await _v2(c, "GET", f"/{slug}")
+
+
+@mcp.tool()
+async def create_skill_v2(name: str, sub: str = "", nl: str = "") -> dict:
+    """Create a new v2 Skill (starts as role='tool', no automation, no pipeline
+    bound). Returns {slug, name, ...}. Slug is auto-generated from name + a
+    short random tail — the human never sees it. Next step is almost always
+    bind_skill_pipeline(slug, pipeline_id) after save_pipeline()."""
+    slug = _slug_from_name(name)
+    body = {"slug": slug, "name": name, "sub": sub, "nl": nl}
+    async with httpx.AsyncClient() as c:
+        d = await _v2(c, "POST", "", body)
+    return {**d, "view_url": f"{PUBLIC}/skills/{slug}"}
+
+
+@mcp.tool()
+async def bind_skill_pipeline(slug: str, pipeline_id: int) -> dict:
+    """Link a saved pb_pipeline (from save_pipeline) to a Skill. The server
+    walks the pipeline's nodes to derive pipeline_nodes (Editor-visible) and
+    has_alarm (True iff any node is block_step_check). After this the human
+    can open the Editor at /skills/<slug> and see the compiled pipeline."""
+    async with httpx.AsyncClient() as c:
+        return await _v2(c, "POST", f"/{slug}/bind-pipeline", {"pipeline_id": pipeline_id})
+
+
+@mcp.tool()
+async def automate_skill_patrol(
+    slug: str,
+    schedule: str = "每 1 小時",
+    target: str = "所有機台",
+    alarm_gate: str = "任一符合 → alarm",
+    outcome: str = "raise alarm · 可被下游接",
+) -> dict:
+    """Wrap a Skill as a scheduled Auto Patrol — fires alarms when the gate
+    condition matches. Requires has_alarm=True on the skill (set by
+    bind_skill_pipeline once the pipeline contains a block_step_check node).
+    Schedule values must be one of: '每 30 分鐘' | '每 1 小時' | '每 2 小時'
+    | '每日 08:00'. Outcome must be one of: 'raise alarm · 可被下游接' |
+    'advisory only · 只通知' | '接 action / workflow'."""
+    body = {
+        "role": "patrol",
+        "trigger": {"kind": "schedule", "schedule": schedule, "target": target},
+        "alarm_gate": alarm_gate,
+        "outcome": outcome,
+    }
+    async with httpx.AsyncClient() as c:
+        return await _v2(c, "POST", f"/{slug}/automation", body)
+
+
+@mcp.tool()
+async def automate_skill_event(
+    slug: str,
+    upstream_slug: str,
+    alarm_gate: str = "任一符合 → alarm",
+    outcome: str = "raise alarm · 可被下游接",
+) -> dict:
+    """Wrap a Skill as an event-driven Auto Patrol — runs when an upstream
+    Auto Patrol's alarm fires. Requires has_alarm=True on this skill AND
+    the upstream slug to be an existing role='patrol' skill (use
+    list_skills_v2 to confirm)."""
+    body = {
+        "role": "patrol",
+        "trigger": {"kind": "event", "source": upstream_slug},
+        "alarm_gate": alarm_gate,
+        "outcome": outcome,
+    }
+    async with httpx.AsyncClient() as c:
+        return await _v2(c, "POST", f"/{slug}/automation", body)
+
+
+@mcp.tool()
+async def automate_skill_datacheck(
+    slug: str,
+    schedule: str = "每日 08:00",
+    target: str = "所有機台",
+) -> dict:
+    """Wrap a Skill as a scheduled Data Check — produces a report / dashboard,
+    NEVER alarms (terminal). Use this for 'each morning summarise X' use
+    cases. The upstream skill should NOT have a block_step_check node
+    (has_alarm=False); if it does, the server rejects with a clear error."""
+    body = {
+        "role": "datacheck",
+        "trigger": {"kind": "schedule", "schedule": schedule, "target": target},
+        "alarm_gate": None,
+        "outcome": "data only",
+    }
+    async with httpx.AsyncClient() as c:
+        return await _v2(c, "POST", f"/{slug}/automation", body)
+
+
+@mcp.tool()
+async def remove_skill_automation(slug: str) -> dict:
+    """Strip a Skill's automation wrapper — flips role back to 'tool'. Use this
+    when the human wants to keep the analysis but stop the schedule / alarm."""
+    async with httpx.AsyncClient() as c:
+        return await _v2(c, "DELETE", f"/{slug}/automation")
+
+
+# Auto-check Rule tool group (skill-document CRUD + two-phase confirm) — legacy
 import rules  # noqa: E402
 rules.register(mcp, java=JAVA, shared=SHARED, jit=JIT, public=PUBLIC)
 

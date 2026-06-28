@@ -6,6 +6,7 @@ import dynamic from "next/dynamic";
 import SurfaceTour from "@/components/tour/SurfaceTour";
 import { PIPELINE_BUILDER_STEPS } from "@/components/tour/steps/pipeline-builder";
 import SkillEmbedBanner, { bootstrapSkillCtxFromUrl, readSkillCtx } from "@/components/pipeline-builder/SkillEmbedBanner";
+import SkillV2EmbedBanner, { bootstrapSkillV2CtxFromUrl, readSkillV2Ctx } from "@/components/skills-v2/SkillV2EmbedBanner";
 
 const BuilderLayout = dynamic(() => import("@/components/pipeline-builder/BuilderLayout"), {
   ssr: false,
@@ -21,6 +22,7 @@ export default function EditPipelinePage() {
   const [ready, setReady] = useState(false);
   useEffect(() => {
     bootstrapSkillCtxFromUrl();
+    bootstrapSkillV2CtxFromUrl();
     setReady(true);
   }, []);
 
@@ -30,11 +32,14 @@ export default function EditPipelinePage() {
   if (!ready) return null;
 
   const inSkillEmbed = readSkillCtx() != null;
+  const inSkillV2Embed = readSkillV2Ctx() != null;
   return (
     <>
-      <SkillEmbedBanner pipelineId={id}/>
+      {inSkillV2Embed
+        ? <SkillV2EmbedBanner pipelineId={id} />
+        : <SkillEmbedBanner pipelineId={id}/>}
       <BuilderLayout mode="edit" pipelineId={id} />
-      {!inSkillEmbed && <SurfaceTour surfaceId="pipeline-builder" steps={PIPELINE_BUILDER_STEPS} />}
+      {!inSkillEmbed && !inSkillV2Embed && <SurfaceTour surfaceId="pipeline-builder" steps={PIPELINE_BUILDER_STEPS} />}
     </>
   );
 }
