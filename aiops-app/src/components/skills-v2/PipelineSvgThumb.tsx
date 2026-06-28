@@ -46,9 +46,18 @@ export default function PipelineSvgThumb({ pipelineId, height = 380 }: Props) {
       .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then((env) => {
         const record = env?.data ?? env;
-        const pj = record?.pipeline_json ?? record;
-        const rawNodes = (pj?.nodes ?? []) as Array<Record<string, unknown>>;
-        const rawEdges = (pj?.edges ?? []) as Array<Record<string, unknown>>;
+        // Java PipelineEntity stores pipeline_json as a TEXT column → on the
+        // wire it arrives as a JSON-encoded STRING, not a nested object.
+        // Parse defensively (some surfaces already deserialize it).
+        const rawPj = record?.pipeline_json ?? record;
+        let pj: Record<string, unknown> = {};
+        if (typeof rawPj === "string") {
+          try { pj = JSON.parse(rawPj); } catch { pj = {}; }
+        } else if (rawPj && typeof rawPj === "object") {
+          pj = rawPj as Record<string, unknown>;
+        }
+        const rawNodes = (pj.nodes ?? []) as Array<Record<string, unknown>>;
+        const rawEdges = (pj.edges ?? []) as Array<Record<string, unknown>>;
         const ns: ThumbNode[] = rawNodes.map((n) => ({
           id: String(n.id),
           block_id: String(n.block_id ?? ""),
