@@ -258,13 +258,13 @@ function SkillCard({ skill, onDelete, deleting }: { skill: Skill; onDelete: () =
 
       {/* actions */}
       <div style={{ display: "flex", gap: 8, flexShrink: 0, alignItems: "center" }}>
-        <Link href={`/skills/${encodeURIComponent(skill.slug)}`} style={{
+        <Link href={`/skills/${skill.id}`} style={{
           font: `600 12px ${FONT.sans}`,
           color: TK.ink, background: TK.card,
           border: `1px solid ${TK.divider}`, padding: "7px 13px", borderRadius: 8,
           textDecoration: "none",
         }}>編寫</Link>
-        <Link href={`/skills/${encodeURIComponent(skill.slug)}/automate`} style={{
+        <Link href={`/skills/${skill.id}/automate`} style={{
           font: `600 12px ${FONT.sans}`,
           color: skill.role === "tool" ? "#fff" : TK.ink,
           background: skill.role === "tool" ? TK.black : TK.card,

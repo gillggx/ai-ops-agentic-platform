@@ -452,8 +452,19 @@ public class SkillV2Service {
 
 	// ─── Helpers ───────────────────────────────────────────────────────
 
-	private SkillV2Entity loadBySlug(String slug) {
-		return repo.findBySlug(slug)
+	/**
+	 * Resolve a path segment that may be a numeric id OR a slug. Auto-generated
+	 * slugs always end in a random alphanumeric tail and never look like a bare
+	 * integer, so a pure-digit segment is unambiguously an id. This lets every
+	 * /api/v2/skills/{key}/** endpoint accept ids — the UI uses /skills/<id>
+	 * URLs (slugs are an internal detail the human never sees).
+	 */
+	private SkillV2Entity loadBySlug(String key) {
+		if (key != null && key.matches("\\d+")) {
+			return repo.findById(Long.valueOf(key))
+					.orElseThrow(() -> ApiException.notFound("skill v2"));
+		}
+		return repo.findBySlug(key)
 				.orElseThrow(() -> ApiException.notFound("skill v2"));
 	}
 

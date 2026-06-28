@@ -45,7 +45,10 @@ export default function NewSkillPage() {
         const t = await res.text();
         throw new Error(t || `HTTP ${res.status}`);
       }
-      router.push(`/skills/${encodeURIComponent(slug)}`);
+      // Route by id (slug is internal). Fall back to slug if id missing.
+      const env = await res.json().catch(() => null);
+      const created = env?.data ?? env;
+      router.push(`/skills/${created?.id ?? encodeURIComponent(slug)}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setSubmitting(false);

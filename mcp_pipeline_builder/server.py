@@ -260,10 +260,12 @@ async def save_pipeline(name: str, pipeline_json: dict, description: str = "") -
     async with httpx.AsyncClient() as c:
         d = await _v2(c, "POST", "/with-pipeline", body)
     skill = d.get("skill") if isinstance(d, dict) else None
-    real_slug = (skill or {}).get("slug", slug)
-    return {"skill_slug": real_slug, "name": name, "status": "draft",
-            "view_url": f"{PUBLIC}/skills/{real_slug}",
-            "_human_message": f"已建好 Skill「{name}」（草稿）：{PUBLIC}/skills/{real_slug} — 開啟後按『啟用』才生效。"}
+    sid = (skill or {}).get("id")
+    # URLs are id-based (slugs are an internal detail; id avoids CJK/encoding).
+    url = f"{PUBLIC}/skills/{sid}" if sid else f"{PUBLIC}/skills"
+    return {"skill_id": sid, "name": name, "status": "draft",
+            "view_url": url,
+            "_human_message": f"已建好 Skill「{name}」（草稿）：{url} — 開啟後按『啟用』才生效。"}
 
 
 # ── Skills v2 cowork tools ──────────────────────────────────────────
@@ -353,7 +355,8 @@ async def create_skill_v2(name: str, sub: str = "", nl: str = "") -> dict:
     body = {"slug": slug, "name": name, "sub": sub, "nl": nl}
     async with httpx.AsyncClient() as c:
         d = await _v2(c, "POST", "", body)
-    return {**d, "view_url": f"{PUBLIC}/skills/{slug}"}
+    sid = d.get("id") if isinstance(d, dict) else None
+    return {**d, "view_url": f"{PUBLIC}/skills/{sid}" if sid else f"{PUBLIC}/skills"}
 
 
 @mcp.tool()
@@ -398,8 +401,11 @@ async def create_skill_with_pipeline(
     body = {"slug": slug, "name": name, "sub": sub, "nl": nl, "pipeline_json": pipeline_json}
     async with httpx.AsyncClient() as c:
         d = await _v2(c, "POST", "/with-pipeline", body)
-    return {**d, "view_url": f"{PUBLIC}/skills/{slug}",
-            "_human_message": f"Skill「{name}」已建好（草稿狀態），請到 {PUBLIC}/skills/{slug} 按『啟用』才會生效。"}
+    skill = d.get("skill") if isinstance(d, dict) else None
+    sid = (skill or {}).get("id")
+    url = f"{PUBLIC}/skills/{sid}" if sid else f"{PUBLIC}/skills"
+    return {**d, "view_url": url,
+            "_human_message": f"Skill「{name}」已建好（草稿狀態），請到 {url} 按『啟用』才會生效。"}
 
 
 @mcp.tool()

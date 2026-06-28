@@ -331,10 +331,10 @@ function ActionBar({ card }: { card: PbPipelineCardData }) {
       }
       const env = await res.json();
       const data = env?.data ?? env;
-      const slug = data?.skill?.slug;
+      const sid = data?.skill?.id;
       setSaved(true);
-      if (slug && window.confirm(`Skill 已建好（草稿狀態）。\n\n要開啟 Editor 去 review + 啟用嗎？`)) {
-        window.open(`/skills/${slug}`, "_blank");
+      if (sid && window.confirm(`Skill 已建好（草稿狀態）。\n\n要開啟 Editor 去 review + 啟用嗎？`)) {
+        window.open(`/skills/${sid}`, "_blank");
       }
     } catch (e) {
       alert(`儲存失敗：${e instanceof Error ? e.message : "未知錯誤"}`);
