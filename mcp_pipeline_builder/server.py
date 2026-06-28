@@ -429,6 +429,85 @@ async def delete_skill_v2(slug: str) -> dict:
     return {"ok": True, "deleted": slug}
 
 
+@mcp.tool()
+async def update_skill_v2(
+    slug: str,
+    nl: str | None = None,
+    name: str | None = None,
+    sub: str | None = None,
+    in_type: str | None = None,
+    out_type: str | None = None,
+) -> dict:
+    """Update an existing Skill's text fields (nl / name / sub / in_type / out_type).
+
+    Use when the user refines the natural-language description, the title,
+    or the short description via chat. Does NOT touch the bound pipeline.
+
+    IMPORTANT: if you change `nl` (the natural-language description), the
+    pipeline does NOT auto-rebuild — it's still the old one. Tell the user
+    they need to click "用 Agent 重新編譯" in the Editor to regenerate the
+    pipeline from the new NL. Small param tweaks should go through PB MCP
+    (update_node_params) instead — see SKILL.md decision tree.
+
+    Pass only the fields you want to change. Returns the updated SkillDto."""
+    body: dict = {}
+    if nl is not None: body["nl"] = nl
+    if name is not None: body["name"] = name
+    if sub is not None: body["sub"] = sub
+    if in_type is not None: body["in_type"] = in_type
+    if out_type is not None: body["out_type"] = out_type
+    if not body:
+        return {"ok": False, "error": "no fields to update — pass at least one of nl/name/sub/in_type/out_type"}
+    async with httpx.AsyncClient() as c:
+        return await _v2(c, "PUT", f"/{slug}", body)
+
+
+@mcp.tool()
+async def get_skill_with_pipeline(slug: str) -> dict:
+    """Fetch a Skill AND its bound pipeline_json in ONE round-trip.
+
+    Use this when you need to reason about the pipeline shape before
+    suggesting edits (nodes, edges, params, inputs). Returns
+    {skill: SkillDto, pipeline_json: <string-encoded JSON or null if unbound>}.
+
+    Cheaper than get_skill_v2 + then PB.get_pipeline. Prefer this for
+    review / advise flows."""
+    async with httpx.AsyncClient() as c:
+        return await _v2(c, "GET", f"/{slug}/full")
+
+
+@mcp.tool()
+async def list_event_sources(exclude_slug: str | None = None) -> list[dict]:
+    """List Skills that are currently active patrols AND have an alarm
+    judgement (has_alarm=true). These are the valid `source` values for
+    automate_skill_event (event-driven datacheck).
+
+    Pass exclude_slug to filter out a skill that shouldn't self-subscribe
+    (useful when configuring the source skill itself).
+
+    Returns [{slug, name, sub}]."""
+    async with httpx.AsyncClient() as c:
+        q = f"?excludeSlug={exclude_slug}" if exclude_slug else ""
+        result = await _v2(c, "GET", f"/alarm-sources{q}")
+        return result if isinstance(result, list) else result.get("data", [])
+
+
+@mcp.tool()
+async def check_skill_ready_for_role(slug: str, role: str) -> dict:
+    """Pre-flight check before automate_skill_patrol / automate_skill_event /
+    automate_skill_datacheck. Returns {ok: bool, reason?: str}.
+
+    Failure reasons include:
+      - skill has no pipeline bound (call bind_skill_pipeline first)
+      - target role requires has_alarm=true but pipeline has no
+        block_step_check verdict node (patrol upgrades fail without this)
+
+    ALWAYS call this before automate_* tools — calling them blindly may
+    waste a round-trip and confuse the user with a Java validation error."""
+    async with httpx.AsyncClient() as c:
+        return await _v2(c, "GET", f"/{slug}/role-readiness?role={role}")
+
+
 # Auto-check Rule tool group (skill-document CRUD + two-phase confirm) — legacy
 import rules  # noqa: E402
 rules.register(mcp, java=JAVA, shared=SHARED, jit=JIT, public=PUBLIC)

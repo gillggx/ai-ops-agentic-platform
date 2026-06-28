@@ -76,6 +76,23 @@ public class SkillV2Controller {
 		return ApiResponse.ok(null);
 	}
 
+	/** Cowork MCP one-shot: skill + its bound pipeline_json in one round-trip. */
+	@GetMapping("/{slug}/full")
+	@PreAuthorize(Authorities.ANY_ROLE)
+	public ApiResponse<SkillV2Service.SkillFullDto> getSkillFull(@PathVariable String slug) {
+		return ApiResponse.ok(service.getFull(slug));
+	}
+
+	/** Cowork pre-flight: can this skill be promoted to {role}?
+	 *  Returns {ok: bool, reason?: str}. */
+	@GetMapping("/{slug}/role-readiness")
+	@PreAuthorize(Authorities.ANY_ROLE)
+	public ApiResponse<SkillV2Service.RoleReadinessDto> roleReadiness(
+			@PathVariable String slug,
+			@RequestParam String role) {
+		return ApiResponse.ok(service.checkRoleReadiness(slug, role));
+	}
+
 	/** Apply automation (role + trigger + gate + outcome). NULL trigger → tool. */
 	@PostMapping("/{slug}/automation")
 	@PreAuthorize(Authorities.ADMIN_OR_PE)

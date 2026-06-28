@@ -12,7 +12,6 @@ import {
   promotePipeline,
   transitionPipeline,
   updatePipeline,
-  validatePipeline,
 } from "@/lib/pipeline-builder/api";
 import type { PipelineStatus } from "@/lib/pipeline-builder/types";
 import { BuilderProvider, useBuilder, useBuilderKeybindings } from "@/context/pipeline-builder/BuilderContext";
@@ -410,16 +409,9 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
     }
   }, [state, actions, router, initialKind]);
 
-  const handleValidate = useCallback(async () => {
-    try {
-      const res = await validatePipeline(state.pipeline);
-      setValidationErrors(res.errors);
-      setValidationOpen(true);
-    } catch (e) {
-      showToast("error", (e as Error).message);
-    }
-  }, [state.pipeline]);
-
+  // handleValidate removed 2026-06-28 with the Validate toolbar button —
+  // executeWithInputs already surfaces validation errors via the same
+  // ValidationDrawer when Run Full reports status=validation_error.
   const executeWithInputs = useCallback(async (providedInputs: Record<string, unknown>) => {
     setRunResult(null);
     try {
@@ -751,42 +743,24 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
         </div>
 
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-          {/* PR-D1/D3 visual prefs */}
-          <button
-            data-testid="btn-theme"
-            onClick={() => actions.setTheme(state.theme === "dark" ? "light" : "dark")}
-            title={state.theme === "dark" ? "切到亮色" : "切到暗色"}
-            style={{
-              ...btn("ghost"),
-              fontSize: 14,
-              padding: "4px 8px",
-            }}
-          >
-            {state.theme === "dark" ? "☀" : "🌙"}
-          </button>
-          <button
-            data-testid="btn-density"
-            onClick={() => actions.setDensity(state.density === "full" ? "compact" : "full")}
-            title={state.density === "full" ? "切換成緊湊" : "切換成完整"}
-            style={{
-              ...btn("ghost"),
-              fontSize: 11,
-              padding: "4px 8px",
-              letterSpacing: "0.03em",
-              fontWeight: 600,
-            }}
-          >
-            {state.density === "full" ? "▤ Full" : "▢ Compact"}
-          </button>
+          {/* 2026-06-28 toolbar bonsai (skills-v2-refactor PR):
+              removed 4 buttons that no longer earn their place:
+                • 🌙 Theme   — dev-only cosmetic, no real users
+                • ▤ Density  — UI preference, belongs in user settings
+                • Validate   — Run Full already validates; standalone button
+                               was rarely clicked and confused new users
+                • → 開始測試 — pipeline-level lifecycle (draft → validating)
+                               is legacy. Skills v2 has its own status; the
+                               test/dry-run UX lives at /skills/<slug>/dry-run
+              The remaining lifecycle buttons (→ 準備上架 / ✔ Publish / ← 退回)
+              stay so any in-flight legacy pipelines already in 'validating'
+              or 'locked' state can still flow through. */}
           <button data-testid="btn-undo" onClick={actions.undo} title="Undo (Cmd/Ctrl+Z)" style={btn("ghost", readOnly)}>
             ↶
           </button>
           <button data-testid="btn-redo" onClick={actions.redo} title="Redo (Cmd/Ctrl+Y)" style={btn("ghost", readOnly)}>
             ↷
           </button>
-          {/* Phase 5-UX-6 fix: "Ask Agent" button removed — the Agent tab is
-              always present on the right, and NodeInspector's per-node "Ask
-              about this" already focuses it. Redundant top-bar entry. */}
           <button
             data-testid="btn-pipeline-inputs"
             onClick={() => setInputsPanelOpen(true)}
@@ -794,9 +768,6 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
             title="宣告 pipeline 變數（讓 pipeline 可重用）"
           >
             🔣 Inputs ({state.pipeline.inputs?.length ?? 0})
-          </button>
-          <button data-testid="btn-validate" onClick={handleValidate} style={btn("ghost")}>
-            Validate
           </button>
           <label
             data-testid="auto-run-toggle"
@@ -883,16 +854,12 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
           )}
 
           {/* PR-B lifecycle transition buttons — hidden in session mode (publish
-              lives in /admin/pipeline-builder). */}
-          {mode !== "session" && state.meta.status === "draft" && state.meta.pipelineId != null && (
-            <button
-              onClick={() => handleTransition("validating")}
-              style={btn("ghost")}
-              title="進入測試階段：驗證結構 + 用真實資料預覽"
-            >
-              → 開始測試
-            </button>
-          )}
+              lives in /admin/pipeline-builder).
+              2026-06-28: '→ 開始測試' (draft → validating) removed; Skills v2
+              uses /skills/<slug>/dry-run for the test surface, and the
+              pipeline-level lifecycle doesn't map to the new model. The
+              validating/locked branches stay so legacy pipelines already in
+              those states can continue through publish. */}
           {mode !== "session" && state.meta.status === "validating" && state.meta.pipelineId != null && (
             <>
               <button

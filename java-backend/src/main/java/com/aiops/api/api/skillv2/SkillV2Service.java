@@ -208,6 +208,38 @@ public class SkillV2Service {
 		repo.delete(row);
 	}
 
+	// ─── Cowork helpers (skill + pipeline one-shot, role pre-check) ──
+
+	@Transactional(readOnly = true)
+	public SkillFullDto getFull(String slug) {
+		SkillV2Entity row = loadBySlug(slug);
+		SkillDto skill = SkillDto.of(row);
+		String pipelineJson = null;
+		if (row.getPipelineId() != null) {
+			PipelineEntity p = pipelineRepo.findById(row.getPipelineId()).orElse(null);
+			if (p != null) pipelineJson = p.getPipelineJson();
+		}
+		return new SkillFullDto(skill, pipelineJson);
+	}
+
+	@Transactional(readOnly = true)
+	public RoleReadinessDto checkRoleReadiness(String slug, String role) {
+		if (role == null) return new RoleReadinessDto(false, "role is required");
+		if (!VALID_ROLES.contains(role)) {
+			return new RoleReadinessDto(false, "invalid role: " + role + " (valid: tool, patrol, datacheck)");
+		}
+		SkillV2Entity row = loadBySlug(slug);
+		if (row.getPipelineId() == null) {
+			return new RoleReadinessDto(false, "skill 沒有綁定 pipeline — 先呼 bind_skill_pipeline");
+		}
+		if ("patrol".equals(role) && !Boolean.TRUE.equals(row.getHasAlarm())) {
+			return new RoleReadinessDto(false,
+				"pipeline 沒有 alarm 判斷式（block_step_check 為 verdict node）— 無法升為 Auto Patrol。"
+					+ "請先在 NL 加入觸發條件並重新編譯，或在 PB 手動加 block_step_check。");
+		}
+		return new RoleReadinessDto(true, null);
+	}
+
 	// ─── Bind pipeline (PB embed + cowork MCP) ────────────────────────
 
 	/**
@@ -391,4 +423,8 @@ public class SkillV2Service {
 	                             String inType, String outType) {}
 
 	public record AlarmSourceDto(String slug, String name, String sub) {}
+
+	public record SkillFullDto(SkillDto skill, String pipelineJson) {}
+
+	public record RoleReadinessDto(boolean ok, String reason) {}
 }

@@ -69,16 +69,49 @@ the human makes. There is no multi-step checklist anymore; one skill, one pipeli
 
 ### Tools
 
+**Read / inspect**
 | tool | use |
 |---|---|
 | `list_skills_v2()` | scan the library — find an upstream alarm source, check whether a similar skill already exists |
-| `get_skill_v2(slug)` | one skill in full, including `pipeline_nodes` (Editor-rendered) |
+| `get_skill_v2(slug)` | one skill in full, including `pipeline_nodes` (Editor-rendered, compact) |
+| `get_skill_with_pipeline(slug)` | **(prefer for review/advise)** skill + bound `pipeline_json` in ONE round-trip. Use before suggesting node edits or NL refinements so you can reason about the actual DAG. |
+| `list_event_sources(exclude_slug?)` | the only valid `source` values for `automate_skill_event` — patrols that emit alarms. Saves a list+filter pass. |
+| `check_skill_ready_for_role(slug, role)` | **(always call before automate_*)** pre-flight: returns `{ok, reason?}`. Patrol fails if pipeline has no `block_step_check` verdict — this surfaces it cleanly. |
+
+**Create / mutate**
+| tool | use |
+|---|---|
 | `create_skill_v2(name, sub?, nl?)` | create. Returns `{slug, view_url}`. Skill starts as `tool` with empty pipeline. |
-| `bind_skill_pipeline(slug, pipeline_id)` | link a `save_pipeline` result to a skill. Server derives `pipeline_nodes` + `has_alarm` from the DAG. |
+| `update_skill_v2(slug, nl?/name?/sub?/in_type?/out_type?)` | edit text fields. **Does NOT rebuild the pipeline** — see Decision tree below. |
+| `bind_skill_pipeline(slug, pipeline_id)` | link a `save_pipeline` result to a skill. Server derives `pipeline_nodes` + `has_alarm` + `in_type` + `out_type` from the DAG. Overwrites any previous binding. |
 | `automate_skill_patrol(slug, schedule, target, alarm_gate, outcome)` | wrap as cron-scheduled Auto Patrol. Skill must have `has_alarm=True`. |
 | `automate_skill_event(slug, upstream_slug, alarm_gate, outcome)` | wrap as event-driven Auto Patrol. Skill must have `has_alarm=True`. |
 | `automate_skill_datacheck(slug, schedule, target)` | wrap as scheduled Data Check (no alarm; terminal). |
 | `remove_skill_automation(slug)` | strip wrapper → back to plain `tool`. |
+| `delete_skill_v2(slug)` | permanently delete. Bound pipeline is NOT deleted (other refs may exist). |
+
+### Decision tree — small change vs big change
+
+When the user says "改一下這個 skill"，pick by SIZE OF EDIT:
+
+```
+                  ┌─ params on ONE node?       → PB MCP: update_node_params(...)
+                  │                              (NO agent rebuild, NO update_skill_v2)
+                  │
+                  ├─ multiple nodes / topology? → PB MCP: edit canvas via MCP
+                  │                              (still NO agent rebuild)
+EDIT type:        │
+                  ├─ rename / sub / contract?  → update_skill_v2(name/sub/in_type/out_type)
+                  │                              (cosmetic, no pipeline change)
+                  │
+                  └─ NL semantic shift?        → update_skill_v2(nl) + tell user:
+                                                 "請到 Editor 按『用 Agent 重新編譯』"
+                                                 (you cannot trigger agent from MCP)
+```
+
+**Never** call `bind_skill_pipeline` to "swap in a freshly agent-built pipeline" silently
+— that destroys user's manual edits. Either re-bind only when user explicitly asks,
+or tell them to use the Editor's `用 Agent 重新編譯` button.
 
 ### Workflow patterns
 
@@ -92,6 +125,8 @@ hand human the view_url at /skills/<slug>. Done.
 **Use case 2 — "幫我建個自動巡檢"**
 ```
 …same as above, then:
+→ check_skill_ready_for_role(slug, role="patrol")    # MUST — patrol needs has_alarm
+→ if ok=False: stop, tell user pipeline 需要 block_step_check verdict
 → automate_skill_patrol(slug, schedule="每 1 小時", target="所有機台",
                         alarm_gate="任一符合 → alarm",
                         outcome="raise alarm · 可被下游接")
@@ -100,9 +135,18 @@ The pipeline MUST end in `block_step_check` so the server marks `has_alarm=True`
 
 **Use case 3 — "OOC 時自動檢查"**
 ```
-list_skills_v2() to find an upstream patrol (look for role='patrol', has_alarm=True).
+list_event_sources()  # NOT list_skills_v2 — already filtered to valid upstreams
+→ pick upstream_slug from result
 …build pipeline + save_pipeline + create_skill_v2 + bind_skill_pipeline as above…
-→ automate_skill_event(slug, upstream_slug="p-ooc52", …)
+→ check_skill_ready_for_role(slug, role="datacheck")
+→ automate_skill_event(slug, upstream_slug, alarm_gate, outcome)
+```
+
+**Review / advise flow** (user asks "幫我看一下 skill X 在做什麼")
+```
+get_skill_with_pipeline(slug)   # one round-trip, full skill + pipeline_json
+→ explain shape, propose changes
+→ apply changes per the Decision tree above
 ```
 
 ### Gotchas
