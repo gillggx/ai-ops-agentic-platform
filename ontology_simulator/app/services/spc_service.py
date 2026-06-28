@@ -19,6 +19,8 @@ Charts (sensor → spec):
   rga_h2o_chart     rga_h2o_partial          (Torr)   contamination signal
   match_tune_chart  match_tune_position      (%)      auto-tune drift
 """
+import random as _random
+
 from app.database import get_db
 from config import SPC_SD_PRODUCTION, SPC_SD_MONITOR
 
@@ -83,6 +85,32 @@ def evaluate(dc_params: dict, lot_type: str = "production") -> tuple[str, dict]:
 
     status = "OOC" if any_ooc else "PASS"
     return status, charts
+
+
+def force_one_chart_ooc(charts: dict) -> str | None:
+    """Flip exactly one chart to is_ooc=True so an event-level spc_status=OOC
+    always has a matching chart-level violation.
+
+    Used by the photo-step OOC injection in station_agent: that path forces
+    spc_status='OOC' to drive rework records, but previously left all 12
+    charts is_ooc=False — producing the inconsistency where a process reads
+    OOC yet not a single SPC chart is OOC (and 'OOC process 內單圖 OOC 數'
+    queries could never fire). Mutates `charts` in place; returns the chart
+    id that was flipped (or None if there were no charts).
+
+    The chosen chart's value is pushed just past its UCL so the violation is
+    visible when the chart is rendered.
+    """
+    if not charts:
+        return None
+    chart_id = _random.choice(list(charts.keys()))
+    c = charts[chart_id]
+    # Push value half a sigma above UCL (fall back to a small absolute bump
+    # for degenerate sub-µ scale charts where sd rounds toward 0).
+    bump = abs(c.get("sd", 0.0)) * 0.5 or 1e-6
+    c["value"] = round(c["ucl"] + bump, 12)
+    c["is_ooc"] = True
+    return chart_id
 
 
 async def upload_snapshot(spc_status: str, charts: dict, context: dict) -> str:

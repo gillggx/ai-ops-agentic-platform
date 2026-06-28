@@ -214,6 +214,10 @@ async def process_step(
     if _is_photo_step(step_num) and spc_status != "OOC":
         if random.random() < PHOTO_OOC_PROBABILITY:
             spc_status = "OOC"
+            # Keep the two layers consistent: an event reading OOC must have
+            # at least one chart-level violation, else process=OOC with zero
+            # is_ooc charts (the inconsistency that broke 單圖 OOC 數 queries).
+            spc_service.force_one_chart_ooc(spc_charts)
 
     # ── Stage 4: FDC classification ───────────────────────────
     fdc_result = fdc_service.classify(dc_readings, spc_status, apc_params)
