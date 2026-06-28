@@ -2,7 +2,6 @@
 
 import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Playbook from "@/components/skills/Playbook";
 
 /**
  * /handoff/[id] — the landing for a cowork-created UI handoff (V63).
@@ -84,10 +83,14 @@ export default function HandoffPage({ params }: { params: Promise<{ id: string }
   if (err) return <div style={wrap}><div style={{ ...card, background: "#fef3f2", borderColor: "#fecaca", color: "#b42318" }}>{err}</div></div>;
   if (!h) return <div style={wrap}><div style={card}>載入中…</div></div>;
 
-  // review_rule — standalone, fit-window rule review (whole-rule try-run + per-step
-  // results + edit), rendered inline so there is no app shell / chat / sidebar.
+  // review_rule — v2 (skills-v2-refactor): Playbook component sunset; redirect
+  // to the new Editor page for inline review. Cowork users get a slightly
+  // worse "shell visible" UX but the review action is still 1 click away.
   if (h.kind === "review_rule" && h.target_ref) {
-    return <div style={{ minHeight: "100vh", background: "#f7f8fc" }}><Playbook slug={h.target_ref} mode="run" /></div>;
+    if (typeof window !== "undefined") {
+      router.replace(`/skills/${encodeURIComponent(h.target_ref)}`);
+    }
+    return <div style={wrap}><div style={card}>Redirecting…</div></div>;
   }
 
   const copy = ACTION_COPY[h.kind] ?? { verb: "執行", tone: "#1d4ed8" };
