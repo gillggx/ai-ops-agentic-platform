@@ -342,9 +342,24 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
     const ctx = readSkillV2Ctx();
     if (!ctx?.nl?.trim()) return;
     autoFiredRef.current = true;
-    // Defer a tick so the SSE consumer + builder context are mounted.
     setTimeout(() => { void submit(ctx.nl); }, 80);
   }, [submit]);
+
+  // ── Auto-confirm v30 goal plan in Skills v2 embed mode ──────────────
+  // The user already committed to building when they clicked "用 Pipeline
+  // Builder 編譯 →" — the plan confirmation gate becomes friction, not
+  // safety. Watch buildStatus → 'awaiting_confirm'; if we're in v2 embed
+  // mode, click the confirm button programmatically once we have phases.
+  const autoConfirmedRef = useRef(false);
+  useEffect(() => {
+    if (autoConfirmedRef.current) return;
+    if (build.buildStatus !== "awaiting_confirm") return;
+    if (!build.phases || build.phases.length === 0) return;
+    if (!readSkillV2Ctx()) return;
+    autoConfirmedRef.current = true;
+    log("info", "Skills v2 embed: 自動確認 plan，agent 繼續建構");
+    setTimeout(() => { void onConfirmPlan(build.phases); }, 60);
+  }, [build.buildStatus, build.phases]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Confirm / cancel goal plan ──────────────────────────────────────
   const onConfirmPlan = async (phases: GoalPhase[]) => {
