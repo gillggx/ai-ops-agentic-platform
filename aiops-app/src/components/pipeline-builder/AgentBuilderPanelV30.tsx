@@ -146,12 +146,21 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
   const handleEvent = useCallback(
     (evType: string, data: Record<string, unknown>) => {
       const sid = (data.session_id as string) || buildRef.current.sessionId;
+      // 2026-06-28 fix: capture session_id from ANY event that carries
+      // one. Sidecar emits `goal_plan_proposed` WITHOUT session_id, then
+      // a separate `goal_plan_confirm_required` WITH session_id (see
+      // runner.py:180). Without this capture, buildRef.sessionId stays
+      // empty and BOTH auto-confirm AND manual-click POST blank session_id
+      // → Java 400 → SSE stream tears → HTTP/2 PROTOCOL_ERROR.
+      if (data.session_id && buildRef.current.sessionId !== data.session_id) {
+        setBuild((b) => ({ ...b, sessionId: data.session_id as string }));
+      }
 
       if (evType === "goal_plan_proposed") {
         const phases = (data.phases as GoalPhase[]) || [];
         setBuild((b) => ({
           ...b,
-          sessionId: sid,
+          sessionId: sid || b.sessionId,
           planSummary: (data.plan_summary as string) || "",
           phases,
           phaseRuntime: Object.fromEntries(phases.map((p) => [p.id, { status: "pending" as PhaseStatus }])),
@@ -159,11 +168,14 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
           buildStatus: "awaiting_confirm",
         }));
         log("agent", `提出 ${phases.length} 個 phases，請確認`);
-        // 2026-06-28: Skills v2 auto-confirm. User clicked 用 Pipeline
-        // Builder 編譯 → they already committed; the plan-review gate is
-        // friction. Skip-the-gate by POSTing plan-confirm inline. Use
-        // sid (just received) so we don't depend on buildRef catching up.
-        if (readSkillV2Ctx() && !autoConfirmedRef.current && phases.length > 0) {
+        // Auto-confirm fires on goal_plan_confirm_required (below), NOT
+        // here — that's the event that carries session_id.
+      } else if (evType === "goal_plan_confirm_required") {
+        // Skills v2 embed: 自動確認 plan once we have BOTH phases (from
+        // goal_plan_proposed) AND session_id (this event).
+        const realSid = (data.session_id as string) || sid;
+        const phases = buildRef.current.phases;
+        if (readSkillV2Ctx() && !autoConfirmedRef.current && realSid && phases.length > 0) {
           autoConfirmedRef.current = true;
           log("info", "Skills v2 embed: 自動確認 plan，agent 繼續建構");
           void (async () => {
@@ -171,7 +183,7 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
               const r = await fetch("/api/agent/build/plan-confirm", {
                 method: "POST",
                 headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-                body: JSON.stringify({ sessionId: sid, confirmed: true, phases }),
+                body: JSON.stringify({ session_id: realSid, confirmed: true, phases }),
               });
               await consumeStream(r);
             } catch (ex) {
@@ -374,16 +386,16 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
 
   // ── Confirm / cancel goal plan ──────────────────────────────────────
   const onConfirmPlan = async (phases: GoalPhase[]) => {
-    if (!buildRef.current.sessionId) return;
+    const sid = buildRef.current.sessionId;
+    if (!sid) {
+      log("error", "Plan 無法確認：尚未取得 session_id");
+      return;
+    }
     try {
       const res = await fetch("/api/agent/build/plan-confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-        body: JSON.stringify({
-          sessionId: buildRef.current.sessionId,
-          confirmed: true,
-          phases,
-        }),
+        body: JSON.stringify({ session_id: sid, confirmed: true, phases }),
       });
       await consumeStream(res);
     } catch (ex) {
@@ -391,12 +403,13 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
     }
   };
   const onCancelPlan = async () => {
-    if (!buildRef.current.sessionId) return;
+    const sid = buildRef.current.sessionId;
+    if (!sid) return;
     try {
       const res = await fetch("/api/agent/build/plan-confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-        body: JSON.stringify({ sessionId: buildRef.current.sessionId, confirmed: false }),
+        body: JSON.stringify({ session_id: sid, confirmed: false }),
       });
       await consumeStream(res);
     } catch (ex) {
@@ -406,15 +419,16 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
 
   // ── Handover choice ──────────────────────────────────────────────────
   const onHandoverChoose = async (choice: HandoverChoice, newGoal?: string) => {
-    if (!buildRef.current.sessionId) return;
+    const sid = buildRef.current.sessionId;
+    if (!sid) return;
     try {
       const res = await fetch("/api/agent/build/handover", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
         body: JSON.stringify({
-          sessionId: buildRef.current.sessionId,
+          session_id: sid,
           choice,
-          newGoal: newGoal || "",
+          new_goal: newGoal || "",
         }),
       });
       await consumeStream(res);

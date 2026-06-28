@@ -130,6 +130,49 @@ export default function SkillsLibraryPage() {
   );
 }
 
+function DeleteButton({
+  onDelete, deleting, skillName,
+}: { onDelete: () => void; deleting: boolean; skillName: string }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      onClick={onDelete}
+      disabled={deleting}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      title="刪除 Skill"
+      aria-label={`刪除 ${skillName}`}
+      style={{
+        marginLeft: 4,
+        width: 32, height: 32,
+        display: "inline-flex", alignItems: "center", justifyContent: "center",
+        background: hover ? "#fef3f2" : "transparent",
+        color: hover ? "#b42318" : "#94a3b8",
+        border: `1px solid ${hover ? "#fecaca" : "transparent"}`,
+        borderRadius: 7,
+        cursor: deleting ? "wait" : "pointer",
+        opacity: deleting ? 0.5 : 1,
+        transition: "background 120ms, color 120ms, border 120ms",
+        padding: 0,
+      }}
+    >
+      {deleting ? (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+          <circle cx="12" cy="12" r="9" strokeOpacity=".3" />
+          <path d="M21 12a9 9 0 0 0-9-9" />
+        </svg>
+      ) : (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 6h18" />
+          <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+          <path d="M10 11v6M14 11v6" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
 function FilterChip({
   label, n, active, onClick, role,
 }: {
@@ -216,23 +259,7 @@ function SkillCard({ skill, onDelete, deleting }: { skill: Skill; onDelete: () =
         }}>
           {skill.role === "tool" ? "設定自動化" : "編輯自動化"}
         </Link>
-        <button
-          onClick={onDelete}
-          disabled={deleting}
-          title="刪除這個 Skill"
-          aria-label={`刪除 ${skill.name}`}
-          style={{
-            font: `600 14px ${FONT.sans}`,
-            color: "#b42318", background: "#fff",
-            border: `1px solid ${TK.divider}`,
-            padding: "5px 10px", borderRadius: 8,
-            cursor: deleting ? "wait" : "pointer",
-            opacity: deleting ? 0.5 : 1,
-            lineHeight: 1,
-          }}
-        >
-          {deleting ? "…" : "✕"}
-        </button>
+        <DeleteButton onDelete={onDelete} deleting={deleting} skillName={skill.name} />
       </div>
     </div>
   );
