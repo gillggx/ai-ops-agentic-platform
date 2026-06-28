@@ -253,7 +253,57 @@ public class SkillV2Service {
 		row.setPipelineId(pipelineId);
 		row.setPipelineNodes(nodesJson != null ? nodesJson : "[]");
 		row.setHasAlarm(hasVerdict);
+		// Auto-derive in/out contract from the pipeline so the Editor
+		// strip + Library card chips aren't empty after compile.
+		row.setInType(deriveInType(pipeline.getPipelineJson()));
+		row.setOutType(deriveOutType(dagNodes, hasVerdict));
 		return SkillDto.of(repo.save(row));
+	}
+
+	@SuppressWarnings("unchecked")
+	private String deriveInType(String pipelineJsonText) {
+		if (pipelineJsonText == null || pipelineJsonText.isBlank()) return "";
+		Map<String, Object> root = JsonUtils.parseObject(mapper, pipelineJsonText);
+		Object inputsObj = root.get("inputs");
+		if (inputsObj instanceof List<?> inputs && !inputs.isEmpty()) {
+			List<String> labels = new ArrayList<>();
+			for (Object in : inputs) {
+				if (in instanceof Map<?, ?> m) {
+					Object name = ((Map<String, Object>) m).get("name");
+					if (name != null && !String.valueOf(name).isBlank()) {
+						labels.add(String.valueOf(name));
+					}
+				}
+			}
+			if (!labels.isEmpty()) return String.join(", ", labels);
+		}
+		// Fallback: pull a hint from the IN node's first non-blank param
+		// (covers older pipelines that bake the input as a literal param).
+		Object nodes = root.get("nodes");
+		if (nodes instanceof List<?> list && !list.isEmpty() && list.get(0) instanceof Map<?, ?> n0) {
+			Object params = ((Map<String, Object>) n0).get("params");
+			if (params instanceof Map<?, ?> pm) {
+				for (Map.Entry<?, ?> e : ((Map<String, Object>) pm).entrySet()) {
+					String v = String.valueOf(e.getValue());
+					if (!v.isBlank() && !"null".equals(v)) {
+						return String.valueOf(e.getKey());
+					}
+				}
+			}
+		}
+		return "—";
+	}
+
+	private String deriveOutType(List<Map<String, Object>> dagNodes, boolean hasVerdict) {
+		if (hasVerdict) return "alarm (pass/fail) + 摘要";
+		if (dagNodes.isEmpty()) return "—";
+		Map<String, Object> last = dagNodes.get(dagNodes.size() - 1);
+		String blockId = String.valueOf(last.getOrDefault("block_id", "")).toLowerCase();
+		if (blockId.contains("data_view") || blockId.contains("table")) return "table";
+		if (blockId.contains("chart") || blockId.contains("plot")
+				|| blockId.contains("heatmap") || blockId.contains("trend")) return "chart";
+		if (blockId.contains("step_check")) return "pass/fail";
+		return "value";
 	}
 
 	@SuppressWarnings("unchecked")
