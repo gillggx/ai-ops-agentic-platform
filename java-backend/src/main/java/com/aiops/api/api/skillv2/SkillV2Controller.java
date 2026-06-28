@@ -34,6 +34,13 @@ public class SkillV2Controller {
 		return ApiResponse.ok(service.list());
 	}
 
+	/** Create a new skill. Body: {slug, name, sub?, nl?, in_type?, out_type?}. */
+	@PostMapping
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public ApiResponse<SkillV2Service.SkillDto> create(@RequestBody Map<String, Object> body) {
+		return ApiResponse.ok(service.create(body));
+	}
+
 	@GetMapping("/{slug}")
 	@PreAuthorize(Authorities.ANY_ROLE)
 	public ApiResponse<SkillV2Service.SkillDto> get(@PathVariable String slug) {

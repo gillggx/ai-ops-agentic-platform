@@ -141,7 +141,7 @@ export default function SkillEmbedBanner({ pipelineId }: { pipelineId?: number |
     // window.close() only works for tabs the page itself opened; if it
     // failed (current tab was opened directly), redirect back to Skill.
     setTimeout(() => {
-      if (ctx) window.location.href = `/skills/${encodeURIComponent(ctx.skill_slug)}/edit`;
+      if (ctx) window.location.href = `/skills/${encodeURIComponent(ctx.skill_slug)}`;
     }, 200);
   }, [ctx]);
 
@@ -167,7 +167,7 @@ export default function SkillEmbedBanner({ pipelineId }: { pipelineId?: number |
       // Try closing the tab; fall back to redirect.
       window.close();
       setTimeout(() => {
-        window.location.href = `/skills/${encodeURIComponent(ctx.skill_slug)}/edit`;
+        window.location.href = `/skills/${encodeURIComponent(ctx.skill_slug)}`;
       }, 300);
     } catch (e) {
       setError(String(e));
@@ -217,7 +217,7 @@ export default function SkillEmbedBanner({ pipelineId }: { pipelineId?: number |
         </div>
       </div>
       <a
-        href={`/skills/${encodeURIComponent(ctx.skill_slug)}/edit`}
+        href={`/skills/${encodeURIComponent(ctx.skill_slug)}`}
         style={{
           padding: "6px 12px", fontSize: 11.5, fontWeight: 500,
           color: "#78350F", textDecoration: "none",

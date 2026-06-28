@@ -42,6 +42,31 @@ public class SkillV2Service {
 		this.mapper = mapper;
 	}
 
+	// ─── Create ────────────────────────────────────────────────────────
+
+	@Transactional
+	public SkillDto create(Map<String, Object> body) {
+		String slug = String.valueOf(body.getOrDefault("slug", "")).trim();
+		String name = String.valueOf(body.getOrDefault("name", "")).trim();
+		if (slug.isBlank()) throw ApiException.badRequest("slug is required");
+		if (name.isBlank()) throw ApiException.badRequest("name is required");
+		if (repo.findBySlug(slug).isPresent()) {
+			throw ApiException.conflict("slug already exists: " + slug);
+		}
+		SkillV2Entity row = new SkillV2Entity();
+		row.setSlug(slug);
+		row.setName(name);
+		row.setSub(String.valueOf(body.getOrDefault("sub", "")));
+		row.setNl(String.valueOf(body.getOrDefault("nl", "")));
+		row.setInType(String.valueOf(body.getOrDefault("in_type", "")));
+		row.setOutType(String.valueOf(body.getOrDefault("out_type", "")));
+		row.setPipelineNodes("[]");
+		row.setHasAlarm(Boolean.FALSE);
+		row.setRole("tool");
+		row.setStatus("draft");
+		return SkillDto.of(repo.save(row));
+	}
+
 	// ─── Read ──────────────────────────────────────────────────────────
 
 	@Transactional(readOnly = true)

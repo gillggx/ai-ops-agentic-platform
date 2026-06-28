@@ -596,7 +596,7 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
               if (raw) {
                 const ctx = JSON.parse(raw) as { skill_slug?: string };
                 if (ctx?.skill_slug) {
-                  backHref = `/skills/${encodeURIComponent(ctx.skill_slug)}/edit`;
+                  backHref = `/skills/${encodeURIComponent(ctx.skill_slug)}`;
                   backLabel = `← back to Skill`;
                 }
               } else {
@@ -604,8 +604,10 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
                 if (lite) {
                   const liteCtx = JSON.parse(lite) as { skill_slug?: string; mode?: "edit" | "run" };
                   if (liteCtx?.skill_slug) {
-                    const sub = liteCtx.mode === "run" ? "" : "/edit";
-                    backHref = `/skills/${encodeURIComponent(liteCtx.skill_slug)}${sub}`;
+                    // 2026-06-28 (skills-v2): both 'run' + 'edit' modes from
+                    // the legacy multi-step shell now land on the single v2
+                    // Editor — there's no separate run page anymore.
+                    backHref = `/skills/${encodeURIComponent(liteCtx.skill_slug)}`;
                     backLabel = `← back to Skill`;
                   }
                 }
