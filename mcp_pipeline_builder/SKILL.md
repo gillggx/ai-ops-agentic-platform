@@ -59,6 +59,21 @@ wrapper**. A Skill on its own is just a reusable analysis tool; wrapping it as a
 **Auto Patrol** (cron) or **Data Check** (cron, no alarm) is a separate decision
 the human makes. There is no multi-step checklist anymore; one skill, one pipeline.
 
+### CRITICAL — always persist + hand back a link
+
+When the human asks you to **查 / 檢查 / 看 / 分析** something, the END of that
+flow is NOT a `preview`/`execute` result printed in chat. preview/execute are
+throw-away validation steps — they leave NOTHING the human can open or reuse.
+
+You MUST finish by calling `create_skill_with_pipeline(...)` and giving the
+human the returned `view_url` (e.g. "已建好，可在這裡打開：<view_url>"). The
+human expects every analysis to become a Skill they can find at /skills.
+
+The ONLY time you skip persistence is if the human explicitly says "只是看一下
+不用存" / "don't save". Re-running an existing skill's analysis ("再檢查一次")
+→ if a matching skill already exists, run it and link to THAT skill; if none
+exists, create one. Never end on an ephemeral preview with no link.
+
 ### Three canonical use cases
 
 | Human said | What you do |

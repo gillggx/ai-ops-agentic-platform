@@ -172,12 +172,13 @@ export default function SkillEditorPage() {
             <textarea
               value={nl}
               onChange={(e) => { setNl(e.target.value); setNlDirty(true); }}
+              rows={Math.min(6, Math.max(2, nl.split("\n").length))}
               placeholder="用自然語言描述這個 Skill 要做什麼…（例如：檢查指定機台最近 5 次 process 是否有 ≥2 次 OOC）"
               style={{
-                minHeight: 120, maxHeight: 280,
-                padding: "14px 18px", border: "none", outline: "none",
+                minHeight: 56,
+                padding: "12px 18px", border: "none", outline: "none",
                 resize: "vertical",
-                font: `15px/1.65 ${FONT.sans}`, color: TK.ink, background: "#fff",
+                font: `15px/1.6 ${FONT.sans}`, color: TK.ink, background: "#fff",
               }}
             />
             <ColumnFooter>
