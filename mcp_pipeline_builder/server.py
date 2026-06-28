@@ -371,6 +371,11 @@ async def create_skill_with_pipeline(
     the human: "Skill 已建好（草稿狀態），請到 <view_url> 按『啟用』才會生效。"
     You cannot activate it yourself — activation is a human action in the UI.
 
+    STRONGLY fill `nl` with the user's original request verbatim (their
+    natural-language intent). It becomes the skill's editable description and
+    is what 用 Agent 重新編譯 re-compiles from. Leaving it blank makes the
+    skill un-rebuildable and confusing in the Editor.
+
     Returns {skill: {slug, name, status, ...}, pipeline_json, view_url}.
     After this, automation (automate_skill_patrol/event/datacheck) is a
     SEPARATE follow-up only if the human asked for scheduling."""

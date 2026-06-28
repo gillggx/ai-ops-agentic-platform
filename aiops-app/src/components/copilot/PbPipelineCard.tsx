@@ -34,6 +34,10 @@ export interface PbPipelineAdHocCard {
   node_results: Record<string, NodeResult>;
   result_summary: PipelineResultSummary | null;
   run_id?: number | null;
+  /** The user's original NL prompt that produced this pipeline (intent prefix
+   *  already stripped). Threaded from AIAgentPanel so 存為 Skill can record it
+   *  as the skill's natural-language description instead of losing it. */
+  goal?: string;
 }
 
 export interface PbPipelinePublishedCard {
@@ -301,30 +305,37 @@ function ActionBar({ card }: { card: PbPipelineCardData }) {
   async function handleSaveAsSkill() {
     if (!isAdHoc) return;
     const defaultName = card.pipeline_json.name || "Chat-built Pipeline";
-    const name = window.prompt("儲存為已發佈 Skill（slug 將從名稱自動生成）\n\n名稱：", defaultName);
+    const name = window.prompt("儲存為 Skill（草稿）\n\n名稱：", defaultName);
     if (!name) return;
     setSaving(true);
     try {
-      // Step 1: persist the pipeline as a draft in pipeline_builder
-      const createRes = await fetch("/api/pipeline-builder/pipelines", {
+      // 2026-06-28: route through the v2 atomic endpoint (pipeline + skill +
+      // bind in one txn) instead of the old /pipelines call that left an
+      // orphan in the PB Library and never appeared under /skills. Carry the
+      // user's original prompt as the skill's NL so it isn't lost.
+      const res = await fetch("/api/skills-v2/with-pipeline", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name,
-          description: `從 Agent 對話建立：${name}`,
-          pipeline_kind: "diagnostic",
+          nl: card.goal ?? "",
+          sub: card.goal ? card.goal.slice(0, 60) : "從 Agent 對話建立",
           pipeline_json: card.pipeline_json,
+          pipeline_kind: "skill",
         }),
       });
-      if (!createRes.ok) {
-        const err = await createRes.json().catch(() => ({}));
-        alert(`建立 Pipeline 失敗：${err.detail || createRes.statusText}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(`建立 Skill 失敗：${err?.error?.message || err.detail || res.statusText}`);
         return;
       }
-      const created = await createRes.json();
-      // Open edit page so user can review / publish via the full lifecycle UI
-      window.open(`/admin/pipeline-builder/${created.id}`, "_blank");
+      const env = await res.json();
+      const data = env?.data ?? env;
+      const slug = data?.skill?.slug;
       setSaved(true);
+      if (slug && window.confirm(`Skill 已建好（草稿狀態）。\n\n要開啟 Editor 去 review + 啟用嗎？`)) {
+        window.open(`/skills/${slug}`, "_blank");
+      }
     } catch (e) {
       alert(`儲存失敗：${e instanceof Error ? e.message : "未知錯誤"}`);
     } finally {

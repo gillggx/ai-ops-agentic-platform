@@ -14,7 +14,7 @@ import Link from "next/link";
 import { TK, FONT, ROLE_COLORS, ensurePlexFont } from "@/components/skills-v2/tokens";
 import { parsePipelineNodes, roleLabel, type Skill, type PipelineNode } from "@/components/skills-v2/types";
 import { writeSkillV2Ctx } from "@/components/skills-v2/SkillV2EmbedBanner";
-import PipelineSvgThumb from "@/components/skills-v2/PipelineSvgThumb";
+import SkillCanvasView from "@/components/skills-v2/SkillCanvasView";
 
 export default function SkillEditorPage() {
   const params = useParams<{ slug: string }>();
@@ -164,18 +164,17 @@ export default function SkillEditorPage() {
           <div style={{ fontSize: 13, color: TK.body }}>{skill.sub}</div>
         </div>
 
-        {/* Two columns */}
-        <div className="editor-cols" style={{
-          display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16,
-        }}>
-          {/* Left: NL */}
+        {/* Stacked: NL on top (full width) → pipeline canvas below */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* NL description */}
           <Column>
             <ColumnHeader>你的描述 · 自然語言</ColumnHeader>
             <textarea
               value={nl}
               onChange={(e) => { setNl(e.target.value); setNlDirty(true); }}
+              placeholder="用自然語言描述這個 Skill 要做什麼…（例如：檢查指定機台最近 5 次 process 是否有 ≥2 次 OOC）"
               style={{
-                flex: 1, minHeight: 320,
+                minHeight: 120, maxHeight: 280,
                 padding: "14px 18px", border: "none", outline: "none",
                 resize: "vertical",
                 font: `15px/1.65 ${FONT.sans}`, color: TK.ink, background: "#fff",
@@ -196,44 +195,55 @@ export default function SkillEditorPage() {
                 }}>
                   {saving ? "Saving..." : "Save Draft"}
                 </button>
+              </div>
+            </ColumnFooter>
+          </Column>
+
+          {/* Pipeline canvas (read-only, real DagCanvas like chat-mode lite canvas) */}
+          <Column>
+            <div style={{
+              padding: "10px 18px", borderBottom: `1px solid ${TK.divider}`,
+              display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+            }}>
+              <span style={{
+                font: `600 11px ${FONT.mono}`, letterSpacing: ".13em",
+                color: TK.body, textTransform: "uppercase",
+              }}>
+                ✦ 編譯結果 · DATA PIPELINE（唯讀）
+                <span style={{ color: TK.faint, marginLeft: 10 }}>{pipeline.length} nodes</span>
+              </span>
+              <span style={{ display: "flex", gap: 8 }}>
                 {skill.pipeline_id ? (
                   <>
                     <button onClick={() => handleOpenBuilder("rebuild")} disabled={opening} title="用 NL 重新跑 Agent，覆蓋目前 pipeline" style={{
-                      font: `600 12px ${FONT.sans}`,
+                      font: `600 11.5px ${FONT.sans}`,
                       color: TK.body, background: "#fff",
                       border: `1px solid ${TK.divider}`,
-                      padding: "7px 12px", borderRadius: 8, cursor: "pointer",
+                      padding: "6px 11px", borderRadius: 7, cursor: "pointer",
                     }}>
                       用 Agent 重新編譯
                     </button>
-                    <button onClick={() => handleOpenBuilder("edit")} disabled={opening} title="開 Pipeline Builder 人手調 canvas，Agent 不會自動跑" style={{
-                      font: `600 12px ${FONT.sans}`,
+                    <button onClick={() => handleOpenBuilder("edit")} disabled={opening} title="開 Pipeline Builder 人手調 canvas" style={{
+                      font: `600 11.5px ${FONT.sans}`,
                       color: "#fff", background: TK.indigo, border: `1px solid ${TK.indigo}`,
-                      padding: "7px 12px", borderRadius: 8, cursor: "pointer",
+                      padding: "6px 11px", borderRadius: 7, cursor: "pointer",
                     }}>
                       {opening ? "Opening…" : "編輯 pipeline →"}
                     </button>
                   </>
                 ) : (
                   <button onClick={() => handleOpenBuilder("compile")} disabled={opening} style={{
-                    font: `600 12px ${FONT.sans}`,
+                    font: `600 11.5px ${FONT.sans}`,
                     color: "#fff", background: TK.indigo, border: `1px solid ${TK.indigo}`,
-                    padding: "7px 12px", borderRadius: 8, cursor: "pointer",
+                    padding: "6px 11px", borderRadius: 7, cursor: "pointer",
                   }}>
                     {opening ? "Opening…" : "用 Pipeline Builder 編譯 →"}
                   </button>
                 )}
-              </div>
-            </ColumnFooter>
-          </Column>
-
-          {/* Right: Pipeline canvas thumb */}
-          <Column>
-            <ColumnHeader rightChip={`${pipeline.length} nodes`}>
-              ✦ 編譯結果 · data pipeline
-            </ColumnHeader>
-            <div style={{ flex: 1, padding: "14px 18px" }}>
-              <PipelineSvgThumb pipelineId={skill.pipeline_id} height={420} />
+              </span>
+            </div>
+            <div style={{ padding: "14px 18px" }}>
+              <SkillCanvasView pipelineId={skill.pipeline_id} height={460} />
             </div>
           </Column>
         </div>

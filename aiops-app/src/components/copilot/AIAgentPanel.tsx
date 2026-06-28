@@ -1044,6 +1044,13 @@ export function AIAgentPanel({
               }]);
             } else if (card?.type === "pb_pipeline" || card?.type === "pb_pipeline_published") {
               const pbCard = card as unknown as PbPipelineCardData;
+              // Thread the user's original prompt (intent prefix stripped) so
+              // 存為 Skill records it as the skill's NL instead of losing it.
+              if (pbCard.type === "pb_pipeline" && !pbCard.goal) {
+                pbCard.goal = lastUserPromptRef.current
+                  .replace(/^\s*\[[^\]]*\]\s*/, "")  // drop [intent_confirmed:…] / [intent=…] prefix
+                  .trim();
+              }
               const sessionMode = mode === "session" && onPipelineUpdate;
               if (sessionMode) {
                 // Phase 5-UX-3b session mode: canvas lives in host — just notify
