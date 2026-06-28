@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { BlockSpec } from "@/lib/pipeline-builder/types";
 import { useBuilder } from "@/context/pipeline-builder/BuilderContext";
 import GoalPlanCard, { type GoalPhase } from "./v30/GoalPlanCard";
 import PhaseTimeline, { type PhaseRuntime, type PhaseStatus } from "./v30/PhaseTimeline";
 import HandoverModal, { type HandoverChoice } from "./v30/HandoverModal";
+import { readSkillV2Ctx } from "@/components/skills-v2/SkillV2EmbedBanner";
 
 interface Props {
   blockCatalog: BlockSpec[];
@@ -302,10 +303,11 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
   );
 
   // ── Submit ──────────────────────────────────────────────────────────
-  const submit = async () => {
-    if (runningRef.current || !input.trim()) return;
+  const submit = useCallback(async (overrideInstruction?: string) => {
+    if (runningRef.current) return;
+    const instruction = (overrideInstruction ?? input).trim();
+    if (!instruction) return;
     runningRef.current = true;
-    const instruction = input.trim();
     setInput("");
     log("user", instruction);
     setBuild({ ...initialBuildState, buildStatus: "planning" });
@@ -327,7 +329,22 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
       setBuild((b) => ({ ...b, buildStatus: "failed" }));
       runningRef.current = false;
     }
-  };
+  }, [input, basePipelineId, consumeStream]);
+
+  // ── Auto-fire on mount when launched from Skills v2 Editor ──────────
+  // When the Editor's "用 Pipeline Builder 編譯 →" navigates here it
+  // stashes the skill's NL in sessionStorage. Pick it up and kick off
+  // the build automatically — user shouldn't have to retype their NL
+  // into the agent input box.
+  const autoFiredRef = useRef(false);
+  useEffect(() => {
+    if (autoFiredRef.current) return;
+    const ctx = readSkillV2Ctx();
+    if (!ctx?.nl?.trim()) return;
+    autoFiredRef.current = true;
+    // Defer a tick so the SSE consumer + builder context are mounted.
+    setTimeout(() => { void submit(ctx.nl); }, 80);
+  }, [submit]);
 
   // ── Confirm / cancel goal plan ──────────────────────────────────────
   const onConfirmPlan = async (phases: GoalPhase[]) => {
@@ -531,7 +548,7 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
         />
         <button
           type="button"
-          onClick={submit}
+          onClick={() => { void submit(); }}
           disabled={runningRef.current || !input.trim()}
           style={{
             padding: "0 16px",

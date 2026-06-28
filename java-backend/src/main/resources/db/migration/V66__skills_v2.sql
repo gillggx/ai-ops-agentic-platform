@@ -56,9 +56,15 @@ COMMENT ON COLUMN skills_v2.has_alarm IS
 COMMENT ON COLUMN skills_v2.role IS
   'Derived view: tool = no automation; patrol = automated + has_alarm; datacheck = automated + !has_alarm.';
 
--- Seed 6 skills from the design spec §2.3 so the UI has data to click
--- through immediately. Slug used as a deduplication key via ON CONFLICT.
-
+-- 2026-06-28: removed seed INSERTs (p-ooc52 / p-diag / d-rollup / t-apc /
+-- d-recipe / t-trend) per user feedback "我還沒建吧" — pre-seeded demo
+-- skills confused first-time users. Library starts empty; users create
+-- their first skill via the /skills/new wizard or the cowork MCP tool
+-- create_skill_v2.
+--
+-- Legacy seed kept below as a SQL comment in case a fresh deploy wants to
+-- re-introduce them as named examples:
+/*
 INSERT INTO skills_v2 (slug, name, sub, nl, pipeline_nodes, has_alarm, in_type, out_type,
                        role, trigger_config, alarm_gate, outcome, status) VALUES
 ('p-ooc52', 'OOC 5取2 全廠巡檢',
@@ -142,3 +148,5 @@ INSERT INTO skills_v2 (slug, name, sub, nl, pipeline_nodes, has_alarm, in_type, 
  'active')
 
 ON CONFLICT (slug) DO NOTHING;
+*/
+
