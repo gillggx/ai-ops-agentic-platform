@@ -102,6 +102,14 @@ public class SkillStudioService {
 			Object pid = body.get("pipeline_id");
 			row.setPipelineId(pid == null ? null : ((Number) pid).longValue());
 		}
+		// 2026-06-28: accept compiled_rules so the "Re-compile then save"
+		// frontend flow can persist what the LLM produced. The string is
+		// trusted JSON (compile endpoint produces it); we don't re-validate
+		// on this path because that would force a JSON parse for every save.
+		if (body.containsKey("compiled_rules")) {
+			Object cr = body.get("compiled_rules");
+			if (cr != null) row.setCompiledRules(String.valueOf(cr));
+		}
 		return StageDto.of(stageRepo.save(row));
 	}
 
