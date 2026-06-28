@@ -41,17 +41,20 @@ public class PipelineBuilderService {
 	private final BlockRepository blockRepo;
 	private final PublishedSkillRepository publishedSkillRepo;
 	private final PipelineAutoCheckTriggerRepository autoCheckRepo;
+	private final com.aiops.api.domain.skillv2.SkillV2Repository skillV2Repo;
 	private final ObjectMapper mapper;
 
 	public PipelineBuilderService(PipelineRepository pipelineRepo,
 	                              BlockRepository blockRepo,
 	                              PublishedSkillRepository publishedSkillRepo,
 	                              PipelineAutoCheckTriggerRepository autoCheckRepo,
+	                              com.aiops.api.domain.skillv2.SkillV2Repository skillV2Repo,
 	                              ObjectMapper mapper) {
 		this.pipelineRepo = pipelineRepo;
 		this.blockRepo = blockRepo;
 		this.publishedSkillRepo = publishedSkillRepo;
 		this.autoCheckRepo = autoCheckRepo;
+		this.skillV2Repo = skillV2Repo;
 		this.mapper = mapper;
 	}
 
@@ -113,7 +116,28 @@ public class PipelineBuilderService {
 		final String q = (query == null) ? "" : query.trim().toLowerCase();
 		final int safeTopK = (topK == null || topK <= 0) ? DEFAULT_TOP_K : Math.min(topK, MAX_TOP_K);
 
-		List<PublishedSkillEntity> active = publishedSkillRepo.findByStatus("active");
+		// Union the two skill registries:
+		//   - pb_published_skills (legacy + V54 mcp_auto derivatives)
+		//   - skills_v2 (the new Skill=1-pipeline model; only status='active'
+		//     so drafts aren't auto-invoked by chat). Projected into transient
+		//     PublishedSkillEntity so the response shape + sidecar invoke path
+		//     (slug → pipeline_id → execute) stay unchanged.
+		// Dedupe by pipeline_id, skills_v2 winning (newer model).
+		List<PublishedSkillEntity> pool = new java.util.ArrayList<>(publishedSkillRepo.findByStatus("active"));
+		java.util.Set<Long> seenPids = new java.util.HashSet<>();
+		for (PublishedSkillEntity s : pool) {
+			if (s.getPipelineId() != null) seenPids.add(s.getPipelineId());
+		}
+		List<PublishedSkillEntity> v2 = new java.util.ArrayList<>();
+		for (com.aiops.api.domain.skillv2.SkillV2Entity sk : skillV2Repo.findByStatusOrderByNameAsc("active")) {
+			if (sk.getPipelineId() == null) continue;            // unbound → not runnable
+			if (seenPids.contains(sk.getPipelineId())) continue; // already covered by pb_published
+			v2.add(projectSkillV2(sk));
+		}
+		// skills_v2 first so dedupe/ranking ties favour the new model.
+		List<PublishedSkillEntity> active = new java.util.ArrayList<>(v2);
+		active.addAll(pool);
+
 		if (q.isEmpty()) {
 			return active.stream()
 					.sorted((a, b) -> a.getName().compareToIgnoreCase(b.getName()))
@@ -129,6 +153,20 @@ public class PipelineBuilderService {
 				.limit(safeTopK)
 				.map(Map.Entry::getKey)
 				.toList();
+	}
+
+	/** Project a skills_v2 row into a transient PublishedSkillEntity so chat's
+	 *  search/invoke path can treat both registries uniformly. NOT persisted. */
+	private PublishedSkillEntity projectSkillV2(com.aiops.api.domain.skillv2.SkillV2Entity sk) {
+		PublishedSkillEntity e = new PublishedSkillEntity();
+		e.setSlug(sk.getSlug());
+		e.setName(sk.getName());
+		e.setUseCase(sk.getSub() == null ? "" : sk.getSub());
+		e.setWhenToUse(sk.getNl() == null ? "" : sk.getNl());  // nl is the rich, searchable description
+		e.setPipelineId(sk.getPipelineId());
+		e.setStatus("active");
+		e.setSource("skill_v2");
+		return e;
 	}
 
 	private static int scoreSkill(PublishedSkillEntity s, String[] terms) {

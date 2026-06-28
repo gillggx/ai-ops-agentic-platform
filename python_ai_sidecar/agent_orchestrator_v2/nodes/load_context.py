@@ -176,6 +176,8 @@ async def load_context_node(state: Dict[str, Any], config: RunnableConfig) -> Di
                 "   訊息根本不會跑到你)，所以**你看到的 user message 已經是規格完整的**。\n"
                 "   按下面順序走：\n"
                 "     a. Call `search_published_skills(query=<user goal>)` to find existing skills.\n"
+                "        這會搜到使用者自己在 /skills 建並**已啟用**的 Skill（skills_v2）\n"
+                "        以及舊版已發佈 Skill。優先重用既有 skill，不要每次重建。\n"
                 "     b. If a result matches well, call `invoke_published_skill(slug, inputs)`.\n"
                 "     c. **If no good match**: 告訴 user「找不到現成 skill，要不要我幫你建一條？」，\n"
                 "        等 user 「好/可以/ok」，再 `build_pipeline_live(goal=\"...\")`.\n"

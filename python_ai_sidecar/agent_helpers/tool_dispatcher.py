@@ -230,10 +230,13 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
     {
         "name": "search_published_skills",
         "description": (
-            "PR-C: 搜尋已發佈的 Skills（pb_published_skills，kind=skill 的 pipelines）。\n"
-            "當使用者描述一個查案需求時，先呼叫這個工具看有沒有現成 skill 可用，\n"
-            "再用 invoke_published_skill 執行。回傳：slug / use_case / when_to_use / inputs_schema。\n"
-            "以簡體或中文/英文關鍵字搜尋，會 match use_case + name + tags 欄位。"
+            "搜尋現成可重用的 Skills — 涵蓋兩個來源：使用者在 /skills 建立並\n"
+            "**已啟用 (active)** 的 Skill（skills_v2），以及舊版已發佈 Skill\n"
+            "（pb_published_skills）。Draft 狀態的 skill 不會出現（要使用者按啟用）。\n"
+            "當使用者描述一個查案需求時，**先呼叫這個工具**看有沒有現成 skill 可用，\n"
+            "再用 invoke_published_skill 執行；沒有 match 才提議幫他建一條。\n"
+            "回傳：slug / name / use_case / when_to_use。以中文/英文關鍵字搜尋，\n"
+            "會 match name + description + tags 欄位。"
         ),
         "input_schema": {
             "type": "object",

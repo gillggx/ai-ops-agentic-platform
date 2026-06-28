@@ -40,6 +40,7 @@ class PipelineBuilderServiceTest {
 	@Mock BlockRepository blockRepo;
 	@Mock PublishedSkillRepository publishedSkillRepo;
 	@Mock PipelineAutoCheckTriggerRepository autoCheckRepo;
+	@Mock com.aiops.api.domain.skillv2.SkillV2Repository skillV2Repo;
 
 	private ObjectMapper mapper;
 	private PipelineBuilderService service;
@@ -48,7 +49,7 @@ class PipelineBuilderServiceTest {
 	void setup() {
 		mapper = new ObjectMapper();
 		service = new PipelineBuilderService(pipelineRepo, blockRepo, publishedSkillRepo,
-				autoCheckRepo, mapper);
+				autoCheckRepo, skillV2Repo, mapper);
 	}
 
 	// ── listBlocks: JSON column parsing ────────────────────────────────────
