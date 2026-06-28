@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<title>AIOps Pipeline Builder — Skill 設定指南</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --ink: #23252b;
+    --title: #1c1d22;
+    --muted: #6b6f78;
+    --faint: #9398a1;
+    --mono-label: #a4a8b0;
+    --accent: #5b51d8;
+    --accent-bg: #ecebfb;
+    --pass: #1a7d4a;
+    --pass-bg: #e3f4ea;
+    --warn: #c1382c;
+    --warn-bg: #fbe2de;
+    --card: #fff;
+    --page: #f3f4f6;
+    --border: #eef0f2;
+    --divider: #f1f2f4;
+    --pill-border: #e4e6ea;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--page); color: var(--ink); }
+  body {
+    font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+    padding: 40px 20px 80px;
+  }
+  .page {
+    max-width: 760px;
+    margin: 0 auto;
+  }
+  .card {
+    background: var(--card);
+    border-radius: 14px;
+    box-shadow: 0 1px 3px rgba(15,18,30,.08), 0 12px 40px rgba(15,18,30,.06);
+    overflow: hidden;
+    margin-bottom: 18px;
+  }
+  /* Header card */
+  .hero {
+    padding: 28px 26px 24px;
+  }
+  .eyebrow {
+    font: 600 11px ui-monospace, 'SF Mono', Menlo, monospace;
+    letter-spacing: .13em;
+    color: var(--mono-label);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  h1 {
+    font: 650 24px system-ui;
+    color: var(--title);
+    margin: 0 0 8px;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 14px;
+    margin: 0;
+  }
+  /* Path picker */
+  .paths {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+  .path-card {
+    background: var(--card);
+    border-radius: 14px;
+    box-shadow: 0 1px 3px rgba(15,18,30,.08), 0 12px 40px rgba(15,18,30,.06);
+    padding: 20px 22px;
+    border: 2px solid transparent;
+    transition: border-color .15s;
+  }
+  .path-card.recommended {
+    border-color: var(--accent);
+  }
+  .path-card .tag {
+    display: inline-block;
+    font: 600 10.5px ui-monospace, monospace;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 6px;
+    background: var(--accent-bg);
+    color: var(--accent);
+    margin-bottom: 10px;
+  }
+  .path-card.alt .tag {
+    background: #f2f3f5;
+    color: #7a7f88;
+  }
+  .path-card h2 {
+    font: 650 17px system-ui;
+    margin: 0 0 8px;
+    color: var(--title);
+  }
+  .path-card p {
+    color: var(--muted);
+    font-size: 13px;
+    margin: 0 0 14px;
+    min-height: 60px;
+  }
+  .path-card .when {
+    font-size: 12px;
+    color: var(--faint);
+    border-top: 1px solid var(--divider);
+    padding-top: 10px;
+  }
+  .path-card .when strong { color: var(--ink); }
+  /* Step section */
+  .section {
+    padding: 24px 26px;
+    border-top: 1px solid var(--border);
+  }
+  .section:first-child { border-top: 0; }
+  .section h2 {
+    font: 650 18px system-ui;
+    color: var(--title);
+    margin: 0 0 6px;
+  }
+  .section .lede {
+    color: var(--muted);
+    font-size: 13px;
+    margin: 0 0 18px;
+  }
+  /* Numbered steps */
+  ol.steps {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    counter-reset: stepc;
+  }
+  ol.steps > li {
+    counter-increment: stepc;
+    position: relative;
+    padding: 12px 0 12px 36px;
+    border-bottom: 1px solid var(--divider);
+  }
+  ol.steps > li:last-child { border-bottom: 0; }
+  ol.steps > li::before {
+    content: counter(stepc, decimal-leading-zero);
+    position: absolute;
+    left: 0;
+    top: 14px;
+    font: 600 12px ui-monospace, monospace;
+    color: var(--faint);
+  }
+  ol.steps > li .step-title {
+    font: 600 14px system-ui;
+    color: var(--ink);
+    margin-bottom: 4px;
+  }
+  ol.steps > li .step-body {
+    color: var(--muted);
+    font-size: 13px;
+  }
+  /* Code blocks */
+  code, .mono {
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+  .codebox {
+    background: #fafbfc;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    padding: 11px 14px;
+    margin: 10px 0;
+    font: 500 12px/1.6 ui-monospace, monospace;
+    color: var(--title);
+    word-break: break-all;
+    position: relative;
+  }
+  .codebox.danger {
+    background: #fdf3f1;
+    border-color: #f1d9d5;
+  }
+  .copyhint {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    font: 600 10px ui-monospace, monospace;
+    color: var(--faint);
+    text-transform: uppercase;
+    letter-spacing: .1em;
+  }
+  pre.skillsrc {
+    background: #1c1d22;
+    color: #d4d6da;
+    border-radius: 11px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font: 500 12px/1.65 ui-monospace, monospace;
+    margin: 14px 0 0;
+    max-height: 380px;
+    overflow-y: auto;
+  }
+  pre.skillsrc::-webkit-scrollbar { width: 6px; height: 6px; }
+  pre.skillsrc::-webkit-scrollbar-thumb { background: #4a4d56; border-radius: 3px; }
+  /* Callouts */
+  .callout {
+    padding: 12px 14px;
+    border-radius: 9px;
+    font-size: 12.5px;
+    line-height: 1.55;
+    margin: 14px 0;
+  }
+  .callout.warn {
+    background: #fdf3f1;
+    color: #823026;
+    border: 1px solid #f1d9d5;
+  }
+  .callout.tip {
+    background: #eef1ff;
+    color: #3b3e8c;
+    border: 1px solid #d6daff;
+  }
+  .callout .lbl {
+    font: 600 10.5px ui-monospace, monospace;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    margin-right: 6px;
+  }
+  /* Pills */
+  .pill {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font: 600 11px ui-monospace, monospace;
+    letter-spacing: .04em;
+  }
+  .pill.builder  { color: var(--accent); background: var(--accent-bg); }
+  .pill.sandbox  { color: #5b6bd6; background: #eef1ff; }
+  /* Verify */
+  .verify-row {
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    gap: 10px;
+    padding: 11px 0;
+    border-bottom: 1px solid var(--divider);
+    align-items: start;
+  }
+  .verify-row:last-child { border-bottom: 0; }
+  .verify-row .check {
+    width: 22px; height: 22px; border-radius: 6px;
+    background: var(--pass-bg);
+    color: var(--pass);
+    font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px;
+  }
+  .verify-row .what { font-weight: 600; color: var(--ink); margin-bottom: 3px; font-size: 13.5px; }
+  .verify-row .how { color: var(--muted); font-size: 12.5px; }
+  /* FAQ */
+  details {
+    border-bottom: 1px solid var(--divider);
+    padding: 12px 0;
+  }
+  details:last-child { border-bottom: 0; }
+  details summary {
+    cursor: pointer;
+    font: 600 14px system-ui;
+    color: var(--ink);
+    list-style: none;
+    position: relative;
+    padding-left: 22px;
+  }
+  details summary::before {
+    content: '+';
+    position: absolute;
+    left: 0;
+    top: -1px;
+    font: 600 16px ui-monospace, monospace;
+    color: var(--accent);
+  }
+  details[open] summary::before { content: '−'; }
+  details .body {
+    color: var(--muted);
+    font-size: 13px;
+    margin-top: 8px;
+    padding-left: 22px;
+    line-height: 1.6;
+  }
+  /* Footer */
+  .footer {
+    padding: 14px 22px;
+    background: #fbfbfc;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 11.5px;
+  }
+  /* Responsive */
+  @media (max-width: 640px) {
+    body { padding: 24px 14px 60px; }
+    .paths { grid-template-columns: 1fr; }
+    .path-card p { min-height: 0; }
+    h1 { font-size: 22px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- HERO -->
+  <div class="card">
+    <div class="hero">
+      <div class="eyebrow">AIOps Pipeline Builder · 設定指南</div>
+      <h1>讓你的 Claude 會用 AIOps</h1>
+      <p class="subtitle">
+        要讓 Claude（Desktop 或 Web）會替你建 AIOps pipeline，先選下面**兩條路其中一條**設好。第一次設定約 3–5 分鐘。
+      </p>
+    </div>
+  </div>
+
+  <!-- TWO PATHS -->
+  <div class="paths">
+    <div class="path-card recommended">
+      <div class="tag">建議</div>
+      <h2>路徑 A — 用 Connection</h2>
+      <p>
+        Claude Desktop 直接連到 AIOps 後端的 MCP server。Claude 會「真的看得到」你的 block 目錄、能 preview / execute / 存 pipeline。
+      </p>
+      <div class="when">
+        <strong>適合：</strong>個人電腦、Mac/Windows、可以裝 Claude Desktop、可以連外網的環境。
+      </div>
+    </div>
+    <div class="path-card alt">
+      <div class="tag">備案</div>
+      <h2>路徑 B — 用 Skill</h2>
+      <p>
+        把 skill 說明貼進 Claude.ai 的 Project / 對話 instructions。Claude 不會「真的呼叫」AIOps，但會照規則格式吐 pipeline JSON 給你貼回工具。
+      </p>
+      <div class="when">
+        <strong>適合：</strong>公司電腦、組織不允許裝 MCP / connection、只能用 claude.ai web。
+      </div>
+    </div>
+  </div>
+
+  <!-- PATH A -->
+  <div class="card">
+    <div class="section">
+      <h2>路徑 A · Connection 設定（Claude Desktop）</h2>
+      <p class="lede">
+        Claude Desktop → Settings → Connectors → Add custom connector。把下面 URL 貼進去即可。
+      </p>
+
+      <ol class="steps">
+        <li>
+          <div class="step-title">開啟 Claude Desktop → 左下角頭像 → Settings</div>
+          <div class="step-body">macOS：⌘, ；Windows：Ctrl+,</div>
+        </li>
+        <li>
+          <div class="step-title">切到 Connectors 分頁 → 點 Add custom connector</div>
+          <div class="step-body">如果沒有 Connectors 分頁，請先把 Claude Desktop 更新到最新版本。</div>
+        </li>
+        <li>
+          <div class="step-title">填寫</div>
+          <div class="step-body">
+            <strong>Name:</strong> <span class="mono">aiops-pipeline-builder</span><br/>
+            <strong>Remote MCP server URL:</strong>
+            <div class="codebox danger">
+              <span class="copyhint">機密</span>
+              https://aiops-gill.com/mcp-YOUR-SECRET-PATH/mcp
+            </div>
+            <div class="callout warn">
+              <span class="lbl">注意</span>這條 URL 含密鑰，等同於登入密碼。不要貼到公開 chat / 社群媒體 / 截圖外流。
+            </div>
+          </div>
+        </li>
+        <li>
+          <div class="step-title">儲存 → 回到任一聊天視窗</div>
+          <div class="step-body">右下角工具欄會多出一個 <span class="pill builder">✦ aiops-pipeline-builder</span> 連結器。確認亮著（enabled）。</div>
+        </li>
+        <li>
+          <div class="step-title">把這段話也貼到 Project custom instructions（讓 Claude 知道怎麼用）</div>
+          <div class="step-body">
+            連線只給「能力」，但 Claude 要知道**順序**才不會瞎跑。下面 Path B 的 Skill 內容，無論你走 A 或 B 都應該貼一份到 <em>Project custom instructions</em>。
+          </div>
+        </li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- PATH B -->
+  <div class="card">
+    <div class="section">
+      <h2>路徑 B · Skill 設定（claude.ai Project / chat instructions）</h2>
+      <p class="lede">
+        如果你的電腦不能裝 Connector，或是組織限制了 MCP，就用這條：把下面整段 Skill 內容貼進 claude.ai 的 Project custom instructions。
+      </p>
+
+      <ol class="steps">
+        <li>
+          <div class="step-title">在 claude.ai 建一個 Project，命名為 <span class="mono">AIOps Pipeline Builder</span></div>
+          <div class="step-body">如果不建 Project，也可以開新對話，把同樣內容貼在第一則 message 開頭。</div>
+        </li>
+        <li>
+          <div class="step-title">打開 Project → Set custom instructions（或對話最頂端）</div>
+          <div class="step-body">把下面整段 Skill 內容（從 <code>## What you can do</code> 開始到結尾）貼進去。</div>
+        </li>
+        <li>
+          <div class="step-title">儲存 → 在這個 Project 內聊天即可</div>
+          <div class="step-body">
+            Claude 不會真的呼叫工具，但會吐出格式正確的 pipeline JSON。你可以複製貼回 AIOps Pipeline Builder UI 的「import JSON」按鈕（如果有）或交給工程師。
+          </div>
+        </li>
+      </ol>
+
+      <div class="callout tip">
+        <span class="lbl">提示</span>就算你走路徑 A，這段 Skill 內容也一定要貼到 Project — Connection 給工具能力，Skill 給「使用順序」。
+      </div>
+
+      <h3 style="font: 650 14px system-ui; color: var(--ink); margin: 20px 0 6px;">Skill 內容（複製整段貼進去）</h3>
+      <pre class="skillsrc"># Skill — Build an AIOps analysis pipeline
+
+## What you can do
+You build a semiconductor-ops analysis **pipeline** — a small DAG of typed
+**blocks** (source → transform → chart) — then run and save it. A saved pipeline
+gets a `/pipeline-view/&lt;id&gt;` URL the human can open (DAG + rendered chart, and an
+"open in Builder" link).
+
+## Tools (from the `aiops-pipeline-builder` connector)
+| tool | use |
+|---|---|
+| `list_blocks(category?)` | see available blocks |
+| `explain_block(name)` | a block's real params/description/examples — the ONLY source of truth |
+| `preview(pipeline_json, node_id)` | run up to a node, get its rows + columns (learn the data) |
+| `validate(pipeline_json)` | structural check |
+| `execute(pipeline_json)` | run the whole thing, get status + chart |
+| `save_pipeline(name, pipeline_json, description?)` | save draft → returns id + view URL |
+
+## The pipeline JSON you assemble
+```json
+{"version":"1.0","name":"...","inputs":[],
+ "nodes":[{"id":"n1","block_id":"block_process_history","block_version":"1.0.0","params":{}}],
+ "edges":[{"id":"e1","from":{"node":"n1","port":"data"},"to":{"node":"n2","port":"data"}}]}
+```
+Node positions are not needed — the UI lays out the DAG.
+
+## Workflow — always in this order
+1. `list_blocks()`, then `explain_block(name)` for each block you intend to use.
+   **Never guess params** — read them from `explain_block`.
+2. Add the **source** node first and `preview` it: confirm `rows &gt; 0` and learn the
+   **actual column names** before wiring anything downstream.
+3. Build the rest using the columns you saw; `preview` each new node.
+4. `validate`, fix any errors.
+5. `execute`, confirm `status=success` and a chart/table came out.
+6. `save_pipeline` and give the human the returned **view_url**.
+
+## Gotchas (learned the hard way)
+- `block_process_history` defaults `time_range="24h"`; sim data may be older →
+  a 24h window returns 0 rows. If `preview` shows `rows=0`, widen `time_range`
+  (`"7d"`/`"30d"`).
+- **"all machines / 全廠"** → `block_list_objects(kind='tool')` →
+  `block_mcp_foreach` → `block_unnest`, **not** a single `process_history`
+  (that's one machine only).
+- Multiple ids → do **not** comma-pack `tool_id`; leave it unset and filter
+  downstream with `block_filter` `operator='in' value=[...]`.</pre>
+    </div>
+  </div>
+
+  <!-- VERIFY -->
+  <div class="card">
+    <div class="section">
+      <h2>驗證設好了沒</h2>
+      <p class="lede">問 Claude 下面 4 句話，照順序成功 = 完成。</p>
+
+      <div class="verify-row">
+        <div class="check">✓</div>
+        <div>
+          <div class="what">「列出所有可用的 block」</div>
+          <div class="how">路徑 A：Claude 會列出 30+ 個 block_*；路徑 B：Claude 會回說「我會用 list_blocks() — 請問你要看哪個 category？」</div>
+        </div>
+      </div>
+      <div class="verify-row">
+        <div class="check">✓</div>
+        <div>
+          <div class="what">「explain block_process_history」</div>
+          <div class="how">A：回 block 的真實 description / params / examples（含 nested 預設 true）。B：Claude 會吐 explain_block 的 stub，提醒你貼回去。</div>
+        </div>
+      </div>
+      <div class="verify-row">
+        <div class="check">✓</div>
+        <div>
+          <div class="what">「幫我看 EQP-10 最近 7 天的 SPC 趨勢」</div>
+          <div class="how">A：Claude 會 preview n1、看到 rows、加 chart、execute、save、給 /pipeline-view/&lt;id&gt; URL。B：Claude 會吐完整 pipeline JSON，可貼回 builder import。</div>
+        </div>
+      </div>
+      <div class="verify-row">
+        <div class="check">✓</div>
+        <div>
+          <div class="what">「跑全廠對比」</div>
+          <div class="how">兩條路都應該用 list_objects → mcp_foreach → unnest 的模式，不是單 process_history。如果它直接用單個 tool_id，提醒它讀 Skill 的 Gotchas。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FAQ -->
+  <div class="card">
+    <div class="section">
+      <h2>常見問題</h2>
+      <details>
+        <summary>我看不到 Connectors 分頁怎麼辦？</summary>
+        <div class="body">Claude Desktop 版本太舊。到 claude.com/download 拉最新版本。如果是組織管控不能更新，走路徑 B。</div>
+      </details>
+      <details>
+        <summary>路徑 A 連上了但 Claude 還是不會用 — 怎麼辦？</summary>
+        <div class="body">Connection 只給「能力」，不給「使用方法」。把路徑 B 的 Skill 整段內容貼到同一個 Project 的 custom instructions。連線 + Skill 兩個都有才會穩。</div>
+      </details>
+      <details>
+        <summary>路徑 B 吐的 JSON 怎麼貼回 AIOps？</summary>
+        <div class="body">打開 <span class="mono">https://aiops-gill.com/admin/pipeline-builder</span>，右上角有 Import JSON 按鈕。或是把 JSON 直接傳給有 connection 的同事，請他幫忙 save。</div>
+      </details>
+      <details>
+        <summary>那條 URL 看起來像密碼 — 對嗎？</summary>
+        <div class="body">是。URL 路徑裡那串 hash 是 secret-path bearer，任何人有這條 URL 就能呼叫所有 builder 工具。不要外流。要 rotate 跟系統工程師說一聲。</div>
+      </details>
+      <details>
+        <summary>能不能在手機 Claude.ai 用？</summary>
+        <div class="body">手機 app 目前不支援自訂 connector（路徑 A 不行）。路徑 B 可以 — Project custom instructions 在手機也讀得到。Claude 會吐 JSON，你截圖傳給有桌機的同事處理。</div>
+      </details>
+    </div>
+    <div class="footer">
+      AIOps Pipeline Builder · 內部使用 · URL 含密鑰請勿外流
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
