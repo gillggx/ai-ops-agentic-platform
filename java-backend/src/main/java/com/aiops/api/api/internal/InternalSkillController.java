@@ -24,11 +24,32 @@ public class InternalSkillController {
 
 	private final SkillDefinitionRepository repository;
 	private final SkillRunnerService runnerService;
+	private final com.aiops.api.api.skillv2.SkillV2RunnerService v2Runner;
 
 	public InternalSkillController(SkillDefinitionRepository repository,
-	                               SkillRunnerService runnerService) {
+	                               SkillRunnerService runnerService,
+	                               com.aiops.api.api.skillv2.SkillV2RunnerService v2Runner) {
 		this.repository = repository;
 		this.runnerService = runnerService;
+		this.v2Runner = v2Runner;
+	}
+
+	/**
+	 * Run a skills_v2 skill by id (cron / event scheduler path). Synchronous —
+	 * executes the bound pipeline, evaluates the verdict, writes skill_run +
+	 * (for patrol) an alarm. Body: {triggered_by?, trigger_payload?}.
+	 */
+	@PostMapping("/v2/{id}/run-system")
+	public ApiResponse<Map<String, Object>> runV2FromSystem(
+			@PathVariable Long id,
+			@RequestBody(required = false) Map<String, Object> body) {
+		Map<String, Object> b = body != null ? body : Map.of();
+		@SuppressWarnings("unchecked")
+		Map<String, Object> payload = b.get("trigger_payload") instanceof Map<?, ?> p
+				? (Map<String, Object>) p : Map.of();
+		String triggeredBy = b.get("triggered_by") instanceof String s && !s.isBlank()
+				? s : "system";
+		return ApiResponse.ok(v2Runner.runSystem(id, triggeredBy, payload));
 	}
 
 	@GetMapping

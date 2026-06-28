@@ -218,10 +218,19 @@ public class SkillV2Service {
 		// Trigger
 		Object trig = body.get("trigger");
 		String triggerJson = null;
-		if (trig instanceof Map<?, ?> trigMap) {
+		if (trig instanceof Map<?, ?> trigMapRaw) {
+			@SuppressWarnings("unchecked")
+			Map<String, Object> trigMap = new LinkedHashMap<>((Map<String, Object>) trigMapRaw);
 			Object kind = trigMap.get("kind");
 			if (kind == null || !VALID_KINDS.contains(String.valueOf(kind))) {
 				throw ApiException.badRequest("trigger.kind must be schedule|event");
+			}
+			// Phase B: inject a deterministic schedule_spec the scheduler can
+			// consume — the display `schedule` string ("每 1 小時") is for humans
+			// only; the scheduler must NOT parse NL. Keep both.
+			if ("schedule".equals(String.valueOf(kind))) {
+				trigMap.put("schedule_spec",
+						normalizeScheduleSpec(String.valueOf(trigMap.getOrDefault("schedule", ""))));
 			}
 			triggerJson = JsonUtils.safeWrite(mapper, trigMap);
 		}
@@ -242,6 +251,24 @@ public class SkillV2Service {
 
 		row.setRole(role);
 		return SkillDto.of(repo.save(row));
+	}
+
+	/**
+	 * Map a display schedule string (one of the fixed SCHEDULES catalogue) into
+	 * a deterministic spec the scheduler can act on without parsing NL.
+	 * mode: "minutes" | "hourly" | "daily_at". Unknown → hourly/every=1.
+	 */
+	private static Map<String, Object> normalizeScheduleSpec(String display) {
+		Map<String, Object> spec = new LinkedHashMap<>();
+		String s = display == null ? "" : display.trim();
+		switch (s) {
+			case "每 30 分鐘" -> { spec.put("mode", "minutes"); spec.put("every", 30); }
+			case "每 1 小時"  -> { spec.put("mode", "hourly");  spec.put("every", 1); }
+			case "每 2 小時"  -> { spec.put("mode", "hourly");  spec.put("every", 2); }
+			case "每日 08:00" -> { spec.put("mode", "daily_at"); spec.put("at_hour", 8); spec.put("at_minute", 0); }
+			default -> { spec.put("mode", "hourly"); spec.put("every", 1); }
+		}
+		return spec;
 	}
 
 	@Transactional

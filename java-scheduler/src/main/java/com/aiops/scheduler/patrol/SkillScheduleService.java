@@ -51,17 +51,20 @@ public class SkillScheduleService {
 	private final SkillApiClient skillApiClient;
 	private final DistributedLockService lockService;
 	private final ObjectMapper objectMapper;
+	private final com.aiops.api.domain.skillv2.SkillV2Repository skillV2Repo;
 
 	public SkillScheduleService(SkillDocumentRepository skillRepo,
 	                            SkillRunRepository runRepo,
 	                            SkillApiClient skillApiClient,
 	                            DistributedLockService lockService,
-	                            ObjectMapper objectMapper) {
+	                            ObjectMapper objectMapper,
+	                            com.aiops.api.domain.skillv2.SkillV2Repository skillV2Repo) {
 		this.skillRepo = skillRepo;
 		this.runRepo = runRepo;
 		this.skillApiClient = skillApiClient;
 		this.lockService = lockService;
 		this.objectMapper = objectMapper;
+		this.skillV2Repo = skillV2Repo;
 	}
 
 	/**
@@ -84,6 +87,47 @@ public class SkillScheduleService {
 		if (eligible > 0) {
 			log.debug("SkillScheduleService.tick: scanned={} eligible={} fired={}", stable.size(), eligible, fired);
 		}
+		tickV2();
+	}
+
+	/**
+	 * skills_v2 cron path. Scans active patrol/datacheck skills with a
+	 * schedule-mode trigger, uses the deterministic schedule_spec (NOT the NL
+	 * display string) to decide due-ness, and fires via the v2 run endpoint.
+	 */
+	private void tickV2() {
+		List<com.aiops.api.domain.skillv2.SkillV2Entity> active =
+				skillV2Repo.findByStatusOrderByNameAsc("active");
+		for (com.aiops.api.domain.skillv2.SkillV2Entity s : active) {
+			String role = s.getRole();
+			if (!"patrol".equals(role) && !"datacheck".equals(role)) continue;
+			Map<String, Object> cfg = parseJson(s.getTriggerConfig());
+			if (!"schedule".equals(String.valueOf(cfg.get("kind")))) continue;
+			if (!isDueV2(s, cfg)) continue;
+			final Long id = s.getId();
+			lockService.runWithLock("skill_v2:" + id, Duration.ofMinutes(5), () -> {
+				boolean ok = skillApiClient.dispatchSkillV2(id, "system_schedule", Map.of());
+				if (ok) log.info("SkillScheduleService: fired skill_v2={} ({})", s.getSlug(), role);
+			});
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	private boolean isDueV2(com.aiops.api.domain.skillv2.SkillV2Entity skill, Map<String, Object> cfg) {
+		Object specObj = cfg.get("schedule_spec");
+		if (!(specObj instanceof Map)) return false;  // pre-Phase-B row → skip until re-saved
+		Map<String, Object> spec = (Map<String, Object>) specObj;
+		String mode = String.valueOf(spec.getOrDefault("mode", "hourly"));
+		Duration interval = switch (mode) {
+			case "minutes" -> Duration.ofMinutes(Math.max(1, parseInt(spec.get("every"), 30)));
+			case "hourly"  -> Duration.ofHours(Math.max(1, parseInt(spec.get("every"), 1)));
+			case "daily_at" -> Duration.ofDays(1);   // first-iteration: treat as daily interval
+			default -> Duration.ZERO;
+		};
+		if (interval.isZero()) return false;
+		Optional<OffsetDateTime> last = runRepo.findLastSystemTriggeredAtV2(skill.getId());
+		if (last.isEmpty()) return true;  // never fired → start the clock
+		return !OffsetDateTime.now().isBefore(last.get().plus(interval));
 	}
 
 	@SuppressWarnings("unchecked")

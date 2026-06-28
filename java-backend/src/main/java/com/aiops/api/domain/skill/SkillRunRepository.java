@@ -36,6 +36,14 @@ public interface SkillRunRepository extends JpaRepository<SkillRunEntity, Long> 
            """)
     Optional<OffsetDateTime> findLastSystemTriggeredAt(@Param("skillId") Long skillId);
 
+    /** Phase A (V67): same clock query keyed on skills_v2 id. */
+    @Query("""
+           SELECT MAX(r.triggeredAt) FROM SkillRunEntity r
+           WHERE r.skillV2Id = :skillV2Id
+             AND r.triggeredBy LIKE 'system_%'
+           """)
+    Optional<OffsetDateTime> findLastSystemTriggeredAtV2(@Param("skillV2Id") Long skillV2Id);
+
     // ─── V60 (2026-06-27) — Patrol Activity queries ─────────────────────
 
     /**

@@ -28,8 +28,13 @@ public class SkillRunEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "skill_id", nullable = false)
+    // Legacy skill_documents id (null for v2 runs). V67 relaxed NOT NULL.
+    @Column(name = "skill_id")
     private Long skillId;
+
+    // skills_v2 id (null for legacy runs). Exactly one of skillId / skillV2Id set.
+    @Column(name = "skill_v2_id")
+    private Long skillV2Id;
 
     @Column(name = "triggered_at", nullable = false)
     private OffsetDateTime triggeredAt = OffsetDateTime.now();

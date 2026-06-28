@@ -92,4 +92,34 @@ public class SkillApiClient {
 			return false;
 		}
 	}
+
+	/** Fire a skills_v2 skill by id via /internal/skills/v2/{id}/run-system. */
+	public boolean dispatchSkillV2(Long id, String triggeredBy, Map<String, Object> triggerPayload) {
+		if (id == null) return false;
+		Map<String, Object> body = new HashMap<>();
+		body.put("triggered_by", triggeredBy != null ? triggeredBy : "system");
+		body.put("trigger_payload", triggerPayload != null ? triggerPayload : Map.of());
+		try {
+			Map<?, ?> resp = webClient.post()
+					.uri("/internal/skills/v2/{id}/run-system", id)
+					.header("X-Internal-Token", internalToken)
+					.contentType(MediaType.APPLICATION_JSON)
+					.accept(MediaType.APPLICATION_JSON)
+					.bodyValue(body)
+					.retrieve()
+					.bodyToMono(Map.class)
+					.timeout(Duration.ofSeconds(30))
+					.onErrorResume(ex -> {
+						log.warn("dispatchSkillV2 {} failed: {}", id, ex.getMessage());
+						return Mono.empty();
+					})
+					.block();
+			if (resp == null) return false;
+			log.info("dispatchSkillV2: id={} triggered_by={} ack={}", id, triggeredBy, resp);
+			return true;
+		} catch (Exception ex) {
+			log.warn("dispatchSkillV2 {} threw: {}", id, ex.getMessage());
+			return false;
+		}
+	}
 }
