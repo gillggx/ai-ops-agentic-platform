@@ -73,20 +73,8 @@ public class SkillScheduleService {
 	 */
 	@Scheduled(fixedDelay = 60_000, initialDelay = 30_000)
 	public void tick() {
-		List<SkillDocumentEntity> stable = skillRepo.findByStatus("stable");
-		int eligible = 0;
-		int fired = 0;
-		for (SkillDocumentEntity s : stable) {
-			Map<String, Object> cfg = parseJson(s.getTriggerConfig());
-			if (!"schedule".equals(String.valueOf(cfg.get("type")))) continue;
-			eligible++;
-			if (!isDue(s, cfg)) continue;
-			boolean ok = tryFire(s);
-			if (ok) fired++;
-		}
-		if (eligible > 0) {
-			log.debug("SkillScheduleService.tick: scanned={} eligible={} fired={}", stable.size(), eligible, fired);
-		}
+		// Legacy skill_documents schedule scan removed in the legacy-skill
+		// sunset (2026-06-29). Only the skills_v2 path remains.
 		tickV2();
 	}
 

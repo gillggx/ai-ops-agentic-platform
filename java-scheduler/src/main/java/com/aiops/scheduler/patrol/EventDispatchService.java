@@ -111,10 +111,8 @@ public class EventDispatchService {
 			}
 		}
 
-		// ── v6.1 path: skill_documents.trigger_config (event) ───────────
-		dispatchToSkillsByEvent(eventTypeId, payload);
-
-		// ── v2 path: skills_v2 raw-event subscribers ────────────────────
+		// Legacy skill_documents event dispatch removed in the legacy-skill
+		// sunset (2026-06-29). Only the skills_v2 raw-event path remains.
 		dispatchToSkillsV2ByRawEvent(eventTypeId, payload);
 	}
 
