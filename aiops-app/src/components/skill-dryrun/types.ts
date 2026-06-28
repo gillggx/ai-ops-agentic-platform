@@ -56,6 +56,15 @@ export interface StepResult {
   threshold?: number | string;
   operator?: string;
   note?: string;
+  // 2026-06-28: SkillStepExecutor.parseRunResult forwards the full
+  // pipeline result_summary so the dry-run report can render each step's
+  // chart inline (not just the boolean verdict). Shape matches
+  // PipelineResultSummary from @/lib/pipeline-builder/types but we keep it
+  // loose here to avoid a circular module dep.
+  result_summary?: {
+    charts?: Array<{ node_id: string; title?: string | null; chart_spec: unknown }>;
+    [k: string]: unknown;
+  } | null;
 }
 
 export type DryRunView = "editor" | "picker" | "running" | "report";

@@ -26,6 +26,7 @@ import { TK, SHADOW, FONT, MONO_EYEBROW, SANDBOX_PILL } from "@/components/skill
 import type {
   SkillDocument, SkillStep, TestCase, StepResult, DryRunView,
 } from "@/components/skill-dryrun/types";
+import ChartRenderer from "@/components/pipeline-builder/ChartRenderer";
 
 const RUNNING_MIN_MS = 950;       // §"Running" — auto-advance after ~950 ms
 const TOAST_DURATION_MS = 2400;
@@ -678,6 +679,7 @@ function ReportOverlay({
                       <span style={{ font: `500 12px ${FONT.mono}`, color: "#7c8089" }}>{r.note}</span>
                     )}
                   </div>
+                  <StepCharts result={r} />
                 </div>
               );
             }
@@ -703,6 +705,7 @@ function ReportOverlay({
                     {r.note && <KV k="note" v={r.note} mono color={TK.fail} />}
                   </div>
                 )}
+                <StepCharts result={r} />
               </div>
             );
           })}
@@ -721,6 +724,40 @@ function ReportOverlay({
         </div>
       </div>
     </Scrim>
+  );
+}
+
+// ── Per-step inline charts ───────────────────────────────────────────────────
+
+/**
+ * Renders every chart in this step's pipeline result_summary, stacked. The
+ * sidecar already curated them via block_chart / block_data_view → they map
+ * 1:1 with PipelineChartSummary which ChartRenderer handles (Vega-Lite +
+ * ChartDSL dispatch).
+ *
+ * No charts → null (don't show an empty placeholder; keeps PASS rows tight).
+ */
+function StepCharts({ result }: { result: StepResult }) {
+  const charts = result.result_summary?.charts ?? [];
+  if (charts.length === 0) return null;
+  return (
+    <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
+      {charts.map((c, i) => (
+        <div key={`${c.node_id}-${i}`} style={{
+          background: "#fff",
+          border: `1px solid ${TK.border}`,
+          borderRadius: 8,
+          padding: "10px 12px",
+        }}>
+          {c.title && (
+            <div style={{ ...MONO_EYEBROW, marginBottom: 6 }}>
+              {c.title}
+            </div>
+          )}
+          <ChartRenderer spec={c.chart_spec} height={220} />
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -828,7 +865,7 @@ function parseSseFrame(frame: string): SseFrame | null {
 function adaptStepDone(data: unknown): StepResult | null {
   if (!data || typeof data !== "object") return null;
   const d = data as Record<string, unknown>;
-  // Java SSE shape: { step_id, status, value, note, duration_ms, ... }
+  // Java SSE shape: { step_id, status, value, note, duration_ms, result_summary, ... }
   // We also accept nested under step_result for safety.
   const sr = (d.step_result as Record<string, unknown>) ?? d;
   const status = String(sr.status ?? "skipped");
@@ -840,6 +877,10 @@ function adaptStepDone(data: unknown): StepResult | null {
     threshold: sr.threshold as number | string | undefined,
     operator: sr.operator as string | undefined,
     note: sr.note as string | undefined,
+    // 2026-06-28: SkillStepExecutor forwards the pipeline's result_summary
+    // (charts + data_views) so the report can render each step's chart
+    // inline beneath its PASS/FAIL badge.
+    result_summary: (sr.result_summary as StepResult["result_summary"]) ?? null,
   };
 }
 
