@@ -14,6 +14,7 @@ import Link from "next/link";
 import { TK, FONT, ROLE_COLORS, ensurePlexFont } from "@/components/skills-v2/tokens";
 import { parsePipelineNodes, roleLabel, type Skill, type PipelineNode } from "@/components/skills-v2/types";
 import { writeSkillV2Ctx } from "@/components/skills-v2/SkillV2EmbedBanner";
+import PipelineSvgThumb from "@/components/skills-v2/PipelineSvgThumb";
 
 export default function SkillEditorPage() {
   const params = useParams<{ slug: string }>();
@@ -183,16 +184,13 @@ export default function SkillEditorPage() {
             </ColumnFooter>
           </Column>
 
-          {/* Right: Pipeline */}
+          {/* Right: Pipeline canvas thumb */}
           <Column>
             <ColumnHeader rightChip={`${pipeline.length} nodes`}>
               ✦ 編譯結果 · data pipeline
             </ColumnHeader>
-            <div style={{
-              flex: 1, padding: "14px 18px",
-              overflowY: "auto", maxHeight: 460,
-            }}>
-              <PipelineView nodes={pipeline} />
+            <div style={{ flex: 1, padding: "14px 18px" }}>
+              <PipelineSvgThumb pipelineId={skill.pipeline_id} height={420} />
             </div>
           </Column>
         </div>
@@ -255,50 +253,6 @@ function ColumnFooter({ children }: { children: React.ReactNode }) {
     }}>{children}</div>
   );
 }
-
-function PipelineView({ nodes }: { nodes: PipelineNode[] }) {
-  if (nodes.length === 0) {
-    return <div style={{ color: TK.faint, fontSize: 13, padding: "30px 0", textAlign: "center" }}>
-      尚未編譯 — 在左欄寫 NL，按「重新編譯 ↻」生成 pipeline。
-    </div>;
-  }
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      {nodes.map((n, i) => {
-        const verdict = !!n.isVerdict;
-        return (
-          <div key={`${n.k}-${i}`} style={{
-            display: "flex", alignItems: "center", gap: 12,
-            padding: "10px 12px",
-            background: verdict ? TK.patrolTint : "#fff",
-            border: `1px solid ${verdict ? TK.patrolBorder : TK.divider}`,
-            borderRadius: 9,
-          }}>
-            <span style={{
-              font: `600 11px ${FONT.mono}`,
-              color: verdict ? TK.patrol : TK.indigo,
-              background: verdict ? "#fff" : TK.indigoTint,
-              padding: "4px 9px", borderRadius: 6,
-              minWidth: 36, textAlign: "center",
-            }}>{n.k}</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ font: `500 14px ${FONT.sans}`, color: TK.ink }}>{n.t}</div>
-              <div style={{ fontSize: 11.5, color: TK.faint, marginTop: 2 }}>{n.s}</div>
-            </div>
-            {verdict && (
-              <span style={{
-                font: `600 10.5px ${FONT.mono}`,
-                color: TK.patrolDeep,
-                whiteSpace: "nowrap",
-              }}>alarm 判斷式</span>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 
 function AlarmCheck({ hasAlarm }: { hasAlarm: boolean }) {
   if (hasAlarm) {
