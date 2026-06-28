@@ -240,19 +240,30 @@ async def execute(pipeline_json: dict) -> dict:
 
 @mcp.tool()
 async def save_pipeline(name: str, pipeline_json: dict, description: str = "") -> dict:
-    """Save the pipeline as a draft so a human can review it. Returns {id, view_url,
-    edit_url}. The view_url shows the DAG + the rendered chart; edit_url opens the
-    visual builder. Run execute() successfully BEFORE saving."""
-    body = {"name": name, "description": description or "Built via MCP",
-            "pipeline_kind": "diagnostic", "pipeline_json": json.dumps(pipeline_json), "version": "1.0"}
+    """Persist a pipeline the human asked you to build.
+
+    NOTE: this now creates a DRAFT SKILL (visible at /skills), not a bare
+    PB-Library pipeline. It internally does the same as
+    create_skill_with_pipeline — pipeline + skill + bind in one transaction —
+    because a bare pipeline is an orphan the human can't open or reuse.
+
+    PREFER calling create_skill_with_pipeline directly so you can pass `nl`
+    (the human's original request) — that becomes the skill's editable
+    description. save_pipeline maps `description` → nl as a fallback.
+
+    Returns {skill_slug, view_url (/skills/<slug>), status:'draft', ...}.
+    ALWAYS hand the human the view_url. The skill lands as draft — tell them
+    to open it and press 啟用 if they want it to take effect."""
+    slug = _slug_from_name(name)
+    body = {"slug": slug, "name": name, "sub": (description or "")[:60],
+            "nl": description or "", "pipeline_json": pipeline_json}
     async with httpx.AsyncClient() as c:
-        r = await _post(c, f"{JAVA}/api/v1/pipelines",
-                        {"Content-Type": "application/json", "Authorization": f"Bearer {SHARED}"}, body, 60)
-    d = _unwrap(r)
-    pid = d.get("id")
-    return {"id": pid, "name": d.get("name"),
-            "view_url": f"{PUBLIC}/pipeline-view/{pid}" if pid else None,
-            "edit_url": f"{PUBLIC}/admin/pipeline-builder/{pid}" if pid else None}
+        d = await _v2(c, "POST", "/with-pipeline", body)
+    skill = d.get("skill") if isinstance(d, dict) else None
+    real_slug = (skill or {}).get("slug", slug)
+    return {"skill_slug": real_slug, "name": name, "status": "draft",
+            "view_url": f"{PUBLIC}/skills/{real_slug}",
+            "_human_message": f"已建好 Skill「{name}」（草稿）：{PUBLIC}/skills/{real_slug} — 開啟後按『啟用』才生效。"}
 
 
 # ── Skills v2 cowork tools ──────────────────────────────────────────
