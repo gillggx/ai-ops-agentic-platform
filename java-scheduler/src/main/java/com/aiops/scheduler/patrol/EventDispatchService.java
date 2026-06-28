@@ -56,6 +56,7 @@ public class EventDispatchService {
 	private final SkillDocumentRepository skillRepo;
 	private final EventTypeRepository eventTypeRepo;
 	private final SkillApiClient skillApiClient;
+	private final com.aiops.api.domain.skillv2.SkillV2Repository skillV2Repo;
 
 	public EventDispatchService(AutoPatrolRepository patrolRepo,
 	                            PipelineAutoCheckTriggerRepository autoCheckRepo,
@@ -65,7 +66,8 @@ public class EventDispatchService {
 	                            DistributedLockService lockService,
 	                            SkillDocumentRepository skillRepo,
 	                            EventTypeRepository eventTypeRepo,
-	                            SkillApiClient skillApiClient) {
+	                            SkillApiClient skillApiClient,
+	                            com.aiops.api.domain.skillv2.SkillV2Repository skillV2Repo) {
 		this.patrolRepo = patrolRepo;
 		this.autoCheckRepo = autoCheckRepo;
 		this.patrolExecutor = patrolExecutor;
@@ -75,6 +77,7 @@ public class EventDispatchService {
 		this.skillRepo = skillRepo;
 		this.eventTypeRepo = eventTypeRepo;
 		this.skillApiClient = skillApiClient;
+		this.skillV2Repo = skillV2Repo;
 	}
 
 	/** Generated events → event-mode auto_patrols + skill_documents triggers. */
@@ -110,6 +113,36 @@ public class EventDispatchService {
 
 		// ── v6.1 path: skill_documents.trigger_config (event) ───────────
 		dispatchToSkillsByEvent(eventTypeId, payload);
+
+		// ── v2 path: skills_v2 raw-event subscribers ────────────────────
+		dispatchToSkillsV2ByRawEvent(eventTypeId, payload);
+	}
+
+	/**
+	 * skills_v2 raw-event triggers: active event-mode skills whose trigger
+	 * subscribes to a raw simulator event by name
+	 * ({"kind":"event","event":"OOC"}). Distinct from the alarm-driven v2
+	 * path (which keys on a `source` upstream slug). Fires the v2 runner.
+	 */
+	private void dispatchToSkillsV2ByRawEvent(Long eventTypeId, Map<String, Object> payload) {
+		com.aiops.api.domain.event.EventTypeEntity type = eventTypeRepo.findById(eventTypeId).orElse(null);
+		if (type == null || type.getName() == null || type.getName().isBlank()) return;
+		String eventName = type.getName();
+
+		for (com.aiops.api.domain.skillv2.SkillV2Entity s :
+				skillV2Repo.findByStatusOrderByNameAsc("active")) {
+			Map<String, Object> cfg = parseJson(s.getTriggerConfig());
+			if (!"event".equals(String.valueOf(cfg.get("kind")))) continue;
+			// raw-event subscription uses `event` (name); alarm subscription
+			// uses `source` (slug) — only handle the former here.
+			if (!eventName.equals(String.valueOf(cfg.get("event")))) continue;
+			final Long id = s.getId();
+			lockService.runWithLock("skill_v2:" + id, Duration.ofMinutes(5), () -> {
+				boolean ok = skillApiClient.dispatchSkillV2(id, "system_event", payload);
+				if (ok) log.info("dispatchToSkillsV2ByRawEvent: event={} → fired skill_v2={}",
+						eventName, s.getSlug());
+			});
+		}
 	}
 
 	/**
