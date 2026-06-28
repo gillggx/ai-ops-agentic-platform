@@ -1,0 +1,86 @@
+package com.aiops.api.api.skillv2;
+
+import com.aiops.api.auth.Authorities;
+import com.aiops.api.common.ApiResponse;
+import com.aiops.api.domain.skillv2.SkillV2Entity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Skills v2 API surface — CRUD + compile + save-automation.
+ *
+ * <p>Lives at {@code /api/v2/skills/**} so the legacy {@code /api/v1/skill-documents/**}
+ * routes can be retired in a follow-up without code churn during the
+ * transition. Currently nothing depends on /api/v1/skill-documents from
+ * the v2 UI; once /patrol-activity is migrated to query skills_v2 + the
+ * scheduler is rewired, the v1 surface can drop.
+ */
+@RestController
+@RequestMapping("/api/v2/skills")
+public class SkillV2Controller {
+
+	private final SkillV2Service service;
+
+	public SkillV2Controller(SkillV2Service service) {
+		this.service = service;
+	}
+
+	@GetMapping
+	@PreAuthorize(Authorities.ANY_ROLE)
+	public ApiResponse<List<SkillV2Service.SkillDto>> list() {
+		return ApiResponse.ok(service.list());
+	}
+
+	@GetMapping("/{slug}")
+	@PreAuthorize(Authorities.ANY_ROLE)
+	public ApiResponse<SkillV2Service.SkillDto> get(@PathVariable String slug) {
+		return ApiResponse.ok(service.get(slug));
+	}
+
+	/**
+	 * NL → pipeline compile. Phase 1 (this commit) returns the existing
+	 * compiled pipeline_nodes from the row (mock). Phase 6+ swaps in an
+	 * LLM call. Compile is read-only — caller must {@link #saveSkill} to
+	 * persist edits.
+	 */
+	@PostMapping("/{slug}/compile")
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public ApiResponse<SkillV2Service.CompileResult> compile(@PathVariable String slug,
+	                                                          @RequestBody Map<String, Object> body) {
+		String nl = body == null ? "" : String.valueOf(body.getOrDefault("nl", ""));
+		return ApiResponse.ok(service.compile(slug, nl));
+	}
+
+	/** Save NL + (optionally) compiled pipeline_nodes back to the row. */
+	@PutMapping("/{slug}")
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public ApiResponse<SkillV2Service.SkillDto> saveSkill(@PathVariable String slug,
+	                                                       @RequestBody Map<String, Object> body) {
+		return ApiResponse.ok(service.saveSkill(slug, body));
+	}
+
+	/** Apply automation (role + trigger + gate + outcome). NULL trigger → tool. */
+	@PostMapping("/{slug}/automation")
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public ApiResponse<SkillV2Service.SkillDto> saveAutomation(@PathVariable String slug,
+	                                                            @RequestBody Map<String, Object> body) {
+		return ApiResponse.ok(service.saveAutomation(slug, body));
+	}
+
+	/** Strip automation — flip role back to tool, clear trigger/gate/outcome. */
+	@DeleteMapping("/{slug}/automation")
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public ApiResponse<SkillV2Service.SkillDto> removeAutomation(@PathVariable String slug) {
+		return ApiResponse.ok(service.removeAutomation(slug));
+	}
+
+	/** Convenience: list peer "alarming" patrols an event-driven skill can subscribe to. */
+	@GetMapping("/alarm-sources")
+	@PreAuthorize(Authorities.ANY_ROLE)
+	public ApiResponse<List<SkillV2Service.AlarmSourceDto>> listAlarmSources(@RequestParam(required = false) String excludeSlug) {
+		return ApiResponse.ok(service.listAlarmSources(excludeSlug));
+	}
+}
