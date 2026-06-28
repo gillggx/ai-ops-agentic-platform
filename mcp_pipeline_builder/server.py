@@ -93,6 +93,13 @@ GOING LIVE / DISABLE / DELETE never happen from a tool. Use rule_request_activat
 rule_request_disable / rule_request_delete — each returns a launch_url; give it to the
 user, who confirms in our GUI where the action actually runs. For edits, rule_get ->
 rule_update(patch the named part) -> rule_request_review again.
+
+CRITICAL — how to report any rule_request_* result: these tools EXECUTE NOTHING
+(their result has executed=false, status=PENDING_USER_*). Relay the returned
+`tell_user` text and the launch_url. NEVER say a rule was deleted / disabled /
+activated / "done" — it is only a request until the user confirms in the system.
+You cannot open the URL for them; present it as the action they must take (it also
+auto-pops if their app is open).
 """
 
 # Server binds 127.0.0.1 only and sits behind nginx (TLS + secret path) — that is

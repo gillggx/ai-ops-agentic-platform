@@ -54,7 +54,8 @@ def register(mcp, *, java: str, shared: str, jit: str, public: str) -> None:
             d = r.json()
             return d.get("data", d) if isinstance(d, dict) else d
 
-    async def _handoff(kind: str, target_ref: str, action: str | None, payload: dict) -> dict:
+    async def _handoff(kind: str, target_ref: str, action: str | None, payload: dict,
+                       *, tell_user: str, status: str = "PENDING_USER_CONFIRMATION") -> dict:
         async with httpx.AsyncClient() as c:
             r = await c.post(f"{java}/internal/handoffs", headers=IH, timeout=30, json={
                 "kind": kind, "target_ref": target_ref, "action": action,
@@ -63,9 +64,18 @@ def register(mcp, *, java: str, shared: str, jit: str, public: str) -> None:
             d = r.json()
             d = d.get("data", d)
         hid = d.get("id")
-        return {"launch_url": f"{public}/handoff/{hid}", "expires_at": d.get("expires_at"),
-                "next": "Give the user this launch_url (or it auto-opens if their app is open). "
-                        "They review/confirm in our GUI — that is where the action actually happens."}
+        return {
+            # This tool changed NOTHING. It only created a request the human must
+            # act on inside the product GUI. Report it that way — never as "done".
+            "status": status,
+            "executed": False,
+            "launch_url": f"{public}/handoff/{hid}",
+            "expires_at": d.get("expires_at"),
+            "tell_user": tell_user,
+            "next": "You executed NOTHING. Tell the user this action needs THEM to confirm in the "
+                    "system — show the launch_url (or it auto-pops if their app is open). NEVER say "
+                    "it is done/deleted/activated; nothing changes until they confirm there.",
+        }
 
     def _summ(rule: dict) -> str:
         tc = _parse(rule.get("trigger_config")) or {}
@@ -199,33 +209,53 @@ def register(mcp, *, java: str, shared: str, jit: str, public: str) -> None:
     # ── Review + dangerous actions (hand off to the GUI; no execute here) ───
     @mcp.tool()
     async def rule_request_review(slug: str) -> dict:
-        """Open the Rule Review GUI for the user: it try-runs the WHOLE rule and shows
-        every checkpoint's real result together, where the user can edit any one or
-        activate it. Call this ONCE after the rule is fully built (don't review per-step)."""
+        """Open the Rule Review GUI for the user. This executes NOTHING and does not
+        activate anything — it returns a launch_url to a page that try-runs the WHOLE
+        rule and shows every checkpoint's result, where the user edits any one or
+        activates it. Call ONCE after the rule is fully built/modified. Report to the
+        user as 'ready for your review in the system' + the launch_url — not as done."""
         r = await _get(f"/{slug}")
-        return await _handoff("review_rule", slug, None, {"summary": _summ(r)})
+        return await _handoff(
+            "review_rule", slug, None, {"summary": _summ(r)},
+            status="PENDING_USER_REVIEW",
+            tell_user=f"我已建好/改好整條 rule「{r.get('title')}」。請到系統審核(會 try-run "
+                      "把每步結果秀給你看),你在那邊決定要不要啟用 —— 我這邊還沒讓它上線:")
 
     @mcp.tool()
     async def rule_request_activate(slug: str) -> dict:
-        """Propose going live. Returns a launch_url; the user confirms in our GUI and the
-        platform activates (materializes the trigger). No tool activates a rule directly."""
+        """Propose going live. This executes NOTHING — it returns a launch_url; the rule
+        goes live ONLY when the user confirms in the system. Report it as needing the
+        user's confirmation; never say it is activated/live."""
         r = await _get(f"/{slug}")
-        return await _handoff("confirm_activate", slug, "activate", {"impact": _summ(r)})
+        return await _handoff(
+            "confirm_activate", slug, "activate", {"impact": _summ(r)},
+            tell_user=f"我已備好『啟用上線』rule「{r.get('title')}」,但不會自己執行 —— "
+                      "請到系統按確認它才會生效。確認前什麼都沒變:")
 
     @mcp.tool()
     async def rule_request_disable(slug: str) -> dict:
-        """Propose disabling (stop auto-running). Returns a launch_url; the user confirms
-        in our GUI and the platform reverts it to draft."""
+        """Propose disabling (stop auto-running). This executes NOTHING — it returns a
+        launch_url; the rule is disabled ONLY when the user confirms in the system.
+        Report it as needing the user's confirmation; never say it is disabled."""
         r = await _get(f"/{slug}")
-        return await _handoff("confirm_disable", slug, "disable", {"impact": _summ(r)})
+        return await _handoff(
+            "confirm_disable", slug, "disable", {"impact": _summ(r)},
+            tell_user=f"我已備好『停用』rule「{r.get('title')}」,但不會自己執行 —— "
+                      "請到系統按確認才會停。確認前它照常運作:")
 
     @mcp.tool()
     async def rule_request_delete(slug: str) -> dict:
-        """Propose deletion. Returns a launch_url; the user sees the impact and confirms in
-        our GUI — the delete runs there, not here."""
+        """Propose deletion. This executes NOTHING — it returns a launch_url; the rule is
+        deleted ONLY when the user confirms in the system (the page shows the impact).
+        Report it as needing the user's confirmation; never say it is deleted."""
+        title = slug
         try:
             r = await _get(f"/{slug}")
             impact = _summ(r)
+            title = r.get("title") or slug
         except Exception:
             impact = "(could not load rule detail)"
-        return await _handoff("confirm_delete", slug, "delete", {"impact": impact})
+        return await _handoff(
+            "confirm_delete", slug, "delete", {"impact": impact},
+            tell_user=f"我已備好『刪除』rule「{title}」,但不會自己執行 —— "
+                      "請到系統按確認才會刪(頁面會列出影響)。確認前什麼都沒變:")

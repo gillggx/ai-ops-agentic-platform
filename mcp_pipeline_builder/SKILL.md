@@ -83,6 +83,11 @@ returns a `launch_url`; give it to the user, who reviews/confirms in our GUI whe
 action actually runs (under their auth). If their app is open it auto-pops; otherwise
 the link is the way in.
 
+**How to report a `rule_request_*` result:** it executed NOTHING (`executed:false`,
+`status:PENDING_USER_*`). Relay its `tell_user` + the launch_url. NEVER say a rule was
+deleted/disabled/activated/"done" — it's only a request until the user confirms in the
+system. You can't open the URL for them; present it as the action they must take.
+
 ## Example request → what you do
 > "查 EQP-08 最近 7 天的 SPC 趨勢,畫成圖並存起來"
 
