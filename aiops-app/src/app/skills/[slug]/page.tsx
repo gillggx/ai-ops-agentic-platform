@@ -60,7 +60,7 @@ export default function SkillEditorPage() {
    * back to this skill_v2 row (pipeline_id + pipeline_nodes derived
    * server-side). User returns to this Editor and sees the new pipeline.
    */
-  const handleOpenBuilder = useCallback(async () => {
+  const handleOpenBuilder = useCallback(async (mode: "compile" | "rebuild" | "edit") => {
     if (!skill) return;
     setOpening(true);
     try {
@@ -72,8 +72,12 @@ export default function SkillEditorPage() {
           body: JSON.stringify({ nl }),
         });
       }
-      writeSkillV2Ctx({ skill_slug: slug, name: skill.name, nl });
-      router.push(`/admin/pipeline-builder/new?embed=skill-v2&slug=${encodeURIComponent(slug)}`);
+      writeSkillV2Ctx({ skill_slug: slug, name: skill.name, nl, mode });
+      // edit → load existing pipeline (no agent); compile/rebuild → /new triggers agent auto-fire
+      const target = (mode === "edit" && skill.pipeline_id)
+        ? `/admin/pipeline-builder/${skill.pipeline_id}?embed=skill-v2&slug=${encodeURIComponent(slug)}&mode=edit`
+        : `/admin/pipeline-builder/new?embed=skill-v2&slug=${encodeURIComponent(slug)}&mode=${mode}`;
+      router.push(target);
     } catch (e) {
       setToast(`開啟 Builder 失敗：${e instanceof Error ? e.message : e}`);
       setOpening(false);
@@ -173,13 +177,33 @@ export default function SkillEditorPage() {
                 }}>
                   {saving ? "Saving..." : "Save Draft"}
                 </button>
-                <button onClick={handleOpenBuilder} disabled={opening} style={{
-                  font: `600 12px ${FONT.sans}`,
-                  color: "#fff", background: TK.indigo, border: `1px solid ${TK.indigo}`,
-                  padding: "7px 12px", borderRadius: 8, cursor: "pointer",
-                }}>
-                  {opening ? "Opening…" : "用 Pipeline Builder 編譯 →"}
-                </button>
+                {skill.pipeline_id ? (
+                  <>
+                    <button onClick={() => handleOpenBuilder("rebuild")} disabled={opening} title="用 NL 重新跑 Agent，覆蓋目前 pipeline" style={{
+                      font: `600 12px ${FONT.sans}`,
+                      color: TK.body, background: "#fff",
+                      border: `1px solid ${TK.divider}`,
+                      padding: "7px 12px", borderRadius: 8, cursor: "pointer",
+                    }}>
+                      用 Agent 重新編譯
+                    </button>
+                    <button onClick={() => handleOpenBuilder("edit")} disabled={opening} title="開 Pipeline Builder 人手調 canvas，Agent 不會自動跑" style={{
+                      font: `600 12px ${FONT.sans}`,
+                      color: "#fff", background: TK.indigo, border: `1px solid ${TK.indigo}`,
+                      padding: "7px 12px", borderRadius: 8, cursor: "pointer",
+                    }}>
+                      {opening ? "Opening…" : "編輯 pipeline →"}
+                    </button>
+                  </>
+                ) : (
+                  <button onClick={() => handleOpenBuilder("compile")} disabled={opening} style={{
+                    font: `600 12px ${FONT.sans}`,
+                    color: "#fff", background: TK.indigo, border: `1px solid ${TK.indigo}`,
+                    padding: "7px 12px", borderRadius: 8, cursor: "pointer",
+                  }}>
+                    {opening ? "Opening…" : "用 Pipeline Builder 編譯 →"}
+                  </button>
+                )}
               </div>
             </ColumnFooter>
           </Column>

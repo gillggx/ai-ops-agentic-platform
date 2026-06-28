@@ -172,10 +172,14 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
         // here — that's the event that carries session_id.
       } else if (evType === "goal_plan_confirm_required") {
         // Skills v2 embed: 自動確認 plan once we have BOTH phases (from
-        // goal_plan_proposed) AND session_id (this event).
+        // goal_plan_proposed) AND session_id (this event). Only when ctx.mode
+        // is compile/rebuild — edit mode means user wants to hand-edit, so
+        // we leave the plan gate visible if Agent was somehow triggered.
         const realSid = (data.session_id as string) || sid;
         const phases = buildRef.current.phases;
-        if (readSkillV2Ctx() && !autoConfirmedRef.current && realSid && phases.length > 0) {
+        const ctx = readSkillV2Ctx();
+        const isAutoMode = ctx?.mode === "compile" || ctx?.mode === "rebuild" || (ctx && !ctx.mode);
+        if (isAutoMode && !autoConfirmedRef.current && realSid && phases.length > 0) {
           autoConfirmedRef.current = true;
           log("info", "Skills v2 embed: 自動確認 plan，agent 繼續建構");
           void (async () => {
@@ -373,6 +377,10 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
     if (autoFiredRef.current) return;
     const ctx = readSkillV2Ctx();
     if (!ctx?.nl?.trim()) return;
+    // Only auto-fire in compile/rebuild flow. mode === "edit" means user
+    // opened PB to hand-edit; don't kick off an Agent build.
+    const mode = ctx.mode ?? "compile";
+    if (mode === "edit") return;
     autoFiredRef.current = true;
     setTimeout(() => { void submit(ctx.nl); }, 80);
   }, [submit]);

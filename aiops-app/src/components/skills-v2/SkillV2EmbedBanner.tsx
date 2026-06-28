@@ -22,6 +22,13 @@ export interface SkillV2EmbedCtx {
   skill_slug: string;
   name: string;
   nl: string;
+  /**
+   * compile  – first-time build from NL (Agent auto-fires + auto-confirms)
+   * rebuild  – re-run Agent over an already-bound pipeline (same auto-fire)
+   * edit     – open existing pipeline for manual canvas edits; Agent does NOT
+   *            auto-fire. User can still type into Agent panel manually.
+   */
+  mode?: "compile" | "rebuild" | "edit";
 }
 
 export function readSkillV2Ctx(): SkillV2EmbedCtx | null {
@@ -57,10 +64,14 @@ export function bootstrapSkillV2CtxFromUrl(): SkillV2EmbedCtx | null {
   // Existing ctx wins (it carries the NL fetched on the click).
   const existing = readSkillV2Ctx();
   if (existing && existing.skill_slug === slug) return existing;
+  const modeRaw = p.get("mode");
+  const mode: SkillV2EmbedCtx["mode"] =
+    modeRaw === "edit" || modeRaw === "rebuild" || modeRaw === "compile" ? modeRaw : "compile";
   const ctx: SkillV2EmbedCtx = {
     skill_slug: slug,
     name: p.get("name") ?? slug,
     nl: p.get("nl") ?? "",
+    mode,
   };
   writeSkillV2Ctx(ctx);
   return ctx;
