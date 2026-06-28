@@ -291,7 +291,11 @@ import string as _string
 
 
 def _slug_from_name(name: str) -> str:
-    base = "".join(c if c.isalnum() or c in "- " else "" for c in name.lower()).strip()
+    # ASCII-only: c.isalnum() is True for CJK characters (they're alphanumeric
+    # in Unicode), which produced slugs like 'eqp-01-最近-…' that broke the
+    # /skills/<slug> API path. Require isascii() so CJK is stripped → the slug
+    # is built from the latin/number tokens only (e.g. 'eqp-01-ooc-process').
+    base = "".join(c if (c.isascii() and c.isalnum()) or c in "- " else " " for c in name.lower())
     base = "-".join(base.split())[:40] or "skill"
     tail = "".join(_random.choices(_string.ascii_lowercase + _string.digits, k=4))
     return f"{base}-{tail}"
