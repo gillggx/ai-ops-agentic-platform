@@ -202,6 +202,12 @@ public class SkillV2Service {
 		return SkillDto.of(repo.save(row));
 	}
 
+	@Transactional
+	public void deleteSkill(String slug) {
+		SkillV2Entity row = loadBySlug(slug);
+		repo.delete(row);
+	}
+
 	// ─── Bind pipeline (PB embed + cowork MCP) ────────────────────────
 
 	/**

@@ -22,15 +22,33 @@ export default function SkillsLibraryPage() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
+  const [deletingSlug, setDeletingSlug] = useState<string | null>(null);
 
   useEffect(() => { ensurePlexFont(); }, []);
 
-  useEffect(() => {
+  const reload = () => {
     fetch("/api/skills-v2")
       .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then(env => setSkills((env?.data ?? env) as Skill[]))
       .catch(e => setLoadError(e instanceof Error ? e.message : String(e)));
-  }, []);
+  };
+
+  useEffect(() => { reload(); }, []);
+
+  const handleDelete = async (skill: Skill) => {
+    if (!confirm(`確認刪除 Skill「${skill.name}」？此動作無法復原。`)) return;
+    setDeletingSlug(skill.slug);
+    try {
+      const res = await fetch(`/api/skills-v2/${encodeURIComponent(skill.slug)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // optimistic remove
+      setSkills(prev => prev.filter(s => s.slug !== skill.slug));
+    } catch (e) {
+      alert(`刪除失敗：${e instanceof Error ? e.message : e}`);
+    } finally {
+      setDeletingSlug(null);
+    }
+  };
 
   const counts = useMemo(() => ({
     all:       skills.length,
@@ -90,7 +108,14 @@ export default function SkillsLibraryPage() {
         )}
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {filtered.map(s => <SkillCard key={s.slug} skill={s} />)}
+          {filtered.map(s => (
+            <SkillCard
+              key={s.slug}
+              skill={s}
+              onDelete={() => handleDelete(s)}
+              deleting={deletingSlug === s.slug}
+            />
+          ))}
           {filtered.length === 0 && !loadError && (
             <div style={{
               background: "#fff", border: `1px solid ${TK.divider}`, borderRadius: 10,
@@ -133,7 +158,7 @@ function FilterChip({
   );
 }
 
-function SkillCard({ skill }: { skill: Skill }) {
+function SkillCard({ skill, onDelete, deleting }: { skill: Skill; onDelete: () => void; deleting: boolean }) {
   const c = ROLE_COLORS[skill.role];
   const trigger = parseTrigger(skill.trigger_config);
   return (
@@ -175,7 +200,7 @@ function SkillCard({ skill }: { skill: Skill }) {
       </div>
 
       {/* actions */}
-      <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+      <div style={{ display: "flex", gap: 8, flexShrink: 0, alignItems: "center" }}>
         <Link href={`/skills/${encodeURIComponent(skill.slug)}`} style={{
           font: `600 12px ${FONT.sans}`,
           color: TK.ink, background: TK.card,
@@ -191,6 +216,23 @@ function SkillCard({ skill }: { skill: Skill }) {
         }}>
           {skill.role === "tool" ? "設定自動化" : "編輯自動化"}
         </Link>
+        <button
+          onClick={onDelete}
+          disabled={deleting}
+          title="刪除這個 Skill"
+          aria-label={`刪除 ${skill.name}`}
+          style={{
+            font: `600 14px ${FONT.sans}`,
+            color: "#b42318", background: "#fff",
+            border: `1px solid ${TK.divider}`,
+            padding: "5px 10px", borderRadius: 8,
+            cursor: deleting ? "wait" : "pointer",
+            opacity: deleting ? 0.5 : 1,
+            lineHeight: 1,
+          }}
+        >
+          {deleting ? "…" : "✕"}
+        </button>
       </div>
     </div>
   );

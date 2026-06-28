@@ -159,6 +159,26 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
           buildStatus: "awaiting_confirm",
         }));
         log("agent", `提出 ${phases.length} 個 phases，請確認`);
+        // 2026-06-28: Skills v2 auto-confirm. User clicked 用 Pipeline
+        // Builder 編譯 → they already committed; the plan-review gate is
+        // friction. Skip-the-gate by POSTing plan-confirm inline. Use
+        // sid (just received) so we don't depend on buildRef catching up.
+        if (readSkillV2Ctx() && !autoConfirmedRef.current && phases.length > 0) {
+          autoConfirmedRef.current = true;
+          log("info", "Skills v2 embed: 自動確認 plan，agent 繼續建構");
+          void (async () => {
+            try {
+              const r = await fetch("/api/agent/build/plan-confirm", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+                body: JSON.stringify({ sessionId: sid, confirmed: true, phases }),
+              });
+              await consumeStream(r);
+            } catch (ex) {
+              log("error", `auto-confirm failed: ${(ex as Error).message}`);
+            }
+          })();
+        }
       } else if (evType === "goal_plan_confirmed") {
         setBuild((b) => ({ ...b, goalConfirmed: "confirmed", buildStatus: "executing" }));
         log("info", "Plan 已確認，agent 開始建構");
@@ -345,21 +365,12 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
     setTimeout(() => { void submit(ctx.nl); }, 80);
   }, [submit]);
 
-  // ── Auto-confirm v30 goal plan in Skills v2 embed mode ──────────────
-  // The user already committed to building when they clicked "用 Pipeline
-  // Builder 編譯 →" — the plan confirmation gate becomes friction, not
-  // safety. Watch buildStatus → 'awaiting_confirm'; if we're in v2 embed
-  // mode, click the confirm button programmatically once we have phases.
+  // ── Skills v2 auto-confirm plan ─────────────────────────────────────
+  // Now handled inline inside the goal_plan_proposed SSE branch above —
+  // POSTing plan-confirm there uses the freshly-received session_id and
+  // avoids a useEffect race against state propagation. autoConfirmedRef
+  // is declared here so the inline handler can read/set it.
   const autoConfirmedRef = useRef(false);
-  useEffect(() => {
-    if (autoConfirmedRef.current) return;
-    if (build.buildStatus !== "awaiting_confirm") return;
-    if (!build.phases || build.phases.length === 0) return;
-    if (!readSkillV2Ctx()) return;
-    autoConfirmedRef.current = true;
-    log("info", "Skills v2 embed: 自動確認 plan，agent 繼續建構");
-    setTimeout(() => { void onConfirmPlan(build.phases); }, 60);
-  }, [build.buildStatus, build.phases]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Confirm / cancel goal plan ──────────────────────────────────────
   const onConfirmPlan = async (phases: GoalPhase[]) => {

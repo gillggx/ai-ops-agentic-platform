@@ -418,6 +418,17 @@ async def remove_skill_automation(slug: str) -> dict:
         return await _v2(c, "DELETE", f"/{slug}/automation")
 
 
+@mcp.tool()
+async def delete_skill_v2(slug: str) -> dict:
+    """Permanently delete a Skill from the v2 library. Use only when the human
+    explicitly asks to remove the skill. The bound pb_pipeline (if any) is
+    NOT deleted — it stays in pb_pipelines so other references aren't broken.
+    Returns {ok: true} on success."""
+    async with httpx.AsyncClient() as c:
+        await _v2(c, "DELETE", f"/{slug}")
+    return {"ok": True, "deleted": slug}
+
+
 # Auto-check Rule tool group (skill-document CRUD + two-phase confirm) — legacy
 import rules  # noqa: E402
 rules.register(mcp, java=JAVA, shared=SHARED, jit=JIT, public=PUBLIC)

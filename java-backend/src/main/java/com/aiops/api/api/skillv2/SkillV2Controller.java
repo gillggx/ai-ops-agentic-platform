@@ -69,6 +69,13 @@ public class SkillV2Controller {
 		return ApiResponse.ok(service.saveSkill(slug, body));
 	}
 
+	@DeleteMapping("/{slug}")
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public ApiResponse<Void> deleteSkill(@PathVariable String slug) {
+		service.deleteSkill(slug);
+		return ApiResponse.ok(null);
+	}
+
 	/** Apply automation (role + trigger + gate + outcome). NULL trigger → tool. */
 	@PostMapping("/{slug}/automation")
 	@PreAuthorize(Authorities.ADMIN_OR_PE)

@@ -31,3 +31,17 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ slug: strin
     headers: { "Content-Type": "application/json" },
   });
 }
+
+export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ slug: string }> }) {
+  const { slug } = await ctx.params;
+  const headers = await authHeaders();
+  const res = await fetch(`${BASE}/api/v2/skills/${encodeURIComponent(slug)}`, {
+    method: "DELETE",
+    headers,
+    cache: "no-store",
+  });
+  return new Response(await res.text(), {
+    status: res.status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
