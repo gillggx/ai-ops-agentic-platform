@@ -286,7 +286,7 @@ def _slug_from_name(name: str) -> str:
     return f"{base}-{tail}"
 
 
-async def _v2(c: httpx.AsyncClient, method: str, path: str, body: dict | None = None) -> dict:
+async def _v2(c: httpx.AsyncClient, method: str, path: str, body: dict | None = None) -> Any:
     headers = {"Authorization": f"Bearer {SHARED}", "Content-Type": "application/json"}
     url = f"{JAVA}/api/v2/skills{path}"
     if method == "GET":
@@ -300,7 +300,13 @@ async def _v2(c: httpx.AsyncClient, method: str, path: str, body: dict | None = 
     else:
         raise ValueError(f"unsupported method {method}")
     r.raise_for_status()
-    return _unwrap(r)
+    # Bug-fix 2026-06-28: was _unwrap(r) — _unwrap expects a parsed dict
+    # but `r` is httpx.Response, so isinstance(r, dict) was False and the
+    # raw Response object fell through. Cowork's list_skills_v2 saw the
+    # raw object and choked. _get() (line 118) already does r.json() so
+    # that path worked; only _v2 callers were broken.
+    parsed = r.json() if r.content else {}
+    return _unwrap(parsed)
 
 
 @mcp.tool()

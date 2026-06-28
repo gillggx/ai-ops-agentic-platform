@@ -162,10 +162,8 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
         input_binding: Record<string, unknown> | null;
       }
   >(null);
-  const [autoRun, setAutoRun] = useState(false);
   const [toast, setToast] = useState<{ kind: "info" | "error" | "success"; text: string } | null>(null);
   const [nameDraft, setNameDraft] = useState(state.pipeline.name);
-  const autoRunTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // PR-B: locked / active / archived are all read-only. Only draft + validating are editable.
   const readOnly =
@@ -457,25 +455,7 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
     void executeWithInputs(silentInputs);
   }, [state.pipeline.inputs, executeWithInputs]);
 
-  /** UX Fix Pack: Auto-run on change — debounce 1500ms after pipeline mutations.
-   *  Skips when autoRun is off, pipeline empty, readOnly, or pipeline has required
-   *  inputs (would prompt dialog, bad UX on every edit). */
-  useEffect(() => {
-    if (!autoRun) return;
-    if (readOnly) return;
-    if (state.pipeline.nodes.length === 0) return;
-    const hasRequiredInputs = (state.pipeline.inputs ?? []).some(
-      (i) => i.required && i.default == null && i.example == null,
-    );
-    if (hasRequiredInputs) return;
-    if (autoRunTimerRef.current) clearTimeout(autoRunTimerRef.current);
-    autoRunTimerRef.current = setTimeout(() => {
-      void handleRun();
-    }, 1500);
-    return () => {
-      if (autoRunTimerRef.current) clearTimeout(autoRunTimerRef.current);
-    };
-  }, [autoRun, readOnly, state.pipeline.nodes, state.pipeline.edges, state.pipeline.inputs, handleRun]);
+  // Auto-run effect removed 2026-06-28 with the Auto toolbar checkbox.
 
   // PR-B: unified lifecycle transition + back-compat helpers.
   const handleTransition = useCallback(
@@ -769,34 +749,10 @@ function BuilderInner({ mode, pipelineId, initialKind, initialPipelineJson, init
           >
             🔣 Inputs ({state.pipeline.inputs?.length ?? 0})
           </button>
-          <label
-            data-testid="auto-run-toggle"
-            title="改動 pipeline 後延遲 1.5 秒自動執行（避免大 pipeline 卡頓時可關閉）"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-              fontSize: 11,
-              color: autoRun ? "#16A34A" : "#64748B",
-              cursor: readOnly ? "not-allowed" : "pointer",
-              padding: "3px 8px",
-              borderRadius: 3,
-              border: `1px solid ${autoRun ? "#86EFAC" : "#CBD5E1"}`,
-              background: autoRun ? "#F0FDF4" : "#fff",
-              opacity: readOnly ? 0.5 : 1,
-              fontWeight: 500,
-              userSelect: "none",
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={autoRun}
-              onChange={(e) => setAutoRun(e.target.checked)}
-              disabled={readOnly}
-              style={{ margin: 0 }}
-            />
-            Auto
-          </label>
+          {/* Auto-run checkbox removed 2026-06-28 — power-user shortcut with
+              edge-case footguns (auto-firing on big pipelines). Run Full
+              covers the actual flow. Companion autoRun state + effect also
+              deleted. */}
           <button
             data-testid="btn-run"
             data-tour-id="pb-run-full"
