@@ -75,6 +75,58 @@ public class SkillV2Service {
 		return SkillDto.of(repo.save(row));
 	}
 
+	/**
+	 * Cowork one-shot: create the pipeline, create the skill, and bind them
+	 * in ONE transaction. Replaces the error-prone 3-call dance
+	 * (save_pipeline → create_skill_v2 → bind_skill_pipeline) that left
+	 * orphan pipelines in pb_pipelines when cowork stopped after step 1.
+	 *
+	 * <p>Skill lands as {@code status='draft'} — it is NOT active until the
+	 * human opens the Editor and clicks 啟用. Body:
+	 * {slug, name, sub?, nl?, pipeline_json (string), pipeline_kind?}.
+	 */
+	@Transactional
+	public SkillFullDto createWithPipeline(Map<String, Object> body, Long callerUserId) {
+		String slug = String.valueOf(body.getOrDefault("slug", "")).trim();
+		String name = String.valueOf(body.getOrDefault("name", "")).trim();
+		if (slug.isBlank()) throw ApiException.badRequest("slug is required");
+		if (name.isBlank()) throw ApiException.badRequest("name is required");
+		if (repo.findBySlug(slug).isPresent()) {
+			throw ApiException.conflict("slug already exists: " + slug);
+		}
+		Object pjObj = body.get("pipeline_json");
+		if (pjObj == null) throw ApiException.badRequest("pipeline_json is required");
+		String pipelineJson = (pjObj instanceof String s) ? s : JsonUtils.safeWrite(mapper, pjObj);
+		if (pipelineJson == null || pipelineJson.isBlank()) {
+			throw ApiException.badRequest("pipeline_json could not be serialized");
+		}
+
+		// 1. Create pipeline. Skills always map to kind='skill' unless overridden.
+		PipelineEntity pipeline = new PipelineEntity();
+		pipeline.setName(name);
+		pipeline.setDescription("Cowork-built skill pipeline: " + name);
+		pipeline.setPipelineKind(String.valueOf(body.getOrDefault("pipeline_kind", "skill")));
+		pipeline.setPipelineJson(pipelineJson);
+		pipeline.setCreatedBy(callerUserId);
+		pipeline = pipelineRepo.save(pipeline);
+
+		// 2. Create skill (draft, tool).
+		SkillV2Entity row = new SkillV2Entity();
+		row.setSlug(slug);
+		row.setName(name);
+		row.setSub(String.valueOf(body.getOrDefault("sub", "")));
+		row.setNl(String.valueOf(body.getOrDefault("nl", "")));
+		row.setPipelineNodes("[]");
+		row.setHasAlarm(Boolean.FALSE);
+		row.setRole("tool");
+		row.setStatus("draft");
+		row = repo.save(row);
+
+		// 3. Bind (derives pipeline_nodes + has_alarm + in/out types).
+		SkillDto bound = bindPipeline(slug, pipeline.getId());
+		return new SkillFullDto(bound, pipelineJson);
+	}
+
 	// ─── Read ──────────────────────────────────────────────────────────
 
 	@Transactional(readOnly = true)
@@ -206,6 +258,30 @@ public class SkillV2Service {
 	public void deleteSkill(String slug) {
 		SkillV2Entity row = loadBySlug(slug);
 		repo.delete(row);
+	}
+
+	// ─── Activation gate (draft → active) ──────────────────────────────
+
+	/**
+	 * Flip a skill from draft to active. This is the human's explicit
+	 * "啟用" — only active skills will (eventually) be picked up by the
+	 * scheduler. Tool-role skills don't need activation (they're run
+	 * on-demand) but we allow it for uniformity.
+	 */
+	@Transactional
+	public SkillDto activate(String slug) {
+		SkillV2Entity row = loadBySlug(slug);
+		row.setStatus("active");
+		return SkillDto.of(repo.save(row));
+	}
+
+	/** Reverse: active → draft. Stops the skill being scheduled without
+	 *  deleting it or stripping its automation config. */
+	@Transactional
+	public SkillDto deactivate(String slug) {
+		SkillV2Entity row = loadBySlug(slug);
+		row.setStatus("draft");
+		return SkillDto.of(repo.save(row));
 	}
 
 	// ─── Cowork helpers (skill + pipeline one-shot, role pre-check) ──

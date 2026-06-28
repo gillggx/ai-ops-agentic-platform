@@ -29,6 +29,7 @@ export default function SkillEditorPage() {
   const [hasAlarm, setHasAlarm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [opening, setOpening] = useState(false);
+  const [activating, setActivating] = useState(false);
   const [toast, setToast] = useState("");
 
   useEffect(() => { ensurePlexFont(); }, []);
@@ -104,6 +105,24 @@ export default function SkillEditorPage() {
       setSaving(false);
     }
   }, [nl, skill, slug]);
+
+  const handleToggleActive = useCallback(async (activate: boolean) => {
+    if (!skill) return;
+    setActivating(true);
+    try {
+      const res = await fetch(`/api/skills-v2/${encodeURIComponent(slug)}/activate`, {
+        method: activate ? "POST" : "DELETE",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const env = await res.json();
+      setSkill((env?.data ?? env) as Skill);
+      setToast(activate ? "已啟用 — 開始生效" : "已停用 — 回到草稿");
+    } catch (e) {
+      setToast(`操作失敗：${e instanceof Error ? e.message : e}`);
+    } finally {
+      setActivating(false);
+    }
+  }, [skill, slug]);
 
   if (loadError) return <Center>讀取失敗：{loadError}</Center>;
   if (!skill) return <Center>載入中...</Center>;
@@ -222,6 +241,16 @@ export default function SkillEditorPage() {
         {/* System alarm check */}
         <AlarmCheck hasAlarm={hasAlarm} />
 
+        {/* Activation gate — only meaningful once a pipeline is bound */}
+        {skill.pipeline_id != null && (
+          <ActivationBanner
+            status={skill.status}
+            busy={activating}
+            onActivate={() => handleToggleActive(true)}
+            onDeactivate={() => handleToggleActive(false)}
+          />
+        )}
+
         {/* Contract + action */}
         <ContractStrip
           inType={skill.in_type}
@@ -275,6 +304,50 @@ function ColumnFooter({ children }: { children: React.ReactNode }) {
       background: "#fbfbfc",
       display: "flex", justifyContent: "space-between", alignItems: "center",
     }}>{children}</div>
+  );
+}
+
+function ActivationBanner({
+  status, busy, onActivate, onDeactivate,
+}: {
+  status: string; busy: boolean; onActivate: () => void; onDeactivate: () => void;
+}) {
+  const active = status === "active";
+  return (
+    <div style={{
+      marginTop: 14,
+      background: active ? "#f0fdf4" : "#fffbeb",
+      border: `1px solid ${active ? "#bbf7d0" : "#fde68a"}`,
+      borderRadius: 10, padding: "12px 18px",
+      display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16,
+    }}>
+      <div style={{ font: `500 12.5px ${FONT.sans}`, color: active ? "#166534" : "#92400e" }}>
+        {active ? (
+          <>● 已啟用 — 這個 Skill 已生效。</>
+        ) : (
+          <>○ 草稿狀態 — 尚未生效。Review 後按「啟用」才會開始運作。</>
+        )}
+      </div>
+      {active ? (
+        <button onClick={onDeactivate} disabled={busy} style={{
+          font: `600 12px ${FONT.sans}`,
+          color: "#92400e", background: "#fff", border: "1px solid #fde68a",
+          padding: "7px 14px", borderRadius: 8, cursor: busy ? "wait" : "pointer",
+          opacity: busy ? 0.6 : 1, whiteSpace: "nowrap",
+        }}>
+          {busy ? "…" : "停用"}
+        </button>
+      ) : (
+        <button onClick={onActivate} disabled={busy} style={{
+          font: `700 12.5px ${FONT.sans}`,
+          color: "#fff", background: "#16a34a", border: "1px solid #16a34a",
+          padding: "8px 18px", borderRadius: 8, cursor: busy ? "wait" : "pointer",
+          opacity: busy ? 0.6 : 1, whiteSpace: "nowrap",
+        }}>
+          {busy ? "啟用中…" : "啟用 — 開始生效"}
+        </button>
+      )}
+    </div>
   );
 }
 

@@ -117,29 +117,40 @@ or tell them to use the Editor's `用 Agent 重新編譯` button.
 
 **Use case 1 — "幫我查 XXX"**
 ```
-list_blocks() → preview() → assemble pj → validate(pj) → execute(pj) → save_pipeline()
-→ create_skill_v2(name) → bind_skill_pipeline(slug, pipeline_id)
-hand human the view_url at /skills/<slug>. Done.
+list_blocks() → preview() → assemble pj → validate(pj) → execute(pj)
+→ create_skill_with_pipeline(name, pipeline_json, nl)   # ONE call, atomic
+→ tell human: "Skill 已建好（草稿），請到 <view_url> 按『啟用』才生效"
 ```
+DO NOT call save_pipeline + create_skill_v2 + bind_skill_pipeline separately
+for skills — that left orphan pipelines in the PB Library that never showed
+up under /skills. `create_skill_with_pipeline` does all three atomically and
+the skill lands as **draft** (human must activate in the Editor).
+
+`save_pipeline` is now ONLY for building a standalone PB-Library pipeline that
+is NOT going to become a skill. For anything the user calls a "skill", use
+`create_skill_with_pipeline`.
 
 **Use case 2 — "幫我建個自動巡檢"**
 ```
-…same as above, then:
+…assemble pj (MUST include block_step_check verdict)…
+→ create_skill_with_pipeline(name, pipeline_json, nl)   # atomic, lands draft
 → check_skill_ready_for_role(slug, role="patrol")    # MUST — patrol needs has_alarm
 → if ok=False: stop, tell user pipeline 需要 block_step_check verdict
 → automate_skill_patrol(slug, schedule="每 1 小時", target="所有機台",
                         alarm_gate="任一符合 → alarm",
                         outcome="raise alarm · 可被下游接")
+→ tell user to 啟用 in the Editor — automation config alone doesn't run
+  until the skill is active.
 ```
-The pipeline MUST end in `block_step_check` so the server marks `has_alarm=True`.
 
 **Use case 3 — "OOC 時自動檢查"**
 ```
 list_event_sources()  # NOT list_skills_v2 — already filtered to valid upstreams
 → pick upstream_slug from result
-…build pipeline + save_pipeline + create_skill_v2 + bind_skill_pipeline as above…
+…assemble pj → create_skill_with_pipeline(name, pipeline_json, nl)…
 → check_skill_ready_for_role(slug, role="datacheck")
 → automate_skill_event(slug, upstream_slug, alarm_gate, outcome)
+→ tell user to 啟用 in the Editor.
 ```
 
 **Review / advise flow** (user asks "幫我看一下 skill X 在做什麼")

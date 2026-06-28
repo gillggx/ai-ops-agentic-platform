@@ -352,6 +352,47 @@ async def bind_skill_pipeline(slug: str, pipeline_id: int) -> dict:
 
 
 @mcp.tool()
+async def create_skill_with_pipeline(
+    name: str,
+    pipeline_json: dict,
+    sub: str = "",
+    nl: str = "",
+) -> dict:
+    """PREFERRED way to turn an assembled pipeline into a Skill — does
+    save_pipeline + create_skill_v2 + bind_skill_pipeline in ONE atomic
+    server transaction.
+
+    USE THIS instead of calling save_pipeline → create_skill_v2 →
+    bind_skill_pipeline separately. Calling them separately is error-prone:
+    if you stop after save_pipeline the pipeline becomes an orphan in the
+    PB Library and never shows up under /skills.
+
+    The skill lands as status='draft' — it is NOT active yet. ALWAYS tell
+    the human: "Skill 已建好（草稿狀態），請到 <view_url> 按『啟用』才會生效。"
+    You cannot activate it yourself — activation is a human action in the UI.
+
+    Returns {skill: {slug, name, status, ...}, pipeline_json, view_url}.
+    After this, automation (automate_skill_patrol/event/datacheck) is a
+    SEPARATE follow-up only if the human asked for scheduling."""
+    slug = _slug_from_name(name)
+    body = {"slug": slug, "name": name, "sub": sub, "nl": nl, "pipeline_json": pipeline_json}
+    async with httpx.AsyncClient() as c:
+        d = await _v2(c, "POST", "/with-pipeline", body)
+    return {**d, "view_url": f"{PUBLIC}/skills/{slug}",
+            "_human_message": f"Skill「{name}」已建好（草稿狀態），請到 {PUBLIC}/skills/{slug} 按『啟用』才會生效。"}
+
+
+@mcp.tool()
+async def activate_skill(slug: str) -> dict:
+    """NOTE: prefer letting the HUMAN activate via the UI button. This tool
+    exists for completeness but activation is meant to be a human review
+    gate — only call it if the human EXPLICITLY says '幫我啟用' / 'activate it'.
+    Flips status draft → active."""
+    async with httpx.AsyncClient() as c:
+        return await _v2(c, "POST", f"/{slug}/activate")
+
+
+@mcp.tool()
 async def automate_skill_patrol(
     slug: str,
     schedule: str = "每 1 小時",

@@ -1,9 +1,10 @@
 package com.aiops.api.api.skillv2;
 
+import com.aiops.api.auth.AuthPrincipal;
 import com.aiops.api.auth.Authorities;
 import com.aiops.api.common.ApiResponse;
-import com.aiops.api.domain.skillv2.SkillV2Entity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -39,6 +40,34 @@ public class SkillV2Controller {
 	@PreAuthorize(Authorities.ADMIN_OR_PE)
 	public ApiResponse<SkillV2Service.SkillDto> create(@RequestBody Map<String, Object> body) {
 		return ApiResponse.ok(service.create(body));
+	}
+
+	/**
+	 * Cowork one-shot: create pipeline + skill + bind in one transaction.
+	 * Lands as status='draft' (NOT active). Body:
+	 * {slug, name, sub?, nl?, pipeline_json, pipeline_kind?}.
+	 */
+	@PostMapping("/with-pipeline")
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public ApiResponse<SkillV2Service.SkillFullDto> createWithPipeline(
+			@RequestBody Map<String, Object> body,
+			@AuthenticationPrincipal AuthPrincipal caller) {
+		Long uid = caller != null ? caller.userId() : null;
+		return ApiResponse.ok(service.createWithPipeline(body, uid));
+	}
+
+	/** Human pressed 啟用 — draft → active. */
+	@PostMapping("/{slug}/activate")
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public ApiResponse<SkillV2Service.SkillDto> activate(@PathVariable String slug) {
+		return ApiResponse.ok(service.activate(slug));
+	}
+
+	/** Stop scheduling — active → draft (config preserved). */
+	@PostMapping("/{slug}/deactivate")
+	@PreAuthorize(Authorities.ADMIN_OR_PE)
+	public ApiResponse<SkillV2Service.SkillDto> deactivate(@PathVariable String slug) {
+		return ApiResponse.ok(service.deactivate(slug));
 	}
 
 	@GetMapping("/{slug}")

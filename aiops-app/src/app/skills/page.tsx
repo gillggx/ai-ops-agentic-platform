@@ -204,17 +204,22 @@ function FilterChip({
 function SkillCard({ skill, onDelete, deleting }: { skill: Skill; onDelete: () => void; deleting: boolean }) {
   const c = ROLE_COLORS[skill.role];
   const trigger = parseTrigger(skill.trigger_config);
+  const isActive = skill.status === "active";
   return (
     <div style={{
       display: "flex", alignItems: "center", gap: 16,
       background: TK.card, border: `1px solid ${TK.divider}`,
       borderRadius: 11, padding: "14px 18px",
     }}>
-      {/* dot */}
-      <span style={{
-        width: 9, height: 9, borderRadius: 5,
-        background: c.color, flexShrink: 0,
-      }} />
+      {/* status dot — draft = hollow gray, active = filled role color */}
+      <span
+        title={isActive ? "已啟用" : "草稿（未啟用）"}
+        style={{
+          width: 9, height: 9, borderRadius: 5, flexShrink: 0,
+          background: isActive ? c.color : "transparent",
+          border: isActive ? "none" : `1.5px solid #cbd5e1`,
+        }}
+      />
 
       {/* main column */}
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -229,6 +234,15 @@ function SkillCard({ skill, onDelete, deleting }: { skill: Skill; onDelete: () =
           }}>
             {roleLabel(skill.role)}
           </span>
+          {!isActive && (
+            <span style={{
+              font: `600 10px ${FONT.mono}`,
+              color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a",
+              padding: "3px 7px", borderRadius: 6, whiteSpace: "nowrap",
+            }}>
+              草稿
+            </span>
+          )}
         </div>
         <div style={{ fontSize: 12.5, color: TK.body, marginTop: 4 }}>{skill.sub}</div>
         <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 8, fontSize: 11.5, color: TK.faint }}>
