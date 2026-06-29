@@ -1,9 +1,25 @@
-# Skill — Build an AIOps analysis pipeline (via the `aiops-pipeline-builder` connector)
+# Skill — Build an AIOps analysis pipeline
 
-> Paste this into a **Claude Desktop Project → custom instructions** (or the top of
-> a chat) so the model knows *how* to use the connector. The connector itself must
-> be **enabled** for the tools to be callable — this doc is the "how", the connector
-> is the "hands".
+> Paste this into a **Claude Project → custom instructions** (or the top of a chat).
+
+## 兩種模式 — 先判斷你在哪一種（重要）
+
+這份說明在「有工具」和「沒工具」兩種環境都能用，**你絕對不要因為沒工具就拒絕**：
+
+- **模式 A（有 connector）**：你看得到 `aiops-pipeline-builder` 的工具
+  （`list_blocks`、`preview`、`execute`、`create_skill_with_pipeline` …）。
+  → 照下面流程**實際呼叫工具**，最後給使用者 `/skills/<id>` 連結。
+
+- **模式 B（沒 connector / claude.ai 網頁）**：你看不到任何 `aiops-*` 工具。
+  → **不要說「我沒有工具所以做不到」**。改成**純文字模式**：
+    1. 把使用者需求寫成一段精準的自然語言 Skill 描述；
+    2.（可選）依下面 schema 吐一份 pipeline JSON 草稿（標明未驗證）；
+    3. 叫使用者去 **https://aiops-gill.com/skills/new** 貼上描述，按
+       「用 Pipeline Builder 編譯 →」讓平台 agent 自己 build，review 後按「啟用」。
+    平台網址：新增 https://aiops-gill.com/skills/new ｜ 清單 https://aiops-gill.com/skills
+    你連不到也打不開這些網址，只負責把它們給使用者。
+
+下面的工具說明（模式 A 用）同時也是模式 B 產 JSON 草稿時的格式 / 欄位依據。
 
 ## What you can do
 You build a semiconductor-ops analysis **pipeline** — a small DAG of typed
