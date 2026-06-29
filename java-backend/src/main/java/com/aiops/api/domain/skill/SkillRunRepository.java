@@ -11,30 +11,9 @@ import java.util.Optional;
 
 @Repository
 public interface SkillRunRepository extends JpaRepository<SkillRunEntity, Long> {
-    List<SkillRunEntity> findBySkillIdOrderByTriggeredAtDesc(Long skillId);
-
-    List<SkillRunEntity> findBySkillIdAndIsTestOrderByTriggeredAtDesc(Long skillId, Boolean isTest);
-
-    @Query("""
-           SELECT COUNT(r) FROM SkillRunEntity r
-           WHERE r.skillId = :skillId
-             AND r.isTest = false
-             AND r.triggeredAt >= :since
-           """)
-    long countNonTestSince(@Param("skillId") Long skillId, @Param("since") OffsetDateTime since);
-
-    /**
-     * v6.1 (2026-05-20): used by java-scheduler SkillScheduleService to decide
-     * whether a schedule-mode skill is "due" — compare now() against last
-     * triggered_at WHERE triggered_by LIKE 'system_%'. Manual + test runs
-     * are excluded so user intervention doesn't reset the schedule clock.
-     */
-    @Query("""
-           SELECT MAX(r.triggeredAt) FROM SkillRunEntity r
-           WHERE r.skillId = :skillId
-             AND r.triggeredBy LIKE 'system_%'
-           """)
-    Optional<OffsetDateTime> findLastSystemTriggeredAt(@Param("skillId") Long skillId);
+    // Legacy skillId-based queries (findBySkillId*, countNonTestSince,
+    // findLastSystemTriggeredAt) removed in the 2026-06-29 sunset along with
+    // the skill_runs.skill_id column (V68). v2 uses the *V2 variants below.
 
     /** Phase A (V67): same clock query keyed on skills_v2 id. */
     @Query("""

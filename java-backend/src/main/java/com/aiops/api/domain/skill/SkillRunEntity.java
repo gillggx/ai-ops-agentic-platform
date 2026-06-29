@@ -28,11 +28,7 @@ public class SkillRunEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // Legacy skill_documents id (null for v2 runs). V67 relaxed NOT NULL.
-    @Column(name = "skill_id")
-    private Long skillId;
-
-    // skills_v2 id (null for legacy runs). Exactly one of skillId / skillV2Id set.
+    // skills_v2 id. (Legacy skill_id column dropped in the 2026-06-29 sunset, V68.)
     @Column(name = "skill_v2_id")
     private Long skillV2Id;
 
