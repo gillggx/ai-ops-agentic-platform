@@ -1,6 +1,5 @@
 package com.aiops.api.api.handoff;
 
-import com.aiops.api.api.skill.SkillDocumentService;
 import com.aiops.api.common.ApiException;
 import com.aiops.api.domain.handoff.UiHandoffEntity;
 import com.aiops.api.domain.handoff.UiHandoffRepository;
@@ -44,12 +43,10 @@ public class HandoffService {
     private static final SecureRandom RNG = new SecureRandom();
 
     private final UiHandoffRepository repo;
-    private final SkillDocumentService skills;
     private final List<SseEmitter> emitters = new CopyOnWriteArrayList<>();
 
-    public HandoffService(UiHandoffRepository repo, SkillDocumentService skills) {
+    public HandoffService(UiHandoffRepository repo) {
         this.repo = repo;
-        this.skills = skills;
     }
 
     private static String newId() {
@@ -107,9 +104,9 @@ public class HandoffService {
                     "handoff is " + h.getStatus() + " and can no longer be resolved");
         }
         switch (h.getKind()) {
-            case "confirm_delete" -> skills.delete(h.getTargetRef());
-            case "confirm_disable" -> skills.setStatus(h.getTargetRef(), "draft");
-            case "confirm_activate" -> skills.setStatus(h.getTargetRef(), "stable");
+            // Legacy skill_documents confirm_delete/disable/activate removed in
+            // the 2026-06-29 sunset — the rule_* flow that created them is gone.
+            // skills_v2 delete/activate go through the v2 API directly, not a handoff.
             case "review_rule", "view_detail" -> { /* no mutation — just mark reviewed */ }
             default -> throw new ApiException(HttpStatus.BAD_REQUEST, "validation_error",
                     "unknown handoff kind " + h.getKind());

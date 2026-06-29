@@ -4,10 +4,10 @@ import com.aiops.api.common.JsonUtils;
 import com.aiops.api.domain.alarm.AlarmEntity;
 import com.aiops.api.domain.alarm.AlarmRepository;
 import com.aiops.api.domain.event.GeneratedEventRepository;
-import com.aiops.api.domain.skill.SkillDocumentEntity;
-import com.aiops.api.domain.skill.SkillDocumentRepository;
 import com.aiops.api.domain.skill.SkillRunEntity;
 import com.aiops.api.domain.skill.SkillRunRepository;
+import com.aiops.api.domain.skillv2.SkillV2Entity;
+import com.aiops.api.domain.skillv2.SkillV2Repository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -43,13 +43,13 @@ import java.util.Set;
 public class PatrolActivityService {
 
 	private final SkillRunRepository runRepo;
-	private final SkillDocumentRepository skillRepo;
+	private final SkillV2Repository skillRepo;
 	private final AlarmRepository alarmRepo;
 	private final GeneratedEventRepository eventRepo;
 	private final ObjectMapper mapper;
 
 	public PatrolActivityService(SkillRunRepository runRepo,
-	                             SkillDocumentRepository skillRepo,
+	                             SkillV2Repository skillRepo,
 	                             AlarmRepository alarmRepo,
 	                             GeneratedEventRepository eventRepo,
 	                             ObjectMapper mapper) {
@@ -68,16 +68,16 @@ public class PatrolActivityService {
 		boolean hasMore = runs.size() > q.limit();
 		if (hasMore) runs = runs.subList(0, q.limit());
 
-		// Bulk-load skills + alarms for the page in one shot each.
+		// Bulk-load skills (v2) + alarms for the page in one shot each.
 		Set<Long> skillIds = new HashSet<>();
 		Set<Long> runIds = new HashSet<>();
 		for (SkillRunEntity r : runs) {
-			skillIds.add(r.getSkillId());
+			if (r.getSkillV2Id() != null) skillIds.add(r.getSkillV2Id());
 			runIds.add(r.getId());
 		}
-		Map<Long, SkillDocumentEntity> skillsById = new HashMap<>();
+		Map<Long, SkillV2Entity> skillsById = new HashMap<>();
 		if (!skillIds.isEmpty()) {
-			for (SkillDocumentEntity s : skillRepo.findAllById(skillIds)) {
+			for (SkillV2Entity s : skillRepo.findAllById(skillIds)) {
 				skillsById.put(s.getId(), s);
 			}
 		}
@@ -94,9 +94,10 @@ public class PatrolActivityService {
 		// LOWER(:p), and event_type lives in trigger_config JSON.
 		List<Item> items = new ArrayList<>(runs.size());
 		for (SkillRunEntity r : runs) {
-			SkillDocumentEntity skill = skillsById.get(r.getSkillId());
+			SkillV2Entity skill = skillsById.get(r.getSkillV2Id());
 			if (q.skillStage() != null && !q.skillStage().isBlank()) {
-				String runStage = skill != null ? skill.getStage() : null;
+				// v2 has no "stage" — closest concept is role (tool/patrol/datacheck).
+				String runStage = skill != null ? skill.getRole() : null;
 				if (runStage == null || !q.skillStage().equalsIgnoreCase(runStage)) continue;
 			}
 			String triggerEventName = extractTriggerEventName(skill);
@@ -132,7 +133,7 @@ public class PatrolActivityService {
 	// ─── Item assembly ──────────────────────────────────────────────────
 
 	private Item buildItem(SkillRunEntity r,
-	                       SkillDocumentEntity skill,
+	                       SkillV2Entity skill,
 	                       String triggerEventName,
 	                       AlarmEntity alarm) {
 		Map<String, Object> payload = JsonUtils.parseObject(mapper, r.getTriggerPayload());
@@ -144,14 +145,14 @@ public class PatrolActivityService {
 				.count();
 
 		String slug = skill != null ? skill.getSlug() : null;
-		String title = skill != null ? skill.getTitle() : null;
-		String stage = skill != null ? skill.getStage() : null;
+		String title = skill != null ? skill.getName() : null;   // v2: name (not title)
+		String stage = skill != null ? skill.getRole() : null;   // v2: role (not stage)
 
 		Long alarmId = alarm != null ? alarm.getId() : null;
 
 		return new Item(
 				r.getId(),
-				r.getSkillId(),
+				r.getSkillV2Id(),
 				slug,
 				title,
 				stage,
@@ -199,10 +200,12 @@ public class PatrolActivityService {
 		}
 	}
 
-	private String extractTriggerEventName(SkillDocumentEntity skill) {
+	private String extractTriggerEventName(SkillV2Entity skill) {
 		if (skill == null) return null;
 		Map<String, Object> cfg = JsonUtils.parseObject(mapper, skill.getTriggerConfig());
+		// v2 raw-event trigger uses `event`; alarm-driven uses `source`.
 		Object ev = cfg.get("event");
+		if (ev == null) ev = cfg.get("source");
 		return ev != null ? String.valueOf(ev) : null;
 	}
 

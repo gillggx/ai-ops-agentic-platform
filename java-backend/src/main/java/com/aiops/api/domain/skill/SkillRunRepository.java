@@ -62,7 +62,8 @@ public interface SkillRunRepository extends JpaRepository<SkillRunEntity, Long> 
            SELECT r FROM SkillRunEntity r
            WHERE r.triggeredAt >= :since
              AND r.triggeredAt < :until
-             AND (:skillId IS NULL OR r.skillId = :skillId)
+             AND r.skillV2Id IS NOT NULL
+             AND (:skillId IS NULL OR r.skillV2Id = :skillId)
              AND (:cursor IS NULL OR r.id < :cursor)
            ORDER BY r.id DESC
            """)
@@ -80,10 +81,11 @@ public interface SkillRunRepository extends JpaRepository<SkillRunEntity, Long> 
                 org.springframework.data.domain.PageRequest.of(0, limit));
     }
 
-    /** Funnel: total skill_runs in window. */
+    /** Funnel: total v2 skill_runs in window. */
     @Query("""
            SELECT COUNT(r) FROM SkillRunEntity r
            WHERE r.triggeredAt >= :since AND r.triggeredAt < :until
+             AND r.skillV2Id IS NOT NULL
            """)
     long countByTriggeredAtBetween(@Param("since") OffsetDateTime since,
                                     @Param("until") OffsetDateTime until);
@@ -99,15 +101,17 @@ public interface SkillRunRepository extends JpaRepository<SkillRunEntity, Long> 
     @Query(value = """
            SELECT COUNT(*) FROM skill_runs r
            WHERE r.triggered_at >= :since AND r.triggered_at < :until
+             AND r.skill_v2_id IS NOT NULL
              AND r.step_results LIKE '%"status":"pass"%'
            """, nativeQuery = true)
     long countByTriggeredAtBetweenAndStepPassed(@Param("since") OffsetDateTime since,
                                                  @Param("until") OffsetDateTime until);
 
-    /** Funnel: how many runs got their alarm suppressed for the given reason. */
+    /** Funnel: how many v2 runs got their alarm suppressed for the given reason. */
     @Query("""
            SELECT COUNT(r) FROM SkillRunEntity r
            WHERE r.triggeredAt >= :since AND r.triggeredAt < :until
+             AND r.skillV2Id IS NOT NULL
              AND r.alarmSkippedReason = :reason
            """)
     long countByTriggeredAtBetweenAndAlarmSkippedReason(@Param("since") OffsetDateTime since,

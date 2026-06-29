@@ -9,8 +9,6 @@ import com.aiops.api.domain.skill.ExecutionLogEntity;
 import com.aiops.api.domain.skill.ExecutionLogRepository;
 import com.aiops.api.domain.skill.SkillDefinitionEntity;
 import com.aiops.api.domain.skill.SkillDefinitionRepository;
-import com.aiops.api.domain.skill.SkillDocumentEntity;
-import com.aiops.api.domain.skill.SkillDocumentRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -38,7 +36,6 @@ public class AlarmEnrichmentService {
 
 	private final ExecutionLogRepository execLogRepo;
 	private final SkillDefinitionRepository skillRepo;
-	private final SkillDocumentRepository skillDocRepo;
 	private final PipelineRunRepository pipelineRunRepo;
 	private final PipelineRepository pipelineRepo;
 	private final ObjectMapper mapper;
@@ -46,14 +43,12 @@ public class AlarmEnrichmentService {
 
 	public AlarmEnrichmentService(ExecutionLogRepository execLogRepo,
 	                              SkillDefinitionRepository skillRepo,
-	                              SkillDocumentRepository skillDocRepo,
 	                              PipelineRunRepository pipelineRunRepo,
 	                              PipelineRepository pipelineRepo,
 	                              ObjectMapper mapper,
 	                              ChartMiddleware chartMiddleware) {
 		this.execLogRepo = execLogRepo;
 		this.skillRepo = skillRepo;
-		this.skillDocRepo = skillDocRepo;
 		this.pipelineRunRepo = pipelineRunRepo;
 		this.pipelineRepo = pipelineRepo;
 		this.mapper = mapper;
@@ -503,30 +498,10 @@ public class AlarmEnrichmentService {
 	private record StepMeta(int order, String text) {}
 
 	private Map<String, StepMeta> loadStepMeta(Long skillId) {
-		if (skillId == null) return Map.of();
-		try {
-			Optional<SkillDocumentEntity> opt = skillDocRepo.findById(skillId);
-			if (opt.isEmpty()) return Map.of();
-			String stepsJson = opt.get().getSteps();
-			if (stepsJson == null || stepsJson.isBlank()) return Map.of();
-			JsonNode arr = parseJsonNode(stepsJson);
-			if (arr == null || !arr.isArray()) return Map.of();
-			Map<String, StepMeta> out = new HashMap<>();
-			for (int i = 0; i < arr.size(); i++) {
-				JsonNode node = arr.get(i);
-				if (node == null) continue;
-				String id = node.has("id") ? node.get("id").asText("") : "";
-				if (id.isBlank()) continue;
-				String text = node.has("text") ? node.get("text").asText("") : "";
-				int order = node.has("order") && node.get("order").isNumber()
-						? node.get("order").asInt() : i + 1;
-				out.put(id, new StepMeta(order, text));
-			}
-			return out;
-		} catch (RuntimeException ex) {
-			log.debug("loadStepMeta({}) failed: {}", skillId, ex.toString());
-			return Map.of();
-		}
+		// Legacy skill_documents.steps removed in the 2026-06-29 sunset. The v2
+		// model is 1-pipeline (no per-step text metadata), so there is nothing
+		// to load — per-step data views come from the pipeline exec log instead.
+		return Map.of();
 	}
 
 	private static String formatStepTitle(int order, String desc) {
