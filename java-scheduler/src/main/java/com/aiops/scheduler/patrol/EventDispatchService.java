@@ -7,8 +7,6 @@ import com.aiops.api.domain.patrol.AutoPatrolEntity;
 import com.aiops.api.domain.patrol.AutoPatrolRepository;
 import com.aiops.api.domain.pipeline.PipelineAutoCheckTriggerEntity;
 import com.aiops.api.domain.pipeline.PipelineAutoCheckTriggerRepository;
-import com.aiops.api.domain.skill.SkillDocumentEntity;
-import com.aiops.api.domain.skill.SkillDocumentRepository;
 import com.aiops.scheduler.lock.DistributedLockService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -52,8 +50,6 @@ public class EventDispatchService {
 	private final AutoCheckExecutor autoCheckExecutor;
 	private final ObjectMapper objectMapper;
 	private final DistributedLockService lockService;
-	// v6.1 (2026-05-20) — skill trigger pathway (skill_documents.trigger_config)
-	private final SkillDocumentRepository skillRepo;
 	private final EventTypeRepository eventTypeRepo;
 	private final SkillApiClient skillApiClient;
 	private final com.aiops.api.domain.skillv2.SkillV2Repository skillV2Repo;
@@ -64,7 +60,6 @@ public class EventDispatchService {
 	                            AutoCheckExecutor autoCheckExecutor,
 	                            ObjectMapper objectMapper,
 	                            DistributedLockService lockService,
-	                            SkillDocumentRepository skillRepo,
 	                            EventTypeRepository eventTypeRepo,
 	                            SkillApiClient skillApiClient,
 	                            com.aiops.api.domain.skillv2.SkillV2Repository skillV2Repo) {
@@ -74,7 +69,6 @@ public class EventDispatchService {
 		this.autoCheckExecutor = autoCheckExecutor;
 		this.objectMapper = objectMapper;
 		this.lockService = lockService;
-		this.skillRepo = skillRepo;
 		this.eventTypeRepo = eventTypeRepo;
 		this.skillApiClient = skillApiClient;
 		this.skillV2Repo = skillV2Repo;
@@ -143,53 +137,8 @@ public class EventDispatchService {
 		}
 	}
 
-	/**
-	 * v6.1 (2026-05-20): event-mode skills migration path. Looks up active
-	 * skills whose trigger_config = {"type":"event", "event":"<name>"} and
-	 * fires each via java-api /internal/skills/by-slug/{slug}/run-system.
-	 *
-	 * <p>Filters in memory because trigger_config is stored as TEXT; with
-	 * typical N < 50 skills this is negligible. Same per-skill lock pattern
-	 * as auto_patrols to dedupe with the cron path (SkillScheduleService).
-	 */
-	private void dispatchToSkillsByEvent(Long eventTypeId, Map<String, Object> payload) {
-		EventTypeEntity type = eventTypeRepo.findById(eventTypeId).orElse(null);
-		if (type == null) {
-			log.debug("dispatchToSkillsByEvent: event_type_id={} not found in event_types", eventTypeId);
-			return;
-		}
-		String eventName = type.getName();
-		if (eventName == null || eventName.isBlank()) return;
-
-		List<SkillDocumentEntity> stable = skillRepo.findByStatus("stable");
-		List<SkillDocumentEntity> matchedSkills = stable.stream().filter(s -> {
-			Map<String, Object> cfg = parseJson(s.getTriggerConfig());
-			if (cfg.isEmpty()) return false;
-			String t = String.valueOf(cfg.get("type"));
-			String ev = String.valueOf(cfg.get("event"));
-			return "event".equals(t) && eventName.equals(ev);
-		}).toList();
-		if (matchedSkills.isEmpty()) {
-			log.debug("dispatchToSkillsByEvent: event={} no matching event-mode skills", eventName);
-			return;
-		}
-		log.info("dispatchToSkillsByEvent: event={} → {} skill(s)", eventName, matchedSkills.size());
-		for (SkillDocumentEntity skill : matchedSkills) {
-			String key = "skill:" + skill.getId();
-			boolean ran = lockService.runWithLock(key, Duration.ofMinutes(5), () -> {
-				try {
-					skillApiClient.dispatchSkill(skill.getSlug(), "system_event", payload);
-				} catch (Exception ex) {
-					log.warn("dispatchToSkillsByEvent: skill {} threw: {}",
-							skill.getSlug(), ex.getMessage(), ex);
-				}
-			});
-			if (!ran) {
-				log.debug("dispatchToSkillsByEvent: skill {} skipped — another fire holds the lock",
-						skill.getSlug());
-			}
-		}
-	}
+	// Legacy dispatchToSkillsByEvent (skill_documents event triggers) removed in
+	// the 2026-06-29 sunset — replaced by dispatchToSkillsV2ByRawEvent.
 
 	/** Alarm write → auto_check pipelines. */
 	@Async

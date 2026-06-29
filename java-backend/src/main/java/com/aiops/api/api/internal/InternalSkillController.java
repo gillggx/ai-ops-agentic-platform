@@ -1,9 +1,6 @@
 package com.aiops.api.api.internal;
 
-import com.aiops.api.api.skill.SkillRunnerService;
-import com.aiops.api.auth.AuthPrincipal;
 import com.aiops.api.auth.InternalAuthority;
-import com.aiops.api.auth.Role;
 import com.aiops.api.common.ApiException;
 import com.aiops.api.common.ApiResponse;
 import com.aiops.api.domain.skill.SkillDefinitionEntity;
@@ -11,10 +8,8 @@ import com.aiops.api.domain.skill.SkillDefinitionRepository;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /** Skill lookup for LangGraph tool_dispatcher inside the sidecar. */
 @RestController
@@ -23,14 +18,11 @@ import java.util.Set;
 public class InternalSkillController {
 
 	private final SkillDefinitionRepository repository;
-	private final SkillRunnerService runnerService;
 	private final com.aiops.api.api.skillv2.SkillV2RunnerService v2Runner;
 
 	public InternalSkillController(SkillDefinitionRepository repository,
-	                               SkillRunnerService runnerService,
 	                               com.aiops.api.api.skillv2.SkillV2RunnerService v2Runner) {
 		this.repository = repository;
-		this.runnerService = runnerService;
 		this.v2Runner = v2Runner;
 	}
 
@@ -65,41 +57,9 @@ public class InternalSkillController {
 				.orElseThrow(() -> ApiException.notFound("skill"))));
 	}
 
-	/**
-	 * v6.1 (2026-05-20): system-fire endpoint for java-scheduler. Triggers a
-	 * skill end-to-end with triggered_by tag (defaults "system" if not given).
-	 * Fire-and-forget — returns immediately with 202-shaped ack while the
-	 * runner executes asynchronously on the elastic scheduler.
-	 *
-	 * <p>Body: {"trigger_payload": {...}, "triggered_by": "system_schedule"}
-	 */
-	@PostMapping("/by-slug/{slug}/run-system")
-	public ApiResponse<Map<String, Object>> runFromSystem(
-			@PathVariable String slug,
-			@RequestBody(required = false) Map<String, Object> body
-	) {
-		Map<String, Object> b = body != null ? body : Map.of();
-		@SuppressWarnings("unchecked")
-		Map<String, Object> payload = b.get("trigger_payload") instanceof Map<?, ?> p
-				? (Map<String, Object>) p : Map.of();
-		String triggeredBy = b.get("triggered_by") instanceof String s && !s.isBlank()
-				? s : "system";
-
-		// Synthetic system principal — userId=0 surfaces in audit; IT_ADMIN
-		// role satisfies any downstream @PreAuthorize on the sidecar path.
-		AuthPrincipal systemCaller = new AuthPrincipal(0L, "system", Set.of(Role.IT_ADMIN));
-
-		// Fire-and-forget: subscribe so doOnSubscribe runs (creates SkillRunEntity
-		// + kicks off runWithSink on elastic scheduler), discard event stream.
-		runnerService.run(slug, payload, false, systemCaller, triggeredBy).subscribe();
-
-		Map<String, Object> resp = new HashMap<>();
-		resp.put("ok", true);
-		resp.put("slug", slug);
-		resp.put("triggered_by", triggeredBy);
-		resp.put("status", "dispatched");
-		return ApiResponse.ok(resp);
-	}
+	// Legacy by-slug/run-system (SkillRunnerService, skill_documents model)
+	// removed in the 2026-06-29 sunset. The scheduler now fires v2 skills via
+	// /internal/skills/v2/{id}/run-system above.
 
 	public record Dto(Long id, String name, String description, String triggerMode, String stepsMapping,
 	                  String inputSchema, String outputSchema, String pipelineConfig,

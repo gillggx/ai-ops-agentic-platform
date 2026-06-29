@@ -1,6 +1,5 @@
 package com.aiops.api.api.admin;
 
-import com.aiops.api.api.skill.SkillRunnerService;
 import com.aiops.api.auth.Authorities;
 import com.aiops.api.config.AiopsProperties;
 import com.aiops.api.domain.agentknowledge.AgentKnowledgeRepository;
@@ -64,7 +63,6 @@ public class SystemMonitorAliasController {
 	private final BlockRepository blockRepo;
 	private final BlockDocRepository blockDocRepo;
 	private final McpDefinitionRepository mcpRepo;
-	private final SkillRunnerService skillRunner;
 	private final String sidecarServiceToken;
 
 	/** Per-service host for monitor probes. Defaults to {@code 127.0.0.1}
@@ -102,7 +100,6 @@ public class SystemMonitorAliasController {
 	                                    BlockRepository blockRepo,
 	                                    BlockDocRepository blockDocRepo,
 	                                    McpDefinitionRepository mcpRepo,
-	                                    SkillRunnerService skillRunner,
 	                                    AiopsProperties props) {
 		this.sidecarServiceToken = props.sidecar() != null && props.sidecar().python() != null
 				? props.sidecar().python().serviceToken() : "";
@@ -121,7 +118,6 @@ public class SystemMonitorAliasController {
 		this.blockRepo = blockRepo;
 		this.blockDocRepo = blockDocRepo;
 		this.mcpRepo = mcpRepo;
-		this.skillRunner = skillRunner;
 	}
 
 	@GetMapping
@@ -147,7 +143,7 @@ public class SystemMonitorAliasController {
 		scheduler.put("status", "JAVA");
 		scheduler.put("note", "aiops-java-scheduler unit handles cron + event dispatch");
 		bg.put("cron_scheduler", scheduler);
-		bg.put("skill_runner", skillRunner.alarmEmitStats());
+		// legacy skill_runner (SkillAlarmEmitter) stats removed in 2026-06-29 sunset
 
 		// ── DB stats ─────────────────────────────────────────────────────
 		Map<String, Object> dbStats = new LinkedHashMap<>();

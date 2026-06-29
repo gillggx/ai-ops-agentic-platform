@@ -1,7 +1,5 @@
 package com.aiops.scheduler.patrol;
 
-import com.aiops.api.domain.skill.SkillDocumentEntity;
-import com.aiops.api.domain.skill.SkillDocumentRepository;
 import com.aiops.api.domain.skill.SkillRunRepository;
 import com.aiops.scheduler.lock.DistributedLockService;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -46,20 +44,17 @@ public class SkillScheduleService {
 
 	private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
 
-	private final SkillDocumentRepository skillRepo;
 	private final SkillRunRepository runRepo;
 	private final SkillApiClient skillApiClient;
 	private final DistributedLockService lockService;
 	private final ObjectMapper objectMapper;
 	private final com.aiops.api.domain.skillv2.SkillV2Repository skillV2Repo;
 
-	public SkillScheduleService(SkillDocumentRepository skillRepo,
-	                            SkillRunRepository runRepo,
+	public SkillScheduleService(SkillRunRepository runRepo,
 	                            SkillApiClient skillApiClient,
 	                            DistributedLockService lockService,
 	                            ObjectMapper objectMapper,
 	                            com.aiops.api.domain.skillv2.SkillV2Repository skillV2Repo) {
-		this.skillRepo = skillRepo;
 		this.runRepo = runRepo;
 		this.skillApiClient = skillApiClient;
 		this.lockService = lockService;
@@ -118,54 +113,8 @@ public class SkillScheduleService {
 		return !OffsetDateTime.now().isBefore(last.get().plus(interval));
 	}
 
-	@SuppressWarnings("unchecked")
-	private boolean isDue(SkillDocumentEntity skill, Map<String, Object> cfg) {
-		Object schedule = cfg.get("schedule");
-		if (!(schedule instanceof Map)) return false;
-		Map<String, Object> sm = (Map<String, Object>) schedule;
-		String mode = String.valueOf(sm.getOrDefault("mode", "hourly"));
-		int every = parseInt(sm.get("every"), 1);
-		Duration interval = switch (mode) {
-			case "hourly" -> Duration.ofHours(Math.max(1, every));
-			case "daily"  -> Duration.ofDays(Math.max(1, every));
-			default -> {
-				// Unsupported (cron etc) — first-iteration cap; log once-ish then skip
-				log.debug("SkillScheduleService: skill {} mode={} not yet supported, skipping",
-						skill.getSlug(), mode);
-				yield Duration.ZERO;
-			}
-		};
-		if (interval.isZero()) return false;
-		Optional<OffsetDateTime> last = runRepo.findLastSystemTriggeredAt(skill.getId());
-		if (last.isEmpty()) {
-			// Never fired by scheduler — fire now to start the clock
-			return true;
-		}
-		OffsetDateTime due = last.get().plus(interval);
-		return !OffsetDateTime.now().isBefore(due);
-	}
-
-	private boolean tryFire(SkillDocumentEntity skill) {
-		String key = "skill:" + skill.getId();
-		final boolean[] result = {false};
-		boolean acquired = lockService.runWithLock(key, Duration.ofMinutes(5), () -> {
-			try {
-				result[0] = skillApiClient.dispatchSkill(
-						skill.getSlug(), "system_schedule", Map.of());
-				if (result[0]) {
-					log.info("SkillScheduleService: fired skill={} (schedule)", skill.getSlug());
-				}
-			} catch (Exception ex) {
-				log.warn("SkillScheduleService: skill {} dispatch threw: {}",
-						skill.getSlug(), ex.getMessage(), ex);
-			}
-		});
-		if (!acquired) {
-			log.debug("SkillScheduleService: skill {} skipped — another fire holds the lock",
-					skill.getSlug());
-		}
-		return result[0];
-	}
+	// Legacy isDue(SkillDocumentEntity) + tryFire(SkillDocumentEntity) removed in
+	// the 2026-06-29 sunset — only the v2 path (isDueV2 + dispatchSkillV2) remains.
 
 	private Map<String, Object> parseJson(String raw) {
 		if (raw == null || raw.isBlank()) return Map.of();
