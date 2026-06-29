@@ -145,7 +145,48 @@ public class SkillV2Service {
 
 	@Transactional(readOnly = true)
 	public SkillDto get(String slug) {
-		return SkillDto.of(loadBySlug(slug));
+		SkillV2Entity row = loadBySlug(slug);
+		// Detail path (used by the Automate page) carries the tool_binding so
+		// the UI can adapt the trigger scope to the pipeline's real state.
+		ToolBindingDto binding = null;
+		if (row.getPipelineId() != null) {
+			PipelineEntity p = pipelineRepo.findById(row.getPipelineId()).orElse(null);
+			if (p != null) binding = deriveToolBinding(p.getPipelineJson());
+		}
+		return SkillDto.of(row, binding);
+	}
+
+	/**
+	 * Inspect the pipeline's data-source nodes to classify how {@code tool_id}
+	 * is supplied — so an "all tools" automation isn't silently faked when the
+	 * pipeline actually pins a single machine.
+	 *
+	 * <ul>
+	 *   <li>PARAMETERIZED — a node uses {@code "$tool_id"} → fan-out injection works</li>
+	 *   <li>PINNED — a node hardcodes a literal (e.g. "EQP-01") → only that tool</li>
+	 *   <li>NONE — no node takes a tool_id → tool-agnostic</li>
+	 *   <li>MIXED — inconsistent ($ref + literal, or two different literals)</li>
+	 * </ul>
+	 */
+	ToolBindingDto deriveToolBinding(String pipelineJsonText) {
+		boolean paramRef = false;
+		java.util.Set<String> literals = new java.util.LinkedHashSet<>();
+		for (Map<String, Object> node : extractDagNodes(pipelineJsonText)) {
+			Object paramsObj = node.get("params");
+			if (!(paramsObj instanceof Map<?, ?> params)) continue;
+			Object tid = params.get("tool_id");
+			if (tid == null) continue;
+			String val = String.valueOf(tid).trim();
+			if (val.isBlank()) continue;
+			if (val.startsWith("$")) paramRef = true;
+			else literals.add(val);
+		}
+		if (!paramRef && literals.isEmpty()) return new ToolBindingDto("NONE", null);
+		if (paramRef && literals.isEmpty()) return new ToolBindingDto("PARAMETERIZED", null);
+		if (!paramRef && literals.size() == 1) {
+			return new ToolBindingDto("PINNED", literals.iterator().next());
+		}
+		return new ToolBindingDto("MIXED", null);  // $ + literal, or multi-literal
 	}
 
 	@Transactional(readOnly = true)
@@ -531,20 +572,27 @@ public class SkillV2Service {
 
 	// ─── DTOs ──────────────────────────────────────────────────────────
 
+	/** How the bound pipeline supplies tool_id. See {@link #deriveToolBinding}. */
+	public record ToolBindingDto(String state, String pinnedTool) {}
+
 	public record SkillDto(
 			Long id, String slug, String name, String sub,
 			String nl, Long pipelineId, String pipelineNodes,
 			Boolean hasAlarm, String inType, String outType,
 			String role, String triggerConfig, String alarmGate, String outcome,
-			String status, String testCases
+			String status, String testCases, ToolBindingDto toolBinding
 	) {
 		static SkillDto of(SkillV2Entity e) {
+			return of(e, null);
+		}
+
+		static SkillDto of(SkillV2Entity e, ToolBindingDto toolBinding) {
 			return new SkillDto(
 					e.getId(), e.getSlug(), e.getName(), e.getSub(),
 					e.getNl(), e.getPipelineId(), e.getPipelineNodes(),
 					e.getHasAlarm(), e.getInType(), e.getOutType(),
 					e.getRole(), e.getTriggerConfig(), e.getAlarmGate(), e.getOutcome(),
-					e.getStatus(), e.getTestCases()
+					e.getStatus(), e.getTestCases(), toolBinding
 			);
 		}
 	}

@@ -52,8 +52,9 @@ public class SkillScheduleService {
 	private final com.aiops.api.domain.pipeline.PipelineRepository pipelineRepo;
 	private final SimulatorClient simulatorClient;
 
-	/** target label (in trigger_config) that means "every tool" → fan out. */
+	/** target labels (in trigger_config) for schedule scope. */
 	private static final String TARGET_ALL_TOOLS = "所有機台";
+	private static final String TARGET_SINGLE_TOOL = "單一機台";
 
 	public SkillScheduleService(SkillRunRepository runRepo,
 	                            SkillApiClient skillApiClient,
@@ -110,43 +111,77 @@ public class SkillScheduleService {
 	                              Map<String, Object> cfg, String role) {
 		final Long id = s.getId();
 		final String target = String.valueOf(cfg.getOrDefault("target", ""));
+		final String tool = cfg.get("tool") != null ? String.valueOf(cfg.get("tool")).trim() : "";
 
-		if (TARGET_ALL_TOOLS.equals(target) && pipelineDeclaresToolId(s.getPipelineId())) {
-			List<String> tools = listToolIds();
-			if (tools.isEmpty()) {
-				log.warn("SkillScheduleService: skill_v2={} targets 所有機台 but tool list is empty — single run", s.getSlug());
-			} else {
-				log.info("SkillScheduleService: fan-out skill_v2={} over {} tools", s.getSlug(), tools.size());
-				for (String tool : tools) {
-					// Per-(skill,tool) lock so one tool's fire doesn't block the rest.
-					lockService.runWithLock("skill_v2:" + id + ":" + tool, Duration.ofMinutes(5), () -> {
-						boolean ok = skillApiClient.dispatchSkillV2(id, "system_schedule", Map.of("tool_id", tool));
-						if (ok) log.info("SkillScheduleService: fired skill_v2={} tool={}", s.getSlug(), tool);
-					});
+		// Single-tool schedule: dispatch only the chosen machine.
+		if (TARGET_SINGLE_TOOL.equals(target) && !tool.isBlank()) {
+			lockService.runWithLock("skill_v2:" + id + ":" + tool, Duration.ofMinutes(5), () -> {
+				boolean ok = skillApiClient.dispatchSkillV2(id, "system_schedule", Map.of("tool_id", tool));
+				if (ok) log.info("SkillScheduleService: fired skill_v2={} tool={}", s.getSlug(), tool);
+			});
+			return;
+		}
+
+		// All-tools fan-out — ONLY when the pipeline actually consumes $tool_id.
+		// A pinned/none/mixed pipeline can't be fanned out (injection is ignored),
+		// so we fall through to a single run instead of faking N identical runs.
+		if (TARGET_ALL_TOOLS.equals(target)) {
+			String binding = scanToolBinding(s.getPipelineId());
+			if ("PARAMETERIZED".equals(binding)) {
+				List<String> tools = listToolIds();
+				if (!tools.isEmpty()) {
+					log.info("SkillScheduleService: fan-out skill_v2={} over {} tools", s.getSlug(), tools.size());
+					for (String t : tools) {
+						lockService.runWithLock("skill_v2:" + id + ":" + t, Duration.ofMinutes(5), () -> {
+							boolean ok = skillApiClient.dispatchSkillV2(id, "system_schedule", Map.of("tool_id", t));
+							if (ok) log.info("SkillScheduleService: fired skill_v2={} tool={}", s.getSlug(), t);
+						});
+					}
+					return;
 				}
-				return;
+				log.warn("SkillScheduleService: skill_v2={} targets 所有機台 but tool list empty — single run", s.getSlug());
+			} else {
+				log.warn("SkillScheduleService: skill_v2={} targets 所有機台 but pipeline binding={} "
+						+ "(not parameterized) — single run, NOT faking fan-out", s.getSlug(), binding);
 			}
 		}
 
-		// Single run (hardcoded tool_id, no tool_id input, or empty tool list fallback).
+		// Single run (pinned tool_id, tool-agnostic, or fallbacks above).
 		lockService.runWithLock("skill_v2:" + id, Duration.ofMinutes(5), () -> {
 			boolean ok = skillApiClient.dispatchSkillV2(id, "system_schedule", Map.of());
 			if (ok) log.info("SkillScheduleService: fired skill_v2={} ({})", s.getSlug(), role);
 		});
 	}
 
-	/** True if the pipeline's JSON declares a pipeline-level input named tool_id. */
-	private boolean pipelineDeclaresToolId(Long pipelineId) {
-		if (pipelineId == null) return false;
+	/**
+	 * Classify how the pipeline supplies tool_id by scanning data-source node
+	 * params (NOT just the input declaration): PARAMETERIZED ($tool_id) /
+	 * PINNED (literal) / NONE / MIXED. Mirrors SkillV2Service.deriveToolBinding.
+	 */
+	private String scanToolBinding(Long pipelineId) {
+		if (pipelineId == null) return "NONE";
 		var pipe = pipelineRepo.findById(pipelineId).orElse(null);
-		if (pipe == null) return false;
+		if (pipe == null) return "NONE";
 		Map<String, Object> pj = parseJson(pipe.getPipelineJson());
-		Object inputs = pj.get("inputs");
-		if (!(inputs instanceof List<?> list)) return false;
-		for (Object item : list) {
-			if (item instanceof Map<?, ?> m && "tool_id".equals(String.valueOf(m.get("name")))) return true;
+		Object nodes = pj.get("nodes");
+		if (!(nodes instanceof List<?> list)) return "NONE";
+		boolean paramRef = false;
+		java.util.Set<String> literals = new java.util.LinkedHashSet<>();
+		for (Object n : list) {
+			if (!(n instanceof Map<?, ?> node)) continue;
+			Object paramsObj = node.get("params");
+			if (!(paramsObj instanceof Map<?, ?> params)) continue;
+			Object tid = params.get("tool_id");
+			if (tid == null) continue;
+			String val = String.valueOf(tid).trim();
+			if (val.isBlank()) continue;
+			if (val.startsWith("$")) paramRef = true;
+			else literals.add(val);
 		}
-		return false;
+		if (!paramRef && literals.isEmpty()) return "NONE";
+		if (paramRef && literals.isEmpty()) return "PARAMETERIZED";
+		if (!paramRef && literals.size() == 1) return "PINNED";
+		return "MIXED";
 	}
 
 	/** Tool IDs from the simulator. Empty on failure → caller falls back to a single run. */

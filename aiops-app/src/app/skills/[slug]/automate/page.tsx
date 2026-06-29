@@ -13,11 +13,13 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { TK, FONT, ROLE_COLORS, ensurePlexFont } from "@/components/skills-v2/tokens";
 import {
-  GATES, OUTCOMES, SCHEDULES, TARGETS, parsePipelineNodes, parseTrigger,
-  type AlarmSource, type EventType, type Role, type Skill, type Trigger, type TriggerKind,
+  GATES, OUTCOMES, SCHEDULES, parsePipelineNodes, parseTrigger,
+  type AlarmSource, type EventType, type Role, type Skill, type ToolBinding, type Trigger, type TriggerKind,
 } from "@/components/skills-v2/types";
 
 type Identity = "patrol" | "datacheck";
+/** Scheduled scope: every tool (fan-out) or one chosen tool. */
+type Scope = "all" | "single";
 /** Event-driven trigger sub-mode: subscribe to a raw simulator event by name,
  *  or to an upstream Auto Patrol's alarm. */
 type EventMode = "raw" | "patrol";
@@ -39,11 +41,17 @@ export default function AutomatePage() {
   const [triggerKind, setTriggerKind] = useState<TriggerKind>("schedule");
   const [eventMode, setEventMode] = useState<EventMode>("raw");
   const [schedule, setSchedule] = useState<string>(SCHEDULES[1]);
-  const [target, setTarget]     = useState<string>(TARGETS[0]);
+  const [scope, setScope]       = useState<Scope>("all");
+  const [selectedTool, setSelectedTool] = useState<string>("");
+  const [tools, setTools]       = useState<string[]>([]);
   const [source, setSource]     = useState<string>("");
   const [rawEvent, setRawEvent] = useState<string>("");
   const [gate, setGate]         = useState<string>(GATES[0]);
   const [outcome, setOutcome]   = useState<string>(OUTCOMES[0]);
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  const binding: ToolBinding | null = skill?.tool_binding ?? null;
+  const bindState = binding?.state ?? "NONE";
 
   useEffect(() => { ensurePlexFont(); }, []);
 
@@ -53,21 +61,33 @@ export default function AutomatePage() {
       fetch(`/api/skills-v2/${encodeURIComponent(slug)}`).then(r => r.json()),
       fetch(`/api/skills-v2/alarm-sources?excludeSlug=${encodeURIComponent(slug)}`).then(r => r.json()),
       fetch(`/api/skills-v2/event-types`).then(r => r.json()),
-    ]).then(([sEnv, srcEnv, evEnv]) => {
+      fetch(`/api/admin/fleet/equipment`).then(r => r.ok ? r.json() : { equipment: [] }).catch(() => ({ equipment: [] })),
+    ]).then(([sEnv, srcEnv, evEnv, eqEnv]) => {
       const s = (sEnv?.data ?? sEnv) as Skill;
       setSkill(s);
       setSources((srcEnv?.data ?? srcEnv) as AlarmSource[]);
       setEventTypes((evEnv?.data ?? evEnv) as EventType[]);
+      const eq = (eqEnv?.data ?? eqEnv)?.equipment ?? [];
+      setTools(Array.isArray(eq) ? eq.map((e: { id: string }) => e.id).filter(Boolean) : []);
 
       // Seed draft from existing automation, or sensible defaults.
       const ident: Identity = s.role === "datacheck" ? "datacheck" : "patrol";
       setIdentity(ident);
+      const tb = s.tool_binding;
+      // PINNED pipeline → scope is forced to single on the pinned tool.
+      if (tb?.state === "PINNED" && tb.pinned_tool) {
+        setScope("single"); setSelectedTool(tb.pinned_tool);
+      }
       const t = parseTrigger(s.trigger_config);
       if (t) {
         setTriggerKind(t.kind);
         if (t.kind === "schedule") {
           if (t.schedule) setSchedule(t.schedule);
-          if (t.target)   setTarget(t.target);
+          if (tb?.state !== "PINNED") {
+            if (t.tool) { setScope("single"); setSelectedTool(t.tool); }
+            else if (t.target === "單一機台") setScope("single");
+            else setScope("all");
+          }
         } else {
           // raw-event subscription uses `event`; alarm subscription uses `source`.
           if (t.event) { setEventMode("raw"); setRawEvent(t.event); }
@@ -92,20 +112,43 @@ export default function AutomatePage() {
     return list[(i + 1) % list.length];
   }, []);
 
+  // The tool a single-scope run targets — pinned pipelines force their tool.
+  const effectiveTool = bindState === "PINNED"
+    ? (binding?.pinned_tool ?? "")
+    : selectedTool;
+
   const buildTrigger = useCallback((): Trigger => {
-    if (triggerKind === "schedule") return { kind: "schedule", schedule, target };
+    if (triggerKind === "schedule") {
+      if (scope === "single") return { kind: "schedule", schedule, target: "單一機台", tool: effectiveTool };
+      return { kind: "schedule", schedule, target: "所有機台" };
+    }
     if (eventMode === "raw") return { kind: "event", event: rawEvent || eventTypes[0]?.name || "" };
     return { kind: "event", source: source || sources[0]?.slug || "" };
-  }, [triggerKind, eventMode, schedule, target, source, sources, rawEvent, eventTypes]);
+  }, [triggerKind, scope, effectiveTool, eventMode, schedule, source, sources, rawEvent, eventTypes]);
+
+  /** Validate, then open the confirm card (instead of activating directly). */
+  const handleReview = useCallback(() => {
+    if (!skill) return;
+    const role: Role = identity;
+    if (role === "patrol" && !skill.has_alarm) {
+      setToast("pipeline 沒有 alarm 判斷節點 — 請先回 Editor 加入判斷條件，無法升為 Auto Patrol。");
+      return;
+    }
+    if (bindState === "MIXED") {
+      setToast("此 pipeline 對 tool_id 的用法不一致（部分寫死、部分 $tool_id）— 請回 Editor 統一後再設定。");
+      return;
+    }
+    if (triggerKind === "schedule" && scope === "single" && !effectiveTool) {
+      setToast("請先選擇要檢查的機台。");
+      return;
+    }
+    setShowConfirm(true);
+  }, [skill, identity, bindState, triggerKind, scope, effectiveTool]);
 
   const handleDone = useCallback(async () => {
     if (!skill) return;
     const role: Role = identity;
     const trigger = buildTrigger();
-    if (role === "patrol" && !skill.has_alarm) {
-      setToast("pipeline 沒有 alarm 判斷式 — 請先回 Editor 加入判斷條件再重新編譯。");
-      return;
-    }
     setSubmitting(true);
     try {
       const res = await fetch(`/api/skills-v2/${encodeURIComponent(slug)}/automation`, {
@@ -213,10 +256,19 @@ export default function AutomatePage() {
                 <BluePill onClick={() => setSchedule(cycle(SCHEDULES, schedule))}>{schedule}</BluePill>
               </Row>
               <Row label="對象">
-                <BluePill onClick={() => setTarget(cycle(TARGETS, target))}>{target}</BluePill>
+                <ScopePicker
+                  bindState={bindState}
+                  pinnedTool={binding?.pinned_tool ?? null}
+                  scope={scope}
+                  onScope={setScope}
+                  tools={tools}
+                  selectedTool={selectedTool}
+                  onSelectTool={setSelectedTool}
+                  slug={slug}
+                />
               </Row>
               <div style={{ fontSize: 12, color: TK.faint, marginTop: 6, fontStyle: "italic" }}>
-                → 每 {schedule.replace("每 ", "")} 檢查 {target}
+                → 每 {schedule.replace("每 ", "")} 檢查 {scopeSummary(bindState, scope, effectiveTool, tools.length)}
               </div>
             </>
           ) : (
@@ -331,7 +383,7 @@ export default function AutomatePage() {
         {/* Composite strip */}
         <CompositeStrip
           trigger={triggerKind === "schedule"
-            ? `${schedule} · ${target}`
+            ? `${schedule} · ${scopeSummary(bindState, scope, effectiveTool, tools.length)}`
             : eventMode === "raw"
               ? `event ${rawEvent || eventTypes[0]?.name || "(選一個事件)"}`
               : `on ${source || sources[0]?.name || "(選一個來源)"}`}
@@ -354,15 +406,36 @@ export default function AutomatePage() {
           }}>
             取消自動化 · 維持工具
           </button>
-          <button onClick={handleDone} disabled={submitting} style={{
+          <button onClick={handleReview} disabled={submitting} style={{
             font: `600 13px ${FONT.sans}`,
             color: "#fff", background: TK.black, border: `1px solid ${TK.black}`,
             padding: "9px 18px", borderRadius: 9, cursor: "pointer",
           }}>
-            {submitting ? "Saving…" : "Done · 啟動"}
+            檢視 · 啟動
           </button>
         </div>
       </div>
+
+      {showConfirm && (
+        <ConfirmCard
+          identity={identity}
+          schedule={schedule}
+          triggerKind={triggerKind}
+          scopeText={triggerKind === "schedule"
+            ? scopeSummary(bindState, scope, effectiveTool, tools.length)
+            : eventMode === "raw"
+              ? `事件 ${rawEvent || eventTypes[0]?.name || ""}`
+              : `上游 ${source || sources[0]?.name || ""} alarm`}
+          fanOut={triggerKind === "schedule" && scope === "all" && bindState === "PARAMETERIZED"}
+          toolCount={tools.length}
+          hasAlarm={skill.has_alarm}
+          gate={gate}
+          outcome={outcome}
+          submitting={submitting}
+          onCancel={() => setShowConfirm(false)}
+          onConfirm={handleDone}
+        />
+      )}
 
       {toast && <Toast text={toast} />}
 
@@ -556,6 +629,160 @@ function StripNode({ color, label, value }: { color: string; label: string; valu
 
 function Arrow() {
   return <span style={{ color: TK.faint, fontSize: 14, lineHeight: 1 }}>→</span>;
+}
+
+/** One-line summary of what the scheduled run will target. */
+function scopeSummary(bindState: string, scope: Scope, tool: string, toolCount: number): string {
+  if (bindState === "NONE") return "（與機台無關）";
+  if (bindState === "MIXED") return "（pipeline tool_id 用法不一致）";
+  if (bindState === "PINNED") return `${tool || "?"}（pipeline 釘死）`;
+  if (scope === "all") return `所有機台（${toolCount} 台，逐台檢查）`;
+  return tool ? `單一機台 · ${tool}` : "單一機台（請選擇）";
+}
+
+/** Trigger-scope picker that adapts to the pipeline's tool_binding state. */
+function ScopePicker({
+  bindState, pinnedTool, scope, onScope, tools, selectedTool, onSelectTool, slug,
+}: {
+  bindState: string; pinnedTool: string | null;
+  scope: Scope; onScope: (s: Scope) => void;
+  tools: string[]; selectedTool: string; onSelectTool: (t: string) => void;
+  slug: string;
+}) {
+  if (bindState === "NONE") {
+    return <span style={{ fontSize: 12.5, color: TK.faint }}>此 Skill 與機台無關，不需指定對象。</span>;
+  }
+  if (bindState === "MIXED") {
+    return (
+      <div style={{ fontSize: 12.5, color: "#b54708" }}>
+        ⚠ 此 pipeline 對 tool_id 用法不一致（部分寫死、部分 $tool_id）。
+        <Link href={`/skills/${encodeURIComponent(slug)}`} style={{ color: TK.indigo, marginLeft: 6 }}>回 Editor 統一 →</Link>
+      </div>
+    );
+  }
+  if (bindState === "PINNED") {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <span style={{
+          font: `600 12.5px ${FONT.sans}`, color: "#b54708",
+          background: "#fffaeb", border: "1px solid #fedf89",
+          padding: "6px 11px", borderRadius: 8, alignSelf: "flex-start",
+        }}>
+          此 pipeline 釘死 {pinnedTool} — 只會檢查這台
+        </span>
+        <span style={{ fontSize: 11.5, color: TK.faint }}>
+          要套用所有機台？
+          <Link href={`/skills/${encodeURIComponent(slug)}`} style={{ color: TK.indigo, marginLeft: 4 }}>
+            去 Editor 把機台改成參數（$tool_id）→
+          </Link>
+        </span>
+      </div>
+    );
+  }
+  // PARAMETERIZED
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", gap: 8 }}>
+        {(["all", "single"] as const).map(s => (
+          <button key={s} onClick={() => onScope(s)} style={{
+            font: `600 12.5px ${FONT.sans}`,
+            background: scope === s ? TK.indigoTint : "#fff",
+            color: TK.ink,
+            border: `1.5px solid ${scope === s ? TK.indigo : TK.divider}`,
+            padding: "6px 13px", borderRadius: 8, cursor: "pointer",
+          }}>
+            {s === "all" ? `所有機台（${tools.length || "?"} 台）` : "單一機台"}
+          </button>
+        ))}
+      </div>
+      {scope === "single" && (
+        <select
+          value={selectedTool}
+          onChange={(e) => onSelectTool(e.target.value)}
+          style={{
+            font: `13px ${FONT.sans}`, color: TK.ink,
+            padding: "7px 10px", border: `1.5px solid ${selectedTool ? TK.indigo : TK.divider}`,
+            borderRadius: 8, outline: "none", maxWidth: 220,
+          }}
+        >
+          <option value="">— 選擇機台 —</option>
+          {tools.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+      )}
+    </div>
+  );
+}
+
+/** Pre-activation confirm — shows exactly what will run + alarm capability. */
+function ConfirmCard({
+  identity, schedule, triggerKind, scopeText, fanOut, toolCount,
+  hasAlarm, gate, outcome, submitting, onCancel, onConfirm,
+}: {
+  identity: Identity; schedule: string; triggerKind: TriggerKind;
+  scopeText: string; fanOut: boolean; toolCount: number;
+  hasAlarm: boolean; gate: string; outcome: string;
+  submitting: boolean; onCancel: () => void; onConfirm: () => void;
+}) {
+  const timing = triggerKind === "schedule" ? schedule : "事件觸發時";
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(15,18,30,.45)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 80, padding: 20,
+    }}>
+      <div style={{
+        background: "#fff", borderRadius: 14, padding: "22px 24px",
+        maxWidth: 480, width: "100%", boxShadow: "0 16px 48px rgba(0,0,0,.3)",
+        fontFamily: FONT.sans,
+      }}>
+        <div style={{ font: `700 17px ${FONT.sans}`, color: TK.ink, marginBottom: 4 }}>
+          即將啟動自動化 — 請確認
+        </div>
+        <div style={{ fontSize: 12.5, color: TK.body, marginBottom: 16 }}>
+          請確認系統實際會做什麼，再啟動。
+        </div>
+
+        <ConfirmRow label="對象" value={scopeText} />
+        <ConfirmRow label="時機" value={timing} />
+        {identity === "patrol" ? (
+          hasAlarm ? (
+            <ConfirmRow label="達標" value={`${gate} → ${fanOut ? "該台" : "此 Skill"}發 alarm（${outcome}）`} tone="#067647" />
+          ) : (
+            <ConfirmRow label="alarm" value="⚠ 此 pipeline 沒有判斷節點，不會發 alarm" tone="#b42318" />
+          )
+        ) : (
+          <ConfirmRow label="結果" value="只彙整 / 呈現資料（不發 alarm）" />
+        )}
+        {fanOut && (
+          <div style={{
+            marginTop: 10, padding: "8px 11px", borderRadius: 8,
+            background: TK.indigoTint, color: TK.ink, fontSize: 12,
+          }}>
+            逐台檢查 {toolCount} 台機台，哪台達標就發那台的 alarm。
+          </div>
+        )}
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 20 }}>
+          <button onClick={onCancel} disabled={submitting} style={{
+            font: `600 13px ${FONT.sans}`, color: TK.body, background: "#fff",
+            border: `1px solid ${TK.divider}`, padding: "9px 16px", borderRadius: 9, cursor: "pointer",
+          }}>取消</button>
+          <button onClick={onConfirm} disabled={submitting} style={{
+            font: `600 13px ${FONT.sans}`, color: "#fff", background: TK.black,
+            border: `1px solid ${TK.black}`, padding: "9px 18px", borderRadius: 9, cursor: "pointer",
+          }}>{submitting ? "啟動中…" : "確認啟動"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmRow({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  return (
+    <div style={{ display: "flex", gap: 12, padding: "7px 0", borderBottom: `1px solid ${TK.divider}` }}>
+      <span style={{ font: `600 12px ${FONT.mono}`, color: TK.faint, minWidth: 48 }}>{label}</span>
+      <span style={{ fontSize: 13, color: tone ?? TK.ink, fontWeight: tone ? 600 : 400 }}>{value}</span>
+    </div>
+  );
 }
 
 function Center({ children }: { children: React.ReactNode }) {

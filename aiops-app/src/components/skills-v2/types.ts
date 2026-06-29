@@ -12,7 +12,8 @@ export type TriggerKind = "schedule" | "event";
 export interface Trigger {
   kind: TriggerKind;
   schedule?: string;
-  target?: string;
+  target?: string;       // schedule scope label: "所有機台" | "單一機台"
+  tool?: string;         // schedule · 單一機台: the chosen tool id (e.g. "EQP-03")
   source?: string;       // event-driven: upstream patrol slug (alarm-driven)
   event?: string;        // event-driven: raw simulator event name (e.g. "OOC")
 }
@@ -20,6 +21,14 @@ export interface Trigger {
 export interface EventType {
   name: string;
   description: string;
+}
+
+/** How the bound pipeline supplies tool_id — drives the trigger-scope UI.
+ *  Mirrors SkillV2Service.ToolBindingDto (snake_case wire). */
+export type ToolBindingState = "PARAMETERIZED" | "PINNED" | "NONE" | "MIXED";
+export interface ToolBinding {
+  state: ToolBindingState;
+  pinned_tool?: string | null;
 }
 
 export interface PipelineNode {
@@ -46,6 +55,7 @@ export interface Skill {
   outcome: string | null;
   status: string;
   test_cases: string;
+  tool_binding?: ToolBinding | null;   // only populated on the detail (get) path
 }
 
 export interface AlarmSource {
