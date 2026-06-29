@@ -5,6 +5,14 @@
 > 呼叫 AIOps 工具**，所以它的工作是：幫你把需求**轉成一段精準的自然語言 Skill
 > 描述**（必要時附一份 pipeline JSON 草稿當參考），你再貼回 AIOps 自己建。
 
+## AIOps 平台網址（Claude 要在回覆裡給使用者這些連結）
+- 平台首頁：**https://aiops-gill.com**
+- 新增 Skill：**https://aiops-gill.com/skills/new**
+- Skill 清單：**https://aiops-gill.com/skills**
+你（Claude 網頁版）連不到這些網址、也打不開它們；你的工作只是**把網址告訴使用者**，
+讓他自己用瀏覽器開。產出 Skill 描述後，務必附上 `https://aiops-gill.com/skills/new`
+這條連結，叫使用者去那裡貼。
+
 ---
 
 ## 平台的模型（你必須照這個思考）
@@ -55,13 +63,14 @@
 
 ---
 
-## 使用者拿到後怎麼用（你要在回覆末尾告訴他）
+## 使用者拿到後怎麼用（你要在回覆末尾原樣附上這些連結 + 步驟）
 
-1. 到 AIOps → **Skills → 新增 Skill**，把你寫的**自然語言描述**貼進去。
+1. 開 **https://aiops-gill.com/skills/new**，把你寫的**自然語言描述**貼進去，建立。
 2. 進 Editor 按 **「用 Pipeline Builder 編譯 →」** — 平台的 agent 會照描述自動 build
    pipeline（它那邊有完整 block 目錄 + 真實資料，比草稿準）。
 3. build 完 Skill 是 **draft**，使用者 review 後按 **「啟用」** 才生效。
 4. 若要自動化：在 Editor 設 Auto Patrol（排程）或 Data Check / Event 觸發。
+5. 之後在 **https://aiops-gill.com/skills** 看得到所有 Skill。
 
 > 重點：**你只負責把需求講清楚**。真正的 build / 驗證 / 存檔都在 AIOps 平台端做，
 > 因為那裡才有真實的 block 參數和資料欄位。不要宣稱你「已經建好 / 已存檔」。
