@@ -112,7 +112,13 @@ public class SkillV2RunnerService {
 					AlarmEntity a = new AlarmEntity();
 					a.setSkillRunId(run.getId());
 					a.setTriggerEvent("skill_v2:" + sk.getSlug());
-					a.setTitle(sk.getName() + " — 條件達標");
+					// Tag the alarm with the machine this run checked (fan-out
+					// passes tool_id per tool) so operators can tell which one.
+					Object toolId = inputs.get("tool_id");
+					String toolLabel = toolId != null && !String.valueOf(toolId).isBlank()
+							? String.valueOf(toolId) : null;
+					if (toolLabel != null) a.setEquipmentId(toolLabel);
+					a.setTitle(sk.getName() + (toolLabel != null ? " · " + toolLabel : "") + " — 條件達標");
 					a.setSummary(sk.getOutcome() != null ? sk.getOutcome() : sk.getNl());
 					a.setSeverity("MEDIUM");
 					a.setStatus("active");
