@@ -27,6 +27,11 @@ const ACTION_COPY: Record<string, { verb: string; tone: string }> = {
   confirm_delete: { verb: "刪除", tone: "#b42318" },
   confirm_disable: { verb: "停用", tone: "#b54708" },
   confirm_activate: { verb: "啟用上線", tone: "#067647" },
+  // skills_v2 critical actions proposed by cowork (confirm here, runs under your auth)
+  confirm_skill_delete: { verb: "刪除 Skill", tone: "#b42318" },
+  confirm_skill_activate: { verb: "啟用 Skill", tone: "#067647" },
+  confirm_skill_automate: { verb: "設定自動化", tone: "#b54708" },
+  confirm_skill_bind: { verb: "綁定 / 覆蓋 pipeline", tone: "#b54708" },
 };
 
 export default function HandoffPage({ params }: { params: Promise<{ id: string }> }) {

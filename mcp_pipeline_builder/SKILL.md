@@ -129,6 +129,25 @@ wrapper**. A Skill on its own is just a reusable analysis tool; wrapping it as a
 **Auto Patrol** (cron) or **Data Check** (cron, no alarm) is a separate decision
 the human makes. There is no multi-step checklist anymore; one skill, one pipeline.
 
+### CRITICAL ACTIONS — propose-only, NEVER execute
+
+These tools **do not execute** — they return a `launch_url` for the human to
+confirm in the GUI (the real action runs there, under the human's auth):
+
+- `delete_skill_v2` — delete (irreversible)
+- `activate_skill` — go live
+- `automate_skill_patrol` / `automate_skill_event` / `automate_skill_datacheck` — set up auto-firing + alarms
+- `bind_skill_pipeline` — overwrites the bound pipeline
+
+When you call one, it returns `{executed:false, launch_url, tell_user}`. You MUST:
+1. Relay `tell_user` + the `launch_url` to the human ("請到這裡確認：<url>").
+2. **NEVER** say the skill was deleted / activated / automated / bound — nothing
+   changed until they confirm in the system. The link auto-pops if their app is
+   open; otherwise the URL is the way in.
+
+Safe (execute directly, no confirm): create_skill_with_pipeline / create_skill_v2
+(draft only), update_skill_v2 (text), remove_skill_automation, deactivate, all reads.
+
 ### CRITICAL — always persist + hand back a link
 
 When the human asks you to **查 / 檢查 / 看 / 分析** something, the END of that

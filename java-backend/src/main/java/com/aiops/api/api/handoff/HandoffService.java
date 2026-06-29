@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.security.SecureRandom;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -34,7 +35,10 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public class HandoffService {
 
     static final Set<String> KINDS = Set.of(
-            "review_rule", "confirm_delete", "confirm_disable", "confirm_activate", "view_detail");
+            "review_rule", "view_detail",
+            // skills_v2 critical actions (cowork proposes, human confirms here)
+            "confirm_skill_delete", "confirm_skill_activate",
+            "confirm_skill_automate", "confirm_skill_bind");
     // TTL for a pending handoff. Env-overridable so it can be tuned without a
     // rebuild (HANDOFF_TTL_MINUTES); default 2 hours.
     private static final long TTL_MINUTES =
@@ -43,10 +47,16 @@ public class HandoffService {
     private static final SecureRandom RNG = new SecureRandom();
 
     private final UiHandoffRepository repo;
+    private final com.aiops.api.api.skillv2.SkillV2Service skillV2;
+    private final com.fasterxml.jackson.databind.ObjectMapper mapper;
     private final List<SseEmitter> emitters = new CopyOnWriteArrayList<>();
 
-    public HandoffService(UiHandoffRepository repo) {
+    public HandoffService(UiHandoffRepository repo,
+                          com.aiops.api.api.skillv2.SkillV2Service skillV2,
+                          com.fasterxml.jackson.databind.ObjectMapper mapper) {
         this.repo = repo;
+        this.skillV2 = skillV2;
+        this.mapper = mapper;
     }
 
     private static String newId() {
@@ -104,10 +114,22 @@ public class HandoffService {
                     "handoff is " + h.getStatus() + " and can no longer be resolved");
         }
         switch (h.getKind()) {
-            // Legacy skill_documents confirm_delete/disable/activate removed in
-            // the 2026-06-29 sunset — the rule_* flow that created them is gone.
-            // skills_v2 delete/activate go through the v2 API directly, not a handoff.
             case "review_rule", "view_detail" -> { /* no mutation — just mark reviewed */ }
+            // skills_v2 critical actions — cowork proposed, this runs under the
+            // confirming user's auth. target_ref = skill slug/id; payload carries params.
+            case "confirm_skill_delete" -> skillV2.deleteSkill(h.getTargetRef());
+            case "confirm_skill_activate" -> skillV2.activate(h.getTargetRef());
+            case "confirm_skill_bind" -> {
+                Map<String, Object> p = parsePayload(h.getPayload());
+                Object pid = p.get("pipeline_id");
+                if (pid == null) throw new ApiException(HttpStatus.BAD_REQUEST,
+                        "validation_error", "bind handoff missing pipeline_id");
+                skillV2.bindPipeline(h.getTargetRef(), Long.valueOf(String.valueOf(pid)));
+            }
+            case "confirm_skill_automate" -> {
+                Map<String, Object> p = parsePayload(h.getPayload());
+                skillV2.saveAutomation(h.getTargetRef(), p);
+            }
             default -> throw new ApiException(HttpStatus.BAD_REQUEST, "validation_error",
                     "unknown handoff kind " + h.getKind());
         }
@@ -115,6 +137,17 @@ public class HandoffService {
         h.setResolvedBy(userId);
         h.setResolvedAt(OffsetDateTime.now());
         return repo.save(h);
+    }
+
+    private Map<String, Object> parsePayload(String json) {
+        if (json == null || json.isBlank()) return Map.of();
+        try {
+            return mapper.readValue(json,
+                    new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+        } catch (com.fasterxml.jackson.core.JsonProcessingException ex) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "validation_error",
+                    "handoff payload not valid JSON: " + ex.getOriginalMessage());
+        }
     }
 
     @Transactional

@@ -326,6 +326,31 @@ async def _v2(c: httpx.AsyncClient, method: str, path: str, body: dict | None = 
     return _unwrap(parsed)
 
 
+async def _handoff(kind: str, target_ref: str, action: str, payload: dict,
+                   *, tell_user: str) -> dict:
+    """Create a UI-handoff for a CRITICAL action instead of executing it.
+    cowork proposes; the human confirms in the authed GUI (HandoffService.resolve
+    runs the real action under their auth). Returns a launch_url — NOT a result.
+    Mirrors rules.py._handoff (same /internal/handoffs endpoint)."""
+    async with httpx.AsyncClient() as c:
+        r = await c.post(f"{JAVA}/internal/handoffs", headers=_JH, timeout=30, json={
+            "kind": kind, "target_ref": target_ref, "action": action,
+            "payload": json.dumps(payload, ensure_ascii=False), "requested_by": "cowork"})
+        r.raise_for_status()
+        d = r.json()
+        d = d.get("data", d)
+    hid = d.get("id")
+    return {
+        "status": "PENDING_USER_CONFIRMATION",
+        "executed": False,
+        "launch_url": f"{PUBLIC}/handoff/{hid}",
+        "expires_at": d.get("expires_at"),
+        "tell_user": tell_user,
+        "_next": "你什麼都沒做。把 launch_url 給 user，請他在系統裡確認才會執行。"
+                 "絕不要說已刪除/已啟用/已設定 —— 在他確認前什麼都沒變。",
+    }
+
+
 @mcp.tool()
 async def list_skills_v2() -> list[dict]:
     """List every Skill in the v2 library (id, slug, name, sub, role, has_alarm).
@@ -361,12 +386,15 @@ async def create_skill_v2(name: str, sub: str = "", nl: str = "") -> dict:
 
 @mcp.tool()
 async def bind_skill_pipeline(slug: str, pipeline_id: int) -> dict:
-    """Link a saved pb_pipeline (from save_pipeline) to a Skill. The server
-    walks the pipeline's nodes to derive pipeline_nodes (Editor-visible) and
-    has_alarm (True iff any node is block_step_check). After this the human
-    can open the Editor at /skills/<slug> and see the compiled pipeline."""
-    async with httpx.AsyncClient() as c:
-        return await _v2(c, "POST", f"/{slug}/bind-pipeline", {"pipeline_id": pipeline_id})
+    """Request linking a pb_pipeline to a Skill. CRITICAL (overwrites any
+    existing binding → can destroy the user's current pipeline) → this does NOT
+    bind. It creates a confirmation request; the human confirms in the GUI via
+    the returned launch_url. Report it as 'needs your confirmation'; never say
+    it was bound."""
+    return await _handoff("confirm_skill_bind", slug, "bind_skill_pipeline",
+                          {"slug": slug, "pipeline_id": pipeline_id},
+                          tell_user=f"要把 pipeline {pipeline_id} 綁到 Skill「{slug}」嗎？"
+                                    f"會覆蓋目前綁定。請開連結確認。")
 
 
 @mcp.tool()
@@ -410,12 +438,12 @@ async def create_skill_with_pipeline(
 
 @mcp.tool()
 async def activate_skill(slug: str) -> dict:
-    """NOTE: prefer letting the HUMAN activate via the UI button. This tool
-    exists for completeness but activation is meant to be a human review
-    gate — only call it if the human EXPLICITLY says '幫我啟用' / 'activate it'.
-    Flips status draft → active."""
-    async with httpx.AsyncClient() as c:
-        return await _v2(c, "POST", f"/{slug}/activate")
+    """Request activating a Skill (draft → active = it goes LIVE and starts
+    running automatically). CRITICAL → this does NOT activate. It creates a
+    confirmation request; the human confirms in the GUI via the launch_url
+    (or just presses 啟用 in the Editor). Never say it was activated."""
+    return await _handoff("confirm_skill_activate", slug, "activate_skill", {"slug": slug},
+                          tell_user=f"要啟用 Skill「{slug}」嗎？啟用後它會自動開始運作。請開連結確認。")
 
 
 @mcp.tool()
@@ -431,15 +459,18 @@ async def automate_skill_patrol(
     bind_skill_pipeline once the pipeline contains a block_step_check node).
     Schedule values must be one of: '每 30 分鐘' | '每 1 小時' | '每 2 小時'
     | '每日 08:00'. Outcome must be one of: 'raise alarm · 可被下游接' |
-    'advisory only · 只通知' | '接 action / workflow'."""
+    'advisory only · 只通知' | '接 action / workflow'.
+    CRITICAL (sets the skill to fire automatically + raise alarms) → this does
+    NOT apply. It creates a confirmation request; the human confirms in the GUI
+    via the launch_url. Never say automation was set up."""
     body = {
         "role": "patrol",
         "trigger": {"kind": "schedule", "schedule": schedule, "target": target},
         "alarm_gate": alarm_gate,
         "outcome": outcome,
     }
-    async with httpx.AsyncClient() as c:
-        return await _v2(c, "POST", f"/{slug}/automation", body)
+    return await _handoff("confirm_skill_automate", slug, "automate_skill", body,
+                          tell_user=f"要把 Skill「{slug}」設成 Auto Patrol（{schedule}、{target}、達標發 alarm）嗎？請開連結確認。")
 
 
 @mcp.tool()
@@ -450,17 +481,17 @@ async def automate_skill_event(
     outcome: str = "raise alarm · 可被下游接",
 ) -> dict:
     """Wrap a Skill as an event-driven Auto Patrol — runs when an upstream
-    Auto Patrol's alarm fires. Requires has_alarm=True on this skill AND
-    the upstream slug to be an existing role='patrol' skill (use
-    list_skills_v2 to confirm)."""
+    Auto Patrol's alarm fires. Requires has_alarm=True + upstream a role='patrol'.
+    CRITICAL → this does NOT apply; it creates a confirmation request for the
+    human to confirm in the GUI via the launch_url. Never say it was set up."""
     body = {
         "role": "patrol",
         "trigger": {"kind": "event", "source": upstream_slug},
         "alarm_gate": alarm_gate,
         "outcome": outcome,
     }
-    async with httpx.AsyncClient() as c:
-        return await _v2(c, "POST", f"/{slug}/automation", body)
+    return await _handoff("confirm_skill_automate", slug, "automate_skill", body,
+                          tell_user=f"要把 Skill「{slug}」設成事件觸發（上游 {upstream_slug} 發 alarm 時跑）嗎？請開連結確認。")
 
 
 @mcp.tool()
@@ -470,17 +501,17 @@ async def automate_skill_datacheck(
     target: str = "所有機台",
 ) -> dict:
     """Wrap a Skill as a scheduled Data Check — produces a report / dashboard,
-    NEVER alarms (terminal). Use this for 'each morning summarise X' use
-    cases. The upstream skill should NOT have a block_step_check node
-    (has_alarm=False); if it does, the server rejects with a clear error."""
+    NEVER alarms (terminal). Use this for 'each morning summarise X' use cases.
+    CRITICAL → this does NOT apply; it creates a confirmation request for the
+    human to confirm in the GUI via the launch_url. Never say it was set up."""
     body = {
         "role": "datacheck",
         "trigger": {"kind": "schedule", "schedule": schedule, "target": target},
         "alarm_gate": None,
         "outcome": "data only",
     }
-    async with httpx.AsyncClient() as c:
-        return await _v2(c, "POST", f"/{slug}/automation", body)
+    return await _handoff("confirm_skill_automate", slug, "automate_skill", body,
+                          tell_user=f"要把 Skill「{slug}」設成 Data Check（{schedule}、{target}、不發 alarm）嗎？請開連結確認。")
 
 
 @mcp.tool()
@@ -493,13 +524,13 @@ async def remove_skill_automation(slug: str) -> dict:
 
 @mcp.tool()
 async def delete_skill_v2(slug: str) -> dict:
-    """Permanently delete a Skill from the v2 library. Use only when the human
-    explicitly asks to remove the skill. The bound pb_pipeline (if any) is
-    NOT deleted — it stays in pb_pipelines so other references aren't broken.
-    Returns {ok: true} on success."""
-    async with httpx.AsyncClient() as c:
-        await _v2(c, "DELETE", f"/{slug}")
-    return {"ok": True, "deleted": slug}
+    """Request permanent deletion of a Skill. CRITICAL + IRREVERSIBLE → this does
+    NOT delete. It creates a confirmation request; the human must open the
+    returned launch_url and confirm in the GUI before anything is removed.
+    Report it as 'needs your confirmation', show the launch_url, and NEVER say
+    the skill was deleted."""
+    return await _handoff("confirm_skill_delete", slug, "delete_skill_v2", {"slug": slug},
+                          tell_user=f"要刪除 Skill「{slug}」嗎？這不可復原。請開連結確認。")
 
 
 @mcp.tool()
