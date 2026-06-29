@@ -77,7 +77,7 @@ export default function SkillTryRunPanel({ pipelineId }: Props) {
       const res = await executePipeline(pj, coerced);
       setResult(res);
       if (res.status === "validation_error" || res.status === "failed") {
-        setError(res.error_message || `執行結果：${res.status}`);
+        setError(res.error_message || firstNodeError(res) || `執行結果：${res.status}`);
       } else {
         setPanelOpen(true);
       }
@@ -188,6 +188,15 @@ export default function SkillTryRunPanel({ pipelineId }: Props) {
       />
     </div>
   );
+}
+
+/** When a run fails, surface the first failing node's error so the user sees
+ *  WHY (e.g. "n2 · column 'spc_charts' not in data") instead of a bare "failed". */
+function firstNodeError(res: ExecuteResponse): string | null {
+  for (const [nodeId, nr] of Object.entries(res.node_results ?? {})) {
+    if (nr?.status === "failed" && nr.error) return `${nodeId} · ${nr.error}`;
+  }
+  return null;
 }
 
 function VerdictChip({ summary, onOpen }: {
