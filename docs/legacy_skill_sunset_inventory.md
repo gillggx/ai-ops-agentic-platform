@@ -3,6 +3,25 @@
 > 盤點日期：2026-06-29。目標：只留 skills_v2，移除 legacy skill_documents
 > 模型的 data / code / schema。**先補功能 → 建 branch → 分階段砍。**
 
+## ✅ 狀態：完成（2026-06-29）
+
+全部 phase 已執行 + 驗證（branch `legacy-skill-sunset`）：
+- 補功能：v2 raw-event 觸發，重建 legacy 115（OOC 自動診斷 → skills_v2 id 18）
+- Phase 1：停 legacy schedule + event 觸發
+- Phase 2：PatrolActivity / AlarmEnrich / Handoff / scheduler 改讀 skills_v2
+- Phase 3：刪 9 個 legacy 檔（SkillDocument*/Runner/Step/Materialize/AlarmEmitter/Dtos）
+- Phase 4：V68 — 刪 20,826 筆 legacy 歷史 + drop skill_documents/skill_stages
+  + 拆 5 條 FK + 移除 skill_runs.skill_id 欄
+
+**執行中修正的兩個誤判（原盤點寫錯，實際保留）：**
+- ❗ **SkillDefinition*（skill_definitions）保留** — 是獨立 registry，sidecar
+  internal skill lookup + system monitor 還在用。**不是** skill_documents 模型。
+- ❗ **auto_patrols 保留** — 獨立的 user-rules / patrol 機制，仍 wired
+  （MonitorController / UserRulesController / EventDispatchService 等）。
+  只拆掉它指向 skill_documents 的 FK。
+
+下面是原始盤點（保留供參考，部分已被上面修正取代）。
+
 ---
 
 ## 0. TL;DR
