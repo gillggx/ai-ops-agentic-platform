@@ -7,11 +7,11 @@
 
 ## What you can do
 You build a semiconductor-ops analysis **pipeline** — a small DAG of typed
-**blocks** (source → transform → chart) — then run and save it. A saved pipeline
-gets a `/pipeline-view/<id>` URL the human can open (DAG + rendered chart, and an
-"open in Builder" link).
+**blocks** (source → transform → chart) — then persist it **as a Skill**. A saved
+Skill gets a `/skills/<id>` URL the human can open (NL description + read-only DAG +
+an edit button). Skills land as **draft** — the human presses 啟用 to make them run.
 
-## Tools (from the `aiops-pipeline-builder` connector)
+## Build tools (from the `aiops-pipeline-builder` connector)
 | tool | use |
 |---|---|
 | `list_blocks(category?)` | see available blocks |
@@ -19,7 +19,8 @@ gets a `/pipeline-view/<id>` URL the human can open (DAG + rendered chart, and a
 | `preview(pipeline_json, node_id)` | run up to a node, get its rows + columns (learn the data) |
 | `validate(pipeline_json)` | structural check |
 | `execute(pipeline_json)` | run the whole thing, get status + chart |
-| `save_pipeline(name, pipeline_json, description?)` | save draft → returns id + view URL |
+
+(Persist / automate tools are in the **Skills v2** section below.)
 
 ## The pipeline JSON you assemble
 ```json
@@ -37,7 +38,11 @@ Node **positions are not needed** — the UI lays out the DAG.
 3. Build the rest using the columns you saw; `preview` each new node.
 4. `validate`, fix any errors.
 5. `execute`, confirm `status=success` and a chart/table came out.
-6. `save_pipeline` and give the human the returned **view_url**.
+6. `create_skill_with_pipeline(name, pipeline_json, nl)` — pass the human's
+   original request as `nl`. Hand back the `/skills/<id>` view_url and say it's
+   a draft (open + 啟用 to make it run). See **Skills v2** below for the full
+   persist + automate tool set. **Don't stop at execute** — that leaves nothing
+   the human can open.
 
 ## Gotchas (learned the hard way)
 - `block_process_history` defaults `time_range="24h"`; sim data may be older →
@@ -188,50 +193,16 @@ get_skill_with_pipeline(slug)   # one round-trip, full skill + pipeline_json
 
 ---
 
-## Legacy: Auto-check Rules (`rule_*` tools)
-> Older multi-step authoring shape. Prefer the Skills v2 tools above for new
-> work — they map 1:1 to what the user sees in the UI. `rule_*` is kept for
-> in-flight tasks that started on the legacy surface.
-
-A **rule** = TRIGGER (when) + CONFIRM/CHECKLIST (what to check) + the platform fires
-the alarm. It is a Skill Document. Build it one part at a time, like a guided author:
-
-| tool | use | confirm |
-|---|---|---|
-| `rule_list` / `rule_get` / `rule_describe_options` / `rule_validate` | read | none |
-| `rule_create` | new rule (draft) + trigger | direct |
-| `rule_update` | patch title/desc/stage/trigger | direct |
-| `rule_bind_checkpoint` | bind a check pipeline YOU built to a slot | direct |
-| `rule_set_confirm_check_nl` / `rule_add_step_nl` | NL → check (slower; prefer build+bind) | direct |
-| `rule_request_review` | open the whole-rule review GUI for the user | hand-off |
-| `rule_request_activate` / `rule_request_disable` / `rule_request_delete` | go live / turn off / remove | hand-off |
-
-Flow: `rule_describe_options` → `rule_create(title, stage, trigger_config)` → for each
-checkpoint build a pipeline that **ends in `block_step_check`** (no `block_alert`),
-`save_pipeline`, then `rule_bind_checkpoint(slot='confirm' or 'step:NEW', pipeline_id)`.
-Build the WHOLE rule (don't review per-checkpoint) → `rule_validate` →
-`rule_request_review(slug)` → give the user the returned `launch_url`: our GUI try-runs
-the whole rule and shows every checkpoint's result together, where they edit any one or
-activate it.
-
-**Draft edits run directly** (create/update/bind/nl) — they only make a reversible draft.
-**Hard rule:** after ANY create OR modify, finish by calling `rule_request_review(slug)`
-and give the user the launch_url — never say a rule is built/changed without launching
-the review GUI; they decide there whether to try-run more or activate.
-**Going live / disable / delete never run from a tool**: call `rule_request_*`, which
-returns a `launch_url`; give it to the user, who reviews/confirms in our GUI where the
-action actually runs (under their auth). If their app is open it auto-pops; otherwise
-the link is the way in.
-
-**How to report a `rule_request_*` result:** it executed NOTHING (`executed:false`,
-`status:PENDING_USER_*`). Relay its `tell_user` + the launch_url. NEVER say a rule was
-deleted/disabled/activated/"done" — it's only a request until the user confirms in the
-system. You can't open the URL for them; present it as the action they must take.
-
 ## Example request → what you do
 > "查 EQP-08 最近 7 天的 SPC 趨勢,畫成圖並存起來"
 
 `explain_block(block_process_history)` → add n1 (`tool_id=EQP-08`, `time_range=7d`)
 → `preview(n1)` to find the xbar value/UCL/LCL columns → add `block_unnest` /
-`block_filter` / `block_line_chart` → `execute` → `save_pipeline` → return the
-view_url.
+`block_filter` / `block_line_chart` → `execute` →
+`create_skill_with_pipeline(name="EQP-08 SPC 趨勢", pipeline_json=…, nl="查 EQP-08
+最近 7 天的 SPC 趨勢,畫成圖並存起來")` → hand the user the returned `/skills/<id>`
+view_url and tell them it's a draft — open it and press 啟用 if they want it to run
+on a schedule.
+
+> Legacy `rule_*` tools were removed in the 2026-06-29 sunset. Everything is the
+> Skill = 1 pipeline model above.
