@@ -49,6 +49,9 @@ interface Props {
    *  force a deterministic Dagre LR layout + fitView. Avoids depending on
    *  server-side layout_node positions or LLM behaviour. */
   autoLayoutNonce?: number;
+  /** Read-only viewers (e.g. Skills v2 canvas) set this to fit the whole DAG
+   *  into view once nodes are present. Editors leave it off to keep zoom 1.0. */
+  autoFit?: boolean;
 }
 
 /** PR-D1: short monospace summary of node params for node detail line. Heuristic. */
@@ -157,7 +160,7 @@ function portType(block: BlockSpec | null, port: string, kind: "input" | "output
   return list?.find((p) => p.port === port)?.type ?? null;
 }
 
-function DagCanvasInner({ blockCatalog, readOnly, runStatuses, onPortError, onAgentPin, autoLayoutNonce }: Props) {
+function DagCanvasInner({ blockCatalog, readOnly, runStatuses, onPortError, onAgentPin, autoLayoutNonce, autoFit }: Props) {
   const { state, actions } = useBuilder();
   const rf = useReactFlow();
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -204,6 +207,15 @@ function DagCanvasInner({ blockCatalog, readOnly, runStatuses, onPortError, onAg
   useEffect(() => {
     if (!initialFitDone) setInitialFitDone(true);
   }, [initialFitDone]);
+
+  // autoFit (read-only viewers): once nodes land, fit the whole DAG into view.
+  // Re-fits whenever the node count changes (e.g. async hydrate from pipeline_json).
+  const nodeCount = state.pipeline.nodes.length;
+  useEffect(() => {
+    if (!autoFit || nodeCount === 0) return;
+    const t = setTimeout(() => rf.fitView({ padding: 0.18 }), 60);
+    return () => clearTimeout(t);
+  }, [autoFit, nodeCount, rf]);
 
   /**
    * v1.1 P4 FIX: drag-end-only persistence.

@@ -14,10 +14,13 @@ import Link from "next/link";
 import { TK, FONT, ROLE_COLORS, ensurePlexFont } from "@/components/skills-v2/tokens";
 import {
   GATES, OUTCOMES, SCHEDULES, TARGETS, parsePipelineNodes, parseTrigger,
-  type AlarmSource, type Role, type Skill, type Trigger, type TriggerKind,
+  type AlarmSource, type EventType, type Role, type Skill, type Trigger, type TriggerKind,
 } from "@/components/skills-v2/types";
 
 type Identity = "patrol" | "datacheck";
+/** Event-driven trigger sub-mode: subscribe to a raw simulator event by name,
+ *  or to an upstream Auto Patrol's alarm. */
+type EventMode = "raw" | "patrol";
 
 export default function AutomatePage() {
   const params = useParams<{ slug: string }>();
@@ -26,6 +29,7 @@ export default function AutomatePage() {
 
   const [skill, setSkill] = useState<Skill | null>(null);
   const [sources, setSources] = useState<AlarmSource[]>([]);
+  const [eventTypes, setEventTypes] = useState<EventType[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState("");
@@ -33,9 +37,11 @@ export default function AutomatePage() {
   // Draft state — separate from skill so Cancel doesn't mutate.
   const [identity, setIdentity] = useState<Identity>("patrol");
   const [triggerKind, setTriggerKind] = useState<TriggerKind>("schedule");
+  const [eventMode, setEventMode] = useState<EventMode>("raw");
   const [schedule, setSchedule] = useState<string>(SCHEDULES[1]);
   const [target, setTarget]     = useState<string>(TARGETS[0]);
   const [source, setSource]     = useState<string>("");
+  const [rawEvent, setRawEvent] = useState<string>("");
   const [gate, setGate]         = useState<string>(GATES[0]);
   const [outcome, setOutcome]   = useState<string>(OUTCOMES[0]);
 
@@ -46,10 +52,12 @@ export default function AutomatePage() {
     Promise.all([
       fetch(`/api/skills-v2/${encodeURIComponent(slug)}`).then(r => r.json()),
       fetch(`/api/skills-v2/alarm-sources?excludeSlug=${encodeURIComponent(slug)}`).then(r => r.json()),
-    ]).then(([sEnv, srcEnv]) => {
+      fetch(`/api/skills-v2/event-types`).then(r => r.json()),
+    ]).then(([sEnv, srcEnv, evEnv]) => {
       const s = (sEnv?.data ?? sEnv) as Skill;
       setSkill(s);
       setSources((srcEnv?.data ?? srcEnv) as AlarmSource[]);
+      setEventTypes((evEnv?.data ?? evEnv) as EventType[]);
 
       // Seed draft from existing automation, or sensible defaults.
       const ident: Identity = s.role === "datacheck" ? "datacheck" : "patrol";
@@ -61,7 +69,9 @@ export default function AutomatePage() {
           if (t.schedule) setSchedule(t.schedule);
           if (t.target)   setTarget(t.target);
         } else {
-          if (t.source) setSource(t.source);
+          // raw-event subscription uses `event`; alarm subscription uses `source`.
+          if (t.event) { setEventMode("raw"); setRawEvent(t.event); }
+          else if (t.source) { setEventMode("patrol"); setSource(t.source); }
         }
       }
       if (s.alarm_gate) setGate(s.alarm_gate);
@@ -84,8 +94,9 @@ export default function AutomatePage() {
 
   const buildTrigger = useCallback((): Trigger => {
     if (triggerKind === "schedule") return { kind: "schedule", schedule, target };
+    if (eventMode === "raw") return { kind: "event", event: rawEvent || eventTypes[0]?.name || "" };
     return { kind: "event", source: source || sources[0]?.slug || "" };
-  }, [triggerKind, schedule, target, source, sources]);
+  }, [triggerKind, eventMode, schedule, target, source, sources, rawEvent, eventTypes]);
 
   const handleDone = useCallback(async () => {
     if (!skill) return;
@@ -210,39 +221,81 @@ export default function AutomatePage() {
             </>
           ) : (
             <>
-              <Row label="來源">
-                {sources.length === 0 ? (
-                  <span style={{ fontSize: 12, color: TK.faint }}>
-                    目前沒有可用的上游 Auto Patrol（需要至少一顆 role=patrol、含 alarm 的 skill）。
-                  </span>
-                ) : (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                    {sources.map(s => (
-                      <button key={s.slug} onClick={() => setSource(s.slug)} style={{
-                        font: `500 12.5px ${FONT.sans}`,
-                        background: source === s.slug ? TK.indigoTint : "#fff",
-                        color: TK.ink,
-                        border: `1.5px solid ${source === s.slug ? TK.indigo : TK.divider}`,
-                        padding: "7px 11px", borderRadius: 8, cursor: "pointer",
-                        textAlign: "left", minWidth: 180,
-                      }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontWeight: 600 }}>{s.name}</span>
-                          <span style={{
-                            font: `600 10px ${FONT.mono}`,
-                            color: TK.patrol, background: TK.patrolTint,
-                            padding: "2px 6px", borderRadius: 4,
-                          }}>alarm</span>
-                        </div>
-                        <div style={{ fontSize: 11, color: TK.faint, marginTop: 2 }}>{s.sub}</div>
-                      </button>
-                    ))}
-                  </div>
-                )}
+              <Row label="事件種類">
+                <Pill
+                  onClick={() => setEventMode(eventMode === "raw" ? "patrol" : "raw")}
+                  color={TK.stripTrigger}
+                >
+                  {eventMode === "raw" ? "原始事件 (Simulator) ↔ 上游 Patrol" : "上游 Auto Patrol ↔ 原始事件"}
+                </Pill>
               </Row>
-              <div style={{ fontSize: 12, color: TK.faint, marginTop: 6 }}>
-                Event-driven 必須接一個上游 Auto Patrol 的 alarm。
-              </div>
+              {eventMode === "raw" ? (
+                <>
+                  <Row label="事件">
+                    {eventTypes.length === 0 ? (
+                      <span style={{ fontSize: 12, color: TK.faint }}>沒有可用的事件種類。</span>
+                    ) : (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        {eventTypes.map(e => (
+                          <button key={e.name} onClick={() => setRawEvent(e.name)} title={e.description} style={{
+                            font: `500 12.5px ${FONT.sans}`,
+                            background: rawEvent === e.name ? TK.indigoTint : "#fff",
+                            color: TK.ink,
+                            border: `1.5px solid ${rawEvent === e.name ? TK.indigo : TK.divider}`,
+                            padding: "7px 11px", borderRadius: 8, cursor: "pointer",
+                            textAlign: "left", minWidth: 160, maxWidth: 280,
+                          }}>
+                            <div style={{ font: `600 12px ${FONT.mono}` }}>{e.name}</div>
+                            <div style={{ fontSize: 11, color: TK.faint, marginTop: 2,
+                                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {e.description}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </Row>
+                  <div style={{ fontSize: 12, color: TK.faint, marginTop: 6 }}>
+                    Simulator 發出該事件時即觸發此 Skill（例：OOC = SPC 超管制界限）。
+                  </div>
+                </>
+              ) : (
+                <>
+                  <Row label="來源">
+                    {sources.length === 0 ? (
+                      <span style={{ fontSize: 12, color: TK.faint }}>
+                        目前沒有可用的上游 Auto Patrol（需要至少一顆 role=patrol、含 alarm 的 skill）。
+                      </span>
+                    ) : (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        {sources.map(s => (
+                          <button key={s.slug} onClick={() => setSource(s.slug)} style={{
+                            font: `500 12.5px ${FONT.sans}`,
+                            background: source === s.slug ? TK.indigoTint : "#fff",
+                            color: TK.ink,
+                            border: `1.5px solid ${source === s.slug ? TK.indigo : TK.divider}`,
+                            padding: "7px 11px", borderRadius: 8, cursor: "pointer",
+                            textAlign: "left", minWidth: 180,
+                          }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                              <span style={{ fontWeight: 600 }}>{s.name}</span>
+                              <span style={{
+                                font: `600 10px ${FONT.mono}`,
+                                color: TK.patrol, background: TK.patrolTint,
+                                padding: "2px 6px", borderRadius: 4,
+                              }}>alarm</span>
+                            </div>
+                            <div style={{ fontSize: 11, color: TK.faint, marginTop: 2 }}>{s.sub}</div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </Row>
+                  <div style={{ fontSize: 12, color: TK.faint, marginTop: 6 }}>
+                    接一個上游 Auto Patrol 的 alarm。
+                  </div>
+                </>
+              )}
             </>
           )}
         </Section>
@@ -279,7 +332,9 @@ export default function AutomatePage() {
         <CompositeStrip
           trigger={triggerKind === "schedule"
             ? `${schedule} · ${target}`
-            : `on ${source || sources[0]?.name || "(選一個來源)"}`}
+            : eventMode === "raw"
+              ? `event ${rawEvent || eventTypes[0]?.name || "(選一個事件)"}`
+              : `on ${source || sources[0]?.name || "(選一個來源)"}`}
           checklist={`${skill.name} · ${nodeCount} steps`}
           gate={identity === "patrol" ? gate : "— 無"}
           outcome={identity === "patrol" ? outcome : "data only"}

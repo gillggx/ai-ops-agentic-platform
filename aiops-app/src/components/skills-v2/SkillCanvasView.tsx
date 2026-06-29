@@ -120,7 +120,7 @@ function Inner({ pipelineId, height }: Props) {
       }}
     >
       <PipelineThemeStyles />
-      <DagCanvas blockCatalog={catalog} readOnly />
+      <DagCanvas blockCatalog={catalog} readOnly autoFit />
       {status === "loading" && (
         <div style={{
           position: "absolute", inset: 0, display: "flex", alignItems: "center",

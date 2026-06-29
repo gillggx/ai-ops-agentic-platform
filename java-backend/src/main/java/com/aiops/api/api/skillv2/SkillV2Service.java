@@ -41,13 +41,16 @@ public class SkillV2Service {
 	private final SkillV2Repository repo;
 	private final PipelineRepository pipelineRepo;
 	private final ObjectMapper mapper;
+	private final com.aiops.api.domain.event.EventTypeRepository eventTypeRepo;
 
 	public SkillV2Service(SkillV2Repository repo,
 	                      PipelineRepository pipelineRepo,
-	                      ObjectMapper mapper) {
+	                      ObjectMapper mapper,
+	                      com.aiops.api.domain.event.EventTypeRepository eventTypeRepo) {
 		this.repo = repo;
 		this.pipelineRepo = pipelineRepo;
 		this.mapper = mapper;
+		this.eventTypeRepo = eventTypeRepo;
 	}
 
 	// ─── Create ────────────────────────────────────────────────────────
@@ -152,6 +155,19 @@ public class SkillV2Service {
 			if (!Boolean.TRUE.equals(s.getHasAlarm())) continue;
 			if (excludeSlug != null && excludeSlug.equals(s.getSlug())) continue;
 			out.add(new AlarmSourceDto(s.getSlug(), s.getName(), s.getSub()));
+		}
+		return out;
+	}
+
+	/** Raw simulator event types an event-driven skill can subscribe to
+	 *  ({"kind":"event","event":<name>}). Distinct from listAlarmSources,
+	 *  which lists upstream patrol alarms. */
+	@Transactional(readOnly = true)
+	public List<EventTypeDto> listEventTypes() {
+		List<EventTypeDto> out = new ArrayList<>();
+		for (com.aiops.api.domain.event.EventTypeEntity e : eventTypeRepo.findAll()) {
+			if (e.getName() == null || e.getName().isBlank()) continue;
+			out.add(new EventTypeDto(e.getName(), e.getDescription()));
 		}
 		return out;
 	}
@@ -537,6 +553,8 @@ public class SkillV2Service {
 	                             String inType, String outType) {}
 
 	public record AlarmSourceDto(String slug, String name, String sub) {}
+
+	public record EventTypeDto(String name, String description) {}
 
 	public record SkillFullDto(SkillDto skill, String pipelineJson) {}
 

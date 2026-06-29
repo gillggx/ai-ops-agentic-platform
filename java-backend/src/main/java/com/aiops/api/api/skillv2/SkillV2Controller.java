@@ -164,4 +164,11 @@ public class SkillV2Controller {
 	public ApiResponse<List<SkillV2Service.AlarmSourceDto>> listAlarmSources(@RequestParam(required = false) String excludeSlug) {
 		return ApiResponse.ok(service.listAlarmSources(excludeSlug));
 	}
+
+	/** Raw simulator event types an event-driven skill can subscribe to. */
+	@GetMapping("/event-types")
+	@PreAuthorize(Authorities.ANY_ROLE)
+	public ApiResponse<List<SkillV2Service.EventTypeDto>> listEventTypes() {
+		return ApiResponse.ok(service.listEventTypes());
+	}
 }

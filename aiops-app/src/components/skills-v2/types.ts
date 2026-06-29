@@ -13,7 +13,13 @@ export interface Trigger {
   kind: TriggerKind;
   schedule?: string;
   target?: string;
-  source?: string;       // upstream patrol slug
+  source?: string;       // event-driven: upstream patrol slug (alarm-driven)
+  event?: string;        // event-driven: raw simulator event name (e.g. "OOC")
+}
+
+export interface EventType {
+  name: string;
+  description: string;
 }
 
 export interface PipelineNode {
@@ -72,6 +78,7 @@ export function summarizeTrigger(t: Trigger | null): string {
   if (t.kind === "schedule") {
     return `⏱ ${t.schedule ?? "—"} · ${t.target ?? "—"}`;
   }
+  if (t.event) return `⚡ on event ${t.event}`;
   return `⚡ on ${t.source ?? "—"} · alarm`;
 }
 

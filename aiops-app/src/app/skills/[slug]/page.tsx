@@ -8,13 +8,14 @@
  * the pipeline contains a verdict node (→ Auto Patrol eligible).
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { TK, FONT, ROLE_COLORS, ensurePlexFont } from "@/components/skills-v2/tokens";
 import { parsePipelineNodes, roleLabel, type Skill, type PipelineNode } from "@/components/skills-v2/types";
 import { writeSkillV2Ctx } from "@/components/skills-v2/SkillV2EmbedBanner";
 import SkillCanvasView from "@/components/skills-v2/SkillCanvasView";
+import SkillTryRunPanel from "@/components/skills-v2/SkillTryRunPanel";
 
 export default function SkillEditorPage() {
   const params = useParams<{ slug: string }>();
@@ -31,8 +32,17 @@ export default function SkillEditorPage() {
   const [opening, setOpening] = useState(false);
   const [activating, setActivating] = useState(false);
   const [toast, setToast] = useState("");
+  const nlRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => { ensurePlexFont(); }, []);
+
+  // Auto-grow the NL textarea to fit content (wrapped lines included, not just \n count).
+  useEffect(() => {
+    const el = nlRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 360)}px`;
+  }, [nl]);
 
   useEffect(() => {
     if (!slug) return;
@@ -170,14 +180,14 @@ export default function SkillEditorPage() {
           <Column>
             <ColumnHeader>你的描述 · 自然語言</ColumnHeader>
             <textarea
+              ref={nlRef}
               value={nl}
               onChange={(e) => { setNl(e.target.value); setNlDirty(true); }}
-              rows={Math.min(6, Math.max(2, nl.split("\n").length))}
               placeholder="用自然語言描述這個 Skill 要做什麼…（例如：檢查指定機台最近 5 次 process 是否有 ≥2 次 OOC）"
               style={{
-                minHeight: 56,
+                minHeight: 56, overflowY: "auto",
                 padding: "12px 18px", border: "none", outline: "none",
-                resize: "vertical",
+                resize: "none",
                 font: `15px/1.6 ${FONT.sans}`, color: TK.ink, background: "#fff",
               }}
             />
@@ -247,6 +257,11 @@ export default function SkillEditorPage() {
               <SkillCanvasView pipelineId={skill.pipeline_id} height={460} />
             </div>
           </Column>
+
+          {/* Try Run — read-only dry-run of the bound pipeline */}
+          {skill.pipeline_id != null && (
+            <SkillTryRunPanel pipelineId={skill.pipeline_id} />
+          )}
         </div>
 
         {/* System alarm check */}
