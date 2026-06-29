@@ -11,13 +11,30 @@
   → 照下面流程**實際呼叫工具**，最後給使用者 `/skills/<id>` 連結。
 
 - **模式 B（沒 connector / claude.ai 網頁）**：你看不到任何 `aiops-*` 工具。
-  → **不要說「我沒有工具所以做不到」**。改成**純文字模式**：
-    1. 把使用者需求寫成一段精準的自然語言 Skill 描述；
-    2.（可選）依下面 schema 吐一份 pipeline JSON 草稿（標明未驗證）；
-    3. 叫使用者去 **https://aiops-gill.com/skills/new** 貼上描述，按
-       「用 Pipeline Builder 編譯 →」讓平台 agent 自己 build，review 後按「啟用」。
-    平台網址：新增 https://aiops-gill.com/skills/new ｜ 清單 https://aiops-gill.com/skills
-    你連不到也打不開這些網址，只負責把它們給使用者。
+  → **不要說「我沒有工具所以做不到」**。你的工作是「幫使用者把需求寫清楚 +
+    教他怎麼在平台上自己建」。每次照下面三步回覆：
+
+    **第 1 步 — 你寫一段精準的 Skill 描述**（一句完整、可執行的中文需求，包含：
+    哪台機台 / step、看什麼資料 + 時間範圍、要呈現圖表還是要判斷告警、若告警門檻多少）。
+
+    **第 2 步 —（可選）pipeline 草稿**：若使用者想看結構，照本文件「Block 速查表」
+    產一份 pipeline JSON 草稿，標明「未驗證、平台會以實際 block 為準」。
+
+    **第 3 步 — 給使用者這段照做（原樣貼出，不要省略網址）**：
+    ```
+    1. 用瀏覽器開：https://aiops-gill.com/skills/new
+    2. 名稱欄填：<你建議的 Skill 名稱>
+       描述欄貼上：<第 1 步那段描述>
+       按「建立 → 進 Editor」。
+    3. 在 Editor 按「用 Pipeline Builder 編譯 →」。
+       平台自己的 AI agent 會照描述把 pipeline 建出來（它有完整 block 目錄 + 真實
+       資料，比草稿準）。等它跑完。
+    4. 檢查右邊畫出來的 pipeline 沒問題後，按頁面下方「啟用」才會正式生效。
+       （要排程巡檢 / OOC 觸發，就在 Editor 設 Auto Patrol / Event。）
+    5. 之後所有 Skill 在 https://aiops-gill.com/skills 看得到。
+    ```
+    你（claude.ai）連不到、也打不開這些網址；你只負責把上面這段給使用者，由他自己操作。
+    **平台沒有給外部直接呼叫的 API**——一律走上面的網頁流程，不要叫使用者去 call API。
 
 下面的工具說明（模式 A 用）同時也是模式 B 產 JSON 草稿時的格式 / 欄位依據。
 
@@ -59,6 +76,38 @@ Node **positions are not needed** — the UI lays out the DAG.
    a draft (open + 啟用 to make it run). See **Skills v2** below for the full
    persist + automate tool set. **Don't stop at execute** — that leaves nothing
    the human can open.
+
+## Block 速查表（模式 B 沒有 `explain_block` 時，照這個寫 params）
+> 模式 A 永遠以 `explain_block(name)` 的回傳為準（這裡只是離線速查 + 草稿用）。
+
+**資料源**
+- `block_process_history` — 從 ontology 拉某機台/批次/站點的 process 歷史，flatten
+  成寬表。params: `tool_id`（機台，或綁 `$tool_id`）、`object_name`（如 `"SPC"`）、
+  `time_range`（`"24h"`/`"7d"`/`"30d"`）、`limit`。**只查一台**；全廠要用 foreach。
+- `block_list_objects` — 列 master 清單。params: `kind`（`tool`機台 / `lot`批次 /
+  `step`站點 / `apc` / `spc`）、`args`（通常 `{}`）。
+- `block_mcp_call` — 直接呼一個 system MCP（單次）。
+
+**處理**
+- `block_filter` — 單條件過濾。params: `column`、`operator`（`==`/`!=`/`>`/`>=`/
+  `<`/`in`/`contains`）、`value`。多台機台用 `operator="in", value=[...]`。
+- `block_unnest` — 把 array 欄位炸成多列（dict 元素的 key 自動升成欄位）。
+  params: `column`（要炸的陣列欄，如 `"spc_charts"`）。
+- `block_mcp_foreach` — 對上游每一列呼一個 MCP，把回傳併成新欄位（**全廠 fan-out 用**）。
+  params: `mcp_name`、`args_template`（如 `{"targetID":"$lotID","step":"$step"}`）、
+  `result_prefix`（如 `"apc_"`）、`max_concurrency`（預設 5）。
+- `block_sort` / `block_groupby_agg` / `block_time_bucket` / `block_find` — 排序 / 分組彙總 / 時間分桶 / 找值。
+
+**判斷（要當 Auto Patrol 必含）**
+- `block_step_check` — 把上游彙總成 scalar 跟門檻比，輸出 `{pass, value, threshold,
+  operator, note}`。params: `aggregate`（`count`/`mean`/`last`/`sum`/`max`…）、
+  `operator`（`>=`/`>`/`==`/`drift`/`changed`…）、`threshold`、`column`（非 count 時）、
+  `baseline`（drift/changed 時）。例：近 5 次 OOC ≥2 → `aggregate="count", operator=">=", threshold=2`。
+
+**輸出**
+- `block_data_view`（表）、`block_line_chart`（趨勢，含 UCL/CL/LCL）、
+  `block_bar_chart`（長條，排名設 `order="desc"` 自己排序）、`block_pareto`（自排）、
+  `block_heatmap`、`block_spc_panel`。
 
 ## Gotchas (learned the hard way)
 - `block_process_history` defaults `time_range="24h"`; sim data may be older →
@@ -120,9 +169,16 @@ exists, create one. Never end on an ephemeral preview with no link.
 | `create_skill_v2(name, sub?, nl?)` | create. Returns `{slug, view_url}`. Skill starts as `tool` with empty pipeline. |
 | `update_skill_v2(slug, nl?/name?/sub?/in_type?/out_type?)` | edit text fields. **Does NOT rebuild the pipeline** — see Decision tree below. |
 | `bind_skill_pipeline(slug, pipeline_id)` | link a `save_pipeline` result to a skill. Server derives `pipeline_nodes` + `has_alarm` + `in_type` + `out_type` from the DAG. Overwrites any previous binding. |
-| `automate_skill_patrol(slug, schedule, target, alarm_gate, outcome)` | wrap as cron-scheduled Auto Patrol. Skill must have `has_alarm=True`. |
-| `automate_skill_event(slug, upstream_slug, alarm_gate, outcome)` | wrap as event-driven Auto Patrol. Skill must have `has_alarm=True`. |
-| `automate_skill_datacheck(slug, schedule, target)` | wrap as scheduled Data Check (no alarm; terminal). |
+| `automate_skill_patrol(slug, schedule, target, alarm_gate, outcome)` | 排程巡檢，gate 達標就發 alarm。skill 必須 `has_alarm=True`（pipeline 含 block_step_check）。**參數只能用下面目錄值**。 |
+| `automate_skill_event(slug, upstream_slug, alarm_gate, outcome)` | 事件觸發巡檢：`upstream_slug` 指向一個**既有的 patrol skill**，那個 patrol 發 alarm 時就跑這個。用 `list_event_sources()` 拿合法 upstream。skill 必須 `has_alarm=True`。 |
+| `automate_skill_datacheck(slug, schedule, target)` | 排程 Data Check：產報表 / dashboard，**永不發 alarm**（terminal）。給「每天早上彙總 X」用。skill 不該有 block_step_check。 |
+
+**自動化參數目錄值（傳錯會被 server 拒）**
+- `schedule`（patrol / datacheck）：`"每 30 分鐘"` | `"每 1 小時"` | `"每 2 小時"` | `"每日 08:00"`
+- `target`：`"所有機台"`（或特定機台清單字串）
+- `alarm_gate`（patrol / event）：`"任一符合 → alarm"`（常用）等 gate 描述
+- `outcome`（patrol / event）：`"raise alarm · 可被下游接"` | `"advisory only · 只通知"` | `"接 action / workflow"`
+- 範例：`automate_skill_patrol(slug, schedule="每 1 小時", target="所有機台", alarm_gate="任一符合 → alarm", outcome="raise alarm · 可被下游接")`
 | `remove_skill_automation(slug)` | strip wrapper → back to plain `tool`. |
 | `delete_skill_v2(slug)` | permanently delete. Bound pipeline is NOT deleted (other refs may exist). |
 
