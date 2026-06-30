@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import McpResultView from "@/components/admin/McpResultView";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -17,7 +17,7 @@ interface SystemMcp {
   name: string;
   description: string;
   api_config: Record<string, unknown> | null;
-  input_schema: { fields?: SchemaField[] } | null;
+  input_schema: { fields?: SchemaField[] } | string | null;
   output_schema: Record<string, unknown> | null;
   visibility: string;
   updated_at: string;
@@ -109,7 +109,17 @@ async function apiFetch(method: string, path: string, body?: unknown) {
 
 function parseSchemaFields(input_schema: SystemMcp["input_schema"]): SchemaField[] {
   if (!input_schema) return [];
-  const fields = (input_schema as Record<string, unknown>).fields;
+  // Detail GET returns input_schema as a JSON string (DB TEXT column serialized
+  // by Jackson as a String DTO field); the list endpoint sends an object or
+  // nothing. Accept both so inputs render regardless of source.
+  let obj: Record<string, unknown>;
+  if (typeof input_schema === "string") {
+    try { obj = JSON.parse(input_schema) as Record<string, unknown>; }
+    catch { return []; }
+  } else {
+    obj = input_schema as Record<string, unknown>;
+  }
+  const fields = obj.fields;
   if (!Array.isArray(fields)) return [];
   return fields.map((f) => {
     const field = f as Record<string, unknown>;
@@ -526,6 +536,8 @@ export default function SystemMcpAdminPage() {
   const [mcps, setMcps]     = useState<SystemMcp[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<SystemMcp | null>(null);
+  // Tracks the currently-selected id for async guards (detail GET races).
+  const selectedIdRef = useRef<number | null>(null);
   const [isNew, setIsNew]   = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -579,6 +591,7 @@ export default function SystemMcpAdminPage() {
 
   async function selectMcp(mcp: SystemMcp) {
     setSelected(mcp);
+    selectedIdRef.current = mcp.id;
     setIsNew(false);
     setTestRaw(undefined); setTestError(null);
     setLintIssues([]);
@@ -602,7 +615,15 @@ export default function SystemMcpAdminPage() {
     try {
       const res = await apiFetch("GET", `mcp-definitions/${mcp.id}`);
       const detail = (res.data ?? res) as SystemMcp | undefined;
-      if (detail) setSelected(s => (s && s.id === mcp.id ? { ...s, ...detail } : s));
+      if (detail) {
+        setSelected(s => (s && s.id === mcp.id ? { ...s, ...detail } : s));
+        // The list Summary omits input_schema and detail sends it as a JSON
+        // string; re-derive the inputs from detail so the schema fields show.
+        // Guard on id so a fast re-select doesn't clobber the new selection.
+        setForm(f => (selectedIdRef.current === mcp.id
+          ? { ...f, schemaFields: parseSchemaFields(detail.input_schema) }
+          : f));
+      }
     } catch {
       /* non-fatal — banner just falls back to neutral state */
     }
@@ -610,6 +631,7 @@ export default function SystemMcpAdminPage() {
 
   function openNew() {
     setSelected(null);
+    selectedIdRef.current = null;
     setIsNew(true);
     setTestRaw(undefined); setTestError(null);
     setLintIssues([]);
@@ -623,6 +645,7 @@ export default function SystemMcpAdminPage() {
 
   function closePanel() {
     setSelected(null);
+    selectedIdRef.current = null;
     setIsNew(false);
     setTestRaw(undefined); setTestError(null);
     setLintIssues([]);
