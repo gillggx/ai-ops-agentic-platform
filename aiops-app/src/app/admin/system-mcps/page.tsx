@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import McpResultView from "@/components/admin/McpResultView";
+import DataResultView, { OkStatus } from "@/components/common/DataResultView";
 import { T, card, secTitle, secHint, flabel, inp as tinp, btn as tbtn, pill } from "@/components/admin/mcpTheme";
 
 // ── Description sections ────────────────────────────────────────────────────
@@ -1330,7 +1330,11 @@ export default function SystemMcpAdminPage() {
                     <div style={{ fontSize: 12, color: T.faint }}>此 MCP 無定義 input 參數，將直接呼叫 endpoint。</div>
                   )}
                   <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-                    <McpResultView result={testRaw} loading={testLoading} error={testError} latencyMs={testLatency} />
+                    <DataResultView
+                      result={testRaw} loading={testLoading} error={testError} latencyMs={testLatency}
+                      statusSlot={<OkStatus />} loadingText="撈取中…"
+                      emptyText="尚未執行 — 填參數後按「執行 Sample Fetch」"
+                    />
                   </div>
                 </>
               )}

@@ -12,6 +12,7 @@
 import { useState } from "react";
 import type { PipelineResultSummary, NodeResult, PipelineChartSummary } from "@/lib/pipeline-builder/types";
 import ChartRenderer from "./ChartRenderer";
+import DataResultView from "@/components/common/DataResultView";
 
 type ChartView = "stacked" | "grid" | "tabs";
 
@@ -30,7 +31,6 @@ export default function ResultsBody({ summary, nodeResults }: Props) {
   const evidence = summary.evidence_node_id
     ? nodeResults[summary.evidence_node_id]?.preview?.evidence
     : undefined;
-  const evidenceCols = (evidence as { columns?: string[] } | undefined)?.columns ?? [];
   const evidenceRows = (evidence as { rows?: Array<Record<string, unknown>> } | undefined)?.rows ?? [];
 
   const effectiveView: ChartView = userChartView ?? (chartCount <= 1 ? "stacked" : "grid");
@@ -42,61 +42,8 @@ export default function ResultsBody({ summary, nodeResults }: Props) {
       {summary.triggered && evidenceRows.length > 0 && (
         <div data-testid="result-evidence-table" style={{ marginTop: 12 }}>
           <div style={sectionHeader}>佐證事件 ({evidenceRows.length} rows)</div>
-          <div
-            style={{
-              border: "1px solid #E2E8F0",
-              borderRadius: 6,
-              maxHeight: 240,
-              overflow: "auto",
-              background: "#fff",
-            }}
-          >
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
-              <thead>
-                <tr>
-                  {evidenceCols.slice(0, 10).map((c) => (
-                    <th
-                      key={c}
-                      style={{
-                        textAlign: "left",
-                        padding: "5px 10px",
-                        borderBottom: "1px solid #E2E8F0",
-                        position: "sticky",
-                        top: 0,
-                        background: "#F7F8FC",
-                        color: "#4A5568",
-                        fontWeight: 600,
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {c}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {evidenceRows.slice(0, 40).map((row, ri) => (
-                  <tr key={ri}>
-                    {evidenceCols.slice(0, 10).map((c) => (
-                      <td
-                        key={c}
-                        style={{
-                          padding: "4px 10px",
-                          borderBottom: "1px solid #F1F5F9",
-                          color: "#2D3748",
-                          maxWidth: 180,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {formatCell(row[c])}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div style={{ height: 280, display: "flex", flexDirection: "column" }}>
+            <DataResultView result={evidenceRows} enableFullscreen={false} />
           </div>
         </div>
       )}
@@ -151,64 +98,8 @@ export default function ResultsBody({ summary, nodeResults }: Props) {
                   {v.description}
                 </div>
               )}
-              <div style={{ maxHeight: 280, overflow: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
-                  <thead>
-                    <tr style={{ background: "#F7F8FC" }}>
-                      {v.columns.map((c) => (
-                        <th
-                          key={c}
-                          style={{
-                            textAlign: "left",
-                            padding: "5px 10px",
-                            borderBottom: "1px solid #E2E8F0",
-                            position: "sticky",
-                            top: 0,
-                            background: "#F7F8FC",
-                            color: "#4A5568",
-                            fontWeight: 600,
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {c}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {v.rows.map((row, ri) => (
-                      <tr key={ri}>
-                        {v.columns.map((c) => (
-                          <td
-                            key={c}
-                            style={{
-                              padding: "4px 10px",
-                              borderBottom: "1px solid #F1F5F9",
-                              color: "#2D3748",
-                              maxWidth: 200,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                              fontFamily: typeof row[c] === "number" ? "ui-monospace,monospace" : undefined,
-                            }}
-                          >
-                            {formatCell(row[c])}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                    {v.rows.length === 0 && (
-                      <tr>
-                        <td
-                          colSpan={v.columns.length || 1}
-                          style={{ padding: 12, textAlign: "center", color: "#94A3B8", fontSize: 11 }}
-                        >
-                          無資料
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+              <div style={{ height: 300, display: "flex", flexDirection: "column", padding: 10 }}>
+                <DataResultView result={v.rows} enableFullscreen={false} emptyText="無資料" />
               </div>
             </div>
           ))}
@@ -369,12 +260,6 @@ const sectionHeader: React.CSSProperties = {
   textTransform: "uppercase",
   marginBottom: 6,
 };
-
-function formatCell(v: unknown): string {
-  if (v === null || v === undefined) return "—";
-  if (typeof v === "object") return JSON.stringify(v);
-  return String(v);
-}
 
 function ViewToggle({
   mode,

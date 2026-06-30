@@ -1,33 +1,46 @@
 "use client";
 
 /**
- * McpResultView — readable rendering of a System MCP sample-fetch response.
+ * DataResultView — shared, schema-agnostic renderer for arbitrary JSON result
+ * data. Promoted out of the System MCP admin screen for site-wide reuse: any
+ * surface that shows "what did this node / block / query actually return" can
+ * drop it in.
  *
- * Schema-agnostic (works for any MCP, not tied to a specific response shape).
  * Three views, switchable client-side with no refetch:
  *   - structured : array-of-objects → table (nested cells collapse to a chip,
  *                  click a row to expand its full record); single object →
  *                  scalar mini-card grid.
  *   - tree       : collapsible JSON tree (expand-all / collapse-all).
  *   - raw        : pretty-printed JSON.
- * Plus copy-to-clipboard and a fullscreen toggle (Esc to exit). Built to fill
- * the available height so the admin layout can use it as the data pane.
+ * Plus copy-to-clipboard and an optional fullscreen toggle (Esc to exit).
+ *
+ * It does NOT render charts or schema-driven (output_schema) reports — those
+ * stay with ChartRenderer / SkillOutputRenderer respectively. This is the
+ * raw-data inspector.
  */
 
-import { Fragment, useEffect, useMemo, useState } from "react";
-import { T } from "./mcpTheme";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { T } from "./uiTokens";
 
 interface Props {
-  result: unknown;        // parsed response object (not a string)
+  result: unknown;              // parsed response/value (not a string)
   loading?: boolean;
   error?: string | null;
-  latencyMs?: number | null;
+  latencyMs?: number | null;    // optional duration shown on the meta line
+  /** Left-most meta slot, e.g. a "200 OK" badge. Omit for a plain count line. */
+  statusSlot?: ReactNode;
+  loadingText?: string;
+  emptyText?: string;
+  defaultView?: View;
+  maxRows?: number;
+  /** Show the fullscreen toggle. Disable when embedded in a modal/canvas. */
+  enableFullscreen?: boolean;
 }
 
 type View = "structured" | "tree" | "raw";
 
 const ARRAY_KEYS = ["events", "data", "items", "results", "rows", "records", "list"];
-const MAX_ROWS = 200;
+const DEFAULT_MAX_ROWS = 200;
 
 /** Find the primary array-of-objects to tabulate. */
 function findTable(result: unknown): { rows: Record<string, unknown>[]; sourceKey: string | null } {
@@ -51,7 +64,7 @@ function findTable(result: unknown): { rows: Record<string, unknown>[]; sourceKe
   return { rows: [], sourceKey: null };
 }
 
-/** Count the rows the viewer reports (events/data length, else 1). */
+/** Count the rows the viewer reports (events/data length, else total/count, else 1). */
 function countOf(result: unknown): number {
   const { rows } = findTable(result);
   if (rows.length) return rows.length;
@@ -76,8 +89,12 @@ function fmtScalar(v: unknown): string {
   return String(v);
 }
 
-export default function McpResultView({ result, loading, error, latencyMs }: Props) {
-  const [view, setView] = useState<View>("structured");
+export default function DataResultView({
+  result, loading, error, latencyMs, statusSlot,
+  loadingText = "載入中…", emptyText = "尚無資料",
+  defaultView = "structured", maxRows = DEFAULT_MAX_ROWS, enableFullscreen = true,
+}: Props) {
+  const [view, setView] = useState<View>(defaultView);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [treeOpen, setTreeOpen] = useState<Record<string, boolean>>({});
@@ -86,11 +103,11 @@ export default function McpResultView({ result, loading, error, latencyMs }: Pro
   const { rows, sourceKey } = useMemo(() => findTable(result), [result]);
   const columns = useMemo(() => {
     const set = new Set<string>();
-    rows.slice(0, MAX_ROWS).forEach(r => Object.keys(r).forEach(k => set.add(k)));
+    rows.slice(0, maxRows).forEach(r => Object.keys(r).forEach(k => set.add(k)));
     return Array.from(set);
-  }, [rows]);
+  }, [rows, maxRows]);
 
-  // A fresh fetch invalidates per-result UI state.
+  // A fresh result invalidates per-result UI state.
   useEffect(() => { setExpandedRow(null); setTreeOpen({}); }, [result]);
   useEffect(() => {
     if (!fullscreen) return;
@@ -99,19 +116,19 @@ export default function McpResultView({ result, loading, error, latencyMs }: Pro
     return () => window.removeEventListener("keydown", onKey);
   }, [fullscreen]);
 
-  if (loading) return <Shell><Center>撈取中…</Center></Shell>;
+  if (loading) return <Shell><Center>{loadingText}</Center></Shell>;
   if (error) {
     return (
       <Shell>
         <div style={{ background: "#fff5f5", border: `1px solid ${T.dangerBd}`, borderRadius: 8, padding: "14px 16px", color: T.oocT }}>
-          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>[no] 呼叫失敗</div>
+          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>[no] 失敗</div>
           <pre style={{ margin: 0, fontSize: 12, whiteSpace: "pre-wrap", fontFamily: T.mono }}>{error}</pre>
         </div>
       </Shell>
     );
   }
   if (result === null || result === undefined) {
-    return <Shell><Center>尚未執行 — 填參數後按「執行 Sample Fetch」</Center></Shell>;
+    return <Shell><Center>{emptyText}</Center></Shell>;
   }
 
   const isTable = rows.length > 0;
@@ -123,10 +140,8 @@ export default function McpResultView({ result, loading, error, latencyMs }: Pro
 
   const meta = (
     <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", fontFamily: T.mono, fontSize: 12, color: T.muted }}>
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-        <span style={{ width: 7, height: 7, borderRadius: "50%", background: T.dot, display: "inline-block" }} />200 OK
-      </span>
-      <span>{countOf(result)} 筆{sourceKey ? ` · ${sourceKey}` : ""}{rows.length > MAX_ROWS ? `（顯示前 ${MAX_ROWS}）` : ""}</span>
+      {statusSlot}
+      <span>{countOf(result)} 筆{sourceKey ? ` · ${sourceKey}` : ""}{rows.length > maxRows ? `（顯示前 ${maxRows}）` : ""}</span>
       {latencyMs != null && <span style={{ color: T.faint }}>{latencyMs} ms</span>}
       {flash && <b style={{ color: T.accent }}>{flash}</b>}
     </div>
@@ -149,7 +164,7 @@ export default function McpResultView({ result, loading, error, latencyMs }: Pro
           <IconBtn onClick={() => setAllTree(false)}>⊟ 收合</IconBtn>
         </>}
         <IconBtn onClick={copy}>⧉ copy</IconBtn>
-        <IconBtn onClick={() => setFullscreen(f => !f)}>{fullscreen ? "⤡ exit" : "⤢ fullscreen"}</IconBtn>
+        {enableFullscreen && <IconBtn onClick={() => setFullscreen(f => !f)}>{fullscreen ? "⤡ exit" : "⤢ fullscreen"}</IconBtn>}
       </div>
     </div>
   );
@@ -163,7 +178,7 @@ export default function McpResultView({ result, loading, error, latencyMs }: Pro
         {view === "raw" && <pre style={{ margin: 0, whiteSpace: "pre-wrap", lineHeight: 1.65 }}>{JSON.stringify(result, null, 2)}</pre>}
         {view === "tree" && <TreeNode value={result} k="root" path="root" depth={0} open={treeOpen} setOpen={setTreeOpen} />}
         {view === "structured" && (isTable
-          ? <DataTable rows={rows} columns={columns} expanded={expandedRow} setExpanded={setExpandedRow} />
+          ? <DataTable rows={rows} columns={columns} maxRows={maxRows} expanded={expandedRow} setExpanded={setExpandedRow} />
           : <CardGrid value={result} />)}
       </div>
     </div>
@@ -193,8 +208,8 @@ export default function McpResultView({ result, loading, error, latencyMs }: Pro
 
 // ── structured: table ───────────────────────────────────────────────────────
 
-function DataTable({ rows, columns, expanded, setExpanded }: {
-  rows: Record<string, unknown>[]; columns: string[];
+function DataTable({ rows, columns, maxRows, expanded, setExpanded }: {
+  rows: Record<string, unknown>[]; columns: string[]; maxRows: number;
   expanded: number | null; setExpanded: (i: number | null) => void;
 }) {
   return (
@@ -206,7 +221,7 @@ function DataTable({ rows, columns, expanded, setExpanded }: {
         </tr>
       </thead>
       <tbody>
-        {rows.slice(0, MAX_ROWS).map((r, i) => {
+        {rows.slice(0, maxRows).map((r, i) => {
           const open = expanded === i;
           return (
             <Fragment key={i}>
@@ -257,7 +272,7 @@ function scalar(v: unknown) {
   return <span style={{ color: T.jStr }}>{String(v)}</span>;
 }
 
-function Chip({ children }: { children: React.ReactNode }) {
+function Chip({ children }: { children: ReactNode }) {
   return <span style={{ fontSize: 11, fontWeight: 600, color: T.accent, background: T.accentBg, borderRadius: 20, padding: "1px 8px" }}>{children}</span>;
 }
 
@@ -322,13 +337,13 @@ function TreeNode({ value, k, path, depth, open, setOpen }: {
 
 // ── shells ──────────────────────────────────────────────────────────────────
 
-function Shell({ children }: { children: React.ReactNode }) {
+function Shell({ children }: { children: ReactNode }) {
   return <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>{children}</div>;
 }
-function Center({ children }: { children: React.ReactNode }) {
+function Center({ children }: { children: ReactNode }) {
   return <div style={{ color: T.faint, fontSize: 13, padding: 40, textAlign: "center" }}>{children}</div>;
 }
-function IconBtn({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
+function IconBtn({ children, onClick }: { children: ReactNode; onClick: () => void }) {
   return <button onClick={onClick} style={{
     fontFamily: T.mono, fontSize: 11.5, fontWeight: 600, border: `1px solid ${T.bd}`, background: "#fff",
     borderRadius: 7, padding: "5px 10px", color: T.muted, cursor: "pointer",
@@ -340,3 +355,12 @@ const th: React.CSSProperties = {
   textTransform: "uppercase", textAlign: "left", padding: "8px 12px", borderBottom: `1px solid ${T.bd}`, whiteSpace: "nowrap",
 };
 const td: React.CSSProperties = { padding: "7px 12px", borderBottom: `1px solid ${T.hair}`, verticalAlign: "top" };
+
+/** Convenience meta slot: a green "200 OK"-style status badge. */
+export function OkStatus({ label = "200 OK" }: { label?: string }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <span style={{ width: 7, height: 7, borderRadius: "50%", background: T.dot, display: "inline-block" }} />{label}
+    </span>
+  );
+}

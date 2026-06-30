@@ -2,6 +2,7 @@
 
 import { ChartDSLRenderer, type ChartDSL } from "@/components/operations/SkillOutputRenderer";
 import { VegaLiteChart } from "@/components/contract/visualizations/VegaLiteChart";
+import DataResultView from "@/components/common/DataResultView";
 
 /**
  * ChartRenderer — dispatcher between chart stacks:
@@ -128,66 +129,11 @@ function TableRenderer({ spec }: { spec: TableSpec }) {
           )}
         </div>
       )}
-      <div style={{ overflowX: "auto", border: "1px solid #E2E8F0", borderRadius: 4 }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-          <thead>
-            <tr style={{ background: "#F8FAFC" }}>
-              {spec.columns.map((c) => (
-                <th
-                  key={c}
-                  style={{
-                    padding: "6px 10px",
-                    textAlign: "left",
-                    fontWeight: 600,
-                    color: "#475569",
-                    borderBottom: "1px solid #E2E8F0",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {c}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {spec.data.map((row, i) => (
-              <tr key={i} style={{ borderTop: "1px solid #F1F5F9" }}>
-                {spec.columns.map((c) => (
-                  <td
-                    key={c}
-                    style={{
-                      padding: "5px 10px",
-                      color: "#1E293B",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {formatCell(row[c])}
-                  </td>
-                ))}
-              </tr>
-            ))}
-            {spec.data.length === 0 && (
-              <tr>
-                <td
-                  colSpan={spec.columns.length}
-                  style={{ padding: 18, textAlign: "center", color: "#94A3B8", fontSize: 11 }}
-                >
-                  無資料
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      <div style={{ height: 320, display: "flex", flexDirection: "column" }}>
+        <DataResultView result={spec.data} enableFullscreen={false} emptyText="無資料" />
       </div>
     </div>
   );
-}
-
-function formatCell(v: unknown): string {
-  if (v == null) return "—";
-  if (typeof v === "number") return Number.isFinite(v) ? v.toString() : "—";
-  if (typeof v === "object") return JSON.stringify(v);
-  return String(v);
 }
 
 function VegaChartRenderer({ spec }: Props) {
