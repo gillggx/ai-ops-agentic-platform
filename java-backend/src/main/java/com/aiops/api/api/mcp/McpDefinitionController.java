@@ -23,13 +23,16 @@ public class McpDefinitionController {
 	private final McpDefinitionRepository repository;
 	private final MCPDerivativeService derivativeService;
 	private final MCPGenerationProxy generationProxy;
+	private final McpSampleFetchService sampleFetchService;
 
 	public McpDefinitionController(McpDefinitionRepository repository,
 	                               MCPDerivativeService derivativeService,
-	                               MCPGenerationProxy generationProxy) {
+	                               MCPGenerationProxy generationProxy,
+	                               McpSampleFetchService sampleFetchService) {
 		this.repository = repository;
 		this.derivativeService = derivativeService;
 		this.generationProxy = generationProxy;
+		this.sampleFetchService = sampleFetchService;
 	}
 
 	@GetMapping
@@ -46,6 +49,18 @@ public class McpDefinitionController {
 		McpDefinitionEntity mcp = repository.findById(id)
 				.orElseThrow(() -> ApiException.notFound("mcp definition"));
 		return ApiResponse.ok(Dtos.detailOf(mcp, derivativeService.derivativeStatusOf(mcp)));
+	}
+
+	/**
+	 * Sample Fetch / 試打資料 — invoke this MCP's own endpoint with the supplied
+	 * params and return the raw upstream JSON, so the admin can see what the MCP
+	 * actually returns. Read-only test; mirrors the runtime block dispatcher.
+	 */
+	@PostMapping("/{id}/sample-fetch")
+	@PreAuthorize(Authorities.ANY_ROLE)
+	public ApiResponse<Object> sampleFetch(@PathVariable Long id,
+	                                        @RequestBody(required = false) Map<String, Object> params) {
+		return ApiResponse.ok(sampleFetchService.fetch(id, params));
 	}
 
 	@PostMapping
