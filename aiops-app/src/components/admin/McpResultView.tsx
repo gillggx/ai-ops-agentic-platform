@@ -14,7 +14,7 @@
  * available height so the admin full-page layout can use it as the data pane.
  */
 
-import { useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 
 interface Props {
   result: unknown;        // parsed response object (not a string)
@@ -65,8 +65,21 @@ function fmtCell(v: unknown): string {
   return String(v);
 }
 
+/**
+ * Table-cell view of a value. Nested objects/arrays are the main reason the
+ * table blows past the screen width (a process event carries APC/DC blobs with
+ * dozens of fields), so they collapse to a compact badge here; the full content
+ * lives in the row-expand detail. Scalars render inline as text.
+ */
+function compactCell(v: unknown): { text: string; complex: boolean } {
+  if (Array.isArray(v)) return { text: `[${v.length}]`, complex: true };
+  if (v && typeof v === "object") return { text: `{${Object.keys(v).length} 欄}`, complex: true };
+  return { text: fmtCell(v), complex: false };
+}
+
 export default function McpResultView({ result, loading, error, latencyMs }: Props) {
   const [view, setView] = useState<"table" | "json">("table");
+  const [expanded, setExpanded] = useState<number | null>(null);
 
   const { rows, sourceKey } = useMemo(() => findTable(result), [result]);
   const columns = useMemo(() => {
@@ -74,6 +87,9 @@ export default function McpResultView({ result, loading, error, latencyMs }: Pro
     rows.slice(0, MAX_ROWS).forEach(r => Object.keys(r).forEach(k => set.add(k)));
     return Array.from(set);
   }, [rows]);
+
+  // A fresh fetch invalidates the expanded row index.
+  useEffect(() => { setExpanded(null); }, [result]);
 
   if (loading) {
     return <Shell><div style={{ color: "#a0aec0", fontSize: 13, padding: 40, textAlign: "center" }}>撈取中…</div></Shell>;
@@ -97,6 +113,7 @@ export default function McpResultView({ result, loading, error, latencyMs }: Pro
     <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginBottom: 10 }}>
       <Badge tone="ok">200 OK</Badge>
       {isTable && <span style={{ fontSize: 12, color: "#4a5568" }}>{rows.length} 筆{sourceKey ? ` · ${sourceKey}` : ""}{rows.length > MAX_ROWS ? `（顯示前 ${MAX_ROWS}）` : ""}</span>}
+      {isTable && view === "table" && <span style={{ fontSize: 11, color: "#a0aec0" }}>點一列看完整內容</span>}
       {latencyMs != null && <span style={{ fontSize: 12, color: "#a0aec0" }}>{latencyMs} ms</span>}
       <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
         {(["table", "json"] as const).map(v => (
@@ -129,21 +146,44 @@ export default function McpResultView({ result, loading, error, latencyMs }: Pro
               </tr>
             </thead>
             <tbody>
-              {rows.slice(0, MAX_ROWS).map((r, i) => (
-                <tr key={i} style={{ borderBottom: "1px solid #f0f0f0" }}>
-                  <td style={{ ...tdStyle, color: "#cbd5e0" }}>{i + 1}</td>
-                  {columns.map(c => {
-                    const raw = r[c];
-                    const txt = fmtCell(raw);
-                    const color = cellColor(raw);
-                    return (
-                      <td key={c} style={{ ...tdStyle, color: color ?? "#2d3748", fontWeight: color ? 700 : 400, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis" }} title={txt}>
-                        {txt}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
+              {rows.slice(0, MAX_ROWS).map((r, i) => {
+                const open = expanded === i;
+                return (
+                  <Fragment key={i}>
+                    <tr
+                      onClick={() => setExpanded(open ? null : i)}
+                      style={{ borderBottom: "1px solid #f0f0f0", cursor: "pointer", background: open ? "#ebf8ff" : undefined }}
+                    >
+                      <td style={{ ...tdStyle, color: open ? "#3182ce" : "#cbd5e0" }}>{open ? "▾" : i + 1}</td>
+                      {columns.map(c => {
+                        const raw = r[c];
+                        const { text, complex } = compactCell(raw);
+                        const color = complex ? undefined : cellColor(raw);
+                        return (
+                          <td key={c} style={{
+                            ...tdStyle,
+                            color: complex ? "#805ad5" : (color ?? "#2d3748"),
+                            fontWeight: color ? 700 : 400,
+                            fontStyle: complex ? "italic" : "normal",
+                            maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis",
+                          }} title={complex ? fmtCell(raw) : text}>
+                            {text}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                    {open && (
+                      <tr>
+                        <td colSpan={columns.length + 1} style={{ padding: 0, background: "#fafbfe", borderBottom: "2px solid #e2e8f0" }}>
+                          <div style={{ padding: "8px 14px", whiteSpace: "normal" }}>
+                            <ObjectView value={r} />
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
