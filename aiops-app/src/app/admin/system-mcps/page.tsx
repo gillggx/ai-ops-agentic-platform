@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import McpResultView from "@/components/admin/McpResultView";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -546,7 +547,9 @@ export default function SystemMcpAdminPage() {
 
   // Test params: auto-populated from schemaFields
   const [testParams, setTestParams] = useState<Record<string, string>>({});
-  const [testResult, setTestResult] = useState<string | null>(null);
+  const [testRaw, setTestRaw] = useState<unknown>(undefined);
+  const [testError, setTestError] = useState<string | null>(null);
+  const [testLatency, setTestLatency] = useState<number | null>(null);
   const [testLoading, setTestLoading] = useState(false);
 
   // ── Load list ────────────────────────────────────────────────────────────
@@ -577,7 +580,7 @@ export default function SystemMcpAdminPage() {
   async function selectMcp(mcp: SystemMcp) {
     setSelected(mcp);
     setIsNew(false);
-    setTestResult(null);
+    setTestRaw(undefined); setTestError(null);
     setLintIssues([]);
     setGenMeta(null);
     setRegenerateStage("idle");
@@ -608,7 +611,7 @@ export default function SystemMcpAdminPage() {
   function openNew() {
     setSelected(null);
     setIsNew(true);
-    setTestResult(null);
+    setTestRaw(undefined); setTestError(null);
     setLintIssues([]);
     setGenMeta(null);
     setForm({
@@ -621,7 +624,7 @@ export default function SystemMcpAdminPage() {
   function closePanel() {
     setSelected(null);
     setIsNew(false);
-    setTestResult(null);
+    setTestRaw(undefined); setTestError(null);
     setLintIssues([]);
     setGenMeta(null);
   }
@@ -898,15 +901,20 @@ export default function SystemMcpAdminPage() {
   async function handleTest() {
     if (!selected) return;
     setTestLoading(true);
-    setTestResult(null);
+    setTestRaw(undefined);
+    setTestError(null);
+    const t0 = (typeof performance !== "undefined" ? performance.now() : Date.now());
     try {
       // Filter out empty string values so optional params aren't sent as ""
       const params: Record<string, string> = {};
       Object.entries(testParams).forEach(([k, v]) => { if (v.trim()) params[k] = v.trim(); });
       const res = await apiFetch("POST", `mcp-definitions/${selected.id}/sample-fetch`, params);
-      setTestResult(JSON.stringify(res, null, 2));
+      // Unwrap our API envelope one level so the renderer sees the MCP payload.
+      const payload = res && typeof res === "object" && "data" in res ? (res as { data: unknown }).data : res;
+      setTestRaw(payload);
+      setTestLatency(Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - t0));
     } catch (e) {
-      setTestResult(String(e));
+      setTestError(String(e));
     }
     setTestLoading(false);
   }
@@ -914,6 +922,9 @@ export default function SystemMcpAdminPage() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   const panelOpen = !!selected || isNew;
+  // Captured before any control-flow narrowing so the table (rendered under
+  // !panelOpen, which narrows `selected` away) can still highlight a row.
+  const selectedId: number | null = selected?.id ?? null;
 
   return (
     <div>
@@ -930,8 +941,8 @@ export default function SystemMcpAdminPage() {
 
       <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
 
-        {/* ── Table ── */}
-        <div style={{ flex: 1, minWidth: 0 }}>
+        {/* ── Table (hidden while editing — full-page editor takes over) ── */}
+        {!panelOpen && <div style={{ flex: 1, minWidth: 0 }}>
           {loading ? (
             <div style={{ color: "#a0aec0", fontSize: 13, padding: 24 }}>載入中...</div>
           ) : (
@@ -950,7 +961,7 @@ export default function SystemMcpAdminPage() {
                   )}
                   {mcps.map(m => {
                     const cfg = (m.api_config ?? {}) as Record<string, string>;
-                    const isActive = selected?.id === m.id;
+                    const isActive = selectedId === m.id;
                     return (
                       <tr key={m.id} onClick={() => selectMcp(m)} style={{ cursor: "pointer", background: isActive ? "#ebf8ff" : "transparent", borderBottom: "1px solid #f0f0f0" }}>
                         <td style={{ padding: "9px 14px", color: "#a0aec0" }}>{m.id}</td>
@@ -975,22 +986,27 @@ export default function SystemMcpAdminPage() {
               </table>
             </div>
           )}
-        </div>
+        </div>}
 
-        {/* ── Edit Panel ── */}
+        {/* ── Full-page editor (fills the viewport — data-viewing focused) ── */}
         {panelOpen && (
           <div style={{
-            width: 420, flexShrink: 0,
+            flex: 1, minWidth: 0, width: "100%",
             background: "#fff", borderRadius: 10, border: "1px solid #e2e8f0",
-            padding: 20, maxHeight: "85vh", overflowY: "auto",
+            padding: 20, height: "calc(100vh - 150px)", display: "flex", flexDirection: "column",
           }}>
             {/* Panel header */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>
-                {isNew ? "新增 System MCP" : `編輯 #${selected?.id}`}
+              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, display: "flex", alignItems: "center", gap: 10 }}>
+                <button style={{ ...btn("dim"), padding: "4px 10px" }} onClick={closePanel}>← 返回清單</button>
+                {isNew ? "新增 System MCP" : `編輯 #${selected?.id} · ${form.name}`}
               </h3>
-              <button style={{ background: "none", border: "none", cursor: "pointer", color: "#a0aec0", fontSize: 18, padding: 0 }} onClick={closePanel}>×</button>
             </div>
+
+            {/* Two columns: config (left, scrollable) | data playground (right, fills) */}
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(400px, 460px) 1fr", gap: 24, flex: 1, minHeight: 0 }}>
+              {/* LEFT — config */}
+              <div style={{ overflowY: "auto", minHeight: 0, paddingRight: 6 }}>
 
             {/* ── Section: Basic Info ── */}
             <div style={{ ...sectionLabel }}>基本資訊</div>
@@ -1158,8 +1174,16 @@ export default function SystemMcpAdminPage() {
               />
             )}
 
-            {/* ── Section: Test Sample Fetch (existing MCP only) ── */}
-            {!isNew && (
+              </div>{/* end LEFT config col */}
+
+              {/* RIGHT — data playground (test params + rich result) */}
+              <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+            {isNew ? (
+              <div style={{
+                flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+                color: "#a0aec0", fontSize: 13, border: "1px dashed #e2e8f0", borderRadius: 8,
+              }}>存檔後可在此測試 Sample Fetch 並檢視資料</div>
+            ) : (
               <>
                 <div style={sectionLabel}>測試 Sample Fetch</div>
 
@@ -1202,22 +1226,16 @@ export default function SystemMcpAdminPage() {
                   {testLoading ? "⏳ 撈取中..." : "▶ 執行 Sample Fetch"}
                 </button>
 
-                {testResult && (
-                  <div style={{ marginBottom: 14 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: "#718096", marginBottom: 4 }}>回應結果：</div>
-                    <pre style={{
-                      background: "#1a202c", color: "#e2e8f0", borderRadius: 6,
-                      padding: 12, fontSize: 10, fontFamily: "ui-monospace, monospace",
-                      overflowX: "auto", maxHeight: 260, lineHeight: 1.6, margin: 0,
-                      whiteSpace: "pre-wrap",
-                    }}>{testResult}</pre>
-                  </div>
-                )}
+                <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+                  <McpResultView result={testRaw} loading={testLoading} error={testError} latencyMs={testLatency} />
+                </div>
               </>
             )}
+              </div>{/* end RIGHT data col */}
+            </div>{/* end two-column grid */}
 
-            {/* ── Action buttons ── */}
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", borderTop: "1px solid #f0f4f8", paddingTop: 14 }}>
+            {/* ── Action buttons (full-width footer) ── */}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", borderTop: "1px solid #f0f4f8", paddingTop: 14, marginTop: 14 }}>
               <button
                 style={btn("primary")}
                 onClick={handleSave}
