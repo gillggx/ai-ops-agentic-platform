@@ -2,6 +2,41 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import McpResultView from "@/components/admin/McpResultView";
+import { T, card, secTitle, secHint, flabel, inp as tinp, btn as tbtn, pill } from "@/components/admin/mcpTheme";
+
+// ── Description sections ────────────────────────────────────────────────────
+// MCP descriptions follow a `== Section ==` convention (all 9 system MCPs do).
+// Parse into sections for the preview rows + modal; serialize back to a single
+// text field on save. Round-trip safe: a doc with no headers becomes one
+// untitled section and serializes back to exactly its text.
+
+interface DescSection { title: string; body: string; }
+
+function parseDescriptionSections(text: string): DescSection[] {
+  const raw = text ?? "";
+  const re = /^==\s*(.+?)\s*==\s*$/gm;
+  const marks: { title: string; start: number; bodyStart: number }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) {
+    marks.push({ title: m[1], start: m.index, bodyStart: m.index + m[0].length });
+  }
+  if (marks.length === 0) return [{ title: "", body: raw.trim() }];
+  const sections: DescSection[] = [];
+  const preamble = raw.slice(0, marks[0].start).trim();
+  if (preamble) sections.push({ title: "", body: preamble });
+  marks.forEach((mk, i) => {
+    const end = i + 1 < marks.length ? marks[i + 1].start : raw.length;
+    sections.push({ title: mk.title, body: raw.slice(mk.bodyStart, end).trim() });
+  });
+  return sections;
+}
+
+function serializeDescriptionSections(sections: DescSection[]): string {
+  return sections
+    .map(s => (s.title ? `== ${s.title} ==\n${s.body}`.trim() : s.body.trim()))
+    .filter(Boolean)
+    .join("\n\n");
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -143,7 +178,6 @@ const inp: React.CSSProperties = {
   border: "1px solid #e2e8f0", fontSize: 12,
   color: "#1a202c", background: "#fff", boxSizing: "border-box", outline: "none",
 };
-const sel: React.CSSProperties = { ...inp, cursor: "pointer" };
 
 function btn(variant: "primary" | "secondary" | "danger" | "ghost" | "dim"): React.CSSProperties {
   const base: React.CSSProperties = {
@@ -157,10 +191,6 @@ function btn(variant: "primary" | "secondary" | "danger" | "ghost" | "dim"): Rea
   return { ...base, background: "#fff", color: "#4a5568", border: "1px solid #e2e8f0" };
 }
 
-const label: React.CSSProperties = {
-  fontSize: 11, fontWeight: 600, color: "#718096",
-  marginBottom: 4, display: "block", textTransform: "uppercase", letterSpacing: "0.3px",
-};
 const fieldWrap: React.CSSProperties = { marginBottom: 14 };
 const sectionLabel: React.CSSProperties = {
   fontSize: 10, fontWeight: 700, color: "#a0aec0",
@@ -412,8 +442,8 @@ function DerivativeBanner({
 
   // Banner palette
   const palette = isStale
-    ? { bg: "#fffaf0", border: "#feebc8", fg: "#9c4221", icon: "⚠" }
-    : { bg: "#f0fff4", border: "#c6f6d5", fg: "#22543d", icon: "✓" };
+    ? { bg: "#fffaf0", border: "#feebc8", fg: "#9c4221", icon: "[!]" }
+    : { bg: "#f0fff4", border: "#c6f6d5", fg: "#22543d", icon: "[ok]" };
 
   const labels: string[] = [];
   if (producesBlock) labels.push("block");
@@ -449,7 +479,7 @@ function DerivativeBanner({
             onClick={onStartRegenerate}
             disabled={generating}
           >
-            🔄 重新生成
+            ↻ 重新生成
           </button>
         )}
       </div>
@@ -512,7 +542,7 @@ function DerivativeBanner({
                   onClick={onCommitRegenerate}
                   disabled={committingRegen || hasError || !form.blockDraft}
                 >
-                  {committingRegen ? "更新中..." : "✓ 確認覆寫"}
+                  {committingRegen ? "更新中..." : "[ok] 確認覆寫"}
                 </button>
                 <button
                   style={{ ...btn("ghost"), padding: "6px 14px", fontSize: 12 }}
@@ -526,6 +556,127 @@ function DerivativeBanner({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Presentational helpers (design 1a) ─────────────────────────────────────
+
+function FormBlock({ title, hint, action, children }: {
+  title: string; hint?: string; action?: React.ReactNode; children: React.ReactNode;
+}) {
+  return (
+    <div style={card}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+          <span style={secTitle}>{title}</span>
+          {hint && <span style={secHint}>{hint}</span>}
+        </div>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Field({ label, required, style, children }: {
+  label: string; required?: boolean; style?: React.CSSProperties; children: React.ReactNode;
+}) {
+  return (
+    <div style={{ marginBottom: 12, ...style }}>
+      <label style={flabel}>{label}{required && <span style={{ color: T.danger }}> *</span>}</label>
+      {children}
+    </div>
+  );
+}
+
+function DescriptionSectionsView({ sections, onOpen }: {
+  sections: DescSection[]; onOpen: (idx: number) => void;
+}) {
+  if (sections.length === 1 && !sections[0].title && !sections[0].body) {
+    return <div style={{ fontSize: 12.5, color: T.faint, padding: "4px 2px" }}>尚無說明 — 點「Expand &amp; edit」撰寫</div>;
+  }
+  return (
+    <>
+      {sections.map((s, i) => (
+        <div key={i} onClick={() => onOpen(i)} className="mcp-desc-row" style={{
+          display: "flex", gap: 10, padding: "9px 11px", border: `1px solid ${T.bdIn}`,
+          borderRadius: 10, background: "#fff", cursor: "pointer", marginBottom: 7,
+        }}>
+          <div style={{ width: 3, borderRadius: 3, background: T.accentSoft, flex: "0 0 3px" }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: T.accentMid }}>
+              {s.title || "說明"}
+            </div>
+            <div style={{ fontSize: 12.5, color: T.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginTop: 2 }}>
+              {s.body.replace(/\n+/g, " · ") || "（空）"}
+            </div>
+          </div>
+          <span style={{ fontSize: 11, fontWeight: 600, color: T.accentFaint, alignSelf: "center", whiteSpace: "nowrap" }}>Details ›</span>
+        </div>
+      ))}
+      <div style={{ fontSize: 11.5, color: T.accentFaint, marginTop: 2 }}>ⓘ 點任一段可讀 / 編輯全文（存回 DB 仍是單一 text 欄）</div>
+    </>
+  );
+}
+
+function DescriptionModal({ open, sections, focused, mcpName, onFocus, onChange, onClose, onDone }: {
+  open: boolean; sections: DescSection[]; focused: number; mcpName: string;
+  onFocus: (i: number) => void; onChange: (i: number, body: string) => void;
+  onClose: () => void; onDone: () => void;
+}) {
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const chars = sections.reduce((n, s) => n + s.body.length, 0);
+  useEffect(() => {
+    if (!open) return;
+    const el = bodyRef.current?.querySelector(`[data-sec="${focused}"]`) as HTMLElement | null;
+    if (el && bodyRef.current) bodyRef.current.scrollTop = el.offsetTop - 12;
+  }, [open, focused]);
+  if (!open) return null;
+  return (
+    <div onClick={e => { if (e.target === e.currentTarget) onClose(); }} style={{
+      position: "fixed", inset: 0, zIndex: 70, background: "rgba(15,23,42,.45)", backdropFilter: "blur(2px)",
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
+    }}>
+      <div style={{
+        width: "min(780px, 94vw)", maxHeight: "86vh", background: "#fff", borderRadius: 18,
+        boxShadow: "0 24px 70px rgba(15,23,42,.3)", display: "flex", flexDirection: "column", overflow: "hidden",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "16px 22px", borderBottom: `1px solid ${T.hair}`, background: T.subtle2 }}>
+          <span style={secTitle}>Description</span>
+          <span style={{ fontFamily: T.mono, fontSize: 14, fontWeight: 600 }}>{mcpName}</span>
+          <span style={{ fontFamily: T.mono, fontSize: 12, color: T.faint }}>{chars} chars</span>
+          <button onClick={onClose} style={{ marginLeft: "auto", width: 32, height: 32, border: `1px solid ${T.bd}`, borderRadius: 9, background: "#fff", cursor: "pointer", fontSize: 16, color: T.muted }}>×</button>
+        </div>
+        <div style={{ display: "flex", gap: 8, padding: "12px 22px", borderBottom: `1px solid ${T.hair}`, flexWrap: "wrap" }}>
+          {sections.map((s, i) => (
+            <button key={i} onClick={() => onFocus(i)} style={{
+              fontSize: 12, fontWeight: 600, borderRadius: 20, padding: "4px 12px", cursor: "pointer",
+              border: `1px solid ${i === focused ? T.accentSoft : T.bdIn}`,
+              background: i === focused ? T.accentBg : "#fff", color: i === focused ? T.accent : T.muted,
+            }}>{s.title || "說明"}</button>
+          ))}
+        </div>
+        <div ref={bodyRef} style={{ padding: 22, overflow: "auto", display: "flex", flexDirection: "column", gap: 18 }}>
+          {sections.map((s, i) => (
+            <div key={i} data-sec={i}>
+              <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6, display: "flex", gap: 8, alignItems: "center", color: i === focused ? T.accent : T.muted }}>
+                {s.title || "說明"}
+                {i === focused && <span style={{ fontSize: 10, fontWeight: 700, color: T.accent, background: T.accentBg, borderRadius: 5, padding: "1px 6px" }}>opened here</span>}
+              </div>
+              <textarea value={s.body} onChange={e => onChange(i, e.target.value)} rows={s.body.length > 120 ? 6 : 3} style={{
+                width: "100%", padding: "12px 14px", fontSize: 13.5, lineHeight: 1.6, color: T.labelC,
+                border: `1px solid ${i === focused ? T.accentSoft : T.bdIn}`, borderRadius: 10,
+                background: i === focused ? "#fafbff" : "#fff", fontFamily: T.sans, resize: "vertical", boxSizing: "border-box",
+              }} />
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 9, padding: "14px 22px", borderTop: `1px solid ${T.hair}`, background: T.subtle }}>
+          <button style={tbtn("ghost")} onClick={onClose}>Cancel</button>
+          <button style={tbtn("primary")} onClick={onDone}>Done</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -556,6 +707,13 @@ export default function SystemMcpAdminPage() {
   // review:  LLM returned a draft (or generation is in flight); user edits + confirms
   const [regenerateStage, setRegenerateStage] = useState<"idle" | "review">("idle");
   const [committingRegen, setCommittingRegen] = useState(false);
+
+  // Description expand-edit modal. descDraft holds the working copy; only
+  // committed back to form.description on "Done" so an un-edited open never
+  // rewrites (and risks reformatting) the stored text.
+  const [descModalOpen, setDescModalOpen] = useState(false);
+  const [descFocused, setDescFocused] = useState(0);
+  const [descDraft, setDescDraft] = useState<DescSection[]>([]);
 
   // Test params: auto-populated from schemaFields
   const [testParams, setTestParams] = useState<Record<string, string>>({});
@@ -942,65 +1100,64 @@ export default function SystemMcpAdminPage() {
     setTestLoading(false);
   }
 
+  // ── Description modal ──────────────────────────────────────────────────────
+
+  const descSections = parseDescriptionSections(form.description);
+
+  function openDescModal(idx = 0) {
+    setDescDraft(parseDescriptionSections(form.description));
+    setDescFocused(idx);
+    setDescModalOpen(true);
+  }
+  function commitDescModal() {
+    setForm(f => ({ ...f, description: serializeDescriptionSections(descDraft) }));
+    setDescModalOpen(false);
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   const panelOpen = !!selected || isNew;
-  // Captured before any control-flow narrowing so the table (rendered under
-  // !panelOpen, which narrows `selected` away) can still highlight a row.
-  const selectedId: number | null = selected?.id ?? null;
 
   return (
-    <div>
-      {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>System MCPs</h1>
-          <p style={{ fontSize: 13, color: "#718096", margin: "4px 0 0" }}>
-            管理底層資料來源 MCP（endpoint_url / input_schema）
-          </p>
-        </div>
-        <button style={btn("primary")} onClick={openNew}>+ 新增 System MCP</button>
-      </div>
-
-      <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
-
-        {/* ── Table (hidden while editing — full-page editor takes over) ── */}
-        {!panelOpen && <div style={{ flex: 1, minWidth: 0 }}>
+    <div style={{ fontFamily: T.sans }}>
+      {/* ── List view ── */}
+      {!panelOpen && (
+        <>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+            <div>
+              <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>System MCPs</h1>
+              <p style={{ fontSize: 13, color: T.muted, margin: "4px 0 0" }}>管理底層資料來源 MCP（endpoint_url / input_schema）</p>
+            </div>
+            <button style={tbtn("primary")} onClick={openNew}>+ 新增 System MCP</button>
+          </div>
           {loading ? (
-            <div style={{ color: "#a0aec0", fontSize: 13, padding: 24 }}>載入中...</div>
+            <div style={{ color: T.faint, fontSize: 13, padding: 24 }}>載入中...</div>
           ) : (
-            <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e2e8f0", overflow: "hidden" }}>
+            <div style={{ background: T.card, borderRadius: 14, border: `1px solid ${T.bd}`, overflow: "hidden" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
-                  <tr style={{ background: "#f7f8fc" }}>
+                  <tr style={{ background: T.panel }}>
                     {["ID", "名稱", "Method", "Endpoint URL", ""].map(h => (
-                      <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontWeight: 600, color: "#4a5568", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>{h}</th>
+                      <th key={h} style={{ padding: "10px 14px", textAlign: "left", fontWeight: 700, color: T.muted, borderBottom: `1px solid ${T.bd}`, whiteSpace: "nowrap", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {mcps.length === 0 && (
-                    <tr><td colSpan={5} style={{ padding: "24px 14px", color: "#a0aec0", textAlign: "center" }}>尚無 System MCP</td></tr>
+                    <tr><td colSpan={5} style={{ padding: "24px 14px", color: T.faint, textAlign: "center" }}>尚無 System MCP</td></tr>
                   )}
                   {mcps.map(m => {
                     const cfg = (m.api_config ?? {}) as Record<string, string>;
-                    const isActive = selectedId === m.id;
                     return (
-                      <tr key={m.id} onClick={() => selectMcp(m)} style={{ cursor: "pointer", background: isActive ? "#ebf8ff" : "transparent", borderBottom: "1px solid #f0f0f0" }}>
-                        <td style={{ padding: "9px 14px", color: "#a0aec0" }}>{m.id}</td>
-                        <td style={{ padding: "9px 14px", fontWeight: 600 }}>{m.name}</td>
-                        <td style={{ padding: "9px 14px" }}>
-                          <span style={{
-                            fontSize: 11, fontWeight: 700, padding: "2px 7px", borderRadius: 4,
-                            background: cfg.method === "POST" ? "#fefcbf" : "#ebf8ff",
-                            color: cfg.method === "POST" ? "#744210" : "#2b6cb0",
-                          }}>{cfg.method ?? "GET"}</span>
+                      <tr key={m.id} onClick={() => selectMcp(m)} style={{ cursor: "pointer", borderBottom: `1px solid ${T.hair}` }}>
+                        <td style={{ padding: "10px 14px", color: T.faint, fontFamily: T.mono }}>{m.id}</td>
+                        <td style={{ padding: "10px 14px", fontWeight: 600, fontFamily: T.mono }}>{m.name}</td>
+                        <td style={{ padding: "10px 14px" }}>
+                          <span style={{ fontFamily: T.mono, fontSize: 11, fontWeight: 600, color: T.typeT, background: T.typeBg, borderRadius: 6, padding: "3px 9px" }}>{cfg.method ?? "GET"}</span>
                         </td>
-                        <td style={{ padding: "9px 14px", color: "#4a5568", fontFamily: "ui-monospace, monospace", fontSize: 11, maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {cfg.endpoint_url ?? "—"}
-                        </td>
-                        <td style={{ padding: "9px 14px", textAlign: "right" }}>
-                          <button style={btn("ghost")} onClick={e => { e.stopPropagation(); selectMcp(m); }}>編輯</button>
+                        <td style={{ padding: "10px 14px", color: T.muted, fontFamily: T.mono, fontSize: 11.5, maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cfg.endpoint_url ?? "—"}</td>
+                        <td style={{ padding: "10px 14px", textAlign: "right" }}>
+                          <button style={tbtn("soft")} onClick={e => { e.stopPropagation(); selectMcp(m); }}>編輯</button>
                         </td>
                       </tr>
                     );
@@ -1009,285 +1166,185 @@ export default function SystemMcpAdminPage() {
               </table>
             </div>
           )}
-        </div>}
+        </>
+      )}
 
-        {/* ── Full-page editor (fills the viewport — data-viewing focused) ── */}
-        {panelOpen && (
-          <div style={{
-            flex: 1, minWidth: 0, width: "100%",
-            background: "#fff", borderRadius: 10, border: "1px solid #e2e8f0",
-            padding: 20, height: "calc(100vh - 150px)", display: "flex", flexDirection: "column",
-          }}>
-            {/* Panel header */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, display: "flex", alignItems: "center", gap: 10 }}>
-                <button style={{ ...btn("dim"), padding: "4px 10px" }} onClick={closePanel}>← 返回清單</button>
-                {isNew ? "新增 System MCP" : `編輯 #${selected?.id} · ${form.name}`}
-              </h3>
-            </div>
+      {/* ── Editor card (design 1a) ── */}
+      {panelOpen && (
+        <div style={{ background: T.card, border: `1px solid ${T.bd}`, borderRadius: 18, boxShadow: "0 8px 30px rgba(15,23,42,.06)", overflow: "hidden", display: "flex", flexDirection: "column", height: "calc(100vh - 120px)" }}>
 
-            {/* Two columns: config (left, scrollable) | data playground (right, fills) */}
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(400px, 460px) 1fr", gap: 24, flex: 1, minHeight: 0 }}>
-              {/* LEFT — config */}
-              <div style={{ overflowY: "auto", minHeight: 0, paddingRight: 6 }}>
-
-            {/* ── Section: Basic Info ── */}
-            <div style={{ ...sectionLabel }}>基本資訊</div>
-
-            <div style={fieldWrap}>
-              <label style={label}>名稱 *</label>
-              <input style={inp} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. get_process_context" />
-            </div>
-
-            <div style={fieldWrap}>
-              <label style={label}>
-                說明
-                <span style={{ marginLeft: 8, color: inlineLint.some(i => i.severity === "error") ? "#e53e3e" : "#a0aec0", fontWeight: 500 }}>
-                  ({form.description.trim().length} chars)
-                </span>
-              </label>
-              <textarea
-                style={{ ...inp, minHeight: 110, fontFamily: "ui-monospace, monospace", lineHeight: 1.5, resize: "vertical" }}
-                value={form.description}
-                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                placeholder={"完整描述此 MCP 的用途、回傳欄位與使用情境（建議 400 字以上）。\n用詞越具體，LLM 生成的 block / skill 草稿越準。"}
-              />
-              {/* V54: inline lint feedback — only show when derivative UI is on or there's an error */}
-              {(showDerivativeUI || inlineLint.some(i => i.severity === "error")) && inlineLint.length > 0 && (
-                <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
-                  {inlineLint.map((iss, idx) => (
-                    <div key={idx} style={{
-                      fontSize: 11, padding: "5px 8px", borderRadius: 4,
-                      background: iss.severity === "error" ? "#fff5f5" : "#fffaf0",
-                      color:      iss.severity === "error" ? "#c53030" : "#9c4221",
-                      border: `1px solid ${iss.severity === "error" ? "#fed7d7" : "#feebc8"}`,
-                    }}>
-                      [{iss.severity}] {iss.message}
-                    </div>
-                  ))}
+          {/* TOP BAR */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 22px", borderBottom: `1px solid ${T.hair}`, background: T.subtle2, gap: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
+              <button style={tbtn("ghost")} onClick={closePanel}>← 返回清單</button>
+              <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: T.faint }}>{isNew ? "新增 System MCP" : `Edit #${selected?.id}`}</span>
+                <span style={{ fontFamily: T.mono, fontSize: 17, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{form.name || "（未命名）"}</span>
+              </div>
+              {!isNew && (
+                <div style={{ display: "flex", gap: 6 }}>
+                  <span style={pill("sys")}>system</span>
+                  <span style={pill("vis")}>{selected?.visibility ?? "private"}</span>
+                  {selected && (selected.produces_block || selected.produces_skill) && (
+                    <span style={pill("ok")}><span style={{ width: 7, height: 7, borderRadius: "50%", background: T.dot }} />derivatives</span>
+                  )}
                 </div>
               )}
             </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "80px 1fr", gap: 10, marginBottom: 14 }}>
-              <div>
-                <label style={label}>Method</label>
-                <select style={sel} value={form.method} onChange={e => setForm(f => ({ ...f, method: e.target.value }))}>
-                  <option value="GET">GET</option>
-                  <option value="POST">POST</option>
-                </select>
-              </div>
-              <div>
-                <label style={label}>Endpoint URL *</label>
-                <input style={inp} value={form.endpoint_url} onChange={e => setForm(f => ({ ...f, endpoint_url: e.target.value }))} placeholder="http://localhost:8012/api/v1/..." />
-              </div>
+            <div style={{ display: "flex", gap: 9 }}>
+              <button
+                style={tbtn("primary")}
+                onClick={handleSave}
+                disabled={saving || !form.name || !form.endpoint_url || (isNew && form.producesBlock && !form.blockDraft) || (isNew && form.producesSkill && !form.skillDraft)}
+                title={isNew && form.producesBlock && !form.blockDraft ? "請先生成 Block 草稿" : isNew && form.producesSkill && !form.skillDraft ? "請先生成 Skill 草稿" : ""}
+              >
+                {saving ? "儲存中..." : isNew ? "建立" : "Save"}
+              </button>
+              <button style={tbtn("ghost")} onClick={closePanel}>Cancel</button>
+              {!isNew && <button style={tbtn("danger")} onClick={handleDelete}>Delete</button>}
             </div>
+          </div>
 
-            {/* ── Section: Input Schema ── */}
-            <div style={{ ...sectionLabel, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <span>Input 參數定義</span>
-              <button style={btn("dim")} onClick={addField}>+ 新增欄位</button>
-            </div>
+          {/* BODY */}
+          <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
 
-            {form.schemaFields.length === 0 ? (
-              <div style={{
-                background: "#f7f8fc", border: "1px dashed #cbd5e0",
-                borderRadius: 6, padding: "14px 12px",
-                color: "#a0aec0", fontSize: 12, textAlign: "center",
-                marginBottom: 14,
-              }}>
-                尚無參數 — 點擊「+ 新增欄位」加入
-              </div>
-            ) : (
-              <div style={{ marginBottom: 14 }}>
-                {/* Header row */}
-                <div style={{
-                  display: "grid", gridTemplateColumns: "1fr 68px 40px 20px",
-                  gap: 6, padding: "0 0 5px",
-                  fontSize: 10, fontWeight: 700, color: "#a0aec0",
-                  textTransform: "uppercase", letterSpacing: "0.3px",
-                }}>
-                  <span>欄位名稱</span>
-                  <span>型別</span>
-                  <span style={{ textAlign: "center" }}>必填</span>
-                  <span />
+            {/* LEFT — form column */}
+            <div style={{ flex: "0 0 480px", background: T.subtle, borderRight: `1px solid ${T.hair}`, padding: 22, display: "flex", flexDirection: "column", gap: 18, overflow: "auto" }}>
+
+              <FormBlock title="Basic">
+                <Field label="Name" required>
+                  <input style={tinp} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. get_process_context" />
+                </Field>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <Field label="Method" style={{ flex: "0 0 110px", marginBottom: 0 }}>
+                    <select style={{ ...tinp, cursor: "pointer" }} value={form.method} onChange={e => setForm(f => ({ ...f, method: e.target.value }))}>
+                      <option value="GET">GET</option>
+                      <option value="POST">POST</option>
+                    </select>
+                  </Field>
+                  <Field label="Endpoint URL" required style={{ flex: 1, minWidth: 0, marginBottom: 0 }}>
+                    <input style={tinp} value={form.endpoint_url} onChange={e => setForm(f => ({ ...f, endpoint_url: e.target.value }))} placeholder="http://localhost:8012/api/v1/..." />
+                  </Field>
                 </div>
+              </FormBlock>
 
-                {form.schemaFields.map((field, idx) => (
-                  <div key={idx} style={{
-                    background: "#f7fafc",
-                    border: "1px solid #e2e8f0",
-                    borderRadius: 6, padding: "8px 10px",
-                    marginBottom: 6,
-                  }}>
-                    {/* Row 1: name / type / required / remove */}
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 68px 40px 20px", gap: 6, alignItems: "center", marginBottom: 5 }}>
-                      <input
-                        style={{ ...inp, padding: "4px 7px", fontSize: 12, fontFamily: "ui-monospace, monospace" }}
-                        placeholder="field_name"
-                        value={field.name}
-                        onChange={e => updateField(idx, { name: e.target.value })}
-                      />
-                      <select
-                        style={{ ...sel, padding: "4px 5px", fontSize: 11 }}
-                        value={field.type}
-                        onChange={e => updateField(idx, { type: e.target.value })}
-                      >
-                        <option value="string">string</option>
-                        <option value="number">number</option>
-                        <option value="integer">integer</option>
-                        <option value="boolean">boolean</option>
-                        <option value="array">array</option>
-                        <option value="object">object</option>
-                      </select>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-                        <input
-                          type="checkbox"
-                          checked={field.required}
-                          onChange={e => updateField(idx, { required: e.target.checked })}
-                          style={{ cursor: "pointer", width: 14, height: 14 }}
-                        />
-                      </div>
-                      <button
-                        onClick={() => removeField(idx)}
-                        style={{ background: "none", border: "none", color: "#fc8181", cursor: "pointer", fontSize: 15, lineHeight: 1, padding: 0, textAlign: "center" }}
-                      >×</button>
-                    </div>
-                    {/* Row 2: description */}
-                    <input
-                      style={{ ...inp, padding: "4px 7px", fontSize: 11, color: "#718096", background: "#fff" }}
-                      placeholder="欄位說明（選填）"
-                      value={field.description}
-                      onChange={e => updateField(idx, { description: e.target.value })}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* ── V54 Section: Pipeline Builder 衍生 ── */}
-            {isNew && (
-              <DerivativeSection
-                form={form}
-                setForm={setForm}
-                generating={generating}
-                hasLintError={hasLintError}
-                onGenerate={handleGenerate}
-                lintIssues={lintIssues}
-                genMeta={genMeta}
-              />
-            )}
-
-            {/* P1-5 / P1-6 (2026-06-04) — derivative banner: stale-aware + regenerate CTA */}
-            {!isNew && selected && (selected.produces_block || selected.produces_skill) && (
-              <DerivativeBanner
-                status={selected.derivative_status ?? null}
-                producesBlock={Boolean(selected.produces_block)}
-                producesSkill={Boolean(selected.produces_skill)}
-                regenerateStage={regenerateStage}
-                generating={generating}
-                committingRegen={committingRegen}
-                onStartRegenerate={handleStartRegenerate}
-                onCancelRegenerate={cancelRegenerate}
-                onCommitRegenerate={handleCommitRegenerate}
-                lintIssues={lintIssues}
-                genMeta={genMeta}
-                form={form}
-                setForm={setForm}
-              />
-            )}
-
-              </div>{/* end LEFT config col */}
-
-              {/* RIGHT — data playground (test params + rich result) */}
-              <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
-            {isNew ? (
-              <div style={{
-                flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
-                color: "#a0aec0", fontSize: 13, border: "1px dashed #e2e8f0", borderRadius: 8,
-              }}>存檔後可在此測試 Sample Fetch 並檢視資料</div>
-            ) : (
-              <>
-                <div style={sectionLabel}>測試 Sample Fetch</div>
-
-                {form.schemaFields.length > 0 ? (
-                  <div style={{
-                    background: "#f7fafc", border: "1px solid #e2e8f0",
-                    borderRadius: 6, padding: "10px 12px", marginBottom: 14,
-                  }}>
-                    {form.schemaFields.map(field => (
-                      <div key={field.name} style={{ display: "grid", gridTemplateColumns: "110px 1fr", gap: 8, alignItems: "center", marginBottom: 7 }}>
-                        <div>
-                          <span style={{ fontSize: 11, fontFamily: "ui-monospace, monospace", color: "#2d3748" }}>
-                            {field.name}
-                          </span>
-                          {field.required && (
-                            <span style={{ fontSize: 10, color: "#e53e3e", marginLeft: 3 }}>*</span>
-                          )}
-                          <div style={{ fontSize: 10, color: "#a0aec0" }}>{field.type}</div>
-                        </div>
-                        <input
-                          style={{ ...inp, padding: "5px 8px", fontSize: 12 }}
-                          placeholder={field.required ? "（必填）" : "（選填）"}
-                          value={testParams[field.name] ?? ""}
-                          onChange={e => setTestParams(p => ({ ...p, [field.name]: e.target.value }))}
-                        />
+              <FormBlock
+                title="Description"
+                hint={`${form.description.trim().length} chars`}
+                action={<button style={tbtn("soft")} onClick={() => openDescModal(0)}>⤢ Expand &amp; edit</button>}
+              >
+                <DescriptionSectionsView sections={descSections} onOpen={openDescModal} />
+                {(showDerivativeUI || inlineLint.some(i => i.severity === "error")) && inlineLint.length > 0 && (
+                  <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+                    {inlineLint.map((iss, idx) => (
+                      <div key={idx} style={{
+                        fontSize: 11, padding: "5px 8px", borderRadius: 6,
+                        background: iss.severity === "error" ? "#fff5f5" : T.warnBg,
+                        color:      iss.severity === "error" ? T.oocT : T.warnT,
+                        border: `1px solid ${iss.severity === "error" ? T.dangerBd : T.warnBd}`,
+                      }}>
+                        [{iss.severity}] {iss.message}
                       </div>
                     ))}
                   </div>
-                ) : (
-                  <div style={{ fontSize: 12, color: "#a0aec0", marginBottom: 10 }}>
-                    此 MCP 無定義 input 參數，將直接呼叫 endpoint。
-                  </div>
                 )}
+              </FormBlock>
 
-                <button
-                  style={{ ...btn("ghost"), marginBottom: 14, width: "100%" }}
-                  onClick={handleTest}
-                  disabled={testLoading}
-                >
-                  {testLoading ? "⏳ 撈取中..." : "▶ 執行 Sample Fetch"}
-                </button>
+              <FormBlock title="Input parameters" action={<button style={tbtn("soft")} onClick={addField}>+ Add field</button>}>
+                {form.schemaFields.length === 0 ? (
+                  <div style={{ background: T.panel, border: `1px dashed ${T.faint2}`, borderRadius: 10, padding: "14px 12px", color: T.faint, fontSize: 12, textAlign: "center" }}>
+                    尚無參數 — 點「+ Add field」加入
+                  </div>
+                ) : (
+                  form.schemaFields.map((field, idx) => (
+                    <div key={idx} style={{ border: `1px solid ${T.bdIn}`, borderRadius: 10, background: "#fff", padding: "9px 11px", marginBottom: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                        <input style={{ ...tinp, padding: "6px 9px", fontSize: 13, flex: 1, minWidth: 0 }} placeholder="field_name" value={field.name} onChange={e => updateField(idx, { name: e.target.value })} />
+                        <select
+                          style={{ ...tinp, width: "auto", padding: "5px 8px", fontSize: 11.5, fontWeight: 600, color: T.typeT, background: T.typeBg, border: "none", cursor: "pointer" }}
+                          value={field.type}
+                          onChange={e => updateField(idx, { type: e.target.value })}
+                        >
+                          {["string", "number", "integer", "boolean", "array", "object"].map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, color: field.required ? T.danger : T.faint2, whiteSpace: "nowrap", cursor: "pointer" }}>
+                          <input type="checkbox" checked={field.required} onChange={e => updateField(idx, { required: e.target.checked })} style={{ cursor: "pointer" }} />REQUIRED
+                        </label>
+                        <span onClick={() => removeField(idx)} style={{ color: T.faint2, cursor: "pointer", fontSize: 16, lineHeight: 1 }}>×</span>
+                      </div>
+                      <input style={{ ...tinp, padding: "5px 9px", fontSize: 11.5, color: T.muted, marginTop: 6, fontFamily: T.sans }} placeholder="欄位說明（選填）" value={field.description} onChange={e => updateField(idx, { description: e.target.value })} />
+                    </div>
+                  ))
+                )}
+              </FormBlock>
 
-                <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-                  <McpResultView result={testRaw} loading={testLoading} error={testError} latencyMs={testLatency} />
-                </div>
-              </>
-            )}
-              </div>{/* end RIGHT data col */}
-            </div>{/* end two-column grid */}
-
-            {/* ── Action buttons (full-width footer) ── */}
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", borderTop: "1px solid #f0f4f8", paddingTop: 14, marginTop: 14 }}>
-              <button
-                style={btn("primary")}
-                onClick={handleSave}
-                disabled={
-                  saving
-                  || !form.name
-                  || !form.endpoint_url
-                  // V54: if a derivative is requested, the draft must exist
-                  || (isNew && form.producesBlock && !form.blockDraft)
-                  || (isNew && form.producesSkill && !form.skillDraft)
-                }
-                title={
-                  isNew && form.producesBlock && !form.blockDraft
-                    ? "請先生成 Block 草稿"
-                    : isNew && form.producesSkill && !form.skillDraft
-                    ? "請先生成 Skill 草稿"
-                    : ""
-                }
-              >
-                {saving ? "儲存中..." : isNew ? "建立" : "儲存"}
-              </button>
-              {!isNew && (
-                <button style={btn("danger")} onClick={handleDelete}>刪除</button>
+              {(isNew || (selected && (selected.produces_block || selected.produces_skill))) && (
+                <FormBlock title="Derivatives (V54)" hint="block + skill 連動">
+                  {isNew && (
+                    <DerivativeSection
+                      form={form} setForm={setForm} generating={generating} hasLintError={hasLintError}
+                      onGenerate={handleGenerate} lintIssues={lintIssues} genMeta={genMeta}
+                    />
+                  )}
+                  {!isNew && selected && (selected.produces_block || selected.produces_skill) && (
+                    <DerivativeBanner
+                      status={selected.derivative_status ?? null}
+                      producesBlock={Boolean(selected.produces_block)}
+                      producesSkill={Boolean(selected.produces_skill)}
+                      regenerateStage={regenerateStage} generating={generating} committingRegen={committingRegen}
+                      onStartRegenerate={handleStartRegenerate} onCancelRegenerate={cancelRegenerate} onCommitRegenerate={handleCommitRegenerate}
+                      lintIssues={lintIssues} genMeta={genMeta} form={form} setForm={setForm}
+                    />
+                  )}
+                </FormBlock>
               )}
-              <button style={btn("secondary")} onClick={closePanel}>取消</button>
+            </div>
+
+            {/* RIGHT — Sample Fetch tester */}
+            <div style={{ flex: 1, minWidth: 0, padding: 22, display: "flex", flexDirection: "column", gap: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                  <span style={secTitle}>Sample Fetch</span><span style={secHint}>try it</span>
+                </div>
+                {!isNew && <button style={tbtn("primary")} onClick={handleTest} disabled={testLoading}>{testLoading ? "撈取中…" : "▶ Run"}</button>}
+              </div>
+
+              {isNew ? (
+                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: T.faint, fontSize: 13, border: `1px dashed ${T.bd}`, borderRadius: 12 }}>
+                  存檔後可在此測試 Sample Fetch 並檢視資料
+                </div>
+              ) : (
+                <>
+                  {form.schemaFields.length > 0 ? (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, background: T.subtle, border: `1px solid ${T.hair}`, borderRadius: 12, padding: 14 }}>
+                      {form.schemaFields.map(field => (
+                        <div key={field.name} style={{ minWidth: 0 }}>
+                          <div style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 600, marginBottom: 4, display: "flex", gap: 5, alignItems: "center" }}>
+                            {field.name}{field.required ? <span style={{ color: T.danger }}>*</span> : <span style={{ color: T.faint2, fontWeight: 500 }}>{field.type}</span>}
+                          </div>
+                          <input style={{ ...tinp, padding: "8px 10px", fontSize: 13 }} placeholder={field.required ? "" : "optional"} value={testParams[field.name] ?? ""} onChange={e => setTestParams(p => ({ ...p, [field.name]: e.target.value }))} />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: T.faint }}>此 MCP 無定義 input 參數，將直接呼叫 endpoint。</div>
+                  )}
+                  <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+                    <McpResultView result={testRaw} loading={testLoading} error={testError} latencyMs={testLatency} />
+                  </div>
+                </>
+              )}
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      <DescriptionModal
+        open={descModalOpen} sections={descDraft} focused={descFocused} mcpName={form.name || "（未命名）"}
+        onFocus={setDescFocused}
+        onChange={(i, body) => setDescDraft(d => d.map((s, j) => j === i ? { ...s, body } : s))}
+        onClose={() => setDescModalOpen(false)} onDone={commitDescModal}
+      />
     </div>
   );
 }
