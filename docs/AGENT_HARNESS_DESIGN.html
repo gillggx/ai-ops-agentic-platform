@@ -243,13 +243,95 @@
   <li><b>短期 context ≠ 長期 memory,別混。</b>working context(當前 build 的 observation)用完即棄;只有被蒸餾/被 feedback 認證的才升級成 durable memory。這是我 compaction 與 memory 的分界。</li>
 </ol>
 
-<!-- 8 open Qs -->
-<h2><span class="n">8</span>待你拍板</h2>
+<!-- 8 decisions -->
+<h2><span class="n">8</span>Q1–Q3 決策（已定案）</h2>
+<div class="callout key">
+  <b>Q1</b> memory class 就這 6 類。　<b>Q2</b> fast + slow 兩路都要;<b>Supervisor 會整理記憶(含修正與砍)</b>。　<b>Q3</b> preference 先 per-user,group 管理機制之後再做。<br>
+  兩個原則:①<b>Builder 的積木 know-how 導向 <code>block_docs</code></b>(單一來源),不塞 agent_knowledge。②<b>class 由 deterministic 決策樹決定</b>,不讓 LLM 自由挑(flow 在 graph)。
+</div>
+
+<!-- 9 matrix -->
+<h2><span class="n">9</span>3 Agent × 6 Class：使用情境 + 記錄 Timing</h2>
+<p class="desc">貫穿全表:<b>episodic 只寫不讀(inference 時)</b>,是 Supervisor 的燃料;其餘 5 類 inference 時讀,寫入大多由 Supervisor 蒸餾,只有 Planner/Repair 對 preference/presentation/correction 有 fast-path 直寫。</p>
+
+<div class="panel" style="margin-bottom:12px"><div class="top" style="background:var(--blue)"></div>
+<h3>PLANNER — 需求擁有者 + 裁判</h3>
+<table style="margin:0"><thead><tr><th>class</th><th>R/W</th><th>使用情境</th><th>timing</th></tr></thead><tbody>
+<tr><td><b>domain</b></td><td>R</td><td>拆意圖時套領域規則(SPC 站級 → phase 定站級)</td><td>每次規劃</td></tr>
+<tr><td><b>preference</b></td><td>R/W</td><td>R:套 user 默認(時間窗/精簡度/慣用 block);W:改 plan 露出反覆默認</td><td>R 每次規劃 / <b>W plan feedback(偏好)</b></td></tr>
+<tr><td><b>presentation</b></td><td>R/W</td><td>R:決定每 phase 輸出型態;W:user 改呈現形式</td><td>R 每次規劃 / <b>W plan feedback(呈現)</b></td></tr>
+<tr><td><b>correction</b></td><td>R/W</td><td>R:避開過去規劃錯誤(tag=plan);W:user 糾正 plan 邏輯/領域</td><td>R 每次規劃 / <b>W plan feedback(fast 草稿)</b></td></tr>
+<tr><td><b>episodic</b></td><td>W</td><td>記「裁判 Builder 結果對/錯」+ 每次 plan feedback 事件</td><td>裁判時 / feedback 時</td></tr>
+<tr><td><b>procedure</b></td><td>R</td><td>重用已知好用的 plan 形狀</td><td>每次規劃</td></tr>
+</tbody></table></div>
+
+<div class="panel" style="margin-bottom:12px"><div class="top" style="background:#1e40af"></div>
+<h3>BUILDER — 執行者</h3>
+<table style="margin:0"><thead><tr><th>class</th><th>R/W</th><th>使用情境</th><th>timing</th></tr></thead><tbody>
+<tr><td><b>domain</b></td><td>R</td><td>block 級領域事實(多在 block_docs)輔助選 block/設參</td><td>每 phase 選 block</td></tr>
+<tr><td><b>preference</b></td><td>–</td><td>不直接碰(隔 Planner 一層)</td><td>–</td></tr>
+<tr><td><b>presentation</b></td><td>R</td><td>照 Planner 指定圖種建對應 chart block</td><td>建 chart phase</td></tr>
+<tr><td><b>correction</b></td><td>R</td><td>讀 execute-tag 糾正「block X 的 param Y 用 Z」</td><td>每 phase 選 block/設參</td></tr>
+<tr><td><b>episodic</b></td><td>W(主)</td><td><b>doc 備忘(錨 block_id)</b> + 序列 episodic(→ procedure)</td><td>每 phase 完成 + build 收尾</td></tr>
+<tr><td><b>procedure</b></td><td>R</td><td>重用建構配方(xbar 趨勢:history→unnest→line)</td><td>build 起始 / 每 phase</td></tr>
+</tbody></table></div>
+
+<div class="panel" style="margin-bottom:4px"><div class="top" style="background:var(--purp)"></div>
+<h3>REPAIR — feedback 驅動的修正者</h3>
+<table style="margin:0"><thead><tr><th>class</th><th>R/W</th><th>使用情境</th><th>timing</th></tr></thead><tbody>
+<tr><td><b>domain</b></td><td>R</td><td>判斷現結果是否違反領域規則</td><td>修正時</td></tr>
+<tr><td><b>preference</b></td><td>R/W</td><td>R:對齊 user 品味;W:feedback 露出偏好</td><td>R 修正時 / <b>W feedback(偏好)</b></td></tr>
+<tr><td><b>presentation</b></td><td>R/W</td><td>feedback 關於形式時讀/寫</td><td>修正時 / <b>W feedback(呈現)</b></td></tr>
+<tr><td><b>correction</b></td><td>W(主)/R</td><td>W:定位「原本哪裡錯」根因(tag 給 planner/builder);R:避免重犯</td><td><b>W 定位根因(fast 草稿)</b> / R 修正起始</td></tr>
+<tr><td><b>episodic</b></td><td>W</td><td>記每則 user feedback + 每次修正嘗試成敗</td><td>每則 feedback / 每次修</td></tr>
+<tr><td><b>procedure</b></td><td>R</td><td>重用已知修正 pattern</td><td>修正時</td></tr>
+</tbody></table></div>
+
+<!-- 10 builder doc-memo -->
+<h2><span class="n">10</span>Builder 的「文件備忘」機制</h2>
+<p class="desc">Builder 不寫散落 episodic,而是把每則學習<b>貼成錨定 <code>block_id</code>(+選配 param)的備忘</b> —— 就是文件旁的便利貼,審核佇列,不是文件本身。</p>
+<div class="grid2">
+  <div class="panel"><div class="top" style="background:#1e40af"></div>
+    <h3>為什麼更好</h3>
+    <table style="border:none;margin:0"><tbody>
+      <tr><td><b>錨定</b></td><td>備忘直接掛在該 block doc 上,DOC_GAP 變「數數」而非模糊關聯</td></tr>
+      <tr><td><b>單一來源</b></td><td>備忘永遠是候選,經 review 才畢業進 block_docs — doc 不被污染</td></tr>
+      <tr><td><b>可見健康度</b></td><td>每份 doc 顯示「N 則待處理備忘」→ doc 自報弱點</td></tr>
+      <tr><td><b>自癒閉環</b></td><td>備忘畢業 → Builder 讀到更好的 doc → 該 block 備忘變少</td></tr>
+    </tbody></table>
+  </div>
+  <div class="panel"><div class="top" style="background:var(--amber)"></div>
+    <h3>備忘要帶「結果脈絡」</h3>
+    <p style="font-size:12.8px;margin:0 0 8px">帶 verdict(Planner 判對/錯、verifier verdict),Supervisor 才分得出兩種 doc 問題:</p>
+    <table style="border:none;margin:0"><tbody>
+      <tr><td><b>成功但卡了一下</b></td><td>→ doc 要補強 / 講清楚(clarify)</td></tr>
+      <tr><td><b>失敗</b></td><td>→ doc 有錯要修(fix)</td></tr>
+    </tbody></table>
+    <p style="font-size:11.8px;color:var(--mut);margin:9px 0 0">實作:<code>block_doc_memos</code> 表(block_id/param/memo/verdict_context/from_build/status),BlockDocsDrawer 順便秀待處理備忘。跨 block 的序列配方仍走 episodic → procedure。</p>
+  </div>
+</div>
+
+<!-- 11 supervisor ops -->
+<h2><span class="n">11</span>Supervisor — 圖書館員（週期蒸餾 + 修正 + 砍）</h2>
+<p class="desc">讀入:三 agent 的 episodic + doc 備忘 + Planner 裁判紀錄 + 召回統計(<code>uses</code>/<code>last_used_at</code>)。寫出:agent_knowledge(5 durable class)+ block_docs。全部留 changelog 稽核。</p>
+<table>
+  <thead><tr><th>操作</th><th>輸入</th><th>產出 / 目標</th><th>timing</th><th>自治</th></tr></thead>
+  <tbody>
+    <tr><td><b>MERGE</b></td><td>一批重疊 episodic</td><td>1 條 durable correction/procedure/domain</td><td>週期蒸餾</td><td>自動</td></tr>
+    <tr><td><b>CORRECT</b></td><td>被新證據推翻的記憶</td><td>版本化更新(留舊版)</td><td>矛盾偵測</td><td>高風險→review</td></tr>
+    <tr><td><b>PRUNE</b></td><td>低 uses + 老舊</td><td>刪除</td><td>週期</td><td>沒被召回→自動 / 高優先→review</td></tr>
+    <tr><td><b>PROMOTE/DEMOTE</b></td><td>召回統計</td><td>調 priority / always_on</td><td>週期</td><td>自動</td></tr>
+    <tr><td><b>DOC_GAP</b></td><td>某 block 的 pending 備忘分群(過門檻)</td><td>block_docs 改進草案(clarify/fix)</td><td>週期</td><td>review</td></tr>
+    <tr><td><b>DEDUP-pref</b></td><td>同 user 矛盾偏好</td><td>留最新 + 標歷史</td><td>偏好衝突</td><td>自動</td></tr>
+  </tbody>
+</table>
+
+<!-- 12 open -->
+<h2><span class="n">12</span>接下來要討論</h2>
 <div class="qbox">
-  <b>Q1 · Memory class 要不要就這 6 類?</b>(domain / preference / presentation / correction / episodic / procedure)還是你想再拆細/合併。<br>
-  <b>Q2 · Feedback intake 誰觸發寫記憶?</b>agent 當下自己寫(fast)、還是一律留給 Supervisor 蒸餾(slow)、還是兩者都要。<br>
-  <b>Q3 · preference 的 scope</b>　per-user 為主?還是也要 per-team / global 預設偏好。<br>
-  <b>Q4 · 落地順序</b>　建議:先做 memory class 欄位 + Planner 的 preference/presentation 讀寫(最有感)→ 再做 Repair 的 correction → Supervisor 蒸餾最後。
+  <b>B · 4 agent 的記錄行為</b>　各 agent 在什麼情境、什麼 timing 觸發記錄,以及<b>如何提示(cue)</b>它們去記 —— 設計中。<br>
+  <b>C · Build trace 要什麼</b>　現行 trace 不足以餵 Supervisor;要補齊(尤其 <b>user feedback</b>:Planner/Builder 以為做好了、user 說「不是我要的」→ Supervisor 檢討)—— 討論中。<br>
+  <b>Q4 · 落地順序</b>　待 B/C 定案再排。
 </div>
 
 <footer>
