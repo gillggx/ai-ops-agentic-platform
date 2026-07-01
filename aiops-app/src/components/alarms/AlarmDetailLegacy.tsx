@@ -14,6 +14,7 @@ import {
   type SkillFindings, type OutputSchemaField, type ChartDSL,
 } from "@/components/operations/SkillOutputRenderer";
 import { DRErrorBoundary } from "@/components/alarms/DRErrorBoundary";
+import DataResultView from "@/components/common/DataResultView";
 
 // ── Types (mirror of app/alarms/page.tsx originals) ──────────
 
@@ -170,10 +171,20 @@ export function useBriefing(scope: string, data?: string, cacheKey?: string) {
 
 // ── Pipeline-mode data view table ────────────────────────────
 
+/**
+ * Marks the rows an operator needs to see first: an explicit triggered_row
+ * flag, an OOC spc_status, or any `<chart>_is_ooc` boolean set true. The rule
+ * stays here (alarm domain) rather than inside the generic DataResultView.
+ */
+function alarmRowHighlight(row: Record<string, unknown>): boolean {
+  if (row.triggered_row === true) return true;
+  if (row.spc_status === "OOC") return true;
+  return Object.entries(row).some(([k, v]) => k.endsWith("_is_ooc") && v === true);
+}
+
 export function DataViewTable({ dv }: { dv: DataView }) {
-  const cols = (dv.columns || []).slice(0, 8);
-  const rows = (dv.rows || []).slice(0, 10);
-  if (cols.length === 0 && rows.length === 0) {
+  const rows = dv.rows || [];
+  if ((dv.columns || []).length === 0 && rows.length === 0) {
     return <div style={{ fontSize: 12, color: "#a0aec0" }}>無資料</div>;
   }
   return (
@@ -186,10 +197,10 @@ export function DataViewTable({ dv }: { dv: DataView }) {
           padding: "8px 12px", background: "#fafafa", borderBottom: "1px solid #e0e0e0",
           fontSize: 12, fontWeight: 700, color: "#2d3748",
         }}>
-          📋 {dv.title}
+          {dv.title}
           {dv.total_rows > rows.length && (
             <span style={{ marginLeft: 8, fontSize: 10, color: "#999", fontWeight: 400 }}>
-              ({rows.length}/{dv.total_rows} 列)
+              (共 {dv.total_rows} 列)
             </span>
           )}
         </div>
@@ -199,45 +210,8 @@ export function DataViewTable({ dv }: { dv: DataView }) {
           {dv.description}
         </div>
       )}
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: "monospace" }}>
-          <thead>
-            <tr style={{ background: "#fafafa" }}>
-              {cols.map((c) => (
-                <th key={c} style={{
-                  padding: "6px 8px", textAlign: "left", color: "#595959",
-                  borderBottom: "1px solid #e0e0e0", fontWeight: 600, whiteSpace: "nowrap",
-                }}>{c}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, ri) => (
-              <tr key={ri} style={{ borderBottom: "1px solid #f0f0f0" }}>
-                {cols.map((c) => {
-                  const v = row[c];
-                  const isOOC = c.endsWith("_is_ooc") && v === true;
-                  const isTriggered = c === "triggered_row" && v === true;
-                  const isOOCStatus = c === "spc_status" && v === "OOC";
-                  const highlight = isOOC || isTriggered || isOOCStatus;
-                  return (
-                    <td key={c} style={{
-                      padding: "6px 8px", whiteSpace: "nowrap",
-                      color: highlight ? "#dc2626" : "#262626",
-                      fontWeight: highlight ? 700 : 400,
-                      background: highlight ? "#fff5f5" : "transparent",
-                    }}>
-                      {v === null || v === undefined ? "—"
-                        : typeof v === "object" ? JSON.stringify(v)
-                        : typeof v === "number" ? (Number.isInteger(v) ? String(v) : v.toFixed(3))
-                        : String(v)}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div style={{ height: 300, display: "flex", flexDirection: "column", padding: 10 }}>
+        <DataResultView result={rows} enableFullscreen={false} emptyText="無資料" rowHighlight={alarmRowHighlight} />
       </div>
     </div>
   );

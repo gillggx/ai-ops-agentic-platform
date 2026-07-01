@@ -35,6 +35,12 @@ interface Props {
   maxRows?: number;
   /** Show the fullscreen toggle. Disable when embedded in a modal/canvas. */
   enableFullscreen?: boolean;
+  /**
+   * Optional per-row highlight predicate for the structured table. The rule
+   * lives at the call site (e.g. an alarm view marks OOC / triggered rows) so
+   * the generic component stays free of domain-specific logic.
+   */
+  rowHighlight?: (row: Record<string, unknown>) => boolean;
 }
 
 type View = "structured" | "tree" | "raw";
@@ -92,7 +98,7 @@ function fmtScalar(v: unknown): string {
 export default function DataResultView({
   result, loading, error, latencyMs, statusSlot,
   loadingText = "載入中…", emptyText = "尚無資料",
-  defaultView = "structured", maxRows = DEFAULT_MAX_ROWS, enableFullscreen = true,
+  defaultView = "structured", maxRows = DEFAULT_MAX_ROWS, enableFullscreen = true, rowHighlight,
 }: Props) {
   const [view, setView] = useState<View>(defaultView);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
@@ -178,7 +184,7 @@ export default function DataResultView({
         {view === "raw" && <pre style={{ margin: 0, whiteSpace: "pre-wrap", lineHeight: 1.65 }}>{JSON.stringify(result, null, 2)}</pre>}
         {view === "tree" && <TreeNode value={result} k="root" path="root" depth={0} open={treeOpen} setOpen={setTreeOpen} />}
         {view === "structured" && (isTable
-          ? <DataTable rows={rows} columns={columns} maxRows={maxRows} expanded={expandedRow} setExpanded={setExpandedRow} />
+          ? <DataTable rows={rows} columns={columns} maxRows={maxRows} expanded={expandedRow} setExpanded={setExpandedRow} rowHighlight={rowHighlight} />
           : <CardGrid value={result} />)}
       </div>
     </div>
@@ -208,9 +214,10 @@ export default function DataResultView({
 
 // ── structured: table ───────────────────────────────────────────────────────
 
-function DataTable({ rows, columns, maxRows, expanded, setExpanded }: {
+function DataTable({ rows, columns, maxRows, expanded, setExpanded, rowHighlight }: {
   rows: Record<string, unknown>[]; columns: string[]; maxRows: number;
   expanded: number | null; setExpanded: (i: number | null) => void;
+  rowHighlight?: (row: Record<string, unknown>) => boolean;
 }) {
   return (
     <table style={{ borderCollapse: "collapse", width: "100%", fontFamily: T.mono, fontSize: 12.5, whiteSpace: "nowrap" }}>
@@ -223,11 +230,12 @@ function DataTable({ rows, columns, maxRows, expanded, setExpanded }: {
       <tbody>
         {rows.slice(0, maxRows).map((r, i) => {
           const open = expanded === i;
+          const hl = rowHighlight?.(r) ?? false;
           return (
             <Fragment key={i}>
               <tr onClick={() => setExpanded(open ? null : i)}
-                  style={{ cursor: "pointer", background: open ? T.accentBg : i % 2 ? T.panel : undefined }}>
-                <td style={{ ...td, color: open ? T.accent : T.faint2 }}>{open ? "▾" : i + 1}</td>
+                  style={{ cursor: "pointer", background: open ? T.accentBg : hl ? T.oocBg : i % 2 ? T.panel : undefined }}>
+                <td style={{ ...td, color: open ? T.accent : hl ? T.oocT : T.faint2 }}>{open ? "▾" : i + 1}</td>
                 {columns.map(c => <td key={c} style={{ ...td, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis" }}
                   title={typeof r[c] === "object" && r[c] ? JSON.stringify(r[c]) : String(r[c] ?? "")}>{cell(r[c])}</td>)}
               </tr>

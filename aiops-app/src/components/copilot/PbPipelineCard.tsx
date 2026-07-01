@@ -17,6 +17,7 @@
 
 import { useState } from "react";
 import ChartRenderer from "@/components/pipeline-builder/ChartRenderer";
+import DataResultView from "@/components/common/DataResultView";
 import type {
   NodeResult,
   PipelineResultSummary,
@@ -256,45 +257,16 @@ function ChartCell({ chart, height }: { chart: PipelineChartSummary; height: num
 }
 
 function DataViewTable({ dv }: { dv: PipelineDataView }) {
-  const rows = dv.rows.slice(0, 20);
   return (
     <div style={{ marginBottom: 8 }}>
       <div style={{ fontSize: 11, fontWeight: 600, color: "#0F172A", marginBottom: 4 }}>
-        {dv.title} <span style={{ color: "#94A3B8", fontWeight: 400 }}>({dv.total_rows} rows{dv.total_rows > rows.length ? `, showing ${rows.length}` : ""})</span>
+        {dv.title} <span style={{ color: "#94A3B8", fontWeight: 400 }}>({dv.total_rows} rows)</span>
       </div>
-      <div style={{ border: "1px solid #E2E8F0", borderRadius: 4, overflow: "auto", maxHeight: 220 }}>
-        <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}>
-          <thead style={{ position: "sticky", top: 0, background: "#F8FAFC" }}>
-            <tr>
-              {dv.columns.map((c) => (
-                <th key={c} style={{ padding: "4px 8px", textAlign: "left", borderBottom: "1px solid #E2E8F0", color: "#475569", fontWeight: 600 }}>
-                  {c}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i} style={{ borderBottom: "1px solid #F1F5F9" }}>
-                {dv.columns.map((c) => (
-                  <td key={c} style={{ padding: "3px 8px", color: "#334155" }}>
-                    {formatCell(r[c])}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div style={{ height: 260, display: "flex", flexDirection: "column" }}>
+        <DataResultView result={dv.rows} enableFullscreen={false} emptyText="無資料" />
       </div>
     </div>
   );
-}
-
-function formatCell(v: unknown): string {
-  if (v == null) return "—";
-  if (typeof v === "object") return JSON.stringify(v);
-  if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(3);
-  return String(v);
 }
 
 function ActionBar({ card }: { card: PbPipelineCardData }) {
