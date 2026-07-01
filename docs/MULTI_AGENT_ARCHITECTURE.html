@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multi-Agent 架構草圖 — 三平面模型</title>
+<style>
+  :root{
+    --ink:#1f2933; --mut:#667085; --line:#e4e7ec; --bg:#f5f7fa; --card:#fff;
+    --blue:#1d4ed8; --blue-bg:#eff6ff; --blue-bd:#bfdbfe;
+    --green:#067647; --green-bg:#ecfdf3; --green-bd:#a6f4c5;
+    --amber:#b54708; --amber-bg:#fffaeb; --amber-bd:#fde68a;
+    --purp:#6d28d9; --purp-bg:#f5f3ff; --purp-bd:#c4b5fd;
+    --ink2:#101828;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;
+       color:var(--ink);background:var(--bg);line-height:1.6;font-size:14.5px;}
+  .wrap{max-width:1100px;margin:0 auto;padding:0 22px 70px;}
+  header.hero{background:linear-gradient(135deg,#0b1f4d,#1d4ed8 55%,#6d28d9);color:#fff;
+       margin:0 -22px 26px;padding:34px 30px 28px;}
+  header.hero .kic{font-size:12px;letter-spacing:.12em;text-transform:uppercase;opacity:.85;}
+  header.hero h1{margin:6px 0 6px;font-size:26px;}
+  header.hero .sub{opacity:.92;font-size:13.5px;}
+  h2{font-size:19px;margin:34px 0 8px;color:var(--ink2);display:flex;align-items:center;gap:10px;}
+  h2 .n{display:inline-flex;width:27px;height:27px;border-radius:7px;background:var(--ink2);color:#fff;
+       align-items:center;justify-content:center;font-size:14px;font-weight:700;}
+  h2 + .desc{color:var(--mut);font-size:13px;margin:0 0 14px;}
+  .planes{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:6px 0 8px;}
+  @media(max-width:820px){.planes{grid-template-columns:1fr;}}
+  .plane{background:#fff;border:1px solid var(--line);border-radius:12px;padding:15px 16px;box-shadow:0 1px 2px rgba(16,24,40,.05);}
+  .plane .top{height:5px;border-radius:5px;margin:-15px -16px 11px;}
+  .plane h3{margin:0 0 3px;font-size:15px;color:var(--ink2);}
+  .plane .clock{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+  .plane p{margin:8px 0 0;font-size:12.8px;color:var(--ink);}
+  .diagram{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;margin:12px 0;box-shadow:0 1px 3px rgba(16,24,40,.06);}
+  .diagram svg{width:100%;height:auto;display:block;}
+  .roles{display:grid;grid-template-columns:repeat(2,1fr);gap:13px;margin:10px 0;}
+  @media(max-width:760px){.roles{grid-template-columns:1fr;}}
+  .role{border:1px solid var(--line);border-radius:11px;padding:13px 15px;background:#fff;}
+  .role .h{display:flex;align-items:center;gap:9px;margin-bottom:5px;}
+  .role .dot{width:11px;height:11px;border-radius:3px;flex:none;}
+  .role .nm{font-weight:800;color:var(--ink2);font-size:14.5px;}
+  .role .tag{margin-left:auto;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;}
+  .role p{margin:4px 0 0;font-size:12.8px;}
+  .role .io{margin-top:7px;font-size:11.5px;color:var(--mut);font-family:ui-monospace,Menlo,monospace;}
+  .callout{border-radius:10px;padding:13px 16px;margin:14px 0;font-size:13.5px;}
+  .callout.key{background:var(--blue-bg);border:1px solid var(--blue-bd);}
+  .callout.warn{background:var(--amber-bg);border:1px solid var(--amber-bd);}
+  .callout b{color:var(--ink2);}
+  ol.ideas{margin:8px 0;padding-left:0;list-style:none;counter-reset:i;}
+  ol.ideas li{position:relative;padding:11px 14px 11px 46px;margin:9px 0;background:#fff;border:1px solid var(--line);border-radius:10px;font-size:13.3px;}
+  ol.ideas li::before{counter-increment:i;content:counter(i);position:absolute;left:12px;top:11px;width:24px;height:24px;background:var(--ink2);color:#fff;border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;}
+  ol.ideas li b{color:var(--ink2);}
+  code{background:#f2f4f7;padding:1px 5px;border-radius:4px;font-size:11.5px;font-family:ui-monospace,Menlo,monospace;}
+  footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);color:var(--mut);font-size:12px;}
+  .qbox{background:var(--purp-bg);border:1px solid var(--purp-bd);border-radius:10px;padding:14px 16px;font-size:13.3px;}
+  .qbox b{color:var(--purp);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kic">Agent 架構 · 設計草圖 · Draft</div>
+  <h1>Multi-Agent 架構 — 三平面模型</h1>
+  <div class="sub">建置平面(Planner/Builder/Repair) · 監督平面(Supervisor) · 監控平面(機台/recipe/APC/站點) · 共用知識底層</div>
+</header>
+
+<!-- planes -->
+<h2><span class="n">1</span>核心觀點:這是三個「時鐘」不同的平面</h2>
+<p class="desc">最容易犯的錯是把它們當成一套系統。它們的觸發、生命週期、狀態完全不同 — 分開設計才乾淨。</p>
+<div class="planes">
+  <div class="plane"><div class="top" style="background:var(--blue)"></div>
+    <div class="clock" style="color:var(--blue)">同步 · REQUEST-SCOPED</div>
+    <h3>建置平面</h3>
+    <p><b>Planner → Builder → Repair</b>。協作把一條 pipeline 建出來。graph 當 supervisor、共用 canvas/phase 狀態。就是我們剛 spec 的角色拆分。</p>
+  </div>
+  <div class="plane"><div class="top" style="background:var(--purp)"></div>
+    <div class="clock" style="color:var(--purp)">週期性 · 離線</div>
+    <h3>監督 / 學習平面</h3>
+    <p><b>Supervisor</b>。不在熱路徑上;定期讀 traces + 歷程,對各 agent 提改進、甚至指出「這是 <b>doc 不齊全</b>」。輸出是<b>寫回知識</b>,不是改 flow。</p>
+  </div>
+  <div class="plane"><div class="top" style="background:var(--green)"></div>
+    <div class="clock" style="color:var(--green)">排程 / 事件 · RUNTIME</div>
+    <h3>監控平面</h3>
+    <p><b>機台 / recipe / APC / 站點偏移</b> monitor。本質是 <b>skills_v2 patrol</b>(排程 skill + verdict + alarm) — 不是新框架,是既有 auto-patrol 基建。</p>
+  </div>
+</div>
+
+<!-- diagram -->
+<h2><span class="n">2</span>關係圖</h2>
+<p class="desc">實線 = request 熱路徑資料流;虛線 = 離線 / 週期性的觀測與回饋。知識底層是三平面共用的 single source。</p>
+<div class="diagram">
+<svg viewBox="0 0 1040 600" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Noto Sans TC,sans-serif">
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#475569"/></marker>
+    <marker id="arp" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#6d28d9"/></marker>
+    <marker id="arg" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#067647"/></marker>
+  </defs>
+
+  <!-- plane tags -->
+  <text x="16" y="150" font-size="11" font-weight="700" fill="#1d4ed8" transform="rotate(-90 16 150)" text-anchor="middle">建置平面</text>
+  <text x="16" y="352" font-size="11" font-weight="700" fill="#b54708" transform="rotate(-90 16 352)" text-anchor="middle">知識底層</text>
+  <text x="16" y="500" font-size="11" font-weight="700" fill="#067647" transform="rotate(-90 16 500)" text-anchor="middle">監控平面</text>
+
+  <!-- SUPERVISOR -->
+  <rect x="300" y="18" width="440" height="66" rx="11" fill="#f5f3ff" stroke="#6d28d9" stroke-width="1.6"/>
+  <text x="520" y="42" text-anchor="middle" font-size="15" font-weight="800" fill="#5b21b6">SUPERVISOR AGENT</text>
+  <text x="520" y="62" text-anchor="middle" font-size="11.5" fill="#4c1d95">定期喚醒 · 讀 build traces + monitor 結果 · 提改進(draft)</text>
+  <text x="520" y="76" text-anchor="middle" font-size="10.5" fill="#7c3aed">週期性 / 離線 · 不在 request 熱路徑</text>
+
+  <!-- observe / feedback between supervisor and build -->
+  <line x1="472" y1="86" x2="472" y2="150" stroke="#6d28d9" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arp)"/>
+  <text x="405" y="120" font-size="10.5" fill="#6d28d9">觀測 traces/歷程</text>
+  <line x1="568" y1="150" x2="568" y2="86" stroke="#6d28d9" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arp)"/>
+  <text x="576" y="120" font-size="10.5" fill="#6d28d9">回饋建議</text>
+
+  <!-- BUILD agents -->
+  <g>
+    <rect x="110" y="150" width="196" height="94" rx="11" fill="#eff6ff" stroke="#1d4ed8" stroke-width="1.5"/>
+    <text x="208" y="180" text-anchor="middle" font-size="14.5" font-weight="800" fill="#1e3a8a">PLANNER</text>
+    <text x="208" y="200" text-anchor="middle" font-size="11" fill="#1f2933">意圖 → plan</text>
+    <text x="208" y="220" text-anchor="middle" font-size="10.3" fill="#475569">整理常用 block + user 偏好</text>
+    <text x="208" y="234" text-anchor="middle" font-size="10.3" fill="#475569">讓一開始規劃更準</text>
+  </g>
+  <g>
+    <rect x="422" y="150" width="196" height="94" rx="11" fill="#e0ecff" stroke="#1d4ed8" stroke-width="1.8"/>
+    <text x="520" y="180" text-anchor="middle" font-size="14.5" font-weight="800" fill="#1e3a8a">BUILDER</text>
+    <text x="520" y="200" text-anchor="middle" font-size="11" fill="#1f2933">follow plan 建置</text>
+    <text x="520" y="220" text-anchor="middle" font-size="10.3" fill="#475569">逐步熟悉積木關係/特性</text>
+    <text x="520" y="234" text-anchor="middle" font-size="10.3" fill="#475569">與參數調配(高頻·吃 token)</text>
+  </g>
+  <g>
+    <rect x="734" y="150" width="196" height="94" rx="11" fill="#eff6ff" stroke="#1d4ed8" stroke-width="1.5"/>
+    <text x="832" y="180" text-anchor="middle" font-size="14.5" font-weight="800" fill="#1e3a8a">REPAIR</text>
+    <text x="832" y="200" text-anchor="middle" font-size="11" fill="#1f2933">確認結果</text>
+    <text x="832" y="220" text-anchor="middle" font-size="10.3" fill="#475569">依 user feedback 修正</text>
+  </g>
+
+  <!-- build flow arrows -->
+  <line x1="306" y1="197" x2="420" y2="197" stroke="#475569" stroke-width="1.8" marker-end="url(#ar)"/>
+  <text x="363" y="190" text-anchor="middle" font-size="10.5" fill="#475569">plan</text>
+  <line x1="618" y1="197" x2="732" y2="197" stroke="#475569" stroke-width="1.8" marker-end="url(#ar)"/>
+  <text x="675" y="190" text-anchor="middle" font-size="10.5" fill="#475569">build+verify</text>
+
+  <!-- user feedback into repair -->
+  <rect x="770" y="112" width="130" height="24" rx="12" fill="#fff" stroke="#94a3b8" stroke-width="1"/>
+  <text x="835" y="128" text-anchor="middle" font-size="10.5" fill="#334155">user feedback</text>
+  <line x1="835" y1="136" x2="835" y2="150" stroke="#475569" stroke-width="1.4" marker-end="url(#ar)"/>
+
+  <!-- Verifier note (deterministic) -->
+  <text x="520" y="262" text-anchor="middle" font-size="10.3" fill="#94a3b8">＊Verifier 維持 deterministic node,不 agent 化</text>
+
+  <!-- reads to substrate -->
+  <line x1="208" y1="244" x2="208" y2="316" stroke="#b54708" stroke-width="1.2" stroke-dasharray="3 3" marker-end="url(#ar)"/>
+  <line x1="520" y1="244" x2="520" y2="316" stroke="#b54708" stroke-width="1.2" stroke-dasharray="3 3" marker-end="url(#ar)"/>
+  <line x1="832" y1="244" x2="832" y2="316" stroke="#b54708" stroke-width="1.2" stroke-dasharray="3 3" marker-end="url(#ar)"/>
+  <text x="250" y="300" font-size="10" fill="#b54708">reads</text>
+
+  <!-- SUBSTRATE -->
+  <rect x="110" y="316" width="820" height="58" rx="11" fill="#fffaeb" stroke="#b54708" stroke-width="1.5"/>
+  <text x="520" y="340" text-anchor="middle" font-size="13.5" font-weight="800" fill="#92400e">知識底層 · single source of truth</text>
+  <text x="520" y="360" text-anchor="middle" font-size="11.5" fill="#7c2d12">agent_knowledge　·　block_docs　·　pb_blocks　·　user 偏好</text>
+
+  <!-- supervisor writes to substrate (left margin dashed L-path) -->
+  <path d="M300,50 L70,50 L70,345 L108,345" fill="none" stroke="#6d28d9" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arp)"/>
+  <text x="76" y="200" font-size="10.5" fill="#6d28d9" transform="rotate(-90 76 200)" text-anchor="middle">Supervisor 寫回改進(draft·人工 review)</text>
+
+  <!-- authored -> monitors -->
+  <line x1="520" y1="374" x2="520" y2="430" stroke="#067647" stroke-width="1.8" marker-end="url(#arg)"/>
+  <text x="527" y="404" font-size="10.5" fill="#067647">authored pipeline → skills_v2 patrol</text>
+
+  <!-- MONITORS -->
+  <g font-size="10.5">
+    <rect x="44" y="432" width="212" height="92" rx="11" fill="#ecfdf3" stroke="#067647" stroke-width="1.4"/>
+    <text x="150" y="460" text-anchor="middle" font-size="13" font-weight="800" fill="#065f46">機台 Monitor</text>
+    <text x="150" y="481" text-anchor="middle" fill="#1f2933">tool 狀態 / OOC</text>
+    <text x="150" y="500" text-anchor="middle" fill="#475569">skills_v2 patrol</text>
+    <text x="150" y="515" text-anchor="middle" fill="#475569">verdict → alarm</text>
+
+    <rect x="288" y="432" width="212" height="92" rx="11" fill="#ecfdf3" stroke="#067647" stroke-width="1.4"/>
+    <text x="394" y="460" text-anchor="middle" font-size="13" font-weight="800" fill="#065f46">Recipe Monitor</text>
+    <text x="394" y="481" text-anchor="middle" fill="#1f2933">recipe 表現 / 偏移</text>
+    <text x="394" y="500" text-anchor="middle" fill="#475569">skills_v2 patrol</text>
+    <text x="394" y="515" text-anchor="middle" fill="#475569">verdict → alarm</text>
+
+    <rect x="532" y="432" width="212" height="92" rx="11" fill="#ecfdf3" stroke="#067647" stroke-width="1.4"/>
+    <text x="638" y="460" text-anchor="middle" font-size="13" font-weight="800" fill="#065f46">APC Monitor</text>
+    <text x="638" y="481" text-anchor="middle" fill="#1f2933">APC 參數 drift</text>
+    <text x="638" y="500" text-anchor="middle" fill="#475569">skills_v2 patrol</text>
+    <text x="638" y="515" text-anchor="middle" fill="#475569">verdict → alarm</text>
+
+    <rect x="776" y="432" width="212" height="92" rx="11" fill="#ecfdf3" stroke="#067647" stroke-width="1.4"/>
+    <text x="882" y="460" text-anchor="middle" font-size="13" font-weight="800" fill="#065f46">站點偏移 Monitor</text>
+    <text x="882" y="481" text-anchor="middle" fill="#1f2933">station drift</text>
+    <text x="882" y="500" text-anchor="middle" fill="#475569">skills_v2 patrol</text>
+    <text x="882" y="515" text-anchor="middle" fill="#475569">verdict → alarm</text>
+  </g>
+
+  <!-- monitor signals -> supervisor (right margin dashed) -->
+  <path d="M950,432 L1006,432 L1006,30 L742,30" fill="none" stroke="#6d28d9" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#arp)"/>
+  <text x="1000" y="230" font-size="10.5" fill="#6d28d9" transform="rotate(-90 1000 230)" text-anchor="middle">監控訊號 → 跨訊號 RCA(選配)</text>
+
+  <!-- alarms out -->
+  <text x="520" y="552" text-anchor="middle" font-size="11" fill="#065f46">各 monitor → alarms / dashboard / 下游事件擴散(skills_v2 event fan-out)</text>
+</svg>
+</div>
+
+<!-- roles -->
+<h2><span class="n">3</span>每個 Agent 的職責</h2>
+<div class="roles">
+  <div class="role"><div class="h"><span class="dot" style="background:var(--blue)"></span><span class="nm">Planner</span><span class="tag" style="color:var(--blue);background:var(--blue-bg)">建置</span></div>
+    <p>專注擬定 plan:把常用 block、user 偏好整理好,產出更準的 phase 拆解,讓後面執行更清楚。</p>
+    <div class="io">in: 意圖 + 偏好/kn識　out: phases</div></div>
+  <div class="role"><div class="h"><span class="dot" style="background:var(--blue)"></span><span class="nm">Builder</span><span class="tag" style="color:var(--blue);background:var(--blue-bg)">建置</span></div>
+    <p>follow plan 建置。建的過程逐步熟悉積木的關係、特性、與參數怎麼調配(高頻、吃大部分 token,須配便宜+cache 友善模型)。</p>
+    <div class="io">in: phases + canvas + kn識　out: canvas patch</div></div>
+  <div class="role"><div class="h"><span class="dot" style="background:var(--blue)"></span><span class="nm">Repair</span><span class="tag" style="color:var(--blue);background:var(--blue-bg)">建置</span></div>
+    <p>前面建好後,幫忙再確認結果,並根據 user 的 feedback 給予修正。</p>
+    <div class="io">in: 結果 + user feedback　out: 修正 patch</div></div>
+  <div class="role"><div class="h"><span class="dot" style="background:var(--purp)"></span><span class="nm">Supervisor</span><span class="tag" style="color:var(--purp);background:var(--purp-bg)">監督·離線</span></div>
+    <p>定期 trace 各 agent 過去的表現與歷程,給各 agent 建議、幫忙修正,甚至指出「這是 document 不齊全」的根因。輸出是<b>寫回知識(草案,人工 review)</b>。</p>
+    <div class="io">in: build traces + monitor 結果　out: kn識/doc/prompt 改進 draft</div></div>
+  <div class="role"><div class="h"><span class="dot" style="background:var(--green)"></span><span class="nm">機台 / Recipe / APC / 站點 Monitor</span><span class="tag" style="color:var(--green);background:var(--green-bg)">監控·runtime</span></div>
+    <p>監控機台狀態、recipe 表現、APC 參數 drift、站點是否偏移。<b>每個 = 一條 skills_v2 patrol</b>(排程/事件觸發 → verdict → alarm),不是新框架。</p>
+    <div class="io">in: live 資料　out: verdict → alarm / 事件</div></div>
+  <div class="role" style="border-style:dashed"><div class="h"><span class="dot" style="background:var(--green)"></span><span class="nm">Monitor-Correlator（選配）</span><span class="tag" style="color:var(--green);background:var(--green-bg)">未來</span></div>
+    <p>真正值得做「agent」的是<b>跨訊號關聯</b>:把機台/recipe/APC/站點的告警融合成一次 RCA(單一 patrol 做不到)。這才是 monitor 平面的 agent 加值點。</p>
+    <div class="io">in: N 個 monitor 訊號　out: 融合 RCA</div></div>
+</div>
+
+<!-- ideas -->
+<h2><span class="n">4</span>我的幾個關鍵想法</h2>
+<ol class="ideas">
+  <li><b>三平面別混在一起做。</b>建置=同步/graph;監督=週期/離線;監控=排程/事件。它們的時鐘不同,混起來會又難測又難維護 — 這正是你要拆的初衷。</li>
+  <li><b>Supervisor 的輸出要是「寫回知識」,不是「改 flow / 改 prompt」。</b>它看到 Builder 老猜錯某 block 參數 → 判定 doc 不齊 → 產 <code>block_docs</code> / <code>agent_knowledge</code> 改進<b>草案</b>。這剛好落實你們原則 0(doc 是唯一來源)、又守住「flow 在 graph」。</li>
+  <li><b>Supervisor 必須離熱路徑。</b>建置要快、要 deterministic;Supervisor 是離線優化器,改的是 build agent「讀的知識」,不是「當下的流程」。</li>
+  <li><b>監控四兄弟 = skills_v2 patrol,不是新造框架。</b>機台/recipe/APC/站點 monitor 就是四條排程 skill(verdict → alarm),既有基建(SkillRunner / block_step_check / alarms / event fan-out)直接用。</li>
+  <li><b>有個漂亮的閉環:</b>建置平面<b>產出</b>監控 patrol → 監控<b>產生</b>訊號 → Supervisor 同時吃 build traces + monitor 結果 → 回頭改進建置。整個 lifecycle 收斂。</li>
+  <li><b>回饋要「有閘、有版本、可稽核」(小心不穩定)。</b>Supervisor 自動改 agent 會有 feedback 漂移風險。走法比照 V54 衍生草案 + 角色稽核:proposal → 人工/gated review → versioned kn識,不做自主 prompt 突變。</li>
+</ol>
+
+<div class="callout key">
+  <b>一句話收斂:</b>把「一個 agent」變成「三個平面 + 共用知識底層」。建置平面是 3 個 role agent(Planner/Builder/Repair,graph 編排);Supervisor 是離線學習迴路(寫回知識);監控平面是既有 skills_v2 patrol 的具體化。四者透過同一份知識底層鬆耦合。
+</div>
+
+<!-- next -->
+<h2><span class="n">5</span>幾個要你拍板的開放問題</h2>
+<div class="qbox">
+  <b>Q1 · Supervisor 的回饋要多自動?</b>　全人工 review 草案 / 半自動(高信心自動、低信心排隊) / 只發「doc 不齊」報告不自動寫。<br>
+  <b>Q2 · 監控平面現在要不要動?</b>　建議先只落地「建置三平面 + Supervisor 骨架」,監控維持現有 patrol,等建置穩了再做 Monitor-Correlator。<br>
+  <b>Q3 · Supervisor 的觸發源</b>　只吃 build traces,還是一開始就併 monitor 結果?(併了才有跨平面學習,但範圍大。)<br>
+  <b>Q4 · 落地順序</b>　先抽 Agent 契約 + 拆 Planner/Builder/Repair(純重構、SLASH-17 零回歸),Supervisor 當第二階段?
+</div>
+
+<footer>
+  設計草圖 · Draft，尚未定案。建置平面拆分細節見對話中的 Tech Spec。監控平面對應 skills_v2(V66)auto-patrol 基建。Generated 2026-07-02。
+</footer>
+
+</div>
+</body>
+</html>

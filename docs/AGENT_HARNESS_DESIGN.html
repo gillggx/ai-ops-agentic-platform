@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Harness & Memory 設計 — 借鏡 Claude Code CLI</title>
+<style>
+  :root{
+    --ink:#1f2933; --mut:#667085; --line:#e4e7ec; --bg:#f5f7fa; --card:#fff;
+    --blue:#1d4ed8; --blue-bg:#eff6ff; --blue-bd:#bfdbfe;
+    --green:#067647; --green-bg:#ecfdf3; --green-bd:#a6f4c5;
+    --amber:#b54708; --amber-bg:#fffaeb; --amber-bd:#fde68a;
+    --purp:#6d28d9; --purp-bg:#f5f3ff; --purp-bd:#c4b5fd;
+    --teal:#0e7490; --teal-bg:#ecfeff; --teal-bd:#a5f3fc;
+    --ink2:#101828;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;
+       color:var(--ink);background:var(--bg);line-height:1.6;font-size:14.5px;}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 22px 70px;}
+  header.hero{background:linear-gradient(135deg,#0b1f4d,#0e7490 60%,#6d28d9);color:#fff;
+       margin:0 -22px 26px;padding:34px 30px 28px;}
+  header.hero .kic{font-size:12px;letter-spacing:.12em;text-transform:uppercase;opacity:.85;}
+  header.hero h1{margin:6px 0 6px;font-size:25px;}
+  header.hero .sub{opacity:.92;font-size:13.5px;}
+  h2{font-size:19px;margin:34px 0 8px;color:var(--ink2);display:flex;align-items:center;gap:10px;}
+  h2 .n{display:inline-flex;width:27px;height:27px;border-radius:7px;background:var(--ink2);color:#fff;
+       align-items:center;justify-content:center;font-size:14px;font-weight:700;}
+  h2 + .desc{color:var(--mut);font-size:13px;margin:0 0 14px;}
+  table{width:100%;border-collapse:collapse;margin:10px 0 6px;font-size:12.7px;background:#fff;
+       border:1px solid var(--line);border-radius:10px;overflow:hidden;}
+  th,td{padding:8px 11px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;}
+  thead th{background:#f8fafc;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--mut);font-weight:700;}
+  tbody tr:last-child td{border-bottom:none;}
+  td b{color:var(--ink2);}
+  .callout{border-radius:10px;padding:13px 16px;margin:14px 0;font-size:13.4px;}
+  .callout.key{background:var(--teal-bg);border:1px solid var(--teal-bd);}
+  .callout.warn{background:var(--amber-bg);border:1px solid var(--amber-bd);}
+  .callout b{color:var(--ink2);}
+  code{background:#f2f4f7;padding:1px 5px;border-radius:4px;font-size:11.5px;font-family:ui-monospace,Menlo,monospace;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  @media(max-width:820px){.grid2{grid-template-columns:1fr;}}
+  .panel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:15px 16px;box-shadow:0 1px 2px rgba(16,24,40,.05);}
+  .panel .top{height:5px;border-radius:5px;margin:-15px -16px 11px;}
+  .panel h3{margin:0 0 6px;font-size:15px;color:var(--ink2);}
+  .roles{display:grid;grid-template-columns:repeat(3,1fr);gap:13px;margin:10px 0;}
+  @media(max-width:900px){.roles{grid-template-columns:1fr;}}
+  .role{border:1px solid var(--line);border-radius:11px;padding:0 0 12px;background:#fff;overflow:hidden;}
+  .role .cap{padding:10px 14px;color:#fff;font-weight:800;font-size:14.5px;}
+  .role dl{margin:9px 14px 0;display:grid;grid-template-columns:auto 1fr;gap:5px 9px;font-size:12.3px;}
+  .role dt{color:var(--mut);font-weight:700;white-space:nowrap;}
+  .role dd{margin:0;color:var(--ink);}
+  .chips span{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:999px;margin:2px 3px 0 0;
+       background:#f2f4f7;border:1px solid var(--line);color:#334155;}
+  .diagram{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;margin:12px 0;box-shadow:0 1px 3px rgba(16,24,40,.06);}
+  .diagram svg{width:100%;height:auto;display:block;}
+  ol.ideas{margin:8px 0;padding-left:0;list-style:none;counter-reset:i;}
+  ol.ideas li{position:relative;padding:11px 14px 11px 46px;margin:9px 0;background:#fff;border:1px solid var(--line);border-radius:10px;font-size:13.2px;}
+  ol.ideas li::before{counter-increment:i;content:counter(i);position:absolute;left:12px;top:11px;width:24px;height:24px;background:var(--teal);color:#fff;border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;}
+  .qbox{background:var(--purp-bg);border:1px solid var(--purp-bd);border-radius:10px;padding:14px 16px;font-size:13.2px;}
+  .qbox b{color:var(--purp);}
+  footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);color:var(--mut);font-size:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kic">Agent 架構 · Harness & Memory · Draft v2</div>
+  <h1>每個 Agent 都是一個小型 Claude Code</h1>
+  <div class="sub">Harness 機制 · Memory 分類 · 「記憶以外還有什麼」 · 借鏡 Claude Code CLI 自己怎麼學</div>
+</header>
+
+<!-- 1 how claude code learns -->
+<h2><span class="n">1</span>先看 Claude Code（我）自己怎麼「學」</h2>
+<p class="desc">關鍵事實:<b>我不更新權重</b>。我的「學習」全部外部化到 harness 的檔案 — 這跟你們的 agent 一樣(你們也不 fine-tune),所以這個範本可以直接搬。</p>
+<div class="callout key">
+  我的「記憶」= 磁碟上的 <code>memory/*.md</code>(每檔一個 fact,frontmatter 分類 user/feedback/project/reference)+ <code>CLAUDE.md</code>(常駐憲章)+ <code>skills</code>(可重用程序)。
+  被糾正時,我<b>寫一條 feedback 記憶</b>(帶 <code>Why</code> + <code>How to apply</code>),下次靠 description 召回。
+  <b>「學習」= 寫進一個分類好、可召回的記憶庫,不是改權重。</b>你們的 Supervisor 要做的就是這件事。
+</div>
+
+<!-- 2 beyond memory -->
+<h2><span class="n">2</span>「Memory 以外還有什麼」— 一個 Harness 的 10 個構件</h2>
+<p class="desc">Memory 只是其中一個。以下每個構件都能對到「我怎麼運作」與「你們現有的東西」。好消息:大半你們已經有了。</p>
+<table>
+  <thead><tr><th style="width:20px">#</th><th>構件</th><th>是什麼</th><th>Claude Code（我）對應</th><th>你們現有對應</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><b>Constitution 憲章</b></td><td>角色定位 + 不可違反的硬規則(靜態)</td><td>CLAUDE.md</td><td>role system prompt</td></tr>
+    <tr><td>2</td><td><b>Memory 長期記憶</b></td><td>分類、scoped、可召回的學到的事實</td><td>memory/*.md</td><td><code>agent_knowledge</code></td></tr>
+    <tr><td>3</td><td><b>Skills 程序</b></td><td>可重用的做事流程(具名叫用)</td><td>/skills</td><td>pb skill / playbook</td></tr>
+    <tr><td>4</td><td><b>Tools 行動空間</b></td><td>scoped 工具白名單(能做什麼)</td><td>Read/Edit/Bash…</td><td>canvas ops / query tools</td></tr>
+    <tr><td>5</td><td><b>Working context + 壓縮</b></td><td>當前任務的短期工作區;滿了就摘要</td><td>context window / compaction</td><td>observation / round delta</td></tr>
+    <tr><td>6</td><td><b>Recall 召回策略</b></td><td>always-on 直推 + RAG 相關性檢索</td><td>memory description 比對</td><td><code>always_on</code> + pgvector RAG</td></tr>
+    <tr><td>7</td><td><b>Feedback intake</b></td><td>被糾正 → 蒸餾成一條記憶(帶 why)</td><td>寫 feedback memory</td><td><span style="color:var(--amber)">待建(核心新機制)</span></td></tr>
+    <tr><td>8</td><td><b>Verification 自檢</b></td><td>交手前先驗證(不亂宣稱完成)</td><td>verify-like-user 紀律</td><td>phase_verifier / inspect_execution</td></tr>
+    <tr><td>9</td><td><b>Gate 審核暫停</b></td><td>提案 → 等核准 → 才動手</td><td>plan mode / ExitPlanMode</td><td><code>goal_plan_confirm_gate</code></td></tr>
+    <tr><td>10</td><td><b>Trace / episodic + 稽核</b></td><td>把每次經歷留檔,供事後蒸餾</td><td>transcript</td><td>BuildTracer</td></tr>
+  </tbody>
+</table>
+
+<!-- 3 memory classification -->
+<h2><span class="n">3</span>Memory 怎麼分類（我的意見）</h2>
+<p class="desc">6 個 <b>memory class</b> × 3 個正交軸。軸的部分你們 <code>agent_knowledge</code> 幾乎都有了 — 只要再加一個 <code>class</code> 維度、每個 agent 讀寫自己那片。</p>
+<div class="grid2">
+  <div class="panel"><div class="top" style="background:var(--teal)"></div>
+    <h3>6 個 Memory Class</h3>
+    <table style="border:none;margin:0">
+      <tbody>
+        <tr><td><b>domain</b></td><td>領域知識(SPC=站級、APC=recipe 級、欄位語義)</td></tr>
+        <tr><td><b>preference</b></td><td>user 偏好(愛用哪些 block、精簡 vs 詳細、命名習慣)</td></tr>
+        <tr><td><b>presentation</b></td><td>什麼資料 → 什麼呈現(時序→line、分佈→box、排名→bar)</td></tr>
+        <tr><td><b>correction</b></td><td>被糾正學到的規則(帶 why + how-to-apply)= 我的 feedback 型</td></tr>
+        <tr><td><b>episodic</b></td><td>過往 build 的成敗歷程(原始經驗,供 Supervisor 蒸餾)</td></tr>
+        <tr><td><b>procedure</b></td><td>可重用的建構配方(≈ skill)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="panel"><div class="top" style="background:var(--purp)"></div>
+    <h3>3 個正交軸（你們已有）</h3>
+    <table style="border:none;margin:0">
+      <tbody>
+        <tr><td><b>scope</b></td><td>global / user / skill / tool / recipe　<span style="color:var(--green)">已有 scope_type</span></td></tr>
+        <tr><td><b>layer</b></td><td>plan / execute　<span style="color:var(--green)">已有 applies_to(V58)</span></td></tr>
+        <tr><td><b>優先級</b></td><td>priority + always_on(直推 vs RAG)　<span style="color:var(--green)">已有</span></td></tr>
+      </tbody>
+    </table>
+    <div class="callout warn" style="margin:12px 0 0">
+      結論:<b>不用重造 memory 基建</b>。加一個 <code>class</code> 欄位到 agent_knowledge,搭配既有 scope/layer/priority,就是一套完整的分類記憶庫。
+    </div>
+  </div>
+</div>
+
+<!-- 4 two speeds -->
+<h2><span class="n">4</span>兩種學習速度:Fast Path vs 蒸餾</h2>
+<div class="grid2">
+  <div class="panel"><div class="top" style="background:var(--blue)"></div>
+    <h3>Fast Path — in-session（即時)</h3>
+    <p style="font-size:13px;margin:0">Planner 收到 user feedback → <b>當下就寫一條 preference / correction(草稿)</b> + 立刻重規劃。就像我在 session 中被糾正、馬上寫 memory 並改做法。特性:快、局部、未去重。</p>
+  </div>
+  <div class="panel"><div class="top" style="background:var(--purp)"></div>
+    <h3>Slow Path — Supervisor 蒸餾（週期)</h3>
+    <p style="font-size:13px;margin:0">Supervisor 定期把大量 <b>episodic traces 蒸餾</b>成乾淨、去重、分類的 durable memory,並寫回。就是「反思/固化」。<b>Supervisor = memory consolidator</b> —— 把噪音經驗變成長期知識,還能發現「這是 doc 不齊」。</p>
+  </div>
+</div>
+
+<!-- 5 per-agent harness -->
+<h2><span class="n">5</span>每個 Agent 的 Harness（細）</h2>
+<div class="roles">
+  <div class="role"><div class="cap" style="background:var(--blue)">PLANNER — 需求擁有者 + 裁判</div>
+    <dl>
+      <dt>憲章</dt><dd>只擬 plan;意圖導向、不選 block</dd>
+      <dt>Memory</dt><dd class="chips"><span>domain</span><span>preference</span><span>presentation</span></dd>
+      <dt>Tools</dt><dd>query_blocks / 讀偏好 / 出 phases</dd>
+      <dt>Gate</dt><dd>提 plan → 等 user feedback → 修正(=我的 plan mode)</dd>
+      <dt>Feedback</dt><dd>來自 user(規劃階段)+ 自己判 Builder 結果對錯</dd>
+      <dt>學到</dt><dd>這 user 偏好、什麼資料用什麼呈現、常用 block</dd>
+    </dl>
+  </div>
+  <div class="role"><div class="cap" style="background:#1e40af">BUILDER — 執行者</div>
+    <dl>
+      <dt>憲章</dt><dd>follow Planner 需求;param key 100% 照 schema</dd>
+      <dt>Memory</dt><dd class="chips"><span>procedure</span><span>domain(block)</span></dd>
+      <dt>Tools</dt><dd>add_node / connect / set_param / inspect</dd>
+      <dt>Gate</dt><dd>結果回交 Planner 裁判(+ deterministic verifier)</dd>
+      <dt>Feedback</dt><dd>來自 Planner(對/錯)+ 結構驗證</dd>
+      <dt>學到</dt><dd>積木的關係、特性、參數怎麼調配(愈建愈熟)</dd>
+    </dl>
+  </div>
+  <div class="role"><div class="cap" style="background:var(--purp)">REPAIR — feedback 驅動的修正者</div>
+    <dl>
+      <dt>憲章</dt><dd>對齊「原意圖 vs 現結果 vs user feedback」三者</dd>
+      <dt>Memory</dt><dd class="chips"><span>correction</span><span>episodic(failure)</span></dd>
+      <dt>Tools</dt><dd>diff / 定點修 canvas / 重跑驗證</dd>
+      <dt>輸入</dt><dd>原始 prompt + 目前設計結果 + user feedback</dd>
+      <dt>Feedback</dt><dd>持續來自 user</dd>
+      <dt>學到</dt><dd>「原本哪裡做錯」→ 寫成 correction 供 Planner/Builder 讀</dd>
+    </dl>
+  </div>
+</div>
+
+<!-- 6 refined loop -->
+<h2><span class="n">6</span>修正後的互動迴路（依你的描述）</h2>
+<p class="desc">跟第一版線性圖不同:<b>Planner 是 hub + 裁判</b>,Builder 執行、結果回交 Planner 判對錯;Repair 吃「原 prompt + 現結果 + user feedback」三路輸入。</p>
+<div class="diagram">
+<svg viewBox="0 0 1040 380" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Noto Sans TC,sans-serif">
+  <defs>
+    <marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#475569"/></marker>
+    <marker id="ab" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#1d4ed8"/></marker>
+  </defs>
+  <!-- USER -->
+  <rect x="40" y="150" width="150" height="70" rx="11" fill="#f8fafc" stroke="#334155" stroke-width="1.5"/>
+  <text x="115" y="180" text-anchor="middle" font-size="15" font-weight="800" fill="#0f172a">USER</text>
+  <text x="115" y="200" text-anchor="middle" font-size="10.5" fill="#475569">意圖 + 持續 feedback</text>
+  <!-- PLANNER -->
+  <rect x="300" y="130" width="200" height="110" rx="12" fill="#eff6ff" stroke="#1d4ed8" stroke-width="1.9"/>
+  <text x="400" y="162" text-anchor="middle" font-size="16" font-weight="800" fill="#1e3a8a">PLANNER</text>
+  <text x="400" y="184" text-anchor="middle" font-size="11" fill="#1f2933">需求擁有者 + 裁判</text>
+  <text x="400" y="204" text-anchor="middle" font-size="10" fill="#475569">domain·preference·presentation</text>
+  <text x="400" y="222" text-anchor="middle" font-size="10" fill="#475569">memory</text>
+  <!-- BUILDER -->
+  <rect x="620" y="130" width="200" height="110" rx="12" fill="#e0ecff" stroke="#1e40af" stroke-width="1.9"/>
+  <text x="720" y="162" text-anchor="middle" font-size="16" font-weight="800" fill="#1e3a8a">BUILDER</text>
+  <text x="720" y="184" text-anchor="middle" font-size="11" fill="#1f2933">執行者</text>
+  <text x="720" y="204" text-anchor="middle" font-size="10" fill="#475569">procedure·block-know-how</text>
+  <text x="720" y="222" text-anchor="middle" font-size="10" fill="#475569">memory</text>
+  <!-- REPAIR -->
+  <rect x="880" y="130" width="130" height="110" rx="12" fill="#f5f3ff" stroke="#6d28d9" stroke-width="1.9"/>
+  <text x="945" y="170" text-anchor="middle" font-size="14.5" font-weight="800" fill="#5b21b6">REPAIR</text>
+  <text x="945" y="190" text-anchor="middle" font-size="10" fill="#4c1d95">correction</text>
+  <text x="945" y="206" text-anchor="middle" font-size="10" fill="#4c1d95">memory</text>
+
+  <!-- USER <-> PLANNER (plan + feedback) -->
+  <line x1="190" y1="172" x2="298" y2="172" stroke="#1d4ed8" stroke-width="1.8" marker-end="url(#ab)"/>
+  <text x="244" y="164" text-anchor="middle" font-size="10" fill="#1d4ed8">意圖</text>
+  <line x1="298" y1="198" x2="190" y2="198" stroke="#1d4ed8" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#ab)"/>
+  <text x="244" y="214" text-anchor="middle" font-size="10" fill="#1d4ed8">plan → 收 feedback → 修正</text>
+
+  <!-- PLANNER <-> BUILDER -->
+  <line x1="500" y1="168" x2="618" y2="168" stroke="#475569" stroke-width="1.9" marker-end="url(#a)"/>
+  <text x="559" y="160" text-anchor="middle" font-size="10" fill="#475569">下需求</text>
+  <line x1="618" y1="202" x2="500" y2="202" stroke="#475569" stroke-width="1.9" stroke-dasharray="5 4" marker-end="url(#a)"/>
+  <text x="559" y="218" text-anchor="middle" font-size="10" fill="#475569">回結果 → Planner 判對/錯</text>
+
+  <!-- REPAIR inputs -->
+  <line x1="820" y1="185" x2="878" y2="185" stroke="#6d28d9" stroke-width="1.6" marker-end="url(#a)"/>
+  <text x="720" y="284" text-anchor="middle" font-size="10.5" fill="#6d28d9">REPAIR 三路輸入:原 prompt + 現結果 + user feedback</text>
+  <path d="M115,220 L115,300 L945,300 L945,242" fill="none" stroke="#6d28d9" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#a)"/>
+  <path d="M400,240 L400,320 L960,320 L960,242" fill="none" stroke="#6d28d9" stroke-width="1.2" stroke-dasharray="3 3" marker-end="url(#a)"/>
+
+  <!-- shared memory note -->
+  <text x="520" y="352" text-anchor="middle" font-size="10.5" fill="#0e7490">三者各自讀寫自己那片 agent_knowledge(scope + layer + class);Supervisor 週期蒸餾 episodic → 回寫</text>
+</svg>
+</div>
+
+<!-- 7 ideas -->
+<h2><span class="n">7</span>幾個關鍵判斷</h2>
+<ol class="ideas">
+  <li><b>Feedback intake 是唯一真正要新建的機制。</b>其餘 9 個構件你們或多或少有了。這個機制 = 「user/Planner 的糾正 → 蒸餾成一條帶 why 的 correction 記憶」,就是我被糾正時做的事。沒有它,agent 每次都從零開始。</li>
+  <li><b>Planner 同時是需求擁有者與裁判。</b>它出需求給 Builder、又判 Builder 結果對錯 —— 這個「裁判」動作本身要留成 episodic,因為它是最有價值的訓練訊號(Supervisor 蒸餾的主料)。</li>
+  <li><b>Repair 的三路對齊(原意圖 vs 現結果 vs feedback)就是它的 harness 核心。</b>它學到的「原本哪裡錯」要寫成 correction,讓 Planner/Builder 下次避開 —— 這是 agent 之間透過記憶底層的間接學習。</li>
+  <li><b>memory 一律「草稿 → 審核 → 版本化」。</b>比照我寫 memory 前會查重、會刪錯的紀律,也比照你們 V54 衍生草案。自動寫記憶不設閘 = feedback 漂移。</li>
+  <li><b>短期 context ≠ 長期 memory,別混。</b>working context(當前 build 的 observation)用完即棄;只有被蒸餾/被 feedback 認證的才升級成 durable memory。這是我 compaction 與 memory 的分界。</li>
+</ol>
+
+<!-- 8 open Qs -->
+<h2><span class="n">8</span>待你拍板</h2>
+<div class="qbox">
+  <b>Q1 · Memory class 要不要就這 6 類?</b>(domain / preference / presentation / correction / episodic / procedure)還是你想再拆細/合併。<br>
+  <b>Q2 · Feedback intake 誰觸發寫記憶?</b>agent 當下自己寫(fast)、還是一律留給 Supervisor 蒸餾(slow)、還是兩者都要。<br>
+  <b>Q3 · preference 的 scope</b>　per-user 為主?還是也要 per-team / global 預設偏好。<br>
+  <b>Q4 · 落地順序</b>　建議:先做 memory class 欄位 + Planner 的 preference/presentation 讀寫(最有感)→ 再做 Repair 的 correction → Supervisor 蒸餾最後。
+</div>
+
+<footer>
+  設計草圖 v2 · Draft。承接 <code>MULTI_AGENT_ARCHITECTURE.html</code> 的三平面模型,補上每個 agent 的 harness 與 memory 機制。範本借鏡 Claude Code CLI 的檔案式記憶 + 憲章 + skills + feedback→memory 迴路。Generated 2026-07-02。
+</footer>
+
+</div>
+</body>
+</html>
