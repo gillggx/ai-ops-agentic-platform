@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM 選型比較 — Sonnet 5 vs Opus 4.8（vs GLM-5.2 baseline）</title>
+<style>
+  :root{
+    --ink:#1f2933; --mut:#667085; --line:#e4e7ec; --bg:#f5f7fa; --card:#fff;
+    --blue:#1d4ed8; --blue-bg:#eff6ff; --blue-bd:#bfdbfe;
+    --green:#067647; --green-bg:#ecfdf3; --green-bd:#a6f4c5;
+    --red:#b42318; --red-bg:#fef3f2; --red-bd:#fecaca;
+    --amber:#b54708; --amber-bg:#fffaeb; --amber-bd:#fde68a;
+    --purp:#6d28d9; --purp-bg:#f5f3ff; --purp-bd:#c4b5fd;
+    --ink2:#101828;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;
+       color:var(--ink);background:var(--bg);line-height:1.6;font-size:14.5px;}
+  .wrap{max-width:1040px;margin:0 auto;padding:0 22px 70px;}
+  header.hero{background:linear-gradient(135deg,#0b1f4d,#6d28d9);color:#fff;
+       margin:0 -22px 26px;padding:34px 30px 28px;}
+  header.hero .kic{font-size:12px;letter-spacing:.12em;text-transform:uppercase;opacity:.8;}
+  header.hero h1{margin:6px 0 6px;font-size:26px;}
+  header.hero .sub{opacity:.9;font-size:13.5px;}
+  .verdict{display:inline-block;margin-top:14px;background:rgba(255,255,255,.14);
+       border:1px solid rgba(255,255,255,.3);border-radius:8px;padding:8px 14px;font-size:14px;}
+  .verdict b{color:#ddd6fe;}
+  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:0 0 30px;}
+  @media(max-width:760px){.cards{grid-template-columns:repeat(2,1fr);}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:15px 16px;
+       box-shadow:0 1px 2px rgba(16,24,40,.05);}
+  .card .lbl{font-size:11.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;}
+  .card .val{font-size:23px;font-weight:700;color:var(--ink2);margin-top:6px;line-height:1.1;}
+  .card .val small{font-size:13px;font-weight:600;color:var(--mut);}
+  .card .delta{font-size:12px;margin-top:5px;}
+  .card .delta.win{color:var(--green);} .card .delta.warn{color:var(--amber);} .card .delta.neutral{color:var(--mut);}
+  h2{font-size:19px;margin:34px 0 6px;color:var(--ink2);display:flex;align-items:center;gap:10px;}
+  h2 .n{display:inline-flex;width:27px;height:27px;border-radius:7px;background:var(--purp);color:#fff;
+       align-items:center;justify-content:center;font-size:14px;font-weight:700;}
+  h2 + .desc{color:var(--mut);font-size:13px;margin:0 0 12px;}
+  table{width:100%;border-collapse:collapse;margin:10px 0 6px;font-size:13px;background:#fff;
+       border:1px solid var(--line);border-radius:10px;overflow:hidden;}
+  th,td{padding:8px 11px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;}
+  thead th{background:#f8fafc;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--mut);font-weight:700;}
+  tbody tr:last-child td{border-bottom:none;}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;}
+  td.mid,th.mid{text-align:center;}
+  .grp-s{background:#fafcff;} .grp-o{background:#faf7ff;}
+  .col-sep{border-left:2px solid var(--purp-bd);}
+  .badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;}
+  .ok{color:var(--green);background:var(--green-bg);border:1px solid var(--green-bd);}
+  .no{color:var(--red);background:var(--red-bg);border:1px solid var(--red-bd);}
+  .win{color:var(--purp);background:var(--purp-bg);border:1px solid var(--purp-bd);font-weight:700;}
+  .tie{color:var(--mut);background:#f2f4f7;border:1px solid var(--line);}
+  tr.total td{background:#f4f0ff;font-weight:700;color:var(--ink2);border-top:2px solid var(--purp-bd);}
+  .callout{border-radius:10px;padding:13px 16px;margin:14px 0;font-size:13.5px;}
+  .callout.key{background:var(--blue-bg);border:1px solid var(--blue-bd);}
+  .callout.warn{background:var(--amber-bg);border:1px solid var(--amber-bd);}
+  .callout.bad{background:var(--red-bg);border:1px solid var(--red-bd);}
+  .callout b{color:var(--ink2);}
+  ul{margin:8px 0;padding-left:20px;} li{margin:5px 0;}
+  code{background:#f2f4f7;padding:1px 5px;border-radius:4px;font-size:12px;font-family:ui-monospace,Menlo,monospace;}
+  footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);color:var(--mut);font-size:12px;}
+  .legend{font-size:12px;color:var(--mut);margin:4px 0 0;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kic">LLM 選型評估 · Builder Agent · 自研 Agent 升級評估</div>
+  <h1>Sonnet 5 vs Opus 4.8</h1>
+  <div class="sub">以 SLASH-17（17 條 production builder 指令）端到端驗證，對照現行 prod 模型 GLM-5.2 · 2026-07-01</div>
+  <div class="verdict">結論：<b>Opus 4.8 品質最高（嚴格 16/17）但成本約 GLM 的 30×</b>；Sonnet 5 被 GLM 支配（更貴卻不更準）。<b>GLM-5.2 續任預設</b>，premium 僅作難題升級層。</div>
+</header>
+
+<div class="cards">
+  <div class="card"><div class="lbl">嚴格通過（golden 全中）</div>
+    <div class="val">16<small>/17</small> <span style="color:var(--mut);font-size:15px;">vs</span> 15<small>/17</small></div>
+    <div class="delta win">Opus 修好 xbar_r；兩者皆漏 weco_rules</div></div>
+  <div class="card"><div class="lbl">跑完全套耗時</div>
+    <div class="val">23.5<small>min</small> <span style="color:var(--mut);font-size:15px;">vs</span> 24.4<small>min</small></div>
+    <div class="delta win">兩者都比 GLM（28 min）快</div></div>
+  <div class="card"><div class="lbl">實測成本 / 17 案</div>
+    <div class="val">$68.6 <span style="color:var(--mut);font-size:15px;">vs</span> $18.7</div>
+    <div class="delta warn">GLM 約 $1–3 → Opus ~30× · Sonnet ~9×</div></div>
+  <div class="card"><div class="lbl">Prompt cache 命中</div>
+    <div class="val">0% <span style="color:var(--mut);font-size:15px;">/</span> 0.9%</div>
+    <div class="delta warn">Anthropic 走 OpenRouter 幾乎無 cache</div></div>
+</div>
+
+<!-- A -->
+<h2><span class="n">A</span>這次比什麼、怎麼比</h2>
+<p class="desc">目的是<b>自研 agent 升級評估</b>：現行 prod builder 用便宜的 GLM-5.2，這次測兩個 Anthropic frontier 模型，回答「難題值不值得升 premium tier」。方法與上次 GLM vs KIMI 完全一致，可直接並排。</p>
+<table>
+  <thead><tr><th style="width:130px">項目</th><th>設定</th></tr></thead>
+  <tbody>
+    <tr><td>Harness</td><td><code>tools/slash17/</code> — 17 條 production builder 指令端到端跑 v30 builder，各 1 rep</td></tr>
+    <tr><td>路由</td><td>兩者皆走 OpenRouter（<code>anthropic/claude-sonnet-5</code> / <code>anthropic/claude-opus-4.8</code>），與 GLM/KIMI 同一條路徑</td></tr>
+    <tr><td>評分</td><td><code>grade_strict.py</code>（golden 全中才 MATCH）；成本由 build trace 的 token / cache 欄位實算</td></tr>
+    <tr><td>Baseline</td><td>GLM-5.2 @ Fireworks @ medium（2026-06-25 bake-off：lenient 17/17、strict ~14/17、cache 40–58%、~$1–3）</td></tr>
+  </tbody>
+</table>
+
+<!-- B -->
+<h2><span class="n">B</span>Sonnet 5 vs Opus 4.8：每案明細</h2>
+<p class="desc"><b>nodes</b>=建成節點數 · <b>rnds</b>=phase-round 數（越少越果斷）· <b>耗時</b>=wall-clock · <b>嚴格</b>=golden 全中。</p>
+<table>
+  <thead>
+    <tr>
+      <th style="width:24px">#</th><th>command</th>
+      <th class="num grp-s">S 節點</th><th class="num grp-s">S rnds</th><th class="num grp-s">S 耗時</th><th class="mid grp-s">S 嚴格</th>
+      <th class="num grp-o col-sep">O 節點</th><th class="num grp-o">O rnds</th><th class="num grp-o">O 耗時</th><th class="mid grp-o">O 嚴格</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td class="num">1</td><td>spc-trend</td><td class="num grp-s">4</td><td class="num grp-s">5</td><td class="num grp-s">33s</td><td class="mid grp-s"><span class="badge ok">match</span></td><td class="num grp-o col-sep">4</td><td class="num grp-o">12</td><td class="num grp-o">135s</td><td class="mid grp-o"><span class="badge ok">match</span></td></tr>
+    <tr><td class="num">2</td><td>spc-ooc</td><td class="num grp-s">7</td><td class="num grp-s">21</td><td class="num grp-s">116s</td><td class="mid grp-s"><span class="badge ok">match</span></td><td class="num grp-o col-sep">7</td><td class="num grp-o">24</td><td class="num grp-o">169s</td><td class="mid grp-o"><span class="badge ok">match</span></td></tr>
+    <tr><td class="num">3</td><td>spc-cpk</td><td class="num grp-s">7</td><td class="num grp-s">36</td><td class="num grp-s">306s</td><td class="mid grp-s"><span class="badge ok">match</span></td><td class="num grp-o col-sep">8</td><td class="num grp-o">10</td><td class="num grp-o">101s</td><td class="mid grp-o"><span class="badge ok">match</span></td></tr>
+    <tr><td class="num">4</td><td>spc-multi-tool</td><td class="num grp-s">5</td><td class="num grp-s">10</td><td class="num grp-s">62s</td><td class="mid grp-s"><span class="badge ok">match</span></td><td class="num grp-o col-sep">5</td><td class="num grp-o">11</td><td class="num grp-o">93s</td><td class="mid grp-o"><span class="badge ok">match</span></td></tr>
+    <tr><td class="num">5</td><td>spc-drift</td><td class="num grp-s">6</td><td class="num grp-s">12</td><td class="num grp-s">66s</td><td class="mid grp-s"><span class="badge ok">match</span></td><td class="num grp-o col-sep">6</td><td class="num grp-o">12</td><td class="num grp-o">115s</td><td class="mid grp-o"><span class="badge ok">match</span></td></tr>
+    <tr><td class="num">6</td><td>spc-xbar-r-pair</td><td class="num grp-s">5</td><td class="num grp-s">9</td><td class="num grp-s">57s</td><td class="mid grp-s"><span class="badge no">wrong</span></td><td class="num grp-o col-sep">4</td><td class="num grp-o">8</td><td class="num grp-o">79s</td><td class="mid grp-o"><span class="badge ok">match</span></td></tr>
+    <tr><td class="num">7</td><td>spc-multi-step</td><td class="num grp-s">2</td><td class="num grp-s">14</td><td class="num grp-s">115s</td><td class="mid grp-s"><span class="badge ok">match</span></td><td class="num grp-o col-sep">2</td><td class="num grp-o">6</td><td class="num grp-o">50s</td><td class="mid grp-o"><span class="badge ok">match</span></td></tr>
+    <tr><td class="num">8</td><td>spc-tool-box</td><td class="num grp-s">4</td><td class="num grp-s">6</td><td class="num grp-s">40s</td><td class="mid grp-s"><span class="badge ok">match</span></td><td class="num grp-o col-sep">4</td><td class="num grp-o">7</td><td class="num grp-o">61s</td><td class="mid grp-o"><span class="badge ok">match</span></td></tr>
+    <tr><td class="num">9</td><td>spc-normality</td><td class="num grp-s">4</td><td class="num grp-s">15</td><td class="num grp-s">102s</td><td class="mid grp-s"><span class="badge ok">match</span></td><td class="num grp-o col-sep">4</td><td class="num grp-o">7</td><td class="num grp-o">52s</td><td class="mid grp-o"><span class="badge ok">match</span></td></tr>
+    <tr><td class="num">10</td><td>spc-cusum</td><td class="num grp-s">4</td><td class="num grp-s">7</td><td class="num grp-s">46s</td><td class="mid grp-s"><span class="badge ok">match</span></td><td class="num grp-o col-sep">4</td><td class="num grp-o">8</td><td class="num grp-o">77s</td><td class="mid grp-o"><span class="badge ok">match</span></td></tr>
+    <tr><td class="num">11</td><td>apc-drift</td><td class="num grp-s">3</td><td class="num grp-s">11</td><td class="num grp-s">104s</td><td class="mid grp-s"><span class="badge no">wrong</span></td><td class="num grp-o col-sep">3</td><td class="num grp-o">8</td><td class="num grp-o">78s</td><td class="mid grp-o"><span class="badge no">wrong</span></td></tr>
+    <tr><td class="num">12</td><td>apc-trend</td><td class="num grp-s">3</td><td class="num grp-s">3</td><td class="num grp-s">26s</td><td class="mid grp-s"><span class="badge ok">match</span></td><td class="num grp-o col-sep">3</td><td class="num grp-o">3</td><td class="num grp-o">35s</td><td class="mid grp-o"><span class="badge ok">match</span></td></tr>
+    <tr><td class="num">13</td><td>apc-recipe-compare</td><td class="num grp-s">3</td><td class="num grp-s">36</td><td class="num grp-s">24s</td><td class="mid grp-s"><span class="badge ok">match</span></td><td class="num grp-o col-sep">3</td><td class="num grp-o">12</td><td class="num grp-o">39s</td><td class="mid grp-o"><span class="badge ok">match</span></td></tr>
+    <tr><td class="num">14</td><td>patrol-status</td><td class="num grp-s">4</td><td class="num grp-s">17</td><td class="num grp-s">134s</td><td class="mid grp-s"><span class="badge ok">match</span></td><td class="num grp-o col-sep">4</td><td class="num grp-o">16</td><td class="num grp-o">127s</td><td class="mid grp-o"><span class="badge ok">match</span></td></tr>
+    <tr><td class="num">15</td><td>ooc-ranking</td><td class="num grp-s">5</td><td class="num grp-s">7</td><td class="num grp-s">69s</td><td class="mid grp-s"><span class="badge ok">match</span></td><td class="num grp-o col-sep">4</td><td class="num grp-o">6</td><td class="num grp-o">71s</td><td class="mid grp-o"><span class="badge ok">match</span></td></tr>
+    <tr><td class="num">16</td><td>ooc-pareto</td><td class="num grp-s">5</td><td class="num grp-s">14</td><td class="num grp-s">126s</td><td class="mid grp-s"><span class="badge ok">match</span></td><td class="num grp-o col-sep">5</td><td class="num grp-o">7</td><td class="num grp-o">71s</td><td class="mid grp-o"><span class="badge ok">match</span></td></tr>
+    <tr><td class="num">17</td><td>step-yield</td><td class="num grp-s">4</td><td class="num grp-s">6</td><td class="num grp-s">39s</td><td class="mid grp-s"><span class="badge ok">match</span></td><td class="num grp-o col-sep">4</td><td class="num grp-o">7</td><td class="num grp-o">58s</td><td class="mid grp-o"><span class="badge ok">match</span></td></tr>
+    <tr class="total">
+      <td></td><td>總計</td>
+      <td class="num grp-s">—</td><td class="num grp-s">229</td><td class="num grp-s">24.4 min</td><td class="mid grp-s">15 / 17</td>
+      <td class="num grp-o col-sep">—</td><td class="num grp-o">164</td><td class="num grp-o">23.5 min</td><td class="mid grp-o">16 / 17</td>
+    </tr>
+  </tbody>
+</table>
+<p class="legend">S = Sonnet 5 ｜ O = Opus 4.8。平均/案 — Sonnet：13.1 call · 86s ｜ Opus：10.1 call · 83s。Opus 少 28% phase-round（164 vs 229），更果斷。</p>
+
+<div class="callout key">
+  <b>品質差在哪：</b>唯一分出勝負的是 <code>spc-xbar-r-pair</code> —— <b>Opus 建對 xbar_r 管制圖</b>，Sonnet 退化成 line_chart（與 KIMI 當年同坑）。
+  兩者都漏 <code>apc-drift</code> 的 <code>weco_rules</code>，這是<b>系統共通弱點</b>（GLM 也常中），非模型特有 —— 該從 knowledge / block doc 修，不是換模型能解。
+</div>
+
+<!-- C -->
+<h2><span class="n">C</span>三方對照：值不值得從 GLM 升級</h2>
+<table>
+  <thead><tr><th>指標</th><th class="mid">GLM-5.2（現行 prod）</th><th class="mid">Sonnet 5</th><th class="mid">Opus 4.8</th></tr></thead>
+  <tbody>
+    <tr><td>嚴格通過</td><td class="mid">~14/17（12–15 變異）</td><td class="mid">15/17</td><td class="mid"><span class="badge win">16/17</span></td></tr>
+    <tr><td>功能可用（寬鬆）</td><td class="mid">17/17</td><td class="mid">~17/17</td><td class="mid">~17/17</td></tr>
+    <tr><td>跑完全套</td><td class="mid">28 min</td><td class="mid">24.4 min</td><td class="mid"><span class="badge win">23.5 min</span></td></tr>
+    <tr><td>LLM 呼叫 / round</td><td class="mid">163</td><td class="mid">229</td><td class="mid">164</td></tr>
+    <tr><td>Prompt cache</td><td class="mid"><span class="badge ok">40–58%</span></td><td class="mid"><span class="badge no">0.9%</span></td><td class="mid"><span class="badge no">0%</span></td></tr>
+    <tr><td><b>實測成本 / 17 案</b></td><td class="mid"><span class="badge ok">~$1–3</span></td><td class="mid">$18.7</td><td class="mid"><span class="badge no">$68.6</span></td></tr>
+    <tr><td>相對 GLM 成本倍數</td><td class="mid">1×</td><td class="mid">~9×</td><td class="mid">~30×</td></tr>
+  </tbody>
+</table>
+
+<div class="callout bad">
+  <b>成本現實 — cache 幾乎全滅：</b>Anthropic 模型走 OpenRouter 的 OpenAI-compat 路徑<b>拿不到 prompt cache</b>（實測 0–0.9%）。
+  那段大 observation prefix 每 round 全價重送，是成本爆高主因。
+  若改走 <b>direct Anthropic API</b>（EC2 已有 key）可恢復 native cache、成本約砍一半（Opus ~$30–35、Sonnet ~$8–10），但仍<b>遠高於 GLM</b>。
+</div>
+
+<!-- D -->
+<h2><span class="n">D</span>結論與建議</h2>
+<ul>
+  <li><b>Opus 4.8 = 品質天花板</b>：嚴格 16/17（唯一勝負手 xbar_r 做對）、最快、最果斷。代價是<b>約 GLM 的 30×</b>成本，且 cache 失效。</li>
+  <li><b>Sonnet 5 被 GLM 支配</b>：嚴格 15/17（與 KIMI 同兩個坑，xbar_r 還退化），成本卻是 GLM 的 ~9× —— <b>更貴又不更準，沒有升級理由</b>。</li>
+  <li><b>weco_rules 這類失分換模型救不了</b>：三個模型都中，屬系統層（knowledge / block doc）弱點，應從那裡修。</li>
+  <li><b>決策：GLM-5.2 續任 prod 預設</b>。Opus 僅在「難題（fleet / composite / 特定管制圖）人工升級」的 on-demand 場景才值得叫用，不當常駐 driver。</li>
+  <li><b>若真要引入 Opus 升級層</b>：務必走 <b>direct Anthropic API</b> 以恢復 prompt cache，並限縮到少數難案，否則帳單失控（單一 17-run 就 ~$68）。</li>
+</ul>
+
+<footer>
+  資料來源：SLASH-17 端到端 builder 驗證，各模型 1 rep（Sonnet 5 / Opus 4.8 經 OpenRouter；GLM-5.2 為 2026-06-25 bake-off baseline）。
+  成本由 build trace 的 <code>input/output/cache_*_input_tokens</code> 實算，套 OpenRouter Anthropic 近似 tier 單價（估值，實際依當時定價）。Generated 2026-07-01。
+</footer>
+
+</div>
+</body>
+</html>

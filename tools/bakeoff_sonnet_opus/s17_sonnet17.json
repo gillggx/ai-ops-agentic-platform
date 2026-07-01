@@ -1,0 +1,301 @@
+[
+  {
+    "key": "spc-trend",
+    "status": "finished",
+    "ok": true,
+    "n_nodes": 4,
+    "terminals": [
+      "block_line_chart"
+    ],
+    "blocks": [
+      "block_process_history",
+      "block_unnest",
+      "block_filter",
+      "block_line_chart"
+    ],
+    "missing_output_reason": null,
+    "sec": 32.6
+  },
+  {
+    "key": "spc-ooc",
+    "status": "finished",
+    "ok": true,
+    "n_nodes": 7,
+    "terminals": [
+      "block_data_view"
+    ],
+    "blocks": [
+      "block_list_objects",
+      "block_mcp_foreach",
+      "block_unnest",
+      "block_filter",
+      "block_groupby_agg",
+      "block_sort",
+      "block_data_view"
+    ],
+    "missing_output_reason": null,
+    "sec": 115.6
+  },
+  {
+    "key": "spc-cpk",
+    "status": "finished",
+    "ok": true,
+    "n_nodes": 7,
+    "terminals": [
+      "block_line_chart",
+      "block_line_chart"
+    ],
+    "blocks": [
+      "block_process_history",
+      "block_unnest",
+      "block_filter",
+      "block_line_chart",
+      "block_filter",
+      "block_filter",
+      "block_line_chart"
+    ],
+    "missing_output_reason": null,
+    "sec": 306.4
+  },
+  {
+    "key": "spc-multi-tool",
+    "status": "finished",
+    "ok": true,
+    "n_nodes": 5,
+    "terminals": [
+      "block_line_chart"
+    ],
+    "blocks": [
+      "block_process_history",
+      "block_filter",
+      "block_unnest",
+      "block_filter",
+      "block_line_chart"
+    ],
+    "missing_output_reason": null,
+    "sec": 62.1
+  },
+  {
+    "key": "spc-drift",
+    "status": "finished",
+    "ok": true,
+    "n_nodes": 6,
+    "terminals": [
+      "block_ewma_cusum",
+      "block_box_plot",
+      "block_probability_plot"
+    ],
+    "blocks": [
+      "block_process_history",
+      "block_unnest",
+      "block_filter",
+      "block_ewma_cusum",
+      "block_box_plot",
+      "block_probability_plot"
+    ],
+    "missing_output_reason": null,
+    "sec": 66.0
+  },
+  {
+    "key": "spc-xbar-r-pair",
+    "status": "finished",
+    "ok": true,
+    "n_nodes": 5,
+    "terminals": [
+      "block_line_chart"
+    ],
+    "blocks": [
+      "block_process_history",
+      "block_unnest",
+      "block_filter",
+      "block_weco_rules",
+      "block_line_chart"
+    ],
+    "missing_output_reason": null,
+    "sec": 56.8
+  },
+  {
+    "key": "spc-multi-step",
+    "status": "finished",
+    "ok": true,
+    "n_nodes": 2,
+    "terminals": [
+      "block_spc_panel"
+    ],
+    "blocks": [
+      "block_spc_panel",
+      "block_process_history"
+    ],
+    "missing_output_reason": null,
+    "sec": 115.1
+  },
+  {
+    "key": "spc-tool-box",
+    "status": "finished",
+    "ok": true,
+    "n_nodes": 4,
+    "terminals": [
+      "block_box_plot"
+    ],
+    "blocks": [
+      "block_process_history",
+      "block_unnest",
+      "block_filter",
+      "block_box_plot"
+    ],
+    "missing_output_reason": null,
+    "sec": 39.7
+  },
+  {
+    "key": "spc-normality",
+    "status": "finished",
+    "ok": true,
+    "n_nodes": 4,
+    "terminals": [
+      "block_probability_plot"
+    ],
+    "blocks": [
+      "block_process_history",
+      "block_unnest",
+      "block_filter",
+      "block_probability_plot"
+    ],
+    "missing_output_reason": null,
+    "sec": 102.2
+  },
+  {
+    "key": "spc-cusum",
+    "status": "finished",
+    "ok": true,
+    "n_nodes": 4,
+    "terminals": [
+      "block_ewma_cusum"
+    ],
+    "blocks": [
+      "block_process_history",
+      "block_unnest",
+      "block_filter",
+      "block_ewma_cusum"
+    ],
+    "missing_output_reason": null,
+    "sec": 46.0
+  },
+  {
+    "key": "apc-drift",
+    "status": "finished",
+    "ok": true,
+    "n_nodes": 3,
+    "terminals": [
+      "block_line_chart"
+    ],
+    "blocks": [
+      "block_process_history",
+      "block_select",
+      "block_line_chart"
+    ],
+    "missing_output_reason": null,
+    "sec": 103.7
+  },
+  {
+    "key": "apc-trend",
+    "status": "finished",
+    "ok": true,
+    "n_nodes": 3,
+    "terminals": [
+      "block_line_chart"
+    ],
+    "blocks": [
+      "block_process_history",
+      "block_select",
+      "block_line_chart"
+    ],
+    "missing_output_reason": null,
+    "sec": 26.0
+  },
+  {
+    "key": "apc-recipe-compare",
+    "status": "finished",
+    "ok": true,
+    "n_nodes": 3,
+    "terminals": [
+      "block_box_plot"
+    ],
+    "blocks": [
+      "block_process_history",
+      "block_select",
+      "block_box_plot"
+    ],
+    "missing_output_reason": null,
+    "sec": 23.9
+  },
+  {
+    "key": "patrol-status",
+    "status": "finished",
+    "ok": true,
+    "n_nodes": 4,
+    "terminals": [
+      "block_data_view"
+    ],
+    "blocks": [
+      "block_list_objects",
+      "block_mcp_foreach",
+      "block_select",
+      "block_data_view"
+    ],
+    "missing_output_reason": null,
+    "sec": 133.5
+  },
+  {
+    "key": "ooc-ranking",
+    "status": "finished",
+    "ok": true,
+    "n_nodes": 5,
+    "terminals": [
+      "block_bar_chart"
+    ],
+    "blocks": [
+      "block_process_history",
+      "block_filter",
+      "block_filter",
+      "block_groupby_agg",
+      "block_bar_chart"
+    ],
+    "missing_output_reason": null,
+    "sec": 68.5
+  },
+  {
+    "key": "ooc-pareto",
+    "status": "finished",
+    "ok": true,
+    "n_nodes": 5,
+    "terminals": [
+      "block_bar_chart"
+    ],
+    "blocks": [
+      "block_process_history",
+      "block_unnest",
+      "block_filter",
+      "block_groupby_agg",
+      "block_bar_chart"
+    ],
+    "missing_output_reason": null,
+    "sec": 125.7
+  },
+  {
+    "key": "step-yield",
+    "status": "finished",
+    "ok": true,
+    "n_nodes": 4,
+    "terminals": [
+      "block_bar_chart"
+    ],
+    "blocks": [
+      "block_process_history",
+      "block_filter",
+      "block_groupby_agg",
+      "block_bar_chart"
+    ],
+    "missing_output_reason": null,
+    "sec": 38.8
+  }
+]

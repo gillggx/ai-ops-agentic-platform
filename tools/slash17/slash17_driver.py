@@ -98,8 +98,17 @@ def run_one(key, tpl):
 
 
 def main():
+    # Optional subset filter: SLASH_CASES=spc-ooc,apc-drift,... runs only those
+    # (comma-separated keys). Unset → all 17. Used for the frontier-model bake-off
+    # to run just the hard/differentiating cases and keep premium-model cost down.
+    _want = os.environ.get("SLASH_CASES", "").strip()
+    cmds = CMDS
+    if _want:
+        keys = {k.strip() for k in _want.split(",") if k.strip()}
+        cmds = [(k, t) for (k, t) in CMDS if k in keys]
+        print(f"[META] SLASH_CASES filter → {len(cmds)} cases: {[k for k, _ in cmds]}", flush=True)
     results = []
-    for i, (key, tpl) in enumerate(CMDS, 1):
+    for i, (key, tpl) in enumerate(cmds, 1):
         r = run_one(key, tpl)
         results.append(r)
         ok = r.get("ok")
@@ -107,7 +116,7 @@ def main():
         term = ",".join(r.get("terminals") or []) or "-"
         mor = r.get("missing_output_reason")
         flag = "OK " if (st == "finished" and ok is not False) else "FAIL"
-        line = (f"[{i:2d}/17] {flag} {key:20s} status={st} ok={ok} "
+        line = (f"[{i:2d}/{len(cmds)}] {flag} {key:20s} status={st} ok={ok} "
                 f"nodes={r.get('n_nodes')} term={term} {r.get('sec')}s")
         if mor:
             line += f"  MISSING_OUTPUT={mor[:80]}"
@@ -118,7 +127,7 @@ def main():
         print(line, flush=True)
     # summary
     npass = sum(1 for r in results if r.get("status") == "finished" and r.get("ok") is not False)
-    print(f"\n==== SLASH-17 summary: {npass}/17 finished+ok ====", flush=True)
+    print(f"\n==== SLASH-17 summary: {npass}/{len(cmds)} finished+ok ====", flush=True)
     miss = [r["key"] for r in results if r.get("status") == "failed_missing_output"]
     if miss:
         print(f"  failed_missing_output (C2 fired): {miss}", flush=True)
