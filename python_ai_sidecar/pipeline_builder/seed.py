@@ -3375,8 +3375,11 @@ def _blocks() -> list[dict[str, Any]]:
                 "operator  (string, default='>=')  ∈ >= / > / = / < / <= / changed / drift\n"
                 "threshold (number, opt)   numeric 比較必填\n"
                 "baseline  (any, opt)      operator='changed' 必填；'drift' 必填\n"
+                "condition_label (string, opt) 人話標籤，描述被量測的東西 (e.g. 「最近 5 筆 OOC 次數」)；\n"
+                "                              alarm 詳情用它組『為什麼達標』。缺省時由 aggregate/column 自動推導。\n"
+                "severity  (string, opt)   LOW / MEDIUM / HIGH，此檢查觸發時 alarm 的嚴重度 (預設 MEDIUM)。\n"
                 "\n== Output ==\n"
-                "port: check (dataframe，1 row)：pass | value | threshold | operator | aggregate | column | note | evidence_rows\n"
+                "port: check (dataframe，1 row)：pass | value | threshold | operator | aggregate | column | note | label | severity | headline | evidence_rows\n"
                 "\n== Examples ==\n"
                 "- 最近 5 lot 內 OOC ≥ 3：upstream block_filter(spc_status='OOC') → step_check(aggregate='count', operator='>=', threshold=3)\n"
                 "- 平均 cd_bias > 2.5σ：upstream → step_check(aggregate='mean', column='cd_bias', operator='>', threshold=2.5)\n"
@@ -3406,12 +3409,20 @@ def _blocks() -> list[dict[str, Any]]:
                     },
                     "threshold": {"type": "number"},
                     "baseline":  {},
+                    # 2026-07-01 alarm metadata — surfaced in the alarm detail.
+                    "condition_label": {"type": "string"},
+                    "severity": {
+                        "type": "string",
+                        "enum": ["LOW", "MEDIUM", "HIGH"],
+                        "default": "MEDIUM",
+                    },
                 },
             },
             "examples": [
                 {
                     "label": "OOC count ≥ 3 in last 5 lots",
-                    "params": {"aggregate": "count", "operator": ">=", "threshold": 3},
+                    "params": {"aggregate": "count", "operator": ">=", "threshold": 3,
+                               "condition_label": "最近 5 筆 OOC 次數", "severity": "HIGH"},
                 },
                 {
                     "label": "recipe revision changed",

@@ -85,6 +85,22 @@ export type Alarm = {
   disposition_reason?: string | null;
   disposed_by?: number | null;
   disposed_at?: string | null;
+  // skills_v2: human trigger rule (skill.nl) + the block_step_check record
+  // ({label, value, threshold, operator, note, headline, severity, ...}).
+  trigger_condition?: string | null;
+  check_result?: CheckResult | null;
+};
+
+export type CheckResult = {
+  pass?: boolean;
+  value?: unknown;
+  threshold?: unknown;
+  operator?: string;
+  label?: string;
+  headline?: string;
+  note?: string;
+  severity?: string;
+  evidence_rows?: number;
 };
 
 export function timeAgo(iso: string): string {
@@ -268,6 +284,22 @@ function DRAccordion({ dr, index, total }: { dr: DiagnosticResult; index: number
 
 // ── Alarm Detail ─────────────────────────────────────────────
 
+/** Labelled section block used by the trigger tab (rule / why-met). */
+function AlarmSection({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{
+      border: "1px solid #e2e8f0", borderLeft: "4px solid #4f46e5",
+      borderRadius: 6, padding: "12px 14px", marginBottom: 12, background: "#fbfcff",
+    }}>
+      <div style={{
+        fontSize: 11, fontWeight: 700, color: "#4f46e5",
+        textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6,
+      }}>{label}</div>
+      {children}
+    </div>
+  );
+}
+
 export function AlarmDetail({ alarm }: { alarm: Alarm }) {
   const drs = alarm.diagnostic_results ?? [];
   const triggerDvs = alarm.trigger_data_views ?? [];
@@ -363,6 +395,30 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
 
       {detailTab === "trigger" && (
         <div style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 8, padding: 20 }}>
+          {/* 觸發條件（規則）— human rule from skill.nl */}
+          {alarm.trigger_condition && (
+            <AlarmSection label="觸發條件（規則）">
+              <div style={{ fontSize: 13, color: "#2d3748", whiteSpace: "pre-line", lineHeight: 1.6 }}>
+                {alarm.trigger_condition}
+              </div>
+            </AlarmSection>
+          )}
+
+          {/* 為什麼達標 — measured value vs threshold, from block_step_check */}
+          {alarm.check_result && (
+            <AlarmSection label="為什麼達標">
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#dc2626", marginBottom: 8 }}>
+                {alarm.check_result.headline ?? alarm.check_result.note ?? "條件達標"}
+              </div>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, color: "#4a5568", fontFamily: "ui-monospace, monospace" }}>
+                {alarm.check_result.label && <span>量測：<b>{alarm.check_result.label}</b></span>}
+                <span>實測值 = <b style={{ color: "#1d4ed8" }}>{String(alarm.check_result.value ?? "—")}</b></span>
+                <span>{alarm.check_result.operator ?? ""} 門檻 <b>{String(alarm.check_result.threshold ?? "—")}</b></span>
+                {alarm.check_result.evidence_rows != null && <span style={{ color: "#94a3b8" }}>掃描 {alarm.check_result.evidence_rows} 筆</span>}
+              </div>
+            </AlarmSection>
+          )}
+
           <div style={{
             background: "#fff",
             padding: 12, borderRadius: 4, marginBottom: 12,
@@ -374,7 +430,8 @@ export function AlarmDetail({ alarm }: { alarm: Alarm }) {
             <div style={{ fontWeight: 700, marginBottom: 4, color: triggered ? "#dc2626" : "#16a34a" }}>
               {triggered ? "🔴 條件達成 — 已觸發警報" : "🟢 條件未達成"}
             </div>
-            {triggerSummaryText && (
+            {/* Headline already shown in 為什麼達標 above; only show raw summary when no structured check exists. */}
+            {!alarm.check_result && triggerSummaryText && (
               <div style={{ color: "#4a5568", whiteSpace: "pre-line" }}>{triggerSummaryText}</div>
             )}
           </div>

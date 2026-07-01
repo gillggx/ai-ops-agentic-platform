@@ -56,6 +56,28 @@ def _coerce_numeric(value):
         return None
 _VALID_AGG = {"count", "sum", "mean", "max", "min", "last", "exists"}
 
+_OP_SYMBOL = {">=": "≥", ">": ">", "=": "=", "<": "<", "<=": "≤"}
+
+
+def _derive_label(aggregate: str, column) -> str:
+    """Human phrase for the measured value when the author gave no
+    condition_label. Kept generic — no case-specific rules."""
+    if aggregate == "count":
+        return "符合筆數"
+    if aggregate == "exists":
+        return "是否存在"
+    col = str(column) if column else "值"
+    return f"{col} 的 {aggregate}"
+
+
+def _fmt_value(value) -> str:
+    """Compact display of the measured scalar (trim float noise)."""
+    if isinstance(value, bool):
+        return "是" if value else "否"
+    if isinstance(value, float):
+        return str(int(value)) if value.is_integer() else f"{value:.4g}"
+    return str(value)
+
 
 class StepCheckBlockExecutor(BlockExecutor):
     block_id = "block_step_check"
@@ -93,6 +115,17 @@ class StepCheckBlockExecutor(BlockExecutor):
         column = params.get("column")
         threshold = params.get("threshold")
         baseline = params.get("baseline")
+
+        # Alarm-facing metadata (2026-07-01). condition_label is a human phrase
+        # for WHAT is being measured (e.g. "最近 5 筆 OOC 次數"); severity lets
+        # the skill author classify the alarm instead of the runner hardcoding
+        # MEDIUM. Both optional — a label is derived from aggregate/column when
+        # absent so existing skills gain a readable headline without re-authoring.
+        condition_label = (params.get("condition_label") or "").strip()
+        severity = (params.get("severity") or "MEDIUM").strip().upper()
+        if severity not in {"LOW", "MEDIUM", "HIGH"}:
+            severity = "MEDIUM"
+        label = condition_label or _derive_label(aggregate, column)
 
         # ── Compute scalar value from the dataframe ──────────────────
         # 2026-05-13: when upstream is empty AND aggregate isn't count/exists,
@@ -197,8 +230,16 @@ class StepCheckBlockExecutor(BlockExecutor):
                 message=f"compare failed ({type(ex).__name__}: {ex})",
             )
 
+        # Human, alarm-facing one-liner: "最近 5 筆 OOC 次數 = 3，≥ 門檻 2".
+        # For threshold ops we can phrase it; for changed/drift fall back to note.
+        if operator in _OP_SYMBOL and threshold is not None and _coerce_numeric(value) is not None:
+            headline = f"{label} = {_fmt_value(value)}，{_OP_SYMBOL[operator]} 門檻 {threshold}"
+        else:
+            headline = f"{label}：{note}"
+
         # SkillRunner reads this single-row DataFrame to fill skill_runs.step_results.
-        # Frontend's SuggestionPanel surfaces `note` to the user when the step fails.
+        # Frontend's SuggestionPanel surfaces `note` to the user when the step fails;
+        # the runner uses `headline` / `severity` to describe the alarm.
         result_df = pd.DataFrame([{
             "pass":      bool(passed),
             "value":     value,
@@ -207,6 +248,9 @@ class StepCheckBlockExecutor(BlockExecutor):
             "aggregate": aggregate,
             "column":    column,
             "note":      note,
+            "label":     label,
+            "severity":  severity,
+            "headline":  headline,
             "evidence_rows": int(len(df)),
         }])
         return {"check": result_df}

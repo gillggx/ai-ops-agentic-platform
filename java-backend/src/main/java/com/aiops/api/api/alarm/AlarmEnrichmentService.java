@@ -38,6 +38,8 @@ public class AlarmEnrichmentService {
 	private final SkillDefinitionRepository skillRepo;
 	private final PipelineRunRepository pipelineRunRepo;
 	private final PipelineRepository pipelineRepo;
+	private final com.aiops.api.domain.skill.SkillRunRepository skillRunRepo;
+	private final com.aiops.api.domain.skillv2.SkillV2Repository skillV2Repo;
 	private final ObjectMapper mapper;
 	private final ChartMiddleware chartMiddleware;
 
@@ -45,12 +47,16 @@ public class AlarmEnrichmentService {
 	                              SkillDefinitionRepository skillRepo,
 	                              PipelineRunRepository pipelineRunRepo,
 	                              PipelineRepository pipelineRepo,
+	                              com.aiops.api.domain.skill.SkillRunRepository skillRunRepo,
+	                              com.aiops.api.domain.skillv2.SkillV2Repository skillV2Repo,
 	                              ObjectMapper mapper,
 	                              ChartMiddleware chartMiddleware) {
 		this.execLogRepo = execLogRepo;
 		this.skillRepo = skillRepo;
 		this.pipelineRunRepo = pipelineRunRepo;
 		this.pipelineRepo = pipelineRepo;
+		this.skillRunRepo = skillRunRepo;
+		this.skillV2Repo = skillV2Repo;
 		this.mapper = mapper;
 		this.chartMiddleware = chartMiddleware;
 	}
@@ -163,7 +169,8 @@ public class AlarmEnrichmentService {
 				f.autoCheckRuns,
 				a.getAckedBy(), a.getAckedAt(),
 				a.getDisposition(), a.getDispositionReason(),
-				a.getDisposedBy(), a.getDisposedAt());
+				a.getDisposedBy(), a.getDisposedAt(),
+				f.triggerCondition, f.checkResult);
 	}
 
 	private AlarmDtos.Detail buildDetail(AlarmEntity a, Ctx ctx) {
@@ -182,7 +189,8 @@ public class AlarmEnrichmentService {
 				f.autoCheckRuns,
 				a.getAckedBy(), a.getAckedAt(),
 				a.getDisposition(), a.getDispositionReason(),
-				a.getDisposedBy(), a.getDisposedAt());
+				a.getDisposedBy(), a.getDisposedAt(),
+				f.triggerCondition, f.checkResult);
 	}
 
 	private EnrichedFields buildFields(AlarmEntity a, Ctx ctx) {
@@ -377,9 +385,60 @@ public class AlarmEnrichmentService {
 					r.getStatus(), dvs, chartsList, alert));
 		}
 
+		// skills_v2 path: the alarm links a skill_run (not execution_log /
+		// pb_pipeline_run), so none of the legacy branches above populate
+		// anything. Pull the "why it fired" check record + evidence
+		// data_views/charts from the run, plus the human trigger condition
+		// (skill.nl). skill_id is NULL on these alarms by design.
+		String triggerCondition = null;
+		Object checkResult = null;
+		if (a.getSkillRunId() != null) {
+			Optional<com.aiops.api.domain.skill.SkillRunEntity> runOpt = safeFindSkillRun(a.getSkillRunId());
+			if (runOpt.isPresent()) {
+				com.aiops.api.domain.skill.SkillRunEntity run = runOpt.get();
+				JsonNode sr = parseJsonNode(run.getStepResults());
+				if (sr != null && sr.isObject()) {
+					JsonNode checkNode = sr.get("check");
+					if (checkNode != null && checkNode.isObject()) checkResult = checkNode;
+					JsonNode rs = sr.get("result_summary");
+					if (rs != null && rs.isObject()) {
+						if (triggerDvs.isEmpty()) triggerDvs = extractDataViews(rs.get("data_views"));
+						if (charts.isEmpty()) {
+							JsonNode cn = rs.get("charts");
+							if (cn != null && cn.isArray()) {
+								List<Object> list = new java.util.ArrayList<>();
+								cn.forEach(list::add);
+								charts = list;
+							}
+						}
+					}
+				}
+				if (run.getSkillV2Id() != null) {
+					com.aiops.api.domain.skillv2.SkillV2Entity skv =
+							skillV2Repo.findById(run.getSkillV2Id()).orElse(null);
+					if (skv != null) triggerCondition = trimToNull(skv.getNl());
+				}
+			}
+		}
+
 		return new EnrichedFields(findings, outputSchema, diagFindings, diagOutputSchema,
 				charts, diagnosticResults, triggerDvs, diagnosticDvs, diagnosticCharts, diagnosticAlert,
-				autoCheckRuns);
+				autoCheckRuns, triggerCondition, checkResult);
+	}
+
+	private Optional<com.aiops.api.domain.skill.SkillRunEntity> safeFindSkillRun(Long id) {
+		try {
+			return skillRunRepo.findById(id);
+		} catch (RuntimeException ex) {
+			log.debug("alarm enrichment: skill_run lookup failed for id={}: {}", id, ex.getMessage());
+			return Optional.empty();
+		}
+	}
+
+	private static String trimToNull(String s) {
+		if (s == null) return null;
+		String t = s.trim();
+		return t.isEmpty() ? null : t;
 	}
 
 	private Optional<PipelineRunEntity> safeFindRun(Long id) {
@@ -609,5 +668,6 @@ public class AlarmEnrichmentService {
 	                              List<AlarmDtos.DataView> diagnosticDataViews,
 	                              List<Object> diagnosticCharts,
 	                              Object diagnosticAlert,
-	                              List<AlarmDtos.AutoCheckRun> autoCheckRuns) {}
+	                              List<AlarmDtos.AutoCheckRun> autoCheckRuns,
+	                              String triggerCondition, Object checkResult) {}
 }

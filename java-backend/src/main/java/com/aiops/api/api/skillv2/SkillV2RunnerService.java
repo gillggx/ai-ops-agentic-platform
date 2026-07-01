@@ -80,6 +80,7 @@ public class SkillV2RunnerService {
 
 		long t0 = System.currentTimeMillis();
 		Boolean verdict = null;
+		Map<String, Object> check = null;
 		Long alarmId = null;
 		try {
 			if (sk.getPipelineId() == null) {
@@ -102,8 +103,9 @@ public class SkillV2RunnerService {
 					.bodyToMono(Map.class)
 					.block();
 
-			verdict = extractVerdict(result);
-			run.setStepResults(JsonUtils.safeWrite(mapper, summarise(result, verdict)));
+			check = extractCheck(result);
+			verdict = check == null ? null : asBool(check.get("pass"));
+			run.setStepResults(JsonUtils.safeWrite(mapper, summarise(result, verdict, check)));
 			run.setStatus("success");
 
 			// Alarm decision — only patrol skills with a verdict node emit.
@@ -119,8 +121,13 @@ public class SkillV2RunnerService {
 							? String.valueOf(toolId) : null;
 					if (toolLabel != null) a.setEquipmentId(toolLabel);
 					a.setTitle(sk.getName() + (toolLabel != null ? " · " + toolLabel : "") + " — 條件達標");
-					a.setSummary(sk.getOutcome() != null ? sk.getOutcome() : sk.getNl());
-					a.setSeverity("MEDIUM");
+					// Describe WHY it fired (measured vs threshold) from the check
+					// record, not the outcome category. Severity is authored on
+					// the check block; fall back to MEDIUM.
+					String headline = check == null ? null : trimToNull(check.get("headline"));
+					a.setSummary(headline != null ? headline
+							: sk.getOutcome() != null ? sk.getOutcome() : sk.getNl());
+					a.setSeverity(normalizeSeverity(check == null ? null : check.get("severity")));
 					a.setStatus("active");
 					a.setEventTime(OffsetDateTime.now());
 					a = alarmRepo.save(a);
@@ -197,8 +204,16 @@ public class SkillV2RunnerService {
 	 * every node's preview rows for that field. Returns null if no verdict node
 	 * ran (e.g. a datacheck pipeline with no step_check).
 	 */
+	/**
+	 * Find the block_step_check output row (the whole record, not just the
+	 * boolean). The verdict node emits a single-row "check" dataframe carrying
+	 * {pass, value, threshold, operator, note, label, severity, headline,
+	 * evidence_rows}; we scan every node's preview rows for the `pass` field and
+	 * return that row so the runner can describe WHY the alarm fired. Null when
+	 * no verdict node ran (e.g. a datacheck pipeline with no step_check).
+	 */
 	@SuppressWarnings("unchecked")
-	private Boolean extractVerdict(Map<String, Object> result) {
+	private Map<String, Object> extractCheck(Map<String, Object> result) {
 		if (result == null) return null;
 		Object dataObj = result.getOrDefault("data", result);
 		Map<String, Object> data = JsonUtils.asMap(dataObj);
@@ -213,21 +228,38 @@ public class SkillV2RunnerService {
 				Object rows = blob.get("rows");
 				if (!(rows instanceof List<?> rl) || rl.isEmpty()) continue;
 				Map<String, Object> row0 = JsonUtils.asMap(rl.get(0));
-				if (row0.containsKey("pass")) {
-					Object p = row0.get("pass");
-					if (p instanceof Boolean b) return b;
-					return Boolean.parseBoolean(String.valueOf(p));
-				}
+				if (row0.containsKey("pass")) return row0;
 			}
 		}
 		return null;
 	}
 
-	private Map<String, Object> summarise(Map<String, Object> result, Boolean verdict) {
+	private static Boolean asBool(Object p) {
+		if (p == null) return null;
+		if (p instanceof Boolean b) return b;
+		return Boolean.parseBoolean(String.valueOf(p));
+	}
+
+	private static String trimToNull(Object o) {
+		if (o == null) return null;
+		String s = String.valueOf(o).trim();
+		return s.isEmpty() ? null : s;
+	}
+
+	/** LOW/MEDIUM/HIGH from the check record; anything else → MEDIUM. */
+	private static String normalizeSeverity(Object sev) {
+		String s = sev == null ? "" : String.valueOf(sev).trim().toUpperCase();
+		return (s.equals("LOW") || s.equals("HIGH")) ? s : "MEDIUM";
+	}
+
+	private Map<String, Object> summarise(Map<String, Object> result, Boolean verdict, Map<String, Object> check) {
 		Map<String, Object> data = JsonUtils.asMap(result.getOrDefault("data", result));
 		Map<String, Object> out = new java.util.HashMap<>();
 		out.put("status", result.get("status"));
 		out.put("verdict", verdict);
+		// Persist the check record so the alarm detail can render "為什麼達標"
+		// (measured value vs threshold) without re-running the pipeline.
+		if (check != null) out.put("check", check);
 		Object summary = data.get("result_summary");
 		if (summary != null) out.put("result_summary", summary);
 		return out;

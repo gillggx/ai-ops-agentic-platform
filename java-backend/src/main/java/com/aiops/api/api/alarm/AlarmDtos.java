@@ -24,7 +24,10 @@ public final class AlarmDtos {
 	                      // Phase 12 dispose fields
 	                      Long ackedBy, OffsetDateTime ackedAt,
 	                      String disposition, String dispositionReason,
-	                      Long disposedBy, OffsetDateTime disposedAt) {}
+	                      Long disposedBy, OffsetDateTime disposedAt,
+	                      // skills_v2: human trigger condition (skill.nl) + the
+	                      // block_step_check record ("為什麼達標": measured vs threshold).
+	                      String triggerCondition, Object checkResult) {}
 
 	public record Detail(Long id, Long skillId, String triggerEvent, String equipmentId,
 	                     String lotId, String step, OffsetDateTime eventTime,
@@ -42,7 +45,10 @@ public final class AlarmDtos {
 	                     // Phase 12 dispose fields
 	                     Long ackedBy, OffsetDateTime ackedAt,
 	                     String disposition, String dispositionReason,
-	                     Long disposedBy, OffsetDateTime disposedAt) {}
+	                     Long disposedBy, OffsetDateTime disposedAt,
+	                     // skills_v2: human trigger condition (skill.nl) + the
+	                     // block_step_check record ("為什麼達標": measured vs threshold).
+	                     String triggerCondition, Object checkResult) {}
 
 	/** POST /api/v1/alarms/{id}/dispose body. */
 	public record DisposeRequest(String disposition, String reason) {}
@@ -73,7 +79,8 @@ public final class AlarmDtos {
 				List.of(), List.of(), List.of(), null, List.of(),
 				e.getAckedBy(), e.getAckedAt(),
 				e.getDisposition(), e.getDispositionReason(),
-				e.getDisposedBy(), e.getDisposedAt());
+				e.getDisposedBy(), e.getDisposedAt(),
+				null, null);
 	}
 
 	static Detail detailOf(AlarmEntity e) {
@@ -86,6 +93,7 @@ public final class AlarmDtos {
 				List.of(), List.of(), List.of(), null, List.of(),
 				e.getAckedBy(), e.getAckedAt(),
 				e.getDisposition(), e.getDispositionReason(),
-				e.getDisposedBy(), e.getDisposedAt());
+				e.getDisposedBy(), e.getDisposedAt(),
+				null, null);
 	}
 }
