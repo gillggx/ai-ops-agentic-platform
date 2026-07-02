@@ -172,7 +172,8 @@ class EpisodeRecorder:
                 "self_assessment": self_assessment,
                 "plan_json": plan_json,
                 "cost_json": self._cost,
-                "trace_file": trace_file,
+                # tracer hands us a PosixPath — coerce, or json serialization dies
+                "trace_file": str(trace_file) if trace_file is not None else None,
                 "finished_at": _now_iso(),
             })
         except Exception as ex:  # noqa: BLE001
