@@ -326,12 +326,72 @@
   </tbody>
 </table>
 
-<!-- 12 open -->
-<h2><span class="n">12</span>接下來要討論</h2>
+<!-- 12 B -->
+<h2><span class="n">12</span>B — 4 Agent 的記錄行為：情境 · Timing · 如何 Cue</h2>
+<div class="callout key">
+  <b>核心原則:</b>「<b>何時記錄</b>」由 graph 的 deterministic 事件決定,不靠 LLM 自由意志(否則會時記時不記)。
+  LLM 只負責「<b>寫什麼</b>」—— 填一個結構化 memo 模板;class 由決策樹選。這守住 flow-in-graph,agent 不會忘記記、也不會亂記。
+</div>
+<pre style="background:#0f172a;color:#e2e8f0;border-radius:9px;padding:12px 14px;font-size:12px;font-family:ui-monospace,Menlo,monospace;overflow:auto;line-height:1.5;">共用 memo 模板（借鏡 Claude Code memory 的 Why + How-to-apply）：
+{ class, scope, tag(applies_to), 情境, 內容/規則, why, from(build_id | feedback_id) }
+correction 特化：{ 情境, 原本錯在哪, 正確做法, why, tag: plan|execute }</pre>
+<table>
+  <thead><tr><th>Agent</th><th>觸發事件(graph 偵測)</th><th>timing</th><th>cue 給 LLM 的窄任務</th></tr></thead>
+  <tbody>
+    <tr><td><b>Planner</b></td><td>user 在 confirm gate 改/否決 plan</td><td>重規劃前</td><td>「user 把 [X] 改成 [Y] → 決策樹分類 → 填模板」<b>(fast)</b></td></tr>
+    <tr><td>Planner</td><td>裁判 Builder 結果 = 錯</td><td>裁判時</td><td>自動 log episodic(沿用裁判 reason)</td></tr>
+    <tr><td><b>Builder</b></td><td>猜 param 被拒 → 改後才過</td><td>phase 過關時</td><td>「block X param Y:原猜 [?]、正解 [Z]、why → 寫 <b>doc 備忘</b>(錨 block X)」</td></tr>
+    <tr><td>Builder</td><td>inspect 發現實際欄位 ≠ doc 所述</td><td>inspect 時</td><td>「doc 說 [X] 實際 [Y] → doc 備忘」</td></tr>
+    <tr><td>Builder</td><td>phase / build 收尾</td><td>每 phase + build 末</td><td>自動 log 序列 episodic(blocks+params+verdict)</td></tr>
+    <tr><td><b>Repair</b></td><td>收到每則 user feedback</td><td>每則</td><td>自動 log episodic(feedback + 當下狀態)</td></tr>
+    <tr><td>Repair</td><td>定位「原本哪裡錯」根因</td><td>修正收斂時</td><td>「user 要 [A]、現果 [B]、差在 [根因] → 寫 correction,tag planner/builder」<b>(fast)</b></td></tr>
+    <tr><td><b>Supervisor</b></td><td>排程(週期)+ 門檻事件(矛盾 / 備忘過門檻)</td><td>週期 + 事件</td><td>「給你這批 episodic+備忘+召回統計 → 提 6 操作草案(帶理由+風險)」</td></tr>
+  </tbody>
+</table>
+
+<!-- 13 C -->
+<h2><span class="n">13</span>C — Build Trace 要什麼（現行不足，尤其缺 User Feedback）</h2>
+<p class="desc">現行 <code>BuildTracer</code> 是 <b>LLM-call log</b>(每 call 的 node/prompt/token/verdict)—— debug LLM 很好,餵 Supervisor 學習卻缺三塊致命的。</p>
+<div class="callout warn">
+  <b>你點名的關鍵場景:</b>Planner &amp; Builder 以為做好了(<code>ok=true</code>、verifier 過、Planner 判對),但 user 說「不是我要的」→ Supervisor 檢討。<br>
+  要抓到它,trace 必須同時記兩個相反訊號並連結:<b>系統自認 OK</b> ＋ <b>user 交付後否決</b> → 派生出 <b>divergence</b>。
+  當「所有內部訊號都說 OK、user 卻不買單」= <b>不是執行錯,是意圖沒抓對</b>(plan 抓錯需求 / 漏呈現偏好 / 領域假設錯)—— 這是單看 verifier 永遠看不到的最高價值訊號。
+</div>
+<pre style="background:#0f172a;color:#e2e8f0;border-radius:9px;padding:12px 14px;font-size:12px;font-family:ui-monospace,Menlo,monospace;overflow:auto;line-height:1.55;">Trace 要從「LLM-call log」升級成「Episode 記錄」：
+Episode {
+  ids:        build_id · user_id · pipeline_id · scope(skill/tool/recipe)
+  intent:     原始 user 需求
+  plan:       proposed → accepted        (+ diff = plan_feedback)
+  build:      [per-phase: blocks, params, verifier_verdicts,
+               reject→fix 事件, inspect_mismatches]     ← 餵 doc 備忘
+  self_assessment: ok · verifier_passed · planner_judge  ← 系統自認
+  delivery:   result summary (charts / tables)
+  user_feedback: [{ stage: plan|delivery|repair,
+                    text, sentiment: accept|edit|reject, target }]  ← 關鍵新增
+  repair:     [feedback → root_cause → fix]
+  divergence: self_assessment=ok  BUT  user=reject       ← 派生 · 金礦
+}
+現行 llm_calls trace = Episode 底下一層(debug 用);Supervisor 主吃 Episode。</pre>
+<table>
+  <thead><tr><th style="width:20px">#</th><th>缺口</th><th>補什麼</th><th>難度</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><b>交付後 user feedback channel</b></td><td>結構化 feedback intake(accept/edit/reject + text + 連 build_id)</td><td>中(新 UI + 表)</td></tr>
+    <tr><td>2</td><td><b>self vs user divergence</b></td><td>派生欄位:比對 self_assessment 與 user 裁決</td><td>低(有 #1 就能算)</td></tr>
+    <tr><td>3</td><td>Planner 裁判 verdict 入 trace</td><td>把「判 Builder 對/錯」寫進 Episode</td><td>低</td></tr>
+    <tr><td>4</td><td>per-block 歸因(reject→fix / inspect mismatch)</td><td>從 llm_calls 抽成結構化 per-block 事件</td><td>中</td></tr>
+    <tr><td>5</td><td>scope / linkage keys</td><td>build_id/user_id/pipeline_id/scope 串起整段</td><td>低</td></tr>
+  </tbody>
+</table>
+<div class="callout key">
+  <b>#1(交付後 feedback)是龍頭。</b>沒有它,「以為做好了但 user 不要」永遠進不了 Supervisor,整個學習迴路斷在這。它也正是 B 表裡 Planner/Repair fast-path 寫入的<b>來源事件</b>。
+</div>
+
+<!-- 14 Q4 -->
+<h2><span class="n">14</span>Q4 — 落地順序（建議）</h2>
 <div class="qbox">
-  <b>B · 4 agent 的記錄行為</b>　各 agent 在什麼情境、什麼 timing 觸發記錄,以及<b>如何提示(cue)</b>它們去記 —— 設計中。<br>
-  <b>C · Build trace 要什麼</b>　現行 trace 不足以餵 Supervisor;要補齊(尤其 <b>user feedback</b>:Planner/Builder 以為做好了、user 說「不是我要的」→ Supervisor 檢討)—— 討論中。<br>
-  <b>Q4 · 落地順序</b>　待 B/C 定案再排。
+  <b>地基先行:</b>C 的 <b>#1 feedback channel + #2 divergence</b> 排最前面(比拆 agent 還前)—— 沒有「user 滿不滿意」訊號,拆再多 agent 也學不到東西。<br>
+  <b>建議序:</b>①C#1+#2(feedback + divergence) → ②agent_knowledge 加 <code>class</code> 欄 + <code>block_doc_memos</code> 表 → ③Planner 的 preference/presentation fast-path(最有感) → ④Builder doc 備忘 + Repair correction → ⑤Supervisor 週期蒸餾與 curation。<br>
+  <b>每步驗收:</b>純加法、SLASH-17 零回歸;Supervisor(⑤)最後上,前面先把「料」記齊。
 </div>
 
 <footer>
