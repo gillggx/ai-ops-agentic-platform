@@ -365,6 +365,30 @@ class BuildGraphState(TypedDict, total=False):
     # dispatch continues. Shape = ErrorEnvelope dict.
     last_op_issue: Optional[dict]
 
+    # ── Multi-agent collaboration signals (Phase 0, 2026-07-02) ───────
+    # Spec: docs/MULTI_AGENT_PHASE0_SPEC.md §2. Written by GRAPH code only
+    # (never by the LLM); conditional edges read them for routing. Phase 0
+    # adds the fields with NO writers — the semantic-judge / REPLAN / repair
+    # loops that populate them arrive in Phase 2+.
+    #
+    # ma_handoff — Builder→Planner trigger (§5.3). Shape:
+    #   {"kind": "PHASE_DONE"|"STUCK"|"INFEASIBLE"|"AMBIGUOUS",
+    #    "phase_id": str, "detail": str}
+    ma_handoff: Optional[dict]
+    # ma_planner_verdict — Planner's ruling on a completed phase (§5.4).
+    #   {"verdict": "APPROVE"|"REVISE"|"REPLAN", "phase_id": str,
+    #    "feedback": str}
+    ma_planner_verdict: Optional[dict]
+    # ma_repair_ticket — Repair's intake (§6). Shape:
+    #   {"source": "in_build"|"post_delivery", "feedback": str,
+    #    "diagnosis": "build_level"|"plan_level"|None}
+    ma_repair_ticket: Optional[dict]
+    # Collaboration budget counters (§2). react_rounds / revise_attempts
+    # deliberately NOT duplicated here — they already live as
+    # v30_phase_round / v30_refine_cycle+reflect counters above.
+    ma_replan_count: int
+    ma_repair_iterations: int
+
     # ── Execution trace (Phase F, 2026-05-13) ─────────────────────────
     # call_tool_node populates after every successful connect/add op:
     #   exec_trace[logical_id] = {
@@ -448,4 +472,10 @@ def initial_state(
         v30_replan_hint=None,
         v30_judge_replan_count=0,
         v30_verify_now=False,
+        # multi-agent collaboration (Phase 0 — fields only, no writers yet)
+        ma_handoff=None,
+        ma_planner_verdict=None,
+        ma_repair_ticket=None,
+        ma_replan_count=0,
+        ma_repair_iterations=0,
     )
