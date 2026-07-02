@@ -72,7 +72,7 @@
   <div class="kic">LLM 選型評估 · Builder Agent · 自研 Agent 升級評估</div>
   <h1>Sonnet 5 vs Opus 4.8</h1>
   <div class="sub">以 SLASH-17（17 條 production builder 指令）端到端驗證，對照現行 prod 模型 GLM-5.2 · 2026-07-01</div>
-  <div class="verdict">結論：<b>Opus 4.8 品質最高（嚴格 16/17）但成本約 GLM 的 30×</b>；Sonnet 5 被 GLM 支配（更貴卻不更準）。<b>GLM-5.2 續任預設</b>，premium 僅作難題升級層。</div>
+  <div class="verdict">結論：<b>Opus 4.8 品質最高（嚴格 16/17）但成本約 GLM 的 20×</b>（direct+cache 實測）；Sonnet 5 被 GLM 支配（更貴卻不更準）。<b>GLM-5.2 續任預設</b>，premium 僅作難題升級層。</div>
 </header>
 
 <div class="cards">
@@ -82,12 +82,12 @@
   <div class="card"><div class="lbl">跑完全套耗時</div>
     <div class="val">23.5<small>min</small> <span style="color:var(--mut);font-size:15px;">vs</span> 24.4<small>min</small></div>
     <div class="delta win">兩者都比 GLM（28 min）快</div></div>
-  <div class="card"><div class="lbl">實測成本 / 17 案</div>
-    <div class="val">$68.6 <span style="color:var(--mut);font-size:15px;">vs</span> $18.7</div>
-    <div class="delta warn">GLM 約 $1–3 → Opus ~30× · Sonnet ~9×</div></div>
-  <div class="card"><div class="lbl">Prompt cache 命中</div>
-    <div class="val">0% <span style="color:var(--mut);font-size:15px;">/</span> 0.9%</div>
-    <div class="delta warn">Anthropic 走 OpenRouter 幾乎無 cache</div></div>
+  <div class="card"><div class="lbl">公平成本 / 17 案*</div>
+    <div class="val">$52 <span style="color:var(--mut);font-size:15px;">vs</span> $11.6</div>
+    <div class="delta warn">direct+cache 實測 · GLM $1–3 → Opus ~20× · Sonnet ~5×</div></div>
+  <div class="card"><div class="lbl">Prompt cache 命中*</div>
+    <div class="val">52% <span style="color:var(--mut);font-size:15px;">/</span> 63%</div>
+    <div class="delta win">direct Anthropic 補測（原走 OpenRouter 為 0%）</div></div>
 </div>
 
 <!-- A -->
@@ -155,31 +155,35 @@
     <tr><td>功能可用（寬鬆）</td><td class="mid">17/17</td><td class="mid">~17/17</td><td class="mid">~17/17</td></tr>
     <tr><td>跑完全套</td><td class="mid">28 min</td><td class="mid">24.4 min</td><td class="mid"><span class="badge win">23.5 min</span></td></tr>
     <tr><td>LLM 呼叫 / round</td><td class="mid">163</td><td class="mid">229</td><td class="mid">164</td></tr>
-    <tr><td>Prompt cache</td><td class="mid"><span class="badge ok">40–58%</span></td><td class="mid"><span class="badge no">0.9%</span></td><td class="mid"><span class="badge no">0%</span></td></tr>
-    <tr><td><b>實測成本 / 17 案</b></td><td class="mid"><span class="badge ok">~$1–3</span></td><td class="mid">$18.7</td><td class="mid"><span class="badge no">$68.6</span></td></tr>
-    <tr><td>相對 GLM 成本倍數</td><td class="mid">1×</td><td class="mid">~9×</td><td class="mid">~30×</td></tr>
+    <tr><td>Prompt cache*</td><td class="mid"><span class="badge ok">40–58%</span></td><td class="mid"><span class="badge ok">63%</span></td><td class="mid"><span class="badge ok">52%</span></td></tr>
+    <tr><td><b>公平成本 / 17 案*</b></td><td class="mid"><span class="badge ok">~$1–3</span></td><td class="mid">$11.6</td><td class="mid"><span class="badge no">$52</span></td></tr>
+    <tr><td>相對 GLM 成本倍數</td><td class="mid">1×</td><td class="mid">~5×</td><td class="mid">~20×</td></tr>
   </tbody>
 </table>
 
 <div class="callout bad">
-  <b>成本現實 — cache 幾乎全滅：</b>Anthropic 模型走 OpenRouter 的 OpenAI-compat 路徑<b>拿不到 prompt cache</b>（實測 0–0.9%）。
-  那段大 observation prefix 每 round 全價重送，是成本爆高主因。
-  若改走 <b>direct Anthropic API</b>（EC2 已有 key）可恢復 native cache、成本約砍一半（Opus ~$30–35、Sonnet ~$8–10），但仍<b>遠高於 GLM</b>。
+  <b>bake-off 當日 Anthropic 兩個無 cache（不公平）：</b>走 OpenRouter 的 OpenAI-compat 路徑會抹掉 cache 斷點（實測 0–0.9%），大 observation prefix 每 round 全價重送 → 當日成本 Opus $68.6 / Sonnet $18.7。
+</div>
+<div class="callout" style="background:var(--blue-bg);border:1px solid var(--blue-bd)">
+  <b>* 2026-07-02 補測（direct Anthropic API，cache 全開）：</b>
+  Opus cache <b>51.8% → $52.10</b>（−24%）；Sonnet cache <b>63.2% → $11.58</b>（−38%）。
+  cache 確實生效但沒砍半 —— 17 個獨立 build 各自 cold-start 快取、付 cache-write（Opus $18.75/M），跨 build 超過 5 分 TTL 無法共用;production 連續 session 會攤更好。
+  <b>結論不變:即使給最有利的 direct+cache，Opus 仍 ~20× GLM、Sonnet ~5× GLM。</b>Opus direct 還快 ~24%（18 vs 23.5 分）。
 </div>
 
 <!-- D -->
 <h2><span class="n">D</span>結論與建議</h2>
 <ul>
-  <li><b>Opus 4.8 = 品質天花板</b>：嚴格 16/17（唯一勝負手 xbar_r 做對）、最快、最果斷。代價是<b>約 GLM 的 30×</b>成本，且 cache 失效。</li>
-  <li><b>Sonnet 5 被 GLM 支配</b>：嚴格 15/17（與 KIMI 同兩個坑，xbar_r 還退化），成本卻是 GLM 的 ~9× —— <b>更貴又不更準，沒有升級理由</b>。</li>
+  <li><b>Opus 4.8 = 品質天花板</b>：嚴格 16/17（唯一勝負手 xbar_r 做對）、最快、最果斷。代價是 direct+cache 實測<b>約 GLM 的 20×</b>成本。</li>
+  <li><b>Sonnet 5 被 GLM 支配</b>：嚴格 15/17（與 KIMI 同兩個坑，xbar_r 還退化），direct+cache 成本仍是 GLM 的 ~5× —— <b>更貴又不更準，沒有升級理由</b>。</li>
   <li><b>weco_rules 這類失分換模型救不了</b>：三個模型都中，屬系統層（knowledge / block doc）弱點，應從那裡修。</li>
   <li><b>決策：GLM-5.2 續任 prod 預設</b>。Opus 僅在「難題（fleet / composite / 特定管制圖）人工升級」的 on-demand 場景才值得叫用，不當常駐 driver。</li>
-  <li><b>若真要引入 Opus 升級層</b>：務必走 <b>direct Anthropic API</b> 以恢復 prompt cache，並限縮到少數難案，否則帳單失控（單一 17-run 就 ~$68）。</li>
+  <li><b>若真要引入 Opus 升級層</b>：務必走 <b>direct Anthropic API</b> 以恢復 prompt cache（direct $52 vs OpenRouter 無 cache $68.6），並限縮到少數難案,否則帳單失控。</li>
 </ul>
 
 <footer>
-  資料來源：SLASH-17 端到端 builder 驗證，各模型 1 rep（Sonnet 5 / Opus 4.8 經 OpenRouter；GLM-5.2 為 2026-06-25 bake-off baseline）。
-  成本由 build trace 的 <code>input/output/cache_*_input_tokens</code> 實算，套 OpenRouter Anthropic 近似 tier 單價（估值，實際依當時定價）。Generated 2026-07-01。
+  資料來源：SLASH-17 端到端 builder 驗證，各模型 1 rep。品質/速度為 2026-07-01 OpenRouter 輪;<b>*成本/cache 為 2026-07-02 direct Anthropic + cache 補測（公平值）</b>,原 OpenRouter 無 cache 為 $68.6 / $18.7。GLM-5.2 為 2026-06-25 baseline。
+  成本由 build trace 的 <code>input/output/cache_*_input_tokens</code> 實算,套各家近似 tier 單價（估值）。Updated 2026-07-02。
 </footer>
 
 </div>
