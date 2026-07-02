@@ -61,6 +61,11 @@ OPUS={"spc-trend":(12,135,1),"spc-ooc":(24,169,1),"spc-cpk":(10,101,1),"spc-mult
 "spc-drift":(12,115,1),"spc-xbar-r-pair":(8,79,1),"spc-multi-step":(6,50,1),"spc-tool-box":(7,61,1),
 "spc-normality":(7,52,1),"spc-cusum":(8,77,1),"apc-drift":(8,78,0),"apc-trend":(3,35,1),
 "apc-recipe-compare":(12,39,1),"patrol-status":(16,127,1),"ooc-ranking":(6,71,1),"ooc-pareto":(7,71,1),"step-yield":(7,58,1)}
+# 第 5 種:同一顆 GLM-5.2、跑在 Multi-Agent Phase 0 重構後的 builder(2026-07-02 p0_gate)
+P0={"spc-trend":(6,25,1),"spc-ooc":(30,116,1),"spc-cpk":(34,284,1),"spc-multi-tool":(12,50,1),
+"spc-drift":(17,79,1),"spc-xbar-r-pair":(9,58,1),"spc-multi-step":(8,31,1),"spc-tool-box":(7,113,1),
+"spc-normality":(9,29,1),"spc-cusum":(9,46,1),"apc-drift":(12,134,1),"apc-trend":(3,17,1),
+"apc-recipe-compare":(34,19,1),"patrol-status":(39,158,1),"ooc-ranking":(6,73,1),"ooc-pareto":(7,56,1),"step-yield":(9,49,1)}
 
 def header(s,kicker,title,accent,sub=None):
     rect(s,0,0,13.333,1.12,NAVY); rect(s,0,1.12,13.333,0.06,accent)
@@ -110,7 +115,7 @@ def model_slide(n,name,data,accent,accentbg,metric_word,metrics,verdict,vfg,vbg,
 s=slide(); rect(s,0,0,13.333,7.5,NAVY); rect(s,0,4.6,13.333,0.05,BLUE)
 settext(box(s,0.9,1.7,11.6,2.6).text_frame,[
     para([seg("Builder Agent · LLM 選型 · 四方彙總",14,True,SKY)],sa=10),
-    para([seg("KIMI · GLM-5.2 · Sonnet 5 · Opus 4.8",34,True,WHITE)],sa=4),
+    para([seg("KIMI · GLM-5.2 · Sonnet 5 · Opus 4.8 · MA-P0",32,True,WHITE)],sa=4),
     para([seg("SLASH-17 端到端 bake-off — 每個模型各一頁完整結果",18,False,RGBColor(0xCE,0xDC,0xF5))],sa=0)])
 settext(box(s,0.9,4.8,11.6,1.4).text_frame,[
     para([seg("結論:",13,True,WHITE),seg("GLM-5.2 = cost-right 預設(品質接近頂級、成本最低、cache 唯一有效)",13,False,RGBColor(0xCE,0xDC,0xF5))],sa=4),
@@ -118,18 +123,18 @@ settext(box(s,0.9,4.8,11.6,1.4).text_frame,[
 
 # ---- 2 summary
 s=slide(); header(s,"總表","四方一眼對照",BLUE)
-hdr=["指標","KIMI K2.5","GLM-5.2","Sonnet 5","Opus 4.8"]
+hdr=["指標","KIMI K2.5","GLM-5.2","Sonnet 5","Opus 4.8","GLM@MA-P0"]
 rows=[
- ("嚴格通過","~14/17","~14/17","15/17","16/17"),
- ("寬鬆(功能可用)","15/17","17/17","~17/17","~17/17"),
- ("跑完全套","73 min","28 min","24.4 min","23.5 min"),
- ("LLM 呼叫/round","229","163","229","164"),
- ("Prompt cache","0%","40–58%","63%*","52%*"),
- ("公平成本/17*","~$3–4","~$1–3","$11.6*","$52*"),
- ("相對 GLM","~1.5×","1×","~5×","~20×"),
- ("定位","淘汰","預設","無角色","升級層"),
+ ("嚴格通過","~14/17","~14/17","15/17","16/17","17/17"),
+ ("寬鬆(功能可用)","15/17","17/17","~17/17","~17/17","17/17"),
+ ("跑完全套","73 min","28 min","24.4 min","23.5 min","22.3 min"),
+ ("LLM 呼叫/round","229","163","229","164","237"),
+ ("Prompt cache","0%","40–58%","63%*","52%*","54.7%"),
+ ("公平成本/17*","~$3–4","~$1–3","$11.6*","$52*","~$1.3"),
+ ("相對 GLM","~1.5×","1×","~5×","~20×","1×"),
+ ("定位","淘汰","預設","無角色","升級層","現行 prod 架構"),
 ]
-cw=[2.6,2.45,2.45,2.45,2.45]; x0=0.55; y0=1.55; rh=0.585
+cw=[2.2,2.0,2.0,2.0,2.0,2.0]; x0=0.55; y0=1.55; rh=0.585
 tot=sum(cw)
 # header row
 rect(s,x0,y0,tot,rh,NAVY); xx=x0
@@ -166,8 +171,12 @@ model_slide(6,"Opus 4.8",OPUS,PURP,PURPBG,"rounds",
     [("嚴格","16/17"),("寬鬆","~17/17"),("跑完","23.5 min"),("round","164"),("cache","52%*"),("成本","$52*")],
     "品質天花板 · 升級層",PURP,PURPBG,RGBColor(0xC4,0xB5,0xFD),
     "嚴格 16/17 最高、最果斷(164 round),只漏 weco_rules。direct+cache 實測 ~20× GLM 成本。")
+model_slide(7,"GLM-5.2 @ Multi-Agent P0  （第 5 種：新架構）",P0,GREEN,GREENBG,"rounds",
+    [("嚴格","17/17"),("寬鬆","17/17"),("跑完","22.3 min"),("round","237"),("cache","54.7%"),("成本","~$1.3")],
+    "現行 prod 架構 [best]",WHITE,GREEN,GREEN,
+    "同一顆 GLM-5.2,跑在 Planner/Builder/Repair 重構後 builder(2026-07-02)。17/17 在 GLM 12-15 變異帶上緣;嚴謹解讀=零回歸,非架構提升品質。")
 
-# ---- 7 verdict
+# ---- 8 verdict
 s=slide(); header(s,"結論","定位與建議",BLUE)
 items=[
  ("GLM-5.2 — prod 預設(不動)",GREEN,GREENBG,"嚴格品質與 Opus 僅差 1 案(xbar_r 也做對),成本最低、cache 唯一有效、速度最快 tier。CP 值完勝。"),
@@ -183,7 +192,7 @@ for title,acc,bg,body in items:
     y+=1.26
 settext(box(s,0.55,y+0.02,12.23,0.5).text_frame,[para([
     seg("共同待辦:",12.5,True,INK2),seg("apc-drift 的 weco_rules 四模型皆弱 → 修 knowledge / block doc,換模型無效。",12.5,False,INK)])])
-footer(s,7)
+footer(s,8)
 
 out="docs/LLM_BAKEOFF_4MODEL.pptx"; prs.save(out)
 print("saved:",out,"slides:",len(prs.slides._sldIdLst))
