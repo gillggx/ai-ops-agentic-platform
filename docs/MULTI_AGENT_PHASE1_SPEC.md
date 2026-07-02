@@ -1,5 +1,9 @@
-# Multi-Agent Phase 1 — 監控平面納入：Monitor Agents as Requesters
+# Multi-Agent — 業務監控平面：Monitor Agents as Requesters【已往後排】
 
+> **狀態:PARKED（2026-07-02）** — 依 user 決策,下一階段改為
+> `MULTI_AGENT_OBSERVABILITY_SPEC.md`（agent 行為觀測 + Supervisor 調校迴路）。
+> 本 spec 的業務監控內容保留,待觀測階段落地後再回來。
+>
 > Draft v1 · 2026-07-02。承接 `MULTI_AGENT_PHASE0_SPEC.md`（已交付,驗收 A1-A10 全過）
 > 與 `AGENT_HARNESS_DESIGN.html` §6（指揮層:monitor 與 user 同位階）。
 > 決策前提:D2 = 監控平面納入本 effort。
