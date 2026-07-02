@@ -23,9 +23,19 @@ import java.util.Map;
 public class InternalAgentEpisodeController {
 
     private final AgentEpisodeService service;
+    private final SupervisorReportService reports;
 
-    public InternalAgentEpisodeController(AgentEpisodeService service) {
+    public InternalAgentEpisodeController(AgentEpisodeService service,
+                                          SupervisorReportService reports) {
         this.service = service;
+        this.reports = reports;
+    }
+
+    /** Supervisor v1 aggregates (spec §5) — read-only, report material. */
+    @GetMapping("/report")
+    public ApiResponse<Map<String, Object>> report(
+            @RequestParam(name = "days", defaultValue = "30") int days) {
+        return ApiResponse.ok(reports.report(Math.max(1, Math.min(days, 365))));
     }
 
     @PostMapping

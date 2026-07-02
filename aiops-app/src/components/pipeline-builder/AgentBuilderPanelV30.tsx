@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import type { BlockSpec } from "@/lib/pipeline-builder/types";
 import { useBuilder } from "@/context/pipeline-builder/BuilderContext";
 import GoalPlanCard, { type GoalPhase } from "./v30/GoalPlanCard";
@@ -560,6 +560,12 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
             {build.doneMessage}
           </div>
         )}
+
+        {/* Post-delivery feedback (observability spec §4.4) — records the
+            divergence signal for the Supervisor loop; nothing fires. */}
+        {build.doneMessage && build.buildStatus === "done" && build.sessionId && (
+          <EpisodeFeedbackBar episodeKey={build.sessionId} />
+        )}
       </div>
 
       {/* Input area */}
@@ -622,6 +628,67 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
           missingCapabilities={build.handover.missingCapabilities}
           onChoose={onHandoverChoose}
         />
+      )}
+    </div>
+  );
+}
+
+/** Post-delivery 3-button feedback strip (符合 / 要修改 / 不是我要的).
+ *  Posts to /api/agent-episodes/[key]/feedback; reject text is optional.
+ *  Pure recording — the Supervisor loop consumes it offline. */
+function EpisodeFeedbackBar({ episodeKey }: { episodeKey: string }) {
+  const [sent, setSent] = useState<string | null>(null);
+  const [pendingReject, setPendingReject] = useState(false);
+  const [text, setText] = useState("");
+
+  const submit = async (sentiment: "accept" | "edit" | "reject", note?: string) => {
+    try {
+      await fetch(`/api/agent-episodes/${encodeURIComponent(episodeKey)}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stage: "delivery", sentiment, text: note ?? "" }),
+      });
+    } catch {
+      /* recording only — never block the user on failure */
+    }
+    setSent(sentiment);
+    setPendingReject(false);
+  };
+
+  if (sent) {
+    return (
+      <div style={{ marginTop: 8, fontSize: 12, color: "#64748b" }}>
+        已記錄回饋（{sent === "accept" ? "符合" : sent === "edit" ? "要修改" : "不是我要的"}），謝謝。
+      </div>
+    );
+  }
+  const btn: CSSProperties = {
+    padding: "5px 12px", borderRadius: 7, border: "1px solid #cbd5e1",
+    background: "#fff", fontSize: 12.5, cursor: "pointer",
+  };
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <span style={{ fontSize: 12, color: "#64748b" }}>這個結果:</span>
+        <button style={{ ...btn, borderColor: "#86efac", color: "#15803d" }}
+                onClick={() => submit("accept")}>符合</button>
+        <button style={{ ...btn, borderColor: "#fde68a", color: "#b45309" }}
+                onClick={() => submit("edit")}>要修改</button>
+        <button style={{ ...btn, borderColor: "#fca5a5", color: "#b91c1c" }}
+                onClick={() => setPendingReject(true)}>不是我要的</button>
+      </div>
+      {pendingReject && (
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="（選填）哪裡不對？"
+            style={{ flex: 1, padding: "5px 10px", borderRadius: 7,
+                     border: "1px solid #cbd5e1", fontSize: 12.5 }}
+          />
+          <button style={{ ...btn, borderColor: "#fca5a5", color: "#b91c1c" }}
+                  onClick={() => submit("reject", text)}>送出</button>
+        </div>
       )}
     </div>
   );
