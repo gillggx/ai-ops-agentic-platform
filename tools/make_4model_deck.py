@@ -114,7 +114,7 @@ settext(box(s,0.9,1.7,11.6,2.6).text_frame,[
     para([seg("SLASH-17 端到端 bake-off — 每個模型各一頁完整結果",18,False,RGBColor(0xCE,0xDC,0xF5))],sa=0)])
 settext(box(s,0.9,4.8,11.6,1.4).text_frame,[
     para([seg("結論:",13,True,WHITE),seg("GLM-5.2 = cost-right 預設(品質接近頂級、成本最低、cache 唯一有效)",13,False,RGBColor(0xCE,0xDC,0xF5))],sa=4),
-    para([seg("Opus 4.8 品質天花板但 ~30× 成本 · Sonnet 5 被 GLM 支配 · KIMI 已淘汰",13,False,RGBColor(0xCE,0xDC,0xF5))],sa=0)])
+    para([seg("Opus 4.8 品質天花板但 ~20× 成本(direct+cache) · Sonnet 5 被 GLM 支配 · KIMI 已淘汰",13,False,RGBColor(0xCE,0xDC,0xF5))],sa=0)])
 
 # ---- 2 summary
 s=slide(); header(s,"總表","四方一眼對照",BLUE)
@@ -124,9 +124,9 @@ rows=[
  ("寬鬆(功能可用)","15/17","17/17","~17/17","~17/17"),
  ("跑完全套","73 min","28 min","24.4 min","23.5 min"),
  ("LLM 呼叫/round","229","163","229","164"),
- ("Prompt cache","0%","40–58%","0.9%","0%"),
- ("成本/17 案","~$3–4","~$1–3","$18.7","$68.6"),
- ("相對 GLM","~1.5×","1×","~9×","~30×"),
+ ("Prompt cache","0%","40–58%","63%*","52%*"),
+ ("公平成本/17*","~$3–4","~$1–3","$11.6*","$52*"),
+ ("相對 GLM","~1.5×","1×","~5×","~20×"),
  ("定位","淘汰","預設","無角色","升級層"),
 ]
 cw=[2.6,2.45,2.45,2.45,2.45]; x0=0.55; y0=1.55; rh=0.585
@@ -144,8 +144,9 @@ for ri,row in enumerate(rows):
         if ci==0: b=True
         settext(box(s,xx+0.05,y,cw[ci]-0.1,rh).text_frame,[para([seg(val,11.5,b,c)],align=PP_ALIGN.CENTER if ci else PP_ALIGN.LEFT)],anchor=MSO_ANCHOR.MIDDLE); xx+=cw[ci]
     y+=rh
-settext(box(s,0.55,y+0.1,12.2,0.9).text_frame,[
-    para([seg("真正分高下只有 2 案:",12.5,True,INK2),seg("xbar_r(只有 GLM+Opus 建對管制圖)、weco_rules(四家幾乎都漏 = 系統層弱點)。其餘 15 案四模型都對。",12.5,False,INK)],ls=1.15)])
+settext(box(s,0.55,y+0.1,12.2,1.1).text_frame,[
+    para([seg("真正分高下只有 2 案:",12.5,True,INK2),seg("xbar_r(只有 GLM+Opus 建對管制圖)、weco_rules(四家幾乎都漏 = 系統層弱點)。其餘 15 案四模型都對。",12.5,False,INK)],ls=1.15),
+    para([seg("* Sonnet/Opus 成本與 cache 為 2026-07-02 direct Anthropic + cache 補測(公平值);bakeoff 當日走 OpenRouter 無 cache 為 $18.7 / $68.6。",10.5,False,MUT)],sa=4,ls=1.1)])
 footer(s,2)
 
 # ---- 3-6 model slides
@@ -158,20 +159,20 @@ model_slide(4,"GLM-5.2  （prod 預設）",GLM,GREEN,GREENBG,"calls",
     "prod 預設 [best]",WHITE,GREEN,GREEN,
     "寬鬆 17/17、xbar_r 建對、cache 唯一有效、成本最低。CP 值完勝,現行 prod。")
 model_slide(5,"Sonnet 5",SON,BLUE,RGBColor(0xEF,0xF6,0xFF),"rounds",
-    [("嚴格","15/17"),("寬鬆","~17/17"),("跑完","24.4 min"),("round","229"),("cache","0.9%"),("成本","$18.7")],
+    [("嚴格","15/17"),("寬鬆","~17/17"),("跑完","24.4 min"),("round","229"),("cache","63%*"),("成本","$11.6*")],
     "被 GLM 支配",AMBER,AMBERBG,RGBColor(0xFD,0xE6,0x8A),
-    "嚴格 15/17(xbar_r 退化成折線)、成本 ~9× GLM。更貴又不更準,無採用理由。")
+    "嚴格 15/17(xbar_r 退化成折線)、direct+cache 成本 ~5× GLM。更貴又不更準,無採用理由。")
 model_slide(6,"Opus 4.8",OPUS,PURP,PURPBG,"rounds",
-    [("嚴格","16/17"),("寬鬆","~17/17"),("跑完","23.5 min"),("round","164"),("cache","0%"),("成本","$68.6")],
+    [("嚴格","16/17"),("寬鬆","~17/17"),("跑完","23.5 min"),("round","164"),("cache","52%*"),("成本","$52*")],
     "品質天花板 · 升級層",PURP,PURPBG,RGBColor(0xC4,0xB5,0xFD),
-    "嚴格 16/17 最高、最果斷(164 round),只漏 weco_rules。但 ~30× 成本、cache 失效。")
+    "嚴格 16/17 最高、最果斷(164 round),只漏 weco_rules。direct+cache 實測 ~20× GLM 成本。")
 
 # ---- 7 verdict
 s=slide(); header(s,"結論","定位與建議",BLUE)
 items=[
  ("GLM-5.2 — prod 預設(不動)",GREEN,GREENBG,"嚴格品質與 Opus 僅差 1 案(xbar_r 也做對),成本最低、cache 唯一有效、速度最快 tier。CP 值完勝。"),
- ("Opus 4.8 — 難題升級層(on-demand)",PURP,PURPBG,"嚴格 16/17 最高,但 ~30× 成本且 cache 走 OpenRouter 失效。只在 fleet/composite/特定管制圖人工升級時叫用,且走 direct Anthropic 恢復 cache。"),
- ("Sonnet 5 — 無角色",AMBER,AMBERBG,"嚴格 15/17(xbar_r 退化),成本 ~9× GLM。比 GLM 貴又不更準。"),
+ ("Opus 4.8 — 難題升級層(on-demand)",PURP,PURPBG,"嚴格 16/17 最高。direct+cache 實測 ~20× GLM 成本。只在 fleet/composite/特定管制圖人工升級時叫用,且走 direct Anthropic 才有 cache。"),
+ ("Sonnet 5 — 無角色",AMBER,AMBERBG,"嚴格 15/17(xbar_r 退化),direct+cache 成本仍 ~5× GLM。比 GLM 貴又不更準。"),
  ("KIMI K2.5 — 已淘汰",RED,REDBG,"最慢、cache 0%、品質不優於 GLM。"),
 ]
 y=1.5
