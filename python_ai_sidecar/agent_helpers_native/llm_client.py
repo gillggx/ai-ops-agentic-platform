@@ -163,6 +163,31 @@ class BaseLLMClient:
             yield ""
 
 
+def _observe_llm_usage(resp: "LLMResponse") -> "LLMResponse":
+    """Agent-observability hook (docs/MULTI_AGENT_OBSERVABILITY_SPEC.md §2).
+
+    Attributes per-call token usage to the current RoleAgent (planner/builder/
+    repair — set by the graph delegates' ContextVar). No-op when the episode
+    recorder is off; hard fail-open — observability must never break an LLM
+    call. Called at BOTH provider paths' return points so cost attribution is
+    provider-agnostic.
+    """
+    try:
+        from python_ai_sidecar.observability import get_current_recorder
+
+        rec = get_current_recorder()
+        if rec is not None:
+            rec.record(
+                "llm_usage",
+                input_tokens=resp.input_tokens,
+                output_tokens=resp.output_tokens,
+                cache_read=resp.cache_read_input_tokens,
+            )
+    except Exception:  # noqa: BLE001 — observability never breaks the call
+        pass
+    return resp
+
+
 # ── Anthropic backend ─────────────────────────────────────────────────────────
 
 class AnthropicLLMClient(BaseLLMClient):
@@ -233,7 +258,7 @@ class AnthropicLLMClient(BaseLLMClient):
                 len(messages or []),
                 len(tools or []),
             )
-        return LLMResponse(
+        return _observe_llm_usage(LLMResponse(
             text=text,
             stop_reason=str(getattr(resp, "stop_reason", "end_turn")),
             finish_reason=str(getattr(resp, "stop_reason", "end_turn")),
@@ -242,7 +267,7 @@ class AnthropicLLMClient(BaseLLMClient):
             output_tokens=getattr(usage, "output_tokens", 0) if usage else 0,
             cache_creation_input_tokens=getattr(usage, "cache_creation_input_tokens", 0) or 0 if usage else 0,
             cache_read_input_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0 if usage else 0,
-        )
+        ))
 
     async def stream(
         self,
@@ -578,7 +603,7 @@ class OllamaLLMClient(BaseLLMClient):
         # Mirror Anthropic semantics: input_tokens excludes cached portion so
         # downstream cost math (input × $/M + cache_read × cached_$/M) holds.
         uncached_input = max(0, prompt_tokens - cached_tokens)
-        return LLMResponse(
+        return _observe_llm_usage(LLMResponse(
             text=text,
             stop_reason=stop_reason,
             finish_reason=str(_finish or "stop"),
@@ -587,7 +612,7 @@ class OllamaLLMClient(BaseLLMClient):
             output_tokens=completion_tokens,
             cache_read_input_tokens=cached_tokens,
             reasoning_content=str(_reasoning or "")[:12000],
-        )
+        ))
 
     async def stream(
         self,

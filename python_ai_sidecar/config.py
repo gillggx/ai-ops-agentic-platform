@@ -95,6 +95,11 @@ class SidecarConfig:
     # 2026-06-18: re-rank MATCHING BLOCKS by phase-goal relevance (not kind only)
     # so adjacent same-kind phases don't show identical luring candidate lists.
     enable_goal_aware_matching: bool
+    # 2026-07-02 Agent observability (docs/MULTI_AGENT_OBSERVABILITY_SPEC.md).
+    # When ON, the build plane records an episode envelope + behavioural step
+    # events to Java /internal/agent-episodes (fire-and-forget, fail-open).
+    # Pure side-channel: no prompt / cache-prefix impact.
+    enable_agent_episodes: bool
 
     @classmethod
     def from_env(cls) -> "SidecarConfig":
@@ -132,6 +137,7 @@ class SidecarConfig:
             enable_rich_schema_values=_read_bool_env("ENABLE_RICH_SCHEMA_VALUES", default=False),
             enable_orphan_resolve=_read_bool_env("ENABLE_ORPHAN_RESOLVE", default=False),
             enable_goal_aware_matching=_read_bool_env("ENABLE_GOAL_AWARE_MATCHING", default=False),
+            enable_agent_episodes=_read_bool_env("ENABLE_AGENT_EPISODES", default=False),
         )
 
 

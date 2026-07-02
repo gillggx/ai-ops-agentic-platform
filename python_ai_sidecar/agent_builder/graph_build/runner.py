@@ -112,6 +112,12 @@ async def stream_graph_build(
         base_pipeline=base_pipeline,
     )
 
+    # Agent observability (docs/MULTI_AGENT_OBSERVABILITY_SPEC.md) — like the
+    # tracer, purely observational; None when ENABLE_AGENT_EPISODES is off.
+    from python_ai_sidecar.observability import make_recorder, set_current_recorder
+    recorder = make_recorder(session_id=sid, instruction=instruction, user_id=user_id)
+    set_current_recorder(recorder)
+
     last_state: dict = {}
     interrupted = False
     paused_kind: Optional[str] = None
@@ -173,6 +179,19 @@ async def stream_graph_build(
             if terminal_status and not interrupted:
                 tracer.set_status(terminal_status)
             await tracer.__aexit__(None, None, None)
+        if recorder is not None:
+            if interrupted:
+                # Paused (confirm gate / handover) — the episode continues on
+                # resume; just flush what we have.
+                await recorder.flush()
+            else:
+                _st = str(last_state.get("status") or "failed")
+                await recorder.finalize(
+                    status=_st,
+                    self_assessment={"ok": _st == "finished", "status": _st},
+                    plan_json=last_state.get("v30_phases") or None,
+                    trace_file=getattr(tracer, "path", None) or getattr(tracer, "file_path", None),
+                )
 
     # Re-emit pause as SSE event (reuse already-detected payload)
     if interrupted:
@@ -622,6 +641,12 @@ async def resume_graph_v30(
         base_pipeline=None,
     )
 
+    # Observability: same episode_key continues across the pause (Java upserts
+    # by key; instruction empty so the original is not clobbered).
+    from python_ai_sidecar.observability import make_recorder, set_current_recorder
+    recorder = make_recorder(session_id=session_id, instruction="", user_id=None)
+    set_current_recorder(recorder)
+
     last_state: dict = {}
     paused_kind: Optional[str] = None
     paused_payload: dict = {}
@@ -680,6 +705,17 @@ async def resume_graph_v30(
             if terminal_status and not interrupted:
                 tracer.set_status(terminal_status)
             await tracer.__aexit__(None, None, None)
+        if recorder is not None:
+            if interrupted:
+                await recorder.flush()
+            else:
+                _st = str(last_state.get("status") or "failed")
+                await recorder.finalize(
+                    status=_st,
+                    self_assessment={"ok": _st == "finished", "status": _st},
+                    plan_json=last_state.get("v30_phases") or None,
+                    trace_file=getattr(tracer, "path", None) or getattr(tracer, "file_path", None),
+                )
 
     if interrupted:
         yield StreamEvent(

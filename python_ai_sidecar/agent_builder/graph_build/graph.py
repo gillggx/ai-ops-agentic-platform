@@ -495,21 +495,128 @@ def build_graph():
     # Node names + edges are unchanged — routing stays 100% in this graph;
     # the agent only does the narrow reasoning step. Verifier stays a
     # deterministic node (never agent-ised).
+    #
+    # Observability (docs/MULTI_AGENT_OBSERVABILITY_SPEC.md): each delegate
+    # sets the current-agent ContextVar (so llm_usage cost is attributed) and
+    # emits behavioural events by DIFFING state vs patch — deterministic graph
+    # code decides what to record, never the LLM. All recorder calls no-op
+    # when the flag is off (recorder is None) and are fail-open.
     from python_ai_sidecar.agent_builder.agents import get_agent
+    from python_ai_sidecar.observability import (
+        get_current_recorder,
+        reset_current_agent,
+        set_current_agent,
+    )
+
+    def _phase_of(state: BuildGraphState) -> "str | None":
+        phases = state.get("v30_phases") or []
+        idx = state.get("v30_current_phase_idx") or 0
+        return phases[idx]["id"] if idx < len(phases) else None
 
     async def _planner_delegate(state: BuildGraphState) -> dict[str, Any]:
-        return await get_agent("planner").run(state)
+        tok = set_current_agent("planner")
+        try:
+            rec = get_current_recorder()
+            if rec is not None and state.get("v30_replan_hint"):
+                rec.record("replan", agent="planner",
+                           payload={"reason": str(state.get("v30_replan_hint"))[:400]})
+            patch = await get_agent("planner").run(state)
+            if rec is not None and patch.get("v30_phases"):
+                rec.record("plan_proposed", agent="planner", payload={
+                    "phases": [{"id": p.get("id"), "goal": str(p.get("goal", ""))[:200],
+                                "expected": p.get("expected")}
+                               for p in patch["v30_phases"]]})
+                await rec.maybe_flush()
+            return patch
+        finally:
+            reset_current_agent(tok)
+
+    async def _confirm_gate_observed(state: BuildGraphState) -> dict[str, Any]:
+        patch = await goal_plan_confirm_gate_node(state)
+        rec = get_current_recorder()
+        if rec is not None and patch.get("status") == "phase_in_progress":
+            edits = patch.get("v30_phase_edit_history") or state.get("v30_phase_edit_history") or {}
+            if edits:
+                rec.record("plan_user_edited", agent="planner", payload={"edits": edits})
+            phases = patch.get("v30_phases") or state.get("v30_phases") or []
+            rec.record("plan_confirmed", agent="planner", payload={
+                "phases": [{"id": p.get("id"), "expected": p.get("expected")} for p in phases],
+                "edited": bool(edits)})
+            await rec.maybe_flush()
+        return patch
 
     async def _builder_delegate(state: BuildGraphState) -> dict[str, Any]:
-        return await get_agent("builder").run(state)
+        tok = set_current_agent("builder")
+        try:
+            rec = get_current_recorder()
+            pid = _phase_of(state)
+            if rec is not None and pid and not (state.get("v30_phase_round") or 0):
+                rec.record("phase_started", agent="builder", phase_id=pid)
+            patch = await get_agent("builder").run(state)
+            if rec is not None:
+                new_block = patch.get("v30_pending_block")
+                if new_block and new_block != state.get("v30_pending_block"):
+                    rec.record("block_picked", agent="builder", phase_id=pid,
+                               payload={"block": new_block})
+                if patch.get("status") == "phase_revise_pending":
+                    rec.record("stuck_escalated", agent="builder", phase_id=pid,
+                               payload={"round": state.get("v30_phase_round")})
+                await rec.maybe_flush()
+            return patch
+        finally:
+            reset_current_agent(tok)
+
+    async def _verifier_observed(state: BuildGraphState) -> dict[str, Any]:
+        patch = await phase_spanning_verifier_node(state)
+        rec = get_current_recorder()
+        if rec is not None:
+            pid = _phase_of(state)
+            reject = patch.get("v30_last_verifier_reject")
+            if reject and pid:
+                rec.record("verifier_reject", agent="builder", phase_id=pid,
+                           payload=reject)
+                rec.note_verifier_reject(pid, reject)
+            new_out = patch.get("v30_phase_outcomes") or {}
+            old_out = state.get("v30_phase_outcomes") or {}
+            for done_pid in new_out.keys() - old_out.keys():
+                outcome = new_out[done_pid] or {}
+                rec.record("phase_done", agent="builder", phase_id=done_pid,
+                           payload={"status": outcome.get("status"),
+                                    "rounds_used": outcome.get("rounds_used")})
+                rejects = rec.take_phase_rejects(done_pid)
+                if rejects:
+                    # v1 approximation of param_reject_fix (spec §4.2 / C4):
+                    # the phase saw >=1 structured reject and later completed —
+                    # the reject payloads carry block/param context for the
+                    # Supervisor's doc-gap aggregation.
+                    rec.record("param_reject_fix", agent="builder", phase_id=done_pid,
+                               payload={"rejects": rejects[:5], "resolved": True,
+                                        "approx": True})
+            await rec.maybe_flush()
+        return patch
 
     async def _repair_delegate(state: BuildGraphState) -> dict[str, Any]:
-        return await get_agent("repair").run(state)
+        tok = set_current_agent("repair")
+        try:
+            rec = get_current_recorder()
+            pid = _phase_of(state)
+            if rec is not None:
+                rec.record("repair_triggered", agent="repair", phase_id=pid,
+                           payload={"source": "round_exhausted"})
+            patch = await get_agent("repair").run(state)
+            if rec is not None:
+                result = "handover" if patch.get("v30_handover") else "retry"
+                rec.record("repair_outcome", agent="repair", phase_id=pid,
+                           payload={"result": result})
+                await rec.maybe_flush()
+            return patch
+        finally:
+            reset_current_agent(tok)
 
     g.add_node("goal_plan", _planner_delegate)
-    g.add_node("goal_plan_confirm_gate", goal_plan_confirm_gate_node)
+    g.add_node("goal_plan_confirm_gate", _confirm_gate_observed)
     g.add_node("agentic_phase_loop", _builder_delegate)
-    g.add_node("phase_verifier", phase_spanning_verifier_node)
+    g.add_node("phase_verifier", _verifier_observed)
     g.add_node("step_pause_gate", step_pause_gate_node)
     g.add_node("phase_revise", _repair_delegate)
     g.add_node("halt_handover", halt_handover_node)

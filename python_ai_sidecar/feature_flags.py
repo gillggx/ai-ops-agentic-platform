@@ -148,6 +148,10 @@ def is_prompt_cache_enabled() -> bool:
     return _effective("prompt_cache", CONFIG.enable_prompt_cache)
 
 
+def is_agent_episodes_enabled() -> bool:
+    return _effective("agent_episodes", CONFIG.enable_agent_episodes)
+
+
 def is_auto_signal_enabled() -> bool:
     return _effective("auto_signal", CONFIG.enable_auto_signal)
 
