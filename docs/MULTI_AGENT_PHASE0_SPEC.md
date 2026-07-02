@@ -302,6 +302,26 @@ patch 形狀測試;budgets 邊界測試。graph 路由函式維持現有 pure-fu
 
 ---
 
-**簽收**:v3 已補 shared state schema、agent 介面簽名、Planner 裁判判準與預算、
-Builder→Planner 觸發的 deterministic 偵測條件、Repair 診斷判準與執行語意、graph 拓撲
-（現況與目標態）、檔案佈局、單測要求。確認無誤請回覆「**開始開發**」。
+---
+
+## 11. 驗收條款（Acceptance Checklist）— 2026-07-02 交付實測
+
+> 流程改進（user 回饋）:自下個 phase 起,驗收條款在 spec 簽核時就先議定。
+
+| # | 條款 | 交付實測結果 | user 自行驗證方式 |
+|---|---|---|---|
+| A1 | 3 個 role agent 存在且註冊 | planner / builder / repair | `python -c "from python_ai_sidecar.agent_builder.agents import registered_names; print(registered_names())"` |
+| A2 | graph 3 個 node 走 agent 委派,edges 不變 | graph.py `_planner/_builder/_repair_delegate` | 看 `graph_build/graph.py` v30 區塊 |
+| A3 | budgets 單一來源（值不變 32/1） | nodes 讀 agents 的 Budgets | 契約單測 `test_budgets_are_single_source_with_nodes` |
+| A4 | 契約單測全綠 | 13/13 passed | `pytest python_ai_sidecar/tests/test_agents_contract.py -q` |
+| A5 | 既有測試零新增失敗 | 381 passed；3 fail 為改動前既存（stash 驗證） | `pytest python_ai_sidecar/tests/ -q --ignore=...test_prompt_size.py` |
+| A6 | **SLASH-17 品質零回歸** | **strict 17/17 MATCH**（baseline ~14,GLM 變異 12-15） | EC2 `grade_strict.py p0_gate` |
+| A7 | 速度零回歸 | 22.3 min（baseline 28 min） | `/tmp/s17_p0_gate.log` |
+| A8 | **cache 命中 40-58% 不退** | **54.7%** | trace 聚合（llm_calls cache_read） |
+| A9 | 空插槽介面就位（元素 9-11） | memory_query / record_triggers / trace_fields no-op | `agents/base.py` |
+| A10 | ma_* 協作欄位就位（無 writer） | initial_state 5 欄全數就位 | 單測 `test_initial_state_has_collab_fields` |
+
+**Phase 0 明確未做（依界線）**:語意裁判 / REPLAN / repair ticket 的行為（Phase 2+）;
+prompt 全文搬入 agents（漸進）;監控平面（Phase 1）。
+
+Commits: `36042b8f`（Steps 1-2）+ `9440c0fd`（Steps 3-5 + 委派）。
