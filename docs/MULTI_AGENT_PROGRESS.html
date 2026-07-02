@@ -66,8 +66,8 @@
         <td>100%（Phase 0 範圍）<div class="bar"><i style="width:100%"></i></div></td>
         <td>Planner/Builder/Repair + registry + 委派;SLASH-17 17/17 零回歸</td></tr>
     <tr><td><b>觀測層(神經系統)</b></td>
-        <td>~90%<div class="bar"><i style="width:90%"></i></div></td>
-        <td>Episode/steps 進 PG、per-agent 成本歸因、feedback 三鍵、divergence、Supervisor v1 報告</td></tr>
+        <td>100%（本階段範圍）<div class="bar"><i style="width:100%"></i></div></td>
+        <td>Episode/steps 進 PG、per-agent 成本歸因、feedback 三鍵、divergence、Supervisor v1 報告 — <b>驗收 C1–C11 全過</b></td></tr>
     <tr><td><b>記憶層(會寫筆記)</b></td>
         <td>0%（設計 100%）<div class="bar"><i style="width:4%"></i></div></td>
         <td>6 class schema / doc 備忘表 / record hooks 皆未實作（Phase 3/4）</td></tr>
@@ -79,7 +79,7 @@
         <td>依決策排在觀測階段之後</td></tr>
   </tbody>
 </table>
-<div class="callout key"><b>整體約 40–45%</b>:「神經系統」接近完工、「大腦寫入」尚未開始 — 這是刻意順序:沒有 episodic 原料,蒸餾不出記憶;原料管線本次交付已打通。</div>
+<div class="callout key"><b>整體約 45–50%</b>:「神經系統」接近完工、「大腦寫入」尚未開始 — 這是刻意順序:沒有 episodic 原料,蒸餾不出記憶;原料管線本次交付已打通。</div>
 
 <!-- 1 harness sections -->
 <h2><span class="n">1</span>對照 AGENT_HARNESS_DESIGN 各大項</h2>
@@ -95,7 +95,7 @@
     <tr><td>10</td><td>Builder 文件備忘</td><td class="mid"><span class="badge todo">0%(原料通)</span></td><td><code>block_doc_memos</code> 表;verifier_reject/param_reject_fix 事件已在流</td></tr>
     <tr><td>11</td><td>Supervisor 6 操作</td><td class="mid"><span class="badge todo">~10%</span></td><td>只有 DOC_GAP 查詢;所有寫側操作</td></tr>
     <tr><td>12</td><td>B:4 Agent 記錄行為</td><td class="mid"><span class="badge part">~70%(trace 級)</span></td><td>「LLM 填 memo 模板」(Phase 4);doc_mismatch 事件</td></tr>
-    <tr><td>13</td><td><b>C:Episode Trace</b></td><td class="mid"><span class="badge ok">~90%</span></td><td>latency 欄未填值;doc_mismatch</td></tr>
+    <tr><td>13</td><td><b>C:Episode Trace</b></td><td class="mid"><span class="badge ok">~95%</span></td><td>latency 欄未填值;doc_mismatch 事件</td></tr>
     <tr><td>14</td><td>Q4 落地順序</td><td class="mid"><span class="badge run">①完成</span></td><td>② class欄+備忘表 → ③④⑤</td></tr>
   </tbody>
 </table>
@@ -117,7 +117,7 @@
         <td><span class="badge ok">e2e:reject→divergence=true;第一份報告產出</span></td>
         <td><code>b1ea40cf</code></td></tr>
     <tr><td>07-02</td><td><b>觀測 Step 8</b>:前端部署 + 全套 SLASH-17 閘門(flag ON)+ 驗收 C1–C11</td>
-        <td><span class="badge run">跑中</span></td><td>—</td></tr>
+        <td><span class="badge ok">C1–C11 全過</span> 17/17 · strict 16 MATCH+1 OVER · cache 49.7% · overhead 量測不到 · 23 episodes/750 steps</td><td><code>b1ea40cf</code></td></tr>
   </tbody>
 </table>
 

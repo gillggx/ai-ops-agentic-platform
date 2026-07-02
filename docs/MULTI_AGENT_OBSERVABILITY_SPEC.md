@@ -225,5 +225,25 @@ sidecar EpisodeRecorder（in-memory buffer per build）
 
 ---
 
-**簽核**:請確認 §8 G1–G4（照建議就說「照建議」）與 §9 驗收條款增刪。
-定案後回覆「開始開發」,我依 §6 Step 1 起手。
+---
+
+## 10. 交付實測（2026-07-02/03 — 驗收 C1–C11 全過）
+
+G1–G4 依建議定案（PG / feedback 三鍵本階段做 / 手動+週期 / 90 天）。
+
+| # | 條款 | 實測結果 |
+|---|---|---|
+| C1 | flag OFF 全行為不變 | 預設 False;OFF 三跑零寫入（c10_off 視窗 0 episode） |
+| C2 | 每 build 產 episode+steps | 閘門 17/17 全 finished 入庫;總量 23 episodes / 750 steps |
+| C3 | 100% steps 有 agent 歸因 | `agent IS NULL` = **0** |
+| C4 | param 猜錯→改對 有事件 | param_reject_fix 6 · verifier_reject 14 · stuck 1 · repair 1 |
+| C5 | plan 編輯 diff 入庫 | 實測編輯 p1 goal → payload 含精確 from/to diff |
+| C6 | 成本可按 agent 聚合 | builder 354 calls/cache 49.7%、planner 19、system 19、repair 1 |
+| C7 | 三鍵可用且入庫 | reject → divergence=true;UI 已進 bundle（force-rebuild 後驗證） |
+| C8 | fail-open | 單測 3 情境 + 真實事故實證（PosixPath finalize 失敗,build 照常完成） |
+| C9 | Supervisor v1 報告可出 | 第一份已產（成本表/divergence 清單/doc-gap 區塊） |
+| C10 | overhead < 3% | 背靠背 3×ON/OFF 交錯:ON 均 54.3s vs OFF 54.7s — 量測不到（provider 噪音 ±50% 主導） |
+| C11 | SLASH-17 零回歸 + cache | 17/17 finished;strict **16 MATCH + 1 OVER**（基準帶 12–15 之上）;cache 49.7%（帶內）。當晚 provider 極慢(patrol-status 2134s),wall-clock 不具跨時段可比性 — C10 已用背靠背隔離 |
+
+備註:doc_mismatch 事件與 latency_ms 填值為已知缺口（不擋驗收,列入 §7 後續）。
+Commits: `78025ef5`(S1) `6b9325a7`(S2-5) `c2314c54`(fix) `b1ea40cf`(S6-7)。
