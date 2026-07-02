@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multi-Agent 進度總表</title>
+<style>
+  :root{
+    --ink:#1f2933; --mut:#667085; --line:#e4e7ec; --bg:#f5f7fa; --card:#fff;
+    --blue:#1d4ed8; --blue-bg:#eff6ff; --blue-bd:#bfdbfe;
+    --green:#067647; --green-bg:#ecfdf3; --green-bd:#a6f4c5;
+    --red:#b42318; --red-bg:#fef3f2; --red-bd:#fecaca;
+    --amber:#b54708; --amber-bg:#fffaeb; --amber-bd:#fde68a;
+    --purp:#6d28d9; --purp-bg:#f5f3ff; --purp-bd:#c4b5fd;
+    --ink2:#101828;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;
+       color:var(--ink);background:var(--bg);line-height:1.6;font-size:14.5px;}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 22px 70px;}
+  header.hero{background:linear-gradient(135deg,#0b1f4d,#1d4ed8 60%,#6d28d9);color:#fff;
+       margin:0 -22px 26px;padding:32px 30px 26px;}
+  header.hero .kic{font-size:12px;letter-spacing:.12em;text-transform:uppercase;opacity:.85;}
+  header.hero h1{margin:6px 0 4px;font-size:25px;}
+  header.hero .sub{opacity:.92;font-size:13px;}
+  h2{font-size:18px;margin:30px 0 8px;color:var(--ink2);display:flex;align-items:center;gap:10px;}
+  h2 .n{display:inline-flex;width:26px;height:26px;border-radius:7px;background:var(--ink2);color:#fff;
+       align-items:center;justify-content:center;font-size:13px;font-weight:700;}
+  table{width:100%;border-collapse:collapse;margin:8px 0 6px;font-size:12.8px;background:#fff;
+       border:1px solid var(--line);border-radius:10px;overflow:hidden;}
+  th,td{padding:8px 11px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;}
+  thead th{background:#f8fafc;font-size:11px;text-transform:uppercase;color:var(--mut);font-weight:700;}
+  tbody tr:last-child td{border-bottom:none;}
+  td.mid{text-align:center;}
+  .badge{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 9px;border-radius:999px;}
+  .ok{color:var(--green);background:var(--green-bg);border:1px solid var(--green-bd);}
+  .part{color:var(--amber);background:var(--amber-bg);border:1px solid var(--amber-bd);}
+  .todo{color:var(--mut);background:#f2f4f7;border:1px solid var(--line);}
+  .run{color:var(--blue);background:var(--blue-bg);border:1px solid var(--blue-bd);}
+  .bar{height:9px;border-radius:6px;background:#eef1f5;overflow:hidden;margin-top:3px;}
+  .bar>i{display:block;height:100%;background:linear-gradient(90deg,#1d4ed8,#6d28d9);border-radius:6px;}
+  .callout{border-radius:10px;padding:12px 15px;margin:12px 0;font-size:13.2px;}
+  .callout.key{background:var(--blue-bg);border:1px solid var(--blue-bd);}
+  .callout b{color:var(--ink2);}
+  code{background:#f2f4f7;padding:1px 5px;border-radius:4px;font-size:11.5px;font-family:ui-monospace,Menlo,monospace;}
+  pre{background:#0f172a;color:#e2e8f0;border-radius:9px;padding:11px 13px;font-size:11.5px;
+      font-family:ui-monospace,Menlo,monospace;overflow:auto;line-height:1.5;}
+  footer{margin-top:34px;padding-top:12px;border-top:1px solid var(--line);color:var(--mut);font-size:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kic">Multi-Agent Programme · Progress</div>
+  <h1>Multi-Agent 進度總表</h1>
+  <div class="sub">對照 <code>AGENT_HARNESS_DESIGN.html</code> 大項的完成度 · 每次交付後更新 · Updated 2026-07-02</div>
+</header>
+
+<!-- 0 overall -->
+<h2><span class="n">0</span>整體完成度</h2>
+<table>
+  <thead><tr><th>層</th><th style="width:36%">進度</th><th>一句話</th></tr></thead>
+  <tbody>
+    <tr><td><b>建置平面(3 agent 骨架)</b></td>
+        <td>100%（Phase 0 範圍）<div class="bar"><i style="width:100%"></i></div></td>
+        <td>Planner/Builder/Repair + registry + 委派;SLASH-17 17/17 零回歸</td></tr>
+    <tr><td><b>觀測層(神經系統)</b></td>
+        <td>~90%<div class="bar"><i style="width:90%"></i></div></td>
+        <td>Episode/steps 進 PG、per-agent 成本歸因、feedback 三鍵、divergence、Supervisor v1 報告</td></tr>
+    <tr><td><b>記憶層(會寫筆記)</b></td>
+        <td>0%（設計 100%）<div class="bar"><i style="width:4%"></i></div></td>
+        <td>6 class schema / doc 備忘表 / record hooks 皆未實作（Phase 3/4）</td></tr>
+    <tr><td><b>Supervisor curation</b></td>
+        <td>~10%<div class="bar"><i style="width:10%"></i></div></td>
+        <td>讀側報告有了;MERGE/CORRECT/PRUNE/PROMOTE 寫側全未做（Phase 5）</td></tr>
+    <tr><td><b>指揮層(monitor requesters)</b></td>
+        <td>0%（spec PARKED）<div class="bar"><i style="width:2%"></i></div></td>
+        <td>依決策排在觀測階段之後</td></tr>
+  </tbody>
+</table>
+<div class="callout key"><b>整體約 40–45%</b>:「神經系統」接近完工、「大腦寫入」尚未開始 — 這是刻意順序:沒有 episodic 原料,蒸餾不出記憶;原料管線本次交付已打通。</div>
+
+<!-- 1 harness sections -->
+<h2><span class="n">1</span>對照 AGENT_HARNESS_DESIGN 各大項</h2>
+<table>
+  <thead><tr><th>§</th><th>大項</th><th class="mid">完成度</th><th>缺什麼</th></tr></thead>
+  <tbody>
+    <tr><td>2</td><td>Harness 10 構件</td><td class="mid"><span class="badge part">~70%</span></td><td>prompt 本體仍在 node;元素 9(memory read)/10(record hooks)空插槽</td></tr>
+    <tr><td>3</td><td>Memory 6 class × 3 軸</td><td class="mid"><span class="badge todo">設計✔ 實作0%</span></td><td><code>agent_knowledge.class</code> 欄未加(Phase 3)</td></tr>
+    <tr><td>4</td><td>Fast / 蒸餾 兩種學習速度</td><td class="mid"><span class="badge todo">~20%</span></td><td>兩路都還不會「寫」;蒸餾只有讀側</td></tr>
+    <tr><td>5</td><td>每 Agent 的 Harness</td><td class="mid"><span class="badge part">~50%</span></td><td>memory chips、L2 裁判 gate</td></tr>
+    <tr><td>6</td><td>互動迴路</td><td class="mid"><span class="badge part">~40%</span></td><td>L2 語意裁判 / REPLAN / feedback 觸發 Repair;monitor requesters</td></tr>
+    <tr><td>9</td><td><b>3 Agent × 6 Class 矩陣</b></td><td class="mid"><span class="badge part">1/6 class</span></td><td><b>episodic 欄全通</b>(+成本歸因);其餘 5 class 讀寫皆未做</td></tr>
+    <tr><td>10</td><td>Builder 文件備忘</td><td class="mid"><span class="badge todo">0%(原料通)</span></td><td><code>block_doc_memos</code> 表;verifier_reject/param_reject_fix 事件已在流</td></tr>
+    <tr><td>11</td><td>Supervisor 6 操作</td><td class="mid"><span class="badge todo">~10%</span></td><td>只有 DOC_GAP 查詢;所有寫側操作</td></tr>
+    <tr><td>12</td><td>B:4 Agent 記錄行為</td><td class="mid"><span class="badge part">~70%(trace 級)</span></td><td>「LLM 填 memo 模板」(Phase 4);doc_mismatch 事件</td></tr>
+    <tr><td>13</td><td><b>C:Episode Trace</b></td><td class="mid"><span class="badge ok">~90%</span></td><td>latency 欄未填值;doc_mismatch</td></tr>
+    <tr><td>14</td><td>Q4 落地順序</td><td class="mid"><span class="badge run">①完成</span></td><td>② class欄+備忘表 → ③④⑤</td></tr>
+  </tbody>
+</table>
+
+<!-- 2 delivered -->
+<h2><span class="n">2</span>已交付里程碑</h2>
+<table>
+  <thead><tr><th>日期</th><th>里程碑</th><th>驗收</th><th>關鍵 commit</th></tr></thead>
+  <tbody>
+    <tr><td>07-02</td><td><b>Phase 0</b>:Planner/Builder/Repair RoleAgent + registry + 委派 + ma_* 協作欄</td>
+        <td><span class="badge ok">A1–A10 全過</span> strict 17/17 · 22.3min · cache 54.7%</td>
+        <td><code>36042b8f</code> <code>9440c0fd</code></td></tr>
+    <tr><td>07-02</td><td><b>觀測 Step 1</b>:V69 兩表 + Java internal API(7/7 Mockito;prod DB 已套)</td>
+        <td><span class="badge ok">done</span></td><td><code>78025ef5</code></td></tr>
+    <tr><td>07-02</td><td><b>觀測 Steps 2–5</b>:EpisodeRecorder(fail-open)+ 行為事件 + per-agent 成本歸因</td>
+        <td><span class="badge ok">E2E:episode finished · cost_json · steps 入庫</span></td>
+        <td><code>6b9325a7</code> <code>c2314c54</code></td></tr>
+    <tr><td>07-02</td><td><b>觀測 Steps 6–7</b>:feedback 三鍵 + divergence + Supervisor v1 報告</td>
+        <td><span class="badge ok">e2e:reject→divergence=true;第一份報告產出</span></td>
+        <td><code>b1ea40cf</code></td></tr>
+    <tr><td>07-02</td><td><b>觀測 Step 8</b>:前端部署 + 全套 SLASH-17 閘門(flag ON)+ 驗收 C1–C11</td>
+        <td><span class="badge run">跑中</span></td><td>—</td></tr>
+  </tbody>
+</table>
+
+<!-- 3 matrix live view -->
+<h2><span class="n">3</span>§9 矩陣即時狀態(3 Agent × 6 Class)</h2>
+<pre>class:        domain   preference   presentation   correction   episodic                    procedure
+Planner  讀     ⬜         ⬜            ⬜             ⬜          —                           ⬜
+Planner  寫     —          ⬜fast        ⬜fast         ⬜fast      ✅ plan_proposed/edited/replan
+Builder  讀     ⬜         —             ⬜             ⬜          —                           ⬜
+Builder  寫     —          —             —              —           ✅ picked/reject/phase_done
+Repair   讀     ⬜         ⬜            ⬜             ⬜          —                           ⬜
+Repair   寫     —          ⬜            ⬜             ⬜(主)      ✅ triggered/outcome</pre>
+<div class="callout key"><b>episodic 欄本次全線打通</b>(且比設計多了 per-agent 成本歸因與 divergence);其餘 5 class 等 Phase 3(schema)+ Phase 4(record hooks 填插槽),骨架不再動。</div>
+
+<!-- 4 next -->
+<h2><span class="n">4</span>下一步(Q4 順序)</h2>
+<table>
+  <thead><tr><th>#</th><th>內容</th><th>狀態</th></tr></thead>
+  <tbody>
+    <tr><td>①</td><td>feedback channel + divergence(C#1+#2)</td><td class="mid"><span class="badge ok">完成</span></td></tr>
+    <tr><td>②</td><td>agent_knowledge 加 <code>class</code> 欄 + <code>block_doc_memos</code> 表</td><td class="mid"><span class="badge todo">next</span></td></tr>
+    <tr><td>③</td><td>Planner preference/presentation fast-path(第一個真「寫記憶」)</td><td class="mid"><span class="badge todo">—</span></td></tr>
+    <tr><td>④</td><td>Builder 文件備忘 + Repair correction(填元素 10)</td><td class="mid"><span class="badge todo">—</span></td></tr>
+    <tr><td>⑤</td><td>Supervisor 蒸餾 + curation(MERGE/CORRECT/PRUNE/PROMOTE)</td><td class="mid"><span class="badge todo">—</span></td></tr>
+    <tr><td>後</td><td>業務監控平面(monitor requesters,spec PARKED)</td><td class="mid"><span class="badge todo">—</span></td></tr>
+  </tbody>
+</table>
+
+<footer>
+  來源文件:<code>AGENT_HARNESS_DESIGN.html</code>(設計)· <code>MULTI_AGENT_PHASE0_SPEC.md</code>(A1–A10)·
+  <code>MULTI_AGENT_OBSERVABILITY_SPEC.md</code>(C1–C11)。本頁隨每次交付更新。Updated 2026-07-02(Step 8 閘門進行中,數字待補)。
+</footer>
+
+</div>
+</body>
+</html>
