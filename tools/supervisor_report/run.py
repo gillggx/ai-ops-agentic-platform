@@ -10,7 +10,7 @@ Usage (on EC2):
 
 Weekly cron (documented, not auto-installed):
     0 8 * * 1  cd /opt/aiops && JAVA_INTERNAL_TOKEN=... python3 tools/supervisor_report/run.py \
-               --days 7 --out /tmp/supervisor_report_$(date +\%Y\%m\%d).md
+               --days 7 --out /tmp/supervisor_report_$(date +%%Y%%m%%d).md
 """
 from __future__ import annotations
 
