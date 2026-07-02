@@ -183,11 +183,12 @@
 <h2><span class="n">6</span>修正後的互動迴路（依你的描述）</h2>
 <p class="desc"><b>指揮層(同位階):</b>USER 不是唯一的需求來源 —— Tool Monitor / Process Performance / APC·Recipe Performance 這些 monitor agent 位階跟 user 同級,偵測到異常時<b>會像 user 一樣對 Planner 下需求、指揮建置</b>。往右:<b>Planner 是 hub + 裁判</b>,Builder 執行、結果回交 Planner 判對錯;Repair 吃「原 prompt + 現結果 + user feedback」三路輸入。</p>
 <div class="diagram">
-<svg viewBox="0 0 1040 470" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Noto Sans TC,sans-serif">
+<svg viewBox="0 0 1040 512" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Noto Sans TC,sans-serif">
   <defs>
     <marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#475569"/></marker>
     <marker id="ab" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#1d4ed8"/></marker>
     <marker id="ag" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#067647"/></marker>
+    <marker id="ap" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#6d28d9"/></marker>
   </defs>
 
   <!-- 指揮層 · 同位階 Requesters -->
@@ -252,11 +253,25 @@
   <line x1="790" y1="235" x2="850" y2="235" stroke="#6d28d9" stroke-width="1.6" marker-end="url(#a)"/>
 
   <!-- Repair three inputs -->
-  <text x="600" y="398" text-anchor="middle" font-size="10.3" fill="#6d28d9">REPAIR 三路輸入:原 prompt(來自 requester)+ 現結果(來自 Builder)+ user feedback</text>
-  <path d="M230,386 L931,386 L931,296" fill="none" stroke="#6d28d9" stroke-width="1.2" stroke-dasharray="5 4" marker-end="url(#a)"/>
+  <text x="600" y="316" text-anchor="middle" font-size="10.3" fill="#6d28d9">REPAIR 三路輸入:原 prompt(來自 requester)+ 現結果(來自 Builder)+ user feedback</text>
+  <path d="M232,326 L931,326 L931,296" fill="none" stroke="#6d28d9" stroke-width="1.1" stroke-dasharray="4 3" marker-end="url(#a)"/>
 
-  <!-- shared memory note -->
-  <text x="600" y="452" text-anchor="middle" font-size="10" fill="#0e7490">各 agent 讀寫自己那片 agent_knowledge(scope + layer + class);Supervisor 週期蒸餾 episodic → 回寫</text>
+  <!-- 知識底層 substrate -->
+  <rect x="250" y="352" width="760" height="42" rx="10" fill="#fffaeb" stroke="#b54708" stroke-width="1.4"/>
+  <text x="630" y="378" text-anchor="middle" font-size="11.5" font-weight="800" fill="#92400e">知識底層 · agent_knowledge · block_docs · user 偏好</text>
+  <line x1="410" y1="296" x2="410" y2="350" stroke="#b54708" stroke-width="1.1" stroke-dasharray="3 3" marker-end="url(#a)"/>
+  <line x1="695" y1="296" x2="695" y2="350" stroke="#b54708" stroke-width="1.1" stroke-dasharray="3 3" marker-end="url(#a)"/>
+  <line x1="931" y1="296" x2="931" y2="350" stroke="#b54708" stroke-width="1.1" stroke-dasharray="3 3" marker-end="url(#a)"/>
+  <text x="474" y="346" text-anchor="middle" font-size="9" fill="#b54708">讀 / 寫</text>
+
+  <!-- SUPERVISOR (週期 / 離線) -->
+  <rect x="250" y="426" width="760" height="66" rx="11" fill="#f5f3ff" stroke="#6d28d9" stroke-width="1.8"/>
+  <text x="630" y="452" text-anchor="middle" font-size="14" font-weight="800" fill="#5b21b6">SUPERVISOR AGENT · 週期 / 離線（不在建置熱路徑）</text>
+  <text x="630" y="472" text-anchor="middle" font-size="10.3" fill="#4c1d95">讀 episodic + traces + 文件備忘 → 蒸餾 · 修正 · 砍 → 回寫知識底層 / block_docs 草案</text>
+  <line x1="470" y1="426" x2="470" y2="396" stroke="#6d28d9" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ap)"/>
+  <text x="470" y="414" text-anchor="middle" font-size="9" fill="#6d28d9">觀測</text>
+  <line x1="790" y1="396" x2="790" y2="426" stroke="#6d28d9" stroke-width="1.3" stroke-dasharray="5 4" marker-end="url(#ap)"/>
+  <text x="790" y="414" text-anchor="middle" font-size="9" fill="#6d28d9">回寫</text>
 </svg>
 </div>
 
