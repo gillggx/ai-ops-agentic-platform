@@ -40,9 +40,10 @@ class _StubAgent(RoleAgent):
 
 
 @pytest.fixture(autouse=True)
-def _clean_registry():
+def _restore_registry():
+    """Snapshot/restore — default agents (registered at package import) stay
+    visible during tests; anything a test registers is rolled back after."""
     saved = dict(registry_mod._REGISTRY)
-    registry_mod._REGISTRY.clear()
     yield
     registry_mod._REGISTRY.clear()
     registry_mod._REGISTRY.update(saved)
@@ -72,7 +73,7 @@ def test_slots_default_noop():
 def test_registry_roundtrip_and_reregister():
     a = register(_StubAgent())
     assert get_agent("stub") is a
-    assert registered_names() == ["stub"]
+    assert "stub" in registered_names()
     b = register(_StubAgent())  # re-register: later wins, no explosion
     assert get_agent("stub") is b
 
@@ -115,3 +116,78 @@ def test_initial_state_has_collab_fields():
     assert st["ma_repair_ticket"] is None
     assert st["ma_replan_count"] == 0
     assert st["ma_repair_iterations"] == 0
+
+
+# ── Phase 0 Steps 3-5: delegation + single-source budgets ──────────────
+
+
+def test_default_agents_registered_on_import():
+    import python_ai_sidecar.agent_builder.agents as agents_pkg
+    assert set(agents_pkg.registered_names()) >= {"planner", "builder", "repair"}
+
+
+def test_budgets_are_single_source_with_nodes():
+    from python_ai_sidecar.agent_builder.agents import get_agent
+    from python_ai_sidecar.agent_builder.graph_build.nodes.agentic_phase_loop import (
+        MAX_REACT_ROUNDS,
+    )
+    from python_ai_sidecar.agent_builder.graph_build.nodes.phase_revise import (
+        MAX_REVISE_ATTEMPTS_PER_PHASE,
+    )
+
+    assert MAX_REACT_ROUNDS == get_agent("builder").budgets.react_rounds == 32
+    assert MAX_REVISE_ATTEMPTS_PER_PHASE == get_agent("repair").budgets.revise_attempts == 1
+
+
+def test_planner_run_delegates_to_goal_plan_node(monkeypatch):
+    from python_ai_sidecar.agent_builder.agents.planner import PlannerAgent
+    from python_ai_sidecar.agent_builder.graph_build.nodes import goal_plan
+
+    called = {}
+
+    async def _fake(state):
+        called["state"] = state
+        return {"status": "goal_plan_confirm_required"}
+
+    monkeypatch.setattr(goal_plan, "goal_plan_node", _fake)
+    patch = asyncio.run(PlannerAgent().run({"instruction": "x"}))
+    assert patch == {"status": "goal_plan_confirm_required"}
+    assert called["state"] == {"instruction": "x"}
+
+
+def test_repair_run_delegates_to_phase_revise_node(monkeypatch):
+    from python_ai_sidecar.agent_builder.agents.repair import RepairAgent
+    from python_ai_sidecar.agent_builder.graph_build.nodes import phase_revise
+
+    async def _fake(state):
+        return {"status": "phase_in_progress"}
+
+    monkeypatch.setattr(phase_revise, "phase_revise_node", _fake)
+    assert asyncio.run(RepairAgent().run({})) == {"status": "phase_in_progress"}
+
+
+def test_state_views_are_compact_slices():
+    from python_ai_sidecar.agent_builder.agents import get_agent
+
+    state = {
+        "instruction": "看 EQP-01 xbar",
+        "base_pipeline": {"nodes": [], "edges": []},
+        "skill_step_mode": False,
+        "v30_replan_hint": None,
+        "user_id": 1,
+        "v30_phases": [{"id": "p1", "goal": "g", "expected": "chart"}],
+        "v30_current_phase_idx": 0,
+        "v30_phase_round": 3,
+        "exec_trace": {"n1": {}},
+        # noise the views must NOT leak through:
+        "sse_events": [{"big": "blob"}],
+        "v30_phase_messages": {"p1": [{"role": "user", "content": "huge"}]},
+    }
+    pv = get_agent("planner").state_view(state)
+    bv = get_agent("builder").state_view(state)
+    rv = get_agent("repair").state_view(state)
+    for view in (pv, bv, rv):
+        assert "sse_events" not in view
+        assert "v30_phase_messages" not in view
+    assert bv["phase"]["id"] == "p1" and bv["phase_round"] == 3
+    assert rv["instruction"].startswith("看 EQP-01")

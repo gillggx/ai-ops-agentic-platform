@@ -490,12 +490,28 @@ def build_graph():
     g.add_node("layout", layout_node)
 
     # v30 ReAct nodes (opt-in via state.v30_mode=True at request time)
-    g.add_node("goal_plan", goal_plan_node)
+    # Phase 0 (2026-07-02, multi-agent): the three role nodes delegate to
+    # RoleAgents from the registry (docs/MULTI_AGENT_PHASE0_SPEC.md §3.2).
+    # Node names + edges are unchanged — routing stays 100% in this graph;
+    # the agent only does the narrow reasoning step. Verifier stays a
+    # deterministic node (never agent-ised).
+    from python_ai_sidecar.agent_builder.agents import get_agent
+
+    async def _planner_delegate(state: BuildGraphState) -> dict[str, Any]:
+        return await get_agent("planner").run(state)
+
+    async def _builder_delegate(state: BuildGraphState) -> dict[str, Any]:
+        return await get_agent("builder").run(state)
+
+    async def _repair_delegate(state: BuildGraphState) -> dict[str, Any]:
+        return await get_agent("repair").run(state)
+
+    g.add_node("goal_plan", _planner_delegate)
     g.add_node("goal_plan_confirm_gate", goal_plan_confirm_gate_node)
-    g.add_node("agentic_phase_loop", agentic_phase_loop_node)
+    g.add_node("agentic_phase_loop", _builder_delegate)
     g.add_node("phase_verifier", phase_spanning_verifier_node)
     g.add_node("step_pause_gate", step_pause_gate_node)
-    g.add_node("phase_revise", phase_revise_node)
+    g.add_node("phase_revise", _repair_delegate)
     g.add_node("halt_handover", halt_handover_node)
     # v30.17j: deficit pause node — interrupt() + wait for user action
     from python_ai_sidecar.agent_builder.graph_build.nodes.judge_clarify_pause import (

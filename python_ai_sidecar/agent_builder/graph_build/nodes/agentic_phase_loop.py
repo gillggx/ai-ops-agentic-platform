@@ -46,9 +46,13 @@ from python_ai_sidecar.pipeline_builder.seedless_registry import SeedlessBlockRe
 logger = logging.getLogger(__name__)
 
 
-MAX_REACT_ROUNDS = 32  # 2026-06-13 (was 16) — multi-block phases (unnest+filter+
-                       # step_check) need 4 rounds per block × 3 blocks = 12
-                       # minimum, with margin for re-inspects.
+# Phase 0 (2026-07-02): budget single-source — the value lives on the
+# BuilderAgent (agents/builder.py BUILDER_BUDGETS). History: 32 since
+# 2026-06-13 (was 16) — multi-block phases (unnest+filter+step_check) need
+# 4 rounds per block × 3 blocks = 12 minimum, with margin for re-inspects.
+from python_ai_sidecar.agent_builder.agents.builder import BUILDER_BUDGETS
+
+MAX_REACT_ROUNDS = BUILDER_BUDGETS.react_rounds
 MAX_INSPECT_CALLS_PER_ROUND = 5
 STUCK_DETECTOR_WINDOW = 2  # last N actions checked for duplicate
 

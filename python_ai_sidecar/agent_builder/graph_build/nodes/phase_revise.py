@@ -28,7 +28,11 @@ logger = logging.getLogger(__name__)
 
 # Cap revise attempts per phase. >1 here would let LLM loop between revise +
 # round; better to escalate to user once self-reflection fails.
-MAX_REVISE_ATTEMPTS_PER_PHASE = 1
+# Phase 0 (2026-07-02): budget single-source — value lives on the RepairAgent
+# (agents/repair.py REPAIR_BUDGETS).
+from python_ai_sidecar.agent_builder.agents.repair import REPAIR_BUDGETS
+
+MAX_REVISE_ATTEMPTS_PER_PHASE = REPAIR_BUDGETS.revise_attempts
 
 
 _SYSTEM = """你之前在一個 ReAct loop 試 build 一個 pipeline phase，跑了 N round 沒達成目標。
