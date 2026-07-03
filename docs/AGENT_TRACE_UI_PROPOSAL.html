@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent 行為 Trace — 介面提案</title>
+<style>
+  :root{
+    --ink:#1f2933; --mut:#667085; --line:#e4e7ec; --bg:#f5f7fa; --card:#fff;
+    --blue:#1d4ed8; --blue-bg:#eff6ff; --blue-bd:#bfdbfe;
+    --indigo:#4338ca; --indigo-bg:#eef2ff;
+    --green:#067647; --green-bg:#ecfdf3; --green-bd:#a6f4c5;
+    --red:#b42318; --red-bg:#fef3f2; --red-bd:#fecaca;
+    --amber:#b54708; --amber-bg:#fffaeb; --amber-bd:#fde68a;
+    --purp:#6d28d9; --purp-bg:#f5f3ff; --purp-bd:#c4b5fd;
+    --slate:#475569; --ink2:#101828;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;
+       color:var(--ink);background:var(--bg);line-height:1.6;font-size:14.5px;}
+  .wrap{max-width:1140px;margin:0 auto;padding:0 22px 70px;}
+  header.hero{background:linear-gradient(135deg,#0b1f4d,#1d4ed8 55%,#6d28d9);color:#fff;
+       margin:0 -22px 26px;padding:32px 30px 26px;}
+  header.hero .kic{font-size:12px;letter-spacing:.12em;text-transform:uppercase;opacity:.85;}
+  header.hero h1{margin:6px 0 4px;font-size:25px;}
+  header.hero .sub{opacity:.92;font-size:13px;}
+  .tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 8px;border-radius:999px;margin-left:6px;
+       background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.3);}
+  h2{font-size:18px;margin:32px 0 6px;color:var(--ink2);display:flex;align-items:center;gap:10px;}
+  h2 .n{display:inline-flex;width:26px;height:26px;border-radius:7px;background:var(--ink2);color:#fff;
+       align-items:center;justify-content:center;font-size:13px;font-weight:700;}
+  h2 + .desc{color:var(--mut);font-size:13px;margin:0 0 12px;}
+  .views{display:grid;grid-template-columns:repeat(3,1fr);gap:13px;margin:6px 0 8px;}
+  @media(max-width:820px){.views{grid-template-columns:1fr;}}
+  .vcard{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 15px;box-shadow:0 1px 2px rgba(16,24,40,.05);}
+  .vcard .top{height:5px;border-radius:5px;margin:-14px -15px 10px;}
+  .vcard h3{margin:0 0 4px;font-size:14.5px;color:var(--ink2);}
+  .vcard p{margin:6px 0 0;font-size:12.6px;color:var(--ink);}
+  .star{font-size:10.5px;font-weight:700;color:#fff;background:var(--green);border-radius:999px;padding:1px 8px;margin-left:6px;}
+
+  /* swim-lane */
+  .swim{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px;margin:10px 0;box-shadow:0 1px 3px rgba(16,24,40,.06);overflow-x:auto;}
+  .grid{display:grid;grid-template-columns:120px repeat(4,1fr);gap:8px;min-width:820px;}
+  .ghead{font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.03em;padding:4px 6px;text-align:center;background:#f8fafc;border-radius:6px;}
+  .ghead.lane{text-align:left;background:transparent;}
+  .lane-label{font-weight:800;font-size:13px;padding:10px 6px;display:flex;align-items:center;gap:7px;}
+  .dot{width:11px;height:11px;border-radius:3px;flex:none;}
+  .cell{border:1px dashed var(--line);border-radius:8px;min-height:46px;padding:5px;display:flex;flex-direction:column;gap:4px;}
+  .cell.empty{border-style:dotted;background:#fcfcfd;}
+  .chip{font-size:11px;font-weight:600;border-radius:6px;padding:3px 7px;line-height:1.25;}
+  .c-act{background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;}
+  .c-plan{background:var(--blue-bg);color:#1e3a8a;border:1px solid var(--blue-bd);}
+  .c-pass{background:var(--green-bg);color:var(--green);border:1px solid var(--green-bd);}
+  .c-rej{background:var(--red-bg);color:var(--red);border:1px solid var(--red-bd);}
+  .c-none{color:var(--mut);font-style:italic;font-size:11px;padding:4px 2px;}
+  .mem{font-size:10.5px;font-weight:700;border-radius:5px;padding:2px 6px;display:inline-block;}
+  .m-read{background:#f1f5f9;color:var(--slate);border:1px solid #cbd5e1;}
+  .m-write{background:var(--green-bg);color:var(--green);border:1px solid var(--green-bd);}
+  .m-draft{background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-bd);}
+  .rail{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:12px;}
+  .railbox{border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:12px;}
+  .railbox b{color:var(--ink2);}
+  .badge{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;}
+  .b-div{color:var(--red);background:var(--red-bg);border:1px solid var(--red-bd);}
+  .b-ok{color:var(--green);background:var(--green-bg);border:1px solid var(--green-bd);}
+
+  table{width:100%;border-collapse:collapse;margin:8px 0;font-size:12.6px;background:#fff;border:1px solid var(--line);border-radius:10px;overflow:hidden;}
+  th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;}
+  thead th{background:#f8fafc;font-size:11px;text-transform:uppercase;color:var(--mut);font-weight:700;}
+  tbody tr:last-child td{border-bottom:none;}
+  td.mid,th.mid{text-align:center;}
+  .bar{height:14px;border-radius:4px;background:linear-gradient(90deg,#1d4ed8,#6d28d9);}
+  .scorecards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
+  @media(max-width:820px){.scorecards{grid-template-columns:1fr;}}
+  .sc{border:1px solid var(--line);border-radius:11px;padding:0 0 12px;overflow:hidden;background:#fff;}
+  .sc .cap{padding:9px 13px;color:#fff;font-weight:800;font-size:14px;}
+  .sc dl{margin:9px 13px 0;display:grid;grid-template-columns:auto 1fr;gap:5px 9px;font-size:12.4px;}
+  .sc dt{color:var(--mut);} .sc dd{margin:0;text-align:right;font-weight:700;color:var(--ink2);}
+  .callout{border-radius:10px;padding:12px 15px;margin:12px 0;font-size:13.2px;}
+  .callout.key{background:var(--blue-bg);border:1px solid var(--blue-bd);}
+  .callout b{color:var(--ink2);}
+  .qbox{background:var(--purp-bg);border:1px solid var(--purp-bd);border-radius:10px;padding:14px 16px;font-size:13.2px;}
+  .qbox b{color:var(--purp);}
+  code{background:#f2f4f7;padding:1px 5px;border-radius:4px;font-size:11.5px;font-family:ui-monospace,Menlo,monospace;}
+  footer{margin-top:34px;padding-top:12px;border-top:1px solid var(--line);color:var(--mut);font-size:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kic">Agent 觀測 · UI 提案 · Mockup</div>
+  <h1>3 個 Agent 的行為要怎麼在介面上呈現<span class="tag">靜態示意,非接線資料</span></h1>
+  <div class="sub">資料源:已上線的 agent_episodes / agent_steps(14 事件)+ 記憶寫入。用「EQP-01 最近 5 次 process 是否超過 3 次 OOC」當範例。</div>
+</header>
+
+<!-- overview -->
+<h2><span class="n">0</span>三個視圖(由細到粗)</h2>
+<div class="views">
+  <div class="vcard"><div class="top" style="background:var(--blue)"></div>
+    <h3>視圖① 單 build 時間軸<span class="star">主打</span></h3>
+    <p>一次 build 的 swim-lane:Planner / Builder / Repair 三軌 + <b>記憶讀寫軌</b>,把「何時讀、何時寫」畫在時間上。回答你最在意的問題。</p></div>
+  <div class="vcard"><div class="top" style="background:var(--indigo)"></div>
+    <h3>視圖② 跨 build 記分板</h3>
+    <p>Supervisor 報告的視覺化:三 agent 各一張成績卡(成本 / cache / 招牌指標)+ doc-gap 長條 + divergence 清單。</p></div>
+  <div class="vcard"><div class="top" style="background:var(--green)"></div>
+    <h3>視圖③ 記憶帳本</h3>
+    <p>每個 agent 寫了什麼:preference/presentation/correction(active vs draft)+ doc 備忘(pending),附<b>被召回次數(uses)</b>——一眼看哪條筆記真的有用。</p></div>
+</div>
+
+<!-- view 1 -->
+<h2><span class="n">1</span>視圖① 單 build 時間軸（主打）</h2>
+<p class="desc">範例:「EQP-01 最近 5 次 process 是否超過 3 次 OOC」→ Planner 拆成 p1 取資料 / p2 取最近 5 次 / p3 判 OOC≥3。橫軸 = phase 進程;每軌 = 一個 agent;最下軌 = <b>記憶讀/寫</b>。</p>
+<div class="swim">
+  <div class="grid">
+    <!-- header row -->
+    <div class="ghead lane">Agent \ 進程</div>
+    <div class="ghead">規劃 / 確認</div>
+    <div class="ghead">p1 · raw_data</div>
+    <div class="ghead">p2 · transform</div>
+    <div class="ghead">p3 · verdict</div>
+
+    <!-- Planner -->
+    <div class="lane-label"><span class="dot" style="background:var(--blue)"></span>PLANNER</div>
+    <div class="cell">
+      <span class="chip c-plan">出 3 phases</span>
+      <span class="chip c-plan">user 改「5 次→10 次」</span>
+    </div>
+    <div class="cell empty"><span class="c-none">—</span></div>
+    <div class="cell empty"><span class="c-none">—</span></div>
+    <div class="cell empty"><span class="c-none">(裁判:Phase 2+)</span></div>
+
+    <!-- Builder -->
+    <div class="lane-label"><span class="dot" style="background:var(--indigo)"></span>BUILDER</div>
+    <div class="cell empty"><span class="c-none">—</span></div>
+    <div class="cell">
+      <span class="chip c-act">選 block_process_history</span>
+      <span class="chip c-pass">過</span>
+    </div>
+    <div class="cell">
+      <span class="chip c-act">sort + limit 取 10 次</span>
+      <span class="chip c-pass">過</span>
+    </div>
+    <div class="cell">
+      <span class="chip c-act">選 block_step_check</span>
+      <span class="chip c-rej">verifier 拒 ×1</span>
+      <span class="chip c-pass">改對後過</span>
+    </div>
+
+    <!-- Repair -->
+    <div class="lane-label"><span class="dot" style="background:var(--purp)"></span>REPAIR</div>
+    <div class="cell empty"><span class="c-none">未觸發</span></div>
+    <div class="cell empty"><span class="c-none">未觸發</span></div>
+    <div class="cell empty"><span class="c-none">未觸發</span></div>
+    <div class="cell empty"><span class="c-none">未觸發(Builder 自行過關)</span></div>
+
+    <!-- Memory lane -->
+    <div class="lane-label"><span class="dot" style="background:var(--green)"></span>記憶</div>
+    <div class="cell">
+      <span class="mem m-read">讀 domain·preference</span>
+      <span class="mem m-write">寫 preference「預設 10 次」(即時)</span>
+    </div>
+    <div class="cell"><span class="mem m-read">讀 block_docs·procedure</span></div>
+    <div class="cell"><span class="mem m-read">讀 correction(execute)</span></div>
+    <div class="cell">
+      <span class="mem m-read">讀 block_docs</span>
+      <span class="mem m-write">寫 doc 備忘 @block_step_check(pending)</span>
+    </div>
+  </div>
+
+  <div class="rail">
+    <div class="railbox"><b>系統自認</b><br>status=finished · verifier 全過 <span class="badge b-ok">ok</span></div>
+    <div class="railbox"><b>你的回饋</b><br>三鍵:符合 / 要修改 / 不是我要的<br><span style="color:var(--mut)">未按 → 無 divergence</span></div>
+    <div class="railbox"><b>成本(per-agent)</b><br>Builder 9 call · Planner 1 · Repair 0<br>cache 62%</div>
+  </div>
+</div>
+<div class="callout key">
+  <b>這張圖直接回答「何時讀、何時寫」:</b>Planner 在<b>規劃時讀</b>、<b>你改 plan 時寫</b>(即時 preference);Builder <b>每 phase 讀</b>、<b>reject→pass 才寫 doc 備忘</b>;Repair 沒事就<b>不出場</b>。紅=verifier 拒、綠=過、綠框=記憶寫入、灰=讀。
+</div>
+
+<!-- view 2 -->
+<h2><span class="n">2</span>視圖② 跨 build 記分板</h2>
+<p class="desc">同一份 Supervisor 報告資料,換成卡片。每 agent 一張,含招牌指標(下方數字為今日實際報告值)。</p>
+<div class="scorecards">
+  <div class="sc"><div class="cap" style="background:var(--blue)">PLANNER</div>
+    <dl><dt>呼叫</dt><dd>86</dd><dt>cache</dt><dd>25.3%</dd><dt>plan 被改率</dt><dd>~6%</dd><dt>divergence</dt><dd>1</dd></dl></div>
+  <div class="sc"><div class="cap" style="background:var(--indigo)">BUILDER</div>
+    <dl><dt>呼叫</dt><dd>1524</dd><dt>cache</dt><dd>63.9%</dd><dt>reject 最多 block</dt><dd>block_filter (9)</dd><dt>doc 備忘</dt><dd>7 pending</dd></dl></div>
+  <div class="sc"><div class="cap" style="background:var(--purp)">REPAIR</div>
+    <dl><dt>觸發</dt><dd>9</dd><dt>retry / handover</dt><dd>9 / 6</dd><dt>correction 草案</dt><dd>12</dd><dt>—</dt><dd></dd></dl></div>
+</div>
+<h3 style="font-size:14px;margin:14px 0 4px;color:var(--ink2)">Doc-gap Top-N(verifier 拒最多 → doc 不齊訊號)</h3>
+<table>
+  <thead><tr><th>block</th><th style="width:55%">rejects</th><th class="mid">builds</th></tr></thead>
+  <tbody>
+    <tr><td>block_filter</td><td><div class="bar" style="width:100%"></div></td><td class="mid">5</td></tr>
+    <tr><td>block_weco_rules</td><td><div class="bar" style="width:89%"></div></td><td class="mid">4</td></tr>
+    <tr><td>block_select</td><td><div class="bar" style="width:67%"></div></td><td class="mid">2</td></tr>
+    <tr><td>block_process_history</td><td><div class="bar" style="width:56%"></div></td><td class="mid">4</td></tr>
+  </tbody>
+</table>
+
+<!-- view 3 -->
+<h2><span class="n">3</span>視圖③ 記憶帳本</h2>
+<p class="desc">每個 agent 寫了什麼、生效或草稿、被召回幾次(uses)。<b>uses</b> 讓你看哪條筆記真的在幫忙、哪條該砍。</p>
+<table>
+  <thead><tr><th>來源 agent</th><th>class</th><th>內容</th><th class="mid">狀態</th><th class="mid">uses</th></tr></thead>
+  <tbody>
+    <tr><td>Planner (W1)</td><td>preference</td><td>預設時間窗 12 小時</td><td class="mid"><span class="badge b-ok">生效</span></td><td class="mid">0</td></tr>
+    <tr><td>Planner (W1)</td><td>presentation</td><td>etch_time_offset 趨勢用 line chart</td><td class="mid"><span class="badge b-ok">生效</span></td><td class="mid">1</td></tr>
+    <tr><td>Repair (W3)</td><td>correction</td><td>[repair·retry] p2 xbar 三站…</td><td class="mid"><span class="badge" style="color:var(--amber);background:var(--amber-bg);border:1px solid var(--amber-bd)">草稿</span></td><td class="mid">—</td></tr>
+    <tr><td>Builder (W2)</td><td>doc 備忘</td><td>@block_step_check:拒 1 次後過</td><td class="mid"><span class="badge" style="color:var(--slate);background:#f1f5f9;border:1px solid #cbd5e1">pending</span></td><td class="mid">—</td></tr>
+  </tbody>
+</table>
+<div class="callout key">
+  <b>草稿 vs 生效</b>是上次污染事件的直接產物:correction 現在一律草稿、等 Supervisor 晉升;preference/presentation(你明改的高可信訊號)即時生效。帳本讓這條規則<b>看得見</b>。
+</div>
+
+<!-- decisions -->
+<h2><span class="n">4</span>待你拍板</h2>
+<div class="qbox">
+  <b>Q1 · 先做哪個視圖?</b>　建議<b>視圖①(單 build 時間軸)</b>先做 —— 它最能「秀」agent 行為,且一次 build 的資料量小、渲染簡單。<br>
+  <b>Q2 · 橫軸用 phase 進程 還是真實時間?</b>　建議 <b>phase 進程</b>(真實時間受 provider 延遲扭曲,不好看)。<br>
+  <b>Q3 · 放哪裡?</b>　既有 <code>/admin/build-traces</code> 頁加一個「Agent 視圖」分頁,還是獨立新頁 <code>/agent-activity</code>?<br>
+  <b>Q4 · 記憶讀取要畫多細?</b>　v1 只標「讀了 N 類」,還是列出具體召回哪幾條(要多一個 read-log,成本較高)?
+</div>
+
+<footer>
+  Mockup · 靜態示意。資料結構取自已上線的 <code>agent_episodes</code>/<code>agent_steps</code> + 記憶寫入;數字混用今日真實報告值與示意值。Generated 2026-07-03。
+</footer>
+
+</div>
+</body>
+</html>
