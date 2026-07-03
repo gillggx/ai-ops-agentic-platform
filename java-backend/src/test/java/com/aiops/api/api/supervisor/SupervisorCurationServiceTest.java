@@ -1,0 +1,210 @@
+package com.aiops.api.api.supervisor;
+
+import com.aiops.api.common.ApiException;
+import com.aiops.api.domain.agentknowledge.AgentKnowledgeEntity;
+import com.aiops.api.domain.agentknowledge.AgentKnowledgeRepository;
+import com.aiops.api.domain.agentknowledge.BlockDocMemoEntity;
+import com.aiops.api.domain.agentknowledge.BlockDocMemoRepository;
+import com.aiops.api.domain.supervisor.SupervisorActionEntity;
+import com.aiops.api.domain.supervisor.SupervisorActionRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
+/**
+ * Pure-Mockito tests — Phase 5 Supervisor curation. Focus: propose-only
+ * discipline (nothing mutates until approve), per-type commit correctness,
+ * and audit stamping.
+ */
+class SupervisorCurationServiceTest {
+
+    private SupervisorActionRepository actions;
+    private AgentKnowledgeRepository knowledge;
+    private BlockDocMemoRepository docMemos;
+    private SupervisorCurationService service;
+
+    @BeforeEach
+    void setUp() {
+        actions = mock(SupervisorActionRepository.class);
+        knowledge = mock(AgentKnowledgeRepository.class);
+        docMemos = mock(BlockDocMemoRepository.class);
+        service = new SupervisorCurationService(actions, knowledge, docMemos, new ObjectMapper());
+        when(actions.save(any())).thenAnswer(inv -> {
+            SupervisorActionEntity a = inv.getArgument(0);
+            if (a.getId() == null) a.setId(77L);
+            return a;
+        });
+        when(knowledge.save(any())).thenAnswer(inv -> {
+            AgentKnowledgeEntity e = inv.getArgument(0);
+            if (e.getId() == null) e.setId(500L);
+            return e;
+        });
+        when(docMemos.save(any())).thenAnswer(inv -> inv.getArgument(0));
+    }
+
+    private SupervisorActionEntity action(long id, String type, String proposalJson) {
+        SupervisorActionEntity a = new SupervisorActionEntity();
+        a.setId(id);
+        a.setActionType(type);
+        a.setProposal(proposalJson);
+        a.setStatus("proposed");
+        return a;
+    }
+
+    private AgentKnowledgeEntity krow(long id, boolean active) {
+        AgentKnowledgeEntity e = new AgentKnowledgeEntity();
+        e.setId(id);
+        e.setActive(active);
+        e.setTitle("t" + id);
+        e.setBody("b" + id);
+        return e;
+    }
+
+    // ── propose ─────────────────────────────────────────────────────────
+
+    @Test
+    void propose_queuesWithoutTouchingKnowledge() {
+        when(actions.existsByActionTypeAndTargetIdsAndStatus(any(), any(), any())).thenReturn(false);
+        Map<String, Object> out = service.propose("PRUNE", List.of(1, 2),
+                Map.of("target_ids", List.of(1, 2)), "stale", Map.of("model", "haiku"));
+        assertThat(out).containsEntry("deduped", false);
+        verify(knowledge, never()).save(any());   // propose-only: no mutation
+        verify(docMemos, never()).save(any());
+    }
+
+    @Test
+    void propose_dedupsLiveProposals() {
+        when(actions.existsByActionTypeAndTargetIdsAndStatus(any(), any(), any())).thenReturn(true);
+        Map<String, Object> out = service.propose("PRUNE", List.of(1),
+                Map.of("target_ids", List.of(1)), null, null);
+        assertThat(out).containsEntry("deduped", true);
+        verify(actions, never()).save(any());
+    }
+
+    @Test
+    void propose_rejectsUnknownType() {
+        assertThatThrownBy(() -> service.propose("NUKE", List.of(), Map.of("x", 1), null, null))
+                .isInstanceOf(ApiException.class);
+    }
+
+    // ── approve: per-type commits ───────────────────────────────────────
+
+    @Test
+    void approve_merge_keepsWinnerDeactivatesLosers() {
+        when(actions.findById(1L)).thenReturn(Optional.of(action(1L, "MERGE",
+                "{\"keep_id\":10,\"remove_ids\":[11,12],\"merged_body\":\"merged text\"}")));
+        when(knowledge.findById(10L)).thenReturn(Optional.of(krow(10, true)));
+        when(knowledge.findById(11L)).thenReturn(Optional.of(krow(11, true)));
+        when(knowledge.findById(12L)).thenReturn(Optional.of(krow(12, true)));
+
+        Map<String, Object> dto = service.approve(1L, 99L);
+
+        assertThat(dto.get("status")).isEqualTo("approved");
+        ArgumentCaptor<AgentKnowledgeEntity> cap = ArgumentCaptor.forClass(AgentKnowledgeEntity.class);
+        verify(knowledge, times(3)).save(cap.capture());
+        assertThat(cap.getAllValues().get(0).getBody()).isEqualTo("merged text"); // keeper updated
+        assertThat(cap.getAllValues().get(1).getActive()).isFalse();               // losers off
+        assertThat(cap.getAllValues().get(2).getActive()).isFalse();
+    }
+
+    @Test
+    void approve_correct_rewritesAndPromotes() {
+        when(actions.findById(2L)).thenReturn(Optional.of(action(2L, "CORRECT",
+                "{\"target_id\":20,\"new_title\":\"clean title\",\"new_body\":\"clean body\",\"promote\":true}")));
+        AgentKnowledgeEntity draft = krow(20, false);
+        when(knowledge.findById(20L)).thenReturn(Optional.of(draft));
+
+        service.approve(2L, 99L);
+
+        assertThat(draft.getTitle()).isEqualTo("clean title");
+        assertThat(draft.getBody()).isEqualTo("clean body");
+        assertThat(draft.getActive()).isTrue();   // promoted on approve
+    }
+
+    @Test
+    void approve_prune_deactivates() {
+        when(actions.findById(3L)).thenReturn(Optional.of(action(3L, "PRUNE",
+                "{\"target_ids\":[30,31]}")));
+        when(knowledge.findById(30L)).thenReturn(Optional.of(krow(30, true)));
+        when(knowledge.findById(31L)).thenReturn(Optional.of(krow(31, false))); // already off → skip
+
+        Map<String, Object> dto = service.approve(3L, 99L);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> result = (Map<String, Object>) dto.get("commit_result");
+        assertThat(result.get("pruned")).isEqualTo(1);
+    }
+
+    @Test
+    void approve_promote_createsSupervisorDomainRow() {
+        when(actions.findById(4L)).thenReturn(Optional.of(action(4L, "PROMOTE",
+                "{\"memo_class\":\"domain\",\"title\":\"SPC 站級規則\",\"body\":\"跨 build 蒸餾出的領域事實\",\"applies_to\":\"plan\"}")));
+
+        service.approve(4L, 99L);
+
+        ArgumentCaptor<AgentKnowledgeEntity> cap = ArgumentCaptor.forClass(AgentKnowledgeEntity.class);
+        verify(knowledge).save(cap.capture());
+        AgentKnowledgeEntity e = cap.getValue();
+        assertThat(e.getMemoClass()).isEqualTo("domain");
+        assertThat(e.getWrittenBy()).isEqualTo("supervisor");
+        assertThat(e.getSource()).isEqualTo("supervisor");
+        assertThat(e.getActive()).isTrue();       // human approved → live
+        assertThat(e.getAppliesTo()).isEqualTo("plan");
+    }
+
+    @Test
+    void approve_promote_rejectsNonDistillClasses() {
+        when(actions.findById(5L)).thenReturn(Optional.of(action(5L, "PROMOTE",
+                "{\"memo_class\":\"preference\",\"title\":\"t\",\"body\":\"b\"}")));
+        assertThatThrownBy(() -> service.approve(5L, 99L)).isInstanceOf(ApiException.class);
+        verify(knowledge, never()).save(any());
+    }
+
+    @Test
+    void approve_docRevise_promotesMemosWithoutTouchingBlockDocs() {
+        when(actions.findById(6L)).thenReturn(Optional.of(action(6L, "DOC_REVISE",
+                "{\"block_id\":\"block_union\",\"memo_ids\":[40],\"revised_doc_draft\":\"...draft...\"}")));
+        BlockDocMemoEntity m = new BlockDocMemoEntity();
+        m.setId(40L);
+        m.setStatus("pending");
+        when(docMemos.findById(40L)).thenReturn(Optional.of(m));
+
+        service.approve(6L, 99L);
+
+        assertThat(m.getStatus()).isEqualTo("promoted");
+        assertThat(m.getReviewedBy()).isEqualTo(99L);
+        verify(knowledge, never()).save(any());   // block_docs / knowledge untouched
+    }
+
+    // ── reject + state guards ───────────────────────────────────────────
+
+    @Test
+    void reject_stampsAuditWithoutMutation() {
+        when(actions.findById(7L)).thenReturn(Optional.of(action(7L, "PRUNE",
+                "{\"target_ids\":[50]}")));
+        Map<String, Object> dto = service.reject(7L, 99L);
+        assertThat(dto.get("status")).isEqualTo("rejected");
+        assertThat(dto.get("reviewed_by")).isEqualTo(99L);
+        verify(knowledge, never()).save(any());   // reject = DB untouched
+        verify(knowledge, never()).findById(any());
+    }
+
+    @Test
+    void approve_twiceRejected() {
+        SupervisorActionEntity done = action(8L, "PRUNE", "{\"target_ids\":[1]}");
+        done.setStatus("approved");
+        when(actions.findById(8L)).thenReturn(Optional.of(done));
+        assertThatThrownBy(() -> service.approve(8L, 99L)).isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> service.reject(8L, 99L)).isInstanceOf(ApiException.class);
+    }
+}

@@ -10,6 +10,11 @@ import java.util.List;
 public interface AgentKnowledgeRepository extends JpaRepository<AgentKnowledgeEntity, Long> {
     List<AgentKnowledgeEntity> findByUserIdOrderByCreatedAtDesc(Long userId);
 
+    /** Curation input (V72): agent-written rows by class+active, e.g. draft
+     *  corrections (active=false) or live preference/presentation dupes. */
+    List<AgentKnowledgeEntity> findTop100ByMemoClassAndActiveOrderByIdDesc(
+            String memoClass, Boolean active);
+
 	/** V70 memory-layer dedup: same (user, class, title) → skip re-write. */
 	java.util.Optional<AgentKnowledgeEntity> findFirstByUserIdAndMemoClassAndTitle(
 			Long userId, String memoClass, String title);
