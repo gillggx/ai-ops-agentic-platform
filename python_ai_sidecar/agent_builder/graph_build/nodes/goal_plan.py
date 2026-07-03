@@ -503,6 +503,7 @@ async def goal_plan_node(state: BuildGraphState) -> dict[str, Any]:
                 instruction, user_id=state.get("user_id") or 1, source="goal_plan",
                 layer="plan" if layered else None,
                 always_only=layered,
+                agent="planner", round=0,
             )
     except Exception as ex:  # noqa: BLE001
         logger.info("goal_plan_node: knowledge injection skipped (%s)", ex)

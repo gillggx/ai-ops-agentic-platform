@@ -726,11 +726,16 @@ async def _build_knowledge_block(
     java, *, user_id: int, query_text: str,
     skill_slug: Optional[str], tool_id: Optional[str], recipe_id: Optional[str],
     layer: Optional[str] = None, limit: int = 3,
+    recalled_out: Optional[list] = None,
 ) -> str:
     """RAG: embed query, fetch top-K most similar knowledge rows, render.
 
     V58: layer ('plan'|'execute'|None) filters by applies_to so the plan and
-    execute agent layers retrieve different slices."""
+    execute agent layers retrieve different slices.
+
+    2026-07-03: when ``recalled_out`` is provided, append one descriptor per
+    recalled row ({id, memo_class, title}) so the caller can log a
+    memory_recall event (Agent Activity page). No behavioural change otherwise."""
     vec = await _embed_query(query_text)
     if vec is None:
         logger.info("_build_knowledge_block: embed returned None — skip")
@@ -767,6 +772,11 @@ async def _build_knowledge_block(
                 await java.bump_knowledge_use(int(rid))
             except Exception:  # noqa: BLE001
                 pass
+        if recalled_out is not None:
+            recalled_out.append({
+                "id": rid, "memo_class": r.get("memo_class"),
+                "title": str(r.get("title") or "")[:60], "layer": "rag",
+            })
     return "\n".join(lines)
 
 

@@ -27,6 +27,8 @@ async def build_knowledge_hint(
     instruction: str, *, user_id: int = 1, source: str = "plan",
     layer: Optional[str] = None, always_only: bool = False,
     include_always_on: bool = True, rag_limit: int = 3,
+    agent: Optional[str] = None, phase_id: Optional[str] = None,
+    round: Optional[int] = None,
 ) -> str:
     """Return a prompt-appendable knowledge block ("" on any failure).
 
@@ -55,6 +57,7 @@ async def build_knowledge_hint(
             timeout_sec=CONFIG.java_timeout_sec,
         )
         sections: list[str] = []
+        recalled: list[dict] = []
 
         # Layer 1: always-on high-priority first-principle rules (layer-filtered).
         if include_always_on:
@@ -72,6 +75,10 @@ async def build_knowledge_hint(
                     body = (r.get("body") or "").strip()
                     if body:
                         lines.append("\n".join(f"    {ln}" for ln in body.split("\n")))
+                    recalled.append({
+                        "id": r.get("id"), "memo_class": r.get("memo_class"),
+                        "title": str(r.get("title") or "")[:60], "layer": "always_on",
+                    })
                 sections.append("\n".join(lines))
 
         # Layer 2: RAG-retrieved (cosine-matched) additional knowledge.
@@ -79,12 +86,26 @@ async def build_knowledge_hint(
             rag_block = await _build_knowledge_block(
                 java, user_id=user_id, query_text=instruction,
                 skill_slug=None, tool_id=None, recipe_id=None,
-                layer=layer, limit=rag_limit,
+                layer=layer, limit=rag_limit, recalled_out=recalled,
             )
             if rag_block:
                 sections.append(rag_block)
         except Exception as ex:  # noqa: BLE001
             logger.info("%s_node: RAG knowledge fetch failed (%s)", source, ex)
+
+        # Agent Activity: log WHICH memories this call referenced (fail-open).
+        if recalled:
+            try:
+                from python_ai_sidecar.observability import get_current_recorder
+                rec = get_current_recorder()
+                if rec is not None:
+                    rec.record("memory_recall",
+                               agent=agent or ("planner" if source == "goal_plan" else "builder"),
+                               phase_id=phase_id,
+                               payload={"layer": layer or source, "round": round,
+                                        "recalled": recalled[:12]})
+            except Exception:  # noqa: BLE001
+                pass
 
         if sections:
             return "\n\n" + "\n\n".join(sections)

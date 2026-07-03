@@ -73,6 +73,7 @@ const KNOWLEDGE_ITEMS = [
 ];
 
 const ADMIN_ITEMS = [
+  { href: "/agent-activity",          label: "Agent Activity",    icon: "◎" },
   { href: "/admin/build-traces",      label: "Build Traces",      icon: "📜" },
   { href: "/admin/block-docs",        label: "Block Docs",        icon: "📖" },
   { href: "/system/data-sources",     label: "Data Sources",      icon: "🗄️" },

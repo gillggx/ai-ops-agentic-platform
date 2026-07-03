@@ -92,3 +92,46 @@ def test_failopen_goes_dead(monkeypatch):
     # dead → all subsequent writes silently skipped, never raise
     assert asyncio.run(w.write_doc_memo(block_id="b", param=None, memo="m",
                                         verdict_context=None)) is False
+
+
+# ── memory_recall capture (Agent Activity Step 1) ──────────────────────
+
+
+def test_memory_recall_emitted_via_recorder(monkeypatch):
+    """build_knowledge_hint records a memory_recall step with recalled rows."""
+    import asyncio as _aio
+    from python_ai_sidecar.agent_builder.graph_build.nodes import _knowledge_inject as ki
+    from python_ai_sidecar.observability.episode_recorder import EpisodeRecorder
+    from python_ai_sidecar.observability import set_current_recorder
+
+    rec = EpisodeRecorder(session_id="ep-recall", instruction="i", user_id=1)
+    set_current_recorder(rec)
+
+    # fake java: 1 high-priority row; RAG appends via recalled_out
+    class _FakeJava:
+        async def list_high_priority_knowledge(self, **kw):
+            return [{"id": 42, "memo_class": "domain", "title": "SPC=站級", "body": "b"}]
+
+    async def _fake_block(java, *, recalled_out=None, **kw):
+        if recalled_out is not None:
+            recalled_out.append({"id": 7, "memo_class": "preference",
+                                 "title": "預設 12h", "layer": "rag"})
+        return "## Retrieved\n  - x"
+
+    monkeypatch.setattr(ki, "JavaAPIClient", lambda *a, **k: _FakeJava(), raising=False)
+    # patch the JavaAPIClient import inside the function + the block builder
+    import python_ai_sidecar.clients.java_client as jc
+    monkeypatch.setattr(jc, "JavaAPIClient", lambda *a, **k: _FakeJava())
+    import python_ai_sidecar.agent_orchestrator_v2.nodes.load_context as lc
+    monkeypatch.setattr(lc, "_build_knowledge_block", _fake_block)
+
+    out = _aio.run(ki.build_knowledge_hint("查 EQP-01 xbar", user_id=1,
+                                           source="goal_plan", agent="planner", round=0))
+    assert "SPC=站級" in out
+    recall = [s for s in rec._buffer if s["event_type"] == "memory_recall"]
+    assert len(recall) == 1
+    ids = {r["id"] for r in recall[0]["payload"]["recalled"]}
+    assert ids == {42, 7}
+    assert recall[0]["agent"] == "planner"
+    assert recall[0]["payload"]["round"] == 0
+    set_current_recorder(None)

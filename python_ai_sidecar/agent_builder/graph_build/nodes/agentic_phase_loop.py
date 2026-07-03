@@ -328,6 +328,8 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
                     phase.get("goal") or state.get("instruction", ""),
                     user_id=state.get("user_id") or 1, source="phase_exec",
                     layer="execute", include_always_on=False, rag_limit=3,
+                    agent="builder", phase_id=phase.get("id"),
+                    round=state.get("v30_phase_round"),
                 )
                 if exec_know:
                     seeded = seeded + exec_know
