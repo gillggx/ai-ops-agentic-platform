@@ -40,3 +40,8 @@ ALTER TABLE agent_knowledge ADD CONSTRAINT agent_knowledge_written_by_check
 ALTER TABLE agent_knowledge DROP CONSTRAINT IF EXISTS agent_knowledge_source_check;
 ALTER TABLE agent_knowledge ADD CONSTRAINT agent_knowledge_source_check
   CHECK (source IN ('manual','auto-promoted','agent_fast','supervisor'));
+
+-- Manual-psql gotcha: applying as postgres superuser leaves the table owned by
+-- postgres → the app role gets "permission denied" (42501). Match existing tables.
+ALTER TABLE supervisor_actions OWNER TO aiops;
+ALTER SEQUENCE supervisor_actions_id_seq OWNER TO aiops;

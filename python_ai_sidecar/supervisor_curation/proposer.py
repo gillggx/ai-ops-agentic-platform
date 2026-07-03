@@ -199,8 +199,13 @@ def _haiku_client():
                     settings.LLM_PROVIDER, settings.LLM_MODEL)
         return get_llm_client()
     if not settings.ANTHROPIC_API_KEY:
-        raise RuntimeError("supervisor curation requires ANTHROPIC_API_KEY "
-                           "when LLM_PROVIDER=anthropic.")
+        # Prod may have the Anthropic key disabled (bake-off key rotation) while
+        # the builder runs via OpenRouter — honour the deployment client rather
+        # than failing the whole offline pass. Haiku is a cost preference, not
+        # a correctness requirement.
+        logger.info("supervisor curation: no ANTHROPIC_API_KEY — falling back "
+                    "to cached client.")
+        return get_llm_client()
     from python_ai_sidecar.agent_helpers_native.llm_client import AnthropicLLMClient
     return AnthropicLLMClient(api_key=settings.ANTHROPIC_API_KEY,
                               model=DEFAULT_LLM_MODEL)

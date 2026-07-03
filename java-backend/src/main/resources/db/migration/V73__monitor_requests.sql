@@ -28,3 +28,7 @@ CREATE TABLE IF NOT EXISTS monitor_requests (
 CREATE UNIQUE INDEX IF NOT EXISTS uq_mr_open
   ON monitor_requests(kind, subject) WHERE status = 'open';
 CREATE INDEX IF NOT EXISTS idx_mr_status ON monitor_requests(status);
+
+-- Manual-psql gotcha: see V72 — own the table as the app role.
+ALTER TABLE monitor_requests OWNER TO aiops;
+ALTER SEQUENCE monitor_requests_id_seq OWNER TO aiops;
