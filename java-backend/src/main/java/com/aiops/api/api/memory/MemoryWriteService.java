@@ -44,10 +44,17 @@ public class MemoryWriteService {
         this.memos = memos;
     }
 
-    /** Create one agent-written knowledge row; dedup by (user, class, title). */
+    /** Create one agent-written knowledge row; dedup by (user, class, title).
+     *
+     * <p>{@code active}: preference/presentation (user-explicit signals) go
+     * live immediately; corrections land as INACTIVE drafts — the 2026-07-03
+     * pollution experiment (0/3 -> 3/3 after deactivation) showed failure-notes
+     * recalled at the execute layer mislead similar builds. Supervisor (Phase 5)
+     * reviews + promotes drafts. */
     @Transactional
     public Map<String, Object> createKnowledge(Long userId, String memoClass, String title,
-                                               String body, String appliesTo, String source) {
+                                               String body, String appliesTo, String source,
+                                               Boolean active) {
         if (userId == null) throw ApiException.badRequest("user_id required");
         if (memoClass == null || !CLASSES.contains(memoClass)) {
             throw ApiException.badRequest("memo_class must be one of " + CLASSES);
@@ -67,7 +74,7 @@ public class MemoryWriteService {
         e.setPriority("med");
         e.setAppliesTo(appliesTo != null && APPLIES.contains(appliesTo) ? appliesTo : "both");
         e.setMemoClass(memoClass);
-        e.setActive(true);                  // E2: effective immediately; Supervisor prunes
+        e.setActive(active == null || active);  // E2-revised: caller decides; default live
         e.setSource(source == null || source.isBlank() ? "agent_fast" : source);
         e = knowledge.save(e);              // embedding NULL → 30s backfill job embeds it
         return Map.of("id", e.getId(), "deduped", false);

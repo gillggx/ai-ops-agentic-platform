@@ -49,7 +49,7 @@ class MemoryWriteServiceTest {
         Map<String, Object> out = service.createKnowledge(
                 1L, "preference", "偏好:預設時間窗 12 小時",
                 "user 在 plan 將 24h 改為 12h(2026-07-03)。**Why:** user 明改。"
-                        + "**How to apply:** 同類需求預設 12h。", "plan", null);
+                        + "**How to apply:** 同類需求預設 12h。", "plan", null, null);
         assertThat(out).containsEntry("deduped", false).containsEntry("id", 9L);
 
         ArgumentCaptor<AgentKnowledgeEntity> cap = ArgumentCaptor.forClass(AgentKnowledgeEntity.class);
@@ -69,18 +69,18 @@ class MemoryWriteServiceTest {
         existing.setId(3L);
         when(knowledge.findFirstByUserIdAndMemoClassAndTitle(1L, "preference", "T"))
                 .thenReturn(Optional.of(existing));
-        Map<String, Object> out = service.createKnowledge(1L, "preference", "T", "b", null, null);
+        Map<String, Object> out = service.createKnowledge(1L, "preference", "T", "b", null, null, null);
         assertThat(out).containsEntry("deduped", true).containsEntry("id", 3L);
         verify(knowledge, never()).save(any());
     }
 
     @Test
     void createKnowledge_rejectsBadClassAndMissingFields() {
-        assertThatThrownBy(() -> service.createKnowledge(1L, "vibes", "t", "b", null, null))
+        assertThatThrownBy(() -> service.createKnowledge(1L, "vibes", "t", "b", null, null, null))
                 .isInstanceOf(ApiException.class);
-        assertThatThrownBy(() -> service.createKnowledge(1L, "domain", " ", "b", null, null))
+        assertThatThrownBy(() -> service.createKnowledge(1L, "domain", " ", "b", null, null, null))
                 .isInstanceOf(ApiException.class);
-        assertThatThrownBy(() -> service.createKnowledge(null, "domain", "t", "b", null, null))
+        assertThatThrownBy(() -> service.createKnowledge(null, "domain", "t", "b", null, null, null))
                 .isInstanceOf(ApiException.class);
     }
 
@@ -88,10 +88,20 @@ class MemoryWriteServiceTest {
     void createKnowledge_defaultsAppliesToBothOnBadValue() {
         when(knowledge.findFirstByUserIdAndMemoClassAndTitle(any(), any(), any()))
                 .thenReturn(Optional.empty());
-        service.createKnowledge(1L, "correction", "t", "b", "weird", null);
+        service.createKnowledge(1L, "correction", "t", "b", "weird", null, null);
         ArgumentCaptor<AgentKnowledgeEntity> cap = ArgumentCaptor.forClass(AgentKnowledgeEntity.class);
         verify(knowledge).save(cap.capture());
         assertThat(cap.getValue().getAppliesTo()).isEqualTo("both");
+    }
+
+    @Test
+    void createKnowledge_correctionDraftWhenActiveFalse() {
+        when(knowledge.findFirstByUserIdAndMemoClassAndTitle(any(), any(), any()))
+                .thenReturn(Optional.empty());
+        service.createKnowledge(1L, "correction", "t", "b", "execute", null, false);
+        ArgumentCaptor<AgentKnowledgeEntity> cap = ArgumentCaptor.forClass(AgentKnowledgeEntity.class);
+        verify(knowledge).save(cap.capture());
+        assertThat(cap.getValue().getActive()).isFalse();   // draft until Supervisor promotes
     }
 
     @Test

@@ -30,7 +30,8 @@ public class InternalMemoryController {
                 s(body.get("title")),
                 s(body.get("body")),
                 s(body.get("applies_to")),
-                s(body.get("source"))));
+                s(body.get("source")),
+                body.get("active") == null ? null : Boolean.valueOf(String.valueOf(body.get("active")))));
     }
 
     @PostMapping("/doc-memos")

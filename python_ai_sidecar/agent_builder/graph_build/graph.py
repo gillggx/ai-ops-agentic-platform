@@ -652,10 +652,13 @@ def build_graph():
                 result = "handover" if patch.get("v30_handover") else "retry"
                 rec.record("repair_outcome", agent="repair", phase_id=pid,
                            payload={"result": result})
-                # W3 (memory layer): root-cause correction, tagged for the
-                # execute layer (block/param-level causes dominate here).
+                # W3 (memory layer): root-cause correction — DRAFT ONLY and
+                # only when the self-fix SUCCEEDED (retry). The 2026-07-03
+                # pollution experiment showed live failure-notes (esp. handover)
+                # recalled at execute layer flip similar builds 3/3->0/3.
+                # Supervisor reviews + promotes drafts (Phase 5).
                 mw = get_current_memory_writer()
-                if mw is not None and pid:
+                if mw is not None and pid and result == "retry":
                     _rej = state.get("v30_last_verifier_reject") or {}
                     _goal = ""
                     _phases = state.get("v30_phases") or []
@@ -664,6 +667,7 @@ def build_graph():
                         _goal = str(_phases[_idx].get("goal") or "")[:150]
                     await mw.write_knowledge(
                         memo_class="correction",
+                        active=False,  # draft — Supervisor promotes
                         title=f"[repair·{result}] {pid}: {_goal[:70]}",
                         body=(
                             f"phase {pid}(goal:{_goal})round 用盡進入 repair,"
