@@ -19,9 +19,28 @@ import argparse
 import asyncio
 import os
 import sys
+from pathlib import Path
+
+
+def _load_sidecar_env() -> None:
+    """Load python_ai_sidecar/.env (systemd loads it for the service; a CLI
+    run does not, so get_settings() would otherwise see defaults — the first
+    prod run hit exactly this). Existing env vars win."""
+    env = Path(__file__).resolve().parents[2] / "python_ai_sidecar" / ".env"
+    if not env.is_file():
+        return
+    for line in env.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        k, v = k.strip(), v.strip().strip('"').strip("'")
+        if k and k not in os.environ:
+            os.environ[k] = v
 
 
 def main() -> int:
+    _load_sidecar_env()
     ap = argparse.ArgumentParser(description="Run one supervisor curation pass")
     ap.add_argument("--java-base", default=os.environ.get(
         "JAVA_API_URL", "http://localhost:8002").rstrip("/"))
