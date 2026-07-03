@@ -18,11 +18,11 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/v1/monitor")
 @PreAuthorize(Authorities.ADMIN_OR_PE)
-public class MonitorController {
+public class MonitorRequestController {
 
     private final MonitorService service;
 
-    public MonitorController(MonitorService service) {
+    public MonitorRequestController(MonitorService service) {
         this.service = service;
     }
 
