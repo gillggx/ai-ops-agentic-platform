@@ -124,6 +124,9 @@
     <tr><td>07-03</td><td><b>Agent Activity 視覺化</b>:<code>/agent-activity</code> 頁 — Tab A Trace 明細(逐 phase/round 的 prompt+output,每輪標注引用了哪幾條 memory)+ Tab B 時間軸 + Tab C 記分板;sidecar 補 <code>memory_recall</code> 事件(agent+phase+round+recalled[])、Java <code>rounds()</code> 併 trace JSON × 召回記憶。修 merge key 正規化(planner goal_plan trace phase/round=null vs step phase=""/round=0)</td>
         <td><span class="badge ok">strict 16 MATCH/1 FAIL(patrol-status,基線同一 flaky)= 零回歸</span> · Java 6/6 + sidecar 7/7 · E2E:ep111 goal_plan recalled=12(always_on 記憶,無需 LLM 驗證) · prod DB 55 memory_recall steps</td>
         <td><code>af1e9366</code> <code>977e8412</code></td></tr>
+    <tr><td>07-04</td><td><b>Memory 來源歸屬「誰寫的」</b>:V71 <code>agent_knowledge.written_by</code>(planner/builder/repair/human)+ 寫入端蓋章(W1→planner、W3→repair、manual→human)+ KnowledgeDto 補 written_by/memo_class/applies_to/always_on + Builder 記憶讀 API(<code>/agent-knowledge/doc-memos</code>)+ <code>/agent-knowledge</code> 頁 agent×class 雙 filter</td>
+        <td><span class="badge ok">Java 14/14 + sidecar 7/7</span> · V71 已套(26 human/22 legacy)· E2E:internal write 蓋 planner 落庫 · API 回 written_by · 16 builder doc-memos</td>
+        <td><code>6f8e604b</code></td></tr>
   </tbody>
 </table>
 
