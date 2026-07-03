@@ -60,11 +60,20 @@ CREATE INDEX idx_bdm_block_status ON block_doc_memos(block_id, status);
 
 ### 3.2 寫入路徑(填 Phase 0 預留的 record-hook 插槽)
 
-| # | Agent | 觸發(graph 事件,觀測層已在偵測) | 寫什麼 | 去哪 |
-|---|---|---|---|---|
-| W1 | Planner | confirm gate 有 user edit(現有 plan_user_edited 的來源) | 決策樹分類 → preference / presentation / correction(帶 from/to + why=user 明改) | agent_knowledge(user 域) |
-| W2 | Builder | phase_done 且該 phase 有 verifier rejects(現有 param_reject_fix 的來源) | block/param + 錯法 + 過法摘要 | **block_doc_memos**(pending) |
-| W3 | Repair | repair_outcome | 根因摘要 correction,`applies_to` 標 plan/execute | agent_knowledge |
+| # | Agent | 觸發(graph 事件,觀測層已在偵測) | 寫什麼 | 去哪 | user 輸入來源(介面) |
+|---|---|---|---|---|---|
+| W1 | Planner | confirm gate 有 user edit(現有 plan_user_edited 的來源) | 決策樹分類 → preference / presentation / correction(帶 from/to + why=user 明改) | agent_knowledge(user 域) | **已有介面**:GoalPlanCard 可編輯 phase |
+| W2 | Builder | phase_done 且該 phase 有 verifier rejects(現有 param_reject_fix 的來源) | block/param + 錯法 + 過法摘要 | **block_doc_memos**(pending) | 無(系統事件,不需 user 輸入) |
+| W3 | Repair | repair_outcome | 根因摘要 correction,`applies_to` 標 plan/execute | agent_knowledge | 無(本階段=自省觸發;post-delivery 文字已有三鍵介面) |
+
+**介面需求清單(user 要 input 的都在此)**:
+
+| 輸入 | 介面 | 狀態 |
+|---|---|---|
+| 編輯 plan phase(W1 來源) | Builder GoalPlanCard | **已有** |
+| 交付後三鍵 + reject 一句話 | V30 done banner EpisodeFeedbackBar | **已有**(觀測層交付) |
+| doc 備忘審核(promote / discard) | 審核佇列 UI(BlockDocsDrawer 徽章 + 列表) | **⚠ 需要介面,後續**(E3;v1 先進 Supervisor 報告) |
+| Supervisor 草案人審(高風險 CORRECT/DOC_GAP) | 草案 review UI | **⚠ 需要介面,Phase 5** |
 
 - **分類決策樹(deterministic,不讓 LLM 挑)**:edit 動到 expected/圖種字樣 →
   presentation;動到時間窗/機台/範圍等慣性參數 → preference;否則 → correction。
