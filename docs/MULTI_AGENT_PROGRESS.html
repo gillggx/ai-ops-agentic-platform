@@ -54,7 +54,7 @@
 <header class="hero">
   <div class="kic">Multi-Agent Programme · Progress</div>
   <h1>Multi-Agent 進度總表</h1>
-  <div class="sub">對照 <code>AGENT_HARNESS_DESIGN.html</code> 大項的完成度 · 每次交付後更新 · Updated 2026-07-02</div>
+  <div class="sub">對照 <code>AGENT_HARNESS_DESIGN.html</code> 大項的完成度 · 每次交付後更新 · Updated 2026-07-04</div>
 </header>
 
 <!-- 0 overall -->
@@ -72,14 +72,14 @@
         <td>100%（本階段範圍）<div class="bar"><i style="width:100%"></i></div></td>
         <td>V70 + W1/W2/W3 寫入;<b>D3 閉環實證 + D5 自然 memo + D10 16/17 zero-regression</b>;含污染事件因果實驗與修正</td></tr>
     <tr><td><b>Supervisor curation</b></td>
-        <td>~10%<div class="bar"><i style="width:10%"></i></div></td>
-        <td>讀側報告有了;MERGE/CORRECT/PRUNE/PROMOTE 寫側全未做（Phase 5）</td></tr>
+        <td>100%（v1 範圍）<div class="bar"><i style="width:100%"></i></div></td>
+        <td>V72 提案佇列 + MERGE/CORRECT/PRUNE/PROMOTE/DOC_REVISE 五操作(propose-only,人工核准才 commit)+ <code>/supervisor</code> 審核頁;E2E:第一筆 domain 記憶已由 PROMOTE 產生</td></tr>
     <tr><td><b>指揮層(monitor requesters)</b></td>
-        <td>0%（spec PARKED）<div class="bar"><i style="width:2%"></i></div></td>
-        <td>依決策排在觀測階段之後</td></tr>
+        <td>100%（A 版:自省觸發器）<div class="bar"><i style="width:100%"></i></div></td>
+        <td>V73 確定性指標掃描(DOC_GAP/DIVERGENCE/REPAIR_HANDOVER,無 LLM)→ 改善請求佇列 → 核准取得 Planner 指令;E2E:3 請求 filed + 核准回指令</td></tr>
   </tbody>
 </table>
-<div class="callout key"><b>整體約 60%</b>:「神經系統」接近完工、「大腦寫入」尚未開始 — 這是刻意順序:沒有 episodic 原料,蒸餾不出記憶;原料管線本次交付已打通。</div>
+<div class="callout key"><b>整體約 95%(v1 藍圖)</b>:五層全通 — 骨架 → 神經系統 → 記憶寫入 → 大腦寫回(蒸餾) → 自省指揮。剩餘為深化項:Supervisor 排程化、DOC_REVISE 草案一鍵併入 block_docs、monitor approve 直發 Planner(目前為複製指令)。</div>
 
 <!-- 1 harness sections -->
 <h2><span class="n">1</span>對照 AGENT_HARNESS_DESIGN 各大項</h2>
@@ -87,16 +87,16 @@
   <thead><tr><th>§</th><th>大項</th><th class="mid">完成度</th><th>缺什麼</th></tr></thead>
   <tbody>
     <tr><td>2</td><td>Harness 10 構件</td><td class="mid"><span class="badge part">~70%</span></td><td>prompt 本體仍在 node;元素 9(memory read)/10(record hooks)空插槽</td></tr>
-    <tr><td>3</td><td>Memory 6 class × 3 軸</td><td class="mid"><span class="badge todo">設計✔ 實作0%</span></td><td><code>agent_knowledge.class</code> 欄未加(Phase 3)</td></tr>
-    <tr><td>4</td><td>Fast / 蒸餾 兩種學習速度</td><td class="mid"><span class="badge todo">~20%</span></td><td>兩路都還不會「寫」;蒸餾只有讀側</td></tr>
+    <tr><td>3</td><td>Memory 6 class × 3 軸</td><td class="mid"><span class="badge ok">~90%</span></td><td>memo_class(V70)+ written_by(V71)上線;6/6 class 都有寫入路徑(domain/procedure 走 Supervisor PROMOTE)</td></tr>
+    <tr><td>4</td><td>Fast / 蒸餾 兩種學習速度</td><td class="mid"><span class="badge ok">~90%</span></td><td>fast-path W1/W2/W3 上線;蒸餾 = Supervisor 五操作(propose-only)上線;缺排程化(目前手動觸發)</td></tr>
     <tr><td>5</td><td>每 Agent 的 Harness</td><td class="mid"><span class="badge part">~50%</span></td><td>memory chips、L2 裁判 gate</td></tr>
     <tr><td>6</td><td>互動迴路</td><td class="mid"><span class="badge part">~40%</span></td><td>L2 語意裁判 / REPLAN / feedback 觸發 Repair;monitor requesters</td></tr>
-    <tr><td>9</td><td><b>3 Agent × 6 Class 矩陣</b></td><td class="mid"><span class="badge part">4/6 class 有寫入</span></td><td>episodic 全通;preference/presentation/correction fast-path <b>已上線且閉環實證</b>;domain/procedure 仍待 Supervisor 蒸餾(⑤)</td></tr>
-    <tr><td>10</td><td>Builder 文件備忘</td><td class="mid"><span class="badge part">~80%</span></td><td>表+寫入+report section 上線(sink e2e 過);待第一顆自然案例(reject→pass)</td></tr>
-    <tr><td>11</td><td>Supervisor 6 操作</td><td class="mid"><span class="badge todo">~10%</span></td><td>只有 DOC_GAP 查詢;所有寫側操作</td></tr>
+    <tr><td>9</td><td><b>3 Agent × 6 Class 矩陣</b></td><td class="mid"><span class="badge ok">6/6 class 有寫入</span></td><td>episodic 全通;pref/pres/corr fast-path 閉環實證;<b>domain/procedure 由 Supervisor PROMOTE 產生(07-04 第一筆 domain id 64)</b>;寫入者歸屬 written_by 全鏈上線</td></tr>
+    <tr><td>10</td><td>Builder 文件備忘</td><td class="mid"><span class="badge ok">~95%</span></td><td>表+寫入+report+<b>DOC_REVISE 審核流上線(memos→promoted)</b>;剩草案一鍵併入 block_docs 編輯器</td></tr>
+    <tr><td>11</td><td>Supervisor 6 操作</td><td class="mid"><span class="badge ok">~85%</span></td><td>MERGE/CORRECT/PRUNE/PROMOTE/DOC_REVISE 全上線(propose-only + 人工核准);缺排程化與跨 user 治理</td></tr>
     <tr><td>12</td><td>B:4 Agent 記錄行為</td><td class="mid"><span class="badge part">~70%(trace 級)</span></td><td>「LLM 填 memo 模板」(Phase 4);doc_mismatch 事件</td></tr>
     <tr><td>13</td><td><b>C:Episode Trace</b></td><td class="mid"><span class="badge ok">~95%</span></td><td>latency 欄未填值;doc_mismatch 事件。<b>已有 <code>/agent-activity</code> 視覺化(逐輪 prompt/output + 引用記憶)</b></td></tr>
-    <tr><td>14</td><td>Q4 落地順序</td><td class="mid"><span class="badge run">①②③④完成</span></td><td>⑤ Supervisor 蒸餾/curation</td></tr>
+    <tr><td>14</td><td>Q4 落地順序</td><td class="mid"><span class="badge ok">①②③④⑤全完成</span></td><td>v1 藍圖收斂;後續為深化(排程化/直發 Planner/草案併入)</td></tr>
   </tbody>
 </table>
 
@@ -127,37 +127,45 @@
     <tr><td>07-04</td><td><b>Memory 來源歸屬「誰寫的」</b>:V71 <code>agent_knowledge.written_by</code>(planner/builder/repair/human)+ 寫入端蓋章(W1→planner、W3→repair、manual→human)+ KnowledgeDto 補 written_by/memo_class/applies_to/always_on + Builder 記憶讀 API(<code>/agent-knowledge/doc-memos</code>)+ <code>/agent-knowledge</code> 頁 agent×class 雙 filter</td>
         <td><span class="badge ok">Java 14/14 + sidecar 7/7</span> · V71 已套(26 human/22 legacy)· E2E:internal write 蓋 planner 落庫 · API 回 written_by · 16 builder doc-memos</td>
         <td><code>6f8e604b</code></td></tr>
+    <tr><td>07-04</td><td><b>Phase 5 Supervisor 蒸餾(寫回)</b>:V72 <code>supervisor_actions</code> 提案佇列;五操作 MERGE/CORRECT/PRUNE/PROMOTE/DOC_REVISE — <b>propose-only</b>(污染事件教訓),人工在 <code>/supervisor</code> 核准才 commit;sidecar 離線 proposer(<code>tools/supervisor_curate</code>,原則式 prompt + 確定性驗證擋幻覺 id)+ PROMOTE 產 domain/procedure(written_by=supervisor)</td>
+        <td><span class="badge ok">E2E 全過</span> 13 提案入佇列 · approve PROMOTE → <b>第一筆 domain 記憶(id 64)</b> · approve DOC_REVISE → memos promoted、block_docs 未動 · reject → DB 未動 · Java 11/11 + sidecar 10/10</td>
+        <td><code>cb1c93ab</code></td></tr>
+    <tr><td>07-04</td><td><b>Phase 6 Monitor 指揮層(A 版:自省觸發器)</b>:V73 <code>monitor_requests</code>;確定性掃描(無 LLM)三指標 — DOC_GAP(block ≥3 pending memo)/ DIVERGENCE(7天 ≥2)/ REPAIR_HANDOVER(7天 ≥3)→ 改善請求 → 人工核准取得 Planner 指令;<code>/supervisor</code> 頁雙區(蒸餾提案+改善請求)</td>
+        <td><span class="badge ok">E2E 全過</span> scan 產 3 請求(2 DOC_GAP + 1 REPAIR_HANDOVER 14次/7天)· approve 回建議指令 · dedup 生效 · Java 5/5</td>
+        <td><code>cb1c93ab</code> <code>1b60367b</code></td></tr>
   </tbody>
 </table>
 
 <!-- 3 matrix live view -->
 <h2><span class="n">3</span>§9 矩陣即時狀態(3 Agent × 6 Class)</h2>
-<pre>class:        domain   preference   presentation   correction   episodic                    procedure
-Planner  讀     ⬜         ⬜            ⬜             ⬜          —                           ⬜
-Planner  寫     —          ⬜fast        ⬜fast         ⬜fast      ✅ plan_proposed/edited/replan
-Builder  讀     ⬜         —             ⬜             ⬜          —                           ⬜
-Builder  寫     —          —             —              —           ✅ picked/reject/phase_done
-Repair   讀     ⬜         ⬜            ⬜             ⬜          —                           ⬜
-Repair   寫     —          ⬜            ⬜             ⬜(主)      ✅ triggered/outcome</pre>
-<div class="callout key"><b>episodic 欄本次全線打通</b>(且比設計多了 per-agent 成本歸因與 divergence);其餘 5 class 等 Phase 3(schema)+ Phase 4(record hooks 填插槽),骨架不再動。</div>
+<pre>class:        domain        preference     presentation   correction      episodic                       procedure
+Planner  讀    [ON] RAG      [ON] RAG       [ON] RAG       [ON] tag=plan   —                              [ON] RAG(S產出後)
+Planner  寫    —             [ON] W1 fast   [ON] W1 fast   [ON] W1 fast    [ON] plan_proposed/edited      —
+Builder  讀    [ON] RAG      —              [ON] RAG       [ON] tag=exec   —                              [ON] RAG(S產出後)
+Builder  寫    —             —              —              —               [ON] picked/reject/phase_done  —
+Repair   讀    [ON] RAG      [ON] RAG      [ON] RAG        [ON]            —                              [ON]
+Repair   寫    —             —              —               [ON] W3 draft   [ON] triggered/outcome         —
+Superv.  寫    [ON] PROMOTE  (MERGE 治理)  (MERGE 治理)    [ON] CORRECT    — (讀原料)                     [ON] PROMOTE</pre>
+<div class="callout key"><b>6/6 class 全有寫入路徑</b>:fast-path(W1/W2/W3)+ Supervisor 蒸餾(PROMOTE 產 domain/procedure — 07-04 第一筆 domain id 64);讀側 memory_recall 事件全程可觀測(/agent-activity),寫入者 written_by 可歸屬(/agent-knowledge)。</div>
 
 <!-- 4 next -->
-<h2><span class="n">4</span>下一步(Q4 順序)</h2>
+<h2><span class="n">4</span>Q4 順序(全完成)+ 深化 backlog</h2>
 <table>
   <thead><tr><th>#</th><th>內容</th><th>狀態</th></tr></thead>
   <tbody>
     <tr><td>①</td><td>feedback channel + divergence(C#1+#2)</td><td class="mid"><span class="badge ok">完成</span></td></tr>
-    <tr><td>②</td><td>agent_knowledge 加 <code>class</code> 欄 + <code>block_doc_memos</code> 表</td><td class="mid"><span class="badge todo">next</span></td></tr>
-    <tr><td>③</td><td>Planner preference/presentation fast-path(第一個真「寫記憶」)</td><td class="mid"><span class="badge todo">—</span></td></tr>
-    <tr><td>④</td><td>Builder 文件備忘 + Repair correction(填元素 10)</td><td class="mid"><span class="badge todo">—</span></td></tr>
-    <tr><td>⑤</td><td>Supervisor 蒸餾 + curation(MERGE/CORRECT/PRUNE/PROMOTE)</td><td class="mid"><span class="badge todo">—</span></td></tr>
-    <tr><td>後</td><td>業務監控平面(monitor requesters,spec PARKED)</td><td class="mid"><span class="badge todo">—</span></td></tr>
+    <tr><td>②</td><td>agent_knowledge 加 <code>memo_class</code> + <code>block_doc_memos</code> 表(V70)</td><td class="mid"><span class="badge ok">完成</span></td></tr>
+    <tr><td>③</td><td>Planner preference/presentation fast-path(W1)</td><td class="mid"><span class="badge ok">完成</span></td></tr>
+    <tr><td>④</td><td>Builder 文件備忘(W2)+ Repair correction(W3)</td><td class="mid"><span class="badge ok">完成</span></td></tr>
+    <tr><td>⑤</td><td>Supervisor 蒸餾 + curation(五操作,propose-only)</td><td class="mid"><span class="badge ok">完成 07-04</span></td></tr>
+    <tr><td>⑥</td><td>Monitor 指揮層 A 版(自省觸發器,V73)</td><td class="mid"><span class="badge ok">完成 07-04</span></td></tr>
+    <tr><td>後</td><td>深化:curation/scan 排程化(cron)· DOC_REVISE 草案一鍵併入 block_docs · monitor approve 直發 Planner · Supervisor 跨 user 治理</td><td class="mid"><span class="badge todo">backlog</span></td></tr>
   </tbody>
 </table>
 
 <footer>
   來源文件:<code>AGENT_HARNESS_DESIGN.html</code>(設計)· <code>MULTI_AGENT_PHASE0_SPEC.md</code>(A1–A10)·
-  <code>MULTI_AGENT_OBSERVABILITY_SPEC.md</code>(C1–C11)。本頁隨每次交付更新。Updated 2026-07-02(Step 8 閘門進行中,數字待補)。
+  <code>MULTI_AGENT_OBSERVABILITY_SPEC.md</code>(C1–C11)。本頁隨每次交付更新。Updated 2026-07-04(Phase 5+6 交付;SLASH-17 閘門數字見 §2)。
 </footer>
 
 </div>
