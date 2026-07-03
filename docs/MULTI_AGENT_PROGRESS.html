@@ -69,8 +69,8 @@
         <td>100%（本階段範圍）<div class="bar"><i style="width:100%"></i></div></td>
         <td>Episode/steps 進 PG、per-agent 成本歸因、feedback 三鍵、divergence、Supervisor v1 報告 — <b>驗收 C1–C11 全過</b></td></tr>
     <tr><td><b>記憶層(會寫筆記)</b></td>
-        <td>0%（設計 100%）<div class="bar"><i style="width:4%"></i></div></td>
-        <td>6 class schema / doc 備忘表 / record hooks 皆未實作（Phase 3/4）</td></tr>
+        <td>~85%<div class="bar"><i style="width:85%"></i></div></td>
+        <td>V70 schema + W1/W2/W3 寫入上線;<b>D3 學習閉環已實證(uses=1)</b>;缺 D5 自然案例 + D10 全套(key 額度)</td></tr>
     <tr><td><b>Supervisor curation</b></td>
         <td>~10%<div class="bar"><i style="width:10%"></i></div></td>
         <td>讀側報告有了;MERGE/CORRECT/PRUNE/PROMOTE 寫側全未做（Phase 5）</td></tr>
@@ -79,7 +79,7 @@
         <td>依決策排在觀測階段之後</td></tr>
   </tbody>
 </table>
-<div class="callout key"><b>整體約 45–50%</b>:「神經系統」接近完工、「大腦寫入」尚未開始 — 這是刻意順序:沒有 episodic 原料,蒸餾不出記憶;原料管線本次交付已打通。</div>
+<div class="callout key"><b>整體約 55–60%</b>:「神經系統」接近完工、「大腦寫入」尚未開始 — 這是刻意順序:沒有 episodic 原料,蒸餾不出記憶;原料管線本次交付已打通。</div>
 
 <!-- 1 harness sections -->
 <h2><span class="n">1</span>對照 AGENT_HARNESS_DESIGN 各大項</h2>
@@ -91,12 +91,12 @@
     <tr><td>4</td><td>Fast / 蒸餾 兩種學習速度</td><td class="mid"><span class="badge todo">~20%</span></td><td>兩路都還不會「寫」;蒸餾只有讀側</td></tr>
     <tr><td>5</td><td>每 Agent 的 Harness</td><td class="mid"><span class="badge part">~50%</span></td><td>memory chips、L2 裁判 gate</td></tr>
     <tr><td>6</td><td>互動迴路</td><td class="mid"><span class="badge part">~40%</span></td><td>L2 語意裁判 / REPLAN / feedback 觸發 Repair;monitor requesters</td></tr>
-    <tr><td>9</td><td><b>3 Agent × 6 Class 矩陣</b></td><td class="mid"><span class="badge part">1/6 class</span></td><td><b>episodic 欄全通</b>(+成本歸因);其餘 5 class 讀寫皆未做</td></tr>
-    <tr><td>10</td><td>Builder 文件備忘</td><td class="mid"><span class="badge todo">0%(原料通)</span></td><td><code>block_doc_memos</code> 表;verifier_reject/param_reject_fix 事件已在流</td></tr>
+    <tr><td>9</td><td><b>3 Agent × 6 Class 矩陣</b></td><td class="mid"><span class="badge part">4/6 class 有寫入</span></td><td>episodic 全通;preference/presentation/correction fast-path <b>已上線且閉環實證</b>;domain/procedure 仍待 Supervisor 蒸餾(⑤)</td></tr>
+    <tr><td>10</td><td>Builder 文件備忘</td><td class="mid"><span class="badge part">~80%</span></td><td>表+寫入+report section 上線(sink e2e 過);待第一顆自然案例(reject→pass)</td></tr>
     <tr><td>11</td><td>Supervisor 6 操作</td><td class="mid"><span class="badge todo">~10%</span></td><td>只有 DOC_GAP 查詢;所有寫側操作</td></tr>
     <tr><td>12</td><td>B:4 Agent 記錄行為</td><td class="mid"><span class="badge part">~70%(trace 級)</span></td><td>「LLM 填 memo 模板」(Phase 4);doc_mismatch 事件</td></tr>
     <tr><td>13</td><td><b>C:Episode Trace</b></td><td class="mid"><span class="badge ok">~95%</span></td><td>latency 欄未填值;doc_mismatch 事件</td></tr>
-    <tr><td>14</td><td>Q4 落地順序</td><td class="mid"><span class="badge run">①完成</span></td><td>② class欄+備忘表 → ③④⑤</td></tr>
+    <tr><td>14</td><td>Q4 落地順序</td><td class="mid"><span class="badge run">①②③④完成</span></td><td>⑤ Supervisor 蒸餾/curation</td></tr>
   </tbody>
 </table>
 
@@ -116,6 +116,9 @@
     <tr><td>07-02</td><td><b>觀測 Steps 6–7</b>:feedback 三鍵 + divergence + Supervisor v1 報告</td>
         <td><span class="badge ok">e2e:reject→divergence=true;第一份報告產出</span></td>
         <td><code>b1ea40cf</code></td></tr>
+    <tr><td>07-03</td><td><b>記憶層</b>:V70(memo_class+doc備忘表)+ W1/W2/W3 fast-path 寫入 + 學習閉環</td>
+        <td><span class="badge ok">D1–D9 過</span> D3 閉環實證(uses=1)· D5 自然案例/D10 全套待 key 補額</td>
+        <td><code>d126e2e2</code></td></tr>
     <tr><td>07-02</td><td><b>觀測 Step 8</b>:前端部署 + 全套 SLASH-17 閘門(flag ON)+ 驗收 C1–C11</td>
         <td><span class="badge ok">C1–C11 全過</span> 17/17 · strict 16 MATCH+1 OVER · cache 49.7% · overhead 量測不到 · 23 episodes/750 steps</td><td><code>b1ea40cf</code></td></tr>
   </tbody>
