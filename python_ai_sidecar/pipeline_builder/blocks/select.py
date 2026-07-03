@@ -73,6 +73,12 @@ class SelectBlockExecutor(BlockExecutor):
                     hint=f"Available top-level: {list(df.columns)[:10]}",
                 ) from None
             name = f.get("as") or path.rsplit(".", 1)[-1].replace("[]", "")
+            # Duplicate column labels in the input make pandas hand back a
+            # DataFrame here — its 2-D .values crashes pd.DataFrame(out_cols)
+            # with "Per-column arrays must each be 1-dimensional" (spc-ooc
+            # gate, 2026-07-04). Take the first occurrence deterministically.
+            if isinstance(series, pd.DataFrame):
+                series = series.iloc[:, 0]
             out_cols[name] = series.values
 
         out = pd.DataFrame(out_cols)
