@@ -84,7 +84,8 @@ class MemoryWriter:
 
     # ── W1 / W3: agent_knowledge fast-path ─────────────────────────────
     async def write_knowledge(self, *, memo_class: str, title: str, body: str,
-                              applies_to: str = "both", active: bool = True) -> bool:
+                              applies_to: str = "both", active: bool = True,
+                              written_by: Optional[str] = None) -> bool:
         if self._dead or self._knowledge_written >= MAX_KNOWLEDGE_PER_BUILD:
             return False
         try:
@@ -96,6 +97,7 @@ class MemoryWriter:
                 "applies_to": applies_to,
                 "source": "agent_fast",
                 "active": active,
+                "written_by": written_by,  # V71: planner (W1) | repair (W3)
             })
             self._knowledge_written += 1
             return True

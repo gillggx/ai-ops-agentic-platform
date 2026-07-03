@@ -562,6 +562,7 @@ def build_graph():
                                     f"預設採用修改後的表述/參數。"
                                 ),
                                 applies_to="plan",
+                                written_by="planner",  # W1
                             )
             phases = patch.get("v30_phases") or state.get("v30_phases") or []
             rec.record("plan_confirmed", agent="planner", payload={
@@ -677,6 +678,7 @@ def build_graph():
                             f"**How to apply:** 同類 phase 建置時避開此失敗路徑。"
                         ),
                         applies_to="execute",
+                        written_by="repair",  # W3
                     )
                 await rec.maybe_flush()
             return patch

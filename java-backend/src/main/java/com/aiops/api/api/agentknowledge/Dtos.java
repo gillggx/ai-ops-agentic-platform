@@ -8,6 +8,19 @@ import java.time.OffsetDateTime;
 public final class Dtos {
     private Dtos() {}
 
+    /** Builder's doc sticky-notes (block_doc_memos) — surfaced read-only on the
+     *  /agent-knowledge page as the Builder's memory (writtenBy is implicitly
+     *  'builder' by virtue of the table). Review queue; never mutates block_docs. */
+    public record DocMemoDto(
+            Long id, String blockId, String param, String memo,
+            String status, String fromEpisode, OffsetDateTime createdAt
+    ) {
+        public static DocMemoDto of(BlockDocMemoEntity e) {
+            return new DocMemoDto(e.getId(), e.getBlockId(), e.getParam(), e.getMemo(),
+                    e.getStatus(), e.getFromEpisode(), e.getCreatedAt());
+        }
+    }
+
     public record DirectiveDto(
             Long id, String scopeType, String scopeValue,
             String title, String body, String priority,
@@ -42,12 +55,14 @@ public final class Dtos {
             Long id, String scopeType, String scopeValue,
             String title, String body, String priority,
             Boolean active, String source,
+            String memoClass, String writtenBy, String appliesTo, Boolean alwaysOn,
             Integer uses, OffsetDateTime lastUsedAt,
             OffsetDateTime createdAt, OffsetDateTime updatedAt
     ) {
         public static KnowledgeDto of(AgentKnowledgeEntity e) {
             return new KnowledgeDto(e.getId(), e.getScopeType(), e.getScopeValue(),
                     e.getTitle(), e.getBody(), e.getPriority(), e.getActive(), e.getSource(),
+                    e.getMemoClass(), e.getWrittenBy(), e.getAppliesTo(), e.getAlwaysOn(),
                     e.getUses(), e.getLastUsedAt(), e.getCreatedAt(), e.getUpdatedAt());
         }
     }

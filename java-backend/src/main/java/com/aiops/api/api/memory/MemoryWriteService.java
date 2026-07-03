@@ -35,6 +35,7 @@ public class MemoryWriteService {
     private static final Set<String> CLASSES = Set.of(
             "domain", "preference", "presentation", "correction", "episodic", "procedure");
     private static final Set<String> APPLIES = Set.of("plan", "execute", "both");
+    private static final Set<String> WRITERS = Set.of("planner", "builder", "repair", "human");
 
     private final AgentKnowledgeRepository knowledge;
     private final BlockDocMemoRepository memos;
@@ -54,7 +55,7 @@ public class MemoryWriteService {
     @Transactional
     public Map<String, Object> createKnowledge(Long userId, String memoClass, String title,
                                                String body, String appliesTo, String source,
-                                               Boolean active) {
+                                               Boolean active, String writtenBy) {
         if (userId == null) throw ApiException.badRequest("user_id required");
         if (memoClass == null || !CLASSES.contains(memoClass)) {
             throw ApiException.badRequest("memo_class must be one of " + CLASSES);
@@ -74,6 +75,9 @@ public class MemoryWriteService {
         e.setPriority("med");
         e.setAppliesTo(appliesTo != null && APPLIES.contains(appliesTo) ? appliesTo : "both");
         e.setMemoClass(memoClass);
+        // V71 provenance: unknown/invalid → NULL (honest "unclassified") rather
+        // than a guessed default. Callers (W1/W3) pass planner/repair explicitly.
+        e.setWrittenBy(writtenBy != null && WRITERS.contains(writtenBy) ? writtenBy : null);
         e.setActive(active == null || active);  // E2-revised: caller decides; default live
         e.setSource(source == null || source.isBlank() ? "agent_fast" : source);
         e = knowledge.save(e);              // embedding NULL → 30s backfill job embeds it

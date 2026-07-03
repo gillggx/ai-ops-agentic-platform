@@ -50,7 +50,7 @@ def test_knowledge_cap_and_payload(monkeypatch):
         "python_ai_sidecar.observability.memory_writer.MAX_KNOWLEDGE_PER_BUILD", 2)
 
     ok1 = asyncio.run(w.write_knowledge(memo_class="preference", title="t1", body="b",
-                                        applies_to="plan"))
+                                        applies_to="plan", written_by="planner"))
     ok2 = asyncio.run(w.write_knowledge(memo_class="correction", title="t2", body="b"))
     ok3 = asyncio.run(w.write_knowledge(memo_class="domain", title="t3", body="b"))
     assert (ok1, ok2, ok3) == (True, True, False)   # cap=2
@@ -59,6 +59,7 @@ def test_knowledge_cap_and_payload(monkeypatch):
     assert calls[0][1]["memo_class"] == "preference"
     assert calls[0][1]["applies_to"] == "plan"
     assert calls[0][1]["source"] == "agent_fast"
+    assert calls[0][1]["written_by"] == "planner"  # V71 provenance
 
 
 def test_doc_memo_cap_and_provenance(monkeypatch):

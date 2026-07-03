@@ -38,6 +38,15 @@ public class AgentKnowledgeService {
 	private final AgentLexiconRepository lexiconRepo;
 	private final AgentKnowledgeRepository knowledgeRepo;
 	private final AgentExampleRepository exampleRepo;
+	private final BlockDocMemoRepository docMemoRepo;
+
+	/** Builder's doc sticky-notes — read-only "Builder memory" for the
+	 *  /agent-knowledge page. Newest first, capped. */
+	@Transactional(readOnly = true)
+	public List<Dtos.DocMemoDto> listDocMemos() {
+		return docMemoRepo.findTop200ByOrderByIdDesc()
+				.stream().map(Dtos.DocMemoDto::of).toList();
+	}
 
 	// ══════════════════════════════════════════════════════════════════════
 	// Directives
@@ -163,6 +172,7 @@ public class AgentKnowledgeService {
 		e.setTitle(req.title());
 		e.setBody(req.body());
 		e.setPriority(req.priority() != null ? req.priority() : "med");
+		e.setWrittenBy("human");   // V71: manual UI create is human-authored
 		// embedding will be filled in by sidecar's _backfill_embeddings (async)
 		return Dtos.KnowledgeDto.of(knowledgeRepo.save(e));
 	}

@@ -28,10 +28,39 @@ interface Directive {
   uses?: number;
 }
 
+type MemoClass = "domain" | "preference" | "presentation" | "correction" | "episodic" | "procedure";
+type WrittenBy = "planner" | "builder" | "repair" | "human";
+
 interface Knowledge extends Directive {
   uses: number;
   last_used_at?: string | null;
+  memo_class?: MemoClass | null;
+  written_by?: WrittenBy | null;
+  applies_to?: "plan" | "execute" | "both" | null;
+  always_on?: boolean;
 }
+
+interface DocMemo {
+  id: number;
+  block_id: string;
+  param?: string | null;
+  memo: string;
+  status: string;
+  from_episode?: string | null;
+  created_at: string;
+}
+
+// agent provenance (who wrote the memory) — the core "分是誰的" dimension
+const AGENT_META: Record<WrittenBy, { label: string; color: string; bg: string }> = {
+  planner: { label: "Planner", color: "#1d4ed8", bg: "#eff6ff" },
+  builder: { label: "Builder", color: "#047857", bg: "#ecfdf5" },
+  repair:  { label: "Repair",  color: "#b45309", bg: "#fffbeb" },
+  human:   { label: "Human",   color: "#475569", bg: "#f1f5f9" },
+};
+const MEMO_CLASS_COLOR: Record<MemoClass, string> = {
+  domain: "#7c3aed", preference: "#0891b2", presentation: "#db2777",
+  correction: "#dc2626", episodic: "#65a30d", procedure: "#ca8a04",
+};
 
 interface Lexicon {
   id: number;
@@ -276,15 +305,26 @@ function DirectiveEditor({ initial, onClose, onSave }: {
 
 // ── Knowledge tab (mostly mirrors Directives — same shape) ────────────
 
+type AgentFilter = "all" | WrittenBy | "unclassified";
+type ClassFilter = "all" | MemoClass;
+
 function KnowledgeView() {
   const [items, setItems] = useState<Knowledge[]>([]);
+  const [docMemos, setDocMemos] = useState<DocMemo[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Knowledge | "new" | null>(null);
+  const [agentF, setAgentF] = useState<AgentFilter>("all");
+  const [classF, setClassF] = useState<ClassFilter>("all");
 
   const load = async () => {
     setLoading(true);
-    try { setItems(await api<Knowledge[]>("/api/agent-knowledge")); }
-    finally { setLoading(false); }
+    try {
+      const [ks, dm] = await Promise.all([
+        api<Knowledge[]>("/api/agent-knowledge"),
+        api<DocMemo[]>("/api/agent-knowledge/doc-memos").catch(() => [] as DocMemo[]),
+      ]);
+      setItems(ks); setDocMemos(dm);
+    } finally { setLoading(false); }
   };
   useEffect(() => { void load(); }, []);
 
@@ -302,22 +342,73 @@ function KnowledgeView() {
     await load();
   };
 
+  // agent bucket for a row: written_by, or "unclassified" when null (legacy)
+  const bucketOf = (d: Knowledge): AgentFilter => d.written_by ?? "unclassified";
+
+  const showBuilder = agentF === "all" || agentF === "builder";
+  const filtered = useMemo(() => items.filter((d) => {
+    if (agentF !== "all" && bucketOf(d) !== agentF) return false;
+    if (classF !== "all" && d.memo_class !== classF) return false;
+    return true;
+  }), [items, agentF, classF]);
+
+  // per-agent counts for the filter chips (builder = doc-memo count)
+  const counts = useMemo(() => {
+    const c: Record<string, number> = { all: items.length + docMemos.length, builder: docMemos.length };
+    for (const d of items) { const b = bucketOf(d); c[b] = (c[b] ?? 0) + 1; }
+    return c;
+  }, [items, docMemos]);
+
   return (
     <div>
-      <div style={{ display: "flex", marginBottom: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+        <FilterGroup label="誰寫的">
+          {(["all", "planner", "builder", "repair", "human", "unclassified"] as AgentFilter[]).map((a) => (
+            <FilterChip key={a} active={agentF === a} onClick={() => setAgentF(a)}
+              color={a !== "all" && a !== "unclassified" ? AGENT_META[a as WrittenBy]?.color : "#475569"}>
+              {a === "all" ? "全部" : a === "unclassified" ? "未分類" : AGENT_META[a as WrittenBy].label}
+              {counts[a] != null && a !== "unclassified" ? ` ${counts[a]}` : ""}
+            </FilterChip>
+          ))}
+        </FilterGroup>
+        <FilterGroup label="類別">
+          {(["all", "domain", "preference", "presentation", "correction", "episodic", "procedure"] as ClassFilter[]).map((c) => (
+            <FilterChip key={c} active={classF === c} onClick={() => setClassF(c)}
+              color={c !== "all" ? MEMO_CLASS_COLOR[c as MemoClass] : "#475569"}>
+              {c === "all" ? "全部" : c}
+            </FilterChip>
+          ))}
+        </FilterGroup>
         <span style={{ flex: 1 }}/>
         <button onClick={() => setEditing("new")} style={btnStyle("primary")}>+ New knowledge fact</button>
       </div>
-      {loading ? <p style={muted}>Loading…</p>
-       : items.length === 0 ? <Empty message="No knowledge yet. Add domain facts the agent should retrieve when relevant."/>
-       : <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-           {items.map((d) => (
-             <ItemRow key={d.id} d={d as unknown as Directive}
-               onEdit={() => setEditing(d)}
-               onToggleActive={() => onToggleActive(d)}
-               onDelete={() => onDelete(d.id)}/>
-           ))}
-         </div>}
+
+      {loading ? <p style={muted}>Loading…</p> : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {filtered.map((d) => (
+            <KnowledgeRow key={d.id} d={d} onEdit={() => setEditing(d)}
+              onToggleActive={() => onToggleActive(d)} onDelete={() => onDelete(d.id)}/>
+          ))}
+
+          {/* Builder's memory lives in a separate table (block_doc_memos) —
+              read-only review queue, shown when the agent filter includes it. */}
+          {showBuilder && classF === "all" && docMemos.length > 0 && (
+            <div style={{ marginTop: filtered.length ? 14 : 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: AGENT_META.builder.color, margin: "4px 2px 8px" }}>
+                Builder 的文件備忘（block_doc_memos · 唯讀，Supervisor 審核後才回寫 block docs）
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {docMemos.map((m) => <DocMemoRow key={m.id} m={m}/>)}
+              </div>
+            </div>
+          )}
+
+          {filtered.length === 0 && !(showBuilder && classF === "all" && docMemos.length > 0) && (
+            <Empty message="這個篩選條件下沒有 memory。調整「誰寫的 / 類別」或新增一筆。"/>
+          )}
+        </div>
+      )}
+
       {editing && (
         <DirectiveEditor
           initial={editing === "new" ? null : (editing as unknown as Directive)}
@@ -325,6 +416,87 @@ function KnowledgeView() {
           onSave={onSave as (d: Partial<Directive>, id?: number) => Promise<void>}/>
       )}
     </div>
+  );
+}
+
+function KnowledgeRow({ d, onEdit, onToggleActive, onDelete }: {
+  d: Knowledge; onEdit: () => void; onToggleActive: () => void; onDelete: () => void;
+}) {
+  const agent = d.written_by ? AGENT_META[d.written_by] : null;
+  const draft = !d.active;
+  return (
+    <div style={{
+      padding: "12px 16px", border: "1px solid #e2e8f0", borderRadius: 6,
+      borderLeft: `3px solid ${agent?.color ?? "#cbd5e1"}`,
+      background: draft ? "#fafafa" : "#fff", opacity: draft ? 0.75 : 1,
+      display: "flex", alignItems: "flex-start", gap: 12,
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: "#1e293b" }}>{d.title}</span>
+          {agent
+            ? <Pill color={agent.color} bg={agent.bg}>{agent.label}</Pill>
+            : <Pill color="#94a3b8">未分類</Pill>}
+          {d.memo_class && (
+            <Pill color={MEMO_CLASS_COLOR[d.memo_class]} bg="#fff">{d.memo_class}</Pill>
+          )}
+          {d.always_on && <Pill color="#7c3aed" bg="#f3e8ff">always-on</Pill>}
+          {draft && <Pill color="#b45309" bg="#fffbeb">draft</Pill>}
+          {d.applies_to && d.applies_to !== "both" && <Pill>{d.applies_to}</Pill>}
+        </div>
+        <div style={{ fontSize: 12.5, color: "#64748b", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{d.body}</div>
+        {(d.uses ?? 0) > 0 && (
+          <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>recalled {d.uses} time(s)</div>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 4 }}>
+        <button onClick={onToggleActive} style={btnStyle("secondary")} title={d.active ? "disable" : "enable"}>
+          {d.active ? "● on" : "○ off"}
+        </button>
+        <button onClick={onEdit} style={btnStyle("secondary")}>Edit</button>
+        <button onClick={onDelete} style={btnStyle("danger")}>×</button>
+      </div>
+    </div>
+  );
+}
+
+function DocMemoRow({ m }: { m: DocMemo }) {
+  return (
+    <div style={{
+      padding: "10px 14px", border: "1px solid #e2e8f0", borderRadius: 6,
+      borderLeft: `3px solid ${AGENT_META.builder.color}`, background: "#fff",
+    }}>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 3 }}>
+        <Pill color={AGENT_META.builder.color} bg={AGENT_META.builder.bg}>Builder</Pill>
+        <span style={{ fontFamily: "monospace", fontSize: 12.5, fontWeight: 600, color: "#1e293b" }}>{m.block_id}</span>
+        {m.param && <Pill>{m.param}</Pill>}
+        <Pill color={m.status === "pending" ? "#b45309" : "#475569"} bg={m.status === "pending" ? "#fffbeb" : "#f1f5f9"}>{m.status}</Pill>
+      </div>
+      <div style={{ fontSize: 12.5, color: "#64748b", lineHeight: 1.5 }}>{m.memo}</div>
+      {m.from_episode && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3 }}>from episode {m.from_episode}</div>}
+    </div>
+  );
+}
+
+function FilterGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600, marginRight: 2 }}>{label}</span>
+      {children}
+    </div>
+  );
+}
+
+function FilterChip({ active, onClick, color, children }: {
+  active: boolean; onClick: () => void; color?: string; children: React.ReactNode;
+}) {
+  return (
+    <button onClick={onClick} style={{
+      padding: "3px 9px", borderRadius: 12, fontSize: 11.5, cursor: "pointer",
+      border: `1px solid ${active ? (color ?? "#2563eb") : "#e2e8f0"}`,
+      background: active ? (color ?? "#2563eb") : "#fff",
+      color: active ? "#fff" : (color ?? "#475569"), fontWeight: active ? 600 : 500,
+    }}>{children}</button>
   );
 }
 

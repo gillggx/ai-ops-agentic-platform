@@ -55,6 +55,12 @@ public class AgentKnowledgeEntity {
     @Column(name = "memo_class", length = 16)
     private String memoClass;
 
+    /** V71: which agent wrote this row — planner | builder | repair | human.
+     *  NULL = legacy (pre-V71) agent_fast rows we don't retro-guess. Builder
+     *  memories live in block_doc_memos, not here. */
+    @Column(name = "written_by", length = 12)
+    private String writtenBy;
+
     /** V58: bypass RAG — inject unconditionally. Reserved for the few
      *  first-principle rules that MUST land regardless of multilingual recall
      *  (SPC/APC/FDC level, "視覺化必含 chart block"). Everything else is RAG-only. */

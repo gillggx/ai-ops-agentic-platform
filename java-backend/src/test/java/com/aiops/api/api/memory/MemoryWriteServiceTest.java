@@ -49,7 +49,7 @@ class MemoryWriteServiceTest {
         Map<String, Object> out = service.createKnowledge(
                 1L, "preference", "偏好:預設時間窗 12 小時",
                 "user 在 plan 將 24h 改為 12h(2026-07-03)。**Why:** user 明改。"
-                        + "**How to apply:** 同類需求預設 12h。", "plan", null, null);
+                        + "**How to apply:** 同類需求預設 12h。", "plan", null, null, "planner");
         assertThat(out).containsEntry("deduped", false).containsEntry("id", 9L);
 
         ArgumentCaptor<AgentKnowledgeEntity> cap = ArgumentCaptor.forClass(AgentKnowledgeEntity.class);
@@ -61,6 +61,20 @@ class MemoryWriteServiceTest {
         assertThat(e.getActive()).isTrue();                 // E2: effective immediately
         assertThat(e.getSource()).isEqualTo("agent_fast");
         assertThat(e.getAppliesTo()).isEqualTo("plan");
+        assertThat(e.getWrittenBy()).isEqualTo("planner");  // V71 provenance
+    }
+
+    @Test
+    void createKnowledge_writtenBy_invalidBecomesNull_validKept() {
+        when(knowledge.findFirstByUserIdAndMemoClassAndTitle(any(), any(), any()))
+                .thenReturn(Optional.empty());
+        ArgumentCaptor<AgentKnowledgeEntity> cap = ArgumentCaptor.forClass(AgentKnowledgeEntity.class);
+
+        service.createKnowledge(1L, "correction", "t1", "b", null, null, false, "repair");
+        service.createKnowledge(1L, "correction", "t2", "b", null, null, false, "bogus");
+        verify(knowledge, org.mockito.Mockito.times(2)).save(cap.capture());
+        assertThat(cap.getAllValues().get(0).getWrittenBy()).isEqualTo("repair");
+        assertThat(cap.getAllValues().get(1).getWrittenBy()).isNull();  // invalid → honest null
     }
 
     @Test
@@ -69,18 +83,18 @@ class MemoryWriteServiceTest {
         existing.setId(3L);
         when(knowledge.findFirstByUserIdAndMemoClassAndTitle(1L, "preference", "T"))
                 .thenReturn(Optional.of(existing));
-        Map<String, Object> out = service.createKnowledge(1L, "preference", "T", "b", null, null, null);
+        Map<String, Object> out = service.createKnowledge(1L, "preference", "T", "b", null, null, null, null);
         assertThat(out).containsEntry("deduped", true).containsEntry("id", 3L);
         verify(knowledge, never()).save(any());
     }
 
     @Test
     void createKnowledge_rejectsBadClassAndMissingFields() {
-        assertThatThrownBy(() -> service.createKnowledge(1L, "vibes", "t", "b", null, null, null))
+        assertThatThrownBy(() -> service.createKnowledge(1L, "vibes", "t", "b", null, null, null, null))
                 .isInstanceOf(ApiException.class);
-        assertThatThrownBy(() -> service.createKnowledge(1L, "domain", " ", "b", null, null, null))
+        assertThatThrownBy(() -> service.createKnowledge(1L, "domain", " ", "b", null, null, null, null))
                 .isInstanceOf(ApiException.class);
-        assertThatThrownBy(() -> service.createKnowledge(null, "domain", "t", "b", null, null, null))
+        assertThatThrownBy(() -> service.createKnowledge(null, "domain", "t", "b", null, null, null, null))
                 .isInstanceOf(ApiException.class);
     }
 
@@ -88,7 +102,7 @@ class MemoryWriteServiceTest {
     void createKnowledge_defaultsAppliesToBothOnBadValue() {
         when(knowledge.findFirstByUserIdAndMemoClassAndTitle(any(), any(), any()))
                 .thenReturn(Optional.empty());
-        service.createKnowledge(1L, "correction", "t", "b", "weird", null, null);
+        service.createKnowledge(1L, "correction", "t", "b", "weird", null, null, null);
         ArgumentCaptor<AgentKnowledgeEntity> cap = ArgumentCaptor.forClass(AgentKnowledgeEntity.class);
         verify(knowledge).save(cap.capture());
         assertThat(cap.getValue().getAppliesTo()).isEqualTo("both");
@@ -98,7 +112,7 @@ class MemoryWriteServiceTest {
     void createKnowledge_correctionDraftWhenActiveFalse() {
         when(knowledge.findFirstByUserIdAndMemoClassAndTitle(any(), any(), any()))
                 .thenReturn(Optional.empty());
-        service.createKnowledge(1L, "correction", "t", "b", "execute", null, false);
+        service.createKnowledge(1L, "correction", "t", "b", "execute", null, false, null);
         ArgumentCaptor<AgentKnowledgeEntity> cap = ArgumentCaptor.forClass(AgentKnowledgeEntity.class);
         verify(knowledge).save(cap.capture());
         assertThat(cap.getValue().getActive()).isFalse();   // draft until Supervisor promotes

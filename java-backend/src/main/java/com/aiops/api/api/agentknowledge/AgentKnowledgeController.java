@@ -104,6 +104,13 @@ public class AgentKnowledgeController {
 		return ApiResponse.ok(service.listKnowledge(caller));
 	}
 
+	/** Builder's doc sticky-notes — read-only "Builder memory" for the same page. */
+	@GetMapping("/agent-knowledge/doc-memos")
+	@PreAuthorize(Authorities.ANY_ROLE)
+	public ApiResponse<List<Dtos.DocMemoDto>> listDocMemos() {
+		return ApiResponse.ok(service.listDocMemos());
+	}
+
 	@PostMapping("/agent-knowledge")
 	@PreAuthorize(Authorities.ANY_ROLE)
 	public ApiResponse<Dtos.KnowledgeDto> createKnowledge(@RequestBody Dtos.CreateKnowledgeRequest req,
