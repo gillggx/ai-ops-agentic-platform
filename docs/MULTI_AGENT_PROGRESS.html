@@ -128,8 +128,8 @@
         <td><span class="badge ok">Java 14/14 + sidecar 7/7</span> · V71 已套(26 human/22 legacy)· E2E:internal write 蓋 planner 落庫 · API 回 written_by · 16 builder doc-memos</td>
         <td><code>6f8e604b</code></td></tr>
     <tr><td>07-04</td><td><b>Phase 5 Supervisor 蒸餾(寫回)</b>:V72 <code>supervisor_actions</code> 提案佇列;五操作 MERGE/CORRECT/PRUNE/PROMOTE/DOC_REVISE — <b>propose-only</b>(污染事件教訓),人工在 <code>/supervisor</code> 核准才 commit;sidecar 離線 proposer(<code>tools/supervisor_curate</code>,原則式 prompt + 確定性驗證擋幻覺 id)+ PROMOTE 產 domain/procedure(written_by=supervisor)</td>
-        <td><span class="badge ok">E2E 全過</span> 13 提案入佇列 · approve PROMOTE → <b>第一筆 domain 記憶(id 64)</b> · approve DOC_REVISE → memos promoted、block_docs 未動 · reject → DB 未動 · Java 11/11 + sidecar 10/10</td>
-        <td><code>cb1c93ab</code></td></tr>
+        <td><span class="badge ok">E2E 全過</span> 13 提案入佇列 · approve PROMOTE → <b>第一筆 domain 記憶(id 64)</b> · approve DOC_REVISE → memos promoted、block_docs 未動 · reject → DB 未動 · Java 11/11 + sidecar 10/10 · <b>SLASH-17 閘門:13 MATCH+1 OVER 首輪,3 疑點重跑 → spc-trend/patrol-status flake 過、spc-ooc 連 2 掛揪出既有 block_select 重複欄名 crash(與本交付無關)→ 修復後 7/7 nodes 過 = 零回歸 + 附贈一顆真 bug fix</b></td>
+        <td><code>cb1c93ab</code> <code>1b60367b</code> <code>090886c1</code></td></tr>
     <tr><td>07-04</td><td><b>Phase 6 Monitor 指揮層(A 版:自省觸發器)</b>:V73 <code>monitor_requests</code>;確定性掃描(無 LLM)三指標 — DOC_GAP(block ≥3 pending memo)/ DIVERGENCE(7天 ≥2)/ REPAIR_HANDOVER(7天 ≥3)→ 改善請求 → 人工核准取得 Planner 指令;<code>/supervisor</code> 頁雙區(蒸餾提案+改善請求)</td>
         <td><span class="badge ok">E2E 全過</span> scan 產 3 請求(2 DOC_GAP + 1 REPAIR_HANDOVER 14次/7天)· approve 回建議指令 · dedup 生效 · Java 5/5</td>
         <td><code>cb1c93ab</code> <code>1b60367b</code></td></tr>
