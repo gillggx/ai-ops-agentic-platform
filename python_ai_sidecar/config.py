@@ -100,6 +100,11 @@ class SidecarConfig:
     # events to Java /internal/agent-episodes (fire-and-forget, fail-open).
     # Pure side-channel: no prompt / cache-prefix impact.
     enable_agent_episodes: bool
+    # 2026-07-03 Memory layer (docs/MULTI_AGENT_MEMORY_SPEC.md). When ON,
+    # deterministic graph events write fast-path memories (W1-W3):
+    # plan-edits -> agent_knowledge, verifier-rejects -> block_doc_memos.
+    # Caps + dedup + fail-open; no prompt/cache impact.
+    enable_memory_writes: bool
 
     @classmethod
     def from_env(cls) -> "SidecarConfig":
@@ -138,6 +143,7 @@ class SidecarConfig:
             enable_orphan_resolve=_read_bool_env("ENABLE_ORPHAN_RESOLVE", default=False),
             enable_goal_aware_matching=_read_bool_env("ENABLE_GOAL_AWARE_MATCHING", default=False),
             enable_agent_episodes=_read_bool_env("ENABLE_AGENT_EPISODES", default=False),
+            enable_memory_writes=_read_bool_env("ENABLE_MEMORY_WRITES", default=False),
         )
 
 

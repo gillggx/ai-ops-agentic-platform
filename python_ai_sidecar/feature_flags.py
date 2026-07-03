@@ -152,6 +152,10 @@ def is_agent_episodes_enabled() -> bool:
     return _effective("agent_episodes", CONFIG.enable_agent_episodes)
 
 
+def is_memory_writes_enabled() -> bool:
+    return _effective("memory_writes", CONFIG.enable_memory_writes)
+
+
 def is_auto_signal_enabled() -> bool:
     return _effective("auto_signal", CONFIG.enable_auto_signal)
 

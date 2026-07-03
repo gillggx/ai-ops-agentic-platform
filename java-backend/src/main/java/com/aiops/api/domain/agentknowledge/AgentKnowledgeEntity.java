@@ -48,6 +48,13 @@ public class AgentKnowledgeEntity {
     @Column(name = "applies_to", nullable = false, length = 10)
     private String appliesTo = "both";
 
+    /** V70: 6-class memory taxonomy (domain|preference|presentation|
+     *  correction|episodic|procedure). NULL = legacy-unclassified (pre-V70
+     *  rows) — retrieval treats NULL exactly as before, zero regression.
+     *  Agent-written rows (memory layer W1-W3) always set it. */
+    @Column(name = "memo_class", length = 16)
+    private String memoClass;
+
     /** V58: bypass RAG — inject unconditionally. Reserved for the few
      *  first-principle rules that MUST land regardless of multilingual recall
      *  (SPC/APC/FDC level, "視覺化必含 chart block"). Everything else is RAG-only. */

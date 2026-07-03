@@ -10,6 +10,10 @@ import java.util.List;
 public interface AgentKnowledgeRepository extends JpaRepository<AgentKnowledgeEntity, Long> {
     List<AgentKnowledgeEntity> findByUserIdOrderByCreatedAtDesc(Long userId);
 
+	/** V70 memory-layer dedup: same (user, class, title) → skip re-write. */
+	java.util.Optional<AgentKnowledgeEntity> findFirstByUserIdAndMemoClassAndTitle(
+			Long userId, String memoClass, String title);
+
     /** Native update for the embedding column. JPA's auto-generated UPDATE
      *  sends the embedding as VARCHAR, which PostgreSQL refuses to implicitly
      *  cast to `vector`. Use ?::vector here so the embedding string literal

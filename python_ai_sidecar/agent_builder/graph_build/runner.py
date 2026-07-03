@@ -114,9 +114,15 @@ async def stream_graph_build(
 
     # Agent observability (docs/MULTI_AGENT_OBSERVABILITY_SPEC.md) — like the
     # tracer, purely observational; None when ENABLE_AGENT_EPISODES is off.
-    from python_ai_sidecar.observability import make_recorder, set_current_recorder
+    from python_ai_sidecar.observability import (
+        make_memory_writer,
+        make_recorder,
+        set_current_memory_writer,
+        set_current_recorder,
+    )
     recorder = make_recorder(session_id=sid, instruction=instruction, user_id=user_id)
     set_current_recorder(recorder)
+    set_current_memory_writer(make_memory_writer(episode_key=sid, user_id=user_id))
 
     last_state: dict = {}
     interrupted = False
@@ -643,9 +649,15 @@ async def resume_graph_v30(
 
     # Observability: same episode_key continues across the pause (Java upserts
     # by key; instruction empty so the original is not clobbered).
-    from python_ai_sidecar.observability import make_recorder, set_current_recorder
+    from python_ai_sidecar.observability import (
+        make_memory_writer,
+        make_recorder,
+        set_current_memory_writer,
+        set_current_recorder,
+    )
     recorder = make_recorder(session_id=session_id, instruction="", user_id=None)
     set_current_recorder(recorder)
+    set_current_memory_writer(make_memory_writer(episode_key=session_id, user_id=None))
 
     last_state: dict = {}
     paused_kind: Optional[str] = None

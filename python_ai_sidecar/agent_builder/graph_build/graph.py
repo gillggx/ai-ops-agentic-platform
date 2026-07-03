@@ -503,6 +503,8 @@ def build_graph():
     # when the flag is off (recorder is None) and are fail-open.
     from python_ai_sidecar.agent_builder.agents import get_agent
     from python_ai_sidecar.observability import (
+        classify_edit,
+        get_current_memory_writer,
         get_current_recorder,
         reset_current_agent,
         set_current_agent,
@@ -538,6 +540,29 @@ def build_graph():
             edits = patch.get("v30_phase_edit_history") or state.get("v30_phase_edit_history") or {}
             if edits:
                 rec.record("plan_user_edited", agent="planner", payload={"edits": edits})
+                # W1 (memory layer): each user edit -> deterministic class ->
+                # fast-path memory. Template memo (E1), capped+deduped server-side.
+                mw = get_current_memory_writer()
+                if mw is not None:
+                    for _pid, _entries in edits.items():
+                        for _e in (_entries or []):
+                            _frm = str(_e.get("from") or "")
+                            _to = str(_e.get("to") or "")
+                            if not _to:
+                                continue
+                            _cls = classify_edit(_frm, _to)
+                            await mw.write_knowledge(
+                                memo_class=_cls,
+                                title=f"[plan修改·{_cls}] {_to[:80]}",
+                                body=(
+                                    f"user 在 plan confirm 將 phase {_pid} 的目標由"
+                                    f"「{_frm[:200]}」改為「{_to[:200]}」。\n"
+                                    f"**Why:** user 明確修改(最高可信訊號)。\n"
+                                    f"**How to apply:** 同 user、同類需求規劃時,"
+                                    f"預設採用修改後的表述/參數。"
+                                ),
+                                applies_to="plan",
+                            )
             phases = patch.get("v30_phases") or state.get("v30_phases") or []
             rec.record("plan_confirmed", agent="planner", payload={
                 "phases": [{"id": p.get("id"), "expected": p.get("expected")} for p in phases],
@@ -592,6 +617,25 @@ def build_graph():
                     rec.record("param_reject_fix", agent="builder", phase_id=done_pid,
                                payload={"rejects": rejects[:5], "resolved": True,
                                         "approx": True})
+                    # W2 (memory layer): doc sticky-note per rejected block —
+                    # review queue, never mutates block_docs directly.
+                    mw = get_current_memory_writer()
+                    if mw is not None:
+                        import json as _json
+                        _blk = str((rejects[0] or {}).get("block_id") or "")
+                        if _blk:
+                            _reasons = "; ".join(
+                                str(r.get("judge_reject_reason") or r.get("reason")
+                                    or r.get("missing_for_phase") or "reject")[:120]
+                                for r in rejects[:3])
+                            await mw.write_doc_memo(
+                                block_id=_blk,
+                                param=None,
+                                memo=(f"phase {done_pid}: 建置時被 verifier 拒 "
+                                      f"{len(rejects)} 次後才通過 — {_reasons}。"
+                                      f"檢視 doc/param_schema 是否寫清楚。"),
+                                verdict_context=_json.dumps(rejects[:5], ensure_ascii=False),
+                            )
             await rec.maybe_flush()
         return patch
 
@@ -608,6 +652,28 @@ def build_graph():
                 result = "handover" if patch.get("v30_handover") else "retry"
                 rec.record("repair_outcome", agent="repair", phase_id=pid,
                            payload={"result": result})
+                # W3 (memory layer): root-cause correction, tagged for the
+                # execute layer (block/param-level causes dominate here).
+                mw = get_current_memory_writer()
+                if mw is not None and pid:
+                    _rej = state.get("v30_last_verifier_reject") or {}
+                    _goal = ""
+                    _phases = state.get("v30_phases") or []
+                    _idx = state.get("v30_current_phase_idx") or 0
+                    if _idx < len(_phases):
+                        _goal = str(_phases[_idx].get("goal") or "")[:150]
+                    await mw.write_knowledge(
+                        memo_class="correction",
+                        title=f"[repair·{result}] {pid}: {_goal[:70]}",
+                        body=(
+                            f"phase {pid}(goal:{_goal})round 用盡進入 repair,"
+                            f"結果={result}。最後 verifier 拒因:"
+                            f"{str(_rej)[:300]}。\n"
+                            f"**Why:** 自省觸發的根因記錄。\n"
+                            f"**How to apply:** 同類 phase 建置時避開此失敗路徑。"
+                        ),
+                        applies_to="execute",
+                    )
                 await rec.maybe_flush()
             return patch
         finally:

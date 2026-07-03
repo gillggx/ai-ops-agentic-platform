@@ -33,6 +33,7 @@ public class SupervisorReportService {
         out.put("cost_by_agent", costByAgent(days));
         out.put("divergences", divergences(days));
         out.put("repair_outcomes", repairOutcomes(days));
+        out.put("pending_doc_memos", pendingDocMemos(days));
         return out;
     }
 
@@ -126,6 +127,19 @@ public class SupervisorReportService {
                 GROUP BY 1 ORDER BY 2 DESC
                 """).setParameter("d", days).getResultList();
         return rows(rows, "result", "count");
+    }
+
+    /** V70: pending Builder doc-memos per block — the DOC_GAP queue (D9). */
+    private List<Map<String, Object>> pendingDocMemos(int days) {
+        List<?> rows = em.createNativeQuery("""
+                SELECT block_id, count(*) AS pending,
+                       max(created_at)::text AS latest
+                FROM block_doc_memos
+                WHERE status = 'pending'
+                  AND created_at > now() - make_interval(days => :d)
+                GROUP BY 1 ORDER BY 2 DESC LIMIT 10
+                """).setParameter("d", days).getResultList();
+        return rows(rows, "block", "pending", "latest");
     }
 
     private static List<Map<String, Object>> rows(List<?> raw, String... cols) {
