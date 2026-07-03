@@ -296,6 +296,44 @@
 <h2><span class="n">9</span>3 Agent × 6 Class：使用情境 + 記錄 Timing</h2>
 <p class="desc">貫穿全表:<b>episodic 只寫不讀(inference 時)</b>,是 Supervisor 的燃料;其餘 5 類 inference 時讀,寫入大多由 Supervisor 蒸餾,只有 Planner/Repair 對 preference/presentation/correction 有 fast-path 直寫。</p>
 
+<h3 style="font-size:15px;margin:14px 0 4px;color:var(--ink2)">9.0 總表:6 Memory × 3 Agent — 何時讀 / 何時寫</h3>
+<p class="desc">每格 = <b>讀:</b>時機 / <b>寫:</b>時機(— = 不碰)。粗體 = fast-path 直寫;「S 蒸餾」= 該 class 的 durable 寫入者是 Supervisor(從 episodic / doc 備忘蒸餾),agent 本身不直寫。</p>
+<table>
+  <thead><tr><th style="width:110px">memory class</th><th>PLANNER</th><th>BUILDER</th><th>REPAIR</th><th style="width:120px">durable 寫入者</th></tr></thead>
+  <tbody>
+    <tr><td><b>domain</b><br><span style="color:var(--mut);font-size:11px">領域事實</span></td>
+        <td>讀:每次規劃(拆意圖套領域規則)<br>寫:—</td>
+        <td>讀:每 phase 選 block/設參(block 級多在 block_docs)<br>寫:—</td>
+        <td>讀:修正時(結果是否違反領域規則)<br>寫:—</td>
+        <td>S 蒸餾(user 糾正先落 correction)</td></tr>
+    <tr><td><b>preference</b><br><span style="color:var(--mut);font-size:11px">user 偏好</span></td>
+        <td>讀:每次規劃(套 user 默認)<br><b>寫:plan feedback 屬偏好類(fast)</b></td>
+        <td>讀:—(隔 Planner 一層)<br>寫:—</td>
+        <td>讀:修正時對齊品味<br><b>寫:feedback 露出偏好(fast)</b></td>
+        <td>Planner / Repair 直寫;S 去重</td></tr>
+    <tr><td><b>presentation</b><br><span style="color:var(--mut);font-size:11px">資料→呈現</span></td>
+        <td>讀:定每 phase 輸出型態<br><b>寫:user 改呈現形式(fast)</b></td>
+        <td>讀:建 chart phase(照指定圖種)<br>寫:—</td>
+        <td>讀:feedback 關於形式時<br><b>寫:同左(fast)</b></td>
+        <td>Planner / Repair 直寫;S 去重</td></tr>
+    <tr><td><b>correction</b><br><span style="color:var(--mut);font-size:11px">糾正(帶 why)</span></td>
+        <td>讀:每次規劃(避開 tag=plan 舊錯)<br><b>寫:user 糾正 plan 邏輯(fast)</b></td>
+        <td>讀:選 block/設參(tag=execute)<br>寫:—(它的學習走 doc 備忘)</td>
+        <td>讀:修正起始(避免重犯)<br><b>寫:定位根因後(主要寫者,tag 給誰讀)</b></td>
+        <td>Repair(主)/ Planner;S CORRECT/PRUNE</td></tr>
+    <tr><td><b>episodic</b><br><span style="color:var(--mut);font-size:11px">經歷(只寫)</span></td>
+        <td>寫:plan_proposed / user_edited / replan / 裁判</td>
+        <td>寫:phase 成敗 / block_picked / verifier_reject / <b>doc 備忘</b></td>
+        <td>寫:repair_triggered / outcome / 每則 feedback</td>
+        <td>— (原料;S 的燃料)<br><span class="badge" style="color:var(--green);background:var(--green-bg);border:1px solid var(--green-bd)">已上線(觀測層)</span></td></tr>
+    <tr><td><b>procedure</b><br><span style="color:var(--mut);font-size:11px">可重用配方</span></td>
+        <td>讀:規劃時重用 plan 形狀<br>寫:—</td>
+        <td>讀:build 起始/每 phase 重用配方<br>寫:—</td>
+        <td>讀:重用修正 pattern<br>寫:—</td>
+        <td>S 蒸餾(從跨 build 序列 episodic)</td></tr>
+  </tbody>
+</table>
+
 <div class="panel" style="margin-bottom:12px"><div class="top" style="background:var(--blue)"></div>
 <h3>PLANNER — 需求擁有者 + 裁判</h3>
 <table style="margin:0"><thead><tr><th>class</th><th>R/W</th><th>使用情境</th><th>timing</th></tr></thead><tbody>
@@ -367,6 +405,55 @@
     <tr><td><b>DEDUP-pref</b></td><td>同 user 矛盾偏好</td><td>留最新 + 標歷史</td><td>偏好衝突</td><td>自動</td></tr>
   </tbody>
 </table>
+
+<h3 style="font-size:15px;margin:18px 0 4px;color:var(--ink2)">11.1 Supervisor 怎麼「修正」三個 Agent（based on log）</h3>
+<div class="callout key">
+  <b>修正機制的本質:</b>Supervisor <b>從不直接改 agent 的 code / prompt</b>。它改的是 agent「<b>讀的東西</b>」
+  （agent_knowledge / block_docs）與預算建議 — agent 下次 build 讀到更好的知識/文件,行為就變了。
+  全部產出是草案、經人審(高風險)或稽核(低風險自動),對齊「flow 在 graph、草案→review→版本化」。
+</div>
+<table>
+  <thead><tr><th style="width:70px">修正對象</th><th>log 訊號(觀測層已在收)</th><th>診斷</th><th>修正動作(草案)</th><th>閉環效果</th></tr></thead>
+  <tbody>
+    <tr><td rowspan="3"><b>PLANNER</b></td>
+        <td><code>plan_user_edited</code> 同類 diff 重複出現(如時間窗一改再改)</td>
+        <td>規劃知識缺:user 默認沒被學到</td>
+        <td>產 preference / presentation 記憶草案(user 域)</td>
+        <td>下次 plan 第一版就對 → <b>edit 率下降</b>(可量測)</td></tr>
+    <tr><td>episode <code>divergence=true</code>(自認 OK、user 否決)清單</td>
+        <td>意圖抓取錯,非執行錯</td>
+        <td>逐案檢討 → domain / correction(tag=plan)草案</td>
+        <td>divergence 率下降</td></tr>
+    <tr><td><code>replan</code> 次數與 phase 數/實際完成數偏差趨勢</td>
+        <td>拆分品質(過切/欠切)</td>
+        <td>plan 層 knowledge 調整;必要時 budget 建議</td>
+        <td>replan 率、fast-forward 合併率改善</td></tr>
+    <tr><td rowspan="3"><b>BUILDER</b></td>
+        <td><code>verifier_reject</code> / <code>param_reject_fix</code> 按 (block,param) 聚合 Top-N + pending doc 備忘過門檻</td>
+        <td><b>DOC_GAP</b>:block 文件不齊/有錯</td>
+        <td>block_docs 修正草案(clarify or fix,人審後畢業)</td>
+        <td>Builder 讀到更好的 doc → 同 block reject 數下降,<b>doc 自癒</b></td></tr>
+    <tr><td><code>block_picked</code>(chosen)vs 當時 offered 的錯選 pattern</td>
+        <td>選塊規則缺</td>
+        <td>execute-tag correction 草案(「此情境選 X 不選 Y」)</td>
+        <td>錯選率下降</td></tr>
+    <tr><td>各 phase 型態平均 rounds / <code>llm_usage</code>(builder)成本趨勢</td>
+        <td>效率或成本回歸(定位到哪次部署後)</td>
+        <td>catalog tier / 知識調整;budget 調整建議</td>
+        <td>rounds/成本回到基線</td></tr>
+    <tr><td rowspan="2"><b>REPAIR</b></td>
+        <td><code>repair_outcome</code> 同一 root-cause 反覆出現</td>
+        <td>上游沒學到:correction 沒被讀到或沒寫好</td>
+        <td>檢查該 correction 召回(uses)→ PROMOTE 或改寫;必要時升 domain</td>
+        <td>同根因重犯率下降</td></tr>
+    <tr><td>repair 成功率(retry 過 vs handover)趨勢</td>
+        <td>自省預算/策略是否夠</td>
+        <td>revise 預算建議;修正 pattern 蒸餾成 procedure</td>
+        <td>handover 率下降</td></tr>
+  </tbody>
+</table>
+<p class="desc" style="margin-top:6px">共通維護(不分對象):PRUNE 從沒被召回的老舊記憶(<code>uses</code>/<code>last_used_at</code>)、DEDUP 矛盾偏好、
+成本回歸報告。<b>每條閉環都有可量測的效果指標</b>(edit 率/divergence 率/reject 數/重犯率)— Supervisor 的下一份報告直接驗證上一輪修正有沒有效。</p>
 
 <!-- 12 B -->
 <h2><span class="n">12</span>B — 4 Agent 的記錄行為：情境 · Timing · 如何 Cue</h2>

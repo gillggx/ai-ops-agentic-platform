@@ -73,6 +73,31 @@ CREATE INDEX idx_bdm_block_status ON block_doc_memos(block_id, status);
 - 寫入走既有 Java internal knowledge API(擴充支援 memo_class)+ 新 doc-memos
   internal endpoint;sidecar 不碰 PG。
 
+### 3.2b 總表:6 Memory × 3 Agent — 何時讀 / 何時寫
+
+> 完整版(含 durable 寫入者與 timing 細節)見 `AGENT_HARNESS_DESIGN.html` §9.0;
+> 此處為實作對照。粗體 = 本階段落地的 fast-path 寫入(W1–W3)。
+
+| class | PLANNER | BUILDER | REPAIR |
+|---|---|---|---|
+| domain | 讀:每次規劃 / 寫:— | 讀:選 block(多在 block_docs)/ 寫:— | 讀:修正時 / 寫:—(S 蒸餾) |
+| preference | 讀:每次規劃 / **寫:plan edit 屬偏好(W1)** | — | 讀:修正時 / **寫:feedback 屬偏好** |
+| presentation | 讀:定輸出型態 / **寫:改呈現形式(W1)** | 讀:建 chart phase / 寫:— | 讀寫:feedback 屬形式時 |
+| correction | 讀:規劃(tag=plan)/ **寫:糾正 plan 邏輯(W1)** | 讀:選 block(tag=execute)/ 寫:—(走 doc 備忘 W2) | 讀:修正起始 / **寫:定位根因(W3,主)** |
+| episodic | 只寫(已上線,觀測層) | 只寫 + **doc 備忘(W2)** | 只寫 |
+| procedure | 讀:重用 plan 形狀 / 寫:—(S 蒸餾) | 讀:重用配方 / 寫:—(S 蒸餾) | 讀:重用修 pattern / 寫:— |
+
+### 3.2c Supervisor 修正迴路(下一階段⑤;log 訊號本階段已備妥)
+
+Supervisor **不改 agent 的 code/prompt,只改 agent「讀的東西」**(knowledge/doc)+
+預算建議,草案經人審。完整表見 `AGENT_HARNESS_DESIGN.html` §11.1;摘要:
+
+| 對象 | log 訊號 | 修正(草案) | 可量測閉環 |
+|---|---|---|---|
+| Planner | plan_user_edited 重複 pattern / divergence 清單 / replan 趨勢 | preference·presentation·correction(tag=plan)草案 | edit 率、divergence 率下降 |
+| Builder | verifier_reject/param_reject_fix 聚合 + pending doc 備忘 / 錯選 pattern / rounds·成本趨勢 | block_docs 修正草案(DOC_GAP)/ execute-tag correction / tier·budget 建議 | 同 block reject 數下降(doc 自癒) |
+| Repair | 同 root-cause 重犯 / 成功率趨勢 | correction 召回檢查→PROMOTE 或改寫 / 蒸餾 procedure | 重犯率、handover 率下降 |
+
 ### 3.3 讀取側(v1 = 零新 code,這是本設計的關鍵槓桿)
 
 新寫入的 agent_knowledge 列 = 普通知識列:30s 背景 job 自動補 embedding →
