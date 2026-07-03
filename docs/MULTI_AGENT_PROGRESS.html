@@ -95,7 +95,7 @@
     <tr><td>10</td><td>Builder 文件備忘</td><td class="mid"><span class="badge part">~80%</span></td><td>表+寫入+report section 上線(sink e2e 過);待第一顆自然案例(reject→pass)</td></tr>
     <tr><td>11</td><td>Supervisor 6 操作</td><td class="mid"><span class="badge todo">~10%</span></td><td>只有 DOC_GAP 查詢;所有寫側操作</td></tr>
     <tr><td>12</td><td>B:4 Agent 記錄行為</td><td class="mid"><span class="badge part">~70%(trace 級)</span></td><td>「LLM 填 memo 模板」(Phase 4);doc_mismatch 事件</td></tr>
-    <tr><td>13</td><td><b>C:Episode Trace</b></td><td class="mid"><span class="badge ok">~95%</span></td><td>latency 欄未填值;doc_mismatch 事件</td></tr>
+    <tr><td>13</td><td><b>C:Episode Trace</b></td><td class="mid"><span class="badge ok">~95%</span></td><td>latency 欄未填值;doc_mismatch 事件。<b>已有 <code>/agent-activity</code> 視覺化(逐輪 prompt/output + 引用記憶)</b></td></tr>
     <tr><td>14</td><td>Q4 落地順序</td><td class="mid"><span class="badge run">①②③④完成</span></td><td>⑤ Supervisor 蒸餾/curation</td></tr>
   </tbody>
 </table>
@@ -121,6 +121,9 @@
         <td><code>d126e2e2</code></td></tr>
     <tr><td>07-02</td><td><b>觀測 Step 8</b>:前端部署 + 全套 SLASH-17 閘門(flag ON)+ 驗收 C1–C11</td>
         <td><span class="badge ok">C1–C11 全過</span> 17/17 · strict 16 MATCH+1 OVER · cache 49.7% · overhead 量測不到 · 23 episodes/750 steps</td><td><code>b1ea40cf</code></td></tr>
+    <tr><td>07-03</td><td><b>Agent Activity 視覺化</b>:<code>/agent-activity</code> 頁 — Tab A Trace 明細(逐 phase/round 的 prompt+output,每輪標注引用了哪幾條 memory)+ Tab B 時間軸 + Tab C 記分板;sidecar 補 <code>memory_recall</code> 事件(agent+phase+round+recalled[])、Java <code>rounds()</code> 併 trace JSON × 召回記憶。修 merge key 正規化(planner goal_plan trace phase/round=null vs step phase=""/round=0)</td>
+        <td><span class="badge ok">strict 16 MATCH/1 FAIL(patrol-status,基線同一 flaky)= 零回歸</span> · Java 6/6 + sidecar 7/7 · E2E:ep111 goal_plan recalled=12(always_on 記憶,無需 LLM 驗證) · prod DB 55 memory_recall steps</td>
+        <td><code>af1e9366</code> <code>977e8412</code></td></tr>
   </tbody>
 </table>
 
