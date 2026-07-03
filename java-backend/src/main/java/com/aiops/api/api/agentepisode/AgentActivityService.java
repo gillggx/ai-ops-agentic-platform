@@ -96,14 +96,17 @@ public class AgentActivityService {
         AgentEpisodeEntity e = episodes.findByEpisodeKey(key)
                 .orElseThrow(() -> ApiException.notFound("episode " + key));
 
-        // index recalled memories by (phase_id|round)
+        // index recalled memories by normalized (phase|round). Normalization
+        // matters: the planner's goal_plan call records phase_id=null/round=null
+        // in the trace, but the memory_recall step emits phase=""/round=0 — so a
+        // raw key compare misses. mergeKey() folds null/blank phase → "-" and
+        // null/blank round → "0" on BOTH sides so they line up.
         Map<String, List<Map<String, Object>>> recallIdx = new HashMap<>();
         for (AgentStepEntity s : steps.findByEpisodeIdOrderByTsAsc(e.getId())) {
             if (!"memory_recall".equals(s.getEventType())) continue;
             Map<String, Object> p = JsonUtils.parseObject(mapper, s.getPayload());
             Object rec = p.get("recalled");
-            Object rnd = p.get("round");
-            String k = (s.getPhaseId() == null ? "-" : s.getPhaseId()) + "|" + rnd;
+            String k = mergeKey(s.getPhaseId(), p.get("round"));
             if (rec instanceof List<?> l) {
                 List<Map<String, Object>> rl = new ArrayList<>();
                 for (Object o : l) if (o instanceof Map<?, ?> mm) rl.add(JsonUtils.asMap(mm));
@@ -121,13 +124,22 @@ public class AgentActivityService {
             return out;
         }
         for (Map<String, Object> c : calls) {
-            Object ph = c.get("phase_id");
-            Object rnd = c.get("round");
-            String k = (ph == null ? "-" : String.valueOf(ph)) + "|" + rnd;
+            String k = mergeKey(c.get("phase_id"), c.get("round"));
             c.put("recalled", recallIdx.getOrDefault(k, List.of()));
         }
         out.put("available", true);
         out.put("rounds", calls);
         return out;
+    }
+
+    /** Normalized merge key: null/blank phase → "-", null/blank/"null" round → "0".
+     *  Lets the planner's goal_plan call (trace phase/round = null) line up with
+     *  its memory_recall step (phase=""/round=0) without cross-matching builder
+     *  phases (which always carry a real phase id like "p1"). */
+    private static String mergeKey(Object phase, Object round) {
+        String p = phase == null || String.valueOf(phase).isBlank() ? "-" : String.valueOf(phase);
+        String rs = round == null ? "" : String.valueOf(round);
+        String r = rs.isBlank() || "null".equals(rs) ? "0" : rs;
+        return p + "|" + r;
     }
 }

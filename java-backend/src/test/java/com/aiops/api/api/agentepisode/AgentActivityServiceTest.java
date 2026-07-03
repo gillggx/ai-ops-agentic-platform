@@ -93,6 +93,34 @@ class AgentActivityServiceTest {
     }
 
     @Test
+    void rounds_plannerGoalPlan_nullTracePhaseRound_matchesStepPhaseBlankRoundZero(@TempDir Path dir)
+            throws Exception {
+        // The real-world mismatch: goal_plan trace call has phase_id=null/round=null,
+        // but the planner memory_recall step emits phase=""/round=0. mergeKey folds both.
+        Path trace = dir.resolve("t.json");
+        Files.writeString(trace, "{\"llm_calls\":["
+                + "{\"node\":\"goal_plan_node\",\"phase_id\":null,\"round\":null,"
+                + "\"user_msg\":\"plan it\",\"raw_response\":\"[p1,p2]\"}]}");
+        when(episodes.findByEpisodeKey("epP")).thenReturn(Optional.of(episode("epP", trace.toString())));
+        AgentStepEntity s = new AgentStepEntity();
+        s.setAgent("planner");
+        s.setPhaseId("");                 // blank, not null — as stored for goal_plan
+        s.setEventType("memory_recall");
+        s.setPayload("{\"layer\":\"goal_plan\",\"round\":0,"
+                + "\"recalled\":[{\"id\":9,\"title\":\"SPC OOC 慣例\",\"layer\":\"always_on\"}]}");
+        s.setTs(OffsetDateTime.now());
+        when(steps.findByEpisodeIdOrderByTsAsc(anyLong())).thenReturn(List.of(s));
+
+        Map<String, Object> out = service.rounds("epP");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> rounds = (List<Map<String, Object>>) out.get("rounds");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> recalled = (List<Map<String, Object>>) rounds.get(0).get("recalled");
+        assertThat(recalled).hasSize(1);
+        assertThat(recalled.get(0).get("id")).isEqualTo(9);
+    }
+
+    @Test
     void rounds_missingRecallLeavesEmptyList(@TempDir Path dir) throws Exception {
         Path trace = dir.resolve("t.json");
         Files.writeString(trace, "{\"llm_calls\":["
