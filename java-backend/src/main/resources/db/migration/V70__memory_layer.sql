@@ -12,6 +12,12 @@
 -- Flyway is disabled in prod — apply via:
 --   psql -h localhost -U aiops aiops_db -f V70__memory_layer.sql
 
+-- Fast-path writes stamp source='agent_fast'; the original CHECK only knew
+-- manual|auto-promoted → extend it (caught by e2e: INSERT 23514).
+ALTER TABLE agent_knowledge DROP CONSTRAINT IF EXISTS agent_knowledge_source_check;
+ALTER TABLE agent_knowledge ADD CONSTRAINT agent_knowledge_source_check
+  CHECK (source IN ('manual', 'auto-promoted', 'agent_fast'));
+
 ALTER TABLE agent_knowledge ADD COLUMN IF NOT EXISTS memo_class VARCHAR(16)
   CHECK (memo_class IN ('domain','preference','presentation',
                         'correction','episodic','procedure'));
