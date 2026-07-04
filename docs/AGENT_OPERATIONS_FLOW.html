@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>各 Agent 詳細運作流程</title>
+<style>
+  :root{
+    --ink:#1f2933; --mut:#667085; --line:#e4e7ec; --bg:#f5f7fa;
+    --blue:#1d4ed8; --blue-bg:#eff6ff; --blue-bd:#bfdbfe;
+    --green:#067647; --green-bg:#ecfdf3; --green-bd:#a6f4c5;
+    --amber:#b54708; --amber-bg:#fffaeb; --amber-bd:#fde68a;
+    --purp:#6d28d9; --purp-bg:#f5f3ff; --purp-bd:#c4b5fd;
+    --teal:#0e7490; --teal-bg:#ecfeff; --teal-bd:#a5f3fc;
+    --red:#b42318; --red-bg:#fef3f2; --red-bd:#fecaca;
+    --ink2:#101828;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;
+       color:var(--ink);background:var(--bg);line-height:1.65;font-size:14.5px;}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 22px 70px;}
+  header.hero{background:linear-gradient(135deg,#0b1f4d,#0e7490 55%,#6d28d9);color:#fff;
+       margin:0 -22px 26px;padding:34px 30px 28px;}
+  header.hero .kic{font-size:12px;letter-spacing:.12em;text-transform:uppercase;opacity:.85;}
+  header.hero h1{margin:6px 0 6px;font-size:25px;}
+  header.hero .sub{opacity:.92;font-size:13.5px;}
+  h2{font-size:19px;margin:36px 0 8px;color:var(--ink2);display:flex;align-items:center;gap:10px;}
+  h2 .n{display:inline-flex;min-width:27px;height:27px;padding:0 6px;border-radius:7px;background:var(--ink2);color:#fff;
+       align-items:center;justify-content:center;font-size:13px;font-weight:700;}
+  h3{font-size:15px;margin:18px 0 6px;color:var(--ink2);}
+  p.desc{color:var(--mut);font-size:13px;margin:0 0 14px;}
+  table{width:100%;border-collapse:collapse;margin:10px 0 6px;font-size:12.7px;background:#fff;
+       border:1px solid var(--line);border-radius:10px;overflow:hidden;}
+  th,td{padding:8px 11px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;}
+  thead th{background:#f8fafc;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--mut);font-weight:700;}
+  tbody tr:last-child td{border-bottom:none;}
+  td b{color:var(--ink2);}
+  .callout{border-radius:10px;padding:13px 16px;margin:14px 0;font-size:13.4px;}
+  .callout.key{background:var(--teal-bg);border:1px solid var(--teal-bd);}
+  .callout.warn{background:var(--amber-bg);border:1px solid var(--amber-bd);}
+  .callout.hard{background:var(--red-bg);border:1px solid var(--red-bd);}
+  .callout b{color:var(--ink2);}
+  code{background:#f2f4f7;padding:1px 5px;border-radius:4px;font-size:11.5px;font-family:ui-monospace,Menlo,monospace;}
+  pre{background:#0f172a;color:#e2e8f0;border-radius:10px;padding:13px 15px;font-size:12px;
+      font-family:ui-monospace,Menlo,monospace;overflow:auto;line-height:1.55;}
+  pre .c{color:#7dd3fc}  pre .g{color:#86efac}  pre .y{color:#fde68a}  pre .m{color:#c4b5fd}
+  .agent{background:#fff;border:1px solid var(--line);border-radius:12px;padding:0 18px 16px;margin:16px 0;
+       box-shadow:0 1px 2px rgba(16,24,40,.05);overflow:hidden;}
+  .agent .cap{margin:0 -18px 12px;padding:11px 18px;color:#fff;font-weight:800;font-size:15.5px;
+       display:flex;align-items:center;gap:10px;}
+  .agent .cap small{font-weight:500;opacity:.9;font-size:12px;}
+  dl.meta{display:grid;grid-template-columns:110px 1fr;gap:4px 12px;font-size:12.6px;margin:10px 0;}
+  dl.meta dt{color:var(--mut);font-weight:700;}
+  dl.meta dd{margin:0;}
+  .chips span{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;margin:2px 4px 0 0;
+       background:#f2f4f7;border:1px solid var(--line);color:#334155;}
+  footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);color:var(--mut);font-size:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kic">Multi-Agent Platform · Operations Reference</div>
+  <h1>各 Agent 詳細運作流程</h1>
+  <div class="sub">Planner / Builder / Verifier / Repair / Supervisor / Monitor — 觸發時機 · 輸入輸出 · 逐步流程 · 記憶讀寫 · 預算與護欄 · 觀測事件。以 2026-07-04 上線 code 為準。</div>
+</header>
+
+<!-- 0 overview -->
+<h2><span class="n">0</span>全景：一次 build 的生命週期</h2>
+<p class="desc">三個 build-plane agent（Planner / Builder / Repair）住在同一張 LangGraph 裡，由 <b>graph 決定流程、agent 只做窄任務</b>（hard rule：flow 不進 prompt）。Verifier 是 deterministic node，永遠不是 agent。Supervisor / Monitor 在 build 之外離線運作。</p>
+<pre>
+user 指令（chat / builder / MCP / auto-patrol）
+   │
+   ▼
+<span class="c">goal_plan</span>(PLANNER) ──不合理──▶ 追問/拒絕
+   │ phases: P1..PN（意圖，不含 block）
+   ▼
+<span class="c">goal_plan_confirm_gate</span> ◀── user 可改 phase 文字 ──▶ <span class="g">W1: 修改差異寫入 memory（planner）</span>
+   │ 確認
+   ▼
+task_contract_extractor（1 LLM call，萃取驗收 contract）
+   ▼
+┌─────────────── 每個 phase 迴圈 ────────────────┐
+│  <span class="c">agentic_phase_loop</span>(BUILDER)                     │
+│    round 1..32：知識注入 → LLM 一個 tool call → canvas 變更  │
+│    │                                            │
+│    ▼                                            │
+│  <span class="c">phase_verifier</span>(DETERMINISTIC)                  │
+│    結構檢查 + task-contract 語意判定                │
+│    ├─ 通過 → 下一 phase  <span class="g">W2: reject→pass 寫 doc memo</span>│
+│    ├─ 拒絕 → 回 Builder（帶結構化拒因）             │
+│    └─ round 用盡 → <span class="c">phase_revise</span>(REPAIR)          │
+│         ├─ retry（修好）→ 回 loop  <span class="g">W3: 寫 correction 草稿</span>│
+│         └─ handover → 標記交棒、繼續下一 phase       │
+└─────────────────────────────────────────────┘
+   ▼
+finalize → inspect_execution（自省摘要）→ 交付
+   │
+   ▼ <span class="m">全程旁路：EpisodeRecorder 把每個事件寫入 agent_episodes / agent_steps</span>
+
+（離線，不在上圖內）
+<span class="m">SUPERVISOR</span>：讀記憶+備忘 → 蒸餾提案 → 人工核准 → commit
+<span class="m">MONITOR</span>  ：掃 episode 指標 → 改善請求 → 人工核准 → 產 Planner 指令
+</pre>
+<div class="callout key"><b>設計不變式</b>：(1) 流程由 graph node 決定，LLM 不決定下一步（CLAUDE.md hard rule）。(2) Verifier 永不 agent 化 — 結構正確性必須可單測、可重現。(3) 任何「寫回記憶/文件」的自動行為都是 <b>propose-only</b>，人核准才生效（2026-07-03 污染事件教訓）。</div>
+
+<!-- 1 planner -->
+<h2><span class="n">1</span>PLANNER — 需求擁有者 + 語意裁判</h2>
+<div class="agent"><div class="cap" style="background:var(--blue)">Planner <small>python_ai_sidecar/agent_builder/agents/planner.py · 委派節點 goal_plan / (Phase 2+) 裁判</small></div>
+<dl class="meta">
+  <dt>Charter</dt><dd>「pipeline architect。把 user 需求拆成 goal-oriented phases（意圖，不挑 block）；Phase 2+ 起並擔任語意裁判（APPROVE / REVISE / REPLAN）。」</dd>
+  <dt>觸發時機</dt><dd>每次 build 的第一個節點（<code>goal_plan</code>）；REPLAN 時帶 <code>v30_replan_hint</code> 重入。</dd>
+  <dt>Model</dt><dd>繼承 session default（現為 GLM-5.2 @ Fireworks）。</dd>
+  <dt>工具</dt><dd><b>無</b> — 只輸出 JSON（phases），不碰 canvas。</dd>
+  <dt>預算</dt><dd><code>replan_count=2</code>（react/revise/repair 均為 0 — 不是它花的）。</dd>
+</dl>
+<h3>逐步流程</h3>
+<table>
+  <thead><tr><th style="width:30px">#</th><th>步驟</th><th>細節</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><b>讀 state view</b></td><td>只讀 5 個欄位：<code>instruction</code> / <code>base_pipeline</code>（增量建置時的既有 canvas）/ <code>skill_step_mode</code> / <code>v30_replan_hint</code> / <code>user_id</code>。</td></tr>
+    <tr><td>2</td><td><b>知識注入（讀記憶）</b></td><td><code>build_knowledge_hint(source="goal_plan", agent="planner", round=0)</code>：always_on 高優先知識直推 + RAG（pgvector, layer=plan）召回 preference / presentation / correction / domain。<b>召回清單以 <code>memory_recall</code> 事件記錄</b>（/agent-activity 可見每輪引用了哪幾條）。</td></tr>
+    <tr><td>3</td><td><b>產 plan</b></td><td>1 次 LLM call 輸出 P1..PN，每 phase 只有 3 欄：<code>id</code> / <code>expected</code>（資料型態）/ 一句 text — <b>block-agnostic</b>（挑 block 是 Builder 的事）。provider error 有 bounded retry（2 次）。</td></tr>
+    <tr><td>4</td><td><b>Confirm gate（graph node，非 LLM）</b></td><td>plan 呈現給 user；user 可逐 phase 改文字。<b>W1 fast-path</b>：每筆修改經 <code>classify_edit</code>（deterministic regex 樹：presentation &gt; preference &gt; correction）分類後寫入 <code>agent_knowledge</code>（<code>written_by=planner</code>, active=true, 上限 3 筆/build）— 「user 明改」是最高可信訊號。</td></tr>
+    <tr><td>5</td><td><b>裁判職（Phase 2+ 位置）</b></td><td>phase 完成後判 APPROVE / REVISE / REPLAN；REPLAN 消耗 replan 預算重入 goal_plan。</td></tr>
+  </tbody>
+</table>
+<h3>記憶 × 觀測</h3>
+<table>
+  <thead><tr><th>讀</th><th>寫</th><th>觀測事件</th></tr></thead>
+  <tbody><tr>
+    <td>domain / preference / presentation / correction(tag=plan) / procedure — always_on + RAG</td>
+    <td>W1：preference / presentation / correction（fast, active）</td>
+    <td><code>plan_proposed</code> · <code>plan_user_edited</code> · <code>plan_confirmed</code> · <code>memory_recall</code> · <code>llm_usage</code>（per-agent 成本歸因）</td>
+  </tr></tbody>
+</table>
+</div>
+
+<!-- 2 builder -->
+<h2><span class="n">2</span>BUILDER — 執行者（ReAct loop）</h2>
+<div class="agent"><div class="cap" style="background:#1e40af">Builder <small>agents/builder.py · 委派節點 agentic_phase_loop</small></div>
+<dl class="meta">
+  <dt>Charter</dt><dd>「follow Planner 的 phase 逐一執行：選 block、接線、設參（param key 100% 依 param_schema）。每 round 一個 tool call；結構驗證由 deterministic verifier 把關。」</dd>
+  <dt>觸發時機</dt><dd>plan 確認後，每個 phase 進入 <code>agentic_phase_loop</code>。</dd>
+  <dt>工具（8）</dt><dd class="chips"><span>inspect_node_output</span><span>inspect_block_doc</span><span>add_node</span><span>connect</span><span>set_param</span><span>remove_node</span><span>run_verifier</span><span>phase_complete</span></dd>
+  <dt>預算</dt><dd><code>react_rounds=32</code>/phase（生產值，界定單 phase 成本上限）。</dd>
+</dl>
+<h3>單一 round 的解剖（× 最多 32）</h3>
+<pre>
+round N：
+ 1. 組 prompt：charter + phase 目標 + <span class="y">canvas 現況</span> + <span class="y">上輪 verifier 拒因(結構化)</span>
+    + <span class="g">知識注入</span>（always_on + RAG layer=execute；agent="builder", phase_id, round
+      → memory_recall 事件）
+    + RAG 查詢工具（query_blocks / query_columns / query_connectable_sources
+      — 「目錄不是教科書」，catalog 每 block ≤1500 chars）
+ 2. LLM 輸出 <span class="y">恰好一個 tool call</span>（多 call / 無 call 都由 loop 矯正）
+ 3. graph 執行該 canvas op（deterministic dispatch — 不是 LLM 自己執行）
+ 4. op 結果（含 preview / error）進下一 round 的 observation
+ 5. Builder 認為 phase 完成 → phase_complete → 交 verifier
+</pre>
+<h3>關鍵行為規則</h3>
+<table>
+  <thead><tr><th>規則</th><th>為什麼</th></tr></thead>
+  <tbody>
+    <tr><td>先 <code>inspect_node_output</code> 上游、再接線設參</td><td>不 inspect 就會幻覺輸出欄位形狀（narrative 重建的常見 Layer-1 錯誤）。</td></tr>
+    <tr><td>param key 100% 依 <code>inspect_block_doc</code> 的 param_schema</td><td>block description 是唯一文件來源（CLAUDE.md 原則 1）。</td></tr>
+    <tr><td>每個 data node 必須有下游 consumer</td><td>verifier 會拒 orphan leaf — 這條已由 Supervisor 蒸餾成 procedure 記憶。</td></tr>
+    <tr><td>不讀 preference（隔 Planner 一層）</td><td>user 偏好在 plan 層就已折進 phase 文字。</td></tr>
+  </tbody>
+</table>
+<h3>記憶 × 觀測</h3>
+<table>
+  <thead><tr><th>讀</th><th>寫</th><th>觀測事件</th></tr></thead>
+  <tbody><tr>
+    <td>domain（多在 block_docs）/ presentation / correction(tag=execute) / procedure</td>
+    <td>W2：phase 曾被 verifier 拒 ≥1 次後通過 → <code>block_doc_memos</code> 寫一張「文件便利貼」（review queue，<b>絕不直接改 block_docs</b>；上限 5 筆/build）</td>
+    <td><code>phase_started</code> · <code>block_picked</code> · <code>verifier_reject</code> · <code>param_reject_fix</code> · <code>phase_done</code> · <code>stuck_escalated</code> · <code>memory_recall</code> · <code>llm_usage</code></td>
+  </tr></tbody>
+</table>
+</div>
+
+<!-- 3 verifier -->
+<h2><span class="n">3</span>VERIFIER — deterministic 守門員（不是 agent）</h2>
+<div class="agent"><div class="cap" style="background:#475569">Phase Verifier <small>graph node phase_verifier（phase-spanning）· 永不 agent 化</small></div>
+<h3>檢查層次</h3>
+<table>
+  <thead><tr><th>層</th><th>檢查</th><th>手段</th></tr></thead>
+  <tbody>
+    <tr><td><b>結構</b></td><td>orphan node / 斷線 port / param 型別（<code>PARAM_TYPE_WRONG</code>）/ 必填缺漏</td><td>pure function，零 LLM</td></tr>
+    <tr><td><b>執行</b></td><td>試跑到 phase terminal，rows&gt;0、欄位存在、chart spec 成形</td><td>sidecar in-process executor</td></tr>
+    <tr><td><b>語意</b></td><td>結果是否符合 <code>v30_task_contract</code>（confirm 後由 extractor 萃取的驗收 contract）；量化 deficit（rows &lt; 80% target → 暫停開 JudgeClarifyCard 問 user）</td><td>contract 比對優先，fallback LLM-judge</td></tr>
+  </tbody>
+</table>
+<h3>裁決與去向</h3>
+<pre>
+verdict:
+  ADVANCED  → 記 phase_done，前進下一 phase（1-block phase 可自動合併多 phase）
+  REJECTED  → <span class="y">結構化拒因</span>{block_id, reason, missing_for_phase}回 Builder 下一 round
+              （這份拒因同時是 W2 doc memo 與 Supervisor DOC_GAP 分析的原料）
+  round 用盡 → 交 REPAIR（phase_revise）
+</pre>
+<div class="callout hard"><b>為什麼永不 agent 化</b>：驗證是系統的正確性底線 — 必須可單測、可重現、不受 LLM 心情影響。出錯時 graph 知道是哪個檢查 fail；若驗證交給 LLM，只能猜「它又走偏了」。</div>
+</div>
+
+<!-- 4 repair -->
+<h2><span class="n">4</span>REPAIR — feedback 驅動的修正者</h2>
+<div class="agent"><div class="cap" style="background:var(--amber)">Repair <small>agents/repair.py · 委派節點 phase_revise</small></div>
+<dl class="meta">
+  <dt>Charter</dt><dd>「對齊三路輸入：原始需求、目前 pipeline 結果、user feedback。先診斷層級（build_level → 直接 patch canvas；plan_level → 產修正 plan 交回 Planner），再最小範圍修正。」</dd>
+  <dt>觸發時機</dt><dd>(a) phase round 用盡（<code>stuck_escalated</code>）；(b) Phase 2+ user feedback 開 repair ticket。</dd>
+  <dt>工具（6）</dt><dd class="chips"><span>inspect_node_output</span><span>add_node</span><span>connect</span><span>set_param</span><span>remove_node</span><span>run_verifier</span>（無 inspect_block_doc / phase_complete — 修正不重規劃）</dd>
+  <dt>預算</dt><dd><code>revise_attempts=1</code>/phase · <code>repair_iterations=3</code>（ticket loop 上限）。</dd>
+</dl>
+<h3>逐步流程</h3>
+<table>
+  <thead><tr><th style="width:30px">#</th><th>步驟</th><th>細節</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><b>三路對齊</b></td><td>state view：<code>instruction</code>（原始需求）+ <code>canvas</code> + <code>last_verifier_reject</code> + <code>repair_ticket</code> + <code>phase_outcomes</code>。</td></tr>
+    <tr><td>2</td><td><b>根因診斷</b></td><td>1 次 LLM call 輸出 {root_cause, alternative_strategy, missing_capabilities}；判定 build_level（param / 接線 / block 選錯）vs plan_level（phase 目標本身錯）。</td></tr>
+    <tr><td>3</td><td><b>最小修正</b></td><td>build_level → 直接 patch canvas（注意教訓：repair LLM 傾向「加 n1b 不移除壞 n1」— 需明確 remove_node）；plan_level → 產修正 plan 交回 Planner（REPLAN）。</td></tr>
+    <tr><td>4</td><td><b>收場</b></td><td><code>result=retry</code>（修好，回 loop 續跑）或 <code>result=handover</code>（自我修復失敗，標記交棒續跑其餘 phase）。</td></tr>
+    <tr><td>5</td><td><b>W3 寫記憶（僅 retry）</b></td><td>修好才寫 correction 到 <code>agent_knowledge</code>（<code>written_by=repair</code>），且 <b><code>active=false</code> 草稿</b> — 等 Supervisor CORRECT 審核轉正。handover 絕不寫（污染實驗證實：live 失敗筆記在 execute 層召回會把同類 build 3/3 翻成 0/3）。</td></tr>
+  </tbody>
+</table>
+<h3>記憶 × 觀測</h3>
+<table>
+  <thead><tr><th>讀</th><th>寫</th><th>觀測事件</th></tr></thead>
+  <tbody><tr>
+    <td>correction（避免重犯）/ domain / preference / presentation / procedure</td>
+    <td>W3：correction 草稿（active=false，僅 retry 成功時）</td>
+    <td><code>repair_triggered</code> · <code>repair_outcome</code>{retry|handover} · <code>llm_usage</code></td>
+  </tr></tbody>
+</table>
+</div>
+
+<!-- 5 supervisor -->
+<h2><span class="n">5</span>SUPERVISOR — 記憶蒸餾者（離線，propose-only）</h2>
+<div class="agent"><div class="cap" style="background:var(--purp)">Supervisor <small>python_ai_sidecar/supervisor_curation/ · tools/supervisor_curate · Java SupervisorCurationService · /supervisor 頁</small></div>
+<dl class="meta">
+  <dt>定位</dt><dd>把大量 episodic 原料（fast-path 記憶、doc 便利貼、episode 統計）蒸餾成乾淨、去重、分類的 durable memory — <b>它是 domain / procedure 兩類記憶唯一的產生者</b>。</dd>
+  <dt>觸發時機</dt><dd>離線 CLI（<code>tools/supervisor_curate</code>）手動或 cron；<b>絕不在 build hot path</b>。</dd>
+  <dt>Model</dt><dd>Haiku 4.5 優先（cost posture 同 mcp_derivative）；無 Anthropic key 時回退部署 client（現為 GLM）。</dd>
+</dl>
+<h3>Pipeline（一次 curation pass）</h3>
+<pre>
+1. GET /internal/supervisor/curation-input（Java 彙整）
+     draft corrections（W3 草稿）· live preferences / presentations（重複候選）
+     · pending doc memos（W2 便利貼）
+2. 1 次 LLM call：原則式 prompt（寧缺勿濫 / id 不可捏造 / <span class="y">per-type 精確 JSON schema</span>）
+3. <span class="g">deterministic validation gate</span>：型別、必填欄位、每個 id 必須存在於輸入
+     — 幻覺 id / 自創欄位一律丟棄（首次實跑擋下 11/11 自創格式，gate 有效）
+4. POST /internal/supervisor/proposals → supervisor_actions（status=proposed）
+     上限 12 提案/run · 同 (type,targets) 去重
+5. <span class="m">人工在 /supervisor 逐筆審核</span> → approve 才由 Java 在同一交易 commit
+</pre>
+<h3>五種操作（approve 時的 commit 行為）</h3>
+<table>
+  <thead><tr><th>操作</th><th>輸入</th><th>commit 效果</th></tr></thead>
+  <tbody>
+    <tr><td><b>MERGE</b></td><td>keep_id + remove_ids (+merged_body)</td><td>保留者可更新內文；其餘 <code>active=false</code>。只合語意相同的 preference/presentation。</td></tr>
+    <tr><td><b>CORRECT</b></td><td>target_id + new_body (+new_title, promote)</td><td>把 W3 草稿改寫成乾淨教訓（含 Why / How to apply）；<code>promote=true</code> 才轉 active。</td></tr>
+    <tr><td><b>PRUNE</b></td><td>target_ids</td><td>過時 / 一次性 / 無再用價值 → <code>active=false</code>。</td></tr>
+    <tr><td><b>PROMOTE</b></td><td>memo_class(domain|procedure) + title + body + applies_to</td><td>新增一筆 durable 記憶：<code>written_by=supervisor</code>、<code>source=supervisor</code>、active — 30 秒內 embedding backfill 後即可被 RAG 召回。<b>只准 domain / procedure</b>（fast-path 類不走此路）。</td></tr>
+    <tr><td><b>DOC_REVISE</b></td><td>block_id + memo_ids + revised_doc_draft</td><td>相關 doc memos → <code>promoted</code>；修訂草案留在 action row — <b>block_docs 本體不動</b>（單一事實來源）。</td></tr>
+  </tbody>
+</table>
+<div class="callout hard"><b>Hard rule：propose-only。</b>reject = 只蓋審核章，DB 一個 byte 都不動。Supervisor 永遠沒有直接寫記憶的路徑 — 這是 2026-07-03 污染事件（自動寫入的失敗筆記讓同類 build 3/3→0/3）換來的架構決定。</div>
+<h3>實跑紀錄（2026-07-04 首航）</h3>
+<table>
+  <tbody>
+    <tr><td>13 筆提案入佇列（PROMOTE 4 / CORRECT 3 / PRUNE 3 / DOC_REVISE 3）；deterministic gate 另擋 4 筆幻覺格式</td></tr>
+    <tr><td>approve PROMOTE → <b>系統第一筆 domain 記憶（id 64）</b>：從 2 筆獨立 correction 蒸餾出「limit 參數必須是 integer」領域事實</td></tr>
+    <tr><td>它也自己發現了 orphan-leaf 是跨 6+ block 的穩定 pattern，提案 PROMOTE 成 procedure — 與人工分析一致</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- 6 monitor -->
+<h2><span class="n">6</span>MONITOR — 自省觸發器（deterministic，無 LLM）</h2>
+<div class="agent"><div class="cap" style="background:var(--teal)">Monitor <small>Java MonitorService · /supervisor 頁「改善請求」區 · V73 monitor_requests</small></div>
+<dl class="meta">
+  <dt>定位</dt><dd>監控<b>我們 agent 自己</b>的健康（不是 fab 資料 — 那是 auto-patrol 的事）；把系統性劣化轉成「對 Planner 的改善請求」。與 Planner 同級的 requester，不是上級。</dd>
+  <dt>觸發時機</dt><dd><code>POST /api/v1/monitor/scan</code>（UI「立即掃描」按鈕 / cron）。</dd>
+  <dt>LLM</dt><dd><b>零</b> — 三條指標全是 SQL 聚合 + 門檻，完全可重現。</dd>
+</dl>
+<h3>三條指標</h3>
+<table>
+  <thead><tr><th>kind</th><th>量測</th><th>門檻</th><th>訊號意義</th></tr></thead>
+  <tbody>
+    <tr><td><b>DOC_GAP</b></td><td>單一 block 的 pending doc memos 數</td><td>≥ 3</td><td>agent 反覆在同一 block 踩坑 → 文件缺口（per-block 一筆請求）</td></tr>
+    <tr><td><b>DIVERGENCE</b></td><td>7 天內「自評 OK 但 user 否決」的 build 數</td><td>≥ 2</td><td>verifier / plan 品質漂移 — 系統最危險的盲區訊號</td></tr>
+    <tr><td><b>REPAIR_HANDOVER</b></td><td>7 天內 repair 以 handover 收場次數</td><td>≥ 3</td><td>自我修復系統性失效（能力缺口 / doc 缺口 / plan 過度切分）</td></tr>
+  </tbody>
+</table>
+<h3>流程</h3>
+<pre>
+scan（deterministic SQL）
+  → 超標 → monitor_requests（status=open；(kind,subject) partial unique index 去重）
+  → 人工在 /supervisor「改善請求」審核
+      approve → 取得<span class="y">預備好的 Planner 指令</span>（一鍵複製，拿去 Builder 下給 Planner）
+      dismiss → 蓋章關閉
+</pre>
+<h3>實跑紀錄（首掃）</h3>
+<table><tbody>
+  <tr><td>DOC_GAP: <code>block_spc_panel</code>、<code>block_weco_rules</code>（各 3 筆 pending memo）</td></tr>
+  <tr><td>REPAIR_HANDOVER: 7 天 14 次（threshold 3）— 真實抓到 handover 偏高，佐證了 gate 期間 block_select bug 的存在</td></tr>
+</tbody></table>
+</div>
+
+<!-- 7 cross-cutting -->
+<h2><span class="n">7</span>橫切機制：記憶、觀測、成本、旗標</h2>
+<h3>7.1 記憶讀寫全景（誰讀什麼 / 誰寫什麼）</h3>
+<table>
+  <thead><tr><th>class</th><th>讀</th><th>寫入者（written_by）</th><th>生效方式</th></tr></thead>
+  <tbody>
+    <tr><td><b>domain</b></td><td>Planner / Builder / Repair（always_on + RAG）</td><td>supervisor（PROMOTE）/ human</td><td>核准即 active</td></tr>
+    <tr><td><b>preference</b></td><td>Planner</td><td>planner（W1）/ human</td><td>立即 active（user 明改訊號）</td></tr>
+    <tr><td><b>presentation</b></td><td>Planner / Builder</td><td>planner（W1）/ human</td><td>立即 active</td></tr>
+    <tr><td><b>correction</b></td><td>Planner(tag=plan) / Builder+Repair(tag=execute)</td><td>planner（W1, active）/ repair（W3, <b>draft</b>）</td><td>W3 草稿等 CORRECT 轉正</td></tr>
+    <tr><td><b>episodic</b></td><td>Supervisor / Monitor（原料）</td><td>三 agent 全部（EpisodeRecorder 事件流）</td><td>寫入即查（PG）</td></tr>
+    <tr><td><b>procedure</b></td><td>Planner / Builder / Repair</td><td>supervisor（PROMOTE）</td><td>核准即 active</td></tr>
+  </tbody>
+</table>
+<h3>7.2 讀取管線（所有 agent 相同）</h3>
+<pre>
+build_knowledge_hint(agent, phase_id, round)
+  ├─ always_on 高優先列直推（不經 RAG）
+  ├─ RAG：pgvector cosine（Cohere embed-multilingual-v3.0），layer 過濾
+  │   （plan / execute / both — V58：錯層的列不進排序）
+  └─ 召回清單 → <span class="m">memory_recall 事件</span>{agent, phase_id, round, recalled[]}
+      → /agent-activity Tab A 每輪 prompt 旁的紫色 chips
+</pre>
+<h3>7.3 觀測（Episode = Supervisor / Monitor 的燃料）</h3>
+<table>
+  <thead><tr><th>層</th><th>內容</th></tr></thead>
+  <tbody>
+    <tr><td><code>agent_episodes</code></td><td>每 build 一列：instruction / plan / status / 自評 / user feedback / <b>divergence</b>（自評 OK ∧ user 否決）/ cost_json（per-agent 歸因）/ trace_file 指標。</td></tr>
+    <tr><td><code>agent_steps</code></td><td>行為事件流（14+ 類，上文各 agent 表列）；ContextVar 注入、fail-open、批次 flush（25）。</td></tr>
+    <tr><td>視覺化</td><td><code>/agent-activity</code>：Tab A Trace 明細（逐 phase/round prompt+output+引用記憶）/ Tab B 時間軸 / Tab C 記分板。</td></tr>
+  </tbody>
+</table>
+<h3>7.4 成本與旗標</h3>
+<table>
+  <thead><tr><th>項目</th><th>設定</th></tr></thead>
+  <tbody>
+    <tr><td>Build LLM</td><td>GLM-5.2 @ OpenRouter（<code>OLLAMA_MODEL</code>，provider pin Fireworks — 快 8 倍）；per-agent 用量由 <code>_observe_llm_usage</code> hook 歸因。</td></tr>
+    <tr><td>Supervisor LLM</td><td>Haiku 4.5 優先（離線、低頻）；<code>SUPERVISOR_CURATION_LLM_MODEL</code> 可覆寫。</td></tr>
+    <tr><td>Monitor</td><td>零 LLM。</td></tr>
+    <tr><td>Feature flags</td><td><code>ENABLE_AGENT_EPISODES</code> / <code>ENABLE_MEMORY_WRITES</code>（env + restart；SSE endpoint 不吃 header 旗標）。兩者 OFF 時系統退回純 build 行為 — 全部旁路 fail-open。</td></tr>
+  </tbody>
+</table>
+
+<h3>7.5 學習閉環（把六個角色串起來）</h3>
+<pre>
+build 失敗/被糾正
+  → <span class="g">fast path</span>（秒級）：W1/W2/W3 落 raw 記憶（planner 立即生效、repair 進草稿、builder 進便利貼）
+  → <span class="m">distill path</span>（天級）：Supervisor 蒸餾（合併/改寫/汰舊/升格/文件草案）→ 人核准
+  → <span class="c">self-watch</span>（週級）：Monitor 掃聚合指標 → 改善請求 → 人核准 → Planner 指令
+下一次 build：RAG 召回更乾淨的記憶 → memory_recall 事件可回查「這輪引用了什麼」
+</pre>
+
+<footer>
+  來源：<code>agents/{planner,builder,repair}.py</code> · <code>graph_build/graph.py</code> ·
+  <code>supervisor_curation/proposer.py</code> · Java <code>SupervisorCurationService</code> / <code>MonitorService</code> ·
+  設計文件 <code>AGENT_HARNESS_DESIGN.html</code> · 進度 <code>MULTI_AGENT_PROGRESS.html</code>。
+  Updated 2026-07-04（Phase 5+6 上線後）。
+</footer>
+
+</div>
+</body>
+</html>
