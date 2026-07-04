@@ -41,7 +41,7 @@ def test_first_empty_appends_nudge_and_counts():
     assert ev["data"]["consecutive_no_action"] == 1
 
 
-def test_escalates_at_cap():
+def test_escalates_at_cap_and_resets_for_revise_retry():
     patch = _handle_no_action(
         _state(no_action={"p3": MAX_CONSECUTIVE_NO_ACTION - 1}),
         pid="p3", round_n=5,
@@ -49,11 +49,11 @@ def test_escalates_at_cap():
         assistant_content=[],
     )
     assert patch["status"] == "phase_revise_pending"
-    assert patch["v30_phase_no_action"]["p3"] == MAX_CONSECUTIVE_NO_ACTION
+    # counter resets so the post-revise retry gets the full budget again
+    assert patch["v30_phase_no_action"]["p3"] == 0
     ev = patch["sse_events"][0]
-    assert ev["event"] == "phase_revise_started" or (
-        ev.get("data", {}).get("reason") == "empty_llm_responses"
-    )
+    assert ev.get("data", {}).get("reason") == "empty_llm_responses"
+    assert ev["data"]["consecutive_no_action"] == MAX_CONSECUTIVE_NO_ACTION
 
 
 def test_counter_is_per_phase():

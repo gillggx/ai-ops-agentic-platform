@@ -264,11 +264,17 @@ def _handle_no_action(
             "responses (round %d) — escalate to revise",
             pid, no_action_n, round_n + 1,
         )
+        # Reset so the post-revise retry gets the full consecutive-empty
+        # budget again — without this the retried phase re-escalates on its
+        # FIRST empty response (observed in smoke5-b1guard: escalated at 3,
+        # then again immediately after revise).
+        no_action_map[pid] = 0
         return {
             "status": "phase_revise_pending",
             "v30_phase_no_action": no_action_map,
             "sse_events": [_event("phase_revise_started", {
                 "phase_id": pid, "reason": "empty_llm_responses",
+                "consecutive_no_action": no_action_n,
             })],
         }
 
@@ -563,12 +569,11 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
             assistant_content=assistant_content,
         )
         if tracer is not None and patch.get("status") == "phase_revise_pending":
+            _ev_data = (patch.get("sse_events") or [{}])[0].get("data") or {}
             tracer.record_step(
                 "agentic_phase_loop", status="empty_response_escalated",
                 phase_id=pid, round=round_n + 1,
-                consecutive_no_action=(
-                    patch.get("v30_phase_no_action") or {}
-                ).get(pid),
+                consecutive_no_action=_ev_data.get("consecutive_no_action"),
             )
         return patch
 
