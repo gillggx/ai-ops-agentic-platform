@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Console — 重設計 Mockup</title>
+<style>
+  :root{
+    --ink:#1f2933; --mut:#64748b; --line:#e2e8f0; --bg:#f5f7fa;
+    --planner:#1d4ed8; --planner-bg:#eff6ff;
+    --builder:#047857; --builder-bg:#ecfdf5;
+    --repair:#b45309; --repair-bg:#fffbeb;
+    --verifier:#475569; --verifier-bg:#f1f5f9;
+    --mem:#6d28d9; --mem-bg:#f5f3ff;
+    --ink2:#0f172a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"Segoe UI","Noto Sans TC",sans-serif;
+       background:var(--bg);color:var(--ink);font-size:13px;line-height:1.55;}
+  .page{max-width:1180px;margin:0 auto;padding:24px 20px 60px;}
+  h1{font-size:20px;margin:0 0 4px;}
+  .sub{color:var(--mut);font-size:12.5px;margin-bottom:20px;}
+  .layout{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;}
+  .notes{flex:1;min-width:320px;}
+  .notes h2{font-size:14px;margin:18px 0 6px;color:var(--ink2);}
+  .notes table{width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden;}
+  .notes th,.notes td{padding:7px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;}
+  .notes thead th{background:#f8fafc;font-size:10.5px;text-transform:uppercase;color:var(--mut);}
+  .notes tbody tr:last-child td{border-bottom:none;}
+  code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:11px;font-family:ui-monospace,Menlo,monospace;}
+
+  /* ── the panel mock (matches AIAgentPanel 380px look) ── */
+  .panel{width:400px;flex-shrink:0;background:#fff;border:1px solid var(--line);border-radius:12px;
+         box-shadow:0 8px 30px rgba(15,23,42,.10);overflow:hidden;}
+  .panel-head{padding:12px 14px 0;}
+  .panel-title{font-weight:700;font-size:14px;color:var(--ink2);}
+  .panel-usage{font-size:10px;color:#94a3b8;font-family:ui-monospace,Menlo,monospace;margin-top:1px;}
+  .tabs{display:flex;gap:2px;margin-top:8px;border-bottom:1px solid var(--line);}
+  .tab{padding:7px 14px;font-size:12.5px;color:var(--mut);border:none;background:none;}
+  .tab.active{color:var(--ink2);font-weight:700;border-bottom:2px solid var(--ink2);margin-bottom:-1px;}
+  .body{padding:12px;display:flex;flex-direction:column;gap:12px;max-height:760px;overflow-y:auto;background:#fafbfc;}
+
+  /* 1. agent strip */
+  .agents{display:flex;gap:8px;}
+  .agent{flex:1;border-radius:9px;padding:8px 10px;border:1px solid var(--line);background:#fff;position:relative;}
+  .agent .who{font-size:11px;font-weight:800;letter-spacing:.03em;}
+  .agent .state{font-size:10.5px;margin-top:1px;}
+  .agent .meta{font-size:9.5px;color:#94a3b8;margin-top:3px;font-family:ui-monospace,Menlo,monospace;}
+  .agent.planner{border-color:#bfdbfe;} .agent.planner .who{color:var(--planner);}
+  .agent.builder{border-color:#a7f3d0;background:var(--builder-bg);} .agent.builder .who{color:var(--builder);}
+  .agent.repair{opacity:.55;} .agent.repair .who{color:var(--repair);}
+  .pulse{position:absolute;top:9px;right:10px;width:7px;height:7px;border-radius:7px;background:var(--builder);}
+  .pulse::after{content:"";position:absolute;inset:-4px;border-radius:99px;border:2px solid var(--builder);opacity:.4;animation:pp 1.4s infinite;}
+  @keyframes pp{0%{transform:scale(.6);opacity:.6}100%{transform:scale(1.4);opacity:0}}
+  @media (prefers-reduced-motion: reduce){.pulse::after{animation:none}}
+
+  /* 2. lanes */
+  .sec-title{font-size:10.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#94a3b8;margin:2px 2px 0;}
+  .lane-item{display:flex;gap:8px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:7px 10px;}
+  .lane-item .rail{width:3px;border-radius:3px;flex-shrink:0;}
+  .lane-item .t{font-size:9.5px;color:#94a3b8;font-family:ui-monospace,Menlo,monospace;width:44px;flex-shrink:0;padding-top:2px;}
+  .lane-item .msg{flex:1;font-size:11.5px;}
+  .lane-item .msg b{font-size:10px;letter-spacing:.03em;}
+  .lane-item .msg .detail{color:var(--mut);font-size:11px;}
+  .lane-item .msg .result{color:var(--builder);font-size:10.5px;font-family:ui-monospace,Menlo,monospace;}
+  .chip{display:inline-block;font-size:9px;font-weight:700;padding:1px 6px;border-radius:99px;vertical-align:1px;margin-left:4px;}
+
+  /* 3. memory */
+  .mem-box{background:var(--mem-bg);border:1px solid #ddd6fe;border-radius:9px;padding:9px 11px;}
+  .mem-box .row{display:flex;gap:6px;align-items:baseline;font-size:11px;padding:2px 0;}
+  .mem-box .id{font-family:ui-monospace,Menlo,monospace;font-size:10px;color:var(--mem);font-weight:700;width:36px;flex-shrink:0;}
+  .mem-box .cls{font-size:9px;font-weight:700;padding:0 5px;border-radius:3px;border:1px solid #c4b5fd;color:var(--mem);flex-shrink:0;}
+  .mem-head{font-size:10.5px;font-weight:800;color:var(--mem);margin-bottom:3px;}
+
+  /* 4. cost */
+  .cost{display:flex;gap:8px;}
+  .cost .kpi{flex:1;background:#fff;border:1px solid var(--line);border-radius:8px;padding:7px 10px;}
+  .cost .kpi .v{font-size:14px;font-weight:800;color:var(--ink2);font-variant-numeric:tabular-nums;}
+  .cost .kpi .k{font-size:9.5px;color:#94a3b8;}
+  .deep{font-size:11px;color:var(--planner);text-align:right;padding:0 2px;}
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Agent Console — 重設計 Mockup</h1>
+  <div class="sub">取代 AIAgentPanel 現有的 9-Stage Console（stage 3-6 事件源已死）。定位：<b>對話 tab 看「事」，Console tab 看「agent」</b> — 誰在動、動到哪、這次引用/學到什麼、花了多少。以下資料全部來自 2026-07-04 真實 build（EQP-01「我後悔了改成3張」案），且每個區塊都由<b>既有 SSE 事件</b>直接餵，零後端新碼。</div>
+
+  <div class="layout">
+    <!-- ════════ THE MOCK PANEL ════════ -->
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-title">AI Agent</div>
+        <div class="panel-usage">in 33,656 · out 603 · cache 65.4k · ~$0.130</div>
+        <div class="tabs">
+          <button class="tab">對話</button>
+          <button class="tab active">Agent Console</button>
+        </div>
+      </div>
+      <div class="body">
+
+        <!-- 1. agent strip -->
+        <div class="sec-title">Agents · 本次 session</div>
+        <div class="agents">
+          <div class="agent planner">
+            <div class="who">PLANNER</div>
+            <div class="state">計畫已確認</div>
+            <div class="meta">5 phases + 1 移除<br>replan 0/2</div>
+          </div>
+          <div class="agent builder">
+            <div class="pulse"></div>
+            <div class="who">BUILDER</div>
+            <div class="state">建構中 — p3</div>
+            <div class="meta">round 2/32<br>last: add_node</div>
+          </div>
+          <div class="agent repair">
+            <div class="who">REPAIR</div>
+            <div class="state">待命</div>
+            <div class="meta">iterations 0/3</div>
+          </div>
+        </div>
+
+        <!-- 2. activity lanes -->
+        <div class="sec-title">活動流（按 agent 分道）</div>
+
+        <div class="lane-item">
+          <div class="rail" style="background:var(--planner)"></div>
+          <div class="t">14:52</div>
+          <div class="msg"><b style="color:var(--planner)">PLANNER</b>
+            <div class="detail">提出 5 phases：取資料 → 聚焦 R → 畫 R → 聚焦 Cpk → 畫 Cpk…
+              <span class="chip" style="border:1px solid #fecaca;color:#b42318">將移除 n3（合併圖被取代）</span></div>
+          </div>
+        </div>
+        <div class="lane-item">
+          <div class="rail" style="background:var(--planner)"></div>
+          <div class="t">14:53</div>
+          <div class="msg"><b style="color:var(--planner)">PLANNER</b>
+            <div class="detail">user 確認（含 1 處編輯）→ <span style="color:var(--mem)">W1 已寫入 preference</span></div>
+          </div>
+        </div>
+        <div class="lane-item">
+          <div class="rail" style="background:var(--builder)"></div>
+          <div class="t">14:53</div>
+          <div class="msg"><b style="color:var(--builder)">BUILDER</b> · p1 r1 · add_node
+            <div class="detail">block_process_history(tool_id=EQP-01, step=STEP_001, 7d)</div>
+            <div class="result">→ 59 rows</div>
+          </div>
+        </div>
+        <div class="lane-item">
+          <div class="rail" style="background:var(--verifier)"></div>
+          <div class="t">14:54</div>
+          <div class="msg"><b style="color:var(--verifier)">VERIFIER</b> · p1
+            <div class="detail">ADVANCED — raw_data 契約滿足
+              <span class="chip" style="background:#fef3c7;color:#b45309">auto</span></div>
+          </div>
+        </div>
+        <div class="lane-item">
+          <div class="rail" style="background:var(--builder)"></div>
+          <div class="t">14:54</div>
+          <div class="msg"><b style="color:var(--builder)">BUILDER</b> · p2 r1 · add_node
+            <div class="detail">block_unnest(column=spc_charts)</div>
+            <div class="result">→ 696 rows</div>
+          </div>
+        </div>
+        <div class="lane-item">
+          <div class="rail" style="background:var(--verifier)"></div>
+          <div class="t">14:55</div>
+          <div class="msg"><b style="color:var(--verifier)">VERIFIER</b> · p2
+            <div class="detail" style="color:#b42318">REJECTED — orphan: data node is a leaf</div>
+          </div>
+        </div>
+        <div class="lane-item">
+          <div class="rail" style="background:var(--builder)"></div>
+          <div class="t">14:55</div>
+          <div class="msg"><b style="color:var(--builder)">BUILDER</b> · p3 r2 · add_node
+            <div class="detail">block_line_chart(x=eventTime, y=value) ← 接上 p2 輸出</div>
+          </div>
+        </div>
+        <div class="lane-item" style="border-style:dashed;opacity:.8">
+          <div class="rail" style="background:#0f172a"></div>
+          <div class="t">結尾</div>
+          <div class="msg"><b>GRAPH</b>
+            <div class="detail">確定性移除 n3（user 已核可）→ nodes_removed</div>
+          </div>
+        </div>
+
+        <!-- 3. memory -->
+        <div class="sec-title">記憶效應 · 本次 session</div>
+        <div class="mem-box">
+          <div class="mem-head">引用（memory_recall，13 筆，示前 4）</div>
+          <div class="row"><span class="id">#9</span><span class="cls">domain</span><span>SPC 連續 N 點 OOC 觸發告警慣例</span></div>
+          <div class="row"><span class="id">#82</span><span class="cls">domain</span><span>process_history 必須提供 tool_id/lot_id/step 三擇一 <span class="chip" style="background:#ede9fe;color:var(--mem)">新蒸餾</span></span></div>
+          <div class="row"><span class="id">#83</span><span class="cls">procedure</span><span>避免 orphan leaf：資料節點必須接下游</span></div>
+          <div class="row"><span class="id">#41</span><span class="cls">preference</span><span>預設時間窗 12 小時</span></div>
+          <div class="mem-head" style="margin-top:7px">寫入（W1/W2/W3）</div>
+          <div class="row"><span class="id">W1</span><span class="cls">pref</span><span>「取得 EQP-01 過去 7 天的歷史資料（改）」— user 編輯 plan</span></div>
+          <div class="row"><span class="id">W2</span><span class="cls">memo</span><span>block_unnest：p2 被拒 1 次後過 → 文件便利貼</span></div>
+        </div>
+
+        <!-- 4. cost -->
+        <div class="sec-title">成本 · per-agent</div>
+        <div class="cost">
+          <div class="kpi"><div class="v">8.2k</div><div class="k">Planner tok</div></div>
+          <div class="kpi"><div class="v">24.1k</div><div class="k">Builder tok</div></div>
+          <div class="kpi"><div class="v">0</div><div class="k">Repair tok</div></div>
+          <div class="kpi"><div class="v">66%</div><div class="k">cache hit</div></div>
+        </div>
+        <div class="deep">完整逐輪 trace → /agent-activity ↗</div>
+      </div>
+    </div>
+
+    <!-- ════════ DESIGN NOTES ════════ -->
+    <div class="notes">
+      <h2>設計意圖（給 design 團隊的 brief）</h2>
+      <table>
+        <thead><tr><th style="width:120px">區塊</th><th>回答的問題</th><th>資料源（既有 SSE，零後端新碼）</th></tr></thead>
+        <tbody>
+          <tr><td><b>1. Agent 狀態列</b></td><td>「現在誰在動？」— 三 agent 晶片，活動中的有脈動點；顯示 phase/round 與預算用量（round 2/32、replan 0/2、repair 0/3）</td><td><code>llm_usage</code>（帶 agent 歸因）、<code>pb_glass_op._round</code>、<code>plan_confirmed</code></td></tr>
+          <tr><td><b>2. 分道活動流</b></td><td>「動到哪了？」— 按 agent 上色的時間軸：Planner 提案/確認（含移除 chip）、Builder 每個動作+結果行、Verifier 裁決（ADVANCED/REJECTED）、Graph 的確定性移除</td><td><code>pb_glass_op</code>、<code>phase_update</code>、<code>nodes_removed</code>、<code>goal_plan_confirmed</code></td></tr>
+          <tr><td><b>3. 記憶效應</b></td><td>「這次引用/學到什麼？」— 召回清單（含「新蒸餾」徽章標 Supervisor 產出的）+ W1/W2/W3 寫入</td><td><code>memory_recall</code>、<code>memory_write</code>（前端已有 case）</td></tr>
+          <tr><td><b>4. 成本</b></td><td>「花了多少？」— per-agent tokens + cache 命中率</td><td><code>llm_usage</code>、<code>glass_usage</code></td></tr>
+        </tbody>
+      </table>
+
+      <h2>與現有 surface 的分工</h2>
+      <table>
+        <tbody>
+          <tr><td><b>對話 tab</b></td><td>任務視角：plan 卡（可編輯+移除勾選）、PhaseTimeline、圖表結果 — 「我要的東西好了沒」</td></tr>
+          <tr><td><b>Agent Console（本提案）</b></td><td>agent 視角：本次 session 的即時儀表 — 「系統內部誰在幹嘛、學了什麼」</td></tr>
+          <tr><td><b>/agent-activity</b></td><td>事後深潛：跨 session、逐輪 prompt/output、完整 trace — debug 與治理用</td></tr>
+        </tbody>
+      </table>
+
+      <h2>要移除的（現 Console 遺物）</h2>
+      <table>
+        <tbody>
+          <tr><td>9-Stage 卡片（<code>PipelineConsole</code>）</td><td>Stage 3-6 事件源（舊 plan_pipeline code-gen 路徑）已死，卡片永遠空</td></tr>
+          <tr><td>「儲存為 Skill」按鈕</td><td>掛在 legacy <code>pipeline_plan</code> ref，實務上按不出東西；Skills v2 已有正式入口</td></tr>
+        </tbody>
+      </table>
+
+      <h2>互動細節（實作時）</h2>
+      <table>
+        <tbody>
+          <tr><td>活動流 hover</td><td>顯示完整 args/result JSON（同 pb_glass_op payload）</td></tr>
+          <tr><td>記憶列點擊</td><td>跳 /agent-knowledge 該筆（有 id）</td></tr>
+          <tr><td>Repair 活躍時</td><td>晶片轉琥珀色 + 顯示 root_cause 一行；handover 轉紅</td></tr>
+          <tr><td>空狀態</td><td>「這輪對話沒有觸發建構 — 下個 build 開始時這裡會亮起來」</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+</body>
+</html>
