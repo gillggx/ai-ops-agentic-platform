@@ -362,11 +362,10 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
           // Without these, a modification message reaches goal_plan with zero
           // context and gets a too_vague refuse ("agent 看不懂需求").
           ...(builderState.pipeline.nodes.length > 0 ? {
-            pipelineSnapshot: {
-              nodes: builderState.pipeline.nodes,
-              edges: builderState.pipeline.edges,
-              inputs: builderState.pipeline.inputs ?? [],
-            },
+            // Full PipelineJSON — cherry-picking nodes/edges dropped the
+            // required name/version fields and crashed PipelineJSON
+            // validation when the resumed build loop started (2026-07-04).
+            pipelineSnapshot: builderState.pipeline,
           } : {}),
           ...(priorInstructionRef.current ? { priorInstruction: priorInstructionRef.current } : {}),
           v30Mode: true,

@@ -52,6 +52,20 @@ class ChatRequest(BaseModel):
     pipeline_snapshot: dict | None = Field(default=None, alias="pipelineSnapshot")
 
 
+def _normalize_snapshot(snap: dict | None) -> dict | None:
+    """Fill the PipelineJSON required fields a partial canvas snapshot may
+    lack (name/version). Callers sending {nodes, edges} only crashed
+    agentic_phase_loop's model_validate mid-build (2026-07-04)."""
+    if not isinstance(snap, dict) or not snap.get("nodes"):
+        return snap
+    out = dict(snap)
+    out.setdefault("version", "1.0")
+    out.setdefault("name", "canvas-snapshot")
+    out.setdefault("edges", [])
+    out.setdefault("inputs", [])
+    return out
+
+
 class BuildRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -207,7 +221,7 @@ async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenera
     try:
         async for stream_event in stream_graph_build(
             instruction=req.instruction,
-            base_pipeline=req.pipeline_snapshot,
+            base_pipeline=_normalize_snapshot(req.pipeline_snapshot),
             prior_instruction=req.prior_instruction,
             user_id=caller.user_id,
             skill_step_mode=req.skill_step_mode,
