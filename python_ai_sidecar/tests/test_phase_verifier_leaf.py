@@ -135,3 +135,82 @@ def test_prune_multiple():
              _node("n3", "block_filter")]
     cleaned = _prune_nodes({"nodes": nodes, "edges": []}, ["n2", "n3"])
     assert [n["id"] for n in cleaned["nodes"]] == ["n1"]
+
+
+# ── 2026-07-05: plan-relevant terminals are NOT dead leaves ──────────
+# apc-drift WRONG ×2: p4=verdict ends in block_weco_rules (verdict block,
+# nothing downstream by design). The old exemptions missed it → after 3
+# leaf rejects the prune deleted the node the same verifier call advanced
+# on → final pipeline shipped without the verdict node.
+
+class FakeRegistryWithCovers(FakeRegistry):
+    def __init__(self, cats, covers=None, standalone=None):
+        super().__init__(cats, standalone=standalone)
+        self._covers = covers or {}
+
+    def get_spec(self, name, version):
+        spec = super().get_spec(name, version)
+        if spec is not None and name in self._covers:
+            spec["produces"] = {"covers_output": self._covers[name]}
+        return spec
+
+
+_CATS_V = dict(_CATS, block_weco_rules="analysis")
+_COVERS_V = {"block_weco_rules": ["verdict"]}
+
+
+def test_verdict_terminal_exempt_when_plan_has_verdict_phase():
+    nodes = [_node("n1", "block_process_history"), _node("n2", "block_filter"),
+             _node("n3", "block_spc_panel"), _node("n4", "block_weco_rules")]
+    edges = [_edge("n1", "n2"), _edge("n2", "n3"), _edge("n2", "n4")]
+    state = {"final_pipeline": {"nodes": nodes, "edges": edges},
+             "v30_phases": [{"id": "p1", "expected": "raw_data"},
+                            {"id": "p2", "expected": "chart"},
+                            {"id": "p4", "expected": "verdict"}],
+             "v30_current_phase_idx": 2}
+    _, ab = _nonoutput_leaves(state, FakeRegistryWithCovers(_CATS_V, _COVERS_V))
+    assert ab == []  # weco_rules is a plan-declared deliverable terminal
+
+
+def test_verdict_leaf_still_flagged_when_plan_has_no_verdict_phase():
+    # Same canvas, but the plan never asked for a verdict — a dangling
+    # weco_rules IS abandoned then.
+    nodes = [_node("n1", "block_process_history"), _node("n3", "block_spc_panel"),
+             _node("n4", "block_weco_rules")]
+    edges = [_edge("n1", "n3"), _edge("n1", "n4")]
+    state = {"final_pipeline": {"nodes": nodes, "edges": edges},
+             "v30_phases": [{"id": "p1", "expected": "raw_data"},
+                            {"id": "p2", "expected": "chart"}],
+             "v30_current_phase_idx": 1}
+    _, ab = _nonoutput_leaves(state, FakeRegistryWithCovers(_CATS_V, _COVERS_V))
+    assert [nid for nid, _ in ab] == ["n4"]
+
+
+def test_current_candidate_never_pruned():
+    # The node under verification this round is the phase frontier —
+    # rejecting it is fine, silently deleting it while advancing is not.
+    nodes = [_node("n1", "block_process_history"), _node("n2", "block_pluck"),
+             _node("n5", "block_box_plot")]
+    edges = [_edge("n1", "n5")]  # n2 dangling AND is the current candidate
+    state = {"final_pipeline": {"nodes": nodes, "edges": edges},
+             "v30_phases": [{"id": "p1", "expected": "raw_data"}],
+             "v30_current_phase_idx": 0,
+             "v30_last_mutated_logical_id": "n2"}
+    _, ab = _nonoutput_leaves(state, FakeRegistry(_CATS))
+    assert ab == []
+
+
+def test_abandoned_fetch_still_detected_with_plan_kinds():
+    # Original prune motivation (ooc-ranking dangling 3rd fetch) must keep
+    # working: raw_data/transform kinds are never exempt.
+    nodes = [_node("n1", "block_process_history"), _node("n2", "block_process_history"),
+             _node("n3", "block_union"), _node("n5", "block_bar_chart"),
+             _node("n4", "block_process_history")]
+    edges = [_edge("n1", "n3"), _edge("n2", "n3"), _edge("n3", "n5")]
+    state = {"final_pipeline": {"nodes": nodes, "edges": edges},
+             "v30_phases": [{"id": "p1", "expected": "raw_data"},
+                            {"id": "p2", "expected": "chart"},
+                            {"id": "p3", "expected": "verdict"}],
+             "v30_current_phase_idx": 1}
+    _, ab = _nonoutput_leaves(state, FakeRegistryWithCovers(_CATS_V, _COVERS_V))
+    assert [nid for nid, _ in ab] == ["n4"]

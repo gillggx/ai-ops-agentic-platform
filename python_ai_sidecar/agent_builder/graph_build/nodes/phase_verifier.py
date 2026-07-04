@@ -559,6 +559,23 @@ def _nonoutput_leaves(
     if not any(_cat_meta(n.get("block_id"))[0] == "output" for n in nodes):
         return pipeline_now, []
 
+    # 2026-07-05 (apc-drift WRONG ×2): a leaf whose covers_output matches a
+    # plan phase's expected kind is a LEGITIMATE terminal — e.g. p4=verdict
+    # ends in block_weco_rules with nothing downstream. The old exemptions
+    # (category=output / standalone_capable) missed verdict/alarm blocks, so
+    # after 3 orphan rejects the prune deleted the node the SAME verifier
+    # call was advancing on. Original prune target (abandoned raw_data /
+    # transform fetches) still gets pruned: their covers never appear as a
+    # deliverable phase kind... except raw_data phases — so we only exempt
+    # non-data kinds.
+    plan_kinds = {
+        str(p.get("expected") or "").strip()
+        for p in (state.get("v30_phases") or [])
+    } - {"raw_data", "transform", ""}
+    # Never prune the node under verification this round — advancing on a
+    # node while deleting it is contradictory by construction.
+    candidate_lid = state.get("v30_last_mutated_logical_id")
+
     abandoned: list[tuple[str, str]] = []
     for n in nodes:
         nid = n.get("id")
@@ -567,6 +584,11 @@ def _nonoutput_leaves(
         # Output blocks are legitimate leaves; standalone composites opt out
         # the same way C14 exempts them.
         if cat == "output" or meta.get("standalone_capable"):
+            continue
+        if nid == candidate_lid:
+            continue
+        spec = registry.get_spec(bid, "1.0.0") or {}
+        if plan_kinds & set(_resolve_covers(spec, kind="output")):
             continue
         if out_count.get(nid, 0) == 0:
             abandoned.append((nid, bid))
