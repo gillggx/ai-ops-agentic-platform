@@ -776,8 +776,24 @@ async def _build_knowledge_block(
             recalled_out.append({
                 "id": rid, "memo_class": r.get("memo_class"),
                 "title": str(r.get("title") or "")[:60], "layer": "rag",
+                # Agent Console shows the How-to-apply sentence on cited
+                # memories (◈ chip), not just the id — extract it here so
+                # the SSE payload is self-contained.
+                "how_apply": _extract_how_apply(body),
+                "written_by": r.get("written_by"),
             })
     return "\n".join(lines)
+
+
+def _extract_how_apply(body: str) -> str:
+    """Pull the '**How to apply:**' sentence out of a memory body (memories
+    follow the Why/How-to-apply template). Empty string when absent."""
+    marker = "**How to apply:**"
+    idx = body.find(marker)
+    if idx < 0:
+        return ""
+    rest = body[idx + len(marker):].strip()
+    return rest.split("\n", 1)[0].strip()[:160]
 
 
 async def _build_examples_block(

@@ -10,7 +10,7 @@ import OpsConsole, { type GlassOpEntry } from "./OpsConsole";
 import SlashCommandMenu from "./SlashCommandMenu";
 import { ChartIntentRenderer, type ChartIntent } from "./ChartIntentRenderer";
 import { ChartExplorer } from "./ChartExplorer";
-import { PipelineConsole, type PipelineCard } from "./PipelineConsole";
+import AgentConsole, { useConsoleStore, normalizeConsoleEvent } from "./AgentConsole";
 import PbPipelineCard, { type PbPipelineCardData } from "./PbPipelineCard";
 import PbPatchProposalCard, { type PbPatchProposalData, type PipelinePatch } from "./PbPatchProposalCard";
 import type { UiRender } from "@/components/McpChartRenderer";
@@ -697,14 +697,12 @@ export function AIAgentPanel({
   const inputRef     = useRef<HTMLTextAreaElement>(null);
   const logsEndRef   = useRef<HTMLDivElement>(null);
   const pendingRenderDecisionRef = useRef<RenderDecisionMeta | null>(null);
-  const [pipelineCards, setPipelineCards] = useState<PipelineCard[]>([]);
-  const [pipelineStats, setPipelineStats] = useState<{ llmCalls: number; totalTokens: number }>({ llmCalls: 0, totalTokens: 0 });
-  // Pipeline Skill save state — stores plan + generated code from SSE events
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const lastPipelinePlanRef = useRef<Record<string, any> | null>(null);
-  const lastTransformCodeRef = useRef<string | null>(null);
-  const lastComputeCodeRef = useRef<string | null>(null);
-  const [pipelineSaved, setPipelineSaved] = useState(false);
+  // Agent Console (2026-07-04): single events[] store, everything derived.
+  // Replaces the dead 9-Stage PipelineConsole (stage 3-6 event sources were
+  // removed with the old plan_pipeline path).
+  const [consoleState, consoleDispatch] = useConsoleStore();
+  // W-codes learned this build (for the completion card's 「這次學到 n 筆」).
+  const memoryWritesRef = useRef<string[]>([]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pendingFlatDataRef = useRef<{ flatData: Record<string, any[]>; metadata: FlatDataMetadata; uiConfig: UIConfig | null; queryInfo?: any } | null>(null);
 
@@ -781,8 +779,6 @@ export function AIAgentPanel({
     setLoading(true);
     setStages([]);
     setLogs([]);
-    setPipelineCards([]);
-    setPipelineStats({ llmCalls: 0, totalTokens: 0 });
     setHitl(null);
     setTokenIn(0);
     setTokenOut(0);
@@ -845,6 +841,25 @@ export function AIAgentPanel({
       const handleStreamEvent = (ev: Record<string, unknown>) => {
         const type = ev.type as string;
 
+        // Agent Console: every SSE event may carry console signal — the
+        // normaliser understands both chat (pb_glass_*) and raw builder
+        // shapes so the two surfaces stay identical.
+        try {
+          if (type === "pb_glass_start") {
+            consoleDispatch({ t: "start" });
+            memoryWritesRef.current = [];
+          } else if (type === "pb_glass_done") {
+            consoleDispatch({ t: "done", status: String(ev.status ?? "finished") });
+          } else {
+            normalizeConsoleEvent(ev).forEach((a) => {
+              if (a.t === "event" && a.ev.kind === "write" && a.ev.write) {
+                memoryWritesRef.current.push(a.ev.write.code);
+              }
+              consoleDispatch(a);
+            });
+          }
+        } catch { /* console rendering must never break the chat stream */ }
+
         switch (type) {
           case "stage_update": {
             const stage  = ev.stage as number;
@@ -874,12 +889,6 @@ export function AIAgentPanel({
                 addLog(makeLog("🧠", `[記憶 #${m.id}] ${m.content.slice(0, 80)}${m.content.length > 80 ? "…" : ""}`, "info"));
               });
             }
-            // Pipeline card
-            setPipelineCards((prev) => [...prev.filter(c => c.stage !== 1), {
-              stage: 1, name: "Context Load", icon: "📦", status: "complete",
-              summary: `RAG: ${ragCount} 條 | History: ${histTurns} 輪`,
-              detail: { rag_count: ragCount, history_turns: histTurns },
-            }]);
             break;
           }
 
@@ -896,7 +905,6 @@ export function AIAgentPanel({
             setTokenOut((p) => p + outTok);
             setCacheWrite((p) => p + ccw);
             setCacheRead((p)  => p + crd);
-            setPipelineStats((p) => ({ llmCalls: p.llmCalls + 1, totalTokens: p.totalTokens + inTok + outTok + ccw + crd }));
             addLog(makeLog("🔢", `LLM #${ev.iteration ?? "?"} in=${inTok} out=${outTok} cache(w=${ccw} r=${crd})`, "token"));
             break;
           }
@@ -913,7 +921,6 @@ export function AIAgentPanel({
             setTokenOut((p) => p + outTok);
             setCacheWrite((p) => p + ccw);
             setCacheRead((p)  => p + crd);
-            setPipelineStats((p) => ({ llmCalls: p.llmCalls + 1, totalTokens: p.totalTokens + inTok + outTok + ccw + crd }));
             addLog(makeLog("🔢", `Glass turn ${ev.turn ?? "?"} in=${inTok} out=${outTok} cache(w=${ccw} r=${crd})`, "token"));
             break;
           }
@@ -1028,11 +1035,6 @@ export function AIAgentPanel({
             const planText = (ev.text as string) ?? "";
             if (planText) {
               addLog(makeLog("📋", `Plan: ${planText.slice(0, 200)}`, "info"));
-              setPipelineCards((prev) => [...prev.filter(c => c.stage !== 2), {
-                stage: 2, name: "Planning", icon: "🧠", status: "complete",
-                summary: planText.slice(0, 100),
-                detail: { plan: planText },
-              }]);
             }
             break;
           }
@@ -1065,14 +1067,6 @@ export function AIAgentPanel({
             const toolName = (ev.tool as string) ?? "";
             const displayLabel = ps ? `${toolName}(${ps})` : toolName;
             addLog(makeLog("🔧", displayLabel, "tool"));
-            // Capture pipeline plan for "Save as My Skill"
-            if (toolName === "plan_pipeline" && ev.input) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              lastPipelinePlanRef.current = ev.input as Record<string, any>;
-              lastTransformCodeRef.current = null;
-              lastComputeCodeRef.current = null;
-              setPipelineSaved(false);
-            }
             break;
           }
 
@@ -1612,9 +1606,16 @@ export function AIAgentPanel({
               summary,
               pipeline_json: ev.pipeline_json,
             });
+            // 記憶連動：完成卡帶上這次 build 學到的 W 代號（design handoff
+            // 2026-07-04）— memoryWritesRef 由 agent_console memory_write
+            // 事件累積，pb_glass_start 時重置。
+            const learned = memoryWritesRef.current;
+            const learnedSuffix = learned.length
+              ? `\n\n這次學到 ${learned.length} 筆（${learned.join(" · ")}）`
+              : "";
             setChatHistory((prev) => [...prev, {
               id: nextId(), role: "agent",
-              content: `✓ **${summary || "完成"}**`,
+              content: `✓ **${summary || "完成"}**${learnedSuffix}`,
             }]);
             break;
           }
@@ -1675,40 +1676,12 @@ export function AIAgentPanel({
               addLog(makeLog(icon, `${name} ${statusIcon} ${elapsed}s — ${summary}`, status === "error" ? "error" : "tool"));
             }
 
-            // Capture generated code for "Save as My Skill"
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const stageDetail = ev.detail as Record<string, any> | undefined;
-            if (stageNum === 4 && stageDetail?.custom_code) {
-              lastTransformCodeRef.current = stageDetail.custom_code as string;
-            }
-            if (stageNum === 5 && stageDetail?.code) {
-              lastComputeCodeRef.current = stageDetail.code as string;
-            }
-
-            // Collect pipeline card for PipelineConsole
-            const pipelineStatus = status === "complete" ? "complete" : status === "error" ? "error" : status === "skipped" ? "skipped" : "running";
-            setPipelineCards((prev) => {
-              const idx = prev.findIndex((c) => c.stage === stageNum);
-              const card: PipelineCard = {
-                stage: stageNum, name, icon, summary, elapsed,
-                status: pipelineStatus as PipelineCard["status"],
-                detail: ev.detail as Record<string, unknown> | undefined,
-              };
-              if (idx >= 0) {
-                const u = [...prev]; u[idx] = card; return u;
-              }
-              return [...prev, card];
-            });
             break;
           }
 
           case "memory_write": {
             const content = (ev.fix_rule ?? ev.content ?? "") as string;
             addLog(makeLog("💡", `[${ev.memory_type ?? ev.source ?? "mem"}] ${content.slice(0, 100)}`, "memory"));
-            setPipelineCards((prev) => [...prev.filter(c => c.stage !== 9), {
-              stage: 9, name: "Memory", icon: "💡", status: "complete",
-              summary: content.slice(0, 60),
-            }]);
             break;
           }
 
@@ -1766,10 +1739,6 @@ export function AIAgentPanel({
               }
             }
             addLog(makeLog("💬", `Synthesis 完成 (${text.length} chars)`, "info"));
-            setPipelineCards((prev) => [...prev.filter(c => c.stage !== 7), {
-              stage: 7, name: "Synthesis", icon: "💬", status: "complete",
-              summary: `${text.length} chars`,
-            }]);
             break;
           }
 
@@ -1781,9 +1750,6 @@ export function AIAgentPanel({
           case "reflection_pass":
             setReflection({ status: "pass", amendment: "" });
             addLog(makeLog("✅", "Self-Critique 通過 — 所有數值來源已確認", "info"));
-            setPipelineCards((prev) => [...prev.filter(c => c.stage !== 8), {
-              stage: 8, name: "Critique", icon: "🔍", status: "complete", summary: "PASS",
-            }]);
             break;
 
           case "reflection_amendment": {
@@ -2078,7 +2044,7 @@ export function AIAgentPanel({
                 gap: 4,
               }}
             >
-              {tab === "chat" ? "💬 對話" : "⚙ Console"}
+              {tab === "chat" ? "對話" : "Console"}
               {tab === "console" && loading && (
                 <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#d69e2e", flexShrink: 0 }} />
               )}
@@ -2120,7 +2086,7 @@ export function AIAgentPanel({
             >
               {msg.role === "plan" && msg.goalPhases ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
-                  <PhaseTimeline phases={msg.goalPhases} runtime={msg.phaseRuntime ?? {}} />
+                  <PhaseTimeline phases={msg.goalPhases} runtime={msg.phaseRuntime ?? {}} onConsoleLink={() => setActiveTab("console")} />
                 </div>
               ) : msg.role === "plan" && msg.planItems ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
@@ -2465,51 +2431,19 @@ export function AIAgentPanel({
         </div>
       )}
 
-      {/* Console Tab */}
+      {/* Console Tab — agent 視角（Agent Console, 2026-07-04 design handoff） */}
       {activeTab === "console" && (
-        <div style={{
-          flex: 1, background: "#fff", margin: "8px",
-          borderRadius: 6, overflowY: "auto",
-          border: "1px solid #e2e8f0", minHeight: 0,
-        }}>
-          <PipelineConsole
-            cards={pipelineCards.sort((a, b) => a.stage - b.stage)}
-            totalTime={pipelineCards.reduce((sum, c) => sum + (c.elapsed ?? 0), 0)}
-            llmCalls={pipelineStats.llmCalls}
-            totalTokens={pipelineStats.totalTokens}
-            canSaveAsSkill={!!lastPipelinePlanRef.current && !pipelineSaved && pipelineCards.some(c => c.status === "complete" && c.stage >= 3)}
-            saved={pipelineSaved}
-            onSaveAsSkill={async () => {
-              const plan = lastPipelinePlanRef.current;
-              if (!plan) return;
-              const name = prompt("儲存為 My Skill\n\n名稱：", plan.intent || "Pipeline Skill");
-              if (!name) return;
-              try {
-                const res = await fetch("/api/admin/my-skills/from-pipeline", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    name,
-                    description: plan.intent || name,
-                    pipeline_plan: plan,
-                    transform_code: lastTransformCodeRef.current,
-                    compute_code: lastComputeCodeRef.current,
-                  }),
-                });
-                if (res.ok) {
-                  setPipelineSaved(true);
-                  alert(`已儲存為 Skill: ${name}\n\n前往 Knowledge Studio → My Skills 查看`);
-                } else {
-                  const err = await res.json().catch(() => ({}));
-                  alert(`儲存失敗: ${(err as Record<string, string>).message || res.statusText}`);
-                }
-              } catch (e) {
-                alert(`儲存失敗: ${e instanceof Error ? e.message : "未知錯誤"}`);
-              }
-            }}
-          />
-          <div ref={logsEndRef} />
-        </div>
+        <AgentConsole
+          state={consoleState}
+          onTeach={({ blockId, phaseId }) => {
+            const qs = new URLSearchParams();
+            if (blockId) qs.set("prefill_block", blockId);
+            if (phaseId) qs.set("prefill_phase", phaseId);
+            if (lastUserPromptRef.current) qs.set("prefill_instruction", lastUserPromptRef.current.slice(0, 300));
+            window.open(`/agent-knowledge?${qs.toString()}`, "_blank");
+          }}
+          onOpenMemory={(id) => window.open(`/agent-knowledge?id=${id}`, "_blank")}
+        />
       )}
 
       {/* v1.7: example-prompt pills retired in favour of slash menu */}

@@ -6,6 +6,7 @@ import { useBuilder } from "@/context/pipeline-builder/BuilderContext";
 import GoalPlanCard, { type GoalPhase, type PlanRemoval } from "./v30/GoalPlanCard";
 import PhaseTimeline, { type PhaseRuntime, type PhaseStatus } from "./v30/PhaseTimeline";
 import HandoverModal, { type HandoverChoice } from "./v30/HandoverModal";
+import AgentConsole, { useConsoleStore, normalizeConsoleEvent } from "@/components/copilot/AgentConsole";
 import { readSkillV2Ctx } from "@/components/skills-v2/SkillV2EmbedBanner";
 
 interface Props {
@@ -80,6 +81,10 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
   const [build, setBuild] = useState<BuildState>(initialBuildState);
   const buildRef = useRef<BuildState>(initialBuildState);
   const runningRef = useRef(false);
+  // Agent Console (2026-07-04) — same store + normaliser as the chat panel
+  // so builder mode's Console renders identically.
+  const [activeTab, setActiveTab] = useState<"build" | "console">("build");
+  const [consoleState, consoleDispatch] = useConsoleStore();
 
   // sync ref with state for SSE handlers (state updates are async)
   buildRef.current = build;
@@ -160,6 +165,18 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
       if (data.session_id && buildRef.current.sessionId !== data.session_id) {
         setBuild((b) => ({ ...b, sessionId: data.session_id as string }));
       }
+
+      // Agent Console: builder receives RAW graph events (no pb_glass_ wrap)
+      // — the shared normaliser handles both shapes.
+      try {
+        if (evType === "build_finalized" || evType === "done") {
+          consoleDispatch({ t: "done", status: String(data.status ?? "finished") });
+        } else if (evType === "error") {
+          consoleDispatch({ t: "done", status: "failed" });
+        } else {
+          normalizeConsoleEvent({ ...data, type: evType }).forEach(consoleDispatch);
+        }
+      } catch { /* console must never break the build stream */ }
 
       if (evType === "goal_plan_proposed") {
         const phases = (data.phases as GoalPhase[]) || [];
@@ -352,6 +369,7 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
     runningRef.current = true;
     setInput("");
     log("user", instruction);
+    consoleDispatch({ t: "start" });
     // v31.2 — capture the previous plan BEFORE the state reset so follow-ups
     // give the Planner full modification context.
     const priorPhases = buildRef.current.phases.map((p) => ({
@@ -481,24 +499,51 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
     >
       <div
         style={{
-          padding: "8px 12px",
+          padding: "8px 12px 0",
           background: "#fff",
           borderBottom: "1px solid #e2e8f0",
-          fontSize: 11,
-          fontWeight: 700,
-          color: "#475569",
-          letterSpacing: 0.6,
-          textTransform: "uppercase",
         }}
       >
-        Agent Builder (v30 ReAct)
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#475569",
+                      letterSpacing: 0.6, textTransform: "uppercase" }}>
+          Agent Builder (v30 ReAct)
+        </div>
+        <div style={{ display: "flex", gap: 2, marginTop: 6 }}>
+          {(["build", "console"] as const).map((tab) => (
+            <div key={tab} onClick={() => setActiveTab(tab)} style={{
+              padding: "5px 14px", fontSize: 11.5, cursor: "pointer",
+              fontWeight: activeTab === tab ? 600 : 400,
+              color: activeTab === tab ? "#2563eb" : "#8a877e",
+              background: activeTab === tab ? "#fafafa" : "transparent",
+              border: activeTab === tab ? "1px solid #e2e8f0" : "1px solid transparent",
+              borderBottom: "none", borderRadius: "7px 7px 0 0",
+            }}>
+              {tab === "build" ? "建構" : "Console"}
+            </div>
+          ))}
+        </div>
       </div>
+
+      {activeTab === "console" && (
+        <AgentConsole
+          state={consoleState}
+          onTeach={({ blockId, phaseId }) => {
+            const qs = new URLSearchParams();
+            if (blockId) qs.set("prefill_block", blockId);
+            if (phaseId) qs.set("prefill_phase", phaseId);
+            if (priorInstructionRef.current) qs.set("prefill_instruction", priorInstructionRef.current.slice(0, 300));
+            window.open(`/agent-knowledge?${qs.toString()}`, "_blank");
+          }}
+          onOpenMemory={(id) => window.open(`/agent-knowledge?id=${id}`, "_blank")}
+        />
+      )}
 
       <div
         style={{
           flex: 1,
           overflowY: "auto",
           padding: 12,
+          display: activeTab === "build" ? undefined : "none",
         }}
       >
         {/* Chat lines */}
@@ -558,7 +603,7 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
 
         {/* Phase Timeline (after confirm) */}
         {build.goalConfirmed === "confirmed" && build.phases.length > 0 && (
-          <PhaseTimeline phases={build.phases} runtime={build.phaseRuntime} />
+          <PhaseTimeline phases={build.phases} runtime={build.phaseRuntime} onConsoleLink={() => setActiveTab("console")} />
         )}
 
         {/* Done banner */}

@@ -114,6 +114,11 @@ run_verifier 也會自動 fallback 觸發一次 — 但通常會 reject。所以
 
 phase_complete 為 legacy alias，效果跟 run_verifier 相同。
 
+== 每步附 reason ==
+canvas 工具 (add_node / connect / set_param / remove_node) 都有 optional
+`reason` 欄：一句話 (≤30字) 說明為什麼做這一步。這是給 user 看的透明化
+說明，不影響執行。有明確理由就帶上；沒有就省略。
+
 == 禁忌 ==
 - 不要 emit JSON ops list — 用 single tool call
 - 不要在沒讀過 upstream runtime schema 時憑空寫 column 名 (用 inspect 先看)
@@ -551,9 +556,12 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
     # dispatch so it never reaches BuilderToolset.add_node(**args) (which would
     # TypeError and silently fail the whole mutation). tool_args stays intact for
     # the memo capture + trace below.
+    # B3 (2026-07-04): `reason` is the Agent Console's 三段式「理由」— same
+    # treatment as `next`: shipped in phase_action.tool_args_raw for the UI,
+    # never passed to the executor.
     exec_args = tool_args
-    if isinstance(tool_args, dict) and "next" in tool_args:
-        exec_args = {k: v for k, v in tool_args.items() if k != "next"}
+    if isinstance(tool_args, dict) and ("next" in tool_args or "reason" in tool_args):
+        exec_args = {k: v for k, v in tool_args.items() if k not in ("next", "reason")}
     # v30.19: signal tools (commit_pick / abort_*/run_verifier) don't go
     # through toolset — they only drive sub-phase transitions.
     if tool_name in _SIGNAL_TOOLS:
@@ -2100,10 +2108,18 @@ def _build_tool_specs() -> list[dict[str, Any]]:
     except ImportError:
         atomic_on = False
 
+    # B3 (2026-07-04): every canvas-mutating tool carries an optional
+    # one-line `reason` — the Agent Console renders it as the step's 「理由」.
+    # Stripped before execution (see exec_args in the dispatcher).
+    _REASON_PROP = {
+        "type": "string",
+        "description": "一句話(≤30字)：為什麼做這一步",
+    }
     add_node_props: dict[str, Any] = {
         "block_name": {"type": "string"},
         "block_version": {"type": "string", "default": "1.0.0"},
         "params": {"type": "object"},
+        "reason": _REASON_PROP,
     }
     add_node_desc = (
         "Add a node to the pipeline canvas. `block_name` MUST exactly match "
@@ -2191,6 +2207,7 @@ def _build_tool_specs() -> list[dict[str, Any]]:
                     "from_port": {"type": "string", "default": "data"},
                     "to_node": {"type": "string"},
                     "to_port": {"type": "string", "default": "data"},
+                    "reason": _REASON_PROP,
                 },
                 "required": ["from_node", "to_node"],
             },
@@ -2204,6 +2221,7 @@ def _build_tool_specs() -> list[dict[str, Any]]:
                     "node_id": {"type": "string"},
                     "key": {"type": "string"},
                     "value": {},
+                    "reason": _REASON_PROP,
                 },
                 "required": ["node_id", "key", "value"],
             },
@@ -2216,7 +2234,7 @@ def _build_tool_specs() -> list[dict[str, Any]]:
             ),
             "input_schema": {
                 "type": "object",
-                "properties": {"node_id": {"type": "string"}},
+                "properties": {"node_id": {"type": "string"}, "reason": _REASON_PROP},
                 "required": ["node_id"],
             },
         },

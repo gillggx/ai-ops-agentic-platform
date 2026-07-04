@@ -195,6 +195,15 @@ export default function GoalPlanCard({
                   <span style={{ fontSize: 11, color: "#64748b" }}>{p.why}</span>
                 )}
               </div>
+              {/* 記憶連動：user 編輯過的 phase 在確認後標記 W1 寫入（design
+                  handoff 2026-07-04 — plan 卡與 Console 記憶效應區呼應）。 */}
+              {decided === "confirmed" &&
+                (p.user_edited ||
+                  (edits[p.id] != null && edits[p.id].trim() !== "" && edits[p.id].trim() !== p.goal)) && (
+                <div style={{ fontSize: 10.5, color: "#6d28d9", marginTop: 3 }}>
+                  ◆ 你編輯了這行 → 已寫入 W1 偏好
+                </div>
+              )}
             </div>
           </li>
         ))}

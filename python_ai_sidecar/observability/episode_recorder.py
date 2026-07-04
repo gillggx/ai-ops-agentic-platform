@@ -34,6 +34,19 @@ _current_agent: contextvars.ContextVar[str] = contextvars.ContextVar(
 
 FLUSH_BATCH_SIZE = 25
 
+# Agent Console (2026-07-04): these behavioural events are ALSO mirrored to
+# the build's SSE stream (drained by the graph delegates into sse_events) so
+# the frontend Console tab can render them live. Everything else stays
+# DB-only. The mirror is in-memory — Java being down never affects it.
+CONSOLE_MIRROR_TYPES = frozenset({
+    "memory_recall", "memory_write", "verifier_reject",
+    "stuck_escalated", "repair_triggered", "repair_outcome",
+    # llm_usage is mirrored because it is the only per-AGENT cost signal —
+    # the SSE glass_usage event has no agent attribution (contextvar lives
+    # here, not in the stream). Console's cost footer needs it.
+    "llm_usage",
+})
+
 
 def get_current_recorder() -> Optional["EpisodeRecorder"]:
     return _current_recorder.get()
@@ -85,6 +98,8 @@ class EpisodeRecorder:
         # per-phase verifier rejects — consumed at phase_done to emit the
         # param_reject_fix approximation (spec §4.2; C4).
         self._phase_rejects: dict[str, list[dict[str, Any]]] = {}
+        # Agent Console SSE mirror — drained by graph delegates.
+        self._console_mirror: list[dict[str, Any]] = []
 
     # ── per-phase reject tracking (graph wrappers call these) ──────────
     def note_verifier_reject(self, phase_id: str, payload: dict[str, Any]) -> None:
@@ -125,6 +140,24 @@ class EpisodeRecorder:
             c["output"] += output_tokens or 0
             c["cache_read"] += cache_read or 0
             c["calls"] += 1
+        if event_type in CONSOLE_MIRROR_TYPES:
+            entry: dict[str, Any] = {
+                "kind": event_type,
+                "agent": who,
+                "phase_id": phase_id,
+                "payload": payload or {},
+                "ts": self._buffer[-1]["ts"],
+            }
+            if event_type == "llm_usage":
+                entry["input_tokens"] = input_tokens or 0
+                entry["output_tokens"] = output_tokens or 0
+                entry["cache_read"] = cache_read or 0
+            self._console_mirror.append(entry)
+
+    def drain_console_events(self) -> list[dict[str, Any]]:
+        """Pop mirrored events for SSE relay (graph delegates call this)."""
+        out, self._console_mirror = self._console_mirror, []
+        return out
 
     def pending(self) -> int:
         return len(self._buffer)

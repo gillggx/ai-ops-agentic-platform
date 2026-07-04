@@ -515,6 +515,21 @@ def build_graph():
         idx = state.get("v30_current_phase_idx") or 0
         return phases[idx]["id"] if idx < len(phases) else None
 
+    def _drain_console(patch: dict[str, Any]) -> dict[str, Any]:
+        """Relay recorder-mirrored events (CONSOLE_MIRROR_TYPES) into the
+        build's sse_events channel as `agent_console` events. Same channel
+        both surfaces read — chat passes them through event_wrapper, builder
+        reads the raw stream — so Console renders identically on both."""
+        rec = get_current_recorder()
+        if rec is None:
+            return patch
+        mirrored = rec.drain_console_events()
+        if mirrored:
+            evs = list(patch.get("sse_events") or [])
+            evs.extend({"event": "agent_console", "data": m} for m in mirrored)
+            patch["sse_events"] = evs
+        return patch
+
     async def _planner_delegate(state: BuildGraphState) -> dict[str, Any]:
         tok = set_current_agent("planner")
         try:
@@ -529,7 +544,7 @@ def build_graph():
                                 "expected": p.get("expected")}
                                for p in patch["v30_phases"]]})
                 await rec.maybe_flush()
-            return patch
+            return _drain_console(patch)
         finally:
             reset_current_agent(tok)
 
@@ -551,9 +566,10 @@ def build_graph():
                             if not _to:
                                 continue
                             _cls = classify_edit(_frm, _to)
-                            await mw.write_knowledge(
+                            _w1_title = f"[plan修改·{_cls}] {_to[:80]}"
+                            _w1_ok = await mw.write_knowledge(
                                 memo_class=_cls,
-                                title=f"[plan修改·{_cls}] {_to[:80]}",
+                                title=_w1_title,
                                 body=(
                                     f"user 在 plan confirm 將 phase {_pid} 的目標由"
                                     f"「{_frm[:200]}」改為「{_to[:200]}」。\n"
@@ -564,12 +580,17 @@ def build_graph():
                                 applies_to="plan",
                                 written_by="planner",  # W1
                             )
+                            if _w1_ok:
+                                rec.record("memory_write", agent="planner", payload={
+                                    "code": "W1", "memo_class": _cls,
+                                    "title": _w1_title,
+                                    "status": "active"})
             phases = patch.get("v30_phases") or state.get("v30_phases") or []
             rec.record("plan_confirmed", agent="planner", payload={
                 "phases": [{"id": p.get("id"), "expected": p.get("expected")} for p in phases],
                 "edited": bool(edits)})
             await rec.maybe_flush()
-        return patch
+        return _drain_console(patch)
 
     async def _builder_delegate(state: BuildGraphState) -> dict[str, Any]:
         tok = set_current_agent("builder")
@@ -588,7 +609,7 @@ def build_graph():
                     rec.record("stuck_escalated", agent="builder", phase_id=pid,
                                payload={"round": state.get("v30_phase_round")})
                 await rec.maybe_flush()
-            return patch
+            return _drain_console(patch)
         finally:
             reset_current_agent(tok)
 
@@ -629,7 +650,7 @@ def build_graph():
                                 str(r.get("judge_reject_reason") or r.get("reason")
                                     or r.get("missing_for_phase") or "reject")[:120]
                                 for r in rejects[:3])
-                            await mw.write_doc_memo(
+                            _w2_ok = await mw.write_doc_memo(
                                 block_id=_blk,
                                 param=None,
                                 memo=(f"phase {done_pid}: 建置時被 verifier 拒 "
@@ -637,8 +658,14 @@ def build_graph():
                                       f"檢視 doc/param_schema 是否寫清楚。"),
                                 verdict_context=_json.dumps(rejects[:5], ensure_ascii=False),
                             )
+                            if _w2_ok:
+                                rec.record("memory_write", agent="builder",
+                                           phase_id=done_pid, payload={
+                                               "code": "W2", "memo_class": "doc_memo",
+                                               "title": f"block_docs 便利貼：{_blk}",
+                                               "status": "review_queue"})
             await rec.maybe_flush()
-        return patch
+        return _drain_console(patch)
 
     async def _repair_delegate(state: BuildGraphState) -> dict[str, Any]:
         tok = set_current_agent("repair")
@@ -666,10 +693,11 @@ def build_graph():
                     _idx = state.get("v30_current_phase_idx") or 0
                     if _idx < len(_phases):
                         _goal = str(_phases[_idx].get("goal") or "")[:150]
-                    await mw.write_knowledge(
+                    _w3_title = f"[repair·{result}] {pid}: {_goal[:70]}"
+                    _w3_ok = await mw.write_knowledge(
                         memo_class="correction",
                         active=False,  # draft — Supervisor promotes
-                        title=f"[repair·{result}] {pid}: {_goal[:70]}",
+                        title=_w3_title,
                         body=(
                             f"phase {pid}(goal:{_goal})round 用盡進入 repair,"
                             f"結果={result}。最後 verifier 拒因:"
@@ -680,8 +708,13 @@ def build_graph():
                         applies_to="execute",
                         written_by="repair",  # W3
                     )
+                    if _w3_ok:
+                        rec.record("memory_write", agent="repair", phase_id=pid,
+                                   payload={"code": "W3", "memo_class": "correction",
+                                            "title": _w3_title,
+                                            "status": "draft"})
                 await rec.maybe_flush()
-            return patch
+            return _drain_console(patch)
         finally:
             reset_current_agent(tok)
 

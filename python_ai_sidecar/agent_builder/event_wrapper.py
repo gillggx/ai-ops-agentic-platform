@@ -339,6 +339,18 @@ def wrap_build_event_for_chat(
         # session id, needed by pending_judge.consume). Drop here to avoid
         # frontend duplicate card.
         return None
+    elif evt_type == "agent_console":
+        # Agent Console (2026-07-04): behavioural side-channel events
+        # (memory_recall / memory_write / verifier_reject / stuck_escalated /
+        # repair_triggered / repair_outcome) mirrored from EpisodeRecorder.
+        # Raw structured fields pass through verbatim — the Console reducer
+        # consumes them; chat log ignores unknown types. Keep in sync with
+        # observability.episode_recorder.CONSOLE_MIRROR_TYPES.
+        payload["type"] = "agent_console"
+        for k in ("kind", "agent", "phase_id", "payload", "ts",
+                  "input_tokens", "output_tokens", "cache_read"):
+            if k in data:
+                payload[k] = data.get(k)
     elif evt_type == "judge_clarify_resolved":
         # v30.17j — after user picks action, log to chat for visibility.
         action = data.get("action") or "?"

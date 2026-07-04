@@ -27,13 +27,16 @@ interface Props {
   phases: GoalPhase[];
   /** Map phase id -> runtime info. Pending phases can be omitted. */
   runtime: Record<string, PhaseRuntime>;
+  /** When set, render a footer link to the Agent Console tab (design
+   *  handoff 2026-07-04 — 對話看事，Console 看 agent)。 */
+  onConsoleLink?: () => void;
 }
 
 /**
  * v30 phase timeline — vertical, one row per phase. Color-coded status.
  * Updates in real-time from SSE events.
  */
-export default function PhaseTimeline({ phases, runtime }: Props) {
+export default function PhaseTimeline({ phases, runtime, onConsoleLink }: Props) {
   return (
     <div
       style={{
@@ -66,6 +69,16 @@ export default function PhaseTimeline({ phases, runtime }: Props) {
           );
         })}
       </ol>
+      {onConsoleLink && (
+        <div style={{ marginTop: 9, paddingTop: 8, borderTop: "1px solid #f1f5f9",
+                      fontSize: 10.5, color: "#8a877e" }}>
+          內部逐步運作與「為什麼」 →{" "}
+          <span onClick={onConsoleLink}
+                style={{ color: "#2563eb", fontWeight: 600, cursor: "pointer" }}>
+            Console 分頁
+          </span>
+        </div>
+      )}
     </div>
   );
 }

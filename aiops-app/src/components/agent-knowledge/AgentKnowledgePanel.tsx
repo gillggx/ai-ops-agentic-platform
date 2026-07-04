@@ -107,7 +107,19 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export function AgentKnowledgePanel() {
-  const [tab, setTab] = useState<Tab>("directives");
+  // Agent Console 教它入口 (2026-07-04): /agent-knowledge?prefill_block=…&
+  // prefill_phase=…&prefill_instruction=… lands on the knowledge tab with a
+  // draft pre-filled from the build step the user was looking at.
+  const prefill = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    const q = new URLSearchParams(window.location.search);
+    const block = q.get("prefill_block");
+    const phase = q.get("prefill_phase");
+    const instruction = q.get("prefill_instruction");
+    if (!block && !phase && !instruction) return null;
+    return { block, phase, instruction };
+  }, []);
+  const [tab, setTab] = useState<Tab>(prefill ? "knowledge" : "directives");
 
   return (
     <div style={{ padding: 24, maxWidth: 1280, margin: "0 auto", fontFamily: "system-ui, sans-serif" }}>
@@ -141,7 +153,7 @@ export function AgentKnowledgePanel() {
       </div>
 
       {tab === "directives" && <DirectivesView />}
-      {tab === "knowledge"  && <KnowledgeView />}
+      {tab === "knowledge"  && <KnowledgeView prefill={prefill} />}
       {tab === "lexicon"    && <LexiconView />}
       {tab === "examples"   && <ExamplesView />}
     </div>
@@ -308,13 +320,32 @@ function DirectiveEditor({ initial, onClose, onSave }: {
 type AgentFilter = "all" | WrittenBy | "unclassified";
 type ClassFilter = "all" | MemoClass;
 
-function KnowledgeView() {
+function KnowledgeView({ prefill }: {
+  prefill?: { block: string | null; phase: string | null; instruction: string | null } | null;
+}) {
   const [items, setItems] = useState<Knowledge[]>([]);
   const [docMemos, setDocMemos] = useState<DocMemo[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Knowledge | "new" | null>(null);
   const [agentF, setAgentF] = useState<AgentFilter>("all");
   const [classF, setClassF] = useState<ClassFilter>("all");
+
+  // 教它 prefill: open the editor once with a draft carrying the build-step
+  // context. No id → DirectiveEditor saves it as a CREATE.
+  useEffect(() => {
+    if (!prefill) return;
+    const ctxLines = [
+      prefill.block ? `工具/block：${prefill.block}` : null,
+      prefill.phase ? `phase：${prefill.phase}` : null,
+      prefill.instruction ? `原始指令：${prefill.instruction}` : null,
+    ].filter(Boolean).join("\n");
+    setEditing({
+      title: `[教它] ${prefill.block ?? prefill.phase ?? "build 知識"}`,
+      body: `${ctxLines}\n\n（描述正確做法）\n**Why:** \n**How to apply:** `,
+      scope_type: "global", scope_value: null, priority: "med",
+    } as unknown as Knowledge);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const load = async () => {
     setLoading(true);
