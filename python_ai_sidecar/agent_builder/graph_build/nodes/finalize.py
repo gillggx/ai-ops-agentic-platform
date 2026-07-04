@@ -155,6 +155,53 @@ def _compact_node_result(info: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _edge_node(v: Any) -> str | None:
+    return v.get("node") if isinstance(v, dict) else v
+
+
+def apply_plan_removals(pipeline: dict, removals: list) -> tuple[dict, list, list]:
+    """v31.2 — deterministically remove modification-plan nodes.
+
+    Applied AFTER all phases completed (new nodes exist) so the still-consumed
+    guard sees the final topology: a node whose output still feeds any node
+    OUTSIDE the removal set is protected (skipped with a reason) — this stops
+    an LLM-listed shared upstream from breaking the new build. Removing a node
+    also drops its dangling edges. Pure function; unit-tested.
+    """
+    want = {str(r.get("node_id")) for r in (removals or []) if isinstance(r, dict)}
+    if not want or not isinstance(pipeline, dict):
+        return pipeline, [], []
+    nodes = list(pipeline.get("nodes") or [])
+    edges = list(pipeline.get("edges") or [])
+    node_ids = {n.get("id") for n in nodes}
+    removed, skipped = [], []
+    for nid in sorted(want):
+        if nid not in node_ids:
+            skipped.append({"node_id": nid, "reason": "node no longer exists"})
+            continue
+        consumers = {
+            _edge_node(e.get("to"))
+            for e in edges
+            if _edge_node(e.get("from")) == nid
+        } - want
+        consumers.discard(None)
+        if consumers:
+            skipped.append({"node_id": nid,
+                            "reason": f"仍被 {sorted(consumers)} 消費，保護不刪"})
+            continue
+        removed.append(nid)
+    if not removed:
+        return pipeline, [], skipped
+    rm = set(removed)
+    out = dict(pipeline)
+    out["nodes"] = [n for n in nodes if n.get("id") not in rm]
+    out["edges"] = [
+        e for e in edges
+        if _edge_node(e.get("from")) not in rm and _edge_node(e.get("to")) not in rm
+    ]
+    return out, removed, skipped
+
+
 async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
     final_dict = state.get("final_pipeline") or state.get("base_pipeline")
     plan = state.get("plan") or []
@@ -168,6 +215,19 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
                 "ok": False, "reason": "no pipeline",
             })],
         }
+
+    # v31.2 — modification-plan removals: applied here (all phases done, new
+    # nodes built) by pure function; the LLM loop never performs removals.
+    removal_events: list[dict[str, Any]] = []
+    _removals = state.get("v30_removals") or []
+    if _removals and isinstance(final_dict, dict):
+        final_dict, _removed, _skipped = apply_plan_removals(final_dict, _removals)
+        if _removed or _skipped:
+            logger.info("finalize: plan removals — removed=%s skipped=%s",
+                        _removed, [x["node_id"] for x in _skipped])
+            removal_events.append(_event("nodes_removed", {
+                "removed": _removed, "skipped": _skipped,
+            }))
 
     # 2026-06-18 (ENABLE_ORPHAN_RESOLVE): before the structural check, give the
     # agent one round to connect-or-remove any fully-disconnected orphan node,
@@ -332,7 +392,8 @@ async def finalize_node(state: BuildGraphState) -> dict[str, Any]:
             )
 
     # Phase 10-C Fix 4 — best-effort runtime dry-run.
-    sse_events = [_event("build_finalized", {
+    # v31.2: removal events lead so the UI narrates 移除 before 完成.
+    sse_events = removal_events + [_event("build_finalized", {
         "ok": status == "finished",
         "node_count": len(pipeline.nodes),
         "edge_count": len(pipeline.edges),

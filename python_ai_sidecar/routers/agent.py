@@ -76,6 +76,8 @@ class BuildRequest(BaseModel):
     # panel sends it with pipelineSnapshot so goal_plan can resolve
     # modification anaphora against the just-built canvas.
     prior_instruction: str | None = Field(default=None, alias="priorInstruction")
+    # v31.2 — the previous build's plan phases, for full modification context.
+    prior_phases: list[dict] | None = Field(default=None, alias="priorPhases")
     # 2026-05-12: explicit flag so the skill-step terminal + anti-alert
     # validators fire when caller is building a Skill step pipeline.
     # Frontend embed=skill flow + chat orchestrator's build_pipeline_live
@@ -223,6 +225,7 @@ async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenera
             instruction=req.instruction,
             base_pipeline=_normalize_snapshot(req.pipeline_snapshot),
             prior_instruction=req.prior_instruction,
+            prior_phases=req.prior_phases,
             user_id=caller.user_id,
             skill_step_mode=req.skill_step_mode,
             skip_confirm=False,  # Builder Mode shows the Apply/Cancel card
@@ -414,6 +417,8 @@ async def _chat_intent_respond_stream(
         resume_payload: dict = {"confirmed": confirmed}
         if confirmed and isinstance(phases, list) and phases:
             resume_payload["phases"] = phases
+        if confirmed and isinstance(req.plan_decision.get("removals"), list):
+            resume_payload["removals"] = req.plan_decision["removals"]
         log.info(
             "chat/intent-respond: plan resume chat_session=%s build_session=%s "
             "confirmed=%s n_phases=%s",
@@ -789,6 +794,11 @@ class BuildPlanConfirmRequest(BaseModel):
     session_id: str = Field(..., alias="sessionId")
     confirmed: bool = Field(...)
     phases: list[dict] = Field(default_factory=list)
+    # v31.2 — user-approved removals (subset of the plan's proposed removals;
+    # unchecked entries omitted by the card). None (field absent) = caller
+    # predates the card / headless auto-confirm -> gate keeps ALL proposed;
+    # [] = user explicitly unchecked everything.
+    removals: list[dict] | None = None
 
 
 async def _build_plan_confirm_stream(
@@ -798,6 +808,8 @@ async def _build_plan_confirm_stream(
     payload: dict = {"confirmed": req.confirmed}
     if req.phases:
         payload["phases"] = req.phases
+    if req.removals is not None:
+        payload["removals"] = req.removals  # [] = user unchecked everything
     try:
         async for stream_event in resume_graph_v30(
             session_id=req.session_id, resume_payload=payload,

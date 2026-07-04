@@ -325,6 +325,14 @@ class BuildGraphState(TypedDict, total=False):
     # sending a follow-up over an existing canvas ("我後悔了，改成3張..."). Lets
     # goal_plan resolve anaphora without any case rules — pure context data.
     prior_instruction: Optional[str]
+    # v31.2 (2026-07-04): the previous build's plan phases (P1..PN) — panel
+    # keeps them and sends with follow-ups so the Planner sees the full
+    # modification context (what was planned before, not just what was built).
+    prior_phases: Optional[list]
+    # v31.2 — modification plan removals: [{node_id, reason}] proposed by
+    # goal_plan, filtered by the user at the confirm gate, applied
+    # deterministically in finalize (never by the LLM loop).
+    v30_removals: Optional[list]
     # Phase 11 — Skill step mode. When True, plan_node prompt forces the
     # pipeline to end with block_step_check (the Skill terminal block).
     skill_step_mode: bool
@@ -414,6 +422,7 @@ def initial_state(
     user_id: Optional[int] = None,
     skip_confirm: bool = False,
     prior_instruction: Optional[str] = None,
+    prior_phases: Optional[list] = None,
     skill_step_mode: bool = False,
     trigger_payload: Optional[dict] = None,
     debug_step_mode: bool = False,
@@ -431,6 +440,8 @@ def initial_state(
         user_confirmed=None,
         skip_confirm=skip_confirm,
         prior_instruction=prior_instruction,
+        prior_phases=prior_phases,
+        v30_removals=None,
         skill_step_mode=skill_step_mode,
         cursor=0,
         logical_to_real={},

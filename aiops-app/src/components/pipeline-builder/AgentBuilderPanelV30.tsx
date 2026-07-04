@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import type { BlockSpec } from "@/lib/pipeline-builder/types";
 import { useBuilder } from "@/context/pipeline-builder/BuilderContext";
-import GoalPlanCard, { type GoalPhase } from "./v30/GoalPlanCard";
+import GoalPlanCard, { type GoalPhase, type PlanRemoval } from "./v30/GoalPlanCard";
 import PhaseTimeline, { type PhaseRuntime, type PhaseStatus } from "./v30/PhaseTimeline";
 import HandoverModal, { type HandoverChoice } from "./v30/HandoverModal";
 import { readSkillV2Ctx } from "@/components/skills-v2/SkillV2EmbedBanner";
@@ -23,6 +23,7 @@ interface BuildState {
   sessionId: string | null;
   planSummary: string;
   phases: GoalPhase[];
+  removals: PlanRemoval[];
   phaseRuntime: Record<string, PhaseRuntime>;
   goalConfirmed: "pending" | "confirmed" | "cancelled" | "none";
   handover: {
@@ -46,6 +47,7 @@ const initialBuildState: BuildState = {
   sessionId: null,
   planSummary: "",
   phases: [],
+  removals: [],
   phaseRuntime: {},
   goalConfirmed: "none",
   handover: null,
@@ -166,6 +168,7 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
           sessionId: sid || b.sessionId,
           planSummary: (data.plan_summary as string) || "",
           phases,
+          removals: (data.removals as PlanRemoval[]) || [],
           phaseRuntime: Object.fromEntries(phases.map((p) => [p.id, { status: "pending" as PhaseStatus }])),
           goalConfirmed: "pending",
           buildStatus: "awaiting_confirm",
@@ -190,7 +193,7 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
               const r = await fetch("/api/agent/build/plan-confirm", {
                 method: "POST",
                 headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-                body: JSON.stringify({ session_id: realSid, confirmed: true, phases }),
+                body: JSON.stringify({ session_id: realSid, confirmed: true, phases, removals: buildRef.current.removals }),
               });
               await consumeStream(r);
             } catch (ex) {
@@ -349,6 +352,11 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
     runningRef.current = true;
     setInput("");
     log("user", instruction);
+    // v31.2 — capture the previous plan BEFORE the state reset so follow-ups
+    // give the Planner full modification context.
+    const priorPhases = buildRef.current.phases.map((p) => ({
+      id: p.id, goal: p.goal, expected: p.expected,
+    }));
     setBuild({ ...initialBuildState, buildStatus: "planning" });
 
     try {
@@ -368,6 +376,7 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
             pipelineSnapshot: builderState.pipeline,
           } : {}),
           ...(priorInstructionRef.current ? { priorInstruction: priorInstructionRef.current } : {}),
+          ...(priorPhases.length > 0 ? { priorPhases } : {}),
           v30Mode: true,
           skillStepMode: false,
         }),
@@ -407,7 +416,7 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
   const autoConfirmedRef = useRef(false);
 
   // ── Confirm / cancel goal plan ──────────────────────────────────────
-  const onConfirmPlan = async (phases: GoalPhase[]) => {
+  const onConfirmPlan = async (phases: GoalPhase[], removals?: PlanRemoval[]) => {
     const sid = buildRef.current.sessionId;
     if (!sid) {
       log("error", "Plan 無法確認：尚未取得 session_id");
@@ -417,7 +426,7 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
       const res = await fetch("/api/agent/build/plan-confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-        body: JSON.stringify({ session_id: sid, confirmed: true, phases }),
+        body: JSON.stringify({ session_id: sid, confirmed: true, phases, removals: removals ?? [] }),
       });
       await consumeStream(res);
     } catch (ex) {
@@ -536,6 +545,7 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
             editable
             planSummary={build.planSummary}
             phases={build.phases}
+            removals={build.removals}
             onConfirm={onConfirmPlan}
             onCancel={onCancelPlan}
             decided={

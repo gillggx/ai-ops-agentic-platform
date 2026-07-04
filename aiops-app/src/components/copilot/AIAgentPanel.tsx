@@ -19,7 +19,7 @@ import type { FlatDataMetadata, UIConfig } from "@/context/FlatDataContext";
 import { useAppContext } from "@/context/AppContext";
 import { DesignIntentCard, type DesignIntentData, type DesignIntentChoice } from "./DesignIntentCard";
 import { BulletConfirmCard } from "@/components/chat/BulletConfirmCard";
-import GoalPlanCard, { type GoalPhase } from "@/components/pipeline-builder/v30/GoalPlanCard";
+import GoalPlanCard, { type GoalPhase, type PlanRemoval } from "@/components/pipeline-builder/v30/GoalPlanCard";
 import PhaseTimeline, { type PhaseRuntime } from "@/components/pipeline-builder/v30/PhaseTimeline";
 import { type PlanPhase } from "@/components/chat/PlanConfirmCard";
 import {
@@ -94,6 +94,7 @@ interface PlanConfirmData {
   build_session_id: string;
   plan_summary?: string;
   phases: PlanPhase[];
+  removals?: PlanRemoval[];
   resolved?: "confirmed" | "refused" | "error";
 }
 
@@ -623,7 +624,7 @@ export function AIAgentPanel({
 
   // v31.1 — plan-confirm decision: POST resume + drain through the SAME
   // stream handler so PhaseTimeline / ops / charts render live.
-  const decidePlan = useCallback(async (msgId: number, confirmed: boolean, phases: GoalPhase[]) => {
+  const decidePlan = useCallback(async (msgId: number, confirmed: boolean, phases: GoalPhase[], removals?: PlanRemoval[]) => {
     let target: ChatMessage | undefined;
     setChatHistory((prev) => {
       target = prev.find((m) => m.id === msgId);
@@ -637,7 +638,9 @@ export function AIAgentPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           chatSessionId: chatSid,
-          plan_decision: confirmed ? { confirmed, phases } : { confirmed },
+          plan_decision: confirmed
+            ? { confirmed, phases, removals: removals ?? [] }
+            : { confirmed },
         }),
       });
       const handler = buildStreamHandlerRef.current;
@@ -1527,6 +1530,7 @@ export function AIAgentPanel({
                   build_session_id: String((ev.build_session_id as string) || ""),
                   plan_summary: (ev.plan_summary as string) || undefined,
                   phases,
+                  removals: (ev.removals as PlanRemoval[]) || [],
                 },
               }]);
             }
@@ -2226,8 +2230,9 @@ export function AIAgentPanel({
                         expected: (["raw_data", "transform", "verdict", "chart", "table", "scalar", "alarm"]
                           .includes(String(p.expected)) ? String(p.expected) : "transform") as GoalPhase["expected"],
                       }))}
+                      removals={msg.planConfirm.removals}
                       onCancel={() => void decidePlan(msg.id, false, [])}
-                      onConfirm={(phases) => void decidePlan(msg.id, true, phases)}
+                      onConfirm={(phases, removals) => void decidePlan(msg.id, true, phases, removals)}
                     />
                   ) : (
                     <div style={{

@@ -508,6 +508,7 @@ async def _execute_build_pipeline_live(
                             "build_session_id": plan_pause.get("session_id") or sid,
                             "plan_summary": plan_pause.get("plan_summary") or "",
                             "phases": plan_pause.get("phases") or [],
+                            "removals": plan_pause.get("removals") or [],
                         })
                     except Exception:  # noqa: BLE001
                         pass

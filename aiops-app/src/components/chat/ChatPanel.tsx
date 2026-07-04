@@ -13,7 +13,7 @@ import {
 } from "@/components/copilot/DesignIntentCard";
 import { type PlanData, type PhaseStatus, type PhaseEntry } from "@/components/chat/PlanCard";
 import { type PlanPhase } from "@/components/chat/PlanConfirmCard";
-import GoalPlanCard, { type GoalPhase } from "@/components/pipeline-builder/v30/GoalPlanCard";
+import GoalPlanCard, { type GoalPhase, type PlanRemoval } from "@/components/pipeline-builder/v30/GoalPlanCard";
 import PhaseTimeline, { type PhaseRuntime } from "@/components/pipeline-builder/v30/PhaseTimeline";
 import {
   JudgeClarifyCard,
@@ -77,6 +77,7 @@ interface ChatMessage {
         build_session_id: string;
         plan_summary?: string;
         phases: PlanPhase[];
+        removals?: PlanRemoval[];
         resolved?: "confirmed" | "refused" | "error";
       };
 }
@@ -557,6 +558,7 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
                   build_session_id: buildSid,
                   plan_summary: (ev.plan_summary as string) || undefined,
                   phases,
+                  removals: (ev.removals as PlanRemoval[]) || [],
                 },
               }]);
               addLog(makeLog("🧠",
@@ -595,7 +597,7 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
 
   // v31.1 — plan-card decision (GoalPlanCard editable): POST the resume and
   // drain the stream through handleAgentEvent so progress renders live.
-  const decidePlanCard = useCallback(async (msgId: number, confirmed: boolean, phases: GoalPhase[]) => {
+  const decidePlanCard = useCallback(async (msgId: number, confirmed: boolean, phases: GoalPhase[], removals?: PlanRemoval[]) => {
     let chatSid = "";
     setChatHistory((prev) => {
       const m = prev.find((x) => x.id === msgId);
@@ -609,7 +611,9 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           chatSessionId: chatSid,
-          plan_decision: confirmed ? { confirmed, phases } : { confirmed },
+          plan_decision: confirmed
+            ? { confirmed, phases, removals: removals ?? [] }
+            : { confirmed },
         }),
       });
       if (!res.ok) outcome = "error";
@@ -795,8 +799,9 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
                         expected: (["raw_data", "transform", "verdict", "chart", "table", "scalar", "alarm"]
                           .includes(String(p.expected)) ? String(p.expected) : "transform") as GoalPhase["expected"],
                       }))}
+                      removals={msg.card.removals}
                       onCancel={() => void decidePlanCard(msg.id, false, [])}
-                      onConfirm={(phases) => void decidePlanCard(msg.id, true, phases)}
+                      onConfirm={(phases, removals) => void decidePlanCard(msg.id, true, phases, removals)}
                     />
                   ) : (
                     <div style={{

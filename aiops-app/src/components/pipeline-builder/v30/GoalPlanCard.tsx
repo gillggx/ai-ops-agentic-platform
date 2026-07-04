@@ -9,6 +9,11 @@ export interface ExpectedOutput {
   outcome_keys?: string[];
 }
 
+export interface PlanRemoval {
+  node_id: string;
+  reason?: string;
+}
+
 export interface GoalPhase {
   id: string;
   goal: string;
@@ -21,8 +26,12 @@ export interface GoalPhase {
 interface Props {
   planSummary: string;
   phases: GoalPhase[];
-  /** Called when user clicks Confirm. Sends original phases (no edit in POC). */
-  onConfirm: (phases: GoalPhase[]) => void;
+  /** v31.2 — modification plans may propose removing superseded nodes.
+   *  Rendered as a red checklist; user unchecks to keep a node. */
+  removals?: PlanRemoval[];
+  /** Called when user clicks Confirm. Second arg = the removals the user
+   *  left checked (undefined when the plan proposed none). */
+  onConfirm: (phases: GoalPhase[], removals?: PlanRemoval[]) => void;
   /** Called when user clicks Cancel — backend treats as refused. */
   onCancel: () => void;
   /** When set, hide buttons and show a "(decided)" tag. */
@@ -61,6 +70,7 @@ const expectedColor: Record<GoalPhase["expected"], string> = {
 export default function GoalPlanCard({
   planSummary,
   phases,
+  removals,
   onConfirm,
   onCancel,
   decided,
@@ -68,6 +78,10 @@ export default function GoalPlanCard({
 }: Props) {
   const [acting, setActing] = useState(false);
   const [edits, setEdits] = useState<Record<string, string>>({});
+  // removals default CHECKED (the plan proposed them); uncheck = keep node.
+  const [keepRemoval, setKeepRemoval] = useState<Record<string, boolean>>(
+    () => Object.fromEntries((removals ?? []).map((r) => [r.node_id, true])),
+  );
 
   const effectivePhases = (): GoalPhase[] =>
     phases.map((p) => {
@@ -81,7 +95,10 @@ export default function GoalPlanCard({
 
   const handleConfirm = () => {
     setActing(true);
-    onConfirm(editable ? effectivePhases() : phases);
+    const approved = removals?.length
+      ? removals.filter((r) => keepRemoval[r.node_id])
+      : undefined;
+    onConfirm(editable ? effectivePhases() : phases, approved);
   };
   const handleCancel = () => {
     setActing(true);
@@ -182,6 +199,42 @@ export default function GoalPlanCard({
           </li>
         ))}
       </ol>
+
+      {removals && removals.length > 0 && (
+        <div style={{
+          marginTop: 12, border: "1px solid #fecaca", background: "#fef2f2",
+          borderRadius: 8, padding: "10px 12px",
+        }}>
+          <div style={{
+            fontSize: 11, fontWeight: 700, color: "#991b1b",
+            textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 6,
+          }}>
+            將移除（修改 plan · 可逐筆取消）
+          </div>
+          {removals.map((r) => (
+            <label key={r.node_id} style={{
+              display: "flex", gap: 8, alignItems: "flex-start",
+              fontSize: 12.5, padding: "3px 0", cursor: decided ? "default" : "pointer",
+              opacity: keepRemoval[r.node_id] ? 1 : 0.55,
+            }}>
+              <input
+                type="checkbox"
+                checked={!!keepRemoval[r.node_id]}
+                disabled={!!decided || acting}
+                onChange={(e) => setKeepRemoval((prev) => ({ ...prev, [r.node_id]: e.target.checked }))}
+                style={{ marginTop: 3 }}
+              />
+              <span>
+                <span style={{ fontFamily: "ui-monospace, Menlo, monospace", fontWeight: 700, color: "#991b1b" }}>
+                  {r.node_id}
+                </span>
+                {r.reason && <span style={{ color: "#7f1d1d" }}> — {r.reason}</span>}
+                {!keepRemoval[r.node_id] && <span style={{ color: "#64748b" }}>（保留，不移除）</span>}
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
 
       <div
         style={{

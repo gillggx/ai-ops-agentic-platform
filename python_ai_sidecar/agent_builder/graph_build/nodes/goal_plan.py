@@ -219,8 +219,15 @@ _SYSTEM = """你是 pipeline architect。User 給你需求，你產出 **goal-or
     {"id":"p3","goal":"展示該時刻所有 OOC 圖表的走勢與管制狀態","expected":"chart",
      "expected_output":{"kind":"chart_list","value_desc":"OOC 圖表的歷史走勢"}}
   ],
-  "alarm": null
+  "alarm": null,
+  "removals": []
 }
+
+**修改既有 canvas 時（prompt 有「CANVAS 已有 nodes」區塊）**：若新 plan 取代了
+某些既有節點的職責（例如舊圖被新圖取代），把它們列入
+`removals: [{"node_id": "n3", "reason": "被三張獨立圖取代"}]`。
+只列**確定被取代**的節點；不確定就不列（user 會在確認卡逐筆把關，寧缺勿濫）。
+全新建置（無既有 canvas）時 removals 一律為空陣列。
 
 **核心原則：Plan 層只有 INTENTION，不碰工具與資料結構。**
 
@@ -459,6 +466,8 @@ async def goal_plan_node(state: BuildGraphState) -> dict[str, Any]:
 
     # Existing canvas snapshot — if user has manual nodes, list them so LLM
     # can plan incrementally instead of from-scratch overwriting.
+    # v31.2: + edges topology + previous plan — a modification plan needs the
+    # FULL current picture (who feeds whom), not just a node list.
     existing_nodes_section = ""
     if base_pipeline.get("nodes"):
         node_summaries = [
@@ -470,6 +479,29 @@ async def goal_plan_node(state: BuildGraphState) -> dict[str, Any]:
             + "\n".join(node_summaries)
             + ("\n... + more" if len(base_pipeline["nodes"]) > 10 else "")
         )
+        edges = base_pipeline.get("edges") or []
+        if edges:
+            edge_lines = []
+            for e in edges[:20]:
+                frm = (e.get("from") or {}).get("node") if isinstance(e.get("from"), dict) else e.get("from")
+                to = (e.get("to") or {}).get("node") if isinstance(e.get("to"), dict) else e.get("to")
+                if frm and to:
+                    edge_lines.append(f"  {frm} → {to}")
+            if edge_lines:
+                existing_nodes_section += (
+                    "\n拓撲 (edges):\n" + "\n".join(edge_lines)
+                    + ("\n... + more" if len(edges) > 20 else "")
+                )
+
+    prior_plan_section = ""
+    prior_phases = state.get("prior_phases") or []
+    if prior_phases and base_pipeline.get("nodes"):
+        lines = [
+            f"  {p2.get('id')}: {str(p2.get('goal'))[:100]}"
+            for p2 in prior_phases[:10] if isinstance(p2, dict)
+        ]
+        if lines:
+            prior_plan_section = "\n\n上一次的 plan（供修改對照）:\n" + "\n".join(lines)
 
     # Declared inputs (compact)
     declared_inputs = base_pipeline.get("inputs") or []
@@ -520,6 +552,7 @@ async def goal_plan_node(state: BuildGraphState) -> dict[str, Any]:
         f"{inputs_section}"
         f"{skill_section}"
         f"{prior_section}"
+        f"{prior_plan_section}"
         f"{existing_nodes_section}"
         f"{knowledge_section}"
     )
@@ -666,6 +699,26 @@ async def goal_plan_node(state: BuildGraphState) -> dict[str, Any]:
     plan_summary = str(decision.get("plan_summary") or "").strip() or "(no summary)"
     alarm = decision.get("alarm")  # optional, can be None
 
+    # v31.2 — modification-plan removals. Untrusted LLM output: keep only
+    # entries whose node_id exists on the current canvas; cap; dedupe. The
+    # still-consumed guard runs at APPLY time (finalize) where the final
+    # topology is known.
+    removals: list[dict[str, Any]] = []
+    existing_ids = {n.get("id") for n in (base_pipeline.get("nodes") or [])}
+    if existing_ids:
+        seen_r: set[str] = set()
+        for r in (decision.get("removals") or [])[:10]:
+            if not isinstance(r, dict):
+                continue
+            nid = str(r.get("node_id") or "").strip()
+            if nid and nid in existing_ids and nid not in seen_r:
+                seen_r.add(nid)
+                removals.append({"node_id": nid,
+                                 "reason": str(r.get("reason") or "")[:200]})
+        if removals:
+            logger.info("goal_plan_node: plan proposes %d removal(s): %s",
+                        len(removals), [r["node_id"] for r in removals])
+
     logger.info(
         "goal_plan_node: emitted %d phases, summary=%r",
         len(phases), plan_summary[:80],
@@ -743,6 +796,7 @@ async def goal_plan_node(state: BuildGraphState) -> dict[str, Any]:
 
     return {
         "v30_phases": phases,
+        "v30_removals": removals,
         "v30_current_phase_idx": 0,
         "v30_phase_round": 0,
         "v30_phase_outcomes": {},
@@ -763,6 +817,7 @@ async def goal_plan_node(state: BuildGraphState) -> dict[str, Any]:
                 "phases": phases,
                 "alarm": alarm,
                 "n_phases": len(phases),
+                "removals": removals,
             }),
             *extra_sse,
         ],
@@ -808,11 +863,13 @@ async def goal_plan_confirm_gate_node(state: BuildGraphState) -> dict[str, Any]:
         len(phases),
     )
 
+    proposed_removals = state.get("v30_removals") or []
     user_response = interrupt({
         "kind": "goal_plan_confirm_required",
         "session_id": state.get("session_id"),
         "plan_summary": plan_summary,
         "phases": phases,
+        "removals": proposed_removals,
     })
 
     # User confirmed — possibly with edits
@@ -826,6 +883,23 @@ async def goal_plan_confirm_gate_node(state: BuildGraphState) -> dict[str, Any]:
             "summary": "User rejected the proposed phases.",
             "sse_events": [_event("goal_plan_rejected", {})],
         }
+
+    # v31.2 — user-approved removals: the card sends back the checked subset.
+    # Only ids that were PROPOSED are honoured (no new removals injectable);
+    # an absent field means the caller predates the feature -> keep proposed.
+    ur_removals = user_response.get("removals")
+    if isinstance(ur_removals, list):
+        allowed = {r["node_id"] for r in proposed_removals}
+        approved_removals = [
+            {"node_id": str(r.get("node_id")), "reason": str(r.get("reason") or "")[:200]}
+            for r in ur_removals
+            if isinstance(r, dict) and str(r.get("node_id")) in allowed
+        ]
+    else:
+        approved_removals = proposed_removals
+    if len(approved_removals) != len(proposed_removals):
+        logger.info("goal_plan_confirm_gate: user kept %d/%d removal(s)",
+                    len(approved_removals), len(proposed_removals))
 
     # If user sent edited phases, use them verbatim. Track edit history.
     edited_phases_raw = user_response.get("phases")
@@ -868,6 +942,7 @@ async def goal_plan_confirm_gate_node(state: BuildGraphState) -> dict[str, Any]:
         return {
             "v30_phases": phases,
             "v30_phase_edit_history": edit_history,
+            "v30_removals": approved_removals,
             "status": "phase_in_progress",
             "sse_events": [_event("goal_plan_confirmed", {
                 "phases": phases, "n_edits": len(edit_history),
@@ -877,6 +952,7 @@ async def goal_plan_confirm_gate_node(state: BuildGraphState) -> dict[str, Any]:
     # User confirmed without edits
     return {
         "status": "phase_in_progress",
+        "v30_removals": approved_removals,
         "sse_events": [_event("goal_plan_confirmed", {
             "phases": phases, "n_edits": 0,
         })],
