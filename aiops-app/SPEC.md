@@ -85,11 +85,14 @@ src/
 │   ├── layout/Topbar.tsx    ★ user 下拉選單（avatar + role badges + 帳號設定 / 變更密碼 / 我的記憶 / 登出）
 │   ├── layout/AnalysisPanel.tsx          ContractRenderer overlay
 │   ├── layout/DataExplorerPanel.tsx
-│   ├── copilot/AIAgentPanel.tsx          AI Agent 對話面板
+│   ├── copilot/AIAgentPanel.tsx          AI Agent 面板（對話 + Console 雙分頁）
 │   ├── copilot/LiveCanvasOverlay.tsx     ★ Glass Box 即時建構畫布（pb_glass_* 事件）
 │   ├── copilot/ChartIntentRenderer.tsx
 │   ├── copilot/ContractCard.tsx
-│   ├── copilot/PipelineConsole.tsx + PbPipelineCard.tsx + PbPatchProposalCard.tsx
+│   ├── copilot/AgentConsole.tsx          ★ Agent Console（agent 視角：狀態列/活動流/記憶效應/成本；
+│   │                                       吃 agent_console SSE + pb_glass_*，chat 與 builder 共用同一 normalizer。
+│   │                                       2026-07-04 取代已死的 9-Stage PipelineConsole）
+│   ├── copilot/PbPipelineCard.tsx + PbPatchProposalCard.tsx
 │   ├── pipeline-builder/    ★ 28 個 component — Builder Canvas + Block Library + Triggers Wizard
 │   ├── contract/            ContractRenderer / EvidenceChain / SuggestedActions
 │   ├── chat/                ChatPanel
