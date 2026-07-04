@@ -509,7 +509,10 @@ export function AgentConsole({
       p.tok += t; p.cache += u.cacheRead;
       total += t; cacheHit += u.cacheRead; cacheDen += u.inputTokens;
     });
-    return { per, total, cachePct: cacheDen > 0 ? Math.round((cacheHit / cacheDen) * 100) : 0 };
+    // cache_read tokens are NOT included in input_tokens (provider
+    // convention) — the hit rate denominator is fresh + cached input.
+    const den = cacheHit + cacheDen;
+    return { per, total, cachePct: den > 0 ? Math.round((cacheHit / den) * 100) : 0 };
   }, [usage]);
 
   // auto-scroll (pause when user scrolled up)
@@ -699,7 +702,7 @@ export function AgentConsole({
                                    textOverflow: "ellipsis" }}>
                       {ev.title}
                     </span>
-                    {(isTeach || ev.round) && (
+                    {(isTeach || !!ev.round) && (
                       <span style={{ fontFamily: M, fontSize: 9, color: isTeach ? "#7c3aed" : "#a09d95",
                                      flex: "none" }}>
                         {isTeach ? "✕0" : `r${ev.round}`}
