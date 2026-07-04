@@ -83,7 +83,7 @@
 <body>
 <div class="page">
   <h1>Agent Console — 重設計 Mockup</h1>
-  <div class="sub">取代 AIAgentPanel 現有的 9-Stage Console（stage 3-6 事件源已死）。定位：<b>對話 tab 看「事」，Console tab 看「agent」</b> — 誰在動、動到哪、這次引用/學到什麼、花了多少。以下資料全部來自 2026-07-04 真實 build（EQP-01「我後悔了改成3張」案），且每個區塊都由<b>既有 SSE 事件</b>直接餵，零後端新碼。</div>
+  <div class="sub">取代 AIAgentPanel 現有的 9-Stage Console（stage 3-6 事件源已死）。定位：<b>對話 tab 看「事」，Console tab 看「agent」</b> — 誰在動、動到哪、這次引用/學到什麼、花了多少。以下資料全部來自 2026-07-04 真實 build（EQP-01「我後悔了改成3張」案）。v2 更新：活動流改為<b>三段式（決定/理由/依據）</b>，並區分「▣ 系統事實」與「⚠ agent 自述」；「召回 0 筆」的步驟高亮並提供「教它」入口。區塊 1/3/4 由既有 SSE 事件餵；三段式理由需一項輕量後端增補（工具呼叫 schema 加 reason 欄，10-20 tokens/步）。</div>
 
   <div class="layout">
     <!-- ════════ THE MOCK PANEL ════════ -->
@@ -119,67 +119,64 @@
           </div>
         </div>
 
-        <!-- 2. activity lanes -->
-        <div class="sec-title">活動流（按 agent 分道）</div>
+        <!-- 2. activity lanes (v2: 決定/理由/依據 三段式) -->
+        <div class="sec-title">活動流 · 每步含「為什麼」</div>
 
         <div class="lane-item">
           <div class="rail" style="background:var(--planner)"></div>
           <div class="t">14:52</div>
           <div class="msg"><b style="color:var(--planner)">PLANNER</b>
-            <div class="detail">提出 5 phases：取資料 → 聚焦 R → 畫 R → 聚焦 Cpk → 畫 Cpk…
-              <span class="chip" style="border:1px solid #fecaca;color:#b42318">將移除 n3（合併圖被取代）</span></div>
+            <div class="detail"><b>決定</b>　提出 5 phases + 移除 n3</div>
+            <div class="detail"><b>理由</b>　你說「改成3張」— 現有只有 1 張合併圖，需各自聚焦→繪圖 ×3，舊圖被取代</div>
+            <div class="detail"><b>依據</b>
+              <span class="chip" style="border:1px solid #94a3b8;color:#475569">▣ canvas 現有 n1→n2→n3</span>
+              <span class="chip" style="border:1px solid #c4b5fd;color:var(--mem)">◈ #83 每個資料節點必須接下游</span></div>
           </div>
         </div>
-        <div class="lane-item">
-          <div class="rail" style="background:var(--planner)"></div>
-          <div class="t">14:53</div>
-          <div class="msg"><b style="color:var(--planner)">PLANNER</b>
-            <div class="detail">user 確認（含 1 處編輯）→ <span style="color:var(--mem)">W1 已寫入 preference</span></div>
-          </div>
-        </div>
+
         <div class="lane-item">
           <div class="rail" style="background:var(--builder)"></div>
           <div class="t">14:53</div>
-          <div class="msg"><b style="color:var(--builder)">BUILDER</b> · p1 r1 · add_node
-            <div class="detail">block_process_history(tool_id=EQP-01, step=STEP_001, 7d)</div>
-            <div class="result">→ 59 rows</div>
+          <div class="msg"><b style="color:var(--builder)">BUILDER</b> · p1 r1
+            <div class="detail"><b>決定</b>　add_node process_history(EQP-01, 7d)</div>
+            <div class="detail"><b>理由</b>　「這 phase 要原始資料，這是唯一的歷史資料來源」<span class="chip" style="border:1px dashed #f59e0b;color:#b45309">⚠ agent 自述</span></div>
+            <div class="detail"><b>依據</b>
+              <span class="chip" style="border:1px solid #c4b5fd;color:var(--mem)">◈ #82 tool_id/lot_id/step 三擇一 → 帶了 tool_id</span></div>
+            <div class="result">▣ 59 rows（系統實測）</div>
           </div>
         </div>
+
         <div class="lane-item">
-          <div class="rail" style="background:var(--verifier)"></div>
-          <div class="t">14:54</div>
-          <div class="msg"><b style="color:var(--verifier)">VERIFIER</b> · p1
-            <div class="detail">ADVANCED — raw_data 契約滿足
-              <span class="chip" style="background:#fef3c7;color:#b45309">auto</span></div>
-          </div>
-        </div>
-        <div class="lane-item">
-          <div class="rail" style="background:var(--builder)"></div>
-          <div class="t">14:54</div>
-          <div class="msg"><b style="color:var(--builder)">BUILDER</b> · p2 r1 · add_node
-            <div class="detail">block_unnest(column=spc_charts)</div>
-            <div class="result">→ 696 rows</div>
-          </div>
-        </div>
-        <div class="lane-item">
-          <div class="rail" style="background:var(--verifier)"></div>
+          <div class="rail" style="background:#b42318"></div>
           <div class="t">14:55</div>
-          <div class="msg"><b style="color:var(--verifier)">VERIFIER</b> · p2
-            <div class="detail" style="color:#b42318">REJECTED — orphan: data node is a leaf</div>
+          <div class="msg"><b style="color:#b42318">VERIFIER · 拒絕</b> · p2
+            <div class="detail"><b>理由</b>　▣ n2 是葉節點，沒有下游消費它的輸出（結構檢查）</div>
+            <div class="detail" style="color:#94a3b8">Builder 將在下一輪處理</div>
           </div>
         </div>
-        <div class="lane-item">
-          <div class="rail" style="background:var(--builder)"></div>
-          <div class="t">14:55</div>
-          <div class="msg"><b style="color:var(--builder)">BUILDER</b> · p3 r2 · add_node
-            <div class="detail">block_line_chart(x=eventTime, y=value) ← 接上 p2 輸出</div>
+
+        <div class="lane-item" style="border-color:#fbbf24;background:#fffbeb">
+          <div class="rail" style="background:#f59e0b"></div>
+          <div class="t">14:58</div>
+          <div class="msg"><b style="color:var(--builder)">BUILDER</b> · p4 r3
+            <div class="detail"><b>決定</b>　set_param 按日聚合（groupby day）</div>
+            <div class="detail"><b>理由</b>　「要每日均值趨勢，先按天分組」<span class="chip" style="border:1px dashed #f59e0b;color:#b45309">⚠ agent 自述</span></div>
+            <div class="detail"><b>依據</b>　<span style="color:#b42318;font-weight:700">✕ 這一步召回 0 筆相關記憶</span></div>
+            <div style="margin-top:5px;background:#fff;border:1px dashed #f59e0b;border-radius:6px;padding:6px 9px;font-size:11px;">
+              agent 在沒有知識支援下摸索中 — 你知道怎麼做對嗎？
+              <a style="color:var(--planner);font-weight:700;text-decoration:none">　教它 →</a>
+              <div style="color:#94a3b8;font-size:10px;margin-top:2px">會帶入情境：block_groupby_agg · phase「按日聚合」· 你補的知識下次 build 生效</div>
+            </div>
           </div>
         </div>
-        <div class="lane-item" style="border-style:dashed;opacity:.8">
+
+        <div class="lane-item" style="border-style:dashed">
           <div class="rail" style="background:#0f172a"></div>
-          <div class="t">結尾</div>
-          <div class="msg"><b>GRAPH</b>
-            <div class="detail">確定性移除 n3（user 已核可）→ nodes_removed</div>
+          <div class="t">15:01</div>
+          <div class="msg"><b>GRAPH · 確定性移除</b>
+            <div class="detail"><b>決定</b>　移除 n3（合併圖）+ 清除懸空邊</div>
+            <div class="detail"><b>理由</b>　▣ 你在 plan 卡勾選核可了這筆移除</div>
+            <div class="detail"><b>護欄</b>　▣ 已檢查 n3 輸出無其他消費者，安全移除</div>
           </div>
         </div>
 
@@ -218,6 +215,8 @@
           <tr><td><b>2. 分道活動流</b></td><td>「動到哪了？」— 按 agent 上色的時間軸：Planner 提案/確認（含移除 chip）、Builder 每個動作+結果行、Verifier 裁決（ADVANCED/REJECTED）、Graph 的確定性移除</td><td><code>pb_glass_op</code>、<code>phase_update</code>、<code>nodes_removed</code>、<code>goal_plan_confirmed</code></td></tr>
           <tr><td><b>3. 記憶效應</b></td><td>「這次引用/學到什麼？」— 召回清單（含「新蒸餾」徽章標 Supervisor 產出的）+ W1/W2/W3 寫入</td><td><code>memory_recall</code>、<code>memory_write</code>（前端已有 case）</td></tr>
           <tr><td><b>4. 成本</b></td><td>「花了多少？」— per-agent tokens + cache 命中率</td><td><code>llm_usage</code>、<code>glass_usage</code></td></tr>
+          <tr><td><b>D6. 三段式說明</b></td><td>每步顯示 決定/理由/依據；「依據」分兩級視覺：<b>▣ 系統事實</b>（實線，verifier 裁決/實測 rows/user 勾選）vs <b>⚠ agent 自述</b>（虛線 — 模型講的理由，可能事後編，修正時優先質疑）；引用記憶顯示其 How-to-apply 句而非只有編號</td><td><code>phase_update</code>/<code>nodes_removed</code>（事實）+ 工具 <code>reason</code> 欄（新增，輕量）+ <code>memory_recall</code></td></tr>
+          <tr><td><b>D7. 「教它」時刻</b></td><td>召回 0 筆的步驟高亮 + 一鍵開 /agent-knowledge，自動帶入當下情境（block/phase/指令）；補的知識 30 秒 embed，下次 build 生效並在此可見 — 「看見 → 理解 → 補知識」閉環的入口</td><td><code>memory_recall</code>（空清單偵測）+ 既有知識新增 API</td></tr>
         </tbody>
       </table>
 
