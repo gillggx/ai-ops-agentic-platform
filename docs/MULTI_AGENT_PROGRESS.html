@@ -133,6 +133,9 @@
     <tr><td>07-04</td><td><b>Chat = Builder 樣貌(plan gate 對齊)</b>:chat build 改停在 <code>goal_plan_confirm_gate</code>(同 builder)— PlanConfirmCard 可編輯 P1..PN、確認前 canvas 不動;plan 編輯經同一 interrupt 契約餵 W1(chat 過去因 skip_confirm 遺失這條學習訊號);ChatPanel 抽出 handleAgentEvent 讓 resume stream live 渲染逐 phase 進度;<code>/chat/intent-respond</code> 加 plan_decision 分支(kind guard 三種 resume 互不搶);env kill-switch <code>CHAT_PLAN_CONFIRM_ENABLED</code>;headless(skill/MCP/patrol)不受影響</td>
         <td><span class="badge ok">A1–A7 全過</span> A2:編輯後 build 4 nodes + W1 落庫(id 68 written_by=planner) · A6:chat episode planner×5+builder×22(同引擎實證) · A7:SLASH-17 14/17 首輪 + 3 疑點重跑 3/3 過 = 零回歸 · sidecar 5 tests</td>
         <td><code>647a8112</code></td></tr>
+    <tr><td>07-04</td><td><b>卡片統一 + follow-up 修復</b>:GoalPlanCard 加 editable 成三 surface 共用唯一 plan 卡;PhaseTimeline(builder 進度卡)接進兩個 chat surface(wrapper 補 auto_completed/ff_update);builder follow-up 帶 <code>pipelineSnapshot</code>+<code>priorInstruction</code> — 「我後悔了改成3張」從 too_vague 拒絕變成 7-phase 拆圖增量 plan;builder plan 卡編輯也餵 W1。實機截圖:<a href="UI_CARDS_SHOWCASE.html">UI_CARDS_SHOWCASE.html</a>(GitHub Pages 已啟用)</td>
+        <td><span class="badge ok">B1/B2 PASS</span> B1 有 context → 7-phase 增量 plan;B2 無 context → 照樣拒(too_vague 未鬆動) · sidecar 12 tests · SLASH-17 14 MATCH 首輪 + 疑點重跑 2/3 過(patrol-status 為基線慣犯,當日另一輪 MATCH)= 零回歸</td>
+        <td><code>f8b56167</code> <code>8f91cbfa</code></td></tr>
     <tr><td>07-04</td><td><b>Phase 6 Monitor 指揮層(A 版:自省觸發器)</b>:V73 <code>monitor_requests</code>;確定性掃描(無 LLM)三指標 — DOC_GAP(block ≥3 pending memo)/ DIVERGENCE(7天 ≥2)/ REPAIR_HANDOVER(7天 ≥3)→ 改善請求 → 人工核准取得 Planner 指令;<code>/supervisor</code> 頁雙區(蒸餾提案+改善請求)</td>
         <td><span class="badge ok">E2E 全過</span> scan 產 3 請求(2 DOC_GAP + 1 REPAIR_HANDOVER 14次/7天)· approve 回建議指令 · dedup 生效 · Java 5/5</td>
         <td><code>cb1c93ab</code> <code>1b60367b</code></td></tr>
@@ -168,7 +171,7 @@ Superv.  寫    [ON] PROMOTE  (MERGE 治理)  (MERGE 治理)    [ON] CORRECT    
 
 <footer>
   來源文件:<code>AGENT_HARNESS_DESIGN.html</code>(設計)· <code>MULTI_AGENT_PHASE0_SPEC.md</code>(A1–A10)·
-  <code>MULTI_AGENT_OBSERVABILITY_SPEC.md</code>(C1–C11)。本頁隨每次交付更新。Updated 2026-07-04(Phase 5+6 交付;SLASH-17 閘門數字見 §2)。
+  <code>MULTI_AGENT_OBSERVABILITY_SPEC.md</code>(C1–C11)。本頁隨每次交付更新。Updated 2026-07-04(Phase 5+6 + chat/builder 卡片統一交付;GitHub Pages: gillggx.github.io/ai-ops-agentic-platform)。
 </footer>
 
 </div>
