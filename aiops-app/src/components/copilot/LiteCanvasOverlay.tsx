@@ -251,7 +251,7 @@ function Inner({
       console.log("[LiteCanvas] sessionStorage saved");
     } catch (e) {
       console.warn("[LiteCanvas] sessionStorage failed", e);
-      /* fall through to navigation, builder will run wizard */
+      /* fall through to navigation; without the stash /new redirects to /skills */
     }
     console.log("[LiteCanvas] navigating to /admin/pipeline-builder/new?from=agent");
     try {

@@ -181,11 +181,17 @@ export function normalizeConsoleEvent(ev: Record<string, unknown>): ConsoleActio
       }});
     } else if (kind === "memory_recall") {
       const mems = Array.isArray(p.recalled) ? (p.recalled as RecalledMem[]) : [];
+      // Subject inline (F-1 2026-07-05): show what was recalled without a
+      // click — first memory title + "+n" for the rest.
+      const first = String(mems[0]?.title ?? "").slice(0, 40);
+      const subject = first
+        ? `「${first}」${mems.length > 1 ? ` +${mems.length - 1}` : ""}`
+        : `（layer=${String(p.layer ?? "?")}）`;
       out.push({ t: "event", ev: {
         kind: "recall", agent: "memory", phaseId: pid,
         round: p.round != null ? Number(p.round) : undefined,
         code: "memory_recall",
-        title: `召回 ${mems.length} 筆（layer=${String(p.layer ?? "?")}）`,
+        title: `召回 ${mems.length} 筆 · ${subject}`,
         mems,
       }});
     } else if (kind === "memory_write") {

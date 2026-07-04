@@ -86,6 +86,10 @@ src/
 │   ├── layout/AnalysisPanel.tsx          ContractRenderer overlay
 │   ├── layout/DataExplorerPanel.tsx
 │   ├── copilot/AIAgentPanel.tsx          AI Agent 面板（對話 + Console 雙分頁）
+│   ├── copilot/BuildFlowCards.tsx        ★ 對話分頁重整（2026-07-05）：INTENT 卡（點選即送出鎖定）+
+│   │                                       BUILD PLAN 卡（單卡生命週期：草案→建構中→完成，同 message id 原地變身）+
+│   │                                       完成卡（▣ 驗證行 + ◆ 學到 W 代號 + 回饋）。ops log / 敘事泡 /
+│   │                                       header token 統計已自對話移除（歸 Console 分頁）。
 │   ├── copilot/LiveCanvasOverlay.tsx     ★ Glass Box 即時建構畫布（pb_glass_* 事件）
 │   ├── copilot/ChartIntentRenderer.tsx
 │   ├── copilot/ContractCard.tsx

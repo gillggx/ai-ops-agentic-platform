@@ -54,6 +54,9 @@ from python_ai_sidecar.agent_builder.agents.builder import BUILDER_BUDGETS
 
 MAX_REACT_ROUNDS = BUILDER_BUDGETS.react_rounds
 MAX_INSPECT_CALLS_PER_ROUND = 5
+# v30.24: consecutive reasoning-only (no tool call) responses before we stop
+# re-asking and escalate to phase_revise. See the tool_call-is-None branch.
+MAX_CONSECUTIVE_NO_ACTION = 3
 STUCK_DETECTOR_WINDOW = 2  # last N actions checked for duplicate
 
 
@@ -217,6 +220,78 @@ def _stamp_last_message_cache(messages: list[dict]) -> list[dict]:
                            "cache_control": {"type": "ephemeral"}}
         last["content"] = new_content
     return out
+
+
+NO_ACTION_NUDGE = (
+    "你上一輪沒有輸出任何 tool call。請直接以一個 tool call 執行你的結論 — "
+    "不要只在思考中決定。"
+)
+
+
+def _handle_no_action(
+    state: BuildGraphState,
+    *,
+    pid: str,
+    round_n: int,
+    phase_messages: list[dict],
+    assistant_content: list[dict] | None,
+) -> dict[str, Any]:
+    """v30.24: consecutive empty-response guard (pure, unit-testable).
+
+    Some providers return reasoning-only completions (finish_reason=stop,
+    empty content, no tool call). Re-calling with byte-identical context
+    repeats the failure deterministically — so (a) append a nudge so the
+    next call's context differs, (b) after MAX_CONSECUTIVE_NO_ACTION
+    consecutive empties escalate to phase_revise instead of blind-burning
+    the full round budget while the UI looks frozen.
+    """
+    # v30.23: strip ANY tool_use blocks from assistant_content before
+    # appending — we have no tool_result to pair them with (no dispatch
+    # happened). Without this Anthropic API rejects next call with
+    # "tool_use without tool_result".
+    if assistant_content:
+        assistant_content = [
+            b for b in assistant_content if b.get("type") != "tool_use"
+        ]
+
+    no_action_map = dict(state.get("v30_phase_no_action") or {})
+    no_action_n = no_action_map.get(pid, 0) + 1
+    no_action_map[pid] = no_action_n
+
+    if no_action_n >= MAX_CONSECUTIVE_NO_ACTION:
+        logger.warning(
+            "agentic_phase_loop: phase %s — %d consecutive empty LLM "
+            "responses (round %d) — escalate to revise",
+            pid, no_action_n, round_n + 1,
+        )
+        return {
+            "status": "phase_revise_pending",
+            "v30_phase_no_action": no_action_map,
+            "sse_events": [_event("phase_revise_started", {
+                "phase_id": pid, "reason": "empty_llm_responses",
+            })],
+        }
+
+    # Nudge: a plain user message breaks the identical-context repeat.
+    # Keep the assistant turn in between (real content when the model
+    # produced text; a placeholder otherwise) so roles stay alternating.
+    phase_messages.append({
+        "role": "assistant",
+        "content": assistant_content
+        or [{"type": "text", "text": "(沒有輸出任何 tool call)"}],
+    })
+    phase_messages.append({"role": "user", "content": NO_ACTION_NUDGE})
+    new_msgs = dict(state.get("v30_phase_messages") or {})
+    new_msgs[pid] = phase_messages
+    return {
+        "v30_phase_round": round_n + 1,
+        "v30_phase_messages": new_msgs,
+        "v30_phase_no_action": no_action_map,
+        "sse_events": [_event("phase_round", {
+            "phase_id": pid, "round": round_n + 1, "max": MAX_REACT_ROUNDS,
+            "no_action": True, "consecutive_no_action": no_action_n,
+        })],
+    }
 
 
 async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
@@ -482,26 +557,20 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
 
     if tool_call is None:
         logger.info("agentic_phase_loop: phase %s round %d — no tool call", pid, round_n + 1)
-        # v30.23: strip ANY tool_use blocks from assistant_content before
-        # appending — we have no tool_result to pair them with (no dispatch
-        # happened). Without this Anthropic API rejects next call with
-        # "tool_use without tool_result".
-        if assistant_content:
-            assistant_content = [
-                b for b in assistant_content if b.get("type") != "tool_use"
-            ]
-        if assistant_content:
-            phase_messages.append({"role": "assistant", "content": assistant_content})
-        new_msgs = dict(state.get("v30_phase_messages") or {})
-        new_msgs[pid] = phase_messages
-        return {
-            "v30_phase_round": round_n + 1,
-            "v30_phase_messages": new_msgs,
-            "sse_events": [_event("phase_round", {
-                "phase_id": pid, "round": round_n + 1, "max": MAX_REACT_ROUNDS,
-                "no_action": True,
-            })],
-        }
+        patch = _handle_no_action(
+            state, pid=pid, round_n=round_n,
+            phase_messages=phase_messages,
+            assistant_content=assistant_content,
+        )
+        if tracer is not None and patch.get("status") == "phase_revise_pending":
+            tracer.record_step(
+                "agentic_phase_loop", status="empty_response_escalated",
+                phase_id=pid, round=round_n + 1,
+                consecutive_no_action=(
+                    patch.get("v30_phase_no_action") or {}
+                ).get(pid),
+            )
+        return patch
 
     tool_name = tool_call["name"]
     tool_args = tool_call.get("args") or {}
@@ -805,6 +874,11 @@ async def agentic_phase_loop_node(state: BuildGraphState) -> dict[str, Any]:
         "final_pipeline": new_pipeline_dict,
         "v30_verify_now": verify_now,
     }
+    # v30.24: a real tool call resets the consecutive-empty counter.
+    if (state.get("v30_phase_no_action") or {}).get(pid):
+        _na = dict(state.get("v30_phase_no_action") or {})
+        _na[pid] = 0
+        state_update["v30_phase_no_action"] = _na
     # Item 1 (ENABLE_NEXT_MEMO): carry the agent's planned next step forward so
     # the next round's prompt can surface it (multi-block intent survives).
     if is_next_memo_enabled():

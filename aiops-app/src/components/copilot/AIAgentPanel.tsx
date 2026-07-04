@@ -6,7 +6,6 @@ import { isValidContract, isAgentAction, isHandoffAction } from "aiops-contract"
 import { consumeSSE } from "@/lib/sse";
 import { ContractCard } from "./ContractCard";
 import { PlanRenderer, type PlanItem } from "./PlanRenderer";
-import OpsConsole, { type GlassOpEntry } from "./OpsConsole";
 import SlashCommandMenu from "./SlashCommandMenu";
 import { ChartIntentRenderer, type ChartIntent } from "./ChartIntentRenderer";
 import { ChartExplorer } from "./ChartExplorer";
@@ -18,10 +17,14 @@ import ChartRenderer from "@/components/pipeline-builder/ChartRenderer";
 import type { FlatDataMetadata, UIConfig } from "@/context/FlatDataContext";
 import { useAppContext } from "@/context/AppContext";
 import { DesignIntentCard, type DesignIntentData, type DesignIntentChoice } from "./DesignIntentCard";
-import { BulletConfirmCard } from "@/components/chat/BulletConfirmCard";
-import GoalPlanCard, { type GoalPhase, type PlanRemoval } from "@/components/pipeline-builder/v30/GoalPlanCard";
-import PhaseTimeline, { type PhaseRuntime } from "@/components/pipeline-builder/v30/PhaseTimeline";
+import { type GoalPhase, type PlanRemoval } from "@/components/pipeline-builder/v30/GoalPlanCard";
+import { type PhaseRuntime } from "@/components/pipeline-builder/v30/PhaseTimeline";
 import { type PlanPhase } from "@/components/chat/PlanConfirmCard";
+import {
+  IntentCard, BuildPlanCard, BuildDoneCard,
+  renderUserContent, userBubbleStyle,
+  type BuildPlanState, type BuildDoneState, type PhaseRuntimeUI,
+} from "./BuildFlowCards";
 import {
   JudgeClarifyCard,
   type JudgeClarifyData,
@@ -89,25 +92,21 @@ interface IntentConfirmData {
   resolved?: "confirmed" | "refused" | "error";
 }
 
-interface PlanConfirmData {
-  session_id: string;            // chat session (pending_clarify key)
-  build_session_id: string;
-  plan_summary?: string;
-  phases: PlanPhase[];
-  removals?: PlanRemoval[];
-  resolved?: "confirmed" | "refused" | "error";
-}
-
 interface ChatMessage {
   id: number;
-  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "ops" | "clarify" | "design_intent" | "intent_confirm" | "plan_confirm" | "chart_inline" | "judge_clarify";
+  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "clarify" | "design_intent" | "intent_confirm" | "build_plan" | "build_done" | "chart_inline" | "judge_clarify";
   content: string;
+  /** 對話分頁重整（2026-07-05）— BUILD PLAN 卡單卡生命週期 state。 */
+  buildPlan?: BuildPlanState;
+  /** 完成卡（§3.5）。 */
+  buildDone?: BuildDoneState;
+  /** 建構開始後 INTENT 卡收斂為單行（§4）。 */
+  intentCollapsed?: boolean;
   clarify?: ClarifyData;
   designIntent?: DesignIntentData;
   /** v19 (2026-05-14) — pb_intent_confirm card for chat-mode build clarify. */
   intentConfirm?: IntentConfirmData;
   /** v31 (2026-07-04) — pb_plan_confirm card: builder-style plan gate in chat. */
-  planConfirm?: PlanConfirmData;
   /** v30.17j — pb_judge_clarify deficit pause card. */
   judgeClarify?: JudgeClarifyData;
   /** v30.17j — chat session id captured at card-emit time, needed when
@@ -132,9 +131,7 @@ interface ChatMessage {
   // plan message renders PhaseTimeline (same card as builder mode).
   goalPhases?: GoalPhase[];
   phaseRuntime?: Record<string, PhaseRuntime>;
-  // v1.7: when role === "ops", glassOps carries the build-op trail that
-  // accumulates across pb_glass_op events keyed off the message id.
-  glassOps?: GlassOpEntry[];
+  // (2026-07-05) ops trail 自對話移除 — 建構過程歸 Console 分頁。
   // Generative UI
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   flatData?: Record<string, any[]>;
@@ -410,8 +407,7 @@ function FeedbackBar({ message, onRate, onOpenReasonModal }: {
         padding: "2px 8px", marginTop: 4, borderRadius: 10,
         fontSize: 10, color: "#718096", background: "#f7f8fc",
       }}>
-        <span>{rated === 1 ? "👍" : "👎"}</span>
-        <span>已記錄</span>
+        <span>{rated === 1 ? "已回饋：有幫助" : "已回饋：不準確"}</span>
       </div>
     );
   }
@@ -431,7 +427,7 @@ function FeedbackBar({ message, onRate, onOpenReasonModal }: {
         style={baseStyle}
         onClick={() => onRate(1)}
       >
-        👍
+        有幫助
       </button>
       <button
         type="button"
@@ -440,7 +436,7 @@ function FeedbackBar({ message, onRate, onOpenReasonModal }: {
         style={baseStyle}
         onClick={onOpenReasonModal}
       >
-        👎
+        不準確
       </button>
     </div>
   );
@@ -593,20 +589,13 @@ export function AIAgentPanel({
   // v1.7 — id of the inline plan chat-card so plan_update events know which
   // message to mutate. Reset at every pb_glass_start.
   const currentPlanMsgIdRef = useRef<number | null>(null);
-  // v1.7 — id of the inline ops chat-card so each new pb_glass_op appends to
-  // the right build session's trail. Reset at every pb_glass_start.
-  const currentOpsMsgIdRef = useRef<number | null>(null);
-  // 2026-05-20 — id of the inline macro-plan card driven by structured
-  // `ev.plan` / `ev.plan_confirmed` / `ev.phase_update` payloads on
-  // pb_glass_chat (goal_plan_proposed). Previously these payloads were
-  // ignored and only the text fallback rendered, which collapsed into a
-  // run-on bubble. Now we render PlanRenderer aligned with the v1.7 todo
-  // card and mutate phases live as the build progresses.
-  const currentMacroPlanMsgIdRef = useRef<number | null>(null);
-  // v1.5 — Glass Box build ops accumulate here, surfaced via OpsConsole (default
-  // collapsed). Cleared at the start of every new build session.
-  // v1.7: glassOps standalone state retired — ops now live as a "ops"
-  // chat-message inserted right after the plan card. See currentOpsMsgIdRef.
+  // 2026-07-05 對話重整 — 單卡生命週期：一次 build 只有一張 BUILD PLAN 卡
+  // （同 message id 原地變身 草案 → 建構中 → 完成）。pb_plan_confirm /
+  // pb_glass_chat(plan) / phase_update / pb_glass_op / pb_glass_done 全部
+  // 對這個 id 做 in-place 更新。ops trail 已自對話移除（歸 Console）。
+  const currentBuildCardIdRef = useRef<number | null>(null);
+  // 完成卡 id — reflection_pass 事件把「數值已驗證」寫進卡而非漂浮 chip。
+  const currentBuildDoneIdRef = useRef<number | null>(null);
   // v1.4 — relay plan changes to parent (AppShell → LiveCanvasOverlay).
   useEffect(() => { onPlanItemsChange?.(planItems); }, [planItems, onPlanItemsChange]);
   // v1.4 Auto-Run — tracks pb_run_* lifecycle for progress display.
@@ -630,8 +619,35 @@ export function AIAgentPanel({
       target = prev.find((m) => m.id === msgId);
       return prev;
     });
-    const chatSid = target?.planConfirm?.session_id ?? sessionIdRef.current ?? "";
-    let finalStatus: "confirmed" | "refused" | "error" = confirmed ? "confirmed" : "refused";
+    const chatSid = target?.buildPlan?.sessionId ?? sessionIdRef.current ?? "";
+    const hm = new Date();
+    const confirmedAt = `${String(hm.getHours()).padStart(2, "0")}:${String(hm.getMinutes()).padStart(2, "0")}`;
+    if (confirmed) {
+      // 單卡生命週期：同 message 原地變身 草案 → 建構中（§3.4 / §5）。
+      const originalGoals = new Map(
+        (target?.buildPlan?.phases ?? []).map((p) => [p.id, p.goal]),
+      );
+      const editedIds = phases
+        .filter((p) => originalGoals.has(p.id) && originalGoals.get(p.id) !== p.goal)
+        .map((p) => p.id);
+      setChatHistory((prev) => prev.map((m) => {
+        if (m.id === msgId && m.buildPlan) {
+          return { ...m, buildPlan: {
+            ...m.buildPlan, phases, status: "building" as const,
+            confirmedAt, editedIds,
+          }};
+        }
+        // 建構開始 → INTENT 卡收斂為單行摘要（§4 第三列）。
+        if (m.role === "intent_confirm") return { ...m, intentCollapsed: true };
+        return m;
+      }));
+    } else {
+      setChatHistory((prev) => prev.map((m) =>
+        m.id === msgId && m.buildPlan
+          ? { ...m, buildPlan: { ...m.buildPlan, status: "cancelled" as const } }
+          : m,
+      ));
+    }
     try {
       const res = await fetch("/api/agent/chat/intent-respond", {
         method: "POST",
@@ -647,24 +663,23 @@ export function AIAgentPanel({
       if (handler && res.ok) {
         await consumeSSE(res, (ev: Record<string, unknown>) => {
           handler(ev as Parameters<typeof handler>[0]);
-          const evType = (ev.type as string) || "";
-          if (evType === "pb_glass_done") {
-            const st = ev.status as string;
-            if (st === "refused") finalStatus = "refused";
-            else if (st === "failed") finalStatus = "error";
-          }
         }, () => {});
-      } else if (!res.ok) {
-        finalStatus = "error";
+      } else if (!res.ok && confirmed) {
+        setChatHistory((prev) => prev.map((m) =>
+          m.id === msgId && m.buildPlan
+            ? { ...m, buildPlan: { ...m.buildPlan, status: "error" as const, errorReason: `送出失敗（HTTP ${res.status}）` } }
+            : m,
+        ));
       }
-    } catch {
-      finalStatus = "error";
+    } catch (e) {
+      if (confirmed) {
+        setChatHistory((prev) => prev.map((m) =>
+          m.id === msgId && m.buildPlan
+            ? { ...m, buildPlan: { ...m.buildPlan, status: "error" as const, errorReason: e instanceof Error ? e.message : String(e) } }
+            : m,
+        ));
+      }
     }
-    setChatHistory((prev) => prev.map((m) =>
-      m.id === msgId && m.planConfirm
-        ? { ...m, planConfirm: { ...m.planConfirm, resolved: finalStatus } }
-        : m,
-    ));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [hitl, setHitl]             = useState<HitlRequest | null>(null);
@@ -788,7 +803,8 @@ export function AIAgentPanel({
     setReflection({ status: null, amendment: "" });
     setPlanItems([]);
     currentPlanMsgIdRef.current = null;
-    currentMacroPlanMsgIdRef.current = null;
+    currentBuildCardIdRef.current = null;
+    currentBuildDoneIdRef.current = null;
     setAutoRun({ status: "idle" });
     setInput("");
     setActiveTab("chat");
@@ -854,6 +870,24 @@ export function AIAgentPanel({
             normalizeConsoleEvent(ev).forEach((a) => {
               if (a.t === "event" && a.ev.kind === "write" && a.ev.write) {
                 memoryWritesRef.current.push(a.ev.write.code);
+              }
+              // 2026-07-05 — BUILD PLAN 卡的拒 n / 修復後通過 chip 由
+              // agent_console 側訊號驅動（chat/builder 同一來源）。
+              if (a.t === "event" && (a.ev.kind === "verdict_reject" || a.ev.kind === "repair_start")) {
+                const cardId = currentBuildCardIdRef.current;
+                const pid = a.ev.phaseId;
+                const isReject = a.ev.kind === "verdict_reject";
+                if (cardId != null && pid) {
+                  setChatHistory((prev) => prev.map((m) => {
+                    if (m.id !== cardId || !m.buildPlan) return m;
+                    const rt = { ...m.buildPlan.runtime };
+                    const cur: PhaseRuntimeUI = rt[pid] ?? { status: "in_progress" };
+                    rt[pid] = isReject
+                      ? { ...cur, rejects: (cur.rejects ?? 0) + 1 }
+                      : { ...cur, repair: true };
+                    return { ...m, buildPlan: { ...m.buildPlan, runtime: rt } };
+                  }));
+                }
               }
               consoleDispatch(a);
             });
@@ -943,12 +977,12 @@ export function AIAgentPanel({
             // with the conversation; the kindLabel prefix tells the user
             // it's a structured Q&A response, not a generic chat.
             const kindLabels: Record<string, string> = {
-              explain: "📖 Block 說明",
-              compare: "⚖️ Block 對比",
-              recommend: "💡 Block 推薦",
-              ambiguous: "🤔 請再說明",
-              compare_failed: "⚠ 對比失敗",
-              error: "⚠ 錯誤",
+              explain: "Block 說明",
+              compare: "Block 對比",
+              recommend: "Block 推薦",
+              ambiguous: "請再說明",
+              compare_failed: "[失敗] 對比失敗",
+              error: "[錯誤]",
             };
             const kind = (ev.kind as string) || "answer";
             const md = (ev.markdown as string) || "";
@@ -1130,7 +1164,7 @@ export function AIAgentPanel({
                 const where = sessionMode ? "已套用至畫布" : "↗ 已顯示於左側 Lite Canvas";
                 const chipText = pbCard.type === "pb_pipeline"
                   ? `🛠️ Pipeline 已完成 · ${nodeCount} nodes / ${edgeCount} edges · ${where}`
-                  : `📌 已執行已發佈 Skill: ${pbCard.skill_name ?? pbCard.slug ?? ""}`;
+                  : `已執行已發佈 Skill: ${pbCard.skill_name ?? pbCard.slug ?? ""}`;
                 setChatHistory((prev) => [...prev, {
                   id: nextId(),
                   role: "agent",
@@ -1190,17 +1224,13 @@ export function AIAgentPanel({
           case "pb_glass_start": {
             const goal = ev.goal as string | undefined;
             onGlassStart?.({ session_id: ev.session_id as string, goal, base_pipeline: ev.base_pipeline });
-            // v1.7 — new build means fresh plan + ops cards; drop the refs
-            // so the next plan / op event creates new chat-messages instead
-            // of mutating the previous build's cards.
+            // 2026-07-05 — 新 build 只重置 plan-todo ref 與 done-card ref。
+            // BUILD PLAN 卡 id 不清：resume（plan confirm）會再收到一次
+            // pb_glass_start，此時卡已存在且必須原地變身而非另開新卡。
+            // 敘事泡（「正在建立 pipeline…」）已移除 — 卡片 chip 表達狀態。
             currentPlanMsgIdRef.current = null;
-            currentOpsMsgIdRef.current = null;
-            currentMacroPlanMsgIdRef.current = null;
+            currentBuildDoneIdRef.current = null;
             setAutoRun({ status: "idle" });
-            setChatHistory((prev) => [...prev, {
-              id: nextId(), role: "agent",
-              content: goal ? `🛠️ **正在建立 pipeline**：${goal}` : "🛠️ 正在建立 pipeline…",
-            }]);
             break;
           }
           case "pb_glass_op": {
@@ -1208,87 +1238,31 @@ export function AIAgentPanel({
             const args = (ev.args as Record<string, unknown>) ?? {};
             const result = (ev.result as Record<string, unknown>) ?? {};
             onGlassOp?.({ op, args, result });
-            // v31.1 — feed PhaseTimeline runtime (round n/32 + last action)
-            {
-              const pid = args._phase_id != null ? String(args._phase_id) : null;
-              const rnd = Number(args._round);
-              if (pid && currentMacroPlanMsgIdRef.current != null) {
-                const targetId = currentMacroPlanMsgIdRef.current;
-                setChatHistory((prev) => prev.map((m) => {
-                  if (m.id !== targetId || m.role !== "plan" || !m.goalPhases) return m;
-                  const rt = { ...(m.phaseRuntime ?? {}) };
-                  const cur = rt[pid] ?? { status: "in_progress" as const };
-                  rt[pid] = {
-                    ...cur,
-                    status: cur.status === "completed" || cur.status === "failed" ? cur.status : "in_progress",
-                    round: Number.isFinite(rnd) ? rnd : cur.round,
-                    maxRound: 32,
-                    lastAction: op,
-                    lastActionResult: typeof (result as Record<string, unknown>)._summary === "string"
-                      ? String((result as Record<string, unknown>)._summary).slice(0, 120) : cur.lastActionResult,
-                  };
-                  return { ...m, phaseRuntime: rt };
-                }));
-              }
-            }
-            const OP_LABEL_MAP: Record<string, string> = {
-              // v1 builder ops
-              add_node: "加入 node", remove_node: "刪除 node",
-              connect: "連邊", set_param: "設定參數",
-              rename_node: "重新命名", finish: "完成",
-              list_blocks: "查看 block 清單", preview: "預覽", validate: "驗證",
-              // v30.17h — phase-loop / RAG tools (chat mode build via
-              // build_pipeline_live). Underscored phase metadata
-              // (_phase_id / _round) is set on args by event_wrapper.
-              inspect_block_doc: "查 block 說明",
-              inspect_node_output: "看節點輸出",
-              phase_complete: "標記 phase 完成",
-              query_blocks: "查 block",
-              query_columns: "查 column",
-              query_connectable_sources: "查可連接來源",
-            };
-            const label = OP_LABEL_MAP[op] ?? op;
-            // v30 ops include _phase_id / _round metadata; prefix label
-            // with [p# r#] so the chat trail keeps phase context.
-            const phaseId = args._phase_id as string | undefined;
-            const roundNum = args._round as number | undefined;
-            const phasePrefix = phaseId && roundNum
-              ? `[${phaseId} r${roundNum}] `
-              : "";
-            let detail = "";
-            if (op === "add_node") detail = `\`${args.block_name ?? ""}\``;
-            else if (op === "connect") detail = `\`${args.from_node}.${args.from_port ?? "out"}\` → \`${args.to_node}.${args.to_port ?? "in"}\``;
-            else if (op === "remove_node") detail = `\`${args.node_id}\``;
-            else if (op === "set_param") detail = `\`${args.node_id}.${args.key}\``;
-            else if (op === "rename_node") detail = `\`${args.node_id}\` → \`${args.label ?? args.display_label ?? "?"}\``;
-            else if (op === "inspect_block_doc") detail = `\`${args.block_id ?? ""}\``;
-            else if (op === "inspect_node_output") detail = `\`${args.node_id ?? ""}\` (${args.n_rows ?? "?"} rows)`;
-            else if (op === "phase_complete") detail = `${String(args.rationale ?? "").slice(0, 60)}`;
-            else if (op === "query_blocks") detail = `keyword=\`${args.keyword ?? args.query ?? ""}\``;
-            else if (op === "query_columns") detail = `node=\`${args.node_id ?? ""}\``;
-            else if (op === "query_connectable_sources") detail = `to=\`${args.target_node_id ?? args.node_id ?? ""}\``;
-            // Prepend phase prefix once we've built the detail
-            if (phasePrefix && !detail.startsWith(phasePrefix)) {
-              detail = phasePrefix + detail;
-            }
-            const newEntry: GlassOpEntry = {
-              id: nextId(), op, label, detail, ts: Date.now(),
-            };
-            // v1.7: ops live as an inline "ops" chat-message, pushed once per
-            // build session and updated in place via the message id ref so
-            // the build-ops trail sits right under the plan in conversation
-            // order instead of pinned at the top of the rail.
-            const opsMsgId = currentOpsMsgIdRef.current;
-            if (opsMsgId == null) {
-              const newId = nextId();
-              currentOpsMsgIdRef.current = newId;
-              setChatHistory((prev) => [...prev, {
-                id: newId, role: "ops", content: "", glassOps: [newEntry],
-              }]);
-            } else {
+            // 2026-07-05 — ops log 自對話移除（歸 Console 分頁）。這裡只餵
+            // BUILD PLAN 卡的進行中 meta：`r{n}/32 · last: add_node → n3`，
+            // 讓卡片持續有「還活著」的訊號（含空 round 後的下一動）。
+            const pid = args._phase_id != null ? String(args._phase_id) : null;
+            const rnd = Number(args._round);
+            const tgt = String(
+              (args.node_id as string)
+              ?? (args.block_name as string)
+              ?? (args.to_node as string)
+              ?? (args.block_id as string)
+              ?? "",
+            );
+            if (pid && currentBuildCardIdRef.current != null) {
+              const targetId = currentBuildCardIdRef.current;
               setChatHistory((prev) => prev.map((m) => {
-                if (m.id !== opsMsgId || m.role !== "ops") return m;
-                return { ...m, glassOps: [...(m.glassOps ?? []), newEntry] };
+                if (m.id !== targetId || !m.buildPlan) return m;
+                const rt = { ...m.buildPlan.runtime };
+                const cur: PhaseRuntimeUI = rt[pid] ?? { status: "in_progress" };
+                rt[pid] = {
+                  ...cur,
+                  status: cur.status === "completed" || cur.status === "failed" ? cur.status : "in_progress",
+                  rounds: Number.isFinite(rnd) ? rnd : cur.rounds,
+                  lastOp: tgt ? `${op} → ${tgt.slice(0, 24)}` : op,
+                };
+                return { ...m, buildPlan: { ...m.buildPlan, runtime: rt } };
               }));
             }
             break;
@@ -1320,24 +1294,37 @@ export function AIAgentPanel({
             } | undefined;
 
             if (planPayload && Array.isArray(planPayload.phases) && planPayload.phases.length > 0) {
-              const items: PlanItem[] = planPayload.phases.map((p) => ({
-                id: String(p.id ?? ""),
-                title: String(p.goal ?? ""),
-                status: "pending",
-              }));
-              // v31.1 — builder-style PhaseTimeline data (expected badges etc.)
               const gp: GoalPhase[] = planPayload.phases.map((p) => ({
                 id: String(p.id ?? ""),
                 goal: String(p.goal ?? ""),
                 expected: (["raw_data", "transform", "verdict", "chart", "table", "scalar", "alarm"]
                   .includes(String(p.expected)) ? String(p.expected) : "transform") as GoalPhase["expected"],
               }));
-              const newId = nextId();
-              currentMacroPlanMsgIdRef.current = newId;
-              setChatHistory((prev) => [...prev, {
-                id: newId, role: "plan", content: "", planItems: items,
-                goalPhases: gp, phaseRuntime: {},
-              }]);
+              // 單卡生命週期：confirm-gate 已建卡 → 原地更新 phases；
+              // auto-confirm 路徑（沒經過 pb_plan_confirm）→ 這裡建卡，
+              // 直接進入建構中狀態。
+              const existing = currentBuildCardIdRef.current;
+              if (existing != null) {
+                setChatHistory((prev) => prev.map((m) =>
+                  m.id === existing && m.buildPlan
+                    ? { ...m, buildPlan: {
+                        ...m.buildPlan, phases: gp,
+                        summary: planPayload.summary || m.buildPlan.summary,
+                      }}
+                    : m,
+                ));
+              } else {
+                const newId = nextId();
+                currentBuildCardIdRef.current = newId;
+                setChatHistory((prev) => [...prev, {
+                  id: newId, role: "build_plan", content: "",
+                  buildPlan: {
+                    sessionId: sessionIdRef.current ?? "",
+                    summary: planPayload.summary || undefined,
+                    phases: gp, status: "building", runtime: {},
+                  },
+                }]);
+              }
               break;
             }
 
@@ -1345,125 +1332,87 @@ export function AIAgentPanel({
             const ffUpdate = ev.ff_update as {
               advanced_by_block?: string; advanced_by_node?: string; phase_ids?: string[];
             } | undefined;
-            if (ffUpdate && Array.isArray(ffUpdate.phase_ids) && currentMacroPlanMsgIdRef.current != null) {
-              const targetId = currentMacroPlanMsgIdRef.current;
+            if (ffUpdate && Array.isArray(ffUpdate.phase_ids) && currentBuildCardIdRef.current != null) {
+              const targetId = currentBuildCardIdRef.current;
               setChatHistory((prev) => prev.map((m) => {
-                if (m.id !== targetId || m.role !== "plan") return m;
-                const rt = { ...(m.phaseRuntime ?? {}) };
+                if (m.id !== targetId || !m.buildPlan) return m;
+                const rt = { ...m.buildPlan.runtime };
                 for (const fid of ffUpdate.phase_ids ?? []) {
-                  rt[String(fid)] = {
-                    ...(rt[String(fid)] ?? {}),
+                  const key = String(fid);
+                  rt[key] = {
+                    ...(rt[key] ?? {}),
                     status: "completed",
-                    autoCompleted: true,
-                    fastForwardedBy: ffUpdate.advanced_by_node,
-                    fastForwardedByBlock: ffUpdate.advanced_by_block,
+                    result: ffUpdate.advanced_by_block
+                      ? `ff: ${ffUpdate.advanced_by_block}${ffUpdate.advanced_by_node ? ` → ${ffUpdate.advanced_by_node}` : ""}`
+                      : rt[key]?.result,
                   };
                 }
-                const items = (m.planItems ?? []).map((it) =>
-                  (ffUpdate.phase_ids ?? []).includes(it.id)
-                    ? { ...it, status: "done" as PlanItem["status"] } : it);
-                return { ...m, phaseRuntime: rt, planItems: items };
+                return { ...m, buildPlan: { ...m.buildPlan, runtime: rt } };
               }));
               break;
             }
 
-            if (planConfirmed && currentMacroPlanMsgIdRef.current != null) {
-              const targetId = currentMacroPlanMsgIdRef.current;
+            if (planConfirmed && currentBuildCardIdRef.current != null) {
+              const targetId = currentBuildCardIdRef.current;
               setChatHistory((prev) => prev.map((m) => {
-                if (m.id !== targetId || m.role !== "plan" || !m.planItems) return m;
-                // Mark the first pending phase as in_progress so the user
-                // immediately sees forward motion.
-                let flipped = false;
-                const items = m.planItems.map((it) => {
-                  if (!flipped && it.status === "pending") {
-                    flipped = true;
-                    return { ...it, status: "in_progress" as PlanItem["status"] };
-                  }
-                  return it;
-                });
-                // v31.1 — mirror into PhaseTimeline runtime
-                const rt = { ...(m.phaseRuntime ?? {}) };
-                const first = (m.goalPhases ?? [])[0];
-                if (first) rt[first.id] = { ...(rt[first.id] ?? {}), status: "in_progress" };
-                return { ...m, planItems: items, phaseRuntime: rt };
+                if (m.role === "intent_confirm") return { ...m, intentCollapsed: true };
+                if (m.id !== targetId || !m.buildPlan) return m;
+                // 建構正式開始 — 第一個 phase 進行中，卡進 building 狀態。
+                const rt = { ...m.buildPlan.runtime };
+                const first = m.buildPlan.phases[0];
+                if (first && !rt[first.id]) rt[first.id] = { status: "in_progress" };
+                return { ...m, buildPlan: { ...m.buildPlan, status: "building", runtime: rt } };
               }));
               break;
             }
 
-            if (phaseUpdate && phaseUpdate.phase_id && currentMacroPlanMsgIdRef.current != null) {
-              const targetId = currentMacroPlanMsgIdRef.current;
+            if (phaseUpdate && phaseUpdate.phase_id && currentBuildCardIdRef.current != null) {
+              const targetId = currentBuildCardIdRef.current;
               const pid = phaseUpdate.phase_id;
               const rawStatus = phaseUpdate.status ?? "";
-              // PlanRenderer only knows 4 states; map richer phase states.
-              let mappedStatus: PlanItem["status"] = "in_progress";
+              let mapped: PhaseRuntimeUI["status"] = "in_progress";
               let note: string | undefined;
               switch (rawStatus) {
                 case "completed":
                 case "handover_take_over":
-                  mappedStatus = "done";
-                  note = phaseUpdate.rationale || undefined;
+                  mapped = "completed";
                   break;
                 case "failed":
                 case "handover_drop":
-                  mappedStatus = "failed";
+                  mapped = "failed";
                   note = phaseUpdate.reason || undefined;
                   break;
                 case "revising":
-                  mappedStatus = "in_progress";
                   note = phaseUpdate.reason ? `反思中：${phaseUpdate.reason}` : "反思中";
                   break;
                 case "revising_retry":
-                  mappedStatus = "in_progress";
                   note = phaseUpdate.alternative ? `換策略：${phaseUpdate.alternative}` : "換策略再試";
                   break;
-                case "running":
-                  mappedStatus = "in_progress";
-                  break;
                 default:
-                  mappedStatus = "in_progress";
+                  mapped = "in_progress";
               }
               setChatHistory((prev) => prev.map((m) => {
-                if (m.id !== targetId || m.role !== "plan" || !m.planItems) return m;
-                let advanceNext = false;
-                const items = m.planItems.map((it) => {
-                  if (it.id !== pid) return it;
-                  if (mappedStatus === "done") advanceNext = true;
-                  return { ...it, status: mappedStatus, note };
-                });
-                if (advanceNext) {
-                  const nextIdx = items.findIndex((it) => it.status === "pending");
-                  if (nextIdx >= 0) {
-                    items[nextIdx] = { ...items[nextIdx], status: "in_progress" };
-                  }
-                }
-                // v31.1 — mirror into PhaseTimeline runtime (builder-style card)
-                const rt = { ...(m.phaseRuntime ?? {}) };
-                const tlStatus =
-                  mappedStatus === "done" ? "completed"
-                  : mappedStatus === "failed" ? "failed" : "in_progress";
-                const evAuto = (ev.phase_update as Record<string, unknown> | undefined)?.auto_completed;
+                if (m.id !== targetId || !m.buildPlan) return m;
+                const rt = { ...m.buildPlan.runtime };
                 rt[pid] = {
                   ...(rt[pid] ?? {}),
-                  status: tlStatus,
-                  rationale: phaseUpdate.rationale || undefined,
-                  failReason: phaseUpdate.reason || undefined,
-                  autoCompleted: Boolean(evAuto),
+                  status: mapped,
+                  note,
+                  result: mapped === "completed"
+                    ? (phaseUpdate.rationale || rt[pid]?.result)
+                    : rt[pid]?.result,
                 };
-                if (advanceNext) {
-                  const nxt = (m.goalPhases ?? []).find((g) => !rt[g.id] || rt[g.id].status === "pending");
+                if (mapped === "completed") {
+                  const nxt = m.buildPlan.phases.find((g) => !rt[g.id] || rt[g.id].status === "pending");
                   if (nxt) rt[nxt.id] = { ...(rt[nxt.id] ?? {}), status: "in_progress" };
                 }
-                return { ...m, planItems: items, phaseRuntime: rt };
+                return { ...m, buildPlan: { ...m.buildPlan, runtime: rt } };
               }));
               break;
             }
 
-            // Fallback — generic chat content (no structured plan payload)
-            if (content.trim()) {
-              setChatHistory((prev) => [...prev, {
-                id: nextId(), role: "agent", content: `💬 ${content}`,
-              }]);
-            }
+            // 敘事泡不重述卡片操作（§1.4）— 建構中的 free-text 旁白已移除，
+            // 內部逐步運作歸 Console 分頁。
             break;
           }
 
@@ -1515,16 +1464,26 @@ export function AIAgentPanel({
               sessionIdRef.current
               || String((ev.session_id as string) || "");
             if (phases.length > 0) {
+              const gp: GoalPhase[] = phases.map((p) => ({
+                id: p.id,
+                goal: p.goal,
+                expected: (["raw_data", "transform", "verdict", "chart", "table", "scalar", "alarm"]
+                  .includes(String(p.expected)) ? String(p.expected) : "transform") as GoalPhase["expected"],
+              }));
+              const newId = nextId();
+              currentBuildCardIdRef.current = newId;
               setChatHistory((prev) => [...prev, {
-                id: nextId(),
-                role: "plan_confirm",
+                id: newId,
+                role: "build_plan",
                 content: "",
-                planConfirm: {
-                  session_id: chatSid,
-                  build_session_id: String((ev.build_session_id as string) || ""),
-                  plan_summary: (ev.plan_summary as string) || undefined,
-                  phases,
+                buildPlan: {
+                  sessionId: chatSid,
+                  buildSessionId: String((ev.build_session_id as string) || ""),
+                  summary: (ev.plan_summary as string) || undefined,
+                  phases: gp,
                   removals: (ev.removals as PlanRemoval[]) || [],
+                  status: "draft",
+                  runtime: {},
                 },
               }]);
             }
@@ -1569,54 +1528,70 @@ export function AIAgentPanel({
               op: opName,
               hint: ev.hint as string | undefined,
             });
-            const errEntry: GlassOpEntry = {
-              id: nextId(),
-              op: opName ?? "error",
-              label: opName ? `${opName} 失敗` : "錯誤",
-              detail: msg,
-              ts: Date.now(),
-              isError: true,
-            };
-            // v1.7: append to the inline ops chat-message (same pattern as
-            // pb_glass_op), so build errors stay grouped with their build.
-            const opsMsgId = currentOpsMsgIdRef.current;
-            if (opsMsgId == null) {
-              const newId = nextId();
-              currentOpsMsgIdRef.current = newId;
-              setChatHistory((prev) => [...prev, {
-                id: newId, role: "ops", content: "", glassOps: [errEntry],
-              }]);
+            // 2026-07-05 — 錯誤進 BUILD PLAN 卡（琥珀 ▲ 原因行），不再貼
+            // ops entry / 敘事泡。沒有卡（非 build 流程）才退回文字訊息。
+            const cardId = currentBuildCardIdRef.current;
+            if (cardId != null) {
+              setChatHistory((prev) => prev.map((m) =>
+                m.id === cardId && m.buildPlan
+                  ? { ...m, buildPlan: {
+                      ...m.buildPlan, status: "error" as const,
+                      errorReason: opName ? `${opName}：${msg}` : msg,
+                    }}
+                  : m,
+              ));
             } else {
-              setChatHistory((prev) => prev.map((m) => {
-                if (m.id !== opsMsgId || m.role !== "ops") return m;
-                return { ...m, glassOps: [...(m.glassOps ?? []), errEntry] };
-              }));
+              setChatHistory((prev) => [...prev, {
+                id: nextId(), role: "agent", content: `發生錯誤：${msg}`,
+              }]);
             }
-            setChatHistory((prev) => [...prev, {
-              id: nextId(), role: "agent", content: `⚠️ ${msg}`,
-            }]);
             break;
           }
           case "pb_glass_done": {
             const summary = ev.summary as string | undefined;
+            const doneStatus = (ev.status as string) ?? "finished";
             // v1.4 — stash for the edit-link card later.
             if (ev.pipeline_json) lastBuiltPipelineRef.current = ev.pipeline_json;
             onGlassDone?.({
-              status: (ev.status as string) ?? "finished",
+              status: doneStatus,
               summary,
               pipeline_json: ev.pipeline_json,
             });
-            // 記憶連動：完成卡帶上這次 build 學到的 W 代號（design handoff
-            // 2026-07-04）— memoryWritesRef 由 agent_console memory_write
-            // 事件累積，pb_glass_start 時重置。
-            const learned = memoryWritesRef.current;
-            const learnedSuffix = learned.length
-              ? `\n\n這次學到 ${learned.length} 筆（${learned.join(" · ")}）`
-              : "";
-            setChatHistory((prev) => [...prev, {
-              id: nextId(), role: "agent",
-              content: `✓ **${summary || "完成"}**${learnedSuffix}`,
-            }]);
+            // ③ 卡片原地收斂：BUILD PLAN 卡 → 完成 / 中止 / 已取消。
+            const cardId = currentBuildCardIdRef.current;
+            const cardStatus: BuildPlanState["status"] =
+              doneStatus === "refused" ? "cancelled"
+              : doneStatus === "failed" ? "error" : "done";
+            if (cardId != null) {
+              setChatHistory((prev) => prev.map((m) =>
+                m.id === cardId && m.buildPlan
+                  ? { ...m, buildPlan: {
+                      ...m.buildPlan,
+                      status: m.buildPlan.status === "error" ? "error" : cardStatus,
+                      ...(cardStatus === "error" && summary ? { errorReason: summary } : {}),
+                    }}
+                  : m,
+              ));
+            }
+            // 完成卡（§3.5）— 只在真的完成時收尾；取消 / 失敗由 plan 卡
+            // chip 表達，不再貼卡。
+            if (cardStatus === "done") {
+              const pj = ev.pipeline_json as { nodes?: unknown[]; edges?: unknown[] } | undefined;
+              const counts = pj
+                ? `${(pj.nodes ?? []).length} nodes / ${(pj.edges ?? []).length} edges — `
+                : "";
+              const learned = memoryWritesRef.current;
+              const doneId = nextId();
+              currentBuildDoneIdRef.current = doneId;
+              setChatHistory((prev) => [...prev, {
+                id: doneId, role: "build_done", content: "",
+                buildDone: {
+                  text: `建構完成 — ${counts}${summary || "pipeline 已在畫布上"}`,
+                  learned: [...learned],
+                  rating: null,
+                },
+              }]);
+            }
             break;
           }
 
@@ -1747,10 +1722,23 @@ export function AIAgentPanel({
             addLog(makeLog("🔍", "Self-Critique 驗證中…", "info"));
             break;
 
-          case "reflection_pass":
-            setReflection({ status: "pass", amendment: "" });
+          case "reflection_pass": {
+            // 漂浮「數值已驗證」chip 移除（§2）— build 流程寫進完成卡的
+            // ▣ 結果行；非 build 對話（Q&A）維持原 chip。
+            const doneId = currentBuildDoneIdRef.current;
+            if (doneId != null) {
+              setChatHistory((prev) => prev.map((m) =>
+                m.id === doneId && m.buildDone
+                  ? { ...m, buildDone: { ...m.buildDone, verified: "數值已驗證（Self-Critique 通過）" } }
+                  : m,
+              ));
+              setReflection({ status: null, amendment: "" });
+            } else {
+              setReflection({ status: "pass", amendment: "" });
+            }
             addLog(makeLog("✅", "Self-Critique 通過 — 所有數值來源已確認", "info"));
             break;
+          }
 
           case "reflection_amendment": {
             const amendment = (ev.amendment as string) ?? "";
@@ -1758,7 +1746,7 @@ export function AIAgentPanel({
             if (amendment) {
               setChatHistory((prev) => [
                 ...prev,
-                { id: nextId(), role: "agent", content: `🔍 **[自動修正]** ${amendment}` },
+                { id: nextId(), role: "agent", content: `**[自動修正]** ${amendment}` },
               ]);
             }
             addLog(makeLog("⚠️", `Self-Critique 修正: ${amendment.slice(0, 100)}`, "info"));
@@ -1805,7 +1793,7 @@ export function AIAgentPanel({
             addLog(makeLog("❌", errMsg, "error"));
             setChatHistory((prev) => [...prev, {
               id: nextId(), role: "agent",
-              content: `⚠️ ${errMsg.includes("authentication") || errMsg.includes("api_key") || errMsg.includes("auth_token")
+              content: `${errMsg.includes("authentication") || errMsg.includes("api_key") || errMsg.includes("auth_token")
                 ? "Agent 無法連線 LLM — 請確認 ANTHROPIC_API_KEY 已設定並重啟 Agent。"
                 : `Agent 錯誤：${errMsg}`}`,
             }]);
@@ -1942,21 +1930,8 @@ export function AIAgentPanel({
             </span>
           )}
         </div>
-        {(tokenIn > 0 || tokenOut > 0 || cacheWrite > 0 || cacheRead > 0) && (
-          <div
-            title={`Input: ${tokenIn.toLocaleString()}\nOutput: ${tokenOut.toLocaleString()}\nCache write (×$3.75/Mtok): ${cacheWrite.toLocaleString()}\nCache read  (×$0.30/Mtok): ${cacheRead.toLocaleString()}\nApprox cost: $${(
-              (tokenIn * 3 + tokenOut * 15 + cacheWrite * 3.75 + cacheRead * 0.3) / 1_000_000
-            ).toFixed(4)}`}
-            style={{ fontSize: 10, color: "#a0aec0", fontFamily: "monospace", marginBottom: 8, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-          >
-            in {tokenIn.toLocaleString()} · out {tokenOut.toLocaleString()}
-            {cacheRead > 0 && <> · cache↓{(cacheRead / 1000).toFixed(1)}k</>}
-            {cacheWrite > 0 && <> · cache↑{(cacheWrite / 1000).toFixed(1)}k</>}
-            {(cacheRead + cacheWrite) > 0 && (
-              <> · ~${((tokenIn * 3 + tokenOut * 15 + cacheWrite * 3.75 + cacheRead * 0.3) / 1_000_000).toFixed(3)}</>
-            )}
-          </div>
-        )}
+        {/* 2026-07-05 對話重整 §2 — header token 統計移除；成本歸 Console
+            分頁的 per-agent 成本 footer。 */}
 
         {/* SPEC_glassbox_continuation §B — live Glass Box turn counter shown
             above the plan card. Goes orange at 70%, red at 90%. Hidden when
@@ -1985,23 +1960,8 @@ export function AIAgentPanel({
           </div>
         )}
 
-        {/* v1.5 — Stage strip first, then Plan Panel sits directly under so the
-            checklist visually extends the progress strip. */}
-        {stages.length > 0 && (
-          <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
-            {stages.map((s) => (
-              <div key={s.stage} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11 }}>
-                <span style={{
-                  width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
-                  background: s.status === "complete" ? "#38a169" : s.status === "error" ? "#e53e3e" : "#d69e2e",
-                }} />
-                <span style={{ color: s.status === "complete" ? "#a0aec0" : "#4a5568" }}>
-                  {s.label || `S${s.stage}`}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* 2026-07-05 對話重整 §2 — header stage 圓點列移除；進度歸
+            BUILD PLAN 卡（chip + phase glyph）與 Console 分頁。 */}
 
         {/* v1.6: Plan Panel moved into the chat tab body so it scrolls with
             the conversation instead of being pinned in the rail header. */}
@@ -2056,7 +2016,7 @@ export function AIAgentPanel({
       {/* HITL */}
       {hitl && (
         <div style={{ margin: "8px 12px", background: "#fffaf0", border: "1px solid #fbd38d", borderRadius: 8, padding: "10px 12px", flexShrink: 0 }}>
-          <div style={{ fontSize: 12, color: "#c05621", fontWeight: 600, marginBottom: 4 }}>⚠️ 需要確認</div>
+          <div style={{ fontSize: 12, color: "#c05621", fontWeight: 600, marginBottom: 4 }}>需要確認</div>
           <div style={{ fontSize: 12, color: "#744210", marginBottom: 8 }}>工具：<code>{hitl.tool}</code></div>
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={() => resolveHitl(hitl.approval_token, true)} style={{ padding: "5px 12px", background: "#c6f6d5", color: "#276749", border: "none", borderRadius: 5, fontSize: 12, cursor: "pointer", fontWeight: 600 }}>批准</button>
@@ -2084,9 +2044,32 @@ export function AIAgentPanel({
                 alignItems: msg.role === "user" ? "flex-end" : "flex-start",
               }}
             >
-              {msg.role === "plan" && msg.goalPhases ? (
+              {msg.role === "build_plan" && msg.buildPlan ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
-                  <PhaseTimeline phases={msg.goalPhases} runtime={msg.phaseRuntime ?? {}} onConsoleLink={() => setActiveTab("console")} />
+                  <BuildPlanCard
+                    state={msg.buildPlan}
+                    onConfirm={(phases, removals) => void decidePlan(msg.id, true, phases, removals)}
+                    onCancel={() => void decidePlan(msg.id, false, [])}
+                    onConsoleLink={() => setActiveTab("console")}
+                  />
+                </div>
+              ) : msg.role === "build_done" && msg.buildDone ? (
+                <div style={{ width: "100%", maxWidth: "100%" }}>
+                  <BuildDoneCard
+                    state={msg.buildDone}
+                    onRate={(rating) => {
+                      setChatHistory((prev) => prev.map((m) =>
+                        m.id === msg.id && m.buildDone
+                          ? { ...m, buildDone: { ...m.buildDone, rating } }
+                          : m,
+                      ));
+                      void submitFeedback({
+                        ...msg,
+                        content: msg.buildDone?.text ?? "build done",
+                        messageIdx: msg.messageIdx ?? synthesisIdxRef.current,
+                      }, rating);
+                    }}
+                  />
                 </div>
               ) : msg.role === "plan" && msg.planItems ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
@@ -2184,40 +2167,14 @@ export function AIAgentPanel({
                     <ChartRenderer spec={msg.chartSpec as Parameters<typeof ChartRenderer>[0]["spec"]} />
                   </div>
                 </div>
-              ) : msg.role === "plan_confirm" && msg.planConfirm ? (
-                <div style={{ width: "100%", maxWidth: "100%" }}>
-                  {msg.planConfirm.resolved === undefined ? (
-                    <GoalPlanCard
-                      editable
-                      planSummary={msg.planConfirm.plan_summary ?? ""}
-                      phases={msg.planConfirm.phases.map((p) => ({
-                        id: p.id,
-                        goal: p.goal,
-                        expected: (["raw_data", "transform", "verdict", "chart", "table", "scalar", "alarm"]
-                          .includes(String(p.expected)) ? String(p.expected) : "transform") as GoalPhase["expected"],
-                      }))}
-                      removals={msg.planConfirm.removals}
-                      onCancel={() => void decidePlan(msg.id, false, [])}
-                      onConfirm={(phases, removals) => void decidePlan(msg.id, true, phases, removals)}
-                    />
-                  ) : (
-                    <div style={{
-                      fontSize: 11, color: "#64748b", padding: "6px 10px",
-                      background: "#f1f5f9", border: "1px solid #cbd5e1",
-                      borderRadius: 6, fontStyle: "italic",
-                    }}>
-                      plan {msg.planConfirm.resolved === "confirmed" ? "✓ 已確認並建構" : msg.planConfirm.resolved === "refused" ? "✗ 已取消" : "⚠ 出錯"}
-                    </div>
-                  )}
-                </div>
               ) : msg.role === "intent_confirm" && msg.intentConfirm ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
-                  {msg.intentConfirm.resolved === undefined ? (
-                    <BulletConfirmCard
-                      chatSessionId={msg.intentConfirm.session_id}
+                  <IntentCard
                       bullets={msg.intentConfirm.bullets}
                       tooVagueReason={msg.intentConfirm.too_vague_reason}
-                      onConfirm={async (confirmations) => {
+                      resolved={msg.intentConfirm.resolved}
+                      collapsed={msg.intentCollapsed}
+                      onSubmit={async (confirmations) => {
                         // POST to chat resume; reuse the SAME stream handler
                         // as /chat so pb_glass_* events still apply ops to
                         // canvas + update chat history.
@@ -2250,18 +2207,8 @@ export function AIAgentPanel({
                             ? { ...m, intentConfirm: { ...m.intentConfirm, resolved: finalStatus } }
                             : m,
                         ));
-                        return finalStatus;
                       }}
                     />
-                  ) : (
-                    <div style={{
-                      fontSize: 11, color: "#64748b", padding: "6px 10px",
-                      background: "#f1f5f9", border: "1px solid #cbd5e1",
-                      borderRadius: 6, fontStyle: "italic",
-                    }}>
-                      intent {msg.intentConfirm.resolved === "confirmed" ? "✓ 已確認" : msg.intentConfirm.resolved === "refused" ? "✗ 已拒絕" : "⚠ 出錯"}
-                    </div>
-                  )}
                 </div>
               ) : msg.role === "judge_clarify" && msg.judgeClarify ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
@@ -2292,7 +2239,7 @@ export function AIAgentPanel({
                           // crashing on the error SSE shape.
                           setChatHistory((prev) => [...prev, {
                             id: nextId(), role: "agent",
-                            content: `⚠ 判決送出失敗 (HTTP ${res.status}) — 可能已被其他卡片消費或 session 過期`,
+                            content: `判決送出失敗 (HTTP ${res.status}) — 可能已被其他卡片消費或 session 過期`,
                           }]);
                           try { await res.body?.cancel(); } catch { /* ignore */ }
                           return;
@@ -2315,15 +2262,11 @@ export function AIAgentPanel({
                         console.error("judge_clarify resume failed", e);
                         setChatHistory((prev) => [...prev, {
                           id: nextId(), role: "agent",
-                          content: `⚠ 判決執行錯誤：${e instanceof Error ? e.message : String(e)}`,
+                          content: `判決執行錯誤：${e instanceof Error ? e.message : String(e)}`,
                         }]);
                       }
                     }}
                   />
-                </div>
-              ) : msg.role === "ops" && msg.glassOps ? (
-                <div style={{ width: "100%", maxWidth: "100%" }}>
-                  <OpsConsole ops={msg.glassOps} />
                 </div>
               ) : msg.role === "pb_proposal" && msg.pbProposal ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
@@ -2357,30 +2300,32 @@ export function AIAgentPanel({
                   background: "#f7f8fc",
                   fontSize: 11, color: "#718096",
                 }}>
-                  <span>📊</span>
-                  <span style={{ fontFamily: "monospace", color: "#2b6cb0" }}>{msg.mcpResult.mcp_name}</span>
+                                    <span style={{ fontFamily: "monospace", color: "#2b6cb0" }}>{msg.mcpResult.mcp_name}</span>
                   <span>· 結果已載入分析面板</span>
                 </div>
               ) : (
                 <>
-                  <div style={{
-                    maxWidth: "90%",
-                    padding: "9px 12px",
-                    borderRadius: msg.role === "user" ? "12px 12px 2px 12px" : "12px 12px 12px 2px",
-                    fontSize: 13,
-                    lineHeight: 1.6,
-                    background: msg.role === "user" ? "#2b6cb0" : "#f7f8fc",
-                    color: msg.role === "user" ? "#fff" : "#1a202c",
-                    border: msg.role === "agent" ? "1px solid #e2e8f0" : "none",
-                  }}>
-                    {msg.role === "user" ? (
-                      <span style={{ whiteSpace: "pre-wrap" }}>{msg.content}</span>
-                    ) : (
+                  {msg.role === "user" ? (
+                    /* §3.1 — 淡色泡 + context tag chip；內部 tag 不顯示 */
+                    <div style={userBubbleStyle}>
+                      {renderUserContent(msg.content)}
+                    </div>
+                  ) : (
+                    <div style={{
+                      maxWidth: "90%",
+                      padding: "9px 12px",
+                      borderRadius: "12px 12px 12px 2px",
+                      fontSize: 13,
+                      lineHeight: 1.6,
+                      background: "#f7f8fc",
+                      color: "#1a202c",
+                      border: msg.role === "agent" ? "1px solid #e2e8f0" : "none",
+                    }}>
                       <div style={MD_STYLES} className="md-agent">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
                   {msg.role === "agent" && msg.contract && (
                     <div style={{ maxWidth: "90%", width: "100%" }}>
                       <ContractCard contract={msg.contract} onTrigger={handleSuggestedAction} />
@@ -2421,9 +2366,9 @@ export function AIAgentPanel({
                   ? { background: "#fffff0", color: "#744210", borderColor: "#f6e05e" }
                   : { background: "#ebf4ff", color: "#2b6cb0", borderColor: "#bee3f8" }),
               }}>
-                {reflection.status === "running" && "🔍 驗證數值來源…"}
+                {reflection.status === "running" && "驗證數值來源…"}
                 {reflection.status === "pass"    && "✓ 數值已驗證"}
-                {reflection.status === "amendment" && "⚠ 已自動修正"}
+                {reflection.status === "amendment" && "已自動修正"}
               </span>
             </div>
           )}
@@ -2465,8 +2410,7 @@ export function AIAgentPanel({
               fontWeight: 500,
             }}
           >
-            <span style={{ fontSize: 10 }}>📌</span>
-            <span>Focused on {focusedNodeLabel ?? focusedNodeId}</span>
+                        <span>Focused on {focusedNodeLabel ?? focusedNodeId}</span>
             <button
               onClick={() => onClearFocus?.()}
               style={{
@@ -2608,7 +2552,6 @@ function ClarifyCard({
       color: "#2d3748",
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600, marginBottom: 8 }}>
-        <span>🤔</span>
         <span>{data.question}</span>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

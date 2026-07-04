@@ -315,9 +315,10 @@ export default function ChartDetailPage() {
           </Section>
 
           {/* CTA at bottom — natural conclusion after user has read 用途/
-              prompt/style. Goes to /new with ?block=... prefill. */}
+              prompt/style. Authoring starts from the Skill Library since the
+              /new wizard was sunset (2026-07-05). */}
           <Link
-            href={`/admin/pipeline-builder/new?from=catalog&block=${entry.blockId}`}
+            href="/skills"
             style={{
               display: "block",
               padding: "12px 14px",
@@ -331,7 +332,7 @@ export default function ChartDetailPage() {
               marginTop: 8,
             }}
           >
-            📋 用此 block 建 pipeline →
+            到 Skill Library 用此 block 建 pipeline →
           </Link>
         </div>
       </aside>

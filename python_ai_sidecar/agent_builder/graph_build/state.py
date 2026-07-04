@@ -170,6 +170,10 @@ class BuildGraphState(TypedDict, total=False):
     # Stuck detector: last 2 actions per phase (for deterministic loop check).
     # Shape: {phase_id: [{tool, args_hash}]}
     v30_phase_recent_actions: dict[str, list[dict]]
+    # v30.24: consecutive reasoning-only (no tool call) LLM responses per
+    # phase. Nudged each time; escalates to phase_revise at the cap instead
+    # of burning the whole round budget. Shape: {phase_id: int}
+    v30_phase_no_action: dict[str, int]
     # v30 opt-in flag (set at request time). When True, _route_entry sends
     # the build through goal_plan_node + agentic_phase_loop instead of v27
     # macro_plan + compile_chunk path.
@@ -478,6 +482,7 @@ def initial_state(
         v30_handover=None,
         v30_phase_edit_history={},
         v30_phase_recent_actions={},
+        v30_phase_no_action={},
         v30_phase_messages={},
         v30_fast_forward_log=[],
         debug_step_mode=debug_step_mode,
