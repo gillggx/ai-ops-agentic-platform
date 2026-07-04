@@ -452,9 +452,20 @@ async def _execute_build_pipeline_live(
             ),
         }
 
-    # ── Normal build path: stream graph with skip_confirm=True ────────
+    # ── Normal build path ──────────────────────────────────────────────
+    import os as _os
     import uuid as _uuid
     sid = str(_uuid.uuid4())
+
+    # v31 (2026-07-04): chat now pauses at goal_plan_confirm_gate like the
+    # builder UI — the user sees + can edit the P1..PN plan card before any
+    # canvas mutation (and plan edits feed W1 planner memories, which the
+    # old skip_confirm=True path silently lost). Env kill-switch for quick
+    # rollback (env + restart; header flags are a no-op on SSE endpoints).
+    # Headless callers (skill_translate, external MCP, auto-patrol) do NOT
+    # go through this function and keep their own skip_confirm=True.
+    _plan_confirm_on = _os.environ.get(
+        "CHAT_PLAN_CONFIRM_ENABLED", "1").strip().lower() not in ("0", "false", "no")
 
     if event_emit is not None:
         try:
@@ -473,14 +484,34 @@ async def _execute_build_pipeline_live(
     # build and continues the chat agent loop with the build result.
     intent_pause: Dict[str, Any] | None = None
     judge_pause: Dict[str, Any] | None = None
+    plan_pause: Dict[str, Any] | None = None
     try:
         async for evt in stream_graph_build(
             instruction=prompt,
             base_pipeline=base_pipeline_dict,
             session_id=sid,
-            skip_confirm=True,  # chat conversation IS the confirmation
+            skip_confirm=not _plan_confirm_on,  # v31: pause at plan card (builder-style)
             skill_step_mode=skill_step_mode,
         ):
+            # v31: intercept goal_plan_confirm_required pause — emit the
+            # plan-confirm card (chat session id, same convention as the
+            # intent card) and stop draining; resume via /chat/intent-respond
+            # with a plan_decision body.
+            if evt.type == "goal_plan_confirm_required":
+                plan_pause = evt.data or {}
+                _chat_sid = str(chat_session_id) if chat_session_id else ""
+                if event_emit is not None:
+                    try:
+                        event_emit({
+                            "type": "pb_plan_confirm",
+                            "session_id": _chat_sid,
+                            "build_session_id": plan_pause.get("session_id") or sid,
+                            "plan_summary": plan_pause.get("plan_summary") or "",
+                            "phases": plan_pause.get("phases") or [],
+                        })
+                    except Exception:  # noqa: BLE001
+                        pass
+                break  # resume happens via /chat/intent-respond (plan_decision)
             # v30.17j: intercept judge_clarify_pending pause (deficit case).
             # Emit pb_judge_clarify with CHAT session id (pending_judge is
             # keyed by that). phase_verifier's sse_events emit is silenced
@@ -582,6 +613,39 @@ async def _execute_build_pipeline_live(
                 "replan / cancel via the pb_judge_clarify card. Generate a SHORT "
                 "reply telling the user the data source only has X rows and ask "
                 "them to pick an option, then stop."
+            ),
+        }
+
+    # v31: goal_plan confirm pause — register pending (kind=plan_confirm) +
+    # return a plan_confirm_pending tool result so the chat LLM tells the
+    # user to review the plan card and stops.
+    if plan_pause is not None:
+        try:
+            from python_ai_sidecar.agent_orchestrator_v2 import pending_clarify as _pc
+            _pc.register(_pc.PendingClarify(
+                chat_session_id=str(chat_session_id) if chat_session_id else "",
+                build_session_id=str(plan_pause.get("session_id") or sid),
+                bullets=[],
+                instruction=prompt,
+                base_pipeline=base_pipeline_dict,
+                skill_step_mode=skill_step_mode,
+                user_id=chat_user_id,
+                kind="plan_confirm",
+                phases=plan_pause.get("phases") or [],
+                plan_summary=str(plan_pause.get("plan_summary") or ""),
+            ))
+        except Exception as ex:  # noqa: BLE001
+            logger.warning("pending plan_confirm register failed: %s", ex)
+        return {
+            "status": "plan_confirm_pending",
+            "build_session_id": plan_pause.get("session_id") or sid,
+            "n_phases": len(plan_pause.get("phases") or []),
+            "note": (
+                "Build paused at the plan-confirm gate — the user sees the "
+                "P1..PN plan card and can edit each phase before building "
+                "(same gate as Pipeline Builder). Generate a SHORT reply "
+                "telling the user to review/edit/confirm the plan card, "
+                "then stop. Do NOT call build_pipeline_live again."
             ),
         }
 

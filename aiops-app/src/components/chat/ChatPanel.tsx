@@ -12,6 +12,7 @@ import {
   type DesignIntentData,
 } from "@/components/copilot/DesignIntentCard";
 import { PlanCard, type PlanData, type PhaseStatus, type PhaseEntry } from "@/components/chat/PlanCard";
+import { PlanConfirmCard, type PlanPhase } from "@/components/chat/PlanConfirmCard";
 import {
   JudgeClarifyCard,
   type JudgeAction,
@@ -67,6 +68,14 @@ interface ChatMessage {
         too_vague_reason?: string;
         resolved?: "confirmed" | "refused" | "error";
         resolved_summary?: string;
+      }
+    | {
+        type: "plan_confirm";
+        chat_session_id: string;
+        build_session_id: string;
+        plan_summary?: string;
+        phases: PlanPhase[];
+        resolved?: "confirmed" | "refused" | "error";
       };
 }
 
@@ -168,6 +177,420 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
     }
   }, [addLog]);
 
+  // v31 (2026-07-04): the SSE event handler, extracted from sendMessage's
+  // inline closure so the plan-confirm resume stream (PlanConfirmCard →
+  // /chat/intent-respond) renders live build progress through the SAME
+  // pipeline — plan card status flips, ops, charts — instead of a dead
+  // drain that only looks for the final done.
+  const handleAgentEvent = useCallback((ev: Record<string, unknown>) => {
+      const type = ev.type as string;
+
+      switch (type) {
+        case "stage_update": {
+          const stage  = ev.stage as number;
+          const status = ev.status as "running" | "complete" | "error";
+          const label  = (ev.label as string) ?? `Stage ${stage}`;
+          setStages((prev) => {
+            const idx = prev.findIndex((s) => s.stage === stage);
+            if (idx >= 0) {
+              const u = [...prev]; u[idx] = { stage, label, status }; return u;
+            }
+            return [...prev, { stage, label, status }];
+          });
+          break;
+        }
+
+        case "context_load": {
+          const rag   = ev.rag_count    ?? 0;
+          const turns = ev.history_turns ?? 0;
+          const pref  = ev.pref_summary && ev.pref_summary !== "(無)" ? ev.pref_summary : "未設定";
+          addLog(makeLog("📦", `CONTEXT | RAG: ${rag} 條 | 歷史: ${turns} 輪 | 偏好: ${pref}`, "info"));
+          break;
+        }
+
+        case "thinking":
+          addLog(makeLog("💭", `THINKING | ${((ev.text as string) ?? "").slice(0, 200)}`, "thinking"));
+          break;
+
+        case "llm_usage": {
+          const inTok  = (ev.input_tokens  as number) ?? 0;
+          const outTok = (ev.output_tokens as number) ?? 0;
+          setTokenIn((p)  => p + inTok);
+          setTokenOut((p) => p + outTok);
+          addLog(makeLog("🔢", `LLM #${ev.iteration ?? "?"} | in=${inTok} out=${outTok}`, "token"));
+          break;
+        }
+
+        case "tool_start": {
+          const inputStr = JSON.stringify(ev.input ?? {});
+          const toolName = (ev.tool ?? "") as string;
+          const [icon, prefix] = toolName === "save_memory"   ? ["💾", "SAVE MEMORY"]
+                               : toolName === "search_memory"  ? ["🔍", "GET MEMORY"]
+                               : toolName === "delete_memory"  ? ["🗑️", "DELETE MEMORY"]
+                               : ["🔧", "TOOL"];
+          addLog(makeLog(icon,
+            `${prefix} #${ev.iteration ?? "?"} → ${toolName}(${inputStr.slice(0, 80)}${inputStr.length > 80 ? "…" : ""})`,
+            "tool"
+          ));
+          break;
+        }
+
+        case "tool_done": {
+          const toolName = (ev.tool ?? "") as string;
+          const [icon, prefix] = toolName === "save_memory"   ? ["💾", "SAVE MEMORY ✓"]
+                               : toolName === "search_memory"  ? ["🔍", "GET MEMORY ✓"]
+                               : toolName === "delete_memory"  ? ["🗑️", "DELETE MEMORY ✓"]
+                               : ["✅", "DONE"];
+          addLog(makeLog(icon, `${prefix} → ${toolName} | ${(ev.result_summary ?? "") as string}`, "tool"));
+
+          // Phase 9 — propose_personal_rule emits a rule_proposal render
+          // card; surface it as an inline confirmation card in chat.
+          const renderCard = ev.render_card as { type?: string; rule_draft?: unknown; preview?: unknown } | undefined;
+          if (renderCard?.type === "rule_proposal" && renderCard.rule_draft) {
+            setChatHistory((prev) => [...prev, {
+              id: nextId(),
+              role: "agent",
+              content: "",
+              card: {
+                type: "rule_proposal",
+                rule_draft: renderCard.rule_draft as Parameters<typeof RuleProposalCard>[0]["ruleDraft"],
+                preview: (renderCard.preview ?? {}) as Parameters<typeof RuleProposalCard>[0]["preview"],
+              },
+            }]);
+          }
+          break;
+        }
+
+        case "memory_write": {
+          const content = (ev.fix_rule ?? ev.content ?? "") as string;
+          const src = (ev.memory_type ?? ev.source ?? "") as string;
+          const [icon, label] = src === "trap"             ? ["⚠️", "Trap Memory"]
+                              : src === "diagnosis"        ? ["🧠", "記憶寫入 · 診斷"]
+                              : src === "preference"       ? ["⭐", "記憶寫入 · 偏好"]
+                              : src === "hitl_preference"  ? ["⭐", "記憶寫入 · HITL偏好"]
+                              : src === "api_pattern"      ? ["📚", "記憶寫入 · API模式"]
+                              :                             ["💾", "記憶寫入"];
+          addLog(makeLog(icon, `[${label}] ${content.slice(0, 120)}`, "memory"));
+          break;
+        }
+
+        case "reflection_running":
+          addLog(makeLog("🔍", "Self-Critique 驗證數值來源中…", "info"));
+          break;
+
+        case "reflection_pass":
+          addLog(makeLog("✅", "Self-Critique 通過 — 所有數值來源已確認", "info"));
+          break;
+
+        case "reflection_amendment": {
+          const count = (ev.issue_count as number) ?? (ev.issues as unknown[])?.length ?? 0;
+          const amended = (ev.amended_text as string) ?? "";
+          addLog(makeLog("🚨", `Self-Critique 發現 ${count} 處幻覺 — 已修訂回覆`, "error"));
+          if (amended) {
+            setChatHistory((prev) => {
+              if (prev.length === 0) return prev;
+              const last = prev[prev.length - 1];
+              if (last.role !== "agent") return prev;
+              return [...prev.slice(0, -1), { ...last, content: amended }];
+            });
+          }
+          break;
+        }
+
+        case "approval_required": {
+          const req: HitlRequest = {
+            approval_token: ev.approval_token as string,
+            tool:           ev.tool as string,
+            input:          ev.input as Record<string, unknown> | undefined,
+          };
+          addLog(makeLog("⚠️", `HITL | 等待批准: ${req.tool}（token: ${req.approval_token}）`, "hitl"));
+          setHitl(req);
+          break;
+        }
+
+        case "synthesis": {
+          const text = (ev.text as string) ?? "";
+          // Extract the plain text part (strip <contract> block) for chat display
+          const displayText = text.replace(/<contract>[\s\S]*?<\/contract>/g, "").trim();
+          if (isValidContract(ev.contract)) {
+            onContract(ev.contract as AIOpsReportContract);
+            setChatHistory((prev) => [...prev, {
+              id: nextId(), role: "agent",
+              content: displayText || (ev.contract as { summary?: string }).summary || "",
+            }]);
+          } else if (displayText) {
+            setChatHistory((prev) => [...prev, { id: nextId(), role: "agent", content: displayText }]);
+          }
+          addLog(makeLog("💬", `SYNTHESIS 完成 (${text.length} chars)`, "info"));
+          break;
+        }
+
+        case "done":
+          sessionIdRef.current = ev.session_id as string;
+          break;
+
+        case "error":
+          addLog(makeLog("❌", (ev.message as string) ?? "Agent 發生錯誤", "error"));
+          break;
+
+        // --- Agent planning ---
+        case "plan": {
+          const planText = (ev.text as string) ?? "";
+          addLog(makeLog("🧭",
+            `PLAN #${ev.iteration ?? "?"}\n${planText}`,
+            "info"));
+          break;
+        }
+
+        // --- Pipeline Builder Glass Box mode ---
+        // When the agent decides to build a pipeline (e.g. asking for a
+        // trend chart), it streams pb_glass_* events instead of a final
+        // synthesis. Surface them so the chat panel shows activity + a
+        // final answer instead of looking dead.
+        case "pb_glass_start":
+          addLog(makeLog("🧱",
+            `PIPELINE BUILDER | 開始建構：${(ev.goal as string) ?? ""}`,
+            "info"));
+          break;
+
+        case "pb_glass_chat": {
+          const content = (ev.content as string) ?? "";
+
+          // v30.17i — goal_plan_proposed carries structured `plan` data
+          // alongside text. Render as a PlanCard once, then later
+          // phase_completed / phase_revise_started events arrive (also
+          // pb_glass_chat) with `phase_update` payload that mutates the
+          // same card's phase status. AIAgentPanel ignores these extra
+          // fields and renders the text bubble — no regression.
+          const planPayload = ev.plan as PlanData | undefined;
+          const planConfirmed = ev.plan_confirmed as { auto: boolean; n_phases: number } | undefined;
+          const phaseUpdate = ev.phase_update as {
+            phase_id: string;
+            status: PhaseStatus;
+            rationale?: string;
+            reason?: string;
+          } | undefined;
+
+          if (planPayload && Array.isArray(planPayload.phases)) {
+            const phases: PhaseEntry[] = planPayload.phases.map((p) => ({
+              id: p.id,
+              goal: p.goal ?? "",
+              expected: p.expected ?? "?",
+              status: "pending",
+              auto_injected: !!p.auto_injected,
+            }));
+            const planData: PlanData = {
+              summary: planPayload.summary ?? "",
+              phases,
+              confirmed: false,
+            };
+            const newId = nextId();
+            activePlanMsgIdRef.current = newId;
+            setChatHistory((prev) => [...prev, {
+              id: newId, role: "plan", content: "",
+              plan: planData,
+            }]);
+            break;
+          }
+
+          if (planConfirmed && activePlanMsgIdRef.current != null) {
+            const targetId = activePlanMsgIdRef.current;
+            setChatHistory((prev) => prev.map((m) => {
+              if (m.id !== targetId || !m.plan) return m;
+              // Flip confirmed flag + mark first phase as running
+              const phases = m.plan.phases.map((p, idx) => ({
+                ...p,
+                status: idx === 0 ? ("running" as PhaseStatus) : p.status,
+              }));
+              return { ...m, plan: { ...m.plan, phases, confirmed: true } };
+            }));
+            break;  // suppress the text bubble for confirmation
+          }
+
+          if (phaseUpdate && activePlanMsgIdRef.current != null) {
+            const targetId = activePlanMsgIdRef.current;
+            setChatHistory((prev) => prev.map((m) => {
+              if (m.id !== targetId || !m.plan) return m;
+              let advanceNext = false;
+              const phases = m.plan.phases.map((p) => {
+                if (p.id !== phaseUpdate.phase_id) return p;
+                if (phaseUpdate.status === "completed") advanceNext = true;
+                return {
+                  ...p,
+                  status: phaseUpdate.status,
+                  rationale: phaseUpdate.rationale,
+                  reason: phaseUpdate.reason,
+                };
+              });
+              // When a phase completes, mark the next pending phase as running
+              if (advanceNext) {
+                const nextIdx = phases.findIndex((p) => p.status === "pending");
+                if (nextIdx >= 0) {
+                  phases[nextIdx] = { ...phases[nextIdx], status: "running" };
+                }
+              }
+              return { ...m, plan: { ...m.plan, phases } };
+            }));
+            break;  // suppress the per-phase text bubble too
+          }
+
+          // Fallback — generic chat content (no structured payload)
+          if (content) {
+            setChatHistory((prev) => [...prev, {
+              id: nextId(), role: "agent",
+              content,
+            }]);
+          }
+          break;
+        }
+
+        case "pb_glass_op": {
+          const op = (ev.op as string) ?? "?";
+          const args = (ev.args as Record<string, unknown>) ?? {};
+          // v30.17h — args carries underscore-prefixed phase metadata
+          // (_phase_id / _round / _args_summary) alongside the raw tool
+          // args. Show phase context inline so the chat console tracks
+          // which phase each op belongs to.
+          const phaseId = args._phase_id as string | undefined;
+          const roundNum = args._round as number | undefined;
+          const summary = args._args_summary as string | undefined;
+          const phasePrefix = phaseId && roundNum ? `[${phaseId} r${roundNum}] ` : "";
+          // Pick a compact body: prefer the human summary when present,
+          // otherwise stringify the args minus underscore metadata.
+          let body = summary ?? "";
+          if (!body) {
+            const cleanArgs = Object.fromEntries(
+              Object.entries(args).filter(([k]) => !k.startsWith("_")),
+            );
+            body = JSON.stringify(cleanArgs).slice(0, 80);
+          }
+          addLog(makeLog("⚙️",
+            `PIPELINE OP | ${phasePrefix}${op} ${body}`,
+            "tool"));
+          break;
+        }
+
+        case "pb_glass_done": {
+          const pid = ev.pipeline_id ?? ev.saved_pipeline_id;
+          const msg = pid
+            ? `Pipeline 建構完成（id=${pid}）— 請到 Pipeline Builder 查看結果`
+            : "Pipeline 建構結束";
+          setChatHistory((prev) => [...prev, {
+            id: nextId(), role: "agent", content: msg,
+          }]);
+          break;
+        }
+
+        // v30.17j — judge_clarify deficit pause card. Sidecar pauses the
+        // graph when data source returns << user's count quantifier
+        // (e.g. user asked '100 筆' but data only has 7). User picks
+        // continue/replan/cancel; we POST to /chat/intent-respond with a
+        // judge_decision body that resumes the build.
+        case "pb_judge_clarify": {
+          const jcData: JudgeClarifyData = {
+            phase_id: (ev.phase_id as string) ?? "?",
+            requested_n: (ev.requested_n as number) ?? 0,
+            actual_rows: (ev.actual_rows as number) ?? 0,
+            ratio: (ev.ratio as number) ?? 0,
+            value_desc: (ev.value_desc as string) ?? "",
+            block_id: (ev.block_id as string) ?? "",
+          };
+          const chatSid = String(ev.session_id ?? ev.build_session_id ?? "");
+          setChatHistory((prev) => [...prev, {
+            id: nextId(),
+            role: "judge_clarify",
+            content: "",
+            judgeClarify: jcData,
+            judgeChatSessionId: chatSid,
+          }]);
+          addLog(makeLog("⚠️",
+            `JUDGE CLARIFY | phase=${jcData.phase_id} got ${jcData.actual_rows}/${jcData.requested_n}`,
+            "hitl"));
+          break;
+        }
+
+        // intent_completeness gate (chat orchestrator_v2) — emits a
+        // structured design intent card when the user prompt is too
+        // ambiguous to build directly. UX matches AIAgentPanel's case
+        // so chat mode and builder mode behave identically.
+        case "design_intent_confirm": {
+          const design: DesignIntentData = {
+            card_id: (ev.card_id as string) ?? `intent-${Date.now()}`,
+            inputs: (ev.inputs as DesignIntentData["inputs"]) ?? [],
+            logic: (ev.logic as string) ?? "",
+            presentation: (ev.presentation as DesignIntentData["presentation"]) ?? "mixed",
+            alternatives: (ev.alternatives as DesignIntentData["alternatives"]) ?? [],
+            clarifications: (ev.clarifications as DesignIntentData["clarifications"]) ?? [],
+            plan_steps: (ev.plan_steps as DesignIntentData["plan_steps"]) ?? [],
+            interactive_brief: (ev.interactive_brief as boolean) ?? false,
+            resolved: false,
+          };
+          setChatHistory((prev) => [...prev, {
+            id: nextId(),
+            role: "design_intent",
+            content: "",
+            designIntent: design,
+            designIntentPrompt: lastUserPromptRef.current,
+          }]);
+          addLog(makeLog("🧠",
+            `DESIGN INTENT | card=${design.card_id} (${(design.clarifications ?? []).length} clarifications)`,
+            "hitl"));
+          break;
+        }
+
+        // v19: chat clarify pause — model 要 user 先確認 intent bullets.
+        case "pb_plan_confirm": {
+            // v31: chat plan-confirm pause — builder-style P1..PN gate.
+            const phases = (ev.phases as PlanPhase[]) ?? [];
+            const chatSid = String(ev.session_id ?? "");
+            const buildSid = String(ev.build_session_id ?? "");
+            if (phases.length > 0) {
+              setChatHistory((prev) => [...prev, {
+                id: nextId(),
+                role: "agent",
+                content: "",
+                card: {
+                  type: "plan_confirm",
+                  chat_session_id: chatSid,
+                  build_session_id: buildSid,
+                  plan_summary: (ev.plan_summary as string) || undefined,
+                  phases,
+                },
+              }]);
+              addLog(makeLog("🧠",
+                `PLAN CONFIRM | ${phases.length} phase(s) waiting for user`,
+                "hitl"));
+            }
+            break;
+          }
+
+          case "pb_intent_confirm": {
+          const bullets = (ev.bullets as IntentBullet[]) ?? [];
+          const reason = (ev.too_vague_reason as string | undefined) || undefined;
+          const chatSid = String(ev.session_id ?? ev.build_session_id ?? "");
+          if (bullets.length > 0) {
+            setChatHistory((prev) => [...prev, {
+              id: nextId(),
+              role: "agent",
+              content: "",
+              card: {
+                type: "intent_confirm",
+                chat_session_id: chatSid,
+                bullets,
+                too_vague_reason: reason,
+              },
+            }]);
+            addLog(makeLog("🧠",
+              `INTENT CONFIRM | ${bullets.length} bullet(s) waiting for user`,
+              "hitl"));
+          }
+          break;
+        }
+      }
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addLog, onContract]);
+
   const sendMessage = useCallback(async (
     message: string,
     clientContext?: Record<string, unknown>,
@@ -211,393 +634,13 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
         return;
       }
 
-      await consumeSSE(res, (ev) => {
-        const type = ev.type as string;
-
-        switch (type) {
-          case "stage_update": {
-            const stage  = ev.stage as number;
-            const status = ev.status as "running" | "complete" | "error";
-            const label  = (ev.label as string) ?? `Stage ${stage}`;
-            setStages((prev) => {
-              const idx = prev.findIndex((s) => s.stage === stage);
-              if (idx >= 0) {
-                const u = [...prev]; u[idx] = { stage, label, status }; return u;
-              }
-              return [...prev, { stage, label, status }];
-            });
-            break;
-          }
-
-          case "context_load": {
-            const rag   = ev.rag_count    ?? 0;
-            const turns = ev.history_turns ?? 0;
-            const pref  = ev.pref_summary && ev.pref_summary !== "(無)" ? ev.pref_summary : "未設定";
-            addLog(makeLog("📦", `CONTEXT | RAG: ${rag} 條 | 歷史: ${turns} 輪 | 偏好: ${pref}`, "info"));
-            break;
-          }
-
-          case "thinking":
-            addLog(makeLog("💭", `THINKING | ${((ev.text as string) ?? "").slice(0, 200)}`, "thinking"));
-            break;
-
-          case "llm_usage": {
-            const inTok  = (ev.input_tokens  as number) ?? 0;
-            const outTok = (ev.output_tokens as number) ?? 0;
-            setTokenIn((p)  => p + inTok);
-            setTokenOut((p) => p + outTok);
-            addLog(makeLog("🔢", `LLM #${ev.iteration ?? "?"} | in=${inTok} out=${outTok}`, "token"));
-            break;
-          }
-
-          case "tool_start": {
-            const inputStr = JSON.stringify(ev.input ?? {});
-            const toolName = (ev.tool ?? "") as string;
-            const [icon, prefix] = toolName === "save_memory"   ? ["💾", "SAVE MEMORY"]
-                                 : toolName === "search_memory"  ? ["🔍", "GET MEMORY"]
-                                 : toolName === "delete_memory"  ? ["🗑️", "DELETE MEMORY"]
-                                 : ["🔧", "TOOL"];
-            addLog(makeLog(icon,
-              `${prefix} #${ev.iteration ?? "?"} → ${toolName}(${inputStr.slice(0, 80)}${inputStr.length > 80 ? "…" : ""})`,
-              "tool"
-            ));
-            break;
-          }
-
-          case "tool_done": {
-            const toolName = (ev.tool ?? "") as string;
-            const [icon, prefix] = toolName === "save_memory"   ? ["💾", "SAVE MEMORY ✓"]
-                                 : toolName === "search_memory"  ? ["🔍", "GET MEMORY ✓"]
-                                 : toolName === "delete_memory"  ? ["🗑️", "DELETE MEMORY ✓"]
-                                 : ["✅", "DONE"];
-            addLog(makeLog(icon, `${prefix} → ${toolName} | ${(ev.result_summary ?? "") as string}`, "tool"));
-
-            // Phase 9 — propose_personal_rule emits a rule_proposal render
-            // card; surface it as an inline confirmation card in chat.
-            const renderCard = ev.render_card as { type?: string; rule_draft?: unknown; preview?: unknown } | undefined;
-            if (renderCard?.type === "rule_proposal" && renderCard.rule_draft) {
-              setChatHistory((prev) => [...prev, {
-                id: nextId(),
-                role: "agent",
-                content: "",
-                card: {
-                  type: "rule_proposal",
-                  rule_draft: renderCard.rule_draft as Parameters<typeof RuleProposalCard>[0]["ruleDraft"],
-                  preview: (renderCard.preview ?? {}) as Parameters<typeof RuleProposalCard>[0]["preview"],
-                },
-              }]);
-            }
-            break;
-          }
-
-          case "memory_write": {
-            const content = (ev.fix_rule ?? ev.content ?? "") as string;
-            const src = (ev.memory_type ?? ev.source ?? "") as string;
-            const [icon, label] = src === "trap"             ? ["⚠️", "Trap Memory"]
-                                : src === "diagnosis"        ? ["🧠", "記憶寫入 · 診斷"]
-                                : src === "preference"       ? ["⭐", "記憶寫入 · 偏好"]
-                                : src === "hitl_preference"  ? ["⭐", "記憶寫入 · HITL偏好"]
-                                : src === "api_pattern"      ? ["📚", "記憶寫入 · API模式"]
-                                :                             ["💾", "記憶寫入"];
-            addLog(makeLog(icon, `[${label}] ${content.slice(0, 120)}`, "memory"));
-            break;
-          }
-
-          case "reflection_running":
-            addLog(makeLog("🔍", "Self-Critique 驗證數值來源中…", "info"));
-            break;
-
-          case "reflection_pass":
-            addLog(makeLog("✅", "Self-Critique 通過 — 所有數值來源已確認", "info"));
-            break;
-
-          case "reflection_amendment": {
-            const count = (ev.issue_count as number) ?? (ev.issues as unknown[])?.length ?? 0;
-            const amended = (ev.amended_text as string) ?? "";
-            addLog(makeLog("🚨", `Self-Critique 發現 ${count} 處幻覺 — 已修訂回覆`, "error"));
-            if (amended) {
-              setChatHistory((prev) => {
-                if (prev.length === 0) return prev;
-                const last = prev[prev.length - 1];
-                if (last.role !== "agent") return prev;
-                return [...prev.slice(0, -1), { ...last, content: amended }];
-              });
-            }
-            break;
-          }
-
-          case "approval_required": {
-            const req: HitlRequest = {
-              approval_token: ev.approval_token as string,
-              tool:           ev.tool as string,
-              input:          ev.input as Record<string, unknown> | undefined,
-            };
-            addLog(makeLog("⚠️", `HITL | 等待批准: ${req.tool}（token: ${req.approval_token}）`, "hitl"));
-            setHitl(req);
-            break;
-          }
-
-          case "synthesis": {
-            const text = (ev.text as string) ?? "";
-            // Extract the plain text part (strip <contract> block) for chat display
-            const displayText = text.replace(/<contract>[\s\S]*?<\/contract>/g, "").trim();
-            if (isValidContract(ev.contract)) {
-              onContract(ev.contract as AIOpsReportContract);
-              setChatHistory((prev) => [...prev, {
-                id: nextId(), role: "agent",
-                content: displayText || (ev.contract as { summary?: string }).summary || "",
-              }]);
-            } else if (displayText) {
-              setChatHistory((prev) => [...prev, { id: nextId(), role: "agent", content: displayText }]);
-            }
-            addLog(makeLog("💬", `SYNTHESIS 完成 (${text.length} chars)`, "info"));
-            break;
-          }
-
-          case "done":
-            sessionIdRef.current = ev.session_id as string;
-            break;
-
-          case "error":
-            addLog(makeLog("❌", (ev.message as string) ?? "Agent 發生錯誤", "error"));
-            break;
-
-          // --- Agent planning ---
-          case "plan": {
-            const planText = (ev.text as string) ?? "";
-            addLog(makeLog("🧭",
-              `PLAN #${ev.iteration ?? "?"}\n${planText}`,
-              "info"));
-            break;
-          }
-
-          // --- Pipeline Builder Glass Box mode ---
-          // When the agent decides to build a pipeline (e.g. asking for a
-          // trend chart), it streams pb_glass_* events instead of a final
-          // synthesis. Surface them so the chat panel shows activity + a
-          // final answer instead of looking dead.
-          case "pb_glass_start":
-            addLog(makeLog("🧱",
-              `PIPELINE BUILDER | 開始建構：${(ev.goal as string) ?? ""}`,
-              "info"));
-            break;
-
-          case "pb_glass_chat": {
-            const content = (ev.content as string) ?? "";
-
-            // v30.17i — goal_plan_proposed carries structured `plan` data
-            // alongside text. Render as a PlanCard once, then later
-            // phase_completed / phase_revise_started events arrive (also
-            // pb_glass_chat) with `phase_update` payload that mutates the
-            // same card's phase status. AIAgentPanel ignores these extra
-            // fields and renders the text bubble — no regression.
-            const planPayload = ev.plan as PlanData | undefined;
-            const planConfirmed = ev.plan_confirmed as { auto: boolean; n_phases: number } | undefined;
-            const phaseUpdate = ev.phase_update as {
-              phase_id: string;
-              status: PhaseStatus;
-              rationale?: string;
-              reason?: string;
-            } | undefined;
-
-            if (planPayload && Array.isArray(planPayload.phases)) {
-              const phases: PhaseEntry[] = planPayload.phases.map((p) => ({
-                id: p.id,
-                goal: p.goal ?? "",
-                expected: p.expected ?? "?",
-                status: "pending",
-                auto_injected: !!p.auto_injected,
-              }));
-              const planData: PlanData = {
-                summary: planPayload.summary ?? "",
-                phases,
-                confirmed: false,
-              };
-              const newId = nextId();
-              activePlanMsgIdRef.current = newId;
-              setChatHistory((prev) => [...prev, {
-                id: newId, role: "plan", content: "",
-                plan: planData,
-              }]);
-              break;
-            }
-
-            if (planConfirmed && activePlanMsgIdRef.current != null) {
-              const targetId = activePlanMsgIdRef.current;
-              setChatHistory((prev) => prev.map((m) => {
-                if (m.id !== targetId || !m.plan) return m;
-                // Flip confirmed flag + mark first phase as running
-                const phases = m.plan.phases.map((p, idx) => ({
-                  ...p,
-                  status: idx === 0 ? ("running" as PhaseStatus) : p.status,
-                }));
-                return { ...m, plan: { ...m.plan, phases, confirmed: true } };
-              }));
-              break;  // suppress the text bubble for confirmation
-            }
-
-            if (phaseUpdate && activePlanMsgIdRef.current != null) {
-              const targetId = activePlanMsgIdRef.current;
-              setChatHistory((prev) => prev.map((m) => {
-                if (m.id !== targetId || !m.plan) return m;
-                let advanceNext = false;
-                const phases = m.plan.phases.map((p) => {
-                  if (p.id !== phaseUpdate.phase_id) return p;
-                  if (phaseUpdate.status === "completed") advanceNext = true;
-                  return {
-                    ...p,
-                    status: phaseUpdate.status,
-                    rationale: phaseUpdate.rationale,
-                    reason: phaseUpdate.reason,
-                  };
-                });
-                // When a phase completes, mark the next pending phase as running
-                if (advanceNext) {
-                  const nextIdx = phases.findIndex((p) => p.status === "pending");
-                  if (nextIdx >= 0) {
-                    phases[nextIdx] = { ...phases[nextIdx], status: "running" };
-                  }
-                }
-                return { ...m, plan: { ...m.plan, phases } };
-              }));
-              break;  // suppress the per-phase text bubble too
-            }
-
-            // Fallback — generic chat content (no structured payload)
-            if (content) {
-              setChatHistory((prev) => [...prev, {
-                id: nextId(), role: "agent",
-                content,
-              }]);
-            }
-            break;
-          }
-
-          case "pb_glass_op": {
-            const op = (ev.op as string) ?? "?";
-            const args = (ev.args as Record<string, unknown>) ?? {};
-            // v30.17h — args carries underscore-prefixed phase metadata
-            // (_phase_id / _round / _args_summary) alongside the raw tool
-            // args. Show phase context inline so the chat console tracks
-            // which phase each op belongs to.
-            const phaseId = args._phase_id as string | undefined;
-            const roundNum = args._round as number | undefined;
-            const summary = args._args_summary as string | undefined;
-            const phasePrefix = phaseId && roundNum ? `[${phaseId} r${roundNum}] ` : "";
-            // Pick a compact body: prefer the human summary when present,
-            // otherwise stringify the args minus underscore metadata.
-            let body = summary ?? "";
-            if (!body) {
-              const cleanArgs = Object.fromEntries(
-                Object.entries(args).filter(([k]) => !k.startsWith("_")),
-              );
-              body = JSON.stringify(cleanArgs).slice(0, 80);
-            }
-            addLog(makeLog("⚙️",
-              `PIPELINE OP | ${phasePrefix}${op} ${body}`,
-              "tool"));
-            break;
-          }
-
-          case "pb_glass_done": {
-            const pid = ev.pipeline_id ?? ev.saved_pipeline_id;
-            const msg = pid
-              ? `Pipeline 建構完成（id=${pid}）— 請到 Pipeline Builder 查看結果`
-              : "Pipeline 建構結束";
-            setChatHistory((prev) => [...prev, {
-              id: nextId(), role: "agent", content: msg,
-            }]);
-            break;
-          }
-
-          // v30.17j — judge_clarify deficit pause card. Sidecar pauses the
-          // graph when data source returns << user's count quantifier
-          // (e.g. user asked '100 筆' but data only has 7). User picks
-          // continue/replan/cancel; we POST to /chat/intent-respond with a
-          // judge_decision body that resumes the build.
-          case "pb_judge_clarify": {
-            const jcData: JudgeClarifyData = {
-              phase_id: (ev.phase_id as string) ?? "?",
-              requested_n: (ev.requested_n as number) ?? 0,
-              actual_rows: (ev.actual_rows as number) ?? 0,
-              ratio: (ev.ratio as number) ?? 0,
-              value_desc: (ev.value_desc as string) ?? "",
-              block_id: (ev.block_id as string) ?? "",
-            };
-            const chatSid = String(ev.session_id ?? ev.build_session_id ?? "");
-            setChatHistory((prev) => [...prev, {
-              id: nextId(),
-              role: "judge_clarify",
-              content: "",
-              judgeClarify: jcData,
-              judgeChatSessionId: chatSid,
-            }]);
-            addLog(makeLog("⚠️",
-              `JUDGE CLARIFY | phase=${jcData.phase_id} got ${jcData.actual_rows}/${jcData.requested_n}`,
-              "hitl"));
-            break;
-          }
-
-          // intent_completeness gate (chat orchestrator_v2) — emits a
-          // structured design intent card when the user prompt is too
-          // ambiguous to build directly. UX matches AIAgentPanel's case
-          // so chat mode and builder mode behave identically.
-          case "design_intent_confirm": {
-            const design: DesignIntentData = {
-              card_id: (ev.card_id as string) ?? `intent-${Date.now()}`,
-              inputs: (ev.inputs as DesignIntentData["inputs"]) ?? [],
-              logic: (ev.logic as string) ?? "",
-              presentation: (ev.presentation as DesignIntentData["presentation"]) ?? "mixed",
-              alternatives: (ev.alternatives as DesignIntentData["alternatives"]) ?? [],
-              clarifications: (ev.clarifications as DesignIntentData["clarifications"]) ?? [],
-              plan_steps: (ev.plan_steps as DesignIntentData["plan_steps"]) ?? [],
-              interactive_brief: (ev.interactive_brief as boolean) ?? false,
-              resolved: false,
-            };
-            setChatHistory((prev) => [...prev, {
-              id: nextId(),
-              role: "design_intent",
-              content: "",
-              designIntent: design,
-              designIntentPrompt: lastUserPromptRef.current,
-            }]);
-            addLog(makeLog("🧠",
-              `DESIGN INTENT | card=${design.card_id} (${(design.clarifications ?? []).length} clarifications)`,
-              "hitl"));
-            break;
-          }
-
-          // v19: chat clarify pause — model 要 user 先確認 intent bullets.
-          case "pb_intent_confirm": {
-            const bullets = (ev.bullets as IntentBullet[]) ?? [];
-            const reason = (ev.too_vague_reason as string | undefined) || undefined;
-            const chatSid = String(ev.session_id ?? ev.build_session_id ?? "");
-            if (bullets.length > 0) {
-              setChatHistory((prev) => [...prev, {
-                id: nextId(),
-                role: "agent",
-                content: "",
-                card: {
-                  type: "intent_confirm",
-                  chat_session_id: chatSid,
-                  bullets,
-                  too_vague_reason: reason,
-                },
-              }]);
-              addLog(makeLog("🧠",
-                `INTENT CONFIRM | ${bullets.length} bullet(s) waiting for user`,
-                "hitl"));
-            }
-            break;
-          }
-        }
-      }, (err) => {
+      await consumeSSE(res, handleAgentEvent, (err) => {
         addLog(makeLog("❌", `連線失敗: ${err.message}`, "error"));
       });
     } finally {
       setLoading(false);
     }
-  }, [loading, onContract, addLog]);
+  }, [loading, onContract, addLog, handleAgentEvent]);
 
   // ---------------------------------------------------------------------------
   // Render
@@ -694,6 +737,61 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
                     ruleDraft={msg.card.rule_draft}
                     preview={msg.card.preview}
                   />
+                </div>
+              ) : msg.card?.type === "plan_confirm" ? (
+                <div style={{ maxWidth: "95%", width: "100%" }}>
+                  {msg.card.resolved === undefined ? (
+                    <PlanConfirmCard
+                      planSummary={msg.card.plan_summary}
+                      phases={msg.card.phases}
+                      onDecide={async (confirmed, phases) => {
+                        // v31: resume the paused build; drain the SSE through
+                        // the SAME handleAgentEvent so the plan card status,
+                        // ops and charts render live (A3).
+                        const chatSid = msg.card && msg.card.type === "plan_confirm" ? msg.card.chat_session_id : "";
+                        let outcome: "confirmed" | "refused" | "error" = confirmed ? "confirmed" : "refused";
+                        try {
+                          const res = await fetch("/api/agent/chat/intent-respond", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              chatSessionId: chatSid,
+                              plan_decision: { confirmed, phases },
+                            }),
+                          });
+                          if (!res.ok) outcome = "error";
+                          else {
+                            await consumeSSE(res, (ev) => {
+                              handleAgentEvent(ev);
+                              const t = ev.type as string | undefined;
+                              const st = String((ev as Record<string, unknown>).status ?? "");
+                              if ((t === "pb_glass_done" || st) && (st === "failed")) outcome = "error";
+                              if (st === "refused") outcome = "refused";
+                            });
+                          }
+                        } catch (e) {
+                          console.error(e);
+                          outcome = "error";
+                        }
+                        setChatHistory((prev) => prev.map((m) =>
+                          m.id === msg.id && m.card?.type === "plan_confirm"
+                            ? { ...m, card: { ...m.card, resolved: outcome } }
+                            : m,
+                        ).concat(!confirmed ? [{
+                          id: nextId(), role: "agent" as const,
+                          content: "已取消建構 — 你可以重新描述需求或直接修改後再送一次。",
+                        }] : []));
+                      }}
+                    />
+                  ) : (
+                    <div style={{
+                      fontSize: 11, color: "#4a5568", padding: "6px 10px",
+                      background: "#1a202c", border: "1px solid #2d3748",
+                      borderRadius: 6, fontStyle: "italic",
+                    }}>
+                      Plan {msg.card.resolved === "confirmed" ? "✓ 已確認並建構" : msg.card.resolved === "refused" ? "✗ 已取消" : "⚠ error"}
+                    </div>
+                  )}
                 </div>
               ) : msg.card?.type === "intent_confirm" ? (
                 <div style={{ maxWidth: "95%", width: "100%" }}>

@@ -38,6 +38,13 @@ class PendingClarify:
     # The chat session history at the moment we paused — needed to
     # continue the LLM loop after resume.
     pre_pause_messages: list[Any] = field(default_factory=list)
+    # v31 (2026-07-04): which pause this entry represents.
+    #   "intent"       — clarify_intent bullets (BulletConfirmCard)
+    #   "plan_confirm" — goal_plan_confirm_gate phases (PlanConfirmCard);
+    #                    `phases` carries the proposed P1..PN for the card.
+    kind: str = "intent"
+    phases: list = field(default_factory=list)
+    plan_summary: str = ""
 
 
 # session_id → pending state. Per Task 2 Q2, only ONE pending per chat

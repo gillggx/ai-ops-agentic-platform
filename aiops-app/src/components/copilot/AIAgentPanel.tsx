@@ -19,6 +19,7 @@ import type { FlatDataMetadata, UIConfig } from "@/context/FlatDataContext";
 import { useAppContext } from "@/context/AppContext";
 import { DesignIntentCard, type DesignIntentData, type DesignIntentChoice } from "./DesignIntentCard";
 import { BulletConfirmCard } from "@/components/chat/BulletConfirmCard";
+import { PlanConfirmCard, type PlanPhase } from "@/components/chat/PlanConfirmCard";
 import {
   JudgeClarifyCard,
   type JudgeClarifyData,
@@ -86,14 +87,24 @@ interface IntentConfirmData {
   resolved?: "confirmed" | "refused" | "error";
 }
 
+interface PlanConfirmData {
+  session_id: string;            // chat session (pending_clarify key)
+  build_session_id: string;
+  plan_summary?: string;
+  phases: PlanPhase[];
+  resolved?: "confirmed" | "refused" | "error";
+}
+
 interface ChatMessage {
   id: number;
-  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "ops" | "clarify" | "design_intent" | "intent_confirm" | "chart_inline" | "judge_clarify";
+  role: "user" | "agent" | "mcp_result" | "chart_intents" | "chart_explorer" | "pb_pipeline" | "pb_proposal" | "plan" | "ops" | "clarify" | "design_intent" | "intent_confirm" | "plan_confirm" | "chart_inline" | "judge_clarify";
   content: string;
   clarify?: ClarifyData;
   designIntent?: DesignIntentData;
   /** v19 (2026-05-14) — pb_intent_confirm card for chat-mode build clarify. */
   intentConfirm?: IntentConfirmData;
+  /** v31 (2026-07-04) — pb_plan_confirm card: builder-style plan gate in chat. */
+  planConfirm?: PlanConfirmData;
   /** v30.17j — pb_judge_clarify deficit pause card. */
   judgeClarify?: JudgeClarifyData;
   /** v30.17j — chat session id captured at card-emit time, needed when
@@ -1369,6 +1380,29 @@ export function AIAgentPanel({
             }
             break;
           }
+          // v31 (2026-07-04): chat-mode build paused at goal_plan_confirm_gate.
+          // Render PlanConfirmCard (builder-style editable P1..PN); resume via
+          // /chat/intent-respond with plan_decision body.
+          case "pb_plan_confirm": {
+            const phases = (ev.phases as PlanPhase[]) ?? [];
+            const chatSid =
+              sessionIdRef.current
+              || String((ev.session_id as string) || "");
+            if (phases.length > 0) {
+              setChatHistory((prev) => [...prev, {
+                id: nextId(),
+                role: "plan_confirm",
+                content: "",
+                planConfirm: {
+                  session_id: chatSid,
+                  build_session_id: String((ev.build_session_id as string) || ""),
+                  plan_summary: (ev.plan_summary as string) || undefined,
+                  phases,
+                },
+              }]);
+            }
+            break;
+          }
           // v30.17j — judge_clarify deficit pause card. Sidecar pauses graph
           // when data source returns < 80% of user's count quantifier
           // (e.g. user asked '100 筆' but data has 7). User picks 3-way:
@@ -2046,6 +2080,54 @@ export function AIAgentPanel({
                     )}
                     <ChartRenderer spec={msg.chartSpec as Parameters<typeof ChartRenderer>[0]["spec"]} />
                   </div>
+                </div>
+              ) : msg.role === "plan_confirm" && msg.planConfirm ? (
+                <div style={{ width: "100%", maxWidth: "100%" }}>
+                  {msg.planConfirm.resolved === undefined ? (
+                    <PlanConfirmCard
+                      planSummary={msg.planConfirm.plan_summary}
+                      phases={msg.planConfirm.phases}
+                      onDecide={async (confirmed, phases) => {
+                        const res = await fetch("/api/agent/chat/intent-respond", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            chatSessionId: msg.planConfirm?.session_id,
+                            plan_decision: { confirmed, phases },
+                          }),
+                        });
+                        const handler = buildStreamHandlerRef.current;
+                        let finalStatus: "confirmed" | "refused" | "error" = confirmed ? "confirmed" : "refused";
+                        if (handler && res.ok) {
+                          await consumeSSE(res, (ev: Record<string, unknown>) => {
+                            handler(ev as Parameters<typeof handler>[0]);
+                            const evType = (ev.type as string) || "";
+                            if (evType === "pb_glass_done") {
+                              const st = ev.status as string;
+                              if (st === "refused") finalStatus = "refused";
+                              else if (st === "failed") finalStatus = "error";
+                            }
+                          }, () => {});
+                        } else {
+                          if (!res.ok) finalStatus = "error";
+                          try { await res.body?.cancel(); } catch { /* ignore */ }
+                        }
+                        setChatHistory((prev) => prev.map((m) =>
+                          m.id === msg.id && m.planConfirm
+                            ? { ...m, planConfirm: { ...m.planConfirm, resolved: finalStatus } }
+                            : m,
+                        ));
+                      }}
+                    />
+                  ) : (
+                    <div style={{
+                      fontSize: 11, color: "#64748b", padding: "6px 10px",
+                      background: "#f1f5f9", border: "1px solid #cbd5e1",
+                      borderRadius: 6, fontStyle: "italic",
+                    }}>
+                      plan {msg.planConfirm.resolved === "confirmed" ? "✓ 已確認並建構" : msg.planConfirm.resolved === "refused" ? "✗ 已取消" : "⚠ 出錯"}
+                    </div>
+                  )}
                 </div>
               ) : msg.role === "intent_confirm" && msg.intentConfirm ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>

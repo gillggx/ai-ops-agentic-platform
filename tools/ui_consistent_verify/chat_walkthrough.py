@@ -106,13 +106,14 @@ def main():
 
     pending_card = None
     chat_session_id = None
+    plan_pause = None   # v31: pb_plan_confirm payload (builder-style gate in chat)
     plan_shown = False
     phase_status: dict[str, dict] = {}
     last_status = None
     final_nodes = 0
 
     def consume(resp_iter, label):
-        nonlocal pending_card, chat_session_id, plan_shown, last_status, final_nodes
+        nonlocal pending_card, chat_session_id, plan_pause, plan_shown, last_status, final_nodes
         synthesis_text = None
         for ev, data in resp_iter:
             d = data or {}
@@ -122,6 +123,14 @@ def main():
             if ev == "design_intent_confirm":
                 pending_card = d.get("card_id")
                 print(f"    [intent confirm requested — auto-confirming card {pending_card}]")
+                continue
+
+            if ev == "pb_plan_confirm":
+                # v31 (2026-07-04): chat now pauses at the builder-style plan
+                # gate. Record + auto-confirm after this stream ends.
+                plan_pause = d
+                n = len(d.get("phases") or [])
+                print(f"    [plan confirm requested — {n} phases, auto-confirming]")
                 continue
 
             if ev == "pb_glass_chat":
@@ -193,6 +202,22 @@ def main():
             consume(_sse_lines(r2), "round2")
         else:
             print(f"    HTTP {r2.status_code} {r2.text[:200]}")
+
+    # v31: auto-confirm the plan card (mirrors user clicking 確認 in chat UI).
+    # May fire after round 1 (direct build) or round 2 (post-intent-confirm).
+    if plan_pause is not None:
+        sid_for_resume = plan_pause.get("session_id") or chat_session_id
+        print(f"\n=== STEP plan-confirm: POST /agent/chat/intent-respond "
+              f"(plan_decision, chat_session={sid_for_resume}) ===")
+        body3 = {"chat_session_id": sid_for_resume,
+                 "plan_decision": {"confirmed": True}}
+        r3 = requests.post(f"{args.sidecar}/internal/agent/chat/intent-respond",
+                           json=body3, headers=hdr, stream=True, timeout=900)
+        if r3.status_code == 200:
+            plan_pause = None
+            consume(_sse_lines(r3), "plan_resume")
+        else:
+            print(f"    HTTP {r3.status_code} {r3.text[:200]}")
 
     print(f"\n=== SUMMARY ===")
     print(f"    final build status: {last_status or '(no done event)'}")

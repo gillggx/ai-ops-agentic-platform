@@ -249,6 +249,12 @@ class ChatIntentRespondRequest(BaseModel):
     # confirmations (frontend picks one based on which card was shown).
     # Shape: {"phase_id": "p1", "action": "continue"|"replan"|"cancel"}
     judge_decision: Optional[dict] = None
+    # v31 (2026-07-04) — when set, the endpoint resumes a goal_plan_confirm
+    # pause (chat builder-style plan card). Mutually exclusive with the two
+    # above. Shape: {"confirmed": bool, "phases": [{id, goal, expected}...]}
+    # — same contract goal_plan_confirm_gate's interrupt() expects, so user
+    # edits flow into W1 planner memories exactly like builder mode.
+    plan_decision: Optional[dict] = None
 
 
 async def _emit_pipeline_charts(
@@ -366,8 +372,100 @@ async def _chat_intent_respond_stream(
     from python_ai_sidecar.agent_builder.graph_build.runner import (
         resume_graph_build_with_clarify,
         resume_graph_build_with_judge_decision,
+        resume_graph_v30,
     )
     from python_ai_sidecar.agent_builder.event_wrapper import wrap_build_event_for_chat
+
+    # v31 (2026-07-04) — plan_decision branch: resume a goal_plan_confirm
+    # pause (chat builder-style plan card). Same interrupt contract as the
+    # builder UI's confirm endpoint, so user edits feed W1 planner memories.
+    if req.plan_decision is not None:
+        pending = _pc.consume(req.chat_session_id)
+        if pending is not None and pending.kind != "plan_confirm":
+            _pc.register(pending)   # not ours — put it back untouched
+            pending = None
+        if pending is None:
+            yield {"event": "error", "data": json.dumps({
+                "message": "no pending plan confirmation for this chat session",
+            })}
+            yield {"event": "done", "data": json.dumps({"status": "no_pending"})}
+            return
+        confirmed = bool(req.plan_decision.get("confirmed"))
+        phases = req.plan_decision.get("phases")
+        resume_payload: dict = {"confirmed": confirmed}
+        if confirmed and isinstance(phases, list) and phases:
+            resume_payload["phases"] = phases
+        log.info(
+            "chat/intent-respond: plan resume chat_session=%s build_session=%s "
+            "confirmed=%s n_phases=%s",
+            req.chat_session_id, pending.build_session_id, confirmed,
+            len(phases) if isinstance(phases, list) else 0,
+        )
+        final_pipeline_for_exec: Optional[dict] = None
+        try:
+            async for stream_event in resume_graph_v30(
+                session_id=pending.build_session_id,
+                resume_payload=resume_payload,
+                trace_label="chat_plan_confirm",
+            ):
+                # Subsequent judge pause (deficit) — re-register pending_judge
+                # + surface the card, same as the judge branch's hotfix.
+                if stream_event.type == "judge_clarify_pending":
+                    sd = stream_event.data or {}
+                    try:
+                        _pj.register(_pj.PendingJudge(
+                            chat_session_id=req.chat_session_id,
+                            build_session_id=str(sd.get("session_id")
+                                                 or pending.build_session_id),
+                            phase_id=str(sd.get("phase_id") or "?"),
+                            requested_n=int(sd.get("requested_n") or 0),
+                            actual_rows=int(sd.get("actual_rows") or 0),
+                            value_desc=str(sd.get("value_desc") or ""),
+                            block_id=str(sd.get("block_id") or ""),
+                            instruction=pending.instruction,
+                            base_pipeline=pending.base_pipeline,
+                            skill_step_mode=pending.skill_step_mode,
+                            user_id=pending.user_id,
+                        ))
+                    except Exception as ex:  # noqa: BLE001
+                        log.warning("plan-resume: re-register pending_judge failed: %s", ex)
+                    yield {"event": "pb_judge_clarify", "data": json.dumps({
+                        "type": "pb_judge_clarify",
+                        "session_id": req.chat_session_id,
+                        "build_session_id": sd.get("session_id") or pending.build_session_id,
+                        "phase_id": sd.get("phase_id"),
+                        "requested_n": sd.get("requested_n"),
+                        "actual_rows": sd.get("actual_rows"),
+                        "ratio": sd.get("ratio"),
+                        "value_desc": sd.get("value_desc"),
+                        "block_id": sd.get("block_id"),
+                    }, default=str, ensure_ascii=False)}
+                    yield {"event": "done", "data": json.dumps({"status": "judge_clarify_pending"})}
+                    return
+                wrapped = wrap_build_event_for_chat(stream_event, pending.build_session_id)
+                if wrapped is not None:
+                    ev_type = wrapped.get("type") or "message"
+                    yield {"event": ev_type,
+                           "data": json.dumps(wrapped, default=str, ensure_ascii=False)}
+                elif stream_event.type == "done":
+                    yield {"event": "done",
+                           "data": json.dumps(stream_event.data, default=str, ensure_ascii=False)}
+                if stream_event.type == "done" and stream_event.data:
+                    pj = stream_event.data.get("pipeline_json")
+                    if isinstance(pj, dict):
+                        final_pipeline_for_exec = pj
+            if final_pipeline_for_exec is not None and confirmed:
+                async for chart_ev in _emit_pipeline_charts(
+                    final_pipeline_for_exec, pending.build_session_id,
+                ):
+                    yield chart_ev
+        except Exception as ex:  # noqa: BLE001
+            log.exception("chat/intent-respond plan resume failed")
+            yield {"event": "error", "data": json.dumps({
+                "message": f"plan resume failed: {ex.__class__.__name__}: {str(ex)[:200]}",
+            }, ensure_ascii=False)}
+            yield {"event": "done", "data": json.dumps({"status": "failed"})}
+        return
 
     # v30.17j — judge_decision branch takes priority over confirmations
     # (frontend sends one or the other based on which card was shown).
@@ -475,6 +573,9 @@ async def _chat_intent_respond_stream(
 
     # Existing intent_confirm path
     pending = _pc.consume(req.chat_session_id)
+    if pending is not None and pending.kind != "intent":
+        _pc.register(pending)   # plan_confirm pending — not this branch's
+        pending = None
     if pending is None:
         yield {"event": "error", "data": json.dumps({
             "message": "no pending intent clarification for this chat session",
