@@ -27,6 +27,11 @@ interface Props {
   onCancel: () => void;
   /** When set, hide buttons and show a "(decided)" tag. */
   decided?: "confirmed" | "cancelled";
+  /** v31.1 (2026-07-04): allow inline editing of each phase's goal text.
+   *  onConfirm receives the EDITED phases; edits flow through the same
+   *  interrupt contract into W1 planner memories. Default false keeps the
+   *  original read-only behaviour. */
+  editable?: boolean;
 }
 
 const expectedLabel: Record<GoalPhase["expected"], string> = {
@@ -59,12 +64,24 @@ export default function GoalPlanCard({
   onConfirm,
   onCancel,
   decided,
+  editable = false,
 }: Props) {
   const [acting, setActing] = useState(false);
+  const [edits, setEdits] = useState<Record<string, string>>({});
+
+  const effectivePhases = (): GoalPhase[] =>
+    phases.map((p) => {
+      const t = edits[p.id];
+      if (t == null || !t.trim() || t.trim() === p.goal) return p;
+      return { ...p, goal: t.trim(), user_edited: true };
+    });
+  const nEdited = phases.filter(
+    (p) => edits[p.id] != null && edits[p.id].trim() !== "" && edits[p.id].trim() !== p.goal,
+  ).length;
 
   const handleConfirm = () => {
     setActing(true);
-    onConfirm(phases);
+    onConfirm(editable ? effectivePhases() : phases);
   };
   const handleCancel = () => {
     setActing(true);
@@ -127,7 +144,22 @@ export default function GoalPlanCard({
               {i + 1}
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ color: "#0f172a", marginBottom: 3 }}>{p.goal}</div>
+              {editable && !decided ? (
+                <textarea
+                  value={edits[p.id] ?? p.goal}
+                  onChange={(e) => setEdits((prev) => ({ ...prev, [p.id]: e.target.value }))}
+                  rows={Math.min(3, Math.max(1, Math.ceil((edits[p.id] ?? p.goal).length / 46)))}
+                  disabled={acting}
+                  style={{
+                    width: "100%", resize: "vertical", marginBottom: 3,
+                    border: `1px solid ${edits[p.id] != null && edits[p.id].trim() !== p.goal ? "#3b82f6" : "#e2e8f0"}`,
+                    borderRadius: 5, color: "#0f172a", fontSize: 13, padding: "4px 8px",
+                    fontFamily: "inherit", lineHeight: 1.5, background: "#fff",
+                  }}
+                />
+              ) : (
+                <div style={{ color: "#0f172a", marginBottom: 3 }}>{p.goal}</div>
+              )}
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <span
                   style={{
@@ -208,7 +240,7 @@ export default function GoalPlanCard({
                 cursor: acting ? "not-allowed" : "pointer",
               }}
             >
-              確認，開始建構
+              {nEdited > 0 ? `確認（含 ${nEdited} 處修改），開始建構` : "確認，開始建構"}
             </button>
           </>
         )}

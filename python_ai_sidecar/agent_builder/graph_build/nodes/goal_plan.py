@@ -450,6 +450,13 @@ async def goal_plan_node(state: BuildGraphState) -> dict[str, Any]:
         instruction = f"[REPLAN HINT — relax constraints]\n{replan_hint}\n\n{instruction}"
         logger.info("goal_plan_node: applying replan_hint (%d chars)", len(replan_hint))
 
+    # v31.1 — follow-up context: the previous instruction, so modification
+    # messages ("我後悔了，改成3張") resolve against what was just built.
+    prior_section = ""
+    prior = state.get("prior_instruction")
+    if prior:
+        prior_section = f"\n\n上一次建構指令（本句可能是對它的修改）:\n  {str(prior)[:300]}"
+
     # Existing canvas snapshot — if user has manual nodes, list them so LLM
     # can plan incrementally instead of from-scratch overwriting.
     existing_nodes_section = ""
@@ -512,6 +519,7 @@ async def goal_plan_node(state: BuildGraphState) -> dict[str, Any]:
         f"USER NEED:\n{instruction[:2000]}"
         f"{inputs_section}"
         f"{skill_section}"
+        f"{prior_section}"
         f"{existing_nodes_section}"
         f"{knowledge_section}"
     )

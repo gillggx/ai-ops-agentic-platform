@@ -321,6 +321,10 @@ class BuildGraphState(TypedDict, total=False):
     # conversation IS the confirmation; pausing the chat orchestrator
     # mid-tool to wait for a UI click would break the conversational flow.
     skip_confirm: bool
+    # v31.1 (2026-07-04): the previous build instruction, when the caller is
+    # sending a follow-up over an existing canvas ("我後悔了，改成3張..."). Lets
+    # goal_plan resolve anaphora without any case rules — pure context data.
+    prior_instruction: Optional[str]
     # Phase 11 — Skill step mode. When True, plan_node prompt forces the
     # pipeline to end with block_step_check (the Skill terminal block).
     skill_step_mode: bool
@@ -409,6 +413,7 @@ def initial_state(
     base_pipeline: Optional[dict],
     user_id: Optional[int] = None,
     skip_confirm: bool = False,
+    prior_instruction: Optional[str] = None,
     skill_step_mode: bool = False,
     trigger_payload: Optional[dict] = None,
     debug_step_mode: bool = False,
@@ -425,6 +430,7 @@ def initial_state(
         is_from_scratch=False,
         user_confirmed=None,
         skip_confirm=skip_confirm,
+        prior_instruction=prior_instruction,
         skill_step_mode=skill_step_mode,
         cursor=0,
         logical_to_real={},

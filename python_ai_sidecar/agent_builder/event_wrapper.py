@@ -266,10 +266,13 @@ def wrap_build_event_for_chat(
         payload["type"] = "pb_glass_chat"
         payload["content"] = f"✓ Phase {pid} 完成{extra}：{rationale[:120]}"
         # v30.17i — structured phase status for PlanCard
+        # v31.1 (2026-07-04): + auto_completed so chat's PhaseTimeline renders
+        # the same auto / ff: badges as builder mode.
         payload["phase_update"] = {
             "phase_id": pid, "status": "completed",
             "rationale": rationale[:200],
             "block_id": block, "node_id": node,
+            "auto_completed": bool(data.get("auto_completed")),
         }
     elif evt_type == "phase_revise_started":
         pid = data.get("phase_id") or "?"
@@ -298,6 +301,12 @@ def wrap_build_event_for_chat(
             f"⚡ Fast-forward：{len(completed)} 個 phase ({ids}) 由 "
             f"{node} [{block}] 一次涵蓋"
         )
+        # v31.1 — structured ff data so chat's PhaseTimeline can mark each
+        # covered phase completed with the ff: badge (same as builder).
+        payload["ff_update"] = {
+            "advanced_by_block": block, "advanced_by_node": node,
+            "phase_ids": [c.get("id") for c in completed if isinstance(c, dict)],
+        }
     elif evt_type == "handover_pending":
         # In chat (skip_confirm=True) v30.17b auto-takes-over so this
         # shouldn't normally fire, but if it does (skip_confirm flag flaked

@@ -58,6 +58,10 @@ class BuildRequest(BaseModel):
     instruction: str = Field(..., min_length=1)
     pipeline_id: int | None = Field(default=None, alias="pipelineId")
     pipeline_snapshot: dict | None = Field(default=None, alias="pipelineSnapshot")
+    # v31.1 (2026-07-04): previous build instruction for follow-up context —
+    # panel sends it with pipelineSnapshot so goal_plan can resolve
+    # modification anaphora against the just-built canvas.
+    prior_instruction: str | None = Field(default=None, alias="priorInstruction")
     # 2026-05-12: explicit flag so the skill-step terminal + anti-alert
     # validators fire when caller is building a Skill step pipeline.
     # Frontend embed=skill flow + chat orchestrator's build_pipeline_live
@@ -204,6 +208,7 @@ async def _build_stream(req: BuildRequest, caller: CallerContext) -> AsyncGenera
         async for stream_event in stream_graph_build(
             instruction=req.instruction,
             base_pipeline=req.pipeline_snapshot,
+            prior_instruction=req.prior_instruction,
             user_id=caller.user_id,
             skill_step_mode=req.skill_step_mode,
             skip_confirm=False,  # Builder Mode shows the Apply/Cancel card

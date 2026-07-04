@@ -19,7 +19,9 @@ import type { FlatDataMetadata, UIConfig } from "@/context/FlatDataContext";
 import { useAppContext } from "@/context/AppContext";
 import { DesignIntentCard, type DesignIntentData, type DesignIntentChoice } from "./DesignIntentCard";
 import { BulletConfirmCard } from "@/components/chat/BulletConfirmCard";
-import { PlanConfirmCard, type PlanPhase } from "@/components/chat/PlanConfirmCard";
+import GoalPlanCard, { type GoalPhase } from "@/components/pipeline-builder/v30/GoalPlanCard";
+import PhaseTimeline, { type PhaseRuntime } from "@/components/pipeline-builder/v30/PhaseTimeline";
+import { type PlanPhase } from "@/components/chat/PlanConfirmCard";
 import {
   JudgeClarifyCard,
   type JudgeClarifyData,
@@ -125,6 +127,10 @@ interface ChatMessage {
   // v1.7: when role === "plan", planItems carries the live checklist that
   // updates in place via plan_update events keyed off the message id.
   planItems?: PlanItem[];
+  // v31.1 (2026-07-04): builder-style v30 plan progress — when set, the
+  // plan message renders PhaseTimeline (same card as builder mode).
+  goalPhases?: GoalPhase[];
+  phaseRuntime?: Record<string, PhaseRuntime>;
   // v1.7: when role === "ops", glassOps carries the build-op trail that
   // accumulates across pb_glass_op events keyed off the message id.
   glassOps?: GlassOpEntry[];
@@ -613,6 +619,51 @@ export function AIAgentPanel({
   // even after the build resumed and finished. Park the main dispatcher
   // here so /agent/build/continue can re-enter the same handler.
   const buildStreamHandlerRef = useRef<((ev: Record<string, unknown>) => void) | null>(null);
+
+
+  // v31.1 — plan-confirm decision: POST resume + drain through the SAME
+  // stream handler so PhaseTimeline / ops / charts render live.
+  const decidePlan = useCallback(async (msgId: number, confirmed: boolean, phases: GoalPhase[]) => {
+    let target: ChatMessage | undefined;
+    setChatHistory((prev) => {
+      target = prev.find((m) => m.id === msgId);
+      return prev;
+    });
+    const chatSid = target?.planConfirm?.session_id ?? sessionIdRef.current ?? "";
+    let finalStatus: "confirmed" | "refused" | "error" = confirmed ? "confirmed" : "refused";
+    try {
+      const res = await fetch("/api/agent/chat/intent-respond", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chatSessionId: chatSid,
+          plan_decision: confirmed ? { confirmed, phases } : { confirmed },
+        }),
+      });
+      const handler = buildStreamHandlerRef.current;
+      if (handler && res.ok) {
+        await consumeSSE(res, (ev: Record<string, unknown>) => {
+          handler(ev as Parameters<typeof handler>[0]);
+          const evType = (ev.type as string) || "";
+          if (evType === "pb_glass_done") {
+            const st = ev.status as string;
+            if (st === "refused") finalStatus = "refused";
+            else if (st === "failed") finalStatus = "error";
+          }
+        }, () => {});
+      } else if (!res.ok) {
+        finalStatus = "error";
+      }
+    } catch {
+      finalStatus = "error";
+    }
+    setChatHistory((prev) => prev.map((m) =>
+      m.id === msgId && m.planConfirm
+        ? { ...m, planConfirm: { ...m.planConfirm, resolved: finalStatus } }
+        : m,
+    ));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [hitl, setHitl]             = useState<HitlRequest | null>(null);
   const [tokenIn, setTokenIn]       = useState(0);
   const [tokenOut, setTokenOut]     = useState(0);
@@ -1160,6 +1211,29 @@ export function AIAgentPanel({
             const args = (ev.args as Record<string, unknown>) ?? {};
             const result = (ev.result as Record<string, unknown>) ?? {};
             onGlassOp?.({ op, args, result });
+            // v31.1 — feed PhaseTimeline runtime (round n/32 + last action)
+            {
+              const pid = args._phase_id != null ? String(args._phase_id) : null;
+              const rnd = Number(args._round);
+              if (pid && currentMacroPlanMsgIdRef.current != null) {
+                const targetId = currentMacroPlanMsgIdRef.current;
+                setChatHistory((prev) => prev.map((m) => {
+                  if (m.id !== targetId || m.role !== "plan" || !m.goalPhases) return m;
+                  const rt = { ...(m.phaseRuntime ?? {}) };
+                  const cur = rt[pid] ?? { status: "in_progress" as const };
+                  rt[pid] = {
+                    ...cur,
+                    status: cur.status === "completed" || cur.status === "failed" ? cur.status : "in_progress",
+                    round: Number.isFinite(rnd) ? rnd : cur.round,
+                    maxRound: 32,
+                    lastAction: op,
+                    lastActionResult: typeof (result as Record<string, unknown>)._summary === "string"
+                      ? String((result as Record<string, unknown>)._summary).slice(0, 120) : cur.lastActionResult,
+                  };
+                  return { ...m, phaseRuntime: rt };
+                }));
+              }
+            }
             const OP_LABEL_MAP: Record<string, string> = {
               // v1 builder ops
               add_node: "加入 node", remove_node: "刪除 node",
@@ -1254,11 +1328,45 @@ export function AIAgentPanel({
                 title: String(p.goal ?? ""),
                 status: "pending",
               }));
+              // v31.1 — builder-style PhaseTimeline data (expected badges etc.)
+              const gp: GoalPhase[] = planPayload.phases.map((p) => ({
+                id: String(p.id ?? ""),
+                goal: String(p.goal ?? ""),
+                expected: (["raw_data", "transform", "verdict", "chart", "table", "scalar", "alarm"]
+                  .includes(String(p.expected)) ? String(p.expected) : "transform") as GoalPhase["expected"],
+              }));
               const newId = nextId();
               currentMacroPlanMsgIdRef.current = newId;
               setChatHistory((prev) => [...prev, {
                 id: newId, role: "plan", content: "", planItems: items,
+                goalPhases: gp, phaseRuntime: {},
               }]);
+              break;
+            }
+
+            // v31.1 — fast-forward: one block covered multiple phases
+            const ffUpdate = ev.ff_update as {
+              advanced_by_block?: string; advanced_by_node?: string; phase_ids?: string[];
+            } | undefined;
+            if (ffUpdate && Array.isArray(ffUpdate.phase_ids) && currentMacroPlanMsgIdRef.current != null) {
+              const targetId = currentMacroPlanMsgIdRef.current;
+              setChatHistory((prev) => prev.map((m) => {
+                if (m.id !== targetId || m.role !== "plan") return m;
+                const rt = { ...(m.phaseRuntime ?? {}) };
+                for (const fid of ffUpdate.phase_ids ?? []) {
+                  rt[String(fid)] = {
+                    ...(rt[String(fid)] ?? {}),
+                    status: "completed",
+                    autoCompleted: true,
+                    fastForwardedBy: ffUpdate.advanced_by_node,
+                    fastForwardedByBlock: ffUpdate.advanced_by_block,
+                  };
+                }
+                const items = (m.planItems ?? []).map((it) =>
+                  (ffUpdate.phase_ids ?? []).includes(it.id)
+                    ? { ...it, status: "done" as PlanItem["status"] } : it);
+                return { ...m, phaseRuntime: rt, planItems: items };
+              }));
               break;
             }
 
@@ -1276,7 +1384,11 @@ export function AIAgentPanel({
                   }
                   return it;
                 });
-                return { ...m, planItems: items };
+                // v31.1 — mirror into PhaseTimeline runtime
+                const rt = { ...(m.phaseRuntime ?? {}) };
+                const first = (m.goalPhases ?? [])[0];
+                if (first) rt[first.id] = { ...(rt[first.id] ?? {}), status: "in_progress" };
+                return { ...m, planItems: items, phaseRuntime: rt };
               }));
               break;
             }
@@ -1327,7 +1439,24 @@ export function AIAgentPanel({
                     items[nextIdx] = { ...items[nextIdx], status: "in_progress" };
                   }
                 }
-                return { ...m, planItems: items };
+                // v31.1 — mirror into PhaseTimeline runtime (builder-style card)
+                const rt = { ...(m.phaseRuntime ?? {}) };
+                const tlStatus =
+                  mappedStatus === "done" ? "completed"
+                  : mappedStatus === "failed" ? "failed" : "in_progress";
+                const evAuto = (ev.phase_update as Record<string, unknown> | undefined)?.auto_completed;
+                rt[pid] = {
+                  ...(rt[pid] ?? {}),
+                  status: tlStatus,
+                  rationale: phaseUpdate.rationale || undefined,
+                  failReason: phaseUpdate.reason || undefined,
+                  autoCompleted: Boolean(evAuto),
+                };
+                if (advanceNext) {
+                  const nxt = (m.goalPhases ?? []).find((g) => !rt[g.id] || rt[g.id].status === "pending");
+                  if (nxt) rt[nxt.id] = { ...(rt[nxt.id] ?? {}), status: "in_progress" };
+                }
+                return { ...m, planItems: items, phaseRuntime: rt };
               }));
               break;
             }
@@ -1985,7 +2114,11 @@ export function AIAgentPanel({
                 alignItems: msg.role === "user" ? "flex-end" : "flex-start",
               }}
             >
-              {msg.role === "plan" && msg.planItems ? (
+              {msg.role === "plan" && msg.goalPhases ? (
+                <div style={{ width: "100%", maxWidth: "100%" }}>
+                  <PhaseTimeline phases={msg.goalPhases} runtime={msg.phaseRuntime ?? {}} />
+                </div>
+              ) : msg.role === "plan" && msg.planItems ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
                   <PlanRenderer items={msg.planItems} />
                 </div>
@@ -2084,40 +2217,17 @@ export function AIAgentPanel({
               ) : msg.role === "plan_confirm" && msg.planConfirm ? (
                 <div style={{ width: "100%", maxWidth: "100%" }}>
                   {msg.planConfirm.resolved === undefined ? (
-                    <PlanConfirmCard
-                      planSummary={msg.planConfirm.plan_summary}
-                      phases={msg.planConfirm.phases}
-                      onDecide={async (confirmed, phases) => {
-                        const res = await fetch("/api/agent/chat/intent-respond", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({
-                            chatSessionId: msg.planConfirm?.session_id,
-                            plan_decision: { confirmed, phases },
-                          }),
-                        });
-                        const handler = buildStreamHandlerRef.current;
-                        let finalStatus: "confirmed" | "refused" | "error" = confirmed ? "confirmed" : "refused";
-                        if (handler && res.ok) {
-                          await consumeSSE(res, (ev: Record<string, unknown>) => {
-                            handler(ev as Parameters<typeof handler>[0]);
-                            const evType = (ev.type as string) || "";
-                            if (evType === "pb_glass_done") {
-                              const st = ev.status as string;
-                              if (st === "refused") finalStatus = "refused";
-                              else if (st === "failed") finalStatus = "error";
-                            }
-                          }, () => {});
-                        } else {
-                          if (!res.ok) finalStatus = "error";
-                          try { await res.body?.cancel(); } catch { /* ignore */ }
-                        }
-                        setChatHistory((prev) => prev.map((m) =>
-                          m.id === msg.id && m.planConfirm
-                            ? { ...m, planConfirm: { ...m.planConfirm, resolved: finalStatus } }
-                            : m,
-                        ));
-                      }}
+                    <GoalPlanCard
+                      editable
+                      planSummary={msg.planConfirm.plan_summary ?? ""}
+                      phases={msg.planConfirm.phases.map((p) => ({
+                        id: p.id,
+                        goal: p.goal,
+                        expected: (["raw_data", "transform", "verdict", "chart", "table", "scalar", "alarm"]
+                          .includes(String(p.expected)) ? String(p.expected) : "transform") as GoalPhase["expected"],
+                      }))}
+                      onCancel={() => void decidePlan(msg.id, false, [])}
+                      onConfirm={(phases) => void decidePlan(msg.id, true, phases)}
                     />
                   ) : (
                     <div style={{

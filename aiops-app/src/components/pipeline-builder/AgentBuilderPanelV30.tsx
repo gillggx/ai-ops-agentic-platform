@@ -69,7 +69,10 @@ const nextId = () => ++_seq;
  *   build_finalized / done / error
  */
 export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: Props) {
-  const { actions } = useBuilder();
+  const { state: builderState, actions } = useBuilder();
+  // v31.1 — previous instruction, sent with follow-ups so goal_plan can
+  // resolve modification anaphora ("我後悔了，改成3張…") against the canvas.
+  const priorInstructionRef = useRef<string | null>(null);
   const [input, setInput] = useState("");
   const [lines, setLines] = useState<ChatLine[]>([]);
   const [build, setBuild] = useState<BuildState>(initialBuildState);
@@ -355,17 +358,29 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
         body: JSON.stringify({
           instruction,
           pipelineId: basePipelineId,
+          // v31.1 — follow-up context: current canvas + previous instruction.
+          // Without these, a modification message reaches goal_plan with zero
+          // context and gets a too_vague refuse ("agent 看不懂需求").
+          ...(builderState.pipeline.nodes.length > 0 ? {
+            pipelineSnapshot: {
+              nodes: builderState.pipeline.nodes,
+              edges: builderState.pipeline.edges,
+              inputs: builderState.pipeline.inputs ?? [],
+            },
+          } : {}),
+          ...(priorInstructionRef.current ? { priorInstruction: priorInstructionRef.current } : {}),
           v30Mode: true,
           skillStepMode: false,
         }),
       });
+      priorInstructionRef.current = instruction;
       await consumeStream(res);
     } catch (ex) {
       log("error", `Build error: ${(ex as Error).message}`);
       setBuild((b) => ({ ...b, buildStatus: "failed" }));
       runningRef.current = false;
     }
-  }, [input, basePipelineId, consumeStream]);
+  }, [input, basePipelineId, consumeStream, builderState.pipeline]);
 
   // ── Auto-fire on mount when launched from Skills v2 Editor ──────────
   // When the Editor's "用 Pipeline Builder 編譯 →" navigates here it
@@ -519,6 +534,7 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
         {/* Goal Plan Card */}
         {build.phases.length > 0 && build.goalConfirmed !== "none" && (
           <GoalPlanCard
+            editable
             planSummary={build.planSummary}
             phases={build.phases}
             onConfirm={onConfirmPlan}

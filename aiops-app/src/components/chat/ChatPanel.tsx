@@ -11,8 +11,10 @@ import {
   type DesignIntentChoice,
   type DesignIntentData,
 } from "@/components/copilot/DesignIntentCard";
-import { PlanCard, type PlanData, type PhaseStatus, type PhaseEntry } from "@/components/chat/PlanCard";
-import { PlanConfirmCard, type PlanPhase } from "@/components/chat/PlanConfirmCard";
+import { type PlanData, type PhaseStatus, type PhaseEntry } from "@/components/chat/PlanCard";
+import { type PlanPhase } from "@/components/chat/PlanConfirmCard";
+import GoalPlanCard, { type GoalPhase } from "@/components/pipeline-builder/v30/GoalPlanCard";
+import PhaseTimeline, { type PhaseRuntime } from "@/components/pipeline-builder/v30/PhaseTimeline";
 import {
   JudgeClarifyCard,
   type JudgeAction,
@@ -591,6 +593,49 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addLog, onContract]);
 
+  // v31.1 — plan-card decision (GoalPlanCard editable): POST the resume and
+  // drain the stream through handleAgentEvent so progress renders live.
+  const decidePlanCard = useCallback(async (msgId: number, confirmed: boolean, phases: GoalPhase[]) => {
+    let chatSid = "";
+    setChatHistory((prev) => {
+      const m = prev.find((x) => x.id === msgId);
+      if (m?.card?.type === "plan_confirm") chatSid = m.card.chat_session_id;
+      return prev;
+    });
+    let outcome: "confirmed" | "refused" | "error" = confirmed ? "confirmed" : "refused";
+    try {
+      const res = await fetch("/api/agent/chat/intent-respond", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chatSessionId: chatSid,
+          plan_decision: confirmed ? { confirmed, phases } : { confirmed },
+        }),
+      });
+      if (!res.ok) outcome = "error";
+      else {
+        await consumeSSE(res, (ev) => {
+          handleAgentEvent(ev);
+          const st = String((ev as Record<string, unknown>).status ?? "");
+          if (st === "failed") outcome = "error";
+          if (st === "refused") outcome = "refused";
+        });
+      }
+    } catch (e) {
+      console.error(e);
+      outcome = "error";
+    }
+    setChatHistory((prev) => prev.map((m) =>
+      m.id === msgId && m.card?.type === "plan_confirm"
+        ? { ...m, card: { ...m.card, resolved: outcome } }
+        : m,
+    ).concat(!confirmed ? [{
+      id: nextId(), role: "agent" as const,
+      content: "已取消建構 — 你可以重新描述需求或直接修改後再送一次。",
+    }] : []));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handleAgentEvent]);
+
   const sendMessage = useCallback(async (
     message: string,
     clientContext?: Record<string, unknown>,
@@ -741,47 +786,17 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
               ) : msg.card?.type === "plan_confirm" ? (
                 <div style={{ maxWidth: "95%", width: "100%" }}>
                   {msg.card.resolved === undefined ? (
-                    <PlanConfirmCard
-                      planSummary={msg.card.plan_summary}
-                      phases={msg.card.phases}
-                      onDecide={async (confirmed, phases) => {
-                        // v31: resume the paused build; drain the SSE through
-                        // the SAME handleAgentEvent so the plan card status,
-                        // ops and charts render live (A3).
-                        const chatSid = msg.card && msg.card.type === "plan_confirm" ? msg.card.chat_session_id : "";
-                        let outcome: "confirmed" | "refused" | "error" = confirmed ? "confirmed" : "refused";
-                        try {
-                          const res = await fetch("/api/agent/chat/intent-respond", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              chatSessionId: chatSid,
-                              plan_decision: { confirmed, phases },
-                            }),
-                          });
-                          if (!res.ok) outcome = "error";
-                          else {
-                            await consumeSSE(res, (ev) => {
-                              handleAgentEvent(ev);
-                              const t = ev.type as string | undefined;
-                              const st = String((ev as Record<string, unknown>).status ?? "");
-                              if ((t === "pb_glass_done" || st) && (st === "failed")) outcome = "error";
-                              if (st === "refused") outcome = "refused";
-                            });
-                          }
-                        } catch (e) {
-                          console.error(e);
-                          outcome = "error";
-                        }
-                        setChatHistory((prev) => prev.map((m) =>
-                          m.id === msg.id && m.card?.type === "plan_confirm"
-                            ? { ...m, card: { ...m.card, resolved: outcome } }
-                            : m,
-                        ).concat(!confirmed ? [{
-                          id: nextId(), role: "agent" as const,
-                          content: "已取消建構 — 你可以重新描述需求或直接修改後再送一次。",
-                        }] : []));
-                      }}
+                    <GoalPlanCard
+                      editable
+                      planSummary={msg.card.plan_summary ?? ""}
+                      phases={msg.card.phases.map((p) => ({
+                        id: p.id,
+                        goal: p.goal,
+                        expected: (["raw_data", "transform", "verdict", "chart", "table", "scalar", "alarm"]
+                          .includes(String(p.expected)) ? String(p.expected) : "transform") as GoalPhase["expected"],
+                      }))}
+                      onCancel={() => void decidePlanCard(msg.id, false, [])}
+                      onConfirm={(phases) => void decidePlanCard(msg.id, true, phases)}
                     />
                   ) : (
                     <div style={{
@@ -872,7 +887,29 @@ export function ChatPanel({ onContract, triggerMessage, onTriggerConsumed }: Pro
                 </div>
               ) : msg.role === "plan" && msg.plan ? (
                 <div style={{ width: "100%", maxWidth: "95%" }}>
-                  <PlanCard plan={msg.plan} />
+                  <PhaseTimeline
+                    phases={msg.plan.phases.map((p) => ({
+                      id: p.id,
+                      goal: p.goal,
+                      expected: (["raw_data", "transform", "verdict", "chart", "table", "scalar", "alarm"]
+                        .includes(String(p.expected)) ? String(p.expected) : "transform") as GoalPhase["expected"],
+                    }))}
+                    runtime={Object.fromEntries(msg.plan.phases.map((p) => {
+                      const st: PhaseRuntime["status"] =
+                        p.status === "running" || p.status === "revising" || p.status === "revising_retry"
+                          ? "in_progress"
+                          : p.status === "completed" || p.status === "handover_take_over"
+                            ? "completed"
+                            : p.status === "failed" || p.status === "handover_drop"
+                              ? "failed"
+                              : "pending";
+                      return [p.id, {
+                        status: st,
+                        rationale: p.rationale,
+                        failReason: p.reason,
+                      } satisfies PhaseRuntime];
+                    }))}
+                  />
                 </div>
               ) : msg.role === "judge_clarify" && msg.judgeClarify ? (
                 <div style={{ width: "100%", maxWidth: "95%" }}>
