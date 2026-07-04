@@ -56,6 +56,9 @@ export interface GlassEvent {
   status?: string;
   summary?: string;
   pipeline_json?: unknown;
+  /** v31.3 — on kind:"start" of an incremental build: the existing canvas
+   *  to seed, so ops referencing pre-existing nodes apply cleanly. */
+  base_pipeline?: unknown;
 }
 
 // idle         — overlay not in use
@@ -159,15 +162,35 @@ function Inner({
     if (fresh.length === 0) return;
     for (const e of fresh) {
       if (e.kind === "start") {
-        // New build session — clear the canvas so nodes from a previous
-        // build don't leak in alongside the new ones.
-        actions.init({
-          pipeline: {
-            version: "1.0",
-            name: e.goal || "Lite Canvas Session",
-            nodes: [], edges: [], metadata: {},
-          },
-        });
+        // New build session. v31.3: incremental builds (我後悔了/修改) start
+        // FROM an existing canvas — seed it so subsequent ops that reference
+        // pre-existing nodes (connect to n2 etc.) apply instead of silently
+        // failing on an empty canvas. From-scratch builds still reset clean.
+        const base = e.base_pipeline as {
+          nodes?: Array<Record<string, unknown>>;
+          edges?: Array<Record<string, unknown>>;
+        } | undefined;
+        if (base && Array.isArray(base.nodes) && base.nodes.length > 0) {
+          const seeded = autoLayoutPipeline(
+            base.nodes as never, (Array.isArray(base.edges) ? base.edges : []) as never);
+          actions.init({
+            pipeline: {
+              version: "1.0",
+              name: e.goal || "Lite Canvas Session",
+              nodes: (seeded.length > 0 ? seeded : base.nodes) as never,
+              edges: (Array.isArray(base.edges) ? base.edges : []) as never,
+              metadata: {},
+            },
+          });
+        } else {
+          actions.init({
+            pipeline: {
+              version: "1.0",
+              name: e.goal || "Lite Canvas Session",
+              nodes: [], edges: [], metadata: {},
+            },
+          });
+        }
       } else if (e.kind === "op" && e.op) {
         applyGlassOp(e.op, e.args ?? {}, e.result ?? {}, actions, catalog);
       } else if (e.kind === "done") {

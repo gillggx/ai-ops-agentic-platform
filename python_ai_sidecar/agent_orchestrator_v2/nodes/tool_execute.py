@@ -469,7 +469,13 @@ async def _execute_build_pipeline_live(
 
     if event_emit is not None:
         try:
-            event_emit({"type": "pb_glass_start", "session_id": sid, "goal": goal})
+            # v31.3 — incremental builds start FROM an existing canvas; the
+            # overlay must seed it or every op referencing old nodes fails
+            # silently (user saw an empty canvas until the final snapshot).
+            _start_ev: Dict[str, Any] = {"type": "pb_glass_start", "session_id": sid, "goal": goal}
+            if base_pipeline_dict and base_pipeline_dict.get("nodes"):
+                _start_ev["base_pipeline"] = base_pipeline_dict
+            event_emit(_start_ev)
         except Exception:  # noqa: BLE001
             pass
 

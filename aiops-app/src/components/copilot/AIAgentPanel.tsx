@@ -202,7 +202,7 @@ interface Props {
   // Phase 5-UX-6: Glass Box event hooks. When chat agent calls build_pipeline_live,
   // the backend relays sub-agent events as pb_glass_* SSE events. Host component
   // consumes these to drive a live canvas overlay / session-embedded canvas.
-  onGlassStart?: (ev: { session_id: string; goal?: string }) => void;
+  onGlassStart?: (ev: { session_id: string; goal?: string; base_pipeline?: unknown }) => void;
   onGlassOp?: (ev: { op: string; args: Record<string, unknown>; result: Record<string, unknown> }) => void;
   onGlassChat?: (ev: { content: string }) => void;
   onGlassError?: (ev: { message: string; op?: string; hint?: string }) => void;
@@ -1195,7 +1195,7 @@ export function AIAgentPanel({
           // itself shows the agent's work (not just in the overlay).
           case "pb_glass_start": {
             const goal = ev.goal as string | undefined;
-            onGlassStart?.({ session_id: ev.session_id as string, goal });
+            onGlassStart?.({ session_id: ev.session_id as string, goal, base_pipeline: ev.base_pipeline });
             // v1.7 — new build means fresh plan + ops cards; drop the refs
             // so the next plan / op event creates new chat-messages instead
             // of mutating the previous build's cards.

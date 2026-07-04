@@ -76,7 +76,7 @@ export default function GoalPlanCard({
   decided,
   editable = false,
 }: Props) {
-  const [acting, setActing] = useState(false);
+  const [acting, setActing] = useState<false | "confirm" | "cancel">(false);
   const [edits, setEdits] = useState<Record<string, string>>({});
   // removals default CHECKED (the plan proposed them); uncheck = keep node.
   const [keepRemoval, setKeepRemoval] = useState<Record<string, boolean>>(
@@ -94,14 +94,14 @@ export default function GoalPlanCard({
   ).length;
 
   const handleConfirm = () => {
-    setActing(true);
+    setActing("confirm");
     const approved = removals?.length
       ? removals.filter((r) => keepRemoval[r.node_id])
       : undefined;
     onConfirm(editable ? effectivePhases() : phases, approved);
   };
   const handleCancel = () => {
-    setActing(true);
+    setActing("cancel");
     onCancel();
   };
 
@@ -166,7 +166,7 @@ export default function GoalPlanCard({
                   value={edits[p.id] ?? p.goal}
                   onChange={(e) => setEdits((prev) => ({ ...prev, [p.id]: e.target.value }))}
                   rows={Math.min(3, Math.max(1, Math.ceil((edits[p.id] ?? p.goal).length / 46)))}
-                  disabled={acting}
+                  disabled={!!acting}
                   style={{
                     width: "100%", resize: "vertical", marginBottom: 3,
                     border: `1px solid ${edits[p.id] != null && edits[p.id].trim() !== p.goal ? "#3b82f6" : "#e2e8f0"}`,
@@ -220,7 +220,7 @@ export default function GoalPlanCard({
               <input
                 type="checkbox"
                 checked={!!keepRemoval[r.node_id]}
-                disabled={!!decided || acting}
+                disabled={!!decided || !!acting}
                 onChange={(e) => setKeepRemoval((prev) => ({ ...prev, [r.node_id]: e.target.checked }))}
                 style={{ marginTop: 3 }}
               />
@@ -264,7 +264,7 @@ export default function GoalPlanCard({
             <button
               type="button"
               onClick={handleCancel}
-              disabled={acting}
+              disabled={!!acting}
               style={{
                 background: "transparent",
                 color: acting ? "#94a3b8" : "#b91c1c",
@@ -281,7 +281,7 @@ export default function GoalPlanCard({
             <button
               type="button"
               onClick={handleConfirm}
-              disabled={acting}
+              disabled={!!acting}
               style={{
                 background: acting ? "#cbd5e1" : "#16a34a",
                 color: "#fff",
@@ -293,8 +293,14 @@ export default function GoalPlanCard({
                 cursor: acting ? "not-allowed" : "pointer",
               }}
             >
-              {nEdited > 0 ? `確認（含 ${nEdited} 處修改），開始建構` : "確認，開始建構"}
+              {acting === "confirm" ? "建構中…"
+                : nEdited > 0 ? `確認（含 ${nEdited} 處修改），開始建構` : "確認，開始建構"}
             </button>
+            {acting === "confirm" && (
+              <span style={{ fontSize: 11, color: "#b45309", fontWeight: 600 }}>
+                agent 建構中 — 進度顯示於下方 / 畫布
+              </span>
+            )}
           </>
         )}
       </div>

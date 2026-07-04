@@ -37,6 +37,9 @@ interface GlassEvent {
   status?: string;
   summary?: string;
   pipeline_json?: unknown;
+  /** v31.3 — on kind:"start" of an incremental build: the existing canvas
+   *  to seed, so ops referencing pre-existing nodes apply cleanly. */
+  base_pipeline?: unknown;
 }
 
 // ── Navigation structure ──────────────────────────────────────────────────────
@@ -403,7 +406,7 @@ function Shell({ children }: { children: React.ReactNode }) {
                     goal: ev.goal,
                     active: true,
                   });
-                  pushGlassEvent({ kind: "start", sessionId: ev.session_id, goal: ev.goal });
+                  pushGlassEvent({ kind: "start", sessionId: ev.session_id, goal: ev.goal, base_pipeline: ev.base_pipeline });
                 }}
                 onGlassOp={(ev) => pushGlassEvent({
                   kind: "op",
