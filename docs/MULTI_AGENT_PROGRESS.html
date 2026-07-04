@@ -133,6 +133,9 @@
     <tr><td>07-04</td><td><b>Chat = Builder 樣貌(plan gate 對齊)</b>:chat build 改停在 <code>goal_plan_confirm_gate</code>(同 builder)— PlanConfirmCard 可編輯 P1..PN、確認前 canvas 不動;plan 編輯經同一 interrupt 契約餵 W1(chat 過去因 skip_confirm 遺失這條學習訊號);ChatPanel 抽出 handleAgentEvent 讓 resume stream live 渲染逐 phase 進度;<code>/chat/intent-respond</code> 加 plan_decision 分支(kind guard 三種 resume 互不搶);env kill-switch <code>CHAT_PLAN_CONFIRM_ENABLED</code>;headless(skill/MCP/patrol)不受影響</td>
         <td><span class="badge ok">A1–A7 全過</span> A2:編輯後 build 4 nodes + W1 落庫(id 68 written_by=planner) · A6:chat episode planner×5+builder×22(同引擎實證) · A7:SLASH-17 14/17 首輪 + 3 疑點重跑 3/3 過 = 零回歸 · sidecar 5 tests</td>
         <td><code>647a8112</code></td></tr>
+    <tr><td>07-04</td><td><b>修改型 build（完整控制）</b>:Planner 修改情境拿到完整現況(edges 拓撲 + 上次 plan + 上句指令);plan 可輸出 <code>removals</code>(被取代節點+理由);確認卡紅色「將移除」區逐筆可勾選;移除由 finalize 的 <code>apply_plan_removals</code> 純函式確定性執行(still-consumed 護欄保護共用上游,LLM loop 永不執行移除)。headless 自動確認保留提案;取消勾選=保留節點</td>
+        <td><span class="badge ok">C0–C6 全過</span> C2:確認→合併圖移除+恰好3張獨立圖(nodes_removed 事件) · C3:取消勾選→保留 · C4:護欄矩陣 5 單測 · C6:chat 路徑同結果 · C5:SLASH-17 15/17+重跑2/2=零回歸 · 11 單元測試</td>
+        <td><code>03dfd494</code></td></tr>
     <tr><td>07-04</td><td><b>卡片統一 + follow-up 修復</b>:GoalPlanCard 加 editable 成三 surface 共用唯一 plan 卡;PhaseTimeline(builder 進度卡)接進兩個 chat surface(wrapper 補 auto_completed/ff_update);builder follow-up 帶 <code>pipelineSnapshot</code>+<code>priorInstruction</code> — 「我後悔了改成3張」從 too_vague 拒絕變成 7-phase 拆圖增量 plan;builder plan 卡編輯也餵 W1。實機截圖:<a href="UI_CARDS_SHOWCASE.html">UI_CARDS_SHOWCASE.html</a>(GitHub Pages 已啟用)</td>
         <td><span class="badge ok">B1/B2 PASS</span> B1 有 context → 7-phase 增量 plan;B2 無 context → 照樣拒(too_vague 未鬆動) · sidecar 12 tests · SLASH-17 14 MATCH 首輪 + 疑點重跑 2/3 過(patrol-status 為基線慣犯,當日另一輪 MATCH)= 零回歸</td>
         <td><code>f8b56167</code> <code>8f91cbfa</code></td></tr>
