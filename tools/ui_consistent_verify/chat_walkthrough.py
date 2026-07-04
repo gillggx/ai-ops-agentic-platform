@@ -80,6 +80,12 @@ def main():
     ap.add_argument("message", help="User message to chat")
     ap.add_argument("--sidecar", default=os.environ.get("SIDECAR_BASE", "http://localhost:8050"))
     ap.add_argument("--mode", default="chat")
+    # v31 acceptance helpers: exercise the plan-confirm gate's edit / cancel
+    # paths (A2 / A4) — default behaviour (plain auto-confirm) unchanged.
+    ap.add_argument("--plan-edit-suffix", default=None,
+                    help="append this text to phase-1 goal when confirming the plan card")
+    ap.add_argument("--plan-cancel", action="store_true",
+                    help="answer the plan card with confirmed=false (A4)")
     args = ap.parse_args()
 
     svc = os.environ.get("SVC_TOKEN")
@@ -209,8 +215,17 @@ def main():
         sid_for_resume = plan_pause.get("session_id") or chat_session_id
         print(f"\n=== STEP plan-confirm: POST /agent/chat/intent-respond "
               f"(plan_decision, chat_session={sid_for_resume}) ===")
+        decision = {"confirmed": not args.plan_cancel}
+        if not args.plan_cancel and args.plan_edit_suffix:
+            edited = [dict(p) for p in (plan_pause.get("phases") or [])]
+            if edited:
+                edited[0]["goal"] = str(edited[0].get("goal") or "") + args.plan_edit_suffix
+                decision["phases"] = edited
+                print(f"    [editing p1 goal += {args.plan_edit_suffix!r}]")
+        if args.plan_cancel:
+            print("    [answering plan card with confirmed=false]")
         body3 = {"chat_session_id": sid_for_resume,
-                 "plan_decision": {"confirmed": True}}
+                 "plan_decision": decision}
         r3 = requests.post(f"{args.sidecar}/internal/agent/chat/intent-respond",
                            json=body3, headers=hdr, stream=True, timeout=900)
         if r3.status_code == 200:
