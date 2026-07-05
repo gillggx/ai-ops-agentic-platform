@@ -534,7 +534,7 @@ export default function AgentBuilderPanelV30({ blockCatalog, basePipelineId }: P
             if (priorInstructionRef.current) qs.set("prefill_instruction", priorInstructionRef.current.slice(0, 300));
             window.open(`/agent-knowledge?${qs.toString()}`, "_blank");
           }}
-          onOpenMemory={(id) => window.open(`/agent-knowledge?id=${id}`, "_blank")}
+          onOpenMemory={(id) => window.open(`/agent-knowledge?id=${String(id).replace(/^#/, "")}`, "_blank")}
         />
       )}
 

@@ -9,7 +9,7 @@
  *
  * Adapted from /Users/gill/Downloads/agent-rules-standalone (mockup).
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type ScopeType = "global" | "skill" | "tool" | "recipe";
 type Priority = "high" | "med" | "low";
@@ -119,7 +119,15 @@ export function AgentKnowledgePanel() {
     if (!block && !phase && !instruction) return null;
     return { block, phase, instruction };
   }, []);
-  const [tab, setTab] = useState<Tab>(prefill ? "knowledge" : "directives");
+  // Agent Console 記憶 chip (2026-07-05): /agent-knowledge?id=N 直接打開該筆
+  // 的編輯器，而不是只落在列表頁。
+  const openId = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    const raw = new URLSearchParams(window.location.search).get("id");
+    const n = raw ? Number(raw) : NaN;
+    return Number.isFinite(n) ? n : null;
+  }, []);
+  const [tab, setTab] = useState<Tab>((prefill || openId != null) ? "knowledge" : "directives");
 
   return (
     <div style={{ padding: 24, maxWidth: 1280, margin: "0 auto", fontFamily: "system-ui, sans-serif" }}>
@@ -153,7 +161,7 @@ export function AgentKnowledgePanel() {
       </div>
 
       {tab === "directives" && <DirectivesView />}
-      {tab === "knowledge"  && <KnowledgeView prefill={prefill} />}
+      {tab === "knowledge"  && <KnowledgeView prefill={prefill} openId={openId} />}
       {tab === "lexicon"    && <LexiconView />}
       {tab === "examples"   && <ExamplesView />}
     </div>
@@ -320,13 +328,24 @@ function DirectiveEditor({ initial, onClose, onSave }: {
 type AgentFilter = "all" | WrittenBy | "unclassified";
 type ClassFilter = "all" | MemoClass;
 
-function KnowledgeView({ prefill }: {
+function KnowledgeView({ prefill, openId }: {
   prefill?: { block: string | null; phase: string | null; instruction: string | null } | null;
+  openId?: number | null;
 }) {
   const [items, setItems] = useState<Knowledge[]>([]);
   const [docMemos, setDocMemos] = useState<DocMemo[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Knowledge | "new" | null>(null);
+  // ?id=N：清單載入後自動打開該筆編輯器（只開一次）。
+  const openedRef = useRef(false);
+  useEffect(() => {
+    if (openId == null || openedRef.current || items.length === 0) return;
+    const hit = items.find((k) => k.id === openId);
+    if (hit) {
+      openedRef.current = true;
+      setEditing(hit);
+    }
+  }, [openId, items]);
   const [agentF, setAgentF] = useState<AgentFilter>("all");
   const [classF, setClassF] = useState<ClassFilter>("all");
 
